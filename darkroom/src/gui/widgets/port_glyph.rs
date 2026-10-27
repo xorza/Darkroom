@@ -221,11 +221,29 @@ impl Painted {
         (self.hit() - self.size) * 0.5
     }
 
+    /// An arrow's corners in the [`Self::hit`]-sided box, its apex last, pointing right and
+    /// turned by `turn` about the box center. Inset by the corner radius: the SDF rounds by
+    /// *dilating* (`sdf - radius`), so the rounded result grows back out to the glyph box
+    /// instead of past it. The layout box is unchanged by the turn: the glyph is not clipped to
+    /// the owner rect, so a turned apex may exceed it.
+    fn arrow_vertices(self, turn: f32) -> [Vec2; 3] {
+        let (size, inset) = (self.size, self.inset());
+        let r = TRIANGLE_RADIUS;
+        let center = Vec2::splat(self.hit() * 0.5);
+        let rot = Vec2::from_angle(turn);
+        [
+            Vec2::new(inset + r, inset + r),
+            Vec2::new(inset + r, inset + size - r),
+            Vec2::new(inset + size - r, inset + size * 0.5),
+        ]
+        .map(|v| center + rot.rotate(v - center))
+    }
+
     /// Paint into the `size`-sided square at [`Self::inset`] within the
     /// [`Self::hit`]-sided box.
     fn draw(self, ui: &mut Ui) {
         let Self { shape, size, fill } = self;
-        let (hit, inset) = (self.hit(), self.inset());
+        let inset = self.inset();
         match shape {
             GlyphShape::Circle { outline } => {
                 let rect = Rect::new(inset, inset, size, size);
@@ -245,24 +263,11 @@ impl Painted {
                 ui.add_shape(Shape::rect(rect).corners(radius).fill(fill));
             }
             GlyphShape::Arrow { turn } => {
-                // Vertices are inset by the corner radius — the SDF rounds by
-                // *dilating* (`sdf - radius`), so the rounded result grows back
-                // out to the glyph box instead of past it. `turn` rotates the
-                // rounded points about the box center; the layout box is
-                // unchanged (the glyph isn't clipped to the owner rect, so a
-                // rotated apex may exceed it).
-                let r = TRIANGLE_RADIUS;
-                let center = Vec2::splat(hit * 0.5);
-                let rot = Vec2::from_angle(turn);
-                let tf = |v: Vec2| center + rot.rotate(v - center);
+                let [a, b, apex] = self.arrow_vertices(turn);
                 ui.add_shape(
-                    Shape::triangle(
-                        tf(Vec2::new(inset + r, inset + r)),
-                        tf(Vec2::new(inset + r, inset + size - r)),
-                        tf(Vec2::new(inset + size - r, inset + size * 0.5)),
-                    )
-                    .radius(r)
-                    .fill(fill),
+                    Shape::triangle(a, b, apex)
+                        .radius(TRIANGLE_RADIUS)
+                        .fill(fill),
                 );
             }
         }
@@ -284,30 +289,32 @@ mod tests {
         );
     }
 
-    /// The subscription pin is the emitter arrow turned by `PI + FRAC_PI_4`.
-    /// Half of that (the `PI`) mirrors the apex from right to left; the
-    /// remaining quarter-turn aims it up-left at the incoming wire. Checked
-    /// here because the rotation is the one thing about the pin that isn't
-    /// visible at its call site.
+    /// A 10-sided arrow sits in its 18-sided box (`HIT_SCALE` 1.8) at inset 4, its corners
+    /// pulled in by the radius 2: (6, 6), (6, 12), and the apex at (12, 9), right of the center
+    /// (9, 9). The subscription pin turns it by `PI + FRAC_PI_4`; the `PI` half mirrors the apex
+    /// to (6, 9) across the center. Within 1e-5 there: `sin(PI)` in f32 is -8.7e-8, not 0.
     #[test]
-    fn a_half_turn_mirrors_the_arrow_apex_across_the_box_center() {
-        let (size, hit) = (10.0f32, 10.0f32 * HIT_SCALE);
-        let inset = (hit - size) * 0.5;
-        let center = Vec2::splat(hit * 0.5);
-        let apex = Vec2::new(inset + size - size * 0.0, inset + size * 0.5);
-        let turned = center + Vec2::from_angle(PI).rotate(apex - center);
-        // Apex sits `size/2` right of center; a half turn puts it `size/2` left.
-        assert!(
-            (apex.x - center.x - size * 0.5).abs() < 1e-4,
-            "base apex points right"
+    fn an_arrow_points_right_and_a_half_turn_mirrors_it() {
+        let arrow = Painted {
+            shape: GlyphShape::Arrow { turn: 0.0 },
+            size: 10.0,
+            fill: RgbaF32::WHITE,
+        };
+        assert_eq!(
+            arrow.arrow_vertices(0.0),
+            [
+                Vec2::new(6.0, 6.0),
+                Vec2::new(6.0, 12.0),
+                Vec2::new(12.0, 9.0)
+            ]
         );
-        assert!(
-            (turned.x - center.x + size * 0.5).abs() < 1e-4,
-            "turned apex points left, mirrored about the center"
-        );
-        assert!(
-            (turned.y - center.y).abs() < 1e-4,
-            "a half turn keeps the apex on the center line"
-        );
+        let [a, b, apex] = arrow.arrow_vertices(PI);
+        for (got, expected) in [
+            (a, Vec2::new(12.0, 12.0)),
+            (b, Vec2::new(12.0, 6.0)),
+            (apex, Vec2::new(6.0, 9.0)),
+        ] {
+            assert!(got.distance(expected) < 1e-5, "{got} against {expected}");
+        }
     }
 }

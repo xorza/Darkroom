@@ -67,7 +67,7 @@ pub(super) struct Field<'a> {
 
 /// A dropdown's options, each read through `label`, with `before` selected.
 #[derive(Debug)]
-struct Pick<'a, S> {
+struct DropdownOptions<'a, S> {
     options: &'a [S],
     label: fn(&S) -> &str,
     before: usize,
@@ -75,13 +75,13 @@ struct Pick<'a, S> {
 
 /// Hand-written: `derive` would demand `S: Copy`, and only a borrow of the
 /// options is held.
-impl<S> Clone for Pick<'_, S> {
+impl<S> Clone for DropdownOptions<'_, S> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<S> Copy for Pick<'_, S> {}
+impl<S> Copy for DropdownOptions<'_, S> {}
 
 impl ConstEditor<'_> {
     /// Render the editor for the value. Returns the new value when the user
@@ -106,7 +106,7 @@ impl ConstEditor<'_> {
                 .expect("an admitted picker value is one of its variants");
             let picked = field.combo(
                 ui,
-                Pick {
+                DropdownOptions {
                     options: value_variants,
                     label: ValueVariant::label,
                     before,
@@ -190,7 +190,7 @@ impl ConstEditor<'_> {
                     .expect("an admitted enum literal names a registered variant");
                 let picked = field.combo(
                     ui,
-                    Pick {
+                    DropdownOptions {
                         options: variants,
                         label: String::as_str,
                         before,
@@ -214,8 +214,8 @@ impl Field<'_> {
     /// port's `&[ValueVariant]`, an `Enum` type's `&[String]` — rather than
     /// projecting the labels into a fresh `Vec<&str>` on every frame the port
     /// records.
-    fn combo<S>(self, ui: &mut Ui, pick: Pick<'_, S>) -> Option<usize> {
-        let Pick {
+    fn combo<S>(self, ui: &mut Ui, pick: DropdownOptions<'_, S>) -> Option<usize> {
+        let DropdownOptions {
             options,
             label,
             before,
@@ -236,11 +236,9 @@ impl Field<'_> {
     /// `String`. The port declares no kind, so the kind rides on the value
     /// itself; the ambiguity is inherent — `"42"` always reads back as `Int`,
     /// never the string `"42"`. Returns the reinterpreted value only when the
-    /// edit committed and it differs from the current one.
+    /// edit committed a change: see [`any_edit`].
     fn any_smart(self, ui: &mut Ui, value: &ConstValue) -> Option<ConstValue> {
-        let text = self.text(ui, value, format_any)?;
-        let parsed = parse_any(&text);
-        (parsed != *value).then_some(parsed)
+        any_edit(&self.text(ui, value, format_any)?, value)
     }
 
     /// An optional input left unset: `Null`, the one admitted literal outside
@@ -362,6 +360,21 @@ fn format_any(value: &ConstValue, out: &mut String) {
     }
 }
 
+/// What committing `text` in an `Any` field showing `value` sets it to, or `None` for no change.
+/// A field commits on blur too, typed in or not, and [`format_any`] and [`parse_any`] do not
+/// round-trip every value — `Null` shows blank, which reads back as an empty `String`, and a
+/// numeric `String` reads back as a number — so the text the field showed commits nothing,
+/// rather than an edit that changes the value's kind.
+fn any_edit(text: &str, value: &ConstValue) -> Option<ConstValue> {
+    let mut shown = String::new();
+    format_any(value, &mut shown);
+    if text == shown {
+        return None;
+    }
+    let parsed = parse_any(text);
+    (parsed != *value).then_some(parsed)
+}
+
 /// Infer the tightest [`ConstValue`] from `text`: `true`/`false` (any casing)
 /// → `Bool`, an `i64` → `Int`, a *finite* `f64` → `Float` (so `"nan"`/`"inf"`
 /// stay text), else `String`. Order matters — bool before int before float, so
@@ -464,7 +477,7 @@ fn float_speed(v: f64) -> f64 {
 /// Drag speed for an integer: same magnitude-relative scaling, floored at
 /// `0.25`/px so small counts stay adjustable (~4 px per step near zero).
 fn int_speed(v: i64) -> f64 {
-    ((v.abs() as f64) * 0.01).max(0.25)
+    ((v.unsigned_abs() as f64) * 0.01).max(0.25)
 }
 
 #[cfg(test)]

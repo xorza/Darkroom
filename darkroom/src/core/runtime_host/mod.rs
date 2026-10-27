@@ -4,20 +4,21 @@
 //! than in the shell.
 
 use std::collections::HashMap;
-use std::mem;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use lens::MlModelPaths;
 use scenarium::DiskStore;
 use scenarium::{CompiledGraph, Compiler, DynamicValue, WorkerExited, WorkerReport};
 use scenarium::{Graph, NodeId};
 
 use crate::core::io::cache;
-use crate::core::io::preferences::Preferences;
+use crate::core::runtime_host::error::NoCompiledWork;
 use crate::core::runtime_library::RuntimeLibrary;
-use crate::core::status_log::{StatusFamily, StatusLog};
 use crate::core::wake::Wake;
 use crate::core::worker_bridge::WorkerBridge;
+
+pub(crate) mod error;
 
 #[derive(Debug)]
 pub(crate) struct RuntimeHost {
@@ -26,16 +27,22 @@ pub(crate) struct RuntimeHost {
     /// The active disk-store root (`None` = memory-only), remembered so a
     /// repeated [`set_document_cache`](Self::set_document_cache) can tell
     /// whether the root changed.
-    disk_root: Option<PathBuf>,
-    /// Whether `disk_root` was created, with its `.gitignore`. Done once per
-    /// root, and only when a blob can land there.
-    root_prepared: bool,
+    disk_root: Option<DiskRoot>,
     /// Whether the last compiled program holds a disk-backed (`Disk`/`Both`)
     /// node — the one kind whose values reach the store.
     disk_backed: bool,
     /// Long-lived so the lowering scratch is reused across compiles instead of
     /// reallocated per run.
     compiler: Compiler,
+}
+
+/// A disk-store root, and whether it was created with its `.gitignore`: done
+/// once per root, and only when a blob can land there. A new root starts
+/// unprepared, so no root change can skip it.
+#[derive(Debug)]
+struct DiskRoot {
+    path: PathBuf,
+    prepared: bool,
 }
 
 /// What a [`RuntimeHost::set_document_cache`] call did to the disk-store root,
@@ -75,16 +82,15 @@ impl CacheRootChange {
 }
 
 impl RuntimeHost {
-    /// Assemble the func library and spin up the evaluation worker, which is
-    /// woken through `wake`.
-    pub(crate) fn new(wake: Wake, preferences: &Preferences) -> Self {
-        let library = RuntimeLibrary::new(&preferences.ml_models);
+    /// Assemble the func library, its ML nodes defaulting to `ml_models`, and
+    /// spin up the evaluation worker, which is woken through `wake`.
+    pub(crate) fn new(wake: Wake, ml_models: &MlModelPaths) -> Self {
+        let library = RuntimeLibrary::new(ml_models);
         let worker = WorkerBridge::new(wake);
         let host = Self {
             library,
             worker,
             disk_root: None,
-            root_prepared: false,
             disk_backed: false,
             compiler: Compiler::default(),
         };
@@ -94,26 +100,21 @@ impl RuntimeHost {
         host
     }
 
-    /// Re-seed the ML nodes' model-path defaults from `preferences`.
-    pub(crate) fn configure_ml_model_defaults(&mut self, preferences: &Preferences) {
-        self.library.update_ml_model_paths(&preferences.ml_models);
+    /// Re-seed the ML nodes' model-path defaults from `ml_models`.
+    pub(crate) fn set_ml_model_paths(&mut self, ml_models: &MlModelPaths) {
+        self.library.set_ml_model_paths(ml_models);
     }
 
     /// Point the worker's [`DiskStore`] at the current root.
     fn sync_worker_disk_store(&self) {
-        self.dispatch(|worker| worker.set_disk_store(DiskStore::new(self.disk_root.clone())));
+        let root = self.disk_root.as_ref().map(|root| root.path.clone());
+        self.dispatch(|worker| worker.set_disk_store(DiskStore::new(root)));
     }
 
-    /// Compile `graph` against the current library, and clear the last run's
-    /// failure from `status`: a new run supersedes it. The document keeps its
+    /// Compile `graph` against the current library. The document keeps its
     /// graph one the library can run, so a compile cannot fail.
-    ///
-    /// The log is borrowed rather than owned: it is the app's user-facing
-    /// outcome slot, shared with file and preferences reporting, and this host
-    /// is otherwise headless.
-    fn compile(&mut self, graph: &Graph, status: &mut StatusLog) -> Arc<CompiledGraph> {
+    fn compile(&mut self, graph: &Graph) -> Arc<CompiledGraph> {
         let compiled = self.compiler.compile(graph, self.library.cur());
-        status.succeeded(StatusFamily::Run);
         self.disk_backed = graph.iter().any(|node| node.cache.persists_to_disk());
         self.prepare_root();
         Arc::new(compiled)
@@ -138,14 +139,22 @@ impl RuntimeHost {
 
     /// Create the disk root, with its `.gitignore`, before the first blob can
     /// land there: once per root, and only while the program holds a
-    /// disk-backed node.
+    /// disk-backed node. A failure is logged and tried again at the next
+    /// chance: the cache still works, as blob writes make the folder, but the
+    /// folder would show in version control.
     fn prepare_root(&mut self) {
-        if self.root_prepared || !self.disk_backed {
+        if !self.disk_backed {
             return;
         }
-        if let Some(root) = &self.disk_root {
-            cache::prepare(root);
-            self.root_prepared = true;
+        let Some(root) = self.disk_root.as_mut().filter(|root| !root.prepared) else {
+            return;
+        };
+        match cache::prepare(&root.path) {
+            Ok(()) => root.prepared = true,
+            Err(error) => tracing::warn!(
+                "the cache folder {} has no .gitignore: {error}",
+                root.path.display()
+            ),
         }
     }
 
@@ -157,34 +166,37 @@ impl RuntimeHost {
     /// What the worker is told is [`CacheRootChange`]'s to decide — see there
     /// for why only one of the transitions owes a flush.
     pub(crate) fn set_document_cache(&mut self, document_path: Option<&Path>) {
-        let prev = mem::replace(&mut self.disk_root, document_path.map(cache::root));
-        let change = CacheRootChange::of(prev.as_deref(), self.disk_root.as_deref());
-        if change != CacheRootChange::Unchanged {
-            self.root_prepared = false;
+        let cur = document_path.map(cache::root);
+        let change = CacheRootChange::of(
+            self.disk_root.as_ref().map(|root| root.path.as_path()),
+            cur.as_deref(),
+        );
+        if change == CacheRootChange::Unchanged {
+            return;
         }
-        match change {
-            CacheRootChange::Unchanged => {}
-            CacheRootChange::Repointed => self.sync_worker_disk_store(),
-            CacheRootChange::Gained => {
-                // The flush writes the resident disk-backed values, so the root
-                // they land in is prepared first.
-                self.prepare_root();
-                // The attach leads, and the two are not interchangeable. They
-                // usually reduce into one batch, where the worker's apply order
-                // decides and this order is moot — but the worker can wake
-                // between the sends and split them, and then the sweep would
-                // land in the batch *before* the store it is for, writing into
-                // the root being left behind.
-                self.sync_worker_disk_store();
-                self.dispatch(WorkerBridge::flush_all_caches);
-            }
+        self.disk_root = cur.map(|path| DiskRoot {
+            path,
+            prepared: false,
+        });
+        // Before the store moves: a disk-backed program installed before the
+        // change, a run in flight or an event loop, writes into the new root
+        // at once, as the flush below does.
+        self.prepare_root();
+        // The attach leads the flush, and the two are not interchangeable. They
+        // usually reduce into one batch, where the worker's apply order decides
+        // and this order is moot — but the worker can wake between the sends
+        // and split them, and then the sweep would land in the batch *before*
+        // the store it is for, writing into the root being left behind.
+        self.sync_worker_disk_store();
+        if change == CacheRootChange::Gained {
+            self.dispatch(WorkerBridge::flush_all_caches);
         }
     }
 
     /// Compile `graph` against the current library and send it to the worker
     /// for one evaluation. Results arrive via [`Self::drain_worker`].
-    pub(crate) fn run_once(&mut self, graph: &Graph, status: &mut StatusLog) {
-        let compiled = self.compile(graph, status);
+    pub(crate) fn run_once(&mut self, graph: &Graph) {
+        let compiled = self.compile(graph);
         self.dispatch(|worker| {
             worker.install(compiled)?;
             worker.run_sinks()
@@ -195,28 +207,34 @@ impl RuntimeHost {
     /// for the preview fetch ("run to this node"). The node seeds the run
     /// explicitly, which overrides its `disabled` flag during planning.
     ///
-    /// `false` means nothing reached the worker: the program holds no work
-    /// for the node, which an edit in the same frame removed (reported to
-    /// `status`). Results arrive via [`Self::drain_worker`].
+    /// Nothing reaches the worker when the program holds no work for the
+    /// node, which an edit in the same frame removed. Results arrive via
+    /// [`Self::drain_worker`].
     pub(crate) fn run_node(
         &mut self,
         graph: &Graph,
         node_id: NodeId,
-        status: &mut StatusLog,
-    ) -> bool {
-        let compiled = self.compile(graph, status);
-        if !compiled.contains(node_id) {
-            status.error(
-                StatusFamily::Run,
-                "nothing to run: this node has no compiled work".to_owned(),
-            );
-            return false;
-        }
+    ) -> Result<(), NoCompiledWork> {
+        let compiled = self.compiled_for(graph, node_id)?;
         self.dispatch(|worker| {
             worker.install(compiled)?;
             worker.run_nodes([node_id])
         });
-        true
+        Ok(())
+    }
+
+    /// Compile `graph`, refusing when the program holds no work for `node_id`.
+    fn compiled_for(
+        &mut self,
+        graph: &Graph,
+        node_id: NodeId,
+    ) -> Result<Arc<CompiledGraph>, NoCompiledWork> {
+        let compiled = self.compile(graph);
+        if compiled.contains(node_id) {
+            Ok(compiled)
+        } else {
+            Err(NoCompiledWork)
+        }
     }
 
     /// Compile the current graph and atomically install it with a runtime-cache
@@ -224,8 +242,8 @@ impl RuntimeHost {
     ///
     /// Answers with the nodes that eviction reaches, resolved against the very
     /// artifact it installs — so a caller projecting the outcome drops exactly
-    /// what the worker drops. Empty when the program holds no work for
-    /// `node_id`.
+    /// what the worker drops. Nothing reaches the worker when the program
+    /// holds no work for `node_id`, as for [`Self::run_node`].
     ///
     /// Asking here rather than reading a reply: a successful eviction is
     /// fire-and-forget (the worker reports only failures), and the cone is a
@@ -234,12 +252,11 @@ impl RuntimeHost {
         &mut self,
         graph: &Graph,
         node_id: NodeId,
-        status: &mut StatusLog,
-    ) -> Vec<NodeId> {
-        let compiled = self.compile(graph, status);
+    ) -> Result<Vec<NodeId>, NoCompiledWork> {
+        let compiled = self.compiled_for(graph, node_id)?;
         let evicted = compiled.consumer_cone([node_id]);
         self.dispatch(|worker| worker.install_and_evict_cache(compiled, node_id));
-        evicted
+        Ok(evicted)
     }
 
     /// Compile the current graph and atomically install it with a request to
@@ -248,10 +265,16 @@ impl RuntimeHost {
     /// never publishes a blob of its own.
     ///
     /// The install has to travel with it: the worker reads the node's cache mode
-    /// off the installed program, which is still the pre-edit one here.
-    pub(crate) fn flush_cache(&mut self, graph: &Graph, node_id: NodeId, status: &mut StatusLog) {
-        let compiled = self.compile(graph, status);
+    /// off the installed program, which is still the pre-edit one here. Nothing
+    /// reaches the worker when the program holds no work for `node_id`.
+    pub(crate) fn flush_cache(
+        &mut self,
+        graph: &Graph,
+        node_id: NodeId,
+    ) -> Result<(), NoCompiledWork> {
+        let compiled = self.compiled_for(graph, node_id)?;
         self.dispatch(|worker| worker.install_and_flush_cache(compiled, node_id));
+        Ok(())
     }
 
     /// Request cancellation of the in-flight run (coarse — the running node
@@ -262,8 +285,8 @@ impl RuntimeHost {
 
     /// Start the event loop on `graph` (compiles + loads it, then fires
     /// events). The worker's `Update` tears down any prior loop first.
-    pub(crate) fn start_event_loop(&mut self, graph: &Graph, status: &mut StatusLog) {
-        let compiled = self.compile(graph, status);
+    pub(crate) fn start_event_loop(&mut self, graph: &Graph) {
+        let compiled = self.compile(graph);
         self.dispatch(|worker| {
             worker.install(compiled)?;
             worker.start_event_loop()

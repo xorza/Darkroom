@@ -17,11 +17,9 @@ use palantir::InternedStr;
 use palantir::prelude::*;
 use scenarium::Binding;
 use scenarium::FuncEvent;
-use scenarium::InputPort;
 use scenarium::Library;
 use scenarium::NodeId;
-use scenarium::OutputPort;
-use scenarium::{ConstValue, DataType, FsPathMode, Func};
+use scenarium::{ConstValue, DataType, FsPathMode};
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::preview_sink;
@@ -30,11 +28,11 @@ use crate::gui::frame::app_command::{EditCommand, PathPick};
 use crate::gui::graph_ctx::input_ctx::InputCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::graph_ctx::output_ctx::OutputCtx;
+use crate::gui::pane::graph_ui::gesture::preview_drag::PreviewSpawn;
 use crate::gui::pane::graph_ui::node_ui::const_editor::{ConstEditor, Field};
 use crate::gui::pane::graph_ui::node_ui::node_record::NodeRecord;
-use crate::gui::pane::graph_ui::node_ui::port_color;
-use crate::gui::pane::graph_ui::node_ui::wid;
-use crate::gui::port_ref::{PortKind, PortRef};
+use crate::gui::pane::graph_ui::wid;
+use crate::gui::port_ref::PortKind;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::hover::Hover;
 use crate::gui::widgets::port_glyph;
@@ -72,10 +70,10 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, row_tracks: &mu
     let (theme, node) = (record.node.theme(), record.node);
     // Events list under the outputs in the same column, so the output side
     // needs a row per output *and* per event.
-    let n_rows = node
+    let row_count = node
         .port_count(PortKind::Input)
         .max(node.port_count(PortKind::Output) + node.events().len());
-    if n_rows == 0 {
+    if row_count == 0 {
         return;
     }
     // Fixed-height rows (font-relative) so a node's ports stay uniform whether
@@ -84,9 +82,9 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, row_tracks: &mu
     // only when a wider node needs more of them or the theme moves the height
     // — not per node. Not a `const`: the height rides the theme's font size.
     let track = Track::fixed(ui.theme().text.font_size * PORT_ROW_HEIGHT_EM);
-    if row_tracks.len() < n_rows || row_tracks.first() != Some(&track) {
+    if row_tracks.len() < row_count || row_tracks.first() != Some(&track) {
         row_tracks.clear();
-        row_tracks.resize(n_rows, track);
+        row_tracks.resize(row_count, track);
     }
     Grid::new()
         .id_salt("ports")
@@ -97,7 +95,7 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, row_tracks: &mu
             Track::FILL,
             Track::HUG,
         ])
-        .rows(&row_tracks[..n_rows])
+        .rows(&row_tracks[..row_count])
         .line_gap(theme.ports.gap)
         .gap(theme.ports.cols_gap)
         .padding(Spacing::new(
@@ -203,23 +201,6 @@ fn grid_row(idx: usize) -> u16 {
     u16::try_from(idx).expect("a node's rows fit the grid's u16 index")
 }
 
-pub(crate) fn port_circle_wid(port: PortRef) -> WidgetId {
-    wid::port("port_circle", port)
-}
-
-/// An input port's inline const editor (text field, checkbox, or file-pick
-/// button).
-fn const_editor_wid(input: InputPort) -> WidgetId {
-    wid::port("const_editor", input.into())
-}
-
-/// An input port's cell (circle + label). Answers a double-click on the
-/// *label* area — the circle has its own [`port_circle_wid`] and consumes
-/// hits over its own rect.
-fn input_cell_wid(port: PortRef) -> WidgetId {
-    wid::port("input_cell", port)
-}
-
 /// Open `menu_id`'s context menu at the pointer — shared by the input and
 /// output cells, on a frame the cell or its port circle was secondary-clicked.
 ///
@@ -244,7 +225,7 @@ fn label_style(ui: &Ui, theme: &Theme) -> TextStyle {
 
 /// Column 0: the input port circle + label, plus the right-click binding
 /// menu (anchored here, so right-clicking the circle or label opens it).
-/// The circle's `WidgetId` is the deterministic `port_circle_wid(port)`, so
+/// The circle's `WidgetId` is the deterministic `wid::port_circle(port)`, so
 /// `CanvasGeometry`/snap/draw reconstruct it from domain coords.
 fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCtx<'_>) {
     let (node_ctx, draw_ctx) = (record.node, record.draw);
@@ -267,7 +248,7 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
         theme.status.warning
     } else {
         Hover::from(draw_ctx.geometry().ports.is_hovered(port))
-            .lift(port_color::data(theme, input.data_type()))
+            .lift(theme.port_color(input.data_type()))
     };
     // A required input's port reads as bigger — its total footprint matches
     // a bound output's circle-plus-ring, so "important port" carries the
@@ -285,11 +266,11 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
     let radius = diameter * 0.5;
     let overhang = theme.port_overhang_for(radius);
     let margin = Spacing::new(-overhang, 0.0, 0.0, 0.0);
-    let wid = port_circle_wid(port);
+    let wid = wid::port_circle(port);
     // Stable cell id so the label area answers a double-click of its own (the
-    // circle has its own `port_circle_wid`); also the context-menu anchor.
+    // circle has its own `wid::port_circle`); also the context-menu anchor.
     let cell = Panel::hstack()
-        .id(input_cell_wid(port))
+        .id(wid::input_cell(port))
         .grid_cell((grid_row(port.port_idx), COL_INPUT))
         .align(Align::new(HAlign::Left, VAlign::Center))
         .size((Sizing::HUG, Sizing::HUG))
@@ -393,7 +374,7 @@ fn value_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCtx<'_>)
     let port = input.port();
     let data_type = input.data_type();
     let value_variants = input.value_variants();
-    let editor_id = const_editor_wid(port);
+    let editor_id = wid::const_editor(port);
     // An `FsPath` editor draws a pick button; clicking it raises a blocking
     // file dialog, which only `App` can run — so this is the app tier.
     //
@@ -450,14 +431,14 @@ fn output_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, output: OutputCtx<'
     let theme = node_ctx.theme();
     let port = output.port_ref();
     let data_type = output.data_type();
-    let fill = Hover::from(draw_ctx.geometry().ports.is_hovered(port))
-        .lift(port_color::data(theme, data_type));
+    let fill =
+        Hover::from(draw_ctx.geometry().ports.is_hovered(port)).lift(theme.port_color(data_type));
     let tooltip = PortTooltip {
         description: output.description(),
         data_type,
     }
     .intern(ui, node_ctx);
-    let wid = port_circle_wid(port);
+    let wid = wid::port_circle(port);
     let overhang = theme.port_overhang();
     let cell = Panel::hstack()
         .id_salt(("out", port.port_idx))
@@ -532,34 +513,6 @@ fn output_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, output: OutputCtx<'
 /// node body and a little above, so it doesn't cover what it is watching.
 const PREVIEW_SPAWN_OFFSET: Vec2 = Vec2::new(80.0, -60.0);
 
-/// A preview node `node_id` to spawn at `pos`, already reading `port`.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct PreviewSpawn {
-    pub(crate) port: OutputPort,
-    pub(crate) pos: Vec2,
-    pub(crate) node_id: NodeId,
-}
-
-impl PreviewSpawn {
-    /// The two intents that spawn the preview `func` declares. Emitted
-    /// together so one undo removes node *and* wire.
-    pub(crate) fn intents(self, func: &Func) -> [GraphIntent; 2] {
-        let Self { port, pos, node_id } = self;
-        [
-            GraphIntent::AddNode {
-                pos,
-                node_id,
-                node: func.into(),
-                bindings: func.default_bindings(node_id).collect(),
-            },
-            GraphIntent::SetInput {
-                input: InputPort::new(node_id, 0),
-                to: Some(Binding::Wire(port)),
-            },
-        ]
-    }
-}
-
 /// One event (emitter) port row: the event name plus an event-colored triangle
 /// glyph, right-aligned and overhanging the node edge like a data output. Sits in
 /// `COL_OUTPUT` at `row` (below the data outputs). The glyph senses drags so a
@@ -581,9 +534,8 @@ impl EventRow<'_> {
         let node_id = node_ctx.node_id;
         let overhang = theme.port_overhang();
         let ev = EventPort::new(node_id, idx);
-        let wid = event_glyph_wid(ev);
-        let fill =
-            Hover::from(draw_ctx.geometry().events.is_hovered(ev)).lift(port_color::event(theme));
+        let wid = wid::event_glyph(ev);
+        let fill = Hover::from(draw_ctx.geometry().events.is_hovered(ev)).lift(theme.event_color());
         let tooltip = node_ctx
             .tooltips()
             .then(|| fmt!(ui, "event: {}", event.name));
@@ -605,12 +557,6 @@ impl EventRow<'_> {
                     .show(ui);
             });
     }
-}
-
-/// An event port glyph. A separate id space from data ports
-/// ([`port_circle_wid`]) because events are indexed independently of outputs.
-pub(crate) fn event_glyph_wid(event: EventPort) -> WidgetId {
-    wid::event("event_glyph", event)
 }
 
 /// Human-readable type for a port tooltip: the picker mode (and accepted
@@ -655,82 +601,4 @@ impl Display for TypeLabel<'_> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use scenarium::FsPathConfig;
-
-    /// The type line of a port tooltip. A path spells out its picker mode and
-    /// the extensions it accepts; everything else defers to the library's own
-    /// name for the type, so a tooltip and a palette entry can't disagree.
-    #[test]
-    fn type_label_spells_out_a_paths_mode_and_extension_list() {
-        let library = Library::default();
-        let label = |data_type: &DataType| {
-            TypeLabel {
-                library: &library,
-                data_type,
-            }
-            .to_string()
-        };
-        let path = |mode, exts: &[&str]| {
-            DataType::FsPath(Arc::new(FsPathConfig::with_extensions(
-                mode,
-                exts.iter().map(|e| (*e).to_owned()).collect(),
-            )))
-        };
-
-        // Scalars and the untyped boundary placeholder are the library's names.
-        assert_eq!(label(&DataType::Any), "any");
-        assert_eq!(label(&DataType::Float), "float");
-
-        // Every mode names itself, and an empty list adds no parenthetical.
-        assert_eq!(label(&path(FsPathMode::Dir, &[])), "path · directory");
-        assert_eq!(label(&path(FsPathMode::ExistingFile, &[])), "path · file");
-        assert_eq!(label(&path(FsPathMode::ExistingFiles, &[])), "path · files");
-        assert_eq!(label(&path(FsPathMode::NewFile, &[])), "path · save path");
-
-        // One extension, then several: the separator appears only *between* them.
-        assert_eq!(
-            label(&path(FsPathMode::ExistingFile, &["fit"])),
-            "path · file (fit)"
-        );
-        assert_eq!(
-            label(&path(FsPathMode::ExistingFiles, &["fit", "fits", "raf"])),
-            "path · files (fit, fits, raf)"
-        );
-    }
-
-    /// "Add preview" spawns a node already reading the port it was raised
-    /// from, offset clear of it, as one batch — so a single undo removes both
-    /// the node and its wire.
-    #[test]
-    fn add_preview_spawns_a_node_already_wired_to_the_port() {
-        let func = preview_sink::func(Arc::default());
-        let producer = NodeId::unique();
-        let port = OutputPort::new(producer, 2);
-        let center = Vec2::new(100.0, 40.0);
-
-        let node_id = NodeId::unique();
-        let [add, wire] = PreviewSpawn {
-            port,
-            pos: center + PREVIEW_SPAWN_OFFSET,
-            node_id,
-        }
-        .intents(&func);
-
-        let GraphIntent::AddNode {
-            pos, node_id, node, ..
-        } = add
-        else {
-            panic!("first intent adds the node, got {add:?}");
-        };
-        assert_eq!(pos, Vec2::new(180.0, -20.0), "offset clear of the port");
-        assert_eq!(node.func_id(), Some(func.id()));
-        assert!(matches!(
-            wire,
-            GraphIntent::SetInput { input, to: Some(Binding::Wire(src)) }
-                if input == InputPort::new(node_id, 0)
-                    && src == OutputPort::new(producer, 2)
-        ));
-    }
-}
+mod tests;

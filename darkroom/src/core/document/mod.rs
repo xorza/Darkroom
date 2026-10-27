@@ -148,26 +148,10 @@ impl Document {
 
     /// Whether the document holds `node_id`, as a graph node or a stub.
     ///
-    /// **The** liveness question, and the single definition of it. Node ids
-    /// are never reused, so a node absent here is gone for good — which is
-    /// what makes this the retention rule for every `NodeId`-keyed cache that
-    /// outlives the scene: the canvas geometry, the open inspectors. Absence
-    /// from a *scene* means only that a node is off-screen or on a closed tab;
-    /// absence from here is permanent.
-    ///
-    /// **Who asks it, and where the next one goes.** Two sweeps run from
-    /// `App::update`, once a frame, and between them their bodies name every
-    /// cache: [`MainWindow::reconcile`](crate::gui::main_window::MainWindow::reconcile)
-    /// for what the window owns, and `RunState::sync` for the published preview
-    /// values (through [`Self::holds_preview_node`]). A new cache derived from
-    /// the document joins one of those two bodies rather than earning a third
-    /// call site, which is what keeps the list in code that a reader can open
-    /// rather than in this comment.
-    ///
-    /// `MainWindow::image_viewers` rides the same pass but is swept against the
-    /// *layout*, since a viewer's framing dies with its tab rather than with its
-    /// node. `RunState::nodes` is a record of the last run rather than a cache
-    /// derived from the document — see its field doc for the reasoning.
+    /// The retention rule for every `NodeId`-keyed cache that outlives the
+    /// scene. Node ids are never reused, so a node absent here is gone for
+    /// good, while absence from a scene means only that a node is off-screen
+    /// or on a closed tab.
     pub(crate) fn holds_node(&self, node_id: NodeId) -> bool {
         self.graph.find(node_id).is_some() || self.stubs.contains(node_id)
     }

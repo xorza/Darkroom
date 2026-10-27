@@ -1,28 +1,26 @@
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use palantir::Ui;
 use scenarium::Binding;
 use scenarium::ConstValue;
 use scenarium::FsPathMode;
 use scenarium::Library;
-use scenarium::NodeId;
 
 use crate::core::edit::graph_intent::GraphIntent;
-use crate::core::edit::relayout::Relayout;
 use crate::core::io::document::document_format::DocumentFormat;
-use crate::core::io::preferences::error::PreferencesLoadError;
-use crate::core::io::preferences::preferences_store::PreferencesStore;
+use crate::core::io::preferences::preferences_store::{OpenedPreferences, PreferencesStore, Saved};
 use crate::core::io::preferences::{Preferences, WindowState};
-use crate::core::open_document::{LaunchSource, OpenDocument};
+use crate::core::open_document::{Launched, Loaded, OpenDocument};
 use crate::core::runtime_host::RuntimeHost;
 use crate::core::status_log::{StatusFamily, StatusLog};
-use crate::driver::error::DriverError;
 use crate::gui::app::app_host::AppHost;
-use crate::gui::app::discard_dialog::{DiscardChoice, DiscardOutcome};
+use crate::gui::app::discard_dialog::{Answered, DiscardChoice, DiscardGuard, PendingTransition};
 use crate::gui::app::driven_requests::DrivenRequests;
+use crate::gui::app::error::DrivenOpenError;
 use crate::gui::app::error::NonUnicodePath;
 use crate::gui::app::session::Session;
 use crate::gui::app::view_capture::{CaptureTarget, ViewCapture};
@@ -33,6 +31,7 @@ use crate::gui::frame::app_command::{
 };
 use crate::gui::frame::app_ctx::{AppCtx, StatusInputs};
 use crate::gui::frame::frame_writes::FrameWrites;
+use crate::gui::frame::relayout::Relayout;
 use crate::gui::frame::requests::Requests;
 use crate::gui::state::process_memory::ProcessMemory;
 use crate::gui::state::run_state::{RunFeed, RunState};
@@ -41,7 +40,7 @@ use crate::gui::theme::Theme;
 pub(crate) mod app_host;
 mod discard_dialog;
 pub(crate) mod driven_requests;
-mod error;
+pub(crate) mod error;
 pub(crate) mod offscreen_signals;
 pub(crate) mod session;
 pub(crate) mod view_capture;
@@ -85,16 +84,17 @@ pub(crate) struct App {
     preferences_store: PreferencesStore,
     /// Where path picks are answered: native dialogs, or a driver script.
     dialogs: Dialogs,
-    /// The document-replacing transition waiting on the unsaved-changes
-    /// prompt, and thus whether that prompt is up at all. Raised by
-    /// [`Self::guard_discard`]; cleared when the user answers.
-    confirm_discard: Option<PendingTransition>,
+    /// The unsaved-changes prompt, and the transition it holds while it is up.
+    discard: DiscardGuard,
     /// The image of the window a View command waits on; a second command replaces the first.
     capture: Option<ViewCapture>,
     /// What a driver on another thread asked of the next frames.
     driven: DrivenRequests,
+    /// Raised at the end of a frame while a preview converts or a view capture waits for its
+    /// image: work the frame does not show yet, which a driver on another thread waits out.
+    pending_work: Arc<AtomicBool>,
     /// Throttled sampler behind the status bar's `MEM` clause. Lives on
-    /// `App` rather than `Editor` because it measures the process, not the
+    /// `App` rather than `Session` because it measures the process, not the
     /// document. Sampled where it is consumed rather than in `update`:
     /// [`ProcessMemory::sample`] refreshes at most once per interval, so a
     /// second record pass repeats the reading the first one drew.
@@ -107,43 +107,22 @@ pub(crate) struct App {
     requests: Requests,
 }
 
-/// A transition that replaces or discards the open document. Held while
-/// the unsaved-changes prompt is up, then carried out (or dropped) by the
-/// answer.
-///
-/// The two open variants differ only in where the path comes from:
-/// [`Self::OpenPicked`] runs the file dialog *after* the prompt clears, so a
-/// cancelled prompt doesn't leave the user having chosen a file for nothing,
-/// while [`Self::OpenAt`] already holds one handed in from outside the editor
-/// (Finder, via [`crate::platform`]). Carrying that path is what
-/// costs this `Copy`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum PendingTransition {
-    Quit,
-    New,
-    OpenPicked,
-    OpenAt(PathBuf),
-}
-
-impl PendingTransition {
-    /// How the prompt finishes "Save changes to X before …?".
-    const fn prompt_tail(&self) -> &'static str {
-        match self {
-            Self::Quit => "quitting",
-            Self::New => "closing it",
-            Self::OpenPicked | Self::OpenAt(_) => "opening another document",
-        }
-    }
+/// What a driver's open does with unsaved edits, in place of the prompt a person answers.
+/// `darkroom/AGENTS.md`, "The editor harness", "A project opens in place".
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum UnsavedEdits {
+    /// Refuse the open: in the window, the person at it may own them.
+    Refuse,
+    /// Discard them: no one but the driver edits an offscreen editor.
+    Discard,
 }
 
 /// What the app is launched with, read before its window exists.
 #[derive(Debug)]
 pub(crate) struct LaunchInputs {
-    /// The preferences as `store` loaded them; a failure leaves the session on defaults it
-    /// does not save.
-    pub(crate) preferences: Result<Preferences, PreferencesLoadError>,
-    /// Where the preferences came from, and where they persist.
-    pub(crate) store: PreferencesStore,
+    /// The preferences as their store opened them, where they persist, and why the file did not
+    /// load, when it did not.
+    pub(crate) preferences: OpenedPreferences,
     /// The document the command line named, if it named one.
     pub(crate) document: Option<PathBuf>,
     /// Where path picks are answered.
@@ -160,8 +139,12 @@ impl App {
     /// `Ui` + host handle exist (before the first frame); the driver calls it over its own host.
     pub(crate) fn new(ui: &mut Ui, host: AppHost, launch: LaunchInputs) -> Self {
         let LaunchInputs {
-            preferences,
-            store,
+            preferences:
+                OpenedPreferences {
+                    preferences,
+                    store: preferences_store,
+                    failure,
+                },
             document,
             dialogs,
         } = launch;
@@ -169,27 +152,22 @@ impl App {
         // `preferences` is loaded in `run` before the window exists, so
         // its saved geometry can size the window at creation.
         let mut status = StatusLog::default();
-        let (mut preferences, preferences_store) = match preferences {
-            Ok(preferences) => (preferences, store),
-            Err(error) => {
-                status.error(
-                    StatusFamily::Preferences,
-                    format!("{error}; this session's settings are not saved"),
-                );
-                (Preferences::default(), PreferencesStore::Memory)
-            }
-        };
+        if let Some(failure) = failure {
+            status.error(
+                StatusFamily::Preferences,
+                format!("{failure}; this session's settings are not saved"),
+            );
+        }
         let run_state = RunState::new(Arc::clone(&wake));
-        let mut runtime = RuntimeHost::new(wake, &preferences);
-        let remembered = preferences.document_path.clone();
-        let open = OpenDocument::open_at_launch(
-            LaunchSource {
-                argument: document,
-                preferences: &mut preferences,
-            },
-            &mut status,
-            runtime.library.cur(),
-        );
+        let mut runtime = RuntimeHost::new(wake, &preferences.ml_models);
+        let remembered = preferences
+            .document_path
+            .as_deref()
+            .filter(|_| preferences.load_last_document);
+        let Launched {
+            open,
+            forgot_remembered,
+        } = OpenDocument::open_at_launch(document, remembered, &mut status, runtime.library.cur());
         runtime.set_document_cache(open.path.as_deref());
         let mut app = Self {
             session: Session::new(open),
@@ -201,17 +179,19 @@ impl App {
             preferences,
             preferences_store,
             dialogs,
-            confirm_discard: None,
+            discard: DiscardGuard::default(),
             capture: None,
             driven: DrivenRequests::default(),
+            pending_work: Arc::default(),
             process_memory: ProcessMemory::new(),
             requests: Requests::default(),
         };
         // Onto the Ui before frame 1, so palantir's own widgets paint right.
         ui.set_theme(app.theme.palantir.clone());
-        // A remembered document that failed to load was forgotten; persist
-        // that, so the next launch does not fail on it again.
-        if app.preferences.document_path != remembered {
+        // A remembered document that failed to load is forgotten, and that is
+        // persisted, so the next launch does not fail on it again.
+        if forgot_remembered {
+            app.preferences.document_path = None;
             app.save_preferences();
         }
         app
@@ -238,13 +218,7 @@ impl App {
             AppCommand::File(FileCommand::SaveAsCompressed) => {
                 self.save_document_as(DocumentFormat::ZippedRon);
             }
-            AppCommand::Run(RunCommand::Once) => self.run_graph(),
-            AppCommand::Run(RunCommand::Node(node_id)) => self.run_node(node_id),
-            AppCommand::Run(RunCommand::EvictCache(node_id)) => self.evict_cache(node_id),
-            AppCommand::Run(RunCommand::FlushCache(node_id)) => self.flush_cache(node_id),
-            AppCommand::Run(RunCommand::Cancel) => self.runtime.cancel_run(),
-            AppCommand::Run(RunCommand::StartEvents) => self.start_events(),
-            AppCommand::Run(RunCommand::StopEvents) => self.stop_events(),
+            AppCommand::Run(run) => self.run(run),
             AppCommand::Preferences(PreferencesCommand::Changed) => self.apply_preferences(),
             AppCommand::Preferences(PreferencesCommand::PickMlModel(kind)) => {
                 self.pick_ml_model(kind);
@@ -278,14 +252,14 @@ impl App {
                 w.maximized = geom.placement.maximized;
                 if !geom.placement.maximized {
                     w.size = geom.inner_size;
-                    w.pos = geom.placement.pos;
+                    w.physical_pos = geom.placement.physical_pos;
                 }
             }
             None => {
                 self.preferences.window = Some(WindowState {
                     size: geom.inner_size,
                     maximized: geom.placement.maximized,
-                    pos: geom.placement.pos,
+                    physical_pos: geom.placement.physical_pos,
                 });
             }
         }
@@ -315,7 +289,7 @@ impl App {
     /// being restated (or forgotten) per caller.
     fn guard_discard(&mut self, transition: PendingTransition) {
         if self.needs_discard_confirmation() {
-            self.confirm_discard = Some(transition);
+            self.discard.hold(transition);
         } else {
             self.perform(transition);
         }
@@ -345,7 +319,7 @@ impl App {
     }
 
     /// The titlebar X. The window stays open only while the prompt is up
-    /// ([`Self::record_discard_prompt`] calls `keep_open`); with nothing to
+    /// ([`DiscardGuard::record`] calls `keep_open`); with nothing to
     /// protect, the close proceeds untouched.
     fn handle_close_request(&mut self, ui: &Ui) {
         if !ui.close_requested() {
@@ -354,18 +328,19 @@ impl App {
 
         self.save_preferences();
         if self.needs_discard_confirmation() {
-            self.confirm_discard = Some(PendingTransition::Quit);
+            self.discard.hold(PendingTransition::Quit);
         }
     }
 
     /// Apply the prompt's answer: run the save it asked for, then let
-    /// [`DiscardOutcome::resolve`] decide — against the dirty flag that
+    /// [`DiscardOutcome::resolve`](crate::gui::app::discard_dialog::DiscardOutcome::resolve) decide — against the dirty flag that
     /// save left behind — whether the transition goes through and whether
     /// the guard stays on.
-    fn apply_discard_outcome(&mut self, outcome: DiscardOutcome) {
-        let Some(pending) = self.confirm_discard.take() else {
-            return;
-        };
+    fn apply_discard_outcome(&mut self, answered: Answered) {
+        let Answered {
+            transition,
+            outcome,
+        } = answered;
         if outcome.choice == DiscardChoice::Save {
             self.save_cur();
         }
@@ -374,23 +349,11 @@ impl App {
             self.set_confirm_unsaved(false);
         }
         if resolution.proceed {
-            self.perform(pending);
+            self.perform(transition);
         }
     }
 
     fn record_discard_prompt(&mut self, ui: &mut Ui) {
-        // Only the tail is taken, so the borrow of the pending transition ends
-        // here — `apply_discard_outcome` below needs `&mut self`.
-        let Some(tail) = self
-            .confirm_discard
-            .as_ref()
-            .map(PendingTransition::prompt_tail)
-        else {
-            return;
-        };
-        if ui.close_requested() {
-            ui.keep_open();
-        }
         let file_name = self
             .session
             .open
@@ -398,9 +361,8 @@ impl App {
             .as_deref()
             .and_then(|p| p.file_name())
             .and_then(|s| s.to_str());
-        let outcome = discard_dialog::show(ui, file_name, tail);
-        if outcome.choice != DiscardChoice::Stay {
-            self.apply_discard_outcome(outcome);
+        if let Some(answered) = self.discard.record(ui, file_name) {
+            self.apply_discard_outcome(answered);
         }
     }
 
@@ -430,13 +392,13 @@ impl App {
             }
         };
         self.status.succeeded(StatusFamily::Edit);
-        self.session.open.apply_edit(
+        Relayout::after(self.session.open.apply_edit(
             GraphIntent::SetInput {
                 input: pick.port,
                 to: Some(Binding::Const(value)),
             },
             self.runtime.library.cur(),
-        )
+        ))
     }
 
     /// Prompt for a project file and load it. The
@@ -498,16 +460,15 @@ impl App {
     /// Load `path` into a fresh editor, and say whether it loaded. A missing or corrupt file
     /// leaves the open document intact and surfaces its reason in the status bar.
     fn load_document(&mut self, path: &Path) -> bool {
-        let loaded = match OpenDocument::load(path.to_path_buf(), self.runtime.library.cur()) {
-            Ok(loaded) => loaded,
-            Err(err) => {
-                self.status
-                    .error(StatusFamily::Document, format!("load failed: {err:#}"));
-                return false;
-            }
+        let Some(Loaded { open, report }) = OpenDocument::load_or_report(
+            path.to_path_buf(),
+            self.runtime.library.cur(),
+            &mut self.status,
+        ) else {
+            return false;
         };
-        self.adopt_document(loaded.open);
-        loaded.report.report(&mut self.status);
+        self.adopt_document(open);
+        report.report(&mut self.status);
         true
     }
 
@@ -564,7 +525,7 @@ impl App {
     ///
     /// [`Preferences`]: crate::core::io::preferences::Preferences
     fn apply_preferences(&mut self) {
-        self.runtime.configure_ml_model_defaults(&self.preferences);
+        self.runtime.set_ml_model_paths(&self.preferences.ml_models);
         self.save_preferences();
     }
 
@@ -572,11 +533,10 @@ impl App {
     /// bar — the one save path every caller routes through, so a broken
     /// preferences file can't fail silently.
     fn save_preferences(&mut self) {
-        let PreferencesStore::File(path) = &self.preferences_store else {
-            return;
-        };
-        match self.preferences.save_to(path) {
-            Ok(()) => self.status.succeeded(StatusFamily::Preferences),
+        match self.preferences_store.save(&self.preferences) {
+            Ok(Saved::File) => self.status.succeeded(StatusFamily::Preferences),
+            // Kept in the session: a failed load's report stays up.
+            Ok(Saved::Memory) => {}
             Err(err) => self
                 .status
                 .error(StatusFamily::Preferences, err.to_string()),
@@ -602,64 +562,53 @@ impl App {
         self.save_preferences();
     }
 
-    /// Compile the document graph and execute its sinks once on the
-    /// worker. Worker status reports acknowledge actual execution and
-    /// event-loop transitions.
-    fn run_graph(&mut self) {
-        self.runtime
-            .run_once(self.session.graph(), &mut self.status);
-    }
-
-    /// Like [`Self::run_graph`], but seeds the run at one node: only its
-    /// upstream cone executes and its outputs are delivered.
-    ///
-    /// The id was read frames ago, so the node may be gone by now; the
-    /// runtime reports that as nothing to run.
-    fn run_node(&mut self, node_id: NodeId) {
-        self.runtime
-            .run_node(self.session.graph(), node_id, &mut self.status);
-    }
-
-    /// Evict one node's cache cone and project the outcome onto exactly the
-    /// nodes it reaches. An empty answer means the program holds no work for
-    /// the node, so there is nothing to project either.
-    fn evict_cache(&mut self, node_id: NodeId) {
-        let evicted = self
-            .runtime
-            .evict_cache(self.session.graph(), node_id, &mut self.status);
-        if !evicted.is_empty() {
-            self.run_state.clear_cache_projections(&evicted);
+    /// Hand `command` to the runtime and report its outcome. A command that
+    /// compiles supersedes the last run's failure; the ids were read frames
+    /// ago, so a node may be gone by now, which the runtime answers as nothing
+    /// to run.
+    fn run(&mut self, command: RunCommand) {
+        let graph = self.session.graph();
+        let outcome = match command {
+            RunCommand::Once => {
+                self.runtime.run_once(graph);
+                Ok(())
+            }
+            RunCommand::Node(node_id) => self.runtime.run_node(graph, node_id),
+            // An eviction projects its outcome onto exactly the nodes it reaches.
+            RunCommand::EvictCache(node_id) => self
+                .runtime
+                .evict_cache(graph, node_id)
+                .map(|evicted| self.run_state.clear_cache_projections(&evicted)),
+            // A flush only gains the value a copy on disk, so no projection moves.
+            RunCommand::FlushCache(node_id) => self.runtime.flush_cache(graph, node_id),
+            RunCommand::StartEvents => {
+                self.runtime.start_event_loop(graph);
+                Ok(())
+            }
+            RunCommand::Cancel => {
+                self.runtime.cancel_run();
+                return;
+            }
+            RunCommand::StopEvents => {
+                self.runtime.stop_event_loop();
+                return;
+            }
+        };
+        match outcome {
+            Ok(()) => self.status.succeeded(StatusFamily::Run),
+            Err(error) => self.status.error(StatusFamily::Run, error.to_string()),
         }
-    }
-
-    /// Publish this node's resident value to the disk store. Nothing on screen
-    /// changes — the value stays exactly where it was, and only gains a copy on
-    /// disk — so unlike the eviction beside it, no projection is reset.
-    fn flush_cache(&mut self, node_id: NodeId) {
-        self.runtime
-            .flush_cache(self.session.graph(), node_id, &mut self.status);
-    }
-
-    /// Start the worker's event loop on the current graph: emitter events
-    /// fire their subscribers until stopped.
-    fn start_events(&mut self) {
-        self.runtime
-            .start_event_loop(self.session.graph(), &mut self.status);
-    }
-
-    /// Stop the worker's event loop.
-    fn stop_events(&self) {
-        self.runtime.stop_event_loop();
     }
 
     /// Hand the image that landed this frame to the capture that asked for it.
     fn deliver_capture(&mut self, ui: &Ui) {
-        let Some(shot) = ui.screenshot_taken() else {
+        let Some(shot) = self.capture.as_ref().and_then(|capture| capture.landed(ui)) else {
             return;
         };
-        let Some(capture) = self.capture.take_if(|capture| capture.asked()) else {
-            return;
-        };
+        let capture = self
+            .capture
+            .take()
+            .expect("the capture its image landed for");
         match capture.deliver(shot, &ui.clipboard()) {
             Ok(()) => self.status.succeeded(StatusFamily::View),
             Err(error) => self.status.error(StatusFamily::View, error.to_string()),
@@ -691,9 +640,7 @@ fn unicode(path: PathBuf) -> Result<String, NonUnicodePath> {
 impl palantir::App for App {
     fn update(&mut self, _win: palantir::WindowToken, ui: &Ui) {
         // First, so a driver reads the frame it saw, before this one changes anything.
-        let mut driven = self.driven.lend();
-        driven.serve(self, ui);
-        self.driven.restore(driven);
+        self.serve_driven(ui);
 
         // Keep the persisted window geometry current so a save on quit
         // captures the latest size / position.
@@ -708,8 +655,7 @@ impl palantir::App for App {
         // Two owners, so two calls: the run projection filters on the node
         // that published, and everything the window caches — canvas geometry,
         // open inspectors, per-tab viewer framing — goes through the session.
-        // A new cache gets a line here rather than a third call site — see
-        // `Document::holds_node`, which they all ask and which lists them.
+        // A new cache gets a line here rather than a third call site.
         //
         // A node deleted later in the same frame's record is swept next frame.
         // Nothing reads a dead entry in between — the geometry is reached
@@ -740,7 +686,7 @@ impl palantir::App for App {
         // While nodes are computing, keep repainting (~20 fps) so the running
         // node's live elapsed-so-far timer ticks — a single long node emits no
         // progress events between its start and finish.
-        if self.run_state.activity.is_executing() {
+        if self.run_state.activity().is_executing() {
             ui.request_repaint_after(Duration::from_millis(100));
         }
 
@@ -752,12 +698,8 @@ impl palantir::App for App {
         // again.
         let ctx = AppCtx::new(&self.theme, &library, &self.run_state).with_status(StatusInputs {
             message: self.status.cur(),
-            process_memory: self.process_memory.sample(Instant::now()),
+            process_memory: self.process_memory.sample(ui.now()),
         });
-        // Reset here rather than inside the frame: the queue is `App`'s, and
-        // `record` runs twice on a frame carrying action input — the second
-        // pass must not inherit what the first already ran.
-        self.requests.clear();
         let mut needs_relayout = self.session.frame(
             ui,
             ctx,
@@ -785,6 +727,11 @@ impl palantir::App for App {
         }
 
         self.record_discard_prompt(ui);
+        // Last, after everything the pass could start: the last pass of a frame leaves it.
+        self.pending_work.store(
+            self.run_state.previews().in_flight() || self.capturing(),
+            Ordering::Release,
+        );
     }
 }
 
@@ -812,39 +759,49 @@ impl App {
         &mut self.driven
     }
 
-    /// Open `path` for a driver, as File ▸ Open does but refusing to discard unsaved edits,
-    /// which a person in the window may own: the driver says so instead of raising the prompt.
-    pub(crate) fn open_driven(&mut self, path: &Path) -> Result<(), DriverError> {
+    /// Open `path` for a driver, as File ▸ Open does, with what `unsaved` says for unsaved edits
+    /// in place of the prompt. A file that does not load leaves the open document as it was.
+    pub(crate) fn open_driven(
+        &mut self,
+        path: &Path,
+        unsaved: UnsavedEdits,
+    ) -> Result<(), DrivenOpenError> {
         debug_assert!(path.is_absolute(), "{}", path.display());
-        self.refuse_unsaved()?;
+        self.check_unsaved(unsaved)?;
         // Read from the load, not the open path: a failed load of the open document's own file
         // leaves that path open.
         if self.load_document(path) {
             Ok(())
         } else {
-            Err(DriverError::NotOpened {
+            Err(DrivenOpenError::NotOpened {
                 path: path.to_path_buf(),
                 status: self.status.cur().map(|message| message.line.to_string()),
             })
         }
     }
 
-    /// Start a new document for a driver, as File ▸ New does but refusing to discard unsaved
-    /// edits.
-    pub(crate) fn new_driven(&mut self) -> Result<(), DriverError> {
-        self.refuse_unsaved()?;
+    /// Start a new document for a driver, as File ▸ New does, with what `unsaved` says for
+    /// unsaved edits.
+    pub(crate) fn new_driven(&mut self, unsaved: UnsavedEdits) -> Result<(), DrivenOpenError> {
+        self.check_unsaved(unsaved)?;
         self.new_document();
         Ok(())
     }
 
-    fn refuse_unsaved(&self) -> Result<(), DriverError> {
-        if self.session.open.dirty {
-            Err(DriverError::Unsaved {
+    fn check_unsaved(&self, unsaved: UnsavedEdits) -> Result<(), DrivenOpenError> {
+        if unsaved == UnsavedEdits::Refuse && self.session.open.dirty {
+            Err(DrivenOpenError::Unsaved {
                 document: self.session.open.path.clone(),
             })
         } else {
             Ok(())
         }
+    }
+
+    /// The flag a frame raises while work it does not show yet goes on, for a driver of the
+    /// window to read without a frame of its own.
+    pub(crate) fn pending_work(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.pending_work)
     }
 
     /// Whether a View ▸ Copy or Save of the view waits for its image.
@@ -858,24 +815,37 @@ impl App {
 }
 
 #[cfg(test)]
+pub(crate) mod internals {
+    use std::sync::Arc;
+
+    use palantir::Ui;
+
+    use crate::core::io::preferences::preferences_store::PreferencesStore;
+    use crate::gui::app::app_host::AppHost;
+    use crate::gui::app::offscreen_signals::OffscreenSignals;
+    use crate::gui::app::{App, LaunchInputs};
+    use crate::gui::dialogs::{DialogFallback, Dialogs};
+
+    impl App {
+        /// An app on a new document, its preferences in memory and its dialogs refused, for a
+        /// test that drives it frame by frame.
+        pub(crate) fn offscreen(ui: &mut Ui) -> Self {
+            Self::new(
+                ui,
+                AppHost::Offscreen(Arc::new(OffscreenSignals::default())),
+                LaunchInputs {
+                    preferences: PreferencesStore::Memory.open(),
+                    document: None,
+                    dialogs: Dialogs::new(DialogFallback::Refuse),
+                },
+            )
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
-
-    /// A document Finder hands over is guarded exactly like one the user
-    /// picked: same question, same wording. The two differ only in where the
-    /// path came from, and the prompt has no business exposing that.
-    #[test]
-    fn an_externally_opened_document_prompts_like_a_picked_one() {
-        let picked = PendingTransition::OpenPicked;
-        let handed = PendingTransition::OpenAt(PathBuf::from("/tmp/scene.darkroom"));
-        assert_eq!(picked.prompt_tail(), "opening another document");
-        assert_eq!(handed.prompt_tail(), picked.prompt_tail());
-
-        // The other two stay distinct — a shared tail would misdescribe what
-        // the user is about to lose the document to.
-        assert_eq!(PendingTransition::Quit.prompt_tail(), "quitting");
-        assert_eq!(PendingTransition::New.prompt_tail(), "closing it");
-    }
 
     /// A Unicode pick becomes the value as it is. One unit that is not Unicode
     /// refuses the whole pick and names that path, instead of replacing the
@@ -904,20 +874,81 @@ mod tests {
         ));
     }
 
-    /// The path rides along rather than being re-picked after the prompt, so
-    /// answering "Save" opens the document the user actually double-clicked.
+    /// A handed-in document waits on the prompt while the open one has unsaved edits, and the
+    /// answer decides: Don't Save opens it, a Save whose dialog is cancelled leaves the edits and
+    /// the document open, as Cancel does. Each answer takes the prompt down.
     #[test]
-    fn a_handed_in_transition_carries_its_path_through_the_prompt() {
-        let path = PathBuf::from("/tmp/from-finder.darkroom");
-        let pending = PendingTransition::OpenAt(path.clone());
-        let held = pending.clone();
-        assert_eq!(held, PendingTransition::OpenAt(path));
-        assert_eq!(held, pending, "surviving the guard costs the path nothing");
+    fn a_handed_in_document_waits_on_the_prompt_and_its_answer() {
+        use common::TempDir;
+        use glam::UVec2;
+        use palantir::internals::ui_harness::UiHarness;
+
+        use crate::core::io::document::saved_paths::SavedPaths;
+        use crate::gui::app::discard_dialog::DiscardOutcome;
+
+        let dir = TempDir::new("darkroom-discard-prompt");
+        let handed = dir.join("handed.darkroom");
+        OpenDocument::default()
+            .save_to(&handed, SavedPaths::Relative, DocumentFormat::Ron)
+            .unwrap();
+        for (choice, opened) in [
+            (DiscardChoice::Discard, true),
+            (DiscardChoice::Save, false),
+            (DiscardChoice::Cancel, false),
+        ] {
+            let mut ui = UiHarness::with_text(UVec2::new(800, 600));
+            let mut app = App::offscreen(ui.ui());
+            app.session.open.dirty = true;
+            app.open_document_at(handed.clone());
+            assert!(app.discard.is_up(), "{choice:?}: the prompt holds the open");
+            assert_eq!(app.session.open.path, None);
+
+            let answered = app
+                .discard
+                .answer(DiscardOutcome {
+                    choice,
+                    dont_ask_again: false,
+                })
+                .unwrap();
+            app.apply_discard_outcome(answered);
+            assert!(!app.discard.is_up(), "{choice:?}: the answer takes it down");
+            assert_eq!(
+                (app.session.open.path.as_ref(), app.session.open.dirty),
+                if opened {
+                    (Some(&handed), false)
+                } else {
+                    (None, true)
+                },
+                "{choice:?}"
+            );
+        }
+    }
+
+    /// A frame leaves the pending-work flag raised while a view capture waits for its image,
+    /// which the deviceless harness never paints, and lowered once nothing waits.
+    #[test]
+    fn a_frame_publishes_the_work_it_leaves_pending() {
+        use glam::UVec2;
+        use palantir::internals::ui_harness::UiHarness;
+
+        use crate::gui::frame::app_command::ViewCommand;
+
+        let mut ui = UiHarness::with_text(UVec2::new(800, 600));
+        let mut app = App::offscreen(ui.ui());
+        let pending = app.pending_work();
+        ui.frame_app(&mut app);
+        assert!(!pending.load(Ordering::Acquire), "nothing waits");
+        let _ = app.run_command(AppCommand::View(ViewCommand::CopyImage));
+        ui.frame_app(&mut app);
+        assert!(pending.load(Ordering::Acquire), "the capture waits");
+        app.capture = None;
+        ui.frame_app(&mut app);
+        assert!(!pending.load(Ordering::Acquire));
     }
 
     /// A driver's open loads the file and reports a load that fails, also of the open document's
-    /// own file, which stays open; with unsaved edits it refuses, and a new document too, rather
-    /// than discard them.
+    /// own file, which stays open; with unsaved edits it refuses, and a new document too, unless
+    /// told to discard them.
     #[test]
     fn a_driven_open_reports_its_load_and_keeps_unsaved_edits() {
         use common::{TempDir, fs};
@@ -925,8 +956,6 @@ mod tests {
         use palantir::internals::ui_harness::UiHarness;
 
         use crate::core::io::document::saved_paths::SavedPaths;
-        use crate::gui::app::offscreen_signals::OffscreenSignals;
-        use crate::gui::dialogs::DialogFallback;
 
         let dir = TempDir::new("darkroom-driven-open");
         let document = dir.join("scene.darkroom");
@@ -934,22 +963,13 @@ mod tests {
             .save_to(&document, SavedPaths::Relative, DocumentFormat::Ron)
             .unwrap();
         let mut ui = UiHarness::with_text(UVec2::new(800, 600));
-        let mut app = App::new(
-            ui.ui(),
-            AppHost::Offscreen(Arc::new(OffscreenSignals::default())),
-            LaunchInputs {
-                preferences: Ok(Preferences::default()),
-                store: PreferencesStore::Memory,
-                document: None,
-                dialogs: Dialogs::new(DialogFallback::Refuse),
-            },
-        );
-        app.open_driven(&document).unwrap();
+        let mut app = App::offscreen(ui.ui());
+        app.open_driven(&document, UnsavedEdits::Refuse).unwrap();
         assert_eq!(app.session.open.path.as_ref(), Some(&document));
 
         fs::write(&document, b"not a document").unwrap();
-        match app.open_driven(&document) {
-            Err(DriverError::NotOpened { path, status }) => {
+        match app.open_driven(&document, UnsavedEdits::Refuse) {
+            Err(DrivenOpenError::NotOpened { path, status }) => {
                 assert_eq!(path, document);
                 assert!(status.is_some_and(|line| line.starts_with("load failed: ")));
             }
@@ -962,15 +982,18 @@ mod tests {
         );
 
         app.session.open.dirty = true;
-        for refused in [app.open_driven(&document), app.new_driven()] {
-            match refused {
-                Err(DriverError::Unsaved { document: open }) => {
-                    assert_eq!(open.as_ref(), Some(&document));
-                }
-                other => panic!("{other:?}"),
-            }
-        }
+        let unsaved = DrivenOpenError::Unsaved {
+            document: Some(document.clone()),
+        };
+        assert_eq!(
+            app.open_driven(&document, UnsavedEdits::Refuse),
+            Err(unsaved.clone())
+        );
+        assert_eq!(app.new_driven(UnsavedEdits::Refuse), Err(unsaved));
         assert!(app.session.open.dirty, "the edits stay");
+        app.new_driven(UnsavedEdits::Discard).unwrap();
+        assert_eq!(app.session.open.path, None, "a discard goes through");
+        assert!(!app.session.open.dirty);
     }
 
     /// An app on the driver's host: a scripted Open dialog opens the answered document; with a
@@ -979,15 +1002,13 @@ mod tests {
     /// user has it, and the status line says so.
     #[test]
     fn a_scripted_open_loads_the_answer_and_the_store_decides_what_persists() {
-        use std::io;
-
         use common::{TempDir, fs};
         use glam::UVec2;
         use palantir::internals::ui_harness::UiHarness;
 
         use crate::core::io::document::saved_paths::SavedPaths;
-        use crate::driver::action::DialogAnswer;
         use crate::gui::app::offscreen_signals::OffscreenSignals;
+        use crate::gui::dialogs::DialogAnswer;
         use crate::gui::dialogs::DialogFallback;
 
         let dir = TempDir::new("darkroom-scripted-open");
@@ -997,25 +1018,16 @@ mod tests {
             .unwrap();
         let preferences_file = dir.join("darkroom.preferences.ron");
 
-        let unreadable = || PreferencesLoadError::Read {
-            path: preferences_file.clone(),
-            source: io::Error::other("unreadable"),
-        };
-        for (store, preferences) in [
-            (
-                PreferencesStore::File(preferences_file.clone()),
-                Ok(Preferences::default()),
-            ),
-            (PreferencesStore::Memory, Ok(Preferences::default())),
-            (
-                PreferencesStore::File(preferences_file.clone()),
-                Err(unreadable()),
-            ),
+        // A file store over a valid file, a memory store, and a file store over
+        // a file that does not parse, which opens as a memory store.
+        for (store, readable) in [
+            (PreferencesStore::File(preferences_file.clone()), true),
+            (PreferencesStore::Memory, true),
+            (PreferencesStore::File(preferences_file.clone()), false),
         ] {
-            let failed = preferences.is_err();
-            if store == PreferencesStore::Memory || failed {
-                // Left by the file store's round; gone, so any write would show.
-                fs::remove_file(&preferences_file).ok();
+            fs::remove_file(&preferences_file).ok();
+            if !readable {
+                fs::write(&preferences_file, b"not ron").unwrap();
             }
             let mut ui = UiHarness::with_text(UVec2::new(800, 600));
             let mut dialogs = Dialogs::new(DialogFallback::Refuse);
@@ -1024,8 +1036,7 @@ mod tests {
                 ui.ui(),
                 AppHost::Offscreen(Arc::new(OffscreenSignals::default())),
                 LaunchInputs {
-                    preferences,
-                    store: store.clone(),
+                    preferences: store.clone().open(),
                     document: None,
                     dialogs,
                 },
@@ -1033,7 +1044,7 @@ mod tests {
             assert_eq!(app.session.open.path, None, "{store:?}: launched empty");
             let _ = app.run_command(AppCommand::File(FileCommand::Open));
             assert_eq!(app.session.open.path.as_ref(), Some(&document), "{store:?}");
-            if failed {
+            if !readable {
                 assert_eq!(app.preferences_store, PreferencesStore::Memory);
                 assert!(
                     app.status
@@ -1044,14 +1055,19 @@ mod tests {
                 );
             }
             match store {
-                PreferencesStore::File(_) if !failed => assert_eq!(
-                    store.load().unwrap().document_path,
+                PreferencesStore::File(_) if readable => assert_eq!(
+                    store.clone().open().preferences.document_path,
                     Some(document.clone()),
                     "the file store remembers the open"
                 ),
-                _ => assert!(
+                PreferencesStore::File(_) => assert_eq!(
+                    fs::read(&preferences_file).unwrap(),
+                    b"not ron",
+                    "the file that did not load stays as it was"
+                ),
+                PreferencesStore::Memory => assert!(
                     !fs::exists(&preferences_file),
-                    "{store:?}, failed {failed}: nothing is written"
+                    "the memory store writes nothing"
                 ),
             }
         }

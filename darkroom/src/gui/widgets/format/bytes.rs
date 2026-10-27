@@ -18,7 +18,9 @@ pub(crate) struct Bytes(u64);
 impl Bytes {
     /// Human-readable byte magnitude (1024-based) — the byte analogue of
     /// [`Elapsed`](crate::gui::widgets::format::elapsed::Elapsed): bare `B`
-    /// under 1 KB, then `KB`/`MB`/`GB` carrying 1–2 decimals. Used by the
+    /// under 1 KiB, then `KiB`/`MiB`/`GiB` carrying 1–2 decimals, the IEC 80000-13
+    /// names of the 1024-based units, as `KB` names 1000. `AGENTS.md`, "Names",
+    /// "Bytes are KiB, MiB and GiB". Used by the
     /// window status bar and each node body's memory readout, so both render
     /// identical figures.
     pub(crate) const fn new(bytes: u64) -> Self {
@@ -28,20 +30,20 @@ impl Bytes {
 
 impl Display for Bytes {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        const KB: f64 = 1024.0;
-        const MB: f64 = KB * KB;
-        const GB: f64 = KB * KB * KB;
+        const KIB: f64 = 1024.0;
+        const MIB: f64 = KIB * KIB;
+        const GIB: f64 = KIB * KIB * KIB;
         let bytes = self.0;
         let b = bytes as f64;
         // As for `Elapsed`: a magnitude that rounds up to 1024 of a unit is shown as 1 of the next.
         if bytes < 1024 {
             write!(f, "{bytes} B")
-        } else if b < MB && format::printed_integer_part(b / KB, 1) < 1024 {
-            write!(f, "{:.1} KB", b / KB)
-        } else if b < GB && format::printed_integer_part(b / MB, 1) < 1024 {
-            write!(f, "{:.1} MB", b / MB)
+        } else if b < MIB && format::printed_integer_part(b / KIB, 1) < 1024 {
+            write!(f, "{:.1} KiB", b / KIB)
+        } else if b < GIB && format::printed_integer_part(b / MIB, 1) < 1024 {
+            write!(f, "{:.1} MiB", b / MIB)
         } else {
-            write!(f, "{:.2} GB", b / GB)
+            write!(f, "{:.2} GiB", b / GIB)
         }
     }
 }

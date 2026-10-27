@@ -38,6 +38,8 @@ windows = { workspace = true, features = [
     "Win32_System_JobObjects",
     "Win32_System_ProcessStatus",
     "Win32_System_Threading",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
     "std",
 ] }
 

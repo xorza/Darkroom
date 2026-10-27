@@ -37,6 +37,26 @@ impl DocumentQueue {
             .extend(iter.into_iter().map(DocumentRequest::Graph));
     }
 
+    /// Queue every graph edit `iter` yields as part of the held `gesture`, whose undo entry they
+    /// join.
+    pub(crate) fn extend_graph_in(
+        &mut self,
+        gesture: GestureId,
+        iter: impl IntoIterator<Item = GraphIntent>,
+    ) {
+        self.requests.extend(
+            iter.into_iter()
+                .map(|intent| DocumentRequest::InGesture { gesture, intent }),
+        );
+    }
+
+    /// Queue the cancel of the held `gesture`: its open undo entry is reverted and dropped, else
+    /// `otherwise` applies.
+    pub(crate) fn push_cancel(&mut self, gesture: GestureId, otherwise: GraphIntent) {
+        self.requests
+            .push(DocumentRequest::Cancel { gesture, otherwise });
+    }
+
     pub(crate) fn push_view(&mut self, op: DockOperation<TabRef>) {
         self.requests.push(DocumentRequest::View(op));
     }
@@ -48,9 +68,5 @@ impl DocumentQueue {
 
     pub(crate) const fn is_empty(&self) -> bool {
         self.requests.is_empty()
-    }
-
-    pub(crate) fn clear(&mut self) {
-        self.requests.clear();
     }
 }

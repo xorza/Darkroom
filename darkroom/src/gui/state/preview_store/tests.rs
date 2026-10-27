@@ -221,14 +221,16 @@ fn a_previews_value_lives_exactly_as_long_as_its_node() {
     store.settle(arena.ui());
     assert_eq!(shown(&store).as_deref(), Some("7"), "formatted on landing");
 
+    // Held unlanded, so the newer publish comes while the older one has converted.
     store.publish(node, int(8));
+    let eight = store.next_converted();
     store.publish(node, int(10));
     assert_eq!(
         shown(&store).as_deref(),
         Some("7"),
         "the card keeps its value while the next converts"
     );
-    store.land_next(arena.ui());
+    store.land_one(arena.ui(), eight);
     assert_eq!(
         shown(&store).as_deref(),
         Some("8"),
@@ -238,12 +240,13 @@ fn a_previews_value_lives_exactly_as_long_as_its_node() {
     assert_eq!(shown(&store).as_deref(), Some("10"));
     assert_eq!(store.entries.len(), 2, "a re-publish replaces in place");
 
-    // Removed while converting, then published again: the first conversion
+    // Removed after it converted, then published again: the first conversion
     // lands first, on the one thread, and is void.
     store.publish(node, int(11));
+    let eleven = store.next_converted();
     store.remove(node);
     store.publish(node, int(13));
-    store.land_next(arena.ui());
+    store.land_one(arena.ui(), eleven);
     assert_eq!(
         shown(&store),
         None,

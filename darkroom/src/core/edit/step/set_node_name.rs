@@ -4,6 +4,7 @@ use scenarium::NodeId;
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::Document;
+use crate::core::edit::edit_facts::EditFacts;
 use crate::core::edit::step::change::{Change, Direction};
 use crate::core::edit::step::reversible::Reversible;
 
@@ -32,13 +33,11 @@ impl Reversible for SetNodeName {
         true
     }
 
-    /// A title width change remeasures the header, shifting every port row
-    /// below it.
-    fn invalidates_cached_geometry(&self) -> bool {
-        true
-    }
-
-    fn changes_node_set(&self) -> bool {
-        false
+    /// A title measures its name.
+    fn facts(&self) -> EditFacts {
+        EditFacts {
+            renamed: true,
+            ..EditFacts::NONE
+        }
     }
 }

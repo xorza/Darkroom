@@ -22,6 +22,9 @@ pub(crate) mod type_scale;
 
 use palantir::{ButtonTheme, FontWeight, RgbaF32, Stroke, TextEditTheme, TextStyleOverrides};
 
+use scenarium::DataType;
+
+use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::app_colors::AppColors;
 use crate::gui::theme::canvas_theme::CanvasTheme;
 use crate::gui::theme::card_theme::CardTheme;
@@ -143,6 +146,48 @@ pub(crate) enum CardTier {
 }
 
 impl Theme {
+    /// The color a port of `data_type` paints at rest, and the wires touching it; see
+    /// [`Hover::lift`](crate::gui::widgets::hover::Hover::lift). The built-in scalars and the
+    /// lens image type, the dominant payload on a darkroom canvas, take a fixed hue each from
+    /// [`TypeColors`]; another custom or enum type lands on a ramp slot by its type id, so
+    /// distinct types read distinct and stay stable. `Any`, which only an input declares, has no
+    /// type identity and takes the untyped input color.
+    pub(crate) fn port_color(&self, data_type: &DataType) -> RgbaF32 {
+        let hues = &self.type_colors;
+        match data_type {
+            DataType::Any => self.ports.input,
+            DataType::Bool => hues.boolean,
+            DataType::Int => hues.int,
+            DataType::Float => hues.float,
+            DataType::String => hues.string,
+            DataType::FsPath(_) => hues.path,
+            DataType::Custom(id) if *id == lens::IMAGE_TYPE_ID => hues.image,
+            DataType::Custom(id) | DataType::Enum(id) => {
+                let slot = id.as_u128() % hues.ramp.len() as u128;
+                hues.ramp[usize::try_from(slot).expect("a slot is below the ramp's length")]
+            }
+        }
+    }
+
+    /// The color of an event emitter glyph, a subscription pin and an event wire, at rest:
+    /// events carry no data type, so one color serves them all.
+    pub(crate) const fn event_color(&self) -> RgbaF32 {
+        self.ports.event
+    }
+
+    /// The accent color of a node's last-run `status`, or `None` when it did not run: shared by
+    /// the body glow and the header time label, so they read as one cue.
+    pub(crate) const fn exec_color(&self, status: &ExecStatus) -> Option<RgbaF32> {
+        match status {
+            ExecStatus::None => None,
+            ExecStatus::Cached => Some(self.status.info),
+            ExecStatus::Executed(_) => Some(self.status.success),
+            ExecStatus::Running(_) => Some(self.status.busy),
+            ExecStatus::MissingInputs(_) => Some(self.status.warning),
+            ExecStatus::Errored(_) => Some(self.status.error),
+        }
+    }
+
     /// How far a port circle of the given `radius` is pulled out of its
     /// column so its **center** lands on the node body's outer edge: clear
     /// the column inset (`port_col_pad_x`) and the body border
@@ -237,11 +282,7 @@ impl Theme {
 /// `base` with every state's border in `color`, its width kept.
 fn error_bordered(base: &TextEditTheme, color: RgbaF32) -> TextEditTheme {
     let mut style = base.clone();
-    for look in [
-        &mut style.looks.normal,
-        &mut style.looks.hovered,
-        &mut style.looks.active,
-    ] {
+    for look in style.looks.each_mut() {
         look.chrome.border = Stroke::new(color, look.chrome.border.width);
     }
     style

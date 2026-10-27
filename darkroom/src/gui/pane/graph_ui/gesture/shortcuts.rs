@@ -8,6 +8,7 @@
 //! from removing nodes nobody is looking at.
 
 use palantir::{Key, Shortcut, Ui};
+use scenarium::NodeId;
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
@@ -40,7 +41,7 @@ pub(crate) fn emit(ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
     if ctx.deselects() && !view.selected.is_empty() {
         out.push_graph(GraphIntent::clear_selection());
     }
-    // Ctrl+0 is the toolbar's reset view: 1:1, centred on the content.
+    // Ctrl+0 is the toolbar's reset view: 1:1, centered on the content.
     if reset_zoom && let Some(reset) = Framing::Reset.intent(ui, ctx) {
         out.push_graph(reset);
     }
@@ -51,9 +52,57 @@ pub(crate) fn emit(ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
             graph_ctx.document(),
             graph_ctx.library(),
             IncomingWires::Drop,
+            || NodeId::unique().as_u128(),
         ));
     }
     if delete {
         out.extend_graph(GraphIntent::remove_selection(view));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use palantir::{Key, Modifiers};
+
+    use crate::core::document::internals::DocumentFixture;
+    use crate::core::document::item_id::ItemId;
+    use crate::core::edit::graph_intent::GraphIntent;
+    use crate::gui::pane::graph_ui::internals::CanvasHarness;
+
+    /// Over a selected node at rest: Delete and Backspace remove it, Esc clears the selection,
+    /// Ctrl+0 resets the view and Ctrl+D duplicates the node; each chord raises only its own.
+    #[test]
+    fn each_chord_raises_its_intent() {
+        let ctrl = Modifiers {
+            ctrl: true,
+            ..Modifiers::default()
+        };
+        let plain = Modifiers::default();
+        let cases = [
+            (Key::Delete, plain, "remove"),
+            (Key::Backspace, plain, "remove"),
+            (Key::Escape, plain, "deselect"),
+            (Key::Char('0'), ctrl, "reset view"),
+            (Key::Char('d'), ctrl, "duplicate"),
+        ];
+        for (key, mods, want) in cases {
+            let mut h = CanvasHarness::new(DocumentFixture::probes(1));
+            let node = h.node(0);
+            h.document_mut().main_view.selected = [ItemId::Node(node)].into_iter().collect();
+            // Off the default view, so the reset has a view to move.
+            h.document_mut().main_view.viewport.zoom = 2.0;
+            h.prime(2);
+            h.ui.set_modifiers(mods);
+            h.ui.key(key);
+            let intents = h.frame();
+            let raised = match &*intents {
+                [GraphIntent::RemoveNode { node_id }] if *node_id == node => "remove",
+                [GraphIntent::SetSelection { to }] if to.is_empty() => "deselect",
+                [GraphIntent::SetViewport { to, .. }] if to.zoom == 1.0 => "reset view",
+                [GraphIntent::AddNode { .. }, ..] => "duplicate",
+                other => panic!("{key:?}: {other:?}"),
+            };
+            assert_eq!(raised, want, "{key:?}");
+        }
     }
 }

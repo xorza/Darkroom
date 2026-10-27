@@ -37,15 +37,27 @@ fn write_elem(index: u32, value: f32) {
 }
 
 // The pixel's channels in the low lanes; the rest, and any pixel outside the
-// input, read as zero.
+// input, read as zero. Lane by lane, with no loop: a loop over a runtime
+// channel count that indexes the vector is one FXC, D3D12's shader compiler,
+// refuses to unroll (X3511).
 fn read_pixel(x: i32, y: i32) -> vec4<f32> {
     var color = vec4<f32>(0.0);
     if x < 0 || x >= i32(params.input_size.x) || y < 0 || y >= i32(params.input_size.y) {
         return color;
     }
     let base = (u32(y) * params.input_size.x + u32(x)) * params.channel_count;
-    for (var k: u32 = 0u; k < params.channel_count; k++) {
-        color[k] = read_elem(base + k);
+    let count = params.channel_count;
+    if count > 0u {
+        color.x = read_elem(base);
+    }
+    if count > 1u {
+        color.y = read_elem(base + 1u);
+    }
+    if count > 2u {
+        color.z = read_elem(base + 2u);
+    }
+    if count > 3u {
+        color.w = read_elem(base + 3u);
     }
     return color;
 }
@@ -87,8 +99,19 @@ fn main(
         color = sample_bilinear(src_pos);
     }
 
+    // Lane by lane, as `read_pixel` reads them.
     let base = pixel * params.channel_count;
-    for (var k: u32 = 0u; k < params.channel_count; k++) {
-        write_elem(base + k, color[k]);
+    let count = params.channel_count;
+    if count > 0u {
+        write_elem(base, color.x);
+    }
+    if count > 1u {
+        write_elem(base + 1u, color.y);
+    }
+    if count > 2u {
+        write_elem(base + 2u, color.z);
+    }
+    if count > 3u {
+        write_elem(base + 3u, color.w);
     }
 }

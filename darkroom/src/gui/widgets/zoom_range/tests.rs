@@ -27,7 +27,8 @@ fn scroll_to_zoom_factor_is_one_step_per_pixel() {
 }
 
 /// The world point under the pivot stays under it, also when the zoom clamps
-/// and the factor that applies is not the one asked for.
+/// and the factor that applies is not the one asked for. A zoom outside the
+/// range steps back toward it and never away.
 #[test]
 fn zoom_about_holds_the_pivot_and_clamps() {
     #[derive(Debug)]
@@ -66,6 +67,36 @@ fn zoom_about_holds_the_pivot_and_clamps() {
             pivot: Vec2::new(100.0, 100.0),
             factor: 0.01,
             expected_zoom: RANGE.min,
+        },
+        // Above the range, as a fit to a tiny image is: a step in holds, a step out moves.
+        Case {
+            pan: Vec2::new(10.0, 10.0),
+            zoom: 8.0,
+            pivot: Vec2::new(100.0, 100.0),
+            factor: 1.25,
+            expected_zoom: 8.0,
+        },
+        Case {
+            pan: Vec2::new(10.0, 10.0),
+            zoom: 8.0,
+            pivot: Vec2::new(100.0, 100.0),
+            factor: 0.5,
+            expected_zoom: 4.0,
+        },
+        // Below it, as a fit to a huge image is: a step out holds, a step in moves.
+        Case {
+            pan: Vec2::new(10.0, 10.0),
+            zoom: 0.05,
+            pivot: Vec2::new(100.0, 100.0),
+            factor: 0.5,
+            expected_zoom: 0.05,
+        },
+        Case {
+            pan: Vec2::new(10.0, 10.0),
+            zoom: 0.05,
+            pivot: Vec2::new(100.0, 100.0),
+            factor: 1.5,
+            expected_zoom: 0.075,
         },
     ];
     for Case {

@@ -37,6 +37,8 @@ use palantir::{ImageDownsample, ImageFilter, ImageFit, ImageHandle};
 use crate::core::document::Document;
 use crate::core::document::viewport::Viewport;
 use crate::core::io::preferences::{ViewerBg, ViewerPreferences};
+use crate::gui::frame::app_command::{AppCommand, PreferencesCommand};
+use crate::gui::frame::requests::Requests;
 use crate::gui::pane::image_viewer::camera::VIEWER_ZOOM;
 use crate::gui::pane::image_viewer::glyph::Swatch;
 use crate::gui::pane::image_viewer::toolbar::{BACKDROPS, Controls, Readout};
@@ -46,7 +48,7 @@ use crate::gui::state::preview_store::{
 };
 use crate::gui::theme::Theme;
 use crate::gui::widgets::chip::Chip;
-use crate::gui::widgets::gesture_slot::GestureSlot;
+use crate::gui::widgets::pan_drag;
 use crate::gui::widgets::pill;
 use crate::gui::widgets::pill::{BUTTON_GAP, TOOLBAR_MARGIN};
 use crate::gui::widgets::toggle::Toggle;
@@ -69,7 +71,7 @@ pub(crate) struct ImageViewer {
     /// their 1:1 logical footprint before applying it.
     view: Option<Viewport>,
     /// Pan-drag bookkeeping: the viewport pan at drag start.
-    pan_anchor: GestureSlot<Vec2>,
+    pan_anchor: Option<Vec2>,
     /// Lazily registered checkerboard tile for the `Checker` backdrop.
     /// The backdrop choice and magnification filter live in
     /// [`ViewerPreferences`] — one persisted setting shared by every
@@ -150,6 +152,14 @@ pub(crate) struct ViewerPane<'a> {
     pub(crate) size: Option<Vec2>,
 }
 
+/// What a viewer writes this frame: the shared viewer preferences its controls edit, and the
+/// queue their change is reported on.
+#[derive(Debug)]
+pub(crate) struct ViewerWrites<'a> {
+    pub(crate) preferences: &'a mut ViewerPreferences,
+    pub(crate) out: &'a mut Requests,
+}
+
 /// A frame that has an image to show, in its pane.
 #[derive(Debug, Clone, Copy)]
 struct Shown<'a> {
@@ -159,19 +169,19 @@ struct Shown<'a> {
 
 impl ImageViewer {
     /// An empty viewer for `node_id` (shows the hint until content arrives).
-    pub(crate) fn new(node_id: NodeId) -> Self {
+    pub(crate) const fn new(node_id: NodeId) -> Self {
         Self {
             node_id,
             source_size: None,
             view: None,
-            pan_anchor: GestureSlot::default(),
+            pan_anchor: None,
             checker: None,
         }
     }
 
-    fn reset_framing(&mut self) {
+    const fn reset_framing(&mut self) {
         self.view = None;
-        self.pan_anchor.clear();
+        self.pan_anchor = None;
     }
 
     /// The framing to draw with: the user's explicit viewport, else the
@@ -213,14 +223,15 @@ impl ImageViewer {
 
     /// Draw the viewer into `view` (the whole tab content). Borrows the
     /// centralized texture, applies last frame's pan/zoom gestures, then
-    /// paints the image (or message), header, and controls. Returns `true`
-    /// when the shared viewer preferences changed.
+    /// paints the image (or message), header, and controls. A change to the shared viewer
+    /// preferences queues [`PreferencesCommand::Changed`], as the Preferences tab's does.
     pub(crate) fn show(
         &mut self,
         ui: &mut Ui,
         pane_view: ViewerPane<'_>,
-        preferences: &mut ViewerPreferences,
-    ) -> bool {
+        writes: ViewerWrites<'_>,
+    ) {
+        let ViewerWrites { preferences, out } = writes;
         let ViewerPane {
             theme,
             previews,
@@ -288,7 +299,9 @@ impl ImageViewer {
                     .show(ui, theme);
                 }
             });
-        preferences_changed
+        if preferences_changed {
+            out.push_app(AppCommand::Preferences(PreferencesCommand::Changed));
+        }
     }
 
     /// The screen-fixed checkerboard backdrop across the whole pane. One
@@ -426,10 +439,10 @@ impl ImageViewer {
         };
 
         if resp.left.drag.started() || resp.middle.drag.started() {
-            self.pan_anchor.latch(v.pan);
+            self.pan_anchor = Some(v.pan);
         }
         let drag = resp.left.drag.delta().or_else(|| resp.middle.drag.delta());
-        self.pan_anchor.fold_pan(|&start| start, drag, &mut v.pan);
+        pan_drag::fold(&mut self.pan_anchor, drag, &mut v.pan);
         VIEWER_ZOOM.fold_scroll(&mut v, ui, &resp);
         self.view = Some(v);
     }
@@ -472,10 +485,24 @@ impl Display for HeaderReadout<'_> {
             f.write_str(" · preparing full resolution")?;
         }
         if let Some(zoom) = self.zoom {
-            write!(f, " · {:.0}%", zoom * 100.0)?;
+            let percent = zoom * 100.0;
+            write!(f, " · {percent:.0$}%", percent_decimals(percent))?;
         }
         Ok(())
     }
+}
+
+/// The decimals a zoom readout of `percent` shows: none from 10 %, else two significant digits,
+/// so a fit to a huge image, below the viewer's own range, never reads as `0%`.
+fn percent_decimals(percent: f32) -> usize {
+    debug_assert!(percent > 0.0, "a zoom is positive");
+    if percent >= 10.0 {
+        return 0;
+    }
+    // The decimal exponent of the first significant digit: -1 for 0.4, -2 for 0.04.
+    let magnitude = percent.log10().floor() as i32;
+    // At most six, as an f32 holds about seven significant digits.
+    usize::try_from((1 - magnitude).clamp(1, 6)).expect("clamped to 1..=6")
 }
 
 /// Display label for a viewer tab / pane header: the node's name, falling

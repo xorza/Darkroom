@@ -2,34 +2,29 @@ pub(crate) mod breaker_probe;
 pub(crate) mod scribble;
 
 use palantir::widget::{LineCap, LineJoin, Shape};
-use palantir::{PointerButton, Stroke, Ui};
+use palantir::{Stroke, Ui};
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::frame::requests::Requests;
-use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph_ui::gesture::breaker_ui::breaker_probe::BreakerProbe;
 use crate::gui::pane::graph_ui::gesture::breaker_ui::scribble::Scribble;
-use crate::gui::pane::graph_ui::gesture::canvas_gesture::CanvasGesture;
+use crate::gui::pane::graph_ui::gesture::button_stroke::{ButtonStroke, StrokeStep};
+use crate::gui::pane::graph_ui::prepass_ctx::CanvasGesture;
 use crate::gui::theme::Theme;
-use crate::gui::widgets::gesture_slot::GestureSlot;
 
 /// Owns the active wire-breaker gesture (RMB / Ctrl+LMB drag on
 /// the outer canvas). Hands out a `BreakerProbe` to the canvas record so node
 /// and wire draws can flag intersections inline.
 ///
-/// Split in two by what each half *is*, not by when it lives: the slot holds
-/// the gesture — present or absent, cancelled by a single `clear` — while the
-/// buffers it fills stay put and are reclaimed by the next scribble. Nothing
-/// in the slot allocates, which is what lets it stay the same plain
-/// [`GestureSlot`] every other controller uses.
+/// Split in two by what each half *is*, not by when it lives: the stroke holds
+/// the gesture — present or absent, cancelled by a single reset — while the
+/// buffers it fills stay put and are reclaimed by the next scribble, as the tie line's do.
 #[derive(Default, Debug)]
 pub(crate) struct BreakerUi {
-    /// The button that latched the live gesture — the whole of its identity,
-    /// and what the release check polls: a Ctrl+LMB-launched breaker must
-    /// keep reading Left, not Right. Empty when no scribble is in flight,
-    /// which is also what makes [`Self::scribble`]'s contents meaningless.
-    latched: GestureSlot<PointerButton>,
+    /// The stroke in flight, the whole of the gesture's identity. Idle when no scribble is in
+    /// flight, which is also what makes [`Self::scribble`]'s contents meaningless.
+    stroke: ButtonStroke,
     scribble: Scribble,
 }
 
@@ -37,94 +32,36 @@ impl BreakerUi {
     /// Drop the in-flight scribble. Only the latch is cleared: the point and
     /// broken-target buffers are meaningless without it (see
     /// [`Self::scribble`]) and keep their capacity for the next gesture.
-    pub(crate) fn reset(&mut self) {
-        self.latched.clear();
+    pub(crate) const fn reset(&mut self) {
+        self.stroke.reset();
     }
 
     /// Whether a scribble is in flight.
     pub(crate) const fn in_flight(&self) -> bool {
-        !self.latched.is_idle()
+        self.stroke.in_flight()
     }
 
     /// Drive the gesture from the outer canvas response: start, extend,
     /// release. On release, drains all three `broken_*` collections into
     /// their matching severing `GraphIntent` (`RemoveNode`,
-    /// `SetInput { to: None }`, `SetSubscription { subscribe: false }`).
+    /// `SetInput { to: None }`, `SetSubscription { to: false }`).
     /// `RemoveNode` supersedes any per-edge severing on the same target — the
     /// undo step already detaches every incoming edge and pin, so emitting
     /// both would log a redundant history entry. The context's Esc — resolved
     /// once by the canvas — drops the scribble without emitting.
     pub(crate) fn apply(&mut self, ui: &Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
-        let graph_ctx = ctx.graph_ctx();
-        let resp = ui.response_for(canvas::outer_wid());
         // The classifier resolves RMB-drag vs Ctrl+LMB-drag and hands back
-        // the latching button, which the gesture polls for continuation.
-        if let Some(CanvasGesture::Breaker(button)) = ctx.gesture()
-            && self.latched.is_idle()
-            && let Some(p) = resp.pointer_local
-        {
-            self.latched.latch(button);
-            self.scribble.restart(graph_ctx.viewport().to_world(p));
-        }
-        if ctx.cancelled() {
-            self.latched.clear();
-            return;
-        }
-        // Copied out, so the slot's borrow ends before the scribble below is
-        // touched. No gesture latched is the whole of the "nothing to do"
-        // case, which is why it returns here rather than falling through a
-        // catch-all arm.
-        let Some(button) = self.latched.get().copied() else {
-            return;
+        // the latching button, which the stroke polls for continuation.
+        let latch = match ctx.gesture() {
+            Some(CanvasGesture::Breaker(button)) => Some(button),
+            _ => None,
         };
-        // Past that guard the scribble *is* this gesture's, so it needs no
-        // liveness check of its own.
-        let scribble = &mut self.scribble;
-        if resp.button(button).drag.delta().is_some() {
-            if let Some(p) = resp.pointer_local {
-                scribble.add_point(graph_ctx.viewport().to_world(p));
-            }
-            return;
+        match self.stroke.step(ui, ctx, latch) {
+            StrokeStep::Started(at) => self.scribble.restart(at),
+            StrokeStep::Moved(at) => self.scribble.add_point(at, ctx.graph_ctx().viewport().zoom),
+            StrokeStep::Released => release(&mut self.scribble, out),
+            StrokeStep::Idle => {}
         }
-        // Released: drain each target set into its severing intent. Drained
-        // rather than moved out — `broken_node_ids` is read while the other two
-        // drain, and taking it would hand its allocation to the intent
-        // instead of to the next gesture.
-        let Scribble {
-            broken,
-            broken_node_ids,
-            broken_subscriptions,
-            ..
-        } = scribble;
-        out.extend_graph(
-            broken_node_ids
-                .iter()
-                .map(|&node_id| GraphIntent::RemoveNode { node_id }),
-        );
-        for addr in broken.drain(..) {
-            if broken_node_ids.contains(&addr.node_id) {
-                continue;
-            }
-            out.push_graph(GraphIntent::SetInput {
-                input: addr,
-                to: None,
-            });
-        }
-        // A removed node already drops its subscriptions (its
-        // step captures every edge touching it), so skip any whose
-        // emitter or subscriber is doomed to avoid redundant history.
-        for s in broken_subscriptions.drain(..) {
-            if broken_node_ids.contains(&s.event.node_id) || broken_node_ids.contains(&s.subscriber)
-            {
-                continue;
-            }
-            out.push_graph(GraphIntent::SetSubscription {
-                subscription: s,
-                subscribe: false,
-            });
-        }
-        broken_node_ids.clear();
-        self.latched.clear();
     }
 
     /// Hand the active state to the inline intersection consumers (the node
@@ -134,7 +71,7 @@ impl BreakerUi {
     /// Called once per record pass, so `begin_frame` clears last pass's marks
     /// exactly once before the consumers record this pass's.
     pub(crate) fn probe(&mut self) -> BreakerProbe<'_> {
-        if self.latched.is_idle() {
+        if !self.stroke.in_flight() {
             return BreakerProbe::new(None);
         }
         self.scribble.begin_frame();
@@ -144,7 +81,7 @@ impl BreakerUi {
     /// Paint the polyline. No-op when no gesture is active or the
     /// polyline has < 2 samples (a `restart` with no `add_point`).
     pub(crate) fn draw(&self, ui: &mut Ui, theme: &Theme) {
-        if self.latched.is_idle() || self.scribble.points.len() < 2 {
+        if !self.stroke.in_flight() || self.scribble.points.len() < 2 {
             return;
         }
         ui.add_shape(
@@ -156,6 +93,46 @@ impl BreakerUi {
             .join(LineJoin::Round),
         );
     }
+}
+
+/// A released scribble: drain each target set into its severing intent. Drained
+/// rather than moved out — `broken_node_ids` is read while the other two
+/// drain, and taking it would hand its allocation to the intent
+/// instead of to the next gesture.
+fn release(scribble: &mut Scribble, out: &mut Requests) {
+    let Scribble {
+        broken,
+        broken_node_ids,
+        broken_subscriptions,
+        ..
+    } = scribble;
+    out.extend_graph(
+        broken_node_ids
+            .iter()
+            .map(|&node_id| GraphIntent::RemoveNode { node_id }),
+    );
+    for addr in broken.drain(..) {
+        if broken_node_ids.contains(&addr.node_id) {
+            continue;
+        }
+        out.push_graph(GraphIntent::SetInput {
+            input: addr,
+            to: None,
+        });
+    }
+    // A removed node already drops its subscriptions (its
+    // step captures every edge touching it), so skip any whose
+    // emitter or subscriber is doomed to avoid redundant history.
+    for s in broken_subscriptions.drain(..) {
+        if broken_node_ids.contains(&s.event.node_id) || broken_node_ids.contains(&s.subscriber) {
+            continue;
+        }
+        out.push_graph(GraphIntent::SetSubscription {
+            subscription: s,
+            to: false,
+        });
+    }
+    broken_node_ids.clear();
 }
 
 #[cfg(test)]

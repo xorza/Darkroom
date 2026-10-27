@@ -16,16 +16,19 @@ use imaginarium::ColorFormat;
 use palantir::prelude::*;
 use palantir::widget::Shape;
 use palantir::{CursorIcon, DockOperation, ImageFit, TextWrap};
-use scenarium::NodeId;
 
 use crate::core::document::tab_ref::TabRef;
+use crate::gui::pane::graph_ui::node_ui::card;
+use crate::gui::pane::graph_ui::node_ui::card::{
+    CARD_FOOTER_PAD_X, CARD_FOOTER_PAD_Y, LabeledValue,
+};
 use crate::gui::pane::graph_ui::node_ui::node_record::NodeRecord;
-use crate::gui::pane::graph_ui::node_ui::wid;
+use crate::gui::pane::graph_ui::wid;
 use crate::gui::state::preview_store::{DrawablePreview, StoredContent};
 use crate::gui::theme::Theme;
 use crate::gui::widgets::format::bytes::Bytes;
 use crate::gui::widgets::support;
-use crate::gui::widgets::support::{CARD_FOOTER_PAD_X, CARD_FOOTER_PAD_Y, LabeledValue, ROW_GAP};
+use crate::gui::widgets::support::ROW_GAP;
 
 /// Minimum body width for a preview node, canvas-world units. Wider than a
 /// normal node's so a thumbnail has somewhere to be; the body still hugs
@@ -34,7 +37,7 @@ pub(super) const PREVIEW_MIN_WIDTH: f32 = 240.0;
 
 /// Height of the value area itself, excluding the header, port row, and info
 /// footer. Fixed, so a node does not resize as values arrive and vanish —
-/// an image letterboxes inside via `Contain`, and a non-image centres its text
+/// an image letterboxes inside via `Contain`, and a non-image centers its text
 /// in the same frame.
 const PREVIEW_CONTENT_HEIGHT: f32 = 150.0;
 
@@ -43,22 +46,16 @@ const PREVIEW_CONTENT_HEIGHT: f32 = 150.0;
 /// "there is no value yet", and saying more would be guessing.
 const EMPTY_LABEL: &str = "No value yet";
 
-/// Stable id for a preview's value area. Reconstructible from the node, so the
-/// canvas-level scan can read last frame's click without a cache.
-pub(crate) fn preview_image_wid(node_id: NodeId) -> WidgetId {
-    wid::node("preview_image", node_id)
-}
-
 /// Draw one preview node's value area, plus the image info footer when there is
 /// an image to describe.
 pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     let node_ctx = record.node;
     let theme = node_ctx.theme();
     let node = node_ctx;
-    let stored = node_ctx.graph_ctx.run_state().previews.get(node.node_id);
+    let stored = node_ctx.graph_ctx.run_state().previews().get(node.node_id);
     let has_image = stored.and_then(StoredContent::image).is_some();
     let content = Panel::vstack()
-        .id(preview_image_wid(node.node_id))
+        .id(wid::preview_image(node.node_id))
         .size((Sizing::FILL, Sizing::fixed(PREVIEW_CONTENT_HEIGHT)))
         .padding(Spacing::all(6.0))
         .child_align(Align::CENTER)
@@ -119,11 +116,11 @@ fn info_row(ui: &mut Ui, theme: &Theme, image: &DrawablePreview) {
         .child_align(Align::v(VAlign::Center))
         // Round only the bottom corners so the strip seats into the body's
         // rounded bottom, the way the header rounds the top.
-        .chrome(support::footer_chrome(theme, theme.card.inner_radius()))
+        .chrome(card::footer_chrome(theme, theme.card.inner_radius()))
         .show(ui, |ui| {
             let size = image.preview.native_size;
-            support::bare_value(ui, theme, format_args!("{}\u{d7}{}", size.x, size.y));
-            support::bare_value(ui, theme, FormatLabel(image.preview.native_format));
+            card::bare_value(ui, theme, format_args!("{}\u{d7}{}", size.x, size.y));
+            card::bare_value(ui, theme, FormatLabel(image.preview.native_format));
             Panel::hstack()
                 .id_salt("preview_info_size")
                 .size((Sizing::HUG, Sizing::HUG))
@@ -171,6 +168,53 @@ mod tests {
         assert_eq!(
             FormatLabel(ColorFormat::MONO_F32).to_string(),
             "Mono \u{b7} 32-bit"
+        );
+    }
+
+    /// Clicking a preview card's image asks the dock for that node's viewer
+    /// tab — the canvas's one view-tier request.
+    #[test]
+    fn clicking_a_preview_card_asks_for_its_viewer_tab() {
+        use std::sync::Arc;
+
+        use palantir::DockOperation;
+
+        use crate::core::document::internals::DocumentFixture;
+        use crate::core::document::tab_ref::TabRef;
+        use crate::core::preview_sink;
+        use crate::gui::pane::graph_ui::internals::CanvasHarness;
+        use crate::gui::pane::graph_ui::wid;
+        use crate::gui::state::preview_store;
+
+        let mut fixture = DocumentFixture::default();
+        let node = fixture.add(&preview_sink::func(Arc::default()));
+        let mut h = CanvasHarness::new(fixture);
+        // The run projection `App` would have filled from a completed run:
+        // without a value the card records `Sense::NONE` and swallows the click.
+        h.ctx
+            .run_state
+            .previews_mut()
+            .publish(node, preview_store::internals::opaque_image_value());
+        h.ctx.run_state.previews_mut().settle(h.ui.ui());
+        h.prime(2);
+        assert!(h.view_ops.is_empty(), "nothing asked for before the click");
+
+        h.ui.click_on(wid::preview_image(node));
+        let intents = h.frame();
+
+        assert!(
+            matches!(
+                h.view_ops[..],
+                [DockOperation::OpenTab {
+                    tab: TabRef::ImageViewer(clicked)
+                }] if clicked == node
+            ),
+            "expected one OpenTab for {node:?}, got {:?}",
+            h.view_ops
+        );
+        assert!(
+            intents.is_empty(),
+            "opening a viewer is navigation, not a graph edit: {intents:?}"
         );
     }
 }

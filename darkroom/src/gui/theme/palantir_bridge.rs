@@ -81,10 +81,7 @@ pub(super) fn theme(p: &palantir::Palette, r: BridgeRoles<'_>) -> palantir::Them
         look.text = look.text.with_font_size(text.body);
     };
     let item = &mut theme.context_menu.item;
-    shrink(&mut item.looks.normal);
-    shrink(&mut item.looks.hovered);
-    shrink(&mut item.looks.active);
-    shrink(&mut item.looks.disabled);
+    item.looks.each_mut().into_iter().for_each(shrink);
     theme
 }
 
@@ -104,16 +101,18 @@ fn tab_roles(theme: &mut palantir::Theme, p: &palantir::Palette, r: BridgeRoles<
     let tabs = &mut theme.tabs;
     tabs.strip = Chrome::fill(r.surround_fill);
     tabs.radius = r.corner_radius;
-    tabs.accent_idle = r.header_fill;
+    tabs.cap_unfocused = r.header_fill;
     tabs.badge = r.warning;
     // The selected chip keeps palantir's `window_bg` fill, which is
     // darkroom's canvas: its bottom edge dissolves into the pane below.
     let top = Corners::top(r.corner_radius);
     let chip = |fill: RgbaF32| Chrome::rounded(fill, top);
-    tabs.inactive.normal.chrome = chip(r.tab_inactive);
-    tabs.inactive.hovered.chrome = chip(p.element_mid);
-    tabs.inactive.active.chrome = chip(p.element_strong);
-    tabs.inactive.disabled.chrome = chip(p.element);
+    // Destructured, so a state palantir adds fails here rather than keeping its default.
+    let [normal, hovered, active, disabled] = tabs.unselected.each_mut();
+    normal.chrome = chip(r.tab_inactive);
+    hovered.chrome = chip(p.element_mid);
+    active.chrome = chip(p.element_strong);
+    disabled.chrome = chip(p.element);
     // The chrome lift behind a hovered close button is the same header
     // band a node's title wears.
     let lift = Chrome::rounded(r.header_fill, Corners::all(CLOSE_LIFT_RADIUS));
@@ -123,14 +122,12 @@ fn tab_roles(theme: &mut palantir::Theme, p: &palantir::Palette, r: BridgeRoles<
     let scale = |look: &mut WidgetLook| {
         look.text = look.text.with_font_size(r.text.body);
     };
-    scale(&mut theme.tabs.active.normal);
-    scale(&mut theme.tabs.active.hovered);
-    scale(&mut theme.tabs.active.active);
-    scale(&mut theme.tabs.active.disabled);
-    scale(&mut theme.tabs.inactive.normal);
-    scale(&mut theme.tabs.inactive.hovered);
-    scale(&mut theme.tabs.inactive.active);
-    scale(&mut theme.tabs.inactive.disabled);
+    let tabs = &mut theme.tabs;
+    tabs.selected
+        .each_mut()
+        .into_iter()
+        .chain(tabs.unselected.each_mut())
+        .for_each(scale);
 
     // The ghost chip trailing the pointer wears the surround band, so it
     // reads as a tab lifted off its strip rather than as a popup.
@@ -154,9 +151,10 @@ pub(super) fn menu_button(p: &palantir::Palette, text: &TypeScale) -> ButtonThem
     let restyle = |look: &mut WidgetLook, color: RgbaF32| {
         look.text = look.text.with_color(color).with_font_size(text.body);
     };
-    restyle(&mut mb.looks.normal, p.text_muted);
-    restyle(&mut mb.looks.hovered, p.text);
-    restyle(&mut mb.looks.active, p.text);
-    restyle(&mut mb.looks.disabled, p.text_disabled);
+    let [normal, hovered, active, disabled] = mb.looks.each_mut();
+    restyle(normal, p.text_muted);
+    restyle(hovered, p.text);
+    restyle(active, p.text);
+    restyle(disabled, p.text_disabled);
     mb
 }

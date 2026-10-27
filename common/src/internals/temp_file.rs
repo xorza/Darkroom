@@ -6,7 +6,7 @@ use std::fs;
 /// A temporary *path*, removed when the value drops — whether the test left a
 /// file there, a directory, or nothing at all.
 ///
-/// Unlike [`TempDir`](crate::internals::temp_dir::TempDir) nothing is created
+/// Unlike [`TempDir`](crate::TempDir) nothing is created
 /// up front: the point is a name for something the code under test will write,
 /// and several fixtures turn that name into a directory precisely to make the
 /// write fail.

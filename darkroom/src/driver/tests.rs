@@ -5,16 +5,20 @@ use common::{TempDir, fs};
 use glam::{UVec2, Vec2};
 use palantir::{DockView, Modifiers, PointerButton, Rect};
 use scenarium::{Binding, ConstValue, InputPort, NodeId};
+use tracing::subscriber;
+use tracing_subscriber::layer::SubscriberExt as _;
 
 use crate::core::io::document as io_document;
 use crate::core::io::document::document_format::DocumentFormat;
 use crate::core::io::document::saved_paths::SavedPaths;
-use crate::driver::action::{Action, DRAG_STEPS, DialogAnswer};
-use crate::driver::error::DriverError;
+use crate::driver::action::{Action, Chord, DRAG_STEPS};
+use crate::driver::error::{ActFailure, DriverError};
 use crate::driver::locator::{Locator, Side};
+use crate::driver::log_ring::LogRing;
 use crate::driver::shot::{NODE_MARGIN, Region, Shot};
-use crate::driver::state::Detail;
+use crate::driver::state::{Detail, State};
 use crate::driver::{COPY_LIMIT, DisplayKind, Driver, OpenMode, SessionConfig};
+use crate::gui::dialogs::DialogAnswer;
 use crate::gui::state::preview_store::StoredContent;
 use crate::gui::theme::Theme;
 use crate::internals::fixture;
@@ -23,21 +27,32 @@ const BRIGHTNESS: &str = "Brightness / Contrast";
 const CONVERT: &str = "Convert";
 
 fn driver() -> Driver {
-    Driver::new(SessionConfig {
-        display: DisplayKind::Cpu,
-        size: UVec2::new(1600, 1000),
-        scale: 1.0,
-    })
+    logged(LogRing::default())
+}
+
+/// [`driver`], whose logs `log` keeps.
+fn logged(log: LogRing) -> Driver {
+    Driver::new(
+        SessionConfig {
+            display: DisplayKind::Cpu,
+            size: UVec2::new(1600, 1000),
+            scale: 1.0,
+        },
+        log,
+    )
     .unwrap()
 }
 
 /// A 400 × 300 window at scale 1 on `display`.
 fn small(display: DisplayKind) -> Driver {
-    Driver::new(SessionConfig {
-        display,
-        size: UVec2::new(400, 300),
-        scale: 1.0,
-    })
+    Driver::new(
+        SessionConfig {
+            display,
+            size: UVec2::new(400, 300),
+            scale: 1.0,
+        },
+        LogRing::default(),
+    )
     .unwrap()
 }
 
@@ -68,6 +83,10 @@ fn drag(from: Locator, to: Locator) -> Action {
     }
 }
 
+fn key(chord: &str) -> Action {
+    Action::Key(Chord::parse(chord).unwrap())
+}
+
 fn node(name: &str) -> Locator {
     Locator::Node(name.to_string())
 }
@@ -85,8 +104,8 @@ fn node_id(driver: &Driver, name: &str) -> NodeId {
 }
 
 /// A click on a node selects it; a drag of its title moves it by the pointer's travel, exactly,
-/// at the default zoom of 1; a drag from one node's output to the other's input wires them, and
-/// Ctrl+Z takes the wire back.
+/// at the default zoom of 1; a drag from one node's output to the other's input wires them, a
+/// filtered state keeps the nodes it names and the wire, and Ctrl+Z takes the wire back.
 #[test]
 fn clicks_drags_and_keys_edit_the_document() {
     let mut driver = driver();
@@ -130,19 +149,32 @@ fn clicks_drags_and_keys_edit_the_document() {
         },
     );
     driver.act(&[wire]).unwrap();
+    let wired = [format!("{BRIGHTNESS}.Image -> {CONVERT}.Image")];
     let detail = driver
         .state(Detail::Detailed, None)
         .unwrap()
         .details
         .unwrap();
-    assert_eq!(detail.wires.len(), 1, "{:?}", detail.wires);
-    assert!(
-        detail.wires[0].starts_with(&format!("{BRIGHTNESS}.Image -> {CONVERT}.")),
-        "{:?}",
-        detail.wires
+    assert_eq!(detail.wires, wired);
+    // A filter keeps the nodes it names in either form, and the wires with one at either end.
+    let names = |state: &State| -> Vec<String> {
+        state.nodes.iter().map(|node| node.name.clone()).collect()
+    };
+    let concise = driver.state(Detail::Concise, Some("Conv")).unwrap();
+    assert_eq!(
+        (names(&concise), concise.omitted),
+        (vec![CONVERT.to_string()], 0)
     );
+    for (filter, nodes) in [(BRIGHTNESS, [BRIGHTNESS]), ("Conv", [CONVERT])] {
+        let state = driver.state(Detail::Detailed, Some(filter)).unwrap();
+        assert_eq!(names(&state), nodes, "{filter}");
+        assert_eq!(state.details.unwrap().wires, wired, "{filter}");
+    }
+    let none = driver.state(Detail::Detailed, Some("Blur")).unwrap();
+    assert_eq!(names(&none), Vec::<String>::new());
+    assert_eq!(none.details.unwrap().wires, Vec::<String>::new());
 
-    driver.act(&[Action::Key("ctrl+z".to_string())]).unwrap();
+    driver.act(&[key("ctrl+z")]).unwrap();
     let detail = driver
         .state(Detail::Detailed, None)
         .unwrap()
@@ -169,7 +201,7 @@ fn a_world_point_lands_on_the_canvas_where_nodes_are_placed() {
         .pos;
     let world = driver
         .offscreen()
-        .read(|app, ui| Locator::World(pos).point(app, ui))
+        .with_app(|app, ui| Locator::World(pos).point(app, ui))
         .unwrap();
     let screen = driver.state(Detail::Concise, None).unwrap().nodes[0]
         .screen
@@ -207,7 +239,7 @@ fn the_new_node_palette_adds_the_node_clicked() {
         .into_iter()
         .map(|node| node.name)
         .collect();
-    assert!(names.contains(&CONVERT.to_string()), "{names:?}");
+    assert_eq!(names, [BRIGHTNESS, CONVERT], "by name");
 }
 
 /// A name no node has is not found, with the names there are; two nodes of one name are
@@ -220,46 +252,69 @@ fn a_node_locator_names_exactly_one_node() {
     let path = fixture::project(dir.path(), &[BRIGHTNESS, BRIGHTNESS]);
     driver.open(&path, OpenMode::Copy).unwrap();
     match driver.act(&[click(node("missing"))]) {
-        Err(DriverError::NotFound { nearest, .. }) => {
+        Err(ActFailure {
+            ran: 0,
+            error: DriverError::NotFound { nearest, .. },
+        }) => {
             assert_eq!(nearest, [BRIGHTNESS, BRIGHTNESS]);
         }
         other => panic!("{other:?}"),
     }
     match driver.act(&[click(node(BRIGHTNESS))]) {
-        Err(DriverError::Ambiguous { matches, .. }) => assert_eq!(matches.len(), 2),
+        Err(ActFailure {
+            ran: 0,
+            error: DriverError::Ambiguous { matches, .. },
+        }) => assert_eq!(matches.len(), 2),
         other => panic!("{other:?}"),
     }
     let nth = |locator: Locator, n: usize| click(Locator::Nth(Box::new(locator), n));
     let second = driver.act(&[nth(node(BRIGHTNESS), 1)]).unwrap();
     assert_eq!(second.selection, [BRIGHTNESS], "the second of the two");
     match driver.act(&[nth(node(BRIGHTNESS), 2)]) {
-        Err(DriverError::NotFound { nearest, .. }) => {
+        Err(ActFailure {
+            ran: 0,
+            error: DriverError::NotFound { nearest, .. },
+        }) => {
             assert!(nearest[0].ends_with("has 2 matches"));
         }
         other => panic!("{other:?}"),
     }
     match driver.act(&[nth(Locator::NodeHeader(BRIGHTNESS.to_string()), 0)]) {
-        Err(DriverError::NotFound { nearest, .. }) => {
+        Err(ActFailure {
+            ran: 0,
+            error: DriverError::NotFound { nearest, .. },
+        }) => {
             assert_eq!(nearest, ["Nth picks among Node or Text matches only"]);
         }
         other => panic!("{other:?}"),
     }
 }
 
-/// A double click on a node's title opens its rename field; the caret blinks there, and the
-/// session still settles with the field focused.
+/// Two clicks on a node's title with a key between them stay two clicks: the second waits out
+/// the double-click window whatever came between. A double click there opens its rename field;
+/// the caret blinks there, and the session still settles with the field focused.
 #[test]
 fn a_focused_text_field_still_settles() {
     let mut driver = driver();
     let dir = TempDir::new("darkroom-driver-focus");
     let path = fixture::project(dir.path(), &[BRIGHTNESS]);
     driver.open(&path, OpenMode::Copy).unwrap();
-    let report = driver
-        .act(&[Action::DoubleClick(Locator::NodeHeader(
-            BRIGHTNESS.to_string(),
-        ))])
+    let header = || Locator::NodeHeader(BRIGHTNESS.to_string());
+    let twice = driver
+        .act(&[click(header()), key("escape"), click(header())])
         .unwrap();
-    assert!(report.focus.is_some(), "the rename field holds the focus");
+    assert_ne!(
+        twice.focus.as_deref(),
+        Some(BRIGHTNESS),
+        "no rename field opened"
+    );
+
+    let report = driver.act(&[Action::DoubleClick(header())]).unwrap();
+    assert_eq!(
+        report.focus.as_deref(),
+        Some(BRIGHTNESS),
+        "the rename field holds the focus"
+    );
 }
 
 /// A copied session saves into its copy: the source stays byte for byte as it was. A folder over
@@ -277,7 +332,7 @@ fn a_copied_session_leaves_the_source_alone() {
                 Locator::NodeHeader(BRIGHTNESS.to_string()),
                 Locator::Screen(Vec2::new(900.0, 700.0)),
             ),
-            Action::Key("ctrl+s".to_string()),
+            key("ctrl+s"),
         ])
         .unwrap();
     let state = driver.state(Detail::Concise, None).unwrap();
@@ -297,7 +352,13 @@ fn a_copied_session_leaves_the_source_alone() {
         .set_len(COPY_LIMIT + 1)
         .unwrap();
     match driver.open(&path, OpenMode::Copy) {
-        Err(DriverError::FolderTooLarge { bytes, .. }) => assert!(bytes > COPY_LIMIT),
+        Err(DriverError::FolderTooLarge { bytes, .. }) => {
+            assert_eq!(
+                bytes,
+                original.len() as u64 + COPY_LIMIT + 1,
+                "the document and the filler"
+            );
+        }
         other => panic!("{other:?}"),
     }
 }
@@ -306,13 +367,18 @@ fn a_copied_session_leaves_the_source_alone() {
 /// button held; a pinch by no positive factor is refused, not dropped; and the error an unanswered dialog logs during `act` reaches the next `state`.
 #[test]
 fn a_failed_action_leaves_nothing_held_and_the_log_reaches_state() {
-    let mut driver = driver();
+    let log = LogRing::default();
+    let _tracing = subscriber::set_default(tracing_subscriber::registry().with(log.layer()));
+    let mut driver = logged(log);
     let dir = TempDir::new("darkroom-driver-failed");
     let path = fixture::project(dir.path(), &[BRIGHTNESS]);
     driver.open(&path, OpenMode::Copy).unwrap();
     assert!(matches!(
         driver.act(&[drag(node(BRIGHTNESS), node("missing"))]),
-        Err(DriverError::NotFound { .. })
+        Err(ActFailure {
+            ran: 0,
+            error: DriverError::NotFound { .. }
+        })
     ));
     let report = driver.act(&[click(node(BRIGHTNESS))]).unwrap();
     assert_eq!(report.selection, [BRIGHTNESS]);
@@ -322,16 +388,17 @@ fn a_failed_action_leaves_nothing_held_and_the_log_reaches_state() {
                 at: node(BRIGHTNESS),
                 factor
             }]),
-            Err(DriverError::BadPinch { factor: refused }) if refused == factor
+            Err(ActFailure { ran: 0, error: DriverError::BadPinch { factor: refused } }) if refused == factor
         ));
     }
 
-    driver.act(&[Action::Key("ctrl+o".to_string())]).unwrap();
+    driver.act(&[key("ctrl+o")]).unwrap();
     let log = driver.state(Detail::Concise, None).unwrap().log;
-    assert!(
-        log.iter()
-            .any(|line| line.contains("no queued answer was left")),
-        "{log:?}"
+    assert_eq!(
+        log,
+        [
+            "ERROR darkroom::gui::dialogs: a dialog asked to open a project, and no queued answer was left"
+        ]
     );
 }
 
@@ -498,7 +565,7 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
 
     let rect = driver
         .offscreen()
-        .read(|app, ui| {
+        .with_app(|app, ui| {
             let layout = &app.open_document().document.layout;
             ui.response_for(DockView::pane_id(layout, layout.primary().id))
                 .rect
@@ -537,7 +604,7 @@ fn the_view_menu_copies_and_saves_the_window() {
     driver.open(&path, OpenMode::Copy).unwrap();
     let view = || click(Locator::Text("View".to_string()));
 
-    let clipboard = driver.offscreen().read(|_, ui| ui.clipboard());
+    let clipboard = driver.offscreen().with_app(|_, ui| ui.clipboard());
     clipboard.set_text("text").unwrap();
     driver
         .act(&[
@@ -586,7 +653,7 @@ fn a_save_keeps_the_file_format_and_save_as_names_one() {
                 Locator::NodeHeader(BRIGHTNESS.to_string()),
                 Locator::Screen(Vec2::new(900.0, 700.0)),
             ),
-            Action::Key("ctrl+s".to_string()),
+            key("ctrl+s"),
         ])
         .unwrap();
     assert!(zipped(&path), "the save kept the zipped format");
@@ -595,7 +662,7 @@ fn a_save_keeps_the_file_format_and_save_as_names_one() {
     driver
         .act(&[
             Action::Answer(DialogAnswer::Path(plain.clone())),
-            Action::Key("ctrl+shift+s".to_string()),
+            key("ctrl+shift+s"),
         ])
         .unwrap();
     assert!(!zipped(&plain), "Save As writes plain RON");
@@ -623,7 +690,10 @@ fn the_sample_project_runs_to_its_previews() {
     let mut driver = driver();
     let sample = Path::new(env!("CARGO_MANIFEST_DIR")).join("sample/sample.darkroom");
     driver.open(&sample, OpenMode::Copy).unwrap();
-    driver.act(&[Action::Key("ctrl+r".to_string())]).unwrap();
+    // A run that ends while a later action of the batch plays is still the batch's run.
+    driver
+        .act(&[key("ctrl+r"), Action::Move(Locator::Screen(Vec2::ZERO))])
+        .unwrap();
     driver.wait_run(Duration::from_secs(30)).unwrap();
 
     let state = driver.state(Detail::Detailed, None).unwrap();
@@ -645,7 +715,7 @@ fn the_sample_project_runs_to_its_previews() {
             let shown = driver
                 .app()
                 .run_state()
-                .previews
+                .previews()
                 .get(node_id(&driver, &node.name))
                 .and_then(StoredContent::image)
                 .unwrap_or_else(|| panic!("{} shows an image", node.name));
@@ -666,14 +736,15 @@ fn the_sample_project_runs_to_its_previews() {
 
 /// A quit ends the session as it closes a window. With unsaved edits Ctrl+Q only asks, and
 /// Cancel keeps the session; Don't Save then quits, and every later call that runs a frame is
-/// refused, the action after it unplayed. A new open starts afresh.
+/// refused, the action after it unplayed. A new open starts afresh, and with no person to own
+/// them, discards unsaved edits.
 #[test]
 fn a_quit_ends_the_session() {
     let mut driver = driver();
     let dir = TempDir::new("darkroom-driver-quit");
     let path = fixture::project(dir.path(), &[BRIGHTNESS]);
     driver.open(&path, OpenMode::Copy).unwrap();
-    let quit = || Action::Key("ctrl+q".to_string());
+    let quit = || key("ctrl+q");
     driver
         .act(&[
             drag(
@@ -694,10 +765,19 @@ fn a_quit_ends_the_session() {
         click(Locator::Text("Don't Save".to_string())),
         click(node(BRIGHTNESS)),
     ]) {
-        Err(DriverError::Quit) => {}
+        Err(ActFailure {
+            ran: 1,
+            error: DriverError::Quit,
+        }) => {}
         other => panic!("{other:?}"),
     }
-    assert!(matches!(driver.act(&[]), Err(DriverError::Quit)));
+    assert!(matches!(
+        driver.act(&[]),
+        Err(ActFailure {
+            ran: 0,
+            error: DriverError::Quit
+        })
+    ));
     assert!(matches!(
         driver.wait_run(Duration::from_secs(1)),
         Err(DriverError::Quit)
@@ -706,4 +786,69 @@ fn a_quit_ends_the_session() {
     driver.open(&path, OpenMode::Copy).unwrap();
     let report = driver.act(&[click(node(BRIGHTNESS))]).unwrap();
     assert_eq!(report.selection, [BRIGHTNESS]);
+
+    let report = driver
+        .act(&[drag(
+            Locator::NodeHeader(BRIGHTNESS.to_string()),
+            Locator::Screen(Vec2::new(900.0, 700.0)),
+        )])
+        .unwrap();
+    assert!(report.dirty);
+    driver.new_document().unwrap();
+    let state = driver.state(Detail::Concise, None).unwrap();
+    assert_eq!(
+        (state.document, state.dirty),
+        (None, false),
+        "offscreen, an open discards unsaved edits"
+    );
+}
+
+/// A wire dropped on bare canvas opens the palette, and a pick adds the node and floats the wire
+/// again, bound to nothing until a click on the new node's input lands it.
+#[test]
+fn a_dropped_wire_floats_onto_the_node_its_palette_adds() {
+    let mut driver = driver();
+    let dir = TempDir::new("darkroom-driver-drop");
+    let path = fixture::project(dir.path(), &[BRIGHTNESS]);
+    driver.open(&path, OpenMode::Copy).unwrap();
+    let output = Locator::Port {
+        node: BRIGHTNESS.to_string(),
+        side: Side::Out,
+        port: "Image".to_string(),
+    };
+    driver
+        .act(&[drag(output, Locator::Screen(Vec2::new(1100.0, 700.0)))])
+        .unwrap();
+    driver
+        .act(&[click(Locator::Text(CONVERT.to_string()))])
+        .unwrap();
+    let wires = |driver: &mut Driver| {
+        driver
+            .state(Detail::Detailed, None)
+            .unwrap()
+            .details
+            .unwrap()
+            .wires
+    };
+    let names: Vec<String> = driver
+        .state(Detail::Concise, None)
+        .unwrap()
+        .nodes
+        .into_iter()
+        .map(|node| node.name)
+        .collect();
+    assert_eq!(names, [BRIGHTNESS, CONVERT], "the pick added the node");
+    assert_eq!(wires(&mut driver), Vec::<String>::new(), "the wire floats");
+
+    driver
+        .act(&[click(Locator::Port {
+            node: CONVERT.to_string(),
+            side: Side::In,
+            port: "0".to_string(),
+        })])
+        .unwrap();
+    assert_eq!(
+        wires(&mut driver),
+        [format!("{BRIGHTNESS}.Image -> {CONVERT}.Image")]
+    );
 }

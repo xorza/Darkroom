@@ -14,13 +14,14 @@ pub(crate) const fn hash(mut state: u64, bytes: &[u8]) -> u64 {
     state
 }
 
-/// FNV-1a over `pins`, each followed by a `0xff` no pin holds, so no two lists hash as one
-/// concatenation. A version derived from pinned digests rather than a number bumped by hand.
-pub(crate) const fn fingerprint(pins: &[&str]) -> u64 {
+/// FNV-1a over `pins`, each followed by a `0xff`, which no UTF-8 text holds, so no two lists of
+/// text hash as one concatenation. A version derived from pinned text rather than a number bumped
+/// by hand.
+pub(crate) const fn fingerprint(pins: &[&[u8]]) -> u64 {
     let mut state = OFFSET;
     let mut pin = 0;
     while pin < pins.len() {
-        state = hash(hash(state, pins[pin].as_bytes()), &[0xff]);
+        state = hash(hash(state, pins[pin]), &[0xff]);
         pin += 1;
     }
     state

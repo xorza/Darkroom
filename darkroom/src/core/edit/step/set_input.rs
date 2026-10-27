@@ -4,6 +4,7 @@ use scenarium::{Binding, InputPort};
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::Document;
+use crate::core::edit::edit_facts::EditFacts;
 use crate::core::edit::step::change::{Change, Direction};
 use crate::core::edit::step::reversible::Reversible;
 use crate::core::edit::step::set_ties::SetTies;
@@ -36,18 +37,12 @@ impl Reversible for SetInput {
         true
     }
 
-    /// The inline const editor exists only while the binding is
-    /// `Const(_)`. Flipping that presence (None ⇄ Const, Wire ⇄ Const) adds or
-    /// removes a widget, so the node remeasures and every port below it
-    /// shifts — wire curves have to re-sample their endpoints. Typing
-    /// inside an existing `Const` keeps the editor present at its `Fixed`
-    /// size, so a value-only edit costs no second pass.
-    fn invalidates_cached_geometry(&self) -> bool {
+    fn facts(&self) -> EditFacts {
         let Change { from, to } = &self.binding;
-        matches!(from, Some(Binding::Const(_))) != matches!(to, Some(Binding::Const(_)))
-    }
-
-    fn changes_node_set(&self) -> bool {
-        false
+        EditFacts {
+            binding_kind: matches!(from, Some(Binding::Const(_)))
+                != matches!(to, Some(Binding::Const(_))),
+            ..EditFacts::NONE
+        }
     }
 }

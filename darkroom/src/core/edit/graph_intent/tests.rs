@@ -3,9 +3,9 @@ use std::collections::BTreeSet;
 use glam::Vec2;
 use scenarium::internals::test_graph::TestGraph;
 use scenarium::{
-    Binding, BindingEntry, BindingRejection, CacheMode, ConstValue, DataType, EventPort, FuncId,
-    FuncInput, FuncOutput, InputPort, Library, Node, NodeId, OutputPort, Subscription,
-    SubscriptionRejection, internals,
+    Binding, BindingEntry, BindingRejection, CacheMode, ConstValue, DataType, DetachedNodeError,
+    EventPort, FuncId, FuncInput, FuncOutput, InputPort, Library, Node, NodeId, OutputPort,
+    Subscription, SubscriptionRejection, Unresolved, internals,
 };
 
 use crate::core::document::Document;
@@ -15,15 +15,25 @@ use crate::core::document::route::Route;
 use crate::core::document::tie::{Tie, TieAngle, TieId};
 use crate::core::document::viewport::Viewport;
 use crate::core::document::wire_key::{DataWire, WireKey};
+use crate::core::edit::edit_facts::EditFacts;
 use crate::core::edit::error::{MalformedIntent, Role};
 use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::graph_intent::click_mode::ClickMode;
 use crate::core::edit::graph_intent::drag_start::DragStart;
 use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
+use crate::core::edit::graph_intent::node_property::NodeProperty;
 use crate::core::edit::graph_intent::route_insert::RouteInsert;
 use crate::core::edit::graph_intent::{DUPLICATE_OFFSET, GraphIntent};
-use crate::core::edit::step::set_node_property::NodeProperty;
 use crate::core::edit::step::undo_step::UndoStep;
+
+/// A duplicate's id source in a test: the next of a run of ids no fixture mints.
+fn counter() -> impl FnMut() -> u128 {
+    let mut last = 1_u128 << 100;
+    move || {
+        last += 1;
+        last
+    }
+}
 
 fn member(node: NodeId, pos: Vec2) -> DragStart {
     DragStart {
@@ -66,54 +76,80 @@ fn undo_all(document: &mut Document, steps: &[UndoStep]) {
     }
 }
 
-fn subscribe(emitter: NodeId, subscriber: NodeId, subscribe: bool) -> GraphIntent {
+fn subscribe(emitter: NodeId, subscriber: NodeId, to: bool) -> GraphIntent {
     GraphIntent::SetSubscription {
         subscription: Subscription::new(EventPort::new(emitter, 0), subscriber),
-        subscribe,
+        to,
     }
 }
 
 /// A plain click always lifts its node to the front; a Shift-click that
-/// *removes* a node must not, or deselecting would jump it forward.
+/// *removes* a node must not, or deselecting would jump it forward. A tie has
+/// no depth, so a click on one only selects.
 #[test]
 fn click_raises_unless_shift_deselects() {
     let (a, b) = (NodeId::unique(), NodeId::unique());
-    let sel = |ids: &[NodeId]| {
-        ids.iter()
-            .copied()
-            .map(ItemId::Node)
-            .collect::<BTreeSet<_>>()
+    let tie = ItemId::Tie(TieId::unique());
+    let (na, nb) = (ItemId::Node(a), ItemId::Node(b));
+    // What a click raises: the selection it sets, and the node it raises, if any.
+    let click = |mode, selected: &[ItemId], item| -> (BTreeSet<ItemId>, Option<NodeId>) {
+        let selected: BTreeSet<ItemId> = selected.iter().copied().collect();
+        match &*GraphIntent::click(mode, &selected, item).collect::<Vec<_>>() {
+            [GraphIntent::SetSelection { to }] => (to.clone(), None),
+            [
+                GraphIntent::SetSelection { to },
+                GraphIntent::Raise { node_id },
+            ] => (to.clone(), Some(*node_id)),
+            other => panic!("{other:?}"),
+        }
     };
-    let click = |mode, selected: BTreeSet<ItemId>, node_id| {
-        GraphIntent::click(mode, &selected, ItemId::Node(node_id)).collect::<Vec<_>>()
-    };
-
-    // Plain click on an unselected node: select it, then raise it.
-    let out = click(ClickMode::Replace, sel(&[]), a);
-    assert_eq!(out.len(), 2);
-    assert!(matches!(out[0], GraphIntent::SetSelection { .. }));
-    assert!(matches!(out[1], GraphIntent::Raise { node_id } if node_id == a));
-
-    // Plain click on an already-selected node still raises it.
-    let out = click(ClickMode::Replace, sel(&[a]), a);
-    assert!(
-        out.iter()
-            .any(|i| matches!(i, GraphIntent::Raise { node_id } if *node_id == a)),
-        "a plain click always lifts its node to the front"
-    );
-
-    // Shift-click adding a fresh node to the selection raises it.
-    let out = click(ClickMode::Toggle, sel(&[a]), b);
-    assert!(
-        out.iter()
-            .any(|i| matches!(i, GraphIntent::Raise { node_id } if *node_id == b)),
-        "shift-adding a node raises it"
-    );
-
-    // Shift-click removing a node does NOT raise it.
-    let out = click(ClickMode::Toggle, sel(&[a, b]), b);
-    assert_eq!(out.len(), 1, "shift-deselect suppresses the raise");
-    assert!(matches!(out[0], GraphIntent::SetSelection { .. }));
+    let set = |items: &[ItemId]| items.iter().copied().collect::<BTreeSet<_>>();
+    for (what, mode, selected, item, expected) in [
+        (
+            "a plain click selects and raises",
+            ClickMode::Replace,
+            &[][..],
+            na,
+            (set(&[na]), Some(a)),
+        ),
+        (
+            "an already-selected node still raises",
+            ClickMode::Replace,
+            &[na],
+            na,
+            (set(&[na]), Some(a)),
+        ),
+        (
+            "a shift-click adding a node raises it",
+            ClickMode::Toggle,
+            &[na],
+            nb,
+            (set(&[na, nb]), Some(b)),
+        ),
+        (
+            "a shift-click removing one does not",
+            ClickMode::Toggle,
+            &[na, nb],
+            nb,
+            (set(&[na]), None),
+        ),
+        (
+            "a click on a tie selects it alone, raising nothing",
+            ClickMode::Replace,
+            &[na],
+            tie,
+            (set(&[tie]), None),
+        ),
+        (
+            "a shift-click on a tie adds it",
+            ClickMode::Toggle,
+            &[na],
+            tie,
+            (set(&[na, tie]), None),
+        ),
+    ] {
+        assert_eq!(click(mode, selected, item), expected, "{what}");
+    }
 }
 
 /// Removing a node and undoing it is the one edit that has to put back state
@@ -260,7 +296,7 @@ fn a_wire_that_goes_leaves_its_input_on_its_default() {
 
     wire_both(&mut document);
     document.main_view.selected = [node].map(ItemId::Node).into_iter().collect();
-    let intents = GraphIntent::duplicate(&document, &library, IncomingWires::Drop);
+    let intents = GraphIntent::duplicate(&document, &library, IncomingWires::Drop, counter());
     let copy = commit_all(&mut document, &library, intents);
     let clone = document
         .main_view
@@ -320,39 +356,38 @@ fn the_gate_refuses_a_mistyped_constant_or_wire_and_a_self_subscription() {
         library,
     } = DocumentFixture::from(g);
     let input = InputPort::new(dst, 0);
-    let refused = |intent: GraphIntent, document: &mut Document| {
-        intent
-            .commit_one(document, &library)
-            .expect_err("the gate refuses it")
-    };
-
-    assert!(matches!(
-        refused(
-            GraphIntent::set_input(input, Binding::Const(ConstValue::from("text"))),
-            &mut document
-        ),
-        MalformedIntent::Rejected { port, rejection: BindingRejection::ConstMismatch }
-            if port == input
-    ));
-    assert!(matches!(
-        refused(GraphIntent::set_input(input, Binding::wire(src, 0)), &mut document),
-        MalformedIntent::Rejected { port, rejection: BindingRejection::WireMismatch }
-            if port == input
-    ));
     let own = Subscription::new(EventPort::new(src, 0), src);
-    assert!(matches!(
-        refused(
+    for (what, intent, expected) in [
+        (
+            "a text constant on an Int input",
+            GraphIntent::set_input(input, Binding::Const(ConstValue::from("text"))),
+            MalformedIntent::Rejected {
+                port: input,
+                rejection: BindingRejection::ConstMismatch,
+            },
+        ),
+        (
+            "a String wire into an Int input",
+            GraphIntent::set_input(input, Binding::wire(src, 0)),
+            MalformedIntent::Rejected {
+                port: input,
+                rejection: BindingRejection::WireMismatch,
+            },
+        ),
+        (
+            "a node subscribing to its own event",
             GraphIntent::SetSubscription {
                 subscription: own,
-                subscribe: true,
+                to: true,
             },
-            &mut document
+            MalformedIntent::RejectedSubscription {
+                subscription: own,
+                rejection: SubscriptionRejection::SelfSubscription,
+            },
         ),
-        MalformedIntent::RejectedSubscription {
-            subscription,
-            rejection: SubscriptionRejection::SelfSubscription,
-        } if subscription == own
-    ));
+    ] {
+        assert_refused(&mut document, &library, intent, expected, what);
+    }
     assert!(document.graph.bindings.is_empty());
     assert_eq!(document.graph.subscriptions().len(), 0);
 }
@@ -370,7 +405,7 @@ fn duplicate_skips_a_selected_stub() {
     } = fixture;
     document.main_view.selected = [node, stub].map(ItemId::Node).into_iter().collect();
 
-    let intents = GraphIntent::duplicate(&document, &library, IncomingWires::Drop);
+    let intents = GraphIntent::duplicate(&document, &library, IncomingWires::Drop, counter());
     commit_all(&mut document, &library, intents);
     assert_eq!(document.graph.len(), 2, "the graph node was copied");
     assert_eq!(document.stubs.len(), 1, "the stub was not");
@@ -477,8 +512,8 @@ fn raising_the_frontmost_item_records_no_step() {
 
 /// `a -> b` inside the selection, `c -> b` crossing out of it: the fixture the
 /// two duplicate tests share, so the only thing that differs between them is
-/// their `IncomingWires`. `b` also carries a Const on input 1, and `a`
-/// emits to `b`.
+/// their `IncomingWires`. `b` also carries a Const on input 1, and `b`
+/// subscribes to `a`'s event, inside, and to `c`'s, crossing out.
 #[derive(Debug)]
 struct CrossingWire {
     document: Document,
@@ -504,6 +539,7 @@ fn crossing_wire() -> CrossingWire {
         .graph
         .set_input_binding(InputPort::new(b, 2), Binding::wire(c, 0));
     document.graph.subscribe(EventPort::new(a, 0), b);
+    document.graph.subscribe(EventPort::new(c, 0), b);
     document.main_view.selected = [a, b].map(ItemId::Node).into_iter().collect();
     CrossingWire {
         document,
@@ -544,7 +580,7 @@ fn duplicate_clones_wiring_and_selects_the_copies() {
     } = crossing_wire();
     let originals: BTreeSet<NodeId> = [a, b, c].into_iter().collect();
 
-    let intents = GraphIntent::duplicate(&document, &library, IncomingWires::Drop);
+    let intents = GraphIntent::duplicate(&document, &library, IncomingWires::Drop, counter());
     let steps = commit_all(&mut document, &library, intents);
     document
         .validate()
@@ -589,6 +625,10 @@ fn duplicate_clones_wiring_and_selects_the_copies() {
             .graph
             .is_subscribed(EventPort::new(a_clone, 0), b_clone)
     );
+    assert!(
+        !document.graph.is_subscribed(EventPort::new(c, 0), b_clone),
+        "the subscription to unselected c is dropped"
+    );
 
     // One batch, so one undo: every clone and its wiring goes, and the
     // selection is the one the duplicate replaced.
@@ -627,9 +667,10 @@ fn duplicate_clones_wiring_and_selects_the_copies() {
 }
 
 /// The same selection over the same crossing wire, with `IncomingWires::Keep`:
-/// the clone keeps the wire from the producer outside the set — pointing at
-/// the original, since that producer wasn't copied. That is the only
-/// difference from the case above, where the same edge is dropped.
+/// the clone keeps the wire from the producer outside the set, and the
+/// subscription to the emitter outside it — each on the original, since it
+/// wasn't copied. That is the only difference from the case above, where both
+/// are dropped.
 #[test]
 fn duplicate_keeps_external_producers_on_request() {
     let CrossingWire {
@@ -641,13 +682,17 @@ fn duplicate_keeps_external_producers_on_request() {
     } = crossing_wire();
     let originals: BTreeSet<NodeId> = [a, b, c].into_iter().collect();
 
-    let intents = GraphIntent::duplicate(&document, &library, IncomingWires::Keep);
+    let intents = GraphIntent::duplicate(&document, &library, IncomingWires::Keep, counter());
     commit_all(&mut document, &library, intents);
     let b_clone = clone_of(&document, Vec2::new(100.0, 0.0), &originals);
     assert_eq!(
         document.graph.bindings.get(&InputPort::new(b_clone, 2)),
         Some(&Binding::wire(c, 0)),
         "the kept wire still reads the original external producer"
+    );
+    assert!(
+        document.graph.is_subscribed(EventPort::new(c, 0), b_clone),
+        "the kept subscription still hears the original external emitter"
     );
     document.validate().unwrap();
 }
@@ -657,7 +702,13 @@ fn duplicate_of_nothing_asks_for_nothing() {
     let mut fixture = DocumentFixture::default();
     fixture.node_at(Vec2::ZERO);
     assert!(
-        GraphIntent::duplicate(&fixture.document, &fixture.library, IncomingWires::Drop).is_empty()
+        GraphIntent::duplicate(
+            &fixture.document,
+            &fixture.library,
+            IncomingWires::Drop,
+            counter()
+        )
+        .is_empty()
     );
 }
 
@@ -698,9 +749,10 @@ fn invalid_viewports_are_dropped_before_mutation() {
     ];
     for to in invalid {
         assert!(
-            GraphIntent::SetViewport { to, gesture: None }
-                .commit_one(&mut document, &fixture.library)
-                .is_err(),
+            matches!(
+                GraphIntent::SetViewport { to }.commit_one(&mut document, &fixture.library),
+                Err(MalformedIntent::InvalidViewport)
+            ),
             "invalid viewport {to:?} must be dropped"
         );
         assert_eq!(
@@ -714,17 +766,81 @@ fn invalid_viewports_are_dropped_before_mutation() {
         zoom: 2.0,
     };
     assert!(
-        GraphIntent::SetViewport {
-            to: valid,
-            gesture: None,
-        }
-        .commit_one(&mut document, &fixture.library)
-        .unwrap()
-        .is_some(),
-        "a finite positive viewport must commit"
+        GraphIntent::SetViewport { to: valid }
+            .commit_one(&mut document, &fixture.library)
+            .unwrap()
+            .is_none(),
+        "a finite positive viewport commits, recording no step"
     );
     assert_eq!(document.main_view.viewport, valid);
+    assert_eq!(document.main_view.viewport, valid);
     document.validate().unwrap();
+}
+
+/// Each one-step edit replays exactly: its revert gives back the whole
+/// document as it was before the commit, and its apply the whole document
+/// after it — not just the field it is about.
+#[test]
+fn each_edit_reverts_and_redoes_the_whole_document() {
+    let mut fixture = DocumentFixture::default();
+    let a = fixture.node_at(Vec2::ZERO);
+    let b = fixture.node_at(Vec2::new(100.0, 0.0));
+    let mut document = fixture.document;
+    let edits = [
+        (
+            "rename",
+            GraphIntent::RenameNode {
+                node_id: a,
+                to: "renamed".to_string(),
+            },
+        ),
+        (
+            "disable",
+            GraphIntent::SetNodeProperty {
+                node_id: a,
+                to: NodeProperty::Disabled(true),
+            },
+        ),
+        (
+            "cache to disk",
+            GraphIntent::SetNodeProperty {
+                node_id: b,
+                to: NodeProperty::RuntimeCache(CacheMode::Disk),
+            },
+        ),
+        ("subscribe", subscribe(a, b, true)),
+        ("unsubscribe", subscribe(a, b, false)),
+        (
+            "select",
+            GraphIntent::SetSelection {
+                to: BTreeSet::from([ItemId::Node(a), ItemId::Node(b)]),
+            },
+        ),
+        (
+            "deselect one",
+            GraphIntent::SetSelection {
+                to: BTreeSet::from([ItemId::Node(b)]),
+            },
+        ),
+        ("raise", GraphIntent::Raise { node_id: a }),
+        (
+            "bind",
+            GraphIntent::set_input(InputPort::new(b, 0), Binding::wire(a, 0)),
+        ),
+    ];
+    for (what, intent) in edits {
+        let before = document.clone();
+        let step = intent
+            .commit_one(&mut document, &fixture.library)
+            .unwrap()
+            .unwrap_or_else(|| panic!("{what} commits a step"));
+        let after = document.clone();
+        assert_ne!(after, before, "{what} changed something");
+        step.revert(&mut document);
+        assert_eq!(document, before, "{what}: the revert");
+        step.apply(&mut document);
+        assert_eq!(document, after, "{what}: the redo");
+    }
 }
 
 #[test]
@@ -831,9 +947,10 @@ fn set_node_property_commits_and_reverts() {
             NodeProperty::RuntimeCache(m) => assert_eq!(node.cache, m),
             NodeProperty::Disabled(d) => assert_eq!(node.disabled, d),
         }
-        assert!(
-            !step.invalidates_cached_geometry(),
-            "a node-property toggle does not remeasure"
+        assert_eq!(
+            step.facts(),
+            EditFacts::NONE,
+            "a node-property toggle changes no shape"
         );
         step.revert(&mut document);
         let node = document.graph.find(id).unwrap();
@@ -909,24 +1026,24 @@ fn commit_rejects_cycle_forming_bind() {
     );
 }
 
-/// What leaked through a commit of `intent` expected to be refused as
-/// malformed — the gate exists to keep a malformed payload out of the write
-/// half — or `None` when the refusal held.
-fn refusal_leak(document: &mut Document, library: &Library, intent: GraphIntent) -> Option<String> {
-    let nodes = document.graph.len();
-    if let Ok(outcome) = intent.commit_one(document, library) {
-        return Some(format!("expected a MalformedIntent, got {outcome:?}"));
-    }
-    if document.graph.len() != nodes {
-        return Some(format!(
-            "a refused intent mutated the graph: {nodes} nodes became {}",
-            document.graph.len()
-        ));
-    }
-    document
-        .validate()
-        .err()
-        .map(|e| format!("document invalid after a refusal: {e}"))
+/// Commit `intent`, which the gate refuses as `expected`, and check that the
+/// refusal left `document` exactly as it was: the gate exists to keep a
+/// malformed payload out of the write half.
+#[track_caller]
+fn assert_refused(
+    document: &mut Document,
+    library: &Library,
+    intent: GraphIntent,
+    expected: MalformedIntent,
+    what: &str,
+) {
+    let before = document.clone();
+    assert_eq!(
+        intent.commit_one(document, library).map(|_| ()),
+        Err(expected),
+        "{what}"
+    );
+    assert_eq!(*document, before, "{what}: a refusal writes nothing");
 }
 
 #[test]
@@ -940,33 +1057,26 @@ fn insertions_reusing_an_identity_are_refused_instead_of_panicking() {
     let node = fixture.plain_node();
     let mut document = fixture.document;
 
-    assert_eq!(
-        refusal_leak(
-            &mut document,
-            &fixture.library,
-            GraphIntent::add_node(Vec2::ZERO, stub, node.clone())
+    let library = &fixture.library;
+    for (what, intent, expected) in [
+        (
+            "AddNode over a stub's id",
+            GraphIntent::add_node(Vec2::ZERO, stub, node.clone()),
+            MalformedIntent::NodeAlreadyExists { node_id: stub },
         ),
-        None,
-        "AddNode over a stub's id"
-    );
-    assert_eq!(
-        refusal_leak(
-            &mut document,
-            &fixture.library,
-            GraphIntent::add_node(Vec2::ZERO, live, node.clone())
+        (
+            "AddNode over a live id",
+            GraphIntent::add_node(Vec2::ZERO, live, node.clone()),
+            MalformedIntent::NodeAlreadyExists { node_id: live },
         ),
-        None,
-        "AddNode over a live id"
-    );
-    assert_eq!(
-        refusal_leak(
-            &mut document,
-            &fixture.library,
-            GraphIntent::add_node(Vec2::ZERO, NodeId::nil(), DocumentFixture::stub_node())
+        (
+            "AddNode with a nil id",
+            GraphIntent::add_node(Vec2::ZERO, NodeId::nil(), DocumentFixture::stub_node()),
+            MalformedIntent::NilNodeId { role: Role::New },
         ),
-        None,
-        "AddNode with a nil id"
-    );
+    ] {
+        assert_refused(&mut document, library, intent, expected, what);
+    }
 
     // Intents commit one at a time, so an id repeated *within* one batch is
     // refused by the same check: the second add meets a graph the first is
@@ -974,18 +1084,16 @@ fn insertions_reusing_an_identity_are_refused_instead_of_panicking() {
     let repeated = NodeId::unique();
     assert!(
         GraphIntent::add_node(Vec2::ZERO, repeated, node)
-            .commit_one(&mut document, &fixture.library)
+            .commit_one(&mut document, library)
             .unwrap()
             .is_some()
     );
-    assert_eq!(
-        refusal_leak(
-            &mut document,
-            &fixture.library,
-            GraphIntent::add_node(Vec2::ONE, repeated, DocumentFixture::stub_node())
-        ),
-        None,
-        "a second AddNode repeating an id from the same batch"
+    assert_refused(
+        &mut document,
+        library,
+        GraphIntent::add_node(Vec2::ONE, repeated, DocumentFixture::stub_node()),
+        MalformedIntent::NodeAlreadyExists { node_id: repeated },
+        "a second AddNode repeating an id from the same batch",
     );
 }
 
@@ -1003,7 +1111,8 @@ fn malformed_payloads_are_refused_before_they_can_invalidate_the_document() {
     let live = fixture.add(&probe);
     let mut document = fixture.document;
     let ghost = NodeId::unique();
-    let nan = Vec2::new(f32::NAN, 0.0);
+    // Infinite rather than NaN, which no error equals.
+    let far = Vec2::new(f32::INFINITY, 0.0);
 
     let nil_func = internals::unresolved_node(FuncId::nil());
 
@@ -1017,97 +1126,92 @@ fn malformed_payloads_are_refused_before_they_can_invalidate_the_document() {
             .map(|(port, binding)| BindingEntry { port, binding })
             .collect(),
     };
+    let own = |port_idx| InputPort::new(fresh, port_idx);
     let cases = [
         (
             "AddNode at a non-finite position",
-            GraphIntent::add_node(nan, NodeId::unique(), DocumentFixture::stub_node()),
+            GraphIntent::add_node(far, NodeId::unique(), DocumentFixture::stub_node()),
+            MalformedIntent::NonFinitePos {
+                role: Role::AddNode,
+                pos: far,
+            },
         ),
         (
             "AddNode with a nil func id",
             GraphIntent::add_node(Vec2::ZERO, NodeId::unique(), nil_func),
+            MalformedIntent::UnresolvedNode {
+                reason: Unresolved::MissingFunc,
+            },
         ),
         (
             // The graph holds only nodes the library can run.
             "AddNode of a node whose func the library lacks",
             GraphIntent::add_node(Vec2::ZERO, NodeId::unique(), DocumentFixture::stub_node()),
+            MalformedIntent::UnresolvedNode {
+                reason: Unresolved::MissingFunc,
+            },
         ),
         (
             "AddNode seeding a binding from a producer that isn't there",
-            seeded(vec![(InputPort::new(fresh, 0), Binding::wire(ghost, 0))]),
+            seeded(vec![(own(0), Binding::wire(ghost, 0))]),
+            MalformedIntent::NodeAbsent {
+                role: Role::BindingProducer,
+                node_id: ghost,
+            },
         ),
         (
             // The insertion restores exactly the wiring it recorded, so it may
             // only author its own node's inputs.
             "AddNode seeding a binding on someone else's port",
             seeded(vec![(InputPort::new(live, 0), Binding::wire(fresh, 0))]),
+            MalformedIntent::ForeignSeedBinding {
+                port: InputPort::new(live, 0),
+            },
         ),
         (
             // A loop of one: nothing reads the new node yet, so its own output
             // is the only source that could close a cycle — and a compile
             // refuses a cyclic graph.
             "AddNode seeding an input from the new node's own output",
-            seeded(vec![(InputPort::new(fresh, 0), Binding::wire(fresh, 0))]),
+            seeded(vec![(own(0), Binding::wire(fresh, 0))]),
+            MalformedIntent::CyclicSeedBinding { port: own(0) },
         ),
         (
             // Only one could survive, so `DetachedNode::new` refuses the record.
             "AddNode seeding one port twice",
             seeded(vec![
-                (
-                    InputPort::new(fresh, 0),
-                    Binding::Const(ConstValue::from(1i64)),
-                ),
-                (
-                    InputPort::new(fresh, 0),
-                    Binding::Const(ConstValue::from(2i64)),
-                ),
+                (own(0), Binding::Const(ConstValue::from(1i64))),
+                (own(0), Binding::Const(ConstValue::from(2i64))),
             ]),
+            MalformedIntent::InsertionRecord(DetachedNodeError::DuplicateBinding { port: own(0) }),
         ),
         (
             "MoveSelection to a non-finite position",
-            drag(&[member(live, nan)], Vec2::ZERO),
+            drag(&[member(live, far)], Vec2::ZERO),
+            MalformedIntent::NonFinitePos {
+                role: Role::MoveSelection,
+                pos: far,
+            },
         ),
         (
-            "SetSubscription carrying a nil id",
+            "SetSubscription from a nil emitter",
             subscribe(NodeId::nil(), live, true),
+            MalformedIntent::NilNodeId {
+                role: Role::SetSubscriptionEmitter,
+            },
+        ),
+        (
+            "SetSubscription to a nil subscriber",
+            subscribe(live, NodeId::nil(), true),
+            MalformedIntent::NilNodeId {
+                role: Role::SetSubscriptionSubscriber,
+            },
         ),
     ];
-    for (what, intent) in cases {
-        assert_eq!(
-            refusal_leak(&mut document, &fixture.library, intent),
-            None,
-            "{what}"
-        );
+    for (what, intent, expected) in cases {
+        assert_refused(&mut document, &fixture.library, intent, expected, what);
     }
 
-    // The refusal names the field it held to, not just the check.
-    let refused = |intent: GraphIntent, document: &mut Document| {
-        intent
-            .commit_one(document, &fixture.library)
-            .expect_err("a malformed payload is refused")
-    };
-    assert!(matches!(
-        refused(subscribe(live, NodeId::nil(), true), &mut document),
-        MalformedIntent::NilNodeId {
-            role: Role::SetSubscriptionSubscriber
-        }
-    ));
-    assert!(matches!(
-        refused(drag(&[member(live, nan)], Vec2::ZERO), &mut document),
-        MalformedIntent::NonFinitePos {
-            role: Role::MoveSelection,
-            ..
-        }
-    ));
-    assert!(matches!(
-        refused(
-            seeded(vec![(InputPort::new(fresh, 0), Binding::wire(ghost, 0))]),
-            &mut document
-        ),
-        MalformedIntent::NodeAbsent {
-            role: Role::BindingProducer,
-            node_id,
-        } if node_id == ghost
-    ));
     assert_eq!(
         Role::SetInputProducer.to_string(),
         "SetInput producer",
@@ -1211,12 +1315,12 @@ fn selection_and_move_drop_members_whose_widget_is_gone() {
     let UndoStep::Selection(step) = &step else {
         panic!("expected a SetSelection step, got {step:?}");
     };
+    let kept: BTreeSet<ItemId> = [ItemId::Node(live)].into_iter().collect();
     assert_eq!(
-        step.selection.to,
-        [ItemId::Node(live)].into_iter().collect::<BTreeSet<_>>(),
+        step.toggled, kept,
         "the vanished node and the tie no view holds are dropped, the live one kept"
     );
-    assert_eq!(document.main_view.selected, step.selection.to);
+    assert_eq!(document.main_view.selected, kept);
 
     // `live` latched at (1, 2) and sits at the origin now: the step moves it
     // from where it sits to (1, 2) + (4, 4) = (5, 6).
@@ -1257,47 +1361,36 @@ fn a_wire_onto_a_const_only_input_is_refused() {
     let mut document = fixture.document;
     let input = InputPort::new(knob, 0);
 
-    let wired = GraphIntent::SetInput {
-        input,
-        to: Some(Binding::wire(feed, 0)),
-    }
-    .commit_one(&mut document, &fixture.library);
-    assert!(
-        matches!(
-            wired,
-            Err(MalformedIntent::Rejected { port, rejection: BindingRejection::WiredConstOnly })
-                if port == input
-        ),
-        "{wired:?}"
-    );
-    assert!(
-        document.graph.bindings.is_empty(),
-        "the refusal wrote nothing"
-    );
-
     let fresh = NodeId::unique();
-    let seeded = GraphIntent::AddNode {
-        pos: Vec2::ZERO,
-        node_id: fresh,
-        node: Node::from(&knob_func),
-        bindings: vec![BindingEntry {
-            port: InputPort::new(fresh, 0),
-            binding: Binding::wire(feed, 0),
-        }],
-    }
-    .commit_one(&mut document, &fixture.library);
-    assert!(
-        matches!(
-            seeded,
-            Err(MalformedIntent::Rejected { port, rejection: BindingRejection::WiredConstOnly })
-                if port.node_id == fresh
+    for (what, intent, port) in [
+        (
+            "a wire onto it",
+            GraphIntent::SetInput {
+                input,
+                to: Some(Binding::wire(feed, 0)),
+            },
+            input,
         ),
-        "{seeded:?}"
-    );
-    assert!(
-        document.graph.find(fresh).is_none(),
-        "the refused node was not added"
-    );
+        (
+            "an insertion seeding a wire onto it",
+            GraphIntent::AddNode {
+                pos: Vec2::ZERO,
+                node_id: fresh,
+                node: Node::from(&knob_func),
+                bindings: vec![BindingEntry {
+                    port: InputPort::new(fresh, 0),
+                    binding: Binding::wire(feed, 0),
+                }],
+            },
+            InputPort::new(fresh, 0),
+        ),
+    ] {
+        let expected = MalformedIntent::Rejected {
+            port,
+            rejection: BindingRejection::WiredConstOnly,
+        };
+        assert_refused(&mut document, &fixture.library, intent, expected, what);
+    }
 
     let constant = GraphIntent::SetInput {
         input,
@@ -1340,51 +1433,49 @@ fn indices_past_the_declaration_are_refused() {
     };
     let listen = |event_idx: usize| GraphIntent::SetSubscription {
         subscription: Subscription::new(EventPort::new(producer, event_idx), consumer),
-        subscribe: true,
+        to: true,
     };
 
+    let rejected = |port, rejection| MalformedIntent::Rejected { port, rejection };
     let refusals = [
-        ("a constant on input 1", set(1, constant())),
+        (
+            "a constant on input 1",
+            set(1, constant()),
+            rejected(
+                InputPort::new(consumer, 1),
+                BindingRejection::UndeclaredInput,
+            ),
+        ),
         (
             "a wire from output 1",
             set(0, Some(Binding::wire(producer, 1))),
+            rejected(
+                InputPort::new(consumer, 0),
+                BindingRejection::UndeclaredOutput,
+            ),
         ),
         (
             "a seed constant on input 1",
             seeded(1, Binding::Const(ConstValue::from(1i64))),
+            rejected(InputPort::new(fresh, 1), BindingRejection::UndeclaredInput),
         ),
         (
             "a seed wire from output 1",
             seeded(0, Binding::wire(producer, 1)),
+            rejected(InputPort::new(fresh, 0), BindingRejection::UndeclaredOutput),
         ),
-        ("a subscription to event 1", listen(1)),
+        (
+            "a subscription to event 1",
+            listen(1),
+            MalformedIntent::RejectedSubscription {
+                subscription: Subscription::new(EventPort::new(producer, 1), consumer),
+                rejection: SubscriptionRejection::UndeclaredEvent,
+            },
+        ),
     ];
-    for (what, intent) in refusals {
-        assert_eq!(refusal_leak(&mut document, library, intent), None, "{what}");
+    for (what, intent, expected) in refusals {
+        assert_refused(&mut document, library, intent, expected, what);
     }
-
-    let refused = |intent: GraphIntent, document: &mut Document| {
-        intent
-            .commit_one(document, library)
-            .expect_err("an undeclared index is refused")
-    };
-    assert!(matches!(
-        refused(set(1, constant()), &mut document),
-        MalformedIntent::Rejected { port, rejection: BindingRejection::UndeclaredInput }
-            if port == InputPort::new(consumer, 1)
-    ));
-    assert!(matches!(
-        refused(set(0, Some(Binding::wire(producer, 1))), &mut document),
-        MalformedIntent::Rejected { port, rejection: BindingRejection::UndeclaredOutput }
-            if port == InputPort::new(consumer, 0)
-    ));
-    assert!(matches!(
-        refused(listen(1), &mut document),
-        MalformedIntent::RejectedSubscription {
-            subscription,
-            rejection: SubscriptionRejection::UndeclaredEvent,
-        } if subscription.event.event_idx == 1
-    ));
 
     assert!(
         matches!(set(1, None).commit_one(&mut document, library), Ok(None)),
@@ -1584,8 +1675,7 @@ fn tie_edits_apply_and_revert() {
             .unwrap_or_else(|| panic!("{what}: no step"));
         if let UndoStep::Ties(_) = step {
             assert!(step.dirties_document(), "{what}");
-            assert!(!step.invalidates_cached_geometry(), "{what}");
-            assert!(!step.changes_node_set(), "{what}");
+            assert_eq!(step.facts(), EditFacts::NONE, "{what}");
         }
         check(&document);
         document
@@ -1835,28 +1925,76 @@ fn tie_intents_refuse_malformed_payloads_and_drop_stale_ones() {
             },
         ),
         (
+            // Infinite rather than NaN, which no error equals.
             "a position that is not finite",
             GraphIntent::TieWires {
                 tie: fresh,
-                pos: Vec2::NAN,
+                pos: Vec2::INFINITY,
                 wires: vec![RouteInsert { wire: ab, at: 0 }],
             },
             MalformedIntent::NonFinitePos {
                 role: Role::TieWires,
-                pos: Vec2::NAN,
+                pos: Vec2::INFINITY,
             },
+        ),
+        // A nil id is malformed, not stale: no view holds one, and it is
+        // refused before the lookup could read it as merely absent.
+        (
+            "a new tie with a nil id",
+            tie_wires(TieId::nil(), vec![RouteInsert { wire: ab, at: 0 }]),
+            MalformedIntent::NilTieId {
+                role: Role::TieWires,
+            },
+        ),
+        (
+            "a join of a nil tie",
+            GraphIntent::JoinTie {
+                tie: TieId::nil(),
+                wires: vec![RouteInsert { wire: ab, at: 0 }],
+            },
+            MalformedIntent::NilTieId {
+                role: Role::JoinTie,
+            },
+        ),
+        (
+            "a removal of a nil tie",
+            GraphIntent::RemoveTie { tie: TieId::nil() },
+            MalformedIntent::NilTieId {
+                role: Role::RemoveTie,
+            },
+        ),
+        (
+            "an angle of a nil tie",
+            GraphIntent::SetTieAngle {
+                tie: TieId::nil(),
+                angle: TieAngle::Auto,
+                gesture: None,
+            },
+            MalformedIntent::NilTieId {
+                role: Role::SetTieAngle,
+            },
+        ),
+        (
+            "a release from a nil tie",
+            GraphIntent::ReleaseWire {
+                tie: TieId::nil(),
+                wire: ab,
+            },
+            MalformedIntent::NilTieId {
+                role: Role::ReleaseWire,
+            },
+        ),
+        (
+            "a raise of a nil node",
+            GraphIntent::Raise {
+                node_id: NodeId::nil(),
+            },
+            MalformedIntent::NilNodeId { role: Role::Raise },
         ),
     ];
     let before = document.clone();
     for (what, intent, expected) in refused {
-        let result = intent.commit_one(&mut document, &library);
-        // Debug, as `MalformedIntent` carries foreign errors with no equality.
-        assert_eq!(
-            format!("{:?}", result.map(|_| ())),
-            format!("{:?}", Err::<(), _>(expected)),
-            "{what}"
-        );
-        assert_eq!(document, before, "{what}: nothing is written");
+        assert_refused(&mut document, &library, intent, expected, what);
     }
 
     let gone = TieId::unique();
@@ -1913,14 +2051,19 @@ fn duplicate_takes_the_ties_inside_the_set() {
         mut document,
         library,
     } = fixture;
+    // An event wire `a.tick → b` through `first` too, which clones as a data wire does.
+    let tick = Subscription::new(EventPort::new(a, 0), b);
+    document.graph.subscribe(tick.event, b);
     let view = &mut document.main_view;
     view.routes.insert(ab, Route::new([second, first, mixed]));
+    view.routes
+        .insert(WireKey::Event(tick), Route::new([first]));
     view.ties.get_mut(&first).unwrap().angle = TieAngle::Pinned(30.0);
     view.selected = [ItemId::Node(a), ItemId::Node(b)].into_iter().collect();
     document.validate().unwrap();
     let before = document.clone();
 
-    let intents = GraphIntent::duplicate(&document, &library, IncomingWires::Keep);
+    let intents = GraphIntent::duplicate(&document, &library, IncomingWires::Keep, counter());
     let steps = commit_all(&mut document, &library, intents);
     document.validate().unwrap();
     let originals = BTreeSet::from([a, b, c]);
@@ -1957,6 +2100,8 @@ fn duplicate_takes_the_ties_inside_the_set() {
         Route::new([second_clone, first_clone])
     );
     assert!(!view.routes.contains_key(&cb_clone));
+    let tick_clone = WireKey::Event(Subscription::new(EventPort::new(a_clone, 0), b_clone));
+    assert_eq!(view.routes[&tick_clone], Route::new([first_clone]));
     assert_eq!(
         view.selected,
         [a_clone, b_clone]

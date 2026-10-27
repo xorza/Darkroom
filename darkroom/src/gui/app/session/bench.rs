@@ -46,7 +46,6 @@ use crate::core::document::item_id::ItemId;
 use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::drag_start::DragStart;
-use crate::core::edit::relayout::Relayout;
 use crate::core::io::preferences::Preferences;
 use crate::core::open_document::OpenDocument;
 use crate::core::preview_sink;
@@ -55,8 +54,9 @@ use crate::core::wake;
 use crate::gui::app::session::Session;
 use crate::gui::frame::app_ctx::AppCtx;
 use crate::gui::frame::frame_writes::FrameWrites;
+use crate::gui::frame::relayout::Relayout;
 use crate::gui::frame::requests::Requests;
-use crate::gui::pane::graph_ui::node_ui::wid;
+use crate::gui::pane::graph_ui::wid;
 use crate::gui::state::preview_store::preview_converter::{self, Card};
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
@@ -192,7 +192,7 @@ impl Editor {
         for (idx, chain) in self.chains.iter().enumerate() {
             let card = self.converted[idx % 2].clone();
             self.run_state
-                .previews
+                .previews_mut()
                 .land_converted(ui, chain[PREVIEW], card);
         }
     }
@@ -233,7 +233,7 @@ impl Editor {
 
     /// Set the editor to frame `n` of `scenario`, through the path production takes.
     fn advance(&mut self, scenario: Scenario, ui: &mut Ui, n: u32) {
-        // One held gesture for the whole run, so its frames fold into one undo entry.
+        // One held drag for the whole run, so its frames fold into one undo entry.
         let gesture = GestureId::default().next();
         let viewport = self.session.open.document.main_view.viewport;
         let intent = match scenario {
@@ -241,25 +241,19 @@ impl Editor {
             Scenario::Preview => {
                 let card = self.converted[(n % 2) as usize].clone();
                 self.run_state
-                    .previews
+                    .previews_mut()
                     .land_converted(ui, self.chains[0][PREVIEW], card);
                 return;
             }
             Scenario::Pan => {
                 let mut to = viewport;
                 to.pan = Vec2::new((to.pan.x + 1.5) % 256.0, (to.pan.y + 0.7) % 256.0);
-                GraphIntent::SetViewport {
-                    to,
-                    gesture: Some(gesture),
-                }
+                GraphIntent::SetViewport { to }
             }
             Scenario::Zoom => {
                 let mut to = viewport;
                 to.zoom = if n.is_multiple_of(2) { ZOOM_IN } else { ZOOM };
-                GraphIntent::SetViewport {
-                    to,
-                    gesture: Some(gesture),
-                }
+                GraphIntent::SetViewport { to }
             }
             Scenario::Drag => GraphIntent::MoveSelection {
                 gesture,
@@ -267,24 +261,28 @@ impl Editor {
                 offset: Vec2::new(if n.is_multiple_of(2) { 1.0 } else { 0.0 }, 0.0),
             },
         };
-        if self.session.open.apply_edit(intent, &self.library) == Relayout::Needed {
+        if Relayout::after(self.session.open.apply_edit(intent, &self.library)) == Relayout::Needed
+        {
             ui.request_relayout();
         }
     }
 
-    /// One record pass as `App` runs a frame: the sweeps of `App::update`, then `App::record`.
-    /// The pass after the first lays the chains out from what the first measured.
+    /// The sweeps of `App::update`, once a frame before its first record pass.
+    fn update(&mut self) {
+        self.run_state
+            .previews_mut()
+            .reconcile(&self.session.open.document);
+        self.session.reconcile_caches();
+    }
+
+    /// One record pass as `App::record` runs it. The pass after the first lays the chains out
+    /// from what the first measured.
     fn record(&mut self, ui: &mut Ui) {
         if !self.laid_out && self.lay_out(ui) {
             self.laid_out = true;
             ui.request_relayout();
         }
-        self.run_state
-            .previews
-            .reconcile(&self.session.open.document);
-        self.session.reconcile_caches();
         let ctx = AppCtx::new(&self.theme, &self.library, &self.run_state);
-        self.requests.clear();
         let relayout = self.session.frame(
             ui,
             ctx,
@@ -373,6 +371,7 @@ pub(crate) fn integration(c: &mut Criterion, backends: Backends) {
                             published = true;
                         }
                         editor.advance(scenario, ui, n);
+                        editor.update();
                         frontend.frame(|ui| editor.record(ui)).paint()
                     }
                 }),
@@ -391,6 +390,7 @@ pub(crate) fn integration(c: &mut Criterion, backends: Backends) {
                             published = true;
                         }
                         editor.advance(scenario, host.ui(), n);
+                        editor.update();
                         let mut app = RecordApp::new(|ui: &mut Ui| editor.record(ui));
                         let paint = host.frame(target.as_target(), BENCH_DPR, &mut app).paint();
                         gpu.wait();

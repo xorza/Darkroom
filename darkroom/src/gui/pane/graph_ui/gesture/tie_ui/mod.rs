@@ -10,7 +10,7 @@ pub(crate) mod tie_widget;
 
 use glam::Vec2;
 use palantir::widget::{LineCap, Shape};
-use palantir::{PointerButton, Stroke, Ui};
+use palantir::{Stroke, Ui};
 
 use crate::core::document::graph_view::GraphView;
 use crate::core::document::item_id::ItemId;
@@ -18,70 +18,56 @@ use crate::core::document::tie::TieId;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::route_insert::RouteInsert;
 use crate::gui::frame::requests::Requests;
-use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
-use crate::gui::pane::graph_ui::gesture::canvas_gesture::CanvasGesture;
+use crate::gui::pane::graph_ui::gesture::button_stroke::{ButtonStroke, StrokeStep};
 use crate::gui::pane::graph_ui::gesture::tie_ui::tie_line::{TieLine, WireCrossing};
 use crate::gui::pane::graph_ui::gesture::tie_ui::tie_probe::TieProbe;
+use crate::gui::pane::graph_ui::prepass_ctx::CanvasGesture;
 use crate::gui::theme::Theme;
-use crate::gui::widgets::gesture_slot::GestureSlot;
 
 /// The tie line in flight, as [`BreakerUi`](crate::gui::pane::graph_ui::gesture::breaker_ui::BreakerUi)
-/// holds the breaker: the slot holds the latched button, and the line's crossing buffers outlive
-/// the gesture for the next one.
+/// holds the breaker: the stroke holds the latched button, and the line's crossing buffers
+/// outlive the gesture for the next one.
 #[derive(Default, Debug)]
 pub(crate) struct TieUi {
-    /// The button that latched the line, which the release check polls. Empty when no line is in
-    /// flight, which is also what makes [`Self::line`] meaningless.
-    latched: GestureSlot<PointerButton>,
+    /// The stroke in flight. Idle when no line is in flight, which is also what makes
+    /// [`Self::line`] meaningless.
+    stroke: ButtonStroke,
     line: TieLine,
 }
 
 impl TieUi {
     /// Drop the line in flight, keeping its buffers.
-    pub(crate) fn reset(&mut self) {
-        self.latched.clear();
+    pub(crate) const fn reset(&mut self) {
+        self.stroke.reset();
     }
 
     pub(crate) const fn in_flight(&self) -> bool {
-        !self.latched.is_idle()
+        self.stroke.in_flight()
     }
 
     /// Drive the line from the outer canvas response: latch it on a tie chord, move its end
     /// with the pointer, and on release tie what the last record pass found it crossing. The
     /// context's Esc drops it.
     pub(crate) fn apply(&mut self, ui: &Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
-        let graph_ctx = ctx.graph_ctx();
-        let resp = ui.response_for(canvas::outer_wid());
-        if let Some(CanvasGesture::Tie(button)) = ctx.gesture()
-            && self.latched.is_idle()
-            && let Some(p) = resp.pointer_local
-        {
-            self.latched.latch(button);
-            self.line.restart(graph_ctx.viewport().to_world(p));
-        }
-        if ctx.cancelled() {
-            self.latched.clear();
-            return;
-        }
-        let Some(button) = self.latched.get().copied() else {
-            return;
+        let latch = match ctx.gesture() {
+            Some(CanvasGesture::Tie(button)) => Some(button),
+            _ => None,
         };
-        if resp.button(button).drag.delta().is_some() {
-            if let Some(p) = resp.pointer_local {
-                self.line.end = graph_ctx.viewport().to_world(p);
-            }
-            return;
+        let zoom = ctx.graph_ctx().viewport().zoom;
+        match self.stroke.step(ui, ctx, latch) {
+            StrokeStep::Started(at) => self.line.restart(at, zoom),
+            StrokeStep::Moved(at) => self.line.reach(at, zoom),
+            StrokeStep::Released => release(&self.line, ctx.graph_ctx().view(), out),
+            StrokeStep::Idle => {}
         }
-        release(&self.line, graph_ctx.view(), out);
-        self.latched.clear();
     }
 
     /// Hand the line to the wire and band draws, which find what it crosses, or an inert probe
     /// when no line is in flight. Called once per record pass, which clears last pass's
     /// crossings.
     pub(crate) fn probe(&mut self) -> TieProbe<'_> {
-        if self.latched.is_idle() {
+        if !self.stroke.in_flight() {
             return TieProbe::new(None);
         }
         self.line.begin_pass();
@@ -90,7 +76,7 @@ impl TieUi {
 
     /// Paint the line, in the selection colour.
     pub(crate) fn draw(&self, ui: &mut Ui, theme: &Theme) {
-        if self.latched.is_idle() {
+        if !self.stroke.in_flight() {
             return;
         }
         ui.add_shape(

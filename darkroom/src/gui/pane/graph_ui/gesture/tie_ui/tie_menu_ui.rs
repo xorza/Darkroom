@@ -1,26 +1,23 @@
 //! [`TieMenuUi`]: the menu a right-click on a tie opens. `darkroom/AGENTS.md`, "Wire ties", "One
 //! wire leaves through the tie's menu", holds the decision.
 
-use std::collections::BTreeSet;
-
 use palantir::{InternedStr, MenuItem, MenuSeparator, Ui, fmt};
 
-use crate::core::document::item_id::ItemId;
 use crate::core::document::tie::{TieAngle, TieId};
 use crate::core::document::wire_key::{DataWire, WireKey};
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
-use crate::gui::pane::graph_ui::draw::context_menu::ContextMenu;
-use crate::gui::pane::graph_ui::draw::tie::tie_layout::TieLayout;
+use crate::gui::pane::graph_ui::frame::tie_layout::TieLayout;
+use crate::gui::pane::graph_ui::gesture::item_menu::ItemMenu;
 use crate::gui::pane::graph_ui::gesture::tie_ui::tie_widget::{AngleSnap, knob_angle};
 
 /// Right-click on a tie: release one of its wires, pin or free its angle, or remove it. A
 /// Release entry under the pointer lights its strand, so the pick names the wire it shows.
 #[derive(Default, Debug)]
 pub(crate) struct TieMenuUi {
-    menu: ContextMenu<TieId>,
+    menu: ItemMenu<TieId>,
     /// The wire of the Release entry under the pointer, which paints lit.
     lit: Option<WireKey>,
 }
@@ -35,7 +32,7 @@ enum MenuChoice {
 }
 
 impl TieMenuUi {
-    pub(crate) fn reset(&mut self) {
+    pub(crate) const fn reset(&mut self) {
         self.menu.reset();
         self.lit = None;
     }
@@ -49,19 +46,15 @@ impl TieMenuUi {
         self.lit
     }
 
-    /// Open the menu on `tie`, which the record pass just saw right-clicked, and select it if it
-    /// is not selected, as a node's menu selects its node. Returns that selection edit.
+    /// Open the menu on `tie`, which the record pass just saw right-clicked; see
+    /// [`ItemMenu::open_on`]. Returns the selection edit, when it needs one.
     pub(crate) fn open_on(
         &mut self,
         ui: &mut Ui,
         graph_ctx: GraphCtx<'_>,
         tie: TieId,
     ) -> Option<GraphIntent> {
-        let item = ItemId::Tie(tie);
-        let select = self.menu.open_on(ui, tie) && !graph_ctx.is_selected(item);
-        select.then(|| GraphIntent::SetSelection {
-            to: BTreeSet::from([item]),
-        })
+        self.menu.open_on(ui, graph_ctx, tie)
     }
 
     /// Record the menu and turn this frame's pick into its intent. `ties` is the last pass's
@@ -76,6 +69,7 @@ impl TieMenuUi {
         let graph_ctx = ctx.graph_ctx();
         let view = graph_ctx.view();
         let mut lit = None;
+        self.menu.retain(|tie| view.ties.contains_key(&tie));
         let pick = self.menu.show(ui, "tie_menu", |ui, popup, tie| {
             let mut chosen = None;
             for (&wire, route) in &view.routes {
@@ -137,21 +131,29 @@ impl TieMenuUi {
 }
 
 /// A Release entry's label: `<producer>.<output> → <consumer>.<input>` for a data wire,
-/// `<emitter>.<event> → <subscriber>` for an event wire.
+/// `<emitter>.<event> → <subscriber>` for an event wire. The load holds a routed wire to both of
+/// its ends and their ports, so each lookup holds.
 fn release_label(ui: &mut Ui, graph_ctx: GraphCtx<'_>, wire: WireKey) -> InternedStr {
-    let node = |node_id| graph_ctx.node(node_id);
+    let node = |node_id| {
+        graph_ctx
+            .node(node_id)
+            .expect("a routed wire's end node exists")
+    };
     match wire {
         WireKey::Data(DataWire { output, input }) => {
             let (from, to) = (node(output.node_id), node(input.node_id));
             fmt!(
                 ui,
                 "Release {}.{} → {}.{}",
-                from.map_or("?", |node| node.name()),
-                from.and_then(|node| node.outputs().nth(output.port_idx))
-                    .map_or("?", |port| port.name()),
-                to.map_or("?", |node| node.name()),
-                to.and_then(|node| node.input(input.port_idx))
-                    .map_or("?", |port| port.name()),
+                from.name(),
+                from.outputs()
+                    .nth(output.port_idx)
+                    .expect("a routed wire's output exists")
+                    .name(),
+                to.name(),
+                to.input(input.port_idx)
+                    .expect("a routed wire's input exists")
+                    .name(),
             )
         }
         WireKey::Event(subscription) => {
@@ -162,10 +164,12 @@ fn release_label(ui: &mut Ui, graph_ctx: GraphCtx<'_>, wire: WireKey) -> Interne
             fmt!(
                 ui,
                 "Release {}.{} → {}",
-                from.map_or("?", |node| node.name()),
-                from.and_then(|node| node.events().get(subscription.event.event_idx))
-                    .map_or("?", |event| event.name.as_str()),
-                to.map_or("?", |node| node.name()),
+                from.name(),
+                from.events()
+                    .get(subscription.event.event_idx)
+                    .expect("a routed subscription's event exists")
+                    .name,
+                to.name(),
             )
         }
     }

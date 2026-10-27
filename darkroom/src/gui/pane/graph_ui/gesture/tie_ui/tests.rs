@@ -10,6 +10,7 @@ use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::route_insert::RouteInsert;
 use crate::gui::pane::graph_ui::gesture::tie_ui::tie_widget::{AngleSnap, knob_angle};
 use crate::gui::pane::graph_ui::internals::CanvasHarness;
+use crate::gui::pane::graph_ui::wid;
 use crate::gui::port_ref::PortRef;
 
 /// Modifiers with Ctrl and Shift as given.
@@ -140,13 +141,13 @@ fn a_line_across_a_tie_joins_it() {
     let Crossed { mut h, wires, x } = crossed(true);
     let tie = *h.document().main_view.ties.keys().next().unwrap();
     // On the line, between the wires.
-    let centre = Vec2::new(x, 250.0);
-    h.document_mut().main_view.ties.get_mut(&tie).unwrap().pos = centre;
+    let center = Vec2::new(x, 250.0);
+    h.document_mut().main_view.ties.get_mut(&tie).unwrap().pos = center;
     h.frame();
     let intents = tie_line(
         &mut h,
-        centre - Vec2::new(15.0, 150.0),
-        centre + Vec2::new(15.0, 150.0),
+        center - Vec2::new(15.0, 150.0),
+        center + Vec2::new(15.0, 150.0),
     );
     let [
         GraphIntent::JoinTie {
@@ -177,7 +178,7 @@ fn a_line_across_nothing_ties_nothing() {
     assert!(intents.is_empty(), "{intents:?}");
 }
 
-/// The knob sets the pointer's angle about the centre, from `+x` toward `+y`: at 52° it sets
+/// The knob sets the pointer's angle about the center, from `+x` toward `+y`: at 52° it sets
 /// 52°, and with Shift the nearest 15° step, 45°. Straight up is -90°, which wraps to 270°.
 /// 52° survives `cos`, `sin` and `atan2` to within `1e-4`, the rounding of three `f32` steps.
 #[test]
@@ -206,12 +207,12 @@ fn one_tie(selected: bool) -> (CanvasHarness, TieId) {
 }
 
 /// A click on a tie selects it alone, as a click on a node does; a drag of it moves it, alone,
-/// by the pointer's travel; and a band over its centre sweeps it.
+/// by the pointer's travel; and a band over its center sweeps it.
 #[test]
 fn a_tie_clicks_drags_and_sweeps_as_a_node_does() {
     let (mut h, tie) = one_tie(false);
-    let centre = Vec2::new(470.0, 250.0);
-    h.ui.click_at(centre);
+    let center = Vec2::new(470.0, 250.0);
+    h.ui.click_at(center);
     let clicked = h.frame();
     assert!(
         matches!(&*clicked, [GraphIntent::SetSelection { to }] if *to == [ItemId::Tie(tie)].into_iter().collect()),
@@ -219,11 +220,11 @@ fn a_tie_clicks_drags_and_sweeps_as_a_node_does() {
     );
 
     let (mut h, tie) = one_tie(false);
-    h.ui.press_at(centre);
+    h.ui.press_at(center);
     h.frame();
-    h.ui.drag_to(centre + Vec2::new(10.0, 0.0));
+    h.ui.drag_to(center + Vec2::new(10.0, 0.0));
     h.frame();
-    h.ui.drag_to(centre + Vec2::new(30.0, -20.0));
+    h.ui.drag_to(center + Vec2::new(30.0, -20.0));
     let moved = h.frame();
     let moves: Vec<_> = moved
         .iter()
@@ -237,9 +238,9 @@ fn a_tie_clicks_drags_and_sweeps_as_a_node_does() {
     assert_eq!(
         moves
             .last()
-            .map(|(members, _)| members.iter().map(|m| m.item).collect::<Vec<_>>()),
-        Some(vec![ItemId::Tie(tie)]),
-        "the tie drags alone: {moved:?}"
+            .map(|(members, offset)| (members.iter().map(|m| m.item).collect::<Vec<_>>(), *offset)),
+        Some((vec![ItemId::Tie(tie)], Vec2::new(30.0, -20.0))),
+        "the tie drags alone, by the pointer's travel from the press: {moved:?}"
     );
 
     let (mut h, tie) = one_tie(false);
@@ -262,10 +263,9 @@ fn a_tie_clicks_drags_and_sweeps_as_a_node_does() {
 #[test]
 fn the_knob_of_a_selected_tie_pins_and_frees_its_angle() {
     use crate::core::document::tie::TieAngle;
-    use crate::gui::pane::graph_ui::gesture::tie_ui::tie_widget::knob_wid;
 
     let (mut h, tie) = one_tie(true);
-    let knob = h.ui.center_of(knob_wid(tie));
+    let knob = h.ui.center_of(wid::tie_knob(tie));
     h.ui.press_at(knob);
     h.frame();
     h.ui.drag_to(knob + Vec2::new(0.0, 10.0));
@@ -287,7 +287,7 @@ fn the_knob_of_a_selected_tie_pins_and_frees_its_angle() {
     assert_eq!(
         turns,
         [(TieAngle::Pinned(90.0), true)],
-        "straight below the centre is 90°: {turned:?}"
+        "straight below the center is 90°: {turned:?}"
     );
     h.ui.release_button(PointerButton::Left);
     h.frame();
@@ -295,7 +295,7 @@ fn the_knob_of_a_selected_tie_pins_and_frees_its_angle() {
     let (mut h, tie) = one_tie(true);
     h.document_mut().main_view.ties.get_mut(&tie).unwrap().angle = TieAngle::Pinned(30.0);
     h.prime(2);
-    let knob = h.ui.center_of(knob_wid(tie));
+    let knob = h.ui.center_of(wid::tie_knob(tie));
     h.advance_past_double_click();
     h.ui.click_at(knob);
     h.frame();
@@ -336,12 +336,12 @@ fn the_tie_menu_releases_pins_and_removes() {
     use crate::core::document::tie::TieAngle;
     use crate::gui::pane::graph_ui::gesture::tie_ui::tie_widget::{AngleSnap, knob_angle};
 
-    let centre = Vec2::new(470.0, 250.0);
+    let center = Vec2::new(470.0, 250.0);
     let open = |h: &mut CanvasHarness| {
-        h.ui.right_click_at(centre);
+        h.ui.right_click_at(center);
         let opened = h.frame();
         h.prime(2);
-        (opened, h.menu_rows(centre))
+        (opened, h.menu_rows(center))
     };
 
     let (mut h, tie, mut wires) = two_wire_tie();
@@ -391,17 +391,17 @@ fn the_tie_menu_releases_pins_and_removes() {
     for row in [0, 1, 3] {
         let (mut h, tie, mut wires) = two_wire_tie();
         wires.sort_unstable();
-        let want = match row {
-            3 => GraphIntent::RemoveTie { tie },
-            release => GraphIntent::ReleaseWire {
-                tie,
-                wire: wires[release],
-            },
-        };
         let (_, rows) = open(&mut h);
         h.ui.click_on(rows[row]);
         let picked = h.frame();
-        assert_eq!(format!("{picked:?}"), format!("{:?}", [want]), "row {row}");
+        let as_wanted = match (row, &*picked) {
+            (3, [GraphIntent::RemoveTie { tie: removed }]) => *removed == tie,
+            (release, [GraphIntent::ReleaseWire { tie: from, wire }]) if release < 2 => {
+                *from == tie && *wire == wires[release]
+            }
+            _ => false,
+        };
+        assert!(as_wanted, "row {row}: {picked:?}");
     }
 
     let (mut h, tie, _) = two_wire_tie();

@@ -17,7 +17,7 @@
 use glam::Vec2;
 use palantir::{Ui, WidgetId};
 
-use crate::gui::graph_ctx::GraphCtx;
+use crate::core::document::viewport::Viewport;
 
 /// Stable id for the outer (pan-capture) canvas — the rect the gestures poll,
 /// the backdrop paints, and the cull measures against.
@@ -31,13 +31,10 @@ pub(super) fn inner_wid() -> WidgetId {
     WidgetId::from_hash("graph.canvas.inner")
 }
 
-/// The pointer in canvas-world coords, or `None` off-window. `canvas_origin`
-/// is the inner canvas's pre-transform origin.
-pub(crate) fn world_pointer(
-    ui: &mut Ui,
-    graph_ctx: GraphCtx<'_>,
-    canvas_origin: Vec2,
-) -> Option<Vec2> {
-    ui.pointer_pos()
-        .map(|p| graph_ctx.viewport().to_world(p - canvas_origin))
+/// The pointer in canvas-world coords under `viewport`, or `None` off-surface: the outer
+/// canvas's local pointer, whose origin the inner one shares.
+pub(crate) fn world_pointer(ui: &Ui, viewport: Viewport) -> Option<Vec2> {
+    ui.response_for(outer_wid())
+        .pointer_local
+        .map(|local| viewport.to_world(local))
 }

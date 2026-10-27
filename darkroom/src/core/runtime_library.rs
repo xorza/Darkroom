@@ -32,7 +32,7 @@ impl RuntimeLibrary {
         }
     }
 
-    pub(crate) fn update_ml_model_paths(&mut self, paths: &MlModelPaths) {
+    pub(crate) fn set_ml_model_paths(&mut self, paths: &MlModelPaths) {
         if self.model_paths == *paths {
             return;
         }

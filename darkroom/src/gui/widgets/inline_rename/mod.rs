@@ -1,5 +1,5 @@
 //! Reusable inline-rename label. Renders plain text that swaps to a
-//! fixed-width `TextEdit` on double-click; Enter / focus-loss commits the
+//! `TextEdit` hugging its text on double-click; Enter / focus-loss commits the
 //! edited string, Esc cancels. Used by the node-header title
 //! (`gui::pane::graph_ui::node_ui::header`), which maps the returned
 //! [`RenameEvent`] onto a `RenameNode` intent.
@@ -20,15 +20,14 @@ struct RenameState {
     draft: String,
 }
 
-/// What one frame of [`InlineRename`] surfaced. `clicked` (idle label
-/// clicked, including the double-click frame) and `committed` (a changed
-/// value was accepted) never co-occur — the first only fires while idle,
-/// the second only while editing — but a single struct keeps the caller's
-/// match flat.
-#[derive(Debug)]
-pub(crate) struct RenameEvent {
-    pub(crate) clicked: bool,
-    pub(crate) committed: Option<String>,
+/// What one frame of [`InlineRename`] surfaced: the idle label clicked, the double-click frame
+/// included, or a changed name accepted. Never both: a click fires only while idle, a commit
+/// only while editing.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum RenameEvent {
+    Idle,
+    Clicked,
+    Committed(String),
 }
 
 /// Minimum width of both the idle label and the editor, so a short name
@@ -36,21 +35,16 @@ pub(crate) struct RenameEvent {
 /// collapse to a caret sliver when the draft is emptied.
 const MIN_EDIT_WIDTH: f32 = 40.0;
 
-/// Default character cap. Caller's `.max_chars(n)` overrides.
-const DEFAULT_MAX_CHARS: usize = 64;
-
 /// Inline-renamable label builder. Idle = click-sensing `Text`;
-/// double-click swaps in a `max_chars`-capped `TextEdit` that hugs its
-/// text width (grows as you type). Enter or blur commits, Esc cancels.
-///
-/// Shaped like a palantir widget: the name and the look are positional, and
-/// identity ([`Self::id`]) is an optional override over a call-site id.
+/// double-click swaps in a `TextEdit` that hugs its text width (grows as you type), capped as
+/// [`Self::max_chars`] says. Enter or blur commits, Esc cancels.
 #[derive(Debug)]
 pub(crate) struct InlineRename<'a> {
-    id: WidgetId,
+    wid: WidgetId,
     name: &'a str,
     style: &'a InlineRenameTheme,
-    max_chars: usize,
+    /// The editor's character cap; none, as a `TextEdit` has, unless set.
+    max_chars: Option<usize>,
     editing: Editing,
 }
 
@@ -64,28 +58,20 @@ enum Editing {
 }
 
 impl<'a> InlineRename<'a> {
-    /// A rename label for `name` in the look `style`, identified by its call
-    /// site.
+    /// A rename label for `name` in the look `style`, under `wid`. The label and the editor both
+    /// record under it, which is what keeps the draft alive across the swap — so it has to be
+    /// stable per domain item (node id, port id, …).
     ///
     /// Font, color and leading ride along inside the bundle's per-state
     /// `text` slots, as they do for every palantir widget — to bold a title,
     /// hand over a bundle built with [`InlineRenameTheme::with_text`]. An
     /// axis a slot leaves unset inherits ambient `palantir::Theme::text`.
-    ///
-    /// Unlike a palantir widget's auto id, this one is *not* scoped to
-    /// the enclosing node and *cannot* be disambiguated by occurrence:
-    /// the widget reads its own state row before it opens a node, to
-    /// decide whether to record a label or an editor at all, so there is
-    /// no resolved parent id to mix in yet. Two rename labels built from
-    /// one call site therefore share a draft — set [`Self::id`] from the
-    /// domain item whenever this is built in a loop.
-    #[track_caller]
-    pub(crate) fn new(name: &'a str, style: &'a InlineRenameTheme) -> Self {
+    pub(crate) const fn new(wid: WidgetId, name: &'a str, style: &'a InlineRenameTheme) -> Self {
         Self {
-            id: WidgetId::auto(),
+            wid,
             name,
             style,
-            max_chars: DEFAULT_MAX_CHARS,
+            max_chars: None,
             editing: Editing::Allowed,
         }
     }
@@ -96,24 +82,15 @@ impl<'a> InlineRename<'a> {
         self
     }
 
-    /// Use `id` verbatim instead of the call-site default. The label and
-    /// the editor both record under it, which is what keeps the draft
-    /// alive across the swap — so it has to be stable per underlying
-    /// domain item (node id, port id, graph id, …).
-    pub(crate) const fn id(mut self, id: WidgetId) -> Self {
-        self.id = id;
-        self
-    }
-
-    /// Override the character cap applied to the active `TextEdit`.
+    /// Cap the editor at `n` characters.
     pub(crate) const fn max_chars(mut self, n: usize) -> Self {
-        self.max_chars = n;
+        self.max_chars = Some(n);
         self
     }
 
     pub(crate) fn show(self, ui: &mut Ui) -> RenameEvent {
         let Self {
-            id,
+            wid,
             name,
             style: theme,
             max_chars,
@@ -147,7 +124,7 @@ impl<'a> InlineRename<'a> {
         // reserves the same, on the same side, so the row keeps its width and
         // the glyphs stay put across the swap.
         let idle_padding = Spacing::new(0.0, 0.0, 2.0 * caret_room, 0.0);
-        ui.with_state::<RenameState, _>(id, |ui, st| {
+        ui.with_state::<RenameState, _>(wid, |ui, st| {
             if !st.active {
                 // `DRAG` as well as `CLICK`: the label captures the press
                 // (so it can register clicks / double-click-to-edit), but
@@ -158,7 +135,7 @@ impl<'a> InlineRename<'a> {
                 // is swallowed. The active editor is a `TextEdit` (no
                 // `DRAG`), so this only applies while idle.
                 let resp = Panel::hstack()
-                    .id(id)
+                    .id(wid)
                     .size((Sizing::HUG, Sizing::HUG))
                     .min_size((MIN_EDIT_WIDTH, line_h))
                     .padding(idle_padding)
@@ -171,7 +148,7 @@ impl<'a> InlineRename<'a> {
                         // to a call-site auto id: the node header draws every
                         // node's title from one call site, so an auto id
                         // would separate two titles only by record order.
-                        Text::new(name).id(label_wid(id)).style(&text).show(ui);
+                        Text::new(name).id(label_wid(wid)).style(&text).show(ui);
                     })
                     .response;
                 let clicked = resp.left.clicked();
@@ -181,11 +158,12 @@ impl<'a> InlineRename<'a> {
                     // capacity the last rename grew it to.
                     st.draft.clear();
                     st.draft.push_str(name);
-                    ui.set_focus(id);
+                    ui.set_focus(wid);
                 }
-                return RenameEvent {
-                    clicked,
-                    committed: None,
+                return if clicked {
+                    RenameEvent::Clicked
+                } else {
+                    RenameEvent::Idle
                 };
             }
 
@@ -194,10 +172,11 @@ impl<'a> InlineRename<'a> {
             // (`KeyClass::Text`) and Escape (`KeyClass::Escape`) — so polling
             // them here would see nothing, and the widget that consumed them
             // is the one that can report them anyway.
-            let edit = TextEdit::new(&mut st.draft)
-                .id(id)
-                .style(&theme.text_edit)
-                .max_chars(max_chars)
+            let mut edit = TextEdit::new(&mut st.draft).id(wid).style(&theme.text_edit);
+            if let Some(max_chars) = max_chars {
+                edit = edit.max_chars(max_chars);
+            }
+            let edit = edit
                 // Renaming replaces a name far more often than it edits
                 // one, so the draft arrives selected and the first
                 // keystroke wipes it. Safe against the double-click that
@@ -212,31 +191,29 @@ impl<'a> InlineRename<'a> {
                 .text_align(text_align)
                 .show(ui);
             if !edit.committed && edit.ended != Some(EditEnd::Canceled) {
-                return RenameEvent {
-                    clicked: false,
-                    committed: None,
-                };
+                return RenameEvent::Idle;
             }
             // Only a committing frame needs the draft as a value of its own;
             // every other one leaves it in the row, so an open rename copies its
             // text once per commit rather than once per frame.
-            let committed = (edit.committed && st.draft != name).then(|| st.draft.clone());
+            let committed = edit.committed && st.draft != name;
             st.active = false;
             ui.clear_focus();
-            RenameEvent {
-                clicked: false,
-                committed,
+            if committed {
+                RenameEvent::Committed(st.draft.clone())
+            } else {
+                RenameEvent::Idle
             }
         })
     }
 }
 
-/// Id of the idle label inside the rename widget `id`, derived from its
+/// Id of the idle label inside the rename widget `wid`, derived from its
 /// parent so a title keeps its identity when the node's paint order
 /// changes. Only the idle path opens it — in edit mode the `TextEdit`
-/// takes over and records under `id` itself.
-fn label_wid(id: WidgetId) -> WidgetId {
-    id.with("inline_rename.label")
+/// takes over and records under `wid` itself.
+fn label_wid(wid: WidgetId) -> WidgetId {
+    wid.with("inline_rename.label")
 }
 
 #[cfg(test)]

@@ -6,10 +6,13 @@ use scenarium::{Binding, Func, Graph, Library, NodeId, OutputPort};
 use serde::Serialize;
 
 use crate::gui::app::App;
-use crate::gui::pane::graph_ui::node_ui::wid;
+use crate::gui::pane::graph_ui::wid;
 
 /// The characters of a widget's text a [`UiList`] keeps: a scroll area's text is all its rows.
 pub const TEXT_CUT: usize = 120;
+/// The nodes a [`State`] lists: a detailed report of this many is about 10,000 tokens, well
+/// inside what an agent's client takes in one answer.
+pub const NODE_LIMIT: usize = 100;
 
 /// How much a [`State`] holds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -26,7 +29,10 @@ pub struct State {
     /// The open document's file, `None` while it is unsaved.
     pub document: Option<String>,
     pub dirty: bool,
+    /// The nodes whose name holds the report's filter, by name, at most [`NODE_LIMIT`] of them.
     pub nodes: Vec<NodeSummary>,
+    /// Matching nodes past the limit.
+    pub omitted: usize,
     /// The selected nodes, by name.
     pub selection: Vec<String>,
     /// The text of the focused widget, or its id when it shows none.
@@ -64,7 +70,7 @@ pub struct PortSummary {
 /// What a detailed report adds about the whole graph.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Details {
-    /// Every wire, `<node>.<output> -> <node>.<input>`.
+    /// Every wire with a listed node's name at either end, `<node>.<output> -> <node>.<input>`.
     pub wires: Vec<String>,
     pub pan: [f32; 2],
     pub zoom: f32,
@@ -95,8 +101,8 @@ pub struct UiWidget {
 }
 
 impl State {
-    /// `app` as its last frame shows it in `ui`, with `log` as the lines since the last report;
-    /// a detailed report keeps the nodes whose name contains `nodes`, when given.
+    /// `app` as its last frame shows it in `ui`, with `log` as the lines since the last report,
+    /// keeping the nodes whose name contains `nodes`, when given.
     pub(crate) fn of(
         app: &App,
         ui: &Ui,
@@ -109,14 +115,19 @@ impl State {
         let graph = &document.graph;
         let library = app.library();
         let detailed = detail == Detail::Detailed;
+        let listed = |name: &str| nodes.is_none_or(|part| name.contains(part));
+        // By name, then id: the graph's own order is a hash map's, which no two reports share.
+        let mut matching: Vec<_> = graph.iter().filter(|node| listed(&node.name)).collect();
+        matching.sort_unstable_by(|a, b| (&a.name, a.node_id).cmp(&(&b.name, b.node_id)));
         let mut widgets = Vec::new();
         ui.inspect(&mut widgets);
         Self {
             document: open.path.as_ref().map(|path| path.display().to_string()),
             dirty: open.dirty,
-            nodes: graph
-                .iter()
-                .filter(|node| !detailed || nodes.is_none_or(|part| node.name.contains(part)))
+            omitted: matching.len().saturating_sub(NODE_LIMIT),
+            nodes: matching
+                .into_iter()
+                .take(NODE_LIMIT)
                 .map(|node| {
                     let id = node.node_id;
                     let func = library.func_of(&node);
@@ -171,7 +182,7 @@ impl State {
             status: app.status().cur().map(|message| message.line.to_string()),
             log,
             details: detailed.then(|| Details {
-                wires: wires(graph, library),
+                wires: wires(graph, library, listed),
                 pan: document.main_view.viewport.pan.to_array(),
                 zoom: document.main_view.viewport.zoom,
                 can_undo: open.can_undo(),
@@ -242,12 +253,19 @@ fn binding(graph: &Graph, library: &Library, node_id: NodeId, idx: usize) -> Opt
         })
 }
 
-fn wires(graph: &Graph, library: &Library) -> Vec<String> {
+/// The wires with a node whose name `listed` keeps at either end, sorted: the graph's own order is
+/// a hash map's, which a reinsert by an undo changes.
+fn wires(graph: &Graph, library: &Library, listed: impl Fn(&str) -> bool) -> Vec<String> {
     let mut wires = Vec::new();
     for node in graph.iter() {
         let inputs = library.func_of(&node).ok().map(Func::inputs);
         for (port, binding) in graph.input_bindings(node.node_id) {
-            if let Binding::Wire(output) = binding {
+            if let Binding::Wire(output) = binding
+                && (listed(&node.name)
+                    || graph
+                        .find(output.node_id)
+                        .is_some_and(|producer| listed(&producer.name)))
+            {
                 let input = inputs
                     .and_then(|inputs| inputs.get(port.port_idx))
                     .map_or_else(|| port.port_idx.to_string(), |input| input.name.clone());
@@ -259,5 +277,39 @@ fn wires(graph: &Graph, library: &Library) -> Vec<String> {
             }
         }
     }
+    wires.sort_unstable();
     wires
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::core::document::internals::DocumentFixture;
+    use crate::driver::state::wires;
+
+    /// The wires come sorted, whatever the graph's order; a filter keeps those with a listed
+    /// node at either end.
+    #[test]
+    fn the_wires_are_sorted_and_filtered_by_either_end() {
+        let fixture = DocumentFixture::sample();
+        let graph = &fixture.document.graph;
+        // The sample wires get_a and get_b into sum, sum and get_b into mult, and mult into Print.
+        assert_eq!(
+            wires(graph, &fixture.library, |_| true),
+            [
+                "get_a.out0 -> sum.in0",
+                "get_b.out0 -> mult.in1",
+                "get_b.out0 -> sum.in1",
+                "mult.out0 -> Print.in0",
+                "sum.out0 -> mult.in0",
+            ]
+        );
+        assert_eq!(
+            wires(graph, &fixture.library, |name| name == "sum"),
+            [
+                "get_a.out0 -> sum.in0",
+                "get_b.out0 -> sum.in1",
+                "sum.out0 -> mult.in0",
+            ]
+        );
+    }
 }

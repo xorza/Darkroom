@@ -16,8 +16,9 @@
 use glam::Vec2;
 use scenarium::internals::test_graph::TestGraph;
 use scenarium::{
-    Binding, DataType, DetachedNode, DetachedNodeParts, EventPort, Func, FuncId, FuncInput,
-    FuncOutput, Graph, InputPort, Library, Node, NodeId, OutputPort, Subscription, internals,
+    Binding, BindingEntry, ConstValue, DataType, DetachedNode, DetachedNodeParts, EventPort, Func,
+    FuncId, FuncInput, FuncOutput, Graph, InputPort, Library, Node, NodeId, OutputPort,
+    Subscription, internals,
 };
 
 use palantir::DockOperation;
@@ -195,6 +196,27 @@ impl DocumentFixture {
     /// [`Self::stub_at`] places, for a test that adds it itself.
     pub(crate) fn stub_node() -> Node {
         internals::unresolved_node(FuncId::unique())
+    }
+
+    /// Bind the first input of the stub `stub` to `value`, in place of its record's wiring.
+    pub(crate) fn bind_stub(&mut self, stub: NodeId, value: ConstValue) {
+        let record = self
+            .document
+            .stubs
+            .remove(stub)
+            .expect("a stub the fixture added");
+        self.document.stubs.insert(
+            DetachedNode::new(DetachedNodeParts {
+                node_id: stub,
+                node: record.node().clone(),
+                bindings: vec![BindingEntry {
+                    port: InputPort::new(stub, 0),
+                    binding: Binding::Const(value),
+                }],
+                subscriptions: Vec::new(),
+            })
+            .expect("a stub with one const binding is a well-formed record"),
+        );
     }
 
     /// The `i`th node in placement order — the order the constructors add in,

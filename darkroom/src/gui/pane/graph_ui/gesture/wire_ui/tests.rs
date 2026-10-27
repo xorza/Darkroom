@@ -1,3 +1,4 @@
+use glam::Vec2;
 use palantir::internals::ui_harness::UiHarness;
 use scenarium::internals::test_graph::NodeSpec;
 use scenarium::internals::test_graph::TestGraph;
@@ -7,8 +8,8 @@ use super::*;
 use crate::core::document::internals::DocumentFixture;
 use crate::gui::graph_ctx::internals::GraphCtxFixture;
 use crate::gui::pane::graph_ui::internals::CanvasHarness;
-use crate::gui::pane::graph_ui::node_ui::port_row;
 use crate::gui::pane::graph_ui::prepass_ctx::{CanvasInput, PrepassCtx};
+use crate::gui::pane::graph_ui::wid;
 
 /// Two two-in/one-out nodes wired producer → consumer — enough graph for a
 /// wire to be in flight over, and enough wiring for the snap filter to have a
@@ -90,11 +91,12 @@ fn the_snap_type_check_reads_the_input_against_the_output_from_either_end() {
 /// undos.
 fn prepass_with_wire_from(fixture: &GraphCtxFixture, start: PortRef) -> Option<InFlight> {
     let mut arena = UiHarness::arena();
-    let mut wires = WireUi::default();
-    wires.state.latch(InFlight {
-        drag: GlyphDrag::new(start),
-        mode: DragMode::Floating,
-    });
+    let mut wires = WireUi {
+        state: Some(InFlight {
+            drag: GlyphDrag::new(start),
+            mode: DragMode::Floating,
+        }),
+    };
     let mut out = Requests::default();
     // The canvas state a context carries beside the pane, empty: a fixture
     // records nothing, so there are no port centers to cache. No gesture
@@ -105,12 +107,12 @@ fn prepass_with_wire_from(fixture: &GraphCtxFixture, start: PortRef) -> Option<I
         PrepassCtx::new(fixture.graph_ctx(), CanvasInput::default()),
         &geometry,
     );
-    wires.apply(arena.ui(), ctx, &mut out);
+    wires.prepass(arena.ui(), ctx, &mut out);
     assert!(
         out.document().is_empty(),
         "an untouched prepass emits nothing"
     );
-    wires.state.get().copied()
+    wires.state.as_ref().copied()
 }
 
 #[test]
@@ -160,7 +162,7 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
     // and `CanvasGeometry` measured centers to hit-test against.
     h.prime(2);
 
-    let source = port_row::port_circle_wid(PortRef::output(producer, 0));
+    let source = wid::port_circle(PortRef::output(producer, 0));
     let drop_at = h.port_center(PortRef::input(consumer, 0));
 
     h.ui.press_on(source);
@@ -194,7 +196,7 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
     h.document_mut()
         .graph
         .set_input_binding(InputPort::new(consumer, 0), Binding::wire(producer, 0));
-    let back_source = port_row::port_circle_wid(PortRef::output(consumer, 0));
+    let back_source = wid::port_circle(PortRef::output(consumer, 0));
     let back_drop_at = h.port_center(PortRef::input(producer, 0));
     h.advance_past_double_click();
     h.ui.press_on(back_source);
@@ -206,5 +208,42 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
     assert!(
         refused.is_empty(),
         "a drop that would close a cycle never snaps, so it binds nothing: {refused:?}"
+    );
+}
+
+/// A right press that ends a floating wire spends its click: the release, a frame later, opens no
+/// palette, where a right click alone on bare canvas opens one.
+#[test]
+fn a_right_press_that_ends_a_floating_wire_opens_no_palette() {
+    use palantir::PointerButton;
+
+    let mut h = CanvasHarness::new(DocumentFixture::probes(2));
+    let start = PortRef::output(h.node(0), 0);
+    h.prime(2);
+    let bare = Vec2::new(600.0, 600.0);
+    let right_click = |h: &mut CanvasHarness| {
+        h.ui.press_button_at(PointerButton::Right, bare);
+        h.frame();
+        h.ui.release_button(PointerButton::Right);
+        h.frame();
+    };
+
+    let CanvasHarness { graph_ui, ctx, .. } = &mut h;
+    graph_ui.wire_ui.resume(start, ctx.graph_ctx());
+    // A frame for the floating wire to ask for the pointer's presses.
+    h.frame();
+    assert!(h.graph_ui.wire_ui.in_flight());
+    right_click(&mut h);
+    assert!(!h.graph_ui.wire_ui.in_flight(), "the press ended the wire");
+    assert!(
+        !h.graph_ui.new_node_ui.in_flight(),
+        "its release opened no palette"
+    );
+
+    h.advance_past_double_click();
+    right_click(&mut h);
+    assert!(
+        h.graph_ui.new_node_ui.in_flight(),
+        "a right click alone opens it"
     );
 }

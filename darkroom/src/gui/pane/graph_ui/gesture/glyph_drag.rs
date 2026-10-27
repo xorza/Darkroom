@@ -4,7 +4,7 @@ use glam::Vec2;
 use scenarium::NodeId;
 
 use crate::gui::node_key::NodeKey;
-use crate::gui::pane::graph_ui::frame::canvas_geometry::PortLayer;
+use crate::gui::pane::graph_ui::frame::canvas_geometry::port_layer::PortLayer;
 
 /// One in-flight wire drag: the glyph the press latched (`from`, a key in
 /// layer `A`) and the compatible glyph currently under the pointer (`snap`, a
@@ -62,5 +62,26 @@ impl<A: NodeKey, B: NodeKey> GlyphDrag<A, B> {
             Some(key) => layer.center(key),
             None => pointer,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use scenarium::{EventPort, NodeId};
+
+    use crate::gui::pane::graph_ui::gesture::glyph_drag::GlyphDrag;
+
+    /// A drag off either end of an event wire resolves the same owning node, and a fresh drag
+    /// has no target yet: the snap scan fills it in each frame.
+    #[test]
+    fn a_drag_resolves_its_node_from_either_end() {
+        let node = NodeId::unique();
+        let emitter = EventPort {
+            node_id: node,
+            event_idx: 0,
+        };
+        assert_eq!(GlyphDrag::<EventPort, NodeId>::new(emitter).node(), node);
+        assert_eq!(GlyphDrag::<NodeId, EventPort>::new(node).node(), node);
+        assert_eq!(GlyphDrag::<EventPort, NodeId>::new(emitter).snap, None);
     }
 }

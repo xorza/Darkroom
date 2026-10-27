@@ -30,7 +30,7 @@ pub(crate) fn id() -> WidgetId {
 
 /// Draw the bottom status bar.
 pub(crate) fn show(ui: &mut Ui, ctx: AppCtx<'_>) {
-    let ram = MemoryLabel::resolve(ctx.process_memory(), ctx.run_state().cache_ram);
+    let ram = MemoryLabel::resolve(ctx.process_memory(), ctx.run_state().cache_ram());
     let colors = &ctx.theme().colors;
     Panel::hstack()
         .id(id())

@@ -34,8 +34,6 @@ fn visibility_tracks_the_active_tab_not_the_graph_contents() {
 
 #[test]
 fn only_runnable_sinks_expose_the_disable_toggle() {
-    use scenarium::FuncId;
-
     // The two axes the toggle depends on: sink or not, and resolvable or not.
     // `can_disable` reads only the first, since a node whose func the library
     // has never held — the third here — declares no sink.
@@ -108,8 +106,9 @@ fn a_missing_func_reads_as_a_deletable_stub() {
     assert_eq!(ghost_node.port_count(PortKind::Input), 0);
 
     // The resolved node, by contrast, exposes its real ports.
-    assert!(
-        known_node.inputs().len() == 2,
+    assert_eq!(
+        known_node.inputs().len(),
+        2,
         "the resolved func still reports its interface"
     );
 

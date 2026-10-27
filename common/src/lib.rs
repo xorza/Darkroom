@@ -21,7 +21,7 @@
 //!   [`IntrospectInteger`], [`IntrospectFloat`] and [`IntrospectError`] are
 //!   exported for generated code to name rather than for hand-written `use`s.
 //! - The one route outside `common` to what the program does beyond its own memory:
-//!   [`fs`] for the file system, with atomic publication, [`FileIdentity`] and,
+//!   [`fs`] for the file system, with atomic publication, [`FileIdentity`], [`TempDir`] and,
 //!   beside it, [`MappedFile`] and [`ScratchFile`]; [`env`](mod@env) for the environment;
 //!   [`process`] for other processes; [`thread`], [`task`] and [`BgRuntime`] for a new
 //!   thread or runtime; [`par`] for parallel work; [`SystemMemory`], [`ResidentMemory`],
@@ -31,7 +31,7 @@
 //!   another; [`PerWorker`] is the scratch such a body takes.
 //!
 //! [`Id`], [`FloatExt`] and [`is_debug`] stand on their own, as do [`Buffer2`], the row-major 2D
-//! grid, and its geometry: [`Size2us`], [`Vec2us`] and [`Rect2us`]. `TempDir`,
+//! grid, and its geometry: [`Size2us`], [`Vec2us`] and [`Rect2us`].
 //! `TempFile` and the `internals` module are test scaffolding, gated behind
 //! the `internals` feature so they never enter a release build, as is `bench`, the policy every
 //! crate's benches share: a case's kind and the sampling of its group.
@@ -81,9 +81,8 @@ pub use buffer2::Buffer2;
 pub use cancel_token::CancelToken;
 pub use float_ext::FloatExt;
 pub use fs::file_identity::{FileId, FileIdentity};
+pub use fs::temp_dir::TempDir;
 pub use id::Id;
-#[cfg(feature = "internals")]
-pub use internals::temp_dir::TempDir;
 #[cfg(feature = "internals")]
 pub use internals::temp_file::TempFile;
 #[cfg(feature = "internals")]

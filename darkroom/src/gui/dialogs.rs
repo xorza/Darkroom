@@ -12,7 +12,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use common::fs;
 
 use crate::core::io::document;
-use crate::driver::action::DialogAnswer;
 
 /// Where `App`'s path picks are answered: the answers a driver queued, one per ask in order, then
 /// the fallback. A queued answer of the other shape reads as a cancel and logs an error, which the
@@ -25,6 +24,17 @@ pub(crate) struct Dialogs {
     /// Raised while a native dialog is open, which blocks the main thread until the person
     /// answers: a driver on another thread reads it to say why the editor does not answer.
     native_open: Arc<AtomicBool>,
+}
+
+/// One scripted answer to a file dialog, which the next dialog the app opens takes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DialogAnswer {
+    /// One path, for every ask but the multi-file pick.
+    Path(PathBuf),
+    /// The multi-file pick's paths.
+    Paths(Vec<PathBuf>),
+    /// The user closed the dialog.
+    Cancel,
 }
 
 /// What answers an ask with no queued answer left.
@@ -40,12 +50,12 @@ pub(crate) enum DialogFallback {
 /// A kind of file a save names: the label of its dialog's filter, and the extension the save
 /// adds when the typed name lacks it, as the native dialogs do not.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct SavedFile {
-    label: &'static str,
-    extension: &'static str,
+pub(crate) struct SavedFile<'a> {
+    label: &'a str,
+    extension: &'a str,
 }
 
-impl SavedFile {
+impl SavedFile<'_> {
     pub(crate) const PROJECT: Self = Self {
         label: "Darkroom project",
         extension: document::EXTENSION,
@@ -102,12 +112,12 @@ impl Dialogs {
     }
 
     /// Where to save a file of `kind`, the picker starting beside `start`; the extension is added.
-    pub(crate) fn save_path(&mut self, kind: SavedFile, start: Option<&Path>) -> Option<PathBuf> {
-        let ask = format!("save a {}", kind.label);
-        match self.queued.pop_front() {
-            Some(answer) => queued_path(&ask, answer).map(|path| kind.extended(path)),
-            None => self.fall_back(&ask, || pick_save_path(kind, start)),
-        }
+    pub(crate) fn save_path(
+        &mut self,
+        kind: SavedFile<'_>,
+        start: Option<&Path>,
+    ) -> Option<PathBuf> {
+        self.save_as(&format!("save a {}", kind.label), kind, start)
     }
 
     /// One existing file with one of `extensions`, or any file for none.
@@ -128,14 +138,36 @@ impl Dialogs {
         }
     }
 
-    /// A file to create, with one of `extensions`.
+    /// A file to create, with one of `extensions`. With exactly one, a name without it gets it
+    /// and an existing extended name is confirmed, as a save's is; with several no one of them is
+    /// the name's, so the name stays as typed.
     pub(crate) fn new_file(&mut self, extensions: &[&str]) -> Option<PathBuf> {
-        self.path("name a new file", || pick_new_file(extensions))
+        const ASK: &str = "name a new file";
+        match extensions {
+            [extension] => self.save_as(
+                ASK,
+                SavedFile {
+                    label: "Files",
+                    extension,
+                },
+                None,
+            ),
+            _ => self.path(ASK, || pick_new_file(extensions)),
+        }
     }
 
     /// A directory.
     pub(crate) fn dir(&mut self) -> Option<PathBuf> {
         self.path("pick a folder", pick_dir)
+    }
+
+    /// A save of `kind` that `ask` names: the next queued answer, else the native save dialog
+    /// behind the fallback, either with the extension added.
+    fn save_as(&mut self, ask: &str, kind: SavedFile<'_>, start: Option<&Path>) -> Option<PathBuf> {
+        match self.queued.pop_front() {
+            Some(answer) => queued_path(ask, answer).map(|path| kind.extended(path)),
+            None => self.fall_back(ask, || pick_save_path(kind, start)),
+        }
     }
 
     /// A one-path ask: the next queued answer, else `native` behind the fallback.
@@ -205,7 +237,7 @@ fn pick_project_open_path(start: Option<&Path>) -> Option<PathBuf> {
 /// answers for the file that will be replaced. A second save dialog rather than
 /// a message box, because rfd shows message boxes on Linux through zenity,
 /// which a desktop may lack, and the save then fails with nothing on screen.
-fn pick_save_path(kind: SavedFile, start: Option<&Path>) -> Option<PathBuf> {
+fn pick_save_path(kind: SavedFile<'_>, start: Option<&Path>) -> Option<PathBuf> {
     let mut picked = save_dialog(kind, start).save_file()?;
     while let Some(target) = kind.unconfirmed_target(&picked) {
         let mut dialog = save_dialog(kind, Some(&target));
@@ -217,7 +249,7 @@ fn pick_save_path(kind: SavedFile, start: Option<&Path>) -> Option<PathBuf> {
     Some(kind.extended(picked))
 }
 
-fn save_dialog(kind: SavedFile, start: Option<&Path>) -> rfd::FileDialog {
+fn save_dialog(kind: SavedFile<'_>, start: Option<&Path>) -> rfd::FileDialog {
     file_dialog(start).add_filter(kind.label, &[kind.extension])
 }
 
@@ -267,7 +299,7 @@ mod tests {
     /// already carries the extension (the dialog asked about that very file), are not.
     #[test]
     fn only_an_existing_extended_name_needs_confirming_again() {
-        let extended = |kind: SavedFile, name: &str| kind.extended(PathBuf::from(name));
+        let extended = |kind: SavedFile<'_>, name: &str| kind.extended(PathBuf::from(name));
         assert_eq!(
             extended(SavedFile::PROJECT, "scene"),
             PathBuf::from("scene.darkroom")
@@ -330,7 +362,8 @@ mod tests {
 
     /// Queued answers go to the asks in order, each of its own shape and absolute, as a native
     /// dialog's are: a relative one is taken against the working directory. The project save adds
-    /// the extension, as the native one does; the file list comes back sorted and once each. A
+    /// the extension, as the native one does, and so does a new file of one extension; the file
+    /// list comes back sorted and once each. A
     /// cancel, an answer of the other shape, and an ask past the last answer all read as `None`,
     /// the last one from the refusing fallback; an answer queued after that goes to the next ask.
     #[test]
@@ -346,6 +379,8 @@ mod tests {
             DialogAnswer::Paths(vec![PathBuf::from("/d/c.fit")]),
             DialogAnswer::Path(PathBuf::from("/d")),
             DialogAnswer::Path(PathBuf::from("inputs/x.fit")),
+            DialogAnswer::Path(PathBuf::from("/o/out")),
+            DialogAnswer::Path(PathBuf::from("/o/out")),
         ] {
             dialogs.queue(answer);
         }
@@ -374,6 +409,16 @@ mod tests {
             relative,
             abs("inputs/x.fit"),
             "taken against the working directory"
+        );
+        assert_eq!(
+            dialogs.new_file(&["png"]),
+            Some(abs("/o/out.png")),
+            "one extension is added"
+        );
+        assert_eq!(
+            dialogs.new_file(&["png", "tiff"]),
+            Some(abs("/o/out")),
+            "of several none is the name's"
         );
         assert_eq!(dialogs.dir(), None, "no answer left");
         assert_eq!(dialogs.existing_files(&[]), None, "no answer left");

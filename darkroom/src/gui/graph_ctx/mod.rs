@@ -189,7 +189,7 @@ impl<'a> GraphCtx<'a> {
 
     /// Whether the document places `node_id`, as a graph node or a stub.
     pub(crate) fn contains(self, node_id: NodeId) -> bool {
-        self.node(node_id).is_some()
+        self.view().node_placements.contains_key(&node_id)
     }
 
     /// This graph's wires, as `(consumer input ← producer output)`.

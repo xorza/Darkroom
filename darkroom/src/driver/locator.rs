@@ -8,7 +8,7 @@ use scenarium::NodeId;
 use crate::driver::error::DriverError;
 use crate::gui::app::App;
 use crate::gui::pane::graph_ui::canvas;
-use crate::gui::pane::graph_ui::node_ui::{port_row, wid};
+use crate::gui::pane::graph_ui::wid;
 use crate::gui::port_ref::PortRef;
 
 /// How many candidates a `NotFound` lists.
@@ -48,7 +48,7 @@ pub enum Side {
 }
 
 impl Locator {
-    /// The window point this locator names in `app`'s current frame: a widget's centre, or the
+    /// The window point this locator names in `app`'s current frame: a widget's center, or the
     /// point itself.
     pub(crate) fn point(&self, app: &App, ui: &Ui) -> Result<Vec2, DriverError> {
         match self {
@@ -85,7 +85,7 @@ impl Locator {
             ),
             Self::Port { node, side, port } => {
                 let port = find_port(self, app, find_node(self, app, node)?, *side, port)?;
-                self.visible(ui.response_for(port_row::port_circle_wid(port)).rect)
+                self.visible(ui.response_for(wid::port_circle(port)).rect)
             }
             Self::Text(text) => find_text(self, ui, text),
             Self::Nth(inner, n) => {

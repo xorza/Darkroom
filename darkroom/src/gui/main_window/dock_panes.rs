@@ -18,13 +18,11 @@ use scenarium::NodeId;
 use crate::core::document::Document;
 use crate::core::document::tab_ref::TabRef;
 use crate::core::io::preferences::Preferences;
-use crate::gui::frame::app_command::AppCommand;
-use crate::gui::frame::app_command::PreferencesCommand;
 use crate::gui::frame::requests::Requests;
 use crate::gui::frame::window_ctx::WindowCtx;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::GraphUi;
-use crate::gui::pane::image_viewer::{self, ImageViewer, ViewerPane};
+use crate::gui::pane::image_viewer::{self, ImageViewer, ViewerPane, ViewerWrites};
 use crate::gui::pane::preferences::PreferencesForm;
 
 /// Everything a pane's body needs, borrowed for one record pass.
@@ -75,23 +73,27 @@ impl DockTabs for DockPanes<'_> {
             }
             TabRef::ImageViewer(node_id) => {
                 let title = image_viewer::node_label(ctx.document(), node_id);
-                let previews = &app.run_state().previews;
+                let previews = app.run_state().previews();
                 let viewer = self
                     .image_viewers
                     .entry(node_id)
                     .or_insert_with(|| ImageViewer::new(node_id));
                 // Viewer-toolbar edits ride the same in-place preferences path
-                // as the Preferences tab.
+                // as the Preferences tab, and report on the same queue.
                 let pane = ViewerPane {
                     theme: app.theme(),
                     title,
                     previews,
                     size: size.map(Vec2::from),
                 };
-                if viewer.show(ui, pane, &mut self.preferences.viewer) {
-                    self.out
-                        .push_app(AppCommand::Preferences(PreferencesCommand::Changed));
-                }
+                viewer.show(
+                    ui,
+                    pane,
+                    ViewerWrites {
+                        preferences: &mut self.preferences.viewer,
+                        out: self.out,
+                    },
+                );
             }
         }
     }

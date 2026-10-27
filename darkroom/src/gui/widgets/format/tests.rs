@@ -9,8 +9,14 @@ fn elapsed_steps_through_units_within_the_reserved_width() {
     // Both sides of every unit switch, plus the digit-count steps within
     // seconds, which is where a live timer spends its time.
     let cases = [
-        (0.0, "0µs"),
-        (9.99e-7, "1µs"),
+        (0.0, "0ns"),
+        (0.4e-9, "<1ns"),
+        // A half rounds to even, so 0.5 ns prints as 0 and reads as under one.
+        (0.5e-9, "<1ns"),
+        (0.6e-9, "1ns"),
+        (100e-9, "100ns"),
+        (999.4e-9, "999ns"),
+        (1e-6, "1µs"),
         (999.4e-6, "999µs"),
         (1e-3, "1.0ms"),
         (999.94e-3, "999.9ms"),
@@ -21,6 +27,7 @@ fn elapsed_steps_through_units_within_the_reserved_width() {
         (999.994, "999.99s"),
         // The carry side of every switch: a value that rounds up to the next unit's 1 is shown in
         // that unit, never as "1000" of the smaller one.
+        (999.6e-9, "1µs"),
         (999.6e-6, "1.0ms"),
         (0.999_96, "1.00s"),
         (999.996, "1000.0s"),
@@ -38,18 +45,18 @@ fn elapsed_steps_through_units_within_the_reserved_width() {
 
 #[test]
 fn bytes_steps_through_magnitudes() {
-    // Sub-KB stays exact in bytes; each threshold is a power of 1024.
+    // Sub-KiB stays exact in bytes; each threshold is a power of 1024.
     assert_eq!(Bytes::new(0).to_string(), "0 B");
     assert_eq!(Bytes::new(512).to_string(), "512 B");
-    assert_eq!(Bytes::new(1024).to_string(), "1.0 KB");
-    assert_eq!(Bytes::new(1536).to_string(), "1.5 KB"); // 1536 / 1024 = 1.5
-    assert_eq!(Bytes::new(1_048_576).to_string(), "1.0 MB"); // 1024^2
-    assert_eq!(Bytes::new(3_145_728).to_string(), "3.0 MB"); // 3 * 1024^2
-    assert_eq!(Bytes::new(1_073_741_824).to_string(), "1.00 GB"); // 1024^3
-    assert_eq!(Bytes::new(1_610_612_736).to_string(), "1.50 GB"); // 1.5 * 1024^3
+    assert_eq!(Bytes::new(1024).to_string(), "1.0 KiB");
+    assert_eq!(Bytes::new(1536).to_string(), "1.5 KiB"); // 1536 / 1024 = 1.5
+    assert_eq!(Bytes::new(1_048_576).to_string(), "1.0 MiB"); // 1024^2
+    assert_eq!(Bytes::new(3_145_728).to_string(), "3.0 MiB"); // 3 * 1024^2
+    assert_eq!(Bytes::new(1_073_741_824).to_string(), "1.00 GiB"); // 1024^3
+    assert_eq!(Bytes::new(1_610_612_736).to_string(), "1.50 GiB"); // 1.5 * 1024^3
     // One below each threshold rounds up to 1024.0 of the smaller unit, so it reads as 1 of the
     // larger: 1_048_575 / 1024 = 1023.999…, (1024^3 − 1) / 1024^2 = 1023.999….
     assert_eq!(Bytes::new(1_023).to_string(), "1023 B");
-    assert_eq!(Bytes::new(1_048_575).to_string(), "1.0 MB");
-    assert_eq!(Bytes::new(1_073_741_823).to_string(), "1.00 GB");
+    assert_eq!(Bytes::new(1_048_575).to_string(), "1.0 MiB");
+    assert_eq!(Bytes::new(1_073_741_823).to_string(), "1.00 GiB");
 }

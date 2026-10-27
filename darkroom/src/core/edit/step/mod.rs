@@ -1,11 +1,11 @@
 //! The reversible primitives an edit lands as, and the history stores.
 //!
-//! An [`UndoStep`](undo_step::UndoStep) is one slot of the document plus both
-//! halves of what went into it — see [`Change`](change::Change) — so replaying
-//! it in either [`Direction`](change::Direction) is the same write with the
-//! other half. That pairing is what makes an inconsistent step
-//! unconstructible: there is no separate snapshot to keep aligned with a
-//! payload.
+//! An [`UndoStep`](undo_step::UndoStep) is one slot of the document plus what
+//! a replay in either [`Direction`](change::Direction) writes there: both
+//! halves of a [`Change`](change::Change), a node's whole entry and which way
+//! it moves, or, for a change that is its own inverse, the change alone, as a
+//! selection's toggles. Each shape admits only the steps it means: there is no
+//! separate snapshot to keep aligned with a payload.
 //!
 //! Each kind is one file, holding its payload and its
 //! [`Reversible`](reversible::Reversible) impl — how it writes and what it
@@ -25,7 +25,6 @@ pub(crate) mod set_positions;
 pub(crate) mod set_selection;
 pub(crate) mod set_subscription;
 pub(crate) mod set_ties;
-pub(crate) mod set_viewport;
 pub(crate) mod undo_step;
 
 #[cfg(test)]

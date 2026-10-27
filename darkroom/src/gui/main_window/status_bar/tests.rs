@@ -1,6 +1,7 @@
 use super::*;
 use crate::core::document::internals::DocumentFixture;
 use crate::gui::app::session::internals::SessionHarness;
+use crate::gui::theme::Theme;
 
 /// The rendered line, or `None` where there is no readout at all.
 fn rendered(process: u64, cache: RamUsage) -> Option<String> {
@@ -13,19 +14,19 @@ fn memory_label_leads_with_the_process_then_sums_both_cache_pools() {
     // An empty cache leaves the process footprint standing alone.
     assert_eq!(
         rendered(MEM, RamUsage::default()).as_deref(),
-        Some("MEM 3.0 MB")
+        Some("MEM 3.0 MiB")
     );
     // Either pool alone raises the clause on its own.
     assert_eq!(
         rendered(MEM, RamUsage { cpu: 1024, gpu: 0 }).as_deref(),
-        Some("MEM 3.0 MB · Cache 1.0 KB")
+        Some("MEM 3.0 MiB · Cache 1.0 KiB")
     );
     assert_eq!(
         rendered(MEM, RamUsage { cpu: 0, gpu: 2048 }).as_deref(),
-        Some("MEM 3.0 MB · Cache 2.0 KB")
+        Some("MEM 3.0 MiB · Cache 2.0 KiB")
     );
     // Both present → one clause carrying the sum: 1024 + 2048 = 3072 B,
-    // which is exactly 3.0 KB.
+    // which is exactly 3.0 KiB.
     assert_eq!(
         rendered(
             MEM,
@@ -35,7 +36,7 @@ fn memory_label_leads_with_the_process_then_sums_both_cache_pools() {
             }
         )
         .as_deref(),
-        Some("MEM 3.0 MB · Cache 3.0 KB")
+        Some("MEM 3.0 MiB · Cache 3.0 KiB")
     );
     // No footprint → no readout, even with a populated cache.
     assert_eq!(
@@ -65,18 +66,14 @@ fn status_bar_is_recorded_on_an_idle_document_with_or_without_a_reading() {
     h.prime(2);
     let with = h.ui.rect(id()).expect("status bar records");
 
-    // The strip is a real row either way — a collapsed one would
-    // arrange to zero height and read as "no bar".
-    for (rect, what) in [(without, "no reading"), (with, "3 MB reading")] {
-        assert!(rect.size.h > 0.0, "{what}: bar arranged to zero height");
-        assert!(rect.size.w > 0.0, "{what}: bar arranged to zero width");
+    // Padding alone without a reading, a row either way: a collapsed one would arrange to zero
+    // height and read as "no bar". A reading adds one body line, 13 px at the theme's factor,
+    // which the shaper measures up to a whole pixel: 15.59 to 16.
+    let theme = Theme::default();
+    let line = theme.palantir.text.line_height_for(theme.text.body).ceil();
+    assert_eq!(without.size.h, 2.0 * PAD_Y, "no reading");
+    assert_eq!(with.size.h, 2.0 * PAD_Y + line, "a 3 MiB reading");
+    for (rect, what) in [(without, "no reading"), (with, "3 MiB reading")] {
+        assert_eq!(rect.size.w, 1200.0, "{what}: the bar spans the window");
     }
-    // With a reading the bar hugs a line of text; without one it is
-    // padding alone, so it is strictly shorter. Both are still rows.
-    assert!(
-        with.size.h > without.size.h,
-        "a reading adds its label's line to the bar: {} vs {}",
-        with.size.h,
-        without.size.h,
-    );
 }

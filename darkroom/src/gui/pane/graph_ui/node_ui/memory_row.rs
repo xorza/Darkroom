@@ -7,10 +7,12 @@ use palantir::prelude::*;
 use scenarium::RamUsage;
 
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
+use crate::gui::pane::graph_ui::node_ui::card;
+use crate::gui::pane::graph_ui::node_ui::card::{
+    CARD_FOOTER_PAD_X, CARD_FOOTER_PAD_Y, LabeledValue,
+};
 use crate::gui::theme::Theme;
 use crate::gui::widgets::format::bytes::Bytes;
-use crate::gui::widgets::support;
-use crate::gui::widgets::support::{CARD_FOOTER_PAD_X, CARD_FOOTER_PAD_Y, LabeledValue};
 
 const DOT: f32 = 6.0;
 const BAR_H: f32 = 3.0;
@@ -36,7 +38,7 @@ pub(super) fn show(ui: &mut Ui, node_ctx: NodeCtx<'_>) {
         .gap(5.0)
         // Round only the bottom corners so the strip seats into the node's
         // rounded bottom — the header rounds the top the same way.
-        .chrome(support::footer_chrome(theme, r))
+        .chrome(card::footer_chrome(theme, r))
         .show(ui, |ui| {
             Panel::hstack()
                 .id_salt("node_mem_meters")

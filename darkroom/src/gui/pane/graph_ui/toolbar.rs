@@ -63,7 +63,7 @@ pub(super) fn show(ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
             pill::dress(Panel::hstack().id_salt("graph_toolbar_run"), theme).show(ui, |ui| {
                 // Run / cancel: toggled while a one-shot run is in
                 // flight.
-                let running = run_state.activity.is_executing();
+                let running = run_state.activity().is_executing();
                 let run_tip = if running { "Cancel run" } else { "Run" };
                 // Run is the one primary action in the cluster — it
                 // alone idles with the accent glyph; the event-loop
@@ -82,7 +82,7 @@ pub(super) fn show(ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
                     }));
                 }
                 // Event loop start / stop: toggled while the loop runs.
-                let event_loop_active = run_state.activity.event_loop_active();
+                let event_loop_active = run_state.activity().event_loop_active();
                 let events_tip = if event_loop_active {
                     "Stop events"
                 } else {
@@ -102,9 +102,9 @@ pub(super) fn show(ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
             });
 
             // View-framing actions, stacked under the run row on their own
-            // pill. Each emits a `SetViewport` intent (undoable), so they
-            // ride the same path as a manual pan/zoom rather than mutating the
-            // viewport out of band.
+            // pill. Each emits a `SetViewport` intent, so they ride the same
+            // path as a manual pan/zoom rather than mutating the viewport out
+            // of band.
             let framing = Panel::vstack()
                 .id_salt("graph_toolbar_framing")
                 .child_align(Align::new(HAlign::Left, VAlign::Top));
@@ -160,26 +160,38 @@ fn draw_reset(ui: &mut Ui, s: f32, color: RgbaF32) {
 
 /// Show all: a frame enclosing a 2×2 field of dots (fit every node).
 fn draw_show_all(ui: &mut Ui, s: f32, color: RgbaF32) {
-    support::frame(ui, s, color);
+    outline_square(ui, s, color);
     let r = s * 0.055;
     let near = s * 0.5 - s * 0.11;
     let far = s * 0.5 + s * 0.11;
     for &cy in &[near, far] {
-        for &ctx in &[near, far] {
-            ui.add_shape(support::dot(Vec2::new(ctx, cy), r).fill(color));
+        for &cx in &[near, far] {
+            ui.add_shape(support::dot(Vec2::new(cx, cy), r).fill(color));
         }
     }
 }
 
 /// Show selected: a frame enclosing one filled square (fit the selection).
 fn draw_show_selected(ui: &mut Ui, s: f32, color: RgbaF32) {
-    support::frame(ui, s, color);
+    outline_square(ui, s, color);
     let inner = s * 0.24;
     let o = (s - inner) * 0.5;
     ui.add_shape(
         Shape::rect(Rect::new(o, o, inner, inner))
             .corners(s * 0.04)
             .fill(color),
+    );
+}
+
+/// The rounded-square outline the view buttons' glyphs sit in, centered in an `s`-sized
+/// button box.
+fn outline_square(ui: &mut Ui, s: f32, color: RgbaF32) {
+    let w = s * 0.62;
+    let o = (s - w) * 0.5;
+    ui.add_shape(
+        Shape::rect(Rect::new(o, o, w, w))
+            .corners(s * 0.08)
+            .border(Stroke::new(color, s * 0.06)),
     );
 }
 

@@ -2,7 +2,7 @@
 //! within the canvas's [`ZoomRange`], and the toolbar's framings. Split out of
 //! `canvas` so the orchestration there isn't tangled with the (independently
 //! testable) viewport algebra. The gesture emits `GraphIntent::SetViewport`,
-//! so pan/zoom rides the same undo path as every other edit.
+//! the one way the document's camera moves.
 
 pub(crate) mod camera_gesture;
 
@@ -27,8 +27,7 @@ const FIT_MARGIN: f32 = 40.0;
 
 /// One of the graph toolbar's one-shot framings. A descriptor resolved at
 /// its call site into a `GraphIntent::SetViewport`, never queued itself, so
-/// a reframe rides the same undo path as a manual pan/zoom, as an undo entry
-/// of its own.
+/// a reframe moves the camera as a manual pan/zoom does.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Framing {
     /// Reset to 1:1 zoom, centered on all nodes (world origin when empty).
@@ -60,7 +59,7 @@ impl Framing {
                 fit_target(node_bounds(geometry, graph_ctx, Bounded::Selected)?, pane)
             }
         };
-        Some(GraphIntent::SetViewport { to, gesture: None })
+        Some(GraphIntent::SetViewport { to })
     }
 }
 
@@ -108,10 +107,7 @@ fn node_bounds(
             None => (rect.min, rect.max()),
         });
     }
-    acc.map(|(min, max)| Rect {
-        min,
-        size: Size::new(max.x - min.x, max.y - min.y),
-    })
+    acc.map(|(min, max)| Rect::from_min_max(min, max))
 }
 
 /// Fit `bounds` (world coords) centered in a `viewport`-sized pane,

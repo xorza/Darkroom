@@ -1,7 +1,7 @@
 //! One node of the graph, with its declaration resolved.
 
 use glam::Vec2;
-use scenarium::{CacheMode, Func, FuncEvent, Node, NodeId, RamUsage, Unresolved};
+use scenarium::{CacheMode, EventPort, Func, FuncEvent, Node, NodeId, RamUsage, Unresolved};
 
 use crate::core::preview_sink;
 use crate::gui::graph_ctx::GraphCtx;
@@ -12,7 +12,6 @@ use crate::gui::state::run_state::{ExecStatus, NodeRunState};
 use crate::gui::theme::Theme;
 use crate::gui::theme::const_editor_theme::ConstEditorTheme;
 use crate::gui::widgets::hover::Hover;
-use scenarium::EventPort;
 
 /// The `kind_label` a stub reports when the library holds no func under its
 /// id — see [`NodeCtx::stub`].

@@ -1,5 +1,5 @@
 //! The Preferences tab's content: a settings form for [`Preferences`]
-//! (the startup and exit toggles, the lens ML model paths), laid out as a
+//! (the behavior toggles, the lens ML model paths), laid out as a
 //! centered width-capped column of labeled sections.
 //! Rendered by `main_window` when the active tab is `TabRef::Preferences`.
 //!
@@ -12,7 +12,7 @@
 
 use std::path::{Path, PathBuf};
 
-use common::fs;
+use common::{fs, process};
 use lens::MlModelPaths;
 use palantir::FontWeight;
 use palantir::prelude::*;
@@ -22,8 +22,8 @@ use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::{MlModelKind, PreferencesCommand};
 use crate::gui::frame::requests::Requests;
 use crate::gui::theme::Theme;
+use crate::gui::widgets::edit_buffer::{EditBuffer, Focus};
 use crate::gui::widgets::support;
-use crate::platform;
 
 /// Cap on the settings column, so the form reads as a column on a wide
 /// window instead of a handful of controls in the corner of a bare sheet.
@@ -62,7 +62,7 @@ impl PreferencesForm<'_> {
                     .max_size((COL_WIDTH, f32::INFINITY))
                     .gap(SECTIONS_GAP)
                     .show(ui, |ui| {
-                        // Behavior — the startup + exit toggles.
+                        // Behavior — the startup, exit and save toggles.
                         Section { title: "Behavior" }.show(ui, theme, |ui| {
                             if Checkbox::new(&mut preferences.load_last_document)
                                 .label("Load last document on startup")
@@ -130,28 +130,20 @@ impl PreferencesForm<'_> {
         let ModelRow { label, kind, .. } = row;
         let theme = self.theme;
         let path = kind.path_mut(paths);
-        let id = WidgetId::from_hash(("preferences.ml_model_path", label));
-        // Refresh the draft from `path` only when `path` changed *externally*
-        // (initial load, a Browse pick, or last frame's commit) — never on
-        // "unfocused". Focus is resolved before the record pass, so on the blur
-        // frame `focus()` already reads unfocused; mirroring there would stomp
-        // the just-typed text before `TextEdit`'s submit/blur commit could read
-        // it (the field would snap back and nothing would save). Keying the
-        // refresh on the external value sidesteps that race entirely — and gives
-        // `status` its no-stat-per-frame revalidation point.
-        ui.with_state::<PathField, _>(id, |ui, field| {
-            // Scoped so the borrow of `path` ends here: `to_string_lossy` is
-            // borrowed for a UTF-8 path (every path that round-trips through this
-            // field), so the common — unchanged — case compares in place rather
-            // than allocating a fresh `String` each frame only to find nothing
-            // moved. The committing branch below compares against the mirrored
-            // `seen` instead.
-            {
+        let wid = path_field_wid(label);
+        // Refresh the draft from `path` only while the field is idle, so an in-progress edit
+        // is never overwritten, the blur frame that commits it included: focus is resolved
+        // before the record pass, so that frame already reads unfocused
+        // ([`EditBuffer::is_idle`]). The problem is re-statted only when the mirrored path
+        // changes and on a commit, never per frame.
+        ui.with_state::<PathField, _>(wid, |ui, field| {
+            if field.buffer.is_idle(Focus::of(ui, wid)) {
+                // Borrowed for a UTF-8 path, every path that round-trips through this field, so
+                // the common unchanged case compares in place.
                 let canonical = path.to_string_lossy();
-                if field.seen != canonical {
-                    field.text.replace_range(.., &canonical);
-                    field.seen.replace_range(.., &canonical);
-                    field.problem = path_problem(&canonical);
+                if field.buffer.text != canonical {
+                    field.buffer.text.replace_range(.., &canonical);
+                    field.problem = path_problem(path);
                 }
             }
             let problem = field.problem;
@@ -175,8 +167,8 @@ impl PreferencesForm<'_> {
                                         .show(ui);
                                 });
 
-                            let mut edit = TextEdit::new(&mut field.text)
-                                .id(id)
+                            let mut edit = TextEdit::new(&mut field.buffer.text)
+                                .id(wid)
                                 .size((Sizing::FILL, Sizing::HUG))
                                 .min_size((ML_PATH_FIELD_MIN, 0.0))
                                 .placeholder("/path/to/model.onnx");
@@ -190,14 +182,11 @@ impl PreferencesForm<'_> {
                             if response.ended == Some(EditEnd::Canceled) {
                                 // Escape drops the draft: the field shows the
                                 // committed path again.
-                                field.text.clone_from(&field.seen);
+                                field.buffer.text.replace_range(.., &path.to_string_lossy());
                             }
                             if response.committed {
-                                // Against the mirror, not a re-read of `path`:
-                                // `seen` was just synced to it, and comparing
-                                // there keeps `path` unborrowed for the write.
-                                if field.text != field.seen {
-                                    *path = PathBuf::from(field.text.clone());
+                                if field.buffer.text != path.to_string_lossy() {
+                                    *path = PathBuf::from(field.buffer.text.clone());
                                     self.out.push_app(AppCommand::Preferences(
                                         PreferencesCommand::Changed,
                                     ));
@@ -205,10 +194,9 @@ impl PreferencesForm<'_> {
                                 // Re-stat on every commit — even an unchanged
                                 // path: the file may have appeared (or vanished)
                                 // since the last check, and Enter is the natural
-                                // retry. A *changed* commit re-checks again next
-                                // frame via the `seen` mirror once it lands in
-                                // `canonical`.
-                                field.problem = path_problem(&field.text);
+                                // retry. The stored path, not the text, which is
+                                // lossy for a name that is not UTF-8.
+                                field.problem = path_problem(path);
                             }
 
                             if Button::new()
@@ -237,6 +225,7 @@ impl PreferencesForm<'_> {
                     }
                     download_hint(ui, theme, row);
                 });
+            field.buffer.settle(Focus::of(ui, wid));
         });
     }
 }
@@ -292,11 +281,10 @@ const ML_ROW_GAP: f32 = 8.0;
 /// valid resting state — the ML nodes are optional) or healthy. Stats the
 /// filesystem, so callers refresh it only on value changes and commits —
 /// never per frame.
-fn path_problem(path: &str) -> Option<&'static str> {
-    if path.is_empty() {
+fn path_problem(p: &Path) -> Option<&'static str> {
+    if p.as_os_str().is_empty() {
         return None;
     }
-    let p = Path::new(path);
     if fs::is_dir(p) {
         return Some("Points at a folder \u{2014} pick the .onnx file inside");
     }
@@ -309,19 +297,18 @@ fn path_problem(path: &str) -> Option<&'static str> {
     (!onnx).then_some("Not an .onnx file")
 }
 
-/// Cross-frame state for a [`PreferencesForm::model_row`] path field: the editor's live `text`
-/// plus `seen`, the external path value last mirrored into it. The buffer is
-/// refreshed from the path only when `seen` diverges from it (an external
-/// change — load, Browse, or our own commit landing), so an in-progress edit
-/// is never overwritten, including on the blur frame where the commit fires.
-/// `problem` (the path health) refreshes on the same mirror *and* on every
-/// commit — the latter so re-committing an unchanged path re-stats it (the
-/// file may have appeared since) — never per frame.
+/// Cross-frame state for a [`PreferencesForm::model_row`] path field: the buffered text, as a
+/// const editor keeps it, and the path's health, cached as the mirror and each commit last
+/// found it.
 #[derive(Default, Debug)]
 struct PathField {
-    text: String,
-    seen: String,
+    buffer: EditBuffer,
     problem: Option<&'static str>,
+}
+
+/// The path field of the model row `label`.
+fn path_field_wid(label: &str) -> WidgetId {
+    WidgetId::from_hash(("preferences.ml_model_path", label))
 }
 
 /// The CLI tools ship as a zip of self-contained binaries plus the model
@@ -353,17 +340,17 @@ fn download_hint(ui: &mut Ui, theme: &Theme, row: ModelRow) {
         download_url: url,
         ..
     } = row;
-    let id = WidgetId::from_hash(("preferences.download_hint", link_label));
+    let wid = WidgetId::from_hash(("preferences.download_hint", link_label));
     // Last frame's hover drives the brighten — this frame's response isn't
     // known until after `show`.
-    let link_color = if ui.response_for(id).hovered() {
+    let link_color = if ui.response_for(wid).hovered() {
         theme.colors.link_hovered
     } else {
         theme.colors.link
     };
     indented_line(ui, "hint", |ui| {
         let link = Panel::hstack()
-            .id(id)
+            .id(wid)
             .size((Sizing::HUG, Sizing::HUG))
             .sense(Sense::CLICK)
             .show(ui, |ui| {
@@ -372,8 +359,11 @@ fn download_hint(ui: &mut Ui, theme: &Theme, row: ModelRow) {
                     .show(ui);
             });
         let snapshot = link.response.snapshot();
-        if link.response.left.clicked() {
-            platform::open_url(url);
+        // A missing opener logs and degrades: the link has no error to show.
+        if link.response.left.clicked()
+            && let Err(error) = process::open_url(url)
+        {
+            tracing::warn!("failed to open url {url}: {error}");
         }
         // Surface the destination on hover so the user sees where the
         // link goes before clicking — the URL isn't otherwise visible.
@@ -389,29 +379,41 @@ mod tests {
     use super::*;
     use std::iter;
 
-    use common::{TempDir, TempFile};
+    use common::{TempDir, TempFile, internals};
     use palantir::internals::ui_harness::UiHarness;
 
     #[test]
     fn path_problem_classifies_empty_missing_dir_and_extension() {
         // Empty is the valid resting state (the ML nodes are optional).
-        assert_eq!(path_problem(""), None);
+        assert_eq!(path_problem(Path::new("")), None);
         // A directory is distinguished from a truly absent path — pointing
         // at the unzipped folder is the mistake the download hint warns of.
         let dir = TempDir::new("darkroom-path-dir");
         assert_eq!(
-            path_problem(dir.path().to_str().unwrap()),
+            path_problem(dir.path()),
             Some("Points at a folder \u{2014} pick the .onnx file inside")
         );
         let missing = TempFile::with_extension("darkroom-path-missing", "onnx");
-        assert_eq!(path_problem(&missing.to_str()), Some("File not found"));
+        assert_eq!(path_problem(missing.path()), Some("File not found"));
         // Real files: a wrong extension flags; `.onnx` passes in any case.
         let wrong = TempFile::with_extension("darkroom-path-wrong", "txt");
         fs::write(wrong.path(), b"x").unwrap();
-        assert_eq!(path_problem(&wrong.to_str()), Some("Not an .onnx file"));
+        assert_eq!(path_problem(wrong.path()), Some("Not an .onnx file"));
         let onnx = TempFile::with_extension("darkroom-path-upper", "ONNX");
         fs::write(onnx.path(), b"x").unwrap();
-        assert_eq!(path_problem(&onnx.to_str()), None);
+        assert_eq!(path_problem(onnx.path()), None);
+        // A name that is not Unicode is checked as itself, not as its lossy text, which names
+        // another file. APFS refuses such a name, so there is nothing to check on it.
+        let mut odd = dir.join(internals::non_unicode_name(1));
+        odd.set_extension("onnx");
+        if fs::write(&odd, b"x").is_ok() {
+            assert_eq!(path_problem(&odd), None);
+            assert_eq!(
+                path_problem(Path::new(&*odd.to_string_lossy())),
+                Some("File not found"),
+                "the lossy text names no file"
+            );
+        }
     }
 
     /// Escape in a path field drops the draft: the path and the field go back to the committed
@@ -425,7 +427,7 @@ mod tests {
             download_label: "download",
             download_url: "https://example.invalid",
         };
-        let id = WidgetId::from_hash(("preferences.ml_model_path", row.label));
+        let wid = path_field_wid(row.label);
         let mut paths = MlModelPaths {
             denoise: PathBuf::from("/a.onnx"),
             ..MlModelPaths::default()
@@ -452,7 +454,7 @@ mod tests {
         let type_x = |h: &mut UiHarness,
                       frame: &mut dyn FnMut(&mut UiHarness, &mut MlModelPaths) -> usize,
                       paths: &mut MlModelPaths| {
-            let center = h.rect(id).expect("path field arranged").center();
+            let center = h.rect(wid).expect("path field arranged").center();
             h.click_at(center);
             frame(h, paths);
             h.key(Key::End);

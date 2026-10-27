@@ -2,20 +2,18 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::thread;
 use std::time::{Duration, Instant};
 
 use palantir::{FrameReport, InputEvent, Rect, Ui};
 
-use crate::core::io::preferences::Preferences;
 use crate::core::io::preferences::preferences_store::PreferencesStore;
 use crate::driver::display::Display;
 use crate::driver::error::DriverError;
-use crate::driver::shot::{Region, Shot};
+use crate::driver::shot::{Capture, Region};
 use crate::driver::{BACKGROUND_WAIT, SETTLE_FRAMES, SessionConfig};
 use crate::gui::app::app_host::AppHost;
 use crate::gui::app::offscreen_signals::OffscreenSignals;
-use crate::gui::app::{App, LaunchInputs};
+use crate::gui::app::{App, LaunchInputs, UnsavedEdits};
 use crate::gui::dialogs::{DialogFallback, Dialogs};
 
 /// The UI time one frame takes.
@@ -35,7 +33,7 @@ impl Offscreen {
     pub(crate) fn new(config: SessionConfig) -> Result<Self, DriverError> {
         let mut display = Display::new(config.display, config.size, config.scale)?;
         let signals = Arc::new(OffscreenSignals::default());
-        let app = launch(&mut display, &signals, None);
+        let app = launch(&mut display, &signals);
         Ok(Self {
             app,
             display,
@@ -43,7 +41,7 @@ impl Offscreen {
         })
     }
 
-    pub(crate) fn read<R>(&mut self, f: impl FnOnce(&mut App, &Ui) -> R) -> R {
+    pub(crate) fn with_app<R>(&mut self, f: impl FnOnce(&mut App, &Ui) -> R) -> R {
         f(&mut self.app, self.display.ui())
     }
 
@@ -79,50 +77,45 @@ impl Offscreen {
         self.signals.wake_pending()
     }
 
-    /// A new app on the absolute `document`, or on an empty one for none, in place of this one,
-    /// or why `document` did not open, which leaves this one as it was.
-    pub(crate) fn relaunch(&mut self, document: Option<PathBuf>) -> Result<(), DriverError> {
-        // Signals of its own: the app before may have asked to quit.
-        let signals = Arc::new(OffscreenSignals::default());
-        let app = launch(&mut self.display, &signals, document.clone());
-        if let Some(document) = document {
-            // A document that does not load leaves the new app on an empty one, as a person's
-            // launch does; the status line holds why.
-            debug_assert!(document.is_absolute(), "{}", document.display());
-            if app.open_document().path.as_ref() != Some(&document) {
-                return Err(DriverError::NotOpened {
-                    path: document,
-                    status: app.status().cur().map(|message| message.line.to_string()),
-                });
-            }
+    /// Sleep until background work wakes the app or `deadline` passes.
+    pub(crate) fn wait_wake(&self, deadline: Instant) {
+        self.signals.wait_wake(deadline);
+    }
+
+    /// Open the absolute `document`, or a new document for none, in place of the open one, as the
+    /// window's open does but discarding unsaved edits, which no one but the driver made here. An
+    /// editor that quit launches again first: a window that quit is gone, and this one has no
+    /// person to lose it.
+    pub(crate) fn open(&mut self, document: Option<PathBuf>) -> Result<(), DriverError> {
+        if self.signals.quit_asked() {
+            // Signals of its own: the app before asked to quit.
+            self.signals = Arc::new(OffscreenSignals::default());
+            self.app = launch(&mut self.display, &self.signals);
         }
-        self.app = app;
-        self.signals = signals;
+        match document {
+            Some(document) => self.app.open_driven(&document, UnsavedEdits::Discard)?,
+            None => self.app.new_driven(UnsavedEdits::Discard)?,
+        }
         Ok(())
     }
 
-    /// A shot of `region` as the next frame paints it; see [`crate::driver::Driver::shot`].
-    pub(crate) fn shot(
-        &mut self,
-        region: &Region,
-        max_side: u32,
-        path: PathBuf,
-    ) -> Result<Shot, DriverError> {
+    /// A capture of `region` as the next frame paints it; see [`crate::driver::Driver::shot`].
+    pub(crate) fn shot(&mut self, region: &Region, max_side: u32) -> Result<Capture, DriverError> {
         if !self.display.paints() {
             return Err(DriverError::NoGpu);
         }
         let rect: Option<Rect> = region.rect(&self.app, self.display.ui())?;
-        self.display.ui().request_screenshot(rect);
+        let asked = self.display.ui().request_screenshot(rect);
         // The frame paints the image; once the device's copy of it is back, the next frame lands
         // it, after any image an earlier ask is owed, one a frame.
         self.frame();
         for _ in 0..SETTLE_FRAMES {
             self.display.wait_for_gpu();
             self.frame();
-            if let Some(screenshot) = self.display.ui().screenshot_taken() {
+            let ui = self.display.ui();
+            if let Some(screenshot) = ui.screenshot_taken(asked) {
                 // The legend reads the frame the image landed in.
-                let screenshot = screenshot.clone();
-                return Shot::of(&screenshot, max_side, &self.app, self.display.ui(), path);
+                return Capture::of(screenshot, max_side, &self.app, ui);
             }
         }
         Err(DriverError::Unsettled {
@@ -158,18 +151,15 @@ impl Offscreen {
                 }
                 continue;
             }
-            if !self.app.run_state().previews.in_flight() {
+            if !self.app.run_state().previews().in_flight() {
                 return Ok(frames);
             }
             // The converter's wake announces the result; the next frame, made full, lands it.
-            while !self.signals.wake_pending() {
-                if Instant::now() > deadline {
-                    return Err(DriverError::UnsettledInTime {
-                        step: step.to_string(),
-                        seconds: BACKGROUND_WAIT.as_secs_f32(),
-                    });
-                }
-                thread::sleep(Duration::from_millis(1));
+            if !self.signals.wait_wake(deadline) {
+                return Err(DriverError::UnsettledInTime {
+                    step: step.to_string(),
+                    seconds: BACKGROUND_WAIT.as_secs_f32(),
+                });
             }
         }
         unreachable!("the frames run until the editor settles or a bound ends them")
@@ -177,18 +167,14 @@ impl Offscreen {
 }
 
 /// An app on the driver's host, opening `document` or an empty one.
-fn launch(
-    display: &mut Display,
-    signals: &Arc<OffscreenSignals>,
-    document: Option<PathBuf>,
-) -> App {
+/// An app on an empty document, its host `signals`.
+fn launch(display: &mut Display, signals: &Arc<OffscreenSignals>) -> App {
     App::new(
         display.ui(),
         AppHost::Offscreen(Arc::clone(signals)),
         LaunchInputs {
-            preferences: Ok(Preferences::default()),
-            store: PreferencesStore::Memory,
-            document,
+            preferences: PreferencesStore::Memory.open(),
+            document: None,
             dialogs: Dialogs::new(DialogFallback::Refuse),
         },
     )

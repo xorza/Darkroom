@@ -50,14 +50,3 @@ pub(crate) fn route_opened_documents<A>(handle: HostHandle<A>, open: fn(&mut A, 
 pub(crate) fn config_dir() -> Option<PathBuf> {
     sys::config_dir()
 }
-
-/// Open `url` in the user's default browser.
-///
-/// Non-blocking — the spawn returns immediately, so this is safe to call
-/// mid-record, unlike the modal file dialogs. A missing opener logs and
-/// degrades; there is no user-facing error surface yet.
-pub(crate) fn open_url(url: &str) {
-    if let Err(e) = sys::open_url(url) {
-        tracing::warn!("failed to open url {url}: {e}");
-    }
-}

@@ -4,11 +4,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use darkroom::driver::Driver;
 use darkroom::driver::action::Action;
-use darkroom::driver::error::DriverError;
+use darkroom::driver::error::{ActFailure, DriverError};
 use darkroom::driver::shot::{LegendNode, Region};
-use darkroom::driver::state::{Detail, State};
-use darkroom::driver::{ActReport, Driver};
+use darkroom::driver::state::{Detail, NODE_LIMIT, State};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
@@ -61,9 +61,9 @@ struct ShotLegend<'a> {
 #[tool_router]
 impl DarkroomServer {
     /// A server of the session `session` holds.
-    pub(crate) fn new(session: SessionThread) -> Self {
+    pub(crate) fn new(session: Arc<SessionThread>) -> Self {
         Self {
-            session: Arc::new(session),
+            session,
             tool_router: Self::tool_router(),
         }
     }
@@ -111,37 +111,49 @@ impl DarkroomServer {
     )]
     async fn darkroom_act(&self, Parameters(params): Parameters<ActParams>) -> CallToolResult {
         self.run(move |session| {
-            let driver = session.driver()?;
-            let count = params.actions.len();
-            // One at a time, so a failure names the action it stopped at.
-            let mut report = driver.act(&[])?;
-            for (idx, action) in params.actions.into_iter().enumerate() {
-                let step = match driver.act(&[Action::from(action)]) {
-                    Ok(step) => step,
-                    Err(DriverError::Quit) => {
-                        session.quit();
-                        return Ok(vec![ContentBlock::text(format!(
-                            "The editor quit at action {} of {count}, as the action asked, and \
-                             the session is closed; the actions after it did not run, and the \
-                             server ends.",
-                            idx + 1
-                        ))]);
-                    }
-                    Err(error) => {
-                        return Err(ToolError(format!(
-                            "action {} of {count} failed, and the ones before it ran: {error}",
-                            idx + 1
-                        )));
-                    }
-                };
-                report = ActReport {
-                    frames: report.frames + step.frames,
-                    ..step
-                };
-            }
+            let actions = params
+                .actions
+                .into_iter()
+                .map(Action::try_from)
+                .collect::<Result<Vec<_>, _>>()?;
+            let count = actions.len();
+            let report = match session.driver()?.act(&actions) {
+                Ok(report) => report,
+                Err(ActFailure {
+                    ran,
+                    error: DriverError::Quit,
+                }) => {
+                    session.quit();
+                    return Ok(vec![ContentBlock::text(format!(
+                        "The editor quit at action {} of {count}, as the action asked, and the \
+                         session is closed; the actions after it did not run, and the server \
+                         ends.",
+                        (ran + 1).min(count)
+                    ))]);
+                }
+                Err(ActFailure { ran, error }) if ran < count => {
+                    return Err(ToolError(format!(
+                        "action {} of {count} failed, and the ones before it ran: {error}",
+                        ran + 1
+                    )));
+                }
+                Err(ActFailure { error, .. }) => {
+                    return Err(ToolError(format!(
+                        "the {count} actions ran, and reading the editor after them failed: \
+                         {error}"
+                    )));
+                }
+            };
             let mut content = json(&report)?;
             if let Some(shot) = params.shot {
-                content.extend(take_shot(driver, shot)?);
+                // The actions ran whatever the shot does: their report stays, so the agent does
+                // not play them again.
+                match take_shot(session.driver()?, shot) {
+                    Ok(shot) => content.extend(shot),
+                    Err(ToolError(message)) => content.push(ContentBlock::text(format!(
+                        "The actions ran; the shot after them failed: {message}"
+                    ))),
+                }
             }
             Ok(content)
         })
@@ -149,12 +161,15 @@ impl DarkroomServer {
     }
 
     #[tool(
-        description = "The editor as text: the open document, whether it has unsaved edits, \
-        each node by name with its rect on screen, the selection, the focus, the status line, and \
-        the warnings and errors logged since the last call. detailed adds each node's id, ports, \
-        bindings and run status, the wires, the camera and whether an undo is possible; nodes \
-        keeps the nodes whose name contains it. Example: {\"detail\": \"detailed\", \"nodes\": \
-        \"Blur\"}"
+        description = format!(
+            "The editor as text: the open document, whether it has unsaved edits, each node by \
+             name with its rect on screen, the selection, the focus, the status line, and the \
+             warnings and errors logged since the last call. detailed adds each node's id, \
+             ports, bindings and run status, the wires, the camera and whether an undo is \
+             possible. nodes keeps the nodes whose name contains it and the wires with one at \
+             either end; the list stops at {NODE_LIMIT} nodes, and the answer says how many it \
+             left out. Example: {{\"detail\": \"detailed\", \"nodes\": \"Blur\"}}"
+        )
     )]
     async fn darkroom_state(&self, Parameters(params): Parameters<StateParams>) -> CallToolResult {
         self.run(move |session| {

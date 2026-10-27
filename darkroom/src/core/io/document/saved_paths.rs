@@ -79,12 +79,17 @@ fn absolute(value: &str) -> bool {
     value.is_empty() || Path::new(value).is_absolute()
 }
 
-/// `value` relative to `folder` when it lies inside it; `.` for the folder itself.
+/// `value` relative to `folder` when it lies inside it; `.` for the folder itself. A path that
+/// reaches its place through `..` stays absolute: a relative form would hold the `..`, and only
+/// the file system says where `..` leads past a link, so it is not folded away.
 fn relative_to(value: &str, folder: &Path) -> Option<String> {
     if !Path::new(value).is_absolute() {
         return None;
     }
     let inner = Path::new(value).strip_prefix(folder).ok()?;
+    if inner.components().any(|part| part == Component::ParentDir) {
+        return None;
+    }
     let parts: Vec<&str> = inner
         .components()
         .map(|part| {

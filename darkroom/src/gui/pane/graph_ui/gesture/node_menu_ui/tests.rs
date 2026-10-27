@@ -214,3 +214,19 @@ fn run_pick_names_the_opened_node_and_edits_nothing() {
         h.commands
     );
 }
+
+/// A menu whose node the document drops while it is open, as a Delete or an undo does, closes:
+/// its picks would apply to nothing, and Remove to whatever the selection is.
+#[test]
+fn a_menu_closes_when_its_node_leaves_the_document() {
+    let mut h = CanvasHarness::shaping_text(DocumentFixture::probes(2), SURFACE);
+    let (gone, stays) = (h.node(0), h.node(1));
+    open_menu(&mut h, gone);
+    assert!(h.graph_ui.node_menu.in_flight(), "the menu opened");
+
+    h.document_mut().graph.detach_node(gone);
+    h.document_mut().main_view.node_placements.remove(&gone);
+    h.document_mut().main_view.selected = [stays].map(ItemId::Node).into_iter().collect();
+    assert!(h.frame().is_empty(), "the closing frame edits nothing");
+    assert!(!h.graph_ui.node_menu.in_flight(), "the menu closed");
+}

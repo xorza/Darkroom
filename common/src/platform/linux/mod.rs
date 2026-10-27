@@ -1,15 +1,22 @@
-//! Linux: control groups bound the process's memory, `mountinfo` names the file systems, and the
-//! XDG base directories name the cache.
+//! Linux: control groups bound the process's memory, `mountinfo` names the file systems, the
+//! XDG base directories name the cache, and `xdg-open` opens a URL.
 
 mod cgroup_memory;
 mod mount_table;
 
+use std::io;
 use std::path::{Path, PathBuf};
 
 use sysinfo::System;
 
 use crate::platform::linux::cgroup_memory::CgroupMemory;
 use crate::platform::linux::mount_table::MountTable;
+use crate::platform::unix;
+
+/// Open `url` with `xdg-open`, which the desktop's own handlers answer.
+pub(super) fn open_url(url: &str) -> io::Result<()> {
+    unix::spawn_detached("xdg-open", [url])
+}
 
 /// The host's available memory, or less where this process's control groups leave less.
 pub(super) fn available_memory(system: &System) -> u64 {

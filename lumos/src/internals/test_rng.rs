@@ -1,6 +1,6 @@
 //! [`TestRng`]: the seeded generator every synthetic fixture draws from.
 
-use std::f32::consts::PI;
+use std::f64::consts::TAU;
 
 /// Deterministic LCG random number generator for reproducible test data.
 ///
@@ -42,12 +42,14 @@ impl TestRng {
 
     /// Return a Gaussian-distributed f32 with mean 0 and standard deviation 1.
     ///
-    /// Uses the Box-Muller transform. Consumes two uniform samples per call.
+    /// Uses the Box-Muller transform. Consumes two uniform samples per call. In `f64`, then
+    /// rounded: the C library's `ln` and `cos` round an ulp apart between platforms, and an `f64`
+    /// ulp almost never moves the `f32`, so a fixture draws the same noise on every host.
     #[inline]
     pub(crate) fn next_gaussian_f32(&mut self) -> f32 {
-        let u1 = self.next_f32().max(1e-10);
-        let u2 = self.next_f32();
-        (-2.0 * u1.ln()).sqrt() * (2.0 * PI * u2).cos()
+        let u1 = f64::from(self.next_f32().max(1e-10));
+        let u2 = f64::from(self.next_f32());
+        ((-2.0 * u1.ln()).sqrt() * (TAU * u2).cos()) as f32
     }
 }
 

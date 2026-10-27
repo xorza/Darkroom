@@ -11,7 +11,7 @@ use crate::gui::pane::graph_ui::internals::CanvasHarness;
 
 /// A drag on a node body moves that node, by the pointer's travel.
 ///
-/// The latch is read where the body is drawn: `NodeWidget::show` walks the
+/// The latch is read where the body is drawn: `NodeUi::draw_node` walks the
 /// node's own `drag_handles` for a fresh press, and later frames' `prepass`
 /// turns that handle's `drag_delta` into a `MoveSelection`. So this drives a
 /// real press-and-travel through the harness — nothing else in the suite

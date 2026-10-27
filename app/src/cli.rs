@@ -7,6 +7,13 @@ use std::str::FromStr;
 use clap::Parser;
 use glam::UVec2;
 
+/// The largest window side a session takes, in physical pixels: wgpu's default
+/// `max_texture_dimension_2d`, which desktop adapters reach. palantir asks the adapter for its
+/// own limit, so an adapter below it panics on a larger window.
+const MAX_WINDOW_SIDE: u32 = 8192;
+/// The smallest scale a session takes: at a quarter, a 12 px label is 3 pixels high.
+const MIN_SCALE: f32 = 0.25;
+
 /// darkroom — node-graph editor.
 #[derive(Debug, Parser)]
 #[command(version, about = "darkroom node-graph editor")]
@@ -24,9 +31,9 @@ pub(crate) struct Cli {
     /// The headless window's physical size, as `1600x1000`.
     #[arg(long, requires = "headless", default_value = "1600x1000")]
     size: WindowSize,
-    /// The headless window's physical pixels per logical pixel.
-    #[arg(long, requires = "headless", default_value_t = 1.0)]
-    scale: f32,
+    /// The headless window's physical pixels per logical pixel, 0.25 or more.
+    #[arg(long, requires = "headless", default_value = "1")]
+    scale: WindowScale,
 }
 
 /// What a launch runs.
@@ -45,9 +52,15 @@ pub(crate) enum Launch {
     },
 }
 
-/// A `WxH` size in pixels.
+/// A `WxH` size in pixels, each side from 1 to [`MAX_WINDOW_SIDE`]: a window no device can make
+/// is refused with the usage error.
 #[derive(Clone, Copy, Debug)]
 struct WindowSize(UVec2);
+
+/// Physical pixels per logical pixel, finite and at least [`MIN_SCALE`], so a label stays
+/// readable.
+#[derive(Clone, Copy, Debug)]
+struct WindowScale(f32);
 
 impl Cli {
     pub(crate) fn launch(self) -> Launch {
@@ -64,7 +77,7 @@ impl Cli {
             (true, true) => Launch::McpHeadless {
                 document,
                 size: size.0,
-                scale,
+                scale: scale.0,
             },
         }
     }
@@ -76,10 +89,27 @@ impl FromStr for WindowSize {
     fn from_str(text: &str) -> Result<Self, Self::Err> {
         let bad = || format!("'{text}' is not a size; write it as 1600x1000");
         let (w, h) = text.split_once('x').ok_or_else(bad)?;
-        Ok(Self(UVec2::new(
-            w.parse().map_err(|_| bad())?,
-            h.parse().map_err(|_| bad())?,
-        )))
+        let size = UVec2::new(w.parse().map_err(|_| bad())?, h.parse().map_err(|_| bad())?);
+        if size.min_element() == 0 || size.max_element() > MAX_WINDOW_SIDE {
+            return Err(format!(
+                "'{text}' is no window; give each side from 1 to {MAX_WINDOW_SIDE} pixels"
+            ));
+        }
+        Ok(Self(size))
+    }
+}
+
+impl FromStr for WindowScale {
+    type Err = String;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        match text.parse::<f32>() {
+            Ok(scale) if scale.is_finite() && scale >= MIN_SCALE => Ok(Self(scale)),
+            _ => Err(format!(
+                "'{text}' is no scale; give the physical pixels per logical pixel, {MIN_SCALE} \
+                 or more"
+            )),
+        }
     }
 }
 
@@ -91,7 +121,7 @@ mod tests {
     use clap::error::ErrorKind;
     use glam::UVec2;
 
-    use crate::cli::{Cli, Launch, WindowSize};
+    use crate::cli::{Cli, Launch, WindowScale, WindowSize};
 
     fn launch(args: &[&str]) -> Result<Launch, ErrorKind> {
         Cli::try_parse_from(["darkroom"].iter().chain(args))
@@ -159,18 +189,37 @@ mod tests {
         );
     }
 
-    /// A size is `WxH` in whole pixels; anything else is refused with the form to write.
+    /// A size is `WxH` in whole pixels, each side from 1 to 8192, the edges taken; anything else
+    /// is refused with the form to write. A scale is a number from a quarter, the edge taken.
     #[test]
-    fn a_window_size_is_width_x_height() {
-        assert_eq!(
-            "1600x1000".parse::<WindowSize>().unwrap().0,
-            UVec2::new(1600, 1000)
-        );
+    fn a_window_size_is_width_x_height_and_a_scale_reads_at_a_quarter() {
+        for (text, size) in [("1600x1000", [1600, 1000]), ("1x8192", [1, 8192])] {
+            assert_eq!(text.parse::<WindowSize>().unwrap().0, UVec2::from(size));
+        }
         for bad in ["1600", "1600x", "x1000", "16o0x1000", "-1x1"] {
             assert_eq!(
                 bad.parse::<WindowSize>().unwrap_err(),
                 format!("'{bad}' is not a size; write it as 1600x1000")
             );
         }
+        for none in ["0x600", "8193x600"] {
+            assert_eq!(
+                none.parse::<WindowSize>().unwrap_err(),
+                format!("'{none}' is no window; give each side from 1 to 8192 pixels")
+            );
+        }
+        assert_eq!("0.25".parse::<WindowScale>().unwrap().0, 0.25);
+        for bad in ["0.24", "NaN", "inf", "-2", "two"] {
+            assert_eq!(
+                bad.parse::<WindowScale>().unwrap_err(),
+                format!(
+                    "'{bad}' is no scale; give the physical pixels per logical pixel, 0.25 or more"
+                )
+            );
+        }
+        assert_eq!(
+            launch(&["--mcp", "--headless", "--size", "0x600"]),
+            Err(ErrorKind::ValueValidation)
+        );
     }
 }

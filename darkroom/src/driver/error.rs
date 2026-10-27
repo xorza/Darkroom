@@ -5,6 +5,8 @@ use std::path::PathBuf;
 
 use palantir::GpuRequestError;
 
+use crate::gui::app::error::DrivenOpenError;
+
 /// A driver call that could not do what it was asked.
 #[expect(
     clippy::module_name_repetitions,
@@ -93,8 +95,25 @@ pub enum DriverError {
         "the editor waits on a native file dialog, which only the person at the window answers"
     )]
     NativeDialog,
+    #[error(
+        "the window is minimized or hidden, and runs no frame until it is shown; ask the person to \
+         show it"
+    )]
+    WindowHidden,
     #[error("the editor did not answer within {seconds} s")]
     NoAnswer { seconds: f32 },
+    #[error(
+        "{cause}, though it had begun the call, so part of it may have taken effect; read the \
+         state before you go on"
+    )]
+    Unfinished { cause: Box<Self> },
+    #[error(
+        "the window ran no frame within {seconds} s; a minimized or covered window runs none, so \
+         ask the person at it to show it"
+    )]
+    NoFrame { seconds: f32 },
+    #[error("the window closed, and the session with it: the person at it closed it, or it quit")]
+    WindowClosed,
     #[error("the GPU display needs an adapter, and none is usable: {0}")]
     NoAdapter(#[from] GpuRequestError),
     #[error("{} has no parent folder to copy", .path.display())]
@@ -105,4 +124,23 @@ pub enum DriverError {
         #[source]
         source: io::Error,
     },
+}
+
+/// A [`Driver::act`](crate::driver::Driver::act) that stopped at `error`, after the first `ran`
+/// actions played: `ran` is the failing action's index, or the batch's length when every action
+/// played and reading the editor after them failed.
+#[derive(Debug, thiserror::Error)]
+#[error("after {ran} actions: {error}")]
+pub struct ActFailure {
+    pub ran: usize,
+    pub error: DriverError,
+}
+
+impl From<DrivenOpenError> for DriverError {
+    fn from(error: DrivenOpenError) -> Self {
+        match error {
+            DrivenOpenError::Unsaved { document } => Self::Unsaved { document },
+            DrivenOpenError::NotOpened { path, status } => Self::NotOpened { path, status },
+        }
+    }
 }

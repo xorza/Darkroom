@@ -1,0 +1,2 @@
+// No reference yet: the RAW decode is checked only with the `real-data` feature, on a dataset not
+// at hand when the references were written. Run that test with LUMOS_SNAPSHOTS=update to write it.

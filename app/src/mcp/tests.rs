@@ -1,6 +1,8 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
-use common::TempDir;
+use common::{TempDir, fs, task};
+use darkroom::driver::log_ring::LogRing;
 use darkroom::driver::{DisplayKind, SessionConfig};
 use darkroom::internals::fixture;
 use glam::UVec2;
@@ -11,15 +13,16 @@ use rmcp::{ServiceError, ServiceExt as _};
 use tokio::io;
 use tokio::sync::oneshot;
 
-use crate::mcp::check_config;
 use crate::mcp::darkroom_server::DarkroomServer;
 use crate::mcp::session_thread::{self, Ended, SessionThread, ToolError};
 
 const BRIGHTNESS: &str = "Brightness / Contrast";
 
-/// A connected server and client, and the receiver told when the session ends.
+/// A connected server and client, the session it serves, and the receiver told when the session
+/// ends.
 struct Connected {
     server: DarkroomServer,
+    session: Arc<SessionThread>,
     client: RunningService<RoleClient, ()>,
     ended: oneshot::Receiver<Ended>,
 }
@@ -31,9 +34,12 @@ async fn connect(display: DisplayKind, document: Option<PathBuf>) -> Connected {
         size: UVec2::new(800, 600),
         scale: 1.0,
     };
-    let (session, ended) =
-        SessionThread::start(move || session_thread::launch(config, document.as_deref())).unwrap();
-    let server = DarkroomServer::new(session);
+    let (session, ended) = SessionThread::start(move || {
+        session_thread::launch(config, LogRing::default(), document.as_deref())
+    })
+    .unwrap();
+    let session = Arc::new(session);
+    let server = DarkroomServer::new(Arc::clone(&session));
     let (server_end, client_end) = io::duplex(1 << 16);
     let serving = server.clone();
     tokio::spawn(async move {
@@ -48,6 +54,7 @@ async fn connect(display: DisplayKind, document: Option<PathBuf>) -> Connected {
     let client = ().serve(client_end).await.expect("the client connects");
     Connected {
         server,
+        session,
         client,
         ended,
     }
@@ -116,8 +123,9 @@ async fn the_server_lists_its_six_tools_with_their_schemas() {
 
 /// A server started on no document is on a new one. An opened fixture reports the build and its
 /// nodes, and `darkroom_state` lists them; a click on a name two nodes share is a tool error
-/// that names the action it stopped at and lists both nodes, and `nth` picks one. The CPU
-/// display has no shots. An open with no project is a new unsaved document; a project that does
+/// that names the action it stopped at and lists both nodes, and `nth` picks one. A bad chord
+/// refuses its batch before any of it plays. The CPU display has no shots, and an act whose shot
+/// fails still reports the actions it played. An open with no project is a new unsaved document; a project that does
 /// not open leaves the open document as it was.
 #[tokio::test]
 async fn an_opened_project_is_driven_through_the_tools() {
@@ -187,9 +195,46 @@ async fn an_opened_project_is_driven_through_the_tools() {
     let report: Value = serde_json::from_str(text(&picked, 0)).unwrap();
     assert_eq!(report["selection"], json!([BRIGHTNESS]));
 
+    // A bad chord refuses the batch before any of it plays: the click on the empty corner,
+    // which would clear the selection, does not run.
+    let refused = call(
+        &client,
+        "darkroom_act",
+        json!({ "actions": [{ "click": { "at": { "screen": [1.0, 1.0] } } }, { "key": "ctrl+banana" }] }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(refused.is_error, Some(true));
+    assert!(
+        text(&refused, 0).starts_with("'ctrl+banana' is not a key chord"),
+        "{}",
+        text(&refused, 0)
+    );
+    let kept = call(&client, "darkroom_state", json!({})).await.unwrap();
+    let kept: Value = serde_json::from_str(text(&kept, 0)).unwrap();
+    assert_eq!(kept["selection"], json!([BRIGHTNESS]));
+
     let shot = call(&client, "darkroom_shot", json!({})).await.unwrap();
     assert_eq!(shot.is_error, Some(true));
     assert!(text(&shot, 0).contains("GPU display"), "{}", text(&shot, 0));
+    // A shot that fails after the actions keeps their report: they ran.
+    let acted = call(
+        &client,
+        "darkroom_act",
+        json!({ "actions": [{ "move": { "screen": [10.0, 10.0] } }], "shot": {} }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(acted.is_error, Some(false), "{}", text(&acted, 0));
+    let report: Value = serde_json::from_str(text(&acted, 0)).unwrap();
+    assert_eq!(report["selection"], json!([BRIGHTNESS]));
+    assert_eq!(
+        text(&acted, 1),
+        format!(
+            "The actions ran; the shot after them failed: {}",
+            text(&shot, 0)
+        )
+    );
 
     let new = call(&client, "darkroom_open", json!({})).await.unwrap();
     let new: Value = serde_json::from_str(text(&new, 0)).unwrap();
@@ -224,7 +269,9 @@ async fn an_opened_project_is_driven_through_the_tools() {
 /// A panic on the editor's thread answers its call with the message and where it was raised,
 /// and ends the session, which the server is told of; a call after it says how the session
 /// ended. A quit, which an action asks, ends the session too, and says so in place of the
-/// actions after it. A server starts on the document it is given.
+/// actions after it. A close, which the window's end asks, ends the session and removes its
+/// directory before it returns, and one after a quit keeps the quit. A server starts on the
+/// document it is given.
 #[tokio::test]
 async fn a_panic_or_a_quit_ends_the_session() {
     let dir = TempDir::new("darkroom-mcp-panic");
@@ -233,6 +280,7 @@ async fn a_panic_or_a_quit_ends_the_session() {
         server,
         client,
         ended,
+        ..
     } = connect(DisplayKind::Cpu, Some(project.clone())).await;
     let started = call(&client, "darkroom_state", json!({})).await.unwrap();
     let started: Value = serde_json::from_str(text(&started, 0)).unwrap();
@@ -258,7 +306,12 @@ async fn a_panic_or_a_quit_ends_the_session() {
         text(&after, 0)
     );
 
-    let Connected { client, ended, .. } = connect(DisplayKind::Cpu, Some(project)).await;
+    let Connected {
+        session,
+        client,
+        ended,
+        ..
+    } = connect(DisplayKind::Cpu, Some(project)).await;
     let quit = call(
         &client,
         "darkroom_act",
@@ -273,10 +326,38 @@ async fn a_panic_or_a_quit_ends_the_session() {
         text(&quit, 0)
     );
     assert!(matches!(ended.await, Ok(Ended::Quit)));
+    // A close after the quit, as the window's end sends, keeps the reason it ended for.
+    task::run_blocking(move || session.close()).await.unwrap();
     let after = call(&client, "darkroom_state", json!({})).await.unwrap();
     assert_eq!(
         text(&after, 0),
         "the session ended when an action quit the editor; the server is ending"
+    );
+
+    let Connected {
+        server,
+        session,
+        client,
+        ended,
+    } = connect(DisplayKind::Cpu, None).await;
+    let session_dir = server
+        .run(|session| {
+            let dir = session.driver()?.session_dir().display().to_string();
+            Ok(vec![ContentBlock::text(dir)])
+        })
+        .await;
+    let session_dir = PathBuf::from(text(&session_dir, 0));
+    assert!(fs::is_dir(&session_dir));
+    task::run_blocking(move || session.close()).await.unwrap();
+    assert!(
+        !fs::exists(&session_dir),
+        "the close waits for the driver's drop"
+    );
+    assert!(matches!(ended.await, Ok(Ended::Closed)));
+    let after = call(&client, "darkroom_state", json!({})).await.unwrap();
+    assert_eq!(
+        text(&after, 0),
+        "the session ended when its window closed; the server is ending"
     );
 }
 
@@ -312,39 +393,20 @@ async fn a_shot_is_an_image_and_its_legend() {
     );
 }
 
-/// A session refuses a window with a side of 0 or past 8192 pixels, and a scale under a quarter
-/// or not a number; the edges themselves are taken. A document that does not open keeps the
-/// session from starting.
+/// A document that does not open keeps the session from starting.
 #[test]
-fn a_window_no_one_can_read_or_a_document_that_does_not_open_is_refused() {
-    let config = |size: [u32; 2], scale: f32| SessionConfig {
+fn a_document_that_does_not_open_is_refused() {
+    let config = SessionConfig {
         display: DisplayKind::Cpu,
-        size: UVec2::from(size),
-        scale,
+        size: UVec2::new(800, 600),
+        scale: 1.0,
     };
-    assert_eq!(check_config(config([1, 8192], 0.25)), Ok(()));
-    assert_eq!(
-        check_config(config([0, 600], 1.0)),
-        Err("size is 0×600; give each side from 1 to 8192 pixels".to_string())
-    );
-    assert_eq!(
-        check_config(config([8193, 600], 1.0)),
-        Err("size is 8193×600; give each side from 1 to 8192 pixels".to_string())
-    );
-    for scale in [0.24, f32::NAN] {
-        assert_eq!(
-            check_config(config([800, 600], scale)),
-            Err(format!(
-                "scale is {scale}; give the physical pixels per logical pixel, 0.25 or more"
-            ))
-        );
-    }
-
     let dir = TempDir::new("darkroom-mcp-start");
     let missing = dir.join("missing.darkroom");
-    let config = config([800, 600], 1.0);
-    let refused =
-        SessionThread::start(move || session_thread::launch(config, Some(&missing))).unwrap_err();
+    let refused = SessionThread::start(move || {
+        session_thread::launch(config, LogRing::default(), Some(&missing))
+    })
+    .unwrap_err();
     assert!(
         refused.to_string().starts_with("the editor did not open "),
         "{refused}"

@@ -1,11 +1,19 @@
-//! Characterization snapshots: bit-exact digests of each pipeline stage's output on fixed
-//! synthetic input, so a rewrite that moves a result names the stage it moved.
+//! Characterization snapshots: each pipeline stage's output on fixed synthetic input, compared
+//! with a reference file in `snapshots/`, so a rewrite that moves a result names the stage and
+//! the place it moved.
 //!
 //! A snapshot pins what the code does, not what is right. A change that moves one states why;
-//! one that moves without a stated reason is a regression until shown otherwise. The digests are
-//! those of an `x86_64` host. Every vector Isa computes the same values, but the scalar code calls
-//! the platform's libm, which another architecture or OS may round differently, so another host
-//! reports the snapshots as skipped rather than failing them.
+//! one that moves without a stated reason is a regression until shown otherwise. The comparison
+//! allows a stated tolerance rather than demanding the same bits: Rust leaves `exp`, `ln`, `powf`
+//! and the other transcendental functions to the platform's C library, whose results differ by an
+//! ulp between glibc, Apple's libm and the MSVC runtime, and between versions of one
+//! ([`f64::exp`]). Regression data compared within a tolerance, with a mode that writes it anew,
+//! is how GROMACS checks its reference data
+//! ([testutils](https://manual.gromacs.org/2022/doxygen/html-lib/group__module__testutils.xhtml)).
+//! Refused: bit-exact digests, which fail on a host or a toolchain whose libm rounds differently;
+//! a libm of the project's own, which only a need for the same bits on every host would pay for.
+//! Each reference a cache keys by — the decodes' and the master stack's — is hashed into that
+//! cache's version, so a reference written anew moves it.
 
 mod snapshot;
 
@@ -18,7 +26,6 @@ use imaginarium::{ChannelLayout, PlanarDesc};
 use crate::calibration::calibration_masters::CalibrationMasters;
 use crate::calibration::calibration_set::CalibrationSet;
 use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
-use crate::calibration::master_recipe::MASTER_PIN;
 use crate::calibration::master_role::MasterRole;
 use crate::calibration::master_stack::MasterStack;
 use crate::calibration::subtractor::Subtractor;
@@ -39,7 +46,6 @@ use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::characterization::snapshot::Snapshot;
 use crate::internals::synthetic::fixtures::star_field;
 use crate::internals::test_rng::TestRng;
-use crate::io::decoder::decode_pins::DECODE_PINS;
 use crate::io::fits::cfa;
 use crate::io::load_ctx::LoadCtx;
 use crate::progress::progress_monitor::ProgressMonitor;
@@ -53,37 +59,9 @@ use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detector::StarDetector;
 use common::Size2us;
 
-/// Whether this host computes the pinned digests; another one reports why it skips.
-fn pinned_host() -> bool {
-    let pinned = cfg!(target_arch = "x86_64");
-    if !pinned {
-        eprintln!("SKIPPED: the characterization snapshots are pinned on x86_64 only");
-    }
-    pinned
-}
-
-/// A decode a frame cache can hold, against its pin in [`DECODE_PINS`].
-fn assert_decode(decode: &str, snapshot: &Snapshot, pin: &str) {
-    assert_eq!(
-        snapshot.finish(),
-        pin,
-        "the {decode} output moved: state the reason with the change and set its DECODE_PINS entry \
-         to this digest, which changes DECODE_VERSION so a kept frame cache decodes again"
-    );
-}
-
-fn assert_snapshot(stage: &str, snapshot: &Snapshot, expected: &str) {
-    assert_eq!(
-        snapshot.finish(),
-        expected,
-        "the {stage} snapshot moved: state the reason with the change, or find the regression"
-    );
-}
-
-fn image_snapshot(snapshot: &mut Snapshot, image: &LinearImage) {
-    snapshot.count(image.channel_count());
+fn image_snapshot(snapshot: &mut Snapshot, name: &str, image: &LinearImage) {
     for channel in 0..image.channel_count() {
-        snapshot.f32s(image.channel(channel).pixels());
+        snapshot.plane(&format!("{name} channel {channel}"), image.channel(channel));
     }
 }
 
@@ -102,16 +80,22 @@ fn warped(image: &LinearImage, transform: Transform) -> WarpResult {
 }
 
 /// A decoded mosaic as a kept cache holds it: its plane, the flags its decoder set, and its
-/// quantization σ, so a change to any of the three moves its decode pin.
-fn cfa_snapshot(snapshot: &mut Snapshot, cfa: &CfaImage) {
-    snapshot.f32s(cfa.data().pixels());
-    let flags = cfa.flags().map_or(&[][..], |flags| flags.bytes());
-    snapshot.count(flags.len()).bytes(flags);
-    snapshot.f32s(&[cfa
-        .metadata
-        .derived
-        .quantization_sigma()
-        .unwrap_or(f32::NAN)]);
+/// quantization σ, so a change to any of the three moves its reference.
+fn cfa_snapshot(snapshot: &mut Snapshot, name: &str, cfa: &CfaImage) {
+    snapshot
+        .plane(&format!("{name} plane"), cfa.data())
+        .bytes(
+            &format!("{name} flags"),
+            cfa.flags().map_or(&[][..], |flags| flags.bytes()),
+        )
+        .f32s(
+            &format!("{name} quantization sigma"),
+            &[cfa
+                .metadata
+                .derived
+                .quantization_sigma()
+                .unwrap_or(f32::NAN)],
+        );
 }
 
 fn detect(image: &LinearImage) -> Vec<Star> {
@@ -122,17 +106,14 @@ fn detect(image: &LinearImage) -> Vec<Star> {
 
 #[test]
 fn decode_snapshot() {
-    if !pinned_host() {
-        return;
-    }
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/test_resources/full_example.fits"
     );
     let image = LoadCtx::default().linear(path).unwrap();
     let mut snapshot = Snapshot::default();
-    image_snapshot(&mut snapshot, &image);
-    assert_decode("FITS decode", &snapshot, DECODE_PINS.fits_linear);
+    image_snapshot(&mut snapshot, "image", &image);
+    snapshot.check("fits_linear");
 
     // A three-channel float TIFF written from the star field, read back as linear data.
     let scratch = TempDir::new("characterization_decode");
@@ -148,8 +129,8 @@ fn decode_snapshot() {
     rgb.write_raster(&tiff).unwrap();
     let image = LoadCtx::default().linear(&tiff).unwrap();
     let mut snapshot = Snapshot::default();
-    image_snapshot(&mut snapshot, &image);
-    assert_decode("float TIFF decode", &snapshot, DECODE_PINS.float_tiff);
+    image_snapshot(&mut snapshot, "image", &image);
+    snapshot.check("float_tiff");
 
     // An RGGB mosaic FITS, read back as its sensor plane.
     let fits = scratch.join("mosaic.fits");
@@ -161,16 +142,13 @@ fn decode_snapshot() {
     cfa::save(&fits, &mosaic).unwrap();
     let cfa = LoadCtx::default().cfa(&fits).unwrap();
     let mut snapshot = Snapshot::default();
-    cfa_snapshot(&mut snapshot, &cfa);
-    assert_decode("mosaic FITS decode", &snapshot, DECODE_PINS.fits_cfa);
+    cfa_snapshot(&mut snapshot, "mosaic", &cfa);
+    snapshot.check("fits_cfa");
 }
 
 /// A Bayer light through bias, dark and flat masters, then demosaiced.
 #[test]
 fn calibrate_snapshot() {
-    if !pinned_host() {
-        return;
-    }
     let size = Size2us::new(64, 64);
     let mut rng = TestRng::new(0xCA1B);
     let bias: Vec<f32> = (0..size.pixel_count())
@@ -216,8 +194,8 @@ fn calibrate_snapshot() {
     let mut light = make_cfa(size, light, bayer);
     masters.calibrate(&mut light).unwrap();
     let mut snapshot = Snapshot::default();
-    snapshot.f32s(light.data().pixels());
-    assert_snapshot("calibration", &snapshot, "c0cac2b4835d1059");
+    snapshot.plane("light", light.data());
+    snapshot.check("calibration");
 
     let mut snapshot = Snapshot::default();
     let xtrans = make_cfa(
@@ -226,12 +204,15 @@ fn calibrate_snapshot() {
         CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN)),
     );
     let demosaiced = light.demosaic_measured(MarkesteijnPasses::One);
-    image_snapshot(&mut snapshot, &demosaiced);
-    for passes in [MarkesteijnPasses::One, MarkesteijnPasses::Three] {
+    image_snapshot(&mut snapshot, "bayer", &demosaiced);
+    for (name, passes) in [
+        ("x-trans one pass", MarkesteijnPasses::One),
+        ("x-trans three passes", MarkesteijnPasses::Three),
+    ] {
         let demosaiced = xtrans.clone().demosaic_measured(passes);
-        image_snapshot(&mut snapshot, &demosaiced);
+        image_snapshot(&mut snapshot, name, &demosaiced);
     }
-    assert_decode("demosaic", &snapshot, DECODE_PINS.demosaic);
+    snapshot.check("demosaic");
 }
 
 /// The master stack a cached master is keyed by: a bias of 3 frames, a dark of 3 and a flat of 8
@@ -239,9 +220,6 @@ fn calibrate_snapshot() {
 /// frames of 32 × 32 with Gaussian noise, a vignetted flat and a dark with hot pixels.
 #[test]
 fn master_snapshot() {
-    if !pinned_host() {
-        return;
-    }
     let size = Size2us::new(32, 32);
     let bayer = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
     let scratch = TempDir::new("lumos_master_snapshot");
@@ -304,24 +282,20 @@ fn master_snapshot() {
         }],
     );
     let mut snapshot = Snapshot::default();
-    for master in [&bias_master, &dark_master, &flat_master] {
-        cfa_snapshot(&mut snapshot, master);
+    for (name, master) in [
+        ("bias", &bias_master),
+        ("dark", &dark_master),
+        ("flat", &flat_master),
+    ] {
+        cfa_snapshot(&mut snapshot, name, master);
     }
-    assert_eq!(
-        snapshot.finish(),
-        MASTER_PIN,
-        "the master stack moved: state the reason with the change and set MASTER_PIN to this \
-         digest, which moves every MasterRecipe so a cached master is stacked again"
-    );
+    snapshot.check("master");
 }
 
 /// The statistics a kept frame is committed with: the star field as a mono frame, as an RGGB
 /// mosaic, and as that mosaic demosaiced, whose noise is the mosaic's.
 #[test]
 fn frame_stats_snapshot() {
-    if !pinned_host() {
-        return;
-    }
     let mono = field();
     let mosaic = make_cfa(
         Size2us::new(192, 192),
@@ -330,52 +304,50 @@ fn frame_stats_snapshot() {
     );
     let demosaiced = mosaic.clone().demosaic_measured(MarkesteijnPasses::One);
     let mut snapshot = Snapshot::default();
-    for stats in [
-        FrameStats::measure(&mono),
-        FrameStats::measure(&mosaic),
-        FrameStats::measure(&demosaiced),
+    for (name, stats) in [
+        ("mono", FrameStats::measure(&mono)),
+        ("mosaic", FrameStats::measure(&mosaic)),
+        ("demosaiced", FrameStats::measure(&demosaiced)),
     ] {
+        let sigmas: Vec<f32> = stats.bg.iter().map(|split| split.sigma()).collect();
         snapshot
-            .f32s(&stats.medians)
+            .f32s(&format!("{name} medians"), &stats.medians)
+            .f32s(&format!("{name} background sigmas"), &sigmas)
+            .f32s(&format!("{name} sky"), &stats.sky)
             .f32s(
-                &stats
-                    .bg
-                    .iter()
-                    .map(|split| split.sigma())
-                    .collect::<Vec<_>>(),
-            )
-            .f32s(&stats.sky)
-            .f32s(&[stats.quantization_sigma.unwrap_or(-1.0)]);
+                &format!("{name} quantization sigma"),
+                &[stats.quantization_sigma.unwrap_or(-1.0)],
+            );
     }
-    assert_decode("frame statistics", &snapshot, DECODE_PINS.frame_stats);
+    snapshot.check("frame_stats");
 }
 
 #[test]
 fn detect_snapshot() {
-    if !pinned_host() {
-        return;
-    }
     let stars = detect(&field());
+    let column = |field: fn(&Star) -> f32| stars.iter().map(field).collect::<Vec<_>>();
     let mut snapshot = Snapshot::default();
-    snapshot.count(stars.len());
-    for star in &stars {
-        snapshot.f64s(&[star.pos.x, star.pos.y]).f32s(&[
-            star.flux,
-            star.fwhm,
-            star.eccentricity,
-            star.snr,
-            star.peak,
-            star.sharpness,
-        ]);
-    }
-    assert_snapshot("detection", &snapshot, "fc7b51416f4dd402");
+    snapshot
+        .count("stars", stars.len())
+        .f64s(
+            "x",
+            &stars.iter().map(|star| star.pos.x).collect::<Vec<_>>(),
+        )
+        .f64s(
+            "y",
+            &stars.iter().map(|star| star.pos.y).collect::<Vec<_>>(),
+        )
+        .f32s("flux", &column(|star| star.flux))
+        .f32s("fwhm", &column(|star| star.fwhm))
+        .f32s("eccentricity", &column(|star| star.eccentricity))
+        .f32s("snr", &column(|star| star.snr))
+        .f32s("peak", &column(|star| star.peak))
+        .f32s("sharpness", &column(|star| star.sharpness));
+    snapshot.check("detection");
 }
 
 #[test]
 fn register_snapshot() {
-    if !pinned_host() {
-        return;
-    }
     let reference = field();
     let target = warped(&reference, dither()).image;
     let mut config = RegistrationConfig::default();
@@ -387,32 +359,26 @@ fn register_snapshot() {
         .unwrap();
     let mut snapshot = Snapshot::default();
     snapshot
-        .f64s(result.transform().matrix())
-        .count(result.inlier_count())
-        .f64s(&[result.rms_error()]);
-    assert_snapshot("registration", &snapshot, "f6beeb64b73e5f9d");
+        .f64s("matrix", result.transform().matrix())
+        .count("inliers", result.inlier_count())
+        .f64s("rms error", &[result.rms_error()]);
+    snapshot.check("registration");
 }
 
 #[test]
 fn warp_snapshot() {
-    if !pinned_host() {
-        return;
-    }
     let result = warped(&field(), dither());
     let mut snapshot = Snapshot::default();
-    image_snapshot(&mut snapshot, &result.image);
+    image_snapshot(&mut snapshot, "image", &result.image);
     snapshot
-        .f32s(result.coverage.pixels())
-        .f32s(result.confidence.pixels());
-    assert_snapshot("warp", &snapshot, "b0e4f2a5dded7f0a");
+        .plane("coverage", &result.coverage)
+        .plane("confidence", &result.confidence);
+    snapshot.check("warp");
 }
 
 /// The field and two dithers of it, stacked with the default configuration.
 #[test]
 fn combine_snapshot() {
-    if !pinned_host() {
-        return;
-    }
     let reference = field();
     let mut frames = vec![StackFrame::from(reference.clone())];
     for transform in [dither(), Transform::translation(DVec2::new(-1.5, 2.75))] {
@@ -429,16 +395,13 @@ fn combine_snapshot() {
     .stack_images(frames, ProgressMonitor::unattended())
     .unwrap();
     let mut snapshot = Snapshot::default();
-    image_snapshot(&mut snapshot, &product.image);
-    assert_snapshot("combine", &snapshot, "c7fffd8295b11ecd");
+    image_snapshot(&mut snapshot, "image", &product.image);
+    snapshot.check("combine");
 }
 
 /// Each automatic stretch on a three-channel field, so the color-preserving paths run.
 #[test]
 fn stretch_snapshot() {
-    if !pinned_host() {
-        return;
-    }
     let size = Size2us::new(96, 96);
     let channels = [0x51, 0x52, 0x53].map(|seed| star_field(size, 20, seed).image);
     let rgb = LinearImage::from_planar_channels(
@@ -448,26 +411,29 @@ fn stretch_snapshot() {
             .map(|image| image.channel(0).pixels().to_vec()),
     );
     let mut snapshot = Snapshot::default();
-    for stretch in [
-        Stretch::auto_asinh(),
-        Stretch::auto_stf(),
-        Stretch {
-            method: StretchMethod::Ghs {
-                black_point: 0.0,
-                d: 5.0,
-                b: 0.0,
-                sp: 0.1,
-                lp: 0.0,
-                hp: 1.0,
+    for (name, stretch) in [
+        ("asinh", Stretch::auto_asinh()),
+        ("stf", Stretch::auto_stf()),
+        (
+            "ghs",
+            Stretch {
+                method: StretchMethod::Ghs {
+                    black_point: 0.0,
+                    d: 5.0,
+                    b: 0.0,
+                    sp: 0.1,
+                    lp: 0.0,
+                    hp: 1.0,
+                },
+                color: ColorMode::ColorPreserving,
             },
-            color: ColorMode::ColorPreserving,
-        },
+        ),
     ] {
         let mut image = rgb.clone();
         stretch.apply(&mut image).unwrap();
-        image_snapshot(&mut snapshot, &image);
+        image_snapshot(&mut snapshot, name, &image);
     }
-    assert_snapshot("stretch", &snapshot, "088d3a703a929f22");
+    snapshot.check("stretch");
 }
 
 /// The first RAW light of the dataset, decoded to its CFA plane — see [`cfa_snapshot`].
@@ -477,12 +443,9 @@ fn raw_decode_snapshot() {
     use crate::internals::real_data::raw_frames;
     use crate::io::raw;
 
-    if !pinned_host() {
-        return;
-    }
     let path = &raw_frames("Lights")[0];
     let cfa = raw::load_cfa(path, &LoadCtx::default()).unwrap();
     let mut snapshot = Snapshot::default();
-    cfa_snapshot(&mut snapshot, &cfa);
-    assert_decode("RAW decode", &snapshot, DECODE_PINS.raw_cfa);
+    cfa_snapshot(&mut snapshot, "raw", &cfa);
+    snapshot.check("raw_cfa");
 }

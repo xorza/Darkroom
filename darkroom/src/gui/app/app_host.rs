@@ -1,4 +1,4 @@
-//! [`AppHost`]: what runs the [`App`](crate::gui::app::App)'s frames, as the app reaches it.
+//! [`AppHost`]: what runs the [`App`]'s frames, as the app reaches it.
 
 use std::sync::Arc;
 

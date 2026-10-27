@@ -4,6 +4,7 @@
 //! polluting a machine-global directory. An unsaved document has no path, so it
 //! stays memory-only until first save.
 
+use std::io;
 use std::path::{Path, PathBuf};
 
 use common::fs;
@@ -24,20 +25,19 @@ pub(crate) fn root(document_path: &Path) -> PathBuf {
     document_path.with_file_name(name)
 }
 
-/// Best-effort: create `root` and drop a `*`-pattern `.gitignore`, so the whole
-/// cache folder (blobs + the ignore file itself) stays out of version control.
+/// Create `root` and drop a `*`-pattern `.gitignore`, so the whole cache
+/// folder (blobs + the ignore file itself) stays out of version control.
 /// Called before the first blob can land there, not when a document opens, so
 /// a document with no disk-backed node leaves its folder untouched. A failure
-/// just means no `.gitignore` yet — the cache still works, since blob writes
-/// recreate the dir.
-pub(crate) fn prepare(root: &Path) {
-    if fs::create_dir_all(root).is_err() {
-        return;
-    }
+/// means no `.gitignore` yet — the cache still works, since blob writes
+/// recreate the dir — so the caller logs it and tries again later.
+pub(crate) fn prepare(root: &Path) -> io::Result<()> {
+    fs::create_dir_all(root)?;
     let gitignore = root.join(".gitignore");
     if !fs::exists(&gitignore) {
-        fs::publish_bytes(&gitignore, b"*\n", fs::PublicationMode::Cache).ok();
+        fs::publish_bytes(&gitignore, b"*\n", fs::PublicationMode::Cache)?;
     }
+    Ok(())
 }
 
 #[cfg(test)]

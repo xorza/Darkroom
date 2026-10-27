@@ -9,154 +9,31 @@
 //! call off the per-frame inputs both renderers need — so they stay visually
 //! identical apart from paint and handle shape, and can't drift.
 //!
-//! **The gesture.** [`GlyphDrag`](glyph_drag::GlyphDrag) is one drag from a latched glyph to
+//! **The gesture.** [`GlyphDrag`](crate::gui::pane::graph_ui::gesture::glyph_drag::GlyphDrag) is one drag from a latched glyph to
 //! whatever compatible glyph the pointer is over, generic over the two
-//! [`PortLayer`](crate::gui::pane::graph_ui::frame::canvas_geometry::PortLayer) key domains it
+//! [`PortLayer`](crate::gui::pane::graph_ui::frame::canvas_geometry::port_layer::PortLayer) key domains it
 //! spans: a data wire drags `PortRef → PortRef`, an event wire drags `EventPort → NodeId` or —
 //! started from the other end — `NodeId → EventPort`. Latching, the release edge, the fixed end's
 //! node, and where the preview's free end sits are stated once here; each family still owns which
 //! glyphs are candidates and what a release commits.
 
-pub(crate) mod glyph_drag;
+use std::ops::Range;
 
-use glam::Vec2;
 use palantir::widget::{CubicBezier, LineCap, Shape};
-use palantir::{ColorRamp, Rect, RgbaF32, Size, Stroke, Ui};
+use palantir::{ColorRamp, RgbaF32, Stroke, Ui};
 
+use crate::core::document::wire_key::DataWire;
 use crate::core::document::wire_key::WireKey;
-use crate::gui::pane::graph_ui::draw::tie::tie_layout::TieLayout;
+use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
+use crate::gui::pane::graph_ui::frame::tie_layout::TieLayout;
+use crate::gui::pane::graph_ui::frame::wire::Wire;
 use crate::gui::pane::graph_ui::gesture::breaker_ui::breaker_probe::BreakerProbe;
 use crate::gui::pane::graph_ui::gesture::tie_ui::tie_probe::TieProbe;
+use crate::gui::pane::graph_ui::wid;
+use crate::gui::port_ref::PortRef;
 use crate::gui::theme::color;
 use crate::gui::widgets::hover::Hover;
-
-/// Minimum length of a wire's bezier control handles, so a short or backward
-/// link still bows out into a readable curve.
-const MIN_HANDLE: f32 = 30.0;
-
-/// Upper bound on the *vertical-gap* term of [`Wire::data`]'s handle
-/// length, so a tall forward span bows into a gentle S rather than a huge loop.
-const MAX_HANDLE: f32 = 120.0;
-
-/// Gain on [`Wire::data`]'s *backward-reach* term: `reach = BACKREACH_GAIN * sqrt(distance)`.
-/// A square-root law (not linear, not a fixed cap) so the loop keeps growing as the far end
-/// moves further left — a flat cap reads short across a big gap — yet grows ever more slowly,
-/// so it never sprawls out to the sides the way a linear reach does. Tuned so a node-width
-/// backlink (~180px) reaches ~135px.
-const BACKREACH_GAIN: f32 = 10.0;
-
-/// One wire's full cubic: the endpoints `p0` → `p3` plus the interior
-/// control points its handle rule placed. Built through [`Wire::data`] or
-/// [`Wire::event`], so the choice of rule happens once — at the only place
-/// that knows which family the curve belongs to — and every consumer
-/// downstream (cull, breaker, paint) takes the finished curve.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct Wire {
-    pub(crate) p0: Vec2,
-    pub(crate) p1: Vec2,
-    pub(crate) p2: Vec2,
-    pub(crate) p3: Vec2,
-}
-
-impl Wire {
-    /// A left-to-right cubic between `p0` (the output port) and `p3` (the
-    /// input port): both handles run horizontally so the curve leaves `p0`
-    /// rightward and arrives at `p3` leftward. Shared by the permanent and
-    /// in-flight draws so a preview always matches its eventual committed
-    /// curve exactly.
-    ///
-    /// The handle length is the larger of two terms:
-    /// - **Forward** — half the *vertical* gap (clamped to `[MIN_HANDLE,
-    ///   MAX_HANDLE]`): near-level anchors stay taut, stacked ones bow into a
-    ///   gentle S without over-looping on a tall span.
-    /// - **Backward** — when `p3` sits *left* of `p0` the curve must double back
-    ///   on itself. A short handle whips it straight across whatever sits between
-    ///   (the "hidden under the node" look); reaching out by `BACKREACH_GAIN *
-    ///   sqrt(distance)` instead bows both ends into one wide, smooth loop that
-    ///   leaves `p0` rightward, arcs around, and re-enters `p3` leftward. The
-    ///   `sqrt` keeps the loop scaling with the backward distance (so a far-away
-    ///   `p3` still gets a proper loop, not a stub) while growing slowly enough
-    ///   that it never sprawls out to the sides.
-    pub(crate) fn data(p0: Vec2, p3: Vec2) -> Self {
-        let vertical = ((p3.y - p0.y).abs() * 0.5).clamp(MIN_HANDLE, MAX_HANDLE);
-        let backreach = BACKREACH_GAIN * (p0.x - p3.x).max(0.0).sqrt();
-        let len = vertical.max(backreach);
-        Self {
-            p0,
-            p1: p0 + Vec2::new(len, 0.0),
-            p2: p3 - Vec2::new(len, 0.0),
-            p3,
-        }
-    }
-
-    /// An event wire from emitter `p0` (a triangle on the right of its node)
-    /// to subscriber pin `p3` (the top-left pin). The emitter handle leaves
-    /// rightward like a data output; the subscriber handle points
-    /// **up-left**, matching the pin's outward-pointing triangle so the wire
-    /// meets it head-on.
-    pub(crate) fn event(p0: Vec2, p3: Vec2) -> Self {
-        let d = (p0.distance(p3) * 0.4).max(MIN_HANDLE);
-        // (-1, -1) is up-left in screen space (y grows downward).
-        let up_left = Vec2::new(-1.0, -1.0).normalize();
-        Self {
-            p0,
-            p1: p0 + Vec2::new(d, 0.0),
-            p2: p3 + up_left * d,
-            p3,
-        }
-    }
-
-    /// The curve's control-point bounding box. A cubic stays inside its control hull, so this is a
-    /// conservative bound — what
-    /// [`CullRegion::keeps_wire`](crate::gui::pane::graph_ui::frame::cull_region::CullRegion::keeps_wire)
-    /// tests against.
-    pub(crate) fn hull(&self) -> Rect {
-        let min = self.p0.min(self.p1).min(self.p2).min(self.p3);
-        let max = self.p0.max(self.p1).max(self.p2).max(self.p3);
-        Rect {
-            min,
-            size: Size::new(max.x - min.x, max.y - min.y),
-        }
-    }
-
-    /// The straight distance between the curve's two ends.
-    pub(crate) fn chord(&self) -> f32 {
-        self.p0.distance(self.p3)
-    }
-
-    /// The point at parameter `t` along the curve, in Bernstein form.
-    pub(crate) fn at(&self, t: f32) -> Vec2 {
-        let u = 1.0 - t;
-        let uu = u * u;
-        let tt = t * t;
-        self.p0 * (uu * u)
-            + self.p1 * (3.0 * uu * t)
-            + self.p2 * (3.0 * u * tt)
-            + self.p3 * (tt * t)
-    }
-
-    /// Emit the stroked curve (round caps). The single place the wire
-    /// `Shape` is built, so data and event curves can't drift in width
-    /// policy, cap, or primitive.
-    pub(crate) fn add(&self, ui: &mut Ui, width: f32, paint: impl Into<WirePaint>) {
-        let WirePaint { color, ramp } = paint.into();
-        let mut shape = Shape::cubic_bezier(
-            CubicBezier {
-                p0: self.p0,
-                p1: self.p1,
-                p2: self.p2,
-                p3: self.p3,
-            },
-            Stroke::new(color, width),
-        )
-        .cap(LineCap::Round);
-        if let Some(ramp) = ramp {
-            shape = shape.ramp(ramp);
-        }
-        ui.add_shape(shape);
-    }
-}
 
 /// What one wire paints with: its stroke color, and the ramp that color
 /// multiplies along the curve when the two ends differ.
@@ -167,6 +44,26 @@ pub(crate) struct WirePaint {
 }
 
 impl WirePaint {
+    /// Stroke `wire` `width` wide with this paint, round-capped: the single place the wire
+    /// `Shape` is built, so data and event curves cannot drift in width policy, cap, or
+    /// primitive.
+    pub(crate) fn stroke(self, ui: &mut Ui, wire: &Wire, width: f32) {
+        let mut shape = Shape::cubic_bezier(
+            CubicBezier {
+                p0: wire.p0,
+                p1: wire.p1,
+                p2: wire.p2,
+                p3: wire.p3,
+            },
+            Stroke::new(self.color, width),
+        )
+        .cap(LineCap::Round);
+        if let Some(ramp) = self.ramp {
+            shape = shape.ramp(ramp);
+        }
+        ui.add_shape(shape);
+    }
+
     /// The part of this paint from `from` to `to` along the wire, both fractions of it: the ramp
     /// between its colors there, so a wire split into pieces paints as the whole one does.
     fn between(self, from: f32, to: f32) -> Self {
@@ -219,11 +116,10 @@ impl WirePass<'_, '_, '_> {
     /// drift in culling, emphasis, or alarm color. An untied wire is one
     /// piece; a tied one is a piece from each point to the next.
     ///
-    /// A piece the cull drops is not probed either: the scribble is always
-    /// on-screen, so it can't have crossed an off-screen curve. The ends'
-    /// `tint` is called only for a wire that survives *both* the cull and the
-    /// breaker, so a family pays for resolving its endpoint colors only where
-    /// they actually show.
+    /// A wire the cull drops is still probed, as a stroke can pan or zoom its
+    /// crossings out of view; only its paint is skipped. The ends' `tint` is
+    /// called only for a wire painted unbroken, so a family pays for resolving
+    /// its endpoint colors only where they actually show.
     ///
     /// Recording the hit stays with the caller — only it knows the domain key
     /// to hand `probe.mark_broken_*`.
@@ -239,12 +135,13 @@ impl WirePass<'_, '_, '_> {
             tint,
         } = ends;
         let cull = self.draw_ctx.cull();
-        let mut kept = pieces.iter().filter(|piece| cull.keeps_wire(piece));
-        if kept.clone().next().is_none() {
-            return false;
-        }
-        let broken = kept.any(|piece| self.probe.crosses_wire(piece));
+        // Probed whole, off-screen pieces too: a stroke that pans or zooms mid-gesture still
+        // cuts or ties what it crossed out of view. Culled is unpainted, not unprobed.
+        let broken = pieces.iter().any(|piece| self.probe.crosses_wire(piece));
         let crossed = self.tie_line.cross_wire(key, pieces);
+        if !pieces.iter().any(|piece| cull.keeps_rect(piece.hull())) {
+            return broken;
+        }
         let mark = match (broken, endpoint) {
             (true, _) => WireMark::Broken,
             (false, Hover::Over) => WireMark::EndpointHovered,
@@ -260,30 +157,20 @@ impl WirePass<'_, '_, '_> {
         } else {
             self.emphasis.paint(tint(), stroke.tier)
         };
-        // The ramp runs over the whole wire, split at the piece ends by
-        // chord length; one piece takes it whole.
-        let total: f32 = pieces.iter().map(Wire::chord).sum();
-        let mut from = 0.0;
         let selection = self.draw_ctx.theme().colors.selection_rect;
-        for (idx, piece) in pieces.iter().enumerate() {
-            let to = if total > 0.0 {
-                (from + piece.chord() / total).min(1.0)
-            } else {
-                1.0
-            };
+        for (idx, (piece, share)) in pieces.iter().zip(shares(pieces)).enumerate() {
             if crossed.is_some_and(|crossing| crossing.piece == idx) {
                 // The piece a tie line crosses is where the tie goes.
                 let lifted = width(self.draw_ctx.theme().stroke_width, Tier::Emphasized);
-                piece.add(ui, lifted, selection);
-            } else if cull.keeps_wire(piece) {
-                let share = if pieces.len() == 1 {
+                WirePaint::from(selection).stroke(ui, piece, lifted);
+            } else if cull.keeps_rect(piece.hull()) {
+                let paint = if pieces.len() == 1 {
                     paint
                 } else {
-                    paint.between(from, to)
+                    paint.between(share.start, share.end)
                 };
-                piece.add(ui, stroke.width, share);
+                paint.stroke(ui, piece, stroke.width);
             }
-            from = to;
         }
         if let Some(crossing) = crossed {
             // A disk as a circle stroked as wide as its radius.
@@ -296,6 +183,114 @@ impl WirePass<'_, '_, '_> {
         }
         broken
     }
+}
+
+impl WirePass<'_, '_, '_> {
+    /// Paint every committed data wire on the current scene retained by the
+    /// pass's cull region, marking those the active breaker crosses as broken
+    /// via `probe.mark_broken_input` for the breaker's release-frame drain.
+    ///
+    /// Reads nothing but committed scene state, so it is the pass's rather than the
+    /// in-flight gesture's.
+    pub(crate) fn draw_data_wires(&mut self, ui: &mut Ui) {
+        let (graph_ctx, geometry) = (self.draw_ctx.graph_ctx(), self.draw_ctx.geometry());
+        for (consumer, producer) in graph_ctx.wires() {
+            let (src, tgt) = (PortRef::from(producer), PortRef::from(consumer));
+            let (Some(p0), Some(p3)) = (geometry.ports.center(src), geometry.ports.center(tgt))
+            else {
+                continue;
+            };
+            let key = WireKey::Data(DataWire {
+                output: producer,
+                input: consumer,
+            });
+            let hover = Hover::from(
+                geometry.ports.is_hovered(src)
+                    || geometry.ports.is_hovered(tgt)
+                    || self.lit == Some(key)
+                    || wid::lit_by_tie(ui, graph_ctx.view(), key),
+            );
+            let untied = [Wire::data(p0, p3)];
+            let pieces = self.ties.pieces(key).unwrap_or(&untied);
+            let ends = WireEnds {
+                wire: key,
+                hover,
+                tint: || data_tint(graph_ctx, src, tgt),
+            };
+            if self.draw_wire(ui, pieces, ends) {
+                self.probe.mark_broken_input(consumer);
+            }
+        }
+    }
+
+    /// Paint every committed subscription wire on the current scene retained by
+    /// the pass's cull region, marking those the active breaker crosses as broken
+    /// via `probe.mark_broken_subscription` for the breaker's release-frame drain.
+    ///
+    /// Reads nothing but committed scene state, as [`Self::draw_data_wires`] does.
+    pub(crate) fn draw_event_wires(&mut self, ui: &mut Ui) {
+        let (theme, graph_ctx, geometry) = (
+            self.draw_ctx.theme(),
+            self.draw_ctx.graph_ctx(),
+            self.draw_ctx.geometry(),
+        );
+        for s in graph_ctx.subscriptions() {
+            let (Some(p0), Some(p3)) = (
+                geometry.events.center(s.event),
+                geometry.subs.center(s.subscriber),
+            ) else {
+                continue;
+            };
+            let key = WireKey::Event(s);
+            let hover = Hover::from(
+                geometry.events.is_hovered(s.event)
+                    || geometry.subs.is_hovered(s.subscriber)
+                    || self.lit == Some(key)
+                    || wid::lit_by_tie(ui, graph_ctx.view(), key),
+            );
+            let untied = [Wire::event(p0, p3)];
+            let pieces = self.ties.pieces(key).unwrap_or(&untied);
+            // Events carry no data type, so one neutral swatch runs the whole
+            // curve rather than a per-end gradient.
+            let ends = WireEnds {
+                wire: key,
+                hover,
+                tint: || WireTint::flat(theme.event_color()),
+            };
+            if self.draw_wire(ui, pieces, ends) {
+                self.probe.mark_broken_subscription(s);
+            }
+        }
+    }
+}
+
+/// The endpoint colors of a committed data wire: the two ports' type colors,
+/// so each end matches the port it touches and the wire reads as its data type
+/// (both ends share it unless the input is the untyped `Any`).
+fn data_tint(graph_ctx: GraphCtx<'_>, src: PortRef, tgt: PortRef) -> WireTint {
+    let theme = graph_ctx.theme();
+    WireTint::new(
+        theme.port_color(graph_ctx.data_type(src)),
+        theme.port_color(graph_ctx.data_type(tgt)),
+    )
+}
+
+/// The part of a wire's ramp each of `pieces` paints, in order from its output end: the whole
+/// wire split at the piece ends by chord length, so the pieces paint the whole one's ramp. A
+/// wire with no length gives each piece the whole ramp's end.
+fn shares(pieces: &[Wire]) -> impl ExactSizeIterator<Item = Range<f32>> + '_ {
+    let total: f32 = pieces.iter().map(Wire::chord).sum();
+    let mut from = 0.0;
+    pieces.iter().map(move |piece| {
+        let to = if total > 0.0 {
+            (from + piece.chord() / total).min(1.0)
+        } else {
+            1.0
+        };
+        let share = from..to;
+        from = to;
+        share
+    })
 }
 
 /// What a committed wire's ends bring to its paint: the wire they bound,
@@ -446,7 +441,7 @@ impl WireEmphasis {
     /// The tiered color for a (non-broken) wire endpoint. While a gesture
     /// fades the set the fade wins over the tier — the snap target's forced
     /// endpoint hover must not re-emphasize a faded wire.
-    fn tint(&self, c: RgbaF32, tier: Tier) -> RgbaF32 {
+    const fn tint(&self, c: RgbaF32, tier: Tier) -> RgbaF32 {
         match (self.set, tier) {
             (WireSet::Faded, _) => c.with_alpha(WIRE_DRAG_FADE),
             (WireSet::Standing, Tier::Emphasized) => c,

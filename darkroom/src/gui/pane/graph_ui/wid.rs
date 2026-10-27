@@ -1,4 +1,5 @@
-//! The widget-id vocabulary of a node's subtree, plus the queries keyed by it.
+//! The widget-id vocabulary of the canvas — a node's subtree and a tie's band — plus the
+//! queries keyed by it.
 //!
 //! Every id under a node is reconstructible from its domain coordinates — a
 //! [`NodeId`], and for the per-port widgets a [`PortRef`] — so any pass can
@@ -7,27 +8,29 @@
 //! geometry rebuild probe arranged rects before the widgets round-trip their
 //! own responses.
 //!
-//! Kept out of the node module proper because these are shared vocabulary
-//! rather than [`NodeUi`](crate::gui::pane::graph_ui::node_ui::NodeUi) state: the
-//! geometry rebuild, the test harness, and the inspector all derive ids here
-//! for widgets they never record.
+//! A leaf, apart from the modules that record the widgets: the geometry rebuild, the gestures,
+//! the test harness, and the inspector all derive ids here for widgets they never record.
 
 use palantir::{Ui, WidgetId};
 use scenarium::NodeId;
 
+use scenarium::{EventPort, InputPort};
+
+use crate::core::document::graph_view::GraphView;
+use crate::core::document::tie::TieId;
+use crate::core::document::wire_key::WireKey;
 use crate::gui::port_ref::PortRef;
-use scenarium::EventPort;
 
 use crate::gui::widgets::hover::Hover;
 
 /// A node-keyed widget id under `tag`.
-pub(crate) fn node(tag: &'static str, node_id: NodeId) -> WidgetId {
+pub(super) fn of_node(tag: &'static str, node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node", tag, node_id))
 }
 
-/// A port-keyed widget id — [`node`] for the per-port widgets, keyed by side
+/// A port-keyed widget id — [`of_node`] for the per-port widgets, keyed by side
 /// and index as well.
-pub(super) fn port(tag: &'static str, port: PortRef) -> WidgetId {
+pub(super) fn of_port(tag: &'static str, port: PortRef) -> WidgetId {
     WidgetId::from_hash((
         "graph.node",
         tag,
@@ -37,9 +40,9 @@ pub(super) fn port(tag: &'static str, port: PortRef) -> WidgetId {
     ))
 }
 
-/// An event-keyed widget id — [`node`] for the per-event widgets, keyed by
+/// An event-keyed widget id — [`of_node`] for the per-event widgets, keyed by
 /// the event's index as well.
-pub(super) fn event(tag: &'static str, event: EventPort) -> WidgetId {
+pub(super) fn of_event(tag: &'static str, event: EventPort) -> WidgetId {
     WidgetId::from_hash(("graph.node", tag, event.node_id, event.event_idx))
 }
 
@@ -47,19 +50,74 @@ pub(super) fn event(tag: &'static str, event: EventPort) -> WidgetId {
 /// geometry rebuild for last frame's arranged rect, before the panel's own
 /// response round-trips.
 pub(crate) fn body(node_id: NodeId) -> WidgetId {
-    node("body", node_id)
+    of_node("body", node_id)
 }
 
 /// A node's inline title-rename editor *and* its idle label, so the same id is
 /// recorded across the label⇄editor swap. Polled by [`drag_handles`] to drag
 /// the node by its title (the idle label senses `DRAG`).
 pub(crate) fn rename(node_id: NodeId) -> WidgetId {
-    node("title_rename", node_id)
+    of_node("title_rename", node_id)
 }
 
-/// Every widget whose drag moves `node_id`'s body, in the order
-/// [`NodeWidget::show`](crate::gui::pane::graph_ui::node_ui::node_widget::NodeWidget::show)
-/// tries them.
+pub(crate) fn port_circle(port: PortRef) -> WidgetId {
+    of_port("port_circle", port)
+}
+
+/// An input port's inline const editor (text field, checkbox, or file-pick
+/// button).
+pub(super) fn const_editor(input: InputPort) -> WidgetId {
+    of_port("const_editor", input.into())
+}
+
+/// An input port's cell (circle + label). Answers a double-click on the
+/// *label* area — the circle has its own [`port_circle`] and consumes
+/// hits over its own rect.
+pub(super) fn input_cell(port: PortRef) -> WidgetId {
+    of_port("input_cell", port)
+}
+
+/// An event port glyph. A separate id space from data ports
+/// ([`port_circle`]) because events are indexed independently of outputs.
+pub(super) fn event_glyph(event: EventPort) -> WidgetId {
+    of_event("event_glyph", event)
+}
+
+/// Stable id for a node's event-subscription pin. Keyed on the node (a
+/// subscription is whole-node, not per-port), so `CanvasGeometry` /
+/// `SubscriptionUi` reconstruct it to poll the pin's geometry as a wire
+/// drop target.
+pub(super) fn subscription_glyph(node_id: NodeId) -> WidgetId {
+    of_node("subscription_glyph", node_id)
+}
+
+/// Stable id for a preview's value area. Reconstructible from the node, so the
+/// canvas-level scan can read last frame's click without a cache.
+pub(crate) fn preview_image(node_id: NodeId) -> WidgetId {
+    of_node("preview_image", node_id)
+}
+
+/// Stable id for a node's inspector toggle chip in the header.
+pub(super) fn inspect_badge(node_id: NodeId) -> WidgetId {
+    of_node("inspect_badge", node_id)
+}
+
+/// Stable id for a node's floating inspection panel.
+pub(super) fn inspect_panel(node_id: NodeId) -> WidgetId {
+    of_node("inspect_panel", node_id)
+}
+
+/// The hover and press target of `tie`'s band.
+pub(super) fn tie_body(tie: TieId) -> WidgetId {
+    WidgetId::from_hash(("graph.tie", "body", tie))
+}
+
+/// The knob of a selected `tie`.
+pub(super) fn tie_knob(tie: TieId) -> WidgetId {
+    WidgetId::from_hash(("graph.tie", "knob", tie))
+}
+
+/// Every widget whose drag moves `node_id`'s body, in the order `NodeUi::draw_node` tries them.
 ///
 /// Not just the body panel: the header title doubles as a drag handle — its
 /// idle label senses `DRAG` and **swallows the press**, so the body never sees
@@ -94,4 +152,14 @@ pub(super) fn drag_handles(node_id: NodeId) -> impl Iterator<Item = WidgetId> {
 /// per node — before the subtree that reads it has recorded.
 pub(crate) fn hover(ui: &Ui, node_id: NodeId) -> Hover {
     Hover::from(ui.is_hover_within(body(node_id)))
+}
+
+/// Whether a hovered tie lights `wire`: the pointer is over a tie on its route, as a hovered
+/// endpoint lights a wire.
+pub(super) fn lit_by_tie(ui: &Ui, view: &GraphView, wire: WireKey) -> bool {
+    view.routes.get(&wire).is_some_and(|route| {
+        route
+            .iter()
+            .any(|&tie| ui.response_for(tie_body(tie)).hovered())
+    })
 }

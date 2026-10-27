@@ -9,13 +9,13 @@ use glam::Vec2;
 use palantir::widget::domain;
 use palantir::{Ui, WidgetId};
 
-use crate::core::edit::graph_intent::GraphIntent;
+use crate::gui::frame::requests::Requests;
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
-use crate::gui::pane::graph_ui::draw::anchored_menu::{AnchoredMenu, PopupShape};
-use crate::gui::pane::graph_ui::gesture::canvas_gesture::CanvasGesture;
+use crate::gui::pane::graph_ui::gesture::anchored_menu::{AnchoredMenu, PopupShape};
 use crate::gui::pane::graph_ui::gesture::new_node_ui::node_palette::{NodePalette, Opening};
 use crate::gui::pane::graph_ui::gesture::new_node_ui::palette_rows::PaletteRows;
+use crate::gui::pane::graph_ui::prepass_ctx::CanvasGesture;
 use crate::gui::port_ref::PortRef;
 
 /// Right-click or double-click on empty canvas → popup that lists every
@@ -34,11 +34,6 @@ pub(crate) struct NewNodeUi {
     /// auto-attaching). `None` for a plain RMB / double-click. Set at open,
     /// read at pick.
     source: Option<PortRef>,
-    /// Set when a node was picked from a popup that a dropped wire
-    /// opened: the wire's source port, handed back to `WireUi` so the
-    /// wire resumes *floating* and the user clicks the exact port to land
-    /// it. Taken by the canvas next frame.
-    resume_floating: Option<PortRef>,
     /// The palette's search box. Cleared on each open; case-insensitively
     /// filters the listed entries by name (a matching category name shows
     /// that whole column). Empty ⇒ everything shows.
@@ -79,7 +74,6 @@ impl NewNodeUi {
     pub(crate) fn reset(&mut self) {
         self.menu.reset();
         self.source = None;
-        self.resume_floating = None;
         self.search.text.clear();
         self.search.folded.clear();
     }
@@ -89,15 +83,17 @@ impl NewNodeUi {
         self.menu.is_open()
     }
 
-    /// Open the palette from a bare RMB / double-click, or from a wire
-    /// dropped on empty canvas whose source is `pending_source`, and record it
-    /// while it is open. Returns the `AddNode` a pick raises.
+    /// Open the palette from a bare RMB / double-click, or from a wire dropped on empty canvas
+    /// this frame, and record it while it is open, the `AddNode` a pick raises onto `out`.
+    /// Returns the source of the dropped wire that opened it, when a pick lands, which floats
+    /// again so the user clicks the exact port to land it rather than it auto-attaching.
     pub(crate) fn apply(
         &mut self,
         ui: &mut Ui,
         ctx: CanvasCtx<'_>,
-        pending_source: Option<PortRef>,
-    ) -> Option<GraphIntent> {
+        out: &mut Requests,
+    ) -> Option<PortRef> {
+        let pending_source = ctx.dropped_wire();
         let graph_ctx = ctx.graph_ctx();
         let resp = ui.response_for(canvas::outer_wid());
         // Open the palette either from a bare RMB / double-click (`NewNode`
@@ -155,19 +151,9 @@ impl NewNodeUi {
             palette.body(ui, popup, search)
         });
 
-        if chosen.is_some() {
-            // If a dropped wire opened this popup, hand its source
-            // back so the wire resumes floating — the user then clicks the
-            // exact port to land it, rather than it auto-attaching.
-            self.resume_floating = self.source;
-        }
-        chosen
-    }
-
-    /// Take the source of a wire whose drop spawned a node this frame — the
-    /// canvas re-floats it on `WireUi`. `None` on a plain palette open.
-    pub(crate) const fn take_resume_floating(&mut self) -> Option<PortRef> {
-        self.resume_floating.take()
+        let picked = chosen?;
+        out.push_graph(picked);
+        self.source
     }
 }
 

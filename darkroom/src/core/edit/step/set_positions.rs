@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::document::Document;
 use crate::core::document::item_id::ItemId;
+use crate::core::edit::edit_facts::EditFacts;
 use crate::core::edit::step::change::{Change, Direction};
 use crate::core::edit::step::reversible::Reversible;
 
@@ -78,15 +79,7 @@ impl Reversible for SetPositions {
         true
     }
 
-    /// Nothing remeasures: every member keeps its size and its cached
-    /// intra-node offsets, and the canvas recomputes port centers from this
-    /// frame's `pos`. The drag also drains pre-record, so the first pass
-    /// already arranges at the cursor.
-    fn invalidates_cached_geometry(&self) -> bool {
-        false
-    }
-
-    fn changes_node_set(&self) -> bool {
-        false
+    fn facts(&self) -> EditFacts {
+        EditFacts::NONE
     }
 }

@@ -3,15 +3,19 @@
 
 use std::path::PathBuf;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use palantir::{InputEvent, Ui};
 
 use crate::driver::error::DriverError;
 use crate::driver::offscreen::Offscreen;
-use crate::driver::shot::{Region, Shot};
+use crate::driver::shot::{Capture, Region};
 use crate::driver::window_backend::WindowBackend;
 use crate::gui::app::App;
+
+/// How long a wait on the window's background work sleeps between two looks at the app, which
+/// each run a frame of it.
+const WINDOW_POLL: Duration = Duration::from_millis(5);
 
 /// The two places the editor runs: offscreen on the driver's thread, or in the desktop window on
 /// the main thread.
@@ -23,14 +27,14 @@ pub(crate) enum Backend {
 }
 
 impl Backend {
-    /// `f` against the app and the frame it last ran.
-    pub(crate) fn read<R: Send + 'static>(
+    /// `f`, which reads or changes the app, against the app and the frame it last ran.
+    pub(crate) fn with_app<R: Send + 'static>(
         &mut self,
         f: impl FnOnce(&mut App, &Ui) -> R + Send + 'static,
     ) -> Result<R, DriverError> {
         match self {
-            Self::Offscreen(offscreen) => Ok(offscreen.read(f)),
-            Self::Window(window) => window.read(f),
+            Self::Offscreen(offscreen) => Ok(offscreen.with_app(f)),
+            Self::Window(window) => window.with_app(f),
         }
     }
 
@@ -77,6 +81,17 @@ impl Backend {
         }
     }
 
+    /// Sleep until background work may have posted a result, or `deadline` passes: offscreen,
+    /// until the app's wake; the window's frames run themselves, so a moment of its real time.
+    pub(crate) fn wait_wake(&self, deadline: Instant) {
+        match self {
+            Self::Offscreen(offscreen) => offscreen.wait_wake(deadline),
+            Self::Window(_) => {
+                thread::sleep(WINDOW_POLL.min(deadline.saturating_duration_since(Instant::now())));
+            }
+        }
+    }
+
     pub(crate) fn settle(&mut self, step: &str) -> Result<u32, DriverError> {
         match self {
             Self::Offscreen(offscreen) => offscreen.settle(step),
@@ -87,20 +102,15 @@ impl Backend {
     /// Open `document`, or a new document for none, in place of the open one.
     pub(crate) fn open(&mut self, document: Option<PathBuf>) -> Result<(), DriverError> {
         match self {
-            Self::Offscreen(offscreen) => offscreen.relaunch(document),
+            Self::Offscreen(offscreen) => offscreen.open(document),
             Self::Window(window) => window.open(document),
         }
     }
 
-    pub(crate) fn shot(
-        &mut self,
-        region: &Region,
-        max_side: u32,
-        path: PathBuf,
-    ) -> Result<Shot, DriverError> {
+    pub(crate) fn shot(&mut self, region: &Region, max_side: u32) -> Result<Capture, DriverError> {
         match self {
-            Self::Offscreen(offscreen) => offscreen.shot(region, max_side, path),
-            Self::Window(window) => window.shot(region, max_side, path),
+            Self::Offscreen(offscreen) => offscreen.shot(region, max_side),
+            Self::Window(window) => window.shot(region, max_side),
         }
     }
 }

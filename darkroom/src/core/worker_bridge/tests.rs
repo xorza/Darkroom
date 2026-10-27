@@ -8,6 +8,7 @@ use scenarium::{
     system_library, worker_events_library,
 };
 
+use crate::core::wake;
 use crate::core::wake::Wake;
 use crate::core::worker_bridge::WorkerBridge;
 
@@ -95,7 +96,7 @@ fn commands_report_a_dead_worker_instead_of_reading_as_queued() {
     // A send only fails once the worker task is gone, and then no
     // report can ever arrive — so a caller told "queued" would wait
     // forever on a run that will never report back.
-    let mut bridge = WorkerBridge::new(Arc::new(|| {}));
+    let mut bridge = WorkerBridge::new(wake::internals::noop());
     assert!(bridge.run_sinks().is_ok(), "a live worker takes commands");
 
     // Stop the worker the way shutdown does, then keep issuing commands.

@@ -12,7 +12,8 @@ use crate::core::wake;
 use crate::gui::state::preview_store;
 
 /// The header line: the fixed head, then the clauses that come and go — the
-/// capped-texture note, the still-converting note and the zoom readout. All
+/// capped-texture note, the still-converting note and the zoom readout, with
+/// two significant digits under 10 %. All
 /// are conditional, so the only way to know they land in the right order is
 /// to render the combinations.
 #[test]
@@ -42,6 +43,19 @@ fn header_readout_adds_its_conditional_clauses_only_when_they_apply() {
     let full = FullView::Ready(shown(UVec2::new(2, 2)));
     assert_eq!(line(&full, None), "img · 2 × 2 · RGBA u8");
     assert_eq!(line(&full, Some(1.25)), "img · 2 × 2 · RGBA u8 · 125%");
+    // Under 10 % two significant digits, so a fit far below the range reads as what it is.
+    for (zoom, percent) in [
+        (0.1, "10%"),
+        (0.05, "5.0%"),
+        (0.004, "0.40%"),
+        (0.000_4, "0.040%"),
+    ] {
+        assert_eq!(
+            line(&full, Some(zoom)),
+            format!("img · 2 × 2 · RGBA u8 · {percent}"),
+            "{zoom}"
+        );
+    }
 
     let capped = FullView::Ready(shown(UVec2::new(8192, 4096)));
     assert_eq!(
@@ -178,7 +192,14 @@ fn the_frame_that_first_draws_a_viewer_frames_it_at_the_full_size() {
                 previews: store,
                 size: pane,
             };
-            viewer.show(ui, view, &mut preferences);
+            viewer.show(
+                ui,
+                view,
+                ViewerWrites {
+                    preferences: &mut preferences,
+                    out: &mut Requests::default(),
+                },
+            );
         })
     };
     let first = frame(&mut h, &mut viewer, &store);
@@ -212,4 +233,67 @@ fn the_frame_that_first_draws_a_viewer_frames_it_at_the_full_size() {
         Some(framing),
         "the full texture landing keeps the framing the user set"
     );
+}
+
+/// A viewer at fit holds no framing of its own until a gesture moves it: a drag then starts
+/// from the fit and pans by the pointer's travel, and a double click goes back to fitting. A
+/// 512 × 256 image in an 800 × 600 pane fits at min(800 / 512, 600 / 256) = 1.5625, which is
+/// 800 × 400, centered at pan (0, (600 − 400) / 2) = (0, 100).
+#[test]
+fn a_drag_starts_from_the_fit_and_a_double_click_fits_again() {
+    let mut h = UiHarness::arena();
+    let mut fixture = DocumentFixture::default();
+    let node = fixture.add(&preview_sink::func(Arc::default()));
+    let mut store = PreviewStore::new(wake::internals::noop());
+    store.publish(
+        node,
+        preview_store::internals::image_value(Size2us::new(512, 256), ColorFormat::RGB_U8),
+    );
+    store.settle(h.ui());
+    let theme = Theme::default();
+    let mut preferences = ViewerPreferences::default();
+    let mut viewer = ImageViewer::new(node);
+    let mut frame = |h: &mut UiHarness, viewer: &mut ImageViewer| {
+        h.frame(|ui| {
+            let view = ViewerPane {
+                theme: &theme,
+                title: "img",
+                previews: &store,
+                size: Some(Vec2::new(800.0, 600.0)),
+            };
+            viewer.show(
+                ui,
+                view,
+                ViewerWrites {
+                    preferences: &mut preferences,
+                    out: &mut Requests::default(),
+                },
+            );
+        });
+    };
+    frame(&mut h, &mut viewer);
+    frame(&mut h, &mut viewer);
+    assert_eq!(viewer.view, None, "at fit, no framing of its own");
+
+    let grab = h.center_of(pane_wid(node));
+    h.press_at(grab);
+    frame(&mut h, &mut viewer);
+    h.drag_to(grab + Vec2::new(30.0, -20.0));
+    frame(&mut h, &mut viewer);
+    assert_eq!(
+        viewer.view,
+        Some(Viewport {
+            pan: Vec2::new(30.0, 80.0),
+            zoom: 1.5625,
+        })
+    );
+    h.release_button(PointerButton::Left);
+    frame(&mut h, &mut viewer);
+
+    h.advance_past_double_click();
+    for _ in 0..2 {
+        h.click_at(grab);
+        frame(&mut h, &mut viewer);
+    }
+    assert_eq!(viewer.view, None, "fitting again");
 }

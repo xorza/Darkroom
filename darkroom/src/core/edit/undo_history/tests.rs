@@ -7,7 +7,6 @@ use scenarium::{Library, NodeId};
 use super::*;
 use crate::core::document::internals::{self, DocumentFixture};
 use crate::core::document::item_id::ItemId;
-use crate::core::document::viewport::Viewport;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::drag_start::DragStart;
 
@@ -233,40 +232,6 @@ fn another_edit_seals_the_open_gesture() {
     assert!(!h.undo());
 }
 
-/// A pan's frames are one entry, and a one-shot camera jump after it — a
-/// toolbar fit, Ctrl+0 — is its own.
-#[test]
-fn a_camera_jump_does_not_fold_into_the_pan_before_it() {
-    let mut h = Harness::sample();
-    let start = h.document.main_view.viewport;
-    let at = |x: f32, zoom| Viewport {
-        pan: Vec2::new(x, 0.0),
-        zoom,
-    };
-
-    let pan = h.gesture();
-    for x in [10.0, 20.0] {
-        h.frame(GraphIntent::SetViewport {
-            to: at(x, start.zoom),
-            gesture: Some(pan),
-        });
-    }
-    h.edit(GraphIntent::SetViewport {
-        to: at(20.0, 2.0),
-        gesture: None,
-    });
-
-    assert!(h.undo());
-    assert_eq!(
-        h.document.main_view.viewport,
-        at(20.0, start.zoom),
-        "the jump"
-    );
-    assert!(h.undo());
-    assert_eq!(h.document.main_view.viewport, start, "the whole pan");
-    assert!(!h.undo());
-}
-
 #[test]
 fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
     use scenarium::{Binding, InputPort};
@@ -369,4 +334,83 @@ fn history_bounded_by_byte_budget() {
         assert!(h.undo());
     }
     assert!(!h.undo(), "exactly the newest {kept} entries were kept");
+}
+
+/// A full rewind then a fresh edit reclaims the whole buffer, dead prefix and
+/// all: the history is the one new entry. A drag frame drops the redo tail as
+/// any edit does, and a drag back to its start is nothing to undo while it is
+/// still held.
+#[test]
+fn a_rewind_then_an_edit_starts_the_buffer_over() {
+    let mut h = Harness::sample();
+    let (a, b) = (h.node(0), h.node(1));
+    h.select([a]);
+    h.select([b]);
+    assert!(h.undo() && h.undo());
+    h.select([a]);
+    assert_eq!(h.history.entries.len(), 1);
+    assert_eq!(h.history.head, 0);
+    assert_eq!(h.history.bytes.len(), h.history.entries[0].len());
+
+    assert!(h.undo());
+    let drag = h.latch(&[a]);
+    h.drag(&drag, Vec2::new(3.0, 0.0));
+    assert!(!h.redo(), "the drag frame dropped the selection's redo");
+
+    let mut still = Harness::sample();
+    let node = still.node(0);
+    let held = still.latch(&[node]);
+    still.drag(&held, Vec2::new(3.0, 0.0));
+    still.drag(&held, Vec2::ZERO);
+    assert!(
+        !still.history.can_undo(),
+        "a held drag back where it started"
+    );
+}
+
+/// One entry larger than the whole budget is kept on its own, the older ones
+/// dropped: the edit just made is always undoable.
+#[test]
+fn an_entry_over_the_budget_survives_alone() {
+    let mut h = Harness::bounded(1);
+    let (a, b) = (h.node(0), h.node(1));
+    h.select([a]);
+    h.select([a, b]);
+    assert_eq!(h.history.entries.len(), 1, "the older one dropped");
+    assert!(h.undo());
+    assert_eq!(
+        h.document.main_view.selected,
+        BTreeSet::from([ItemId::Node(a)])
+    );
+    assert!(!h.undo());
+}
+
+/// A withdraw takes the held gesture's whole entry back, newest step first,
+/// and forgets it; a withdraw of another gesture, or of one an edit sealed,
+/// touches nothing.
+#[test]
+fn a_withdraw_takes_the_open_gesture_back() {
+    let mut h = Harness::sample();
+    let a = h.node(0);
+    let before = h.document.clone();
+    let drag = h.latch(&[a]);
+    h.drag(&drag, Vec2::new(7.0, 0.0));
+    let other = h.gesture();
+    assert!(!h.history.withdraw(other, &mut h.document, &mut |_| {}));
+    assert!(
+        h.history
+            .withdraw(drag.gesture, &mut h.document, &mut |_| {})
+    );
+    assert_eq!(h.document, before);
+    assert!(!h.history.can_undo(), "nothing is left");
+
+    let sealed = h.latch(&[a]);
+    h.drag(&sealed, Vec2::new(7.0, 0.0));
+    h.select([a]);
+    let moved = h.document.clone();
+    assert!(
+        !h.history
+            .withdraw(sealed.gesture, &mut h.document, &mut |_| {})
+    );
+    assert_eq!(h.document, moved);
 }

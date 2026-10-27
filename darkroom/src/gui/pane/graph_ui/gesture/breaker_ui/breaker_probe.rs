@@ -3,7 +3,7 @@
 use palantir::Rect;
 use scenarium::{InputPort, NodeId, Subscription};
 
-use crate::gui::pane::graph_ui::draw::wire::Wire;
+use crate::gui::pane::graph_ui::frame::wire::Wire;
 use crate::gui::pane::graph_ui::gesture::breaker_ui::scribble::Scribble;
 
 /// The active gesture, threaded through node and wire rendering so

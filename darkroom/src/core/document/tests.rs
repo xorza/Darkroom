@@ -1,8 +1,5 @@
 use std::sync::Arc;
 
-use common::SerdeFormat;
-use palantir::DockOperation;
-
 use scenarium::{EventPort, InputPort, OutputPort};
 
 use super::*;
@@ -253,63 +250,6 @@ fn reconcile_repairs_the_ties() {
     );
 }
 
-/// Ties, routes and a selected tie round-trip through RON, the format a
-/// document is saved in.
-#[test]
-fn ties_round_trip_as_ron() {
-    let mut fixture = DocumentFixture::default();
-    let [a, b] = [0.0, 220.0].map(|x| fixture.node_at(Vec2::new(x, 0.0)));
-    let data = fixture.wire(OutputPort::new(a, 0), InputPort::new(b, 0));
-    let event = fixture.subscribe(EventPort::new(a, 0), b);
-    let first = fixture.tie(Vec2::new(80.0, 10.0), [data, event]);
-    let second = fixture.tie(Vec2::new(140.0, 10.0), [data]);
-    let mut document = fixture.document;
-    document.main_view.ties.get_mut(&second).unwrap().angle = TieAngle::Pinned(45.0);
-    document.main_view.selected = [ItemId::Node(a), ItemId::Tie(first)].into_iter().collect();
-    document.validate().unwrap();
-
-    let bytes = SerdeFormat::Ron.serialize(&document).unwrap();
-    let back: Document = SerdeFormat::Ron.deserialize(&bytes).unwrap();
-    assert_eq!(back.main_view, document.main_view);
-    assert_eq!(
-        back.main_view.routes[&data],
-        Route::new([first, second]),
-        "a route keeps its order"
-    );
-}
-
-#[test]
-fn dock_layout_round_trips_as_ron() {
-    use palantir::{DockDrop, SplitSide};
-
-    let mut fixture = DocumentFixture::sample();
-    let node_id = fixture.add(&preview_sink::func(Arc::default()));
-    let mut document = fixture.document;
-    let primary = document.layout.primary().id;
-    document.layout.find_or_insert(TabRef::Preferences, primary);
-    document
-        .layout
-        .find_or_insert(TabRef::ImageViewer(node_id), primary);
-    // A split pane too, so the whole tree shape round-trips — not
-    // just a flat strip.
-    document.layout.apply(DockOperation::MoveTab {
-        tab: TabRef::ImageViewer(node_id),
-        to: DockDrop::Split {
-            group: primary,
-            side: SplitSide::Right,
-        },
-    });
-    let bytes = SerdeFormat::Ron
-        .serialize(&document)
-        .expect("serialize with dock layout");
-    let back: Document = SerdeFormat::Ron.deserialize(&bytes).expect("deserialize");
-    back.validate().expect("round-tripped document is valid");
-    assert_eq!(
-        back.layout, document.layout,
-        "the split tree (groups, focus, ratio) round-trips through RON"
-    );
-}
-
 /// The sample validates, and a layout that pins another tab, or was
 /// saved under another dock seed, does not — each would pass palantir's
 /// own load check.
@@ -339,32 +279,17 @@ fn validation_holds_the_layout_to_the_editors_dock() {
 fn validation_holds_paths_absolute() {
     use std::path::{self, Path};
 
-    use scenarium::{BindingEntry, ConstValue, DetachedNodeParts, InputPort};
+    use scenarium::ConstValue;
 
     let mut fixture = DocumentFixture::sample();
     let stub = fixture.stub_at(Vec2::ZERO);
-    let mut document = fixture.document;
-    let with_path = |document: &mut Document, value: &str| {
-        let record = document.stubs.remove(stub).unwrap();
-        document.stubs.insert(
-            DetachedNode::new(DetachedNodeParts {
-                node_id: stub,
-                node: record.node().clone(),
-                bindings: vec![BindingEntry {
-                    port: InputPort::new(stub, 0),
-                    binding: Binding::Const(ConstValue::FsPath(value.to_string())),
-                }],
-                subscriptions: Vec::new(),
-            })
-            .unwrap(),
-        );
-    };
     let absolute = path::absolute(Path::new("x.tiff")).unwrap();
     for valid in [absolute.to_str().unwrap(), ""] {
-        with_path(&mut document, valid);
-        document.validate().unwrap();
+        fixture.bind_stub(stub, ConstValue::FsPath(valid.to_string()));
+        fixture.document.validate().unwrap();
     }
-    with_path(&mut document, "inputs/x.tiff");
+    fixture.bind_stub(stub, ConstValue::FsPath("inputs/x.tiff".to_string()));
+    let document = fixture.document;
     assert!(matches!(
         document.validate(),
         Err(DocumentValidationError::RelativePath { node_id, path })

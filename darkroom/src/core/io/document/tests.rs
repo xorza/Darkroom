@@ -1,32 +1,61 @@
+use std::collections::BTreeSet;
+use std::io::Write as _;
+use std::sync::Arc;
+
 use common::TempDir;
 use glam::Vec2;
 use lens::MlModelPaths;
-use scenarium::{
-    Binding, BindingEntry, ConstValue, DetachedNode, DetachedNodeParts, InputPort, NodeId,
-};
-
-use std::io::Write as _;
+use palantir::{DockDrop, DockOperation, SplitSide};
+use scenarium::{Binding, ConstValue, EventPort, InputPort, NodeId, OutputPort};
 
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 use super::*;
 use crate::core::document::internals::DocumentFixture;
+use crate::core::document::item_id::ItemId;
+use crate::core::document::route::Route;
+use crate::core::document::tab_ref::TabRef;
+use crate::core::document::tie::TieAngle;
 use crate::core::io::document::document_format::DOCUMENT_ENTRY;
+use crate::core::preview_sink;
 use crate::core::runtime_library::RuntimeLibrary;
 
 /// A document round-trips in each format, and a load reports the format it found. The plain
 /// file is the document's pretty RON text; the zipped one holds that text as its one deflated
-/// entry.
+/// entry. The document holds every kind of view state: placements keyed by `NodeId`, a wire
+/// and a subscription through two ties in route order, a pinned angle, a selection of a node
+/// and a tie, and a dock split in two groups.
 #[test]
 fn document_round_trips_in_either_format() {
     let dir = TempDir::new("darkroom-document-roundtrip");
-    // Populated, not `Document::default()`: an empty document has an empty
-    // placement map, which would never exercise a `NodeId` as a key.
-    let document = DocumentFixture::sample().document;
-    assert!(
-        !document.main_view.node_placements.is_empty(),
-        "the fixture must place nodes for this to prove anything"
+    let mut fixture = DocumentFixture::sample();
+    let [a, b] = [0.0, 220.0].map(|x| fixture.node_at(Vec2::new(x, 300.0)));
+    let data = fixture.wire(OutputPort::new(a, 0), InputPort::new(b, 0));
+    let event = fixture.subscribe(EventPort::new(a, 0), b);
+    let first = fixture.tie(Vec2::new(80.0, 310.0), [data, event]);
+    let second = fixture.tie(Vec2::new(140.0, 310.0), [data]);
+    let viewer = fixture.add(&preview_sink::func(Arc::default()));
+    let mut document = fixture.document;
+    document.main_view.ties.get_mut(&second).unwrap().angle = TieAngle::Pinned(45.0);
+    document.main_view.selected = BTreeSet::from([ItemId::Node(a), ItemId::Tie(first)]);
+    let primary = document.layout.primary().id;
+    document.layout.find_or_insert(TabRef::Preferences, primary);
+    document
+        .layout
+        .find_or_insert(TabRef::ImageViewer(viewer), primary);
+    document.layout.apply(DockOperation::MoveTab {
+        tab: TabRef::ImageViewer(viewer),
+        to: DockDrop::Split {
+            group: primary,
+            side: SplitSide::Right,
+        },
+    });
+    document.validate().unwrap();
+    assert_eq!(
+        document.main_view.routes[&data],
+        Route::new([first, second]),
+        "the data wire runs through both ties, in order"
     );
 
     let plain = dir.join("plain.darkroom");
@@ -159,6 +188,7 @@ fn paths_document(one: &str, many: &[&str], stub: &str) -> (Document, [NodeId; 4
     let stack = fixture.add(&func("Stack Lights"));
     let unset = fixture.add(&func("Load Image"));
     let stubbed = fixture.stub_at(Vec2::ZERO);
+    fixture.bind_stub(stubbed, ConstValue::FsPath(stub.to_string()));
     let mut document = fixture.document;
     let bind = |document: &mut Document, node_id, value| {
         document
@@ -173,19 +203,6 @@ fn paths_document(one: &str, many: &[&str], stub: &str) -> (Document, [NodeId; 4
         ConstValue::FsPaths(many.iter().map(ToString::to_string).collect()),
     );
     bind(&mut document, unset, ConstValue::FsPath(String::new()));
-    let record = document.stubs.remove(stubbed).unwrap();
-    document.stubs.insert(
-        DetachedNode::new(DetachedNodeParts {
-            node_id: stubbed,
-            node: record.node().clone(),
-            bindings: vec![BindingEntry {
-                port: InputPort::new(stubbed, 0),
-                binding: Binding::Const(ConstValue::FsPath(stub.to_string())),
-            }],
-            subscriptions: Vec::new(),
-        })
-        .unwrap(),
-    );
     (document, [load, stack, unset, stubbed])
 }
 
@@ -215,9 +232,9 @@ fn stored(path: &Path, nodes: [NodeId; 4]) -> Vec<String> {
 }
 
 /// A save writes each path inside the document's folder relative to it, `/` between its parts,
-/// and the folder itself as `.`; a path outside, and an unset one, stay as they are, and a stub's
-/// path is written as the graph's are. A load reads them against the folder of the file it
-/// reads: a copy in another folder names the copy's files. Saved absolute, the file holds the
+/// and the folder itself as `.`; a path outside, one reached through `..`, and an unset one stay
+/// as they are, and a stub's path is written as the graph's are. A load reads them against the
+/// folder of the file it reads: a copy in another folder names the copy's files. Saved absolute, the file holds the
 /// document's own paths; and a save to a folder below leaves the old folder's paths absolute.
 #[test]
 fn paths_inside_the_folder_are_saved_relative_and_move_with_it() {
@@ -228,9 +245,23 @@ fn paths_inside_the_folder_are_saved_relative_and_move_with_it() {
     let inside = |folder: &Path, name: &str| folder.join("inputs").join(name).display().to_string();
     let outside = dir.join("elsewhere").join("c.fit").display().to_string();
     let folder = first.display().to_string();
+    // Through `..`, one out of the folder and one back into it: both stay absolute.
+    let climbs_out = first.join("..").join("x.tiff").display().to_string();
+    let climbs_back = first
+        .join("below")
+        .join("..")
+        .join("y.tiff")
+        .display()
+        .to_string();
     let (document, nodes) = paths_document(
         &inside(&first, "a.tiff"),
-        &[&inside(&first, "b.fit"), &outside, &folder],
+        &[
+            &inside(&first, "b.fit"),
+            &outside,
+            &folder,
+            &climbs_out,
+            &climbs_back,
+        ],
         &inside(&first, "s.tiff"),
     );
 
@@ -243,6 +274,8 @@ fn paths_inside_the_folder_are_saved_relative_and_move_with_it() {
             "inputs/b.fit",
             outside.as_str(),
             ".",
+            climbs_out.as_str(),
+            climbs_back.as_str(),
             "",
             "inputs/s.tiff"
         ]
@@ -262,6 +295,8 @@ fn paths_inside_the_folder_are_saved_relative_and_move_with_it() {
             inside(&second, "b.fit"),
             outside,
             second.display().to_string(),
+            climbs_out,
+            climbs_back,
             String::new(),
             inside(&second, "s.tiff"),
         ]

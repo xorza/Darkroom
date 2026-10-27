@@ -4,20 +4,17 @@ use glam::Vec2;
 use palantir::Rect;
 use scenarium::{InputPort, NodeId, Subscription};
 
-use crate::gui::pane::graph_ui::draw::wire::Wire;
+use crate::gui::pane::graph_ui::frame::wire::Wire;
 
-/// Polyline samples closer than this (in inner-canvas world units)
-/// are dropped — keeps the breaker from accumulating sub-pixel
-/// duplicates on a slow drag.
+/// Polyline samples closer than this on screen, in logical px, are dropped — keeps the breaker
+/// from accumulating sub-pixel duplicates on a slow drag. On screen rather than in world units,
+/// so the spacing a hand sees is the same at every zoom.
 const MIN_POINT_DISTANCE: f32 = 4.0;
-/// Hard cap on the total polyline length. Once hit, further points
-/// stop appending; the last segment is clamped to land exactly on
-/// the limit. With [`MIN_POINT_DISTANCE`] spacing it holds a scribble to
-/// 500 segments, which bounds the per-frame intersection work.
+/// Hard cap on the total polyline length on screen, in logical px, each segment counted at the
+/// zoom it was drawn at. Once hit, further points stop appending; the last segment is clamped to
+/// land exactly on the limit. With [`MIN_POINT_DISTANCE`] spacing it holds a scribble to 500
+/// segments, which bounds the per-frame intersection work at every zoom.
 const MAX_BREAKER_LENGTH: f32 = 2000.0;
-/// Bezier sampling resolution for hit-testing: 16 chords per wire, cheap
-/// enough to redo every frame for every visible wire.
-pub(crate) const BEZIER_SAMPLES: usize = 16;
 
 /// The breaker scribble: its samples, how far they run, and the three target
 /// sets a frame's probing marks against them. Lives in inner-canvas world
@@ -58,7 +55,7 @@ pub(crate) struct Scribble {
     /// release into `GraphIntent::RemoveNode`.
     pub(super) broken_node_ids: Vec<NodeId>,
     /// Event subscriptions whose wire the breaker intersects this frame,
-    /// drained on release into `SetSubscription { subscribe: false }`.
+    /// drained on release into `SetSubscription { to: false }`.
     pub(super) broken_subscriptions: Vec<Subscription>,
 }
 
@@ -85,9 +82,11 @@ impl Scribble {
         self.broken_subscriptions.clear();
     }
 
-    pub(super) fn add_point(&mut self, p: Vec2) {
+    /// Extend the scribble to the world point `p`, drawn at `zoom` screen px per world unit.
+    pub(super) fn add_point(&mut self, p: Vec2, zoom: f32) {
+        debug_assert!(zoom > 0.0, "a zoom is positive");
         let last = *self.points.last().unwrap();
-        let seg = last.distance(p);
+        let seg = last.distance(p) * zoom;
         if seg <= MIN_POINT_DISTANCE {
             return;
         }
@@ -151,29 +150,19 @@ impl Scribble {
         false
     }
 
-    /// True if any sample-segment of `wire` crosses any breaker segment.
-    /// Samples the cubic into `BEZIER_SAMPLES` chords; this runs once per
-    /// wire per frame while the gesture is active, so we don't cache.
+    /// True if any chord of `wire` crosses any breaker segment. This runs once per wire per frame
+    /// while the gesture is active, so nothing is cached.
     pub(super) fn intersects_wire(&self, wire: &Wire) -> bool {
-        let Wire { p0, p1, p2, p3 } = *wire;
         // A cubic stays inside its control points' box, and so does every
         // chord between two of its samples.
-        if self.points.len() < 2
-            || self.misses(p0.min(p1).min(p2).min(p3), p0.max(p1).max(p2).max(p3))
-        {
+        let hull = wire.hull();
+        if self.points.len() < 2 || self.misses(hull.min, hull.max()) {
             return false;
         }
-        let mut prev = p0;
-        for i in 1..=BEZIER_SAMPLES {
-            let next = wire.at(i as f32 / BEZIER_SAMPLES as f32);
-            for segment in self.segments() {
-                if segments_intersect((prev, next), segment) {
-                    return true;
-                }
-            }
-            prev = next;
-        }
-        false
+        wire.chords().any(|[a, b]| {
+            self.segments()
+                .any(|segment| segments_intersect((a, b), segment))
+        })
     }
 }
 

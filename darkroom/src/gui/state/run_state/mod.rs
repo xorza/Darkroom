@@ -142,23 +142,23 @@ pub(crate) struct RunState {
     ///    completed run. The caches that *are* swept release textures up to
     ///    8192² RGBA8, which is what earns them a per-frame pass.
     nodes: HashMap<NodeId, NodeRunState>,
-    pub(crate) previews: PreviewStore,
+    previews: PreviewStore,
     /// The program acknowledged by the worker's ordered report stream. Every
     /// subsequent progress/result payload belongs to this exact compile.
-    pub(crate) compiled: Option<Arc<CompiledGraph>>,
-    pub(crate) activity: WorkerActivity,
+    compiled: Option<Arc<CompiledGraph>>,
+    activity: WorkerActivity,
     /// The runs the worker reported ended, completed or failed: a count that only grows, so a
     /// reader that noted it before asking for a run knows when one ended after, however fast.
     /// The worker merges the run commands of one batch into one run, so this counts runs, not
     /// requests.
-    pub(crate) runs_ended: u64,
+    runs_ended: u64,
     /// RAM held by the worker's runtime cache (system RAM vs GPU VRAM), as of
     /// the last report that measured it: a completed run, or an install —
     /// which releases the values of every node the new program dropped, and
     /// is the only measurement a program with nothing to run ever produces.
     /// Explicit eviction clears this projection until the next
     /// run because successful eviction is fire-and-forget.
-    pub(crate) cache_ram: RamUsage,
+    cache_ram: RamUsage,
     /// The values preview nodes published since the last frame, swapped in
     /// from the worker's side and emptied into [`Self::previews`]. Kept so the
     /// swap reuses its capacity.
@@ -185,6 +185,25 @@ impl RunState {
             cache_ram: RamUsage::default(),
             published: HashMap::new(),
         }
+    }
+
+    /// The preview values the frame shows, and their conversions.
+    pub(crate) const fn previews(&self) -> &PreviewStore {
+        &self.previews
+    }
+
+    pub(crate) const fn activity(&self) -> WorkerActivity {
+        self.activity
+    }
+
+    /// The runs the worker reported ended; see the field.
+    pub(crate) const fn runs_ended(&self) -> u64 {
+        self.runs_ended
+    }
+
+    /// RAM the worker's runtime cache holds, as of the last report that measured it.
+    pub(crate) const fn cache_ram(&self) -> RamUsage {
+        self.cache_ram
     }
 
     /// Bring this projection up to date with everything that has happened
@@ -448,18 +467,29 @@ impl RunState {
     }
 }
 
-#[cfg(test)]
+#[cfg(feature = "internals")]
 pub(crate) mod internals {
+    #[cfg(test)]
     use scenarium::{NodeId, RamUsage};
 
-    use crate::gui::state::run_state::{ExecStatus, NodeRunState, RunState};
+    use crate::gui::state::preview_store::PreviewStore;
+    use crate::gui::state::run_state::RunState;
+    #[cfg(test)]
+    use crate::gui::state::run_state::{ExecStatus, NodeRunState};
 
     impl RunState {
+        /// The preview store, for a test or a bench that publishes or lands a value itself.
+        pub(crate) const fn previews_mut(&mut self) -> &mut PreviewStore {
+            &mut self.previews
+        }
+
+        #[cfg(test)]
         pub(crate) fn status(&self, id: NodeId) -> ExecStatus {
             self.node(id)
                 .map_or(ExecStatus::None, |node| node.status().clone())
         }
 
+        #[cfg(test)]
         pub(crate) fn ram(&self, id: NodeId) -> RamUsage {
             self.node(id).map(NodeRunState::ram).unwrap_or_default()
         }

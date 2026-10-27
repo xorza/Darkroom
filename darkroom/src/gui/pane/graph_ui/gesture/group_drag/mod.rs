@@ -5,7 +5,7 @@
 //! The caller owns the hit-testing that decides *what* got grabbed — a node
 //! body or its title, or a tie's band — and hands the result to
 //! [`GroupDrag::latch`].
-//! Everything after that lives here in [`GroupDrag::advance`].
+//! Everything after that lives here in [`GroupDrag::prepass`].
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -25,7 +25,7 @@ use crate::gui::pane::graph_ui::prepass_ctx::PrepassCtx;
 
 /// One in-flight group drag, or none.
 ///
-/// [`Self::advance`] is the whole per-frame lifecycle: the grabbed item left
+/// [`Self::prepass`] is the whole per-frame lifecycle: the grabbed item left
 /// the view, a fresh gesture relatched on the same widget, Esc
 /// cancelled it, the drag released, or it moved and commits. Every committed
 /// position is `start + drag_delta` against the snapshot taken at latch — not
@@ -40,7 +40,7 @@ pub(crate) struct GroupDrag {
 /// widget whose drag drives them.
 #[derive(Debug)]
 pub(crate) struct Grab {
-    /// The item the pointer grabbed, which [`GroupDrag::advance`] checks
+    /// The item the pointer grabbed, which [`GroupDrag::prepass`] checks
     /// against the view.
     pub(crate) item: ItemId,
     /// Every item moving with this drag, at its position when the drag
@@ -76,12 +76,11 @@ impl GroupDrag {
         self.anchor.is_some()
     }
 
-    /// Start (or replace) the gesture on `grab`.
-    pub(crate) fn latch(&mut self, grab: Grab, out: &mut Requests) {
-        self.anchor = Some(Anchor {
-            grab,
-            gesture: out.open_gesture(),
-        });
+    /// Start (or replace) the gesture on `grab`, and name it, for edits that join it.
+    pub(crate) fn latch(&mut self, grab: Grab, out: &mut Requests) -> GestureId {
+        let gesture = out.open_gesture();
+        self.anchor = Some(Anchor { grab, gesture });
+        gesture
     }
 
     /// Advance one frame, pushing this frame's `GraphIntent::MoveSelection`
@@ -89,14 +88,15 @@ impl GroupDrag {
     /// A caller that also latches fresh drags skips its own scan while this
     /// returns `true`.
     ///
-    /// A cancelling Esc puts every member back where the drag latched it and
-    /// ends the drag; the undo gesture then ends where it began and records
-    /// nothing.
+    /// A cancelling Esc takes the drag's undo entry back whole, which puts
+    /// every member back where the drag latched it, and ends the drag; the
+    /// gesture records nothing. `darkroom/AGENTS.md`, "Undo", "A held gesture
+    /// is one entry, and Esc takes it back whole".
     ///
     /// Runs pre-record, so the move lands in `Document` before the pass that
     /// draws the moved items: they paint at the cursor in Pass A with no
     /// relayout retry.
-    pub(crate) fn advance(&mut self, ui: &Ui, ctx: PrepassCtx<'_>, out: &mut Requests) -> bool {
+    pub(crate) fn prepass(&mut self, ui: &Ui, ctx: PrepassCtx<'_>, out: &mut Requests) -> bool {
         let graph_ctx = ctx.graph_ctx();
         // An item deleted mid-drag (breaker swipe, undo) takes its drag with
         // it: left in place the anchor would emit against a missing item.
@@ -120,7 +120,9 @@ impl GroupDrag {
             return false;
         }
         if ctx.cancelled() {
-            out.push_graph(anchor.frame(Vec2::ZERO));
+            // The gesture's whole entry goes back, a spawn it joined too; should an edit in
+            // between have sealed it, the members go back to where the drag latched them.
+            out.push_cancel(anchor.gesture, anchor.frame(Vec2::ZERO));
             self.anchor = None;
             return true;
         }

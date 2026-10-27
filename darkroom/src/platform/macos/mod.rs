@@ -1,10 +1,9 @@
 //! macOS. See [`crate::platform`] for the surface every OS module implements.
 
 use std::ffi::OsString;
-use std::io;
 use std::path::PathBuf;
 
-use common::{env, process};
+use common::env;
 
 use palantir::HostHandle;
 
@@ -30,10 +29,6 @@ pub(super) fn route_opened_documents<A>(handle: HostHandle<A>, open: fn(&mut A, 
             })
             .ok();
     });
-}
-
-pub(super) fn open_url(url: &str) -> io::Result<()> {
-    process::spawn("open", [url])
 }
 
 /// `~/Library/Application Support/Darkroom`.

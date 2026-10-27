@@ -19,20 +19,23 @@ use crate::core::document::wire_key::WireKey;
 /// **This is our own bug, not a refusal.** Widgets read every identity they
 /// emit out of the live document, so the worst they manage is *stale* — and a
 /// stale intent is not an error at all: it simply yields no step, which
-/// [`GraphIntent::into_step`](crate::core::edit::graph_intent::GraphIntent::into_step)
-/// reports as `Ok(None)` and callers drop without a word. So do a no-op and a
+/// [`GraphIntent::commit`](crate::core::edit::graph_intent::GraphIntent::commit)
+/// drops without a word. So do a no-op and a
 /// cycle-forming bind. Only the cases below travel as an `Err`.
 ///
 /// Each variant names the check that rejected it rather than carrying a
 /// formatted string, so a test can assert *which* precondition broke without
 /// matching on prose, and nothing allocates a message on a path that is
 /// supposed to be unreachable.
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Clone, Copy, PartialEq)]
 pub(crate) enum MalformedIntent {
     /// A nil id where the intent must name something: never stale, as no
     /// document holds it.
     #[error("{role} node id is nil")]
     NilNodeId { role: Role },
+    /// A nil tie id, which no view holds, as [`Self::NilNodeId`] is for a node.
+    #[error("{role} tie id is nil")]
+    NilTieId { role: Role },
     /// A new id the document already holds. Scenarium requires node ids to be
     /// unique across the whole authoring tree, and `Graph::insert` panics
     /// outright on a collision.
@@ -124,7 +127,12 @@ pub(crate) enum Role {
     SetNodeProperty,
     SetSubscriptionEmitter,
     SetSubscriptionSubscriber,
+    Raise,
     TieWires,
+    JoinTie,
+    RemoveTie,
+    SetTieAngle,
+    ReleaseWire,
 }
 
 impl Display for Role {
@@ -141,7 +149,12 @@ impl Display for Role {
             Self::SetNodeProperty => "SetNodeProperty",
             Self::SetSubscriptionEmitter => "SetSubscription emitter",
             Self::SetSubscriptionSubscriber => "SetSubscription subscriber",
+            Self::Raise => "Raise",
             Self::TieWires => "TieWires",
+            Self::JoinTie => "JoinTie",
+            Self::RemoveTie => "RemoveTie",
+            Self::SetTieAngle => "SetTieAngle",
+            Self::ReleaseWire => "ReleaseWire",
         })
     }
 }

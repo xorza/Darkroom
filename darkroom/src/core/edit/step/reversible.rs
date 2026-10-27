@@ -1,6 +1,7 @@
 //! The contract every kind of undo step answers.
 
 use crate::core::document::Document;
+use crate::core::edit::edit_facts::EditFacts;
 use crate::core::edit::step::change::Direction;
 
 /// One reversible edit primitive: a slot the document holds, plus what that
@@ -8,7 +9,7 @@ use crate::core::edit::step::change::Direction;
 ///
 /// **This trait is the checklist for a new kind of edit.** Everything the
 /// pipeline wants to know about a kind — how it writes, whether it changed
-/// anything, what it costs the frame — is answered in that kind's own `impl`,
+/// anything, what it changed of the document's shape — is answered in that kind's own `impl`,
 /// so adding one is writing one file rather than widening a match in five.
 /// No question has a default: a kind that forgets to answer one does not
 /// compile.
@@ -44,23 +45,8 @@ pub(super) trait Reversible {
     /// `OpenDocument::dirty`.
     fn dirties_document(&self) -> bool;
 
-    /// Whether replaying this strands the canvas's cross-frame geometry
-    /// caches: a widget whose *measured size* changed, or a node with no
-    /// cached port offsets at all. Those caches are what wires anchor to, so a
-    /// true answer costs one relayout request at the end of the frame and a
-    /// second pass that rebuilds them against the first pass's arranged
-    /// rects.
-    ///
-    /// A step that only *moves* or reorders answers false even though it does
-    /// change what the layout engine reads: a port center resolves as
-    /// `node.pos + cached offset`, and a move touches only `pos`. Getting that
-    /// wrong is expensive rather than incorrect — a node drag emits one step
-    /// per gesture frame, so a spurious true doubles the whole editor pipeline
-    /// for the length of the drag.
-    fn invalidates_cached_geometry(&self) -> bool;
-
-    /// Whether replaying this adds or removes a node. The canvas's node caches
-    /// are swept only after such a step, so a false answer here leaves a
-    /// removed node's entries behind.
-    fn changes_node_set(&self) -> bool;
+    /// What replaying this, in either direction, changes of the document's shape. The node
+    /// set fact also sweeps the canvas's node caches, so a false one leaves a removed node's
+    /// entries behind.
+    fn facts(&self) -> EditFacts;
 }

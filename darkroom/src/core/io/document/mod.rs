@@ -11,7 +11,7 @@ use common::{SerdeFormat, fs};
 
 use crate::core::document::Document;
 use crate::core::io::document::document_format::DocumentFormat;
-use crate::core::io::document::error::{DocumentLoadError, DocumentSaveError};
+use crate::core::io::document::error::{DocumentLoadError, DocumentSaveError, DocumentWriteError};
 use crate::core::io::document::saved_paths::SavedPaths;
 
 pub(crate) const EXTENSION: &str = "darkroom";
@@ -106,9 +106,12 @@ pub(crate) fn save(
     fs::publish(path, fs::PublicationMode::Durable, |file| {
         format.write(file, &encoded)
     })
-    .map_err(|source| DocumentSaveError::Publish {
-        path: path.to_path_buf(),
-        source,
+    .map_err(|error| {
+        let path = path.to_path_buf();
+        match error {
+            DocumentWriteError::Io(source) => DocumentSaveError::Publish { path, source },
+            DocumentWriteError::Archive(source) => DocumentSaveError::Archive { path, source },
+        }
     })
 }
 

@@ -4,7 +4,7 @@
 
 pub(crate) mod cfa_decoder;
 pub(crate) mod decode_params;
-pub(crate) mod decode_pins;
+pub(crate) mod decode_version;
 pub(crate) mod decoder_kind;
 pub(crate) mod fnv1a;
 pub(crate) mod linear_decoder;
