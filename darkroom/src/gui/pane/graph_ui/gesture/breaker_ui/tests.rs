@@ -48,7 +48,7 @@ fn the_breaker_cuts_a_node_at_its_current_position_not_its_last_painted_one() {
     // is back there — the divergence the probe has to resolve the new way.
     h.document_mut()
         .main_view
-        .item_placements
+        .node_placements
         .get_mut(&node)
         .unwrap()
         .pos = SCRIBBLE_TO - Vec2::new(body.size.w, body.size.h) * 0.5;

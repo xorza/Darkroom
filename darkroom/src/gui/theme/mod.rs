@@ -16,6 +16,7 @@ pub(crate) mod palantir_bridge;
 pub(crate) mod palette;
 pub(crate) mod port_theme;
 pub(crate) mod status_colors;
+pub(crate) mod tie_theme;
 pub(crate) mod type_colors;
 pub(crate) mod type_scale;
 
@@ -30,6 +31,7 @@ use crate::gui::theme::palantir_bridge::BridgeRoles;
 use crate::gui::theme::palette::Palette;
 use crate::gui::theme::port_theme::PortTheme;
 use crate::gui::theme::status_colors::StatusColors;
+use crate::gui::theme::tie_theme::TieTheme;
 use crate::gui::theme::type_colors::TypeColors;
 use crate::gui::theme::type_scale::TypeScale;
 
@@ -69,6 +71,9 @@ pub(crate) struct Theme {
 
     /// The graph canvas and its dotted backdrop.
     pub(crate) canvas: CanvasTheme,
+
+    /// A wire tie's band.
+    pub(crate) tie: TieTheme,
 
     /// Elevated rounded surfaces — node bodies, the inspector panel, dock
     /// tabs.
@@ -212,6 +217,7 @@ impl Theme {
             new_node_popup_max_height: 400.0,
             text,
             canvas: CanvasTheme::from_palette(p),
+            tie: TieTheme::from_palette(p),
             card,
             ports: PortTheme::from_palette(p),
             status,

@@ -157,7 +157,7 @@
     ),
     stubs: [],
     main_view: (
-        item_placements: {
+        node_placements: {
             ("1597eb8d-1700-4637-9d30-37da1b6d28d4"): (
                 pos: (900.0, 300.0),
                 z: 3,
@@ -191,6 +191,8 @@
                 z: 4,
             ),
         },
+        ties: {},
+        routes: {},
         viewport: (
             pan: (0.0, 0.0),
             zoom: 1.0,

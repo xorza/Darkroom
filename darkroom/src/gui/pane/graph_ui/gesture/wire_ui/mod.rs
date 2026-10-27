@@ -2,6 +2,7 @@ use glam::Vec2;
 use palantir::{PointerButton, PointerEvent, PointerWake, Ui};
 use scenarium::Binding;
 
+use crate::core::document::wire_key::{DataWire, WireKey};
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::GraphCtx;
@@ -12,6 +13,7 @@ use crate::gui::pane::graph_ui::draw::wire::glyph_drag::GlyphDrag;
 use crate::gui::pane::graph_ui::draw::wire::{Wire, WireEnds, WirePass, WireTint};
 use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
 use crate::gui::pane::graph_ui::gesture::canvas_gesture;
+use crate::gui::pane::graph_ui::gesture::tie_ui::tie_widget;
 use crate::gui::pane::graph_ui::node_ui::port_color;
 use crate::gui::port_ref::{PortKind, PortRef};
 use crate::gui::widgets::gesture_slot::GestureSlot;
@@ -278,20 +280,31 @@ impl WireUi {
 /// Reads nothing but committed scene state off `pass`, so it belongs to the
 /// module rather than [`WireUi`] — the in-flight gesture that struct
 /// owns has no bearing on how the standing wires paint.
-pub(crate) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
+pub(crate) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_, '_>) {
     let (graph_ctx, geometry) = (pass.draw_ctx.graph_ctx(), pass.draw_ctx.geometry());
     for (consumer, producer) in graph_ctx.wires() {
         let (src, tgt) = (PortRef::from(producer), PortRef::from(consumer));
         let (Some(p0), Some(p3)) = (geometry.ports.center(src), geometry.ports.center(tgt)) else {
             continue;
         };
-        let hover = Hover::from(geometry.ports.is_hovered(src) || geometry.ports.is_hovered(tgt));
-        let wire = Wire::data(p0, p3);
+        let key = WireKey::Data(DataWire {
+            output: producer,
+            input: consumer,
+        });
+        let hover = Hover::from(
+            geometry.ports.is_hovered(src)
+                || geometry.ports.is_hovered(tgt)
+                || pass.lit == Some(key)
+                || tie_widget::lights(ui, graph_ctx.view(), key),
+        );
+        let untied = [Wire::data(p0, p3)];
+        let pieces = pass.ties.pieces(key).unwrap_or(&untied);
         let ends = WireEnds {
+            wire: key,
             hover,
             tint: || data_tint(graph_ctx, src, tgt),
         };
-        if pass.draw_wire(ui, &wire, ends) {
+        if pass.draw_wire(ui, pieces, ends) {
             pass.probe.mark_broken_input(consumer);
         }
     }

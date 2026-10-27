@@ -13,6 +13,7 @@ use crate::core::edit::step::set_node_property::SetNodeProperty;
 use crate::core::edit::step::set_positions::SetPositions;
 use crate::core::edit::step::set_selection::SetSelection;
 use crate::core::edit::step::set_subscription::SetSubscription;
+use crate::core::edit::step::set_ties::SetTies;
 use crate::core::edit::step::set_viewport::SetViewport;
 
 /// One self-contained entry of the undo history: which kind of edit it is,
@@ -41,6 +42,7 @@ pub(crate) enum UndoStep {
     NodeProperty(SetNodeProperty),
     Viewport(SetViewport),
     Subscription(SetSubscription),
+    Ties(SetTies),
 }
 
 impl UndoStep {
@@ -84,6 +86,7 @@ impl UndoStep {
         match (self, next) {
             (Self::Positions(open), Self::Positions(next)) => open.absorb(next),
             (Self::Viewport(open), Self::Viewport(next)) => open.absorb(next),
+            (Self::Ties(open), Self::Ties(next)) => open.absorb(next),
             (open, next) => panic!("a gesture cannot fold {next:?} into {open:?}"),
         }
     }
@@ -105,6 +108,7 @@ impl UndoStep {
             Self::NodeProperty(step) => step,
             Self::Viewport(step) => step,
             Self::Subscription(step) => step,
+            Self::Ties(step) => step,
         }
     }
 }

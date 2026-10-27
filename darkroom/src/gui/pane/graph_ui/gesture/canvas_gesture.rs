@@ -38,6 +38,12 @@ pub(crate) enum CanvasGesture {
     /// that latched it, since the breaker polls that same button for
     /// continuation/release (a Ctrl+LMB breaker must keep reading Left).
     Breaker(PointerButton),
+    /// The breaker's chord plus Shift → tie line: Shift+RMB-drag, or
+    /// Ctrl+Shift+LMB-drag on a trackpad, as Blender's Shift+RMB line adds
+    /// reroutes beside its Ctrl+RMB cut. `darkroom/AGENTS.md`, "Wire ties", "The tie line
+    /// is Shift+RMB-drag", holds the decision. Carries the button, as the
+    /// breaker does.
+    Tie(PointerButton),
     /// RMB-click or LMB double-click on empty canvas (no drag) → new-node
     /// popup.
     NewNode,
@@ -62,14 +68,20 @@ impl CanvasGesture {
         if resp.middle.drag.started() {
             return Some(Self::Pan);
         }
+        let modifiers = ui.modifiers();
         if resp.right.drag.started() {
-            return Some(Self::Breaker(PointerButton::Right));
+            return Some(if modifiers.shift {
+                Self::Tie(PointerButton::Right)
+            } else {
+                Self::Breaker(PointerButton::Right)
+            });
         }
         if resp.left.drag.started() {
-            return Some(if ui.modifiers().ctrl {
-                Self::Breaker(PointerButton::Left)
-            } else {
-                Self::Select
+            return Some(match (modifiers.ctrl, modifiers.shift) {
+                (true, true) => Self::Tie(PointerButton::Left),
+                (true, false) => Self::Breaker(PointerButton::Left),
+                // Shift extends the band selection; the band reads it.
+                (false, _) => Self::Select,
             });
         }
         // A double-click sets `clicked` *and* `double_click` on the same frame,

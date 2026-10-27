@@ -6,6 +6,9 @@ use std::fmt::{Display, Formatter};
 
 use scenarium::{BindingEntry, NodeId, Repair, Subscription, Unresolved};
 
+use crate::core::document::item_id::ItemId;
+use crate::core::document::tie::TieId;
+use crate::core::document::wire_key::WireKey;
 use crate::core::status_log::{StatusFamily, StatusLog};
 
 /// Every change a load made, in the order it made them. Empty for a document
@@ -57,9 +60,39 @@ pub(crate) enum DocumentRepair {
     Placed {
         node_id: NodeId,
     },
-    /// A selection entry with no placement.
+    /// The route of a wire the graph does not hold.
+    RouteDropped {
+        wire: WireKey,
+    },
+    /// A route's step that names no tie.
+    RouteStepDropped {
+        wire: WireKey,
+        tie: TieId,
+    },
+    /// A route's step that names a tie an earlier step names.
+    RouteStepRepeated {
+        wire: WireKey,
+        tie: TieId,
+    },
+    /// A route with no step left, or none to start with.
+    EmptyRouteDropped {
+        wire: WireKey,
+    },
+    /// A tie that no route names.
+    TieDropped {
+        tie: TieId,
+    },
+    /// A tie at a non-finite position, moved to the origin.
+    TiePosReset {
+        tie: TieId,
+    },
+    /// A tie pinned to an angle outside `[0, 360)`, set to turn itself.
+    TieAngleFreed {
+        tie: TieId,
+    },
+    /// A selection entry the view does not hold.
     SelectionDropped {
-        node_id: NodeId,
+        item: ItemId,
     },
     /// A layout that pins another tab, or belongs to another dock.
     LayoutReset,
@@ -86,7 +119,7 @@ impl LoadReport {
         status.warn(
             StatusFamily::Document,
             format!(
-                "the load changed {} item(s) to fit the library; save to keep the changes",
+                "the load made {} repair(s) to the document; save to keep them",
                 self.repairs.len()
             ),
         );
@@ -135,10 +168,40 @@ impl Display for DocumentRepair {
             Self::Placed { node_id } => {
                 write!(f, "placed {node_id:?} at the origin: it had no placement")
             }
-            Self::SelectionDropped { node_id } => {
+            Self::RouteDropped { wire } => {
+                write!(f, "removed the route of {wire:?}, which names no wire")
+            }
+            Self::RouteStepDropped { wire, tie } => {
                 write!(
                     f,
-                    "removed {node_id:?} from the selection: it has no placement"
+                    "removed {tie:?} from the route of {wire:?}: it names no tie"
+                )
+            }
+            Self::RouteStepRepeated { wire, tie } => {
+                write!(f, "removed a repeat of {tie:?} from the route of {wire:?}")
+            }
+            Self::EmptyRouteDropped { wire } => {
+                write!(f, "removed the route of {wire:?}: it names no tie")
+            }
+            Self::TieDropped { tie } => {
+                write!(f, "removed the tie {tie:?}, which holds no wire")
+            }
+            Self::TiePosReset { tie } => {
+                write!(
+                    f,
+                    "moved the tie {tie:?} to the origin: its position is not finite"
+                )
+            }
+            Self::TieAngleFreed { tie } => {
+                write!(
+                    f,
+                    "freed the angle of the tie {tie:?}: it is not in [0, 360)"
+                )
+            }
+            Self::SelectionDropped { item } => {
+                write!(
+                    f,
+                    "removed {item:?} from the selection: the view does not hold it"
                 )
             }
             Self::LayoutReset => f.write_str("reset the pane layout"),

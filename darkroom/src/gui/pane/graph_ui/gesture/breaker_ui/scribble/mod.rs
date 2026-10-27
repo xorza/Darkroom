@@ -17,7 +17,7 @@ const MIN_POINT_DISTANCE: f32 = 4.0;
 const MAX_BREAKER_LENGTH: f32 = 2000.0;
 /// Bezier sampling resolution for hit-testing: 16 chords per wire, cheap
 /// enough to redo every frame for every visible wire.
-const BEZIER_SAMPLES: usize = 16;
+pub(crate) const BEZIER_SAMPLES: usize = 16;
 
 /// The breaker scribble: its samples, how far they run, and the three target
 /// sets a frame's probing marks against them. Lives in inner-canvas world

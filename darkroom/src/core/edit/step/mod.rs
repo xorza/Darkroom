@@ -24,6 +24,7 @@ pub(crate) mod set_node_property;
 pub(crate) mod set_positions;
 pub(crate) mod set_selection;
 pub(crate) mod set_subscription;
+pub(crate) mod set_ties;
 pub(crate) mod set_viewport;
 pub(crate) mod undo_step;
 

@@ -1,28 +1,28 @@
-//! Dragging node bodies across the canvas.
+//! Dragging node bodies and ties across the canvas.
 
 use glam::Vec2;
-use scenarium::NodeId;
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::Document;
+use crate::core::document::item_id::ItemId;
 use crate::core::edit::step::change::{Change, Direction};
 use crate::core::edit::step::reversible::Reversible;
 
 /// One dragged member: where it sat, and where the drag put it.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Move {
-    pub(crate) node_id: NodeId,
+    pub(crate) item: ItemId,
     pub(crate) pos: Change<Vec2>,
 }
 
-/// A drag of one or more node bodies in canvas-world coordinates.
+/// A drag of one or more node bodies and ties in canvas-world coordinates.
 ///
 /// A multi-select drag moves the whole group as a single undo entry; a plain
 /// drag carries just the one grabbed body.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct SetPositions {
     /// One entry per member that still had a placement when the step was
-    /// built, in the drag's member order. A member whose node vanished
+    /// built, in the drag's member order. A member whose item vanished
     /// mid-drag is dropped rather than refusing the whole move, so this can be
     /// shorter than the intent that produced it — and empty, which
     /// [`Reversible::is_noop`] then filters out.
@@ -40,7 +40,7 @@ impl SetPositions {
     pub(crate) fn absorb(&mut self, next: &Self) {
         let mut later = next.moves.iter().peekable();
         for moved in &mut self.moves {
-            if let Some(update) = later.next_if(|update| update.node_id == moved.node_id) {
+            if let Some(update) = later.next_if(|update| update.item == moved.item) {
                 moved.pos.to = update.pos.to;
             }
         }
@@ -59,13 +59,14 @@ impl SetPositions {
 
 impl Reversible for SetPositions {
     fn write(&self, document: &mut Document, dir: Direction) {
+        let view = &mut document.main_view;
         for moved in &self.moves {
-            document
-                .main_view
-                .item_placements
-                .get_mut(&moved.node_id)
-                .expect("history replays a move against the items it recorded")
-                .pos = *moved.pos.half(dir);
+            let pos = match moved.item {
+                ItemId::Node(node_id) => view.node_placements.get_mut(&node_id).map(|p| &mut p.pos),
+                ItemId::Tie(tie) => view.ties.get_mut(&tie).map(|tie| &mut tie.pos),
+            };
+            *pos.expect("history replays a move against the items it recorded") =
+                *moved.pos.half(dir);
         }
     }
 

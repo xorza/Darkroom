@@ -24,7 +24,8 @@ use std::collections::BTreeSet;
 use scenarium::{DataType, Graph, InputPort, Library, NodeId, OutputPort, Subscription};
 
 use crate::core::document::Document;
-use crate::core::document::graph_view::{GraphView, StackedItem};
+use crate::core::document::graph_view::{GraphView, StackedNode};
+use crate::core::document::item_id::ItemId;
 use crate::core::document::viewport::Viewport;
 use crate::gui::frame::window_ctx::WindowCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
@@ -150,11 +151,11 @@ impl<'a> GraphCtx<'a> {
         }
     }
 
-    /// This pane's placed items — every graph node and every stub — in no
+    /// This pane's placed nodes — every graph node and every stub — in no
     /// particular order.
     ///
-    /// Driven by the view's placements, which name exactly those items, since
-    /// a placement carries the position an item is drawn at.
+    /// Driven by the view's placements, which name exactly those nodes, since
+    /// a placement carries the position a node is drawn at.
     ///
     /// Unordered because almost nothing needs the stack: scanning for
     /// emitters, resolving a drag anchor, framing the viewport and hit-testing
@@ -162,7 +163,7 @@ impl<'a> GraphCtx<'a> {
     /// [`Self::paint_order`] and pays for the sort there.
     pub(crate) fn nodes(self) -> impl Iterator<Item = NodeCtx<'a>> {
         self.view()
-            .item_placements
+            .node_placements
             .iter()
             .map(move |(id, placement)| NodeCtx::resolve(self, *id, placement.pos))
     }
@@ -175,14 +176,14 @@ impl<'a> GraphCtx<'a> {
     /// [`NodeCtx`] borrows this context — see
     /// [`GraphView::paint_order`](crate::core::document::graph_view::GraphView::paint_order)
     /// for why the buffer is the caller's.
-    pub(crate) fn paint_order(self, out: &mut Vec<StackedItem>) {
+    pub(crate) fn paint_order(self, out: &mut Vec<StackedNode>) {
         self.view().paint_order(out);
     }
 
-    /// One placed item — a graph node or a stub — or `None` for an id the
+    /// One placed node — a graph node or a stub — or `None` for an id the
     /// document does not hold: one deleted since the caller read the id.
     pub(crate) fn node(self, node_id: NodeId) -> Option<NodeCtx<'a>> {
-        let placement = *self.view().item_placements.get(&node_id)?;
+        let placement = *self.view().node_placements.get(&node_id)?;
         Some(NodeCtx::resolve(self, node_id, placement.pos))
     }
 
@@ -202,13 +203,13 @@ impl<'a> GraphCtx<'a> {
     }
 
     /// This graph's committed selection.
-    pub(crate) const fn selected(self) -> &'a BTreeSet<NodeId> {
+    pub(crate) const fn selected(self) -> &'a BTreeSet<ItemId> {
         &self.view().selected
     }
 
-    /// Whether `key` is in this graph's committed selection.
-    pub(crate) fn is_selected(self, key: NodeId) -> bool {
-        self.view().selected.contains(&key)
+    /// Whether `item` is in this graph's committed selection.
+    pub(crate) fn is_selected(self, item: ItemId) -> bool {
+        self.view().selected.contains(&item)
     }
 }
 

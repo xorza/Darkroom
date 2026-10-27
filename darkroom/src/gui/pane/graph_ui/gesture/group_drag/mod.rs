@@ -1,17 +1,21 @@
-//! The group drag: whichever selected node the pointer latched drags its
-//! whole group alongside it, one `GraphIntent::MoveSelection` per frame, all
-//! folding into one undo entry.
+//! The group drag: whichever selected node or tie the pointer latched drags
+//! its whole group alongside it, one `GraphIntent::MoveSelection` per frame,
+//! all folding into one undo entry.
 //!
 //! The caller owns the hit-testing that decides *what* got grabbed — a node
-//! body or its title — and hands the result to [`GroupDrag::latch`].
+//! body or its title, or a tie's band — and hands the result to
+//! [`GroupDrag::latch`].
 //! Everything after that lives here in [`GroupDrag::advance`].
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use glam::Vec2;
 use palantir::{Ui, WidgetId};
 use scenarium::NodeId;
 
+use crate::core::document::graph_view::GraphView;
+use crate::core::document::item_id::ItemId;
 use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::drag_start::DragStart;
@@ -21,8 +25,8 @@ use crate::gui::pane::graph_ui::prepass_ctx::PrepassCtx;
 
 /// One in-flight group drag, or none.
 ///
-/// [`Self::advance`] is the whole per-frame lifecycle: the grabbed item's
-/// node left the scene, a fresh gesture relatched on the same widget, Esc
+/// [`Self::advance`] is the whole per-frame lifecycle: the grabbed item left
+/// the view, a fresh gesture relatched on the same widget, Esc
 /// cancelled it, the drag released, or it moved and commits. Every committed
 /// position is `start + drag_delta` against the snapshot taken at latch — not
 /// a running integration over the moving widget — so a dropped frame can't
@@ -32,16 +36,17 @@ pub(crate) struct GroupDrag {
     anchor: Option<Anchor>,
 }
 
-/// What a press grabbed: the node, every node moving with it, and the widget
-/// whose drag drives them.
+/// What a press grabbed: the node or tie, every item moving with it, and the
+/// widget whose drag drives them.
 #[derive(Debug)]
 pub(crate) struct Grab {
-    /// The node the pointer grabbed, which [`GroupDrag::advance`] checks
-    /// against the scene.
-    pub(crate) node_id: NodeId,
-    /// Every node moving with this drag, at its position when the drag
+    /// The item the pointer grabbed, which [`GroupDrag::advance`] checks
+    /// against the view.
+    pub(crate) item: ItemId,
+    /// Every item moving with this drag, at its position when the drag
     /// latched: the whole selection when the grabbed node was already
-    /// selected, else just the grabbed one. Includes the grabbed node itself.
+    /// selected, else just the grabbed one, with the ties inside the moving
+    /// nodes ([`with_inner_ties`]). Includes the grabbed node itself.
     /// Shared with each frame's intent, so a frame copies no list.
     pub(crate) members: Arc<[DragStart]>,
     /// The widget whose drag delta drives the gesture, captured at latch so
@@ -93,13 +98,12 @@ impl GroupDrag {
     /// relayout retry.
     pub(crate) fn advance(&mut self, ui: &Ui, ctx: PrepassCtx<'_>, out: &mut Requests) -> bool {
         let graph_ctx = ctx.graph_ctx();
-        // A node deleted mid-drag (breaker swipe, undo) takes its drag with
-        // it: left in place the anchor would emit against a missing node, and
-        // could fire again if a fresh node reused the id.
+        // An item deleted mid-drag (breaker swipe, undo) takes its drag with
+        // it: left in place the anchor would emit against a missing item.
         if self
             .anchor
             .as_ref()
-            .is_some_and(|anchor| !graph_ctx.contains(anchor.grab.node_id))
+            .is_some_and(|anchor| !graph_ctx.view().holds(anchor.grab.item))
         {
             self.anchor = None;
         }
@@ -145,18 +149,49 @@ impl Anchor {
     }
 }
 
-/// The selection's members at their current positions — [`GroupDrag::latch`]'s
-/// `members` for a drag that grabbed an already-selected member.
+/// The selection's members at their current positions, with the ties inside
+/// its nodes — [`GroupDrag::latch`]'s `members` for a drag that grabbed an
+/// already-selected member.
 pub(crate) fn selected_group(draw_ctx: DrawCtx<'_>) -> Arc<[DragStart]> {
-    draw_ctx
-        .graph_ctx()
+    let graph_ctx = draw_ctx.graph_ctx();
+    let view = graph_ctx.view();
+    let nodes = graph_ctx
         .nodes()
-        .filter(|n| draw_ctx.is_selected(n.node_id))
+        .filter(|n| draw_ctx.is_selected(ItemId::Node(n.node_id)))
         .map(|n| DragStart {
-            node_id: n.node_id,
+            item: ItemId::Node(n.node_id),
             pos: n.pos,
-        })
-        .collect()
+        });
+    let ties = view
+        .ties
+        .iter()
+        .filter(|(tie, _)| draw_ctx.is_selected(ItemId::Tie(**tie)))
+        .map(|(tie, placed)| DragStart {
+            item: ItemId::Tie(*tie),
+            pos: placed.pos,
+        });
+    with_inner_ties(view, nodes.chain(ties).collect())
+}
+
+/// `members`, and after them each tie whose every wire has both end nodes
+/// among the member nodes, at its current position: a drag of a node set
+/// takes the ties inside it. `darkroom/AGENTS.md`, "Wire ties", "A node set takes the
+/// ties inside it", holds the decision.
+pub(crate) fn with_inner_ties(view: &GraphView, mut members: Vec<DragStart>) -> Arc<[DragStart]> {
+    let nodes: BTreeSet<NodeId> = members
+        .iter()
+        .filter_map(|member| member.item.node())
+        .collect();
+    for tie in view.ties_within(|node_id| nodes.contains(&node_id)) {
+        let item = ItemId::Tie(tie);
+        if !members.iter().any(|member| member.item == item) {
+            members.push(DragStart {
+                item,
+                pos: view.ties[&tie].pos,
+            });
+        }
+    }
+    members.into()
 }
 
 #[cfg(test)]

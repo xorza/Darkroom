@@ -272,7 +272,7 @@ fn fit(image: &RgbaImage, max_side: u32) -> RgbaImage {
     );
     RgbaImage::from_fn(scaled.width(), scaled.height(), |x, y| {
         let [r, g, b, a] = scaled.get_pixel(x, y).0;
-        let bytes = RgbaF32::new(r, g, b, a).to_srgba_u8();
+        let bytes = RgbaF32::new(r, g, b, a).to_srgba();
         Rgba([bytes.r, bytes.g, bytes.b, bytes.a])
     })
 }

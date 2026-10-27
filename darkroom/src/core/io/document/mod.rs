@@ -34,11 +34,6 @@ pub(crate) fn load(path: &Path) -> Result<DocumentFile, DocumentLoadError> {
     Ok(file)
 }
 
-/// The relative paths the document at `path` holds that climb out of its folder.
-pub(crate) fn paths_leaving_folder(path: &Path) -> Result<Vec<String>, DocumentLoadError> {
-    Ok(saved_paths::leaving_folder(&decode(path)?.document))
-}
-
 /// The document at `path` as its file holds it.
 fn decode(path: &Path) -> Result<DocumentFile, DocumentLoadError> {
     if !has_extension(path) {
@@ -129,16 +124,29 @@ const fn fits(size: u64) -> bool {
     size <= MAX_DOCUMENT_BYTES
 }
 
-#[cfg(test)]
+#[cfg(feature = "internals")]
 pub(crate) mod internals {
     use std::path::Path;
 
+    #[cfg(test)]
     use common::{SerdeFormat, fs};
 
+    #[cfg(test)]
     use crate::core::document::Document;
+    use crate::core::io::document::decode;
+    use crate::core::io::document::error::DocumentLoadError;
+    use crate::core::io::document::saved_paths;
+
+    /// The relative paths the document at `path` holds that climb out of its folder.
+    pub(crate) fn paths_leaving_folder(path: &Path) -> Result<Vec<String>, DocumentLoadError> {
+        Ok(saved_paths::internals::leaving_folder(
+            &decode(path)?.document,
+        ))
+    }
 
     /// Write `document` to `path` as it is, unchecked: a file holding what no save writes, as a
     /// relative path that climbs out of its folder.
+    #[cfg(test)]
     pub(crate) fn write_unchecked(document: &Document, path: &Path) {
         fs::write(path, SerdeFormat::Ron.serialize(document).unwrap()).unwrap();
     }

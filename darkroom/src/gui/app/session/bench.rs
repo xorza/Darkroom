@@ -38,10 +38,11 @@ use palantir::internals::record_app::RecordApp;
 use palantir::internals::ui_harness::UiHarness;
 use palantir::internals::ui_harness::frontend_harness::FrontendHarness;
 use palantir::internals::{BenchGpu, Timing};
-use palantir::{FramePaint, Ui};
+use palantir::{FramePaint, OffscreenHost, Ui};
 use scenarium::{Binding, DynamicValue, Func, Graph, InputPort, Library, NodeId};
 
 use crate::core::document::Document;
+use crate::core::document::item_id::ItemId;
 use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::drag_start::DragStart;
@@ -175,7 +176,7 @@ impl Editor {
             preferences: Preferences::default(),
             requests: Requests::default(),
             dragged: Arc::new([DragStart {
-                node_id: chains[DRAGGED_CHAIN][BLEND],
+                item: ItemId::Node(chains[DRAGGED_CHAIN][BLEND]),
                 pos: Vec2::ZERO,
             }]),
             chains,
@@ -214,7 +215,7 @@ impl Editor {
             })
             .collect();
         let row = sizes.iter().map(|r| r.size.h).fold(0.0, f32::max) + GAP;
-        let placements = &mut self.session.open.document.main_view.item_placements;
+        let placements = &mut self.session.open.document.main_view.node_placements;
         for (chain, nodes) in self.chains.iter().enumerate() {
             for (col, node) in nodes.iter().enumerate() {
                 placements
@@ -224,7 +225,7 @@ impl Editor {
             }
         }
         self.dragged = Arc::new([DragStart {
-            node_id: self.chains[DRAGGED_CHAIN][BLEND],
+            item: ItemId::Node(self.chains[DRAGGED_CHAIN][BLEND]),
             pos: Vec2::new(cols[BLEND], DRAGGED_CHAIN as f32 * row),
         }]);
         true
@@ -378,8 +379,7 @@ pub(crate) fn integration(c: &mut Criterion, backends: Backends) {
                 Backend::Gpu => case.measure(&mut group, || {
                     let gpu = BenchGpu::shared(Timing::PassOnly);
                     let target = gpu.target("darkroom.editor_frame", BENCH_SURFACE);
-                    let mut host = gpu
-                        .offscreen_builder()
+                    let mut host = OffscreenHost::builder(gpu.handles())
                         .collect_gpu_stats(false)
                         .retained_target(true)
                         .build();

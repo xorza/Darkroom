@@ -2,5 +2,4 @@
 - stacking frames (outer, inner, reference)
 - auto chosen reference frame for stacking and manually specified
 - visual node groups
-- wire zips
-- serialize more efficiently: signature: ((29, 254, 160, 215, 236, 134, 123, 182, 193, 181, 253, 51, 30, 64, 20, 124, 48, 225, 143, 211, 98, 100, 248, 243, 76, 21, 55, 95, 112, 0, 81, 8)),
+- make darkroom start mcp and not otherwise

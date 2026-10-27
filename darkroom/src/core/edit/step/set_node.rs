@@ -1,12 +1,15 @@
 //! [`SetNode`]: a node added to the document or removed from it.
 
-use scenarium::{DetachedNode, NodeId};
+use scenarium::{Binding, DetachedNode, NodeId};
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::Document;
-use crate::core::document::graph_view::ItemPlacement;
+use crate::core::document::graph_view::NodePlacement;
+use crate::core::document::item_id::ItemId;
+use crate::core::document::wire_key::{DataWire, WireKey};
 use crate::core::edit::step::change::{Change, Direction};
 use crate::core::edit::step::reversible::Reversible;
+use crate::core::edit::step::set_ties::SetTies;
 
 /// Where a node's record lives in the document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -25,7 +28,7 @@ pub(crate) struct NodeEntry {
     home: Home,
     /// Restored verbatim rather than recomputed, so an undone delete comes
     /// back where it was and at the depth it had — not frontmost.
-    placement: ItemPlacement,
+    placement: NodePlacement,
     /// Selection membership: removal prunes it, a restore re-adds it.
     selected: bool,
 }
@@ -45,13 +48,30 @@ impl NodeEntry {
         Some(Self {
             placement: *document
                 .main_view
-                .item_placements
+                .node_placements
                 .get(&node_id)
                 .expect("the view places every node and stub"),
-            selected: document.main_view.selected.contains(&node_id),
+            selected: document.main_view.selected.contains(&ItemId::Node(node_id)),
             detached,
             home,
         })
+    }
+
+    /// The wires the graph holds on this node: none for a stub, whose
+    /// record keeps its wiring off the graph.
+    pub(crate) fn wires(&self) -> impl Iterator<Item = WireKey> + '_ {
+        let (bindings, subscriptions) = match self.home {
+            Home::Graph => (self.detached.bindings(), self.detached.subscriptions()),
+            Home::Stubs => (&[][..], &[][..]),
+        };
+        let data = bindings.iter().filter_map(|entry| match entry.binding {
+            Binding::Wire(output) => Some(WireKey::Data(DataWire {
+                output,
+                input: entry.port,
+            })),
+            Binding::Const(_) => None,
+        });
+        data.chain(subscriptions.iter().copied().map(WireKey::Event))
     }
 
     fn restore(&self, document: &mut Document) {
@@ -62,10 +82,10 @@ impl NodeEntry {
         }
         document
             .main_view
-            .item_placements
+            .node_placements
             .insert(node_id, self.placement);
         if self.selected {
-            document.main_view.selected.insert(node_id);
+            document.main_view.selected.insert(ItemId::Node(node_id));
         }
     }
 }
@@ -86,6 +106,9 @@ pub(crate) struct SetNode {
     /// Exactly one half is `Some`: the step is an insertion or a removal,
     /// never a replacement of one node by another.
     node: Change<Option<NodeEntry>>,
+    /// The routes of the wires a removal ends, and each tie that only they
+    /// held. Empty for an insertion, which ends no wire.
+    ties: SetTies,
 }
 
 impl SetNode {
@@ -93,7 +116,7 @@ impl SetNode {
     ///
     /// Unselected: adding a node leaves the selection alone, and a caller that
     /// wants the new node selected raises that as its own edit.
-    pub(crate) const fn insertion(detached: DetachedNode, placement: ItemPlacement) -> Self {
+    pub(crate) fn insertion(detached: DetachedNode, placement: NodePlacement) -> Self {
         Self {
             node_id: detached.node_id(),
             node: Change {
@@ -105,17 +128,20 @@ impl SetNode {
                     selected: false,
                 }),
             },
+            ties: SetTies::default(),
         }
     }
 
-    /// Take `entry`'s node out of the document; undo puts it back whole.
-    pub(crate) const fn removal(entry: NodeEntry) -> Self {
+    /// Take `entry`'s node out of the document, with `ties`, the routes of
+    /// its wires; undo puts it back whole.
+    pub(crate) const fn removal(entry: NodeEntry, ties: SetTies) -> Self {
         Self {
             node_id: entry.detached.node_id(),
             node: Change {
                 from: Some(entry),
                 to: None,
             },
+            ties,
         }
     }
 
@@ -150,6 +176,7 @@ impl Reversible for SetNode {
             Some(entry) => entry.restore(document),
             None => self.take_out(document, dir),
         }
+        self.ties.write(document, dir);
     }
 
     fn is_noop(&self) -> bool {

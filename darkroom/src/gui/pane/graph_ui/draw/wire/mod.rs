@@ -3,7 +3,8 @@
 //! **The curve.** A data wire ([`crate::gui::pane::graph_ui::gesture::wire_ui`]) and
 //! an event wire ([`crate::gui::pane::graph_ui::gesture::subscription_ui`]) are both one
 //! [`Wire`]: two endpoints plus the interior control points its family's handle
-//! rule placed. That single value is what the cull test, the breaker probe, and
+//! rule placed, or, tied, one `Wire` for each piece between its ties
+//! ([`TieLayout`]). That value is what the cull test, the breaker probe, and
 //! the paint call all take, and [`WirePass::draw_wire`] runs all three in one
 //! call off the per-frame inputs both renderers need — so they stay visually
 //! identical apart from paint and handle shape, and can't drift.
@@ -22,8 +23,11 @@ use glam::Vec2;
 use palantir::widget::{CubicBezier, LineCap, Shape};
 use palantir::{ColorRamp, Rect, RgbaF32, Size, Stroke, Ui};
 
+use crate::core::document::wire_key::WireKey;
+use crate::gui::pane::graph_ui::draw::tie::tie_layout::TieLayout;
 use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
 use crate::gui::pane::graph_ui::gesture::breaker_ui::breaker_probe::BreakerProbe;
+use crate::gui::pane::graph_ui::gesture::tie_ui::tie_probe::TieProbe;
 use crate::gui::theme::color;
 use crate::gui::widgets::hover::Hover;
 
@@ -116,6 +120,11 @@ impl Wire {
         }
     }
 
+    /// The straight distance between the curve's two ends.
+    pub(crate) fn chord(&self) -> f32 {
+        self.p0.distance(self.p3)
+    }
+
     /// The point at parameter `t` along the curve, in Bernstein form.
     pub(crate) fn at(&self, t: f32) -> Vec2 {
         let u = 1.0 - t;
@@ -157,6 +166,19 @@ pub(crate) struct WirePaint {
     ramp: Option<ColorRamp>,
 }
 
+impl WirePaint {
+    /// The part of this paint from `from` to `to` along the wire, both fractions of it: the ramp
+    /// between its colors there, so a wire split into pieces paints as the whole one does.
+    fn between(self, from: f32, to: f32) -> Self {
+        Self {
+            color: self.color,
+            ramp: self
+                .ramp
+                .map(|ramp| ColorRamp::two_stop(ramp.color_at(from), ramp.color_at(to))),
+        }
+    }
+}
+
 impl From<RgbaF32> for WirePaint {
     /// One color for the whole curve.
     fn from(color: RgbaF32) -> Self {
@@ -176,19 +198,28 @@ impl From<RgbaF32> for WirePaint {
 /// wire pass has — the breaker probe it marks hits against, and this frame's
 /// emphasis tier.
 #[derive(Debug)]
-pub(crate) struct WirePass<'a, 'p> {
+pub(crate) struct WirePass<'a, 'p, 't> {
     /// Shared with the node-body draws — `Copy`, so it rides along by value.
     pub(crate) draw_ctx: DrawCtx<'a>,
     pub(crate) probe: &'a mut BreakerProbe<'p>,
+    /// The tie line in flight, which marks the pieces it crosses.
+    pub(crate) tie_line: &'a mut TieProbe<'t>,
+    /// The wire a hovered entry of a tie's menu names, which paints lit as
+    /// a hovered endpoint lights a wire.
+    pub(crate) lit: Option<WireKey>,
     pub(crate) emphasis: &'a WireEmphasis,
+    /// This frame's tied wires, which paint as pieces.
+    pub(crate) ties: &'a TieLayout,
 }
 
-impl WirePass<'_, '_> {
-    /// Cull, breaker-probe, tier, and paint one committed wire, reporting
-    /// whether the breaker crossed it — the whole per-wire body, shared by both
-    /// renderers so they can't drift in culling, emphasis, or alarm color.
+impl WirePass<'_, '_, '_> {
+    /// Cull, breaker-probe, tier, and paint one committed wire, its `pieces`
+    /// in order from its output end, reporting whether the breaker crossed
+    /// it — the whole per-wire body, shared by both renderers so they can't
+    /// drift in culling, emphasis, or alarm color. An untied wire is one
+    /// piece; a tied one is a piece from each point to the next.
     ///
-    /// A wire the cull drops is not probed either: the scribble is always
+    /// A piece the cull drops is not probed either: the scribble is always
     /// on-screen, so it can't have crossed an off-screen curve. The ends'
     /// `tint` is called only for a wire that survives *both* the cull and the
     /// breaker, so a family pays for resolving its endpoint colors only where
@@ -197,19 +228,23 @@ impl WirePass<'_, '_> {
     /// Recording the hit stays with the caller — only it knows the domain key
     /// to hand `probe.mark_broken_*`.
     pub(crate) fn draw_wire(
-        &self,
+        &mut self,
         ui: &mut Ui,
-        wire: &Wire,
+        pieces: &[Wire],
         ends: WireEnds<impl FnOnce() -> WireTint>,
     ) -> bool {
         let WireEnds {
+            wire: key,
             hover: endpoint,
             tint,
         } = ends;
-        if !self.draw_ctx.cull().keeps_wire(wire) {
+        let cull = self.draw_ctx.cull();
+        let mut kept = pieces.iter().filter(|piece| cull.keeps_wire(piece));
+        if kept.clone().next().is_none() {
             return false;
         }
-        let broken = self.probe.crosses_wire(wire);
+        let broken = kept.any(|piece| self.probe.crosses_wire(piece));
+        let crossed = self.tie_line.cross_wire(key, pieces);
         let mark = match (broken, endpoint) {
             (true, _) => WireMark::Broken,
             (false, Hover::Over) => WireMark::EndpointHovered,
@@ -225,15 +260,50 @@ impl WirePass<'_, '_> {
         } else {
             self.emphasis.paint(tint(), stroke.tier)
         };
-        wire.add(ui, stroke.width, paint);
+        // The ramp runs over the whole wire, split at the piece ends by
+        // chord length; one piece takes it whole.
+        let total: f32 = pieces.iter().map(Wire::chord).sum();
+        let mut from = 0.0;
+        let selection = self.draw_ctx.theme().colors.selection_rect;
+        for (idx, piece) in pieces.iter().enumerate() {
+            let to = if total > 0.0 {
+                (from + piece.chord() / total).min(1.0)
+            } else {
+                1.0
+            };
+            if crossed.is_some_and(|crossing| crossing.piece == idx) {
+                // The piece a tie line crosses is where the tie goes.
+                let lifted = width(self.draw_ctx.theme().stroke_width, Tier::Emphasized);
+                piece.add(ui, lifted, selection);
+            } else if cull.keeps_wire(piece) {
+                let share = if pieces.len() == 1 {
+                    paint
+                } else {
+                    paint.between(from, to)
+                };
+                piece.add(ui, stroke.width, share);
+            }
+            from = to;
+        }
+        if let Some(crossing) = crossed {
+            // A disk as a circle stroked as wide as its radius.
+            let radius = CROSSING_MARK_RADIUS;
+            ui.add_shape(Shape::circle(
+                crossing.point,
+                radius * 0.5,
+                Stroke::new(selection, radius),
+            ));
+        }
         broken
     }
 }
 
-/// What a committed wire's ends bring to its paint: whether an endpoint glyph
-/// is hovered, and `tint`, which resolves the colors the ends paint it with.
+/// What a committed wire's ends bring to its paint: the wire they bound,
+/// whether an endpoint glyph or a tie on it is hovered, and `tint`, which
+/// resolves the colors the ends paint it with.
 #[derive(Debug)]
 pub(crate) struct WireEnds<F> {
+    pub(crate) wire: WireKey,
     pub(crate) hover: Hover,
     pub(crate) tint: F,
 }
@@ -277,6 +347,9 @@ const WIRE_DRAG_FADE: f32 = 0.35;
 /// Width multiplier for an emphasized (hovered or broken-alarm) wire, so
 /// one wire stays traceable through a crossing.
 const WIRE_HOVER_WIDTH: f32 = 1.25;
+
+/// The radius of the mark where a tie line crosses a wire.
+const CROSSING_MARK_RADIUS: f32 = 4.0;
 
 /// Whether any wire gesture — a new-wire drag, a subscription drag, a
 /// breaker scribble — is in flight this pass.

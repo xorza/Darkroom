@@ -5,7 +5,7 @@ use std::time::Duration;
 use glam::UVec2;
 use palantir::internals::HeadlessWindow;
 use palantir::internals::ui_harness::UiHarness;
-use palantir::{FrameReport, InputEvent, Ui};
+use palantir::{FrameReport, InputEvent, PowerPreference, RequestedGpu, Ui};
 
 use crate::gui::app::App;
 use crate::internals::harness::DisplayKind;
@@ -32,10 +32,19 @@ impl Display {
         match kind {
             DisplayKind::Gpu => {
                 let clock = SteppedClock::default();
-                let window =
-                    HeadlessWindow::new(size, scale, clock.clone()).unwrap_or_else(|error| {
-                        panic!("DisplayKind::Gpu needs a GPU adapter: {error}")
-                    });
+                // No optional features: the editor draws with what every adapter has.
+                #[expect(
+                    clippy::default_trait_access,
+                    reason = "the features are wgpu's type, which darkroom does not depend on"
+                )]
+                let gpu =
+                    RequestedGpu::headless(PowerPreference::HighPerformance, Default::default())
+                        .unwrap_or_else(|error| {
+                            panic!("DisplayKind::Gpu needs a GPU adapter: {error}")
+                        });
+                let window = HeadlessWindow::builder(gpu.gpu)
+                    .clock(clock.clone())
+                    .open(size, scale);
                 Self::Gpu {
                     window: Box::new(window),
                     clock,
@@ -91,7 +100,7 @@ impl Display {
     pub(crate) fn resize(&mut self, size: UVec2) {
         match self {
             Self::Gpu { window, .. } => {
-                let scale = window.scale();
+                let scale = window.system_scale();
                 window.resize(size, scale);
             }
             Self::Cpu(harness) => {

@@ -4,24 +4,32 @@ use glam::Vec2;
 use scenarium::internals::test_graph::TestGraph;
 use scenarium::{
     Binding, BindingEntry, BindingRejection, CacheMode, ConstValue, DataType, EventPort, FuncId,
-    FuncInput, FuncOutput, InputPort, Library, Node, NodeId, Subscription, SubscriptionRejection,
-    internals,
+    FuncInput, FuncOutput, InputPort, Library, Node, NodeId, OutputPort, Subscription,
+    SubscriptionRejection, internals,
 };
 
 use crate::core::document::Document;
 use crate::core::document::internals::DocumentFixture;
+use crate::core::document::item_id::ItemId;
+use crate::core::document::route::Route;
+use crate::core::document::tie::{Tie, TieAngle, TieId};
 use crate::core::document::viewport::Viewport;
+use crate::core::document::wire_key::{DataWire, WireKey};
 use crate::core::edit::error::{MalformedIntent, Role};
 use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::graph_intent::click_mode::ClickMode;
 use crate::core::edit::graph_intent::drag_start::DragStart;
 use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
+use crate::core::edit::graph_intent::route_insert::RouteInsert;
 use crate::core::edit::graph_intent::{DUPLICATE_OFFSET, GraphIntent};
 use crate::core::edit::step::set_node_property::NodeProperty;
 use crate::core::edit::step::undo_step::UndoStep;
 
 fn member(node: NodeId, pos: Vec2) -> DragStart {
-    DragStart { node_id: node, pos }
+    DragStart {
+        item: ItemId::Node(node),
+        pos,
+    }
 }
 
 /// One frame of a drag: every member moves to its start plus `offset`.
@@ -70,9 +78,14 @@ fn subscribe(emitter: NodeId, subscriber: NodeId, subscribe: bool) -> GraphInten
 #[test]
 fn click_raises_unless_shift_deselects() {
     let (a, b) = (NodeId::unique(), NodeId::unique());
-    let sel = |ids: &[NodeId]| ids.iter().copied().collect::<BTreeSet<_>>();
-    let click = |mode, selected: BTreeSet<NodeId>, node_id| {
-        GraphIntent::click(mode, &selected, node_id).collect::<Vec<_>>()
+    let sel = |ids: &[NodeId]| {
+        ids.iter()
+            .copied()
+            .map(ItemId::Node)
+            .collect::<BTreeSet<_>>()
+    };
+    let click = |mode, selected: BTreeSet<ItemId>, node_id| {
+        GraphIntent::click(mode, &selected, ItemId::Node(node_id)).collect::<Vec<_>>()
     };
 
     // Plain click on an unselected node: select it, then raise it.
@@ -119,17 +132,17 @@ fn a_removed_node_comes_back_whole() {
     let edge = InputPort::new(b, 0);
     document.graph.set_input_binding(edge, Binding::wire(a, 0));
     document.graph.subscribe(EventPort::new(a, 0), b);
-    document.main_view.selected = [a].into_iter().collect();
-    let placement = document.main_view.item_placements[&a];
+    document.main_view.selected = [a].map(ItemId::Node).into_iter().collect();
+    let placement = document.main_view.node_placements[&a];
 
     let step = GraphIntent::RemoveNode { node_id: a }
         .commit_one(&mut document, &fixture.library)
         .unwrap()
         .expect("removing a live node commits");
     assert!(document.graph.find(a).is_none());
-    assert!(!document.main_view.item_placements.contains_key(&a));
+    assert!(!document.main_view.node_placements.contains_key(&a));
     assert!(
-        !document.main_view.selected.contains(&a),
+        !document.main_view.selected.contains(&ItemId::Node(a)),
         "selection is pruned"
     );
     assert_eq!(
@@ -148,10 +161,10 @@ fn a_removed_node_comes_back_whole() {
     step.revert(&mut document);
     assert!(document.graph.find(a).is_some());
     assert_eq!(
-        document.main_view.item_placements[&a], placement,
+        document.main_view.node_placements[&a], placement,
         "position *and* paint depth come back, not a fresh frontmost slot"
     );
-    assert!(document.main_view.selected.contains(&a));
+    assert!(document.main_view.selected.contains(&ItemId::Node(a)));
     assert_eq!(
         document.graph.bindings.get(&edge),
         Some(&Binding::wire(a, 0))
@@ -169,19 +182,19 @@ fn a_removed_node_comes_back_whole() {
     assert_eq!(document.graph.bindings.get(&edge), None);
 
     let record = document.stubs.get(stub).cloned().unwrap();
-    let stub_placement = document.main_view.item_placements[&stub];
+    let stub_placement = document.main_view.node_placements[&stub];
     let step = GraphIntent::RemoveNode { node_id: stub }
         .commit_one(&mut document, &fixture.library)
         .unwrap()
         .expect("removing a stub commits");
     assert!(!document.stubs.contains(stub));
-    assert!(!document.main_view.item_placements.contains_key(&stub));
+    assert!(!document.main_view.node_placements.contains_key(&stub));
     document
         .validate()
         .expect("a stub's removal leaves a valid document");
     step.revert(&mut document);
     assert_eq!(document.stubs.get(stub), Some(&record));
-    assert_eq!(document.main_view.item_placements[&stub], stub_placement);
+    assert_eq!(document.main_view.node_placements[&stub], stub_placement);
     assert!(
         document.graph.find(stub).is_none(),
         "a stub stays out of the graph"
@@ -246,10 +259,15 @@ fn a_wire_that_goes_leaves_its_input_on_its_default() {
     );
 
     wire_both(&mut document);
-    document.main_view.selected = [node].into_iter().collect();
+    document.main_view.selected = [node].map(ItemId::Node).into_iter().collect();
     let intents = GraphIntent::duplicate(&document, &library, IncomingWires::Drop);
     let copy = commit_all(&mut document, &library, intents);
-    let clone = document.main_view.selected.first().copied().unwrap();
+    let clone = document
+        .main_view
+        .selected
+        .first()
+        .and_then(|item| item.node())
+        .unwrap();
     assert_ne!(clone, node);
     assert_eq!(
         [0, 1].map(|port_idx| document
@@ -350,7 +368,7 @@ fn duplicate_skips_a_selected_stub() {
         mut document,
         library,
     } = fixture;
-    document.main_view.selected = [node, stub].into_iter().collect();
+    document.main_view.selected = [node, stub].map(ItemId::Node).into_iter().collect();
 
     let intents = GraphIntent::duplicate(&document, &library, IncomingWires::Drop);
     commit_all(&mut document, &library, intents);
@@ -381,13 +399,13 @@ fn redo_restores_the_depth_an_add_had() {
         .commit_one(&mut document, &fixture.library)
         .unwrap()
         .expect("adding a fresh node commits");
-    let x_z = document.main_view.item_placements[&x].z;
+    let x_z = document.main_view.node_placements[&x].z;
     let raise = GraphIntent::Raise { node_id: y }
         .commit_one(&mut document, &fixture.library)
         .unwrap()
         .expect("y is behind x, so raising it is a real change");
     assert!(
-        document.main_view.item_placements[&y].z > x_z,
+        document.main_view.node_placements[&y].z > x_z,
         "the raise put y in front"
     );
 
@@ -396,12 +414,12 @@ fn redo_restores_the_depth_an_add_had() {
     add.revert(&mut document);
     add.apply(&mut document);
     assert_eq!(
-        document.main_view.item_placements[&x].z, x_z,
+        document.main_view.node_placements[&x].z, x_z,
         "the redone add keeps its recorded depth"
     );
     raise.apply(&mut document);
     assert!(
-        document.main_view.item_placements[&y].z > document.main_view.item_placements[&x].z,
+        document.main_view.node_placements[&y].z > document.main_view.node_placements[&x].z,
         "so the paint order after a round trip is the one it started with"
     );
 }
@@ -419,7 +437,7 @@ fn raising_the_frontmost_item_records_no_step() {
     for node_id in [first, second] {
         document
             .main_view
-            .item_placements
+            .node_placements
             .get_mut(&node_id)
             .unwrap()
             .z = 4;
@@ -439,13 +457,13 @@ fn raising_the_frontmost_item_records_no_step() {
             "the higher id already paints last at a tied depth"
         );
     }
-    assert_eq!(document.main_view.item_placements[&high].z, 4);
+    assert_eq!(document.main_view.node_placements[&high].z, 4);
 
     let step = GraphIntent::Raise { node_id: low }
         .commit_one(&mut document, &fixture.library)
         .unwrap()
         .expect("the lower id is behind at a tied depth");
-    assert_eq!(document.main_view.item_placements[&low].z, 5);
+    assert_eq!(document.main_view.node_placements[&low].z, 5);
     assert!(
         GraphIntent::Raise { node_id: low }
             .commit_one(&mut document, &fixture.library)
@@ -454,7 +472,7 @@ fn raising_the_frontmost_item_records_no_step() {
         "once in front, raising again is a no-op"
     );
     step.revert(&mut document);
-    assert_eq!(document.main_view.item_placements[&low].z, 4);
+    assert_eq!(document.main_view.node_placements[&low].z, 4);
 }
 
 /// `a -> b` inside the selection, `c -> b` crossing out of it: the fixture the
@@ -486,7 +504,7 @@ fn crossing_wire() -> CrossingWire {
         .graph
         .set_input_binding(InputPort::new(b, 2), Binding::wire(c, 0));
     document.graph.subscribe(EventPort::new(a, 0), b);
-    document.main_view.selected = [a, b].into_iter().collect();
+    document.main_view.selected = [a, b].map(ItemId::Node).into_iter().collect();
     CrossingWire {
         document,
         a,
@@ -506,7 +524,7 @@ fn clone_of(document: &Document, origin: Vec2, originals: &BTreeSet<NodeId>) -> 
         .map(|node| node.node_id)
         .find(|id| {
             !originals.contains(id)
-                && document.main_view.item_placements[id].pos == origin + DUPLICATE_OFFSET
+                && document.main_view.node_placements[id].pos == origin + DUPLICATE_OFFSET
         })
         .unwrap_or_else(|| panic!("a clone offset from {origin:?}"))
 }
@@ -542,7 +560,8 @@ fn duplicate_clones_wiring_and_selects_the_copies() {
         .collect();
     assert_eq!(clones.len(), 2, "both selected nodes were cloned");
     assert_eq!(
-        document.main_view.selected, clones,
+        document.main_view.selected,
+        clones.iter().copied().map(ItemId::Node).collect(),
         "the copies end up selected"
     );
     let a_clone = clone_of(&document, Vec2::ZERO, &originals);
@@ -575,7 +594,10 @@ fn duplicate_clones_wiring_and_selects_the_copies() {
     // selection is the one the duplicate replaced.
     undo_all(&mut document, &steps);
     assert_eq!(document.graph.len(), 3, "only the originals are left");
-    assert_eq!(document.main_view.selected, [a, b].into_iter().collect());
+    assert_eq!(
+        document.main_view.selected,
+        [a, b].map(ItemId::Node).into_iter().collect()
+    );
     assert_eq!(
         document.graph.bindings.get(&InputPort::new(b, 2)),
         Some(&Binding::wire(c, 0)),
@@ -591,7 +613,10 @@ fn duplicate_clones_wiring_and_selects_the_copies() {
         step.apply(&mut document);
     }
     assert_eq!(document.graph.len(), 5);
-    assert_eq!(document.main_view.selected, clones);
+    assert_eq!(
+        document.main_view.selected,
+        clones.iter().copied().map(ItemId::Node).collect()
+    );
     assert_eq!(
         document.graph.bindings.get(&InputPort::new(b_clone, 0)),
         Some(&Binding::wire(a_clone, 0))
@@ -1172,7 +1197,13 @@ fn selection_and_move_drop_members_whose_widget_is_gone() {
     let gone = NodeId::unique();
 
     let step = GraphIntent::SetSelection {
-        to: [live, gone].into_iter().collect(),
+        to: [
+            ItemId::Node(live),
+            ItemId::Node(gone),
+            ItemId::Tie(TieId::unique()),
+        ]
+        .into_iter()
+        .collect(),
     }
     .commit_one(&mut document, &fixture.library)
     .unwrap()
@@ -1182,8 +1213,8 @@ fn selection_and_move_drop_members_whose_widget_is_gone() {
     };
     assert_eq!(
         step.selection.to,
-        [live].into_iter().collect::<BTreeSet<_>>(),
-        "the vanished member is dropped, the live one kept"
+        [ItemId::Node(live)].into_iter().collect::<BTreeSet<_>>(),
+        "the vanished node and the tie no view holds are dropped, the live one kept"
     );
     assert_eq!(document.main_view.selected, step.selection.to);
 
@@ -1200,7 +1231,7 @@ fn selection_and_move_drop_members_whose_widget_is_gone() {
         panic!("expected a SetPositions step, got {step:?}");
     };
     assert_eq!(step.moves.len(), 1, "only the surviving member is recorded");
-    assert_eq!(step.moves[0].node_id, live);
+    assert_eq!(step.moves[0].item, ItemId::Node(live));
     assert_eq!(
         (step.moves[0].pos.from, step.moves[0].pos.to),
         (Vec2::ZERO, Vec2::new(5.0, 6.0))
@@ -1374,4 +1405,600 @@ fn indices_past_the_declaration_are_refused() {
         let committed = intent.commit_one(&mut document, library);
         assert!(matches!(committed, Ok(Some(_))), "{what}: {committed:?}");
     }
+}
+
+/// What an edit case names, the edit, and what it checks of the document
+/// after it.
+type Edit<'a> = (&'a str, GraphIntent, &'a dyn Fn(&Document));
+
+/// Three plain nodes in a row and four wires: `ab = a.0 → b.0`, `ac = a.0 →
+/// c.0`, `bc = b.0 → c.1` and the event wire `tick = a.tick → b`. The tie
+/// `held` holds `ab` and `tick` and is selected; the tie `shared` holds `ac`
+/// and `bc`.
+struct Tied {
+    document: Document,
+    library: Library,
+    nodes: [NodeId; 3],
+    ab: WireKey,
+    ac: WireKey,
+    bc: WireKey,
+    tick: WireKey,
+    held: TieId,
+    shared: TieId,
+}
+
+fn tied() -> Tied {
+    let mut fixture = DocumentFixture::default();
+    let nodes @ [a, b, c] = [0.0, 220.0, 440.0].map(|x| fixture.node_at(Vec2::new(x, 0.0)));
+    let ab = fixture.wire(OutputPort::new(a, 0), InputPort::new(b, 0));
+    let ac = fixture.wire(OutputPort::new(a, 0), InputPort::new(c, 0));
+    let bc = fixture.wire(OutputPort::new(b, 0), InputPort::new(c, 1));
+    let tick = fixture.subscribe(EventPort::new(a, 0), b);
+    let held = fixture.tie(Vec2::new(110.0, 20.0), [ab, tick]);
+    let shared = fixture.tie(Vec2::new(330.0, 20.0), [ac, bc]);
+    let DocumentFixture {
+        mut document,
+        library,
+    } = fixture;
+    document.main_view.selected.insert(ItemId::Tie(held));
+    document.validate().unwrap();
+    Tied {
+        document,
+        library,
+        nodes,
+        ab,
+        ac,
+        bc,
+        tick,
+        held,
+        shared,
+    }
+}
+
+/// Each tie edit lands as one `SetTies` step, a tie's move as a
+/// `SetPositions`, and each leaves the view as the case says; a revert puts
+/// the document back exactly. A tie edit dirties the document and leaves the
+/// node set and the geometry caches alone.
+#[test]
+fn tie_edits_apply_and_revert() {
+    let Tied {
+        document,
+        library,
+        ab,
+        ac,
+        bc,
+        tick,
+        held,
+        shared,
+        ..
+    } = tied();
+    let fresh = TieId::unique();
+    let route = |ties: &[TieId]| Some(Route::new(ties.iter().copied()));
+    let cases: [Edit<'_>; 7] = [
+        (
+            "TieWires puts a new tie on each route at its crossed piece",
+            GraphIntent::TieWires {
+                tie: fresh,
+                pos: Vec2::new(50.0, 60.0),
+                wires: vec![
+                    RouteInsert { wire: ac, at: 1 },
+                    RouteInsert { wire: ab, at: 0 },
+                ],
+            },
+            &|document| {
+                let view = &document.main_view;
+                assert_eq!(
+                    view.ties[&fresh],
+                    Tie {
+                        pos: Vec2::new(50.0, 60.0),
+                        angle: TieAngle::Auto
+                    }
+                );
+                assert_eq!(view.routes.get(&ac).cloned(), route(&[shared, fresh]));
+                assert_eq!(view.routes.get(&ab).cloned(), route(&[fresh, held]));
+            },
+        ),
+        (
+            "JoinTie adds a wire to a tie",
+            GraphIntent::JoinTie {
+                tie: held,
+                wires: vec![RouteInsert { wire: ac, at: 0 }],
+            },
+            &|document| {
+                assert_eq!(
+                    document.main_view.routes.get(&ac).cloned(),
+                    route(&[held, shared])
+                );
+            },
+        ),
+        (
+            "RemoveTie removes the tie, its wires' steps through it, and its selection",
+            GraphIntent::RemoveTie { tie: held },
+            &|document| {
+                let view = &document.main_view;
+                assert!(!view.ties.contains_key(&held));
+                assert_eq!(
+                    view.routes.keys().copied().collect::<BTreeSet<_>>(),
+                    BTreeSet::from([ac, bc])
+                );
+                assert!(view.selected.is_empty());
+            },
+        ),
+        (
+            "SetTieAngle pins the band",
+            GraphIntent::SetTieAngle {
+                tie: held,
+                angle: TieAngle::Pinned(45.0),
+                gesture: None,
+            },
+            &|document| {
+                assert_eq!(document.main_view.ties[&held].angle, TieAngle::Pinned(45.0));
+            },
+        ),
+        (
+            "SetTieAngle frees a pinned band",
+            GraphIntent::SetTieAngle {
+                tie: shared,
+                angle: TieAngle::Auto,
+                gesture: None,
+            },
+            &|document| {
+                assert_eq!(document.main_view.ties[&shared].angle, TieAngle::Auto);
+            },
+        ),
+        (
+            "ReleaseWire takes one wire out and keeps the tie that holds another",
+            GraphIntent::ReleaseWire {
+                tie: held,
+                wire: tick,
+            },
+            &|document| {
+                let view = &document.main_view;
+                assert!(!view.routes.contains_key(&tick));
+                assert_eq!(view.routes.get(&ab).cloned(), route(&[held]));
+                assert!(view.ties.contains_key(&held));
+            },
+        ),
+        (
+            "a drag frame moves a tie",
+            drag(
+                &[DragStart {
+                    item: ItemId::Tie(held),
+                    pos: Vec2::new(110.0, 20.0),
+                }],
+                Vec2::new(5.0, -5.0),
+            ),
+            &|document| {
+                assert_eq!(document.main_view.ties[&held].pos, Vec2::new(115.0, 15.0));
+            },
+        ),
+    ];
+    for (what, intent, check) in cases {
+        let mut document = document.clone();
+        // A pinned angle to free, so freeing it is not a no-op.
+        document.main_view.ties.get_mut(&shared).unwrap().angle = TieAngle::Pinned(10.0);
+        let before = document.clone();
+        let step = intent
+            .commit_one(&mut document, &library)
+            .unwrap()
+            .unwrap_or_else(|| panic!("{what}: no step"));
+        if let UndoStep::Ties(_) = step {
+            assert!(step.dirties_document(), "{what}");
+            assert!(!step.invalidates_cached_geometry(), "{what}");
+            assert!(!step.changes_node_set(), "{what}");
+        }
+        check(&document);
+        document
+            .validate()
+            .unwrap_or_else(|error| panic!("{what}: {error}"));
+        step.revert(&mut document);
+        assert_eq!(document, before, "{what}: the revert puts it back");
+    }
+}
+
+/// Releasing a tie's last wire removes the tie with it and takes it out of the
+/// selection; the reverts, in reverse, bring the wire, the tie and its
+/// selection back.
+#[test]
+fn releasing_a_ties_last_wire_removes_the_tie() {
+    let Tied {
+        mut document,
+        library,
+        ab,
+        tick,
+        held,
+        ..
+    } = tied();
+    let before = document.clone();
+    let steps = commit_all(
+        &mut document,
+        &library,
+        [
+            GraphIntent::ReleaseWire {
+                tie: held,
+                wire: tick,
+            },
+            GraphIntent::ReleaseWire {
+                tie: held,
+                wire: ab,
+            },
+        ],
+    );
+    assert_eq!(steps.len(), 2);
+    assert!(!document.main_view.ties.contains_key(&held));
+    assert!(!document.main_view.selected.contains(&ItemId::Tie(held)));
+    document.validate().unwrap();
+    undo_all(&mut document, &steps);
+    assert_eq!(document, before);
+}
+
+/// A wire is both of its ends: rewiring `c.0` from `a` to `b` drops the route
+/// of `ac`, while `shared` stays for `bc`; cutting `b.0` drops the route of
+/// `ab`, while `held` stays for `tick`; unsubscribing
+/// `tick` drops its route. A bind to the same output changes nothing, so it
+/// records no step and keeps the route. Removing `a` ends `ab`, `ac` and
+/// `tick`: `held`, which only they held, goes, and `shared` stays for `bc`.
+/// Each revert brings all of it back.
+#[test]
+fn wiring_edits_take_the_routes_of_the_wires_they_end() {
+    let Tied {
+        document,
+        library,
+        nodes: [a, b, c],
+        ab,
+        ac,
+        bc,
+        tick,
+        held,
+        shared,
+    } = tied();
+    let input = InputPort::new(b, 0);
+    let mut same = document.clone();
+    assert!(
+        GraphIntent::set_input(input, Binding::wire(a, 0))
+            .commit_one(&mut same, &library)
+            .unwrap()
+            .is_none(),
+        "a bind to the same output is no edit"
+    );
+    assert_eq!(same, document, "and keeps the route");
+
+    let cases: [Edit<'_>; 4] = [
+        (
+            "a rewire to another output",
+            GraphIntent::set_input(InputPort::new(c, 0), Binding::wire(b, 0)),
+            &|document| {
+                assert!(!document.main_view.routes.contains_key(&ac));
+                assert!(document.main_view.ties.contains_key(&shared));
+            },
+        ),
+        ("a cut", GraphIntent::set_input(input, None), &|document| {
+            assert!(!document.main_view.routes.contains_key(&ab));
+            assert!(document.main_view.ties.contains_key(&held));
+        }),
+        ("an unsubscribe", subscribe(a, b, false), &|document| {
+            assert!(!document.main_view.routes.contains_key(&tick));
+            assert!(document.main_view.routes.contains_key(&ab));
+        }),
+        (
+            "a removal of the node every wire of `held` touches",
+            GraphIntent::RemoveNode { node_id: a },
+            &|document| {
+                let view = &document.main_view;
+                assert!(!view.ties.contains_key(&held), "`held` goes");
+                assert!(view.selected.is_empty(), "and leaves the selection");
+                assert_eq!(
+                    view.routes.iter().collect::<Vec<_>>(),
+                    [(&bc, &Route::new([shared]))],
+                    "`shared` keeps `bc` alone"
+                );
+            },
+        ),
+    ];
+    for (what, intent, check) in cases {
+        let mut document = document.clone();
+        let before = document.clone();
+        let steps = commit_all(&mut document, &library, [intent]);
+        check(&document);
+        document
+            .validate()
+            .unwrap_or_else(|error| panic!("{what}: {error}"));
+        undo_all(&mut document, &steps);
+        assert_eq!(document, before, "{what}: the revert puts it back");
+    }
+}
+
+/// Delete removes the selected nodes, then the selected ties. A tie the node
+/// removal took with it is stale by its turn, so the batch commits one step.
+#[test]
+fn delete_removes_the_selected_ties_after_the_nodes() {
+    let Tied {
+        mut document,
+        library,
+        nodes: [a, ..],
+        held,
+        shared,
+        ..
+    } = tied();
+    document.main_view.selected = [ItemId::Node(a), ItemId::Tie(held), ItemId::Tie(shared)]
+        .into_iter()
+        .collect();
+    let intents: Vec<GraphIntent> = GraphIntent::remove_selection(&document.main_view).collect();
+    let mut ties = [held, shared];
+    ties.sort_unstable();
+    assert!(
+        matches!(
+            intents[..],
+            [
+                GraphIntent::RemoveNode { node_id },
+                GraphIntent::RemoveTie { tie: first },
+                GraphIntent::RemoveTie { tie: second },
+            ] if node_id == a && [first, second] == ties
+        ),
+        "{intents:?}"
+    );
+    let steps = commit_all(&mut document, &library, intents);
+    assert_eq!(
+        steps.len(),
+        2,
+        "the node's removal, and `shared`'s: `held` went with the node"
+    );
+    assert!(document.main_view.ties.is_empty());
+    document.validate().unwrap();
+}
+
+/// A tie edit that could never apply is refused with its case, and one whose
+/// tie went since the gesture started gives no step.
+#[test]
+fn tie_intents_refuse_malformed_payloads_and_drop_stale_ones() {
+    let Tied {
+        mut document,
+        library,
+        nodes: [a, _, c],
+        ab,
+        held,
+        ..
+    } = tied();
+    let unheld = WireKey::Event(Subscription::new(EventPort::new(c, 0), a));
+    let fresh = TieId::unique();
+    let tie_wires = |tie, wires| GraphIntent::TieWires {
+        tie,
+        pos: Vec2::ZERO,
+        wires,
+    };
+    let refused = [
+        (
+            "an id the view holds",
+            tie_wires(held, vec![RouteInsert { wire: ab, at: 0 }]),
+            MalformedIntent::TieAlreadyExists { tie: held },
+        ),
+        (
+            "no wire",
+            tie_wires(fresh, Vec::new()),
+            MalformedIntent::EmptyTie { tie: fresh },
+        ),
+        (
+            "a wire the graph does not hold",
+            tie_wires(
+                fresh,
+                vec![RouteInsert {
+                    wire: unheld,
+                    at: 0,
+                }],
+            ),
+            MalformedIntent::WireAbsent { wire: unheld },
+        ),
+        (
+            "a piece past the route's end",
+            tie_wires(fresh, vec![RouteInsert { wire: ab, at: 2 }]),
+            MalformedIntent::RouteIndexOutOfRange {
+                wire: ab,
+                at: 2,
+                len: 1,
+            },
+        ),
+        (
+            "one wire crossed twice",
+            tie_wires(
+                fresh,
+                vec![
+                    RouteInsert { wire: ab, at: 0 },
+                    RouteInsert { wire: ab, at: 0 },
+                ],
+            ),
+            MalformedIntent::TieAlreadyOnRoute {
+                wire: ab,
+                tie: fresh,
+            },
+        ),
+        (
+            "a join of a wire the tie holds",
+            GraphIntent::JoinTie {
+                tie: held,
+                wires: vec![RouteInsert { wire: ab, at: 1 }],
+            },
+            MalformedIntent::TieAlreadyOnRoute {
+                wire: ab,
+                tie: held,
+            },
+        ),
+        (
+            "an angle of 360",
+            GraphIntent::SetTieAngle {
+                tie: held,
+                angle: TieAngle::Pinned(360.0),
+                gesture: None,
+            },
+            MalformedIntent::InvalidTieAngle {
+                tie: held,
+                degrees: 360.0,
+            },
+        ),
+        (
+            "a position that is not finite",
+            GraphIntent::TieWires {
+                tie: fresh,
+                pos: Vec2::NAN,
+                wires: vec![RouteInsert { wire: ab, at: 0 }],
+            },
+            MalformedIntent::NonFinitePos {
+                role: Role::TieWires,
+                pos: Vec2::NAN,
+            },
+        ),
+    ];
+    let before = document.clone();
+    for (what, intent, expected) in refused {
+        let result = intent.commit_one(&mut document, &library);
+        // Debug, as `MalformedIntent` carries foreign errors with no equality.
+        assert_eq!(
+            format!("{:?}", result.map(|_| ())),
+            format!("{:?}", Err::<(), _>(expected)),
+            "{what}"
+        );
+        assert_eq!(document, before, "{what}: nothing is written");
+    }
+
+    let gone = TieId::unique();
+    let stale = [
+        GraphIntent::JoinTie {
+            tie: gone,
+            wires: vec![RouteInsert { wire: ab, at: 0 }],
+        },
+        GraphIntent::RemoveTie { tie: gone },
+        GraphIntent::SetTieAngle {
+            tie: gone,
+            angle: TieAngle::Auto,
+            gesture: None,
+        },
+        GraphIntent::ReleaseWire {
+            tie: gone,
+            wire: ab,
+        },
+        GraphIntent::ReleaseWire {
+            tie: held,
+            wire: unheld,
+        },
+    ];
+    for intent in stale {
+        let what = format!("{intent:?}");
+        assert!(
+            intent
+                .commit_one(&mut document, &library)
+                .unwrap()
+                .is_none(),
+            "{what}"
+        );
+    }
+    assert_eq!(document, before);
+}
+
+/// A duplicate of `a` and `b` takes the ties inside them, at the offset and
+/// with their angles, and the cloned wire runs through the clones in its
+/// original's order: `ab` runs through `second` then `first`, so `ab'` runs
+/// through `second'` then `first'`. `mixed` also holds `cb`, which comes from
+/// `c` outside the set, so even with `IncomingWires::Keep`, which keeps `cb'`,
+/// it is not cloned, and `cb'` has no route. The clones end up selected with
+/// the copied nodes, and one undo takes all of it back.
+#[test]
+fn duplicate_takes_the_ties_inside_the_set() {
+    let mut fixture = DocumentFixture::default();
+    let [a, b, c] = [0.0, 220.0, 440.0].map(|x| fixture.node_at(Vec2::new(x, 0.0)));
+    let ab = fixture.wire(OutputPort::new(a, 0), InputPort::new(b, 0));
+    let cb = fixture.wire(OutputPort::new(c, 0), InputPort::new(b, 1));
+    let first = fixture.tie(Vec2::new(150.0, 0.0), [ab]);
+    let second = fixture.tie(Vec2::new(60.0, 0.0), [ab]);
+    let mixed = fixture.tie(Vec2::new(300.0, 0.0), [cb]);
+    let DocumentFixture {
+        mut document,
+        library,
+    } = fixture;
+    let view = &mut document.main_view;
+    view.routes.insert(ab, Route::new([second, first, mixed]));
+    view.ties.get_mut(&first).unwrap().angle = TieAngle::Pinned(30.0);
+    view.selected = [ItemId::Node(a), ItemId::Node(b)].into_iter().collect();
+    document.validate().unwrap();
+    let before = document.clone();
+
+    let intents = GraphIntent::duplicate(&document, &library, IncomingWires::Keep);
+    let steps = commit_all(&mut document, &library, intents);
+    document.validate().unwrap();
+    let originals = BTreeSet::from([a, b, c]);
+    let a_clone = clone_of(&document, Vec2::ZERO, &originals);
+    let b_clone = clone_of(&document, Vec2::new(220.0, 0.0), &originals);
+    let view = &document.main_view;
+    let clone_at = |pos: Vec2| {
+        *view
+            .ties
+            .iter()
+            .find(|(tie, placed)| ![first, second, mixed].contains(tie) && placed.pos == pos)
+            .unwrap()
+            .0
+    };
+    let first_clone = clone_at(Vec2::new(150.0, 0.0) + DUPLICATE_OFFSET);
+    let second_clone = clone_at(Vec2::new(60.0, 0.0) + DUPLICATE_OFFSET);
+    assert_eq!(view.ties.len(), 5, "`mixed` is not cloned");
+    assert_eq!(view.ties[&first_clone].angle, TieAngle::Pinned(30.0));
+    assert_eq!(view.ties[&second_clone].angle, TieAngle::Auto);
+    let ab_clone = WireKey::Data(DataWire {
+        output: OutputPort::new(a_clone, 0),
+        input: InputPort::new(b_clone, 0),
+    });
+    let cb_clone = WireKey::Data(DataWire {
+        output: OutputPort::new(c, 0),
+        input: InputPort::new(b_clone, 1),
+    });
+    assert!(
+        cb_clone.is_held_by(&document.graph),
+        "the kept incoming wire"
+    );
+    assert_eq!(
+        view.routes[&ab_clone],
+        Route::new([second_clone, first_clone])
+    );
+    assert!(!view.routes.contains_key(&cb_clone));
+    assert_eq!(
+        view.selected,
+        [a_clone, b_clone]
+            .map(ItemId::Node)
+            .into_iter()
+            .chain([first_clone, second_clone].map(ItemId::Tie))
+            .collect()
+    );
+
+    undo_all(&mut document, &steps);
+    assert_eq!(document, before);
+}
+
+/// The frames of one knob drag fold into one step: it keeps the angle before the drag and takes
+/// the last frame's, so one revert puts the band back where the drag found it.
+#[test]
+fn a_knob_drags_frames_fold_into_one_step() {
+    let Tied {
+        mut document,
+        library,
+        held,
+        ..
+    } = tied();
+    let before = document.clone();
+    let gesture = Some(GestureId::default().next());
+    let turn = |degrees| GraphIntent::SetTieAngle {
+        tie: held,
+        angle: TieAngle::Pinned(degrees),
+        gesture,
+    };
+    let mut open = turn(10.0)
+        .commit_one(&mut document, &library)
+        .unwrap()
+        .unwrap();
+    let next = turn(20.0)
+        .commit_one(&mut document, &library)
+        .unwrap()
+        .unwrap();
+    open.absorb(&next);
+    assert_eq!(document.main_view.ties[&held].angle, TieAngle::Pinned(20.0));
+    open.revert(&mut document);
+    assert_eq!(document, before);
+    open.apply(&mut document);
+    assert_eq!(document.main_view.ties[&held].angle, TieAngle::Pinned(20.0));
 }

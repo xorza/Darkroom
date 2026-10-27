@@ -28,11 +28,16 @@
 pub(crate) mod error;
 pub(crate) mod graph_revision;
 pub(crate) mod graph_view;
+pub(crate) mod item_id;
 pub(crate) mod load_report;
+pub(crate) mod route;
 pub(crate) mod stubs;
 pub(crate) mod tab_ref;
+pub(crate) mod tie;
 pub(crate) mod viewport;
+pub(crate) mod wire_key;
 
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::slice;
 
@@ -45,10 +50,13 @@ use scenarium::{
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::error::DocumentValidationError;
-use crate::core::document::graph_view::{GraphView, ItemPlacement};
+use crate::core::document::graph_view::{GraphView, NodePlacement};
+use crate::core::document::item_id::ItemId;
 use crate::core::document::load_report::{DocumentRepair, LoadReport};
+use crate::core::document::route::Route;
 use crate::core::document::stubs::Stubs;
 use crate::core::document::tab_ref::TabRef;
+use crate::core::document::tie::{TieAngle, TieId};
 use crate::core::document::viewport::Viewport;
 use crate::core::preview_sink;
 
@@ -118,8 +126,8 @@ impl Document {
     }
 
     fn unplace(&mut self, node_id: NodeId) {
-        self.main_view.item_placements.remove(&node_id);
-        self.main_view.selected.remove(&node_id);
+        self.main_view.node_placements.remove(&node_id);
+        self.main_view.selected.remove(&ItemId::Node(node_id));
     }
 
     fn close_viewer(&mut self, node_id: NodeId) {
@@ -402,7 +410,8 @@ fn reattach_stubs(
 
 /// Reset a bad viewport, drop each placement for no node or stub, move each
 /// non-finite position to the origin, place each node or stub that has no
-/// placement at the origin, and drop each selection entry with no placement.
+/// placement at the origin, repair the ties, and drop each selection entry
+/// the view does not hold.
 fn repair_view(
     main_view: &mut GraphView,
     graph: &CoreGraph,
@@ -413,7 +422,7 @@ fn repair_view(
         main_view.viewport = Viewport::default();
         repairs.push(DocumentRepair::ViewportReset);
     }
-    let placements = &mut main_view.item_placements;
+    let placements = &mut main_view.node_placements;
     placements.retain(|&node_id, _| {
         let held = graph.find(node_id).is_some() || stubs.contains(node_id);
         if !held {
@@ -435,15 +444,66 @@ fn repair_view(
         .collect();
     unplaced.sort_unstable();
     for node_id in unplaced {
-        placements.insert(node_id, ItemPlacement::default());
+        placements.insert(node_id, NodePlacement::default());
         repairs.push(DocumentRepair::Placed { node_id });
     }
-    main_view.selected.retain(|&node_id| {
-        let placed = main_view.item_placements.contains_key(&node_id);
-        if !placed {
-            repairs.push(DocumentRepair::SelectionDropped { node_id });
+    repair_ties(main_view, graph, repairs);
+    let mut selected = std::mem::take(&mut main_view.selected);
+    selected.retain(|&item| {
+        let held = main_view.holds(item);
+        if !held {
+            repairs.push(DocumentRepair::SelectionDropped { item });
         }
-        placed
+        held
+    });
+    main_view.selected = selected;
+}
+
+/// Drop each route to a wire the graph does not hold, each step to no tie
+/// and each repeat of a step, and each route left with no step; then drop
+/// each tie no route names, move each non-finite tie to the origin, and free
+/// each pinned angle outside `[0, 360)`.
+fn repair_ties(main_view: &mut GraphView, graph: &CoreGraph, repairs: &mut Vec<DocumentRepair>) {
+    let GraphView { ties, routes, .. } = main_view;
+    routes.retain(|&wire, route| {
+        if !wire.is_held_by(graph) {
+            repairs.push(DocumentRepair::RouteDropped { wire });
+            return false;
+        }
+        let mut steps: Vec<TieId> = Vec::with_capacity(route.iter().len());
+        for &tie in route.iter() {
+            if !ties.contains_key(&tie) {
+                repairs.push(DocumentRepair::RouteStepDropped { wire, tie });
+            } else if steps.contains(&tie) {
+                repairs.push(DocumentRepair::RouteStepRepeated { wire, tie });
+            } else {
+                steps.push(tie);
+            }
+        }
+        if steps.is_empty() {
+            repairs.push(DocumentRepair::EmptyRouteDropped { wire });
+            return false;
+        }
+        if steps.len() != route.iter().len() {
+            *route = Route::new(steps);
+        }
+        true
+    });
+    let routed: BTreeSet<TieId> = routes.values().flatten().copied().collect();
+    ties.retain(|&tie, placed| {
+        if !routed.contains(&tie) {
+            repairs.push(DocumentRepair::TieDropped { tie });
+            return false;
+        }
+        if !placed.pos.is_finite() {
+            placed.pos = Vec2::ZERO;
+            repairs.push(DocumentRepair::TiePosReset { tie });
+        }
+        if !placed.angle.is_valid() {
+            placed.angle = TieAngle::Auto;
+            repairs.push(DocumentRepair::TieAngleFreed { tie });
+        }
+        true
     });
 }
 
@@ -496,243 +556,4 @@ fn new_layout() -> DockState<TabRef> {
 pub(crate) mod internals;
 
 #[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
-    use common::SerdeFormat;
-    use palantir::DockOperation;
-
-    use super::*;
-    use crate::core::document::internals::DocumentFixture;
-
-    /// Every `NodeId`-keyed cache sweeps against one rule, and the two
-    /// narrowings of it are strict subsets — so a node that is gone is gone by
-    /// all of them at once, and nothing can be retained by one sweep while
-    /// another has released it.
-    ///
-    /// Re-diverging the predicates is what this catches.
-    #[test]
-    fn node_liveness_is_one_rule_with_two_declared_narrowings() {
-        let mut fixture = DocumentFixture::default();
-        let preview_func = preview_sink::func(Arc::default());
-        fixture.library.add(preview_func.clone());
-        let preview = fixture.document.graph.add(Node::from(&preview_func));
-        let plain = fixture.stub_at(Vec2::ZERO);
-        let mut document = fixture.document;
-
-        // The shared rule answers for a graph node and a stub alike.
-        for node in [preview, plain] {
-            assert!(document.holds_node(node), "the document holds {node:?}");
-        }
-        assert!(document.holds_preview_node(preview));
-        assert!(
-            !document.holds_preview_node(plain),
-            "a stub retains no published value"
-        );
-        assert!(
-            !document.holds_tab(TabRef::ImageViewer(plain)),
-            "a stub has no viewer"
-        );
-
-        // The tab lift is the same rule asked of a tab: a viewer dies exactly
-        // with its node, and the two non-node tabs never do.
-        assert!(document.holds_tab(TabRef::ImageViewer(preview)));
-        assert!(document.holds_tab(TabRef::Graph));
-        assert!(document.holds_tab(TabRef::Preferences));
-
-        document.graph.detach_node(preview);
-        assert!(!document.holds_node(preview), "the rule says gone");
-        assert!(
-            !document.holds_preview_node(preview),
-            "and so does the narrowing"
-        );
-        assert!(
-            !document.holds_tab(TabRef::ImageViewer(preview)),
-            "and so does the tab lift"
-        );
-        assert!(
-            document.holds_node(plain),
-            "the surviving node is untouched"
-        );
-    }
-
-    /// A removal closes the node's viewer tab: every removal, by an edit, an
-    /// undo or a redo, goes through `remove_node`, so no tab outlives its node.
-    #[test]
-    fn removing_a_node_closes_its_viewer() {
-        let mut fixture = DocumentFixture::sample();
-        let node_id = fixture.add(&preview_sink::func(Arc::default()));
-        let mut document = fixture.document;
-        let primary = document.layout.primary().id;
-        document
-            .layout
-            .find_or_insert(TabRef::ImageViewer(node_id), primary);
-
-        document.remove_node(node_id);
-        assert!(
-            !document
-                .layout
-                .all_tabs()
-                .any(|tab| tab == TabRef::ImageViewer(node_id))
-        );
-        document.validate().expect("no tab names the removed node");
-    }
-
-    /// The load repairs the view and the layout around the graph, in order,
-    /// and reports each repair: a bad viewport resets, a placement for no node
-    /// goes, a non-finite position and a missing placement go to the origin, a
-    /// selection entry with no placement goes, and a viewer on a node that is
-    /// no preview node closes. A layout that pins another tab resets whole.
-    #[test]
-    fn reconcile_repairs_the_view_and_the_layout() {
-        let mut fixture = DocumentFixture::default();
-        let shown = fixture.node_at(Vec2::new(f32::NAN, 0.0));
-        let unplaced = fixture.node_at(Vec2::ZERO);
-        let DocumentFixture {
-            mut document,
-            library,
-        } = fixture;
-        let ghost = NodeId::unique();
-        document.main_view.viewport = Viewport {
-            pan: Vec2::ZERO,
-            zoom: 0.0,
-        };
-        document.main_view.item_placements.remove(&unplaced);
-        document
-            .main_view
-            .item_placements
-            .insert(ghost, ItemPlacement::default());
-        document.main_view.selected = [unplaced].into_iter().collect();
-        let primary = document.layout.primary().id;
-        document
-            .layout
-            .find_or_insert(TabRef::ImageViewer(shown), primary);
-
-        let report = document.reconcile(&library);
-        assert_eq!(
-            report.repairs,
-            [
-                DocumentRepair::ViewportReset,
-                DocumentRepair::PlacementDropped { node_id: ghost },
-                DocumentRepair::PosReset { node_id: shown },
-                DocumentRepair::Placed { node_id: unplaced },
-                DocumentRepair::ViewerClosed { node_id: shown },
-            ]
-        );
-        assert_eq!(document.main_view.item_placements[&shown].pos, Vec2::ZERO);
-        assert_eq!(
-            document.main_view.item_placements[&unplaced].pos,
-            Vec2::ZERO
-        );
-        assert!(
-            document.main_view.selected.contains(&unplaced),
-            "placed before the selection is checked, so it stays selected"
-        );
-        document.validate().expect("a reconciled document is valid");
-        assert!(
-            document.reconcile(&library).is_empty(),
-            "nothing is left to repair"
-        );
-
-        document.layout = DockState::new(DOCK_SEED, TabRef::Preferences);
-        assert_eq!(
-            document.reconcile(&library).repairs,
-            [DocumentRepair::LayoutReset]
-        );
-        assert_eq!(document.layout, new_layout());
-    }
-
-    #[test]
-    fn dock_layout_round_trips_as_ron() {
-        use palantir::{DockDrop, SplitSide};
-
-        let mut fixture = DocumentFixture::sample();
-        let node_id = fixture.add(&preview_sink::func(Arc::default()));
-        let mut document = fixture.document;
-        let primary = document.layout.primary().id;
-        document.layout.find_or_insert(TabRef::Preferences, primary);
-        document
-            .layout
-            .find_or_insert(TabRef::ImageViewer(node_id), primary);
-        // A split pane too, so the whole tree shape round-trips — not
-        // just a flat strip.
-        document.layout.apply(DockOperation::MoveTab {
-            tab: TabRef::ImageViewer(node_id),
-            to: DockDrop::Split {
-                group: primary,
-                side: SplitSide::Right,
-            },
-        });
-        let bytes = SerdeFormat::Ron
-            .serialize(&document)
-            .expect("serialize with dock layout");
-        let back: Document = SerdeFormat::Ron.deserialize(&bytes).expect("deserialize");
-        back.validate().expect("round-tripped document is valid");
-        assert_eq!(
-            back.layout, document.layout,
-            "the split tree (groups, focus, ratio) round-trips through RON"
-        );
-    }
-
-    /// The sample validates, and a layout that pins another tab, or was
-    /// saved under another dock seed, does not — each would pass palantir's
-    /// own load check.
-    #[test]
-    fn validation_holds_the_layout_to_the_editors_dock() {
-        let mut document = DocumentFixture::sample().document;
-        document.validate().unwrap();
-
-        document.layout = DockState::new(DOCK_SEED, TabRef::Preferences);
-        assert!(matches!(
-            document.validate(),
-            Err(DocumentValidationError::PinnedTab {
-                tab: TabRef::Preferences
-            })
-        ));
-
-        document.layout = DockState::new("another.dock", TabRef::Graph);
-        assert!(matches!(
-            document.validate(),
-            Err(DocumentValidationError::ForeignDock)
-        ));
-    }
-
-    /// A path a binding holds is absolute or unset in memory: a stub's relative one fails the
-    /// check and names its node, while an absolute one and an empty one pass.
-    #[test]
-    fn validation_holds_paths_absolute() {
-        use std::path::{self, Path};
-
-        use scenarium::{BindingEntry, ConstValue, DetachedNodeParts, InputPort};
-
-        let mut fixture = DocumentFixture::sample();
-        let stub = fixture.stub_at(Vec2::ZERO);
-        let mut document = fixture.document;
-        let with_path = |document: &mut Document, value: &str| {
-            let record = document.stubs.remove(stub).unwrap();
-            document.stubs.insert(
-                DetachedNode::new(DetachedNodeParts {
-                    node_id: stub,
-                    node: record.node().clone(),
-                    bindings: vec![BindingEntry {
-                        port: InputPort::new(stub, 0),
-                        binding: Binding::Const(ConstValue::FsPath(value.to_string())),
-                    }],
-                    subscriptions: Vec::new(),
-                })
-                .unwrap(),
-            );
-        };
-        let absolute = path::absolute(Path::new("x.tiff")).unwrap();
-        for valid in [absolute.to_str().unwrap(), ""] {
-            with_path(&mut document, valid);
-            document.validate().unwrap();
-        }
-        with_path(&mut document, "inputs/x.tiff");
-        assert!(matches!(
-            document.validate(),
-            Err(DocumentValidationError::RelativePath { node_id, path })
-                if node_id == stub && path == "inputs/x.tiff"
-        ));
-    }
-}
+mod tests;

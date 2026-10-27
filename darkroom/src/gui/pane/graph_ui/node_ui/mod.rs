@@ -8,7 +8,7 @@ pub(crate) mod port_row;
 pub(crate) mod preview_row;
 pub(crate) mod wid;
 
-use crate::core::document::graph_view::StackedItem;
+use crate::core::document::graph_view::StackedNode;
 use crate::gui::frame::requests::Requests;
 use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
 use crate::gui::pane::graph_ui::gesture::breaker_ui::breaker_probe::BreakerProbe;
@@ -53,7 +53,7 @@ pub(super) struct NodeUi {
     /// seen. Sized to the *whole* graph — the sweep resolves stacking before
     /// it can cull — so a fresh `Vec` per frame would scale its allocation
     /// with the document.
-    paint_order: Vec<StackedItem>,
+    paint_order: Vec<StackedNode>,
 }
 
 /// The canvas pass every node body records in: the draw context, the breaker

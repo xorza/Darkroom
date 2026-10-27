@@ -6,7 +6,7 @@
 
 #[cfg(feature = "internals")]
 use std::collections::VecDeque;
-use std::path::{self, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use common::fs;
 
@@ -149,7 +149,7 @@ fn scripted_path(answers: &mut VecDeque<DialogAnswer>, ask: &str) -> Option<Path
 /// directory, so a scripted pick holds what a document keeps in memory.
 #[cfg(feature = "internals")]
 fn absolute(path: PathBuf) -> PathBuf {
-    path::absolute(&path).unwrap_or(path)
+    std::path::absolute(&path).unwrap_or(path)
 }
 
 /// A scripted ask with no answer of its shape: a cancel, and an error for the harness to report.
