@@ -4,10 +4,10 @@
 use palantir::{RgbaF32, Shadow};
 
 use crate::gui::theme::palette::Palette;
+use crate::gui::theme::radius_scale::RadiusScale;
 
-/// An elevated rounded surface: node bodies, the inspector panel, the
-/// dock's tabs. Named for the shape rather than the node, because all
-/// three read from it — a header band derives its own tighter radius from
+/// An elevated rounded surface: node bodies and the dock's tabs. Named for
+/// the shape rather than the node, because both read from it — a footer strip derives its own tighter radius from
 /// [`Self::inner_radius`] rather than carrying fields of its own.
 #[derive(Clone, Debug)]
 pub(crate) struct CardTheme {
@@ -17,9 +17,8 @@ pub(crate) struct CardTheme {
     /// and the stroke slot is reserved for the selection / breaker /
     /// missing colors.
     pub(crate) border: RgbaF32,
-    /// Header band fill, a step brighter than `fill` so the band reads
-    /// against the body. Doubles as the chrome lift behind a hovered strip
-    /// glyph.
+    /// A step brighter than `fill`: the lift behind a hovered button on a
+    /// card or a toolbar, and behind a hovered strip glyph.
     pub(crate) header_fill: RgbaF32,
     /// Ambient elevation shadow cast when no status glow claims the slot —
     /// one color so every elevated surface casts the same kind of shadow.
@@ -39,14 +38,14 @@ pub(crate) struct CardTheme {
 }
 
 impl CardTheme {
-    pub(super) const fn from_palette(p: &Palette) -> Self {
+    pub(super) const fn from_palette(p: &Palette, radius: &RadiusScale) -> Self {
         Self {
             fill: p.node_fill,
             border: p.node_border,
             header_fill: p.header_fill,
             ambient_shadow: p.node_ambient_shadow,
             border_width: 1.0,
-            corner_radius: 6.0,
+            corner_radius: radius.card,
             min_width: 160.0,
             min_height: 10.0,
         }

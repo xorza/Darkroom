@@ -6,7 +6,6 @@ use std::io;
 use scenarium::InvokeError;
 use scenarium::LogEntry;
 use scenarium::NodeStatus;
-use scenarium::RunError;
 
 use crate::core::wake;
 use crate::gui::state::preview_store::StoredContent;
@@ -380,4 +379,94 @@ fn only_a_failed_run_clears_the_last_run_statuses() {
     );
     assert_eq!(rs.status(node), ExecStatus::None);
     assert_eq!(rs.runs_ended(), 2);
+}
+
+/// A node a failure before it stopped reads as skipped, not as failed, so the one node that
+/// failed stands out as the cause; the outcome counts each kind and names that node, the first
+/// failed one in the run's order, which the rows are in.
+#[test]
+fn a_skipped_node_is_not_a_failure_and_the_outcome_names_the_cause() {
+    let [ran, failed, later_failed, skipped_a, skipped_b] = [1, 2, 3, 4, 5].map(node_id);
+    let mut rs = run_state([ran, failed, later_failed, skipped_a, skipped_b]);
+    let row = |node_id, status| NodeStatus {
+        node_id,
+        status: Some(status),
+        ram: RamUsage::default(),
+    };
+    let invoke = || NodeExecStatus::Errored {
+        error: RunError::Invoke(Arc::new(InvokeError::external(io::Error::other("boom")))),
+    };
+    let skipped = || NodeExecStatus::Errored {
+        error: RunError::SkippedUpstream,
+    };
+    let summary = RunSummary {
+        nodes: vec![
+            row(ran, NodeExecStatus::Executed { elapsed_secs: 0.5 }),
+            row(skipped_a, skipped()),
+            row(failed, invoke()),
+            row(later_failed, invoke()),
+            row(skipped_b, skipped()),
+        ],
+        ..RunSummary::default()
+    };
+    assert_eq!(rs.outcome(), None, "no run yet");
+    rs.apply_report(
+        WorkerReport::Completed(Arc::new(summary)),
+        &mut StatusLog::default(),
+    );
+    assert_eq!(
+        rs.status(failed),
+        ExecStatus::Errored(Some("boom".to_owned()))
+    );
+    assert_eq!(rs.status(skipped_a), ExecStatus::Skipped);
+    assert_eq!(rs.status(skipped_b), ExecStatus::Skipped);
+    assert_eq!(
+        rs.outcome(),
+        Some(RunOutcome {
+            ran_count: 1,
+            cached_count: 0,
+            failed_count: 2,
+            skipped_count: 2,
+            missing_count: 0,
+            cause: Some(failed),
+            cancelled: false,
+        })
+    );
+    rs.clear();
+    assert_eq!(
+        rs.outcome(),
+        None,
+        "a clear drops the tally with the statuses"
+    );
+}
+
+/// With no failure, the cause is the first node the run could not feed.
+#[test]
+fn with_no_failure_the_cause_is_the_first_node_missing_an_input() {
+    let [cached, missing] = [1, 2].map(node_id);
+    let row = |node_id, status| NodeStatus {
+        node_id,
+        status: Some(status),
+        ram: RamUsage::default(),
+    };
+    let outcome = RunOutcome::of(&RunSummary {
+        nodes: vec![
+            row(cached, NodeExecStatus::Cached),
+            row(missing, NodeExecStatus::MissingInputs { ports: vec![0] }),
+        ],
+        cancelled: true,
+        ..RunSummary::default()
+    });
+    assert_eq!(
+        outcome,
+        RunOutcome {
+            ran_count: 0,
+            cached_count: 1,
+            failed_count: 0,
+            skipped_count: 0,
+            missing_count: 1,
+            cause: Some(missing),
+            cancelled: true,
+        }
+    );
 }

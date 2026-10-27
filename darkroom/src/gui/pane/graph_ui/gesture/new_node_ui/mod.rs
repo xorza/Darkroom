@@ -19,10 +19,10 @@ use crate::gui::pane::graph_ui::prepass_ctx::CanvasGesture;
 use crate::gui::port_ref::PortRef;
 
 /// Right-click or double-click on empty canvas → popup that lists every
-/// `Func` the context's library holds plus the built-in specials, grouped by
-/// category. Clicking an entry emits the intent that adds it at the click's
-/// world position (inner-canvas pre-transform). Outside-click and Esc
-/// dismiss.
+/// `Func` the context's library holds plus the built-in specials: under their
+/// categories with no query, ranked by how they match with one. A click or
+/// Enter on the focused row emits the intent that adds it at the click's world
+/// position (inner-canvas pre-transform). Outside-click and Esc dismiss.
 #[derive(Default, Debug)]
 pub(crate) struct NewNodeUi {
     menu: AnchoredMenu,
@@ -35,8 +35,8 @@ pub(crate) struct NewNodeUi {
     /// read at pick.
     source: Option<PortRef>,
     /// The palette's search box. Cleared on each open; case-insensitively
-    /// filters the listed entries by name (a matching category name shows
-    /// that whole column). Empty ⇒ everything shows.
+    /// filters and ranks the listed entries by name, category and
+    /// description. Empty ⇒ everything shows.
     search: Search,
 }
 
@@ -51,6 +51,8 @@ struct Search {
     text: String,
     folded: String,
     rows: PaletteRows,
+    /// The row Enter picks, by its index in the list; the first after each filtering.
+    focused: usize,
 }
 
 impl Search {
@@ -187,6 +189,12 @@ pub(crate) fn search_field_wid() -> WidgetId {
     WidgetId::from_hash("new_node_search")
 }
 
+/// Stable id for the row the search field sits in, whose top edge [`space_above_results`]
+/// measures from: the row pads the field, so the field's own top is below it.
+pub(crate) fn search_row_wid() -> WidgetId {
+    WidgetId::from_hash("new_node_search_row")
+}
+
 /// Stable id for the scrolling results area, the half [`space_above_results`]
 /// sizes. Explicit like the search field's so the two ends of that arithmetic
 /// are both addressable.
@@ -196,7 +204,7 @@ pub(crate) fn results_wid() -> WidgetId {
 
 /// Vertical space the palette claims above the scrolling results: the
 /// popup's own padding and border, plus everything the layout placed between
-/// the search field's top edge and the results' top edge.
+/// the search row's top edge and the results' top edge.
 ///
 /// The inner `Scroll` needs this subtracted from the popup's height cap
 /// because a stack hands every non-`Fill` child its *full* main extent — a
@@ -224,7 +232,7 @@ pub(crate) fn results_wid() -> WidgetId {
 /// rects yet, and estimates the span from one line of body text.
 fn space_above_results(ui: &Ui) -> f32 {
     let menu = &ui.theme().context_menu;
-    let field = ui.response_for(search_field_wid()).layout_rect;
+    let field = ui.response_for(search_row_wid()).layout_rect;
     let results = ui.response_for(results_wid()).layout_rect;
     let rows = field.zip(results).map_or_else(
         || {

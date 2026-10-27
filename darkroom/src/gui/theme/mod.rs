@@ -15,6 +15,8 @@ pub(crate) mod inline_rename_theme;
 pub(crate) mod palantir_bridge;
 pub(crate) mod palette;
 pub(crate) mod port_theme;
+pub(crate) mod radius_scale;
+pub(crate) mod space_scale;
 pub(crate) mod status_colors;
 pub(crate) mod tie_theme;
 pub(crate) mod type_colors;
@@ -33,6 +35,8 @@ use crate::gui::theme::inline_rename_theme::InlineRenameTheme;
 use crate::gui::theme::palantir_bridge::BridgeRoles;
 use crate::gui::theme::palette::Palette;
 use crate::gui::theme::port_theme::PortTheme;
+use crate::gui::theme::radius_scale::RadiusScale;
+use crate::gui::theme::space_scale::SpaceScale;
 use crate::gui::theme::status_colors::StatusColors;
 use crate::gui::theme::tie_theme::TieTheme;
 use crate::gui::theme::type_colors::TypeColors;
@@ -61,10 +65,6 @@ pub(crate) struct Theme {
     /// leader, and the breaker scribble that cuts them — one width so the
     /// blade reads at the same weight as what it severs.
     pub(crate) stroke_width: f32,
-    /// Gap between a node's edge and a floating widget's near edge — the
-    /// inspector panel anchors from the node's right edge, so any future
-    /// floating surface reads as the same clearance.
-    pub(crate) floating_widget_gap: f32,
     /// Cap on the new-node popup's height. Inner scroll handles
     /// overflow when the function list exceeds the cap.
     pub(crate) new_node_popup_max_height: f32,
@@ -72,14 +72,19 @@ pub(crate) struct Theme {
     /// Font sizes by hierarchy tier.
     pub(crate) text: TypeScale,
 
+    /// The spacing steps every padding, gap and margin reads.
+    pub(crate) space: SpaceScale,
+
+    /// Corner radii by the kind of surface.
+    pub(crate) radius: RadiusScale,
+
     /// The graph canvas and its dotted backdrop.
     pub(crate) canvas: CanvasTheme,
 
     /// A wire tie's band.
     pub(crate) tie: TieTheme,
 
-    /// Elevated rounded surfaces — node bodies, the inspector panel, dock
-    /// tabs.
+    /// Elevated rounded surfaces — node bodies and dock tabs.
     pub(crate) card: CardTheme,
 
     /// A node's ports: circles, label ink, column geometry.
@@ -127,6 +132,9 @@ pub(crate) struct Theme {
     /// resolve against a menu-bar style — the bar passes this to
     /// [`palantir::Button::style`] itself.
     pub(crate) menu_button: ButtonTheme,
+    /// [`Self::menu_button`] while its menu is open: lit at rest as when hovered, as macOS,
+    /// Windows and GNOME light the title of the open menu.
+    pub(crate) menu_button_open: ButtonTheme,
 
     /// Palantir-side widget theme. Pushed onto `Ui::theme` once at
     /// startup so every palantir widget (Button, `TextEdit`, `MenuItem`,
@@ -175,13 +183,29 @@ impl Theme {
         self.ports.event
     }
 
-    /// The accent color of a node's last-run `status`, or `None` when it did not run: shared by
-    /// the body glow and the header time label, so they read as one cue.
+    /// The ink of a node's last-run `status` in its footer and its inspector, or `None` for the
+    /// muted ink: a node that did not run, and one a failure before it stopped.
     pub(crate) const fn exec_color(&self, status: &ExecStatus) -> Option<RgbaF32> {
         match status {
-            ExecStatus::None => None,
+            ExecStatus::None | ExecStatus::Skipped => None,
             ExecStatus::Cached => Some(self.status.info),
             ExecStatus::Executed(_) => Some(self.status.success),
+            ExecStatus::Running(_) => Some(self.status.busy),
+            ExecStatus::MissingInputs(_) => Some(self.status.warning),
+            ExecStatus::Errored(_) => Some(self.status.error),
+        }
+    }
+
+    /// The frame a node's body takes for its last-run `status`, or `None` for its resting
+    /// shadow. Only what asks for attention takes one — a node in progress, one the run could
+    /// not feed, and the node that failed — so a good run leaves the canvas quiet, and a
+    /// failure frames its cause alone, not each node it stopped.
+    pub(crate) const fn exec_frame(&self, status: &ExecStatus) -> Option<RgbaF32> {
+        match status {
+            ExecStatus::None
+            | ExecStatus::Cached
+            | ExecStatus::Executed(_)
+            | ExecStatus::Skipped => None,
             ExecStatus::Running(_) => Some(self.status.busy),
             ExecStatus::MissingInputs(_) => Some(self.status.warning),
             ExecStatus::Errored(_) => Some(self.status.error),
@@ -231,11 +255,13 @@ impl Theme {
     fn build(p: &Palette) -> Self {
         let colors = AppColors::from_palette(p);
         let text = TypeScale::DEFAULT;
+        let space = SpaceScale::DEFAULT;
+        let radius = RadiusScale::DEFAULT;
         // The palantir half is derived here rather than stored on `Palette`:
         // it is a projection of the same roles, and a second copy of them
         // could drift from the one the darkroom rosters read.
         let pal = palantir_bridge::palette(p);
-        let card = CardTheme::from_palette(p);
+        let card = CardTheme::from_palette(p, &radius);
         let status = StatusColors::from_palette(p);
         let palantir = palantir_bridge::theme(
             &pal,
@@ -244,23 +270,26 @@ impl Theme {
                 tab_inactive: colors.tab_inactive,
                 header_fill: card.header_fill,
                 warning: status.warning,
-                corner_radius: card.corner_radius,
                 text: &text,
+                space: &space,
+                radius: &radius,
             },
         );
-        let menu_button = palantir_bridge::menu_button(&pal, &text);
+        let menu_button = palantir_bridge::menu_button(&pal);
+        let menu_button_open = palantir_bridge::menu_button_open(&menu_button);
         let path_field_error = error_bordered(&palantir.text_edit, status.error);
         let inline_rename = InlineRenameTheme::from_palette(&pal);
         let inline_rename_title = inline_rename
             .clone()
             .with_text(TextStyleOverrides::NONE.with_weight(FontWeight::BOLD));
         Self {
-            // The three measurements that belong to no widget group; the
+            // The two measurements that belong to no widget group; the
             // rest are authored beside their colors in the groups below.
             stroke_width: 2.0,
-            floating_widget_gap: 16.0,
             new_node_popup_max_height: 400.0,
             text,
+            space,
+            radius,
             canvas: CanvasTheme::from_palette(p),
             tie: TieTheme::from_palette(p),
             card,
@@ -273,6 +302,7 @@ impl Theme {
             inline_rename,
             inline_rename_title,
             menu_button,
+            menu_button_open,
             path_field_error,
             palantir,
         }

@@ -35,7 +35,6 @@ use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::canvas_bg::CanvasBg;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
-use crate::gui::pane::graph_ui::draw::inspectors::Inspectors;
 use crate::gui::pane::graph_ui::draw::wire::{WireEmphasis, WirePass, WireSet};
 use crate::gui::pane::graph_ui::draw_ctx::{DrawCtx, PaintFacts};
 use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
@@ -45,6 +44,7 @@ use crate::gui::pane::graph_ui::gesture::breaker_ui::BreakerUi;
 use crate::gui::pane::graph_ui::gesture::group_drag::GroupDrag;
 use crate::gui::pane::graph_ui::gesture::new_node_ui::NewNodeUi;
 use crate::gui::pane::graph_ui::gesture::node_menu_ui::NodeMenuUi;
+use crate::gui::pane::graph_ui::gesture::pan_zoom::Framing;
 use crate::gui::pane::graph_ui::gesture::pan_zoom::camera_gesture::CameraGesture;
 use crate::gui::pane::graph_ui::gesture::preview_drag;
 use crate::gui::pane::graph_ui::gesture::selection_ui::SelectionUi;
@@ -122,11 +122,6 @@ pub(crate) struct GraphUi {
     /// This frame's wire ties: each band and each tied wire's pieces, rebuilt
     /// at the top of [`Self::record_canvas`] into the buffers it keeps.
     ties: TieLayout,
-    /// Open inspection panels, keyed by node. Outside the gesture group so
-    /// they survive a tab switch — an open panel is a standing request about a
-    /// node, not gesture state; panels only paint for nodes in the active
-    /// scene, so off-tab ones hide and reappear.
-    inspectors: Inspectors,
     /// What this frame's input means on the canvas — the bare-canvas gesture
     /// that latched and what Esc does — resolved once in [`Self::prepass`]
     /// and read back by [`Self::draw`].
@@ -158,30 +153,30 @@ pub(crate) struct GraphUi {
     /// The camera's input in flight: a pan drag's latch, and the run of
     /// wheel or pinch input. Input bookkeeping, not viewport state.
     camera: CameraGesture,
+    /// A framing a surface outside the canvas asked for — the status bar's link, a menu —
+    /// raised as a camera move in the next prepass, which has the settled geometry it needs.
+    framing: Option<Framing>,
 }
 
 impl GraphUi {
-    /// Evict this canvas's two `NodeId`-keyed caches down to the nodes the
-    /// document still holds — the cross-frame geometry and the open inspection
-    /// panels.
+    /// Raise `framing` as a camera move in the next prepass.
+    pub(crate) const fn request_framing(&mut self, framing: Framing) {
+        self.framing = Some(framing);
+    }
+
+    /// Evict this canvas's `NodeId`-keyed cache, the cross-frame geometry, down to the nodes the
+    /// document still holds.
     ///
-    /// Both deliberately outlive the scene, so absence from it is no grounds
-    /// on its own and neither can do this itself; see
-    /// [`CanvasGeometry::retain_nodes`]. Swept together because `GraphUi` owns
-    /// both, so a new one lands here rather than in a fourth call site.
+    /// It deliberately outlives the scene, so absence from it is no grounds on its own; see
+    /// [`CanvasGeometry::retain_nodes`].
     pub(crate) fn retain_nodes(&mut self, document: &Document) {
         self.geometry
-            .retain_nodes(|node_id| document.holds_node(node_id));
-        self.inspectors
             .retain_nodes(|node_id| document.holds_node(node_id));
     }
 
     /// Drop every in-flight gesture, keeping the buffers the controllers grow.
     ///
-    /// Gestures only. The inspection panels stay open across a tab switch —
-    /// opening one is a deliberate choice about a node, not something the
-    /// pointer left latched, so leaving the canvas shouldn't undo it. They
-    /// close on an outside action instead ([`Inspectors::apply`]).
+    /// Gestures only.
     ///
     /// Destructured rather than assigned wholesale so the compiler makes the
     /// call: a field added to [`GraphUi`] does not compile until it is either
@@ -203,15 +198,16 @@ impl GraphUi {
             tie_menu,
             camera,
             secondary,
-            // Survivors: caches and panels that outlive the scene on purpose,
+            // Survivors: caches that outlive the scene on purpose,
             // and the frame-local facts `prepass` rewrites before anything
             // reads them.
             bg: _,
             geometry: _,
             ties: _,
-            inspectors: _,
             last_prepass_frame: _,
             input: _,
+            // A request, not a gesture: it waits for the canvas to show.
+            framing: _,
         } = self;
         node_ui.reset();
         breaker_ui.reset();
@@ -250,10 +246,10 @@ impl GraphUi {
             bg: _,
             geometry: _,
             ties: _,
-            inspectors: _,
             last_prepass_frame: _,
             input: _,
             secondary: _,
+            framing: _,
         } = self;
         group_drag.in_flight()
             || breaker_ui.in_flight()
@@ -385,6 +381,9 @@ impl GraphUi {
         // `ctx` — nothing below may read one.
         self.wire_ui.bake_snap_hover(&mut self.geometry);
         self.subscription_ui.bake_snap_hover(&mut self.geometry);
+        if let Some(framing) = self.framing.take() {
+            out.extend_graph(framing.intent(ui, CanvasCtx::new(prepass, &self.geometry)));
+        }
         // The keyboard half of the same phase. Last, so a chord reads the
         // document the pointer gestures above were raised against.
         shortcuts::emit(ui, CanvasCtx::new(prepass, &self.geometry), out);
@@ -480,9 +479,8 @@ impl GraphUi {
             Selection::swept,
         );
 
-        // What the node draw sees but cannot act on: the inspect chip and the
-        // body clicks, both of which drive `Inspectors` — held shared below so
-        // the panels can paint, and taken `&mut` once the draw is over.
+        // What the node draw sees but cannot act on: the menu a right-click
+        // opens and the drag a press starts, applied once the draw is over.
         let mut outcome = NodeDrawOutcome::default();
         // The tie a right-click landed on, whose menu opens once the draw is
         // over, as a node's does, and the drag a press on one started.
@@ -531,18 +529,10 @@ impl GraphUi {
                         // Painted first so it sits beneath the
                         // wires and node bodies.
                         self.selection_ui.draw(ui, theme);
-                        // One bundle for everything the canvas records: the
-                        // node bodies below, and the inspection
-                        // panels after them. Built out here rather than inside
-                        // the probe scope so both passes read the same refs.
-                        let draw_ctx = DrawCtx::new(
-                            ctx,
-                            PaintFacts {
-                                selected,
-                                inspectors: &self.inspectors,
-                                cull,
-                            },
-                        );
+                        // One bundle for everything the canvas records, built
+                        // out here rather than inside the probe scope so both
+                        // passes read the same refs.
+                        let draw_ctx = DrawCtx::new(ctx, PaintFacts { selected, cull });
                         {
                             let mut probe = self.breaker_ui.probe();
                             let mut tie_line = self.tie_ui.probe();
@@ -601,21 +591,12 @@ impl GraphUi {
                                 },
                             );
                         }
-                        // Inspection panels paint after the node bodies so
-                        // they sit on top and win clicks over the nodes
-                        // beneath; positioned in world coords, so they ride
-                        // the inner-canvas transform.
-                        self.inspectors.draw_panels(ui, draw_ctx);
                         self.breaker_ui.draw(ui, theme);
                         self.tie_ui.draw(ui, theme);
                         self.wire_ui.draw_in_flight(ui, ctx);
                         self.subscription_ui.draw_in_flight(ui, ctx);
                     });
             });
-        // The draw is over, so the panels are free to take `&mut`: cycle the
-        // node whose chip was clicked, and close the unpinned ones if the
-        // action landed anywhere but on a panel.
-        self.inspectors.apply(ui, &outcome);
         if let Some(node) = outcome.menu_opened {
             out.extend_graph(self.node_menu.open_on(ui, graph_ctx, node));
         } else if let Some(tie) = ties.menu_opened {

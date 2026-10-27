@@ -21,6 +21,7 @@
 pub(crate) mod click_mode;
 pub(crate) mod drag_start;
 pub(crate) mod incoming_wires;
+mod node_name;
 pub(crate) mod node_property;
 pub(crate) mod route_insert;
 
@@ -481,6 +482,8 @@ impl GraphIntent {
                     pos,
                     z: view.front_z(),
                 };
+                let mut node = node;
+                node.name = node_name::free(graph, &node.name);
                 let detached = DetachedNode::new(DetachedNodeParts {
                     node_id,
                     node,

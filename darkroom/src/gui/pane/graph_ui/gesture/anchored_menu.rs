@@ -13,8 +13,19 @@ use palantir::{Anchor, ClickOutside, CloseHandle};
 /// dismiss closes the menu" resolution.
 #[derive(Default, Debug)]
 pub(crate) struct AnchoredMenu {
-    /// The surface-space anchor the menu opened at.
-    anchor: Option<Vec2>,
+    anchor: Option<Place>,
+}
+
+/// Where an open menu records. The window clamps a popup each frame, so one anchored at the
+/// point it opened at moves as its body grows or shrinks: a palette opened near the bottom edge
+/// sat high while it listed the library, and dropped to the point at the first letter typed.
+/// So it keeps the place its first frame took.
+#[derive(Clone, Copy, Debug)]
+enum Place {
+    /// The surface-space point the menu opened at, until its first frame lays it out.
+    Opened(Vec2),
+    /// The top-left corner its first frame landed at.
+    Landed(Vec2),
 }
 
 /// Which canvas popup a menu records as, and how tall it may grow.
@@ -34,7 +45,7 @@ impl AnchoredMenu {
 
     /// Open (or re-anchor) the menu at a surface-space point.
     pub(crate) const fn open_at(&mut self, anchor: Vec2) {
-        self.anchor = Some(anchor);
+        self.anchor = Some(Place::Opened(anchor));
     }
 
     /// Whether the menu is open.
@@ -61,7 +72,8 @@ impl AnchoredMenu {
             max_height,
         } = shape;
         // `None` for a menu that isn't open.
-        let anchor = *self.anchor.as_ref()?;
+        let place = self.anchor?;
+        let (Place::Opened(anchor) | Place::Landed(anchor)) = place;
         // Esc dismissal is owned by the `Dismiss` popup below (folds into
         // `resp.dismissed`) — no separate Escape poll here.
         //
@@ -91,6 +103,10 @@ impl AnchoredMenu {
         });
         if pick.is_some() || resp.dismissed || resp.close_requested {
             self.anchor = None;
+        } else if let Place::Opened(_) = place
+            && let Some(rect) = ui.response_for(resp.id).rect
+        {
+            self.anchor = Some(Place::Landed(rect.min));
         }
         pick
     }

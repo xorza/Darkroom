@@ -4,7 +4,7 @@
 //! [`pill`](crate::gui::widgets::pill).
 
 use palantir::prelude::*;
-use palantir::widget::{RectShape, Shape, TriangleShape};
+use palantir::widget::{RectShape, Shape};
 use palantir::{FontFamily, ResponseSnapshot, TextInput};
 
 use crate::gui::theme::Theme;
@@ -40,44 +40,9 @@ pub(crate) fn mono_text(ui: &Ui, px: f32) -> TextStyle {
     }
 }
 
-/// The gap between the items of one row on a node card: a port's glyph and
-/// its label, a header's chips.
-pub(crate) const ROW_GAP: f32 = 4.0;
-
 /// A small circle of radius `r` centered on `center`, for the caller to fill.
 pub(crate) fn dot(center: Vec2, r: f32) -> RectShape {
     Shape::rect(Rect::new(center.x - r, center.y - r, 2.0 * r, 2.0 * r)).corners(r)
-}
-
-/// A right-pointing play triangle inscribed in an `s`-sized box, spanning
-/// `fill` of it, for the caller to fill.
-///
-/// Nudged right by a fifth of its half-width: a play mark's visual center sits
-/// left of its bounding box's, so a geometrically centered one reads as offset.
-/// Its points are pulled in by the corner radius because the SDF rounds by
-/// dilating — the glyph grows back out to the intended extents.
-///
-/// Shared so the two chips carrying this mark — the node header's run chip and
-/// the graph toolbar's run button — cannot drift on that geometry. `fill`
-/// stays per-caller: a 30px toolbar button carries proportionally less glyph
-/// than an 18px header badge.
-pub(crate) fn play_triangle(s: f32, fill: f32) -> TriangleShape {
-    play_triangle_at(s, Vec2::splat(s * 0.5), fill)
-}
-
-/// [`play_triangle`] centered on `c` rather than on the box — for a mark that
-/// shares its box with another, like the event-loop button's bar.
-pub(crate) fn play_triangle_at(s: f32, c: Vec2, fill: f32) -> TriangleShape {
-    let half_h = s * fill * 0.5;
-    let half_w = half_h * (5.0 / 6.0);
-    let r = s * 0.05;
-    let nudge = half_w * 0.2;
-    Shape::triangle(
-        c + Vec2::new(nudge - half_w + r, r - half_h),
-        c + Vec2::new(nudge - half_w + r, half_h - r),
-        c + Vec2::new(nudge + half_w - r, 0.0),
-    )
-    .radius(r)
 }
 
 /// An empty stretch panel pushing the following hstack siblings to the
@@ -93,7 +58,7 @@ pub(crate) fn hspacer(ui: &mut Ui, salt: &'static str) {
 /// none. Takes an already-snapshotted response (rather than `&Response<'_>`)
 /// so a caller that just finished building the widget can end its own `ui`
 /// borrow (via `.snapshot()`) before this one needs `ui` back mutably to
-/// record the tooltip. Shared by every chip/badge/port-glyph that pairs a
+/// record the tooltip. Shared by every chip, icon button and port glyph that pairs a
 /// widget with a hover tooltip.
 ///
 /// `Option` rather than an empty-string sentinel: "this widget has no

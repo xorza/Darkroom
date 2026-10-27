@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use palantir::DockOperation;
 use scenarium::{EventPort, InputPort, OutputPort};
 
 use super::*;
@@ -58,25 +59,33 @@ fn node_liveness_is_one_rule_with_two_declared_narrowings() {
     );
 }
 
-/// A removal closes the node's viewer tab: every removal, by an edit, an
-/// undo or a redo, goes through `remove_node`, so no tab outlives its node.
+/// A removal closes the node's viewer tab and an inspector pinned to it: every removal, by an
+/// edit, an undo or a redo, goes through `remove_node`, so no tab outlives its node. The
+/// selection's inspector stays, as it names no node.
 #[test]
-fn removing_a_node_closes_its_viewer() {
+fn removing_a_node_closes_its_viewer_and_its_pinned_inspector() {
     let mut fixture = DocumentFixture::sample();
     let node_id = fixture.add(&preview_sink::func(Arc::default()));
     let mut document = fixture.document;
-    let primary = document.layout.primary().id;
+    let tabs = [
+        TabRef::ImageViewer(node_id),
+        TabRef::Inspector(InspectTarget::Node(node_id)),
+        TabRef::Inspector(InspectTarget::Selection),
+    ];
+    for tab in tabs {
+        document.layout.apply(DockOperation::OpenTab { tab });
+    }
     document
-        .layout
-        .find_or_insert(TabRef::ImageViewer(node_id), primary);
+        .validate()
+        .expect("each tab names a node the graph holds");
 
     document.remove_node(node_id);
-    assert!(
-        !document
-            .layout
-            .all_tabs()
-            .any(|tab| tab == TabRef::ImageViewer(node_id))
-    );
+    let open: Vec<TabRef> = document
+        .layout
+        .all_tabs()
+        .filter(|tab| tabs.contains(tab))
+        .collect();
+    assert_eq!(open, [TabRef::Inspector(InspectTarget::Selection)]);
     document.validate().expect("no tab names the removed node");
 }
 
@@ -105,10 +114,9 @@ fn reconcile_repairs_the_view_and_the_layout() {
         .node_placements
         .insert(ghost, NodePlacement::default());
     document.main_view.selected = [unplaced].map(ItemId::Node).into_iter().collect();
-    let primary = document.layout.primary().id;
-    document
-        .layout
-        .find_or_insert(TabRef::ImageViewer(shown), primary);
+    document.layout.apply(DockOperation::OpenTab {
+        tab: TabRef::ImageViewer(shown),
+    });
 
     let report = document.reconcile(&library);
     assert_eq!(

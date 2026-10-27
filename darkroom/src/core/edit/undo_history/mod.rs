@@ -68,6 +68,12 @@ pub(crate) struct UndoHistory {
 }
 
 impl UndoHistory {
+    /// Whether [`UndoHistory::redo`] would replay an entry: an undone tail exists. An open
+    /// gesture leaves none.
+    pub(crate) fn can_redo(&self) -> bool {
+        self.cursor < self.entries.len()
+    }
+
     /// Whether [`UndoHistory::undo`] would take an entry back: a packed one,
     /// or the open gesture unless sealing it would drop it.
     pub(crate) fn can_undo(&self) -> bool {

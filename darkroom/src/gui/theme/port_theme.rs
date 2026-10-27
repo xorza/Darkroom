@@ -33,7 +33,7 @@ pub(crate) struct PortTheme {
     /// border) so their center sits on the body edge regardless of it.
     pub(crate) col_pad_x: f32,
     /// The column's vertical rhythm, spent twice over: the inset below the
-    /// header band before the first port, and the gap between adjacent ports.
+    /// header rule before the first port, and the gap between adjacent ports.
     /// One field because equal spacing is the point — a distinct top inset
     /// would read as a misaligned first row.
     pub(crate) gap: f32,

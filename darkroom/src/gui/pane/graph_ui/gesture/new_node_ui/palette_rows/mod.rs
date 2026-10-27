@@ -26,25 +26,64 @@ impl PaletteRow {
     }
 }
 
-/// The rows the palette's query matched, category-major then name, and each
-/// category's run of them.
+/// The rows the palette's query matched, in the order they list, and the runs a caption heads.
 ///
-/// Filtered and sorted only when the palette opens or its query changes; the
-/// frames between record straight off the kept rows, one library lookup per
-/// row and no allocation. Both buffers keep their capacity across filterings.
+/// With no query, every row, category-major then name, one run per category under its name.
+/// With one, the rows ranked by how they match ([`Rank`]), then category and name, as one run
+/// under no caption: the best match leads, where the focus starts.
+///
+/// Filtered and sorted only when the palette opens or its query changes; the frames between
+/// record straight off the kept rows, one library lookup per row and no allocation. Both
+/// buffers keep their capacity across filterings.
 #[derive(Debug, Default)]
 pub(super) struct PaletteRows {
     rows: Vec<PaletteRow>,
-    /// One range of `rows` per category, in order.
-    cols: Vec<Range<usize>>,
+    /// One range of `rows` per run, in order.
+    runs: Vec<Range<usize>>,
+    /// Whether each run is a category under its caption: the query was empty.
+    grouped: bool,
+}
+
+/// How a row matches a query, best first: the order a ranked palette lists in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) enum Rank {
+    /// The name starts with the query: "stre" in "Stretch".
+    NameStart,
+    /// A word of the name starts with it: "stre" in "Auto Stretch".
+    WordStart,
+    /// The name holds it elsewhere.
+    Name,
+    /// The category holds it.
+    Category,
+    /// The description holds it.
+    Description,
+}
+
+impl Rank {
+    /// How `entry` matches `query_lc`, or `None` when it does not.
+    pub(super) fn of(entry: PaletteEntry<'_>, query_lc: &str) -> Option<Self> {
+        let name = entry.name();
+        if folded_starts_with(name, query_lc) {
+            Some(Self::NameStart)
+        } else if word_starts(name).any(|start| folded_starts_with(&name[start..], query_lc)) {
+            Some(Self::WordStart)
+        } else if name_matches(name, query_lc) {
+            Some(Self::Name)
+        } else if name_matches(entry.category(), query_lc) {
+            Some(Self::Category)
+        } else if entry
+            .description()
+            .is_some_and(|text| name_matches(text, query_lc))
+        {
+            Some(Self::Description)
+        } else {
+            None
+        }
+    }
 }
 
 impl PaletteRows {
-    /// Keep the `entries` that `query_lc` matches, category-major then name,
-    /// so a category's rows are one contiguous run.
-    ///
-    /// A matching *category* name reveals that whole column; otherwise a row
-    /// is filtered by its own name.
+    /// Keep the `entries` that `query_lc` matches, in the order the palette lists them.
     pub(super) fn refilter<'a>(
         &mut self,
         library: &'a Library,
@@ -52,12 +91,11 @@ impl PaletteRows {
         query_lc: &str,
     ) {
         self.rows.clear();
-        self.cols.clear();
+        self.runs.clear();
+        self.grouped = query_lc.is_empty();
         self.rows.extend(
             entries
-                .filter(|entry| {
-                    name_matches(entry.category(), query_lc) || name_matches(entry.name(), query_lc)
-                })
+                .filter(|entry| Rank::of(*entry, query_lc).is_some())
                 .map(PaletteEntry::row),
         );
         let entry = |row: &PaletteRow| {
@@ -70,24 +108,64 @@ impl PaletteRows {
         // categories that fold alike in runs of their own.
         self.rows.sort_by(|a, b| {
             let (a, b) = (entry(a), entry(b));
-            lowercase_cmp(a.category(), b.category())
+            Rank::of(a, query_lc)
+                .cmp(&Rank::of(b, query_lc))
+                .then_with(|| lowercase_cmp(a.category(), b.category()))
                 .then_with(|| lowercase_cmp(a.name(), b.name()))
         });
+        if !self.grouped {
+            if !self.rows.is_empty() {
+                self.runs.push(0..self.rows.len());
+            }
+            return;
+        }
         let mut start = 0;
         for end in 1..=self.rows.len() {
             if end == self.rows.len()
                 || entry(&self.rows[end]).category() != entry(&self.rows[start]).category()
             {
-                self.cols.push(start..end);
+                self.runs.push(start..end);
                 start = end;
             }
         }
     }
 
-    /// Each category's rows, in order.
-    pub(super) fn cols(&self) -> impl Iterator<Item = &[PaletteRow]> {
-        self.cols.iter().map(|run| &self.rows[run.clone()])
+    /// Each run's rows, in order, with the index of its first row in the whole list.
+    pub(super) fn runs(&self) -> impl Iterator<Item = (usize, &[PaletteRow])> {
+        self.runs
+            .iter()
+            .map(|run| (run.start, &self.rows[run.clone()]))
     }
+
+    /// Whether each run is a category under its caption.
+    pub(super) const fn grouped(&self) -> bool {
+        self.grouped
+    }
+
+    /// How many rows the list holds.
+    pub(super) const fn len(&self) -> usize {
+        self.rows.len()
+    }
+
+    /// The row at `idx` of the whole list.
+    pub(super) fn get(&self, idx: usize) -> Option<PaletteRow> {
+        self.rows.get(idx).copied()
+    }
+}
+
+/// Where each word of `name` starts, past its first: after a space, a slash, a hyphen, an
+/// underscore or an opening bracket.
+fn word_starts(name: &str) -> impl Iterator<Item = usize> + '_ {
+    name.char_indices()
+        .zip(name.chars().skip(1))
+        .filter(|((_, sep), _)| matches!(sep, ' ' | '/' | '-' | '_' | '('))
+        .map(|((at, sep), _)| at + sep.len_utf8())
+}
+
+/// Whether `name`, folded `char` by `char`, starts with the already folded `query_lc`.
+fn folded_starts_with(name: &str, query_lc: &str) -> bool {
+    let mut folded = name.chars().flat_map(char::to_lowercase);
+    query_lc.chars().all(|wanted| folded.next() == Some(wanted))
 }
 
 /// Case-insensitive ordering of two palette row names, without materializing

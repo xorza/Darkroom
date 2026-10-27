@@ -1,7 +1,7 @@
 mod card;
 mod const_editor;
 pub(super) mod header;
-mod memory_row;
+mod node_footer;
 pub(super) mod node_record;
 pub(crate) mod port_row;
 pub(crate) mod preview_row;
@@ -71,17 +71,12 @@ pub(super) struct NodePass<'a, 'p> {
 
 /// What one record pass's node draw saw but could not act on itself.
 ///
-/// Each drives state the draw itself holds *shared* — the inspection panels
-/// through [`DrawCtx`] so they can paint, the context menu because it is the
-/// canvas's and not a node's. So the clicks are seen here and applied by the
-/// caller once the draw is over and both can be taken `&mut`.
-
+/// Each drives state the draw itself holds *shared* — the context menu because
+/// it is the canvas's and not a node's, the group drag because the canvas owns
+/// one — so the clicks are seen here and applied by the caller once the draw is
+/// over and both can be taken `&mut`.
 #[derive(Default, Debug)]
 pub(crate) struct NodeDrawOutcome {
-    /// The node whose `i` chip was clicked, cycling its inspection panel.
-    pub(crate) inspect_toggled: Option<NodeId>,
-    /// Whether any node body was clicked or started a drag.
-    pub(crate) body_acted: bool,
     /// The node whose body was right-clicked, opening its context menu.
     pub(crate) menu_opened: Option<NodeId>,
     /// The drag a node's body or title press started, for the canvas's one group drag to latch.
@@ -99,8 +94,6 @@ pub(crate) struct NodeDrawOutcome {
 /// job rather than the node's.
 #[derive(Default, Debug)]
 pub(super) struct NodeResponse {
-    pub(super) inspect_toggled: bool,
-    pub(super) body_acted: bool,
     pub(super) menu_opened: bool,
     /// The drag a body or title press started, for the canvas's one group drag to latch.
     pub(super) grab: Option<Grab>,
@@ -169,10 +162,6 @@ impl NodeUi {
             }
             let node_ctx = n.with_hover(wid::hover(ui, n.node_id));
             let node = self.draw_node(ui, node_ctx, pass);
-            if node.inspect_toggled {
-                outcome.inspect_toggled.get_or_insert(n.node_id);
-            }
-            outcome.body_acted |= node.body_acted;
             if node.menu_opened {
                 outcome.menu_opened.get_or_insert(n.node_id);
             }
@@ -242,8 +231,8 @@ impl NodeUi {
         // Sample modifiers before the panel borrows `ui` for the rest
         // of this scope (the click handler below can't reborrow it).
         let click_mode = ClickMode::with_shift(ui.modifiers().shift);
-        // Status glow when the node ran, else the ambient elevation shadow —
-        // one slot, and live status outranks depth.
+        // The status frame when the last run asks for attention, else the
+        // ambient elevation shadow — one slot, and live status outranks depth.
         let shadow = node_shadow(theme, node.exec_status());
 
         // The subscription pin records just before the body so it peeks out
@@ -283,31 +272,22 @@ impl NodeUi {
                     draw: draw_ctx,
                     out,
                 };
-                let inspect_toggled = header::show(ui, &mut record);
-                header::status_row(ui, &mut record);
+                header::show(ui, &mut record);
                 port_row::show(ui, &mut record, row_tracks);
                 // A preview has no output, so it has no cached value for the
-                // memory readout to report — its value takes that slot instead.
+                // footer to report — its value takes that slot instead.
                 if node.preview() {
                     preview_row::show(ui, &mut record);
                 } else {
-                    memory_row::show(ui, node_ctx);
+                    node_footer::show(ui, node_ctx);
                 }
-                inspect_toggled
             });
         // Pull the body response's flags into locals so its `&Ui` borrow ends
         // before the handle scan below. (`Response` is a lazy probe over
         // `response_for`, so reading the body through either is the same
         // last-frame state.)
-        //
-        // `body_acted` is "the user acted on a node", as opposed to on the
-        // bare canvas — what closes the unpinned inspection panels. The title
-        // is deliberately not folded in: a title drag moves the node but has
-        // never counted.
         let body_clicked = panel.response.left.clicked();
         let mut response = NodeResponse {
-            inspect_toggled: panel.inner,
-            body_acted: body_clicked || panel.response.left.drag.started(),
             menu_opened: panel.response.right.clicked(),
             grab: None,
         };
@@ -363,18 +343,18 @@ impl NodeUi {
     }
 }
 
-/// The node body's one shadow: the status glow for its last-run outcome
-/// (zero offset so the halo wraps evenly), or — when it didn't run — a soft
+/// The node body's one shadow: the status frame for a last-run outcome that
+/// asks for attention (zero offset so the halo wraps evenly), or — else — a soft
 /// ambient drop shadow that lifts the body off the canvas and the wires
 /// crossing beneath it. The ambient color is the theme's elevation swatch
-/// (`node_ambient_shadow`), shared with the inspector panels so all
-/// elevated surfaces cast one kind of shadow.
+/// (`node_ambient_shadow`), shared with the other cards so all elevated
+/// surfaces cast one kind of shadow.
 const fn node_shadow(theme: &Theme, status: &ExecStatus) -> Shadow {
-    match theme.exec_color(status) {
-        // Blur/spread sized so the glow carries elevation too — it replaces
-        // the ambient shadow, and a tighter halo would leave a just-run node
-        // sitting flatter than its idle neighbors. Kept a touch tighter than
-        // the ambient shadow so the status reads as a crisp halo, not a bloom.
+    match theme.exec_frame(status) {
+        // Blur/spread sized so the frame carries elevation too — it replaces
+        // the ambient shadow, and a tighter halo would leave a framed node
+        // sitting flatter than its neighbors. Kept a touch tighter than the
+        // ambient shadow so the status reads as a crisp halo, not a bloom.
         Some(color) => Shadow::drop(color, Vec2::ZERO, 3.0).with_spread(0.5),
         None => theme.card.elevation_shadow(10.0),
     }

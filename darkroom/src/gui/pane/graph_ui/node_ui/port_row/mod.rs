@@ -38,7 +38,6 @@ use crate::gui::widgets::hover::Hover;
 use crate::gui::widgets::port_glyph;
 use crate::gui::widgets::port_glyph::{PortGlyph, PortGlyphResponse};
 use crate::gui::widgets::support;
-use crate::gui::widgets::support::ROW_GAP;
 use scenarium::EventPort;
 
 /// Grid columns: inputs (hug), input values (hug, capped at `max_width` — so
@@ -275,7 +274,7 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
         .align(Align::new(HAlign::Left, VAlign::Center))
         .size((Sizing::HUG, Sizing::HUG))
         .sense(Sense::CLICK)
-        .gap(ROW_GAP)
+        .gap(theme.space.xs)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
             // A const-only input can't be wired, so it has no wire anchor
@@ -289,6 +288,9 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
                     .tooltip(tooltip);
                 if let Some(color) = outline {
                     circle = circle.outline(color);
+                }
+                if *input.data_type() == DataType::Any {
+                    circle = circle.hollow();
                 }
                 let glyph = circle.show(ui);
                 label.show(ui, theme);
@@ -446,7 +448,7 @@ fn output_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, output: OutputCtx<'
         .align(Align::new(HAlign::Right, VAlign::Center))
         .size((Sizing::HUG, Sizing::HUG))
         .sense(Sense::CLICK)
-        .gap(ROW_GAP)
+        .gap(theme.space.xs)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
             PortLabel {
@@ -544,7 +546,7 @@ impl EventRow<'_> {
             .grid_cell((grid_row(row), COL_OUTPUT))
             .align(Align::new(HAlign::Right, VAlign::Center))
             .size((Sizing::HUG, Sizing::HUG))
-            .gap(ROW_GAP)
+            .gap(theme.space.xs)
             .child_align(Align::v(VAlign::Center))
             .show(ui, |ui| {
                 // Muted like the data-port labels.

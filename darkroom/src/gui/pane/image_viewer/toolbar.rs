@@ -12,9 +12,9 @@ use palantir::{ImageFilter, TextInput};
 use scenarium::NodeId;
 
 use crate::core::io::preferences::ViewerBg;
-use crate::gui::pane::image_viewer::glyph;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::chip::Chip;
+use crate::gui::widgets::icon::Icon;
 use crate::gui::widgets::pill;
 use crate::gui::widgets::support;
 use crate::gui::widgets::toggle::Toggle;
@@ -53,7 +53,7 @@ impl Controls<'_> {
         };
         if Chip::new(self.wid("filter"), tooltip)
             .toggled(Toggle::from(nearest))
-            .show(ui, self.theme, glyph::draw_pixels)
+            .show_icon(ui, self.theme, Icon::Pixels)
         {
             *filter = if nearest {
                 ImageFilter::Linear
@@ -81,7 +81,7 @@ impl Readout<'_> {
         let Self { panel, text } = self;
         panel
             .size((Sizing::HUG, Sizing::HUG))
-            .padding(Spacing::new(10.0, 6.0, 10.0, 6.0))
+            .padding(Spacing::xy(theme.space.md, theme.space.sm))
             .chrome(pill::chrome(theme))
             .show(ui, |ui| {
                 let style = support::muted_text(ui, theme, theme.text.body);

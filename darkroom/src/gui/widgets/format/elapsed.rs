@@ -8,8 +8,8 @@ use crate::gui::widgets::format;
 /// A run time that renders on demand rather than into a `String`.
 ///
 /// `Display` rather than an owned buffer because every caller is a
-/// per-frame label: the node header's live timer runs once per node per
-/// frame and the inspector's status line once per open panel, and both
+/// per-frame label: the node footer's live timer runs once per node per
+/// frame and the inspector's status line once per open pane, and both
 /// feed the result straight into a formatter that never needed it to be
 /// heap-allocated.
 #[derive(Clone, Copy, Debug)]
@@ -20,10 +20,10 @@ impl Elapsed {
     /// that keeps 2–3 significant digits, and `<1ns` for a time above 0 that
     /// would print as `0ns`, so a run that took time never reads as none. The
     /// elapsed-time sibling of [`Bytes`](crate::gui::widgets::format::bytes::Bytes),
-    /// read by the node header's live timer and the inspector's status line.
+    /// read by the node footer's live timer and the inspector's status line.
     ///
     /// Stays within 7 characters up to `999999s` (decimals drop past `999.99s`),
-    /// which is what `RUN_TIME_MIN_WIDTH` in `gui::pane::graph_ui::node_ui::header`
+    /// which is what `RUN_TIME_MIN_WIDTH` in `gui::pane::graph_ui::node_ui::node_footer`
     /// reserves so a running node's label measures identically across
     /// digit-count changes (see the test).
     pub(crate) const fn new(secs: f64) -> Self {

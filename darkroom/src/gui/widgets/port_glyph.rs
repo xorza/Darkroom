@@ -26,11 +26,19 @@ const TRIANGLE_RADIUS: f32 = 2.0;
 /// reads as one consistent size regardless of which visual carries it.
 const OUTLINE_WIDTH: f32 = 2.5;
 
+/// Stroke width of a hollow circle's ring: the 2 px of a wire, so the ring reads as the line
+/// that lands on it.
+const HOLLOW_WIDTH: f32 = 2.0;
+
 /// What a glyph paints inside its box.
 #[derive(Clone, Copy, Debug)]
 enum GlyphShape {
-    /// A filled disc, optionally ringed by an annulus strictly outside it.
-    Circle { outline: Option<RgbaF32> },
+    /// A disc, optionally ringed by an annulus strictly outside it; a hollow one is a stroke
+    /// ring in the ink with nothing inside.
+    Circle {
+        outline: Option<RgbaF32>,
+        hollow: bool,
+    },
     /// An isosceles triangle whose apex points right before `turn` rotates it
     /// about the box center.
     Arrow { turn: f32 },
@@ -99,7 +107,10 @@ impl<'a> PortGlyph<'a> {
         Self::new(
             wid,
             Painted {
-                shape: GlyphShape::Circle { outline: None },
+                shape: GlyphShape::Circle {
+                    outline: None,
+                    hollow: false,
+                },
                 size: diameter,
                 fill,
             },
@@ -131,8 +142,18 @@ impl<'a> PortGlyph<'a> {
     /// Ring a circle with an annulus strictly outside its fill. Ignored by
     /// [`arrow`](Self::arrow). Default: no ring.
     pub(crate) const fn outline(mut self, color: RgbaF32) -> Self {
-        if let GlyphShape::Circle { outline } = &mut self.glyph.shape {
+        if let GlyphShape::Circle { outline, .. } = &mut self.glyph.shape {
             *outline = Some(color);
+        }
+        self
+    }
+
+    /// Draw a circle as a stroke ring with nothing inside: an input that takes any type, told
+    /// apart by shape where a typed port is told apart by hue. Ignored by
+    /// [`arrow`](Self::arrow). Default: filled.
+    pub(crate) const fn hollow(mut self) -> Self {
+        if let GlyphShape::Circle { hollow, .. } = &mut self.glyph.shape {
+            *hollow = true;
         }
         self
     }
@@ -245,7 +266,7 @@ impl Painted {
         let Self { shape, size, fill } = self;
         let inset = self.inset();
         match shape {
-            GlyphShape::Circle { outline } => {
+            GlyphShape::Circle { outline, hollow } => {
                 let rect = Rect::new(inset, inset, size, size);
                 let radius = size * 0.5;
                 // The ring paints *before* the fill — an annulus strictly
@@ -260,7 +281,12 @@ impl Painted {
                             .border(Stroke::new(color, OUTLINE_WIDTH)),
                     );
                 }
-                ui.add_shape(Shape::rect(rect).corners(radius).fill(fill));
+                let disc = Shape::rect(rect).corners(radius);
+                ui.add_shape(if hollow {
+                    disc.border(Stroke::new(fill, HOLLOW_WIDTH))
+                } else {
+                    disc.fill(fill)
+                });
             }
             GlyphShape::Arrow { turn } => {
                 let [a, b, apex] = self.arrow_vertices(turn);

@@ -1,3 +1,5 @@
+use glam::Vec2;
+use palantir::Spacing;
 use scenarium::TypeId;
 use static_assertions::assert_not_impl_any;
 
@@ -36,9 +38,50 @@ fn default_wiring_and_menu_tweak() {
     // The palantir half is the same palette, not palantir's own default.
     assert_eq!(theme.palantir.window_clear, p.canvas_bg);
     assert!(theme.palantir.tooltip.max_size.h.is_infinite());
-    // The menu-bar font was shrunk from palantir's default to ours.
-    let menu_text = theme.menu_button.looks.normal.text;
-    assert_eq!(menu_text.font_size, Some(theme.text.body));
+
+    // The open menu's trigger rests lit, as the hovered one does; a shut one rests flat.
+    let (shut, open) = (&theme.menu_button.looks, &theme.menu_button_open.looks);
+    assert_eq!(open.normal, shut.hovered);
+    assert_eq!(open.hovered, shut.hovered);
+    assert_ne!(open.normal, shut.normal);
+    // A menu's rows and panel as the review drew them.
+    let menu = &theme.palantir.context_menu;
+    assert_eq!(
+        menu.item.defaults.padding,
+        Spacing::xy(theme.space.md, theme.space.sm)
+    );
+    assert_eq!(menu.item.gap, theme.space.xl);
+    assert_eq!(menu.panel.shadow.offset, Vec2::new(0.0, theme.space.sm));
+    assert_eq!(menu.panel.shadow.blur, theme.space.lg);
+}
+
+/// Every palantir widget resolves its text to the type scale's body, not to palantir's 16 px
+/// default: the ambient size is the body tier, and no look pins a size of its own.
+#[test]
+fn every_palantir_widget_resolves_to_the_body_tier() {
+    let theme = Theme::default();
+    let ui = &theme.palantir;
+    assert_eq!(ui.text.font_size, theme.text.body);
+    let looks = [
+        ("button", &ui.button.looks),
+        ("menu button", &theme.menu_button.looks),
+        ("menu item", &ui.context_menu.item.looks),
+        ("selected tab", &ui.tabs.selected),
+        ("unselected tab", &ui.tabs.unselected),
+        ("text edit", &ui.text_edit.looks),
+        ("unchecked checkbox", &ui.checkbox.unchecked),
+        ("checked checkbox", &ui.checkbox.checked),
+    ];
+    for (widget, look) in looks {
+        for state in [&look.normal, &look.hovered, &look.active, &look.disabled] {
+            assert_eq!(
+                state.text.apply(&ui.text).font_size,
+                theme.text.body,
+                "{widget}"
+            );
+        }
+    }
+    assert_eq!(ui.tooltip.text.apply(&ui.text).font_size, theme.text.body);
 }
 
 /// Every badge is legible against every other, because a node's head
@@ -95,6 +138,21 @@ fn surfaces_stack_darkest_first() {
             "{under} is not darker than {over} — a surface on it disappears",
         );
     }
+}
+
+/// A disabled menu row reads dimmer than a live row's shortcut hint on the menu's surface, so a
+/// menu whose rows are all disabled does not read as live. The two were one grey.
+#[test]
+fn a_disabled_row_is_dimmer_than_a_hint() {
+    let p = Palette::load();
+    let ground = luminance(p.node_fill) + 0.05;
+    let ratio = |ink: RgbaF32| (luminance(ink) + 0.05) / ground;
+    assert!(
+        ratio(p.text_disabled) < ratio(p.text_muted),
+        "disabled {:.2}:1 against muted {:.2}:1",
+        ratio(p.text_disabled),
+        ratio(p.text_muted),
+    );
 }
 
 /// Relative luminance, the WCAG definition, of the linear channels an `RgbaF32` holds. Local
@@ -201,4 +259,131 @@ fn the_event_color_is_the_themes_and_lifts_on_hover() {
         (Hover::from(false), Hover::from(true)),
         (Hover::Rest, Hover::Over)
     );
+}
+
+/// Every padding and corner radius the bridge gives palantir's widgets is a step of the theme's
+/// scales, or zero: a palantir control lines up with a darkroom one beside it.
+#[test]
+fn every_palantir_padding_and_radius_is_on_the_scale() {
+    let theme = Theme::default();
+    let ui = &theme.palantir;
+    let SpaceScale {
+        xs,
+        sm,
+        md,
+        lg,
+        xl,
+        xxl,
+    } = theme.space.clone();
+    let RadiusScale {
+        control,
+        card,
+        float,
+    } = theme.radius.clone();
+    let paddings = [
+        ("button", ui.button.defaults.padding),
+        ("text edit", ui.text_edit.defaults.padding),
+        ("menu item", ui.context_menu.item.defaults.padding),
+        ("menu", ui.context_menu.padding),
+        ("tooltip", ui.tooltip.padding),
+        ("tab chip", ui.tabs.chip_padding),
+        ("modal", ui.modal.padding),
+    ];
+    for (widget, padding) in paddings {
+        for side in padding.as_array() {
+            assert!(
+                [0.0, xs, sm, md, lg, xl, xxl].contains(&side),
+                "{widget} padding {side}"
+            );
+        }
+    }
+    let looks = [
+        ("button", &ui.button.looks),
+        ("text edit", &ui.text_edit.looks),
+        ("menu item", &ui.context_menu.item.looks),
+    ];
+    let mut corners = vec![
+        ("tooltip", ui.tooltip.panel.corners),
+        ("menu", ui.context_menu.panel.corners),
+        ("modal", ui.modal.panel.corners),
+        ("dock ghost", ui.dock.ghost.chrome.corners),
+    ];
+    for (widget, look) in looks {
+        for state in [&look.normal, &look.hovered, &look.active, &look.disabled] {
+            corners.push((widget, state.chrome.corners));
+        }
+    }
+    for (widget, corners) in corners {
+        for radius in corners.as_array() {
+            assert!(
+                [0.0, control, card, float].contains(&radius),
+                "{widget} radius {radius}"
+            );
+        }
+    }
+    // The values the bridge picks, not only that each is a step: a field and the button beside
+    // it share a height, and a menu rounds like a floating surface.
+    assert_eq!(ui.button.defaults.padding.as_array(), [md, xs, md, xs]);
+    assert_eq!(ui.text_edit.defaults.padding.as_array(), [sm, xs, sm, xs]);
+    assert_eq!(ui.context_menu.panel.corners.as_array(), [float; 4]);
+}
+
+/// Only a status that asks for attention frames the node: one in progress, one the run could
+/// not feed, and the one that failed. A good run, a cache hit and a node a failure stopped keep
+/// the resting shadow; their inks still tell them apart in the footer.
+#[test]
+fn only_a_status_that_asks_for_attention_frames_the_node() {
+    let theme = Theme::default();
+    let s = &theme.status;
+    let cases = [
+        (ExecStatus::None, None, None),
+        (ExecStatus::Cached, None, Some(s.info)),
+        (ExecStatus::Executed(0.5), None, Some(s.success)),
+        (ExecStatus::Skipped, None, None),
+        (
+            ExecStatus::Running(std::time::Instant::now()),
+            Some(s.busy),
+            Some(s.busy),
+        ),
+        (
+            ExecStatus::MissingInputs(vec![0]),
+            Some(s.warning),
+            Some(s.warning),
+        ),
+        (ExecStatus::Errored(None), Some(s.error), Some(s.error)),
+    ];
+    for (status, frame, ink) in cases {
+        assert_eq!(theme.exec_frame(&status), frame, "{status:?} frame");
+        assert_eq!(theme.exec_color(&status), ink, "{status:?} ink");
+    }
+}
+
+/// No untyped port takes a hue a run status or a data type spends: an event is not the Bool and
+/// error red, and an untyped input is not the String and success green, so a port on a framed
+/// node reads as a port, and an untyped input as no type.
+#[test]
+fn no_untyped_port_borrows_a_status_or_a_type_hue() {
+    let t = Theme::default();
+    let s = &t.status;
+    let statuses = [s.success, s.info, s.warning, s.error];
+    let hues = &t.type_colors;
+    let types = [
+        hues.boolean,
+        hues.int,
+        hues.float,
+        hues.string,
+        hues.path,
+        hues.image,
+    ];
+    for (name, port) in [("event", t.event_color()), ("untyped input", t.ports.input)] {
+        assert!(
+            !statuses.contains(&port),
+            "the {name} port wears a status hue"
+        );
+        assert!(!types.contains(&port), "the {name} port wears a type hue");
+        assert!(
+            !hues.ramp.contains(&port),
+            "the {name} port wears a ramp hue"
+        );
+    }
 }

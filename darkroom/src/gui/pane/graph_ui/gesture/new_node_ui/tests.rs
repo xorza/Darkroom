@@ -6,6 +6,7 @@ use scenarium::{FuncId, Graph, Library, internals};
 use super::*;
 use crate::core::document::internals::DocumentFixture;
 use crate::gui::pane::graph_ui::internals::CanvasHarness;
+use crate::gui::theme::Theme;
 
 /// A much bigger search field and a much roomier popup than the defaults.
 fn enlarge(t: &mut palantir::Theme) {
@@ -77,7 +78,7 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
         // 900 px surface.
         let cap = popup_cap(h.ctx.theme.new_node_popup_max_height, SURFACE.y as f32);
         Palette {
-            field: h.ui.rect(search_field_wid()).expect("field recorded"),
+            field: h.ui.rect(search_row_wid()).expect("search row recorded"),
             results: h.ui.rect(results_wid()).expect("results recorded"),
             cap,
         }
@@ -219,4 +220,89 @@ fn the_popup_cap_holds_the_palette_inside_the_window() {
     assert_eq!(popup_cap(400.0, 900.0), 400.0);
     assert_eq!(popup_cap(400.0, 300.0), 300.0 - POPUP_WINDOW_MARGIN);
     assert_eq!(popup_cap(400.0, 100.0), POPUP_MIN_HEIGHT);
+}
+
+/// The palette keeps the place its first frame took: opened near the window's bottom edge, the
+/// window lifts the whole library above the point, and the first letter, which leaves a few
+/// rows, must not drop the field back to the point.
+#[test]
+fn the_search_field_stays_where_the_palette_opened() {
+    const SURFACE: UVec2 = UVec2::new(1200, 900);
+    let mut h = CanvasHarness::sized(
+        DocumentFixture::with_library(Graph::default(), bulk_library(60)),
+        SURFACE,
+    );
+    h.frame();
+    h.ui.right_click_at(Vec2::new(500.0, 860.0));
+    h.prime(3);
+    let opened = h.ui.rect(search_row_wid()).expect("the palette opened");
+    assert!(
+        opened.min.y < 860.0 - 100.0,
+        "premise: the window lifted the palette above the point ({opened:?})",
+    );
+
+    h.ui.type_text("func0");
+    h.prime(3);
+    let results = h.ui.rect(results_wid()).expect("rows match");
+    assert!(
+        results.size.h < 400.0 - 100.0,
+        "premise: the query shrank the list ({results:?})",
+    );
+    assert_eq!(h.ui.rect(search_row_wid()), Some(opened), "the field moved");
+}
+
+/// Down walks the focus past the scroll's bottom edge, and the list follows it: the focused
+/// row is inside the results' rect, and the first row has scrolled out.
+#[test]
+fn the_list_follows_the_focus_the_keys_move() {
+    let mut h = CanvasHarness::new(DocumentFixture::with_library(
+        Graph::default(),
+        bulk_library(60),
+    ));
+    h.frame();
+    h.ui.right_click_at(Vec2::new(500.0, 100.0));
+    h.prime(3);
+    for _ in 0..30 {
+        h.ui.key(palantir::Key::ArrowDown);
+        h.prime(1);
+    }
+    h.prime(2);
+    let results = h.ui.rect(results_wid()).expect("the palette opened");
+    let focused =
+        h.ui.rect(node_palette::row_wid(30))
+            .expect("row 30 recorded");
+    assert!(
+        results.contains_rect(focused),
+        "row 30 ({focused:?}) is outside the results ({results:?})",
+    );
+    // A visible rect is clipped to the viewport, so a row scrolled out has none left.
+    let first = h.ui.rect(node_palette::row_wid(0));
+    assert!(
+        first.is_none_or(|first| first.size.h == 0.0),
+        "the first row is still in view: {first:?}",
+    );
+}
+
+/// The focused row's ink keeps 4.5:1 on its tint (WCAG 2.2 SC 1.4.3), the tint blended over
+/// the popup's fill in linear light as the GPU blends it.
+#[test]
+fn the_focused_rows_ink_keeps_its_contrast_on_the_tint() {
+    let theme = Theme::default();
+    let tint = node_palette::focus_fill(&theme);
+    // The popup's panel is a node's fill, as palantir's `element` is darkroom's `node_fill`.
+    let ground = theme.card.fill;
+    let text = theme.palantir.text.color;
+    let mix = |over: f32, under: f32| tint.a * over + (1.0 - tint.a) * under;
+    let luminance = |c: [f32; 3]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    let fill = luminance([
+        mix(tint.r, ground.r),
+        mix(tint.g, ground.g),
+        mix(tint.b, ground.b),
+    ]);
+    let ink = luminance([text.r, text.g, text.b]);
+    let ratio = (ink + 0.05) / (fill + 0.05);
+    assert!(
+        ratio >= 4.5,
+        "the focused row's ink is {ratio:.2}:1 on its tint"
+    );
 }

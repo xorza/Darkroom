@@ -39,11 +39,10 @@ fn document_round_trips_in_either_format() {
     let mut document = fixture.document;
     document.main_view.ties.get_mut(&second).unwrap().angle = TieAngle::Pinned(45.0);
     document.main_view.selected = BTreeSet::from([ItemId::Node(a), ItemId::Tie(first)]);
-    let primary = document.layout.primary().id;
-    document.layout.find_or_insert(TabRef::Preferences, primary);
-    document
-        .layout
-        .find_or_insert(TabRef::ImageViewer(viewer), primary);
+    let primary = document.layout.primary().id();
+    for tab in [TabRef::Preferences, TabRef::ImageViewer(viewer)] {
+        document.layout.apply(DockOperation::OpenTab { tab });
+    }
     document.layout.apply(DockOperation::MoveTab {
         tab: TabRef::ImageViewer(viewer),
         to: DockDrop::Split {

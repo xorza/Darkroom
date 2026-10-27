@@ -23,24 +23,13 @@ use crate::gui::frame::relayout::Relayout;
 use crate::gui::frame::requests::Requests;
 use crate::gui::frame::window_ctx::WindowCtx;
 use crate::gui::main_window::MainWindow;
-use palantir::{Shortcut, Ui};
+use crate::gui::pane::graph_ui::gesture::pan_zoom::Framing;
+use palantir::Ui;
 use scenarium::Graph;
 
 use crate::gui::frame::app_ctx::AppCtx;
 use crate::gui::frame::frame_writes::FrameWrites;
-
-const UNDO_SHORTCUT: Shortcut = Shortcut::ctrl('Z');
-const REDO_SHORTCUT: Shortcut = Shortcut::ctrl_shift('Z');
-const NEW_SHORTCUT: Shortcut = Shortcut::ctrl('N');
-const OPEN_SHORTCUT: Shortcut = Shortcut::ctrl('O');
-const SAVE_SHORTCUT: Shortcut = Shortcut::ctrl('S');
-const SAVE_AS_SHORTCUT: Shortcut = Shortcut::ctrl_shift('S');
-const RUN_SHORTCUT: Shortcut = Shortcut::ctrl('R');
-/// ⌘Q on macOS, Ctrl+Q elsewhere. Routes through `AppCommand::Quit` →
-/// `App::guard_discard`, so it prompts to save when the document is dirty
-/// — same path as File ▸ Quit. (palantir drops winit's default macOS menu
-/// so ⌘Q reaches us instead of hard-terminating.)
-const QUIT_SHORTCUT: Shortcut = Shortcut::ctrl('Q');
+use crate::gui::frame::shortcuts;
 
 #[derive(Debug)]
 pub(crate) struct Session {
@@ -179,8 +168,8 @@ impl Session {
     /// read answers `false` on its own.
     #[must_use]
     fn apply_undo_redo(&mut self, ui: &mut Ui) -> Relayout {
-        let undo = ui.shortcut_pressed(UNDO_SHORTCUT);
-        let redo = ui.shortcut_pressed(REDO_SHORTCUT);
+        let undo = ui.shortcut_pressed(shortcuts::UNDO);
+        let redo = ui.shortcut_pressed(shortcuts::REDO);
         // The document owns its history and what a replay means; this layer
         // only says which direction the chord asked for.
         if undo {
@@ -190,6 +179,13 @@ impl Session {
         } else {
             Relayout::NotNeeded
         }
+    }
+
+    /// Frame the graph in the canvas's next prepass; see [`ViewCommand::Frame`].
+    ///
+    /// [`ViewCommand::Frame`]: crate::gui::frame::app_command::ViewCommand::Frame
+    pub(crate) const fn frame_graph(&mut self, framing: Framing) {
+        self.main_window.graph_ui.request_framing(framing);
     }
 
     /// Release the canvas's `NodeId`-keyed caches for nodes the document has
@@ -213,12 +209,12 @@ impl Session {
 /// the others' subscription that frame). Palantir matches modifiers
 /// exactly, so Ctrl+Shift+S never also reads as Ctrl+S.
 fn menu_shortcut(ui: &mut Ui, requests: &mut Requests) {
-    let new = ui.shortcut_pressed(NEW_SHORTCUT);
-    let open = ui.shortcut_pressed(OPEN_SHORTCUT);
-    let save_as = ui.shortcut_pressed(SAVE_AS_SHORTCUT);
-    let save = ui.shortcut_pressed(SAVE_SHORTCUT);
-    let run = ui.shortcut_pressed(RUN_SHORTCUT);
-    let quit = ui.shortcut_pressed(QUIT_SHORTCUT);
+    let new = ui.shortcut_pressed(shortcuts::NEW);
+    let open = ui.shortcut_pressed(shortcuts::OPEN);
+    let save_as = ui.shortcut_pressed(shortcuts::SAVE_AS);
+    let save = ui.shortcut_pressed(shortcuts::SAVE);
+    let run = ui.shortcut_pressed(shortcuts::RUN);
+    let quit = ui.shortcut_pressed(shortcuts::QUIT);
     let command = if new {
         AppCommand::File(FileCommand::New)
     } else if open {

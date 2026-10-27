@@ -1,5 +1,8 @@
-//! The viewer's drawn vocabulary: the four control-button glyphs and the
-//! checkerboard tile behind a transparent image.
+//! The viewer's own drawn vocabulary, past the shared [`Icon`] set: the "1:1"
+//! label, the backdrop swatches and the checkerboard tile behind a
+//! transparent image.
+//!
+//! [`Icon`]: crate::gui::widgets::icon::Icon
 //!
 //! Every one is a pure function of the button side `s` and an ink color,
 //! built from `s * k` factors so a glyph fills its box at any button size.
@@ -48,54 +51,10 @@ pub(super) fn checker_image() -> palantir::Image {
     tile
 }
 
-/// Four inward corner brackets — "fit the image to the view".
-pub(super) fn draw_fit(ui: &mut Ui, s: f32, color: RgbaF32) {
-    let t = s * 0.07; // bar thickness
-    let len = s * 0.18; // bar length
-    let o = s * 0.26; // inset from the button edge
-    let far = s - o;
-    // An L in each corner: horizontal bar + vertical bar.
-    let bars = [
-        (o, o, len, t),
-        (o, o, t, len),
-        (far - len, o, len, t),
-        (far - t, o, t, len),
-        (o, far - t, len, t),
-        (o, far - len, t, len),
-        (far - len, far - t, len, t),
-        (far - t, far - len, t, len),
-    ];
-    for (x, y, w, h) in bars {
-        ui.add_shape(
-            Shape::rect(Rect::new(x, y, w, h))
-                .corners(t * 0.5)
-                .fill(color),
-        );
-    }
-}
-
 /// "1:1" label — zoom to 100%.
 pub(super) fn draw_100(ui: &mut Ui, s: f32, color: RgbaF32) {
     let style = support::colored_text(ui, color, s * LABEL_GLYPH_FILL);
     Text::new("1:1").style(&style).align(Align::CENTER).show(ui);
-}
-
-/// 2×2 grid of hard squares — nearest (pixelated) sampling.
-pub(super) fn draw_pixels(ui: &mut Ui, s: f32, color: RgbaF32) {
-    let cell = s * 0.18;
-    let gap = s * 0.08;
-    let o = (s - (2.0 * cell + gap)) * 0.5;
-    for iy in 0..2 {
-        for ix in 0..2 {
-            let x = o + ix as f32 * (cell + gap);
-            let y = o + iy as f32 * (cell + gap);
-            ui.add_shape(
-                Shape::rect(Rect::new(x, y, cell, cell))
-                    .corners(1.0)
-                    .fill(color),
-            );
-        }
-    }
 }
 
 /// A backdrop mode's swatch, ringed with the selection accent while `state`

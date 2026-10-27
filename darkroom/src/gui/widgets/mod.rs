@@ -3,11 +3,12 @@
 //! builds on. Unlike the `node`/`canvas` modules these hold no graph
 //! knowledge — a caller maps the widget's returned event onto its own
 //! intent.
-pub(crate) mod badge;
 pub(crate) mod chip;
 pub(crate) mod edit_buffer;
 pub(crate) mod format;
 pub(crate) mod hover;
+pub(crate) mod icon;
+pub(crate) mod icon_button;
 pub(crate) mod inline_rename;
 pub(crate) mod pan_drag;
 pub(crate) mod pill;

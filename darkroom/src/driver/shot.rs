@@ -120,7 +120,7 @@ fn pane(app: &App, ui: &Ui, name: &str) -> Result<Rect, DriverError> {
     let label = |tab: TabRef| dock_panes::tab_label(document, tab);
     let groups: Vec<_> = layout
         .groups()
-        .filter(|group| label(group.active_tab()) == name)
+        .filter(|group| label(group.active_tab()).to_string() == name)
         .collect();
     let group = match groups.as_slice() {
         [one] => one,
@@ -138,12 +138,12 @@ fn pane(app: &App, ui: &Ui, name: &str) -> Result<Rect, DriverError> {
                 locator,
                 matches: groups
                     .iter()
-                    .map(|group| format!("{:?}", group.id))
+                    .map(|group| format!("{:?}", group.id()))
                     .collect(),
             });
         }
     };
-    ui.response_for(DockView::pane_id(layout, group.id))
+    ui.response_for(DockView::pane_id(layout, group.id()))
         .rect
         .filter(|rect| !rect.is_paint_empty())
         .ok_or(DriverError::OffScreen { locator })

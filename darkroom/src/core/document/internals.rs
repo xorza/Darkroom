@@ -277,14 +277,13 @@ impl DocumentFixture {
         tie
     }
 
-    /// Open `tab` in the primary group and make it that group's active one —
-    /// only a visible tab draws, so a test about drawing needs both halves.
+    /// Open `tab` in the primary group, focused, and make it that group's active
+    /// one — only a visible tab draws, so a test about drawing needs both halves.
     pub(crate) fn with_tab(mut self, tab: TabRef) -> Self {
-        let primary = self.document.layout.primary().id;
-        self.document.layout.find_or_insert(tab, primary);
-        self.document
-            .layout
-            .apply(DockOperation::ActivateTab { tab });
+        let group = self.document.layout.primary().id();
+        let layout = &mut self.document.layout;
+        layout.apply(DockOperation::FocusPane { group });
+        layout.apply(DockOperation::OpenTab { tab });
         self
     }
 }

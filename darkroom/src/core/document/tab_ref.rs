@@ -3,9 +3,11 @@
 use scenarium::NodeId;
 use serde::{Deserialize, Serialize};
 
+use crate::core::document::inspect_target::InspectTarget;
+
 /// What an editor tab shows: the document's graph ([`TabRef::Graph`]), or a
-/// non-graph app view like [`TabRef::Preferences`] (the settings window) or an
-/// image viewer. Persisted with the rest of the document, so reopening one
+/// non-graph app view like [`TabRef::Preferences`] (the settings window), an
+/// image viewer or an inspector. Persisted with the rest of the document, so reopening one
 /// restores its open tabs; not undoable, since the pane arrangement records no
 /// undo step, so Ctrl+Z walks past a tab switch to the last graph edit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -23,4 +25,8 @@ pub(crate) enum TabRef {
     /// preview card on the canvas uses, so the two can never disagree about
     /// which value a tab is for.
     ImageViewer(NodeId),
+    /// A node's details at UI scale: its status, inputs, outputs and log.
+    /// Content is runtime-only, like a viewer's. A pinned one is pruned with its
+    /// node.
+    Inspector(InspectTarget),
 }

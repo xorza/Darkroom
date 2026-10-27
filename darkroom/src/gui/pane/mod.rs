@@ -6,4 +6,5 @@
 
 pub(crate) mod graph_ui;
 pub(crate) mod image_viewer;
+pub(crate) mod inspector;
 pub(crate) mod preferences;

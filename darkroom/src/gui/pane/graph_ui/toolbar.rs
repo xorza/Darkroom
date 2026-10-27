@@ -9,17 +9,16 @@
 //! `GraphIntent::SetViewport` directly.
 
 use palantir::prelude::*;
-use palantir::widget::Shape;
 
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::RunCommand;
 use crate::gui::frame::requests::Requests;
+use crate::gui::frame::shortcuts;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph_ui::gesture::pan_zoom::Framing;
 use crate::gui::widgets::chip::Chip;
+use crate::gui::widgets::icon::Icon;
 use crate::gui::widgets::pill;
-use crate::gui::widgets::pill::{BUTTON_GAP, TOOLBAR_MARGIN};
-use crate::gui::widgets::support;
 use crate::gui::widgets::toggle::Toggle;
 
 /// The toolbar's chip ids. One graph pane, so each is a fixed hash.
@@ -55,8 +54,8 @@ pub(super) fn show(ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
         .size((Sizing::HUG, Sizing::HUG))
         .align(Align::new(HAlign::Left, VAlign::Top))
         .child_align(Align::new(HAlign::Left, VAlign::Top))
-        .margin(Spacing::new(TOOLBAR_MARGIN, TOOLBAR_MARGIN, 0.0, 0.0))
-        .gap(BUTTON_GAP)
+        .margin(Spacing::new(theme.space.sm, theme.space.sm, 0.0, 0.0))
+        .gap(theme.space.sm)
         .show(ui, |ui| {
             // Top row: run/cancel + event-loop toggles, side by side on their
             // own pill. Both compile and run the whole document.
@@ -70,10 +69,11 @@ pub(super) fn show(ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
                 // toggle sits muted beside it like the framing
                 // buttons below.
                 if Chip::new(run_button_wid(), run_tip)
+                    .shortcut(shortcuts::RUN)
                     .toggled(Toggle::from(running))
                     .idle_glyph(theme.status.success)
                     .toggled_fill(theme.status.busy)
-                    .show(ui, theme, draw_play)
+                    .show_icon(ui, theme, Icon::Run)
                 {
                     out.push_app(AppCommand::Run(if running {
                         RunCommand::Cancel
@@ -91,7 +91,7 @@ pub(super) fn show(ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
                 if Chip::new(events_button_wid(), events_tip)
                     .toggled(Toggle::from(event_loop_active))
                     .toggled_fill(theme.status.busy)
-                    .show(ui, theme, draw_play_bar)
+                    .show_icon(ui, theme, Icon::RunEvents)
                 {
                     out.push_app(AppCommand::Run(if event_loop_active {
                         RunCommand::StopEvents
@@ -109,90 +109,24 @@ pub(super) fn show(ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
                 .id_salt("graph_toolbar_framing")
                 .child_align(Align::new(HAlign::Left, VAlign::Top));
             pill::dress(framing, theme).show(ui, |ui| {
-                if Chip::new(reset_view_wid(), "Reset view").show(ui, theme, draw_reset) {
+                if Chip::new(reset_view_wid(), "Reset view")
+                    .shortcut(shortcuts::RESET_VIEW)
+                    .show_icon(ui, theme, Icon::ResetView)
+                {
                     out.extend_graph(Framing::Reset.intent(ui, ctx));
                 }
-                if Chip::new(show_all_wid(), "Show all").show(ui, theme, draw_show_all) {
+                if Chip::new(show_all_wid(), "Show all").show_icon(ui, theme, Icon::ShowAll) {
                     out.extend_graph(Framing::ShowAll.intent(ui, ctx));
                 }
-                if Chip::new(show_selected_wid(), "Show selected").show(
+                if Chip::new(show_selected_wid(), "Show selected").show_icon(
                     ui,
                     theme,
-                    draw_show_selected,
+                    Icon::ShowSelected,
                 ) {
                     out.extend_graph(Framing::ShowSelected.intent(ui, ctx));
                 }
             });
         });
-}
-
-/// A right-pointing play triangle (run once), optically centered in the box.
-fn draw_play(ui: &mut Ui, s: f32, color: RgbaF32) {
-    ui.add_shape(support::play_triangle(s, PLAY_FILL).fill(color));
-}
-
-/// `|>` — a vertical bar then a play triangle (start the event loop).
-fn draw_play_bar(ui: &mut Ui, s: f32, color: RgbaF32) {
-    ui.add_shape(
-        Shape::rect(Rect::new(s * 0.28, s * 0.30, s * 0.085, s * 0.40))
-            .corners(1.0)
-            .fill(color),
-    );
-    ui.add_shape(support::play_triangle_at(s, Vec2::new(s * 0.58, s * 0.5), 0.40).fill(color));
-}
-
-/// How much of a toolbar button the play mark spans. Smaller than the node
-/// header's share of its badge: a 30px button carries proportionally less
-/// glyph than an 18px chip.
-const PLAY_FILL: f32 = 0.4;
-
-/// Reset view: a target ring with a center dot (recenter to 1:1).
-fn draw_reset(ui: &mut Ui, s: f32, color: RgbaF32) {
-    let d = s * 0.52;
-    let o = (s - d) * 0.5;
-    ui.add_shape(
-        Shape::rect(Rect::new(o, o, d, d))
-            .corners(d * 0.5)
-            .border(Stroke::new(color, s * 0.06)),
-    );
-    ui.add_shape(support::dot(Vec2::new(s * 0.5, s * 0.5), s * 0.075).fill(color));
-}
-
-/// Show all: a frame enclosing a 2×2 field of dots (fit every node).
-fn draw_show_all(ui: &mut Ui, s: f32, color: RgbaF32) {
-    outline_square(ui, s, color);
-    let r = s * 0.055;
-    let near = s * 0.5 - s * 0.11;
-    let far = s * 0.5 + s * 0.11;
-    for &cy in &[near, far] {
-        for &cx in &[near, far] {
-            ui.add_shape(support::dot(Vec2::new(cx, cy), r).fill(color));
-        }
-    }
-}
-
-/// Show selected: a frame enclosing one filled square (fit the selection).
-fn draw_show_selected(ui: &mut Ui, s: f32, color: RgbaF32) {
-    outline_square(ui, s, color);
-    let inner = s * 0.24;
-    let o = (s - inner) * 0.5;
-    ui.add_shape(
-        Shape::rect(Rect::new(o, o, inner, inner))
-            .corners(s * 0.04)
-            .fill(color),
-    );
-}
-
-/// The rounded-square outline the view buttons' glyphs sit in, centered in an `s`-sized
-/// button box.
-fn outline_square(ui: &mut Ui, s: f32, color: RgbaF32) {
-    let w = s * 0.62;
-    let o = (s - w) * 0.5;
-    ui.add_shape(
-        Shape::rect(Rect::new(o, o, w, w))
-            .corners(s * 0.08)
-            .border(Stroke::new(color, s * 0.06)),
-    );
 }
 
 #[cfg(test)]

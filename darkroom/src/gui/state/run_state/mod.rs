@@ -32,6 +32,8 @@
 //!
 //! [`App`]: crate::gui::app::App
 
+pub(crate) mod run_outcome;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
@@ -48,11 +50,13 @@ use scenarium::LogLevel;
 use scenarium::NodeExecStatus;
 use scenarium::NodeId;
 use scenarium::RamUsage;
+use scenarium::RunError;
 use scenarium::WorkerActivity;
 use scenarium::{RunPhase, RunSummary};
 use scenarium::{WorkerError, WorkerReport};
 
 use crate::gui::state::preview_store::PreviewStore;
+use crate::gui::state::run_state::run_outcome::RunOutcome;
 
 /// A report row can only name a node of the compiled graph the worker
 /// acknowledged, so a miss is a protocol violation rather than a state to
@@ -84,6 +88,9 @@ pub(crate) enum ExecStatus {
     /// provided", not just "errored". `None` while only live progress has
     /// reported the failure: its message arrives with the completed summary.
     Errored(Option<String>),
+    /// Never ran: a node before it failed. Apart from `Errored` so the one
+    /// node that failed reads as the cause and the ones it stopped do not.
+    Skipped,
 }
 
 /// Everything the editor knows about one node from the last run.
@@ -125,7 +132,7 @@ pub(crate) struct RunState {
     /// sweeps them. Three reasons, in order of weight:
     ///
     /// 1. **Going stale on an edit is already what these mean.** Rewire a
-    ///    node's input and its `Executed` glow persists untouched until the
+    ///    node's input and its `Executed` check persists untouched until the
     ///    next run — nothing on the edit path touches this. A status says
     ///    *what the last run said*, never *what the graph would do now*.
     ///    Sweeping on delete would make delete-then-undo the one edit that
@@ -163,6 +170,9 @@ pub(crate) struct RunState {
     /// from the worker's side and emptied into [`Self::previews`]. Kept so the
     /// swap reuses its capacity.
     published: HashMap<NodeId, DynamicValue>,
+    /// What the last completed run came to; `None` before one, and after a
+    /// [`Self::clear`].
+    outcome: Option<RunOutcome>,
 }
 
 /// Where a run's reports come from, and where their verdicts land.
@@ -184,7 +194,13 @@ impl RunState {
             runs_ended: 0,
             cache_ram: RamUsage::default(),
             published: HashMap::new(),
+            outcome: None,
         }
+    }
+
+    /// What the last completed run came to, for the status bar.
+    pub(crate) const fn outcome(&self) -> Option<RunOutcome> {
+        self.outcome
     }
 
     /// The preview values the frame shows, and their conversions.
@@ -230,7 +246,7 @@ impl RunState {
     /// Fold everything `runtime`'s worker has posted since the last frame into
     /// this projection.
     ///
-    /// A completed run reprojects per-node `ExecStatus` (the status glow) and
+    /// A completed run reprojects per-node `ExecStatus` (the frames and footers) and
     /// per-node logs (the inspector's Log section); a failed run clears both
     /// and surfaces in the status bar. Published preview values are not
     /// reports: [`Self::sync_previews`] queues them for conversion, and each
@@ -334,6 +350,7 @@ impl RunState {
                 .expect("worker reported results before installing a compiled graph"),
         );
         self.cache_ram = update.cache_ram;
+        self.outcome = Some(RunOutcome::of(update));
         #[expect(
             clippy::iter_over_hash_type,
             reason = "each node is reset alone, so the order changes nothing"
@@ -354,6 +371,9 @@ impl RunState {
                     NodeExecStatus::MissingInputs { ports } => {
                         ExecStatus::MissingInputs(ports.clone())
                     }
+                    NodeExecStatus::Errored {
+                        error: RunError::SkippedUpstream,
+                    } => ExecStatus::Skipped,
                     NodeExecStatus::Errored { error } => {
                         ExecStatus::Errored(Some(error.to_string()))
                     }
@@ -454,7 +474,7 @@ impl RunState {
         self.previews.reconcile(document);
     }
 
-    /// Drop the document-derived half: no glow, timings, logs, or published
+    /// Drop the document-derived half: no statuses, timings, logs, or published
     /// values. The worker-stream half is left alone — see the module doc.
     ///
     /// Two callers, one meaning ("nothing on screen came from a run"): a run
@@ -464,6 +484,7 @@ impl RunState {
     pub(crate) fn clear(&mut self) {
         self.nodes.clear();
         self.previews.clear();
+        self.outcome = None;
     }
 }
 
@@ -474,6 +495,14 @@ pub(crate) mod internals {
 
     use crate::gui::state::preview_store::PreviewStore;
     use crate::gui::state::run_state::RunState;
+    #[cfg(test)]
+    use std::sync::Arc;
+
+    #[cfg(test)]
+    use scenarium::{CompiledGraph, RunSummary, WorkerReport};
+
+    #[cfg(test)]
+    use crate::core::status_log::StatusLog;
     #[cfg(test)]
     use crate::gui::state::run_state::{ExecStatus, NodeRunState};
 
@@ -492,6 +521,18 @@ pub(crate) mod internals {
         #[cfg(test)]
         pub(crate) fn ram(&self, id: NodeId) -> RamUsage {
             self.node(id).map(NodeRunState::ram).unwrap_or_default()
+        }
+
+        /// Take in `summary` as the worker's completed run of a program of exactly its rows'
+        /// nodes, for a test of what a surface shows after a run.
+        #[cfg(test)]
+        pub(crate) fn complete(&mut self, summary: RunSummary) {
+            let nodes = summary.nodes.iter().map(|row| row.node_id);
+            self.compiled = Some(Arc::new(CompiledGraph::bare(nodes)));
+            self.apply_report(
+                WorkerReport::Completed(Arc::new(summary)),
+                &mut StatusLog::default(),
+            );
         }
     }
 }

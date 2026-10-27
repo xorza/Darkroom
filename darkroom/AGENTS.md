@@ -256,3 +256,54 @@ layout only: the graph does not change, and the run does not read it.
   plumbing, so a node body covers it as it covers wires. Refused: a colour for each tie.
 - **No motion of its own.** A band follows the pointer and the nodes directly. Refused: the spring
   motion of comfyui-cabletie, which lags the pointer and repaints the canvas until it settles.
+
+## The look
+
+- **A good run is quiet.** A node that ran shows a check and its time in its footer, and keeps
+  its resting shadow. Refused: a green glow on each node that ran, which lit the whole canvas
+  after every good run; a glow that fades, an animation state for no information.
+- **One red frame per cause.** The node whose lambda failed takes the error frame and its first
+  error line. A node `RunError::SkippedUpstream` stopped loses its frame, and its footer says
+  "Skipped · input failed" in the muted ink. Refused: a red frame on each skipped node, which
+  made one missing file into 15 frames of one weight.
+- **Status hues are for status only.** Red, green, amber and blue on a frame, a footer and the
+  status bar mean error, success, warning and info; a port or wire hue never stands for one.
+  An event port is white, as Unreal Blueprint draws its execution pins, and an untyped input a
+  hollow muted ring, as Blender 5 tells socket structure by shape. Refused: the event port in
+  the error red, to match a sink marker.
+- **Every port and wire hue clears 3:1 and APCA Lc 40 on a node's body**, the WCAG 2.2 bar for
+  a graphic a user must see (SC 1.4.11) and the floor ayu-graphite holds its `light` row to;
+  `build.py` checks both beside its wire separation floor. Refused: Lc 45, APCA's figure for
+  icons, which no free hue past cyan reaches.
+- **A node keeps the `elem` fill**, and a 1 px rule divides its title from its ports. Refused:
+  the `panel` fill, which breaks the generator's surface ladder.
+- **One type ladder for darkroom and palantir.** `TypeScale` sets palantir's ambient text, so no
+  palantir widget shows its 16 px default. Refused: an 8.5 px caption, too small at scale 1; a
+  12 px label, a point under the body.
+- **Space and radius are scales on the theme**, beside `TypeScale`, and the bridge hands them to
+  palantir. A literal size at a call site is a missing token.
+- **One icon set.** Every glyph on a node and a toolbar is a stroke `Icon` at one stroke width,
+  and an "on" control is a tint behind it. Refused: letters (`R`, `D`, `i`) and font glyphs
+  (`■`, `~`, `↻`) beside drawn ones.
+- **The inspector is a dock pane at UI scale**, following the selection; a pin opens a tab that
+  keeps one node. Refused: a panel on the canvas, which zoomed with the nodes to about 6 px
+  text and covered its neighbor, and a Closed → Open → Pinned chip the user must remember.
+- **A path shows its file name, cut in the middle**, with palantir's `TextWrap::EllipsisMiddle`
+  and the whole path as tooltip, so the kept end holds the extension, as macOS, Qt and Pango
+  cut a file name.
+- **Menus show their keys** with `MenuItem::shortcut_hint`, from the one `shortcuts` table the
+  handlers read. A hint keeps the muted ink, as macOS, Windows and GNOME draw key equivalents;
+  a disabled row and its hint take `text_disabled`, the text ink at Fluent's
+  `TextFillColorDisabled` alpha, which WCAG 2.2 SC 1.4.3 exempts. Refused: the mono face for
+  hints, which no platform menu uses; gesture rows in a menu, which a click could not run.
+- **The palette is one list in every state**, as VS Code's command palette and Blender's F3
+  search are: with no query the library by category under captions, with one a ranked run,
+  each row with its description. Refused: one column a category, 870 px wide over the canvas
+  the node goes on. Chosen by the user on 2026-10-27.
+- **A canvas menu stays where its first frame landed.** Refused: re-anchoring at the opening
+  point each frame, which let the window clamp it again, so the palette's field jumped 400 px
+  when a query shrank the list.
+- **Undo reads "Undo".** Refused: naming the step, as Qt's `QUndoCommand` and AppKit's
+  `setActionName` do from the command that made it: darkroom's commands reach the history as
+  batches of intents, and a name read off them misnames a compound command (Duplicate would
+  read "Undo Add Node").

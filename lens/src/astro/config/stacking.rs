@@ -71,10 +71,7 @@ impl Preset for RegistrationPreset {
 /// The star-detection knobs the editor offers, drawn from
 /// [`StarDetectionConfig`]'s `extraction`, `fwhm` and `filter` sub-configs.
 #[derive(Debug, Clone, Introspect)]
-#[config(
-    type_id = "4512544e-537c-4c1c-96ad-e596cc88d60d",
-    name = "DetectionConfig"
-)]
+#[config(type_id = "4512544e-537c-4c1c-96ad-e596cc88d60d", name = "Detection")]
 pub(crate) struct DetectionKnobs {
     sigma_threshold: f32,
     expected_fwhm: f32,
@@ -128,7 +125,7 @@ impl From<DetectionKnobs> for StarDetectionConfig {
 #[derive(Debug, Clone, Introspect)]
 #[config(
     type_id = "63cd4de9-b82f-4829-bea5-391da64e296f",
-    name = "RegistrationConfig"
+    name = "Registration"
 )]
 pub(crate) struct RegistrationKnobs {
     max_stars: usize,
@@ -221,10 +218,7 @@ impl From<WeightingChoice> for Weighting {
 /// two rejecting methods; `normalization` and `weighting` are the lights'
 /// policy, whatever the method.
 #[derive(Debug, Clone, Introspect)]
-#[config(
-    type_id = "843bff16-61ec-47db-9a86-64bb53c9c1cc",
-    name = "CombineConfig"
-)]
+#[config(type_id = "843bff16-61ec-47db-9a86-64bb53c9c1cc", name = "Combine")]
 pub(crate) struct CombineKnobs {
     method: CombineMethodChoice,
     sigma: f32,

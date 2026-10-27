@@ -16,8 +16,7 @@
 /// no `from_palette` here: a single [`Self::DEFAULT`] is the whole story.
 #[derive(Clone, Debug)]
 pub(crate) struct TypeScale {
-    /// The loudest tier: a floating panel's own heading — the inspector's node
-    /// title.
+    /// The loudest tier: a pane's own heading — the inspector's node title.
     pub(crate) title: f32,
     /// Default UI text — dock tab labels, menu rows, settings rows, the drag
     /// ghost, the status bar, a settings row's help/error/link line, an
@@ -30,23 +29,17 @@ pub(crate) struct TypeScale {
     /// from [`crate::gui::widgets::support::mono_text`], not from a tier of
     /// its own.
     pub(crate) label: f32,
-    /// The caption above a readout — the smallest type that ships.
-    pub(crate) caption: f32,
 }
 
 impl TypeScale {
-    /// The authored scale. Four tiers, each a step the eye can actually
+    /// The authored scale. Three tiers, each a step the eye can actually
     /// resolve: the 15/14 and 13/12 and 11/10.5 pairs this replaced sat a
     /// half-step or a point apart and read as one size, so the smaller of
-    /// each was doing no work its neighbour wasn't.
-    ///
-    /// Badge glyphs stay out: a `■` sized to an 18px chip box is geometry
-    /// that happens to be drawn with a font, tracking the box rather than the
-    /// hierarchy, so it stays named beside the box (`BADGE_FONT`).
+    /// each was doing no work its neighbour wasn't. Label is the floor: an
+    /// 8.5 px caption below it was too small to read at scale 1.
     pub(super) const DEFAULT: Self = Self {
         title: 15.0,
         body: 13.0,
         label: 11.0,
-        caption: 8.5,
     };
 }
