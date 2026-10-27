@@ -7,9 +7,10 @@ use std::path::PathBuf;
 use common::fs::{self, PublicationMode};
 use image::codecs::png::PngEncoder;
 use image::{ImageError, RgbaImage};
-use palantir::{Clipboard, Image, Screenshot, ScreenshotId, Ui};
+use palantir::{Clipboard, Image, Ui};
 
 use crate::gui::app::error::ViewCaptureError;
+use crate::gui::app::screenshot_ask::{Landed, ScreenshotAsk};
 
 /// Where a captured image goes.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -25,40 +26,37 @@ pub(crate) enum CaptureTarget {
 #[derive(Debug)]
 pub(crate) struct ViewCapture {
     target: CaptureTarget,
-    /// The ask, once it went out; a replayed pass of the asking frame asks again and gets the
-    /// same one.
-    asked: Option<ScreenshotId>,
+    asked: ScreenshotAsk,
 }
 
 impl ViewCapture {
     pub(crate) const fn new(target: CaptureTarget) -> Self {
         Self {
             target,
-            asked: None,
+            asked: ScreenshotAsk::Unasked,
         }
     }
 
     /// Ask `ui`'s frame for an image of the whole window, once.
     pub(crate) fn ask(&mut self, ui: &mut Ui) {
-        if self.asked.is_none() {
-            self.asked = Some(ui.request_screenshot(None));
-        }
+        self.asked.ask(ui, None);
     }
 
-    /// The image this capture asked for, in the frame `ui` it lands in.
-    pub(crate) fn landed<'ui>(&self, ui: &'ui Ui) -> Option<&'ui Screenshot> {
-        ui.screenshot_taken(self.asked?)
+    /// What this capture's ask got, once it got it.
+    pub(crate) fn landed<'ui>(&self, ui: &'ui Ui) -> Option<Landed<'ui>> {
+        self.asked.landed(ui)
     }
 
-    /// Put `shot` where the target says.
+    /// Put what landed where the target says.
     pub(crate) fn deliver(
         self,
-        shot: &Screenshot,
+        landed: Landed<'_>,
         clipboard: &Clipboard,
     ) -> Result<(), ViewCaptureError> {
-        // The window's size at paint time decides the region, and a window of no pixels then
-        // gives none.
-        let image = shot.image().ok_or(ViewCaptureError::Empty)?;
+        let Landed::Shot(shot) = landed else {
+            return Err(ViewCaptureError::Empty);
+        };
+        let image = shot.image();
         match self.target {
             CaptureTarget::Clipboard => Ok(clipboard.set_image(image)?),
             CaptureTarget::Png(path) => fs::publish(&path, PublicationMode::Durable, |file| {

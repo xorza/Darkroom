@@ -42,6 +42,7 @@ mod discard_dialog;
 pub(crate) mod driven_requests;
 pub(crate) mod error;
 pub(crate) mod offscreen_signals;
+pub(crate) mod screenshot_ask;
 pub(crate) mod session;
 pub(crate) mod view_capture;
 
@@ -602,14 +603,14 @@ impl App {
 
     /// Hand the image that landed this frame to the capture that asked for it.
     fn deliver_capture(&mut self, ui: &Ui) {
-        let Some(shot) = self.capture.as_ref().and_then(|capture| capture.landed(ui)) else {
+        let Some(landed) = self.capture.as_ref().and_then(|capture| capture.landed(ui)) else {
             return;
         };
         let capture = self
             .capture
             .take()
             .expect("the capture its image landed for");
-        match capture.deliver(shot, &ui.clipboard()) {
+        match capture.deliver(landed, &ui.clipboard()) {
             Ok(()) => self.status.succeeded(StatusFamily::View),
             Err(error) => self.status.error(StatusFamily::View, error.to_string()),
         }

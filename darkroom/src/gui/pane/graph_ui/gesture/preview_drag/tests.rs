@@ -78,7 +78,8 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
 }
 
 /// Esc on a spawn-and-place drag takes the spawn back with the drag: the card is gone and there
-/// is nothing to undo, where a drag released in place keeps its card.
+/// is nothing to undo, where a drag released in place keeps its card. Esc cancels with the
+/// spawn chord's Ctrl still held as well as with it let go.
 #[test]
 fn esc_on_a_preview_spawn_takes_the_card_back() {
     use palantir::{Key, Modifiers, PointerButton};
@@ -86,7 +87,12 @@ fn esc_on_a_preview_spawn_takes_the_card_back() {
     use crate::core::preview_sink::PreviewSink;
     use crate::gui::port_ref::PortRef;
 
-    let spawn = |cancel: bool| {
+    let ctrl = Modifiers {
+        ctrl: true,
+        ..Default::default()
+    };
+    // `None` releases in place; `Some(mods)` presses Esc first with `mods` held.
+    let spawn = |cancel: Option<Modifiers>| {
         let mut fixture = DocumentFixture::probes(1);
         fixture
             .library
@@ -94,19 +100,15 @@ fn esc_on_a_preview_spawn_takes_the_card_back() {
         let out_port = PortRef::output(fixture.node(0), 0);
         let mut h = CanvasHarness::new(fixture);
         h.prime(2);
-        h.ui.set_modifiers(Modifiers {
-            ctrl: true,
-            ..Default::default()
-        });
+        h.ui.set_modifiers(ctrl);
         let from = h.port_center(out_port);
         h.ui.press_on(wid::port_circle(out_port));
         h.frame_applied();
         h.ui.drag_to(from + Vec2::new(90.0, 40.0));
         h.frame_applied();
-        // The chord matters only at the latch; Esc reads with no modifier held.
-        h.ui.set_modifiers(Modifiers::default());
-        h.frame_applied();
-        if cancel {
+        if let Some(mods) = cancel {
+            h.ui.set_modifiers(mods);
+            h.frame_applied();
             h.ui.key(Key::Escape);
             h.frame_applied();
         }
@@ -114,6 +116,12 @@ fn esc_on_a_preview_spawn_takes_the_card_back() {
         h.frame_applied();
         (h.document().graph.len(), h.ctx.open.can_undo())
     };
-    assert_eq!(spawn(false), (2, true), "a placed card stays, undoable");
-    assert_eq!(spawn(true), (1, false), "a cancelled one leaves nothing");
+    assert_eq!(spawn(None), (2, true), "a placed card stays, undoable");
+    for mods in [Modifiers::default(), ctrl] {
+        assert_eq!(
+            spawn(Some(mods)),
+            (1, false),
+            "cancelled under {mods:?}: nothing left"
+        );
+    }
 }

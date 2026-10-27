@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use palantir::{FrameSummary, InputEvent, OwnedInputEvent, ScreenshotId, Ui};
+use palantir::{FrameSummary, InputEvent, OwnedInputEvent, Ui};
 
 use crate::driver::BACKGROUND_WAIT;
 use crate::driver::error::DriverError;
@@ -16,6 +16,7 @@ use crate::driver::shot::{Capture, Region};
 use crate::driver::window_link::WindowLink;
 use crate::gui::MAIN_WINDOW;
 use crate::gui::app::driven_requests::{RequestHandle, Served, UpdateRequest, Withdrawn};
+use crate::gui::app::screenshot_ask::{Landed, ScreenshotAsk};
 use crate::gui::app::{App, UnsavedEdits};
 
 /// How often a wait reads the window's last frame: a frame at 60 Hz is about 17 ms.
@@ -177,15 +178,16 @@ fn shot_request(
     let (reply, answer) = mpsc::sync_channel(1);
     let mut pushed = false;
     // Written by the record pass that asks, read by the update passes after it.
-    let asked: Arc<Mutex<Option<ScreenshotId>>> = Arc::default();
+    let asked: Arc<Mutex<ScreenshotAsk>> = Arc::default();
     let request: UpdateRequest = Box::new(move |app, ui| {
         if !pushed {
             match region.rect(app, ui) {
                 Ok(rect) => {
                     let ask = Arc::clone(&asked);
                     app.driven_mut().push_record(Box::new(move |ui| {
-                        *ask.lock().unwrap_or_else(PoisonError::into_inner) =
-                            Some(ui.request_screenshot(rect));
+                        ask.lock()
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .ask(ui, rect);
                     }));
                     pushed = true;
                     return Served::Again;
@@ -196,13 +198,27 @@ fn shot_request(
                 }
             }
         }
-        let id = *asked.lock().unwrap_or_else(PoisonError::into_inner);
-        let Some(screenshot) = id.and_then(|id| ui.screenshot_taken(id)) else {
-            return Served::Again;
+        let landed = asked
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .landed(ui);
+        let screenshot = match landed {
+            None => return Served::Again,
+            Some(Landed::Shot(screenshot)) => screenshot,
+            Some(Landed::Empty) => {
+                reply
+                    .send(Err(DriverError::EmptyRegion {
+                        region: format!("{region:?}"),
+                    }))
+                    .ok();
+                return Served::Done;
+            }
         };
         // The copy and the legend alone: the fit and the encode, tens of milliseconds, run on
         // the driver's thread rather than stall the person's window.
-        reply.send(Capture::of(screenshot, max_side, app, ui)).ok();
+        reply
+            .send(Ok(Capture::of(screenshot, max_side, app, ui)))
+            .ok();
         Served::Done
     });
     (request, answer)

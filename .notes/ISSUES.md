@@ -15,9 +15,6 @@
   `segments_intersect` in `gesture/breaker_ui/scribble/mod.rs` counts proper crossings only, so a
   stroke that passes exactly through the point two sampled chords share touches both and crosses
   neither: a vertical stroke at the middle of a level wire between two ports leaves it uncut.
-- **darkroom: Esc with a modifier held cancels no canvas gesture.** `GraphUi::prepass` reads Esc as
-  `Shortcut::key(Key::Escape)`, which a held Ctrl does not match, so Ctrl still held from the
-  chord of a preview spawn drag turns Esc into nothing.
 - **lumos: the private docs do not build with `-D warnings`.** `RUSTDOCFLAGS="-D warnings" cargo
   doc -p lumos --no-deps --document-private-items --features internals` stops at an unresolved
   link to `combine` (`combine/stack/mod.rs:1`), one to `crate::MAX_SIDE` (`image/error.rs:39`), and

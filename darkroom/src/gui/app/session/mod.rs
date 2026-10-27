@@ -179,8 +179,8 @@ impl Session {
     /// read answers `false` on its own.
     #[must_use]
     fn apply_undo_redo(&mut self, ui: &mut Ui) -> Relayout {
-        let undo = ui.key_pressed(UNDO_SHORTCUT);
-        let redo = ui.key_pressed(REDO_SHORTCUT);
+        let undo = ui.shortcut_pressed(UNDO_SHORTCUT);
+        let redo = ui.shortcut_pressed(REDO_SHORTCUT);
         // The document owns its history and what a replay means; this layer
         // only says which direction the chord asked for.
         if undo {
@@ -213,12 +213,12 @@ impl Session {
 /// the others' subscription that frame). Palantir matches modifiers
 /// exactly, so Ctrl+Shift+S never also reads as Ctrl+S.
 fn menu_shortcut(ui: &mut Ui, requests: &mut Requests) {
-    let new = ui.key_pressed(NEW_SHORTCUT);
-    let open = ui.key_pressed(OPEN_SHORTCUT);
-    let save_as = ui.key_pressed(SAVE_AS_SHORTCUT);
-    let save = ui.key_pressed(SAVE_SHORTCUT);
-    let run = ui.key_pressed(RUN_SHORTCUT);
-    let quit = ui.key_pressed(QUIT_SHORTCUT);
+    let new = ui.shortcut_pressed(NEW_SHORTCUT);
+    let open = ui.shortcut_pressed(OPEN_SHORTCUT);
+    let save_as = ui.shortcut_pressed(SAVE_AS_SHORTCUT);
+    let save = ui.shortcut_pressed(SAVE_SHORTCUT);
+    let run = ui.shortcut_pressed(RUN_SHORTCUT);
+    let quit = ui.shortcut_pressed(QUIT_SHORTCUT);
     let command = if new {
         AppCommand::File(FileCommand::New)
     } else if open {
