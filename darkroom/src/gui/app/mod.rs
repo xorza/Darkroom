@@ -364,7 +364,7 @@ impl App {
             .as_deref()
             .and_then(|p| p.file_name())
             .and_then(|s| s.to_str());
-        if let Some(answered) = self.discard.record(ui, file_name) {
+        if let Some(answered) = self.discard.record(ui, &self.theme, file_name) {
             self.apply_discard_outcome(answered);
         }
     }

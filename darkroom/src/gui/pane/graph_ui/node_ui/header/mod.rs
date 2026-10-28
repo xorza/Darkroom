@@ -6,10 +6,14 @@
 //! divides it from the ports.
 
 use std::collections::BTreeSet;
-use std::f32::consts::{FRAC_PI_4, PI};
+use std::f32::consts::FRAC_PI_4;
 
-use palantir::prelude::*;
-use palantir::{DockDrop, DockOperation, MenuSeparator, SplitSide};
+use palantir::{
+    Align, Checkbox, Configure, ContextMenu, DockDrop, DockOperation, MenuItem, MenuSeparator,
+    Panel, Separator, Sizing, SplitSide, Ui, VAlign, WidgetId,
+};
+
+use glam::Vec2;
 use scenarium::{CacheMode, NodeId};
 
 use crate::core::document::inspect_target::InspectTarget;
@@ -51,21 +55,21 @@ const NODE_NAME_MAX_CHARS: usize = 32;
 /// while a drag snaps to it) tints the triangle as drop feedback.
 pub(super) fn subscription_pin(ui: &mut Ui, node: NodeCtx<'_>, hover: Hover) {
     let theme = node.theme();
-    // The emitter arrow turned half a turn — mirroring its apex from right to
-    // left — plus a quarter, aiming it up-left along the wire arriving from
-    // there. Placed by its grown box's center rather than in flow, so it
-    // straddles the node's top-left corner.
+    // The emitter arrow turned an eighth of a turn, so it points down-right into
+    // its node along the event wire arriving from the upper left, as Unreal
+    // points an input exec pin along the flow. Placed by its grown box's center
+    // rather than in flow, so it straddles the node's top-left corner.
     PortGlyph::arrow(
         wid::subscription_glyph(node.node_id),
-        theme.ports.size,
-        hover.lift(theme.event_color()),
+        theme.port.size,
+        hover.lift(theme.port.event),
     )
-    .turn(PI + FRAC_PI_4)
+    .turn(FRAC_PI_4)
     .centered_on(node.pos)
     .tooltip(Some(
         "Event subscription — drag to an emitter, or drop an event wire here",
     ))
-    .show(ui);
+    .show(ui, theme);
 }
 
 /// The header row: the run button, the title and its kind mark, then — pinned to the right edge
@@ -87,7 +91,7 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
                     .push_app(AppCommand::Run(RunCommand::Node(node.node_id)));
             }
             title(ui, record);
-            kind_mark(ui, node);
+            kind_mark(ui, node, wid::of_node("kind_mark", node.node_id));
             support::hspacer(ui, "header_spacer");
             if node.can_disable() {
                 disable_button(ui, record);
@@ -98,7 +102,7 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
             if IconButton::press(
                 Icon::Inspect,
                 wid::inspect_button(node.node_id),
-                theme.colors.badge_graph,
+                theme.colors.accent,
                 "Inspect — values, status, log",
                 Toggle::Off,
             )
@@ -112,15 +116,13 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
                 show_inspector(record);
             }
         });
-    Separator::horizontal()
-        .color(theme.colors.border_soft())
-        .show(ui);
+    Separator::horizontal().show(ui);
 }
 
-/// The one mark that says what kind of node this is, after its title: the sink icon for a sink,
-/// else the impure icon, the tooltip naming every kind the node has. Nothing for a node of
-/// neither kind.
-fn kind_mark(ui: &mut Ui, node: NodeCtx<'_>) {
+/// The one mark that says what kind of node this is, after its title on the node and in the
+/// inspector: the sink icon for a sink, else the impure icon, the tooltip naming every kind the
+/// node has. Nothing for a node of neither kind.
+pub(crate) fn kind_mark(ui: &mut Ui, node: NodeCtx<'_>, wid: WidgetId) {
     let (icon, tooltip) = match (node.sink(), node.impure()) {
         (true, true) => (
             Icon::Sink,
@@ -131,13 +133,7 @@ fn kind_mark(ui: &mut Ui, node: NodeCtx<'_>) {
         (false, false) => return,
     };
     let theme = node.theme();
-    IconButton::mark(
-        icon,
-        wid::of_node("kind_mark", node.node_id),
-        theme.colors.badge_kind,
-        tooltip,
-    )
-    .show(ui, theme);
+    IconButton::mark(icon, wid, theme.badge.kind, tooltip).show(ui, theme);
 }
 
 /// Show the inspector that follows the selection: where it already sits, else in a pane split
@@ -189,7 +185,7 @@ fn disable_button(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     if IconButton::press(
         Icon::Disable,
         wid::of_node("disable_button", node.node_id),
-        theme.colors.text_muted,
+        theme.ink.muted,
         "Disable — exclude this sink from graph runs",
         Toggle::from(node.disabled()),
     )
@@ -213,7 +209,7 @@ fn cache_button(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     let clicked = IconButton::press(
         Icon::Cache,
         wid,
-        theme.colors.badge_cache,
+        theme.badge.cache,
         "Cache — keep this node's output across runs",
         Toggle::from(ram || disk),
     )
@@ -277,7 +273,7 @@ fn title(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     let rename = InlineRename::new(
         wid::rename(node.node_id),
         node.name(),
-        &node.theme().inline_rename_title,
+        &node.theme().flat_text_edit.bold,
     )
     .max_chars(NODE_NAME_MAX_CHARS);
     let rename = if node.stub() {

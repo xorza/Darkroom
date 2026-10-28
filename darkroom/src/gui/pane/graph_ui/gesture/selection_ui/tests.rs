@@ -4,7 +4,9 @@ use palantir::Modifiers;
 use crate::core::document::internals::DocumentFixture;
 use crate::core::document::item_id::ItemId;
 use crate::core::edit::graph_intent::GraphIntent;
+use crate::gui::pane::graph_ui::gesture::selection_ui::border;
 use crate::gui::pane::graph_ui::internals::CanvasHarness;
+use crate::gui::theme::Theme;
 
 /// Escape cancels a rubber band: no `SetSelection`, and the next band
 /// starts from a clean base.
@@ -122,4 +124,15 @@ fn a_shift_band_unions_with_the_committed_selection_counting_overlap_once() {
         ),
         "the shift band commits both nodes exactly once: {intents:?} (a = {a:?}, b = {b:?})"
     );
+}
+
+/// The band's border is one hairline on screen at every zoom: its world width times the zoom
+/// is the hairline, 1 px, so 2 world px at 50 % and half a world px at 200 %.
+#[test]
+fn the_band_border_is_a_screen_hairline_at_every_zoom() {
+    let theme = Theme::default();
+    for (zoom, world) in [(0.5, 2.0), (1.0, 1.0), (2.0, 0.5)] {
+        assert_eq!(border(&theme, zoom).width, world, "{zoom}");
+        assert_eq!(world * zoom, theme.stroke.hairline);
+    }
 }

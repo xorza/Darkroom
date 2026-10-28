@@ -26,8 +26,7 @@ pub(crate) mod selection;
 pub(crate) mod toolbar;
 pub(crate) mod wid;
 
-use palantir::TranslateScale;
-use palantir::prelude::*;
+use palantir::{Chrome, Configure, Key, Panel, Sense, Sizing, TranslateScale, Ui};
 
 use crate::core::document::Document;
 use crate::gui::frame::relayout::Relayout;
@@ -528,7 +527,7 @@ impl GraphUi {
                         );
                         // Painted first so it sits beneath the
                         // wires and node bodies.
-                        self.selection_ui.draw(ui, theme);
+                        self.selection_ui.draw(ui, theme, viewport.zoom);
                         // One bundle for everything the canvas records, built
                         // out here rather than inside the probe scope so both
                         // passes read the same refs.
@@ -591,8 +590,8 @@ impl GraphUi {
                                 },
                             );
                         }
-                        self.breaker_ui.draw(ui, theme);
-                        self.tie_ui.draw(ui, theme);
+                        self.breaker_ui.draw(ui, theme, viewport.zoom);
+                        self.tie_ui.draw(ui, theme, viewport.zoom);
                         self.wire_ui.draw_in_flight(ui, ctx);
                         self.subscription_ui.draw_in_flight(ui, ctx);
                     });

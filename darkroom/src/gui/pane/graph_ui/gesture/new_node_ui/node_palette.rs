@@ -3,8 +3,13 @@
 
 use std::ops::Range;
 
-use palantir::prelude::*;
-use palantir::{CloseHandle, FontWeight, KeyboardWake, TextWrap};
+use palantir::{
+    Align, Chrome, CloseHandle, Configure, Corners, EditEnd, FontWeight, Key, KeyboardWake,
+    MenuSeparator, Panel, RgbaF32, Scroll, Sense, Sizing, Spacing, Text, TextEdit, TextStyle,
+    TextWrap, Ui, VAlign, WidgetId, fmt,
+};
+
+use glam::Vec2;
 use scenarium::Func;
 use scenarium::Node;
 use scenarium::NodeId;
@@ -13,9 +18,10 @@ use scenarium::{SPECIAL_NODES, SpecialNode};
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::gesture::new_node_ui;
+use crate::gui::pane::graph_ui::gesture::new_node_ui::Search;
 use crate::gui::pane::graph_ui::gesture::new_node_ui::palette_rows::PaletteRow;
-use crate::gui::pane::graph_ui::gesture::new_node_ui::{SEARCH_ROW_GAP, Search};
 use crate::gui::theme::Theme;
+use crate::gui::theme::color;
 use crate::gui::widgets::support;
 
 /// One row of a category's palette list: a library `Func` or a built-in
@@ -149,7 +155,7 @@ impl NodePalette<'_> {
                     // the user can type into.
                     .escape_falls_through(true)
                     .placeholder("Search…")
-                    .style(&theme.inline_rename.text_edit)
+                    .style(&theme.flat_text_edit.plain)
                     .size((Sizing::fill(1.0), Sizing::HUG))
                     .show(ui);
                 submitted = field.ended == Some(EditEnd::Submitted);
@@ -169,12 +175,10 @@ impl NodePalette<'_> {
                 } else {
                     "\u{21b5} add \u{b7} \u{2191}\u{2193} move"
                 };
-                let style = support::muted_text(ui, theme, theme.text.label);
+                let style = support::muted_text(ui, theme, theme.font.caption);
                 Text::new(hint).style(&style).show(ui);
             });
-        Separator::horizontal()
-            .margin(Spacing::new(0.0, 0.0, 0.0, SEARCH_ROW_GAP))
-            .show(ui);
+        MenuSeparator::new().show(ui);
         // Read off the popup's own presses rather than `key_pressed`: the search field holds the
         // focus and its scope takes the arrow keys, which a single-line field leaves unused.
         ui.watch_keyboard(KeyboardWake::KEY);
@@ -299,9 +303,9 @@ impl Row<'_> {
         // falls under 4.5:1 on any fill above the panel's.
         let lit = self.focused || hovered;
         let secondary = if lit {
-            support::sized_text(ui, theme.text.label)
+            support::sized_text(ui, theme.font.caption)
         } else {
-            support::muted_text(ui, theme, theme.text.label)
+            support::muted_text(ui, theme, theme.font.caption)
         };
         let row = Panel::hstack()
             .id(wid)
@@ -311,20 +315,20 @@ impl Row<'_> {
             .chrome(chrome)
             .show(ui, |ui| {
                 let bar = if self.focused {
-                    theme.colors.selection_rect
+                    theme.colors.accent
                 } else {
                     RgbaF32::TRANSPARENT
                 };
                 Panel::hstack()
                     .id_salt("focus_bar")
-                    .size((Sizing::fixed(FOCUS_BAR_WIDTH), Sizing::HUG))
+                    .size((Sizing::fixed(theme.stroke.line), Sizing::HUG))
                     .chrome(Chrome::fill(bar))
                     .show(ui, |_| {});
                 Panel::vstack()
                     .id_salt("body")
                     .size((Sizing::FILL, Sizing::HUG))
                     .padding(Spacing::new(
-                        theme.space.sm - FOCUS_BAR_WIDTH,
+                        theme.space.sm - theme.stroke.line,
                         theme.space.xs,
                         theme.space.sm,
                         theme.space.xs,
@@ -335,7 +339,7 @@ impl Row<'_> {
                             .size((Sizing::FILL, Sizing::HUG))
                             .child_align(Align::v(VAlign::Center))
                             .show(ui, |ui| {
-                                name(ui, theme, self.entry.name(), self.query_lc);
+                                name(ui, theme, self.entry.name(), self.query_lc, lit);
                                 support::hspacer(ui, "category_spacer");
                                 if !self.grouped {
                                     Text::new(self.entry.category()).style(&secondary).show(ui);
@@ -357,29 +361,29 @@ impl Row<'_> {
     }
 }
 
-/// The tint behind the focused row: the selection's hue, light enough that the text on it
-/// keeps 4.5:1.
-const FOCUS_ALPHA: f32 = 0.14;
-
-/// The accent bar on the focused row's left edge, which marks it where the tint is faint.
-const FOCUS_BAR_WIDTH: f32 = 2.0;
-
-/// The focused row's fill.
-pub(super) const fn focus_fill(theme: &Theme) -> RgbaF32 {
-    theme.colors.selection_rect.with_alpha(FOCUS_ALPHA)
+/// The focused row's fill: a soft wash of the selection's hue over the popup, whose panel is a
+/// node's fill. An accent bar on its left edge marks it where the tint is faint.
+pub(super) fn focus_fill(theme: &Theme) -> RgbaF32 {
+    color::wash(theme.colors.accent, theme.tint.soft, theme.card.fill)
 }
 
 pub(super) fn row_wid(idx: usize) -> WidgetId {
-    WidgetId::from_hash(("new_node_row", idx))
+    WidgetId::from_hash(("darkroom.palette.row", idx))
 }
 
-/// `text` with the first stretch that matches `query_lc` in the accent ink. Names fold `char`
-/// by `char` as the query did; a name whose fold changes its length draws plain.
-fn name(ui: &mut Ui, theme: &Theme, text: &str, query_lc: &str) {
-    let plain = support::sized_text(ui, theme.text.body);
-    let lit = TextStyle {
+/// `text` with the first stretch that matches `query_lc` in semibold, in the accent ink on a
+/// resting row and in the body ink on a `lit` one, where the accent falls under 4.5:1. Names
+/// fold `char` by `char` as the query did; a name whose fold changes its length draws plain.
+fn name(ui: &mut Ui, theme: &Theme, text: &str, query_lc: &str, lit: bool) {
+    let plain = support::body_text(ui, theme);
+    let matched = TextStyle {
         weight: FontWeight::SEMI_BOLD,
-        ..support::colored_text(ui, theme.colors.selection_rect, theme.text.body)
+        color: if lit {
+            plain.color
+        } else {
+            theme.colors.accent
+        },
+        ..plain
     };
     let span = match_span(text, query_lc);
     Panel::hstack()
@@ -389,7 +393,7 @@ fn name(ui: &mut Ui, theme: &Theme, text: &str, query_lc: &str) {
             Some(span) => {
                 for (part, style) in [
                     (&text[..span.start], &plain),
-                    (&text[span.clone()], &lit),
+                    (&text[span.clone()], &matched),
                     (&text[span.end..], &plain),
                 ] {
                     if !part.is_empty() {
@@ -416,9 +420,9 @@ fn match_span(name: &str, query_lc: &str) -> Option<Range<usize>> {
     Some(start..start + query_lc.len())
 }
 
-/// A category's name above its run, in the muted label ink.
+/// A category's name above its run, as a caption.
 fn caption(ui: &mut Ui, theme: &Theme, category: &str) {
-    let style = support::muted_text(ui, theme, theme.text.label);
+    let style = support::caption_text(ui, theme);
     Text::new(category)
         .style(&style)
         .margin(Spacing::new(
@@ -432,8 +436,8 @@ fn caption(ui: &mut Ui, theme: &Theme, category: &str) {
 
 /// What the list says when the query matches nothing.
 fn no_match(ui: &mut Ui, theme: &Theme, query: &str) {
-    let body = support::sized_text(ui, theme.text.body);
-    let hint = support::muted_text(ui, theme, theme.text.label);
+    let body = support::body_text(ui, theme);
+    let hint = support::muted_text(ui, theme, theme.font.caption);
     Panel::vstack()
         .id_salt("no_match")
         .size((Sizing::FILL, Sizing::HUG))

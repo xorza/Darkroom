@@ -2,7 +2,9 @@
 
 use std::f32::consts::PI;
 
-use palantir::prelude::*;
+use palantir::{Rect, RgbaF32, Stroke, Ui};
+
+use glam::Vec2;
 use palantir::widget::{CircularArc, LineCap, LineJoin, Shape};
 
 use crate::gui::widgets::support;
@@ -13,10 +15,6 @@ use crate::gui::widgets::support;
 /// Material Symbols at weight 400), so a 16 px icon strokes at 1.33 px and a 18 px one at 1.5 px.
 const GRID: f32 = 24.0;
 const STROKE: f32 = 2.0;
-
-/// The room around an icon in a button, each side, so every icon button, a toolbar chip, a
-/// node header's button or the inspector's pin, gives its icon the same margin.
-pub(crate) const BUTTON_INSET: f32 = 6.0;
 
 /// The span of [`Icon::Cross`]'s arms on the grid, centered.
 const CROSS_SPAN: f32 = 12.0;
@@ -46,7 +44,8 @@ pub(crate) enum Icon {
     Cache,
     /// Disable a sink: a power symbol.
     Disable,
-    /// A sink, which runs for its effect: an arrow into a tray.
+    /// A sink, which runs for its effect: an arrow into a bar, where the flow ends (Lucide
+    /// `arrow-right-to-line`).
     Sink,
     /// Impure, recomputed every run: a lightning bolt.
     Impure,
@@ -58,6 +57,9 @@ pub(crate) enum Icon {
     ShowSelected,
     /// Fit the image to the view: four corner brackets.
     Fit,
+    /// Show the image at its actual size: a ratio of one to one, drawn as the set's strokes and
+    /// dots.
+    ActualSize,
     /// Nearest sampling: a 2 × 2 grid of squares.
     Pixels,
     /// Done: a check mark.
@@ -102,9 +104,9 @@ impl Icon {
                 pen.line(ui, (12.0, 3.0), (12.0, 12.0));
             }
             Self::Sink => {
-                pen.open(ui, &[(4.0, 14.0), (4.0, 20.0), (20.0, 20.0), (20.0, 14.0)]);
-                pen.line(ui, (12.0, 3.5), (12.0, 15.0));
-                pen.open(ui, &[(7.5, 10.5), (12.0, 15.0), (16.5, 10.5)]);
+                pen.line(ui, (3.0, 12.0), (17.0, 12.0));
+                pen.open(ui, &[(11.0, 6.0), (17.0, 12.0), (11.0, 18.0)]);
+                pen.line(ui, (21.0, 5.0), (21.0, 19.0));
             }
             Self::Impure => pen.closed(
                 ui,
@@ -136,6 +138,13 @@ impl Icon {
                 pen.open(ui, &[(15.0, 4.0), (20.0, 4.0), (20.0, 9.0)]);
                 pen.open(ui, &[(20.0, 15.0), (20.0, 20.0), (15.0, 20.0)]);
                 pen.open(ui, &[(9.0, 20.0), (4.0, 20.0), (4.0, 15.0)]);
+            }
+            Self::ActualSize => {
+                for x in [6.0, 18.0] {
+                    pen.open(ui, &[(x - 2.0, 8.0), (x, 6.0), (x, 18.0)]);
+                }
+                pen.dot(ui, (12.0, 10.0), 1.25);
+                pen.dot(ui, (12.0, 15.0), 1.25);
             }
             Self::Check => pen.open(ui, &[(4.5, 12.5), (9.5, 17.5), (19.5, 6.5)]),
             Self::Cross => {

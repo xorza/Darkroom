@@ -1,5 +1,7 @@
+use crate::gui::widgets::format;
 use crate::gui::widgets::format::bytes::Bytes;
 use crate::gui::widgets::format::elapsed::Elapsed;
+use crate::gui::widgets::format::percent::Percent;
 
 /// Each unit switch on both sides, and the carry that shows a value rounding
 /// up to the next unit's 1 in that unit. The node header measures these
@@ -59,4 +61,30 @@ fn bytes_steps_through_magnitudes() {
     assert_eq!(Bytes::new(1_023).to_string(), "1023 B");
     assert_eq!(Bytes::new(1_048_575).to_string(), "1.0 MiB");
     assert_eq!(Bytes::new(1_073_741_823).to_string(), "1.00 GiB");
+}
+
+/// Whole from 10 %, rounding half to even as `{:.0}` does (62.5 → 62); under 10 %, two
+/// significant digits, so a fit far below a view's range never reads as 0%.
+#[test]
+fn percent_reads_whole_then_two_significant_digits() {
+    let cases = [
+        (5.0, "500%"),
+        (1.25, "125%"),
+        (0.62, "62%"),
+        (0.625, "62%"),
+        (0.1, "10%"),
+        (0.05, "5.0%"),
+        (0.004, "0.40%"),
+        (0.000_4, "0.040%"),
+    ];
+    for (factor, expected) in cases {
+        assert_eq!(Percent::new(factor).to_string(), expected, "{factor}");
+    }
+}
+
+/// A node's name stands as it is; a cleared one reads "Unnamed" on every surface.
+#[test]
+fn a_cleared_node_name_reads_unnamed() {
+    assert_eq!(format::node_name("Blur"), "Blur");
+    assert_eq!(format::node_name(""), "Unnamed");
 }

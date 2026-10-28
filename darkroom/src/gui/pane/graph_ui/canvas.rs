@@ -22,13 +22,13 @@ use crate::core::document::viewport::Viewport;
 /// Stable id for the outer (pan-capture) canvas — the rect the gestures poll,
 /// the backdrop paints, and the cull measures against.
 pub(crate) fn outer_wid() -> WidgetId {
-    WidgetId::from_hash("graph.canvas.outer")
+    WidgetId::from_hash("darkroom.graph.canvas.outer")
 }
 
 /// Stable id for the inner (transformed) canvas. Used as the widget seed and
 /// for resolving the canvas's pre-transform origin in wire draws.
 pub(super) fn inner_wid() -> WidgetId {
-    WidgetId::from_hash("graph.canvas.inner")
+    WidgetId::from_hash("darkroom.graph.canvas.inner")
 }
 
 /// The pointer in canvas-world coords under `viewport`, or `None` off-surface: the outer

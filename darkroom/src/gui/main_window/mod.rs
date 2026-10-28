@@ -4,8 +4,10 @@ pub(crate) mod status_bar;
 
 use std::collections::HashMap;
 
-use palantir::prelude::*;
-use palantir::{DockOperation, DockView, KeyFilter, TabOverflow};
+use palantir::{
+    Align, Chrome, Configure, DockOperation, DockView, KeyFilter, Panel, Sizing, TabOverflow, Ui,
+    VAlign, WidgetId,
+};
 use scenarium::NodeId;
 
 use crate::core::document::graph_revision::GraphRevision;
@@ -129,7 +131,7 @@ impl MainWindow {
         let app = ctx.app();
         // The menu bar rides its own surround band; the dock fills the
         // space between it and the status bar.
-        let fill = app.theme().colors.surround_fill;
+        let fill = app.theme().colors.surround_bg;
         let Self {
             graph_ui,
             image_viewers,

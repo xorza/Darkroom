@@ -13,8 +13,11 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::sync::Arc;
 
-use palantir::InternedStr;
-use palantir::prelude::*;
+use glam::Vec2;
+use palantir::{
+    Align, Configure, ContextMenu, Grid, HAlign, InternedStr, MenuItem, Panel, Sense, Sizing,
+    Spacing, Text, TextStyle, Track, Ui, VAlign, WidgetId, fmt,
+};
 use scenarium::Binding;
 use scenarium::FuncEvent;
 use scenarium::InputPort;
@@ -58,12 +61,6 @@ const COL_VALUE: u16 = 1;
 const COL_SPACER: u16 = 2;
 const COL_OUTPUT: u16 = COL_SPACER + 1;
 
-/// Port row height as a multiple of the body font size. The const editors
-/// fill this height (so a chip, dropdown, and text field are all the same
-/// size); it must clear the tallest editor's min-content — the inline text
-/// field, `line_height + chip padding ≈ 1.9em` — so nothing overflows.
-const PORT_ROW_HEIGHT_EM: f32 = 2.0;
-
 /// `row_tracks` is [`NodeUi`](crate::gui::pane::graph_ui::node_ui::NodeUi)'s retained staging
 /// buffer — see its doc for why the grid's rows aren't built fresh here.
 pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, row_tracks: &mut Vec<Track>) {
@@ -81,7 +78,7 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, row_tracks: &mu
     // Every row of every node gets the same track, so the buffer is rebuilt
     // only when a wider node needs more of them or the theme moves the height
     // — not per node. Not a `const`: the height rides the theme's font size.
-    let track = Track::fixed(ui.theme().text.font_size * PORT_ROW_HEIGHT_EM);
+    let track = Track::fixed(theme.row_height());
     if row_tracks.len() < row_count || row_tracks.first() != Some(&track) {
         row_tracks.clear();
         row_tracks.resize(row_count, track);
@@ -91,18 +88,18 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, row_tracks: &mu
         .size((Sizing::FILL, Sizing::HUG))
         .cols([
             Track::HUG,
-            Track::HUG.with_max(theme.const_editor.max_width),
+            Track::HUG.with_max(theme.const_editor.rest.max_width),
             Track::FILL,
             Track::HUG,
         ])
         .rows(&row_tracks[..row_count])
-        .line_gap(theme.ports.gap)
-        .gap(theme.ports.cols_gap)
+        .line_gap(theme.port.gap)
+        .gap(theme.port.cols_gap)
         .padding(Spacing::new(
-            theme.ports.col_pad_x,
-            theme.ports.gap,
-            theme.ports.col_pad_x,
-            theme.ports.gap,
+            theme.port.col_pad_x,
+            theme.port.gap,
+            theme.port.col_pad_x,
+            theme.port.gap,
         ))
         .show(ui, |ui| {
             input_cells(ui, record);
@@ -218,7 +215,7 @@ fn open_port_context_menu(ui: &mut Ui, menu_id: WidgetId) {
 /// The ink a port or event label wears: the ports' muted label ink.
 fn label_style(ui: &Ui, theme: &Theme) -> TextStyle {
     TextStyle {
-        color: theme.ports.label,
+        color: theme.port.label,
         ..ui.theme().text
     }
 }
@@ -240,32 +237,27 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
         name: input.name(),
         tooltip,
     };
+    let fill = Hover::from(draw_ctx.geometry().ports.is_hovered(port))
+        .lift(theme.port_color(input.data_type()));
     // Flag a port only once a run actually failed on it — not on every unbound edit — so
-    // the port keeps its data-type color while editing instead of flipping as you
-    // bind/unbind. The run named the exact ports it could not feed, so only those light
-    // up, and only while the node's status is that verdict: a live re-run replaces it.
-    let fill = if input.missing() {
-        theme.status.warning
+    // the port does not flip as you bind/unbind. The run named the exact ports it could not
+    // feed, so only those ring, and only while the node's status is that verdict: a live re-run
+    // replaces it. A ring in the warning ink around the type's own hue, so the status takes a
+    // form of its own and the type stays readable. A required input's port reads as bigger: a
+    // disc of the footprint an optional input's circle and ring take. An optional one is the
+    // plain circle in a ring of the body's fill, which reads as the node's own surface wrapping
+    // around the port.
+    let (diameter, outline) = if input.missing() {
+        (theme.port.size, Some(theme.status.warning))
+    } else if input.required() {
+        (
+            port_glyph::enlarged_diameter(theme.port.size, theme.stroke.line),
+            None,
+        )
     } else {
-        Hover::from(draw_ctx.geometry().ports.is_hovered(port))
-            .lift(theme.port_color(input.data_type()))
+        (theme.port.size, Some(theme.card.fill))
     };
-    // A required input's port reads as bigger — its total footprint matches
-    // a bound output's circle-plus-ring, so "important port" carries the
-    // same visual weight on either side. An optional input instead gets a
-    // muted outline, so "not required" reads at a glance without needing
-    // the bigger required-input footprint.
-    let diameter = if input.required() {
-        port_glyph::enlarged_diameter(theme.ports.size)
-    } else {
-        theme.ports.size
-    };
-    // Matches the node body itself — the ring reads as the node's own surface
-    // wrapping around the port, rather than a separate accent.
-    let outline = (!input.required()).then_some(theme.card.fill);
-    let radius = diameter * 0.5;
-    let overhang = theme.port_overhang_for(radius);
-    let margin = Spacing::new(-overhang, 0.0, 0.0, 0.0);
+    let margin = theme.port_margin(PortKind::Input, diameter * 0.5);
     let wid = wid::port_circle(port);
     // Stable cell id so the label area answers a double-click of its own (the
     // circle has its own `wid::port_circle`); also the context-menu anchor.
@@ -293,7 +285,7 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
                 if *input.data_type() == DataType::Any {
                     circle = circle.hollow();
                 }
-                let glyph = circle.show(ui);
+                let glyph = circle.show(ui, theme);
                 label.show(ui, theme);
                 glyph
             }
@@ -462,7 +454,7 @@ fn output_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, output: OutputCtx<'
     }
     .intern(ui, node_ctx);
     let wid = wid::port_circle(port);
-    let overhang = theme.port_overhang();
+    let margin = theme.port_margin(PortKind::Output, theme.port.radius());
     let cell = Panel::hstack()
         .id_salt(("out", port.port_idx))
         .grid_cell((grid_row(port.port_idx), COL_OUTPUT))
@@ -477,10 +469,10 @@ fn output_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, output: OutputCtx<'
                 tooltip,
             }
             .show(ui, theme);
-            PortGlyph::circle(wid, theme.ports.size, fill)
-                .margin(Spacing::new(0.0, 0.0, -overhang, 0.0))
+            PortGlyph::circle(wid, theme.port.size, fill)
+                .margin(margin)
                 .tooltip(tooltip)
-                .show(ui)
+                .show(ui, theme)
         });
     // Right-click anywhere on the cell (circle or label) opens the port menu —
     // mirrors the input side's binding menu. Pulled into locals so the
@@ -555,10 +547,10 @@ impl EventRow<'_> {
         let (node_ctx, draw_ctx) = (record.node, record.draw);
         let theme = node_ctx.theme();
         let node_id = node_ctx.node_id;
-        let overhang = theme.port_overhang();
+        let margin = theme.port_margin(PortKind::Output, theme.port.radius());
         let ev = EventPort::new(node_id, idx);
         let wid = wid::event_glyph(ev);
-        let fill = Hover::from(draw_ctx.geometry().events.is_hovered(ev)).lift(theme.event_color());
+        let fill = Hover::from(draw_ctx.geometry().events.is_hovered(ev)).lift(theme.port.event);
         let tooltip = node_ctx
             .tooltips()
             .then(|| fmt!(ui, "event: {}", event.name));
@@ -574,10 +566,10 @@ impl EventRow<'_> {
                 Text::new(event.name.as_str())
                     .style(&label_style(ui, theme))
                     .show(ui);
-                PortGlyph::arrow(wid, theme.ports.size, fill)
-                    .margin(Spacing::new(0.0, 0.0, -overhang, 0.0))
+                PortGlyph::arrow(wid, theme.port.size, fill)
+                    .margin(margin)
                     .tooltip(tooltip)
-                    .show(ui);
+                    .show(ui, theme);
             });
     }
 }

@@ -1,4 +1,6 @@
 use super::*;
+use glam::{UVec2, Vec2};
+use palantir::Key;
 
 use palantir::internals::ui_harness::UiHarness;
 
@@ -17,7 +19,7 @@ fn the_unfocused_mirror_refills_its_buffer_instead_of_appending() {
     let theme = Theme::default();
     let id = WidgetId::from_hash("const_editor::mirror");
     let field = Field {
-        theme: &theme.const_editor,
+        theme: &theme.const_editor.rest,
         id,
     };
     let value = ConstValue::Int(42);
@@ -48,7 +50,7 @@ fn the_unfocused_mirror_refills_its_buffer_instead_of_appending() {
         h.frame(|ui| {
             assert!(
                 Field {
-                    theme: &theme.const_editor,
+                    theme: &theme.const_editor.rest,
                     id: unset,
                 }
                 .unset(ui, &ConstValue::Null)
@@ -111,7 +113,7 @@ fn escape_drops_the_draft_and_enter_or_blur_commits() {
     let theme = Theme::default();
     let field = Probe {
         field: Field {
-            theme: &theme.const_editor,
+            theme: &theme.const_editor.rest,
             id: WidgetId::from_hash("const_editor::commit_rules"),
         },
         value: ConstValue::Int(42),

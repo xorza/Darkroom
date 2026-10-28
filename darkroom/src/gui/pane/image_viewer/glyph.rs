@@ -1,60 +1,25 @@
-//! The viewer's own drawn vocabulary, past the shared [`Icon`] set: the "1:1"
-//! label, the backdrop swatches and the checkerboard tile behind a
-//! transparent image.
+//! The viewer's own drawn vocabulary, past the shared [`Icon`] set: the backdrop swatches and
+//! the checkerboard tile behind a transparent image.
 //!
 //! [`Icon`]: crate::gui::widgets::icon::Icon
-//!
-//! Every one is a pure function of the button side `s` and an ink color,
-//! built from `s * k` factors so a glyph fills its box at any button size.
-//! That holds for the one glyph that is *text* rather than primitives
-//! ([`draw_100`]) too — it takes a share of `s` like its siblings rather than
-//! sitting on a [`TypeScale`] tier, because it is sized to a box and not to
-//! the reading hierarchy.
-//!
-//! [`TypeScale`]: crate::gui::theme::type_scale::TypeScale
 
-use palantir::SrgbaU8;
-use palantir::prelude::*;
+use palantir::{Rect, RgbaF32, Stroke, Ui};
+
+use glam::UVec2;
 use palantir::widget::Shape;
 
 use crate::core::io::preferences::ViewerBg;
 use crate::gui::theme::Theme;
-use crate::gui::widgets::support;
 use crate::gui::widgets::toggle::Toggle;
 
-/// The "1:1" glyph's share of its button box — the text peer of the `s * k`
-/// factors its drawn siblings are built from, so it scales with the box rather
-/// than sitting on a `TypeScale` tier.
-const LABEL_GLYPH_FILL: f32 = 0.37;
-
-/// On-screen side of one checkerboard square, logical px. Screen-fixed
-/// (doesn't pan/zoom with the image) — it's a transparency reference,
-/// not content.
-pub(super) const CHECKER_SQUARE_PX: f32 = 8.0;
-
-/// Checkerboard grays (sRGB bytes) — shared by the backdrop tile and
-/// its control-panel swatch. Fixed regardless of theme: the checker is
-/// a neutral transparency reference, not a surface.
-const CHECKER_LIGHT_U8: u8 = 77; // #4d4d4d
-const CHECKER_DARK_U8: u8 = 51; // #333333
-
-/// The 2×2 checkerboard tile — one full checker period, stamped across
-/// the pane via `ImageFit::Tile` + `ImageFilter::Nearest`.
-pub(super) fn checker_image() -> palantir::Image {
-    const L: u8 = CHECKER_LIGHT_U8;
-    const D: u8 = CHECKER_DARK_U8;
+/// The 2×2 checkerboard tile in the theme's checker inks — one full checker period, stamped
+/// across the pane via `ImageFit::Tile` + `ImageFilter::Nearest`.
+pub(super) fn checker_image(theme: &Theme) -> palantir::Image {
+    let [light, dark] =
+        [theme.viewer.checker_light, theme.viewer.checker_dark].map(RgbaF32::to_srgba);
     let mut tile = palantir::Image::blank(UVec2::splat(2));
-    tile.fill_with(|x, y| {
-        let gray = if (x + y) % 2 == 0 { L } else { D };
-        SrgbaU8::rgb(gray, gray, gray)
-    });
+    tile.fill_with(|x, y| if (x + y) % 2 == 0 { light } else { dark });
     tile
-}
-
-/// "1:1" label — zoom to 100%.
-pub(super) fn draw_100(ui: &mut Ui, s: f32, color: RgbaF32) {
-    let style = support::colored_text(ui, color, s * LABEL_GLYPH_FILL);
-    Text::new("1:1").style(&style).align(Align::CENTER).show(ui);
 }
 
 /// A backdrop mode's swatch, ringed with the selection accent while `state`
@@ -66,27 +31,20 @@ pub(super) struct Swatch {
 }
 
 impl Swatch {
-    /// An inset square in the `s`-sized box filled with the mode itself (mini
-    /// checker for `Checker`).
+    /// A square the toolbar icon's size centered in the `s`-sized box, filled with the mode
+    /// itself (mini checker for `Checker`), rounded as a mark, and ringed at one width whose ink
+    /// alone says whether it is on.
     pub(super) fn draw(self, ui: &mut Ui, s: f32, theme: &Theme) {
         let Self { mode, state } = self;
-        let d = s * SWATCH_SHARE;
+        let d = theme.icon.toolbar.icon;
         let o = (s - d) * 0.5;
+        let radius = theme.radius.mark;
         let rect = Rect::new(o, o, d, d);
         if let Some(fill) = flat_fill(theme, mode) {
-            ui.add_shape(Shape::rect(rect).corners(SWATCH_RADIUS).fill(fill));
+            ui.add_shape(Shape::rect(rect).corners(radius).fill(fill));
         } else {
-            let light = RgbaF32::from_srgba(SrgbaU8::rgb(
-                CHECKER_LIGHT_U8,
-                CHECKER_LIGHT_U8,
-                CHECKER_LIGHT_U8,
-            ));
-            let dark = RgbaF32::from_srgba(SrgbaU8::rgb(
-                CHECKER_DARK_U8,
-                CHECKER_DARK_U8,
-                CHECKER_DARK_U8,
-            ));
-            ui.add_shape(Shape::rect(rect).corners(SWATCH_RADIUS).fill(dark));
+            let (light, dark) = (theme.viewer.checker_light, theme.viewer.checker_dark);
+            ui.add_shape(Shape::rect(rect).corners(radius).fill(dark));
             // Two light quads on the diagonal make the 2×2 mini checker.
             let h = d * 0.5;
             for cell in [Rect::new(o, o, h, h), Rect::new(o + h, o + h, h, h)] {
@@ -94,17 +52,14 @@ impl Swatch {
             }
         }
         // Ring on top so the checker quads can't cover it.
-        let (ring, width) = match state {
-            Toggle::On => (theme.colors.selection_rect, theme.card.border_width_total()),
-            Toggle::Off => (
-                theme.colors.text_muted.with_alpha(SWATCH_RING_ALPHA),
-                theme.card.border_width,
-            ),
+        let ring = match state {
+            Toggle::On => theme.colors.accent,
+            Toggle::Off => theme.viewer.swatch_ring,
         };
         ui.add_shape(
             Shape::rect(rect)
-                .corners(SWATCH_RADIUS)
-                .border(Stroke::new(ring, width)),
+                .corners(radius)
+                .border(Stroke::new(ring, theme.stroke.line)),
         );
     }
 }
@@ -119,14 +74,6 @@ pub(super) const fn flat_fill(theme: &Theme, mode: ViewerBg) -> Option<RgbaF32> 
         ViewerBg::Checker => None,
     }
 }
-
-/// How much of its button a backdrop swatch fills, leaving room for the ring.
-const SWATCH_SHARE: f32 = 0.54;
-/// The swatch's corner radius: a softened square, so it reads as a color
-/// chip rather than a pixel.
-const SWATCH_RADIUS: f32 = 2.0;
-/// The resting ring's alpha: visible on every backdrop, louder on none.
-const SWATCH_RING_ALPHA: f32 = 0.4;
 
 #[cfg(test)]
 mod tests {
@@ -143,11 +90,12 @@ mod tests {
         assert_eq!(flat_fill(&theme, ViewerBg::Checker), None);
     }
 
+    /// The tile is the theme's two checker inks, `#4d4d4d` and `#333333`, as one period.
     #[test]
     fn checker_image_is_one_2x2_period() {
-        const L: u8 = CHECKER_LIGHT_U8;
-        const D: u8 = CHECKER_DARK_U8;
-        let image = checker_image();
+        const L: u8 = 0x4d;
+        const D: u8 = 0x33;
+        let image = checker_image(&Theme::default());
         // Row-major light/dark, dark/light — one full checker period.
         #[rustfmt::skip]
         let expected = [

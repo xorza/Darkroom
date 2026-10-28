@@ -32,7 +32,7 @@ impl InterfaceSize {
     ];
 
     /// [`Self::OFFERED`]'s labels, in its order.
-    const LABELS: [&str; 6] = ["80 %", "90 %", "100 %", "110 %", "125 %", "150 %"];
+    const LABELS: [&str; 6] = ["80%", "90%", "100%", "110%", "125%", "150%"];
 
     /// The offered size nearest `percent`; a tie takes the smaller.
     pub(crate) fn nearest(percent: u16) -> Self {
@@ -94,7 +94,7 @@ mod tests {
         let offered: Vec<u16> = InterfaceSize::OFFERED.map(|size| size.percent).into();
         assert_eq!(offered, rungs);
         for size in InterfaceSize::OFFERED {
-            assert_eq!(size.label(), format!("{} %", size.percent));
+            assert_eq!(size.label(), format!("{}%", size.percent));
         }
         for (saved, loaded) in [(100, 100), (117, 110), (118, 125), (40, 80), (400, 150)] {
             assert_eq!(InterfaceSize::nearest(saved).percent, loaded, "{saved} %");

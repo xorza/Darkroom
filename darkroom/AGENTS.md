@@ -295,8 +295,13 @@ layout only: the graph does not change, and the run does not read it.
   together, and the same on every monitor. Refused: a font size alone, which grows text inside
   chrome that keeps its size; a free number, as each factor re-rasterizes every glyph. Chosen by
   the user on 2026-10-27.
-- **Space and radius are scales on the theme**, beside `TypeScale`, and the bridge hands them to
-  palantir. A literal size at a call site is a missing token.
+- **Space and radius are scales on the theme**, beside `TypeScale`. A literal size at a call
+  site is a missing token.
+- **palantir's recipes read the theme's steps.** The bridge hands the space, radius and stroke
+  steps and the floating shadow to `palantir::Theme::from_parts` as its `Metrics`, as egui keeps
+  `Style::spacing` beside `Style::visuals`, then sets colors and darkroom's own widths. Refused:
+  overriding palantir's literals field by field after it built its derived recipes, which left
+  the drag value on the old button padding. Chosen by the user on 2026-10-28.
 - **An icon button gives its icon 6 px a side**: a toolbar chip draws 18 in 30, a node header's
   button 16 in 28, a step over the 14 px title. Refused: 15 in 22, whose 3.5 px read cramped.
   Chosen by the user on 2026-10-27.
@@ -311,9 +316,10 @@ layout only: the graph does not change, and the run does not read it.
   shadow, port dots and field boxes, so a port reads the same on the canvas and in the pane.
   Refused: text on the canvas color, which read as a log, and the status and error as red
   prose, the loudest thing in the window.
-- **A tab is a ghost with a menu title's fills, on one row with the menus**: no fill at rest,
-  `elem_hover` under the pointer, `elem_active` pressed. A tab, a menu-bar title and a menu item
-  take one 12 · 8 inset, the bridge's `row_inset`, so all three are 32 px at the body size. Refused: a solid block per tab, the one control filled at rest, and
+- **A tab is a ghost with a menu title's fills, on a strip that continues the surround band the
+  menu bar sits on**: no fill at rest,
+  `element_mid` under the pointer, `element_strong` pressed. A tab, a menu-bar title and a menu item
+  take one 12 · 8 inset, palantir's row inset over `space.md` and `space.sm`, so all three are 32 px at the body size. Refused: a solid block per tab, the one control filled at rest, and
   a hover of its own, which took the palette's `tab_inactive` rung with it. Chosen by the user
   on 2026-10-27.
 - **A tab's close is the icon set's `Cross`**, drawn, on the selected tab and the one under the
@@ -321,9 +327,14 @@ layout only: the graph does not change, and the run does not read it.
   which sat under the label's center, and a cross on every tab.
 - **One unsaved mark**, the dot beside the document's name in the menu bar. Refused: a second
   dot on the Graph tab for the same fact.
-- **A wash composites as CSS does**: `Theme::wash` mixes an ink into the canvas on the encoded
-  values and makes it opaque, as the alphas a design picks assume. Refused: `with_alpha`, which
-  palantir blends in linear light, where a 10 % red wash read about three times as bright.
+- **A wash composites as CSS does**: `color::wash` mixes an ink into the ground it sits on, on
+  the encoded values, and makes it opaque, as the alphas a design picks assume, at a strength of
+  the theme's `TintScale`. A tint over a ground the code knows is a wash; `with_alpha` stays for
+  a layer over content it does not know, as the toolbar pill's veil and the rubber band. A
+  hover lift and the wires' rest dim keep their linear blend: each was tuned by eye there, not
+  picked as a design's alpha. Refused: `with_alpha` for a tint, which palantir blends in linear
+  light, where a 10 % red wash read about three times as bright and an "on" button's tint
+  outshone the hover fill.
 - **A value reads as a field**, as Blender's and Unreal's node inputs do: a quiet box at rest, the
   value at the left of its column, numbers in the mono face, and "—" in the muted ink for an
   input with nothing in it that could hold a constant. Refused: plain text, which does not say
@@ -350,3 +361,86 @@ layout only: the graph does not change, and the run does not read it.
   `setActionName` do from the command that made it: darkroom's commands reach the history as
   batches of intents, and a name read off them misnames a compound command (Duplicate would
   read "Undo Add Node").
+- **A readout that changes while it is watched reserves its widest value**, in the mono face, at
+  the width `type_scale::figure_width` derives from the face's advance: the status bar's zoom and
+  memory and a node's run time, so the words beside them hold still as a digit count changes.
+  Refused: a measured literal, which drifted from the face and the size it guessed.
+- **A percent reads `62%`**, with no space before the sign, as the viewer's "Zoom to 100%" chip
+  and every platform's zoom control write it, through one `Percent`. Refused: `62 %`, the
+  ISO 80000 spacing, beside unspaced labels in the same window.
+- **A node whose name was cleared reads "Unnamed"**, through one `format::node_name`, on the
+  viewer's tab and title, the inspector's title and a held inspector's tab. Refused: "(unnamed)",
+  "image" and a blank, three words for one case.
+- **A node's text starts on one line**: the header's title, every port label and the footer
+  start at the border plus `space.md`, and a port's glyph hangs on the body's edge in a margin
+  that takes back its width, so a required input's bigger disc, a plain circle and a row with no
+  glyph put their labels at one x. Refused: a label after its glyph, which sat at 10, 10.5 and
+  13 px for the three kinds.
+- **One dialog button order on every platform**: right-aligned, with Save last in the accent
+  (`Theme::primary_button`), focused as the dialog opens so Return presses it. Refused: an order
+  by role for each platform, as Qt's `QDialogButtonBox` does
+  ([Qt](https://doc.qt.io/qt-6/qdialogbuttonbox.html)), which needs platform code in palantir;
+  it puts Save on the other side from Windows' `ContentDialog`
+  ([Microsoft](https://learn.microsoft.com/en-us/windows/apps/design/controls/dialogs-and-flyouts/dialogs)).
+  Also refused: a left-aligned row of equal buttons. Chosen by the user on 2026-10-28.
+- **The surround's text starts on one line**: the menu bar and the tab strip start their
+  controls at `Theme::surround_inset`, and the status bar starts its text a control's inset
+  further, where the titles' text sits; the status bar is a row high, 28 px.
+- **The preferences are one form grid**: a label column, a control column and a button column
+  shared by every section, each row of controls a row high, the notes under a field wrapping in
+  the control column, and the pane at `Theme::pane_padding`, which the inspector reads too.
+  Refused: a fixed label width, which "Star removal (StarNet)" filled to within 3 px.
+- **A widget id reads `darkroom.<area>.<name>`**, so a dump of ids sorts by surface and no two
+  areas collide. Refused: `::` paths and bare names beside dotted ones.
+- **A status has a form of its own** beside its hue, as WCAG 1.4.1 asks
+  ([F81](https://www.w3.org/WAI/WCAG22/Techniques/failures/F81.html)): a missing input keeps
+  its type's hue in a warning ring; a wire the breaker will cut is the error red with a bar
+  across its middle, as Blender marks a muted link; a tie line previews the band it will put,
+  faint, square to the strands it crosses, and the crossed pieces keep their own paint at the
+  emphasized width. Refused: a hue swap alone, and a dashed wire, which palantir cannot draw.
+  Chosen by the user on 2026-10-28.
+- **The menu bar and the tab strips keep two rows.** Refused: the first pane's strip on the menu
+  row, as darkroom's strips belong to the dock's panes, so the others would sit 38 px lower;
+  Blender and Godot put only one global strip of workspaces on their menu row, and Blender's
+  users still cannot tell where the menus end
+  ([devtalk](https://devtalk.blender.org/t/ways-of-differentiating-workspace-tabs-from-menus-and-buttons/10592)).
+  Chosen by the user on 2026-10-28.
+- **A node's footer shows at all times**, "Not run" in the muted ink before the first run, so no
+  node changes height when a run ends, as space is reserved for content that arrives later
+  ([web.dev, CLS](https://web.dev/articles/optimize-cls)). Refused: a footer that appears after
+  the first run, and an overlay above the node, as Blender draws its timings, which leaves the
+  error line and the memory pools without a home. Chosen by the user on 2026-10-28.
+- **A port is 12 px with a 2 px ring, its rows 8 px apart**: 12 is a whole number of pixels at
+  scales 1, 1.5 and 2, 2 is `stroke.line`, and `space.sm` puts the row pitch at 36 on the 4 px
+  grid. Refused: 13 px and 2.5 px; a 24 px hit floor, as the ports pass WCAG 2.5.8 by its
+  spacing exception
+  ([Understanding 2.5.8](https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html));
+  gaps of 6 and 4. Chosen by the user on 2026-10-28.
+- **The subscription pin points into its node**, along the event wire that arrives, as Unreal
+  points an input exec pin along the flow. Refused: pointing back up the wire, which read as a
+  mouse pointer. Chosen by the user on 2026-10-28.
+- **The sink mark is an arrow into a bar**, where the flow ends (Lucide `arrow-right-to-line`).
+  Refused: an arrow into a tray, the standard download icon, which read as a save button
+  ([NN/g](https://www.nngroup.com/articles/flat-ui-less-attention-cause-uncertainty/)). Chosen
+  by the user on 2026-10-28.
+- **Focus is the accent**, 5.19:1 on a node, through palantir's `border_focused`. Refused: a
+  darker blue at 1.99:1 on a field's fill, under the 3:1 of WCAG 1.4.11, and a separate brighter
+  role in the generator. Chosen by the user on 2026-10-28.
+- **A field's help, error and link lines use the caption tier, 12**, under the body labels, as
+  Material sets supporting text in bodySmall. Refused: body 14 told apart only by the muted ink.
+  Chosen by the user on 2026-10-28.
+- **A wire is 2.5 px and never thinner on screen when zoomed out**, as Blender draws its links at
+  `2.5 * max(zoom, 1)`
+  ([drawnode.cc](https://github.com/blender/blender/blob/main/source/blender/editors/space_node/drawnode.cc));
+  the drag preview, the pin leader and the breaker scribble take the same width. Refused: 2 px,
+  which thinned to 1 px at 50 %, and 3 px, which made crossings busy beside 12 px ports. Chosen by
+  the user on 2026-10-28.
+- **A lit control lights its text**: a hovered menu row's shortcut hint takes the label's ink, as
+  a tab's and a menu title's text does, where the muted hint read 3.85:1 on the hover fill; a
+  toolbar chip's idle glyph lights in its ink under the pointer, and an on chip is a wash of its
+  ink, as an icon button's is.
+- **A neutral may serve two roles whose forms differ**: the untyped input port and the busy
+  status share the muted grey, as no type and no verdict, drawn as a hollow ring and as a spinner
+  and a halo. Unreal draws a wildcard pin grey too. Refused: busy in the white the event port
+  and the kind mark wear, and a third grey between the two inks. Chosen by the user on
+  2026-10-28.

@@ -1,46 +1,40 @@
+use glam::UVec2;
+use palantir::internals::ui_harness::UiHarness;
+
 use super::*;
 use crate::core::document::internals::DocumentFixture;
 use crate::gui::app::session::internals::SessionHarness;
-use crate::gui::theme::Theme;
 
-/// The rendered line, or `None` where there is no readout at all.
-fn rendered(process: u64, cache: RamUsage) -> Option<String> {
-    MemoryLabel::resolve(process, cache).map(|label| label.to_string())
-}
-
+/// The memory clause leads with the process and sums both cache pools; no footprint leaves no
+/// clause, even with a populated cache.
 #[test]
 fn memory_label_leads_with_the_process_then_sums_both_cache_pools() {
     const MEM: u64 = 3 * 1024 * 1024;
-    // An empty cache leaves the process footprint standing alone.
+    let fields = |process, cache| {
+        MemoryLabel::resolve(process, cache).map(|label| (label.process, label.cached))
+    };
+    assert_eq!(fields(MEM, RamUsage::default()), Some((MEM, 0)));
     assert_eq!(
-        rendered(MEM, RamUsage::default()).as_deref(),
-        Some("MEM 3.0 MiB")
-    );
-    // Either pool alone raises the clause on its own.
-    assert_eq!(
-        rendered(MEM, RamUsage { cpu: 1024, gpu: 0 }).as_deref(),
-        Some("MEM 3.0 MiB · Cache 1.0 KiB")
+        fields(MEM, RamUsage { cpu: 1024, gpu: 0 }),
+        Some((MEM, 1024))
     );
     assert_eq!(
-        rendered(MEM, RamUsage { cpu: 0, gpu: 2048 }).as_deref(),
-        Some("MEM 3.0 MiB · Cache 2.0 KiB")
+        fields(MEM, RamUsage { cpu: 0, gpu: 2048 }),
+        Some((MEM, 2048))
     );
-    // Both present → one clause carrying the sum: 1024 + 2048 = 3072 B,
-    // which is exactly 3.0 KiB.
+    // Both pools → one clause carrying the sum: 1024 + 2048 = 3072 B.
     assert_eq!(
-        rendered(
+        fields(
             MEM,
             RamUsage {
                 cpu: 1024,
                 gpu: 2048
             }
-        )
-        .as_deref(),
-        Some("MEM 3.0 MiB · Cache 3.0 KiB")
+        ),
+        Some((MEM, 3072))
     );
-    // No footprint → no readout, even with a populated cache.
     assert_eq!(
-        rendered(
+        fields(
             0,
             RamUsage {
                 cpu: 1024,
@@ -51,48 +45,75 @@ fn memory_label_leads_with_the_process_then_sums_both_cache_pools() {
     );
 }
 
+/// The readout reserves each figure's widest value, so the line keeps its width as the zoom and
+/// the memory change their digit counts: 10% against 500%, and 1.0 KiB against 1023.9 MiB.
+#[test]
+fn the_readout_holds_its_width_as_its_figures_change() {
+    let theme = Theme::default();
+    let mut h = UiHarness::with_text(UVec2::new(1600, 100));
+    let root = WidgetId::from_hash("readout_root");
+    let mut width = |zoom: f32, process: u64, cached: u64| {
+        h.frame(|ui| {
+            Panel::hstack()
+                .id(root)
+                .size((Sizing::HUG, Sizing::HUG))
+                .show(ui, |ui| {
+                    Readout {
+                        counts: CountsClause {
+                            node_count: 19,
+                            selected_count: 1,
+                        },
+                        zoom,
+                        ram: Some(MemoryLabel { process, cached }),
+                    }
+                    .show(ui, &theme);
+                });
+        });
+        h.rect(root).expect("the readout arranged").size.w
+    };
+    let short = width(0.1, 1024, 1024);
+    let long = width(5.0, 1_073_636_966, 1_073_636_966);
+    assert_eq!(short, long);
+}
+
 /// The graph's line gives the bar something to say on every frame, so it is recorded on an
-/// untouched document, one body line tall with or without a memory reading: a bar that grew as
-/// the figure landed would move the dock.
+/// untouched document, one row tall with or without a memory reading: a bar that grew as the
+/// figure landed would move the dock.
 #[test]
 fn status_bar_is_recorded_on_an_idle_document_with_or_without_a_reading() {
     let mut h = SessionHarness::new(DocumentFixture::default());
     h.prime(2);
     let without =
-        h.ui.rect(id())
+        h.ui.rect(wid())
             .expect("status bar records with no reading and an empty cache");
 
     h.process_memory = 3 * 1024 * 1024;
     h.prime(2);
-    let with = h.ui.rect(id()).expect("status bar records");
+    let with = h.ui.rect(wid()).expect("status bar records");
 
-    // One body line, 14 px at the theme's factor, which the shaper measures up to a whole
-    // pixel, inside the padding.
+    // A row, two body sizes: 2 × 14 = 28 px, on the 4 px grid.
     let theme = Theme::default();
-    let line = theme.palantir.text.line_height_for(theme.text.body).ceil();
-    let pad = theme.space.xs;
-    assert_eq!(without.size.h, 2.0 * pad + line, "no reading");
-    assert_eq!(with.size.h, 2.0 * pad + line, "a 3 MiB reading");
+    assert_eq!(theme.row_height(), 28.0);
+    assert_eq!(without.size.h, theme.row_height(), "no reading");
+    assert_eq!(with.size.h, theme.row_height(), "a 3 MiB reading");
     for (rect, what) in [(without, "no reading"), (with, "3 MiB reading")] {
         assert_eq!(rect.size.w, 1200.0, "{what}: the bar spans the window");
     }
 }
 
-/// The graph's line counts its nodes, one noun singular, and its selection, and reads the zoom
-/// as a whole percent: 0.62 is 62 %, 0.625 rounds to even, 62 %.
+/// The graph's counts name its nodes, one noun singular, and its selection.
 #[test]
-fn the_canvas_line_counts_and_reads_the_zoom() {
-    let line = |node_count, selected_count, zoom| {
-        CanvasLine {
+fn the_counts_clause_counts_nodes_and_the_selection() {
+    let line = |node_count, selected_count| {
+        CountsClause {
             node_count,
             selected_count,
-            zoom,
         }
         .to_string()
     };
-    assert_eq!(line(19, 1, 0.62), "19 nodes \u{b7} 1 selected \u{b7} 62 %");
-    assert_eq!(line(1, 0, 1.0), "1 node \u{b7} 0 selected \u{b7} 100 %");
-    assert_eq!(line(0, 0, 0.625), "0 nodes \u{b7} 0 selected \u{b7} 62 %");
+    assert_eq!(line(19, 1), "19 nodes \u{b7} 1 selected");
+    assert_eq!(line(1, 0), "1 node \u{b7} 0 selected");
+    assert_eq!(line(0, 0), "0 nodes \u{b7} 0 selected");
 }
 
 /// The run line leads with the worst of the run and counts the rest, one noun singular.

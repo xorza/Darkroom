@@ -80,14 +80,14 @@ impl BreakerUi {
 
     /// Paint the polyline. No-op when no gesture is active or the
     /// polyline has < 2 samples (a `restart` with no `add_point`).
-    pub(crate) fn draw(&self, ui: &mut Ui, theme: &Theme) {
+    pub(crate) fn draw(&self, ui: &mut Ui, theme: &Theme, zoom: f32) {
         if !self.stroke.in_flight() || self.scribble.points.len() < 2 {
             return;
         }
         ui.add_shape(
             Shape::polyline(
                 &self.scribble.points,
-                Stroke::new(theme.colors.breaker_stroke, theme.stroke_width),
+                Stroke::new(theme.canvas.breaker_stroke, theme.stroke.wire_at(zoom)),
             )
             .cap(LineCap::Round)
             .join(LineJoin::Round),

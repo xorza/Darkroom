@@ -2,8 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use palantir::CloseHandle;
-use palantir::prelude::*;
+use palantir::{CloseHandle, Ui};
 
 use crate::core::document::item_id::ItemId;
 use crate::core::edit::graph_intent::GraphIntent;

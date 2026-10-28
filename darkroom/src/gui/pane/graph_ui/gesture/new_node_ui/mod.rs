@@ -17,6 +17,7 @@ use crate::gui::pane::graph_ui::gesture::new_node_ui::node_palette::{NodePalette
 use crate::gui::pane::graph_ui::gesture::new_node_ui::palette_rows::PaletteRows;
 use crate::gui::pane::graph_ui::prepass_ctx::CanvasGesture;
 use crate::gui::port_ref::PortRef;
+use crate::gui::theme::Theme;
 
 /// Right-click or double-click on empty canvas → popup that lists every
 /// `Func` the context's library holds plus the built-in specials: under their
@@ -131,8 +132,9 @@ impl NewNodeUi {
         // (`max_height` minus the space above it) keeps it from eating the
         // header's space — a `Hug` scroll otherwise claims the full cap.
         let surface = ui.display().logical_rect();
-        let max_height = popup_cap(graph_ctx.theme().new_node_popup_max_height, surface.size.h);
-        let scroll_cap = (max_height - space_above_results(ui)).max(MIN_RESULTS_HEIGHT);
+        let max_height = popup_cap(graph_ctx.theme(), surface.size.h);
+        let scroll_cap =
+            (max_height - space_above_results(ui, graph_ctx.theme())).max(MIN_RESULTS_HEIGHT);
         let search = &mut self.search;
         // Rows are picked at the position the *open* captured, not wherever
         // the pointer has drifted to by the frame of the click.
@@ -159,24 +161,21 @@ impl NewNodeUi {
     }
 }
 
-/// The palette's height cap: the theme's, held inside a window `surface_h`
-/// tall by [`POPUP_WINDOW_MARGIN`], and never below [`POPUP_MIN_HEIGHT`].
-fn popup_cap(theme_max: f32, surface_h: f32) -> f32 {
-    theme_max
-        .min(surface_h - POPUP_WINDOW_MARGIN)
+/// The palette's height cap: [`POPUP_MAX_HEIGHT`], held inside a window `surface_h` tall with
+/// the theme's `space.lg` of it left over, a popup's distance from the window edge, and never
+/// below [`POPUP_MIN_HEIGHT`]. The popup's placement fits it into what is left.
+fn popup_cap(theme: &Theme, surface_h: f32) -> f32 {
+    POPUP_MAX_HEIGHT
+        .min(surface_h - theme.space.lg)
         .max(POPUP_MIN_HEIGHT)
 }
 
-/// What the palette leaves of a short window's height, so it never touches
-/// the window's edge.
-const POPUP_WINDOW_MARGIN: f32 = 16.0;
+/// The palette's height when the window has room: past it, the results scroll.
+const POPUP_MAX_HEIGHT: f32 = 400.0;
 
 /// Floor under the palette's height: a window too short for the theme's cap
 /// still gets a palette with a search field and a few rows.
 const POPUP_MIN_HEIGHT: f32 = 120.0;
-
-/// Gap (px) below the search field, before the results scroll.
-const SEARCH_ROW_GAP: f32 = 8.0;
 
 /// Floor under the results area, so a window short enough that the space above the results eats
 /// the whole cap still shows a scrollable strip of rows rather than nothing.
@@ -186,20 +185,20 @@ const MIN_RESULTS_HEIGHT: f32 = 80.0;
 /// `const` because the height cap below reads the field's rect *before* the
 /// body that records it runs, so both sites have to name the same id.
 pub(crate) fn search_field_wid() -> WidgetId {
-    WidgetId::from_hash("new_node_search")
+    WidgetId::from_hash("darkroom.palette.search")
 }
 
 /// Stable id for the row the search field sits in, whose top edge [`space_above_results`]
 /// measures from: the row pads the field, so the field's own top is below it.
 pub(crate) fn search_row_wid() -> WidgetId {
-    WidgetId::from_hash("new_node_search_row")
+    WidgetId::from_hash("darkroom.palette.search_row")
 }
 
 /// Stable id for the scrolling results area, the half [`space_above_results`]
 /// sizes. Explicit like the search field's so the two ends of that arithmetic
 /// are both addressable.
 pub(crate) fn results_wid() -> WidgetId {
-    WidgetId::from_hash("new_node_results")
+    WidgetId::from_hash("darkroom.palette.results")
 }
 
 /// Vertical space the palette claims above the scrolling results: the
@@ -224,20 +223,20 @@ pub(crate) fn results_wid() -> WidgetId {
 /// so its gate is repeated here over the same public `domain` predicate.
 ///
 /// The span between the rows is measured rather than re-summed from the
-/// field's height, [`SEARCH_ROW_GAP`] and the stack's gutter. A sum has to be
+/// field's height, the gap under the search row and the stack's gutter. A sum has to be
 /// kept in step with what `body` records, and a term missing from it shrinks
 /// the space by that much, which lands as rows painted past the popup's
 /// bottom edge. Measuring covers whatever the layout put between the rows,
 /// including a row added later. Only the first frame of the first open has no
 /// rects yet, and estimates the span from one line of body text.
-fn space_above_results(ui: &Ui) -> f32 {
+fn space_above_results(ui: &Ui, theme: &Theme) -> f32 {
     let menu = &ui.theme().context_menu;
     let field = ui.response_for(search_row_wid()).layout_rect;
     let results = ui.response_for(results_wid()).layout_rect;
     let rows = field.zip(results).map_or_else(
         || {
             let text = &ui.theme().text;
-            text.line_height_for(text.font_size) + SEARCH_ROW_GAP + menu.gap
+            text.line_height_for(text.font_size) + theme.space.sm + menu.gap
         },
         |(field, results)| results.min.y - field.min.y,
     );

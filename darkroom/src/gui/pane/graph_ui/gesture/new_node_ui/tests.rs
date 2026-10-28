@@ -1,12 +1,12 @@
 use std::time::Duration;
 
 use glam::UVec2;
+use palantir::RgbaF32;
 use scenarium::{FuncId, Graph, Library, internals};
 
 use super::*;
 use crate::core::document::internals::DocumentFixture;
 use crate::gui::pane::graph_ui::internals::CanvasHarness;
-use crate::gui::theme::Theme;
 
 /// A much bigger search field and a much roomier popup than the defaults.
 fn enlarge(t: &mut palantir::Theme) {
@@ -76,7 +76,7 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
 
         // The same cap `NewNodeUi::apply` resolves, against this harness's
         // 900 px surface.
-        let cap = popup_cap(h.ctx.theme.new_node_popup_max_height, SURFACE.y as f32);
+        let cap = popup_cap(&h.ctx.theme, SURFACE.y as f32);
         Palette {
             field: h.ui.rect(search_row_wid()).expect("search row recorded"),
             results: h.ui.rect(results_wid()).expect("results recorded"),
@@ -213,13 +213,14 @@ fn the_search_reports_only_a_changed_fold() {
     assert_eq!(search.folded, "blurx");
 }
 
-/// The cap is the theme's inside a tall window, the window less its margin
-/// inside a short one, and the floor inside one shorter still.
+/// The cap is [`POPUP_MAX_HEIGHT`] inside a tall window, the window less the theme's `lg`
+/// (16) inside a short one, and the floor inside one shorter still.
 #[test]
 fn the_popup_cap_holds_the_palette_inside_the_window() {
-    assert_eq!(popup_cap(400.0, 900.0), 400.0);
-    assert_eq!(popup_cap(400.0, 300.0), 300.0 - POPUP_WINDOW_MARGIN);
-    assert_eq!(popup_cap(400.0, 100.0), POPUP_MIN_HEIGHT);
+    let theme = Theme::default();
+    assert_eq!(popup_cap(&theme, 900.0), 400.0);
+    assert_eq!(popup_cap(&theme, 300.0), 300.0 - 16.0);
+    assert_eq!(popup_cap(&theme, 100.0), POPUP_MIN_HEIGHT);
 }
 
 /// The palette keeps the place its first frame took: opened near the window's bottom edge, the
@@ -283,26 +284,22 @@ fn the_list_follows_the_focus_the_keys_move() {
     );
 }
 
-/// The focused row's ink keeps 4.5:1 on its tint (WCAG 2.2 SC 1.4.3), the tint blended over
-/// the popup's fill in linear light as the GPU blends it.
+/// The focused row's ink keeps 4.5:1 on its tint (WCAG 2.2 SC 1.4.3), and a match's accent on a
+/// resting row keeps it on the popup's fill, which is a node's. The tint is an opaque wash, so
+/// the GPU paints it as it is.
 #[test]
 fn the_focused_rows_ink_keeps_its_contrast_on_the_tint() {
     let theme = Theme::default();
     let tint = node_palette::focus_fill(&theme);
-    // The popup's panel is a node's fill, as palantir's `element` is darkroom's `node_fill`.
-    let ground = theme.card.fill;
-    let text = theme.palantir.text.color;
-    let mix = |over: f32, under: f32| tint.a * over + (1.0 - tint.a) * under;
-    let luminance = |c: [f32; 3]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
-    let fill = luminance([
-        mix(tint.r, ground.r),
-        mix(tint.g, ground.g),
-        mix(tint.b, ground.b),
-    ]);
-    let ink = luminance([text.r, text.g, text.b]);
-    let ratio = (ink + 0.05) / (fill + 0.05);
+    assert_eq!(tint.a, 1.0, "a wash is opaque");
+    let luminance = |c: RgbaF32| 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+    let contrast = |ink: RgbaF32, fill: RgbaF32| (luminance(ink) + 0.05) / (luminance(fill) + 0.05);
+    let text = theme.ink.text;
+    let ratio = contrast(text, tint);
     assert!(
         ratio >= 4.5,
         "the focused row's ink is {ratio:.2}:1 on its tint"
     );
+    let ratio = contrast(theme.colors.accent, theme.card.fill);
+    assert!(ratio >= 4.5, "a resting match is {ratio:.2}:1 on the popup");
 }

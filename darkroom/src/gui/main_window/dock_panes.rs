@@ -28,6 +28,7 @@ use crate::gui::pane::graph_ui::GraphUi;
 use crate::gui::pane::image_viewer::{self, ImageViewer, ViewerPane, ViewerWrites};
 use crate::gui::pane::inspector;
 use crate::gui::pane::preferences::PreferencesForm;
+use crate::gui::widgets::format;
 
 /// Everything a pane's body needs, borrowed for one record pass.
 ///
@@ -52,12 +53,13 @@ pub(crate) fn tab_label(document: &Document, tab: TabRef) -> TabLabel<'_> {
             TabLabel::Plain(image_viewer::node_label(document, node_id))
         }
         TabRef::Inspector(InspectTarget::Selection) => TabLabel::Plain("Inspector"),
-        TabRef::Inspector(InspectTarget::Node(node_id)) => TabLabel::Inspector(
-            document
+        TabRef::Inspector(InspectTarget::Node(node_id)) => TabLabel::Inspector(format::node_name(
+            &document
                 .graph
                 .find(node_id)
-                .map_or("", |node| node.name.as_str()),
-        ),
+                .expect("a held inspector closes with its node")
+                .name,
+        )),
     }
 }
 

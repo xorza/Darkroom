@@ -1,11 +1,14 @@
-//! Shared record-time scraps used across the GUI tree: text styles
-//! derived from the theme base, small filled/stroked glyph primitives,
-//! and layout spacers. Chrome-level composition (pills, chips) lives in
-//! [`pill`](crate::gui::widgets::pill).
+//! Shared record-time scraps used across the GUI tree: text styles derived from the theme base,
+//! a dot and layout spacers. A toolbar's pill lives in [`pill`](crate::gui::widgets::pill), its
+//! chips in [`chip`](crate::gui::widgets::chip).
 
-use palantir::prelude::*;
+use palantir::{
+    Chrome, Configure, Corners, FontFamily, FontWeight, Panel, Rect, ResponseSnapshot, RgbaF32,
+    Sizing, TextInput, TextStyle, Tooltip, Ui,
+};
+
+use glam::Vec2;
 use palantir::widget::{RectShape, Shape};
-use palantir::{FontFamily, ResponseSnapshot, TextInput};
 
 use crate::gui::theme::Theme;
 
@@ -28,7 +31,35 @@ pub(crate) fn colored_text(ui: &Ui, color: RgbaF32, px: f32) -> TextStyle {
 /// [`colored_text`] in the shared de-emphasized ink — the common
 /// readout/label style.
 pub(crate) fn muted_text(ui: &Ui, theme: &Theme, px: f32) -> TextStyle {
-    colored_text(ui, theme.colors.text_muted, px)
+    colored_text(ui, theme.ink.muted, px)
+}
+
+/// The body tier, the size every row label and value reads at.
+pub(crate) fn body_text(ui: &Ui, theme: &Theme) -> TextStyle {
+    sized_text(ui, theme.font.body)
+}
+
+/// The title tier in bold: a node's name in the inspector, a dialog's title. The canvas draws a
+/// node's name bold too, at the body tier its row has room for.
+pub(crate) fn title_text(ui: &Ui, theme: &Theme) -> TextStyle {
+    TextStyle {
+        weight: FontWeight::BOLD,
+        ..sized_text(ui, theme.font.title)
+    }
+}
+
+/// A caption over a group: the caption tier, semibold, in the muted ink — an inspector card's, a
+/// preferences section's, a palette category's.
+pub(crate) fn caption_text(ui: &Ui, theme: &Theme) -> TextStyle {
+    TextStyle {
+        weight: FontWeight::SEMI_BOLD,
+        ..muted_text(ui, theme, theme.font.caption)
+    }
+}
+
+/// A figure: the caption tier in the monospace family, so digits hold their column.
+pub(crate) fn figure_text(ui: &Ui, theme: &Theme) -> TextStyle {
+    mono_text(ui, theme.font.caption)
 }
 
 /// [`sized_text`] in the monospace family — tabular readouts (byte figures,
@@ -43,6 +74,17 @@ pub(crate) fn mono_text(ui: &Ui, px: f32) -> TextStyle {
 /// A small circle of radius `r` centered on `center`, for the caller to fill.
 pub(crate) fn dot(center: Vec2, r: f32) -> RectShape {
     Shape::rect(Rect::new(center.x - r, center.y - r, 2.0 * r, 2.0 * r)).corners(r)
+}
+
+/// A filled circle of the theme's `icon.dot` side that takes its side in layout, so a label flows
+/// after it: the unsaved mark, a memory pool's key. [`dot`] is the bare shape, with no layout.
+pub(crate) fn dot_cell(ui: &mut Ui, salt: &'static str, theme: &Theme, hue: RgbaF32) {
+    let side = theme.icon.dot;
+    Panel::zstack()
+        .id_salt(salt)
+        .size((Sizing::fixed(side), Sizing::fixed(side)))
+        .chrome(Chrome::rounded(hue, Corners::all(side * 0.5)))
+        .show(ui, |_| {});
 }
 
 /// An empty stretch panel pushing the following hstack siblings to the

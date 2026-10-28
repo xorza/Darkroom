@@ -1,6 +1,11 @@
 //! [`ConstEditorTheme`]: how an inline const editor is styled.
 
-use palantir::{Brush, ButtonTheme, DragValueTheme, FontFamily, RgbaF32, TextEditTheme};
+use palantir::{
+    Brush, ButtonTheme, Chrome, DragValueTheme, FontFamily, RgbaF32, Spacing, TextEditTheme,
+};
+
+use crate::gui::theme::color;
+use crate::gui::widgets::hover::Hover;
 
 const VALUE_EDITOR_WIDTH: f32 = 100.0;
 /// Upper bound on the value column: editors fill the column up to here, then a
@@ -41,29 +46,58 @@ const REST_ALPHA: f32 = 0.5;
 /// together, short of the hovered chip's full fill.
 const REVEAL_ALPHA: f32 = 0.8;
 
+/// The const editor at rest and with the pointer over its node, built beside each other so they
+/// cannot drift. Precomputed: deriving the revealed look per frame would clone the nested bundle
+/// in the record path.
+#[derive(Clone, Debug)]
+pub(crate) struct ConstEditorLooks {
+    pub(crate) rest: ConstEditorTheme,
+    /// The boxes surface to [`REVEAL_ALPHA`] as soon as the pointer is anywhere over the node.
+    /// Fill only, so geometry is identical to the resting look.
+    pub(crate) revealed: ConstEditorTheme,
+}
+
+impl ConstEditorLooks {
+    /// Shared shape: palantir's `menu_button` preset over `p` and `m` (no border) as the chip,
+    /// inset as the bridged `field`, the app's text edit, with the inline editor derived from
+    /// that chip so both modes share one box, and caret, selection and placeholder from `field`
+    /// so it matches the app's other fields.
+    pub(super) fn new(p: &palantir::Palette, m: &palantir::Metrics, field: &TextEditTheme) -> Self {
+        let mut chip = ButtonTheme::menu_button(p, m);
+        chip.defaults.padding = field.defaults.padding;
+        let base = DragValueTheme::from_chip(chip, field);
+        Self {
+            rest: ConstEditorTheme::with_box(&base, p, REST_ALPHA),
+            revealed: ConstEditorTheme::with_box(&base, p, REVEAL_ALPHA),
+        }
+    }
+
+    /// The look for a node under the pointer or at rest.
+    pub(crate) const fn at(&self, hover: Hover) -> &ConstEditorTheme {
+        match hover {
+            Hover::Over => &self.revealed,
+            Hover::Rest => &self.rest,
+        }
+    }
+}
+
 impl ConstEditorTheme {
-    /// The pointer-over-node variant of [`Self::from_palette`]: the boxes
-    /// surface to [`REVEAL_ALPHA`] as soon as the pointer is anywhere over
-    /// the node. Fill only, so geometry is identical to the resting look.
-    pub(super) fn revealed_from_palette(p: &palantir::Palette) -> Self {
-        Self::with_box(p, REVEAL_ALPHA)
+    /// The box a value sits in at rest, which the inspector draws a value in as the node does.
+    pub(crate) const fn rest_box(&self) -> &Chrome {
+        &self.drag_value.chip.looks.normal.chrome
     }
 
-    /// Shared shape: palantir's `menu_button` preset over `p` (no border) as
-    /// the chip, with the inline editor derived from that chip so both modes
-    /// share one box, and caret/selection/placeholder from the same palette's
-    /// text-edit recipe so it matches the app's other text fields.
-    pub(super) fn from_palette(p: &palantir::Palette) -> Self {
-        Self::with_box(p, REST_ALPHA)
+    /// The inset of the value in [`Self::rest_box`].
+    pub(crate) const fn rest_padding(&self) -> Spacing {
+        self.drag_value.chip.defaults.padding
     }
 
-    /// The bundle with the chip's and the editor's resting box at `alpha` of
+    /// `base` with the chip's and the editor's resting box at `alpha` of
     /// the hover fill. Both, so a numeric chip and a string field (always a
     /// `TextEdit`, showing `editor.normal` at rest) surface together.
-    fn with_box(p: &palantir::Palette, alpha: f32) -> Self {
-        let mut drag_value =
-            DragValueTheme::from_chip(ButtonTheme::menu_button(p), &TextEditTheme::from_palette(p));
-        let rest = Brush::Solid(p.element_mid.with_alpha(alpha));
+    fn with_box(base: &DragValueTheme, p: &palantir::Palette, alpha: f32) -> Self {
+        let mut drag_value = base.clone();
+        let rest = Brush::Solid(color::wash(p.element_mid, alpha, p.element));
         drag_value.chip.looks.normal.chrome.fill = rest.clone();
         drag_value.editor.looks.normal.chrome.fill = rest;
         let mut number = drag_value.clone();

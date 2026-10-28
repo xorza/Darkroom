@@ -13,9 +13,11 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 
 use imaginarium::ColorFormat;
-use palantir::prelude::*;
 use palantir::widget::Shape;
-use palantir::{CursorIcon, DockOperation, ImageFit, TextWrap};
+use palantir::{
+    Align, Configure, CursorIcon, DockOperation, ImageFit, Justify, Panel, Sense, Sizing, Text,
+    TextWrap, Ui, VAlign, fmt,
+};
 
 use crate::core::document::tab_ref::TabRef;
 use crate::gui::pane::graph_ui::node_ui::card;
@@ -27,16 +29,11 @@ use crate::gui::theme::Theme;
 use crate::gui::widgets::format::bytes::Bytes;
 use crate::gui::widgets::support;
 
-/// Minimum body width for a preview node, canvas-world units. Wider than a
-/// normal node's so a thumbnail has somewhere to be; the body still hugs
-/// upward if the header or port row needs more.
-pub(super) const PREVIEW_MIN_WIDTH: f32 = 240.0;
-
 /// Height of the value area itself, excluding the header, port row, and info
 /// footer. Fixed, so a node does not resize as values arrive and vanish —
 /// an image letterboxes inside via `Contain`, and a non-image centers its text
 /// in the same frame.
-const PREVIEW_CONTENT_HEIGHT: f32 = 150.0;
+const PREVIEW_CONTENT_HEIGHT: f32 = 152.0;
 
 /// What a preview shows when it has never received a value. A run that produced
 /// nothing and a preview wired to nothing are the same from here — both mean
@@ -54,7 +51,8 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     let content = Panel::vstack()
         .id(wid::preview_image(node.node_id))
         .size((Sizing::FILL, Sizing::fixed(PREVIEW_CONTENT_HEIGHT)))
-        .padding(Spacing::all(theme.space.sm))
+        // The header's and footer's inset, so the image's left edge lines up with the title.
+        .padding(card::band_padding(theme))
         .child_align(Align::CENTER)
         .justify(Justify::Center)
         // Only an image opens a viewer, so only an image is clickable.
@@ -65,13 +63,20 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
             } else {
                 // `message` is complementary to `image`, so this covers a
                 // formatted non-image value and a value that failed to prepare
-                // alike; `EMPTY_LABEL` covers having nothing at all.
-                let text = match stored.and_then(StoredContent::message) {
-                    Some(message) => fmt!(ui, "{message}"),
-                    None => ui.intern(EMPTY_LABEL),
+                // alike, in the body ink; `EMPTY_LABEL` covers having nothing at all, in the muted
+                // ink every empty state takes.
+                let (text, style) = match stored.and_then(StoredContent::message) {
+                    Some(message) => (
+                        fmt!(ui, "{message}"),
+                        support::sized_text(ui, theme.font.caption),
+                    ),
+                    None => (
+                        ui.intern(EMPTY_LABEL),
+                        support::muted_text(ui, theme, theme.font.caption),
+                    ),
                 };
                 Text::new(text)
-                    .style(&support::sized_text(ui, theme.text.label))
+                    .style(&style)
                     .text_wrap(TextWrap::Wrap)
                     .show(ui);
             }
@@ -109,11 +114,10 @@ fn info_row(ui: &mut Ui, theme: &Theme, image: &DrawablePreview) {
         .size((Sizing::FILL, Sizing::HUG))
         .padding(card::band_padding(theme))
         .gap(theme.space.md)
-        .line_gap(4.0)
         .child_align(Align::v(VAlign::Center))
         // Round only the bottom corners so the strip seats into the body's
         // rounded bottom, the way the header rounds the top.
-        .chrome(card::footer_chrome(theme, theme.card.inner_radius()))
+        .chrome(card::footer_chrome(theme))
         .show(ui, |ui| {
             let size = image.preview.native_size;
             card::bare_value(ui, theme, format_args!("{}\u{d7}{}", size.x, size.y));

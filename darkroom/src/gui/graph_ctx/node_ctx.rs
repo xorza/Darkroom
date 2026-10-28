@@ -131,16 +131,11 @@ impl<'a> NodeCtx<'a> {
         matches!(self.hover, Hover::Over)
     }
 
-    /// The const-editor styling this node's value cells paint with. Pointer
-    /// over the node surfaces the (otherwise invisible) chips at half
-    /// strength — the edit affordance appears exactly when the pointer is in
-    /// the neighborhood, and geometry never changes.
+    /// The const-editor styling this node's value cells paint with: the pointer over the node
+    /// surfaces the resting boxes further, so the edit affordance grows where the pointer is and
+    /// geometry never changes.
     pub(crate) const fn const_editor_theme(self) -> &'a ConstEditorTheme {
-        let theme = self.graph_ctx.theme();
-        match self.hover {
-            Hover::Over => &theme.const_editor_revealed,
-            Hover::Rest => &theme.const_editor,
-        }
+        self.graph_ctx.theme().const_editor.at(self.hover)
     }
 
     /// The palette and metrics this node paints from.

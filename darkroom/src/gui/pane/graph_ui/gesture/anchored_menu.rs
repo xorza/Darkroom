@@ -1,5 +1,5 @@
-use palantir::prelude::*;
-use palantir::{Anchor, ClickOutside, CloseHandle};
+use glam::Vec2;
+use palantir::{Anchor, ClickOutside, CloseHandle, Configure, Popup, Sizing, Ui};
 
 /// Shared open/close lifecycle + look for the canvas's anchored context
 /// popups (the node menu and the new-node palette). Owns only the

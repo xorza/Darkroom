@@ -1,82 +1,39 @@
-//! [`CardTheme`]: the elevated rounded surface node bodies, the inspector
-//! panel and the dock tabs all read from.
+//! [`CardTheme`]: the elevated rounded surface node bodies and the inspector's cards read.
 
-use palantir::{RgbaF32, Shadow};
+use palantir::RgbaF32;
 
 use crate::gui::theme::palette::Palette;
-use crate::gui::theme::radius_scale::RadiusScale;
 
-/// An elevated rounded surface: node bodies and the dock's tabs. Named for
-/// the shape rather than the node, because both read from it — a footer strip derives its own tighter radius from
-/// [`Self::inner_radius`] rather than carrying fields of its own.
+/// An elevated rounded surface: a node's body and an inspector card. Its radius is the theme's
+/// `radius.card` and its shadow `elevation.resting`;
+/// [`Theme::card_chrome`](crate::gui::theme::Theme::card_chrome) puts them together.
 #[derive(Clone, Debug)]
 pub(crate) struct CardTheme {
     /// Body fill.
     pub(crate) fill: RgbaF32,
-    /// Resting outline. Transparent: the ambient shadow carries the edge,
-    /// and the stroke slot is reserved for the selection / breaker /
-    /// missing colors.
+    /// Resting outline. Transparent: the resting shadow carries the edge, and the stroke slot is
+    /// reserved for the selection, breaker and missing colors.
     pub(crate) border: RgbaF32,
-    /// A step brighter than `fill`: the lift behind a hovered button on a
-    /// card or a toolbar, and behind a hovered strip glyph.
-    pub(crate) header_fill: RgbaF32,
-    /// Ambient elevation shadow cast when no status glow claims the slot —
-    /// one color so every elevated surface casts the same kind of shadow.
-    pub(crate) ambient_shadow: RgbaF32,
-    /// Resting outline width. The drawn stroke is always
-    /// [`Self::border_width_total`] — twice this — so selecting never resizes
-    /// a card.
+    /// Two steps over `fill`: the lift behind a hovered button on a card or a toolbar.
+    pub(crate) lift: RgbaF32,
+    /// The outline's width, at rest and selected alike, so selecting a card never resizes it:
+    /// only its color changes.
     pub(crate) border_width: f32,
-    /// How round a card is. A header derives its own from
-    /// [`Self::inner_radius`].
-    pub(crate) corner_radius: f32,
-    /// Minimum content size for a node body. Caps how tightly a node with
-    /// very short port labels can shrink horizontally so the header stays
-    /// legible at any zoom.
+    /// A node body's smallest width, so a node with short port labels keeps a legible header.
     pub(crate) min_width: f32,
-    pub(crate) min_height: f32,
+    /// A preview node's smallest width, room for a thumbnail.
+    pub(crate) preview_min_width: f32,
 }
 
-/// The blur of a resting card's shadow.
-const RESTING_BLUR: f32 = 10.0;
-
 impl CardTheme {
-    pub(super) const fn from_palette(p: &Palette, radius: &RadiusScale) -> Self {
+    pub(super) const fn from_palette(p: &Palette) -> Self {
         Self {
-            fill: p.node_fill,
+            fill: p.node_bg,
             border: p.node_border,
-            header_fill: p.header_fill,
-            ambient_shadow: p.node_ambient_shadow,
-            border_width: 1.0,
-            corner_radius: radius.card,
+            lift: p.element_strong,
+            border_width: 2.0,
             min_width: 160.0,
-            min_height: 10.0,
+            preview_min_width: 240.0,
         }
-    }
-
-    /// The stroke width a card actually draws — always the *selection* width (`border_width * 2`)
-    /// regardless of selection state, so selecting one never resizes it (only its color changes).
-    /// Named so the doubling can't drift between the call sites that must agree on it: the stroke
-    /// itself, [`Self::inner_radius`], and
-    /// [`Theme::port_overhang_for`](crate::gui::theme::Theme::port_overhang_for).
-    #[inline]
-    pub(crate) fn border_width_total(&self) -> f32 {
-        self.border_width * 2.0
-    }
-
-    /// Inner corner radius for a header or footer strip seating flush against
-    /// the card's own outer stroke — a node body rounds its header/footer band
-    /// to this, not the raw `corner_radius`, else the strip's corner leaves a
-    /// wedge of plain fill showing between it and the (selection-lit) stroke.
-    #[inline]
-    pub(crate) fn inner_radius(&self) -> f32 {
-        (self.corner_radius - self.border_width_total()).max(0.0)
-    }
-
-    /// Ambient elevation shadow shared by every card at rest — node bodies,
-    /// inspector cards — so they all read as the same kind of surface.
-    #[inline]
-    pub(crate) const fn resting_shadow(&self) -> Shadow {
-        Shadow::drop(self.ambient_shadow, glam::Vec2::new(0.0, 3.0), RESTING_BLUR)
     }
 }

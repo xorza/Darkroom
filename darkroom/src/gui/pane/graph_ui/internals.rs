@@ -6,9 +6,9 @@
 //! runs, `prepass` → `draw`, and only the gesture driven through it differs. A
 //! test that skipped a phase would be exercising a frame the app never performs.
 
-use palantir::DockOperation;
+use glam::{UVec2, Vec2};
 use palantir::internals::ui_harness::UiHarness;
-use palantir::prelude::*;
+use palantir::{Configure, DockOperation, Panel, Rect, Sizing, Ui, WidgetId};
 use scenarium::NodeId;
 
 use crate::core::document::Document;
@@ -239,9 +239,11 @@ impl CanvasHarness {
             .unwrap_or_else(|| panic!("{node_id:?} recorded no body — was the frame primed?"))
     }
 
-    /// The point a press grabs `node_id`'s body at.
+    /// The point a press grabs `node_id`'s body at: the middle of its footer, past the run status
+    /// at its left, where no widget takes the press. The body's own center can land on a port
+    /// row's field.
     pub(crate) fn node_center(&self, node_id: NodeId) -> Vec2 {
-        self.ui.center_of(wid::body(node_id))
+        self.ui.center_of(wid::footer(node_id))
     }
 
     /// The point a wire drag leaves `port` from, or lands on — the snap scan

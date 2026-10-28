@@ -1,10 +1,10 @@
-use glam::Vec2;
-use palantir::{Chrome, CloseShown, Spacing, SrgbaU8};
+use palantir::{CloseShown, RadiusSteps, SpaceSteps, SrgbaU8, StrokeSteps};
 use scenarium::TypeId;
 use static_assertions::assert_not_impl_any;
 
 use super::*;
 use crate::gui::widgets::hover::Hover;
+use crate::gui::widgets::port_glyph;
 
 assert_not_impl_any!(Theme: Copy);
 assert_not_impl_any!(AppColors: Copy);
@@ -13,34 +13,34 @@ assert_not_impl_any!(CardTheme: Copy);
 assert_not_impl_any!(PortTheme: Copy);
 assert_not_impl_any!(StatusColors: Copy);
 assert_not_impl_any!(TypeColors: Copy);
-assert_not_impl_any!(ConstEditorTheme: Copy);
-assert_not_impl_any!(InlineRenameTheme: Copy);
+assert_not_impl_any!(ConstEditorLooks: Copy);
+assert_not_impl_any!(FlatTextEdit: Copy);
 
 /// Pin which palette role reaches which field, plus the non-trivial
 /// palantir tweak, so a regression in `Theme::build`'s wiring, in
 /// `palantir_bridge::theme`, or in `palantir_bridge::menu_button` fails
 /// loudly. Against the loaded palette rather than hex literals: the values
-/// are the palette's to choose, but landing `header_fill` in `canvas.bg` is
+/// are the palette's to choose, but landing `element_strong` in `canvas.bg` is
 /// still a bug.
 #[test]
 fn default_wiring_and_menu_tweak() {
     let p = Palette::load();
     let theme = Theme::default();
     assert_eq!(theme.canvas.bg, p.canvas_bg);
-    assert_eq!(theme.card.header_fill, p.header_fill);
-    assert_eq!(theme.ports.input, p.input_port);
-    assert_eq!(theme.colors.badge_cache, p.badge_cache);
-    assert_eq!(theme.colors.badge_kind, p.badge_kind);
+    assert_eq!(theme.card.lift, p.element_strong);
+    assert_eq!(theme.port.input, p.input_port);
+    assert_eq!(theme.badge.cache, p.badge_cache);
+    assert_eq!(theme.badge.kind, p.badge_kind);
     assert_eq!(theme.status.busy, p.status_busy);
     // Each of those is a distinct role, so a palette that collapsed them
     // onto one color would pass every assertion above.
-    assert_ne!(theme.canvas.bg, theme.card.header_fill);
+    assert_ne!(theme.canvas.bg, theme.card.lift);
     // The palantir half is the same palette, not palantir's own default.
     assert_eq!(theme.palantir.window_clear, p.canvas_bg);
     assert!(theme.palantir.tooltip.max_size.h.is_infinite());
 
     // The open menu's trigger rests lit, as the hovered one does; a shut one rests flat.
-    let (shut, open) = (&theme.menu_button.looks, &theme.menu_button_open.looks);
+    let (shut, open) = (&theme.menu_button.shut.looks, &theme.menu_button.open.looks);
     assert_eq!(open.normal, shut.hovered);
     assert_eq!(open.hovered, shut.hovered);
     assert_ne!(open.normal, shut.normal);
@@ -51,8 +51,14 @@ fn default_wiring_and_menu_tweak() {
         Spacing::xy(theme.space.md, theme.space.sm)
     );
     assert_eq!(menu.item.gap, theme.space.xl);
-    assert_eq!(menu.panel.shadow.offset, Vec2::new(0.0, theme.space.sm));
-    assert_eq!(menu.panel.shadow.blur, theme.space.lg);
+    // A header's icon button and a port row are one height: 16 + 2 · 6 = 28 = 14 · 2.
+    assert_eq!(theme.icon.control.side(), theme.row_height());
+    assert_eq!(theme.row_height(), 28.0);
+    // Every floating surface sits on one tier.
+    let floating = theme.elevation.floating;
+    assert_eq!(menu.panel.shadow, floating);
+    assert_eq!(theme.palantir.tooltip.panel.shadow, floating);
+    assert_eq!(theme.palantir.modal.panel.shadow, floating);
 }
 
 /// Every palantir widget resolves its text to the type scale's body, not to palantir's 16 px
@@ -61,10 +67,10 @@ fn default_wiring_and_menu_tweak() {
 fn every_palantir_widget_resolves_to_the_body_tier() {
     let theme = Theme::default();
     let ui = &theme.palantir;
-    assert_eq!(ui.text.font_size, theme.text.body);
+    assert_eq!(ui.text.font_size, theme.font.body);
     let looks = [
         ("button", &ui.button.looks),
-        ("menu button", &theme.menu_button.looks),
+        ("menu button", &theme.menu_button.shut.looks),
         ("menu item", &ui.context_menu.item.looks),
         ("selected tab", &ui.tabs.selected),
         ("unselected tab", &ui.tabs.unselected),
@@ -76,12 +82,12 @@ fn every_palantir_widget_resolves_to_the_body_tier() {
         for state in [&look.normal, &look.hovered, &look.active, &look.disabled] {
             assert_eq!(
                 state.text.apply(&ui.text).font_size,
-                theme.text.body,
+                theme.font.body,
                 "{widget}"
             );
         }
     }
-    assert_eq!(ui.tooltip.text.apply(&ui.text).font_size, theme.text.body);
+    assert_eq!(ui.tooltip.text.apply(&ui.text).font_size, theme.font.body);
 }
 
 /// Every badge is legible against every other, because a node's head
@@ -96,11 +102,12 @@ fn every_palantir_widget_resolves_to_the_body_tier() {
 /// colors cannot state about itself.
 #[test]
 fn badges_are_told_apart_from_each_other() {
-    let c = Theme::default().colors;
+    let theme = Theme::default();
+    let (c, b) = (&theme.colors, &theme.badge);
     let badges = [
-        ("badge_graph", c.badge_graph),
-        ("badge_cache", c.badge_cache),
-        ("badge_kind", c.badge_kind),
+        ("accent", c.accent),
+        ("badge_cache", b.cache),
+        ("badge_kind", b.kind),
     ];
     for (i, (name, color)) in badges.iter().enumerate() {
         for (other_name, other) in &badges[i + 1..] {
@@ -113,7 +120,7 @@ fn badges_are_told_apart_from_each_other() {
     let s = Theme::default().status;
     let statuses = [s.success, s.info, s.busy, s.warning, s.error];
     assert!(
-        !statuses.contains(&c.badge_kind),
+        !statuses.contains(&b.kind),
         "the kind mark wears a status hue"
     );
 }
@@ -129,10 +136,10 @@ fn surfaces_stack_darkest_first() {
     let p = Palette::load();
     let ladder = [
         ("canvas_bg", p.canvas_bg),
-        ("surround_fill", p.surround_fill),
-        ("node_fill", p.node_fill),
-        ("elem_hover", p.elem_hover),
-        ("header_fill", p.header_fill),
+        ("surround_bg", p.surround_bg),
+        ("node_bg", p.node_bg),
+        ("element_mid", p.element_mid),
+        ("element_strong", p.element_strong),
     ];
     for pair in ladder.windows(2) {
         let [(under, lower), (over, upper)] = pair else {
@@ -150,7 +157,7 @@ fn surfaces_stack_darkest_first() {
 #[test]
 fn a_disabled_row_is_dimmer_than_a_hint() {
     let p = Palette::load();
-    let ground = luminance(p.node_fill) + 0.05;
+    let ground = luminance(p.node_bg) + 0.05;
     let ratio = |ink: RgbaF32| (luminance(ink) + 0.05) / ground;
     assert!(
         ratio(p.text_disabled) < ratio(p.text_muted),
@@ -172,7 +179,7 @@ fn luminance(c: RgbaF32) -> f32 {
 #[test]
 fn the_error_path_field_recolors_every_border_and_keeps_its_width() {
     let theme = Theme::default();
-    let (base, error) = (&theme.palantir.text_edit, &theme.path_field_error);
+    let (base, error) = (&theme.palantir.text_edit, &theme.field_error);
     for (base, error) in [
         (&base.looks.normal, &error.looks.normal),
         (&base.looks.hovered, &error.looks.hovered),
@@ -227,10 +234,10 @@ fn a_typed_ports_color_varies_by_type_and_hover_but_not_by_column() {
 #[test]
 fn any_falls_back_to_the_untyped_input_color() {
     let t = Theme::default();
-    assert_eq!(t.port_color(&DataType::Any), t.ports.input);
+    assert_eq!(t.port_color(&DataType::Any), t.port.input);
     assert_eq!(
         Hover::Over.lift(t.port_color(&DataType::Any)),
-        color::hover_lift(t.ports.input)
+        color::hover_lift(t.port.input)
     );
 }
 
@@ -253,10 +260,10 @@ fn the_event_color_is_the_themes_and_lifts_on_hover() {
     // Events use the theme's event color, distinct from any data hue, and
     // the hover variant differs from rest.
     let t = Theme::default();
-    let rest = t.event_color();
-    let hov = Hover::Over.lift(t.event_color());
-    assert_eq!(rest, t.ports.event);
-    assert_eq!(hov, color::hover_lift(t.ports.event));
+    let rest = t.port.event;
+    let hov = Hover::Over.lift(t.port.event);
+    assert_eq!(rest, t.port.event);
+    assert_eq!(hov, color::hover_lift(t.port.event));
     assert_ne!(rest, hov, "hover must visibly differ from rest");
     // At rest nothing lifts, and the flag a caller holds maps onto the state.
     assert_eq!(Hover::Rest.lift(rest), rest);
@@ -266,95 +273,97 @@ fn the_event_color_is_the_themes_and_lifts_on_hover() {
     );
 }
 
-/// Every padding and corner radius the bridge gives palantir's widgets is a step of the theme's
-/// scales, or zero: a palantir control lines up with a darkroom one beside it.
+/// The bridge hands palantir every step of the theme's scales, and palantir's
+/// `every_recipe_reads_its_geometry_from_the_metrics` holds each of its recipes to its step, so
+/// every padding, radius, line and floating shadow palantir's widgets wear is darkroom's: a
+/// palantir control lines up with a darkroom one beside it.
 #[test]
 fn every_palantir_padding_and_radius_is_on_the_scale() {
     let theme = Theme::default();
     let ui = &theme.palantir;
     let SpaceScale {
+        xxs: _,
         xs,
         sm,
         md,
         lg,
         xl,
-        xxl,
     } = theme.space.clone();
     let RadiusScale {
+        mark,
         control,
         card,
         float,
     } = theme.radius.clone();
-    let paddings = [
-        ("button", ui.button.defaults.padding),
-        ("text edit", ui.text_edit.defaults.padding),
-        ("menu item", ui.context_menu.item.defaults.padding),
-        ("menu", ui.context_menu.padding),
-        ("tooltip", ui.tooltip.padding),
-        ("tab chip", ui.tabs.chip_padding),
-        ("tab strip", ui.tabs.strip_padding),
-        ("modal", ui.modal.padding),
-    ];
-    for (widget, padding) in paddings {
-        for side in padding.as_array() {
-            assert!(
-                [0.0, xs, sm, md, lg, xl, xxl].contains(&side),
-                "{widget} padding {side}"
-            );
+    let StrokeScale {
+        hairline,
+        fine,
+        line,
+        wire: _,
+    } = theme.stroke.clone();
+    let metrics = BridgeRoles {
+        surround_bg: theme.colors.surround_bg,
+        font: &theme.font,
+        space: &theme.space,
+        radius: &theme.radius,
+        stroke: &theme.stroke,
+        icon: &theme.icon,
+        elevation: &theme.elevation,
+    }
+    .metrics();
+    assert_eq!(metrics.space, SpaceSteps { xs, sm, md, lg, xl });
+    assert_eq!(
+        metrics.radius,
+        RadiusSteps {
+            mark,
+            control,
+            card,
+            float
         }
-    }
-    let gaps = [
-        ("tab strip gap", ui.tabs.gap),
-        ("tab label gap", ui.tabs.label_gap),
-        ("tab trailing inset", ui.tabs.trailing_inset),
-    ];
-    for (widget, gap) in gaps {
-        assert!([xs, sm, md, lg, xl, xxl].contains(&gap), "{widget} {gap}");
-    }
-    let looks = [
-        ("button", &ui.button.looks),
-        ("text edit", &ui.text_edit.looks),
-        ("menu item", &ui.context_menu.item.looks),
-        ("tab close", &ui.tabs.close),
-    ];
-    let mut corners = vec![
-        ("tooltip", ui.tooltip.panel.corners),
-        ("menu", ui.context_menu.panel.corners),
-        ("modal", ui.modal.panel.corners),
-        ("dock ghost", ui.dock.ghost.chrome.corners),
-    ];
-    for (widget, look) in looks {
-        for state in [&look.normal, &look.hovered, &look.active, &look.disabled] {
-            corners.push((widget, state.chrome.corners));
+    );
+    assert_eq!(
+        metrics.stroke,
+        StrokeSteps {
+            hairline,
+            fine,
+            line
         }
-    }
-    for (widget, corners) in corners {
-        for radius in corners.as_array() {
-            assert!(
-                [0.0, control, card, float].contains(&radius),
-                "{widget} radius {radius}"
-            );
-        }
-    }
+    );
+    assert_eq!(metrics.float_shadow, theme.elevation.floating);
+    // The tab strip starts its tabs at the surround's inset, as the menu bar starts its titles.
+    assert_eq!(
+        theme.palantir.tabs.strip_padding.to_array()[0],
+        theme.surround_inset()
+    );
+    assert_eq!(ui.dock.preview_radius, mark);
+    // A dragged tab's ghost is a tab lifted off its strip; a value's box is a field's.
+    assert_eq!(ui.dock.ghost_padding, ui.tabs.chip_padding);
+    assert_eq!(
+        theme.const_editor.rest.drag_value.chip.defaults.padding,
+        ui.text_edit.defaults.padding
+    );
     // The values the bridge picks, not only that each is a step: a field and the button beside
     // it share a height, and a menu rounds like a floating surface.
-    assert_eq!(ui.button.defaults.padding.as_array(), [md, xs, md, xs]);
-    assert_eq!(ui.text_edit.defaults.padding.as_array(), [sm, xs, sm, xs]);
-    assert_eq!(ui.context_menu.panel.corners.as_array(), [float; 4]);
-    assert_eq!(ui.tabs.strip_padding.as_array(), [sm, xs, sm, 0.0]);
+    assert_eq!(ui.button.defaults.padding.to_array(), [md, xs, md, xs]);
+    assert_eq!(ui.text_edit.defaults.padding.to_array(), [sm, xs, sm, xs]);
+    assert_eq!(ui.context_menu.panel.corners.to_array(), [float; 4]);
+    assert_eq!(ui.tabs.strip_padding.to_array(), [sm, xs, sm, 0.0]);
     assert_eq!(ui.tabs.chip_padding, ui.context_menu.item.defaults.padding);
-    assert_eq!(theme.menu_button.defaults.padding, ui.tabs.chip_padding);
     assert_eq!(
-        theme.menu_button_open.defaults.padding,
+        theme.menu_button.shut.defaults.padding,
         ui.tabs.chip_padding
     );
-    assert_eq!(ui.tabs.chip_padding.as_array(), [md, sm, md, sm]);
+    assert_eq!(
+        theme.menu_button.open.defaults.padding,
+        ui.tabs.chip_padding
+    );
+    assert_eq!(ui.tabs.chip_padding.to_array(), [md, sm, md, sm]);
     assert_eq!(
         (ui.tabs.gap, ui.tabs.label_gap, ui.tabs.trailing_inset),
         (xs, sm, xs)
     );
     assert_eq!(
-        ui.tabs.close.hovered.chrome.corners.as_array(),
+        ui.tabs.close.hovered.chrome.corners.to_array(),
         [control; 4]
     );
 }
@@ -371,7 +380,7 @@ fn a_tab_chip_and_its_close_button_are_ghosts() {
     let looks = &tabs.unselected;
     assert_eq!(looks.normal.chrome, Chrome::NONE);
     assert_eq!(looks.disabled.chrome, Chrome::NONE);
-    let titles = &theme.menu_button.looks;
+    let titles = &theme.menu_button.shut.looks;
     assert_eq!(looks.hovered.chrome.fill, titles.hovered.chrome.fill);
     assert_eq!(looks.active.chrome.fill, titles.active.chrome.fill);
     assert_eq!(tabs.close.hovered.chrome.fill, titles.active.chrome.fill);
@@ -392,36 +401,45 @@ fn only_a_status_that_asks_for_attention_frames_the_node() {
     let theme = Theme::default();
     let s = &theme.status;
     let cases = [
-        (ExecStatus::None, None, None),
-        (ExecStatus::Cached, None, Some(s.info)),
-        (ExecStatus::Executed(0.5), None, Some(s.success)),
-        (ExecStatus::Skipped, None, None),
+        (ExecStatus::None, None, theme.ink.muted),
+        (ExecStatus::Cached, None, s.info),
+        (ExecStatus::Executed(0.5), None, s.success),
+        (ExecStatus::Skipped, None, theme.ink.muted),
         (
             ExecStatus::Running(std::time::Instant::now()),
             Some(s.busy),
-            Some(s.busy),
+            s.busy,
         ),
         (
             ExecStatus::MissingInputs(vec![0]),
             Some(s.warning),
-            Some(s.warning),
+            s.warning,
         ),
-        (ExecStatus::Errored(None), Some(s.error), Some(s.error)),
+        (ExecStatus::Errored(None), Some(s.error), s.error),
     ];
     for (status, frame, ink) in cases {
         assert_eq!(theme.exec_frame(&status), frame, "{status:?} frame");
-        assert_eq!(theme.exec_color(&status), ink, "{status:?} ink");
+        assert_eq!(theme.exec_ink(&status), ink, "{status:?} ink");
     }
 }
 
-/// No untyped port takes a hue a run status or a data type spends: an event is not the Bool and
-/// error red, and an untyped input is not the String and success green, so a port on a framed
-/// node reads as a port, and an untyped input as no type.
+/// No untyped port takes a hue a run status, an alarm or a data type spends: an event is not the
+/// Bool and error red, and an untyped input is not the String and success green, so a port on a
+/// framed node reads as a port, and an untyped input as no type. Busy is left out: it and the
+/// untyped input share the neutral grey, each as no verdict and no type, in forms that differ,
+/// a spinner and a halo against a hollow ring.
 #[test]
 fn no_untyped_port_borrows_a_status_or_a_type_hue() {
     let t = Theme::default();
     let s = &t.status;
-    let statuses = [s.success, s.info, s.warning, s.error];
+    let statuses = [
+        s.success,
+        s.info,
+        s.warning,
+        s.error,
+        t.canvas.wire_broken,
+        t.canvas.breaker_stroke,
+    ];
     let hues = &t.type_colors;
     let types = [
         hues.boolean,
@@ -431,7 +449,7 @@ fn no_untyped_port_borrows_a_status_or_a_type_hue() {
         hues.path,
         hues.image,
     ];
-    for (name, port) in [("event", t.event_color()), ("untyped input", t.ports.input)] {
+    for (name, port) in [("event", t.port.event), ("untyped input", t.port.input)] {
         assert!(
             !statuses.contains(&port),
             "the {name} port wears a status hue"
@@ -461,11 +479,51 @@ fn a_wash_composites_on_the_encoded_values() {
         "premise"
     );
     assert_eq!(
-        theme.wash(theme.status.error, 0.14).to_srgba(),
+        color::wash(theme.status.error, 0.14, theme.canvas.bg).to_srgba(),
         SrgbaU8::hex(0x352525)
     );
     assert_eq!(
-        theme.wash(theme.status.error, 0.0).to_srgba(),
+        color::wash(theme.status.error, 0.0, theme.canvas.bg).to_srgba(),
         SrgbaU8::hex(0x141414)
     );
+}
+
+/// A port glyph hangs on the body's edge and takes no room in its cell, so every label starts at
+/// the column inset, the border plus `space.md`, as the header's title does: the glyph's left
+/// edge sits a radius out from the body's edge, and its margins, width and the cell's gap sum to
+/// zero, for the plain 13 px circle, a required input's bigger one, and on either side.
+#[test]
+fn a_port_glyph_hangs_on_the_edge_and_leaves_its_label_at_the_inset() {
+    let theme = Theme::default();
+    let inset = theme.card.border_width + theme.port.col_pad_x;
+    assert_eq!(inset, theme.card.border_width + theme.space.md);
+    // A required input's disc: the 12 px port and a 2 px ring each side, 12 + 2 × 2 = 16.
+    let enlarged = port_glyph::enlarged_diameter(theme.port.size, theme.stroke.line);
+    assert_eq!(enlarged, 16.0);
+    for radius in [theme.port.radius(), enlarged * 0.5] {
+        let input = theme.port_margin(PortKind::Input, radius);
+        let [left, _, right, _] = input.to_array();
+        // From the body's outer edge: the cell starts at the inset, the glyph a margin before it.
+        assert_eq!(inset + left, -radius, "the glyph's center is on the edge");
+        assert_eq!(
+            left + 2.0 * radius + right + theme.space.xs,
+            0.0,
+            "{radius}"
+        );
+        let output = theme.port_margin(PortKind::Output, radius);
+        assert_eq!(output.to_array(), [right, 0.0, left, 0.0], "mirrored");
+    }
+}
+
+/// A wire is never thinner than 2.5 px on screen: at 50 % its world width doubles to 5 so the
+/// screen keeps 2.5; at 100 % it is 2.5; at 200 % it zooms with the canvas, 2.5 in the world and
+/// 5 on screen.
+#[test]
+fn a_wire_keeps_its_width_on_screen_when_zoomed_out() {
+    let stroke = Theme::default().stroke;
+    assert_eq!(stroke.wire, 2.5);
+    for (zoom, world, screen) in [(0.5, 5.0, 2.5), (1.0, 2.5, 2.5), (2.0, 2.5, 5.0)] {
+        assert_eq!(stroke.wire_at(zoom), world, "{zoom}");
+        assert_eq!(stroke.wire_at(zoom) * zoom, screen, "{zoom}");
+    }
 }

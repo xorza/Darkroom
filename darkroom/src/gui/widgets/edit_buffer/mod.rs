@@ -1,7 +1,7 @@
 //! [`EditBuffer`]: the cross-frame state behind a buffered text field, as the node const editors
 //! and the preferences' path fields keep it.
 
-use palantir::prelude::*;
+use palantir::{Ui, WidgetId};
 
 /// Cross-frame state for one buffered text edit.
 #[derive(Default, Clone, Debug)]

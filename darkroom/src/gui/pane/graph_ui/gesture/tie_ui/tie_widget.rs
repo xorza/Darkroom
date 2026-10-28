@@ -4,7 +4,8 @@
 
 use std::sync::Arc;
 
-use palantir::prelude::*;
+use glam::Vec2;
+use palantir::{Configure, Panel, Sense, Sizing, Ui};
 
 use crate::core::document::item_id::ItemId;
 use crate::core::document::tie::{TieAngle, TieId};
@@ -118,7 +119,7 @@ impl TieWidgets {
     pub(crate) fn record(&mut self, ui: &mut Ui, pass: &mut TiePass<'_, '_>) -> TiesRecorded {
         let mut recorded = TiesRecorded::default();
         let draw_ctx = pass.draw_ctx;
-        let theme = &draw_ctx.theme().tie;
+        let theme = draw_ctx.theme();
         let click_mode = ClickMode::with_shift(ui.modifiers().shift);
         for band in pass
             .ties
@@ -127,7 +128,7 @@ impl TieWidgets {
             .filter(|band| band.strand_count() > 0)
         {
             let axes = BandAxes::of(band);
-            if !draw_ctx.cull().keeps_rect(axes.bounds()) {
+            if !draw_ctx.cull().keeps_rect(axes.bounds(theme.stroke.fine)) {
                 continue;
             }
             let item = ItemId::Tie(band.tie);

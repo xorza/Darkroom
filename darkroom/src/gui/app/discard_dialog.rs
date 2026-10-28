@@ -4,7 +4,10 @@
 
 use std::path::PathBuf;
 
-use palantir::prelude::*;
+use palantir::{Button, Checkbox, Configure, Modal, Panel, Sizing, Text, TextWrap, Ui, WidgetId};
+
+use crate::gui::theme::Theme;
+use crate::gui::widgets::support;
 
 /// The transition waiting on the unsaved-changes prompt, and so whether the prompt is up.
 #[derive(Debug, Default)]
@@ -27,12 +30,17 @@ impl DiscardGuard {
 
     /// The prompt over this frame while it is up, naming the document `file_name` (`None` for
     /// one never saved), and the answer given this frame. The window stays open while it is up.
-    pub(super) fn record(&mut self, ui: &mut Ui, file_name: Option<&str>) -> Option<Answered> {
+    pub(super) fn record(
+        &mut self,
+        ui: &mut Ui,
+        theme: &Theme,
+        file_name: Option<&str>,
+    ) -> Option<Answered> {
         let tail = self.pending.as_ref()?.prompt_tail();
         if ui.close_requested() {
             ui.keep_open();
         }
-        let outcome = show(ui, file_name, tail);
+        let outcome = show(ui, theme, file_name, tail);
         self.answer(outcome)
     }
 
@@ -138,7 +146,11 @@ impl DiscardOutcome {
 /// sentence for the transition being guarded ("quitting", "closing it", …).
 /// Returns the choice the user made this frame plus the "Don't ask again"
 /// state.
-fn show(ui: &mut Ui, file_name: Option<&str>, tail: &str) -> DiscardOutcome {
+///
+/// The buttons sit at the right in one order on every platform, Save last in the accent, and
+/// Save takes the focus as the dialog opens, so Return presses it, as a dialog's default button
+/// does.
+fn show(ui: &mut Ui, theme: &Theme, file_name: Option<&str>, tail: &str) -> DiscardOutcome {
     let title = match file_name {
         Some(name) => ui.fmt(format_args!("Save changes to “{name}” before {tail}?")),
         None => ui.fmt(format_args!("Save changes before {tail}?")),
@@ -148,18 +160,21 @@ fn show(ui: &mut Ui, file_name: Option<&str>, tail: &str) -> DiscardOutcome {
     // as the dialog is up: once it closes nothing records the checkbox, the
     // row is swept, and the next open starts unchecked.
     let dont_ask_id = dont_ask_wid();
+    let opened = ui.state::<DontAskAgain>(dont_ask_id).is_none();
     ui.with_state::<DontAskAgain, _>(dont_ask_id, |ui, DontAskAgain(dont_ask_again)| {
         let mut choice = DiscardChoice::Stay;
         let resp = Modal::new()
             .id_salt(("discard_dialog", "modal"))
             .show(ui, |ui, _| {
                 Panel::vstack()
-                    .id_salt(("discard_dialog", "body"))
-                    .gap(16.0)
-                    .padding(8.0)
+                    .id(body_wid())
+                    .max_size((title_measure(theme), f32::INFINITY))
+                    .gap(theme.space.lg)
                     .show(ui, |ui| {
                         Text::new(title)
-                            .id_salt(("discard_dialog", "title"))
+                            .id(title_wid())
+                            .style(&support::title_text(ui, theme))
+                            .text_wrap(TextWrap::Wrap)
                             .show(ui);
                         Checkbox::new(dont_ask_again)
                             .id(dont_ask_id)
@@ -167,19 +182,12 @@ fn show(ui: &mut Ui, file_name: Option<&str>, tail: &str) -> DiscardOutcome {
                             .show(ui);
                         Panel::hstack()
                             .id_salt(("discard_dialog", "row"))
-                            .gap(8.0)
+                            .size((Sizing::FILL, Sizing::HUG))
+                            .gap(theme.space.sm)
                             .show(ui, |ui| {
+                                support::hspacer(ui, "discard_dialog_spacer");
                                 if Button::new()
-                                    .id_salt(("discard_dialog", "save"))
-                                    .label("Save")
-                                    .show(ui)
-                                    .left
-                                    .clicked()
-                                {
-                                    choice = DiscardChoice::Save;
-                                }
-                                if Button::new()
-                                    .id_salt(("discard_dialog", "discard"))
+                                    .id(discard_wid())
                                     .label("Don't Save")
                                     .show(ui)
                                     .left
@@ -188,13 +196,27 @@ fn show(ui: &mut Ui, file_name: Option<&str>, tail: &str) -> DiscardOutcome {
                                     choice = DiscardChoice::Discard;
                                 }
                                 if Button::new()
-                                    .id_salt(("discard_dialog", "cancel"))
+                                    .id(cancel_wid())
                                     .label("Cancel")
                                     .show(ui)
                                     .left
                                     .clicked()
                                 {
                                     choice = DiscardChoice::Cancel;
+                                }
+                                if Button::new()
+                                    .id(save_wid())
+                                    .label("Save")
+                                    .style(&theme.primary_button)
+                                    .show(ui)
+                                    .left
+                                    .clicked()
+                                {
+                                    choice = DiscardChoice::Save;
+                                }
+                                // Save holds the focus as the dialog opens, so Return presses it.
+                                if opened {
+                                    ui.set_focus(save_wid());
                                 }
                             });
                     });
@@ -215,8 +237,35 @@ fn show(ui: &mut Ui, file_name: Option<&str>, tail: &str) -> DiscardOutcome {
 #[derive(Default, Debug)]
 struct DontAskAgain(bool);
 
+/// The title's measure: about 60 characters at the title size, 30 of its ems, inside the 45 to
+/// 75 a line of reading text holds (Bringhurst, *The Elements of Typographic Style*, 2.1.2), so
+/// a long file name wraps rather than widening the dialog.
+fn title_measure(theme: &Theme) -> f32 {
+    30.0 * theme.font.title
+}
+
 fn dont_ask_wid() -> WidgetId {
-    WidgetId::from_hash("discard_dialog::dont_ask_again")
+    WidgetId::from_hash("darkroom.discard_dialog.dont_ask_again")
+}
+
+fn body_wid() -> WidgetId {
+    WidgetId::from_hash("darkroom.discard_dialog.body")
+}
+
+fn title_wid() -> WidgetId {
+    WidgetId::from_hash("darkroom.discard_dialog.title")
+}
+
+fn save_wid() -> WidgetId {
+    WidgetId::from_hash("darkroom.discard_dialog.save")
+}
+
+fn discard_wid() -> WidgetId {
+    WidgetId::from_hash("darkroom.discard_dialog.discard")
+}
+
+fn cancel_wid() -> WidgetId {
+    WidgetId::from_hash("darkroom.discard_dialog.cancel")
 }
 
 #[cfg(test)]
@@ -233,6 +282,8 @@ pub(crate) mod internals {
 
 #[cfg(test)]
 mod tests {
+    use glam::UVec2;
+    use palantir::Key;
     use palantir::internals::ui_harness::UiHarness;
 
     use super::*;
@@ -242,11 +293,13 @@ mod tests {
     /// unchecked rather than inheriting the last prompt's answer.
     #[test]
     fn the_checkbox_holds_while_the_dialog_is_up_and_resets_once_it_closes() {
+        let theme = Theme::default();
         let mut h = UiHarness::with_text(UVec2::new(800, 600));
-        let open =
-            |h: &mut UiHarness| h.frame_value(|ui| show(ui, None, "quitting").dont_ask_again);
+        let open = |h: &mut UiHarness| {
+            h.frame_value(|ui| show(ui, &theme, None, "quitting").dont_ask_again)
+        };
         h.prime(2, |ui| {
-            show(ui, None, "quitting");
+            show(ui, &theme, None, "quitting");
         });
         assert!(!open(&mut h), "a fresh dialog starts unchecked");
 
@@ -269,6 +322,47 @@ mod tests {
             );
         });
         assert!(!open(&mut h), "the next open starts unchecked");
+    }
+
+    /// The buttons sit at the body's right in one order, Don't Save, Cancel, then Save, which
+    /// wears the accent; a long file name wraps the title inside its measure; Return picks Save.
+    #[test]
+    fn save_ends_the_button_row_in_the_accent_and_return_picks_it() {
+        let theme = Theme::default();
+        let mut h = UiHarness::with_text(UVec2::new(1200, 800));
+        let name = "a file name long enough to run well past the title's measure.darkroom";
+        let choice =
+            |h: &mut UiHarness| h.frame_value(|ui| show(ui, &theme, Some(name), "quitting").choice);
+        assert_eq!(choice(&mut h), DiscardChoice::Stay);
+        assert_eq!(choice(&mut h), DiscardChoice::Stay);
+        let rect = |wid: WidgetId| h.rect(wid).expect("recorded");
+        let [body, title, discard, cancel, save] = [
+            body_wid(),
+            title_wid(),
+            discard_wid(),
+            cancel_wid(),
+            save_wid(),
+        ]
+        .map(rect);
+        assert!(discard.max().x < cancel.min.x && cancel.max().x < save.min.x);
+        assert_eq!(
+            save.max().x,
+            body.max().x,
+            "the row ends at the body's right edge"
+        );
+        assert!(body.size.w <= title_measure(&theme), "{}", body.size.w);
+        let line = theme.palantir.text.line_height_for(theme.font.title);
+        assert!(
+            title.size.h >= 2.0 * line,
+            "the title wraps: {}",
+            title.size.h
+        );
+        assert_eq!(
+            theme.primary_button.looks.normal.chrome.fill,
+            theme.colors.accent.into()
+        );
+        h.key(Key::Enter);
+        assert_eq!(choice(&mut h), DiscardChoice::Save);
     }
 
     /// A document Finder hands over is guarded exactly like one the user

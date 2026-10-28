@@ -3,7 +3,7 @@
 //! graph canvas toolbar and the image viewer's control panel; each caller
 //! keeps its own glyphs and toggle color policy.
 
-use palantir::prelude::*;
+use palantir::{Chrome, Configure, Corners, Panel, Sense, Separator, Sizing, Spacing, Ui};
 
 use crate::gui::theme::Theme;
 
@@ -16,7 +16,7 @@ const PILL_BG_ALPHA: f32 = 0.7;
 /// The frosted chrome backdrop shared by toolbar group pills.
 pub(crate) fn chrome(theme: &Theme) -> Chrome {
     Chrome::rounded(
-        theme.colors.surround_fill.with_alpha(PILL_BG_ALPHA),
+        theme.colors.surround_bg.with_alpha(PILL_BG_ALPHA),
         Corners::all(theme.radius.float),
     )
 }
@@ -36,12 +36,17 @@ pub(crate) fn dress(panel: Panel, theme: &Theme) -> Panel {
         .chrome(chrome(theme))
 }
 
+/// A row pill's height: a toolbar chip and the pill's padding above and below it, which a
+/// readout pill beside it takes so the two line up.
+pub(crate) fn height(theme: &Theme) -> f32 {
+    theme.icon.toolbar.side() + 2.0 * theme.space.xs
+}
+
 /// Thin horizontal rule between concept groups sharing one column
 /// (vstack) pill, inset from the pill's chrome on both ends. Grow an axis
 /// parameter when a row pill first needs one.
 pub(crate) fn rule(ui: &mut Ui, theme: &Theme) {
     Separator::horizontal()
-        .color(theme.colors.border_soft())
         .margin(Spacing::new(theme.space.xs, 0.0, theme.space.xs, 0.0))
         .show(ui);
 }

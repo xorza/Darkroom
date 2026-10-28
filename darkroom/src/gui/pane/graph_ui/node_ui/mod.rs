@@ -1,14 +1,15 @@
 mod card;
 mod const_editor;
-pub(super) mod header;
+pub(crate) mod header;
 mod node_footer;
 pub(super) mod node_record;
 pub(crate) mod port_row;
 pub(crate) mod preview_row;
+pub(crate) mod run_status;
 
 use std::mem;
 
-use palantir::prelude::*;
+use palantir::{Configure, Panel, Sense, Shadow, Sizing, Stroke, Track, Ui};
 use scenarium::NodeId;
 
 use crate::core::document::graph_view::StackedNode;
@@ -213,7 +214,7 @@ impl NodeUi {
         // not color-gated). Only the color changes: the breaker alarm wins,
         // then the missing-stub color, then `Theme::card_border`'s selected
         // or resting color.
-        let border_width = theme.card.border_width_total();
+        let border_width = theme.card.border_width;
         let tier = if broken {
             CardTier::Broken
         } else if selected {
@@ -255,14 +256,15 @@ impl NodeUi {
             // A preview needs room for a thumbnail; every other node keeps the
             // theme's own floor.
             .min_size(if node.preview() {
-                (preview_row::PREVIEW_MIN_WIDTH, theme.card.min_height)
+                (theme.card.preview_min_width, 0.0)
             } else {
-                (theme.card.min_width, theme.card.min_height)
+                (theme.card.min_width, 0.0)
             })
             .size((Sizing::HUG, Sizing::HUG))
             .sense(Sense::CLICK | Sense::DRAG)
             .chrome(
-                Chrome::rounded(theme.card.fill, Corners::all(theme.card.corner_radius))
+                theme
+                    .card_chrome()
                     .with_border(Stroke::new(border, border_width))
                     .with_shadow(shadow),
             )
@@ -343,19 +345,11 @@ impl NodeUi {
     }
 }
 
-/// The node body's one shadow: the status frame for a last-run outcome that
-/// asks for attention (zero offset so the halo wraps evenly), or — else — a soft
-/// ambient drop shadow that lifts the body off the canvas and the wires
-/// crossing beneath it. The ambient color is the theme's elevation swatch
-/// (`node_ambient_shadow`), shared with the other cards so all elevated
-/// surfaces cast one kind of shadow.
+/// The node body's one shadow: the status frame for a last-run outcome that asks for attention,
+/// in place of the resting shadow every card casts.
 const fn node_shadow(theme: &Theme, status: &ExecStatus) -> Shadow {
     match theme.exec_frame(status) {
-        // Blur/spread sized so the frame carries elevation too — it replaces
-        // the ambient shadow, and a tighter halo would leave a framed node
-        // sitting flatter than its neighbors. Kept a touch tighter than the
-        // ambient shadow so the status reads as a crisp halo, not a bloom.
-        Some(color) => Shadow::drop(color, Vec2::ZERO, 3.0).with_spread(0.5),
-        None => theme.card.resting_shadow(),
+        Some(color) => theme.elevation.frame(color),
+        None => theme.elevation.resting,
     }
 }

@@ -4,6 +4,7 @@ use glam::Vec2;
 
 use crate::core::document::tie::TieId;
 use crate::core::document::wire_key::WireKey;
+use crate::gui::pane::graph_ui::draw::tie::band::BandAxes;
 use crate::gui::pane::graph_ui::frame::wire::Wire;
 use crate::gui::pane::graph_ui::gesture::segments;
 
@@ -34,6 +35,8 @@ pub(crate) struct WireCrossing {
     pub(crate) piece: usize,
     pub(crate) along: f32,
     pub(crate) point: Vec2,
+    /// The way the wire runs where the line crosses it: its crossed chord's unit direction.
+    pub(crate) dir: Vec2,
 }
 
 /// A tie whose band the line crosses, and how far along the line.
@@ -70,6 +73,40 @@ impl TieLine {
     }
 
     /// The first crossing of the line with `pieces`, a wire from its output end, or `None`.
+    /// The band a release would put, when the line crosses wires and no tie: at the mean of
+    /// the crossings, square to the mean of the crossed strands, each turned to run the first's
+    /// way so two strands that cross the line in opposite senses do not cancel.
+    pub(crate) fn preview(&self) -> Option<BandAxes> {
+        if !self.ties.is_empty() {
+            return None;
+        }
+        let first = self.wires.first()?;
+        let count = self.wires.len();
+        let center = self
+            .wires
+            .iter()
+            .map(|crossing| crossing.point)
+            .sum::<Vec2>()
+            / count as f32;
+        let dir = self
+            .wires
+            .iter()
+            .map(|crossing| {
+                if crossing.dir.dot(first.dir) < 0.0 {
+                    -crossing.dir
+                } else {
+                    crossing.dir
+                }
+            })
+            .sum::<Vec2>()
+            .normalize_or(first.dir);
+        Some(BandAxes::preview(
+            center,
+            dir,
+            u32::try_from(count).expect("a line crosses fewer than 2^32 wires"),
+        ))
+    }
+
     pub(crate) fn first_crossing(&self, wire: WireKey, pieces: &[Wire]) -> Option<WireCrossing> {
         if !self.is_long() {
             return None;
@@ -94,6 +131,7 @@ impl TieLine {
                         // Start plus the fraction of the run, not `lerp`'s weighted sum of
                         // the ends, which rounds a straight line's own coordinate off it.
                         point: self.start + (self.end - self.start) * along,
+                        dir: (b - a).normalize_or_zero(),
                     });
                 }
             }
@@ -118,9 +156,13 @@ mod tests {
     use glam::Vec2;
     use scenarium::{InputPort, NodeId, OutputPort};
 
+    use crate::core::document::tie::TieId;
     use crate::core::document::wire_key::{DataWire, WireKey};
+    use crate::gui::pane::graph_ui::draw::tie::band::BandAxes;
     use crate::gui::pane::graph_ui::frame::wire::Wire;
-    use crate::gui::pane::graph_ui::gesture::tie_ui::tie_line::{TieLine, WireCrossing};
+    use crate::gui::pane::graph_ui::gesture::tie_ui::tie_line::{
+        TieCrossing, TieLine, WireCrossing,
+    };
 
     fn line(start: Vec2, end: Vec2, zoom: f32) -> TieLine {
         let mut line = TieLine::default();
@@ -162,6 +204,37 @@ mod tests {
         }
     }
 
+    /// A line across wires and no tie previews the band a release would put: at the mean of
+    /// the crossings, (2, 0) and (6, 0) give (4, 0), square to the strands, which run along y
+    /// whichever way each was drawn, so the band's axis is x; a line that crosses a tie
+    /// previews none, as the wires join that tie.
+    #[test]
+    fn a_line_previews_its_band_at_the_mean_of_its_crossings() {
+        let wire = |x: f32, dir: Vec2| WireCrossing {
+            wire: WireKey::Data(DataWire {
+                output: OutputPort::new(NodeId::unique(), 0),
+                input: InputPort::new(NodeId::unique(), 0),
+            }),
+            piece: 0,
+            along: x / 10.0,
+            point: Vec2::new(x, 0.0),
+            dir,
+        };
+        let mut across = line(Vec2::ZERO, Vec2::new(10.0, 0.0), 1.0);
+        assert!(across.preview().is_none(), "crossing nothing");
+        across.wires = vec![wire(2.0, Vec2::Y), wire(6.0, -Vec2::Y)];
+        let band = across.preview().expect("it crosses wires");
+        assert_eq!(band, BandAxes::preview(Vec2::new(4.0, 0.0), Vec2::Y, 2));
+        across.ties.push(TieCrossing {
+            tie: TieId::unique(),
+            along: 0.5,
+        });
+        assert!(
+            across.preview().is_none(),
+            "the wires join the tie it crosses"
+        );
+    }
+
     /// Over a wire of two pieces, the line's first crossing is its earliest along the line,
     /// whichever piece it is on, at the point the fraction names.
     #[test]
@@ -185,6 +258,7 @@ mod tests {
                 piece: 1,
                 along: 0.2,
                 point: Vec2::new(2.0, 0.0),
+                dir: Vec2::Y,
             })
         );
         assert_eq!(across.first_crossing(wire, &[vertical(20.0)]), None);

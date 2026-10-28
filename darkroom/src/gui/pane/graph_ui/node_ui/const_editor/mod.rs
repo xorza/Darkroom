@@ -30,8 +30,10 @@
 //! frame, whose buffer still holds the user's text to commit — and parse
 //! only when the edit commits.
 
-use palantir::TextWrap;
-use palantir::prelude::*;
+use palantir::{
+    Align, Button, Checkbox, ComboBox, Configure, DragValue, Sizing, TextEdit, TextWrap, Ui,
+    WidgetId, fmt,
+};
 use scenarium::{ConstValue, DataType, Library, ValueVariant};
 
 use crate::gui::theme::const_editor_theme::ConstEditorTheme;

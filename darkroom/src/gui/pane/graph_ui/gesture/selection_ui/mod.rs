@@ -193,7 +193,10 @@ impl SelectionUi {
     /// Paint the in-progress rectangle. Drawn inside the inner canvas so
     /// its world coords ride the same pan/zoom transform as the nodes.
     /// No-op when no gesture is active or the rect has no area yet.
-    pub(crate) fn draw(&self, ui: &mut Ui, theme: &Theme) {
+    ///
+    /// The border is a hairline on screen at every `zoom`: palantir scales a stroke by the
+    /// canvas's transform, so its world width is the hairline over the zoom.
+    pub(crate) fn draw(&self, ui: &mut Ui, theme: &Theme, zoom: f32) {
         let Some(band) = self.band.as_ref() else {
             return;
         };
@@ -204,9 +207,17 @@ impl SelectionUi {
         ui.add_shape(
             Shape::rect(rect)
                 .fill(theme.colors.selection_fill())
-                .border(Stroke::new(theme.colors.selection_border(), 1.0)),
+                .border(border(theme, zoom)),
         );
     }
+}
+
+/// The band's border at `zoom`, a hairline on screen.
+fn border(theme: &Theme, zoom: f32) -> Stroke {
+    Stroke::new(
+        theme.colors.selection_border(),
+        theme.stroke.hairline / zoom,
+    )
 }
 
 #[cfg(test)]

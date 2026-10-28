@@ -10,8 +10,11 @@
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 
-use palantir::prelude::*;
-use palantir::{ClipMode, DockOperation, FontWeight, TextInput, TextWrap};
+use palantir::{
+    Align, Block, Chrome, ClipMode, Configure, Corners, DockOperation, Panel, RgbaF32, Scroll,
+    Sense, Sizing, Spacing, Stroke, Text, TextInput, TextStyle, TextWrap, Ui, VAlign, WidgetId,
+    fmt,
+};
 use scenarium::LogLevel;
 use scenarium::NodeId;
 use scenarium::{Binding, ConstValue, DataType, ValueVariant};
@@ -23,14 +26,16 @@ use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::input_ctx::InputCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
+use crate::gui::pane::graph_ui::node_ui::header;
+use crate::gui::pane::graph_ui::node_ui::run_status::RunStatus;
 use crate::gui::port_ref::PortKind;
 use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::Theme;
-use crate::gui::widgets::format::elapsed::Elapsed;
+use crate::gui::theme::color;
+use crate::gui::widgets::format;
 use crate::gui::widgets::format::shown_value::{ShownValue, UNSET};
 use crate::gui::widgets::icon::Icon;
 use crate::gui::widgets::icon_button::IconButton;
-use crate::gui::widgets::port_glyph;
 use crate::gui::widgets::support;
 use crate::gui::widgets::toggle::Toggle;
 
@@ -47,13 +52,13 @@ pub(crate) fn show(ui: &mut Ui, ctx: GraphCtx<'_>, target: InspectTarget, out: &
             Panel::vstack()
                 .id_salt("inspector_body")
                 .size((Sizing::FILL, Sizing::HUG))
-                .padding(Spacing::xy(theme.space.lg, theme.space.md))
+                .padding(theme.pane_padding())
                 .gap(theme.space.md)
                 .show(ui, |ui| {
                     if let Some(node) = inspected(ctx, target) {
                         body(ui, node, target, out);
                     } else {
-                        let style = support::muted_text(ui, theme, theme.text.body);
+                        let style = support::muted_text(ui, theme, theme.font.body);
                         Text::new("Select one node to inspect it.")
                             .style(&style)
                             .show(ui);
@@ -86,44 +91,51 @@ fn body(ui: &mut Ui, node: NodeCtx<'_>, target: InspectTarget, out: &mut Request
     let theme = node.theme();
     let logs = node.graph_ctx.run_state().logs(node.node_id);
     let error = error_message(node.exec_status());
-    Panel::hstack()
-        .id_salt("inspector_title")
+    Panel::vstack()
+        .id_salt("inspector_header")
         .size((Sizing::FILL, Sizing::HUG))
-        .gap(theme.space.sm)
-        .child_align(Align::v(VAlign::Top))
+        .gap(theme.space.xxs)
         .show(ui, |ui| {
-            Panel::vstack()
-                .id_salt("inspector_names")
-                .size((Sizing::FILL, Sizing::HUG))
-                .gap(NAME_KIND_GAP)
+            // One row as tall as a port row, its chip and pin centered on the title, the kind
+            // mark after the title as on the node.
+            Panel::hstack()
+                .id(title_wid())
+                .size((Sizing::FILL, Sizing::fixed(theme.row_height())))
+                .gap(theme.space.xs)
+                .child_align(Align::v(VAlign::Center))
                 .show(ui, |ui| {
-                    let title = if node.name().is_empty() {
-                        "(unnamed)"
-                    } else {
-                        node.name()
-                    };
-                    line(ui, title, title_style(theme, ui));
-                    // The kind line earns its row only when it says something the title doesn't:
-                    // an unrenamed node repeats its func name.
-                    if !node.kind_label().eq_ignore_ascii_case(node.name()) {
-                        line(ui, node.kind_label(), muted_style(theme, ui));
+                    Text::new(format::node_name(node.name()))
+                        .id(title_wid().with("text"))
+                        .style(&support::title_text(ui, theme))
+                        .text_wrap(TextWrap::Ellipsis)
+                        .show(ui);
+                    header::kind_mark(ui, node, kind_mark_wid());
+                    support::hspacer(ui, "inspector_title_spacer");
+                    status_chip(ui, theme, node.exec_status());
+                    if target == InspectTarget::Selection
+                        && !node.stub()
+                        && IconButton::press(
+                            Icon::Pin,
+                            pin_wid(),
+                            theme.colors.accent,
+                            "Pin — keep this node in its own tab",
+                            Toggle::Off,
+                        )
+                        .show(ui, theme)
+                    {
+                        out.push_view(DockOperation::OpenTab {
+                            tab: TabRef::Inspector(InspectTarget::Node(node.node_id)),
+                        });
                     }
                 });
-            status_chip(ui, theme, node.exec_status());
-            if target == InspectTarget::Selection
-                && !node.stub()
-                && IconButton::press(
-                    Icon::Pin,
-                    pin_wid(),
-                    theme.colors.badge_graph,
-                    "Pin — keep this node in its own tab",
-                    Toggle::Off,
-                )
-                .show(ui, theme)
-            {
-                out.push_view(DockOperation::OpenTab {
-                    tab: TabRef::Inspector(InspectTarget::Node(node.node_id)),
-                });
+            // The kind line earns its row only when it says something the title doesn't: an
+            // unrenamed node repeats its func name.
+            if !node.kind_label().eq_ignore_ascii_case(node.name()) {
+                line(
+                    ui,
+                    node.kind_label(),
+                    support::muted_text(ui, theme, theme.font.caption),
+                );
             }
         });
     // The failure's cause under the header: what turns a generic status into an actionable
@@ -131,16 +143,13 @@ fn body(ui: &mut Ui, node: NodeCtx<'_>, target: InspectTarget, out: &mut Request
     if let Some(message) = error {
         error_callout(ui, theme, message);
     }
-    if node.sink() {
-        line(ui, "Sink", muted_style(theme, ui));
-    }
     if !node.description().is_empty() {
         line(
             ui,
             node.description(),
             TextStyle {
-                color: theme.ports.label,
-                ..body_style(theme, ui)
+                color: theme.port.label,
+                ..support::body_text(ui, theme)
             },
         );
     }
@@ -191,8 +200,8 @@ fn body(ui: &mut Ui, node: NodeCtx<'_>, target: InspectTarget, out: &mut Request
                     ui,
                     &entry.message,
                     TextStyle {
-                        color: log_color(theme, ui, entry.level),
-                        ..support::mono_text(ui, theme.text.label)
+                        color: log_color(theme, entry.level),
+                        ..support::figure_text(ui, theme)
                     },
                 );
             }
@@ -215,25 +224,20 @@ fn card(
         .id(wid)
         .size((Sizing::FILL, Sizing::HUG))
         .padding(Spacing::xy(theme.space.md, theme.space.sm))
-        .chrome(
-            Chrome::rounded(theme.card.fill, Corners::all(theme.radius.card))
-                .with_shadow(theme.card.resting_shadow()),
-        )
+        .chrome(theme.card_chrome())
         .show(ui, |ui| {
             Panel::hstack()
                 .id(wid.with("caption"))
                 .size((Sizing::FILL, Sizing::HUG))
                 .padding(Spacing::new(0.0, 0.0, 0.0, theme.space.xs))
                 .show(ui, |ui| {
-                    let style = TextStyle {
-                        weight: FontWeight::SEMI_BOLD,
-                        ..muted_style(theme, ui)
-                    };
-                    Text::new(caption).style(&style).show(ui);
+                    Text::new(caption)
+                        .style(&support::caption_text(ui, theme))
+                        .show(ui);
                     support::hspacer(ui, "inspector_caption_spacer");
                     let style = TextStyle {
-                        color: theme.ports.label,
-                        ..support::mono_text(ui, theme.text.label)
+                        color: theme.port.label,
+                        ..support::figure_text(ui, theme)
                     };
                     Text::new(fmt!(ui, "{count}"))
                         .id(wid.with("count"))
@@ -244,14 +248,6 @@ fn card(
         });
 }
 
-/// A port row's height: a field box, a body line and 2 px above and below it, with a gutter
-/// around it, so the rows of a card do not touch.
-const PORT_ROW_HEIGHT: f32 = 28.0;
-
-/// The side of a port's dot in a row: under the node's port, which is sized for a wire to land on
-/// and a press to grab, and a row has neither.
-const PORT_DOT_SIDE: f32 = 10.0;
-
 /// The row of the `kind` port at `idx`.
 fn port_wid(kind: PortKind, idx: usize) -> WidgetId {
     WidgetId::from_hash(("darkroom.inspector.port", kind, idx))
@@ -260,6 +256,14 @@ fn port_wid(kind: PortKind, idx: usize) -> WidgetId {
 /// The card captioned `caption`.
 fn card_wid(caption: &'static str) -> WidgetId {
     WidgetId::from_hash(("darkroom.inspector.card", caption))
+}
+
+fn title_wid() -> WidgetId {
+    WidgetId::from_hash("darkroom.inspector.title")
+}
+
+fn kind_mark_wid() -> WidgetId {
+    WidgetId::from_hash("darkroom.inspector.kind_mark")
 }
 
 fn pin_wid() -> WidgetId {
@@ -274,23 +278,6 @@ fn error_wid() -> WidgetId {
     WidgetId::from_hash("darkroom.inspector.error")
 }
 
-/// The name and the kind under it sit closer than the pane's gap, so the kind reads as the
-/// name's subtitle.
-const NAME_KIND_GAP: f32 = 2.0;
-
-/// The status chip's icon and word sit as a node footer's do.
-const STATUS_GAP: f32 = 6.0;
-
-/// The status chip's fill: a [`Theme::wash`] of its ink, light enough that the word reads on it.
-const STATUS_FILL_ALPHA: f32 = 0.14;
-
-/// The error callout's fill: a [`Theme::wash`] of the error ink, under the status chip's, as the
-/// callout is the larger surface.
-const ERROR_FILL_ALPHA: f32 = 0.10;
-
-/// The error callout's bar at its left edge.
-const ERROR_BAR_WIDTH: f32 = 2.0;
-
 /// The failure's cause the callout shows: a failed node's message, when one came.
 fn error_message(status: &ExecStatus) -> Option<&str> {
     match status {
@@ -299,63 +286,18 @@ fn error_message(status: &ExecStatus) -> Option<&str> {
     }
 }
 
-/// The ink and icon of a status chip: the status ink, muted where a status has none, and the icon
-/// the node's footer shows: a cross for a failure, a check for a run.
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct StatusLook {
-    color: RgbaF32,
-    icon: Option<Icon>,
-}
-
-impl StatusLook {
-    const fn of(theme: &Theme, status: &ExecStatus) -> Self {
-        let color = match theme.exec_color(status) {
-            Some(color) => color,
-            None => theme.colors.text_muted,
-        };
-        let icon = match status {
-            ExecStatus::Errored(_) => Some(Icon::Cross),
-            ExecStatus::Executed(_) => Some(Icon::Check),
-            _ => None,
-        };
-        Self { color, icon }
-    }
-}
-
-/// The last run's word on the node as a chip in its [`StatusLook`].
+/// The last run's word on the node as a chip: the node footer's own [`RunStatus`] on a soft wash
+/// of its ink.
 fn status_chip(ui: &mut Ui, theme: &Theme, status: &ExecStatus) {
-    let StatusLook { color, icon } = StatusLook::of(theme, status);
-    let word = status_text(ui, status);
     Panel::hstack()
         .id(status_wid())
         .size((Sizing::HUG, Sizing::HUG))
-        // 2 above and below the label tier, 8 after the word, and 6 before the icon, whose stroke
-        // sits 2 inside its box, so both ends read as 8.
-        .padding(Spacing::new(6.0, 2.0, 8.0, 2.0))
-        .gap(STATUS_GAP)
-        .child_align(Align::v(VAlign::Center))
+        .padding(Spacing::xy(theme.space.sm, theme.space.xxs))
         .chrome(Chrome::rounded(
-            theme.wash(color, STATUS_FILL_ALPHA),
+            color::wash(theme.exec_ink(status), theme.tint.soft, theme.canvas.bg),
             Corners::all(theme.radius.control),
         ))
-        .show(ui, |ui| {
-            if let Some(icon) = icon {
-                let side = theme.text.label;
-                Panel::zstack()
-                    .id_salt("inspector_status_icon")
-                    .size((Sizing::fixed(side), Sizing::fixed(side)))
-                    .show(ui, |ui| {
-                        icon.draw(ui, Rect::new(0.0, 0.0, side, side), color);
-                    });
-            }
-            Text::new(word)
-                .id(status_wid().with("word"))
-                .style(&TextStyle {
-                    weight: FontWeight::MEDIUM,
-                    ..support::colored_text(ui, color, theme.text.label)
-                })
-                .show(ui);
-        });
+        .show(ui, |ui| RunStatus::new(status).show(ui, theme));
 }
 
 /// A failure's message in the body ink on a wash of the error ink, a bar of it at the left: the
@@ -370,20 +312,20 @@ fn error_callout(ui: &mut Ui, theme: &Theme, message: &str) {
         .padding(Spacing::new(0.0, 0.0, pad, 0.0))
         .gap(pad)
         .chrome(Chrome::rounded(
-            theme.wash(error, ERROR_FILL_ALPHA),
-            Corners::all(theme.radius.control),
+            color::wash(error, theme.tint.faint, theme.canvas.bg),
+            Corners::all(theme.radius.card),
         ))
         // The bar runs the callout's height, and its rounded clip curves the bar's ends with it.
         .clip(ClipMode::Rounded)
         .show(ui, |ui| {
             Block::new()
                 .id_salt("inspector_error_bar")
-                .size((Sizing::fixed(ERROR_BAR_WIDTH), Sizing::FILL))
+                .size((Sizing::fixed(theme.stroke.line), Sizing::FILL))
                 .chrome(Chrome::fill(error))
                 .show(ui);
             Text::new(message)
                 .id(error_wid().with("message"))
-                .style(&body_style(theme, ui))
+                .style(&support::body_text(ui, theme))
                 .text_wrap(TextWrap::Wrap)
                 .margin(Spacing::new(0.0, pad, 0.0, pad))
                 .show(ui);
@@ -391,9 +333,9 @@ fn error_callout(ui: &mut Ui, theme: &Theme, message: &str) {
 }
 
 /// A log line's ink by level: info in the body ink, warn and error in their status inks.
-fn log_color(theme: &Theme, ui: &Ui, level: LogLevel) -> RgbaF32 {
+const fn log_color(theme: &Theme, level: LogLevel) -> RgbaF32 {
     match level {
-        LogLevel::Info => ui.theme().text.color,
+        LogLevel::Info => theme.ink.text,
         LogLevel::Warn => theme.status.warning,
         LogLevel::Error => theme.status.error,
     }
@@ -439,17 +381,18 @@ impl PortDot {
         }
     }
 
-    fn show(self, ui: &mut Ui, wid: WidgetId) {
-        let corners = Corners::all(PORT_DOT_SIDE * 0.5);
+    fn show(self, ui: &mut Ui, theme: &Theme, wid: WidgetId) {
+        let side = theme.port.row_dot;
+        let corners = Corners::all(side * 0.5);
         let chrome = match self.fill {
             DotFill::Disc => Chrome::rounded(self.color, corners),
             DotFill::Ring => Chrome::rounded(RgbaF32::TRANSPARENT, corners)
-                .with_border(Stroke::new(self.color, port_glyph::HOLLOW_WIDTH)),
+                .with_border(Stroke::new(self.color, theme.stroke.line)),
             DotFill::Blank => Chrome::NONE,
         };
         Block::new()
             .id(wid)
-            .size((Sizing::fixed(PORT_DOT_SIDE), Sizing::fixed(PORT_DOT_SIDE)))
+            .size((Sizing::fixed(side), Sizing::fixed(side)))
             .chrome(chrome)
             .show(ui);
     }
@@ -478,15 +421,15 @@ impl InspectedPort<'_> {
         } = self;
         Panel::hstack()
             .id(wid)
-            .size((Sizing::FILL, Sizing::fixed(PORT_ROW_HEIGHT)))
+            .size((Sizing::FILL, Sizing::fixed(theme.row_height())))
             .gap(theme.space.sm)
             .child_align(Align::v(VAlign::Center))
             .show(ui, |ui| {
-                dot.show(ui, wid.with("dot"));
+                dot.show(ui, theme, wid.with("dot"));
                 let name = Text::new(name)
                     .style(&TextStyle {
-                        color: theme.ports.label,
-                        ..body_style(theme, ui)
+                        color: theme.port.label,
+                        ..support::body_text(ui, theme)
                     })
                     .text_wrap(TextWrap::Ellipsis)
                     .size((Sizing::FILL, Sizing::HUG))
@@ -500,7 +443,7 @@ impl InspectedPort<'_> {
                     None => {
                         Text::new(shown_type)
                             .id(wid.with("value"))
-                            .style(&muted_style(theme, ui))
+                            .style(&support::muted_text(ui, theme, theme.font.caption))
                             .text_wrap(TextWrap::EllipsisMiddle)
                             .show(ui);
                     }
@@ -570,29 +513,23 @@ impl<'a> PortValue<'a> {
         }
     }
 
-    /// The value in the node's resting field box.
+    /// The value in the node's resting field box, the row's height, as the node's field fills
+    /// its row.
     fn show(self, ui: &mut Ui, theme: &Theme, wid: WidgetId) {
         let style = match self.face {
-            ValueFace::Text => body_style(theme, ui),
-            ValueFace::Number => support::mono_text(ui, theme.text.body),
+            ValueFace::Text => support::body_text(ui, theme),
+            ValueFace::Number => support::mono_text(ui, theme.font.body),
             ValueFace::Unset => {
-                support::colored_text(ui, theme.const_editor.unset, theme.text.body)
+                support::colored_text(ui, theme.const_editor.rest.unset, theme.font.body)
             }
         };
-        let fill = theme
-            .const_editor
-            .drag_value
-            .chip
-            .looks
-            .normal
-            .chrome
-            .fill
-            .clone();
+        let field = &theme.const_editor.rest;
         Panel::hstack()
             .id(wid)
-            .size((Sizing::HUG, Sizing::HUG))
-            .padding(Spacing::xy(theme.space.sm, FIELD_INSET))
-            .chrome(Chrome::rounded(fill, Corners::all(theme.radius.control)))
+            .size((Sizing::HUG, Sizing::FILL))
+            .padding(field.rest_padding())
+            .child_align(Align::v(VAlign::Center))
+            .chrome(field.rest_box().clone())
             .show(ui, |ui| {
                 Text::new(self.text)
                     .id(wid.with("text"))
@@ -603,49 +540,12 @@ impl<'a> PortValue<'a> {
     }
 }
 
-/// A field box's inset above and below its text, as the node's field has.
-const FIELD_INSET: f32 = 2.0;
-
-fn title_style(theme: &Theme, ui: &Ui) -> TextStyle {
-    TextStyle {
-        weight: FontWeight::SEMI_BOLD,
-        ..support::sized_text(ui, theme.text.title)
-    }
-}
-
-/// The pane's de-emphasized ink: a port label's, so a port row reads as it does on the node.
-fn muted_style(theme: &Theme, ui: &Ui) -> TextStyle {
-    support::colored_text(ui, theme.ports.label, theme.text.label)
-}
-
-fn body_style(theme: &Theme, ui: &Ui) -> TextStyle {
-    support::sized_text(ui, theme.text.body)
-}
-
 /// The label of the variant among `variants` that holds `value`, if one does.
 fn variant_label<'a>(variants: &'a [ValueVariant], value: &ConstValue) -> Option<&'a str> {
     variants
         .iter()
         .find(|variant| &variant.value == value)
         .map(ValueVariant::label)
-}
-
-fn status_text(ui: &mut Ui, status: &ExecStatus) -> TextInput<'static> {
-    match status {
-        ExecStatus::None => TextInput::Borrowed("Not run"),
-        ExecStatus::Cached => TextInput::Borrowed("Cached"),
-        ExecStatus::Executed(secs) => {
-            TextInput::Interned(fmt!(ui, "Ran in {}", Elapsed::new(*secs)))
-        }
-        ExecStatus::Running(at) => TextInput::Interned(fmt!(
-            ui,
-            "Running… {}",
-            Elapsed::new(at.elapsed().as_secs_f64())
-        )),
-        ExecStatus::MissingInputs(_) => TextInput::Borrowed("Missing inputs"),
-        ExecStatus::Errored(_) => TextInput::Borrowed("Failed"),
-        ExecStatus::Skipped => TextInput::Borrowed("Skipped: a node before it failed"),
-    }
 }
 
 #[cfg(test)]
@@ -678,7 +578,12 @@ mod tests {
             h.ui.rect(card_wid("Inputs"))
                 .expect("the inputs card recorded");
         let theme = Theme::default();
-        assert_eq!(row.size.h, PORT_ROW_HEIGHT);
+        assert_eq!(row.size.h, theme.row_height());
+        assert_eq!(
+            value.size.h,
+            theme.row_height(),
+            "the field fills the row, as on the node"
+        );
         assert_eq!(value.max().x, row.max().x, "the value ends the row");
         assert_eq!(
             card.max().x - row.max().x,
@@ -690,8 +595,66 @@ mod tests {
                 .expect("the dot recorded");
         assert_eq!(
             (dot.size.w, dot.size.h, dot.min.x - row.min.x),
-            (PORT_DOT_SIDE, PORT_DOT_SIDE, 0.0),
+            (theme.port.row_dot, theme.port.row_dot, 0.0),
             "the dot opens the row"
+        );
+    }
+
+    /// The title row is a port row's height, its chip and pin centered on the title; an impure
+    /// node's kind mark follows the title, at the node header's gap, and a pure node shows none.
+    #[test]
+    fn the_title_row_centers_its_chip_and_pin_and_marks_the_kind() {
+        use crate::core::document::internals::DocumentFixture;
+        use crate::core::edit::graph_intent::GraphIntent;
+        use crate::gui::app::session::internals::SessionHarness;
+        use scenarium::internals::stub_func;
+        use scenarium::{FuncId, FuncInput};
+
+        let inspect = |fixture: DocumentFixture| {
+            let mut h =
+                SessionHarness::new(fixture.with_tab(TabRef::Inspector(InspectTarget::Selection)));
+            let node_id = h.session.open.document.graph.iter().next().unwrap().node_id;
+            let _relayout = h.apply(GraphIntent::SetSelection {
+                to: [ItemId::Node(node_id)].into(),
+            });
+            h.prime(3);
+            h
+        };
+        let theme = Theme::default();
+        let impure = stub_func(FuncId::unique(), "probe")
+            .input(FuncInput::optional("a", DataType::Int))
+            .build();
+        let mut fixture = DocumentFixture::default();
+        fixture.add(&impure);
+        let h = inspect(fixture);
+        let rect = |wid: WidgetId| h.ui.rect(wid).expect("recorded");
+        let row = rect(title_wid());
+        assert_eq!(row.size.h, theme.row_height());
+        let title = rect(title_wid().with("text"));
+        let mark = rect(kind_mark_wid());
+        assert_eq!(
+            mark.min.x,
+            title.max().x + theme.space.xs,
+            "the mark follows the title"
+        );
+        for (what, wid) in [
+            ("title", title_wid().with("text")),
+            ("chip", status_wid()),
+            ("pin", pin_wid()),
+            ("mark", kind_mark_wid()),
+        ] {
+            assert_eq!(
+                rect(wid).center().y,
+                row.center().y,
+                "the {what} centers in the row"
+            );
+        }
+
+        let pure = inspect(DocumentFixture::probes(1));
+        assert_eq!(
+            pure.ui.rect(kind_mark_wid()),
+            None,
+            "a pure node shows no mark"
         );
     }
 
@@ -706,48 +669,26 @@ mod tests {
             (theme.type_colors.float, DotFill::Disc)
         );
         let any = PortDot::of(&theme, &DataType::Any);
-        assert_eq!((any.color, any.fill), (theme.ports.input, DotFill::Ring));
+        assert_eq!((any.color, any.fill), (theme.port.input, DotFill::Ring));
         assert_ne!(float.color, any.color);
     }
 
-    /// The status chip wears each status's ink, the muted ink where a status has none, and the
-    /// footer's icon for a failure and a run alone; the callout shows a failure's message, and
-    /// nothing for a failure without one or any other status.
+    /// The callout shows a failure's message, and nothing for a failure without one or any
+    /// other status; the chip's ink is `Theme::exec_ink`'s.
     #[test]
-    fn the_status_chip_and_the_callout_follow_the_status() {
-        let theme = Theme::default();
-        let s = &theme.status;
-        let muted = theme.colors.text_muted;
+    fn the_callout_shows_a_failures_message_alone() {
         let failed = ExecStatus::Errored(Some("no light frames".to_owned()));
         let cases = [
-            (ExecStatus::None, muted, None, None),
-            (ExecStatus::Cached, s.info, None, None),
-            (
-                ExecStatus::Executed(0.5),
-                s.success,
-                Some(Icon::Check),
-                None,
-            ),
-            (
-                ExecStatus::Running(std::time::Instant::now()),
-                s.busy,
-                None,
-                None,
-            ),
-            (ExecStatus::MissingInputs(Vec::new()), s.warning, None, None),
-            (ExecStatus::Errored(None), s.error, Some(Icon::Cross), None),
-            (failed, s.error, Some(Icon::Cross), Some("no light frames")),
-            (ExecStatus::Skipped, muted, None, None),
+            (ExecStatus::None, None),
+            (ExecStatus::Cached, None),
+            (ExecStatus::Executed(0.5), None),
+            (ExecStatus::Running(std::time::Instant::now()), None),
+            (ExecStatus::MissingInputs(Vec::new()), None),
+            (ExecStatus::Errored(None), None),
+            (failed, Some("no light frames")),
+            (ExecStatus::Skipped, None),
         ];
-        for (status, color, icon, message) in &cases {
-            assert_eq!(
-                StatusLook::of(&theme, status),
-                StatusLook {
-                    color: *color,
-                    icon: *icon
-                },
-                "{status:?}"
-            );
+        for (status, message) in &cases {
             assert_eq!(error_message(status), *message, "{status:?}");
         }
     }

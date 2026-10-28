@@ -1,6 +1,6 @@
-use glam::Vec2;
+use glam::{UVec2, Vec2};
 use palantir::widget::Shape;
-use palantir::{Image, ImageFit, ImageHandle, SrgbaU8, UVec2, Ui};
+use palantir::{Image, ImageFit, ImageHandle, SrgbaU8, Ui};
 
 use crate::core::document::viewport::Viewport;
 use crate::gui::pane::graph_ui::canvas;
