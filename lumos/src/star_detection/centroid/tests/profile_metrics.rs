@@ -1,4 +1,5 @@
 use super::*;
+use crate::star_detection::centroid::covariance::Cov2;
 use crate::star_detection::centroid::stamp::StampFit;
 
 /// A converged fit's widths replace the moment-based FWHM and eccentricity: the Gaussian's both,
@@ -158,6 +159,48 @@ fn windowed_covariance_deconvolves_to_the_source() {
             assert!(cov.xy.abs() <= 1e-7 * xx.min(yy), "{name}: xy {}", cov.xy);
         }
     }
+}
+
+/// The pixel's 1/12 px² leaves each principal variance, stopping at 0. Resolved on both axes,
+/// (2, 1, 0.5), whose minor variance is `(3 − √2)/2` = 0.79, loses it from the diagonal alone. A
+/// line along x, (4, 0, 0), and one on the diagonal, (2, 2, 2), both of variance 4 along their
+/// length, keep `4 − 1/12` of it and none across: FWHM 0 by their zero area, eccentricity 1, so
+/// the filter's eccentricity bound rejects them. A point, 1/24 on each axis, is the zero matrix:
+/// FWHM 0, eccentricity 0.
+#[test]
+fn less_pixel_clamps_each_principal_variance_at_zero() {
+    let rho = 1.0 / 12.0;
+    let resolved = Cov2 {
+        xx: 2.0,
+        yy: 1.0,
+        xy: 0.5,
+    }
+    .less_pixel();
+    assert_eq!(
+        [resolved.xx, resolved.yy, resolved.xy],
+        [2.0 - rho, 1.0 - rho, 0.5]
+    );
+
+    for (name, line) in [("along x", (4.0, 0.0, 0.0)), ("diagonal", (2.0, 2.0, 2.0))] {
+        let (xx, yy, xy) = line;
+        let less = Cov2 { xx, yy, xy }.less_pixel();
+        assert_eq!(less.det(), 0.0, "{name}: {less:?}");
+        assert!(
+            (less.trace() - (4.0 - rho)).abs() <= 4.0 * f64::EPSILON,
+            "{name}: {less:?}"
+        );
+        assert_eq!(less.fwhm(), 0.0, "{name}");
+        assert_eq!(less.eccentricity(), 1.0, "{name}");
+    }
+
+    let point = Cov2 {
+        xx: rho / 2.0,
+        yy: rho / 2.0,
+        xy: 0.0,
+    }
+    .less_pixel();
+    assert_eq!([point.xx, point.yy, point.xy], [0.0; 3]);
+    assert_eq!((point.fwhm(), point.eccentricity()), (0.0, 0.0));
 }
 
 /// Noise in the wings is what the window is for. At the matched window `σ_w = σ` the weighted moments
