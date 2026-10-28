@@ -45,7 +45,7 @@ use crate::gui::theme::elevation_scale::ElevationScale;
 use crate::gui::theme::flat_text_edit::FlatTextEdit;
 use crate::gui::theme::icon_scale::IconScale;
 use crate::gui::theme::inks::Inks;
-use crate::gui::theme::palantir_bridge::{BridgeRoles, MenuButtonLooks};
+use crate::gui::theme::palantir_bridge::BridgeRoles;
 use crate::gui::theme::palette::Palette;
 use crate::gui::theme::port_theme::PortTheme;
 use crate::gui::theme::radius_scale::RadiusScale;
@@ -137,10 +137,6 @@ pub(crate) struct Theme {
     /// broken, as a preferences path that names no file. Precomputed, so a broken field costs no
     /// theme clone per frame.
     pub(crate) field_error: TextEditTheme,
-
-    /// A menu-bar trigger, shut and open. Darkroom's own slot: no palantir widget resolves
-    /// against a menu-bar style, so the bar passes it to [`palantir::Button::style`] itself.
-    pub(crate) menu_button: MenuButtonLooks,
 
     /// A floating toolbar's pill: the surround's color over the popups' frosted glass, so a
     /// readout on it holds its contrast over the image under it.
@@ -341,7 +337,6 @@ impl Theme {
         };
         let metrics = roles.metrics();
         let palantir = palantir_bridge::theme(&pal, &metrics, roles);
-        let menu_button = MenuButtonLooks::new(&pal, &metrics);
         let primary_button = palantir_bridge::primary_button(&pal, &metrics);
         let mut pill = Chrome::rounded(colors.surround_bg, Corners::all(radius.float));
         glass::frost(&mut pill, ink.muted);
@@ -367,7 +362,6 @@ impl Theme {
             const_editor: ConstEditorLooks::new(&pal, &metrics, &palantir.text_edit),
             flat_text_edit: FlatTextEdit::new(&palantir.text_edit),
             field_error,
-            menu_button,
             pill,
             primary_button,
             palantir,
