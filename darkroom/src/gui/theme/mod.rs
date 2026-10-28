@@ -14,6 +14,7 @@ pub(crate) mod color;
 pub(crate) mod const_editor_theme;
 pub(crate) mod elevation_scale;
 pub(crate) mod flat_text_edit;
+pub(crate) mod glass;
 pub(crate) mod icon_scale;
 pub(crate) mod inks;
 pub(crate) mod palantir_bridge;
@@ -140,6 +141,10 @@ pub(crate) struct Theme {
     /// A menu-bar trigger, shut and open. Darkroom's own slot: no palantir widget resolves
     /// against a menu-bar style, so the bar passes it to [`palantir::Button::style`] itself.
     pub(crate) menu_button: MenuButtonLooks,
+
+    /// A floating toolbar's pill: the surround's color over the popups' frosted glass, so a
+    /// readout on it holds its contrast over the image under it.
+    pub(crate) pill: Chrome,
 
     /// A dialog's primary action, the one Return picks: palantir's button filled with the accent.
     /// Darkroom's own slot, as no palantir widget resolves against it.
@@ -338,6 +343,8 @@ impl Theme {
         let palantir = palantir_bridge::theme(&pal, &metrics, roles);
         let menu_button = MenuButtonLooks::new(&pal, &metrics);
         let primary_button = palantir_bridge::primary_button(&pal, &metrics);
+        let mut pill = Chrome::rounded(colors.surround_bg, Corners::all(radius.float));
+        glass::frost(&mut pill, ink.muted);
         let field_error = error_bordered(&palantir.text_edit, status.error);
         Self {
             canvas: CanvasTheme::from_palette(p, &space, &stroke),
@@ -361,6 +368,7 @@ impl Theme {
             flat_text_edit: FlatTextEdit::new(&palantir.text_edit),
             field_error,
             menu_button,
+            pill,
             primary_button,
             palantir,
         }

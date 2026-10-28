@@ -60,31 +60,48 @@ fn default_wiring_and_menu_tweak() {
     assert_eq!(theme.palantir.tooltip.panel.shadow, floating);
     assert_eq!(theme.palantir.modal.panel.shadow, floating);
 
-    // Every light-dismiss popup is frosted glass under its own color at 0.72 alpha; a modal
-    // stays opaque under its scrim. The glass's ceiling holds the muted ink, a popup's dimmest,
-    // at WCAG's 4.5:1 over the brightest backdrop: #a4a4a4 is `Y = 0.371238` and the #383838
-    // panel `Y = 0.039546`, so the brightest ground is `(0.371238 + 0.05) / 4.5 − 0.05 =
-    // 0.043608` and the ceiling `(0.043608 − 0.72 · 0.039546) / 0.28 = 0.05405387`. Over white,
-    // the tint alone left the ground at `0.28 + 0.72 · 0.039546 = 0.308473`, 1.18:1.
+    // Every light-dismiss popup and the toolbar pill are frosted glass under their own color at
+    // 0.72 alpha; a modal stays opaque under its scrim. The glass's ceiling holds the muted ink,
+    // the dimmest each paints, at WCAG's 4.5:1 over the brightest backdrop as an 8-bit target
+    // stores it: #a4a4a4 is `Y = 0.371238`, so the brightest ground is
+    // `(0.371238 + 0.05) / 4.5 − 0.05 = 0.043608`, which encodes to byte 58.91, so byte 58 is the
+    // highest at or under it, and the composite may reach byte 57, `0.04091520`, a step under it.
+    // On the #383838 panel, `Y = 0.039546`, the ceiling is
+    // `(0.04091520 − 0.72 · 0.039546) / 0.28 = 0.04443538`, and on the #1f1f1f surround,
+    // `Y = 0.013702`, it is `(0.04091520 − 0.72 · 0.013702) / 0.28 = 0.11089178`. Byte 58 is
+    // `0.04231141`, 4.563:1. Over white, the panel's tint alone left the ground at
+    // `0.28 + 0.72 · 0.039546 = 0.308473`, 1.18:1.
     let ui = &theme.palantir;
-    for (name, panel) in [
-        ("menu", &menu.panel),
-        ("tooltip", &ui.tooltip.panel),
-        ("color picker", &ui.color_picker.popup),
+    let level = |byte: u8| RgbaF32::from_srgba(SrgbaU8::rgb(byte, byte, byte)).r;
+    let muted = color::luminance(p.text_muted);
+    assert!((muted + 0.05) / (level(58) + 0.05) >= 4.5);
+    assert!(
+        (muted + 0.05) / (level(59) + 0.05) < 4.5,
+        "byte 58 is the highest"
+    );
+    for (name, glass, tint, want) in [
+        ("menu", &menu.panel, p.node_bg, 0.04443538),
+        ("tooltip", &ui.tooltip.panel, p.node_bg, 0.04443538),
+        (
+            "color picker",
+            &ui.color_picker.popup,
+            p.node_bg,
+            0.04443538,
+        ),
+        ("pill", &theme.pill, p.surround_bg, 0.11089178),
     ] {
-        let ceiling = panel.backdrop_filter.max_luminance.expect(name);
+        let ceiling = glass.backdrop_filter.max_luminance.expect(name);
         assert_eq!(
-            panel.backdrop_filter,
+            glass.backdrop_filter,
             palantir::BackdropFilter::frosted(20.0).with_max_luminance(ceiling),
             "{name}"
         );
-        // The hand value's eighth digit, and the derivation's f32 rounding, a few ulps of 4e-9.
-        assert!((ceiling - 0.05405387).abs() < 1e-7, "{name}: {ceiling}");
-        assert_eq!(panel.fill, p.node_bg.with_alpha(0.72).into(), "{name}");
-        let ground = 0.28 * ceiling + 0.72 * color::luminance(p.node_bg);
-        let ratio = (color::luminance(p.text_muted) + 0.05) / (ground + 0.05);
-        // The same f32 rounding, carried through the ratio: a few ulps of 5e-7.
-        assert!((ratio - 4.5).abs() < 2e-6, "{name}: {ratio:.7}:1");
+        // The hand value's eighth digit, and the derivation's f32 rounding, a few ulps of 1e-8.
+        assert!((ceiling - want).abs() < 1e-7, "{name}: {ceiling}");
+        assert_eq!(glass.fill, tint.with_alpha(0.72).into(), "{name}");
+        let ground = 0.28 * ceiling + 0.72 * color::luminance(tint);
+        // The same f32 rounding, carried through: a few ulps of 4e-9.
+        assert!((ground - level(57)).abs() < 2e-8, "{name}: {ground}");
     }
     assert!(ui.modal.panel.backdrop_filter.is_noop());
     assert_eq!(ui.modal.panel.fill, p.element_mid.into());
