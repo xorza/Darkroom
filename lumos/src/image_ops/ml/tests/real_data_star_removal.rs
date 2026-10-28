@@ -1,3 +1,5 @@
+use common::CancelToken;
+
 use crate::image_ops::ml::backend::OnnxModel;
 use crate::image_ops::ml::remove_stars::RemoveStars;
 use crate::internals::real_data::ml_support::onnx_weights;
@@ -33,10 +35,12 @@ fn starnet_removes_stars() {
     // own copy.
     let mut starless_only = img.clone();
     remove
-        .apply(&mut starless_only)
+        .apply(&mut starless_only, &CancelToken::never())
         .expect("starless-only star removal succeeds");
 
-    let result = remove.split(img).expect("star removal succeeds");
+    let result = remove
+        .split(img, &CancelToken::never())
+        .expect("star removal succeeds");
     visual::save_linear(&result.starless, "star_removal/starless");
     visual::save_linear(&result.stars, "star_removal/stars");
     for channel in 0..starless_only.channel_count() {

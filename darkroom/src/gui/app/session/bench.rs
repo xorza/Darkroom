@@ -28,11 +28,11 @@ use common::{Buffer2, Size2us};
 use imaginarium::PlanarImage;
 use std::sync::Arc;
 
-use criterion::measurement::WallTime;
-use criterion::{BenchmarkGroup, Criterion};
+use criterion::Criterion;
 use glam::Vec2;
 use lens::MlModelPaths;
 use palantir::bench::backends::{Backend, Backends};
+use palantir::bench::case_group::CaseGroup;
 use palantir::bench::kind::{Kind, Scale};
 use palantir::internals::frame_fixture::{BENCH_DPR, BENCH_SURFACE};
 use palantir::internals::record_app::RecordApp;
@@ -320,7 +320,7 @@ struct FrameCase {
 impl FrameCase {
     /// Measure the case: build the frame with `build` in the case, run it
     /// through [`SETTLE_FRAMES`], check its paint, then time frames.
-    fn measure<F>(self, group: &mut BenchmarkGroup<'_, WallTime>, build: impl Fn() -> F)
+    fn measure<F>(self, group: &mut CaseGroup<'_>, build: impl Fn() -> F)
     where
         F: FnMut(&mut Editor, u32) -> FramePaint,
     {

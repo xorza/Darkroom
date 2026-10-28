@@ -4,7 +4,7 @@
 //! 512² tiles, feather-blended) and recovers the stars layer by **unscreen**. A **display-domain**
 //! operation: StarNet expects stretched data in `[0, 1]`, so run it after the stretch.
 
-use common::par;
+use common::{CancelToken, par};
 use imaginarium::PlanarImage;
 use rayon::prelude::*;
 
@@ -45,9 +45,10 @@ impl RemoveStars {
     /// Replace `image` with the starless layer, discarding the stars.
     ///
     /// The ONNX inference dominates either way, but this skips the whole-image unscreen pass
-    /// [`split`](Self::split) needs to derive the stars layer.
-    pub fn apply(&mut self, image: &mut LinearImage) -> Result<(), MlError> {
-        self.model.run(image, self.stride)
+    /// [`split`](Self::split) needs to derive the stars layer. A run cancelled through `cancel`
+    /// returns [`MlError::Cancelled`] and leaves `image` partly starless.
+    pub fn apply(&mut self, image: &mut LinearImage, cancel: &CancelToken) -> Result<(), MlError> {
+        self.model.run(image, self.stride, cancel)
     }
 
     /// Both layers: the starless image and the stars unscreened out of it.
@@ -56,8 +57,13 @@ impl RemoveStars {
     /// done its original pixels are no longer needed, so `build_stars` overwrites `image`'s own
     /// buffer in place to become `stars` — a copy of the input and a fresh stars image both
     /// spared. Callers who still need the original pixels afterward should `.clone()` before
-    /// calling. Both layers keep `image`'s metadata, flags and flat gain.
-    pub fn split(&mut self, mut image: LinearImage) -> Result<StarRemovalResult, MlError> {
+    /// calling. Both layers keep `image`'s metadata, flags and flat gain. A run cancelled through
+    /// `cancel` returns [`MlError::Cancelled`].
+    pub fn split(
+        &mut self,
+        mut image: LinearImage,
+        cancel: &CancelToken,
+    ) -> Result<StarRemovalResult, MlError> {
         let desc = image.desc();
         let mut starless = LinearImage::new(
             PlanarImage::from_planar_channels(
@@ -68,7 +74,8 @@ impl RemoveStars {
             image.metadata.clone(),
         );
         starless.set_flat_gain(image.flat_gain().cloned());
-        self.model.run_into(&image, &mut starless, self.stride)?;
+        self.model
+            .run_into(&image, &mut starless, self.stride, cancel)?;
         build_stars(&mut image, &starless);
         Ok(StarRemovalResult {
             starless,

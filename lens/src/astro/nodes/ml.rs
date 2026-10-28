@@ -27,12 +27,9 @@ fn register_denoise(library: &mut Library, model_path: &Path) {
         Func::builder(
             DENOISE_FUNC_ID,
             "ML Denoise",
-            async_lambda!(move |Invocation {
-                                    inputs,
-                                    outputs,
-                                    state,
-                                    ..
-                                }| {
+            async_lambda!(move |Invocation { ctx, inputs, outputs, state, .. }| {
+                cancel = ctx.cancel_flag(),
+            } => {
                 debug_assert_eq!(inputs.len(), 2);
                 debug_assert_eq!(outputs.len(), 1);
                 let path = PathBuf::from(inputs[1].required_fs_path());
@@ -40,12 +37,12 @@ fn register_denoise(library: &mut Library, model_path: &Path) {
                 let (output, kept) =
                     runtime::run_on_planes(mem::take(&mut inputs[0]), move |mut image| {
                         let kept = KeptModel::current(kept, path, denoise)?;
-                        let output = kept.lock().apply(&mut image).map(|()| image);
+                        let output = kept.lock().apply(&mut image, &cancel).map(|()| image);
                         Ok::<_, MlError>((output, kept))
                     })
                     .await?;
                 state.set(kept);
-                let output = output.map_err(InvokeError::external)?;
+                let output = output.map_err(invoke_error)?;
                 outputs[0] = DynamicValue::from_custom(Image::from(output));
                 Ok(())
             }),
@@ -65,7 +62,8 @@ fn register_star_removal(library: &mut Library, model_path: &Path) {
         Func::builder(
             STAR_REMOVAL_FUNC_ID,
             "ML Star Removal",
-            async_lambda!(move |Invocation { inputs, demand: output_demand, outputs, state, .. }| {
+            async_lambda!(move |Invocation { ctx, inputs, demand: output_demand, outputs, state, .. }| {
+                cancel = ctx.cancel_flag(),
                 need_stars = !output_demand[1].is_skip(),
             } => {
                 debug_assert_eq!(inputs.len(), 2);
@@ -76,12 +74,12 @@ fn register_star_removal(library: &mut Library, model_path: &Path) {
                     let (result, kept) =
                         runtime::run_on_planes(mem::take(&mut inputs[0]), move |image| {
                             let kept = KeptModel::current(kept, path, star_removal)?;
-                            let result = kept.lock().split(image);
+                            let result = kept.lock().split(image, &cancel);
                             Ok::<_, MlError>((result, kept))
                         })
                         .await?;
                     state.set(kept);
-                    let result = result.map_err(InvokeError::external)?;
+                    let result = result.map_err(invoke_error)?;
                     outputs[0] = DynamicValue::from_custom(Image::from(result.starless));
                     outputs[1] = DynamicValue::from_custom(Image::from(result.stars));
                 } else {
@@ -89,13 +87,14 @@ fn register_star_removal(library: &mut Library, model_path: &Path) {
                         mem::take(&mut inputs[0]),
                         move |mut image| {
                             let kept = KeptModel::current(kept, path, star_removal)?;
-                            let starless = kept.lock().apply(&mut image).map(|()| image);
+                            let starless =
+                                kept.lock().apply(&mut image, &cancel).map(|()| image);
                             Ok::<_, MlError>((starless, kept))
                         },
                     )
                     .await?;
                     state.set(kept);
-                    let starless = starless.map_err(InvokeError::external)?;
+                    let starless = starless.map_err(invoke_error)?;
                     outputs[0] = DynamicValue::from_custom(Image::from(starless));
                 }
                 Ok(())
@@ -125,6 +124,15 @@ fn model_input(name: &str, default: &Path) -> FuncInput {
     )
     .description("ONNX model file. Its file identity participates in the node cache key.")
     .default(ConstValue::FsPath(default.display().to_string()))
+}
+
+/// A model's failure as the node reports it: a cancel as the run's own, so the executor reads the
+/// node as stopped rather than failed.
+fn invoke_error(error: MlError) -> InvokeError {
+    match error {
+        MlError::Cancelled => InvokeError::Cancelled,
+        error => InvokeError::external(error),
+    }
 }
 
 /// The denoise model at `path`, loaded now.
@@ -194,9 +202,24 @@ mod tests {
     use std::cell::Cell;
 
     use common::{TempDir, fs};
-    use scenarium::AnyState;
+    use lumos::MlError;
+    use scenarium::{AnyState, InvokeError};
 
-    use crate::astro::nodes::ml::KeptModel;
+    use crate::astro::nodes::ml::{KeptModel, invoke_error};
+
+    /// A model's cancel reaches the executor as the run's cancel, and its other failures as the
+    /// node's own.
+    #[test]
+    fn a_cancelled_model_reports_the_run_cancelled() {
+        assert!(matches!(
+            invoke_error(MlError::Cancelled),
+            InvokeError::Cancelled
+        ));
+        assert!(matches!(
+            invoke_error(MlError::OutputLen { len: 1 }),
+            InvokeError::External(_)
+        ));
+    }
 
     /// A model is loaded once and kept while its file stays the same: a second run of the same
     /// file loads nothing, a rewritten file of another length loads again, and a node asked for

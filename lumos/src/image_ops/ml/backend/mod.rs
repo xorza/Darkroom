@@ -10,13 +10,13 @@
 
 use std::path::Path;
 
-use common::fs;
+use common::{CancelToken, fs};
 use imaginarium::PlanarDesc;
 use ort::session::Session;
 use ort::value::TensorRef;
 
 use crate::config_field::ConfigField;
-use crate::error::InvalidConfigField;
+use crate::error::{Cancelled, InvalidConfigField};
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::error::MlError;
 use common::Vec2us;
@@ -60,9 +60,14 @@ impl OnnxModel {
     }
 
     /// The model over `image` in 512² tiles at `stride`, feather-blended, written into `image`'s
-    /// planes: see [`run_tiles`].
-    pub(crate) fn run(&mut self, image: &mut LinearImage, stride: usize) -> Result<(), MlError> {
-        run_tiles(Planes::InPlace(image), stride, |input, output| {
+    /// planes, until `cancel` is set: see [`run_tiles`].
+    pub(crate) fn run(
+        &mut self,
+        image: &mut LinearImage,
+        stride: usize,
+        cancel: &CancelToken,
+    ) -> Result<(), MlError> {
+        run_tiles(Planes::InPlace(image), stride, cancel, |input, output| {
             self.infer(input, output)
         })
     }
@@ -73,11 +78,15 @@ impl OnnxModel {
         input: &LinearImage,
         output: &mut LinearImage,
         stride: usize,
+        cancel: &CancelToken,
     ) -> Result<(), MlError> {
         debug_assert_eq!(output.desc(), input.desc());
-        run_tiles(Planes::Apart { input, output }, stride, |input, output| {
-            self.infer(input, output)
-        })
+        run_tiles(
+            Planes::Apart { input, output },
+            stride,
+            cancel,
+            |input, output| self.infer(input, output),
+        )
     }
 
     /// The model's output tile for the `input` tile, written into `output`.
@@ -130,12 +139,18 @@ impl Planes<'_> {
 /// and writes each final row as the tile row ends, which an image read in place allows too. One
 /// input and one output buffer serve every tile.
 ///
+/// `cancel` is polled before each tile: one tile is the unit ONNX Runtime runs without a return,
+/// about 0.17 s on a 10-core machine (60 s over the 23 × 15 tiles of a 6000 × 4000 frame at
+/// the default stride), so a cancel stops the run within one tile.
+///
 /// # Errors
 /// [`MlError::Config`] for a stride that does not cover the frame at full weight, refused before
-/// any tile runs; [`MlError::TooSmall`] for an image smaller than a tile; and what `infer` returns.
+/// any tile runs; [`MlError::TooSmall`] for an image smaller than a tile; [`MlError::Cancelled`]
+/// once `cancel` is set, the output's planes then partly written; and what `infer` returns.
 fn run_tiles(
     mut planes: Planes<'_>,
     stride: usize,
+    cancel: &CancelToken,
     mut infer: impl FnMut(&[f32], &mut [f32]) -> Result<(), MlError>,
 ) -> Result<(), MlError> {
     validate_stride(stride)?;
@@ -151,6 +166,7 @@ fn run_tiles(
     let ys = tile_starts(size.height, stride);
     for (row, &ty) in ys.iter().enumerate() {
         for &tx in &xs {
+            Cancelled::check(cancel)?;
             let tile = Vec2us::new(tx, ty);
             fill_tile_input(planes.input(), tile, &mut input);
             infer(&input, &mut output)?;

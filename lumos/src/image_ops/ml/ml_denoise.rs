@@ -5,6 +5,8 @@
 //! stretched data, so feed the stretched `[0,1]` image — mirroring how `NoiseXTerminator` /
 //! GraXpert AI denoise are applied (after the stretch / channel combination).
 
+use common::CancelToken;
+
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::error::MlError;
 use crate::image_ops::ml::backend::OnnxModel;
@@ -30,7 +32,9 @@ impl MlDenoise {
         }
     }
 
-    pub fn apply(&mut self, image: &mut LinearImage) -> Result<(), MlError> {
-        self.model.run(image, self.stride)
+    /// Denoise `image` in place, until `cancel` is set: a cancelled run returns
+    /// [`MlError::Cancelled`] and leaves `image` partly denoised.
+    pub fn apply(&mut self, image: &mut LinearImage, cancel: &CancelToken) -> Result<(), MlError> {
+        self.model.run(image, self.stride, cancel)
     }
 }
