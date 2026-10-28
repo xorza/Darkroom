@@ -328,8 +328,10 @@ fn the_demosaic_support_bounds_every_impulse_response() {
     }
 }
 
-/// A flag on one photosite covers every output pixel the demosaic reads it into, and `NO_DATA`
-/// stays where it was: a saturated photosite at (20, 20) flags the 21 × 21 square around it.
+/// A bound on one photosite covers every output pixel the demosaic reads it into, and a photosite
+/// repaired before it stays where it was: a saturated photosite at (20, 20) flags the 21 × 21
+/// square around it, while the null at (40, 40), the defect at (40, 5) and the hit at (5, 40)
+/// flag their own pixel alone, each `REPAIRED`.
 #[test]
 fn demosaic_spreads_flags_by_its_support() {
     let size = Size2us::new(48usize, 48usize);
@@ -341,6 +343,8 @@ fn demosaic_spreads_flags_by_its_support() {
     cfa.set_flags(PixelFlags::from_fn(size, |idx| match idx {
         idx if idx == 20 * 48 + 20 => QualityFlags::SATURATED,
         idx if idx == 40 * 48 + 40 => QualityFlags::NO_DATA,
+        idx if idx == 5 * 48 + 40 => QualityFlags::DEFECT.union(QualityFlags::REPAIRED),
+        idx if idx == 40 * 48 + 5 => QualityFlags::COSMIC_RAY.union(QualityFlags::REPAIRED),
         _ => QualityFlags::default(),
     }));
     let flags = cfa
@@ -350,6 +354,13 @@ fn demosaic_spreads_flags_by_its_support() {
         .unwrap();
     assert_eq!(flags.count(QualityFlags::SATURATED), 21 * 21);
     assert_eq!(flags.count(QualityFlags::NO_DATA), 1);
+    assert_eq!(flags.count(QualityFlags::DEFECT), 1);
+    assert_eq!(flags.count(QualityFlags::COSMIC_RAY), 1);
+    assert_eq!(flags.count(QualityFlags::REPAIRED), 3);
+    assert_eq!(
+        flags.at_pos(Vec2us::new(40, 5)),
+        QualityFlags::DEFECT.union(QualityFlags::REPAIRED)
+    );
     assert!(
         flags
             .at_pos(Vec2us::new(10, 30))
@@ -427,7 +438,8 @@ fn a_balanced_demosaic_keeps_neutral_detail_neutral() {
 /// diagonals, 11 and 13, so `(4 + 24r) / (2 + 2r)` with `r = 1/√2`. A filled photosite carries
 /// the flags of the greens it was filled from, a green its own: green (1, 0) is saturated, and
 /// so are the red (0, 0) and blue (1, 1) it fills, while blue (3, 3), whose greens are (2, 3),
-/// (4, 3), (3, 2) and (3, 4), carries nothing.
+/// (4, 3), (3, 2) and (3, 4), carries nothing: the defect repaired at green (3, 2) stays on it.
+/// The null at green (2, 5), which no repair filled, reaches red (2, 4) beside it.
 #[test]
 fn the_green_proxy_fills_each_photosite_from_its_greens() {
     let size = Size2us::new(6, 6);
@@ -440,6 +452,9 @@ fn the_green_proxy_fills_each_photosite_from_its_greens() {
         CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
     );
     bayer.add_flags_where(QualityFlags::SATURATED, |idx| idx == 1);
+    let repaired = QualityFlags::DEFECT.union(QualityFlags::REPAIRED);
+    bayer.add_flags_where(repaired, |idx| idx == 15);
+    bayer.add_flags_where(QualityFlags::NO_DATA, |idx| idx == 32);
     let proxy = bayer.green_proxy();
     let plane = proxy.channel(0);
     assert_eq!(plane[(0, 0)], 5.5);
@@ -451,6 +466,9 @@ fn the_green_proxy_fills_each_photosite_from_its_greens() {
         (0, QualityFlags::SATURATED),
         (7, QualityFlags::SATURATED),
         (21, QualityFlags::default()),
+        (15, repaired),
+        (26, QualityFlags::NO_DATA),
+        (32, QualityFlags::NO_DATA),
     ] {
         assert_eq!(flags.at(pixel), expected, "pixel {pixel}");
     }
