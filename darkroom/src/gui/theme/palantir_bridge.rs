@@ -2,8 +2,8 @@
 //! [`palantir::Palette`], and the [`palantir::Theme`] that builds.
 
 use palantir::{
-    ButtonTheme, Chrome, CloseShown, RadiusSteps, RgbaF32, SpaceSteps, Stroke, StrokeSteps,
-    TextStyleOverrides, WidgetLook,
+    ButtonTheme, Chrome, CloseShown, MenuBarTheme, RadiusSteps, RgbaF32, SpaceSteps, Stroke,
+    StrokeSteps, TextStyleOverrides, WidgetLook,
 };
 
 use crate::gui::theme::color;
@@ -114,6 +114,7 @@ pub(super) fn theme(
     theme.splitter.rule_thickness = m.space.xs;
 
     tab_roles(&mut theme, p, r);
+    menu_bar_roles(&mut theme.menu_bar, p, m);
 
     theme.text = theme.text.with_font_size(r.font.body);
     theme.tooltip.text = TextStyleOverrides::NONE;
@@ -181,47 +182,25 @@ fn tab_roles(theme: &mut palantir::Theme, p: &palantir::Palette, r: BridgeRoles<
     theme.dock.ghost.chrome.fill = r.surround_bg.into();
 }
 
-/// A menu-bar trigger's two looks, built beside each other so they cannot drift.
-#[derive(Clone, Debug)]
-pub(crate) struct MenuButtonLooks {
-    /// The trigger whose menu is shut.
-    pub(crate) shut: ButtonTheme,
-    /// The trigger whose menu is open: lit at rest as when hovered, as macOS, Windows and GNOME
-    /// light the title of the open menu.
-    pub(crate) open: ButtonTheme,
-}
-
-impl MenuButtonLooks {
-    pub(super) fn new(p: &palantir::Palette, m: &palantir::Metrics) -> Self {
-        let shut = menu_button(p, m);
-        let mut open = shut.clone();
-        open.looks.normal = open.looks.hovered.clone();
-        Self { shut, open }
-    }
-}
-
-/// Menu-bar trigger look: palantir's [`ButtonTheme::menu_button`] recipe
-/// (transparent at rest, `element_mid` / `element_strong` fills, no chip
-/// overlay) with the label muted until hovered — so a trigger reads as a
-/// menu, not as a button.
-///
-/// Pins color; every other axis inherits the ambient style an unstyled label
-/// would have.
-fn menu_button(p: &palantir::Palette, m: &palantir::Metrics) -> ButtonTheme {
-    let mut mb = ButtonTheme::menu_button(p, m);
+/// The menu bar's titles: palantir's flat recipe with the label muted until hovered, so a title
+/// reads as a menu, not as a button, the open title in the hovered label as in its fill, and an
+/// `xs` gutter between titles. Pins color; every other axis inherits the ambient style an
+/// unstyled label would have.
+fn menu_bar_roles(bar: &mut MenuBarTheme, p: &palantir::Palette, m: &palantir::Metrics) {
+    bar.gap = m.space.xs;
     let restyle = |look: &mut WidgetLook, color: RgbaF32| {
         look.text = look.text.with_color(color);
     };
-    let [normal, hovered, active, disabled] = mb.looks.each_mut();
+    let [normal, hovered, active, disabled] = bar.title.each_mut();
     restyle(normal, p.text_muted);
     restyle(hovered, p.text);
     restyle(active, p.text);
     restyle(disabled, p.text_disabled);
-    mb
+    restyle(&mut bar.open, p.text);
 }
 
 /// A dialog's primary action: palantir's button recipe filled with the accent and its label in
-/// the window's ground ink, as `menu_button` derives the menu bar's from palantir's. Under the
+/// the window's ground ink, as `menu_bar_roles` restyles the menu bar's from palantir's. Under the
 /// pointer it lifts as a port does; pressed, it drops back to the accent.
 pub(super) fn primary_button(p: &palantir::Palette, m: &palantir::Metrics) -> ButtonTheme {
     let mut button = ButtonTheme::from_parts(p, m);

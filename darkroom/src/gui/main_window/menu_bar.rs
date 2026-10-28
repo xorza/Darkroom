@@ -1,7 +1,6 @@
-use glam::Vec2;
 use palantir::{
-    Align, Button, CloseHandle, Configure, ContextMenu, DockOperation, HAlign, MenuItem,
-    MenuSeparator, Panel, Sense, Shortcut, Sizing, Spacing, Text, Ui, VAlign, WidgetId, fmt,
+    Align, CloseHandle, Configure, DockOperation, HAlign, MenuBar, MenuBarMenus, MenuItem,
+    MenuSeparator, Panel, Sense, Shortcut, Sizing, Spacing, Text, Ui, VAlign, fmt,
 };
 use scenarium::NodeId;
 
@@ -13,12 +12,10 @@ use crate::gui::frame::requests::Requests;
 use crate::gui::frame::shortcuts;
 use crate::gui::frame::window_ctx::WindowCtx;
 use crate::gui::pane::graph_ui::gesture::pan_zoom::Framing;
-use crate::gui::theme::Theme;
 use crate::gui::widgets::support;
 
-/// Top-of-window menu bar: the menu triggers at the left, each opening a [`ContextMenu`]
-/// anchored at its bottom-left, and the document's name at the center, with a dot while it has
-/// unsaved edits.
+/// Top-of-window menu bar: palantir's [`MenuBar`] at the left, and the document's name at the
+/// center, with a dot while it has unsaved edits.
 ///
 /// A pick goes onto `out` in whichever tier it belongs to: graph edits as intents, the file
 /// lifecycle, the history, the run, the view and `Quit` as [`AppCommand`]s for `App` to run after
@@ -30,52 +27,19 @@ pub(crate) fn show(ui: &mut Ui, ctx: WindowCtx<'_>, out: &mut Requests) {
         .id_salt("menu_bar")
         .size((Sizing::FILL, Sizing::HUG))
         .show(ui, |ui| {
-            Panel::hstack()
+            MenuBar::new()
                 .id_salt("menu_bar_menus")
                 .size((Sizing::HUG, Sizing::HUG))
                 .align(Align::new(HAlign::Left, VAlign::Center))
                 .padding(Spacing::xy(theme.surround_inset(), theme.space.xs))
-                .gap(theme.space.xs)
-                .show(ui, |ui| {
-                    file_menu(ui, theme, out);
-                    edit_menu(ui, ctx, out);
-                    graph_menu(ui, ctx, out);
-                    view_menu(ui, theme, out);
+                .show(ui, |bar| {
+                    file_menu(bar, out);
+                    edit_menu(bar, ctx, out);
+                    graph_menu(bar, ctx, out);
+                    view_menu(bar, out);
                 });
             document_name(ui, ctx);
         });
-}
-
-/// One menu-bar dropdown: a flat trigger button labelled `label` that toggles
-/// a `ContextMenu` of [`MenuItem`] rows. Centralizes the trigger + anchor +
-/// open plumbing so each menu is just its label + rows.
-#[derive(Clone, Copy, Debug)]
-struct Dropdown {
-    label: &'static str,
-}
-
-impl Dropdown {
-    /// `build` populates the popup and raises whatever a pick means.
-    fn show(self, ui: &mut Ui, theme: &Theme, build: impl FnOnce(&mut Ui, &CloseHandle)) {
-        let id = WidgetId::from_hash(("darkroom.menu_bar", self.label));
-        let style = if ContextMenu::is_open(ui, id) {
-            &theme.menu_button.open
-        } else {
-            &theme.menu_button.shut
-        };
-        let trigger = Button::new()
-            .id(id)
-            .label(self.label)
-            .style(style)
-            .show(ui)
-            .snapshot();
-        if trigger.left.clicked()
-            && let Some(rect) = trigger.rect
-        {
-            ContextMenu::open(ui, trigger.id, Vec2::new(rect.min.x, rect.max().y));
-        }
-        ContextMenu::for_id(trigger.id).show(ui, build);
-    }
 }
 
 /// One row, `enabled` or greyed out, with the chord its handler reads shown beside it; `true`
@@ -95,8 +59,8 @@ fn item(
     row.show(ui, popup).left.clicked()
 }
 
-fn file_menu(ui: &mut Ui, theme: &Theme, out: &mut Requests) {
-    Dropdown { label: "File" }.show(ui, theme, |ui, popup| {
+fn file_menu(bar: &mut MenuBarMenus<'_>, out: &mut Requests) {
+    bar.menu("File", |ui, popup| {
         let file = [
             ("New", Some(shortcuts::NEW), FileCommand::New),
             ("Open…", Some(shortcuts::OPEN), FileCommand::Open),
@@ -123,10 +87,10 @@ fn file_menu(ui: &mut Ui, theme: &Theme, out: &mut Requests) {
 
 /// The history and the selection's edits. Duplicate drops the wires from producers outside the
 /// selection, as Ctrl+D does.
-fn edit_menu(ui: &mut Ui, ctx: WindowCtx<'_>, out: &mut Requests) {
+fn edit_menu(bar: &mut MenuBarMenus<'_>, ctx: WindowCtx<'_>, out: &mut Requests) {
     let (open, app) = (ctx.open(), ctx.app());
     let selected = !open.document.main_view.selected.is_empty();
-    Dropdown { label: "Edit" }.show(ui, app.theme(), |ui, popup| {
+    bar.menu("Edit", |ui, popup| {
         if item(ui, popup, "Undo", Some(shortcuts::UNDO), open.can_undo()) {
             out.push_app(AppCommand::Undo);
         }
@@ -149,11 +113,11 @@ fn edit_menu(ui: &mut Ui, ctx: WindowCtx<'_>, out: &mut Requests) {
 }
 
 /// The run and the camera: what the canvas toolbar does, by name and with its keys.
-fn graph_menu(ui: &mut Ui, ctx: WindowCtx<'_>, out: &mut Requests) {
+fn graph_menu(bar: &mut MenuBarMenus<'_>, ctx: WindowCtx<'_>, out: &mut Requests) {
     let app = ctx.app();
     let activity = app.run_state().activity();
     let selected = !ctx.document().main_view.selected.is_empty();
-    Dropdown { label: "Graph" }.show(ui, app.theme(), |ui, popup| {
+    bar.menu("Graph", |ui, popup| {
         let running = activity.is_executing();
         if item(ui, popup, "Run", Some(shortcuts::RUN), !running) {
             out.push_app(AppCommand::Run(RunCommand::Once));
@@ -188,8 +152,8 @@ fn graph_menu(ui: &mut Ui, ctx: WindowCtx<'_>, out: &mut Requests) {
     });
 }
 
-fn view_menu(ui: &mut Ui, theme: &Theme, out: &mut Requests) {
-    Dropdown { label: "View" }.show(ui, theme, |ui, popup| {
+fn view_menu(bar: &mut MenuBarMenus<'_>, out: &mut Requests) {
+    bar.menu("View", |ui, popup| {
         if item(ui, popup, "Copy View as Image", None, true) {
             out.push_app(AppCommand::View(ViewCommand::CopyImage));
         }

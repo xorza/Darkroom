@@ -18,7 +18,7 @@ assert_not_impl_any!(FlatTextEdit: Copy);
 
 /// Pin which palette role reaches which field, plus the non-trivial
 /// palantir tweak, so a regression in `Theme::build`'s wiring, in
-/// `palantir_bridge::theme`, or in `palantir_bridge::menu_button` fails
+/// `palantir_bridge::theme`, or in `palantir_bridge::menu_bar_roles` fails
 /// loudly. Against the loaded palette rather than hex literals: the values
 /// are the palette's to choose, but landing `element_strong` in `canvas.bg` is
 /// still a bug.
@@ -40,10 +40,11 @@ fn default_wiring_and_menu_tweak() {
     assert!(theme.palantir.tooltip.max_size.h.is_infinite());
 
     // The open menu's trigger rests lit, as the hovered one does; a shut one rests flat.
-    let (shut, open) = (&theme.menu_button.shut.looks, &theme.menu_button.open.looks);
-    assert_eq!(open.normal, shut.hovered);
-    assert_eq!(open.hovered, shut.hovered);
-    assert_ne!(open.normal, shut.normal);
+    let bar = &theme.palantir.menu_bar;
+    assert_eq!(bar.open, bar.title.hovered);
+    assert_ne!(bar.open, bar.title.normal);
+    assert_eq!(bar.title.normal.text.color, Some(p.text_muted));
+    assert_eq!(bar.open.text.color, Some(p.text));
     // A menu's rows and panel as the review drew them.
     let menu = &theme.palantir.context_menu;
     assert_eq!(
@@ -116,7 +117,7 @@ fn every_palantir_widget_resolves_to_the_body_tier() {
     assert_eq!(ui.text.font_size, theme.font.body);
     let looks = [
         ("button", &ui.button.looks),
-        ("menu button", &theme.menu_button.shut.looks),
+        ("menu bar title", &ui.menu_bar.title),
         ("menu item", &ui.context_menu.item.looks),
         ("selected tab", &ui.tabs.selected),
         ("unselected tab", &ui.tabs.unselected),
@@ -388,14 +389,8 @@ fn every_palantir_padding_and_radius_is_on_the_scale() {
     assert_eq!(ui.context_menu.panel.corners.to_array(), [float; 4]);
     assert_eq!(ui.tabs.strip_padding.to_array(), [sm, xs, sm, 0.0]);
     assert_eq!(ui.tabs.chip_padding, ui.context_menu.item.defaults.padding);
-    assert_eq!(
-        theme.menu_button.shut.defaults.padding,
-        ui.tabs.chip_padding
-    );
-    assert_eq!(
-        theme.menu_button.open.defaults.padding,
-        ui.tabs.chip_padding
-    );
+    assert_eq!(ui.menu_bar.defaults.padding, ui.tabs.chip_padding);
+    assert_eq!(ui.menu_bar.gap, xs);
     assert_eq!(ui.tabs.chip_padding.to_array(), [md, sm, md, sm]);
     assert_eq!(
         (ui.tabs.gap, ui.tabs.label_gap, ui.tabs.trailing_inset),
@@ -419,7 +414,7 @@ fn a_tab_chip_and_its_close_button_are_ghosts() {
     let looks = &tabs.unselected;
     assert_eq!(looks.normal.chrome, Chrome::NONE);
     assert_eq!(looks.disabled.chrome, Chrome::NONE);
-    let titles = &theme.menu_button.shut.looks;
+    let titles = &theme.palantir.menu_bar.title;
     assert_eq!(looks.hovered.chrome.fill, titles.hovered.chrome.fill);
     assert_eq!(looks.active.chrome.fill, titles.active.chrome.fill);
     assert_eq!(tabs.close.hovered.chrome.fill, titles.active.chrome.fill);
