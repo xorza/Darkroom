@@ -20,9 +20,9 @@ const PARAMS: MeshParams = MeshParams {
 #[test]
 fn only_the_noise_is_held_to_the_tiles_range() {
     let sigmas = [1.0f32, 1.0, 1.0, 4.0];
-    let pixels = Buffer2::from_fn((64, 128), |x, y| {
-        let k = y / 32;
-        let sign = if (x + y) % 2 == 0 { 1.0 } else { -1.0 };
+    let pixels = Buffer2::from_fn((64, 128), |at| {
+        let k = at.y / 32;
+        let sign = if (at.x + at.y) % 2 == 0 { 1.0 } else { -1.0 };
         (k * k) as f32 + sign * sigmas[k]
     });
     let grid = BgMesh::computed(&pixels, None, PARAMS);
@@ -52,9 +52,11 @@ fn only_the_noise_is_held_to_the_tiles_range() {
 /// reader of the σ starts from none of the rows the sky's readers solved.
 #[test]
 fn a_pixel_is_its_row_bit_for_bit() {
-    let pixels = Buffer2::from_fn((100, 70), |x, y| {
-        let sign = if (x + y) % 2 == 0 { 1.0 } else { -1.0 };
-        0.1 + 0.001 * x as f32 + 0.002 * y as f32 + sign * (0.01 + 0.0005 * (x / 32) as f32)
+    let pixels = Buffer2::from_fn((100, 70), |at| {
+        let sign = if (at.x + at.y) % 2 == 0 { 1.0 } else { -1.0 };
+        0.1 + 0.001 * at.x as f32
+            + 0.002 * at.y as f32
+            + sign * (0.01 + 0.0005 * (at.x / 32) as f32)
     });
     let grid = BgMesh::computed(&pixels, None, PARAMS);
     let mut spline = MeshSpline::default();

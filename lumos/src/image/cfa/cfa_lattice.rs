@@ -272,7 +272,7 @@ mod tests {
                 }
                 _ => 0.125 * (cfa.slot_at(pos) + 1) as f32,
             };
-            let pixels = Buffer2::from_fn(size, |x, y| level(USizeVec2::new(x, y)));
+            let pixels = Buffer2::from_fn(size, level);
             let mut scratch = Gathered::default();
             for y in 0..size.height {
                 for x in 0..size.width {

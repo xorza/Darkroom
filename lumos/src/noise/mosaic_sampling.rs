@@ -197,7 +197,6 @@ mod tests {
     use crate::math::statistics::subsample::MAX_STATISTIC_SAMPLES;
     use crate::noise::mosaic_sampling::MosaicSampling;
     use common::USize2;
-    use glam::USizeVec2;
 
     /// Each color of a Bayer mosaic reads its own noise, through a gradient the differences
     /// cancel. σ = 0.01 red, 0.02 green, 0.03 blue on a 512² mosaic: every row holds 255 pairs of
@@ -211,9 +210,9 @@ mod tests {
         let rggb = Mosaic::Bayer(BayerPattern::Rggb);
         let sigmas = [0.01f32, 0.02, 0.03];
         let mut rng = TestRng::new(9);
-        let mosaic = Buffer2::from_fn((512, 512), |x, y| {
-            let color = rggb.slot_at(USizeVec2::new(x, y));
-            0.2 + 0.3 * (x as f32 / 512.0) + sigmas[color] * rng.next_gaussian_f32()
+        let mosaic = Buffer2::from_fn((512, 512), |at| {
+            let color = rggb.slot_at(at);
+            0.2 + 0.3 * (at.x as f32 / 512.0) + sigmas[color] * rng.next_gaussian_f32()
         });
         for per_color in [MAX_STATISTIC_SAMPLES, 43_690] {
             let sampling = MosaicSampling {

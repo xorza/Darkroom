@@ -860,7 +860,7 @@ fn samples_spread_evenly_by_rank_past_the_limit() {
     };
     check(every(USize2::new(pixel_count, 1)), [0, 3, 6, 9], 199_996);
 
-    let even = Buffer2::from_fn((pixel_count, 1), |x, _| if x % 2 == 0 { 1.0 } else { 0.0 });
+    let even = Buffer2::from_fn((pixel_count, 1), |at| if at.x % 2 == 0 { 1.0 } else { 0.0 });
     let frame = StoredFrame::from_memory(
         LinearImage::from_interleaved(
             PlanarDesc::new((pixel_count, 1), ChannelLayout::Mono),
@@ -1203,8 +1203,8 @@ fn per_channel_frames_are_normalized_pair_by_pair() {
                 .collect();
             let drops = (0..3)
                 .map(|c| {
-                    let reached = Buffer2::from_fn((8, 1), |x, _| {
-                        f32::from(u8::from(reaches(frame, c).contains(&x)))
+                    let reached = Buffer2::from_fn((8, 1), |at| {
+                        f32::from(u8::from(reaches(frame, c).contains(&at.x)))
                     });
                     DropPlanes {
                         weight: reached.clone(),
@@ -1422,7 +1422,7 @@ fn per_channel_frames_sharing_no_pixel_are_normalized_one_by_one() {
             .collect();
         let drops = (0..3)
             .map(|_| {
-                let reach = Buffer2::from_fn((4, 1), |x, _| f32::from(u8::from(x == reached)));
+                let reach = Buffer2::from_fn((4, 1), |at| f32::from(u8::from(at.x == reached)));
                 DropPlanes {
                     weight: reach.clone(),
                     confidence: reach,

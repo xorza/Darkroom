@@ -97,7 +97,7 @@ fn a_flat_gain_survives_the_fits_round_trip() {
     let size = USize2::new(12, 6);
     let bayer = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
     let gain = Arc::new(FlatGain::of_divisor(
-        &Buffer2::from_fn((12, 6), |x, _| 1.0 - 0.3 * x as f32 / 12.0),
+        &Buffer2::from_fn((12, 6), |at| 1.0 - 0.3 * at.x as f32 / 12.0),
         &bayer,
         |_| false,
     ));
@@ -266,7 +266,7 @@ fn a_flat_gain_survives_the_fits_round_trip() {
 fn a_gain_the_run_holds_is_not_read_again() {
     let bayer = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
     let gain = Arc::new(FlatGain::of_divisor(
-        &Buffer2::from_fn((12, 6), |x, _| 1.0 - 0.3 * x as f32 / 12.0),
+        &Buffer2::from_fn((12, 6), |at| 1.0 - 0.3 * at.x as f32 / 12.0),
         &bayer,
         |_| false,
     ));

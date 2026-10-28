@@ -135,9 +135,9 @@ fn windowed_covariance_deconvolves_to_the_source() {
             sigma_y,
             angle: 0.0,
         };
-        let pixels = Buffer2::from_fn(size, |x, y| {
-            let dx = x as f64 - pos.x;
-            let dy = y as f64 - pos.y;
+        let pixels = Buffer2::from_fn(size, |at| {
+            let dx = at.x as f64 - pos.x;
+            let dy = at.y as f64 - pos.y;
             profile.shape_at(dx, dy) as f32
         });
         let measured = Measured::flat(&pixels, 0.0, 1.0);

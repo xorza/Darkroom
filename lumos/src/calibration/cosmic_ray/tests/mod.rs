@@ -362,7 +362,7 @@ fn repair_via_snapshot(pixels: &Buffer2<f32>, mask: &BitBuffer2, sky: f32) -> Bu
 fn a_repair_matches_a_snapshot_reference() {
     let size = USize2::new(12, 12);
     // Distinct values so a median that picked up a replaced neighbour would shift visibly.
-    let pixels = Buffer2::from_fn((12, 12), |x, y| (y * 12 + x) as f32);
+    let pixels = Buffer2::from_fn((12, 12), |at| (at.y * 12 + at.x) as f32);
 
     let mut mask = BitBuffer2::new_default(size);
     let at = |x, y| size.idx_of(USizeVec2::new(x, y));
@@ -520,8 +520,8 @@ fn a_stated_gain_needs_a_unit_on_the_frame() {
 fn a_faint_hit_on_a_gradient_is_caught() {
     let size = USize2::new(128, 128);
     let mut rng = TestRng::new(0x6A);
-    let mut pixels = Buffer2::from_fn((128, 128), |x, _| {
-        0.05 + 0.4 * x as f32 / 128.0 + 0.002 * rng.next_gaussian_f32()
+    let mut pixels = Buffer2::from_fn((128, 128), |at| {
+        0.05 + 0.4 * at.x as f32 / 128.0 + 0.002 * rng.next_gaussian_f32()
     });
     let hit = USizeVec2::new(70, 70);
     pixels[size.idx_of(hit)] += 0.04;

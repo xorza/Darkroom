@@ -14,12 +14,10 @@ fn each_color_reads_its_own_level() {
     let size = 128;
     let cfa = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
     let red = |x: usize| 0.125 + x as f32 / 1024.0;
-    let pixels = Buffer2::from_fn((size, size), |x, y| {
-        match cfa.slot_at(USizeVec2::new(x, y)) {
-            0 => red(x),
-            1 => 0.25,
-            _ => 0.375,
-        }
+    let pixels = Buffer2::from_fn((size, size), |at| match cfa.slot_at(at) {
+        0 => red(at.x),
+        1 => 0.25,
+        _ => 0.375,
     });
     let mesh = ColorMesh::measure(MaskedPlane::from(&pixels), &cfa, 64);
     for pos in [
@@ -44,7 +42,7 @@ fn each_color_reads_its_own_level() {
 fn a_mostly_masked_tile_takes_its_neighbours_sky() {
     let size = USize2::new(128, 128);
     let cfa = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
-    let pixels = Buffer2::from_fn(size, |x, y| match (x, y) {
+    let pixels = Buffer2::from_fn(size, |at| match (at.x, at.y) {
         (0..48, 0..48) => 100.0,
         (0..64, 0..64) => 0.5,
         _ => 0.25,

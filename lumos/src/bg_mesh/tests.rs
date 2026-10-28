@@ -77,8 +77,8 @@ fn grid_shape_and_flat_skies() {
 #[test]
 fn skewed_tile_sky_sits_below_median() {
     let ramp = |j: usize| 0.1 + j as f32 * 2e-5 + if j >= 412 { 0.005 } else { 0.0 };
-    let pixels = Buffer2::from_fn((32, 32), |x, y| {
-        let i = y * 32 + x;
+    let pixels = Buffer2::from_fn((32, 32), |at| {
+        let i = at.y * 32 + at.x;
         ramp(i.min(1023 - i))
     });
     let sky = make_grid(&pixels, 32).stats[(0, 0)].sky;
@@ -97,7 +97,9 @@ fn skewed_tile_sky_sits_below_median() {
 /// 0.6. A 2 × 2 grid is not median-filtered.
 #[test]
 fn masked_pixels_never_reach_the_statistics() {
-    let mut pixels = Buffer2::from_fn((64, 64), |x, y| [[0.2f32, 0.4], [0.6, 0.8]][y / 32][x / 32]);
+    let mut pixels = Buffer2::from_fn((64, 64), |at| {
+        [[0.2f32, 0.4], [0.6, 0.8]][at.y / 32][at.x / 32]
+    });
     let mut mask = BitBuffer2::new_filled(USize2::new(64, 64), false);
     for y in 2..32 {
         for x in 0..32 {
@@ -137,7 +139,7 @@ fn mad_sigma_known_value() {
     // whole image in one 10×10 tile and gives 10 copies of each value.
     let width = 10;
     let height = 10;
-    let pixels = Buffer2::from_fn((width, height), |x, _| x as f32);
+    let pixels = Buffer2::from_fn((width, height), |at| at.x as f32);
     let grid = make_grid(&pixels, 10);
     let stats = grid.stats[(0, 0)];
 
@@ -173,8 +175,8 @@ fn clipping_rejects_outliers_from_a_sky_with_spread() {
             10_000.0
         }
     };
-    let pixels = Buffer2::from_fn((32, 32), |x, y| {
-        let i = y * 32 + x;
+    let pixels = Buffer2::from_fn((32, 32), |at| {
+        let i = at.y * 32 + at.x;
         value(i.min(1023 - i))
     });
 
@@ -253,7 +255,7 @@ fn tile_centres_are_the_mean_pixel_index() {
 fn median_filter_keeps_a_plane_and_drops_spoiled_tiles() {
     let size = 160;
     let plane = |x: f32, y: f32| 0.1 + 1e-3 * x + 2e-3 * y;
-    let pixels = Buffer2::from_fn((size, size), |x, y| plane(x as f32, y as f32));
+    let pixels = Buffer2::from_fn((size, size), |at| plane(at.x as f32, at.y as f32));
     let grid = make_grid(&pixels, 32);
     let sigma = grid.stats[(2, 2)].sigma;
     for ty in 0..5 {
@@ -292,7 +294,7 @@ fn median_filter_keeps_a_plane_and_drops_spoiled_tiles() {
 /// every tile leaves no sky to take, and each tile reads all its pixels: 15.5/64 and 47.5/64.
 #[test]
 fn a_masked_tile_takes_its_neighbours_sky() {
-    let pixels = Buffer2::from_fn((64, 32), |x, _| x as f32 / 64.0);
+    let pixels = Buffer2::from_fn((64, 32), |at| at.x as f32 / 64.0);
     let mut mask = BitBuffer2::new_filled(USize2::new(64, 32), false);
     for y in 0..32 {
         for x in 0..32 {
@@ -310,7 +312,7 @@ fn a_masked_tile_takes_its_neighbours_sky() {
 
     // Four tiles of the ramp x/128, the first three masked: each searches outward ring by ring
     // past the bad ones, and all three take tile 3's 111.5/128.
-    let wide = Buffer2::from_fn((128, 32), |x, _| x as f32 / 128.0);
+    let wide = Buffer2::from_fn((128, 32), |at| at.x as f32 / 128.0);
     let mut first_three = BitBuffer2::new_filled(USize2::new(128, 32), false);
     for y in 0..32 {
         for x in 0..96 {
@@ -328,7 +330,7 @@ fn a_masked_tile_takes_its_neighbours_sky() {
 #[test]
 fn a_grid_under_three_tiles_is_not_filtered() {
     let skies = [[0.1f32, 0.2], [0.3, 0.9]];
-    let pixels = Buffer2::from_fn((64, 64), |x, y| skies[y / 32][x / 32]);
+    let pixels = Buffer2::from_fn((64, 64), |at| skies[at.y / 32][at.x / 32]);
     let grid = make_grid(&pixels, 32);
     for (ty, row) in skies.iter().enumerate() {
         for (tx, &sky) in row.iter().enumerate() {
@@ -343,8 +345,8 @@ fn a_grid_under_three_tiles_is_not_filtered() {
 #[test]
 fn a_bad_tile_takes_the_nearest_ring_of_good_tiles() {
     let (tiles_x, tiles_y, tile) = (8, 6, 4);
-    let pixels = Buffer2::from_fn((tiles_x * tile, tiles_y * tile), |x, y| {
-        (x / tile + 10 * (y / tile)) as f32
+    let pixels = Buffer2::from_fn((tiles_x * tile, tiles_y * tile), |at| {
+        (at.x / tile + 10 * (at.y / tile)) as f32
     });
     let good = [(0, 0), (5, 1), (2, 5), (7, 3)];
     let mut mask = BitBuffer2::new_filled(pixels.size(), true);

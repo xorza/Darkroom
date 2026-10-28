@@ -9,7 +9,6 @@ use crate::image::cfa::demosaic::mosaic_view::MosaicView;
 use crate::image::cfa::demosaic::tiled::{OutputPlanes, TilePlace};
 use crate::internals::test_rng::TestRng;
 use common::USize2;
-use glam::USizeVec2;
 use simd::Portable;
 use simd::{F32_LANES, F32x8, Isa};
 
@@ -216,9 +215,7 @@ fn rcd_matches_librtprocess_bit_for_bit() {
     ];
     for ((name, scene), digests) in scenes.into_iter().zip(DIGESTS) {
         for (pattern, expected) in patterns.into_iter().zip(digests) {
-            let data = Buffer2::from_fn(size, |x, y| {
-                scene(pattern.color_at(USizeVec2::new(x, y)).idx(), x, y)
-            });
+            let data = Buffer2::from_fn(size, |at| scene(pattern.color_at(at).idx(), at.x, at.y));
             let planes = demosaic(&MosaicView::new(&data, pattern), &CancelToken::never()).unwrap();
             let mut digest = 0xcbf2_9ce4_8422_2325u64;
             for plane in &planes {
@@ -242,7 +239,7 @@ fn rcd_matches_librtprocess_bit_for_bit() {
 fn a_tile_writes_nothing_that_reads_another_tiles_leftovers() {
     let size = USize2::new(TILE + 40, TILE + 30);
     let mut rng = TestRng::new(11);
-    let data = Buffer2::from_fn(size, |_, _| 0.1 + 0.8 * rng.next_f32());
+    let data = Buffer2::from_fn(size, |_| 0.1 + 0.8 * rng.next_f32());
     for pattern in BayerPattern::ALL {
         for place in [
             TilePlace {
@@ -286,7 +283,7 @@ fn a_balanced_demosaic_divides_the_balanced_one_by_the_gains() {
     let size = USize2::new(TILE + 40, TILE + 30);
     let gains = [2.13, 1.0, 1.71];
     let mut rng = TestRng::new(5);
-    let data = Buffer2::from_fn(size, |_, _| 0.1 + 0.8 * rng.next_f32());
+    let data = Buffer2::from_fn(size, |_| 0.1 + 0.8 * rng.next_f32());
     for pattern in BayerPattern::ALL {
         let color = |idx: usize| pattern.color_at(size.point_of(idx)).idx();
         let balanced = Buffer2::new(

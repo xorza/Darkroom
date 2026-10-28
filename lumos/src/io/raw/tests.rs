@@ -116,11 +116,11 @@ fn the_preview_is_the_clamped_science_frame_and_ignores_the_margins() {
         }
     };
     let samples = |margin: u16| -> Buffer2<u16> {
-        Buffer2::from_fn((SIDE, SIDE), |x, y| {
-            if x == 0 || y == 0 || x == SIDE - 1 || y == SIDE - 1 {
+        Buffer2::from_fn((SIDE, SIDE), |at| {
+            if at.x == 0 || at.y == 0 || at.x == SIDE - 1 || at.y == SIDE - 1 {
                 margin
             } else {
-                visible(x - 1, y - 1)
+                visible(at.x - 1, at.y - 1)
             }
         })
     };
@@ -384,10 +384,10 @@ fn the_raw_values_settle_no_data_and_saturation() {
 fn the_decode_takes_the_masked_means_libraw_truncates() {
     const SIDE: usize = 26;
     let parity = |row: usize, col: usize| (row % 2) * 2 + col % 2;
-    let samples = Buffer2::from_fn((SIDE, SIDE), |col, row| {
-        if col < 2 {
-            let p = parity(row, col);
-            (2048 + p + usize::from(row / 2 <= p)) as u16
+    let samples = Buffer2::from_fn((SIDE, SIDE), |at| {
+        if at.x < 2 {
+            let p = parity(at.y, at.x);
+            (2048 + p + usize::from(at.y / 2 <= p)) as u16
         } else {
             3000
         }
@@ -485,7 +485,7 @@ fn the_peek_counts_the_file_and_the_raw_buffer() {
 /// the mosaic reads LibRaw's own memory alone.
 #[test]
 fn the_file_goes_once_the_sensor_data_is_unpacked() {
-    let samples = Buffer2::from_fn((24, 24), |x, y| 1000 + (x * 24 + y) as u16);
+    let samples = Buffer2::from_fn((24, 24), |at| 1000 + (at.x * 24 + at.y) as u16);
     let mut libraw =
         Libraw::open_bayer(&samples, BayerDump::default(), &CancelToken::never()).unwrap();
     libraw.unpack(1).unwrap();

@@ -129,7 +129,7 @@ mod tests {
     fn deinterleave_takes_one_phase() {
         let [_, right, below, _] = BayerPhase::ALL;
         let size = USize2::new(5, 3);
-        let mosaic = Buffer2::from_fn((5, 3), |x, y| (y * 5 + x) as f32);
+        let mosaic = Buffer2::from_fn((5, 3), |at| (at.y * 5 + at.x) as f32);
         let mut plane = Buffer2::default();
         right.deinterleave(&mosaic, &mut plane);
         assert_eq!(plane.size(), USize2::new(2, 2));

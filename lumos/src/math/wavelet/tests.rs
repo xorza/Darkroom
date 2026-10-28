@@ -7,9 +7,9 @@ use common::USize2;
 use simd::IsaTier;
 
 fn pattern(size: USize2) -> Buffer2<f32> {
-    Buffer2::from_fn(size, |x, y| {
-        let (x, y) = (x as f32, y as f32);
-        0.5 + 0.3 * (x * 0.3).sin() * (y * 0.2).cos()
+    Buffer2::from_fn(size, |at| {
+        let at = at.as_vec2();
+        0.5 + 0.3 * (at.x * 0.3).sin() * (at.y * 0.2).cos()
     })
 }
 

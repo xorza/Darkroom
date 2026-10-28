@@ -16,8 +16,8 @@ const BIAS: f32 = 0.002;
 pub(crate) fn masters(side: usize) -> CalibrationMasters {
     let centre = (side as f32 - 1.0) / 2.0;
     let corner = 2.0 * centre * centre;
-    let flat = Buffer2::from_fn((side, side), |x, y| {
-        let (dx, dy) = (x as f32 - centre, y as f32 - centre);
+    let flat = Buffer2::from_fn((side, side), |at| {
+        let (dx, dy) = (at.x as f32 - centre, at.y as f32 - centre);
         1.0 - 0.2 * (dx * dx + dy * dy) / corner
     });
     let mosaic = |plane| {

@@ -308,12 +308,12 @@ impl Oracle<'_> {
 
 /// A `size` plane of signed, unstructured values with a few bright pixels among them.
 fn fixture(size: USize2, seed: usize) -> Buffer2<f32> {
-    Buffer2::from_fn(size, |x, y| {
-        let i = y * size.width + x;
+    Buffer2::from_fn(size, |at| {
+        let i = at.y * size.width + at.x;
         if (i + seed).is_multiple_of(37) {
             40.0
         } else {
-            ((i * 13 + seed + y * 7) % 31) as f32 / 9.0 - 1.0
+            ((i * 13 + seed + at.y * 7) % 31) as f32 / 9.0 - 1.0
         }
     })
 }
