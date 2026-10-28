@@ -269,12 +269,12 @@ mod tests {
         assert_eq!(scene.sources.len(), 500);
 
         // Count sources within a central disk of radius = 12% of the field (the core σ).
-        let (cx, cy) = (size.width as f64 / 2.0, size.height as f64 / 2.0);
+        let centre = DVec2::new(size.width as f64, size.height as f64) / 2.0;
         let r = size.width as f64 * 0.12;
         let central = scene
             .sources
             .iter()
-            .filter(|s| (s.pos.x - cx).hypot(s.pos.y - cy) < r)
+            .filter(|s| s.pos.distance(centre) < r)
             .count();
         // A uniform field would put only ~π r² / (size.width·size.height) ≈ 4.5% in that disk;
         // clustering must pack far more (the 80% core inside ~1σ ⇒ well over a third).

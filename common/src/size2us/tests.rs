@@ -1,5 +1,5 @@
 use crate::size2us::Size2us;
-use crate::vec2us::Vec2us;
+use glam::USizeVec2;
 #[test]
 fn size_measures_extent_and_indexes_row_major() {
     let size = Size2us::new(4, 3);
@@ -7,21 +7,21 @@ fn size_measures_extent_and_indexes_row_major() {
     assert_eq!(size.pixel_count(), 12);
 
     // Row-major: the index advances by 1 across a row and by `width` down a column.
-    assert_eq!(size.idx_of(Vec2us::ZERO), 0);
-    assert_eq!(size.idx_of(Vec2us::new(3, 0)), 3);
-    assert_eq!(size.idx_of(Vec2us::new(0, 1)), 4);
-    assert_eq!(size.idx_of(Vec2us::new(3, 2)), 11);
+    assert_eq!(size.idx_of(USizeVec2::ZERO), 0);
+    assert_eq!(size.idx_of(USizeVec2::new(3, 0)), 3);
+    assert_eq!(size.idx_of(USizeVec2::new(0, 1)), 4);
+    assert_eq!(size.idx_of(USizeVec2::new(3, 2)), 11);
 
     // The last in-bounds pixel is the last index; one past either axis is outside.
-    assert!(size.contains(Vec2us::new(3, 2)));
-    assert!(!size.contains(Vec2us::new(4, 2)));
-    assert!(!size.contains(Vec2us::new(3, 3)));
+    assert!(size.contains(USizeVec2::new(3, 2)));
+    assert!(!size.contains(USizeVec2::new(4, 2)));
+    assert!(!size.contains(USizeVec2::new(3, 3)));
 
     // `point_of` inverts `idx_of` over the whole grid.
-    assert_eq!(size.point_of(0), Vec2us::ZERO);
-    assert_eq!(size.point_of(3), Vec2us::new(3, 0));
-    assert_eq!(size.point_of(4), Vec2us::new(0, 1));
-    assert_eq!(size.point_of(11), Vec2us::new(3, 2));
+    assert_eq!(size.point_of(0), USizeVec2::ZERO);
+    assert_eq!(size.point_of(3), USizeVec2::new(3, 0));
+    assert_eq!(size.point_of(4), USizeVec2::new(0, 1));
+    assert_eq!(size.point_of(11), USizeVec2::new(3, 2));
     for idx in 0..size.pixel_count() {
         assert_eq!(size.idx_of(size.point_of(idx)), idx);
     }
@@ -31,12 +31,12 @@ fn size_measures_extent_and_indexes_row_major() {
     assert_ne!(size, transposed);
     assert_eq!(size.pixel_count(), transposed.pixel_count());
     assert_ne!(
-        size.idx_of(Vec2us::new(1, 1)),
-        transposed.idx_of(Vec2us::new(1, 1))
+        size.idx_of(USizeVec2::new(1, 1)),
+        transposed.idx_of(USizeVec2::new(1, 1))
     );
     // Same index, different decomposition: 5 is (1, 1) at width 4 but (2, 1) at width 3.
-    assert_eq!(size.point_of(5), Vec2us::new(1, 1));
-    assert_eq!(transposed.point_of(5), Vec2us::new(2, 1));
+    assert_eq!(size.point_of(5), USizeVec2::new(1, 1));
+    assert_eq!(transposed.point_of(5), USizeVec2::new(2, 1));
 }
 
 #[test]

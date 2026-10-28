@@ -69,6 +69,7 @@ pub(crate) mod internals {
     };
     use crate::star_detection::convolution::{fill_gaussian_kernel_1d, kernel_radius};
     use ::simd::Kernel;
+    use glam::Vec2;
 
     /// The 1D kernel of `sigma` out to `3σ`.
     pub(crate) fn gaussian_kernel_1d(sigma: f32) -> Vec<f32> {
@@ -133,20 +134,20 @@ pub(crate) mod internals {
         sigma: f32,
         temp: &mut Buffer2<f32>,
     ) -> f32 {
-        separable_convolve(values, [sigma, sigma], temp)
+        separable_convolve(values, Vec2::splat(sigma), temp)
     }
 
     /// The Gaussian of `[σx, σy]` along the axes convolved with `values` in place, out to `3σ` of
     /// the wider both ways, `temp` for the row pass; returns `sqrt(Σkx²·Σky²)`.
     pub(super) fn separable_convolve(
         values: &mut Buffer2<f32>,
-        [sigma_x, sigma_y]: [f32; 2],
+        sigma: Vec2,
         temp: &mut Buffer2<f32>,
     ) -> f32 {
-        let radius = kernel_radius(sigma_x.max(sigma_y));
+        let radius = kernel_radius(sigma.max_element());
         let (mut rows, mut cols) = (Vec::new(), Vec::new());
-        fill_gaussian_kernel_1d(sigma_x, radius, &mut rows);
-        fill_gaussian_kernel_1d(sigma_y, radius, &mut cols);
+        fill_gaussian_kernel_1d(sigma.x, radius, &mut rows);
+        fill_gaussian_kernel_1d(sigma.y, radius, &mut cols);
         convolve_rows(values, temp, &rows);
         convolve_cols(temp, values, &cols);
         let squares = |kernel: &[f32]| kernel.iter().map(|&weight| weight * weight).sum::<f32>();

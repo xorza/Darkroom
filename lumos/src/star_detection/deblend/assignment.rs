@@ -2,7 +2,8 @@
 
 use crate::star_detection::deblend;
 use crate::star_detection::deblend::pixel::Pixel;
-use common::{Rect2us, Vec2us};
+use common::Rect2us;
+use glam::USizeVec2;
 
 /// Peaks at or under this many are searched in full for every pixel; past it, a cell grid finds a
 /// pixel's nearest peak in the few cells around it, so a component holding thousands of stars
@@ -18,11 +19,11 @@ pub(crate) struct Assignment {
     pub(super) bboxes: Vec<Rect2us>,
     pub(super) areas: Vec<usize>,
     /// The grid's origin, the component's top-left pixel.
-    origin: Vec2us,
+    origin: USizeVec2,
     /// The side of a grid cell, in pixels.
     cell: usize,
     /// The grid's extent in cells.
-    cells: Vec2us,
+    cells: USizeVec2,
     /// Peak indices ordered by cell, in raster order of cells.
     by_cell: Vec<u32>,
     /// Where each cell's run starts in `by_cell`, with a trailing sentinel.
@@ -45,7 +46,7 @@ impl Assignment {
 
         self.origin = bbox.min;
         self.cell = (bbox.area() / peaks.len()).isqrt().max(1);
-        self.cells = Vec2us::new(
+        self.cells = USizeVec2::new(
             bbox.width().div_ceil(self.cell),
             bbox.height().div_ceil(self.cell),
         );
@@ -72,7 +73,7 @@ impl Assignment {
         }
     }
 
-    const fn cell_of(&self, pos: Vec2us) -> usize {
+    const fn cell_of(&self, pos: USizeVec2) -> usize {
         let x = (pos.x - self.origin.x) / self.cell;
         let y = (pos.y - self.origin.y) / self.cell;
         y * self.cells.x + x
@@ -82,11 +83,11 @@ impl Assignment {
     /// `deblend::nearest_peak_idx` returns, found ring by ring of cells. A peak in a ring further
     /// out than `r` lies at least `r·cell + 1` away, so once the best is strictly nearer than that
     /// no later peak can win, not even a tie with a lower index.
-    pub(super) fn nearest(&self, pos: Vec2us, peaks: &[Pixel]) -> usize {
+    pub(super) fn nearest(&self, pos: USizeVec2, peaks: &[Pixel]) -> usize {
         if peaks.len() <= FULL_SEARCH_PEAKS {
             return deblend::nearest_peak_idx(pos, peaks);
         }
-        let home = Vec2us::new(
+        let home = USizeVec2::new(
             (pos.x - self.origin.x) / self.cell,
             (pos.y - self.origin.y) / self.cell,
         );

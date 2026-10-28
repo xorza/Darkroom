@@ -8,7 +8,7 @@
 //! this to the clean image, so the *same* code path produces both the stimulus and its truth.
 
 use common::Buffer2;
-use glam::DVec2;
+use glam::{DVec2, USizeVec2};
 use imaginarium::{ChannelLayout, PlanarDesc};
 
 use crate::image::linear_image::LinearImage;
@@ -17,7 +17,6 @@ use crate::internals::synthetic::noise::{DarkCurrent, ReadNoise, apply_shot_nois
 use crate::internals::synthetic::scene::Scene;
 use crate::internals::test_rng::TestRng;
 use crate::registration::transform::Transform;
-use common::Vec2us;
 
 /// Geometry + exposure parameters for one frame.
 #[derive(Debug, Clone)]
@@ -60,7 +59,7 @@ pub(crate) struct FrameTruth {
     /// Sources as they land on the sensor (post-transform).
     pub(crate) sources: Vec<ObservedSource>,
     /// Cosmic-ray hits a fixture added after the light path, empty from [`render`].
-    pub(crate) cosmic_rays: Vec<Vec2us>,
+    pub(crate) cosmic_rays: Vec<USizeVec2>,
 }
 
 /// A rendered frame plus its ground truth.

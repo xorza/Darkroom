@@ -74,7 +74,7 @@ pub(crate) mod internals {
     use crate::star_detection::labeling::labeler::Labeler;
     use crate::star_detection::labeling::{LabelMap, LabelRun};
     use crate::star_detection::star_detection_config::extraction_config::Connectivity;
-    use common::Vec2us;
+    use glam::USizeVec2;
 
     impl LabelMap {
         /// Adopt pre-computed labels `1..=label_count`, bypassing connected-component analysis;
@@ -96,8 +96,8 @@ pub(crate) mod internals {
                     }
                     let component = &mut components[label as usize - 1];
                     component.label = label;
-                    component.bbox.include(Vec2us::new(start, y));
-                    component.bbox.include(Vec2us::new(x - 1, y));
+                    component.bbox.include(USizeVec2::new(start, y));
+                    component.bbox.include(USizeVec2::new(x - 1, y));
                     component.area += x - start;
                     runs_by_label[label as usize - 1].push(LabelRun {
                         y: y as u32,

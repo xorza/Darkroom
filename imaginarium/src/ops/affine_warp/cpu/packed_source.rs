@@ -2,8 +2,8 @@
 
 use std::array;
 
-use common::{Size2us, Vec2us};
-use glam::Vec2;
+use common::Size2us;
+use glam::{USizeVec2, Vec2};
 
 use crate::color::sample::Sample;
 use crate::interleaved::interleaved_image::InterleavedImage;
@@ -29,7 +29,7 @@ impl<'a, T: Sample> PackedSource<'a, T> {
     /// The index of the first of pixel `(x, y)`'s `N` channels, or `None` outside the image.
     #[inline]
     fn tap<const N: usize>(self, x: i32, y: i32) -> Option<usize> {
-        let pos = Vec2us::new(usize::try_from(x).ok()?, usize::try_from(y).ok()?);
+        let pos = USizeVec2::new(usize::try_from(x).ok()?, usize::try_from(y).ok()?);
         self.size.contains(pos).then(|| self.size.idx_of(pos) * N)
     }
 

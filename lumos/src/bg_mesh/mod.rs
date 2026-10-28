@@ -27,7 +27,8 @@ use crate::bg_mesh::mesh_axis::MeshAxis;
 use crate::bg_mesh::tile_stats::{TileInput, TileScratch, TileStats};
 use crate::math::statistics;
 use crate::scratch_pool::ScratchPool;
-use common::{Rect2us, Size2us, Vec2us};
+use common::{Rect2us, Size2us};
+use glam::USizeVec2;
 
 /// Tile grid with each tile's statistics and centre.
 #[derive(Debug)]
@@ -109,8 +110,8 @@ impl BgMesh {
         let tile_at = |idx: usize| {
             let (tx, ty) = (idx % tiles_x, idx / tiles_x);
             Rect2us::new(
-                Vec2us::new(cols.start(tx), rows.start(ty)),
-                Vec2us::new(cols.end(tx), rows.end(ty)),
+                USizeVec2::new(cols.start(tx), rows.start(ty)),
+                USizeVec2::new(cols.end(tx), rows.end(ty)),
             )
         };
 
@@ -258,10 +259,10 @@ impl BgMesh {
 
         let src = &self.stats;
         let dst = scratch.pixels_mut();
-        let last = Vec2us::new(tiles_x - 1, tiles_y - 1);
+        let last = USizeVec2::new(tiles_x - 1, tiles_y - 1);
 
         par::iter_mut(dst).enumerate().for_each(|(idx, out)| {
-            let tile = Vec2us::new(idx % tiles_x, idx / tiles_x);
+            let tile = USizeVec2::new(idx % tiles_x, idx / tiles_x);
 
             let mut skies = [0.0f32; 9];
             let mut sigmas = [0.0f32; 9];

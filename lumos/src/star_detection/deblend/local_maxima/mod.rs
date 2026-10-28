@@ -16,7 +16,7 @@ use crate::star_detection::deblend::component_pixels::ComponentPixels;
 use crate::star_detection::deblend::deblend_buffers::DeblendBuffers;
 use crate::star_detection::deblend::pixel::Pixel;
 use crate::star_detection::deblend::region::Region;
-use common::Vec2us;
+use glam::USizeVec2;
 
 /// What the local-maxima deblender reads from the detection configuration.
 #[derive(Debug, Clone, Copy)]
@@ -105,7 +105,7 @@ impl LocalMaximaParams {
             let pos = candidate.pos();
             let crowded = (pos.y.saturating_sub(reach)..=pos.y + reach).any(|y| {
                 (pos.x.saturating_sub(reach)..=pos.x + reach).any(|x| {
-                    let near = Vec2us::new(x, y);
+                    let near = USizeVec2::new(x, y);
                     pixels.idx_of(near).is_some_and(|idx| occupied[idx])
                         && deblend::dist_sq(pos, near) < min_sep_sq
                 })

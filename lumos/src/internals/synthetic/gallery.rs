@@ -16,7 +16,7 @@ use std::path::PathBuf;
 
 use common::internals::DEBUG_OUTPUT_VAR;
 use common::{Buffer2, internals};
-use glam::{DVec2, Vec2};
+use glam::{DVec2, USizeVec2, Vec2};
 
 use crate::image::cfa::cfa_type::CfaType;
 use crate::internals::synthetic::artifacts::CosmicRays;
@@ -28,7 +28,7 @@ use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::scene::{BgField, Placement, Scatter, Scene, TrueSource};
 use crate::internals::visual::{self, ToneMap};
 use crate::registration::transform::Transform;
-use common::{Size2us, Vec2us};
+use common::Size2us;
 
 /// Save a mono frame to `synthetic_gallery/<name>.png`, returning the path.
 fn save(pixels: &Buffer2<f32>, name: &str, tone: ToneMap) -> PathBuf {
@@ -66,7 +66,8 @@ fn checkerboard(size: Size2us, cell_size: usize, [value_a, value_b]: [f32; 2]) -
     for y in 0..size.height {
         for x in 0..size.width {
             let checker = ((x / cell_size) + (y / cell_size)) % 2;
-            pixels[size.idx_of(Vec2us::new(x, y))] = if checker == 0 { value_a } else { value_b };
+            pixels[size.idx_of(USizeVec2::new(x, y))] =
+                if checker == 0 { value_a } else { value_b };
         }
     }
     Buffer2::new(size, pixels)

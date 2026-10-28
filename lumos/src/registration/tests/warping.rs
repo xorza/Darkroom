@@ -2,7 +2,7 @@
 //! the kernels, SIP, and the quality maps at the border.
 
 use common::Buffer2;
-use glam::DVec2;
+use glam::{DVec2, USizeVec2};
 use imaginarium::{ChannelLayout, PlanarDesc};
 
 use crate::image::linear_image::LinearImage;
@@ -11,7 +11,7 @@ use crate::internals::synthetic::metrics;
 use crate::registration::resample::warp_config::{InterpolationMethod, WarpConfig};
 use crate::registration::transform::{Transform, TransformType};
 use crate::registration::warp_transform::WarpTransform;
-use common::{Size2us, Vec2us};
+use common::Size2us;
 
 /// Helper to warp and return a new buffer (for test convenience).
 /// Visually applies the transform to the image content (stars move by T).
@@ -293,7 +293,7 @@ fn extract_central_region(a: &Buffer2<f32>, b: &Buffer2<f32>, margin: usize) -> 
 
     for y in margin..(size.height - margin) {
         for x in margin..(size.width - margin) {
-            let idx = size.idx_of(Vec2us::new(x, y));
+            let idx = size.idx_of(USizeVec2::new(x, y));
             central_a.push(a[idx]);
             central_b.push(b[idx]);
         }
@@ -382,7 +382,7 @@ fn warp_emits_coverage_and_renormalizes_bilinear_border() {
     let cov = result.coverage.pixels();
     let confidence = result.confidence.pixels();
     let val = result.image.channel(0).pixels();
-    let at = |x: usize, y: usize| size.idx_of(Vec2us::new(x, y));
+    let at = |x: usize, y: usize| size.idx_of(USizeVec2::new(x, y));
 
     // Every row shares the column pattern. Two equal x taps have confidence 1²/(0.5² + 0.5²) = 2
     // and one surviving tap 0.5²/0.5² = 1; a covered pixel — the half-covered column 13 too — is
@@ -426,7 +426,7 @@ fn warp_renormalizes_lanczos_edges_and_emits_coverage() {
     let cov = result.coverage.pixels();
     let confidence = result.confidence.pixels();
     let val = result.image.channel(0).pixels();
-    let at = |x: usize, y: usize| size.idx_of(Vec2us::new(x, y));
+    let at = |x: usize, y: usize| size.idx_of(USizeVec2::new(x, y));
     let y = 4;
 
     // Interior: every kernel tap is in bounds, so the magnitude support fraction is 1 exactly.

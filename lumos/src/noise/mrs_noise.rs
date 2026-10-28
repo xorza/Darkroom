@@ -12,7 +12,8 @@ use crate::image::metadata::bg_split::BgSplit;
 use crate::math::wavelet;
 use crate::noise::bg_from_gain;
 use crate::noise::binned_samples::{BinnedSamples, Samples};
-use common::{Rect2us, Size2us, Vec2us};
+use common::{Rect2us, Size2us};
+use glam::USizeVec2;
 
 /// Layers of the transform; PixInsight's default.
 const SCALES: usize = 4;
@@ -519,10 +520,10 @@ fn tiles(size: Size2us) -> Vec<Tile> {
     rows.iter()
         .flat_map(|&[y0, y1]| {
             cols.iter().map(move |&[x0, x1]| Tile {
-                core: Rect2us::new(Vec2us::new(x0, y0), Vec2us::new(x1, y1)),
+                core: Rect2us::new(USizeVec2::new(x0, y0), USizeVec2::new(x1, y1)),
                 region: Rect2us::new(
-                    Vec2us::new(x0.saturating_sub(MARGIN), y0.saturating_sub(MARGIN)),
-                    Vec2us::new(
+                    USizeVec2::new(x0.saturating_sub(MARGIN), y0.saturating_sub(MARGIN)),
+                    USizeVec2::new(
                         (x1 + MARGIN).min(size.width),
                         (y1 + MARGIN).min(size.height),
                     ),

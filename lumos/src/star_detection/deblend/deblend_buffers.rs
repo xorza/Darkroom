@@ -65,7 +65,8 @@ impl DeblendBuffers {
 mod tests {
     use crate::star_detection::deblend::deblend_buffers::DeblendBuffers;
     use crate::star_detection::deblend::region::Region;
-    use common::{Rect2us, Vec2us};
+    use common::Rect2us;
+    use glam::USizeVec2;
 
     /// A set that grew to a component of a million pixels gives the room back to
     /// [`DeblendBuffers::KEPT_PIXELS`] of them, in every vector of each pixel, and keeps the
@@ -77,8 +78,8 @@ mod tests {
         buffers.tree.reserve_per_pixel(1 << 20);
         buffers.occupied.reserve(1 << 20);
         let region = Region {
-            bbox: Rect2us::new(Vec2us::new(1, 2), Vec2us::new(3, 4)),
-            peak: Vec2us::new(2, 3),
+            bbox: Rect2us::new(USizeVec2::new(1, 2), USizeVec2::new(3, 4)),
+            peak: USizeVec2::new(2, 3),
             area: 4,
         };
         buffers.regions.push(region);

@@ -1,10 +1,10 @@
 //! [`DistortionMap`]: a thin-plate spline's distortion sampled on a grid.
 
-use glam::DVec2;
+use glam::{DVec2, USizeVec2};
 
 use crate::math::grid;
 use crate::registration::distortion::tps::ThinPlateSpline;
-use common::{Size2us, Vec2us};
+use common::Size2us;
 
 /// A spline's distortion at every node of a grid, with its largest and mean magnitude.
 #[derive(Debug, Clone)]
@@ -67,7 +67,7 @@ impl DistortionMap {
     }
 
     /// The distortion at grid node `point`; `None` past the grid.
-    fn get(&self, point: Vec2us) -> Option<DVec2> {
+    fn get(&self, point: USizeVec2) -> Option<DVec2> {
         self.grid
             .contains(point)
             .then(|| self.vectors[self.grid.idx_of(point)])
@@ -78,7 +78,7 @@ impl DistortionMap {
     fn interpolate(&self, p: DVec2) -> DVec2 {
         let x = self.cell(&self.cols, p.x);
         let y = self.cell(&self.rows, p.y);
-        let at = |x, y| self.vectors[self.grid.idx_of(Vec2us::new(x, y))];
+        let at = |x, y| self.vectors[self.grid.idx_of(USizeVec2::new(x, y))];
         let (v00, v10, v01, v11) = (
             at(x.lower, y.lower),
             at(x.upper, y.lower),

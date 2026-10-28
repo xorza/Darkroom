@@ -8,28 +8,29 @@ use crate::image::error::XTransPatternError;
 use crate::internals::assertions::assert_close;
 use crate::internals::cfa::XTRANS_PATTERN;
 use crate::internals::test_rng::TestRng;
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use glam::USizeVec2;
 
 #[test]
 fn xtrans_pattern_color_at() {
     let pattern = XTRANS_PATTERN;
     // Check corners
-    assert_eq!(pattern.color_at(Vec2us::new(0, 0)), CfaColor::Green);
-    assert_eq!(pattern.color_at(Vec2us::new(2, 0)), CfaColor::Red);
-    assert_eq!(pattern.color_at(Vec2us::new(5, 0)), CfaColor::Blue);
-    assert_eq!(pattern.color_at(Vec2us::new(0, 2)), CfaColor::Blue);
+    assert_eq!(pattern.color_at(USizeVec2::new(0, 0)), CfaColor::Green);
+    assert_eq!(pattern.color_at(USizeVec2::new(2, 0)), CfaColor::Red);
+    assert_eq!(pattern.color_at(USizeVec2::new(5, 0)), CfaColor::Blue);
+    assert_eq!(pattern.color_at(USizeVec2::new(0, 2)), CfaColor::Blue);
     // Check wrapping
     assert_eq!(
-        pattern.color_at(Vec2us::new(0, 6)),
-        pattern.color_at(Vec2us::new(0, 0))
+        pattern.color_at(USizeVec2::new(0, 6)),
+        pattern.color_at(USizeVec2::new(0, 0))
     );
     assert_eq!(
-        pattern.color_at(Vec2us::new(6, 0)),
-        pattern.color_at(Vec2us::new(0, 0))
+        pattern.color_at(USizeVec2::new(6, 0)),
+        pattern.color_at(USizeVec2::new(0, 0))
     );
     assert_eq!(
-        pattern.color_at(Vec2us::new(12, 12)),
-        pattern.color_at(Vec2us::new(0, 0))
+        pattern.color_at(USizeVec2::new(12, 12)),
+        pattern.color_at(USizeVec2::new(0, 0))
     );
 }
 
@@ -150,14 +151,14 @@ fn the_hexagons_are_dcraws() {
     for (row, cells) in expected.iter().enumerate() {
         for (col, cell) in cells.iter().enumerate() {
             let actual: Vec<(i8, i8)> = hexagons
-                .at(Vec2us::new(col + 6, row + 3))
+                .at(USizeVec2::new(col + 6, row + 3))
                 .iter()
                 .map(|offset| (offset.dy, offset.dx))
                 .collect();
             assert_eq!(actual, cell, "row {row}, column {col}");
         }
     }
-    assert_eq!(hexagons.solitary(), Vec2us::new(2, 2));
+    assert_eq!(hexagons.solitary(), USizeVec2::new(2, 2));
 }
 
 /// A uniform frame demosaics to itself, three planes of its size, at any level and either pass
@@ -238,7 +239,7 @@ fn f32_demosaic_preserves_signed_native_samples() {
     .unwrap();
     for y in 0..size.height {
         for x in 0..size.width {
-            let channel = pattern.color_at(Vec2us::new(x, y)) as usize;
+            let channel = pattern.color_at(USizeVec2::new(x, y)) as usize;
             let expected = data[y * size.width + x];
             let actual = rgb[channel][y * size.width + x];
             assert_close!(

@@ -24,8 +24,8 @@ use crate::registration::transform::TransformType;
 use crate::registration::transform_model::TransformModel;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detector::StarDetector;
-use common::{TempDir, Vec2us};
-use glam::DVec2;
+use common::TempDir;
+use glam::{DVec2, USizeVec2};
 
 /// The known scene: color `color`'s value at reference pixel `(x, y)`, distinct in every
 /// color and every pixel of a period, and a multiple of 1/64 so every sum below is exact.
@@ -75,7 +75,7 @@ fn a_cfa_drizzle_puts_each_photosite_in_its_color_alone() {
     .into_iter()
     .flat_map(|set| tiers.iter().map(move |ingest| (set.clone(), ingest)))
     {
-        let color = |x: i64, y: i64| cfa_type.slot_at(Vec2us::new(x as usize, y as usize));
+        let color = |x: i64, y: i64| cfa_type.slot_at(USizeVec2::new(x as usize, y as usize));
         let frames = dithers
             .iter()
             .map(|&(dx, dy)| {
@@ -177,7 +177,7 @@ fn the_light_preset_combines_a_cfa_drizzle() {
             let shift = DVec2::new(rng.next_f64() * 2.0, rng.next_f64() * 2.0);
             let pixels = (0..size.pixel_count())
                 .map(|idx| {
-                    let pos = Vec2us::new(idx % size.width, idx / size.width);
+                    let pos = USizeVec2::new(idx % size.width, idx / size.width);
                     let color = rggb.slot_at(pos);
                     sky(color, pos.x as f64 + shift.x) + SIGMA * rng.next_gaussian_f32()
                 })
@@ -403,7 +403,7 @@ fn the_green_proxy_registers_a_pair_as_the_demosaiced_pair_does() {
             .iter()
             .enumerate()
             .map(|(idx, &value)| {
-                let pos = Vec2us::new(idx % size.width, idx / size.width);
+                let pos = USizeVec2::new(idx % size.width, idx / size.width);
                 value * gains[rggb.slot_at(pos)]
             })
             .collect();

@@ -121,7 +121,7 @@ fn single_star_is_one_whole_region() {
     assert_eq!(regions.len(), 1);
     assert_eq!(regions[0].bbox, fixture.data.bbox);
     assert_eq!(regions[0].area, fixture.data.area);
-    assert_eq!(regions[0].peak, Vec2us::new(50, 50));
+    assert_eq!(regions[0].peak, USizeVec2::new(50, 50));
 }
 
 #[test]
@@ -151,12 +151,12 @@ fn two_separated_stars() {
             .filter(|p| (p.pos().x < 50) == left)
             .count()
     };
-    let summary: Vec<(Vec2us, usize)> = regions.iter().map(|r| (r.peak, r.area)).collect();
+    let summary: Vec<(USizeVec2, usize)> = regions.iter().map(|r| (r.peak, r.area)).collect();
     assert_eq!(
         summary,
         [
-            (Vec2us::new(30, 50), blob_area(true)),
-            (Vec2us::new(70, 50), blob_area(false)),
+            (USizeVec2::new(30, 50), blob_area(true)),
+            (USizeVec2::new(70, 50), blob_area(false)),
         ]
     );
     assert!(regions.iter().all(|r| r.bbox.contains(r.peak)));
@@ -247,7 +247,7 @@ fn peaks_sorted_by_brightness() {
     assert_eq!(poss(&peaks), [(50, 50), (70, 50), (30, 50)]);
 
     // The component's own peak is the brightest pixel.
-    assert_eq!(component.peak().pos(), Vec2us::new(50, 50));
+    assert_eq!(component.peak().pos(), USizeVec2::new(50, 50));
     assert_eq!(component.peak().value, fixture.pixels[(50, 50)]);
 }
 
@@ -346,7 +346,7 @@ fn is_local_maximum_cases() {
         ((8, 2), true, "above every neighbour"),
     ];
     for ((x, y), expected, why) in cases {
-        let pixel = Pixel::new(Vec2us::new(x, y), pixels[(x, y)]);
+        let pixel = Pixel::new(USizeVec2::new(x, y), pixels[(x, y)]);
         assert_eq!(is_local_maximum(pixel, &pixels), expected, "{why}");
     }
 }
@@ -365,7 +365,7 @@ fn plateau_has_its_first_pixel_as_maximum() {
 
     let labels = LabelMap::from_raw(&labels_buf, 1);
     let data = ComponentData {
-        bbox: Rect2us::new(Vec2us::new(3, 3), Vec2us::new(7, 7)),
+        bbox: Rect2us::new(USizeVec2::new(3, 3), USizeVec2::new(7, 7)),
         label: 1,
         area: 16,
     };
@@ -381,7 +381,10 @@ fn plateau_has_its_first_pixel_as_maximum() {
     // With one maximum the component stays whole, peaked at its first brightest pixel.
     let regions = deblended(&component, 1, 0.0);
     assert_eq!(regions.len(), 1);
-    assert_eq!((regions[0].peak, regions[0].area), (Vec2us::new(3, 3), 16));
+    assert_eq!(
+        (regions[0].peak, regions[0].area),
+        (USizeVec2::new(3, 3), 16)
+    );
 }
 
 #[test]
@@ -393,7 +396,7 @@ fn single_pixel_is_local_max() {
 
     let labels = LabelMap::from_raw(&labels_buf, 1);
     let data = ComponentData {
-        bbox: Rect2us::new(Vec2us::new(5, 5), Vec2us::new(6, 6)),
+        bbox: Rect2us::new(USizeVec2::new(5, 5), USizeVec2::new(6, 6)),
         label: 1,
         area: 1,
     };
@@ -422,12 +425,12 @@ fn voronoi_assignment_and_its_tie() {
 
     let labels = LabelMap::from_raw(&labels_buf, 1);
     let data = ComponentData {
-        bbox: Rect2us::new(Vec2us::new(20, 50), Vec2us::new(81, 51)),
+        bbox: Rect2us::new(USizeVec2::new(20, 50), USizeVec2::new(81, 51)),
         label: 1,
         area: 61,
     };
     let component = Component::new(&data, &pixels, &labels);
-    let peak = |x: usize| Pixel::new(Vec2us::new(x, 50), 1.0);
+    let peak = |x: usize| Pixel::new(USizeVec2::new(x, 50), 1.0);
 
     let split = |peaks: &[Pixel]| {
         let mut regions = Vec::new();
@@ -439,15 +442,21 @@ fn voronoi_assignment_and_its_tie() {
     assert_eq!(
         summary,
         [
-            (31, Rect2us::new(Vec2us::new(20, 50), Vec2us::new(51, 51))),
-            (30, Rect2us::new(Vec2us::new(51, 50), Vec2us::new(81, 51))),
+            (
+                31,
+                Rect2us::new(USizeVec2::new(20, 50), USizeVec2::new(51, 51))
+            ),
+            (
+                30,
+                Rect2us::new(USizeVec2::new(51, 50), USizeVec2::new(81, 51))
+            ),
         ]
     );
 
     for peaks in [&[][..], &[peak(80)]] {
         let whole = split(peaks);
         assert_eq!(whole.len(), 1, "{} peaks", peaks.len());
-        assert_eq!((whole[0].peak, whole[0].area), (Vec2us::new(20, 50), 61));
+        assert_eq!((whole[0].peak, whole[0].area), (USizeVec2::new(20, 50), 61));
     }
 }
 
@@ -458,7 +467,7 @@ fn noise_component(size: Size2us, seed: u64) -> TestComponent {
     let pixels = Buffer2::from_fn(size, |_, _| 0.1 + (rng.next_f32() * 16.0).floor() / 16.0);
     let labels = LabelMap::from_raw(&Buffer2::new_filled(size, 1u32), 1);
     let data = ComponentData {
-        bbox: Rect2us::new(Vec2us::ZERO, Vec2us::new(size.width, size.height)),
+        bbox: Rect2us::new(USizeVec2::ZERO, USizeVec2::new(size.width, size.height)),
         label: 1,
         area: size.pixel_count(),
     };
@@ -530,13 +539,13 @@ fn fast_paths_match_the_definitions() {
             areas[nearest] += 1;
             boxes[nearest].include(pixel.pos());
         }
-        let expected_regions: Vec<(Vec2us, usize, Rect2us)> = peaks
+        let expected_regions: Vec<(USizeVec2, usize, Rect2us)> = peaks
             .iter()
             .zip(areas.iter().zip(&boxes))
             .filter(|(_, (area, _))| **area > 0)
             .map(|(peak, (&area, &bbox))| (peak.pos(), area, bbox))
             .collect();
-        let got: Vec<(Vec2us, usize, Rect2us)> = regions
+        let got: Vec<(USizeVec2, usize, Rect2us)> = regions
             .iter()
             .map(|region| (region.peak, region.area, region.bbox))
             .collect();
@@ -575,7 +584,7 @@ fn a_flat_topped_source_keeps_its_region_between_fainter_peaks() {
     pixels[(18, 11)] = 0.8;
     let labels = LabelMap::from_raw(&labels_buf, 1);
     let data = ComponentData {
-        bbox: Rect2us::new(Vec2us::new(2, 9), Vec2us::new(22, 14)),
+        bbox: Rect2us::new(USizeVec2::new(2, 9), USizeVec2::new(22, 14)),
         label: 1,
         area: 100,
     };
@@ -589,7 +598,7 @@ fn a_flat_topped_source_keeps_its_region_between_fainter_peaks() {
     assert_eq!(regions.len(), 3);
     let top = regions
         .iter()
-        .find(|region| region.peak == Vec2us::new(10, 10))
+        .find(|region| region.peak == USizeVec2::new(10, 10))
         .expect("the flat top is a region of its own");
     assert!(top.area >= 4, "{}", top.area);
 }

@@ -6,6 +6,7 @@
 use std::ops::{Deref, DerefMut, Index, IndexMut, Range};
 use std::{array, slice, vec};
 
+use glam::USizeVec2;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 
 use crate::par;
@@ -207,6 +208,22 @@ impl<T: Copy + Send + Sync, const N: usize> Buffer2<[T; N]> {
     }
 }
 
+impl<T> Index<USizeVec2> for Buffer2<T> {
+    type Output = T;
+
+    #[inline]
+    fn index(&self, pos: USizeVec2) -> &Self::Output {
+        &self[(pos.x, pos.y)]
+    }
+}
+
+impl<T> IndexMut<USizeVec2> for Buffer2<T> {
+    #[inline]
+    fn index_mut(&mut self, pos: USizeVec2) -> &mut Self::Output {
+        &mut self[(pos.x, pos.y)]
+    }
+}
+
 impl<T> Index<(usize, usize)> for Buffer2<T> {
     type Output = T;
 
@@ -325,6 +342,7 @@ impl<T> From<Buffer2<T>> for Vec<T> {
 mod tests {
     use crate::buffer2::Buffer2;
     use crate::size2us::Size2us;
+    use glam::USizeVec2;
 
     #[test]
     fn indexing_is_row_major() {
@@ -334,6 +352,7 @@ mod tests {
         // y · width + x: (2, 1) → 5, (0, 1) → 3.
         assert_eq!(*buf.get(2, 1), 60);
         assert_eq!(buf[(0, 1)], 40);
+        assert_eq!(buf[USizeVec2::new(0, 1)], 40);
         assert_eq!(buf.row(1), &[40, 50, 60]);
         *buf.get_mut(1, 0) = 99;
         buf.row_mut(1)[2] = 7;

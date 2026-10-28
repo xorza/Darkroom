@@ -22,7 +22,8 @@ use crate::io::fits::extension_claims::{ExtensionClaims, IMAGE_KEYWORD, PRIMARY}
 use crate::io::fits::lumos_extension::{DescribedImage, LumosExtension};
 use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD};
 use crate::io::fits::plane_hdu::{FlagBytes, PlaneHdu};
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use glam::USizeVec2;
 
 pub(crate) const FLAGS_EXTNAME: &str = "LUMFLAGS";
 pub(super) const FLAGS_FORMAT: &str = "PIXFLAGS";
@@ -102,7 +103,7 @@ pub(crate) fn join(
         byte & unknown != 0 || (byte & no_data != 0) != decoded_no_data
     });
     if let Some((idx, &byte)) = disagreement {
-        let pixel = Vec2us::new(idx % size.width, idx / size.width);
+        let pixel = USizeVec2::new(idx % size.width, idx / size.width);
         let reason = if byte & unknown != 0 {
             FitsRefusal::UnknownFlagBits { pixel, byte }
         } else {
@@ -139,7 +140,8 @@ mod tests {
     use crate::internals::fits::fits_refusal;
     use crate::io::fits::error::FitsRefusal;
     use crate::io::fits::flags_extension;
-    use common::{Size2us, Vec2us};
+    use common::Size2us;
+    use glam::USizeVec2;
 
     /// The stored flags join those the decode found, bit by bit. Stored, row-major over 3×2:
     /// nothing, `NO_DATA`, `SATURATED | DEFECT` (6), nothing, `COSMIC_RAY | REPAIRED` (24),
@@ -172,7 +174,7 @@ mod tests {
         assert_eq!(
             reason,
             FitsRefusal::UnknownFlagBits {
-                pixel: Vec2us::new(1, 1),
+                pixel: USizeVec2::new(1, 1),
                 byte: 0x80
             }
         );

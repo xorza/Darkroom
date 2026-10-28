@@ -2,9 +2,9 @@
 //! and nebula-like structure.
 
 use common::Buffer2;
-use glam::Vec2;
+use glam::{USizeVec2, Vec2};
 
-use common::{Size2us, Vec2us};
+use common::Size2us;
 
 /// Add uniform background to image.
 pub(super) fn add_uniform_bg(pixels: &mut [f32], level: f32) {
@@ -54,7 +54,7 @@ impl Gradient {
                     0.5
                 };
                 let level = level_start + (level_end - level_start) * t;
-                pixels[size.idx_of(Vec2us::new(x, y))] += level;
+                pixels[size.idx_of(USizeVec2::new(x, y))] += level;
             }
         }
     }
@@ -83,7 +83,7 @@ impl Vignette {
         let size = pixels.size();
         for y in 0..size.height {
             for x in 0..size.width {
-                pixels[size.idx_of(Vec2us::new(x, y))] += self.at(size, x, y);
+                pixels[size.idx_of(USizeVec2::new(x, y))] += self.at(size, x, y);
             }
         }
     }
@@ -147,7 +147,7 @@ impl NebulaConfig {
                 let t = r_sq / radius_sq;
 
                 let falloff = (-t * self.softness).exp();
-                pixels[size.idx_of(Vec2us::new(x, y))] += self.amplitude * falloff;
+                pixels[size.idx_of(USizeVec2::new(x, y))] += self.amplitude * falloff;
             }
         }
     }

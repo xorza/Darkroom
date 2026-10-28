@@ -63,7 +63,7 @@ use crate::stack_product::coverage::Coverage;
 use crate::stack_product::quality_planes::QualityPlanes;
 use crate::stack_product::run_report::RunReport;
 use crate::stack_product::weight_kind::WeightKind;
-use common::Vec2us;
+use glam::USizeVec2;
 
 /// Channel-shaped result of one combine pass. A plane is `None` when [`QualityPlanes`] did not
 /// ask for it.
@@ -469,7 +469,7 @@ impl FrameCache {
                         let y = pixel_offset / width + row_in_chunk;
                         for pixel_in_row in 0..width {
                             let pixel_idx = row_offset + pixel_in_row;
-                            let slot = slots.slot(channel, Vec2us::new(pixel_in_row, y));
+                            let slot = slots.slot(channel, USizeVec2::new(pixel_in_row, y));
                             let gain_point = gain_grid.point(pixel_in_row as f32, y as f32);
                             let mut covered = 0usize;
                             for (frame_idx, chunk) in frames.iter().enumerate() {

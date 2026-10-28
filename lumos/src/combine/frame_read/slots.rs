@@ -5,7 +5,7 @@ use imaginarium::PlanarDesc;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
-use common::Vec2us;
+use glam::USizeVec2;
 
 /// The slots of a frame's noise and weights: one per channel, or one per color of a mosaic, whose
 /// one channel holds three colors with their own noise.
@@ -36,7 +36,7 @@ impl Slots {
     }
 
     /// The slot of the pixel at `pos` in `channel`.
-    pub(crate) const fn slot(&self, channel: usize, pos: Vec2us) -> usize {
+    pub(crate) const fn slot(&self, channel: usize, pos: USizeVec2) -> usize {
         match &self.mosaic {
             Some(mosaic) => mosaic.slot_at(pos),
             None => channel,

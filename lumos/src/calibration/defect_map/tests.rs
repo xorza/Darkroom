@@ -12,7 +12,7 @@ use crate::image::cfa::mosaic::Mosaic;
 use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::test_rng::TestRng;
 use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
-use common::Vec2us;
+use glam::USizeVec2;
 
 fn median_mad(mut samples: Vec<f32>) -> MedianMad {
     MedianMad::of_mut(&mut samples)
@@ -49,7 +49,7 @@ fn capped_color_sampling_spans_sensor_and_cfa_phases() {
             let mut population = 0;
             for y in 0..height {
                 for x in 0..width {
-                    if cfa_type.slot_at(Vec2us::new(x, y)) == target_color {
+                    if cfa_type.slot_at(USizeVec2::new(x, y)) == target_color {
                         expected_rows[y] = true;
                         expected_cols[x] = true;
                         expected_phases[(y % period) * period + x % period] = true;
@@ -76,7 +76,7 @@ fn capped_color_sampling_spans_sensor_and_cfa_phases() {
             for idx in idxs {
                 let x = idx % width;
                 let y = idx / width;
-                assert_eq!(cfa_type.slot_at(Vec2us::new(x, y)), target_color);
+                assert_eq!(cfa_type.slot_at(USizeVec2::new(x, y)), target_color);
                 sampled_rows[y] = true;
                 sampled_cols[x] = true;
                 sampled_phases[(y % period) * period + x % period] = true;
@@ -108,7 +108,7 @@ fn capped_color_sampling_matches_exact_row_and_column_statistics() {
             });
             let exact = median_mad(
                 (0..width * height)
-                    .filter(|&idx| cfa_type.slot_at(Vec2us::new(idx % width, idx / width)) == 0)
+                    .filter(|&idx| cfa_type.slot_at(USizeVec2::new(idx % width, idx / width)) == 0)
                     .map(|idx| data[idx])
                     .collect(),
             );
@@ -264,7 +264,7 @@ fn correct_clustered_defect_uses_only_good_neighbors() {
     let hot = [(6, 6), (4, 6), (8, 6), (6, 4), (6, 8), (4, 4)];
     let mut px = vec![0.5f32; size.pixel_count()];
     for &(x, y) in &hot {
-        px[size.idx_of(Vec2us::new(x, y))] = 0.95;
+        px[size.idx_of(USizeVec2::new(x, y))] = 0.95;
     }
     let dark = make_cfa(size, px, cfa);
     let defect_map = DefectMap::new(dark.size())
@@ -284,7 +284,7 @@ fn correct_clustered_defect_uses_only_good_neighbors() {
 
     let mut light = make_cfa(size, vec![0.5f32; size.pixel_count()], cfa);
     for &(x, y) in &hot {
-        light.data_mut()[size.idx_of(Vec2us::new(x, y))] = 0.95;
+        light.data_mut()[size.idx_of(USizeVec2::new(x, y))] = 0.95;
     }
     defect_map.correct(&mut light, None);
 
@@ -308,19 +308,20 @@ fn xtrans_hot_pixel_correction_uses_same_color() {
         let mut px = vec![0.0f32; size.pixel_count()];
         for y in 0..size.height {
             for x in 0..size.width {
-                px[size.idx_of(Vec2us::new(x, y))] = color_val(cfa.slot_at(Vec2us::new(x, y)));
+                px[size.idx_of(USizeVec2::new(x, y))] =
+                    color_val(cfa.slot_at(USizeVec2::new(x, y)));
             }
         }
         for &(x, y) in corrupt {
-            px[size.idx_of(Vec2us::new(x, y))] = 0.9;
+            px[size.idx_of(USizeVec2::new(x, y))] = 0.9;
         }
         make_cfa(size, px, cfa)
     };
 
     let r_hot = (2usize, 0usize); // rows[0][2] = 0 → R
     let b_hot = (0usize, 2usize); // rows[2][0] = 2 → B
-    assert_eq!(cfa.slot_at(Vec2us::new(r_hot.0, r_hot.1)), 0);
-    assert_eq!(cfa.slot_at(Vec2us::new(b_hot.0, b_hot.1)), 2);
+    assert_eq!(cfa.slot_at(USizeVec2::new(r_hot.0, r_hot.1)), 0);
+    assert_eq!(cfa.slot_at(USizeVec2::new(b_hot.0, b_hot.1)), 2);
 
     let dark = build(&[r_hot, b_hot]);
     let defect_map = DefectMap::new(dark.size())
@@ -441,7 +442,7 @@ fn per_channel_detection_bayer() {
     let mut pixels = vec![0.0f32; 64];
     for y in 0..8 {
         for x in 0..8 {
-            let color = pattern.slot_at(Vec2us::new(x, y));
+            let color = pattern.slot_at(USizeVec2::new(x, y));
             pixels[y * 8 + x] = match color {
                 0 => 100.0, // R
                 1 => 200.0, // G
@@ -476,7 +477,7 @@ fn dark_background_reconstructs_affine_mono_signal_through_image_edges() {
     for y in 0..size.height {
         for x in 0..size.width {
             let expected = 0.02 + 0.0001 * x as f32 + 0.0002 * y as f32;
-            let sky = bg.at(0, Vec2us::new(x, y)).sky;
+            let sky = bg.at(0, USizeVec2::new(x, y)).sky;
             assert!(
                 (sky - expected).abs() < 2e-7,
                 "affine background mismatch at ({x}, {y}): expected {expected}, got {sky}"
@@ -493,7 +494,7 @@ fn hot_detection_rejects_column_noise_gradient_and_amp_glow_but_keeps_clusters()
     let mut cluster = Vec::new();
     for y in (124..=132).step_by(2) {
         for x in (156..=164).step_by(2) {
-            assert_eq!(cfa.slot_at(Vec2us::new(x, y)), 0);
+            assert_eq!(cfa.slot_at(USizeVec2::new(x, y)), 0);
             cluster.push((x, y));
         }
     }
@@ -501,7 +502,7 @@ fn hot_detection_rejects_column_noise_gradient_and_amp_glow_but_keeps_clusters()
     let mut pixels = vec![0.0f32; size.pixel_count()];
     for y in 0..size.height {
         for x in 0..size.width {
-            let color = cfa.slot_at(Vec2us::new(x, y));
+            let color = cfa.slot_at(USizeVec2::new(x, y));
             let x_unit = x as f32 / (size.width - 1) as f32;
             let y_unit = y as f32 / (size.height - 1) as f32;
             let baseline = [0.01, 0.02, 0.03][color];
@@ -509,7 +510,7 @@ fn hot_detection_rejects_column_noise_gradient_and_amp_glow_but_keeps_clusters()
             let amp_glow = [0.05, 0.07, 0.09][color] * x_unit * x_unit * (0.5 + 0.5 * y_unit);
             let col_noise = ((x * 13) % 11) as f32 * 0.00004 - 0.0002;
             let noise = ((x * 37 + y * 19) % 17) as f32 * 0.00003 - 0.00024;
-            pixels[size.idx_of(Vec2us::new(x, y))] =
+            pixels[size.idx_of(USizeVec2::new(x, y))] =
                 baseline + gradient + amp_glow + col_noise + noise;
         }
     }
@@ -517,7 +518,7 @@ fn hot_detection_rejects_column_noise_gradient_and_amp_glow_but_keeps_clusters()
     let mut expected: Vec<usize> = isolated
         .iter()
         .chain(&cluster)
-        .map(|&(x, y)| size.idx_of(Vec2us::new(x, y)))
+        .map(|&(x, y)| size.idx_of(USizeVec2::new(x, y)))
         .collect();
     expected.sort_unstable();
     for &idx in &expected {
@@ -634,7 +635,7 @@ fn cold_detection_survives_vignetting_gradient() {
         .collect();
     for y in 6..10 {
         for x in 2..6 {
-            pixels[size.idx_of(Vec2us::new(x, y))] *= 0.65;
+            pixels[size.idx_of(USizeVec2::new(x, y))] *= 0.65;
         }
     }
     let dead = 8 * size.width + 8; // (8,8), normally ≈0.52; its 8 neighbours median ≈0.52
@@ -715,7 +716,7 @@ fn a_hot_pixel_keeps_the_residual_its_detection_tested() {
     let mut ramp: Vec<f32> = (0..size.pixel_count())
         .map(|i| 0.25 + (i % size.width) as f32 / 1024.0)
         .collect();
-    let hot = size.idx_of(Vec2us::new(16, 16));
+    let hot = size.idx_of(USizeVec2::new(16, 16));
     ramp[hot] = 1.0;
     let dark = make_cfa(size, ramp, CfaType::Mono);
     let map = DefectMap::new(dark.size())
@@ -738,10 +739,14 @@ fn xtrans_cold_pixel_detected() {
     let size = Size2us::new(24usize, 24usize);
     let color_val = |c: usize| 0.1 * (c + 1) as f32;
     let mut px: Vec<f32> = (0..size.pixel_count())
-        .map(|i| color_val(pattern.slot_at(Vec2us::new(i % size.width, i / size.width))))
+        .map(|i| color_val(pattern.slot_at(USizeVec2::new(i % size.width, i / size.width))))
         .collect();
     let dead = 12 * size.width + 12; // interior G pixel: 0.0 < 0.5 · 0.2 neighbourhood median
-    assert_eq!(pattern.slot_at(Vec2us::new(12, 12)), 1, "(12,12) is green");
+    assert_eq!(
+        pattern.slot_at(USizeVec2::new(12, 12)),
+        1,
+        "(12,12) is green"
+    );
     px[dead] = 0.0;
     let flat = make_cfa(size, px, pattern);
 
@@ -868,7 +873,11 @@ fn the_ring_plane_reads_the_level_at_the_pixel() {
         .collect();
     let cfa = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
     let mut ring = RingReference::default();
-    for point in [Vec2us::new(20, 20), Vec2us::new(0, 0), Vec2us::new(39, 38)] {
+    for point in [
+        USizeVec2::new(20, 20),
+        USizeVec2::new(0, 0),
+        USizeVec2::new(39, 38),
+    ] {
         let plain = make_cfa(size, pixels.clone(), cfa);
         let read = ring.at(RingFrame::of(plain.data()), &cfa, point).unwrap();
         assert!(
@@ -885,7 +894,7 @@ fn the_ring_plane_reads_the_level_at_the_pixel() {
     }
     let spotted = make_cfa(size, pixels, cfa);
     let read = ring
-        .at(RingFrame::of(spotted.data()), &cfa, Vec2us::new(20, 20))
+        .at(RingFrame::of(spotted.data()), &cfa, USizeVec2::new(20, 20))
         .unwrap();
     assert!((read - level(20, 20)).abs() < 1e-6, "{read}");
     let tiny = make_cfa(Size2us::new(6, 6), vec![0.1; 36], CfaType::Mono);
@@ -893,7 +902,7 @@ fn the_ring_plane_reads_the_level_at_the_pixel() {
         ring.at(
             RingFrame::of(tiny.data()),
             &CfaType::Mono,
-            Vec2us::new(3, 3)
+            USizeVec2::new(3, 3)
         )
         .is_none()
     );

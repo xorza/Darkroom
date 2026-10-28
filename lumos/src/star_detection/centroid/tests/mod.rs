@@ -6,9 +6,9 @@
 )]
 
 use common::Buffer2;
-use glam::DVec2;
+use glam::{DVec2, USizeVec2};
 
-use common::{Size2us, Vec2us};
+use common::Size2us;
 use std::f32::consts::FRAC_PI_4;
 
 use crate::internals::synthetic::{bg_map, patterns};
@@ -54,7 +54,7 @@ fn global_bg(sky: &SkyNoise, pos: DVec2) -> StarBg {
             bg_sigma: f64::from(
                 sky.noise
                     .reader()
-                    .at(Vec2us::new(pixel.0, pixel.1))
+                    .at(USizeVec2::new(pixel.0, pixel.1))
                     .max(sky.floor),
             ),
             electrons_per_unit: None,
@@ -123,10 +123,10 @@ impl Measured {
         let (width, height) = (self.residual.width(), self.residual.height());
         Region {
             bbox: Rect2us::new(
-                Vec2us::new(px.saturating_sub(5), py.saturating_sub(5)),
-                Vec2us::new((px + 6).min(width), (py + 6).min(height)),
+                USizeVec2::new(px.saturating_sub(5), py.saturating_sub(5)),
+                USizeVec2::new((px + 6).min(width), (py + 6).min(height)),
             ),
-            peak: Vec2us::new(px, py),
+            peak: USizeVec2::new(px, py),
             area: 50,
         }
     }

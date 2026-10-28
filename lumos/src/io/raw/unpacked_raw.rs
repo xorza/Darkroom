@@ -30,7 +30,7 @@ use crate::io::raw::raw_decoder::RawDecoder;
 use crate::io::{null_policy, raw};
 use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
 use crate::noise::mosaic_noise_measure::MosaicNoiseMeasure;
-use common::Vec2us;
+use glam::USizeVec2;
 
 /// A camera RAW file LibRaw unpacked, with what lumos reads of it, ready for sensor-specific
 /// processing.
@@ -275,7 +275,7 @@ impl UnpackedRaw {
         let (cfa_type, filters) = (self.cfa_type, self.visible_filters);
         move |x: usize, y: usize| match cfa_type {
             Some(CfaType::Mosaic(Mosaic::XTrans(pattern))) => {
-                pattern.color_at(Vec2us::new(x, y)).idx()
+                pattern.color_at(USizeVec2::new(x, y)).idx()
             }
             Some(CfaType::Mosaic(Mosaic::Bayer(_))) => raw::filter_color(filters, y, x),
             Some(CfaType::Mono) | None => 0,

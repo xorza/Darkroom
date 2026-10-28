@@ -1,7 +1,7 @@
 //! [`WindowedStamp`]: a stamp under a circular Gaussian window, and the moments it weighs.
 
 use common::Buffer2;
-use glam::DVec2;
+use glam::{DVec2, USizeVec2};
 
 use crate::star_detection::centroid::covariance::Cov2;
 use crate::star_detection::centroid::stamp::{MAX_STAMP_SIZE, StampAt};
@@ -12,8 +12,8 @@ use crate::star_detection::centroid::stamp::{MAX_STAMP_SIZE, StampAt};
 #[derive(Debug)]
 pub(super) struct WindowedStamp<'a> {
     residual: &'a Buffer2<f32>,
-    x0: usize,
-    y0: usize,
+    /// The stamp's top-left pixel.
+    origin: USizeVec2,
     size: usize,
     pos: DVec2,
     inv_two_window: f64,
@@ -54,18 +54,17 @@ impl<'a> WindowedStamp<'a> {
         let centre = stamp.centre()?;
         let inv_two_window = 1.0 / (2.0 * window_sq);
         let size = 2 * radius + 1;
-        let (x0, y0) = (centre.x - radius, centre.y - radius);
+        let origin = centre - USizeVec2::splat(radius);
         let mut col_weights = [0.0; MAX_STAMP_SIZE];
         let mut col_offsets = [0.0; MAX_STAMP_SIZE];
         for col in 0..size {
-            let dx = (x0 + col) as f64 - pos.x;
+            let dx = (origin.x + col) as f64 - pos.x;
             col_offsets[col] = dx;
             col_weights[col] = (-dx * dx * inv_two_window).exp();
         }
         Some(Self {
             residual,
-            x0,
-            y0,
+            origin,
             size,
             pos,
             inv_two_window,
@@ -76,10 +75,10 @@ impl<'a> WindowedStamp<'a> {
 
     /// Each row of the stamp, top to bottom.
     pub(super) fn rows(&self) -> impl Iterator<Item = WindowedRow<'a>> + '_ {
-        (self.y0..self.y0 + self.size).map(|y| {
+        (self.origin.y..self.origin.y + self.size).map(|y| {
             let dy = y as f64 - self.pos.y;
             WindowedRow {
-                pixels: &self.residual.row(y)[self.x0..self.x0 + self.size],
+                pixels: &self.residual.row(y)[self.origin.x..self.origin.x + self.size],
                 weight: (-dy * dy * self.inv_two_window).exp(),
                 dy,
             }

@@ -8,7 +8,7 @@ use crate::image::metadata::image_metadata::ImageMetadata;
 use crate::math::statistics::spread::Spread;
 use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
 use crate::noise::ccd_noise::NoiseAt;
-use common::Vec2us;
+use glam::USizeVec2;
 
 /// [`NoiseEstimation`] resolved on a frame: the electrons one unit of its samples is worth, when
 /// known.
@@ -87,7 +87,7 @@ pub(crate) struct PixelBgs<'a> {
 }
 
 impl PixelBgs<'_> {
-    pub(crate) fn at(&self, color: usize, pos: Vec2us) -> PixelBg {
+    pub(crate) fn at(&self, color: usize, pos: USizeVec2) -> PixelBg {
         PixelBg {
             local: self.mesh.at(color, pos),
             flat_gain: self

@@ -9,7 +9,8 @@
 //! which a fused sum here would undo. The pixels whose window crosses an edge take the scalar
 //! per-pixel form.
 
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use glam::USizeVec2;
 use simd::{F32_LANES, F32x8, Isa, Kernel};
 
 /// The rows a column or 2D convolution reads its taps from: whole rows of an image of `size`, image
@@ -81,7 +82,7 @@ impl<'a> Kernel2d<'a> {
 
     /// One output pixel of the 2D convolution of the image `input` at `pos`, mirrored on both axes.
     #[inline]
-    fn convolve_pixel(self, input: RowRing<'_>, pos: Vec2us) -> f32 {
+    fn convolve_pixel(self, input: RowRing<'_>, pos: USizeVec2) -> f32 {
         let size = input.size;
         let radius = self.radius() as isize;
         let mut sum = 0.0f32;
@@ -267,10 +268,10 @@ impl Kernel for Convolve2dRow<'_> {
         let (head, rest) = output_row.split_at_mut(interior.start.min(size.width));
         let (inside, tail) = rest.split_at_mut(interior.len());
         for (x, out) in head.iter_mut().enumerate() {
-            *out = kernel.convolve_pixel(input, Vec2us::new(x, y));
+            *out = kernel.convolve_pixel(input, USizeVec2::new(x, y));
         }
         for (x, out) in (interior.end..).zip(tail) {
-            *out = kernel.convolve_pixel(input, Vec2us::new(x, y));
+            *out = kernel.convolve_pixel(input, USizeVec2::new(x, y));
         }
         if inside.is_empty() {
             return;
@@ -335,7 +336,7 @@ mod internals {
     use crate::star_detection::convolution::simd::{Convolve2dRow, ConvolveColsRow, mirror_idx};
     use crate::star_detection::convolution::simd::{ConvolveRow, convolve_pixel_scalar};
     #[cfg(test)]
-    use common::Vec2us;
+    use glam::USizeVec2;
 
     impl ConvolveRow<'_> {
         /// The scalar row convolution the kernel is tested and benched against.
@@ -372,7 +373,7 @@ mod internals {
             for (x, out) in self.output_row.iter_mut().enumerate() {
                 *out = self
                     .kernel
-                    .convolve_pixel(self.input, Vec2us::new(x, self.y));
+                    .convolve_pixel(self.input, USizeVec2::new(x, self.y));
             }
         }
     }

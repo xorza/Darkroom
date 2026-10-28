@@ -71,7 +71,8 @@ use crate::io::load_ctx::LoadCtx;
 use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::progress_monitor::ProgressMonitor;
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use glam::USizeVec2;
 
 /// The bundle `images` builds, at the default defect threshold.
 fn bundle(images: CalibrationSet<Option<CfaImage>>) -> CalibrationMasters {
@@ -1103,7 +1104,7 @@ fn calibrate_hot_pixel_correction() {
     let mut light_pixels = Buffer2::new_default((w, h));
     for y in 0..h {
         for x in 0..w {
-            light_pixels[(x, y)] = baseline[pattern.slot_at(Vec2us::new(x, y))];
+            light_pixels[(x, y)] = baseline[pattern.slot_at(USizeVec2::new(x, y))];
         }
     }
     light_pixels[(2, 2)] = 0.9;
@@ -1114,7 +1115,7 @@ fn calibrate_hot_pixel_correction() {
     let flags = light.flags().unwrap();
     assert_eq!(flags.count(QualityFlags::REPAIRED), 1);
     assert_eq!(
-        flags.at_pos(Vec2us::new(2, 2)),
+        flags.at_pos(USizeVec2::new(2, 2)),
         QualityFlags::DEFECT.union(QualityFlags::REPAIRED)
     );
 

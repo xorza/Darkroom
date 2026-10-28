@@ -12,7 +12,7 @@ use crate::star_detection::labeling::run::{Run, RunJoin};
 use crate::star_detection::labeling::union_find::UnionFind;
 use crate::star_detection::labeling::{LabelMap, LabelRun, run};
 use crate::star_detection::star_detection_config::extraction_config::Connectivity;
-use common::Vec2us;
+use glam::USizeVec2;
 
 /// Rows a strip must cover to be worth splitting off, so an image is not cut into bands whose
 /// per-strip overhead and boundary stitching outweigh the labeling. An image under this height
@@ -148,10 +148,10 @@ impl Labeler {
                 component.label = label;
                 component
                     .bbox
-                    .include(Vec2us::new(run.start as usize, y as usize));
+                    .include(USizeVec2::new(run.start as usize, y as usize));
                 component
                     .bbox
-                    .include(Vec2us::new(run.end as usize - 1, y as usize));
+                    .include(USizeVec2::new(run.end as usize - 1, y as usize));
                 component.area += (run.end - run.start) as usize;
                 run_starts[label as usize] += 1;
             }

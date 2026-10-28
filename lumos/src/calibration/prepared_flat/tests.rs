@@ -13,7 +13,8 @@ use crate::image::flags::quality_flags::QualityFlags;
 use crate::internals::assertions::bits;
 use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::test_rng::TestRng;
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use glam::USizeVec2;
 
 fn prepare(mut flat: CfaImage, subtractor: Option<&CfaImage>) -> PreparedFlat {
     if let Some(subtractor) = subtractor {
@@ -126,7 +127,7 @@ fn prepared_flat_is_bit_exact_for_bayer_and_xtrans_with_subtraction() {
         let mut expected_divisors = Vec::with_capacity(size.pixel_count());
         for y in 0..size.height {
             for x in 0..size.width {
-                let color = cfa_type.slot_at(Vec2us::new(x, y));
+                let color = cfa_type.slot_at(USizeVec2::new(x, y));
                 let divisor = if counts[color].is_multiple_of(2) {
                     0.5
                 } else {

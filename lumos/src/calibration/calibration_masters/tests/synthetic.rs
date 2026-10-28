@@ -20,7 +20,8 @@ use crate::internals::synthetic::metrics::{pixel_stats, rms_diff};
 use crate::internals::synthetic::observe::{Observation, render};
 use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::scene::{BgField, Placement, Scatter, Scene};
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use glam::USizeVec2;
 
 /// A uniformly lit sky seen through a vignette, with bias and dark on top, calibrates to the sky
 /// times the flat's mean at every pixel. Noiseless, so the check is the arithmetic's own: the
@@ -254,7 +255,7 @@ fn defect_correction_replaces_hot_pixels_with_neighbours() {
     let hot: [(usize, usize); 2] = [(10, 10), (20, 15)];
     let mut dark = vec![0.05f32; n];
     for &(x, y) in &hot {
-        dark[size.idx_of(Vec2us::new(x, y))] = 0.9;
+        dark[size.idx_of(USizeVec2::new(x, y))] = 0.9;
     }
     let map = DefectMap::new(size)
         .detect_hot(
@@ -266,7 +267,7 @@ fn defect_correction_replaces_hot_pixels_with_neighbours() {
 
     let mut img_px = vec![bg; n];
     for &(x, y) in &hot {
-        img_px[size.idx_of(Vec2us::new(x, y))] = 0.95;
+        img_px[size.idx_of(USizeVec2::new(x, y))] = 0.95;
     }
     let mut img = make_cfa(size, img_px, CfaType::Mono);
     map.correct(&mut img, None);

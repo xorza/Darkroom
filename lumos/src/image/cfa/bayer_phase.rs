@@ -4,14 +4,15 @@ use common::{Buffer2, par};
 use rayon::prelude::*;
 
 use crate::bit_buffer2::BitBuffer2;
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use glam::USizeVec2;
 
 /// One of a 2×2 pattern's four phases: the photosites at `(x + 2i, y + 2j)` from its origin
 /// `(x, y)`, all behind one filter. A Bayer phase is one color, and its photosites, side by side,
 /// make a dense plane of it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct BayerPhase {
-    origin: Vec2us,
+    origin: USizeVec2,
 }
 
 impl BayerPhase {
@@ -25,12 +26,12 @@ impl BayerPhase {
 
     const fn at(x: usize, y: usize) -> Self {
         Self {
-            origin: Vec2us::new(x, y),
+            origin: USizeVec2::new(x, y),
         }
     }
 
     /// The phase's first photosite.
-    pub(crate) const fn origin(self) -> Vec2us {
+    pub(crate) const fn origin(self) -> USizeVec2 {
         self.origin
     }
 
@@ -43,8 +44,8 @@ impl BayerPhase {
     }
 
     /// The mosaic position of `at` of the phase's dense plane.
-    pub(crate) const fn to_mosaic(self, at: Vec2us) -> Vec2us {
-        Vec2us::new(2 * at.x + self.origin.x, 2 * at.y + self.origin.y)
+    pub(crate) const fn to_mosaic(self, at: USizeVec2) -> USizeVec2 {
+        USizeVec2::new(2 * at.x + self.origin.x, 2 * at.y + self.origin.y)
     }
 
     /// Copy the phase of `mosaic` into `plane`, of [`Self::size`], row-major.
@@ -53,14 +54,14 @@ impl BayerPhase {
     /// they are the whole of its serial fraction otherwise.
     pub(crate) fn deinterleave(self, mosaic: &Buffer2<f32>, plane: &mut Buffer2<f32>) {
         let plane_size = self.size(mosaic.size());
-        let Vec2us { x: a, y: b } = self.origin;
+        let origin = self.origin;
         plane.reshape(plane_size, 0.0);
         par::chunks_mut(plane, plane_size.width.max(1))
             .enumerate()
             .for_each(|(y, row)| {
-                let source = mosaic.row(2 * y + b);
+                let source = mosaic.row(2 * y + origin.y);
                 for (x, value) in row.iter_mut().enumerate() {
-                    *value = source[2 * x + a];
+                    *value = source[2 * x + origin.x];
                 }
             });
     }
@@ -71,11 +72,15 @@ impl BayerPhase {
     /// The plane's padding stays clear: a plane pixel past its width reads the mosaic past its
     /// width, which is padding or no word at all.
     pub(crate) fn deinterleave_mask(self, mosaic: &BitBuffer2, plane: &mut BitBuffer2) {
-        let Vec2us { x: a, y: b } = self.origin;
+        let origin = self.origin;
         plane.clear_to(self.size(mosaic.size()));
         plane.par_rows_mut().enumerate().for_each(|(y, row)| {
-            let source = mosaic.row_words(2 * y + b);
-            let half = |idx: usize| source.get(idx).map_or(0, |&word| even_bits(word >> a));
+            let source = mosaic.row_words(2 * y + origin.y);
+            let half = |idx: usize| {
+                source
+                    .get(idx)
+                    .map_or(0, |&word| even_bits(word >> origin.x))
+            };
             for (w, word) in row.iter_mut().enumerate() {
                 *word = half(2 * w) | (half(2 * w + 1) << 32);
             }
@@ -86,13 +91,13 @@ impl BayerPhase {
     pub(crate) fn interleave(self, plane: &Buffer2<f32>, mosaic: &mut Buffer2<f32>) {
         let size = mosaic.size();
         debug_assert_eq!(plane.size(), self.size(size), "the plane is the phase's");
-        let Vec2us { x: a, y: b } = self.origin;
+        let origin = self.origin;
         par::chunks_mut(mosaic, size.width)
             .enumerate()
-            .filter(|(y, _)| y % 2 == b)
+            .filter(|(y, _)| y % 2 == origin.y)
             .for_each(|(y, row)| {
                 for (x, &value) in plane.row(y / 2).iter().enumerate() {
-                    row[2 * x + a] = value;
+                    row[2 * x + origin.x] = value;
                 }
             });
     }
@@ -114,7 +119,8 @@ mod tests {
 
     use crate::bit_buffer2::BitBuffer2;
     use crate::image::cfa::bayer_phase::{BayerPhase, even_bits};
-    use common::{Size2us, Vec2us};
+    use common::Size2us;
+    use glam::USizeVec2;
 
     /// Phase (1, 0) of a 5 × 3 mosaic holding its own indices is columns 1 and 3 of rows 0 and 2:
     /// a 2 × 2 plane of 1, 3, 11, 13, whose (1, 1) is the mosaic's (3, 2). Phase (0, 1) is row 1's
@@ -129,7 +135,7 @@ mod tests {
         assert_eq!(plane.size(), Size2us::new(2, 2));
         assert_eq!(plane.pixels(), [1.0, 3.0, 11.0, 13.0]);
         assert_eq!(right.size(size), Size2us::new(2, 2));
-        assert_eq!(right.to_mosaic(Vec2us::new(1, 1)), Vec2us::new(3, 2));
+        assert_eq!(right.to_mosaic(USizeVec2::new(1, 1)), USizeVec2::new(3, 2));
         below.deinterleave(&mosaic, &mut plane);
         assert_eq!(plane.size(), Size2us::new(3, 1));
         assert_eq!(plane.pixels(), [5.0, 7.0, 9.0]);
@@ -167,7 +173,7 @@ mod tests {
                 assert!(plane.padding_is_clear(), "{width} {phase:?}");
                 for y in 0..plane_size.height {
                     for x in 0..plane_size.width {
-                        let at = Vec2us::new(x, y);
+                        let at = USizeVec2::new(x, y);
                         assert_eq!(
                             plane.get_at(at),
                             mosaic.get_at(phase.to_mosaic(at)),

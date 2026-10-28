@@ -1,6 +1,7 @@
 //! [`SensorLayout`]: where a RAW file's visible window sits inside LibRaw's raw buffer.
 
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use common::glam::USizeVec2;
 
 use crate::error::LibrawError;
 use crate::sys;
@@ -14,7 +15,7 @@ pub struct SensorLayout {
     /// Extent of the visible window.
     pub active: Size2us,
     /// Top-left corner of the window within the source buffer.
-    pub margin: Vec2us,
+    pub margin: USizeVec2,
 }
 
 impl SensorLayout {
@@ -27,7 +28,7 @@ impl SensorLayout {
     pub(crate) fn of(sizes: &sys::libraw_image_sizes_t) -> Result<Self, LibrawError> {
         let raw = Size2us::new(usize::from(sizes.raw_width), usize::from(sizes.raw_height));
         let active = Size2us::new(usize::from(sizes.width), usize::from(sizes.height));
-        let margin = Vec2us::new(
+        let margin = USizeVec2::new(
             usize::from(sizes.left_margin),
             usize::from(sizes.top_margin),
         );

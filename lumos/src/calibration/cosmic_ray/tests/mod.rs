@@ -6,7 +6,7 @@
 mod scratch;
 
 use common::{Buffer2, PerWorker};
-use glam::Vec2;
+use glam::{USizeVec2, Vec2};
 
 use crate::bg_mesh::color_mesh::LocalBg;
 use crate::calibration::cosmic_ray::cosmic_ray_config::NoiseEstimation;
@@ -23,7 +23,6 @@ use crate::internals::test_rng::TestRng;
 use crate::math::statistics;
 use crate::math::statistics::median_mad::MedianMad;
 use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
-use common::Vec2us;
 
 /// 64×64: flat sky + deterministic Gaussian noise (σ≈0.003) + three well-sampled stars
 /// (FWHM≈3 px). Unclamped, because the tests inject cosmic rays above the ceiling afterwards.
@@ -60,12 +59,16 @@ fn removes_cosmic_rays_preserves_stars() {
     let size = data.size();
     // Single-pixel CRs at empty positions + a short horizontal streak.
     let crs = [
-        Vec2us::new(10, 10),
-        Vec2us::new(54, 12),
-        Vec2us::new(12, 54),
-        Vec2us::new(50, 50),
+        USizeVec2::new(10, 10),
+        USizeVec2::new(54, 12),
+        USizeVec2::new(12, 54),
+        USizeVec2::new(50, 50),
     ];
-    let streak = [Vec2us::new(30, 8), Vec2us::new(31, 8), Vec2us::new(32, 8)];
+    let streak = [
+        USizeVec2::new(30, 8),
+        USizeVec2::new(31, 8),
+        USizeVec2::new(32, 8),
+    ];
     for &p in crs.iter().chain(&streak) {
         data[size.idx_of(p)] = 0.95;
     }
@@ -121,7 +124,7 @@ fn sigclip_controls_sensitivity() {
         pixels: mut data, ..
     } = synthetic_field();
     let size = data.size();
-    data[size.idx_of(Vec2us::new(40, 40))] = 0.05 + 0.045;
+    data[size.idx_of(USizeVec2::new(40, 40))] = 0.05 + 0.045;
     let sensitive = reject(
         &mut cfa_from_plane(data.clone(), CfaType::Mono),
         &CosmicRayConfig {
@@ -151,7 +154,7 @@ fn measured_and_stated_gains_both_catch_a_bright_cr() {
         pixels: mut data, ..
     } = synthetic_field();
     let size = data.size();
-    let cr = Vec2us::new(15, 33);
+    let cr = USizeVec2::new(15, 33);
     data[size.idx_of(cr)] = 0.99;
     for noise in [
         NoiseEstimation::Measured,
@@ -203,14 +206,14 @@ fn bayer_removes_cosmic_rays_preserves_star() {
             peaks: &[(Vec2::new(24.0, 24.0), 0.6)],
         },
     );
-    let core = Vec2us::new(24, 24);
+    let core = USizeVec2::new(24, 24);
     let star = data[size.idx_of(core)];
     // Each CR sits in a different (x%2, y%2) phase, exercising all four planes.
     let crs = [
-        Vec2us::new(8, 8),
-        Vec2us::new(9, 12),
-        Vec2us::new(12, 41),
-        Vec2us::new(37, 37),
+        USizeVec2::new(8, 8),
+        USizeVec2::new(9, 12),
+        USizeVec2::new(12, 41),
+        USizeVec2::new(37, 37),
     ];
     for &p in &crs {
         data[size.idx_of(p)] = 0.95;
@@ -245,9 +248,9 @@ fn bayer_removes_cosmic_rays_preserves_star() {
     assert_eq!(flags.count(QualityFlags::COSMIC_RAY), 7);
     assert_eq!(flags.count(QualityFlags::REPAIRED), 7);
     for &p in crs.iter().chain(&[
-        Vec2us::new(10, 10),
-        Vec2us::new(11, 10),
-        Vec2us::new(35, 39),
+        USizeVec2::new(10, 10),
+        USizeVec2::new(11, 10),
+        USizeVec2::new(35, 39),
     ]) {
         assert_eq!(flags.at_pos(p), repaired, "({}, {})", p.x, p.y);
     }
@@ -283,8 +286,8 @@ fn bayer_tight_star_eaten_is_a_known_limitation() {
             peaks: &[(Vec2::new(24.0, 24.0), 0.6)],
         },
     );
-    let core = Vec2us::new(24, 24);
-    let crs = [Vec2us::new(8, 8), Vec2us::new(37, 37)];
+    let core = USizeVec2::new(24, 24);
+    let crs = [USizeVec2::new(8, 8), USizeVec2::new(37, 37)];
     for &p in &crs {
         data[size.idx_of(p)] = 0.95;
     }
@@ -322,7 +325,7 @@ fn repair_via_snapshot(pixels: &Buffer2<f32>, mask: &BitBuffer2, sky: f32) -> Bu
     let (wi, hi) = (size.width as isize, size.height as isize);
     for y in 0..size.height {
         for x in 0..size.width {
-            let target = size.idx_of(Vec2us::new(x, y));
+            let target = size.idx_of(USizeVec2::new(x, y));
             if !mask.get(target) {
                 continue;
             }
@@ -335,7 +338,7 @@ fn repair_via_snapshot(pixels: &Buffer2<f32>, mask: &BitBuffer2, sky: f32) -> Bu
                             continue;
                         }
                         let xx = (x as isize + dx).clamp(0, wi - 1) as usize;
-                        let j = size.idx_of(Vec2us::new(xx, yy));
+                        let j = size.idx_of(USizeVec2::new(xx, yy));
                         if !mask.get(j) {
                             buf.push(src[j]);
                         }
@@ -362,7 +365,7 @@ fn a_repair_matches_a_snapshot_reference() {
     let pixels = Buffer2::from_fn((12, 12), |x, y| (y * 12 + x) as f32);
 
     let mut mask = BitBuffer2::new_default(size);
-    let at = |x, y| size.idx_of(Vec2us::new(x, y));
+    let at = |x, y| size.idx_of(USizeVec2::new(x, y));
     // Isolated hit.
     mask.set(at(6, 6), true);
     // Adjacent 2x2 block: the case that would expose an order-dependent read, since each of the
@@ -520,7 +523,7 @@ fn a_faint_hit_on_a_gradient_is_caught() {
     let mut pixels = Buffer2::from_fn((128, 128), |x, _| {
         0.05 + 0.4 * x as f32 / 128.0 + 0.002 * rng.next_gaussian_f32()
     });
-    let hit = Vec2us::new(70, 70);
+    let hit = USizeVec2::new(70, 70);
     pixels[size.idx_of(hit)] += 0.04;
     let whole_frame_sigma = MedianMad::of_mut(&mut pixels.clone()).sigma();
     assert!(whole_frame_sigma > 0.08, "premise: {whole_frame_sigma}");
@@ -682,7 +685,7 @@ fn a_clipped_star_core_is_kept_and_a_saturated_hit_is_not() {
         },
     )
     .pixels;
-    let hit = Vec2us::new(44, 30);
+    let hit = USizeVec2::new(44, 30);
     data[size.idx_of(hit)] = 2.0;
     for value in data.pixels_mut() {
         *value = value.min(0.9);
@@ -746,7 +749,7 @@ fn an_xtrans_mosaic_is_refused_untouched() {
     let mut data: Vec<f32> = (0..size.pixel_count())
         .map(|idx| 0.04 + 0.01 * cfa.slot_at(size.point_of(idx)) as f32)
         .collect();
-    data[size.idx_of(Vec2us::new(18, 18))] = 0.95;
+    data[size.idx_of(USizeVec2::new(18, 18))] = 0.95;
     let mut image = cfa_from_plane(Buffer2::new(size, data.clone()), cfa);
     image.set_flags(PixelFlags::from_fn(size, |idx| {
         if idx == 7 {
@@ -817,7 +820,7 @@ fn the_local_recompute_is_the_full_one() {
     ] {
         for dy in 0..=2 * half {
             for dx in 0..=2 * half {
-                hits.push(Vec2us::new(centre.0 + dx - half, centre.1 + dy - half));
+                hits.push(USizeVec2::new(centre.0 + dx - half, centre.1 + dy - half));
             }
         }
     }

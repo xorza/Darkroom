@@ -11,7 +11,8 @@ use crate::image::flags::flag_counts::FlagCounts;
 use crate::image::flags::quality_flags::QualityFlags;
 use crate::scratch_pool::{ScratchPool, Shapeless};
 use crate::unsafe_send_ptr::UnsafeSendPtr;
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use glam::USizeVec2;
 
 /// Which pixels of an image carry which [`QualityFlags`].
 ///
@@ -167,7 +168,7 @@ impl PixelFlags {
 
     /// The flags of the pixel at `pos`.
     #[inline]
-    pub fn at_pos(&self, pos: Vec2us) -> QualityFlags {
+    pub fn at_pos(&self, pos: USizeVec2) -> QualityFlags {
         self.at(self.size().idx_of(pos))
     }
 

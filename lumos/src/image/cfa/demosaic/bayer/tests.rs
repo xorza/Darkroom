@@ -12,7 +12,8 @@ use crate::image::cfa::mosaic::Mosaic;
 use crate::internals::assertions::assert_close;
 use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::test_rng::TestRng;
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use glam::USizeVec2;
 
 /// Every phase round-trips through its `BAYERPAT` spelling, in any case and with blanks around
 /// it; `TRUE`, which names no phase, is refused like any other value.
@@ -131,10 +132,10 @@ fn demosaic(data: &Buffer2<f32>, pattern: BayerPattern) -> [Vec<f32>; 3] {
 fn mosaic(
     size: Size2us,
     pattern: BayerPattern,
-    scene: impl Fn(Vec2us, usize) -> f32,
+    scene: impl Fn(USizeVec2, usize) -> f32,
 ) -> Buffer2<f32> {
     Buffer2::from_fn(size, |x, y| {
-        let pos = Vec2us::new(x, y);
+        let pos = USizeVec2::new(x, y);
         scene(pos, pattern.color_at(pos).idx())
     })
 }
@@ -197,7 +198,7 @@ fn rcd_beyond_the_border_matches_a_larger_frame() {
                 if distance < INTERPOLATED_BORDER {
                     continue;
                 }
-                let outer = large.idx_of(Vec2us::new(pos.x + offset, pos.y + offset));
+                let outer = large.idx_of(pos + USizeVec2::splat(offset));
                 assert_eq!(
                     value.to_bits(),
                     whole_plane[outer].to_bits(),
@@ -223,7 +224,7 @@ fn rcd_all_patterns_preserve_native_samples_and_stay_finite() {
     };
     let assert_native = |planes: &[Vec<f32>; 3],
                          data: &[f32],
-                         color: &dyn Fn(Vec2us) -> usize,
+                         color: &dyn Fn(USizeVec2) -> usize,
                          size: Size2us,
                          case: &str| {
         for (channel, plane) in planes.iter().enumerate() {
@@ -344,7 +345,7 @@ fn rcd_is_the_same_on_every_bayer_phase() {
     let mosaic = |pattern: BayerPattern, dx: usize, dy: usize| -> Buffer2<f32> {
         let (cw, ch) = (w - dx, h - dy);
         Buffer2::from_fn((cw, ch), |x, y| {
-            scene(x + dx, y + dy, pattern.color_at(Vec2us::new(x, y)).idx())
+            scene(x + dx, y + dy, pattern.color_at(USizeVec2::new(x, y)).idx())
         })
     };
 
@@ -361,8 +362,8 @@ fn rcd_is_the_same_on_every_bayer_phase() {
         (BayerPattern::Bggr, 1, 1),
     ] {
         assert_eq!(
-            pattern.color_at(Vec2us::new(0, 0)),
-            BayerPattern::Rggb.color_at(Vec2us::new(dx, dy)),
+            pattern.color_at(USizeVec2::new(0, 0)),
+            BayerPattern::Rggb.color_at(USizeVec2::new(dx, dy)),
             "{pattern:?} is RGGB shifted by ({dx}, {dy})"
         );
         let (cw, ch) = (w - dx, h - dy);
@@ -391,7 +392,7 @@ fn rcd_is_the_same_on_every_bayer_phase() {
 /// would mix in a quarter of the other side, 0.15 here.
 #[test]
 fn rcd_interpolates_along_an_edge() {
-    type Axis = fn(Vec2us) -> usize;
+    type Axis = fn(USizeVec2) -> usize;
     fn side(coordinate: usize) -> f32 {
         if coordinate < 16 { 0.8 } else { 0.2 }
     }
@@ -433,7 +434,7 @@ fn rcd_interpolates_along_an_edge() {
 #[test]
 fn rcd_reproduces_a_linear_ramp_inside_the_border() {
     let size = Size2us::new(48, 40);
-    let ramp = |pos: Vec2us| 0.1 + 0.015 * pos.x as f32 + 0.01 * pos.y as f32;
+    let ramp = |pos: USizeVec2| 0.1 + 0.015 * pos.x as f32 + 0.01 * pos.y as f32;
     for pattern in BayerPattern::ALL {
         let planes = demosaic(&mosaic(size, pattern, |pos, _| ramp(pos)), pattern);
         for idx in 0..size.pixel_count() {

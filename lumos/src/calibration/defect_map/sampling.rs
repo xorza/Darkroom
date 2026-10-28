@@ -12,7 +12,8 @@ use common::Buffer2;
 use crate::bg_mesh::color_mesh::ColorMesh;
 use crate::calibration::defect_map::MAX_MEDIAN_SAMPLES;
 use crate::image::cfa::cfa_type::CfaType;
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use glam::USizeVec2;
 
 #[derive(Debug, Clone, Copy)]
 struct CfaSamplePhase {
@@ -63,7 +64,7 @@ pub(super) fn color_sample_idxs(
         ArrayVec::<CfaSamplePhase, { CfaType::MAX_PERIOD * CfaType::MAX_PERIOD }>::new();
     for y_offset in 0..period.min(size.height) {
         for x_offset in 0..period.min(size.width) {
-            if cfa_type.slot_at(Vec2us::new(x_offset, y_offset)) != target_color {
+            if cfa_type.slot_at(USizeVec2::new(x_offset, y_offset)) != target_color {
                 continue;
             }
             let cols = (size.width - 1 - x_offset) / period + 1;
@@ -101,7 +102,7 @@ pub(super) fn color_sample_idxs(
                 let y = phase.y_offset + row * period;
                 for col in 0..phase.cols {
                     let x = phase.x_offset + col * period;
-                    idxs.push(size.idx_of(Vec2us::new(x, y)));
+                    idxs.push(size.idx_of(USizeVec2::new(x, y)));
                 }
             }
             continue;
@@ -121,7 +122,7 @@ pub(super) fn color_sample_idxs(
                 let col = (stratified_center(sample_col, row_sample_count, phase.cols) + rotation)
                     % phase.cols;
                 let x = phase.x_offset + col * period;
-                idxs.push(size.idx_of(Vec2us::new(x, y)));
+                idxs.push(size.idx_of(USizeVec2::new(x, y)));
             }
         }
     }

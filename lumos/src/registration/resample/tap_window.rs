@@ -10,6 +10,7 @@ use crate::registration::resample::ringing_clamp::{LobeSums, LobeWeights};
 use crate::registration::resample::source_image::SourcePlane;
 use crate::registration::resample::warp_kernel::TapAxis;
 use common::Size2us;
+use glam::USizeVec2;
 use simd::{F32_LANES, F32x8, Isa, Mask8};
 
 /// Weight sums over the taps of a window that hold data, the weight of a tap being `L = wₓ·w_y`.
@@ -143,8 +144,8 @@ impl<V: F32x8> Lobes<V> {
 /// weights of the in-bounds taps on each axis.
 #[derive(Debug)]
 pub(crate) struct TapWindow<'a> {
-    x: usize,
-    y: usize,
+    /// The window's first in-bounds tap.
+    first: USizeVec2,
     wx: &'a [f32],
     wy: &'a [f32],
     /// `wx` and the slots after it, at least a vector's worth.
@@ -209,8 +210,7 @@ impl<'a> TapWindow<'a> {
         let clip_x = Clip::of(x, size.width)?;
         let clip_y = Clip::of(y, size.height)?;
         Some(Self {
-            x: clip_x.first,
-            y: clip_y.first,
+            first: USizeVec2::new(clip_x.first, clip_y.first),
             wx: &x.weights()[clip_x.from..clip_x.to],
             wy: &y.weights()[clip_y.from..clip_y.to],
             wx_padded: x.padded_from(clip_x.from),
@@ -373,7 +373,7 @@ impl<'a> TapWindow<'a> {
     /// Where row `j` of the window starts in a plane `width` wide, the source's.
     #[inline(always)]
     const fn row(&self, width: usize, j: usize) -> usize {
-        (self.y + j) * width + self.x
+        (self.first.y + j) * width + self.first.x
     }
 }
 

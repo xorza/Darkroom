@@ -22,7 +22,8 @@ use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::test_rng::TestRng;
 use crate::io::raw;
 use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use glam::USizeVec2;
 
 #[test]
 fn a_null_is_repaired_from_its_same_color_neighbours_before_demosaic() {
@@ -98,7 +99,7 @@ fn a_demosaiced_frame_keeps_its_mosaics_noise() {
     let mut rng = TestRng::new(7);
     let pixels = (0..size.pixel_count())
         .map(|idx| {
-            let color = cfa_type.slot_at(Vec2us::new(idx % 64, idx / 64));
+            let color = cfa_type.slot_at(USizeVec2::new(idx % 64, idx / 64));
             level[color] + sigma[color] * rng.next_gaussian_f32()
         })
         .collect();
@@ -212,7 +213,7 @@ fn every_pattern_names_the_color_at_each_position() {
         for y in 0..4 {
             for x in 0..4 {
                 let expected = color_of(spelling[(y % 2) * 2 + x % 2]);
-                let pos = Vec2us::new(x, y);
+                let pos = USizeVec2::new(x, y);
                 assert_eq!(pattern.color_at(pos).idx(), expected, "{pattern:?} {pos:?}");
                 assert_eq!(
                     CfaType::Mosaic(Mosaic::Bayer(pattern)).slot_at(pos),
@@ -224,7 +225,7 @@ fn every_pattern_names_the_color_at_each_position() {
     }
     for y in 0..12 {
         for x in 0..12 {
-            let pos = Vec2us::new(x, y);
+            let pos = USizeVec2::new(x, y);
             assert_eq!(CfaType::Mono.slot_at(pos), 0);
             assert_eq!(
                 CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN)).slot_at(pos),
@@ -260,7 +261,7 @@ fn every_pattern_names_the_color_at_each_position() {
             let mut counted = vec![0; cfa.color_count()];
             for y in 0..size.height {
                 for x in 0..size.width {
-                    counted[cfa.slot_at(Vec2us::new(x, y))] += 1;
+                    counted[cfa.slot_at(USizeVec2::new(x, y))] += 1;
                 }
             }
             assert_eq!(
@@ -358,17 +359,17 @@ fn demosaic_spreads_flags_by_its_support() {
     assert_eq!(flags.count(QualityFlags::COSMIC_RAY), 1);
     assert_eq!(flags.count(QualityFlags::REPAIRED), 3);
     assert_eq!(
-        flags.at_pos(Vec2us::new(40, 5)),
+        flags.at_pos(USizeVec2::new(40, 5)),
         QualityFlags::DEFECT.union(QualityFlags::REPAIRED)
     );
     assert!(
         flags
-            .at_pos(Vec2us::new(10, 30))
+            .at_pos(USizeVec2::new(10, 30))
             .intersects(QualityFlags::SATURATED)
     );
     assert!(
         !flags
-            .at_pos(Vec2us::new(31, 20))
+            .at_pos(USizeVec2::new(31, 20))
             .intersects(QualityFlags::SATURATED)
     );
 }
@@ -399,7 +400,7 @@ fn a_balanced_demosaic_keeps_neutral_detail_neutral() {
             let samples: Vec<f32> = (0..size.pixel_count())
                 .map(|idx| {
                     let (x, y) = (idx % size.width, idx / size.width);
-                    scene(x, y) / gains[cfa_type.slot_at(Vec2us::new(x, y))]
+                    scene(x, y) / gains[cfa_type.slot_at(USizeVec2::new(x, y))]
                 })
                 .collect();
             let false_color = |balance: Option<[f32; 4]>| {

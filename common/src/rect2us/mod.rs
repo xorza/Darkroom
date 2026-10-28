@@ -1,6 +1,6 @@
 //! Half-open axis-aligned pixel rectangles.
 
-use crate::vec2us::Vec2us;
+use glam::USizeVec2;
 
 // `Ord::min`/`max` are trait methods, which a `const fn` cannot call.
 const fn min_usize(a: usize, b: usize) -> usize {
@@ -14,8 +14,8 @@ const fn max_usize(a: usize, b: usize) -> usize {
 /// Unsigned pixel rectangle with minimum-inclusive, maximum-exclusive bounds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rect2us {
-    pub min: Vec2us,
-    pub max: Vec2us,
+    pub min: USizeVec2,
+    pub max: USizeVec2,
 }
 
 impl Rect2us {
@@ -23,7 +23,7 @@ impl Rect2us {
     /// checked in debug builds, as a hot loop builds rectangles; the one with `min > max` is
     /// [`Self::empty`].
     #[inline]
-    pub const fn new(min: Vec2us, max: Vec2us) -> Self {
+    pub const fn new(min: USizeVec2, max: USizeVec2) -> Self {
         debug_assert!(min.x <= max.x && min.y <= max.y, "invalid rectangle bounds");
         Self { min, max }
     }
@@ -33,8 +33,8 @@ impl Rect2us {
     #[inline]
     pub const fn empty() -> Self {
         Self {
-            min: Vec2us::new(usize::MAX, usize::MAX),
-            max: Vec2us::ZERO,
+            min: USizeVec2::MAX,
+            max: USizeVec2::ZERO,
         }
     }
 
@@ -57,7 +57,7 @@ impl Rect2us {
     }
 
     #[inline]
-    pub const fn contains(self, point: Vec2us) -> bool {
+    pub const fn contains(self, point: USizeVec2) -> bool {
         point.x >= self.min.x
             && point.x < self.max.x
             && point.y >= self.min.y
@@ -65,7 +65,7 @@ impl Rect2us {
     }
 
     #[inline]
-    pub const fn include(&mut self, point: Vec2us) {
+    pub const fn include(&mut self, point: USizeVec2) {
         self.min.x = min_usize(self.min.x, point.x);
         self.min.y = min_usize(self.min.y, point.y);
         self.max.x = max_usize(self.max.x, point.x + 1);

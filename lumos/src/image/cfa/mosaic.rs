@@ -7,7 +7,7 @@ use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_color::CfaColor;
 use crate::image::cfa::xtrans_pattern::XTransPattern;
 use crate::image::metadata::image_provenance::ColorProvenance;
-use common::Vec2us;
+use glam::USizeVec2;
 
 /// A pattern of red, green and blue filters over a sensor's photosites, anchored at the origin of
 /// the image data it accompanies.
@@ -22,7 +22,7 @@ pub enum Mosaic {
 impl Mosaic {
     /// The color of the photosite at `pos`.
     #[inline(always)]
-    pub const fn color_at(&self, pos: Vec2us) -> CfaColor {
+    pub const fn color_at(&self, pos: USizeVec2) -> CfaColor {
         match self {
             Self::Bayer(pattern) => pattern.color_at(pos),
             Self::XTrans(pattern) => pattern.color_at(pos),
@@ -31,7 +31,7 @@ impl Mosaic {
 
     /// The color slot of the photosite at `pos`: its [`CfaColor::idx`].
     #[inline(always)]
-    pub const fn slot_at(&self, pos: Vec2us) -> usize {
+    pub const fn slot_at(&self, pos: USizeVec2) -> usize {
         self.color_at(pos).idx()
     }
 

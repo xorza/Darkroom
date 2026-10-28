@@ -79,18 +79,18 @@ fn sample_ordinals_are_even_and_point_symmetric() {
 fn tile_samples_centre_on_the_tile() {
     let size = Size2us::new(100, 100);
     let pixels = Buffer2::from_fn(size, |x, y| (x + 1000 * y) as f32);
-    let tile = Rect2us::new(Vec2us::new(10, 20), Vec2us::new(74, 84));
+    let tile = Rect2us::new(USizeVec2::new(10, 20), USizeVec2::new(74, 84));
     let mut samples = TileSamples::default();
     samples.collect_tile(&pixels, tile);
     let TileSamples { values, offsets } = &samples;
     assert_eq!(values.len(), MAX_TILE_SAMPLES);
     let mean = values.iter().map(|&v| f64::from(v)).sum::<f64>() / values.len() as f64;
     assert_eq!(mean, 41.5 + 1000.0 * 51.5);
-    for (&v, &[ox, oy]) in values.iter().zip(offsets) {
-        assert_eq!(2 * v as i32, 83 + ox + 1000 * (103 + oy), "{v}");
+    for (&v, &offset) in values.iter().zip(offsets) {
+        assert_eq!(2 * v as i32, 83 + offset.x + 1000 * (103 + offset.y), "{v}");
     }
 
-    let small = Rect2us::new(Vec2us::new(3, 4), Vec2us::new(13, 9));
+    let small = Rect2us::new(USizeVec2::new(3, 4), USizeVec2::new(13, 9));
     let mut samples = TileSamples::default();
     samples.collect_tile(&pixels, small);
     let every: Vec<f32> = (4..9)
@@ -117,32 +117,32 @@ fn masked_sampling_reads_the_unmasked_ordinals() {
     let cases = [
         SamplingCase {
             size: Size2us::new(17, 19),
-            tile: Rect2us::new(Vec2us::ZERO, Vec2us::new(17, 19)),
+            tile: Rect2us::new(USizeVec2::ZERO, USizeVec2::new(17, 19)),
             mask_modulus: None,
         },
         SamplingCase {
             size: Size2us::new(32, 32),
-            tile: Rect2us::new(Vec2us::ZERO, Vec2us::new(32, 32)),
+            tile: Rect2us::new(USizeVec2::ZERO, USizeVec2::new(32, 32)),
             mask_modulus: None,
         },
         SamplingCase {
             size: Size2us::new(40, 40),
-            tile: Rect2us::new(Vec2us::ZERO, Vec2us::new(40, 40)),
+            tile: Rect2us::new(USizeVec2::ZERO, USizeVec2::new(40, 40)),
             mask_modulus: Some(7),
         },
         SamplingCase {
             size: Size2us::new(130, 75),
-            tile: Rect2us::new(Vec2us::new(3, 2), Vec2us::new(129, 74)),
+            tile: Rect2us::new(USizeVec2::new(3, 2), USizeVec2::new(129, 74)),
             mask_modulus: Some(5),
         },
         SamplingCase {
             size: Size2us::new(256, 256),
-            tile: Rect2us::new(Vec2us::ZERO, Vec2us::new(256, 256)),
+            tile: Rect2us::new(USizeVec2::ZERO, USizeVec2::new(256, 256)),
             mask_modulus: None,
         },
         SamplingCase {
             size: Size2us::new(64, 64),
-            tile: Rect2us::new(Vec2us::ZERO, Vec2us::new(64, 64)),
+            tile: Rect2us::new(USizeVec2::ZERO, USizeVec2::new(64, 64)),
             mask_modulus: Some(1),
         },
     ];
@@ -155,7 +155,7 @@ fn masked_sampling_reads_the_unmasked_ordinals() {
             for y in 0..size.height {
                 for x in 0..size.width {
                     if (x + 3 * y) % modulus == 0 {
-                        mask.set_at(Vec2us::new(x, y), true);
+                        mask.set_at(USizeVec2::new(x, y), true);
                     }
                 }
             }
@@ -166,8 +166,8 @@ fn masked_sampling_reads_the_unmasked_ordinals() {
                 let mask = &mask;
                 let pixels = &pixels;
                 (case.tile.min.x..case.tile.max.x)
-                    .filter(move |&x| !mask.get_at(Vec2us::new(x, y)))
-                    .map(move |x| pixels[size.idx_of(Vec2us::new(x, y))])
+                    .filter(move |&x| !mask.get_at(USizeVec2::new(x, y)))
+                    .map(move |x| pixels[size.idx_of(USizeVec2::new(x, y))])
             })
             .collect();
         let count = expected.len().min(MAX_TILE_SAMPLES);
@@ -188,7 +188,7 @@ fn masked_sampling_reads_the_unmasked_ordinals() {
         } = samples;
 
         assert_eq!(actual, expected, "case: {case:?}");
-        let named: Vec<[i32; 2]> = actual
+        let named: Vec<IVec2> = actual
             .iter()
             .map(|&v| {
                 let i = v as usize;
@@ -215,7 +215,7 @@ fn masked_sampling_reads_the_unmasked_ordinals() {
 fn a_tile_reads_its_sky_about_its_own_plane() {
     let size = Size2us::new(40, 40);
     // 32×32 = 1024 pixels: the whole tile is read, so the samples are exactly the pixels.
-    let tile = Rect2us::new(Vec2us::new(4, 6), Vec2us::new(36, 38));
+    let tile = Rect2us::new(USizeVec2::new(4, 6), USizeVec2::new(36, 38));
     let frame = |level: &dyn Fn(usize, usize) -> f32, checker: f32| {
         Buffer2::from_fn(size, |x, y| {
             let sign = if (x + y).is_multiple_of(2) { 1.0 } else { -1.0 };
@@ -227,7 +227,7 @@ fn a_tile_reads_its_sky_about_its_own_plane() {
     let mut star = BitBuffer2::new_filled(size, false);
     for y in 12..16 {
         for x in 20..24 {
-            star.set_at(Vec2us::new(x, y), true);
+            star.set_at(USizeVec2::new(x, y), true);
         }
     }
 

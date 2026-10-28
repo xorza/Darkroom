@@ -9,7 +9,8 @@ use crate::image::cfa::mosaic::Mosaic;
 use crate::math::plane_moments::PlaneMoments;
 use crate::math::statistics::clipped_stats::{ClippedStats, SigmaClip};
 use crate::scratch_pool::Shapeless;
-use common::{Rect2us, Vec2us};
+use common::Rect2us;
+use glam::{DVec2, IVec2, USizeVec2};
 
 /// Maximum samples per tile for statistics computation.
 pub(super) const MAX_TILE_SAMPLES: usize = 1024;
@@ -45,7 +46,7 @@ pub(crate) struct ColorSites {
 }
 
 impl ColorSites {
-    const fn takes(self, pos: Vec2us) -> bool {
+    const fn takes(self, pos: USizeVec2) -> bool {
         self.mosaic.slot_at(pos) == self.color
     }
 }
@@ -65,7 +66,7 @@ impl Shapeless for TileScratch {}
 #[derive(Debug, Default)]
 pub(super) struct TileSamples {
     pub(super) values: Vec<f32>,
-    offsets: Vec<[i32; 2]>,
+    offsets: Vec<IVec2>,
 }
 
 /// Tile statistics computed during background estimation.
@@ -86,15 +87,12 @@ pub(crate) struct TileStats {
 
 /// The slope of a plane over one tile, per unit of a doubled, centred offset (see [`centred`]).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-struct TileSlope {
-    x: f64,
-    y: f64,
-}
+struct TileSlope(DVec2);
 
 impl TileSlope {
     /// The plane's rise from the tile's centre to the sample at `offset`.
-    fn at(self, offset: [i32; 2]) -> f64 {
-        self.x * f64::from(offset[0]) + self.y * f64::from(offset[1])
+    fn at(self, offset: IVec2) -> f64 {
+        self.0.dot(offset.as_dvec2())
     }
 
     /// The least-squares slope of the `samples` whose value off this plane lies within `band` of
@@ -108,8 +106,7 @@ impl TileSlope {
                 moments.add(offset, value);
             }
         }
-        let [x, y] = moments.plane()?.slope;
-        Some(Self { x, y })
+        Some(Self(moments.plane()?.slope))
     }
 }
 
@@ -273,15 +270,15 @@ const fn sample_count(candidates: usize) -> usize {
 
 /// The offset of pixel `(x, y)` from the centre of `tile`, doubled: an integer on a tile of any
 /// parity, so the plane fit's position moments are exact.
-fn centred(tile: Rect2us, x: usize, y: usize) -> [i32; 2] {
+fn centred(tile: Rect2us, x: usize, y: usize) -> IVec2 {
     let axis = |at: usize, min: usize, side: usize| {
         let doubled = i32::try_from(2 * (at - min)).expect("a tile side is below 2^30");
         doubled - i32::try_from(side - 1).expect("a tile side is below 2^30")
     };
-    [
+    IVec2::new(
         axis(x, tile.min.x, tile.width()),
         axis(y, tile.min.y, tile.height()),
-    ]
+    )
 }
 
 impl TileSamples {
@@ -372,7 +369,7 @@ impl TileSamples {
         let mut ordinal = 0;
         for y in tile.min.y..tile.max.y {
             for x in tile.min.x..tile.max.x {
-                if !selection.takes(Vec2us::new(x, y)) {
+                if !selection.takes(USizeVec2::new(x, y)) {
                     continue;
                 }
                 if self.values.len() < count
@@ -411,7 +408,7 @@ impl ColorTile<'_> {
         };
         for y in self.tile.min.y..self.tile.max.y {
             for x in self.tile.min.x..self.tile.max.x {
-                let pos = Vec2us::new(x, y);
+                let pos = USizeVec2::new(x, y);
                 if self.color.takes(pos) {
                     count.eligible += 1;
                     count.unmasked += usize::from(!self.masked(pos));
@@ -421,11 +418,11 @@ impl ColorTile<'_> {
         count
     }
 
-    fn takes(&self, pos: Vec2us) -> bool {
+    fn takes(&self, pos: USizeVec2) -> bool {
         self.color.takes(pos) && !self.masked(pos)
     }
 
-    fn masked(&self, pos: Vec2us) -> bool {
+    fn masked(&self, pos: USizeVec2) -> bool {
         self.mask.is_some_and(|mask| mask.get_at(pos))
     }
 }

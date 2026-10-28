@@ -16,7 +16,8 @@ use crate::image::metadata::sample_domain::{Pedestal, SampleDomain, ScaleOrigin}
 use crate::internals::cfa::make_cfa;
 use crate::internals::test_rng::TestRng;
 use crate::noise::ccd_noise::CcdNoise;
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use glam::USizeVec2;
 
 const SEED: u64 = 7;
 
@@ -30,7 +31,7 @@ fn a_mosaic_has_a_sky_per_color() {
     let size = Size2us::new(8, 8);
     let cfa = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
     let pixels = (0..size.pixel_count())
-        .map(|idx| match cfa.slot_at(Vec2us::new(idx % 8, idx / 8)) {
+        .map(|idx| match cfa.slot_at(USizeVec2::new(idx % 8, idx / 8)) {
             0 => 0.125,
             1 => 0.25,
             _ => 0.375,

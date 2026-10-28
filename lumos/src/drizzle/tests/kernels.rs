@@ -5,19 +5,18 @@
 
 use std::f64::consts::PI;
 
-use glam::DVec2;
+use glam::{DVec2, USizeVec2};
 
 use super::*;
 use imaginarium::ChannelLayout;
 
 use crate::image::flags::quality_flags::QualityFlags;
 use crate::internals::images::rgb_image;
-use common::Vec2us;
 
 /// One pixel of an image set apart from its background.
 #[derive(Debug, Clone, Copy)]
 struct OnePixel {
-    at: Vec2us,
+    at: USizeVec2,
     value: f32,
 }
 
@@ -31,9 +30,9 @@ impl OnePixel {
 }
 
 /// A pixel-weight map that lets only `pixel` deposit.
-fn only(size: Size2us, pixel: Vec2us) -> Buffer2<f32> {
+fn only(size: Size2us, pixel: USizeVec2) -> Buffer2<f32> {
     let mut weights = Buffer2::new_filled(size, 0.0);
-    weights[(pixel.x, pixel.y)] = 1.0;
+    weights[pixel] = 1.0;
     weights
 }
 
@@ -178,7 +177,7 @@ fn two_frames_combine_to_their_weighted_mean() {
 fn one_bright_pixel_fills_its_own_block() {
     let size = Size2us::new(6, 6);
     let image = OnePixel {
-        at: Vec2us::new(1, 1),
+        at: USizeVec2::new(1, 1),
         value: 2.0,
     }
     .on(size, 0.0);
@@ -227,7 +226,7 @@ fn one_bright_pixel_fills_its_own_block() {
 #[test]
 fn the_pixel_fraction_sets_the_cells_a_drop_reaches() {
     let size = Size2us::new(6, 6);
-    let pixel = Vec2us::new(2, 2);
+    let pixel = USizeVec2::new(2, 2);
     let transform = Transform::translation(DVec2::splat(0.1));
     for kernel in [DrizzleKernel::Turbo, DrizzleKernel::Square] {
         for (pixfrac, first, shares) in [
@@ -285,7 +284,7 @@ fn min_weight_fraction_gates_against_the_deepest_weight() {
         drizzle_frames(
             vec![
                 OnePixel {
-                    at: Vec2us::new(0, 0),
+                    at: USizeVec2::new(0, 0),
                     value: 1.0,
                 }
                 .on(size, 0.0),
@@ -300,14 +299,14 @@ fn min_weight_fraction_gates_against_the_deepest_weight() {
     let flags = product.image.flags().unwrap();
     for (x, y) in [(1, 0), (1, 1)] {
         assert_eq!(out[(x, y)], 1.0, "cell ({x},{y}) kept");
-        assert_eq!(flags.at_pos(Vec2us::new(x, y)), QualityFlags::default());
+        assert_eq!(flags.at_pos(USizeVec2::new(x, y)), QualityFlags::default());
     }
     let coverage = product.coverage.as_ref().unwrap().to_plane(0);
     for (x, y) in [(0, 0), (0, 1)] {
         assert_eq!(out[(x, y)], 0.0, "cell ({x},{y}) below the threshold");
         assert_eq!(weight[(x, y)], 0.0, "cell ({x},{y}) weight");
         assert_eq!(coverage[(x, y)], 0.0, "cell ({x},{y}) coverage");
-        assert_eq!(flags.at_pos(Vec2us::new(x, y)), QualityFlags::NO_DATA);
+        assert_eq!(flags.at_pos(USizeVec2::new(x, y)), QualityFlags::NO_DATA);
     }
 }
 
@@ -327,7 +326,7 @@ fn lanczos_keeps_its_negative_lobes() {
         kernel_config(DrizzleKernel::Lanczos, 1.0, 1.0),
         &DrizzleFrame::new(
             OnePixel {
-                at: Vec2us::new(10, 10),
+                at: USizeVec2::new(10, 10),
                 value: 100.0,
             }
             .on(size, 0.0),
@@ -419,9 +418,9 @@ fn unit_sampling_copies_the_input() {
 #[test]
 fn a_drop_deposits_its_pixel_weight() {
     let size = Size2us::new(16, 16);
-    let pixel = Vec2us::new(7, 7);
+    let pixel = USizeVec2::new(7, 7);
     let mut weights = only(size, pixel);
-    weights[(pixel.x, pixel.y)] = 2.5;
+    weights[pixel] = 2.5;
     for kernel in DrizzleKernel::ALL {
         let mut acc = accumulator(
             PlanarDesc::new(size, ChannelLayout::Mono),
@@ -456,10 +455,10 @@ fn a_zero_pixel_weight_keeps_the_pixel_out() {
     const GATE: f32 = 0.25;
 
     let size = Size2us::new(12, 12);
-    let pixel = Vec2us::new(5, 5);
+    let pixel = USizeVec2::new(5, 5);
     let transform = Transform::translation(DVec2::new(0.3, -0.2));
     let mut excluded = Buffer2::new_filled(size, 1.0);
-    excluded[(pixel.x, pixel.y)] = 0.0;
+    excluded[pixel] = 0.0;
     for (kernel, footprint) in [
         (DrizzleKernel::Turbo, 9),
         (DrizzleKernel::Square, 9),
@@ -666,7 +665,7 @@ fn rgb_channels_drizzle_independently() {
 #[test]
 fn a_zero_lanczos_tap_marks_no_coverage() {
     let size = Size2us::new(13, 13);
-    let pixel = Vec2us::new(6, 6);
+    let pixel = USizeVec2::new(6, 6);
     let config = kernel_config(DrizzleKernel::Lanczos, 1.0, 1.0);
     let shift = Transform::translation(DVec2::new(0.5, 0.0));
     let mut alone = accumulator(PlanarDesc::new(size, ChannelLayout::Mono), config.clone());

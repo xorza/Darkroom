@@ -5,7 +5,7 @@ use crate::bg_mesh::mesh_spline::MeshSpline;
 use crate::bg_mesh::mesh_surface::MeshSurface;
 use crate::bg_mesh::mesh_workspace::{MedianFilter, MeshParams};
 use crate::bg_mesh::tile_stats::TileComponent;
-use common::Vec2us;
+use glam::USizeVec2;
 
 /// Tiles of 32 px, two σ-clip passes and the 3×3 median.
 const PARAMS: MeshParams = MeshParams {
@@ -67,7 +67,7 @@ fn a_pixel_is_its_row_bit_for_bit() {
         let columns = (0..100).flat_map(|x| (0..70).map(move |y| (x, y)));
         for (x, y) in rows.chain(columns) {
             assert_eq!(
-                reader.at(Vec2us::new(x, y)).to_bits(),
+                reader.at(USizeVec2::new(x, y)).to_bits(),
                 plane[(x, y)].to_bits(),
                 "{component:?} at ({x}, {y})"
             );

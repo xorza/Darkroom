@@ -21,7 +21,8 @@ use crate::combine::frame_read::frame_gate::FrameGate;
 use crate::error::Cancelled;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stratified_samples::SAMPLE_LIMIT;
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use glam::USizeVec2;
 
 /// Pixels per word of the mask, which is one row: word `w` covers pixels `64w..64w + 64`.
 const WORD_BITS: usize = u64::BITS as usize;
@@ -109,7 +110,7 @@ impl CommonDomain {
     pub(super) fn restricted(
         &self,
         size: Size2us,
-        keeps: impl Fn(Vec2us) -> bool + Sync,
+        keeps: impl Fn(USizeVec2) -> bool + Sync,
         cancel: &CancelToken,
     ) -> Result<Self, StackError> {
         let pixel_count = size.pixel_count();
@@ -123,7 +124,7 @@ impl CommonDomain {
                     let end = (base + words.len() * WORD_BITS).min(pixel_count);
                     intersect_span(words, end - base, |idx| {
                         let pixel = base + idx;
-                        keeps(Vec2us::new(pixel % size.width, pixel / size.width))
+                        keeps(USizeVec2::new(pixel % size.width, pixel / size.width))
                     });
                 }
                 Ok::<_, StackError>(())

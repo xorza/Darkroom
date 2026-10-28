@@ -22,7 +22,8 @@ use crate::internals::synthetic::metrics::rms_diff;
 use crate::internals::synthetic::observe::{Observation, SimFrame, render};
 use crate::internals::synthetic::scene::{BgField, Placement, Scatter, Scene};
 use crate::progress::progress_monitor::ProgressMonitor;
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use glam::USizeVec2;
 
 const W: usize = 128;
 const H: usize = 128;
@@ -74,7 +75,7 @@ fn stack_frames(sims: &[SimFrame], config: &StackConfig) -> LinearImage {
 }
 
 /// Overwrite one pixel of one frame with a bright cosmic-ray-like spike.
-fn inject_spike(sim: &mut SimFrame, pos: Vec2us, value: f32) {
+fn inject_spike(sim: &mut SimFrame, pos: USizeVec2, value: f32) {
     let mut px = sim.image.channel(0).pixels().to_vec();
     px[Size2us::new(W, H).idx_of(pos)] = value;
     sim.image =
@@ -134,7 +135,7 @@ fn sigma_clip_rejects_injected_outliers_where_mean_is_contaminated() {
             clean.pixels()[y * W + x] < 0.2,
             "outlier site ({x},{y}) must be background"
         );
-        inject_spike(&mut sims[f], Vec2us::new(x, y), 1.0);
+        inject_spike(&mut sims[f], USizeVec2::new(x, y), 1.0);
     }
 
     let mean = stack_frames(
@@ -189,7 +190,7 @@ fn all_rejection_methods_remove_outliers() {
 
     let sites = outlier_sites();
     for &(f, x, y) in &sites {
-        inject_spike(&mut sims[f], Vec2us::new(x, y), 1.0);
+        inject_spike(&mut sims[f], USizeVec2::new(x, y), 1.0);
     }
 
     // Every rejecting combine (and the robust median) recovers the clean background.

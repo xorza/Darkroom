@@ -1,5 +1,5 @@
 use common::Buffer2;
-use glam::DVec2;
+use glam::{DVec2, USizeVec2};
 
 use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_type::CfaType;
@@ -10,7 +10,7 @@ use crate::image::flat_gain::{FlatGain, FlatGainRecord};
 use crate::image::frame_desc::MAX_SIDE;
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
-use common::{Size2us, Vec2us};
+use common::Size2us;
 
 /// A node is the mean gain of its color within half a step, its excluded photosites left out.
 /// - A mono 9×9 flat of 0.5 has a 3×3 grid of gain 2. One photosite at (4, 4) floored at 0.1 is
@@ -33,7 +33,7 @@ fn a_node_is_its_colors_mean_gain() {
     assert_eq!(unflagged.at(0, 0.0, 0.0), 2.0);
 
     let cfa = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
-    let divisor = Buffer2::from_fn((8, 8), |x, y| match cfa.slot_at(Vec2us::new(x, y)) {
+    let divisor = Buffer2::from_fn((8, 8), |x, y| match cfa.slot_at(USizeVec2::new(x, y)) {
         0 => 0.5,
         1 => 1.0,
         _ => 0.25,

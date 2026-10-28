@@ -3,10 +3,11 @@
 use std::io::Cursor;
 use std::sync::Arc;
 
-use common::{Buffer2, Size2us, Vec2us};
+use common::{Buffer2, Size2us};
 use fits_well::FitsReader;
 use fits_well::header::Header;
 use fits_well::io::{ChecksumReport, ChecksumStatus};
+use glam::USizeVec2;
 use imaginarium::{ChannelLayout, PlanarDesc};
 
 use crate::image::cfa::bayer_pattern::BayerPattern;
@@ -334,7 +335,7 @@ fn a_flags_extension_lumos_did_not_write_is_refused() {
             "unknown bit",
             |_, data| data[5] |= 0x40,
             FitsRefusal::UnknownFlagBits {
-                pixel: Vec2us::new(2, 1),
+                pixel: USizeVec2::new(2, 1),
                 byte: 0x60,
             },
         ),
@@ -342,14 +343,14 @@ fn a_flags_extension_lumos_did_not_write_is_refused() {
             "NO_DATA lost",
             |_, data| data[1] = 0,
             FitsRefusal::NoDataDisagrees {
-                pixel: Vec2us::new(1, 0),
+                pixel: USizeVec2::new(1, 0),
             },
         ),
         (
             "NO_DATA added",
             |_, data| data[3] = 1,
             FitsRefusal::NoDataDisagrees {
-                pixel: Vec2us::new(0, 1),
+                pixel: USizeVec2::new(0, 1),
             },
         ),
         (

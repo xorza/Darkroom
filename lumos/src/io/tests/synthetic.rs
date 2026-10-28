@@ -51,7 +51,8 @@ use crate::io::null_policy::{NullPolicy, NullSamples};
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use glam::USizeVec2;
 
 /// `image` written as a FITS file and loaded back as a linear image.
 fn write_and_load(image: &Image) -> Result<LinearImage, FitsLoadError> {
@@ -625,7 +626,7 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
     let dark_value = 0.1f32;
     let pixels: Vec<f32> = (0..size.height)
         .flat_map(|y| {
-            (0..size.width).map(move |x| target[pattern.slot_at(Vec2us::new(x, y))] + dark_value)
+            (0..size.width).map(move |x| target[pattern.slot_at(USizeVec2::new(x, y))] + dark_value)
         })
         .collect();
     let image = Image::new(
@@ -700,9 +701,9 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
     assert!(preview.is_rgb());
     for y in 6..size.height - 6 {
         for x in 6..size.width - 6 {
-            let channel = pattern.slot_at(Vec2us::new(x, y));
+            let channel = pattern.slot_at(USizeVec2::new(x, y));
             assert_eq!(
-                preview.channel(channel).pixels()[size.idx_of(Vec2us::new(x, y))],
+                preview.channel(channel).pixels()[size.idx_of(USizeVec2::new(x, y))],
                 target[channel] + dark_value
             );
         }
@@ -752,10 +753,10 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
     assert_eq!(demosaiced.metadata.derived.domain().unwrap().scale, 1.0);
     for y in 6..size.height - 6 {
         for x in 6..size.width - 6 {
-            let channel = pattern.slot_at(Vec2us::new(x, y));
+            let channel = pattern.slot_at(USizeVec2::new(x, y));
             let expected = (target[channel] + dark_value) - dark_value;
             assert_eq!(
-                demosaiced.channel(channel)[size.idx_of(Vec2us::new(x, y))],
+                demosaiced.channel(channel)[size.idx_of(USizeVec2::new(x, y))],
                 expected
             );
         }

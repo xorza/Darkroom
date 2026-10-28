@@ -8,7 +8,8 @@ use crate::internals::images::mono_image;
 use crate::internals::test_rng::TestRng;
 use crate::star_detection::star_detector::stages::detect::DetectionInput;
 use crate::star_detection::star_detector::stages::prepared_frame::*;
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use glam::USizeVec2;
 
 /// `image` reduced to one plane, as the measurement plane is before its sky goes.
 fn prepare(image: &LinearImage, pool: &DetectionResources) -> Pooled<Buffer2<f32>> {
@@ -359,7 +360,7 @@ fn pixels_with_no_data_stay_out_of_the_sky_and_the_threshold() {
     let config = StarDetectionConfig::default();
     let mut pool = DetectionResources::new(size);
     let frame = PreparedFrame::new(&image, &config, &mut pool);
-    let sigma = frame.sky.noise.reader().at(Vec2us::new(32, 32));
+    let sigma = frame.sky.noise.reader().at(USizeVec2::new(32, 32));
     assert!((sigma / 0.01 - 1.0).abs() <= 0.1, "{sigma}");
     let plane = frame.detection_plane(Some(4.0), &config, &mut pool);
     let detected = Candidates::detect(

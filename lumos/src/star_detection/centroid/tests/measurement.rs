@@ -245,8 +245,8 @@ fn measure_star_multiple_stars_independent() {
 
     // A candidate whose stamp would leave the frame is not measured.
     let edge = Region {
-        bbox: Rect2us::new(Vec2us::new(0, 30), Vec2us::new(6, 36)),
-        peak: Vec2us::new(3, 32),
+        bbox: Rect2us::new(USizeVec2::new(0, 30), USizeVec2::new(6, 36)),
+        peak: USizeVec2::new(3, 32),
         area: 18,
     };
     assert!(
@@ -411,8 +411,8 @@ fn annulus_sky_is_centred_on_the_fitted_position() {
     let radius = measure_grid::stamp_radius(4.0);
     // Seeded two pixels off the star, so the fit has to cross a pixel boundary to reach it.
     let region = Region {
-        bbox: Rect2us::new(Vec2us::new(28, 26), Vec2us::new(40, 38)),
-        peak: Vec2us::new(34, 32),
+        bbox: Rect2us::new(USizeVec2::new(28, 26), USizeVec2::new(40, 38)),
+        peak: USizeVec2::new(34, 32),
         area: 40,
     };
     let star = measured
@@ -574,14 +574,14 @@ fn a_pixel_with_no_data_keeps_out_of_the_measurement() {
     let clean = measure(&star.residual, &BitBuffer2::new_default(size)).unwrap();
 
     let mut inside = BitBuffer2::new_default(size);
-    inside.set_at(Vec2us::new(43, 32), true);
+    inside.set_at(USizeVec2::new(43, 32), true);
     assert!(
         measure(&star.residual, &inside).is_none(),
         "11 px out: in the stamp"
     );
 
     let mut beside = BitBuffer2::new_default(size);
-    beside.set_at(Vec2us::new(44, 32), true);
+    beside.set_at(USizeVec2::new(44, 32), true);
     let kept = measure(&star.residual, &beside).unwrap();
     assert_eq!((kept.pos, kept.flux), (clean.pos, clean.flux));
 
@@ -592,7 +592,7 @@ fn a_pixel_with_no_data_keeps_out_of_the_measurement() {
     let mut masked = BitBuffer2::new_default(size);
     let mut filled = star.residual.clone();
     for x in right.clone() {
-        masked.set_at(Vec2us::new(x, 32), true);
+        masked.set_at(USizeVec2::new(x, 32), true);
         filled[(x, 32)] = 0.02;
     }
     let all = StampBg::measure(MaskedPlane::from(&star.residual), centre, annulus).unwrap();

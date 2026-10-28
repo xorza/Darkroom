@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 use crate::image::cfa::color_raster::ColorRaster;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::metadata::image_provenance::ColorProvenance;
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use glam::USizeVec2;
 
 /// The color filter over a sensor's photosites, anchored at the origin of the image data it
 /// accompanies. The one sensor-pattern type: a frame with no filter is [`CfaType::Mono`].
@@ -27,7 +28,7 @@ impl CfaType {
     /// [`CfaColor::idx`](crate::image::cfa::cfa_color::CfaColor::idx) under a mosaic, and 0,
     /// the one slot, on a mono sensor.
     #[inline(always)]
-    pub const fn slot_at(&self, pos: Vec2us) -> usize {
+    pub const fn slot_at(&self, pos: USizeVec2) -> usize {
         match self {
             Self::Mono => 0,
             Self::Mosaic(mosaic) => mosaic.slot_at(pos),

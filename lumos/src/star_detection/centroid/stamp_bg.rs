@@ -7,12 +7,12 @@
 use std::ops::{Range, RangeInclusive};
 
 use arrayvec::ArrayVec;
-use glam::DVec2;
+use glam::{DVec2, USizeVec2};
 
 use crate::image::masked_plane::MaskedPlane;
 use crate::math::statistics::clipped_stats::{ClippedStats, SigmaClip};
 use crate::star_detection::centroid::measure_grid::AnnulusRadii;
-use common::{Size2us, Vec2us};
+use common::Size2us;
 
 /// Flat per-stamp sky: the residual's offset from zero and its noise, valid at the stamp scale.
 #[derive(Debug, Clone, Copy)]
@@ -38,7 +38,7 @@ impl StampBg {
             mask: no_data,
         } = residual;
         let spans = || AnnulusSpans::about(pos, annulus, residual.size());
-        let measured = |&at: &Vec2us| no_data.is_none_or(|no_data| !no_data.get_at(at));
+        let measured = |&at: &USizeVec2| no_data.is_none_or(|no_data| !no_data.get_at(at));
         // The annulus pixels inside the frame that hold a measurement, row by row, as image
         // positions.
         let pixels = || spans().flat_map(RowSpan::pixels).filter(measured);
@@ -100,9 +100,9 @@ struct RowSpan {
 
 impl RowSpan {
     /// The span's pixels, left to right.
-    fn pixels(self) -> impl Iterator<Item = Vec2us> {
+    fn pixels(self) -> impl Iterator<Item = USizeVec2> {
         let Self { y, xs } = self;
-        xs.map(move |x| Vec2us::new(x, y))
+        xs.map(move |x| USizeVec2::new(x, y))
     }
 }
 
@@ -209,7 +209,7 @@ mod tests {
                         if let Some((x, y)) =
                             inside.filter(|_| (inner_sq..=outer_sq).contains(&r_sq))
                         {
-                            walked.push(Vec2us::new(x, y));
+                            walked.push(USizeVec2::new(x, y));
                         }
                     }
                 }

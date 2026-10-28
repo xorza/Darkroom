@@ -11,7 +11,7 @@ use common::Buffer2;
 use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_color::CfaColor;
 use crate::internals::test_rng::TestRng;
-use common::Vec2us;
+use glam::USizeVec2;
 
 /// `count` random cosmic-ray hits, each of an amplitude drawn uniformly from `amplitude`, placed
 /// by the generator `seed` starts.
@@ -28,7 +28,7 @@ impl CosmicRays {
         clippy::cast_sign_loss,
         reason = "synthetic fixtures are small images with non-negative coordinates"
     )]
-    pub(crate) fn add_to(self, pixels: &mut Buffer2<f32>) -> Vec<Vec2us> {
+    pub(crate) fn add_to(self, pixels: &mut Buffer2<f32>) -> Vec<USizeVec2> {
         let Self {
             count,
             amplitude,
@@ -58,7 +58,7 @@ impl CosmicRays {
                 }
             }
 
-            poss.push(Vec2us::new(x, y));
+            poss.push(USizeVec2::new(x, y));
         }
 
         poss
@@ -76,7 +76,7 @@ pub(crate) fn add_bayer_pattern(pixels: &mut Buffer2<f32>, strength: f32, patter
 
     for y in 0..height {
         for x in 0..width {
-            let factor = match pattern.color_at(Vec2us::new(x, y)) {
+            let factor = match pattern.color_at(USizeVec2::new(x, y)) {
                 CfaColor::Red => r_factor,
                 CfaColor::Blue => b_factor,
                 CfaColor::Green => 1.0,

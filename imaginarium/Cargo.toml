@@ -29,7 +29,7 @@ pollster = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true, features = ["sync"] }
 thiserror = { workspace = true, features = ["std"] }
 bytemuck = { workspace = true, features = ["derive", "extern_crate_std", "min_const_generics"] }
-glam = { workspace = true, features = ["std"] }
+glam = { workspace = true, features = ["bytemuck", "std", "u32", "usize"] }
 rayon = { workspace = true }
 serde = { workspace = true, features = ["derive", "std"] }
 strum = { workspace = true, features = ["derive", "std"] }

@@ -4,7 +4,7 @@ use std::ops::Range;
 
 use arrayvec::ArrayVec;
 use common::Buffer2;
-use glam::DVec2;
+use glam::{DVec2, USizeVec2};
 
 use crate::drizzle::accumulator::MAX_CHANNELS;
 use crate::drizzle::accumulator::band_scan::BandScan;
@@ -18,7 +18,7 @@ use crate::image::cfa::mosaic::Mosaic;
 use crate::image::flags::pixel_flags::PixelFlags;
 use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::stackable_image::StackableImage;
-use common::{Size2us, Vec2us};
+use common::Size2us;
 
 /// Area below which a square drop is discarded: the transform has collapsed the input pixel to
 /// nothing, so there is no output area to spread its flux over.
@@ -44,7 +44,7 @@ pub(super) struct Fluxes {
 /// multiply the scan exists to hoist.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct InputPixel {
-    pub(super) pos: Vec2us,
+    pub(super) pos: USizeVec2,
     pub(super) idx: usize,
 }
 

@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 
 use common::{CancelToken, TempDir};
-use glam::DVec2;
+use glam::{DVec2, USizeVec2};
 
 use super::*;
 use imaginarium::ChannelLayout;
@@ -20,7 +20,6 @@ use crate::io::decoder::linear_decoder::LinearDecoder;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::registration::distortion::sip::SipModel;
 use crate::registration::distortion::sip::sip_order::SipOrder;
-use common::Vec2us;
 
 /// At scale 2 and pixfrac 0.8 every cell holds a quarter of exactly one drop (see
 /// `one_bright_pixel_fills_its_own_block`), so a flat frame covers the whole grid at weight 0.25
@@ -381,7 +380,7 @@ fn a_sip_warp_drizzles_through_its_inverse() {
     assert_eq!(bits(&from_images), bits(&from_accumulator));
 
     let mut pixels = vec![0.0f32; size.pixel_count()];
-    let t = Vec2us::new(20, 9);
+    let t = USizeVec2::new(20, 9);
     pixels[size.idx_of(t)] = 1.0;
     let point = kernel_config(DrizzleKernel::Point, 1.0, 1.0);
     let mut acc = accumulator(PlanarDesc::new(size, ChannelLayout::Mono), point);
@@ -392,12 +391,8 @@ fn a_sip_warp_drizzles_through_its_inverse() {
         .inverse()
         .pos(DVec2::new(t.x as f64, t.y as f64))
         .unwrap();
-    let landing = Vec2us::new(r.x.round() as usize, r.y.round() as usize);
-    assert_eq!(
-        out.image.channel(0)[(landing.x, landing.y)],
-        1.0,
-        "at {r:?}"
-    );
+    let landing = USizeVec2::new(r.x.round() as usize, r.y.round() as usize);
+    assert_eq!(out.image.channel(0)[landing], 1.0, "at {r:?}");
 }
 
 /// Past a fold the warp has no inverse, and those input pixels deposit nothing and are counted —

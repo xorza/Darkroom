@@ -19,7 +19,7 @@ use crate::config_field::ConfigField;
 use crate::error::{Cancelled, InvalidConfigField};
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::error::MlError;
-use common::Vec2us;
+use glam::USizeVec2;
 
 /// The fixed model processing window — these nets take a `[1, 512, 512, 3]` (NHWC) input.
 pub(crate) const WINDOW: usize = 512;
@@ -167,7 +167,7 @@ fn run_tiles(
     for (row, &ty) in ys.iter().enumerate() {
         for &tx in &xs {
             Cancelled::check(cancel)?;
-            let tile = Vec2us::new(tx, ty);
+            let tile = USizeVec2::new(tx, ty);
             fill_tile_input(planes.input(), tile, &mut input);
             infer(&input, &mut output)?;
             blend.add(&output, tile);
@@ -203,7 +203,7 @@ fn tile_starts(dim: usize, stride: usize) -> Vec<usize> {
 /// Fill the reused NHWC `[1,512,512,3]` `input` buffer from the tile at `(tx, ty)`, clamped to
 /// `[0,1]`. Mono replicates its single channel to R=G=B. `input` is the caller's
 /// tile-loop-lifetime scratch buffer (see [`run_tiles`]), overwritten in full every call.
-fn fill_tile_input(planar: &LinearImage, tile: Vec2us, input: &mut [f32]) {
+fn fill_tile_input(planar: &LinearImage, tile: USizeVec2, input: &mut [f32]) {
     let w = planar.width();
     let chans: [&[f32]; 3] = if planar.is_rgb() {
         [
@@ -276,7 +276,7 @@ impl FeatherBlend {
     }
 
     /// Add `out`, the model's NHWC output for the tile at `tile`.
-    fn add(&mut self, out: &[f32], tile: Vec2us) {
+    fn add(&mut self, out: &[f32], tile: USizeVec2) {
         let width = self.desc.width();
         for hh in 0..WINDOW {
             let fy = feather(hh);

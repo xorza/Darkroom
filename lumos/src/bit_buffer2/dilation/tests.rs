@@ -4,7 +4,8 @@ use common::Buffer2;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::bit_buffer2::dilation::dilate_mask;
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use glam::USizeVec2;
 
 /// `mask` dilated by `radius` into `dilated`, through the in-place kernel.
 fn dilate_into(mask: &BitBuffer2, radius: usize, dilated: &mut BitBuffer2) {
@@ -13,14 +14,14 @@ fn dilate_into(mask: &BitBuffer2, radius: usize, dilated: &mut BitBuffer2) {
 }
 
 /// The first pixel where `dilated` differs from a naive O(n²×r²) disk dilation of `mask`.
-fn naive_mismatch(mask: &BitBuffer2, dilated: &BitBuffer2, radius: usize) -> Option<Vec2us> {
+fn naive_mismatch(mask: &BitBuffer2, dilated: &BitBuffer2, radius: usize) -> Option<USizeVec2> {
     let size = mask.size;
     (0..size.pixel_count())
         .map(|idx| size.point_of(idx))
         .find(|&at| {
             let near = |sy: usize, sx: usize| {
                 sx.abs_diff(at.x).pow(2) + sy.abs_diff(at.y).pow(2) <= radius * radius
-                    && mask.get_at(Vec2us::new(sx, sy))
+                    && mask.get_at(USizeVec2::new(sx, sy))
             };
             let expected = (at.y.saturating_sub(radius)..=(at.y + radius).min(size.height - 1))
                 .any(|sy| {
@@ -92,13 +93,13 @@ fn a_pixel_dilates_into_a_disk() {
         ),
     ] {
         let mut mask = BitBuffer2::new_filled(Size2us::new(size, size), false);
-        mask.set_at(Vec2us::new(seed.0, seed.1), true);
+        mask.set_at(USizeVec2::new(seed.0, seed.1), true);
         let mut dilated = BitBuffer2::new_filled(Size2us::new(size, size), false);
         dilate_into(&mask, radius, &mut dilated);
         for (y, row) in picture.lines().enumerate() {
             for (x, cell) in row.trim().chars().enumerate() {
                 assert_eq!(
-                    dilated.get_at(Vec2us::new(x, y)),
+                    dilated.get_at(USizeVec2::new(x, y)),
                     cell == '#',
                     "radius {radius} from {seed:?} at ({x}, {y})"
                 );

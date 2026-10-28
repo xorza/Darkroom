@@ -1,5 +1,7 @@
 //! [`PlaneMoments`]: the least-squares plane through samples at integer offsets, solved exactly.
 
+use glam::{DVec2, IVec2};
+
 /// The moments of samples at integer offsets `(x, y)`, for the least-squares plane
 /// `v = level + slope_x·x + slope_y·y` through them.
 ///
@@ -25,20 +27,20 @@ pub(crate) struct PlaneMoments {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Plane {
     pub(crate) level: f64,
-    pub(crate) slope: [f64; 2],
+    pub(crate) slope: DVec2,
 }
 
 impl Plane {
     /// The plane's value at `offset`.
-    pub(crate) fn at(self, offset: [i32; 2]) -> f64 {
-        self.level + self.slope[0] * f64::from(offset[0]) + self.slope[1] * f64::from(offset[1])
+    pub(crate) fn at(self, offset: IVec2) -> f64 {
+        self.level + self.slope.x * f64::from(offset.x) + self.slope.y * f64::from(offset.y)
     }
 }
 
 impl PlaneMoments {
     /// Take the sample `value` at `offset`.
-    pub(crate) fn add(&mut self, offset: [i32; 2], value: f64) {
-        let (x, y) = (i128::from(offset[0]), i128::from(offset[1]));
+    pub(crate) fn add(&mut self, offset: IVec2, value: f64) {
+        let (x, y) = (i128::from(offset.x), i128::from(offset.y));
         self.n += 1;
         self.sx += x;
         self.sy += y;
@@ -46,8 +48,8 @@ impl PlaneMoments {
         self.syy += y * y;
         self.sxy += x * y;
         self.sv += value;
-        self.sxv += f64::from(offset[0]) * value;
-        self.syv += f64::from(offset[1]) * value;
+        self.sxv += f64::from(offset.x) * value;
+        self.syv += f64::from(offset.y) * value;
     }
 
     /// The least-squares plane through the samples taken; `None` when they span none: fewer than
@@ -76,9 +78,9 @@ impl PlaneMoments {
         let cxv = n * sxv - sx * sv;
         let cyv = n * syv - sy * sv;
         let (cxx, cyy, cxy, det) = (cxx as f64, cyy as f64, cxy as f64, det as f64);
-        let slope = [(cxv * cyy - cyv * cxy) / det, (cyv * cxx - cxv * cxy) / det];
+        let slope = DVec2::new((cxv * cyy - cyv * cxy) / det, (cyv * cxx - cxv * cxy) / det);
         Some(Plane {
-            level: (sv - slope[0] * sx - slope[1] * sy) / n,
+            level: (sv - slope.x * sx - slope.y * sy) / n,
             slope,
         })
     }
@@ -87,6 +89,7 @@ impl PlaneMoments {
 #[cfg(test)]
 mod tests {
     use crate::math::plane_moments::{Plane, PlaneMoments};
+    use glam::{DVec2, IVec2};
 
     /// Samples on `v = 2 + 0.5x − 0.25y`, every value a dyadic rational, give that plane exactly;
     /// three on one line, or two, give none.
@@ -95,7 +98,10 @@ mod tests {
         let plane = |offsets: &[[i32; 2]]| {
             let mut moments = PlaneMoments::default();
             for &[x, y] in offsets {
-                moments.add([x, y], 2.0 + 0.5 * f64::from(x) - 0.25 * f64::from(y));
+                moments.add(
+                    IVec2::new(x, y),
+                    2.0 + 0.5 * f64::from(x) - 0.25 * f64::from(y),
+                );
             }
             moments.plane()
         };
@@ -103,7 +109,7 @@ mod tests {
             plane(&[[-3, -1], [4, 2], [0, 5], [7, -6]]),
             Some(Plane {
                 level: 2.0,
-                slope: [0.5, -0.25],
+                slope: DVec2::new(0.5, -0.25),
             })
         );
         assert_eq!(plane(&[[0, 0], [1, 1], [5, 5]]), None);

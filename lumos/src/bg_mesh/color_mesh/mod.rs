@@ -9,7 +9,7 @@ use crate::bg_mesh::mesh_workspace::{
 use crate::bg_mesh::tile_stats::{ColorSites, TileStats};
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::masked_plane::MaskedPlane;
-use common::Vec2us;
+use glam::USizeVec2;
 
 /// A tile mesh per color of a mosaic, one for a mono plane, read bilinearly between the tile
 /// centres.
@@ -77,7 +77,7 @@ impl ColorMesh {
 
     /// The sky and noise of `color` at `pos`, bilinear between the four nearest tile centres,
     /// and continued linearly past the outer ones.
-    pub(crate) fn at(&self, color: usize, pos: Vec2us) -> LocalBg {
+    pub(crate) fn at(&self, color: usize, pos: USizeVec2) -> LocalBg {
         let tiles = &self.colors[color];
         let x = self.x[pos.x];
         let y = self.y[pos.y];

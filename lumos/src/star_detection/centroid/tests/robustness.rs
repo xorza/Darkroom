@@ -257,7 +257,7 @@ fn gaussian_fit_rotated_ellipse() {
     let result = result.unwrap();
 
     // Position should still be accurate
-    let error = (result.pos.x - true_cx).hypot(result.pos.y - true_cy);
+    let error = result.pos.distance(DVec2::new(true_cx, true_cy));
     assert!(
         error < 0.1,
         "Position error {error} too large for rotated ellipse fit"
@@ -296,8 +296,8 @@ fn gaussian_fit_rejects_a_diagonal_elongated_star() {
         ..Default::default()
     };
     let region = Region {
-        bbox: Rect2us::new(Vec2us::new(24, 24), Vec2us::new(41, 41)),
-        peak: Vec2us::new(32, 32),
+        bbox: Rect2us::new(USizeVec2::new(24, 24), USizeVec2::new(41, 41)),
+        peak: USizeVec2::new(32, 32),
         area: 200,
     };
     let expected_fwhm = 6.23;
