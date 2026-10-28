@@ -1,8 +1,6 @@
 <p align="center">
-  <img src="darkroom/assets/logo.svg" width="140" alt="Darkroom" />
+  <img src="darkroom/assets/logo.svg" width="240" alt="Darkroom" />
 </p>
-
-<h1 align="center">Darkroom</h1>
 
 <p align="center">
   A node-graph editor for image &amp; data pipelines — build a graph, wire it up, watch it run.
@@ -18,10 +16,8 @@ in-house immediate-mode GUI with a wgpu renderer — over a domain-agnostic grap
 engine. Its first workload is imaging: general image processing and an
 astronomical stacking pipeline.
 
-<p align="center">
-  <img src="docs/readme-screenshot.png" width="900"
-       alt="The Darkroom editor: a node-graph canvas wiring an astronomical image-stacking pipeline — build_masters, stack_lights, star removal, auto-stretch, and blend, with live per-node status badges" />
-</p>
+<img width="2285" height="1976" alt="Screenshot_20261029_000442" src="https://github.com/user-attachments/assets/e74780b4-e19d-40a5-81f1-544aebcfbbf6" />
+
 
 ## Run it
 
