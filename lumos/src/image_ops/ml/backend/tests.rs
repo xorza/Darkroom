@@ -124,6 +124,7 @@ fn an_identity_model_reproduces_the_input() {
         run_tiles(
             Planes::InPlace(&mut output),
             OnnxModel::DEFAULT_STRIDE,
+            &CancelToken::never(),
             |input, tile| {
                 tile.copy_from_slice(input);
                 Ok(())
@@ -169,9 +170,12 @@ fn the_stride_must_cover_the_frame() {
             (WINDOW, WINDOW),
             0.5f32,
         )));
-        let error = run_tiles(Planes::InPlace(&mut image), stride, |_, _| {
-            panic!("a stride refused runs no tile")
-        })
+        let error = run_tiles(
+            Planes::InPlace(&mut image),
+            stride,
+            &CancelToken::never(),
+            |_, _| panic!("a stride refused runs no tile"),
+        )
         .unwrap_err();
         assert!(
             matches!(&error, MlError::Config(invalid) if invalid.field == "ML tile stride"),
@@ -260,6 +264,7 @@ fn a_band_blends_what_the_whole_frame_blended() {
         run_tiles(
             Planes::InPlace(&mut in_place),
             MAX_STRIDE,
+            &CancelToken::never(),
             |input, output| {
                 infer(input, output);
                 Ok(())
@@ -281,6 +286,7 @@ fn a_band_blends_what_the_whole_frame_blended() {
                 output: &mut apart,
             },
             MAX_STRIDE,
+            &CancelToken::never(),
             |input, output| {
                 infer(input, output);
                 Ok(())
@@ -305,5 +311,38 @@ fn a_band_blends_what_the_whole_frame_blended() {
                 "channel {c} apart"
             );
         }
+    }
+}
+
+/// A cancel stops the run before the next tile: a token set before the run runs no tile, and one
+/// set by the second tile of a 3 × 3 grid (1000² at 256: starts 0, 256 and 488) lets that tile
+/// finish and runs no third.
+#[test]
+fn a_cancel_stops_the_run_before_the_next_tile() {
+    for (cancel_at, tiles_run) in [(0usize, 0usize), (2, 2)] {
+        let mut image = LinearImage::from(PlanarImage::new_mono(Buffer2::new_filled(
+            (1000, 1000),
+            0.5f32,
+        )));
+        let cancel = CancelToken::new();
+        if cancel_at == 0 {
+            cancel.cancel();
+        }
+        let mut tiles = 0;
+        let error = run_tiles(
+            Planes::InPlace(&mut image),
+            OnnxModel::DEFAULT_STRIDE,
+            &cancel,
+            |_, _| {
+                tiles += 1;
+                if tiles == cancel_at {
+                    cancel.cancel();
+                }
+                Ok(())
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(error, MlError::Cancelled), "{error:?}");
+        assert_eq!(tiles, tiles_run, "cancelled at {cancel_at}");
     }
 }

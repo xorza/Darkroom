@@ -2,6 +2,8 @@
 
 use std::fmt;
 
+#[cfg(feature = "ml")]
+use crate::error::Cancelled;
 use crate::error::InvalidConfigField;
 #[cfg(feature = "ml")]
 use crate::image_ops::ml::backend::WINDOW;
@@ -84,4 +86,15 @@ pub enum MlError {
         WINDOW * WINDOW * 3
     )]
     OutputLen { len: usize },
+    /// The run's cancel token was set: the filter stopped between two tiles and its output holds
+    /// part of a blend.
+    #[error("cancelled")]
+    Cancelled,
+}
+
+#[cfg(feature = "ml")]
+impl From<Cancelled> for MlError {
+    fn from(Cancelled: Cancelled) -> Self {
+        Self::Cancelled
+    }
 }

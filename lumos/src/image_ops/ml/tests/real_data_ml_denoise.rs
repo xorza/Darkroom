@@ -1,3 +1,5 @@
+use common::CancelToken;
+
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::ml::backend::OnnxModel;
 use crate::image_ops::ml::ml_denoise::MlDenoise;
@@ -38,7 +40,7 @@ fn deepsnr_denoises() {
     // `apply` denoises in place; the comparison below still needs the noisy original.
     let mut denoised = img.clone();
     MlDenoise::new(OnnxModel::load(weights).expect("the DeepSNR model loads"))
-        .apply(&mut denoised)
+        .apply(&mut denoised, &CancelToken::never())
         .expect("denoise succeeds");
     visual::save_linear(&denoised, "ml_denoise/denoised");
 

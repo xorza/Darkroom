@@ -22,9 +22,10 @@
 //! takes no parameters and so has no `validate` to call; that is the contract met, not skipped.
 //!
 //! The two `ml`-gated ops (`MlDenoise`, `RemoveStars`) hold the `OnnxModel` their caller loaded,
-//! so they `apply` through `&mut self`, and report `MlError`: their failures are a model that does
-//! not run or an image smaller than one tile, neither of which is a config range that
-//! `InvalidConfigField` describes.
+//! so they `apply` through `&mut self`. A run of one lasts up to a minute, so they also take a
+//! `CancelToken`. They report `MlError`: their failures are a model that does not run, an image
+//! smaller than one tile, or a cancel, none of which is a config range that `InvalidConfigField`
+//! describes.
 
 pub(crate) mod color_calibration;
 pub(crate) mod denoise;
