@@ -1,5 +1,5 @@
 use crate::internals::synthetic::sky_field::{GaussianStars, Sky, SkyField, SkyNoise};
-use common::Size2us;
+use common::USize2;
 use glam::{USizeVec2, Vec2};
 
 const FLAT: Sky = Sky {
@@ -11,7 +11,7 @@ const FLAT: Sky = Sky {
 #[test]
 fn stars_sit_on_the_sky_at_their_centres() {
     let field = SkyField::render(
-        Size2us::new(32, 32),
+        USize2::new(32, 32),
         FLAT,
         GaussianStars {
             sigma: 1.5,
@@ -30,7 +30,7 @@ fn stars_sit_on_the_sky_at_their_centres() {
 #[test]
 fn centres_round_to_the_nearest_pixel() {
     let field = SkyField::render(
-        Size2us::new(16, 16),
+        USize2::new(16, 16),
         FLAT,
         GaussianStars {
             sigma: 1.0,
@@ -52,7 +52,7 @@ fn noise_is_deterministic_and_clamping_is_opt_in() {
     };
     let spec = |sky, peaks| {
         SkyField::render(
-            Size2us::new(24, 24),
+            USize2::new(24, 24),
             sky,
             GaussianStars { sigma: 1.5, peaks },
         )

@@ -24,7 +24,7 @@ use glam::Vec2;
 
 use crate::math::pixel_gaussian::PixelGaussian;
 use crate::math::pixel_quadrature::{AnalyticProfile, PixelQuadrature};
-use common::Size2us;
+use common::USize2;
 
 /// How closely a pixel mean without a closed form is integrated, relative to the peak: far under
 /// the f32 rounding of a sample, and under any tolerance a test asserts.
@@ -211,7 +211,7 @@ impl SyntheticStar {
     }
 
     /// A `size` buffer on a flat `bg` holding exactly this star, rendered untruncated.
-    pub(crate) fn stamp(self, size: Size2us, bg: f32) -> Buffer2<f32> {
+    pub(crate) fn stamp(self, size: USize2, bg: f32) -> Buffer2<f32> {
         let mut pixels = Buffer2::new_filled(size, bg);
         self.add_exact(&mut pixels);
         pixels

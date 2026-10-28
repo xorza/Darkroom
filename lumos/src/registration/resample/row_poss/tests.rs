@@ -6,7 +6,7 @@ use crate::registration::resample::row_poss::RowPoss;
 use crate::registration::resample::source_pos::SourcePos;
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
-use common::Size2us;
+use common::USize2;
 
 /// Every row of an affine model or a homography is the bits `WarpTransform::apply` gives, split
 /// by `SourcePos::within`, and positions past the footprint are `None`. A SIP row sums its
@@ -15,7 +15,7 @@ use common::Size2us;
 /// the split, under 1, rounds to half its 6e-8 spacing — 1e-7 holds both.
 #[test]
 fn a_row_is_what_apply_gives_pixel_by_pixel() {
-    let source = Size2us::new(300, 200);
+    let source = USize2::new(300, 200);
     let center = DVec2::new(150.0, 100.0);
     let affine = Transform::similarity(DVec2::new(-12.5, 7.25), 0.03, 1.01);
     let mut reference = Vec::new();

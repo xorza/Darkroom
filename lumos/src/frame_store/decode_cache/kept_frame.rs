@@ -25,7 +25,7 @@ use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::image::flat_gain::{FlatGain, GainGrid};
 use crate::image::stackable_image::{ImageParts, StackableImage};
-use common::Size2us;
+use common::USize2;
 
 /// A kept frame, its planes mapped: the same whether this run wrote it or a run before did, so a
 /// first run and a reuse give the combine frames of one shape.
@@ -294,7 +294,7 @@ impl KeptFrame {
 fn shared_gain(
     spill: &FrameSpill<'_>,
     kept: KeptGain,
-    size: Size2us,
+    size: USize2,
     gains: &SharedGains,
 ) -> Option<Arc<FlatGain>> {
     if let Some(shared) = gains.get(kept.key) {

@@ -35,7 +35,7 @@ use crate::registration::warp_transform::WarpTransform;
 use crate::stack_product::StackProduct;
 use crate::stack_product::coverage::Coverage;
 use crate::stack_product::quality_planes::QualityPlanes;
-use common::Size2us;
+use common::USize2;
 
 /// Output pixels a drop's deposits share at most: the Lanczos-3 and Gaussian neighbourhoods are
 /// 7×7.
@@ -113,7 +113,7 @@ fn drizzle_one(config: DrizzleConfig, frame: &DrizzleFrame<LinearImage>) -> Stac
     acc.finalize()
 }
 
-fn constant_image(size: Size2us, value: f32) -> LinearImage {
+fn constant_image(size: USize2, value: f32) -> LinearImage {
     mono_image(size, vec![value; size.pixel_count()])
 }
 

@@ -34,7 +34,7 @@ use crate::io::fits::fits_load_config::{
     FitsChecksumPolicy, FitsCubeInterpretation, FitsFloatScale, FitsHduSelector, FitsLoadConfig,
 };
 use crate::io::load_ctx::LoadCtx;
-use common::Size2us;
+use common::USize2;
 
 fn load_ctx() -> LoadCtx {
     LoadCtx::new(CancelToken::never())
@@ -124,14 +124,14 @@ fn shape_validation_rejects_zero_overflow_and_unsupported_cubes_without_panickin
         assert_eq!(
             reason,
             FitsRefusal::SideTooLong {
-                size: Size2us::new(shape[0], shape[1])
+                size: USize2::new(shape[0], shape[1])
             },
             "{shape:?}"
         );
     }
     assert_eq!(
         FitsRefusal::SideTooLong {
-            size: Size2us::new(side + 1, 2)
+            size: USize2::new(side + 1, 2)
         }
         .to_string(),
         "FITS image 1073741825x2 has a side past 1073741824 px"
@@ -352,7 +352,7 @@ fn zero_axis_file_returns_error_and_rgb_planes_load_without_repacking() {
     let mut mosaic = Cursor::new(Vec::new());
     cfa::write(
         &make_cfa(
-            Size2us::new(2, 2),
+            USize2::new(2, 2),
             vec![0.25; 4],
             CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
         ),

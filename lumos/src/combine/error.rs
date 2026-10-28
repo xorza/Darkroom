@@ -10,7 +10,7 @@ use crate::frame_store::error::{FrameStoreError, LoadError};
 use crate::image::error::FrameDimensionMismatch;
 use crate::ingest::error::AdmissionError;
 use crate::io::error::ImageError;
-use common::Size2us;
+use common::USize2;
 
 /// Invalid [`crate::StackConfig`] parameters.
 ///
@@ -104,8 +104,8 @@ pub enum StackError {
     PlaneDimensionMismatch {
         idx: usize,
         plane: FramePlane,
-        expected: Size2us,
-        actual: Size2us,
+        expected: USize2,
+        actual: USize2,
     },
 
     /// A frame failed the checks every frame of a set passes before it is combined.

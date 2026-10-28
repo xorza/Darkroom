@@ -16,7 +16,7 @@ use crate::calibration::cosmic_ray::kept_out::KeptOut;
 use crate::calibration::cosmic_ray::masks::{CrMasks, DetectionPlanes};
 use crate::calibration::cosmic_ray::noise_model::{NoiseModel, PixelBg};
 use crate::math::statistics;
-use common::Size2us;
+use common::USize2;
 use glam::USizeVec2;
 
 /// Frame-sized `f32` planes the mono detector holds, however many iterations it runs.
@@ -114,13 +114,13 @@ impl<'a> MonoDetector<'a> {
 
     /// Whether a detection scans a `size` plane: one under 3 pixels on either side is left as it
     /// is.
-    pub(super) const fn scans(size: Size2us) -> bool {
+    pub(super) const fn scans(size: USize2) -> bool {
         size.width >= 3 && size.height >= 3
     }
 
     /// The bytes a detection on a `size` plane allocates beside it: the scratch planes and the
     /// masks, or on a plane too small to scan the empty mask of what it found alone.
-    pub(super) const fn heap_bytes(size: Size2us) -> usize {
+    pub(super) const fn heap_bytes(size: USize2) -> usize {
         if !Self::scans(size) {
             return BitBuffer2::heap_bytes(size);
         }
@@ -629,7 +629,7 @@ impl PixelRepair<'_> {
 
 /// The pixels at Chebyshev distance `reach` from `centre`, each replicated into the `size` frame
 /// at its edges: the centre itself for 0.
-fn ring(centre: USizeVec2, reach: usize, size: Size2us) -> impl Iterator<Item = (usize, usize)> {
+fn ring(centre: USizeVec2, reach: usize, size: USize2) -> impl Iterator<Item = (usize, usize)> {
     let side = 2 * reach + 1;
     let clamp =
         move |at: usize, limit: usize| (at + reach).saturating_sub(2 * reach).min(limit - 1);

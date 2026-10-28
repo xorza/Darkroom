@@ -20,7 +20,7 @@ use crate::star_detection::resources::{
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detection_config::bg_config::MIN_TILE_SIZE;
 use crate::star_detection::star_detector::StarDetector;
-use common::Size2us;
+use common::USize2;
 
 /// The detection working set at its high-water mark over every preset: the buffers the pool holds
 /// at rest once every stage has run and returned its scratch. Because buffers are recycled across
@@ -58,7 +58,7 @@ fn pinned_working_set_matches_what_the_memory_planner_charges() {
     assert_eq!(floats, PEAK_FLOATS);
     assert_eq!(bitmasks + NO_DATA_MASK, PEAK_BITMASKS);
     assert_eq!(surfaces, PEAK_SURFACES);
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     assert_eq!(MeshSurface::heap_bytes(size, MIN_TILE_SIZE, 1), 116 * 4);
     assert_eq!(convolution::max_kernel_radius(), 26);
     assert_eq!(BandScratch::heap_bytes(64, 26), (53 + 3 + 1) * 64 * 4);
@@ -74,7 +74,7 @@ fn pinned_working_set_matches_what_the_memory_planner_charges() {
 /// detection, the multi-threshold deblender.
 #[test]
 fn warmed_pool_holds_the_pinned_working_set() {
-    let size = Size2us::new(128, 128);
+    let size = USize2::new(128, 128);
     let frames: Vec<_> = (0..2)
         .map(|s| star_field(size, 30, 4200 + s).image)
         .collect();

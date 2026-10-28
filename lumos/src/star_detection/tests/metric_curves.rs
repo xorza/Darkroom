@@ -14,7 +14,7 @@ use crate::star_detection::star_detector::StarDetector;
 use crate::star_detection::tests::{
     MATCH_RADIUS, Scenario, detected_poss, synthetic_config, truth_poss,
 };
-use common::Size2us;
+use common::USize2;
 
 #[test]
 fn completeness_and_reliability_high_for_bright_field() {
@@ -107,7 +107,7 @@ fn completeness_falls_for_fainter_sources() {
 #[test]
 fn negligible_false_positives_on_source_free_noise() {
     let scene = Scene {
-        size: Size2us::new(256, 256),
+        size: USize2::new(256, 256),
         sources: vec![],
         bg: BgField::Uniform { level: 0.1 },
     };

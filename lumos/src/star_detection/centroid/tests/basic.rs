@@ -40,7 +40,7 @@ fn a_detected_star_measures_as_on_its_true_sky() {
             AMPLITUDE as f32,
             StarProfile::gaussian(sigma),
         )
-        .stamp(Size2us::new(128, 128), SKY);
+        .stamp(USize2::new(128, 128), SKY);
         let truth = truth.as_vec2().as_dvec2();
         let bg = bg_map::estimate(
             &pixels,
@@ -161,7 +161,7 @@ fn a_detected_star_measures_as_on_its_true_sky() {
 #[test]
 fn subpixel_result_is_independent_of_distance_from_the_origin() {
     const SHIFT: usize = 5968;
-    let near = Size2us::new(64, 64);
+    let near = USize2::new(64, 64);
     let true_pos = DVec2::new(32.3, 32.7);
 
     let near_pixels =
@@ -169,7 +169,7 @@ fn subpixel_result_is_independent_of_distance_from_the_origin() {
 
     // Blit, don't re-render: re-rendering at x = 6000.3 would round the centre in the fixture
     // itself and measure that instead of the coordinate arithmetic.
-    let far = Size2us::new(SHIFT + 64, 64);
+    let far = USize2::new(SHIFT + 64, 64);
     let mut far_data = vec![0.1f32; far.pixel_count()];
     for y in 0..near.height {
         let dst = far.width * y + SHIFT;
@@ -207,7 +207,7 @@ fn valid_stamp_position_covers_boundaries_and_rounding() {
     struct Case {
         name: &'static str,
         pos: DVec2,
-        size: Size2us,
+        size: USize2,
         expected: bool,
     }
 
@@ -217,79 +217,79 @@ fn valid_stamp_position_covers_boundaries_and_rounding() {
         Case {
             name: "center",
             pos: DVec2::splat(32.0),
-            size: Size2us::new(64, 64),
+            size: USize2::new(64, 64),
             expected: true,
         },
         Case {
             name: "minimum valid",
             pos: DVec2::splat(radius as f64),
-            size: Size2us::new(64, 64),
+            size: USize2::new(64, 64),
             expected: true,
         },
         Case {
             name: "maximum valid",
             pos: DVec2::splat((64 - radius - 1) as f64),
-            size: Size2us::new(64, 64),
+            size: USize2::new(64, 64),
             expected: true,
         },
         Case {
             name: "left edge",
             pos: DVec2::new((radius - 1) as f64, 32.0),
-            size: Size2us::new(64, 64),
+            size: USize2::new(64, 64),
             expected: false,
         },
         Case {
             name: "top edge",
             pos: DVec2::new(32.0, (radius - 1) as f64),
-            size: Size2us::new(64, 64),
+            size: USize2::new(64, 64),
             expected: false,
         },
         Case {
             name: "right edge",
             pos: DVec2::new((64 - radius) as f64, 32.0),
-            size: Size2us::new(64, 64),
+            size: USize2::new(64, 64),
             expected: false,
         },
         Case {
             name: "bottom edge",
             pos: DVec2::new(32.0, (64 - radius) as f64),
-            size: Size2us::new(64, 64),
+            size: USize2::new(64, 64),
             expected: false,
         },
         Case {
             name: "negative x",
             pos: DVec2::new(-1.0, 32.0),
-            size: Size2us::new(64, 64),
+            size: USize2::new(64, 64),
             expected: false,
         },
         Case {
             name: "negative y",
             pos: DVec2::new(32.0, -1.0),
-            size: Size2us::new(64, 64),
+            size: USize2::new(64, 64),
             expected: false,
         },
         Case {
             name: "fraction rounds in",
             pos: DVec2::new(radius as f64 + 0.4, 32.0),
-            size: Size2us::new(64, 64),
+            size: USize2::new(64, 64),
             expected: true,
         },
         Case {
             name: "fraction rounds out",
             pos: DVec2::new(radius as f64 - 0.6, 32.0),
-            size: Size2us::new(64, 64),
+            size: USize2::new(64, 64),
             expected: false,
         },
         Case {
             name: "minimum image size",
             pos: DVec2::splat(radius as f64),
-            size: Size2us::new(min_size, min_size),
+            size: USize2::new(min_size, min_size),
             expected: true,
         },
         Case {
             name: "image too small",
             pos: DVec2::splat(radius as f64),
-            size: Size2us::new(min_size - 1, min_size - 1),
+            size: USize2::new(min_size - 1, min_size - 1),
             expected: false,
         },
     ];

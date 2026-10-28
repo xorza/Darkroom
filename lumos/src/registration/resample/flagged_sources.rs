@@ -24,7 +24,7 @@ use crate::image::flags::quality_flags::QualityFlags;
 use crate::registration::resample::source_pos::SourcePos;
 use crate::registration::resample::warp_kernel::TapAxis;
 use crate::scratch_pool::Shapeless;
-use common::Size2us;
+use common::USize2;
 use simd::{F32_LANES, Isa};
 
 /// A flagged frame's sources as the warp samples them, prepared once per frame in a
@@ -53,7 +53,7 @@ impl FlagScratch {
     /// The bytes the scratch holds beside a `size` frame's warp on `workers` at the most: its
     /// flags grown by the kernel's window, that growth's block ORs, and the plane for the warped
     /// flags, which it keeps from a frame whose warp carried none.
-    pub(crate) const fn heap_bytes(size: Size2us, workers: usize) -> usize {
+    pub(crate) const fn heap_bytes(size: USize2, workers: usize) -> usize {
         2 * size.pixel_count() * size_of::<u8>() + DilationScratch::heap_bytes(size, workers)
     }
 
@@ -89,7 +89,7 @@ impl FlagScratch {
 
     /// A plane for the warped flags of a frame of `size`: the one kept here, or a new one. Every
     /// pixel is written, so none is cleared.
-    pub(crate) fn output(&mut self, size: Size2us) -> Buffer2<u8> {
+    pub(crate) fn output(&mut self, size: USize2) -> Buffer2<u8> {
         match self.output.take() {
             Some(plane) if plane.size() == size => plane,
             _ => Buffer2::new_default(size),
@@ -111,7 +111,7 @@ impl FlagScratch {
 impl Shapeless for FlagScratch {}
 
 /// The plane in `slot`, made for `size` when it holds none of that size.
-fn sized(slot: &mut Option<Buffer2<u8>>, size: Size2us) -> &mut Buffer2<u8> {
+fn sized(slot: &mut Option<Buffer2<u8>>, size: USize2) -> &mut Buffer2<u8> {
     if slot.as_ref().is_none_or(|plane| plane.size() != size) {
         *slot = Some(Buffer2::new_default(size));
     }

@@ -7,7 +7,7 @@ use crate::star_detection::deblend::pixel::Pixel;
 use crate::star_detection::deblend::region::Region;
 use crate::star_detection::labeling::component_data::ComponentData;
 use crate::star_detection::labeling::{LabelMap, LabelRun};
-use common::Rect2us;
+use common::USizeRect2;
 
 /// One connected component of the residual: the pixels of its runs, and the brightest of them.
 #[derive(Debug, Clone, Copy)]
@@ -49,7 +49,7 @@ impl<'a> Component<'a> {
         self.residual
     }
 
-    pub(crate) const fn bbox(&self) -> Rect2us {
+    pub(crate) const fn bbox(&self) -> USizeRect2 {
         self.data.bbox
     }
 

@@ -5,7 +5,7 @@ use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion};
 
-use common::Size2us;
+use common::USize2;
 use common::bench::{Kind, Scale};
 
 use crate::bench::fixture::{self, Backend, Variant};
@@ -24,16 +24,14 @@ pub(crate) fn atomic(c: &mut Criterion) {
     for from in ColorFormat::ALL {
         let mut source = None;
         for to in pairs_from(from) {
-            let mut row = InterleavedImage::new_zeroed(InterleavedDesc::new(
-                Size2us::new(FRAME.width, 1),
-                to,
-            ));
+            let mut row =
+                InterleavedImage::new_zeroed(InterleavedDesc::new(USize2::new(FRAME.width, 1), to));
             group.throughput(fixture::throughput(FRAME.width, from.byte_len()));
             for variant in Variant::all(VectorConversion::of(from, to)) {
                 let id = BenchmarkId::new(Backend::Cpu.case(variant.id()), pair_id(from, to));
                 group.bench_function(id, |b| {
                     let src = source
-                        .get_or_insert_with(|| scene::sky(from, Size2us::new(FRAME.width, 1), 1))
+                        .get_or_insert_with(|| scene::sky(from, USize2::new(FRAME.width, 1), 1))
                         .bytes();
                     let dst = row.bytes_mut();
                     if let Variant::Kernel { kernel, tier } = variant {

@@ -7,7 +7,7 @@ const STEP_50: Grid = Grid {
 };
 use crate::registration::estimate::Pairs;
 use crate::registration::transform::TransformType;
-use common::Size2us;
+use common::USize2;
 use std::f64::consts::PI;
 
 /// A fit needs three pairs per term against overfitting: orders 2 to 5 have 3, 7, 12 and 18 terms,
@@ -81,7 +81,7 @@ fn coincident_points_fit_nothing() {
 /// coefficient of its fit is zero.
 #[test]
 fn max_correction_is_the_corner_correction() {
-    let size = Size2us::new(1000, 1000);
+    let size = USize2::new(1000, 1000);
     let distorted = fit_field(&barrel(), Grid::DEFAULT, SipOrder::Three);
     let corner = 25.0 * 2f64.sqrt();
     assert!((distorted.max_grid_correction(size, 50.0) - corner).abs() <= EXACT_FIT_PX);

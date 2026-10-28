@@ -211,7 +211,7 @@ pub(crate) mod internals {
 
 #[cfg(test)]
 mod tests {
-    use common::{Size2us, thread};
+    use common::{USize2, thread};
     use std::sync::atomic::{AtomicBool, Ordering};
 
     use crate::color::color_format::ColorFormat;
@@ -227,7 +227,7 @@ mod tests {
             return;
         };
         for format in ColorFormat::ALL {
-            let image = create_test_image(format, Size2us::new(7, 3), 11);
+            let image = create_test_image(format, USize2::new(7, 3), 11);
             let uploaded = GpuImage::from_image(gpu, &image).unwrap();
             assert_eq!(
                 uploaded.to_image(gpu).unwrap().bytes(),

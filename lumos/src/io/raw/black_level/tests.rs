@@ -1,7 +1,7 @@
 use crate::image::flags::quality_flags::QualityFlags;
 use crate::io::raw::black_level::{BlackLevel, DngLevels, FlagRule, LibrawBlack, Photosites};
 use crate::io::raw::error::BlackLevelError;
-use common::Size2us;
+use common::USize2;
 use glam::USizeVec2;
 use libraw::SensorLayout;
 
@@ -111,15 +111,15 @@ fn a_canon_black_level_is_exact_against_a_hand_sum() {
     assert_eq!(black.common, 2052.0);
     assert_eq!(black.span(), 12_948.0);
     let repeat = black.repeat.as_ref().unwrap();
-    assert_eq!(repeat.size, Size2us::new(3, 2));
+    assert_eq!(repeat.size, USize2::new(3, 2));
     assert_eq!(&*repeat.values, &[0.0, 2.0, 4.0, 6.0, 8.0, 10.0]);
 
     // Eight columns, past the six after which the channel's period of 2 and the pattern's of 3
     // repeat together, so a row's levels wrap once. A zero at visible (2, 1) has no measurement;
     // channel 0 saturates at 6000 ADU, which visible (0, 0) reads and (2, 0) misses by one.
     let layout = SensorLayout {
-        raw: Size2us::new(10, 5),
-        active: Size2us::new(8, 3),
+        raw: USize2::new(10, 5),
+        active: USize2::new(8, 3),
         margin: USizeVec2::new(1, 1),
     };
     let mut raw: Vec<u16> = (0..layout.raw.pixel_count())

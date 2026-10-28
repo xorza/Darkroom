@@ -88,7 +88,7 @@ pub(crate) mod bench;
 
 #[cfg(test)]
 mod tests {
-    use common::Size2us;
+    use common::USize2;
 
     use crate::color::color_format::ColorFormat;
     use crate::internals::create_test_image;
@@ -99,7 +99,7 @@ mod tests {
     #[test]
     fn apply_cpu_adjusts_in_place_without_reallocating() {
         for format in ColorFormat::ALL {
-            let source = create_test_image(format, Size2us::new(17, 5), 0);
+            let source = create_test_image(format, USize2::new(17, 5), 0);
             let mut image = source.clone();
             let before = image.bytes().as_ptr();
 

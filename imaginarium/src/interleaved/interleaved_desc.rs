@@ -1,6 +1,6 @@
 use std::fmt;
 
-use common::Size2us;
+use common::USize2;
 
 use crate::color::color_format::ColorFormat;
 use crate::error::DescError;
@@ -11,7 +11,7 @@ use crate::error::DescError;
 /// (`src/gpu/`), never here.
 #[derive(Clone, Copy, Eq, PartialEq, Debug, Hash)]
 pub struct InterleavedDesc {
-    size: Size2us,
+    size: USize2,
     color_format: ColorFormat,
 }
 
@@ -19,7 +19,7 @@ impl InterleavedDesc {
     /// # Panics
     ///
     /// When `size` has a zero side, or its pixels have more bytes than a `usize` counts.
-    pub const fn new(size: Size2us, color_format: ColorFormat) -> Self {
+    pub const fn new(size: USize2, color_format: ColorFormat) -> Self {
         match Self::checked(size, color_format) {
             Ok(desc) => desc,
             Err(DescError::ZeroWidth) => panic!("width must be positive"),
@@ -30,8 +30,8 @@ impl InterleavedDesc {
 
     /// The descriptor `size` and `color_format` make, or the first rule they break: a zero side,
     /// or more bytes than a `usize` counts.
-    pub const fn checked(size: Size2us, color_format: ColorFormat) -> Result<Self, DescError> {
-        let Size2us { width, height } = size;
+    pub const fn checked(size: USize2, color_format: ColorFormat) -> Result<Self, DescError> {
+        let USize2 { width, height } = size;
         if width == 0 {
             return Err(DescError::ZeroWidth);
         }
@@ -52,7 +52,7 @@ impl InterleavedDesc {
         Ok(Self { size, color_format })
     }
 
-    pub const fn size(&self) -> Size2us {
+    pub const fn size(&self) -> USize2 {
         self.size
     }
 
@@ -107,7 +107,7 @@ impl fmt::Display for InterleavedDesc {
 
 #[cfg(test)]
 mod tests {
-    use common::Size2us;
+    use common::USize2;
 
     use crate::color::color_format::ColorFormat;
     use crate::error::DescError;
@@ -116,8 +116,8 @@ mod tests {
     /// A 5 × 3 `RGB_U16` descriptor: rows of 5 · 6 = 30 bytes, 90 in all.
     #[test]
     fn a_desc_counts_its_bytes() {
-        let desc = InterleavedDesc::new(Size2us::new(5, 3), ColorFormat::RGB_U16);
-        assert_eq!(desc.size(), Size2us::new(5, 3));
+        let desc = InterleavedDesc::new(USize2::new(5, 3), ColorFormat::RGB_U16);
+        assert_eq!(desc.size(), USize2::new(5, 3));
         assert_eq!(desc.color_format(), ColorFormat::RGB_U16);
         assert_eq!(desc.row_byte_len(), 30);
         assert_eq!(desc.byte_len(), 90);
@@ -128,21 +128,21 @@ mod tests {
     /// `usize::MAX / 4 + 1` pixels in one row fit as `MONO_U8`, and as `RGBA_U8` do not.
     #[test]
     fn checked_names_the_first_rule_broken() {
-        let wide = Size2us::new(usize::MAX / 4 + 1, 1);
-        let huge = Size2us::new(usize::MAX, 2);
+        let wide = USize2::new(usize::MAX / 4 + 1, 1);
+        let huge = USize2::new(usize::MAX, 2);
         for (size, format, expected) in [
             (
-                Size2us::new(0, 3),
+                USize2::new(0, 3),
                 ColorFormat::MONO_U8,
                 DescError::ZeroWidth,
             ),
             (
-                Size2us::new(0, 0),
+                USize2::new(0, 0),
                 ColorFormat::MONO_U8,
                 DescError::ZeroWidth,
             ),
             (
-                Size2us::new(4, 0),
+                USize2::new(4, 0),
                 ColorFormat::RGB_F32,
                 DescError::ZeroHeight,
             ),
@@ -175,6 +175,6 @@ mod tests {
     #[test]
     #[should_panic(expected = "height must be positive")]
     fn new_panics_on_the_rule_broken() {
-        InterleavedDesc::new(Size2us::new(4, 0), ColorFormat::MONO_U8);
+        InterleavedDesc::new(USize2::new(4, 0), ColorFormat::MONO_U8);
     }
 }

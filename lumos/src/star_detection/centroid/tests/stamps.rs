@@ -19,7 +19,7 @@ fn sigma_seed_is_the_truncated_second_moment() {
     let radius = 10;
     for sigma in [1.5f32, 2.0, 2.5, 3.0, 4.0] {
         let pixels = SyntheticStar::new(Vec2::splat(10.0), 1.0, StarProfile::gaussian(sigma))
-            .stamp(Size2us::new(21, 21), SKY);
+            .stamp(USize2::new(21, 21), SKY);
         let fit = StampFit::prepare::<6>(FitInputs {
             pixels: &pixels,
             pos: DVec2::splat(10.0),
@@ -165,7 +165,7 @@ fn local_annulus_removes_a_sky_the_map_left() {
         AMPLITUDE,
         StarProfile::gaussian(sigma),
     )
-    .stamp(Size2us::new(128, 128), 0.1);
+    .stamp(USize2::new(128, 128), 0.1);
     let truth = Measured::flat(&pixels, 0.1, 0.01);
     let offset = Measured::flat(&pixels, 0.1 - PEDESTAL, 0.01);
     let region = truth.region_at(DVec2::new(64.3, 63.6));
@@ -230,7 +230,7 @@ fn local_annulus_needs_ten_pixels_in_the_frame() {
 /// subsampled and still reads the flat sky.
 #[test]
 fn the_annulus_reads_the_sky_around_the_star() {
-    let size = Size2us::new(240, 240);
+    let size = USize2::new(240, 240);
     let centre = DVec2::splat(120.0);
     let mut residual = Buffer2::new_filled(size, 0.25f32);
     for y in 104..137 {

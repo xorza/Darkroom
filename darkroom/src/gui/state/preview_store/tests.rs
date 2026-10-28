@@ -68,7 +68,7 @@ fn capped_target_preserves_aspect_without_upscaling() {
 fn conversion_produces_opaque_rgba8_at_the_target_size() {
     let bytes = vec![255, 0, 0, 255, 0, 255, 0, 255];
     let rgba = InterleavedImage::new_with_data(
-        InterleavedDesc::new(Size2us::new(2, 1), ColorFormat::RGBA_U8),
+        InterleavedDesc::new(USize2::new(2, 1), ColorFormat::RGBA_U8),
         bytes.clone(),
     )
     .unwrap();
@@ -78,7 +78,7 @@ fn conversion_produces_opaque_rgba8_at_the_target_size() {
     );
 
     let rgb = InterleavedImage::new_with_data(
-        InterleavedDesc::new(Size2us::new(1, 1), ColorFormat::RGB_F32),
+        InterleavedDesc::new(USize2::new(1, 1), ColorFormat::RGB_F32),
         vec![0; 12],
     )
     .unwrap();
@@ -95,7 +95,7 @@ fn conversion_produces_opaque_rgba8_at_the_target_size() {
 fn native_size_refuses_an_edge_no_texture_holds() {
     let size = |width, height| {
         native_size(InterleavedDesc::new(
-            Size2us::new(width, height),
+            USize2::new(width, height),
             ColorFormat::RGB_U8,
         ))
     };
@@ -105,7 +105,7 @@ fn native_size_refuses_an_edge_no_texture_holds() {
         assert!(
             matches!(
                 size(width, height),
-                Err(DrawablePreviewError::EdgeTooLong { size }) if size == Size2us::new(width, height)
+                Err(DrawablePreviewError::EdgeTooLong { size }) if size == USize2::new(width, height)
             ),
             "{width}×{height}",
         );
@@ -125,7 +125,7 @@ fn the_full_texture_converts_on_the_first_ask_and_is_reused_after() {
 
     store.publish(
         node,
-        internals::image_value(Size2us::new(1024, 512), ColorFormat::RGB_F32),
+        internals::image_value(USize2::new(1024, 512), ColorFormat::RGB_F32),
     );
     assert!(
         store.entries.is_empty(),

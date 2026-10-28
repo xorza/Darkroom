@@ -6,7 +6,7 @@ use crate::star_detection::convolution;
 use crate::star_detection::convolution::simd::{
     Convolve2dRow, ConvolveColsRow, ConvolveRow, Kernel2d, RowRing,
 };
-use common::Size2us;
+use common::USize2;
 use glam::Vec2;
 use simd::Kernel;
 
@@ -197,7 +197,7 @@ impl MatchedKernel<'_> {
     /// Output row `y` of an image of `size` into `output`, from `ring`, whole rows of
     /// [`Self::ring_row`]s, image row `n` in slot `n` modulo its slots, holding every row the taps
     /// read: mirrored at the image's edges, and scaled back to the input's noise.
-    pub(crate) fn output_row(self, ring: &[f32], size: Size2us, y: usize, output: &mut [f32]) {
+    pub(crate) fn output_row(self, ring: &[f32], size: USize2, y: usize, output: &mut [f32]) {
         debug_assert_eq!(output.len(), size.width, "one output row");
         let input = RowRing::new(ring, size);
         match self.shape {

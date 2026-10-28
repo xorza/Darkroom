@@ -10,7 +10,7 @@ use crate::frame::error::ConditionMismatch;
 use crate::image::cfa::cfa_color::CfaColor;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::metadata::sample_domain::SampleDomain;
-use common::Size2us;
+use common::USize2;
 
 /// A calibration master does not describe the same measurement as the light it is applied to.
 ///
@@ -107,8 +107,8 @@ pub enum CalibrationError {
     #[error("{component} master is {master}, expected {expected}")]
     DimensionMismatch {
         component: CalibrationComponent,
-        expected: Size2us,
-        master: Size2us,
+        expected: USize2,
+        master: USize2,
     },
 }
 
@@ -133,8 +133,8 @@ pub enum SubtractionError {
     #[error("frame {idx} is {frame} on its sensor, but the master it subtracts is {subtractor}")]
     SubtractorShape {
         idx: usize,
-        frame: Size2us,
-        subtractor: Size2us,
+        frame: USize2,
+        subtractor: USize2,
     },
 
     /// The master a calibration stack subtracts from every frame is of another sensor pattern than

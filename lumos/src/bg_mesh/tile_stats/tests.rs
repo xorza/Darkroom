@@ -4,7 +4,7 @@
 )]
 
 use crate::bg_mesh::tile_stats::*;
-use common::Size2us;
+use common::USize2;
 
 #[test]
 fn sextractor_sky_hand_computed() {
@@ -77,9 +77,9 @@ fn sample_ordinals_are_even_and_point_symmetric() {
 /// names: `2·v = 2·41.5 + o.x + 1000·(2·51.5 + o.y)`.
 #[test]
 fn tile_samples_centre_on_the_tile() {
-    let size = Size2us::new(100, 100);
+    let size = USize2::new(100, 100);
     let pixels = Buffer2::from_fn(size, |x, y| (x + 1000 * y) as f32);
-    let tile = Rect2us::new(USizeVec2::new(10, 20), USizeVec2::new(74, 84));
+    let tile = USizeRect2::new(USizeVec2::new(10, 20), USizeVec2::new(74, 84));
     let mut samples = TileSamples::default();
     samples.collect_tile(&pixels, tile);
     let TileSamples { values, offsets } = &samples;
@@ -90,7 +90,7 @@ fn tile_samples_centre_on_the_tile() {
         assert_eq!(2 * v as i32, 83 + offset.x + 1000 * (103 + offset.y), "{v}");
     }
 
-    let small = Rect2us::new(USizeVec2::new(3, 4), USizeVec2::new(13, 9));
+    let small = USizeRect2::new(USizeVec2::new(3, 4), USizeVec2::new(13, 9));
     let mut samples = TileSamples::default();
     samples.collect_tile(&pixels, small);
     let every: Vec<f32> = (4..9)
@@ -109,40 +109,40 @@ fn tile_samples_centre_on_the_tile() {
 fn masked_sampling_reads_the_unmasked_ordinals() {
     #[derive(Debug)]
     struct SamplingCase {
-        size: Size2us,
-        tile: Rect2us,
+        size: USize2,
+        tile: USizeRect2,
         mask_modulus: Option<usize>,
     }
 
     let cases = [
         SamplingCase {
-            size: Size2us::new(17, 19),
-            tile: Rect2us::new(USizeVec2::ZERO, USizeVec2::new(17, 19)),
+            size: USize2::new(17, 19),
+            tile: USizeRect2::new(USizeVec2::ZERO, USizeVec2::new(17, 19)),
             mask_modulus: None,
         },
         SamplingCase {
-            size: Size2us::new(32, 32),
-            tile: Rect2us::new(USizeVec2::ZERO, USizeVec2::new(32, 32)),
+            size: USize2::new(32, 32),
+            tile: USizeRect2::new(USizeVec2::ZERO, USizeVec2::new(32, 32)),
             mask_modulus: None,
         },
         SamplingCase {
-            size: Size2us::new(40, 40),
-            tile: Rect2us::new(USizeVec2::ZERO, USizeVec2::new(40, 40)),
+            size: USize2::new(40, 40),
+            tile: USizeRect2::new(USizeVec2::ZERO, USizeVec2::new(40, 40)),
             mask_modulus: Some(7),
         },
         SamplingCase {
-            size: Size2us::new(130, 75),
-            tile: Rect2us::new(USizeVec2::new(3, 2), USizeVec2::new(129, 74)),
+            size: USize2::new(130, 75),
+            tile: USizeRect2::new(USizeVec2::new(3, 2), USizeVec2::new(129, 74)),
             mask_modulus: Some(5),
         },
         SamplingCase {
-            size: Size2us::new(256, 256),
-            tile: Rect2us::new(USizeVec2::ZERO, USizeVec2::new(256, 256)),
+            size: USize2::new(256, 256),
+            tile: USizeRect2::new(USizeVec2::ZERO, USizeVec2::new(256, 256)),
             mask_modulus: None,
         },
         SamplingCase {
-            size: Size2us::new(64, 64),
-            tile: Rect2us::new(USizeVec2::ZERO, USizeVec2::new(64, 64)),
+            size: USize2::new(64, 64),
+            tile: USizeRect2::new(USizeVec2::ZERO, USizeVec2::new(64, 64)),
             mask_modulus: Some(1),
         },
     ];
@@ -213,9 +213,9 @@ fn masked_sampling_reads_the_unmasked_ordinals() {
 /// the slope's spread counts in it.
 #[test]
 fn a_tile_reads_its_sky_about_its_own_plane() {
-    let size = Size2us::new(40, 40);
+    let size = USize2::new(40, 40);
     // 32×32 = 1024 pixels: the whole tile is read, so the samples are exactly the pixels.
-    let tile = Rect2us::new(USizeVec2::new(4, 6), USizeVec2::new(36, 38));
+    let tile = USizeRect2::new(USizeVec2::new(4, 6), USizeVec2::new(36, 38));
     let frame = |level: &dyn Fn(usize, usize) -> f32, checker: f32| {
         Buffer2::from_fn(size, |x, y| {
             let sign = if (x + y).is_multiple_of(2) { 1.0 } else { -1.0 };

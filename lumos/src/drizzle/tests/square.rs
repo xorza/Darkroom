@@ -21,7 +21,7 @@ fn square_kernel_mixes_two_pixels_by_their_overlap() {
     let product = drizzle_one(
         kernel_config(DrizzleKernel::Square, 2.0, 1.0),
         &DrizzleFrame::new(
-            mono_image(Size2us::new(4, 4), pixels),
+            mono_image(USize2::new(4, 4), pixels),
             warp_of(Transform::translation(DVec2::new(0.25, 0.0))),
         ),
     );
@@ -45,7 +45,7 @@ fn square_kernel_mixes_two_pixels_by_their_overlap() {
 /// drop a general quadrilateral, and they apportion flux differently — by far more than that.
 #[test]
 fn square_matches_turbo_only_while_the_drop_stays_axis_aligned() {
-    let size = Size2us::new(10, 10);
+    let size = USize2::new(10, 10);
     // A horizontal gradient: uniform data would agree under any kernel and prove nothing.
     let gradient: Vec<f32> = (0..100).map(|i| (i % 10) as f32).collect();
     let agreement = 2.0 * (2.0 * 4.0 + 1.0) * f32::EPSILON * 9.0;
@@ -114,7 +114,7 @@ fn square_matches_turbo_only_while_the_drop_stays_axis_aligned() {
 /// the quadrilaterals of the patch's pixels around it — so it reads 10.
 #[test]
 fn a_rotated_square_drop_keeps_its_flux() {
-    let size = Size2us::new(20, 20);
+    let size = USize2::new(20, 20);
     let mut pixels = vec![0.0f32; size.pixel_count()];
     for y in 8..12 {
         for x in 8..12 {

@@ -18,7 +18,7 @@ use crate::star_detection::resources::DetectionResources;
 use crate::star_detection::star_detection_config::bg_config::{
     BgConfig, BgRefinement, IterativeRefinement,
 };
-use common::Size2us;
+use common::USize2;
 
 /// The background and noise maps of `pixels` at `tile_size`.
 fn estimate(pixels: &Buffer2<f32>, tile_size: usize) -> BgEstimate {
@@ -234,7 +234,7 @@ fn outliers_in_under_half_a_tile_leave_the_sky_exact() {
 fn refine_masks_the_stars_and_their_halos_out() {
     const SKY: f32 = 0.25;
     const SPREAD: f32 = 1.0 / 64.0;
-    let size = Size2us::new(128, 128);
+    let size = USize2::new(128, 128);
     let pixels = Buffer2::from_fn(size, |x, y| {
         let sign = if (x + y) % 2 == 0 { 1.0 } else { -1.0 };
         let lift = match (x % 32, y % 32) {
@@ -335,7 +335,7 @@ fn repeated_estimation_and_dimension_reset_preserve_exact_results() {
         tile_size: 16,
         ..Default::default()
     };
-    let mut resources = DetectionResources::new(Size2us::new(96, 64));
+    let mut resources = DetectionResources::new(USize2::new(96, 64));
 
     let first = BgEstimate::estimate(
         MaskedPlane::from(&pixels),
@@ -357,7 +357,7 @@ fn repeated_estimation_and_dimension_reset_preserve_exact_results() {
     assert_eq!(second.sky.noise.plane().pixels(), expected_noise);
     drop(second);
 
-    resources.reshape(Size2us::new(48, 32));
+    resources.reshape(USize2::new(48, 32));
     let resized_pixels = Buffer2::new_filled((48, 32), 0.25);
     let resized = BgEstimate::estimate(
         MaskedPlane::from(&resized_pixels),

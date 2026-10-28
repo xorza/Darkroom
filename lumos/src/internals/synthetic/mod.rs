@@ -17,7 +17,7 @@
 //! use crate::internals::synthetic::scene::{BgField, Placement, Scatter, Scene};
 //!
 //! let scene = Scene::scatter(
-//!     Size2us::new(512, 512),
+//!     USize2::new(512, 512),
 //!     Scatter {
 //!         count: 80,
 //!         flux: (5.0, 200.0),

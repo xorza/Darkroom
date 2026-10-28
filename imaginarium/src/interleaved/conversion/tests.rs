@@ -6,7 +6,7 @@ use crate::interleaved::conversion::vector_conversion::VectorConversion;
 use crate::interleaved::interleaved_desc::InterleavedDesc;
 use crate::interleaved::interleaved_image::InterleavedImage;
 use crate::internals::create_test_image;
-use common::Size2us;
+use common::USize2;
 
 /// `(r·13933 + g·46871 + b·4732) / 65536`, rounded half to even:
 /// red 255 → 3 552 915 / 65536 = 54.21 → 54; green 255 → 11 952 105 / 65536 = 182.38 → 182;
@@ -121,12 +121,12 @@ fn whole_images_convert_by_the_rule() {
     ];
     for (from, bytes, to, expected) in cases {
         let image =
-            InterleavedImage::new_with_data(InterleavedDesc::new(Size2us::new(5, 1), from), bytes)
+            InterleavedImage::new_with_data(InterleavedDesc::new(USize2::new(5, 1), from), bytes)
                 .unwrap();
         let converted = image.convert_to(to);
         assert_eq!(
             converted.desc(),
-            InterleavedDesc::new(Size2us::new(5, 1), to)
+            InterleavedDesc::new(USize2::new(5, 1), to)
         );
         assert_eq!(converted.bytes(), expected, "{from} -> {to}");
     }
@@ -140,7 +140,7 @@ fn converting_to_the_same_format_copies() {
             .map(|i| (i * 37 % 251) as u8)
             .collect();
         let image = InterleavedImage::new_with_data(
-            InterleavedDesc::new(Size2us::new(3, 2), format),
+            InterleavedDesc::new(USize2::new(3, 2), format),
             bytes.clone(),
         )
         .unwrap();
@@ -167,7 +167,7 @@ fn conversion_snapshot() {
     }
 
     let digests = ColorFormat::ALL.map(|from| {
-        let mut source = create_test_image(from, Size2us::new(37, 5), 3);
+        let mut source = create_test_image(from, USize2::new(37, 5), 3);
         if from.sample_type == SampleType::F32 {
             let edges = [-1.0f32, -0.0, 1.5, 255.0, f32::INFINITY, f32::NEG_INFINITY];
             let floats: &mut [f32] = bytemuck::cast_slice_mut(source.bytes_mut());

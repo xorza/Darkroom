@@ -12,7 +12,7 @@ use crate::image::cfa::mosaic::Mosaic;
 use crate::internals::assertions::assert_close;
 use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::test_rng::TestRng;
-use common::Size2us;
+use common::USize2;
 use glam::USizeVec2;
 
 /// Every phase round-trips through its `BAYERPAT` spelling, in any case and with blanks around
@@ -99,9 +99,9 @@ fn cancelled_token_bails_the_demosaic() {
 #[test]
 fn parallel_rcd_matches_single_thread_bit_for_bit() {
     let size = if cfg!(miri) {
-        Size2us::new(20, 20)
+        USize2::new(20, 20)
     } else {
-        Size2us::new(96, 80)
+        USize2::new(96, 80)
     };
     let data = Buffer2::from_fn(size, |x, y| {
         let idx = y * size.width + x;
@@ -130,7 +130,7 @@ fn demosaic(data: &Buffer2<f32>, pattern: BayerPattern) -> [Vec<f32>; 3] {
 
 /// A mosaic of `size` under `pattern` sampling each pixel's own color of `scene`.
 fn mosaic(
-    size: Size2us,
+    size: USize2,
     pattern: BayerPattern,
     scene: impl Fn(USizeVec2, usize) -> f32,
 ) -> Buffer2<f32> {
@@ -149,7 +149,7 @@ fn mosaic(
 /// equal neighbours and is exact up to rounding.
 #[test]
 fn constant_color_reconstructs_on_every_phase() {
-    let size = Size2us::new(40, 36);
+    let size = USize2::new(40, 36);
     for pattern in BayerPattern::ALL {
         for color in [[0.5; 3], [0.8, 0.5, 0.2], [0.1, 0.9, 0.4]] {
             let data = mosaic(size, pattern, |_, channel| color[channel]);
@@ -177,11 +177,11 @@ fn constant_color_reconstructs_on_every_phase() {
 /// tiles each way. Random samples, so no stencil can hide behind equal neighbours.
 #[test]
 fn rcd_beyond_the_border_matches_a_larger_frame() {
-    let large = Size2us::new(300, 280);
+    let large = USize2::new(300, 280);
     let offset = 16;
     let mut rng = TestRng::new(7);
     let samples = Buffer2::from_fn(large, |_, _| 0.1 + 0.8 * rng.next_f32());
-    let small = Size2us::new(240, 236);
+    let small = USize2::new(240, 236);
     let crop = Buffer2::from_fn(small, |x, y| samples[(x + offset, y + offset)]);
     for pattern in BayerPattern::ALL {
         let whole = demosaic(&samples, pattern);
@@ -217,7 +217,7 @@ fn rcd_beyond_the_border_matches_a_larger_frame() {
 /// interpolated sample is balanced back by its own color's gain.
 #[test]
 fn rcd_all_patterns_preserve_native_samples_and_stay_finite() {
-    let ramp = |size: Size2us| -> Buffer2<f32> {
+    let ramp = |size: USize2| -> Buffer2<f32> {
         Buffer2::from_fn(size, |x, y| {
             (y * size.width + x) as f32 / size.pixel_count() as f32
         })
@@ -225,7 +225,7 @@ fn rcd_all_patterns_preserve_native_samples_and_stay_finite() {
     let assert_native = |planes: &[Vec<f32>; 3],
                          data: &[f32],
                          color: &dyn Fn(USizeVec2) -> usize,
-                         size: Size2us,
+                         size: USize2,
                          case: &str| {
         for (channel, plane) in planes.iter().enumerate() {
             for (idx, &value) in plane.iter().enumerate() {
@@ -244,7 +244,7 @@ fn rcd_all_patterns_preserve_native_samples_and_stay_finite() {
             );
         }
     };
-    let size = Size2us::new(20, 20);
+    let size = USize2::new(20, 20);
     let data = ramp(size);
     for pattern in BayerPattern::ALL {
         assert_native(
@@ -256,7 +256,7 @@ fn rcd_all_patterns_preserve_native_samples_and_stay_finite() {
         );
     }
 
-    let size = Size2us::new(130, 130);
+    let size = USize2::new(130, 130);
     let data = ramp(size);
     for (cfa_type, passes) in [
         (
@@ -296,7 +296,7 @@ fn rcd_all_patterns_preserve_native_samples_and_stay_finite() {
 /// border averages symmetric neighbours of a linear ramp, which is exact.
 #[test]
 fn signed_linear_gradient_crossing_zero_is_reconstructed_without_spikes() {
-    let size = Size2us::new(32, 24);
+    let size = USize2::new(32, 24);
     let slope = 0.125;
     for pattern in BayerPattern::ALL {
         let data = mosaic(size, pattern, |pos, _| (pos.x as f32 - 15.5) * slope);
@@ -396,7 +396,7 @@ fn rcd_interpolates_along_an_edge() {
     fn side(coordinate: usize) -> f32 {
         if coordinate < 16 { 0.8 } else { 0.2 }
     }
-    let size = Size2us::new(32, 32);
+    let size = USize2::new(32, 32);
     let axes: [(&str, Axis); 2] = [("horizontal", |pos| pos.y), ("vertical", |pos| pos.x)];
     for pattern in BayerPattern::ALL {
         for (name, across) in axes {
@@ -433,7 +433,7 @@ fn rcd_interpolates_along_an_edge() {
 /// left.
 #[test]
 fn rcd_reproduces_a_linear_ramp_inside_the_border() {
-    let size = Size2us::new(48, 40);
+    let size = USize2::new(48, 40);
     let ramp = |pos: USizeVec2| 0.1 + 0.015 * pos.x as f32 + 0.01 * pos.y as f32;
     for pattern in BayerPattern::ALL {
         let planes = demosaic(&mosaic(size, pattern, |pos, _| ramp(pos)), pattern);
@@ -465,7 +465,7 @@ fn rcd_reproduces_a_linear_ramp_inside_the_border() {
 /// `8v/(eps + 8v)`. Each sample is the level to one unit in its last place.
 #[test]
 fn rcd_returns_a_flat_field_at_any_level() {
-    let size = Size2us::new(32, 24);
+    let size = USize2::new(32, 24);
     for pattern in BayerPattern::ALL {
         for level in [-1e-4f32, 0.0, 1e-5, 1e-4, 1e-2] {
             let planes = demosaic(&Buffer2::new_filled(size, level), pattern);
@@ -488,7 +488,7 @@ fn rcd_returns_a_flat_field_at_any_level() {
 /// leaves the background, is treated as its mirror is.
 #[test]
 fn rcd_is_odd() {
-    let size = Size2us::new(40, 32);
+    let size = USize2::new(40, 32);
     let mut rng = TestRng::new(11);
     let data = Buffer2::from_fn(size, |_, _| 0.02 * (rng.next_f32() - 0.5));
     let negated = Buffer2::new(size, data.iter().map(|&value| -value).collect());

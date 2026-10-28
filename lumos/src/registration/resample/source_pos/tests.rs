@@ -1,9 +1,9 @@
 use glam::DVec2;
 
 use crate::registration::resample::source_pos::SourcePos;
-use common::Size2us;
+use common::USize2;
 
-const SIZE: Size2us = Size2us::new(10, 6);
+const SIZE: USize2 = USize2::new(10, 6);
 
 /// Inside the footprint a position splits into its floor and the exact remainder; the rim is
 /// inclusive, and anything past it or not finite is outside.
@@ -44,7 +44,7 @@ fn within_splits_inside_the_footprint_only() {
 /// fraction, while the f64 split keeps 0.123 to f32's 7.5e-9 at that magnitude.
 #[test]
 fn the_fraction_is_split_before_it_is_narrowed() {
-    let p = SourcePos::within(DVec2::new(6000.123, 2.0), Size2us::new(8000, 4)).unwrap();
+    let p = SourcePos::within(DVec2::new(6000.123, 2.0), USize2::new(8000, 4)).unwrap();
     assert_eq!(p.cell_x, 6000);
     assert!((f64::from(p.fx) - 0.123).abs() < 1e-8, "{}", p.fx);
     let narrowed_first = 6000.123f32 - 6000.0;

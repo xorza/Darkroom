@@ -12,7 +12,7 @@ use crate::frame_store::stored_plane::StoredPlane;
 use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::flat_gain::gain_bins::GainBins;
 use crate::image::flat_gain::{FlatGain, GainGrid, GainRows};
-use common::Size2us;
+use common::USize2;
 
 /// Each channel's node grid of a frame's [`FrameGain`], wherever it lies: a source gain where the
 /// run holds it for every frame that shares it, and a frame's own in RAM on the resident tier or
@@ -28,7 +28,7 @@ pub(crate) enum StoredGain {
 /// and the bins it carries over from the sensor, which its nodes do not give back.
 #[derive(Debug)]
 pub(crate) struct MappedGain {
-    size: Size2us,
+    size: USize2,
     planes: ArrayVec<StoredPlane, 3>,
     bins: ArrayVec<GainBins, 3>,
 }
@@ -58,7 +58,7 @@ impl StoredGain {
     }
 
     /// The image size the grid covers.
-    fn size(&self) -> Size2us {
+    fn size(&self) -> USize2 {
         match self {
             Self::Shared(gain) => gain.size(),
             Self::Own(gain) => gain.size(),

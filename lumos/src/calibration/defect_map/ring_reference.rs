@@ -7,7 +7,7 @@ use crate::image::cfa::cfa_type::CfaType;
 use crate::math::plane_moments::{Plane, PlaneMoments};
 use crate::math::statistics;
 use crate::math::statistics::median_mad::MedianMad;
-use common::Size2us;
+use common::USize2;
 use glam::{DVec2, IVec2, USizeVec2};
 
 /// The ring's inner reach, in pixels: a same-color cluster of up to this many pixels across keeps
@@ -42,7 +42,7 @@ pub(crate) struct RingReference {
 /// The frame a ring is read from: its size, and its sample at each flat index.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct RingFrame<F> {
-    pub(crate) size: Size2us,
+    pub(crate) size: USize2,
     pub(crate) value: F,
 }
 

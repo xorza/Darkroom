@@ -1,5 +1,5 @@
 use super::*;
-use common::Size2us;
+use common::USize2;
 use std::cell::Cell;
 use std::sync::Arc;
 
@@ -161,7 +161,7 @@ fn resolve_separates_no_entry_from_a_reason_there_is_no_image() {
         );
     }
 
-    let size = Size2us::new(1 << 33, 1);
+    let size = USize2::new(1 << 33, 1);
     let errored = StoredContent::Error(DrawablePreviewError::EdgeTooLong { size });
     let resolved = ShownSource::resolve(Some(&errored), h.ui());
     assert!(resolved.image().is_none());
@@ -202,7 +202,7 @@ fn the_frame_that_first_draws_a_viewer_frames_it_at_the_full_size() {
     // texture at nothing, so it keeps the source's own size.
     store.publish(
         node,
-        preview_store::internals::image_value(Size2us::new(512, 256), ColorFormat::RGB_U8),
+        preview_store::internals::image_value(USize2::new(512, 256), ColorFormat::RGB_U8),
     );
     store.settle(h.ui());
 
@@ -280,7 +280,7 @@ fn a_drag_starts_from_the_fit_and_a_double_click_fits_again() {
     let mut store = PreviewStore::new(wake::internals::noop());
     store.publish(
         node,
-        preview_store::internals::image_value(Size2us::new(512, 256), ColorFormat::RGB_U8),
+        preview_store::internals::image_value(USize2::new(512, 256), ColorFormat::RGB_U8),
     );
     store.settle(h.ui());
     let theme = Theme::default();

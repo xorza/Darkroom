@@ -155,7 +155,7 @@ mod tests {
     use crate::image::flat_gain::FlatGain;
     use crate::image::flat_gain::frame_gain::FrameGain;
     use crate::image::linear_image::LinearImage;
-    use common::Size2us;
+    use common::USize2;
 
     /// A parked image leaves the page cache whole where the system evicts, its flags with its
     /// channels, and loads back as it was spilled.
@@ -163,7 +163,7 @@ mod tests {
     fn an_evicted_image_leaves_every_plane_on_the_disk() {
         let dir = TempDir::new("stored_image_evict");
         let scratch = RunScratch::create_evictable(dir.path()).unwrap();
-        let size = Size2us::new(512, 512);
+        let size = USize2::new(512, 512);
         let mut image = LinearImage::from_planar_channels(
             PlanarDesc::new(size, ChannelLayout::Rgb),
             [0.25f32, 0.5, 0.75].map(|level| vec![level; size.pixel_count()]),
@@ -191,7 +191,7 @@ mod tests {
     fn a_shared_gain_parks_as_its_handle_and_an_own_one_is_written() {
         let dir = TempDir::new("stored_image_gain");
         let scratch = RunScratch::create(dir.path()).unwrap();
-        let size = Size2us::new(9, 9);
+        let size = USize2::new(9, 9);
         let divisor = Buffer2::from_fn((9, 9), |x, y| 0.5 + 0.05 * (x + y) as f32);
         let gain = Arc::new(FlatGain::of_divisor(&divisor, &CfaType::Mono, |_| false));
         let mut image = LinearImage::from_planar_channels(

@@ -10,7 +10,7 @@ use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::io::raw;
 use crate::io::raw::black_level::{BlackLevel, DecodedRaw, FlagRule, LibrawBlack, Photosites};
-use common::Size2us;
+use common::USize2;
 use glam::USizeVec2;
 use libraw::SensorLayout;
 
@@ -57,9 +57,9 @@ impl RawSensor {
         clippy::cast_sign_loss,
         reason = "a light reads its bias less a few read-noise σ at the least, so a level is above zero"
     )]
-    fn of(field: Field, active: Size2us) -> Self {
+    fn of(field: Field, active: USize2) -> Self {
         let layout = SensorLayout {
-            raw: Size2us::new(active.width + 32, active.height + 24),
+            raw: USize2::new(active.width + 32, active.height + 24),
             active,
             margin: USizeVec2::new(16, 12),
         };
@@ -122,7 +122,7 @@ mod tests {
     /// 92 × 64.
     #[test]
     fn the_decode_gives_back_the_light_less_its_bias() {
-        let active = Size2us::new(60, 40);
+        let active = USize2::new(60, 40);
         let sensor = RawSensor::of(Field::Typical, active);
         assert_eq!(sensor.raw.len(), 92 * 64);
         let span = sensor.black.span();

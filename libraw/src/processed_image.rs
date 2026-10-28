@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 use std::ptr::NonNull;
 use std::{fmt, slice};
 
-use common::Size2us;
+use common::USize2;
 
 use crate::error::LibrawError;
 use crate::libraw::Libraw;
@@ -21,7 +21,7 @@ pub struct ProcessedImage<'a> {
 #[derive(Debug)]
 pub struct ProcessedSamples<'a> {
     pub samples: &'a [u16],
-    pub size: Size2us,
+    pub size: USize2,
     /// The colors each pixel holds, interleaved.
     pub colors: usize,
 }
@@ -67,7 +67,7 @@ impl ProcessedImage<'_> {
         let samples = unsafe { slice::from_raw_parts(data, len) };
         Ok(ProcessedSamples {
             samples,
-            size: Size2us::new(width, height),
+            size: USize2::new(width, height),
             colors,
         })
     }

@@ -16,7 +16,7 @@ use crate::image::metadata::sample_domain::{Pedestal, SampleDomain, ScaleOrigin}
 use crate::internals::cfa::make_cfa;
 use crate::internals::test_rng::TestRng;
 use crate::noise::ccd_noise::CcdNoise;
-use common::Size2us;
+use common::USize2;
 use glam::USizeVec2;
 
 const SEED: u64 = 7;
@@ -28,7 +28,7 @@ const SEED: u64 = 7;
 /// 1000 ADU: 2000.
 #[test]
 fn a_mosaic_has_a_sky_per_color() {
-    let size = Size2us::new(8, 8);
+    let size = USize2::new(8, 8);
     let cfa = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
     let pixels = (0..size.pixel_count())
         .map(|idx| match cfa.slot_at(USizeVec2::new(idx % 8, idx / 8)) {
@@ -78,7 +78,7 @@ fn a_mosaic_has_a_sky_per_color() {
 #[test]
 fn a_flat_divided_frame_splits_its_noise_by_the_flat_gain() {
     let gain = |x: usize| 1.0 + 2.0 * x as f64 / 511.0;
-    let frame = |size: Size2us, read: f64, sky: f64| {
+    let frame = |size: USize2, read: f64, sky: f64| {
         let mut rng = TestRng::new(SEED);
         let pixels: Vec<f32> = (0..size.pixel_count())
             .map(|idx| {
@@ -106,7 +106,7 @@ fn a_flat_divided_frame_splits_its_noise_by_the_flat_gain() {
                 );
             }
         };
-        let size = Size2us::new(512, 256);
+        let size = USize2::new(512, 256);
         let (pixels, divisor) = frame(size, read, sky);
         let mut mono =
             LinearImage::from_interleaved(PlanarDesc::new(size, ChannelLayout::Mono), pixels);
@@ -116,7 +116,7 @@ fn a_flat_divided_frame_splits_its_noise_by_the_flat_gain() {
             |_| false,
         )))));
         check(FrameStats::measure(&mono), 0.06, 0.06);
-        let size = Size2us::new(512, 512);
+        let size = USize2::new(512, 512);
         let (pixels, divisor) = frame(size, read, sky);
         let mut mosaic = make_cfa(size, pixels, cfa);
         mosaic.set_flat_gain(Some(FrameGain::Shared(Arc::new(FlatGain::of_divisor(

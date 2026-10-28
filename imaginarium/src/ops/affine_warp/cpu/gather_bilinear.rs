@@ -2,7 +2,7 @@
 //! vector, one channel a vector: each lane finds its position and taps as the scalar reference
 //! does, and gathers them.
 
-use common::Size2us;
+use common::USize2;
 use simd::{F32_LANES, F32x8, I32x8, Isa, Kernel, Mask, Mask8, U8_LANES};
 
 use crate::color::sample::Sample;
@@ -283,7 +283,7 @@ struct RowMap<S: Isa> {
 
 impl<S: Isa> RowMap<S> {
     #[inline(always)]
-    fn new(isa: S, size: Size2us, map: SourceMap, y: usize) -> Self {
+    fn new(isa: S, size: USize2, map: SourceMap, y: usize) -> Self {
         let py = y as f32 + 0.5;
         let (width, height) = (size.width as f32, size.height as f32);
         Self {

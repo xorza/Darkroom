@@ -31,7 +31,7 @@
 //!   another; [`PerWorker`] is the scratch such a body takes.
 //!
 //! [`Id`], [`FloatExt`] and [`is_debug`] stand on their own, as do [`Buffer2`], the row-major 2D
-//! grid, and its geometry: [`Size2us`] and [`Rect2us`], with points as `glam`'s `USizeVec2`.
+//! grid, and its geometry: [`USize2`] and [`USizeRect2`], with points as `glam`'s `USizeVec2`.
 //! `glam` is re-exported whole, as those signatures name its types.
 //! `TempFile` and the `internals` module are test scaffolding, gated behind
 //! the `internals` feature so they never enter a release build, as is `bench`, the policy every
@@ -72,9 +72,9 @@ mod id;
 mod introspect;
 #[expect(unsafe_code, reason = "memory maps and the OS calls behind them")]
 mod platform;
-mod rect2us;
 mod serde;
-mod size2us;
+mod usize2;
+mod usize_rect2;
 
 pub use bg_runtime::BgRuntime;
 pub use buffer2::Buffer2;
@@ -101,11 +101,11 @@ pub use introspect::{
 pub use par::per_worker::PerWorker;
 #[cfg(feature = "internals")]
 pub use par::worker_pool::WorkerPool;
-pub use rect2us::Rect2us;
 pub use serde::hex_bytes;
 pub use serde::serde_format::SerdeFormat;
 pub use serde::{DeserializeError, SerializeError};
-pub use size2us::Size2us;
+pub use usize_rect2::USizeRect2;
+pub use usize2::USize2;
 
 /// Whether this build has debug assertions on — the one switch every
 /// debug-only self-check in the workspace is gated on, so those checks turn

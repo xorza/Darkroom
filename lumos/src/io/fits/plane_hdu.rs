@@ -223,7 +223,7 @@ mod tests {
     use crate::image::flags::pixel_flags::PixelFlags;
     use crate::image::flags::quality_flags::QualityFlags;
     use crate::io::fits::plane_hdu::{FlagBytes, FloatPlanes, NoDataMask, PlaneHdu, PlaneSource};
-    use common::Size2us;
+    use common::USize2;
 
     /// The file `hdu` writes in chunks of 8 bytes — a row of `f32` samples of a 3-wide plane at
     /// a time, two rows of bytes — which must be the file fits-well writes whole of `image`.
@@ -244,7 +244,7 @@ mod tests {
     /// saturation and drop the repair at the null; the mask is 1 at pixel 4 in both slices.
     #[test]
     fn every_source_streams_the_image_fits_well_writes_whole() {
-        let size = Size2us::new(3, 2);
+        let size = USize2::new(3, 2);
         let null = QualityFlags::NO_DATA.union(QualityFlags::REPAIRED);
         let flags = PixelFlags::from_fn(size, |idx| match idx {
             1 => QualityFlags::SATURATED,

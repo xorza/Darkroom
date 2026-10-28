@@ -12,7 +12,7 @@ use crate::star_detection::deblend::internals::{
 use crate::star_detection::deblend::local_maxima::LocalMaximaParams;
 use crate::star_detection::deblend::region::Region;
 use crate::star_detection::star_detection_config::extraction_config::{Deblend, ExtractionConfig};
-use common::Size2us;
+use common::USize2;
 
 /// [`deblend_local_maxima`] at the default config's separation and relative height, into a fresh
 /// list.
@@ -41,7 +41,7 @@ fn local_vs_multi_threshold_single_star() {
         labels,
         data,
     } = make_test_component(
-        Size2us::new(100, 100),
+        USize2::new(100, 100),
         &[SyntheticStar::new(
             Vec2::new(50.0, 50.0),
             1.0,
@@ -91,7 +91,7 @@ fn iter_pixels_count() {
         labels,
         data,
     } = make_test_component(
-        Size2us::new(100, 100),
+        USize2::new(100, 100),
         &[SyntheticStar::new(
             Vec2::new(50.0, 50.0),
             1.0,

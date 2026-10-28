@@ -1,4 +1,4 @@
-use common::Size2us;
+use common::USize2;
 use simd::IsaTier;
 use strum::IntoEnumIterator;
 
@@ -63,7 +63,7 @@ fn blend_mode_formulas() {
     ];
     let pixel = |value: f32| {
         InterleavedImage::new_with_data(
-            InterleavedDesc::new(Size2us::new(1, 1), ColorFormat::MONO_F32),
+            InterleavedDesc::new(USize2::new(1, 1), ColorFormat::MONO_F32),
             value.to_ne_bytes().to_vec(),
         )
         .unwrap()
@@ -102,7 +102,7 @@ fn blending_a_value_over_itself_keeps_it() {
         ),
     ] {
         let image = InterleavedImage::new_with_data(
-            InterleavedDesc::new(Size2us::new(width, 1), format),
+            InterleavedDesc::new(USize2::new(width, 1), format),
             data,
         )
         .unwrap();
@@ -121,8 +121,8 @@ fn blending_a_value_over_itself_keeps_it() {
 #[test]
 fn alpha_zero_returns_dst_and_alpha_one_returns_src() {
     for format in ColorFormat::ALL {
-        let src = create_test_image(format, Size2us::new(8, 4), 0);
-        let dst = create_test_image(format, Size2us::new(8, 4), 100);
+        let src = create_test_image(format, USize2::new(8, 4), 0);
+        let dst = create_test_image(format, USize2::new(8, 4), 100);
         for (alpha, expected) in [(0.0, &dst), (1.0, &src)] {
             let output = blend(Blend::new(BlendMode::Normal, alpha), &src, &dst);
             assert!(
@@ -148,8 +148,8 @@ fn every_tier_matches_the_scalar_reference() {
     for tier in IsaTier::supported() {
         for format in ColorFormat::ALL {
             for width in [1, 3, 17, 64] {
-                let src = create_test_image(format, Size2us::new(width, 3), 0);
-                let mut dst = create_test_image(format, Size2us::new(width, 3), 100);
+                let src = create_test_image(format, USize2::new(width, 3), 0);
+                let mut dst = create_test_image(format, USize2::new(width, 3), 100);
                 if format.sample_type == SampleType::F32 {
                     let specials = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -0.5, 1.5, -0.0];
                     let samples: &mut [f32] = bytemuck::cast_slice_mut(dst.bytes_mut());

@@ -4,14 +4,14 @@ use crate::image::flags::pixel_flags::PixelFlags;
 use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::rgb::Rgb;
 use crate::math::statistics::subsample::{MAX_STATISTIC_SAMPLES, Subsample};
-use common::Size2us;
+use common::USize2;
 
 /// An image's combined intensity, read a pixel at a time from its channels: the channel itself for
 /// a mono image, [`Rgb::intensity`] of the three for RGB. Bit for bit the plane it replaces,
 /// with no plane made.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Intensity<'a> {
-    size: Size2us,
+    size: USize2,
     channels: Channels<'a>,
     /// The flags of the image the channels are, which name the pixels that hold a fill.
     flags: Option<&'a PixelFlags>,
@@ -26,7 +26,7 @@ enum Channels<'a> {
 
 impl<'a> Intensity<'a> {
     /// The intensity of a mono image of `size`: its one channel.
-    pub(crate) fn mono(size: Size2us, pixels: &'a [f32]) -> Self {
+    pub(crate) fn mono(size: USize2, pixels: &'a [f32]) -> Self {
         debug_assert_eq!(pixels.len(), size.pixel_count());
         Self {
             size,
@@ -36,7 +36,7 @@ impl<'a> Intensity<'a> {
     }
 
     /// The intensity of an RGB image of `size`: the mean of its three channels.
-    pub(crate) fn rgb(size: Size2us, [r, g, b]: [&'a [f32]; 3]) -> Self {
+    pub(crate) fn rgb(size: USize2, [r, g, b]: [&'a [f32]; 3]) -> Self {
         debug_assert!(
             [r, g, b]
                 .iter()
@@ -55,7 +55,7 @@ impl<'a> Intensity<'a> {
         Self { flags, ..self }
     }
 
-    pub(crate) const fn size(&self) -> Size2us {
+    pub(crate) const fn size(&self) -> USize2 {
         self.size
     }
 

@@ -2,7 +2,7 @@ use std::path::Path;
 use std::{array, slice};
 
 use arrayvec::ArrayVec;
-use common::{Buffer2, Size2us, par};
+use common::{Buffer2, USize2, par};
 use imaginarium::{InterleavedImage, PlanarDesc, PlanarImage};
 use rayon::prelude::*;
 
@@ -80,7 +80,7 @@ impl LinearImage {
         Self::from(PlanarImage::from_planar_channels(desc, planes))
     }
 
-    pub fn size(&self) -> Size2us {
+    pub fn size(&self) -> USize2 {
         self.desc().size()
     }
 
@@ -467,14 +467,14 @@ mod tests {
     use crate::image::flat_gain::frame_gain::FrameGain;
     use crate::image::linear_image::{LinearImage, LinearParts};
     use crate::internals::images::{mono_image, rgb_image};
-    use common::Size2us;
+    use common::USize2;
 
     /// A 2×1 RGB image holds 6 `f32` samples, 24 bytes; its flag plane adds a byte a pixel, 2; a
     /// gain it holds alone adds its grid, 2 nodes × 3 channels × 4 bytes = 24; a shared one adds
     /// nothing, as its owner counts it.
     #[test]
     fn ram_bytes_counts_the_planes_the_flags_and_an_own_gain() {
-        let size = Size2us::new(2, 1);
+        let size = USize2::new(2, 1);
         let mut image = rgb_image(size, [vec![0.1, 0.4], vec![0.2, 0.5], vec![0.3, 0.6]]);
         assert_eq!(image.ram_bytes(), 24);
         image.set_flags(PixelFlags::from_bytes(Buffer2::new((2, 1), vec![1, 0])));
@@ -499,7 +499,7 @@ mod tests {
     /// and the metadata, the flags and the gain come back as they went in.
     #[test]
     fn parts_round_trip_without_a_copy() {
-        let size = Size2us::new(2, 1);
+        let size = USize2::new(2, 1);
         let mut image = mono_image(size, vec![0.25, 0.5]);
         image.metadata.header.object = Some("M31".to_owned());
         image.set_flags(PixelFlags::from_bytes(Buffer2::new((2, 1), vec![0, 5])));
@@ -524,7 +524,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "flags for another geometry")]
     fn parts_refuse_flags_of_another_size() {
-        let mut parts = LinearParts::from(mono_image(Size2us::new(2, 1), vec![0.25, 0.5]));
+        let mut parts = LinearParts::from(mono_image(USize2::new(2, 1), vec![0.25, 0.5]));
         parts.flags = PixelFlags::from_bytes(Buffer2::new((3, 1), vec![0, 5, 0]));
         let _ = LinearImage::from(parts);
     }
@@ -533,7 +533,7 @@ mod tests {
     fn map_rgb_maps_every_channel_of_a_pixel_and_skips_mono() {
         // 2x1 RGB: pixels (0.1,0.2,0.3) and (0.4,0.5,0.6).
         let mut image = rgb_image(
-            Size2us::new(2, 1),
+            USize2::new(2, 1),
             [vec![0.1, 0.4], vec![0.2, 0.5], vec![0.3, 0.6]],
         );
         image.map_rgb(|px| px.scale(2.0));
@@ -543,7 +543,7 @@ mod tests {
 
         // Mono has no cross-channel relationship for `rgb` to act on, so it is left alone
         // rather than having the closure applied to (l, l, l).
-        let mut mono = mono_image(Size2us::new(3, 1), vec![0.25, 0.5, 0.75]);
+        let mut mono = mono_image(USize2::new(3, 1), vec![0.25, 0.5, 0.75]);
         mono.map_rgb(|px| px.scale(2.0));
         assert_eq!(mono.channel(0).pixels(), &[0.25, 0.5, 0.75]);
     }
@@ -554,7 +554,7 @@ mod tests {
     #[test]
     fn intensity_plane_is_channel_mean_for_rgb_and_identity_for_mono() {
         let rgb = rgb_image(
-            Size2us::new(2, 1),
+            USize2::new(2, 1),
             [vec![0.3, 0.6], vec![0.0, 0.6], vec![0.0, 0.6]],
         );
         assert_eq!(
@@ -562,7 +562,7 @@ mod tests {
             &[f32::from_bits(0x3dcc_ccce), 0.6]
         );
 
-        let l = mono_image(Size2us::new(2, 1), vec![0.2, 0.7]);
+        let l = mono_image(USize2::new(2, 1), vec![0.2, 0.7]);
         assert_eq!(l.intensity_plane().pixels(), &[0.2, 0.7]);
     }
 
@@ -570,13 +570,13 @@ mod tests {
     /// the mapped intensity itself, clamped to `[0, 1]`.
     #[test]
     fn remap_intensity_moves_pixels_with_their_hue() {
-        let mut image = rgb_image(Size2us::new(1, 1), [vec![0.2], vec![0.1], vec![0.1]]);
+        let mut image = rgb_image(USize2::new(1, 1), [vec![0.2], vec![0.1], vec![0.1]]);
         image.remap_intensity(|intensity| Buffer2::new((1, 1), vec![2.0 * intensity.at(0)]));
         assert_eq!(image.channel(0).pixels(), &[0.4]);
         assert_eq!(image.channel(1).pixels(), &[0.2]);
         assert_eq!(image.channel(2).pixels(), &[0.2]);
 
-        let mut mono = mono_image(Size2us::new(3, 1), vec![0.2, 0.5, 0.7]);
+        let mut mono = mono_image(USize2::new(3, 1), vec![0.2, 0.5, 0.7]);
         mono.remap_intensity(|_| Buffer2::new((3, 1), vec![-0.5, 0.25, 1.5]));
         assert_eq!(mono.channel(0).pixels(), &[0.0, 0.25, 1.0]);
     }

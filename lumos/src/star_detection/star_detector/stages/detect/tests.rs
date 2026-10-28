@@ -1,4 +1,4 @@
-use common::{Buffer2, Size2us};
+use common::{Buffer2, USize2};
 use glam::Vec2;
 
 use crate::internals::synthetic::bg_map;
@@ -41,7 +41,7 @@ fn extracted(labelled: LabelledPlane<'_>, config: &ExtractionConfig) -> Extracte
 }
 
 /// A flat sky noise of 0.01 over `size`.
-fn flat_sky(size: Size2us) -> SkyNoise {
+fn flat_sky(size: USize2) -> SkyNoise {
     bg_map::uniform(size, 0.0, 0.01).sky_noise()
 }
 
@@ -64,7 +64,7 @@ fn local_maxima_deblended_counts_split_components_not_extra_regions() {
         labels: label_map,
         ..
     } = make_test_component(
-        Size2us::new(48, 24),
+        USize2::new(48, 24),
         &[
             SyntheticStar::new(Vec2::new(12.0, 12.0), 1.0, StarProfile::gaussian(3.0)),
             SyntheticStar::new(Vec2::new(24.0, 12.0), 1.0, StarProfile::gaussian(3.0)),
@@ -99,7 +99,7 @@ fn local_maxima_single_peak_reports_zero_deblended() {
         labels: label_map,
         ..
     } = make_test_component(
-        Size2us::new(32, 32),
+        USize2::new(32, 32),
         &[SyntheticStar::new(
             Vec2::new(16.0, 16.0),
             1.0,
@@ -133,7 +133,7 @@ fn edge_margin_swallowing_image_yields_no_regions_without_panicking() {
             labels: label_map,
             ..
         } = make_test_component(
-            Size2us::new(32, 32),
+            USize2::new(32, 32),
             &[SyntheticStar::new(
                 Vec2::new(16.0, 16.0),
                 1.0,
@@ -177,7 +177,7 @@ struct Rectangles {
     labels: LabelMap,
 }
 
-fn rectangles(size: Size2us, rects: &[Rect]) -> Rectangles {
+fn rectangles(size: USize2, rects: &[Rect]) -> Rectangles {
     let mut residual = Buffer2::new_filled(size, 0.0f32);
     let mut labels = Buffer2::new_filled(size, 0u32);
     for (idx, rect) in rects.iter().enumerate() {
@@ -203,7 +203,7 @@ fn rectangles(size: Size2us, rects: &[Rect]) -> Rectangles {
 /// starts at it or ends at `size − margin` (boxes are half-open), and nothing beyond.
 #[test]
 fn region_filter_bounds() {
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let config = ExtractionConfig {
         min_area: 5,
         max_area: 20,
@@ -305,7 +305,7 @@ fn region_filter_bounds() {
 /// which the multi-threshold tree splits; the squares are flat and stay whole.
 #[test]
 fn detect_counts_pixels_components_and_splits() {
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let mut residual = Buffer2::new_filled(size, 0.0f32);
     for (x0, y0) in [(15, 15), (40, 15)] {
         for y in y0..y0 + 3 {

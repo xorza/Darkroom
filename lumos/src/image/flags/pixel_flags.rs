@@ -11,7 +11,7 @@ use crate::image::flags::flag_counts::FlagCounts;
 use crate::image::flags::quality_flags::QualityFlags;
 use crate::scratch_pool::{ScratchPool, Shapeless};
 use crate::unsafe_send_ptr::UnsafeSendPtr;
-use common::Size2us;
+use common::USize2;
 use glam::USizeVec2;
 
 /// Which pixels of an image carry which [`QualityFlags`].
@@ -30,7 +30,7 @@ pub struct PixelFlags {
 impl PixelFlags {
     /// The flags `flags_at` gives every pixel, by row-major index; `None` when it gives none.
     pub(crate) fn from_fn(
-        size: Size2us,
+        size: USize2,
         flags_at: impl Fn(usize) -> QualityFlags + Sync,
     ) -> Option<Self> {
         let mut bits = Buffer2::new_default(size);
@@ -83,7 +83,7 @@ impl PixelFlags {
 
     /// A `size` plane holding `flags` at `idxs` alone; `None` when there are none, so no pixel
     /// holds one.
-    pub(crate) fn at_idxs(size: Size2us, flags: QualityFlags, idxs: &[usize]) -> Option<Self> {
+    pub(crate) fn at_idxs(size: USize2, flags: QualityFlags, idxs: &[usize]) -> Option<Self> {
         if idxs.is_empty() || flags == QualityFlags::default() {
             return None;
         }
@@ -140,7 +140,7 @@ impl PixelFlags {
         counts.any().then_some(Self { bits, counts })
     }
 
-    pub const fn size(&self) -> Size2us {
+    pub const fn size(&self) -> USize2 {
         self.bits.size()
     }
 
@@ -222,7 +222,7 @@ const STRIP_WIDTH: usize = 64;
 impl DilationScratch {
     /// The bytes a dilation of a `size` image on `workers` holds here: each worker's block ORs, of
     /// a row or of a strip's columns down the whole height, whichever is larger, at any reach.
-    pub(crate) const fn heap_bytes(size: Size2us, workers: usize) -> usize {
+    pub(crate) const fn heap_bytes(size: USize2, workers: usize) -> usize {
         let strip = if size.width < STRIP_WIDTH {
             size.width
         } else {
@@ -246,7 +246,7 @@ impl DilationScratch {
 /// a strip's block ORs, not a plane's.
 fn dilate_bytes(
     bits: &mut [u8],
-    size: Size2us,
+    size: USize2,
     spec: DilationSpec,
     scratch: &DilationScratch,
     strip: usize,
@@ -279,7 +279,7 @@ fn dilate_bytes(
 #[derive(Debug)]
 struct Strip {
     plane: UnsafeSendPtr<u8>,
-    size: Size2us,
+    size: USize2,
     columns: Range<usize>,
 }
 
@@ -485,13 +485,13 @@ impl WindowParts {
 pub(crate) mod internals {
     use crate::image::flags::pixel_flags::PixelFlags;
     use crate::image::flags::quality_flags::QualityFlags;
-    use common::Size2us;
+    use common::USize2;
 
     impl PixelFlags {
         /// The pixels where any of `planes` holds a non-finite sample, flagged
         /// [`QualityFlags::NO_DATA`], or `None` when none do: the flags a FITS decode of those
         /// samples gives.
-        pub(crate) fn of_non_finite(size: Size2us, planes: &[&[f32]]) -> Option<Self> {
+        pub(crate) fn of_non_finite(size: USize2, planes: &[&[f32]]) -> Option<Self> {
             debug_assert!(
                 planes
                     .iter()
@@ -518,14 +518,14 @@ mod tests {
     };
     use crate::image::flags::quality_flags::QualityFlags;
     use crate::internals::test_rng::TestRng;
-    use common::Size2us;
+    use common::USize2;
 
     #[test]
     fn a_pixel_has_no_data_when_any_channel_is_non_finite() {
         // 3x2. Red is null at index 1, blue at index 4, and index 1 is finite in the other two —
         // the union is what the flags must hold, because a pixel missing one channel has no
         // complete measurement.
-        let size = Size2us::new(3usize, 2usize);
+        let size = USize2::new(3usize, 2usize);
         let red = [0.0, f32::NAN, 2.0, 3.0, 4.0, 5.0];
         let green = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0];
         let blue = [0.0, 1.0, 2.0, 3.0, f32::INFINITY, 5.0];
@@ -577,7 +577,7 @@ mod tests {
 
     #[test]
     fn a_wholly_null_plane_flags_every_pixel() {
-        let size = Size2us::new(3usize, 2usize);
+        let size = USize2::new(3usize, 2usize);
         let plane = [f32::NAN; 6];
         let flags = PixelFlags::of_non_finite(size, &[&plane]).unwrap();
         assert_eq!(
@@ -593,7 +593,7 @@ mod tests {
     #[test]
     fn a_dilation_holds_no_more_than_its_price() {
         for (width, height) in [(1000usize, 3usize), (200, 9), (9, 200)] {
-            let size = Size2us::new(width, height);
+            let size = USize2::new(width, height);
             let flags = PixelFlags::from_fn(size, |idx| {
                 if idx % 7 == 0 {
                     QualityFlags::SATURATED
@@ -630,7 +630,7 @@ mod tests {
     fn dilation_matches_the_brute_force_window() {
         let mut rng = TestRng::new(7);
         for (width, height) in [(1usize, 1usize), (7, 5), (13, 17), (32, 3), (70, 9)] {
-            let size = Size2us::new(width, height);
+            let size = USize2::new(width, height);
             for reach in [1usize, 2, 3, 6, 40]
                 .map(Reach::symmetric)
                 .into_iter()

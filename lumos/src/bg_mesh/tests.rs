@@ -29,7 +29,7 @@ fn make_grid_with_mask(pixels: &Buffer2<f32>, tile_size: usize, mask: &BitBuffer
 fn new_uninit_zero_dimension_panics() {
     // A zero-size image is a logic error upstream (PlanarDesc asserts > 0); fail fast
     // with a clear message instead of a bare div_ceil divide-by-zero.
-    BgMesh::new_uninit(Size2us::new(0, 100), 64);
+    BgMesh::new_uninit(USize2::new(0, 100), 64);
 }
 
 /// The grid's shape, and a flat image's statistics on it. A tile size past the image clamps to
@@ -40,19 +40,19 @@ fn new_uninit_zero_dimension_panics() {
 #[test]
 fn grid_shape_and_flat_skies() {
     for (size, tile_size, cols, rows, value) in [
-        (Size2us::new(128, 64), 32, 4, 2, 0.3f32),
-        (Size2us::new(100, 70), 32, 3, 2, 0.5),
-        (Size2us::new(100, 50), 200, 2, 1, 0.3),
-        (Size2us::new(1000, 10), 64, 100, 1, 0.5),
-        (Size2us::new(10, 1000), 64, 1, 100, 0.5),
-        (Size2us::new(10, 8), 64, 1, 1, 0.5),
-        (Size2us::new(64, 64), 32, 2, 2, -0.5),
-        (Size2us::new(64, 64), 64, 1, 1, 100.0),
+        (USize2::new(128, 64), 32, 4, 2, 0.3f32),
+        (USize2::new(100, 70), 32, 3, 2, 0.5),
+        (USize2::new(100, 50), 200, 2, 1, 0.3),
+        (USize2::new(1000, 10), 64, 100, 1, 0.5),
+        (USize2::new(10, 1000), 64, 1, 100, 0.5),
+        (USize2::new(10, 8), 64, 1, 1, 0.5),
+        (USize2::new(64, 64), 32, 2, 2, -0.5),
+        (USize2::new(64, 64), 64, 1, 1, 100.0),
     ] {
         let grid = make_grid(&Buffer2::new_filled(size, value), tile_size);
         assert_eq!(
             grid.stats.size(),
-            Size2us::new(cols, rows),
+            USize2::new(cols, rows),
             "{size:?} at {tile_size}"
         );
         for stats in grid.stats.pixels() {
@@ -98,7 +98,7 @@ fn skewed_tile_sky_sits_below_median() {
 #[test]
 fn masked_pixels_never_reach_the_statistics() {
     let mut pixels = Buffer2::from_fn((64, 64), |x, y| [[0.2f32, 0.4], [0.6, 0.8]][y / 32][x / 32]);
-    let mut mask = BitBuffer2::new_filled(Size2us::new(64, 64), false);
+    let mut mask = BitBuffer2::new_filled(USize2::new(64, 64), false);
     for y in 2..32 {
         for x in 0..32 {
             pixels[(x, y)] = 0.9;
@@ -203,32 +203,32 @@ fn clipping_rejects_outliers_from_a_sky_with_spread() {
 fn tile_centres_are_the_mean_pixel_index() {
     #[derive(Debug)]
     struct Case {
-        size: Size2us,
+        size: USize2,
         tile_size: usize,
         centers_x: &'static [f32],
         centers_y: &'static [f32],
     }
     let cases = [
         Case {
-            size: Size2us::new(128, 64),
+            size: USize2::new(128, 64),
             tile_size: 32,
             centers_x: &[15.5, 47.5, 79.5, 111.5],
             centers_y: &[15.5, 47.5],
         },
         Case {
-            size: Size2us::new(64, 100),
+            size: USize2::new(64, 100),
             tile_size: 32,
             centers_x: &[15.5, 47.5],
             centers_y: &[15.5, 47.5, 81.5],
         },
         Case {
-            size: Size2us::new(32, 32),
+            size: USize2::new(32, 32),
             tile_size: 32,
             centers_x: &[15.5],
             centers_y: &[15.5],
         },
         Case {
-            size: Size2us::new(20, 20),
+            size: USize2::new(20, 20),
             tile_size: 64,
             centers_x: &[9.5],
             centers_y: &[9.5],
@@ -293,7 +293,7 @@ fn median_filter_keeps_a_plane_and_drops_spoiled_tiles() {
 #[test]
 fn a_masked_tile_takes_its_neighbours_sky() {
     let pixels = Buffer2::from_fn((64, 32), |x, _| x as f32 / 64.0);
-    let mut mask = BitBuffer2::new_filled(Size2us::new(64, 32), false);
+    let mut mask = BitBuffer2::new_filled(USize2::new(64, 32), false);
     for y in 0..32 {
         for x in 0..32 {
             mask.set_at(USizeVec2::new(x, y), true);
@@ -303,7 +303,7 @@ fn a_masked_tile_takes_its_neighbours_sky() {
     assert_eq!(grid.stats[(0, 0)].sky, 47.5 / 64.0);
     assert_eq!(grid.stats[(1, 0)].sky, 47.5 / 64.0);
 
-    let everything = BitBuffer2::new_filled(Size2us::new(64, 32), true);
+    let everything = BitBuffer2::new_filled(USize2::new(64, 32), true);
     let grid = make_grid_with_mask(&pixels, 32, &everything);
     assert_eq!(grid.stats[(0, 0)].sky, 15.5 / 64.0);
     assert_eq!(grid.stats[(1, 0)].sky, 47.5 / 64.0);
@@ -311,7 +311,7 @@ fn a_masked_tile_takes_its_neighbours_sky() {
     // Four tiles of the ramp x/128, the first three masked: each searches outward ring by ring
     // past the bad ones, and all three take tile 3's 111.5/128.
     let wide = Buffer2::from_fn((128, 32), |x, _| x as f32 / 128.0);
-    let mut first_three = BitBuffer2::new_filled(Size2us::new(128, 32), false);
+    let mut first_three = BitBuffer2::new_filled(USize2::new(128, 32), false);
     for y in 0..32 {
         for x in 0..96 {
             first_three.set_at(USizeVec2::new(x, y), true);

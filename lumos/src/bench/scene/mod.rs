@@ -22,10 +22,10 @@ use crate::internals::synthetic::observe::{Observation, SimFrame, render};
 use crate::internals::synthetic::scene::{BgField, Placement, Scatter, Scene};
 use crate::internals::test_rng::TestRng;
 use crate::registration::transform::Transform;
-use common::Size2us;
+use common::USize2;
 
 /// The standard frame: 6000 × 4000, an APS-C camera's 24 MP.
-pub(crate) const FRAME: Size2us = Size2us::new(6000, 4000);
+pub(crate) const FRAME: USize2 = USize2::new(6000, 4000);
 
 /// A daylight white balance, red and blue gains over green's, in `camera_white_balance`'s order.
 const WHITE_BALANCE: [f32; 4] = [2.13, 1.0, 1.71, 1.0];
@@ -123,7 +123,7 @@ impl Field {
     }
 
     /// The true sky of the field over a frame of `size`.
-    pub(crate) fn scene(self, size: Size2us) -> Scene {
+    pub(crate) fn scene(self, size: USize2) -> Scene {
         let (stars, seed) = (at_density(self.stars(), size), self.seed());
         let placement = match self {
             Self::Sparse | Self::Typical => Placement::Uniform { margin: 16.0 },
@@ -142,14 +142,14 @@ impl Field {
     }
 
     /// The field calibrated, on a mono sensor of `size`.
-    pub(crate) fn render(self, size: Size2us) -> SimFrame {
+    pub(crate) fn render(self, size: USize2) -> SimFrame {
         self.expose(Sensor::calibrated(size, CfaType::Mono), Shot::Field)
     }
 
     /// A `side` × `side` tile of the field that holds a star, cut from a calibrated mono frame of
     /// 4 × 4 such tiles.
     pub(crate) fn tile(self, side: usize) -> Buffer2<f32> {
-        let frame = self.render(Size2us::new(4 * side, 4 * side));
+        let frame = self.render(USize2::new(4 * side, 4 * side));
         let star = frame
             .truth
             .sources
@@ -167,14 +167,14 @@ impl Field {
     /// warp leaves it: aligned to the field's frame. From exposure to exposure the sky brightens
     /// or fades by up to 8% and the transparency falls by up to 9%, as over a night, and the noise
     /// is the exposure's own.
-    pub(crate) fn aligned(self, size: Size2us, idx: usize) -> SimFrame {
+    pub(crate) fn aligned(self, size: USize2, idx: usize) -> SimFrame {
         let shot = Shot::Sequence { idx, aligned: true };
         self.expose(Sensor::calibrated(size, CfaType::Mono), shot)
     }
 
     /// Exposure `idx` of the sequence [`Self::aligned`] gives, as the sensor saw it: placed by
     /// [`dither`].
-    pub(crate) fn exposure(self, size: Size2us, idx: usize) -> SimFrame {
+    pub(crate) fn exposure(self, size: USize2, idx: usize) -> SimFrame {
         let shot = Shot::Sequence {
             idx,
             aligned: false,
@@ -186,7 +186,7 @@ impl Field {
     /// 30 lights of a color sensor: each star its color, from red to blue, on a light-polluted
     /// sky of 1.2, 1 and 0.8 times the field's in red, green and blue, with a thirtieth of one
     /// light's noise variance and no hot pixels, which the stack rejects.
-    pub(crate) fn stacked_rgb(self, size: Size2us) -> LinearImage {
+    pub(crate) fn stacked_rgb(self, size: USize2) -> LinearImage {
         let mut camera = Sensor::calibrated(size, CfaType::Mono).camera();
         camera.full_well_e *= STACKED_LIGHTS as f32;
         camera.read_noise_e *= (STACKED_LIGHTS as f32).sqrt();
@@ -219,14 +219,14 @@ impl Field {
 
     /// The field calibrated, on a sensor of `size` behind `cfa_type`'s filters, with cosmic-ray
     /// hits.
-    pub(crate) fn mosaic(self, size: Size2us, cfa_type: CfaType) -> CfaImage {
+    pub(crate) fn mosaic(self, size: USize2, cfa_type: CfaType) -> CfaImage {
         self.hit(Sensor::calibrated(size, cfa_type), Shot::Field)
     }
 
     /// Exposure `idx` of the sequence [`Self::exposure`] gives, calibrated, on a sensor of `size`
     /// behind `cfa_type`'s filters, with its own cosmic-ray hits: a light of a dithered set as
     /// calibration leaves it, for a drizzle.
-    pub(crate) fn mosaic_exposure(self, size: Size2us, cfa_type: CfaType, idx: usize) -> CfaImage {
+    pub(crate) fn mosaic_exposure(self, size: USize2, cfa_type: CfaType, idx: usize) -> CfaImage {
         let shot = Shot::Sequence {
             idx,
             aligned: false,
@@ -236,13 +236,13 @@ impl Field {
 
     /// The field as a sensor of `size` behind `cfa_type`'s filters reads it, with cosmic-ray hits:
     /// what [`masters`] calibrate.
-    pub(crate) fn light(self, size: Size2us, cfa_type: CfaType) -> CfaImage {
+    pub(crate) fn light(self, size: USize2, cfa_type: CfaType) -> CfaImage {
         self.hit(Sensor::raw(size, cfa_type), Shot::Field)
     }
 
     /// Exposure `idx` of the sequence [`Self::exposure`] gives, as a sensor of `size` behind
     /// `cfa_type`'s filters reads it, with its own cosmic-ray hits.
-    pub(crate) fn light_exposure(self, size: Size2us, cfa_type: CfaType, idx: usize) -> CfaImage {
+    pub(crate) fn light_exposure(self, size: USize2, cfa_type: CfaType, idx: usize) -> CfaImage {
         let shot = Shot::Sequence {
             idx,
             aligned: false,
@@ -302,14 +302,14 @@ enum Shot {
 
 /// The bias, dark and flat masters of the sensor a light of `size` behind `cfa_type` is taken on,
 /// one exposure each: how deep a master is changes none of the work that calibrates with it.
-pub(crate) fn masters(size: Size2us, cfa_type: CfaType) -> CalibrationSet<Option<CfaImage>> {
+pub(crate) fn masters(size: USize2, cfa_type: CfaType) -> CalibrationSet<Option<CfaImage>> {
     master_frames(size, cfa_type, 0)
 }
 
 /// Frame `idx` of each of the bias, dark and flat sequences [`masters`] are stacked from, each
 /// with its own noise.
 pub(crate) fn master_frames(
-    size: Size2us,
+    size: USize2,
     cfa_type: CfaType,
     idx: usize,
 ) -> CalibrationSet<Option<CfaImage>> {
@@ -341,7 +341,7 @@ pub(crate) fn master_frames(
 /// sensor's. Exposure 0 is the reference; every other is dithered by up to 5 px each way and
 /// turned by up to 0.2° about the frame's centre, along the golden-ratio sequence that spreads a
 /// dither pattern evenly.
-pub(crate) fn dither(size: Size2us, idx: usize) -> Transform {
+pub(crate) fn dither(size: USize2, idx: usize) -> Transform {
     if idx == 0 {
         return Transform::identity();
     }
@@ -382,14 +382,14 @@ enum Readout {
 /// The sensor of `size` behind `cfa_type`'s filters, as `readout` shows it.
 #[derive(Debug, Clone, Copy)]
 struct Sensor {
-    size: Size2us,
+    size: USize2,
     cfa_type: CfaType,
     readout: Readout,
 }
 
 impl Sensor {
     /// The sensor as calibration leaves a light.
-    const fn calibrated(size: Size2us, cfa_type: CfaType) -> Self {
+    const fn calibrated(size: USize2, cfa_type: CfaType) -> Self {
         Self {
             size,
             cfa_type,
@@ -398,7 +398,7 @@ impl Sensor {
     }
 
     /// The sensor as it reads a light.
-    const fn raw(size: Size2us, cfa_type: CfaType) -> Self {
+    const fn raw(size: USize2, cfa_type: CfaType) -> Self {
         Self {
             size,
             cfa_type,
@@ -433,7 +433,7 @@ impl Sensor {
 }
 
 /// The sensor's hot and dead pixels on a frame of `size`, the same on every frame of that size.
-fn defects(size: Size2us) -> SensorDefects {
+fn defects(size: USize2) -> SensorDefects {
     let mut rng = TestRng::new(SENSOR_SEED);
     let pos = |rng: &mut TestRng| {
         let x = (rng.next_u64() % size.width as u64) as usize;
@@ -464,7 +464,7 @@ fn mosaic(frame: SimFrame, cfa_type: CfaType) -> CfaImage {
 
 /// `count` of something the standard frame holds, at the same density on a frame of `size`, and
 /// at least one of it when the frame holds any.
-const fn at_density(count: usize, size: Size2us) -> usize {
+const fn at_density(count: usize, size: USize2) -> usize {
     (count * size.pixel_count()).div_ceil(FRAME.pixel_count())
 }
 

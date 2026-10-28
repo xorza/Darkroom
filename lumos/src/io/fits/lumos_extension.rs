@@ -10,7 +10,7 @@ use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 use crate::io::fits::flags_extension::{FLAGS_EXTNAME, FLAGS_FORMAT, FLAGS_VERSION};
 use crate::io::fits::gain_extension::{GAIN_EXTNAME, GAIN_FORMAT, GAIN_VERSION};
 use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD};
-use common::Size2us;
+use common::USize2;
 
 /// The `LUMOSFMT` and `LUMOSVER` of a stack product's quality planes.
 pub(crate) const QUALITY_FORMAT: &str = "QUALPLAN";
@@ -200,7 +200,7 @@ impl LumosExtension {
 /// The image an extension describes, as its check reads it.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct DescribedImage {
-    pub(crate) size: Size2us,
+    pub(crate) size: USize2,
     pub(crate) channels: usize,
     /// What a sample of the image is worth in the source's units: its domain's scale.
     pub(crate) scale: Option<f64>,

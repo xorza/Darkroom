@@ -4,7 +4,7 @@ use common::Buffer2;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::bit_buffer2::dilation::dilate_mask;
-use common::Size2us;
+use common::USize2;
 use glam::USizeVec2;
 
 /// `mask` dilated by `radius` into `dilated`, through the in-place kernel.
@@ -35,7 +35,7 @@ fn naive_mismatch(mask: &BitBuffer2, dilated: &BitBuffer2, radius: usize) -> Opt
 #[test]
 fn dilate_mask_empty() {
     let mask = BitBuffer2::from_plane(&Buffer2::new((3, 3), [false; 9].to_vec()));
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(3, 3), false);
+    let mut dilated = BitBuffer2::new_filled(USize2::new(3, 3), false);
     dilate_into(&mask, 1, &mut dilated);
     assert!(dilated.iter().all(|x| !x));
 }
@@ -46,7 +46,7 @@ fn dilate_mask_single_pixel_radius_0() {
     let mut mask_data = Buffer2::new_default((3, 3));
     mask_data[4] = true; // center
     let mask = BitBuffer2::from_plane(&mask_data);
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(3, 3), false);
+    let mut dilated = BitBuffer2::new_filled(USize2::new(3, 3), false);
     dilate_into(&mask, 0, &mut dilated);
 
     assert_eq!(dilated.iter().filter(|x| *x).count(), 1);
@@ -92,9 +92,9 @@ fn a_pixel_dilates_into_a_disk() {
              ....",
         ),
     ] {
-        let mut mask = BitBuffer2::new_filled(Size2us::new(size, size), false);
+        let mut mask = BitBuffer2::new_filled(USize2::new(size, size), false);
         mask.set_at(USizeVec2::new(seed.0, seed.1), true);
-        let mut dilated = BitBuffer2::new_filled(Size2us::new(size, size), false);
+        let mut dilated = BitBuffer2::new_filled(USize2::new(size, size), false);
         dilate_into(&mask, radius, &mut dilated);
         for (y, row) in picture.lines().enumerate() {
             for (x, cell) in row.trim().chars().enumerate() {
@@ -116,7 +116,7 @@ fn dilate_mask_preserves_original_pixels() {
     mask_data[12] = true; // center
     mask_data[24] = true;
     let mask = BitBuffer2::from_plane(&mask_data);
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(5, 5), false);
+    let mut dilated = BitBuffer2::new_filled(USize2::new(5, 5), false);
     dilate_into(&mask, 1, &mut dilated);
 
     // All original pixels must be present
@@ -130,7 +130,7 @@ fn dilate_mask_preserves_original_pixels() {
 fn dilate_mask_radius_above_63_panics() {
     // Radius > 63 is out of contract (production caps dilation at 50).
     let mask = BitBuffer2::from_plane(&Buffer2::new((200, 1), [false; 200].to_vec()));
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(200, 1), false);
+    let mut dilated = BitBuffer2::new_filled(USize2::new(200, 1), false);
     dilate_into(&mask, 64, &mut dilated);
 }
 
@@ -154,7 +154,7 @@ fn dilation_matches_the_brute_force_reference() {
     #[derive(Debug)]
     struct Case {
         name: &'static str,
-        size: Size2us,
+        size: USize2,
         seed: Seed,
         radii: &'static [usize],
     }
@@ -163,115 +163,115 @@ fn dilation_matches_the_brute_force_reference() {
     let cases = [
         Case {
             name: "single centre",
-            size: Size2us::new(9, 9),
+            size: USize2::new(9, 9),
             seed: Seed::Pixels(&[(4, 4)]),
             radii: &[0, 1, 2, 3, 8, 20],
         },
         Case {
             name: "corner",
-            size: Size2us::new(8, 8),
+            size: USize2::new(8, 8),
             seed: Seed::Pixels(&[(0, 0)]),
             radii: &[1, 2, 7],
         },
         Case {
             name: "all corners",
-            size: Size2us::new(8, 8),
+            size: USize2::new(8, 8),
             seed: Seed::Pixels(&[(0, 0), (7, 0), (0, 7), (7, 7)]),
             radii: &[1, 2, 4],
         },
         Case {
             name: "edge midpoints",
-            size: Size2us::new(9, 9),
+            size: USize2::new(9, 9),
             seed: Seed::Pixels(&[(4, 0), (0, 4), (8, 4), (4, 8)]),
             radii: &[1, 3],
         },
         Case {
             name: "nearby pair merges",
-            size: Size2us::new(10, 4),
+            size: USize2::new(10, 4),
             seed: Seed::Pixels(&[(2, 2), (5, 2)]),
             radii: &[1, 2, 3],
         },
         Case {
             name: "width 64 exact word",
-            size: Size2us::new(64, 4),
+            size: USize2::new(64, 4),
             seed: Seed::Pixels(&[(0, 1), (63, 1), (31, 2)]),
             radii: &[0, 1, 2],
         },
         Case {
             name: "width 65 crosses word",
-            size: Size2us::new(65, 4),
+            size: USize2::new(65, 4),
             seed: Seed::Pixels(&[(63, 1), (64, 2)]),
             radii: &[0, 1, 2],
         },
         Case {
             name: "width 128 two words",
-            size: Size2us::new(128, 3),
+            size: USize2::new(128, 3),
             seed: Seed::Pixels(&[(63, 1), (64, 1), (127, 0)]),
             radii: &[1, 2],
         },
         Case {
             name: "wide sparse",
-            size: Size2us::new(200, 5),
+            size: USize2::new(200, 5),
             seed: Seed::Pixels(&[(0, 0), (99, 2), (199, 4)]),
             radii: &[1, 3, 5],
         },
         Case {
             name: "smears of every doubling remainder across word edges",
-            size: Size2us::new(200, 7),
+            size: USize2::new(200, 7),
             seed: Seed::Pixels(&[(62, 3), (65, 0), (127, 6), (128, 3), (191, 1)]),
             radii: &[4, 5, 6, 7, 8, 31, 32, 33, 50],
         },
         Case {
             name: "max radius 63",
-            size: Size2us::new(70, 3),
+            size: USize2::new(70, 3),
             seed: Seed::Pixels(&[(35, 1)]),
             radii: &[63],
         },
         Case {
             name: "single column",
-            size: Size2us::new(1, 10),
+            size: USize2::new(1, 10),
             seed: Seed::Pixels(&[(0, 5)]),
             radii: &[0, 1, 3],
         },
         Case {
             name: "single row",
-            size: Size2us::new(10, 1),
+            size: USize2::new(10, 1),
             seed: Seed::Pixels(&[(5, 0)]),
             radii: &[0, 1, 3],
         },
         Case {
             name: "first and last row",
-            size: Size2us::new(12, 6),
+            size: USize2::new(12, 6),
             seed: Seed::Pixels(&[(3, 0), (8, 5)]),
             radii: &[1, 2],
         },
         Case {
             name: "vertical word boundary",
-            size: Size2us::new(70, 8),
+            size: USize2::new(70, 8),
             seed: Seed::Pixels(&[(64, 0), (64, 7)]),
             radii: &[1, 2],
         },
         Case {
             name: "empty",
-            size: Size2us::new(16, 16),
+            size: USize2::new(16, 16),
             seed: Seed::Pixels(&[]),
             radii: &[0, 1, 5],
         },
         Case {
             name: "all set",
-            size: Size2us::new(20, 6),
+            size: USize2::new(20, 6),
             seed: Seed::Every(1),
             radii: &[0, 1, 4],
         },
         Case {
             name: "checkerboard",
-            size: Size2us::new(16, 16),
+            size: USize2::new(16, 16),
             seed: Seed::Every(2),
             radii: &[0, 1, 2],
         },
         Case {
             name: "sparse across words",
-            size: Size2us::new(130, 4),
+            size: USize2::new(130, 4),
             seed: Seed::Every(7),
             radii: &[1, 3],
         },

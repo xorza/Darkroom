@@ -4,7 +4,7 @@ use common::Buffer2;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::star_detection::threshold_mask::threshold_params::ThresholdParams;
-use common::Size2us;
+use common::USize2;
 
 /// The mask of `filtered` at `sigma` over `noise`, at the shared test floor.
 fn threshold_mask(filtered: &Buffer2<f32>, noise: &Buffer2<f32>, sigma: f32) -> BitBuffer2 {
@@ -19,7 +19,7 @@ struct ThresholdMaskCase {
     pixels: &'static [f32],
     noise: &'static [f32],
     sigma: f32,
-    size: Size2us,
+    size: USize2,
     expected: &'static [bool],
 }
 
@@ -42,7 +42,7 @@ fn threshold_mask_truth_table() {
             pixels: &[50.0; 4],
             noise: &[10.0; 4],
             sigma: 3.0,
-            size: Size2us::new(4, 1),
+            size: USize2::new(4, 1),
             expected: &[true; 4],
         },
         ThresholdMaskCase {
@@ -50,7 +50,7 @@ fn threshold_mask_truth_table() {
             pixels: &[0.2, 0.4, 0.6, 0.8],
             noise: &[0.1; 4],
             sigma: 3.0,
-            size: Size2us::new(2, 2),
+            size: USize2::new(2, 2),
             expected: &[false, true, true, true],
         },
         ThresholdMaskCase {
@@ -58,7 +58,7 @@ fn threshold_mask_truth_table() {
             pixels: &[0.5; 4],
             noise: &[0.1, 0.2, 0.3, 0.05],
             sigma: 3.0,
-            size: Size2us::new(2, 2),
+            size: USize2::new(2, 2),
             expected: &[true, false, false, true],
         },
         ThresholdMaskCase {
@@ -66,7 +66,7 @@ fn threshold_mask_truth_table() {
             pixels: &[-0.5, 0.5, -0.1, 0.4],
             noise: &[0.1; 4],
             sigma: 3.0,
-            size: Size2us::new(2, 2),
+            size: USize2::new(2, 2),
             expected: &[false, true, false, true],
         },
         ThresholdMaskCase {
@@ -74,7 +74,7 @@ fn threshold_mask_truth_table() {
             pixels: &[0.1, -0.1],
             noise: &[0.0; 2],
             sigma: 3.0,
-            size: Size2us::new(2, 1),
+            size: USize2::new(2, 1),
             expected: &[true, false],
         },
         ThresholdMaskCase {
@@ -82,7 +82,7 @@ fn threshold_mask_truth_table() {
             pixels: &[0.1, -0.1],
             noise: &[-0.1; 2],
             sigma: 3.0,
-            size: Size2us::new(2, 1),
+            size: USize2::new(2, 1),
             expected: &[true, false],
         },
         ThresholdMaskCase {
@@ -90,7 +90,7 @@ fn threshold_mask_truth_table() {
             pixels: &[10.0; 4],
             noise: &[10.0; 4],
             sigma: 3.0,
-            size: Size2us::new(2, 2),
+            size: USize2::new(2, 2),
             expected: &[false; 4],
         },
         ThresholdMaskCase {
@@ -98,7 +98,7 @@ fn threshold_mask_truth_table() {
             pixels: &[1.0; 2],
             noise: &[0.1, 0.5],
             sigma: 3.0,
-            size: Size2us::new(2, 1),
+            size: USize2::new(2, 1),
             expected: &[true, false],
         },
         ThresholdMaskCase {
@@ -106,7 +106,7 @@ fn threshold_mask_truth_table() {
             pixels: &[1.0],
             noise: &[0.1],
             sigma: 3.0,
-            size: Size2us::new(1, 1),
+            size: USize2::new(1, 1),
             expected: &[true],
         },
         ThresholdMaskCase {
@@ -114,7 +114,7 @@ fn threshold_mask_truth_table() {
             pixels: &[0.0],
             noise: &[0.1],
             sigma: 3.0,
-            size: Size2us::new(1, 1),
+            size: USize2::new(1, 1),
             expected: &[false],
         },
         ThresholdMaskCase {
@@ -122,7 +122,7 @@ fn threshold_mask_truth_table() {
             pixels: &[0.3, 0.30001],
             noise: &[0.1; 2],
             sigma: 3.0,
-            size: Size2us::new(2, 1),
+            size: USize2::new(2, 1),
             expected: &[false, true],
         },
         ThresholdMaskCase {
@@ -130,7 +130,7 @@ fn threshold_mask_truth_table() {
             pixels: &[0.5; 4],
             noise: &[0.1; 4],
             sigma: 3.0,
-            size: Size2us::new(2, 2),
+            size: USize2::new(2, 2),
             expected: &[true; 4],
         },
         ThresholdMaskCase {
@@ -138,7 +138,7 @@ fn threshold_mask_truth_table() {
             pixels: &[0.5; 4],
             noise: &[0.1; 4],
             sigma: 4.0,
-            size: Size2us::new(2, 2),
+            size: USize2::new(2, 2),
             expected: &[true; 4],
         },
         ThresholdMaskCase {
@@ -146,7 +146,7 @@ fn threshold_mask_truth_table() {
             pixels: &[0.5; 4],
             noise: &[0.1; 4],
             sigma: 5.0,
-            size: Size2us::new(2, 2),
+            size: USize2::new(2, 2),
             expected: &[false; 4],
         },
     ];
@@ -164,7 +164,7 @@ fn threshold_mask_truth_table() {
 /// pixel. Above-threshold pixels read 1.0 against `3·0.1`, the rest −0.5.
 #[test]
 fn row_layout_over_sizes_and_patterns() {
-    type Pattern = (&'static str, fn(usize, usize, Size2us) -> bool);
+    type Pattern = (&'static str, fn(usize, usize, USize2) -> bool);
     let patterns: [Pattern; 4] = [
         ("checkerboard", |x, y, _| (x + y) % 2 == 0),
         ("horizontal stripes", |_, y, _| y % 2 == 0),
@@ -172,14 +172,14 @@ fn row_layout_over_sizes_and_patterns() {
         ("row ends", |x, _, size| x == 0 || x == size.width - 1),
     ];
     let sizes = [
-        Size2us::new(10, 10),
-        Size2us::new(64, 4),
-        Size2us::new(70, 4),
-        Size2us::new(128, 3),
-        Size2us::new(191, 5),
-        Size2us::new(100, 73),
-        Size2us::new(1, 10),
-        Size2us::new(10, 1),
+        USize2::new(10, 10),
+        USize2::new(64, 4),
+        USize2::new(70, 4),
+        USize2::new(128, 3),
+        USize2::new(191, 5),
+        USize2::new(100, 73),
+        USize2::new(1, 10),
+        USize2::new(10, 1),
     ];
     for size in sizes {
         for (name, pattern) in patterns {

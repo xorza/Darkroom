@@ -40,7 +40,7 @@ use crate::internals::synthetic::observe::{Observation, SimFrame, render};
 use crate::internals::synthetic::scene::{BgField, Placement, Scatter, Scene};
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detector::StarDetector;
-use common::Size2us;
+use common::USize2;
 
 /// How near a detection must lie to a source to be that source's: one FWHM of the scenarios' 4-px
 /// PSF, past which a centroid is not a measurement of the source.
@@ -53,7 +53,7 @@ const ISOLATION: f64 = 12.0;
 
 /// The `points` at least [`ISOLATION`] from each other, from every one of `others`, and from the
 /// edge of a `size` frame.
-fn isolated(points: &[DVec2], others: &[DVec2], size: Size2us) -> Vec<DVec2> {
+fn isolated(points: &[DVec2], others: &[DVec2], size: USize2) -> Vec<DVec2> {
     let far = |a: DVec2, b: DVec2| a.distance(b) >= ISOLATION;
     let inside = |p: DVec2| {
         p.min_element() >= ISOLATION
@@ -108,7 +108,7 @@ fn detected_poss(frame: &SimFrame, config: &StarDetectionConfig) -> Vec<DVec2> {
 /// `SimFrame` whose `image` + `truth.sources` the tests grade against.
 #[derive(Debug, Clone)]
 pub(super) struct Scenario {
-    pub(super) size: Size2us,
+    pub(super) size: USize2,
     pub(super) star_count: usize,
     /// Log-uniform total-flux range; higher = brighter / easier to detect.
     pub(super) flux: (f32, f32),
@@ -129,7 +129,7 @@ impl Default for Scenario {
     fn default() -> Self {
         let camera = Camera::realistic(STAR_FIELD_FWHM);
         Self {
-            size: Size2us::new(256, 256),
+            size: USize2::new(256, 256),
             star_count: 30,
             flux: STAR_FIELD_FLUX,
             fwhm: STAR_FIELD_FWHM,

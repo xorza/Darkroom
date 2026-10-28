@@ -47,7 +47,7 @@ use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::masked_plane::MaskedPlane;
-use common::Size2us;
+use common::USize2;
 
 /// The tile side of the mesh the local background comes from: as the dark-current model's, small
 /// beside a sensor's gradients and amp glow, large enough for a robust sky per color.
@@ -147,7 +147,7 @@ pub(crate) fn reject(
 /// # Errors
 ///
 /// [`CosmicRayError::XTransUnsupported`] for an X-Trans mosaic, which the pass refuses.
-pub(crate) fn heap_bytes(cfa_type: &CfaType, size: Size2us) -> Result<usize, CosmicRayError> {
+pub(crate) fn heap_bytes(cfa_type: &CfaType, size: USize2) -> Result<usize, CosmicRayError> {
     let detector = match Layout::of(cfa_type)? {
         Layout::Bayer(_) => BayerDetector::heap_bytes(size),
         Layout::Mono => MonoDetector::heap_bytes(size),

@@ -18,7 +18,7 @@ use crate::registration::resample::warp_config::{InterpolationMethod, WarpConfig
 use crate::registration::resample::{Warp, WarpResult, WarpScratch};
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
-use common::Size2us;
+use common::USize2;
 
 /// A constant read back through normalized weights: each f32 sum of up to 64 terms rounds by
 /// `64·ε` of its absolute sum, and a window the warp normalizes has `Σ|L| ≤ 8·Σ L` (its squares
@@ -27,7 +27,7 @@ use common::Size2us;
 const TOL: f32 = 2.0 * 64.0 * f32::EPSILON * 8.0 * 3.25;
 
 /// A `size` image of `channels` signed, unstructured planes, interleaved.
-fn signed_pixels(size: Size2us, channels: usize) -> Vec<f32> {
+fn signed_pixels(size: USize2, channels: usize) -> Vec<f32> {
     (0..size.pixel_count() * channels)
         .map(|i| ((i * 13 + i / size.width * 7) % 31) as f32 / 9.0 - 1.7)
         .collect()
@@ -272,7 +272,7 @@ fn warp_refuses_a_non_finite_border() {
 /// grown flags and its flag plane, are each rewritten too, and the flags come out the same.
 #[test]
 fn warp_into_overwrites_dirty_buffers_completely() {
-    let size = Size2us::new(20, 14);
+    let size = USize2::new(20, 14);
     let transforms = [
         WarpTransform::new(Transform::similarity(DVec2::new(1.5, -2.25), 0.05, 1.02)),
         WarpTransform::new(Transform::homography([
@@ -370,7 +370,7 @@ fn warp_into_overwrites_dirty_buffers_completely() {
 /// the row's positions and maps but nothing of each other's values.
 #[test]
 fn an_rgb_warp_is_three_mono_warps() {
-    let size = Size2us::new(20, 14);
+    let size = USize2::new(20, 14);
     let rgb = LinearImage::from_interleaved(
         PlanarDesc::new((size.width, size.height), ChannelLayout::Rgb),
         signed_pixels(size, 3),
@@ -440,7 +440,7 @@ mod plane;
 #[test]
 fn a_flag_leaves_its_pixel_out_or_carries_it_by_what_it_says() {
     const CONSTANT: f32 = 0.25;
-    let size = Size2us::new(24, 24);
+    let size = USize2::new(24, 24);
     let flagged = 10 * 24 + 10;
     let warp = |flag: Option<QualityFlags>, shift: DVec2| {
         let mut pixels = vec![CONSTANT; size.pixel_count()];
@@ -550,7 +550,7 @@ fn a_flag_leaves_its_pixel_out_or_carries_it_by_what_it_says() {
 /// 1.875 of `flat_gain`'s own test, each within 1e-6 of the line.
 #[test]
 fn a_warp_moves_the_flat_gain_with_the_pixels() {
-    let size = Size2us::new(9, 9);
+    let size = USize2::new(9, 9);
     let mut image = mono_image(size, vec![0.5; size.pixel_count()]);
     let divisor = Buffer2::from_fn((9, 9), |x, _| 1.0 / (1.0 + x as f32 / 8.0));
     image.set_flat_gain(Some(FrameGain::Shared(Arc::new(FlatGain::of_divisor(
@@ -574,7 +574,7 @@ fn a_warp_moves_the_flat_gain_with_the_pixels() {
 /// any warp, stays either way.
 #[test]
 fn only_the_nearest_pixel_keeps_the_quantization_step() {
-    let size = Size2us::new(9, 9);
+    let size = USize2::new(9, 9);
     let mut image = mono_image(size, vec![0.5; size.pixel_count()]);
     image.metadata.derived.set_quantization_sigma(Some(0.25));
     let mosaic_noise = MosaicNoise {

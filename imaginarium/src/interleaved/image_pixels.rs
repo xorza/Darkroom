@@ -3,7 +3,7 @@
 
 use crate::color::color_format::{ChannelCount, ColorFormat, SampleType};
 use crate::color::sample::Sample;
-use common::{Buffer2, Size2us};
+use common::{Buffer2, USize2};
 
 /// Tightly packed pixels of one of the nine formats, typed.
 #[derive(Debug, Clone)]
@@ -104,7 +104,7 @@ fn build_for(format: ColorFormat, builder: impl Build) -> ImagePixels {
 /// All-zero pixels.
 #[derive(Debug)]
 struct Zeroed {
-    size: Size2us,
+    size: USize2,
 }
 
 impl Build for Zeroed {
@@ -117,7 +117,7 @@ impl Build for Zeroed {
 /// storage aligned for their type.
 #[derive(Debug)]
 struct FromBytes {
-    size: Size2us,
+    size: USize2,
     bytes: Vec<u8>,
 }
 
@@ -132,7 +132,7 @@ impl Build for FromBytes {
 /// Pixels taken from typed samples, keeping their allocation.
 #[derive(Debug)]
 struct FromSamples<T> {
-    size: Size2us,
+    size: USize2,
     samples: Vec<T>,
 }
 
@@ -150,7 +150,7 @@ impl ImagePixels {
     /// `size`.
     pub(crate) fn from_samples<T: Sample>(
         format: ColorFormat,
-        size: Size2us,
+        size: USize2,
         samples: Vec<T>,
     ) -> Self {
         assert_eq!(
@@ -161,12 +161,12 @@ impl ImagePixels {
         build_for(format, FromSamples { size, samples })
     }
 
-    pub(crate) fn new_zeroed(format: ColorFormat, size: Size2us) -> Self {
+    pub(crate) fn new_zeroed(format: ColorFormat, size: USize2) -> Self {
         build_for(format, Zeroed { size })
     }
 
     /// Takes `bytes`, which must hold exactly the pixels of `size` in `format`.
-    pub(crate) fn from_bytes(format: ColorFormat, size: Size2us, bytes: Vec<u8>) -> Self {
+    pub(crate) fn from_bytes(format: ColorFormat, size: USize2, bytes: Vec<u8>) -> Self {
         build_for(format, FromBytes { size, bytes })
     }
 
@@ -184,7 +184,7 @@ impl ImagePixels {
         }
     }
 
-    pub(crate) const fn size(&self) -> Size2us {
+    pub(crate) const fn size(&self) -> USize2 {
         with_pixels!(self, pixels => pixels.size())
     }
 

@@ -108,7 +108,7 @@ fn build_stars(image: &mut LinearImage, starless: &LinearImage) {
 mod tests {
     use crate::image_ops::ml::remove_stars::*;
     use crate::internals::images::{mono_image, rgb_image};
-    use common::Size2us;
+    use common::USize2;
 
     #[test]
     fn build_stars_unscreens_per_sample_in_place() {
@@ -116,9 +116,9 @@ mod tests {
         // (0.75, 0.5) -> 1 - 0.25/0.5 = 0.5
         // (1.0, 0.0)  -> 1 - 0.0/1.0  = 1.0
         // (0.5, 1.0)  -> denominator floors at 1e-4 -> huge negative -> clamps to 0.0
-        let mut orig = mono_image(Size2us::new(3, 1), vec![0.75, 1.0, 0.5]);
+        let mut orig = mono_image(USize2::new(3, 1), vec![0.75, 1.0, 0.5]);
         let desc = orig.desc();
-        let starless = mono_image(Size2us::new(3, 1), vec![0.5, 0.0, 1.0]);
+        let starless = mono_image(USize2::new(3, 1), vec![0.5, 0.0, 1.0]);
         build_stars(&mut orig, &starless);
         assert_eq!(orig.channel(0).pixels(), &[0.5, 1.0, 0.0]);
         assert_eq!(orig.desc(), desc);
@@ -128,8 +128,8 @@ mod tests {
     fn build_stars_is_channel_agnostic_over_rgb() {
         // Same (o, s) pairs as above, spread one per channel of a single RGB pixel instead of
         // three mono pixels — pins that the unscreen is per-sample, with no channel meaning.
-        let mut orig = rgb_image(Size2us::new(1, 1), [vec![0.75], vec![1.0], vec![0.5]]);
-        let starless = rgb_image(Size2us::new(1, 1), [vec![0.5], vec![0.0], vec![1.0]]);
+        let mut orig = rgb_image(USize2::new(1, 1), [vec![0.75], vec![1.0], vec![0.5]]);
+        let starless = rgb_image(USize2::new(1, 1), [vec![0.5], vec![0.0], vec![1.0]]);
         build_stars(&mut orig, &starless);
         assert_eq!(orig.channel(0).pixels(), &[0.5]);
         assert_eq!(orig.channel(1).pixels(), &[1.0]);
@@ -146,10 +146,10 @@ mod tests {
         let s = |i: usize| (i % 7) as f32 / 8.0;
         let t = |i: usize| (i % 5) as f32 / 8.0;
         let mut orig = mono_image(
-            Size2us::new(n, 1),
+            USize2::new(n, 1),
             (0..n).map(|i| 1.0 - (1.0 - s(i)) * t(i)).collect(),
         );
-        let starless = mono_image(Size2us::new(n, 1), (0..n).map(s).collect());
+        let starless = mono_image(USize2::new(n, 1), (0..n).map(s).collect());
         build_stars(&mut orig, &starless);
         for (i, &v) in orig.channel(0).pixels().iter().enumerate() {
             assert_eq!(v, 1.0 - t(i), "sample {i}");

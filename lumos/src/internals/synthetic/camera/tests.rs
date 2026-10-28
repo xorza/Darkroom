@@ -69,7 +69,7 @@ fn seeing_scale_widens_and_lowers_peak() {
 /// f32. Times the gain 1.25, also exact.
 #[test]
 fn flat_field_color_gain_and_vignette() {
-    let flat = FlatField::default().render(Size2us::new(8, 8), &CfaType::Mono);
+    let flat = FlatField::default().render(USize2::new(8, 8), &CfaType::Mono);
     assert!(flat.iter().all(|&f| f == 1.0));
 
     let ff = FlatField {
@@ -77,13 +77,13 @@ fn flat_field_color_gain_and_vignette() {
         color_gain: [0.9, 1.0, 1.25],
     };
     assert!(
-        ff.render(Size2us::new(4, 4), &CfaType::Mono)
+        ff.render(USize2::new(4, 4), &CfaType::Mono)
             .iter()
             .all(|&f| f == 0.9)
     );
     // RGGB: R G on even rows, G B on odd ones.
     let rggb = ff.render(
-        Size2us::new(4, 2),
+        USize2::new(4, 2),
         &CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
     );
     assert_eq!(rggb.pixels(), [0.9, 1.0, 0.9, 1.0, 1.0, 1.25, 1.0, 1.25]);
@@ -96,11 +96,11 @@ fn flat_field_color_gain_and_vignette() {
         }),
         color_gain: [1.0, 1.0, 1.25],
     };
-    let map = vig.render(Size2us::new(64, 64), &CfaType::Mono);
+    let map = vig.render(USize2::new(64, 64), &CfaType::Mono);
     assert_eq!((map[32 * 64 + 32], map[0]), (1.0, 0.5));
     // BGGR puts blue at every even row's even column, so at (32, 32) and (0, 0).
     let map = vig.render(
-        Size2us::new(64, 64),
+        USize2::new(64, 64),
         &CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Bggr)),
     );
     assert_eq!((map[32 * 64 + 32], map[0]), (1.25, 0.5 * 1.25));

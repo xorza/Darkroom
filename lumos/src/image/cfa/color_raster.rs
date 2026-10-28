@@ -3,7 +3,7 @@
 use arrayvec::ArrayVec;
 
 use crate::image::cfa::cfa_type::CfaType;
-use common::Size2us;
+use common::USize2;
 use glam::USizeVec2;
 
 /// The photosites of one color of a mosaic over an image, in raster order: how many there are,
@@ -24,7 +24,7 @@ pub(crate) struct ColorRaster {
 
 impl ColorRaster {
     /// The photosites of `color` of a `cfa_type` mosaic over an image of `size`.
-    pub(crate) fn new(cfa_type: &CfaType, size: Size2us, color: usize) -> Self {
+    pub(crate) fn new(cfa_type: &CfaType, size: USize2, color: usize) -> Self {
         let period = cfa_type.period();
         let cols: ArrayVec<ArrayVec<u8, { CfaType::MAX_PERIOD }>, { CfaType::MAX_PERIOD }> = (0
             ..period)
@@ -85,7 +85,7 @@ mod tests {
     use crate::image::cfa::color_raster::ColorRaster;
     use crate::image::cfa::mosaic::Mosaic;
     use crate::image::cfa::xtrans_pattern::XTransPattern;
-    use common::Size2us;
+    use common::USize2;
     use glam::USizeVec2;
 
     /// Every rank lands where a walk over the pixels in raster order finds that photosite, for each
@@ -108,7 +108,7 @@ mod tests {
             CfaType::Mosaic(Mosaic::XTrans(xtrans)),
         ] {
             for (width, height) in [(12, 12), (13, 7), (7, 13), (1, 1), (5, 2)] {
-                let size = Size2us::new(width, height);
+                let size = USize2::new(width, height);
                 for color in 0..3 {
                     let walk: Vec<usize> = (0..size.pixel_count())
                         .filter(|&idx| {

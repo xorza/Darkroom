@@ -6,7 +6,7 @@ use crate::math::dmat3::DMat3;
 use crate::registration::resample::source_pos::SourcePos;
 use crate::registration::transform::TransformType;
 use crate::registration::warp_transform::WarpTransform;
-use common::Size2us;
+use common::USize2;
 
 /// The source position of every pixel of one output row, evaluated once and read by every channel,
 /// the quality maps and the validity warp.
@@ -24,7 +24,7 @@ pub(super) struct RowPoss {
 impl RowPoss {
     /// Fill with the positions output row `y` samples in a `source`-sized image, the output frame
     /// the source's size.
-    pub(super) fn fill(&mut self, y: usize, transform: &WarpTransform, source: Size2us) {
+    pub(super) fn fill(&mut self, y: usize, transform: &WarpTransform, source: USize2) {
         let width = source.width;
         self.poss.clear();
         self.poss.reserve_exact(width);

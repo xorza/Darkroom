@@ -1,34 +1,37 @@
-use crate::rect2us::Rect2us;
+use crate::usize_rect2::USizeRect2;
 use glam::USizeVec2;
 
 #[test]
 fn accumulation_uses_exclusive_max() {
-    const LEFT: Rect2us = Rect2us::new(USizeVec2::new(2, 3), USizeVec2::new(6, 9));
+    const LEFT: USizeRect2 = USizeRect2::new(USizeVec2::new(2, 3), USizeVec2::new(6, 9));
 
-    assert_eq!(Rect2us::default(), Rect2us::empty());
+    assert_eq!(USizeRect2::default(), USizeRect2::empty());
     assert_eq!((LEFT.width(), LEFT.height(), LEFT.area()), (4, 6, 24));
     // Inverted bounds saturate to zero instead of wrapping.
-    assert_eq!((Rect2us::empty().width(), Rect2us::empty().area()), (0, 0));
+    assert_eq!(
+        (USizeRect2::empty().width(), USizeRect2::empty().area()),
+        (0, 0)
+    );
     assert!(LEFT.contains(USizeVec2::new(2, 3)));
     assert!(LEFT.contains(USizeVec2::new(5, 8)));
     assert!(!LEFT.contains(USizeVec2::new(6, 8)));
     assert!(!LEFT.contains(USizeVec2::new(5, 9)));
 
-    let mut bounds = Rect2us::empty();
+    let mut bounds = USizeRect2::empty();
     bounds.include(USizeVec2::new(5, 3));
     assert_eq!(
         bounds,
-        Rect2us::new(USizeVec2::new(5, 3), USizeVec2::new(6, 4))
+        USizeRect2::new(USizeVec2::new(5, 3), USizeVec2::new(6, 4))
     );
     bounds.include(USizeVec2::new(2, 7));
     assert_eq!(
         bounds,
-        Rect2us::new(USizeVec2::new(2, 3), USizeVec2::new(6, 8))
+        USizeRect2::new(USizeVec2::new(2, 3), USizeVec2::new(6, 8))
     );
     bounds.include(USizeVec2::new(8, 1));
     assert_eq!(
         bounds,
-        Rect2us::new(USizeVec2::new(2, 1), USizeVec2::new(9, 8))
+        USizeRect2::new(USizeVec2::new(2, 1), USizeVec2::new(9, 8))
     );
 
     let covered: Vec<USizeVec2> = (bounds.min.y..bounds.max.y)
@@ -45,5 +48,5 @@ fn accumulation_uses_exclusive_max() {
 #[test]
 #[should_panic(expected = "invalid rectangle bounds")]
 fn inverted_bounds_panic_in_debug_builds() {
-    Rect2us::new(USizeVec2::new(1, 1), USizeVec2::ZERO);
+    USizeRect2::new(USizeVec2::new(1, 1), USizeVec2::ZERO);
 }

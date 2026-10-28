@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use common::Size2us;
+use common::USize2;
 
 use crate::color::color_format::{ChannelCount, ColorFormat, SampleType};
 use crate::error::DescError;
@@ -13,7 +13,7 @@ use crate::planar::channel_layout::ChannelLayout;
 /// holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PlanarDesc {
-    size: Size2us,
+    size: USize2,
     layout: ChannelLayout,
 }
 
@@ -22,14 +22,14 @@ impl PlanarDesc {
     ///
     /// When `size` has a zero side, or `size` and `layout` hold more bytes than a `usize`
     /// counts.
-    pub fn new(size: impl Into<Size2us>, layout: ChannelLayout) -> Self {
+    pub fn new(size: impl Into<USize2>, layout: ChannelLayout) -> Self {
         Self::checked(size.into(), layout).unwrap_or_else(|error| panic!("{error}"))
     }
 
     /// The descriptor `size` and `layout` make, or the first rule they break: a zero side, or more
     /// bytes than a `usize` counts.
-    pub const fn checked(size: Size2us, layout: ChannelLayout) -> Result<Self, DescError> {
-        let Size2us { width, height } = size;
+    pub const fn checked(size: USize2, layout: ChannelLayout) -> Result<Self, DescError> {
+        let USize2 { width, height } = size;
         if width == 0 {
             return Err(DescError::ZeroWidth);
         }
@@ -50,7 +50,7 @@ impl PlanarDesc {
         Ok(Self { size, layout })
     }
 
-    pub const fn size(&self) -> Size2us {
+    pub const fn size(&self) -> USize2 {
         self.size
     }
 
@@ -125,7 +125,7 @@ impl From<PlanarDesc> for InterleavedDesc {
 
 #[cfg(test)]
 mod tests {
-    use common::Size2us;
+    use common::USize2;
 
     use crate::color::color_format::ColorFormat;
     use crate::error::DescError;
@@ -141,7 +141,7 @@ mod tests {
             (ChannelLayout::Rgb, 36, ColorFormat::RGB_F32),
         ] {
             let desc = PlanarDesc::new((4, 3), layout);
-            assert_eq!(desc.size(), Size2us::new(4, 3));
+            assert_eq!(desc.size(), USize2::new(4, 3));
             assert_eq!(desc.layout(), layout);
             assert_eq!(desc.channel_count(), layout.count());
             assert_eq!(desc.pixel_count(), 12);
@@ -152,7 +152,7 @@ mod tests {
             assert_eq!(desc.color_format(), format);
             assert_eq!(
                 InterleavedDesc::from(desc),
-                InterleavedDesc::new(Size2us::new(4, 3), format)
+                InterleavedDesc::new(USize2::new(4, 3), format)
             );
         }
         assert_eq!(
@@ -166,24 +166,12 @@ mod tests {
     /// each, do not.
     #[test]
     fn checked_names_the_first_rule_broken() {
-        let wide = Size2us::new(usize::MAX / 8 + 1, 1);
-        let huge = Size2us::new(usize::MAX, 2);
+        let wide = USize2::new(usize::MAX / 8 + 1, 1);
+        let huge = USize2::new(usize::MAX, 2);
         for (size, layout, expected) in [
-            (
-                Size2us::new(0, 3),
-                ChannelLayout::Mono,
-                DescError::ZeroWidth,
-            ),
-            (
-                Size2us::new(0, 0),
-                ChannelLayout::Mono,
-                DescError::ZeroWidth,
-            ),
-            (
-                Size2us::new(4, 0),
-                ChannelLayout::Rgb,
-                DescError::ZeroHeight,
-            ),
+            (USize2::new(0, 3), ChannelLayout::Mono, DescError::ZeroWidth),
+            (USize2::new(0, 0), ChannelLayout::Mono, DescError::ZeroWidth),
+            (USize2::new(4, 0), ChannelLayout::Rgb, DescError::ZeroHeight),
             (
                 huge,
                 ChannelLayout::Mono,

@@ -9,7 +9,7 @@ use crate::registration::resample::warp_kernel::{Filter, TapAxis, TapRange, Warp
 use crate::registration::transform::Transform;
 use crate::registration::transform::local_geometry::LocalGeometry;
 use crate::registration::warp_transform::WarpTransform;
-use common::Size2us;
+use common::USize2;
 use simd::IsaTier;
 use simd::{Isa, Kernel};
 
@@ -180,7 +180,7 @@ fn a_window_holds_the_taps_within_the_stretched_radius() {
 ///   corner's scale.
 #[test]
 fn the_stretch_is_the_largest_local_scale() {
-    let size = Size2us::new(200, 120);
+    let size = USize2::new(200, 120);
     let stretch = |transform: Transform| {
         let warp = WarpTransform::new(transform);
         let kernel = WarpKernel::for_frame(Filter::Bilinear, &warp, size);
@@ -245,7 +245,7 @@ fn bicubic_kernel_hand_values() {
 #[test]
 fn nearest_rounds_a_half_up() {
     let input = Buffer2::new((2, 2), vec![10.0, 20.0, 30.0, 40.0]);
-    let size = Size2us::new(2, 2);
+    let size = USize2::new(2, 2);
     for (x, y, expected) in [
         (0.4, 0.4, 10.0),
         (1.4, 0.4, 20.0),

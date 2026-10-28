@@ -7,7 +7,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use common::bench::{Kind, Scale};
-use common::{Size2us, TempDir, fs};
+use common::{TempDir, USize2, fs};
 use criterion::{BenchmarkId, Criterion};
 
 use crate::bench::fixture::{self, Backend};
@@ -89,7 +89,7 @@ fn cases() -> Vec<(RasterFormat, ColorFormat)> {
     pairs
         .filter(|&(file, format)| {
             match file.encode(
-                &scene::sky(format, Size2us::new(1, 1), 0),
+                &scene::sky(format, USize2::new(1, 1), 0),
                 Cursor::new(Vec::new()),
             ) {
                 Ok(()) => true,

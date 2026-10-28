@@ -12,7 +12,7 @@ use crate::bg_mesh::spline::natural_spline::NaturalSpline;
 use crate::bg_mesh::spline::spline_segment::{SplineNode, SplineSegment};
 use crate::scratch_pool::{Pooled, Scratch, ScratchPool, Shapeless};
 use ::simd::Kernel;
-use common::Size2us;
+use common::USize2;
 use glam::USizeVec2;
 
 /// One component of a mesh — its sky or its σ — as the natural bicubic spline through the tile
@@ -31,7 +31,7 @@ pub(crate) struct MeshSurface {
     pub(super) centers_x: Vec<f32>,
     pub(super) centers_y: Vec<f32>,
     /// The frame the surface covers.
-    pub(super) size: Size2us,
+    pub(super) size: USize2,
     /// The range a σ is held to: the spline overshoots its nodes, and past the outer tiles it
     /// extrapolates, so on a field whose σ changes fast it reaches below zero. photutils clips its
     /// maps to the mesh's range for that reason. The sky is not clipped: its extrapolation is
@@ -99,7 +99,7 @@ impl MeshSurface {
     /// The bytes a surface over a frame of `size` holds, its mesh of `tile_size` tiles, read by
     /// `workers` at once: the tiles' values and second derivatives, the centres, and each reader's
     /// row scratch and row.
-    pub(crate) const fn heap_bytes(size: Size2us, tile_size: usize, workers: usize) -> usize {
+    pub(crate) const fn heap_bytes(size: USize2, tile_size: usize, workers: usize) -> usize {
         let tiles_x = MeshAxis::new(size.width, tile_size).count();
         let tiles_y = MeshAxis::new(size.height, tile_size).count();
         let reader = 3 * tiles_x + size.width;
@@ -272,12 +272,12 @@ impl SurfaceReader<'_> {
 pub(crate) mod internals {
     use crate::bg_mesh::mesh_surface::MeshSurface;
     use crate::scratch_pool::ScratchPool;
-    use common::Size2us;
+    use common::USize2;
 
     impl MeshSurface {
         /// A surface of `value` at every pixel of a frame of `size`: a mesh of one tile, whose
         /// rows are its one value.
-        pub(crate) fn uniform(value: f32, size: Size2us) -> Self {
+        pub(crate) fn uniform(value: f32, size: USize2) -> Self {
             Self {
                 values: vec![value],
                 d2y: vec![0.0],

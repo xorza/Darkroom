@@ -1,6 +1,6 @@
 use std::fmt;
 
-use common::Size2us;
+use common::USize2;
 use thiserror::Error;
 
 use crate::codec::raster_format::RasterFormat;
@@ -18,13 +18,10 @@ pub enum DescError {
     Channels { count: usize },
     /// An RGB image's plane of another size than its first.
     #[error("an RGB plane of {got} beside a first of {expected}")]
-    PlaneSize { expected: Size2us, got: Size2us },
+    PlaneSize { expected: USize2, got: USize2 },
     /// The pixels of `size`, `pixel_byte_len` bytes each, have more bytes than a `usize` counts.
     #[error("{size} pixels of {pixel_byte_len} bytes overflow usize")]
-    TooLarge {
-        size: Size2us,
-        pixel_byte_len: usize,
-    },
+    TooLarge { size: USize2, pixel_byte_len: usize },
 }
 
 /// Bytes that are not the pixels of the descriptor they came with.

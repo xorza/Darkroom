@@ -22,7 +22,7 @@ use crate::internals::synthetic::metrics::rms_diff;
 use crate::internals::synthetic::observe::{Observation, SimFrame, render};
 use crate::internals::synthetic::scene::{BgField, Placement, Scatter, Scene};
 use crate::progress::progress_monitor::ProgressMonitor;
-use common::Size2us;
+use common::USize2;
 use glam::USizeVec2;
 
 const W: usize = 128;
@@ -30,7 +30,7 @@ const H: usize = 128;
 
 fn demo_scene(seed: u64) -> Scene {
     Scene::scatter(
-        Size2us::new(W, H),
+        USize2::new(W, H),
         Scatter {
             count: 20,
             flux: (4.0, 10.0),
@@ -77,7 +77,7 @@ fn stack_frames(sims: &[SimFrame], config: &StackConfig) -> LinearImage {
 /// Overwrite one pixel of one frame with a bright cosmic-ray-like spike.
 fn inject_spike(sim: &mut SimFrame, pos: USizeVec2, value: f32) {
     let mut px = sim.image.channel(0).pixels().to_vec();
-    px[Size2us::new(W, H).idx_of(pos)] = value;
+    px[USize2::new(W, H).idx_of(pos)] = value;
     sim.image =
         LinearImage::from_planar_channels(PlanarDesc::new((W, H), ChannelLayout::Mono), [px]);
 }

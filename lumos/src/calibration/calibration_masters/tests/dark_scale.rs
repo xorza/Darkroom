@@ -13,10 +13,10 @@ use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::metadata::calibration_state::CalibrationState;
 use crate::internals::cfa::{constant_cfa, make_cfa};
 use crate::internals::test_rng::TestRng;
-use common::Size2us;
+use common::USize2;
 use glam::USizeVec2;
 
-const SIZE: Size2us = Size2us::new(256, 256);
+const SIZE: USize2 = USize2::new(256, 256);
 const BIAS: f32 = 0.0625;
 /// The dark current every pixel has, which the ring's plane takes out of both excesses.
 const DARK_CURRENT: f32 = 0.004;

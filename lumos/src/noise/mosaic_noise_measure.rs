@@ -10,7 +10,7 @@ use crate::image::metadata::mosaic_noise::MosaicNoise;
 use crate::math::statistics;
 use crate::math::statistics::subsample::MAX_STATISTIC_SAMPLES;
 use crate::noise::mosaic_sampling::MosaicSampling;
-use common::Size2us;
+use common::USize2;
 
 /// An undemosaiced mosaic of three colors, as its noise is measured: its plane under its
 /// pattern, the flags that leave photosites out, the flat gain that divided it when one did, and
@@ -39,7 +39,7 @@ impl<'a> MosaicNoiseMeasure<'a> {
 
     /// The most bytes [`Self::measure`] holds over a `size` frame of `mosaic`: the larger of the pairs its noise is measured over and the samples its medians
     /// are, which it holds one after the other.
-    pub(crate) fn heap_bytes(size: Size2us, mosaic: Mosaic) -> usize {
+    pub(crate) fn heap_bytes(size: USize2, mosaic: Mosaic) -> usize {
         let sampling = MosaicSampling {
             size,
             mosaic,
@@ -100,7 +100,7 @@ mod tests {
     use crate::math::statistics::subsample::MAX_STATISTIC_SAMPLES;
     use crate::noise::mosaic_noise_measure::{MosaicNoiseMeasure, color_medians};
     use crate::noise::mosaic_sampling::MosaicSampling;
-    use common::Size2us;
+    use common::USize2;
     use glam::USizeVec2;
 
     /// Over an 8 × 4 RGGB mosaic a photosite pairs with the one two to its right, so six pairs a
@@ -112,7 +112,7 @@ mod tests {
         let rggb = Mosaic::Bayer(BayerPattern::Rggb);
         assert_eq!(
             MosaicSampling {
-                size: Size2us::new(8, 4),
+                size: USize2::new(8, 4),
                 mosaic: rggb,
                 excluded: |_| false,
                 per_color: MAX_STATISTIC_SAMPLES,
@@ -120,12 +120,9 @@ mod tests {
             .noise_heap_bytes(),
             120
         );
+        assert_eq!(MosaicNoiseMeasure::heap_bytes(USize2::new(8, 4), rggb), 128);
         assert_eq!(
-            MosaicNoiseMeasure::heap_bytes(Size2us::new(8, 4), rggb),
-            128
-        );
-        assert_eq!(
-            MosaicNoiseMeasure::heap_bytes(Size2us::new(16, 4), rggb),
+            MosaicNoiseMeasure::heap_bytes(USize2::new(16, 4), rggb),
             280
         );
     }
@@ -136,7 +133,7 @@ mod tests {
     /// rows would read only the even rows, and no blue photosite.
     #[test]
     fn a_sampled_mosaic_keeps_every_color() {
-        let size = Size2us::new(64, 64);
+        let size = USize2::new(64, 64);
         let rggb = Mosaic::Bayer(BayerPattern::Rggb);
         let levels = [0.2, 0.1, 0.05];
         let mosaic = Buffer2::from_fn((64, 64), |x, y| levels[rggb.slot_at(USizeVec2::new(x, y))]);

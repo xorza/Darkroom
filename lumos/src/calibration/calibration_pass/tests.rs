@@ -5,7 +5,7 @@ use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::metadata::sample_domain::DomainMap;
 use crate::internals::cfa::make_cfa;
 use crate::internals::test_rng::TestRng;
-use common::Size2us;
+use common::USize2;
 
 /// Each sample is `(L − B·g_b − o_b − D·g_d·k − o_d)/F`, rounded to f32 once: within half a
 /// unit in its last place of that value, worked in f64 in another order, where three rounded
@@ -14,7 +14,7 @@ use common::Size2us;
 /// 0.95 of a span of 1) and imposed `NO_DATA` at 3 holds exactly those.
 #[test]
 fn a_light_is_its_f64_calibration_rounded_once() {
-    let size = Size2us::new(16, 8);
+    let size = USize2::new(16, 8);
     let mut rng = TestRng::new(5);
     let mut plane = |base: f32, spread: f32| -> Vec<f32> {
         (0..size.pixel_count())

@@ -5,7 +5,7 @@ use crate::star_detection::star_detector::stages::filter::FilterRejection;
 
 /// Overlapping round stars of `sigma`, each `(centre, amplitude)`, rendered untruncated on a 0.1
 /// sky.
-fn blended(size: Size2us, sigma: f32, stars: [(Vec2, f32); 2]) -> Buffer2<f32> {
+fn blended(size: USize2, sigma: f32, stars: [(Vec2, f32); 2]) -> Buffer2<f32> {
     let mut pixels = Buffer2::new_filled(size, 0.1);
     for (centre, amplitude) in stars {
         SyntheticStar::new(centre, amplitude, StarProfile::gaussian(sigma)).add_exact(&mut pixels);
@@ -27,7 +27,7 @@ fn blended(size: Size2us, sigma: f32, stars: [(Vec2, f32); 2]) -> Buffer2<f32> {
 /// beside the companion clearly more (measured 0.557 and 0.763).
 #[test]
 fn the_windowed_centre_is_pulled_toward_a_companion_as_derived() {
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let fwhm = fwhm::from_sigma(2.5);
     let window = MeasureGrid::new(fwhm).window_sigma;
     let spread = 2.0 * (2.5f64 * 2.5 + 1.0 / 12.0 + window * window);
@@ -101,7 +101,7 @@ fn the_windowed_centre_is_pulled_toward_a_companion_as_derived() {
 #[test]
 fn gaussian_fit_with_contamination() {
     let mut pixels = SyntheticStar::new(Vec2::splat(15.0), 0.8, StarProfile::gaussian(2.5))
-        .stamp(Size2us::new(31, 31), 0.1);
+        .stamp(USize2::new(31, 31), 0.1);
     SyntheticStar::new(Vec2::new(22.0, 15.0), 0.2, StarProfile::gaussian(2.5))
         .add_exact(&mut pixels);
     let fit = GaussianFit::new(FitInputs {
@@ -132,7 +132,7 @@ fn the_windowed_centroid_on_undersampled_and_truncated_stars() {
         let start = DVec2::splat((side / 2) as f64);
         let truth = (start + DVec2::new(0.3, 0.7)).as_vec2();
         let pixels = SyntheticStar::new(truth, 0.9, StarProfile::gaussian(sigma))
-            .stamp(Size2us::new(side, side), 0.1);
+            .stamp(USize2::new(side, side), 0.1);
         let measured = Measured::flat(&pixels, 0.1, 0.01);
         let centre = measured
             .windowed(start, fwhm::from_sigma(sigma))
@@ -162,7 +162,7 @@ const fn ellipse(sigma_major: f32, sigma_minor: f32, angle: f32) -> StarProfile 
 }
 
 /// `star` on a 0.1 sky.
-fn on_sky(size: Size2us, star: SyntheticStar) -> Buffer2<f32> {
+fn on_sky(size: USize2, star: SyntheticStar) -> Buffer2<f32> {
     let mut pixels = Buffer2::new_filled(size, 0.1f32);
     star.add_to(&mut pixels);
     pixels
@@ -180,7 +180,7 @@ fn on_sky(size: Size2us, star: SyntheticStar) -> Buffer2<f32> {
 /// within its tolerance at every angle.
 #[test]
 fn rotated_ellipse_moments_at_every_angle() {
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let centre = DVec2::splat(32.0);
     for degrees in [0.0f32, 30.0, 45.0, 60.0, 90.0, 120.0, 135.0, 150.0] {
         let angle = degrees.to_radians();
@@ -238,7 +238,7 @@ fn gaussian_fit_rotated_ellipse() {
 
     // Create 45° rotated ellipse
     let pixels = on_sky(
-        Size2us::new(width, height),
+        USize2::new(width, height),
         SyntheticStar::new(
             Vec2::new(true_cx as f32, true_cy as f32),
             0.8,
@@ -285,7 +285,7 @@ fn gaussian_fit_rotated_ellipse() {
 /// passed it.
 #[test]
 fn gaussian_fit_rejects_a_diagonal_elongated_star() {
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let pixels = on_sky(
         size,
         SyntheticStar::new(Vec2::new(32.0, 32.0), 0.8, ellipse(3.5, 2.0, FRAC_PI_4)),
@@ -296,7 +296,7 @@ fn gaussian_fit_rejects_a_diagonal_elongated_star() {
         ..Default::default()
     };
     let region = Region {
-        bbox: Rect2us::new(USizeVec2::new(24, 24), USizeVec2::new(41, 41)),
+        bbox: USizeRect2::new(USizeVec2::new(24, 24), USizeVec2::new(41, 41)),
         peak: USizeVec2::new(32, 32),
         area: 200,
     };

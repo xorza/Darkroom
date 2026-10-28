@@ -24,7 +24,7 @@
 //! A scenario changes the editor as production does: the camera and the drag are one held
 //! gesture of edit intents through `OpenDocument::apply_edit`, whose relayout the frame takes.
 
-use common::{Buffer2, Size2us};
+use common::{Buffer2, USize2};
 use imaginarium::PlanarImage;
 use std::sync::Arc;
 
@@ -305,7 +305,7 @@ impl Editor {
 /// A 6000 × 4000 frame of float RGB at `level`, one plane per channel: a stacked frame as lumos
 /// publishes one.
 fn stacked_frame(level: f32) -> DynamicValue {
-    let size = Size2us::new(6000, 4000);
+    let size = USize2::new(6000, 4000);
     let planes = std::array::from_fn(|_| Buffer2::new_filled(size, level));
     DynamicValue::from_custom(lens::Image::from(PlanarImage::new_rgb(planes)))
 }

@@ -67,7 +67,7 @@ fn fits_report_their_own_widths() {
     let pos = DVec2::splat(64.0);
     for case in cases {
         let pixels =
-            SyntheticStar::new(pos.as_vec2(), 0.8, case.profile).stamp(Size2us::new(128, 128), 0.1);
+            SyntheticStar::new(pos.as_vec2(), 0.8, case.profile).stamp(USize2::new(128, 128), 0.1);
         let measured = Measured::flat(&pixels, 0.1, 0.01);
         let region = measured.region_at(pos);
         let measure = |centroid_method| {
@@ -127,7 +127,7 @@ fn fits_report_their_own_widths() {
 /// ≤ 3.1e-8 of each variance (measured), under the 1e-7 asserted.
 #[test]
 fn windowed_covariance_deconvolves_to_the_source() {
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let pos = DVec2::splat(32.0);
     for (sigma_x, sigma_y, radius) in [(2.5f32, 2.5f32, 12), (3.0, 2.0, 14), (2.0, 3.0, 14)] {
         let profile = StarProfile::Gaussian {
@@ -213,7 +213,7 @@ fn less_pixel_clamps_each_principal_variance_at_zero() {
 #[test]
 fn windowed_covariance_holds_wing_noise_to_its_propagated_scatter() {
     const NOISE: f32 = 0.03;
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let pos = DVec2::splat(32.0);
     let sigma = 2.5f32;
     let radius = 12;

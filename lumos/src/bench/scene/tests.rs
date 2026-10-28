@@ -13,7 +13,7 @@ use glam::USizeVec2;
 /// 600 × 400 is a hundredth of the frame: 3000 / 100 = 30 stars, 300 / 100 = 3 sparse ones,
 /// 20 000 / 100 = 200 in the cluster, 200 / 100 = 2 cosmic rays, and, rounded up,
 /// ⌈240 / 100⌉ = 3 hot pixels and ⌈24 / 100⌉ = 1 dead one.
-const SMALL: Size2us = Size2us::new(600, 400);
+const SMALL: USize2 = USize2::new(600, 400);
 
 const RGGB: CfaType = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
 

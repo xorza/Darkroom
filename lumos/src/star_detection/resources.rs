@@ -18,7 +18,7 @@ use crate::star_detection::duplicates::Duplicates;
 use crate::star_detection::labeling::labeler::Labeler;
 use crate::star_detection::star::Star;
 use crate::star_detection::star_detection_config::bg_config::MIN_TILE_SIZE;
-use common::Size2us;
+use common::USize2;
 
 /// Reusable planes and stage workspaces for star detection, kept across `detect()` calls so a
 /// frame after the first allocates nothing but the stars it hands back.
@@ -82,7 +82,7 @@ impl DetectionResources {
     /// of each worker and of the threads outside the pool, which deblend a frame of one component.
     /// A component past [`DeblendBuffers::KEPT_PIXELS`] holds its set past that while it splits,
     /// in proportion to its pixels.
-    pub(crate) fn heap_bytes(size: Size2us, workers: usize) -> usize {
+    pub(crate) fn heap_bytes(size: USize2, workers: usize) -> usize {
         (PEAK_FLOATS + LABEL_RUNS_PLANES) * size.pixel_count() * size_of::<f32>()
             + PEAK_BITMASKS * BitBuffer2::heap_bytes(size)
             + PEAK_SURFACES * MeshSurface::heap_bytes(size, MIN_TILE_SIZE, workers)
@@ -91,7 +91,7 @@ impl DetectionResources {
     }
 
     /// The dimensions every plane is leased at.
-    pub(crate) fn size(&self) -> Size2us {
+    pub(crate) fn size(&self) -> USize2 {
         self.floats.shape()
     }
 
@@ -107,7 +107,7 @@ impl DetectionResources {
     /// follows the frame's: the labeler, the background mesh, the surfaces and their readers' rows,
     /// the filters' bands and the deblenders. The per-tile and per-star vectors, the duplicate
     /// scratch and the filter kernels follow the star and tile counts, and stay.
-    pub(crate) fn reshape(&mut self, size: Size2us) {
+    pub(crate) fn reshape(&mut self, size: USize2) {
         if self.size() == size {
             return;
         }
@@ -125,7 +125,7 @@ impl DetectionResources {
 pub(crate) mod internals {
     use crate::scratch_pool::ScratchPool;
     use crate::star_detection::resources::DetectionResources;
-    use common::Size2us;
+    use common::USize2;
 
     #[cfg(test)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -138,7 +138,7 @@ pub(crate) mod internals {
     impl DetectionResources {
         /// Resources for frames of `size`, for a stage a test or a bench runs on its own; a
         /// detector reshapes its own per frame.
-        pub(crate) fn new(size: Size2us) -> Self {
+        pub(crate) fn new(size: USize2) -> Self {
             Self {
                 floats: ScratchPool::new(size),
                 bitmasks: ScratchPool::new(size),
@@ -162,7 +162,7 @@ pub(crate) mod internals {
 mod tests {
     use crate::star_detection::resources::DetectionResources;
     use crate::star_detection::resources::internals::BufferCounts;
-    use common::Size2us;
+    use common::USize2;
 
     const fn counts(floats: usize, bitmasks: usize) -> BufferCounts {
         BufferCounts {
@@ -177,8 +177,8 @@ mod tests {
     /// that kind is the same allocation.
     #[test]
     fn planes_lease_at_the_frame_dimensions_from_one_pool_per_kind() {
-        let resources = DetectionResources::new(Size2us::new(64, 32));
-        assert_eq!(resources.size(), Size2us::new(64, 32));
+        let resources = DetectionResources::new(USize2::new(64, 32));
+        assert_eq!(resources.size(), USize2::new(64, 32));
         assert_eq!(resources.buffer_counts(), counts(0, 0));
 
         let plane = resources.acquire_f32();
@@ -189,7 +189,7 @@ mod tests {
         assert_eq!(resources.acquire_f32().as_ptr(), address);
 
         let mask = resources.acquire_bit();
-        assert_eq!(mask.size(), Size2us::new(64, 32));
+        assert_eq!(mask.size(), USize2::new(64, 32));
         let address = mask.words_ptr();
         drop(mask);
         assert_eq!(resources.buffer_counts(), counts(1, 1));
@@ -200,7 +200,7 @@ mod tests {
     /// leased before the change is not shelved when it drops after it.
     #[test]
     fn reshape_drops_the_planes_on_a_change_of_dimensions() {
-        let mut resources = DetectionResources::new(Size2us::new(64, 64));
+        let mut resources = DetectionResources::new(USize2::new(64, 64));
         drop((
             resources.acquire_f32(),
             resources.acquire_bit(),
@@ -209,7 +209,7 @@ mod tests {
         ));
         let outstanding = resources.acquire_f32();
 
-        resources.reshape(Size2us::new(64, 64));
+        resources.reshape(USize2::new(64, 64));
         assert_eq!(
             resources.buffer_counts(),
             BufferCounts {
@@ -219,8 +219,8 @@ mod tests {
         );
         assert_eq!(resources.bands.pooled(), 1);
 
-        resources.reshape(Size2us::new(128, 64));
-        assert_eq!(resources.size(), Size2us::new(128, 64));
+        resources.reshape(USize2::new(128, 64));
+        assert_eq!(resources.size(), USize2::new(128, 64));
         assert_eq!(resources.buffer_counts(), counts(0, 0));
         assert_eq!(resources.bands.pooled(), 0);
         drop(outstanding);

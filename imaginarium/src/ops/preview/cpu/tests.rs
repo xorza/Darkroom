@@ -4,14 +4,14 @@ use crate::interleaved::interleaved_image::InterleavedImage;
 use crate::internals::create_test_image;
 use crate::ops::preview::Preview;
 use crate::planar::planar_image::PlanarImage;
-use common::Size2us;
+use common::USize2;
 
 fn img(w: usize, h: usize, fmt: ColorFormat, bytes: Vec<u8>) -> InterleavedImage {
-    InterleavedImage::new_with_data(InterleavedDesc::new(Size2us::new(w, h), fmt), bytes).unwrap()
+    InterleavedImage::new_with_data(InterleavedDesc::new(USize2::new(w, h), fmt), bytes).unwrap()
 }
 
 /// A source's format, width, height and bytes, the target, and the preview's bytes.
-type Row = (ColorFormat, usize, usize, Vec<u8>, Size2us, Vec<u8>);
+type Row = (ColorFormat, usize, usize, Vec<u8>, USize2, Vec<u8>);
 
 /// `values` as the bytes of `T` samples.
 fn bytes_of<T: bytemuck::Pod>(values: &[T]) -> Vec<u8> {
@@ -39,7 +39,7 @@ fn a_preview_averages_each_footprint_as_computed_by_hand() {
             2,
             2,
             (10..=160).step_by(10).collect(),
-            Size2us::new(2, 2),
+            USize2::new(2, 2),
             (10..=160).step_by(10).collect(),
         ),
         (
@@ -47,7 +47,7 @@ fn a_preview_averages_each_footprint_as_computed_by_hand() {
             1,
             1,
             vec![12, 34, 56],
-            Size2us::new(1, 1),
+            USize2::new(1, 1),
             vec![12, 34, 56, 255],
         ),
         (
@@ -55,7 +55,7 @@ fn a_preview_averages_each_footprint_as_computed_by_hand() {
             1,
             1,
             bytes_of(&[65535u16, 32768, 0, 65535]),
-            Size2us::new(1, 1),
+            USize2::new(1, 1),
             vec![255, 128, 0, 255],
         ),
         (
@@ -63,7 +63,7 @@ fn a_preview_averages_each_footprint_as_computed_by_hand() {
             1,
             1,
             bytes_of(&[1.0f32, 0.0, 0.2]),
-            Size2us::new(1, 1),
+            USize2::new(1, 1),
             vec![255, 0, 51, 255],
         ),
         (
@@ -73,7 +73,7 @@ fn a_preview_averages_each_footprint_as_computed_by_hand() {
             vec![
                 0, 0, 0, 255, 100, 100, 100, 255, 200, 200, 200, 255, 40, 40, 40, 255,
             ],
-            Size2us::new(1, 1),
+            USize2::new(1, 1),
             vec![85, 85, 85, 255],
         ),
         (
@@ -81,7 +81,7 @@ fn a_preview_averages_each_footprint_as_computed_by_hand() {
             2,
             2,
             vec![0, 100, 200, 40],
-            Size2us::new(1, 1),
+            USize2::new(1, 1),
             vec![85, 85, 85, 255],
         ),
         (
@@ -89,7 +89,7 @@ fn a_preview_averages_each_footprint_as_computed_by_hand() {
             3,
             1,
             vec![0, 60, 120],
-            Size2us::new(2, 1),
+            USize2::new(2, 1),
             vec![0, 0, 0, 255, 90, 90, 90, 255],
         ),
         (
@@ -97,7 +97,7 @@ fn a_preview_averages_each_footprint_as_computed_by_hand() {
             4,
             1,
             vec![1, 2, 2, 3],
-            Size2us::new(2, 1),
+            USize2::new(2, 1),
             vec![2, 2, 2, 255, 2, 2, 2, 255],
         ),
         (
@@ -105,7 +105,7 @@ fn a_preview_averages_each_footprint_as_computed_by_hand() {
             2,
             1,
             bytes_of(&[257u16, 514]),
-            Size2us::new(1, 1),
+            USize2::new(1, 1),
             vec![2, 2, 2, 255],
         ),
         (
@@ -113,7 +113,7 @@ fn a_preview_averages_each_footprint_as_computed_by_hand() {
             2,
             1,
             vec![255, 0, 0, 255, 0, 0, 0, 0],
-            Size2us::new(1, 1),
+            USize2::new(1, 1),
             vec![255, 0, 0, 128],
         ),
         (
@@ -121,7 +121,7 @@ fn a_preview_averages_each_footprint_as_computed_by_hand() {
             2,
             1,
             bytes_of(&[65535u16, 0, 0, 65535, 0, 0, 0, 0]),
-            Size2us::new(1, 1),
+            USize2::new(1, 1),
             vec![255, 0, 0, 128],
         ),
         (
@@ -129,7 +129,7 @@ fn a_preview_averages_each_footprint_as_computed_by_hand() {
             2,
             1,
             bytes_of(&[1.0f32, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0]),
-            Size2us::new(1, 1),
+            USize2::new(1, 1),
             vec![255, 0, 0, 128],
         ),
     ];
@@ -149,7 +149,7 @@ fn a_preview_averages_each_footprint_as_computed_by_hand() {
         vec![10, 20, 30, 0, 30, 40, 50, 0],
     );
     assert_eq!(
-        Preview::new(Size2us::new(1, 1)).to_rgba8(&clear).bytes(),
+        Preview::new(USize2::new(1, 1)).to_rgba8(&clear).bytes(),
         [20, 30, 40, 0]
     );
 }
@@ -159,9 +159,9 @@ fn a_preview_averages_each_footprint_as_computed_by_hand() {
 #[test]
 fn planes_preview_as_their_interleaved_image() {
     for format in [ColorFormat::MONO_F32, ColorFormat::RGB_F32] {
-        let image = create_test_image(format, Size2us::new(17, 11), 3);
+        let image = create_test_image(format, USize2::new(17, 11), 3);
         let planes = PlanarImage::try_from(&image).unwrap();
-        let preview = Preview::new(Size2us::new(8, 5));
+        let preview = Preview::new(USize2::new(8, 5));
         assert_eq!(
             preview.planes_to_rgba8(&planes).bytes(),
             preview.to_rgba8(&image).bytes(),
@@ -174,8 +174,8 @@ fn planes_preview_as_their_interleaved_image() {
 #[test]
 fn test_same_size_is_the_conversion() {
     for format in ColorFormat::ALL {
-        let src = create_test_image(format, Size2us::new(7, 3), 5);
-        let out = Preview::new(Size2us::new(7, 3)).to_rgba8(&src);
+        let src = create_test_image(format, USize2::new(7, 3), 5);
+        let out = Preview::new(USize2::new(7, 3)).to_rgba8(&src);
         assert_eq!(
             out.bytes(),
             src.convert_to(ColorFormat::RGBA_U8).bytes(),
@@ -188,8 +188,8 @@ fn test_same_size_is_the_conversion() {
 #[test]
 fn test_all_formats_to_rgba8() {
     for format in ColorFormat::ALL {
-        let src = create_test_image(format, Size2us::new(17, 11), 3);
-        let out = Preview::new(Size2us::new(8, 5)).to_rgba8(&src);
+        let src = create_test_image(format, USize2::new(17, 11), 3);
+        let out = Preview::new(USize2::new(8, 5)).to_rgba8(&src);
         assert_eq!(out.desc().color_format(), ColorFormat::RGBA_U8);
         assert_eq!(out.desc().size().width, 8);
         assert_eq!(out.desc().size().height, 5);

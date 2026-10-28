@@ -14,7 +14,7 @@ use crate::star_detection::centroid::profile_problem::internals::{
 };
 use crate::star_detection::centroid::stamp::StampGrid;
 use crate::star_detection::centroid::tests::perturbation::Perturbation;
-use common::Size2us;
+use common::USize2;
 
 /// One recovery case: render a star of known parameters, optionally spoil the stamp or lie to
 /// the fitter about its background, then check what it got back.
@@ -398,7 +398,7 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
 fn gaussian_fit_recovers_known_parameters() {
     for case in RECOVERY_CASES {
         let mut pixels = SyntheticStar::new(case.center.as_vec2(), case.amplitude, case.profile())
-            .stamp(Size2us::new(case.stamp, case.stamp), case.bg);
+            .stamp(USize2::new(case.stamp, case.stamp), case.bg);
         case.perturbation.apply(&mut pixels);
 
         let result = GaussianFit::new(FitInputs {
@@ -551,7 +551,7 @@ fn gaussian_fit_rejects_what_the_data_cannot_support() {
     ];
 
     for case in cases {
-        let size = Size2us::new(case.side, case.side);
+        let size = USize2::new(case.side, case.side);
         let truth = centre(case.side);
         let pixels = match case.sigma {
             Some(sigma) => SyntheticStar::new(truth.as_vec2(), 1.0, StarProfile::gaussian(sigma))
@@ -591,7 +591,7 @@ fn gaussian_fit_rms_residual() {
     let n: f64 = 17.0 * 17.0;
     for noise in [0.0f32, 0.05] {
         let mut pixels = SyntheticStar::new(Vec2::splat(10.0), 1.0, StarProfile::gaussian(2.5))
-            .stamp(Size2us::new(21, 21), 0.1);
+            .stamp(USize2::new(21, 21), 0.1);
         patterns::add_gaussian_noise(&mut pixels, noise, 11111);
         let fit = GaussianFit::new(FitInputs {
             pixels: &pixels,
@@ -685,7 +685,7 @@ fn gaussian_evaluate_and_jacobian_consistency() {
 /// takes no more iterations than an elongated one's from the same round seed.
 #[test]
 fn gaussian_fit_converges_as_fast_on_a_round_star() {
-    let size = Size2us::new(31, 31);
+    let size = USize2::new(31, 31);
     let iterations = |sigma_x: f32, sigma_y: f32| {
         let pixels = SyntheticStar::new(
             Vec2::new(15.0, 15.0),

@@ -26,7 +26,7 @@ use crate::internals::{init_tracing, real_data};
 use crate::io::load_ctx::LoadCtx;
 use crate::io::raw;
 use crate::progress::progress_monitor::ProgressMonitor;
-use common::Size2us;
+use common::USize2;
 
 #[test]
 fn raw_frame_info_matches_full_decode() {
@@ -154,10 +154,10 @@ struct HotMaskMetrics {
 #[derive(Debug)]
 struct DetectedHotMask {
     map: DefectMap,
-    size: Size2us,
+    size: USize2,
 }
 
-fn hot_mask_metrics(map: &DefectMap, size: Size2us) -> HotMaskMetrics {
+fn hot_mask_metrics(map: &DefectMap, size: USize2) -> HotMaskMetrics {
     const BINS: usize = 8;
 
     let margin_x = size.width / 10;

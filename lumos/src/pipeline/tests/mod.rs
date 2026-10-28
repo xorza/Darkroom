@@ -49,10 +49,10 @@ use crate::registration::warp_transform::WarpTransform;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detection_config::extraction_config::ExtractionConfig;
 use crate::star_detection::star_detector::StarDetector;
-use common::Size2us;
+use common::USize2;
 
 fn base_field() -> LinearImage {
-    star_field(Size2us::new(256, 256), 40, 66666).image
+    star_field(USize2::new(256, 256), 40, 66666).image
 }
 
 /// Warp `base` by a pure translation to fake a dithered exposure.
@@ -702,7 +702,7 @@ fn the_raw_front_end_checks_each_light_at_decode() {
     };
     assert_eq!(invalid.field, "cosmic-ray max_iterations");
 
-    let mut dark = make_cfa(Size2us::new(32, 32), vec![0.01; 32 * 32], CfaType::Mono);
+    let mut dark = make_cfa(USize2::new(32, 32), vec![0.01; 32 * 32], CfaType::Mono);
     dark.metadata.header.exposure_time = Some(10.0);
     let masters = CalibrationMasters::from_images(
         CalibrationSet {
@@ -713,7 +713,7 @@ fn the_raw_front_end_checks_each_light_at_decode() {
         &CancelToken::never(),
     )
     .unwrap();
-    let mut longer = make_cfa(Size2us::new(32, 32), vec![0.1; 32 * 32], CfaType::Mono);
+    let mut longer = make_cfa(USize2::new(32, 32), vec![0.1; 32 * 32], CfaType::Mono);
     longer.metadata.header.exposure_time = Some(20.0);
     let longer_path = scratch.path().join("light_longer.fits");
     cfa::save(&longer_path, &longer).unwrap();
@@ -748,7 +748,7 @@ fn the_raw_front_end_checks_each_light_at_decode() {
 
     let xtrans = scratch.path().join("xtrans_0.fits");
     let cfa = make_cfa(
-        Size2us::new(36, 36),
+        USize2::new(36, 36),
         vec![0.1; 36 * 36],
         CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN)),
     );
@@ -783,7 +783,7 @@ impl LinearLights {
     /// written under `scratch`. Every light registers on this field; on 112 × 112 with 30 stars,
     /// most found no matching pattern.
     fn write(scratch: &TempDir) -> Self {
-        let base = star_field(Size2us::new(128, 128), 40, 4242).image;
+        let base = star_field(USize2::new(128, 128), 40, 4242).image;
         let frames = [
             base.clone(),
             shifted(&base, 5.0, -3.0),
@@ -1110,7 +1110,7 @@ fn both_front_ends_report_the_same_stages() {
 fn ram_and_streaming_tiers_produce_identical_stacks() {
     let scratch = TempDir::new("lumos_tier_equivalence");
     // Smaller than `base_field`, since the lights are stacked four times.
-    let base = star_field(Size2us::new(160, 160), 24, 66666).image;
+    let base = star_field(USize2::new(160, 160), 24, 66666).image;
 
     // Five dithered exposures: five clears `StackConfig`'s default `SmallN::median_below(5)`, so
     // the σ-clipped mean actually runs and the combine emits a linear-variance plane — without

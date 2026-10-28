@@ -15,7 +15,7 @@ use crate::image::cfa::demosaic::bayer::rcd::{
 };
 use crate::image::cfa::demosaic::mosaic_view::MosaicView;
 use crate::image::cfa::demosaic::tiled::{OutputPlanes, TilePlace};
-use common::Size2us;
+use common::USize2;
 use glam::USizeVec2;
 use simd::{F32_LANES, F32x8, Isa, Kernel};
 
@@ -75,7 +75,7 @@ struct Stages<'a> {
 /// red and blue sites of each row parity.
 #[derive(Debug, Clone, Copy)]
 struct Crop {
-    size: Size2us,
+    size: USize2,
     pattern: BayerPattern,
     red_blue: [usize; 2],
 }
@@ -175,7 +175,7 @@ impl Tile {
         out: OutputPlanes,
     ) {
         let TilePlace { top, left, size } = place;
-        let Size2us { width, height } = size;
+        let USize2 { width, height } = size;
         let pattern = bayer.pattern();
         debug_assert!(
             top % 2 == 0 && left % 2 == 0,
@@ -241,7 +241,7 @@ impl Tile {
     /// Step 1: the vertical-against-horizontal direction map, from the squared high-pass filters
     /// summed over three pixels along each axis.
     #[inline(always)]
-    fn directions<S: Isa>(&mut self, isa: S, Size2us { width, height }: Size2us) {
+    fn directions<S: Isa>(&mut self, isa: S, USize2 { width, height }: USize2) {
         let cfa = view(&self.cfa);
         let (three, six, epssq) = (isa.splat_f32(3.0), isa.splat_f32(6.0), isa.splat_f32(EPSSQ));
         // Each row's vertical filter as it comes into reach, and a row's direction map once the
@@ -316,7 +316,7 @@ impl Tile {
     #[inline(always)]
     fn green<S: Isa>(&mut self, isa: S, crop: Crop) {
         let Crop {
-            size: Size2us { width, height },
+            size: USize2 { width, height },
             red_blue,
             ..
         } = crop;
@@ -440,7 +440,7 @@ impl Tile {
     #[inline(always)]
     fn diagonal_directions<S: Isa>(&mut self, isa: S, crop: Crop) {
         let Crop {
-            size: Size2us { width, height },
+            size: USize2 { width, height },
             red_blue,
             ..
         } = crop;
@@ -514,7 +514,7 @@ impl Tile {
     #[inline(always)]
     fn opposite_colors<S: Isa>(&mut self, isa: S, crop: Crop) {
         let Crop {
-            size: Size2us { width, height },
+            size: USize2 { width, height },
             pattern,
             red_blue,
         } = crop;
@@ -603,7 +603,7 @@ impl Tile {
     #[inline(always)]
     fn colors_at_green<S: Isa>(&mut self, isa: S, crop: Crop) {
         let Crop {
-            size: Size2us { width, height },
+            size: USize2 { width, height },
             pattern,
             red_blue,
         } = crop;

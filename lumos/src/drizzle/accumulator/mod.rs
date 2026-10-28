@@ -31,7 +31,7 @@ use crate::image::stackable_image::StackableImage;
 use crate::ingest::error::AdmissionError;
 use crate::recycled::Recycled;
 use crate::scratch_pool::ScratchPool;
-use common::Size2us;
+use common::USize2;
 
 /// A frame is mono or RGB — the two shapes `LinearImage` has — or a mosaic of at most three
 /// colors, so it never carries more planes, and the output never more channels.
@@ -173,7 +173,7 @@ impl Drizzler {
         band_rows: usize,
     ) -> Result<usize, DrizzleError> {
         self.validate(frame, idx)?;
-        let Size2us { width, height } = self.grid.size();
+        let USize2 { width, height } = self.grid.size();
         if sums.flags.is_none()
             && frame
                 .source

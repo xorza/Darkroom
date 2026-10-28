@@ -12,7 +12,7 @@ use crate::image::metadata::bg_split::BgSplit;
 use crate::math::wavelet;
 use crate::noise::bg_from_gain;
 use crate::noise::binned_samples::{BinnedSamples, Samples};
-use common::{Rect2us, Size2us};
+use common::{USize2, USizeRect2};
 use glam::USizeVec2;
 
 /// Layers of the transform; PixInsight's default.
@@ -209,7 +209,7 @@ impl Samples for Coefficients {
 /// that takes a tile, with room for the largest region's planes and the widest region's row, and
 /// the tile list beside them. A tile's transform starts no parallel work, so a worker holds one
 /// scratch at a time. An estimate of σ holds no bins and so a byte a coefficient less.
-pub(crate) fn heap_bytes(size: Size2us, threads: usize) -> usize {
+pub(crate) fn heap_bytes(size: USize2, threads: usize) -> usize {
     let tiles = tiles(size);
     let analysed: usize = tiles.iter().map(|tile| tile.core.area()).sum();
     let workers = threads.max(1).min(tiles.len());
@@ -406,7 +406,7 @@ impl<E: Fn(usize) -> bool + Sync> NoisePlane<'_, E> {
 /// [`SCALES`] layers [`WHITE_NOISE_RESPONSE`] was measured with, the k-σ estimate of the first
 /// layer over the pixels its kernel lies inside the frame at, run to the same convergence and
 /// corrected for its own response; `0` when no two such pixels remain.
-fn sigma(coefficients: CoefficientRun<'_>, size: Size2us) -> f64 {
+fn sigma(coefficients: CoefficientRun<'_>, size: USize2) -> f64 {
     let count = coefficients.idx.len();
     if count < 2 {
         return 0.0;
@@ -421,7 +421,7 @@ fn sigma(coefficients: CoefficientRun<'_>, size: Size2us) -> f64 {
 
 /// The k-σ estimate [`sigma`] falls back to: the first layer's, over the pixels its kernel lies
 /// inside the frame at.
-fn k_sigma_sigma(coefficients: CoefficientRun<'_>, size: Size2us) -> f64 {
+fn k_sigma_sigma(coefficients: CoefficientRun<'_>, size: USize2) -> f64 {
     let count = coefficients.idx.len();
     let reach = FIRST_LAYER_REACH;
     let interior = |pos: usize| {
@@ -476,8 +476,8 @@ fn support_sigma(coefficients: CoefficientRun<'_>) -> Option<f64> {
 /// reads.
 #[derive(Debug, Clone, Copy)]
 struct Tile {
-    core: Rect2us,
-    region: Rect2us,
+    core: USizeRect2,
+    region: USizeRect2,
 }
 
 /// The pixels of the largest of `tiles`' regions; none for no tile.
@@ -500,7 +500,7 @@ fn widest_region(tiles: &[Tile]) -> usize {
 
 /// Up to [`TILES_PER_AXIS`]² tiles spread evenly over `size`, each core [`TILE`] wide or the whole
 /// axis when it is narrower.
-fn tiles(size: Size2us) -> Vec<Tile> {
+fn tiles(size: USize2) -> Vec<Tile> {
     let spans = |extent: usize| -> Vec<[usize; 2]> {
         let core = TILE.min(extent);
         let count = (extent / TILE).clamp(1, TILES_PER_AXIS);
@@ -520,8 +520,8 @@ fn tiles(size: Size2us) -> Vec<Tile> {
     rows.iter()
         .flat_map(|&[y0, y1]| {
             cols.iter().map(move |&[x0, x1]| Tile {
-                core: Rect2us::new(USizeVec2::new(x0, y0), USizeVec2::new(x1, y1)),
-                region: Rect2us::new(
+                core: USizeRect2::new(USizeVec2::new(x0, y0), USizeVec2::new(x1, y1)),
+                region: USizeRect2::new(
                     USizeVec2::new(x0.saturating_sub(MARGIN), y0.saturating_sub(MARGIN)),
                     USizeVec2::new(
                         (x1 + MARGIN).min(size.width),

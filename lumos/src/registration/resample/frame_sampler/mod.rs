@@ -32,7 +32,7 @@ use crate::registration::resample::tap_window::{TapWindow, WindowWeights};
 use crate::registration::resample::warp_config::WarpConfig;
 use crate::registration::resample::warp_kernel::{Filter, TapAxis, WarpKernel};
 use crate::registration::warp_transform::WarpTransform;
-use common::Size2us;
+use common::USize2;
 use simd::{Isa, Kernel};
 
 /// How a frame's pixels are sampled.
@@ -54,7 +54,7 @@ pub(crate) struct FilterSampling {
 
 impl SampleMethod {
     /// What `params` asks for, at the stretch `warp` needs over an output frame of `size`.
-    pub(super) fn for_frame(params: WarpConfig, warp: &WarpTransform, size: Size2us) -> Self {
+    pub(super) fn for_frame(params: WarpConfig, warp: &WarpTransform, size: USize2) -> Self {
         match Filter::of(params.method) {
             None => Self::Nearest,
             Some(filter) => Self::Filter(FilterSampling {
@@ -89,7 +89,7 @@ pub(crate) struct FrameSampler<'a> {
     sources: ArrayVec<SourcePlane<'a>, 3>,
     flagged: Option<&'a FlaggedSources<'a>>,
     border: f32,
-    size: Size2us,
+    size: USize2,
 }
 
 /// The tap axes of the pixel a row is sampling, kept across pixels and rows for their storage.

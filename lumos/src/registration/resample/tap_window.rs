@@ -9,7 +9,7 @@ use crate::registration::resample::flagged_sources::Validity;
 use crate::registration::resample::ringing_clamp::{LobeSums, LobeWeights};
 use crate::registration::resample::source_image::SourcePlane;
 use crate::registration::resample::warp_kernel::TapAxis;
-use common::Size2us;
+use common::USize2;
 use glam::USizeVec2;
 use simd::{F32_LANES, F32x8, Isa, Mask8};
 
@@ -206,7 +206,7 @@ impl Clip {
 
 impl<'a> TapWindow<'a> {
     /// The window of `x` and `y` in a `size` source; `None` when it misses the source on an axis.
-    pub(crate) fn new(x: &'a TapAxis, y: &'a TapAxis, size: Size2us) -> Option<Self> {
+    pub(crate) fn new(x: &'a TapAxis, y: &'a TapAxis, size: USize2) -> Option<Self> {
         let clip_x = Clip::of(x, size.width)?;
         let clip_y = Clip::of(y, size.height)?;
         Some(Self {

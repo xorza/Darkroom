@@ -8,7 +8,7 @@ use crate::star_detection::convolution::internals::convolve_cols;
 use crate::star_detection::convolution::simd::{
     Convolve2dRow, ConvolveColsRow, ConvolveRow, Kernel2d, RowRing, mirror_idx,
 };
-use common::Size2us;
+use common::USize2;
 use simd::Kernel;
 
 /// An asymmetric kernel, so a tap applied in mirrored order shows.
@@ -17,7 +17,7 @@ fn asymmetric_kernel(radius: usize) -> Vec<f32> {
 }
 
 /// An image of `size` whose row `y` is the shape's row for seed `y`.
-fn shape_image(shape: &DataShape, size: Size2us) -> Buffer2<f32> {
+fn shape_image(shape: &DataShape, size: USize2) -> Buffer2<f32> {
     let pixels = (0..size.height)
         .flat_map(|y| shape.row(size.width, y))
         .collect();
@@ -251,7 +251,7 @@ fn convolve_cols_matches_scalar() {
         let kernel = asymmetric_kernel(radius);
         let height = 2 * radius + 6;
         assert_simd_matches_scalar(SWEEP_WIDTHS, |tier, shape, width| {
-            let size = Size2us::new(width, height);
+            let size = USize2::new(width, height);
             let input = shape_image(shape, size);
             let mut scalar = vec![0.0f32; width * height];
             let mut simd = vec![0.0f32; width * height];
@@ -291,7 +291,7 @@ fn convolve_2d_row_matches_scalar() {
         let height = 2 * radius + 6;
         let widths: Vec<usize> = (1..8).chain(SWEEP_WIDTHS.iter().copied()).collect();
         assert_simd_matches_scalar(&widths, |tier, shape, width| {
-            let size = Size2us::new(width, height);
+            let size = USize2::new(width, height);
             let input = shape_image(shape, size);
             let mut scalar = Vec::new();
             let mut simd = Vec::new();

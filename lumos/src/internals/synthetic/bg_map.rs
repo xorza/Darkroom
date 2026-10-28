@@ -13,10 +13,10 @@ use crate::star_detection::detection_plane::PlaneSpec;
 use crate::star_detection::refined_bg::RefinedBg;
 use crate::star_detection::resources::DetectionResources;
 use crate::star_detection::star_detection_config::bg_config::BgConfig;
-use common::Size2us;
+use common::USize2;
 
 /// Create a uniform `BgEstimate` with constant background and noise values.
-pub(crate) fn uniform(size: Size2us, bg: f32, noise: f32) -> BgEstimate {
+pub(crate) fn uniform(size: USize2, bg: f32, noise: f32) -> BgEstimate {
     BgEstimate {
         bg: Pooled::loose(MeshSurface::uniform(bg, size), ()),
         sky: SkyNoise {
@@ -63,7 +63,7 @@ mod tests {
     /// Every pixel of a uniform estimate reads its two values exactly.
     #[test]
     fn uniform_fills_both_the_background_and_noise_planes() {
-        let bg = uniform(Size2us::new(100, 70), 0.1, 0.01);
+        let bg = uniform(USize2::new(100, 70), 0.1, 0.01);
         assert!(bg.bg.plane().pixels().iter().all(|&sky| sky == 0.1));
         assert!(
             bg.sky

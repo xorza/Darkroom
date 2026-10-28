@@ -11,7 +11,7 @@
 
 use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
-use common::{Buffer2, Size2us};
+use common::{Buffer2, USize2};
 use glam::{USizeVec2, Vec2};
 
 /// The sky a field is drawn on.
@@ -54,7 +54,7 @@ impl SkyField {
         clippy::cast_sign_loss,
         reason = "synthetic fixtures are small images with non-negative coordinates"
     )]
-    pub(crate) fn render(size: Size2us, sky: Sky, stars: GaussianStars<'_>) -> Self {
+    pub(crate) fn render(size: USize2, sky: Sky, stars: GaussianStars<'_>) -> Self {
         let GaussianStars { sigma, peaks } = stars;
         let mut pixels = Buffer2::new_filled(size, sky.level);
         for &(center, peak) in peaks {

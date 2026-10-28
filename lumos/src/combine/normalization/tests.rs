@@ -36,7 +36,7 @@ use crate::internals::synthetic::sky_field::{GaussianStars, Sky, SkyField};
 use crate::internals::test_rng::TestRng;
 use crate::math::statistics;
 use crate::progress::progress_monitor::ProgressMonitor;
-use common::Size2us;
+use common::USize2;
 
 /// Statistics with one `(median, mad)` per channel and nothing else stated.
 fn channel_stats(channels: &[(f32, f32)]) -> Admitted {
@@ -719,7 +719,7 @@ fn common_domain_norms_preserve_pair_order_and_honor_cancellation() {
 /// gains agree with the unblanked ones to within one standard error.
 #[test]
 fn global_gains_are_recovered_from_a_star_field_and_one_blank_pixel_does_not_move_them() {
-    let size = Size2us::new(256, 256);
+    let size = USize2::new(256, 256);
     let mut rng = TestRng::new(0x9a17);
     let stars: Vec<(Vec2, f32)> = (0..150)
         .map(|_| {
@@ -853,12 +853,12 @@ fn samples_spread_evenly_by_rank_past_the_limit() {
         assert_eq!(idxs[idxs.len() - 1], last);
         assert!(idxs.is_sorted() && idxs.windows(2).all(|pair| pair[0] < pair[1]));
     };
-    let every = |size: Size2us| {
+    let every = |size: USize2| {
         StratifiedSamples::new(size, None, 0)
             .idxs()
             .collect::<Vec<_>>()
     };
-    check(every(Size2us::new(pixel_count, 1)), [0, 3, 6, 9], 199_996);
+    check(every(USize2::new(pixel_count, 1)), [0, 3, 6, 9], 199_996);
 
     let even = Buffer2::from_fn((pixel_count, 1), |x, _| if x % 2 == 0 { 1.0 } else { 0.0 });
     let frame = StoredFrame::from_memory(
@@ -885,9 +885,9 @@ fn samples_spread_evenly_by_rank_past_the_limit() {
         199_996,
     );
 
-    assert_eq!(every(Size2us::new(10, 1)), (0..10).collect::<Vec<_>>());
+    assert_eq!(every(USize2::new(10, 1)), (0..10).collect::<Vec<_>>());
 
-    let size = Size2us::new(4096, 64);
+    let size = USize2::new(4096, 64);
     let rggb = Mosaic::Bayer(BayerPattern::Rggb);
     for (slot, expected) in [[65_536, 0, 0, 0], [0, 32_768, 32_768, 0], [0, 0, 0, 65_536]]
         .into_iter()
@@ -998,7 +998,7 @@ fn noise_variance_scales_by_the_mean_inverse_confidence() {
 /// pixel keeps all three, a survivor weight of 3, and the master is frame 0.
 #[test]
 fn twilight_flats_normalize_per_color() {
-    let size = Size2us::new(16, 16);
+    let size = USize2::new(16, 16);
     let cfa = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
     let pattern: Vec<f32> = (0..size.pixel_count())
         .map(|idx| 0.25 + (37 * idx % 64) as f32 / 1024.0)
@@ -1052,7 +1052,7 @@ fn twilight_flats_normalize_per_color() {
 /// past the sample limit for every slot of the RGB frames, and under it for the mosaic's colors.
 #[test]
 fn spilled_unwarped_frames_normalize_from_their_stored_samples() {
-    let size = Size2us::new(300, 240);
+    let size = USize2::new(300, 240);
     let rggb = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
     let pixels = |frame: usize, channel: usize| -> Vec<f32> {
         let mut rng = TestRng::new(frame as u64 * 3 + channel as u64);

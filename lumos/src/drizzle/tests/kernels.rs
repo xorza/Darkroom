@@ -22,7 +22,7 @@ struct OnePixel {
 
 impl OnePixel {
     /// An image of `bg` with this pixel set.
-    fn on(self, size: Size2us, bg: f32) -> LinearImage {
+    fn on(self, size: USize2, bg: f32) -> LinearImage {
         let mut pixels = vec![bg; size.pixel_count()];
         pixels[size.idx_of(self.at)] = self.value;
         mono_image(size, pixels)
@@ -30,7 +30,7 @@ impl OnePixel {
 }
 
 /// A pixel-weight map that lets only `pixel` deposit.
-fn only(size: Size2us, pixel: USizeVec2) -> Buffer2<f32> {
+fn only(size: USize2, pixel: USizeVec2) -> Buffer2<f32> {
     let mut weights = Buffer2::new_filled(size, 0.0);
     weights[pixel] = 1.0;
     weights
@@ -92,7 +92,7 @@ fn a_constant_reads_back_wherever_weight_landed() {
     const GATE: f32 = 0.5;
     const FILL: f32 = -7.0;
 
-    let size = Size2us::new(20, 20);
+    let size = USize2::new(20, 20);
     let transforms = [
         ("identity", Transform::identity()),
         ("shift", Transform::translation(DVec2::new(0.3, -0.2))),
@@ -129,7 +129,7 @@ fn a_constant_reads_back_wherever_weight_landed() {
 /// cells in four to the fill.
 #[test]
 fn two_frames_combine_to_their_weighted_mean() {
-    let size = Size2us::new(12, 12);
+    let size = USize2::new(12, 12);
     for kernel in DrizzleKernel::ALL {
         let product = DrizzleConfig {
             stack: StackConfig {
@@ -175,7 +175,7 @@ fn two_frames_combine_to_their_weighted_mean() {
 /// the same box while the map stays axis-aligned. Every quantity is exact in f32.
 #[test]
 fn one_bright_pixel_fills_its_own_block() {
-    let size = Size2us::new(6, 6);
+    let size = USize2::new(6, 6);
     let image = OnePixel {
         at: USizeVec2::new(1, 1),
         value: 2.0,
@@ -225,7 +225,7 @@ fn one_bright_pixel_fills_its_own_block() {
 /// the product of shares rounds once more, so 4ε holds.
 #[test]
 fn the_pixel_fraction_sets_the_cells_a_drop_reaches() {
-    let size = Size2us::new(6, 6);
+    let size = USize2::new(6, 6);
     let pixel = USizeVec2::new(2, 2);
     let transform = Transform::translation(DVec2::splat(0.1));
     for kernel in [DrizzleKernel::Turbo, DrizzleKernel::Square] {
@@ -275,7 +275,7 @@ fn the_pixel_fraction_sets_the_cells_a_drop_reaches() {
 /// `NO_DATA`; a kept cell carries no flag.
 #[test]
 fn min_weight_fraction_gates_against_the_deepest_weight() {
-    let size = Size2us::new(4, 4);
+    let size = USize2::new(4, 4);
     let config = DrizzleConfig {
         min_weight_fraction: 0.6,
         ..kernel_config(DrizzleKernel::Turbo, 2.0, 0.5)
@@ -321,7 +321,7 @@ fn min_weight_fraction_gates_against_the_deepest_weight() {
 /// to 49·ε of the bright one.
 #[test]
 fn lanczos_keeps_its_negative_lobes() {
-    let size = Size2us::new(20, 20);
+    let size = USize2::new(20, 20);
     let product = drizzle_one(
         kernel_config(DrizzleKernel::Lanczos, 1.0, 1.0),
         &DrizzleFrame::new(
@@ -351,7 +351,7 @@ fn lanczos_keeps_its_negative_lobes() {
 /// even cells take the fill with no weight and no coverage.
 #[test]
 fn the_point_kernel_lands_each_pixel_on_one_odd_cell() {
-    let size = Size2us::new(4, 4);
+    let size = USize2::new(4, 4);
     let image = mono_image(size, (0..16).map(|i| i as f32 + 1.0).collect());
     let config = DrizzleConfig {
         fill_value: -999.0,
@@ -388,7 +388,7 @@ fn the_point_kernel_lands_each_pixel_on_one_odd_cell() {
 /// input and weigh every pixel 1, exactly.
 #[test]
 fn unit_sampling_copies_the_input() {
-    let size = Size2us::new(5, 5);
+    let size = USize2::new(5, 5);
     let pixels: Vec<f32> = (0..25).map(|i| i as f32 * 0.75 - 4.0).collect();
     for kernel in [
         DrizzleKernel::Turbo,
@@ -417,7 +417,7 @@ fn unit_sampling_copies_the_input() {
 /// gate, which zeroes the cells it fills, a Lanczos lobe's negative ones among them.
 #[test]
 fn a_drop_deposits_its_pixel_weight() {
-    let size = Size2us::new(16, 16);
+    let size = USize2::new(16, 16);
     let pixel = USizeVec2::new(7, 7);
     let mut weights = only(size, pixel);
     weights[pixel] = 2.5;
@@ -454,7 +454,7 @@ fn a_drop_deposits_its_pixel_weight() {
 fn a_zero_pixel_weight_keeps_the_pixel_out() {
     const GATE: f32 = 0.25;
 
-    let size = Size2us::new(12, 12);
+    let size = USize2::new(12, 12);
     let pixel = USizeVec2::new(5, 5);
     let transform = Transform::translation(DVec2::new(0.3, -0.2));
     let mut excluded = Buffer2::new_filled(size, 1.0);
@@ -512,7 +512,7 @@ fn a_zero_pixel_weight_keeps_the_pixel_out() {
 /// pixfrac 1, where every drop is its own pixel. A few roundings of values near 6.
 #[test]
 fn pixel_weights_scale_their_pixel_share() {
-    let size = Size2us::new(4, 4);
+    let size = USize2::new(4, 4);
     let mut half = Buffer2::new_filled((4, 4), 1.0f32);
     half[(1, 1)] = 0.5;
     let mut acc = accumulator(
@@ -536,7 +536,7 @@ fn pixel_weights_scale_their_pixel_share() {
 /// counts one frame of two, 0.5.
 #[test]
 fn a_frame_of_zero_pixel_weights_is_not_gathered() {
-    let size = Size2us::new(8, 8);
+    let size = USize2::new(8, 8);
     let mut frames = drizzle_frames(
         vec![constant_image(size, 3.0), constant_image(size, 100.0)],
         &[Transform::identity(); 2],
@@ -561,7 +561,7 @@ fn a_frame_of_zero_pixel_weights_is_not_gathered() {
 #[test]
 fn radial_drops_lose_the_flux_that_misses_the_grid() {
     const SIDE: i64 = 8;
-    let size = Size2us::new(SIDE as usize, SIDE as usize);
+    let size = USize2::new(SIDE as usize, SIDE as usize);
     let config = kernel_config(DrizzleKernel::Gaussian, 1.0, 1.0);
     let product = drizzle_one(
         config,
@@ -610,7 +610,7 @@ fn radial_drops_lose_the_flux_that_misses_the_grid() {
 /// drops of a flat 4×4 frame leave the weight a centred one leaves, each at its nearest pixel.
 #[test]
 fn a_narrow_gaussian_drop_off_a_pixel_centre_deposits_its_weight() {
-    let size = Size2us::new(4, 4);
+    let size = USize2::new(4, 4);
     let config = kernel_config(DrizzleKernel::Gaussian, 1.0, 0.1);
     let weights = |shift: f64| {
         let product = drizzle_one(
@@ -632,7 +632,7 @@ fn a_narrow_gaussian_drop_off_a_pixel_centre_deposits_its_weight() {
 /// cells with those three values, exactly — see `one_bright_pixel_fills_its_own_block`.
 #[test]
 fn rgb_channels_drizzle_independently() {
-    let size = Size2us::new(4, 4);
+    let size = USize2::new(4, 4);
     let plane = |value: f32| {
         let mut pixels = vec![0.0f32; 16];
         pixels[5] = value;
@@ -664,7 +664,7 @@ fn rgb_channels_drizzle_independently() {
 /// cell, so the coverage of those cells counts that frame alone: 1/2.
 #[test]
 fn a_zero_lanczos_tap_marks_no_coverage() {
-    let size = Size2us::new(13, 13);
+    let size = USize2::new(13, 13);
     let pixel = USizeVec2::new(6, 6);
     let config = kernel_config(DrizzleKernel::Lanczos, 1.0, 1.0);
     let shift = Transform::translation(DVec2::new(0.5, 0.0));

@@ -39,7 +39,7 @@ use crate::stack_product::StackProduct;
 use crate::stack_product::coverage::Coverage;
 use crate::stack_product::fits::error::{ProductError, ProductRefusal};
 use crate::stack_product::weight_kind::WeightKind;
-use common::Size2us;
+use common::USize2;
 
 /// 1: the report in the primary header, the quality planes in `CCDData`'s layout. 2: what the
 /// frame weights of the weight plane were, which a plane of inverse variances is scaled by.
@@ -337,7 +337,7 @@ fn map_hdu<'a>(
 }
 
 /// An image's width and height, then its `channels` when it has more than one.
-fn image_shape(size: Size2us, channels: usize) -> ArrayVec<usize, 3> {
+fn image_shape(size: USize2, channels: usize) -> ArrayVec<usize, 3> {
     [size.width, size.height]
         .into_iter()
         .chain((channels > 1).then_some(channels))
@@ -417,7 +417,7 @@ fn check_mask(mask: Option<StoredPlanes<u8>>, image: &LinearImage) -> Result<(),
 }
 
 /// The planes `stored` holds, one or three of `size`: [`check_plane`] admitted only those.
-fn quality_map(stored: StoredPlanes<f32>, size: Size2us) -> QualityMap {
+fn quality_map(stored: StoredPlanes<f32>, size: USize2) -> QualityMap {
     let mut planes = stored
         .into_iter()
         .map(|samples| Buffer2::new(size, samples));

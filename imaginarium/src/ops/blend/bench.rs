@@ -8,7 +8,7 @@ use std::time::Duration;
 use criterion::{BenchmarkId, Criterion};
 use strum::IntoEnumIterator;
 
-use common::Size2us;
+use common::USize2;
 use common::bench::{Kind, Scale};
 
 use crate::bench::fixture::{self, Backend, Backends, Variant};
@@ -36,10 +36,8 @@ pub(crate) fn atomic(c: &mut Criterion) {
     let mut group = Kind::Atomic.group(c, "blend", Scale::Micros);
     for format in ColorFormat::ALL {
         let mut layers = None;
-        let mut out = InterleavedImage::new_zeroed(InterleavedDesc::new(
-            Size2us::new(FRAME.width, 1),
-            format,
-        ));
+        let mut out =
+            InterleavedImage::new_zeroed(InterleavedDesc::new(USize2::new(FRAME.width, 1), format));
         group.throughput(fixture::throughput(FRAME.width, 2 * format.byte_len()));
         let kernel = BlendKernel::of(format);
         for mode in BlendMode::iter() {
@@ -54,8 +52,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
                     BenchmarkId::new(Backend::Cpu.case(variant.id()), input),
                     |b| {
                         let [src, dst] = layers.get_or_insert_with(|| {
-                            [1, 2]
-                                .map(|seed| scene::sky(format, Size2us::new(FRAME.width, 1), seed))
+                            [1, 2].map(|seed| scene::sky(format, USize2::new(FRAME.width, 1), seed))
                         });
                         let (src, dst, out) = (src.bytes(), dst.bytes(), out.bytes_mut());
                         if let Variant::Kernel { kernel, tier } = variant {

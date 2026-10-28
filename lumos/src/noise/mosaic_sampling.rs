@@ -12,7 +12,7 @@ use crate::image::metadata::bg_split::BgSplit;
 use crate::math::statistics::median_mad::MedianMad;
 use crate::noise::bg_from_gain;
 use crate::noise::binned_samples::BinnedSamples;
-use common::Size2us;
+use common::USize2;
 use glam::USizeVec2;
 
 /// The photosites of a `size` frame of `mosaic` a statistic samples: those of the rows
@@ -20,7 +20,7 @@ use glam::USizeVec2;
 /// `excluded` names.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct MosaicSampling<E> {
-    pub(crate) size: Size2us,
+    pub(crate) size: USize2,
     pub(crate) mosaic: Mosaic,
     pub(crate) excluded: E,
     pub(crate) per_color: usize,
@@ -55,7 +55,7 @@ impl Pair {
 impl<E: Fn(usize) -> bool> MosaicSampling<E> {
     /// The index and color of every sampled photosite.
     pub(super) fn for_each_photosite(&self, mut visit: impl FnMut(usize, usize)) {
-        let Size2us { width, .. } = self.size;
+        let USize2 { width, .. } = self.size;
         for y in CfaType::from(self.mosaic).sampled_rows(self.size, self.per_color) {
             for x in 0..width {
                 let idx = y * width + x;
@@ -76,7 +76,7 @@ impl<E: Fn(usize) -> bool> MosaicSampling<E> {
     /// Every pair of a sampled photosite and the nearest same-color photosite to its right in its
     /// row; a pair touching an excluded pixel is skipped.
     pub(super) fn for_each_pair(&self, mut visit: impl FnMut(Pair)) {
-        let Size2us { width, .. } = self.size;
+        let USize2 { width, .. } = self.size;
         for y in CfaType::from(self.mosaic).sampled_rows(self.size, self.per_color) {
             for x in 0..width {
                 let color = self.mosaic.slot_at(USizeVec2::new(x, y));
@@ -196,7 +196,7 @@ mod tests {
     use crate::internals::test_rng::TestRng;
     use crate::math::statistics::subsample::MAX_STATISTIC_SAMPLES;
     use crate::noise::mosaic_sampling::MosaicSampling;
-    use common::Size2us;
+    use common::USize2;
     use glam::USizeVec2;
 
     /// Each color of a Bayer mosaic reads its own noise, through a gradient the differences
@@ -207,7 +207,7 @@ mod tests {
     /// MAD's standard error is 1.166·σ/√n, so 3 of them is at most 1.94% of σ; 2% covers both.
     #[test]
     fn each_bayer_color_reads_its_own_noise() {
-        let size = Size2us::new(512, 512);
+        let size = USize2::new(512, 512);
         let rggb = Mosaic::Bayer(BayerPattern::Rggb);
         let sigmas = [0.01f32, 0.02, 0.03];
         let mut rng = TestRng::new(9);

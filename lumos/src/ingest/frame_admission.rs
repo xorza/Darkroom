@@ -106,7 +106,7 @@ impl<'a> FrameAdmission<'a> {
 
 #[cfg(test)]
 mod tests {
-    use common::{CancelToken, Size2us};
+    use common::{CancelToken, USize2};
 
     use crate::frame::admitted::Admitted;
     use crate::ingest::frame_admission::FrameAdmission;
@@ -117,7 +117,7 @@ mod tests {
     /// the frame again, and reads 0.5.
     #[test]
     fn a_measured_frame_is_taken_unless_it_lacks_a_spread() {
-        let image = mono_image(Size2us::new(8, 8), vec![0.5; 64]);
+        let image = mono_image(USize2::new(8, 8), vec![0.5; 64]);
         let cancel = CancelToken::new();
         let mut measured = Admitted::measure(&image);
         measured.stats.medians[0] = 7.0;

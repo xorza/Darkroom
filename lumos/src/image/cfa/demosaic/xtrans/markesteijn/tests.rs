@@ -71,7 +71,7 @@ fn markesteijn_matches_librtprocess_bit_for_bit() {
             0.1 + 1.6 * (t - t.floor() - 0.5).abs()
         }),
     ];
-    let size = Size2us::new(WIDTH, HEIGHT);
+    let size = USize2::new(WIDTH, HEIGHT);
     let pattern = XTRANS_PATTERN;
     for (passes, digests) in PASSES.into_iter().zip(DIGESTS) {
         for ((name, scene), expected) in scenes.into_iter().zip(digests) {
@@ -110,7 +110,7 @@ fn markesteijn_matches_librtprocess_bit_for_bit() {
 fn constant_color_reconstructs_to_rounding_at_every_size() {
     let pattern = XTRANS_PATTERN;
     for side in [12, 24, 25, 37, 130] {
-        let size = Size2us::new(side, side);
+        let size = USize2::new(side, side);
         for color in [[0.5f32; 3], [0.8, 0.5, 0.2], [0.1, 0.9, 0.4]] {
             let data = Buffer2::from_fn(size, |x, y| {
                 color[pattern.color_at(USizeVec2::new(x, y)).idx()]
@@ -141,7 +141,7 @@ fn constant_color_reconstructs_to_rounding_at_every_size() {
 /// that a flat field makes zero.
 #[test]
 fn markesteijn_ramp_is_finite_and_zeros_stay_zero() {
-    let size = Size2us::new(40, 40);
+    let size = USize2::new(40, 40);
     let ramp = Buffer2::from_fn(size, |x, y| {
         (y * size.width + x) as f32 / size.pixel_count() as f32
     });
@@ -188,13 +188,13 @@ fn margin_is_the_least_that_reads_only_computed_colors() {
     for passes in PASSES {
         let mut least = 0;
         for phase in 0..3 {
-            let extent = Size2us::new(TILE - 1, TILE - 3);
+            let extent = USize2::new(TILE - 1, TILE - 3);
             let place = TilePlace {
                 top: 3 + phase,
                 left: 3 + phase,
                 size: extent,
             };
-            let size = Size2us::new(place.left + extent.width + 3, place.top + extent.height + 3);
+            let size = USize2::new(place.left + extent.width + 3, place.top + extent.height + 3);
             let data = Buffer2::from_fn(size, |_, _| 0.1 + 0.8 * rng.next_f32());
             let xtrans = MosaicView::new(&data, pattern);
             let hex = HexTable::new(pattern);
@@ -237,7 +237,7 @@ fn margin_is_the_least_that_reads_only_computed_colors() {
 /// Random samples, so no stencil can hide behind equal neighbours.
 #[test]
 fn markesteijn_inside_the_border_matches_a_larger_frame() {
-    let large = Size2us::new(152, 144);
+    let large = USize2::new(152, 144);
     let mut rng = TestRng::new(7);
     let samples = Buffer2::from_fn(large, |_, _| 0.1 + 0.8 * rng.next_f32());
     let rows = XTRANS_PATTERN.rows();
@@ -249,7 +249,7 @@ fn markesteijn_inside_the_border_matches_a_larger_frame() {
         )
         .unwrap();
         for (ox, oy) in [(12, 12), (13, 14), (14, 13)] {
-            let small = Size2us::new(128 + (ox + 2 * oy) % 3, 120 + (2 * ox + oy) % 3);
+            let small = USize2::new(128 + (ox + 2 * oy) % 3, 120 + (2 * ox + oy) % 3);
             let mut shifted = [[0u8; 6]; 6];
             for (y, row) in shifted.iter_mut().enumerate() {
                 for (x, color) in row.iter_mut().enumerate() {

@@ -14,7 +14,7 @@ use std::f32::consts::PI;
 /// centroid is refused. No positive light at all, or a stamp off the frame, gives nothing.
 #[test]
 fn windowed_centroid_limits() {
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let centre = DVec2::splat(32.0);
     let star = Measured::flat(
         &SyntheticStar::new(centre.as_vec2(), 0.8, StarProfile::gaussian(2.5)).stamp(size, 0.1),
@@ -71,7 +71,7 @@ fn windowed_centroid_limits() {
 
 #[test]
 fn moment_star_of_a_clean_star() {
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let centre = DVec2::splat(32.0);
     let npix = (2 * TEST_STAMP_RADIUS + 1) as f32;
     let reference = |amplitude: f32| {
@@ -123,7 +123,7 @@ fn moment_star_of_a_clean_star() {
 /// reads, the mean of a uniform map over the stamp's outer ring, doubles bit for bit.
 #[test]
 fn snr_halves_when_the_noise_doubles() {
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let pixels =
         SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::gaussian(2.5)).stamp(size, 0.1);
     let snr = |noise: f32| {
@@ -139,7 +139,7 @@ fn snr_halves_when_the_noise_doubles() {
 /// up to the f32 rounding of `v + 10 − 10` — 2⁻²⁰ per pixel, 529 · 1e-6 = 5e-4 of a flux of 15.7.
 #[test]
 fn a_bright_sky_changes_nothing() {
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let measure = |sky: f32| {
         let pixels =
             SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::gaussian(2.5)).stamp(size, sky);
@@ -165,7 +165,7 @@ fn a_bright_sky_changes_nothing() {
 /// error itself lies within 5 of it.
 #[test]
 fn the_windowed_centroid_reports_its_propagated_noise() {
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let centre = DVec2::splat(32.0);
     let clean =
         SyntheticStar::new(centre.as_vec2(), 0.8, StarProfile::gaussian(2.5)).stamp(size, 0.1);
@@ -245,7 +245,7 @@ fn measure_star_multiple_stars_independent() {
 
     // A candidate whose stamp would leave the frame is not measured.
     let edge = Region {
-        bbox: Rect2us::new(USizeVec2::new(0, 30), USizeVec2::new(6, 36)),
+        bbox: USizeRect2::new(USizeVec2::new(0, 30), USizeVec2::new(6, 36)),
         peak: USizeVec2::new(3, 32),
         area: 18,
     };
@@ -263,7 +263,7 @@ fn measure_star_multiple_stars_independent() {
 #[test]
 fn a_one_sided_tail_moves_sround() {
     let mut pixels = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::gaussian(2.5))
-        .stamp(Size2us::new(64, 64), 0.1);
+        .stamp(USize2::new(64, 64), 0.1);
     SyntheticStar::new(
         Vec2::new(36.0, 32.0),
         0.3,
@@ -299,8 +299,8 @@ fn moment_star_local_offset_removes_what_the_global_map_left() {
     let height = 64;
     let pos = DVec2::splat(32.0);
     let pixels = SyntheticStar::new(pos.as_vec2(), 0.8, StarProfile::gaussian(2.5))
-        .stamp(Size2us::new(width, height), 0.1);
-    let bg = bg_map::uniform(Size2us::new(width, height), 0.05, 0.01);
+        .stamp(USize2::new(width, height), 0.1);
+    let bg = bg_map::uniform(USize2::new(width, height), 0.05, 0.01);
     let residual = bg.residual_of(&pixels);
     let sky = bg.sky_noise();
     let global_bg = global_bg(&sky, pos);
@@ -381,7 +381,7 @@ fn moment_star_invalid_position_returns_none() {
 /// that lands straight in flux and SNR.
 #[test]
 fn annulus_sky_is_centred_on_the_fitted_position() {
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     // 0.02 of sky per column, so shifting the annulus one pixel moves its sigma-clipped median by
     // ~0.02 — several percent of this star's flux once summed over the stamp.
     let sky = |x: usize| 0.1 + 0.02 * x as f32;
@@ -411,7 +411,7 @@ fn annulus_sky_is_centred_on_the_fitted_position() {
     let radius = measure_grid::stamp_radius(4.0);
     // Seeded two pixels off the star, so the fit has to cross a pixel boundary to reach it.
     let region = Region {
-        bbox: Rect2us::new(USizeVec2::new(28, 26), USizeVec2::new(40, 38)),
+        bbox: USizeRect2::new(USizeVec2::new(28, 26), USizeVec2::new(40, 38)),
         peak: USizeVec2::new(34, 32),
         area: 40,
     };
@@ -461,7 +461,7 @@ fn annulus_sky_is_centred_on_the_fitted_position() {
 fn sky_noise_adds_no_flux_or_snr() {
     const SIGMA: f32 = 0.0625;
     const SKY: f32 = 0.25;
-    let size = Size2us::new(48, 48);
+    let size = USize2::new(48, 48);
     let pixels = Buffer2::from_fn(size, |x, y| {
         if (x + y) % 2 == 0 {
             SKY + SIGMA
@@ -508,7 +508,7 @@ fn empty_sky_stamps_measure_no_signal() {
     // instead adds σ/√(2π) ≈ 0.399σ per pixel, an SNR of 0.399·√npix: 6.0 at r = 7, 10.8 at 13
     // and 12.4 at 15, every stamp a "star".
     let side = 496;
-    let size = Size2us::new(side, side);
+    let size = USize2::new(side, side);
     let sigma = 0.01f32;
     let mut residual = Buffer2::new_filled((side, side), 0.0f32);
     patterns::add_gaussian_noise(residual.pixels_mut(), sigma, 7);
@@ -550,7 +550,7 @@ fn empty_sky_stamps_measure_no_signal() {
 /// pixels.
 #[test]
 fn a_pixel_with_no_data_keeps_out_of_the_measurement() {
-    let size = Size2us::new(80, 80);
+    let size = USize2::new(80, 80);
     let centre = DVec2::splat(32.0);
     let pixels =
         SyntheticStar::new(centre.as_vec2(), 0.8, StarProfile::gaussian(2.5)).stamp(size, 0.1);

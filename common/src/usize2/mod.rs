@@ -13,12 +13,12 @@ use glam::USizeVec2;
 /// `width, height` pair also makes the two impossible to transpose at a call site — they are
 /// both `usize`, so the compiler cannot otherwise tell them apart.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub struct Size2us {
+pub struct USize2 {
     pub width: usize,
     pub height: usize,
 }
 
-impl Size2us {
+impl USize2 {
     #[inline]
     pub const fn new(width: usize, height: usize) -> Self {
         Self { width, height }
@@ -65,22 +65,22 @@ impl Size2us {
     }
 }
 
-impl Display for Size2us {
+impl Display for USize2 {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         write!(formatter, "{}x{}", self.width, self.height)
     }
 }
 
-impl From<(usize, usize)> for Size2us {
+impl From<(usize, usize)> for USize2 {
     #[inline]
     fn from((width, height): (usize, usize)) -> Self {
         Self { width, height }
     }
 }
 
-impl From<Size2us> for (usize, usize) {
+impl From<USize2> for (usize, usize) {
     #[inline]
-    fn from(size: Size2us) -> Self {
+    fn from(size: USize2) -> Self {
         (size.width, size.height)
     }
 }

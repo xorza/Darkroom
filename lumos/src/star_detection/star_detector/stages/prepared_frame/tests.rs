@@ -8,7 +8,7 @@ use crate::internals::images::mono_image;
 use crate::internals::test_rng::TestRng;
 use crate::star_detection::star_detector::stages::detect::DetectionInput;
 use crate::star_detection::star_detector::stages::prepared_frame::*;
-use common::Size2us;
+use common::USize2;
 use glam::USizeVec2;
 
 /// `image` reduced to one plane, as the measurement plane is before its sky goes.
@@ -32,7 +32,7 @@ fn prepare_uniform() {
     let data = vec![0.5f32; 64 * 64];
     let image = LinearImage::from_interleaved(dim, data);
 
-    let pool = DetectionResources::new(Size2us::new(64, 64));
+    let pool = DetectionResources::new(USize2::new(64, 64));
     let result = prepare(&image, &pool);
 
     assert_eq!(result.width(), 64);
@@ -53,7 +53,7 @@ fn prepare_with_star() {
     let dim = PlanarDesc::new((width, height), ChannelLayout::Mono);
     let image = LinearImage::from_interleaved(dim, data);
 
-    let pool = DetectionResources::new(Size2us::new(width, height));
+    let pool = DetectionResources::new(USize2::new(width, height));
     let result = prepare(&image, &pool);
 
     // Star pixel should be preserved (no CFA, no defects)
@@ -74,7 +74,7 @@ fn the_median_filter_follows_interpolation() {
         detected: f32,
     }
 
-    let size = Size2us::new(8, 8);
+    let size = USize2::new(8, 8);
     let mut data = vec![0.125f32; size.pixel_count()];
     data[4 * size.width + 4] = 0.875;
 
@@ -195,7 +195,7 @@ fn prepare_rgb_equal_noise_is_mean() {
     let b = channel_with_mad(0.70, 0.02);
     let image = LinearImage::from_planar_channels(desc, vec![r.clone(), g.clone(), b.clone()]);
 
-    let pool = DetectionResources::new(Size2us::new(4, 4));
+    let pool = DetectionResources::new(USize2::new(4, 4));
     let out = prepare(&image, &pool);
 
     for (i, &out_v) in out.pixels().iter().enumerate() {
@@ -218,7 +218,7 @@ fn prepare_rgb_red_star_survives() {
     let b = channel_with_mad(0.10, 0.01);
     let image = LinearImage::from_planar_channels(desc, vec![r.clone(), g, b]);
 
-    let pool = DetectionResources::new(Size2us::new(4, 4));
+    let pool = DetectionResources::new(USize2::new(4, 4));
     let out = prepare(&image, &pool);
 
     // A 4 × 4 frame is too small for the noise estimate, which reads 0 in every channel, so the
@@ -247,9 +247,9 @@ fn saturation_is_marked_per_channel_or_from_the_decoders_flags() {
 
     use crate::internals::images::rgb_image;
 
-    use common::Size2us;
+    use common::USize2;
 
-    let size = Size2us::new(2, 1);
+    let size = USize2::new(2, 1);
     let image = rgb_image(size, [vec![0.6, 0.9], vec![1.0, 0.9], vec![0.6, 0.9]]);
     let mut mask = BitBuffer2::new_default(size);
     mark_saturated(&image, &mut mask);
@@ -270,7 +270,7 @@ fn saturation_is_marked_per_channel_or_from_the_decoders_flags() {
 
 /// A demosaiced frame of pure noise, as the demosaic correlates it: white noise of σ 0.01 on a sky
 /// of 0.1 laid out as an RGGB mosaic and interpolated by RCD.
-fn demosaiced_noise(size: Size2us, seed: u64) -> LinearImage {
+fn demosaiced_noise(size: USize2, seed: u64) -> LinearImage {
     use crate::image::cfa::bayer_pattern::BayerPattern;
     use crate::image::cfa::cfa_type::CfaType;
     use crate::image::cfa::mosaic::Mosaic;
@@ -307,7 +307,7 @@ fn demosaiced_noise(size: Size2us, seed: u64) -> LinearImage {
 /// 2σ passes 4 times the stated sky (0.089).
 #[test]
 fn the_detection_threshold_passes_the_sky_it_states() {
-    let size = Size2us::new(768, 768);
+    let size = USize2::new(768, 768);
     let image = demosaiced_noise(size, 11);
     let config = StarDetectionConfig::default();
     let mut pool = DetectionResources::new(size);
@@ -340,7 +340,7 @@ fn pixels_with_no_data_stay_out_of_the_sky_and_the_threshold() {
     use crate::image::flags::pixel_flags::PixelFlags;
     use crate::star_detection::star_detector::stages::detect::Candidates;
 
-    let size = Size2us::new(128, 128);
+    let size = USize2::new(128, 128);
     let missing = |idx: usize| idx % size.width < 64 && idx / size.width < 64;
     let mut rng = TestRng::new(5);
     let pixels: Vec<f32> = (0..size.pixel_count())

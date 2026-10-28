@@ -19,7 +19,7 @@ use crate::io::fits::linear::LINEAR_FITS_VERSION;
 use crate::io::fits::lumos_extension::LumosExtension;
 use crate::io::fits::metadata::domain_keywords::{PEDESTAL, PEDESTAL_LEVEL, SCALE_ORIGIN};
 use crate::io::null_policy::NullSamples;
-use common::Size2us;
+use common::USize2;
 use glam::USizeVec2;
 
 /// Why a FITS decode failed: the file's own failures, which a load of a path names the file for
@@ -103,7 +103,7 @@ pub enum FitsRefusal {
         axes: usize,
     },
     SideTooLong {
-        size: Size2us,
+        size: USize2,
     },
     SampleCountOverflow {
         shape: Vec<usize>,
@@ -185,7 +185,7 @@ pub enum FitsRefusal {
     ExtensionShape {
         extension: LumosExtension,
         shape: Vec<usize>,
-        image: Size2us,
+        image: USize2,
     },
     /// An extension at HDU `hdu` that names no image it is for.
     ClaimsNoImage {

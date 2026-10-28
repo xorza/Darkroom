@@ -9,7 +9,7 @@
 //! which a fused sum here would undo. The pixels whose window crosses an edge take the scalar
 //! per-pixel form.
 
-use common::Size2us;
+use common::USize2;
 use glam::USizeVec2;
 use simd::{F32_LANES, F32x8, Isa, Kernel};
 
@@ -19,12 +19,12 @@ use simd::{F32_LANES, F32x8, Isa, Kernel};
 #[derive(Debug, Clone, Copy)]
 pub(super) struct RowRing<'a> {
     rows: &'a [f32],
-    size: Size2us,
+    size: USize2,
 }
 
 impl<'a> RowRing<'a> {
     /// `rows`, whole rows of an image of `size`.
-    pub(super) fn new(rows: &'a [f32], size: Size2us) -> Self {
+    pub(super) fn new(rows: &'a [f32], size: USize2) -> Self {
         debug_assert!(
             !rows.is_empty() && rows.len().is_multiple_of(size.width),
             "a ring holds whole rows"

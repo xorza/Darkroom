@@ -5,7 +5,7 @@ use imaginarium::PlanarImage;
 
 use crate::image::flags::quality_map::QualityMap;
 use crate::image::linear_image::LinearImage;
-use common::Size2us;
+use common::USize2;
 
 /// The share of frames that reached each pixel, in `[0, 1]`.
 ///
@@ -22,7 +22,7 @@ pub enum Coverage {
     Uniform {
         value: f32,
         /// Kept so the plane can still be materialized on demand.
-        size: Size2us,
+        size: USize2,
     },
     /// Coverage measured per pixel: one plane every channel shares, or one per channel for a
     /// mosaic drizzled into the channels of its colors, which reach each channel at other pixels.

@@ -19,7 +19,7 @@ use crate::io::fits::extension_claims::{ExtensionClaims, IMAGE_KEYWORD, PRIMARY}
 use crate::io::fits::lumos_extension::{DescribedImage, LumosExtension};
 use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD};
 use crate::io::fits::plane_hdu::{FloatPlanes, PlaneHdu};
-use common::Size2us;
+use common::USize2;
 
 pub(super) const GAIN_EXTNAME: &str = "LUMGAIN";
 pub(super) const GAIN_FORMAT: &str = "FLATGAIN";
@@ -100,7 +100,7 @@ pub(crate) fn locate(
 /// over the channels' planes in turn, as the HDU stores it.
 pub(crate) fn decode(
     nodes: ArrayVec<Vec<f32>, 3>,
-    size: Size2us,
+    size: USize2,
     stated: Option<GainKey>,
 ) -> Result<FlatGain, FitsLoadError> {
     let grid = GainGrid::of(size);

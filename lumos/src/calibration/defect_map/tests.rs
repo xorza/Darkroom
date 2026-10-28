@@ -59,7 +59,7 @@ fn capped_color_sampling_spans_sensor_and_cfa_phases() {
             }
 
             let idxs =
-                sampling::color_sample_idxs(Size2us::new(width, height), cfa_type, target_color);
+                sampling::color_sample_idxs(USize2::new(width, height), cfa_type, target_color);
             assert_eq!(
                 idxs.len(),
                 population.min(MAX_MEDIAN_SAMPLES),
@@ -135,7 +135,7 @@ fn capped_color_sampling_matches_exact_row_and_column_statistics() {
 
 #[test]
 fn cancelled_detection_returns_error() {
-    let image = make_cfa(Size2us::new(4, 4), vec![0.5; 16], CfaType::Mono);
+    let image = make_cfa(USize2::new(4, 4), vec![0.5; 16], CfaType::Mono);
     let cancel = CancelToken::new();
     cancel.cancel();
 
@@ -151,7 +151,7 @@ fn cancelled_detection_returns_error() {
 
 #[test]
 fn quantization_floor_scales_with_bit_depth_and_master_count() {
-    let size = Size2us::new(128usize, 64usize);
+    let size = USize2::new(128usize, 64usize);
     let expected = [10 * size.width + 10, 20 * size.width + 80];
     let below_threshold = [30 * size.width + 20, 40 * size.width + 90];
 
@@ -213,7 +213,7 @@ fn cfa_stack_propagates_raw_quantization_into_hot_detection() {
             for &idx in &below_threshold {
                 pixels[idx] += 4.0 * master_sigma;
             }
-            let mut image = make_cfa(Size2us::new(width, height), pixels, CfaType::Mono);
+            let mut image = make_cfa(USize2::new(width, height), pixels, CfaType::Mono);
             image
                 .metadata
                 .derived
@@ -259,7 +259,7 @@ fn correct_clustered_defect_uses_only_good_neighbors() {
     // the few good ones — the defect mask excludes the bad neighbours. Pre-mask, the neighbour
     // median was dominated by the cluster and left the pixel ~uncorrected (≈0.95 here).
     let cfa = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
-    let size = Size2us::new(16usize, 16usize);
+    let size = USize2::new(16usize, 16usize);
     // Red pixels sit at (even,even). Target (6,6); make 5 of its 8 stride-2 red neighbours hot.
     let hot = [(6, 6), (4, 6), (8, 6), (6, 4), (6, 8), (4, 4)];
     let mut px = vec![0.5f32; size.pixel_count()];
@@ -297,7 +297,7 @@ fn correct_clustered_defect_uses_only_good_neighbors() {
 fn xtrans_hot_pixel_correction_uses_same_color() {
     // X-Trans hot pixels must be repaired from SAME-COLOR neighbours, not the global mean.
     let cfa = CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN));
-    let size = Size2us::new(12usize, 12usize);
+    let size = USize2::new(12usize, 12usize);
     // Distinct per-color baselines so a wrong-color repair is detectable.
     let color_val = |c: usize| match c {
         0 => 0.1, // R
@@ -355,7 +355,7 @@ fn cfa_hot_pixel_detection() {
     pixels[35] = 10000.0; // hot at (5,5)
 
     let dark = make_cfa(
-        Size2us::new(6, 6),
+        USize2::new(6, 6),
         pixels,
         CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
     );
@@ -375,7 +375,7 @@ fn cfa_hot_pixel_detection() {
 #[test]
 fn cfa_hot_pixel_correction_bayer() {
     let pattern = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
-    let size = Size2us::new(6, 6);
+    let size = USize2::new(6, 6);
     let baseline = [100.0f32, 200.0, 50.0];
     let mut pixels: Vec<f32> = (0..size.pixel_count())
         .map(|i| baseline[pattern.slot_at(size.point_of(i))])
@@ -392,9 +392,9 @@ fn cfa_hot_pixel_correction_bayer() {
 fn cfa_hot_pixel_correction_mono() {
     // Mono: uses standard 8-connected neighbors
     let pixels = vec![10.0, 20.0, 30.0, 40.0, 1000.0, 50.0, 60.0, 70.0, 80.0];
-    let mut image = make_cfa(Size2us::new(3, 3), pixels, CfaType::Mono);
+    let mut image = make_cfa(USize2::new(3, 3), pixels, CfaType::Mono);
 
-    let defect_map = DefectMap::from_lists(Size2us::new(3, 3), hot(vec![4]), vec![]).unwrap();
+    let defect_map = DefectMap::from_lists(USize2::new(3, 3), hot(vec![4]), vec![]).unwrap();
 
     defect_map.correct(&mut image, None);
 
@@ -415,7 +415,7 @@ fn cfa_hot_pixel_detection_large() {
     }
 
     let dark = make_cfa(
-        Size2us::new(size, size),
+        USize2::new(size, size),
         pixels,
         CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
     );
@@ -454,7 +454,7 @@ fn per_channel_detection_bayer() {
     // Make one red pixel hot
     pixels[0] = 500.0; // (0,0) = R
 
-    let dark = make_cfa(Size2us::new(8, 8), pixels, pattern);
+    let dark = make_cfa(USize2::new(8, 8), pixels, pattern);
     let defect_map = DefectMap::new(dark.size())
         .detect_hot(
             &dark,
@@ -470,7 +470,7 @@ fn per_channel_detection_bayer() {
 
 #[test]
 fn dark_background_reconstructs_affine_mono_signal_through_image_edges() {
-    let size = Size2us::new(192usize, 128usize);
+    let size = USize2::new(192usize, 128usize);
     let data = Buffer2::from_fn(size, |x, y| 0.02 + 0.0001 * x as f32 + 0.0002 * y as f32);
     let bg = ColorMesh::measure(MaskedPlane::from(&data), &CfaType::Mono, DARK_BG_TILE_SIZE);
 
@@ -488,7 +488,7 @@ fn dark_background_reconstructs_affine_mono_signal_through_image_edges() {
 
 #[test]
 fn hot_detection_rejects_column_noise_gradient_and_amp_glow_but_keeps_clusters() {
-    let size = Size2us::new(384usize, 256usize);
+    let size = USize2::new(384usize, 256usize);
     let cfa = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
     let isolated = [(17usize, 23usize), (201, 48), (312, 190)];
     let mut cluster = Vec::new();
@@ -545,7 +545,7 @@ fn hot_detection_rejects_column_noise_gradient_and_amp_glow_but_keeps_clusters()
 #[test]
 fn cfa_no_defective_pixels() {
     let pixels = vec![100.0; 36];
-    let dark = make_cfa(Size2us::new(6, 6), pixels, CfaType::Mono);
+    let dark = make_cfa(USize2::new(6, 6), pixels, CfaType::Mono);
     let defect_map = DefectMap::new(dark.size())
         .detect_hot(
             &dark,
@@ -563,7 +563,7 @@ fn cfa_no_defective_pixels() {
 #[test]
 fn near_zero_median_dark_flags_only_hot_pixels() {
     // 64x64 mono dark: small zero-mean noise (many pixels < 0), median ≈ 0.
-    let size = Size2us::new(64usize, 64usize);
+    let size = USize2::new(64usize, 64usize);
     let mut pixels: Vec<f32> = (0..size.pixel_count())
         .map(|i| if i % 2 == 0 { -0.0003 } else { 0.0002 })
         .collect();
@@ -595,7 +595,7 @@ fn cold_pixels_detected_from_flat() {
     // 6x6 mono flat: uniform illumination 0.4 with one dead pixel (no response).
     let mut pixels = vec![0.4f32; 36];
     pixels[5] = 0.0; // dead pixel at index 5
-    let flat = make_cfa(Size2us::new(6, 6), pixels, CfaType::Mono);
+    let flat = make_cfa(USize2::new(6, 6), pixels, CfaType::Mono);
 
     let defect_map = DefectMap::new(flat.size())
         .detect_cold(&flat, &CancelToken::never())
@@ -615,7 +615,7 @@ fn cold_pixels_detected_from_flat() {
 /// neighbourhood median, so none falls below half of it.
 #[test]
 fn uniform_flat_flags_no_cold() {
-    let flat = make_cfa(Size2us::new(8, 8), vec![0.5f32; 64], CfaType::Mono);
+    let flat = make_cfa(USize2::new(8, 8), vec![0.5f32; 64], CfaType::Mono);
     let defect_map = DefectMap::new(flat.size())
         .detect_cold(&flat, &CancelToken::never())
         .unwrap();
@@ -629,7 +629,7 @@ fn uniform_flat_flags_no_cold() {
 /// the genuinely dead pixel and leaves both edges alone.
 #[test]
 fn cold_detection_survives_vignetting_gradient() {
-    let size = Size2us::new(16usize, 16usize);
+    let size = USize2::new(16usize, 16usize);
     let mut pixels: Vec<f32> = (0..size.pixel_count())
         .map(|i| 0.2 + 0.6 * (i % size.width) as f32 / (size.width - 1) as f32)
         .collect();
@@ -662,11 +662,11 @@ fn detect_hot_and_cold_combine() {
     // Near-zero dark with one hot pixel; illuminated flat with one dead pixel.
     let mut dark_px = vec![0.001f32; 36];
     dark_px[0] = 0.5; // hot
-    let dark = make_cfa(Size2us::new(6, 6), dark_px, CfaType::Mono);
+    let dark = make_cfa(USize2::new(6, 6), dark_px, CfaType::Mono);
 
     let mut flat_px = vec![0.4f32; 36];
     flat_px[5] = 0.0; // dead
-    let flat = make_cfa(Size2us::new(6, 6), flat_px, CfaType::Mono);
+    let flat = make_cfa(USize2::new(6, 6), flat_px, CfaType::Mono);
 
     let defect_map = DefectMap::new(dark.size())
         .detect_hot(
@@ -695,7 +695,7 @@ fn detect_hot_and_cold_combine() {
 fn a_hot_pixel_keeps_the_residual_its_detection_tested() {
     let mut corner = vec![0.25f32; 36];
     corner[0] = 1.0;
-    let dark = make_cfa(Size2us::new(6, 6), corner, CfaType::Mono);
+    let dark = make_cfa(USize2::new(6, 6), corner, CfaType::Mono);
     let map = DefectMap::new(dark.size())
         .detect_hot(
             &dark,
@@ -712,7 +712,7 @@ fn a_hot_pixel_keeps_the_residual_its_detection_tested() {
         }
     );
 
-    let size = Size2us::new(32, 32);
+    let size = USize2::new(32, 32);
     let mut ramp: Vec<f32> = (0..size.pixel_count())
         .map(|i| 0.25 + (i % size.width) as f32 / 1024.0)
         .collect();
@@ -736,7 +736,7 @@ fn a_hot_pixel_keeps_the_residual_its_detection_tested() {
 #[test]
 fn xtrans_cold_pixel_detected() {
     let pattern = CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN));
-    let size = Size2us::new(24usize, 24usize);
+    let size = USize2::new(24usize, 24usize);
     let color_val = |c: usize| 0.1 * (c + 1) as f32;
     let mut px: Vec<f32> = (0..size.pixel_count())
         .map(|i| color_val(pattern.slot_at(USizeVec2::new(i % size.width, i / size.width))))
@@ -768,9 +768,9 @@ fn xtrans_cold_pixel_detected() {
 #[should_panic(expected = "cannot feed a defect map")]
 fn correct_cfa_dimension_mismatch() {
     let pixels = vec![10.0; 9];
-    let mut image = make_cfa(Size2us::new(3, 3), pixels, CfaType::Mono);
+    let mut image = make_cfa(USize2::new(3, 3), pixels, CfaType::Mono);
 
-    let defect_map = DefectMap::from_lists(Size2us::new(2, 2), hot(vec![]), vec![]).unwrap();
+    let defect_map = DefectMap::from_lists(USize2::new(2, 2), hot(vec![]), vec![]).unwrap();
 
     defect_map.correct(&mut image, None);
 }
@@ -781,7 +781,7 @@ fn correct_cfa_dimension_mismatch() {
 /// none of 4. An index past the sensor is refused rather than stored.
 #[test]
 fn a_pixel_hot_and_dead_counts_once() {
-    let size = Size2us::new(4, 4);
+    let size = USize2::new(4, 4);
     let map = DefectMap::from_lists(size, hot(vec![1, 2]), vec![2, 3]).unwrap();
     let summary = map.summary(&CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)));
     let color = |hot, cold, defective, photosites| ColorDefects {
@@ -838,7 +838,7 @@ fn the_lower_tail_constant_is_the_reciprocal_normal_percentile() {
 /// hot pixels, at about 0.02, and put the cut near 0.039: it flagged none.
 #[test]
 fn a_dense_warm_population_is_flagged() {
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let mut rng = TestRng::new(31);
     let pixels: Vec<f32> = (0..size.pixel_count())
         .map(|idx| {
@@ -866,7 +866,7 @@ fn a_dense_warm_population_is_flagged() {
 #[test]
 fn the_ring_plane_reads_the_level_at_the_pixel() {
     use crate::calibration::defect_map::ring_reference::RingReference;
-    let size = Size2us::new(40, 40);
+    let size = USize2::new(40, 40);
     let level = |x: usize, y: usize| 0.1 + 0.001 * x as f32 + 0.002 * y as f32;
     let mut pixels: Vec<f32> = (0..size.pixel_count())
         .map(|idx| level(idx % size.width, idx / size.width))
@@ -897,7 +897,7 @@ fn the_ring_plane_reads_the_level_at_the_pixel() {
         .at(RingFrame::of(spotted.data()), &cfa, USizeVec2::new(20, 20))
         .unwrap();
     assert!((read - level(20, 20)).abs() < 1e-6, "{read}");
-    let tiny = make_cfa(Size2us::new(6, 6), vec![0.1; 36], CfaType::Mono);
+    let tiny = make_cfa(USize2::new(6, 6), vec![0.1; 36], CfaType::Mono);
     assert!(
         ring.at(
             RingFrame::of(tiny.data()),
@@ -926,7 +926,7 @@ fn hot(idxs: Vec<usize>) -> HotPixels {
 #[test]
 fn a_defect_is_not_repaired_from_a_repair() {
     let pattern = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
-    let size = Size2us::new(10, 10);
+    let size = USize2::new(10, 10);
     let baseline = [100.0f32, 200.0, 50.0];
     let mut pixels: Vec<f32> = (0..size.pixel_count())
         .map(|i| baseline[pattern.slot_at(size.point_of(i))])

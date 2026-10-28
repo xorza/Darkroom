@@ -22,7 +22,7 @@ use crate::io::fits::extension_claims::{ExtensionClaims, IMAGE_KEYWORD, PRIMARY}
 use crate::io::fits::lumos_extension::{DescribedImage, LumosExtension};
 use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD};
 use crate::io::fits::plane_hdu::{FlagBytes, PlaneHdu};
-use common::Size2us;
+use common::USize2;
 use glam::USizeVec2;
 
 pub(crate) const FLAGS_EXTNAME: &str = "LUMFLAGS";
@@ -121,7 +121,7 @@ pub(crate) fn join(
 
 /// The bytes of a flags HDU [`locate`] found, as read, as the plane of the `size` image
 /// they are for.
-pub(crate) fn plane(bytes: Vec<u8>, size: Size2us) -> Buffer2<u8> {
+pub(crate) fn plane(bytes: Vec<u8>, size: USize2) -> Buffer2<u8> {
     Buffer2::new(size, bytes)
 }
 
@@ -140,7 +140,7 @@ mod tests {
     use crate::internals::fits::fits_refusal;
     use crate::io::fits::error::FitsRefusal;
     use crate::io::fits::flags_extension;
-    use common::Size2us;
+    use common::USize2;
     use glam::USizeVec2;
 
     /// The stored flags join those the decode found, bit by bit. Stored, row-major over 3×2:
@@ -150,7 +150,7 @@ mod tests {
     /// at all, and a byte past the known bits — 0x80 here — is refused.
     #[test]
     fn stored_flags_join_the_decoded_ones() {
-        let size = Size2us::new(3, 2);
+        let size = USize2::new(3, 2);
         let decoded = PixelFlags::from_fn(size, |idx| match idx {
             1 => QualityFlags::NO_DATA,
             3 => QualityFlags::SATURATED,
@@ -188,7 +188,7 @@ mod tests {
     /// Nor do repaired nulls, whose repair the NaN replaces.
     #[test]
     fn only_flags_past_no_data_need_an_extension() {
-        let size = Size2us::new(2, 1);
+        let size = USize2::new(2, 1);
         for null in [
             QualityFlags::NO_DATA,
             QualityFlags::NO_DATA.union(QualityFlags::REPAIRED),

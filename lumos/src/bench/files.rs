@@ -147,13 +147,13 @@ mod tests {
     use crate::internals::fits::{load_cfa, load_linear};
     use crate::io::fits::cfa;
     use crate::io::load_ctx::LoadCtx;
-    use common::Size2us;
+    use common::USize2;
 
     /// Each file loads back as what was written, to within half the 16-bit step `0.5 / 65535` for
     /// the integer files and exactly for the float ones.
     #[test]
     fn each_file_loads_back_as_written() {
-        let size = Size2us::new(60, 40);
+        let size = USize2::new(60, 40);
         let field = Field::Typical;
         let ctx = LoadCtx::default();
         let within_half_step = |loaded: &[f32], expected: &[f32]| {

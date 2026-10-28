@@ -1,7 +1,7 @@
 //! The errors of the image types: a record or a pattern that is not one, and a frame of another
 //! shape than its set's.
 
-use common::Size2us;
+use common::USize2;
 use imaginarium::{DescError, PlanarDesc};
 use thiserror::Error;
 
@@ -42,7 +42,7 @@ pub enum FrameDescError {
     #[error(transparent)]
     Desc(#[from] DescError),
     #[error("{size} has a side past MAX_SIDE")]
-    SidePastMax { size: Size2us },
+    SidePastMax { size: USize2 },
 }
 
 /// Why a record is no [`FlatGain`](crate::image::flat_gain::FlatGain): what a damaged kept frame

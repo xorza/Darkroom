@@ -1,4 +1,4 @@
-use common::{Buffer2, Size2us};
+use common::{Buffer2, USize2};
 
 use crate::color::color_format::{ColorFormat, SampleType};
 use crate::error::{DescError, PlanesError};
@@ -9,7 +9,7 @@ use crate::planar::channel_layout::ChannelLayout;
 use crate::planar::planar_desc::PlanarDesc;
 use crate::planar::planar_image::PlanarImage;
 
-fn f32_image(format: ColorFormat, size: Size2us, samples: &[f32]) -> InterleavedImage {
+fn f32_image(format: ColorFormat, size: USize2, samples: &[f32]) -> InterleavedImage {
     InterleavedImage::new_with_data(
         InterleavedDesc::new(size, format),
         bytemuck::cast_slice(samples).to_vec(),
@@ -30,7 +30,7 @@ fn interleaved_samples_split_into_planes_and_back() {
     let interleaved = InterleavedImage::from(&image);
     assert_eq!(
         interleaved.desc(),
-        InterleavedDesc::new(Size2us::new(2, 2), ColorFormat::RGB_F32)
+        InterleavedDesc::new(USize2::new(2, 2), ColorFormat::RGB_F32)
     );
     assert_eq!(
         interleaved.bytes(),
@@ -96,8 +96,8 @@ fn planes_that_are_no_image_are_refused() {
     assert_eq!(
         mismatched.unwrap_err(),
         DescError::PlaneSize {
-            expected: Size2us::new(2, 1),
-            got: Size2us::new(1, 1)
+            expected: USize2::new(2, 1),
+            got: USize2::new(1, 1)
         }
     );
     let empty = PlanarImage::checked_mono(Buffer2::<f32>::new((0, 4), vec![]));
@@ -120,7 +120,7 @@ fn a_fourth_plane_is_refused() {
 #[test]
 fn each_format_round_trips_through_the_planes_or_is_refused() {
     for format in ColorFormat::ALL {
-        let image = create_test_image(format, Size2us::new(5, 3), 7);
+        let image = create_test_image(format, USize2::new(5, 3), 7);
         let f32_format = ColorFormat::new(format.without_alpha().channel_count, SampleType::F32);
         let converted = image.convert_to(f32_format);
         let dropped = PlanarImage::without_alpha(&image);
@@ -163,7 +163,7 @@ fn each_format_round_trips_through_the_planes_or_is_refused() {
 /// to the image.
 #[test]
 fn a_mono_f32_image_taken_keeps_its_allocation() {
-    let image = f32_image(ColorFormat::MONO_F32, Size2us::new(3, 1), &[0.5, 1.0, 2.0]);
+    let image = f32_image(ColorFormat::MONO_F32, USize2::new(3, 1), &[0.5, 1.0, 2.0]);
     let pointer = image.bytes().as_ptr();
     let planes = PlanarImage::try_from(image).unwrap();
     assert_eq!(planes.channel(0).pixels(), &[0.5, 1.0, 2.0]);
@@ -183,7 +183,7 @@ fn a_mono_f32_image_taken_keeps_its_allocation() {
 fn without_alpha_keeps_the_color_channels() {
     let rgba = f32_image(
         ColorFormat::RGBA_F32,
-        Size2us::new(2, 1),
+        USize2::new(2, 1),
         &[1.0, 0.25, 0.0, 0.5, 0.0, 1.0, 0.75, 1.0],
     );
     let rgb = rgba.without_alpha();
@@ -194,7 +194,7 @@ fn without_alpha_keeps_the_color_channels() {
     );
 
     for format in ColorFormat::ALL {
-        let image = create_test_image(format, Size2us::new(4, 2), 1);
+        let image = create_test_image(format, USize2::new(4, 2), 1);
         let dropped = image.clone().without_alpha();
         assert_eq!(
             dropped.desc().color_format(),

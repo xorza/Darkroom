@@ -23,7 +23,7 @@ use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detection_config::measurement_config::CentroidMethod;
 use crate::star_detection::star_detector::StarDetector;
 use crate::star_detection::star_detector::stages::detect::DetectionInput;
-use common::Size2us;
+use common::USize2;
 
 fn rho_opiuchi_path() -> PathBuf {
     dataset_path("rho-opiuchi.jpg")
@@ -152,7 +152,7 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
     let linear_image = rho_opiuchi();
     let width = linear_image.width();
     let height = linear_image.height();
-    let size = Size2us::new(width, height);
+    let size = USize2::new(width, height);
     println!("Image size: {width}x{height}");
 
     let config = StarDetectionConfig::precise_ground();

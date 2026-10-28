@@ -10,12 +10,12 @@ use crate::image_ops::hdr::{Hdr, data_mean};
 use crate::internals::assertions::assert_close_slice;
 use crate::internals::images::{mono_image, rgb_image};
 use crate::math::wavelet;
-use common::Size2us;
+use common::USize2;
 use glam::USizeVec2;
 
 /// A smooth radial brightness dome — bright center (~1.0), dark corners (~0.1). The large-scale
 /// brightness HDR is meant to compress.
-fn dome(size: Size2us) -> Vec<f32> {
+fn dome(size: USize2) -> Vec<f32> {
     let (cx, cy) = (
         (size.width as f32 - 1.0) / 2.0,
         (size.height as f32 - 1.0) / 2.0,
@@ -33,8 +33,8 @@ fn dome(size: Size2us) -> Vec<f32> {
 
 #[test]
 fn hdr_amount_zero_is_identity() {
-    let px = dome(Size2us::new(64, 64));
-    let mut img = mono_image(Size2us::new(64, 64), px.clone());
+    let px = dome(USize2::new(64, 64));
+    let mut img = mono_image(USize2::new(64, 64), px.clone());
     Hdr {
         scales: 3,
         amount: 0.0,
@@ -52,7 +52,7 @@ fn hdr_amount_zero_is_identity() {
 fn hdr_compresses_large_scale_contrast() {
     // The dome lives in the residual (scales=3 → residual captures >8 px structure); compressing it
     // shrinks the center-vs-corner contrast while keeping it monotone.
-    let size = Size2us::new(128, 128);
+    let size = USize2::new(128, 128);
     let px = dome(size);
     let ci = size.idx_of(USizeVec2::new(size.width / 2, size.height / 2));
     let in_contrast = px[ci] - px[0];
@@ -74,7 +74,7 @@ fn hdr_compresses_large_scale_contrast() {
 
 #[test]
 fn hdr_amount_controls_compression() {
-    let size = Size2us::new(128, 128);
+    let size = USize2::new(128, 128);
     let px = dome(size);
     let ci = size.idx_of(USizeVec2::new(size.width / 2, size.height / 2));
     let contrast_at = |amount: f32| {
@@ -93,7 +93,7 @@ fn hdr_amount_controls_compression() {
 fn hdr_preserves_fine_detail() {
     // Dome + a 1-px ±0.03 checkerboard texture: the dome (residual) compresses, the texture (finest
     // detail layer) is preserved.
-    let size = Size2us::new(128, 128);
+    let size = USize2::new(128, 128);
     let mut px = dome(size);
     for (i, p) in px.iter_mut().enumerate() {
         *p += if (i % size.width + i / size.width).is_multiple_of(2) {
@@ -177,7 +177,7 @@ fn reference_hdr(px: &Buffer2<f32>, scales: usize, amount: f32) -> Vec<f32> {
 
 #[test]
 fn hdr_matches_explicit_pyramid_reference() {
-    let size = Size2us::new(64, 48);
+    let size = USize2::new(64, 48);
     let (scales, amount) = (3, 0.6);
     let mut img = mono_image(size, dome(size));
     let expected = reference_hdr(img.channel(0), scales, amount);
@@ -204,7 +204,7 @@ fn hdr_matches_explicit_pyramid_reference() {
 /// with the product's rounding to 8ε relative.
 #[test]
 fn a_flat_plane_comes_back_as_itself() {
-    let size = Size2us::new(512, 512);
+    let size = USize2::new(512, 512);
     let mut img = mono_image(size, vec![0.2; size.pixel_count()]);
     Hdr {
         scales: 5,
@@ -222,7 +222,7 @@ fn a_flat_plane_comes_back_as_itself() {
 /// flagged `NO_DATA`, the mean is 2. An image of fills alone has none, and is refused.
 #[test]
 fn the_mean_leaves_fills_out() {
-    let size = Size2us::new(4, 1);
+    let size = USize2::new(4, 1);
     let values = [1.0, 2.0, 3.0, 10.0];
     let flags = PixelFlags::at_idxs(size, QualityFlags::NO_DATA, &[3]).unwrap();
     let intensity = Intensity::mono(size, &values).with_flags(Some(&flags));
@@ -245,7 +245,7 @@ fn the_mean_leaves_fills_out() {
 /// past white rather than clipping it — on a dome whose red runs twice its intensity.
 #[test]
 fn hdr_keeps_color_in_range() {
-    let size = Size2us::new(96, 96);
+    let size = USize2::new(96, 96);
     let i = dome(size);
     let r: Vec<f32> = i.iter().map(|&v| (2.0 * v).min(1.0)).collect();
     let mut img = rgb_image(size, [r, i.clone(), i]);
@@ -261,7 +261,7 @@ fn hdr_keeps_color_in_range() {
 /// what the frame holds (`max_scales`, 5 for 48 px) a request is that limit, bit for bit.
 #[test]
 fn scales_change_the_output_up_to_the_frame_limit() {
-    let size = Size2us::new(48, 48);
+    let size = USize2::new(48, 48);
     let run = |scales| {
         let mut img = mono_image(size, dome(size));
         Hdr {
@@ -283,7 +283,7 @@ fn scales_change_the_output_up_to_the_frame_limit() {
 /// it — while the log domain scales it by a positive factor: every pixel comes out above 0.
 #[test]
 fn a_halo_pixel_stays_above_black() {
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let centre = USizeVec2::new(32, 32);
     let px: Vec<f32> = (0..size.pixel_count())
         .map(|idx| {
@@ -317,7 +317,7 @@ fn a_halo_pixel_stays_above_black() {
 /// control's ratio is near 1.
 #[test]
 fn near_black_pixels_keep_their_ratio() {
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let mut px = dome(size);
     let (dim, bright) = (
         size.idx_of(USizeVec2::new(2, 2)),
@@ -349,7 +349,7 @@ fn near_black_pixels_keep_their_ratio() {
 /// A pixel with no positive intensity is black on mono and on color alike.
 #[test]
 fn no_positive_intensity_is_black_on_mono_and_color() {
-    let size = Size2us::new(16, 16);
+    let size = USize2::new(16, 16);
     let mut px = vec![0.3f32; size.pixel_count()];
     px[0] = -0.01;
     px[1] = 0.0;

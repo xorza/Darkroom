@@ -26,12 +26,12 @@ use crate::stack_product::coverage::Coverage;
 use crate::stack_product::fits::error::{ProductError, ProductRefusal};
 use crate::stack_product::run_report::RunReport;
 use crate::stack_product::weight_kind::WeightKind;
-use common::Size2us;
+use common::USize2;
 
 /// An edit of one HDU of a file, by index: its header and data, `false` to drop it.
 type Edit = Box<dyn FnMut(usize, &mut Header, &mut Vec<u8>) -> bool>;
 
-const SIZE: Size2us = Size2us::new(4, 3);
+const SIZE: USize2 = USize2::new(4, 3);
 /// The pixel that holds no measurement, and the one that saturated.
 const NO_DATA_PIXEL: usize = 5;
 const SATURATED_PIXEL: usize = 2;

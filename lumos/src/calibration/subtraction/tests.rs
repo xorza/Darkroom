@@ -10,9 +10,9 @@ use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::metadata::calibration_state::CalibrationState;
 use crate::image::metadata::sample_domain::{DomainMap, Pedestal, SampleDomain, ScaleOrigin};
 use crate::internals::cfa::make_cfa;
-use common::Size2us;
+use common::USize2;
 
-const SIZE: Size2us = Size2us::new(2, 2);
+const SIZE: USize2 = USize2::new(2, 2);
 
 fn frame(samples: [f32; 4], exposure: f64) -> CfaImage {
     let mut frame = make_cfa(SIZE, samples.to_vec(), CfaType::Mono);

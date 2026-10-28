@@ -1,6 +1,6 @@
 use std::io::Cursor;
 
-use common::Size2us;
+use common::USize2;
 use tiff::encoder::{TiffEncoder, colortype};
 
 use crate::codec::raster_format::RasterFormat;
@@ -15,7 +15,7 @@ fn lena_reads_as_packed_rgba() {
     let img = lena(ColorFormat::RGBA_U8);
     assert_eq!(
         img.desc(),
-        InterleavedDesc::new(Size2us::new(895, 551), ColorFormat::RGBA_U8)
+        InterleavedDesc::new(USize2::new(895, 551), ColorFormat::RGBA_U8)
     );
     assert_eq!(img.desc().row_byte_len(), 895 * 4);
     assert_eq!(img.bytes().len(), 895 * 4 * 551);
@@ -36,7 +36,7 @@ fn round_trip(
 #[test]
 fn every_format_round_trips_through_tiff() {
     for format in ColorFormat::ALL {
-        let image = create_test_image(format, Size2us::new(17, 5), 3);
+        let image = create_test_image(format, USize2::new(17, 5), 3);
         let reloaded = round_trip(&image, RasterFormat::Tiff).unwrap();
         assert_eq!(reloaded.desc(), image.desc(), "{format}");
         assert_eq!(reloaded.bytes(), image.bytes(), "{format}");
@@ -47,7 +47,7 @@ fn every_format_round_trips_through_tiff() {
 #[test]
 fn integer_formats_round_trip_through_png() {
     for format in ColorFormat::ALL {
-        let image = create_test_image(format, Size2us::new(17, 5), 3);
+        let image = create_test_image(format, USize2::new(17, 5), 3);
         let result = round_trip(&image, RasterFormat::Png);
         if format.sample_type.is_float() {
             assert!(
@@ -66,7 +66,7 @@ fn integer_formats_round_trip_through_png() {
 #[test]
 fn jpeg_refuses_what_it_cannot_store() {
     for format in ColorFormat::ALL {
-        let image = create_test_image(format, Size2us::new(8, 8), 0);
+        let image = create_test_image(format, USize2::new(8, 8), 0);
         let result = RasterFormat::Jpeg.encode(&image, Cursor::new(Vec::new()));
         if format == ColorFormat::MONO_U8 || format == ColorFormat::RGB_U8 {
             result.unwrap();
@@ -96,7 +96,7 @@ fn mono_alpha_png_widens_to_rgba() {
     let reloaded = RasterFormat::Png.decode(png, u64::MAX).unwrap();
     assert_eq!(
         reloaded.desc(),
-        InterleavedDesc::new(Size2us::new(2, 1), ColorFormat::RGBA_U8)
+        InterleavedDesc::new(USize2::new(2, 1), ColorFormat::RGBA_U8)
     );
     assert_eq!(reloaded.bytes(), &[10, 10, 10, 200, 30, 30, 30, 40]);
 }
@@ -291,7 +291,7 @@ fn a_header_past_the_cap_is_refused() {
     RasterFormat::Tiff.decode(tiff(), 24).unwrap();
 
     let gray = InterleavedImage::new_with_data(
-        InterleavedDesc::new(Size2us::new(4, 2), ColorFormat::MONO_U8),
+        InterleavedDesc::new(USize2::new(4, 2), ColorFormat::MONO_U8),
         vec![9; 8],
     )
     .unwrap();

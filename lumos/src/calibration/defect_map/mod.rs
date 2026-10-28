@@ -73,7 +73,7 @@ use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::masked_plane::MaskedPlane;
 use crate::math::statistics::median_mad::MedianMad;
 use crate::math::statistics::spread::Spread;
-use common::Size2us;
+use common::USize2;
 
 /// A mask of defective pixels: **hot** pixels (abnormally high dark current) from a master
 /// dark, and **cold/dead** pixels (abnormally low response) from a master flat.
@@ -91,7 +91,7 @@ pub(crate) struct DefectMap {
     mask: BitBuffer2,
     /// Pixels set in `mask` — a pixel both hot and dead counts once.
     count: usize,
-    size: Size2us,
+    size: USize2,
 }
 
 /// The hot pixels of a dark: each one's flat index, and how far it stands above the dark around it.
@@ -111,7 +111,7 @@ pub(crate) struct HotPixels {
 impl DefectMap {
     /// An empty map for a sensor of `size`, ready for [`Self::detect_hot`] and
     /// [`Self::detect_cold`].
-    pub(crate) fn new(size: Size2us) -> Self {
+    pub(crate) fn new(size: USize2) -> Self {
         Self {
             hot: HotPixels::default(),
             cold_idxs: Vec::new(),
@@ -122,7 +122,7 @@ impl DefectMap {
     }
 
     /// A map with these defect lists, or `None` when an index lies outside `size`.
-    pub(crate) fn from_lists(size: Size2us, hot: HotPixels, cold_idxs: Vec<usize>) -> Option<Self> {
+    pub(crate) fn from_lists(size: USize2, hot: HotPixels, cold_idxs: Vec<usize>) -> Option<Self> {
         debug_assert_eq!(hot.idxs.len(), hot.excess.len());
         debug_assert_eq!(hot.idxs.len(), hot.noise.len());
         let pixel_count = size.pixel_count();
@@ -142,7 +142,7 @@ impl DefectMap {
     }
 
     /// The sensor extent the indices apply to.
-    pub(crate) const fn size(&self) -> Size2us {
+    pub(crate) const fn size(&self) -> USize2 {
         self.size
     }
 

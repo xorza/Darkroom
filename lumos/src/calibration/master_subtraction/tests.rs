@@ -5,10 +5,10 @@ use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::metadata::dark_comparison::DarkComparison;
 use crate::internals::cfa::constant_cfa;
-use common::Size2us;
+use common::USize2;
 
 fn frame(value: f32, exposure: f64) -> CfaImage {
-    let mut frame = constant_cfa(Size2us::new(2, 2), value, CfaType::Mono);
+    let mut frame = constant_cfa(USize2::new(2, 2), value, CfaType::Mono);
     frame.metadata.header.exposure_time = Some(exposure);
     frame
 }
@@ -119,7 +119,7 @@ fn each_frame_loses_what_the_subtractor_holds() {
     .unwrap()
     .unwrap();
     let rggb = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
-    let mut mosaic = constant_cfa(Size2us::new(2, 2), 0.5, rggb);
+    let mut mosaic = constant_cfa(USize2::new(2, 2), 0.5, rggb);
     assert!(matches!(
         subtraction.apply(4, &mut mosaic),
         Err(SubtractionError::SubtractorPattern {
@@ -128,14 +128,14 @@ fn each_frame_loses_what_the_subtractor_holds() {
             subtractor: CfaType::Mono,
         }) if frame == rggb
     ));
-    let mut wide = constant_cfa(Size2us::new(4, 2), 0.5, CfaType::Mono);
+    let mut wide = constant_cfa(USize2::new(4, 2), 0.5, CfaType::Mono);
     assert!(matches!(
         subtraction.apply(5, &mut wide),
         Err(SubtractionError::SubtractorShape {
             idx: 5,
             frame,
             subtractor,
-        }) if frame == Size2us::new(4, 2) && subtractor == Size2us::new(2, 2)
+        }) if frame == USize2::new(4, 2) && subtractor == USize2::new(2, 2)
     ));
 }
 

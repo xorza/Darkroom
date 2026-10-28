@@ -22,10 +22,10 @@ use crate::combine::stack_config::weighting::Weighting;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::io::load_ctx::LoadCtx;
 use crate::progress::progress_monitor::ProgressMonitor;
-use common::Size2us;
+use common::USize2;
 
 /// Write a spatially-uniform 16-bit FITS frame (`value` in every pixel) to `path`.
-fn write_const_fits(path: &Path, size: Size2us, value: u16) {
+fn write_const_fits(path: &Path, size: USize2, value: u16) {
     let image = Image::from_u16(
         vec![size.width, size.height],
         &vec![value; size.pixel_count()],
@@ -44,7 +44,7 @@ fn write_const_fits(path: &Path, size: Size2us, value: u16) {
 #[test]
 fn disk_and_memory_tiers_produce_identical_masters() {
     let dir = TempDir::new("lumos_mem_tier_test");
-    let size = Size2us::new(24, 24);
+    let size = USize2::new(24, 24);
     let n = 6usize;
 
     // Distinct per-frame constant → a spatially-uniform master bracketed by the frame values, so a

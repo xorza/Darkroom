@@ -1,4 +1,4 @@
-use common::{Buffer2, Size2us};
+use common::{Buffer2, USize2};
 
 use crate::bg_mesh::BgMesh;
 use crate::bg_mesh::mesh_spline::MeshSpline;
@@ -15,7 +15,7 @@ use crate::star_detection::detection_filter::{DetectionFilter, FilterSource};
 use crate::star_detection::median_filter::internals::apply_3x3;
 
 /// A plane of noise around a slope, its sky the mesh of 16-px tiles measures on it.
-fn frame(size: Size2us, seed: u64) -> (Buffer2<f32>, MeshSurface) {
+fn frame(size: USize2, seed: u64) -> (Buffer2<f32>, MeshSurface) {
     let mut rng = TestRng::new(seed);
     let pixels = Buffer2::from_fn(size, |x, y| {
         0.2 + 0.003 * x as f32 + 0.002 * y as f32 + 0.05 * rng.next_f32()
@@ -93,7 +93,7 @@ fn a_band_at_a_time_is_the_whole_plane_bit_for_bit() {
     ];
     let bands = ScratchPool::default();
     for (width, height) in [(37, 23), (24, 24), (3, 17), (2, 9), (40, 5), (19, 1)] {
-        let (pixels, sky) = frame(Size2us::new(width, height), (width * 100 + height) as u64);
+        let (pixels, sky) = frame(USize2::new(width, height), (width * 100 + height) as u64);
         for source in [
             FilterSource::Plane(&pixels),
             FilterSource::Residual {

@@ -8,7 +8,7 @@ use crate::image::cfa::demosaic::bayer::rcd::{
 use crate::image::cfa::demosaic::mosaic_view::MosaicView;
 use crate::image::cfa::demosaic::tiled::{OutputPlanes, TilePlace};
 use crate::internals::test_rng::TestRng;
-use common::Size2us;
+use common::USize2;
 use glam::USizeVec2;
 use simd::Portable;
 use simd::{F32_LANES, F32x8, Isa};
@@ -207,7 +207,7 @@ fn rcd_matches_librtprocess_bit_for_bit() {
             0.1 + 1.6 * (t - t.floor() - 0.5).abs()
         }),
     ];
-    let size = Size2us::new(WIDTH, HEIGHT);
+    let size = USize2::new(WIDTH, HEIGHT);
     let patterns = [
         BayerPattern::Rggb,
         BayerPattern::Bggr,
@@ -240,7 +240,7 @@ fn rcd_matches_librtprocess_bit_for_bit() {
 /// tile at its far corner, after buffers filled with +1000 and with −1000, in each Bayer phase.
 #[test]
 fn a_tile_writes_nothing_that_reads_another_tiles_leftovers() {
-    let size = Size2us::new(TILE + 40, TILE + 30);
+    let size = USize2::new(TILE + 40, TILE + 30);
     let mut rng = TestRng::new(11);
     let data = Buffer2::from_fn(size, |_, _| 0.1 + 0.8 * rng.next_f32());
     for pattern in BayerPattern::ALL {
@@ -248,12 +248,12 @@ fn a_tile_writes_nothing_that_reads_another_tiles_leftovers() {
             TilePlace {
                 top: 0,
                 left: 0,
-                size: Size2us::new(TILE, TILE),
+                size: USize2::new(TILE, TILE),
             },
             TilePlace {
                 top: size.height - 100,
                 left: size.width - 90,
-                size: Size2us::new(90, 100),
+                size: USize2::new(90, 100),
             },
         ] {
             let run = |poison: f32| {
@@ -283,7 +283,7 @@ fn a_tile_writes_nothing_that_reads_another_tiles_leftovers() {
 /// each Bayer phase.
 #[test]
 fn a_balanced_demosaic_divides_the_balanced_one_by_the_gains() {
-    let size = Size2us::new(TILE + 40, TILE + 30);
+    let size = USize2::new(TILE + 40, TILE + 30);
     let gains = [2.13, 1.0, 1.71];
     let mut rng = TestRng::new(5);
     let data = Buffer2::from_fn(size, |_, _| 0.1 + 0.8 * rng.next_f32());

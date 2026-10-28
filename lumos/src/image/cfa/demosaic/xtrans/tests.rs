@@ -8,7 +8,7 @@ use crate::image::error::XTransPatternError;
 use crate::internals::assertions::assert_close;
 use crate::internals::cfa::XTRANS_PATTERN;
 use crate::internals::test_rng::TestRng;
-use common::Size2us;
+use common::USize2;
 use glam::USizeVec2;
 
 #[test]
@@ -166,7 +166,7 @@ fn the_hexagons_are_dcraws() {
 /// a few times, 2⁻²¹ of the level at most. The frame is large enough for the tiles.
 #[test]
 fn a_uniform_frame_demosaics_to_itself() {
-    let size = Size2us::new(96, 96);
+    let size = USize2::new(96, 96);
     for passes in [MarkesteijnPasses::One, MarkesteijnPasses::Three] {
         for level in [-1e-4f32, 0.0, 1e-5, 1e-4, 1e-2, 0.5] {
             let rgb = markesteijn::demosaic(
@@ -196,7 +196,7 @@ fn a_uniform_frame_demosaics_to_itself() {
 /// is large enough for the tiles, which the border fill would otherwise replace.
 #[test]
 fn markesteijn_is_odd() {
-    let size = Size2us::new(96, 96);
+    let size = USize2::new(96, 96);
     let mut rng = TestRng::new(13);
     let data = Buffer2::from_fn(size, |x, y| {
         let stripe = (x + y) % 7 < 3;
@@ -228,7 +228,7 @@ fn markesteijn_is_odd() {
 
 #[test]
 fn f32_demosaic_preserves_signed_native_samples() {
-    let size = Size2us::new(18, 18);
+    let size = USize2::new(18, 18);
     let pattern = XTRANS_PATTERN;
     let data = Buffer2::from_fn(size, |x, y| ((y * size.width + x) % 17) as f32 * 0.25 - 2.0);
     let rgb = markesteijn::demosaic(
@@ -257,7 +257,7 @@ fn f32_demosaic_preserves_signed_native_samples() {
 /// demosaic leaves the range for the caller to clamp.
 #[test]
 fn f32_demosaic_is_equivariant_to_a_uniform_pedestal() {
-    let size = Size2us::new(18, 18);
+    let size = USize2::new(18, 18);
     let pedestal = 0.375;
     let base = Buffer2::from_fn(size, |x, y| {
         let idx = y * size.width + x;
@@ -287,7 +287,7 @@ fn f32_demosaic_is_equivariant_to_a_uniform_pedestal() {
         }
     }
 
-    let contrast = Size2us::new(30, 30);
+    let contrast = USize2::new(30, 30);
     let blocks = Buffer2::from_fn(contrast, |x, y| {
         if (x / 2 + y / 3) % 2 == 0 {
             0.008

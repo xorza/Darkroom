@@ -3,7 +3,7 @@
 use glam::DVec2;
 
 use crate::math::floor_i32::FloorI32;
-use common::Size2us;
+use common::USize2;
 
 /// A source position as its integer cell and the fraction within that cell.
 ///
@@ -31,7 +31,7 @@ pub(super) struct AxisPos {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct SourceAt {
     pub(super) pos: SourcePos,
-    pub(super) size: Size2us,
+    pub(super) size: USize2,
 }
 
 impl SourcePos {
@@ -56,7 +56,7 @@ impl SourcePos {
     /// `p` split, when it lies in the footprint of a `size` source — `[-½, w − ½] × [-½, h − ½]`,
     /// the area its pixels cover; `None` outside it or for a non-finite `p`.
     #[inline]
-    pub(super) fn within(p: DVec2, size: Size2us) -> Option<Self> {
+    pub(super) fn within(p: DVec2, size: USize2) -> Option<Self> {
         let max_x = size.width as f64 - 0.5;
         let max_y = size.height as f64 - 0.5;
         // Written so a NaN fails every comparison and lands outside.
@@ -76,7 +76,7 @@ impl SourcePos {
     /// This position held to the grid of pixel centres, `[0, w − 1] × [0, h − 1]`: where bilinear
     /// and nearest sample a position in the half-pixel rim of the footprint.
     #[inline]
-    pub(super) const fn clamped_to_centers(self, size: Size2us) -> Self {
+    pub(super) const fn clamped_to_centers(self, size: USize2) -> Self {
         let x = ClampedAxis::of(self.cell_x, self.fx, size.width);
         let y = ClampedAxis::of(self.cell_y, self.fy, size.height);
         Self {
@@ -94,7 +94,7 @@ impl SourcePos {
         clippy::cast_sign_loss,
         reason = "a position clamped to the pixel-centre grid has non-negative cells"
     )]
-    pub(super) const fn nearest_idx(self, size: Size2us) -> usize {
+    pub(super) const fn nearest_idx(self, size: USize2) -> usize {
         let pos = self.clamped_to_centers(size);
         let x = pos.cell_x as usize + (pos.fx >= 0.5) as usize;
         let y = pos.cell_y as usize + (pos.fy >= 0.5) as usize;

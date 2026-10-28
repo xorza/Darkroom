@@ -218,7 +218,7 @@ mod tests {
     use crate::frame_store::run_scratch::RunScratch;
     use crate::frame_store::stored_frame::{FrameWrite, SetKind};
     use crate::image::linear_image::LinearImage;
-    use common::Size2us;
+    use common::USize2;
 
     /// A spilled frame with quality planes leaves the page cache whole where the system evicts:
     /// its three channels and its coverage and confidence, 512² × 4 bytes = 1 MiB each, every page
@@ -228,7 +228,7 @@ mod tests {
     fn an_evicted_frame_leaves_every_plane_on_the_disk() {
         let dir = TempDir::new("stored_frame_evict");
         let scratch = RunScratch::create_evictable(dir.path()).unwrap();
-        let size = Size2us::new(512, 512);
+        let size = USize2::new(512, 512);
         let image = LinearImage::from_planar_channels(
             PlanarDesc::new(size, ChannelLayout::Rgb),
             [0.25f32, 0.5, 0.75].map(|level| vec![level; size.pixel_count()]),

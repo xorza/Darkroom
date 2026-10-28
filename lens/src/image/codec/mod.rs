@@ -5,7 +5,7 @@ use std::io;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use common::{Buffer2, DeserializeError, SerdeFormat, Size2us};
+use common::{Buffer2, DeserializeError, SerdeFormat, USize2};
 use imaginarium::{
     ChannelCount, ChannelLayout, ColorFormat, DescError, InterleavedDesc, PlanarImage, SampleType,
 };
@@ -153,7 +153,7 @@ impl CustomValueCodec for ImageCodec {
             .deserialize(&record)
             .map_err(DecodeError::from)?;
 
-        let desc = InterleavedDesc::checked(Size2us::new(width, height), color_format)
+        let desc = InterleavedDesc::checked(USize2::new(width, height), color_format)
             .map_err(DecodeError::from)?;
         let pixel_count = desc.size().pixel_count();
         let pixel_len = desc.byte_len();

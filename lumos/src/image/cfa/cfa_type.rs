@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::image::cfa::color_raster::ColorRaster;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::metadata::image_provenance::ColorProvenance;
-use common::Size2us;
+use common::USize2;
 use glam::USizeVec2;
 
 /// The color filter over a sensor's photosites, anchored at the origin of the image data it
@@ -57,7 +57,7 @@ impl CfaType {
     /// the period, and with them every photosite of a color only those rows hold.
     pub(crate) fn sampled_rows(
         &self,
-        size: Size2us,
+        size: USize2,
         per_color: usize,
     ) -> impl Iterator<Item = usize> + use<> {
         let period = self.period();
@@ -81,7 +81,7 @@ impl CfaType {
 
     /// How many photosites of each color, by [`Self::slot_at`]'s index, a sensor of `size`
     /// holds.
-    pub(crate) fn photosites_per_color(&self, size: Size2us) -> ArrayVec<usize, 3> {
+    pub(crate) fn photosites_per_color(&self, size: USize2) -> ArrayVec<usize, 3> {
         (0..self.color_count())
             .map(|color| ColorRaster::new(self, size, color).count())
             .collect()

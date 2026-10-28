@@ -4,12 +4,12 @@ use common::Buffer2;
 use imaginarium::PlanarImage;
 
 use crate::image_ops::ml::backend::*;
-use common::Size2us;
+use common::USize2;
 
 /// A plane whose every sample names its pixel and channel: `c/4 + (x + y·w)/(4·w·h)`, inside
 /// `[c/4, c/4 + 1/4)` so nothing reaches the clamp, and distinct at f32 resolution — a wrong tile
 /// origin, a wrong row stride or a swapped channel reads a different value.
-fn ramp(size: Size2us, channel: usize) -> Buffer2<f32> {
+fn ramp(size: USize2, channel: usize) -> Buffer2<f32> {
     let count = size.pixel_count();
     let pixels = (0..count)
         .map(|i| channel as f32 / 4.0 + i as f32 / (4.0 * count as f32))
@@ -22,7 +22,7 @@ fn a_tile_reads_from_its_own_origin_with_each_channel_in_its_own_model_slot() {
     // 640² so the tile origin is not forced to (0,0) and an off-by-one in the row stride shows.
     let (side, tile) = (640usize, USizeVec2::new(128, 96));
     let planar = LinearImage::from(PlanarImage::new_rgb(array::from_fn::<_, 3, _>(|c| {
-        ramp(Size2us::new(side, side), c)
+        ramp(USize2::new(side, side), c)
     })));
     let mut input = vec![0.0f32; WINDOW * WINDOW * 3];
     fill_tile_input(&planar, tile, &mut input);
@@ -113,7 +113,7 @@ fn feather_ramps_from_either_edge() {
 /// blend lands in the frame's planes, which keep the frame's metadata.
 #[test]
 fn an_identity_model_reproduces_the_input() {
-    let size = Size2us::new(700, 600);
+    let size = USize2::new(700, 600);
     let rgb = LinearImage::from(PlanarImage::new_rgb(array::from_fn::<_, 3, _>(|c| {
         ramp(size, c)
     })));
@@ -243,7 +243,7 @@ fn whole_frame_blend(
 /// runs tile rows at 0, 384 and 588, so a band row is reused and the last tile row is short.
 #[test]
 fn a_band_blends_what_the_whole_frame_blended() {
-    let size = Size2us::new(600, 1100);
+    let size = USize2::new(600, 1100);
     let rgb = LinearImage::from(PlanarImage::new_rgb(array::from_fn::<_, 3, _>(|c| {
         ramp(size, c)
     })));

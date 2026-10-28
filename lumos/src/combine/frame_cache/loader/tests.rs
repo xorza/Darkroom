@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::thread;
 use std::time::{Duration, UNIX_EPOCH};
 
-use common::{Size2us, TempDir, WorkerPool, fs};
+use common::{TempDir, USize2, WorkerPool, fs};
 use fits_well::header::Header;
 use fits_well::image::{Image as FitsImage, Scaling};
 use imaginarium::{ChannelLayout, PlanarDesc};
@@ -522,7 +522,7 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
     let mosaic = |name: &str, pattern: BayerPattern| {
         let path = dir.join(format!("{name}.fits"));
         make_cfa(
-            Size2us::new(4, 2),
+            USize2::new(4, 2),
             vec![0.5; 8],
             CfaType::Mosaic(Mosaic::Bayer(pattern)),
         )

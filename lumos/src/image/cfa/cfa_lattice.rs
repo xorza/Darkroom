@@ -164,7 +164,7 @@ pub(crate) struct Gathered {
 
 #[cfg(test)]
 mod tests {
-    use common::{Buffer2, Size2us};
+    use common::{Buffer2, USize2};
 
     use super::*;
     use crate::bit_buffer2::BitBuffer2;
@@ -265,7 +265,7 @@ mod tests {
             CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Gbrg)),
         ] {
             let lattice = CfaLattice::new(&cfa);
-            let size = Size2us::new(25, 19);
+            let size = USize2::new(25, 19);
             let level = |pos: USizeVec2| match cfa {
                 CfaType::Mosaic(Mosaic::Bayer(_)) => {
                     0.125 * (1 + pos.x % 2 + 2 * (pos.y % 2)) as f32
@@ -293,7 +293,7 @@ mod tests {
     #[test]
     fn the_median_skips_masked_neighbours() {
         let lattice = CfaLattice::new(&CfaType::Mono);
-        let size = Size2us::new(3, 3);
+        let size = USize2::new(3, 3);
         let pixels = Buffer2::new(
             (3, 3),
             vec![

@@ -18,7 +18,7 @@ use crate::image::cfa::mosaic::Mosaic;
 use crate::image::flags::pixel_flags::PixelFlags;
 use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::stackable_image::StackableImage;
-use common::Size2us;
+use common::USize2;
 
 /// Area below which a square drop is discarded: the transform has collapsed the input pixel to
 /// nothing, so there is no output area to spread its flux over.
@@ -91,7 +91,7 @@ pub(super) struct FrameSource<'a> {
     planes: ArrayVec<&'a [f32], MAX_CHANNELS>,
     /// The mosaic whose photosites each reach the channel of their color alone.
     mosaic: Option<Mosaic>,
-    size: Size2us,
+    size: USize2,
     map: InputMap,
     pixel_weights: Option<&'a [f32]>,
     /// The frame's flags, when it carries any: those of

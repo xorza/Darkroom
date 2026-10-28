@@ -1,4 +1,4 @@
-use common::Size2us;
+use common::USize2;
 use strum::IntoEnumIterator;
 
 use crate::color::color_format::ColorFormat;
@@ -19,8 +19,8 @@ fn gpu_matches_cpu() {
         return;
     };
     for format in ColorFormat::ALL {
-        let src_cpu = create_test_image(format, Size2us::new(13, 5), 0);
-        let dst_cpu = create_test_image(format, Size2us::new(13, 5), 100);
+        let src_cpu = create_test_image(format, USize2::new(13, 5), 0);
+        let dst_cpu = create_test_image(format, USize2::new(13, 5), 100);
         let src = GpuImage::from_image(gpu, &src_cpu).unwrap();
         let dst = GpuImage::from_image(gpu, &dst_cpu).unwrap();
         for (mode, clamp) in

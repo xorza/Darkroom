@@ -10,7 +10,7 @@ use glam::USizeVec2;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 
 use crate::par;
-use crate::size2us::Size2us;
+use crate::usize2::USize2;
 
 /// `width × height` values in row-major order.
 ///
@@ -20,11 +20,11 @@ use crate::size2us::Size2us;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Buffer2<T> {
     pixels: Vec<T>,
-    size: Size2us,
+    size: USize2,
 }
 
 impl<T> Buffer2<T> {
-    pub fn new(size: impl Into<Size2us>, pixels: Vec<T>) -> Self {
+    pub fn new(size: impl Into<USize2>, pixels: Vec<T>) -> Self {
         let size = size.into();
         assert_eq!(
             pixels.len(),
@@ -36,7 +36,7 @@ impl<T> Buffer2<T> {
 
     /// The buffer of `size` whose value at `(x, y)` is `f(x, y)`, called once per pixel in
     /// row-major order — so a stateful `f`, a random draw, lays its values out row by row.
-    pub fn from_fn(size: impl Into<Size2us>, mut f: impl FnMut(usize, usize) -> T) -> Self {
+    pub fn from_fn(size: impl Into<USize2>, mut f: impl FnMut(usize, usize) -> T) -> Self {
         let size = size.into();
         let mut pixels = Vec::with_capacity(size.pixel_count());
         for y in 0..size.height {
@@ -66,7 +66,7 @@ impl<T> Buffer2<T> {
     }
 
     #[inline]
-    pub const fn size(&self) -> Size2us {
+    pub const fn size(&self) -> USize2 {
         self.size
     }
 
@@ -109,19 +109,19 @@ impl<T> Default for Buffer2<T> {
     fn default() -> Self {
         Self {
             pixels: Vec::new(),
-            size: Size2us::default(),
+            size: USize2::default(),
         }
     }
 }
 
 impl<T: Default + Clone> Buffer2<T> {
-    pub fn new_default(size: impl Into<Size2us>) -> Self {
+    pub fn new_default(size: impl Into<USize2>) -> Self {
         Self::new_filled(size, T::default())
     }
 }
 
 impl<T: Clone> Buffer2<T> {
-    pub fn new_filled(size: impl Into<Size2us>, value: T) -> Self {
+    pub fn new_filled(size: impl Into<USize2>, value: T) -> Self {
         let size = size.into();
         Self {
             pixels: vec![value; size.pixel_count()],
@@ -132,7 +132,7 @@ impl<T: Clone> Buffer2<T> {
     /// This buffer as `size`, in the allocation it has: the first `width · height` of its values
     /// stay where they lie in row-major order, and any past the old length are `value`. For a
     /// scratch plane reused across sizes, which grows only for a larger one.
-    pub fn reshape(&mut self, size: impl Into<Size2us>, value: T) {
+    pub fn reshape(&mut self, size: impl Into<USize2>, value: T) {
         self.size = size.into();
         self.pixels.resize(self.size.pixel_count(), value);
     }
@@ -341,13 +341,13 @@ impl<T> From<Buffer2<T>> for Vec<T> {
 #[cfg(test)]
 mod tests {
     use crate::buffer2::Buffer2;
-    use crate::size2us::Size2us;
+    use crate::usize2::USize2;
     use glam::USizeVec2;
 
     #[test]
     fn indexing_is_row_major() {
         let mut buf = Buffer2::new((3, 2), vec![10, 20, 30, 40, 50, 60]);
-        assert_eq!(buf.size(), Size2us::new(3, 2));
+        assert_eq!(buf.size(), USize2::new(3, 2));
         assert_eq!((buf.width(), buf.height(), buf.len()), (3, 2, 6));
         // y · width + x: (2, 1) → 5, (0, 1) → 3.
         assert_eq!(*buf.get(2, 1), 60);

@@ -22,7 +22,7 @@ use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::test_rng::TestRng;
 use crate::io::raw;
 use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
-use common::Size2us;
+use common::USize2;
 use glam::USizeVec2;
 
 #[test]
@@ -32,7 +32,7 @@ fn a_null_is_repaired_from_its_same_color_neighbours_before_demosaic() {
     // is what it would really be — and every one of its neighbours reads 0.5, so their median is
     // 0.5. Left alone, a mosaic demosaic would carry that 900 into every output pixel whose
     // interpolation reached it, which no mask covers.
-    let size = Size2us::new(4usize, 4usize);
+    let size = USize2::new(4usize, 4usize);
     let mut pixels = vec![0.5f32; size.pixel_count()];
     pixels[5] = 900.0;
     let mut nulls = vec![0.0f32; size.pixel_count()];
@@ -93,7 +93,7 @@ fn a_null_is_repaired_from_its_same_color_neighbours_before_demosaic() {
 /// the demosaic, and its noise's split by that gain is the mosaic's too.
 #[test]
 fn a_demosaiced_frame_keeps_its_mosaics_noise() {
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let cfa_type = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
     let (level, sigma) = ([0.125f32, 0.25, 0.375], [0.02f32, 0.01, 0.03]);
     let mut rng = TestRng::new(7);
@@ -237,11 +237,11 @@ fn every_pattern_names_the_color_at_each_position() {
     let bayer = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
     let xtrans = CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN));
     assert_eq!(
-        bayer.photosites_per_color(Size2us::new(5, 3)).as_slice(),
+        bayer.photosites_per_color(USize2::new(5, 3)).as_slice(),
         [6, 7, 2]
     );
     assert_eq!(
-        xtrans.photosites_per_color(Size2us::new(6, 6)).as_slice(),
+        xtrans.photosites_per_color(USize2::new(6, 6)).as_slice(),
         [8, 20, 8]
     );
     // An 8 × 8 Bayer frame at 10 samples a color steps by ⌊64 / 30⌋ = 2 periods, a 24 × 24
@@ -249,7 +249,7 @@ fn every_pattern_names_the_color_at_each_position() {
     // of the pattern is sampled. A mono frame's period is a row, and its one color at 30 samples
     // steps by ⌊64 / 30⌋ = 2.
     let rows = |cfa: CfaType, side: usize, per_color: usize| -> Vec<usize> {
-        cfa.sampled_rows(Size2us::new(side, side), per_color)
+        cfa.sampled_rows(USize2::new(side, side), per_color)
             .collect()
     };
     assert_eq!(rows(bayer, 8, 10), [0, 1, 4, 5]);
@@ -257,7 +257,7 @@ fn every_pattern_names_the_color_at_each_position() {
     assert_eq!(rows(CfaType::Mono, 8, 30), [0, 2, 4, 6]);
     assert_eq!(rows(bayer, 8, 64), (0..8).collect::<Vec<_>>());
     for cfa in [CfaType::Mono, bayer, xtrans] {
-        for size in [Size2us::new(1, 1), Size2us::new(5, 3), Size2us::new(7, 13)] {
+        for size in [USize2::new(1, 1), USize2::new(5, 3), USize2::new(7, 13)] {
             let mut counted = vec![0; cfa.color_count()];
             for y in 0..size.height {
                 for x in 0..size.width {
@@ -295,7 +295,7 @@ fn the_demosaic_support_bounds_every_impulse_response() {
             MarkesteijnPasses::Three,
         ),
     ] {
-        let size = Size2us::new(SIDE, SIDE);
+        let size = USize2::new(SIDE, SIDE);
         let mut reach = 0usize;
         for seed in 1..=6u64 {
             let mut rng = TestRng::new(seed);
@@ -335,7 +335,7 @@ fn the_demosaic_support_bounds_every_impulse_response() {
 /// flag their own pixel alone, each `REPAIRED`.
 #[test]
 fn demosaic_spreads_flags_by_its_support() {
-    let size = Size2us::new(48usize, 48usize);
+    let size = USize2::new(48usize, 48usize);
     let mut cfa = make_cfa(
         size,
         vec![0.25; size.pixel_count()],
@@ -383,7 +383,7 @@ fn demosaic_spreads_flags_by_its_support() {
 /// test asks for a third of the unbalanced error at most, below the least ratio measured, 4.2.
 #[test]
 fn a_balanced_demosaic_keeps_neutral_detail_neutral() {
-    let size = Size2us::new(48, 48);
+    let size = USize2::new(48, 48);
     let gains = [2.0f32, 1.0, 1.5];
     let star = |x: usize, y: usize| {
         let (dx, dy) = (x as f32 - 23.6, y as f32 - 24.3);
@@ -443,7 +443,7 @@ fn a_balanced_demosaic_keeps_neutral_detail_neutral() {
 /// The null at green (2, 5), which no repair filled, reaches red (2, 4) beside it.
 #[test]
 fn the_green_proxy_fills_each_photosite_from_its_greens() {
-    let size = Size2us::new(6, 6);
+    let size = USize2::new(6, 6);
     let pixels: Vec<f32> = (0..size.pixel_count())
         .map(|idx| (idx % 6 + 10 * (idx / 6)) as f32)
         .collect();
@@ -519,7 +519,7 @@ fn the_green_proxy_fills_each_photosite_from_its_greens() {
 /// own: 18. A gain it shares is its owner's to count: 10.
 #[test]
 fn ram_bytes_counts_the_plane_the_flags_and_an_own_gain() {
-    let size = Size2us::new(2, 1);
+    let size = USize2::new(2, 1);
     let mut image = make_cfa(size, vec![0.1, 0.2], CfaType::Mono);
     assert_eq!(image.ram_bytes(), 8);
     image.set_flags(PixelFlags::from_fn(size, |idx| {

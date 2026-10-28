@@ -25,7 +25,7 @@ use crate::math::fwhm::FWHM_PER_SIGMA;
 /// 25 deposits each.
 #[test]
 fn a_magnified_frame_weighs_less_per_output_pixel() {
-    let size = Size2us::new(12, 12);
+    let size = USize2::new(12, 12);
     let gaussian = |d: f64| (-d * d * FWHM_PER_SIGMA * FWHM_PER_SIGMA / 2.0).exp();
     let s: f64 = (-2..=2).map(|d| gaussian(f64::from(d))).sum();
     let bound = (2.0 * 34.0 + 1.0) * f64::from(f32::EPSILON) * 10.0;
@@ -92,7 +92,7 @@ fn a_magnified_frame_weighs_less_per_output_pixel() {
 /// values differ from the centre by at most 3.5·0.15 per axis.
 #[test]
 fn a_linear_ramp_reads_back_at_each_preimage() {
-    let size = Size2us::new(24, 24);
+    let size = USize2::new(24, 24);
     let ramp = |x: f64, y: f64| 1.0 + 0.1 * x + 0.05 * y;
     let image = mono_image(
         size,

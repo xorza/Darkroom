@@ -498,7 +498,7 @@ mod tests {
     use crate::registration::distortion::sip::sip_order::SipOrder;
     use crate::registration::transform::Transform;
     use crate::registration::warp_transform::WarpTransform;
-    use common::Size2us;
+    use common::USize2;
 
     /// One warp of [`the_corner_lattice_maps_the_corners_each_drop_would`].
     #[derive(Debug)]
@@ -517,7 +517,7 @@ mod tests {
     /// so its inverse fails at the input pixels past the fold, and only there.
     #[test]
     fn the_corner_lattice_maps_the_corners_each_drop_would() {
-        let size = Size2us::new(24, 16);
+        let size = USize2::new(24, 16);
         let image = mono_image(size, vec![1.0; size.pixel_count()]);
         let centre = DVec2::new(12.0, 8.0);
         let reference: Vec<DVec2> = (0..size.height)

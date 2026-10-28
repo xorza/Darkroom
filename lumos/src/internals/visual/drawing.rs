@@ -2,7 +2,7 @@
 
 use std::ops::RangeInclusive;
 
-use common::Size2us;
+use common::USize2;
 use glam::Vec2;
 use imaginarium::{ColorFormat, InterleavedImage};
 
@@ -24,7 +24,7 @@ const fn rgb(r: f32, g: f32, b: f32) -> Rgb {
 #[derive(Debug)]
 struct Canvas<'a> {
     pixels: &'a mut [[f32; 3]],
-    size: Size2us,
+    size: USize2,
 }
 
 impl<'a> Canvas<'a> {
@@ -153,14 +153,14 @@ fn draw_line(canvas: &mut Canvas<'_>, start: Vec2, end: Vec2, color: Rgb, thickn
 }
 
 mod tests {
-    use common::Size2us;
+    use common::USize2;
     use glam::Vec2;
     use imaginarium::{ColorFormat, InterleavedDesc, InterleavedImage};
 
     use crate::internals::visual::drawing::{GREEN, draw_circle, draw_cross, rgb};
 
     fn canvas(format: ColorFormat, side: usize) -> InterleavedImage {
-        InterleavedImage::new_zeroed(InterleavedDesc::new(Size2us::new(side, side), format))
+        InterleavedImage::new_zeroed(InterleavedDesc::new(USize2::new(side, side), format))
     }
 
     /// The `(x, y)` of every pixel whose green channel was drawn.

@@ -212,7 +212,7 @@ mod tests {
     use crate::star_detection::labeling::LabelMap;
     use crate::star_detection::labeling::component_data::ComponentData;
     use crate::star_detection::star_detection_config::extraction_config::Connectivity;
-    use common::{Rect2us, Size2us};
+    use common::{USize2, USizeRect2};
     use glam::USizeVec2;
 
     /// A plus of five pixels and one pixel diagonal to its arm: under 8-connectivity the arm's end
@@ -221,11 +221,11 @@ mod tests {
     /// and the row index holds a start per row of the box and an end.
     #[test]
     fn neighbours_follow_the_connectivity() {
-        let size = Size2us::new(10, 10);
+        let size = USize2::new(10, 10);
         let lit = [(4, 3), (3, 4), (4, 4), (5, 4), (4, 5), (6, 3)];
         let mut pixels = Buffer2::new_filled(size, 0.0f32);
         let mut labels = Buffer2::new_filled(size, 0u32);
-        let mut bbox = Rect2us::empty();
+        let mut bbox = USizeRect2::empty();
         for &(x, y) in &lit {
             pixels[(x, y)] = 1.0;
             labels[(x, y)] = 1;

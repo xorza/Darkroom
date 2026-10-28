@@ -7,7 +7,7 @@ use crate::image_ops::color_calibration::neutralize_bg::*;
 use crate::image_ops::color_calibration::scnr::*;
 use crate::internals::assertions::{assert_close, assert_close_slice};
 use crate::internals::images::{mono_image, rgb_image};
-use common::Size2us;
+use common::USize2;
 
 /// A green background at 0.3 over red and blue at 0.1, and a white star 0.4 above every channel.
 /// The flat backgrounds are their own medians, exactly; neutralizing moves green down by 0.2 to the
@@ -19,7 +19,7 @@ fn neutralize_equalizes_backgrounds_and_makes_image_neutral() {
     let r = [vec![0.1; 7], vec![0.5, 0.5]].concat();
     let g = [vec![0.3; 7], vec![0.7, 0.7]].concat();
     let b = [vec![0.1; 7], vec![0.5, 0.5]].concat();
-    let mut img = rgb_image(Size2us::new(3, 3), [r.clone(), g, b.clone()]);
+    let mut img = rgb_image(USize2::new(3, 3), [r.clone(), g, b.clone()]);
 
     let before = channel_bgs(&img).unwrap();
     assert_eq!((before.r, before.g, before.b), (0.1, 0.3, 0.1));
@@ -33,7 +33,7 @@ fn neutralize_equalizes_backgrounds_and_makes_image_neutral() {
     // Eight fills of 0 ahead of the same pixels outnumber them, and would be the median; flagged
     // `NO_DATA`, they are left out and the backgrounds read as before.
     let filled = |plane: &[f32]| [&[0.0; 8], plane].concat();
-    let size = Size2us::new(17, 1);
+    let size = USize2::new(17, 1);
     let mut img = rgb_image(
         size,
         [filled(&r), filled(img.channel(1).pixels()), filled(&b)],
@@ -52,7 +52,7 @@ fn neutralize_equalizes_backgrounds_and_makes_image_neutral() {
 #[test]
 fn scnr_average_neutral_clamps_only_green_excess() {
     let mut img = rgb_image(
-        Size2us::new(2, 1),
+        USize2::new(2, 1),
         [vec![0.2, 0.5], vec![0.6, 0.3], vec![0.2, 0.5]],
     );
     Scnr::average_neutral(1.0).apply(&mut img).unwrap();
@@ -75,7 +75,7 @@ fn scnr_additive_mask_hand_computed() {
         ((0.7, 0.6, 0.5), 0.5, 0.6),
         ((0.7, 0.6, 0.5), 1.0, 0.6),
     ] {
-        let mut img = rgb_image(Size2us::new(1, 1), [vec![r], vec![g], vec![b]]);
+        let mut img = rgb_image(USize2::new(1, 1), [vec![r], vec![g], vec![b]]);
         Scnr::additive_mask(amount).apply(&mut img).unwrap();
         let green = img.channel(1).pixels()[0];
         assert_close!(
@@ -112,7 +112,7 @@ fn every_protection_blends_by_its_amount() {
     ];
     for (name, scnr, full, half) in protections {
         for (amount, expected) in [(0.0f32, 0.6f64), (0.5, half), (1.0, full)] {
-            let mut img = rgb_image(Size2us::new(1, 1), [vec![r], vec![g], vec![b]]);
+            let mut img = rgb_image(USize2::new(1, 1), [vec![r], vec![g], vec![b]]);
             scnr(amount).apply(&mut img).unwrap();
             assert_close!(
                 img.channel(1).pixels()[0],
@@ -125,14 +125,14 @@ fn every_protection_blends_by_its_amount() {
                 (r, b)
             );
         }
-        let mut img = rgb_image(Size2us::new(1, 1), [vec![r], vec![g], vec![b]]);
+        let mut img = rgb_image(USize2::new(1, 1), [vec![r], vec![g], vec![b]]);
         assert!(scnr(1.5).apply(&mut img).is_err(), "{name}");
     }
 }
 
 #[test]
 fn color_ops_are_noops_on_mono() {
-    let mut g = mono_image(Size2us::new(2, 1), vec![0.3, 0.7]);
+    let mut g = mono_image(USize2::new(2, 1), vec![0.3, 0.7]);
     NeutralizeBg.apply(&mut g).unwrap();
     Scnr::average_neutral(1.0).apply(&mut g).unwrap();
     assert_eq!(g.channel(0).pixels(), vec![0.3, 0.7], "mono left unchanged");

@@ -4,7 +4,7 @@ use common::{Buffer2, par};
 use rayon::prelude::*;
 
 use crate::bit_buffer2::BitBuffer2;
-use common::Size2us;
+use common::USize2;
 use glam::USizeVec2;
 
 /// One of a 2×2 pattern's four phases: the photosites at `(x + 2i, y + 2j)` from its origin
@@ -36,8 +36,8 @@ impl BayerPhase {
     }
 
     /// The size of the phase's dense plane in a `size` mosaic.
-    pub(crate) const fn size(self, size: Size2us) -> Size2us {
-        Size2us::new(
+    pub(crate) const fn size(self, size: USize2) -> USize2 {
+        USize2::new(
             (size.width - self.origin.x).div_ceil(2),
             (size.height - self.origin.y).div_ceil(2),
         )
@@ -119,7 +119,7 @@ mod tests {
 
     use crate::bit_buffer2::BitBuffer2;
     use crate::image::cfa::bayer_phase::{BayerPhase, even_bits};
-    use common::Size2us;
+    use common::USize2;
     use glam::USizeVec2;
 
     /// Phase (1, 0) of a 5 × 3 mosaic holding its own indices is columns 1 and 3 of rows 0 and 2:
@@ -128,16 +128,16 @@ mod tests {
     #[test]
     fn deinterleave_takes_one_phase() {
         let [_, right, below, _] = BayerPhase::ALL;
-        let size = Size2us::new(5, 3);
+        let size = USize2::new(5, 3);
         let mosaic = Buffer2::from_fn((5, 3), |x, y| (y * 5 + x) as f32);
         let mut plane = Buffer2::default();
         right.deinterleave(&mosaic, &mut plane);
-        assert_eq!(plane.size(), Size2us::new(2, 2));
+        assert_eq!(plane.size(), USize2::new(2, 2));
         assert_eq!(plane.pixels(), [1.0, 3.0, 11.0, 13.0]);
-        assert_eq!(right.size(size), Size2us::new(2, 2));
+        assert_eq!(right.size(size), USize2::new(2, 2));
         assert_eq!(right.to_mosaic(USizeVec2::new(1, 1)), USizeVec2::new(3, 2));
         below.deinterleave(&mosaic, &mut plane);
-        assert_eq!(plane.size(), Size2us::new(3, 1));
+        assert_eq!(plane.size(), USize2::new(3, 1));
         assert_eq!(plane.pixels(), [5.0, 7.0, 9.0]);
         let mut written = Buffer2::new_default((5, 3));
         below.interleave(&Buffer2::new((3, 1), vec![-1.0, -2.0, -3.0]), &mut written);
@@ -163,7 +163,7 @@ mod tests {
         assert_eq!(even_bits(0xaaaa_aaaa_aaaa_aaaa), 0);
         let mut plane = BitBuffer2::empty();
         for width in [1, 2, 63, 64, 65, 100, 127, 128, 129, 257] {
-            let size = Size2us::new(width, 5);
+            let size = USize2::new(width, 5);
             let mut mosaic = BitBuffer2::new_default(size);
             mosaic.fill_from_predicate(|i| (i * 7 + i / 3).is_multiple_of(5));
             for phase in BayerPhase::ALL {

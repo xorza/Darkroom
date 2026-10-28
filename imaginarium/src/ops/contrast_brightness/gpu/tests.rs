@@ -5,7 +5,7 @@ use crate::internals::gpu::test_gpu;
 use crate::internals::image_diff::assert_matches_cpu;
 use crate::ops::clamp::Clamp;
 use crate::ops::contrast_brightness::ContrastBrightness;
-use common::Size2us;
+use common::USize2;
 use strum::IntoEnumIterator;
 
 /// Every format under the identity, a contrast and brightness that saturate part of the
@@ -17,7 +17,7 @@ fn gpu_matches_cpu() {
         return;
     };
     for format in ColorFormat::ALL {
-        let image = create_test_image(format, Size2us::new(13, 5), 7);
+        let image = create_test_image(format, USize2::new(13, 5), 7);
         for params in [
             ContrastBrightness::new(1.0, 0.0),
             ContrastBrightness::new(1.7, -0.15),

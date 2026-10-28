@@ -4,7 +4,7 @@
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::color_raster::ColorRaster;
 use crate::image::cfa::mosaic::Mosaic;
-use common::Size2us;
+use common::USize2;
 
 /// Samples a slot's gain fit runs on, at most: a stratified 65 536 of its measured pixels.
 pub(crate) const SAMPLE_LIMIT: usize = 65_536;
@@ -27,7 +27,7 @@ pub(crate) struct StratifiedSamples {
 impl StratifiedSamples {
     /// The sample of slot `slot` of an image of `size`: a color of `mosaic`, or a channel
     /// without one.
-    pub(crate) fn new(size: Size2us, mosaic: Option<Mosaic>, slot: usize) -> Self {
+    pub(crate) fn new(size: USize2, mosaic: Option<Mosaic>, slot: usize) -> Self {
         let color = mosaic.map(|mosaic| ColorRaster::new(&CfaType::from(mosaic), size, slot));
         let pixels = color
             .as_ref()
