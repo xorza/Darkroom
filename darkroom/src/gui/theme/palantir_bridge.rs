@@ -2,8 +2,8 @@
 //! [`palantir::Palette`], and the [`palantir::Theme`] that builds.
 
 use palantir::{
-    ButtonTheme, Chrome, CloseShown, RadiusSteps, RgbaF32, SpaceSteps, Stroke, StrokeSteps,
-    TextStyleOverrides, WidgetLook,
+    BackdropFilter, ButtonTheme, Chrome, CloseShown, RadiusSteps, RgbaF32, SpaceSteps, Stroke,
+    StrokeSteps, TextStyleOverrides, WidgetLook,
 };
 
 use crate::gui::theme::color;
@@ -120,12 +120,60 @@ pub(super) fn theme(
     menu.min_width = MENU_MIN_WIDTH;
     // The panel sits inside a rule in the separators' ink, not on palantir's lit border.
     menu.panel.border.color = p.border_soft();
+    // Every light-dismiss popup is frosted: the menu panel, which the menus, the node palette and
+    // the combo lists wear, the tooltip and the color picker. A modal keeps its opaque panel: it
+    // dims what is behind it under a scrim, so there is nothing to see through.
+    for panel in [
+        &mut theme.context_menu.panel,
+        &mut theme.tooltip.panel,
+        &mut theme.color_picker.popup,
+    ] {
+        frost(panel, p.text_muted);
+    }
     theme
 }
 
 /// A menu's width floor: room for "Save As…" and its Ctrl+Shift+S hint a gutter apart, so the
 /// File, Edit and Graph menus open one width and a short menu does not read as a pill.
 const MENU_MIN_WIDTH: f32 = 240.0;
+
+/// The tint's alpha over a popup's frosted backdrop: the canvas reads through as a blurred wash
+/// under the popup's own color.
+const POPUP_TINT_ALPHA: f32 = 0.72;
+
+/// The contrast WCAG 1.4.3 asks of text against its ground
+/// (<https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum>).
+const TEXT_CONTRAST: f32 = 4.5;
+
+/// A popup's blur σ in logical px: wide enough that a node's title under a popup reads as color,
+/// not as text competing with the rows.
+const POPUP_BLUR: f32 = 20.0;
+
+/// `panel` over frosted glass: its own color as the tint, made translucent, as Fluent puts
+/// acrylic under its transient, light-dismiss surfaces
+/// (<https://learn.microsoft.com/windows/apps/develop/ui/in-app-acrylic>) and macOS its menus
+/// on a blurred material.
+///
+/// The glass shows at most the luminance that keeps `ink`, the dimmest ink the popup paints, at
+/// [`TEXT_CONTRAST`] over any backdrop. The brightest ground `ink` holds it on is
+/// `g = (Y(ink) + 0.05) / 4.5 − 0.05`, and the ground over a backdrop at the ceiling `c` is
+/// `(1 − α)·c + α·Y(tint)`, both in the linear light palantir composites in; so
+/// `c = (g − α·Y(tint)) / (1 − α)`.
+fn frost(panel: &mut Chrome, ink: RgbaF32) {
+    let tint = panel
+        .fill
+        .as_solid()
+        .expect("a popup panel is a solid fill");
+    let ground = (color::luminance(ink) + 0.05) / TEXT_CONTRAST - 0.05;
+    let tint_luminance = color::luminance(tint);
+    debug_assert!(
+        tint_luminance <= ground,
+        "the ink holds its contrast on the opaque panel"
+    );
+    let ceiling = (ground - POPUP_TINT_ALPHA * tint_luminance) / (1.0 - POPUP_TINT_ALPHA);
+    panel.fill = tint.with_alpha(POPUP_TINT_ALPHA).into();
+    panel.backdrop_filter = BackdropFilter::frosted(POPUP_BLUR).with_max_luminance(ceiling);
+}
 
 /// A chip's width floor: its padding, label gap, close box and trailing inset take 42 px, so 64
 /// leaves a short name room.

@@ -128,10 +128,7 @@ fn press_fill(theme: &Theme, color: RgbaF32, state: Toggle, hovered: bool) -> Op
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn luminance(c: RgbaF32) -> f32 {
-        0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
-    }
+    use crate::gui::theme::color;
 
     /// An "on" button rests under the hover lift an "off" one takes, so "on" never reads as
     /// "hovered", and lifts past it under the pointer, so hovering it still shows. For the two
@@ -149,11 +146,11 @@ mod tests {
             let rest = press_fill(&theme, ink, Toggle::On, false).expect("on fills");
             let hover = press_fill(&theme, ink, Toggle::On, true).expect("on fills");
             assert!(
-                luminance(rest) < luminance(lift),
+                color::luminance(rest) < color::luminance(lift),
                 "{name}: on reads as hovered"
             );
             assert!(
-                luminance(hover) > luminance(lift),
+                color::luminance(hover) > color::luminance(lift),
                 "{name}: hovering on does not show"
             );
         }
