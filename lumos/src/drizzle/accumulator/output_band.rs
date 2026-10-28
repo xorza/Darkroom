@@ -2,7 +2,7 @@
 
 use std::ops::Range;
 
-use glam::DVec2;
+use glam::{DVec2, USizeVec2};
 
 use crate::drizzle::accumulator::PlaneSpan;
 use crate::drizzle::accumulator::band_scan::BandScan;
@@ -11,12 +11,15 @@ use crate::drizzle::accumulator::frame_source::{DropOutcome, Fluxes, FrameSource
 use crate::drizzle::accumulator::kernel_plan::{KernelPlan, LANCZOS_ORDER};
 use crate::math::lanczos::lanczos_lut::LANCZOS_LUT_RESOLUTION;
 use crate::scratch_pool::{Scratch, ScratchPool, Shapeless};
-use common::Vec2us;
 
 /// The lattice points of [`QUAD_CORNERS`](crate::drizzle::accumulator::frame_source::QUAD_CORNERS)
-/// about pixel `(x, y)`, as `(x + dx, y + dy)`: lattice
-/// point `(j, k)` is input point `(j − ½, k − ½)`.
-const LATTICE_CORNERS: [[usize; 2]; 4] = [[0, 0], [1, 0], [1, 1], [0, 1]];
+/// about a pixel, as offsets from it: lattice point `(j, k)` is input point `(j − ½, k − ½)`.
+const LATTICE_CORNERS: [USizeVec2; 4] = [
+    USizeVec2::new(0, 0),
+    USizeVec2::new(1, 0),
+    USizeVec2::new(1, 1),
+    USizeVec2::new(0, 1),
+];
 
 /// One radial drop's kernel along each axis, one value per output column and per output row of
 /// its neighbourhood. Both kernels are separable — the Gaussian is a product of one-axis
@@ -80,16 +83,16 @@ impl Scratch for CornerLattice {
 }
 
 impl CornerLattice {
-    /// Lattice point `(j, k)` on the output grid, mapped through `source` the first time it is
-    /// asked for in lattice row `k`.
+    /// Lattice point `point` on the output grid, mapped through `source` the first time it is
+    /// asked for in its lattice row.
     #[inline]
-    fn corner(&mut self, source: &FrameSource<'_>, j: usize, k: usize) -> Option<DVec2> {
-        let row = &mut self.rows[k % 2];
-        if row.stamps[j] != k + 1 {
-            row.points[j] = source.pos(DVec2::new(j as f64 - 0.5, k as f64 - 0.5));
-            row.stamps[j] = k + 1;
+    fn corner(&mut self, source: &FrameSource<'_>, point: USizeVec2) -> Option<DVec2> {
+        let row = &mut self.rows[point.y % 2];
+        if row.stamps[point.x] != point.y + 1 {
+            row.points[point.x] = source.pos(point.as_dvec2() - DVec2::splat(0.5));
+            row.stamps[point.x] = point.y + 1;
         }
-        row.points[j]
+        row.points[point.x]
     }
 }
 
@@ -131,10 +134,8 @@ impl OutputBand<'_> {
                 let mut lattice = self.lattice.acquire();
                 debug_assert!(lattice.has_shape(source.width()));
                 self.distribute_square(source, |pixel| {
-                    let Vec2us { x, y } = pixel.pos;
                     source.quad_of(pixel, |corner| {
-                        let [dx, dy] = LATTICE_CORNERS[corner];
-                        lattice.corner(source, x + dx, y + dy)
+                        lattice.corner(source, pixel.pos + LATTICE_CORNERS[corner])
                     })
                 })
             }
@@ -189,7 +190,7 @@ impl OutputBand<'_> {
             let row = iy * width;
             for ix in scan.cols(iy) {
                 let pixel = InputPixel {
-                    pos: Vec2us::new(ix, iy),
+                    pos: USizeVec2::new(ix, iy),
                     idx: row + ix,
                 };
                 match drop(pixel) {
@@ -561,7 +562,7 @@ mod tests {
             let frame = DrizzleFrame::new(image.clone(), warp);
             let source = FrameSource::new(&frame, Deposit::of(&image), OutputGrid::new(2.0, size));
             let pixel = |x: usize, y: usize| InputPixel {
-                pos: Vec2us::new(x, y),
+                pos: USizeVec2::new(x, y),
                 idx: y * size.width + x,
             };
             let rows_first = (0..size.height).flat_map(|y| (0..size.width).map(move |x| (x, y)));
@@ -576,8 +577,7 @@ mod tests {
                     let own = source.quad(pixel(x, y), 0.5);
                     unconverged += usize::from(matches!(own, DropOutcome::Unconverged));
                     let shared = source.quad_of(pixel(x, y), |corner| {
-                        let [dx, dy] = LATTICE_CORNERS[corner];
-                        lattice.corner(&source, x + dx, y + dy)
+                        lattice.corner(&source, USizeVec2::new(x, y) + LATTICE_CORNERS[corner])
                     });
                     assert!(same(own, shared), "{name} {order}: pixel ({x}, {y})");
                 }

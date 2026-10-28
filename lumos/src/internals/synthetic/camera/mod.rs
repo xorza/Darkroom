@@ -8,13 +8,13 @@
 use std::f32::consts::PI;
 
 use common::Buffer2;
-use glam::Vec2;
+use glam::{USizeVec2, Vec2};
 
 use crate::image::cfa::cfa_type::CfaType;
 use crate::internals::synthetic::bgs::Vignette;
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use crate::math::fwhm;
-use common::{Size2us, Vec2us};
+use common::Size2us;
 
 /// Point-spread function the camera convolves every point source with.
 #[derive(Debug, Clone, Copy)]
@@ -127,7 +127,7 @@ impl FlatField {
     /// color's gain times the vignette.
     pub(crate) fn render(&self, size: Size2us, cfa_type: &CfaType) -> Buffer2<f32> {
         Buffer2::from_fn(size, |x, y| {
-            let gain = self.color_gain[cfa_type.slot_at(Vec2us::new(x, y))];
+            let gain = self.color_gain[cfa_type.slot_at(USizeVec2::new(x, y))];
             self.vignette
                 .map_or(gain, |vignette| gain * vignette.at(size, x, y))
         })

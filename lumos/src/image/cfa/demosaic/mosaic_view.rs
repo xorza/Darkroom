@@ -15,12 +15,13 @@ use rayon::prelude::*;
 use crate::error::Cancelled;
 use crate::image::cfa::cfa_color::CfaColor;
 use crate::image::cfa::demosaic::tiled::{NativePixel, OutputPlanes, TileKernel, TilePlace};
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use glam::USizeVec2;
 
 /// A color filter a demosaic reads a mosaic through, anchored at the mosaic's first pixel.
 pub(crate) trait MosaicPattern: Copy + Sync {
     /// The color of the photosite at `pos`.
-    fn color_at(&self, pos: Vec2us) -> CfaColor;
+    fn color_at(&self, pos: USizeVec2) -> CfaColor;
 }
 
 /// A frame's mosaic as a demosaic reads it: its samples row by row — calibration may put them
@@ -74,13 +75,13 @@ impl<'a, P: MosaicPattern> MosaicView<'a, P> {
 
     /// The sample at `at`, balanced by its color's gain.
     #[inline(always)]
-    pub(crate) fn balanced(&self, at: Vec2us) -> f32 {
+    pub(crate) fn balanced(&self, at: USizeVec2) -> f32 {
         self.data[at.y * self.size.width + at.x] * self.gain_at(at)
     }
 
     /// The gain that balances the color of the photosite at `at`.
     #[inline(always)]
-    pub(super) fn gain_at(&self, at: Vec2us) -> f32 {
+    pub(super) fn gain_at(&self, at: USizeVec2) -> f32 {
         self.gains[self.pattern.color_at(at).idx()]
     }
 
@@ -93,7 +94,7 @@ impl<'a, P: MosaicPattern> MosaicView<'a, P> {
 
     /// The pixel at `at` as a kernel writes it: its index, its color and its own sample.
     #[inline(always)]
-    pub(crate) fn native(&self, at: Vec2us) -> NativePixel {
+    pub(crate) fn native(&self, at: USizeVec2) -> NativePixel {
         let idx = at.y * self.size.width + at.x;
         NativePixel {
             idx,
@@ -164,7 +165,7 @@ impl<'a, P: MosaicPattern> MosaicView<'a, P> {
             .for_each(|(y, ((row_r, row_g), row_b))| {
                 let mut fill_span = |span: Range<usize>| {
                     for x in span {
-                        let [r, g, b] = self.border_pixel(Vec2us::new(x, y));
+                        let [r, g, b] = self.border_pixel(USizeVec2::new(x, y));
                         row_r[x] = r;
                         row_g[x] = g;
                         row_b[x] = b;
@@ -186,9 +187,9 @@ impl<'a, P: MosaicPattern> MosaicView<'a, P> {
     ///
     /// A mean of one color's samples is the same whatever gain balances that color, so the border
     /// reads the input as it is, and its native samples are the input's own.
-    fn border_pixel(&self, at: Vec2us) -> [f32; 3] {
+    fn border_pixel(&self, at: USizeVec2) -> [f32; 3] {
         let Size2us { width, height } = self.size;
-        let Vec2us { x, y } = at;
+        let USizeVec2 { x, y } = at;
         let mut sums = [0.0f32; 3];
         let mut weights = [0.0f32; 3];
         for neighbor_y in y.saturating_sub(1)..=(y + 1).min(height - 1) {
@@ -201,7 +202,7 @@ impl<'a, P: MosaicPattern> MosaicView<'a, P> {
                 };
                 let color = self
                     .pattern
-                    .color_at(Vec2us::new(neighbor_x, neighbor_y))
+                    .color_at(USizeVec2::new(neighbor_x, neighbor_y))
                     .idx();
                 sums[color] += self.data[neighbor_y * width + neighbor_x] * weight;
                 weights[color] += weight;
@@ -225,9 +226,9 @@ impl<'a, P: MosaicPattern> MosaicView<'a, P> {
     /// a border pixel whose 3×3 neighbourhood has none. `None` only when the whole frame has no
     /// sample of `color`, where there is nothing to interpolate from and the caller keeps the
     /// pixel's own sample.
-    fn nearest_mean(&self, at: Vec2us, color: usize) -> Option<f32> {
+    fn nearest_mean(&self, at: USizeVec2, color: usize) -> Option<f32> {
         let Size2us { width, height } = self.size;
-        let Vec2us { x, y } = at;
+        let USizeVec2 { x, y } = at;
         (2..width.max(height)).find_map(|radius| {
             let mut sum = 0.0f32;
             let mut count = 0usize;
@@ -235,7 +236,7 @@ impl<'a, P: MosaicPattern> MosaicView<'a, P> {
                 for neighbor_x in x.saturating_sub(radius)..=(x + radius).min(width - 1) {
                     if self
                         .pattern
-                        .color_at(Vec2us::new(neighbor_x, neighbor_y))
+                        .color_at(USizeVec2::new(neighbor_x, neighbor_y))
                         .idx()
                         == color
                     {
@@ -256,7 +257,8 @@ mod tests {
     use crate::image::cfa::bayer_pattern::BayerPattern;
     use crate::image::cfa::demosaic::mosaic_view::MosaicView;
     use crate::internals::cfa::XTRANS_PATTERN;
-    use common::{Size2us, Vec2us};
+    use common::Size2us;
+    use glam::USizeVec2;
 
     /// A view takes its plane's size, which must not be empty, reads each pixel's own sample as it
     /// is, and balances it by its color's gain: on RGGB, (1, 0) is green under 1, (1, 1) blue
@@ -266,10 +268,10 @@ mod tests {
         let data = Buffer2::new_filled((6, 4), 0.5);
         let bayer = MosaicView::new(&data, BayerPattern::Rggb).with_gains([2.0, 1.0, 4.0]);
         assert_eq!(bayer.size, Size2us::new(6, 4));
-        let blue = bayer.native(Vec2us::new(1, 1));
+        let blue = bayer.native(USizeVec2::new(1, 1));
         assert_eq!((blue.idx, blue.native, blue.sample), (7, 2, 0.5));
-        assert_eq!(bayer.balanced(Vec2us::new(1, 0)), 0.5);
-        assert_eq!(bayer.balanced(Vec2us::new(1, 1)), 2.0);
+        assert_eq!(bayer.balanced(USizeVec2::new(1, 0)), 0.5);
+        assert_eq!(bayer.balanced(USizeVec2::new(1, 1)), 2.0);
         assert_eq!(
             MosaicView::new(&data, XTRANS_PATTERN).size,
             Size2us::new(6, 4)

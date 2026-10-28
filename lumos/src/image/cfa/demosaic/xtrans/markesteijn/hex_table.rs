@@ -4,7 +4,7 @@
 use crate::image::cfa::cfa_color::CfaColor;
 use crate::image::cfa::demosaic::xtrans::markesteijn::{CROP, TILE};
 use crate::image::cfa::xtrans_pattern::XTransPattern;
-use common::Vec2us;
+use glam::USizeVec2;
 
 /// Each `(row % 3, col % 3)`'s hexagon as flat offsets — in the input crop's stride, which the
 /// samples are read in, and in the tile's, which its buffers are — beside the pattern's colors and
@@ -27,7 +27,9 @@ impl HexTable {
             let mut table = [[[0isize; 8]; 3]; 3];
             for (row, cells) in table.iter_mut().enumerate() {
                 for (col, cell) in cells.iter_mut().enumerate() {
-                    for (entry, offset) in cell.iter_mut().zip(hexagons.at(Vec2us::new(col, row))) {
+                    for (entry, offset) in
+                        cell.iter_mut().zip(hexagons.at(USizeVec2::new(col, row)))
+                    {
                         *entry = isize::from(offset.dy) * stride + isize::from(offset.dx);
                     }
                 }
@@ -37,7 +39,7 @@ impl HexTable {
         let mut right_shift = [false; 3];
         for (row, shift) in right_shift.iter_mut().enumerate() {
             let greens = (0..3)
-                .filter(|&col| pattern.color_at(Vec2us::new(col, row)) == CfaColor::Green)
+                .filter(|&col| pattern.color_at(USizeVec2::new(col, row)) == CfaColor::Green)
                 .count();
             *shift = greens == 2;
         }
@@ -66,14 +68,14 @@ impl HexTable {
     /// The color index at `(row, col)`: 0 red, 1 green, 2 blue.
     #[inline(always)]
     pub(super) const fn color(&self, row: usize, col: usize) -> usize {
-        self.pattern.color_at(Vec2us::new(col, row)).idx()
+        self.pattern.color_at(USizeVec2::new(col, row)).idx()
     }
 
     /// Whether `(row, col)` is green; greens repeat every three rows and columns.
     #[inline(always)]
     pub(super) const fn is_green(&self, row: usize, col: usize) -> bool {
         matches!(
-            self.pattern.color_at(Vec2us::new(col % 3, row % 3)),
+            self.pattern.color_at(USizeVec2::new(col % 3, row % 3)),
             CfaColor::Green
         )
     }

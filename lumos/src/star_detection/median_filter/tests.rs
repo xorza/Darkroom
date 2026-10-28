@@ -5,7 +5,7 @@ use common::Buffer2;
 use crate::internals::test_rng::TestRng;
 use crate::star_detection::median_filter::internals::apply_3x3;
 use crate::star_detection::median_filter::*;
-use common::Vec2us;
+use glam::USizeVec2;
 
 #[test]
 fn single_hot_pixel() {
@@ -301,7 +301,7 @@ fn median_at_side_edges() {
 fn median_at_edge_truth_table() {
     #[derive(Debug)]
     struct EdgeMedianCase {
-        pos: Vec2us,
+        pos: USizeVec2,
         expected: f32,
     }
 
@@ -314,27 +314,27 @@ fn median_at_edge_truth_table() {
     ];
     let cases = [
         EdgeMedianCase {
-            pos: Vec2us::new(0, 0),
+            pos: USizeVec2::new(0, 0),
             expected: 0.35,
         },
         EdgeMedianCase {
-            pos: Vec2us::new(3, 0),
+            pos: USizeVec2::new(3, 0),
             expected: 0.55,
         },
         EdgeMedianCase {
-            pos: Vec2us::new(0, 3),
+            pos: USizeVec2::new(0, 3),
             expected: 1.15,
         },
         EdgeMedianCase {
-            pos: Vec2us::new(3, 3),
+            pos: USizeVec2::new(3, 3),
             expected: 1.35,
         },
         EdgeMedianCase {
-            pos: Vec2us::new(1, 0),
+            pos: USizeVec2::new(1, 0),
             expected: 0.4,
         },
         EdgeMedianCase {
-            pos: Vec2us::new(1, 3),
+            pos: USizeVec2::new(1, 3),
             expected: 1.2,
         },
     ];

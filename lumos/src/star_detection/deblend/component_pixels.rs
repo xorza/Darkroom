@@ -3,7 +3,7 @@
 use crate::star_detection::deblend::component::Component;
 use crate::star_detection::deblend::pixel::Pixel;
 use crate::star_detection::star_detection_config::extraction_config::Connectivity;
-use common::Vec2us;
+use glam::USizeVec2;
 
 /// One component's pixels in raster order, with where each row of its box starts.
 ///
@@ -124,7 +124,7 @@ impl ComponentPixels {
     }
 
     /// The index of the pixel at `pos`, when the component holds it.
-    pub(crate) fn idx_of(&self, pos: Vec2us) -> Option<usize> {
+    pub(crate) fn idx_of(&self, pos: USizeVec2) -> Option<usize> {
         let row = self.row(pos.y);
         row.pixels
             .binary_search_by_key(&pos.x, |pixel| pixel.pos().x)
@@ -142,11 +142,11 @@ impl ComponentPixels {
     ) {
         debug_assert_eq!(self.above.len(), self.pixels.len(), "the rows are linked");
         let pos = self.pixels[idx].pos();
-        if idx > 0 && self.pixels[idx - 1].pos() == Vec2us::new(pos.x.wrapping_sub(1), pos.y) {
+        if idx > 0 && self.pixels[idx - 1].pos() == USizeVec2::new(pos.x.wrapping_sub(1), pos.y) {
             visit(idx - 1);
         }
         if idx + 1 < self.pixels.len()
-            && self.pixels[idx + 1].pos() == Vec2us::new(pos.x + 1, pos.y)
+            && self.pixels[idx + 1].pos() == USizeVec2::new(pos.x + 1, pos.y)
         {
             visit(idx + 1);
         }
@@ -212,7 +212,8 @@ mod tests {
     use crate::star_detection::labeling::LabelMap;
     use crate::star_detection::labeling::component_data::ComponentData;
     use crate::star_detection::star_detection_config::extraction_config::Connectivity;
-    use common::{Rect2us, Size2us, Vec2us};
+    use common::{Rect2us, Size2us};
+    use glam::USizeVec2;
 
     /// A plus of five pixels and one pixel diagonal to its arm: under 8-connectivity the arm's end
     /// (5, 4) reaches the diagonal (6, 3), the centre and the plus's other two diagonal pixels;
@@ -228,7 +229,7 @@ mod tests {
         for &(x, y) in &lit {
             pixels[(x, y)] = 1.0;
             labels[(x, y)] = 1;
-            bbox.include(Vec2us::new(x, y));
+            bbox.include(USizeVec2::new(x, y));
         }
         let labels = LabelMap::from_raw(&labels, 1);
         let data = ComponentData {
@@ -240,8 +241,8 @@ mod tests {
         component.fill(&Component::new(&data, &pixels, &labels));
         component.link();
         assert_eq!(component.row_starts.len(), 3 + 1);
-        assert_eq!(component.idx_of(Vec2us::new(7, 3)), None);
-        let arm = component.idx_of(Vec2us::new(5, 4)).unwrap();
+        assert_eq!(component.idx_of(USizeVec2::new(7, 3)), None);
+        let arm = component.idx_of(USizeVec2::new(5, 4)).unwrap();
         let reached = |connectivity| {
             let mut poss = Vec::new();
             component.for_each_neighbour(arm, connectivity, |idx| {

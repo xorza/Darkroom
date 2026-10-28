@@ -3,7 +3,8 @@
 use arrayvec::ArrayVec;
 
 use crate::image::cfa::cfa_type::CfaType;
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use glam::USizeVec2;
 
 /// The photosites of one color of a mosaic over an image, in raster order: how many there are,
 /// and the pixel index of each by its rank among them, in closed form — the pattern repeats, so a
@@ -29,7 +30,7 @@ impl ColorRaster {
             ..period)
             .map(|row| {
                 (0..period)
-                    .filter(|&col| cfa_type.slot_at(Vec2us::new(col, row)) == color)
+                    .filter(|&col| cfa_type.slot_at(USizeVec2::new(col, row)) == color)
                     .map(|col| u8::try_from(col).expect("a column within the period"))
                     .collect()
             })
@@ -84,7 +85,8 @@ mod tests {
     use crate::image::cfa::color_raster::ColorRaster;
     use crate::image::cfa::mosaic::Mosaic;
     use crate::image::cfa::xtrans_pattern::XTransPattern;
-    use common::{Size2us, Vec2us};
+    use common::Size2us;
+    use glam::USizeVec2;
 
     /// Every rank lands where a walk over the pixels in raster order finds that photosite, for each
     /// color of an RGGB and an X-Trans mosaic, over sizes that end mid-period on either axis or
@@ -109,7 +111,9 @@ mod tests {
                 let size = Size2us::new(width, height);
                 for color in 0..3 {
                     let walk: Vec<usize> = (0..size.pixel_count())
-                        .filter(|&idx| cfa.slot_at(Vec2us::new(idx % width, idx / width)) == color)
+                        .filter(|&idx| {
+                            cfa.slot_at(USizeVec2::new(idx % width, idx / width)) == color
+                        })
                         .collect();
                     let raster = ColorRaster::new(&cfa, size, color);
                     assert_eq!(

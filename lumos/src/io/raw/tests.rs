@@ -8,7 +8,8 @@ use crate::image::flags::quality_flags::{QualityFlags, SATURATION_FRACTION};
 use crate::internals::cfa::XTRANS_PATTERN;
 use crate::io::raw::unpacked_raw::{instrument, planes, saturation_level};
 use crate::io::raw::*;
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use glam::USizeVec2;
 
 /// A dump at black `black`, with no other option.
 fn black(black: u32) -> BayerDump {
@@ -350,14 +351,17 @@ fn the_raw_values_settle_no_data_and_saturation() {
     let flags = flags_for(2);
     assert_eq!(flags.size(), Size2us::new(SIDE - 2, SIDE - 2));
     assert_eq!(flags.count(QualityFlags::NO_DATA), 1);
-    assert_eq!(flags.at_pos(Vec2us::new(4, 6)), QualityFlags::NO_DATA);
+    assert_eq!(flags.at_pos(USizeVec2::new(4, 6)), QualityFlags::NO_DATA);
     assert_eq!(flags.count(QualityFlags::SATURATED), 1);
-    assert_eq!(flags.at_pos(Vec2us::new(9, 9)), QualityFlags::SATURATED);
-    assert_eq!(flags.at_pos(Vec2us::new(11, 11)), QualityFlags::default());
+    assert_eq!(flags.at_pos(USizeVec2::new(9, 9)), QualityFlags::SATURATED);
+    assert_eq!(
+        flags.at_pos(USizeVec2::new(11, 11)),
+        QualityFlags::default()
+    );
     // A camera without the convention reads its zero as a value: not missing, not saturated.
     let flags = flags_for(0);
     assert_eq!(flags.count(QualityFlags::NO_DATA), 0);
-    assert_eq!(flags.at_pos(Vec2us::new(4, 6)), QualityFlags::default());
+    assert_eq!(flags.at_pos(USizeVec2::new(4, 6)), QualityFlags::default());
 
     // The frame keeps its dead photosite at the median of the others, as a FITS null is kept:
     // 2000 at every visible pixel but three, so the median is the floor visible (3, 3) holds.

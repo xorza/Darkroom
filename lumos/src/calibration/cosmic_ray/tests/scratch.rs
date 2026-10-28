@@ -13,7 +13,8 @@ use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::internals::cfa::cfa_from_plane;
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use glam::USizeVec2;
 
 /// Cosmic-ray detection holds three full-frame masks at its peak, one bit per pixel each.
 ///
@@ -51,7 +52,7 @@ fn cosmic_ray_masks_stay_one_bit_per_pixel() {
 fn cosmic_ray_float_scratch_is_five_frame_planes() {
     let size = Size2us::new(64, 64);
     let mut data = Buffer2::new_filled(size, 0.05f32);
-    data[size.idx_of(Vec2us::new(32, 32))] = 0.95;
+    data[size.idx_of(USizeVec2::new(32, 32))] = 0.95;
 
     // The spike has to be flagged, or the measurement below would come from a detect-only first
     // pass that never reaches `PixelRepair::apply`'s snapshot buffer.

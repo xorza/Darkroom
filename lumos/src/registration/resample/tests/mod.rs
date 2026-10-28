@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use common::Buffer2;
-use glam::DVec2;
+use glam::{DVec2, USizeVec2};
 use imaginarium::{ChannelLayout, PlanarDesc};
 
 use crate::image::cfa::cfa_type::CfaType;
@@ -18,7 +18,7 @@ use crate::registration::resample::warp_config::{InterpolationMethod, WarpConfig
 use crate::registration::resample::{Warp, WarpResult, WarpScratch};
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
-use common::{Size2us, Vec2us};
+use common::Size2us;
 
 /// A constant read back through normalized weights: each f32 sum of up to 64 terms rounds by
 /// `64·ε` of its absolute sum, and a window the warp normalizes has `Σ|L| ≤ 8·Σ L` (its squares
@@ -530,7 +530,7 @@ fn a_flag_leaves_its_pixel_out_or_carries_it_by_what_it_says() {
                     QualityFlags::default()
                 };
                 assert_eq!(
-                    flags.at_pos(Vec2us::new(x, y)),
+                    flags.at_pos(USizeVec2::new(x, y)),
                     expected,
                     "{name} ({x}, {y})"
                 );
@@ -540,7 +540,7 @@ fn a_flag_leaves_its_pixel_out_or_carries_it_by_what_it_says() {
         let whole = warp(Some(flag), DVec2::new(1.0, 0.0));
         let flags = whole.image.flags().unwrap();
         assert_eq!(flags.count(flag), 1, "{name}");
-        assert_eq!(flags.at_pos(Vec2us::new(9, 10)), flag, "{name}");
+        assert_eq!(flags.at_pos(USizeVec2::new(9, 10)), flag, "{name}");
     }
     assert_eq!(carried, 2);
 }

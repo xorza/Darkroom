@@ -57,7 +57,7 @@ fn a_pixel_reads_its_mesh_and_its_flat_gain() {
             mesh: &mesh,
             flat_gain,
         }
-        .at(0, Vec2us::new(5, 9));
+        .at(0, USizeVec2::new(5, 9));
         assert_eq!(pixel.flat_gain, expected);
         assert_eq!(pixel.local.sky, 0.5);
     }

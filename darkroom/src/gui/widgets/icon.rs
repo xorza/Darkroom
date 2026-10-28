@@ -125,8 +125,8 @@ impl Icon {
             }
             Self::ShowAll => {
                 pen.frame(ui, (3.5, 3.5, 17.0, 17.0), 3.0);
-                for (x, y) in [(9.0, 9.0), (15.0, 9.0), (9.0, 15.0), (15.0, 15.0)] {
-                    pen.dot(ui, (x, y), 1.5);
+                for center in [(9.0, 9.0), (15.0, 9.0), (9.0, 15.0), (15.0, 15.0)] {
+                    pen.dot(ui, center, 1.5);
                 }
             }
             Self::ShowSelected => {
@@ -187,8 +187,8 @@ struct Pen {
 }
 
 impl Pen {
-    fn at(self, (x, y): (f32, f32)) -> Vec2 {
-        self.origin + Vec2::new(x, y) * self.k
+    fn at(self, point: impl Into<Vec2>) -> Vec2 {
+        self.origin + point.into() * self.k
     }
 
     fn rect(self, (x, y, w, h): (f32, f32, f32, f32)) -> Rect {
@@ -196,7 +196,7 @@ impl Pen {
         Rect::new(min.x, min.y, w * self.k, h * self.k)
     }
 
-    fn line(self, ui: &mut Ui, a: (f32, f32), b: (f32, f32)) {
+    fn line(self, ui: &mut Ui, a: impl Into<Vec2>, b: impl Into<Vec2>) {
         ui.add_shape(Shape::line(self.at(a), self.at(b), self.stroke).cap(LineCap::Round));
     }
 
@@ -227,11 +227,11 @@ impl Pen {
         );
     }
 
-    fn circle(self, ui: &mut Ui, center: (f32, f32), radius: f32) {
+    fn circle(self, ui: &mut Ui, center: impl Into<Vec2>, radius: f32) {
         ui.add_shape(Shape::circle(self.at(center), radius * self.k, self.stroke));
     }
 
-    fn arc(self, ui: &mut Ui, center: (f32, f32), radius: f32, start_angle: f32, sweep: f32) {
+    fn arc(self, ui: &mut Ui, center: impl Into<Vec2>, radius: f32, start_angle: f32, sweep: f32) {
         let arc = CircularArc {
             center: self.at(center),
             radius: radius * self.k,
@@ -241,7 +241,7 @@ impl Pen {
         ui.add_shape(Shape::arc(arc, self.stroke).cap(LineCap::Round));
     }
 
-    fn dot(self, ui: &mut Ui, center: (f32, f32), radius: f32) {
+    fn dot(self, ui: &mut Ui, center: impl Into<Vec2>, radius: f32) {
         ui.add_shape(support::dot(self.at(center), radius * self.k).fill(self.color));
     }
 

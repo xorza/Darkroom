@@ -9,6 +9,7 @@ use darkroom::driver::action::Action;
 use darkroom::driver::error::{ActFailure, DriverError};
 use darkroom::driver::shot::{LegendNode, Region};
 use darkroom::driver::state::{Detail, NODE_LIMIT, State};
+use glam::UVec2;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
@@ -54,7 +55,7 @@ struct Opened {
 struct ShotLegend<'a> {
     path: &'a PathBuf,
     /// `[width, height]` of the picture.
-    size: [u32; 2],
+    size: UVec2,
     nodes: &'a [LegendNode],
 }
 
@@ -259,7 +260,7 @@ fn take_shot(driver: &mut Driver, params: ShotParams) -> Result<Vec<ContentBlock
     let mut content = vec![image.content];
     content.extend(json(&ShotLegend {
         path: &shot.path,
-        size: shot.size.to_array(),
+        size: shot.size,
         nodes: &shot.legend,
     })?);
     Ok(content)

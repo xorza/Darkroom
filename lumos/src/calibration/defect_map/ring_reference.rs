@@ -7,7 +7,8 @@ use crate::image::cfa::cfa_type::CfaType;
 use crate::math::plane_moments::{Plane, PlaneMoments};
 use crate::math::statistics;
 use crate::math::statistics::median_mad::MedianMad;
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use glam::{DVec2, IVec2, USizeVec2};
 
 /// The ring's inner reach, in pixels: a same-color cluster of up to this many pixels across keeps
 /// most of itself out of its members' rings, and what it leaves in, the clip takes out.
@@ -58,7 +59,7 @@ impl RingFrame<()> {
 /// One photosite of the ring: its offset from the pixel, and its value.
 #[derive(Debug, Clone, Copy)]
 struct RingSample {
-    offset: [i32; 2],
+    offset: IVec2,
     value: f64,
 }
 
@@ -69,7 +70,7 @@ impl RingReference {
         &mut self,
         frame: RingFrame<impl Fn(usize) -> f64>,
         cfa: &CfaType,
-        point: Vec2us,
+        point: USizeVec2,
     ) -> Option<f32> {
         let RingFrame { size, value } = frame;
         let color = cfa.slot_at(point);
@@ -86,10 +87,12 @@ impl RingReference {
                 ) else {
                     continue;
                 };
-                let at = Vec2us::new(x, y);
+                let at = USizeVec2::new(x, y);
                 if x < size.width && y < size.height && cfa.slot_at(at) == color {
                     self.samples.push(RingSample {
-                        offset: [dx, dy].map(|d| i32::try_from(d).expect("a ring offset is small")),
+                        offset: IVec2::from_array(
+                            [dx, dy].map(|d| i32::try_from(d).expect("a ring offset is small")),
+                        ),
                         value: value(size.idx_of(at)),
                     });
                 }
@@ -106,7 +109,7 @@ impl RingReference {
                 &mut self.residuals,
                 self.samples.iter().map(|sample| sample.value),
             ),
-            slope: [0.0; 2],
+            slope: DVec2::ZERO,
         };
         for _ in 0..2 {
             let cut = self.clip_cut(plane);

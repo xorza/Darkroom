@@ -1,6 +1,6 @@
 use crate::internals::synthetic::sky_field::{GaussianStars, Sky, SkyField, SkyNoise};
-use common::{Size2us, Vec2us};
-use glam::Vec2;
+use common::Size2us;
+use glam::{USizeVec2, Vec2};
 
 const FLAT: Sky = Sky {
     level: 0.1,
@@ -22,7 +22,7 @@ fn stars_sit_on_the_sky_at_their_centres() {
     // m(0) = 3·√(π/2)·erf(1/(3√2)) = 0.981786 per axis, so 0.1 + 0.5·m(0)² = 0.581952, to the
     // f32 rounding of the sum. It sits where we put it.
     assert!((field.pixels[(8, 20)] - 0.581_952).abs() <= 1e-7);
-    assert_eq!(field.centers, vec![Vec2us::new(8, 20)]);
+    assert_eq!(field.centers, vec![USizeVec2::new(8, 20)]);
     // Far from the star, only sky.
     assert_eq!(field.pixels[(31, 0)], 0.1);
 }
@@ -37,7 +37,7 @@ fn centres_round_to_the_nearest_pixel() {
             peaks: &[(Vec2::new(4.4, 7.6), 0.3)],
         },
     );
-    assert_eq!(field.centers, vec![Vec2us::new(4, 8)]);
+    assert_eq!(field.centers, vec![USizeVec2::new(4, 8)]);
 }
 
 #[test]

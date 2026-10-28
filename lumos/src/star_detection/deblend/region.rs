@@ -1,6 +1,7 @@
 //! Connected region from segmentation and deblending.
 
-use common::{Rect2us, Vec2us};
+use common::Rect2us;
+use glam::USizeVec2;
 
 /// A connected region of pixels identified during detection.
 ///
@@ -12,7 +13,7 @@ pub(crate) struct Region {
     /// Bounding box of the region.
     pub(crate) bbox: Rect2us,
     /// Peak pixel coordinates within the region.
-    pub(crate) peak: Vec2us,
+    pub(crate) peak: USizeVec2,
     /// Number of pixels in the region.
     pub(crate) area: usize,
 }

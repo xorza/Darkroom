@@ -1,10 +1,10 @@
-use glam::DVec2;
+use glam::{DVec2, USizeVec2};
 
 use crate::registration::distortion::tps::distortion_map::DistortionMap;
 use crate::registration::distortion::tps::tests::{
     EXACT_PX, assert_near, fit_default, square_source_4,
 };
-use common::{Size2us, Vec2us};
+use common::Size2us;
 
 /// `DistortionMap` from pure translation: grid dimensions, vectors, and statistics.
 #[test]
@@ -25,7 +25,7 @@ fn distortion_map_translation() {
     // For pure translation, every grid point should have distortion ~(5, 3)
     for gy in 0..map.grid.height {
         for gx in 0..map.grid.width {
-            let d = map.get(Vec2us::new(gx, gy)).unwrap();
+            let d = map.get(USizeVec2::new(gx, gy)).unwrap();
             assert!(
                 d.abs_diff_eq(shift, EXACT_PX),
                 "grid ({gx},{gy}): {d} vs {shift}"
@@ -60,16 +60,16 @@ fn distortion_map_get_out_of_bounds() {
     let map = DistortionMap::from_tps(&tps, Size2us::new(100, 100), 50);
 
     // Valid: within grid
-    assert!(map.get(Vec2us::ZERO).is_some());
+    assert!(map.get(USizeVec2::ZERO).is_some());
 
     // Invalid: beyond grid dimensions
-    assert!(map.get(Vec2us::new(map.grid.width, 0)).is_none());
-    assert!(map.get(Vec2us::new(0, map.grid.height)).is_none());
+    assert!(map.get(USizeVec2::new(map.grid.width, 0)).is_none());
+    assert!(map.get(USizeVec2::new(0, map.grid.height)).is_none());
     assert!(
-        map.get(Vec2us::new(map.grid.width, map.grid.height))
+        map.get(USizeVec2::new(map.grid.width, map.grid.height))
             .is_none()
     );
-    assert!(map.get(Vec2us::new(1000, 1000)).is_none());
+    assert!(map.get(USizeVec2::new(1000, 1000)).is_none());
 }
 
 /// `DistortionMap::interpolate` with bilinear on translation: exact at grid and mid-points.

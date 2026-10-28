@@ -488,10 +488,10 @@ fn an_axis_aligned_ellipse_filters_separably_as_its_2d_kernel() {
     let size = 2 * radius + 1;
     let tolerance = (size * size) as f32 * f32::EPSILON;
     for (angle, sigmas) in [
-        (0.0f32, [sigma, sigma * axis_ratio]),
-        (std::f32::consts::PI, [sigma, sigma * axis_ratio]),
-        (FRAC_PI_2, [sigma * axis_ratio, sigma]),
-        (-FRAC_PI_2, [sigma * axis_ratio, sigma]),
+        (0.0f32, Vec2::new(sigma, sigma * axis_ratio)),
+        (std::f32::consts::PI, Vec2::new(sigma, sigma * axis_ratio)),
+        (FRAC_PI_2, Vec2::new(sigma * axis_ratio, sigma)),
+        (-FRAC_PI_2, Vec2::new(sigma * axis_ratio, sigma)),
     ] {
         let mut separable = pixels.clone();
         let mut temp = Buffer2::new_default((side, side));
@@ -518,7 +518,11 @@ fn an_axis_aligned_ellipse_filters_separably_as_its_2d_kernel() {
         }
         if angle == FRAC_PI_2 {
             let mut swapped = pixels.clone();
-            separable_convolve(&mut swapped, [sigma, sigma * axis_ratio], &mut temp);
+            separable_convolve(
+                &mut swapped,
+                Vec2::new(sigma, sigma * axis_ratio),
+                &mut temp,
+            );
             let largest = swapped
                 .iter()
                 .zip(full.iter())
@@ -1037,11 +1041,14 @@ fn a_kernel_along_the_axes_keeps_its_axes_however_near_round() {
         KernelShape::Separable(sigmas) => Some(sigmas),
         KernelShape::Elliptical(_) => None,
     };
-    assert_eq!(separable(shape(0.995, 0.0)), Some([sigma, sigma * 0.995]));
+    assert_eq!(
+        separable(shape(0.995, 0.0)),
+        Some(Vec2::new(sigma, sigma * 0.995))
+    );
     assert_eq!(
         separable(shape(0.995, FRAC_PI_2)),
-        Some([sigma * 0.995, sigma])
+        Some(Vec2::new(sigma * 0.995, sigma))
     );
-    assert_eq!(separable(shape(0.995, 0.3)), Some([sigma, sigma]));
+    assert_eq!(separable(shape(0.995, 0.3)), Some(Vec2::splat(sigma)));
     assert_eq!(separable(shape(0.5, 0.3)), None);
 }

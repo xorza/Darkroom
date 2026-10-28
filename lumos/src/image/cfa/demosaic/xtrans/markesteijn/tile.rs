@@ -7,7 +7,7 @@ use crate::image::cfa::demosaic::tiled::{OutputPlanes, TilePlace};
 use crate::image::cfa::demosaic::xtrans::markesteijn::hex_table::HexTable;
 use crate::image::cfa::demosaic::xtrans::markesteijn::{CROP, MarkesteijnPasses, READ_REACH, TILE};
 use crate::image::cfa::xtrans_pattern::XTransPattern;
-use common::Vec2us;
+use glam::USizeVec2;
 use simd::{F32_LANES, F32x8, Isa, Kernel};
 
 /// Half the tile, the width of the green bounds, which hold one entry per pair of columns.
@@ -148,7 +148,7 @@ impl Tile {
         {
             let y = first_row + row;
             for (col, balanced) in line[..cols].iter_mut().enumerate() {
-                *balanced = xtrans.balanced(Vec2us::new(first_col + col, y));
+                *balanced = xtrans.balanced(USizeVec2::new(first_col + col, y));
             }
         }
     }
@@ -734,7 +734,7 @@ impl Tile {
                         avg[3] += 1.0;
                     }
                 }
-                let pixel = xtrans.native(Vec2us::new(col + left, row + top));
+                let pixel = xtrans.native(USizeVec2::new(col + left, row + top));
                 let values = [0, 1, 2].map(|channel| avg[channel] / avg[3]);
                 unsafe { out.write_pixel(pixel, values) };
             }

@@ -28,7 +28,8 @@ use crate::image::metadata::mosaic_noise::MosaicNoise;
 use crate::image::stackable_image::{ImageParts, StackableImage};
 use crate::io::error::WriteError;
 use crate::io::fits;
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use glam::USizeVec2;
 
 /// Raw CFA image - single channel with color filter pattern metadata.
 /// Represents sensor data before demosaicing.
@@ -401,7 +402,7 @@ impl CfaImage {
             for (x, sample) in row.iter_mut().enumerate() {
                 let idx = y * size.width + x;
                 let own_flags = flags.map_or(0, |flags| flags.at(idx).byte());
-                if cfa_type.slot_at(Vec2us::new(x, y)) == GREEN {
+                if cfa_type.slot_at(USizeVec2::new(x, y)) == GREEN {
                     *sample = self.data[idx];
                     if let Some(row_flags) = row_flags.as_deref_mut() {
                         row_flags[x] = own_flags;
@@ -419,7 +420,7 @@ impl CfaImage {
                         if (dx, dy) == (0, 0)
                             || nx >= size.width
                             || ny >= size.height
-                            || cfa_type.slot_at(Vec2us::new(nx, ny)) != GREEN
+                            || cfa_type.slot_at(USizeVec2::new(nx, ny)) != GREEN
                         {
                             continue;
                         }

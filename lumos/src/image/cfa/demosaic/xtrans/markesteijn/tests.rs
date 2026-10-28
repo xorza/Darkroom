@@ -5,7 +5,7 @@ use crate::image::cfa::demosaic::xtrans::markesteijn::*;
 use crate::internals::assertions::assert_close;
 use crate::internals::cfa::XTRANS_PATTERN;
 use crate::internals::test_rng::TestRng;
-use common::Vec2us;
+use glam::USizeVec2;
 
 const PASSES: [MarkesteijnPasses; 2] = [MarkesteijnPasses::One, MarkesteijnPasses::Three];
 
@@ -76,7 +76,7 @@ fn markesteijn_matches_librtprocess_bit_for_bit() {
     for (passes, digests) in PASSES.into_iter().zip(DIGESTS) {
         for ((name, scene), expected) in scenes.into_iter().zip(digests) {
             let data = Buffer2::from_fn(size, |x, y| {
-                scene(pattern.color_at(Vec2us::new(x, y)).idx(), x, y)
+                scene(pattern.color_at(USizeVec2::new(x, y)).idx(), x, y)
             });
             let planes = demosaic(
                 &MosaicView::new(&data, pattern),
@@ -113,7 +113,7 @@ fn constant_color_reconstructs_to_rounding_at_every_size() {
         let size = Size2us::new(side, side);
         for color in [[0.5f32; 3], [0.8, 0.5, 0.2], [0.1, 0.9, 0.4]] {
             let data = Buffer2::from_fn(size, |x, y| {
-                color[pattern.color_at(Vec2us::new(x, y)).idx()]
+                color[pattern.color_at(USizeVec2::new(x, y)).idx()]
             });
             for passes in PASSES {
                 let planes = demosaic(
@@ -268,8 +268,8 @@ fn markesteijn_inside_the_border_matches_a_larger_frame() {
             for (channel, (part_plane, whole_plane)) in part.iter().zip(&whole).enumerate() {
                 for y in border..small.height - border {
                     for x in border..small.width - border {
-                        let value = part_plane[small.idx_of(Vec2us::new(x, y))];
-                        let outer = whole_plane[large.idx_of(Vec2us::new(x + ox, y + oy))];
+                        let value = part_plane[small.idx_of(USizeVec2::new(x, y))];
+                        let outer = whole_plane[large.idx_of(USizeVec2::new(x + ox, y + oy))];
                         assert_eq!(
                             value.to_bits(),
                             outer.to_bits(),

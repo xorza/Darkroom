@@ -21,7 +21,7 @@ use crate::io::error::{ImageError, RasterLoadError, ScientificRefusal, WriteErro
 use crate::io::load_ctx::LoadCtx;
 use crate::io::null_policy::{NullPolicy, NullSamples};
 use crate::io::raster;
-use common::Vec2us;
+use glam::USizeVec2;
 
 #[test]
 fn convert_fits_to_imaginarium_image() {
@@ -58,7 +58,7 @@ fn load_full_example_fits() {
     // recoverable. The sample is that quotient narrowed once.
     let physical_scale = image.metadata.derived.domain().unwrap().scale;
     assert_eq!(physical_scale, 4_294_967_295.0);
-    let pixel = image.channel(0)[image.desc().size().idx_of(Vec2us::new(5, 20))];
+    let pixel = image.channel(0)[image.desc().size().idx_of(USizeVec2::new(5, 20))];
     assert_eq!(pixel, (152.0 / 4_294_967_295.0_f64) as f32);
     assert_close!(f64::from(pixel) * physical_scale, 152.0, 1e-5, "{pixel}");
 

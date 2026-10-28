@@ -18,7 +18,7 @@ pub(super) fn checker_image(theme: &Theme) -> palantir::Image {
     let [light, dark] =
         [theme.viewer.checker_light, theme.viewer.checker_dark].map(RgbaF32::to_srgba);
     let mut tile = palantir::Image::blank(UVec2::splat(2));
-    tile.fill_with(|x, y| if (x + y) % 2 == 0 { light } else { dark });
+    tile.fill_with(|at| if (at.x + at.y) % 2 == 0 { light } else { dark });
     tile
 }
 

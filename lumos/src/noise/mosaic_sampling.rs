@@ -12,7 +12,8 @@ use crate::image::metadata::bg_split::BgSplit;
 use crate::math::statistics::median_mad::MedianMad;
 use crate::noise::bg_from_gain;
 use crate::noise::binned_samples::BinnedSamples;
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use glam::USizeVec2;
 
 /// The photosites of a `size` frame of `mosaic` a statistic samples: those of the rows
 /// [`CfaType::sampled_rows`] takes for about `per_color` samples a color, less the pixels
@@ -59,7 +60,7 @@ impl<E: Fn(usize) -> bool> MosaicSampling<E> {
             for x in 0..width {
                 let idx = y * width + x;
                 if !(self.excluded)(idx) {
-                    visit(idx, self.mosaic.slot_at(Vec2us::new(x, y)));
+                    visit(idx, self.mosaic.slot_at(USizeVec2::new(x, y)));
                 }
             }
         }
@@ -78,10 +79,10 @@ impl<E: Fn(usize) -> bool> MosaicSampling<E> {
         let Size2us { width, .. } = self.size;
         for y in CfaType::from(self.mosaic).sampled_rows(self.size, self.per_color) {
             for x in 0..width {
-                let color = self.mosaic.slot_at(Vec2us::new(x, y));
+                let color = self.mosaic.slot_at(USizeVec2::new(x, y));
                 // Every color recurs within a period on every row of its own.
                 let Some(neighbour) = (x + 1..(x + 1 + CfaType::MAX_PERIOD).min(width))
-                    .find(|&nx| self.mosaic.slot_at(Vec2us::new(nx, y)) == color)
+                    .find(|&nx| self.mosaic.slot_at(USizeVec2::new(nx, y)) == color)
                 else {
                     continue;
                 };
@@ -195,7 +196,8 @@ mod tests {
     use crate::internals::test_rng::TestRng;
     use crate::math::statistics::subsample::MAX_STATISTIC_SAMPLES;
     use crate::noise::mosaic_sampling::MosaicSampling;
-    use common::{Size2us, Vec2us};
+    use common::Size2us;
+    use glam::USizeVec2;
 
     /// Each color of a Bayer mosaic reads its own noise, through a gradient the differences
     /// cancel. σ = 0.01 red, 0.02 green, 0.03 blue on a 512² mosaic: every row holds 255 pairs of
@@ -210,7 +212,7 @@ mod tests {
         let sigmas = [0.01f32, 0.02, 0.03];
         let mut rng = TestRng::new(9);
         let mosaic = Buffer2::from_fn((512, 512), |x, y| {
-            let color = rggb.slot_at(Vec2us::new(x, y));
+            let color = rggb.slot_at(USizeVec2::new(x, y));
             0.2 + 0.3 * (x as f32 / 512.0) + sigmas[color] * rng.next_gaussian_f32()
         });
         for per_color in [MAX_STATISTIC_SAMPLES, 43_690] {

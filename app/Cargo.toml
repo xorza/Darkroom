@@ -18,7 +18,7 @@ darkroom = { workspace = true }
 common = { workspace = true }
 palantir = { workspace = true }
 
-glam = { workspace = true, features = ["std"] }
+glam = { workspace = true, features = ["serde", "std", "u32"] }
 serde = { workspace = true, features = ["derive", "std"] }
 tokio = { workspace = true, features = ["macros", "rt", "sync"] }
 tracing = { workspace = true, features = ["std"] }

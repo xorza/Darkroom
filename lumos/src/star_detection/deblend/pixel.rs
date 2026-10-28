@@ -2,25 +2,27 @@
 
 use std::cmp::Ordering;
 
-use common::Vec2us;
+use glam::{USizeVec2, UVec2};
 
 /// A pixel with its coordinates and value: 12 bytes, which a deblend holds one of for each pixel
 /// of the component it splits. A frame's sides fit a `u32`.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Pixel {
-    x: u32,
-    y: u32,
+    pos: UVec2,
     pub(crate) value: f32,
 }
 
 impl Pixel {
     /// The pixel at column `x` of row `y`, as a labeling run states them.
     pub(crate) const fn at(x: u32, y: u32, value: f32) -> Self {
-        Self { x, y, value }
+        Self {
+            pos: UVec2::new(x, y),
+            value,
+        }
     }
 
-    pub(crate) const fn pos(&self) -> Vec2us {
-        Vec2us::new(self.x as usize, self.y as usize)
+    pub(crate) const fn pos(&self) -> USizeVec2 {
+        USizeVec2::new(self.pos.x as usize, self.pos.y as usize)
     }
 
     /// The brightest of `pixels`, the first in iteration order among equals; `None` when there
@@ -37,19 +39,19 @@ impl Pixel {
         other
             .value
             .total_cmp(&self.value)
-            .then(self.y.cmp(&other.y))
-            .then(self.x.cmp(&other.x))
+            .then(self.pos.y.cmp(&other.pos.y))
+            .then(self.pos.x.cmp(&other.pos.x))
     }
 }
 
 #[cfg(test)]
 pub(crate) mod internals {
     use crate::star_detection::deblend::pixel::Pixel;
-    use common::Vec2us;
+    use glam::USizeVec2;
 
     impl Pixel {
         /// The pixel at `pos`.
-        pub(crate) fn new(pos: Vec2us, value: f32) -> Self {
+        pub(crate) fn new(pos: USizeVec2, value: f32) -> Self {
             Self::at(
                 u32::try_from(pos.x).unwrap(),
                 u32::try_from(pos.y).unwrap(),

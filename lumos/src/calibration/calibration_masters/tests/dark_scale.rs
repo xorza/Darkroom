@@ -13,7 +13,8 @@ use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::metadata::calibration_state::CalibrationState;
 use crate::internals::cfa::{constant_cfa, make_cfa};
 use crate::internals::test_rng::TestRng;
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use glam::USizeVec2;
 
 const SIZE: Size2us = Size2us::new(256, 256);
 const BIAS: f32 = 0.0625;
@@ -26,7 +27,7 @@ const LIGHT_NOISE: f32 = 0.002;
 #[derive(Debug)]
 struct HotDark {
     dark: CfaImage,
-    hot: Vec<(Vec2us, f32)>,
+    hot: Vec<(USizeVec2, f32)>,
 }
 
 /// A bias-removed master dark of 300 s at −10 °C, `count` hot pixels on a 16-px grid 8 px in from
@@ -34,9 +35,9 @@ struct HotDark {
 /// `saturated` read 0.002 short of it, flagged saturated: a level the sensor clipped just below the
 /// excess.
 fn dark(count: usize, saturated: usize) -> HotDark {
-    let hot: Vec<(Vec2us, f32)> = (0..count)
+    let hot: Vec<(USizeVec2, f32)> = (0..count)
         .map(|k| {
-            let pos = Vec2us::new(8 + 16 * (k % 16), 8 + 16 * (k / 16));
+            let pos = USizeVec2::new(8 + 16 * (k % 16), 8 + 16 * (k / 16));
             (pos, 0.02 + 0.3 * k as f32 / 255.0)
         })
         .collect();
@@ -80,7 +81,7 @@ struct Light {
 impl Light {
     /// The light over the dark's `hot` pixels, on a sky that slopes along both axes, a star of
     /// amplitude 0.2 and σ 1 px on each of the first `starred` of them, and Gaussian noise.
-    fn render(self, hot: &[(Vec2us, f32)]) -> CfaImage {
+    fn render(self, hot: &[(USizeVec2, f32)]) -> CfaImage {
         let Self {
             scale,
             starred,
@@ -101,7 +102,7 @@ impl Light {
         for &(centre, _) in &hot[..starred] {
             for dy in -3i32..=3 {
                 for dx in -3i32..=3 {
-                    let at = Vec2us::new(
+                    let at = USizeVec2::new(
                         centre.x.wrapping_add_signed(dx as isize),
                         centre.y.wrapping_add_signed(dy as isize),
                     );

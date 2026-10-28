@@ -20,7 +20,8 @@ use rayon::prelude::*;
 use rayon::slice::ChunksExactMut;
 
 use crate::scratch_pool::Scratch;
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use glam::USizeVec2;
 
 /// Number of bits per storage word.
 const BITS_PER_WORD: usize = 64;
@@ -195,7 +196,7 @@ impl BitBuffer2 {
 
     /// Get a bit value at the given (x, y) coordinates.
     #[inline]
-    pub(crate) fn get_at(&self, pos: Vec2us) -> bool {
+    pub(crate) fn get_at(&self, pos: USizeVec2) -> bool {
         debug_assert!(self.size.contains(pos));
         let bit_idx = pos.y * self.stride + pos.x;
         let word_idx = bit_idx / BITS_PER_WORD;
@@ -205,7 +206,7 @@ impl BitBuffer2 {
 
     /// Set a bit value at the given (x, y) coordinates.
     #[inline]
-    pub(crate) fn set_at(&mut self, pos: Vec2us, value: bool) {
+    pub(crate) fn set_at(&mut self, pos: USizeVec2, value: bool) {
         debug_assert!(self.size.contains(pos));
         let bit_idx = pos.y * self.stride + pos.x;
         let word_idx = bit_idx / BITS_PER_WORD;
@@ -307,7 +308,7 @@ impl BitBuffer2 {
 
     /// Whether any pixel of the square `radius` either side of `centre`, clipped to the buffer, is
     /// set: word by word along each of its rows.
-    pub(crate) fn any_in_square(&self, centre: Vec2us, radius: usize) -> bool {
+    pub(crate) fn any_in_square(&self, centre: USizeVec2, radius: usize) -> bool {
         if self.size.width == 0 || self.size.height == 0 {
             return false;
         }
@@ -340,13 +341,13 @@ impl BitBuffer2 {
 
     /// Call `visit` with the position of every set bit, row by row, skipping each clear word whole
     /// — a sparse mask costs a pass over its words, not over its pixels.
-    pub(crate) fn for_each_set(&self, mut visit: impl FnMut(Vec2us)) {
+    pub(crate) fn for_each_set(&self, mut visit: impl FnMut(USizeVec2)) {
         for y in 0..self.size.height {
             for (word_in_row, &word) in self.row_words(y).iter().enumerate() {
                 let base = word_in_row * BITS_PER_WORD;
                 let mut bits = word;
                 while bits != 0 {
-                    visit(Vec2us::new(base + bits.trailing_zeros() as usize, y));
+                    visit(USizeVec2::new(base + bits.trailing_zeros() as usize, y));
                     bits &= bits - 1;
                 }
             }

@@ -5,7 +5,8 @@ use common::Buffer2;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::internals::panic_message;
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use glam::USizeVec2;
 
 /// Every bit of `buffer` in row-major order.
 fn iter_bits(buffer: &BitBuffer2) -> Vec<bool> {
@@ -36,7 +37,7 @@ fn linear_coordinate_and_index_access_agree() {
     for idx in [0, 63, 64, 65, 129, 194] {
         buffer.set(idx, true);
     }
-    buffer.set_at(Vec2us::new(4, 2), true);
+    buffer.set_at(USizeVec2::new(4, 2), true);
 
     let expected = [0, 63, 64, 65, 129, 134, 194];
     assert_eq!(buffer.count_ones(), expected.len());
@@ -44,9 +45,9 @@ fn linear_coordinate_and_index_access_agree() {
         assert_eq!(buffer.get(idx), expected.contains(&idx), "index {idx}");
         assert_eq!(buffer[idx], buffer.get(idx));
     }
-    assert!(buffer.get_at(Vec2us::new(4, 2)));
+    assert!(buffer.get_at(USizeVec2::new(4, 2)));
 
-    buffer.set_at(Vec2us::new(4, 2), false);
+    buffer.set_at(USizeVec2::new(4, 2), false);
     assert!(!buffer.get(134));
     assert_eq!(buffer.count_ones(), expected.len() - 1);
 }
@@ -69,13 +70,13 @@ fn slice_and_iteration_preserve_row_major_order() {
     // word reaches its second.
     let filled = BitBuffer2::new_filled(Size2us::new(70, 2), true);
     let mut count = 0;
-    let mut last = Vec2us::ZERO;
+    let mut last = USizeVec2::ZERO;
     filled.for_each_set(|pos| {
         count += 1;
         last = pos;
     });
     assert_eq!(count, 140);
-    assert_eq!(last, Vec2us::new(69, 1));
+    assert_eq!(last, USizeVec2::new(69, 1));
 }
 
 #[test]
@@ -107,15 +108,15 @@ fn fill_count_clone_and_swap() {
     first.fill(true);
     assert_eq!(first.count_ones(), 14);
     assert_eq!(first.count_runs(), 2);
-    first.set_at(Vec2us::new(3, 1), false);
+    first.set_at(USizeVec2::new(3, 1), false);
     assert_eq!(first.count_ones(), 13);
     assert_eq!(first.count_runs(), 3);
 
     let mut wide = BitBuffer2::new_default(Size2us::new(130, 2));
     for x in [63, 64, 127, 129] {
-        wide.set_at(Vec2us::new(x, 0), true);
+        wide.set_at(USizeVec2::new(x, 0), true);
     }
-    wide.set_at(Vec2us::new(0, 1), true);
+    wide.set_at(USizeVec2::new(0, 1), true);
     assert_eq!(wide.count_runs(), 4);
 
     let mut copy = first.clone();
@@ -151,9 +152,14 @@ fn debug_access_rejects_out_of_bounds_indices_and_coordinates() {
     let mut buffer = BitBuffer2::new_default(Size2us::new(3, 2));
 
     assert!(catch_unwind(|| buffer.get(6)).is_err());
-    assert!(catch_unwind(|| buffer.get_at(Vec2us::new(3, 0))).is_err());
+    assert!(catch_unwind(|| buffer.get_at(USizeVec2::new(3, 0))).is_err());
     assert!(catch_unwind(AssertUnwindSafe(|| buffer.set(6, true))).is_err());
-    assert!(catch_unwind(AssertUnwindSafe(|| buffer.set_at(Vec2us::new(0, 2), true))).is_err());
+    assert!(
+        catch_unwind(AssertUnwindSafe(
+            || buffer.set_at(USizeVec2::new(0, 2), true)
+        ))
+        .is_err()
+    );
 }
 
 /// A width that is neither a whole word nor a whole 128-bit row: 100 real bits per row, stored in
@@ -251,21 +257,21 @@ fn the_padding_stays_clear_whatever_sets_the_pixels() {
 #[test]
 fn a_square_finds_the_bits_inside_it() {
     let mut buffer = BitBuffer2::new_default(Size2us::new(130, 20));
-    buffer.set_at(Vec2us::new(64, 5), true);
-    assert!(buffer.any_in_square(Vec2us::new(61, 5), 3));
-    assert!(!buffer.any_in_square(Vec2us::new(60, 5), 3));
-    assert!(buffer.any_in_square(Vec2us::new(64, 8), 3));
-    assert!(!buffer.any_in_square(Vec2us::new(64, 9), 3));
-    buffer.set_at(Vec2us::new(129, 19), true);
-    assert!(buffer.any_in_square(Vec2us::new(126, 16), 3));
-    assert!(!buffer.any_in_square(Vec2us::new(125, 16), 3));
+    buffer.set_at(USizeVec2::new(64, 5), true);
+    assert!(buffer.any_in_square(USizeVec2::new(61, 5), 3));
+    assert!(!buffer.any_in_square(USizeVec2::new(60, 5), 3));
+    assert!(buffer.any_in_square(USizeVec2::new(64, 8), 3));
+    assert!(!buffer.any_in_square(USizeVec2::new(64, 9), 3));
+    buffer.set_at(USizeVec2::new(129, 19), true);
+    assert!(buffer.any_in_square(USizeVec2::new(126, 16), 3));
+    assert!(!buffer.any_in_square(USizeVec2::new(125, 16), 3));
 
     let mut corner = BitBuffer2::new_default(Size2us::new(130, 20));
-    corner.set_at(Vec2us::new(5, 5), true);
-    assert!(corner.any_in_square(Vec2us::new(0, 0), 5));
+    corner.set_at(USizeVec2::new(5, 5), true);
+    assert!(corner.any_in_square(USizeVec2::new(0, 0), 5));
     let mut outside = BitBuffer2::new_default(Size2us::new(130, 20));
-    outside.set_at(Vec2us::new(6, 0), true);
-    assert!(!outside.any_in_square(Vec2us::new(0, 0), 5));
+    outside.set_at(USizeVec2::new(6, 0), true);
+    assert!(!outside.any_in_square(USizeVec2::new(0, 0), 5));
 }
 
 /// Cleared to a smaller size, a buffer keeps its words and holds no bit of the larger one, padding
@@ -288,7 +294,7 @@ fn clear_to_reuses_the_words_and_clears_every_bit() {
     );
     assert!(buffer.words.iter().all(|&word| word == 0));
     assert!(buffer.padding_is_clear());
-    buffer.set_at(Vec2us::new(129, 1), true);
+    buffer.set_at(USizeVec2::new(129, 1), true);
     assert_eq!(buffer.count_ones(), 1);
 
     buffer.clear_to(Size2us::new(400, 2));

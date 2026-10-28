@@ -11,8 +11,8 @@
 
 use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
-use common::{Buffer2, Size2us, Vec2us};
-use glam::Vec2;
+use common::{Buffer2, Size2us};
+use glam::{USizeVec2, Vec2};
 
 /// The sky a field is drawn on.
 #[derive(Debug, Clone, Copy)]
@@ -45,7 +45,7 @@ pub(crate) struct GaussianStars<'a> {
 pub(crate) struct SkyField {
     pub(crate) pixels: Buffer2<f32>,
     /// Star centres rounded to the nearest pixel, for tests asserting a core survived.
-    pub(crate) centers: Vec<Vec2us>,
+    pub(crate) centers: Vec<USizeVec2>,
 }
 
 impl SkyField {
@@ -72,7 +72,7 @@ impl SkyField {
             pixels,
             centers: peaks
                 .iter()
-                .map(|&(c, _)| Vec2us::new(c.x.round() as usize, c.y.round() as usize))
+                .map(|&(c, _)| USizeVec2::new(c.x.round() as usize, c.y.round() as usize))
                 .collect(),
         }
     }

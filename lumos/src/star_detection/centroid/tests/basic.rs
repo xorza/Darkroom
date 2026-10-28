@@ -58,7 +58,7 @@ fn a_detected_star_measures_as_on_its_true_sky() {
         let nearest = truth.round();
         assert_eq!(
             region.peak,
-            Vec2us::new(nearest.x as usize, nearest.y as usize),
+            USizeVec2::new(nearest.x as usize, nearest.y as usize),
             "σ {sigma} at {truth}"
         );
 

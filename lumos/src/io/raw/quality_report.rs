@@ -19,7 +19,7 @@ use crate::internals::real_data::raw_frames;
 use crate::io::load_ctx::LoadCtx;
 use crate::io::raw;
 use crate::io::raw::internals::load_raw_libraw_demosaic;
-use common::Vec2us;
+use glam::USizeVec2;
 
 /// Pixels this far from an edge are left out: both demosaics extrapolate there.
 const BORDER: usize = 6;
@@ -175,7 +175,7 @@ impl Compared<'_> {
 
         for y in border..(size.height - border) {
             for x in border..(size.width - border) {
-                let idx = size.idx_of(Vec2us::new(x, y));
+                let idx = size.idx_of(USizeVec2::new(x, y));
                 let mut predicted = [0.0; 3];
                 let mut actual = [0.0; 3];
                 for channel in 0..3 {
@@ -214,7 +214,7 @@ fn compare_channels(a: &Buffer2<f32>, b: &Buffer2<f32>, border: usize) -> Channe
 
     for y in border..(size.height - border) {
         for x in border..(size.width - border) {
-            let idx = size.idx_of(Vec2us::new(x, y));
+            let idx = size.idx_of(USizeVec2::new(x, y));
             let av = f64::from(a[idx]);
             let bv = f64::from(b[idx]);
             sum_a += av;
@@ -243,7 +243,7 @@ fn compare_channels(a: &Buffer2<f32>, b: &Buffer2<f32>, border: usize) -> Channe
 
     for y in border..(size.height - border) {
         for x in border..(size.width - border) {
-            let idx = size.idx_of(Vec2us::new(x, y));
+            let idx = size.idx_of(USizeVec2::new(x, y));
             let predicted = f64::from(a[idx]) * scale + offset;
             let actual = f64::from(b[idx]);
             let diff = predicted - actual;

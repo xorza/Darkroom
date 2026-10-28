@@ -8,7 +8,7 @@ use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::internals::synthetic::camera::FlatField;
 use crate::math::statistics;
-use common::Vec2us;
+use glam::USizeVec2;
 
 /// 600 × 400 is a hundredth of the frame: 3000 / 100 = 30 stars, 300 / 100 = 3 sparse ones,
 /// 20 000 / 100 = 200 in the cluster, 200 / 100 = 2 cosmic rays, and, rounded up,
@@ -125,7 +125,7 @@ fn the_masters_find_the_sensors_defects() {
         .detect_cold(&flat, &CancelToken::never())
         .unwrap();
     let SensorDefects { hot, dead } = defects(SMALL);
-    let idx = |x: usize, y: usize| SMALL.idx_of(Vec2us::new(x, y));
+    let idx = |x: usize, y: usize| SMALL.idx_of(USizeVec2::new(x, y));
     let mut hot: Vec<usize> = hot.into_iter().map(|(x, y, _)| idx(x, y)).collect();
     hot.sort_unstable();
     assert_eq!(map.hot().idxs, hot);

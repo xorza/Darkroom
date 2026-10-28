@@ -11,7 +11,7 @@
 //!    blended sources. More accurate for crowded fields but slower.
 
 use crate::star_detection::deblend::pixel::Pixel;
-use common::Vec2us;
+use glam::USizeVec2;
 
 pub(super) mod assignment;
 pub(super) mod component;
@@ -26,14 +26,14 @@ pub(super) mod region;
 /// Squared Euclidean distance between two pixel positions — the one peak-separation
 /// metric shared by the Voronoi assignment and every min-separation check.
 #[inline]
-const fn dist_sq(a: Vec2us, b: Vec2us) -> usize {
+const fn dist_sq(a: USizeVec2, b: USizeVec2) -> usize {
     let dx = a.x.abs_diff(b.x);
     let dy = a.y.abs_diff(b.y);
     dx * dx + dy * dy
 }
 
 /// Index of the nearest peak to `pos` by squared Euclidean distance; the first peak wins ties.
-fn nearest_peak_idx(pos: Vec2us, peaks: &[Pixel]) -> usize {
+fn nearest_peak_idx(pos: USizeVec2, peaks: &[Pixel]) -> usize {
     let mut min_dist_sq = usize::MAX;
     let mut nearest = 0;
     for (i, peak) in peaks.iter().enumerate() {
@@ -58,8 +58,8 @@ pub(crate) mod internals {
     use crate::star_detection::labeling::LabelMap;
     use crate::star_detection::labeling::component_data::ComponentData;
     use crate::star_detection::star_detection_config::extraction_config::Connectivity;
-    use common::{Rect2us, Size2us, Vec2us};
-    use glam::Vec2;
+    use common::{Rect2us, Size2us};
+    use glam::{USizeVec2, Vec2};
 
     /// Rendered stars and the one label covering every pixel they light above 0.001.
     #[derive(Debug)]
@@ -98,7 +98,7 @@ pub(crate) mod internals {
                 for offset_x in -radius..=radius {
                     let x = (star.center.x as i32 + offset_x) as usize;
                     let y = (star.center.y as i32 + offset_y) as usize;
-                    if !size.contains(Vec2us::new(x, y)) {
+                    if !size.contains(USizeVec2::new(x, y)) {
                         continue;
                     }
 
@@ -112,7 +112,7 @@ pub(crate) mod internals {
                     pixels[(x, y)] += value;
                     if labels[(x, y)] == 0 {
                         labels[(x, y)] = 1;
-                        bbox.include(Vec2us::new(x, y));
+                        bbox.include(USizeVec2::new(x, y));
                         area += 1;
                     }
                 }

@@ -12,7 +12,7 @@ use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::metadata::bg_split::BgSplit;
 use crate::noise::ccd_noise::CcdNoise;
-use common::Vec2us;
+use glam::USizeVec2;
 
 fn stats(noise: &[f32], quantization_sigma: Option<f32>, electrons: Option<f32>) -> FrameStats {
     FrameStats {
@@ -57,7 +57,7 @@ fn models_follow_the_normalization_and_the_quantization_floor() {
         .into_iter()
         .enumerate()
     {
-        assert_eq!(slots.slot(slot, Vec2us::new(0, 0)), slot);
+        assert_eq!(slots.slot(slot, USizeVec2::new(0, 0)), slot);
         assert_eq!(
             noise.model(0, slot),
             CcdNoise {
@@ -84,7 +84,7 @@ fn models_follow_the_normalization_and_the_quantization_floor() {
         (0, 1, 1, 1.0, 1.125),
         (1, 1, 2, 0.25, 0.375),
     ] {
-        let slot = mosaic_slots.slot(0, Vec2us::new(x, y));
+        let slot = mosaic_slots.slot(0, USizeVec2::new(x, y));
         assert_eq!(slot, color, "({x}, {y})");
         assert_eq!(mosaic.model(0, slot).at(1.0).bg, variance, "({x}, {y})");
         assert_eq!(mosaic.model(0, slot).sky, sky, "({x}, {y})");

@@ -1,7 +1,8 @@
 use crate::image::flags::quality_flags::QualityFlags;
 use crate::io::raw::black_level::{BlackLevel, DngLevels, FlagRule, LibrawBlack, Photosites};
 use crate::io::raw::error::BlackLevelError;
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use glam::USizeVec2;
 use libraw::SensorLayout;
 
 /// RGGB in LibRaw's `filters` word: (0, 0) red, (0, 1) and (1, 0) green, (1, 1) blue, the second
@@ -119,7 +120,7 @@ fn a_canon_black_level_is_exact_against_a_hand_sum() {
     let layout = SensorLayout {
         raw: Size2us::new(10, 5),
         active: Size2us::new(8, 3),
-        margin: Vec2us::new(1, 1),
+        margin: USizeVec2::new(1, 1),
     };
     let mut raw: Vec<u16> = (0..layout.raw.pixel_count())
         .map(|idx| 2000 + (idx * 37 % 9000) as u16)

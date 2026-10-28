@@ -5,7 +5,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use crate::image::cfa::cfa_color::CfaColor;
 use crate::image::cfa::demosaic::mosaic_view::MosaicPattern;
 use crate::image::error::XTransPatternError;
-use common::Vec2us;
+use glam::USizeVec2;
 
 /// A Fujifilm X-Trans color filter layout: 6×6 color indices (0 = red, 1 = green, 2 = blue),
 /// the color at `(x, y)` the index at row `y % 6` and column `x % 6`.
@@ -27,7 +27,7 @@ pub struct XTransPattern {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Hexagons {
     offsets: [[[HexOffset; 8]; 3]; 3],
-    solitary: Vec2us,
+    solitary: USizeVec2,
 }
 
 /// One hexagon neighbour's offset from its pixel.
@@ -40,12 +40,12 @@ pub(crate) struct HexOffset {
 impl Hexagons {
     /// The eight offsets of the hexagon at `pos`.
     #[inline(always)]
-    pub(crate) const fn at(&self, pos: Vec2us) -> &[HexOffset; 8] {
+    pub(crate) const fn at(&self, pos: USizeVec2) -> &[HexOffset; 8] {
         &self.offsets[pos.y % 3][pos.x % 3]
     }
 
     /// Where the cell's solitary green lies, within the first 3×3 cell.
-    pub(crate) const fn solitary(&self) -> Vec2us {
+    pub(crate) const fn solitary(&self) -> USizeVec2 {
         self.solitary
     }
 }
@@ -64,7 +64,7 @@ const PATT: [[i8; 16]; 2] = [
 
 impl MosaicPattern for XTransPattern {
     #[inline(always)]
-    fn color_at(&self, pos: Vec2us) -> CfaColor {
+    fn color_at(&self, pos: USizeVec2) -> CfaColor {
         self.color_at(pos)
     }
 }
@@ -168,7 +168,7 @@ impl XTransPattern {
 
     /// The color at `pos`.
     #[inline(always)]
-    pub const fn color_at(&self, pos: Vec2us) -> CfaColor {
+    pub const fn color_at(&self, pos: USizeVec2) -> CfaColor {
         self.colors[pos.y % 6][pos.x % 6]
     }
 }
@@ -200,7 +200,7 @@ const fn hexagons(rows: &[[u8; 6]; 6]) -> Option<Hexagons> {
                     run += 1;
                 }
                 if run == 4 {
-                    solitary = Some(Vec2us::new(col, row));
+                    solitary = Some(USizeVec2::new(col, row));
                     solitary_count += 1;
                 }
                 if run == g + 1 {

@@ -7,6 +7,7 @@ use crate::star_detection::convolution::simd::{
     Convolve2dRow, ConvolveColsRow, ConvolveRow, Kernel2d, RowRing,
 };
 use common::Size2us;
+use glam::Vec2;
 use simd::Kernel;
 
 /// The matched filter's PSF: a Gaussian of `fwhm` along its major axis, before the pixel integrates
@@ -59,7 +60,7 @@ pub(crate) struct EllipticalGaussian {
 /// in a row pass and a column pass, or an ellipse at another angle, filtered with a 2D kernel.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum KernelShape {
-    Separable([f32; 2]),
+    Separable(Vec2),
     Elliptical(EllipticalGaussian),
 }
 
@@ -78,13 +79,13 @@ impl KernelShape {
             Some(turns) => {
                 let minor = sigma * axis_ratio;
                 Self::Separable(if turns % 2 == 0 {
-                    [sigma, minor]
+                    Vec2::new(sigma, minor)
                 } else {
-                    [minor, sigma]
+                    Vec2::new(minor, sigma)
                 })
             }
             None if (axis_ratio - 1.0).abs() < CIRCULAR_KERNEL_THRESHOLD => {
-                Self::Separable([sigma, sigma])
+                Self::Separable(Vec2::splat(sigma))
             }
             None => Self::Elliptical(EllipticalGaussian {
                 sigma,
@@ -140,11 +141,11 @@ impl FilterKernels {
         // sqrt(sum(K²)) of the kernel: for a separable one, of the equivalent 2D kernel,
         // `sqrt(Σkx²·Σky²)`, which for a circular kernel is `Σk²` exactly.
         let (shape, noise_norm) = match KernelShape::of(filter) {
-            KernelShape::Separable([sigma_x, sigma_y]) => {
-                debug_assert!(sigma_x > 0.0 && sigma_y > 0.0, "Sigma must be positive");
-                let radius = convolution::kernel_radius(sigma_x.max(sigma_y));
-                convolution::fill_gaussian_kernel_1d(sigma_x, radius, &mut self.rows);
-                convolution::fill_gaussian_kernel_1d(sigma_y, radius, &mut self.cols);
+            KernelShape::Separable(sigma) => {
+                debug_assert!(sigma.cmpgt(Vec2::ZERO).all(), "Sigma must be positive");
+                let radius = convolution::kernel_radius(sigma.max_element());
+                convolution::fill_gaussian_kernel_1d(sigma.x, radius, &mut self.rows);
+                convolution::fill_gaussian_kernel_1d(sigma.y, radius, &mut self.cols);
                 let norm = (squares(&self.rows) * squares(&self.cols)).sqrt();
                 (
                     MatchedShape::Separable {

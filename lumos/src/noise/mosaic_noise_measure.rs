@@ -100,7 +100,8 @@ mod tests {
     use crate::math::statistics::subsample::MAX_STATISTIC_SAMPLES;
     use crate::noise::mosaic_noise_measure::{MosaicNoiseMeasure, color_medians};
     use crate::noise::mosaic_sampling::MosaicSampling;
-    use common::{Size2us, Vec2us};
+    use common::Size2us;
+    use glam::USizeVec2;
 
     /// Over an 8 × 4 RGGB mosaic a photosite pairs with the one two to its right, so six pairs a
     /// row, three of each of its two colors: 6 red, 12 green and 6 blue, 24 pairs at 4 bytes and a
@@ -138,7 +139,7 @@ mod tests {
         let size = Size2us::new(64, 64);
         let rggb = Mosaic::Bayer(BayerPattern::Rggb);
         let levels = [0.2, 0.1, 0.05];
-        let mosaic = Buffer2::from_fn((64, 64), |x, y| levels[rggb.slot_at(Vec2us::new(x, y))]);
+        let mosaic = Buffer2::from_fn((64, 64), |x, y| levels[rggb.slot_at(USizeVec2::new(x, y))]);
         let sampling = MosaicSampling {
             size,
             mosaic: rggb,

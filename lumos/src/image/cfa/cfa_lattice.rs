@@ -5,14 +5,13 @@ use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::masked_plane::MaskedPlane;
 use crate::math::statistics;
-use common::Vec2us;
+use glam::{IVec2, USizeVec2};
 
 /// One same-color neighbour of a phase: its offset, and its squared distance, which orders the
 /// stencil and decides its ties.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Tap {
-    dx: i32,
-    dy: i32,
+    offset: IVec2,
     distance2: i32,
 }
 
@@ -65,7 +64,7 @@ impl CfaLattice {
         let mut starts = Vec::with_capacity(period * period + 1);
         for phase in 0..period * period {
             starts.push(u32::try_from(taps.len()).expect("the table is small"));
-            let origin = Vec2us::new(phase % period, phase / period);
+            let origin = USizeVec2::new(phase % period, phase / period);
             let color = cfa.slot_at(origin);
             let first = taps.len();
             for dy in -radius..=radius {
@@ -73,7 +72,7 @@ impl CfaLattice {
                     if (dx, dy) == (0, 0) {
                         continue;
                     }
-                    let pos = Vec2us::new(
+                    let pos = USizeVec2::new(
                         (origin.x + shift).wrapping_add_signed(dx as isize),
                         (origin.y + shift).wrapping_add_signed(dy as isize),
                     );
@@ -83,14 +82,15 @@ impl CfaLattice {
                             cfa.slot_at(pos) == color
                         }
                     };
-                    let distance2 = dx * dx + dy * dy;
+                    let offset = IVec2::new(dx, dy);
+                    let distance2 = offset.length_squared();
                     // Within the inscribed disc, every offset of a shell lies in the square.
                     if same_filter && distance2 <= radius * radius {
-                        taps.push(Tap { dx, dy, distance2 });
+                        taps.push(Tap { offset, distance2 });
                     }
                 }
             }
-            taps[first..].sort_by_key(|tap| (tap.distance2, tap.dy, tap.dx));
+            taps[first..].sort_by_key(|tap| (tap.distance2, tap.offset.y, tap.offset.x));
             let target = MASKED_HEADROOM * count;
             debug_assert!(taps.len() - first >= target, "phase {phase}");
             let last = taps[first + target - 1].distance2;
@@ -106,7 +106,7 @@ impl CfaLattice {
         }
     }
 
-    fn stencil(&self, pos: Vec2us) -> &[Tap] {
+    fn stencil(&self, pos: USizeVec2) -> &[Tap] {
         let phase = (pos.y % self.period) * self.period + pos.x % self.period;
         &self.taps[self.starts[phase] as usize..self.starts[phase + 1] as usize]
     }
@@ -120,7 +120,7 @@ impl CfaLattice {
     pub(crate) fn median(
         &self,
         plane: MaskedPlane<'_>,
-        pos: Vec2us,
+        pos: USizeVec2,
         scratch: &mut Gathered,
     ) -> f32 {
         let MaskedPlane { pixels, mask } = plane;
@@ -134,8 +134,8 @@ impl CfaLattice {
                 break;
             }
             let (Some(x), Some(y)) = (
-                pos.x.checked_add_signed(tap.dx as isize),
-                pos.y.checked_add_signed(tap.dy as isize),
+                pos.x.checked_add_signed(tap.offset.x as isize),
+                pos.y.checked_add_signed(tap.offset.y as isize),
             ) else {
                 continue;
             };
@@ -171,13 +171,13 @@ mod tests {
     use crate::image::cfa::bayer_pattern::BayerPattern;
     use crate::internals::cfa::XTRANS_PATTERN;
 
-    fn offsets(lattice: &CfaLattice, pos: Vec2us, count: usize) -> Vec<(i32, i32)> {
+    fn offsets(lattice: &CfaLattice, pos: USizeVec2, count: usize) -> Vec<(i32, i32)> {
         let stencil = lattice.stencil(pos);
         let last = stencil[count - 1].distance2;
         stencil
             .iter()
             .take_while(|tap| tap.distance2 <= last)
-            .map(|tap| (tap.dx, tap.dy))
+            .map(|tap| (tap.offset.x, tap.offset.y))
             .collect()
     }
 
@@ -204,11 +204,11 @@ mod tests {
             ])
         };
         let mono = CfaLattice::new(&CfaType::Mono);
-        assert_eq!(sorted(offsets(&mono, Vec2us::new(3, 3), 8)), ring(1, 1));
+        assert_eq!(sorted(offsets(&mono, USizeVec2::new(3, 3), 8)), ring(1, 1));
         let bayer = CfaLattice::new(&CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)));
-        assert_eq!(sorted(offsets(&bayer, Vec2us::new(0, 0), 8)), ring(2, 2));
-        assert_eq!(sorted(offsets(&bayer, Vec2us::new(1, 0), 8)), ring(2, 2));
-        assert_eq!(sorted(offsets(&bayer, Vec2us::new(0, 1), 8)), ring(2, 2));
+        assert_eq!(sorted(offsets(&bayer, USizeVec2::new(0, 0), 8)), ring(2, 2));
+        assert_eq!(sorted(offsets(&bayer, USizeVec2::new(1, 0), 8)), ring(2, 2));
+        assert_eq!(sorted(offsets(&bayer, USizeVec2::new(0, 1), 8)), ring(2, 2));
     }
 
     /// Every phase's stencil is whole shells of equal distance holding at least twice its count:
@@ -226,14 +226,14 @@ mod tests {
             let lattice = CfaLattice::new(&cfa);
             let period = lattice.period;
             for phase in 0..period * period {
-                let origin = Vec2us::new(phase % period, phase / period);
+                let origin = USizeVec2::new(phase % period, phase / period);
                 let stencil = lattice.stencil(origin);
                 assert!(stencil.len() >= 2 * lattice.count, "{cfa:?} phase {phase}");
                 let farthest = stencil[stencil.len() - 1].distance2;
                 let mut expected = Vec::new();
                 for dy in -20i32..=20 {
                     for dx in -20i32..=20 {
-                        let at = Vec2us::new(
+                        let at = USizeVec2::new(
                             (60 + origin.x).strict_add_signed(dx as isize),
                             (60 + origin.y).strict_add_signed(dy as isize),
                         );
@@ -246,7 +246,10 @@ mod tests {
                         }
                     }
                 }
-                let taken: Vec<(i32, i32)> = stencil.iter().map(|tap| (tap.dx, tap.dy)).collect();
+                let taken: Vec<(i32, i32)> = stencil
+                    .iter()
+                    .map(|tap| (tap.offset.x, tap.offset.y))
+                    .collect();
                 assert_eq!(sorted(taken), sorted(expected), "{cfa:?} phase {phase}");
             }
         }
@@ -263,17 +266,17 @@ mod tests {
         ] {
             let lattice = CfaLattice::new(&cfa);
             let size = Size2us::new(25, 19);
-            let level = |pos: Vec2us| match cfa {
+            let level = |pos: USizeVec2| match cfa {
                 CfaType::Mosaic(Mosaic::Bayer(_)) => {
                     0.125 * (1 + pos.x % 2 + 2 * (pos.y % 2)) as f32
                 }
                 _ => 0.125 * (cfa.slot_at(pos) + 1) as f32,
             };
-            let pixels = Buffer2::from_fn(size, |x, y| level(Vec2us::new(x, y)));
+            let pixels = Buffer2::from_fn(size, |x, y| level(USizeVec2::new(x, y)));
             let mut scratch = Gathered::default();
             for y in 0..size.height {
                 for x in 0..size.width {
-                    let pos = Vec2us::new(x, y);
+                    let pos = USizeVec2::new(x, y);
                     assert_eq!(
                         lattice.median(MaskedPlane::from(&pixels), pos, &mut scratch),
                         level(pos),
@@ -297,7 +300,7 @@ mod tests {
                 10.0, 10.0, 10.0, 10.0, 999.0, 1000.0, 1000.0, 1000.0, 1000.0,
             ],
         );
-        let centre = Vec2us::new(1, 1);
+        let centre = USizeVec2::new(1, 1);
         let mut scratch = Gathered::default();
         assert_eq!(
             lattice.median(MaskedPlane::from(&pixels), centre, &mut scratch),
@@ -353,11 +356,19 @@ mod tests {
         pixels[(2, 1)] = 1000.0;
         let mut scratch = Gathered::default();
         assert_eq!(
-            lattice.median(MaskedPlane::from(&pixels), Vec2us::new(0, 0), &mut scratch),
+            lattice.median(
+                MaskedPlane::from(&pixels),
+                USizeVec2::new(0, 0),
+                &mut scratch
+            ),
             60.0
         );
         assert_eq!(
-            lattice.median(MaskedPlane::from(&pixels), Vec2us::new(1, 0), &mut scratch),
+            lattice.median(
+                MaskedPlane::from(&pixels),
+                USizeVec2::new(1, 0),
+                &mut scratch
+            ),
             30.0
         );
     }

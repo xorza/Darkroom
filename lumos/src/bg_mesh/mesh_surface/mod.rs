@@ -12,7 +12,8 @@ use crate::bg_mesh::spline::natural_spline::NaturalSpline;
 use crate::bg_mesh::spline::spline_segment::{SplineNode, SplineSegment};
 use crate::scratch_pool::{Pooled, Scratch, ScratchPool, Shapeless};
 use ::simd::Kernel;
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use glam::USizeVec2;
 
 /// One component of a mesh — its sky or its σ — as the natural bicubic spline through the tile
 /// centres carries it to every pixel of the frame: the tiles' values, the y pass's second
@@ -225,7 +226,7 @@ impl MeshSurface {
     }
 
     /// The value at `pos`, the one [`Self::row_into`] writes there.
-    fn at(&self, pos: Vec2us, scratch: &mut RowScratch) -> f32 {
+    fn at(&self, pos: USizeVec2, scratch: &mut RowScratch) -> f32 {
         self.solve_row(pos.y, scratch);
         let value = if self.tiles_x() == 1 {
             scratch.nodes[0]
@@ -262,7 +263,7 @@ impl SurfaceReader<'_> {
     }
 
     /// The value at `pos`.
-    pub(crate) fn at(&mut self, pos: Vec2us) -> f32 {
+    pub(crate) fn at(&mut self, pos: USizeVec2) -> f32 {
         self.surface.at(pos, &mut self.scratch)
     }
 }

@@ -33,7 +33,7 @@ thiserror = { workspace = true }
 bytemuck = { workspace = true, features = ["derive"] }
 rayon = { workspace = true }
 tracing = { workspace = true, features = ["std"] }
-glam = { workspace = true, features = ["f64", "serde", "std"] }
+glam = { workspace = true, features = ["f64", "i32", "serde", "std", "u32", "usize"] }
 serde = { workspace = true, features = ["derive", "std"] }
 rand = { workspace = true }
 rand_chacha = { workspace = true }

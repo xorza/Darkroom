@@ -102,13 +102,13 @@ fn masked_pixels_never_reach_the_statistics() {
     for y in 2..32 {
         for x in 0..32 {
             pixels[(x, y)] = 0.9;
-            mask.set_at(Vec2us::new(x, y), true);
+            mask.set_at(USizeVec2::new(x, y), true);
         }
     }
     for y in 8..24 {
         for x in 40..56 {
             pixels[(x, y)] = 5.0;
-            mask.set_at(Vec2us::new(x, y), true);
+            mask.set_at(USizeVec2::new(x, y), true);
         }
     }
     let grid = make_grid_with_mask(&pixels, 32, &mask);
@@ -296,7 +296,7 @@ fn a_masked_tile_takes_its_neighbours_sky() {
     let mut mask = BitBuffer2::new_filled(Size2us::new(64, 32), false);
     for y in 0..32 {
         for x in 0..32 {
-            mask.set_at(Vec2us::new(x, y), true);
+            mask.set_at(USizeVec2::new(x, y), true);
         }
     }
     let grid = make_grid_with_mask(&pixels, 32, &mask);
@@ -314,7 +314,7 @@ fn a_masked_tile_takes_its_neighbours_sky() {
     let mut first_three = BitBuffer2::new_filled(Size2us::new(128, 32), false);
     for y in 0..32 {
         for x in 0..96 {
-            first_three.set_at(Vec2us::new(x, y), true);
+            first_three.set_at(USizeVec2::new(x, y), true);
         }
     }
     let grid = make_grid_with_mask(&wide, 32, &first_three);
@@ -351,7 +351,7 @@ fn a_bad_tile_takes_the_nearest_ring_of_good_tiles() {
     for (tx, ty) in good {
         for y in ty * tile..(ty + 1) * tile {
             for x in tx * tile..(tx + 1) * tile {
-                mask.set_at(Vec2us::new(x, y), false);
+                mask.set_at(USizeVec2::new(x, y), false);
             }
         }
     }

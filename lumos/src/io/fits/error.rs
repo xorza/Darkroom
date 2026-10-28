@@ -19,7 +19,8 @@ use crate::io::fits::linear::LINEAR_FITS_VERSION;
 use crate::io::fits::lumos_extension::LumosExtension;
 use crate::io::fits::metadata::domain_keywords::{PEDESTAL, PEDESTAL_LEVEL, SCALE_ORIGIN};
 use crate::io::null_policy::NullSamples;
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use glam::USizeVec2;
 
 /// Why a FITS decode failed: the file's own failures, which a load of a path names the file for
 /// ([`ImageError`](crate::ImageError)).
@@ -224,13 +225,13 @@ pub enum FitsRefusal {
     },
     /// A flags byte at `pixel` holding a bit no flag has.
     UnknownFlagBits {
-        pixel: Vec2us,
+        pixel: USizeVec2,
         byte: u8,
     },
     /// A flags `NO_DATA` at `pixel` that the image's NaN does not state, or a NaN it does not
     /// flag.
     NoDataDisagrees {
-        pixel: Vec2us,
+        pixel: USizeVec2,
     },
     /// A keyword whose value lies outside the range its meaning allows.
     KeywordOutOfRange {

@@ -9,13 +9,14 @@ use crate::registration::resample::source_image::SourcePlane;
 use crate::registration::resample::source_pos::SourceAt;
 use crate::registration::resample::tap_window::{AxisSums, Lobes, RowLanes, WindowWeights};
 use crate::registration::resample::warp_kernel::WarpKernel;
+use glam::USizeVec2;
 use simd::{F32_LANES, F32x8, Isa, Mask8};
 
 /// A window of at most [`F32_LANES`] taps per axis, wholly inside the source.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct InteriorWindow<V: F32x8> {
-    x: usize,
-    y: usize,
+    /// The window's first tap.
+    first: USizeVec2,
     rows: usize,
     /// The x weights, cleared past the window's taps: a sum over the vector is a sum over them.
     wx: V,
@@ -46,8 +47,7 @@ impl<V: F32x8> InteriorWindow<V> {
             .keep()
             .keep(kernel.weight_lanes(isa, y.first, pos.fy));
         Some(Self {
-            x: first_x,
-            y: first_y,
+            first: USizeVec2::new(first_x, first_y),
             rows: y.count,
             wx,
             lanes,
@@ -100,6 +100,6 @@ impl<V: F32x8> InteriorWindow<V> {
 
     #[inline(always)]
     const fn row(&self, plane: SourcePlane<'_>, j: usize) -> usize {
-        (self.y + j) * plane.width + self.x
+        (self.first.y + j) * plane.width + self.first.x
     }
 }

@@ -2,7 +2,8 @@
 
 use std::fmt;
 
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use common::glam::USizeVec2;
 
 use crate::sys;
 
@@ -33,7 +34,7 @@ pub enum LibrawError {
     Geometry {
         raw: Size2us,
         active: Size2us,
-        margin: Vec2us,
+        margin: USizeVec2,
     },
     /// LibRaw's own processing failed.
     #[error("LibRaw could not process the image: {0}")]

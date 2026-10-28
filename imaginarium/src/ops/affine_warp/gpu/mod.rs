@@ -1,4 +1,5 @@
 use bytemuck::{Pod, Zeroable};
+use glam::{UVec2, Vec2};
 
 use crate::gpu::Gpu;
 use crate::gpu::compute_kernel::{KernelJob, OutputStart};
@@ -20,15 +21,15 @@ pub(super) fn apply(params: &AffineWarp, gpu: &Gpu, input: &GpuImage, output: &m
 
     let uniform = Params {
         inv_matrix: inv.matrix2.to_cols_array(),
-        inv_translation: inv.translation.to_array(),
-        input_size: [
+        inv_translation: inv.translation,
+        input_size: UVec2::new(
             extent(input_desc.size().width),
             extent(input_desc.size().height),
-        ],
-        output_size: [
+        ),
+        output_size: UVec2::new(
             extent(output_desc.size().width),
             extent(output_desc.size().height),
-        ],
+        ),
         channel_count: extent(format.channel_count.count()),
         sample_byte_len: extent(format.sample_type.byte_len()),
         filter_mode: match params.filter {
@@ -59,9 +60,9 @@ pub(super) fn apply(params: &AffineWarp, gpu: &Gpu, input: &GpuImage, output: &m
 struct Params {
     /// Column-major, as WGSL's `mat2x2`.
     inv_matrix: [f32; 4],
-    inv_translation: [f32; 2],
-    input_size: [u32; 2],
-    output_size: [u32; 2],
+    inv_translation: Vec2,
+    input_size: UVec2,
+    output_size: UVec2,
     channel_count: u32,
     sample_byte_len: u32,
     filter_mode: u32,

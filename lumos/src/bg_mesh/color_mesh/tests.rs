@@ -14,23 +14,25 @@ fn each_color_reads_its_own_level() {
     let size = 128;
     let cfa = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
     let red = |x: usize| 0.125 + x as f32 / 1024.0;
-    let pixels = Buffer2::from_fn((size, size), |x, y| match cfa.slot_at(Vec2us::new(x, y)) {
-        0 => red(x),
-        1 => 0.25,
-        _ => 0.375,
+    let pixels = Buffer2::from_fn((size, size), |x, y| {
+        match cfa.slot_at(USizeVec2::new(x, y)) {
+            0 => red(x),
+            1 => 0.25,
+            _ => 0.375,
+        }
     });
     let mesh = ColorMesh::measure(MaskedPlane::from(&pixels), &cfa, 64);
     for pos in [
-        Vec2us::new(31, 31),
-        Vec2us::new(64, 10),
-        Vec2us::new(100, 90),
+        USizeVec2::new(31, 31),
+        USizeVec2::new(64, 10),
+        USizeVec2::new(100, 90),
     ] {
         assert_eq!(mesh.at(1, pos).sky, 0.25, "{pos:?}");
         assert_eq!(mesh.at(2, pos).sky, 0.375, "{pos:?}");
         assert_eq!(mesh.at(1, pos).noise, 0.0, "{pos:?}");
     }
-    assert_eq!(mesh.at(0, Vec2us::new(31, 31)).sky, red(31));
-    assert_eq!(mesh.at(0, Vec2us::new(63, 31)).sky, red(63));
+    assert_eq!(mesh.at(0, USizeVec2::new(31, 31)).sky, red(31));
+    assert_eq!(mesh.at(0, USizeVec2::new(63, 31)).sky, red(63));
 }
 
 /// The mask counts against a color's half of a tile. An RGGB mosaic of 128 × 128 at 1/4, its
@@ -50,7 +52,7 @@ fn a_mostly_masked_tile_takes_its_neighbours_sky() {
     let mut mask = BitBuffer2::new_default(size);
     for y in 0..48 {
         for x in 0..48 {
-            mask.set_at(Vec2us::new(x, y), true);
+            mask.set_at(USizeVec2::new(x, y), true);
         }
     }
     let masked = MaskedPlane {
@@ -60,7 +62,7 @@ fn a_mostly_masked_tile_takes_its_neighbours_sky() {
     let mesh = ColorMesh::measure(masked, &cfa, 64);
     for color in 0..3 {
         assert_eq!(
-            mesh.at(color, Vec2us::new(31, 31)).sky,
+            mesh.at(color, USizeVec2::new(31, 31)).sky,
             0.25,
             "color {color}"
         );
@@ -78,7 +80,7 @@ fn a_mostly_masked_tile_takes_its_neighbours_sky() {
     );
     for color in 0..3 {
         assert_eq!(
-            mesh.at(color, Vec2us::new(70, 20)).sky,
+            mesh.at(color, USizeVec2::new(70, 20)).sky,
             0.25,
             "color {color}"
         );

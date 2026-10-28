@@ -1,7 +1,6 @@
-use glam::DVec2;
+use glam::{DVec2, USizeVec2};
 
 use super::*;
-use common::Vec2us;
 use imaginarium::ChannelLayout;
 
 /// A value in [0, 1) for each index, spread with no structure a kernel could resonate with.
@@ -135,7 +134,7 @@ fn a_satellite_trail_in_one_frame_is_rejected() {
                 .collect();
             if f == TRAIL_FRAME {
                 for x in 40..88 {
-                    pixels[size.idx_of(Vec2us::new(x, 64))] = 100.0;
+                    pixels[size.idx_of(USizeVec2::new(x, 64))] = 100.0;
                 }
             }
             mono_image(size, pixels)

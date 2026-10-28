@@ -10,7 +10,7 @@ use std::sync::OnceLock;
 
 use arrayvec::ArrayVec;
 use common::{Buffer2, par};
-use glam::DVec2;
+use glam::{DVec2, USizeVec2};
 use imaginarium::ChannelLayout;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -20,7 +20,7 @@ use crate::image::error::InvalidFlatGain;
 use crate::image::flat_gain::gain_bins::GainBins;
 use crate::image::flat_gain::gain_key::GainKey;
 use crate::image::frame_desc;
-use common::{Size2us, Vec2us};
+use common::Size2us;
 
 /// Pixels between the grid's nodes on each axis.
 ///
@@ -133,7 +133,7 @@ impl FlatGain {
                     .enumerate()
                     .for_each(|(j, row)| {
                         for (i, node) in row.iter_mut().enumerate() {
-                            *node = flat.node_gain(color, Vec2us::new(STEP * i, STEP * j));
+                            *node = flat.node_gain(color, USizeVec2::new(STEP * i, STEP * j));
                         }
                     });
                 plane
@@ -398,7 +398,7 @@ struct NormalizedFlat<'a, E> {
 impl<E: Fn(usize) -> bool> NormalizedFlat<'_, E> {
     /// The mean of `1/f` over the photosites of `color` within half a step of `node`; 1, no gain
     /// known, for a color the sensor has no photosite of.
-    fn node_gain(&self, color: usize, node: Vec2us) -> f32 {
+    fn node_gain(&self, color: usize, node: USizeVec2) -> f32 {
         let divisor = self.divisor;
         let size = divisor.size();
         let mut half = STEP / 2;
@@ -410,7 +410,7 @@ impl<E: Fn(usize) -> bool> NormalizedFlat<'_, E> {
             let mut all = (0.0f64, 0usize);
             for y in window(size.height, node.y) {
                 for x in window(size.width, node.x) {
-                    let pos = Vec2us::new(x, y);
+                    let pos = USizeVec2::new(x, y);
                     if self.cfa_type.slot_at(pos) != color {
                         continue;
                     }

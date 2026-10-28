@@ -8,14 +8,13 @@
 
 use arrayvec::ArrayVec;
 use common::Buffer2;
-use glam::DVec2;
+use glam::{DVec2, USizeVec2};
 
 use crate::math::lm_controller::LmFit;
 use crate::star_detection::centroid::measure_grid::MAX_STAMP_RADIUS;
 use crate::star_detection::centroid::profile_bounds::MIN_PROFILE_SIGMA;
 use crate::star_detection::centroid::profile_problem::{FitData, LmModel};
 use crate::star_detection::centroid::star_noise::StarNoise;
-use common::Vec2us;
 
 /// Maximum stamp side length in pixels (31 for `stamp_radius=15`).
 pub(super) const MAX_STAMP_SIZE: usize = 2 * MAX_STAMP_RADIUS + 1;
@@ -41,14 +40,14 @@ impl StampAt<'_> {
         clippy::cast_sign_loss,
         reason = "both coordinates are checked to be at least the radius before the cast"
     )]
-    pub(super) fn centre(self) -> Option<Vec2us> {
+    pub(super) fn centre(self) -> Option<USizeVec2> {
         let (x, y) = (self.pos.x.round(), self.pos.y.round());
         let radius = self.radius as f64;
         let inside = x >= radius
             && y >= radius
             && x + radius < self.residual.width() as f64
             && y + radius < self.residual.height() as f64;
-        inside.then(|| Vec2us::new(x as usize, y as usize))
+        inside.then(|| USizeVec2::new(x as usize, y as usize))
     }
 }
 

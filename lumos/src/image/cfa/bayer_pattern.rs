@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::image::cfa::cfa_color::CfaColor;
 use crate::image::cfa::demosaic::mosaic_view::MosaicPattern;
-use common::Vec2us;
+use glam::USizeVec2;
 
 /// Bayer CFA (Color Filter Array) pattern.
 /// Represents the 2x2 pattern of color filters on the sensor.
@@ -22,7 +22,7 @@ pub enum BayerPattern {
 
 impl MosaicPattern for BayerPattern {
     #[inline(always)]
-    fn color_at(&self, pos: Vec2us) -> CfaColor {
+    fn color_at(&self, pos: USizeVec2) -> CfaColor {
         self.color_at(pos)
     }
 }
@@ -84,7 +84,7 @@ impl BayerPattern {
 
     /// The color of the photosite at `pos`.
     #[inline(always)]
-    pub const fn color_at(&self, pos: Vec2us) -> CfaColor {
+    pub const fn color_at(&self, pos: USizeVec2) -> CfaColor {
         use CfaColor::{Blue, Green, Red};
         let phase = ((pos.y & 1) << 1) | (pos.x & 1);
         match self {

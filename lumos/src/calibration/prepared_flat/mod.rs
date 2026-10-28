@@ -15,7 +15,7 @@ use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::flat_gain::FlatGain;
 use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::metadata::calibration_state::CalibrationState;
-use common::Vec2us;
+use glam::USizeVec2;
 
 /// Bounds amplification at dead and near-zero photosites while keeping every pixel calibrated.
 pub(super) const MIN_NORMALIZED_FLAT: f32 = 0.1;
@@ -157,7 +157,7 @@ fn normalize(flat: &mut CfaImage) -> Result<(), CalibrationError> {
                     }) {
                         continue;
                     }
-                    let color = cfa_type.slot_at(Vec2us::new(x, y));
+                    let color = cfa_type.slot_at(USizeVec2::new(x, y));
                     sums.sums[color] += f64::from(value);
                     sums.counts[color] += 1;
                 }
@@ -194,7 +194,7 @@ fn normalize(flat: &mut CfaImage) -> Result<(), CalibrationError> {
         .enumerate()
         .for_each(|(y, row)| {
             for (x, value) in row.iter_mut().enumerate() {
-                let color = cfa_type.slot_at(Vec2us::new(x, y));
+                let color = cfa_type.slot_at(USizeVec2::new(x, y));
                 *value = ((f64::from(*value) / means[color]) as f32).max(MIN_NORMALIZED_FLAT);
             }
         });

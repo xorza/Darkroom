@@ -8,7 +8,7 @@ use crate::image::flags::pixel_flags::PixelFlags;
 use crate::image::flags::quality_flags::QualityFlags;
 use crate::math::statistics;
 use crate::math::statistics::radix_median::RadixMedian;
-use common::Vec2us;
+use glam::USizeVec2;
 
 /// The 5×5 window, as astroscrappy's `medfilt5`, whose median tells a saturated star's core from a
 /// saturated hit.
@@ -86,7 +86,7 @@ fn grown(cores: &BitBuffer2) -> BitBuffer2 {
                     core.x.checked_add_signed(dx).filter(|&x| x < size.width),
                     core.y.checked_add_signed(dy).filter(|&y| y < size.height),
                 ) {
-                    mask.set_at(Vec2us::new(x, y), true);
+                    mask.set_at(USizeVec2::new(x, y), true);
                 }
             }
         }
@@ -119,7 +119,7 @@ fn star_cores(data: &Buffer2<f32>, saturated: &BitBuffer2) -> BitBuffer2 {
                 .min(size.height - 1);
             for dx in 0..=2 * CORE_RADIUS {
                 let x = (pos.x + dx).saturating_sub(CORE_RADIUS).min(size.width - 1);
-                window.push(data[size.idx_of(Vec2us::new(x, y))]);
+                window.push(data[size.idx_of(USizeVec2::new(x, y))]);
             }
         }
         if statistics::median_mut(&mut window) > threshold {

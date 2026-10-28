@@ -125,13 +125,11 @@ fn build_tile(theme: &Theme) -> Image {
     let n = TILE_PX;
     let radius = (theme.canvas.dot_radius * n as f32 / theme.canvas.dot_spacing).max(0.5);
     let c = theme.canvas.dot.to_srgba();
-    let center = n as f32 * 0.5;
+    let center = Vec2::splat(n as f32 * 0.5);
     let r2 = radius * radius;
     let mut tile = Image::blank(UVec2::splat(n));
-    tile.fill_with(|x, y| {
-        let dx = x as f32 + 0.5 - center;
-        let dy = y as f32 + 0.5 - center;
-        if dx * dx + dy * dy <= r2 {
+    tile.fill_with(|at| {
+        if (at.as_vec2() + 0.5 - center).length_squared() <= r2 {
             c
         } else {
             SrgbaU8::new(0, 0, 0, 0)

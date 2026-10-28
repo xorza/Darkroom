@@ -20,7 +20,7 @@ fn ramp(size: Size2us, channel: usize) -> Buffer2<f32> {
 #[test]
 fn a_tile_reads_from_its_own_origin_with_each_channel_in_its_own_model_slot() {
     // 640² so the tile origin is not forced to (0,0) and an off-by-one in the row stride shows.
-    let (side, tile) = (640usize, Vec2us::new(128, 96));
+    let (side, tile) = (640usize, USizeVec2::new(128, 96));
     let planar = LinearImage::from(PlanarImage::new_rgb(array::from_fn::<_, 3, _>(|c| {
         ramp(Size2us::new(side, side), c)
     })));
@@ -55,7 +55,7 @@ fn a_mono_master_replicates_into_all_three_model_channels() {
     });
     let planar = LinearImage::from(PlanarImage::new_mono(plane));
     let mut input = vec![0.0f32; WINDOW * WINDOW * 3];
-    fill_tile_input(&planar, Vec2us::new(0, 0), &mut input);
+    fill_tile_input(&planar, USizeVec2::new(0, 0), &mut input);
 
     for (pixel, expected) in [(0usize, 0.0f32), (1, 1.0), (2, 0.5), (side * side - 1, 0.5)] {
         assert_eq!(
@@ -202,7 +202,7 @@ fn whole_frame_blend(
     let mut output = vec![0.0f32; WINDOW * WINDOW * 3];
     for &ty in &tile_starts(height, stride) {
         for &tx in &tile_starts(width, stride) {
-            fill_tile_input(image, Vec2us::new(tx, ty), &mut input);
+            fill_tile_input(image, USizeVec2::new(tx, ty), &mut input);
             infer(&input, &mut output);
             for hh in 0..WINDOW {
                 for ww in 0..WINDOW {

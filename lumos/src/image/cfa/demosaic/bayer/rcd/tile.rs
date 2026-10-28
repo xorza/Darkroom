@@ -15,7 +15,8 @@ use crate::image::cfa::demosaic::bayer::rcd::{
 };
 use crate::image::cfa::demosaic::mosaic_view::MosaicView;
 use crate::image::cfa::demosaic::tiled::{OutputPlanes, TilePlace};
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use glam::USizeVec2;
 use simd::{F32_LANES, F32x8, Isa, Kernel};
 
 /// A phase plane's rows, and the columns its sites take.
@@ -185,7 +186,7 @@ impl Tile {
             let at = (row / 2) * STRIDE;
             let parity = 2 * (row % 2);
             // A tile starts on the frame's phase, so the crop's colors are the frame's.
-            let [even_gain, odd_gain] = [0, 1].map(|col| bayer.gain_at(Vec2us::new(col, row)));
+            let [even_gain, odd_gain] = [0, 1].map(|col| bayer.gain_at(USizeVec2::new(col, row)));
             let [even, odd] = self.cfa.get_disjoint_mut([parity, parity + 1]).unwrap();
             let (even, odd) = (&mut even[at..at + STRIDE], &mut odd[at..at + STRIDE]);
             let input = bayer.samples(top + row, left..left + width);
@@ -200,8 +201,8 @@ impl Tile {
         }
         // The column phase of the red and blue sites of each row parity.
         let red_blue = [
-            pattern.color_at(Vec2us::new(0, 0)).idx() & 1,
-            pattern.color_at(Vec2us::new(0, 1)).idx() & 1,
+            pattern.color_at(USizeVec2::new(0, 0)).idx() & 1,
+            pattern.color_at(USizeVec2::new(0, 1)).idx() & 1,
         ];
         Stages {
             tile: self,
@@ -843,7 +844,7 @@ fn direction_ratio<V: F32x8>(a: V, b: V, floor: V) -> V {
 /// The color of a frame of `pattern` at Bayer phase `phase`.
 #[inline(always)]
 const fn phase_color(pattern: BayerPattern, phase: usize) -> usize {
-    pattern.color_at(Vec2us::new(phase % 2, phase / 2)).idx()
+    pattern.color_at(USizeVec2::new(phase % 2, phase / 2)).idx()
 }
 
 /// Each of `taps` at the sites from plane column `j`.

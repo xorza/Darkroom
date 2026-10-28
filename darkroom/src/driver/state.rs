@@ -1,5 +1,6 @@
 //! What the driver reports of the editor as text: [`State`] and [`UiList`].
 
+use glam::Vec2;
 use palantir::InspectedWidget;
 use palantir::{Rect, Sense, Ui};
 use scenarium::{Binding, Func, Graph, Library, NodeId, OutputPort};
@@ -72,7 +73,7 @@ pub struct PortSummary {
 pub struct Details {
     /// Every wire with a listed node's name at either end, `<node>.<output> -> <node>.<input>`.
     pub wires: Vec<String>,
-    pub pan: [f32; 2],
+    pub pan: Vec2,
     pub zoom: f32,
     pub can_undo: bool,
 }
@@ -183,7 +184,7 @@ impl State {
             log,
             details: detailed.then(|| Details {
                 wires: wires(graph, library, listed),
-                pan: document.main_view.viewport.pan.to_array(),
+                pan: document.main_view.viewport.pan,
                 zoom: document.main_view.viewport.zoom,
                 can_undo: open.can_undo(),
             }),

@@ -8,7 +8,8 @@ use crate::image::cfa::demosaic::bayer::rcd::{
 use crate::image::cfa::demosaic::mosaic_view::MosaicView;
 use crate::image::cfa::demosaic::tiled::{OutputPlanes, TilePlace};
 use crate::internals::test_rng::TestRng;
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use glam::USizeVec2;
 use simd::Portable;
 use simd::{F32_LANES, F32x8, Isa};
 
@@ -216,7 +217,7 @@ fn rcd_matches_librtprocess_bit_for_bit() {
     for ((name, scene), digests) in scenes.into_iter().zip(DIGESTS) {
         for (pattern, expected) in patterns.into_iter().zip(digests) {
             let data = Buffer2::from_fn(size, |x, y| {
-                scene(pattern.color_at(Vec2us::new(x, y)).idx(), x, y)
+                scene(pattern.color_at(USizeVec2::new(x, y)).idx(), x, y)
             });
             let planes = demosaic(&MosaicView::new(&data, pattern), &CancelToken::never()).unwrap();
             let mut digest = 0xcbf2_9ce4_8422_2325u64;

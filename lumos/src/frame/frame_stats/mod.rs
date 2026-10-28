@@ -16,7 +16,7 @@ use crate::math::statistics::median_mad::MedianMad;
 use crate::noise::ccd_noise::CcdNoise;
 use crate::noise::mosaic_noise_measure::MosaicNoiseMeasure;
 use crate::noise::mrs_noise::{self, NoisePlane, PixelGains};
-use common::Vec2us;
+use glam::USizeVec2;
 
 /// Per-frame statistics, per slot: a channel, or a color of a mosaic, whose one channel holds three
 /// colors of their own level and noise.
@@ -215,9 +215,9 @@ impl SlotLevel {
     /// [`Spreads::Measured`] their σ from the MAD. Both 0 when `keep` names none: a frame with
     /// nothing measured there contributes at none of them, so the figures are never read — but the
     /// median of nothing would panic.
-    fn of(plane: &Buffer2<f32>, spreads: Spreads, keep: impl Fn(usize, Vec2us) -> bool) -> Self {
+    fn of(plane: &Buffer2<f32>, spreads: Spreads, keep: impl Fn(usize, USizeVec2) -> bool) -> Self {
         let width = plane.width();
-        let kept = |y: usize, x: usize| keep(y * width + x, Vec2us::new(x, y));
+        let kept = |y: usize, x: usize| keep(y * width + x, USizeVec2::new(x, y));
         let mut count = 0;
         for (y, row) in plane.chunks(width).enumerate() {
             count += (0..row.len()).filter(|&x| kept(y, x)).count();

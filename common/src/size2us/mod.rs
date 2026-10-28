@@ -4,11 +4,11 @@ use std::fmt;
 use std::fmt::Display;
 use std::fmt::Formatter;
 
-use crate::vec2us::Vec2us;
+use glam::USizeVec2;
 
 /// How many columns and rows a 2D grid has.
 ///
-/// Distinct from [`Vec2us`], which locates a pixel: a size has no origin, adding two sizes is
+/// Distinct from [`USizeVec2`], which locates a pixel: a size has no origin, adding two sizes is
 /// meaningless, and its components are named for what they measure. Taking one instead of a
 /// `width, height` pair also makes the two impossible to transpose at a call site — they are
 /// both `usize`, so the compiler cannot otherwise tell them apart.
@@ -38,7 +38,7 @@ impl Size2us {
     /// # Panics
     /// Panics in debug builds if `point` is outside the grid.
     #[inline]
-    pub const fn idx_of(self, point: Vec2us) -> usize {
+    pub const fn idx_of(self, point: USizeVec2) -> usize {
         debug_assert!(self.contains(point), "point is outside the grid");
         point.y * self.width + point.x
     }
@@ -48,19 +48,19 @@ impl Size2us {
     /// # Panics
     /// Panics in debug builds if `idx` is past the last pixel.
     #[inline]
-    pub fn point_of(self, idx: usize) -> Vec2us {
+    pub fn point_of(self, idx: usize) -> USizeVec2 {
         debug_assert!(
             idx < self.pixel_count(),
             "index {idx} past the last pixel of a {}x{} grid",
             self.width,
             self.height
         );
-        Vec2us::new(idx % self.width, idx / self.width)
+        USizeVec2::new(idx % self.width, idx / self.width)
     }
 
     /// Whether `point` lies inside the grid.
     #[inline]
-    pub const fn contains(self, point: Vec2us) -> bool {
+    pub const fn contains(self, point: USizeVec2) -> bool {
         point.x < self.width && point.y < self.height
     }
 }

@@ -10,7 +10,8 @@ use crate::image_ops::hdr::{Hdr, data_mean};
 use crate::internals::assertions::assert_close_slice;
 use crate::internals::images::{mono_image, rgb_image};
 use crate::math::wavelet;
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use glam::USizeVec2;
 
 /// A smooth radial brightness dome — bright center (~1.0), dark corners (~0.1). The large-scale
 /// brightness HDR is meant to compress.
@@ -53,7 +54,7 @@ fn hdr_compresses_large_scale_contrast() {
     // shrinks the center-vs-corner contrast while keeping it monotone.
     let size = Size2us::new(128, 128);
     let px = dome(size);
-    let ci = size.idx_of(Vec2us::new(size.width / 2, size.height / 2));
+    let ci = size.idx_of(USizeVec2::new(size.width / 2, size.height / 2));
     let in_contrast = px[ci] - px[0];
     let mut img = mono_image(size, px);
     Hdr {
@@ -75,7 +76,7 @@ fn hdr_compresses_large_scale_contrast() {
 fn hdr_amount_controls_compression() {
     let size = Size2us::new(128, 128);
     let px = dome(size);
-    let ci = size.idx_of(Vec2us::new(size.width / 2, size.height / 2));
+    let ci = size.idx_of(USizeVec2::new(size.width / 2, size.height / 2));
     let contrast_at = |amount: f32| {
         let mut img = mono_image(size, px.clone());
         Hdr { scales: 3, amount }.apply(&mut img).unwrap();
@@ -283,7 +284,7 @@ fn scales_change_the_output_up_to_the_frame_limit() {
 #[test]
 fn a_halo_pixel_stays_above_black() {
     let size = Size2us::new(64, 64);
-    let centre = Vec2us::new(32, 32);
+    let centre = USizeVec2::new(32, 32);
     let px: Vec<f32> = (0..size.pixel_count())
         .map(|idx| {
             let p = size.point_of(idx);
@@ -292,7 +293,7 @@ fn a_halo_pixel_stays_above_black() {
         })
         .collect();
     let (scales, amount) = (4, 0.8);
-    let halo = size.idx_of(Vec2us::new(40, 32));
+    let halo = size.idx_of(USizeVec2::new(40, 32));
     let mut img = mono_image(size, px);
     assert!(
         linear_hdr(img.channel(0), scales, amount)[halo] < 0.0,
@@ -319,8 +320,8 @@ fn near_black_pixels_keep_their_ratio() {
     let size = Size2us::new(64, 64);
     let mut px = dome(size);
     let (dim, bright) = (
-        size.idx_of(Vec2us::new(2, 2)),
-        size.idx_of(Vec2us::new(3, 2)),
+        size.idx_of(USizeVec2::new(2, 2)),
+        size.idx_of(USizeVec2::new(3, 2)),
     );
     px[dim] = 1e-4;
     px[bright] = 1e-3;

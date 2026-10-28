@@ -1,7 +1,7 @@
 use std::slice;
 
 use common::{Buffer2, CancelToken, TempDir};
-use glam::Vec2;
+use glam::{USizeVec2, Vec2};
 use imaginarium::{ChannelLayout, PlanarDesc};
 
 use crate::combine::frame_cache::FrameCache;
@@ -36,7 +36,7 @@ use crate::internals::synthetic::sky_field::{GaussianStars, Sky, SkyField};
 use crate::internals::test_rng::TestRng;
 use crate::math::statistics;
 use crate::progress::progress_monitor::ProgressMonitor;
-use common::{Size2us, Vec2us};
+use common::Size2us;
 
 /// Statistics with one `(median, mad)` per channel and nothing else stated.
 fn channel_stats(channels: &[(f32, f32)]) -> Admitted {
@@ -1011,7 +1011,7 @@ fn twilight_flats_normalize_per_color() {
                 .iter()
                 .enumerate()
                 .map(|(idx, &level)| {
-                    let color = cfa.slot_at(Vec2us::new(idx % 16, idx / 16));
+                    let color = cfa.slot_at(USizeVec2::new(idx % 16, idx / 16));
                     level * scale[color]
                 })
                 .collect();

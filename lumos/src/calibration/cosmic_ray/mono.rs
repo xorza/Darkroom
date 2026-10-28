@@ -16,7 +16,8 @@ use crate::calibration::cosmic_ray::kept_out::KeptOut;
 use crate::calibration::cosmic_ray::masks::{CrMasks, DetectionPlanes};
 use crate::calibration::cosmic_ray::noise_model::{NoiseModel, PixelBg};
 use crate::math::statistics;
-use common::{Size2us, Vec2us};
+use common::Size2us;
+use glam::USizeVec2;
 
 /// Frame-sized `f32` planes the mono detector holds, however many iterations it runs.
 pub(crate) const MONO_SCRATCH_PLANES: usize = 5;
@@ -597,7 +598,7 @@ impl PixelRepair<'_> {
                 let mut scratch = windows.get();
                 let buf = &mut scratch.values;
                 for (x, o) in row.iter_mut().enumerate() {
-                    if !mask.get_at(Vec2us::new(x, y)) {
+                    if !mask.get_at(USizeVec2::new(x, y)) {
                         continue;
                     }
                     buf.clear();
@@ -609,15 +610,15 @@ impl PixelRepair<'_> {
                         if reach > 2 && !buf.is_empty() {
                             break;
                         }
-                        for (xx, yy) in ring(Vec2us::new(x, y), reach, size) {
-                            let j = size.idx_of(Vec2us::new(xx, yy));
+                        for (xx, yy) in ring(USizeVec2::new(x, y), reach, size) {
+                            let j = size.idx_of(USizeVec2::new(xx, yy));
                             if measured(j) {
                                 buf.push(src[j]);
                             }
                         }
                     }
                     *o = if buf.is_empty() {
-                        local(size.idx_of(Vec2us::new(x, y))).local.sky
+                        local(size.idx_of(USizeVec2::new(x, y))).local.sky
                     } else {
                         statistics::median_mut(buf)
                     };
@@ -628,7 +629,7 @@ impl PixelRepair<'_> {
 
 /// The pixels at Chebyshev distance `reach` from `centre`, each replicated into the `size` frame
 /// at its edges: the centre itself for 0.
-fn ring(centre: Vec2us, reach: usize, size: Size2us) -> impl Iterator<Item = (usize, usize)> {
+fn ring(centre: USizeVec2, reach: usize, size: Size2us) -> impl Iterator<Item = (usize, usize)> {
     let side = 2 * reach + 1;
     let clamp =
         move |at: usize, limit: usize| (at + reach).saturating_sub(2 * reach).min(limit - 1);

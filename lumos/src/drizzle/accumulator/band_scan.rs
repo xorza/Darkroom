@@ -3,9 +3,9 @@
 
 use std::ops::Range;
 
-use glam::DVec2;
+use glam::{DVec2, USizeVec2};
 
-use common::{Size2us, Vec2us};
+use common::Size2us;
 
 /// Input rows of slack on the strip an outline is cut by: far above the rounding of an outline's
 /// vertices — coordinates of 10⁵ pixels carry 10⁻¹¹ — and far below a pixel, so it scans no
@@ -147,7 +147,7 @@ impl BandScan {
     }
 
     /// Whether the band scans input pixel `pixel`.
-    pub(super) fn contains(&self, pixel: Vec2us) -> bool {
+    pub(super) fn contains(&self, pixel: USizeVec2) -> bool {
         self.rows.contains(&pixel.y) && self.cols(pixel.y).contains(&pixel.x)
     }
 }
