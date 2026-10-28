@@ -4,6 +4,7 @@ use std::cell::Cell;
 use std::sync::Arc;
 
 use imaginarium::ColorFormat;
+use palantir::PointerButton;
 use palantir::internals::ui_harness::UiHarness;
 
 use crate::core::document::internals::DocumentFixture;
@@ -21,7 +22,7 @@ fn header_readout_adds_its_conditional_clauses_only_when_they_apply() {
     let mut h = UiHarness::arena();
     let handle = h
         .ui()
-        .load_image(&glyph::checker_image())
+        .load_image(&glyph::checker_image(&Theme::default()))
         .expect("a 2x2 checker fits every supported GPU");
     // The texture is the 2×2 checker throughout; `native_size` against
     // `texels` is what says whether the view is capped below its source.
@@ -272,7 +273,8 @@ fn the_frame_that_first_draws_a_viewer_frames_it_at_the_full_size() {
 /// 800 × 400, centered at pan (0, (600 − 400) / 2) = (0, 100).
 #[test]
 fn a_drag_starts_from_the_fit_and_a_double_click_fits_again() {
-    let mut h = UiHarness::arena();
+    // A surface the pane's size, which the pane fills as its tab's content does.
+    let mut h = UiHarness::new(UVec2::new(800, 600));
     let mut fixture = DocumentFixture::default();
     let node = fixture.add(&preview_sink::func(Arc::default()));
     let mut store = PreviewStore::new(wake::internals::noop());
@@ -306,6 +308,12 @@ fn a_drag_starts_from_the_fit_and_a_double_click_fits_again() {
     frame(&mut h, &mut viewer);
     frame(&mut h, &mut viewer);
     assert_eq!(viewer.view, None, "at fit, no framing of its own");
+    // The readout pill stands as tall as the control pill beside it: an 18 px icon in a 30 px
+    // chip, and 4 px of the pill's padding above and below, 38.
+    let controls = toolbar::controls_wid(node, "pill_framing");
+    let [header, pill] = [header_wid(node), controls].map(|wid| h.rect(wid).expect("recorded"));
+    assert_eq!(header.size.h, 38.0);
+    assert_eq!((header.min.y, header.size.h), (pill.min.y, pill.size.h));
 
     let grab = h.center_of(pane_wid(node));
     h.press_at(grab);

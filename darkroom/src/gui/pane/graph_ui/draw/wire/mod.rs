@@ -19,6 +19,8 @@
 
 use std::ops::Range;
 
+use glam::Vec2;
+
 use palantir::widget::{CubicBezier, LineCap, Shape};
 use palantir::{ColorRamp, RgbaF32, Stroke, Ui};
 
@@ -27,7 +29,7 @@ use crate::core::document::wire_key::WireKey;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
 use crate::gui::pane::graph_ui::frame::tie_layout::TieLayout;
-use crate::gui::pane::graph_ui::frame::wire::Wire;
+use crate::gui::pane::graph_ui::frame::wire::{BEZIER_SAMPLES, Wire};
 use crate::gui::pane::graph_ui::gesture::breaker_ui::breaker_probe::BreakerProbe;
 use crate::gui::pane::graph_ui::gesture::tie_ui::tie_probe::TieProbe;
 use crate::gui::pane::graph_ui::wid;
@@ -110,6 +112,14 @@ pub(crate) struct WirePass<'a, 'p, 't> {
 }
 
 impl WirePass<'_, '_, '_> {
+    /// A wire's width at the camera's zoom, before its emphasis tier.
+    fn wire_width(&self) -> f32 {
+        let theme = self.draw_ctx.theme();
+        theme
+            .stroke
+            .wire_at(self.draw_ctx.graph_ctx().viewport().zoom)
+    }
+
     /// Cull, breaker-probe, tier, and paint one committed wire, its `pieces`
     /// in order from its output end, reporting whether the breaker crossed
     /// it — the whole per-wire body, shared by both renderers so they can't
@@ -147,39 +157,46 @@ impl WirePass<'_, '_, '_> {
             (false, Hover::Over) => WireMark::EndpointHovered,
             (false, Hover::Rest) => WireMark::Plain,
         };
-        let stroke = self
-            .emphasis
-            .stroke(self.draw_ctx.theme().stroke_width, mark);
+        let stroke = self.emphasis.stroke(self.wire_width(), mark);
+        let theme = self.draw_ctx.theme();
         // A broken wire paints flat so the alarm read isn't diluted by the
         // family's own gradient, and it outranks the hover tint outright.
         let paint = if broken {
-            WirePaint::from(self.draw_ctx.theme().colors.wire_broken)
+            WirePaint::from(theme.canvas.wire_broken)
         } else {
             self.emphasis.paint(tint(), stroke.tier)
         };
-        let selection = self.draw_ctx.theme().colors.selection_rect;
         for (idx, (piece, share)) in pieces.iter().zip(shares(pieces)).enumerate() {
-            if crossed.is_some_and(|crossing| crossing.piece == idx) {
-                // The piece a tie line crosses is where the tie goes.
-                let lifted = width(self.draw_ctx.theme().stroke_width, Tier::Emphasized);
-                WirePaint::from(selection).stroke(ui, piece, lifted);
-            } else if cull.keeps_rect(piece.hull()) {
-                let paint = if pieces.len() == 1 {
-                    paint
-                } else {
-                    paint.between(share.start, share.end)
-                };
-                paint.stroke(ui, piece, stroke.width);
+            // The piece a tie line crosses keeps its own paint at the emphasized width, under the
+            // band the line previews there.
+            let crossed = crossed.is_some_and(|crossing| crossing.piece == idx);
+            if !crossed && !cull.keeps_rect(piece.hull()) {
+                continue;
             }
+            let paint = if pieces.len() == 1 {
+                paint
+            } else {
+                paint.between(share.start, share.end)
+            };
+            let width = if crossed {
+                width(self.wire_width(), Tier::Emphasized)
+            } else {
+                stroke.width
+            };
+            paint.stroke(ui, piece, width);
         }
-        if let Some(crossing) = crossed {
-            // A disk as a circle stroked as wide as its radius.
-            let radius = CROSSING_MARK_RADIUS;
-            ui.add_shape(Shape::circle(
-                crossing.point,
-                radius * 0.5,
-                Stroke::new(selection, radius),
-            ));
+        // A cut wire also takes a form of its own, a bar across its middle, so the alarm does
+        // not rest on its hue alone.
+        if broken && let Some(middle) = Middle::of(pieces) {
+            let half = middle.dir.perp() * (theme.canvas.cut_bar_length * 0.5);
+            ui.add_shape(
+                Shape::line(
+                    middle.at - half,
+                    middle.at + half,
+                    Stroke::new(theme.canvas.wire_broken, theme.canvas.cut_bar_width),
+                )
+                .cap(LineCap::Round),
+            );
         }
         broken
     }
@@ -255,7 +272,7 @@ impl WirePass<'_, '_, '_> {
             let ends = WireEnds {
                 wire: key,
                 hover,
-                tint: || WireTint::flat(theme.event_color()),
+                tint: || WireTint::flat(theme.port.event),
             };
             if self.draw_wire(ui, pieces, ends) {
                 self.probe.mark_broken_subscription(s);
@@ -278,6 +295,42 @@ fn data_tint(graph_ctx: GraphCtx<'_>, src: PortRef, tgt: PortRef) -> WireTint {
 /// The part of a wire's ramp each of `pieces` paints, in order from its output end: the whole
 /// wire split at the piece ends by chord length, so the pieces paint the whole one's ramp. A
 /// wire with no length gives each piece the whole ramp's end.
+/// A wire's point halfway along its length, and the way it runs there, a unit vector.
+#[derive(Clone, Copy, Debug)]
+struct Middle {
+    at: Vec2,
+    dir: Vec2,
+}
+
+impl Middle {
+    /// The middle of the curve `pieces` draw, by arc length: measured over each piece's
+    /// [`BEZIER_SAMPLES`] chords, as the probes sample it, and placed back on the cubic at the
+    /// chord's parameter, so the mark sits on the curve the wire paints. `None` for a wire of no
+    /// length.
+    fn of(pieces: &[Wire]) -> Option<Self> {
+        let total: f32 = pieces
+            .iter()
+            .flat_map(Wire::chords)
+            .map(|[a, b]| a.distance(b))
+            .sum();
+        let mut left = total * 0.5;
+        for piece in pieces {
+            for (idx, [a, b]) in piece.chords().enumerate() {
+                let length = a.distance(b);
+                if length > 0.0 && left <= length {
+                    let t = (idx as f32 + left / length) / BEZIER_SAMPLES as f32;
+                    return Some(Self {
+                        at: piece.at(t),
+                        dir: piece.velocity(t).normalize_or((b - a) / length),
+                    });
+                }
+                left -= length;
+            }
+        }
+        None
+    }
+}
+
 fn shares(pieces: &[Wire]) -> impl ExactSizeIterator<Item = Range<f32>> + '_ {
     let total: f32 = pieces.iter().map(Wire::chord).sum();
     let mut from = 0.0;
@@ -342,9 +395,6 @@ const WIRE_DRAG_FADE: f32 = 0.35;
 /// Width multiplier for an emphasized (hovered or broken-alarm) wire, so
 /// one wire stays traceable through a crossing.
 const WIRE_HOVER_WIDTH: f32 = 1.25;
-
-/// The radius of the mark where a tie line crosses a wire.
-const CROSSING_MARK_RADIUS: f32 = 4.0;
 
 /// Whether any wire gesture — a new-wire drag, a subscription drag, a
 /// breaker scribble — is in flight this pass.

@@ -3,7 +3,7 @@
 
 use std::fmt::Display;
 
-use palantir::prelude::*;
+use palantir::{Chrome, Corners, Spacing, Text, Ui, fmt};
 
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support;
@@ -21,7 +21,7 @@ pub(crate) fn band_padding(theme: &Theme) -> Spacing {
 /// caller assembles at the call site — and lands in the record pass's text
 /// arena, so a per-frame fact strip builds no `String`.
 pub(crate) fn bare_value(ui: &mut Ui, theme: &Theme, value: impl Display) {
-    let style = support::mono_text(ui, theme.text.label);
+    let style = support::figure_text(ui, theme);
     Text::new(fmt!(ui, "{value}")).style(&style).show(ui);
 }
 
@@ -39,18 +39,16 @@ impl<V: Display> LabeledValue<'_, V> {
     /// footer and a preview node's image-info footer.
     pub(crate) fn show(self, ui: &mut Ui, theme: &Theme) {
         Text::new(self.label)
-            .style(&support::muted_text(ui, theme, theme.text.label))
+            .style(&support::muted_text(ui, theme, theme.font.caption))
             .show(ui);
         bare_value(ui, theme, self.value);
     }
 }
 
-/// A read-only "fact strip" footer's chrome: the surround fill, rounded
-/// on only its bottom two corners so it seats under whatever rounds the
-/// top. Shared by a node body's footer and a preview node's image-info footer.
-pub(crate) fn footer_chrome(theme: &Theme, corner_radius: f32) -> Chrome {
-    Chrome::rounded(
-        theme.colors.surround_fill,
-        Corners::new(0.0, 0.0, corner_radius, corner_radius),
-    )
+/// A read-only "fact strip" footer's chrome: the surround fill, rounded on only its bottom two
+/// corners, at the card's inner radius, so it seats inside the card's stroke. Shared by a node
+/// body's footer and a preview node's image-info footer.
+pub(crate) fn footer_chrome(theme: &Theme) -> Chrome {
+    let r = theme.card_inner_radius();
+    Chrome::rounded(theme.colors.surround_bg, Corners::new(0.0, 0.0, r, r))
 }

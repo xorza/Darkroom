@@ -21,14 +21,12 @@ const AYU_GRAPHITE: &str = include_str!("../../../assets/ayu-graphite.ron");
 /// [`hover_lift`](crate::gui::theme::color::hover_lift)), because the
 /// palette's brightest tint has nothing above it to lift into.
 ///
-/// **Roles may share a hue; roles that share a *context* may not.** The
-/// file resolves every role against one upstream semantic layer, so a
-/// badge, a status and a wire type routinely land on the same value —
-/// harmless, because a glyph on a node's head never meets a wire. Two
-/// badges do meet, on that same head, which is why
-/// `theme::tests::badges_are_told_apart_from_each_other` pins them
-/// pairwise. State the rule, not the hex: which color a role holds is
-/// the asset's to change.
+/// **Roles may share a hue, never a form.** The file resolves every role against one upstream
+/// semantic layer, so a badge, a status and a wire type routinely land on the same value; each
+/// then shows in a form of its own, as `darkroom/AGENTS.md`, "A status and a type share a hue,
+/// never a form", records. Two badges meet on one head, which is why
+/// `theme::tests::badges_are_told_apart_from_each_other` pins them pairwise. State the rule, not
+/// the hex: which color a role holds is the asset's to change.
 ///
 /// A role the file holds and this struct does not fails the load, as a
 /// missing one does: the generator and the struct name the same roles.
@@ -40,16 +38,14 @@ pub(crate) struct Palette {
     /// Backdrop grid dot color.
     pub(crate) canvas_dot: RgbaF32,
     /// Surround fill behind the menu bar and tab strip.
-    pub(crate) surround_fill: RgbaF32,
+    pub(crate) surround_bg: RgbaF32,
     /// Node body fill, and the surface tier palantir gives its own popups.
-    pub(crate) node_fill: RgbaF32,
+    pub(crate) node_bg: RgbaF32,
     /// Resting card outline. Transparent — the shadow carries the edge.
     pub(crate) node_border: RgbaF32,
-    /// Header band, a step off the body so the band reads against it.
-    pub(crate) header_fill: RgbaF32,
     /// Ambient elevation shadow. A near-black ground takes a lot of alpha
     /// before a shadow registers at all.
-    pub(crate) node_ambient_shadow: RgbaF32,
+    pub(crate) shadow: RgbaF32,
     /// Primary ink.
     pub(crate) text: RgbaF32,
     /// De-emphasized ink.
@@ -57,26 +53,30 @@ pub(crate) struct Palette {
     /// Disabled ink.
     pub(crate) text_disabled: RgbaF32,
     /// Control fill one step up from the surface behind it — the hover tier.
-    pub(crate) elem_hover: RgbaF32,
+    pub(crate) element_mid: RgbaF32,
     /// Control fill two steps up — the emphasis tier a press reaches for.
-    pub(crate) elem_active: RgbaF32,
-    /// Focus ring.
-    pub(crate) border_focused: RgbaF32,
-    /// Rubber-band sweep and committed selection halo.
-    pub(crate) selection_rect: RgbaF32,
+    pub(crate) element_strong: RgbaF32,
+    /// The accent: the selection's rubber band and halo, focus, and the buttons that open a
+    /// node's inspector.
+    pub(crate) accent: RgbaF32,
     /// A wire whose endpoint no longer resolves.
     pub(crate) wire_broken: RgbaF32,
     /// The scribble that cuts wires.
     pub(crate) breaker_stroke: RgbaF32,
+    /// The light square of the checker behind a transparent image, a transparency reference the
+    /// same in every theme.
+    pub(crate) checker_light: RgbaF32,
+    /// The dark square of that checker.
+    pub(crate) checker_dark: RgbaF32,
     /// Color for an untyped (`Any`) input port.
     pub(crate) input_port: RgbaF32,
-    /// Event emitters, subscription pins and event wires — the sink
-    /// marker's red, so the trigger machinery reads as one family.
+    /// Event emitters, subscription pins and event wires: one white, as Unreal draws its
+    /// execution pins, so the trigger machinery reads as one family.
     pub(crate) event_port: RgbaF32,
     /// Port and event label ink.
     pub(crate) port_label: RgbaF32,
-    /// Inspect chip and pinned-inspector outline.
-    pub(crate) badge_graph: RgbaF32,
+    /// A text link.
+    pub(crate) link: RgbaF32,
     /// Persist-to-disk cache chip.
     pub(crate) badge_cache: RgbaF32,
     /// The kind mark: a sink, or a node recomputed every run.

@@ -105,6 +105,14 @@ impl Wire {
         })
     }
 
+    /// The curve's derivative at parameter `t`: the way it runs there, scaled by its speed.
+    pub(crate) fn velocity(&self, t: f32) -> Vec2 {
+        let u = 1.0 - t;
+        (self.p1 - self.p0) * (3.0 * u * u)
+            + (self.p2 - self.p1) * (6.0 * u * t)
+            + (self.p3 - self.p2) * (3.0 * t * t)
+    }
+
     /// The point at parameter `t` along the curve, in Bernstein form.
     pub(crate) fn at(&self, t: f32) -> Vec2 {
         let u = 1.0 - t;

@@ -6,6 +6,7 @@
 pub(crate) mod bytes;
 pub(crate) mod elapsed;
 pub(crate) mod path_preview;
+pub(crate) mod percent;
 pub(crate) mod shown_value;
 
 use std::io::Cursor;
@@ -29,6 +30,13 @@ fn printed_integer_part(value: f64, precision: usize) -> u64 {
         .ok()
         .and_then(|digits| digits.parse().ok())
         .unwrap_or(u64::MAX)
+}
+
+/// What a node is called on every surface that names it — a viewer's tab and title, the
+/// inspector's title, a held inspector's tab: its name, or "Unnamed" for a node whose name was
+/// cleared, so no surface reads blank and none invents a word of its own.
+pub(crate) const fn node_name(name: &str) -> &str {
+    if name.is_empty() { "Unnamed" } else { name }
 }
 
 #[cfg(test)]

@@ -2612,6 +2612,7 @@ dependencies = [
  "cosmic-text",
  "criterion",
  "fixedbitset",
+ "foldhash",
  "glam 0.34.1",
  "half",
  "image",

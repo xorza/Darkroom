@@ -1,5 +1,5 @@
-//! [`AppColors`]: the colors belonging to no single widget — the
-//! surround, the shared inks, and the badge roster.
+//! [`AppColors`]: the colors belonging to no single widget — the selection accent, the surround
+//! and the link.
 
 use palantir::RgbaF32;
 
@@ -10,72 +10,41 @@ use crate::gui::theme::palette::Palette;
 /// whose thin strokes need the larger step to read as lit.
 const LINK_HOVER_LIFT: f32 = 0.5;
 
-/// The colors that belong to no single widget — the surround, the
-/// shared inks, and the badge roster.
+/// The colors that belong to no single widget.
 #[derive(Clone, Debug)]
 pub(crate) struct AppColors {
-    /// The selection accent: the rubber-band rectangle (translucent fill +
-    /// near-opaque 1px border, both derived from this) *and* the selected-
-    /// node border, so "in the selection" reads as one color from sweep to
-    /// committed halo (palette accent).
-    pub(crate) selection_rect: RgbaF32,
-    pub(crate) wire_broken: RgbaF32,
-    pub(crate) breaker_stroke: RgbaF32,
-    /// Muted secondary foreground (palette `text_muted`). The
-    /// de-emphasized accent shared across the interface: inactive/disabled header
-    /// chips and active-tab text — visible without competing with the bright
-    /// accent (`badge_graph`) or full-strength text.
-    pub(crate) text_muted: RgbaF32,
-    /// Surround fill behind the menu bar + tab strip. A notch darker
-    /// than the card surface, sitting between the graph (`canvas.bg`)
-    /// and the nodes, so the surround recedes and the active tab (which
-    /// uses `canvas.bg`) reads as continuous with the graph below it.
-    pub(crate) surround_fill: RgbaF32,
-    /// Accent cyan: the inspect chip, the pinned-inspector outline, and the
-    /// VRAM half of a memory readout.
-    pub(crate) badge_graph: RgbaF32,
-    /// A text link at rest (the accent), and lifted halfway to white under
-    /// the pointer.
+    /// The accent: the inspect button, the inspector's pin, a memory readout's VRAM pool, and the
+    /// selection: the rubber band (a translucent fill and a near-opaque border, both
+    /// derived from this) and the selected node's border, so "in the selection" reads as one
+    /// color from sweep to committed halo.
+    pub(crate) accent: RgbaF32,
+    /// The band the menu bar, the status bar and every tab strip sit on: between the graph
+    /// (`canvas.bg`) and the nodes, so the surround recedes and the selected tab, which takes
+    /// `canvas.bg`, reads as one with the graph below it.
+    pub(crate) surround_bg: RgbaF32,
+    /// A text link at rest, and lifted halfway to white under the pointer.
     pub(crate) link: RgbaF32,
     pub(crate) link_hovered: RgbaF32,
-    /// `RuntimeCache` (persist-to-disk) chip — warning yellow.
-    pub(crate) badge_cache: RgbaF32,
-    /// The kind mark: a read-only descriptor of what the node is (a sink, or
-    /// recomputed every run), in the title's white, as a kind is not a status.
-    pub(crate) badge_kind: RgbaF32,
 }
 
 impl AppColors {
     pub(super) const fn from_palette(p: &Palette) -> Self {
         Self {
-            selection_rect: p.selection_rect,
-            wire_broken: p.wire_broken,
-            breaker_stroke: p.breaker_stroke,
-            text_muted: p.text_muted,
-            surround_fill: p.surround_fill,
-            badge_graph: p.badge_graph,
-            link: p.badge_graph,
-            link_hovered: color::toward(p.badge_graph, RgbaF32::WHITE, LINK_HOVER_LIFT),
-            badge_cache: p.badge_cache,
-            badge_kind: p.badge_kind,
+            accent: p.accent,
+            surround_bg: p.surround_bg,
+            link: p.link,
+            link_hovered: color::toward(p.link, RgbaF32::WHITE, LINK_HOVER_LIFT),
         }
     }
 
-    /// Rubber-band interior wash — `selection_rect` at 12%, pairing
-    /// with [`Self::selection_border`] (the derivation the
-    /// `selection_rect` doc promises lives in one place).
+    /// Rubber-band interior — `accent` at 12%, pairing with [`Self::selection_border`].
+    /// A translucent layer, not a wash: the nodes and wires the band sweeps show through it.
     pub(crate) const fn selection_fill(&self) -> RgbaF32 {
-        self.selection_rect.with_alpha(0.12)
+        self.accent.with_alpha(0.12)
     }
 
-    /// Rubber-band outline — `selection_rect` near-opaque.
+    /// Rubber-band outline — `accent` near-opaque.
     pub(crate) const fn selection_border(&self) -> RgbaF32 {
-        self.selection_rect.with_alpha(0.85)
-    }
-
-    /// Soft hairline rule — `text_muted` at 18%, the peer of
-    /// palantir's `Palette::border_soft`.
-    pub(crate) const fn border_soft(&self) -> RgbaF32 {
-        self.text_muted.with_alpha(0.18)
+        self.accent.with_alpha(0.85)
     }
 }

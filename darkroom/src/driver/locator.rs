@@ -1,8 +1,7 @@
 //! [`Locator`]: where an action lands, named by what the editor shows rather than by pixels.
 
 use glam::Vec2;
-use palantir::InspectedWidget;
-use palantir::{Rect, Ui};
+use palantir::{InspectedWidget, Rect, Ui};
 use scenarium::NodeId;
 
 use crate::driver::error::DriverError;
@@ -63,11 +62,28 @@ impl Locator {
             }
             Self::Screen(point) => Ok(*point),
             Self::Offset(inner, by) => Ok(inner.point(app, ui)? + *by),
-            Self::Node(_)
-            | Self::NodeHeader(_)
-            | Self::Port { .. }
-            | Self::Text(_)
-            | Self::Nth(..) => self.rect(app, ui).map(Rect::center),
+            // A node's press point is the middle of its footer, where no widget takes the press;
+            // the body's own center can land on a port row's field.
+            Self::Node(node) => {
+                let id = find_node(self, app, node)?;
+                self.visible(ui.response_for(wid::footer(id)).rect)
+                    .map(Rect::center)
+            }
+            Self::Nth(inner, n) => match inner.as_ref() {
+                Self::Node(node) => {
+                    let ids = node_ids(app, node);
+                    let id = ids.get(*n).ok_or_else(|| DriverError::NotFound {
+                        locator: format!("{self:?}"),
+                        nearest: vec![format!("{inner:?} has {} matches", ids.len())],
+                    })?;
+                    self.visible(ui.response_for(wid::footer(*id)).rect)
+                        .map(Rect::center)
+                }
+                _ => self.rect(app, ui).map(Rect::center),
+            },
+            Self::NodeHeader(_) | Self::Port { .. } | Self::Text(_) => {
+                self.rect(app, ui).map(Rect::center)
+            }
         }
     }
 

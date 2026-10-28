@@ -1,10 +1,13 @@
 //! The small sensing glyph a wire terminates on: a filled circle or a
 //! rounded triangle in a generously grown hit box, with a hover tooltip.
 
-use palantir::TextInput;
-use palantir::prelude::*;
+use glam::Vec2;
 use palantir::widget::Shape;
+use palantir::{
+    Configure, Panel, Rect, RgbaF32, Sense, Sizing, Spacing, Stroke, TextInput, Ui, WidgetId,
+};
 
+use crate::gui::theme::Theme;
 use crate::gui::widgets::support;
 
 /// Hover / grab box scaled past the painted glyph so ports, event triangles,
@@ -14,21 +17,6 @@ use crate::gui::widgets::support;
 /// the emphasis zone, so entering/leaving it is a hover-target change and
 /// repaints without any pointer subscription.
 const HIT_SCALE: f32 = 1.8;
-
-/// Corner rounding of the triangle glyphs, matching the soft corners of the
-/// rest of the interface.
-const TRIANGLE_RADIUS: f32 = 2.0;
-
-/// Stroke width of the muted ring drawn around a circle with an
-/// [`outline`](PortGlyph::outline). Also the amount
-/// [`enlarged_diameter`] grows a circle by (on each side), so a
-/// plain enlarged circle's footprint matches a ringed one — "important port"
-/// reads as one consistent size regardless of which visual carries it.
-const OUTLINE_WIDTH: f32 = 2.5;
-
-/// Stroke width of a hollow circle's ring: the 2 px of a wire, so the ring reads as the line
-/// that lands on it.
-pub(crate) const HOLLOW_WIDTH: f32 = 2.0;
 
 /// What a glyph paints inside its box.
 #[derive(Clone, Copy, Debug)]
@@ -193,7 +181,9 @@ impl<'a> PortGlyph<'a> {
         self
     }
 
-    pub(crate) fn show(self, ui: &mut Ui) -> PortGlyphResponse {
+    /// Record the glyph. A ring, an [`outline`](Self::outline) or a [`hollow`](Self::hollow)
+    /// circle's, strokes at the theme's `stroke.line`, and a triangle rounds at `radius.mark`.
+    pub(crate) fn show(self, ui: &mut Ui, theme: &Theme) -> PortGlyphResponse {
         let Self {
             wid,
             glyph,
@@ -207,12 +197,14 @@ impl<'a> PortGlyph<'a> {
             .sense(Sense::CLICK | Sense::DRAG);
         let panel = match placement {
             Placement::Margin(margin) => {
-                let [l, t, r, b] = margin.as_array();
+                let [l, t, r, b] = margin.to_array();
                 panel.margin(Spacing::new(l - inset, t - inset, r - inset, b - inset))
             }
             Placement::CenteredOn(point) => panel.pos(point - Vec2::splat(hit * 0.5)),
         };
-        let shown = panel.show(ui, |ui| glyph.draw(ui));
+        let shown = panel.show(ui, |ui| {
+            glyph.draw(ui, theme.stroke.line, theme.radius.mark);
+        });
         // Take the owned snapshot + the click edges so the glyph's `ui` borrow
         // ends before the tooltip records into `ui`.
         let snapshot = shown.response.snapshot();
@@ -225,10 +217,11 @@ impl<'a> PortGlyph<'a> {
     }
 }
 
-/// A circle's diameter grown by [`OUTLINE_WIDTH`] on each side, so a plain
-/// circle's footprint matches an [`outline`](PortGlyph::outline)d one.
-pub(crate) const fn enlarged_diameter(base: f32) -> f32 {
-    base + 2.0 * OUTLINE_WIDTH
+/// A circle's diameter grown by a `ring` width on each side, so a plain circle's footprint
+/// matches an [`outline`](PortGlyph::outline)d one: "important port" reads as one size whichever
+/// visual carries it.
+pub(crate) const fn enlarged_diameter(base: f32, ring: f32) -> f32 {
+    base + 2.0 * ring
 }
 
 impl Painted {
@@ -243,13 +236,12 @@ impl Painted {
     }
 
     /// An arrow's corners in the [`Self::hit`]-sided box, its apex last, pointing right and
-    /// turned by `turn` about the box center. Inset by the corner radius: the SDF rounds by
+    /// turned by `turn` about the box center. Inset by the corner radius `r`: the SDF rounds by
     /// *dilating* (`sdf - radius`), so the rounded result grows back out to the glyph box
     /// instead of past it. The layout box is unchanged by the turn: the glyph is not clipped to
     /// the owner rect, so a turned apex may exceed it.
-    fn arrow_vertices(self, turn: f32) -> [Vec2; 3] {
+    fn arrow_vertices(self, turn: f32, r: f32) -> [Vec2; 3] {
         let (size, inset) = (self.size, self.inset());
-        let r = TRIANGLE_RADIUS;
         let center = Vec2::splat(self.hit() * 0.5);
         let rot = Vec2::from_angle(turn);
         [
@@ -261,8 +253,8 @@ impl Painted {
     }
 
     /// Paint into the `size`-sided square at [`Self::inset`] within the
-    /// [`Self::hit`]-sided box.
-    fn draw(self, ui: &mut Ui) {
+    /// [`Self::hit`]-sided box, a ring at `ring` wide and a triangle's corners at `corner`.
+    fn draw(self, ui: &mut Ui, ring: f32, corner: f32) {
         let Self { shape, size, fill } = self;
         let inset = self.inset();
         match shape {
@@ -276,25 +268,21 @@ impl Painted {
                 // lands the ring's inner edge exactly on the fill's outer edge.
                 if let Some(color) = outline {
                     ui.add_shape(
-                        Shape::rect(rect.inflated(OUTLINE_WIDTH))
-                            .corners(radius + OUTLINE_WIDTH)
-                            .border(Stroke::new(color, OUTLINE_WIDTH)),
+                        Shape::rect(rect.inflated(ring))
+                            .corners(radius + ring)
+                            .border(Stroke::new(color, ring)),
                     );
                 }
                 let disc = Shape::rect(rect).corners(radius);
                 ui.add_shape(if hollow {
-                    disc.border(Stroke::new(fill, HOLLOW_WIDTH))
+                    disc.border(Stroke::new(fill, ring))
                 } else {
                     disc.fill(fill)
                 });
             }
             GlyphShape::Arrow { turn } => {
-                let [a, b, apex] = self.arrow_vertices(turn);
-                ui.add_shape(
-                    Shape::triangle(a, b, apex)
-                        .radius(TRIANGLE_RADIUS)
-                        .fill(fill),
-                );
+                let [a, b, apex] = self.arrow_vertices(turn, corner);
+                ui.add_shape(Shape::triangle(a, b, apex).radius(corner).fill(fill));
             }
         }
     }
@@ -307,18 +295,18 @@ mod tests {
 
     #[test]
     fn enlarged_diameter_grows_by_the_outline_width_on_each_side() {
-        // 10 + 2 * 2.5: the ring's width on both sides.
+        // 10 + 2 * 2: the ring's width on both sides.
         assert_eq!(
-            enlarged_diameter(10.0),
-            15.0,
+            enlarged_diameter(10.0, 2.0),
+            14.0,
             "enlarged port matches an outlined circle's footprint"
         );
     }
 
     /// A 10-sided arrow sits in its 18-sided box (`HIT_SCALE` 1.8) at inset 4, its corners
     /// pulled in by the radius 2: (6, 6), (6, 12), and the apex at (12, 9), right of the center
-    /// (9, 9). The subscription pin turns it by `PI + FRAC_PI_4`; the `PI` half mirrors the apex
-    /// to (6, 9) across the center. Within 1e-5 there: `sin(PI)` in f32 is -8.7e-8, not 0.
+    /// (9, 9). A half turn mirrors the apex to (6, 9) across the center. Within 1e-5 there:
+    /// `sin(PI)` in f32 is -8.7e-8, not 0.
     #[test]
     fn an_arrow_points_right_and_a_half_turn_mirrors_it() {
         let arrow = Painted {
@@ -327,14 +315,14 @@ mod tests {
             fill: RgbaF32::WHITE,
         };
         assert_eq!(
-            arrow.arrow_vertices(0.0),
+            arrow.arrow_vertices(0.0, 2.0),
             [
                 Vec2::new(6.0, 6.0),
                 Vec2::new(6.0, 12.0),
                 Vec2::new(12.0, 9.0)
             ]
         );
-        let [a, b, apex] = arrow.arrow_vertices(PI);
+        let [a, b, apex] = arrow.arrow_vertices(PI, 2.0);
         for (got, expected) in [
             (a, Vec2::new(12.0, 12.0)),
             (b, Vec2::new(12.0, 6.0)),

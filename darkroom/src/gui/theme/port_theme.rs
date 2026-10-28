@@ -3,16 +3,16 @@
 use palantir::RgbaF32;
 
 use crate::gui::theme::palette::Palette;
+use crate::gui::theme::space_scale::SpaceScale;
 
 /// A node's ports: the circles straddling the body edge, their labels,
 /// and the column geometry that lays them out.
 ///
 /// Positional colors only — a *typed* port takes its hue from
-/// [`TypeColors`](crate::gui::theme::type_colors::TypeColors) instead,
-/// resolved by `gui::pane::graph_ui::node_ui::port_color`, which needs this
-/// roster and the type roster together and so stays a function over the
-/// whole [`Theme`](crate::gui::theme::Theme). Every color here is a
-/// resting one; the pointer lift is applied at that call site.
+/// [`TypeColors`](crate::gui::theme::type_colors::TypeColors) instead, resolved by
+/// [`Theme::port_color`](crate::gui::theme::Theme::port_color), which needs this roster and the
+/// type roster together. Every color here is a resting one; the pointer lift is applied at the
+/// call site.
 #[derive(Clone, Debug)]
 pub(crate) struct PortTheme {
     /// Color for an untyped (`Any`) input port. No output is untyped.
@@ -25,12 +25,16 @@ pub(crate) struct PortTheme {
     /// slot rather than `text_muted` at the call site: which of the row's
     /// three inks recedes is the interface's decision to change.
     pub(crate) label: RgbaF32,
-    /// Side of the port circle quad; the circle's radius is derived as half
-    /// this (see [`Self::radius`]).
+    /// Side of the port circle quad, 12: a whole number of pixels at scales 1, 1.5 and 2 at
+    /// 100 % zoom. The circle's radius is derived as half this (see [`Self::radius`]).
     pub(crate) size: f32,
-    /// Horizontal inset on each side of the ports row. Circles overhang by
-    /// `-Theme::port_overhang()` (which folds in this inset and the card
-    /// border) so their center sits on the body edge regardless of it.
+    /// Side of a port's dot in a row that lists ports, the inspector's: under [`Self::size`], as
+    /// a row is no place for a wire to land or a press to grab.
+    pub(crate) row_dot: f32,
+    /// Horizontal inset on each side of the ports row, where every port label starts: the header's
+    /// and footer's inset, so a label lines up with the title. Circles hang out by
+    /// `Theme::port_margin` (which folds in this inset and the card border)
+    /// so their center sits on the body edge regardless of it.
     pub(crate) col_pad_x: f32,
     /// The column's vertical rhythm, spent twice over: the inset below the
     /// header rule before the first port, and the gap between adjacent ports.
@@ -42,15 +46,16 @@ pub(crate) struct PortTheme {
 }
 
 impl PortTheme {
-    pub(super) const fn from_palette(p: &Palette) -> Self {
+    pub(super) const fn from_palette(p: &Palette, space: &SpaceScale) -> Self {
         Self {
             input: p.input_port,
             event: p.event_port,
             label: p.port_label,
-            size: 13.0,
-            col_pad_x: 8.0,
-            gap: 6.0,
-            cols_gap: 12.0,
+            size: 12.0,
+            row_dot: 10.0,
+            col_pad_x: space.md,
+            gap: space.sm,
+            cols_gap: space.md,
         }
     }
 

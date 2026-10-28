@@ -25,14 +25,14 @@ use crate::gui::widgets::hover::Hover;
 
 /// A node-keyed widget id under `tag`.
 pub(super) fn of_node(tag: &'static str, node_id: NodeId) -> WidgetId {
-    WidgetId::from_hash(("graph.node", tag, node_id))
+    WidgetId::from_hash(("darkroom.graph.node", tag, node_id))
 }
 
 /// A port-keyed widget id — [`of_node`] for the per-port widgets, keyed by side
 /// and index as well.
 pub(super) fn of_port(tag: &'static str, port: PortRef) -> WidgetId {
     WidgetId::from_hash((
-        "graph.node",
+        "darkroom.graph.node",
         tag,
         port.node_id,
         port.kind as u8,
@@ -43,7 +43,7 @@ pub(super) fn of_port(tag: &'static str, port: PortRef) -> WidgetId {
 /// An event-keyed widget id — [`of_node`] for the per-event widgets, keyed by
 /// the event's index as well.
 pub(super) fn of_event(tag: &'static str, event: EventPort) -> WidgetId {
-    WidgetId::from_hash(("graph.node", tag, event.node_id, event.event_idx))
+    WidgetId::from_hash(("darkroom.graph.node", tag, event.node_id, event.event_idx))
 }
 
 /// The node's outer body panel — probed by the wire breaker and the
@@ -51,6 +51,12 @@ pub(super) fn of_event(tag: &'static str, event: EventPort) -> WidgetId {
 /// response round-trips.
 pub(crate) fn body(node_id: NodeId) -> WidgetId {
     of_node("body", node_id)
+}
+
+/// A node's footer, under its ports. No widget takes a press in the middle of it, past the run
+/// status at its left, so a press there grabs the body.
+pub(crate) fn footer(node_id: NodeId) -> WidgetId {
+    of_node("footer", node_id)
 }
 
 /// A node's inline title-rename editor *and* its idle label, so the same id is
@@ -104,12 +110,12 @@ pub(super) fn inspect_button(node_id: NodeId) -> WidgetId {
 
 /// The hover and press target of `tie`'s band.
 pub(super) fn tie_body(tie: TieId) -> WidgetId {
-    WidgetId::from_hash(("graph.tie", "body", tie))
+    WidgetId::from_hash(("darkroom.graph.tie", "body", tie))
 }
 
 /// The knob of a selected `tie`.
 pub(super) fn tie_knob(tie: TieId) -> WidgetId {
-    WidgetId::from_hash(("graph.tie", "knob", tie))
+    WidgetId::from_hash(("darkroom.graph.tie", "knob", tie))
 }
 
 /// Every widget whose drag moves `node_id`'s body, in the order `NodeUi::draw_node` tries them.

@@ -23,7 +23,7 @@ impl Elapsed {
     /// read by the node footer's live timer and the inspector's status line.
     ///
     /// Stays within 7 characters up to `999999s` (decimals drop past `999.99s`),
-    /// which is what `RUN_TIME_MIN_WIDTH` in `gui::pane::graph_ui::node_ui::node_footer`
+    /// which is what `RUN_TIME_GLYPHS` in `gui::pane::graph_ui::node_ui::run_status`
     /// reserves so a running node's label measures identically across
     /// digit-count changes (see the test).
     pub(crate) const fn new(secs: f64) -> Self {

@@ -1,12 +1,11 @@
-//! Reusable inline-rename label. Renders plain text that swaps to a
-//! `TextEdit` hugging its text on double-click; Enter / focus-loss commits the
-//! edited string, Esc cancels. Used by the node-header title
-//! (`gui::pane::graph_ui::node_ui::header`), which maps the returned
-//! [`RenameEvent`] onto a `RenameNode` intent.
+//! Reusable inline-rename label. Renders plain text that swaps to a `TextEdit` hugging its text
+//! on double-click; Enter or focus loss commits the edited string, Esc cancels. The node header's
+//! title is its caller, which maps the returned [`RenameEvent`] onto a `RenameNode` intent.
 
-use palantir::prelude::*;
-
-use crate::gui::theme::inline_rename_theme::InlineRenameTheme;
+use palantir::{
+    Align, Configure, EditEnd, HAlign, Panel, Sense, Sizing, Spacing, Text, TextEdit,
+    TextEditTheme, Ui, VAlign, WidgetId,
+};
 
 /// Cross-frame state for one inline-rename editor, held in palantir's
 /// `StateMap` under the editor's `WidgetId`.
@@ -42,7 +41,7 @@ const MIN_EDIT_WIDTH: f32 = 40.0;
 pub(crate) struct InlineRename<'a> {
     wid: WidgetId,
     name: &'a str,
-    style: &'a InlineRenameTheme,
+    style: &'a TextEditTheme,
     /// The editor's character cap; none, as a `TextEdit` has, unless set.
     max_chars: Option<usize>,
     editing: Editing,
@@ -62,11 +61,10 @@ impl<'a> InlineRename<'a> {
     /// record under it, which is what keeps the draft alive across the swap — so it has to be
     /// stable per domain item (node id, port id, …).
     ///
-    /// Font, color and leading ride along inside the bundle's per-state
-    /// `text` slots, as they do for every palantir widget — to bold a title,
-    /// hand over a bundle built with [`InlineRenameTheme::with_text`]. An
+    /// Font, color and leading ride along inside the bundle's per-state `text` slots, as they do
+    /// for every palantir widget: a bold title hands over the theme's `flat_text_edit.bold`. An
     /// axis a slot leaves unset inherits ambient `palantir::Theme::text`.
-    pub(crate) const fn new(wid: WidgetId, name: &'a str, style: &'a InlineRenameTheme) -> Self {
+    pub(crate) const fn new(wid: WidgetId, name: &'a str, style: &'a TextEditTheme) -> Self {
         Self {
             wid,
             name,
@@ -105,7 +103,7 @@ impl<'a> InlineRename<'a> {
         // The label's text style: the bundle's resting slot over ambient —
         // `TextEdit` resolves its own the same way, so the two agree across
         // the swap by construction.
-        let text = theme.text_edit.looks.normal.text.apply(&ui.theme().text);
+        let text = theme.looks.normal.text.apply(&ui.theme().text);
         // Floor the height at one text line so an empty label still has
         // a clickable box (a `Hug` panel with no text would collapse to
         // zero height). Derived from the resolved text style so a bundle
@@ -116,7 +114,7 @@ impl<'a> InlineRename<'a> {
         // this, the panel grows by `caret_width` (and right-aligned
         // glyphs shift left by the same amount) on the swap to edit
         // mode, twitching the label one or two pixels.
-        let caret_room = theme.text_edit.caret_width.max(0.0);
+        let caret_room = theme.caret_width.max(0.0);
         // TextEdit's Hug single-line floor sets `min_size.w = text +
         // padding_horiz + 2 * caret_room` (see palantir
         // `text_edit/mod.rs::show`) and puts left-aligned text flush at its
@@ -172,7 +170,7 @@ impl<'a> InlineRename<'a> {
             // (`KeyClass::Text`) and Escape (`KeyClass::Escape`) — so polling
             // them here would see nothing, and the widget that consumed them
             // is the one that can report them anyway.
-            let mut edit = TextEdit::new(&mut st.draft).id(wid).style(&theme.text_edit);
+            let mut edit = TextEdit::new(&mut st.draft).id(wid).style(theme);
             if let Some(max_chars) = max_chars {
                 edit = edit.max_chars(max_chars);
             }

@@ -8,7 +8,7 @@
 //! and map to an [`AppCommand`], while the framing buttons emit an
 //! `GraphIntent::SetViewport` directly.
 
-use palantir::prelude::*;
+use palantir::{Align, Configure, HAlign, Panel, Sizing, Spacing, Ui, VAlign, WidgetId};
 
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::RunCommand;
@@ -72,7 +72,7 @@ pub(super) fn show(ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
                     .shortcut(shortcuts::RUN)
                     .toggled(Toggle::from(running))
                     .idle_glyph(theme.status.success)
-                    .toggled_fill(theme.status.busy)
+                    .ink(theme.status.busy)
                     .show_icon(ui, theme, Icon::Run)
                 {
                     out.push_app(AppCommand::Run(if running {
@@ -90,7 +90,7 @@ pub(super) fn show(ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
                 };
                 if Chip::new(events_button_wid(), events_tip)
                     .toggled(Toggle::from(event_loop_active))
-                    .toggled_fill(theme.status.busy)
+                    .ink(theme.status.busy)
                     .show_icon(ui, theme, Icon::RunEvents)
                 {
                     out.push_app(AppCommand::Run(if event_loop_active {

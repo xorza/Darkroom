@@ -12,7 +12,8 @@ use std::io;
 use std::path::PathBuf;
 
 use common::is_debug;
-use palantir::{Image, UVec2, WindowConfig, WinitHost, WinitHostError};
+use glam::UVec2;
+use palantir::{Image, WindowConfig, WinitHost, WinitHostError};
 use tracing_subscriber::Layer as _;
 use tracing_subscriber::layer::SubscriberExt as _;
 use tracing_subscriber::util::SubscriberInitExt as _;
@@ -147,7 +148,7 @@ mod alloc_audit;
 
 #[cfg(test)]
 mod tests {
-    use palantir::UVec2;
+    use glam::UVec2;
 
     use crate::load_icon;
 

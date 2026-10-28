@@ -1,25 +1,28 @@
 //! The palantir-side half of the theme: darkroom's palette projected onto
 //! [`palantir::Palette`], and the [`palantir::Theme`] that builds.
 
-use glam::Vec2;
 use palantir::{
-    ButtonTheme, Chrome, CloseShown, Corners, RgbaF32, Spacing, StatefulLook, Stroke,
+    ButtonTheme, Chrome, CloseShown, RadiusSteps, RgbaF32, SpaceSteps, Stroke, StrokeSteps,
     TextStyleOverrides, WidgetLook,
 };
 
+use crate::gui::theme::color;
+use crate::gui::theme::elevation_scale::ElevationScale;
+use crate::gui::theme::icon_scale::IconScale;
 use crate::gui::theme::palette::Palette;
 use crate::gui::theme::radius_scale::RadiusScale;
 use crate::gui::theme::space_scale::SpaceScale;
+use crate::gui::theme::stroke_scale::StrokeScale;
 use crate::gui::theme::type_scale::TypeScale;
 use crate::gui::widgets::icon;
 
 /// darkroom's roles as the [`palantir::Palette`] that
-/// [`palantir::Theme::from_palette`] wants, so every widget palantir paints
+/// [`palantir::Theme::from_parts`] wants, so every widget palantir paints
 /// reads the same palette as darkroom's own widgets. Two notes on the
 /// mapping:
 /// - `window_bg` is the window clear and the selected tab chip —
 ///   the graph canvas, so a chip dissolves into the pane below it.
-/// - `element` and `node_fill` are one color by design: nodes and
+/// - `element` and `node_bg` are one color by design: nodes and
 ///   palantir's own surfaces sit on the same tier.
 pub(super) const fn palette(p: &Palette) -> palantir::Palette {
     palantir::Palette {
@@ -27,116 +30,102 @@ pub(super) const fn palette(p: &Palette) -> palantir::Palette {
         text_muted: p.text_muted,
         text_disabled: p.text_disabled,
         window_bg: p.canvas_bg,
-        element: p.node_fill,
-        element_mid: p.elem_hover,
-        element_strong: p.elem_active,
-        border_focused: p.border_focused,
-        accent: p.selection_rect,
+        element: p.node_bg,
+        element_mid: p.element_mid,
+        element_strong: p.element_strong,
+        // The accent, 5.19:1 on a node, where a darker blue read 1.99:1 on a field's fill,
+        // under the 3:1 WCAG 1.4.11 asks of a focus indicator.
+        border_focused: p.accent,
+        accent: p.accent,
     }
 }
 
-/// The darkroom colors the bridge needs past the palette projection —
-/// the roles whose palantir counterpart lands on a different rung than
-/// darkroom wants.
-///
-/// A bundle rather than five parameters: two of them are `RgbaF32`, so
-/// they swap and still compile.
+/// What the bridge needs past the palette projection: the surround, whose palantir counterpart
+/// lands on another rung than darkroom wants, and the theme's scales. A bundle rather than seven
+/// parameters.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct BridgeRoles<'a> {
     /// The band the menu bar, the status bar and every tab strip sit on.
-    pub(super) surround_fill: RgbaF32,
-    /// The selection cap on a strip that does not hold focus.
-    pub(super) header_fill: RgbaF32,
-    pub(super) text: &'a TypeScale,
+    pub(super) surround_bg: RgbaF32,
+    pub(super) font: &'a TypeScale,
     pub(super) space: &'a SpaceScale,
-    /// The tab chip is a card; menus and the modal float; the rest are controls.
     pub(super) radius: &'a RadiusScale,
+    pub(super) stroke: &'a StrokeScale,
+    pub(super) icon: &'a IconScale,
+    pub(super) elevation: &'a ElevationScale,
 }
 
-/// Palantir sub-theme for darkroom: assemble every widget recipe from
-/// the palette via [`palantir::Theme::from_palette`], then apply the
-/// darkroom-only tweaks (the type scale's body as the ambient text,
-/// surround-colored dock seam, darkroom's own tab chips).
+impl BridgeRoles<'_> {
+    /// The theme's steps as palantir's recipes read them, so a palantir control lines up with a
+    /// darkroom one: a field and a button beside it share one height, a menu rounds and casts as
+    /// every floating surface does, and a tab chip rounds as a card.
+    pub(super) const fn metrics(&self) -> palantir::Metrics {
+        let Self {
+            space,
+            radius,
+            stroke,
+            elevation,
+            ..
+        } = *self;
+        palantir::Metrics {
+            space: SpaceSteps {
+                xs: space.xs,
+                sm: space.sm,
+                md: space.md,
+                lg: space.lg,
+                xl: space.xl,
+            },
+            radius: RadiusSteps {
+                mark: radius.mark,
+                control: radius.control,
+                card: radius.card,
+                float: radius.float,
+            },
+            stroke: StrokeSteps {
+                hairline: stroke.hairline,
+                fine: stroke.fine,
+                line: stroke.line,
+            },
+            float_shadow: elevation.floating,
+        }
+    }
+}
+
+/// Palantir sub-theme for darkroom: assemble every widget recipe from the palette and `m` via
+/// [`palantir::Theme::from_parts`], then apply the darkroom-only tweaks (the type scale's body as
+/// the ambient text, surround-colored dock seam, darkroom's own tab chips, a wider menu).
 ///
 /// The ambient size is [`TypeScale::body`], and no widget look pins a size
 /// of its own: a palantir widget then reads the tier every darkroom label
 /// at that prominence reads, rather than palantir's 16 px default.
-pub(super) fn theme(p: &palantir::Palette, r: BridgeRoles<'_>) -> palantir::Theme {
-    let BridgeRoles {
-        surround_fill,
-        text,
-        space,
-        radius,
-        ..
-    } = r;
-    let mut theme = palantir::Theme::from_palette(p);
+pub(super) fn theme(
+    p: &palantir::Palette,
+    m: &palantir::Metrics,
+    r: BridgeRoles<'_>,
+) -> palantir::Theme {
+    let mut theme = palantir::Theme::from_parts(p, m);
 
     // Dock splitter: the resting seam paints the surround band that frames
     // the panes, so the gap reads as part of that surround rather than a
     // dark line (hovered/active fill still marks the grab target); a wider
     // seam does the visual separation.
-    theme.splitter.rule = surround_fill;
-    theme.splitter.rule_thickness = 4.0;
+    theme.splitter.rule = r.surround_bg;
+    theme.splitter.rule_thickness = m.space.xs;
 
     tab_roles(&mut theme, p, r);
 
-    theme.text = theme.text.with_font_size(text.body);
+    theme.text = theme.text.with_font_size(r.font.body);
     theme.tooltip.text = TextStyleOverrides::NONE;
-    scales(&mut theme, space, radius);
-    menu(&mut theme, p, space);
-    theme
-}
-
-/// A menu as the review drew it: the hint a gutter from its label, and a panel that floats on a
-/// soft shadow inside a rule in the separators' ink, not on palantir's lit border. Its 32 px rows
-/// are the [`row_inset`].
-const fn menu(theme: &mut palantir::Theme, p: &palantir::Palette, space: &SpaceScale) {
     let menu = &mut theme.context_menu;
-    menu.item.gap = space.xl;
     menu.min_width = MENU_MIN_WIDTH;
-    menu.panel.border = Stroke::new(p.border_soft(), 1.0);
-    menu.panel.shadow.offset = Vec2::new(0.0, space.sm);
-    menu.panel.shadow.blur = space.lg;
+    // The panel sits inside a rule in the separators' ink, not on palantir's lit border.
+    menu.panel.border.color = p.border_soft();
+    theme
 }
 
 /// A menu's width floor: room for "Save As…" and its Ctrl+Shift+S hint a gutter apart, so the
 /// File, Edit and Graph menus open one width and a short menu does not read as a pill.
 const MENU_MIN_WIDTH: f32 = 240.0;
-
-/// The inset of a row a pointer picks from: a menu item, a menu-bar title and a tab are one row,
-/// so one height at the body size, 32 px.
-fn row_inset(space: &SpaceScale) -> Spacing {
-    Spacing::xy(space.md, space.sm)
-}
-
-/// The theme's spacing steps and radii over palantir's own literals, so a palantir control
-/// lines up with a darkroom one: a field and a button beside it share one height, and a menu
-/// rounds like every other floating surface.
-fn scales(theme: &mut palantir::Theme, space: &SpaceScale, radius: &RadiusScale) {
-    let control = Spacing::xy(space.sm, space.xs);
-    theme.button.defaults.padding = Spacing::xy(space.md, space.xs);
-    theme.text_edit.defaults.padding = control;
-    theme.context_menu.padding = Spacing::all(space.xs);
-    theme.tooltip.padding = control;
-    theme.context_menu.item.defaults.padding = row_inset(space);
-    theme.tabs.chip_padding = row_inset(space);
-    theme.modal.padding = Spacing::all(space.xl);
-
-    let round = |look: &mut StatefulLook, r: f32| {
-        for state in look.each_mut() {
-            state.chrome.corners = Corners::all(r);
-        }
-    };
-    round(&mut theme.button.looks, radius.control);
-    round(&mut theme.text_edit.looks, radius.control);
-    round(&mut theme.context_menu.item.looks, radius.control);
-    theme.tooltip.panel.corners = Corners::all(radius.control);
-    theme.context_menu.panel.corners = Corners::all(radius.float);
-    theme.modal.panel.corners = Corners::all(radius.float);
-}
-
-/// The lift around the close button's icon box, each side.
-const CLOSE_LIFT: f32 = 3.0;
 
 /// A chip's width floor: its padding, label gap, close box and trailing inset take 42 px, so 64
 /// leaves a short name room.
@@ -144,70 +133,60 @@ const TAB_MIN_WIDTH: f32 = 64.0;
 
 /// Darkroom's own tab chips over palantir's recipe.
 ///
-/// Palantir derives its strip from the palette alone, which lands the
-/// band on `element`, the idle cap on `element_strong` and every chip on a
-/// fill. Darkroom wants the strip to continue the surround band the menu bar
-/// rides, ghost chips and close buttons as its other controls are, and the
-/// spacing and radius scales every other surface uses.
+/// Palantir puts the strip on no band, the idle cap on `element_strong` and
+/// every chip on a fill. Darkroom wants the strip to continue the surround band
+/// the menu bar rides, and ghost chips and close buttons as its other controls
+/// are.
 fn tab_roles(theme: &mut palantir::Theme, p: &palantir::Palette, r: BridgeRoles<'_>) {
-    let BridgeRoles {
-        surround_fill,
-        header_fill,
-        text,
-        space,
-        radius,
-    } = r;
     let tabs = &mut theme.tabs;
-    tabs.strip = Chrome::fill(surround_fill);
-    tabs.strip_padding = Spacing::new(space.sm, space.xs, space.sm, 0.0);
-    tabs.gap = space.xs;
-    tabs.label_gap = space.sm;
-    tabs.trailing_inset = space.xs;
+    tabs.strip = Chrome::fill(r.surround_bg);
     tabs.min_width = TAB_MIN_WIDTH;
-    tabs.radius = radius.card;
-    tabs.cap_unfocused = header_fill;
     // An unselected chip is a ghost with a menu title's fills, as the two share the surround: no
     // fill at rest, `element_mid` under the pointer, `element_strong` pressed. The selected chip
     // keeps palantir's `window_bg` fill, which is darkroom's canvas: its bottom edge dissolves
     // into the pane below.
-    let top = Corners::top(radius.card);
-    let chip = |fill: RgbaF32| Chrome::rounded(fill, top);
     // Destructured, so a state palantir adds fails here rather than keeping its default.
     let [normal, hovered, active, disabled] = tabs.unselected.each_mut();
     normal.chrome = Chrome::NONE;
-    normal.text = TextStyleOverrides::NONE.with_color(p.text_muted);
-    hovered.chrome = chip(p.element_mid);
+    hovered.chrome.fill = p.element_mid.into();
     hovered.text = TextStyleOverrides::NONE;
-    active.chrome = chip(p.element_strong);
-    active.text = TextStyleOverrides::NONE;
+    active.chrome.fill = p.element_strong.into();
     disabled.chrome = Chrome::NONE;
-    disabled.text = TextStyleOverrides::NONE.with_color(p.text_disabled);
 
     // The close button is the icon set's `Cross`, so it strokes as every icon does, on a
     // control-rounded lift. It shows on the selected chip and the chip under the pointer, as VS
     // Code's and Zed's strips do. Its lift is the top rung, the one fill that shows on a hovered
     // chip as on the canvas-filled selected one, pressed or not.
-    // The icon box is the label tier's, as a node footer's status icon is.
-    let close_icon = text.label;
-    tabs.close_size = close_icon + 2.0 * CLOSE_LIFT;
-    tabs.close_glyph = icon::cross_span(close_icon);
-    tabs.close_stroke = icon::stroke_width(close_icon);
+    // The icon box is the inline tier's, as a node footer's status icon is.
+    let close = r.icon.inline;
+    tabs.close_size = close.side();
+    tabs.close_glyph = icon::cross_span(close.icon);
+    tabs.close_stroke = icon::stroke_width(close.icon);
     tabs.close_shown = CloseShown::SelectedOrHovered;
-    let lift = |fill: RgbaF32| Chrome::rounded(fill, Corners::all(radius.control));
-    let [normal, hovered, active, disabled] = tabs.close.each_mut();
-    normal.chrome = Chrome::NONE;
-    normal.text = TextStyleOverrides::NONE.with_color(p.text_muted);
-    hovered.chrome = lift(p.element_strong);
-    hovered.text = TextStyleOverrides::NONE;
-    active.chrome = lift(p.element_strong);
-    active.text = TextStyleOverrides::NONE;
-    disabled.chrome = Chrome::NONE;
-    disabled.text = TextStyleOverrides::NONE.with_color(p.text_disabled);
+    tabs.close.active.chrome.border = Stroke::NONE;
 
     // The ghost chip trailing the pointer wears the surround band, so it
     // reads as a tab lifted off its strip rather than as a popup.
-    theme.dock.ghost.chrome = Chrome::rounded(surround_fill, Corners::all(radius.card))
-        .with_border(Stroke::new(p.accent, 1.0));
+    theme.dock.ghost.chrome.fill = r.surround_bg.into();
+}
+
+/// A menu-bar trigger's two looks, built beside each other so they cannot drift.
+#[derive(Clone, Debug)]
+pub(crate) struct MenuButtonLooks {
+    /// The trigger whose menu is shut.
+    pub(crate) shut: ButtonTheme,
+    /// The trigger whose menu is open: lit at rest as when hovered, as macOS, Windows and GNOME
+    /// light the title of the open menu.
+    pub(crate) open: ButtonTheme,
+}
+
+impl MenuButtonLooks {
+    pub(super) fn new(p: &palantir::Palette, m: &palantir::Metrics) -> Self {
+        let shut = menu_button(p, m);
+        let mut open = shut.clone();
+        open.looks.normal = open.looks.hovered.clone();
+        Self { shut, open }
+    }
 }
 
 /// Menu-bar trigger look: palantir's [`ButtonTheme::menu_button`] recipe
@@ -215,15 +194,10 @@ fn tab_roles(theme: &mut palantir::Theme, p: &palantir::Palette, r: BridgeRoles<
 /// overlay) with the label muted until hovered — so a trigger reads as a
 /// menu, not as a button.
 ///
-/// A darkroom slot rather than a `palantir::Theme` field because no
-/// palantir widget resolves against a menu-bar style: the bar hands this
-/// to [`palantir::Button::style`] at the call site.
-///
-/// Pins color and the [`row_inset`]; every other axis inherits the ambient
-/// style an unstyled label would have.
-pub(super) fn menu_button(p: &palantir::Palette, space: &SpaceScale) -> ButtonTheme {
-    let mut mb = ButtonTheme::menu_button(p);
-    mb.defaults.padding = row_inset(space);
+/// Pins color; every other axis inherits the ambient style an unstyled label
+/// would have.
+fn menu_button(p: &palantir::Palette, m: &palantir::Metrics) -> ButtonTheme {
+    let mut mb = ButtonTheme::menu_button(p, m);
     let restyle = |look: &mut WidgetLook, color: RgbaF32| {
         look.text = look.text.with_color(color);
     };
@@ -235,9 +209,22 @@ pub(super) fn menu_button(p: &palantir::Palette, space: &SpaceScale) -> ButtonTh
     mb
 }
 
-/// `menu_button` with its resting look the hovered one, for the trigger whose menu is open.
-pub(super) fn menu_button_open(menu_button: &ButtonTheme) -> ButtonTheme {
-    let mut open = menu_button.clone();
-    open.looks.normal = open.looks.hovered.clone();
-    open
+/// A dialog's primary action: palantir's button recipe filled with the accent and its label in
+/// the window's ground ink, as `menu_button` derives the menu bar's from palantir's. Under the
+/// pointer it lifts as a port does; pressed, it drops back to the accent.
+pub(super) fn primary_button(p: &palantir::Palette, m: &palantir::Metrics) -> ButtonTheme {
+    let mut button = ButtonTheme::from_parts(p, m);
+    let on_accent = TextStyleOverrides::NONE.with_color(p.window_bg);
+    // Destructured, so a state palantir adds fails here rather than keeping its default.
+    let [normal, hovered, active, _disabled] = button.looks.each_mut();
+    for (look, fill) in [
+        (normal, p.accent),
+        (hovered, color::hover_lift(p.accent)),
+        (active, p.accent),
+    ] {
+        look.chrome.fill = fill.into();
+        look.chrome.border.color = fill;
+        look.text = on_accent;
+    }
+    button
 }

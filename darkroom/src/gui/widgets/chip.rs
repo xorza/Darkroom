@@ -1,25 +1,23 @@
 //! [`Chip`]: the square glyph button a toolbar pill carries.
 
-use palantir::TextInput;
-use palantir::prelude::*;
+use palantir::{
+    Chrome, Configure, Corners, Panel, Rect, RgbaF32, Sense, Shortcut, Sizing, TextInput, Ui,
+    WidgetId, fmt,
+};
 
 use crate::gui::theme::Theme;
-use crate::gui::widgets::icon;
 use crate::gui::widgets::icon::Icon;
 use crate::gui::widgets::support;
 use crate::gui::widgets::toggle::Toggle;
 
-/// Side of an [`Icon`] inside the button: 18 px on its 24-unit grid strokes at 1.5 px.
-const ICON_SIZE: f32 = 18.0;
-/// Side of each square button: the icon and [`icon::BUTTON_INSET`] around it.
-const BUTTON_SIZE: f32 = ICON_SIZE + 2.0 * icon::BUTTON_INSET;
-
 /// One square chip button riding a group pill: an opaque rounded chip
 /// whose icon is painted by a caller closure, with a hover tooltip.
-/// Momentary by default — neutral fill lifting on hover, muted glyph;
-/// [`toggled`](Self::toggled) turns it into a toggle whose active state
-/// inverts the chip (accent fill under a dark glyph). Builder chain
-/// ending in [`show`](Self::show), like an palantir widget.
+/// Momentary by default — neutral fill lifting on hover, a muted glyph that lights in the chip's
+/// ink under the pointer; [`toggled`](Self::toggled) turns it into a toggle whose active state is
+/// a wash of its ink under a glyph in that ink, as an [`IconButton`]'s is. Builder chain ending in
+/// [`show`](Self::show), like a palantir widget.
+///
+/// [`IconButton`]: crate::gui::widgets::icon_button::IconButton
 #[derive(Debug)]
 pub(crate) struct Chip {
     wid: WidgetId,
@@ -27,7 +25,7 @@ pub(crate) struct Chip {
     shortcut: Option<Shortcut>,
     toggled: Toggle,
     idle_glyph: Option<RgbaF32>,
-    toggled_fill: Option<RgbaF32>,
+    ink: Option<RgbaF32>,
 }
 
 impl Chip {
@@ -38,7 +36,7 @@ impl Chip {
             shortcut: None,
             toggled: Toggle::Off,
             idle_glyph: None,
-            toggled_fill: None,
+            ink: None,
         }
     }
 
@@ -48,35 +46,38 @@ impl Chip {
         self
     }
 
-    /// Toggle state: while [`Toggle::On`] the chip inverts — the toggled fill
-    /// under a dark glyph. Default [`Toggle::Off`] (a momentary action chip).
+    /// Toggle state: while [`Toggle::On`] the chip takes a wash of its ink under a glyph in it.
+    /// Default [`Toggle::Off`] (a momentary action chip).
     pub(crate) const fn toggled(mut self, state: Toggle) -> Self {
         self.toggled = state;
         self
     }
 
-    /// Glyph ink while idle (untoggled). Default: `text_muted`.
+    /// Glyph ink while idle (untoggled), at rest and under the pointer. Default: `text_muted`,
+    /// lighting in the chip's ink under the pointer.
     pub(crate) const fn idle_glyph(mut self, color: RgbaF32) -> Self {
         self.idle_glyph = Some(color);
         self
     }
 
-    /// Chip fill while toggled. Default: the selection accent.
-    pub(crate) const fn toggled_fill(mut self, color: RgbaF32) -> Self {
-        self.toggled_fill = Some(color);
+    /// The chip's ink: its glyph while on or under the pointer, and the wash behind it while on.
+    /// Default: the accent.
+    pub(crate) const fn ink(mut self, color: RgbaF32) -> Self {
+        self.ink = Some(color);
         self
     }
 
     /// [`Self::show`] with `icon` centered in the button.
     pub(crate) fn show_icon(self, ui: &mut Ui, theme: &Theme, icon: Icon) -> bool {
-        self.show(ui, theme, |ui, s, color| {
-            let inset = (s - ICON_SIZE) * 0.5;
-            icon.draw(ui, Rect::new(inset, inset, ICON_SIZE, ICON_SIZE), color);
+        let toolbar = theme.icon.toolbar;
+        self.show(ui, theme, |ui, _, color| {
+            let (inset, side) = (toolbar.inset, toolbar.icon);
+            icon.draw(ui, Rect::new(inset, inset, side, side), color);
         })
     }
 
     /// Draw the chip: state-dependent fill, the icon painted centered in
-    /// the `BUTTON_SIZE` box by `draw_glyph`, and the hover tooltip.
+    /// the toolbar icon box by `draw_glyph`, and the hover tooltip.
     /// Returns whether it was clicked this frame.
     pub(crate) fn show(
         self,
@@ -85,23 +86,20 @@ impl Chip {
         draw_glyph: impl FnOnce(&mut Ui, f32, RgbaF32),
     ) -> bool {
         let hovered = ui.response_for(self.wid).hovered();
-        // Glyph and fill vary on different axes: the glyph only inverts
-        // for the toggled state, the fill also lifts on hover.
+        let ink = self.ink.unwrap_or(theme.colors.accent);
         let (glyph, fill) = match self.toggled {
-            Toggle::On => (
-                theme.colors.surround_fill,
-                self.toggled_fill.unwrap_or(theme.colors.selection_rect),
-            ),
-            Toggle::Off => (
-                self.idle_glyph.unwrap_or(theme.colors.text_muted),
-                if hovered {
-                    theme.card.header_fill
+            Toggle::On => (ink, theme.on_fill(ink, hovered)),
+            Toggle::Off => {
+                let lit = if hovered { ink } else { theme.ink.muted };
+                let fill = if hovered {
+                    theme.card.lift
                 } else {
                     theme.card.fill
-                },
-            ),
+                };
+                (self.idle_glyph.unwrap_or(lit), fill)
+            }
         };
-        let s = BUTTON_SIZE;
+        let s = theme.icon.toolbar.side();
         let button = Panel::zstack()
             .id(self.wid)
             .size((Sizing::fixed(s), Sizing::fixed(s)))

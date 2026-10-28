@@ -177,3 +177,37 @@ fn the_pieces_share_the_ramp_by_chord_length() {
     assert_eq!(shares(&pieces[2..]).collect::<Vec<_>>(), [0.0..1.0]);
     assert_eq!(shares(&pieces).len(), 3);
 }
+
+/// A cut wire's bar sits halfway along its length, square to it: a level wire from (0, 0) to
+/// (200, 0) is straight, so its middle is (100, 0), running along x; split at (120, 0) into two
+/// level pieces, 120 and 80 long, its middle is still 100 along. Within a chord the parameter
+/// runs linearly while the curve's speed does not, so the split middle lands within 0.02 px, a
+/// fiftieth of a pixel, under what any screen shows.
+#[test]
+fn a_wires_middle_is_halfway_along_its_length() {
+    let middle = Middle::of(&[Wire::data(Vec2::ZERO, Vec2::new(200.0, 0.0))]).expect("a length");
+    assert!(
+        middle.at.abs_diff_eq(Vec2::new(100.0, 0.0), 1e-3),
+        "{:?}",
+        middle.at
+    );
+    assert_eq!(middle.dir, Vec2::X);
+    let split = [
+        Wire::data(Vec2::ZERO, Vec2::new(120.0, 0.0)),
+        Wire::data(Vec2::new(120.0, 0.0), Vec2::new(200.0, 0.0)),
+    ];
+    let middle = Middle::of(&split).expect("a length");
+    assert!(
+        middle.at.abs_diff_eq(Vec2::new(100.0, 0.0), 0.02),
+        "{:?}",
+        middle.at
+    );
+    assert_eq!(middle.dir, Vec2::X);
+    let point = Wire {
+        p0: Vec2::ONE,
+        p1: Vec2::ONE,
+        p2: Vec2::ONE,
+        p3: Vec2::ONE,
+    };
+    assert!(Middle::of(&[point]).is_none(), "no length, no middle");
+}

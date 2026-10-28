@@ -2,45 +2,60 @@
 //! per-widget rosters hanging off it.
 //!
 //! Every color comes from [`Palette`], read out of the generated
-//! `assets/ayu-graphite.ron`. Each per-widget roster owns a file and fills
-//! itself from that palette through its own `from_palette`. The palantir-side
-//! half lives in [`palantir_bridge`].
+//! `assets/ayu-graphite.ron`, and every size from a scale: type, space, radius, stroke, icon,
+//! elevation and tint. Each roster owns a file and builds from the palette and the scales it
+//! reads. The palantir-side half lives in [`palantir_bridge`].
 
 pub(crate) mod app_colors;
+pub(crate) mod badge_colors;
 pub(crate) mod canvas_theme;
 pub(crate) mod card_theme;
 pub(crate) mod color;
 pub(crate) mod const_editor_theme;
-pub(crate) mod inline_rename_theme;
+pub(crate) mod elevation_scale;
+pub(crate) mod flat_text_edit;
+pub(crate) mod icon_scale;
+pub(crate) mod inks;
 pub(crate) mod palantir_bridge;
 pub(crate) mod palette;
 pub(crate) mod port_theme;
 pub(crate) mod radius_scale;
 pub(crate) mod space_scale;
 pub(crate) mod status_colors;
+pub(crate) mod stroke_scale;
 pub(crate) mod tie_theme;
+pub(crate) mod tint_scale;
 pub(crate) mod type_colors;
 pub(crate) mod type_scale;
+pub(crate) mod viewer_theme;
 
-use palantir::{ButtonTheme, FontWeight, RgbaF32, Stroke, TextEditTheme, TextStyleOverrides};
+use palantir::{ButtonTheme, Chrome, Corners, RgbaF32, Spacing, Stroke, TextEditTheme};
 
 use scenarium::DataType;
 
+use crate::gui::port_ref::PortKind;
 use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::app_colors::AppColors;
+use crate::gui::theme::badge_colors::BadgeColors;
 use crate::gui::theme::canvas_theme::CanvasTheme;
 use crate::gui::theme::card_theme::CardTheme;
-use crate::gui::theme::const_editor_theme::ConstEditorTheme;
-use crate::gui::theme::inline_rename_theme::InlineRenameTheme;
-use crate::gui::theme::palantir_bridge::BridgeRoles;
+use crate::gui::theme::const_editor_theme::ConstEditorLooks;
+use crate::gui::theme::elevation_scale::ElevationScale;
+use crate::gui::theme::flat_text_edit::FlatTextEdit;
+use crate::gui::theme::icon_scale::IconScale;
+use crate::gui::theme::inks::Inks;
+use crate::gui::theme::palantir_bridge::{BridgeRoles, MenuButtonLooks};
 use crate::gui::theme::palette::Palette;
 use crate::gui::theme::port_theme::PortTheme;
 use crate::gui::theme::radius_scale::RadiusScale;
 use crate::gui::theme::space_scale::SpaceScale;
 use crate::gui::theme::status_colors::StatusColors;
+use crate::gui::theme::stroke_scale::StrokeScale;
 use crate::gui::theme::tie_theme::TieTheme;
+use crate::gui::theme::tint_scale::TintScale;
 use crate::gui::theme::type_colors::TypeColors;
 use crate::gui::theme::type_scale::TypeScale;
+use crate::gui::theme::viewer_theme::ViewerTheme;
 
 /// Visual palette + layout dimensions for darkroom's UI. Owned by `App`,
 /// handed to every UI subtree through [`crate::gui::frame::app_ctx::AppCtx`] and the
@@ -60,17 +75,8 @@ use crate::gui::theme::type_scale::TypeScale;
 /// file.
 #[derive(Clone, Debug)]
 pub(crate) struct Theme {
-    /// Stroke width of every mark drawn on the canvas at wire scale: the
-    /// wires themselves, the in-flight drag preview, the subscription pin's
-    /// leader, and the breaker scribble that cuts them — one width so the
-    /// blade reads at the same weight as what it severs.
-    pub(crate) stroke_width: f32,
-    /// Cap on the new-node popup's height. Inner scroll handles
-    /// overflow when the function list exceeds the cap.
-    pub(crate) new_node_popup_max_height: f32,
-
     /// Font sizes by hierarchy tier.
-    pub(crate) text: TypeScale,
+    pub(crate) font: TypeScale,
 
     /// The spacing steps every padding, gap and margin reads.
     pub(crate) space: SpaceScale,
@@ -78,17 +84,30 @@ pub(crate) struct Theme {
     /// Corner radii by the kind of surface.
     pub(crate) radius: RadiusScale,
 
+    /// Line widths by what the line is.
+    pub(crate) stroke: StrokeScale,
+
+    /// Icon boxes by where the icon sits.
+    pub(crate) icon: IconScale,
+
+    /// Shadows by how far a surface sits above the canvas.
+    pub(crate) elevation: ElevationScale,
+
+    /// The strengths a wash takes.
+    pub(crate) tint: TintScale,
+
     /// The graph canvas and its dotted backdrop.
     pub(crate) canvas: CanvasTheme,
 
     /// A wire tie's band.
     pub(crate) tie: TieTheme,
+    pub(crate) viewer: ViewerTheme,
 
-    /// Elevated rounded surfaces — node bodies and dock tabs.
+    /// Elevated rounded surfaces — node bodies and inspector cards.
     pub(crate) card: CardTheme,
 
     /// A node's ports: circles, label ink, column geometry.
-    pub(crate) ports: PortTheme,
+    pub(crate) port: PortTheme,
 
     /// The semantic feedback palette — success / info / busy / warning /
     /// error.
@@ -97,44 +116,34 @@ pub(crate) struct Theme {
     /// The colors belonging to no single widget.
     pub(crate) colors: AppColors,
 
+    /// The text inks.
+    pub(crate) ink: Inks,
+
+    /// What a node's head says about itself.
+    pub(crate) badge: BadgeColors,
+
     /// Data-type → wire/port hue roster (see [`TypeColors`]).
     pub(crate) type_colors: TypeColors,
 
-    /// Look + dimensions for the inline const editor that hugs a
-    /// `Binding::Const` input port (number/string field, file-pick chip).
-    pub(crate) const_editor: ConstEditorTheme,
+    /// The inline const editor that hugs a `Binding::Const` input port, at rest and with the
+    /// pointer over its node.
+    pub(crate) const_editor: ConstEditorLooks,
 
-    /// The pointer-over-node variant of `const_editor` (chip fill
-    /// pre-lit at half the hover strength). Precomputed at construction —
-    /// deriving it per frame would clone the whole nested theme in the
-    /// record path — and kept next to its base so the pair can't drift.
-    pub(crate) const_editor_revealed: ConstEditorTheme,
+    /// A text edit that reads as plain text: a node title's rename, the palette's search field.
+    pub(crate) flat_text_edit: FlatTextEdit,
 
-    /// Look for the inline-rename widget. Text is left unset, so a rename
-    /// inherits ambient `palantir::Theme::text` like any other label.
-    pub(crate) inline_rename: InlineRenameTheme,
+    /// palantir's text edit with every state's border in the error color: a field whose value is
+    /// broken, as a preferences path that names no file. Precomputed, so a broken field costs no
+    /// theme clone per frame.
+    pub(crate) field_error: TextEditTheme,
 
-    /// The node-title variant of `inline_rename`, with the ambient text
-    /// style pinned to [`FontWeight::BOLD`] on every state. Precomputed
-    /// at construction, beside its base so the two can't drift — a node
-    /// header would otherwise rebuild the whole nested text-edit bundle
-    /// per node per frame just to carry one weight.
-    pub(crate) inline_rename_title: InlineRenameTheme,
+    /// A menu-bar trigger, shut and open. Darkroom's own slot: no palantir widget resolves
+    /// against a menu-bar style, so the bar passes it to [`palantir::Button::style`] itself.
+    pub(crate) menu_button: MenuButtonLooks,
 
-    /// The preferences path field's look while its committed path is broken:
-    /// palantir's text edit with every state's border in the error color.
-    /// Precomputed at construction like `const_editor_revealed`, so a
-    /// broken path costs no theme clone per frame.
-    pub(crate) path_field_error: TextEditTheme,
-
-    /// Look for a menu-bar trigger button. Darkroom's own slot: palantir
-    /// ships the recipe but no theme field, because none of its widgets
-    /// resolve against a menu-bar style — the bar passes this to
-    /// [`palantir::Button::style`] itself.
-    pub(crate) menu_button: ButtonTheme,
-    /// [`Self::menu_button`] while its menu is open: lit at rest as when hovered, as macOS,
-    /// Windows and GNOME light the title of the open menu.
-    pub(crate) menu_button_open: ButtonTheme,
+    /// A dialog's primary action, the one Return picks: palantir's button filled with the accent.
+    /// Darkroom's own slot, as no palantir widget resolves against it.
+    pub(crate) primary_button: ButtonTheme,
 
     /// Palantir-side widget theme. Pushed onto `Ui::theme` once at
     /// startup so every palantir widget (Button, `TextEdit`, `MenuItem`,
@@ -142,6 +151,9 @@ pub(crate) struct Theme {
     /// call site restyling per use.
     pub(crate) palantir: palantir::Theme,
 }
+
+/// [`Theme::row_height`] in body sizes.
+const ROW_HEIGHT_EM: f32 = 2.0;
 
 /// How a selectable card's outline resolves, highest first: a breaker hit
 /// reads as the alarm, else the selection halo, else the neutral resting
@@ -154,24 +166,6 @@ pub(crate) enum CardTier {
 }
 
 impl Theme {
-    /// `ink` at `alpha` over the canvas, made opaque, composited on the sRGB-encoded values as
-    /// CSS and the design tools composite. A wash's alpha is a designer's, picked in that space:
-    /// palantir blends in linear light, where a 10 % wash of a light ink lands about three times
-    /// as bright.
-    pub(crate) fn wash(&self, ink: RgbaF32, alpha: f32) -> RgbaF32 {
-        debug_assert!(
-            (0.0..=1.0).contains(&alpha),
-            "a wash's alpha is a fraction: {alpha}"
-        );
-        let [ink, under] = [ink, self.canvas.bg].map(RgbaF32::to_srgba);
-        let over = |a: u8, b: u8| (alpha * f32::from(a) + (1.0 - alpha) * f32::from(b)) / 255.0;
-        RgbaF32::srgb(
-            over(ink.r, under.r),
-            over(ink.g, under.g),
-            over(ink.b, under.b),
-        )
-    }
-
     /// The color a port of `data_type` paints at rest, and the wires touching it; see
     /// [`Hover::lift`](crate::gui::widgets::hover::Hover::lift). The built-in scalars and the
     /// lens image type, the dominant payload on a darkroom canvas, take a fixed hue each from
@@ -181,7 +175,7 @@ impl Theme {
     pub(crate) fn port_color(&self, data_type: &DataType) -> RgbaF32 {
         let hues = &self.type_colors;
         match data_type {
-            DataType::Any => self.ports.input,
+            DataType::Any => self.port.input,
             DataType::Bool => hues.boolean,
             DataType::Int => hues.int,
             DataType::Float => hues.float,
@@ -195,22 +189,16 @@ impl Theme {
         }
     }
 
-    /// The color of an event emitter glyph, a subscription pin and an event wire, at rest:
-    /// events carry no data type, so one color serves them all.
-    pub(crate) const fn event_color(&self) -> RgbaF32 {
-        self.ports.event
-    }
-
-    /// The ink of a node's last-run `status` in its footer and its inspector, or `None` for the
-    /// muted ink: a node that did not run, and one a failure before it stopped.
-    pub(crate) const fn exec_color(&self, status: &ExecStatus) -> Option<RgbaF32> {
+    /// The ink of a node's last-run `status` in its footer and its inspector: the muted ink for a
+    /// node that did not run, and for one a failure before it stopped.
+    pub(crate) const fn exec_ink(&self, status: &ExecStatus) -> RgbaF32 {
         match status {
-            ExecStatus::None | ExecStatus::Skipped => None,
-            ExecStatus::Cached => Some(self.status.info),
-            ExecStatus::Executed(_) => Some(self.status.success),
-            ExecStatus::Running(_) => Some(self.status.busy),
-            ExecStatus::MissingInputs(_) => Some(self.status.warning),
-            ExecStatus::Errored(_) => Some(self.status.error),
+            ExecStatus::None | ExecStatus::Skipped => self.ink.muted,
+            ExecStatus::Cached => self.status.info,
+            ExecStatus::Executed(_) => self.status.success,
+            ExecStatus::Running(_) => self.status.busy,
+            ExecStatus::MissingInputs(_) => self.status.warning,
+            ExecStatus::Errored(_) => self.status.error,
         }
     }
 
@@ -230,96 +218,150 @@ impl Theme {
         }
     }
 
-    /// How far a port circle of the given `radius` is pulled out of its
-    /// column so its **center** lands on the node body's outer edge: clear
-    /// the column inset (`port_col_pad_x`) and the body border
-    /// (`node_border_width * 2`, which "folds into" the body's content
-    /// padding), then push out by `radius` so the dot straddles the edge
-    /// evenly. Parameterized rather than always `port_radius()` so an
-    /// enlarged port (e.g. a required input's bigger circle) still
-    /// straddles the edge correctly — see [`Self::port_overhang`] for the
-    /// common (plain-radius) case.
+    /// How far a port circle of `radius` is pulled out of its column so its center lands on the
+    /// node body's outer edge: past the column inset (`port.col_pad_x`) and the body's stroke
+    /// ([`CardTheme::border_width`], which folds into the body's content padding), then out
+    /// by `radius`, so the dot straddles the edge evenly. An enlarged port, a required input's
+    /// bigger circle, passes its own radius.
     #[inline]
-    pub(crate) fn port_overhang_for(&self, radius: f32) -> f32 {
-        radius + self.ports.col_pad_x + self.card.border_width_total()
+    fn port_overhang_for(&self, radius: f32) -> f32 {
+        radius + self.port.col_pad_x + self.card.border_width
     }
 
-    /// [`Self::port_overhang_for`] at the plain port radius. Independent of
-    /// `port_size` — bigger circles keep their center on the edge.
-    #[inline]
-    pub(crate) fn port_overhang(&self) -> f32 {
-        self.port_overhang_for(self.ports.radius())
+    /// The margin that hangs a port glyph of `radius` on the body's edge on `kind`'s side, its
+    /// center on the edge, and takes back the glyph's width and its cell's `space.xs` gap, so the
+    /// label beside it starts at the column inset whatever the glyph's size, and where a row has
+    /// no glyph: every label then lines up with the header's and footer's text.
+    pub(crate) fn port_margin(&self, kind: PortKind, radius: f32) -> Spacing {
+        let overhang = self.port_overhang_for(radius);
+        let back = overhang - 2.0 * radius - self.space.xs;
+        match kind {
+            PortKind::Input => Spacing::new(-overhang, 0.0, back, 0.0),
+            PortKind::Output => Spacing::new(back, 0.0, -overhang, 0.0),
+        }
     }
 
-    /// Border color for a selectable card in `tier`. Width is always
-    /// [`CardTheme::border_width_total`] regardless of tier, so selecting (or
+    /// A card's chrome at rest: its fill, the card radius and the resting shadow. A node adds its
+    /// border and trades the shadow for a status frame.
+    pub(crate) fn card_chrome(&self) -> Chrome {
+        Chrome::rounded(self.card.fill, Corners::all(self.radius.card))
+            .with_shadow(self.elevation.resting)
+    }
+
+    /// The corner radius of a strip seated flush inside a card's stroke, a footer: the card's
+    /// radius less the stroke, else the strip's corner leaves a wedge of fill showing between it
+    /// and a selection-lit stroke.
+    #[inline]
+    pub(crate) fn card_inner_radius(&self) -> f32 {
+        (self.radius.card - self.card.border_width).max(0.0)
+    }
+
+    /// The fill of a control that is on, an icon button's or a toolbar chip's: a wash of its
+    /// `ink` over the card's fill, a step stronger under the pointer.
+    pub(crate) fn on_fill(&self, ink: RgbaF32, hovered: bool) -> RgbaF32 {
+        let strength = if hovered {
+            self.tint.strong
+        } else {
+            self.tint.soft
+        };
+        color::wash(ink, strength, self.card.fill)
+    }
+
+    /// The inset of a pane's content from its edges, every pane's: the inspector's and the
+    /// preferences'.
+    #[inline]
+    pub(crate) fn pane_padding(&self) -> Spacing {
+        Spacing::all(self.space.lg)
+    }
+
+    /// Where the surround's controls start from the window's edge: the menu bar's first title and
+    /// the first tab, whose text then sits a control's `space.md` further in, as the status bar's
+    /// does. palantir's tab strip pads by the same `space.sm`.
+    #[inline]
+    pub(crate) const fn surround_inset(&self) -> f32 {
+        self.space.sm
+    }
+
+    /// The height of a row that holds a field: a node's port row, an inspector's port row. Two
+    /// body lines, which clears the tallest field, the inline text edit, at a line and its
+    /// padding, about 1.9 body sizes.
+    #[inline]
+    pub(crate) fn row_height(&self) -> f32 {
+        self.font.body * ROW_HEIGHT_EM
+    }
+
+    /// Border color for a selectable card in `tier`. Its width is
+    /// [`CardTheme::border_width`] in every tier, so selecting (or
     /// breaking) a card never resizes it — only the color changes. A caller
     /// with an extra tier of its own (e.g. a node body's "missing" stub state)
     /// special-cases that tier around this call instead of forcing it in here.
     #[inline]
     pub(crate) const fn card_border(&self, tier: CardTier) -> RgbaF32 {
         match tier {
-            CardTier::Broken => self.colors.wire_broken,
-            CardTier::Selected => self.colors.selection_rect,
+            CardTier::Broken => self.canvas.wire_broken,
+            CardTier::Selected => self.colors.accent,
             CardTier::Resting => self.card.border,
         }
     }
 
     /// Assemble the full theme from `p` — the darkroom peer of
-    /// `palantir::Theme::from_palette`. Dimensions are palette-independent;
+    /// `palantir::Theme::from_parts`. Dimensions are palette-independent;
     /// every color and every sub-recipe (the palantir widget theme, the
     /// const editor, inline rename) cascades from `p` rather than
     /// being hand-assembled, so a palette edit reaches the whole app.
     fn build(p: &Palette) -> Self {
         let colors = AppColors::from_palette(p);
-        let text = TypeScale::DEFAULT;
+        let font = TypeScale::DEFAULT;
         let space = SpaceScale::DEFAULT;
         let radius = RadiusScale::DEFAULT;
+        let stroke = StrokeScale::DEFAULT;
+        let icon = IconScale::new(&font);
+        let elevation = ElevationScale::new(p);
+        let tint = TintScale::DEFAULT;
+        let ink = Inks::from_palette(p);
         // The palantir half is derived here rather than stored on `Palette`:
         // it is a projection of the same roles, and a second copy of them
         // could drift from the one the darkroom rosters read.
         let pal = palantir_bridge::palette(p);
-        let card = CardTheme::from_palette(p, &radius);
+        let card = CardTheme::from_palette(p);
         let status = StatusColors::from_palette(p);
-        let palantir = palantir_bridge::theme(
-            &pal,
-            BridgeRoles {
-                surround_fill: colors.surround_fill,
-                header_fill: card.header_fill,
-                text: &text,
-                space: &space,
-                radius: &radius,
-            },
-        );
-        let menu_button = palantir_bridge::menu_button(&pal, &space);
-        let menu_button_open = palantir_bridge::menu_button_open(&menu_button);
-        let path_field_error = error_bordered(&palantir.text_edit, status.error);
-        let inline_rename = InlineRenameTheme::from_palette(&pal);
-        let inline_rename_title = inline_rename
-            .clone()
-            .with_text(TextStyleOverrides::NONE.with_weight(FontWeight::BOLD));
+        let roles = BridgeRoles {
+            surround_bg: colors.surround_bg,
+            font: &font,
+            space: &space,
+            radius: &radius,
+            stroke: &stroke,
+            icon: &icon,
+            elevation: &elevation,
+        };
+        let metrics = roles.metrics();
+        let palantir = palantir_bridge::theme(&pal, &metrics, roles);
+        let menu_button = MenuButtonLooks::new(&pal, &metrics);
+        let primary_button = palantir_bridge::primary_button(&pal, &metrics);
+        let field_error = error_bordered(&palantir.text_edit, status.error);
         Self {
-            // The two measurements that belong to no widget group; the
-            // rest are authored beside their colors in the groups below.
-            stroke_width: 2.0,
-            new_node_popup_max_height: 400.0,
-            text,
+            canvas: CanvasTheme::from_palette(p, &space, &stroke),
+            tie: TieTheme::from_palette(p, &tint),
+            viewer: ViewerTheme::new(p, &space, &ink),
+            card,
+            port: PortTheme::from_palette(p, &space),
+            font,
             space,
             radius,
-            canvas: CanvasTheme::from_palette(p),
-            tie: TieTheme::from_palette(p),
-            card,
-            ports: PortTheme::from_palette(p),
+            stroke,
+            icon,
+            elevation,
+            tint,
             status,
             colors,
+            ink,
+            badge: BadgeColors::from_palette(p),
             type_colors: p.type_colors.clone(),
-            const_editor: ConstEditorTheme::from_palette(&pal),
-            const_editor_revealed: ConstEditorTheme::revealed_from_palette(&pal),
-            inline_rename,
-            inline_rename_title,
+            const_editor: ConstEditorLooks::new(&pal, &metrics, &palantir.text_edit),
+            flat_text_edit: FlatTextEdit::new(&palantir.text_edit),
+            field_error,
             menu_button,
-            menu_button_open,
-            path_field_error,
+            primary_button,
             palantir,
         }
     }

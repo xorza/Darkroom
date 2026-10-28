@@ -3,7 +3,7 @@
 use palantir::RgbaF32;
 
 /// Data-type → wire/port-circle hue roster (consumed by
-/// `gui::pane::graph_ui::node_ui::port_color`). `ramp` backs the open-ended
+/// [`Theme::port_color`](crate::gui::theme::Theme::port_color)). `ramp` backs the open-ended
 /// `Custom`/`Enum` families — keyed by `type_id`, so distinct custom types
 /// land on stable, distinct colors; `image` is the fixed hue the lens image
 /// type owns.

@@ -15,15 +15,15 @@ use crate::gui::theme::palette::Palette;
 /// `success` is the toolbar's run glyph.
 #[derive(Clone, Debug)]
 pub(crate) struct StatusColors {
-    /// It worked / it ran — green.
+    /// It worked / it ran.
     pub(crate) success: RgbaF32,
-    /// It was reused from cache — the accent cyan.
+    /// It was reused from cache.
     pub(crate) info: RgbaF32,
-    /// It is happening right now — teal.
+    /// It is happening right now.
     pub(crate) busy: RgbaF32,
-    /// It is incomplete but not broken — orange.
+    /// It is incomplete but not broken.
     pub(crate) warning: RgbaF32,
-    /// It failed — red.
+    /// It failed.
     pub(crate) error: RgbaF32,
 }
 

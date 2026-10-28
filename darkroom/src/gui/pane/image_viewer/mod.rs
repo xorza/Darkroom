@@ -30,9 +30,12 @@ use std::fmt;
 use std::fmt::Display;
 use std::fmt::Formatter;
 
-use palantir::prelude::*;
+use glam::{UVec2, Vec2};
 use palantir::widget::Shape;
-use palantir::{ImageDownsample, ImageFilter, ImageFit, ImageHandle};
+use palantir::{
+    Align, Chrome, Configure, HAlign, ImageDownsample, ImageFilter, ImageFit, ImageHandle, Panel,
+    Sense, Sizing, Spacing, Ui, VAlign, WidgetId, fmt,
+};
 
 use crate::core::document::Document;
 use crate::core::document::viewport::Viewport;
@@ -49,6 +52,8 @@ use crate::gui::state::preview_store::{
 use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::chip::Chip;
+use crate::gui::widgets::format;
+use crate::gui::widgets::format::percent::Percent;
 use crate::gui::widgets::icon::Icon;
 use crate::gui::widgets::pan_drag;
 use crate::gui::widgets::pill;
@@ -291,7 +296,7 @@ impl ImageViewer {
                 if preferences.bg == ViewerBg::Checker
                     && let Some(pane) = pane
                 {
-                    self.draw_checker(ui, pane);
+                    self.draw_checker(ui, theme, pane);
                 }
                 if let Some(view) = source.image() {
                     let shown = view.image();
@@ -321,9 +326,19 @@ impl ImageViewer {
                 // the picture. On the frosted readout pill, so the line stays
                 // legible over the checker/white backdrops too.
                 if let Some(hint) = source.hint(status) {
+                    // A failure reads in the error ink; every other line invites, muted.
+                    let ink = match hint {
+                        PreviewMessage::Failure(_) => theme.status.error,
+                        PreviewMessage::Text(_) => theme.ink.muted,
+                    };
+                    let max_width = pane_view
+                        .size
+                        .map_or(f32::INFINITY, |pane| pane.x - 2.0 * theme.space.lg);
                     Readout {
                         panel: Panel::hstack().id_salt("viewer_hint").align(Align::CENTER),
                         text: fmt!(ui, "{hint}").into(),
+                        ink,
+                        max_width,
                     }
                     .show(ui, theme);
                 }
@@ -336,11 +351,11 @@ impl ImageViewer {
     /// The screen-fixed checkerboard backdrop across the whole pane. One
     /// tiled 2×2 texture; `Nearest` keeps the squares crisp at any pane
     /// size and DPI.
-    fn draw_checker(&mut self, ui: &mut Ui, pane: Vec2) {
+    fn draw_checker(&mut self, ui: &mut Ui, theme: &Theme, pane: Vec2) {
         let handle = self
             .checker
             .get_or_insert_with(|| {
-                ui.load_image(&glyph::checker_image())
+                ui.load_image(&glyph::checker_image(theme))
                     .expect("checker image fits every supported GPU")
             })
             .clone();
@@ -348,7 +363,7 @@ impl ImageViewer {
             Shape::image(handle)
                 .fit(ImageFit::Tile {
                     offset: Vec2::ZERO,
-                    scale: pane / (2.0 * glyph::CHECKER_SQUARE_PX),
+                    scale: pane / (2.0 * theme.viewer.checker_square),
                 })
                 .min_filter(ImageFilter::Nearest)
                 .mag_filter(ImageFilter::Nearest),
@@ -366,18 +381,26 @@ impl ImageViewer {
                 .effective_view(ui, shown.view.image(), shown.pane.size)
                 .map(|v| v.zoom),
         };
+        let theme = shown.pane.theme;
+        let margin = theme.space.sm;
+        // Cut before the control panel, a gap short of it, as it stood last frame.
+        let controls = ui
+            .response_for(toolbar::controls_wid(self.node_id, "panel"))
+            .rect
+            .map_or(0.0, |rect| rect.size.w);
+        let max_width = shown
+            .pane
+            .size
+            .map_or(f32::INFINITY, |pane| pane.x - 3.0 * margin - controls);
         Readout {
             panel: Panel::hstack()
-                .id_salt("viewer_header")
-                .margin(Spacing::new(
-                    shown.pane.theme.space.sm,
-                    shown.pane.theme.space.sm,
-                    0.0,
-                    0.0,
-                )),
+                .id(header_wid(self.node_id))
+                .margin(Spacing::new(margin, margin, 0.0, 0.0)),
             text: fmt!(ui, "{readout}").into(),
+            ink: theme.ink.muted,
+            max_width,
         }
-        .show(ui, shown.pane.theme);
+        .show(ui, theme);
     }
 
     /// The floating control panel in the pane's top-right corner — the
@@ -415,10 +438,10 @@ impl ImageViewer {
                     {
                         self.reset_framing();
                     }
-                    if Chip::new(controls.wid("100"), "Zoom to 100%").show(
+                    if Chip::new(controls.wid("100"), "Zoom to 100%").show_icon(
                         ui,
                         theme,
-                        glyph::draw_100,
+                        Icon::ActualSize,
                     ) && let Some(pane) = pane
                         && let Some(v) = self.effective_view(ui, shown.view.image(), Some(pane))
                     {
@@ -516,29 +539,14 @@ impl Display for HeaderReadout<'_> {
             f.write_str(" · preparing full resolution")?;
         }
         if let Some(zoom) = self.zoom {
-            let percent = zoom * 100.0;
-            write!(f, " · {percent:.0$}%", percent_decimals(percent))?;
+            write!(f, " · {}", Percent::new(zoom))?;
         }
         Ok(())
     }
 }
 
-/// The decimals a zoom readout of `percent` shows: none from 10 %, else two significant digits,
-/// so a fit to a huge image, below the viewer's own range, never reads as `0%`.
-fn percent_decimals(percent: f32) -> usize {
-    debug_assert!(percent > 0.0, "a zoom is positive");
-    if percent >= 10.0 {
-        return 0;
-    }
-    // The decimal exponent of the first significant digit: -1 for 0.4, -2 for 0.04.
-    let magnitude = percent.log10().floor() as i32;
-    // At most six, as an f32 holds about seven significant digits.
-    usize::try_from((1 - magnitude).clamp(1, 6)).expect("clamped to 1..=6")
-}
-
-/// Display label for a viewer tab / pane header: the node's name, falling
-/// back to "image" for an unnamed node. The one formatter for both the tab
-/// strip and the viewer title.
+/// Display label for a viewer tab / pane header: the node's name through
+/// [`format::node_name`]. The one formatter for both the tab strip and the viewer title.
 ///
 /// Borrowed from the document rather than assembled: both readers record
 /// every frame, and both arms are text something already owns. Each reader
@@ -546,12 +554,11 @@ fn percent_decimals(percent: f32) -> usize {
 /// labels the one tab it is — because one hash probe per label is cheaper than
 /// a table keyed by every tab.
 pub(crate) fn node_label(document: &Document, node_id: NodeId) -> &str {
-    let name = &document
+    let node = document
         .graph
         .find(node_id)
-        .expect("a viewer tab's node is in the graph")
-        .name;
-    if name.is_empty() { "image" } else { name }
+        .expect("a viewer tab's node is in the graph");
+    format::node_name(&node.name)
 }
 
 /// A texture's 1:1 logical footprint on the current display — one texel per
@@ -561,10 +568,15 @@ fn logical_size(image: &DrawableImage, ui: &Ui) -> Vec2 {
     image.texels.as_vec2() / ui.display().scale_factor()
 }
 
+/// The header readout of `node_id`'s viewer.
+fn header_wid(node_id: NodeId) -> WidgetId {
+    WidgetId::from_hash(("darkroom.image_viewer.header", node_id))
+}
+
 /// Stable id for a viewer's pane — keyed by node so switching between two
 /// viewer tabs can't cross-feed their gesture responses.
 fn pane_wid(node_id: NodeId) -> WidgetId {
-    WidgetId::from_hash(("image_viewer.pane", node_id))
+    WidgetId::from_hash(("darkroom.image_viewer.pane", node_id))
 }
 
 #[cfg(test)]

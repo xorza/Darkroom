@@ -19,6 +19,7 @@ use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::route_insert::RouteInsert;
 use crate::gui::frame::requests::Requests;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
+use crate::gui::pane::graph_ui::draw::tie::band::{BandInk, BandLook};
 use crate::gui::pane::graph_ui::gesture::button_stroke::{ButtonStroke, StrokeStep};
 use crate::gui::pane::graph_ui::gesture::tie_ui::tie_line::{TieLine, WireCrossing};
 use crate::gui::pane::graph_ui::gesture::tie_ui::tie_probe::TieProbe;
@@ -74,16 +75,29 @@ impl TieUi {
         TieProbe::new(Some(&mut self.line))
     }
 
-    /// Paint the line, in the selection colour.
-    pub(crate) fn draw(&self, ui: &mut Ui, theme: &Theme) {
+    /// Paint the line, in the selection colour, over the band it will put where it crosses wires
+    /// and no tie: centered on the mean of its crossings, square to the mean of the crossed
+    /// strands, a slot for each, as feedforward shows a gesture's result before it ends.
+    pub(crate) fn draw(&self, ui: &mut Ui, theme: &Theme, zoom: f32) {
         if !self.stroke.in_flight() {
             return;
+        }
+        if let Some(preview) = self.line.preview() {
+            preview.paint(
+                ui,
+                theme,
+                BandLook {
+                    ink: BandInk::Preview,
+                    selected: false,
+                    pinned: false,
+                },
+            );
         }
         ui.add_shape(
             Shape::line(
                 self.line.start,
                 self.line.end,
-                Stroke::new(theme.colors.selection_rect, theme.stroke_width),
+                Stroke::new(theme.tie.ring, theme.stroke.wire_at(zoom)),
             )
             .cap(LineCap::Round),
         );

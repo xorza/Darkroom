@@ -1,5 +1,8 @@
-use palantir::prelude::*;
-use palantir::{CloseHandle, DockOperation, MenuSeparator};
+use glam::Vec2;
+use palantir::{
+    Align, Button, CloseHandle, Configure, ContextMenu, DockOperation, HAlign, MenuItem,
+    MenuSeparator, Panel, Sense, Shortcut, Sizing, Spacing, Text, Ui, VAlign, WidgetId, fmt,
+};
 use scenarium::NodeId;
 
 use crate::core::document::tab_ref::TabRef;
@@ -31,7 +34,7 @@ pub(crate) fn show(ui: &mut Ui, ctx: WindowCtx<'_>, out: &mut Requests) {
                 .id_salt("menu_bar_menus")
                 .size((Sizing::HUG, Sizing::HUG))
                 .align(Align::new(HAlign::Left, VAlign::Center))
-                .padding(Spacing::xy(theme.space.sm, theme.space.xs))
+                .padding(Spacing::xy(theme.surround_inset(), theme.space.xs))
                 .gap(theme.space.xs)
                 .show(ui, |ui| {
                     file_menu(ui, theme, out);
@@ -54,11 +57,11 @@ struct Dropdown {
 impl Dropdown {
     /// `build` populates the popup and raises whatever a pick means.
     fn show(self, ui: &mut Ui, theme: &Theme, build: impl FnOnce(&mut Ui, &CloseHandle)) {
-        let id = WidgetId::from_hash(("menu_bar", self.label));
+        let id = WidgetId::from_hash(("darkroom.menu_bar", self.label));
         let style = if ContextMenu::is_open(ui, id) {
-            &theme.menu_button_open
+            &theme.menu_button.open
         } else {
-            &theme.menu_button
+            &theme.menu_button.shut
         };
         let trigger = Button::new()
             .id(id)
@@ -215,16 +218,9 @@ fn document_name(ui: &mut Ui, ctx: WindowCtx<'_>) {
         .sense(Sense::HOVER)
         .show(ui, |ui| {
             if open.dirty {
-                Panel::zstack()
-                    .id_salt("menu_bar_dirty")
-                    .size((Sizing::fixed(DIRTY_DOT), Sizing::fixed(DIRTY_DOT)))
-                    .chrome(Chrome::rounded(
-                        theme.colors.text_muted,
-                        Corners::all(DIRTY_DOT * 0.5),
-                    ))
-                    .show(ui, |_| {});
+                support::dot_cell(ui, "menu_bar_dirty", theme, theme.ink.muted);
             }
-            let style = support::sized_text(ui, theme.text.body);
+            let style = support::body_text(ui, theme);
             Text::new(fmt!(ui, "{name}")).style(&style).show(ui);
         })
         .response
@@ -234,9 +230,6 @@ fn document_name(ui: &mut Ui, ctx: WindowCtx<'_>) {
         .map(|folder| fmt!(ui, "{}", folder.display()));
     support::tooltip_after(ui, &row, folder);
 }
-
-/// Side of the unsaved-edits dot before the document's name.
-const DIRTY_DOT: f32 = 7.0;
 
 #[cfg(test)]
 mod tests {

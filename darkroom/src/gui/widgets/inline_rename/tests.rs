@@ -1,7 +1,8 @@
 use super::*;
 use crate::gui::theme::Theme;
-use palantir::Display;
+use glam::UVec2;
 use palantir::internals::ui_harness::UiHarness;
+use palantir::{Display, Key};
 
 /// The idle label puts the name flush against its panel's leading edge,
 /// where the editor will draw it. Pixel snapping off keeps the comparison
@@ -18,7 +19,7 @@ fn the_idle_name_sits_on_the_panels_leading_edge() {
         ..Display::default()
     });
     h.frame(|ui| {
-        InlineRename::new(wid, "Ab", &theme.inline_rename).show(ui);
+        InlineRename::new(wid, "Ab", &theme.flat_text_edit.plain).show(ui);
     });
     let panel = h.rect(wid).expect("label panel arranged");
     let label = h.rect(label_wid(wid)).expect("name text arranged");
@@ -36,7 +37,7 @@ fn the_idle_name_sits_on_the_panels_leading_edge() {
 #[test]
 fn entering_edit_mode_selects_the_whole_name() {
     fn render(ui: &mut Ui, wid: WidgetId, theme: &Theme) -> RenameEvent {
-        InlineRename::new(wid, "Alpha", &theme.inline_rename).show(ui)
+        InlineRename::new(wid, "Alpha", &theme.flat_text_edit.plain).show(ui)
     }
 
     let theme = Theme::default();
@@ -87,7 +88,7 @@ fn entering_edit_mode_selects_the_whole_name() {
     // A read-only label opens no editor, so the same gesture commits nothing.
     let locked = WidgetId::from_hash("rename-read-only");
     let render_locked = |ui: &mut Ui| {
-        InlineRename::new(locked, "Alpha", &theme.inline_rename)
+        InlineRename::new(locked, "Alpha", &theme.flat_text_edit.plain)
             .read_only()
             .show(ui)
     };
