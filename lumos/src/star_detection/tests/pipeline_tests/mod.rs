@@ -118,7 +118,7 @@ impl PipelineCase<'_> {
         // What the threshold is applied to: the residual itself, or its matched-filtered image,
         // which lifts a smooth plateau by 2√π·s against noise, twice what it lifts a star's peak
         // by.
-        let clean_residual = Buffer2::from_fn(size, residual_at);
+        let clean_residual = Buffer2::from_fn(size, |at| residual_at(at.x, at.y));
         let thresholded = match config.fwhm.mode {
             None => clean_residual,
             Some(FwhmMode::Fixed(fwhm)) => {

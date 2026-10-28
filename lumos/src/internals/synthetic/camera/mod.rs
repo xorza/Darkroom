@@ -8,7 +8,7 @@
 use std::f32::consts::PI;
 
 use common::Buffer2;
-use glam::{USizeVec2, Vec2};
+use glam::Vec2;
 
 use crate::image::cfa::cfa_type::CfaType;
 use crate::internals::synthetic::bgs::Vignette;
@@ -126,10 +126,10 @@ impl FlatField {
     /// The response of every photosite of a `size` sensor behind `cfa_type`'s filters: its
     /// color's gain times the vignette.
     pub(crate) fn render(&self, size: USize2, cfa_type: &CfaType) -> Buffer2<f32> {
-        Buffer2::from_fn(size, |x, y| {
-            let gain = self.color_gain[cfa_type.slot_at(USizeVec2::new(x, y))];
+        Buffer2::from_fn(size, |at| {
+            let gain = self.color_gain[cfa_type.slot_at(at)];
             self.vignette
-                .map_or(gain, |vignette| gain * vignette.at(size, x, y))
+                .map_or(gain, |vignette| gain * vignette.at(size, at.x, at.y))
         })
     }
 }

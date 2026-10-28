@@ -31,72 +31,79 @@ fn run_patterns_count_as_worked_out() {
     let cases = [
         (
             "a run across the first word boundary (x = 62..67)",
-            Mask::from_fn(USize2::new(70, 3), |x, y| y == 1 && (62..67).contains(&x)),
+            Mask::from_fn(USize2::new(70, 3), |at| {
+                at.y == 1 && (62..67).contains(&at.x)
+            }),
             1,
             1,
         ),
         (
             "a run across the second word boundary (x = 126..131)",
-            Mask::from_fn(USize2::new(140, 3), |x, y| {
-                y == 1 && (126..131).contains(&x)
+            Mask::from_fn(USize2::new(140, 3), |at| {
+                at.y == 1 && (126..131).contains(&at.x)
             }),
             1,
             1,
         ),
         (
             "a run spanning three words",
-            Mask::from_fn(USize2::new(200, 5), |x, y| y == 2 && (10..190).contains(&x)),
+            Mask::from_fn(USize2::new(200, 5), |at| {
+                at.y == 2 && (10..190).contains(&at.x)
+            }),
             1,
             1,
         ),
         (
             "two full words",
-            Mask::from_fn(USize2::new(128, 3), |_, y| y == 1),
+            Mask::from_fn(USize2::new(128, 3), |at| at.y == 1),
             1,
             1,
         ),
         (
             "alternating bits in a word",
-            Mask::from_fn(USize2::new(64, 3), |x, y| y == 1 && x % 2 == 0),
+            Mask::from_fn(USize2::new(64, 3), |at| at.y == 1 && at.x % 2 == 0),
             32,
             32,
         ),
         (
             "three runs in one row",
-            Mask::from_fn(USize2::new(100, 3), |x, y| {
-                y == 1 && [5..15, 30..40, 60..70].iter().any(|run| run.contains(&x))
+            Mask::from_fn(USize2::new(100, 3), |at| {
+                at.y == 1
+                    && [5..15, 30..40, 60..70]
+                        .iter()
+                        .any(|run| run.contains(&at.x))
             }),
             3,
             3,
         ),
         (
             "runs overlapping on adjacent rows",
-            Mask::from_fn(USize2::new(50, 4), |x, y| {
-                (y == 1 && (10..30).contains(&x)) || (y == 2 && (20..40).contains(&x))
+            Mask::from_fn(USize2::new(50, 4), |at| {
+                (at.y == 1 && (10..30).contains(&at.x)) || (at.y == 2 && (20..40).contains(&at.x))
             }),
             1,
             1,
         ),
         (
             "runs apart on adjacent rows",
-            Mask::from_fn(USize2::new(50, 4), |x, y| {
-                (y == 1 && (5..15).contains(&x)) || (y == 2 && (25..35).contains(&x))
+            Mask::from_fn(USize2::new(50, 4), |at| {
+                (at.y == 1 && (5..15).contains(&at.x)) || (at.y == 2 && (25..35).contains(&at.x))
             }),
             2,
             2,
         ),
         (
             "runs touching only at a diagonal (x = 14 against 15)",
-            Mask::from_fn(USize2::new(50, 4), |x, y| {
-                (y == 1 && (5..15).contains(&x)) || (y == 2 && (15..25).contains(&x))
+            Mask::from_fn(USize2::new(50, 4), |at| {
+                (at.y == 1 && (5..15).contains(&at.x)) || (at.y == 2 && (15..25).contains(&at.x))
             }),
             2,
             1,
         ),
         (
             "runs with empty rows between",
-            Mask::from_fn(USize2::new(50, 10), |x, y| {
-                (y == 2 || y == 7) && (10..20).contains(&x)
+            Mask::from_fn(USize2::new(50, 10), |at| {
+                (at.y == 2 || at.y == 7) && (10..20).contains(&at.x)
             }),
             2,
             2,

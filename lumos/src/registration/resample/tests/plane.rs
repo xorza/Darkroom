@@ -28,9 +28,9 @@ use common::USize2;
 #[test]
 fn integer_shifts_copy_the_source() {
     let size = USize2::new(24, 20);
-    let input = Buffer2::from_fn(size, |x, y| {
-        let i = y * size.width + x;
-        ((i * 13 + y * 7) % 31) as f32 / 9.0 - 1.7
+    let input = Buffer2::from_fn(size, |at| {
+        let i = at.y * size.width + at.x;
+        ((i * 13 + at.y * 7) % 31) as f32 / 9.0 - 1.7
     });
     let range = 30.0 / 9.0;
     let largest = 1.7f32;

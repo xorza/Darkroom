@@ -9,7 +9,7 @@ use common::USize2;
 
 fn white_noise(size: USize2, sigma: f32, seed: u64) -> Buffer2<f32> {
     let mut rng = TestRng::new(seed);
-    Buffer2::from_fn(size, |_, _| sigma * rng.next_gaussian_f32())
+    Buffer2::from_fn(size, |_| sigma * rng.next_gaussian_f32())
 }
 
 /// White Gaussian noise of σ = 1 reads its σ. Two fresh frames of 10⁶ analysed pixels: each
@@ -76,9 +76,12 @@ fn excluded_pixels_leave_the_estimate() {
     let size = USize2::new(512, 512);
     let left = white_noise(size, 0.01, 5);
     let right = white_noise(size, 0.05, 6);
-    let frame = Buffer2::from_fn((512, 512), |x, y| {
-        if x < 256 { left[(x, y)] } else { right[(x, y)] }
-    });
+    let frame = Buffer2::from_fn(
+        (512, 512),
+        |at| {
+            if at.x < 256 { left[at] } else { right[at] }
+        },
+    );
     let sigma = NoisePlane {
         samples: &frame,
         excluded: |idx| idx % 512 >= 256,

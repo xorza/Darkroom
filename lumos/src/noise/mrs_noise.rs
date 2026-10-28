@@ -720,8 +720,9 @@ mod tests {
     /// k-σ estimate: 15 × 15 holds three.
     #[test]
     fn a_frame_under_four_layers_reads_the_k_sigma_estimate() {
-        let samples = Buffer2::from_fn((15, 15), |x, y| {
-            ((x * 7 + y * 13) % 11) as f32 / 11.0 + if (x + y) % 2 == 0 { 0.05 } else { -0.05 }
+        let samples = Buffer2::from_fn((15, 15), |at| {
+            ((at.x * 7 + at.y * 13) % 11) as f32 / 11.0
+                + if (at.x + at.y) % 2 == 0 { 0.05 } else { -0.05 }
         });
         assert_eq!(wavelet::max_scales(samples.size()), 3);
         let plane = NoisePlane {

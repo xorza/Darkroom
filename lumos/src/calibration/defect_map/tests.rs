@@ -102,8 +102,8 @@ fn capped_color_sampling_matches_exact_row_and_column_statistics() {
     let cfa_type = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
     for (width, height) in [(800, 800), (1000, 800), (800, 1000)] {
         for row_pattern in [true, false] {
-            let data = Buffer2::from_fn((width, height), |x, y| {
-                let coordinate = if row_pattern { y } else { x };
+            let data = Buffer2::from_fn((width, height), |at| {
+                let coordinate = if row_pattern { at.y } else { at.x };
                 (coordinate / 2) as f32
             });
             let exact = median_mad(
@@ -471,7 +471,9 @@ fn per_channel_detection_bayer() {
 #[test]
 fn dark_background_reconstructs_affine_mono_signal_through_image_edges() {
     let size = USize2::new(192usize, 128usize);
-    let data = Buffer2::from_fn(size, |x, y| 0.02 + 0.0001 * x as f32 + 0.0002 * y as f32);
+    let data = Buffer2::from_fn(size, |at| {
+        0.02 + 0.0001 * at.x as f32 + 0.0002 * at.y as f32
+    });
     let bg = ColorMesh::measure(MaskedPlane::from(&data), &CfaType::Mono, DARK_BG_TILE_SIZE);
 
     for y in 0..size.height {

@@ -17,8 +17,8 @@ use crate::star_detection::median_filter::internals::apply_3x3;
 /// A plane of noise around a slope, its sky the mesh of 16-px tiles measures on it.
 fn frame(size: USize2, seed: u64) -> (Buffer2<f32>, MeshSurface) {
     let mut rng = TestRng::new(seed);
-    let pixels = Buffer2::from_fn(size, |x, y| {
-        0.2 + 0.003 * x as f32 + 0.002 * y as f32 + 0.05 * rng.next_f32()
+    let pixels = Buffer2::from_fn(size, |at| {
+        0.2 + 0.003 * at.x as f32 + 0.002 * at.y as f32 + 0.05 * rng.next_f32()
     });
     let mesh = BgMesh::computed(
         &pixels,

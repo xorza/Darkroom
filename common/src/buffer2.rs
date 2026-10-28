@@ -34,13 +34,13 @@ impl<T> Buffer2<T> {
         Self { pixels, size }
     }
 
-    /// The buffer of `size` whose value at `(x, y)` is `f(x, y)`, called once per pixel in
-    /// row-major order — so a stateful `f`, a random draw, lays its values out row by row.
-    pub fn from_fn(size: impl Into<USize2>, mut f: impl FnMut(usize, usize) -> T) -> Self {
+    /// The buffer of `size` whose value at each pixel is `f` of its position, called once per
+    /// pixel in row-major order — so a stateful `f`, a random draw, lays its values out row by row.
+    pub fn from_fn(size: impl Into<USize2>, mut f: impl FnMut(USizeVec2) -> T) -> Self {
         let size = size.into();
         let mut pixels = Vec::with_capacity(size.pixel_count());
         for y in 0..size.height {
-            pixels.extend((0..size.width).map(|x| f(x, y)));
+            pixels.extend((0..size.width).map(|x| f(USizeVec2::new(x, y))));
         }
         Self { pixels, size }
     }
@@ -392,18 +392,18 @@ mod tests {
     /// order. An empty side calls it never.
     #[test]
     fn from_fn_takes_each_position_in_row_major_order() {
-        let positions = Buffer2::from_fn((3, 2), |x, y| 10 * y + x);
+        let positions = Buffer2::from_fn((3, 2), |at| 10 * at.y + at.x);
         assert_eq!((positions.width(), positions.height()), (3, 2));
         assert_eq!(positions.pixels(), [0, 1, 2, 10, 11, 12]);
         assert_eq!(*positions.get(2, 1), 12);
         let mut next = 0;
-        let order = Buffer2::from_fn((3, 2), |_, _| {
+        let order = Buffer2::from_fn((3, 2), |_| {
             next += 1;
             next - 1
         });
         assert_eq!(order.pixels(), [0, 1, 2, 3, 4, 5]);
         let mut calls = 0;
-        let empty = Buffer2::<u8>::from_fn((0, 4), |_, _| {
+        let empty = Buffer2::<u8>::from_fn((0, 4), |_| {
             calls += 1;
             0
         });

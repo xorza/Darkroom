@@ -464,7 +464,7 @@ fn voronoi_assignment_and_its_tie() {
 /// and its label map: hundreds of local maxima, many equal in value and in distance.
 fn noise_component(size: USize2, seed: u64) -> TestComponent {
     let mut rng = TestRng::new(seed);
-    let pixels = Buffer2::from_fn(size, |_, _| 0.1 + (rng.next_f32() * 16.0).floor() / 16.0);
+    let pixels = Buffer2::from_fn(size, |_| 0.1 + (rng.next_f32() * 16.0).floor() / 16.0);
     let labels = LabelMap::from_raw(&Buffer2::new_filled(size, 1u32), 1);
     let data = ComponentData {
         bbox: USizeRect2::new(USizeVec2::ZERO, USizeVec2::new(size.width, size.height)),

@@ -78,7 +78,7 @@ fn sample_ordinals_are_even_and_point_symmetric() {
 #[test]
 fn tile_samples_centre_on_the_tile() {
     let size = USize2::new(100, 100);
-    let pixels = Buffer2::from_fn(size, |x, y| (x + 1000 * y) as f32);
+    let pixels = Buffer2::from_fn(size, |at| (at.x + 1000 * at.y) as f32);
     let tile = USizeRect2::new(USizeVec2::new(10, 20), USizeVec2::new(74, 84));
     let mut samples = TileSamples::default();
     samples.collect_tile(&pixels, tile);
@@ -149,7 +149,7 @@ fn masked_sampling_reads_the_unmasked_ordinals() {
 
     for case in cases {
         let size = case.size;
-        let pixels = Buffer2::from_fn(size, |x, y| (y * size.width + x) as f32);
+        let pixels = Buffer2::from_fn(size, |at| (at.y * size.width + at.x) as f32);
         let mut mask = BitBuffer2::new_filled(size, false);
         if let Some(modulus) = case.mask_modulus {
             for y in 0..size.height {
@@ -217,9 +217,13 @@ fn a_tile_reads_its_sky_about_its_own_plane() {
     // 32×32 = 1024 pixels: the whole tile is read, so the samples are exactly the pixels.
     let tile = USizeRect2::new(USizeVec2::new(4, 6), USizeVec2::new(36, 38));
     let frame = |level: &dyn Fn(usize, usize) -> f32, checker: f32| {
-        Buffer2::from_fn(size, |x, y| {
-            let sign = if (x + y).is_multiple_of(2) { 1.0 } else { -1.0 };
-            level(x, y) + sign * checker
+        Buffer2::from_fn(size, |at| {
+            let sign = if (at.x + at.y).is_multiple_of(2) {
+                1.0
+            } else {
+                -1.0
+            };
+            level(at.x, at.y) + sign * checker
         })
     };
     let plane = |x: usize, y: usize| 0.25 * x as f32 + 2.0 * y as f32;

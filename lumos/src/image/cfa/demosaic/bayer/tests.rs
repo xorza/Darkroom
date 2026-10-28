@@ -103,9 +103,9 @@ fn parallel_rcd_matches_single_thread_bit_for_bit() {
     } else {
         USize2::new(96, 80)
     };
-    let data = Buffer2::from_fn(size, |x, y| {
-        let idx = y * size.width + x;
-        ((idx * 37 + y * 11) % 1_024) as f32 / 1_023.0
+    let data = Buffer2::from_fn(size, |at| {
+        let idx = at.y * size.width + at.x;
+        ((idx * 37 + at.y * 11) % 1_024) as f32 / 1_023.0
     });
     let bayer = MosaicView::new(&data, BayerPattern::Rggb);
 
@@ -134,10 +134,7 @@ fn mosaic(
     pattern: BayerPattern,
     scene: impl Fn(USizeVec2, usize) -> f32,
 ) -> Buffer2<f32> {
-    Buffer2::from_fn(size, |x, y| {
-        let pos = USizeVec2::new(x, y);
-        scene(pos, pattern.color_at(pos).idx())
-    })
+    Buffer2::from_fn(size, |at| scene(at, pattern.color_at(at).idx()))
 }
 
 /// A constant color per channel — uniform grey and two distinct (R, G, B) — through every phase
@@ -180,9 +177,9 @@ fn rcd_beyond_the_border_matches_a_larger_frame() {
     let large = USize2::new(300, 280);
     let offset = 16;
     let mut rng = TestRng::new(7);
-    let samples = Buffer2::from_fn(large, |_, _| 0.1 + 0.8 * rng.next_f32());
+    let samples = Buffer2::from_fn(large, |_| 0.1 + 0.8 * rng.next_f32());
     let small = USize2::new(240, 236);
-    let crop = Buffer2::from_fn(small, |x, y| samples[(x + offset, y + offset)]);
+    let crop = Buffer2::from_fn(small, |at| samples[(at.x + offset, at.y + offset)]);
     for pattern in BayerPattern::ALL {
         let whole = demosaic(&samples, pattern);
         // An even offset keeps the crop on the larger frame's phase.
@@ -218,8 +215,8 @@ fn rcd_beyond_the_border_matches_a_larger_frame() {
 #[test]
 fn rcd_all_patterns_preserve_native_samples_and_stay_finite() {
     let ramp = |size: USize2| -> Buffer2<f32> {
-        Buffer2::from_fn(size, |x, y| {
-            (y * size.width + x) as f32 / size.pixel_count() as f32
+        Buffer2::from_fn(size, |at| {
+            (at.y * size.width + at.x) as f32 / size.pixel_count() as f32
         })
     };
     let assert_native = |planes: &[Vec<f32>; 3],
@@ -344,8 +341,8 @@ fn rcd_is_the_same_on_every_bayer_phase() {
     };
     let mosaic = |pattern: BayerPattern, dx: usize, dy: usize| -> Buffer2<f32> {
         let (cw, ch) = (w - dx, h - dy);
-        Buffer2::from_fn((cw, ch), |x, y| {
-            scene(x + dx, y + dy, pattern.color_at(USizeVec2::new(x, y)).idx())
+        Buffer2::from_fn((cw, ch), |at| {
+            scene(at.x + dx, at.y + dy, pattern.color_at(at).idx())
         })
     };
 
@@ -490,7 +487,7 @@ fn rcd_returns_a_flat_field_at_any_level() {
 fn rcd_is_odd() {
     let size = USize2::new(40, 32);
     let mut rng = TestRng::new(11);
-    let data = Buffer2::from_fn(size, |_, _| 0.02 * (rng.next_f32() - 0.5));
+    let data = Buffer2::from_fn(size, |_| 0.02 * (rng.next_f32() - 0.5));
     let negated = Buffer2::new(size, data.iter().map(|&value| -value).collect());
     for pattern in BayerPattern::ALL {
         let planes = demosaic(&data, pattern);

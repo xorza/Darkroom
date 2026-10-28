@@ -22,6 +22,7 @@ use crate::star_detection::labeling::labeler::Labeler;
 use crate::star_detection::labeling::labeler::internals::label_in_strips;
 use crate::star_detection::star_detection_config::extraction_config::Connectivity;
 use common::USize2;
+use glam::USizeVec2;
 
 mod parallel;
 mod property_based;
@@ -52,8 +53,8 @@ impl Mask {
         }
     }
 
-    /// The pixels `(x, y)` for which `set` holds.
-    fn from_fn(size: USize2, set: impl FnMut(usize, usize) -> bool) -> Self {
+    /// The pixels for which `set` holds.
+    fn from_fn(size: USize2, set: impl FnMut(USizeVec2) -> bool) -> Self {
         Self {
             data: Buffer2::from_fn(size, set),
         }
@@ -178,8 +179,8 @@ fn a_reused_map_relabels_as_a_fresh_one() {
     let size = USize2::new(40, 30);
     let mut labeler = Labeler::default();
     let masks = [
-        Mask::from_fn(size, |x, y| (x + y) % 7 < 3).bits(),
-        Mask::from_fn(size, |x, y| (x * y) % 5 == 0).bits(),
+        Mask::from_fn(size, |at| (at.x + at.y) % 7 < 3).bits(),
+        Mask::from_fn(size, |at| (at.x * at.y) % 5 == 0).bits(),
     ];
     for (idx, mask) in masks.iter().enumerate() {
         let reused = labeler.label(mask, Connectivity::Eight);

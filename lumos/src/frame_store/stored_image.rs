@@ -192,7 +192,7 @@ mod tests {
         let dir = TempDir::new("stored_image_gain");
         let scratch = RunScratch::create(dir.path()).unwrap();
         let size = USize2::new(9, 9);
-        let divisor = Buffer2::from_fn((9, 9), |x, y| 0.5 + 0.05 * (x + y) as f32);
+        let divisor = Buffer2::from_fn((9, 9), |at| 0.5 + 0.05 * (at.x + at.y) as f32);
         let gain = Arc::new(FlatGain::of_divisor(&divisor, &CfaType::Mono, |_| false));
         let mut image = LinearImage::from_planar_channels(
             PlanarDesc::new(size, ChannelLayout::Mono),

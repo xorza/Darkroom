@@ -198,8 +198,8 @@ fn a_uniform_frame_demosaics_to_itself() {
 fn markesteijn_is_odd() {
     let size = USize2::new(96, 96);
     let mut rng = TestRng::new(13);
-    let data = Buffer2::from_fn(size, |x, y| {
-        let stripe = (x + y) % 7 < 3;
+    let data = Buffer2::from_fn(size, |at| {
+        let stripe = (at.x + at.y) % 7 < 3;
         (if stripe { -0.05 } else { -0.45 }) + 0.01 * (rng.next_f32() - 0.5)
     });
     let negated = Buffer2::new(size, data.iter().map(|&value| -value).collect());
@@ -230,7 +230,9 @@ fn markesteijn_is_odd() {
 fn f32_demosaic_preserves_signed_native_samples() {
     let size = USize2::new(18, 18);
     let pattern = XTRANS_PATTERN;
-    let data = Buffer2::from_fn(size, |x, y| ((y * size.width + x) % 17) as f32 * 0.25 - 2.0);
+    let data = Buffer2::from_fn(size, |at| {
+        ((at.y * size.width + at.x) % 17) as f32 * 0.25 - 2.0
+    });
     let rgb = markesteijn::demosaic(
         &MosaicView::new(&data, pattern),
         MarkesteijnPasses::One,
@@ -259,8 +261,8 @@ fn f32_demosaic_preserves_signed_native_samples() {
 fn f32_demosaic_is_equivariant_to_a_uniform_pedestal() {
     let size = USize2::new(18, 18);
     let pedestal = 0.375;
-    let base = Buffer2::from_fn(size, |x, y| {
-        let idx = y * size.width + x;
+    let base = Buffer2::from_fn(size, |at| {
+        let idx = at.y * size.width + at.x;
         0.2 + (idx * 37 % 101) as f32 / 200.0
     });
     let shifted = Buffer2::new(size, base.iter().map(|value| value + pedestal).collect());
@@ -288,8 +290,8 @@ fn f32_demosaic_is_equivariant_to_a_uniform_pedestal() {
     }
 
     let contrast = USize2::new(30, 30);
-    let blocks = Buffer2::from_fn(contrast, |x, y| {
-        if (x / 2 + y / 3) % 2 == 0 {
+    let blocks = Buffer2::from_fn(contrast, |at| {
+        if (at.x / 2 + at.y / 3) % 2 == 0 {
             0.008
         } else {
             0.977

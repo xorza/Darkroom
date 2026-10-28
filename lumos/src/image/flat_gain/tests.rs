@@ -1,5 +1,5 @@
 use common::Buffer2;
-use glam::{DVec2, USizeVec2};
+use glam::DVec2;
 
 use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_type::CfaType;
@@ -33,7 +33,7 @@ fn a_node_is_its_colors_mean_gain() {
     assert_eq!(unflagged.at(0, 0.0, 0.0), 2.0);
 
     let cfa = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
-    let divisor = Buffer2::from_fn((8, 8), |x, y| match cfa.slot_at(USizeVec2::new(x, y)) {
+    let divisor = Buffer2::from_fn((8, 8), |at| match cfa.slot_at(at) {
         0 => 0.5,
         1 => 1.0,
         _ => 0.25,
@@ -59,7 +59,7 @@ fn a_node_is_its_colors_mean_gain() {
 #[test]
 fn the_gain_is_bilinear_between_nodes_and_moves_with_the_warp() {
     let size = USize2::new(9, 9);
-    let divisor = Buffer2::from_fn((9, 9), |x, _| 1.0 / (1.0 + x as f32 / 8.0));
+    let divisor = Buffer2::from_fn((9, 9), |at| 1.0 / (1.0 + at.x as f32 / 8.0));
     let gain = FlatGain::of_divisor(&divisor, &CfaType::Mono, |_| false);
     let close = |actual: f32, expected: f32, what: &str| {
         assert!(
@@ -90,7 +90,7 @@ fn the_gain_is_bilinear_between_nodes_and_moves_with_the_warp() {
     // every output node of every channel reads its own channel one node row lower, exactly, and
     // the last row, past the source, holds the source's last.
     let ramps = (1..=3)
-        .map(|channel| Buffer2::from_fn((3, 3), |i, j| (10 * channel + 3 * j + i) as f32))
+        .map(|channel| Buffer2::from_fn((3, 3), |at| (10 * channel + 3 * at.y + at.x) as f32))
         .collect();
     let gain = FlatGain::from_nodes(size, ramps);
     let down = WarpTransform::new(Transform::translation(DVec2::new(0.0, 4.0)));
@@ -135,7 +135,7 @@ fn a_record_of_no_image_size_is_refused() {
 /// reads back from its 64 hex digits.
 #[test]
 fn a_gain_is_known_by_its_little_endian_digest() {
-    let divisor = Buffer2::from_fn((9, 9), |x, y| 0.5 + 0.02 * (x * 9 + y) as f32);
+    let divisor = Buffer2::from_fn((9, 9), |at| 0.5 + 0.02 * (at.x * 9 + at.y) as f32);
     let gain = FlatGain::of_divisor(&divisor, &CfaType::Mono, |_| false);
     let mut bytes: Vec<u8> = [9u64, 9, 1].iter().flat_map(|v| v.to_le_bytes()).collect();
     bytes.extend(gain.planes().flatten().flat_map(|node| node.to_le_bytes()));

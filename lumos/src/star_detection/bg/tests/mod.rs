@@ -5,6 +5,7 @@ mod synthetic_skies;
 use std::num::NonZeroUsize;
 
 use common::Buffer2;
+use glam::USizeVec2;
 use glam::Vec2;
 
 use crate::image::masked_plane::MaskedPlane;
@@ -78,14 +79,15 @@ fn plane_skies_come_back_exactly() {
         (200, 150, 64, Vec2::new(-1e-3, 1.5e-3)),
         (160, 160, 32, Vec2::new(2e-3, -1e-3)),
     ] {
-        let plane = |x: usize, y: usize| 0.5 + gradient.x * x as f32 + gradient.y * y as f32;
+        let plane = |at: USizeVec2| 0.5 + gradient.x * at.x as f32 + gradient.y * at.y as f32;
         let pixels = Buffer2::from_fn((width, height), plane);
         let bg = estimate(&pixels, tile_size).bg.plane();
         let largest = pixels.pixels().iter().fold(0.0f32, |m, &v| m.max(v.abs()));
         let bound = 8.0 * f32::EPSILON * largest;
         for y in 0..height {
             for x in 0..width {
-                let error = (bg[(x, y)] - plane(x, y)).abs();
+                let at = USizeVec2::new(x, y);
+                let error = (bg[at] - plane(at)).abs();
                 assert!(
                     error <= bound,
                     "{width}×{height}, gradient {gradient}: ({x}, {y}) off by {error} > {bound}"
@@ -176,9 +178,9 @@ fn maps_follow_the_natural_spline_through_the_tile_skies() {
     let bound = 4.0 * f64::from(f32::EPSILON) * 0.75;
     for along_x in [true, false] {
         let (width, height) = if along_x { (160, 96) } else { (96, 160) };
-        let pixels = Buffer2::from_fn((width, height), |x, y| {
-            let tile = if along_x { x } else { y } / 32;
-            let sign = if (x + y) % 2 == 0 { 1.0 } else { -1.0 };
+        let pixels = Buffer2::from_fn((width, height), |at| {
+            let tile = if along_x { at.x } else { at.y } / 32;
+            let sign = if (at.x + at.y) % 2 == 0 { 1.0 } else { -1.0 };
             SKY[tile] + sign * SPREAD[tile]
         });
         let estimate = estimate(&pixels, 32);
@@ -235,9 +237,9 @@ fn refine_masks_the_stars_and_their_halos_out() {
     const SKY: f32 = 0.25;
     const SPREAD: f32 = 1.0 / 64.0;
     let size = USize2::new(128, 128);
-    let pixels = Buffer2::from_fn(size, |x, y| {
-        let sign = if (x + y) % 2 == 0 { 1.0 } else { -1.0 };
-        let lift = match (x % 32, y % 32) {
+    let pixels = Buffer2::from_fn(size, |at| {
+        let sign = if (at.x + at.y) % 2 == 0 { 1.0 } else { -1.0 };
+        let lift = match (at.x % 32, at.y % 32) {
             (14..18, 14..18) => 8.0,
             (12..20, 12..20) => 2.0 * SPREAD,
             _ => 0.0,
@@ -330,7 +332,7 @@ fn refine_masks_the_stars_and_their_halos_out() {
 
 #[test]
 fn repeated_estimation_and_dimension_reset_preserve_exact_results() {
-    let pixels = Buffer2::from_fn((96, 64), |x, y| (3 * x + y) as f32 / 512.0);
+    let pixels = Buffer2::from_fn((96, 64), |at| (3 * at.x + at.y) as f32 / 512.0);
     let config = BgConfig {
         tile_size: 16,
         ..Default::default()

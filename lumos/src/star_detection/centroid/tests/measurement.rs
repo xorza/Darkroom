@@ -462,8 +462,8 @@ fn sky_noise_adds_no_flux_or_snr() {
     const SIGMA: f32 = 0.0625;
     const SKY: f32 = 0.25;
     let size = USize2::new(48, 48);
-    let pixels = Buffer2::from_fn(size, |x, y| {
-        if (x + y) % 2 == 0 {
+    let pixels = Buffer2::from_fn(size, |at| {
+        if (at.x + at.y) % 2 == 0 {
             SKY + SIGMA
         } else {
             SKY - SIGMA

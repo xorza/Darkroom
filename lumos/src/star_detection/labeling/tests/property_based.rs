@@ -13,7 +13,7 @@ struct RandomMaskCase {
 
 fn random_mask(case: &RandomMaskCase, seed: u64) -> Mask {
     let mut rng = TestRng::new(seed);
-    Mask::from_fn(case.size, |_, _| rng.next_f64() < case.density)
+    Mask::from_fn(case.size, |_| rng.next_f64() < case.density)
 }
 
 /// Random masks across densities and sizes, each against the reference at every band count.

@@ -160,7 +160,7 @@ impl Field {
         let corner = |at: f64| (at as usize / side * side).min(3 * side);
         let (left, top) = (corner(star.x), corner(star.y));
         let plane = frame.image.channel(0);
-        Buffer2::from_fn((side, side), |x, y| plane[(left + x, top + y)])
+        Buffer2::from_fn((side, side), |at| plane[(left + at.x, top + at.y)])
     }
 
     /// Exposure `idx` of a sequence on the field, calibrated, on a mono sensor of `size`, as the

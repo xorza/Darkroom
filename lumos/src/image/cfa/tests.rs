@@ -108,7 +108,7 @@ fn a_demosaiced_frame_keeps_its_mosaics_noise() {
         .derived
         .set_quantization_sigma(Some(QUANTIZATION_SIGMA_PER_STEP / 4096.0));
     let gain = Arc::new(FlatGain::of_divisor(
-        &Buffer2::from_fn((64, 64), |x, _| 1.0 - 0.5 * x as f32 / 64.0),
+        &Buffer2::from_fn((64, 64), |at| 1.0 - 0.5 * at.x as f32 / 64.0),
         &cfa_type,
         |_| false,
     ));

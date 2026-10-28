@@ -189,7 +189,7 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
                 // Every third frame was divided by a vignetted flat, whose gain the noise model
                 // reads per sample: a mono flat for a mono frame, a mosaic's for a color one.
                 if f.is_multiple_of(3) {
-                    let divisor = Buffer2::from_fn((w, h), |x, _| 1.0 - 0.4 * x as f32 / w as f32);
+                    let divisor = Buffer2::from_fn((w, h), |at| 1.0 - 0.4 * at.x as f32 / w as f32);
                     let cfa = if channels == 1 {
                         CfaType::Mono
                     } else {

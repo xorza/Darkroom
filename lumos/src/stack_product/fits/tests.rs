@@ -40,7 +40,7 @@ const SCALE: f64 = 1_234.567_8;
 /// A plane of `SIZE` whose samples share no bit pattern with another plane's: `seed` and the
 /// index through a sevenths ramp, so each sample is a full-mantissa float.
 fn plane(seed: f32) -> Buffer2<f32> {
-    Buffer2::from_fn(SIZE, |x, y| (seed + (y * SIZE.width + x) as f32) / 7.0)
+    Buffer2::from_fn(SIZE, |at| (seed + (at.y * SIZE.width + at.x) as f32) / 7.0)
 }
 
 fn domain() -> SampleDomain {

@@ -552,7 +552,7 @@ fn a_flag_leaves_its_pixel_out_or_carries_it_by_what_it_says() {
 fn a_warp_moves_the_flat_gain_with_the_pixels() {
     let size = USize2::new(9, 9);
     let mut image = mono_image(size, vec![0.5; size.pixel_count()]);
-    let divisor = Buffer2::from_fn((9, 9), |x, _| 1.0 / (1.0 + x as f32 / 8.0));
+    let divisor = Buffer2::from_fn((9, 9), |at| 1.0 / (1.0 + at.x as f32 / 8.0));
     image.set_flat_gain(Some(FrameGain::Shared(Arc::new(FlatGain::of_divisor(
         &divisor,
         &CfaType::Mono,
