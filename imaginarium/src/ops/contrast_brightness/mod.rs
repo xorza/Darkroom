@@ -10,6 +10,7 @@ use crate::gpu::Gpu;
 #[cfg(feature = "wgpu")]
 use crate::gpu::gpu_image::GpuImage;
 use crate::interleaved::interleaved_image::InterleavedImage;
+use crate::ops::clamp::Clamp;
 
 /// Parameters for contrast and brightness adjustment.
 #[derive(Debug, Clone, Copy)]
@@ -19,22 +20,24 @@ pub struct ContrastBrightness {
     /// Brightness offset in normalized range [-1.0, 1.0].
     /// Positive values brighten, negative values darken.
     pub brightness: f32,
+    /// The ends of the range an `f32` result is held to; an integer one saturates to its range
+    /// whatever this is.
+    pub clamp: Clamp,
 }
 
 impl Default for ContrastBrightness {
     fn default() -> Self {
-        Self {
-            contrast: 1.0,
-            brightness: 0.0,
-        }
+        Self::new(1.0, 0.0)
     }
 }
 
 impl ContrastBrightness {
+    /// `contrast` and `brightness` under [`Clamp::DEFAULT`].
     pub const fn new(contrast: f32, brightness: f32) -> Self {
         Self {
             contrast,
             brightness,
+            clamp: Clamp::DEFAULT,
         }
     }
 
@@ -52,11 +55,19 @@ impl ContrastBrightness {
         self
     }
 
+    /// Builder method to set the clamp.
+    #[must_use]
+    pub const fn clamp(mut self, clamp: Clamp) -> Self {
+        self.clamp = clamp;
+        self
+    }
+
     /// Applies contrast and brightness adjustment to an image **in place** using CPU,
     /// so an owning caller pays no output allocation.
     ///
     /// The formula applied to each color channel is:
-    /// `output = (input - mid) * contrast + mid + brightness`
+    /// `output = (input - mid) * contrast + mid + brightness`, held to the range's ends
+    /// [`Self::clamp`] names.
     ///
     /// Where `mid` is the middle value of the type's range.
     /// Alpha channel (if present) is preserved unchanged.
@@ -83,10 +94,7 @@ mod tests {
     use crate::internals::create_test_image;
     use crate::ops::contrast_brightness::ContrastBrightness;
 
-    const OP: ContrastBrightness = ContrastBrightness {
-        contrast: 1.5,
-        brightness: 0.1,
-    };
+    const OP: ContrastBrightness = ContrastBrightness::new(1.5, 0.1);
 
     #[test]
     fn apply_cpu_adjusts_in_place_without_reallocating() {

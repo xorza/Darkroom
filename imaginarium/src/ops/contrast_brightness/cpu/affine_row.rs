@@ -74,7 +74,7 @@ impl Kernel for AffineRow<'_, u16> {
     }
 }
 
-/// Eight samples a step. `f32` storage keeps the affine as it is, unbounded.
+/// Eight samples a step. `f32` storage keeps the affine as the clamp leaves it.
 impl Kernel for AffineRow<'_, f32> {
     type Output = ();
 
@@ -82,7 +82,9 @@ impl Kernel for AffineRow<'_, f32> {
     fn run<S: Isa>(self, isa: S) {
         let lanes = Lanes::new(isa, self.affine, self.alpha);
         row_groups::in_place::<f32, F32_LANES>(self.row, |samples| {
-            lanes.affine(isa.load_f32(samples)).store(samples);
+            lanes
+                .clamped(lanes.affine(isa.load_f32(samples)))
+                .store(samples);
         });
     }
 }
@@ -98,12 +100,22 @@ struct Lanes<F: F32x8> {
     /// `max` in every lane: the integer kernels' round bound, an integer as the round takes it,
     /// which leaves an alpha lane's sample as it is.
     max: F,
+    /// The clamp's bounds, `∓∞` in an alpha lane. The integer kernels leave them be: the round
+    /// saturates to `[0, max]`, which holds every bound's result.
+    low: F,
+    high: F,
 }
 
 impl<F: F32x8> Lanes<F> {
     #[inline(always)]
     fn new<S: Isa<F32 = F>>(isa: S, affine: ChannelAffine, alpha: Alpha) -> Self {
-        let ChannelAffine { scale, offset, max } = affine;
+        let ChannelAffine {
+            scale,
+            offset,
+            max,
+            low,
+            high,
+        } = affine;
         let lanes = |color: f32, alpha_lane: f32| match alpha {
             Alpha::Absent => isa.splat_f32(color),
             Alpha::Kept => isa.load_f32(&[
@@ -114,6 +126,8 @@ impl<F: F32x8> Lanes<F> {
             scale: lanes(scale, 1.0),
             offset: lanes(offset, -0.0),
             max: isa.splat_f32(max),
+            low: lanes(low, f32::NEG_INFINITY),
+            high: lanes(high, f32::INFINITY),
         }
     }
 
@@ -121,6 +135,13 @@ impl<F: F32x8> Lanes<F> {
     #[inline(always)]
     fn affine(self, values: F) -> F {
         values * self.scale + self.offset
+    }
+
+    /// `values` held to `[low, high]`: `low > v ? low : v`, then `v > high ? high : v`, the
+    /// reference's compare-selects, which keep a NaN.
+    #[inline(always)]
+    fn clamped(self, values: F) -> F {
+        self.low.max(values).min(self.high)
     }
 
     /// [`Self::affine`] of `values`, clamped to `[0, max]` and rounded, as an integer kernel stores

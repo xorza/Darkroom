@@ -4,10 +4,12 @@ use crate::interleaved::interleaved_desc::InterleavedDesc;
 use crate::interleaved::interleaved_image::InterleavedImage;
 use crate::internals::create_test_image;
 use crate::internals::image_diff::{max_pixel_diff, pixels_equal};
+use crate::ops::clamp::Clamp;
 use crate::ops::contrast_brightness::channel_affine::ChannelAffine;
 use crate::ops::contrast_brightness::{ContrastBrightness, cpu};
 use common::Size2us;
 use simd::IsaTier;
+use strum::IntoEnumIterator;
 
 /// Builds a single-row image from raw channel bytes.
 fn image_from_channels(format: ColorFormat, width: usize, bytes: Vec<u8>) -> InterleavedImage {
@@ -27,10 +29,7 @@ const SWEEP_LEN: usize = 37;
 
 /// `contrast = 2.0, brightness = 0.0` folds to `value * 2 - mid`, whose ties
 /// land exactly on `.5` — so these also pin the round-half-to-even behaviour.
-const CONTRAST_TWO: ContrastBrightness = ContrastBrightness {
-    contrast: 2.0,
-    brightness: 0.0,
-};
+const CONTRAST_TWO: ContrastBrightness = ContrastBrightness::new(2.0, 0.0);
 
 /// `samples` in `format`'s sample type, one channel's values in its own units, as bytes.
 fn sample_bytes(format: ColorFormat, samples: &[f32]) -> Vec<u8> {
@@ -49,14 +48,15 @@ fn sample_bytes(format: ColorFormat, samples: &[f32]) -> Vec<u8> {
 ///
 /// - Contrast 2 folds to `2v − mid`, `mid` 127.5, 32767.5 or 0.5. `u8`: 0 → −127.5 → 0,
 ///   64 → 0.5 → 0 and 65 → 2.5 → 2 (ties to even), 128 → 128.5 → 128, 255 → 382.5 → 255; `u16`
-///   the same at 0, 16384, 16385, 32768 and 65535. An integer store saturates; `f32` keeps −0.5
-///   and 1.5.
+///   the same at 0, 16384, 16385, 32768 and 65535. An integer store saturates, under any clamp;
+///   `f32` keeps −0.5 and 1.5 under `None`, holds −0.5 at 0 under `Black` and 1.5 at 1 too under
+///   `BlackAndWhite`.
 /// - Brightness alone adds `b · max`: 0.2 · 255 = 51 (100 → 151), 0.2 · 65535 = 13107
 ///   (1000 → 14107), and 0.2 to an `f32`, rounded once, through −0.2 and past 1.
 #[test]
 fn contrast_and_brightness_map_hand_computed_values() {
     let brightness = ContrastBrightness::new(1.0, 0.2);
-    let rows: [(ContrastBrightness, ColorFormat, &[f32], &[f32]); 6] = [
+    let rows: [(ContrastBrightness, ColorFormat, &[f32], &[f32]); 9] = [
         (
             CONTRAST_TWO,
             ColorFormat::MONO_U8,
@@ -70,10 +70,28 @@ fn contrast_and_brightness_map_hand_computed_values() {
             &[0.0, 0.0, 2.0, 32768.0, 65535.0],
         ),
         (
-            CONTRAST_TWO,
+            CONTRAST_TWO.clamp(Clamp::BlackAndWhite),
+            ColorFormat::MONO_U8,
+            &[0.0, 64.0, 65.0, 128.0, 255.0],
+            &[0.0, 0.0, 2.0, 128.0, 255.0],
+        ),
+        (
+            CONTRAST_TWO.clamp(Clamp::None),
             ColorFormat::MONO_F32,
             &[0.0, 0.25, 0.5, 0.75, 1.0],
             &[-0.5, 0.0, 0.5, 1.0, 1.5],
+        ),
+        (
+            CONTRAST_TWO,
+            ColorFormat::MONO_F32,
+            &[0.0, 0.25, 0.5, 0.75, 1.0],
+            &[0.0, 0.0, 0.5, 1.0, 1.5],
+        ),
+        (
+            CONTRAST_TWO.clamp(Clamp::BlackAndWhite),
+            ColorFormat::MONO_F32,
+            &[0.0, 0.25, 0.5, 0.75, 1.0],
+            &[0.0, 0.0, 0.5, 1.0, 1.0],
         ),
         (brightness, ColorFormat::MONO_U8, &[100.0], &[151.0]),
         (brightness, ColorFormat::MONO_U16, &[1000.0], &[14107.0]),
@@ -172,16 +190,23 @@ fn alpha_survives_every_alpha_format() {
     }
 }
 
-/// Brightness ±1 saturates every color channel of an integer format at its maximum or at zero, and
-/// moves an `f32` channel by exactly ±1, unbounded. Alpha is exempt.
+/// Brightness ±1 saturates every color channel of an integer format at its maximum or at zero
+/// under every clamp, and moves an `f32` channel by exactly ±1 to where its clamp holds it: past
+/// 1 and below 0 under `None`, at 0 from below under `Black`, within `[0, 1]` under
+/// `BlackAndWhite`. Alpha is exempt.
 #[test]
 fn extreme_brightness_saturates_integers_and_moves_floats() {
-    for format in ColorFormat::ALL {
+    for (format, clamp) in ColorFormat::ALL
+        .into_iter()
+        .flat_map(|format| Clamp::iter().map(move |clamp| (format, clamp)))
+    {
         let input = create_test_image(format, Size2us::new(4, 2), 0);
         let affine_max = ChannelAffine::new(ContrastBrightness::default(), format).max;
         for brightness in [1.0f32, -1.0] {
             let mut output = input.clone();
-            ContrastBrightness::new(1.0, brightness).apply_cpu(&mut output);
+            ContrastBrightness::new(1.0, brightness)
+                .clamp(clamp)
+                .apply_cpu(&mut output);
 
             let channel_count = format.channel_count.count();
             let color_count = channel_count - usize::from(format.has_alpha());
@@ -193,13 +218,17 @@ fn extreme_brightness_saturates_integers_and_moves_floats() {
                     continue;
                 }
                 let want = match format.sample_type {
-                    SampleType::F32 => before + brightness,
+                    SampleType::F32 => match clamp {
+                        Clamp::None => before + brightness,
+                        Clamp::Black => (before + brightness).max(0.0),
+                        Clamp::BlackAndWhite => (before + brightness).clamp(0.0, 1.0),
+                    },
                     SampleType::U8 | SampleType::U16 if brightness > 0.0 => affine_max,
                     SampleType::U8 | SampleType::U16 => 0.0,
                 };
                 assert_eq!(
                     after, want,
-                    "brightness {brightness}, channel {index} of {format}"
+                    "brightness {brightness}, {clamp:?}, channel {index} of {format}"
                 );
             }
         }
@@ -225,7 +254,7 @@ const PARAM_SWEEP: [(f32, f32); 4] = [(2.0, 0.0), (1.0, 0.2), (1.5, 0.1), (0.5, 
 /// Every tier's kernel agrees with the scalar reference bit for bit, floats included: both
 /// evaluate the same affine in the same order. Width 3 is shorter than any step, 17 whole steps
 /// and a partial one. The float images carry NaN, the infinities, out-of-range values and a
-/// negative zero, in the alpha lanes too, which a kernel keeps as they are.
+/// negative zero, in the alpha lanes too, which a kernel keeps as they are, under every clamp.
 #[test]
 fn every_tier_matches_the_scalar_reference() {
     for tier in IsaTier::supported() {
@@ -241,8 +270,11 @@ fn every_tier_matches_the_scalar_reference() {
                         *sample = *special;
                     }
                 }
-                for (contrast, brightness) in PARAM_SWEEP {
-                    let op = ContrastBrightness::new(contrast, brightness);
+                for ((contrast, brightness), clamp) in PARAM_SWEEP
+                    .into_iter()
+                    .flat_map(|params| Clamp::iter().map(move |clamp| (params, clamp)))
+                {
+                    let op = ContrastBrightness::new(contrast, brightness).clamp(clamp);
 
                     let mut actual = input.clone();
                     cpu::apply_on(tier, op, &mut actual);
@@ -251,7 +283,7 @@ fn every_tier_matches_the_scalar_reference() {
                     assert!(
                         pixels_equal(&expected, &actual),
                         "{tier} diverges from the scalar reference for {format} width {width} \
-                         (contrast={contrast}, brightness={brightness}): diff={}",
+                         ({op:?}): diff={}",
                         max_pixel_diff(&expected, &actual)
                     );
                     assert!(

@@ -22,7 +22,8 @@ pub(super) fn apply(
         // `BlendMode` is `#[repr(u8)]`; the shader's mode contract depends on this order.
         mode: params.mode as u32,
         alpha: params.alpha,
-        _pad: [0; 2],
+        clamp: params.clamp.shader_code(),
+        _pad: 0,
         layout: PackedLayout::new(src.desc),
     };
     pipeline::kernel(gpu).run(
@@ -36,13 +37,14 @@ pub(super) fn apply(
     );
 }
 
-/// The shader's `Params`.
+/// The shader's `Params`, the clamp by its shader code.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 struct Params {
     mode: u32,
     alpha: f32,
-    _pad: [u32; 2],
+    clamp: u32,
+    _pad: u32,
     layout: PackedLayout,
 }
 

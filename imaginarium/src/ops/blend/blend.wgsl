@@ -1,15 +1,16 @@
 // Blend two tightly-packed buffers, one invocation per `u32` word.
 //
 // Blending is per-channel: out.c = blend(src.c, dst.c)·alpha + dst.c·(1-alpha),
-// with the alpha channel (if any) passed through the blend as Normal. So output
+// then `hold`, with the alpha channel (if any) passed through the blend as
+// Normal and held by no clamp. So output
 // element E depends only on element E of src and dst — one invocation owns one
 // output word, no row stride, no shared-word read-modify-write, no races.
 
 struct Params {
     mode: u32,             // 0=Normal,1=Add,2=Subtract,3=Multiply,4=Screen,5=Overlay
     alpha: f32,
-    _pad0: u32,
-    _pad1: u32,
+    clamp: u32,
+    _pad: u32,
     byte_len: u32,         // packed image size = width * height * bytes_per_pixel
     sample_byte_len: u32,  // bytes per channel value: 1 (u8), 2 (u16), 4 (f32)
     channel_count: u32,    // channels per pixel
@@ -23,8 +24,8 @@ struct Params {
 
 fn blend_channel(s: f32, d: f32, mode: u32) -> f32 {
     switch mode {
-        case 1u: { return min(s + d, 1.0); }            // Add
-        case 2u: { return max(d - s, 0.0); }            // Subtract
+        case 1u: { return s + d; }                      // Add
+        case 2u: { return d - s; }                      // Subtract
         case 3u: { return s * d; }                      // Multiply
         case 4u: { return 1.0 - (1.0 - s) * (1.0 - d); } // Screen
         case 5u: {                                      // Overlay
@@ -37,13 +38,11 @@ fn blend_channel(s: f32, d: f32, mode: u32) -> f32 {
 
 // Normalized blend of one channel element. Alpha channels blend as Normal.
 fn blend_elem(s: f32, d: f32, is_alpha: bool) -> f32 {
-    var blended: f32;
     if is_alpha {
-        blended = s;
-    } else {
-        blended = blend_channel(s, d, params.mode);
+        return s * params.alpha + d * (1.0 - params.alpha);
     }
-    return blended * params.alpha + d * (1.0 - params.alpha);
+    let mixed = blend_channel(s, d, params.mode) * params.alpha + d * (1.0 - params.alpha);
+    return hold(mixed, params.clamp, 1.0);
 }
 
 @compute @workgroup_size(256)

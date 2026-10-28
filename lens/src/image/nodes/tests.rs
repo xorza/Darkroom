@@ -37,6 +37,16 @@ fn enum_defaults_are_exact() {
         blend.inputs()[2].default_value,
         Some(ConstValue::Enum("Normal".to_string())),
     );
+
+    for (name, idx) in [("Brightness / Contrast", 3), ("Blend", 4)] {
+        let func = library.by_name(name).unwrap();
+        assert_eq!(func.inputs()[idx].name, "Clamp", "{name}");
+        assert_eq!(
+            func.inputs()[idx].default_value,
+            Some(ConstValue::Enum("Black".to_string())),
+            "{name}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -106,40 +116,50 @@ async fn load_and_save_round_trip_exact_pixels() {
 
 /// Source and destination are two independent wires, so a size or format mismatch is the user's
 /// graph: the node fails with an input error naming the destination, instead of the blend kernel's
-/// assert taking the worker down.
+/// assert taking the worker down. An alpha past [0, 1], NaN included, fails naming the alpha,
+/// as the mix would extrapolate beyond both images; both ends run.
 #[tokio::test]
-async fn blend_refuses_a_destination_of_another_size_or_format() {
+async fn blend_refuses_a_mismatched_destination_and_an_alpha_out_of_range() {
     let library = image_library();
     let image = |width, format| {
         DynamicValue::from_custom(Image::from(imaginarium::InterleavedImage::new_zeroed(
             imaginarium::InterleavedDesc::new(Size2us::new(width, 2), format),
         )))
     };
-    let blend = |source: DynamicValue, destination: DynamicValue| {
+    let blend = |source: DynamicValue, destination: DynamicValue, alpha: f64| {
         let inputs = [
             source,
             destination,
             ConstValue::Enum("Normal".to_owned()).into(),
-            ConstValue::Float(0.5).into(),
+            ConstValue::Float(alpha).into(),
+            ConstValue::Enum("Black".to_owned()).into(),
         ];
         let blend = library.by_name("Blend").unwrap();
         async move { FuncInvoker::default().call(blend, inputs).await }
     };
+    let rgb = || image(2, ColorFormat::RGB_U8);
 
     for destination in [
         image(3, ColorFormat::RGB_U8),
         image(2, ColorFormat::RGBA_U8),
     ] {
         assert!(matches!(
-            blend(image(2, ColorFormat::RGB_U8), destination).await,
+            blend(rgb(), destination, 0.5).await,
             Err(scenarium::InvokeError::InvalidInput { idx: 1, .. })
         ));
     }
-    assert!(
-        blend(image(2, ColorFormat::RGB_U8), image(2, ColorFormat::RGB_U8))
-            .await
-            .is_ok()
-    );
+    for alpha in [-0.1, 1.5, f64::NAN] {
+        assert!(
+            matches!(
+                blend(rgb(), rgb(), alpha).await,
+                Err(scenarium::InvokeError::InvalidInput { idx: 3, .. })
+            ),
+            "alpha {alpha}"
+        );
+    }
+    for alpha in [0.0, 0.5, 1.0] {
+        assert!(blend(rgb(), rgb(), alpha).await.is_ok(), "alpha {alpha}");
+    }
 }
 
 /// A zero or non-finite scale, and a non-finite rotation or shift, fail the node with an input

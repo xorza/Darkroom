@@ -3,19 +3,25 @@ use crate::color::sample::Sample;
 use crate::ops::contrast_brightness::ContrastBrightness;
 
 /// The per-channel affine `value * scale + offset` that contrast/brightness reduces to in a
-/// storage type's own units: an integer store saturates it to `[0, max]`, and `f32` keeps it
-/// unbounded.
+/// storage type's own units, held to `[low, high]`: an integer store then saturates it to
+/// `[0, max]`, and `f32` keeps it.
 ///
 /// Folding brightness and the mid-point recentering into one offset is what
 /// lets a row be a single multiply-add. The scalar reference and every vector
 /// kernel evaluate exactly this expression in exactly this order, so they agree
-/// bit for bit rather than within a rounding tolerance; the GPU takes these
-/// values as its uniforms.
+/// bit for bit rather than within a rounding tolerance; the GPU takes the scale,
+/// offset and max as its uniforms, and the clamp by its shader code in place of
+/// `low` and `high`.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ChannelAffine {
     pub(crate) scale: f32,
     pub(crate) offset: f32,
     pub(crate) max: f32,
+    /// The [`Clamp`]'s bounds in the storage type's units, `±∞` where it holds no end.
+    ///
+    /// [`Clamp`]: crate::ops::clamp::Clamp
+    pub(crate) low: f32,
+    pub(crate) high: f32,
 }
 
 impl ChannelAffine {
@@ -30,6 +36,8 @@ impl ChannelAffine {
             scale: params.contrast,
             offset: mid * (1.0 - params.contrast) + params.brightness * max,
             max,
+            low: params.clamp.low(),
+            high: params.clamp.high(max),
         }
     }
 }
@@ -37,15 +45,17 @@ impl ChannelAffine {
 #[cfg(feature = "internals")]
 pub(crate) mod internals {
     use crate::color::sample::Sample;
+    use crate::ops::clamp::internals::hold;
     use crate::ops::contrast_brightness::channel_affine::ChannelAffine;
 
     /// The scalar reference, which the tests hold every kernel to.
     impl ChannelAffine {
-        /// One channel value adjusted: the affine, narrowed by the crate's rounding rule, which
-        /// saturates an integer to `[0, max]` and keeps an `f32`, a NaN included.
+        /// One channel value adjusted: the affine, [`hold`] to `[low, high]`, then narrowed by the
+        /// crate's rounding rule, which saturates an integer to `[0, max]` and keeps an `f32`.
         #[inline]
         pub(crate) fn apply<T: Sample>(self, value: T) -> T {
-            T::from_f32(value.to_f32() * self.scale + self.offset)
+            let value = value.to_f32() * self.scale + self.offset;
+            T::from_f32(hold(value, self.low, self.high))
         }
 
         /// Every channel value of `values` adjusted in place: the scalar reference over a row with

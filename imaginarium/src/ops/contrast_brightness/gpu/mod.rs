@@ -15,7 +15,7 @@ pub(super) fn apply(params: ContrastBrightness, gpu: &Gpu, image: &mut GpuImage)
         scale: affine.scale,
         offset: affine.offset,
         max: affine.max,
-        _pad: 0,
+        clamp: params.clamp.shader_code(),
         layout: PackedLayout::new(image.desc),
     };
     pipeline::kernel(gpu).run(
@@ -29,14 +29,14 @@ pub(super) fn apply(params: ContrastBrightness, gpu: &Gpu, image: &mut GpuImage)
     );
 }
 
-/// The shader's `Params`: the CPU's affine, value for value.
+/// The shader's `Params`: the CPU's affine, value for value, and the clamp by its shader code.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 struct Params {
     scale: f32,
     offset: f32,
     max: f32,
-    _pad: u32,
+    clamp: u32,
     layout: PackedLayout,
 }
 

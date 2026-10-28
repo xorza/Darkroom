@@ -21,10 +21,7 @@ use crate::ops::contrast_brightness::{ContrastBrightness, cpu};
 
 /// Both knobs off their identity values, so no path can short-circuit and the fused
 /// `v * contrast + offset` the kernels evaluate has a nonzero offset.
-const OP: ContrastBrightness = ContrastBrightness {
-    contrast: 1.2,
-    brightness: 0.05,
-};
+const OP: ContrastBrightness = ContrastBrightness::new(1.2, 0.05);
 
 /// The slowest GPU case's iteration as measured on a Radeon 680M (RGBA f32, 315 ms): the round
 /// trip copies the frame to the device and back.
