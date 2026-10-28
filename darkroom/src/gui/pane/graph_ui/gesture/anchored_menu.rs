@@ -77,10 +77,10 @@ impl AnchoredMenu {
         // Esc dismissal is owned by the `Dismiss` popup below (folds into
         // `resp.dismissed`) — no separate Escape poll here.
         //
-        // Chrome, padding, and the width floor all come off the same theme
-        // slot `CtxMenu::show` reads, so a canvas menu and a menu-bar
-        // menu are the same object; these popups only opt out of
-        // `CtxMenu` for its per-trigger open lifecycle, not its look.
+        // Chrome, padding, the width floor and the gap all come off the
+        // theme slot `ContextMenu::show` reads, so these popups and a menu
+        // look alike; they opt out of `ContextMenu` only for its per-trigger
+        // open lifecycle.
         let ctx = &ui.theme().context_menu;
         let chrome = ctx.panel.clone();
         let padding = ctx.padding;

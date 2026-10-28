@@ -74,9 +74,7 @@ impl Dropdown {
         {
             ContextMenu::open(ui, trigger.id, Vec2::new(rect.min.x, rect.max().y));
         }
-        ContextMenu::for_id(trigger.id).show(ui, |ui, popup| {
-            build(ui, popup);
-        });
+        ContextMenu::for_id(trigger.id).show(ui, build);
     }
 }
 
