@@ -1,7 +1,7 @@
 //! In-memory image adjustment, conversion, blending, and transform nodes.
 
 use glam::Vec2;
-use imaginarium::{AffineWarp, Blend, BlendMode, ColorFormat, ContrastBrightness};
+use imaginarium::{AffineWarp, Blend, BlendMode, Clamp, ColorFormat, ContrastBrightness};
 use scenarium::FuncId;
 use scenarium::Invocation;
 use scenarium::async_lambda;
@@ -10,7 +10,7 @@ use scenarium::{Func, FuncInput, FuncOutput, Library};
 use strum::VariantNames;
 
 use crate::image::format::{CONVERSION_FORMAT_DATATYPE, ConversionFormat};
-use crate::image::nodes::BLENDMODE_DATATYPE;
+use crate::image::nodes::{BLENDMODE_DATATYPE, CLAMP_DATATYPE};
 use crate::image::{IMAGE_DATA_TYPE, Image};
 use std::mem;
 
@@ -34,12 +34,16 @@ fn register_brightness(library: &mut Library) {
             async_lambda!(move |Invocation {
                                     inputs, outputs, ..
                                 }| {
-                debug_assert_eq!(inputs.len(), 3);
+                debug_assert_eq!(inputs.len(), 4);
                 debug_assert_eq!(outputs.len(), 1);
                 let value = mem::take(&mut inputs[0]);
                 let brightness = inputs[1].required_f64() as f32;
                 let contrast = inputs[2].required_f64() as f32;
-                let image = adjust_image(ContrastBrightness::new(contrast, brightness), value);
+                let clamp = inputs[3].required_enum_as::<Clamp>();
+                let image = adjust_image(
+                    ContrastBrightness::new(contrast, brightness).clamp(clamp),
+                    value,
+                );
                 outputs[0] = DynamicValue::from_custom(image);
                 Ok(())
             }),
@@ -58,9 +62,22 @@ fn register_brightness(library: &mut Library) {
                 .description("Contrast multiplier. 1 leaves it unchanged.")
                 .default(1.0),
         )
+        .input(clamp_input())
         .output(FuncOutput::new("Image", IMAGE_DATA_TYPE).description("Adjusted image."))
         .build(),
     );
+}
+
+/// The `Clamp` input both color ops take, at [`Clamp::DEFAULT`].
+fn clamp_input() -> FuncInput {
+    FuncInput::required("Clamp", CLAMP_DATATYPE)
+        .default(ConstValue::Enum(
+            Clamp::VARIANTS[Clamp::DEFAULT as usize].to_owned(),
+        ))
+        .description(
+            "The ends of [0, 1] a float result is held to. An integer image saturates to its \
+             range whatever this is.",
+        )
 }
 
 fn register_convert(library: &mut Library) {
@@ -110,12 +127,17 @@ fn register_blend(library: &mut Library) {
             async_lambda!(move |Invocation {
                                     inputs, outputs, ..
                                 }| {
-                debug_assert_eq!(inputs.len(), 4);
+                debug_assert_eq!(inputs.len(), 5);
                 debug_assert_eq!(outputs.len(), 1);
                 let source = inputs[0].required_custom::<Image>();
                 let destination = inputs[1].required_custom::<Image>();
                 let mode = inputs[2].required_enum_as::<BlendMode>();
                 let alpha = inputs[3].required_f64() as f32;
+                let clamp = inputs[4].required_enum_as::<Clamp>();
+                // Past [0, 1] the mix extrapolates beyond both images.
+                if !(0.0..=1.0).contains(&alpha) {
+                    return Err(InvokeError::invalid_input(3, "an alpha in [0, 1]", alpha));
+                }
                 // Two independent wires: a different size or format is the user's
                 // graph, not a broken invariant, and the blend kernel asserts on it.
                 if destination.desc() != source.desc() {
@@ -126,7 +148,7 @@ fn register_blend(library: &mut Library) {
                     ));
                 }
                 let mut output = imaginarium::InterleavedImage::new_zeroed(source.desc());
-                Blend::new(mode, alpha).apply_cpu(
+                Blend::new(mode, alpha).clamp(clamp).apply_cpu(
                     &source.interleaved(),
                     &destination.interleaved(),
                     &mut output,
@@ -158,6 +180,7 @@ fn register_blend(library: &mut Library) {
                 .description("Blend strength in [0, 1]. 1 is full source.")
                 .default(1.0),
         )
+        .input(clamp_input())
         .output(FuncOutput::new("Image", IMAGE_DATA_TYPE).description("Blended image."))
         .build(),
     );

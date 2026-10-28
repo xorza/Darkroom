@@ -45,10 +45,14 @@ fn logged(log: LogRing) -> Driver {
 
 /// A 400 × 300 window at scale 1 on `display`.
 fn small(display: DisplayKind) -> Driver {
+    sized(display, UVec2::new(400, 300))
+}
+
+fn sized(display: DisplayKind, size: UVec2) -> Driver {
     Driver::new(
         SessionConfig {
             display,
-            size: UVec2::new(400, 300),
+            size,
             scale: 1.0,
         },
         LogRing::default(),
@@ -488,28 +492,30 @@ fn a_folder_a_copy_would_break_is_refused() {
     assert_eq!((state.document, state.nodes.len()), (None, 0));
 }
 
-/// A shot of the whole 400 × 300 window is the frame: the canvas's ground and the node's body
-/// show the theme's colours exactly, and the legend's node rect is the rect `state` reports, as
-/// the scale is 1. A `max_side` of 100 scales it to 100 × 75 and the legend by 1/4, exactly. A
-/// node's shot is its body as the canvas shows it, (40, 119) to (317, 275), with 24 px around
-/// it, clamped to the window and rounded out: (16, 95) to (341, 299), 325 × 204, the body at
-/// (24, 24) in it. A rect of the canvas at the node's place, 100 × 50 at zoom 1, starts at the
-/// body's corner, and one past the window or of negative size is empty. A pane's shot is its rect, rounded out; a name no visible tab shows lists those
-/// that are. The CPU display lays the node out where the GPU one does, and has no shots.
+/// A shot of the whole 400 × 340 window, tall enough to hold the node, is the frame: the canvas's
+/// ground and the node's body show the theme's colours exactly, and the legend's node rect is the
+/// rect `state` reports, as the scale is 1. A `max_side` of 100 scales it to 100 × 85 and the
+/// legend by 1/4, exactly. A node's shot is its body as the canvas shows it, (40, 119) to
+/// (317, 312), with 24 px around it, clamped to the window and rounded out: (16, 95) to (341, 336),
+/// 325 × 241, the body at (24, 24) in it. A rect of the canvas at the node's place, 100 × 50 at
+/// zoom 1, starts at the body's corner, and one past the window or of negative size is empty. A
+/// pane's shot is its rect, rounded out; a name no visible tab shows lists those that are. The CPU
+/// display lays the node out where the GPU one does, and has no shots.
 #[test]
 fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
-    let mut driver = small(DisplayKind::TestGpu);
+    let window = UVec2::new(400, 340);
+    let mut driver = sized(DisplayKind::TestGpu, window);
     let dir = TempDir::new("darkroom-driver-shot");
     let path = fixture::project(dir.path(), &[BRIGHTNESS]);
     driver.open(&path, OpenMode::Copy).unwrap();
     let screen = driver.state(Detail::Concise, None).unwrap().nodes[0]
         .screen
         .unwrap();
-    assert_eq!(screen, [40.0, 119.0, 277.0, 156.0]);
+    assert_eq!(screen, [40.0, 119.0, 277.0, 193.0]);
 
     let theme = Theme::default();
     let whole = driver.shot(&Region::Window, 400).unwrap();
-    assert_eq!(whole.size, UVec2::new(400, 300));
+    assert_eq!(whole.size, window);
     assert_eq!(whole.legend[0].name, BRIGHTNESS);
     assert_eq!(whole.legend[0].rect, screen);
     let pixels = decode(&whole.png);
@@ -531,8 +537,8 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
     );
 
     let quarter = driver.shot(&Region::Window, 100).unwrap();
-    assert_eq!(quarter.size, UVec2::new(100, 75));
-    assert_eq!(decode(&quarter.png).dimensions(), (100, 75));
+    assert_eq!(quarter.size, UVec2::new(100, 85));
+    assert_eq!(decode(&quarter.png).dimensions(), (100, 85));
     assert_eq!(quarter.legend[0].rect, screen.map(|v| v / 4.0));
     let ports = |shot: &Shot| {
         shot.legend[0]
@@ -554,7 +560,7 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
         .shot(&Region::Node(BRIGHTNESS.to_string()), 1000)
         .unwrap();
     assert_eq!(NODE_MARGIN, 24.0);
-    assert_eq!(node.size, UVec2::new(325, 204));
+    assert_eq!(node.size, UVec2::new(325, 241));
     assert_eq!(node.legend[0].rect[..2], [24.0, 24.0]);
     assert!(
         node.path
@@ -588,7 +594,7 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
         ),
         Err(DriverError::EmptyRegion { .. })
     ));
-    // The title: the 300 px window's status bar covers the footer a node's locator presses.
+    // The title: a short window's status bar covers the footer a node's locator presses.
     let settled = driver.act(&[click(Locator::NodeHeader(BRIGHTNESS.to_string()))]);
     assert!(settled.is_ok(), "settled after the failure: {settled:?}");
 
@@ -610,7 +616,7 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
         other => panic!("{other:?}"),
     }
 
-    let mut cpu = small(DisplayKind::Cpu);
+    let mut cpu = sized(DisplayKind::Cpu, window);
     cpu.open(&path, OpenMode::Copy).unwrap();
     assert_eq!(
         cpu.state(Detail::Concise, None).unwrap().nodes[0].screen,

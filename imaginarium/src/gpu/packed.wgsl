@@ -1,7 +1,7 @@
 // Shared by the shaders over tightly packed buffers: how a channel value of
 // `sample_byte_len` bytes (1 = u8, 2 = u16, 4 = f32) sits in a little-endian u32
-// word, the one rounding rule for narrowing into an integer type, and the
-// linear index of a 2-D dispatch.
+// word, the one rounding rule for narrowing into an integer type, the hold an
+// op's `Clamp` names, and the linear index of a 2-D dispatch.
 
 const NO_ALPHA: u32 = 0xffffffffu;
 const WORKGROUP_SIZE: u32 = 256u;
@@ -32,6 +32,21 @@ fn pack(value: f32, shift: u32, sample_byte_len: u32) -> u32 {
         return bitcast<u32>(value);
     }
     return u32(round(clamp(value, 0.0, full_scale(sample_byte_len)))) << shift;
+}
+
+// `value` held at black from `clamp` 1 and at `white` too from 2, as
+// `Clamp::shader_code` numbers them: the CPU's compare-selects, so a negative
+// zero stays. The CPU's ±∞ bounds are not passed, as WGSL lets an
+// implementation assume no infinity occurs.
+fn hold(value: f32, clamp: u32, white: f32) -> f32 {
+    var held = value;
+    if clamp >= 1u && 0.0 > held {
+        held = 0.0;
+    }
+    if clamp >= 2u && held > white {
+        held = white;
+    }
+    return held;
 }
 
 // The invocation's index in a dispatch laid out as rows of `groups.x`

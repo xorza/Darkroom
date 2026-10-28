@@ -7,14 +7,14 @@
 // bytes; `alpha_channel` (or NO_ALPHA) marks the channel copied through.
 //
 // Formula: out = in * scale + offset in the storage type's own units — the CPU's
-// `ChannelAffine`, whose values the uniform carries — which `pack` saturates for
-// an integer type and an f32 keeps unbounded.
+// `ChannelAffine`, whose values the uniform carries — then `hold`, which `pack`
+// saturates for an integer type and an f32 keeps.
 
 struct Params {
     scale: f32,
     offset: f32,
     max: f32,
-    _pad: u32,
+    clamp: u32,
     byte_len: u32,         // packed image size = width * height * bytes_per_pixel
     sample_byte_len: u32,  // bytes per channel value: 1 (u8), 2 (u16), 4 (f32)
     channel_count: u32,    // channels per pixel
@@ -45,7 +45,7 @@ fn main(
         let value = unpack(data[w], shift, sample_byte_len);
         var adjusted = value;
         if (offset / sample_byte_len) % params.channel_count != params.alpha_channel {
-            adjusted = value * params.scale + params.offset;
+            adjusted = hold(value * params.scale + params.offset, params.clamp, params.max);
         }
         out_word = out_word | pack(adjusted, shift, sample_byte_len);
     }

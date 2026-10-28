@@ -92,7 +92,7 @@ impl Kernel for BlendRow<'_, u16> {
 }
 
 /// Eight samples a step. The full scale is one, so the reference's multiply by it is exact, and
-/// `f32` storage keeps the blend as it is, unbounded.
+/// `f32` storage keeps the blend as the clamp leaves it.
 impl Kernel for BlendRow<'_, f32> {
     type Output = ();
 
@@ -112,13 +112,15 @@ struct Splat<F: F32x8> {
     mode: BlendMode,
     alpha: F,
     one_minus_alpha: F,
-    zero: F,
     one: F,
     half: F,
     two: F,
     full_scale: F,
     /// Lanes 3 and 7 in an RGBA row, the alpha channel of each pixel; none in another.
     alpha_lanes: F::Mask,
+    /// The clamp's ends of `[0, 1]`, `∓∞` in an alpha lane, which no clamp holds.
+    low: F,
+    high: F,
 }
 
 impl<F: F32x8> Splat<F> {
@@ -129,16 +131,23 @@ impl<F: F32x8> Splat<F> {
             Alpha::Absent => [0.0; F32_LANES],
             Alpha::Mixed => [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
         };
+        let color_lanes = |color: f32, alpha_lane: f32| match alpha {
+            Alpha::Absent => isa.splat_f32(color),
+            Alpha::Mixed => isa.load_f32(&[
+                color, color, color, alpha_lane, color, color, color, alpha_lane,
+            ]),
+        };
         Self {
             mode: params.mode,
             alpha: isa.splat_f32(params.alpha),
             one_minus_alpha: isa.splat_f32(1.0 - params.alpha),
-            zero,
             one: isa.splat_f32(1.0),
             half: isa.splat_f32(0.5),
             two: isa.splat_f32(2.0),
             full_scale: isa.splat_f32(full_scale),
             alpha_lanes: isa.load_f32(&alpha_lanes).lanes_gt(zero),
+            low: color_lanes(params.clamp.low(), f32::NEG_INFINITY),
+            high: color_lanes(params.clamp.high(1.0), f32::INFINITY),
         }
     }
 
@@ -149,16 +158,16 @@ impl<F: F32x8> Splat<F> {
         isa.round_clamped_f32_to_i32(self.blend(src, dst) * self.full_scale, self.full_scale)
     }
 
-    /// `BlendMode::blend` of normalized channels, `Normal` in the alpha lanes.
+    /// `BlendMode::blend` of normalized channels, `Normal` in the alpha lanes, held to the clamp.
     ///
     /// `max` and `min` are compare-selects, `a > b ? a : b` and `a > b ? b : a`, which the
-    /// reference spells out, so each takes a NaN or a signed zero to the same side.
+    /// reference's hold spells out, so each takes a NaN or a signed zero to the same side.
     #[inline(always)]
     fn blend(self, src: F, dst: F) -> F {
         let blended = match self.mode {
             BlendMode::Normal => src,
-            BlendMode::Add => self.one.min(src + dst),
-            BlendMode::Subtract => (dst - src).max(self.zero),
+            BlendMode::Add => src + dst,
+            BlendMode::Subtract => dst - src,
             BlendMode::Multiply => src * dst,
             BlendMode::Screen => self.one - (self.one - src) * (self.one - dst),
             BlendMode::Overlay => {
@@ -168,6 +177,7 @@ impl<F: F32x8> Splat<F> {
             }
         };
         let blended = self.alpha_lanes.select(src, blended);
-        blended * self.alpha + dst * self.one_minus_alpha
+        let mixed = blended * self.alpha + dst * self.one_minus_alpha;
+        self.low.max(mixed).min(self.high)
     }
 }

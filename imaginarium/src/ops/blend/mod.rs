@@ -11,6 +11,7 @@ use crate::gpu::Gpu;
 #[cfg(feature = "wgpu")]
 use crate::gpu::gpu_image::GpuImage;
 use crate::interleaved::interleaved_image::InterleavedImage;
+use crate::ops::clamp::Clamp;
 
 /// How a source channel is combined with the destination channel under it.
 ///
@@ -24,9 +25,9 @@ pub enum BlendMode {
     /// `src` — the destination shows through only via the alpha mix.
     #[default]
     Normal,
-    /// `src + dst`, clamped at one.
+    /// `src + dst`.
     Add,
-    /// `dst - src`, clamped at zero.
+    /// `dst - src`.
     Subtract,
     /// `src * dst`.
     Multiply,
@@ -45,20 +46,25 @@ pub struct Blend {
     /// 0.0 = fully dst, 1.0 = fully src (for Normal mode)
     /// For other modes, this controls the strength of the effect.
     pub alpha: f32,
+    /// The ends of the range each color channel's result is held to, after the alpha mix; an
+    /// integer one saturates to its range whatever this is, and an alpha channel is not held.
+    pub clamp: Clamp,
 }
 
 impl Default for Blend {
     fn default() -> Self {
-        Self {
-            mode: BlendMode::Normal,
-            alpha: 1.0,
-        }
+        Self::new(BlendMode::Normal, 1.0)
     }
 }
 
 impl Blend {
+    /// `mode` at `alpha` under [`Clamp::DEFAULT`].
     pub const fn new(mode: BlendMode, alpha: f32) -> Self {
-        Self { mode, alpha }
+        Self {
+            mode,
+            alpha,
+            clamp: Clamp::DEFAULT,
+        }
     }
 
     /// Builder method to set blend mode.
@@ -72,6 +78,13 @@ impl Blend {
     #[must_use]
     pub const fn alpha(mut self, alpha: f32) -> Self {
         self.alpha = alpha;
+        self
+    }
+
+    /// Builder method to set the clamp.
+    #[must_use]
+    pub const fn clamp(mut self, clamp: Clamp) -> Self {
+        self.clamp = clamp;
         self
     }
 
@@ -112,22 +125,15 @@ pub(crate) mod internals {
         /// Combines two normalized `[0, 1]` channel values, then mixes the result
         /// back over `dst` by `alpha`: `blended * alpha + dst * (1 - alpha)`.
         ///
-        /// The scalar reference, which the vector kernels hold to the bit. The clamps of `Add` and
-        /// `Subtract` are compare-selects, which take a NaN to the bound and `−0` to `+0` on every
-        /// CPU, where `f32::min` and `f32::max` leave a signed zero's sign open. The result is left
-        /// unclamped — each storage type clamps to its own range on write.
+        /// The scalar reference, which the vector kernels hold to the bit. The result is left
+        /// unclamped: [`Blend::clamp`](crate::ops::blend::Blend::clamp) holds it after, and
+        /// each storage type saturates to its own range on write.
         #[inline]
         pub(crate) fn blend(self, src: f32, dst: f32, alpha: f32) -> f32 {
             let blended = match self {
                 Self::Normal => src,
-                Self::Add => {
-                    let sum = src + dst;
-                    if 1.0 > sum { sum } else { 1.0 }
-                }
-                Self::Subtract => {
-                    let difference = dst - src;
-                    if difference > 0.0 { difference } else { 0.0 }
-                }
+                Self::Add => src + dst,
+                Self::Subtract => dst - src,
                 Self::Multiply => src * dst,
                 Self::Screen => 1.0 - (1.0 - src) * (1.0 - dst),
                 Self::Overlay => {

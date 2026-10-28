@@ -86,14 +86,17 @@ pub(crate) mod internals {
     use crate::color::color_format::{ColorFormat, SampleType};
     use crate::color::sample::Sample;
     use crate::ops::blend::{Blend, BlendMode};
+    use crate::ops::clamp::Clamp;
+    use crate::ops::clamp::internals::hold;
 
-    /// One channel value blended against its destination: both normalized, blended, scaled back
-    /// and narrowed by the crate's rounding rule, which saturates an integer to its full scale and
-    /// keeps an `f32`, a NaN included.
+    /// One channel value blended against its destination: both normalized, blended, [`hold`] to
+    /// `clamp`'s ends of `[0, 1]`, scaled back and narrowed by the crate's rounding rule, which
+    /// saturates an integer to its full scale and keeps an `f32`, a NaN included.
     #[inline]
-    fn blend_value<T: Sample>(src: T, dst: T, mode: BlendMode, alpha: f32) -> T {
+    fn blend_value<T: Sample>(src: T, dst: T, mode: BlendMode, alpha: f32, clamp: Clamp) -> T {
         let blended = mode.blend(src.to_unit(), dst.to_unit(), alpha);
-        T::from_f32(blended * T::FULL_SCALE_F32)
+        let held = hold(blended, clamp.low(), clamp.high(1.0));
+        T::from_f32(held * T::FULL_SCALE_F32)
     }
 
     /// Blends one pixel in place: `params.mode` over the leading `color_count` channels,
@@ -107,20 +110,20 @@ pub(crate) mod internals {
         out: &mut [T],
         color_count: usize,
     ) {
-        let Blend { mode, alpha } = params;
+        let Blend { mode, alpha, clamp } = params;
         for ((&s, &d), o) in src[..color_count]
             .iter()
             .zip(&dst[..color_count])
             .zip(out[..color_count].iter_mut())
         {
-            *o = blend_value(s, d, mode, alpha);
+            *o = blend_value(s, d, mode, alpha, clamp);
         }
         for ((&s, &d), o) in src[color_count..]
             .iter()
             .zip(&dst[color_count..])
             .zip(out[color_count..].iter_mut())
         {
-            *o = blend_value(s, d, BlendMode::Normal, alpha);
+            *o = blend_value(s, d, BlendMode::Normal, alpha, Clamp::None);
         }
     }
 

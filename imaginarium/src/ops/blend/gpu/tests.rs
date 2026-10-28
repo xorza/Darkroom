@@ -8,8 +8,9 @@ use crate::internals::create_test_image;
 use crate::internals::gpu::test_gpu;
 use crate::internals::image_diff::assert_matches_cpu;
 use crate::ops::blend::{Blend, BlendMode};
+use crate::ops::clamp::Clamp;
 
-/// Every format, mode and a spread of alphas against the CPU reference. One kernel
+/// Every format, mode, clamp and a spread of alphas against the CPU reference. One kernel
 /// serves every dispatch, so a reused kernel that kept anything of an earlier run
 /// shows up as a mismatch on a later one.
 #[test]
@@ -22,9 +23,11 @@ fn gpu_matches_cpu() {
         let dst_cpu = create_test_image(format, Size2us::new(13, 5), 100);
         let src = GpuImage::from_image(gpu, &src_cpu).unwrap();
         let dst = GpuImage::from_image(gpu, &dst_cpu).unwrap();
-        for mode in BlendMode::iter() {
+        for (mode, clamp) in
+            BlendMode::iter().flat_map(|mode| Clamp::iter().map(move |clamp| (mode, clamp)))
+        {
             for alpha in [0.0, 0.35, 1.0] {
-                let params = Blend::new(mode, alpha);
+                let params = Blend::new(mode, alpha).clamp(clamp);
                 let mut output = GpuImage::new_empty(gpu, dst.desc).unwrap();
                 params.apply_gpu(gpu, &src, &dst, &mut output);
 
@@ -33,7 +36,7 @@ fn gpu_matches_cpu() {
                 assert_matches_cpu(
                     &output.to_image(gpu).unwrap(),
                     &expected,
-                    &format!("{format} {mode:?} alpha {alpha}"),
+                    &format!("{format} {mode:?} {clamp:?} alpha {alpha}"),
                 );
             }
         }

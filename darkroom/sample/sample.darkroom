@@ -13,7 +13,7 @@
             ("1597eb8d-1700-4637-9d30-37da1b6d28d4"): (
                 kind: Func((
                     id: ("975cc74b-8412-4293-b2cb-ef8d41fdd9b3"),
-                    signature: "6035a60ef89541e2d86e08a11c01975d9b5b887551ad3e39db5c975f6e259716",
+                    signature: "03b4887a8aaa1cf8021c2a27f0cc86e3381f8899b4f22ce8292302d4c1e32e8f",
                 )),
                 name: "Blend",
                 cache: r#None,
@@ -31,7 +31,7 @@
             ("ef3d267f-7460-490f-a885-3944c99a9fdb"): (
                 kind: Func((
                     id: ("ebe9a4d0-2cb1-4354-b66e-8e7bee7cb860"),
-                    signature: "154356692ff05e699f79bbee7f18f972f40d39cfe176dbd0475788dae9cc2989",
+                    signature: "1d60472137e43d6d6586fa3d09d5c13d91d4dbc51400f68e50e417801194eddb",
                 )),
                 name: "Brightness / Contrast",
                 cache: r#None,
@@ -98,6 +98,10 @@
                 port_idx: 3,
             ), Const(Float(0.5))),
             ((
+                node_id: ("1597eb8d-1700-4637-9d30-37da1b6d28d4"),
+                port_idx: 4,
+            ), Const(Enum("Black"))),
+            ((
                 node_id: ("696af895-549c-44c9-9b92-5917e2dfbd9a"),
                 port_idx: 0,
             ), Wire((
@@ -134,6 +138,10 @@
                 node_id: ("ef3d267f-7460-490f-a885-3944c99a9fdb"),
                 port_idx: 2,
             ), Const(Float(1.0))),
+            ((
+                node_id: ("ef3d267f-7460-490f-a885-3944c99a9fdb"),
+                port_idx: 3,
+            ), Const(Enum("Black"))),
             ((
                 node_id: ("f6f72b9b-3e13-4d8d-bcbb-bffad1eeaa4b"),
                 port_idx: 0,
