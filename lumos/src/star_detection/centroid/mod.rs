@@ -30,7 +30,6 @@ use crate::bg_mesh::mesh_surface::SurfaceReader;
 use crate::bit_buffer2::BitBuffer2;
 use crate::image::masked_plane::MaskedPlane;
 use crate::star_detection::bg::sky_noise::SkyNoise;
-use crate::star_detection::centroid::covariance::Cov2;
 use crate::star_detection::centroid::gaussian_fit::GaussianFit;
 use crate::star_detection::centroid::measure_grid::MeasureGrid;
 use crate::star_detection::centroid::moffat_fit::MoffatFit;
@@ -201,15 +200,10 @@ impl MeasurePlanes<'_> {
             Some(FitShape::Elliptical(covariance)) => {
                 (covariance.fwhm(), covariance.eccentricity())
             }
-            Some(FitShape::Round { fwhm }) => {
-                (fwhm, metrics.moment_shape().map_or(0.0, Cov2::eccentricity))
-            }
+            Some(FitShape::Round { fwhm }) => (fwhm, metrics.moment_shape().eccentricity()),
             None => {
                 let shape = metrics.moment_shape();
-                (
-                    shape.map_or(0.0, Cov2::fwhm),
-                    shape.map_or(0.0, Cov2::eccentricity),
-                )
+                (shape.fwhm(), shape.eccentricity())
             }
         };
 

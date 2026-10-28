@@ -43,18 +43,42 @@ impl Cov2 {
         }
     }
 
-    /// The covariance of the profile before the pixel integrated it, `None` when it is not
-    /// positive definite: the moments of pixel samples hold the profile convolved with the unit
-    /// box, which adds the box's variance 1/12 on each axis and nothing across them. Exact for
-    /// unweighted moments. Through the Gaussian window, the box's kurtosis leaves `1/(480·σ²)` px²
-    /// on each axis to first order: 0.0009 at σ 1.5.
-    pub(super) fn less_pixel(self) -> Option<Self> {
-        let less = Self {
-            xx: self.xx - PIXEL_VARIANCE,
-            yy: self.yy - PIXEL_VARIANCE,
-            xy: self.xy,
-        };
-        (less.xx > 0.0 && less.det() > 0.0).then_some(less)
+    /// The covariance of the profile before the pixel integrated it: the moments of pixel samples
+    /// hold the profile convolved with the unit box, which adds the box's variance 1/12 on each
+    /// axis and nothing across them. Exact for unweighted moments. Through the Gaussian window, the
+    /// box's kurtosis leaves `1/(480·σ²)` px² on each axis to first order: 0.0009 at σ 1.5.
+    ///
+    /// Each principal variance loses the 1/12 and stops at 0, so an axis narrower than a pixel
+    /// reads unresolved while the other keeps its width: a point is the zero matrix, a line a pixel
+    /// wide keeps its length and reads eccentricity 1. SExtractor and photutils meet the same
+    /// singular case by adding 1/12 to both axes, which here would report the pixel's width as the
+    /// PSF's on those sources alone.
+    pub(super) fn less_pixel(self) -> Self {
+        let trace = self.trace();
+        let spread = (trace * trace - 4.0 * self.det()).max(0.0).sqrt();
+        let major = f64::midpoint(trace, spread);
+        let minor = (trace - spread) / 2.0;
+        if minor >= PIXEL_VARIANCE {
+            Self {
+                xx: self.xx - PIXEL_VARIANCE,
+                yy: self.yy - PIXEL_VARIANCE,
+                xy: self.xy,
+            }
+        } else if major > PIXEL_VARIANCE {
+            // `(C − λ₂·I)/(λ₁ − λ₂)` projects on the major axis; λ₁ > 1/12 > λ₂ keeps it defined.
+            let scale = (major - PIXEL_VARIANCE) / (major - minor);
+            Self {
+                xx: (self.xx - minor) * scale,
+                yy: (self.yy - minor) * scale,
+                xy: self.xy * scale,
+            }
+        } else {
+            Self {
+                xx: 0.0,
+                yy: 0.0,
+                xy: 0.0,
+            }
+        }
     }
 
     /// Inverse of the symmetric matrix, or `None` if (near-)singular.

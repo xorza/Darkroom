@@ -27,7 +27,8 @@ const UPDATE: &str = "LUMOS_SNAPSHOTS";
 /// The deviations a failure lists before it counts the rest.
 const LISTED: usize = 8;
 
-/// What one stage produced, entry by entry: each plane summed in cells, every other value whole.
+/// What one stage produced, entry by entry: each plane summed in cells, bytes by their digest,
+/// every other value whole.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub(crate) struct Snapshot(Vec<Entry>);
 
@@ -43,7 +44,9 @@ enum Value {
     F32s(Vec<f32>),
     F64s(Vec<f64>),
     Count(u64),
-    Bytes(#[serde(with = "common::hex_bytes")] Vec<u8>),
+    /// The blake3 digest of bytes too many to keep: a full frame's flag plane, two hex digits a
+    /// pixel, is 46.4 MiB at 24 MP. Skia Gold keeps an image by its digest the same way.
+    Digest(#[serde(with = "common::hex_bytes")] [u8; 32]),
 }
 
 /// A plane by its size, its extremes and two `f64` sums of each cell of a grid of at most
@@ -76,8 +79,8 @@ impl Snapshot {
         self.push(label, Value::Count(count as u64))
     }
 
-    pub(crate) fn bytes(&mut self, label: &str, bytes: &[u8]) -> &mut Self {
-        self.push(label, Value::Bytes(bytes.to_vec()))
+    pub(crate) fn digest(&mut self, label: &str, bytes: &[u8]) -> &mut Self {
+        self.push(label, Value::Digest(blake3::hash(bytes).into()))
     }
 
     fn push(&mut self, label: &str, value: Value) -> &mut Self {
@@ -167,13 +170,9 @@ impl Snapshot {
                         differences.push(format!("{label} is {count}, the reference {want}"));
                     }
                 }
-                (Value::Bytes(bytes), Value::Bytes(want)) => {
-                    if bytes != want {
-                        differences.push(format!(
-                            "{label}: the {} bytes differ from the reference's {}",
-                            bytes.len(),
-                            want.len()
-                        ));
+                (Value::Digest(digest), Value::Digest(want)) => {
+                    if digest != want {
+                        differences.push(format!("{label}: the digest is not the reference's"));
                     }
                 }
                 (value, want) => differences.push(format!(
@@ -194,7 +193,7 @@ impl Value {
             Self::F32s(_) => "f32 values",
             Self::F64s(_) => "f64 values",
             Self::Count(_) => "a count",
-            Self::Bytes(_) => "bytes",
+            Self::Digest(_) => "a digest",
         }
     }
 }
@@ -396,11 +395,17 @@ mod tests {
         let mut other = Snapshot::default();
         other.count("n", 4);
         assert_eq!(counted.differences(&other), ["n is 3, the reference 4"]);
-        let mut bytes = Snapshot::default();
-        bytes.bytes("n", &[1, 2]);
+        let mut digest = Snapshot::default();
+        digest.digest("n", &[1, 2]);
         assert_eq!(
-            bytes.differences(&counted),
-            ["n is bytes, the reference a count"]
+            digest.differences(&counted),
+            ["n is a digest, the reference a count"]
+        );
+        let mut moved = Snapshot::default();
+        moved.digest("n", &[1, 3]);
+        assert_eq!(
+            moved.differences(&digest),
+            ["n: the digest is not the reference's"]
         );
         let mut renamed = Snapshot::default();
         renamed.count("m", 3);

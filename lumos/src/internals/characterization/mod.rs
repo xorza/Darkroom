@@ -39,6 +39,8 @@ use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::cfa::mosaic::Mosaic;
+use crate::image::flags::pixel_flags::PixelFlags;
+use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::stretch::{ColorMode, Stretch, StretchMethod};
 use crate::ingest::ingest_config::IngestConfig;
@@ -82,20 +84,27 @@ fn warped(image: &LinearImage, transform: Transform) -> WarpResult {
 /// A decoded mosaic as a kept cache holds it: its plane, the flags its decoder set, and its
 /// quantization σ, so a change to any of the three moves its reference.
 fn cfa_snapshot(snapshot: &mut Snapshot, name: &str, cfa: &CfaImage) {
-    snapshot
-        .plane(&format!("{name} plane"), cfa.data())
-        .bytes(
-            &format!("{name} flags"),
-            cfa.flags().map_or(&[][..], |flags| flags.bytes()),
-        )
-        .f32s(
-            &format!("{name} quantization sigma"),
-            &[cfa
-                .metadata
-                .derived
-                .quantization_sigma()
-                .unwrap_or(f32::NAN)],
+    let flags = cfa.flags();
+    snapshot.plane(&format!("{name} plane"), cfa.data()).digest(
+        &format!("{name} flags"),
+        flags.map_or(&[][..], PixelFlags::bytes),
+    );
+    // The digest says the flags moved; each flag's count says which.
+    for (flag, flag_name) in QualityFlags::NAMED {
+        let count = flags.map_or(0, |flags| flags.count(flag));
+        snapshot.count(
+            &format!("{name} {flag_name}"),
+            usize::try_from(count).expect("a pixel count fits usize"),
         );
+    }
+    snapshot.f32s(
+        &format!("{name} quantization sigma"),
+        &[cfa
+            .metadata
+            .derived
+            .quantization_sigma()
+            .unwrap_or(f32::NAN)],
+    );
 }
 
 fn detect(image: &LinearImage) -> Vec<Star> {

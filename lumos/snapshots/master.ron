@@ -526,7 +526,31 @@
     ),
     (
         label: "bias flags",
-        value: Bytes(""),
+        value: Digest("af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262"),
+    ),
+    (
+        label: "bias NO_DATA",
+        value: Count(0),
+    ),
+    (
+        label: "bias SATURATED",
+        value: Count(0),
+    ),
+    (
+        label: "bias DEFECT",
+        value: Count(0),
+    ),
+    (
+        label: "bias COSMIC_RAY",
+        value: Count(0),
+    ),
+    (
+        label: "bias REPAIRED",
+        value: Count(0),
+    ),
+    (
+        label: "bias FLAT_FLOOR",
+        value: Count(0),
     ),
     (
         label: "bias quantization sigma",
@@ -1061,7 +1085,31 @@
     ),
     (
         label: "dark flags",
-        value: Bytes(""),
+        value: Digest("af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262"),
+    ),
+    (
+        label: "dark NO_DATA",
+        value: Count(0),
+    ),
+    (
+        label: "dark SATURATED",
+        value: Count(0),
+    ),
+    (
+        label: "dark DEFECT",
+        value: Count(0),
+    ),
+    (
+        label: "dark COSMIC_RAY",
+        value: Count(0),
+    ),
+    (
+        label: "dark REPAIRED",
+        value: Count(0),
+    ),
+    (
+        label: "dark FLAT_FLOOR",
+        value: Count(0),
     ),
     (
         label: "dark quantization sigma",
@@ -1596,7 +1644,31 @@
     ),
     (
         label: "flat flags",
-        value: Bytes(""),
+        value: Digest("af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262"),
+    ),
+    (
+        label: "flat NO_DATA",
+        value: Count(0),
+    ),
+    (
+        label: "flat SATURATED",
+        value: Count(0),
+    ),
+    (
+        label: "flat DEFECT",
+        value: Count(0),
+    ),
+    (
+        label: "flat COSMIC_RAY",
+        value: Count(0),
+    ),
+    (
+        label: "flat REPAIRED",
+        value: Count(0),
+    ),
+    (
+        label: "flat FLAT_FLOOR",
+        value: Count(0),
     ),
     (
         label: "flat quantization sigma",

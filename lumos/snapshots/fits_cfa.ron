@@ -462,7 +462,31 @@
     ),
     (
         label: "mosaic flags",
-        value: Bytes(""),
+        value: Digest("af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262"),
+    ),
+    (
+        label: "mosaic NO_DATA",
+        value: Count(0),
+    ),
+    (
+        label: "mosaic SATURATED",
+        value: Count(0),
+    ),
+    (
+        label: "mosaic DEFECT",
+        value: Count(0),
+    ),
+    (
+        label: "mosaic COSMIC_RAY",
+        value: Count(0),
+    ),
+    (
+        label: "mosaic REPAIRED",
+        value: Count(0),
+    ),
+    (
+        label: "mosaic FLAT_FLOOR",
+        value: Count(0),
     ),
     (
         label: "mosaic quantization sigma",
