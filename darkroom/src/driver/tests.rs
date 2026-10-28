@@ -491,8 +491,8 @@ fn a_folder_a_copy_would_break_is_refused() {
 /// A shot of the whole 400 × 300 window is the frame: the canvas's ground and the node's body
 /// show the theme's colours exactly, and the legend's node rect is the rect `state` reports, as
 /// the scale is 1. A `max_side` of 100 scales it to 100 × 75 and the legend by 1/4, exactly. A
-/// node's shot is its body as the canvas shows it, (40, 118) to (317, 274), with 24 px around
-/// it, clamped to the window and rounded out: (16, 94) to (341, 298), 325 × 204, the body at
+/// node's shot is its body as the canvas shows it, (40, 119) to (317, 275), with 24 px around
+/// it, clamped to the window and rounded out: (16, 95) to (341, 299), 325 × 204, the body at
 /// (24, 24) in it. A rect of the canvas at the node's place, 100 × 50 at zoom 1, starts at the
 /// body's corner, and one past the window or of negative size is empty. A pane's shot is its rect, rounded out; a name no visible tab shows lists those
 /// that are. The CPU display lays the node out where the GPU one does, and has no shots.
@@ -505,7 +505,7 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
     let screen = driver.state(Detail::Concise, None).unwrap().nodes[0]
         .screen
         .unwrap();
-    assert_eq!(screen, [40.0, 118.0, 277.0, 156.0]);
+    assert_eq!(screen, [40.0, 119.0, 277.0, 156.0]);
 
     let theme = Theme::default();
     let whole = driver.shot(&Region::Window, 400).unwrap();

@@ -338,12 +338,25 @@ impl CfaImage {
             .map_or([1.0; 3], |[red, green, blue, _]| {
                 [red / green, 1.0, blue / green]
             });
-        // `NO_DATA` travels at its own extent, which `repair_nulls` above is what makes honest:
-        // these pixels were reconstructed rather than measured, and the combine still has to know
-        // that. Every other fact spreads as far as the demosaic reads.
+        // A photosite whose value measured nothing — a null, a defect, a hit — holds its
+        // same-color neighbours' value by now, from `repair_nulls` above, the defect correction
+        // and the cosmic-ray in-painting, so the demosaic reads an estimate there as it reads one
+        // for every color a photosite lacks. Those flags stay at their own extent, as Siril,
+        // PixInsight's CosmeticCorrection and dcraw's `.badpixels` repair before the demosaic and
+        // take the result as data; grown by the demosaic's reach, a few percent of warm pixels
+        // would flag every pixel. A bound, saturated or at the flat's floor, is not repaired, and
+        // spreads as far as the demosaic reads.
         let mut flags = self.flags;
         if let Some(flags) = &mut flags {
-            flags.dilate(demosaic.support(), QualityFlags::NO_DATA);
+            debug_assert!(
+                flags.bytes().iter().all(|&byte| {
+                    let pixel = QualityFlags::from_byte(byte);
+                    !pixel.intersects(QualityFlags::RESAMPLE_EXCLUDED)
+                        || pixel.intersects(QualityFlags::REPAIRED)
+                }),
+                "a photosite that measured nothing reached the demosaic unrepaired"
+            );
+            flags.dilate(demosaic.support(), QualityFlags::RESAMPLE_EXCLUDED);
         }
 
         let mut image = LinearImage::new(demosaic.run(self.data, gains, cancel)?, flags, metadata);
@@ -358,8 +371,9 @@ impl CfaImage {
     /// Stars are measured on green alone, at its full resolution, with no color interpolated
     /// across an edge as a demosaic would.
     ///
-    /// A filled photosite carries the flags of the greens it was filled from. One with no green
-    /// neighbour, which only a frame narrower than its pattern has, keeps its own sample and
+    /// A filled photosite carries the flags of the greens it was filled from, but a repaired
+    /// green's own: its value is an estimate the fill reads as the demosaic reads it, and its
+    /// flags stay on it as [`Self::demosaic`] keeps them. One with no green neighbour, which only a frame narrower than its pattern has, keeps its own sample and
     /// flags. A mono frame is its own proxy, its metadata whole: nothing was filled, so its
     /// quantization step and flat gain still hold.
     pub fn green_proxy(&self) -> LinearImage {
@@ -417,7 +431,14 @@ impl CfaImage {
                         let neighbour = ny * size.width + nx;
                         sum += tap * f64::from(self.data[neighbour]);
                         weight += tap;
-                        carried |= flags.map_or(0, |flags| flags.at(neighbour).byte());
+                        let green =
+                            flags.map_or_else(QualityFlags::default, |flags| flags.at(neighbour));
+                        let passed = if green.intersects(QualityFlags::REPAIRED) {
+                            green.intersection(QualityFlags::RESAMPLE_CARRIED)
+                        } else {
+                            green
+                        };
+                        carried |= passed.byte();
                     }
                 }
                 let (value, value_flags) = if weight > 0.0 {

@@ -1359,6 +1359,25 @@ fn calibrate_align_stack_runs_end_to_end_on_real_lights() {
                 .all(|v| v.is_finite())
         );
     }
+    let coverage = result
+        .product
+        .coverage
+        .as_ref()
+        .expect("a warped stack measures its coverage")
+        .to_plane(0);
+    // All three frames reach most pixels: the dataset's 3% of warm pixels, repaired before the
+    // demosaic, cost each frame its own photosites alone. Measured 96.8% of the pixels; with the
+    // repairs' flags grown by the demosaic's reach, all three reached 1 pixel.
+    let full = coverage
+        .pixels()
+        .iter()
+        .filter(|&&share| share == 1.0)
+        .count();
+    assert!(
+        full >= coverage.pixels().len() / 100 * 95,
+        "all three frames reach {full} of {} pixels",
+        coverage.pixels().len()
+    );
 }
 
 /// A combine failure reaches the caller on one path: a cancel, an empty set and a frame-store
