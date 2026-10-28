@@ -98,7 +98,7 @@ impl Readout<'_> {
             .max_size((max_width, f32::INFINITY))
             .padding(Spacing::xy(theme.space.md, 0.0))
             .child_align(Align::v(VAlign::Center))
-            .chrome(pill::chrome(theme))
+            .chrome(theme.pill.clone())
             .show(ui, |ui| {
                 let style = support::colored_text(ui, ink, theme.font.body);
                 Text::new(text)

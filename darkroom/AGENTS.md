@@ -330,11 +330,19 @@ layout only: the graph does not change, and the run does not read it.
 - **A wash composites as CSS does**: `color::wash` mixes an ink into the ground it sits on, on
   the encoded values, and makes it opaque, as the alphas a design picks assume, at a strength of
   the theme's `TintScale`. A tint over a ground the code knows is a wash; `with_alpha` stays for
-  a layer over content it does not know, as the toolbar pill's veil and the rubber band. A
+  a layer over content it does not know, as the glass's tint and the rubber band. A
   hover lift and the wires' rest dim keep their linear blend: each was tuned by eye there, not
   picked as a design's alpha. Refused: `with_alpha` for a tint, which palantir blends in linear
   light, where a 10 % red wash read about three times as bright and an "on" button's tint
   outshone the hover fill.
+- **A surface that floats over content is frosted glass, from one recipe** (`theme::glass`): the
+  menus, the node palette, the combo lists, tooltips, the color picker and the toolbar pills, as
+  Fluent puts acrylic under flyouts, context menus and in-app surfaces
+  ([in-app acrylic](https://learn.microsoft.com/windows/apps/develop/ui/in-app-acrylic)). Its
+  luminance ceiling is derived so the muted ink holds WCAG's 4.5:1 over any backdrop as an 8-bit
+  target stores it. Refused: a tint alone, 1.18:1 over a white image; a frosted modal, whose
+  scrim leaves nothing to see through; the menu bar's menus alone. Chosen by the user on
+  2026-10-29.
 - **A value reads as a field**, as Blender's and Unreal's node inputs do: a quiet box at rest, the
   value at the left of its column, numbers in the mono face, and "—" in the muted ink for an
   input with nothing in it that could hold a constant. Refused: plain text, which does not say
