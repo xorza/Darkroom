@@ -9,17 +9,17 @@ use crate::image_ops::local_contrast::{
 use crate::internals::images::{mono_image, rgb_image};
 use crate::internals::synthetic::metrics::pixel_stats;
 use crate::internals::synthetic::patterns;
-use common::Size2us;
+use common::USize2;
 
 /// A low-contrast horizontal gradient, intensity 0.45 to 0.55.
-fn low_contrast(size: Size2us) -> Vec<f32> {
+fn low_contrast(size: USize2) -> Vec<f32> {
     patterns::horizontal_gradient(size, 0.45, 0.55).into_vec()
 }
 
 #[test]
 fn clahe_strength_zero_is_identity() {
-    let px = low_contrast(Size2us::new(64, 64));
-    let mut img = mono_image(Size2us::new(64, 64), px.clone());
+    let px = low_contrast(USize2::new(64, 64));
+    let mut img = mono_image(USize2::new(64, 64), px.clone());
     LocalContrast {
         strength: 0.0,
         ..Default::default()
@@ -37,7 +37,7 @@ fn clahe_strength_zero_is_identity() {
 /// past white rather than clipping it — on a field whose red runs twice its intensity.
 #[test]
 fn clahe_keeps_color_in_range() {
-    let size = Size2us::new(96, 96);
+    let size = USize2::new(96, 96);
     let i: Vec<f32> = (0..size.pixel_count())
         .map(|i| ((i as f32 * 0.013).sin() * 0.5 + 0.5).clamp(0.0, 1.0))
         .collect();
@@ -56,7 +56,7 @@ fn clahe_keeps_color_in_range() {
 /// 128 bins below put the bin's lower edge at 128 · 4 / 1024 = 0.5 — where 0.5 maps, exactly.
 #[test]
 fn clahe_flat_region_not_blown_up() {
-    let mut img = mono_image(Size2us::new(64, 64), vec![0.5; 64 * 64]);
+    let mut img = mono_image(USize2::new(64, 64), vec![0.5; 64 * 64]);
     LocalContrast::default().apply(&mut img).unwrap();
     assert!(img.channel(0).pixels().iter().all(|&v| v == 0.5));
 }
@@ -66,7 +66,7 @@ fn clahe_flat_region_not_blown_up() {
 /// holds `√(16384 / (4 · 256))` = 4 tiles a side before the cap, so 4 and 2 both stand.
 #[test]
 fn clahe_increases_low_contrast_and_every_knob_matters() {
-    let size = Size2us::new(128, 128);
+    let size = USize2::new(128, 128);
     let px = low_contrast(size);
     let in_std = pixel_stats(&px).std;
     let run = |tiles, clip_limit| {
@@ -118,7 +118,7 @@ fn clahe_tile_mappings_are_monotonic() {
 /// alone keeps every level.
 #[test]
 fn clahe_tiles_map_their_data_alone() {
-    let size = Size2us::new(4, 4);
+    let size = USize2::new(4, 4);
     let grid = TileGrid {
         cols: TileAxis::new(4, 1),
         rows: TileAxis::new(4, 1),
@@ -147,7 +147,7 @@ fn clahe_tiles_map_their_data_alone() {
 /// doubling commutes with rounding, so wherever the input red is twice the green the output is too.
 #[test]
 fn clahe_is_color_preserving() {
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let i = low_contrast(size);
     let r: Vec<f32> = i.iter().map(|&v| (2.0 * v).min(1.0)).collect();
     let mut img = rgb_image(size, [r.clone(), i.clone(), i]);
@@ -196,7 +196,7 @@ fn clipping_spreads_the_excess_across_the_range() {
 /// mapping between edges is the identity, to the rounding of the interpolation (4ε).
 #[test]
 fn a_flat_histogram_maps_to_the_identity() {
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let px: Vec<f32> = (0..4096).map(|i| (i as f32 + 0.5) / 4096.0).collect();
     let mut img = mono_image(size, px.clone());
     LocalContrast {
@@ -215,7 +215,7 @@ fn a_flat_histogram_maps_to_the_identity() {
 /// out strictly increasing, where a 256-entry lookup gives each run of 16 one output.
 #[test]
 fn distinct_values_stay_distinct() {
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let px: Vec<f32> = (0..4096).map(|i| (i as f32 / 4095.0).powi(2)).collect();
     let mut img = mono_image(size, px);
     LocalContrast {

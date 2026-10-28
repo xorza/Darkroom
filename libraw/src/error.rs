@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use common::Size2us;
+use common::USize2;
 use common::glam::USizeVec2;
 
 use crate::sys;
@@ -32,8 +32,8 @@ pub enum LibrawError {
         margin.x, margin.y
     )]
     Geometry {
-        raw: Size2us,
-        active: Size2us,
+        raw: USize2,
+        active: USize2,
         margin: USizeVec2,
     },
     /// LibRaw's own processing failed.

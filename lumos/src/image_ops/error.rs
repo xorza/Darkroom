@@ -8,7 +8,7 @@ use crate::error::InvalidConfigField;
 #[cfg(feature = "ml")]
 use crate::image_ops::ml::backend::WINDOW;
 #[cfg(feature = "ml")]
-use common::Size2us;
+use common::USize2;
 
 /// Why a display/processing op failed.
 #[derive(Debug, thiserror::Error)]
@@ -69,7 +69,7 @@ impl fmt::Display for AutoStretch {
 #[derive(Debug, thiserror::Error)]
 pub enum MlError {
     #[error("image must be at least {WINDOW}×{WINDOW}, got {}×{}", .0.width, .0.height)]
-    TooSmall(Size2us),
+    TooSmall(USize2),
     #[error("invalid ML tiling configuration: {0}")]
     Config(#[from] InvalidConfigField),
     #[error("ONNX model error: {0}")]

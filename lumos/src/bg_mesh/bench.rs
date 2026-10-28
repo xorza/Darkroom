@@ -7,7 +7,7 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 use crate::bench::scene::Field;
 use crate::bg_mesh::tile_stats::{TileInput, TileScratch, TileStats};
 use crate::star_detection::star_detection_config::bg_config::BgConfig;
-use common::Rect2us;
+use common::USizeRect2;
 use glam::USizeVec2;
 
 pub(crate) fn atomic(c: &mut Criterion) {
@@ -19,7 +19,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
         BenchmarkId::new("tile_stats", format!("tile_{side}")),
         |b| {
             let pixels = Field::Typical.tile(side);
-            let tile = Rect2us::new(USizeVec2::new(0, 0), USizeVec2::new(side, side));
+            let tile = USizeRect2::new(USizeVec2::new(0, 0), USizeVec2::new(side, side));
             let input = TileInput {
                 pixels: &pixels,
                 mask: None,

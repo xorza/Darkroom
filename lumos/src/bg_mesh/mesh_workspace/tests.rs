@@ -3,7 +3,7 @@ use common::Buffer2;
 use crate::bg_mesh::mesh_workspace::{MedianFilter, MeshParams, MeshWorkspace};
 use crate::bg_mesh::tile_stats::MAX_TILE_SAMPLES;
 use crate::bit_buffer2::BitBuffer2;
-use common::Size2us;
+use common::USize2;
 
 /// Tiles of `tile_size`, two σ-clip passes, and `median_filter`.
 const fn params(tile_size: usize, median_filter: MedianFilter) -> MeshParams {
@@ -91,7 +91,7 @@ fn a_measure_rebuilds_the_grid_for_layout_changes() {
 #[test]
 fn a_masked_measure_keeps_per_job_scratch_bounded() {
     let pixels = Buffer2::new_filled((512, 512), 0.5);
-    let mask = BitBuffer2::new_filled(Size2us::new(512, 512), false);
+    let mask = BitBuffer2::new_filled(USize2::new(512, 512), false);
     let mut workspace = MeshWorkspace::default();
 
     workspace.measure(&pixels, Some(&mask), None, params(256, MedianFilter::Skip));

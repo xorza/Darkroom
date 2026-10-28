@@ -578,7 +578,7 @@ fn evaluate_basis(uv: DVec2, terms: &[(usize, usize)], basis: &mut [f64]) {
 pub(crate) mod internals {
     use super::*;
     use crate::registration::transform::TransformType;
-    use common::Size2us;
+    use common::USize2;
 
     /// A fit's u and v coefficients.
     #[derive(Debug)]
@@ -734,7 +734,7 @@ pub(crate) mod internals {
             clippy::cast_sign_loss,
             reason = "a size over a positive grid spacing is non-negative"
         )]
-        pub(crate) fn max_grid_correction(&self, size: Size2us, grid_spacing: f64) -> f64 {
+        pub(crate) fn max_grid_correction(&self, size: USize2, grid_spacing: f64) -> f64 {
             // Integer-stepped to avoid float accumulation drift skipping the boundary band.
             let nx = (size.width as f64 / grid_spacing).floor() as usize;
             let ny = (size.height as f64 / grid_spacing).floor() as usize;

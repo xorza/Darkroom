@@ -12,7 +12,7 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 
-use common::Size2us;
+use common::USize2;
 use imaginarium::{ChannelLayout, PlanarDesc, PlanarImage};
 use lumos::{
     FrameDescError, FrameGain, ImageMetadata, LinearImage, LinearParts, PixelFlags, frame_desc,
@@ -145,7 +145,7 @@ impl Image {
 
     /// The `RGBA_U8` preview of this image at `size` — see [`imaginarium::Preview`] — read from
     /// the pixels where they lie, planes without interleaving them first.
-    pub fn preview_rgba8(&self, size: Size2us) -> imaginarium::InterleavedImage {
+    pub fn preview_rgba8(&self, size: USize2) -> imaginarium::InterleavedImage {
         let preview = imaginarium::Preview::new(size);
         match &self.pixels {
             Pixels::Interleaved(image) => preview.to_rgba8(image),

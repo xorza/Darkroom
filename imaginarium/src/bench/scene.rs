@@ -3,7 +3,7 @@
 
 use std::f32::consts::TAU;
 
-use common::{Size2us, par};
+use common::{USize2, par};
 use rayon::prelude::*;
 
 use crate::color::color_format::{ColorFormat, SampleType};
@@ -12,7 +12,7 @@ use crate::interleaved::interleaved_desc::InterleavedDesc;
 use crate::interleaved::interleaved_image::InterleavedImage;
 
 /// The standard frame: 6000 × 4000, an APS-C camera's 24 MP, as the lumos benches use.
-pub(crate) const FRAME: Size2us = Size2us::new(6000, 4000);
+pub(crate) const FRAME: USize2 = USize2::new(6000, 4000);
 /// The side of the tile an atomic case hands a kernel that takes an image.
 pub(crate) const TILE: usize = 512;
 
@@ -20,7 +20,7 @@ pub(crate) const TILE: usize = 512;
 /// white noise of σ 0.01, one pixel in fifty a star up to 1 above it in every color channel, all
 /// clamped to `[0, 1]`; alpha opaque. Each pixel draws from its own `split_mix` stream, so rows
 /// fill in parallel and a 24 MP frame takes a fraction of a second.
-pub(crate) fn sky(format: ColorFormat, size: Size2us, seed: u64) -> InterleavedImage {
+pub(crate) fn sky(format: ColorFormat, size: USize2, seed: u64) -> InterleavedImage {
     match format.sample_type {
         SampleType::U8 => typed_sky::<u8>(format, size, seed),
         SampleType::U16 => typed_sky::<u16>(format, size, seed),
@@ -28,8 +28,8 @@ pub(crate) fn sky(format: ColorFormat, size: Size2us, seed: u64) -> InterleavedI
     }
 }
 
-fn typed_sky<T: Sample>(format: ColorFormat, size: Size2us, seed: u64) -> InterleavedImage {
-    let Size2us { width, height } = size;
+fn typed_sky<T: Sample>(format: ColorFormat, size: USize2, seed: u64) -> InterleavedImage {
+    let USize2 { width, height } = size;
     let channel_count = format.channel_count.count();
     let color_count = channel_count - usize::from(format.has_alpha());
     let mut samples = vec![T::FULL_SCALE; width * height * channel_count];

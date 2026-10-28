@@ -23,7 +23,7 @@ use crate::star_detection::centroid::stamp::FitInputs;
 use crate::star_detection::centroid::stamp_bg::StampBg;
 use crate::star_detection::centroid::star_noise::StarNoise;
 use crate::star_detection::centroid::windowed_centroid::{WindowedCentroid, WindowedInputs};
-use common::Size2us;
+use common::USize2;
 
 /// The sky the stars sit on, which the residual has taken out.
 const SKY: f32 = 0.1;
@@ -33,7 +33,7 @@ const BETA: f32 = 2.5;
 
 /// The frame a star is rendered on: room for the wide star's annulus, out to 4 FWHM and a stamp
 /// radius beyond, about 49 px each way.
-const SIZE: Size2us = Size2us::new(128, 128);
+const SIZE: USize2 = USize2::new(128, 128);
 
 pub(crate) fn atomic(c: &mut Criterion) {
     let mut group = Kind::Atomic.group(c, "detection/centroid", Scale::Micros);

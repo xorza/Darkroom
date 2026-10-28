@@ -36,7 +36,7 @@ use crate::io::fits::flags_extension::{self, FLAGS_EXTNAME};
 use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD};
 use crate::io::fits::tile_parallel;
 use crate::io::load_ctx::LoadCtx;
-use common::Size2us;
+use common::USize2;
 
 const BUNDLE_FORMAT: &str = "CALMASTR";
 const DEFECT_FORMAT: &str = "DEFMAP";
@@ -388,7 +388,7 @@ fn encode_defect_map(map: &DefectMap) -> Result<EncodedDefectMap, BundleError> {
 
 /// The sensor extent the table states; `None` when an extent is missing, not positive, or the two
 /// overflow.
-fn read_defect_size(header: &Header) -> Result<Option<Size2us>, BundleError> {
+fn read_defect_size(header: &Header) -> Result<Option<USize2>, BundleError> {
     let extent = |name: &str| -> Result<Option<usize>, BundleError> {
         Ok(header
             .get_integer(name)?
@@ -400,7 +400,7 @@ fn read_defect_size(header: &Header) -> Result<Option<Size2us>, BundleError> {
     };
     Ok(width
         .checked_mul(height)
-        .map(|_| Size2us::new(width, height)))
+        .map(|_| USize2::new(width, height)))
 }
 
 #[cfg(test)]
@@ -408,17 +408,17 @@ mod tests {
     use crate::calibration::bundle::encode_defect_map;
     use crate::calibration::bundle::error::BundleError;
     use crate::calibration::defect_map::DefectMap;
-    use common::Size2us;
+    use common::USize2;
 
     /// A sensor extent past `i64::MAX` is refused with both edges, not written as a wrapped
     /// `LUMWID`; a zero height keeps the map's mask empty.
     #[test]
     fn a_defect_extent_past_the_fits_range_is_refused() {
         let width = usize::try_from(i64::MAX).unwrap() + 1;
-        let map = DefectMap::new(Size2us::new(width, 0));
+        let map = DefectMap::new(USize2::new(width, 0));
         assert!(matches!(
             encode_defect_map(&map),
-            Err(BundleError::DefectExtentOutOfRange { size }) if size == Size2us::new(width, 0)
+            Err(BundleError::DefectExtentOutOfRange { size }) if size == USize2::new(width, 0)
         ));
     }
 }

@@ -13,7 +13,7 @@ use crate::image::flags::quality_flags::QualityFlags;
 use crate::internals::assertions::bits;
 use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::test_rng::TestRng;
-use common::Size2us;
+use common::USize2;
 use glam::USizeVec2;
 
 fn prepare(mut flat: CfaImage, subtractor: Option<&CfaImage>) -> PreparedFlat {
@@ -40,7 +40,7 @@ fn standard_xtrans() -> CfaType {
 
 #[test]
 fn prepared_flat_matches_hand_computed_mono_calibration() {
-    let flat = make_cfa(Size2us::new(2, 2), vec![0.0, 1.0, 1.0, 2.0], CfaType::Mono);
+    let flat = make_cfa(USize2::new(2, 2), vec![0.0, 1.0, 1.0, 2.0], CfaType::Mono);
     let prepared = prepare(flat, None);
     assert_eq!(
         prepared.divisor().data().pixels(),
@@ -48,7 +48,7 @@ fn prepared_flat_matches_hand_computed_mono_calibration() {
     );
     assert_eq!(prepared.floored(), 1);
 
-    let mut light = make_cfa(Size2us::new(2, 2), vec![1.0; 4], CfaType::Mono);
+    let mut light = make_cfa(USize2::new(2, 2), vec![1.0; 4], CfaType::Mono);
     divide(prepared, &mut light);
     assert_eq!(light.data().pixels(), &[10.0, 1.0, 1.0, 0.5]);
     // The light carries the flat's gain for its noise: the one node over the 2×2 frame is the mean
@@ -70,7 +70,7 @@ fn prepared_flat_matches_hand_computed_mono_calibration() {
 fn a_flat_is_normalized_by_one_rounding() {
     let samples = [0.3f32, 0.7, 0.9];
     let prepared = prepare(
-        make_cfa(Size2us::new(3, 1), samples.to_vec(), CfaType::Mono),
+        make_cfa(USize2::new(3, 1), samples.to_vec(), CfaType::Mono),
         None,
     );
     let mean = samples.iter().map(|&value| f64::from(value)).sum::<f64>() / 3.0;
@@ -85,7 +85,7 @@ fn a_flat_is_normalized_by_one_rounding() {
 /// first photosite, and `NO_DATA` at the last two, which calibration then repairs.
 #[test]
 fn a_flats_mean_leaves_out_what_it_did_not_measure() {
-    let size = Size2us::new(2, 2);
+    let size = USize2::new(2, 2);
     let mut flat = make_cfa(size, vec![1.0, 3.0, 5.0, 9.0], CfaType::Mono);
     flat.set_flags(PixelFlags::from_fn(size, |idx| match idx {
         2 => QualityFlags::SATURATED,
@@ -117,8 +117,8 @@ fn prepared_flat_is_bit_exact_for_bayer_and_xtrans_with_subtraction() {
         standard_xtrans(),
     ] {
         let size = match cfa_type {
-            CfaType::Mosaic(Mosaic::Bayer(_)) => Size2us::new(4, 4),
-            CfaType::Mosaic(Mosaic::XTrans(_)) => Size2us::new(6, 6),
+            CfaType::Mosaic(Mosaic::Bayer(_)) => USize2::new(4, 4),
+            CfaType::Mosaic(Mosaic::XTrans(_)) => USize2::new(6, 6),
             CfaType::Mono => unreachable!(),
         };
         let means = [0.5f32, 1.0, 0.25];
@@ -162,7 +162,7 @@ fn prepared_flat_is_bit_exact_for_bayer_and_xtrans_with_subtraction() {
 /// sum added in a fixed order.
 #[test]
 fn preparation_does_not_depend_on_the_thread_count() {
-    let size = Size2us::new(300, 260);
+    let size = USize2::new(300, 260);
     let mut rng = TestRng::new(5);
     let pixels: Vec<f32> = (0..size.pixel_count())
         .map(|_| 0.4 + 0.2 * rng.next_f32())
@@ -186,13 +186,8 @@ fn preparation_does_not_depend_on_the_thread_count() {
 /// the floor, NaN and ∞ — is refused there, with its value; the floor itself and 2.5 are taken.
 #[test]
 fn a_stored_divisor_holds_only_what_a_prepared_flat_can() {
-    let divisor = |value: f32| {
-        make_cfa(
-            Size2us::new(2, 2),
-            vec![1.0, 1.0, value, 1.0],
-            CfaType::Mono,
-        )
-    };
+    let divisor =
+        |value: f32| make_cfa(USize2::new(2, 2), vec![1.0, 1.0, value, 1.0], CfaType::Mono);
     for value in [0.0, -0.3, 0.01, f32::NAN, f32::INFINITY] {
         let refused = PreparedFlat::checked_divisor(divisor(value)).unwrap_err();
         assert!(

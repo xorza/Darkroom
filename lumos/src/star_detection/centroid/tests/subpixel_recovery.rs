@@ -91,14 +91,14 @@ fn the_position_sigma_matches_the_scatter() {
         0.3,
         StarProfile::gaussian(fwhm::to_sigma(fwhm)),
     )
-    .stamp(Size2us::new(32, 32), 0.1);
+    .stamp(USize2::new(32, 32), 0.1);
     let grid = MeasureGrid::new(fwhm);
     // The draws are independent, so they run in parallel; the sums run in seed order.
     let draws: Vec<Draw> = par::into_iter(0..DRAWS)
         .map(|seed| {
             let mut pixels = clean.clone();
             patterns::add_gaussian_noise(pixels.pixels_mut(), NOISE, seed);
-            let residual = bg_map::uniform(Size2us::new(32, 32), 0.1, NOISE).residual_of(&pixels);
+            let residual = bg_map::uniform(USize2::new(32, 32), 0.1, NOISE).residual_of(&pixels);
             let windowed = WindowedCentroid::measure(
                 &residual,
                 &grid,

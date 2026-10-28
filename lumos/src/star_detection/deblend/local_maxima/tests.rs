@@ -13,7 +13,7 @@ use crate::star_detection::deblend::local_maxima::*;
 use crate::star_detection::labeling::LabelMap;
 use crate::star_detection::labeling::component_data::ComponentData;
 use crate::star_detection::star_detection_config::extraction_config::{Deblend, ExtractionConfig};
-use common::{Rect2us, Size2us};
+use common::{USize2, USizeRect2};
 
 /// The default config's separation.
 fn default_separation() -> usize {
@@ -31,7 +31,7 @@ fn default_relative_height() -> f32 {
 }
 
 /// Gaussian stars of `sigma` at `(x, y, amplitude)`, as one labelled component.
-fn stars(size: Size2us, sigma: f32, stars: &[(f32, f32, f32)]) -> TestComponent {
+fn stars(size: USize2, sigma: f32, stars: &[(f32, f32, f32)]) -> TestComponent {
     let stars: Vec<SyntheticStar> = stars
         .iter()
         .map(|&(x, y, amplitude)| {
@@ -107,7 +107,7 @@ fn poss(peaks: &[Pixel]) -> Vec<(usize, usize)> {
 
 #[test]
 fn single_star_is_one_whole_region() {
-    let fixture = stars(Size2us::new(100, 100), 3.0, &[(50.0, 50.0, 1.0)]);
+    let fixture = stars(USize2::new(100, 100), 3.0, &[(50.0, 50.0, 1.0)]);
     let component = Component::new(&fixture.data, &fixture.pixels, &fixture.labels);
 
     let peaks = maxima(&component, default_separation(), default_relative_height());
@@ -129,7 +129,7 @@ fn two_separated_stars() {
     // 40 px apart, each labelled out to where it falls to 0.001: two disjoint blobs, one label.
     // The Voronoi line is x = 50, clear of both, so each region is exactly its blob.
     let fixture = stars(
-        Size2us::new(100, 100),
+        USize2::new(100, 100),
         2.5,
         &[(30.0, 50.0, 1.0), (70.0, 50.0, 0.8)],
     );
@@ -170,7 +170,7 @@ fn two_separated_stars() {
 fn euclidean_separation() {
     // Two peaks √18 ≈ 4.24 apart on the diagonal: within 5 (25 > 18), clear of 4 (16 < 18).
     let fixture = stars(
-        Size2us::new(100, 100),
+        USize2::new(100, 100),
         1.5,
         &[(50.0, 50.0, 1.0), (53.0, 53.0, 0.9)],
     );
@@ -186,7 +186,7 @@ fn euclidean_separation() {
 fn relative_height_filter() {
     // The faint star peaks at 0.2 of the bright one: out at relative height 0.5, in at 0.1.
     let fixture = stars(
-        Size2us::new(100, 100),
+        USize2::new(100, 100),
         2.5,
         &[(30.0, 50.0, 1.0), (70.0, 50.0, 0.2)],
     );
@@ -203,7 +203,7 @@ fn zero_min_separation_keeps_adjacent_peaks() {
     // Stars 3 px apart, σ 1: both centres are local maxima (the faint one's 0.8 + e^−4.5 against
     // its neighbours' 0.62 and 0.49). Separation 0 suppresses nothing; 4 keeps the brighter.
     let fixture = stars(
-        Size2us::new(100, 100),
+        USize2::new(100, 100),
         1.0,
         &[(50.0, 50.0, 1.0), (53.0, 50.0, 0.8)],
     );
@@ -221,7 +221,7 @@ fn equal_brightness_tie_breaking() {
     // commutes). Within a separation of 5 only one survives, and the tie goes to the first in
     // raster order; at 4 they are not too close and both stay.
     let fixture = stars(
-        Size2us::new(100, 100),
+        USize2::new(100, 100),
         1.0,
         &[(48.0, 50.0, 1.0), (52.0, 50.0, 1.0)],
     );
@@ -237,7 +237,7 @@ fn equal_brightness_tie_breaking() {
 #[test]
 fn peaks_sorted_by_brightness() {
     let fixture = stars(
-        Size2us::new(100, 100),
+        USize2::new(100, 100),
         2.5,
         &[(30.0, 50.0, 0.5), (50.0, 50.0, 1.0), (70.0, 50.0, 0.7)],
     );
@@ -255,7 +255,7 @@ fn peaks_sorted_by_brightness() {
 fn close_peaks_keep_the_brighter() {
     // 1 px apart: one local maximum survives the sum, and it is the bright centre.
     let fixture = stars(
-        Size2us::new(100, 100),
+        USize2::new(100, 100),
         1.5,
         &[(50.0, 50.0, 1.0), (51.0, 50.0, 0.8)],
     );
@@ -274,7 +274,7 @@ fn many_peaks_are_all_kept_brightest_first() {
     let star_list: Vec<(f32, f32, f32)> = (0..12)
         .map(|i| ((10 + i * 8) as f32, 50.0, 0.45 + i as f32 * 0.05))
         .collect();
-    let fixture = stars(Size2us::new(120, 100), 1.5, &star_list);
+    let fixture = stars(USize2::new(120, 100), 1.5, &star_list);
 
     let peaks = maxima(
         &Component::new(&fixture.data, &fixture.pixels, &fixture.labels),
@@ -295,7 +295,7 @@ fn suppressed_peak_does_not_suppress_dimmer_ones() {
     // suppression must not carry over to C. Taken in raster order instead, B would replace C and
     // A would replace B, leaving A alone.
     let fixture = stars(
-        Size2us::new(100, 100),
+        USize2::new(100, 100),
         1.0,
         &[(50.0, 50.0, 0.6), (53.0, 50.0, 0.8), (56.0, 50.0, 1.0)],
     );
@@ -365,7 +365,7 @@ fn plateau_has_its_first_pixel_as_maximum() {
 
     let labels = LabelMap::from_raw(&labels_buf, 1);
     let data = ComponentData {
-        bbox: Rect2us::new(USizeVec2::new(3, 3), USizeVec2::new(7, 7)),
+        bbox: USizeRect2::new(USizeVec2::new(3, 3), USizeVec2::new(7, 7)),
         label: 1,
         area: 16,
     };
@@ -396,7 +396,7 @@ fn single_pixel_is_local_max() {
 
     let labels = LabelMap::from_raw(&labels_buf, 1);
     let data = ComponentData {
-        bbox: Rect2us::new(USizeVec2::new(5, 5), USizeVec2::new(6, 6)),
+        bbox: USizeRect2::new(USizeVec2::new(5, 5), USizeVec2::new(6, 6)),
         label: 1,
         area: 1,
     };
@@ -425,7 +425,7 @@ fn voronoi_assignment_and_its_tie() {
 
     let labels = LabelMap::from_raw(&labels_buf, 1);
     let data = ComponentData {
-        bbox: Rect2us::new(USizeVec2::new(20, 50), USizeVec2::new(81, 51)),
+        bbox: USizeRect2::new(USizeVec2::new(20, 50), USizeVec2::new(81, 51)),
         label: 1,
         area: 61,
     };
@@ -438,17 +438,17 @@ fn voronoi_assignment_and_its_tie() {
         regions
     };
     let regions = split(&[peak(20), peak(80)]);
-    let summary: Vec<(usize, Rect2us)> = regions.iter().map(|r| (r.area, r.bbox)).collect();
+    let summary: Vec<(usize, USizeRect2)> = regions.iter().map(|r| (r.area, r.bbox)).collect();
     assert_eq!(
         summary,
         [
             (
                 31,
-                Rect2us::new(USizeVec2::new(20, 50), USizeVec2::new(51, 51))
+                USizeRect2::new(USizeVec2::new(20, 50), USizeVec2::new(51, 51))
             ),
             (
                 30,
-                Rect2us::new(USizeVec2::new(51, 50), USizeVec2::new(81, 51))
+                USizeRect2::new(USizeVec2::new(51, 50), USizeVec2::new(81, 51))
             ),
         ]
     );
@@ -462,12 +462,12 @@ fn voronoi_assignment_and_its_tie() {
 
 /// A full-box component of random values, quantized to 16 levels so neighbouring maxima often tie,
 /// and its label map: hundreds of local maxima, many equal in value and in distance.
-fn noise_component(size: Size2us, seed: u64) -> TestComponent {
+fn noise_component(size: USize2, seed: u64) -> TestComponent {
     let mut rng = TestRng::new(seed);
     let pixels = Buffer2::from_fn(size, |_, _| 0.1 + (rng.next_f32() * 16.0).floor() / 16.0);
     let labels = LabelMap::from_raw(&Buffer2::new_filled(size, 1u32), 1);
     let data = ComponentData {
-        bbox: Rect2us::new(USizeVec2::ZERO, USizeVec2::new(size.width, size.height)),
+        bbox: USizeRect2::new(USizeVec2::ZERO, USizeVec2::new(size.width, size.height)),
         label: 1,
         area: size.pixel_count(),
     };
@@ -495,7 +495,7 @@ fn fast_paths_match_the_definitions() {
             pixels,
             labels,
             data,
-        } = noise_component(Size2us::new(61, 43), seed);
+        } = noise_component(USize2::new(61, 43), seed);
         let component = Component::new(&data, &pixels, &labels);
 
         let mut candidates: Vec<Pixel> = component
@@ -525,7 +525,7 @@ fn fast_paths_match_the_definitions() {
         let mut regions = Vec::new();
         component.split_at(&peaks, &mut Assignment::default(), &mut regions);
         let mut areas = vec![0usize; peaks.len()];
-        let mut boxes = vec![Rect2us::empty(); peaks.len()];
+        let mut boxes = vec![USizeRect2::empty(); peaks.len()];
         for pixel in component.pixels() {
             let nearest = (0..peaks.len())
                 .min_by_key(|&i| {
@@ -539,13 +539,13 @@ fn fast_paths_match_the_definitions() {
             areas[nearest] += 1;
             boxes[nearest].include(pixel.pos());
         }
-        let expected_regions: Vec<(USizeVec2, usize, Rect2us)> = peaks
+        let expected_regions: Vec<(USizeVec2, usize, USizeRect2)> = peaks
             .iter()
             .zip(areas.iter().zip(&boxes))
             .filter(|(_, (area, _))| **area > 0)
             .map(|(peak, (&area, &bbox))| (peak.pos(), area, bbox))
             .collect();
-        let got: Vec<(USizeVec2, usize, Rect2us)> = regions
+        let got: Vec<(USizeVec2, usize, USizeRect2)> = regions
             .iter()
             .map(|region| (region.peak, region.area, region.bbox))
             .collect();
@@ -584,7 +584,7 @@ fn a_flat_topped_source_keeps_its_region_between_fainter_peaks() {
     pixels[(18, 11)] = 0.8;
     let labels = LabelMap::from_raw(&labels_buf, 1);
     let data = ComponentData {
-        bbox: Rect2us::new(USizeVec2::new(2, 9), USizeVec2::new(22, 14)),
+        bbox: USizeRect2::new(USizeVec2::new(2, 9), USizeVec2::new(22, 14)),
         label: 1,
         area: 100,
     };

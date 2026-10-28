@@ -5,13 +5,13 @@ use common::Buffer2;
 
 use crate::internals;
 use crate::scratch_pool::{Scratch, ScratchPool, Shapeless};
-use common::Size2us;
+use common::USize2;
 
-const SMALL: Size2us = Size2us {
+const SMALL: USize2 = USize2 {
     width: 8,
     height: 4,
 };
-const LARGE: Size2us = Size2us {
+const LARGE: USize2 = USize2 {
     width: 16,
     height: 4,
 };

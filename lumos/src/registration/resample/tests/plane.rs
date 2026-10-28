@@ -13,7 +13,7 @@ use crate::registration::resample::warp_config::{InterpolationMethod, WarpConfig
 use crate::registration::resample::warp_kernel::Filter;
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
-use common::Size2us;
+use common::USize2;
 
 /// An integer shift samples every output pixel at a pixel centre, so it copies the source pixel
 /// there, and outside the source it is the border.
@@ -27,7 +27,7 @@ use common::Size2us;
 /// window keeps its in-bounds taps, the centre among them.
 #[test]
 fn integer_shifts_copy_the_source() {
-    let size = Size2us::new(24, 20);
+    let size = USize2::new(24, 20);
     let input = Buffer2::from_fn(size, |x, y| {
         let i = y * size.width + x;
         ((i * 13 + y * 7) % 31) as f32 / 9.0 - 1.7
@@ -151,7 +151,7 @@ fn a_homography_horizon_takes_the_border_and_no_coverage() {
 /// two of them is off by at most `2·64·ε·8` of the constant.
 #[test]
 fn an_image_smaller_than_the_kernel_reads_a_constant_back() {
-    let size = Size2us::new(3, 3);
+    let size = USize2::new(3, 3);
     let input = Buffer2::new_filled(size, 0.5f32);
     let wt = WarpTransform::new(Transform::translation(DVec2::new(0.3, -0.2)));
     let tolerance = 2.0 * 64.0 * f32::EPSILON * 8.0 * 0.5;

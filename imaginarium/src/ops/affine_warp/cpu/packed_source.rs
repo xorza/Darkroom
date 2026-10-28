@@ -2,7 +2,7 @@
 
 use std::array;
 
-use common::Size2us;
+use common::USize2;
 use glam::{USizeVec2, Vec2};
 
 use crate::color::sample::Sample;
@@ -14,7 +14,7 @@ use crate::interleaved::interleaved_image::InterleavedImage;
 pub(super) struct PackedSource<'a, T> {
     /// The samples, which a vector kernel gathers a tap's channels from.
     pub(super) pixels: &'a [T],
-    pub(super) size: Size2us,
+    pub(super) size: USize2,
 }
 
 impl<'a, T: Sample> PackedSource<'a, T> {

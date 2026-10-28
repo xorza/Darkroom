@@ -12,7 +12,7 @@ use crate::registration::resample::warp_config::InterpolationMethod;
 use crate::registration::transform::TransformType;
 use crate::registration::transform::local_geometry::LocalGeometry;
 use crate::registration::warp_transform::WarpTransform;
-use common::Size2us;
+use common::USize2;
 use simd::{F32_LANES, F32x8, Isa, Mask8};
 
 /// The spacing, in output pixels, of the grid a non-affine warp's local scale is read on.
@@ -198,7 +198,7 @@ impl WarpKernel {
     }
 
     /// `filter` at the stretch `warp` needs over an output frame of `size`, the source's own.
-    pub(super) fn for_frame(filter: Filter, warp: &WarpTransform, size: Size2us) -> Self {
+    pub(super) fn for_frame(filter: Filter, warp: &WarpTransform, size: USize2) -> Self {
         Self::new(filter, frame_stretch(warp, size))
     }
 
@@ -314,7 +314,7 @@ fn bicubic_lanes<S: Isa>(isa: S, x: S::F32) -> S::F32 {
 /// at least one. An affine map has one Jacobian; any other is read on [`STRETCH_GRID`] and the
 /// frame's last row and column. A node that lands outside the source has nothing to alias and
 /// is left out: near a homography's horizon the scale grows without bound.
-fn frame_stretch(warp: &WarpTransform, size: Size2us) -> f32 {
+fn frame_stretch(warp: &WarpTransform, size: USize2) -> f32 {
     let largest = if !warp.has_sip() && warp.transform.transform_type() != TransformType::Homography
     {
         LocalGeometry::of(warp.jacobian(DVec2::ZERO)).stretch[0]

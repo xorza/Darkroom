@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use criterion::{BenchmarkId, Criterion};
 
-use common::Size2us;
+use common::USize2;
 use common::bench::{self, Kind, Scale};
 
 use crate::bench::fixture::{self, Backend, Backends, Variant};
@@ -43,7 +43,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
             let id = BenchmarkId::new(Backend::Cpu.case(variant.id()), fixture::format_id(format));
             group.bench_function(id, |b| {
                 let row = source
-                    .get_or_insert_with(|| scene::sky(format, Size2us::new(FRAME.width, 1), 1));
+                    .get_or_insert_with(|| scene::sky(format, USize2::new(FRAME.width, 1), 1));
                 if let Variant::Kernel { kernel, tier } = variant {
                     b.iter_batched_ref(
                         || row.clone(),

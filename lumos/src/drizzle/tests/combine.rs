@@ -9,7 +9,7 @@ fn hash_unit(idx: usize) -> f32 {
 }
 
 /// A frame of `size` whose pixels lie in [1, 2), different for each `seed`.
-fn textured_image(size: Size2us, seed: usize) -> LinearImage {
+fn textured_image(size: USize2, seed: usize) -> LinearImage {
     let pixels = (0..size.pixel_count())
         .map(|i| 1.0 + hash_unit(i + seed * size.pixel_count()))
         .collect();
@@ -31,7 +31,7 @@ fn the_unrejected_combine_is_the_single_pass_drizzle() {
     const FRAMES: usize = 4;
     const MARGIN: usize = 6;
 
-    let size = Size2us::new(16, 16);
+    let size = USize2::new(16, 16);
     let shifts = [
         DVec2::new(0.3, -0.2),
         DVec2::new(-0.7, 0.45),
@@ -84,7 +84,7 @@ fn the_unrejected_combine_is_the_single_pass_drizzle() {
 /// and half an ulp of 28/11.
 #[test]
 fn a_sliver_frame_weighs_in_by_its_sliver() {
-    let size = Size2us::new(8, 8);
+    let size = USize2::new(8, 8);
     let product = drizzle_plain(
         drizzle_frames(
             vec![constant_image(size, 2.0), constant_image(size, 8.0)],
@@ -126,7 +126,7 @@ fn a_satellite_trail_in_one_frame_is_rejected() {
     const FRAMES: usize = 10;
     const TRAIL_FRAME: usize = 3;
 
-    let size = Size2us::new(128, 128);
+    let size = USize2::new(128, 128);
     let images: Vec<LinearImage> = (0..FRAMES)
         .map(|f| {
             let mut pixels: Vec<f32> = (0..size.pixel_count())

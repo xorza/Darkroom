@@ -7,7 +7,7 @@ use crate::image::flags::pixel_flags::PixelFlags;
 use crate::image::flags::quality_flags::QualityFlags;
 use crate::math::statistics;
 use crate::math::statistics::subsample::Subsample;
-use common::Size2us;
+use common::USize2;
 
 /// What a linear image's null samples do to the load: a FITS null (IEEE NaN for a floating-point
 /// `BITPIX`, the `BLANK` value for an integer one) or a floating-point raster's NaN or infinity.
@@ -41,7 +41,7 @@ impl NullPolicy {
     pub(crate) fn resolve(
         self,
         planes: &mut [CountedPlane<'_>],
-        size: Size2us,
+        size: USize2,
         saturation: Option<f32>,
     ) -> Result<Option<PixelFlags>, NullSamples> {
         let pixel_count = size.pixel_count();
@@ -226,7 +226,7 @@ mod tests {
     use crate::io::null_policy::{
         self, CountedPlane, FILL_MEDIAN_SAMPLES, NullPolicy, NullSamples,
     };
-    use common::Size2us;
+    use common::USize2;
 
     /// Two 2×1 planes with one null each, at different pixels. `Mask` flags both pixels and fills
     /// each plane with its own finite sample (the median of one value); `Reject` counts 2 samples,
@@ -234,7 +234,7 @@ mod tests {
     /// saturation level of 0.6 flags the 0.75 at pixel 1 and not the 0.5 at pixel 0.
     #[test]
     fn a_policy_masks_or_rejects_the_nulls_of_every_plane() {
-        let size = Size2us::new(2, 1);
+        let size = USize2::new(2, 1);
         let (mut red, mut green) = ([0.5, f32::NAN], [f32::INFINITY, 0.25]);
         let flags = NullPolicy::Mask
             .resolve(
@@ -302,7 +302,7 @@ mod tests {
         // 0.5 and 7 take it.
         let mut samples = [1.0, 0.5, 2.0, 4.0, 7.0, 10.0];
         let missing = [1, 4];
-        let flags = PixelFlags::from_fn(Size2us::new(6, 1), |idx| {
+        let flags = PixelFlags::from_fn(USize2::new(6, 1), |idx| {
             if missing.contains(&idx) {
                 QualityFlags::NO_DATA
             } else {

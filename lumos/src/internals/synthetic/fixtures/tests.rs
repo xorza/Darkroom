@@ -16,7 +16,7 @@ fn region_sum(px: &Buffer2<f32>, corner: USizeVec2, side: usize) -> f64 {
 
 #[test]
 fn star_field_has_requested_sources_and_signal() {
-    let frame = star_field(Size2us::new(128, 128), 30, 1);
+    let frame = star_field(USize2::new(128, 128), 30, 1);
     assert_eq!(frame.truth.sources.len(), 30);
     assert_eq!(frame.image.channel(0).pixels().len(), 128 * 128);
     // Bright stars on a 0.1 sky: mean above background, a clear peak.
@@ -35,7 +35,7 @@ fn star_field_has_requested_sources_and_signal() {
 
 #[test]
 fn cluster_field_is_denser_at_center() {
-    let frame = cluster_field(Size2us::new(200, 200), 400, 2);
+    let frame = cluster_field(USize2::new(200, 200), 400, 2);
     assert_eq!(frame.truth.sources.len(), 400);
     let px = frame.image.channel(0);
     // Central 40×40 carries much more flux than a corner 40×40.

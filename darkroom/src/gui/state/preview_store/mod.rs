@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::num::NonZeroU32;
 
-use common::Size2us;
+use common::USize2;
 use glam::UVec2;
 use imaginarium::{ColorFormat, InterleavedDesc};
 use lens::Image;
@@ -449,7 +449,7 @@ fn native_size(desc: InterleavedDesc) -> Result<UVec2, DrawablePreviewError> {
 /// Downscale to `target` and convert to RGBA8 — the one place pixels are
 /// produced, and so the seam a test asserts exact output on.
 fn rgba8_raster(image: &Image, target: UVec2) -> Raster {
-    let rgba = image.preview_rgba8(Size2us::new(target.x as usize, target.y as usize));
+    let rgba = image.preview_rgba8(USize2::new(target.x as usize, target.y as usize));
     let desc = rgba.desc();
     debug_assert_eq!(desc.color_format(), ColorFormat::RGBA_U8);
     let pixels = rgba.into_bytes();
@@ -583,7 +583,7 @@ pub(crate) mod internals {
 
     /// A black image of `size` in `format`, as a node would publish it.
     #[cfg(test)]
-    pub(crate) fn image_value(size: Size2us, format: ColorFormat) -> DynamicValue {
+    pub(crate) fn image_value(size: USize2, format: ColorFormat) -> DynamicValue {
         let raw = InterleavedImage::new_zeroed(InterleavedDesc::new(size, format));
         DynamicValue::from_custom(Image::from(raw))
     }
@@ -596,7 +596,7 @@ pub(crate) mod internals {
     /// viewer tab it opens, starts by publishing and settling this.
     #[cfg(test)]
     pub(crate) fn opaque_image_value() -> DynamicValue {
-        image_value(Size2us::new(2, 1), ColorFormat::RGB_U8)
+        image_value(USize2::new(2, 1), ColorFormat::RGB_U8)
     }
 }
 

@@ -1,4 +1,4 @@
-use common::{Size2us, TempDir};
+use common::{TempDir, USize2};
 
 use crate::combine::frame_cache::normalized_stats::NormalizedStats;
 use crate::combine::frame_cache::*;
@@ -270,7 +270,7 @@ fn a_stored_frame_of_the_wrong_shape_is_a_pipeline_bug() {
 /// different color under another pattern, and a demosaiced frame is no mosaic at all.
 #[test]
 fn stored_frames_must_share_one_cfa_pattern() {
-    let size = Size2us::new(4, 2);
+    let size = USize2::new(4, 2);
     let desc = PlanarDesc::new(size, ChannelLayout::Mono);
     let core = || CacheCore::plain(StorageTier::UNPLANNED, desc);
     let mosaic = |cfa_type: CfaType| {
@@ -470,7 +470,7 @@ fn the_combine_stage_counts_active_inputs_and_full_outputs() {
         if flagged {
             frames[0]
                 .image
-                .set_flags(PixelFlags::from_fn(Size2us::new(2, 1), |idx| {
+                .set_flags(PixelFlags::from_fn(USize2::new(2, 1), |idx| {
                     if idx == 0 {
                         QualityFlags::SATURATED
                     } else {
@@ -526,7 +526,7 @@ fn the_combine_stage_counts_active_inputs_and_full_outputs() {
         (0..3)
             .map(|_| {
                 let mut image = image();
-                image.set_flags(PixelFlags::from_fn(Size2us::new(2, 1), |idx| {
+                image.set_flags(PixelFlags::from_fn(USize2::new(2, 1), |idx| {
                     if idx == 1 {
                         QualityFlags::NO_DATA
                     } else {
@@ -572,7 +572,7 @@ fn finish_product_uniform_equal_weights() {
     assert!(
         matches!(
             coverage,
-            Coverage::Uniform { value, size } if *value == 1.0 && *size == Size2us::new(3, 2)
+            Coverage::Uniform { value, size } if *value == 1.0 && *size == USize2::new(3, 2)
         ),
         "fully-covered stack should not materialize a plane: {coverage:?}"
     );

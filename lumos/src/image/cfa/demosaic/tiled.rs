@@ -3,7 +3,7 @@
 
 use crate::memory::footprint::Footprint;
 use crate::unsafe_send_ptr::UnsafeSendPtr;
-use common::Size2us;
+use common::USize2;
 
 /// How a kernel tiles a frame.
 #[derive(Debug, Clone, Copy)]
@@ -22,7 +22,7 @@ pub(crate) struct Tiling {
 pub(crate) struct TilePlace {
     pub(crate) top: usize,
     pub(crate) left: usize,
-    pub(crate) size: Size2us,
+    pub(crate) size: USize2,
 }
 
 impl TilePlace {
@@ -62,7 +62,7 @@ impl Tiling {
 
     /// The tiles over a frame of `size`, overlapping by twice the margin so that the parts they
     /// write tile the frame within the border; none when the frame is all border.
-    pub(crate) fn places(self, size: Size2us) -> Vec<TilePlace> {
+    pub(crate) fn places(self, size: USize2) -> Vec<TilePlace> {
         let border = self.border();
         if size.width <= 2 * border || size.height <= 2 * border {
             return Vec::new();
@@ -80,7 +80,7 @@ impl Tiling {
                 starts(size.width).map(move |left| TilePlace {
                     top,
                     left,
-                    size: Size2us::new(
+                    size: USize2::new(
                         (size.width - self.inset - left).min(self.tile),
                         (size.height - self.inset - top).min(self.tile),
                     ),
@@ -153,7 +153,7 @@ impl OutputPlanes {
 /// The output's three planes, and the peak: the caller's input, the output, and the buffers of
 /// `tile_bytes` each of `workers` holds. Demosaics running at once share the workers, so the charge
 /// to each is an upper bound.
-pub(crate) const fn footprint(size: Size2us, tile_bytes: usize, workers: usize) -> Footprint {
+pub(crate) const fn footprint(size: USize2, tile_bytes: usize, workers: usize) -> Footprint {
     let plane_bytes = size
         .width
         .saturating_mul(size.height)

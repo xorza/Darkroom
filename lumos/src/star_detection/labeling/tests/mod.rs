@@ -21,7 +21,7 @@ use crate::star_detection::labeling::LabelMap;
 use crate::star_detection::labeling::labeler::Labeler;
 use crate::star_detection::labeling::labeler::internals::label_in_strips;
 use crate::star_detection::star_detection_config::extraction_config::Connectivity;
-use common::Size2us;
+use common::USize2;
 
 mod parallel;
 mod property_based;
@@ -53,7 +53,7 @@ impl Mask {
     }
 
     /// The pixels `(x, y)` for which `set` holds.
-    fn from_fn(size: Size2us, set: impl FnMut(usize, usize) -> bool) -> Self {
+    fn from_fn(size: USize2, set: impl FnMut(usize, usize) -> bool) -> Self {
         Self {
             data: Buffer2::from_fn(size, set),
         }
@@ -90,7 +90,7 @@ fn neighbours(connectivity: Connectivity) -> &'static [(isize, isize)] {
 /// Flood fill from each unlabelled foreground pixel in raster order: naive, slow and obviously
 /// correct, and numbered the way the labeler numbers.
 fn reference(mask: &Mask, connectivity: Connectivity) -> Vec<u32> {
-    let Size2us { width, height } = mask.data.size();
+    let USize2 { width, height } = mask.data.size();
     let mut labels = vec![0u32; mask.data.len()];
     let mut next = 0u32;
     let mut queue = VecDeque::new();
@@ -175,7 +175,7 @@ fn check(mask: &Mask) -> Labelings {
 /// first filled.
 #[test]
 fn a_reused_map_relabels_as_a_fresh_one() {
-    let size = Size2us::new(40, 30);
+    let size = USize2::new(40, 30);
     let mut labeler = Labeler::default();
     let masks = [
         Mask::from_fn(size, |x, y| (x + y) % 7 < 3).bits(),

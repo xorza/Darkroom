@@ -51,7 +51,7 @@ use crate::io::null_policy::{NullPolicy, NullSamples};
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
-use common::Size2us;
+use common::USize2;
 use glam::USizeVec2;
 
 /// `image` written as a FITS file and loaded back as a linear image.
@@ -113,7 +113,7 @@ fn optional_metadata_degrades_and_load_deciding_keywords_fail() {
 
 #[test]
 fn fits_float32_round_trips_pixels_and_order() {
-    let size = Size2us::new(32usize, 24usize);
+    let size = USize2::new(32usize, 24usize);
     // The asymmetric physical scale catches both transposition and accidental frame-max scaling.
     // Divided by 8 to stay below the maximum an undeclared float scale may reach; exact, since 8 is
     // a power of two.
@@ -178,7 +178,7 @@ fn fits_integer_samples_are_divided_by_the_span_their_header_declares() {
     assert_eq!(pixels[2], 0.0);
 
     // The headline case: the FITS unsigned convention (BZERO = 2¹⁵) lands exactly on [0, 1].
-    let size = Size2us::new(5usize, 1usize);
+    let size = USize2::new(5usize, 1usize);
     let raw = [0u16, 16384, 32768, 49152, 65535];
     let image = Image::from_u16(vec![size.width, size.height], &raw).unwrap();
 
@@ -620,7 +620,7 @@ fn mono_sensor_frames_and_stale_cube_patterns_load_as_linear() {
 
 #[test]
 fn mosaic_fits_uses_the_cfa_calibration_route() {
-    let size = Size2us::new(32usize, 32usize);
+    let size = USize2::new(32usize, 32usize);
     let pattern = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
     let target = [0.8f32, 0.5, 0.2];
     let dark_value = 0.1f32;
@@ -767,7 +767,7 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
 fn fits_nulls_of_every_non_finite_kind_are_summarized_together() {
     // NaN is the standard's flag, but ±inf reaches the same place: a sample the file declares that
     // no arithmetic downstream can use. All three count, and all three are masked.
-    let size = Size2us::new(4usize, 4usize);
+    let size = USize2::new(4usize, 4usize);
     let mut pixels = vec![0.3f32; size.pixel_count()];
     pixels[0] = f32::NAN;
     pixels[5] = f32::INFINITY;

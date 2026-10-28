@@ -5,7 +5,7 @@ use rayon::prelude::*;
 use crate::bit_buffer2::BitBuffer2;
 use crate::calibration::cosmic_ray::FINE_STRUCTURE_SIGMA_FLOOR;
 use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;
-use common::Size2us;
+use common::USize2;
 
 /// Masks a detection holds: the accumulated one, plus `primary` and `flags`.
 pub(crate) const CONCURRENT_MASKS: usize = 3;
@@ -29,7 +29,7 @@ pub(super) struct CrMasks {
 
 impl CrMasks {
     /// The bytes the masks of a `size` detection hold.
-    pub(super) const fn heap_bytes(size: Size2us) -> usize {
+    pub(super) const fn heap_bytes(size: USize2) -> usize {
         CONCURRENT_MASKS * BitBuffer2::heap_bytes(size)
     }
 
@@ -43,7 +43,7 @@ impl CrMasks {
     }
 
     /// All three clear at `size`, in the allocations a previous detection left.
-    pub(super) fn clear_to(&mut self, size: Size2us) {
+    pub(super) fn clear_to(&mut self, size: USize2) {
         for mask in [&mut self.accumulated, &mut self.primary, &mut self.flags] {
             mask.clear_to(size);
         }
@@ -150,7 +150,7 @@ impl<K: Fn(usize) -> bool + Sync> Growth<'_, K> {
             never_flagged,
             keep,
         } = self;
-        let Size2us { width, height } = source.size();
+        let USize2 { width, height } = source.size();
         let used_words = width.div_ceil(64);
         let last_word_mask = source.last_word_mask();
         dest.par_rows_mut().enumerate().for_each(|(y, out_row)| {
@@ -190,11 +190,11 @@ impl<K: Fn(usize) -> bool + Sync> Growth<'_, K> {
 pub(crate) mod internals {
     use crate::bit_buffer2::BitBuffer2;
     use crate::calibration::cosmic_ray::masks::CrMasks;
-    use common::Size2us;
+    use common::USize2;
 
     /// One of the masks a detection on a `size` plane holds, sized as the detector sizes it, for
     /// `cosmic_ray_scratch` to weigh.
-    pub(crate) fn new_cr_mask(size: Size2us) -> BitBuffer2 {
+    pub(crate) fn new_cr_mask(size: USize2) -> BitBuffer2 {
         let mut masks = CrMasks::empty();
         masks.clear_to(size);
         masks.accumulated

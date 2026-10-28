@@ -4,7 +4,7 @@
 use glam::DVec2;
 
 use crate::registration::transform::Transform;
-use common::Size2us;
+use common::USize2;
 
 /// The grid a drizzle run reconstructs onto: `scale` times finer than the reference grid, and
 /// large enough for every drop of a validated config.
@@ -17,7 +17,7 @@ use common::Size2us;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct OutputGrid {
     scale: f64,
-    size: Size2us,
+    size: USize2,
 }
 
 impl OutputGrid {
@@ -27,18 +27,18 @@ impl OutputGrid {
         clippy::cast_sign_loss,
         reason = "a validated config holds the scale positive, so each side is non-negative"
     )]
-    pub(crate) fn new(scale: f32, input: Size2us) -> Self {
+    pub(crate) fn new(scale: f32, input: USize2) -> Self {
         debug_assert!(scale > 0.0, "a drizzle scale is positive, not {scale}");
         Self {
             scale: f64::from(scale),
-            size: Size2us::new(
+            size: USize2::new(
                 (input.width as f32 * scale).ceil() as usize,
                 (input.height as f32 * scale).ceil() as usize,
             ),
         }
     }
 
-    pub(crate) const fn size(self) -> Size2us {
+    pub(crate) const fn size(self) -> USize2 {
         self.size
     }
 

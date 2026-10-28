@@ -28,7 +28,7 @@ use crate::image::linear_image::{LinearImage, PlanesWithFlags};
 use crate::image_ops::error::OpError;
 use crate::math::wavelet;
 use crate::noise::mrs_noise::NoisePlane;
-use common::Size2us;
+use common::USize2;
 
 /// How to attenuate a wavelet coefficient that falls below the per-scale threshold.
 ///
@@ -275,7 +275,7 @@ struct DenoiseScratch {
 }
 
 impl DenoiseScratch {
-    fn new(size: Size2us) -> Self {
+    fn new(size: USize2) -> Self {
         Self {
             c_cur: Buffer2::new_default(size),
             c_next: Buffer2::new_default(size),

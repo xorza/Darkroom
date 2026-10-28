@@ -12,7 +12,7 @@ use common::Buffer2;
 use crate::bg_mesh::color_mesh::ColorMesh;
 use crate::calibration::defect_map::MAX_MEDIAN_SAMPLES;
 use crate::image::cfa::cfa_type::CfaType;
-use common::Size2us;
+use common::USize2;
 use glam::USizeVec2;
 
 #[derive(Debug, Clone, Copy)]
@@ -49,7 +49,7 @@ impl ColorResiduals<'_> {
 /// photosite of the color, or [`MAX_MEDIAN_SAMPLES`] of them spread across its phases, rows and
 /// columns.
 pub(super) fn color_sample_idxs(
-    size: Size2us,
+    size: USize2,
     cfa_type: CfaType,
     target_color: usize,
 ) -> Vec<usize> {

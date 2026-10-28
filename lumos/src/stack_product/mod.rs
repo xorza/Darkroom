@@ -246,7 +246,7 @@ mod tests {
     use crate::stack_product::coverage::Coverage;
     use crate::stack_product::run_report::RunReport;
     use crate::stack_product::weight_kind::WeightKind;
-    use common::Size2us;
+    use common::USize2;
 
     fn product(channels: usize, cfa_type: Option<CfaType>) -> StackProduct {
         let desc = PlanarDesc::new((2, 1), ChannelLayout::try_from(channels).unwrap());
@@ -346,7 +346,7 @@ mod tests {
     fn uniform_coverage_becomes_a_filled_plane() {
         let image = LinearImage::from(Coverage::Uniform {
             value: 0.5,
-            size: Size2us::new(3, 2),
+            size: USize2::new(3, 2),
         });
         assert_eq!(image.desc(), PlanarDesc::new((3, 2), ChannelLayout::Mono));
         assert_eq!(image.channel(0).pixels(), &[0.5; 6]);

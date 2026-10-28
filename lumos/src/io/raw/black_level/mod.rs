@@ -9,7 +9,7 @@ use crate::image::flags::pixel_flags::PixelFlags;
 use crate::image::flags::quality_flags::QualityFlags;
 use crate::io::raw;
 use crate::io::raw::error::BlackLevelError;
-use common::Size2us;
+use common::USize2;
 use libraw::{CBLACK_LEN, SensorLayout};
 
 /// Where the spatial pattern starts in `cblack`.
@@ -58,7 +58,7 @@ pub(crate) struct BlackLevel {
 /// [`BlackLevel`]'s spatial pattern, anchored at the visible area's first pixel.
 #[derive(Debug)]
 struct BlackRepeat {
-    size: Size2us,
+    size: USize2,
     values: Box<[f64]>,
 }
 
@@ -120,7 +120,7 @@ impl BlackLevel {
             }
         }
 
-        let mut pattern = Size2us::new(width as usize, height as usize);
+        let mut pattern = USize2::new(width as usize, height as usize);
         // A 2×2 pattern on a Bayer sensor, or a 1×1 one on X-Trans, is a per-channel level.
         if libraw.filters > 1000 && height.div_ceil(2) == 1 && width.div_ceil(2) == 1 {
             let mut colors = [0usize; 4];
@@ -140,12 +140,12 @@ impl BlackLevel {
                 let cell = (c / 2) % height as usize * width as usize + c % 2 % width as usize;
                 cblack[colors[c]] += cblack[PATTERN + cell];
             }
-            pattern = Size2us::new(0, 0);
+            pattern = USize2::new(0, 0);
         } else if libraw.filters <= 1000 && height == 1 && width == 1 {
             for c in 0..4 {
                 cblack[c] += cblack[PATTERN];
             }
-            pattern = Size2us::new(0, 0);
+            pattern = USize2::new(0, 0);
         }
 
         let common_channel = cblack[..4].iter().copied().fold(f64::INFINITY, f64::min);

@@ -1,6 +1,6 @@
 //! [`MAX_SIDE`]: the longest side of a frame lumos holds, and the check that holds a size to it.
 
-use common::Size2us;
+use common::USize2;
 use imaginarium::{ChannelLayout, PlanarDesc};
 
 use crate::image::error::FrameDescError;
@@ -14,7 +14,7 @@ pub const MAX_SIDE: usize = 1 << 30;
 
 /// The descriptor of a frame of `size` and `layout`, or why there is none: no planar image has
 /// them, or a side is past [`MAX_SIDE`].
-pub const fn checked(size: Size2us, layout: ChannelLayout) -> Result<PlanarDesc, FrameDescError> {
+pub const fn checked(size: USize2, layout: ChannelLayout) -> Result<PlanarDesc, FrameDescError> {
     let desc = match PlanarDesc::checked(size, layout) {
         Ok(desc) => desc,
         Err(error) => return Err(FrameDescError::Desc(error)),
@@ -51,7 +51,7 @@ pub(crate) fn assert_frame(desc: PlanarDesc) {
 
 #[cfg(test)]
 mod tests {
-    use common::Size2us;
+    use common::USize2;
     use imaginarium::{ChannelLayout, DescError};
 
     use crate::image::error::FrameDescError;
@@ -63,19 +63,19 @@ mod tests {
         let past = MAX_SIDE + 1;
         for (size, expected) in [
             (
-                Size2us::new(0, past),
+                USize2::new(0, past),
                 FrameDescError::Desc(DescError::ZeroWidth),
             ),
             (
-                Size2us::new(past, 1),
+                USize2::new(past, 1),
                 FrameDescError::SidePastMax {
-                    size: Size2us::new(past, 1),
+                    size: USize2::new(past, 1),
                 },
             ),
             (
-                Size2us::new(1, past),
+                USize2::new(1, past),
                 FrameDescError::SidePastMax {
-                    size: Size2us::new(1, past),
+                    size: USize2::new(1, past),
                 },
             ),
         ] {
@@ -85,7 +85,7 @@ mod tests {
                 "{size}"
             );
         }
-        let desc = frame_desc::checked(Size2us::new(MAX_SIDE, 1), ChannelLayout::Rgb).unwrap();
-        assert_eq!(desc.size(), Size2us::new(MAX_SIDE, 1));
+        let desc = frame_desc::checked(USize2::new(MAX_SIDE, 1), ChannelLayout::Rgb).unwrap();
+        assert_eq!(desc.size(), USize2::new(MAX_SIDE, 1));
     }
 }

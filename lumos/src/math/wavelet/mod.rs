@@ -10,7 +10,7 @@
 use common::{Buffer2, PerWorker, par};
 use rayon::prelude::*;
 
-use common::Size2us;
+use common::USize2;
 use simd::{F32_LANES, F32x8, Isa, Kernel};
 
 /// B3-spline low-pass filter `[1, 4, 6, 4, 1] / 16` — the separable à trous smoothing kernel.
@@ -250,7 +250,7 @@ fn smoothing_filter(scale: usize) -> Vec<f64> {
 
 /// Largest scale count for which the coarsest hole step stays within the image: `2^J ≤ min(w, h)`.
 /// Beyond it the à trous kernel spans the whole frame, so the extra scales do nothing.
-pub(crate) fn max_scales(size: Size2us) -> usize {
+pub(crate) fn max_scales(size: USize2) -> usize {
     let min_dim = size.width.min(size.height);
     if min_dim < 2 {
         return 1;

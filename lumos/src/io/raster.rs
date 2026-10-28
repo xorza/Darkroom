@@ -8,7 +8,7 @@ use std::io::{BufRead, BufWriter, Seek, Write};
 use std::path::Path;
 
 use arrayvec::ArrayVec;
-use common::{Size2us, SystemMemory, fs};
+use common::{SystemMemory, USize2, fs};
 use imaginarium::{ChannelCount, InterleavedImage, PlanarDesc, PlanarImage, RasterFormat};
 
 use crate::error::Cancelled;
@@ -148,7 +148,7 @@ pub(crate) fn preview(
 }
 
 /// A raster of `size` refused when a side is past [`MAX_SIDE`], the longest a frame has.
-const fn check_side(size: Size2us) -> Result<(), RasterLoadError> {
+const fn check_side(size: USize2) -> Result<(), RasterLoadError> {
     if size.width > MAX_SIDE || size.height > MAX_SIDE {
         return Err(RasterLoadError::SideTooLong(size));
     }
@@ -175,7 +175,7 @@ pub(crate) fn write_image(path: &Path, image: &InterleavedImage) -> Result<(), W
 
 #[cfg(test)]
 mod tests {
-    use common::Size2us;
+    use common::USize2;
 
     use crate::frame::frame_info::DecoderBytes;
     use crate::image::frame_desc::MAX_SIDE;
@@ -187,8 +187,8 @@ mod tests {
     /// size.
     #[test]
     fn a_raster_side_past_the_frame_limit_is_refused() {
-        assert!(check_side(Size2us::new(MAX_SIDE, MAX_SIDE)).is_ok());
-        for size in [Size2us::new(MAX_SIDE + 1, 1), Size2us::new(1, MAX_SIDE + 1)] {
+        assert!(check_side(USize2::new(MAX_SIDE, MAX_SIDE)).is_ok());
+        for size in [USize2::new(MAX_SIDE + 1, 1), USize2::new(1, MAX_SIDE + 1)] {
             let error = check_side(size).unwrap_err();
             assert!(
                 matches!(&error, RasterLoadError::SideTooLong(refused) if *refused == size),

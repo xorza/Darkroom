@@ -4,13 +4,13 @@ use glam::{DVec2, USizeVec2};
 
 use crate::math::grid;
 use crate::registration::distortion::tps::ThinPlateSpline;
-use common::Size2us;
+use common::USize2;
 
 /// A spline's distortion at every node of a grid, with its largest and mean magnitude.
 #[derive(Debug, Clone)]
 struct DistortionMap {
     /// The grid's extent, in nodes.
-    grid: Size2us,
+    grid: USize2,
     /// The distance between nodes, in pixels; the last cell of an axis may be narrower.
     spacing: usize,
     /// The pixel each column of nodes sits on, ending on the image's last column.
@@ -35,10 +35,10 @@ impl DistortionMap {
     /// The distortion `tps` gives at every node of a grid of `spacing` over `image`: every
     /// `spacing` pixels and the last pixel of each axis ([`grid::nodes`]), so the statistics
     /// cover the frame and nothing past it, where a spline grows like `r² ln r`.
-    fn from_tps(tps: &ThinPlateSpline, image: Size2us, spacing: usize) -> Self {
+    fn from_tps(tps: &ThinPlateSpline, image: USize2, spacing: usize) -> Self {
         let cols: Vec<usize> = grid::nodes(image.width, spacing).collect();
         let rows: Vec<usize> = grid::nodes(image.height, spacing).collect();
-        let grid = Size2us::new(cols.len(), rows.len());
+        let grid = USize2::new(cols.len(), rows.len());
 
         let mut vectors = Vec::with_capacity(grid.pixel_count());
         let mut max_magnitude = 0.0f64;

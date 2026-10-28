@@ -11,7 +11,7 @@ use crate::internals::test_rng::TestRng;
 use crate::math::statistics;
 use glam::USizeVec2;
 
-fn fill(size: Size2us, f: impl Fn(usize, usize) -> f32) -> Vec<f32> {
+fn fill(size: USize2, f: impl Fn(usize, usize) -> f32) -> Vec<f32> {
     let mut v = vec![0.0f32; size.pixel_count()];
     for y in 0..size.height {
         for x in 0..size.width {
@@ -21,7 +21,7 @@ fn fill(size: Size2us, f: impl Fn(usize, usize) -> f32) -> Vec<f32> {
     v
 }
 
-fn mono_of(size: Size2us, f: impl Fn(usize, usize) -> f32) -> LinearImage {
+fn mono_of(size: USize2, f: impl Fn(usize, usize) -> f32) -> LinearImage {
     mono_image(size, fill(size, f))
 }
 
@@ -58,7 +58,7 @@ fn dyadic_plane(x: usize, y: usize) -> f32 {
 }
 
 /// The plane's mean over `size`: its value at the centre pixel index.
-fn dyadic_plane_mean(size: Size2us) -> f32 {
+fn dyadic_plane_mean(size: USize2) -> f32 {
     0.5 + (size.width - 1) as f32 / 2048.0 + (size.height - 1) as f32 / 4096.0
 }
 
@@ -66,7 +66,7 @@ fn dyadic_plane_mean(size: Size2us) -> f32 {
 /// for every pixel — 0.5 + 199/2048 + 159/4096 — in each of three channels on its own plane.
 #[test]
 fn subtract_removes_linear_gradients_per_channel() {
-    let size = Size2us::new(200, 160);
+    let size = USize2::new(200, 160);
     let r = fill(size, dyadic_plane);
     let g = fill(size, |x, y| dyadic_plane(size.width - 1 - x, y));
     let b = fill(size, |x, y| 0.25 + y as f32 / 4096.0 + x as f32 / 8192.0);
@@ -96,7 +96,7 @@ fn subtract_removes_linear_gradients_per_channel() {
 /// exactly. Unflagged, the zeros tilt the model and the data are no longer flat.
 #[test]
 fn subtract_fits_the_data_and_not_the_fills() {
-    let size = Size2us::new(200, 160);
+    let size = USize2::new(200, 160);
     let tile = 40;
     let plane = |fill_flagged: bool| {
         let mut img = mono_of(size, |x, y| if x < tile { 0.0 } else { dyadic_plane(x, y) });
@@ -131,7 +131,7 @@ fn subtract_fits_the_data_and_not_the_fills() {
 /// included — a tile's MAD over one bright pixel is 0, so its sky is the median, 0.3125.
 #[test]
 fn subtract_leaves_a_flat_sky_and_its_stars_unchanged() {
-    let size = Size2us::new(128, 128);
+    let size = USize2::new(128, 128);
     let stars = [(10, 10), (50, 80), (100, 30), (70, 70), (20, 110)];
     let sky = fill(size, |x, y| {
         if stars.contains(&(x, y)) {
@@ -155,7 +155,7 @@ fn subtract_leaves_a_flat_sky_and_its_stars_unchanged() {
 /// twice, by half an ulp each, so every pixel is the mean to ε relative.
 #[test]
 fn divide_corrects_a_planar_falloff() {
-    let size = Size2us::new(160, 160);
+    let size = USize2::new(160, 160);
     let mut img = mono_of(size, dyadic_plane);
     ExtractBg {
         degree: 2,
@@ -178,7 +178,7 @@ fn divide_corrects_a_planar_falloff() {
 /// column, far past what its rounding could move.
 #[test]
 fn divide_floor_caps_the_gain() {
-    let size = Size2us::new(160, 32);
+    let size = USize2::new(160, 32);
     let falloff = |x: usize, _: usize| x as f32 / 1024.0 + 1.0 / 64.0;
     let run = |divide_floor| {
         let mut img = mono_of(size, falloff);
@@ -216,7 +216,7 @@ fn divide_floor_caps_the_gain() {
 /// fails.
 #[test]
 fn divide_refuses_a_sky_with_no_positive_mean_and_changes_nothing() {
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let negative = fill(size, |x, _| -0.25 + x as f32 / 1024.0);
     let positive = fill(size, |x, _| 0.25 + x as f32 / 1024.0);
     let mut img = rgb_image(size, [positive.clone(), negative.clone(), positive.clone()]);
@@ -243,7 +243,7 @@ fn divide_refuses_a_sky_with_no_positive_mean_and_changes_nothing() {
 /// too wide to reject anything, the blob tilts the model and the sky is no longer flat.
 #[test]
 fn outlier_tiles_are_rejected_from_the_fit() {
-    let size = Size2us::new(160, 120);
+    let size = USize2::new(160, 120);
     let blob = |x: usize, y: usize| (40..80).contains(&x) && (40..80).contains(&y);
     let sky = fill(size, |x, y| {
         dyadic_plane(x, y) + if blob(x, y) { 0.5 } else { 0.0 }
@@ -291,7 +291,7 @@ fn outlier_tiles_are_rejected_from_the_fit() {
 /// plus its f32 rounding, and the mean to the average of `Polynomial::at` over every pixel.
 #[test]
 fn surface_evaluators_agree() {
-    let size = Size2us::new(37, 23);
+    let size = USize2::new(37, 23);
     for degree in 1..=4 {
         let terms = Monomial::up_to(degree);
         let polynomial = Polynomial {
@@ -330,7 +330,7 @@ fn surface_evaluators_agree() {
 
 #[test]
 fn higher_degree_fits_cubic_better() {
-    let size = Size2us::new(180, 180);
+    let size = USize2::new(180, 180);
     let cubic = |x: usize, y: usize| {
         let (nx, ny) = (x as f32 / size.width as f32, y as f32 / size.height as f32);
         0.4 + 0.2 * nx - 0.3 * nx * nx + 0.25 * nx * nx * nx + 0.15 * ny * ny * ny
@@ -364,7 +364,7 @@ fn higher_degree_fits_cubic_better() {
 
 #[test]
 fn rank_deficient_sample_grid_is_reported_without_mutating_the_image() {
-    let mut img = mono_of(Size2us::new(8, 64), |x, y| {
+    let mut img = mono_of(USize2::new(8, 64), |x, y| {
         0.2 + 0.01 * x as f32 + 0.001 * y as f32
     });
     let before = img.channel(0).pixels().to_vec();
@@ -426,7 +426,7 @@ fn rank_deficient_sample_grid_is_reported_without_mutating_the_image() {
 /// 4 × 4 = 16 samples, enough for the default quadratic's 6 terms.
 #[test]
 fn auto_stretches_hit_their_target_after_gradient_removal() {
-    let size = Size2us::new(129, 129);
+    let size = USize2::new(129, 129);
     let mut rng = TestRng::new(7);
     let sky: Vec<f32> = fill(size, |x, y| {
         let star = if (x % 31, y % 29) == (15, 14) {

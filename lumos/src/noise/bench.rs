@@ -11,7 +11,7 @@ use crate::bench::fixture;
 use crate::image::flat_gain::gain_bins::GainBins;
 use crate::noise::binned_samples::BinnedSamples;
 use crate::noise::mrs_noise::{NoisePlane, PixelGains};
-use common::Size2us;
+use common::USize2;
 
 /// One tile of the MRS grid, and a frame the 4 × 4 grid covers in part.
 const SIDES: [usize; 2] = [1_024, 4_096];
@@ -53,7 +53,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
         );
     });
     for side in SIDES {
-        let size = Size2us::new(side, side);
+        let size = USize2::new(side, side);
         group.throughput(Throughput::Elements(size.pixel_count() as u64));
         group.bench_function(BenchmarkId::new("mrs_estimate", side), |b| {
             let plane = Buffer2::new((side, side), fixture::sky(size.pixel_count(), 5));

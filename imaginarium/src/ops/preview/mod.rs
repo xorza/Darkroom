@@ -1,6 +1,6 @@
 mod cpu;
 
-use common::Size2us;
+use common::USize2;
 
 use crate::interleaved::interleaved_image::InterleavedImage;
 use crate::planar::planar_image::PlanarImage;
@@ -16,11 +16,11 @@ use crate::planar::planar_image::PlanarImage;
 /// pixel's color by its alpha, so a transparent pixel lends a footprint no color.
 #[derive(Debug, Clone, Copy)]
 pub struct Preview {
-    pub size: Size2us,
+    pub size: USize2,
 }
 
 impl Preview {
-    pub const fn new(size: Size2us) -> Self {
+    pub const fn new(size: USize2) -> Self {
         Self { size }
     }
 

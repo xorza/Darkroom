@@ -13,7 +13,7 @@ use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::internals::cfa::cfa_from_plane;
-use common::Size2us;
+use common::USize2;
 use glam::USizeVec2;
 
 /// Cosmic-ray detection holds three full-frame masks at its peak, one bit per pixel each.
@@ -24,7 +24,7 @@ use glam::USizeVec2;
 #[test]
 fn cosmic_ray_masks_stay_one_bit_per_pixel() {
     for side in [1024usize, 6144] {
-        let size = Size2us::new(side, side);
+        let size = USize2::new(side, side);
         let pixels = size.pixel_count();
         let packed = BitBuffer2::heap_bytes(new_cr_mask(size).size());
 
@@ -50,7 +50,7 @@ fn cosmic_ray_masks_stay_one_bit_per_pixel() {
 /// 144 MB a piece and would otherwise show up only as a stack that no longer fits its budget.
 #[test]
 fn cosmic_ray_float_scratch_is_five_frame_planes() {
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let mut data = Buffer2::new_filled(size, 0.05f32);
     data[size.idx_of(USizeVec2::new(32, 32))] = 0.95;
 
@@ -89,7 +89,7 @@ fn cosmic_ray_heap_bytes_count_planes_and_masks() {
         (bayer, 4, 3 * 4 * 16),
     ] {
         assert_eq!(
-            cosmic_ray::heap_bytes(&cfa, Size2us::new(side, side)),
+            cosmic_ray::heap_bytes(&cfa, USize2::new(side, side)),
             Ok(expected),
             "{cfa:?} {side}²"
         );

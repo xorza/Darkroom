@@ -1,6 +1,6 @@
 //! Why a published value has no image to draw.
 
-use common::Size2us;
+use common::USize2;
 use palantir::ImageTooLarge;
 
 /// Why a preview value could not become a texture.
@@ -17,7 +17,7 @@ pub(crate) enum DrawablePreviewError {
     NotAnImage,
     /// An edge longer than `u32::MAX` pixels, which no texture can hold.
     #[error("image is {size}, past the longest texture edge")]
-    EdgeTooLong { size: Size2us },
+    EdgeTooLong { size: USize2 },
     /// The renderer refused the texture — larger than the device's maximum
     /// 2D dimension.
     #[error("{0}")]

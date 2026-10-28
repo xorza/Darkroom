@@ -1,8 +1,8 @@
-use crate::size2us::Size2us;
+use crate::usize2::USize2;
 use glam::USizeVec2;
 #[test]
 fn size_measures_extent_and_indexes_row_major() {
-    let size = Size2us::new(4, 3);
+    let size = USize2::new(4, 3);
     assert_eq!((size.width, size.height), (4, 3));
     assert_eq!(size.pixel_count(), 12);
 
@@ -27,7 +27,7 @@ fn size_measures_extent_and_indexes_row_major() {
     }
 
     // Width and height are not interchangeable — a transposed size indexes differently.
-    let transposed = Size2us::new(3, 4);
+    let transposed = USize2::new(3, 4);
     assert_ne!(size, transposed);
     assert_eq!(size.pixel_count(), transposed.pixel_count());
     assert_ne!(
@@ -43,19 +43,19 @@ fn size_measures_extent_and_indexes_row_major() {
 #[cfg(debug_assertions)]
 #[should_panic(expected = "past the last pixel")]
 fn point_of_rejects_an_index_past_the_grid() {
-    Size2us::new(4, 3).point_of(12);
+    USize2::new(4, 3).point_of(12);
 }
 
 #[test]
 fn size_round_trips_through_a_tuple_in_declaration_order() {
-    let size = Size2us::from((7, 2));
+    let size = USize2::from((7, 2));
     assert_eq!((size.width, size.height), (7, 2));
     assert_eq!(<(usize, usize)>::from(size), (7, 2));
-    assert_eq!(Size2us::default(), Size2us::new(0, 0));
+    assert_eq!(USize2::default(), USize2::new(0, 0));
 }
 
 #[test]
 #[should_panic(expected = "must fit in usize")]
 fn pixel_count_rejects_an_overflowing_extent() {
-    Size2us::new(usize::MAX, 2).pixel_count();
+    USize2::new(usize::MAX, 2).pixel_count();
 }

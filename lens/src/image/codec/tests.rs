@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::io::Cursor;
 use std::sync::Arc;
 
-use common::{Buffer2, SerdeFormat, Size2us};
+use common::{Buffer2, SerdeFormat, USize2};
 use imaginarium::{ChannelLayout, ColorFormat, InterleavedDesc, InterleavedImage, PlanarDesc};
 use lumos::{FlatGain, FrameGain, ImageMetadata, LinearImage, PixelFlags};
 use scenarium::{CustomValue, CustomValueCodec, Library};
@@ -78,7 +78,7 @@ fn gain() -> FlatGain {
 #[tokio::test]
 async fn every_interleaved_format_round_trips_pixel_exact() {
     for format in ColorFormat::ALL {
-        let desc = InterleavedDesc::new(Size2us::new(3, 2), format);
+        let desc = InterleavedDesc::new(USize2::new(3, 2), format);
         let pixels: Vec<u8> = (0..desc.byte_len())
             .map(|i| u8::try_from(i * 37 % 251).unwrap())
             .collect();
@@ -104,7 +104,7 @@ async fn every_interleaved_format_round_trips_pixel_exact() {
     }
 
     // A 2×1 mono u16 image: 4 sample bytes, then the 2 flag bytes.
-    let desc = InterleavedDesc::new(Size2us::new(2, 1), ColorFormat::MONO_U16);
+    let desc = InterleavedDesc::new(USize2::new(2, 1), ColorFormat::MONO_U16);
     let samples = vec![1, 2, 3, 4];
     let image = Image {
         pixels: Pixels::Interleaved(
@@ -134,7 +134,7 @@ async fn every_interleaved_format_round_trips_pixel_exact() {
         Some(SerdeFormat::Ron.serialize(&gain()).unwrap())
     );
 
-    let desc = InterleavedDesc::new(Size2us::new(2, 1), ColorFormat::RGB_U8);
+    let desc = InterleavedDesc::new(USize2::new(2, 1), ColorFormat::RGB_U8);
     let pixels = vec![10, 20, 30, 40, 50, 60];
     let bytes = encoded(Image::from(
         InterleavedImage::new_with_data(desc, pixels.clone()).unwrap(),

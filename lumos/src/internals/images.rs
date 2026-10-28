@@ -9,15 +9,15 @@ use common::Buffer2;
 use imaginarium::{ChannelLayout, PlanarDesc, PlanarImage};
 
 use crate::image::linear_image::LinearImage;
-use common::Size2us;
+use common::USize2;
 
 /// Single-channel image from explicit pixel values, row-major.
-pub(crate) fn mono_image(size: Size2us, pixels: Vec<f32>) -> LinearImage {
+pub(crate) fn mono_image(size: USize2, pixels: Vec<f32>) -> LinearImage {
     LinearImage::from(PlanarImage::new_mono(Buffer2::new(size, pixels)))
 }
 
 /// Three-channel image from planar values, one `Vec` per channel: red, green and blue.
-pub(crate) fn rgb_image(size: Size2us, channels: [Vec<f32>; 3]) -> LinearImage {
+pub(crate) fn rgb_image(size: USize2, channels: [Vec<f32>; 3]) -> LinearImage {
     LinearImage::from_planar_channels(
         PlanarDesc::new((size.width, size.height), ChannelLayout::Rgb),
         channels,

@@ -14,7 +14,7 @@ use crate::math::error_function;
 /// 7.1e-3, with 1% for the sampling.
 #[test]
 fn every_method_on_a_sub_pixel_grid() {
-    let size = Size2us::new(32, 32);
+    let size = USize2::new(32, 32);
     let fwhm = fwhm::from_sigma(2.5);
     let moments = MeasurementConfig {
         centroid_method: CentroidMethod::WeightedMoments,
@@ -98,7 +98,7 @@ fn every_method_on_a_sub_pixel_grid() {
 /// its mean over three, `(erf(1/(2σ√2)) / erf(3/(2σ√2)))²`.
 #[test]
 fn moment_metrics_of_gaussian_stars() {
-    let size = Size2us::new(128, 128);
+    let size = USize2::new(128, 128);
     let at = DVec2::splat(64.0);
     for (sigma_x, sigma_y, ground, sround) in [
         (1.5f32, 1.5f32, 0.0, 0.0),

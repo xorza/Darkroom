@@ -3,10 +3,10 @@ use common::Buffer2;
 use crate::math::wavelet::{
     B3, SmoothRow, atrous_smooth, atrous_smooth_serial, max_scales, reflect, white_noise_sigma,
 };
-use common::Size2us;
+use common::USize2;
 use simd::IsaTier;
 
-fn pattern(size: Size2us) -> Buffer2<f32> {
+fn pattern(size: USize2) -> Buffer2<f32> {
     Buffer2::from_fn(size, |x, y| {
         let (x, y) = (x as f32, y as f32);
         0.5 + 0.3 * (x * 0.3).sin() * (y * 0.2).cos()
@@ -33,19 +33,19 @@ fn reflect_mirrors_idxs() {
 
 #[test]
 fn max_scales_bounds_by_dimension() {
-    assert_eq!(max_scales(Size2us::new(1, 1)), 1);
-    assert_eq!(max_scales(Size2us::new(2, 2)), 1);
-    assert_eq!(max_scales(Size2us::new(5, 5)), 2);
-    assert_eq!(max_scales(Size2us::new(8, 8)), 3);
+    assert_eq!(max_scales(USize2::new(1, 1)), 1);
+    assert_eq!(max_scales(USize2::new(2, 2)), 1);
+    assert_eq!(max_scales(USize2::new(5, 5)), 2);
+    assert_eq!(max_scales(USize2::new(8, 8)), 3);
     // Bounded by the smaller axis, whichever it is.
-    assert_eq!(max_scales(Size2us::new(1000, 8)), 3);
-    assert_eq!(max_scales(Size2us::new(8, 1000)), 3);
+    assert_eq!(max_scales(USize2::new(1000, 8)), 3);
+    assert_eq!(max_scales(USize2::new(8, 1000)), 3);
 }
 
 #[test]
 fn atrous_smooth_preserves_constant() {
     // The B3 kernel sums to 1, so a flat field is reproduced exactly at every hole spacing.
-    let size = Size2us::new(8, 6);
+    let size = USize2::new(8, 6);
     let src = Buffer2::new_filled(size, 0.42);
     let mut dst = Buffer2::new_default(size);
     for step in [1usize, 2, 4] {
@@ -68,7 +68,7 @@ fn atrous_smooth_preserves_constant() {
 /// parallel form's bits, through a row of scratch that starts the wrong length and dirty.
 #[test]
 fn atrous_smooth_is_the_b3_convolution() {
-    let size = Size2us::new(17, 13);
+    let size = USize2::new(17, 13);
     let src = pattern(size);
     let weights = [1.0f64, 4.0, 6.0, 4.0, 1.0].map(|w| w / 16.0);
     let mut dst = Buffer2::new_default(size);

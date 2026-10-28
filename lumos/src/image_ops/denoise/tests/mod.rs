@@ -13,10 +13,10 @@ use crate::internals::synthetic::metrics::pixel_stats;
 use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::sky_field::SkyNoise;
 use crate::internals::test_rng::TestRng;
-use common::Size2us;
+use common::USize2;
 
 /// A flat `bg` with white Gaussian `noise`.
-fn noisy(size: Size2us, bg: f32, noise: SkyNoise) -> Vec<f32> {
+fn noisy(size: USize2, bg: f32, noise: SkyNoise) -> Vec<f32> {
     let mut px = vec![bg; size.pixel_count()];
     patterns::add_gaussian_noise(&mut px, noise.sigma, noise.seed);
     px
@@ -37,7 +37,7 @@ fn threshold_apply_hand_computed() {
 
 #[test]
 fn denoise_reduces_white_noise_and_preserves_mean() {
-    let size = Size2us::new(128, 128);
+    let size = USize2::new(128, 128);
     let (bg, sigma) = (0.5, 0.05);
     let px = noisy(size, bg, SkyNoise { sigma, seed: 12345 });
     let in_std = pixel_stats(&px).std as f32;
@@ -59,7 +59,7 @@ fn denoise_reduces_white_noise_and_preserves_mean() {
 
 #[test]
 fn higher_k_smooths_more() {
-    let size = Size2us::new(96, 96);
+    let size = USize2::new(96, 96);
     let px = noisy(
         size,
         0.5,
@@ -92,7 +92,7 @@ fn higher_k_smooths_more() {
 
 #[test]
 fn strength_zero_is_identity_and_blends_between() {
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let px = noisy(
         size,
         0.5,
@@ -150,7 +150,7 @@ fn strength_zero_is_identity_and_blends_between() {
 
 #[test]
 fn hard_and_soft_thresholds_differ() {
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let px = noisy(
         size,
         0.5,
@@ -189,7 +189,7 @@ fn hard_and_soft_thresholds_differ() {
 fn denoise_preserves_bright_feature() {
     // A bright 8x8 block on a faintly-noisy background: hard thresholding keeps its large
     // coefficients, so the block stays bright while the flat background is smoothed.
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let mut px = noisy(
         size,
         0.1,
@@ -233,7 +233,7 @@ fn denoise_preserves_bright_feature() {
 /// exactly as that plane alone would, nothing carried over from the one before.
 #[test]
 fn denoise_is_per_channel_on_rgb() {
-    let size = Size2us::new(48, 48);
+    let size = USize2::new(48, 48);
     let planes = [
         noisy(
             size,
@@ -276,11 +276,11 @@ fn denoise_is_per_channel_on_rgb() {
 fn denoise_handles_images_smaller_than_the_kernel() {
     // Scale count clamps to the dimensions — these must not panic.
     let mut tiny = mono_image(
-        Size2us::new(3, 3),
+        USize2::new(3, 3),
         vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
     );
     Denoise::default().apply(&mut tiny).unwrap();
-    let mut one = mono_image(Size2us::new(1, 1), vec![0.42]);
+    let mut one = mono_image(USize2::new(1, 1), vec![0.42]);
     Denoise::default().apply(&mut one).unwrap();
     assert_eq!(
         one.channel(0).pixels(),
@@ -293,7 +293,7 @@ fn denoise_handles_images_smaller_than_the_kernel() {
 /// leaves the image bit for bit, hard or soft.
 #[test]
 fn a_zero_variance_plane_leaves_the_image() {
-    let size = Size2us::new(64, 48);
+    let size = USize2::new(64, 48);
     let pixels = noisy(
         size,
         0.3,
@@ -323,7 +323,7 @@ fn a_zero_variance_plane_leaves_the_image() {
 /// 16 denoises to the output times 4, bit for bit, since every step scales by a power of two.
 #[test]
 fn the_variance_threshold_scales_with_the_data() {
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let pixels = noisy(
         size,
         0.25,
@@ -360,7 +360,7 @@ fn the_variance_threshold_scales_with_the_data() {
 /// above them, and take them out, moving pixels by up to 0.05.
 #[test]
 fn structure_filling_the_frame_survives() {
-    let size = Size2us::new(128, 128);
+    let size = USize2::new(128, 128);
     let mut rng = TestRng::new(31);
     let pixels: Vec<f32> = (0..size.pixel_count())
         .map(|idx| {

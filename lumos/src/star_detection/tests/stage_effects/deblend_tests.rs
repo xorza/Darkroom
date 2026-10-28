@@ -19,7 +19,7 @@ use crate::star_detection::star_detector::stages::detect::internals::{
     detect_stars_test, detect_test,
 };
 use crate::star_detection::tests::stage_effects::{bg_estimate, matched_truths};
-use common::Size2us;
+use common::USize2;
 
 /// The sky these stage tests detect against: bright enough to matter, quiet enough to detect on.
 const DETECTION_SKY: Sky = Sky {
@@ -32,7 +32,7 @@ const DETECTION_SKY: Sky = Sky {
 };
 
 /// Render `stars` as `(x, y, amplitude)` on a 0.1 sky with light Gaussian noise (σ 0.01).
-fn field(size: Size2us, sigma: f32, stars: &[(f32, f32, f32)]) -> Buffer2<f32> {
+fn field(size: USize2, sigma: f32, stars: &[(f32, f32, f32)]) -> Buffer2<f32> {
     let stars: Vec<(Vec2, f32)> = stars
         .iter()
         .map(|&(x, y, amp)| (Vec2::new(x, y), amp))
@@ -61,7 +61,7 @@ fn deblend_config(threshold_count: usize, min_contrast: f32) -> ExtractionConfig
 /// Detect `stars` (σ for a 4 px FWHM) on [`DETECTION_SKY`] at `contrast`. When they come out as
 /// more than one region, exactly one component must have been split — the stars shared it, so
 /// the split is the deblender's and not the threshold's.
-fn deblend_blend(size: Size2us, stars: &[(f32, f32, f32)], contrast: f32) -> Vec<Region> {
+fn deblend_blend(size: USize2, stars: &[(f32, f32, f32)], contrast: f32) -> Vec<Region> {
     let pixels = field(size, fwhm::to_sigma(4.0), stars);
     let bg = bg_estimate(&pixels);
     let result = detect_test(
@@ -86,7 +86,7 @@ const SEPARATION: f32 = 6.0;
 fn deblend_resolves_equal_pair_into_exactly_two() {
     let (x1, x2, y) = (128.0 - SEPARATION / 2.0, 128.0 + SEPARATION / 2.0, 128.0);
     let candidates = deblend_blend(
-        Size2us::new(256, 256),
+        USize2::new(256, 256),
         &[(x1, y, 0.15), (x2, y, 0.15)],
         0.005,
     );
@@ -108,7 +108,7 @@ fn deblend_resolves_chain_of_five() {
         .map(|i| (100.0 + i as f32 * SEPARATION, 64.0))
         .collect();
     let stars: Vec<(f32, f32, f32)> = truths.iter().map(|&(x, y)| (x, y, 0.15)).collect();
-    let candidates = deblend_blend(Size2us::new(256, 128), &stars, 0.005);
+    let candidates = deblend_blend(USize2::new(256, 128), &stars, 0.005);
     assert_eq!(
         candidates.len(),
         5,
@@ -129,14 +129,14 @@ fn deblend_resolves_unequal_pair() {
     let (x1, x2, y) = (128.0 - SEPARATION / 2.0, 128.0 + SEPARATION / 2.0, 128.0);
     let stars = [(x1, y, 0.20), (x2, y, 0.10)];
 
-    let split = deblend_blend(Size2us::new(256, 256), &stars, 0.005);
+    let split = deblend_blend(USize2::new(256, 256), &stars, 0.005);
     assert_eq!(split.len(), 2, "the unequal pair must split into exactly 2");
     assert_eq!(
         matched_truths(&split, &[(x1, y), (x2, y)], fwhm::to_sigma(4.0)),
         2,
         "both bright and faint companion must be recovered"
     );
-    let whole = deblend_blend(Size2us::new(256, 256), &stars, 0.5);
+    let whole = deblend_blend(USize2::new(256, 256), &stars, 0.5);
     assert_eq!(whole.len(), 1, "a 0.5 contrast must keep the pair whole");
 }
 
@@ -146,7 +146,7 @@ fn deblend_separation_controls_split() {
     let pair_count = |sep: f32| {
         let (x1, x2, y) = (128.0 - sep / 2.0, 128.0 + sep / 2.0, 128.0);
         deblend_blend(
-            Size2us::new(256, 256),
+            USize2::new(256, 256),
             &[(x1, y, 0.15), (x2, y, 0.15)],
             0.005,
         )
@@ -175,7 +175,7 @@ fn a_crowded_group_splits_into_every_star() {
         })
         .collect();
     let stars: Vec<(f32, f32, f32)> = truths.iter().map(|&(x, y)| (x, y, 0.3)).collect();
-    let pixels = field(Size2us::new(256, 256), fwhm::to_sigma(4.0), &stars);
+    let pixels = field(USize2::new(256, 256), fwhm::to_sigma(4.0), &stars);
     let bg = bg_estimate(&pixels);
     for deblend in [
         ExtractionConfig::default().deblend,
@@ -220,7 +220,7 @@ fn a_crowded_group_splits_into_every_star() {
 /// = 0.09 against a 0.15 secondary, so the first case split there and not on a zero sky.
 #[test]
 fn deblending_does_not_depend_on_the_sky_level() {
-    let size = Size2us::new(48, 48);
+    let size = USize2::new(48, 48);
     let render = |pedestal: f32| {
         let mut pixels = Buffer2::new_filled(size, pedestal);
         for (x, amplitude) in [(22.0, 0.2), (27.0, 0.05)] {

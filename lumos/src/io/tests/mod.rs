@@ -4,7 +4,7 @@ mod synthetic;
 
 use std::io::Cursor;
 
-use common::{Size2us, TempDir, fs};
+use common::{TempDir, USize2, fs};
 use fits_well::image::SampleType;
 use imaginarium::{
     ChannelLayout, ColorFormat, InterleavedDesc, InterleavedImage, PlanarDesc, RasterFormat,
@@ -112,7 +112,7 @@ fn saved_tiff_round_trips_its_samples() {
 fn a_float_tiffs_nulls_follow_the_load_policy() {
     let samples = vec![0.25f32, f32::NAN, 0.5, 0.75];
     let image = InterleavedImage::new_with_data(
-        InterleavedDesc::new(Size2us::new(2, 2), ColorFormat::MONO_F32),
+        InterleavedDesc::new(USize2::new(2, 2), ColorFormat::MONO_F32),
         bytemuck::cast_slice(&samples).to_vec(),
     )
     .unwrap();
@@ -153,7 +153,7 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
     let float_path = dir.join("linear_float.tiff");
     let float_pixels = vec![-0.25f32, 0.5, 1.25, 3.0];
     let float_image = InterleavedImage::new_with_data(
-        InterleavedDesc::new(Size2us::new(2, 2), ColorFormat::MONO_F32),
+        InterleavedDesc::new(USize2::new(2, 2), ColorFormat::MONO_F32),
         bytemuck::cast_slice(&float_pixels).to_vec(),
     )
     .unwrap();
@@ -169,7 +169,7 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
     let png = dir.join("display.png");
     let jpeg = dir.join("lossy.jpg");
     let integer_image = InterleavedImage::new_with_data(
-        InterleavedDesc::new(Size2us::new(2, 2), ColorFormat::MONO_U8),
+        InterleavedDesc::new(USize2::new(2, 2), ColorFormat::MONO_U8),
         vec![0, 64, 128, 255],
     )
     .unwrap();
@@ -204,7 +204,7 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
     let alpha_path = dir.join("alpha.tiff");
     let alpha_pixels = vec![1.0f32, 0.0, 0.0, 0.5, 0.0, 1.0, 0.0, 0.0];
     let alpha_image = InterleavedImage::new_with_data(
-        InterleavedDesc::new(Size2us::new(2, 1), ColorFormat::RGBA_F32),
+        InterleavedDesc::new(USize2::new(2, 1), ColorFormat::RGBA_F32),
         bytemuck::cast_slice(&alpha_pixels).to_vec(),
     )
     .unwrap();

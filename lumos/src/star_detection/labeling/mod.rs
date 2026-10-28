@@ -16,12 +16,12 @@ mod run;
 mod union_find;
 
 use crate::star_detection::labeling::component_data::ComponentData;
-use common::Size2us;
+use common::USize2;
 
 /// The connected components of a mask: each one's box and area, and its pixels as runs.
 #[derive(Debug, Default)]
 pub(crate) struct LabelMap {
-    size: Size2us,
+    size: USize2,
     /// Component `i` carries label `i + 1`.
     components: Vec<ComponentData>,
     /// Every component's runs, component by component, each component's in raster order.
@@ -60,7 +60,7 @@ impl LabelMap {
 
     /// The size of the mask it labels.
     #[inline]
-    pub(crate) const fn size(&self) -> Size2us {
+    pub(crate) const fn size(&self) -> USize2 {
         self.size
     }
 }

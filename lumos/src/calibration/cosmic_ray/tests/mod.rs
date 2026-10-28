@@ -41,7 +41,7 @@ fn synthetic_field() -> SkyField {
         (Vec2::new(32.0, 50.0), 0.7),
     ];
     SkyField::render(
-        Size2us::new(64, 64),
+        USize2::new(64, 64),
         sky,
         GaussianStars {
             sigma: 1.3,
@@ -187,7 +187,7 @@ fn measured_and_stated_gains_both_catch_a_bright_cr() {
 fn bayer_removes_cosmic_rays_preserves_star() {
     // Bayer deinterleave path: a well-sampled star + CRs spread across all four 2×2 phases. The
     // CRs go; the star core survives (each phase plane's mono detector protects it).
-    let size = Size2us::new(48, 48);
+    let size = USize2::new(48, 48);
     let sky = Sky {
         level: 0.05,
         noise: Some(SkyNoise {
@@ -266,7 +266,7 @@ fn bayer_tight_star_eaten_is_a_known_limitation() {
     // σ-rejection instead of per-frame CFA L.A.Cosmic. The test pins the behavior so a future fix
     // (e.g. mosaic-level detection) flips it loudly. Contrast `bayer_removes_cosmic_rays_...`,
     // which uses a *well-sampled* FWHM≈5.9 px star that survives.
-    let size = Size2us::new(48, 48);
+    let size = USize2::new(48, 48);
     let sky = Sky {
         level: 0.05,
         noise: Some(SkyNoise {
@@ -360,7 +360,7 @@ fn repair_via_snapshot(pixels: &Buffer2<f32>, mask: &BitBuffer2, sky: f32) -> Bu
 
 #[test]
 fn a_repair_matches_a_snapshot_reference() {
-    let size = Size2us::new(12, 12);
+    let size = USize2::new(12, 12);
     // Distinct values so a median that picked up a replaced neighbour would shift visibly.
     let pixels = Buffer2::from_fn((12, 12), |x, y| (y * 12 + x) as f32);
 
@@ -518,7 +518,7 @@ fn a_stated_gain_needs_a_unit_on_the_frame() {
 /// hit is under half a σ: the old whole-frame model would never flag it.
 #[test]
 fn a_faint_hit_on_a_gradient_is_caught() {
-    let size = Size2us::new(128, 128);
+    let size = USize2::new(128, 128);
     let mut rng = TestRng::new(0x6A);
     let mut pixels = Buffer2::from_fn((128, 128), |x, _| {
         0.05 + 0.4 * x as f32 / 128.0 + 0.002 * rng.next_gaussian_f32()
@@ -551,7 +551,7 @@ fn a_faint_hit_on_a_gradient_is_caught() {
 /// two.
 #[test]
 fn the_mask_grows_in_astroscrappys_two_rings() {
-    let size = Size2us::new(8, 3);
+    let size = USize2::new(8, 3);
     let at = |x: usize, y: usize| y * size.width + x;
     let mut significance = vec![0.0f32; size.pixel_count()];
     let mut fine = vec![0.0f32; size.pixel_count()];
@@ -573,7 +573,7 @@ fn the_mask_grows_in_astroscrappys_two_rings() {
     // Sized from a larger plane's detection, as a Bayer mosaic's later phases are: clearing to the
     // plane at hand must leave none of the earlier plane's bits behind.
     let mut masks = CrMasks::empty();
-    let larger = Size2us::new(16, 4);
+    let larger = USize2::new(16, 4);
     masks.clear_to(larger);
     let crowded = vec![10.0f32; larger.pixel_count()];
     let flat = vec![0.0f32; larger.pixel_count()];
@@ -621,7 +621,7 @@ fn window_medians_match_the_sorted_window_to_the_bit() {
         -1e-40,
     ];
     for (width, height) in [(5, 4), (13, 7), (21, 13), (40, 9)] {
-        let size = Size2us::new(width, height);
+        let size = USize2::new(width, height);
         let data: Vec<f32> = (0..size.pixel_count())
             .map(|_| {
                 let pick = rng.next_f32();
@@ -675,7 +675,7 @@ fn a_clipped_star_core_is_kept_and_a_saturated_hit_is_not() {
         }),
         clamp: false,
     };
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let mut data = SkyField::render(
         size,
         sky,
@@ -745,7 +745,7 @@ fn a_clipped_star_core_is_kept_and_a_saturated_hit_is_not() {
 #[test]
 fn an_xtrans_mosaic_is_refused_untouched() {
     let cfa = CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN));
-    let size = Size2us::new(36, 36);
+    let size = USize2::new(36, 36);
     let mut data: Vec<f32> = (0..size.pixel_count())
         .map(|idx| 0.04 + 0.01 * cfa.slot_at(size.point_of(idx)) as f32)
         .collect();
@@ -791,7 +791,7 @@ fn the_local_recompute_is_the_full_one() {
     use crate::calibration::cosmic_ray::mono::Recompute;
     use crate::calibration::cosmic_ray::mono::internals::reject_recomputing;
 
-    let size = Size2us::new(96, 96);
+    let size = USize2::new(96, 96);
     let sky = Sky {
         level: 0.1,
         noise: Some(SkyNoise {

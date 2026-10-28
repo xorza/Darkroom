@@ -21,7 +21,7 @@ use crate::combine::frame_read::frame_gate::FrameGate;
 use crate::error::Cancelled;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stratified_samples::SAMPLE_LIMIT;
-use common::Size2us;
+use common::USize2;
 use glam::USizeVec2;
 
 /// Pixels per word of the mask, which is one row: word `w` covers pixels `64w..64w + 64`.
@@ -46,12 +46,12 @@ impl CommonDomain {
     /// Its own function so the tests can weigh exactly what [`Self::build`] allocates rather than
     /// a copy of the expression that could drift from it.
     fn full_mask(pixel_count: usize) -> BitBuffer2 {
-        BitBuffer2::new_filled(Size2us::new(pixel_count, 1), true)
+        BitBuffer2::new_filled(USize2::new(pixel_count, 1), true)
     }
 
     /// The bytes a domain over `pixel_count` pixels holds: its mask.
     pub(crate) const fn heap_bytes(pixel_count: usize) -> usize {
-        BitBuffer2::heap_bytes(Size2us::new(pixel_count, 1))
+        BitBuffer2::heap_bytes(USize2::new(pixel_count, 1))
     }
 
     /// Intersect every frame's coverage into the pixels all of them contribute at.
@@ -109,7 +109,7 @@ impl CommonDomain {
     /// [`StackError::NoCommonCoverage`] when it keeps none of them.
     pub(super) fn restricted(
         &self,
-        size: Size2us,
+        size: USize2,
         keeps: impl Fn(USizeVec2) -> bool + Sync,
         cancel: &CancelToken,
     ) -> Result<Self, StackError> {

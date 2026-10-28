@@ -1,4 +1,4 @@
-use common::{Buffer2, Size2us, TempDir};
+use common::{Buffer2, TempDir, USize2};
 use scenarium::internals::func_invoker::FuncInvoker;
 
 use imaginarium::{ColorFormat, PlanarImage};
@@ -53,7 +53,7 @@ fn enum_defaults_are_exact() {
 async fn load_and_save_round_trip_exact_pixels() {
     let dir = TempDir::new("lens-image-io");
     let path = dir.join("roundtrip.png");
-    let desc = imaginarium::InterleavedDesc::new(Size2us::new(2, 1), ColorFormat::RGB_U8);
+    let desc = imaginarium::InterleavedDesc::new(USize2::new(2, 1), ColorFormat::RGB_U8);
     let pixels = vec![10, 20, 30, 40, 50, 60];
     let image = imaginarium::InterleavedImage::new_with_data(desc, pixels.clone()).unwrap();
     let library = image_library();
@@ -123,7 +123,7 @@ async fn blend_refuses_a_mismatched_destination_and_an_alpha_out_of_range() {
     let library = image_library();
     let image = |width, format| {
         DynamicValue::from_custom(Image::from(imaginarium::InterleavedImage::new_zeroed(
-            imaginarium::InterleavedDesc::new(Size2us::new(width, 2), format),
+            imaginarium::InterleavedDesc::new(USize2::new(width, 2), format),
         )))
     };
     let blend = |source: DynamicValue, destination: DynamicValue, alpha: f64| {
@@ -171,7 +171,7 @@ async fn transform_refuses_a_transform_with_no_inverse() {
     let run = |values: [f64; 5]| {
         let image =
             DynamicValue::from_custom(Image::from(imaginarium::InterleavedImage::new_zeroed(
-                imaginarium::InterleavedDesc::new(Size2us::new(2, 2), ColorFormat::MONO_U8),
+                imaginarium::InterleavedDesc::new(USize2::new(2, 2), ColorFormat::MONO_U8),
             )));
         let inputs = [image]
             .into_iter()

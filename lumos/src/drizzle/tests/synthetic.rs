@@ -93,7 +93,7 @@ fn drizzle(frames: &DitheredFrames, config: &DrizzleConfig) -> StackProduct {
 /// relative 33·ε, and the totals are taken in f64.
 #[test]
 fn drizzle_conserves_total_flux() {
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let scene = Scene::single(
         size,
         TrueSource {
@@ -131,7 +131,7 @@ fn drizzle_conserves_total_flux() {
 /// 9·ε, at offsets up to the 128-pixel width, twice over for the input's centroid.
 #[test]
 fn drizzle_places_star_at_its_reference_position() {
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let scene = Scene::single(
         size,
         TrueSource {
@@ -158,7 +158,7 @@ fn drizzle_places_star_at_its_reference_position() {
 
 #[test]
 fn drizzle_dithering_recovers_resolution() {
-    let size = Size2us::new(48, 48);
+    let size = USize2::new(48, 48);
     // Undersampled PSF (fwhm 1.8 < Nyquist 2) at a sub-pixel centre. Flux kept low so the tight
     // PSF peak stays unsaturated (otherwise both peaks clip at 1.0 and the comparison is moot).
     let scene = Scene::single(
@@ -205,7 +205,7 @@ fn drizzle_dithering_recovers_resolution() {
 /// column are left out: the half-dithered frames reach them with half a drop.
 #[test]
 fn drizzle_quality_maps_have_their_closed_form() {
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let scene = Scene::single(
         size,
         TrueSource {

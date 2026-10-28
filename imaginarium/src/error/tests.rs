@@ -1,7 +1,7 @@
 use std::error::Error as _;
 use std::io;
 
-use common::Size2us;
+use common::USize2;
 
 use crate::codec::raster_format::RasterFormat;
 use crate::color::color_format::ColorFormat;
@@ -35,7 +35,7 @@ fn only_a_wrapped_cause_is_reachable_through_source() {
         assert_eq!(error.source().unwrap().to_string(), cause);
     }
 
-    let desc = InterleavedDesc::new(Size2us::new(3, 2), ColorFormat::RGB_F32);
+    let desc = InterleavedDesc::new(USize2::new(3, 2), ColorFormat::RGB_F32);
     for (error, message) in [
         (
             CodecError::Unstorable {

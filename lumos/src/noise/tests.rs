@@ -5,9 +5,9 @@ use crate::internals::test_rng::TestRng;
 use crate::math::statistics::median_mad::MedianMad;
 use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
 use crate::noise::mrs_noise::{self, NoisePlane};
-use common::Size2us;
+use common::USize2;
 
-fn white_noise(size: Size2us, sigma: f32, seed: u64) -> Buffer2<f32> {
+fn white_noise(size: USize2, sigma: f32, seed: u64) -> Buffer2<f32> {
     let mut rng = TestRng::new(seed);
     Buffer2::from_fn(size, |_, _| sigma * rng.next_gaussian_f32())
 }
@@ -17,7 +17,7 @@ fn white_noise(size: Size2us, sigma: f32, seed: u64) -> Buffer2<f32> {
 /// 0.002 is three of the combined standard errors.
 #[test]
 fn white_noise_reads_its_own_sigma() {
-    let size = Size2us::new(1024, 1024);
+    let size = USize2::new(1024, 1024);
     let mean = (1..=2u64)
         .map(|seed| {
             f64::from(
@@ -40,7 +40,7 @@ fn white_noise_reads_its_own_sigma() {
 /// MAD = 0.25 and 1.4826 × 0.25 = 0.37, 37 times the noise.
 #[test]
 fn a_ramp_leaves_the_noise_estimate() {
-    let size = Size2us::new(512, 512);
+    let size = USize2::new(512, 512);
     let noise = white_noise(size, 0.01, 3);
     let ramped = Buffer2::new(
         (512, 512),
@@ -73,7 +73,7 @@ fn a_ramp_leaves_the_noise_estimate() {
 /// excluded, the left half σ = 0.01, so the frame reads the left half's σ.
 #[test]
 fn excluded_pixels_leave_the_estimate() {
-    let size = Size2us::new(512, 512);
+    let size = USize2::new(512, 512);
     let left = white_noise(size, 0.01, 5);
     let right = white_noise(size, 0.05, 6);
     let frame = Buffer2::from_fn((512, 512), |x, y| {
@@ -104,7 +104,7 @@ fn excluded_pixels_leave_the_estimate() {
 /// each draw; the mean of 16 scatters by 1.3%, and 4% is three of that.
 #[test]
 fn a_frame_the_support_covers_whole_reads_its_noise() {
-    let size = Size2us::new(48, 48);
+    let size = USize2::new(48, 48);
     let estimates: Vec<f32> = (0..16)
         .map(|seed| {
             let mut frame = white_noise(size, 0.01, 11 + seed);
@@ -135,7 +135,7 @@ fn a_frame_the_support_covers_whole_reads_its_noise() {
 /// region the frame, which one worker of the 16 takes: 36 864 × 33 + 36 864 × 28 + 192 × 4 + 136.
 #[test]
 fn working_sets_are_what_the_buffers_hold() {
-    let wide = Size2us::new(1024, 1024);
+    let wide = USize2::new(1024, 1024);
     assert_eq!(
         mrs_noise::heap_bytes(wide, 16),
         34_603_008 + 45_875_200 + 20_480 + 2176
@@ -145,7 +145,7 @@ fn working_sets_are_what_the_buffers_hold() {
         34_603_008 + 11_468_800 + 5120 + 2176
     );
     assert_eq!(
-        mrs_noise::heap_bytes(Size2us::new(192, 192), 16),
+        mrs_noise::heap_bytes(USize2::new(192, 192), 16),
         36_864 * 33 + 36_864 * 28 + 192 * 4 + 136
     );
 }

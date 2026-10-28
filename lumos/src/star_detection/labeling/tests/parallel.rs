@@ -2,9 +2,9 @@
 //! boundaries somewhere else, so each case is stitched at many rows.
 
 use crate::star_detection::labeling::tests::{Mask, STRIP_COUNTS, check};
-use common::Size2us;
+use common::USize2;
 
-const SIZE: Size2us = Size2us::new(400, 300);
+const SIZE: USize2 = USize2::new(400, 300);
 
 #[test]
 fn tall_masks_count_as_worked_out() {
@@ -69,13 +69,13 @@ fn tall_masks_count_as_worked_out() {
         ),
         (
             "every pixel set",
-            Mask::from_fn(Size2us::new(200, 200), |_, _| true),
+            Mask::from_fn(USize2::new(200, 200), |_, _| true),
             1,
             1,
         ),
         (
             "four corners of a large frame",
-            Mask::from_fn(Size2us::new(1000, 1000), |x, y| {
+            Mask::from_fn(USize2::new(1000, 1000), |x, y| {
                 (x == 10 || x == 990) && (y == 10 || y == 990)
             }),
             4,
@@ -83,7 +83,7 @@ fn tall_masks_count_as_worked_out() {
         ),
         (
             "one wide row",
-            Mask::from_fn(Size2us::new(500, 1), |x, _| {
+            Mask::from_fn(USize2::new(500, 1), |x, _| {
                 [10..20, 100..110, 400..410]
                     .iter()
                     .any(|run| run.contains(&x))
@@ -93,7 +93,7 @@ fn tall_masks_count_as_worked_out() {
         ),
         (
             "one tall column",
-            Mask::from_fn(Size2us::new(1, 500), |_, y| {
+            Mask::from_fn(USize2::new(1, 500), |_, y| {
                 [10..20, 100..110, 400..410]
                     .iter()
                     .any(|run| run.contains(&y))

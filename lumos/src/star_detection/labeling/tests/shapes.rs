@@ -1,7 +1,7 @@
 //! Small shapes, each with its labels worked out by hand for both connectivities.
 
 use crate::star_detection::labeling::tests::{Mask, check};
-use common::Size2us;
+use common::USize2;
 
 /// Expected labels, one string per row: `.` is background, a digit the label.
 fn labels(rows: &[&str]) -> Vec<u32> {
@@ -201,7 +201,7 @@ fn larger_shapes_count_as_worked_out() {
         "#.........#",
         "###########",
     ]);
-    let checkerboard = Mask::from_fn(Size2us::new(8, 8), |x, y| (x + y) % 2 == 0);
+    let checkerboard = Mask::from_fn(USize2::new(8, 8), |x, y| (x + y) % 2 == 0);
     for (name, mask, four, eight) in [
         ("spiral", spiral, 3, 3),
         ("concentric rings", rings, 2, 2),
@@ -218,7 +218,7 @@ fn larger_shapes_count_as_worked_out() {
 
 #[test]
 fn zero_sized_masks_have_no_components() {
-    for size in [Size2us::new(0, 10), Size2us::new(10, 0)] {
+    for size in [USize2::new(0, 10), USize2::new(10, 0)] {
         let labelled = check(&Mask::from_fn(size, |_, _| true));
         assert_eq!(labelled.four.label_count(), 0, "{size:?}");
         assert_eq!(labelled.eight.label_count(), 0, "{size:?}");

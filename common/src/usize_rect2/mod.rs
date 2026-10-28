@@ -13,12 +13,12 @@ const fn max_usize(a: usize, b: usize) -> usize {
 
 /// Unsigned pixel rectangle with minimum-inclusive, maximum-exclusive bounds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Rect2us {
+pub struct USizeRect2 {
     pub min: USizeVec2,
     pub max: USizeVec2,
 }
 
-impl Rect2us {
+impl USizeRect2 {
     /// The rectangle from `min` to `max`. `min ≤ max` on both axes is the caller's contract,
     /// checked in debug builds, as a hot loop builds rectangles; the one with `min > max` is
     /// [`Self::empty`].
@@ -73,7 +73,7 @@ impl Rect2us {
     }
 }
 
-impl Default for Rect2us {
+impl Default for USizeRect2 {
     fn default() -> Self {
         Self::empty()
     }

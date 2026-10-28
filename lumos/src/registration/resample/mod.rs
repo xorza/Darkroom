@@ -19,7 +19,7 @@ use crate::registration::resample::source_image::SourceImage;
 use crate::registration::resample::warp_config::WarpConfig;
 use crate::registration::warp_transform::WarpTransform;
 use crate::scratch_pool::{ScratchPool, Shapeless};
-use common::Size2us;
+use common::USize2;
 
 mod flagged_sources;
 mod frame_sampler;
@@ -78,7 +78,7 @@ impl WarpScratch {
     /// The bytes one warp of a `size` frame on `workers` holds here at the most, its flag planes
     /// and their growth's block ORs: a row's scratch is a few bytes a pixel of one row, which a
     /// plan counts nowhere.
-    pub(crate) const fn heap_bytes(size: Size2us, workers: usize) -> usize {
+    pub(crate) const fn heap_bytes(size: USize2, workers: usize) -> usize {
         FlagScratch::heap_bytes(size, workers)
     }
 }

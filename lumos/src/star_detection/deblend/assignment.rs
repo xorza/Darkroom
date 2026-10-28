@@ -2,7 +2,7 @@
 
 use crate::star_detection::deblend;
 use crate::star_detection::deblend::pixel::Pixel;
-use common::Rect2us;
+use common::USizeRect2;
 use glam::USizeVec2;
 
 /// Peaks at or under this many are searched in full for every pixel; past it, a cell grid finds a
@@ -16,7 +16,7 @@ const FULL_SEARCH_PEAKS: usize = 8;
 /// components.
 #[derive(Debug, Default)]
 pub(crate) struct Assignment {
-    pub(super) bboxes: Vec<Rect2us>,
+    pub(super) bboxes: Vec<USizeRect2>,
     pub(super) areas: Vec<usize>,
     /// The grid's origin, the component's top-left pixel.
     origin: USizeVec2,
@@ -35,9 +35,9 @@ pub(crate) struct Assignment {
 impl Assignment {
     /// Clear the boxes and areas for `peaks`, and grid them over `bbox` when there are enough:
     /// cells of side `⌈√(area / peaks)⌉`, about one peak each.
-    pub(super) fn reset(&mut self, peaks: &[Pixel], bbox: Rect2us) {
+    pub(super) fn reset(&mut self, peaks: &[Pixel], bbox: USizeRect2) {
         self.bboxes.clear();
-        self.bboxes.resize(peaks.len(), Rect2us::empty());
+        self.bboxes.resize(peaks.len(), USizeRect2::empty());
         self.areas.clear();
         self.areas.resize(peaks.len(), 0);
         if peaks.len() <= FULL_SEARCH_PEAKS {

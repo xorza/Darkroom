@@ -58,7 +58,7 @@ use crate::registration::resample::warp_config::{InterpolationMethod, WarpConfig
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
 use crate::stack_product::weight_kind::WeightKind;
-use common::Size2us;
+use common::USize2;
 
 /// The combine, with no progress reported and no cancel.
 fn combine(frames: Vec<StackFrame>, config: &StackConfig) -> Result<StackProduct, StackError> {
@@ -92,7 +92,7 @@ fn make_cfa_stack_cache(
         .zip(source_sigmas)
         .map(|(pixels, &sigma)| {
             let mut image =
-                internals::cfa::make_cfa(Size2us::new(pixels.len(), 1), pixels, CfaType::Mono);
+                internals::cfa::make_cfa(USize2::new(pixels.len(), 1), pixels, CfaType::Mono);
             image.metadata.derived.set_quantization_sigma(Some(sigma));
             image
         })
@@ -859,8 +859,8 @@ fn stack_images_dimension_errors() {
                 StackError::PlaneDimensionMismatch {
                     idx: 0,
                     plane,
-                    expected: Size2us { width: 4, height: 4 },
-                    actual: Size2us { width: 2, height: 2 },
+                    expected: USize2 { width: 4, height: 4 },
+                    actual: USize2 { width: 2, height: 2 },
                 } if plane == expected_plane
             ),
             "expected a {expected_plane} dimension error, got {error:?}"
@@ -1414,7 +1414,7 @@ fn signed_uniform_warp_and_weighted_combine_preserve_dc() {
 /// pixels, which moves it by under 1% — and the fit lands within 5 of them.
 #[test]
 fn registered_global_normalization_uses_paired_signal_samples() {
-    let size = Size2us::new(128, 128);
+    let size = USize2::new(128, 128);
     let desc = PlanarDesc::new((size.width, size.height), ChannelLayout::Mono);
     let mut rng = TestRng::new(0x5ca1e);
     let stars: Vec<(Vec2, f32)> = (0..60)

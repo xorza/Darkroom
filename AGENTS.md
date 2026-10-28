@@ -164,7 +164,7 @@ One word, one meaning, in the workspace crates; the submodules keep their own.
 - **One channel is `mono`.** `luma` is the Rec. 709 weighted sum of encoded
   samples, and an RGB value with `R = G = B` a neutral. Refused: `L`, the PIL
   mode name; `gray` and `grey`, which the crates spelled both ways.
-- **A descriptor is a `desc`, a `Size2us` a `size`.** Refused: `dimensions`,
+- **A descriptor is a `desc`, a `USize2` a `size`.** Refused: `dimensions`,
   which named both.
 - **Bytes are KiB, MiB and GiB**, 1024-based as RAM is sized, the IEC 80000-13 names. Refused:
   SI kB at 1000, and KB at 1024, which the standard reads as 1000

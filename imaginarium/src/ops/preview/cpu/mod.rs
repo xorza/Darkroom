@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 use std::ops::{AddAssign, Range};
 
-use common::{Size2us, par};
+use common::{USize2, par};
 use rayon::prelude::*;
 
 use crate::color::color_format::{ChannelCount, ColorFormat, SampleType};
@@ -45,8 +45,8 @@ pub(super) fn generate_planar(params: &Preview, input: &PlanarImage) -> Interlea
 }
 
 /// The preview's size, at least one pixel on each side.
-fn target(params: &Preview) -> Size2us {
-    Size2us::new(params.size.width.max(1), params.size.height.max(1))
+fn target(params: &Preview) -> USize2 {
+    USize2::new(params.size.width.max(1), params.size.height.max(1))
 }
 
 /// A source sample type: the sum a footprint accumulates in, and how a footprint's sum turns
@@ -163,8 +163,8 @@ fn footprint(out: usize, src: usize, dst: usize) -> Range<usize> {
 /// The `RGBA_U8` preview of a `src`-sized source at `target`, each pixel `mean` of its footprint's
 /// rows and columns, row-parallel.
 fn fill(
-    src: Size2us,
-    target: Size2us,
+    src: USize2,
+    target: USize2,
     mean: impl Fn(Range<usize>, Range<usize>) -> [u8; 4] + Sync,
 ) -> InterleavedImage {
     let mut out = InterleavedImage::new_zeroed(InterleavedDesc::new(target, ColorFormat::RGBA_U8));
@@ -195,7 +195,7 @@ fn rgba<const N: usize>(mean: [u8; N]) -> [u8; 4] {
 /// color; a footprint of no alpha at all, which has no color to weigh, takes the plain mean.
 fn typed<T: PreviewSample, const N: usize>(
     input: &InterleavedImage,
-    target: Size2us,
+    target: USize2,
 ) -> InterleavedImage {
     let src_size = input.desc().size();
     let src: &[T] = bytemuck::cast_slice(input.bytes());
@@ -230,7 +230,7 @@ fn typed<T: PreviewSample, const N: usize>(
 }
 
 /// The preview of `N` `f32` planes of `size`.
-fn planar<const N: usize>(planes: [&[f32]; N], size: Size2us, target: Size2us) -> InterleavedImage {
+fn planar<const N: usize>(planes: [&[f32]; N], size: USize2, target: USize2) -> InterleavedImage {
     fill(size, target, |rows, cols| {
         let mut sum = [0.0f64; N];
         for sy in rows.clone() {

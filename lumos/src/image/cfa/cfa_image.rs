@@ -28,7 +28,7 @@ use crate::image::metadata::mosaic_noise::MosaicNoise;
 use crate::image::stackable_image::{ImageParts, StackableImage};
 use crate::io::error::WriteError;
 use crate::io::fits;
-use common::Size2us;
+use common::USize2;
 use glam::USizeVec2;
 
 /// Raw CFA image - single channel with color filter pattern metadata.
@@ -113,7 +113,7 @@ impl CfaImage {
     }
 
     /// The sensor extent the samples cover.
-    pub(crate) const fn size(&self) -> Size2us {
+    pub(crate) const fn size(&self) -> USize2 {
         self.data.size()
     }
 

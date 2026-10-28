@@ -14,7 +14,7 @@ use crate::calibration::cosmic_ray::mono::MonoDetector;
 use crate::calibration::cosmic_ray::noise_model::{NoiseModel, PixelBgs};
 use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::bayer_phase::BayerPhase;
-use common::Size2us;
+use common::USize2;
 
 /// Phase-sized masks a phase's detection holds beside the mono detector's: the frame's [`KeptOut`]
 /// sampled to the phase, two.
@@ -54,7 +54,7 @@ impl<'a> BayerDetector<'a> {
     /// The bytes a detection on a `size` mosaic allocates beside it: the mask of what it repaired,
     /// and the largest phase plane, the mono detector's scratch over it and the phase's
     /// [`PHASE_MASKS`] — of which nothing when even that phase is too small to scan.
-    pub(super) const fn heap_bytes(size: Size2us) -> usize {
+    pub(super) const fn heap_bytes(size: USize2) -> usize {
         let [first, ..] = BayerPhase::ALL;
         let phase = first.size(size);
         let scanned = if MonoDetector::scans(phase) {

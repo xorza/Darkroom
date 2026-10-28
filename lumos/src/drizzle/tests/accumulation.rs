@@ -26,7 +26,7 @@ use crate::registration::distortion::sip::sip_order::SipOrder;
 /// and reads back exactly, the first and last rows and columns included.
 #[test]
 fn a_flat_frame_at_scale_2_covers_every_cell() {
-    let size = Size2us::new(100, 100);
+    let size = USize2::new(100, 100);
     let product = drizzle_one(
         DrizzleConfig::default(),
         &DrizzleFrame::new(constant_image(size, 0.5), warp_of(Transform::identity())),
@@ -104,7 +104,7 @@ fn drizzle_paths_refuses_before_decoding() {
 #[test]
 fn drizzle_paths_loads_its_frames_under_the_run_token() {
     let scratch = TempDir::new("lumos_drizzle_paths");
-    let size = Size2us::new(16, 12);
+    let size = USize2::new(16, 12);
     let transforms = [
         Transform::identity(),
         Transform::translation(DVec2::new(0.4, -0.3)),
@@ -229,11 +229,11 @@ fn drizzle_admits_each_frame_before_it_deposits() {
     pixels[6] = f32::NAN;
     let frames = vec![
         DrizzleFrame::new(
-            constant_image(Size2us::new(4, 4), 1.0),
+            constant_image(USize2::new(4, 4), 1.0),
             WarpTransform::new(Transform::identity()),
         ),
         DrizzleFrame::new(
-            mono_image(Size2us::new(4, 4), pixels),
+            mono_image(USize2::new(4, 4), pixels),
             WarpTransform::new(Transform::identity()),
         ),
     ];
@@ -270,7 +270,7 @@ fn drizzle_stops_between_frames_when_cancelled() {
     let frames: Vec<_> = (0..3)
         .map(|_| {
             DrizzleFrame::new(
-                constant_image(Size2us::new(16, 16), 0.5),
+                constant_image(USize2::new(16, 16), 0.5),
                 WarpTransform::new(Transform::identity()),
             )
         })
@@ -294,7 +294,7 @@ fn drizzle_stops_between_frames_when_cancelled() {
     let frames: Vec<_> = (0..3)
         .map(|_| {
             DrizzleFrame::new(
-                constant_image(Size2us::new(16, 16), 0.5),
+                constant_image(USize2::new(16, 16), 0.5),
                 WarpTransform::new(Transform::identity()),
             )
         })
@@ -315,7 +315,7 @@ fn drizzle_stops_between_frames_when_cancelled() {
 
 /// A SIP fit of `field` about the centre of a `size` frame, on `transform`, as registration would
 /// report it.
-fn sip_warp(size: Size2us, transform: Transform, field: impl Fn(DVec2) -> DVec2) -> WarpTransform {
+fn sip_warp(size: USize2, transform: Transform, field: impl Fn(DVec2) -> DVec2) -> WarpTransform {
     let center = DVec2::new(size.width as f64 / 2.0, size.height as f64 / 2.0);
     let mut reference = Vec::new();
     for y in (0..size.height).step_by(2) {
@@ -342,7 +342,7 @@ fn sip_warp(size: Size2us, transform: Transform, field: impl Fn(DVec2) -> DVec2)
 /// of `t` — at scale 1 and with the point kernel, the cell `round(r)`.
 #[test]
 fn a_sip_warp_drizzles_through_its_inverse() {
-    let size = Size2us::new(32, 32);
+    let size = USize2::new(32, 32);
     let warp = sip_warp(
         size,
         Transform::similarity(DVec2::new(0.7, -0.4), 0.02, 1.0),
@@ -401,7 +401,7 @@ fn a_sip_warp_drizzles_through_its_inverse() {
 /// every input pixel further right than that has no preimage, and every one left of it has one.
 #[test]
 fn pixels_past_a_fold_are_counted_once_and_deposit_nothing() {
-    let size = Size2us::new(40, 24);
+    let size = USize2::new(40, 24);
     let warp = sip_warp(size, Transform::identity(), |d| {
         DVec2::new(-0.03 * d.x * d.x, 0.0)
     });
@@ -435,8 +435,8 @@ fn pixels_past_a_fold_are_counted_once_and_deposit_nothing() {
 
 #[test]
 fn drizzle_images_dimension_mismatch() {
-    let a = constant_image(Size2us::new(20, 20), 0.5);
-    let b = constant_image(Size2us::new(10, 10), 0.5);
+    let a = constant_image(USize2::new(20, 20), 0.5);
+    let b = constant_image(USize2::new(10, 10), 0.5);
     let result = DrizzleConfig {
         stack: plain_stack(),
         ..DrizzleConfig::default()
@@ -459,7 +459,7 @@ fn drizzle_images_dimension_mismatch() {
 /// scale 1. The drops' weight is the same in every channel.
 #[test]
 fn drizzle_rgb_gives_each_channel_its_variance() {
-    let size = Size2us::new(8, 8);
+    let size = USize2::new(8, 8);
     let mut image = rgb_image(
         size,
         [
@@ -496,7 +496,7 @@ fn drizzle_rgb_gives_each_channel_its_variance() {
 /// Every value is a correctly rounded quotient of small integers.
 #[test]
 fn weight_and_inverse_variance_maps() {
-    let size = Size2us::new(4, 4);
+    let size = USize2::new(4, 4);
     let at = (2, 2);
     for (frame_weights, weight, inverse_variance) in [
         (vec![1.0, 1.0, 1.0], 3.0, 3.0f32),
@@ -542,7 +542,7 @@ fn weight_and_inverse_variance_maps() {
 /// gate is actually exercised while coverage is declined.
 #[test]
 fn declined_quality_planes_are_absent_and_do_not_disturb_the_image() {
-    let size = Size2us::new(24, 24);
+    let size = USize2::new(24, 24);
     let image = constant_image(size, 0.5);
     let transform = Transform::translation(DVec2::new(1.7, -2.3));
     let product = |quality| {
@@ -641,8 +641,8 @@ fn coverage_counts_frames_rather_than_accumulated_weight() {
     .drizzle_images(
         drizzle_frames(
             vec![
-                constant_image(Size2us::new(side, side), 1.0),
-                constant_image(Size2us::new(side, side), 1.0),
+                constant_image(USize2::new(side, side), 1.0),
+                constant_image(USize2::new(side, side), 1.0),
             ],
             &[
                 Transform::identity(),
@@ -700,7 +700,7 @@ fn coverage_counts_frames_rather_than_accumulated_weight() {
 /// whole output, so it scans every pixel whose drop lands anywhere on it.
 #[test]
 fn band_count_does_not_change_the_result() {
-    let image = star_field(Size2us::new(64, 64), 24, 4242).image;
+    let image = star_field(USize2::new(64, 64), 24, 4242).image;
     let desc = image.desc();
     let centre = DVec2::new(32.0, 32.0);
     let warp = |transform: Transform| WarpTransform::new(transform.inverse());
@@ -789,7 +789,7 @@ fn band_count_does_not_change_the_result() {
 /// the frame — a tight answer there drops flux with no diagnostic.
 #[test]
 fn a_band_scan_covers_every_reaching_drop() {
-    let image = constant_image(Size2us::new(16, 12), 1.0);
+    let image = constant_image(USize2::new(16, 12), 1.0);
     let scan = |warp: &WarpTransform, width: usize, output: f64, input: f64| {
         let frame = DrizzleFrame::new(image.clone(), warp.clone());
         band_scan(&frame, width, DropReach { output, input }).collect::<Vec<_>>()
@@ -854,7 +854,7 @@ fn drizzle_accumulator_rejects_invalid_frame_inputs() {
     let mut acc = accumulator(PlanarDesc::new((4, 4), ChannelLayout::Mono), config);
 
     let mut frame = DrizzleFrame::new(
-        constant_image(Size2us::new(4, 4), 1.0),
+        constant_image(USize2::new(4, 4), 1.0),
         WarpTransform::new(Transform::identity()),
     );
     frame.pixel_weight_map = Some(Buffer2::new_filled((3, 3), 1.0));
@@ -864,11 +864,11 @@ fn drizzle_accumulator_rejects_invalid_frame_inputs() {
         DrizzleError::Stack(StackError::PlaneDimensionMismatch {
             idx: 0,
             plane: FramePlane::PixelWeight,
-            expected: Size2us {
+            expected: USize2 {
                 width: 4,
                 height: 4
             },
-            actual: Size2us {
+            actual: USize2 {
                 width: 3,
                 height: 3
             },
@@ -881,7 +881,7 @@ fn drizzle_accumulator_rejects_invalid_frame_inputs() {
     let mut pixel_weights = vec![1.0; 16];
     pixel_weights[5] = -0.25;
     let mut frame = DrizzleFrame::new(
-        constant_image(Size2us::new(4, 4), 1.0),
+        constant_image(USize2::new(4, 4), 1.0),
         WarpTransform::new(Transform::identity()),
     );
     frame.pixel_weight_map = Some(Buffer2::new((4, 4), pixel_weights));
@@ -905,7 +905,7 @@ fn drizzle_accumulator_rejects_invalid_frame_inputs() {
 /// last column takes the fill value with no weight. Before, the 5.0 deposited at full weight.
 #[test]
 fn a_null_pixel_deposits_nothing() {
-    let size = Size2us::new(6, 4);
+    let size = USize2::new(6, 4);
     let mut pixels = vec![1.0f32; size.pixel_count()];
     let mut nulls = vec![0.0f32; size.pixel_count()];
     for y in 0..size.height {

@@ -2,14 +2,14 @@ use super::*;
 use crate::color::color_format::ColorFormat;
 use crate::internals::create_test_image;
 use crate::internals::image_diff::pixels_equal;
-use common::Size2us;
+use common::USize2;
 use glam::Vec2;
 
-fn image_u8(size: Size2us, fmt: ColorFormat, bytes: Vec<u8>) -> InterleavedImage {
+fn image_u8(size: USize2, fmt: ColorFormat, bytes: Vec<u8>) -> InterleavedImage {
     InterleavedImage::new_with_data(InterleavedDesc::new(size, fmt), bytes).unwrap()
 }
 
-fn image_f32(size: Size2us, fmt: ColorFormat, values: &[f32]) -> InterleavedImage {
+fn image_f32(size: USize2, fmt: ColorFormat, values: &[f32]) -> InterleavedImage {
     let bytes: Vec<u8> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
     InterleavedImage::new_with_data(InterleavedDesc::new(size, fmt), bytes).unwrap()
 }
@@ -21,7 +21,7 @@ fn test_identity_is_exact_all_formats() {
     for &filter in &[FilterMode::Nearest, FilterMode::Bilinear] {
         for format in ColorFormat::ALL {
             // Non-power-of-two dimensions to exercise edge rows/columns.
-            let input = create_test_image(format, Size2us::new(13, 7), 0);
+            let input = create_test_image(format, USize2::new(13, 7), 0);
             let mut output = InterleavedImage::new_zeroed(input.desc());
 
             AffineWarp::new()
@@ -41,7 +41,7 @@ fn test_identity_is_exact_all_formats() {
 #[test]
 fn test_integer_translate_shifts_pixels() {
     let input = image_u8(
-        Size2us::new(4, 1),
+        USize2::new(4, 1),
         ColorFormat::MONO_U8,
         vec![10, 20, 30, 40],
     );
@@ -60,12 +60,12 @@ fn test_integer_translate_shifts_pixels() {
 #[test]
 fn test_nearest_downscale_picks_even_columns() {
     let input = image_u8(
-        Size2us::new(4, 1),
+        USize2::new(4, 1),
         ColorFormat::MONO_U8,
         vec![10, 20, 30, 40],
     );
     let mut output = InterleavedImage::new_zeroed(InterleavedDesc::new(
-        Size2us::new(2, 1),
+        USize2::new(2, 1),
         ColorFormat::MONO_U8,
     ));
 
@@ -82,13 +82,9 @@ fn test_nearest_downscale_picks_even_columns() {
 /// math exact: [0.25,0.75,0.5] → [0.125, 0.5, 0.625].
 #[test]
 fn test_bilinear_half_pixel_average() {
-    let input = image_f32(
-        Size2us::new(3, 1),
-        ColorFormat::MONO_F32,
-        &[0.25, 0.75, 0.5],
-    );
+    let input = image_f32(USize2::new(3, 1), ColorFormat::MONO_F32, &[0.25, 0.75, 0.5]);
     let mut output = InterleavedImage::new_zeroed(InterleavedDesc::new(
-        Size2us::new(3, 1),
+        USize2::new(3, 1),
         ColorFormat::MONO_F32,
     ));
 
@@ -106,12 +102,12 @@ fn test_bilinear_half_pixel_average() {
 #[test]
 fn test_rgba_alpha_is_interpolated() {
     let input = image_f32(
-        Size2us::new(2, 1),
+        USize2::new(2, 1),
         ColorFormat::RGBA_F32,
         &[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
     );
     let mut output = InterleavedImage::new_zeroed(InterleavedDesc::new(
-        Size2us::new(2, 1),
+        USize2::new(2, 1),
         ColorFormat::RGBA_F32,
     ));
 
@@ -130,7 +126,7 @@ fn test_rgba_alpha_is_interpolated() {
 #[test]
 fn test_fully_out_of_bounds_is_zero_all_formats() {
     for format in ColorFormat::ALL {
-        let input = create_test_image(format, Size2us::new(3, 3), 0);
+        let input = create_test_image(format, USize2::new(3, 3), 0);
         let mut output = InterleavedImage::new_zeroed(input.desc());
 
         AffineWarp::new()
@@ -148,8 +144,8 @@ fn test_fully_out_of_bounds_is_zero_all_formats() {
 /// confirming the filter parameter actually changes behavior.
 #[test]
 fn test_filter_modes_differ_on_upscale() {
-    let input = image_u8(Size2us::new(2, 1), ColorFormat::MONO_U8, vec![0, 100]);
-    let out_desc = InterleavedDesc::new(Size2us::new(4, 1), ColorFormat::MONO_U8);
+    let input = image_u8(USize2::new(2, 1), ColorFormat::MONO_U8, vec![0, 100]);
+    let out_desc = InterleavedDesc::new(USize2::new(4, 1), ColorFormat::MONO_U8);
 
     let mut nearest = InterleavedImage::new_zeroed(out_desc);
     AffineWarp::new()
@@ -184,11 +180,11 @@ fn every_tier_matches_the_scalar_reference() {
     for tier in IsaTier::supported() {
         for format in ColorFormat::ALL {
             for width in [3, 13, 37, 70] {
-                let input = create_test_image(format, Size2us::new(width, 19), 7);
+                let input = create_test_image(format, USize2::new(width, 19), 7);
                 for (warp, output) in [
-                    (rotation, Size2us::new(width, 19)),
-                    (upscale, Size2us::new(2 * width, 38)),
-                    (downscale, Size2us::new(width.div_ceil(2), 15)),
+                    (rotation, USize2::new(width, 19)),
+                    (upscale, USize2::new(2 * width, 38)),
+                    (downscale, USize2::new(width.div_ceil(2), 15)),
                 ] {
                     let warp = warp.filter(FilterMode::Bilinear);
                     let desc = InterleavedDesc::new(output, format);
@@ -217,7 +213,7 @@ fn special_floats_interpolate_as_the_reference() {
         .rotate_around(0.3, Vec2::new(10.0, 4.0))
         .filter(FilterMode::Bilinear);
     for format in [ColorFormat::RGB_F32, ColorFormat::RGBA_F32] {
-        let mut input = create_test_image(format, Size2us::new(21, 9), 3);
+        let mut input = create_test_image(format, USize2::new(21, 9), 3);
         let specials = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -0.5, 1.5, -0.0];
         let samples: &mut [f32] = bytemuck::cast_slice_mut(input.bytes_mut());
         for (sample, special) in samples.iter_mut().step_by(7).zip(specials.iter().cycle()) {
@@ -238,7 +234,7 @@ fn special_floats_interpolate_as_the_reference() {
 #[test]
 fn bilinear_rounds_ties_to_even() {
     let input = image_u8(
-        Size2us::new(4, 1),
+        USize2::new(4, 1),
         ColorFormat::MONO_U8,
         vec![10, 11, 11, 12],
     );
@@ -276,7 +272,7 @@ fn invertibility_needs_a_normal_determinant_and_a_finite_inverse() {
 #[test]
 #[should_panic(expected = "the transform is not invertible")]
 fn a_singular_transform_is_refused() {
-    let input = image_u8(Size2us::new(2, 1), ColorFormat::MONO_U8, vec![1, 2]);
+    let input = image_u8(USize2::new(2, 1), ColorFormat::MONO_U8, vec![1, 2]);
     let mut output = InterleavedImage::new_zeroed(input.desc());
     AffineWarp::new()
         .scale(Vec2::new(0.0, 1.0))

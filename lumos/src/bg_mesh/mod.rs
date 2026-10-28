@@ -27,7 +27,7 @@ use crate::bg_mesh::mesh_axis::MeshAxis;
 use crate::bg_mesh::tile_stats::{TileInput, TileScratch, TileStats};
 use crate::math::statistics;
 use crate::scratch_pool::ScratchPool;
-use common::{Rect2us, Size2us};
+use common::{USize2, USizeRect2};
 use glam::USizeVec2;
 
 /// Tile grid with each tile's statistics and centre.
@@ -38,7 +38,7 @@ pub(crate) struct BgMesh {
     pub(crate) centers_x: Vec<f32>,
     pub(crate) centers_y: Vec<f32>,
     tile_size: usize,
-    size: Size2us,
+    size: USize2,
     /// Which tiles measured their own statistics; the others were filled from them.
     measured: Vec<bool>,
 }
@@ -57,7 +57,7 @@ impl BgMesh {
     /// interpolation path handles correctly (1-tile dimensions degenerate to a constant fill).
     ///
     /// Constructed and populated only by [`MeshWorkspace`](mesh_workspace::MeshWorkspace).
-    fn new_uninit(size: Size2us, tile_size: usize) -> Self {
+    fn new_uninit(size: USize2, tile_size: usize) -> Self {
         debug_assert!(
             size.width > 0 && size.height > 0 && tile_size > 0,
             "BackgroundMesh needs non-zero dimensions and tile size, got {}x{} tile {tile_size}",
@@ -82,7 +82,7 @@ impl BgMesh {
         }
     }
 
-    fn matches_layout(&self, size: Size2us, tile_size: usize) -> bool {
+    fn matches_layout(&self, size: USize2, tile_size: usize) -> bool {
         self.size == size && self.tile_size == clamped_tile_size(size, tile_size)
     }
 
@@ -109,7 +109,7 @@ impl BgMesh {
         let rows = MeshAxis::new(self.size.height, self.tile_size);
         let tile_at = |idx: usize| {
             let (tx, ty) = (idx % tiles_x, idx / tiles_x);
-            Rect2us::new(
+            USizeRect2::new(
                 USizeVec2::new(cols.start(tx), rows.start(ty)),
                 USizeVec2::new(cols.end(tx), rows.end(ty)),
             )
@@ -324,7 +324,7 @@ impl Reflection {
 
 /// The tile size a grid over `size` uses: `tile_size`, cut to the image's shorter side so
 /// a tile never exceeds the frame.
-const fn clamped_tile_size(size: Size2us, tile_size: usize) -> usize {
+const fn clamped_tile_size(size: USize2, tile_size: usize) -> usize {
     let side = if size.width < size.height {
         size.width
     } else {

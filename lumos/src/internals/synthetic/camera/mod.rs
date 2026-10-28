@@ -14,7 +14,7 @@ use crate::image::cfa::cfa_type::CfaType;
 use crate::internals::synthetic::bgs::Vignette;
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use crate::math::fwhm;
-use common::Size2us;
+use common::USize2;
 
 /// Point-spread function the camera convolves every point source with.
 #[derive(Debug, Clone, Copy)]
@@ -125,7 +125,7 @@ impl Default for FlatField {
 impl FlatField {
     /// The response of every photosite of a `size` sensor behind `cfa_type`'s filters: its
     /// color's gain times the vignette.
-    pub(crate) fn render(&self, size: Size2us, cfa_type: &CfaType) -> Buffer2<f32> {
+    pub(crate) fn render(&self, size: USize2, cfa_type: &CfaType) -> Buffer2<f32> {
         Buffer2::from_fn(size, |x, y| {
             let gain = self.color_gain[cfa_type.slot_at(USizeVec2::new(x, y))];
             self.vignette

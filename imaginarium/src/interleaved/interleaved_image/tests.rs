@@ -1,4 +1,4 @@
-use common::{Buffer2, Size2us, par};
+use common::{Buffer2, USize2, par};
 use rayon::iter::ParallelIterator;
 
 use crate::color::color_format::{ColorFormat, SampleType};
@@ -10,7 +10,7 @@ use crate::internals::create_test_image;
 /// One `MONO_U16` pixel is 2 bytes: 3 are refused with both lengths, and 2 make the image.
 #[test]
 fn data_of_another_length_is_refused() {
-    let desc = InterleavedDesc::new(Size2us::new(1, 1), ColorFormat::MONO_U16);
+    let desc = InterleavedDesc::new(USize2::new(1, 1), ColorFormat::MONO_U16);
     let error = InterleavedImage::new_with_data(desc, vec![0; 3]).unwrap_err();
     assert_eq!(error, ByteLenError { desc, byte_len: 3 });
     assert_eq!(
@@ -26,7 +26,7 @@ fn data_of_another_length_is_refused() {
 #[test]
 fn byte_vectors_are_reused_where_the_layout_allows() {
     for format in ColorFormat::ALL {
-        let desc = InterleavedDesc::new(Size2us::new(6, 2), format);
+        let desc = InterleavedDesc::new(USize2::new(6, 2), format);
         let bytes: Vec<u8> = (0..desc.byte_len()).map(|i| (i * 7 % 251) as u8).collect();
         let given = bytes.clone();
         let pointer = given.as_ptr();
@@ -57,7 +57,7 @@ fn byte_vectors_are_reused_where_the_layout_allows() {
 /// The same format is a move-through: the very same allocation comes back.
 #[test]
 fn convert_to_the_same_format_keeps_the_allocation() {
-    let image = create_test_image(ColorFormat::RGBA_U16, Size2us::new(3, 2), 0);
+    let image = create_test_image(ColorFormat::RGBA_U16, USize2::new(3, 2), 0);
     let pointer = image.bytes().as_ptr();
     assert_eq!(
         image.convert(ColorFormat::RGBA_U16).bytes().as_ptr(),
@@ -76,7 +76,7 @@ fn planes_interleave_into_the_format_they_spell() {
     let image = InterleavedImage::from(planes.each_ref());
     assert_eq!(
         image.desc(),
-        InterleavedDesc::new(Size2us::new(2, 1), ColorFormat::RGB_U8)
+        InterleavedDesc::new(USize2::new(2, 1), ColorFormat::RGB_U8)
     );
     assert_eq!(image.bytes(), &[1, 2, 3, 4, 5, 6]);
 
@@ -105,7 +105,7 @@ fn planes_converted_in_a_parallel_body_panic() {
         let image = InterleavedImage::from([&plane, &plane, &plane]);
         assert_eq!(
             image.desc(),
-            InterleavedDesc::new(Size2us::new(2, 1), ColorFormat::RGB_F32)
+            InterleavedDesc::new(USize2::new(2, 1), ColorFormat::RGB_F32)
         );
     };
     convert();
@@ -114,10 +114,8 @@ fn planes_converted_in_a_parallel_body_panic() {
 
 #[test]
 fn deinterleaving_into_another_format_is_refused() {
-    let image = InterleavedImage::new_zeroed(InterleavedDesc::new(
-        Size2us::new(2, 2),
-        ColorFormat::RGB_U8,
-    ));
+    let image =
+        InterleavedImage::new_zeroed(InterleavedDesc::new(USize2::new(2, 2), ColorFormat::RGB_U8));
     let refused = PlanesError::Mismatch {
         color_format: ColorFormat::RGB_U8,
         plane_count: 1,

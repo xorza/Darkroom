@@ -20,7 +20,7 @@ use crate::image::error::InvalidFlatGain;
 use crate::image::flat_gain::gain_bins::GainBins;
 use crate::image::flat_gain::gain_key::GainKey;
 use crate::image::frame_desc;
-use common::Size2us;
+use common::USize2;
 
 /// Pixels between the grid's nodes on each axis.
 ///
@@ -38,7 +38,7 @@ pub(crate) const STEP: usize = 4;
 #[serde(into = "FlatGainRecord", try_from = "FlatGainRecord")]
 pub struct FlatGain {
     /// The image the grid covers.
-    size: Size2us,
+    size: USize2,
     /// The node grid over [`Self::size`].
     grid: GainGrid,
     nodes: ArrayVec<Buffer2<f32>, 3>,
@@ -81,7 +81,7 @@ impl TryFrom<FlatGainRecord> for FlatGain {
         };
         // The size first: a zero side has no grid, an overflowing one no pixel count, and one past
         // the side limit no frame to cover.
-        let size = Size2us::new(record.width, record.height);
+        let size = USize2::new(record.width, record.height);
         if frame_desc::checked(size, ChannelLayout::Mono).is_err() {
             return Err(invalid);
         }
@@ -144,7 +144,7 @@ impl FlatGain {
 
     /// The gain of an image of `size` whose node grids, one per channel, are `nodes`: a grid a
     /// file stored. Each must be [`GainGrid::of`] `size`.
-    pub(crate) fn from_nodes(size: Size2us, nodes: ArrayVec<Buffer2<f32>, 3>) -> Self {
+    pub(crate) fn from_nodes(size: USize2, nodes: ArrayVec<Buffer2<f32>, 3>) -> Self {
         let bins = nodes
             .iter()
             .map(|plane| GainBins::of(&mut plane.pixels().to_vec()))
@@ -155,7 +155,7 @@ impl FlatGain {
     /// The gain of an image of `size` whose node grids are `nodes`, each channel's bins `bins`: a
     /// warped gain, whose bins are its sensor's, read back.
     pub(crate) fn with_bins(
-        size: Size2us,
+        size: USize2,
         nodes: ArrayVec<Buffer2<f32>, 3>,
         bins: ArrayVec<GainBins, 3>,
     ) -> Self {
@@ -185,7 +185,7 @@ impl FlatGain {
     ///
     /// A node row at a time, each node located among the source's nodes once for every channel,
     /// so nothing beside the planes it fills grows with the frame.
-    pub(crate) fn warped(&self, to_source: impl Fn(DVec2) -> DVec2 + Sync, size: Size2us) -> Self {
+    pub(crate) fn warped(&self, to_source: impl Fn(DVec2) -> DVec2 + Sync, size: USize2) -> Self {
         let grid = GainGrid::of(size);
         let source_grid = self.grid;
         let mut nodes: ArrayVec<Buffer2<f32>, 3> = self
@@ -220,7 +220,7 @@ impl FlatGain {
     }
 
     /// The image the grid covers.
-    pub(crate) const fn size(&self) -> Size2us {
+    pub(crate) const fn size(&self) -> USize2 {
         self.size
     }
 
@@ -254,7 +254,7 @@ impl FlatGain {
 
     /// Whether the gain covers an image of `size` and `channels` channels, or of `channels`
     /// colors for a mosaic.
-    pub fn covers(&self, size: Size2us, channels: usize) -> bool {
+    pub fn covers(&self, size: USize2, channels: usize) -> bool {
         self.size() == size && self.channels() == channels
     }
 }
@@ -268,7 +268,7 @@ pub(crate) struct GainGrid {
 
 impl GainGrid {
     /// The grid over an image of `size`.
-    pub(crate) const fn of(size: Size2us) -> Self {
+    pub(crate) const fn of(size: USize2) -> Self {
         Self {
             cols: nodes_along(size.width),
             rows: nodes_along(size.height),

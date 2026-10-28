@@ -11,7 +11,7 @@ use crate::internals::synthetic::metrics;
 use crate::registration::resample::warp_config::{InterpolationMethod, WarpConfig};
 use crate::registration::transform::{Transform, TransformType};
 use crate::registration::warp_transform::WarpTransform;
-use common::Size2us;
+use common::USize2;
 
 /// Helper to warp and return a new buffer (for test convenience).
 /// Visually applies the transform to the image content (stars move by T).
@@ -75,7 +75,7 @@ struct Roundtrip {
 
 impl Roundtrip {
     fn check(self) {
-        let ref_buf = star_field(Size2us::new(256, 256), 30, self.seed)
+        let ref_buf = star_field(USize2::new(256, 256), 30, self.seed)
             .image
             .channel(0)
             .clone();
@@ -202,7 +202,7 @@ fn warp_homography_roundtrip() {
 /// lobes, and the most from the widest kernel, which has the most to cut.
 #[test]
 fn interpolation_quality_ordering() {
-    let ref_buf = star_field(Size2us::new(256, 256), 30, 77777)
+    let ref_buf = star_field(USize2::new(256, 256), 30, 77777)
         .image
         .channel(0)
         .clone();
@@ -240,7 +240,7 @@ fn warp_preserves_output_metadata() {
     use crate::image::metadata::image_metadata::ImageMetadata;
     use crate::image::metadata::observation_header::ObservationHeader;
 
-    let pixels = star_field(Size2us::new(256, 256), 30, 11111)
+    let pixels = star_field(USize2::new(256, 256), 30, 11111)
         .image
         .channel(0)
         .clone();
@@ -314,7 +314,7 @@ fn the_public_warp_samples_through_the_sip_correction() {
     use crate::registration::distortion::sip::SipModel;
     use crate::registration::distortion::sip::sip_order::SipOrder;
 
-    let size = Size2us::new(128, 128);
+    let size = USize2::new(128, 128);
     let transform = Transform::translation(DVec2::new(5.0, -3.0));
     let field = RadialField {
         transform,
@@ -362,7 +362,7 @@ fn warp_emits_coverage_and_renormalizes_bilinear_border() {
     // Constant image so any darkening is unambiguous: a covered output pixel
     // must read back exactly V.
     const V: f32 = 0.5;
-    let size = Size2us::new(16usize, 8usize);
+    let size = USize2::new(16usize, 8usize);
     let image = LinearImage::from_interleaved(
         PlanarDesc::new((size.width, size.height), ChannelLayout::Mono),
         vec![V; size.pixel_count()],
@@ -408,7 +408,7 @@ fn warp_emits_coverage_and_renormalizes_bilinear_border() {
 #[test]
 fn warp_renormalizes_lanczos_edges_and_emits_coverage() {
     const V: f32 = 0.5;
-    let size = Size2us::new(32usize, 8usize);
+    let size = USize2::new(32usize, 8usize);
     let image = LinearImage::from_interleaved(
         PlanarDesc::new((size.width, size.height), ChannelLayout::Mono),
         vec![V; size.pixel_count()],

@@ -81,14 +81,14 @@ fn drizzle_config_invalid_parameters_return_exact_errors() {
         };
         assert_eq!((invalid.field, invalid.value), ("pixfrac", 0.0));
         assert!(matches!(
-            DrizzleAccumulator::new(&constant_image(Size2us::new(2, 2), 0.0), config, 0),
+            DrizzleAccumulator::new(&constant_image(USize2::new(2, 2), 0.0), config, 0),
             Err(DrizzleError::Config(DrizzleConfigError::Field(invalid)))
                 if invalid.field == "pixfrac"
         ));
     }
 
     let error = DrizzleAccumulator::new(
-        &constant_image(Size2us::new(2, 2), 0.0),
+        &constant_image(USize2::new(2, 2), 0.0),
         DrizzleConfig {
             pixfrac: 1.5,
             ..Default::default()
@@ -118,7 +118,7 @@ fn drizzle_output_grid_is_the_input_scaled() {
 fn a_scale_past_any_image_is_refused() {
     let frames = || {
         vec![DrizzleFrame::new(
-            constant_image(Size2us::new(2, 2), 1.0),
+            constant_image(USize2::new(2, 2), 1.0),
             warp_of(Transform::identity()),
         )]
     };
@@ -126,6 +126,6 @@ fn a_scale_past_any_image_is_refused() {
     assert!(matches!(
         at(1e9),
         Err(DrizzleError::OutputSize(FrameDescError::SidePastMax { size }))
-            if size == Size2us::new(2_000_000_000, 2_000_000_000)
+            if size == USize2::new(2_000_000_000, 2_000_000_000)
     ));
 }

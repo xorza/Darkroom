@@ -3,7 +3,7 @@
 use std::io::Cursor;
 use std::sync::Arc;
 
-use common::{Buffer2, Size2us};
+use common::{Buffer2, USize2};
 use fits_well::FitsReader;
 use fits_well::header::Header;
 use fits_well::io::{ChecksumReport, ChecksumStatus};
@@ -50,7 +50,7 @@ fn written(image: &CfaImage) -> Vec<u8> {
 /// reloads with the null `NO_DATA` alone, 1.
 #[test]
 fn a_masters_flags_survive_the_fits_round_trip() {
-    let size = Size2us::new(3, 2);
+    let size = USize2::new(3, 2);
     let bytes = [0u8, 17, 6, 0, 24, 32];
     let cfa = |bytes: [u8; 6]| {
         let mut image = CfaImage::from_plane(
@@ -94,7 +94,7 @@ fn a_masters_flags_survive_the_fits_round_trip() {
 #[test]
 fn a_flat_gain_survives_the_fits_round_trip() {
     type Edit = fn(&mut Header, &mut Vec<u8>);
-    let size = Size2us::new(12, 6);
+    let size = USize2::new(12, 6);
     let bayer = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
     let gain = Arc::new(FlatGain::of_divisor(
         &Buffer2::from_fn((12, 6), |x, _| 1.0 - 0.3 * x as f32 / 12.0),
@@ -313,7 +313,7 @@ fn a_gain_the_run_holds_is_not_read_again() {
 #[test]
 fn a_flags_extension_lumos_did_not_write_is_refused() {
     type Edit = fn(&mut Header, &mut Vec<u8>);
-    let size = Size2us::new(3, 2);
+    let size = USize2::new(3, 2);
     let bytes = [0u8, 1, 6, 0, 24, 32];
     let file = {
         let image = {
@@ -439,7 +439,7 @@ fn a_masters_sample_domain_and_quantization_survive_the_fits_round_trip() {
                 (1_234.567_8, Some("ADU")),
                 (65_535.0, None),
             ] {
-                let mut master = make_cfa(Size2us::new(2, 2), vec![0.25; 4], CfaType::Mono);
+                let mut master = make_cfa(USize2::new(2, 2), vec![0.25; 4], CfaType::Mono);
                 let domain = SampleDomain {
                     scale,
                     origin,

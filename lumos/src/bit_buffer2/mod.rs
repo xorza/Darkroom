@@ -20,7 +20,7 @@ use rayon::prelude::*;
 use rayon::slice::ChunksExactMut;
 
 use crate::scratch_pool::Scratch;
-use common::Size2us;
+use common::USize2;
 use glam::USizeVec2;
 
 /// Number of bits per storage word.
@@ -37,7 +37,7 @@ struct BitLayout {
 }
 
 impl BitLayout {
-    const fn of(size: Size2us) -> Self {
+    const fn of(size: USize2) -> Self {
         if size.width == 0 || size.height == 0 {
             return Self {
                 stride: 0,
@@ -75,36 +75,36 @@ impl BitLayout {
 pub(crate) struct BitBuffer2 {
     /// Packed bit storage, 64 values per word, each row's padding clear.
     words: Vec<u64>,
-    size: Size2us,
+    size: USize2,
     /// Bits per row including padding: the width rounded up to 128.
     stride: usize,
 }
 
 /// A frame-sized mask: a value's shape is its size, and it is reused as it is.
 impl Scratch for BitBuffer2 {
-    type Shape = Size2us;
+    type Shape = USize2;
 
-    fn build(shape: Size2us) -> Self {
+    fn build(shape: USize2) -> Self {
         Self::new_filled(shape, false)
     }
 
-    fn fit(&mut self, shape: Size2us) {
+    fn fit(&mut self, shape: USize2) {
         debug_assert!(self.has_shape(shape));
     }
 
-    fn has_shape(&self, shape: Size2us) -> bool {
+    fn has_shape(&self, shape: USize2) -> bool {
         self.size == shape
     }
 }
 
 impl BitBuffer2 {
     /// The pixels the mask covers.
-    pub(crate) const fn size(&self) -> Size2us {
+    pub(crate) const fn size(&self) -> USize2 {
         self.size
     }
 
     #[inline]
-    pub(crate) fn new_filled(size: Size2us, value: bool) -> Self {
+    pub(crate) fn new_filled(size: USize2, value: bool) -> Self {
         let layout = BitLayout::of(size);
         let mut buffer = Self {
             words: vec![0; layout.word_count],
@@ -118,12 +118,12 @@ impl BitBuffer2 {
     }
 
     /// The bytes a buffer of `size` allocates, rows padded and all.
-    pub(crate) const fn heap_bytes(size: Size2us) -> usize {
+    pub(crate) const fn heap_bytes(size: USize2) -> usize {
         BitLayout::of(size).word_count * size_of::<u64>()
     }
 
     #[inline]
-    pub(crate) fn new_default(size: Size2us) -> Self {
+    pub(crate) fn new_default(size: USize2) -> Self {
         Self::new_filled(size, false)
     }
 
@@ -131,14 +131,14 @@ impl BitBuffer2 {
     pub(crate) const fn empty() -> Self {
         Self {
             words: Vec::new(),
-            size: Size2us::new(0, 0),
+            size: USize2::new(0, 0),
             stride: 0,
         }
     }
 
     /// Every bit clear at `size`, in the allocation this buffer already holds when it is large
     /// enough: a buffer reused for planes of several sizes grows once, to the largest.
-    pub(crate) fn clear_to(&mut self, size: Size2us) {
+    pub(crate) fn clear_to(&mut self, size: USize2) {
         let layout = BitLayout::of(size);
         self.words.clear();
         self.words.resize(layout.word_count, 0);

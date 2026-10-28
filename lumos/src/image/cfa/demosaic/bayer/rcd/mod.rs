@@ -20,7 +20,7 @@ use crate::image::cfa::demosaic::mosaic_view::MosaicView;
 use crate::image::cfa::demosaic::tiled;
 use crate::image::cfa::demosaic::tiled::{TileKernel, Tiling};
 use crate::memory::footprint::Footprint;
-use common::Size2us;
+use common::USize2;
 use simd::{F32x8, Isa, Mask8};
 
 /// Keeps an inverse-gradient weight finite where a gradient is zero, as librtprocess's `eps`.
@@ -46,7 +46,7 @@ pub(super) const INTERPOLATED_BORDER: usize = 10;
 const TILE: usize = 128;
 
 /// What a demosaic of a frame of `size` holds on `workers` — see [`tiled::footprint`].
-pub(crate) const fn footprint(size: Size2us, workers: usize) -> Footprint {
+pub(crate) const fn footprint(size: USize2, workers: usize) -> Footprint {
     tiled::footprint(size, Tile::bytes(), workers)
 }
 

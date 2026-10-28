@@ -17,7 +17,7 @@ use crate::star_detection::deblend::local_maxima::LocalMaximaParams;
 use crate::star_detection::deblend::multi_threshold::*;
 use crate::star_detection::labeling::LabelMap;
 use crate::star_detection::labeling::component_data::ComponentData;
-use common::{Rect2us, Size2us};
+use common::{USize2, USizeRect2};
 
 #[test]
 fn single_star_no_deblending() {
@@ -26,7 +26,7 @@ fn single_star_no_deblending() {
         labels,
         data,
     } = make_test_component(
-        Size2us::new(100, 100),
+        USize2::new(100, 100),
         &[SyntheticStar::new(
             Vec2::new(50.0, 50.0),
             1.0,
@@ -78,7 +78,7 @@ fn late_gaussian_split_uses_full_threshold_ladder() {
         labels,
         data,
     } = make_test_component(
-        Size2us::new(100, 100),
+        USize2::new(100, 100),
         &[
             SyntheticStar::new(Vec2::new(44.0, 50.0), 1.0, StarProfile::gaussian(4.0)),
             SyntheticStar::new(Vec2::new(56.0, 50.0), 1.0, StarProfile::gaussian(4.0)),
@@ -178,7 +178,7 @@ fn close_peaks_merge() {
         labels,
         data,
     } = make_test_component(
-        Size2us::new(100, 100),
+        USize2::new(100, 100),
         &[
             SyntheticStar::new(Vec2::new(48.0, 50.0), 1.0, StarProfile::gaussian(2.0)),
             SyntheticStar::new(Vec2::new(52.0, 50.0), 0.9, StarProfile::gaussian(2.0)),
@@ -226,7 +226,7 @@ fn three_stars_deblend() {
         labels,
         data,
     } = make_test_component(
-        Size2us::new(150, 100),
+        USize2::new(150, 100),
         &[
             SyntheticStar::new(Vec2::new(30.0, 50.0), 1.0, StarProfile::gaussian(2.5)),
             SyntheticStar::new(Vec2::new(75.0, 50.0), 0.9, StarProfile::gaussian(2.5)),
@@ -257,7 +257,7 @@ fn hierarchical_deblend() {
         labels,
         data,
     } = make_test_component(
-        Size2us::new(150, 100),
+        USize2::new(150, 100),
         &[
             SyntheticStar::new(Vec2::new(30.0, 50.0), 1.0, StarProfile::gaussian(2.5)),
             SyntheticStar::new(Vec2::new(100.0, 50.0), 0.8, StarProfile::gaussian(2.5)),
@@ -411,7 +411,7 @@ fn vertical_star_pair() {
         labels,
         data,
     } = make_test_component(
-        Size2us::new(100, 100),
+        USize2::new(100, 100),
         &[
             SyntheticStar::new(Vec2::new(50.0, 30.0), 1.0, StarProfile::gaussian(2.5)),
             SyntheticStar::new(Vec2::new(50.0, 70.0), 0.8, StarProfile::gaussian(2.5)),
@@ -436,7 +436,7 @@ fn diagonal_star_pair() {
         labels,
         data,
     } = make_test_component(
-        Size2us::new(100, 100),
+        USize2::new(100, 100),
         &[
             SyntheticStar::new(Vec2::new(30.0, 30.0), 1.0, StarProfile::gaussian(2.5)),
             SyntheticStar::new(Vec2::new(70.0, 70.0), 0.8, StarProfile::gaussian(2.5)),
@@ -461,7 +461,7 @@ fn threshold_count_effect() {
         labels,
         data,
     } = make_test_component(
-        Size2us::new(100, 100),
+        USize2::new(100, 100),
         &[
             SyntheticStar::new(Vec2::new(46.0, 50.0), 1.0, StarProfile::gaussian(2.5)),
             SyntheticStar::new(Vec2::new(54.0, 50.0), 0.9, StarProfile::gaussian(2.5)),
@@ -501,7 +501,7 @@ fn single_pixel_component() {
 
     let labels = LabelMap::from_raw(&labels_buf, 1);
     let data = ComponentData {
-        bbox: Rect2us::new(USizeVec2::new(5, 5), USizeVec2::new(6, 6)),
+        bbox: USizeRect2::new(USizeVec2::new(5, 5), USizeVec2::new(6, 6)),
         label: 1,
         area: 1,
     };
@@ -518,7 +518,7 @@ fn flat_profile_no_deblend() {
     let mut pixels = Buffer2::new_filled((50, 50), 0.0f32);
     let mut labels_buf = Buffer2::new_filled((50, 50), 0u32);
 
-    let mut bbox = Rect2us::empty();
+    let mut bbox = USizeRect2::empty();
     let mut area = 0;
 
     for y in 10..40 {
@@ -563,7 +563,7 @@ fn zero_valued_pixels_below_the_floor_do_not_prevent_deblending() {
     let mut pixels = Buffer2::new_filled((width, height), 0.0f32);
     let mut labels_buf = Buffer2::new_filled((width, height), 0u32);
 
-    let mut bbox = Rect2us::empty();
+    let mut bbox = USizeRect2::empty();
     let mut area = 0;
     // The whole rectangle is one connected component; most of it stays at 0.0.
     for y in 10..90 {
@@ -643,7 +643,7 @@ fn many_stars_are_all_kept() {
         pixels,
         labels,
         data,
-    } = make_test_component(Size2us::new(180, 100), &stars);
+    } = make_test_component(USize2::new(180, 100), &stars);
 
     let result =
         deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), Ladder::STANDARD);
@@ -674,7 +674,7 @@ fn a_wide_split_keeps_every_child() {
         pixels,
         labels,
         data,
-    } = make_test_component(Size2us::new(150, 150), &stars);
+    } = make_test_component(USize2::new(150, 150), &stars);
 
     let result = deblend_multi_threshold_test(
         &Component::new(&data, &pixels, &labels),
@@ -702,14 +702,14 @@ fn buffer_reuse_consistency() {
     // One `TreeBuffers` through A, then a different component B, then A again: every result must
     // equal the one fresh buffers give, so nothing a previous component left behind leaks in.
     let pair = make_test_component(
-        Size2us::new(100, 100),
+        USize2::new(100, 100),
         &[
             SyntheticStar::new(Vec2::new(30.0, 50.0), 1.0, StarProfile::gaussian(2.5)),
             SyntheticStar::new(Vec2::new(70.0, 50.0), 0.8, StarProfile::gaussian(2.5)),
         ],
     );
     let close = make_test_component(
-        Size2us::new(60, 60),
+        USize2::new(60, 60),
         &[
             SyntheticStar::new(Vec2::new(26.0, 30.0), 1.0, StarProfile::gaussian(2.5)),
             SyntheticStar::new(Vec2::new(34.0, 30.0), 0.9, StarProfile::gaussian(2.5)),
@@ -756,7 +756,7 @@ fn bbox_contains_all_peaks() {
         labels,
         data,
     } = make_test_component(
-        Size2us::new(150, 100),
+        USize2::new(150, 100),
         &[
             SyntheticStar::new(Vec2::new(30.0, 30.0), 1.0, StarProfile::gaussian(2.5)),
             SyntheticStar::new(Vec2::new(75.0, 50.0), 0.9, StarProfile::gaussian(2.5)),
@@ -811,7 +811,7 @@ fn single_threshold_level() {
 #[test]
 fn a_region_under_min_area_is_no_object() {
     let mut fixture = make_test_component(
-        Size2us::new(31, 31),
+        USize2::new(31, 31),
         &[SyntheticStar::new(
             Vec2::new(15.0, 15.0),
             1.0,
@@ -851,10 +851,10 @@ fn a_region_under_min_area_is_no_object() {
 /// the row index 1001, where a grid over the box held 10⁶ cells each.
 #[test]
 fn the_scratch_follows_the_pixels_not_the_box() {
-    let size = Size2us::new(1000, 1000);
+    let size = USize2::new(1000, 1000);
     let mut pixels = Buffer2::new_filled(size, 0.0f32);
     let mut labels = Buffer2::new_filled(size, 0u32);
-    let mut bbox = Rect2us::empty();
+    let mut bbox = USizeRect2::empty();
     for i in 0..1000 {
         pixels[(i, i)] = 1.0 + (i % 7) as f32 / 10.0;
         labels[(i, i)] = 1;

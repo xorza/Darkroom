@@ -5,7 +5,7 @@ use std::ops::Range;
 
 use glam::{DVec2, USizeVec2};
 
-use common::Size2us;
+use common::USize2;
 
 /// Input rows of slack on the strip an outline is cut by: far above the rounding of an outline's
 /// vertices — coordinates of 10⁵ pixels carry 10⁻¹¹ — and far below a pixel, so it scans no
@@ -109,8 +109,8 @@ impl BandScan {
         clippy::cast_sign_loss,
         reason = "each bound is held at 0 or above first, and the cast saturates at the top"
     )]
-    pub(super) fn new(outline: Option<Outline>, size: Size2us) -> Self {
-        let Size2us { width, height } = size;
+    pub(super) fn new(outline: Option<Outline>, size: USize2) -> Self {
+        let USize2 { width, height } = size;
         let Some(outline) = outline else {
             return Self {
                 rows: 0..height,

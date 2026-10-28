@@ -14,13 +14,13 @@ use crate::registration::transform::{Transform, TransformType};
 use crate::registration::transform_model::TransformModel;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detector::StarDetector;
-use common::Size2us;
+use common::USize2;
 
 /// A scene of `stars` over `size`, its reference frame and the frame `truth` maps it to.
 #[derive(Debug)]
 struct Rendered {
     name: &'static str,
-    size: Size2us,
+    size: USize2,
     stars: usize,
     seed: u64,
     truth: Transform,
@@ -33,7 +33,7 @@ impl Rendered {
     fn new(name: &'static str, truth: Transform, model: TransformType) -> Self {
         Self {
             name,
-            size: Size2us::new(256, 256),
+            size: USize2::new(256, 256),
             stars: 60,
             seed: 1,
             truth,
@@ -172,7 +172,7 @@ fn rendered_frames_register_to_the_transform_they_were_rendered_under() {
             ..Rendered::new("dense field", similarity(10.0, 8.0, 0.5, 1.0), Euclidean)
         },
         Rendered {
-            size: Size2us::new(1024, 1024),
+            size: USize2::new(1024, 1024),
             stars: 100,
             seed: 111,
             ..Rendered::new(

@@ -12,7 +12,7 @@ use tiff::encoder::colortype::{
 };
 use tiff::encoder::{TiffEncoder, TiffValue};
 
-use common::Size2us;
+use common::USize2;
 
 use crate::codec::raster_format::RasterFormat;
 use crate::color::color_format::{ChannelCount, ColorFormat, SampleType};
@@ -79,7 +79,7 @@ fn load_png_jpeg(
     let decoder = reader.into_decoder()?;
     check_stated(decoder.total_bytes(), max_bytes)?;
     let img = DynamicImage::from_decoder(decoder)?;
-    let size = Size2us::new(img.width() as usize, img.height() as usize);
+    let size = USize2::new(img.width() as usize, img.height() as usize);
     let desc = |format| InterleavedDesc::checked(size, format);
     // Each decoded buffer is handed over whole. Mono with alpha has no format of its own here;
     // it widens to RGBA, which keeps the alpha.
@@ -143,7 +143,7 @@ fn load_tiff(input: &mut dyn BufReadSeek, max_bytes: u64) -> Result<InterleavedI
         return Err(CodecError::TiffBitDepth(bits));
     }
     let (width, height) = decoder.dimensions()?;
-    let size = Size2us::new(width as usize, height as usize);
+    let size = USize2::new(width as usize, height as usize);
     let desc = |sample_type| {
         InterleavedDesc::checked(size, ColorFormat::new(channel_count, sample_type))
             .map_err(CodecError::from)

@@ -17,7 +17,7 @@ use crate::bg_mesh::mesh_surface::{MeshSurface, SurfaceReader};
 use crate::scratch_pool::{ScratchPool, Shapeless};
 use crate::star_detection::convolution::filter_kernels::MatchedKernel;
 use crate::star_detection::median_filter::MedianRows;
-use common::Size2us;
+use common::USize2;
 
 /// What a detection plane's residual passes through before the matched filter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -181,7 +181,7 @@ impl DetectionFilter<'_> {
                 });
             }
             next = next.max(end);
-            kernel.output_row(ring, Size2us::new(width, height), y, out);
+            kernel.output_row(ring, USize2::new(width, height), y, out);
         }
     }
 }

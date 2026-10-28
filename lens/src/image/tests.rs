@@ -37,7 +37,7 @@ fn crossing_to_the_interleaved_domain_repacks_in_pixel_order() {
     // Reading dimensions is not a repack.
     assert_eq!(
         image.desc(),
-        imaginarium::InterleavedDesc::new(Size2us::new(2, 1), imaginarium::ColorFormat::RGB_F32)
+        imaginarium::InterleavedDesc::new(USize2::new(2, 1), imaginarium::ColorFormat::RGB_F32)
     );
     assert_eq!(image.into_interleaved().bytes(), interleaved_bytes());
 }
@@ -46,10 +46,7 @@ fn crossing_to_the_interleaved_domain_repacks_in_pixel_order() {
 fn borrowing_is_free_in_the_matching_layout_and_repacks_in_the_other() {
     let interleaved = Image::from(
         imaginarium::InterleavedImage::new_with_data(
-            imaginarium::InterleavedDesc::new(
-                Size2us::new(2, 1),
-                imaginarium::ColorFormat::RGB_F32,
-            ),
+            imaginarium::InterleavedDesc::new(USize2::new(2, 1), imaginarium::ColorFormat::RGB_F32),
             interleaved_bytes(),
         )
         .unwrap(),
@@ -113,7 +110,7 @@ fn a_planar_input_is_taken_without_repacking_and_a_shared_one_is_cloned() {
     let original = second_holder.as_custom::<Image>().unwrap();
     assert_eq!(
         original.desc(),
-        imaginarium::InterleavedDesc::new(Size2us::new(4, 3), imaginarium::ColorFormat::MONO_F32),
+        imaginarium::InterleavedDesc::new(USize2::new(4, 3), imaginarium::ColorFormat::MONO_F32),
         "the shared original stays intact behind the other holder"
     );
 }
@@ -125,7 +122,7 @@ fn an_interleaved_input_deinterleaves_at_the_domain_boundary() {
     // 2x1 RGB: pixels (0.125, 0.25, 0.375) and (0.5, 0.625, 0.75).
     let samples = [0.125f32, 0.25, 0.375, 0.5, 0.625, 0.75];
     let raw = imaginarium::InterleavedImage::new_with_data(
-        imaginarium::InterleavedDesc::new(Size2us::new(2, 1), imaginarium::ColorFormat::RGB_F32),
+        imaginarium::InterleavedDesc::new(USize2::new(2, 1), imaginarium::ColorFormat::RGB_F32),
         samples.iter().flat_map(|v| v.to_le_bytes()).collect(),
     )
     .unwrap();
@@ -145,7 +142,7 @@ fn an_interleaved_input_deinterleaves_at_the_domain_boundary() {
 #[test]
 fn an_image_makes_a_frame_up_to_the_side_limit() {
     let desc = |width| {
-        imaginarium::InterleavedDesc::new(Size2us::new(width, 1), imaginarium::ColorFormat::RGBA_U8)
+        imaginarium::InterleavedDesc::new(USize2::new(width, 1), imaginarium::ColorFormat::RGBA_U8)
     };
     assert_eq!(
         frame_desc_of(desc(frame_desc::MAX_SIDE)),
@@ -154,7 +151,7 @@ fn an_image_makes_a_frame_up_to_the_side_limit() {
             ChannelLayout::Rgb
         ))
     );
-    let size = Size2us::new(frame_desc::MAX_SIDE + 1, 1);
+    let size = USize2::new(frame_desc::MAX_SIDE + 1, 1);
     assert_eq!(
         frame_desc_of(desc(size.width)),
         Err(FrameDescError::SidePastMax { size })

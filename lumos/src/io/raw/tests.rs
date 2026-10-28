@@ -8,7 +8,7 @@ use crate::image::flags::quality_flags::{QualityFlags, SATURATION_FRACTION};
 use crate::internals::cfa::XTRANS_PATTERN;
 use crate::io::raw::unpacked_raw::{instrument, planes, saturation_level};
 use crate::io::raw::*;
-use common::Size2us;
+use common::USize2;
 use glam::USizeVec2;
 
 /// A dump at black `black`, with no other option.
@@ -349,7 +349,7 @@ fn the_raw_values_settle_no_data_and_saturation() {
     };
 
     let flags = flags_for(2);
-    assert_eq!(flags.size(), Size2us::new(SIDE - 2, SIDE - 2));
+    assert_eq!(flags.size(), USize2::new(SIDE - 2, SIDE - 2));
     assert_eq!(flags.count(QualityFlags::NO_DATA), 1);
     assert_eq!(flags.at_pos(USizeVec2::new(4, 6)), QualityFlags::NO_DATA);
     assert_eq!(flags.count(QualityFlags::SATURATED), 1);
@@ -546,7 +546,7 @@ fn processed_samples_split_into_one_plane_a_color() {
     let samples = [100, 200, 300, 400, 65_535, 0];
     let processed = ProcessedSamples {
         samples: &samples,
-        size: Size2us::new(2, 1),
+        size: USize2::new(2, 1),
         colors: 3,
     };
     let split: Vec<Vec<f32>> = planes(&processed).collect();

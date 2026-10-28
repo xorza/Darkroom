@@ -20,7 +20,7 @@ use crate::registration::resample::warp_kernel::internals::bicubic_kernel;
 use crate::registration::resample::warp_kernel::{Filter, WarpKernel};
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
-use common::Size2us;
+use common::USize2;
 use simd::IsaTier;
 
 /// One output pixel as the rules define it, in f64 from the f32 tap weights.
@@ -41,7 +41,7 @@ struct Oracle<'a> {
     planes: Vec<SourcePlane<'a>>,
     validity: Option<Validity<'a>>,
     flags: Option<&'a PixelFlags>,
-    size: Size2us,
+    size: USize2,
     border: f32,
 }
 
@@ -59,7 +59,7 @@ struct OracleSums {
 }
 
 impl Oracle<'_> {
-    fn size(&self) -> Size2us {
+    fn size(&self) -> USize2 {
         self.size
     }
 
@@ -307,7 +307,7 @@ impl Oracle<'_> {
 }
 
 /// A `size` plane of signed, unstructured values with a few bright pixels among them.
-fn fixture(size: Size2us, seed: usize) -> Buffer2<f32> {
+fn fixture(size: USize2, seed: usize) -> Buffer2<f32> {
     Buffer2::from_fn(size, |x, y| {
         let i = y * size.width + x;
         if (i + seed).is_multiple_of(37) {
@@ -320,7 +320,7 @@ fn fixture(size: Size2us, seed: usize) -> Buffer2<f32> {
 
 /// The positions of a rotated, enlarged grid over a `size` source: interior, edge band, the rim
 /// and outside.
-fn poss(size: Size2us) -> Vec<Option<SourcePos>> {
+fn poss(size: USize2) -> Vec<Option<SourcePos>> {
     let mut poss = Vec::new();
     for j in 0..26 {
         for i in 0..34 {
@@ -437,7 +437,7 @@ fn methods() -> Vec<Case> {
 /// confidence are ratios of such sums over magnitudes of order 1, so `1e-4`.
 #[test]
 fn every_pixel_follows_the_rules() {
-    let size = Size2us::new(24, 20);
+    let size = USize2::new(24, 20);
     let planes = [fixture(size, 0), fixture(size, 5)];
     let flags = PixelFlags::from_fn(size, |idx| match idx {
         idx if [5 * 24 + 7, 5 * 24 + 8, 12 * 24 + 15, 19 * 24, 9 * 24 + 23].contains(&idx) => {
@@ -538,7 +538,7 @@ fn every_pixel_follows_the_rules() {
 /// does not depend on the CPU.
 #[test]
 fn every_tier_samples_to_portables_bits() {
-    let size = Size2us::new(24, 20);
+    let size = USize2::new(24, 20);
     let rgb = LinearImage::from_planar_channels(
         PlanarDesc::new((size.width, size.height), ChannelLayout::Rgb),
         [
@@ -598,7 +598,7 @@ fn every_tier_samples_to_portables_bits() {
 /// sampled at (8.5, 4), whose taps 6..=11 put the bright one 1.5 px away, with the clamp at
 /// `threshold`.
 fn clamped_sample(bright: f32, bg: f32, threshold: Option<f32>) -> f32 {
-    let size = Size2us::new(16, 9);
+    let size = USize2::new(16, 9);
     let mut pixels = vec![bg; size.pixel_count()];
     pixels[4 * size.width + 7] = bright;
     let pos = DVec2::new(8.5, 4.0);
@@ -696,7 +696,7 @@ fn a_bright_pixel_keeps_its_undershoot_within_the_clamp() {
 /// `1 − 2·L(½)²/(Σ|L|)²` with `Σ|L| = 2·(0.6079 + 0.1351 + 0.0243) = 1.5346`, which is 0.686.
 #[test]
 fn two_adjacent_nulls_fall_back_to_bilinear() {
-    let size = Size2us::new(18, 18);
+    let size = USize2::new(18, 18);
     let ramp: Vec<f32> = (0..size.pixel_count())
         .map(|i| (i % 18) as f32 + 10.0 * (i / 18) as f32)
         .collect();
@@ -747,7 +747,7 @@ fn two_adjacent_nulls_fall_back_to_bilinear() {
 /// method across every border, the rim and the outside — the pairing the combine leans on.
 #[test]
 fn coverage_and_confidence_vanish_together() {
-    let size = Size2us::new(24, 20);
+    let size = USize2::new(24, 20);
     let rgb = LinearImage::from_interleaved(
         PlanarDesc::new((size.width, size.height), ChannelLayout::Mono),
         fixture(size, 1).pixels().to_vec(),
@@ -793,7 +793,7 @@ fn coverage_and_confidence_vanish_together() {
 /// round within `121·ε·2·2`.
 #[test]
 fn a_halved_nyquist_grating_does_not_alias() {
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let grating: Vec<f32> = (0..size.pixel_count())
         .map(|i| if (i % 64).is_multiple_of(2) { 2.0 } else { 0.0 })
         .collect();
@@ -854,7 +854,7 @@ fn a_halved_nyquist_grating_does_not_alias() {
 /// centre it averages four corners, high by `(0.02 + 0.05)/4 = 0.0175` on this one.
 #[test]
 fn filters_reproduce_their_polynomials() {
-    let size = Size2us::new(12, 10);
+    let size = USize2::new(12, 10);
     let plane = |x: f64, y: f64| 0.25 * x - 0.5 * y + 3.0;
     let quadratic =
         |x: f64, y: f64| 0.02 * x * x - 0.03 * x * y + 0.05 * y * y + 0.1 * x - 0.2 * y + 1.0;

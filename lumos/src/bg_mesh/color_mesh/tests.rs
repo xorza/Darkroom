@@ -2,7 +2,7 @@ use super::*;
 use crate::bit_buffer2::BitBuffer2;
 use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::mosaic::Mosaic;
-use common::Size2us;
+use common::USize2;
 
 /// An RGGB mosaic of 128 × 128 with red at 1/8 + x/1024, green at 1/4 and blue at 3/8: each
 /// color's mesh reads its own level, and red's gradient. Tiles of 64 are centred at 31.5 and
@@ -42,7 +42,7 @@ fn each_color_reads_its_own_level() {
 /// frame masked no tile is good, and every tile is measured without the mask: 1/4 again.
 #[test]
 fn a_mostly_masked_tile_takes_its_neighbours_sky() {
-    let size = Size2us::new(128, 128);
+    let size = USize2::new(128, 128);
     let cfa = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
     let pixels = Buffer2::from_fn(size, |x, y| match (x, y) {
         (0..48, 0..48) => 100.0,

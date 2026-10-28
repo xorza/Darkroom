@@ -28,7 +28,7 @@ use crate::image::linear_image::LinearImage;
 use crate::image_ops::error::OpError;
 use crate::math::lstsq::Lstsq;
 use crate::math::statistics::median_mad::MedianMad;
-use common::Size2us;
+use common::USize2;
 
 /// How the modeled background is removed from the image.
 ///
@@ -339,11 +339,11 @@ struct Surface {
     /// Row-major `C[i*d1 + j]` for the monomials `x^i·y^j`; `(degree+1)² ≤ 25`.
     c_mat: [f64; 25],
     degree: usize,
-    size: Size2us,
+    size: USize2,
 }
 
 impl Surface {
-    fn new(polynomial: &Polynomial<'_>, size: Size2us) -> Self {
+    fn new(polynomial: &Polynomial<'_>, size: USize2) -> Self {
         let degree = polynomial
             .terms
             .iter()

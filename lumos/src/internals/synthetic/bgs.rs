@@ -4,7 +4,7 @@
 use common::Buffer2;
 use glam::{USizeVec2, Vec2};
 
-use common::Size2us;
+use common::USize2;
 
 /// Add uniform background to image.
 pub(super) fn add_uniform_bg(pixels: &mut [f32], level: f32) {
@@ -71,7 +71,7 @@ pub(crate) struct Vignette {
 
 impl Vignette {
     /// The level at pixel `(x, y)` of a `size` frame.
-    pub(crate) fn at(self, size: Size2us, x: usize, y: usize) -> f32 {
+    pub(crate) fn at(self, size: USize2, x: usize, y: usize) -> f32 {
         let centre = Vec2::new(size.width as f32 / 2.0, size.height as f32 / 2.0);
         let max_r = centre.length().max(1.0);
         let t = (Vec2::new(x as f32, y as f32).distance(centre) / max_r).powf(self.falloff);
@@ -174,7 +174,7 @@ mod tests {
     /// extent to span, so it takes the midpoint.
     #[test]
     fn gradient_spans_its_end_levels() {
-        let size = Size2us::new(64, 4);
+        let size = USize2::new(64, 4);
         let mut pixels = Buffer2::new_default((64, 4));
         Gradient {
             start: 0.0,

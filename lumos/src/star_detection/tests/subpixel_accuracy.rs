@@ -13,7 +13,7 @@ use crate::internals::synthetic::observe::{Observation, render};
 use crate::internals::synthetic::scene::{BgField, Placement, Scatter, Scene};
 use crate::registration::transform::Transform;
 use crate::star_detection::tests::{MATCH_RADIUS, detected_poss, synthetic_config, truth_poss};
-use common::Size2us;
+use common::USize2;
 
 /// Median per-axis shift between two matched detection catalogs (`shifted − reference`).
 /// The median over many stars averages down per-star centroid scatter.
@@ -36,7 +36,7 @@ fn median_shift(reference: &[DVec2], shifted: &[DVec2]) -> DVec2 {
 #[test]
 fn subpixel_shift_recovered_across_offsets() {
     let scene = Scene::scatter(
-        Size2us::new(256, 256),
+        USize2::new(256, 256),
         Scatter {
             count: 24,
             flux: (8.0, 14.0),

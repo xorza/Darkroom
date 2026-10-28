@@ -4,7 +4,7 @@ pub(crate) mod image_diff;
 
 use std::io::BufReader;
 
-use common::{Size2us, fs};
+use common::{USize2, fs};
 
 use crate::codec::raster_format::RasterFormat;
 use crate::color::color_format::{ColorFormat, SampleType};
@@ -15,7 +15,7 @@ use crate::interleaved::interleaved_image::InterleavedImage;
 /// pattern that reaches every byte value, float formats values on `[0, 1)`.
 pub(crate) fn create_test_image(
     format: ColorFormat,
-    size: Size2us,
+    size: USize2,
     seed: usize,
 ) -> InterleavedImage {
     let mut img = InterleavedImage::new_zeroed(InterleavedDesc::new(size, format));

@@ -37,7 +37,7 @@ use crate::image::cfa::demosaic::xtrans::markesteijn::hex_table::HexTable;
 use crate::image::cfa::demosaic::xtrans::markesteijn::tile::{Tile, TileJob};
 use crate::image::cfa::xtrans_pattern::XTransPattern;
 use crate::memory::footprint::Footprint;
-use common::Size2us;
+use common::USize2;
 
 /// The side of a tile, where its buffers stay in a core's cache. On a Ryzen 7 6800U (512 KiB of L2
 /// per core) a 26 MP frame demosaics in 245 ms at one pass and 703 ms at three with tiles of 96,
@@ -97,7 +97,7 @@ impl MarkesteijnPasses {
 /// What a demosaic of a frame of `size` in `passes` holds on `workers` — see
 /// [`tiled::footprint`] — its tiles holding the directions the passes take.
 pub(crate) const fn footprint(
-    size: Size2us,
+    size: USize2,
     passes: MarkesteijnPasses,
     workers: usize,
 ) -> Footprint {

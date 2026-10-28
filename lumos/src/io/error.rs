@@ -1,4 +1,4 @@
-use common::Size2us;
+use common::USize2;
 use imaginarium::RasterFormat;
 use std::fmt::{self, Display, Formatter};
 use std::io;
@@ -42,7 +42,7 @@ pub enum ImageError {
     UnsupportedFormat { path: PathBuf },
 
     #[error("raster '{path}' is {size}, which has a side past {max} px", max = MAX_SIDE)]
-    RasterSideTooLong { path: PathBuf, size: Size2us },
+    RasterSideTooLong { path: PathBuf, size: USize2 },
 
     #[error("scientific image input '{path}' was rejected: {reason}")]
     ScientificInputRejected {
@@ -163,7 +163,7 @@ pub(crate) enum RasterLoadError {
     #[error("{0}")]
     Refused(ScientificRefusal),
     #[error("raster is {0}, which has a side past {max} px", max = MAX_SIDE)]
-    SideTooLong(Size2us),
+    SideTooLong(USize2),
     #[error("{0}")]
     NullSamples(#[from] NullSamples),
     #[error("cancelled")]

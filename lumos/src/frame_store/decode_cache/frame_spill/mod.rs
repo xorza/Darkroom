@@ -31,7 +31,7 @@ use crate::image::flat_gain::{FlatGain, GainGrid};
 use crate::image::frame_desc;
 use crate::image::metadata::image_metadata::ImageMetadata;
 use crate::io::decoder::fnv1a;
-use common::Size2us;
+use common::USize2;
 
 /// The commit layout pin: the digest of a fixed [`Commit`] as bitcode, which
 /// `sidecar_layout_is_pinned` checks. Bitcode is not self-describing, so a file written with
@@ -166,7 +166,7 @@ impl<'a> FrameSpill<'a> {
             return None;
         }
         let layout = ChannelLayout::try_from(commit.channels).ok()?;
-        let desc = frame_desc::checked(Size2us::new(commit.width, commit.height), layout).ok()?;
+        let desc = frame_desc::checked(USize2::new(commit.width, commit.height), layout).ok()?;
         Some(Committed {
             admitted: Admitted {
                 stats: commit.stats.into_owned(),
@@ -243,7 +243,7 @@ impl KeptGain {
     }
 
     /// The bytes the gain holds in RAM over an image of `size`.
-    pub(crate) const fn bytes(self, size: Size2us) -> usize {
+    pub(crate) const fn bytes(self, size: USize2) -> usize {
         GainGrid::of(size).bytes(self.channels)
     }
 }

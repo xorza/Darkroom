@@ -2,7 +2,7 @@ use std::io::{Read, Seek};
 use std::ops::Range;
 
 use arrayvec::ArrayVec;
-use common::Size2us;
+use common::USize2;
 use fits_well::header::Header;
 use fits_well::image::{
     Bitpix as FitsBitpix, Metadata as FitsMetadata, Region, SampleType, Scaling,
@@ -395,7 +395,7 @@ pub(super) fn desc_from_shape(
     };
     if width > MAX_SIDE || height > MAX_SIDE {
         return Err(FitsLoadError::from(FitsRefusal::SideTooLong {
-            size: Size2us::new(width, height),
+            size: USize2::new(width, height),
         }));
     }
     width

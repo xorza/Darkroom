@@ -59,7 +59,7 @@ use crate::registration::warp_transform::WarpTransform;
 use crate::star_detection::star::Star;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detector::StarDetector;
-use common::Size2us;
+use common::USize2;
 
 fn image_snapshot(snapshot: &mut Snapshot, name: &str, image: &LinearImage) {
     for channel in 0..image.channel_count() {
@@ -69,7 +69,7 @@ fn image_snapshot(snapshot: &mut Snapshot, name: &str, image: &LinearImage) {
 
 /// The star field every stage after decoding starts from.
 fn field() -> LinearImage {
-    star_field(Size2us::new(192, 192), 40, 0x5EED).image
+    star_field(USize2::new(192, 192), 40, 0x5EED).image
 }
 
 /// A dither with a little rotation, so warping interpolates every pixel.
@@ -126,7 +126,7 @@ fn decode_snapshot() {
 
     // A three-channel float TIFF written from the star field, read back as linear data.
     let scratch = TempDir::new("characterization_decode");
-    let size = Size2us::new(48, 40);
+    let size = USize2::new(48, 40);
     let channels = [0x61, 0x62, 0x63].map(|seed| star_field(size, 10, seed).image);
     let rgb = LinearImage::from_planar_channels(
         PlanarDesc::new(size, ChannelLayout::Rgb),
@@ -158,7 +158,7 @@ fn decode_snapshot() {
 /// A Bayer light through bias, dark and flat masters, then demosaiced.
 #[test]
 fn calibrate_snapshot() {
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let mut rng = TestRng::new(0xCA1B);
     let bias: Vec<f32> = (0..size.pixel_count())
         .map(|_| 0.02 + 0.002 * rng.next_f32())
@@ -229,7 +229,7 @@ fn calibrate_snapshot() {
 /// frames of 32 × 32 with Gaussian noise, a vignetted flat and a dark with hot pixels.
 #[test]
 fn master_snapshot() {
-    let size = Size2us::new(32, 32);
+    let size = USize2::new(32, 32);
     let bayer = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
     let scratch = TempDir::new("lumos_master_snapshot");
     let mut rng = TestRng::new(0x3A57);
@@ -307,7 +307,7 @@ fn master_snapshot() {
 fn frame_stats_snapshot() {
     let mono = field();
     let mosaic = make_cfa(
-        Size2us::new(192, 192),
+        USize2::new(192, 192),
         mono.channel(0).pixels().to_vec(),
         CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
     );
@@ -411,7 +411,7 @@ fn combine_snapshot() {
 /// Each automatic stretch on a three-channel field, so the color-preserving paths run.
 #[test]
 fn stretch_snapshot() {
-    let size = Size2us::new(96, 96);
+    let size = USize2::new(96, 96);
     let channels = [0x51, 0x52, 0x53].map(|seed| star_field(size, 20, seed).image);
     let rgb = LinearImage::from_planar_channels(
         PlanarDesc::new(size, ChannelLayout::Rgb),

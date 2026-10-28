@@ -3,7 +3,7 @@ use crate::internals::synthetic::camera::{BiasField, FlatField, SensorDefects};
 use crate::internals::synthetic::metrics::pixel_stats;
 use crate::internals::synthetic::observe::*;
 use crate::internals::synthetic::scene::{BgField, TrueSource};
-use common::Size2us;
+use common::USize2;
 
 /// Where the brightest pixel is.
 #[derive(Debug)]
@@ -28,7 +28,7 @@ fn argmax_xy(pixels: &[f32], width: usize) -> Peak {
 fn ideal_render_equals_clean() {
     // Dim scene so the clean peak stays below saturation (no clamp difference).
     let scene = Scene::single(
-        Size2us::new(64, 64),
+        USize2::new(64, 64),
         TrueSource {
             pos: DVec2::new(32.0, 32.0),
             flux: 2.0,
@@ -47,7 +47,7 @@ fn ideal_render_equals_clean() {
 #[test]
 fn source_lands_at_transformed_position() {
     let scene = Scene::single(
-        Size2us::new(64, 64),
+        USize2::new(64, 64),
         TrueSource {
             pos: DVec2::new(20.0, 20.0),
             flux: 5.0,
@@ -67,7 +67,7 @@ fn source_lands_at_transformed_position() {
 #[test]
 fn flux_conserved_in_clean() {
     let scene = Scene::single(
-        Size2us::new(81, 81),
+        USize2::new(81, 81),
         TrueSource {
             pos: DVec2::new(40.0, 40.0),
             flux: 50.0,
@@ -83,7 +83,7 @@ fn flux_conserved_in_clean() {
 fn flat_applied_to_clean_truth() {
     // Uniform 0.3 sky, vignette flat: clean = bg × flat, so center (≈0.3) > darkened corner.
     let scene = Scene {
-        size: Size2us::new(64, 64),
+        size: USize2::new(64, 64),
         sources: vec![],
         bg: BgField::Uniform { level: 0.3 },
     };
@@ -110,7 +110,7 @@ fn flat_applied_to_clean_truth() {
 #[test]
 fn noise_raises_variance_but_keeps_mean() {
     let scene = Scene {
-        size: Size2us::new(128, 128),
+        size: USize2::new(128, 128),
         sources: vec![],
         bg: BgField::Uniform { level: 0.2 },
     };
@@ -131,7 +131,7 @@ fn noise_raises_variance_but_keeps_mean() {
 #[test]
 fn dither_shifts_peak() {
     let scene = Scene::single(
-        Size2us::new(64, 64),
+        USize2::new(64, 64),
         TrueSource {
             pos: DVec2::new(20.0, 32.0),
             flux: 5.0,
@@ -156,7 +156,7 @@ fn dither_shifts_peak() {
 #[test]
 fn bias_and_defects_applied() {
     let scene = Scene {
-        size: Size2us::new(32, 32),
+        size: USize2::new(32, 32),
         sources: vec![],
         bg: BgField::Uniform { level: 0.2 },
     };
@@ -184,7 +184,7 @@ fn bias_and_defects_applied() {
 fn saturation_clamps_bright_source() {
     // A flux-20 source at fwhm 3 has a clean peak ~2.0; the well clips it at `saturation`.
     let scene = Scene::single(
-        Size2us::new(64, 64),
+        USize2::new(64, 64),
         TrueSource {
             pos: DVec2::new(32.0, 32.0),
             flux: 20.0,
@@ -223,7 +223,7 @@ fn saturation_clamps_bright_source() {
 #[test]
 fn bad_columns_raise_their_column() {
     let scene = Scene {
-        size: Size2us::new(32, 32),
+        size: USize2::new(32, 32),
         sources: vec![],
         bg: BgField::Uniform { level: 0.1 },
     };
@@ -256,7 +256,7 @@ fn exposure_scales_dark_cur() {
     // Dark pedestal = dark_rate·exposure/full_well. With read noise off and an empty sky, the
     // mean pixel is that pedestal, so a 100× exposure scales it ~100×.
     let scene = Scene {
-        size: Size2us::new(128, 128),
+        size: USize2::new(128, 128),
         sources: vec![],
         bg: BgField::Uniform { level: 0.0 },
     };

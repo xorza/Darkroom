@@ -20,10 +20,10 @@ use crate::combine::stack::mean_combine::MeanCombine;
 use crate::combine::stack_config::DEFAULT_MIN_SURVIVORS;
 use crate::combine::stack_config::small_n::SmallN;
 use crate::internals::test_rng::TestRng;
-use common::Size2us;
+use common::USize2;
 
 /// The pixels of a block: one 64 × 64 tile.
-pub(crate) const BLOCK: Size2us = Size2us::new(64, 64);
+pub(crate) const BLOCK: USize2 = USize2::new(64, 64);
 
 /// A full well's electrons, in which the samples' shot noise is counted.
 const FULL_WELL_E: f32 = 50_000.0;

@@ -7,13 +7,13 @@ use crate::internals::image_diff::{max_pixel_diff, pixels_equal};
 use crate::ops::clamp::Clamp;
 use crate::ops::contrast_brightness::channel_affine::ChannelAffine;
 use crate::ops::contrast_brightness::{ContrastBrightness, cpu};
-use common::Size2us;
+use common::USize2;
 use simd::IsaTier;
 use strum::IntoEnumIterator;
 
 /// Builds a single-row image from raw channel bytes.
 fn image_from_channels(format: ColorFormat, width: usize, bytes: Vec<u8>) -> InterleavedImage {
-    let desc = InterleavedDesc::new(Size2us::new(width, 1), format);
+    let desc = InterleavedDesc::new(USize2::new(width, 1), format);
     assert_eq!(
         bytes.len(),
         desc.row_byte_len(),
@@ -146,7 +146,7 @@ fn identity_params_leave_every_format_bit_identical() {
     // contrast 1.0 / brightness 0.0 folds to `value * 1.0 + 0.0`, which is
     // exact for floats too — so this is an equality check, not an epsilon one.
     for format in ColorFormat::ALL {
-        let input = create_test_image(format, Size2us::new(17, 5), 0);
+        let input = create_test_image(format, USize2::new(17, 5), 0);
         let mut output = input.clone();
 
         ContrastBrightness::new(1.0, 0.0).apply_cpu(&mut output);
@@ -164,7 +164,7 @@ fn alpha_survives_every_alpha_format() {
         .into_iter()
         .filter(|format| format.has_alpha())
     {
-        let input = create_test_image(format, Size2us::new(16, 4), 0);
+        let input = create_test_image(format, USize2::new(16, 4), 0);
         let mut output = input.clone();
 
         ContrastBrightness::new(2.0, 0.3).apply_cpu(&mut output);
@@ -200,7 +200,7 @@ fn extreme_brightness_saturates_integers_and_moves_floats() {
         .into_iter()
         .flat_map(|format| Clamp::iter().map(move |clamp| (format, clamp)))
     {
-        let input = create_test_image(format, Size2us::new(4, 2), 0);
+        let input = create_test_image(format, USize2::new(4, 2), 0);
         let affine_max = ChannelAffine::new(ContrastBrightness::default(), format).max;
         for brightness in [1.0f32, -1.0] {
             let mut output = input.clone();
@@ -260,7 +260,7 @@ fn every_tier_matches_the_scalar_reference() {
     for tier in IsaTier::supported() {
         for format in ColorFormat::ALL {
             for width in [3, 17] {
-                let mut input = create_test_image(format, Size2us::new(width, 5), 0);
+                let mut input = create_test_image(format, USize2::new(width, 5), 0);
                 if format.sample_type == SampleType::F32 {
                     let specials = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -0.5, 1.5, -0.0];
                     let samples: &mut [f32] = bytemuck::cast_slice_mut(input.bytes_mut());

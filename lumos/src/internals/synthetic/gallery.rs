@@ -28,7 +28,7 @@ use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::scene::{BgField, Placement, Scatter, Scene, TrueSource};
 use crate::internals::visual::{self, ToneMap};
 use crate::registration::transform::Transform;
-use common::Size2us;
+use common::USize2;
 
 /// Save a mono frame to `synthetic_gallery/<name>.png`, returning the path.
 fn save(pixels: &Buffer2<f32>, name: &str, tone: ToneMap) -> PathBuf {
@@ -45,7 +45,7 @@ fn save_frame(frame: &SimFrame, name: &str, tone: ToneMap) {
 }
 
 /// A representative populated star field over `bg`.
-fn demo_field(size: Size2us, bg: BgField, seed: u64) -> Scene {
+fn demo_field(size: USize2, bg: BgField, seed: u64) -> Scene {
     Scene::scatter(
         size,
         Scatter {
@@ -61,7 +61,7 @@ fn demo_field(size: Size2us, bg: BgField, seed: u64) -> Scene {
 /// Create a checkerboard pattern.
 ///
 /// Useful for phase correlation and registration tests.
-fn checkerboard(size: Size2us, cell_size: usize, [value_a, value_b]: [f32; 2]) -> Buffer2<f32> {
+fn checkerboard(size: USize2, cell_size: usize, [value_a, value_b]: [f32; 2]) -> Buffer2<f32> {
     let mut pixels = vec![0.0f32; size.pixel_count()];
     for y in 0..size.height {
         for x in 0..size.width {
@@ -89,7 +89,7 @@ fn dithered<'a>(
 #[test]
 #[ignore = "visual gallery; run with --ignored"]
 fn gallery_bgs() {
-    let size = Size2us::new(256, 256);
+    let size = USize2::new(256, 256);
     let cases: [(&str, BgField, ToneMap); 6] = [
         (
             "backgrounds/uniform",
@@ -149,7 +149,7 @@ fn gallery_bgs() {
 #[test]
 #[ignore = "visual gallery; run with --ignored"]
 fn gallery_psf_models() {
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let dark = BgField::Uniform { level: 0.0 };
     let cases: [(&str, PsfModel); 6] = [
         ("psf/gaussian_fwhm3", PsfModel::gaussian(3.0)),
@@ -210,7 +210,7 @@ fn gallery_psf_models() {
 #[test]
 #[ignore = "visual gallery; run with --ignored"]
 fn gallery_noise() {
-    let size = Size2us::new(200, 200);
+    let size = USize2::new(200, 200);
     let flat = Scene {
         size,
         sources: vec![],
@@ -260,7 +260,7 @@ fn gallery_noise() {
 #[test]
 #[ignore = "visual gallery; run with --ignored"]
 fn gallery_sensor() {
-    let size = Size2us::new(256, 256);
+    let size = USize2::new(256, 256);
     // The multiplicative flat map itself.
     let vignette_flat = FlatField {
         vignette: Some(Vignette {
@@ -321,7 +321,7 @@ fn gallery_sensor() {
 #[test]
 #[ignore = "visual gallery; run with --ignored"]
 fn gallery_scenes() {
-    let size = Size2us::new(512, 512);
+    let size = USize2::new(512, 512);
 
     let sparse = Scene::scatter(
         size,
@@ -408,7 +408,7 @@ fn gallery_scenes() {
     reason = "synthetic fixtures are small images with non-negative coordinates"
 )]
 fn gallery_seeing() {
-    let size = Size2us::new(256, 256);
+    let size = USize2::new(256, 256);
     let field = demo_field(size, BgField::Uniform { level: 0.05 }, 11);
     for scale in [1.0f32, 1.5, 2.5] {
         let obs = Observation {
@@ -427,7 +427,7 @@ fn gallery_seeing() {
 #[test]
 #[ignore = "visual gallery; run with --ignored"]
 fn gallery_dither() {
-    let size = Size2us::new(256, 256);
+    let size = USize2::new(256, 256);
     let field = demo_field(size, BgField::Uniform { level: 0.05 }, 13);
     let dithers = [
         DVec2::new(0.0, 0.0),
@@ -447,7 +447,7 @@ fn gallery_dither() {
 #[test]
 #[ignore = "visual gallery; run with --ignored"]
 fn gallery_patterns() {
-    let size = Size2us::new(256, 256);
+    let size = USize2::new(256, 256);
     save(
         &checkerboard(size, 16, [0.1, 0.9]),
         "patterns/checkerboard",
@@ -472,28 +472,28 @@ fn gallery_fixtures() {
     // cluster_field}), at inspectable sizes.
     let size = 1024;
     save(
-        star_field(Size2us::new(size, size), 100, 42)
+        star_field(USize2::new(size, size), 100, 42)
             .image
             .channel(0),
         "fixtures/star_field_sparse",
         ToneMap::Asinh,
     );
     save(
-        star_field(Size2us::new(size, size), 1000, 42)
+        star_field(USize2::new(size, size), 1000, 42)
             .image
             .channel(0),
         "fixtures/star_field_dense",
         ToneMap::Asinh,
     );
     save(
-        cluster_field(Size2us::new(size, size), 4000, 42)
+        cluster_field(USize2::new(size, size), 4000, 42)
             .image
             .channel(0),
         "fixtures/cluster_field",
         ToneMap::Asinh,
     );
     save(
-        cluster_field(Size2us::new(size, size), 15000, 42)
+        cluster_field(USize2::new(size, size), 15000, 42)
             .image
             .channel(0),
         "fixtures/cluster_field_dense",

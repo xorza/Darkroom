@@ -13,7 +13,7 @@ use crate::star_detection::centroid::profile_problem::internals::{
 };
 use crate::star_detection::centroid::stamp::StampGrid;
 use crate::star_detection::centroid::tests::perturbation::Perturbation;
-use common::Size2us;
+use common::USize2;
 
 /// One Moffat recovery case, as `gaussian_fit`'s `RecoveryCase` with one more axis: `fixed_beta`,
 /// the shape the fitter is told to assume, which `wrong_beta` sets apart from the rendered `beta`.
@@ -200,7 +200,7 @@ fn moffat_fit_recovers_known_parameters() {
                 beta: case.beta,
             },
         )
-        .stamp(Size2us::new(case.stamp, case.stamp), case.bg);
+        .stamp(USize2::new(case.stamp, case.stamp), case.bg);
         case.perturbation.apply(&mut pixels);
 
         let beta = case.fixed_beta;
@@ -273,7 +273,7 @@ fn moffat_fit_rejects_what_the_data_cannot_support() {
             beta: 2.5,
         },
     )
-    .stamp(Size2us::new(21, 21), 0.1);
+    .stamp(USize2::new(21, 21), 0.1);
     let uniform = Buffer2::new_filled((21, 21), 0.5f32);
     for (name, pixels, seed, sky, lands) in [
         ("the star", &star, DVec2::splat(10.0), 0.1, true),

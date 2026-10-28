@@ -8,7 +8,7 @@
 use common::Buffer2;
 use glam::{DVec2, USizeVec2};
 
-use common::Size2us;
+use common::USize2;
 use std::f32::consts::FRAC_PI_4;
 
 use crate::internals::synthetic::{bg_map, patterns};
@@ -27,7 +27,7 @@ use crate::star_detection::star_detection_config::bg_config::BgConfig;
 use crate::star_detection::star_detection_config::extraction_config::ExtractionConfig;
 use crate::star_detection::star_detection_config::measurement_config::MeasurementConfig;
 use crate::star_detection::star_detector::stages::detect::internals::detect_stars_test;
-use common::Rect2us;
+use common::USizeRect2;
 
 /// The FWHM most fixtures here are built at: σ = 2.5 → 2.3548 · 2.5 = 5.887.
 const TEST_EXPECTED_FWHM: f32 = 5.9;
@@ -122,7 +122,7 @@ impl Measured {
         let (px, py) = (pos.x.round() as usize, pos.y.round() as usize);
         let (width, height) = (self.residual.width(), self.residual.height());
         Region {
-            bbox: Rect2us::new(
+            bbox: USizeRect2::new(
                 USizeVec2::new(px.saturating_sub(5), py.saturating_sub(5)),
                 USizeVec2::new((px + 6).min(width), (py + 6).min(height)),
             ),

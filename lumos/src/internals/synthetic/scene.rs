@@ -9,7 +9,7 @@ use common::Buffer2;
 
 use crate::internals::synthetic::bgs::{Gradient, NebulaConfig, Vignette, add_uniform_bg};
 use crate::internals::test_rng::TestRng;
-use common::Size2us;
+use common::USize2;
 use glam::DVec2;
 
 /// A true point source (star) in sky coordinates. Its on-sensor shape comes entirely from
@@ -34,7 +34,7 @@ pub(crate) enum BgField {
 
 impl BgField {
     /// Render this background into a fresh `size`-sized buffer of normalized values.
-    pub(crate) fn render(&self, size: Size2us) -> Buffer2<f32> {
+    pub(crate) fn render(&self, size: USize2) -> Buffer2<f32> {
         let mut pixels = Buffer2::new_default(size);
         match self {
             Self::Uniform { level } => add_uniform_bg(&mut pixels, *level),
@@ -73,7 +73,7 @@ impl LogUniformFlux {
 #[derive(Debug, Clone)]
 pub(crate) struct Scene {
     /// Sky extent in reference-frame pixels; sources/background live within this.
-    pub(crate) size: Size2us,
+    pub(crate) size: USize2,
     pub(crate) sources: Vec<TrueSource>,
     pub(crate) bg: BgField,
 }
@@ -102,7 +102,7 @@ pub(crate) struct Scatter {
 impl Scene {
     /// A single `source` over `bg`. Useful for precise photometric/astrometric
     /// verification.
-    pub(crate) fn single(size: Size2us, source: TrueSource, bg: BgField) -> Self {
+    pub(crate) fn single(size: USize2, source: TrueSource, bg: BgField) -> Self {
         Self {
             size,
             sources: vec![source],
@@ -115,7 +115,7 @@ impl Scene {
         clippy::cast_sign_loss,
         reason = "synthetic fixtures are small images with non-negative coordinates"
     )]
-    pub(crate) fn scatter(size: Size2us, scatter: Scatter, bg: BgField) -> Self {
+    pub(crate) fn scatter(size: USize2, scatter: Scatter, bg: BgField) -> Self {
         let Scatter {
             count,
             flux,
@@ -185,7 +185,7 @@ mod tests {
     /// level exactly and a gradient reaches both end levels exactly.
     #[test]
     fn bgs_render_their_levels() {
-        let buf = BgField::Uniform { level: 0.25 }.render(Size2us::new(32, 16));
+        let buf = BgField::Uniform { level: 0.25 }.render(USize2::new(32, 16));
         assert_eq!(buf.len(), 32 * 16);
         assert!(buf.iter().all(|&p| p == 0.25));
 
@@ -194,7 +194,7 @@ mod tests {
             end: 1.0,
             angle: 0.0,
         });
-        let buf = bg.render(Size2us::new(64, 4));
+        let buf = bg.render(USize2::new(64, 4));
         assert_eq!((buf[0], buf[63], buf[64], buf[127]), (0.0, 1.0, 0.0, 1.0));
     }
 
@@ -202,7 +202,7 @@ mod tests {
     fn uniform_scatter_count_bounds_and_reproducibility() {
         let bg = BgField::Uniform { level: 0.05 };
         let a = Scene::scatter(
-            Size2us::new(200, 200),
+            USize2::new(200, 200),
             Scatter {
                 count: 50,
                 flux: (1.0, 100.0),
@@ -219,7 +219,7 @@ mod tests {
         }
         // Same seed → identical scene.
         let b = Scene::scatter(
-            Size2us::new(200, 200),
+            USize2::new(200, 200),
             Scatter {
                 count: 50,
                 flux: (1.0, 100.0),
@@ -237,7 +237,7 @@ mod tests {
     #[test]
     fn single_source_scene() {
         let scene = Scene::single(
-            Size2us::new(64, 64),
+            USize2::new(64, 64),
             TrueSource {
                 pos: DVec2::new(32.0, 32.0),
                 flux: 5.0,
@@ -247,15 +247,12 @@ mod tests {
         assert_eq!(scene.sources.len(), 1);
         assert_eq!(scene.sources[0].pos, DVec2::new(32.0, 32.0));
         // Empty-sky background really is empty.
-        assert_eq!(
-            pixel_stats(&scene.bg.render(Size2us::new(64, 64))).mean,
-            0.0
-        );
+        assert_eq!(pixel_stats(&scene.bg.render(USize2::new(64, 64))).mean, 0.0);
     }
 
     #[test]
     fn cluster_is_centrally_concentrated() {
-        let size = Size2us::new(400usize, 400usize);
+        let size = USize2::new(400usize, 400usize);
         let scene = Scene::scatter(
             size,
             Scatter {

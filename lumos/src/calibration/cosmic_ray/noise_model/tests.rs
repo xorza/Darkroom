@@ -6,7 +6,7 @@ use crate::image::masked_plane::MaskedPlane;
 use crate::image::metadata::derived_facts::DerivedFacts;
 use crate::image::metadata::observation_header::ObservationHeader;
 use crate::image::metadata::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
-use common::Size2us;
+use common::USize2;
 
 /// With a gain the source term is `(signal − sky)·g/electrons`: σ 0.5, sky 1, 4 electrons per
 /// unit, signal 3 gives √(0.25 + 2/4) = √0.75 where no flat amplified the pixel, and
@@ -38,7 +38,7 @@ fn the_noise_adds_the_photons_above_the_local_sky() {
 /// divided reads gain 1, one under a flat of 0.5 reads 2, the sky the mesh measured either way.
 #[test]
 fn a_pixel_reads_its_mesh_and_its_flat_gain() {
-    let size = Size2us::new(16, 16);
+    let size = USize2::new(16, 16);
     let mesh = ColorMesh::measure(
         MaskedPlane {
             pixels: &Buffer2::new((16, 16), vec![0.5; size.pixel_count()]),

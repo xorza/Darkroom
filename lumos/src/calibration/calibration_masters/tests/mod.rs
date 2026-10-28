@@ -71,7 +71,7 @@ use crate::io::load_ctx::LoadCtx;
 use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::progress_monitor::ProgressMonitor;
-use common::Size2us;
+use common::USize2;
 use glam::USizeVec2;
 
 /// The bundle `images` builds, at the default defect threshold.
@@ -85,15 +85,14 @@ fn calibrating_a_calibrated_light_is_refused() {
     // from the file (`LUMCALB`, `LUMCALD`, `LUMCALF`), so it is refused as input, and the light is
     // left as it was.
     let mut images = CalibrationSet::default();
-    *images.get_mut(MasterRole::Dark) =
-        Some(constant_cfa(Size2us::new(4, 4), 0.125, CfaType::Mono));
+    *images.get_mut(MasterRole::Dark) = Some(constant_cfa(USize2::new(4, 4), 0.125, CfaType::Mono));
     let masters = CalibrationMasters::from_images(
         images,
         SigmaThreshold::new(5.0).unwrap(),
         &CancelToken::never(),
     )
     .unwrap();
-    let mut light = constant_cfa(Size2us::new(4, 4), 0.5, CfaType::Mono);
+    let mut light = constant_cfa(USize2::new(4, 4), 0.5, CfaType::Mono);
     masters.calibrate(&mut light).unwrap();
     // The dark still holds the bias, so the light lost both additive parts.
     assert_eq!(
@@ -123,9 +122,9 @@ fn a_flat_with_no_positive_mean_is_refused() {
         ),
     ] {
         let mut images = CalibrationSet::default();
-        *images.get_mut(MasterRole::Flat) = Some(constant_cfa(Size2us::new(4, 4), flat, cfa_type));
+        *images.get_mut(MasterRole::Flat) = Some(constant_cfa(USize2::new(4, 4), flat, cfa_type));
         *images.get_mut(MasterRole::FlatDark) =
-            subtractor.map(|level| constant_cfa(Size2us::new(4, 4), level, cfa_type));
+            subtractor.map(|level| constant_cfa(USize2::new(4, 4), level, cfa_type));
         assert!(
             matches!(
                 CalibrationMasters::from_images(images, SigmaThreshold::new(5.0).unwrap(), &CancelToken::never()),
@@ -142,12 +141,12 @@ fn a_flat_with_no_positive_mean_is_refused() {
 fn a_bundle_spanning_two_patterns_is_refused() {
     let images = CalibrationSet {
         flat: Some(constant_cfa(
-            Size2us::new(2, 2),
+            USize2::new(2, 2),
             0.5,
             CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
         )),
         flat_dark: Some(constant_cfa(
-            Size2us::new(2, 2),
+            USize2::new(2, 2),
             0.1,
             CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Bggr)),
         )),
@@ -164,13 +163,13 @@ fn a_bundle_spanning_two_patterns_is_refused() {
 }
 
 fn masters_with_component(role: MasterRole, cfa_type: CfaType) -> CalibrationMasters {
-    masters_with_sized_component(role, cfa_type, Size2us::new(2, 2))
+    masters_with_sized_component(role, cfa_type, USize2::new(2, 2))
 }
 
 fn masters_with_sized_component(
     role: MasterRole,
     cfa_type: CfaType,
-    size: Size2us,
+    size: USize2,
 ) -> CalibrationMasters {
     let master = constant_cfa(size, 1.0, cfa_type);
     let mut images = CalibrationSet::default();
@@ -238,7 +237,7 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
 
     for case in cases {
         let masters = masters_with_component(case.role, case.master);
-        let mut light = constant_cfa(Size2us::new(2, 2), 0.5, case.light);
+        let mut light = constant_cfa(USize2::new(2, 2), 0.5, case.light);
         let original_data = light.data().to_vec();
 
         assert_eq!(masters.calibrate(&mut light), Err(case.expected));
@@ -251,16 +250,16 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
     // role a bundle keeps is covered because each is applied by a different operation; the
     // flat-dark is spent on the flat, so a bundle never holds one to check.
     for component in [MasterRole::Dark, MasterRole::Flat, MasterRole::Bias] {
-        let masters = masters_with_sized_component(component, CfaType::Mono, Size2us::new(4, 4));
-        let mut light = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
+        let masters = masters_with_sized_component(component, CfaType::Mono, USize2::new(4, 4));
+        let mut light = constant_cfa(USize2::new(2, 2), 0.5, CfaType::Mono);
         let original_data = light.data().to_vec();
 
         assert_eq!(
             masters.calibrate(&mut light),
             Err(CalibrationError::DimensionMismatch {
                 component: component.into(),
-                expected: Size2us::new(2, 2),
-                master: Size2us::new(4, 4),
+                expected: USize2::new(2, 2),
+                master: USize2::new(4, 4),
             })
         );
         assert_eq!(light.data().pixels(), original_data);
@@ -270,7 +269,7 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
     // A master of another camera is refused when both name theirs, and calibrates when they name
     // the same one or either names none.
     let named = |instrument: Option<&str>| {
-        let mut master = constant_cfa(Size2us::new(2, 2), 0.1, CfaType::Mono);
+        let mut master = constant_cfa(USize2::new(2, 2), 0.1, CfaType::Mono);
         master.metadata.header.instrument = instrument.map(str::to_owned);
         bundle(CalibrationSet {
             bias: Some(master),
@@ -278,7 +277,7 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
         })
     };
     let light = |instrument: Option<&str>| {
-        let mut light = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
+        let mut light = constant_cfa(USize2::new(2, 2), 0.5, CfaType::Mono);
         light.metadata.header.instrument = instrument.map(str::to_owned);
         light
     };
@@ -313,7 +312,7 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
         (MasterRole::Flat, 0.5),
         (MasterRole::FlatDark, 0.5),
     ] {
-        let mut master = constant_cfa(Size2us::new(2, 2), 0.25, CfaType::Mono);
+        let mut master = constant_cfa(USize2::new(2, 2), 0.25, CfaType::Mono);
         master
             .metadata
             .derived
@@ -322,7 +321,7 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
         *images.get_mut(component) = Some(master);
         let masters = bundle(images);
 
-        let mut light = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
+        let mut light = constant_cfa(USize2::new(2, 2), 0.5, CfaType::Mono);
         light
             .metadata
             .derived
@@ -339,7 +338,7 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
     // light on another span would remove ~0.01 from ~3000 and then mark the light calibrated.
     // Refused for the master the light subtracts, before the light is touched.
     for component in [MasterRole::Dark, MasterRole::Bias] {
-        let mut master = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
+        let mut master = constant_cfa(USize2::new(2, 2), 0.5, CfaType::Mono);
         master
             .metadata
             .derived
@@ -348,7 +347,7 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
         *images.get_mut(component) = Some(master);
         let masters = bundle(images);
 
-        let mut light = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
+        let mut light = constant_cfa(USize2::new(2, 2), 0.5, CfaType::Mono);
         light
             .metadata
             .derived
@@ -370,7 +369,7 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
     // The same failure with no span to give it away: a master and a light on one span whose BUNIT
     // names different quantities. The subtraction would run and report success.
     {
-        let mut master = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
+        let mut master = constant_cfa(USize2::new(2, 2), 0.5, CfaType::Mono);
         master.metadata.derived.set_domain(Some(fits_domain(
             1.0,
             Some("count/s"),
@@ -380,7 +379,7 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
         *images.get_mut(MasterRole::Dark) = Some(master);
         let masters = bundle(images);
 
-        let mut light = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
+        let mut light = constant_cfa(USize2::new(2, 2), 0.5, CfaType::Mono);
         light.metadata.derived.set_domain(Some(fits_domain(
             1.0,
             Some("Jy/beam"),
@@ -402,7 +401,7 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
         // A master that states no unit is "cannot tell", not a disagreement, so the same pair
         // calibrates once the master stops naming a quantity — the unit is the axis, not its
         // presence.
-        let mut master = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
+        let mut master = constant_cfa(USize2::new(2, 2), 0.5, CfaType::Mono);
         master
             .metadata
             .derived
@@ -410,7 +409,7 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
         let mut images = CalibrationSet::default();
         *images.get_mut(MasterRole::Dark) = Some(master);
         let masters = bundle(images);
-        let mut light = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
+        let mut light = constant_cfa(USize2::new(2, 2), 0.5, CfaType::Mono);
         light.metadata.derived.set_domain(Some(fits_domain(
             1.0,
             Some("Jy/beam"),
@@ -422,8 +421,8 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
     // ...and a set that does match still calibrates, so the extent check is not rejecting on
     // sheer presence. The dark also carries a defect map detected at its own size, which the
     // same pass checks against the light.
-    let masters = masters_with_sized_component(MasterRole::Dark, CfaType::Mono, Size2us::new(4, 4));
-    let mut light = constant_cfa(Size2us::new(4, 4), 0.5, CfaType::Mono);
+    let masters = masters_with_sized_component(MasterRole::Dark, CfaType::Mono, USize2::new(4, 4));
+    let mut light = constant_cfa(USize2::new(4, 4), 0.5, CfaType::Mono);
     assert_eq!(masters.calibrate(&mut light).map(drop), Ok(()));
 
     // Matching spans pass, and so does a pair where only one side declares one: an undeclared
@@ -435,7 +434,7 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
         (None, Some(65_535.0)),
         (None, None),
     ] {
-        let mut master = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
+        let mut master = constant_cfa(USize2::new(2, 2), 0.5, CfaType::Mono);
         master
             .metadata
             .derived
@@ -444,7 +443,7 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
         *images.get_mut(MasterRole::Dark) = Some(master);
         let masters = bundle(images);
 
-        let mut light = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
+        let mut light = constant_cfa(USize2::new(2, 2), 0.5, CfaType::Mono);
         light
             .metadata
             .derived
@@ -478,12 +477,12 @@ fn a_dark_that_kept_its_pedestal_subtracts_only_its_signal() {
         unit: None,
     };
     let calibrate = |pedestal| {
-        let mut dark = constant_cfa(Size2us::new(2, 2), 0.031_25, CfaType::Mono);
+        let mut dark = constant_cfa(USize2::new(2, 2), 0.031_25, CfaType::Mono);
         dark.metadata.derived.set_domain(Some(SampleDomain {
             pedestal,
             ..kept.clone()
         }));
-        let mut light = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
+        let mut light = constant_cfa(USize2::new(2, 2), 0.5, CfaType::Mono);
         light
             .metadata
             .derived
@@ -508,7 +507,7 @@ fn a_dark_that_kept_its_pedestal_subtracts_only_its_signal() {
     ));
 
     let kept_frame = |value| {
-        let mut frame = constant_cfa(Size2us::new(2, 2), value, CfaType::Mono);
+        let mut frame = constant_cfa(USize2::new(2, 2), value, CfaType::Mono);
         frame.metadata.derived.set_domain(Some(kept.clone()));
         frame
     };
@@ -556,9 +555,9 @@ fn a_set_that_cannot_be_loaded_cannot_be_built() {
     // Masters that describe different sensors: with no flat present nothing else compares them,
     // so `from_images` has to refuse a set that `save` would write and only `load` reject.
     let mismatched = CalibrationSet {
-        dark: Some(constant_cfa(Size2us::new(4, 4), 0.01, CfaType::Mono)),
+        dark: Some(constant_cfa(USize2::new(4, 4), 0.01, CfaType::Mono)),
         flat: None,
-        bias: Some(constant_cfa(Size2us::new(8, 8), 0.005, CfaType::Mono)),
+        bias: Some(constant_cfa(USize2::new(8, 8), 0.005, CfaType::Mono)),
         flat_dark: None,
     };
     assert_eq!(
@@ -572,8 +571,8 @@ fn a_set_that_cannot_be_loaded_cannot_be_built() {
     // The flat is the one role whose subtractor was already checked, so it must still be caught
     // when it is the odd one out rather than the reference.
     let mismatched_flat = CalibrationSet {
-        dark: Some(constant_cfa(Size2us::new(4, 4), 0.01, CfaType::Mono)),
-        flat: Some(constant_cfa(Size2us::new(6, 6), 1.0, CfaType::Mono)),
+        dark: Some(constant_cfa(USize2::new(4, 4), 0.01, CfaType::Mono)),
+        flat: Some(constant_cfa(USize2::new(6, 6), 1.0, CfaType::Mono)),
         bias: None,
         flat_dark: None,
     };
@@ -590,9 +589,9 @@ fn a_set_that_cannot_be_loaded_cannot_be_built() {
 
     // A coherent set of the same shape is still accepted.
     let coherent = CalibrationSet {
-        dark: Some(constant_cfa(Size2us::new(4, 4), 0.01, CfaType::Mono)),
+        dark: Some(constant_cfa(USize2::new(4, 4), 0.01, CfaType::Mono)),
         flat: None,
-        bias: Some(constant_cfa(Size2us::new(4, 4), 0.005, CfaType::Mono)),
+        bias: Some(constant_cfa(USize2::new(4, 4), 0.005, CfaType::Mono)),
         flat_dark: None,
     };
     let masters =
@@ -668,10 +667,10 @@ fn empty_roles_yield_no_masters() {
 
 #[test]
 fn new_constructor() {
-    let dark = constant_cfa(Size2us::new(4, 4), 0.1, CfaType::Mono);
-    let flat = constant_cfa(Size2us::new(4, 4), 0.8, CfaType::Mono);
-    let bias = constant_cfa(Size2us::new(4, 4), 0.02, CfaType::Mono);
-    let flat_dark = constant_cfa(Size2us::new(4, 4), 0.03, CfaType::Mono);
+    let dark = constant_cfa(USize2::new(4, 4), 0.1, CfaType::Mono);
+    let flat = constant_cfa(USize2::new(4, 4), 0.8, CfaType::Mono);
+    let bias = constant_cfa(USize2::new(4, 4), 0.02, CfaType::Mono);
+    let flat_dark = constant_cfa(USize2::new(4, 4), 0.03, CfaType::Mono);
 
     let masters = bundle(CalibrationSet {
         dark: Some(dark),
@@ -722,8 +721,8 @@ fn cold_detection_uses_subtracted_unfloored_flat_response() {
     for kind in [SubtractorKind::Bias, SubtractorKind::FlatDark] {
         let mut flat_pixels = vec![11.0; width * height];
         flat_pixels[dead] = 10.0;
-        let flat = make_cfa(Size2us::new(width, height), flat_pixels, CfaType::Mono);
-        let subtractor = constant_cfa(Size2us::new(width, height), 10.0, CfaType::Mono);
+        let flat = make_cfa(USize2::new(width, height), flat_pixels, CfaType::Mono);
+        let subtractor = constant_cfa(USize2::new(width, height), 10.0, CfaType::Mono);
         let mut images = CalibrationSet {
             flat: Some(flat),
             ..Default::default()
@@ -755,7 +754,7 @@ fn from_images_rejects_cancelled_operation() {
 
     let result = CalibrationMasters::from_images(
         CalibrationSet {
-            dark: Some(constant_cfa(Size2us::new(4, 4), 0.1, CfaType::Mono)),
+            dark: Some(constant_cfa(USize2::new(4, 4), 0.1, CfaType::Mono)),
             ..Default::default()
         },
         SigmaThreshold::DEFAULT,
@@ -767,7 +766,7 @@ fn from_images_rejects_cancelled_operation() {
 
 #[test]
 fn new_no_dark_no_hot_pixels() {
-    let flat = constant_cfa(Size2us::new(4, 4), 0.8, CfaType::Mono);
+    let flat = constant_cfa(USize2::new(4, 4), 0.8, CfaType::Mono);
 
     let masters = bundle(CalibrationSet {
         flat: Some(flat),
@@ -800,7 +799,7 @@ fn new_no_dark_no_hot_pixels() {
 /// median of its neighbours instead, 0.4375.
 #[test]
 fn calibrate_subtracts_the_dark_or_else_the_bias() {
-    let size = Size2us::new(4, 4);
+    let size = USize2::new(4, 4);
     let level = |value| Some(constant_cfa(size, value, CfaType::Mono));
     for (dark, bias, expected) in [
         (Some(0.125), None, 0.375f32),
@@ -874,7 +873,7 @@ fn calibrate_subtracts_the_dark_or_else_the_bias() {
 /// still holds one, with no bias to separate the two, is refused.
 #[test]
 fn calibrate_divides_by_the_flat_less_its_own_subtractor() {
-    let size = Size2us::new(2, 1);
+    let size = USize2::new(2, 1);
     let (signal, vignetting, k) = ([0.25f32, 0.5], [0.75f32, 1.0], 0.5f32);
     let mean_v = f32::midpoint(vignetting[0], vignetting[1]);
     let (dark, bias, flat_dark) = (0.0625f32, 0.03125f32, 0.015_625f32);
@@ -1001,8 +1000,8 @@ fn sigma_threshold_affects_detection() {
         .collect();
     pixels[15] = 400.0; // index 15 is odd → was 110
 
-    let dark_strict = make_cfa(Size2us::new(6, 6), pixels.clone(), CfaType::Mono);
-    let dark_loose = make_cfa(Size2us::new(6, 6), pixels, CfaType::Mono);
+    let dark_strict = make_cfa(USize2::new(6, 6), pixels.clone(), CfaType::Mono);
+    let dark_loose = make_cfa(USize2::new(6, 6), pixels, CfaType::Mono);
 
     let masters_strict = CalibrationMasters::from_images(
         CalibrationSet {
@@ -1124,7 +1123,7 @@ fn calibrate_hot_pixel_correction() {
         light_pixels.pixels_mut()[idx] = 0.9;
     }
     let mut light = cfa_from_plane(light_pixels, pattern);
-    light.set_flags(PixelFlags::from_fn(Size2us::new(w, h), |idx| {
+    light.set_flags(PixelFlags::from_fn(USize2::new(w, h), |idx| {
         if nulls.contains(&idx) {
             QualityFlags::NO_DATA
         } else {
@@ -1160,23 +1159,23 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         },
     );
     let mut masters = bundle(CalibrationSet {
-        dark: Some(constant_cfa(Size2us::new(4, 4), 0.05, cfa_type)),
+        dark: Some(constant_cfa(USize2::new(4, 4), 0.05, cfa_type)),
         flat: Some(flat),
-        bias: Some(constant_cfa(Size2us::new(4, 4), 0.1, cfa_type)),
+        bias: Some(constant_cfa(USize2::new(4, 4), 0.1, cfa_type)),
         flat_dark: None,
     });
     let dark = masters.dark.as_mut().unwrap();
     dark.metadata.derived.set_quantization_sigma(Some(0.000_02));
     // Pixel 5 is saturated and a defect: 2 + 4 = 6. The dark's flags go in its own `LUMFLAGS`
     // extension, right after it.
-    let dark_flags = PixelFlags::from_fn(Size2us::new(4, 4), |idx| {
+    let dark_flags = PixelFlags::from_fn(USize2::new(4, 4), |idx| {
         QualityFlags::from_byte(if idx == 5 { 6 } else { 0 })
     });
     dark.set_flags(dark_flags.clone());
     // Two hot pixels with excesses f32 rounds, and pixel 10 cold as well.
     masters.defect_map = Some(
         DefectMap::from_lists(
-            Size2us::new(4, 4),
+            USize2::new(4, 4),
             HotPixels {
                 idxs: vec![5, 10],
                 excess: vec![0.1, 3.0e-5],
@@ -1188,7 +1187,7 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
     );
     let prepared_bits = bits(masters.flat.as_ref().unwrap().divisor().data().pixels());
 
-    let mut expected = constant_cfa(Size2us::new(4, 4), 0.75, cfa_type);
+    let mut expected = constant_cfa(USize2::new(4, 4), 0.75, cfa_type);
     masters.calibrate(&mut expected).unwrap();
 
     let dir = TempDir::new("lumos-calibration-roundtrip");
@@ -1431,7 +1430,7 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         );
     }
 
-    let mut actual = constant_cfa(Size2us::new(4, 4), 0.75, cfa_type);
+    let mut actual = constant_cfa(USize2::new(4, 4), 0.75, cfa_type);
     loaded.calibrate(&mut actual).unwrap();
     assert_eq!(bits(actual.data().pixels()), bits(expected.data().pixels()));
 }
@@ -1456,16 +1455,16 @@ fn empty_master_fits_bundle_round_trips_as_a_checksummed_primary_hdu() {
 #[test]
 fn ram_bytes_sums_present_frames_and_defects() {
     // A 10×8 mono CFA frame holds 80 f32 pixels = 320 bytes.
-    let dark = constant_cfa(Size2us::new(10, 8), 0.1, CfaType::Mono);
+    let dark = constant_cfa(USize2::new(10, 8), 0.1, CfaType::Mono);
     assert_eq!(dark.ram_bytes(), 10 * 8 * 4);
 
     // A defect map holds its index lists and its mask. The mask's rows pad to 128 bits, so a
     // 10-wide row is two words: 8 rows × 2 × 8 B = 128 B, all of an empty map. Three indices add
     // 3 × 8 B.
     let mask_bytes = 8 * 2 * size_of::<u64>();
-    assert_eq!(DefectMap::new(Size2us::new(10, 8)).ram_bytes(), mask_bytes);
+    assert_eq!(DefectMap::new(USize2::new(10, 8)).ram_bytes(), mask_bytes);
     let defects = DefectMap::from_lists(
-        Size2us::new(10, 8),
+        USize2::new(10, 8),
         HotPixels {
             idxs: vec![1, 2],
             excess: vec![0.5, 0.25],
@@ -1482,7 +1481,7 @@ fn ram_bytes_sums_present_frames_and_defects() {
         bias: None,
         dark: Some(dark),
         flat: Some(
-            PreparedFlat::checked_divisor(constant_cfa(Size2us::new(4, 4), 1.0, CfaType::Mono))
+            PreparedFlat::checked_divisor(constant_cfa(USize2::new(4, 4), 1.0, CfaType::Mono))
                 .unwrap(),
         ),
         defect_map: Some(defects),
@@ -1614,7 +1613,7 @@ fn with_pedestal(mut frame: CfaImage, pedestal: Pedestal) -> CfaImage {
 /// refused as such.
 #[test]
 fn an_offset_is_never_divided_by_the_flat() {
-    let size = Size2us::new(4, 4);
+    let size = USize2::new(4, 4);
     let flat = |pedestal| with_pedestal(constant_cfa(size, 0.5, CfaType::Mono), pedestal);
     for pedestal in [Pedestal::Kept(256.0), Pedestal::Unknown] {
         assert_eq!(
@@ -1714,7 +1713,7 @@ fn an_offset_is_never_divided_by_the_flat() {
 /// samples moved away from, and keeps both through a FITS save and reload.
 #[test]
 fn calibration_records_saturation_before_it_moves_the_samples() {
-    let size = Size2us::new(2, 2);
+    let size = USize2::new(2, 2);
     let saturated = |light: &CfaImage| {
         (0..4)
             .filter(|&idx| {
@@ -1789,7 +1788,7 @@ fn sensor_compared(difference: Option<TemperatureDifference>) -> DarkComparison 
 ///   again, and without it the light keeps its bias, 0.5 − 0.15625 = 0.34375.
 #[test]
 fn a_dark_is_matched_to_the_light() {
-    let size = Size2us::new(4, 4);
+    let size = USize2::new(4, 4);
     let dark = |exposure: Option<f64>, temperature: Option<f64>| {
         let mut dark = constant_cfa(size, 0.1875, CfaType::Mono);
         dark.metadata.header.exposure_time = exposure;
@@ -1947,7 +1946,7 @@ fn a_dark_is_matched_to_the_light() {
 ///   refused. One 1.5 °C warmer than the flat is taken, and its temperature reported unverified.
 #[test]
 fn a_flat_dark_is_matched_to_the_flat() {
-    let size = Size2us::new(2, 1);
+    let size = USize2::new(2, 1);
     let (signal, vignetting) = ([0.25f32, 0.5], [0.75f32, 1.0]);
     let (bias, thermal) = (0.031_25f32, 0.015_625f32);
     let conditions = |mut frame: CfaImage, exposure: f64, temperature: f64| {
@@ -2100,7 +2099,7 @@ fn a_flat_dark_is_matched_to_the_flat() {
 /// Both on the memory tier and on the disk tier, which spills the subtracted frames for the run.
 #[test]
 fn flats_are_calibrated_before_they_are_combined() {
-    let size = Size2us::new(8, 8);
+    let size = USize2::new(8, 8);
     let offset = 1.0 / 32.0;
     let field = |x: usize, y: usize| {
         if (x == 0 || x == 7) && (y == 0 || y == 7) {
@@ -2234,7 +2233,7 @@ fn the_builder_calibrates_the_flats_and_keeps_each_master() {
         }
     }
 
-    let size = Size2us::new(8, 8);
+    let size = USize2::new(8, 8);
     let offset = 1.0 / 32.0;
     let dir = TempDir::new("lumos-master-builder");
     let write = |name: &str, exposure: f64, value: &dyn Fn(usize) -> f32| -> PathBuf {
@@ -2351,7 +2350,7 @@ fn a_cancel_inside_a_stack_is_the_builds_cancel() {
     let bias: Vec<PathBuf> = (0..2)
         .map(|idx| {
             let path = dir.join(format!("bias_{idx}.fits"));
-            constant_cfa(Size2us::new(8, 8), 1.0 / 32.0, CfaType::Mono)
+            constant_cfa(USize2::new(8, 8), 1.0 / 32.0, CfaType::Mono)
                 .write_fits(&path)
                 .unwrap();
             path
@@ -2423,7 +2422,7 @@ fn dark_frames_share_one_exposure() {
             .iter()
             .enumerate()
             .map(|(idx, &(exposure, temperature))| {
-                let mut frame = constant_cfa(Size2us::new(4, 4), 0.25, CfaType::Mono);
+                let mut frame = constant_cfa(USize2::new(4, 4), 0.25, CfaType::Mono);
                 frame.metadata.header.exposure_time = Some(exposure);
                 frame.metadata.header.ccd_temp = temperature;
                 let path = dir.join(format!("{name}_{idx}.fits"));
@@ -2485,7 +2484,7 @@ fn dark_frames_share_one_exposure() {
     assert_eq!(master.metadata.header.ccd_temp, Some(-10.0));
     assert_eq!(master.metadata.derived.dark_comparison(), None);
 
-    let mut flat_dark = constant_cfa(Size2us::new(4, 4), 0.031_25, CfaType::Mono);
+    let mut flat_dark = constant_cfa(USize2::new(4, 4), 0.031_25, CfaType::Mono);
     flat_dark.metadata.header.exposure_time = Some(1.0);
     flat_dark.metadata.header.ccd_temp = Some(-10.0);
     flat_dark
@@ -2522,7 +2521,7 @@ fn dark_frames_share_one_exposure() {
 /// is, and the counts agree with the bytes.
 #[test]
 fn calibration_counts_its_flags_as_it_sets_them() {
-    let size = Size2us::new(16, 16);
+    let size = USize2::new(16, 16);
     let at = |x: usize, y: usize| y * size.width + x;
     let mut bias = constant_cfa(size, 0.0625, CfaType::Mono);
     bias.set_flags(PixelFlags::from_fn(size, |idx| {

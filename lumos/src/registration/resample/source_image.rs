@@ -7,7 +7,7 @@ use crate::image::flags::pixel_flags::PixelFlags;
 use crate::image::flat_gain::FlatGain;
 use crate::image::linear_image::LinearImage;
 use crate::image::metadata::image_metadata::ImageMetadata;
-use common::Size2us;
+use common::USize2;
 
 /// A frame as the warp reads it: its planes, its flags and its metadata, borrowed from a
 /// `LinearImage` in memory.
@@ -44,7 +44,7 @@ impl<'a> SourceImage<'a> {
         }
     }
 
-    pub(crate) const fn size(&self) -> Size2us {
+    pub(crate) const fn size(&self) -> USize2 {
         self.desc.size()
     }
 }

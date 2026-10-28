@@ -5,7 +5,7 @@ use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion};
 
-use common::Size2us;
+use common::USize2;
 use common::bench::{Kind, Scale};
 
 use crate::bench::fixture::{self, Backend};
@@ -20,7 +20,7 @@ const PREVIEW: usize = 256;
 /// 256 × 171 preview, the allocation of the result included. Per source pixel, reading the
 /// frame.
 pub(crate) fn integration(c: &mut Criterion) {
-    let preview = Preview::new(Size2us::new(
+    let preview = Preview::new(USize2::new(
         PREVIEW,
         (FRAME.height * PREVIEW + FRAME.width / 2) / FRAME.width,
     ));

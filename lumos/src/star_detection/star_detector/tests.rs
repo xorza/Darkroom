@@ -1,4 +1,4 @@
-use common::Size2us;
+use common::USize2;
 use glam::DVec2;
 
 use crate::internals::images::mono_image;
@@ -30,9 +30,9 @@ fn a_demosaiced_frame_measures_its_stars_unfiltered() {
     use crate::internals::images::rgb_image;
     use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
     use crate::internals::test_rng::TestRng;
-    use common::Size2us;
+    use common::USize2;
 
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let mut star = Buffer2::new_filled(size, 0.0f32);
     SyntheticStar::new(
         Vec2::new(32.3, 31.6),
@@ -210,7 +210,7 @@ fn auto_fwhm_recovers_wide_stars() {
     for fwhm in [5.0f32, 6.0, 8.0, 10.0] {
         let scale = fwhm * fwhm / 16.0;
         let frame = Scenario {
-            size: Size2us::new(384, 384),
+            size: USize2::new(384, 384),
             star_count: 20,
             flux: (5.0 * scale, 14.0 * scale),
             fwhm,

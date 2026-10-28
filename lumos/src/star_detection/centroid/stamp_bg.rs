@@ -12,7 +12,7 @@ use glam::{DVec2, USizeVec2};
 use crate::image::masked_plane::MaskedPlane;
 use crate::math::statistics::clipped_stats::{ClippedStats, SigmaClip};
 use crate::star_detection::centroid::measure_grid::AnnulusRadii;
-use common::Size2us;
+use common::USize2;
 
 /// Flat per-stamp sky: the residual's offset from zero and its noise, valid at the stamp scale.
 #[derive(Debug, Clone, Copy)]
@@ -85,7 +85,7 @@ struct AnnulusSpans {
     centre_y: isize,
     inner_sq: usize,
     outer_sq: usize,
-    size: Size2us,
+    size: USize2,
     rows: RangeInclusive<isize>,
     /// The right span of the row the left one was handed out of.
     pending: Option<RowSpan>,
@@ -107,7 +107,7 @@ impl RowSpan {
 }
 
 impl AnnulusSpans {
-    fn about(pos: DVec2, annulus: AnnulusRadii, size: Size2us) -> Self {
+    fn about(pos: DVec2, annulus: AnnulusRadii, size: USize2) -> Self {
         let reach =
             isize::try_from(annulus.outer).expect("an annulus is a few hundred pixels across");
         Self {
@@ -176,7 +176,7 @@ mod tests {
     /// the frame.
     #[test]
     fn the_spans_hold_the_annulus_pixels_in_order() {
-        let size = Size2us::new(40, 30);
+        let size = USize2::new(40, 30);
         let annuli = [
             AnnulusRadii { inner: 5, outer: 9 },
             AnnulusRadii {

@@ -1,4 +1,4 @@
-use common::Size2us;
+use common::USize2;
 use glam::Vec2;
 
 use crate::color::color_format::ColorFormat;
@@ -36,7 +36,7 @@ fn gpu_matches_cpu() {
         (AffineWarp::new().scale(Vec2::new(0.5, 0.75)), [7, 7], false),
     ];
     for format in ColorFormat::ALL {
-        let image = create_test_image(format, Size2us::new(width, height), 3);
+        let image = create_test_image(format, USize2::new(width, height), 3);
         let input = GpuImage::from_image(gpu, &image).unwrap();
         for (warp, [out_w, out_h], exact) in cases {
             let filters: &[FilterMode] = if exact {
@@ -46,7 +46,7 @@ fn gpu_matches_cpu() {
             };
             for &filter in filters {
                 let warp = warp.filter(filter);
-                let desc = InterleavedDesc::new(Size2us::new(out_w, out_h), format);
+                let desc = InterleavedDesc::new(USize2::new(out_w, out_h), format);
                 let mut output = GpuImage::new_empty(gpu, desc).unwrap();
                 warp.apply_gpu(gpu, &input, &mut output);
 

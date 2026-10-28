@@ -264,7 +264,7 @@ fn adjust_image(op: ContrastBrightness, value: DynamicValue) -> Image {
 
 #[cfg(test)]
 mod tests {
-    use common::Size2us;
+    use common::USize2;
     use imaginarium::{ColorFormat, ContrastBrightness};
     use scenarium::DynamicValue;
 
@@ -273,7 +273,7 @@ mod tests {
 
     #[test]
     fn adjust_image_runs_in_place_only_for_unique_cpu_inputs() {
-        let desc = imaginarium::InterleavedDesc::new(Size2us::new(9, 4), ColorFormat::RGBA_U8);
+        let desc = imaginarium::InterleavedDesc::new(USize2::new(9, 4), ColorFormat::RGBA_U8);
         let op = ContrastBrightness::new(1.5, 0.1);
         let pattern: Vec<u8> = (0..desc.byte_len())
             .map(|idx| u8::try_from(idx % 251).unwrap())

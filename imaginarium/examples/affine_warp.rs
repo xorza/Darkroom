@@ -7,7 +7,7 @@ mod shared;
 
 use std::f32::consts::PI;
 
-use common::Size2us;
+use common::USize2;
 use glam::Vec2;
 use imaginarium::{AffineWarp, FilterMode, Gpu, GpuImage, InterleavedDesc};
 use shared::{load_lena_rgba_u8, print_image_info, save_image};
@@ -27,7 +27,7 @@ fn main() {
 
     let mut output = GpuImage::new_empty(
         &ctx,
-        InterleavedDesc::new(Size2us::new(256, 256), input_cpu.desc().color_format()),
+        InterleavedDesc::new(USize2::new(256, 256), input_cpu.desc().color_format()),
     )
     .expect("allocate");
     AffineWarp::new()
@@ -38,7 +38,7 @@ fn main() {
 
     let mut output = GpuImage::new_empty(
         &ctx,
-        InterleavedDesc::new(Size2us::new(768, 768), input_cpu.desc().color_format()),
+        InterleavedDesc::new(USize2::new(768, 768), input_cpu.desc().color_format()),
     )
     .expect("allocate");
     AffineWarp::new()
@@ -63,7 +63,7 @@ fn main() {
 
     let mut output = GpuImage::new_empty(
         &ctx,
-        InterleavedDesc::new(Size2us::new(800, 600), input_cpu.desc().color_format()),
+        InterleavedDesc::new(USize2::new(800, 600), input_cpu.desc().color_format()),
     )
     .expect("allocate");
     AffineWarp::new()
@@ -101,7 +101,7 @@ fn main() {
 
     let mut output_nearest = GpuImage::new_empty(
         &ctx,
-        InterleavedDesc::new(Size2us::new(1024, 1024), input_cpu.desc().color_format()),
+        InterleavedDesc::new(USize2::new(1024, 1024), input_cpu.desc().color_format()),
     )
     .expect("allocate");
     AffineWarp::new()
@@ -113,7 +113,7 @@ fn main() {
 
     let mut output_bilinear = GpuImage::new_empty(
         &ctx,
-        InterleavedDesc::new(Size2us::new(1024, 1024), input_cpu.desc().color_format()),
+        InterleavedDesc::new(USize2::new(1024, 1024), input_cpu.desc().color_format()),
     )
     .expect("allocate");
     AffineWarp::new()

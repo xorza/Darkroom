@@ -28,7 +28,7 @@ fn gaussian_value_matches_the_closed_form() {
 
 #[test]
 fn truncated_and_exact_agree_inside_the_radius_and_differ_outside() {
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let star = SyntheticStar::new(Vec2::splat(32.0), 1.0, GAUSSIAN_2);
 
     let mut truncated = Buffer2::new_filled(size, 0.0f32);
@@ -50,7 +50,7 @@ fn truncated_and_exact_agree_inside_the_radius_and_differ_outside() {
 #[test]
 fn stamp_lays_the_star_over_a_flat_background() {
     let stamp =
-        SyntheticStar::new(Vec2::splat(10.0), 0.5, GAUSSIAN_2).stamp(Size2us::new(21, 21), 0.1);
+        SyntheticStar::new(Vec2::splat(10.0), 0.5, GAUSSIAN_2).stamp(USize2::new(21, 21), 0.1);
     // The peak pixel holds the profile's mean over it, at σ 2 m(0) = 4·√(π/2)·erf(1/(4√2)) =
     // 0.989680 per axis: 0.1 + 0.5·m(0)² = 0.589734, to the f32 rounding of the sum.
     assert!((stamp[(10, 10)] - 0.589_733_5).abs() <= 1e-7);

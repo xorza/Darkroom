@@ -20,7 +20,7 @@ use crate::internals::synthetic::metrics::{pixel_stats, rms_diff};
 use crate::internals::synthetic::observe::{Observation, render};
 use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::scene::{BgField, Placement, Scatter, Scene};
-use common::Size2us;
+use common::USize2;
 use glam::USizeVec2;
 
 /// A uniformly lit sky seen through a vignette, with bias and dark on top, calibrates to the sky
@@ -29,7 +29,7 @@ use glam::USizeVec2;
 /// division each round once, by at most ε of the value: 6ε of `sky · mean(f)`.
 #[test]
 fn calibrate_removes_vignette_dark_and_bias() {
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let (sky, bias, dark) = (0.3f32, 0.05f32, 0.02f32);
     let flat = FlatField {
         vignette: Some(Vignette {
@@ -80,7 +80,7 @@ fn calibrate_removes_vignette_dark_and_bias() {
 /// stars add shot noise.
 #[test]
 fn calibrate_recovers_star_field_through_a_noisy_light() {
-    let size = Size2us::new(96, 96);
+    let size = USize2::new(96, 96);
     let (bias, dark) = (0.05f32, 0.02f32);
     let scene = Scene::scatter(
         size,
@@ -130,7 +130,7 @@ fn calibrate_recovers_star_field_through_a_noisy_light() {
 /// flags and none missed.
 #[test]
 fn defect_map_detects_the_cameras_hot_and_dead_pixels() {
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let hot: [usize; 5] = [100, 517, 1234, 2048, 3900];
     let dead: [usize; 3] = [200, 1700, 3001];
     let camera = Camera {
@@ -186,7 +186,7 @@ fn defect_map_detects_the_cameras_hot_and_dead_pixels() {
 /// any noise pixel past 3σ, of which a 4096-pixel Gaussian field has about five.
 #[test]
 fn hot_detection_sigma_threshold_picks_its_tier() {
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let mut dark_px = vec![0.1f32; size.pixel_count()];
     patterns::add_gaussian_noise(&mut dark_px, 0.01, 99);
     let moderate = [500usize, 1500, 2500];
@@ -220,7 +220,7 @@ fn hot_detection_sigma_threshold_picks_its_tier() {
 /// dark-signal pixels are.
 #[test]
 fn a_pixel_only_the_bias_sets_apart_is_no_hot_pixel() {
-    let size = Size2us::new(64, 64);
+    let size = USize2::new(64, 64);
     let mut bias = vec![0.02f32; size.pixel_count()];
     patterns::add_gaussian_noise(&mut bias, 0.005, 7);
     bias[1300] += 0.1;
@@ -248,7 +248,7 @@ fn a_pixel_only_the_bias_sets_apart_is_no_hot_pixel() {
 
 #[test]
 fn defect_correction_replaces_hot_pixels_with_neighbours() {
-    let size = Size2us::new(32, 32);
+    let size = USize2::new(32, 32);
     let n = size.pixel_count();
     let bg = 0.2f32;
 

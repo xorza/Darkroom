@@ -58,7 +58,7 @@ pub(crate) mod internals {
     use crate::star_detection::labeling::LabelMap;
     use crate::star_detection::labeling::component_data::ComponentData;
     use crate::star_detection::star_detection_config::extraction_config::Connectivity;
-    use common::{Rect2us, Size2us};
+    use common::{USize2, USizeRect2};
     use glam::{USizeVec2, Vec2};
 
     /// Rendered stars and the one label covering every pixel they light above 0.001.
@@ -73,7 +73,7 @@ pub(crate) mod internals {
     /// blobs under one label.
     pub(super) fn separated_pair(secondary: f32) -> TestComponent {
         make_test_component(
-            Size2us::new(100, 100),
+            USize2::new(100, 100),
             &[
                 SyntheticStar::new(Vec2::new(30.0, 50.0), 1.0, StarProfile::gaussian(2.5)),
                 SyntheticStar::new(Vec2::new(70.0, 50.0), secondary, StarProfile::gaussian(2.5)),
@@ -85,10 +85,10 @@ pub(crate) mod internals {
         clippy::cast_sign_loss,
         reason = "synthetic fixtures are small images with non-negative coordinates"
     )]
-    pub(crate) fn make_test_component(size: Size2us, stars: &[SyntheticStar]) -> TestComponent {
+    pub(crate) fn make_test_component(size: USize2, stars: &[SyntheticStar]) -> TestComponent {
         let mut pixels = Buffer2::new_filled(size, 0.0f32);
         let mut labels = Buffer2::new_filled(size, 0u32);
-        let mut bbox = Rect2us::empty();
+        let mut bbox = USizeRect2::empty();
         let mut area = 0;
 
         for &star in stars {
