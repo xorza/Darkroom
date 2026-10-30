@@ -17,9 +17,8 @@ assert_not_impl_any!(ConstEditorLooks: Copy);
 assert_not_impl_any!(FlatTextEdit: Copy);
 
 /// Pin which palette role reaches which field, plus the non-trivial
-/// palantir tweak, so a regression in `Theme::build`'s wiring, in
-/// `palantir_bridge::theme`, or in `palantir_bridge::menu_bar_roles` fails
-/// loudly. Against the loaded palette rather than hex literals: the values
+/// palantir tweak, so a regression in `Theme::build`'s wiring or in
+/// `palantir_bridge::theme` fails loudly. Against the loaded palette rather than hex literals: the values
 /// are the palette's to choose, but landing `element_strong` in `canvas.bg` is
 /// still a bug.
 #[test]
@@ -37,6 +36,9 @@ fn default_wiring_and_menu_tweak() {
     assert_ne!(theme.canvas.bg, theme.card.lift);
     // The palantir half is the same palette, not palantir's own default.
     assert_eq!(theme.palantir.window_clear, p.canvas_bg);
+    // The menu bar and every tab strip ride the surround band.
+    assert_eq!(theme.palantir.menu_bar.bar, Chrome::fill(p.surround_bg));
+    assert_eq!(theme.palantir.tabs.strip, Chrome::fill(p.surround_bg));
     assert!(theme.palantir.tooltip.max_size.h.is_infinite());
 
     // The open menu's trigger rests lit, as the hovered one does; a shut one rests flat.
@@ -44,7 +46,7 @@ fn default_wiring_and_menu_tweak() {
     assert_eq!(bar.open, bar.title.hovered);
     assert_ne!(bar.open, bar.title.normal);
     assert_eq!(bar.title.normal.text.color, Some(p.text_muted));
-    assert_eq!(bar.open.text.color, Some(p.text));
+    assert_eq!(bar.open.to_animated(theme.palantir.text).text.color, p.text);
     // A menu's rows and panel as the review drew them.
     let menu = &theme.palantir.context_menu;
     assert_eq!(
@@ -342,7 +344,6 @@ fn every_palantir_padding_and_radius_is_on_the_scale() {
         wire: _,
     } = theme.stroke.clone();
     let metrics = BridgeRoles {
-        surround_bg: theme.colors.surround_bg,
         font: &theme.font,
         space: &theme.space,
         radius: &theme.radius,
@@ -388,6 +389,7 @@ fn every_palantir_padding_and_radius_is_on_the_scale() {
     assert_eq!(ui.text_edit.defaults.padding.to_array(), [sm, xs, sm, xs]);
     assert_eq!(ui.context_menu.panel.corners.to_array(), [float; 4]);
     assert_eq!(ui.tabs.strip_padding.to_array(), [sm, xs, sm, 0.0]);
+    assert_eq!(ui.menu_bar.bar_padding.to_array(), [sm, xs, sm, xs]);
     assert_eq!(ui.tabs.chip_padding, ui.context_menu.item.defaults.padding);
     assert_eq!(ui.menu_bar.defaults.padding, ui.tabs.chip_padding);
     assert_eq!(ui.menu_bar.gap, xs);
@@ -412,8 +414,8 @@ fn a_tab_chip_and_its_close_button_are_ghosts() {
     let theme = Theme::default();
     let tabs = &theme.palantir.tabs;
     let looks = &tabs.unselected;
-    assert_eq!(looks.normal.chrome, Chrome::NONE);
-    assert_eq!(looks.disabled.chrome, Chrome::NONE);
+    assert_eq!(looks.normal.chrome.fill, Chrome::NONE.fill);
+    assert_eq!(looks.disabled.chrome.fill, Chrome::NONE.fill);
     let titles = &theme.palantir.menu_bar.title;
     assert_eq!(looks.hovered.chrome.fill, titles.hovered.chrome.fill);
     assert_eq!(looks.active.chrome.fill, titles.active.chrome.fill);

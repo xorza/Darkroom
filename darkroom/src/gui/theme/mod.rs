@@ -277,7 +277,7 @@ impl Theme {
 
     /// Where the surround's controls start from the window's edge: the menu bar's first title and
     /// the first tab, whose text then sits a control's `space.md` further in, as the status bar's
-    /// does. palantir's tab strip pads by the same `space.sm`.
+    /// does. palantir's tab strip and menu bar pad their bands by the same `space.sm`.
     #[inline]
     pub(crate) const fn surround_inset(&self) -> f32 {
         self.space.sm
@@ -327,7 +327,6 @@ impl Theme {
         let card = CardTheme::from_palette(p);
         let status = StatusColors::from_palette(p);
         let roles = BridgeRoles {
-            surround_bg: colors.surround_bg,
             font: &font,
             space: &space,
             radius: &radius,
