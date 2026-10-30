@@ -1,6 +1,6 @@
 use palantir::{
     Align, CloseHandle, Configure, DockOperation, HAlign, MenuBar, MenuBarMenus, MenuItem,
-    MenuSeparator, Panel, Sense, Shortcut, Sizing, Spacing, Text, Ui, VAlign, fmt,
+    MenuSeparator, Panel, Sense, Shortcut, Sizing, Text, Ui, VAlign, fmt,
 };
 use scenarium::NodeId;
 
@@ -22,7 +22,6 @@ use crate::gui::widgets::support;
 /// the pass, Preferences as the [`DockOperation`] that opens its tab. Every item with a chord
 /// shows it, read from [`shortcuts`], the table its handler reads.
 pub(crate) fn show(ui: &mut Ui, ctx: WindowCtx<'_>, out: &mut Requests) {
-    let theme = ctx.app().theme();
     Panel::zstack()
         .id_salt("menu_bar")
         .size((Sizing::FILL, Sizing::HUG))
@@ -31,7 +30,6 @@ pub(crate) fn show(ui: &mut Ui, ctx: WindowCtx<'_>, out: &mut Requests) {
                 .id_salt("menu_bar_menus")
                 .size((Sizing::HUG, Sizing::HUG))
                 .align(Align::new(HAlign::Left, VAlign::Center))
-                .padding(Spacing::xy(theme.surround_inset(), theme.space.xs))
                 .show(ui, |bar| {
                     file_menu(bar, out);
                     edit_menu(bar, ctx, out);
