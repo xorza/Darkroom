@@ -47,7 +47,7 @@ struct DotKey {
 }
 
 impl DotKey {
-    fn from_theme(theme: &Theme) -> Self {
+    const fn from_theme(theme: &Theme) -> Self {
         Self {
             color: theme.canvas.dot.to_srgba(),
             radius_bits: theme.canvas.dot_radius.to_bits(),
