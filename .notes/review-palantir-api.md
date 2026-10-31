@@ -36,11 +36,7 @@ speed finding.
    own copies of the steps (`SpaceScale`, `RadiusScale`, `StrokeScale`, `TypeScale`,
    `ElevationScale`) and copies them across in `BridgeRoles::metrics`. `RadiusScale` is the same
    as `RadiusSteps`, field for field.
-6. **A shortcut read has a side effect.** `Ui::shortcut_pressed` also watches the chord for the
-   wake gate. A short-circuit skips the watch, and palantir drops an unfocused press of a chord
-   that no frame watched (`palantir/src/input_state/mod.rs`, the `observable` check). darkroom
-   explains the trap in three doc comments and breaks it once.
-7. **A popup is placed again in each frame.** The clamp to the window moves an open popup when its
+6. **A popup is placed again in each frame.** The clamp to the window moves an open popup when its
    body changes size. darkroom's `AnchoredMenu` keeps the first place by hand.
 
 ### Target design
@@ -142,10 +138,6 @@ Each bullet is one decision: the choice, the options refused, and the source.
 
 #### Input
 
-- **A table of shortcuts reads every chord.** `Ui::pressed_shortcut<T: Copy>(&mut self, table:
-  &[(Shortcut, T)]) -> Option<T>` watches each chord of the table and returns the value of the
-  first one pressed. darkroom's `menu_shortcut` and the canvas's `emit` become one call each.
-  Refused: a public `watch_shortcut`, which leaves the trap where it is.
 - **An optional chord argument takes an `Option`.** `MenuItem::shortcut` and
   `MenuItem::shortcut_hint` take `impl Into<Option<Shortcut>>`, as palantir's "Argument shapes"
   asks for an optional argument.
@@ -202,22 +194,6 @@ Each batch leaves both workspaces green. A palantir change runs, from `palantir/
 change runs `cargo drive check` and `cargo drive test` from the root. A palantir test goes into
 palantir's suite beside the code it tests, with hand-computed values. Whoever addresses an item
 deletes it.
-
-### Batch 1: shortcut reads cannot drop a watch (bug)
-
-Files: `palantir/src/ui/mod.rs`; `darkroom/src/gui/app/session/mod.rs`,
-`darkroom/src/gui/pane/graph_ui/gesture/shortcuts.rs`.
-
-- [ ] `palantir/src/ui/mod.rs:325`, `shortcut_pressed`: a read also watches, so `a || b` loses the
-  watch of `b`. Add `Ui::pressed_shortcut<T: Copy>(&mut self, table: &[(Shortcut, T)]) ->
-  Option<T>`, which watches every chord of the table and returns the first value pressed.
-  Document the watch on `shortcut_pressed`. Test: two chords, the second one pressed on the frame
-  after the first fired, and both read.
-- [ ] `shortcuts.rs:36` (the `.notes/ISSUES.md` entry on `emit`): Backspace is not watched on a
-  frame where Delete fires. Read Delete and Backspace through one table. Delete the issue entry.
-- [ ] `session/mod.rs:211` `menu_shortcut`: six reads, an `if` chain and a doc comment that
-  explains the trap. Replace with one `pressed_shortcut` over a `(Shortcut, AppCommand)` table,
-  and drop the comment's trap paragraph.
 
 ### Batch 2: a tooltip attaches to the response
 
@@ -453,3 +429,17 @@ Files: `palantir/AGENTS.md`, `darkroom/AGENTS.md`, `.notes/review-palantir-api.m
   system it governs: widgets, hosts, theme, input and layout in `palantir/AGENTS.md`; the driver's
   use of `is_busy`, the waker and `Remote::settle` in `darkroom/AGENTS.md`, "The editor harness".
   Code that cites one cites it by document and title. Then delete this file.
+
+## Changed
+
+- `session/mod.rs` `menu_shortcut`: a `MENU_CHORDS` table and one `find` in darkroom, with no
+  palantir API, as the search may stop at the first chord that fired (see Declined).
+
+## Declined
+
+- `Ui::pressed_shortcut`: the gap it closed does not exist. A frame that receives a press records
+  again with no input, and that pass reads every chord a short-circuit skipped, so each stays
+  watched. palantir now documents this on `Ui::shortcut_pressed` and pins it in
+  `a_shortcut_read_skipped_behind_one_that_fired_stays_watched`.
+- `shortcuts.rs:36` `emit`, Backspace behind Delete: not a bug, for the same reason. The issue
+  entry is deleted, and the doc comments that described the trap are corrected.

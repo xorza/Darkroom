@@ -21,11 +21,9 @@ use crate::gui::pane::graph_ui::gesture::pan_zoom::Framing;
 ///
 /// Routed through the intent stack (not a direct document write) so they land in
 /// the undo history; the `is_noop` filter in `drain_requests` drops them when
-/// they'd change nothing. Every chord is sampled up front rather than
-/// short-circuited, so one firing doesn't drop the others' subscription for
-/// palantir's wake gate. The `Edit`-class ones stand down on their own while a
-/// text field holds focus, and Ctrl+0 / Ctrl+D are `Accel` so they keep firing
-/// mid-edit.
+/// they'd change nothing. Each chord is read on its own, so chords pressed in one frame all act.
+/// The `Edit`-class ones stand down on their own while a text field holds focus, and Ctrl+0 /
+/// Ctrl+D are `Accel` so they keep firing mid-edit.
 ///
 /// Esc deselects only when the canvas `ctx` says nothing was in flight: only
 /// the canvas knows whether the Esc cancelled a gesture instead.
