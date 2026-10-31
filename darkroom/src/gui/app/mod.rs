@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use palantir::Ui;
+use palantir::{ColorScheme, SchemePreference, Ui};
 use scenarium::Binding;
 use scenarium::ConstValue;
 use scenarium::FsPathMode;
@@ -179,8 +179,10 @@ impl App {
             requests: Requests::default(),
         };
         // Onto the Ui before frame 1, so palantir's own widgets paint right and the first frame
-        // is at the remembered size.
-        ui.set_theme(app.theme.palantir.clone());
+        // is at the remembered size. Darkroom has one look, Ayu Graphite's dark, so it pins the
+        // dark scheme whatever the system reports.
+        ui.set_theme_for(ColorScheme::Dark, app.theme.palantir.clone());
+        ui.set_scheme_preference(SchemePreference::Dark);
         ui.set_user_scale(app.preferences.interface_size.user_scale());
         // A remembered document that failed to load is forgotten, and that is
         // persisted, so the next launch does not fail on it again.

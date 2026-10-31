@@ -32,6 +32,10 @@ pub(super) const fn palette(p: &Palette) -> palantir::Palette {
         // under the 3:1 WCAG 1.4.11 asks of a focus indicator.
         border_focused: p.accent,
         accent: p.accent,
+        // The canvas's ink on the accent, as palantir's dark palette sets it: 8.16:1, where the
+        // body text read 1.89:1 as an on switch's knob.
+        on_accent: p.canvas_bg,
+        shadow: p.shadow,
     }
 }
 

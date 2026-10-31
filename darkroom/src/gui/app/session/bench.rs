@@ -36,7 +36,7 @@ use palantir::bench::case_group::CaseGroup;
 use palantir::bench::kind::{Kind, Scale};
 use palantir::internals::frame_fixture::{BENCH_DPR, BENCH_SURFACE};
 use palantir::internals::{BenchGpu, Timing};
-use palantir::{Depth, Harness};
+use palantir::{ColorScheme, Depth, Harness};
 use palantir::{FramePaint, OffscreenHost, Ui};
 use scenarium::{Binding, DynamicValue, Func, Graph, InputPort, Library, NodeId};
 
@@ -363,7 +363,9 @@ pub(crate) fn integration(c: &mut Criterion, backends: Backends) {
                         .scale(BENCH_DPR)
                         .depth(Depth::Compose)
                         .build();
-                    frontend.ui().set_theme(Theme::default().palantir);
+                    frontend
+                        .ui()
+                        .set_theme_for(ColorScheme::Dark, Theme::default().palantir);
                     let mut published = false;
                     move |editor: &mut Editor, n: u32| {
                         let ui = frontend.ui();
@@ -383,7 +385,8 @@ pub(crate) fn integration(c: &mut Criterion, backends: Backends) {
                         .collect_gpu_stats(false)
                         .retained_target(true)
                         .build();
-                    host.ui().set_theme(Theme::default().palantir);
+                    host.ui()
+                        .set_theme_for(ColorScheme::Dark, Theme::default().palantir);
                     let mut published = false;
                     move |editor: &mut Editor, n: u32| {
                         if !published {
