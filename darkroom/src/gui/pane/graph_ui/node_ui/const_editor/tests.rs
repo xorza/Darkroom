@@ -6,70 +6,36 @@ use palantir::Harness;
 
 use crate::gui::theme::Theme;
 
-/// The unfocused mirror *refills* its retained buffer rather than
-/// replacing it, so a literal that never changes must still read as one
-/// copy of itself after any number of frames — an append that forgot to
-/// clear would show `4242` on the second.
-///
-/// The same frames must commit nothing: the editor speaks only on the
-/// frame its edit lands, which is what keeps the commit's one `String`
-/// at gesture rate instead of frame rate.
+/// An input with nothing in it shows [`UNSET`] and takes no click: a click on it focuses
+/// nothing, and the row around it gets the press.
 #[test]
-fn the_unfocused_mirror_refills_its_buffer_instead_of_appending() {
+fn an_unset_field_shows_its_mark_and_takes_no_click() {
     let theme = Theme::default();
-    let id = WidgetId::from_hash("const_editor::mirror");
+    let id = WidgetId::from_hash("const_editor::unset");
     let field = Field {
         theme: &theme.const_editor.rest,
         id,
     };
-    let value = ConstValue::Int(42);
     let mut h = Harness::builder(UVec2::new(200, 60)).mono().build();
-
-    let mut buffered = String::new();
-    for frame in 0..3 {
-        h.frame(|ui| {
-            let committed = field.text(ui, &value, format_any);
-            assert!(
-                committed.is_none(),
-                "frame {frame}: an unfocused editor commits nothing"
-            );
-            buffered = ui
-                .state::<EditBuffer>(id)
-                .expect("the editor keeps its buffer")
-                .text
-                .clone();
-        });
-        assert_eq!(buffered, "42", "frame {frame}");
-    }
-
-    // The unset field borrows the same buffer and refills it
-    // unconditionally, so it carries the same hazard — and its overwrite
-    // is what makes the field read-only in the first place.
-    let unset = WidgetId::from_hash("const_editor::unset");
-    for frame in 0..3 {
-        h.frame(|ui| {
-            assert!(
-                Field {
-                    theme: &theme.const_editor.rest,
-                    id: unset,
-                }
-                .unset(ui, &ConstValue::Null)
-                .is_none(),
-                "frame {frame}: an unset field never commits"
-            );
-            buffered = ui
-                .state::<EditBuffer>(unset)
-                .expect("the field keeps its buffer")
-                .text
-                .clone();
-        });
-        assert_eq!(buffered, UNSET, "frame {frame}");
-    }
+    let mut record = |ui: &mut Ui| {
+        assert!(field.unset(ui, &ConstValue::Null).is_none());
+    };
+    h.frame(&mut record);
+    let shown: Vec<String> = h.widgets(None).into_iter().map(|w| w.text).collect();
+    assert!(
+        !shown.iter().any(|text| text == UNSET),
+        "nothing interactive reads {UNSET}: {shown:?}"
+    );
+    let center = h.rect(id).expect("the field is arranged").center();
+    h.click(center);
+    h.frame(&mut record);
+    assert_eq!(h.ui().focus(), None, "the click focuses nothing");
 }
 
-/// Escape drops the draft: nothing commits, on the Escape frame or after, and the next idle
-/// frame shows the document value again. Enter and a click elsewhere each commit what was
-/// typed, once — and a blur that follows Enter with no edit between commits nothing more.
+/// The text field commits through palantir's buffered `TextEdit`: Escape commits nothing and
+/// the next session starts at the document value, so Enter there commits nothing; Enter and a
+/// click elsewhere each commit what was typed, once, and a blur that follows Enter with no edit
+/// between commits nothing more.
 ///
 /// Commits are collected from every record pass, not only the input-observing one: a frame
 /// can run a second pass, and the cancelled draft must not commit there.
@@ -78,35 +44,25 @@ fn escape_drops_the_draft_and_enter_or_blur_commits() {
     #[derive(Debug)]
     struct Probe<'a> {
         field: Field<'a>,
-        value: ConstValue,
-    }
-    /// Every commit any pass of a frame produced, and the text the field ends with.
-    #[derive(Debug)]
-    struct Framed {
-        commits: Vec<String>,
-        text: String,
     }
     impl Probe<'_> {
-        fn frame(&self, h: &mut Harness) -> Framed {
+        /// Every commit any pass of a frame produced.
+        fn frame(&self, h: &mut Harness) -> Vec<String> {
             let mut commits = Vec::new();
-            let mut text = String::new();
-            h.frame(|ui| {
-                commits.extend(self.field.text(ui, &self.value, format_any));
-                text.clone_from(
-                    &ui.state::<EditBuffer>(self.field.id)
-                        .expect("the editor keeps its buffer")
-                        .text,
-                );
-            });
-            Framed { commits, text }
+            h.frame(|ui| commits.extend(self.field.text(ui, "42")));
+            commits
+        }
+
+        fn focus(&self, h: &mut Harness) {
+            let center = h.rect(self.field.id).expect("field arranged").center();
+            h.click(center);
+            assert!(self.frame(h).is_empty(), "focusing commits nothing");
         }
 
         fn focus_and_type(&self, h: &mut Harness) {
-            let center = h.rect(self.field.id).expect("field arranged").center();
-            h.click(center);
-            assert!(self.frame(h).commits.is_empty(), "focusing commits nothing");
+            self.focus(h);
             h.key(Key::Char('7'));
-            assert!(self.frame(h).commits.is_empty(), "typing commits nothing");
+            assert!(self.frame(h).is_empty(), "typing commits nothing");
         }
     }
 
@@ -116,7 +72,6 @@ fn escape_drops_the_draft_and_enter_or_blur_commits() {
             theme: &theme.const_editor.rest,
             id: WidgetId::from_hash("const_editor::commit_rules"),
         },
-        value: ConstValue::Int(42),
     };
     let mut h = Harness::builder(UVec2::new(200, 60)).mono().build();
     field.frame(&mut h);
@@ -124,32 +79,29 @@ fn escape_drops_the_draft_and_enter_or_blur_commits() {
     field.focus_and_type(&mut h);
     h.key(Key::Escape);
     assert_eq!(
-        field.frame(&mut h).commits,
+        field.frame(&mut h),
         Vec::<String>::new(),
         "Escape must not commit"
     );
     for later in 0..3 {
-        let Framed { commits, text } = field.frame(&mut h);
         assert!(
-            commits.is_empty(),
+            field.frame(&mut h).is_empty(),
             "frame {later} after Escape must not commit"
         );
-        assert_eq!(
-            text, "42",
-            "frame {later}: the field shows the document value again"
-        );
     }
+    field.focus(&mut h);
+    h.key(Key::Enter);
+    assert!(
+        field.frame(&mut h).is_empty(),
+        "the next session starts at the document value"
+    );
 
     let elsewhere = Vec2::new(190.0, 55.0);
     field.focus_and_type(&mut h);
     h.key(Key::Enter);
-    assert_eq!(
-        field.frame(&mut h).commits.len(),
-        1,
-        "Enter commits the draft once"
-    );
+    assert_eq!(field.frame(&mut h).len(), 1, "Enter commits the draft once");
     h.click(elsewhere);
-    let commits: Vec<String> = (0..2).flat_map(|_| field.frame(&mut h).commits).collect();
+    let commits: Vec<String> = (0..2).flat_map(|_| field.frame(&mut h)).collect();
     assert!(
         commits.is_empty(),
         "a blur with no edit since Enter commits nothing: {commits:?}"
@@ -157,7 +109,7 @@ fn escape_drops_the_draft_and_enter_or_blur_commits() {
 
     field.focus_and_type(&mut h);
     h.click(elsewhere);
-    let commits: Vec<String> = (0..2).flat_map(|_| field.frame(&mut h).commits).collect();
+    let commits: Vec<String> = (0..2).flat_map(|_| field.frame(&mut h)).collect();
     assert_eq!(commits.len(), 1, "a click elsewhere commits the draft once");
 }
 
@@ -190,11 +142,9 @@ fn parse_any_infers_tightest_kind() {
     assert_eq!(parse_any("42x"), ConstValue::String("42x".into()));
 }
 
-/// [`format_any`] into a fresh buffer — the shape the assertions read.
+/// [`AnyText`] as a `String` — the shape the assertions read.
 fn formatted_any(value: &ConstValue) -> String {
-    let mut out = String::new();
-    format_any(value, &mut out);
-    out
+    AnyText(value).to_string()
 }
 
 #[test]
@@ -255,18 +205,14 @@ fn int_speed_floors_then_scales() {
     assert_eq!(int_speed(i64::MIN), 2_f64.powi(63) * 0.01);
 }
 
-/// A commit of the text an `Any` field showed changes nothing, whatever its kind would read
-/// back as: blank over `Null`, `42` over the string `"42"`. A real edit sets the tightest kind,
-/// and one that reads back as the value it replaced sets nothing.
+/// A commit sets the tightest kind its text reads as, and one that reads back as the value it
+/// replaced sets nothing.
 #[test]
 fn an_any_field_commits_only_a_real_edit() {
     let text = |value: &str| ConstValue::String(value.to_string());
     for (value, committed, set) in [
-        (ConstValue::Null, "", None),
-        (text("42"), "42", None),
-        (text("true"), "true", None),
-        (ConstValue::Float(3.0), "3.0", None),
         (ConstValue::Int(5), "+5", None),
+        (ConstValue::Float(3.0), "3", Some(ConstValue::Int(3))),
         (ConstValue::Null, "7", Some(ConstValue::Int(7))),
         (ConstValue::Int(42), "43", Some(ConstValue::Int(43))),
         (text("a"), "b", Some(text("b"))),

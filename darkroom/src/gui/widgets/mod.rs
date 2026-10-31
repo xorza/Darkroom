@@ -3,7 +3,6 @@
 //! builds on. They hold no graph knowledge — a caller maps the widget's returned event onto its
 //! own intent.
 pub(crate) mod chip;
-pub(crate) mod edit_buffer;
 pub(crate) mod format;
 pub(crate) mod hover;
 pub(crate) mod icon;

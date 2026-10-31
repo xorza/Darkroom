@@ -190,28 +190,6 @@ change runs `cargo drive check` and `cargo drive test` from the root. A palantir
 palantir's suite beside the code it tests, with hand-computed values. Whoever addresses an item
 deletes it.
 
-### Batch 4: buffered and read-only text fields
-
-Files: `palantir/src/widgets/text_edit/`, `palantir/src/widgets/drag_value/mod.rs`;
-`darkroom/src/gui/widgets/edit_buffer/`, `darkroom/src/gui/pane/graph_ui/node_ui/const_editor/`,
-`darkroom/src/gui/pane/preferences.rs`.
-
-- [ ] `text_edit/`: a field that commits on Enter or blur needs a buffer that every app writes
-  again. Add `TextEdit::buffered(current: impl Into<TextInput<'a>>)` and
-  `TextEditResponse::committed_text: Option<String>`, with the rules of root cause 3. Move
-  `DragValue`'s draft (`drag_value/mod.rs:31-339`) onto it. Test: idle refill, Esc restores,
-  blur commits, and a commit with no change gives `None`.
-- [ ] `text_edit/`: no read-only field. Add `TextEdit::read_only(bool)`. Test: typed keys change
-  nothing, and selection and copy still work.
-- [ ] `const_editor/mod.rs:293` `Field::text` and `:266` `Field::empty`: a hand-built buffer, and a
-  read-only field that refills its buffer every frame. Use `TextEdit::buffered` and `read_only`.
-  The `Any` editor formats into a scratch string the field keeps.
-- [ ] `preferences.rs:171` `model_row`: the same buffer, plus an Esc restore by hand. Use
-  `TextEdit::buffered`, and keep `PathField::problem`, refreshed on commit and when the stored
-  path changes.
-- [ ] `edit_buffer/`: no callers left. Delete the module and its tests; their cases move to
-  palantir's `text_edit` tests.
-
 ### Batch 5: an editable label
 
 Files: `palantir/src/widgets/` (new `editable_label/`); `darkroom/src/gui/widgets/inline_rename/`,
@@ -396,6 +374,15 @@ Files: `palantir/AGENTS.md`, `darkroom/AGENTS.md`, `.notes/review-palantir-api.m
 
 ## Changed
 
+- `drag_value/mod.rs`: keeps its own draft. It parses the draft on each keystroke and shows the
+  value live, where `TextEdit::buffered` hands the draft over only on its commit; moving it
+  would change what a scrub field shows while typed in.
+- `const_editor/mod.rs` `Field::empty`: a `Panel` in the editor's resting look around a `Text`,
+  in place of a read-only `TextEdit` (see Declined). It shows the mark and takes no click, as its
+  doc said it did.
+- `const_editor/mod.rs` `any_edit`: drops its check of the shown text, as the buffered field
+  never hands that text over.
+
 - `node_palette.rs` `Row::show`: stays a `Panel`. A row holds child widgets (a focus bar, a
   name, a description), and a `Button` is a leaf that lays out no children.
 
@@ -403,6 +390,10 @@ Files: `palantir/AGENTS.md`, `darkroom/AGENTS.md`, `.notes/review-palantir-api.m
   palantir API, as the search may stop at the first chord that fired (see Declined).
 
 ## Declined
+
+- Batch 4, `TextEdit::read_only`: one darkroom field wants it, and it shows only a mark that no
+  one selects or copies. Read-only touches typing, the edit menu, undo and the input method in
+  palantir; a non-interactive box serves the field.
 
 - Batch 2, `Response::tooltip`: `Response` lives in `widget_core`, below `widgets`, where
   `Tooltip` lives. The method either breaks palantir's layering or puts an `impl Response` outside
