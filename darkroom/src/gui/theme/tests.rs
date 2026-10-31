@@ -1,4 +1,4 @@
-use palantir::{CloseShown, RadiusSteps, SpaceSteps, SrgbaU8, StrokeSteps};
+use palantir::{CloseShown, SrgbaU8};
 use scenarium::TypeId;
 use static_assertions::assert_not_impl_any;
 
@@ -76,7 +76,7 @@ fn default_wiring_and_menu_tweak() {
     // `0.28 + 0.72 · 0.039546 = 0.308473`, 1.18:1.
     let ui = &theme.palantir;
     let level = |byte: u8| RgbaF32::from_srgba(SrgbaU8::rgb(byte, byte, byte)).r;
-    let muted = color::luminance(p.text_muted);
+    let muted = p.text_muted.luminance();
     assert!((muted + 0.05) / (level(58) + 0.05) >= 4.5);
     assert!(
         (muted + 0.05) / (level(59) + 0.05) < 4.5,
@@ -102,7 +102,7 @@ fn default_wiring_and_menu_tweak() {
         // The hand value's eighth digit, and the derivation's f32 rounding, a few ulps of 1e-8.
         assert!((ceiling - want).abs() < 1e-7, "{name}: {ceiling}");
         assert_eq!(glass.fill, tint.with_alpha(0.72).into(), "{name}");
-        let ground = 0.28 * ceiling + 0.72 * color::luminance(tint);
+        let ground = 0.28 * ceiling + 0.72 * tint.luminance();
         // The same f32 rounding, carried through: a few ulps of 4e-9.
         assert!((ground - level(57)).abs() < 2e-8, "{name}: {ground}");
     }
@@ -195,7 +195,7 @@ fn surfaces_stack_darkest_first() {
             unreachable!("windows(2) yields pairs")
         };
         assert!(
-            color::luminance(*lower) < color::luminance(*upper),
+            lower.luminance() < upper.luminance(),
             "{under} is not darker than {over} — a surface on it disappears",
         );
     }
@@ -206,8 +206,7 @@ fn surfaces_stack_darkest_first() {
 #[test]
 fn a_disabled_row_is_dimmer_than_a_hint() {
     let p = Palette::load();
-    let ground = color::luminance(p.node_bg) + 0.05;
-    let ratio = |ink: RgbaF32| (color::luminance(ink) + 0.05) / ground;
+    let ratio = |ink: RgbaF32| ink.contrast_ratio(p.node_bg);
     assert!(
         ratio(p.text_disabled) < ratio(p.text_muted),
         "disabled {:.2}:1 against muted {:.2}:1",
@@ -315,7 +314,7 @@ fn the_event_color_is_the_themes_and_lifts_on_hover() {
     );
 }
 
-/// The bridge hands palantir every step of the theme's scales, and palantir's
+/// palantir's recipes read the theme's own steps, and palantir's
 /// `every_recipe_reads_its_geometry_from_the_metrics` holds each of its recipes to its step, so
 /// every padding, radius, line and floating shadow palantir's widgets wear is darkroom's: a
 /// palantir control lines up with a darkroom one beside it.
@@ -323,54 +322,15 @@ fn the_event_color_is_the_themes_and_lifts_on_hover() {
 fn every_palantir_padding_and_radius_is_on_the_scale() {
     let theme = Theme::default();
     let ui = &theme.palantir;
-    let SpaceScale {
-        xxs: _,
-        xs,
-        sm,
-        md,
-        lg,
-        xl,
-    } = theme.space.clone();
-    let RadiusScale {
+    let SpaceSteps { xs, sm, md, .. } = theme.space;
+    let RadiusSteps {
         mark,
         control,
-        card,
         float,
-    } = theme.radius.clone();
-    let StrokeScale {
-        hairline,
-        fine,
-        line,
-        wire: _,
-    } = theme.stroke.clone();
-    let metrics = BridgeRoles {
-        font: &theme.font,
-        space: &theme.space,
-        radius: &theme.radius,
-        stroke: &theme.stroke,
-        icon: &theme.icon,
-        elevation: &theme.elevation,
-    }
-    .metrics();
-    assert_eq!(metrics.space, SpaceSteps { xs, sm, md, lg, xl });
-    assert_eq!(
-        metrics.radius,
-        RadiusSteps {
-            mark,
-            control,
-            card,
-            float
-        }
-    );
-    assert_eq!(
-        metrics.stroke,
-        StrokeSteps {
-            hairline,
-            fine,
-            line
-        }
-    );
-    assert_eq!(metrics.float_shadow, theme.elevation.floating);
+        ..
+    } = theme.radius;
+    assert_eq!(ui.text.font_size, theme.font.body);
+    assert_eq!(ui.context_menu.panel.shadow, theme.elevation.floating);
     // The tab strip starts its tabs at the surround's inset, as the menu bar starts its titles.
     assert_eq!(
         theme.palantir.tabs.strip_padding.to_array()[0],
@@ -556,10 +516,10 @@ fn a_port_glyph_hangs_on_the_edge_and_leaves_its_label_at_the_inset() {
 /// 5 on screen.
 #[test]
 fn a_wire_keeps_its_width_on_screen_when_zoomed_out() {
-    let stroke = Theme::default().stroke;
-    assert_eq!(stroke.wire, 2.5);
+    let canvas = Theme::default().canvas;
+    assert_eq!(canvas.wire, 2.5);
     for (zoom, world, screen) in [(0.5, 5.0, 2.5), (1.0, 2.5, 2.5), (2.0, 2.5, 5.0)] {
-        assert_eq!(stroke.wire_at(zoom), world, "{zoom}");
-        assert_eq!(stroke.wire_at(zoom) * zoom, screen, "{zoom}");
+        assert_eq!(canvas.wire_at(zoom), world, "{zoom}");
+        assert_eq!(canvas.wire_at(zoom) * zoom, screen, "{zoom}");
     }
 }

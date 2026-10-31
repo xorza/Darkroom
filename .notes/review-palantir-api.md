@@ -190,30 +190,6 @@ change runs `cargo drive check` and `cargo drive test` from the root. A palantir
 palantir's suite beside the code it tests, with hand-computed values. Whoever addresses an item
 deletes it.
 
-### Batch 7: one copy of the theme's steps
-
-Files: `palantir/src/theme/{metrics,tooltip,button,text_edit,mod}.rs`,
-`palantir/src/primitives/paint/color/mod.rs`, `palantir/src/primitives/paint/chrome.rs`;
-`darkroom/src/gui/theme/`.
-
-- [ ] `metrics.rs`: no type ramp and no resting shadow; `tooltip.rs:61` sets 12 px by hand. Add
-  `TypeSteps`, `Metrics::rest_shadow` and `SpaceSteps::xxs`; `Theme::from_parts` reads `body`
-  for `text` and `caption` for the tooltip. Extend
-  `every_recipe_reads_its_geometry_from_the_metrics` (`theme/tests/metrics.rs:39`) to the ramp.
-- [ ] `theme/button.rs`, `theme/text_edit.rs`: add `ButtonTheme::accent` and
-  `TextEditTheme::flat`. Test the fills and the zero padding by value.
-- [ ] `chrome.rs`: add `Chrome::with_frost(self, Frost)` with darkroom's `glass::frost` math and its
-  test values. `color/mod.rs`: add `RgbaF32::luminance` and `RgbaF32::contrast_ratio`.
-- [ ] `darkroom/src/gui/theme/{space_scale,radius_scale,stroke_scale,type_scale,elevation_scale}.rs`
-  and `palantir_bridge.rs:61` `BridgeRoles::metrics`: copies of palantir's steps. `Theme` holds
-  the palantir step types from one `Metrics`; `wire` and `wire_at` move to `CanvasTheme`;
-  `figure_width` moves with item D3. Delete the files, `BridgeRoles`, and
-  `every_palantir_padding_and_radius_is_on_the_scale`, which then compares a value with itself.
-- [ ] `palantir_bridge.rs:121` keeps its tooltip override, as darkroom's tooltips read at the
-  body tier. `palantir_bridge.rs:158` `primary_button`,
-  `flat_text_edit.rs` `flattened`, `glass.rs`, `color/mod.rs` `luminance`: use the palantir
-  recipes and delete darkroom's.
-
 ### Batch 8: pan and zoom on `TranslateScale`
 
 Files: `palantir/src/primitives/geometry/translate_scale/mod.rs`,
@@ -296,9 +272,6 @@ Files: as each item names.
   `.size(Sizing::FILL)`; 18 `.left.clicked()` are `.clicked()`; the empty
   `Panel … .show(ui, |_| {})` calls (`support::dot_cell`, `support::hspacer`, the palette's focus
   bar, `node_footer.rs` `bar_segment`) are `Block`s.
-- [ ] D3, `theme/type_scale.rs:53` `figure_width`: copies JetBrains Mono's advance from its `hmtx`
-  table. Measure the figures once per theme and scale with `Ui::probe_text`, and delete
-  `FIGURE_ADVANCE` and `ADVANCE_SUM_SLACK`.
 - [ ] D4, tests: `menu_bar.rs:208`, `node_footer.rs:193` and `tie_ui/tests.rs:364` each list
   widgets through `ui().inspect` with a helper of their own. Use `Harness::widgets(filter)` or
   `Harness::find` where they serve, and one shared helper where they do not.
@@ -335,6 +308,13 @@ Files: `palantir/AGENTS.md`, `darkroom/AGENTS.md`, `.notes/review-palantir-api.m
 
 ## Changed
 
+- darkroom's steps are its own constants (`TEXT`, `SPACE`, `RADIUS`, `STROKE` in
+  `gui/theme/mod.rs`) on palantir's step types, which build the `Metrics` it hands palantir, so a
+  retune of `Metrics::DEFAULT` moves nothing in darkroom. `ElevationScale` stays darkroom's (see
+  Declined), and hands palantir the floating shadow.
+- D3 landed with Batch 7: `support::figure_width` measures the figures with `Ui::probe_text`, as
+  the type scale it lived on went.
+
 - A view capture asks frames (`Ui::request_repaint`) until its image lands, in place of reading
   as busy: its image comes in a frame, not with a wake, so `App::is_busy` is the previews alone.
 - `App::quit` sets a flag that closes the window as the pass ends (`Ui::close_window`), as the
@@ -366,6 +346,12 @@ Files: `palantir/AGENTS.md`, `darkroom/AGENTS.md`, `.notes/review-palantir-api.m
   palantir API, as the search may stop at the first chord that fired (see Declined).
 
 ## Declined
+
+- Batch 7, `Metrics::rest_shadow`: no palantir recipe casts a resting shadow, so the step would
+  be a field palantir never reads; darkroom's `ElevationScale` keeps it.
+- Batch 7, `ButtonTheme::accent`: palantir's palette has no tier for an accent under the pointer,
+  and darkroom's lifts toward white as a port does, a rule of its own; `primary_button` stays in
+  darkroom.
 
 - Batch 6, `App::open_files` and the move of darkroom's macOS hook into palantir: palantir pins
   `objc2-app-kit` 0.2 for winit 0.30, and the hook is written for `objc2` 0.6. The move rewrites

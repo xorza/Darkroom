@@ -173,7 +173,6 @@ const fn flush() -> SlotDefaults {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gui::theme::color;
 
     /// The fill a look paints.
     fn fill(look: &WidgetLook) -> RgbaF32 {
@@ -195,11 +194,11 @@ mod tests {
         for (ink, name) in [(theme.badge.cache, "cache"), (theme.ink.muted, "disable")] {
             let on = press_style(&theme, ink).selected;
             assert!(
-                color::luminance(fill(&on.normal)) < color::luminance(lift),
+                fill(&on.normal).luminance() < lift.luminance(),
                 "{name}: on reads as hovered"
             );
             assert!(
-                color::luminance(fill(&on.hovered)) > color::luminance(lift),
+                fill(&on.hovered).luminance() > lift.luminance(),
                 "{name}: hovering on does not show"
             );
         }

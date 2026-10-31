@@ -97,7 +97,7 @@ impl TieUi {
             Shape::line(
                 self.line.start,
                 self.line.end,
-                Stroke::new(theme.tie.ring, theme.stroke.wire_at(zoom)),
+                Stroke::new(theme.tie.ring, theme.canvas.wire_at(zoom)),
             )
             .cap(LineCap::Round),
         );

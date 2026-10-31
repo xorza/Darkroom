@@ -2,9 +2,9 @@
 //! per-widget rosters hanging off it.
 //!
 //! Every color comes from [`Palette`], read out of the generated
-//! `assets/ayu-graphite.ron`, and every size from a scale: type, space, radius, stroke, icon,
-//! elevation and tint. Each roster owns a file and builds from the palette and the scales it
-//! reads. The palantir-side half lives in [`palantir_bridge`].
+//! `assets/ayu-graphite.ron`, and every size from a scale: the type, space, radius and stroke
+//! steps, which palantir's recipes read too, and darkroom's icon, elevation and tint scales. Each roster owns a file and builds from the palette and the scales it reads. The
+//! palantir-side half lives in [`palantir_bridge`].
 
 pub(crate) mod app_colors;
 pub(crate) mod badge_colors;
@@ -14,23 +14,21 @@ pub(crate) mod color;
 pub(crate) mod const_editor_theme;
 pub(crate) mod elevation_scale;
 pub(crate) mod flat_text_edit;
-pub(crate) mod glass;
 pub(crate) mod icon_scale;
 pub(crate) mod inks;
 pub(crate) mod palantir_bridge;
 pub(crate) mod palette;
 pub(crate) mod port_theme;
-pub(crate) mod radius_scale;
-pub(crate) mod space_scale;
 pub(crate) mod status_colors;
-pub(crate) mod stroke_scale;
 pub(crate) mod tie_theme;
 pub(crate) mod tint_scale;
 pub(crate) mod type_colors;
-pub(crate) mod type_scale;
 pub(crate) mod viewer_theme;
 
-use palantir::{ButtonTheme, Chrome, Corners, RgbaF32, Spacing, Stroke, TextEditTheme};
+use palantir::{
+    ButtonTheme, Chrome, Corners, Frost, Metrics, RadiusSteps, RgbaF32, SpaceSteps, Spacing,
+    Stroke, StrokeSteps, TextEditTheme, TextSteps,
+};
 
 use scenarium::DataType;
 
@@ -45,17 +43,12 @@ use crate::gui::theme::elevation_scale::ElevationScale;
 use crate::gui::theme::flat_text_edit::FlatTextEdit;
 use crate::gui::theme::icon_scale::IconScale;
 use crate::gui::theme::inks::Inks;
-use crate::gui::theme::palantir_bridge::BridgeRoles;
 use crate::gui::theme::palette::Palette;
 use crate::gui::theme::port_theme::PortTheme;
-use crate::gui::theme::radius_scale::RadiusScale;
-use crate::gui::theme::space_scale::SpaceScale;
 use crate::gui::theme::status_colors::StatusColors;
-use crate::gui::theme::stroke_scale::StrokeScale;
 use crate::gui::theme::tie_theme::TieTheme;
 use crate::gui::theme::tint_scale::TintScale;
 use crate::gui::theme::type_colors::TypeColors;
-use crate::gui::theme::type_scale::TypeScale;
 use crate::gui::theme::viewer_theme::ViewerTheme;
 
 /// Visual palette + layout dimensions for darkroom's UI. Owned by `App`,
@@ -76,17 +69,17 @@ use crate::gui::theme::viewer_theme::ViewerTheme;
 /// file.
 #[derive(Clone, Debug)]
 pub(crate) struct Theme {
-    /// Font sizes by hierarchy tier.
-    pub(crate) font: TypeScale,
+    /// Font sizes by hierarchy tier: [`TEXT`].
+    pub(crate) font: TextSteps,
 
-    /// The spacing steps every padding, gap and margin reads.
-    pub(crate) space: SpaceScale,
+    /// The spacing steps every padding, gap and margin reads: [`SPACE`].
+    pub(crate) space: SpaceSteps,
 
-    /// Corner radii by the kind of surface.
-    pub(crate) radius: RadiusScale,
+    /// Corner radii by the kind of surface: [`RADIUS`].
+    pub(crate) radius: RadiusSteps,
 
-    /// Line widths by what the line is.
-    pub(crate) stroke: StrokeScale,
+    /// Line widths by what the line is: [`STROKE`].
+    pub(crate) stroke: StrokeSteps,
 
     /// Icon boxes by where the icon sits.
     pub(crate) icon: IconScale,
@@ -312,10 +305,7 @@ impl Theme {
     /// being hand-assembled, so a palette edit reaches the whole app.
     fn build(p: &Palette) -> Self {
         let colors = AppColors::from_palette(p);
-        let font = TypeScale::DEFAULT;
-        let space = SpaceScale::DEFAULT;
-        let radius = RadiusScale::DEFAULT;
-        let stroke = StrokeScale::DEFAULT;
+        let (font, space, radius, stroke) = (TEXT, SPACE, RADIUS, STROKE);
         let icon = IconScale::new(&font);
         let elevation = ElevationScale::new(p);
         let tint = TintScale::DEFAULT;
@@ -326,22 +316,14 @@ impl Theme {
         let pal = palantir_bridge::palette(p);
         let card = CardTheme::from_palette(p);
         let status = StatusColors::from_palette(p);
-        let roles = BridgeRoles {
-            font: &font,
-            space: &space,
-            radius: &radius,
-            stroke: &stroke,
-            icon: &icon,
-            elevation: &elevation,
-        };
-        let metrics = roles.metrics();
-        let palantir = palantir_bridge::theme(&pal, &metrics, roles);
+        let metrics = metrics(&elevation);
+        let palantir = palantir_bridge::theme(&pal, &metrics, &icon);
         let primary_button = palantir_bridge::primary_button(&pal, &metrics);
-        let mut pill = Chrome::rounded(colors.surround_bg, Corners::all(radius.float));
-        glass::frost(&mut pill, ink.muted);
+        let pill = Chrome::rounded(colors.surround_bg, Corners::all(radius.float))
+            .with_frost(frost(ink.muted));
         let field_error = error_bordered(&palantir.text_edit, status.error);
         Self {
-            canvas: CanvasTheme::from_palette(p, &space, &stroke),
+            canvas: CanvasTheme::from_palette(p, &space),
             tie: TieTheme::from_palette(p, &tint),
             viewer: ViewerTheme::new(p, &space, &ink),
             card,
@@ -365,6 +347,72 @@ impl Theme {
             primary_button,
             palantir,
         }
+    }
+}
+
+/// Font sizes by prominence, the Windows Fluent 2 ramp (Caption 12, Body 14, Subtitle 16): two
+/// points between tiers, a step the eye resolves. A literal at a call site is a missing tier.
+/// `darkroom/AGENTS.md`, "The look", "One type ladder for darkroom and palantir".
+const TEXT: TextSteps = TextSteps {
+    caption: 12.0,
+    body: 14.0,
+    title: 16.0,
+};
+
+/// A 4 px grid, in steps of 4 to 16 and of 8 past it, with a 2 px step under it for the insets of
+/// the densest rows. A literal at a call site is a missing step.
+const SPACE: SpaceSteps = SpaceSteps {
+    xxs: 2.0,
+    xs: 4.0,
+    sm: 8.0,
+    md: 12.0,
+    lg: 16.0,
+    xl: 24.0,
+};
+
+/// How round a surface is, by what it is. A toolbar pill is concentric with the card-rounded chips
+/// inside it at the `xs` padding.
+const RADIUS: RadiusSteps = RadiusSteps {
+    mark: 2.0,
+    control: 4.0,
+    card: 6.0,
+    float: 10.0,
+};
+
+/// The widths every stroke reads, by what the stroke is; a wire's is the canvas's
+/// ([`CanvasTheme::wire`]).
+const STROKE: StrokeSteps = StrokeSteps {
+    hairline: 1.0,
+    fine: 1.5,
+    line: 2.0,
+};
+
+/// The steps palantir's recipes read, so a palantir control lines up with a darkroom one: a
+/// field and a button beside it share one height, a menu rounds and casts as every floating
+/// surface does. No transition: darkroom's controls snap, so a view saved right after a menu
+/// pick pictures the settled window. `darkroom/AGENTS.md`, "The look", "palantir's recipes read
+/// the theme's steps".
+const fn metrics(elevation: &ElevationScale) -> Metrics {
+    Metrics {
+        text: TEXT,
+        space: SPACE,
+        radius: RADIUS,
+        stroke: STROKE,
+        float_shadow: elevation.floating,
+        transition: None,
+    }
+}
+
+/// The frosted glass every surface that floats over content wears, the popups and the toolbar
+/// pills: its own color as a tint at 0.72 alpha over a backdrop blurred by σ 20 logical px, wide
+/// enough that a node's title under it reads as color, not as text. `ink` is the dimmest ink the
+/// surface paints. `darkroom/AGENTS.md`, "The look", "A surface that floats over content is
+/// frosted glass".
+pub(super) const fn frost(ink: RgbaF32) -> Frost {
+    Frost {
+        blur: 20.0,
+        tint_alpha: 0.72,
+        ink,
     }
 }
 

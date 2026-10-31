@@ -25,7 +25,6 @@ use crate::gui::frame::window_ctx::WindowCtx;
 use crate::gui::pane::graph_ui::gesture::pan_zoom::Framing;
 use crate::gui::state::run_state::run_outcome::RunOutcome;
 use crate::gui::theme::Theme;
-use crate::gui::theme::type_scale;
 use crate::gui::widgets::format::bytes::Bytes;
 use crate::gui::widgets::format::percent::Percent;
 use crate::gui::widgets::link::Link;
@@ -109,7 +108,8 @@ impl Readout {
             color: theme.ink.muted,
             ..support::mono_text(ui, theme.font.body)
         };
-        let width = |glyphs| type_scale::figure_width(theme.font.body, glyphs);
+        let zoom_width = support::figure_width(ui, &figures, ZOOM_GLYPHS);
+        let bytes_width = support::figure_width(ui, &figures, BYTES_GLYPHS);
         Panel::hstack()
             .id_salt("status_readout")
             .size((Sizing::HUG, Sizing::HUG))
@@ -120,7 +120,7 @@ impl Readout {
                     .show(ui);
                 Figure {
                     value: Percent::new(zoom),
-                    min_width: width(ZOOM_GLYPHS),
+                    min_width: zoom_width,
                 }
                 .show(ui, &figures);
                 let Some(MemoryLabel { process, cached }) = ram else {
@@ -129,14 +129,14 @@ impl Readout {
                 Text::new(" \u{b7} Memory ").style(&words).show(ui);
                 Figure {
                     value: Bytes::new(process),
-                    min_width: width(BYTES_GLYPHS),
+                    min_width: bytes_width,
                 }
                 .show(ui, &figures);
                 if cached > 0 {
                     Text::new(" \u{b7} Cache ").style(&words).show(ui);
                     Figure {
                         value: Bytes::new(cached),
-                        min_width: width(BYTES_GLYPHS),
+                        min_width: bytes_width,
                     }
                     .show(ui, &figures);
                 }

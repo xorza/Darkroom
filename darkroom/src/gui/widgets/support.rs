@@ -3,12 +3,12 @@
 //! chips in [`chip`](crate::gui::widgets::chip).
 
 use palantir::{
-    Chrome, Configure, Corners, FontFamily, FontWeight, Panel, Rect, ResponseSnapshot, RgbaF32,
-    Sizing, TextInput, TextStyle, Tooltip, Ui,
+    Align, Chrome, Configure, Corners, FontFamily, FontWeight, Panel, Rect, ResponseSnapshot,
+    RgbaF32, Sizing, TextInput, TextStyle, TextWrap, Tooltip, Ui,
 };
 
 use glam::Vec2;
-use palantir::widget::{RectShape, Shape};
+use palantir::widget::{RectShape, Shape, TextRun};
 
 use crate::gui::theme::Theme;
 
@@ -69,6 +69,23 @@ pub(crate) fn mono_text(ui: &Ui, px: f32) -> TextStyle {
         family: FontFamily::MONO,
         ..sized_text(ui, px)
     }
+}
+
+/// The width `glyphs` figures take in `style`, as palantir measures them: the floor of a readout
+/// that changes while it is watched, so the line beside it holds still as its digit count
+/// changes. Measured on zeros, as every figure of the mono face advances alike.
+pub(crate) fn figure_width(ui: &mut Ui, style: &TextStyle, glyphs: u8) -> f32 {
+    const FIGURES: &str = "0000000000000000";
+    let text = &FIGURES[..usize::from(glyphs)];
+    ui.probe_text(TextRun {
+        text,
+        font: style.font(),
+        wrap: TextWrap::SingleLine,
+        align: Align::LEFT,
+        max_width: None,
+    })
+    .size()
+    .w
 }
 
 /// A small circle of radius `r` centered on `center`, for the caller to fill.
