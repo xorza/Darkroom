@@ -42,6 +42,20 @@
     "env": { "RUST_BACKTRACE": "1" },
   },
   {
+    "label": "run palantir observatory",
+    "command": "cargo",
+    "args": [
+      "run",
+      "--profile",
+      "release-dev",
+      "--manifest-path",
+      "palantir/Cargo.toml",
+      "--example",
+      "observatory",
+    ],
+    "env": { "RUST_BACKTRACE": "1" },
+  },
+  {
     "label": "run palantir showcase with tracy",
     "command": "cargo",
     "args": [

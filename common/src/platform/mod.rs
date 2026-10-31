@@ -153,8 +153,13 @@ pub struct SystemMemory;
 impl SystemMemory {
     /// Read once per run: a few tens of microseconds, against a decision every stage of the run
     /// keeps.
+    ///
+    /// # Panics
+    ///
+    /// On a target sysinfo has no implementation for: a build-configuration error, not a runtime
+    /// condition.
     pub fn available() -> u64 {
-        let mut system = System::new();
+        let mut system = System::new().expect("sysinfo has no implementation for this platform");
         system.refresh_memory();
         os::available_memory(&system)
     }
@@ -179,7 +184,7 @@ impl ResidentMemory {
     pub fn new() -> Self {
         let pid = sysinfo::get_current_pid().expect("sysinfo cannot resolve this platform's pid");
         Self {
-            system: System::new(),
+            system: System::new().expect("sysinfo has no implementation for this platform"),
             pid,
         }
     }
