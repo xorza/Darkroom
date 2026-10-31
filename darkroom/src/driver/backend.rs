@@ -5,8 +5,9 @@ use std::path::PathBuf;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use palantir::{InputEvent, Ui};
+use palantir::{InspectedWidget, Ui};
 
+use crate::driver::action::Play;
 use crate::driver::error::DriverError;
 use crate::driver::offscreen::Offscreen;
 use crate::driver::shot::{Capture, Region};
@@ -38,30 +39,23 @@ impl Backend {
         }
     }
 
-    pub(crate) fn input(&mut self, event: InputEvent<'_>) {
+    /// Play `action` and settle, the editor's own work included; the frames it ran.
+    pub(crate) fn play(&mut self, action: &Play, step: &str) -> Result<u32, DriverError> {
         match self {
-            Self::Offscreen(offscreen) => offscreen.input(event),
-            Self::Window(window) => window.input(event),
+            Self::Offscreen(offscreen) => Ok(offscreen.play(action)? + offscreen.settle(step)?),
+            Self::Window(window) => window.play(action, step),
         }
     }
 
-    /// One frame that sees every event sent so far.
-    pub(crate) fn frame(&mut self) -> Result<(), DriverError> {
+    /// The visible interactive widgets of the last frame whose text contains `filter`, ignoring
+    /// case, in paint order, as palantir lists them.
+    pub(crate) fn widgets(
+        &mut self,
+        filter: Option<&str>,
+    ) -> Result<Vec<InspectedWidget>, DriverError> {
         match self {
-            Self::Offscreen(offscreen) => {
-                offscreen.frame();
-                Ok(())
-            }
-            Self::Window(window) => window.frame(),
-        }
-    }
-
-    /// Let `dt` pass with no frame, as a pause between two clicks does.
-    pub(crate) fn advance(&mut self, dt: Duration) {
-        match self {
-            Self::Offscreen(offscreen) => offscreen.advance(dt),
-            // The window runs on real time: pause as a person's hand does between two clicks.
-            Self::Window(_) => thread::sleep(dt),
+            Self::Offscreen(offscreen) => Ok(offscreen.widgets(filter)),
+            Self::Window(window) => window.widgets(filter),
         }
     }
 

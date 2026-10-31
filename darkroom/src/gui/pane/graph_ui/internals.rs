@@ -1,4 +1,4 @@
-//! The canvas a test drives real input at: a [`UiHarness`] surface, the
+//! The canvas a test drives real input at: a [`Harness`] surface, the
 //! [`GraphUi`] recorded onto it, and the document both read.
 //!
 //! One type rather than a closure per test file because the subject under test
@@ -7,7 +7,7 @@
 //! test that skipped a phase would be exercising a frame the app never performs.
 
 use glam::{UVec2, Vec2};
-use palantir::internals::ui_harness::UiHarness;
+use palantir::Harness;
 use palantir::{Configure, DockOperation, Panel, Rect, Sizing, Ui, WidgetId};
 use scenarium::NodeId;
 
@@ -52,8 +52,8 @@ const PROBE_STEP: f32 = 2.0;
 #[derive(Debug)]
 pub(crate) struct CanvasHarness {
     /// The palantir side. `pub(crate)` so tests drive input and read geometry
-    /// through it directly — `h.ui.press_at(..)`, `h.ui.rect(..)`.
-    pub(crate) ui: UiHarness,
+    /// through it directly — `h.ui.press(.., PointerButton::Left)`, `h.ui.rect(..)`.
+    pub(crate) ui: Harness,
     pub(crate) graph_ui: GraphUi,
     /// The document the canvas draws and the context it resolves through.
     /// `pub(crate)` so a test can edit the document between frames, the way an
@@ -76,22 +76,22 @@ impl CanvasHarness {
     /// Takes a [`DocumentFixture`] or anything that converts into one — a
     /// [`TestGraph`](scenarium::internals::test_graph::TestGraph) goes straight in.
     pub(crate) fn new(fixture: impl Into<DocumentFixture>) -> Self {
-        Self::over(UiHarness::new(SURFACE), fixture)
+        Self::over(Harness::builder(SURFACE).mono().build(), fixture)
     }
 
     /// A different surface, still mono: for the tests whose subject is what
     /// fits on one.
     pub(crate) fn sized(fixture: impl Into<DocumentFixture>, surface: UVec2) -> Self {
-        Self::over(UiHarness::new(surface), fixture)
+        Self::over(Harness::builder(surface).mono().build(), fixture)
     }
 
     /// Real text shaping: node headers and menu rows size to their labels, so
     /// mono metrics would put every one of them in the wrong place.
     pub(crate) fn shaping_text(fixture: impl Into<DocumentFixture>, surface: UVec2) -> Self {
-        Self::over(UiHarness::with_text(surface), fixture)
+        Self::over(Harness::new(surface), fixture)
     }
 
-    fn over(ui: UiHarness, fixture: impl Into<DocumentFixture>) -> Self {
+    fn over(ui: Harness, fixture: impl Into<DocumentFixture>) -> Self {
         Self {
             ui,
             graph_ui: GraphUi::default(),
@@ -176,11 +176,12 @@ impl CanvasHarness {
         let Self {
             ui, graph_ui, ctx, ..
         } = self;
-        ui.frame_passes(|recorder: &mut Ui| {
+        let mut recorded = false;
+        ui.frame(|recorder: &mut Ui| {
+            recorded = true;
             let _ = record(graph_ui, ctx, recorder);
-        })
-        .into_a()
-        .is_some()
+        });
+        recorded
     }
 
     pub(crate) fn document(&self) -> &Document {
@@ -243,13 +244,19 @@ impl CanvasHarness {
     /// at its left, where no widget takes the press. The body's own center can land on a port
     /// row's field.
     pub(crate) fn node_center(&self, node_id: NodeId) -> Vec2 {
-        self.ui.center_of(wid::footer(node_id))
+        self.ui
+            .rect(wid::footer(node_id))
+            .expect("the widget shows")
+            .center()
     }
 
     /// The point a wire drag leaves `port` from, or lands on — the snap scan
     /// tests the post-transform rect, so this is the one to aim at.
     pub(crate) fn port_center(&self, port: PortRef) -> Vec2 {
-        self.ui.center_of(wid::port_circle(port))
+        self.ui
+            .rect(wid::port_circle(port))
+            .expect("the widget shows")
+            .center()
     }
 
     /// The cached world rect wires anchor to and the cull reads, or `None`

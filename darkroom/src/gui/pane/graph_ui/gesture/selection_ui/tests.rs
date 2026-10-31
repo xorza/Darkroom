@@ -1,5 +1,5 @@
 use glam::Vec2;
-use palantir::Modifiers;
+use palantir::{Modifiers, PointerButton};
 
 use crate::core::document::internals::DocumentFixture;
 use crate::core::document::item_id::ItemId;
@@ -35,7 +35,7 @@ fn escape_cancels_a_rubber_band_and_leaves_no_residue() {
 
     // Sweep bare canvas across both nodes, then cancel mid-drag.
     let empty = Vec2::new(20.0, 400.0);
-    h.ui.press_at(empty);
+    h.ui.press(empty, PointerButton::Left);
     h.frame();
     h.ui.drag_to(Vec2::new(700.0, 60.0));
     h.frame();
@@ -45,7 +45,7 @@ fn escape_cancels_a_rubber_band_and_leaves_no_residue() {
         cancelled.is_empty(),
         "a cancelled band commits nothing: {cancelled:?}"
     );
-    h.ui.release_button(palantir::PointerButton::Left);
+    h.ui.release(PointerButton::Left);
     let after = h.frame();
     assert!(
         after.is_empty(),
@@ -57,11 +57,11 @@ fn escape_cancels_a_rubber_band_and_leaves_no_residue() {
     // at x = 40 and x = 400, so a sweep stopping at x = 150 reaches the
     // first and not the second; both bands start from the same empty patch
     // well below them.
-    h.ui.press_at(empty);
+    h.ui.press(empty, PointerButton::Left);
     h.frame();
     h.ui.drag_to(Vec2::new(150.0, 100.0));
     h.frame();
-    h.ui.release_button(palantir::PointerButton::Left);
+    h.ui.release(PointerButton::Left);
     let intents = h.frame();
     assert!(
         matches!(
@@ -100,7 +100,7 @@ fn a_shift_band_unions_with_the_committed_selection_counting_overlap_once() {
         shift: true,
         ..Modifiers::default()
     });
-    h.ui.press_at(Vec2::new(20.0, 400.0));
+    h.ui.press(Vec2::new(20.0, 400.0), PointerButton::Left);
     h.frame();
     // Two steps, not one: the band anchors where `drag.started()` first
     // fires, so a single jump would latch and finish at the same point and
@@ -109,7 +109,7 @@ fn a_shift_band_unions_with_the_committed_selection_counting_overlap_once() {
     h.frame();
     h.ui.drag_to(Vec2::new(700.0, 60.0));
     h.frame();
-    h.ui.release_button(palantir::PointerButton::Left);
+    h.ui.release(PointerButton::Left);
     let intents = h.frame();
 
     // Both nodes, each once. `SetSelection` carries a `BTreeSet`, so the

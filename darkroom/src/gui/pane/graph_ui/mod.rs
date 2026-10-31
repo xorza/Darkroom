@@ -614,7 +614,8 @@ pub(crate) mod internals;
 #[cfg(test)]
 mod tests {
 
-    use palantir::internals::ui_harness::UiHarness;
+    use glam::UVec2;
+    use palantir::Harness;
 
     use super::*;
 
@@ -627,7 +628,7 @@ mod tests {
     /// appearance would reset a drag mid-gesture.
     #[test]
     fn appearing_is_a_frame_gap_not_a_repeat_or_a_step() {
-        let mut h = UiHarness::arena();
+        let mut h = Harness::builder(UVec2::ONE).mono().build();
         let mut graph_ui = GraphUi::default();
 
         assert!(

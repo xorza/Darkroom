@@ -70,13 +70,17 @@ fn pick(from: CacheMode, row: usize) -> Pick {
     let button =
         h.ui.rect(cache_button_wid(node_id))
             .expect("a cacheable node's button");
-    h.ui.click_at(h.ui.center_of(cache_button_wid(node_id)));
+    h.ui.click(
+        h.ui.rect(cache_button_wid(node_id))
+            .expect("the widget shows")
+            .center(),
+    );
     h.frame();
     h.prime(2);
     let rows = h.menu_rows(Vec2::new(button.min.x, button.max().y));
     assert_eq!(rows.len(), 3, "RAM, disk and clear: {rows:?}");
     mem::take(&mut h.commands);
-    h.ui.click_on(rows[row]);
+    h.ui.click(rows[row]);
     let intents = h.frame();
     Pick {
         node_id,
@@ -172,7 +176,11 @@ fn the_inspect_button_selects_its_node_and_opens_one_inspector() {
     };
     for node_id in [ids[0], ids[1]] {
         h.prime(2);
-        h.ui.click_at(h.ui.center_of(wid::inspect_button(node_id)));
+        h.ui.click(
+            h.ui.rect(wid::inspect_button(node_id))
+                .expect("the widget shows")
+                .center(),
+        );
         h.frame();
         let _relayout = h.drain();
         assert_eq!(

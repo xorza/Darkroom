@@ -47,8 +47,8 @@ impl ScreenshotAsk {
 #[cfg(test)]
 mod tests {
     use glam::UVec2;
+    use palantir::Harness;
     use palantir::Rect;
-    use palantir::internals::ui_harness::UiHarness;
 
     use crate::gui::app::screenshot_ask::{Landed, ScreenshotAsk};
 
@@ -57,7 +57,7 @@ mod tests {
     /// lands as empty at once.
     #[test]
     fn an_ask_goes_out_once_and_an_empty_region_lands_at_once() {
-        let mut h = UiHarness::new(UVec2::new(64, 48));
+        let mut h = Harness::builder(UVec2::new(64, 48)).mono().build();
         let mut inside = ScreenshotAsk::default();
         let mut outside = ScreenshotAsk::default();
         h.frame(|ui| {

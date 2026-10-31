@@ -401,7 +401,7 @@ mod tests {
     use std::iter;
 
     use common::{TempDir, TempFile, internals};
-    use palantir::internals::ui_harness::UiHarness;
+    use palantir::Harness;
 
     #[test]
     fn path_problem_classifies_empty_missing_dir_and_extension() {
@@ -454,8 +454,8 @@ mod tests {
             denoise: PathBuf::from("/a.onnx"),
             ..MlModelPaths::default()
         };
-        let mut h = UiHarness::new(UVec2::new(800, 200));
-        let mut frame = |h: &mut UiHarness, paths: &mut MlModelPaths| {
+        let mut h = Harness::builder(UVec2::new(800, 200)).mono().build();
+        let mut frame = |h: &mut Harness, paths: &mut MlModelPaths| {
             let mut out = Requests::default();
             h.frame(|ui| {
                 PreferencesForm {
@@ -473,11 +473,11 @@ mod tests {
                 })
                 .count()
         };
-        let type_x = |h: &mut UiHarness,
-                      frame: &mut dyn FnMut(&mut UiHarness, &mut MlModelPaths) -> usize,
+        let type_x = |h: &mut Harness,
+                      frame: &mut dyn FnMut(&mut Harness, &mut MlModelPaths) -> usize,
                       paths: &mut MlModelPaths| {
             let center = h.rect(wid).expect("path field arranged").center();
-            h.click_at(center);
+            h.click(center);
             frame(h, paths);
             h.key(Key::End);
             frame(h, paths);

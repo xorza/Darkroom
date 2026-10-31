@@ -1,5 +1,5 @@
 use glam::UVec2;
-use palantir::internals::ui_harness::UiHarness;
+use palantir::Harness;
 
 use super::*;
 use crate::core::document::internals::DocumentFixture;
@@ -50,7 +50,7 @@ fn memory_label_leads_with_the_process_then_sums_both_cache_pools() {
 #[test]
 fn the_readout_holds_its_width_as_its_figures_change() {
     let theme = Theme::default();
-    let mut h = UiHarness::with_text(UVec2::new(1600, 100));
+    let mut h = Harness::new(UVec2::new(1600, 100));
     let root = WidgetId::from_hash("readout_root");
     let mut width = |zoom: f32, process: u64, cached: u64| {
         h.frame(|ui| {
@@ -207,7 +207,7 @@ fn the_run_lines_link_selects_and_frames_the_cause() {
     });
     h.prime(2);
     let link = cause_link_wid();
-    h.ui.click_at(h.ui.center_of(link));
+    h.ui.click(h.ui.rect(link).expect("the widget shows").center());
     let commands = h.frame();
     assert!(
         matches!(

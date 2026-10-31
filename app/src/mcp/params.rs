@@ -5,13 +5,13 @@ use std::path::PathBuf;
 
 use darkroom::DialogAnswer;
 use darkroom::driver::OpenMode;
-use darkroom::driver::action::{Action, Chord, DRAG_STEPS};
+use darkroom::driver::action::{Action, DRAG_STEPS, Play};
 use darkroom::driver::error::DriverError;
-use darkroom::driver::locator::{Locator, Side};
+use darkroom::driver::locator::{EditorTarget, Locator, Side};
 use darkroom::driver::shot::Region;
 use darkroom::driver::state::Detail;
 use glam::Vec2;
-use palantir::{Modifiers, PointerButton, Rect};
+use palantir::{PointerButton, Rect, Shortcut, ShortcutMods};
 use rmcp::schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -239,63 +239,69 @@ impl From<DetailParam> for Detail {
     }
 }
 
-/// A chord is parsed here, so a batch with a bad one is refused before any of it plays.
+/// A key is parsed here, so a batch with a bad one is refused before any of it plays.
 impl TryFrom<ActionParam> for Action {
     type Error = DriverError;
 
     fn try_from(action: ActionParam) -> Result<Self, DriverError> {
-        Ok(match action {
-            ActionParam::Move(at) => Self::Move(at.into()),
-            ActionParam::Click { at, button, mods } => Self::Click {
+        let play = |action: Play| Ok(Self::Play(action));
+        match action {
+            ActionParam::Move(at) => play(Play::Move(at.into())),
+            ActionParam::Click { at, button, mods } => play(Play::Click {
                 at: at.into(),
                 button: button.into(),
                 mods: modifiers(&mods),
-            },
-            ActionParam::DoubleClick(at) => Self::DoubleClick(at.into()),
+            }),
+            ActionParam::DoubleClick(at) => play(Play::DoubleClick(at.into())),
             ActionParam::Drag {
                 from,
                 to,
                 button,
                 mods,
                 steps,
-            } => Self::Drag {
+            } => play(Play::Drag {
                 from: from.into(),
                 to: to.into(),
                 button: button.into(),
                 mods: modifiers(&mods),
                 steps: steps.unwrap_or(DRAG_STEPS),
-            },
-            ActionParam::Scroll { at, delta } => Self::Scroll {
+            }),
+            ActionParam::Scroll { at, delta } => play(Play::Scroll {
                 at: at.into(),
                 delta: Vec2::from(delta),
-            },
-            ActionParam::Pinch { at, factor } => Self::Pinch {
+            }),
+            ActionParam::Pinch { at, factor } => play(Play::Pinch {
                 at: at.into(),
                 factor,
-            },
-            ActionParam::Key(chord) => Self::Key(Chord::parse(&chord)?),
-            ActionParam::Type(text) => Self::Type(text),
-            ActionParam::Answer(answer) => Self::Answer(answer.into()),
-        })
+            }),
+            ActionParam::Key(chord) => {
+                let shortcut = chord
+                    .parse::<Shortcut>()
+                    .map_err(|_| DriverError::BadChord { chord })?;
+                play(Play::Key(shortcut))
+            }
+            ActionParam::Type(text) => play(Play::Type(text)),
+            ActionParam::Answer(answer) => Ok(Self::Answer(answer.into())),
+        }
     }
 }
 
 impl From<LocatorParam> for Locator {
     fn from(locator: LocatorParam) -> Self {
         match locator {
-            LocatorParam::Node(node) => Self::Node(node),
-            LocatorParam::Header(node) => Self::NodeHeader(node),
-            LocatorParam::Port { node, side, port } => Self::Port {
+            LocatorParam::Node(node) => Self::App(EditorTarget::Node(node)),
+            LocatorParam::Header(node) => Self::App(EditorTarget::NodeHeader(node)),
+            LocatorParam::Port { node, side, port } => Self::App(EditorTarget::Port {
                 node,
                 side: match side {
                     SideParam::In => Side::In,
                     SideParam::Out => Side::Out,
                 },
                 port,
-            },
-            LocatorParam::World(point) => Self::World(Vec2::from(point)),
+            }),
+            LocatorParam::World(point) => Self::App(EditorTarget::World(Vec2::from(point))),
             LocatorParam::Text(text) => Self::Text(text),
-            LocatorParam::Screen(point) => Self::Screen(Vec2::from(point)),
+            LocatorParam::Screen(point) => Self::Point(Vec2::from(point)),
             LocatorParam::Offset { of, by } => Self::Offset(Box::new((*of).into()), Vec2::from(by)),
             LocatorParam::Nth { of, index } => Self::Nth(Box::new((*of).into()), index),
         }
@@ -334,8 +340,8 @@ impl From<RegionParam> for Region {
 }
 
 /// The modifiers `mods` names held at once.
-fn modifiers(mods: &[ModParam]) -> Modifiers {
-    let mut held = Modifiers::default();
+fn modifiers(mods: &[ModParam]) -> ShortcutMods {
+    let mut held = ShortcutMods::NONE;
     for modifier in mods {
         match modifier {
             ModParam::Ctrl => held.ctrl = true,

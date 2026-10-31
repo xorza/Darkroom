@@ -5,7 +5,6 @@
 
 pub mod action;
 mod backend;
-pub mod display;
 pub mod error;
 pub mod locator;
 pub mod log_ring;
@@ -19,15 +18,13 @@ use std::path::{self, Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use common::{TempDir, env, fs};
-use glam::{UVec2, Vec2};
-use palantir::{InputEvent, Key, Modifiers, PointerButton};
+use glam::UVec2;
 use serde::Serialize;
 
 use crate::core::io::document as io_document;
-use crate::driver::action::{Action, path};
+use crate::driver::action::Action;
 use crate::driver::backend::Backend;
 use crate::driver::error::{ActFailure, DriverError};
-use crate::driver::locator::Locator;
 use crate::driver::log_ring::LogRing;
 use crate::driver::offscreen::Offscreen;
 use crate::driver::shot::{Region, Shot};
@@ -89,11 +86,6 @@ pub struct Driver {
     /// The session's own directory, which is RAM on a tmpfs `/tmp`.
     session: TempDir,
     log: LogRing,
-    /// How soon a second press makes a double click, which separate presses wait out.
-    double_click: Duration,
-    /// The UI time of the last press, at or after the frame that saw it, which the next press
-    /// waits out the double-click window from.
-    last_press: Option<Duration>,
     /// The runs the worker had ended when the last `act` began, which a run it starts ends past.
     runs_before: u64,
     /// Shots taken, which numbers the next one's file.
@@ -126,8 +118,7 @@ impl Driver {
         Self::over(Backend::Window(WindowBackend::new(link)), log)
     }
 
-    fn over(mut backend: Backend, log: LogRing) -> Result<Self, DriverError> {
-        let double_click = backend.with_app(|_, ui| ui.double_click_window())?;
+    fn over(backend: Backend, log: LogRing) -> Result<Self, DriverError> {
         let temp = env::temp_dir();
         let session =
             TempDir::create_in(&temp, "driver").map_err(|source| io_error(&temp, source))?;
@@ -135,8 +126,6 @@ impl Driver {
             backend,
             session,
             log,
-            double_click,
-            last_press: None,
             runs_before: 0,
             shots: 0,
         };
@@ -211,9 +200,7 @@ impl Driver {
 
     /// The visible interactive widgets whose text contains `filter`, at most `limit`.
     pub fn ui(&mut self, filter: Option<&str>, limit: usize) -> Result<UiList, DriverError> {
-        let filter = filter.map(str::to_owned);
-        self.backend
-            .with_app(move |_, ui| UiList::of(ui, filter.as_deref(), limit))
+        Ok(UiList::of(&self.backend.widgets(filter)?, limit))
     }
 
     /// A picture of `region` as a later frame paints it, scaled so that its longer side is at
@@ -232,7 +219,7 @@ impl Driver {
         // The session settles even when the shot fails, so the next call starts from a settled
         // frame.
         self.backend.settle(&format!("the shot of {region:?}"))?;
-        let shot = Shot::new(capture?, max_side, path);
+        let shot = Shot::new(capture?, path);
         fs::create_dir_all(&dir).map_err(|source| io_error(&dir, source))?;
         fs::write(&shot.path, &shot.png).map_err(|source| io_error(&shot.path, source))?;
         Ok(shot)
@@ -264,157 +251,20 @@ impl Driver {
         }
     }
 
-    /// Play one action and settle. Every locator resolves before any input goes in, and nothing
-    /// between a press or a modifier and its release can fail, so an error never leaves a button
-    /// or a modifier held for the next action.
+    /// Play one action and settle, as palantir plays it: every locator resolves before any input
+    /// goes in, and nothing between a press or a modifier and its release can fail, so an error
+    /// never leaves a button or a modifier held for the next action.
     fn play(&mut self, action: &Action) -> Result<u32, DriverError> {
         let step = format!("{action:?}");
-        let mut frames = 0;
         match action {
-            Action::Move(at) => {
-                let point = self.point(at)?;
-                self.input(InputEvent::PointerMoved(point));
-            }
-            Action::Click { at, button, mods } => {
-                let point = self.point(at)?;
-                frames += self.hover(point, &step)?;
-                self.space_press()?;
-                frames += self.press_and_release(*button, *mods)?;
-                self.note_press()?;
-            }
-            Action::DoubleClick(at) => {
-                let point = self.point(at)?;
-                frames += self.hover(point, &step)?;
-                self.space_press()?;
-                for _ in 0..2 {
-                    frames += self.press_and_release(PointerButton::Left, Modifiers::default())?;
-                }
-                self.note_press()?;
-            }
-            Action::Drag {
-                from,
-                to,
-                button,
-                mods,
-                steps,
-            } => {
-                let start = self.point(from)?;
-                let end = self.point(to)?;
-                frames += self.hover(start, &step)?;
-                self.space_press()?;
-                self.modifiers(*mods);
-                self.input(InputEvent::PointerPressed(*button));
-                // A frame between the steps, as a hand moves: the window's frames run on, and an
-                // error is past the press only if the window closed, which releases it anyway.
-                frames += self.frame()?;
-                for point in path(start, end, *steps) {
-                    self.input(InputEvent::PointerMoved(point));
-                    frames += self.frame()?;
-                }
-                self.input(InputEvent::PointerReleased(*button));
-                frames += self.frame()?;
-                self.modifiers(Modifiers::default());
-                self.note_press()?;
-            }
-            Action::Scroll { at, delta } => {
-                let point = self.point(at)?;
-                frames += self.hover(point, &step)?;
-                self.input(InputEvent::ScrollPixels(*delta));
-            }
-            Action::Pinch { at, factor } => {
-                // palantir drops a zoom that is not a positive factor, which would pass silently.
-                if !(factor.is_finite() && *factor > 0.0) {
-                    return Err(DriverError::BadPinch { factor: *factor });
-                }
-                let point = self.point(at)?;
-                frames += self.hover(point, &step)?;
-                self.input(InputEvent::Zoom(*factor));
-            }
-            Action::Key(chord) => {
-                self.modifiers(chord.mods);
-                self.input(InputEvent::KeyDown {
-                    key: chord.key,
-                    repeat: false,
-                    physical: Key::Other,
-                    text: chord.text(),
-                });
-                frames += self.frame()?;
-                // A hand lets go, so no key reads as held after the action.
-                self.input(InputEvent::KeyUp { key: chord.key });
-                self.modifiers(Modifiers::default());
-            }
-            Action::Type(text) => self.input(InputEvent::ImeCommit(text)),
+            Action::Play(action) => self.backend.play(action, &step),
             Action::Answer(answer) => {
                 let answer = answer.clone();
                 self.backend
                     .with_app(move |app, _| app.dialogs_mut().queue(answer))?;
+                self.backend.settle(&step)
             }
         }
-        Ok(frames + self.backend.settle(&step)?)
-    }
-
-    /// Move the pointer to `point` and settle, so the next press hits what it hovers.
-    fn hover(&mut self, point: Vec2, step: &str) -> Result<u32, DriverError> {
-        self.input(InputEvent::PointerMoved(point));
-        self.backend.settle(step)
-    }
-
-    /// Press and release `button` where the pointer is, with `mods` held, a frame each.
-    fn press_and_release(
-        &mut self,
-        button: PointerButton,
-        mods: Modifiers,
-    ) -> Result<u32, DriverError> {
-        self.modifiers(mods);
-        self.input(InputEvent::PointerPressed(button));
-        let pressed = self.frame();
-        self.input(InputEvent::PointerReleased(button));
-        let released = self.frame();
-        self.modifiers(Modifiers::default());
-        Ok(pressed? + released?)
-    }
-
-    /// Wait out what is left of the double-click window since the last press, so the next press
-    /// starts a fresh run, whatever actions came between them.
-    fn space_press(&mut self) -> Result<(), DriverError> {
-        let Some(pressed) = self.last_press else {
-            return Ok(());
-        };
-        let since = self.now()?.saturating_sub(pressed);
-        if since <= self.double_click {
-            self.backend
-                .advance(self.double_click - since + Duration::from_millis(1));
-        }
-        Ok(())
-    }
-
-    /// Take the frame just run as the last press's time, which is at or after the press.
-    fn note_press(&mut self) -> Result<(), DriverError> {
-        self.last_press = Some(self.now()?);
-        Ok(())
-    }
-
-    fn now(&mut self) -> Result<Duration, DriverError> {
-        self.backend.with_app(|_, ui| ui.now())
-    }
-
-    fn modifiers(&mut self, mods: Modifiers) {
-        self.input(InputEvent::ModifiersChanged(mods));
-    }
-
-    fn input(&mut self, event: InputEvent<'_>) {
-        self.backend.input(event);
-    }
-
-    /// One frame that sees the input sent so far, counted.
-    fn frame(&mut self) -> Result<u32, DriverError> {
-        self.backend.frame()?;
-        Ok(1)
-    }
-
-    fn point(&mut self, at: &Locator) -> Result<Vec2, DriverError> {
-        let at = at.clone();
-        self.backend.with_app(move |app, ui| at.point(app, ui))?
     }
 
     /// Copy the folder of `document` into the session directory, refusing one over

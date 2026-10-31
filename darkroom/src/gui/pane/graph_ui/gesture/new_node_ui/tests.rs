@@ -71,7 +71,7 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
         h.frame();
         // Right-click on empty canvas opens the palette; give it two frames so
         // the search field has measured and the cap reads its real height.
-        h.ui.right_click_at(Vec2::new(500.0, 400.0));
+        h.ui.right_click(Vec2::new(500.0, 400.0));
         h.prime(2);
 
         // The same cap `NewNodeUi::apply` resolves, against this harness's
@@ -168,7 +168,7 @@ fn a_caret_blink_does_not_read_as_the_canvas_having_been_away() {
     ));
     h.frame();
     let anchor = Vec2::new(500.0, 400.0);
-    h.ui.right_click_at(anchor);
+    h.ui.right_click(anchor);
     h.prime(2);
     let opened = h.ui.rect(results_wid()).expect("the palette opened");
 
@@ -182,7 +182,7 @@ fn a_caret_blink_does_not_read_as_the_canvas_having_been_away() {
     // The smallest input there is: the pointer moves within the row it was
     // already over. Nothing about the palette changed — only the frame the
     // blink slipped in between.
-    h.ui.move_to(opened.center() + Vec2::new(1.0, 0.0));
+    h.ui.hover(opened.center() + Vec2::new(1.0, 0.0));
     h.prime(1);
     assert_eq!(
         h.ui.rect(results_wid()),
@@ -234,7 +234,7 @@ fn the_search_field_stays_where_the_palette_opened() {
         SURFACE,
     );
     h.frame();
-    h.ui.right_click_at(Vec2::new(500.0, 860.0));
+    h.ui.right_click(Vec2::new(500.0, 860.0));
     h.prime(3);
     let opened = h.ui.rect(search_row_wid()).expect("the palette opened");
     assert!(
@@ -261,7 +261,7 @@ fn the_list_follows_the_focus_the_keys_move() {
         bulk_library(60),
     ));
     h.frame();
-    h.ui.right_click_at(Vec2::new(500.0, 100.0));
+    h.ui.right_click(Vec2::new(500.0, 100.0));
     h.prime(3);
     for _ in 0..30 {
         h.ui.key(palantir::Key::ArrowDown);

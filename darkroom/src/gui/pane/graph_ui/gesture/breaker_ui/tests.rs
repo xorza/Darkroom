@@ -36,7 +36,7 @@ fn the_breaker_cuts_a_node_at_its_current_position_not_its_last_painted_one() {
 
     // Right-drag over empty canvas: the gesture latches and paints a polyline
     // nowhere near the node, so nothing is marked.
-    h.ui.press_button_at(PointerButton::Right, SCRIBBLE_FROM);
+    h.ui.press(SCRIBBLE_FROM, PointerButton::Right);
     h.ui.drag_to(SCRIBBLE_TO);
     let scribbling = h.frame();
     assert!(
@@ -55,7 +55,7 @@ fn the_breaker_cuts_a_node_at_its_current_position_not_its_last_painted_one() {
         .pos = SCRIBBLE_TO - Vec2::new(body.size.w, body.size.h) * 0.5;
     h.frame();
 
-    h.ui.release_button(PointerButton::Right);
+    h.ui.release(PointerButton::Right);
     let released = h.frame();
     assert!(
         matches!(released[..], [GraphIntent::RemoveNode { node_id }] if node_id == node),
@@ -78,7 +78,7 @@ fn the_breaker_cuts_a_node_it_crossed_after_a_pan_moves_it_out_of_view() {
     // starts, and each later frame extends it to the pointer.
     let y = body.center().y;
     let start = Vec2::new(body.min.x - 40.0, y);
-    h.ui.press_button_at(PointerButton::Right, start);
+    h.ui.press(start, PointerButton::Right);
     h.ui.drag_to(start + Vec2::new(10.0, 0.0));
     assert!(h.frame().is_empty(), "nothing is cut before the release");
     h.ui.drag_to(Vec2::new(body.min.x + body.size.w + 40.0, y));
@@ -92,7 +92,7 @@ fn the_breaker_cuts_a_node_it_crossed_after_a_pan_moves_it_out_of_view() {
         "the node is culled now"
     );
 
-    h.ui.release_button(PointerButton::Right);
+    h.ui.release(PointerButton::Right);
     let released = h.frame();
     assert!(
         matches!(released[..], [GraphIntent::RemoveNode { node_id }] if node_id == node),
@@ -135,7 +135,7 @@ fn the_breaker_cuts_a_wire_it_crossed_after_a_pan_moves_it_out_of_view() {
         * 0.5
         + Vec2::new(3.0, 0.0);
     let start = middle - Vec2::new(0.0, 40.0);
-    h.ui.press_button_at(PointerButton::Right, start);
+    h.ui.press(start, PointerButton::Right);
     h.frame();
     h.ui.drag_to(start + Vec2::new(0.0, 6.0));
     h.frame();
@@ -145,7 +145,7 @@ fn the_breaker_cuts_a_wire_it_crossed_after_a_pan_moves_it_out_of_view() {
 
     h.document_mut().main_view.viewport.pan += Vec2::new(0.0, -5000.0);
     h.frame();
-    h.ui.release_button(PointerButton::Right);
+    h.ui.release(PointerButton::Right);
     let released = h.frame();
     assert!(
         matches!(released[..], [GraphIntent::SetInput { input: cut, to: None }] if cut == input),
@@ -186,7 +186,7 @@ fn a_cut_node_takes_the_cuts_of_its_own_inputs() {
         * 0.5
         + Vec2::new(3.0, 0.0);
     let start = middle - Vec2::new(0.0, 40.0);
-    h.ui.press_button_at(PointerButton::Right, start);
+    h.ui.press(start, PointerButton::Right);
     h.frame();
     for to in [
         start + Vec2::new(0.0, 6.0),
@@ -197,7 +197,7 @@ fn a_cut_node_takes_the_cuts_of_its_own_inputs() {
         h.frame();
     }
     h.frame();
-    h.ui.release_button(PointerButton::Right);
+    h.ui.release(PointerButton::Right);
     let released = h.frame();
     assert!(
         matches!(released[..], [GraphIntent::RemoveNode { node_id }] if node_id == consumer),

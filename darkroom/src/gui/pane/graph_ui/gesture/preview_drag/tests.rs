@@ -44,14 +44,14 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
         ..Default::default()
     });
     let from = h.port_center(out_port);
-    h.ui.press_on(wid::port_circle(out_port));
+    h.ui.press(wid::port_circle(out_port), PointerButton::Left);
     h.frame();
     // `first_drag_started` polls the *drag* edge, not the press, so the
     // pointer has to actually move past palantir's threshold.
     h.ui.drag_to(from + Vec2::new(90.0, 40.0));
     let spawned = h.frame();
     h.ui.set_modifiers(Modifiers::default());
-    h.ui.release_button(PointerButton::Left);
+    h.ui.release(PointerButton::Left);
 
     let adds: Vec<_> = spawned
         .iter()
@@ -102,7 +102,7 @@ fn esc_on_a_preview_spawn_takes_the_card_back() {
         h.prime(2);
         h.ui.set_modifiers(ctrl);
         let from = h.port_center(out_port);
-        h.ui.press_on(wid::port_circle(out_port));
+        h.ui.press(wid::port_circle(out_port), PointerButton::Left);
         h.frame_applied();
         h.ui.drag_to(from + Vec2::new(90.0, 40.0));
         h.frame_applied();
@@ -112,7 +112,7 @@ fn esc_on_a_preview_spawn_takes_the_card_back() {
             h.ui.key(Key::Escape);
             h.frame_applied();
         }
-        h.ui.release_button(PointerButton::Left);
+        h.ui.release(PointerButton::Left);
         h.frame_applied();
         (h.document().graph.len(), h.ctx.open.can_undo())
     };

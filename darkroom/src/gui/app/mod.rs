@@ -19,7 +19,6 @@ use crate::core::runtime_host::RuntimeHost;
 use crate::core::status_log::{StatusFamily, StatusLog};
 use crate::gui::app::app_host::AppHost;
 use crate::gui::app::discard_dialog::{Answered, DiscardChoice, DiscardGuard, PendingTransition};
-use crate::gui::app::driven_requests::DrivenRequests;
 use crate::gui::app::error::DrivenOpenError;
 use crate::gui::app::error::NonUnicodePath;
 use crate::gui::app::session::Session;
@@ -39,7 +38,6 @@ use crate::gui::theme::Theme;
 
 pub(crate) mod app_host;
 mod discard_dialog;
-pub(crate) mod driven_requests;
 pub(crate) mod error;
 pub(crate) mod offscreen_signals;
 pub(crate) mod screenshot_ask;
@@ -89,8 +87,6 @@ pub(crate) struct App {
     discard: DiscardGuard,
     /// The image of the window a View command waits on; a second command replaces the first.
     capture: Option<ViewCapture>,
-    /// What a driver on another thread asked of the next frames.
-    driven: DrivenRequests,
     /// Raised at the end of a frame while a preview converts or a view capture waits for its
     /// image: work the frame does not show yet, which a driver on another thread waits out.
     pending_work: Arc<AtomicBool>,
@@ -182,7 +178,6 @@ impl App {
             dialogs,
             discard: DiscardGuard::default(),
             capture: None,
-            driven: DrivenRequests::default(),
             pending_work: Arc::default(),
             process_memory: ProcessMemory::new(),
             requests: Requests::default(),
@@ -642,9 +637,6 @@ fn unicode(path: PathBuf) -> Result<String, NonUnicodePath> {
 
 impl palantir::App for App {
     fn update(&mut self, _win: palantir::WindowToken, ui: &Ui) {
-        // First, so a driver reads the frame it saw, before this one changes anything.
-        self.serve_driven(ui);
-
         // Keep the persisted window geometry current so a save on quit
         // captures the latest size / position.
         self.track_window_state(ui);
@@ -679,12 +671,6 @@ impl palantir::App for App {
     }
 
     fn record(&mut self, _win: palantir::WindowToken, ui: &mut Ui) {
-        self.driven.serve_record(ui);
-        // A request that waits, as for a screenshot to land, needs the frames to go on.
-        if self.driven.pending() {
-            ui.request_repaint();
-        }
-
         // While nodes are computing, keep repainting (~20 fps) so the running
         // node's live elapsed-so-far timer ticks — a single long node emits no
         // progress events between its start and finish.
@@ -760,11 +746,6 @@ impl App {
     /// The library this session resolves the document's funcs against.
     pub(crate) const fn library(&self) -> &Arc<Library> {
         self.runtime.library.cur()
-    }
-
-    /// What a driver on another thread asks of the next frames.
-    pub(crate) const fn driven_mut(&mut self) -> &mut DrivenRequests {
-        &mut self.driven
     }
 
     /// Open `path` for a driver, as File ▸ Open does, with what `unsaved` says for unsaved edits
@@ -889,7 +870,7 @@ mod tests {
     fn a_handed_in_document_waits_on_the_prompt_and_its_answer() {
         use common::TempDir;
         use glam::UVec2;
-        use palantir::internals::ui_harness::UiHarness;
+        use palantir::Harness;
 
         use crate::core::io::document::saved_paths::SavedPaths;
         use crate::gui::app::discard_dialog::DiscardOutcome;
@@ -904,7 +885,7 @@ mod tests {
             (DiscardChoice::Save, false),
             (DiscardChoice::Cancel, false),
         ] {
-            let mut ui = UiHarness::with_text(UVec2::new(800, 600));
+            let mut ui = Harness::new(UVec2::new(800, 600));
             let mut app = App::offscreen(ui.ui());
             app.session.open.dirty = true;
             app.open_document_at(handed.clone());
@@ -937,11 +918,11 @@ mod tests {
     #[test]
     fn a_frame_publishes_the_work_it_leaves_pending() {
         use glam::UVec2;
-        use palantir::internals::ui_harness::UiHarness;
+        use palantir::Harness;
 
         use crate::gui::frame::app_command::ViewCommand;
 
-        let mut ui = UiHarness::with_text(UVec2::new(800, 600));
+        let mut ui = Harness::new(UVec2::new(800, 600));
         let mut app = App::offscreen(ui.ui());
         let pending = app.pending_work();
         ui.frame_app(&mut app);
@@ -961,7 +942,7 @@ mod tests {
     fn a_driven_open_reports_its_load_and_keeps_unsaved_edits() {
         use common::{TempDir, fs};
         use glam::UVec2;
-        use palantir::internals::ui_harness::UiHarness;
+        use palantir::Harness;
 
         use crate::core::io::document::saved_paths::SavedPaths;
 
@@ -970,7 +951,7 @@ mod tests {
         OpenDocument::default()
             .save_to(&document, SavedPaths::Relative)
             .unwrap();
-        let mut ui = UiHarness::with_text(UVec2::new(800, 600));
+        let mut ui = Harness::new(UVec2::new(800, 600));
         let mut app = App::offscreen(ui.ui());
         app.open_driven(&document, UnsavedEdits::Refuse).unwrap();
         assert_eq!(app.session.open.path.as_ref(), Some(&document));
@@ -1012,7 +993,7 @@ mod tests {
     fn a_scripted_open_loads_the_answer_and_the_store_decides_what_persists() {
         use common::{TempDir, fs};
         use glam::UVec2;
-        use palantir::internals::ui_harness::UiHarness;
+        use palantir::Harness;
 
         use crate::core::io::document::saved_paths::SavedPaths;
         use crate::gui::app::offscreen_signals::OffscreenSignals;
@@ -1037,7 +1018,7 @@ mod tests {
             if !readable {
                 fs::write(&preferences_file, b"not ron").unwrap();
             }
-            let mut ui = UiHarness::with_text(UVec2::new(800, 600));
+            let mut ui = Harness::new(UVec2::new(800, 600));
             let mut dialogs = Dialogs::new(DialogFallback::Refuse);
             dialogs.queue(DialogAnswer::Path(document.clone()));
             let mut app = App::new(

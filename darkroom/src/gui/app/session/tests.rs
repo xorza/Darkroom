@@ -1,5 +1,5 @@
 use glam::{UVec2, Vec2};
-use palantir::internals::ui_harness::UiHarness;
+use palantir::Harness;
 use palantir::{DockOperation, Key, Modifiers};
 use scenarium::{InputPort, NodeId, OutputPort};
 use std::sync::Arc;
@@ -52,7 +52,7 @@ const AUDITED_FRAMES: usize = 64;
 /// fails on the frame that performed it.
 #[test]
 fn a_settled_frame_records_without_allocating() {
-    let mut ui = UiHarness::with_text(UVec2::new(1200, 800));
+    let mut ui = Harness::new(UVec2::new(1200, 800));
     let mut app = App::offscreen(ui.ui());
     let library = Arc::clone(app.runtime.library.cur());
     let func = library.by_name("Brightness / Contrast").unwrap();
@@ -78,7 +78,7 @@ fn a_settled_frame_records_without_allocating() {
     app.run_state.previews_mut().settle(ui.ui());
     // Each frame asked, as a wake asks one: a frame nothing asked for paints only and records
     // nothing, which would audit nothing.
-    let full_frame = |ui: &mut UiHarness, app: &mut App| {
+    let full_frame = |ui: &mut Harness, app: &mut App| {
         ui.ui().request_repaint();
         ui.frame_app(app)
     };
@@ -125,7 +125,7 @@ fn a_viewer_opened_by_click_queues_its_full_image_in_that_same_frame() {
         "a card-only preview never uploads its full-resolution source"
     );
 
-    test.ui.click_on(wid::preview_image(node));
+    test.ui.click(wid::preview_image(node));
     let _ = test.frame();
     assert!(
         test.session
@@ -254,7 +254,7 @@ fn a_chord_and_a_click_on_one_frame_both_reach_the_app() {
         ..Modifiers::NONE
     });
     test.ui.key(Key::Char('S'));
-    test.ui.click_on(toolbar::internals::run_chip_wid());
+    test.ui.click(toolbar::internals::run_chip_wid());
 
     let commands = test.frame();
     assert!(

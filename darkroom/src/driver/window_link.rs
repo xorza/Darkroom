@@ -32,6 +32,12 @@ impl WindowLink {
         }
     }
 
+    /// Whether a native dialog holds the main thread now, as a remote's waits ask.
+    pub(crate) fn native_probe(&self) -> impl Fn() -> bool + Send + 'static {
+        let native_open = Arc::clone(&self.native_open);
+        move || native_open.load(Ordering::Acquire)
+    }
+
     /// Whether the last frame left a preview converting or a view capture waiting.
     pub(crate) fn pending_work(&self) -> bool {
         self.pending_work.load(Ordering::Acquire)

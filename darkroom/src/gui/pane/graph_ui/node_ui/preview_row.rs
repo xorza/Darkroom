@@ -200,7 +200,7 @@ mod tests {
         h.prime(2);
         assert!(h.view_ops.is_empty(), "nothing asked for before the click");
 
-        h.ui.click_on(wid::preview_image(node));
+        h.ui.click(wid::preview_image(node));
         let intents = h.frame();
 
         assert!(

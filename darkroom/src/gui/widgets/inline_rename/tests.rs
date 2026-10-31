@@ -1,7 +1,7 @@
 use super::*;
 use crate::gui::theme::Theme;
 use glam::UVec2;
-use palantir::internals::ui_harness::UiHarness;
+use palantir::Harness;
 use palantir::{Display, Key};
 
 /// The idle label puts the name flush against its panel's leading edge,
@@ -12,7 +12,7 @@ fn the_idle_name_sits_on_the_panels_leading_edge() {
     let theme = Theme::default();
     let wid = WidgetId::from_hash("rename-leading-edge");
     let surface = UVec2::new(300, 100);
-    let mut h = UiHarness::new(surface);
+    let mut h = Harness::builder(surface).mono().build();
     h.set_display(Display {
         physical: surface,
         pixel_snap: false,
@@ -42,18 +42,18 @@ fn entering_edit_mode_selects_the_whole_name() {
 
     let theme = Theme::default();
     let wid = WidgetId::from_hash("rename-select-all");
-    let mut h = UiHarness::new(UVec2::new(300, 100));
+    let mut h = Harness::builder(UVec2::new(300, 100)).mono().build();
 
     // Lay the label out, then double-click it to open the editor.
     h.frame(|ui| {
         render(ui, wid, &theme);
     });
     let hit = h.rect(wid).expect("label arranged").center();
-    h.click_at(hit);
+    h.click(hit);
     h.frame(|ui| {
         render(ui, wid, &theme);
     });
-    h.click_at(hit);
+    h.click(hit);
     h.frame(|ui| {
         render(ui, wid, &theme);
     });
@@ -97,7 +97,7 @@ fn entering_edit_mode_selects_the_whole_name() {
     });
     let hit = h.rect(locked).expect("label arranged").center();
     for _ in 0..2 {
-        h.click_at(hit);
+        h.click(hit);
         h.frame(|ui| {
             render_locked(ui);
         });

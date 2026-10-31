@@ -2,7 +2,7 @@ use super::*;
 use glam::{UVec2, Vec2};
 use palantir::Key;
 
-use palantir::internals::ui_harness::UiHarness;
+use palantir::Harness;
 
 use crate::gui::theme::Theme;
 
@@ -23,7 +23,7 @@ fn the_unfocused_mirror_refills_its_buffer_instead_of_appending() {
         id,
     };
     let value = ConstValue::Int(42);
-    let mut h = UiHarness::new(UVec2::new(200, 60));
+    let mut h = Harness::builder(UVec2::new(200, 60)).mono().build();
 
     let mut buffered = String::new();
     for frame in 0..3 {
@@ -87,7 +87,7 @@ fn escape_drops_the_draft_and_enter_or_blur_commits() {
         text: String,
     }
     impl Probe<'_> {
-        fn frame(&self, h: &mut UiHarness) -> Framed {
+        fn frame(&self, h: &mut Harness) -> Framed {
             let mut commits = Vec::new();
             let mut text = String::new();
             h.frame(|ui| {
@@ -101,9 +101,9 @@ fn escape_drops_the_draft_and_enter_or_blur_commits() {
             Framed { commits, text }
         }
 
-        fn focus_and_type(&self, h: &mut UiHarness) {
+        fn focus_and_type(&self, h: &mut Harness) {
             let center = h.rect(self.field.id).expect("field arranged").center();
-            h.click_at(center);
+            h.click(center);
             assert!(self.frame(h).commits.is_empty(), "focusing commits nothing");
             h.key(Key::Char('7'));
             assert!(self.frame(h).commits.is_empty(), "typing commits nothing");
@@ -118,7 +118,7 @@ fn escape_drops_the_draft_and_enter_or_blur_commits() {
         },
         value: ConstValue::Int(42),
     };
-    let mut h = UiHarness::new(UVec2::new(200, 60));
+    let mut h = Harness::builder(UVec2::new(200, 60)).mono().build();
     field.frame(&mut h);
 
     field.focus_and_type(&mut h);
@@ -148,7 +148,7 @@ fn escape_drops_the_draft_and_enter_or_blur_commits() {
         1,
         "Enter commits the draft once"
     );
-    h.click_at(elsewhere);
+    h.click(elsewhere);
     let commits: Vec<String> = (0..2).flat_map(|_| field.frame(&mut h).commits).collect();
     assert!(
         commits.is_empty(),
@@ -156,7 +156,7 @@ fn escape_drops_the_draft_and_enter_or_blur_commits() {
     );
 
     field.focus_and_type(&mut h);
-    h.click_at(elsewhere);
+    h.click(elsewhere);
     let commits: Vec<String> = (0..2).flat_map(|_| field.frame(&mut h).commits).collect();
     assert_eq!(commits.len(), 1, "a click elsewhere commits the draft once");
 }

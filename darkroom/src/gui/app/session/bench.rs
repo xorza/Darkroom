@@ -35,10 +35,8 @@ use palantir::bench::backends::{Backend, Backends};
 use palantir::bench::case_group::CaseGroup;
 use palantir::bench::kind::{Kind, Scale};
 use palantir::internals::frame_fixture::{BENCH_DPR, BENCH_SURFACE};
-use palantir::internals::record_app::RecordApp;
-use palantir::internals::ui_harness::UiHarness;
-use palantir::internals::ui_harness::frontend_harness::FrontendHarness;
 use palantir::internals::{BenchGpu, Timing};
+use palantir::{Depth, Harness};
 use palantir::{FramePaint, OffscreenHost, Ui};
 use scenarium::{Binding, DynamicValue, Func, Graph, InputPort, Library, NodeId};
 
@@ -361,12 +359,14 @@ pub(crate) fn integration(c: &mut Criterion, backends: Backends) {
             let case = FrameCase { scenario, backend };
             match backend {
                 Backend::Cpu => case.measure(&mut group, || {
-                    let mut harness = UiHarness::with_text(BENCH_SURFACE).scale(BENCH_DPR);
-                    harness.ui().set_theme(Theme::default().palantir);
-                    let mut frontend = FrontendHarness::new(harness);
+                    let mut frontend = Harness::builder(BENCH_SURFACE)
+                        .scale(BENCH_DPR)
+                        .depth(Depth::Compose)
+                        .build();
+                    frontend.ui().set_theme(Theme::default().palantir);
                     let mut published = false;
                     move |editor: &mut Editor, n: u32| {
-                        let ui = frontend.harness().ui();
+                        let ui = frontend.ui();
                         if !published {
                             editor.publish_previews(ui);
                             published = true;
@@ -392,7 +392,7 @@ pub(crate) fn integration(c: &mut Criterion, backends: Backends) {
                         }
                         editor.advance(scenario, host.ui(), n);
                         editor.update();
-                        let mut app = RecordApp::new(|ui: &mut Ui| editor.record(ui));
+                        let mut app = |ui: &mut Ui| editor.record(ui);
                         let paint = host.frame(target.as_target(), BENCH_DPR, &mut app).paint();
                         gpu.wait();
                         paint
