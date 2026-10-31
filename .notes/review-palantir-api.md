@@ -190,38 +190,6 @@ change runs `cargo drive check` and `cargo drive test` from the root. A palantir
 palantir's suite beside the code it tests, with hand-computed values. Whoever addresses an item
 deletes it.
 
-### Batch 8: pan and zoom on `TranslateScale`
-
-Files: `palantir/src/primitives/geometry/translate_scale/mod.rs`,
-`palantir/src/widgets/scroll/{scroll_state,zoom_config,mod}.rs`; `darkroom/src/gui/widgets/zoom_range/`,
-`darkroom/src/gui/pane/graph_ui/gesture/pan_zoom/`, `darkroom/src/gui/pane/image_viewer/camera/`,
-`darkroom/src/core/document/viewport.rs`.
-
-- [ ] `translate_scale/mod.rs`: zoom about a point lives only inside `Scroll`
-  (`scroll_state.rs:202`). Add `zoomed_about` and `scrolled` as the target design says; make
-  `ZoomConfig::clamp` and `ScrollDelta::is_none` public; `ScrollState::apply_zoom` calls them.
-  Test: the world point under the pivot stays under it, a zoom outside the range steps toward it,
-  and a non-finite factor changes nothing.
-- [ ] `zoom_range/mod.rs`: `scrolled`, `fold_scroll`, `zoom_about` and `scroll_to_zoom_factor`
-  repeat that algebra. Replace `ZoomRange` with two `ZoomConfig` constants and call the palantir
-  functions through `Viewport`'s `From` conversions. Move the cases of `zoom_range/tests.rs` that
-  test the algebra to palantir; keep the darkroom cases that test the canvas's and viewer's
-  ranges. Hand-compute the new wheel step so a notch zooms by the same factor as
-  `1.0025^line_px` does today.
-
-### Batch 9: an open popup keeps its place
-
-Files: `palantir/src/widgets/popup/mod.rs`, `palantir/src/primitives/layout/anchor/`,
-`palantir/src/layout/`; `darkroom/src/gui/pane/graph_ui/gesture/{anchored_menu,node_menu_ui,new_node_ui,tie_ui}/`.
-
-- [ ] `popup/mod.rs`: the place is computed again in each frame, so an open popup moves when its
-  body changes size. Keep the first measured place while the anchor, the window size and the fit
-  hold. Test in `popup/tests/placement.rs`: a body that shrinks after it opened near the bottom
-  edge stays where it opened.
-- [ ] `anchored_menu.rs`: the latch by hand, plus the context menu's look copied from the theme.
-  Open the canvas menus with `ContextMenu::open(ui, id, point)` and `ContextMenu::for_id(id)`,
-  `max_size` where `PopupShape::max_height` was. Delete `AnchoredMenu` and `PopupShape`.
-
 ### Batch 10: window geometry as one value
 
 Files: `palantir/src/window/window_geometry.rs`, `palantir/src/window/` (`WindowConfig`),
@@ -308,6 +276,13 @@ Files: `palantir/AGENTS.md`, `darkroom/AGENTS.md`, `.notes/review-palantir-api.m
 
 ## Changed
 
+- Batch 9: palantir holds a popup asked to sit at a point where its first frame landed it, and
+  places one asked to sit beside a rect each frame, as `dynamic_body_size_repositions_at_every_
+  viewport_edge_without_settling` pins: a list under its button flips to keep the button clear.
+  `AnchoredMenu` stays, as the canvas's menus own their open state and the menu look, and drops
+  its own latch. Refused: replacing it with `ContextMenu`, whose arrow keys walk menu rows the
+  palette's search field drives itself.
+
 - darkroom's steps are its own constants (`TEXT`, `SPACE`, `RADIUS`, `STROKE` in
   `gui/theme/mod.rs`) on palantir's step types, which build the `Metrics` it hands palantir, so a
   retune of `Metrics::DEFAULT` moves nothing in darkroom. `ElevationScale` stays darkroom's (see
@@ -346,6 +321,11 @@ Files: `palantir/AGENTS.md`, `darkroom/AGENTS.md`, `.notes/review-palantir-api.m
   palantir API, as the search may stop at the first chord that fired (see Declined).
 
 ## Declined
+
+- Batch 8, pan and zoom on `TranslateScale`: the algebra `Scroll` and darkroom share is one line,
+  `pan = pivot − (pivot − pan) · factor`. The policies around it differ: `Scroll` zooms on a
+  modified wheel and clamps to its range, darkroom's surfaces zoom on the bare wheel and widen the
+  range to hold a fit. A shared function would take both policies as parameters.
 
 - Batch 7, `Metrics::rest_shadow`: no palantir recipe casts a resting shadow, so the step would
   be a field palantir never reads; darkroom's `ElevationScale` keeps it.
