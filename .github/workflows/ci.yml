@@ -21,7 +21,7 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
   # The driver's commit that the drive table's `version` takes, as a local install has it.
-  DRIVE_REV: dcb1db7afe89a955f2d7d6c7e3aeafc6d7a0a477
+  DRIVE_REV: 91c27b4e4c9e678619ee68b587d52bd9538f8b18
   # fits-well's test runner: its drive table keeps nextest's default, which ran its suite in 0.48 s
   # where `cargo test` took 0.75 s.
   NEXTEST_VERSION: 0.9.148
