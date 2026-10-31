@@ -236,7 +236,7 @@ fn space_above_results(ui: &Ui, theme: &Theme) -> f32 {
     let rows = field.zip(results).map_or_else(
         || {
             let text = &ui.theme().text;
-            text.line_height_for(text.font_size) + theme.space.sm + menu.gap
+            text.line_height() + theme.space.sm + menu.gap
         },
         |(field, results)| results.min.y - field.min.y,
     );

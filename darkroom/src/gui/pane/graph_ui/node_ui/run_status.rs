@@ -6,7 +6,6 @@ use palantir::{
 
 use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::Theme;
-use crate::gui::theme::type_scale;
 use crate::gui::widgets::format::elapsed::Elapsed;
 use crate::gui::widgets::icon::Icon;
 use crate::gui::widgets::support;
@@ -95,7 +94,7 @@ fn status_icon(ui: &mut Ui, theme: &Theme, icon: Icon, color: RgbaF32) {
     let side = theme.icon.inline.icon;
     Panel::zstack()
         .id_salt("run_status_icon")
-        .size((Sizing::fixed(side), Sizing::fixed(side)))
+        .size(side)
         .show(ui, |ui| {
             icon.draw(ui, Rect::new(0.0, 0.0, side, side), color);
         });
@@ -111,12 +110,11 @@ fn run_time_style(ui: &Ui, theme: &Theme, color: RgbaF32) -> TextStyle {
 
 fn run_time(ui: &mut Ui, theme: &Theme, secs: f64, color: RgbaF32) {
     let elapsed = fmt!(ui, "{}", Elapsed::new(secs));
+    let style = run_time_style(ui, theme, color);
+    let floor = support::figure_width(ui, &style, RUN_TIME_GLYPHS);
     Text::new(elapsed)
-        .style(&run_time_style(ui, theme, color))
-        .min_size((
-            type_scale::figure_width(theme.font.caption, RUN_TIME_GLYPHS),
-            0.0,
-        ))
+        .style(&style)
+        .min_size((floor, 0.0))
         .show(ui);
 }
 
@@ -144,7 +142,13 @@ mod tests {
         let theme = Theme::default();
         let mut h = Harness::new(UVec2::new(800, 200));
         let id = |i: usize| WidgetId::from_hash(("run_time", i));
+        let mut floor = 0.0;
         h.frame(|ui| {
+            floor = support::figure_width(
+                ui,
+                &run_time_style(ui, &theme, RgbaF32::WHITE),
+                RUN_TIME_GLYPHS,
+            );
             for (i, &s) in secs.iter().enumerate() {
                 let style = run_time_style(ui, &theme, RgbaF32::WHITE);
                 Text::new(Elapsed::new(s).to_string())
@@ -153,8 +157,8 @@ mod tests {
                     .show(ui);
             }
         });
-        // Seven figures at 0.6 of the 12 px caption tier, 7 × 7.2 = 50.4 px, up to a whole 51.
-        let floor = type_scale::figure_width(theme.font.caption, RUN_TIME_GLYPHS);
+        // Seven figures of the mono face, whose advance is 600 of its 1000 units per em, at the
+        // 12 px caption tier: 7 × 7.2 = 50.4 px, up to a whole 51.
         assert_eq!(floor, 51.0);
         let mut widest = 0.0_f32;
         for (i, &s) in secs.iter().enumerate() {

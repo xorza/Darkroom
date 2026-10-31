@@ -1,11 +1,9 @@
 //! [`Shot`]: a picture of the window as a user's capture gives it, sized for an agent to read,
 //! with a legend of where each node and port is in it.
 
-use std::io::Cursor;
 use std::path::PathBuf;
 
 use glam::UVec2;
-use image::ImageFormat;
 use palantir::{DockView, Image, LocateError, Rect, Screenshot, Ui};
 use serde::Serialize;
 
@@ -180,9 +178,7 @@ impl Shot {
     pub(crate) fn new(capture: Capture, path: PathBuf) -> Self {
         let size = capture.picture.size();
         let mut png = Vec::new();
-        view_capture::rgba_image(&capture.picture)
-            .write_to(&mut Cursor::new(&mut png), ImageFormat::Png)
-            .expect("a PNG encodes into memory");
+        view_capture::write_png(&capture.picture, &mut png).expect("a PNG encodes into memory");
         Self {
             png,
             path,

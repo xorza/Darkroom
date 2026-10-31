@@ -157,7 +157,7 @@ impl TieWidgets {
                 .sense(Sense::CLICK | Sense::DRAG)
                 .show(ui, |_| {});
             let (clicked, grabbed, menu) = (
-                body.response.left.clicked(),
+                body.response.clicked(),
                 body.response.left.drag.started(),
                 body.response.right.clicked(),
             );
@@ -188,7 +188,7 @@ impl TieWidgets {
         let knob = Panel::zstack()
             .id(wid::tie_knob(tie))
             .pos(center - Vec2::splat(KNOB_HIT_RADIUS))
-            .size((Sizing::fixed(side), Sizing::fixed(side)))
+            .size(side)
             .sense(Sense::CLICK | Sense::DRAG)
             .show(ui, |_| {});
         if knob.response.left.double_clicked() {

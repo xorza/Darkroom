@@ -288,7 +288,7 @@ impl NodeUi {
         // before the handle scan below. (`Response` is a lazy probe over
         // `response_for`, so reading the body through either is the same
         // last-frame state.)
-        let body_clicked = panel.response.left.clicked();
+        let body_clicked = panel.response.clicked();
         let mut response = NodeResponse {
             menu_opened: panel.response.right.clicked(),
             grab: None,

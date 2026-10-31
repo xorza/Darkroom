@@ -41,13 +41,6 @@ pub(crate) fn wash(ink: RgbaF32, alpha: f32, ground: RgbaF32) -> RgbaF32 {
     )
 }
 
-/// The relative luminance of `c`'s linear channels, as WCAG defines it
-/// (<https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum>): the weights of the Rec. 709
-/// primaries, which palantir's shaders weigh a luminance by too.
-pub(crate) const fn luminance(c: RgbaF32) -> f32 {
-    0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
-}
-
 /// The hover emphasis every port shares: blend toward white, so the port lifts off the canvas.
 ///
 /// The palette cannot carry a lifted color beside each resting one — most port colors already

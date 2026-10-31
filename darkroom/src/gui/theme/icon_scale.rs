@@ -1,6 +1,6 @@
 //! [`IconScale`]: the theme's icon boxes.
 
-use crate::gui::theme::type_scale::TypeScale;
+use palantir::TextSteps;
 
 /// An icon's side and the room around it in its button, each side.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -34,7 +34,7 @@ pub(crate) struct IconScale {
 impl IconScale {
     /// The boxes the review chose: 6 px a side for a button, as "An icon button gives its icon
     /// 6 px a side" in `darkroom/AGENTS.md` records.
-    pub(super) const fn new(text: &TypeScale) -> Self {
+    pub(super) const fn new(text: &TextSteps) -> Self {
         Self {
             toolbar: IconBox {
                 icon: 18.0,

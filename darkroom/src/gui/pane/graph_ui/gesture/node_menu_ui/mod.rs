@@ -78,7 +78,7 @@ impl NodeMenuUi {
                     chosen = Some(MenuChoice::Run);
                 }
                 MenuSeparator::new().show(ui);
-                if MenuItem::new("Duplicate").show(ui, popup).left.clicked() {
+                if MenuItem::new("Duplicate").show(ui, popup).clicked() {
                     chosen = Some(MenuChoice::Duplicate {
                         incoming: IncomingWires::Drop,
                     });
@@ -94,7 +94,7 @@ impl NodeMenuUi {
                 }
                 MenuSeparator::new().show(ui);
             }
-            if MenuItem::new("Remove").show(ui, popup).left.clicked() {
+            if MenuItem::new("Remove").show(ui, popup).clicked() {
                 chosen = Some(MenuChoice::Remove);
             }
             chosen

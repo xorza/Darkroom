@@ -116,7 +116,7 @@ impl WirePass<'_, '_, '_> {
     fn wire_width(&self) -> f32 {
         let theme = self.draw_ctx.theme();
         theme
-            .stroke
+            .canvas
             .wire_at(self.draw_ctx.graph_ctx().viewport().zoom)
     }
 

@@ -45,7 +45,7 @@ impl ZoomRange {
             && let Some(pivot) = resp.pointer_local
         {
             let text = &ui.theme().text;
-            let line_px = text.line_height_for(text.font_size);
+            let line_px = text.line_height();
             self.zoom_about(
                 v,
                 pivot,

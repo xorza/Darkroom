@@ -195,7 +195,7 @@ impl SubscriptionUi {
             }
         };
         let theme = graph_ctx.theme();
-        let width = theme.stroke.wire_at(graph_ctx.viewport().zoom);
+        let width = theme.canvas.wire_at(graph_ctx.viewport().zoom);
         WirePaint::from(theme.port.event).stroke(ui, &Wire::event(p0, p3), width);
     }
 }

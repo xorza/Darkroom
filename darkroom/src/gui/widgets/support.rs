@@ -3,12 +3,13 @@
 //! chips in [`chip`](crate::gui::widgets::chip).
 
 use palantir::{
-    Chrome, Configure, Corners, FontFamily, FontWeight, Panel, Rect, ResponseSnapshot, RgbaF32,
-    Sizing, TextInput, TextStyle, Tooltip, Ui,
+    Align, Block, ButtonTheme, Chrome, Configure, Corners, FontFamily, FontWeight, Rect,
+    ResponseSnapshot, RgbaF32, Sizing, SlotDefaults, Spacing, StatefulLook, TextInput, TextStyle,
+    TextWrap, Tooltip, Ui, WidgetLook,
 };
 
 use glam::Vec2;
-use palantir::widget::{RectShape, Shape};
+use palantir::widget::{RectShape, Shape, TextRun};
 
 use crate::gui::theme::Theme;
 
@@ -71,6 +72,23 @@ pub(crate) fn mono_text(ui: &Ui, px: f32) -> TextStyle {
     }
 }
 
+/// The width `glyphs` figures take in `style`, as palantir measures them: the floor of a readout
+/// that changes while it is watched, so the line beside it holds still as its digit count
+/// changes. Measured on zeros, as every figure of the mono face advances alike.
+pub(crate) fn figure_width(ui: &mut Ui, style: &TextStyle, glyphs: u8) -> f32 {
+    const FIGURES: &str = "0000000000000000";
+    let text = &FIGURES[..usize::from(glyphs)];
+    ui.probe_text(TextRun {
+        text,
+        font: style.font(),
+        wrap: TextWrap::SingleLine,
+        align: Align::LEFT,
+        max_width: None,
+    })
+    .size()
+    .w
+}
+
 /// A small circle of radius `r` centered on `center`, for the caller to fill.
 pub(crate) fn dot(center: Vec2, r: f32) -> RectShape {
     Shape::rect(Rect::new(center.x - r, center.y - r, 2.0 * r, 2.0 * r)).corners(r)
@@ -80,20 +98,45 @@ pub(crate) fn dot(center: Vec2, r: f32) -> RectShape {
 /// after it: the unsaved mark, a memory pool's key. [`dot`] is the bare shape, with no layout.
 pub(crate) fn dot_cell(ui: &mut Ui, salt: &'static str, theme: &Theme, hue: RgbaF32) {
     let side = theme.icon.dot;
-    Panel::zstack()
+    Block::new()
         .id_salt(salt)
-        .size((Sizing::fixed(side), Sizing::fixed(side)))
+        .size(side)
         .chrome(Chrome::rounded(hue, Corners::all(side * 0.5)))
-        .show(ui, |_| {});
+        .show(ui);
 }
 
 /// An empty stretch panel pushing the following hstack siblings to the
 /// far edge. `salt` keeps sibling spacers' ids distinct.
 pub(crate) fn hspacer(ui: &mut Ui, salt: &'static str) {
-    Panel::hstack()
+    Block::new()
         .id_salt(salt)
         .size((Sizing::FILL, Sizing::HUG))
-        .show(ui, |_| {});
+        .show(ui);
+}
+
+/// `rest` at rest and while disabled, `lit` under the pointer and while pressed: a press looks as
+/// the pointer over it does.
+pub(crate) fn hover_looks(rest: WidgetLook, lit: WidgetLook) -> StatefulLook {
+    StatefulLook {
+        normal: rest.clone(),
+        hovered: lit.clone(),
+        active: lit,
+        disabled: rest,
+    }
+}
+
+/// A button that draws its own box: `looks` while off, `selected` while on, no padding or margin,
+/// and no transition, as darkroom's controls snap.
+pub(crate) const fn flush_button(looks: StatefulLook, selected: StatefulLook) -> ButtonTheme {
+    ButtonTheme {
+        looks,
+        selected,
+        defaults: SlotDefaults {
+            padding: Spacing::ZERO,
+            margin: Spacing::ZERO,
+            animation: None,
+        },
+    }
 }
 
 /// Shows `tooltip` as a hover tooltip anchored to `snapshot`; `None` records

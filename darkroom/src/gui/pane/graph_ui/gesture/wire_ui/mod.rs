@@ -247,7 +247,7 @@ impl WireUi {
         let theme = graph_ctx.theme();
         let drag_data_type = graph_ctx.data_type(start_port);
         let color = theme.port_color(drag_data_type);
-        let width = theme.stroke.wire_at(graph_ctx.viewport().zoom);
+        let width = theme.canvas.wire_at(graph_ctx.viewport().zoom);
         WirePaint::from(color).stroke(ui, &Wire::data(p0, p3), width);
     }
 }

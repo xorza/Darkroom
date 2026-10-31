@@ -10,7 +10,6 @@ use palantir::widget::Shape;
 
 use crate::core::io::preferences::ViewerBg;
 use crate::gui::theme::Theme;
-use crate::gui::widgets::toggle::Toggle;
 
 /// The 2×2 checkerboard tile in the theme's checker inks — one full checker period, stamped
 /// across the pane via `ImageFit::Tile` + `ImageFilter::Nearest`.
@@ -22,12 +21,11 @@ pub(super) fn checker_image(theme: &Theme) -> palantir::Image {
     tile
 }
 
-/// A backdrop mode's swatch, ringed with the selection accent while `state`
-/// is on.
+/// A backdrop mode's swatch, ringed with the selection accent while `selected`.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Swatch {
     pub(super) mode: ViewerBg,
-    pub(super) state: Toggle,
+    pub(super) selected: bool,
 }
 
 impl Swatch {
@@ -35,7 +33,7 @@ impl Swatch {
     /// itself (mini checker for `Checker`), rounded as a mark, and ringed at one width whose ink
     /// alone says whether it is on.
     pub(super) fn draw(self, ui: &mut Ui, s: f32, theme: &Theme) {
-        let Self { mode, state } = self;
+        let Self { mode, selected } = self;
         let d = theme.icon.toolbar.icon;
         let o = (s - d) * 0.5;
         let radius = theme.radius.mark;
@@ -52,9 +50,10 @@ impl Swatch {
             }
         }
         // Ring on top so the checker quads can't cover it.
-        let ring = match state {
-            Toggle::On => theme.colors.accent,
-            Toggle::Off => theme.viewer.swatch_ring,
+        let ring = if selected {
+            theme.colors.accent
+        } else {
+            theme.viewer.swatch_ring
         };
         ui.add_shape(
             Shape::rect(rect)

@@ -1,10 +1,9 @@
 //! [`ViewerTheme`]: what the image viewer paints past the shared widgets.
 
-use palantir::RgbaF32;
+use palantir::{RgbaF32, SpaceSteps};
 
 use crate::gui::theme::inks::Inks;
 use crate::gui::theme::palette::Palette;
-use crate::gui::theme::space_scale::SpaceScale;
 
 /// The resting swatch ring's alpha: visible on every backdrop, louder on none. A translucent
 /// layer, not a wash, as the swatch it rings shows any of four backdrops.
@@ -26,7 +25,7 @@ pub(crate) struct ViewerTheme {
 }
 
 impl ViewerTheme {
-    pub(super) const fn new(p: &Palette, space: &SpaceScale, ink: &Inks) -> Self {
+    pub(super) const fn new(p: &Palette, space: &SpaceSteps, ink: &Inks) -> Self {
         Self {
             checker_light: p.checker_light,
             checker_dark: p.checker_dark,

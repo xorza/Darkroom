@@ -15,8 +15,8 @@ use std::sync::Arc;
 
 use glam::Vec2;
 use palantir::{
-    Align, Configure, ContextMenu, Grid, HAlign, InternedStr, MenuItem, Panel, Sense, Sizing,
-    Spacing, Text, TextStyle, Track, Ui, VAlign, WidgetId, fmt,
+    Align, Configure, ContextMenu, Grid, InternedStr, MenuItem, Panel, Sense, Sizing, Spacing,
+    Text, TextStyle, Track, Ui, VAlign, WidgetId, fmt,
 };
 use scenarium::Binding;
 use scenarium::FuncEvent;
@@ -264,7 +264,7 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
     let cell = Panel::hstack()
         .id(wid::input_cell(port))
         .grid_cell((grid_row(port.port_idx), COL_INPUT))
-        .align(Align::new(HAlign::Left, VAlign::Center))
+        .align(Align::LEFT)
         .size((Sizing::HUG, Sizing::HUG))
         .sense(Sense::CLICK)
         .gap(theme.space.xs)
@@ -393,7 +393,7 @@ fn value_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCtx<'_>)
     // means *pick a path* is a question about the port's type. Answering it
     // here costs nothing, because the type is what decided to draw the button
     // in the first place.
-    if ui.response_for(editor_id).left.clicked()
+    if ui.response_for(editor_id).clicked()
         && matches!(value, ConstValue::FsPath(_) | ConstValue::FsPaths(_))
         && let DataType::FsPath(config) = data_type
     {
@@ -431,7 +431,7 @@ fn value_column<R>(ui: &mut Ui, port: InputPort, body: impl FnOnce(&mut Ui) -> R
     Panel::hstack()
         .id_salt(("val", port.port_idx))
         .grid_cell((grid_row(port.port_idx), COL_VALUE))
-        .size((Sizing::FILL, Sizing::FILL))
+        .size(Sizing::FILL)
         .child_align(Align::v(VAlign::Center))
         .show(ui, body)
         .inner
@@ -458,7 +458,7 @@ fn output_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, output: OutputCtx<'
     let cell = Panel::hstack()
         .id_salt(("out", port.port_idx))
         .grid_cell((grid_row(port.port_idx), COL_OUTPUT))
-        .align(Align::new(HAlign::Right, VAlign::Center))
+        .align(Align::RIGHT)
         .size((Sizing::HUG, Sizing::HUG))
         .sense(Sense::CLICK)
         .gap(theme.space.xs)
@@ -502,7 +502,7 @@ fn output_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, output: OutputCtx<'
         .size((Sizing::HUG, Sizing::HUG))
         .show(ui, |ui, popup| {
             if let Some(func) = preview_sink::registered(node_ctx.graph_ctx.library())
-                && MenuItem::new("Add preview").show(ui, popup).left.clicked()
+                && MenuItem::new("Add preview").show(ui, popup).clicked()
             {
                 // Positioned off the port when its center is known (it is,
                 // after the first frame); otherwise the node lands at the
@@ -557,7 +557,7 @@ impl EventRow<'_> {
         Panel::hstack()
             .id_salt(("event", idx))
             .grid_cell((grid_row(row), COL_OUTPUT))
-            .align(Align::new(HAlign::Right, VAlign::Center))
+            .align(Align::RIGHT)
             .size((Sizing::HUG, Sizing::HUG))
             .gap(theme.space.xs)
             .child_align(Align::v(VAlign::Center))

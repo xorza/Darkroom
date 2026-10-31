@@ -144,6 +144,29 @@ impl From<PlayError> for DriverError {
             PlayError::NoPixels => Self::NoGpu,
             PlayError::Disconnected => Self::WindowClosed,
             PlayError::NoFrame { seconds } => Self::NoFrame { seconds },
+            PlayError::Busy { step, seconds } => Self::UnsettledInTime { step, seconds },
+            // The session ends on a panic, here as on the driver's own thread.
+            PlayError::Panicked { message } => {
+                panic!("a request on the window's thread panicked: {message}")
+            }
+        }
+    }
+}
+
+impl DriverError {
+    /// A failed settle of `step`: palantir names every settle "the settle", the driver after
+    /// what it settles.
+    pub(crate) fn from_settle(step: &str, error: PlayError) -> Self {
+        match error {
+            PlayError::Unsettled { frames, .. } => Self::Unsettled {
+                step: step.to_string(),
+                frames,
+            },
+            PlayError::Busy { seconds, .. } => Self::UnsettledInTime {
+                step: step.to_string(),
+                seconds,
+            },
+            error => error.into(),
         }
     }
 }

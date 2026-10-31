@@ -284,7 +284,7 @@ fn record(graph_ui: &mut GraphUi, ctx: &GraphCtxFixture, recorder: &mut Ui) -> R
 fn draw(graph_ui: &mut GraphUi, ctx: &GraphCtxFixture, recorder: &mut Ui, out: &mut Requests) {
     Panel::vstack()
         .id_salt("pane")
-        .size((Sizing::FILL, Sizing::FILL))
+        .size(Sizing::FILL)
         .show(recorder, |ui| {
             graph_ui.draw(ui, ctx.graph_ctx(), out);
         });

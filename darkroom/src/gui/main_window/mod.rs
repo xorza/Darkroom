@@ -140,7 +140,7 @@ impl MainWindow {
         } = self;
         Panel::vstack()
             .id(app_root_wid())
-            .size((Sizing::FILL, Sizing::FILL))
+            .size(Sizing::FILL)
             // The application's input scope, and the only one darkroom
             // declares — palantir's overlays and text fields bring their
             // own. Everything except `TEXT`: a canvas has no typing, so a

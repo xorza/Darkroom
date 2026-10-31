@@ -1,9 +1,8 @@
 //! [`PortTheme`]: how a node's input and output ports are drawn.
 
-use palantir::RgbaF32;
+use palantir::{RgbaF32, SpaceSteps};
 
 use crate::gui::theme::palette::Palette;
-use crate::gui::theme::space_scale::SpaceScale;
 
 /// A node's ports: the circles straddling the body edge, their labels,
 /// and the column geometry that lays them out.
@@ -46,7 +45,7 @@ pub(crate) struct PortTheme {
 }
 
 impl PortTheme {
-    pub(super) const fn from_palette(p: &Palette, space: &SpaceScale) -> Self {
+    pub(super) const fn from_palette(p: &Palette, space: &SpaceSteps) -> Self {
         Self {
             input: p.input_port,
             event: p.event_port,

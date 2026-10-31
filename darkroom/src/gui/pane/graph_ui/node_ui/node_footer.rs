@@ -4,7 +4,8 @@
 //! run, so a run's end changes no node's height.
 
 use palantir::{
-    Align, Chrome, Configure, Corners, Panel, RgbaF32, Sense, Sizing, Text, TextWrap, Ui, VAlign,
+    Align, Block, Chrome, Configure, Corners, Panel, RgbaF32, Sense, Sizing, Text, TextWrap, Ui,
+    VAlign,
 };
 use scenarium::RamUsage;
 
@@ -123,11 +124,11 @@ impl Pool {
 
     /// The pool's segment of the proportion bar, weighted by its bytes.
     fn bar_segment(self, ui: &mut Ui) {
-        Panel::zstack()
+        Block::new()
             .id_salt(("node_mem_seg", self.label))
             .size((Sizing::fill(self.bytes as f32), Sizing::FILL))
             .chrome(Chrome::rounded(self.hue, Corners::all(BAR_HEIGHT * 0.5)))
-            .show(ui, |_ui| {});
+            .show(ui);
     }
 }
 
@@ -184,15 +185,18 @@ mod tests {
             h.ui.rect(wid::footer(node_id))
                 .expect("a failure has a footer");
         let theme = Theme::default();
-        // One label line, 12 × 1.2 = 14.4 px, snapped to the 1/64 px grid the measurer keeps
-        // metrics on: 922 / 64.
-        let line = (theme.palantir.text.line_height_for(theme.font.caption) * 64.0).round() / 64.0;
+        // One label line, 12 × 1.2 = 14.4 px, on the 1/64 px grid the measurer keeps metrics on,
+        // which `line_height` snaps to: 922 / 64.
+        let line = theme
+            .palantir
+            .text
+            .with_font_size(theme.font.caption)
+            .line_height();
+        assert_eq!(line, 922.0 / 64.0);
         let pad = card::band_padding(&theme);
         assert_eq!(footer.size.h, pad.sums().h + line, "one row");
-        let mut listed = Vec::new();
-        h.ui.ui().inspect(&mut listed);
-        let texts: Vec<&str> = listed.iter().map(|widget| widget.text.as_str()).collect();
-        assert!(!texts.contains(&"Failed"), "{texts:?}");
+        let texts: Vec<String> = h.ui.widgets(None).into_iter().map(|w| w.text).collect();
+        assert!(!texts.iter().any(|text| text == "Failed"), "{texts:?}");
     }
 
     /// A node that never ran says so in a footer, so its height is the one a run leaves it at:

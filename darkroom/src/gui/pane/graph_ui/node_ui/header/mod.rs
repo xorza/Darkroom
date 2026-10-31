@@ -9,8 +9,8 @@ use std::collections::BTreeSet;
 use std::f32::consts::FRAC_PI_4;
 
 use palantir::{
-    Align, Checkbox, Configure, ContextMenu, DockDrop, DockOperation, MenuItem, MenuSeparator,
-    Panel, Separator, Sizing, SplitSide, Ui, VAlign, WidgetId,
+    Align, Checkbox, Configure, ContextMenu, DockDrop, DockOperation, EditableLabel, MenuItem,
+    MenuSeparator, Panel, Separator, Sizing, SplitSide, Ui, VAlign, WidgetId,
 };
 
 use glam::Vec2;
@@ -31,13 +31,15 @@ use crate::gui::pane::graph_ui::wid;
 use crate::gui::widgets::hover::Hover;
 use crate::gui::widgets::icon::Icon;
 use crate::gui::widgets::icon_button::IconButton;
-use crate::gui::widgets::inline_rename::{InlineRename, RenameEvent};
 use crate::gui::widgets::port_glyph::PortGlyph;
 use crate::gui::widgets::support;
-use crate::gui::widgets::toggle::Toggle;
 
 /// Character cap for a node title in the inline rename editor.
 const NODE_NAME_MAX_CHARS: usize = 32;
+
+/// The title's width floor, so a short name still presents an easy double-click target and the
+/// editor does not collapse to a caret when the draft is emptied.
+const NODE_NAME_MIN_WIDTH: f32 = 40.0;
 
 /// One whole-node event-subscription pin: an event-colored triangle behind
 /// the node's top-left corner, its apex pointing up-left toward the
@@ -104,7 +106,6 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
                 wid::inspect_button(node.node_id),
                 theme.colors.accent,
                 "Inspect — values, status, log",
-                Toggle::Off,
             )
             .show(ui, theme)
             {
@@ -173,7 +174,6 @@ fn run_button(ui: &mut Ui, node: NodeCtx<'_>) -> bool {
         wid::of_node("run_button", node.node_id),
         theme.status.success,
         tooltip,
-        Toggle::Off,
     )
     .show(ui, theme)
 }
@@ -187,8 +187,8 @@ fn disable_button(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
         wid::of_node("disable_button", node.node_id),
         theme.ink.muted,
         "Disable — exclude this sink from graph runs",
-        Toggle::from(node.disabled()),
     )
+    .selected(node.disabled())
     .show(ui, theme)
     {
         record.out.push_graph(GraphIntent::SetNodeProperty {
@@ -211,8 +211,8 @@ fn cache_button(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
         wid,
         theme.badge.cache,
         "Cache — keep this node's output across runs",
-        Toggle::from(ram || disk),
     )
+    .selected(ram || disk)
     .show(ui, theme);
     if clicked && let Some(rect) = ui.response_for(wid).rect {
         ContextMenu::open(ui, wid, Vec2::new(rect.min.x, rect.max().y));
@@ -248,7 +248,7 @@ fn cache_button(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
             }
         }
         MenuSeparator::new().show(ui);
-        if MenuItem::new("Clear cache").show(ui, popup).left.clicked() {
+        if MenuItem::new("Clear cache").show(ui, popup).clicked() {
             record
                 .out
                 .push_app(AppCommand::Run(RunCommand::EvictCache(node.node_id)));
@@ -267,31 +267,24 @@ fn cache_button_wid(node_id: NodeId) -> WidgetId {
 fn title(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     let node = record.node;
     let mode = ClickMode::with_shift(ui.modifiers().shift);
-    // Borrowed straight off the node: an interned handle is only valid
-    // within the record pass that minted it, and the widget reads the
-    // name back on the label⇄editor swap to seed the draft.
-    let rename = InlineRename::new(
-        wid::rename(node.node_id),
-        node.name(),
-        &node.theme().flat_text_edit.bold,
-    )
-    .max_chars(NODE_NAME_MAX_CHARS);
-    let rename = if node.stub() {
-        rename.read_only()
-    } else {
-        rename
-    };
-    match rename.show(ui) {
-        RenameEvent::Idle => {}
-        RenameEvent::Clicked => record.out.extend_graph(GraphIntent::click(
+    let title = EditableLabel::new(node.name())
+        .id(wid::rename(node.node_id))
+        .style(&node.theme().flat_text_edit.bold)
+        .max_chars(NODE_NAME_MAX_CHARS)
+        .editable(!node.stub())
+        .min_size((NODE_NAME_MIN_WIDTH, 0.0))
+        .show(ui);
+    if let Some(to) = title.committed_text {
+        record.out.push_graph(GraphIntent::RenameNode {
+            node_id: node.node_id,
+            to,
+        });
+    } else if !title.editing && title.response.clicked() {
+        record.out.extend_graph(GraphIntent::click(
             mode,
             node.graph_ctx.selected(),
             ItemId::Node(node.node_id),
-        )),
-        RenameEvent::Committed(to) => record.out.push_graph(GraphIntent::RenameNode {
-            node_id: node.node_id,
-            to,
-        }),
+        ));
     }
 }
 

@@ -4,7 +4,7 @@
 use std::ops::Range;
 
 use palantir::{
-    Align, Chrome, CloseHandle, Configure, Corners, EditEnd, FontWeight, Key, KeyboardWake,
+    Align, Block, Chrome, CloseHandle, Configure, Corners, EditEnd, FontWeight, Key, KeyboardWake,
     MenuSeparator, Panel, RgbaF32, Scroll, Sense, Sizing, Spacing, Text, TextEdit, TextStyle,
     TextWrap, Ui, VAlign, WidgetId, fmt,
 };
@@ -319,11 +319,11 @@ impl Row<'_> {
                 } else {
                     RgbaF32::TRANSPARENT
                 };
-                Panel::hstack()
+                Block::new()
                     .id_salt("focus_bar")
                     .size((Sizing::fixed(theme.stroke.line), Sizing::HUG))
                     .chrome(Chrome::fill(bar))
-                    .show(ui, |_| {});
+                    .show(ui);
                 Panel::vstack()
                     .id_salt("body")
                     .size((Sizing::FILL, Sizing::HUG))
@@ -357,7 +357,7 @@ impl Row<'_> {
             })
             .response
             .snapshot();
-        row.left.clicked()
+        row.clicked()
     }
 }
 

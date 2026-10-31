@@ -416,7 +416,7 @@ impl GraphUi {
         // nothing about the overlay.
         Panel::zstack()
             .id_salt("graph_overlay")
-            .size((Sizing::FILL, Sizing::FILL))
+            .size(Sizing::FILL)
             .show(ui, |ui| {
                 self.record_canvas(ui, graph_ctx, out);
                 // Composed here rather than shared with the halves above and
@@ -506,7 +506,7 @@ impl GraphUi {
         // every pan/zoom tick.
         Panel::canvas()
             .id(canvas::outer_wid())
-            .size((Sizing::FILL, Sizing::FILL))
+            .size(Sizing::FILL)
             .sense(Sense::CLICK | Sense::DRAG | Sense::SCROLL | Sense::PINCH)
             .clip_rect()
             .chrome(Chrome::fill(theme.canvas.bg))
@@ -516,7 +516,7 @@ impl GraphUi {
                 self.bg.draw(ui, theme, viewport);
                 Panel::canvas()
                     .id(canvas::inner_wid())
-                    .size((Sizing::FILL, Sizing::FILL))
+                    .size(Sizing::FILL)
                     .transform(TranslateScale::new(viewport.pan, viewport.zoom))
                     .show(ui, |ui| {
                         let cull = CullRegion::from_size(

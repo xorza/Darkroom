@@ -40,10 +40,10 @@ impl Backend {
     }
 
     /// Play `action` and settle, the editor's own work included; the frames it ran.
-    pub(crate) fn play(&mut self, action: &Play, step: &str) -> Result<u32, DriverError> {
+    pub(crate) fn play(&mut self, action: &Play) -> Result<u32, DriverError> {
         match self {
-            Self::Offscreen(offscreen) => Ok(offscreen.play(action)? + offscreen.settle(step)?),
-            Self::Window(window) => window.play(action, step),
+            Self::Offscreen(offscreen) => offscreen.play(action),
+            Self::Window(window) => window.play(action),
         }
     }
 
@@ -66,8 +66,8 @@ impl Backend {
         }
     }
 
-    /// Whether background work announced a result no frame has taken yet. The window's host runs
-    /// that frame itself.
+    /// Whether a wake waits for the next frame: work the worker posted since the last settle.
+    /// The window runs that frame at once, so none waits there.
     pub(crate) fn wake_pending(&self) -> bool {
         match self {
             Self::Offscreen(offscreen) => offscreen.wake_pending(),

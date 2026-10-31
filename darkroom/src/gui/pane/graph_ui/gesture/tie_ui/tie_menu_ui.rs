@@ -81,7 +81,7 @@ impl TieMenuUi {
                 if entry.hovered() {
                     lit = Some(wire);
                 }
-                if entry.left.clicked() {
+                if entry.clicked() {
                     chosen = Some(MenuChoice::Release(wire));
                 }
             }
@@ -95,11 +95,11 @@ impl TieMenuUi {
             } else {
                 ("Pin angle", MenuChoice::Pin)
             };
-            if MenuItem::new(label).show(ui, popup).left.clicked() {
+            if MenuItem::new(label).show(ui, popup).clicked() {
                 chosen = Some(choice);
             }
             MenuSeparator::new().show(ui);
-            if MenuItem::new("Remove tie").show(ui, popup).left.clicked() {
+            if MenuItem::new("Remove tie").show(ui, popup).clicked() {
                 chosen = Some(MenuChoice::Remove);
             }
             chosen

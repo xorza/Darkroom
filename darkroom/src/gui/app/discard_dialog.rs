@@ -160,7 +160,6 @@ fn show(ui: &mut Ui, theme: &Theme, file_name: Option<&str>, tail: &str) -> Disc
     // as the dialog is up: once it closes nothing records the checkbox, the
     // row is swept, and the next open starts unchecked.
     let dont_ask_id = dont_ask_wid();
-    let opened = ui.state::<DontAskAgain>(dont_ask_id).is_none();
     ui.with_state::<DontAskAgain, _>(dont_ask_id, |ui, DontAskAgain(dont_ask_again)| {
         let mut choice = DiscardChoice::Stay;
         let resp = Modal::new()
@@ -214,13 +213,13 @@ fn show(ui: &mut Ui, theme: &Theme, file_name: Option<&str>, tail: &str) -> Disc
                                 {
                                     choice = DiscardChoice::Save;
                                 }
-                                // Save holds the focus as the dialog opens, so Return presses it.
-                                if opened {
-                                    ui.set_focus(save_wid());
-                                }
                             });
                     });
             });
+        // Save holds the focus as the dialog opens, so Return presses it.
+        if resp.opened {
+            ui.set_focus(save_wid());
+        }
         // Esc / backdrop click dismisses the modal — treat as Cancel.
         if resp.dismissed {
             choice = DiscardChoice::Cancel;
@@ -350,7 +349,11 @@ mod tests {
             "the row ends at the body's right edge"
         );
         assert!(body.size.w <= title_measure(&theme), "{}", body.size.w);
-        let line = theme.palantir.text.line_height_for(theme.font.title);
+        let line = theme
+            .palantir
+            .text
+            .with_font_size(theme.font.title)
+            .line_height();
         assert!(
             title.size.h >= 2.0 * line,
             "the title wraps: {}",
