@@ -16,8 +16,8 @@
 //! frame; [`SessionHarness::frame`] returns the commands of every pass, in order.
 
 use glam::UVec2;
-use palantir::Harness;
 use palantir::Ui;
+use palantir::{ColorScheme, Harness};
 use scenarium::Library;
 
 use crate::core::document::internals::DocumentFixture;
@@ -71,7 +71,8 @@ impl SessionHarness {
         // widget darkroom records reads its geometry from — the dock's
         // tab strips among them. Without it a geometry assertion here
         // measures palantir's stock theme rather than darkroom's.
-        ui.ui().set_theme(theme.palantir.clone());
+        ui.ui()
+            .set_theme_for(ColorScheme::Dark, theme.palantir.clone());
         Self {
             ui,
             session: Session::new(OpenDocument::over(fixture.document)),
