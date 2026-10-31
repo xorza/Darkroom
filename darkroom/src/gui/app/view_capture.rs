@@ -1,12 +1,12 @@
 //! [`ViewCapture`]: an image of the window the user asked for, from the command to the frame its
 //! screenshot lands in.
 
-use std::io::{BufWriter, Write as _};
+use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 
 use common::fs::{self, PublicationMode};
 use image::codecs::png::PngEncoder;
-use image::{ImageError, RgbaImage};
+use image::{ExtendedColorType, ImageEncoder, ImageError};
 use palantir::{Clipboard, Image, Ui};
 
 use crate::gui::app::error::ViewCaptureError;
@@ -61,7 +61,7 @@ impl ViewCapture {
             CaptureTarget::Clipboard => Ok(clipboard.set_image(image)?),
             CaptureTarget::Png(path) => fs::publish(&path, PublicationMode::Durable, |file| {
                 let mut out = BufWriter::new(file);
-                rgba_image(image).write_with_encoder(PngEncoder::new(&mut out))?;
+                write_png(image, &mut out)?;
                 out.flush()?;
                 Ok::<_, ImageError>(())
             })
@@ -70,16 +70,8 @@ impl ViewCapture {
     }
 }
 
-/// `image`'s texels as the `image` crate holds them, for its codecs and filters.
-pub(crate) fn rgba_image(image: &Image) -> RgbaImage {
+/// Encode `image` as a PNG into `out`, straight from its bytes.
+pub(crate) fn write_png(image: &Image, out: impl Write) -> Result<(), ImageError> {
     let size = image.size();
-    // Through whole texels, then flattened: an exact-size map, where a flat map's unknown length
-    // regrows the buffer as it fills.
-    let bytes = image
-        .texels()
-        .iter()
-        .map(|texel| [texel.r, texel.g, texel.b, texel.a])
-        .collect::<Vec<_>>()
-        .into_flattened();
-    RgbaImage::from_raw(size.x, size.y, bytes).expect("four bytes per texel")
+    PngEncoder::new(out).write_image(image.as_srgba8(), size.x, size.y, ExtendedColorType::Rgba8)
 }

@@ -49,12 +49,11 @@ fn item(
     shortcut: Option<Shortcut>,
     enabled: bool,
 ) -> bool {
-    let row = MenuItem::new(label).disabled(!enabled);
-    let row = match shortcut {
-        Some(shortcut) => row.shortcut_hint(shortcut),
-        None => row,
-    };
-    row.show(ui, popup).left.clicked()
+    MenuItem::new(label)
+        .disabled(!enabled)
+        .shortcut_hint(shortcut)
+        .show(ui, popup)
+        .clicked()
 }
 
 fn file_menu(bar: &mut MenuBarMenus<'_>, out: &mut Requests) {

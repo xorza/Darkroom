@@ -4,6 +4,7 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use palantir::wgpu::Features;
 use palantir::{
     GpuRequestError, Harness, InspectedWidget, PlayError, PowerPreference, RequestedGpu,
     Screenshot, Ui, WindowCommand,
@@ -168,11 +169,7 @@ fn harness(config: SessionConfig) -> Result<Harness, GpuRequestError> {
     Ok(match config.display {
         DisplayKind::Gpu => {
             // No optional features: the editor draws with what every adapter has.
-            #[expect(
-                clippy::default_trait_access,
-                reason = "the features are wgpu's type, which darkroom does not depend on"
-            )]
-            let gpu = RequestedGpu::headless(PowerPreference::HighPerformance, Default::default())?;
+            let gpu = RequestedGpu::headless(PowerPreference::HighPerformance, Features::empty())?;
             builder.gpu(gpu.gpu).build()
         }
         #[cfg(feature = "internals")]

@@ -190,42 +190,6 @@ change runs `cargo drive check` and `cargo drive test` from the root. A palantir
 palantir's suite beside the code it tests, with hand-computed values. Whoever addresses an item
 deletes it.
 
-### Batch 10: window geometry as one value
-
-Files: `palantir/src/window/window_geometry.rs`, `palantir/src/window/` (`WindowConfig`),
-`palantir/src/host/winit/window/`; `darkroom/src/core/io/preferences/mod.rs`,
-`darkroom/src/gui/app/mod.rs`, `darkroom/src/lib.rs`.
-
-- [ ] `window_geometry.rs`: the geometry cannot be saved, and while maximized it gives the
-  maximized size. Derive `Serialize` and `Deserialize`, keep the normal bounds, and add
-  `WindowConfig::with_geometry`. Test: maximize, then read the normal size the window had.
-- [ ] `preferences/mod.rs` `WindowState` and `app/mod.rs:246` `track_window_state`: a copy of the
-  type, and a rule by hand that keeps the last normal size. Store `WindowGeometry`, and restore it
-  in `lib.rs` with `with_geometry`.
-
-### Batch 11: small API additions
-
-Files: `palantir/src/widgets/context_menu/menu_item.rs`, `palantir/src/primitives/paint/`
-(`Image`), `palantir/src/primitives/geometry/cubic_bezier/mod.rs`,
-`palantir/src/primitives/identity/widget_id/mod.rs`, `palantir/src/gpu/device/requested_gpu.rs`,
-`palantir/src/widget_core/overlay_response.rs`, `palantir/src/layout/` (`Grid`); and the darkroom
-callers.
-
-- [ ] `menu_item.rs:55,61`: `shortcut` and `shortcut_hint` take a `Shortcut`. Take
-  `impl Into<Option<Shortcut>>`; `menu_bar.rs` `item` drops its `match`.
-- [ ] `Image`: no byte view on the output side. Add `as_srgba8` and `into_srgba8`;
-  `view_capture.rs:74` `rgba_image` and `shot.rs` stop the texel copy.
-- [ ] `cubic_bezier/mod.rs:37`: `bbox` is crate-private and there is no `at` or `velocity`. Make
-  the three public; `frame/wire/mod.rs` `Wire` holds a `CubicBezier` and drops its copies.
-- [ ] `widget_id/mod.rs:48`: no `const` constructor. Add `WidgetId::named`; turn darkroom's 32
-  literal-id functions into `const` items.
-- [ ] `requested_gpu.rs`: `headless` takes wgpu's `Features`. Take `DeviceFeatures`;
-  `driver/offscreen.rs` drops its lint `expect`.
-- [ ] `overlay_response.rs`: no edge for the first frame. Add `opened`; `discard_dialog.rs` drops
-  the `ui.state::<DontAskAgain>(…).is_none()` probe.
-- [ ] `Grid`: add `auto_rows(track)`; `node_ui/mod.rs` drops `row_tracks` and `port_row/mod.rs`
-  its refill.
-
 ### Batch 12: darkroom-only fixes
 
 Files: as each item names.
@@ -276,6 +240,12 @@ Files: `palantir/AGENTS.md`, `darkroom/AGENTS.md`, `.notes/review-palantir-api.m
 
 ## Changed
 
+- Batch 11, `RequestedGpu::headless`: keeps wgpu's `Features`, as its optional features are any
+  an app's own `GpuPaint` needs, past palantir's `DeviceFeatures`. darkroom passes
+  `palantir::wgpu::Features::empty()` and drops its lint `expect`.
+- Batch 11, `Image::into_srgba8`: not added, as nothing takes an image by value. With
+  `as_srgba8`, darkroom encodes its PNGs straight from the image's bytes, with no copy.
+
 - Batch 9: palantir holds a popup asked to sit at a point where its first frame landed it, and
   places one asked to sit beside a rect each frame, as `dynamic_body_size_repositions_at_every_
   viewport_edge_without_settling` pins: a list under its button flips to keep the button clear.
@@ -321,6 +291,18 @@ Files: `palantir/AGENTS.md`, `darkroom/AGENTS.md`, `.notes/review-palantir-api.m
   palantir API, as the search may stop at the first chord that fired (see Declined).
 
 ## Declined
+
+- Batch 10, window geometry as one value: winit 0.30 reports no bounds a maximized window
+  restores to, so palantir would track them frame by frame, the rule darkroom's
+  `track_window_state` already keeps, and seed them from each host's window config. palantir's
+  `AGENTS.md` shelves a structural change no workload needs; darkroom is the one app.
+- Batch 11, curve math on `CubicBezier`: darkroom's `Wire` carries its own construction rules and
+  its control hull for culling; the two formulas it would share are textbook lines, and each call
+  would convert to palantir's type.
+- Batch 11, `WidgetId::named`: a second hash beside `WidgetId::from_hash` gives one name two ids,
+  and a function that returns a constant id serves.
+- Batch 11, `Grid::auto_rows`: implicit rows need the grid driver to grow its track list from the
+  cells it measures, a layout change for one call site that already reuses one `Vec`.
 
 - Batch 8, pan and zoom on `TranslateScale`: the algebra `Scroll` and darkroom share is one line,
   `pan = pivot − (pivot − pan) · factor`. The policies around it differ: `Scroll` zooms on a
