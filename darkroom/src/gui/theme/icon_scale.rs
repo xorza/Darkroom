@@ -32,8 +32,8 @@ pub(crate) struct IconScale {
 }
 
 impl IconScale {
-    /// The boxes the review chose: 6 px a side for a button, as "An icon button gives its icon
-    /// 6 px a side" in `darkroom/AGENTS.md` records.
+    /// 6 px a side for a button's icon: a toolbar chip draws 18 in 30, a node header's button 16
+    /// in 28, a step over the 14 px title. Refused: 15 in 22, whose 3.5 px read cramped.
     pub(super) const fn new(text: &TextSteps) -> Self {
         Self {
             toolbar: IconBox {

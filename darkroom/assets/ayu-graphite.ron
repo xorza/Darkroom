@@ -26,7 +26,7 @@
     element_strong: "#525252",    // elem_active          gray_5
 
     // Graph — the wires, and the marks drawn over them.
-    accent:         "#44b5ff",    // accent               blue_bright
+    accent:         "#d1ff02",    // (fixed)              palantir's dark accent
     wire_broken:    "#ff8b8c",    // error                red_bright
     breaker_stroke: "#ff8b8c",    // error                red_bright
 
@@ -41,7 +41,7 @@
     port_label:     "#a4a4a4",    // text_muted           gray_6
 
     // Badges — what a node's head says about itself.
-    link:           "#44b5ff",    // accent               blue_bright
+    link:           "#d1ff02",    // (fixed)              palantir's dark accent
     badge_cache:    "#f6e055",    // warning              yellow_bright
     badge_kind:     "#ebebeb",    // text                 gray_7
 

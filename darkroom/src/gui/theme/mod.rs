@@ -355,7 +355,9 @@ impl Theme {
 
 /// Font sizes by prominence, the Windows Fluent 2 ramp (Caption 12, Body 14, Subtitle 16): two
 /// points between tiers, a step the eye resolves. A literal at a call site is a missing tier.
-/// `darkroom/AGENTS.md`, "The look", "One type ladder for darkroom and palantir".
+/// palantir reads it too, so its ambient text is the body and no palantir widget shows a size of
+/// its own. Refused: 15/13/11, the macOS and KDE body size, which read small on a large screen at
+/// scale 1.5; a label a point under the body, which reads as the same size.
 const TEXT: TextSteps = TextSteps {
     caption: 12.0,
     body: 14.0,
@@ -393,8 +395,8 @@ const STROKE: StrokeSteps = StrokeSteps {
 /// The steps palantir's recipes read, so a palantir control lines up with a darkroom one: a
 /// field and a button beside it share one height, a menu rounds and casts as every floating
 /// surface does. No transition: darkroom's controls snap, so a view saved right after a menu
-/// pick pictures the settled window. `darkroom/AGENTS.md`, "The look", "palantir's recipes read
-/// the theme's steps".
+/// pick pictures the settled window. Refused: overriding palantir's literals field by field after
+/// it built its derived recipes, which left the drag value on the old button padding.
 const fn metrics(elevation: &ElevationScale) -> Metrics {
     Metrics {
         text: TEXT,
@@ -412,8 +414,11 @@ const fn metrics(elevation: &ElevationScale) -> Metrics {
 /// `chrome` as the frosted glass every surface that floats over content wears, the popups and the
 /// toolbar pills: its own solid fill as a tint at 0.72 alpha over a backdrop blurred by σ 20
 /// logical px, wide enough that a node's title under it reads as color, not as text, and capped
-/// so `ink`, the dimmest ink the surface paints, keeps its contrast. `darkroom/AGENTS.md`, "The
-/// look", "A surface that floats over content is frosted glass".
+/// so `ink`, the dimmest ink the surface paints, keeps its contrast at 4.5:1, as Fluent puts
+/// acrylic under flyouts and in-app surfaces
+/// ([in-app acrylic](https://learn.microsoft.com/windows/apps/develop/ui/in-app-acrylic)).
+/// Refused: a tint alone, 1.18:1 over a white image; a frosted modal, whose scrim leaves nothing
+/// to see through.
 pub(super) fn frosted(chrome: &Chrome, ink: RgbaF32) -> Chrome {
     let tint = chrome
         .fill

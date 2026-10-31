@@ -27,12 +27,12 @@ pub(super) const fn palette(p: &Palette) -> palantir::Palette {
         element: p.node_bg,
         element_mid: p.element_mid,
         element_strong: p.element_strong,
-        // The accent, 5.19:1 on a node, where a darker blue read 1.99:1 on a field's fill,
-        // under the 3:1 WCAG 1.4.11 asks of a focus indicator.
+        // The accent, 10.06:1 on a node and 8.23:1 on a field's fill, over the 3:1 WCAG 1.4.11
+        // asks of a focus indicator.
         border_focused: p.accent,
         accent: p.accent,
-        // The canvas's ink on the accent, as palantir's dark palette sets it: 8.16:1, where the
-        // body text read 1.89:1 as an on switch's knob.
+        // The canvas's ink on the accent, as palantir's dark palette sets it: 15.80:1, where the
+        // body text read 1.02:1 as an on switch's knob.
         on_accent: p.canvas_bg,
         shadow: p.shadow,
     }
@@ -67,10 +67,12 @@ pub(super) fn theme(
     // The panel sits inside a rule in the separators' ink, not on palantir's lit border.
     menu.panel.border.color = p.border_soft();
     // Every light-dismiss popup is frosted: the menu panel, which the menus, the node palette and
-    // the combo lists wear, the tooltip and the color picker. A modal keeps its opaque panel: it
-    // dims what is behind it under a scrim, so there is nothing to see through.
+    // the combo lists wear, a bare popup's panel, the tooltip and the color picker. A modal keeps
+    // its opaque panel: it dims what is behind it under a scrim, so there is nothing to see
+    // through.
     for panel in [
         &mut theme.context_menu.panel,
+        &mut theme.popup.panel,
         &mut theme.tooltip.panel,
         &mut theme.color_picker.popup,
     ] {

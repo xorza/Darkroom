@@ -60,5 +60,7 @@ impl CanvasTheme {
     }
 }
 
-/// A wire's width: `darkroom/AGENTS.md`, "The look", "A wire is 2.5 px".
+/// A wire's width, which the drag preview, the pin leader and the breaker scribble share, as
+/// Blender's links. Refused: 2 px, which thinned to 1 px at 50 %, and 3 px, which made crossings
+/// busy beside 12 px ports.
 const WIRE: f32 = 2.5;
