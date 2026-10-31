@@ -58,12 +58,12 @@ pub(crate) struct ConstEditorLooks {
 }
 
 impl ConstEditorLooks {
-    /// Shared shape: palantir's `menu_button` preset over `p` and `m` (no border) as the chip,
+    /// Shared shape: palantir's `subtle` button over `p` and `m` (no border) as the chip,
     /// inset as the bridged `field`, the app's text edit, with the inline editor derived from
     /// that chip so both modes share one box, and caret, selection and placeholder from `field`
     /// so it matches the app's other fields.
     pub(super) fn new(p: &palantir::Palette, m: &palantir::Metrics, field: &TextEditTheme) -> Self {
-        let mut chip = ButtonTheme::menu_button(p, m);
+        let mut chip = ButtonTheme::subtle(p, m);
         chip.defaults.padding = field.defaults.padding;
         let base = DragValueTheme::from_chip(chip, field);
         Self {

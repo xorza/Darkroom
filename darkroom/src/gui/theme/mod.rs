@@ -319,7 +319,7 @@ impl Theme {
         let status = StatusColors::from_palette(p);
         let metrics = metrics(&elevation);
         let palantir = palantir_bridge::theme(&pal, &metrics, &icon);
-        let primary_button = palantir_bridge::primary_button(&pal, &metrics);
+        let primary_button = ButtonTheme::accent(&pal, &metrics);
         let pill = frosted(
             &Chrome::rounded(colors.surround_bg, Corners::all(radius.float)),
             ink.muted,
