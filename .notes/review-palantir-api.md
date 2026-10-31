@@ -190,19 +190,6 @@ change runs `cargo drive check` and `cargo drive test` from the root. A palantir
 palantir's suite beside the code it tests, with hand-computed values. Whoever addresses an item
 deletes it.
 
-### Batch 5: an editable label
-
-Files: `palantir/src/widgets/` (new `editable_label/`); `darkroom/src/gui/widgets/inline_rename/`,
-`darkroom/src/gui/pane/graph_ui/node_ui/header/mod.rs`.
-
-- [ ] New `palantir/src/widgets/editable_label/`: `EditableLabel` as the target design says, on
-  `TextEdit::buffered`. Test, from darkroom's `inline_rename/tests.rs`: the glyphs keep their
-  rect across the swap, a double click opens the editor with the text selected, Esc keeps the
-  name, and a drag that starts on the idle label reports its start, which the node header reads
-  to move its node.
-- [ ] `inline_rename/`: copies `TextEdit`'s private caret room (`mod.rs:117-124`). Delete it.
-  `header/mod.rs` `title` uses `EditableLabel` with `editable(!node.stub())`.
-
 ### Batch 6: hosts wake, settle and open files alike
 
 Files: `palantir/src/app.rs`, `palantir/src/ui/mod.rs`, `palantir/src/host/harness/`,
@@ -373,6 +360,13 @@ Files: `palantir/AGENTS.md`, `darkroom/AGENTS.md`, `.notes/review-palantir-api.m
   label would stop measuring as a leaf's does.
 
 ## Changed
+
+- `TextEdit::buffered`: the draft takes the current value on every frame that follows one the
+  field was not focused in, not only while idle, so a session that opens with a `set_focus`, as
+  `EditableLabel`'s does, starts from the value.
+- `EditableLabel`: its response reports `editing` beside `committed_text`, so a caller reads a
+  click as one on the label alone; the first Escape drops the selection the editor opens with,
+  as in every `TextEdit`, and the second the edit.
 
 - `drag_value/mod.rs`: keeps its own draft. It parses the draft on each keystroke and shows the
   value live, where `TextEdit::buffered` hands the draft over only on its commit; moving it

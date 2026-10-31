@@ -7,7 +7,6 @@ pub(crate) mod format;
 pub(crate) mod hover;
 pub(crate) mod icon;
 pub(crate) mod icon_button;
-pub(crate) mod inline_rename;
 pub(crate) mod link;
 pub(crate) mod pan_drag;
 pub(crate) mod pill;
