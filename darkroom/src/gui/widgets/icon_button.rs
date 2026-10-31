@@ -155,9 +155,9 @@ mod tests {
     fn an_on_button_rests_under_the_hover_lift_and_rises_past_it() {
         let theme = Theme::default();
         let off = press_style(&theme, theme.ink.muted);
-        let lift = fill(&off.looks.hovered);
+        let lift = fill(&off.unselected.hovered);
         assert!(
-            off.looks.normal.chrome.fill.is_noop(),
+            off.unselected.normal.chrome.fill.is_noop(),
             "a resting button paints no quad"
         );
         for (ink, name) in [(theme.badge.cache, "cache"), (theme.ink.muted, "disable")] {

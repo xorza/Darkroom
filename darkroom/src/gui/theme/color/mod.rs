@@ -32,7 +32,7 @@ pub(crate) fn wash(ink: RgbaF32, alpha: f32, ground: RgbaF32) -> RgbaF32 {
         (0.0..=1.0).contains(&alpha),
         "a wash's alpha is a fraction: {alpha}"
     );
-    let [ink, under] = [ink, ground].map(RgbaF32::to_srgba);
+    let [ink, under] = [ink, ground].map(RgbaF32::to_srgba8);
     let over = |a: u8, b: u8| (alpha * f32::from(a) + (1.0 - alpha) * f32::from(b)) / 255.0;
     RgbaF32::srgb(
         over(ink.r, under.r),

@@ -360,7 +360,7 @@ mod tests {
             title.size.h
         );
         assert_eq!(
-            theme.primary_button.looks.normal.chrome.fill,
+            theme.primary_button.unselected.normal.chrome.fill,
             theme.colors.accent.into()
         );
         h.key(Key::Enter);

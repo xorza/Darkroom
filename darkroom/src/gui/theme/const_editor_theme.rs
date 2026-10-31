@@ -84,7 +84,7 @@ impl ConstEditorLooks {
 impl ConstEditorTheme {
     /// The box a value sits in at rest, which the inspector draws a value in as the node does.
     pub(crate) const fn rest_box(&self) -> &Chrome {
-        &self.drag_value.chip.looks.normal.chrome
+        &self.drag_value.chip.unselected.normal.chrome
     }
 
     /// The inset of the value in [`Self::rest_box`].
@@ -98,10 +98,10 @@ impl ConstEditorTheme {
     fn with_box(base: &DragValueTheme, p: &palantir::Palette, alpha: f32) -> Self {
         let mut drag_value = base.clone();
         let rest = Brush::Solid(color::wash(p.element_mid, alpha, p.element));
-        drag_value.chip.looks.normal.chrome.fill = rest.clone();
+        drag_value.chip.unselected.normal.chrome.fill = rest.clone();
         drag_value.editor.looks.normal.chrome.fill = rest;
         let mut number = drag_value.clone();
-        for look in number.chip.looks.each_mut() {
+        for look in number.chip.unselected.each_mut() {
             look.text = look.text.with_family(FontFamily::MONO);
         }
         for look in number.editor.looks.each_mut() {

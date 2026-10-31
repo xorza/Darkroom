@@ -125,11 +125,11 @@ pub(crate) fn hover_looks(rest: WidgetLook, lit: WidgetLook) -> StatefulLook {
     }
 }
 
-/// A button that draws its own box: `looks` while off, `selected` while on, no padding or margin,
-/// and no transition, as darkroom's controls snap.
-pub(crate) const fn flush_button(looks: StatefulLook, selected: StatefulLook) -> ButtonTheme {
+/// A button that draws its own box: `unselected` while off, `selected` while on, no padding or
+/// margin, and no transition, as darkroom's controls snap.
+pub(crate) const fn flush_button(unselected: StatefulLook, selected: StatefulLook) -> ButtonTheme {
     ButtonTheme {
-        looks,
+        unselected,
         selected,
         defaults: SlotDefaults {
             padding: Spacing::ZERO,

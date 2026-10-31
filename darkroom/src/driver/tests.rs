@@ -65,7 +65,7 @@ fn decode(png: &[u8]) -> image::RgbaImage {
 }
 
 fn srgb(color: palantir::RgbaF32) -> [u8; 4] {
-    let bytes = color.to_srgba();
+    let bytes = color.to_srgba8();
     [bytes.r, bytes.g, bytes.b, bytes.a]
 }
 

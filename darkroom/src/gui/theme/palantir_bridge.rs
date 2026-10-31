@@ -87,8 +87,8 @@ const MENU_MIN_WIDTH: f32 = 240.0;
 const fn tab_close(tabs: &mut TabsTheme, icon: &IconScale) {
     let close = icon.inline;
     tabs.close_size = close.side();
-    tabs.close_glyph = icon::cross_span(close.icon);
-    tabs.close_stroke = icon::stroke_width(close.icon);
+    tabs.close_glyph_span = icon::cross_span(close.icon);
+    tabs.close_glyph_width = icon::stroke_width(close.icon);
     tabs.close.active.chrome.border = Stroke::NONE;
 }
 
@@ -99,7 +99,7 @@ pub(super) fn primary_button(p: &palantir::Palette, m: &palantir::Metrics) -> Bu
     let mut button = ButtonTheme::from_parts(p, m);
     let on_accent = TextStyleOverrides::NONE.with_color(p.window_bg);
     // Destructured, so a state palantir adds fails here rather than keeping its default.
-    let [normal, hovered, active, _disabled] = button.looks.each_mut();
+    let [normal, hovered, active, _disabled] = button.unselected.each_mut();
     for (look, fill) in [
         (normal, p.accent),
         (hovered, color::hover_lift(p.accent)),
