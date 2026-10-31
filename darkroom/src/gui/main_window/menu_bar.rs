@@ -1,6 +1,6 @@
 use palantir::{
-    Align, CloseHandle, Configure, DockOperation, HAlign, MenuBar, MenuBarMenus, MenuItem,
-    MenuSeparator, Panel, Sense, Shortcut, Sizing, Text, Ui, VAlign, fmt,
+    Align, CloseHandle, Configure, DockOperation, MenuBar, MenuBarMenus, MenuItem, MenuSeparator,
+    Panel, Sense, Shortcut, Sizing, Text, Ui, VAlign, fmt,
 };
 use scenarium::NodeId;
 
@@ -29,7 +29,7 @@ pub(crate) fn show(ui: &mut Ui, ctx: WindowCtx<'_>, out: &mut Requests) {
             MenuBar::new()
                 .id_salt("menu_bar_menus")
                 .size((Sizing::HUG, Sizing::HUG))
-                .align(Align::new(HAlign::Left, VAlign::Center))
+                .align(Align::LEFT)
                 .show(ui, |bar| {
                     file_menu(bar, out);
                     edit_menu(bar, ctx, out);
@@ -204,10 +204,8 @@ mod tests {
 
     /// The visible widget whose text starts with `label`: a menu row's text is its label, then
     /// its chord.
-    fn widget(h: &mut SessionHarness, label: &str) -> InspectedWidget {
-        let mut listed = Vec::new();
-        h.ui.ui().inspect(&mut listed);
-        listed
+    fn widget(h: &SessionHarness, label: &str) -> InspectedWidget {
+        h.ui.widgets(Some(label))
             .into_iter()
             .find(|widget| widget.text == label || widget.text.starts_with(&format!("{label} ")))
             .unwrap_or_else(|| panic!("no widget reads {label:?}"))
@@ -259,11 +257,11 @@ mod tests {
                 format!("{:?}", [expected]),
                 "{menu} ▸ {row}"
             );
-            let trigger = widget(&mut h, menu).id;
+            let trigger = widget(&h, menu).id;
             h.ui.click(trigger);
             h.frame();
             h.prime(2);
-            let text = widget(&mut h, row).text;
+            let text = widget(&h, row).text;
             let shown = match chord {
                 Some(chord) => format!("{row} {chord}"),
                 None => row.to_owned(),
@@ -277,22 +275,19 @@ mod tests {
     fn undo_waits_for_an_edit() {
         let mut h = SessionHarness::new(DocumentFixture::probes(1));
         h.prime(2);
-        let edit = widget(&mut h, "Edit").id;
+        let edit = widget(&h, "Edit").id;
         h.ui.click(edit);
         h.frame();
         h.prime(2);
-        assert!(widget(&mut h, "Undo").disabled, "nothing to undo yet");
-        assert!(widget(&mut h, "Delete").disabled, "nothing selected");
+        assert!(widget(&h, "Undo").disabled, "nothing to undo yet");
+        assert!(widget(&h, "Delete").disabled, "nothing selected");
 
         let node_id = h.session.open.document.graph.iter().next().unwrap().node_id;
         let _relayout = h.apply(GraphIntent::SetSelection {
             to: [ItemId::Node(node_id)].into(),
         });
         h.prime(2);
-        assert!(
-            !widget(&mut h, "Undo").disabled,
-            "the selection is an entry"
-        );
-        assert!(!widget(&mut h, "Delete").disabled, "one node selected");
+        assert!(!widget(&h, "Undo").disabled, "the selection is an entry");
+        assert!(!widget(&h, "Delete").disabled, "one node selected");
     }
 }

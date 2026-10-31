@@ -3,7 +3,7 @@
 //! chips in [`chip`](crate::gui::widgets::chip).
 
 use palantir::{
-    Align, Chrome, Configure, Corners, FontFamily, FontWeight, Panel, Rect, ResponseSnapshot,
+    Align, Block, Chrome, Configure, Corners, FontFamily, FontWeight, Rect, ResponseSnapshot,
     RgbaF32, Sizing, TextInput, TextStyle, TextWrap, Tooltip, Ui,
 };
 
@@ -97,20 +97,20 @@ pub(crate) fn dot(center: Vec2, r: f32) -> RectShape {
 /// after it: the unsaved mark, a memory pool's key. [`dot`] is the bare shape, with no layout.
 pub(crate) fn dot_cell(ui: &mut Ui, salt: &'static str, theme: &Theme, hue: RgbaF32) {
     let side = theme.icon.dot;
-    Panel::zstack()
+    Block::new()
         .id_salt(salt)
-        .size((Sizing::fixed(side), Sizing::fixed(side)))
+        .size(side)
         .chrome(Chrome::rounded(hue, Corners::all(side * 0.5)))
-        .show(ui, |_| {});
+        .show(ui);
 }
 
 /// An empty stretch panel pushing the following hstack siblings to the
 /// far edge. `salt` keeps sibling spacers' ids distinct.
 pub(crate) fn hspacer(ui: &mut Ui, salt: &'static str) {
-    Panel::hstack()
+    Block::new()
         .id_salt(salt)
         .size((Sizing::FILL, Sizing::HUG))
-        .show(ui, |_| {});
+        .show(ui);
 }
 
 /// Shows `tooltip` as a hover tooltip anchored to `snapshot`; `None` records

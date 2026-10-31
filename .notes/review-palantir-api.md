@@ -190,26 +190,6 @@ change runs `cargo drive check` and `cargo drive test` from the root. A palantir
 palantir's suite beside the code it tests, with hand-computed values. Whoever addresses an item
 deletes it.
 
-### Batch 12: darkroom-only fixes
-
-Files: as each item names.
-
-- [ ] D1, `image_viewer/mod.rs:388` `header`: the header's width comes from last frame's controls
-  width, so for one frame after a resize the two overlap. Put the header and the controls column
-  in one `Panel::hstack` row, the header hugging with `TextWrap::Ellipsis`, and drop the
-  `response_for` read.
-- [ ] D2, existing sugar: 12 `Align::new(HAlign::…, VAlign::…)` equal a constant
-  (`Align::TOP_LEFT`, `LEFT`, `TOP`, `TOP_RIGHT`, `RIGHT`); 7 square
-  `(Sizing::fixed(s), Sizing::fixed(s))` are `.size(s)`; 11 `(Sizing::FILL, Sizing::FILL)` are
-  `.size(Sizing::FILL)`; 18 `.left.clicked()` are `.clicked()`; the empty
-  `Panel … .show(ui, |_| {})` calls (`support::dot_cell`, `support::hspacer`, the palette's focus
-  bar, `node_footer.rs` `bar_segment`) are `Block`s.
-- [ ] D4, tests: `menu_bar.rs:208`, `node_footer.rs:193` and `tie_ui/tests.rs:364` each list
-  widgets through `ui().inspect` with a helper of their own. Use `Harness::widgets(filter)` or
-  `Harness::find` where they serve, and one shared helper where they do not.
-  `node_footer.rs:189` rounds to the 1/64 px grid that `line_height_for` already returns; drop the
-  rounding.
-
 ### Batch 13: fold the decisions and delete this file
 
 Files: `palantir/AGENTS.md`, `darkroom/AGENTS.md`, `.notes/review-palantir-api.md`.

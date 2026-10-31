@@ -94,7 +94,7 @@ impl CanvasGesture {
         if right_click || resp.left.double_clicked() {
             return Some(Self::NewNode);
         }
-        if resp.left.clicked() {
+        if resp.clicked() {
             return Some(Self::Deselect);
         }
         None

@@ -46,7 +46,7 @@ pub(crate) fn show(ui: &mut Ui, ctx: GraphCtx<'_>, target: InspectTarget, out: &
     let theme = ctx.theme();
     Scroll::vertical()
         .id_salt(("inspector", target))
-        .size((Sizing::FILL, Sizing::FILL))
+        .size(Sizing::FILL)
         .show(ui, |ui| {
             Panel::vstack()
                 .id_salt("inspector_body")
@@ -388,11 +388,7 @@ impl PortDot {
                 .with_border(Stroke::new(self.color, theme.stroke.line)),
             DotFill::Blank => Chrome::NONE,
         };
-        Block::new()
-            .id(wid)
-            .size((Sizing::fixed(side), Sizing::fixed(side)))
-            .chrome(chrome)
-            .show(ui);
+        Block::new().id(wid).size(side).chrome(chrome).show(ui);
     }
 }
 

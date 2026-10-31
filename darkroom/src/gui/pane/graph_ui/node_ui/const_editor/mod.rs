@@ -174,7 +174,7 @@ impl ConstEditor<'_> {
                     .style(&field.theme.drag_value.chip)
                     .text_wrap(TextWrap::EllipsisMiddle)
                     .text_align(Align::LEFT)
-                    .size((Sizing::FILL, Sizing::FILL))
+                    .size(Sizing::FILL)
                     .min_size((field.theme.width, 0.0))
                     .show(ui)
                     .snapshot();
@@ -231,7 +231,7 @@ impl Field<'_> {
         ComboBox::labeled(&mut idx, options, label)
             .id(self.id)
             .button_style(&self.theme.drag_value.chip)
-            .size((Sizing::FILL, Sizing::FILL))
+            .size(Sizing::FILL)
             .min_size((self.theme.width, 0.0))
             .show(ui);
         (idx != before).then_some(idx)

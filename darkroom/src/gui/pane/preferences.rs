@@ -15,8 +15,8 @@ use std::path::{Path, PathBuf};
 use common::{fs, process};
 use lens::MlModelPaths;
 use palantir::{
-    Align, Button, Checkbox, ComboBox, Configure, Grid, HAlign, Panel, Sizing, Spacing, Text,
-    TextEdit, TextWrap, Track, Ui, VAlign, WidgetId,
+    Align, Button, Checkbox, ComboBox, Configure, Grid, Panel, Sizing, Spacing, Text, TextEdit,
+    TextWrap, Track, Ui, VAlign, WidgetId,
 };
 
 use crate::core::io::preferences::Preferences;
@@ -47,9 +47,9 @@ impl PreferencesForm<'_> {
         let theme = self.theme;
         Panel::vstack()
             .id_salt("preferences_view")
-            .size((Sizing::FILL, Sizing::FILL))
+            .size(Sizing::FILL)
             .padding(theme.pane_padding())
-            .child_align(Align::new(HAlign::Center, VAlign::Top))
+            .child_align(Align::TOP)
             .show(ui, |ui| {
                 // One grid for every section, so a label column, a control column and a button
                 // column line up from section to section. A cell spans no column past the
@@ -134,7 +134,7 @@ impl PreferencesForm<'_> {
         ComboBox::labeled(&mut picked, &InterfaceSize::OFFERED, |size| size.label())
             .id(interface_size_wid())
             .grid_cell((row, 1))
-            .align(Align::new(HAlign::Left, VAlign::Center))
+            .align(Align::LEFT)
             .show(ui);
         if picked != before {
             *size = InterfaceSize::OFFERED[picked];

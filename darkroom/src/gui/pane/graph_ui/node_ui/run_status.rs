@@ -94,7 +94,7 @@ fn status_icon(ui: &mut Ui, theme: &Theme, icon: Icon, color: RgbaF32) {
     let side = theme.icon.inline.icon;
     Panel::zstack()
         .id_salt("run_status_icon")
-        .size((Sizing::fixed(side), Sizing::fixed(side)))
+        .size(side)
         .show(ui, |ui| {
             icon.draw(ui, Rect::new(0.0, 0.0, side, side), color);
         });

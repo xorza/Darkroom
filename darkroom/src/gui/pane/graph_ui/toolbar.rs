@@ -8,7 +8,7 @@
 //! and map to an [`AppCommand`], while the framing buttons emit an
 //! `GraphIntent::SetViewport` directly.
 
-use palantir::{Align, Configure, HAlign, Panel, Sizing, Spacing, Ui, VAlign, WidgetId};
+use palantir::{Align, Configure, Panel, Sizing, Spacing, Ui, WidgetId};
 
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::RunCommand;
@@ -51,8 +51,8 @@ pub(super) fn show(ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
     Panel::vstack()
         .id_salt("graph_toolbar")
         .size((Sizing::HUG, Sizing::HUG))
-        .align(Align::new(HAlign::Left, VAlign::Top))
-        .child_align(Align::new(HAlign::Left, VAlign::Top))
+        .align(Align::TOP_LEFT)
+        .child_align(Align::TOP_LEFT)
         .margin(Spacing::new(theme.space.sm, theme.space.sm, 0.0, 0.0))
         .gap(theme.space.sm)
         .show(ui, |ui| {
@@ -106,7 +106,7 @@ pub(super) fn show(ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
             // of band.
             let framing = Panel::vstack()
                 .id_salt("graph_toolbar_framing")
-                .child_align(Align::new(HAlign::Left, VAlign::Top));
+                .child_align(Align::TOP_LEFT);
             pill::dress(framing, theme).show(ui, |ui| {
                 if Chip::new(reset_view_wid(), "Reset view")
                     .shortcut(shortcuts::RESET_VIEW)

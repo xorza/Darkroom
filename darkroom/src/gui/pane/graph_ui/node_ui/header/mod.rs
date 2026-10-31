@@ -248,7 +248,7 @@ fn cache_button(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
             }
         }
         MenuSeparator::new().show(ui);
-        if MenuItem::new("Clear cache").show(ui, popup).left.clicked() {
+        if MenuItem::new("Clear cache").show(ui, popup).clicked() {
             record
                 .out
                 .push_app(AppCommand::Run(RunCommand::EvictCache(node.node_id)));
