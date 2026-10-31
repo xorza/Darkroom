@@ -1,1 +1,4 @@
 # Open issues
+
+- `darkroom/src/gui/pane/graph_ui/gesture/shortcuts.rs` `emit` reads `Key::Backspace` through `||` after `shortcuts::DELETE`, so on a frame where Delete fires Backspace is not read and not watched, against the function doc's rule that no chord read is short-circuited. palantir drops an unfocused press of a chord no frame watched (`InputState`, the `observable` check).
+- darkroom never reads `Ui::device_restored`. After the window host recovers from a lost GPU device, every image darkroom registered paints nothing: the canvas dot tile (`darkroom/src/gui/pane/graph_ui/canvas_bg.rs`), the viewer checker tile (`darkroom/src/gui/pane/image_viewer/mod.rs`, `draw_checker`) and every preview thumbnail and full texture in `darkroom/src/gui/state/preview_store`, which keeps no texels or source to upload again once a full texture is resident. A full texture also keeps the size `Ui::max_image_dimension` capped it to on the lost device.
