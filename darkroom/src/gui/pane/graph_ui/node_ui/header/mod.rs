@@ -34,7 +34,6 @@ use crate::gui::widgets::icon_button::IconButton;
 use crate::gui::widgets::inline_rename::{InlineRename, RenameEvent};
 use crate::gui::widgets::port_glyph::PortGlyph;
 use crate::gui::widgets::support;
-use crate::gui::widgets::toggle::Toggle;
 
 /// Character cap for a node title in the inline rename editor.
 const NODE_NAME_MAX_CHARS: usize = 32;
@@ -104,7 +103,6 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
                 wid::inspect_button(node.node_id),
                 theme.colors.accent,
                 "Inspect — values, status, log",
-                Toggle::Off,
             )
             .show(ui, theme)
             {
@@ -173,7 +171,6 @@ fn run_button(ui: &mut Ui, node: NodeCtx<'_>) -> bool {
         wid::of_node("run_button", node.node_id),
         theme.status.success,
         tooltip,
-        Toggle::Off,
     )
     .show(ui, theme)
 }
@@ -187,8 +184,8 @@ fn disable_button(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
         wid::of_node("disable_button", node.node_id),
         theme.ink.muted,
         "Disable — exclude this sink from graph runs",
-        Toggle::from(node.disabled()),
     )
+    .selected(node.disabled())
     .show(ui, theme)
     {
         record.out.push_graph(GraphIntent::SetNodeProperty {
@@ -211,8 +208,8 @@ fn cache_button(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
         wid,
         theme.badge.cache,
         "Cache — keep this node's output across runs",
-        Toggle::from(ram || disk),
     )
+    .selected(ram || disk)
     .show(ui, theme);
     if clicked && let Some(rect) = ui.response_for(wid).rect {
         ContextMenu::open(ui, wid, Vec2::new(rect.min.x, rect.max().y));

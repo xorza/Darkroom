@@ -1,11 +1,14 @@
 //! [`Link`]: text that does something when clicked, in the link ink.
 
-use palantir::{Configure, Sense, Text, TextInput, Ui, WidgetId};
+use palantir::{
+    Button, ButtonTheme, Chrome, Configure, SlotDefaults, Spacing, StatefulLook, TextInput,
+    TextStyleOverrides, Ui, WidgetId, WidgetLook,
+};
 
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support;
 
-/// A text link: the accent at rest, lifted under the pointer, with an optional tooltip naming
+/// A text link: the link ink at rest, lifted under the pointer, with an optional tooltip naming
 /// where it leads. Builder chain ending in [`show`](Self::show), like a palantir widget.
 #[derive(Debug)]
 pub(crate) struct Link<'a> {
@@ -45,21 +48,42 @@ impl<'a> Link<'a> {
             tooltip,
             size,
         } = self;
-        // Last frame's hover: this frame's response is known only after `show`.
-        let ink = if ui.response_for(wid).hovered() {
-            theme.colors.link_hovered
-        } else {
-            theme.colors.link
-        };
-        let style = support::colored_text(ui, ink, size.unwrap_or(theme.font.body));
-        let response = Text::new(text)
+        let style = style(theme, size.unwrap_or(theme.font.body));
+        let response = Button::new()
             .id(wid)
+            .label(text)
+            .focusable(false)
             .style(&style)
-            .sense(Sense::CLICK)
             .show(ui);
         let snapshot = response.snapshot();
-        let clicked = response.left.clicked();
+        let clicked = response.clicked();
         support::tooltip_after(ui, &snapshot, tooltip);
         clicked
+    }
+}
+
+/// A link's looks: no chrome, the text at `px` in the link ink, the hovered ink under the
+/// pointer and while pressed.
+fn style(theme: &Theme, px: f32) -> ButtonTheme {
+    let look = |ink| WidgetLook {
+        chrome: Chrome::NONE,
+        text: TextStyleOverrides::NONE.with_font_size(px).with_color(ink),
+    };
+    let rest = look(theme.colors.link);
+    let lit = look(theme.colors.link_hovered);
+    let looks = StatefulLook {
+        normal: rest.clone(),
+        hovered: lit.clone(),
+        active: lit,
+        disabled: rest,
+    };
+    ButtonTheme {
+        selected: looks.clone(),
+        looks,
+        defaults: SlotDefaults {
+            padding: Spacing::ZERO,
+            margin: Spacing::ZERO,
+            animation: None,
+        },
     }
 }

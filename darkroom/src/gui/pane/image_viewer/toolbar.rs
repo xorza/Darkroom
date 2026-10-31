@@ -19,7 +19,6 @@ use crate::gui::widgets::chip::Chip;
 use crate::gui::widgets::icon::Icon;
 use crate::gui::widgets::pill;
 use crate::gui::widgets::support;
-use crate::gui::widgets::toggle::Toggle;
 
 /// The backdrop radio roster — mode, widget-id key, tooltip — the one
 /// table behind the controls loop and the swatch ids.
@@ -54,7 +53,7 @@ impl Controls<'_> {
             "Zoom-in sampling: bilinear — click for nearest"
         };
         if Chip::new(self.wid("filter"), tooltip)
-            .toggled(Toggle::from(nearest))
+            .selected(nearest)
             .show_icon(ui, self.theme, Icon::Pixels)
         {
             *filter = if nearest {

@@ -37,7 +37,6 @@ use crate::gui::widgets::format::shown_value::{ShownValue, UNSET};
 use crate::gui::widgets::icon::Icon;
 use crate::gui::widgets::icon_button::IconButton;
 use crate::gui::widgets::support;
-use crate::gui::widgets::toggle::Toggle;
 
 /// Most recent log lines shown per node, so the pane stays bounded.
 const LOG_LINE_CAP: usize = 20;
@@ -119,7 +118,6 @@ fn body(ui: &mut Ui, node: NodeCtx<'_>, target: InspectTarget, out: &mut Request
                             pin_wid(),
                             theme.colors.accent,
                             "Pin — keep this node in its own tab",
-                            Toggle::Off,
                         )
                         .show(ui, theme)
                     {

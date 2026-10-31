@@ -56,11 +56,6 @@ Each bullet is one decision: the choice, the options refused, and the source.
   [iced `button(content)`](https://docs.rs/iced/latest/iced/widget/fn.button.html),
   [WAI-ARIA button pattern](https://www.w3.org/WAI/ARIA/apg/patterns/button/),
   [Fluent toggle button](https://learn.microsoft.com/windows/apps/design/controls/buttons).
-- **A `Response` holds `&mut Ui`, and a tooltip attaches to it.** `Response::tooltip(self, text) ->
-  Self` records the tooltip of the widget that returned the response. `Tooltip::on(&snapshot)`
-  stays for code that holds a snapshot. Refused: `Tooltip::for_id(id, text)`, which keeps two
-  statements; `Configure::tooltip`, as `Widget` has no lifetime to hold the text. Source:
-  [egui `Response::on_hover_text`](https://docs.rs/egui/latest/egui/struct.Response.html#method.on_hover_text).
 - **`TextEdit` has a buffered mode and a read-only mode.** `TextEdit::buffered(current)` keeps the
   draft in the state map under its id. It fills the draft from `current` while the field is idle,
   restores it on Esc, and commits on Enter or blur. `TextEditResponse::committed_text:
@@ -194,47 +189,6 @@ Each batch leaves both workspaces green. A palantir change runs, from `palantir/
 change runs `cargo drive check` and `cargo drive test` from the root. A palantir test goes into
 palantir's suite beside the code it tests, with hand-computed values. Whoever addresses an item
 deletes it.
-
-### Batch 2: a tooltip attaches to the response
-
-Files: `palantir/src/widget_core/response.rs`, `palantir/src/widgets/tooltip/mod.rs`, every
-palantir widget that builds a `Response`; `darkroom/src/gui/widgets/support.rs` and the 9 callers
-of `tooltip_after`.
-
-- [ ] `response.rs:27`: `Response` holds `&'a Ui`, so an overlay cannot attach through it. Hold
-  `&'a mut Ui`, and add `Response::tooltip(self, text: impl Into<TextInput<'a>>) -> Self`.
-  Test: the tooltip shows after the delay over its widget, as `Tooltip::on` does.
-- [ ] `support.rs:111` `tooltip_after` and its callers in `menu_bar.rs`, `icon_button.rs`,
-  `port_glyph.rs`, `link.rs`, `chip.rs`, `inspector.rs`, `node_footer.rs`,
-  `const_editor/mod.rs`, `port_row/mod.rs`: a snapshot exists only to end a borrow. Chain
-  `.tooltip(text)` on the response, with an `if let` where the text is optional. Delete
-  `tooltip_after` and the snapshots that only fed it.
-
-### Batch 3: a button holds content and a selected state
-
-Files: `palantir/src/widgets/button/mod.rs`, `palantir/src/theme/button.rs`;
-`darkroom/src/gui/widgets/{chip,icon_button,link,toggle}.rs`,
-`darkroom/src/gui/pane/graph_ui/gesture/new_node_ui/node_palette.rs`,
-`darkroom/src/gui/pane/image_viewer/{mod,glyph,toolbar}.rs`, `darkroom/src/gui/theme/`.
-
-- [ ] `button/mod.rs:58`: a button paints only a label. Add `Button::show_with(self, ui, body:
-  impl FnOnce(&mut Ui, &TextStyle) -> R) -> InnerResponse<'_, R>`, which records `body` with the
-  look's text style in place of the label. Test: the body's ink follows normal, hovered, pressed
-  and disabled.
-- [ ] `theme/button.rs`: a button has no on state. Add `ButtonTheme::selected: StatefulLook`, built
-  by each recipe, and `Button::selected(bool)`. Test: a selected button wears `selected.hovered`
-  under the pointer.
-- [ ] `chip.rs`, `icon_button.rs`: each reads last frame's hover and picks fill and ink by hand.
-  Build them on `Button::show_with` and `selected`, with one `ButtonTheme` per ink that the
-  darkroom theme builds once (accent, success, busy, muted, cache). Keep
-  `an_on_button_rests_under_the_hover_lift_and_rises_past_it`, aimed at the new themes.
-- [ ] `link.rs:49`: the same hover read for a text color. Make `Link` a `Button` with a link
-  `ButtonTheme` (no chrome, `link` and `link_hovered` text).
-- [ ] `node_palette.rs:282` `Row::show`: the same hover read, and a fill copied out of
-  `ui.theme().context_menu.item.looks.hovered`. Make the row a `Button::show_with` with
-  `selected(focused)` and a row theme built from the menu item's looks.
-- [ ] `toggle.rs`: the `Toggle` enum only feeds the widgets above. Delete it and pass `bool` to
-  `selected`.
 
 ### Batch 4: buffered and read-only text fields
 
@@ -430,12 +384,30 @@ Files: `palantir/AGENTS.md`, `darkroom/AGENTS.md`, `.notes/review-palantir-api.m
   use of `is_busy`, the waker and `Remote::settle` in `darkroom/AGENTS.md`, "The editor harness".
   Code that cites one cites it by document and title. Then delete this file.
 
+## Decisions
+
+- **One `Selection` for every two-pack theme.** palantir's `TabSelection` became `Selection`, and
+  `ButtonTheme`'s pick takes it as `TabsTheme`'s does, so "selected" keeps one meaning across
+  widgets. Refused: a `bool` pick, against palantir's rule that a flag that selects behavior is an
+  enum; a second enum for buttons, two names for one idea.
+- **`show_with` adds shapes to a leaf.** `Button` stays a leaf node, as its label is measured as a
+  leaf's text; the body adds shapes in the button's space. Refused: a container button, whose
+  label would stop measuring as a leaf's does.
+
 ## Changed
+
+- `node_palette.rs` `Row::show`: stays a `Panel`. A row holds child widgets (a focus bar, a
+  name, a description), and a `Button` is a leaf that lays out no children.
 
 - `session/mod.rs` `menu_shortcut`: a `MENU_CHORDS` table and one `find` in darkroom, with no
   palantir API, as the search may stop at the first chord that fired (see Declined).
 
 ## Declined
+
+- Batch 2, `Response::tooltip`: `Response` lives in `widget_core`, below `widgets`, where
+  `Tooltip` lives. The method either breaks palantir's layering or puts an `impl Response` outside
+  its file, and darkroom's `tooltip_after` already makes the pair one call. `Response` keeps its
+  `&Ui`.
 
 - `Ui::pressed_shortcut`: the gap it closed does not exist. A frame that receives a press records
   again with no input, and that pass reads every chord a short-circuit skipped, so each stays

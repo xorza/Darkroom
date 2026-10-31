@@ -57,7 +57,6 @@ use crate::gui::widgets::format::percent::Percent;
 use crate::gui::widgets::icon::Icon;
 use crate::gui::widgets::pan_drag;
 use crate::gui::widgets::pill;
-use crate::gui::widgets::toggle::Toggle;
 use crate::gui::widgets::zoom_range;
 
 /// One image-viewer tab's state: what it shows and how it's framed.
@@ -451,10 +450,10 @@ impl ImageViewer {
                 let appearance = Panel::vstack().id(controls.wid("pill_appearance"));
                 pill::dress(appearance, theme).show(ui, |ui| {
                     for (mode, key, tooltip) in BACKDROPS {
-                        let state = Toggle::from(preferences.bg == mode);
+                        let selected = preferences.bg == mode;
                         if Chip::new(controls.wid(key), tooltip).show(ui, theme, |ui, s, _| {
-                            Swatch { mode, state }.draw(ui, s, theme);
-                        }) && state == Toggle::Off
+                            Swatch { mode, selected }.draw(ui, s, theme);
+                        }) && !selected
                         {
                             preferences.bg = mode;
                             changed = true;

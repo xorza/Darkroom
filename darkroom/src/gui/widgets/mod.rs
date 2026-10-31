@@ -14,5 +14,4 @@ pub(crate) mod pan_drag;
 pub(crate) mod pill;
 pub(crate) mod port_glyph;
 pub(crate) mod support;
-pub(crate) mod toggle;
 pub(crate) mod zoom_range;

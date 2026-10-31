@@ -19,7 +19,6 @@ use crate::gui::pane::graph_ui::gesture::pan_zoom::Framing;
 use crate::gui::widgets::chip::Chip;
 use crate::gui::widgets::icon::Icon;
 use crate::gui::widgets::pill;
-use crate::gui::widgets::toggle::Toggle;
 
 /// The toolbar's chip ids. One graph pane, so each is a fixed hash.
 fn run_button_wid() -> WidgetId {
@@ -70,7 +69,7 @@ pub(super) fn show(ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
                 // buttons below.
                 if Chip::new(run_button_wid(), run_tip)
                     .shortcut(shortcuts::RUN)
-                    .toggled(Toggle::from(running))
+                    .selected(running)
                     .idle_glyph(theme.status.success)
                     .ink(theme.status.busy)
                     .show_icon(ui, theme, Icon::Run)
@@ -89,7 +88,7 @@ pub(super) fn show(ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
                     "Start events"
                 };
                 if Chip::new(events_button_wid(), events_tip)
-                    .toggled(Toggle::from(event_loop_active))
+                    .selected(event_loop_active)
                     .ink(theme.status.busy)
                     .show_icon(ui, theme, Icon::RunEvents)
                 {
