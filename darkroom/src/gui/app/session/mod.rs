@@ -24,7 +24,7 @@ use crate::gui::frame::requests::Requests;
 use crate::gui::frame::window_ctx::WindowCtx;
 use crate::gui::main_window::MainWindow;
 use crate::gui::pane::graph_ui::gesture::pan_zoom::Framing;
-use palantir::Ui;
+use palantir::{Shortcut, Ui};
 use scenarium::Graph;
 
 use crate::gui::frame::app_ctx::AppCtx;
@@ -197,40 +197,28 @@ impl Session {
     }
 }
 
-/// Queue the [`AppCommand`] for whichever of Ctrl+N / Ctrl+O / Ctrl+S /
-/// Ctrl+Shift+S / Ctrl+R / Ctrl+Q fired.
-///
-/// Document file ops are **global** — they fire regardless of
-/// focus, so Ctrl+S still saves while a node's const editor is
-/// focused (`TextEdit` doesn't bind S/O/N, so nothing is stolen).
-/// Every chord is sampled with `key_pressed` each frame so all
-/// stay subscribed for palantir's wake-gate (sampling them all up
-/// front, not short-circuited, so one chord firing doesn't drop
-/// the others' subscription that frame). Palantir matches modifiers
-/// exactly, so Ctrl+Shift+S never also reads as Ctrl+S.
+/// The global chords and the command each raises. Document file ops fire regardless of focus,
+/// so Ctrl+S still saves while a node's const editor is focused (`TextEdit` binds none of these).
+/// Palantir matches modifiers exactly, so Ctrl+Shift+S never also reads as Ctrl+S.
+const MENU_CHORDS: [(Shortcut, AppCommand); 6] = [
+    (shortcuts::NEW, AppCommand::File(FileCommand::New)),
+    (shortcuts::OPEN, AppCommand::File(FileCommand::Open)),
+    (shortcuts::SAVE_AS, AppCommand::File(FileCommand::SaveAs)),
+    (shortcuts::SAVE, AppCommand::File(FileCommand::Save)),
+    (shortcuts::RUN, AppCommand::Run(RunCommand::Once)),
+    (shortcuts::QUIT, AppCommand::Quit),
+];
+
+/// Queue the command of the first [`MENU_CHORDS`] chord that fired. The search stops at the
+/// first match, and the chords after it stay watched: palantir records the frame again with no
+/// input, and that pass reads them all (`Ui::shortcut_pressed`).
 fn menu_shortcut(ui: &mut Ui, requests: &mut Requests) {
-    let new = ui.shortcut_pressed(shortcuts::NEW);
-    let open = ui.shortcut_pressed(shortcuts::OPEN);
-    let save_as = ui.shortcut_pressed(shortcuts::SAVE_AS);
-    let save = ui.shortcut_pressed(shortcuts::SAVE);
-    let run = ui.shortcut_pressed(shortcuts::RUN);
-    let quit = ui.shortcut_pressed(shortcuts::QUIT);
-    let command = if new {
-        AppCommand::File(FileCommand::New)
-    } else if open {
-        AppCommand::File(FileCommand::Open)
-    } else if save_as {
-        AppCommand::File(FileCommand::SaveAs)
-    } else if save {
-        AppCommand::File(FileCommand::Save)
-    } else if run {
-        AppCommand::Run(RunCommand::Once)
-    } else if quit {
-        AppCommand::Quit
-    } else {
-        return;
-    };
-    requests.push_app(command);
+    if let Some((_, command)) = MENU_CHORDS
+        .iter()
+        .find(|(chord, _)| ui.shortcut_pressed(*chord))
+    {
+        requests.push_app(command.clone());
+    }
 }
 
 #[cfg(feature = "internals")]

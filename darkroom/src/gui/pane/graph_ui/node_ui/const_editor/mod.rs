@@ -24,20 +24,20 @@
 //!
 //! Textual edit state: a `TextEdit` round-trip through `i64`/`f64`
 //! formatting would clobber partial input (typing "3." would reformat
-//! to "3" on the next frame). The buffer lives in palantir's `StateMap`
-//! keyed by the editor id ([`crate::gui::widgets::edit_buffer::EditBuffer`]);
-//! we mirror canonical → buffer only while unfocused — skipping the blur
-//! frame, whose buffer still holds the user's text to commit — and parse
-//! only when the edit commits.
+//! to "3" on the next frame). The text fields are palantir's buffered
+//! `TextEdit`s, which keep the draft under the editor id, take the document
+//! value only while idle, and hand the draft over on its commit, which is
+//! when it is parsed.
+
+use std::fmt::{self as std_fmt, Display, Formatter};
 
 use palantir::{
-    Align, Button, Checkbox, ComboBox, Configure, DragValue, Sizing, TextEdit, TextWrap, Ui,
-    WidgetId, fmt,
+    Align, Button, Checkbox, ComboBox, Configure, DragValue, Panel, Sizing, Text, TextEdit,
+    TextInput, TextWrap, Ui, VAlign, WidgetId, fmt,
 };
 use scenarium::{ConstValue, DataType, Library, ValueVariant};
 
 use crate::gui::theme::const_editor_theme::ConstEditorTheme;
-use crate::gui::widgets::edit_buffer::{EditBuffer, Focus};
 use crate::gui::widgets::format::path_preview::PathPreview;
 use crate::gui::widgets::format::shown_value::{self, FLOAT_DECIMALS, UNSET};
 use crate::gui::widgets::support;
@@ -150,8 +150,7 @@ impl ConstEditor<'_> {
                 let Some(cur) = value.as_string() else {
                     return field.unset(ui, value);
                 };
-                let edited = field.text(ui, cur, format_string)?;
-                (edited != cur).then_some(ConstValue::String(edited))
+                field.text(ui, cur).map(ConstValue::String)
             }
             DataType::FsPath(config) => {
                 // The admitted literal is the shape the mode takes; the pick
@@ -175,7 +174,7 @@ impl ConstEditor<'_> {
                     .style(&field.theme.drag_value.chip)
                     .text_wrap(TextWrap::EllipsisMiddle)
                     .text_align(Align::LEFT)
-                    .size((Sizing::FILL, Sizing::FILL))
+                    .size(Sizing::FILL)
                     .min_size((field.theme.width, 0.0))
                     .show(ui)
                     .snapshot();
@@ -232,7 +231,7 @@ impl Field<'_> {
         ComboBox::labeled(&mut idx, options, label)
             .id(self.id)
             .button_style(&self.theme.drag_value.chip)
-            .size((Sizing::FILL, Sizing::FILL))
+            .size(Sizing::FILL)
             .min_size((self.theme.width, 0.0))
             .show(ui);
         (idx != before).then_some(idx)
@@ -246,7 +245,8 @@ impl Field<'_> {
     /// never the string `"42"`. Returns the reinterpreted value only when the
     /// edit committed a change: see [`any_edit`].
     fn any_smart(self, ui: &mut Ui, value: &ConstValue) -> Option<ConstValue> {
-        any_edit(&self.text(ui, value, format_any)?, value)
+        let shown = fmt!(ui, "{}", AnyText(value));
+        any_edit(&self.text(ui, shown)?, value)
     }
 
     /// An optional input left unset: `Null`, the one admitted literal outside
@@ -261,62 +261,34 @@ impl Field<'_> {
         None
     }
 
-    /// An input with nothing in it — left unset, or bound to nothing: [`UNSET`] in a
-    /// read-only field the size of an editor; clicks fall through to the surrounding row.
+    /// An input with nothing in it — left unset, or bound to nothing: [`UNSET`] in the muted ink,
+    /// in a box with an editor's resting look and size, as the inspector reads an input with
+    /// nothing in it. It senses nothing, so a click falls through to the surrounding row.
     pub(super) fn empty(self, ui: &mut Ui) {
         let Self { theme, id } = self;
-        // The same retained buffer the editable fields keep under this id,
-        // refilled every frame — which is also what makes the field read-only:
-        // anything typed into it is gone by the next record. "—" in the muted
-        // ink, as the inspector reads an input with nothing in it.
-        ui.with_state::<EditBuffer, _>(id, |ui, buffer| {
-            buffer.text.replace_range(.., UNSET);
-            TextEdit::new(&mut buffer.text)
-                .id(id)
-                .style(&theme.drag_value.editor)
-                .color(theme.unset)
-                .size((Sizing::fixed(theme.width), Sizing::FILL))
-                .show(ui);
-        });
+        let editor = &theme.drag_value.editor;
+        Panel::hstack()
+            .id(id)
+            .size((Sizing::fixed(theme.width), Sizing::FILL))
+            .padding(editor.defaults.padding)
+            .child_align(Align::v(VAlign::Center))
+            .chrome(editor.looks.normal.chrome.clone())
+            .show(ui, |ui| {
+                Text::new(UNSET).color(theme.unset).show(ui);
+            });
     }
 
-    /// Render a `TextEdit` whose buffer survives across frames via palantir's
-    /// `StateMap`. Returns the buffer's text on the frame the edit commits
-    /// (Enter, or focus left the field), `None` on every other — Escape
-    /// included, which drops the draft and lets the next idle frame refill it.
-    ///
-    /// While the field is idle, `mirror` refills the cleared buffer from
-    /// `canonical` rather than handing back a fresh `String`, so the frames
-    /// that change nothing cost no allocation. While focused, and on the frame
-    /// focus leaves, the user's text is left alone so it survives to be
-    /// committed ([`EditBuffer::is_idle`]).
-    fn text<T: ?Sized>(
-        self,
-        ui: &mut Ui,
-        canonical: &T,
-        mirror: fn(&T, &mut String),
-    ) -> Option<String> {
+    /// A buffered `TextEdit` over `current`: the draft palantir keeps under the field's id, handed
+    /// back on the frame an edit commits it with a change (Enter, or focus left the field), `None`
+    /// on every other — Escape included, which puts `current` back.
+    fn text<'t>(self, ui: &mut Ui, current: impl Into<TextInput<'t>>) -> Option<String> {
         let Self { theme, id } = self;
-        ui.with_state::<EditBuffer, _>(id, |ui, buffer| {
-            let idle = buffer.is_idle(Focus::of(ui, id));
-            let text = &mut buffer.text;
-            if idle {
-                text.clear();
-                mirror(canonical, text);
-            }
-            let response = TextEdit::new(text)
-                .id(id)
-                .style(&theme.drag_value.editor)
-                .size((Sizing::fixed(theme.width), Sizing::FILL))
-                .show(ui);
-            // The buffer keeps the text — the editor goes on showing it until
-            // the mirror re-seeds from the committed document value — so a
-            // commit is the one frame that copies, at gesture rate rather than
-            // frame rate.
-            let committed = response.committed.then(|| text.clone());
-            buffer.settle(Focus::of(ui, id));
-            committed
-        })
+        TextEdit::buffered(current)
+            .id(id)
+            .style(&theme.drag_value.editor)
+            .size((Sizing::fixed(theme.width), Sizing::FILL))
+            .show(ui)
+            .committed_text
     }
 
     /// Editor for an `Int` const: an editable `DragValue` — drag horizontally
@@ -363,23 +335,20 @@ impl Field<'_> {
 /// `Int`) and `Null` shows blank (an unseeded `Any` starts empty). A `String`
 /// prints verbatim, so a numeric-looking string (`"42"`) is the one kind that
 /// doesn't round-trip — the accepted ambiguity of an untyped literal.
-///
-/// Writes into the caller's cleared buffer — see [`Field::text`].
-fn format_any(value: &ConstValue, out: &mut String) {
-    shown_value::write_untyped(value, out).expect("writing to a String cannot fail");
+#[derive(Clone, Copy, Debug)]
+struct AnyText<'a>(&'a ConstValue);
+
+impl Display for AnyText<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std_fmt::Result {
+        shown_value::write_untyped(self.0, f)
+    }
 }
 
-/// What committing `text` in an `Any` field showing `value` sets it to, or `None` for no change.
-/// A field commits on blur too, typed in or not, and [`format_any`] and [`parse_any`] do not
-/// round-trip every value — `Null` shows blank, which reads back as an empty `String`, and a
-/// numeric `String` reads back as a number — so the text the field showed commits nothing,
-/// rather than an edit that changes the value's kind.
+/// What committing `text` in an `Any` field showing `value` sets it to, or `None` when it reads
+/// back as `value`. The field hands over only a text that differs from the one it showed, as
+/// [`AnyText`] and [`parse_any`] do not round-trip every value: `Null` shows blank, which reads
+/// back as an empty `String`, and a numeric `String` reads back as a number.
 fn any_edit(text: &str, value: &ConstValue) -> Option<ConstValue> {
-    let mut shown = String::new();
-    format_any(value, &mut shown);
-    if text == shown {
-        return None;
-    }
     let parsed = parse_any(text);
     (parsed != *value).then_some(parsed)
 }
@@ -404,11 +373,6 @@ fn parse_any(text: &str) -> ConstValue {
         return ConstValue::Float(float);
     }
     ConstValue::String(text.to_owned())
-}
-
-/// The `String` port's mirror: its literal *is* the field's text, verbatim.
-fn format_string(value: &str, out: &mut String) {
-    out.push_str(value);
 }
 
 /// Drag speed for a float: ≈1% of the value's magnitude per logical pixel

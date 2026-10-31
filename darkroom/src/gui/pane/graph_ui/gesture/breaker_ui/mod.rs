@@ -87,7 +87,7 @@ impl BreakerUi {
         ui.add_shape(
             Shape::polyline(
                 &self.scribble.points,
-                Stroke::new(theme.canvas.breaker_stroke, theme.stroke.wire_at(zoom)),
+                Stroke::new(theme.canvas.breaker_stroke, theme.canvas.wire_at(zoom)),
             )
             .cap(LineCap::Round)
             .join(LineJoin::Round),

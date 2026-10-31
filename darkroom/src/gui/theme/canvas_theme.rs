@@ -1,11 +1,9 @@
 //! [`CanvasTheme`]: the graph canvas ground, the grid ruled across it, and the alarm inks drawn
 //! on it.
 
-use palantir::RgbaF32;
+use palantir::{RgbaF32, SpaceSteps};
 
 use crate::gui::theme::palette::Palette;
-use crate::gui::theme::space_scale::SpaceScale;
-use crate::gui::theme::stroke_scale::StrokeScale;
 
 /// The graph canvas itself — the ground everything else sits on, and the
 /// dotted grid ruled across it.
@@ -31,14 +29,14 @@ pub(crate) struct CanvasTheme {
     pub(crate) cut_bar_width: f32,
     /// The scribble that cuts wires.
     pub(crate) breaker_stroke: RgbaF32,
+    /// A wire's width, and every mark drawn at wire weight: the drag preview, the subscription
+    /// pin's leader and the breaker scribble that cuts them, so the blade reads at the weight of
+    /// what it severs.
+    pub(crate) wire: f32,
 }
 
 impl CanvasTheme {
-    pub(super) const fn from_palette(
-        p: &Palette,
-        space: &SpaceScale,
-        stroke: &StrokeScale,
-    ) -> Self {
+    pub(super) const fn from_palette(p: &Palette, space: &SpaceSteps) -> Self {
         Self {
             bg: p.canvas_bg,
             dot: p.canvas_dot,
@@ -46,8 +44,21 @@ impl CanvasTheme {
             dot_radius: 0.6,
             wire_broken: p.wire_broken,
             cut_bar_length: space.md,
-            cut_bar_width: stroke.wire,
+            cut_bar_width: WIRE,
             breaker_stroke: p.breaker_stroke,
+            wire: WIRE,
         }
     }
+
+    /// A wire's width in world units at `zoom`: [`Self::wire`] on screen from 100 % down, and
+    /// zoomed with the canvas above, as Blender draws a link at `2.5 * max(zoom, 1)` px
+    /// ([drawnode.cc](https://github.com/blender/blender/blob/main/source/blender/editors/space_node/drawnode.cc)),
+    /// so a zoomed-out wire never thins under its width.
+    pub(crate) fn wire_at(&self, zoom: f32) -> f32 {
+        debug_assert!(zoom > 0.0, "a zoom is positive");
+        self.wire * zoom.max(1.0) / zoom
+    }
 }
+
+/// A wire's width: `darkroom/AGENTS.md`, "The look", "A wire is 2.5 px".
+const WIRE: f32 = 2.5;

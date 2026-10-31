@@ -3,9 +3,7 @@
 
 use glam::Vec2;
 use palantir::widget::Shape;
-use palantir::{
-    Configure, Panel, Rect, RgbaF32, Sense, Sizing, Spacing, Stroke, TextInput, Ui, WidgetId,
-};
+use palantir::{Configure, Panel, Rect, RgbaF32, Sense, Spacing, Stroke, TextInput, Ui, WidgetId};
 
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support;
@@ -193,7 +191,7 @@ impl<'a> PortGlyph<'a> {
         let (hit, inset) = (glyph.hit(), glyph.inset());
         let panel = Panel::zstack()
             .id(wid)
-            .size((Sizing::fixed(hit), Sizing::fixed(hit)))
+            .size(hit)
             .sense(Sense::CLICK | Sense::DRAG);
         let panel = match placement {
             Placement::Margin(margin) => {

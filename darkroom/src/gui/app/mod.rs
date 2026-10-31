@@ -1,7 +1,6 @@
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use palantir::Ui;
@@ -17,7 +16,8 @@ use crate::core::io::preferences::{Preferences, WindowState};
 use crate::core::open_document::{Launched, Loaded, OpenDocument};
 use crate::core::runtime_host::RuntimeHost;
 use crate::core::status_log::{StatusFamily, StatusLog};
-use crate::gui::app::app_host::AppHost;
+use crate::core::wake::Wake;
+use crate::gui::MAIN_WINDOW;
 use crate::gui::app::discard_dialog::{Answered, DiscardChoice, DiscardGuard, PendingTransition};
 use crate::gui::app::error::DrivenOpenError;
 use crate::gui::app::error::NonUnicodePath;
@@ -36,10 +36,8 @@ use crate::gui::state::process_memory::ProcessMemory;
 use crate::gui::state::run_state::{RunFeed, RunState};
 use crate::gui::theme::Theme;
 
-pub(crate) mod app_host;
 mod discard_dialog;
 pub(crate) mod error;
-pub(crate) mod offscreen_signals;
 pub(crate) mod screenshot_ask;
 pub(crate) mod session;
 pub(crate) mod view_capture;
@@ -72,7 +70,8 @@ pub(crate) struct App {
     /// whoever is reporting.
     status: StatusLog,
     theme: Theme,
-    host: AppHost,
+    /// A quit asked this pass, which closes the window as the pass ends.
+    quitting: bool,
     /// Persisted session state: the last document, the window, the viewer
     /// and model choices. Written on every change through
     /// [`Self::save_preferences`], so the next launch reopens where the user
@@ -87,9 +86,6 @@ pub(crate) struct App {
     discard: DiscardGuard,
     /// The image of the window a View command waits on; a second command replaces the first.
     capture: Option<ViewCapture>,
-    /// Raised at the end of a frame while a preview converts or a view capture waits for its
-    /// image: work the frame does not show yet, which a driver on another thread waits out.
-    pending_work: Arc<AtomicBool>,
     /// Throttled sampler behind the status bar's `MEM` clause. Lives on
     /// `App` rather than `Session` because it measures the process, not the
     /// document. Sampled where it is consumed rather than in `update`:
@@ -134,7 +130,7 @@ impl App {
     ///
     /// Handed to [`palantir::WinitHost::run`], which calls it once the
     /// `Ui` + host handle exist (before the first frame); the driver calls it over its own host.
-    pub(crate) fn new(ui: &mut Ui, host: AppHost, launch: LaunchInputs) -> Self {
+    pub(crate) fn new(ui: &mut Ui, launch: LaunchInputs) -> Self {
         let LaunchInputs {
             preferences:
                 OpenedPreferences {
@@ -145,7 +141,8 @@ impl App {
             document,
             dialogs,
         } = launch;
-        let wake = host.wake();
+        let waker = ui.waker();
+        let wake: Wake = Arc::new(move || waker.wake());
         // `preferences` is loaded in `run` before the window exists, so
         // its saved geometry can size the window at creation.
         let mut status = StatusLog::default();
@@ -172,13 +169,12 @@ impl App {
             run_state,
             status,
             theme: Theme::default(),
-            host,
+            quitting: false,
             preferences,
             preferences_store,
             dialogs,
             discard: DiscardGuard::default(),
             capture: None,
-            pending_work: Arc::default(),
             process_memory: ProcessMemory::new(),
             requests: Requests::default(),
         };
@@ -264,13 +260,13 @@ impl App {
     }
 
     /// Persist preferences (including the window geometry mirrored by
-    /// [`Self::track_window_state`]) and ask the host to exit. Every
-    /// explicit quit path routes through here so geometry is saved on the
+    /// [`Self::track_window_state`]) and close the window as this pass ends, which ends the
+    /// host. Every explicit quit path routes through here so geometry is saved on the
     /// way out; the titlebar-X clean close — which never calls this —
     /// saves in [`Self::handle_close_request`] instead.
     fn quit(&mut self) {
         self.save_preferences();
-        self.host.quit();
+        self.quitting = true;
     }
 
     /// Whether a destructive transition has to prompt before proceeding:
@@ -710,8 +706,11 @@ impl palantir::App for App {
         if ui.user_scale() != interface {
             ui.set_user_scale(interface);
         }
+        // A capture asks frames until its image lands and `update` hands it over: work the
+        // frames do, so no wake comes for it.
         if let Some(capture) = &mut self.capture {
             capture.ask(ui);
+            ui.request_repaint();
         }
         // The app's one relayout request, past both tiers: everything that can
         // strand `CanvasGeometry`'s cross-frame caches has reported by here,
@@ -721,11 +720,14 @@ impl palantir::App for App {
         }
 
         self.record_discard_prompt(ui);
-        // Last, after everything the pass could start: the last pass of a frame leaves it.
-        self.pending_work.store(
-            self.run_state.previews().in_flight() || self.capturing(),
-            Ordering::Release,
-        );
+        if self.quitting {
+            ui.close_window(MAIN_WINDOW);
+        }
+    }
+
+    /// A preview converts on its thread, which wakes the window when the result lands.
+    fn is_busy(&self) -> bool {
+        self.run_state.previews().in_flight()
     }
 }
 
@@ -787,17 +789,6 @@ impl App {
         }
     }
 
-    /// The flag a frame raises while work it does not show yet goes on, for a driver of the
-    /// window to read without a frame of its own.
-    pub(crate) fn pending_work(&self) -> Arc<AtomicBool> {
-        Arc::clone(&self.pending_work)
-    }
-
-    /// Whether a View ▸ Copy or Save of the view waits for its image.
-    pub(crate) const fn capturing(&self) -> bool {
-        self.capture.is_some()
-    }
-
     pub(crate) const fn dialogs_mut(&mut self) -> &mut Dialogs {
         &mut self.dialogs
     }
@@ -805,13 +796,9 @@ impl App {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use std::sync::Arc;
-
     use palantir::Ui;
 
     use crate::core::io::preferences::preferences_store::PreferencesStore;
-    use crate::gui::app::app_host::AppHost;
-    use crate::gui::app::offscreen_signals::OffscreenSignals;
     use crate::gui::app::{App, LaunchInputs};
     use crate::gui::dialogs::{DialogFallback, Dialogs};
 
@@ -821,7 +808,6 @@ pub(crate) mod internals {
         pub(crate) fn offscreen(ui: &mut Ui) -> Self {
             Self::new(
                 ui,
-                AppHost::Offscreen(Arc::new(OffscreenSignals::default())),
                 LaunchInputs {
                     preferences: PreferencesStore::Memory.open(),
                     document: None,
@@ -913,26 +899,38 @@ mod tests {
         }
     }
 
-    /// A frame leaves the pending-work flag raised while a view capture waits for its image,
-    /// which the deviceless harness never paints, and lowered once nothing waits.
+    /// A view capture asks frames until its image lands, and the app reads as busy only while a
+    /// preview converts, which wakes the window; File ▸ Quit closes the window as its pass ends.
     #[test]
-    fn a_frame_publishes_the_work_it_leaves_pending() {
+    fn a_capture_asks_frames_and_a_quit_closes_the_window() {
         use glam::UVec2;
-        use palantir::Harness;
+        use palantir::{App as _, Harness, WindowCommand};
 
         use crate::gui::frame::app_command::ViewCommand;
 
         let mut ui = Harness::new(UVec2::new(800, 600));
         let mut app = App::offscreen(ui.ui());
-        let pending = app.pending_work();
-        ui.frame_app(&mut app);
-        assert!(!pending.load(Ordering::Acquire), "nothing waits");
+        assert!(!ui.frame_app(&mut app).repaint_requested, "nothing waits");
+        assert!(!app.is_busy());
         let _ = app.run_command(AppCommand::View(ViewCommand::CopyImage));
-        ui.frame_app(&mut app);
-        assert!(pending.load(Ordering::Acquire), "the capture waits");
+        assert!(
+            ui.frame_app(&mut app).repaint_requested,
+            "the capture waits"
+        );
+        assert!(
+            !app.is_busy(),
+            "a capture is the frames' work, not a wake's"
+        );
         app.capture = None;
+        assert!(!ui.frame_app(&mut app).repaint_requested);
+
+        assert!(ui.window_commands().is_empty());
+        let _ = app.run_command(AppCommand::Quit);
         ui.frame_app(&mut app);
-        assert!(!pending.load(Ordering::Acquire));
+        assert!(matches!(
+            ui.window_commands(),
+            [WindowCommand::Close(window)] if *window == MAIN_WINDOW
+        ));
     }
 
     /// A driver's open loads the file and reports a load that fails, also of the open document's
@@ -996,7 +994,6 @@ mod tests {
         use palantir::Harness;
 
         use crate::core::io::document::saved_paths::SavedPaths;
-        use crate::gui::app::offscreen_signals::OffscreenSignals;
         use crate::gui::dialogs::DialogAnswer;
         use crate::gui::dialogs::DialogFallback;
 
@@ -1023,7 +1020,6 @@ mod tests {
             dialogs.queue(DialogAnswer::Path(document.clone()));
             let mut app = App::new(
                 ui.ui(),
-                AppHost::Offscreen(Arc::new(OffscreenSignals::default())),
                 LaunchInputs {
                     preferences: store.clone().open(),
                     document: None,

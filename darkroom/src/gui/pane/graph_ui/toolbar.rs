@@ -8,7 +8,7 @@
 //! and map to an [`AppCommand`], while the framing buttons emit an
 //! `GraphIntent::SetViewport` directly.
 
-use palantir::{Align, Configure, HAlign, Panel, Sizing, Spacing, Ui, VAlign, WidgetId};
+use palantir::{Align, Configure, Panel, Sizing, Spacing, Ui, WidgetId};
 
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::RunCommand;
@@ -19,7 +19,6 @@ use crate::gui::pane::graph_ui::gesture::pan_zoom::Framing;
 use crate::gui::widgets::chip::Chip;
 use crate::gui::widgets::icon::Icon;
 use crate::gui::widgets::pill;
-use crate::gui::widgets::toggle::Toggle;
 
 /// The toolbar's chip ids. One graph pane, so each is a fixed hash.
 fn run_button_wid() -> WidgetId {
@@ -52,8 +51,8 @@ pub(super) fn show(ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
     Panel::vstack()
         .id_salt("graph_toolbar")
         .size((Sizing::HUG, Sizing::HUG))
-        .align(Align::new(HAlign::Left, VAlign::Top))
-        .child_align(Align::new(HAlign::Left, VAlign::Top))
+        .align(Align::TOP_LEFT)
+        .child_align(Align::TOP_LEFT)
         .margin(Spacing::new(theme.space.sm, theme.space.sm, 0.0, 0.0))
         .gap(theme.space.sm)
         .show(ui, |ui| {
@@ -70,7 +69,7 @@ pub(super) fn show(ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
                 // buttons below.
                 if Chip::new(run_button_wid(), run_tip)
                     .shortcut(shortcuts::RUN)
-                    .toggled(Toggle::from(running))
+                    .selected(running)
                     .idle_glyph(theme.status.success)
                     .ink(theme.status.busy)
                     .show_icon(ui, theme, Icon::Run)
@@ -89,7 +88,7 @@ pub(super) fn show(ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
                     "Start events"
                 };
                 if Chip::new(events_button_wid(), events_tip)
-                    .toggled(Toggle::from(event_loop_active))
+                    .selected(event_loop_active)
                     .ink(theme.status.busy)
                     .show_icon(ui, theme, Icon::RunEvents)
                 {
@@ -107,7 +106,7 @@ pub(super) fn show(ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
             // of band.
             let framing = Panel::vstack()
                 .id_salt("graph_toolbar_framing")
-                .child_align(Align::new(HAlign::Left, VAlign::Top));
+                .child_align(Align::TOP_LEFT);
             pill::dress(framing, theme).show(ui, |ui| {
                 if Chip::new(reset_view_wid(), "Reset view")
                     .shortcut(shortcuts::RESET_VIEW)

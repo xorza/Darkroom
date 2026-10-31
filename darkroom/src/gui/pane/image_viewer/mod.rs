@@ -33,8 +33,8 @@ use std::fmt::Formatter;
 use glam::{UVec2, Vec2};
 use palantir::widget::Shape;
 use palantir::{
-    Align, Chrome, Configure, HAlign, ImageDownsample, ImageFilter, ImageFit, ImageHandle, Panel,
-    Sense, Sizing, Spacing, Ui, VAlign, WidgetId, fmt,
+    Align, Chrome, Configure, ImageDownsample, ImageFilter, ImageFit, ImageHandle, Panel, Sense,
+    Sizing, Spacing, Ui, WidgetId, fmt,
 };
 
 use crate::core::document::Document;
@@ -57,7 +57,7 @@ use crate::gui::widgets::format::percent::Percent;
 use crate::gui::widgets::icon::Icon;
 use crate::gui::widgets::pan_drag;
 use crate::gui::widgets::pill;
-use crate::gui::widgets::toggle::Toggle;
+use crate::gui::widgets::support;
 use crate::gui::widgets::zoom_range;
 
 /// One image-viewer tab's state: what it shows and how it's framed.
@@ -288,7 +288,7 @@ impl ImageViewer {
         let mut preferences_changed = false;
         Panel::zstack()
             .id(pane_wid(self.node_id))
-            .size((Sizing::FILL, Sizing::FILL))
+            .size(Sizing::FILL)
             .sense(Sense::CLICK | Sense::DRAG | Sense::SCROLL | Sense::PINCH)
             .clip_rect()
             .chrome(Chrome::fill(fill))
@@ -318,8 +318,7 @@ impl ImageViewer {
                         pane: pane_view,
                         view,
                     };
-                    self.header(ui, shown);
-                    preferences_changed = self.controls(ui, shown, preferences);
+                    preferences_changed = self.top_row(ui, shown, preferences);
                 }
                 // Complementary to the image above, so this is the same
                 // either/or the enum states — never a second thing drawn over
@@ -370,6 +369,30 @@ impl ImageViewer {
         );
     }
 
+    /// The row along the pane's top: the readout at the left, cut with an ellipsis where it would
+    /// reach the control panel at the right. One row lays both out, so the readout yields to the
+    /// panel in the frame they share. Returns `true` when `preferences` changed.
+    fn top_row(
+        &mut self,
+        ui: &mut Ui,
+        shown: Shown<'_>,
+        preferences: &mut ViewerPreferences,
+    ) -> bool {
+        let margin = shown.pane.theme.space.sm;
+        Panel::hstack()
+            .id(top_row_wid(self.node_id))
+            .size((Sizing::FILL, Sizing::HUG))
+            .padding(Spacing::new(margin, margin, margin, 0.0))
+            .gap(margin)
+            .child_align(Align::TOP_LEFT)
+            .show(ui, |ui| {
+                self.header(ui, shown);
+                support::hspacer(ui, "viewer_top_spacer");
+                self.controls(ui, shown, preferences)
+            })
+            .inner
+    }
+
     /// The top-left readout: source node, native dimensions and pixel
     /// format, whether the view is texture-capped or still converting, and the
     /// current zoom.
@@ -382,23 +405,11 @@ impl ImageViewer {
                 .map(|v| v.zoom),
         };
         let theme = shown.pane.theme;
-        let margin = theme.space.sm;
-        // Cut before the control panel, a gap short of it, as it stood last frame.
-        let controls = ui
-            .response_for(toolbar::controls_wid(self.node_id, "panel"))
-            .rect
-            .map_or(0.0, |rect| rect.size.w);
-        let max_width = shown
-            .pane
-            .size
-            .map_or(f32::INFINITY, |pane| pane.x - 3.0 * margin - controls);
         Readout {
-            panel: Panel::hstack()
-                .id(header_wid(self.node_id))
-                .margin(Spacing::new(margin, margin, 0.0, 0.0)),
+            panel: Panel::hstack().id(header_wid(self.node_id)),
             text: fmt!(ui, "{readout}").into(),
             ink: theme.ink.muted,
-            max_width,
+            max_width: f32::INFINITY,
         }
         .show(ui, theme);
     }
@@ -427,9 +438,7 @@ impl ImageViewer {
         Panel::vstack()
             .id(controls.wid("panel"))
             .size((Sizing::HUG, Sizing::HUG))
-            .align(Align::new(HAlign::Right, VAlign::Top))
-            .child_align(Align::new(HAlign::Right, VAlign::Top))
-            .margin(Spacing::new(0.0, theme.space.sm, theme.space.sm, 0.0))
+            .child_align(Align::TOP_RIGHT)
             .gap(theme.space.sm)
             .show(ui, |ui| {
                 let framing = Panel::hstack().id(controls.wid("pill_framing"));
@@ -451,10 +460,10 @@ impl ImageViewer {
                 let appearance = Panel::vstack().id(controls.wid("pill_appearance"));
                 pill::dress(appearance, theme).show(ui, |ui| {
                     for (mode, key, tooltip) in BACKDROPS {
-                        let state = Toggle::from(preferences.bg == mode);
+                        let selected = preferences.bg == mode;
                         if Chip::new(controls.wid(key), tooltip).show(ui, theme, |ui, s, _| {
-                            Swatch { mode, state }.draw(ui, s, theme);
-                        }) && state == Toggle::Off
+                            Swatch { mode, selected }.draw(ui, s, theme);
+                        }) && !selected
                         {
                             preferences.bg = mode;
                             changed = true;
@@ -571,6 +580,11 @@ fn logical_size(image: &DrawableImage, ui: &Ui) -> Vec2 {
 /// The header readout of `node_id`'s viewer.
 fn header_wid(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("darkroom.image_viewer.header", node_id))
+}
+
+/// The row along a viewer's top that holds its readout and its control panel.
+fn top_row_wid(node_id: NodeId) -> WidgetId {
+    WidgetId::from_hash(("darkroom.image_viewer.top_row", node_id))
 }
 
 /// Stable id for a viewer's pane — keyed by node so switching between two

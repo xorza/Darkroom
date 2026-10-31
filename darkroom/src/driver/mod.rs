@@ -257,7 +257,7 @@ impl Driver {
     fn play(&mut self, action: &Action) -> Result<u32, DriverError> {
         let step = format!("{action:?}");
         match action {
-            Action::Play(action) => self.backend.play(action, &step),
+            Action::Play(action) => self.backend.play(action),
             Action::Answer(answer) => {
                 let answer = answer.clone();
                 self.backend

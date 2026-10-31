@@ -1,19 +1,12 @@
 //! The palantir-side half of the theme: darkroom's palette projected onto
 //! [`palantir::Palette`], and the [`palantir::Theme`] that builds.
 
-use palantir::{
-    ButtonTheme, RadiusSteps, SpaceSteps, Stroke, StrokeSteps, TabsTheme, TextStyleOverrides,
-};
+use palantir::{ButtonTheme, Stroke, TabsTheme, TextStyleOverrides};
 
+use crate::gui::theme;
 use crate::gui::theme::color;
-use crate::gui::theme::elevation_scale::ElevationScale;
-use crate::gui::theme::glass;
 use crate::gui::theme::icon_scale::IconScale;
 use crate::gui::theme::palette::Palette;
-use crate::gui::theme::radius_scale::RadiusScale;
-use crate::gui::theme::space_scale::SpaceScale;
-use crate::gui::theme::stroke_scale::StrokeScale;
-use crate::gui::theme::type_scale::TypeScale;
 use crate::gui::widgets::icon;
 
 /// darkroom's roles as the [`palantir::Palette`] that
@@ -42,69 +35,17 @@ pub(super) const fn palette(p: &Palette) -> palantir::Palette {
     }
 }
 
-/// What the bridge needs past the palette projection: the theme's scales. A bundle rather than six
-/// parameters.
-#[derive(Clone, Copy, Debug)]
-pub(super) struct BridgeRoles<'a> {
-    pub(super) font: &'a TypeScale,
-    pub(super) space: &'a SpaceScale,
-    pub(super) radius: &'a RadiusScale,
-    pub(super) stroke: &'a StrokeScale,
-    pub(super) icon: &'a IconScale,
-    pub(super) elevation: &'a ElevationScale,
-}
-
-impl BridgeRoles<'_> {
-    /// The theme's steps as palantir's recipes read them, so a palantir control lines up with a
-    /// darkroom one: a field and a button beside it share one height, a menu rounds and casts as
-    /// every floating surface does, a tab chip rounds as a card, and every control snaps.
-    pub(super) const fn metrics(&self) -> palantir::Metrics {
-        let Self {
-            space,
-            radius,
-            stroke,
-            elevation,
-            ..
-        } = *self;
-        palantir::Metrics {
-            space: SpaceSteps {
-                xs: space.xs,
-                sm: space.sm,
-                md: space.md,
-                lg: space.lg,
-                xl: space.xl,
-            },
-            radius: RadiusSteps {
-                mark: radius.mark,
-                control: radius.control,
-                card: radius.card,
-                float: radius.float,
-            },
-            stroke: StrokeSteps {
-                hairline: stroke.hairline,
-                fine: stroke.fine,
-                line: stroke.line,
-            },
-            float_shadow: elevation.floating,
-            // Darkroom's own controls snap, so palantir's do too: a button in a dialog changes as
-            // a node's icon button does, and a view saved right after a menu pick pictures the
-            // settled window, not a title halfway through its fade.
-            transition: None,
-        }
-    }
-}
-
 /// Palantir sub-theme for darkroom: assemble every widget recipe from the palette and `m` via
-/// [`palantir::Theme::from_parts`], then apply the darkroom-only tweaks (the type scale's body as
-/// the ambient text, surround-colored dock seam, the icon set's tab close button, a wider menu).
+/// [`palantir::Theme::from_parts`], then apply the darkroom-only tweaks (a tooltip at the body
+/// tier, surround-colored dock seam, the icon set's tab close button, a wider menu).
 ///
-/// The ambient size is [`TypeScale::body`], and no widget look pins a size
-/// of its own: a palantir widget then reads the tier every darkroom label
-/// at that prominence reads.
+/// The ambient size is `m`'s body tier, which `from_parts` sets, and no widget look pins a size
+/// of its own once the tooltip's caption tier is dropped: a palantir widget then reads the tier
+/// every darkroom label at that prominence reads.
 pub(super) fn theme(
     p: &palantir::Palette,
     m: &palantir::Metrics,
-    r: BridgeRoles<'_>,
+    icon: &IconScale,
 ) -> palantir::Theme {
     let mut theme = palantir::Theme::from_parts(p, m);
 
@@ -115,9 +56,8 @@ pub(super) fn theme(
     theme.splitter.rule = p.surround;
     theme.splitter.rule_thickness = m.space.xs;
 
-    tab_close(&mut theme.tabs, r);
+    tab_close(&mut theme.tabs, icon);
 
-    theme.text = theme.text.with_font_size(r.font.body);
     theme.tooltip.text = TextStyleOverrides::NONE;
     let menu = &mut theme.context_menu;
     menu.min_width = MENU_MIN_WIDTH;
@@ -131,7 +71,7 @@ pub(super) fn theme(
         &mut theme.tooltip.panel,
         &mut theme.color_picker.popup,
     ] {
-        glass::frost(panel, p.text_muted);
+        *panel = theme::frosted(panel, p.text_muted);
     }
     theme
 }
@@ -144,8 +84,8 @@ const MENU_MIN_WIDTH: f32 = 240.0;
 /// control-rounded lift: the top rung, the one fill that shows on a hovered chip as on the
 /// canvas-filled selected one, pressed or not. The icon box is the inline tier's, as a node
 /// footer's status icon is.
-const fn tab_close(tabs: &mut TabsTheme, r: BridgeRoles<'_>) {
-    let close = r.icon.inline;
+const fn tab_close(tabs: &mut TabsTheme, icon: &IconScale) {
+    let close = icon.inline;
     tabs.close_size = close.side();
     tabs.close_glyph = icon::cross_span(close.icon);
     tabs.close_stroke = icon::stroke_width(close.icon);

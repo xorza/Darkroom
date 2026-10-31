@@ -37,7 +37,6 @@ use crate::gui::widgets::format::shown_value::{ShownValue, UNSET};
 use crate::gui::widgets::icon::Icon;
 use crate::gui::widgets::icon_button::IconButton;
 use crate::gui::widgets::support;
-use crate::gui::widgets::toggle::Toggle;
 
 /// Most recent log lines shown per node, so the pane stays bounded.
 const LOG_LINE_CAP: usize = 20;
@@ -47,7 +46,7 @@ pub(crate) fn show(ui: &mut Ui, ctx: GraphCtx<'_>, target: InspectTarget, out: &
     let theme = ctx.theme();
     Scroll::vertical()
         .id_salt(("inspector", target))
-        .size((Sizing::FILL, Sizing::FILL))
+        .size(Sizing::FILL)
         .show(ui, |ui| {
             Panel::vstack()
                 .id_salt("inspector_body")
@@ -119,7 +118,6 @@ fn body(ui: &mut Ui, node: NodeCtx<'_>, target: InspectTarget, out: &mut Request
                             pin_wid(),
                             theme.colors.accent,
                             "Pin — keep this node in its own tab",
-                            Toggle::Off,
                         )
                         .show(ui, theme)
                     {
@@ -390,11 +388,7 @@ impl PortDot {
                 .with_border(Stroke::new(self.color, theme.stroke.line)),
             DotFill::Blank => Chrome::NONE,
         };
-        Block::new()
-            .id(wid)
-            .size((Sizing::fixed(side), Sizing::fixed(side)))
-            .chrome(chrome)
-            .show(ui);
+        Block::new().id(wid).size(side).chrome(chrome).show(ui);
     }
 }
 

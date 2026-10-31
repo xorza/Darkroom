@@ -15,8 +15,8 @@ use std::path::{Path, PathBuf};
 use common::{fs, process};
 use lens::MlModelPaths;
 use palantir::{
-    Align, Button, Checkbox, ComboBox, Configure, EditEnd, Grid, HAlign, Panel, Sizing, Spacing,
-    Text, TextEdit, TextWrap, Track, Ui, VAlign, WidgetId,
+    Align, Button, Checkbox, ComboBox, Configure, Grid, Panel, Sizing, Spacing, Text, TextEdit,
+    TextWrap, Track, Ui, VAlign, WidgetId,
 };
 
 use crate::core::io::preferences::Preferences;
@@ -25,7 +25,6 @@ use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::{MlModelKind, PreferencesCommand};
 use crate::gui::frame::requests::Requests;
 use crate::gui::theme::Theme;
-use crate::gui::widgets::edit_buffer::{EditBuffer, Focus};
 use crate::gui::widgets::link::Link;
 use crate::gui::widgets::support;
 
@@ -48,9 +47,9 @@ impl PreferencesForm<'_> {
         let theme = self.theme;
         Panel::vstack()
             .id_salt("preferences_view")
-            .size((Sizing::FILL, Sizing::FILL))
+            .size(Sizing::FILL)
             .padding(theme.pane_padding())
-            .child_align(Align::new(HAlign::Center, VAlign::Top))
+            .child_align(Align::TOP)
             .show(ui, |ui| {
                 // One grid for every section, so a label column, a control column and a button
                 // column line up from section to section. A cell spans no column past the
@@ -135,7 +134,7 @@ impl PreferencesForm<'_> {
         ComboBox::labeled(&mut picked, &InterfaceSize::OFFERED, |size| size.label())
             .id(interface_size_wid())
             .grid_cell((row, 1))
-            .align(Align::new(HAlign::Left, VAlign::Center))
+            .align(Align::LEFT)
             .show(ui);
         if picked != before {
             *size = InterfaceSize::OFFERED[picked];
@@ -163,24 +162,17 @@ impl PreferencesForm<'_> {
         let theme = self.theme;
         let path = kind.path_mut(paths);
         let wid = path_field_wid(name);
-        // Refresh the draft from `path` only while the field is idle, so an in-progress edit
-        // is never overwritten, the blur frame that commits it included: focus is resolved
-        // before the record pass, so that frame already reads unfocused
-        // ([`EditBuffer::is_idle`]). The problem is re-statted only when the mirrored path
-        // changes and on a commit, never per frame.
+        // The field is palantir's buffered `TextEdit`: it shows the stored path while idle,
+        // keeps an edit in progress, and hands it over on its commit. The problem is re-statted
+        // only when the stored path changes and on a commit, never per frame.
         ui.with_state::<PathField, _>(wid, |ui, field| {
-            if field.buffer.is_idle(Focus::of(ui, wid)) {
-                // Borrowed for a UTF-8 path, every path that round-trips through this field, so
-                // the common unchanged case compares in place.
-                let canonical = path.to_string_lossy();
-                if field.buffer.text != canonical {
-                    field.buffer.text.replace_range(.., &canonical);
-                    field.problem = path_problem(path);
-                }
+            if field.checked != *path {
+                field.check(path);
             }
             let problem = field.problem;
             self.label(ui, name, at);
-            let mut edit = TextEdit::new(&mut field.buffer.text)
+            // Borrowed for a UTF-8 path, every path that round-trips through this field.
+            let mut edit = TextEdit::buffered(path.to_string_lossy())
                 .id(wid)
                 .grid_cell((at, 1))
                 .align(Align::v(VAlign::Center))
@@ -193,20 +185,16 @@ impl PreferencesForm<'_> {
                 edit = edit.style(&theme.field_error);
             }
             let response = edit.show(ui);
-            if response.ended == Some(EditEnd::Canceled) {
-                // Escape drops the draft: the field shows the committed path again.
-                field.buffer.text.replace_range(.., &path.to_string_lossy());
+            if let Some(text) = response.committed_text {
+                *path = PathBuf::from(text);
+                self.out
+                    .push_app(AppCommand::Preferences(PreferencesCommand::Changed));
             }
             if response.committed {
-                if field.buffer.text != path.to_string_lossy() {
-                    *path = PathBuf::from(field.buffer.text.clone());
-                    self.out
-                        .push_app(AppCommand::Preferences(PreferencesCommand::Changed));
-                }
                 // Re-stat on every commit — even an unchanged path: the file may have appeared
                 // (or vanished) since the last check, and Enter is the natural retry. The stored
                 // path, not the text, which is lossy for a name that is not UTF-8.
-                field.problem = path_problem(path);
+                field.check(path);
             }
 
             if Button::new()
@@ -245,7 +233,6 @@ impl PreferencesForm<'_> {
                     }
                     download_hint(ui, theme, row);
                 });
-            field.buffer.settle(Focus::of(ui, wid));
         });
     }
 
@@ -336,13 +323,22 @@ fn path_problem(p: &Path) -> Option<&'static str> {
     (!onnx).then_some("Not an .onnx file")
 }
 
-/// Cross-frame state for a [`PreferencesForm::model_row`] path field: the buffered text, as a
-/// const editor keeps it, and the path's health, cached as the mirror and each commit last
-/// found it.
+/// Cross-frame state for a [`PreferencesForm::model_row`] path field: the path's health, as the
+/// last change of the stored path or the last commit found it.
 #[derive(Default, Debug)]
 struct PathField {
-    buffer: EditBuffer,
+    /// The path [`Self::problem`] was found for.
+    checked: PathBuf,
     problem: Option<&'static str>,
+}
+
+impl PathField {
+    /// Stat `path` and keep what is wrong with it.
+    fn check(&mut self, path: &Path) {
+        self.problem = path_problem(path);
+        self.checked.clear();
+        self.checked.push(path);
+    }
 }
 
 /// The path field of the model row `label`.

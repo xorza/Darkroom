@@ -36,8 +36,7 @@ pixels. The window is offscreen, or the desktop one. The `darkroom` binary of `a
   palantir's `Remote`, whose queries run between two frames with the app and its `Ui`. palantir
   plays the steps, resolves the locators and takes the shots, by one set of rules for both;
   darkroom adds its places (`EditorTarget`: a node, its title, a port, a canvas point), the
-  dialog answer, its settle wait for the worker and the previews, and its state, legends and
-  tools. A query that panics on the window's thread ends that query alone, its message passed to
+  dialog answer, its wait for a run, and its state, legends and tools. A query that panics on the window's thread ends that query alone, its message passed to
   the session. An open is the app's driven open: File ▸ Open, with no prompt. Refused: a request
   queue in the app, which the window served in its next frame, as `Remote` reaches the app and
   the `Ui` between frames itself.
@@ -90,14 +89,14 @@ pixels. The window is offscreen, or the desktop one. The `darkroom` binary of `a
   side and name, a world point, then a widget's text, then a screen point. A locator that matches
   several is an error that lists them, and `Nth` picks one, as Playwright's strict locators and
   `nth` do ([Playwright locators](https://playwright.dev/docs/locators)).
-- **Each action waits until the editor settles**, as Playwright's auto-wait does. Offscreen,
-  frames run until one asks no repaint, the app has no wake pending, and no preview is converting
-  on its thread, bounded in frames and in real time; a wake from the worker or the preview
-  converter makes the next frame a full one, as the window host's repaint does. In the window, the
-  settle waits for a frame that saw every sent event and asks no repaint, then for no preview
-  converting, bounded in real time. A timer wake, as a caret blink asks, holds neither. A shot's
-  image is copied back by the device: offscreen, the driver waits for the device, and the next
-  frame lands the image; in the window, the wait is bounded in real time.
+- **Each action waits until the editor settles**, as Playwright's auto-wait does, through
+  palantir's settle: `Harness::settle` offscreen and `Remote::settle` in the window. The app
+  reports a preview converting on its thread through `App::is_busy` and wakes the window through
+  `Ui::waker`, so the settle runs until a frame asks no repaint, no wake waits and nothing is
+  busy, bounded in frames and in real time. A view capture asks frames until its image lands. A
+  timer wake, as a caret blink asks, holds neither. A shot's image is copied back by the device:
+  offscreen, the harness waits for the device, and the next frame lands the image; in the window,
+  the wait is bounded in real time.
   `darkroom_wait_run` waits for the worker too. Refused: a fixed sleep or frame count, which
   breaks when a frame, a conversion or a slow adapter takes longer, as a software adapter's copy
   outlasted 600 offscreen frames on the CI runners.
@@ -293,8 +292,8 @@ layout only: the graph does not change, and the run does not read it.
 - **A node keeps the `elem` fill**, and a 1 px rule divides its title from its ports. Refused:
   the `panel` fill, which breaks the generator's surface ladder.
 - **One type ladder for darkroom and palantir: title 16, body 14, label 12**, the Windows Fluent
-  2 ramp. `TypeScale` sets palantir's ambient text, so no palantir widget shows a size of its
-  own. Refused: 15/13/11, the macOS and KDE body size, which read small on a 57" screen at scale
+  2 ramp, darkroom's `TEXT` steps in the `Metrics` palantir reads, so palantir's ambient text is
+  the body and no palantir widget shows a size of its own. Refused: 15/13/11, the macOS and KDE body size, which read small on a 57" screen at scale
   1.5; an 8.5 px caption, too small at scale 1; a label a point under the body, which reads as
   the same size. Chosen by the user on 2026-10-27.
 - **Interface size is a preference**, from 80 to 150 % on palantir's `UserScale` steps, as VS
@@ -304,9 +303,10 @@ layout only: the graph does not change, and the run does not read it.
   the user on 2026-10-27.
 - **Space and radius are scales on the theme**, beside `TypeScale`. A literal size at a call
   site is a missing token.
-- **palantir's recipes read the theme's steps.** The bridge hands the space, radius and stroke
-  steps and the floating shadow to `palantir::Theme::from_parts` as its `Metrics`, as egui keeps
-  `Style::spacing` beside `Style::visuals`, then sets colors and darkroom's own widths. Refused:
+- **palantir's recipes read the theme's steps.** The theme's type, space, radius and stroke steps
+  are constants on palantir's step types, and with the floating shadow they make the `Metrics`
+  handed to `palantir::Theme::from_parts`, as egui keeps `Style::spacing` beside `Style::visuals`;
+  the bridge then sets colors and darkroom's own widths. Refused:
   overriding palantir's literals field by field after it built its derived recipes, which left
   the drag value on the old button padding. Chosen by the user on 2026-10-28.
 - **An icon button gives its icon 6 px a side**: a toolbar chip draws 18 in 30, a node header's
@@ -342,8 +342,8 @@ layout only: the graph does not change, and the run does not read it.
   picked as a design's alpha. Refused: `with_alpha` for a tint, which palantir blends in linear
   light, where a 10 % red wash read about three times as bright and an "on" button's tint
   outshone the hover fill.
-- **A surface that floats over content is frosted glass, from one recipe** (`theme::glass`): the
-  menus, the node palette, the combo lists, tooltips, the color picker and the toolbar pills, as
+- **A surface that floats over content is frosted glass, from one recipe** (`theme::frosted`, its
+  ceiling from palantir's `BackdropFilter::with_max_luminance_for`): the menus, the node palette, the combo lists, tooltips, the color picker and the toolbar pills, as
   Fluent puts acrylic under flyouts, context menus and in-app surfaces
   ([in-app acrylic](https://learn.microsoft.com/windows/apps/develop/ui/in-app-acrylic)). Its
   luminance ceiling is derived so the muted ink holds WCAG's 4.5:1 over any backdrop as an 8-bit
@@ -369,17 +369,18 @@ layout only: the graph does not change, and the run does not read it.
   search are: with no query the library by category under captions, with one a ranked run,
   each row with its description. Refused: one column a category, 870 px wide over the canvas
   the node goes on. Chosen by the user on 2026-10-27.
-- **A canvas menu stays where its first frame landed.** Refused: re-anchoring at the opening
-  point each frame, which let the window clamp it again, so the palette's field jumped 400 px
-  when a query shrank the list.
+- **A canvas menu stays where its first frame landed**, as palantir holds a popup raised at a
+  point. Refused: re-anchoring at the opening point each frame, which let the window clamp it
+  again, so the palette's field jumped 400 px when a query shrank the list.
 - **Undo reads "Undo".** Refused: naming the step, as Qt's `QUndoCommand` and AppKit's
   `setActionName` do from the command that made it: darkroom's commands reach the history as
   batches of intents, and a name read off them misnames a compound command (Duplicate would
   read "Undo Add Node").
 - **A readout that changes while it is watched reserves its widest value**, in the mono face, at
-  the width `type_scale::figure_width` derives from the face's advance: the status bar's zoom and
+  the width `support::figure_width` measures through palantir's shaper: the status bar's zoom and
   memory and a node's run time, so the words beside them hold still as a digit count changes.
-  Refused: a measured literal, which drifted from the face and the size it guessed.
+  Refused: a measured literal, which drifted from the face and the size it guessed; the face's
+  advance copied by hand.
 - **A percent reads `62%`**, with no space before the sign, as the viewer's "Zoom to 100%" chip
   and every platform's zoom control write it, through one `Percent`. Refused: `62 %`, the
   ISO 80000 spacing, beside unspaced labels in the same window.

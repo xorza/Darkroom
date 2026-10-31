@@ -23,7 +23,6 @@ use crate::core::io::preferences::preferences_store::PreferencesStore;
 use crate::driver::log_ring::LogRing;
 use crate::driver::window_link::WindowLink;
 use crate::gui::MAIN_WINDOW;
-use crate::gui::app::app_host::AppHost;
 use crate::gui::app::{App, LaunchInputs};
 use crate::gui::dialogs::{DialogFallback, Dialogs};
 
@@ -74,21 +73,15 @@ pub fn run_driven(
 
             let dialogs = Dialogs::new(DialogFallback::Native);
             let native_open = dialogs.native_open();
-            let link_handle = handle.clone();
             let app = App::new(
                 ui,
-                AppHost::Window(handle),
                 LaunchInputs {
                     preferences,
                     document,
                     dialogs,
                 },
             );
-            serve(WindowLink::new(
-                link_handle,
-                native_open,
-                app.pending_work(),
-            ));
+            serve(WindowLink::new(handle, native_open));
             app
         })?;
 

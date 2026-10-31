@@ -1,27 +1,27 @@
 //! [`IconButton`]: the small ghost button and the read-only mark a node's header carries.
 
-use palantir::{Chrome, Configure, Corners, Panel, Rect, RgbaF32, Sense, Sizing, Ui, WidgetId};
+use palantir::{
+    Brush, Button, ButtonTheme, Chrome, Configure, Corners, Rect, RgbaF32, Sense,
+    TextStyleOverrides, Ui, WidgetId, WidgetLook,
+};
 
 use crate::gui::theme::Theme;
 use crate::gui::widgets::icon::Icon;
 use crate::gui::widgets::support;
-use crate::gui::widgets::toggle::Toggle;
 
 /// What the button is: a control the user presses, or a mark that only tells.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Kind {
-    Press {
-        state: Toggle,
-    },
+    Press,
     /// Senses hover alone, for its tooltip, so a click falls through to the node.
     Mark,
 }
 
-/// One icon in the control icon box with a tooltip. A control is a ghost button: no fill at rest, the
-/// hover fill when the pointer is over it, and a tint of its color while it is on. Its ink is
-/// the muted ink at rest and `color` while it is on or under the pointer; the hover fill is the
-/// one a toolbar chip lifts to. Builder chain ending in [`show`](Self::show), like a palantir
-/// widget.
+/// One icon in the control icon box with a tooltip. A control is a ghost button: no fill at rest,
+/// the hover fill when the pointer is over it, and a tint of its color while it is
+/// [selected](Self::selected). Its ink is the muted ink at rest and `color` while it is on or
+/// under the pointer; the hover fill is the one a toolbar chip lifts to. Builder chain ending in
+/// [`show`](Self::show), like a palantir widget.
 #[derive(Debug)]
 pub(crate) struct IconButton {
     icon: Icon,
@@ -29,23 +29,24 @@ pub(crate) struct IconButton {
     color: RgbaF32,
     tooltip: &'static str,
     kind: Kind,
+    selected: bool,
 }
 
 impl IconButton {
-    /// A control, clickable through `wid`, showing `state`.
+    /// A control, clickable through `wid`.
     pub(crate) const fn press(
         icon: Icon,
         wid: WidgetId,
         color: RgbaF32,
         tooltip: &'static str,
-        state: Toggle,
     ) -> Self {
         Self {
             icon,
             wid,
             color,
             tooltip,
-            kind: Kind::Press { state },
+            kind: Kind::Press,
+            selected: false,
         }
     }
 
@@ -62,7 +63,14 @@ impl IconButton {
             color,
             tooltip,
             kind: Kind::Mark,
+            selected: false,
         }
+    }
+
+    /// Whether a control shows its on state. Default `false`.
+    pub(crate) const fn selected(mut self, selected: bool) -> Self {
+        self.selected = selected;
+        self
     }
 
     /// Record the button; `true` when a control was clicked this frame.
@@ -73,62 +81,72 @@ impl IconButton {
             color,
             tooltip,
             kind,
+            selected,
         } = self;
-        // Last frame's hover: this frame's response is known only after `show`.
-        let hovered = ui.response_for(wid).hovered();
-        let (fill, ink, sense) = match kind {
-            Kind::Mark => (None, color, Sense::HOVER),
-            Kind::Press { state } => {
-                let fill = press_fill(theme, color, state, hovered);
-                let ink = if hovered || state == Toggle::On {
-                    color
-                } else {
-                    theme.ink.muted
-                };
-                (fill, ink, Sense::CLICK)
-            }
-        };
-        let mut chrome = Chrome {
-            corners: Corners::all(theme.radius.control),
-            ..Chrome::default()
-        };
-        // Left without a fill rather than a transparent one, so a resting button paints no quad.
-        if let Some(fill) = fill {
-            chrome.fill = fill.into();
-        }
         let control = theme.icon.control;
         let (inset, side) = (control.inset, control.icon);
-        let button = Panel::zstack()
+        let (style, sense) = match kind {
+            Kind::Press => (press_style(theme, color), Sense::CLICK),
+            Kind::Mark => (mark_style(theme, color), Sense::HOVER),
+        };
+        let button = Button::new()
             .id(wid)
-            .size((Sizing::fixed(control.side()), Sizing::fixed(control.side())))
+            .size(control.side())
             .sense(sense)
-            .chrome(chrome)
-            .show(ui, |ui| {
-                icon.draw(ui, Rect::new(inset, inset, side, side), ink);
+            .focusable(false)
+            .style(&style)
+            .selected(selected)
+            .show_with(ui, |ui, text| {
+                icon.draw(ui, Rect::new(inset, inset, side, side), text.color);
             });
-        // The owned snapshot ends the button's `ui` borrow before the tooltip records.
         let snapshot = button.response.snapshot();
-        let clicked = matches!(kind, Kind::Press { .. }) && button.response.left.clicked();
+        let clicked = kind == Kind::Press && button.response.clicked();
         support::tooltip_after(ui, &snapshot, Some(tooltip));
         clicked
     }
 }
 
-/// A control's fill: none at rest, the hover lift under the pointer, and while it is on a wash of
-/// its own `color` over the card it sits on, a step stronger under the pointer. A tint, not a
-/// solid swatch, since a setting is passive configuration and solid fills belong to live status.
-fn press_fill(theme: &Theme, color: RgbaF32, state: Toggle, hovered: bool) -> Option<RgbaF32> {
-    match (state, hovered) {
-        (Toggle::On, hovered) => Some(theme.on_fill(color, hovered)),
-        (Toggle::Off, true) => Some(theme.card.lift),
-        (Toggle::Off, false) => None,
+/// A look of `fill` under `ink`, control-rounded; a `None` fill paints no quad.
+fn look(theme: &Theme, fill: Option<RgbaF32>, ink: RgbaF32) -> WidgetLook {
+    WidgetLook {
+        chrome: Chrome::rounded(
+            fill.map_or(Brush::TRANSPARENT, Brush::from),
+            Corners::all(theme.radius.control),
+        ),
+        text: TextStyleOverrides::NONE.with_color(ink),
     }
+}
+
+/// A control's looks: no fill and the muted ink at rest, the hover lift under `color` under the
+/// pointer, and while it is on a wash of its own `color` over the card it sits on, a step
+/// stronger under the pointer. A tint, not a solid swatch, since a setting is passive
+/// configuration and solid fills belong to live status.
+fn press_style(theme: &Theme, color: RgbaF32) -> ButtonTheme {
+    let rest = look(theme, None, theme.ink.muted);
+    let lit = look(theme, Some(theme.card.lift), color);
+    let on = look(theme, Some(theme.on_fill(color, false)), color);
+    let on_lit = look(theme, Some(theme.on_fill(color, true)), color);
+    support::flush_button(
+        support::hover_looks(rest, lit),
+        support::hover_looks(on, on_lit),
+    )
+}
+
+/// A mark's looks: `color` and no fill in every state.
+fn mark_style(theme: &Theme, color: RgbaF32) -> ButtonTheme {
+    let still = look(theme, None, color);
+    let looks = support::hover_looks(still.clone(), still);
+    support::flush_button(looks.clone(), looks)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gui::theme::color;
+
+    /// The fill a look paints.
+    fn fill(look: &WidgetLook) -> RgbaF32 {
+        look.chrome.fill.as_solid().expect("a solid fill")
+    }
 
     /// An "on" button rests under the hover lift an "off" one takes, so "on" never reads as
     /// "hovered", and lifts past it under the pointer, so hovering it still shows. For the two
@@ -136,21 +154,20 @@ mod tests {
     #[test]
     fn an_on_button_rests_under_the_hover_lift_and_rises_past_it() {
         let theme = Theme::default();
-        let lift =
-            press_fill(&theme, theme.ink.muted, Toggle::Off, true).expect("a hovered button fills");
-        assert_eq!(
-            press_fill(&theme, theme.ink.muted, Toggle::Off, false),
-            None
+        let off = press_style(&theme, theme.ink.muted);
+        let lift = fill(&off.looks.hovered);
+        assert!(
+            off.looks.normal.chrome.fill.is_noop(),
+            "a resting button paints no quad"
         );
         for (ink, name) in [(theme.badge.cache, "cache"), (theme.ink.muted, "disable")] {
-            let rest = press_fill(&theme, ink, Toggle::On, false).expect("on fills");
-            let hover = press_fill(&theme, ink, Toggle::On, true).expect("on fills");
+            let on = press_style(&theme, ink).selected;
             assert!(
-                color::luminance(rest) < color::luminance(lift),
+                fill(&on.normal).luminance() < lift.luminance(),
                 "{name}: on reads as hovered"
             );
             assert!(
-                color::luminance(hover) > color::luminance(lift),
+                fill(&on.hovered).luminance() > lift.luminance(),
                 "{name}: hovering on does not show"
             );
         }

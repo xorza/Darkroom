@@ -360,8 +360,7 @@ fn the_tie_menu_releases_pins_and_removes() {
     assert_eq!(rows.len(), 4, "two releases, a pin and a removal");
     // Each entry names its rows by text: the wire from the producer's output to the consumer's
     // input, through the plain func's port names.
-    let mut listed = Vec::new();
-    h.ui.ui().inspect(&mut listed);
+    let listed = h.ui.widgets(None);
     let text = |id| {
         listed
             .iter()
