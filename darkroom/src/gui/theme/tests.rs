@@ -75,7 +75,7 @@ fn default_wiring_and_menu_tweak() {
     // `0.04231141`, 4.563:1. Over white, the panel's tint alone left the ground at
     // `0.28 + 0.72 · 0.039546 = 0.308473`, 1.18:1.
     let ui = &theme.palantir;
-    let level = |byte: u8| RgbaF32::from_srgba(SrgbaU8::rgb(byte, byte, byte)).r;
+    let level = |byte: u8| RgbaF32::from_srgba8(SrgbaU8::rgb(byte, byte, byte)).r;
     let muted = p.text_muted.luminance();
     assert!((muted + 0.05) / (level(58) + 0.05) >= 4.5);
     assert!(
@@ -118,7 +118,7 @@ fn every_palantir_widget_resolves_to_the_body_tier() {
     let ui = &theme.palantir;
     assert_eq!(ui.text.font_size, theme.font.body);
     let looks = [
-        ("button", &ui.button.looks),
+        ("button", &ui.button.unselected),
         ("menu bar title", &ui.menu_bar.title),
         ("menu item", &ui.context_menu.item.looks),
         ("selected tab", &ui.tabs.selected),
@@ -383,7 +383,11 @@ fn a_tab_chip_and_its_close_button_are_ghosts() {
     assert_ne!(tabs.close.hovered.chrome.fill, looks.hovered.chrome.fill);
     assert_eq!(tabs.close.normal.chrome, Chrome::NONE);
     assert_eq!(
-        (tabs.close_size, tabs.close_glyph, tabs.close_stroke),
+        (
+            tabs.close_size,
+            tabs.close_glyph_span,
+            tabs.close_glyph_width
+        ),
         (18.0, 6.0, 1.0)
     );
     assert_eq!(tabs.close_shown, CloseShown::SelectedOrHovered);
@@ -465,21 +469,21 @@ fn no_untyped_port_borrows_a_status_or_a_type_hue() {
 fn a_wash_composites_on_the_encoded_values() {
     let theme = Theme::default();
     assert_eq!(
-        theme.status.error.to_srgba(),
+        theme.status.error.to_srgba8(),
         SrgbaU8::hex(0xff8b8c),
         "premise"
     );
     assert_eq!(
-        theme.canvas.bg.to_srgba(),
+        theme.canvas.bg.to_srgba8(),
         SrgbaU8::hex(0x141414),
         "premise"
     );
     assert_eq!(
-        color::wash(theme.status.error, 0.14, theme.canvas.bg).to_srgba(),
+        color::wash(theme.status.error, 0.14, theme.canvas.bg).to_srgba8(),
         SrgbaU8::hex(0x352525)
     );
     assert_eq!(
-        color::wash(theme.status.error, 0.0, theme.canvas.bg).to_srgba(),
+        color::wash(theme.status.error, 0.0, theme.canvas.bg).to_srgba8(),
         SrgbaU8::hex(0x141414)
     );
 }
