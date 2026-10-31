@@ -193,25 +193,12 @@ impl State {
 }
 
 impl UiList {
-    /// The visible interactive widgets of `ui`'s last frame whose text contains `filter`, ignoring
-    /// case, at most `limit` of them in paint order.
-    pub(crate) fn of(ui: &Ui, filter: Option<&str>, limit: usize) -> Self {
-        let mut widgets = Vec::new();
-        ui.inspect(&mut widgets);
-        let filter = filter.map(str::to_lowercase);
-        let matching: Vec<&InspectedWidget> = widgets
-            .iter()
-            .filter(|widget| !widget.clipped)
-            .filter(|widget| {
-                filter
-                    .as_deref()
-                    .is_none_or(|filter| widget.text.to_lowercase().contains(filter))
-            })
-            .collect();
+    /// The first `limit` of `matching`, the visible widgets a filter kept, in paint order.
+    pub(crate) fn of(matching: &[InspectedWidget], limit: usize) -> Self {
         Self {
             omitted: matching.len().saturating_sub(limit),
             widgets: matching
-                .into_iter()
+                .iter()
                 .take(limit)
                 .map(|widget| UiWidget {
                     text: widget.text.chars().take(TEXT_CUT).collect(),

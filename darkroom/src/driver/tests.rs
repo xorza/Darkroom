@@ -3,16 +3,16 @@ use std::time::Duration;
 
 use common::{TempDir, fs};
 use glam::{UVec2, Vec2};
-use palantir::{DockView, Modifiers, PointerButton, Rect};
+use palantir::{DockView, LocateError, PointerButton, Rect, ShortcutMods};
 use scenarium::{Binding, ConstValue, InputPort, NodeId};
 use tracing::{callsite, subscriber};
 use tracing_subscriber::layer::SubscriberExt as _;
 
 use crate::core::io::document as io_document;
 use crate::core::io::document::saved_paths::SavedPaths;
-use crate::driver::action::{Action, Chord, DRAG_STEPS};
+use crate::driver::action::{Action, DRAG_STEPS, Play};
 use crate::driver::error::{ActFailure, DriverError};
-use crate::driver::locator::{Locator, Side};
+use crate::driver::locator::{EditorTarget, Locator, Side};
 use crate::driver::log_ring::LogRing;
 use crate::driver::shot::{NODE_MARGIN, Region, Shot};
 use crate::driver::state::{Detail, State};
@@ -70,29 +70,29 @@ fn srgb(color: palantir::RgbaF32) -> [u8; 4] {
 }
 
 fn click(at: Locator) -> Action {
-    Action::Click {
+    Action::Play(Play::Click {
         at,
         button: PointerButton::Left,
-        mods: Modifiers::default(),
-    }
+        mods: ShortcutMods::NONE,
+    })
 }
 
 fn drag(from: Locator, to: Locator) -> Action {
-    Action::Drag {
+    Action::Play(Play::Drag {
         from,
         to,
         button: PointerButton::Left,
-        mods: Modifiers::default(),
+        mods: ShortcutMods::NONE,
         steps: DRAG_STEPS,
-    }
+    })
 }
 
 fn key(chord: &str) -> Action {
-    Action::Key(Chord::parse(chord).unwrap())
+    Action::Play(Play::Key(chord.parse().unwrap()))
 }
 
 fn node(name: &str) -> Locator {
-    Locator::Node(name.to_string())
+    Locator::App(EditorTarget::Node(name.to_string()))
 }
 
 fn node_id(driver: &Driver, name: &str) -> NodeId {
@@ -131,7 +131,7 @@ fn clicks_drags_and_keys_edit_the_document() {
             .pos
     };
     let before = placed(&driver);
-    let header = Locator::NodeHeader(BRIGHTNESS.to_string());
+    let header = Locator::App(EditorTarget::NodeHeader(BRIGHTNESS.to_string()));
     driver
         .act(&[drag(
             header.clone(),
@@ -141,16 +141,16 @@ fn clicks_drags_and_keys_edit_the_document() {
     assert_eq!(placed(&driver), before + Vec2::new(120.0, 60.0));
 
     let wire = drag(
-        Locator::Port {
+        Locator::App(EditorTarget::Port {
             node: BRIGHTNESS.to_string(),
             side: Side::Out,
             port: "Image".to_string(),
-        },
-        Locator::Port {
+        }),
+        Locator::App(EditorTarget::Port {
             node: CONVERT.to_string(),
             side: Side::In,
             port: "0".to_string(),
-        },
+        }),
     );
     driver.act(&[wire]).unwrap();
     let wired = [format!("{BRIGHTNESS}.Image -> {CONVERT}.Image")];
@@ -205,8 +205,9 @@ fn a_world_point_lands_on_the_canvas_where_nodes_are_placed() {
         .pos;
     let world = driver
         .offscreen()
-        .with_app(|app, ui| Locator::World(pos).point(app, ui))
-        .unwrap();
+        .with_app(|app, ui| Locator::App(EditorTarget::World(pos)).find(app, ui))
+        .unwrap()
+        .point;
     let screen = driver.state(Detail::Concise, None).unwrap().nodes[0]
         .screen
         .unwrap();
@@ -223,12 +224,12 @@ fn the_new_node_palette_adds_the_node_clicked() {
     driver.open(&path, OpenMode::Copy).unwrap();
     driver
         .act(&[
-            Action::Click {
-                at: Locator::Screen(Vec2::new(1200.0, 800.0)),
+            Action::Play(Play::Click {
+                at: Locator::Point(Vec2::new(1200.0, 800.0)),
                 button: PointerButton::Right,
-                mods: Modifiers::default(),
-            },
-            Action::Type("Convert".to_string()),
+                mods: ShortcutMods::NONE,
+            }),
+            Action::Play(Play::Type("Convert".to_string())),
             key("enter"),
         ])
         .unwrap();
@@ -252,12 +253,12 @@ fn down_then_enter_adds_the_next_ranked_match() {
     driver.open(&path, OpenMode::Copy).unwrap();
     driver
         .act(&[
-            Action::Click {
-                at: Locator::Screen(Vec2::new(1200.0, 800.0)),
+            Action::Play(Play::Click {
+                at: Locator::Point(Vec2::new(1200.0, 800.0)),
                 button: PointerButton::Right,
-                mods: Modifiers::default(),
-            },
-            Action::Type("con".to_string()),
+                mods: ShortcutMods::NONE,
+            }),
+            Action::Play(Play::Type("con".to_string())),
             key("down"),
             key("down"),
             key("up"),
@@ -286,7 +287,7 @@ fn a_node_locator_names_exactly_one_node() {
     match driver.act(&[click(node("missing"))]) {
         Err(ActFailure {
             ran: 0,
-            error: DriverError::NotFound { nearest, .. },
+            error: DriverError::Locate(LocateError::NotFound { nearest, .. }),
         }) => {
             assert_eq!(nearest, [BRIGHTNESS, BRIGHTNESS]);
         }
@@ -295,7 +296,7 @@ fn a_node_locator_names_exactly_one_node() {
     match driver.act(&[click(node(BRIGHTNESS))]) {
         Err(ActFailure {
             ran: 0,
-            error: DriverError::Ambiguous { matches, .. },
+            error: DriverError::Locate(LocateError::Ambiguous { matches, .. }),
         }) => assert_eq!(matches.len(), 2),
         other => panic!("{other:?}"),
     }
@@ -305,21 +306,13 @@ fn a_node_locator_names_exactly_one_node() {
     match driver.act(&[nth(node(BRIGHTNESS), 2)]) {
         Err(ActFailure {
             ran: 0,
-            error: DriverError::NotFound { nearest, .. },
-        }) => {
-            assert!(nearest[0].ends_with("has 2 matches"));
-        }
+            error: DriverError::Locate(LocateError::NoNth { count, .. }),
+        }) => assert_eq!(count, 2),
         other => panic!("{other:?}"),
     }
-    match driver.act(&[nth(Locator::NodeHeader(BRIGHTNESS.to_string()), 0)]) {
-        Err(ActFailure {
-            ran: 0,
-            error: DriverError::NotFound { nearest, .. },
-        }) => {
-            assert_eq!(nearest, ["Nth picks among Node or Text matches only"]);
-        }
-        other => panic!("{other:?}"),
-    }
+    let header = Locator::App(EditorTarget::NodeHeader(BRIGHTNESS.to_string()));
+    let first = driver.act(&[nth(header, 0)]).unwrap();
+    assert_eq!(first.selection, [BRIGHTNESS], "the first title of the two");
 }
 
 /// Two clicks on a node's title with a key between them stay two clicks: the second waits out
@@ -331,7 +324,7 @@ fn a_focused_text_field_still_settles() {
     let dir = TempDir::new("darkroom-driver-focus");
     let path = fixture::project(dir.path(), &[BRIGHTNESS]);
     driver.open(&path, OpenMode::Copy).unwrap();
-    let header = || Locator::NodeHeader(BRIGHTNESS.to_string());
+    let header = || Locator::App(EditorTarget::NodeHeader(BRIGHTNESS.to_string()));
     let twice = driver
         .act(&[click(header()), key("escape"), click(header())])
         .unwrap();
@@ -341,7 +334,9 @@ fn a_focused_text_field_still_settles() {
         "no rename field opened"
     );
 
-    let report = driver.act(&[Action::DoubleClick(header())]).unwrap();
+    let report = driver
+        .act(&[Action::Play(Play::DoubleClick(header()))])
+        .unwrap();
     assert_eq!(
         report.focus.as_deref(),
         Some(BRIGHTNESS),
@@ -361,8 +356,8 @@ fn a_copied_session_leaves_the_source_alone() {
     driver
         .act(&[
             drag(
-                Locator::NodeHeader(BRIGHTNESS.to_string()),
-                Locator::Screen(Vec2::new(900.0, 700.0)),
+                Locator::App(EditorTarget::NodeHeader(BRIGHTNESS.to_string())),
+                Locator::Point(Vec2::new(900.0, 700.0)),
             ),
             key("ctrl+s"),
         ])
@@ -409,17 +404,17 @@ fn a_failed_action_leaves_nothing_held_and_the_log_reaches_state() {
         driver.act(&[drag(node(BRIGHTNESS), node("missing"))]),
         Err(ActFailure {
             ran: 0,
-            error: DriverError::NotFound { .. }
+            error: DriverError::Locate(LocateError::NotFound { .. })
         })
     ));
     let report = driver.act(&[click(node(BRIGHTNESS))]).unwrap();
     assert_eq!(report.selection, [BRIGHTNESS]);
     for factor in [0.0, -2.0] {
         assert!(matches!(
-            driver.act(&[Action::Pinch {
+            driver.act(&[Action::Play(Play::Pinch {
                 at: node(BRIGHTNESS),
                 factor
-            }]),
+            })]),
             Err(ActFailure { ran: 0, error: DriverError::BadPinch { factor: refused } }) if refused == factor
         ));
     }
@@ -595,7 +590,9 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
         Err(DriverError::EmptyRegion { .. })
     ));
     // The title: a short window's status bar covers the footer a node's locator presses.
-    let settled = driver.act(&[click(Locator::NodeHeader(BRIGHTNESS.to_string()))]);
+    let settled = driver.act(&[click(Locator::App(EditorTarget::NodeHeader(
+        BRIGHTNESS.to_string(),
+    )))]);
     assert!(settled.is_ok(), "settled after the failure: {settled:?}");
 
     let rect = driver
@@ -612,7 +609,9 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
     let rounded = rect.max().ceil() - rect.min.floor();
     assert_eq!(pane.size.as_vec2(), rounded, "{rect:?}");
     match driver.shot(&Region::Pane("missing".to_string()), 1000) {
-        Err(DriverError::NotFound { nearest, .. }) => assert_eq!(nearest, ["Graph"]),
+        Err(DriverError::Locate(LocateError::NotFound { nearest, .. })) => {
+            assert_eq!(nearest, ["Graph"]);
+        }
         other => panic!("{other:?}"),
     }
 
@@ -686,8 +685,8 @@ fn a_save_writes_the_format_its_extension_names() {
     driver
         .act(&[
             drag(
-                Locator::NodeHeader(BRIGHTNESS.to_string()),
-                Locator::Screen(Vec2::new(900.0, 700.0)),
+                Locator::App(EditorTarget::NodeHeader(BRIGHTNESS.to_string())),
+                Locator::Point(Vec2::new(900.0, 700.0)),
             ),
             key("ctrl+s"),
         ])
@@ -740,7 +739,10 @@ fn the_sample_project_runs_to_its_previews() {
     driver.open(&sample, OpenMode::Copy).unwrap();
     // A run that ends while a later action of the batch plays is still the batch's run.
     driver
-        .act(&[key("ctrl+r"), Action::Move(Locator::Screen(Vec2::ZERO))])
+        .act(&[
+            key("ctrl+r"),
+            Action::Play(Play::Move(Locator::Point(Vec2::ZERO))),
+        ])
         .unwrap();
     driver.wait_run(Duration::from_secs(30)).unwrap();
 
@@ -796,8 +798,8 @@ fn a_quit_ends_the_session() {
     driver
         .act(&[
             drag(
-                Locator::NodeHeader(BRIGHTNESS.to_string()),
-                Locator::Screen(Vec2::new(900.0, 700.0)),
+                Locator::App(EditorTarget::NodeHeader(BRIGHTNESS.to_string())),
+                Locator::Point(Vec2::new(900.0, 700.0)),
             ),
             quit(),
             click(Locator::Text("Cancel".to_string())),
@@ -837,8 +839,8 @@ fn a_quit_ends_the_session() {
 
     let report = driver
         .act(&[drag(
-            Locator::NodeHeader(BRIGHTNESS.to_string()),
-            Locator::Screen(Vec2::new(900.0, 700.0)),
+            Locator::App(EditorTarget::NodeHeader(BRIGHTNESS.to_string())),
+            Locator::Point(Vec2::new(900.0, 700.0)),
         )])
         .unwrap();
     assert!(report.dirty);
@@ -859,18 +861,18 @@ fn a_dropped_wire_floats_onto_the_node_its_palette_adds() {
     let dir = TempDir::new("darkroom-driver-drop");
     let path = fixture::project(dir.path(), &[BRIGHTNESS]);
     driver.open(&path, OpenMode::Copy).unwrap();
-    let output = Locator::Port {
+    let output = Locator::App(EditorTarget::Port {
         node: BRIGHTNESS.to_string(),
         side: Side::Out,
         port: "Image".to_string(),
-    };
+    });
     driver
-        .act(&[drag(output, Locator::Screen(Vec2::new(1100.0, 700.0)))])
+        .act(&[drag(output, Locator::Point(Vec2::new(1100.0, 700.0)))])
         .unwrap();
     // Picked by the keys: a row's text joins its name, category and description, and the
     // library may scroll Convert out of view.
     driver
-        .act(&[Action::Type(CONVERT.to_string()), key("enter")])
+        .act(&[Action::Play(Play::Type(CONVERT.to_string())), key("enter")])
         .unwrap();
     let wires = |driver: &mut Driver| {
         driver
@@ -891,11 +893,11 @@ fn a_dropped_wire_floats_onto_the_node_its_palette_adds() {
     assert_eq!(wires(&mut driver), Vec::<String>::new(), "the wire floats");
 
     driver
-        .act(&[click(Locator::Port {
+        .act(&[click(Locator::App(EditorTarget::Port {
             node: CONVERT.to_string(),
             side: Side::In,
             port: "0".to_string(),
-        })])
+        }))])
         .unwrap();
     assert_eq!(
         wires(&mut driver),

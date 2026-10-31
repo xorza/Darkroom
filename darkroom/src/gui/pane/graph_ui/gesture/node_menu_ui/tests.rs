@@ -33,7 +33,7 @@ fn pick(h: &mut CanvasHarness, on: NodeId, row: usize) -> Vec<GraphIntent> {
         ROW_COUNT,
         "the sweep found rows the menu does not offer, or missed some"
     );
-    h.ui.click_on(rows[row]);
+    h.ui.click(rows[row]);
     h.frame()
 }
 
@@ -43,7 +43,7 @@ fn open_menu(h: &mut CanvasHarness, on: NodeId) -> Vec<WidgetId> {
     // rect to aim the right-click at, then two more so the opened menu has.
     h.prime(2);
     let anchor = h.node_center(on);
-    h.ui.right_click_at(anchor);
+    h.ui.right_click(anchor);
     h.prime(2);
     h.menu_rows(anchor)
 }
@@ -59,7 +59,7 @@ fn a_stubs_menu_offers_only_remove() {
 
     let rows = open_menu(&mut h, stub);
     assert_eq!(rows.len(), 1, "Remove is the one row");
-    h.ui.click_on(rows[0]);
+    h.ui.click(rows[0]);
     let intents = h.frame();
     assert!(
         matches!(intents[..], [GraphIntent::RemoveNode { node_id }] if node_id == stub),
@@ -84,7 +84,7 @@ fn a_node_body_right_click_selects_the_node_it_landed_on() {
     h.prime(2);
 
     let on_func = h.node_center(func);
-    h.ui.right_click_at(on_func);
+    h.ui.right_click(on_func);
     let intents = h.frame();
     assert!(
         matches!(

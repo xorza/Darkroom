@@ -44,7 +44,7 @@ fn the_tie_line_is_the_breakers_chord_plus_shift() {
         let mut h = CanvasHarness::new(DocumentFixture::default());
         h.prime(2);
         h.ui.set_modifiers(modifiers);
-        h.ui.press_button_at(button, Vec2::new(300.0, 300.0));
+        h.ui.press(Vec2::new(300.0, 300.0), button);
         h.frame();
         h.ui.drag_to(Vec2::new(340.0, 380.0));
         h.frame();
@@ -97,14 +97,14 @@ fn crossed(tie_first: bool) -> Crossed {
 /// one toward `to`.
 fn tie_line(h: &mut CanvasHarness, from: Vec2, to: Vec2) -> Vec<GraphIntent> {
     h.ui.set_modifiers(held(false, true));
-    h.ui.press_button_at(PointerButton::Right, from);
+    h.ui.press(from, PointerButton::Right);
     h.frame();
     h.ui.drag_to(from + (to - from).normalize() * 6.0);
     h.frame();
     h.ui.drag_to(to);
     h.frame();
     h.frame();
-    h.ui.release_button(PointerButton::Right);
+    h.ui.release(PointerButton::Right);
     h.frame()
 }
 
@@ -212,7 +212,7 @@ fn one_tie(selected: bool) -> (CanvasHarness, TieId) {
 fn a_tie_clicks_drags_and_sweeps_as_a_node_does() {
     let (mut h, tie) = one_tie(false);
     let center = Vec2::new(470.0, 250.0);
-    h.ui.click_at(center);
+    h.ui.click(center);
     let clicked = h.frame();
     assert!(
         matches!(&*clicked, [GraphIntent::SetSelection { to }] if *to == [ItemId::Tie(tie)].into_iter().collect()),
@@ -220,7 +220,7 @@ fn a_tie_clicks_drags_and_sweeps_as_a_node_does() {
     );
 
     let (mut h, tie) = one_tie(false);
-    h.ui.press_at(center);
+    h.ui.press(center, PointerButton::Left);
     h.frame();
     h.ui.drag_to(center + Vec2::new(10.0, 0.0));
     h.frame();
@@ -244,13 +244,13 @@ fn a_tie_clicks_drags_and_sweeps_as_a_node_does() {
     );
 
     let (mut h, tie) = one_tie(false);
-    h.ui.press_at(Vec2::new(430.0, 600.0));
+    h.ui.press(Vec2::new(430.0, 600.0), PointerButton::Left);
     h.frame();
     h.ui.drag_to(Vec2::new(430.0, 590.0));
     h.frame();
     h.ui.drag_to(Vec2::new(520.0, 230.0));
     h.frame();
-    h.ui.release_button(PointerButton::Left);
+    h.ui.release(PointerButton::Left);
     let swept = h.frame();
     assert!(
         matches!(&*swept, [GraphIntent::SetSelection { to }] if *to == [ItemId::Tie(tie)].into_iter().collect()),
@@ -265,8 +265,11 @@ fn the_knob_of_a_selected_tie_pins_and_frees_its_angle() {
     use crate::core::document::tie::TieAngle;
 
     let (mut h, tie) = one_tie(true);
-    let knob = h.ui.center_of(wid::tie_knob(tie));
-    h.ui.press_at(knob);
+    let knob =
+        h.ui.rect(wid::tie_knob(tie))
+            .expect("the widget shows")
+            .center();
+    h.ui.press(knob, PointerButton::Left);
     h.frame();
     h.ui.drag_to(knob + Vec2::new(0.0, 10.0));
     h.frame();
@@ -289,17 +292,20 @@ fn the_knob_of_a_selected_tie_pins_and_frees_its_angle() {
         [(TieAngle::Pinned(90.0), true)],
         "straight below the center is 90°: {turned:?}"
     );
-    h.ui.release_button(PointerButton::Left);
+    h.ui.release(PointerButton::Left);
     h.frame();
 
     let (mut h, tie) = one_tie(true);
     h.document_mut().main_view.ties.get_mut(&tie).unwrap().angle = TieAngle::Pinned(30.0);
     h.prime(2);
-    let knob = h.ui.center_of(wid::tie_knob(tie));
+    let knob =
+        h.ui.rect(wid::tie_knob(tie))
+            .expect("the widget shows")
+            .center();
     h.advance_past_double_click();
-    h.ui.click_at(knob);
+    h.ui.click(knob);
     h.frame();
-    h.ui.click_at(knob);
+    h.ui.click(knob);
     let freed = h.frame();
     assert!(
         freed.iter().any(|intent| matches!(
@@ -338,7 +344,7 @@ fn the_tie_menu_releases_pins_and_removes() {
 
     let center = Vec2::new(470.0, 250.0);
     let open = |h: &mut CanvasHarness| {
-        h.ui.right_click_at(center);
+        h.ui.right_click(center);
         let opened = h.frame();
         h.prime(2);
         (opened, h.menu_rows(center))
@@ -380,7 +386,7 @@ fn the_tie_menu_releases_pins_and_removes() {
             "Remove tie".to_string(),
         ]
     );
-    h.ui.move_to(h.ui.center_of(rows[1]));
+    h.ui.hover(h.ui.rect(rows[1]).expect("the widget shows").center());
     h.frame();
     assert_eq!(
         h.graph_ui.tie_menu.lit(),
@@ -392,7 +398,7 @@ fn the_tie_menu_releases_pins_and_removes() {
         let (mut h, tie, mut wires) = two_wire_tie();
         wires.sort_unstable();
         let (_, rows) = open(&mut h);
-        h.ui.click_on(rows[row]);
+        h.ui.click(rows[row]);
         let picked = h.frame();
         let as_wanted = match (row, &*picked) {
             (3, [GraphIntent::RemoveTie { tie: removed }]) => *removed == tie,
@@ -407,7 +413,7 @@ fn the_tie_menu_releases_pins_and_removes() {
     let (mut h, tie, _) = two_wire_tie();
     let (_, rows) = open(&mut h);
     let standing = knob_angle(h.graph_ui.ties.band(tie).unwrap().axis, AngleSnap::Free);
-    h.ui.click_on(rows[2]);
+    h.ui.click(rows[2]);
     let pinned = h.frame();
     assert!(
         matches!(
@@ -423,7 +429,7 @@ fn the_tie_menu_releases_pins_and_removes() {
     h.document_mut().main_view.ties.get_mut(&tie).unwrap().angle = TieAngle::Pinned(30.0);
     h.prime(2);
     let (_, rows) = open(&mut h);
-    h.ui.click_on(rows[2]);
+    h.ui.click(rows[2]);
     let freed = h.frame();
     assert!(
         matches!(

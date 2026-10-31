@@ -128,8 +128,8 @@ fn word(ui: &mut Ui, theme: &Theme, text: &'static str, color: RgbaF32) {
 #[cfg(test)]
 mod tests {
     use glam::UVec2;
+    use palantir::Harness;
     use palantir::WidgetId;
-    use palantir::internals::ui_harness::UiHarness;
 
     use super::*;
 
@@ -142,7 +142,7 @@ mod tests {
             0.0, 999.4e-6, 999.94e-3, 9.994, 99.999, 999.994, 999.996, 9_999.96, 999_999.0,
         ];
         let theme = Theme::default();
-        let mut h = UiHarness::with_text(UVec2::new(800, 200));
+        let mut h = Harness::new(UVec2::new(800, 200));
         let id = |i: usize| WidgetId::from_hash(("run_time", i));
         h.frame(|ui| {
             for (i, &s) in secs.iter().enumerate() {

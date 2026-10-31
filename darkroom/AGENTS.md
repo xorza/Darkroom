@@ -24,19 +24,23 @@ pixels. The window is offscreen, or the desktop one. The `darkroom` binary of `a
   rmcp. Refused: the server in the library, which every darkroom test build then compiles; the
   server behind a library feature, which `--all-features` builds on every lint.
 - **The driver is product code, and palantir publishes what it reads.** The binary does not build
-  `internals`: palantir's `HeadlessWindow`, `Ui::inspect` with `InspectedWidget`, and
-  `Ui::double_click_window` are public API. iced and egui ship a headless runner as product API
+  `internals`: palantir's `Harness`, `Remote`, `Locator` and `Action`, `Ui::inspect` with
+  `InspectedWidget`, and `Ui::double_click_window` are public API. iced and egui ship a headless runner as product API
   ([iced_test](https://docs.rs/iced_test), [egui_kittest](https://docs.rs/egui_kittest)), and
   iced_test selects a widget by its text as `inspect` does. The double-click window is a query, as
   Qt's `QStyleHints::mouseDoubleClickInterval` and egui's `InputOptions::max_double_click_delay`
   are, so it can follow the OS setting with no change to callers. Refused: an AccessKit tree for
   locators, as egui_kittest reads, which waits for palantir to take on screen readers.
-- **One driver, two backends.** Actions, locators, state, shots and the settle rules are one
-  driver over a backend. Offscreen: the app on the driver's thread, a stepped clock, a
-  `HeadlessWindow`. Window: the app on the winit main thread; input goes in through
-  `HostHandle::send_input`, and what needs the `Ui` is a request the app serves in its next frame,
-  answered on a channel. A shot uses the product screenshot API in both, and an open the app's
-  driven open: File ▸ Open, with no prompt.
+- **One driver, two backends, palantir's players.** Offscreen: the app on the driver's thread in
+  palantir's `Harness`, a stepped clock. Window: the app on the winit main thread, reached through
+  palantir's `Remote`, whose queries run between two frames with the app and its `Ui`. palantir
+  plays the steps, resolves the locators and takes the shots, by one set of rules for both;
+  darkroom adds its places (`EditorTarget`: a node, its title, a port, a canvas point), the
+  dialog answer, its settle wait for the worker and the previews, and its state, legends and
+  tools. A query that panics on the window's thread ends that query alone, its message passed to
+  the session. An open is the app's driven open: File ▸ Open, with no prompt. Refused: a request
+  queue in the app, which the window served in its next frame, as `Remote` reaches the app and
+  the `Ui` between frames itself.
 - **palantir puts input into a window as the OS does.** `HostHandle::send_input` delivers an
   event before the next frame as OS input is, with the window's input clock, then runs a frame;
   `HostHandle::last_frame` reads the window's last frame summary, which counts the sent events
@@ -103,8 +107,11 @@ pixels. The window is offscreen, or the desktop one. The `darkroom` binary of `a
   the picture, so a point seen in it becomes a locator. An image costs about w·h/750 tokens, which
   is why Playwright MCP gives agents an accessibility snapshot first
   ([Playwright MCP](https://github.com/microsoft/playwright-mcp)).
-- **A shot scales down in linear light** with a tent filter widened by the ratio, as the frame
-  blends. Refused: a mean of the encoded bytes, which darkens every edge between light and dark.
+- **A shot scales down through palantir's `Image::fitted`**, in premultiplied linear light, as
+  the frame blends, and its legend places each rect through `Screenshot::place`. In the window
+  the legend reads the frame after the image lands, as the remote hands the image back from its
+  own frame. Refused: a mean of the encoded bytes, which darkens every edge between light and
+  dark; darkroom's own fit, which bled transparent texels' color into their neighbors.
 - **A screenshot is product API, and the harness shoots through it**: View ▸ Copy View as Image
   and Save View as PNG… take the window through `Ui::request_screenshot`, and `darkroom_shot`
   asks the same way, so an agent sees what a user's capture gives, as egui's
@@ -115,14 +122,14 @@ pixels. The window is offscreen, or the desktop one. The `darkroom` binary of `a
   ([egui ViewportCommand](https://docs.rs/egui/latest/egui/viewport/enum.ViewportCommand.html)).
 - **No `cpu` display in the product.** `--headless` needs a GPU adapter, and a software one
   (lavapipe, llvmpipe, WARP) counts, as a headless browser renders in software. With none, the
-  start fails with the adapter error. The `cpu` display, palantir's deviceless frontend, where a
+  start fails with the adapter error. The `cpu` display, a `Harness` at `Depth::Record`, where a
   shot is an error, stays a test backend. Both shape text with the bundled fonts, so a locator
   resolves to the same rect on both. Refused: `--display cpu`, which makes palantir's test harness
   public API for a mode with no shots; a silent fallback, which turns a missing adapter into a test
   that passes without having run.
-- **The offscreen harness steps its own time**, `OffscreenTime::Manual` advanced 1/60 s a frame,
-  and spaces each press past the double-click window from the last one, whatever actions came
-  between them, so animation and click timing repeat
+- **The offscreen harness steps its own time**, 1/60 s a frame, and palantir's player spaces each
+  press past the double-click window from the last one, whatever actions came between them, so
+  animation and click timing repeat
   from run to run. The worker runs on real time, which a run needs; the window runs on real time
   throughout.
 - **The process is the session.** `darkroom_open` opens a project in the running editor, in place
@@ -130,7 +137,7 @@ pixels. The window is offscreen, or the desktop one. The `darkroom` binary of `a
   Ctrl+Q past the unsaved-changes prompt) ends the process, and the client sees the server end. A
   panic ends the session: the server answers with the panic's message and location, then ends.
   With a window, the window stays when the server ends, for the person at it, and a panic in a
-  request the window serves ends that request alone, its message passed to the session. Refused: sessions
+  query the window serves ends that query alone, its message passed to the session. Refused: sessions
   that start and stop inside one server, which a window cannot do.
 - **A project opens in place.** `darkroom_open` opens the file where it is, as a person's Open
   does; `copy` opens a copy of its folder under `common::env::temp_dir`, tmpfs on Debian 13 and

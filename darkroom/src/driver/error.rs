@@ -3,7 +3,7 @@
 use std::io;
 use std::path::PathBuf;
 
-use palantir::GpuRequestError;
+use palantir::{GpuRequestError, LocateError, PlayError};
 
 use crate::gui::app::error::DrivenOpenError;
 
@@ -14,18 +14,10 @@ use crate::gui::app::error::DrivenOpenError;
 )]
 #[derive(Debug, thiserror::Error)]
 pub enum DriverError {
-    #[error("{locator} matches nothing; the nearest are: {}", .nearest.join(", "))]
-    NotFound {
-        locator: String,
-        nearest: Vec<String>,
-    },
-    #[error("{locator} matches {} widgets, name one of: {}", .matches.len(), .matches.join(", "))]
-    Ambiguous {
-        locator: String,
-        matches: Vec<String>,
-    },
-    #[error("{locator} is in the document but not on screen; pan or zoom the canvas to it")]
-    OffScreen { locator: String },
+    /// A locator that names no one place, with palantir's hint, and the canvas's for a place
+    /// out of view.
+    #[error("{}", locate_message(.0))]
+    Locate(#[from] LocateError),
     #[error(
         "the editor quit, as an action asked (File ▸ Quit or Ctrl+Q), and the session ended; open \
          a project to go on"
@@ -100,13 +92,6 @@ pub enum DriverError {
          show it"
     )]
     WindowHidden,
-    #[error("the editor did not answer within {seconds} s")]
-    NoAnswer { seconds: f32 },
-    #[error(
-        "{cause}, though it had begun the call, so part of it may have taken effect; read the \
-         state before you go on"
-    )]
-    Unfinished { cause: Box<Self> },
     #[error(
         "the window ran no frame within {seconds} s; a minimized or covered window runs none, so \
          ask the person at it to show it"
@@ -142,5 +127,34 @@ impl From<DrivenOpenError> for DriverError {
             DrivenOpenError::Unsaved { document } => Self::Unsaved { document },
             DrivenOpenError::NotOpened { path, status } => Self::NotOpened { path, status },
         }
+    }
+}
+
+/// What a failed step of palantir's player means to the editor's driver, each case kept with the
+/// driver's own hint.
+impl From<PlayError> for DriverError {
+    fn from(error: PlayError) -> Self {
+        match error {
+            PlayError::Locate(error) => Self::Locate(error),
+            PlayError::Unsettled { step, frames } => Self::Unsettled { step, frames },
+            PlayError::BadPinch { factor } => Self::BadPinch { factor },
+            PlayError::EmptyRegion => Self::EmptyRegion {
+                region: "the region".to_string(),
+            },
+            PlayError::NoPixels => Self::NoGpu,
+            PlayError::Disconnected => Self::WindowClosed,
+            PlayError::NoFrame { seconds } => Self::NoFrame { seconds },
+        }
+    }
+}
+
+/// palantir's message for `error`, and for a place out of view the canvas's way to it.
+fn locate_message(error: &LocateError) -> String {
+    match error {
+        LocateError::OffScreen { locator } => format!(
+            "{locator} is in the document but not on screen; pan or zoom the canvas to it, or \
+             scroll its panel"
+        ),
+        error => error.to_string(),
     }
 }

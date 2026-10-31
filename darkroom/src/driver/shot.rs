@@ -4,15 +4,14 @@
 use std::io::Cursor;
 use std::path::PathBuf;
 
-use glam::{UVec2, Vec2};
-use image::imageops::{self, FilterType};
-use image::{ImageFormat, Rgba, Rgba32FImage, RgbaImage};
-use palantir::{DockView, Rect, RgbaF32, Screenshot, SrgbaU8, Ui};
+use glam::UVec2;
+use image::ImageFormat;
+use palantir::{DockView, Image, LocateError, Rect, Screenshot, Ui};
 use serde::Serialize;
 
 use crate::core::document::tab_ref::TabRef;
 use crate::driver::error::DriverError;
-use crate::driver::locator::Locator;
+use crate::driver::locator::{EditorTarget, Locator};
 use crate::gui::app::App;
 use crate::gui::app::view_capture;
 use crate::gui::main_window::dock_panes;
@@ -76,12 +75,20 @@ impl Region {
         match self {
             Self::Window => Ok(None),
             Self::Pane(name) => pane(app, ui, name).map(Some),
-            Self::Node(node) => Locator::Node(node.clone())
-                .rect(app, ui)
-                .map(|rect| Some(rect.inflated(NODE_MARGIN))),
+            Self::Node(node) => Ok(Some(
+                Locator::App(EditorTarget::Node(node.clone()))
+                    .find(app, ui)?
+                    .rect
+                    .inflated(NODE_MARGIN),
+            )),
             Self::World(world) => {
-                let min = Locator::World(world.min).point(app, ui)?;
-                let max = Locator::World(world.max()).point(app, ui)?;
+                let point = |at| {
+                    Locator::App(EditorTarget::World(at))
+                        .find(app, ui)
+                        .map(|found| found.point)
+                };
+                let min = point(world.min)?;
+                let max = point(world.max())?;
                 // Not `from_min_max`: a rect of negative size is a caller's empty region.
                 let size = max - min;
                 Ok(Some(Rect::new(min.x, min.y, size.x, size.y)))
@@ -125,69 +132,55 @@ fn pane(app: &App, ui: &Ui, name: &str) -> Result<Rect, DriverError> {
     let group = match groups.as_slice() {
         [one] => one,
         [] => {
-            return Err(DriverError::NotFound {
+            return Err(LocateError::NotFound {
                 locator,
                 nearest: layout
                     .active_tabs()
                     .map(|tab| label(tab).to_string())
                     .collect(),
-            });
+            }
+            .into());
         }
         _ => {
-            return Err(DriverError::Ambiguous {
+            return Err(LocateError::Ambiguous {
                 locator,
                 matches: groups
                     .iter()
                     .map(|group| format!("{:?}", group.id()))
                     .collect(),
-            });
+            }
+            .into());
         }
     };
     ui.response_for(DockView::pane_id(layout, group.id()))
         .rect
         .filter(|rect| !rect.is_paint_empty())
-        .ok_or(DriverError::OffScreen { locator })
+        .ok_or_else(|| LocateError::OffScreen { locator }.into())
 }
 
-/// A screenshot and the legend of what it shows, read in the frame it landed in: what a backend
-/// hands the driver, which fits and encodes it away from the window's thread.
+/// A picture of a screenshot, fitted, and the legend of what it shows: what a backend hands the
+/// driver, which encodes it.
 #[derive(Debug)]
 pub(crate) struct Capture {
-    image: RgbaImage,
-    /// Placed in the picture a fit of `image` to the shot's longer side makes.
+    picture: Image,
     legend: Vec<LegendNode>,
 }
 
 impl Capture {
-    /// `screenshot`, with the legend of `app`'s nodes as `ui`'s frame lays them out, placed in
-    /// the picture a fit to `max_side` makes.
-    pub(crate) fn of(screenshot: &Screenshot, max_side: u32, app: &App, ui: &Ui) -> Self {
-        let region = screenshot.region();
-        let image = screenshot.image();
-        let physical = image.size();
-        let size = fitted(physical, max_side);
-        let legend = Legend {
-            origin: (region.min * screenshot.scale()).floor(),
-            scale: screenshot.scale(),
-            factor: size.as_vec2() / physical.as_vec2(),
-            bounds: Rect::new(0.0, 0.0, size.x as f32, size.y as f32),
-        }
-        .nodes(app, ui);
-        Self {
-            image: view_capture::rgba_image(image),
-            legend,
-        }
+    /// `picture`, a fit of `screenshot`, with the legend of `app`'s nodes as `ui`'s frame lays
+    /// them out, placed in it.
+    pub(crate) fn of(screenshot: &Screenshot, picture: Image, app: &App, ui: &Ui) -> Self {
+        let legend = legend(screenshot, picture.size(), app, ui);
+        Self { picture, legend }
     }
 }
 
 impl Shot {
-    /// `capture` scaled so that its longer side is at most `max_side`, as a PNG, which `path`
-    /// names.
-    pub(crate) fn new(capture: Capture, max_side: u32, path: PathBuf) -> Self {
-        let picture = fit(capture.image, max_side);
-        let size = UVec2::new(picture.width(), picture.height());
+    /// `capture` as a PNG, which `path` names.
+    pub(crate) fn new(capture: Capture, path: PathBuf) -> Self {
+        let size = capture.picture.size();
         let mut png = Vec::new();
-        picture
+        view_capture::rgba_image(&capture.picture)
             .write_to(&mut Cursor::new(&mut png), ImageFormat::Png)
             .expect("a PNG encodes into memory");
         Self {
@@ -199,113 +192,54 @@ impl Shot {
     }
 }
 
-/// How a logical rect of the window maps into the picture: to physical pixels at `scale`, from
-/// the physical `origin` the screenshot starts at, then by `factor` per axis to the picture.
-#[derive(Clone, Copy, Debug)]
-struct Legend {
-    origin: Vec2,
-    scale: f32,
-    factor: Vec2,
-    bounds: Rect,
-}
-
-impl Legend {
-    fn nodes(self, app: &App, ui: &Ui) -> Vec<LegendNode> {
-        let library = app.library();
-        let mut nodes = Vec::new();
-        for node in app.open_document().document.graph.iter() {
-            let Some(rect) = self.place(ui.response_for(wid::body(node.node_id)).rect) else {
-                continue;
-            };
-            let mut legend = LegendNode {
-                name: node.name.clone(),
-                rect,
-                inputs: Vec::new(),
-                outputs: Vec::new(),
-            };
-            if let Ok(func) = library.func_of(&node) {
-                let port = |port: PortRef, name: &str| {
-                    self.place(ui.response_for(wid::port_circle(port)).rect)
-                        .map(|rect| LegendPort {
-                            name: name.to_string(),
-                            rect,
-                        })
-                };
-                legend.inputs = func
-                    .inputs()
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(idx, input)| port(PortRef::input(node.node_id, idx), &input.name))
-                    .collect();
-                legend.outputs = func
-                    .outputs()
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(idx, output)| {
-                        port(PortRef::output(node.node_id, idx), &output.name)
-                    })
-                    .collect();
-            }
-            nodes.push(legend);
-        }
-        nodes
-    }
-
-    /// The part of the logical `rect` the picture shows, in its pixels; `None` when none does.
-    fn place(self, rect: Option<Rect>) -> Option<[f32; 4]> {
+/// The visible nodes of `app`, as `ui`'s frame lays them out, each placed in a picture of
+/// `picture` texels that fits `screenshot`.
+fn legend(screenshot: &Screenshot, picture: UVec2, app: &App, ui: &Ui) -> Vec<LegendNode> {
+    let place = |rect: Option<Rect>| {
         let rect = rect.filter(|rect| !rect.is_paint_empty())?;
-        let min = (rect.min * self.scale - self.origin) * self.factor;
-        let max = (rect.max() * self.scale - self.origin) * self.factor;
-        let placed = Rect::from_min_max(min, max).intersect(self.bounds)?;
+        let placed = screenshot.place(rect, picture)?;
         Some([placed.min.x, placed.min.y, placed.size.w, placed.size.h])
-    }
-}
-
-/// The size of a picture of `size` scaled down so that its longer side is `max_side`, each side
-/// rounded to the nearest pixel, or `size` when it already fits.
-fn fitted(size: UVec2, max_side: u32) -> UVec2 {
-    let longer = size.x.max(size.y);
-    if longer <= max_side {
-        return size;
-    }
-    let side = |len: u32| {
-        let scaled =
-            (u64::from(len) * u64::from(max_side) + u64::from(longer) / 2) / u64::from(longer);
-        u32::try_from(scaled.max(1)).expect("a scaled side is at most `max_side`")
     };
-    UVec2::new(side(size.x), side(size.y))
-}
-
-/// `image` at its [`fitted`] size. The filter averages in linear light, as the frame blends:
-/// averaging encoded bytes darkens every edge between a light and a dark pixel. A tent filter
-/// widened by the scale weighs every source pixel and adds no ringing at the hard edges a UI is
-/// made of.
-fn fit(image: RgbaImage, max_side: u32) -> RgbaImage {
-    let size = UVec2::new(image.width(), image.height());
-    let target = fitted(size, max_side);
-    if target == size {
-        return image;
+    let library = app.library();
+    let mut nodes = Vec::new();
+    for node in app.open_document().document.graph.iter() {
+        let Some(rect) = place(ui.response_for(wid::body(node.node_id)).rect) else {
+            continue;
+        };
+        let mut legend = LegendNode {
+            name: node.name.clone(),
+            rect,
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+        };
+        if let Ok(func) = library.func_of(&node) {
+            let port = |port: PortRef, name: &str| {
+                place(ui.response_for(wid::port_circle(port)).rect).map(|rect| LegendPort {
+                    name: name.to_string(),
+                    rect,
+                })
+            };
+            legend.inputs = func
+                .inputs()
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, input)| port(PortRef::input(node.node_id, idx), &input.name))
+                .collect();
+            legend.outputs = func
+                .outputs()
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, output)| port(PortRef::output(node.node_id, idx), &output.name))
+                .collect();
+        }
+        nodes.push(legend);
     }
-    let linear = Rgba32FImage::from_fn(size.x, size.y, |x, y| {
-        let [r, g, b, a] = image.get_pixel(x, y).0;
-        let color = RgbaF32::from_srgba(SrgbaU8 { r, g, b, a });
-        Rgba([color.r, color.g, color.b, color.a])
-    });
-    let scaled = imageops::resize(&linear, target.x, target.y, FilterType::Triangle);
-    RgbaImage::from_fn(scaled.width(), scaled.height(), |x, y| {
-        let [r, g, b, a] = scaled.get_pixel(x, y).0;
-        let bytes = RgbaF32::new(r, g, b, a).to_srgba();
-        Rgba([bytes.r, bytes.g, bytes.b, bytes.a])
-    })
+    nodes
 }
 
 #[cfg(test)]
 mod tests {
-    use image::{Rgba, RgbaImage};
-
-    use glam::UVec2;
-
-    use crate::driver::shot::{Region, fit, fitted};
+    use crate::driver::shot::Region;
 
     /// A slug keeps a name's ASCII letters and digits in lower case, a dash for anything else,
     /// and the first 64 characters of a longer name; a region with no name is its kind.
@@ -325,44 +259,6 @@ mod tests {
             (Region::Node(long), format!("node-{}", "a".repeat(64))),
         ] {
             assert_eq!(region.slug(), slug, "{region:?}");
-        }
-    }
-
-    /// A 4 × 2 image of black and white columns, black first, fits a `max_side` of 2 as 2 × 1.
-    /// The tent, widened by 2, weighs the columns at its center 3/4 each and the next ones out
-    /// 1/4, over the columns the image has: the left pixel holds 3/4 white of 7/4, the right one
-    /// 1/4 + 3/4 of 7/4. In linear light that is 3/7 and 4/7, which sRGB encodes as 175 and 199;
-    /// a mean of the encoded bytes would give 109 and 146.
-    #[test]
-    fn a_scaled_shot_averages_in_linear_light() {
-        let image = RgbaImage::from_fn(4, 2, |x, _| {
-            let v = if x % 2 == 0 { 0 } else { 255 };
-            Rgba([v, v, v, 255])
-        });
-        let scaled = fit(image.clone(), 2);
-        assert_eq!((scaled.width(), scaled.height()), (2, 1));
-        assert_eq!(scaled.get_pixel(0, 0).0, [175, 175, 175, 255]);
-        assert_eq!(scaled.get_pixel(1, 0).0, [199, 199, 199, 255]);
-        assert_eq!(fit(image.clone(), 4), image);
-    }
-
-    /// A fit keeps a size that fits, and scales one that does not so that its longer side is the
-    /// limit: 1000 of 1600 at 800 is 500, and 3 of 1001 at 10 rounds to 0.03, which keeps 1.
-    /// Odd sides round to the nearest: 999 of 1998 at 1000 is 499.5, which rounds up.
-    #[test]
-    fn a_fit_rounds_each_side_and_keeps_one_pixel() {
-        for (size, max_side, fitted_size) in [
-            ([5, 5], 5, [5, 5]),
-            ([1600, 1000], 800, [800, 500]),
-            ([1000, 1600], 800, [500, 800]),
-            ([1001, 3], 10, [10, 1]),
-            ([1998, 999], 1000, [1000, 500]),
-        ] {
-            assert_eq!(
-                fitted(UVec2::from(size), max_side),
-                UVec2::from(fitted_size),
-                "{size:?} at {max_side}"
-            );
         }
     }
 }

@@ -1,4 +1,5 @@
 use glam::Vec2;
+use palantir::PointerButton;
 use scenarium::{Binding, InputPort};
 
 use crate::core::document::internals::DocumentFixture;
@@ -117,7 +118,7 @@ fn a_dragged_nodes_ports_follow_it_in_the_frame_that_moves_it() {
     let rest = offset(&h);
 
     let grab = h.node_center(node);
-    h.ui.press_at(grab);
+    h.ui.press(grab, PointerButton::Left);
     h.frame_applied();
     let mut moves = 0;
     for step in 1..=3 {

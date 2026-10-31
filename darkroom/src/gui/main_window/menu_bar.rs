@@ -218,11 +218,11 @@ mod tests {
     fn pick(h: &mut SessionHarness, menu: &str, row: &str) -> Vec<AppCommand> {
         h.prime(2);
         let trigger = widget(h, menu).id;
-        h.ui.click_on(trigger);
+        h.ui.click(trigger);
         h.frame();
         h.prime(2);
         let row = widget(h, row).id;
-        h.ui.click_on(row);
+        h.ui.click(row);
         h.frame()
     }
 
@@ -261,7 +261,7 @@ mod tests {
                 "{menu} ▸ {row}"
             );
             let trigger = widget(&mut h, menu).id;
-            h.ui.click_on(trigger);
+            h.ui.click(trigger);
             h.frame();
             h.prime(2);
             let text = widget(&mut h, row).text;
@@ -279,7 +279,7 @@ mod tests {
         let mut h = SessionHarness::new(DocumentFixture::probes(1));
         h.prime(2);
         let edit = widget(&mut h, "Edit").id;
-        h.ui.click_on(edit);
+        h.ui.click(edit);
         h.frame();
         h.prime(2);
         assert!(widget(&mut h, "Undo").disabled, "nothing to undo yet");

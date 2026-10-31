@@ -1,5 +1,5 @@
 //! Whole-editor test harness: drives [`Session::frame`] through palantir's
-//! [`UiHarness`], so a test can feed a real pointer event and assert on
+//! [`Harness`], so a test can feed a real pointer event and assert on
 //! what the editor did with it.
 //!
 //! Two levels, one type. [`SessionHarness::apply`] / [`SessionHarness::drain`]
@@ -16,8 +16,8 @@
 //! frame; [`SessionHarness::frame`] returns the commands of every pass, in order.
 
 use glam::UVec2;
+use palantir::Harness;
 use palantir::Ui;
-use palantir::internals::ui_harness::UiHarness;
 use scenarium::Library;
 
 use crate::core::document::internals::DocumentFixture;
@@ -43,8 +43,8 @@ const SURFACE: UVec2 = UVec2::new(1200, 800);
 #[derive(Debug)]
 pub(crate) struct SessionHarness {
     /// The palantir side. `pub(crate)` so tests drive input and read
-    /// geometry through it directly — `h.ui.press_at(..)`, `h.ui.rect(..)`.
-    pub(crate) ui: UiHarness,
+    /// geometry through it directly — `h.ui.press(.., PointerButton::Left)`, `h.ui.rect(..)`.
+    pub(crate) ui: Harness,
     pub(crate) session: Session,
     pub(crate) library: Arc<Library>,
     pub(crate) theme: Theme,
@@ -66,7 +66,7 @@ impl SessionHarness {
     /// labels, so mono metrics would put every chip in the wrong place.
     pub(crate) fn new(fixture: DocumentFixture) -> Self {
         let theme = Theme::default();
-        let mut ui = UiHarness::with_text(SURFACE);
+        let mut ui = Harness::new(SURFACE);
         // What `App::new` does before frame 1, and what every palantir
         // widget darkroom records reads its geometry from — the dock's
         // tab strips among them. Without it a geometry assertion here
@@ -156,7 +156,7 @@ impl SessionHarness {
     }
 
     /// `n` frames whose commands are discarded — the editor equivalent of
-    /// `UiHarness::prime`. Two is the minimum before reading geometry:
+    /// `Harness::prime`. Two is the minimum before reading geometry:
     /// one to lay out, one for `response_for` to resolve against a
     /// settled cascade.
     pub(crate) fn prime(&mut self, n: u32) {

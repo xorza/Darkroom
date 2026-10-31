@@ -4,8 +4,8 @@ use std::cell::Cell;
 use std::sync::Arc;
 
 use imaginarium::ColorFormat;
+use palantir::Harness;
 use palantir::PointerButton;
-use palantir::internals::ui_harness::UiHarness;
 
 use crate::core::document::internals::DocumentFixture;
 use crate::core::preview_sink;
@@ -19,7 +19,7 @@ use crate::gui::state::preview_store;
 /// to render the combinations.
 #[test]
 fn header_readout_adds_its_conditional_clauses_only_when_they_apply() {
-    let mut h = UiHarness::arena();
+    let mut h = Harness::builder(UVec2::ONE).mono().build();
     let handle = h
         .ui()
         .load_image(&glyph::checker_image(&Theme::default()))
@@ -124,7 +124,7 @@ fn sync_source_refits_only_for_size_changes_or_removal() {
 /// stopped before it, or one in which it failed — each its own line.
 #[test]
 fn resolve_separates_no_entry_from_a_reason_there_is_no_image() {
-    let mut h = UiHarness::arena();
+    let mut h = Harness::builder(UVec2::ONE).mono().build();
 
     let nothing = ShownSource::resolve(None, h.ui());
     assert!(
@@ -194,7 +194,7 @@ fn resolve_separates_no_entry_from_a_reason_there_is_no_image() {
 /// zoom readout arriving a frame behind.
 #[test]
 fn the_frame_that_first_draws_a_viewer_frames_it_at_the_full_size() {
-    let mut h = UiHarness::arena();
+    let mut h = Harness::builder(UVec2::ONE).mono().build();
     let mut fixture = DocumentFixture::default();
     let node = fixture.add(&preview_sink::func(Arc::default()));
     let mut store = PreviewStore::new(wake::internals::noop());
@@ -214,7 +214,7 @@ fn the_frame_that_first_draws_a_viewer_frames_it_at_the_full_size() {
     // says the frame settled in one — palantir keeps its pass structure
     // to itself, and `FrameReport` does not name it.
     let passes = Cell::new(0u32);
-    let mut frame = |h: &mut UiHarness, viewer: &mut ImageViewer, store: &PreviewStore| {
+    let mut frame = |h: &mut Harness, viewer: &mut ImageViewer, store: &PreviewStore| {
         h.frame(|ui| {
             passes.set(passes.get() + 1);
             let view = ViewerPane {
@@ -274,7 +274,7 @@ fn the_frame_that_first_draws_a_viewer_frames_it_at_the_full_size() {
 #[test]
 fn a_drag_starts_from_the_fit_and_a_double_click_fits_again() {
     // A surface the pane's size, which the pane fills as its tab's content does.
-    let mut h = UiHarness::new(UVec2::new(800, 600));
+    let mut h = Harness::builder(UVec2::new(800, 600)).mono().build();
     let mut fixture = DocumentFixture::default();
     let node = fixture.add(&preview_sink::func(Arc::default()));
     let mut store = PreviewStore::new(wake::internals::noop());
@@ -286,7 +286,7 @@ fn a_drag_starts_from_the_fit_and_a_double_click_fits_again() {
     let theme = Theme::default();
     let mut preferences = ViewerPreferences::default();
     let mut viewer = ImageViewer::new(node);
-    let mut frame = |h: &mut UiHarness, viewer: &mut ImageViewer| {
+    let mut frame = |h: &mut Harness, viewer: &mut ImageViewer| {
         h.frame(|ui| {
             let view = ViewerPane {
                 theme: &theme,
@@ -315,8 +315,8 @@ fn a_drag_starts_from_the_fit_and_a_double_click_fits_again() {
     assert_eq!(header.size.h, 38.0);
     assert_eq!((header.min.y, header.size.h), (pill.min.y, pill.size.h));
 
-    let grab = h.center_of(pane_wid(node));
-    h.press_at(grab);
+    let grab = h.rect(pane_wid(node)).expect("the widget shows").center();
+    h.press(grab, PointerButton::Left);
     frame(&mut h, &mut viewer);
     h.drag_to(grab + Vec2::new(30.0, -20.0));
     frame(&mut h, &mut viewer);
@@ -327,12 +327,12 @@ fn a_drag_starts_from_the_fit_and_a_double_click_fits_again() {
             zoom: 1.5625,
         })
     );
-    h.release_button(PointerButton::Left);
+    h.release(PointerButton::Left);
     frame(&mut h, &mut viewer);
 
     h.advance_past_double_click();
     for _ in 0..2 {
-        h.click_at(grab);
+        h.click(grab);
         frame(&mut h, &mut viewer);
     }
     assert_eq!(viewer.view, None, "fitting again");

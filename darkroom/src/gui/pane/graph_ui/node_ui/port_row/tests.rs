@@ -110,13 +110,16 @@ fn double_clicking_a_wired_input_port_circle_clears_its_binding() {
     // glyph — its box is 23.4 px across — and both clicks land on the same
     // point, so the double-click still registers.
     let at =
-        h.ui.center_of(wid::port_circle(PortRef::input(consumer, 0))) + Vec2::new(4.0, 0.0);
+        h.ui.rect(wid::port_circle(PortRef::input(consumer, 0)))
+            .expect("the widget shows")
+            .center()
+            + Vec2::new(4.0, 0.0);
 
-    h.ui.click_at(at);
+    h.ui.click(at);
     let first = h.frame();
     assert!(first.is_empty(), "one click is not a double: {first:?}");
 
-    h.ui.click_at(at);
+    h.ui.click(at);
     let cleared = h.frame();
     assert!(
         matches!(

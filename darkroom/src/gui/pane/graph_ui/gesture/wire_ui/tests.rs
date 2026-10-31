@@ -1,5 +1,5 @@
-use glam::Vec2;
-use palantir::internals::ui_harness::UiHarness;
+use glam::{UVec2, Vec2};
+use palantir::Harness;
 use scenarium::internals::test_graph::NodeSpec;
 use scenarium::internals::test_graph::TestGraph;
 use scenarium::{DataType, InputPort, NodeId};
@@ -90,7 +90,7 @@ fn the_snap_type_check_reads_the_input_against_the_output_from_either_end() {
 /// one, since no button is held, so it can sit across an arbitrary number of
 /// undos.
 fn prepass_with_wire_from(fixture: &GraphCtxFixture, start: PortRef) -> Option<InFlight> {
-    let mut arena = UiHarness::arena();
+    let mut arena = Harness::builder(UVec2::ONE).mono().build();
     let mut wires = WireUi {
         state: Some(InFlight {
             drag: GlyphDrag::new(start),
@@ -165,7 +165,7 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
     let source = wid::port_circle(PortRef::output(producer, 0));
     let drop_at = h.port_center(PortRef::input(consumer, 0));
 
-    h.ui.press_on(source);
+    h.ui.press(source, PointerButton::Left);
     h.frame();
     h.ui.drag_to(drop_at);
     let held = h.frame();
@@ -174,7 +174,7 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
         "a wire still held commits nothing: {held:?}"
     );
 
-    h.ui.release_button(PointerButton::Left);
+    h.ui.release(PointerButton::Left);
     let released = h.frame();
     assert!(
         matches!(
@@ -199,11 +199,11 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
     let back_source = wid::port_circle(PortRef::output(consumer, 0));
     let back_drop_at = h.port_center(PortRef::input(producer, 0));
     h.advance_past_double_click();
-    h.ui.press_on(back_source);
+    h.ui.press(back_source, PointerButton::Left);
     h.frame();
     h.ui.drag_to(back_drop_at);
     h.frame();
-    h.ui.release_button(PointerButton::Left);
+    h.ui.release(PointerButton::Left);
     let refused = h.frame();
     assert!(
         refused.is_empty(),
@@ -222,9 +222,9 @@ fn a_right_press_that_ends_a_floating_wire_opens_no_palette() {
     h.prime(2);
     let bare = Vec2::new(600.0, 600.0);
     let right_click = |h: &mut CanvasHarness| {
-        h.ui.press_button_at(PointerButton::Right, bare);
+        h.ui.press(bare, PointerButton::Right);
         h.frame();
-        h.ui.release_button(PointerButton::Right);
+        h.ui.release(PointerButton::Right);
         h.frame();
     };
 

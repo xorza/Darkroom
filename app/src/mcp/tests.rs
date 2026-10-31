@@ -178,13 +178,11 @@ async fn an_opened_project_is_driven_through_the_tools() {
         message.starts_with("action 2 of 2 failed, and the ones before it ran: "),
         "{message}"
     );
-    for node in state["nodes"].as_array().unwrap() {
-        let id = node["id"].as_str().unwrap();
-        assert!(
-            message.contains(&format!("{BRIGHTNESS} ({id})")),
-            "{message}"
-        );
-    }
+    assert!(
+        message.contains("matches 2 places; pick one with Nth: 0: at ")
+            && message.contains(", 1: at "),
+        "{message}"
+    );
     let picked = call(
         &client,
         "darkroom_act",

@@ -27,7 +27,7 @@ fn a_body_drag_moves_the_node_by_the_pointers_travel() {
     // Press the body, then travel past the drag threshold. The sweep sees
     // the latch on the frame after the travel; the record consumes it.
     let grab = h.node_center(dragged);
-    h.ui.press_at(grab);
+    h.ui.press(grab, PointerButton::Left);
     h.frame();
     let travel = Vec2::new(37.0, -21.0);
     h.ui.drag_to(grab + travel);
@@ -88,7 +88,7 @@ fn esc_cancels_a_drag_before_it_deselects() {
     h.prime(2);
 
     let grab = h.node_center(dragged);
-    h.ui.press_at(grab);
+    h.ui.press(grab, PointerButton::Left);
     h.frame();
     h.ui.drag_to(grab + Vec2::new(40.0, 0.0));
     h.frame();
@@ -100,7 +100,7 @@ fn esc_cancels_a_drag_before_it_deselects() {
         matches!(first[..], [GraphIntent::MoveSelection { offset, .. }] if offset == Vec2::ZERO),
         "the first Esc only puts the drag back: {first:?}"
     );
-    h.ui.release_button(PointerButton::Left);
+    h.ui.release(PointerButton::Left);
     h.frame();
 
     h.ui.set_modifiers(Modifiers {
