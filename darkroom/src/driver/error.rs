@@ -144,6 +144,11 @@ impl From<PlayError> for DriverError {
             PlayError::NoPixels => Self::NoGpu,
             PlayError::Disconnected => Self::WindowClosed,
             PlayError::NoFrame { seconds } => Self::NoFrame { seconds },
+            PlayError::Busy { step, seconds } => Self::UnsettledInTime { step, seconds },
+            // The session ends on a panic, here as on the driver's own thread.
+            PlayError::Panicked { message } => {
+                panic!("a request on the window's thread panicked: {message}")
+            }
         }
     }
 }

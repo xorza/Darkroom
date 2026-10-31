@@ -190,41 +190,6 @@ change runs `cargo drive check` and `cargo drive test` from the root. A palantir
 palantir's suite beside the code it tests, with hand-computed values. Whoever addresses an item
 deletes it.
 
-### Batch 6: hosts wake, settle and open files alike
-
-Files: `palantir/src/app.rs`, `palantir/src/ui/mod.rs`, `palantir/src/host/harness/`,
-`palantir/src/host/winit/{handle,frame_summary,platform/macos}.rs`,
-`palantir/src/host/winit/remote/mod.rs`; `darkroom/src/gui/app/{app_host,offscreen_signals,mod}.rs`,
-`darkroom/src/driver/{backend,offscreen,window_backend,window_link,mod}.rs`,
-`darkroom/src/platform/`, `darkroom/src/lib.rs`.
-
-- [ ] `palantir/src/ui/mod.rs`: only winit has a wake that another thread can call. Add
-  `Ui::waker() -> Waker` on every host. Test: a wake from another thread makes the next
-  `Harness` frame whole.
-- [ ] `palantir/src/app.rs`: a settle cannot see the app's background work. Add
-  `App::is_busy(&self) -> bool`. `Harness::settle` waits on the waker while the app is busy,
-  bounded by `HarnessBuilder::background_wait`; `FrameSummary::busy` carries it on winit. Test: an
-  app busy until a thread wakes it settles after the wake, and fails with `Unsettled` past the
-  bound.
-- [ ] `remote/mod.rs:254` `wait_frame` and `:217` `receive`: a 2 ms sleep loop. Wait on a condition
-  variable that the host signals after each frame. Make `Remote::settle` public.
-- [ ] `remote/mod.rs:149` `query`: a panic in `f` ends the event loop. Catch it and return
-  `PlayError::Panicked { message }`. Test on the test channel the remote tests use.
-- [ ] `palantir/src/app.rs` and `platform/macos.rs`: the OS request to open files never reaches the
-  app. Add `App::open_files(&mut self, paths: &[PathBuf])`, and move darkroom's
-  `application:openURLs:` hook into the macOS platform file; the other platforms do nothing.
-- [ ] `darkroom/src/gui/app/app_host.rs`, `offscreen_signals.rs`: a second wake and quit path
-  beside palantir's. Delete both. `App::new` takes the waker from `ui`, `App::quit` calls
-  `ui.close_window(MAIN_WINDOW)`, and `App::is_busy` returns what `pending_work` holds today.
-- [ ] `driver/offscreen.rs:144` `settle`, `window_backend.rs:116` `settle`,
-  `window_backend.rs:51` `catch_unwind`, `window_link.rs` `pending_work`, `backend.rs`
-  `wake_pending` and `wait_wake`: duplicates of palantir's settle and query. Call
-  `Harness::settle` and `Remote::settle`, map `PlayError::Panicked` to the session error, and read
-  a quit from `Harness::window_commands`. `wait_run` keeps its loop over the waker. Keep the
-  driver tests (`driver/tests.rs`) green unchanged.
-- [ ] `darkroom/src/platform/macos/open_files.rs` and `route_opened_documents` in each platform
-  file: replaced by `App::open_files`. Delete them; `lib.rs` drops the call.
-
 ### Batch 7: one copy of the theme's steps
 
 Files: `palantir/src/theme/{metrics,tooltip,button,text_edit,mod}.rs`,
@@ -351,6 +316,15 @@ Files: `palantir/AGENTS.md`, `darkroom/AGENTS.md`, `.notes/review-palantir-api.m
 
 ## Decisions
 
+- **A busy app is a trait method, read after a frame.** `App::is_busy` reads the app's own state
+  when a settle asks. Refused: a flag the record sets on `Ui`, stale when no frame records, the
+  case a settle waits in. Sources: Playwright's auto-wait
+  (https://playwright.dev/docs/actionability), which waits on the page's own state.
+- **A waker is a type-erased closure.** `Waker` holds an `Arc<dyn Fn() + Send + Sync>`, as the
+  host is chosen at run time and the winit handle is generic over the app. Refused: an enum of the
+  hosts, which puts `HostHandle<T>` and its `T` into `Ui`. Source: egui's `Context`, which any
+  thread calls (https://docs.rs/egui/latest/egui/struct.Context.html#method.request_repaint).
+
 - **One `Selection` for every two-pack theme.** palantir's `TabSelection` became `Selection`, and
   `ButtonTheme`'s pick takes it as `TabsTheme`'s does, so "selected" keeps one meaning across
   widgets. Refused: a `bool` pick, against palantir's rule that a flag that selects behavior is an
@@ -360,6 +334,14 @@ Files: `palantir/AGENTS.md`, `darkroom/AGENTS.md`, `.notes/review-palantir-api.m
   label would stop measuring as a leaf's does.
 
 ## Changed
+
+- A view capture asks frames (`Ui::request_repaint`) until its image lands, in place of reading
+  as busy: its image comes in a frame, not with a wake, so `App::is_busy` is the previews alone.
+- `App::quit` sets a flag that closes the window as the pass ends (`Ui::close_window`), as the
+  quit runs in the record without the `Ui`; the offscreen driver reads the close in
+  `Harness::window_commands`.
+- `Driver::wait_run` keeps its check for a wake that came after the settle, through
+  `Harness::wait_for_wake` with a deadline that has passed.
 
 - `TextEdit::buffered`: the draft takes the current value on every frame that follows one the
   field was not focused in, not only while idle, so a session that opens with a `set_focus`, as
@@ -384,6 +366,11 @@ Files: `palantir/AGENTS.md`, `darkroom/AGENTS.md`, `.notes/review-palantir-api.m
   palantir API, as the search may stop at the first chord that fired (see Declined).
 
 ## Declined
+
+- Batch 6, `App::open_files` and the move of darkroom's macOS hook into palantir: palantir pins
+  `objc2-app-kit` 0.2 for winit 0.30, and the hook is written for `objc2` 0.6. The move rewrites
+  unsafe Objective-C against the older API, with two new dependencies, and no macOS build here to
+  check it; it waits for palantir's move to winit's next release.
 
 - Batch 4, `TextEdit::read_only`: one darkroom field wants it, and it shows only a mark that no
   one selects or copies. Read-only touches typing, the edit menu, undo and the input method in

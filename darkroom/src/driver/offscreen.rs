@@ -2,12 +2,11 @@
 //! no desktop on a stepped clock.
 
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use palantir::{
-    FrameReport, GpuRequestError, Harness, InspectedWidget, PlayError, PowerPreference,
-    RequestedGpu, Screenshot, Ui,
+    GpuRequestError, Harness, InspectedWidget, PlayError, PowerPreference, RequestedGpu,
+    Screenshot, Ui, WindowCommand,
 };
 
 use crate::core::io::preferences::preferences_store::PreferencesStore;
@@ -15,21 +14,22 @@ use crate::driver::action::Play;
 use crate::driver::error::DriverError;
 use crate::driver::shot::{Capture, Region};
 use crate::driver::{BACKGROUND_WAIT, DisplayKind, SETTLE_FRAMES, SessionConfig};
-use crate::gui::app::app_host::AppHost;
-use crate::gui::app::offscreen_signals::OffscreenSignals;
+use crate::gui::MAIN_WINDOW;
 use crate::gui::app::{App, LaunchInputs, UnsavedEdits};
 use crate::gui::dialogs::{DialogFallback, Dialogs};
 
 /// The UI time one frame takes, as the harness's own settle steps it.
 const FRAME: Duration = Duration::from_nanos(16_666_667);
 
-/// The app, the window it runs in, and what it asked of its host.
+/// The app and the window it runs in.
 #[derive(Debug)]
 pub(crate) struct Offscreen {
     app: App,
     /// Boxed: it holds a whole `Ui`, kilobytes a driver need not carry inline.
     harness: Box<Harness>,
-    signals: Arc<OffscreenSignals>,
+    /// The window commands the harness had recorded when this app launched: a close past them
+    /// is this app's quit.
+    launched_at: usize,
 }
 
 impl Offscreen {
@@ -37,12 +37,11 @@ impl Offscreen {
     /// on a machine with no usable adapter.
     pub(crate) fn new(config: SessionConfig) -> Result<Self, DriverError> {
         let mut harness = Box::new(harness(config)?);
-        let signals = Arc::new(OffscreenSignals::default());
-        let app = launch(harness.ui(), &signals);
+        let app = launch(harness.ui());
         Ok(Self {
             app,
             harness,
-            signals,
+            launched_at: 0,
         })
     }
 
@@ -50,44 +49,49 @@ impl Offscreen {
         f(&mut self.app, self.harness.ui())
     }
 
-    /// Play `action`, as palantir's harness plays it, settling after each step it takes.
+    /// Play `action`, as palantir's harness plays it, settling after each step it takes, the
+    /// previews converting included ([`App::is_busy`](palantir::App::is_busy)). A step that quits
+    /// the editor ends with [`DriverError::Quit`].
     pub(crate) fn play(&mut self, action: &Play) -> Result<u32, DriverError> {
-        self.harness
+        let played = self
+            .harness
             .play(&mut self.app, std::slice::from_ref(action))
-            .map_err(|failed| DriverError::from(failed.error))
+            .map_err(|failed| DriverError::from(failed.error));
+        self.running()?;
+        played
     }
 
     pub(crate) fn widgets(&self, filter: Option<&str>) -> Vec<InspectedWidget> {
         self.harness.widgets(filter)
     }
 
-    /// One frame. A wake asks for a full one, as the window host's `request_repaint` does: a
-    /// frame nothing asked for paints only, and runs no `update` to drain what the wake announced.
-    fn frame(&mut self) -> FrameReport {
-        if self.signals.take_wake() {
-            self.harness.ui().request_repaint();
-        }
-        self.harness.advance(FRAME);
-        self.harness.frame_app(&mut self.app)
-    }
-
-    /// Refuse to go on once the editor asked to quit, as File ▸ Quit and Ctrl+Q do: a window
+    /// Refuse to go on once the editor asked to quit, as File ▸ Quit and Ctrl+Q do: its window
     /// closes then, and the session a driver runs ends with it.
     pub(crate) fn running(&self) -> Result<(), DriverError> {
-        if self.signals.quit_asked() {
+        if self.quit() {
             Err(DriverError::Quit)
         } else {
             Ok(())
         }
     }
 
+    /// Whether this app closed its window.
+    fn quit(&self) -> bool {
+        self.harness.window_commands()[self.launched_at..]
+            .iter()
+            .any(
+                |command| matches!(command, WindowCommand::Close(window) if *window == MAIN_WINDOW),
+            )
+    }
+
+    /// Whether a wake waits for the next frame: a wait whose deadline has passed reads it at once.
     pub(crate) fn wake_pending(&self) -> bool {
-        self.signals.wake_pending()
+        self.harness.wait_for_wake(Instant::now())
     }
 
     /// Sleep until background work wakes the app or `deadline` passes.
     pub(crate) fn wait_wake(&self, deadline: Instant) {
-        self.signals.wait_wake(deadline);
+        self.harness.wait_for_wake(deadline);
     }
 
     /// Open the absolute `document`, or a new document for none, in place of the open one, as the
@@ -95,10 +99,9 @@ impl Offscreen {
     /// editor that quit launches again first: a window that quit is gone, and this one has no
     /// person to lose it.
     pub(crate) fn open(&mut self, document: Option<PathBuf>) -> Result<(), DriverError> {
-        if self.signals.quit_asked() {
-            // Signals of its own: the app before asked to quit.
-            self.signals = Arc::new(OffscreenSignals::default());
-            self.app = launch(self.harness.ui(), &self.signals);
+        if self.quit() {
+            self.launched_at = self.harness.window_commands().len();
+            self.app = launch(self.harness.ui());
         }
         match document {
             Some(document) => self.app.open_driven(&document, UnsavedEdits::Discard)?,
@@ -133,46 +136,24 @@ impl Offscreen {
         ))
     }
 
-    /// Run frames until one asks no repaint, the app has no wake pending, and no preview is
-    /// converting: palantir's settle, which waits for the device while a screenshot is on its
-    /// way, then the editor's own work. A timer wake, as a caret blink asks, does not count: the
-    /// frame it would run changes nothing. A conversion runs on the converter's thread, so a quiet
-    /// frame with one in flight waits in real time, bounded, for the wake that makes the next
-    /// frame land it, and a view capture waits for the device to copy its image back, which the
-    /// next frame lands. A frame that quits the editor ends the step with [`DriverError::Quit`]:
-    /// every step ends here, so no call goes on past a quit, whatever it guards at its start.
+    /// palantir's settle: frames until one asks no repaint, no screenshot is on its way back from
+    /// the device, no wake waits and no preview converts, bounded in frames and, for a conversion,
+    /// in real time. A frame that quits the editor ends the step with [`DriverError::Quit`]: every
+    /// step ends here, so no call goes on past a quit, whatever it guards at its start.
     pub(crate) fn settle(&mut self, step: &str) -> Result<u32, DriverError> {
-        let deadline = Instant::now() + BACKGROUND_WAIT;
-        let mut busy = 0;
-        for frames in 1.. {
-            let report = self.frame();
-            self.running()?;
-            let capturing = self.app.capturing();
-            if capturing {
-                self.harness.wait_for_gpu();
-            }
-            if capturing || report.repaint_requested || self.signals.wake_pending() {
-                busy += 1;
-                if busy == SETTLE_FRAMES {
-                    return Err(DriverError::Unsettled {
-                        step: step.to_string(),
-                        frames: SETTLE_FRAMES,
-                    });
-                }
-                continue;
-            }
-            if !self.app.run_state().previews().in_flight() {
-                return Ok(frames);
-            }
-            // The converter's wake announces the result; the next frame, made full, lands it.
-            if !self.signals.wait_wake(deadline) {
-                return Err(DriverError::UnsettledInTime {
-                    step: step.to_string(),
-                    seconds: BACKGROUND_WAIT.as_secs_f32(),
-                });
-            }
-        }
-        unreachable!("the frames run until the editor settles or a bound ends them")
+        let settled = self.harness.settle(&mut self.app);
+        self.running()?;
+        settled.map_err(|error| match error {
+            PlayError::Unsettled { frames, .. } => DriverError::Unsettled {
+                step: step.to_string(),
+                frames,
+            },
+            PlayError::Busy { seconds, .. } => DriverError::UnsettledInTime {
+                step: step.to_string(),
+                seconds,
+            },
+            error => error.into(),
+        })
     }
 }
 
@@ -181,7 +162,9 @@ fn harness(config: SessionConfig) -> Result<Harness, GpuRequestError> {
     // The harness's own settles step a frame as this driver's do.
     let builder = Harness::builder(config.size)
         .scale(config.scale)
-        .frame_dt(FRAME);
+        .frame_dt(FRAME)
+        .settle_frames(SETTLE_FRAMES)
+        .background_wait(BACKGROUND_WAIT);
     Ok(match config.display {
         DisplayKind::Gpu => {
             // No optional features: the editor draws with what every adapter has.
@@ -202,11 +185,10 @@ fn harness(config: SessionConfig) -> Result<Harness, GpuRequestError> {
     })
 }
 
-/// An app on an empty document, its host `signals`.
-fn launch(ui: &mut Ui, signals: &Arc<OffscreenSignals>) -> App {
+/// An app on an empty document.
+fn launch(ui: &mut Ui) -> App {
     App::new(
         ui,
-        AppHost::Offscreen(Arc::clone(signals)),
         LaunchInputs {
             preferences: PreferencesStore::Memory.open(),
             document: None,
