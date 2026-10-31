@@ -2616,6 +2616,7 @@ dependencies = [
  "glam 0.34.1",
  "half",
  "image",
+ "objc2-app-kit 0.2.2",
  "padding-struct",
  "palantir-anim-derive",
  "pollster 1.0.1",
@@ -2631,6 +2632,7 @@ dependencies = [
  "unicode-linebreak",
  "unicode-segmentation",
  "wgpu",
+ "windows",
  "winit",
 ]
 
