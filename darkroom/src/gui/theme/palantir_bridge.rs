@@ -1,10 +1,9 @@
 //! The palantir-side half of the theme: darkroom's palette projected onto
 //! [`palantir::Palette`], and the [`palantir::Theme`] that builds.
 
-use palantir::{ButtonTheme, Stroke, TabsTheme, TextStyleOverrides};
+use palantir::{Stroke, TabsTheme, TextStyleOverrides};
 
 use crate::gui::theme;
-use crate::gui::theme::color;
 use crate::gui::theme::icon_scale::IconScale;
 use crate::gui::theme::palette::Palette;
 use crate::gui::widgets::icon;
@@ -94,24 +93,4 @@ const fn tab_close(tabs: &mut TabsTheme, icon: &IconScale) {
     tabs.close_glyph_span = icon::cross_span(close.icon);
     tabs.close_glyph_width = icon::stroke_width(close.icon);
     tabs.close.active.chrome.border = Stroke::NONE;
-}
-
-/// A dialog's primary action: palantir's button recipe filled with the accent and its label in
-/// the window's ground ink. Under the
-/// pointer it lifts as a port does; pressed, it drops back to the accent.
-pub(super) fn primary_button(p: &palantir::Palette, m: &palantir::Metrics) -> ButtonTheme {
-    let mut button = ButtonTheme::from_parts(p, m);
-    let on_accent = TextStyleOverrides::NONE.with_color(p.window_bg);
-    // Destructured, so a state palantir adds fails here rather than keeping its default.
-    let [normal, hovered, active, _disabled] = button.unselected.each_mut();
-    for (look, fill) in [
-        (normal, p.accent),
-        (hovered, color::hover_lift(p.accent)),
-        (active, p.accent),
-    ] {
-        look.chrome.fill = fill.into();
-        look.chrome.border.color = fill;
-        look.text = on_accent;
-    }
-    button
 }
