@@ -3,3 +3,4 @@
 - visual node groups
 - subgraphs
 - canvas dot grid shimmers as the camera pans
+- upload images again after a GPU device recovery (`Ui::device_restored`), see `ISSUES.md`
