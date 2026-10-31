@@ -234,18 +234,17 @@ impl Painted {
     }
 
     /// An arrow's corners in the [`Self::hit`]-sided box, its apex last, pointing right and
-    /// turned by `turn` about the box center. Inset by the corner radius `r`: the SDF rounds by
-    /// *dilating* (`sdf - radius`), so the rounded result grows back out to the glyph box
-    /// instead of past it. The layout box is unchanged by the turn: the glyph is not clipped to
-    /// the owner rect, so a turned apex may exceed it.
-    fn arrow_vertices(self, turn: f32, r: f32) -> [Vec2; 3] {
+    /// turned by `turn` about the box center. Rounding keeps a triangle's edges, so the rounded
+    /// arrow stays inside the glyph box. The layout box is unchanged by the turn: the glyph is
+    /// not clipped to the owner rect, so a turned apex may exceed it.
+    fn arrow_vertices(self, turn: f32) -> [Vec2; 3] {
         let (size, inset) = (self.size, self.inset());
         let center = Vec2::splat(self.hit() * 0.5);
         let rot = Vec2::from_angle(turn);
         [
-            Vec2::new(inset + r, inset + r),
-            Vec2::new(inset + r, inset + size - r),
-            Vec2::new(inset + size - r, inset + size * 0.5),
+            Vec2::new(inset, inset),
+            Vec2::new(inset, inset + size),
+            Vec2::new(inset + size, inset + size * 0.5),
         ]
         .map(|v| center + rot.rotate(v - center))
     }
@@ -279,7 +278,7 @@ impl Painted {
                 });
             }
             GlyphShape::Arrow { turn } => {
-                let [a, b, apex] = self.arrow_vertices(turn, corner);
+                let [a, b, apex] = self.arrow_vertices(turn);
                 ui.add_shape(Shape::triangle(a, b, apex).radius(corner).fill(fill));
             }
         }
@@ -301,9 +300,9 @@ mod tests {
         );
     }
 
-    /// A 10-sided arrow sits in its 18-sided box (`HIT_SCALE` 1.8) at inset 4, its corners
-    /// pulled in by the radius 2: (6, 6), (6, 12), and the apex at (12, 9), right of the center
-    /// (9, 9). A half turn mirrors the apex to (6, 9) across the center. Within 1e-5 there:
+    /// A 10-sided arrow sits in its 18-sided box (`HIT_SCALE` 1.8) at inset 4: (4, 4), (4, 14),
+    /// and the apex at (14, 9), right of the center (9, 9). A half turn mirrors the apex to
+    /// (4, 9) across the center. Within 1e-5 there:
     /// `sin(PI)` in f32 is -8.7e-8, not 0.
     #[test]
     fn an_arrow_points_right_and_a_half_turn_mirrors_it() {
@@ -313,18 +312,18 @@ mod tests {
             fill: RgbaF32::WHITE,
         };
         assert_eq!(
-            arrow.arrow_vertices(0.0, 2.0),
+            arrow.arrow_vertices(0.0),
             [
-                Vec2::new(6.0, 6.0),
-                Vec2::new(6.0, 12.0),
-                Vec2::new(12.0, 9.0)
+                Vec2::new(4.0, 4.0),
+                Vec2::new(4.0, 14.0),
+                Vec2::new(14.0, 9.0)
             ]
         );
-        let [a, b, apex] = arrow.arrow_vertices(PI, 2.0);
+        let [a, b, apex] = arrow.arrow_vertices(PI);
         for (got, expected) in [
-            (a, Vec2::new(12.0, 12.0)),
-            (b, Vec2::new(12.0, 6.0)),
-            (apex, Vec2::new(6.0, 9.0)),
+            (a, Vec2::new(14.0, 14.0)),
+            (b, Vec2::new(14.0, 4.0)),
+            (apex, Vec2::new(4.0, 9.0)),
         ] {
             assert!(got.distance(expected) < 1e-5, "{got} against {expected}");
         }
