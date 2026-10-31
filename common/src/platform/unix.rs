@@ -54,10 +54,15 @@ pub(super) fn advise_sequential(map: &Mmap) {
 /// The free space of the listed disk whose mount point is on the device `path` is on. The device,
 /// not the path, ties the two: a path under a mount the list omits — a network share, a tmpfs —
 /// would otherwise match the disk mounted above it, and a macOS firmlink would match none.
+///
+/// # Panics
+///
+/// On a target sysinfo has no implementation for: a build-configuration error, not a runtime
+/// condition.
 pub(super) fn free_space(path: &Path) -> Option<u64> {
     let device = fs::metadata(path).ok()?.dev();
     Disks::new_with_refreshed_list()
-        .list()
+        .expect("sysinfo has no implementation for this platform")
         .iter()
         .find(|disk| fs::metadata(disk.mount_point()).is_ok_and(|mount| mount.dev() == device))
         .map(Disk::available_space)

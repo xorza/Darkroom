@@ -85,7 +85,7 @@ proc-macro2 = { version = "1.0", default-features = false }
 syn = { version = "3.0", default-features = false }
 memmap2 = { version = "0.9", default-features = false }
 image = { version = "0.25", default-features = false }
-sysinfo = { version = "0.39", default-features = false }
+sysinfo = { version = "0.40", default-features = false }
 bitcode = { version = "0.6", default-features = false }
 blake3 = { version = "1.8", default-features = false }
 windows = { version = "0.62", default-features = false }
@@ -94,7 +94,7 @@ objc2 = { version = "0.6", default-features = false }
 objc2-app-kit = { version = "0.3", default-features = false }
 objc2-foundation = { version = "0.3", default-features = false }
 rfd = { version = "0.17", default-features = false }
-zip = { version = "9.1", default-features = false }
+zip = { version = "9.2", default-features = false }
 async-trait = { version = "0.1", default-features = false }
 arrayvec = { version = "0.7", default-features = false }
 static_assertions = { version = "1.1", default-features = false }
@@ -113,7 +113,7 @@ bindgen = { version = "0.73", default-features = false }
 wgpu = { version = "30.0", default-features = false }
 pollster = { version = "1.0", default-features = false }
 tiff = { version = "0.11", default-features = false }
-rmcp = { version = "3.7", default-features = false }
+rmcp = { version = "3.8", default-features = false }
 
 [profile.dev]
 opt-level = 1
