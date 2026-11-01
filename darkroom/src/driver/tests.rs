@@ -95,6 +95,18 @@ fn node(name: &str) -> Locator {
     Locator::App(EditorTarget::Node(name.to_string()))
 }
 
+/// Where the node named `name` sits on the canvas.
+fn placed(driver: &Driver, name: &str) -> Vec2 {
+    let id = node_id(driver, name);
+    driver
+        .app()
+        .open_document()
+        .document
+        .main_view
+        .node_placements[&id]
+        .pos
+}
+
 fn node_id(driver: &Driver, name: &str) -> NodeId {
     driver
         .app()
@@ -120,17 +132,7 @@ fn clicks_drags_and_keys_edit_the_document() {
     let report = driver.act(&[click(node(BRIGHTNESS))]).unwrap();
     assert_eq!(report.selection, [BRIGHTNESS]);
 
-    let id = node_id(&driver, BRIGHTNESS);
-    let placed = |driver: &Driver| {
-        driver
-            .app()
-            .open_document()
-            .document
-            .main_view
-            .node_placements[&id]
-            .pos
-    };
-    let before = placed(&driver);
+    let before = placed(&driver, BRIGHTNESS);
     let header = Locator::App(EditorTarget::NodeHeader(BRIGHTNESS.to_string()));
     driver
         .act(&[drag(
@@ -138,7 +140,7 @@ fn clicks_drags_and_keys_edit_the_document() {
             Locator::Offset(Box::new(header), Vec2::new(120.0, 60.0)),
         )])
         .unwrap();
-    assert_eq!(placed(&driver), before + Vec2::new(120.0, 60.0));
+    assert_eq!(placed(&driver, BRIGHTNESS), before + Vec2::new(120.0, 60.0));
 
     let wire = drag(
         Locator::App(EditorTarget::Port {
@@ -195,14 +197,7 @@ fn a_world_point_lands_on_the_canvas_where_nodes_are_placed() {
     let dir = TempDir::new("darkroom-driver-world");
     let path = fixture::project(dir.path(), &[BRIGHTNESS]);
     driver.open(&path, OpenMode::Copy).unwrap();
-    let id = node_id(&driver, BRIGHTNESS);
-    let pos = driver
-        .app()
-        .open_document()
-        .document
-        .main_view
-        .node_placements[&id]
-        .pos;
+    let pos = placed(&driver, BRIGHTNESS);
     let world = driver
         .offscreen()
         .with_app(|app, ui| Locator::App(EditorTarget::World(pos)).find(app, ui))
@@ -334,6 +329,18 @@ fn a_focused_text_field_still_settles() {
         "no rename field opened"
     );
 
+    // A move to undo, then the rename field: it takes its own Ctrl+Z, so the move stays until the
+    // field closes and the chord reaches the document again.
+    let before = placed(&driver, BRIGHTNESS);
+    driver
+        .act(&[drag(
+            header(),
+            Locator::Offset(Box::new(header()), Vec2::new(120.0, 60.0)),
+        )])
+        .unwrap();
+    let moved = placed(&driver, BRIGHTNESS);
+    assert_eq!(moved, before + Vec2::new(120.0, 60.0));
+
     let report = driver
         .act(&[Action::Play(Play::DoubleClick(header()))])
         .unwrap();
@@ -341,6 +348,22 @@ fn a_focused_text_field_still_settles() {
         report.focus.as_deref(),
         Some(BRIGHTNESS),
         "the rename field holds the focus"
+    );
+    driver.act(&[key("ctrl+z")]).unwrap();
+    assert_eq!(
+        placed(&driver, BRIGHTNESS),
+        moved,
+        "the field took the Ctrl+Z"
+    );
+    // The field opens with its text selected: the first Escape drops the selection, the second
+    // the edit.
+    driver
+        .act(&[key("escape"), key("escape"), key("ctrl+z")])
+        .unwrap();
+    assert_eq!(
+        placed(&driver, BRIGHTNESS),
+        before,
+        "the closed field leaves it to the document"
     );
 }
 
@@ -562,17 +585,10 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
             .ends_with("shots/003-node-brightness---contrast.png")
     );
 
-    let id = node_id(&driver, BRIGHTNESS);
-    let placed = driver
-        .app()
-        .open_document()
-        .document
-        .main_view
-        .node_placements[&id]
-        .pos;
+    let corner = placed(&driver, BRIGHTNESS);
     let world = driver
         .shot(
-            &Region::World(Rect::new(placed.x, placed.y, 100.0, 50.0)),
+            &Region::World(Rect::new(corner.x, corner.y, 100.0, 50.0)),
             1000,
         )
         .unwrap();
@@ -584,7 +600,7 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
     ));
     assert!(matches!(
         driver.shot(
-            &Region::World(Rect::new(placed.x, placed.y, -10.0, 10.0)),
+            &Region::World(Rect::new(corner.x, corner.y, -10.0, 10.0)),
             1000
         ),
         Err(DriverError::EmptyRegion { .. })

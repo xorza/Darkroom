@@ -5,8 +5,7 @@ pub(crate) mod status_bar;
 use std::collections::HashMap;
 
 use palantir::{
-    Align, Chrome, Configure, DockOperation, DockView, KeyFilter, Panel, Sizing, TabOverflow, Ui,
-    VAlign, WidgetId,
+    Align, Chrome, Configure, DockOperation, DockView, Panel, Sizing, TabOverflow, Ui, VAlign,
 };
 use scenarium::NodeId;
 
@@ -21,14 +20,6 @@ use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::main_window::dock_panes::DockPanes;
 use crate::gui::pane::graph_ui::GraphUi;
 use crate::gui::pane::image_viewer::ImageViewer;
-
-/// The application root's [`Configure::input_scope`] anchor. A fixed id
-/// rather than an auto one because darkroom's global chords, read before
-/// the root records, read as it (`Ui::shortcut_pressed_as`), and an auto id
-/// moves with the call site.
-pub(crate) fn app_root_wid() -> WidgetId {
-    WidgetId::from_hash("darkroom.app_root")
-}
 
 /// Smallest a dock pane can be squeezed on its split axis, in logical
 /// px.
@@ -138,46 +129,35 @@ impl MainWindow {
             dock_ops,
             swept_at: _,
         } = self;
-        Panel::vstack()
-            .id(app_root_wid())
-            .size(Sizing::FILL)
-            // The application's input scope, and the only one darkroom
-            // declares — palantir's overlays and text fields bring their
-            // own. Everything except `TEXT`: a canvas has no typing, so a
-            // focused editor's characters, its Ctrl+Z, its Delete and its
-            // Escape all stop here rather than doubling as graph edits,
-            // while `ACCEL` (Ctrl+S, Ctrl+R, …) still lands on the app
-            // mid-edit.
-            .input_scope(KeyFilter::ALL.difference(KeyFilter::TEXT))
-            .show(ui, |ui| {
-                Panel::hstack()
-                    .id_salt("surround_row")
-                    .size((Sizing::FILL, Sizing::HUG))
-                    .child_align(Align::v(VAlign::Bottom))
-                    .chrome(Chrome::fill(fill))
-                    .show(ui, |ui| {
-                        menu_bar::show(ui, ctx, out);
-                    });
-                let mut panes = DockPanes {
-                    ctx,
-                    graph_ui,
-                    image_viewers,
-                    preferences,
-                    out,
-                };
-                dock_ops.clear();
-                DockView::new(&ctx.document().layout, dock_ops)
-                    .min_pane(MIN_PANE)
-                    .overflow(TabOverflow::Menu)
-                    .show(ui, &mut panes);
-                // Ratio drags and split-menu picks, onto the frame's own
-                // queue — the same route the navigation scan's ops take.
-                for op in dock_ops.drain(..) {
-                    out.push_view(op);
-                }
-                // Bottom surround band: the run line and the memory readout, below the panes.
-                status_bar::show(ui, ctx, out);
-            });
+        Panel::vstack().size(Sizing::FILL).show(ui, |ui| {
+            Panel::hstack()
+                .id_salt("surround_row")
+                .size((Sizing::FILL, Sizing::HUG))
+                .child_align(Align::v(VAlign::Bottom))
+                .chrome(Chrome::fill(fill))
+                .show(ui, |ui| {
+                    menu_bar::show(ui, ctx, out);
+                });
+            let mut panes = DockPanes {
+                ctx,
+                graph_ui,
+                image_viewers,
+                preferences,
+                out,
+            };
+            dock_ops.clear();
+            DockView::new(&ctx.document().layout, dock_ops)
+                .min_pane(MIN_PANE)
+                .overflow(TabOverflow::Menu)
+                .show(ui, &mut panes);
+            // Ratio drags and split-menu picks, onto the frame's own
+            // queue — the same route the navigation scan's ops take.
+            for op in dock_ops.drain(..) {
+                out.push_view(op);
+            }
+            // Bottom surround band: the run line and the memory readout, below the panes.
+            status_bar::show(ui, ctx, out);
+        });
     }
 
     /// Release everything this window caches for a subject the document has
