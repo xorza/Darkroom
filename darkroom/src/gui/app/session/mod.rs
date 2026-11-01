@@ -22,7 +22,7 @@ use crate::gui::frame::app_command::RunCommand;
 use crate::gui::frame::relayout::Relayout;
 use crate::gui::frame::requests::Requests;
 use crate::gui::frame::window_ctx::WindowCtx;
-use crate::gui::main_window::MainWindow;
+use crate::gui::main_window::{self, MainWindow};
 use crate::gui::pane::graph_ui::gesture::pan_zoom::Framing;
 use palantir::{Shortcut, Ui};
 use scenarium::Graph;
@@ -157,8 +157,8 @@ impl Session {
     /// Ctrl+Z / Ctrl+Shift+Z. Replays undo/redo against the document
     /// (each entry carries its own graph target).
     ///
-    /// The chords are sampled via `key_pressed` *every frame,
-    /// unconditionally* — that call both reads the press and keeps the
+    /// The chords are read as the app root, whose scope takes them, *every
+    /// frame, unconditionally* — that call both reads the press and keeps the
     /// chord subscribed, and palantir's keyboard wake-gate only delivers
     /// an off-focus press when its chord was subscribed last frame
     /// (subscriptions clear each frame).
@@ -168,8 +168,9 @@ impl Session {
     /// read answers `false` on its own.
     #[must_use]
     fn apply_undo_redo(&mut self, ui: &mut Ui) -> Relayout {
-        let undo = ui.shortcut_pressed(shortcuts::UNDO);
-        let redo = ui.shortcut_pressed(shortcuts::REDO);
+        let root = main_window::app_root_wid();
+        let undo = ui.shortcut_pressed_as(root, shortcuts::UNDO);
+        let redo = ui.shortcut_pressed_as(root, shortcuts::REDO);
         // The document owns its history and what a replay means; this layer
         // only says which direction the chord asked for.
         if undo {
@@ -211,11 +212,13 @@ const MENU_CHORDS: [(Shortcut, AppCommand); 6] = [
 
 /// Queue the command of the first [`MENU_CHORDS`] chord that fired. The search stops at the
 /// first match, and the chords after it stay watched: palantir records the frame again with no
-/// input, and that pass reads them all (`Ui::shortcut_pressed`).
+/// input, and that pass reads them all (`Ui::shortcut_pressed`). Read as the app root, whose
+/// scope takes them, as the root has not recorded yet.
 fn menu_shortcut(ui: &mut Ui, requests: &mut Requests) {
+    let root = main_window::app_root_wid();
     if let Some((_, command)) = MENU_CHORDS
         .iter()
-        .find(|(chord, _)| ui.shortcut_pressed(*chord))
+        .find(|(chord, _)| ui.shortcut_pressed_as(root, *chord))
     {
         requests.push_app(command.clone());
     }

@@ -70,7 +70,7 @@ impl<'a> RunStatus<'a> {
                 }
                 ExecStatus::Running(at) => {
                     Spinner::new()
-                        .diameter(theme.icon.inline.icon)
+                        .size(theme.icon.inline.icon)
                         .color(color)
                         .show(ui);
                     run_time(ui, theme, at.elapsed().as_secs_f64(), color);

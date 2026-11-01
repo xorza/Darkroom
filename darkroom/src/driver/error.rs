@@ -33,6 +33,8 @@ pub enum DriverError {
     NoGpu,
     #[error("the GPU device was lost before the picture came back; take the shot again")]
     DeviceLost,
+    #[error("the GPU did not finish the frame in time and hangs; the shot has no pixels")]
+    GpuTimedOut,
     #[error("the run did not finish within {seconds} s")]
     RunTimeout { seconds: f32 },
     #[error(
@@ -42,6 +44,8 @@ pub enum DriverError {
     BadChord { chord: String },
     #[error("a pinch factor of {factor} zooms nowhere; give a positive one, above 1 to zoom in")]
     BadPinch { factor: f32 },
+    #[error("a drag of {travel} px is too short to start a drag and would click; drag farther")]
+    ShortDrag { travel: f32 },
     #[error(
         "the project folder {} holds {bytes} bytes, over the {limit}-byte copy limit; open it \
          in place instead",
@@ -140,11 +144,13 @@ impl From<PlayError> for DriverError {
             PlayError::Locate(error) => Self::Locate(error),
             PlayError::Unsettled { step, frames } => Self::Unsettled { step, frames },
             PlayError::BadPinch { factor } => Self::BadPinch { factor },
+            PlayError::ShortDrag { travel } => Self::ShortDrag { travel },
             PlayError::EmptyRegion => Self::EmptyRegion {
                 region: "the region".to_string(),
             },
             PlayError::NoPixels => Self::NoGpu,
             PlayError::DeviceLost => Self::DeviceLost,
+            PlayError::GpuTimedOut => Self::GpuTimedOut,
             PlayError::Disconnected => Self::WindowClosed,
             PlayError::NoFrame { seconds } => Self::NoFrame { seconds },
             PlayError::Busy { step, seconds } => Self::UnsettledInTime { step, seconds },

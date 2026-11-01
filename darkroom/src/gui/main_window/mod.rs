@@ -23,10 +23,10 @@ use crate::gui::pane::graph_ui::GraphUi;
 use crate::gui::pane::image_viewer::ImageViewer;
 
 /// The application root's [`Configure::input_scope`] anchor. A fixed id
-/// rather than an auto one because the scope is the thing darkroom's
-/// chord handling resolves against, and an auto id moves with the call
-/// site.
-fn app_root_wid() -> WidgetId {
+/// rather than an auto one because darkroom's global chords, read before
+/// the root records, read as it (`Ui::shortcut_pressed_as`), and an auto id
+/// moves with the call site.
+pub(crate) fn app_root_wid() -> WidgetId {
     WidgetId::from_hash("darkroom.app_root")
 }
 
