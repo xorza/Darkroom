@@ -31,6 +31,8 @@ pub enum DriverError {
     EmptyRegion { region: String },
     #[error("a shot needs pixels, and this session has none: start it with the GPU display")]
     NoGpu,
+    #[error("the GPU device was lost before the picture came back; take the shot again")]
+    DeviceLost,
     #[error("the run did not finish within {seconds} s")]
     RunTimeout { seconds: f32 },
     #[error(
@@ -142,6 +144,7 @@ impl From<PlayError> for DriverError {
                 region: "the region".to_string(),
             },
             PlayError::NoPixels => Self::NoGpu,
+            PlayError::DeviceLost => Self::DeviceLost,
             PlayError::Disconnected => Self::WindowClosed,
             PlayError::NoFrame { seconds } => Self::NoFrame { seconds },
             PlayError::Busy { step, seconds } => Self::UnsettledInTime { step, seconds },
