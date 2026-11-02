@@ -70,14 +70,14 @@ impl TieMenuUi {
         let view = graph_ctx.view();
         let mut lit = None;
         self.menu.retain(|tie| view.ties.contains_key(&tie));
-        let pick = self.menu.show(ui, "tie_menu", |ui, popup, tie| {
+        let pick = self.menu.show(ui, "tie_menu", |ui, tie| {
             let mut chosen = None;
             for (&wire, route) in &view.routes {
                 if !route.contains(tie) {
                     continue;
                 }
                 let label = release_label(ui, graph_ctx, wire);
-                let entry = MenuItem::new(label).show(ui, popup);
+                let entry = MenuItem::new(label).show(ui);
                 if entry.hovered() {
                     lit = Some(wire);
                 }
@@ -95,11 +95,11 @@ impl TieMenuUi {
             } else {
                 ("Pin angle", MenuChoice::Pin)
             };
-            if MenuItem::new(label).show(ui, popup).clicked() {
+            if MenuItem::new(label).show(ui).clicked() {
                 chosen = Some(choice);
             }
             MenuSeparator::new().show(ui);
-            if MenuItem::new("Remove tie").show(ui, popup).clicked() {
+            if MenuItem::new("Remove tie").show(ui).clicked() {
                 chosen = Some(MenuChoice::Remove);
             }
             chosen

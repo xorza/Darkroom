@@ -230,7 +230,7 @@ pub(crate) fn results_wid() -> WidgetId {
 /// including a row added later. Only the first frame of the first open has no
 /// rects yet, and estimates the span from one line of body text.
 fn space_above_results(ui: &Ui, theme: &Theme) -> f32 {
-    let menu = &ui.theme().context_menu;
+    let menu = &ui.theme().menu;
     let field = ui.response_for(search_row_wid()).layout_rect;
     let results = ui.response_for(results_wid()).layout_rect;
     let rows = field.zip(results).map_or_else(

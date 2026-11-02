@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use palantir::{CloseHandle, Ui};
+use palantir::Ui;
 
 use crate::core::document::item_id::ItemId;
 use crate::core::edit::graph_intent::GraphIntent;
@@ -103,16 +103,14 @@ impl<K: Copy> ItemMenu<K> {
         &mut self,
         ui: &mut Ui,
         id_salt: &'static str,
-        body: impl FnOnce(&mut Ui, &CloseHandle, K) -> Option<T>,
+        body: impl FnOnce(&mut Ui, K) -> Option<T>,
     ) -> Option<Pick<K, T>> {
         let target = self.target?;
         let shape = PopupShape {
             id_salt,
             max_height: None,
         };
-        let choice = self
-            .menu
-            .show(ui, shape, |ui, popup| body(ui, popup, target))?;
+        let choice = self.menu.show(ui, shape, |ui, _| body(ui, target))?;
         Some(Pick { target, choice })
     }
 }

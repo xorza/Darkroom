@@ -48,7 +48,7 @@ fn default_wiring_and_menu_tweak() {
     assert_eq!(bar.title.normal.text.color, Some(p.text_muted));
     assert_eq!(bar.open.to_animated(theme.palantir.text).text.color, p.text);
     // A menu's rows and panel as the review drew them.
-    let menu = &theme.palantir.context_menu;
+    let menu = &theme.palantir.menu;
     assert_eq!(
         menu.item.defaults.padding,
         Spacing::xy(theme.space.md, theme.space.sm)
@@ -87,7 +87,7 @@ fn default_wiring_and_menu_tweak() {
         ("tooltip", &ui.tooltip.panel, p.node_bg, 0.04443538),
         (
             "color picker",
-            &ui.color_picker.popup,
+            &ui.color_picker.popup.panel,
             p.node_bg,
             0.04443538,
         ),
@@ -120,7 +120,8 @@ fn every_palantir_widget_resolves_to_the_body_tier() {
     let looks = [
         ("button", &ui.button.unselected),
         ("menu bar title", &ui.menu_bar.title),
-        ("menu item", &ui.context_menu.item.looks),
+        ("menu item", &ui.menu.item.unselected),
+        ("selected menu item", &ui.menu.item.selected),
         ("selected tab", &ui.tabs.selected),
         ("unselected tab", &ui.tabs.unselected),
         ("text edit", &ui.text_edit.looks),
@@ -330,7 +331,7 @@ fn every_palantir_padding_and_radius_is_on_the_scale() {
         ..
     } = theme.radius;
     assert_eq!(ui.text.font_size, theme.font.body);
-    assert_eq!(ui.context_menu.panel.shadow, theme.elevation.floating);
+    assert_eq!(ui.menu.panel.shadow, theme.elevation.floating);
     // The tab strip starts its tabs at the surround's inset, as the menu bar starts its titles.
     assert_eq!(
         theme.palantir.tabs.strip_padding.to_array()[0],
@@ -347,10 +348,10 @@ fn every_palantir_padding_and_radius_is_on_the_scale() {
     // it share a height, and a menu rounds like a floating surface.
     assert_eq!(ui.button.defaults.padding.to_array(), [md, xs, md, xs]);
     assert_eq!(ui.text_edit.defaults.padding.to_array(), [sm, xs, sm, xs]);
-    assert_eq!(ui.context_menu.panel.corners.to_array(), [float; 4]);
+    assert_eq!(ui.menu.panel.corners.to_array(), [float; 4]);
     assert_eq!(ui.tabs.strip_padding.to_array(), [sm, xs, sm, 0.0]);
     assert_eq!(ui.menu_bar.bar_padding.to_array(), [sm, xs, sm, xs]);
-    assert_eq!(ui.tabs.chip_padding, ui.context_menu.item.defaults.padding);
+    assert_eq!(ui.tabs.chip_padding, ui.menu.item.defaults.padding);
     assert_eq!(ui.menu_bar.defaults.padding, ui.tabs.chip_padding);
     assert_eq!(ui.menu_bar.gap, xs);
     assert_eq!(ui.tabs.chip_padding.to_array(), [md, sm, md, sm]);

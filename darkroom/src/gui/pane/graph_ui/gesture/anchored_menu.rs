@@ -1,5 +1,5 @@
 use glam::Vec2;
-use palantir::{Anchor, ClickOutside, CloseHandle, Configure, Popup, Sizing, Ui};
+use palantir::{CloseHandle, Configure, Menu, Popup, Sizing, Ui};
 
 /// Shared open/close lifecycle + look for the canvas's anchored context
 /// popups (the node menu and the new-node palette). Owns only the
@@ -7,10 +7,9 @@ use palantir::{Anchor, ClickOutside, CloseHandle, Configure, Popup, Sizing, Ui};
 /// own per-open extras (target node, drop position, …) as plain fields set at
 /// open-time and read at pick-time.
 ///
-/// Carries what both controllers need: the Esc-to-close guard, the identical
-/// `Popup` look (the `ctx_menu` theme slot's panel, padding, and width
-/// floor, hug sizing, click-outside dismiss), and the "a pick or an outside
-/// dismiss closes the menu" resolution.
+/// Carries what both controllers need: a palantir [`Menu`] at the anchor, whose
+/// open state this keeps, in the menu look with hug sizing, and the "a pick or an
+/// outside dismiss closes the menu" resolution.
 #[derive(Default, Debug)]
 pub(crate) struct AnchoredMenu {
     /// The surface-space point the open menu was raised at; palantir's popup keeps the place its
@@ -47,8 +46,8 @@ impl AnchoredMenu {
         self.anchor.is_some()
     }
 
-    /// Show the menu when open, recording `body` inside the shared popup
-    /// look shaped by `shape`. `body` records the items and returns the pick
+    /// Show the menu when open, recording `body` inside a palantir [`Menu`]
+    /// shaped by `shape`. `body` records the items and returns the pick
     /// (if any); returning `Some` — or an Esc / outside-click dismiss — closes
     /// the menu. The pick is handed back for the caller to act on.
     pub(crate) fn show<T>(
@@ -63,34 +62,18 @@ impl AnchoredMenu {
         } = shape;
         // `None` for a menu that isn't open.
         let anchor = self.anchor?;
-        // Esc dismissal is owned by the `Dismiss` popup below (folds into
-        // `resp.dismissed`) — no separate Escape poll here.
-        //
-        // Chrome, padding, the width floor and the gap all come off the
-        // theme slot `ContextMenu::show` reads, so these popups and a menu
-        // look alike; they opt out of `ContextMenu` only for its per-trigger
-        // open lifecycle.
-        let ctx = &ui.theme().context_menu;
-        let chrome = ctx.panel.clone();
-        let padding = ctx.padding;
-        let min_width = ctx.min_width;
-        let gap = ctx.gap;
         let mut pick = None;
-        let mut popup = Popup::new(Anchor::at_point(anchor))
-            .click_outside(ClickOutside::Dismiss)
-            .chrome(chrome)
+        let mut menu = Menu::at(anchor)
             .id_salt(id_salt)
-            .size((Sizing::HUG, Sizing::HUG))
-            .min_size((min_width, 0.0))
-            .padding(padding)
-            .gap(gap);
+            .size((Sizing::HUG, Sizing::HUG));
         if let Some(h) = max_height {
-            popup = popup.max_size((f32::INFINITY, h));
+            menu = menu.max_size((f32::INFINITY, h));
         }
-        let resp = popup.show(ui, |ui, popup| {
+        let resp = menu.show(ui, |ui, popup| {
             pick = body(ui, popup);
         });
-        if pick.is_some() || resp.dismissed || resp.close_requested {
+        if pick.is_some() || resp.closed() {
+            Popup::close(ui, resp.id);
             self.anchor = None;
         }
         pick

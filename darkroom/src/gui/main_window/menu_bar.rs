@@ -1,6 +1,6 @@
 use palantir::{
-    Align, CloseHandle, Configure, DockOperation, MenuBar, MenuBarMenus, MenuItem, MenuSeparator,
-    Panel, Sense, Shortcut, Sizing, Text, Ui, VAlign, fmt,
+    Align, Configure, DockOperation, MenuBar, MenuBarMenus, MenuItem, MenuSeparator, Panel, Sense,
+    Shortcut, Sizing, Text, Ui, VAlign, fmt,
 };
 use scenarium::NodeId;
 
@@ -42,22 +42,16 @@ pub(crate) fn show(ui: &mut Ui, ctx: WindowCtx<'_>, out: &mut Requests) {
 
 /// One row, `enabled` or greyed out, with the chord its handler reads shown beside it; `true`
 /// when picked.
-fn item(
-    ui: &mut Ui,
-    popup: &CloseHandle,
-    label: &'static str,
-    shortcut: Option<Shortcut>,
-    enabled: bool,
-) -> bool {
+fn item(ui: &mut Ui, label: &'static str, shortcut: Option<Shortcut>, enabled: bool) -> bool {
     let mut row = MenuItem::new(label).disabled(!enabled);
     if let Some(shortcut) = shortcut {
         row = row.shortcut_hint(shortcut);
     }
-    row.show(ui, popup).clicked()
+    row.show(ui).clicked()
 }
 
 fn file_menu(bar: &mut MenuBarMenus<'_>, out: &mut Requests) {
-    bar.menu("File", |ui, popup| {
+    bar.menu("File", |ui, _| {
         let file = [
             ("New", Some(shortcuts::NEW), FileCommand::New),
             ("Open…", Some(shortcuts::OPEN), FileCommand::Open),
@@ -65,18 +59,18 @@ fn file_menu(bar: &mut MenuBarMenus<'_>, out: &mut Requests) {
             ("Save As…", Some(shortcuts::SAVE_AS), FileCommand::SaveAs),
         ];
         for (label, shortcut, command) in file {
-            if item(ui, popup, label, shortcut, true) {
+            if item(ui, label, shortcut, true) {
                 out.push_app(AppCommand::File(command));
             }
         }
         MenuSeparator::new().show(ui);
-        if item(ui, popup, "Preferences", None, true) {
+        if item(ui, "Preferences", None, true) {
             out.push_view(DockOperation::OpenTab {
                 tab: TabRef::Preferences,
             });
         }
         MenuSeparator::new().show(ui);
-        if item(ui, popup, "Quit", Some(shortcuts::QUIT), true) {
+        if item(ui, "Quit", Some(shortcuts::QUIT), true) {
             out.push_app(AppCommand::Quit);
         }
     });
@@ -87,15 +81,15 @@ fn file_menu(bar: &mut MenuBarMenus<'_>, out: &mut Requests) {
 fn edit_menu(bar: &mut MenuBarMenus<'_>, ctx: WindowCtx<'_>, out: &mut Requests) {
     let (open, app) = (ctx.open(), ctx.app());
     let selected = !open.document.main_view.selected.is_empty();
-    bar.menu("Edit", |ui, popup| {
-        if item(ui, popup, "Undo", Some(shortcuts::UNDO), open.can_undo()) {
+    bar.menu("Edit", |ui, _| {
+        if item(ui, "Undo", Some(shortcuts::UNDO), open.can_undo()) {
             out.push_app(AppCommand::Undo);
         }
-        if item(ui, popup, "Redo", Some(shortcuts::REDO), open.can_redo()) {
+        if item(ui, "Redo", Some(shortcuts::REDO), open.can_redo()) {
             out.push_app(AppCommand::Redo);
         }
         MenuSeparator::new().show(ui);
-        if item(ui, popup, "Duplicate", Some(shortcuts::DUPLICATE), selected) {
+        if item(ui, "Duplicate", Some(shortcuts::DUPLICATE), selected) {
             out.extend_graph(GraphIntent::duplicate(
                 &open.document,
                 app.library(),
@@ -103,7 +97,7 @@ fn edit_menu(bar: &mut MenuBarMenus<'_>, ctx: WindowCtx<'_>, out: &mut Requests)
                 || NodeId::unique().as_u128(),
             ));
         }
-        if item(ui, popup, "Delete", Some(shortcuts::DELETE), selected) {
+        if item(ui, "Delete", Some(shortcuts::DELETE), selected) {
             out.extend_graph(GraphIntent::remove_selection(&open.document.main_view));
         }
     });
@@ -114,12 +108,12 @@ fn graph_menu(bar: &mut MenuBarMenus<'_>, ctx: WindowCtx<'_>, out: &mut Requests
     let app = ctx.app();
     let activity = app.run_state().activity();
     let selected = !ctx.document().main_view.selected.is_empty();
-    bar.menu("Graph", |ui, popup| {
+    bar.menu("Graph", |ui, _| {
         let running = activity.is_executing();
-        if item(ui, popup, "Run", Some(shortcuts::RUN), !running) {
+        if item(ui, "Run", Some(shortcuts::RUN), !running) {
             out.push_app(AppCommand::Run(RunCommand::Once));
         }
-        if item(ui, popup, "Cancel Run", None, running) {
+        if item(ui, "Cancel Run", None, running) {
             out.push_app(AppCommand::Run(RunCommand::Cancel));
         }
         let (events, command) = if activity.event_loop_active() {
@@ -127,7 +121,7 @@ fn graph_menu(bar: &mut MenuBarMenus<'_>, ctx: WindowCtx<'_>, out: &mut Requests
         } else {
             ("Start Events", RunCommand::StartEvents)
         };
-        if item(ui, popup, events, None, true) {
+        if item(ui, events, None, true) {
             out.push_app(AppCommand::Run(command));
         }
         MenuSeparator::new().show(ui);
@@ -142,7 +136,7 @@ fn graph_menu(bar: &mut MenuBarMenus<'_>, ctx: WindowCtx<'_>, out: &mut Requests
             ("Show Selected", None, Framing::ShowSelected, selected),
         ];
         for (label, shortcut, framing, enabled) in framings {
-            if item(ui, popup, label, shortcut, enabled) {
+            if item(ui, label, shortcut, enabled) {
                 out.push_app(AppCommand::View(ViewCommand::Frame(framing)));
             }
         }
@@ -150,11 +144,11 @@ fn graph_menu(bar: &mut MenuBarMenus<'_>, ctx: WindowCtx<'_>, out: &mut Requests
 }
 
 fn view_menu(bar: &mut MenuBarMenus<'_>, out: &mut Requests) {
-    bar.menu("View", |ui, popup| {
-        if item(ui, popup, "Copy View as Image", None, true) {
+    bar.menu("View", |ui, _| {
+        if item(ui, "Copy View as Image", None, true) {
             out.push_app(AppCommand::View(ViewCommand::CopyImage));
         }
-        if item(ui, popup, "Save View as PNG…", None, true) {
+        if item(ui, "Save View as PNG…", None, true) {
             out.push_app(AppCommand::View(ViewCommand::SaveImage));
         }
     });

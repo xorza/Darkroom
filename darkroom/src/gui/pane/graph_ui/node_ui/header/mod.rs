@@ -9,11 +9,10 @@ use std::collections::BTreeSet;
 use std::f32::consts::FRAC_PI_4;
 
 use palantir::{
-    Align, Checkbox, Configure, ContextMenu, DockDrop, DockOperation, EditableLabel, MenuItem,
-    MenuSeparator, Panel, Separator, Sizing, SplitSide, Ui, VAlign, WidgetId,
+    Align, Checkbox, Configure, DockDrop, DockOperation, EditableLabel, Menu, MenuItem,
+    MenuSeparator, Panel, ResponseSnapshot, Separator, Sizing, SplitSide, Ui, VAlign, WidgetId,
 };
 
-use glam::Vec2;
 use scenarium::{CacheMode, NodeId};
 
 use crate::core::document::inspect_target::InspectTarget;
@@ -206,7 +205,7 @@ fn cache_button(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     let wid = cache_button_wid(node.node_id);
     let cache = node.cache();
     let (ram, disk) = (cache.caches_in_ram(), cache.persists_to_disk());
-    let clicked = IconButton::press(
+    IconButton::press(
         Icon::Cache,
         wid,
         theme.badge.cache,
@@ -214,10 +213,11 @@ fn cache_button(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     )
     .selected(ram || disk)
     .show(ui, theme);
-    if clicked && let Some(rect) = ui.response_for(wid).rect {
-        ContextMenu::open(ui, wid, Vec2::new(rect.min.x, rect.max().y));
-    }
-    ContextMenu::for_id(wid).show(ui, |ui, popup| {
+    let trigger = ResponseSnapshot {
+        id: wid,
+        state: ui.response_for(wid),
+    };
+    Menu::below(&trigger).show(ui, |ui, _| {
         let mut keep_ram = ram;
         if Checkbox::new(&mut keep_ram)
             .label("Keep in RAM")
@@ -248,7 +248,7 @@ fn cache_button(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
             }
         }
         MenuSeparator::new().show(ui);
-        if MenuItem::new("Clear cache").show(ui, popup).clicked() {
+        if MenuItem::new("Clear cache").show(ui).clicked() {
             record
                 .out
                 .push_app(AppCommand::Run(RunCommand::EvictCache(node.node_id)));

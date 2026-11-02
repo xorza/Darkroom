@@ -138,7 +138,7 @@ pub(crate) enum ActionParam {
     /// One key chord: modifiers and one key joined by `+`, as `ctrl+z`, `shift+delete`, `enter`,
     /// `escape`, `f2` or `a`. `ctrl` is Cmd on macOS.
     Key(String),
-    /// Type text into the focused field.
+    /// Type text into the focused field, committed whole as an input method commits it.
     Type(String),
     /// The answer the next file dialog gets. Queue it before the action that opens the dialog.
     Answer(AnswerParam),
@@ -280,7 +280,7 @@ impl TryFrom<ActionParam> for Action {
                     .map_err(|_| DriverError::BadChord { chord })?;
                 play(Play::Key(shortcut))
             }
-            ActionParam::Type(text) => play(Play::Type(text)),
+            ActionParam::Type(text) => play(Play::InsertText(text)),
             ActionParam::Answer(answer) => Ok(Self::Answer(answer.into())),
         }
     }

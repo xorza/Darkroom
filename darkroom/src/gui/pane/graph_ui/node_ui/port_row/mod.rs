@@ -15,8 +15,8 @@ use std::sync::Arc;
 
 use glam::Vec2;
 use palantir::{
-    Align, Configure, ContextMenu, Grid, InternedStr, MenuItem, Panel, Sense, Sizing, Spacing,
-    Text, TextStyle, Track, Ui, VAlign, WidgetId, fmt,
+    Align, Configure, Grid, InternedStr, Menu, MenuItem, Panel, Sense, Sizing, Spacing, Text,
+    TextStyle, Track, Ui, VAlign, WidgetId, fmt,
 };
 use scenarium::Binding;
 use scenarium::FuncEvent;
@@ -208,7 +208,7 @@ fn grid_row(idx: usize) -> u16 {
 /// on the circle (no bubbling).
 fn open_port_context_menu(ui: &mut Ui, menu_id: WidgetId) {
     if let Some(p) = ui.pointer_pos() {
-        ContextMenu::open(ui, menu_id, p);
+        Menu::open(ui, menu_id, p);
     }
 }
 
@@ -326,16 +326,16 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
                 .push_graph(GraphIntent::set_input(input.port(), None)),
         }
     }
-    ContextMenu::for_id(menu_id)
+    Menu::for_id(menu_id)
         .size((Sizing::HUG, Sizing::HUG))
-        .show(ui, |ui, popup| {
+        .show(ui, |ui, _| {
             // Resolved once for both the enable test and the value the pick
             // pushes — the fallback literal is built on read, not stored.
             let default = input.default();
             let can_set = !matches!(input.binding(), Some(Binding::Const(_))) && default.is_some();
             if MenuItem::new("Set constant")
                 .disabled(!can_set)
-                .show(ui, popup)
+                .show(ui)
                 .left
                 .clicked()
                 && let Some(value) = default
@@ -346,7 +346,7 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
             }
             if MenuItem::new("Clear binding")
                 .disabled(input.binding().is_none())
-                .show(ui, popup)
+                .show(ui)
                 .left
                 .clicked()
             {
@@ -498,11 +498,11 @@ fn output_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, output: OutputCtx<'
     // "Add preview" — spawn a preview node already wired to this output. What it
     // creates is an ordinary node the user can move, delete, and undo like any
     // other. Hidden when the library has no preview func.
-    ContextMenu::for_id(menu_id)
+    Menu::for_id(menu_id)
         .size((Sizing::HUG, Sizing::HUG))
-        .show(ui, |ui, popup| {
+        .show(ui, |ui, _| {
             if let Some(func) = preview_sink::registered(node_ctx.graph_ctx.library())
-                && MenuItem::new("Add preview").show(ui, popup).clicked()
+                && MenuItem::new("Add preview").show(ui).clicked()
             {
                 // Positioned off the port when its center is known (it is,
                 // after the first frame); otherwise the node lands at the

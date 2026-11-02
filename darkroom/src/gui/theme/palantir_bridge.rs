@@ -62,7 +62,7 @@ pub(super) fn theme(
     tab_close(&mut theme.tabs, icon);
 
     theme.tooltip.text = TextStyleOverrides::NONE;
-    let menu = &mut theme.context_menu;
+    let menu = &mut theme.menu;
     menu.min_width = MENU_MIN_WIDTH;
     // The panel sits inside a rule in the separators' ink, not on palantir's lit border.
     menu.panel.border.color = p.border_soft();
@@ -71,10 +71,10 @@ pub(super) fn theme(
     // its opaque panel: it dims what is behind it under a scrim, so there is nothing to see
     // through.
     for panel in [
-        &mut theme.context_menu.panel,
+        &mut theme.menu.panel,
         &mut theme.popup.panel,
         &mut theme.tooltip.panel,
-        &mut theme.color_picker.popup,
+        &mut theme.color_picker.popup.panel,
     ] {
         *panel = theme::frosted(panel, p.text_muted);
     }

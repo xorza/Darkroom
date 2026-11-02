@@ -63,28 +63,24 @@ impl NodeMenuUi {
     pub(crate) fn apply(&mut self, ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
         let graph_ctx = ctx.graph_ctx();
         self.menu.retain(|node_id| graph_ctx.contains(node_id));
-        let pick = self.menu.show(ui, "node_body_menu", |ui, popup, node_id| {
+        let pick = self.menu.show(ui, "node_body_menu", |ui, node_id| {
             let mut chosen = None;
             // "Run to this node" and the duplicates show only when the
             // clicked node is a graph node, not a stub (same rule as the
             // header play chip): a stub neither runs nor copies. The body
             // only runs while the menu is open.
             if graph_ctx.node(node_id).is_some_and(NodeCtx::runnable) {
-                if MenuItem::new("Run to this node")
-                    .show(ui, popup)
-                    .left
-                    .clicked()
-                {
+                if MenuItem::new("Run to this node").show(ui).left.clicked() {
                     chosen = Some(MenuChoice::Run);
                 }
                 MenuSeparator::new().show(ui);
-                if MenuItem::new("Duplicate").show(ui, popup).clicked() {
+                if MenuItem::new("Duplicate").show(ui).clicked() {
                     chosen = Some(MenuChoice::Duplicate {
                         incoming: IncomingWires::Drop,
                     });
                 }
                 if MenuItem::new("Duplicate with incoming wires")
-                    .show(ui, popup)
+                    .show(ui)
                     .left
                     .clicked()
                 {
@@ -94,7 +90,7 @@ impl NodeMenuUi {
                 }
                 MenuSeparator::new().show(ui);
             }
-            if MenuItem::new("Remove").show(ui, popup).clicked() {
+            if MenuItem::new("Remove").show(ui).clicked() {
                 chosen = Some(MenuChoice::Remove);
             }
             chosen

@@ -224,6 +224,11 @@ fn show(ui: &mut Ui, theme: &Theme, file_name: Option<&str>, tail: &str) -> Disc
         if resp.dismissed {
             choice = DiscardChoice::Cancel;
         }
+        // A button's choice ends the dialog, which the caller stops showing: its input goes back
+        // now, not a frame late.
+        if choice != DiscardChoice::Stay {
+            Modal::close(ui, resp.id);
+        }
         DiscardOutcome {
             choice,
             dont_ask_again: *dont_ask_again,

@@ -142,14 +142,8 @@ impl DockTabs for DockPanes<'_> {
     /// The keyboard-free, discoverable route to the same split a chip
     /// drag performs.
     fn tab_menu(&mut self, ui: &mut Ui, menu: DockTabMenu<'_, TabRef>) {
-        let right = MenuItem::new("Split right")
-            .show(ui, menu.close)
-            .left
-            .clicked();
-        let down = MenuItem::new("Split down")
-            .show(ui, menu.close)
-            .left
-            .clicked();
+        let right = MenuItem::new("Split right").show(ui).left.clicked();
+        let down = MenuItem::new("Split down").show(ui).left.clicked();
         let side = if down {
             Some(SplitSide::Bottom)
         } else {

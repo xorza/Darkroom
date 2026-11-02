@@ -11,8 +11,8 @@ use crate::gui::pane::graph_ui::internals::CanvasHarness;
 /// A much bigger search field and a much roomier popup than the defaults.
 fn enlarge(t: &mut palantir::Theme) {
     t.text.font_size *= 3.0;
-    t.context_menu.padding = palantir::Spacing::all(24.0);
-    t.context_menu.gap = 12.0;
+    t.menu.padding = palantir::Spacing::all(24.0);
+    t.menu.gap = 12.0;
 }
 
 /// `n` stub funcs in one category — enough rows for a palette to overflow.
@@ -88,7 +88,7 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
     /// inset fit the cap with no slack the inset doesn't account for —
     /// which catches an allowance that over-subtracts as well as one that
     /// under-subtracts.
-    fn assert_fits(palette: Palette, menu: &palantir::ContextMenuTheme, label: &str) {
+    fn assert_fits(palette: Palette, menu: &palantir::MenuTheme, label: &str) {
         let Palette {
             field,
             results,
@@ -124,7 +124,7 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
 
     let plain = palantir::Theme::default();
     let small = open_palette(|_| {});
-    assert_fits(small, &plain.context_menu, "default theme");
+    assert_fits(small, &plain.menu, "default theme");
 
     // Now restyle both terms a fixed allowance could never track: a much
     // bigger search field, and a much roomier popup. The results area has to
@@ -132,7 +132,7 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
     let mut restyled = palantir::Theme::default();
     enlarge(&mut restyled);
     let big = open_palette(enlarge);
-    assert_fits(big, &restyled.context_menu, "bigger field and popup");
+    assert_fits(big, &restyled.menu, "bigger field and popup");
 
     assert!(
         big.field.size.h > small.field.size.h,
