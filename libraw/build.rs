@@ -72,7 +72,16 @@ fn compile(root: &Path) {
         match openmp.runtime {
             Runtime::Implicit => {}
             Runtime::Shared(library) => println!("cargo::rustc-link-lib={library}"),
-            Runtime::Static(archive) => {
+            Runtime::Static { archive, header } => {
+                // A runtime removed or upgraded reruns the script. One installed after the build
+                // is not seen until a forced rebuild (`cargo clean -p libraw`): watching its path
+                // before it exists would rerun the script, and so recompile LibRaw, on every
+                // build, as Cargo reruns a script while a watched path is missing
+                // (<https://github.com/rust-lang/cargo/issues/4076>). pkg-config and openssl-sys
+                // likewise see no later install.
+                for file in [&header, &archive] {
+                    println!("cargo::rerun-if-changed={}", file.display());
+                }
                 let dir = archive.parent().expect("an archive path has a directory");
                 println!("cargo::rustc-link-search=native={}", dir.display());
                 println!("cargo::rustc-link-lib=static=omp");
@@ -123,7 +132,11 @@ enum Runtime {
     /// The archive at this path, linked into the binary. Homebrew's libomp: its shared library's
     /// install name is under the Homebrew prefix, so a binary linked to it fails to launch on a
     /// Mac without Homebrew's libomp. The archive needs only libSystem.
-    Static(PathBuf),
+    Static {
+        archive: PathBuf,
+        /// The `omp.h` the translation units include, beside the archive.
+        header: PathBuf,
+    },
 }
 
 impl OpenMp {
@@ -148,7 +161,10 @@ impl OpenMp {
                     "-fopenmp".to_owned(),
                     format!("-I{}", prefix.join("include").display()),
                 ],
-                runtime: Runtime::Static(prefix.join("lib/libomp.a")),
+                runtime: Runtime::Static {
+                    archive: prefix.join("lib/libomp.a"),
+                    header: prefix.join("include/omp.h"),
+                },
             }
         } else {
             Self {
@@ -185,7 +201,7 @@ impl OpenMp {
             Runtime::Shared(library) => {
                 command.arg(format!("-l{library}"));
             }
-            Runtime::Static(archive) => {
+            Runtime::Static { archive, .. } => {
                 command.arg(archive);
             }
         }
