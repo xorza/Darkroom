@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::num::NonZeroU32;
 
-use common::USize2;
+use common::{ErrorChain, USize2};
 use glam::UVec2;
 use imaginarium::{ColorFormat, InterleavedDesc};
 use lens::Image;
@@ -100,7 +100,7 @@ impl fmt::Display for PreviewMessage<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Text(text) => f.write_str(text),
-            Self::Failure(error) => write!(f, "{error}"),
+            Self::Failure(error) => write!(f, "{}", ErrorChain::new(*error)),
         }
     }
 }

@@ -44,6 +44,7 @@ use crate::core::document::Document;
 use crate::core::runtime_host::RuntimeHost;
 use crate::core::status_log::{StatusFamily, StatusLog};
 use crate::core::wake::Wake;
+use common::ErrorChain;
 use scenarium::CompiledGraph;
 use scenarium::DynamicValue;
 use scenarium::LogLevel;
@@ -294,7 +295,7 @@ impl RunState {
                     self.runs_ended += 1;
                     self.clear();
                 }
-                status.error(StatusFamily::Run, error.to_string());
+                status.error(StatusFamily::Run, ErrorChain::new(&error).to_string());
             }
             WorkerReport::Activity(activity) => self.activity = activity,
             WorkerReport::Progress { node_id, phase } => self.apply_progress(node_id, phase),
@@ -381,7 +382,7 @@ impl RunState {
                         error: RunError::SkippedUpstream,
                     } => ExecStatus::Skipped,
                     NodeExecStatus::Errored { error } => {
-                        ExecStatus::Errored(Some(error.to_string()))
+                        ExecStatus::Errored(Some(ErrorChain::new(error).to_string()))
                     }
                 };
                 self.nodes.entry(node.node_id).or_default().status = status;

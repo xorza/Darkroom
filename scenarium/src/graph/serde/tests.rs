@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use common::SerdeFormat;
+use common::{ErrorChain, SerdeFormat};
 use hashbrown::HashMap;
 use ron::ser;
 use serde::de::value::{self, MapAccessDeserializer};
@@ -43,8 +43,8 @@ fn duplicate_ports_fail_in_every_binding_format() {
         let bytes = format.serialize(&bindings).unwrap();
         let error = format
             .deserialize::<CheckedBindings>(&bytes)
-            .expect_err("a repeated input port does not decode")
-            .to_string();
+            .expect_err("a repeated input port does not decode");
+        let error = ErrorChain::new(&error).to_string();
 
         if format != SerdeFormat::Bitcode || cfg!(debug_assertions) {
             assert!(

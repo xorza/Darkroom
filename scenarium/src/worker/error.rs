@@ -15,7 +15,7 @@ use crate::graph::identity::NodeId;
 
 #[derive(Debug, thiserror::Error)]
 pub enum WorkerError {
-    #[error("execution failed: {error}")]
+    #[error("execution failed")]
     Exec {
         #[source]
         error: ExecError,

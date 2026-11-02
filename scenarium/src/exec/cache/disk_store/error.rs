@@ -17,31 +17,31 @@ use crate::exec::cache::disk_store::store_outcome::StoreOutcome;
 /// an external codec's own failure.
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
-    #[error("could not create the cache directory for {}: {source}", path.display())]
+    #[error("could not create the cache directory for {}", path.display())]
     Dir {
         path: PathBuf,
         #[source]
         source: io::Error,
     },
-    #[error("could not begin publishing {}: {source}", path.display())]
+    #[error("could not begin publishing {}", path.display())]
     Begin {
         path: PathBuf,
         #[source]
         source: io::Error,
     },
-    #[error("could not encode the outputs for {}: {source}", path.display())]
+    #[error("could not encode the outputs for {}", path.display())]
     Encode {
         path: PathBuf,
         #[source]
         source: CodecFormatError,
     },
-    #[error("could not write {}: {source}", path.display())]
+    #[error("could not write {}", path.display())]
     Write {
         path: PathBuf,
         #[source]
         source: io::Error,
     },
-    #[error("could not publish {}: {source}", path.display())]
+    #[error("could not publish {}", path.display())]
     Publish {
         path: PathBuf,
         #[source]
@@ -54,7 +54,7 @@ pub(crate) type StoreResult = Result<StoreOutcome, StoreError>;
 /// A blob that would not go away. A blob that was never there is not one of
 /// these — an eviction wants the file gone, and an absent file already is.
 #[derive(Debug, thiserror::Error)]
-#[error("failed to remove {}: {source}", path.display())]
+#[error("failed to remove {}", path.display())]
 pub struct RemovalError {
     pub path: PathBuf,
     #[source]
@@ -65,15 +65,15 @@ pub struct RemovalError {
 /// is whatever an individual codec handed back and which this wraps.
 #[derive(Debug, thiserror::Error)]
 pub enum CodecFormatError {
-    #[error("cache I/O failed: {0}")]
+    #[error("cache I/O failed")]
     Io(#[from] io::Error),
-    #[error("malformed cached output frame: {0}")]
+    #[error("malformed cached output frame")]
     Frame(#[from] FrameError),
-    #[error("encoding a {type_id:?} value failed: {source}")]
+    #[error("encoding a {type_id:?} value failed")]
     Encode { type_id: TypeId, source: CodecError },
     #[error("no cache codec registered for custom type {0:?}")]
     UnknownType(TypeId),
-    #[error("decoding a {type_id:?} value failed: {source}")]
+    #[error("decoding a {type_id:?} value failed")]
     Decode { type_id: TypeId, source: CodecError },
 }
 
@@ -115,7 +115,7 @@ pub enum FrameError {
     StringLenOverflow,
     #[error("cached string does not fit in memory")]
     StringTooLarge,
-    #[error("cached text is not valid UTF-8: {0}")]
+    #[error("cached text is not valid UTF-8")]
     InvalidUtf8(#[source] FromUtf8Error),
     #[error("cached path list length overflow")]
     PathListLenOverflow,

@@ -5,17 +5,17 @@ use ron::de::SpannedError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SerializeError {
-    #[error("RON serialization failed: {0}")]
+    #[error("RON serialization failed")]
     Ron(#[from] ron::Error),
-    #[error("Bitcode serialization failed: {0}")]
+    #[error("Bitcode serialization failed")]
     Bitcode(#[from] bitcode::Error),
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum DeserializeError {
-    #[error("RON deserialization failed: {0}")]
+    #[error("RON deserialization failed")]
     Ron(#[from] SpannedError),
-    #[error("Bitcode deserialization failed: {0}")]
+    #[error("Bitcode deserialization failed")]
     Bitcode(#[from] bitcode::Error),
 }
 

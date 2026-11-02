@@ -34,7 +34,7 @@ pub enum DrizzleError {
     Stack(#[from] StackError),
 
     /// The output grid the scale makes of the input frames is no image's.
-    #[error("drizzle output grid: {0}")]
+    #[error("drizzle output grid")]
     OutputSize(#[from] FrameDescError),
 }
 

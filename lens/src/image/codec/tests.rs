@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::io::Cursor;
 use std::sync::Arc;
 
-use common::{Buffer2, SerdeFormat, USize2};
+use common::{Buffer2, ErrorChain, SerdeFormat, USize2};
 use imaginarium::{ChannelLayout, ColorFormat, InterleavedDesc, InterleavedImage, PlanarDesc};
 use lumos::{FlatGain, FrameGain, ImageMetadata, LinearImage, PixelFlags};
 use scenarium::{CustomValue, CustomValueCodec, Library};
@@ -229,12 +229,12 @@ async fn a_planar_image_round_trips_whole() {
 async fn decode_rejects_short_unknown_and_mismatched_payloads() {
     async fn error(bytes: Vec<u8>) -> String {
         let byte_len = u64::try_from(bytes.len()).unwrap();
-        ImageCodec
+        let error = ImageCodec
             .decode(&mut Cursor::new(bytes), byte_len)
             .await
             .map(|_| ())
-            .expect_err("the payload is refused")
-            .to_string()
+            .expect_err("the payload is refused");
+        ErrorChain::new(&*error).to_string()
     }
     let raster = record(SampleOrder::Interleaved, None, false);
     let planes = |flat_gain, flagged| record(SampleOrder::Planar, flat_gain, flagged);

@@ -1,5 +1,6 @@
 //! [`FrameRegistrar`]: each light's registration to the reference, its warp, and where it parks.
 
+use common::ErrorChain;
 use imaginarium::PlanarDesc;
 
 use crate::frame_store::storage_tier::Stored;
@@ -125,7 +126,12 @@ impl<'a> FrameRegistrar<'a> {
         let registration = match self.run.registrar.register(&self.reference_stars, &stars) {
             Ok(registration) => registration,
             Err(error) => {
-                tracing::info!(light = idx, total = self.count, %error, "registration failed");
+                tracing::info!(
+                    light = idx,
+                    total = self.count,
+                    error = %ErrorChain::new(&error),
+                    "registration failed"
+                );
                 return Ok(Parked::Dropped(error));
             }
         };

@@ -36,6 +36,7 @@ use crate::core::io::document;
 use crate::core::io::document::error::{DocumentLoadError, DocumentSaveError};
 use crate::core::io::document::saved_paths::SavedPaths;
 use crate::core::status_log::{StatusFamily, StatusLog};
+use common::ErrorChain;
 use scenarium::Library;
 
 /// Byte budget for the undo history's packed buffer (~1 MiB). Bounds
@@ -337,7 +338,11 @@ impl OpenDocument {
                 Err(error) => {
                     status.error(
                         StatusFamily::Document,
-                        format!("load failed: {}: {error}", argument.display()),
+                        format!(
+                            "load failed: {}: {}",
+                            argument.display(),
+                            ErrorChain::new(&error)
+                        ),
                     );
                     return Launched {
                         open: Self::default(),
@@ -378,7 +383,10 @@ impl OpenDocument {
         match Self::load(path, library) {
             Ok(loaded) => Some(loaded),
             Err(error) => {
-                status.error(StatusFamily::Document, format!("load failed: {error:#}"));
+                status.error(
+                    StatusFamily::Document,
+                    format!("load failed: {}", ErrorChain::new(&error)),
+                );
                 None
             }
         }

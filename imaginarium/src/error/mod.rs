@@ -51,9 +51,9 @@ pub enum PlanesError {
 /// Why bytes do not decode as a raster, or an image does not encode as one.
 #[derive(Debug, Error)]
 pub enum CodecError {
-    #[error("PNG or JPEG codec error: {0}")]
+    #[error("PNG or JPEG codec error")]
     Image(#[from] image::ImageError),
-    #[error("TIFF codec error: {0}")]
+    #[error("TIFF codec error")]
     Tiff(#[from] tiff::TiffError),
     /// A PNG or JPEG whose color type no format holds.
     #[error("unsupported color type {0:?}")]
@@ -76,7 +76,7 @@ pub enum CodecError {
         decoded: usize,
     },
     /// The file states a size no image has.
-    #[error("the file states no image: {0}")]
+    #[error("the file states no image")]
     Desc(#[from] DescError),
     /// The file format has no way to store the image's color format.
     #[error("{format} cannot store {color_format}")]
@@ -124,9 +124,9 @@ impl fmt::Display for TiffSampleType {
 #[cfg(feature = "wgpu")]
 #[derive(Debug, Error)]
 pub enum GpuError {
-    #[error("no suitable GPU adapter: {0}")]
+    #[error("no suitable GPU adapter")]
     Adapter(#[from] wgpu::RequestAdapterError),
-    #[error("the GPU device does not open: {0}")]
+    #[error("the GPU device does not open")]
     Device(#[from] wgpu::RequestDeviceError),
     /// An image whose buffer, `byte_len` bytes, is past the `max` the device binds.
     #[error("a {desc} image needs a {byte_len}-byte buffer; this device binds at most {max}")]
@@ -136,7 +136,7 @@ pub enum GpuError {
         max: u64,
     },
     /// A buffer the device did not map for reading.
-    #[error("the GPU buffer does not map: {0}")]
+    #[error("the GPU buffer does not map")]
     Map(#[from] wgpu::BufferAsyncError),
 }
 

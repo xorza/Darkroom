@@ -8,25 +8,25 @@ use crate::io::error::ImageError;
 /// Failure while creating or accessing disk-backed frame storage.
 #[derive(Debug, thiserror::Error)]
 pub enum FrameStoreError {
-    #[error("failed to create frame-store directory '{path}': {source}")]
+    #[error("failed to create frame-store directory '{path}'")]
     CreateDir {
         path: PathBuf,
         #[source]
         source: io::Error,
     },
-    #[error("failed to write frame-store file '{path}': {source}")]
+    #[error("failed to write frame-store file '{path}'")]
     WriteFile {
         path: PathBuf,
         #[source]
         source: io::Error,
     },
-    #[error("failed to open frame-store file '{path}': {source}")]
+    #[error("failed to open frame-store file '{path}'")]
     OpenFile {
         path: PathBuf,
         #[source]
         source: io::Error,
     },
-    #[error("failed to read metadata for frame-store source '{path}': {source}")]
+    #[error("failed to read metadata for frame-store source '{path}'")]
     ReadMetadata {
         path: PathBuf,
         #[source]
@@ -51,7 +51,7 @@ pub enum FrameStoreError {
         needed: u64,
         available: u64,
     },
-    #[error("failed to memory-map frame-store file '{path}': {source}")]
+    #[error("failed to memory-map frame-store file '{path}'")]
     MemoryMap {
         path: PathBuf,
         #[source]

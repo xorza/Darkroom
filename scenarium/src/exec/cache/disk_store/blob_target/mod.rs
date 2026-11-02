@@ -4,6 +4,7 @@
 use std::io;
 use std::path::PathBuf;
 
+use common::ErrorChain;
 use common::fs::{self, AtomicFile, PublicationMode};
 use tokio::fs::File;
 use tokio::io::{AsyncWriteExt as _, BufWriter};
@@ -59,7 +60,7 @@ impl BlobTarget {
         {
             tracing::error!(
                 path = %self.path.display(),
-                %error,
+                error = %ErrorChain::new(&error),
                 "could not delete an undecodable cache blob; it will keep failing to load",
             );
         }
@@ -137,7 +138,11 @@ impl BlobTarget {
             Ok(Some(blob)) => blob,
             Ok(None) => return None,
             Err(error) => {
-                tracing::warn!(path = %self.path.display(), %error, "cache blob could not be read; treating as miss");
+                tracing::warn!(
+                    path = %self.path.display(),
+                    error = %ErrorChain::new(&error),
+                    "cache blob could not be read; treating as miss"
+                );
                 return None;
             }
         };
@@ -145,7 +150,11 @@ impl BlobTarget {
             Ok(Some(values)) => Some(OutputSnapshot::new(values)),
             Ok(None) => None,
             Err(error) => {
-                tracing::warn!(path = %self.path.display(), %error, "cached outputs failed to decode; treating as miss");
+                tracing::warn!(
+                    path = %self.path.display(),
+                    error = %ErrorChain::new(&error),
+                    "cached outputs failed to decode; treating as miss"
+                );
                 self.delete().await;
                 None
             }

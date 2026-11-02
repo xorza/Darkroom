@@ -1,38 +1,38 @@
 use std::error::Error as _;
 use std::io;
 
-use common::USize2;
+use common::{ErrorChain, USize2};
 
 use crate::codec::raster_format::RasterFormat;
 use crate::color::color_format::ColorFormat;
 use crate::error::{CodecError, DescError, TiffSampleType};
 use crate::interleaved::interleaved_desc::InterleavedDesc;
 
-/// A wrapped foreign error is the source and its own message; a case of imaginarium's own has no
-/// source.
+/// A wrapped foreign error is the source alone, out of the message; a case of imaginarium's own has
+/// no source.
 #[test]
 fn only_a_wrapped_cause_is_reachable_through_source() {
     let truncated = || io::Error::new(io::ErrorKind::UnexpectedEof, "truncated");
 
-    for (error, message, cause) in [
+    for (error, message, chain) in [
         (
             CodecError::from(image::ImageError::IoError(truncated())),
+            "PNG or JPEG codec error",
             "PNG or JPEG codec error: truncated",
-            "truncated",
         ),
         (
             CodecError::from(tiff::TiffError::IoError(truncated())),
+            "TIFF codec error",
             "TIFF codec error: truncated",
-            "truncated",
         ),
         (
             CodecError::from(DescError::ZeroWidth),
+            "the file states no image",
             "the file states no image: width must be positive",
-            "width must be positive",
         ),
     ] {
         assert_eq!(error.to_string(), message);
-        assert_eq!(error.source().unwrap().to_string(), cause);
+        assert_eq!(ErrorChain::new(&error).to_string(), chain);
     }
 
     let desc = InterleavedDesc::new(USize2::new(3, 2), ColorFormat::RGB_F32);

@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use common::ErrorChain;
 use palantir::{ColorScheme, SchemePreference, Ui};
 use scenarium::Binding;
 use scenarium::ConstValue;
@@ -149,7 +150,10 @@ impl App {
         if let Some(failure) = failure {
             status.error(
                 StatusFamily::Preferences,
-                format!("{failure}; this session's settings are not saved"),
+                format!(
+                    "{}; this session's settings are not saved",
+                    ErrorChain::new(&failure)
+                ),
             );
         }
         let run_state = RunState::new(Arc::clone(&wake));
@@ -383,7 +387,8 @@ impl App {
             None => return Relayout::NotNeeded,
             Some(Ok(value)) => value,
             Some(Err(error)) => {
-                self.status.error(StatusFamily::Edit, error.to_string());
+                self.status
+                    .error(StatusFamily::Edit, ErrorChain::new(&error).to_string());
                 return Relayout::NotNeeded;
             }
         };
@@ -504,9 +509,10 @@ impl App {
                 self.remember_document_path();
                 self.status.succeeded(StatusFamily::Document);
             }
-            Err(err) => self
-                .status
-                .error(StatusFamily::Document, format!("save failed: {err:#}")),
+            Err(err) => self.status.error(
+                StatusFamily::Document,
+                format!("save failed: {}", ErrorChain::new(&err)),
+            ),
         }
     }
 
@@ -535,7 +541,7 @@ impl App {
             Ok(Saved::Memory) => {}
             Err(err) => self
                 .status
-                .error(StatusFamily::Preferences, err.to_string()),
+                .error(StatusFamily::Preferences, ErrorChain::new(&err).to_string()),
         }
     }
 
@@ -592,7 +598,9 @@ impl App {
         };
         match outcome {
             Ok(()) => self.status.succeeded(StatusFamily::Run),
-            Err(error) => self.status.error(StatusFamily::Run, error.to_string()),
+            Err(error) => self
+                .status
+                .error(StatusFamily::Run, ErrorChain::new(&error).to_string()),
         }
     }
 
@@ -607,7 +615,9 @@ impl App {
             .expect("the capture its image landed for");
         match capture.deliver(landed, &ui.clipboard()) {
             Ok(()) => self.status.succeeded(StatusFamily::View),
-            Err(error) => self.status.error(StatusFamily::View, error.to_string()),
+            Err(error) => self
+                .status
+                .error(StatusFamily::View, ErrorChain::new(&error).to_string()),
         }
     }
 }

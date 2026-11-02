@@ -14,7 +14,7 @@ use crate::io::fits::error::FitsLoadError;
 #[derive(Debug, thiserror::Error)]
 pub enum BundleError {
     /// The file could not be written.
-    #[error("calibration-master bundle: {0}")]
+    #[error("calibration-master bundle")]
     Write(#[from] WriteError),
     /// A defect's pixel index past the FITS signed 64-bit range.
     #[error("defect index {idx} exceeds the FITS signed 64-bit range")]
@@ -23,10 +23,10 @@ pub enum BundleError {
     #[error("defect map of {size} exceeds the FITS signed 64-bit range")]
     DefectExtentOutOfRange { size: USize2 },
     /// The file could not be opened or read.
-    #[error("calibration-master bundle: {0}")]
+    #[error("calibration-master bundle")]
     Io(#[from] io::Error),
     /// The file is not well-formed FITS, or a header value has the wrong type.
-    #[error("calibration-master bundle: {0}")]
+    #[error("calibration-master bundle")]
     Fits(#[from] fits_well::FitsError),
     /// The file does not start with the dataless primary HDU that names a Lumos bundle.
     #[error("not a Lumos calibration-master bundle")]
@@ -65,13 +65,13 @@ pub enum BundleError {
     #[error("the {role} master of the bundle states another role or prepared state")]
     MasterRecord { role: MasterRole },
     /// A master's HDU could not be decoded.
-    #[error("the {role} master of the bundle: {source}")]
+    #[error("the {role} master of the bundle")]
     Master {
         role: MasterRole,
         source: FitsLoadError,
     },
     /// The defect map's table is not what a bundle writes.
-    #[error("the bundle's defect map: {0}")]
+    #[error("the bundle's defect map")]
     DefectTable(#[from] DefectTableError),
     /// The masters read do not make a set.
     #[error(transparent)]

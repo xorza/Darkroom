@@ -20,6 +20,6 @@ pub(crate) enum DrawablePreviewError {
     EdgeTooLong { size: USize2 },
     /// The renderer refused the texture — larger than the device's maximum
     /// 2D dimension.
-    #[error("{0}")]
+    #[error(transparent)]
     Register(#[from] ImageTooLarge),
 }

@@ -9,8 +9,9 @@ use palantir::bench::backends::Backends;
 
 use crate::gui::app::session;
 
-/// Every case. The host's adapters are listed once here; no device opens.
+/// Every case. The host's adapters are listed once here; no device opens. The devices drop with
+/// `backends`, when the run ends.
 pub fn run(c: &mut Criterion) {
     let backends = Backends::probe();
-    session::bench::integration(c, backends);
+    session::bench::integration(c, &backends);
 }

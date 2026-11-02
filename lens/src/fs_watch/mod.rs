@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use common::{fs, task};
+use common::{ErrorChain, fs, task};
 use notify::event::ModifyKind;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use scenarium::Invocation;
@@ -43,7 +43,7 @@ struct WatchState {
 
 #[derive(Debug, thiserror::Error)]
 enum WatchError {
-    #[error("failed to inspect watch directory {path:?}: {source}")]
+    #[error("failed to inspect watch directory {path:?}")]
     Inspect {
         path: PathBuf,
         #[source]
@@ -51,9 +51,9 @@ enum WatchError {
     },
     #[error("watch path is not a directory: {path:?}")]
     NotDir { path: PathBuf },
-    #[error("failed to create filesystem watcher: {0}")]
+    #[error("failed to create filesystem watcher")]
     Create(#[source] notify::Error),
-    #[error("failed to watch {path:?}: {source}")]
+    #[error("failed to watch {path:?}")]
     Register {
         path: PathBuf,
         #[source]
@@ -81,7 +81,7 @@ impl WatchState {
             Ok(_) => {}
             Err(error) => tracing::warn!(
                 path = %callback_path.display(),
-                %error,
+                error = %ErrorChain::new(&error),
                 "filesystem watcher backend error"
             ),
         })

@@ -17,9 +17,9 @@ pub(super) struct NonUnicodePath(pub(super) PathBuf);
 pub(crate) enum ViewCaptureError {
     #[error("the window showed nothing to copy or save")]
     Empty,
-    #[error("copying the view failed: {0}")]
+    #[error("copying the view failed")]
     Clipboard(#[from] ClipboardUnavailable),
-    #[error("saving the view to {} failed: {source}", .path.display())]
+    #[error("saving the view to {} failed", .path.display())]
     Save {
         path: PathBuf,
         #[source]

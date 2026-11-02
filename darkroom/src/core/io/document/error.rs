@@ -21,19 +21,19 @@ pub(crate) enum DocumentLoadError {
         path = .path.display()
     )]
     NonUnicodeFolder { path: PathBuf },
-    #[error("{path}: {source}", path = .path.display())]
+    #[error("{path}", path = .path.display())]
     Open {
         path: PathBuf,
         #[source]
         source: io::Error,
     },
-    #[error("{path} is not a valid Darkroom archive: {source}", path = .path.display())]
+    #[error("{path} is not a valid Darkroom archive", path = .path.display())]
     InvalidArchive {
         path: PathBuf,
         #[source]
         source: ZipError,
     },
-    #[error("failed to inspect {path}: {source}", path = .path.display())]
+    #[error("failed to inspect {path}", path = .path.display())]
     InspectArchive {
         path: PathBuf,
         #[source]
@@ -43,7 +43,7 @@ pub(crate) enum DocumentLoadError {
     OverlappingEntries { path: PathBuf },
     #[error("{path} must contain exactly one {DOCUMENT_ENTRY}, found {count}", path = .path.display())]
     DocumentEntryCount { path: PathBuf, count: usize },
-    #[error("failed to open {DOCUMENT_ENTRY} in {path}: {source}", path = .path.display())]
+    #[error("failed to open {DOCUMENT_ENTRY} in {path}", path = .path.display())]
     OpenDocumentEntry {
         path: PathBuf,
         #[source]
@@ -57,13 +57,13 @@ pub(crate) enum DocumentLoadError {
         max_mib = MAX_DOCUMENT_BYTES / (1024 * 1024)
     )]
     DocumentTooLarge { path: PathBuf, size: u64 },
-    #[error("failed to read {path}: {source}", path = .path.display())]
+    #[error("failed to read {path}", path = .path.display())]
     Read {
         path: PathBuf,
         #[source]
         source: io::Error,
     },
-    #[error("{path} is not a valid Darkroom document: {source}", path = .path.display())]
+    #[error("{path} is not a valid Darkroom document", path = .path.display())]
     Deserialize {
         path: PathBuf,
         /// Boxed: a spanned RON error carries its whole span, which every
@@ -80,7 +80,7 @@ pub(crate) enum DocumentSaveError {
         path = .path.display()
     )]
     InvalidExtension { path: PathBuf },
-    #[error("failed to serialize the document for {path}: {source}", path = .path.display())]
+    #[error("failed to serialize the document for {path}", path = .path.display())]
     Serialize {
         path: PathBuf,
         #[source]
@@ -92,13 +92,13 @@ pub(crate) enum DocumentSaveError {
         max_mib = MAX_DOCUMENT_BYTES / (1024 * 1024)
     )]
     DocumentTooLarge { path: PathBuf, size: u64 },
-    #[error("{path}: {source}", path = .path.display())]
+    #[error("{path}", path = .path.display())]
     Publish {
         path: PathBuf,
         #[source]
         source: io::Error,
     },
-    #[error("failed to write the archive {path}: {source}", path = .path.display())]
+    #[error("failed to write the archive {path}", path = .path.display())]
     Archive {
         path: PathBuf,
         #[source]

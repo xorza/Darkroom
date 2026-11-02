@@ -24,7 +24,7 @@ pub enum AlignStackError {
     #[error(transparent)]
     Load(Box<ImageError>),
     /// The configuration cannot run over these lights, found before any light is worked.
-    #[error("invalid configuration: {0}")]
+    #[error("invalid configuration")]
     Config(#[from] AlignStackConfigError),
     #[error("reference frame {idx} has only {found} stars (need {required})")]
     ReferenceInsufficientStars {
@@ -34,14 +34,14 @@ pub enum AlignStackError {
     },
     #[error("all {count} non-reference frames failed to register")]
     AllFramesDropped { count: usize },
-    #[error("cannot calibrate light frame '{path}': {source}")]
+    #[error("cannot calibrate light frame '{path}'")]
     Calibration {
         path: PathBuf,
         /// Boxed for the reason [`Self::Load`] is.
         #[source]
         source: Box<CalibrationError>,
     },
-    #[error("cannot reject cosmic rays in light frame '{path}': {source}")]
+    #[error("cannot reject cosmic rays in light frame '{path}'")]
     CosmicRay {
         path: PathBuf,
         #[source]
@@ -69,7 +69,7 @@ pub enum AlignStackConfigError {
     Warp(InvalidConfigField),
     #[error("cosmic-ray rejection: {0}")]
     CosmicRay(InvalidConfigField),
-    #[error("combine: {0}")]
+    #[error("combine")]
     Stack(#[from] StackConfigError),
     #[error("reference index {idx} out of range ({count} frames)")]
     ReferenceOutOfRange { idx: usize, count: usize },

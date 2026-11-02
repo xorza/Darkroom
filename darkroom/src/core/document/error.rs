@@ -19,7 +19,7 @@ pub(crate) enum GraphViewValidationError {
     MissingNode { node_id: NodeId },
     #[error("the route of {wire:?} names no wire the graph holds")]
     RouteToNoWire { wire: WireKey },
-    #[error("the route of {wire:?}: {source}")]
+    #[error("the route of {wire:?}")]
     Route {
         wire: WireKey,
         #[source]
@@ -50,7 +50,7 @@ pub(crate) enum RouteError {
 pub(crate) enum DocumentValidationError {
     #[error(transparent)]
     Graph(#[from] GraphValidationError),
-    #[error("main view: {source}")]
+    #[error("main view")]
     MainView {
         #[source]
         source: GraphViewValidationError,

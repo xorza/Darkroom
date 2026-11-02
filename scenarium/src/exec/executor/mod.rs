@@ -22,7 +22,7 @@ use std::time::Instant;
 
 use tokio::task;
 
-use common::CancelToken;
+use common::{CancelToken, ErrorChain};
 
 use crate::containers::col::Col;
 use crate::data::dynamic_value::DynamicValue;
@@ -480,7 +480,10 @@ impl ExecFrame<'_, '_> {
                 self.ctx.log_node(
                     program.node_ids[node_idx],
                     LogLevel::Warn,
-                    format!("running uncached, a declared path could not be identified: {error}"),
+                    format!(
+                        "running uncached, a declared path could not be identified: {}",
+                        ErrorChain::new(&error)
+                    ),
                 );
                 true
             }

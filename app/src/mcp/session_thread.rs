@@ -9,7 +9,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 use std::thread::{self, JoinHandle, ThreadId};
 
-use common::thread as threads;
+use common::{ErrorChain, thread as threads};
 use darkroom::driver::error::DriverError;
 use darkroom::driver::log_ring::LogRing;
 use darkroom::driver::{Driver, OpenMode, SessionConfig};
@@ -313,6 +313,6 @@ impl fmt::Debug for Request {
 
 impl From<DriverError> for ToolError {
     fn from(error: DriverError) -> Self {
-        Self(error.to_string())
+        Self(ErrorChain::new(&error).to_string())
     }
 }

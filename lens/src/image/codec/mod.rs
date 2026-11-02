@@ -67,11 +67,11 @@ enum DecodeError {
     LenOverflow,
     #[error("image cache payload has length {byte_len}, expected {expected}")]
     LenMismatch { byte_len: u64, expected: u64 },
-    #[error("invalid cached image: {0}")]
+    #[error("invalid cached image")]
     InvalidDesc(#[from] DescError),
-    #[error("invalid cached planes: {0}")]
+    #[error("invalid cached planes")]
     InvalidPlanes(#[from] FrameDescError),
-    #[error("image cache record does not read: {0}")]
+    #[error("image cache record does not read")]
     Record(#[from] DeserializeError),
     #[error("image cache payload is flagged, and its flag plane holds no flag")]
     EmptyFlags,

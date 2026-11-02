@@ -26,13 +26,13 @@ use glam::USizeVec2;
 /// ([`ImageError`](crate::ImageError)).
 #[derive(Debug, Error)]
 pub enum FitsLoadError {
-    #[error("{0}")]
+    #[error(transparent)]
     Io(#[from] io::Error),
-    #[error("{0}")]
+    #[error(transparent)]
     Fits(#[from] fits_well::FitsError),
     #[error("{0}")]
     Refused(FitsRefusal),
-    #[error("{0}")]
+    #[error(transparent)]
     NullSamples(#[from] NullSamples),
     #[error("{0}")]
     Scientific(ScientificRefusal),

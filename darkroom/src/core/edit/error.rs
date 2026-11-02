@@ -76,7 +76,7 @@ pub(crate) enum MalformedIntent {
     ForeignSeedBinding { port: InputPort },
     /// The insertion's record is not one a graph could hold — a port seeded
     /// twice, of which only one could survive.
-    #[error("the inserted node's record is malformed: {0}")]
+    #[error("the inserted node's record is malformed")]
     InsertionRecord(#[from] DetachedNodeError),
     /// Positions reach the view verbatim, and nothing after the load repairs a
     /// non-finite one.

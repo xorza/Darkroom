@@ -15,9 +15,9 @@ use crate::gui::app::error::DrivenOpenError;
 #[derive(Debug, thiserror::Error)]
 pub enum DriverError {
     /// A locator that names no one place, with palantir's hint, and the canvas's for a place
-    /// out of view.
+    /// out of view. The variant restates the error, which is not a cause under it.
     #[error("{}", locate_message(.0))]
-    Locate(#[from] LocateError),
+    Locate(LocateError),
     #[error(
         "the editor quit, as an action asked (File ▸ Quit or Ctrl+Q), and the session ended; open \
          a project to go on"
@@ -105,11 +105,11 @@ pub enum DriverError {
     NoFrame { seconds: f32 },
     #[error("the window closed, and the session with it: the person at it closed it, or it quit")]
     WindowClosed,
-    #[error("the GPU display needs an adapter, and none is usable: {0}")]
+    #[error("the GPU display needs an adapter, and none is usable")]
     NoAdapter(#[from] GpuRequestError),
     #[error("{} has no parent folder to copy", .path.display())]
     NoFolder { path: PathBuf },
-    #[error("{}: {source}", .path.display())]
+    #[error("{}", .path.display())]
     Io {
         path: PathBuf,
         #[source]
@@ -121,10 +121,17 @@ pub enum DriverError {
 /// actions played: `ran` is the failing action's index, or the batch's length when every action
 /// played and reading the editor after them failed.
 #[derive(Debug, thiserror::Error)]
-#[error("after {ran} actions: {error}")]
+#[error("after {ran} actions")]
 pub struct ActFailure {
     pub ran: usize,
+    #[source]
     pub error: DriverError,
+}
+
+impl From<LocateError> for DriverError {
+    fn from(error: LocateError) -> Self {
+        Self::Locate(error)
+    }
 }
 
 impl From<DrivenOpenError> for DriverError {

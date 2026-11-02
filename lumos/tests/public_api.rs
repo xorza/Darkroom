@@ -1,6 +1,6 @@
 use std::io::{Error, ErrorKind};
 
-use common::{Buffer2, CancelToken};
+use common::{Buffer2, CancelToken, ErrorChain};
 use imaginarium::{ChannelLayout, PlanarDesc};
 use lumos::{
     AlignStackConfig, AlignStackConfigError, AlignStackError, AlignStackResult, BayerPattern,
@@ -224,7 +224,7 @@ fn stacking_configuration_errors_are_available_from_the_crate_root() {
     };
     let operation_error: StackError = storage_error.into();
     assert_eq!(
-        operation_error.to_string(),
+        ErrorChain::new(&operation_error).to_string(),
         "failed to create frame-store directory '.tmp/unwritable': denied"
     );
 
@@ -279,7 +279,7 @@ fn stacking_configuration_errors_are_available_from_the_crate_root() {
     );
     let pipeline_error = AlignStackError::Config(AlignStackConfigError::Detection(detection_error));
     assert_eq!(
-        pipeline_error.to_string(),
+        ErrorChain::new(&pipeline_error).to_string(),
         "invalid configuration: star detection: sigma_threshold must be finite and positive, got 0"
     );
 
@@ -288,7 +288,7 @@ fn stacking_configuration_errors_are_available_from_the_crate_root() {
         source: Box::new(CalibrationError::AlreadyCalibrated),
     };
     assert_eq!(
-        pipeline_error.to_string(),
+        ErrorChain::new(&pipeline_error).to_string(),
         "cannot calibrate light frame 'light_7.cr2': the light frame is already calibrated"
     );
 

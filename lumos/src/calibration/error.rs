@@ -66,7 +66,7 @@ pub enum CalibrationError {
     LightWithoutSubtractor,
     /// A master holding dark signal was taken under other conditions than the frame it calibrates:
     /// the dark against a light, or the flat-dark against the flat.
-    #[error("the {component} master does not match the frame it calibrates: {source}")]
+    #[error("the {component} master does not match the frame it calibrates")]
     DarkMismatch {
         component: MasterRole,
         source: DarkMismatch,
@@ -182,7 +182,7 @@ pub enum SubtractionError {
 
     /// The master holding dark signal that a calibration stack subtracts was taken under other
     /// conditions than frame `idx`.
-    #[error("frame {idx} cannot take the subtracted master: {source}")]
+    #[error("frame {idx} cannot take the subtracted master")]
     SubtractorConditions { idx: usize, source: DarkMismatch },
 }
 
@@ -198,7 +198,7 @@ pub enum MasterStackError {
     /// The frames of a master whose dark signal is one exposure's at one temperature — a dark or a
     /// flat-dark — were not all taken under one: the master would state one frame's conditions and
     /// hold the majority's signal.
-    #[error("the {role} frames must share one exposure and one temperature: {source}")]
+    #[error("the {role} frames must share one exposure and one temperature")]
     Conditions {
         role: MasterRole,
         source: ConditionMismatch,

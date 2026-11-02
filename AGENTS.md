@@ -113,6 +113,11 @@ the benches of the root it runs in; each submodule runs its own.
   type. A type valid by construction has a `new` that panics and a `checked`
   that returns the error. Refused: one `Error` of messages, which no caller
   can match on.
+- **An error names its cause in `source` alone**, and every report prints it
+  through `common::ErrorChain`, which walks the chain. Refused: the cause in
+  `Display` too, which a chain prints twice; the cause in `Display` alone,
+  which no caller can walk to
+  ([error-handling project group](https://blog.rust-lang.org/inside-rust/2021/07/01/What-the-error-handling-project-group-is-working-towards.html)).
 - **No backward compatibility.** Change serialized shapes and APIs freely: no
   migrations, compat shims, legacy deserializers or legacy-format tests.
 - **New ids come from `uuidgen | tr 'A-Z' 'a-z'`** — every new `common::Id`

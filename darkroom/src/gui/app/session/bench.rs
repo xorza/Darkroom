@@ -34,8 +34,8 @@ use lens::MlModelPaths;
 use palantir::bench::backends::{Backend, Backends};
 use palantir::bench::case_group::CaseGroup;
 use palantir::bench::kind::{Kind, Scale};
+use palantir::internals::Timing;
 use palantir::internals::frame_fixture::{BENCH_DPR, BENCH_SURFACE};
-use palantir::internals::{BenchGpu, Timing};
 use palantir::{ColorScheme, Depth, Harness};
 use palantir::{FramePaint, OffscreenHost, Ui};
 use scenarium::{Binding, DynamicValue, Func, Graph, InputPort, Library, NodeId};
@@ -352,7 +352,7 @@ impl FrameCase {
 }
 
 /// `integration/editor_frame/<backend>/<scenario>`: one whole editor frame of the made graph.
-pub(crate) fn integration(c: &mut Criterion, backends: Backends) {
+pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
     let mut group = Kind::Integration.group(c, "editor_frame", Scale::Frame);
     for backend in backends.all() {
         for scenario in Scenario::ALL {
@@ -379,7 +379,7 @@ pub(crate) fn integration(c: &mut Criterion, backends: Backends) {
                     }
                 }),
                 Backend::Gpu => case.measure(&mut group, || {
-                    let gpu = BenchGpu::shared(Timing::PassOnly);
+                    let gpu = backends.device(Timing::PassOnly);
                     let target = gpu.target("darkroom.editor_frame", BENCH_SURFACE);
                     let mut host = OffscreenHost::builder(gpu.handles())
                         .collect_gpu_stats(false)

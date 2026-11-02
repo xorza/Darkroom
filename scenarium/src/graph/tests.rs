@@ -20,7 +20,7 @@ use crate::graph::subscription::Subscription;
 use crate::graph::{Graph, InputPort, NodeId, OutputPort};
 use crate::internals;
 use crate::internals::test_graph::TestGraph;
-use common::SerdeFormat;
+use common::{ErrorChain, SerdeFormat};
 use std::panic;
 use std::panic::AssertUnwindSafe;
 
@@ -600,11 +600,10 @@ fn loading_rejects_a_corrupt_graph() {
     let error = SerdeFormat::Ron
         .deserialize::<Graph>(&bytes)
         .expect_err("a duplicate input port cannot decode into the binding map");
+    let message = ErrorChain::new(&error).to_string();
     assert!(
-        error
-            .to_string()
-            .contains("duplicate binding for input port"),
-        "{error}"
+        message.contains("duplicate binding for input port"),
+        "{message}"
     );
 }
 

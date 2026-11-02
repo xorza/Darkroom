@@ -10,7 +10,7 @@ use imaginarium::CodecError;
 pub(super) enum RasterFileError {
     #[error("no image file format has the extension of '{}'", path.display())]
     Extension { path: PathBuf },
-    #[error("I/O error: {0}")]
+    #[error("I/O error")]
     Io(#[from] io::Error),
     #[error(transparent)]
     Codec(#[from] CodecError),

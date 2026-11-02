@@ -30,6 +30,7 @@
 //! - Parallel work: [`par`] starts every parallel loop, and panics when a loop's body would start
 //!   another; [`PerWorker`] is the scratch such a body takes.
 //!
+//! [`ErrorChain`] is how every report prints an error: the error and each cause under it.
 //! [`Id`], [`FloatExt`] and [`is_debug`] stand on their own, as do [`Buffer2`], the row-major 2D
 //! grid, and its geometry: [`USize2`] and [`USizeRect2`], with points as `glam`'s `USizeVec2`.
 //! `glam` is re-exported whole, as those signatures name its types.
@@ -67,6 +68,7 @@ pub mod thread;
 mod bg_runtime;
 mod buffer2;
 mod cancel_token;
+mod error_chain;
 mod float_ext;
 mod id;
 mod introspect;
@@ -79,6 +81,7 @@ mod usize_rect2;
 pub use bg_runtime::BgRuntime;
 pub use buffer2::Buffer2;
 pub use cancel_token::CancelToken;
+pub use error_chain::ErrorChain;
 pub use float_ext::FloatExt;
 pub use fs::file_identity::{FileId, FileIdentity};
 pub use fs::temp_dir::TempDir;

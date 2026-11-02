@@ -1,8 +1,9 @@
 pub(crate) mod dark_comparison_keywords;
 pub(crate) mod domain_keywords;
 
-use std::fmt::Display;
+use std::error::Error;
 
+use common::ErrorChain;
 use fits_well::header::{Header, Keyword, RecordName, keywords};
 use fits_well::image::SampleType;
 
@@ -234,9 +235,13 @@ pub(super) fn read_data_max(header: &Header) -> Option<f64> {
 
 /// An optional keyword's value, or `None` — with the reason logged — when the header gives it in
 /// a form it cannot have.
-fn optional<T, E: Display>(keyword: &str, value: Result<Option<T>, E>) -> Option<T> {
+fn optional<T, E: Error>(keyword: &str, value: Result<Option<T>, E>) -> Option<T> {
     value.unwrap_or_else(|error| {
-        tracing::warn!(keyword, %error, "ignoring a FITS keyword given in a form it cannot have");
+        tracing::warn!(
+            keyword,
+            error = %ErrorChain::new(&error),
+            "ignoring a FITS keyword given in a form it cannot have"
+        );
         None
     })
 }

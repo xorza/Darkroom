@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use common::ErrorChain;
 use lens::MlModelPaths;
 use scenarium::DiskStore;
 use scenarium::{CompiledGraph, Compiler, DynamicValue, WorkerExited, WorkerReport};
@@ -152,8 +153,9 @@ impl RuntimeHost {
         match cache::prepare(&root.path) {
             Ok(()) => root.prepared = true,
             Err(error) => tracing::warn!(
-                "the cache folder {} has no .gitignore: {error}",
-                root.path.display()
+                "the cache folder {} has no .gitignore: {}",
+                root.path.display(),
+                ErrorChain::new(&error)
             ),
         }
     }
@@ -309,6 +311,7 @@ impl RuntimeHost {
     /// the editor alive and inert.
     fn dispatch(&self, commands: impl FnOnce(&WorkerBridge) -> Result<(), WorkerExited>) {
         if let Err(error) = commands(&self.worker) {
+            let error = ErrorChain::new(&error);
             tracing::error!(%error, "worker task is gone; no command can be delivered");
             panic!("worker exited while the host was still running: {error}");
         }

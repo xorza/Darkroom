@@ -4,7 +4,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use common::fs::{self, PublicationMode};
-use common::{CancelToken, FileIdentity};
+use common::{CancelToken, ErrorChain, FileIdentity};
 use lumos::{
     CachedMaster, CalibrationMasters, CalibrationSet, CfaImage, IngestConfig, LoadCtx, MasterBuild,
     MasterBuildError, MasterCache, MasterInputs, MasterRole, NoMasterCache, ProgressCallback,
@@ -24,19 +24,19 @@ const BUILD_MASTERS_FUNC_ID: FuncId = FuncId::literal("f2f6f1ff-5b10-409c-900f-d
 /// Why a master kept next to its frames could not be read or written.
 #[derive(Debug, thiserror::Error)]
 enum CacheError {
-    #[error("failed to read metadata for '{path}': {source}", path = .path.display())]
+    #[error("failed to read metadata for '{path}'", path = .path.display())]
     FrameMetadata {
         path: PathBuf,
         #[source]
         source: io::Error,
     },
-    #[error("failed to write cached calibration master '{path}': {source}", path = .path.display())]
+    #[error("failed to write cached calibration master '{path}'", path = .path.display())]
     WriteMaster {
         path: PathBuf,
         #[source]
         source: WriteError,
     },
-    #[error("failed to update calibration cache '{path}': {source}", path = .path.display())]
+    #[error("failed to update calibration cache '{path}'", path = .path.display())]
     Write {
         path: PathBuf,
         #[source]
@@ -269,7 +269,7 @@ impl MasterCache<PathBuf> for SourceDirCache<'_> {
                 Ok(master) => return Ok(CachedMaster::Kept(Box::new(master))),
                 Err(error) => tracing::warn!(
                     path = %place.paths.master.display(),
-                    %error,
+                    error = %ErrorChain::new(&error),
                     "failed to load calibration master cache; rebuilding from source frames"
                 ),
             }

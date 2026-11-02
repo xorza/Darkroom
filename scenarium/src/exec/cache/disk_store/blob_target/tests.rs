@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use common::internals::publication_temp_files;
-use common::{TempDir, TempFile, fs};
+use common::{ErrorChain, TempDir, TempFile, fs};
 
 use crate::data::codec::Codecs;
 use crate::data::const_value::ConstValue;
@@ -239,9 +239,10 @@ async fn failed_streaming_encode_preserves_previous_blob() {
         panic!("a failing codec must report an encode failure, got {failed:?}");
     };
     assert_eq!(path, file.path());
+    let message = ErrorChain::new(source).to_string();
     assert!(
-        source.to_string().contains("injected encode failure"),
-        "the codec's own message survives: {source}"
+        message.contains("injected encode failure"),
+        "the codec's own message survives: {message}"
     );
     assert_eq!(fs::read(file.path()).unwrap(), original);
     assert!(publication_temp_files(file.path()).is_empty());

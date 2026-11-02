@@ -226,6 +226,7 @@ impl From<Cancelled> for StackError {
 
 #[cfg(test)]
 mod tests {
+    use common::ErrorChain;
     use imaginarium::{ChannelLayout, PlanarDesc};
     use std::error::Error as _;
     use std::io;
@@ -323,7 +324,11 @@ mod tests {
             source: io::Error::new(io::ErrorKind::NotFound, "file not found"),
         });
 
-        let message = error.to_string();
+        assert_eq!(
+            error.to_string(),
+            "failed to read file '/path/to/image.fits'"
+        );
+        let message = ErrorChain::new(&error).to_string();
         assert_eq!(
             message,
             "failed to read file '/path/to/image.fits': file not found"
@@ -353,6 +358,10 @@ mod tests {
         });
         assert_eq!(
             store.to_string(),
+            "failed to write frame-store file '/tmp/cache/frame.bin'"
+        );
+        assert_eq!(
+            ErrorChain::new(&store).to_string(),
             "failed to write frame-store file '/tmp/cache/frame.bin': disk full"
         );
 

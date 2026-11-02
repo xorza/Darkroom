@@ -17,6 +17,7 @@ mod mcp;
 use std::process::ExitCode;
 
 use clap::Parser;
+use common::ErrorChain;
 use darkroom::driver::log_ring::LogRing;
 
 use crate::cli::{Cli, Launch};
@@ -28,7 +29,7 @@ fn main() -> ExitCode {
             match darkroom::run(document) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(error) => {
-                    tracing::error!("darkroom: {error}");
+                    tracing::error!("darkroom: {}", ErrorChain::new(&error));
                     ExitCode::FAILURE
                 }
             }

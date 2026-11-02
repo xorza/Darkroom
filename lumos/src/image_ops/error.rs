@@ -14,7 +14,7 @@ use common::USize2;
 #[derive(Debug, thiserror::Error)]
 pub enum OpError {
     /// A configuration parameter is outside its valid range.
-    #[error("invalid config: {0}")]
+    #[error("invalid config")]
     Config(#[from] InvalidConfigField),
     /// The background surface's design matrix does not hold enough independent information: the
     /// sample tiles do not span the image in both directions.
@@ -70,11 +70,11 @@ impl fmt::Display for AutoStretch {
 pub enum MlError {
     #[error("image must be at least {WINDOW}×{WINDOW}, got {}×{}", .0.width, .0.height)]
     TooSmall(USize2),
-    #[error("invalid ML tiling configuration: {0}")]
+    #[error("invalid ML tiling configuration")]
     Config(#[from] InvalidConfigField),
-    #[error("ONNX model error: {0}")]
+    #[error("ONNX model error")]
     Model(#[from] ort::Error),
-    #[error("cannot read the model {}: {source}", .path.display())]
+    #[error("cannot read the model {}", .path.display())]
     Read {
         path: std::path::PathBuf,
         #[source]

@@ -3,6 +3,7 @@
 use std::time::Instant;
 
 use arrayvec::ArrayVec;
+use common::ErrorChain;
 use glam::DVec2;
 
 use crate::registration::distortion::sip::{SipConfig, SipModel};
@@ -101,7 +102,11 @@ impl ModelSearch<'_> {
             match self.estimate_and_refine(model) {
                 Ok(fit) => fitted.push((model, fit)),
                 Err(error) => {
-                    tracing::debug!(model = ?model.transform_type(), %error, "Auto candidate failed");
+                    tracing::debug!(
+                        model = ?model.transform_type(),
+                        error = %ErrorChain::new(&error),
+                        "Auto candidate failed"
+                    );
                     failures.push(FailedModel {
                         model: model.transform_type(),
                         failure: error,

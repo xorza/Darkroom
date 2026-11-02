@@ -12,7 +12,7 @@
 
 use std::path::{Path, PathBuf};
 
-use common::{fs, process};
+use common::{ErrorChain, fs, process};
 use lens::MlModelPaths;
 use palantir::{
     Align, Button, Checkbox, ComboBox, Configure, Grid, Panel, Sizing, Spacing, Text, TextEdit,
@@ -379,7 +379,7 @@ fn download_hint(ui: &mut Ui, theme: &Theme, row: ModelRow) {
                 .show(ui, theme)
                 && let Err(error) = process::open_url(url)
             {
-                tracing::warn!("failed to open url {url}: {error}");
+                tracing::warn!("failed to open url {url}: {}", ErrorChain::new(&error));
             }
             Text::new(DOWNLOAD_HINT)
                 .style(&support::muted_text(ui, theme, theme.font.caption))

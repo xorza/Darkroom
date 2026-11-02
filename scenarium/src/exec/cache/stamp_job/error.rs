@@ -21,7 +21,7 @@ pub(crate) enum StampError {
     /// would not list, an entry that would not stat, a file with no
     /// modification time. `path` is the one that failed, which inside a
     /// directory is the entry rather than the directory.
-    #[error("{}: {source}", path.display())]
+    #[error("{}", path.display())]
     Io {
         path: PathBuf,
         #[source]

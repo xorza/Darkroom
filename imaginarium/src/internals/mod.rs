@@ -56,6 +56,8 @@ pub(crate) fn lena(format: ColorFormat) -> InterleavedImage {
 pub(crate) mod gpu {
     use std::sync::OnceLock;
 
+    use common::ErrorChain;
+
     use crate::gpu::Gpu;
 
     /// A shared GPU context for tests, created once: initialization takes about two seconds.
@@ -68,7 +70,7 @@ pub(crate) mod gpu {
             .get_or_init(|| match Gpu::new() {
                 Ok(gpu) => Some(gpu),
                 Err(error) => {
-                    eprintln!("GPU tests skipped, no device: {error}");
+                    eprintln!("GPU tests skipped, no device: {}", ErrorChain::new(&error));
                     None
                 }
             })

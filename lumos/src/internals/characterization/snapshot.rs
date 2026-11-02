@@ -3,7 +3,7 @@
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
-use common::{Buffer2, SerdeFormat, env, fs};
+use common::{Buffer2, ErrorChain, SerdeFormat, env, fs};
 use serde::{Deserialize, Serialize};
 
 /// The cells a plane's side is summed in, at most: 256 sums keep a plane's reference short and
@@ -106,11 +106,16 @@ impl Snapshot {
             Ok(bytes) => match SerdeFormat::Ron.deserialize::<Self>(&bytes) {
                 Ok(reference) => self.differences(&reference),
                 Err(error) => vec![format!(
-                    "the reference {} does not parse: {error}",
-                    path.display()
+                    "the reference {} does not parse: {}",
+                    path.display(),
+                    ErrorChain::new(&error)
                 )],
             },
-            Err(error) => vec![format!("no reference at {}: {error}", path.display())],
+            Err(error) => vec![format!(
+                "no reference at {}: {}",
+                path.display(),
+                ErrorChain::new(&error)
+            )],
         };
         if differences.is_empty() {
             return;

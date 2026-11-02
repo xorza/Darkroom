@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use common::ErrorChain;
 use darkroom::driver::Driver;
 use darkroom::driver::action::Action;
 use darkroom::driver::error::{ActFailure, DriverError};
@@ -134,14 +135,16 @@ impl DarkroomServer {
                 }
                 Err(ActFailure { ran, error }) if ran < count => {
                     return Err(ToolError(format!(
-                        "action {} of {count} failed, and the ones before it ran: {error}",
-                        ran + 1
+                        "action {} of {count} failed, and the ones before it ran: {}",
+                        ran + 1,
+                        ErrorChain::new(&error)
                     )));
                 }
                 Err(ActFailure { error, .. }) => {
                     return Err(ToolError(format!(
                         "the {count} actions ran, and reading the editor after them failed: \
-                         {error}"
+                         {}",
+                        ErrorChain::new(&error)
                     )));
                 }
             };

@@ -17,7 +17,7 @@ pub enum ImageError {
     #[error("image load cancelled for '{path}'")]
     Cancelled { path: PathBuf },
 
-    #[error("failed to load FITS file '{path}': {source}")]
+    #[error("failed to load FITS file '{path}'")]
     Fits {
         path: PathBuf,
         source: fits_well::FitsError,
@@ -26,16 +26,16 @@ pub enum ImageError {
     #[error("unsupported FITS file '{path}': {reason}")]
     FitsUnsupported { path: PathBuf, reason: FitsRefusal },
 
-    #[error("failed to load image '{path}': {source}")]
+    #[error("failed to load image '{path}'")]
     Image {
         path: PathBuf,
         source: imaginarium::CodecError,
     },
 
-    #[error("failed to load raw file '{path}': {source}")]
+    #[error("failed to load raw file '{path}'")]
     Raw { path: PathBuf, source: RawError },
 
-    #[error("failed to read file '{path}': {source}")]
+    #[error("failed to read file '{path}'")]
     Io { path: PathBuf, source: io::Error },
 
     #[error("no decoder reads the extension of '{path}'")]
@@ -156,15 +156,15 @@ impl ImageError {
 /// Why a raster load failed, before the entry point names the file.
 #[derive(Debug, Error)]
 pub(crate) enum RasterLoadError {
-    #[error("{0}")]
+    #[error(transparent)]
     Io(#[from] io::Error),
-    #[error("{0}")]
+    #[error(transparent)]
     Codec(#[from] imaginarium::CodecError),
     #[error("{0}")]
     Refused(ScientificRefusal),
     #[error("raster is {0}, which has a side past {max} px", max = MAX_SIDE)]
     SideTooLong(USize2),
-    #[error("{0}")]
+    #[error(transparent)]
     NullSamples(#[from] NullSamples),
     #[error("cancelled")]
     Cancelled,
@@ -180,13 +180,13 @@ impl From<Cancelled> for RasterLoadError {
 #[derive(Debug, Error)]
 pub enum WriteError {
     /// Creating, writing or publishing the file failed, in lumos or inside fits-well.
-    #[error("failed to write the file: {0}")]
+    #[error("failed to write the file")]
     Io(#[from] io::Error),
     /// fits-well refused a keyword, an image or a table it was asked to encode.
-    #[error("failed to encode FITS data: {0}")]
+    #[error("failed to encode FITS data")]
     Fits(#[source] fits_well::FitsError),
     /// imaginarium could not encode or write the raster format the path names.
-    #[error("failed to write the raster image: {0}")]
+    #[error("failed to write the raster image")]
     Raster(#[from] imaginarium::CodecError),
     /// No raster format has the extension of the path.
     #[error("no raster format has the extension of '{}'", path.display())]

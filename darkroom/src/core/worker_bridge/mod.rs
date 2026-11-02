@@ -15,7 +15,7 @@ use std::fmt::Formatter;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
-use common::BgRuntime;
+use common::{BgRuntime, ErrorChain};
 use scenarium::CompiledGraph;
 use scenarium::DiskStore;
 use scenarium::NodeId;
@@ -168,7 +168,10 @@ impl WorkerBridge {
 impl Drop for WorkerBridge {
     fn drop(&mut self) {
         if let Err(error) = self.runtime.block_on(self.worker.exit()) {
-            tracing::error!(%error, "worker task failed during shutdown");
+            tracing::error!(
+                error = %ErrorChain::new(&error),
+                "worker task failed during shutdown"
+            );
         }
     }
 }

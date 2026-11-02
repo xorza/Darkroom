@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::{Arc, mpsc};
 
-use common::thread as threads;
+use common::{ErrorChain, thread as threads};
 use darkroom::driver::log_ring::LogRing;
 use darkroom::driver::{DisplayKind, Driver, SessionConfig};
 use glam::UVec2;
@@ -40,7 +40,7 @@ pub(crate) fn serve_headless(
     let (session, ended) = match started {
         Ok(started) => started,
         Err(error) => {
-            tracing::error!("darkroom: {error}");
+            tracing::error!("darkroom: {}", ErrorChain::new(&error));
             return ExitCode::FAILURE;
         }
     };
@@ -65,7 +65,7 @@ pub(crate) fn serve_window(document: Option<PathBuf>, log: LogRing) -> ExitCode 
         // the window whatever the server is doing. The session comes back here to end first.
         threads::spawn("darkroom-mcp", move || {
             let ended = SessionThread::start(move || Driver::window(link, log))
-                .map_err(|error| error.to_string())
+                .map_err(|error| ErrorChain::new(&error).to_string())
                 .and_then(|(session, ended)| {
                     let session = Arc::new(session);
                     sessions.send(Arc::clone(&session)).ok();
@@ -86,7 +86,7 @@ pub(crate) fn serve_window(document: Option<PathBuf>, log: LogRing) -> ExitCode 
     match run {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            tracing::error!("darkroom: {error}");
+            tracing::error!("darkroom: {}", ErrorChain::new(&error));
             ExitCode::FAILURE
         }
     }
@@ -106,7 +106,7 @@ fn serve(
         let service = DarkroomServer::new(session)
             .serve(stdio())
             .await
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| ErrorChain::new(&error).to_string())?;
         // The editor's end ends the server; rmcp sends the answers in flight before it stops.
         let token = service.cancellation_token();
         let watch = tokio::spawn(async move {
@@ -114,7 +114,10 @@ fn serve(
             token.cancel();
             ended
         });
-        service.waiting().await.map_err(|error| error.to_string())?;
+        service
+            .waiting()
+            .await
+            .map_err(|error| ErrorChain::new(&error).to_string())?;
         watch.abort();
         Ok(watch.await.ok().flatten())
     })
