@@ -83,11 +83,11 @@ impl Display for TabLabel<'_> {
 impl DockTabs for DockPanes<'_> {
     type Tab = TabRef;
 
-    fn title(&mut self, ui: &mut Ui, tab: TabRef) -> InternedStr {
+    fn label(&mut self, ui: &mut Ui, tab: TabRef) -> InternedStr {
         fmt!(ui, "{}", tab_label(self.ctx.document(), tab))
     }
 
-    fn content(&mut self, ui: &mut Ui, tab: TabRef, size: Option<Size>) {
+    fn body(&mut self, ui: &mut Ui, tab: TabRef, size: Option<Size>) {
         let ctx = self.ctx;
         let app = ctx.app();
         match tab {

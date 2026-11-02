@@ -219,7 +219,5 @@
         ],
         focused: (0),
         next_group: 1,
-        pinned: Graph,
-        seed: 4257369575896356136,
     ),
 )

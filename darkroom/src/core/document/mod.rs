@@ -30,6 +30,7 @@ pub(crate) mod graph_revision;
 pub(crate) mod graph_view;
 pub(crate) mod inspect_target;
 pub(crate) mod item_id;
+mod layout_file;
 pub(crate) mod load_report;
 pub(crate) mod route;
 pub(crate) mod stubs;
@@ -88,14 +89,9 @@ pub(crate) struct Document {
     /// the focused group. Persisted like the rest of the view state, and
     /// mutated only through a `DockOperation` — none of which is undoable, so
     /// Ctrl+Z walks past a tab switch to the last graph edit.
-    #[serde(default = "new_layout")]
+    #[serde(default = "new_layout", with = "layout_file")]
     pub(crate) layout: DockState<TabRef>,
 }
-
-/// Scopes every widget id the dock derives. One string, in one place,
-/// because two docks built from different seeds would draw with
-/// different ids and share none of their state.
-const DOCK_SEED: &str = "darkroom.dock";
 
 impl Default for Document {
     fn default() -> Self {
@@ -229,9 +225,6 @@ impl Document {
     /// layout. A debug check: a document that fails it is a bug in the load
     /// or an edit.
     ///
-    /// The layout is held to what [`new_layout`] builds: the graph tab
-    /// pinned, which palantir's own load check already makes present, and
-    /// this editor's dock seed.
     pub(crate) fn validate(&self) -> Result<(), DocumentValidationError> {
         self.graph.validate()?;
         if let Some(record) = self
@@ -246,14 +239,6 @@ impl Document {
         self.main_view
             .validate(&self.graph, &self.stubs)
             .map_err(|source| DocumentValidationError::MainView { source })?;
-
-        let tab = self.layout.pinned();
-        if tab != TabRef::Graph {
-            return Err(DocumentValidationError::PinnedTab { tab });
-        }
-        if self.layout.seed() != new_layout().seed() {
-            return Err(DocumentValidationError::ForeignDock);
-        }
 
         for tab in self.layout.all_tabs() {
             if !self.holds_tab(tab) {
@@ -503,38 +488,33 @@ fn repair_ties(main_view: &mut GraphView, graph: &CoreGraph, repairs: &mut Vec<D
     });
 }
 
-/// Reset a layout that pins another tab or belongs to another dock, else close
-/// each viewer on a node that is no preview node in the graph.
+/// Close each viewer on a node that is no preview node in the graph, and each inspector on a
+/// node the graph does not hold.
 fn repair_layout(
     layout: &mut DockState<TabRef>,
     graph: &CoreGraph,
     repairs: &mut Vec<DocumentRepair>,
 ) {
-    if layout.pinned() != TabRef::Graph || layout.seed() != new_layout().seed() {
-        *layout = new_layout();
-        repairs.push(DocumentRepair::LayoutReset);
-    } else {
-        let stale: Vec<(TabRef, DocumentRepair)> = layout
-            .all_tabs()
-            .filter_map(|tab| {
-                let repair = match tab {
-                    TabRef::ImageViewer(node_id) => (!is_preview_node(graph, node_id))
-                        .then_some(DocumentRepair::ViewerClosed { node_id }),
-                    TabRef::Inspector(InspectTarget::Node(node_id)) => graph
-                        .find(node_id)
-                        .is_none()
-                        .then_some(DocumentRepair::InspectorClosed { node_id }),
-                    TabRef::Graph
-                    | TabRef::Preferences
-                    | TabRef::Inspector(InspectTarget::Selection) => None,
-                }?;
-                Some((tab, repair))
-            })
-            .collect();
-        if !stale.is_empty() {
-            layout.retain_tabs(|tab| stale.iter().all(|(closed, _)| *closed != tab));
-            repairs.extend(stale.into_iter().map(|(_, repair)| repair));
-        }
+    let stale: Vec<(TabRef, DocumentRepair)> = layout
+        .all_tabs()
+        .filter_map(|tab| {
+            let repair = match tab {
+                TabRef::ImageViewer(node_id) => (!is_preview_node(graph, node_id))
+                    .then_some(DocumentRepair::ViewerClosed { node_id }),
+                TabRef::Inspector(InspectTarget::Node(node_id)) => graph
+                    .find(node_id)
+                    .is_none()
+                    .then_some(DocumentRepair::InspectorClosed { node_id }),
+                TabRef::Graph
+                | TabRef::Preferences
+                | TabRef::Inspector(InspectTarget::Selection) => None,
+            }?;
+            Some((tab, repair))
+        })
+        .collect();
+    if !stale.is_empty() {
+        layout.retain_tabs(|tab| stale.iter().all(|(closed, _)| *closed != tab));
+        repairs.extend(stale.into_iter().map(|(_, repair)| repair));
     }
 }
 
@@ -549,7 +529,7 @@ fn is_preview_node(graph: &CoreGraph, node_id: NodeId) -> bool {
 /// A fresh dock: one pane showing the graph. `Graph` is the pinned
 /// tab, so it refuses to close and the tree is never empty.
 fn new_layout() -> DockState<TabRef> {
-    DockState::new(DOCK_SEED, TabRef::Graph)
+    DockState::new(TabRef::Graph)
 }
 
 #[cfg(feature = "internals")]

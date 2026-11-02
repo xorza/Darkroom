@@ -19,6 +19,7 @@ use crate::driver::state::{Detail, State};
 use crate::driver::{COPY_LIMIT, DisplayKind, Driver, OpenMode, SessionConfig};
 use crate::gui::dialogs::DialogAnswer;
 use crate::gui::frame::shortcuts;
+use crate::gui::main_window::MainWindow;
 use crate::gui::state::preview_store::StoredContent;
 use crate::gui::theme::Theme;
 use crate::internals::fixture;
@@ -620,8 +621,11 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
         .offscreen()
         .with_app(|app, ui| {
             let layout = &app.open_document().document.layout;
-            ui.response_for(DockView::pane_id(layout, layout.primary().id()))
-                .rect
+            ui.response_for(DockView::pane_id(
+                MainWindow::dock_wid(),
+                layout.primary().id(),
+            ))
+            .rect
         })
         .unwrap();
     let pane = driver

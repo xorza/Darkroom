@@ -12,6 +12,7 @@ use crate::driver::error::DriverError;
 use crate::driver::locator::{EditorTarget, Locator};
 use crate::gui::app::App;
 use crate::gui::app::view_capture;
+use crate::gui::main_window::MainWindow;
 use crate::gui::main_window::dock_panes;
 use crate::gui::pane::graph_ui::wid;
 use crate::gui::port_ref::PortRef;
@@ -150,7 +151,7 @@ fn pane(app: &App, ui: &Ui, name: &str) -> Result<Rect, DriverError> {
             .into());
         }
     };
-    ui.response_for(DockView::pane_id(layout, group.id()))
+    ui.response_for(DockView::pane_id(MainWindow::dock_wid(), group.id()))
         .rect
         .filter(|rect| !rect.is_paint_empty())
         .ok_or_else(|| LocateError::OffScreen { locator }.into())

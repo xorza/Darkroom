@@ -94,8 +94,6 @@ pub(crate) enum DocumentRepair {
     SelectionDropped {
         item: ItemId,
     },
-    /// A layout that pins another tab, or belongs to another dock.
-    LayoutReset,
     /// A viewer tab on a node that is not a preview node in the graph.
     ViewerClosed {
         node_id: NodeId,
@@ -213,7 +211,6 @@ impl Display for DocumentRepair {
                     "removed {item:?} from the selection: the view does not hold it"
                 )
             }
-            Self::LayoutReset => f.write_str("reset the pane layout"),
             Self::InspectorClosed { node_id } => {
                 write!(f, "closed the inspector of {node_id:?}, which is no node")
             }

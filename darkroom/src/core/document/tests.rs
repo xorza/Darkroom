@@ -146,13 +146,6 @@ fn reconcile_repairs_the_view_and_the_layout() {
         document.reconcile(&library).is_empty(),
         "nothing is left to repair"
     );
-
-    document.layout = DockState::new(DOCK_SEED, TabRef::Preferences);
-    assert_eq!(
-        document.reconcile(&library).repairs,
-        [DocumentRepair::LayoutReset]
-    );
-    assert_eq!(document.layout, new_layout());
 }
 
 /// The load repairs the ties and the routes, in order, and reports each
@@ -256,29 +249,6 @@ fn reconcile_repairs_the_ties() {
         document.reconcile(&library).is_empty(),
         "nothing is left to repair"
     );
-}
-
-/// The sample validates, and a layout that pins another tab, or was
-/// saved under another dock seed, does not — each would pass palantir's
-/// own load check.
-#[test]
-fn validation_holds_the_layout_to_the_editors_dock() {
-    let mut document = DocumentFixture::sample().document;
-    document.validate().unwrap();
-
-    document.layout = DockState::new(DOCK_SEED, TabRef::Preferences);
-    assert!(matches!(
-        document.validate(),
-        Err(DocumentValidationError::PinnedTab {
-            tab: TabRef::Preferences
-        })
-    ));
-
-    document.layout = DockState::new("another.dock", TabRef::Graph);
-    assert!(matches!(
-        document.validate(),
-        Err(DocumentValidationError::ForeignDock)
-    ));
 }
 
 /// A path a binding holds is absolute or unset in memory: a stub's relative one fails the

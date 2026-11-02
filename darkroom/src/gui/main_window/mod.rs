@@ -6,6 +6,7 @@ use std::collections::HashMap;
 
 use palantir::{
     Align, Chrome, Configure, DockOperation, DockView, Panel, Sizing, TabOverflow, Ui, VAlign,
+    WidgetId,
 };
 use scenarium::NodeId;
 
@@ -56,6 +57,11 @@ pub(crate) struct MainWindow {
 }
 
 impl MainWindow {
+    /// The dock's id, which its scan and its record share and every pane's id derives from.
+    pub(crate) fn dock_wid() -> WidgetId {
+        WidgetId::from_hash("darkroom.dock")
+    }
+
     /// Navigation scan: surface tab activate/close/drag-drop from *last*
     /// frame's chip responses. Runs at the top of the frame so a switch
     /// applies before the record — the switched-to tab records in Pass A and
@@ -71,7 +77,7 @@ impl MainWindow {
     pub(crate) fn scan_navigation(&mut self, ui: &mut Ui, ctx: WindowCtx<'_>, out: &mut Requests) {
         let ops = &mut self.dock_ops;
         ops.clear();
-        DockView::scan(ui, &ctx.document().layout, ops);
+        DockView::scan(ui, Self::dock_wid(), &ctx.document().layout, ops);
         for op in ops.drain(..) {
             out.push_view(op);
         }
@@ -146,7 +152,7 @@ impl MainWindow {
                 out,
             };
             dock_ops.clear();
-            DockView::new(&ctx.document().layout, dock_ops)
+            DockView::new(Self::dock_wid(), &ctx.document().layout, dock_ops)
                 .min_pane(MIN_PANE)
                 .overflow(TabOverflow::Menu)
                 .show(ui, &mut panes);

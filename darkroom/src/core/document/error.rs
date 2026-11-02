@@ -57,14 +57,6 @@ pub(crate) enum DocumentValidationError {
     },
     #[error("open tab {tab:?} names no preview node in the graph")]
     MissingTab { tab: TabRef },
-    /// The graph tab is the one that refuses to close, which is what keeps
-    /// it reachable; a layout pinning another tab can lose it for good.
-    #[error("the layout pins {tab:?} instead of the graph")]
-    PinnedTab { tab: TabRef },
-    /// The layout was saved by a dock with another seed, so none of its
-    /// widget ids would be this editor's.
-    #[error("the layout belongs to another dock")]
-    ForeignDock,
     #[error("node {node_id:?} is both a graph node and a stub")]
     StubInGraph { node_id: NodeId },
     #[error("node {node_id:?} holds the relative path {path:?}, which memory holds absolute")]
