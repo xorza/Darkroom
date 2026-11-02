@@ -155,7 +155,7 @@ impl NodePalette<'_> {
                     // the user can type into.
                     .escape_falls_through(true)
                     .placeholder("Search…")
-                    .style(&theme.flat_text_edit.plain)
+                    .style(&theme.flat_text_edit)
                     .size((Sizing::fill(1.0), Sizing::HUG))
                     .show(ui);
                 submitted = field.ended == Some(EditEnd::Submitted);

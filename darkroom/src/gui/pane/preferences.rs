@@ -129,15 +129,19 @@ impl PreferencesForm<'_> {
     fn interface_size_row(&mut self, ui: &mut Ui, size: &mut InterfaceSize) {
         let row = APPEARANCE_ROW + 1;
         self.label(ui, "Interface size", row);
-        let before = size.offered_idx();
-        let mut picked = before;
-        ComboBox::labeled(&mut picked, &InterfaceSize::OFFERED, |size| size.label())
+        let offered: &'static [InterfaceSize] = &InterfaceSize::OFFERED;
+        let mut picked = offered
+            .iter()
+            .find(|offer| *offer == size)
+            .expect("a size is an offered one");
+        let changed = ComboBox::labeled(&mut picked, offered, |size| size.label())
             .id(interface_size_wid())
             .grid_cell((row, 1))
             .align(Align::LEFT)
-            .show(ui);
-        if picked != before {
-            *size = InterfaceSize::OFFERED[picked];
+            .show(ui)
+            .changed;
+        if changed {
+            *size = *picked;
             self.out
                 .push_app(AppCommand::Preferences(PreferencesCommand::Changed));
         }

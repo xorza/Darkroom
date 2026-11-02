@@ -269,7 +269,8 @@ fn title(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     let mode = ClickMode::with_shift(ui.modifiers().shift);
     let title = EditableLabel::new(node.name())
         .id(wid::rename(node.node_id))
-        .style(&node.theme().flat_text_edit.bold)
+        .style(&node.theme().flat_text_edit)
+        .bold()
         .max_chars(NODE_NAME_MAX_CHARS)
         .editable(!node.stub())
         .min_size((NODE_NAME_MIN_WIDTH, 0.0))

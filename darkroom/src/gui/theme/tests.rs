@@ -14,7 +14,6 @@ assert_not_impl_any!(PortTheme: Copy);
 assert_not_impl_any!(StatusColors: Copy);
 assert_not_impl_any!(TypeColors: Copy);
 assert_not_impl_any!(ConstEditorLooks: Copy);
-assert_not_impl_any!(FlatTextEdit: Copy);
 
 /// Pin which palette role reaches which field, plus the non-trivial
 /// palantir tweak, so a regression in `Theme::build`'s wiring or in

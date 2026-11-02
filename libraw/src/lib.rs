@@ -41,6 +41,11 @@ pub use crate::process_params::ProcessParams;
 pub use crate::processed_image::{ProcessedImage, ProcessedSamples};
 pub use crate::sensor_layout::SensorLayout;
 
+/// Whether LibRaw was built with OpenMP, and so decodes Canon CR3, compressed Fuji and Panasonic
+/// v8 frames on several threads. The build script turns it on wherever the toolchain links an
+/// OpenMP runtime; on macOS, that is Homebrew's libomp.
+pub const OPENMP: bool = cfg!(libraw_openmp);
+
 /// The length of LibRaw's `cblack` table: four channel values, the spatial pattern's height and
 /// width, and the pattern.
 pub const CBLACK_LEN: usize = sys::LIBRAW_CBLACK_SIZE as usize;

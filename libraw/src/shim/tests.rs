@@ -57,12 +57,12 @@ fn the_shims_read_a_sensor_dump_as_plain() {
     }
 }
 
-/// The library carries OpenMP exactly when the build script found a runtime that links, which it
-/// states as `cfg(libraw_openmp)`; setting the decode threads is harmless either way.
+/// The library carries OpenMP exactly when [`crate::OPENMP`] says so; setting the decode threads is
+/// harmless either way.
 #[test]
 fn the_build_carries_openmp_where_the_toolchain_links_it() {
     unsafe {
         libraw_lumos_set_decode_threads(2);
-        assert_eq!(libraw_lumos_openmp() != 0, cfg!(libraw_openmp));
+        assert_eq!(libraw_lumos_openmp() != 0, crate::OPENMP);
     }
 }

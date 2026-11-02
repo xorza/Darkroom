@@ -14,7 +14,6 @@ pub(crate) mod card_theme;
 pub(crate) mod color;
 pub(crate) mod const_editor_theme;
 pub(crate) mod elevation_scale;
-pub(crate) mod flat_text_edit;
 pub(crate) mod icon_scale;
 pub(crate) mod inks;
 pub(crate) mod palantir_bridge;
@@ -41,7 +40,6 @@ use crate::gui::theme::canvas_theme::CanvasTheme;
 use crate::gui::theme::card_theme::CardTheme;
 use crate::gui::theme::const_editor_theme::ConstEditorLooks;
 use crate::gui::theme::elevation_scale::ElevationScale;
-use crate::gui::theme::flat_text_edit::FlatTextEdit;
 use crate::gui::theme::icon_scale::IconScale;
 use crate::gui::theme::inks::Inks;
 use crate::gui::theme::palette::Palette;
@@ -124,8 +122,10 @@ pub(crate) struct Theme {
     /// pointer over its node.
     pub(crate) const_editor: ConstEditorLooks,
 
-    /// A text edit that reads as plain text: a node title's rename, the palette's search field.
-    pub(crate) flat_text_edit: FlatTextEdit,
+    /// palantir's text edit stripped to its bare surface, no padding, margin, border or fill, so a
+    /// field's `Hug` height equals the plain text it replaces and a row does not reshape on the
+    /// swap: a node title's rename, the palette's search field.
+    pub(crate) flat_text_edit: TextEditTheme,
 
     /// palantir's text edit with every state's border in the error color: a field whose value is
     /// broken, as a preferences path that names no file. Precomputed, so a broken field costs no
@@ -344,7 +344,7 @@ impl Theme {
             badge: BadgeColors::from_palette(p),
             type_colors: p.type_colors.clone(),
             const_editor: ConstEditorLooks::new(&pal, &metrics, &palantir.text_edit),
-            flat_text_edit: FlatTextEdit::new(&palantir.text_edit),
+            flat_text_edit: palantir.text_edit.flat(),
             field_error,
             pill,
             primary_button,

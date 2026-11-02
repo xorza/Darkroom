@@ -21,6 +21,7 @@ scenarium = { workspace = true }
 common = { workspace = true }
 lens = { workspace = true }
 imaginarium = { workspace = true }
+libraw = { workspace = true }
 
 image = { workspace = true, features = ["png"] }
 glam = { workspace = true, features = ["serde", "std"] }

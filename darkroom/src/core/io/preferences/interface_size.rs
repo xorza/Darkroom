@@ -42,17 +42,13 @@ impl InterfaceSize {
             .expect("one size is offered")
     }
 
-    /// Where the size sits in [`Self::OFFERED`]; every size is an offered one.
-    pub(crate) fn offered_idx(self) -> usize {
+    /// The size as the Preferences tab lists it; every size is an offered one.
+    pub(crate) fn label(self) -> &'static str {
         Self::OFFERED
             .iter()
-            .position(|size| *size == self)
+            .zip(Self::LABELS)
+            .find_map(|(size, label)| (*size == self).then_some(label))
             .expect("a size is an offered one")
-    }
-
-    /// The size as the Preferences tab lists it.
-    pub(crate) fn label(self) -> &'static str {
-        Self::LABELS[self.offered_idx()]
     }
 
     /// The factor palantir multiplies onto the platform's.

@@ -64,12 +64,12 @@ pub(super) struct Field<'a> {
     pub(super) id: WidgetId,
 }
 
-/// A dropdown's options, each read through `label`, with `before` selected.
+/// A dropdown's options, each read through `label`, with `current` picked.
 #[derive(Debug)]
 struct DropdownOptions<'a, S> {
     options: &'a [S],
     label: fn(&S) -> &str,
-    before: usize,
+    current: &'a S,
 }
 
 /// Hand-written: `derive` would demand `S: Copy`, and only a borrow of the
@@ -99,19 +99,19 @@ impl ConstEditor<'_> {
         // chosen variant's value. Works regardless of `data_type` (a custom config
         // port still shows its presets).
         if !value_variants.is_empty() {
-            let before = value_variants
+            let current = value_variants
                 .iter()
-                .position(|o| &o.value == value)
+                .find(|o| &o.value == value)
                 .expect("an admitted picker value is one of its variants");
             let picked = field.combo(
                 ui,
                 DropdownOptions {
                     options: value_variants,
                     label: ValueVariant::label,
-                    before,
+                    current,
                 },
             )?;
-            return value_variants.get(picked).map(|o| o.value.clone());
+            return Some(picked.value.clone());
         }
         // The widget follows the *declared* port type, not the stored literal's
         // kind: a coerced literal gets the declared type's editor (displaying
@@ -191,19 +191,19 @@ impl ConstEditor<'_> {
                 let variants = library
                     .enum_variants(*type_id)
                     .expect("an admitted enum literal's type is registered");
-                let before = variants
+                let current = variants
                     .iter()
-                    .position(|v| v == cur)
+                    .find(|v| *v == cur)
                     .expect("an admitted enum literal names a registered variant");
                 let picked = field.combo(
                     ui,
                     DropdownOptions {
                         options: variants,
                         label: String::as_str,
-                        before,
+                        current,
                     },
                 )?;
-                variants.get(picked).cloned().map(ConstValue::Enum)
+                Some(ConstValue::Enum(picked.clone()))
             }
             // No literal form (pick-or-wire ports carry variants, handled above).
             DataType::Custom(_) => field.unset(ui, value),
@@ -212,8 +212,8 @@ impl ConstEditor<'_> {
 }
 
 impl Field<'_> {
-    /// A dropdown over `pick`'s options, returning the newly picked index —
-    /// `None` when the selection is unchanged. Both pickers (the value-variant
+    /// A dropdown over `pick`'s options, returning the newly picked option —
+    /// `None` when the selection is unchanged, so a frame without a pick clones nothing. Both pickers (the value-variant
     /// override and the `Enum` port) are this widget over different option
     /// lists, each read through its own `label`.
     ///
@@ -221,20 +221,20 @@ impl Field<'_> {
     /// port's `&[ValueVariant]`, an `Enum` type's `&[String]` — rather than
     /// projecting the labels into a fresh `Vec<&str>` on every frame the port
     /// records.
-    fn combo<S>(self, ui: &mut Ui, pick: DropdownOptions<'_, S>) -> Option<usize> {
+    fn combo<'o, S: PartialEq>(self, ui: &mut Ui, pick: DropdownOptions<'o, S>) -> Option<&'o S> {
         let DropdownOptions {
             options,
             label,
-            before,
+            mut current,
         } = pick;
-        let mut idx = before;
-        ComboBox::labeled(&mut idx, options, label)
+        let changed = ComboBox::labeled(&mut current, options, label)
             .id(self.id)
             .button_style(&self.theme.drag_value.chip)
             .size(Sizing::FILL)
             .min_size((self.theme.width, 0.0))
-            .show(ui);
-        (idx != before).then_some(idx)
+            .show(ui)
+            .changed;
+        changed.then_some(current)
     }
 
     /// Editor for an untyped (`Any`) port: one text field that reinterprets
@@ -300,7 +300,6 @@ impl Field<'_> {
     fn int(self, ui: &mut Ui, cur: i64) -> Option<ConstValue> {
         let mut draft = cur;
         let committed = DragValue::new(&mut draft)
-            .editable(true)
             .speed(int_speed(cur))
             .style(&self.theme.number)
             .text_align(Align::LEFT)
@@ -315,7 +314,6 @@ impl Field<'_> {
     fn float(self, ui: &mut Ui, cur: f64) -> Option<ConstValue> {
         let mut draft = cur;
         let committed = DragValue::new(&mut draft)
-            .editable(true)
             .speed(float_speed(cur))
             .decimals(FLOAT_DECIMALS)
             .style(&self.theme.number)

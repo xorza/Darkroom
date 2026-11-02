@@ -20,37 +20,37 @@ resolver = "3"
 version = "0.1.0"
 edition = "2024"
 
-# The driver's lanes. The tests leave out the data bundle a fresh clone lacks,
-# and Tracy, which makes each test wait on its profiler. `cargo test` ran the suite in 2.2 s where
-# nextest took 3.5 s.
+
 [workspace.metadata.drive]
-version = "0.2.1"
-test = [{ all-features-but = ["lumos/real-data", "darkroom/profile-with-tracy"] }]
+version = "0.2.7"
+test = [
+    { all-features-but = [
+        "lumos/real-data",
+        "darkroom/profile-with-tracy",
+    ] },
+]
 test-runner = "cargo-test"
-# The second lint set is the CPU-only build of imaginarium. The benches always measure its GPU
-# build.
 lint = ["--all-features", { all-features-but = ["imaginarium/wgpu"] }]
 bench = "--features imaginarium/wgpu"
 
-# A host never compiles `simd`'s backend of the other architecture, so a change to it runs the
-# lint for that one: `lint-x86` from an arm64 host, `lint-aarch64` from an x86 one, each after
-# `rustup target add` of its target. Not `cross-lint`, which lints every member: `libraw`
-# builds LibRaw's C++ for the target. The target's own rustflags join the root's `target-cpu`,
-# where `RUSTFLAGS` would replace it.
 [workspace.metadata.drive.commands.lint-x86]
-steps = [{ build = "clippy -p simd --all-targets --all-features --target x86_64-unknown-linux-gnu", env = { CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS = "-D warnings" } }]
+steps = [
+    { build = "clippy -p simd --all-targets --all-features --target x86_64-unknown-linux-gnu", env = { CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS = "-D warnings" } },
+]
 
 [workspace.metadata.drive.commands.lint-aarch64]
-steps = [{ build = "clippy -p simd --all-targets --all-features --target aarch64-unknown-linux-gnu", env = { CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS = "-D warnings" } }]
+steps = [
+    { build = "clippy -p simd --all-targets --all-features --target aarch64-unknown-linux-gnu", env = { CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS = "-D warnings" } },
+]
 
 # The tests that read the gitignored dataset in `test_data/lumos_data/`, only when asked; the
 # arguments go to the test binaries, as a name filter.
 [workspace.metadata.drive.commands.real-data]
 steps = [{ cargo = "test -p lumos --all-features", args = true }]
 
-# The editor with its MCP server, which `.mcp.json` starts from `target/mcp/`.
 [workspace.metadata.drive.commands.mcp]
 steps = [{ build = "build -p darkroom-app --profile mcp" }]
+
 
 [workspace.dependencies]
 common = { path = "common" }
@@ -118,6 +118,7 @@ rmcp = { version = "3.8", default-features = false }
 [profile.dev]
 opt-level = 1
 debug = "line-tables-only"
+lto = "off"
 
 [profile.dev.package."*"]
 opt-level = 3
@@ -134,7 +135,6 @@ debug = "line-tables-only"
 [profile.dev.package.objc2]
 debug-assertions = false
 
-# Full debug info, which `darkroom/packaging` splits out of the shipped binary.
 [profile.release]
 lto = "fat"
 codegen-units = 1
@@ -157,10 +157,9 @@ debug = "line-tables-only"
 # and not the server; `release` aborts on one. A profile of its own, as `panic` is not set per
 # package.
 [profile.mcp]
-inherits = "release-dev"
+inherits = "dev"
 panic = "unwind"
 
-# Warn, not deny: the verification chain runs clippy with `-D warnings`.
 [workspace.lints.rust]
 rust_2018_idioms = { level = "warn", priority = -1 }
 meta_variable_misuse = "warn"

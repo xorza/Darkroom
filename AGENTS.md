@@ -51,11 +51,14 @@ version refuses to run. Run it from the root.
 
 ```
 cargo drive check              # after each change: fmt, then the lints
-cargo drive test [args]        # the tests; the runner's arguments pick some
+cargo drive test [args]        # the tests with default features; the runner's arguments pick some
 cargo drive bench [args]       # the benches; a filter, or --test to run each case once
-cargo drive gate               # the full check, as CI runs it with --ci
+cargo drive gate               # the full check, every lint and test lane, as CI runs it with --ci
 cargo drive run <name> [args]  # a command of the root's own, from its drive table
 ```
+
+`check` after each change, `test` after a batch of them, and `gate` once, when the task is done:
+it runs every lint and test lane, which `check` and `test` leave out to stay fast.
 
 An agent sees the editor through the `darkroom` MCP server: `cargo drive run mcp`
 builds it, and Claude Code starts it, `darkroom --mcp --headless`, from

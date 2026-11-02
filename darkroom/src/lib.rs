@@ -108,7 +108,8 @@ fn load_icon() -> Image {
 /// warnings and errors of every thread in `ring`, for a driver to report. `try_init` is a no-op
 /// if a subscriber is already installed. Stderr in every mode: MCP's stdio transport forbids any
 /// byte on stdout but its messages and allows logs on stderr
-/// (<https://modelcontextprotocol.io/specification/2025-06-18/basic/transports>).
+/// (<https://modelcontextprotocol.io/specification/2025-06-18/basic/transports>). Then logs how
+/// LibRaw was built, which its build script leaves out of the build output.
 pub fn init_tracing(ring: Option<&LogRing>) {
     tracing_subscriber::registry()
         .with(
@@ -119,6 +120,7 @@ pub fn init_tracing(ring: Option<&LogRing>) {
         .with(ring.map(LogRing::layer))
         .try_init()
         .ok();
+    tracing::info!(openmp = libraw::OPENMP, "libraw tiled decoders");
 }
 
 /// `RUST_LOG`, or `info` without it.

@@ -54,29 +54,29 @@ fn compile(root: &Path) {
     }
     build.include(zlib_include());
     // LibRaw parallelizes its tiled decoders — Canon CR3, compressed Fuji, Panasonic v8 — under
-    // OpenMP alone, which it enables wherever the compiler defines `_OPENMP`.
+    // OpenMP alone, which it enables wherever the compiler defines `_OPENMP`. A toolchain without
+    // a runtime builds them single-threaded, silently: Cargo replays a path dependency's
+    // `cargo::warning` on every build, fresh ones included, and `libraw::OPENMP` states the
+    // outcome at run time instead.
     let openmp = OpenMp::find(&build);
-    match &openmp {
-        Some(openmp) => {
-            for flag in &openmp.flags {
-                build.flag(flag);
-            }
+    if let Some(openmp) = &openmp {
+        for flag in &openmp.flags {
+            build.flag(flag);
         }
-        None => println!(
-            "cargo::warning=no OpenMP runtime links with this compiler: LibRaw decodes CR3, \
-             compressed Fuji and Panasonic v8 frames on one thread each"
-        ),
     }
     build.compile("raw");
     println!("cargo::rustc-check-cfg=cfg(libraw_openmp)");
     // After the library, so the linker resolves the runtime the library calls.
     if let Some(openmp) = openmp {
         println!("cargo::rustc-cfg=libraw_openmp");
-        if let Some(search) = &openmp.search {
-            println!("cargo::rustc-link-search=native={}", search.display());
-        }
-        if let Some(library) = openmp.library {
-            println!("cargo::rustc-link-lib={library}");
+        match openmp.runtime {
+            Runtime::Implicit => {}
+            Runtime::Shared(library) => println!("cargo::rustc-link-lib={library}"),
+            Runtime::Static(archive) => {
+                let dir = archive.parent().expect("an archive path has a directory");
+                println!("cargo::rustc-link-search=native={}", dir.display());
+                println!("cargo::rustc-link-lib=static=omp");
+            }
         }
     }
 }
@@ -110,24 +110,32 @@ fn generate_bindings(root: &Path) {
 struct OpenMp {
     /// For every translation unit.
     flags: Vec<String>,
-    /// The runtime rustc links; `None` where the compiler names it in the objects itself, as
-    /// MSVC does.
-    library: Option<&'static str>,
-    /// Where the runtime is, when not on the linker's own path.
-    search: Option<PathBuf>,
+    runtime: Runtime,
+}
+
+/// The OpenMP runtime the final link takes.
+#[derive(Debug)]
+enum Runtime {
+    /// Named in the objects by the compiler itself, as MSVC's `/openmp` names `vcomp`.
+    Implicit,
+    /// A shared library on the linker's own path: GCC's libgomp, Clang's libomp.
+    Shared(&'static str),
+    /// The archive at this path, linked into the binary. Homebrew's libomp: its shared library's
+    /// install name is under the Homebrew prefix, so a binary linked to it fails to launch on a
+    /// Mac without Homebrew's libomp. The archive needs only libSystem.
+    Static(PathBuf),
 }
 
 impl OpenMp {
     /// OpenMP for `build`'s compiler, or `None` when it cannot compile and link a program using
     /// it: GCC's `-fopenmp` and libgomp, Clang's and libomp, MSVC's `/openmp`, and on macOS, whose
-    /// Clang ships no runtime, Homebrew's libomp.
+    /// Clang ships no runtime, Homebrew's static libomp.
     fn find(build: &cc::Build) -> Option<Self> {
         let compiler = build.get_compiler();
         let openmp = if compiler.is_like_msvc() {
             Self {
                 flags: vec!["/openmp".to_owned()],
-                library: None,
-                search: None,
+                runtime: Runtime::Implicit,
             }
         } else if env::var("CARGO_CFG_TARGET_OS").is_ok_and(|os| os == "macos") {
             let prefix = ["/opt/homebrew/opt/libomp", "/usr/local/opt/libomp"]
@@ -140,18 +148,16 @@ impl OpenMp {
                     "-fopenmp".to_owned(),
                     format!("-I{}", prefix.join("include").display()),
                 ],
-                library: Some("omp"),
-                search: Some(prefix.join("lib")),
+                runtime: Runtime::Static(prefix.join("lib/libomp.a")),
             }
         } else {
             Self {
                 flags: vec!["-fopenmp".to_owned()],
-                library: Some(if compiler.is_like_clang() {
+                runtime: Runtime::Shared(if compiler.is_like_clang() {
                     "omp"
                 } else {
                     "gomp"
                 }),
-                search: None,
             }
         };
         openmp.links(&compiler).then_some(openmp)
@@ -173,11 +179,14 @@ impl OpenMp {
             command.arg("/Feopenmp_probe.exe");
         } else {
             command.arg("-o").arg(out.join("openmp_probe"));
-            if let Some(search) = &self.search {
-                command.arg(format!("-L{}", search.display()));
-            }
-            if let Some(library) = self.library {
+        }
+        match &self.runtime {
+            Runtime::Implicit => {}
+            Runtime::Shared(library) => {
                 command.arg(format!("-l{library}"));
+            }
+            Runtime::Static(archive) => {
+                command.arg(archive);
             }
         }
         command.output().is_ok_and(|output| output.status.success())
