@@ -1,5 +1,5 @@
 use glam::Vec2;
-use palantir::{CloseHandle, Configure, Menu, Popup, Sizing, Ui};
+use palantir::{CloseHandle, Configure, Menu, Sizing, Ui};
 
 /// Shared open/close lifecycle + look for the canvas's anchored context
 /// popups (the node menu and the new-node palette). Owns only the
@@ -69,11 +69,14 @@ impl AnchoredMenu {
         if let Some(h) = max_height {
             menu = menu.max_size((f32::INFINITY, h));
         }
-        let resp = menu.show(ui, |ui, popup| {
-            pick = body(ui, popup);
-        });
-        if pick.is_some() || resp.closed() {
-            Popup::close(ui, resp.id);
+        let closed = menu
+            .show(ui, |ui, popup| {
+                pick = body(ui, popup);
+            })
+            .is_some_and(|resp| resp.closed());
+        // A pick closes the menu through its row or the handle, so its input goes back with it.
+        debug_assert!(pick.is_none() || closed, "a pick closes the menu");
+        if closed {
             self.anchor = None;
         }
         pick

@@ -4,7 +4,9 @@
 
 use std::path::PathBuf;
 
-use palantir::{Button, Checkbox, Configure, Modal, Panel, Sizing, Text, TextWrap, Ui, WidgetId};
+use palantir::{
+    Button, Checkbox, Configure, Modal, OverlayClose, Panel, Sizing, Text, TextWrap, Ui, WidgetId,
+};
 
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support;
@@ -221,7 +223,7 @@ fn show(ui: &mut Ui, theme: &Theme, file_name: Option<&str>, tail: &str) -> Disc
             ui.set_focus(save_wid());
         }
         // Esc / backdrop click dismisses the modal — treat as Cancel.
-        if resp.dismissed {
+        if resp.close == Some(OverlayClose::Dismissed) {
             choice = DiscardChoice::Cancel;
         }
         // A button's choice ends the dialog, which the caller stops showing: its input goes back

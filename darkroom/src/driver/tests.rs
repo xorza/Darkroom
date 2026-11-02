@@ -320,11 +320,16 @@ fn a_focused_text_field_still_settles() {
     let path = fixture::project(dir.path(), &[BRIGHTNESS]);
     driver.open(&path, OpenMode::Copy).unwrap();
     let header = || Locator::App(EditorTarget::NodeHeader(BRIGHTNESS.to_string()));
-    let twice = driver
+    driver
         .act(&[click(header()), key("escape"), click(header())])
         .unwrap();
-    assert_ne!(
-        twice.focus.as_deref(),
+    // The click focuses the title, which reads as the node's name too; text typed into it would
+    // reach a rename field and replace the selected name, and reaches nothing on the title.
+    let typed = driver
+        .act(&[Action::Play(Play::InsertText("Q".to_string()))])
+        .unwrap();
+    assert_eq!(
+        typed.focus.as_deref(),
         Some(BRIGHTNESS),
         "no rename field opened"
     );
