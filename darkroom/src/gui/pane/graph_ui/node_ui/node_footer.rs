@@ -186,13 +186,11 @@ mod tests {
                 .expect("a failure has a footer");
         let theme = Theme::default();
         // One label line, 12 × 1.2 = 14.4 px, on the 1/64 px grid the measurer keeps metrics on,
-        // which `line_height` snaps to: 922 / 64.
-        let line = theme
-            .palantir
-            .text
-            .with_font_size(theme.font.caption)
-            .line_height();
-        assert_eq!(line, 922.0 / 64.0);
+        // which `line_height` snaps to: 922 / 64, a block rounded up to 15 px.
+        let caption = theme.palantir.text.with_font_size(theme.font.caption);
+        assert_eq!(caption.line_height(), 922.0 / 64.0);
+        let line = caption.block_height(1);
+        assert_eq!(line, 15.0);
         let pad = card::band_padding(&theme);
         assert_eq!(footer.size.h, pad.sums().h + line, "one row");
         let texts: Vec<String> = h.ui.widgets(None).into_iter().map(|w| w.text).collect();
