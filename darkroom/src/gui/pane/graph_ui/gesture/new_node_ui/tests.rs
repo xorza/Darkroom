@@ -122,14 +122,14 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
         );
     }
 
-    let plain = palantir::Theme::default();
+    let plain = palantir::Theme::stock(palantir::ColorScheme::Dark);
     let small = open_palette(|_| {});
     assert_fits(small, &plain.menu, "default theme");
 
     // Now restyle both terms a fixed allowance could never track: a much
     // bigger search field, and a much roomier popup. The results area has to
     // give up exactly what they took.
-    let mut restyled = palantir::Theme::default();
+    let mut restyled = palantir::Theme::stock(palantir::ColorScheme::Dark);
     enlarge(&mut restyled);
     let big = open_palette(enlarge);
     assert_fits(big, &restyled.menu, "bigger field and popup");

@@ -15,19 +15,22 @@ const VALUE_EDITOR_WIDTH: f32 = 100.0;
 const VALUE_EDITOR_MAX_WIDTH: f32 = 240.0;
 
 /// Per-widget theme bundle for the inline const editor on a
-/// `Binding::Const` input port. Owns the `DragValue` look (scrub chip and
-/// the inline editor derived from it) which the `Button`/`ComboBox`
-/// siblings (path pick, enum, presets) borrow via `drag_value.chip`, the
-/// numeric fields' mono variant of it, and the fixed field width.
+/// `Binding::Const` input port: the `Button`/`ComboBox` look the path pick, enum and presets
+/// wear, the `DragValue` look of a number in the same box, the text field a string types into,
+/// and the fixed field width.
 ///
 /// A value reads as a field at rest, as Blender's and Unreal's node inputs
 /// do: its chip wears a quiet box, a step over the node's fill at half
 /// strength, so the eye finds what it can edit before the pointer arrives.
 #[derive(Clone, Debug)]
 pub(crate) struct ConstEditorTheme {
-    pub(crate) drag_value: DragValueTheme,
-    /// [`Self::drag_value`] with its text in the mono face, for a number's
-    /// figures, which then line up from row to row.
+    /// The chip a path pick, an enum and a preset show.
+    pub(crate) button: ButtonTheme,
+    /// The text field a string, and a value of no declared kind, type into: [`Self::number`]'s
+    /// editor in the proportional face.
+    pub(crate) field: TextEditTheme,
+    /// The chip a number scrubs on, and its editor, with the figures in the mono face, which
+    /// then line up from row to row.
     pub(crate) number: DragValueTheme,
     /// The ink an empty input's "—" reads in: an optional one left unset, or one bound to
     /// nothing that could hold a constant.
@@ -63,12 +66,11 @@ impl ConstEditorLooks {
     /// that chip so both modes share one box, and caret, selection and placeholder from `field`
     /// so it matches the app's other fields.
     pub(super) fn new(p: &palantir::Palette, m: &palantir::Metrics, field: &TextEditTheme) -> Self {
-        let mut chip = ButtonTheme::subtle(p, m);
-        chip.defaults.padding = field.defaults.padding;
-        let base = DragValueTheme::from_chip(chip, field);
+        let mut button = ButtonTheme::subtle(p, m);
+        button.defaults.padding = field.defaults.padding;
         Self {
-            rest: ConstEditorTheme::with_box(&base, p, REST_ALPHA),
-            revealed: ConstEditorTheme::with_box(&base, p, REVEAL_ALPHA),
+            rest: ConstEditorTheme::with_box(&button, field, p, REST_ALPHA),
+            revealed: ConstEditorTheme::with_box(&button, field, p, REVEAL_ALPHA),
         }
     }
 
@@ -84,31 +86,41 @@ impl ConstEditorLooks {
 impl ConstEditorTheme {
     /// The box a value sits in at rest, which the inspector draws a value in as the node does.
     pub(crate) const fn rest_box(&self) -> &Chrome {
-        &self.drag_value.chip.unselected.normal.chrome
+        &self.button.unselected.normal.chrome
     }
 
     /// The inset of the value in [`Self::rest_box`].
     pub(crate) const fn rest_padding(&self) -> Spacing {
-        self.drag_value.chip.defaults.padding
+        self.button.defaults.padding
     }
 
-    /// `base` with the chip's and the editor's resting box at `alpha` of
-    /// the hover fill. Both, so a numeric chip and a string field (always a
-    /// `TextEdit`, showing `editor.normal` at rest) surface together.
-    fn with_box(base: &DragValueTheme, p: &palantir::Palette, alpha: f32) -> Self {
-        let mut drag_value = base.clone();
-        let rest = Brush::Solid(color::wash(p.element_mid, alpha, p.element));
-        drag_value.chip.unselected.normal.chrome.fill = rest.clone();
-        drag_value.editor.looks.normal.chrome.fill = rest;
-        let mut number = drag_value.clone();
-        for look in number.chip.unselected.each_mut() {
-            look.text = look.text.with_family(FontFamily::MONO);
-        }
-        for look in number.editor.looks.each_mut() {
+    /// `button`'s resting box at `alpha` of the hover fill, worn by the button, the number and
+    /// the field alike, so every kind of value surfaces together; the number and the field take
+    /// the caret, selection and placeholder of the app's `field`.
+    fn with_box(
+        button: &ButtonTheme,
+        field: &TextEditTheme,
+        p: &palantir::Palette,
+        alpha: f32,
+    ) -> Self {
+        let mut button = button.clone();
+        button.unselected.normal.chrome.fill =
+            Brush::Solid(color::wash(p.element_mid, alpha, p.element));
+        let proportional = DragValueTheme {
+            looks: button.unselected.clone(),
+            defaults: button.defaults,
+            caret: field.caret,
+            caret_width: field.caret_width,
+            selection: field.selection,
+            placeholder: field.placeholder,
+        };
+        let mut number = proportional.clone();
+        for look in number.looks.each_mut() {
             look.text = look.text.with_family(FontFamily::MONO);
         }
         Self {
-            drag_value,
+            button,
+            field: proportional.editor(),
             number,
             unset: p.text_muted,
             width: VALUE_EDITOR_WIDTH,

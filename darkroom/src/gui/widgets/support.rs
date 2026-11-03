@@ -136,7 +136,7 @@ pub(crate) const fn flush_button(unselected: StatefulLook, selected: StatefulLoo
         defaults: SlotDefaults {
             padding: Spacing::ZERO,
             margin: Spacing::ZERO,
-            animation: AnimationSpec::SNAP,
+            transition: AnimationSpec::SNAP,
         },
     }
 }

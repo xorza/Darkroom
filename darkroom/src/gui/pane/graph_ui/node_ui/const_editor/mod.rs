@@ -171,7 +171,7 @@ impl ConstEditor<'_> {
                 let snapshot = Button::new()
                     .id(field.id)
                     .label(label)
-                    .style(&field.theme.drag_value.chip)
+                    .style(&field.theme.button)
                     .text_wrap(TextWrap::EllipsisMiddle)
                     .text_align(Align::LEFT)
                     .size(Sizing::FILL)
@@ -229,7 +229,7 @@ impl Field<'_> {
         } = pick;
         let changed = ComboBox::labeled(&mut current, options, label)
             .id(self.id)
-            .button_style(&self.theme.drag_value.chip)
+            .button_style(&self.theme.button)
             .size(Sizing::FILL)
             .min_size((self.theme.width, 0.0))
             .show(ui)
@@ -266,7 +266,7 @@ impl Field<'_> {
     /// nothing in it. It senses nothing, so a click falls through to the surrounding row.
     pub(super) fn empty(self, ui: &mut Ui) {
         let Self { theme, id } = self;
-        let editor = &theme.drag_value.editor;
+        let editor = &theme.field;
         Panel::hstack()
             .id(id)
             .size((Sizing::fixed(theme.width), Sizing::FILL))
@@ -285,7 +285,7 @@ impl Field<'_> {
         let Self { theme, id } = self;
         TextEdit::buffered(current)
             .id(id)
-            .style(&theme.drag_value.editor)
+            .style(&theme.field)
             .size((Sizing::fixed(theme.width), Sizing::FILL))
             .show(ui)
             .committed_text

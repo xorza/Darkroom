@@ -34,7 +34,7 @@ fn default_wiring_and_menu_tweak() {
     // onto one color would pass every assertion above.
     assert_ne!(theme.canvas.bg, theme.card.lift);
     // The palantir half is the same palette, not palantir's own default.
-    assert_eq!(theme.palantir.window_clear, p.canvas_bg);
+    assert_eq!(theme.palantir.window_bg, p.canvas_bg);
     // The menu bar and every tab strip ride the surround band.
     assert_eq!(theme.palantir.menu_bar.bar, Chrome::fill(p.surround_bg));
     assert_eq!(theme.palantir.tabs.strip, Chrome::fill(p.surround_bg));
@@ -336,11 +336,11 @@ fn every_palantir_padding_and_radius_is_on_the_scale() {
         theme.palantir.tabs.strip_padding.to_array()[0],
         theme.surround_inset()
     );
-    assert_eq!(ui.dock.preview_radius, mark);
+    assert_eq!(ui.dock.preview.corners, Corners::all(mark));
     // A dragged tab's ghost is a tab lifted off its strip; a value's box is a field's.
     assert_eq!(ui.dock.ghost_padding, ui.tabs.chip_padding);
     assert_eq!(
-        theme.const_editor.rest.drag_value.chip.defaults.padding,
+        theme.const_editor.rest.button.defaults.padding,
         ui.text_edit.defaults.padding
     );
     // The values the bridge picks, not only that each is a step: a field and the button beside
