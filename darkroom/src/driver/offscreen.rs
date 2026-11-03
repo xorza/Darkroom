@@ -4,10 +4,10 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use palantir::wgpu::Features;
+use palantir::wgpu::{Features, PowerPreference};
 use palantir::{
-    Depth, GpuRequestError, Harness, InspectedWidget, PlayError, PowerPreference, RequestedGpu,
-    Screenshot, Ui, WindowCommand,
+    Depth, GpuRequestError, Harness, InspectedWidget, PlayError, RequestedGpu, Screenshot, Ui,
+    WindowCommand,
 };
 
 use crate::core::io::preferences::preferences_store::PreferencesStore;
