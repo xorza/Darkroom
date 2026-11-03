@@ -164,14 +164,10 @@ impl DriverError {
             PlayError::GpuTimedOut => Self::GpuTimedOut,
             PlayError::Disconnected => Self::WindowClosed,
             PlayError::NoFrame { waited } => Self::NoFrame { waited },
-            PlayError::Busy { waited } => Self::UnsettledInTime {
+            PlayError::Busy { waited } | PlayError::StillBusy { waited } => Self::UnsettledInTime {
                 step: step.to_string(),
                 waited,
             },
-            // The session ends on a panic, here as on the driver's own thread.
-            PlayError::Panicked { message } => {
-                panic!("a request on the window's thread panicked: {message}")
-            }
         }
     }
 }
