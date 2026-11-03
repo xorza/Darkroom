@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use glam::Vec2;
 use palantir::widget::Shape;
-use palantir::{Rect, Stroke, Ui};
+use palantir::{Modifiers, Rect, Stroke, Ui};
 
 use crate::core::document::item_id::ItemId;
 use crate::core::edit::graph_intent::GraphIntent;
@@ -119,7 +119,7 @@ impl SelectionUi {
                 // arbitration — read it here, not in the classifier.
                 // Captured once, so the per-frame union never re-reads the
                 // document.
-                base: if ui.modifiers().shift {
+                base: if ui.modifiers().contains(Modifiers::SHIFT) {
                     graph_ctx.selected().clone()
                 } else {
                     BTreeSet::new()

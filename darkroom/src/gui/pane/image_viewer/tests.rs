@@ -19,7 +19,7 @@ use crate::gui::state::preview_store;
 /// to render the combinations.
 #[test]
 fn header_readout_adds_its_conditional_clauses_only_when_they_apply() {
-    let mut h = Harness::builder(UVec2::ONE).mono().build();
+    let h = Harness::builder(UVec2::ONE).mono().build();
     let handle = h
         .ui()
         .load_image(&glyph::checker_image(&Theme::default()))
@@ -124,7 +124,7 @@ fn sync_source_refits_only_for_size_changes_or_removal() {
 /// stopped before it, or one in which it failed — each its own line.
 #[test]
 fn resolve_separates_no_entry_from_a_reason_there_is_no_image() {
-    let mut h = Harness::builder(UVec2::ONE).mono().build();
+    let h = Harness::builder(UVec2::ONE).mono().build();
 
     let nothing = ShownSource::resolve(None, h.ui());
     assert!(

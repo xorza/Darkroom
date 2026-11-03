@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use palantir::{InspectedWidget, Ui};
 
@@ -75,14 +75,12 @@ impl Backend {
         }
     }
 
-    /// Sleep until background work may have posted a result, or `deadline` passes: offscreen,
+    /// Sleep until background work may have posted a result, or `timeout` passes: offscreen,
     /// until the app's wake; the window's frames run themselves, so a moment of its real time.
-    pub(crate) fn wait_wake(&self, deadline: Instant) {
+    pub(crate) fn wait_wake(&self, timeout: Duration) {
         match self {
-            Self::Offscreen(offscreen) => offscreen.wait_wake(deadline),
-            Self::Window(_) => {
-                thread::sleep(WINDOW_POLL.min(deadline.saturating_duration_since(Instant::now())));
-            }
+            Self::Offscreen(offscreen) => offscreen.wait_wake(timeout),
+            Self::Window(_) => thread::sleep(WINDOW_POLL.min(timeout)),
         }
     }
 

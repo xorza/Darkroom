@@ -119,7 +119,7 @@ fn native_size_refuses_an_edge_no_texture_holds() {
 /// at the full texture's size, so the viewer's framing never moves.
 #[test]
 fn the_full_texture_converts_on_the_first_ask_and_is_reused_after() {
-    let mut arena = Harness::builder(UVec2::ONE).mono().build();
+    let arena = Harness::builder(UVec2::ONE).mono().build();
     let mut store = PreviewStore::new(wake::internals::noop());
     let node = NodeId::unique();
 
@@ -204,7 +204,7 @@ fn the_full_texture_converts_on_the_first_ask_and_is_reused_after() {
 /// updates — and removing the node's value voids its conversions in flight.
 #[test]
 fn a_previews_value_lives_exactly_as_long_as_its_node() {
-    let mut arena = Harness::builder(UVec2::ONE).mono().build();
+    let arena = Harness::builder(UVec2::ONE).mono().build();
     let mut store = PreviewStore::new(wake::internals::noop());
     let node = NodeId::unique();
     let mut document = document_with_preview(node);

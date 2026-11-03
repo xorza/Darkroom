@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 
 use common::{TempDir, env, fs};
 use glam::UVec2;
+use palantir::SystemScale;
 use serde::Serialize;
 
 use crate::core::io::document as io_document;
@@ -76,7 +77,7 @@ pub struct SessionConfig {
     /// Physical pixels.
     pub size: UVec2,
     /// Physical pixels per logical pixel.
-    pub scale: f32,
+    pub scale: SystemScale,
 }
 
 /// The editor a driver plays, and the session directory its copies and shots live in.
@@ -247,7 +248,8 @@ impl Driver {
                 });
             }
             // The worker posts on real time and wakes the app when it does.
-            self.backend.wait_wake(deadline);
+            self.backend
+                .wait_wake(deadline.saturating_duration_since(Instant::now()));
         }
     }
 

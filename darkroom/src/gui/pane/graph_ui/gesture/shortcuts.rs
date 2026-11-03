@@ -68,10 +68,7 @@ mod tests {
     /// Ctrl+0 resets the view and Ctrl+D duplicates the node; each chord raises only its own.
     #[test]
     fn each_chord_raises_its_intent() {
-        let ctrl = Modifiers {
-            ctrl: true,
-            ..Modifiers::default()
-        };
+        let ctrl = Modifiers::CTRL;
         let plain = Modifiers::default();
         let cases = [
             (Key::Delete, plain, "remove"),
@@ -87,7 +84,7 @@ mod tests {
             // Off the default view, so the reset has a view to move.
             h.document_mut().main_view.viewport.zoom = 2.0;
             h.prime(2);
-            h.ui.set_modifiers(mods);
+            h.ui.hold_modifiers(mods);
             h.ui.key(key);
             let intents = h.frame();
             let raised = match &*intents {

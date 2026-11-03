@@ -96,10 +96,7 @@ fn a_shift_band_unions_with_the_committed_selection_counting_overlap_once() {
     h.document_mut().main_view.selected.insert(ItemId::Node(a));
     h.prime(2);
 
-    h.ui.set_modifiers(Modifiers {
-        shift: true,
-        ..Modifiers::default()
-    });
+    h.ui.hold_modifiers(Modifiers::SHIFT);
     h.ui.press(Vec2::new(20.0, 400.0), PointerButton::Left);
     h.frame();
     // Two steps, not one: the band anchors where `drag.started()` first

@@ -11,7 +11,7 @@ use darkroom::driver::locator::{EditorTarget, Locator, Side};
 use darkroom::driver::shot::Region;
 use darkroom::driver::state::Detail;
 use glam::Vec2;
-use palantir::{PointerButton, Rect, Shortcut, ShortcutMods};
+use palantir::{PointerButton, Rect, Shortcut, ShortcutMods, ZoomFactor};
 use rmcp::schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -266,13 +266,13 @@ impl TryFrom<ActionParam> for Action {
                 mods: modifiers(&mods),
                 steps: steps.unwrap_or(DRAG_STEPS),
             }),
-            ActionParam::Scroll { at, delta } => play(Play::Scroll {
+            ActionParam::Scroll { at, delta } => play(Play::ScrollPixels {
                 at: at.into(),
                 delta: Vec2::from(delta),
             }),
             ActionParam::Pinch { at, factor } => play(Play::Pinch {
                 at: at.into(),
-                factor,
+                factor: ZoomFactor::new(factor).ok_or(DriverError::BadPinch { factor })?,
             }),
             ActionParam::Key(chord) => {
                 let shortcut = chord
@@ -302,8 +302,8 @@ impl From<LocatorParam> for Locator {
             LocatorParam::World(point) => Self::App(EditorTarget::World(Vec2::from(point))),
             LocatorParam::Text(text) => Self::Text(text),
             LocatorParam::Screen(point) => Self::Point(Vec2::from(point)),
-            LocatorParam::Offset { of, by } => Self::Offset(Box::new((*of).into()), Vec2::from(by)),
-            LocatorParam::Nth { of, index } => Self::Nth(Box::new((*of).into()), index),
+            LocatorParam::Offset { of, by } => Self::from(*of).offset(Vec2::from(by)),
+            LocatorParam::Nth { of, index } => Self::from(*of).nth(index),
         }
     }
 }
@@ -344,10 +344,10 @@ fn modifiers(mods: &[ModParam]) -> ShortcutMods {
     let mut held = ShortcutMods::NONE;
     for modifier in mods {
         match modifier {
-            ModParam::Ctrl => held.ctrl = true,
-            ModParam::Shift => held.shift = true,
-            ModParam::Alt => held.alt = true,
-            ModParam::Meta => held.meta = true,
+            ModParam::Ctrl => held.insert(ShortcutMods::CTRL),
+            ModParam::Shift => held.insert(ShortcutMods::SHIFT),
+            ModParam::Alt => held.insert(ShortcutMods::ALT),
+            ModParam::Meta => held.insert(ShortcutMods::META),
         }
     }
     held

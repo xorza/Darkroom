@@ -14,7 +14,7 @@
 use std::sync::Arc;
 
 use glam::Vec2;
-use palantir::Ui;
+use palantir::{Modifiers, Ui};
 use scenarium::{Binding, Func, InputPort, NodeId, OutputPort};
 
 use crate::core::document::item_id::ItemId;
@@ -30,7 +30,7 @@ use crate::gui::pane::graph_ui::wid;
 /// the output column from its latch candidates under the same condition, so the two cannot drift
 /// into both claiming, or neither.
 pub(crate) const fn modifier_held(ui: &mut Ui) -> bool {
-    ui.modifiers().ctrl
+    ui.modifiers().contains(Modifiers::CTRL)
 }
 
 /// A Ctrl+drag that started on an output port this frame: the grab of the preview node it

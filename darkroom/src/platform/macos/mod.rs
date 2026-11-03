@@ -22,12 +22,7 @@ mod open_files;
 /// task until it does.
 pub(super) fn route_opened_documents<A>(handle: HostHandle<A>, open: fn(&mut A, PathBuf)) {
     open_files::install(move |path| {
-        handle
-            .run_on_main(move |app: &mut A| {
-                open(app, path);
-                true
-            })
-            .ok();
+        handle.run_on_main(move |app: &mut A| open(app, path)).ok();
     });
 }
 

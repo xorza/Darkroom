@@ -13,6 +13,7 @@ use common::{ErrorChain, thread as threads};
 use darkroom::driver::log_ring::LogRing;
 use darkroom::driver::{DisplayKind, Driver, SessionConfig};
 use glam::UVec2;
+use palantir::SystemScale;
 use rmcp::ServiceExt as _;
 use rmcp::transport::stdio;
 use tokio::runtime;
@@ -27,7 +28,7 @@ use crate::mcp::session_thread::{Ended, SessionThread};
 pub(crate) fn serve_headless(
     document: Option<PathBuf>,
     size: UVec2,
-    scale: f32,
+    scale: SystemScale,
     log: LogRing,
 ) -> ExitCode {
     let config = SessionConfig {

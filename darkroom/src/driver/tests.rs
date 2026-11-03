@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use common::{TempDir, fs};
 use glam::{UVec2, Vec2};
-use palantir::{DockView, LocateError, PointerButton, Rect, ShortcutMods};
+use palantir::{DockView, LocateError, PointerButton, Rect, ShortcutMods, SystemScale};
 use scenarium::{Binding, ConstValue, InputPort, NodeId};
 use tracing::{callsite, subscriber};
 use tracing_subscriber::layer::SubscriberExt as _;
@@ -37,7 +37,7 @@ fn logged(log: LogRing) -> Driver {
         SessionConfig {
             display: DisplayKind::Cpu,
             size: UVec2::new(1600, 1000),
-            scale: 1.0,
+            scale: SystemScale::ONE,
         },
         log,
     )
@@ -54,7 +54,7 @@ fn sized(display: DisplayKind, size: UVec2) -> Driver {
         SessionConfig {
             display,
             size,
-            scale: 1.0,
+            scale: SystemScale::ONE,
         },
         LogRing::default(),
     )
@@ -136,10 +136,7 @@ fn clicks_drags_and_keys_edit_the_document() {
     let before = placed(&driver, BRIGHTNESS);
     let header = Locator::App(EditorTarget::NodeHeader(BRIGHTNESS.to_string()));
     driver
-        .act(&[drag(
-            header.clone(),
-            Locator::Offset(Box::new(header), Vec2::new(120.0, 60.0)),
-        )])
+        .act(&[drag(header.clone(), header.offset(Vec2::new(120.0, 60.0)))])
         .unwrap();
     assert_eq!(placed(&driver, BRIGHTNESS), before + Vec2::new(120.0, 60.0));
 
@@ -296,7 +293,7 @@ fn a_node_locator_names_exactly_one_node() {
         }) => assert_eq!(matches.len(), 2),
         other => panic!("{other:?}"),
     }
-    let nth = |locator: Locator, n: usize| click(Locator::Nth(Box::new(locator), n));
+    let nth = |locator: Locator, n: usize| click(locator.nth(n));
     let second = driver.act(&[nth(node(BRIGHTNESS), 1)]).unwrap();
     assert_eq!(second.selection, [BRIGHTNESS], "the second of the two");
     match driver.act(&[nth(node(BRIGHTNESS), 2)]) {
@@ -339,10 +336,7 @@ fn a_focused_text_field_still_settles() {
     // field closes and the chord reaches the document again.
     let before = placed(&driver, BRIGHTNESS);
     driver
-        .act(&[drag(
-            header(),
-            Locator::Offset(Box::new(header()), Vec2::new(120.0, 60.0)),
-        )])
+        .act(&[drag(header(), header().offset(Vec2::new(120.0, 60.0)))])
         .unwrap();
     let moved = placed(&driver, BRIGHTNESS);
     assert_eq!(moved, before + Vec2::new(120.0, 60.0));
@@ -438,15 +432,6 @@ fn a_failed_action_leaves_nothing_held_and_the_log_reaches_state() {
     ));
     let report = driver.act(&[click(node(BRIGHTNESS))]).unwrap();
     assert_eq!(report.selection, [BRIGHTNESS]);
-    for factor in [0.0, -2.0] {
-        assert!(matches!(
-            driver.act(&[Action::Play(Play::Pinch {
-                at: node(BRIGHTNESS),
-                factor
-            })]),
-            Err(ActFailure { ran: 0, error: DriverError::BadPinch { factor: refused } }) if refused == factor
-        ));
-    }
 
     // tracing-core caches each callsite's interest globally, and another test thread that hits
     // the dialog's callsite can leave it cached as never for this thread's scoped subscriber:
@@ -671,7 +656,7 @@ fn the_view_menu_copies_and_saves_the_window() {
             click(Locator::Text("Copy View as Image".to_string())),
         ])
         .unwrap();
-    assert_eq!(clipboard.text().unwrap(), "");
+    assert_eq!(clipboard.text().unwrap(), None);
 
     driver
         .act(&[

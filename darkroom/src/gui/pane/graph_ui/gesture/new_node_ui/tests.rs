@@ -66,7 +66,7 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
             DocumentFixture::with_library(Graph::default(), library),
             SURFACE,
         );
-        restyle(h.ui.ui().theme_mut());
+        restyle(h.ui.ui_mut().theme_mut());
 
         h.frame();
         // Right-click on empty canvas opens the palette; give it two frames so

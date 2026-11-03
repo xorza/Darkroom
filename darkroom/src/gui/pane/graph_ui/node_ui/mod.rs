@@ -9,7 +9,7 @@ pub(crate) mod run_status;
 
 use std::mem;
 
-use palantir::{Configure, Panel, Sense, Shadow, Sizing, Stroke, Track, Ui};
+use palantir::{Configure, Modifiers, Panel, Sense, Shadow, Sizing, Stroke, Track, Ui};
 use scenarium::NodeId;
 
 use crate::core::document::graph_view::StackedNode;
@@ -231,7 +231,7 @@ impl NodeUi {
         };
         // Sample modifiers before the panel borrows `ui` for the rest
         // of this scope (the click handler below can't reborrow it).
-        let click_mode = ClickMode::with_shift(ui.modifiers().shift);
+        let click_mode = ClickMode::with_shift(ui.modifiers().contains(Modifiers::SHIFT));
         // The status frame when the last run asks for attention, else the
         // ambient elevation shadow — one slot, and live status outranks depth.
         let shadow = node_shadow(theme, node.exec_status());

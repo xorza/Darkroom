@@ -83,11 +83,12 @@ impl Locate<App> for EditorTarget {
                             }
                         }),
                         Self::NodeHeader(_) => {
-                            visible(ui.response_for(wid::rename(id)).rect).map(Found::rect)
+                            visible(ui.response_for(wid::rename(id)).rect).map(Found::center_of)
                         }
                         Self::Port { side, port, .. } => {
                             let port = find_port(self, app, id, *side, port)?;
-                            visible(ui.response_for(wid::port_circle(port)).rect).map(Found::rect)
+                            visible(ui.response_for(wid::port_circle(port)).rect)
+                                .map(Found::center_of)
                         }
                         Self::World(_) => unreachable!("matched above"),
                     };

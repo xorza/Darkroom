@@ -53,7 +53,7 @@ const AUDITED_FRAMES: usize = 64;
 #[test]
 fn a_settled_frame_records_without_allocating() {
     let mut ui = Harness::new(UVec2::new(1200, 800));
-    let mut app = App::offscreen(ui.ui());
+    let mut app = App::offscreen(ui.ui_mut());
     let library = Arc::clone(app.runtime.library.cur());
     let func = library.by_name("Brightness / Contrast").unwrap();
     let mut fixture = DocumentFixture::default();
@@ -79,7 +79,7 @@ fn a_settled_frame_records_without_allocating() {
     // Each frame asked, as a wake asks one: a frame nothing asked for paints only and records
     // nothing, which would audit nothing.
     let full_frame = |ui: &mut Harness, app: &mut App| {
-        ui.ui().request_repaint();
+        ui.ui_mut().request_repaint();
         ui.frame_app(app)
     };
     for _ in 0..SETTLE_FRAMES {
@@ -249,10 +249,7 @@ fn a_chord_and_a_click_on_one_frame_both_reach_the_app() {
     // Ctrl+S chord is subscribed for palantir's keyboard wake-gate.
     test.prime(2);
 
-    test.ui.set_modifiers(Modifiers {
-        ctrl: true,
-        ..Modifiers::NONE
-    });
+    test.ui.hold_modifiers(Modifiers::CTRL);
     test.ui.key(Key::Char('S'));
     test.ui.click(toolbar::internals::run_chip_wid());
 

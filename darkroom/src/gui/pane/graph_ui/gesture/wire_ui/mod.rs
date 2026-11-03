@@ -187,7 +187,7 @@ impl WireUi {
         // the terminating press.
         ui.watch_pointer(PointerWake::MOVE | PointerWake::BUTTONS);
         let ended = ui.pointer_events().iter().find_map(|ev| match ev {
-            PointerEvent::Down {
+            PointerEvent::Pressed {
                 button: button @ (PointerButton::Left | PointerButton::Right),
                 ..
             } => Some(*button),

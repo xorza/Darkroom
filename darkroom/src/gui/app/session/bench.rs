@@ -360,15 +360,15 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
             match backend {
                 Backend::Cpu => case.measure(&mut group, || {
                     let mut frontend = Harness::builder(BENCH_SURFACE)
-                        .scale(BENCH_DPR)
+                        .system_scale(BENCH_DPR)
                         .depth(Depth::Compose)
                         .build();
                     frontend
-                        .ui()
+                        .ui_mut()
                         .set_theme_for(ColorScheme::Dark, Theme::default().palantir);
                     let mut published = false;
                     move |editor: &mut Editor, n: u32| {
-                        let ui = frontend.ui();
+                        let ui = frontend.ui_mut();
                         if !published {
                             editor.publish_previews(ui);
                             published = true;
@@ -385,7 +385,7 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
                         .collect_gpu_stats(false)
                         .retained_target(true)
                         .build();
-                    host.ui()
+                    host.ui_mut()
                         .set_theme_for(ColorScheme::Dark, Theme::default().palantir);
                     let mut published = false;
                     move |editor: &mut Editor, n: u32| {
@@ -393,10 +393,13 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
                             editor.publish_previews(host.ui());
                             published = true;
                         }
-                        editor.advance(scenario, host.ui(), n);
+                        editor.advance(scenario, host.ui_mut(), n);
                         editor.update();
                         let mut app = |ui: &mut Ui| editor.record(ui);
-                        let paint = host.frame(target.as_target(), BENCH_DPR, &mut app).paint();
+                        let paint = host
+                            .set_system_scale(BENCH_DPR)
+                            .frame(target.as_target(), &mut app)
+                            .paint();
                         gpu.wait();
                         paint
                     }

@@ -39,10 +39,7 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
 
     // Ctrl held, press on the output circle, then drag: the press frame is
     // where `PreviewDrag` latches.
-    h.ui.set_modifiers(Modifiers {
-        ctrl: true,
-        ..Default::default()
-    });
+    h.ui.hold_modifiers(Modifiers::CTRL);
     let from = h.port_center(out_port);
     h.ui.press(wid::port_circle(out_port), PointerButton::Left);
     h.frame();
@@ -50,7 +47,7 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
     // pointer has to actually move past palantir's threshold.
     h.ui.drag_to(from + Vec2::new(90.0, 40.0));
     let spawned = h.frame();
-    h.ui.set_modifiers(Modifiers::default());
+    h.ui.hold_modifiers(Modifiers::default());
     h.ui.release(PointerButton::Left);
 
     let adds: Vec<_> = spawned
@@ -87,10 +84,7 @@ fn esc_on_a_preview_spawn_takes_the_card_back() {
     use crate::core::preview_sink::PreviewSink;
     use crate::gui::port_ref::PortRef;
 
-    let ctrl = Modifiers {
-        ctrl: true,
-        ..Default::default()
-    };
+    let ctrl = Modifiers::CTRL;
     // `None` releases in place; `Some(mods)` presses Esc first with `mods` held.
     let spawn = |cancel: Option<Modifiers>| {
         let mut fixture = DocumentFixture::probes(1);
@@ -100,14 +94,14 @@ fn esc_on_a_preview_spawn_takes_the_card_back() {
         let out_port = PortRef::output(fixture.node(0), 0);
         let mut h = CanvasHarness::new(fixture);
         h.prime(2);
-        h.ui.set_modifiers(ctrl);
+        h.ui.hold_modifiers(ctrl);
         let from = h.port_center(out_port);
         h.ui.press(wid::port_circle(out_port), PointerButton::Left);
         h.frame_applied();
         h.ui.drag_to(from + Vec2::new(90.0, 40.0));
         h.frame_applied();
         if let Some(mods) = cancel {
-            h.ui.set_modifiers(mods);
+            h.ui.hold_modifiers(mods);
             h.frame_applied();
             h.ui.key(Key::Escape);
             h.frame_applied();

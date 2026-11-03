@@ -15,11 +15,10 @@ use crate::gui::port_ref::PortRef;
 
 /// Modifiers with Ctrl and Shift as given.
 fn held(ctrl: bool, shift: bool) -> Modifiers {
-    Modifiers {
-        ctrl,
-        shift,
-        ..Modifiers::default()
-    }
+    let mut mods = Modifiers::NONE;
+    mods.set(Modifiers::CTRL, ctrl);
+    mods.set(Modifiers::SHIFT, shift);
+    mods
 }
 
 /// A drag on bare canvas latches the gesture its chord names: RMB-drag and Ctrl+LMB-drag the
@@ -43,7 +42,7 @@ fn the_tie_line_is_the_breakers_chord_plus_shift() {
     for (button, modifiers, want) in cases {
         let mut h = CanvasHarness::new(DocumentFixture::default());
         h.prime(2);
-        h.ui.set_modifiers(modifiers);
+        h.ui.hold_modifiers(modifiers);
         h.ui.press(Vec2::new(300.0, 300.0), button);
         h.frame();
         h.ui.drag_to(Vec2::new(340.0, 380.0));
@@ -96,7 +95,7 @@ fn crossed(tie_first: bool) -> Crossed {
 /// frame's intents. The line latches where the drag first moves, so the first step is a short
 /// one toward `to`.
 fn tie_line(h: &mut CanvasHarness, from: Vec2, to: Vec2) -> Vec<GraphIntent> {
-    h.ui.set_modifiers(held(false, true));
+    h.ui.hold_modifiers(held(false, true));
     h.ui.press(from, PointerButton::Right);
     h.frame();
     h.ui.drag_to(from + (to - from).normalize() * 6.0);

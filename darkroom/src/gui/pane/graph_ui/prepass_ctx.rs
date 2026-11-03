@@ -74,19 +74,24 @@ impl CanvasGesture {
             return Some(Self::Pan);
         }
         if resp.right.drag.started() {
-            return Some(if modifiers.shift {
+            return Some(if modifiers.contains(Modifiers::SHIFT) {
                 Self::Tie(PointerButton::Right)
             } else {
                 Self::Breaker(PointerButton::Right)
             });
         }
         if resp.left.drag.started() {
-            return Some(match (modifiers.ctrl, modifiers.shift) {
-                (true, true) => Self::Tie(PointerButton::Left),
-                (true, false) => Self::Breaker(PointerButton::Left),
-                // Shift extends the band selection; the band reads it.
-                (false, _) => Self::Select,
-            });
+            return Some(
+                match (
+                    modifiers.contains(Modifiers::CTRL),
+                    modifiers.contains(Modifiers::SHIFT),
+                ) {
+                    (true, true) => Self::Tie(PointerButton::Left),
+                    (true, false) => Self::Breaker(PointerButton::Left),
+                    // Shift extends the band selection; the band reads it.
+                    (false, _) => Self::Select,
+                },
+            );
         }
         // A double-click sets `clicked` and `double_clicked` on one frame, so it precedes the
         // plain click's `Deselect`; the first click of the pair already cleared the selection.
@@ -168,10 +173,11 @@ mod tests {
             phase: ButtonPhase::Up { click: Some(count) },
             drag: Drag::None,
         };
-        let mods = |ctrl, shift| Modifiers {
-            ctrl,
-            shift,
-            ..Modifiers::default()
+        let mods = |ctrl, shift| {
+            let mut mods = Modifiers::NONE;
+            mods.set(Modifiers::CTRL, ctrl);
+            mods.set(Modifiers::SHIFT, shift);
+            mods
         };
         let none = Modifiers::default();
         let (left, right) = (PointerButton::Left, PointerButton::Right);

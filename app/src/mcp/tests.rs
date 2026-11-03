@@ -6,6 +6,7 @@ use darkroom::driver::log_ring::LogRing;
 use darkroom::driver::{DisplayKind, SessionConfig};
 use darkroom::internals::fixture;
 use glam::UVec2;
+use palantir::SystemScale;
 use rmcp::model::{CallToolRequestParams, CallToolResult, ContentBlock};
 use rmcp::serde_json::{self, Value, json};
 use rmcp::service::{RoleClient, RunningService};
@@ -32,7 +33,7 @@ async fn connect(display: DisplayKind, document: Option<PathBuf>) -> Connected {
     let config = SessionConfig {
         display,
         size: UVec2::new(800, 600),
-        scale: 1.0,
+        scale: SystemScale::ONE,
     };
     let (session, ended) = SessionThread::start(move || {
         session_thread::launch(config, LogRing::default(), document.as_deref())
@@ -124,7 +125,7 @@ async fn the_server_lists_its_six_tools_with_their_schemas() {
 /// A server started on no document is on a new one. An opened fixture reports the build and its
 /// nodes, and `darkroom_state` lists them; a click on a name two nodes share is a tool error
 /// that names the action it stopped at and lists both nodes, and `nth` picks one. A bad chord
-/// refuses its batch before any of it plays. The CPU display has no shots, and an act whose shot
+/// or a pinch factor no zoom can be refuses its batch before any of it plays. The CPU display has no shots, and an act whose shot
 /// fails still reports the actions it played. An open with no project is a new unsaved document; a project that does
 /// not open leaves the open document as it was.
 #[tokio::test]
@@ -207,6 +208,19 @@ async fn an_opened_project_is_driven_through_the_tools() {
         text(&refused, 0).starts_with("'ctrl+banana' is not a key chord"),
         "{}",
         text(&refused, 0)
+    );
+    let pinched = call(
+        &client,
+        "darkroom_act",
+        json!({ "actions": [{ "click": { "at": { "screen": [1.0, 1.0] } } }, { "pinch": { "at": { "screen": [1.0, 1.0] }, "factor": 0.0 } }] }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(pinched.is_error, Some(true));
+    assert!(
+        text(&pinched, 0).starts_with("a pinch factor of 0 zooms nowhere"),
+        "{}",
+        text(&pinched, 0)
     );
     let kept = call(&client, "darkroom_state", json!({})).await.unwrap();
     let kept: Value = serde_json::from_str(text(&kept, 0)).unwrap();
@@ -397,7 +411,7 @@ fn a_document_that_does_not_open_is_refused() {
     let config = SessionConfig {
         display: DisplayKind::Cpu,
         size: UVec2::new(800, 600),
-        scale: 1.0,
+        scale: SystemScale::ONE,
     };
     let dir = TempDir::new("darkroom-mcp-start");
     let missing = dir.join("missing.darkroom");

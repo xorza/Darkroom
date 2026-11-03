@@ -2,6 +2,7 @@
 
 use std::io;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use palantir::{GpuRequestError, LocateError, PlayError};
 
@@ -25,8 +26,8 @@ pub enum DriverError {
     Quit,
     #[error("the editor did not settle within {frames} frames after {step}")]
     Unsettled { step: String, frames: u32 },
-    #[error("the editor did not settle within {seconds} s after {step}")]
-    UnsettledInTime { step: String, seconds: f32 },
+    #[error("the editor did not settle within {} s after {step}", .waited.as_secs_f32())]
+    UnsettledInTime { step: String, waited: Duration },
     #[error("{region} covers none of the window; pick a region inside it")]
     EmptyRegion { region: String },
     #[error("a shot needs pixels, and this session has none: start it with the GPU display")]
@@ -99,10 +100,11 @@ pub enum DriverError {
     )]
     WindowHidden,
     #[error(
-        "the window ran no frame within {seconds} s; a minimized or covered window runs none, so \
-         ask the person at it to show it"
+        "the window ran no frame within {} s; a minimized or covered window runs none, so ask \
+         the person at it to show it",
+        .waited.as_secs_f32()
     )]
-    NoFrame { seconds: f32 },
+    NoFrame { waited: Duration },
     #[error("the window closed, and the session with it: the person at it closed it, or it quit")]
     WindowClosed,
     #[error("the GPU display needs an adapter, and none is usable")]
@@ -143,14 +145,16 @@ impl From<DrivenOpenError> for DriverError {
     }
 }
 
-/// What a failed step of palantir's player means to the editor's driver, each case kept with the
-/// driver's own hint.
-impl From<PlayError> for DriverError {
-    fn from(error: PlayError) -> Self {
+impl DriverError {
+    /// What `error` of palantir's player means to the editor's driver, each case kept with the
+    /// driver's own hint, and a failed settle named after `step`, what the driver played.
+    pub(crate) fn played(step: &str, error: PlayError) -> Self {
         match error {
             PlayError::Locate(error) => Self::Locate(error),
-            PlayError::Unsettled { step, frames } => Self::Unsettled { step, frames },
-            PlayError::BadPinch { factor } => Self::BadPinch { factor },
+            PlayError::Unsettled { frames } => Self::Unsettled {
+                step: step.to_string(),
+                frames,
+            },
             PlayError::ShortDrag { travel } => Self::ShortDrag { travel },
             PlayError::EmptyRegion => Self::EmptyRegion {
                 region: "the region".to_string(),
@@ -159,30 +163,15 @@ impl From<PlayError> for DriverError {
             PlayError::DeviceLost => Self::DeviceLost,
             PlayError::GpuTimedOut => Self::GpuTimedOut,
             PlayError::Disconnected => Self::WindowClosed,
-            PlayError::NoFrame { seconds } => Self::NoFrame { seconds },
-            PlayError::Busy { step, seconds } => Self::UnsettledInTime { step, seconds },
+            PlayError::NoFrame { waited } => Self::NoFrame { waited },
+            PlayError::Busy { waited } => Self::UnsettledInTime {
+                step: step.to_string(),
+                waited,
+            },
             // The session ends on a panic, here as on the driver's own thread.
             PlayError::Panicked { message } => {
                 panic!("a request on the window's thread panicked: {message}")
             }
-        }
-    }
-}
-
-impl DriverError {
-    /// A failed settle of `step`: palantir names every settle "the settle", the driver after
-    /// what it settles.
-    pub(crate) fn from_settle(step: &str, error: PlayError) -> Self {
-        match error {
-            PlayError::Unsettled { frames, .. } => Self::Unsettled {
-                step: step.to_string(),
-                frames,
-            },
-            PlayError::Busy { seconds, .. } => Self::UnsettledInTime {
-                step: step.to_string(),
-                seconds,
-            },
-            error => error.into(),
         }
     }
 }

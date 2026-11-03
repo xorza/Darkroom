@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use glam::Vec2;
-use palantir::{Configure, Panel, Sense, Sizing, Ui};
+use palantir::{Configure, Modifiers, Panel, Sense, Sizing, Ui};
 
 use crate::core::document::item_id::ItemId;
 use crate::core::document::tie::{TieAngle, TieId};
@@ -102,7 +102,7 @@ impl TieWidgets {
             self.knob = None;
             return;
         };
-        let snap = if ui.modifiers().shift {
+        let snap = if ui.modifiers().contains(Modifiers::SHIFT) {
             AngleSnap::Steps
         } else {
             AngleSnap::Free
@@ -120,7 +120,7 @@ impl TieWidgets {
         let mut recorded = TiesRecorded::default();
         let draw_ctx = pass.draw_ctx;
         let theme = draw_ctx.theme();
-        let click_mode = ClickMode::with_shift(ui.modifiers().shift);
+        let click_mode = ClickMode::with_shift(ui.modifiers().contains(Modifiers::SHIFT));
         for band in pass
             .ties
             .bands()

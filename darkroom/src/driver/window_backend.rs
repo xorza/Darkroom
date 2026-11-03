@@ -40,15 +40,15 @@ impl WindowBackend {
     ) -> Result<R, DriverError> {
         self.remote
             .query(move |app, ui| f(app, ui))
-            .map_err(|error| self.error(error))
+            .map_err(|error| self.error("the query", error))
     }
 
     /// Play `action` as palantir's remote plays it, settling after each step it takes, the
     /// previews converting included ([`App::is_busy`](palantir::App::is_busy)).
-    pub(crate) fn play(&self, action: &Play) -> Result<u32, DriverError> {
+    pub(crate) fn play(&mut self, action: &Play) -> Result<u32, DriverError> {
         self.remote
             .play(std::slice::from_ref(action))
-            .map_err(|failed| self.error(failed.error))
+            .map_err(|failed| self.error(&format!("{action:?}"), failed.error))
     }
 
     pub(crate) fn widgets(
@@ -57,7 +57,7 @@ impl WindowBackend {
     ) -> Result<Vec<InspectedWidget>, DriverError> {
         self.remote
             .widgets(filter)
-            .map_err(|error| self.error(error))
+            .map_err(|error| self.error("the widget list", error))
     }
 
     /// Refuse to go on once the window closed: the session ends with it.
@@ -81,14 +81,14 @@ impl WindowBackend {
     /// A shot of `region` as a later frame paints it: the region resolved against the last
     /// frame, the image taken by the frame it lands in, the fit made here, off the person's
     /// thread, and the legend read against the frame after.
-    pub(crate) fn shot(&self, region: &Region, max_side: u32) -> Result<Capture, DriverError> {
+    pub(crate) fn shot(&mut self, region: &Region, max_side: u32) -> Result<Capture, DriverError> {
         let asked = region.clone();
         let rect = self.with_app(move |app, ui| asked.rect(app, ui))??;
         let screenshot = self.remote.shot(rect).map_err(|error| match error {
             PlayError::EmptyRegion => DriverError::EmptyRegion {
                 region: format!("{region:?}"),
             },
-            error => self.error(error),
+            error => self.error(&format!("the shot of {region:?}"), error),
         })?;
         let picture = screenshot.image().fitted(max_side);
         self.with_app(move |app, ui| Capture::of(&screenshot, picture, app, ui))
@@ -96,18 +96,18 @@ impl WindowBackend {
 
     /// palantir's settle of the window: a frame that saw every sent event, asks no repaint and
     /// finds no preview converting, bounded in real time.
-    pub(crate) fn settle(&self, step: &str) -> Result<u32, DriverError> {
+    pub(crate) fn settle(&mut self, step: &str) -> Result<u32, DriverError> {
         self.running()?;
-        self.remote.settle().map_err(|error| {
-            self.link
-                .blocked()
-                .unwrap_or_else(|| DriverError::from_settle(step, error))
-        })
+        self.remote
+            .settle()
+            .map_err(|error| self.error(step, error))
     }
 
-    /// What `error` of the remote means: a native dialog or a hidden window holding the frames
-    /// is said to be the reason, as the remote gave up on it at once.
-    fn error(&self, error: PlayError) -> DriverError {
-        self.link.blocked().unwrap_or_else(|| error.into())
+    /// What `error` of the remote, playing `step`, means: a native dialog or a hidden window
+    /// holding the frames is said to be the reason, as the remote gave up on it at once.
+    fn error(&self, step: &str, error: PlayError) -> DriverError {
+        self.link
+            .blocked()
+            .unwrap_or_else(|| DriverError::played(step, error))
     }
 }

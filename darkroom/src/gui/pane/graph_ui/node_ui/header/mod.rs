@@ -10,7 +10,8 @@ use std::f32::consts::FRAC_PI_4;
 
 use palantir::{
     Align, Checkbox, Configure, DockDrop, DockOperation, EditableLabel, Menu, MenuItem,
-    MenuSeparator, Panel, ResponseSnapshot, Separator, Sizing, SplitSide, Ui, VAlign, WidgetId,
+    MenuSeparator, Modifiers, Panel, ResponseSnapshot, Separator, Sizing, SplitSide, Ui, VAlign,
+    WidgetId,
 };
 
 use scenarium::{CacheMode, NodeId};
@@ -266,7 +267,7 @@ fn cache_button_wid(node_id: NodeId) -> WidgetId {
 /// title is read-only: its record is a frozen snapshot no edit changes.
 fn title(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     let node = record.node;
-    let mode = ClickMode::with_shift(ui.modifiers().shift);
+    let mode = ClickMode::with_shift(ui.modifiers().contains(Modifiers::SHIFT));
     let title = EditableLabel::new(node.name())
         .id(wid::rename(node.node_id))
         .style(&node.theme().flat_text_edit)

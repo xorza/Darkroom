@@ -71,7 +71,7 @@ impl SessionHarness {
         // widget darkroom records reads its geometry from — the dock's
         // tab strips among them. Without it a geometry assertion here
         // measures palantir's stock theme rather than darkroom's.
-        ui.ui()
+        ui.ui_mut()
             .set_theme_for(ColorScheme::Dark, theme.palantir.clone());
         Self {
             ui,

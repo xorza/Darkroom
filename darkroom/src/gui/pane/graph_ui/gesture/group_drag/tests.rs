@@ -103,14 +103,11 @@ fn esc_cancels_a_drag_before_it_deselects() {
     h.ui.release(PointerButton::Left);
     h.frame();
 
-    h.ui.set_modifiers(Modifiers {
-        ctrl: true,
-        ..Modifiers::default()
-    });
+    h.ui.hold_modifiers(Modifiers::CTRL);
     h.ui.key(Key::Escape);
     let chord = h.frame();
     assert!(chord.is_empty(), "Ctrl+Esc deselects nothing: {chord:?}");
-    h.ui.set_modifiers(Modifiers::default());
+    h.ui.hold_modifiers(Modifiers::default());
     h.frame();
 
     h.ui.key(Key::Escape);

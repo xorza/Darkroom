@@ -884,7 +884,7 @@ mod tests {
             (DiscardChoice::Cancel, false),
         ] {
             let mut ui = Harness::new(UVec2::new(800, 600));
-            let mut app = App::offscreen(ui.ui());
+            let mut app = App::offscreen(ui.ui_mut());
             app.session.open.dirty = true;
             app.open_document_at(handed.clone());
             assert!(app.discard.is_up(), "{choice:?}: the prompt holds the open");
@@ -921,7 +921,7 @@ mod tests {
         use crate::gui::frame::app_command::ViewCommand;
 
         let mut ui = Harness::new(UVec2::new(800, 600));
-        let mut app = App::offscreen(ui.ui());
+        let mut app = App::offscreen(ui.ui_mut());
         assert!(!ui.frame_app(&mut app).repaint_requested, "nothing waits");
         assert!(!app.is_busy());
         let _ = app.run_command(AppCommand::View(ViewCommand::CopyImage));
@@ -962,7 +962,7 @@ mod tests {
             .save_to(&document, SavedPaths::Relative)
             .unwrap();
         let mut ui = Harness::new(UVec2::new(800, 600));
-        let mut app = App::offscreen(ui.ui());
+        let mut app = App::offscreen(ui.ui_mut());
         app.open_driven(&document, UnsavedEdits::Refuse).unwrap();
         assert_eq!(app.session.open.path.as_ref(), Some(&document));
 
@@ -1031,7 +1031,7 @@ mod tests {
             let mut dialogs = Dialogs::new(DialogFallback::Refuse);
             dialogs.queue(DialogAnswer::Path(document.clone()));
             let mut app = App::new(
-                ui.ui(),
+                ui.ui_mut(),
                 LaunchInputs {
                     preferences: store.clone().open(),
                     document: None,

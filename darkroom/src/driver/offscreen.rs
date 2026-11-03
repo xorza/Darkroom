@@ -2,11 +2,11 @@
 //! no desktop on a stepped clock.
 
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use palantir::wgpu::Features;
 use palantir::{
-    GpuRequestError, Harness, InspectedWidget, PlayError, PowerPreference, RequestedGpu,
+    Depth, GpuRequestError, Harness, InspectedWidget, PlayError, PowerPreference, RequestedGpu,
     Screenshot, Ui, WindowCommand,
 };
 
@@ -38,7 +38,7 @@ impl Offscreen {
     /// on a machine with no usable adapter.
     pub(crate) fn new(config: SessionConfig) -> Result<Self, DriverError> {
         let mut harness = Box::new(harness(config)?);
-        let app = launch(harness.ui());
+        let app = launch(harness.ui_mut());
         Ok(Self {
             app,
             harness,
@@ -57,7 +57,7 @@ impl Offscreen {
         let played = self
             .harness
             .play(&mut self.app, std::slice::from_ref(action))
-            .map_err(|failed| DriverError::from(failed.error));
+            .map_err(|failed| DriverError::played(&format!("{action:?}"), failed.error));
         self.running()?;
         played
     }
@@ -89,9 +89,9 @@ impl Offscreen {
         self.harness.has_pending_wake()
     }
 
-    /// Sleep until background work wakes the app or `deadline` passes.
-    pub(crate) fn wait_wake(&self, deadline: Instant) {
-        self.harness.wait_for_wake(deadline);
+    /// Sleep until background work wakes the app or `timeout` passes.
+    pub(crate) fn wait_wake(&self, timeout: Duration) {
+        self.harness.wait_for_wake(timeout);
     }
 
     /// Open the absolute `document`, or a new document for none, in place of the open one, as the
@@ -101,7 +101,7 @@ impl Offscreen {
     pub(crate) fn open(&mut self, document: Option<PathBuf>) -> Result<(), DriverError> {
         if self.quit() {
             self.launched_at = self.harness.window_commands().len();
-            self.app = launch(self.harness.ui());
+            self.app = launch(self.harness.ui_mut());
         }
         match document {
             Some(document) => self.app.open_driven(&document, UnsavedEdits::Discard)?,
@@ -120,7 +120,7 @@ impl Offscreen {
                     PlayError::EmptyRegion => DriverError::EmptyRegion {
                         region: format!("{region:?}"),
                     },
-                    error => DriverError::from_settle(&format!("the shot of {region:?}"), error),
+                    error => DriverError::played(&format!("the shot of {region:?}"), error),
                 })?;
         let picture = screenshot.image().fitted(max_side);
         // The legend reads the frame the image landed in, the harness's last.
@@ -139,7 +139,7 @@ impl Offscreen {
     pub(crate) fn settle(&mut self, step: &str) -> Result<u32, DriverError> {
         let settled = self.harness.settle(&mut self.app);
         self.running()?;
-        settled.map_err(|error| DriverError::from_settle(step, error))
+        settled.map_err(|error| DriverError::played(step, error))
     }
 }
 
@@ -147,7 +147,7 @@ impl Offscreen {
 fn harness(config: SessionConfig) -> Result<Harness, GpuRequestError> {
     // The harness's own settles step a frame as this driver's do.
     let builder = Harness::builder(config.size)
-        .scale(config.scale)
+        .system_scale(config.scale)
         .frame_dt(FRAME)
         .settle_frames(SETTLE_FRAMES)
         .background_wait(BACKGROUND_WAIT);
@@ -155,15 +155,17 @@ fn harness(config: SessionConfig) -> Result<Harness, GpuRequestError> {
         DisplayKind::Gpu => {
             // No optional features: the editor draws with what every adapter has.
             let gpu = RequestedGpu::headless(PowerPreference::HighPerformance, Features::empty())?;
-            builder.gpu(gpu.gpu).build()
+            builder.depth(Depth::gpu(gpu.gpu)).build()
         }
         #[cfg(feature = "internals")]
         #[expect(clippy::absolute_paths, reason = "a gated arm takes no gated import")]
         DisplayKind::TestGpu => builder
-            .gpu(palantir::internals::headless_test_gpu().handles())
+            .depth(Depth::gpu(
+                palantir::internals::headless_test_gpu().handles(),
+            ))
             .build(),
         #[cfg(feature = "internals")]
-        DisplayKind::Cpu => builder.depth(palantir::Depth::Record).build(),
+        DisplayKind::Cpu => builder.depth(Depth::Record).build(),
     })
 }
 

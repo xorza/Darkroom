@@ -6,6 +6,7 @@ use std::str::FromStr;
 
 use clap::Parser;
 use glam::UVec2;
+use palantir::SystemScale;
 
 /// The largest window side a session takes, in physical pixels: wgpu's default
 /// `max_texture_dimension_2d`, which desktop adapters reach. palantir asks the adapter for its
@@ -48,7 +49,7 @@ pub(crate) enum Launch {
     McpHeadless {
         document: Option<PathBuf>,
         size: UVec2,
-        scale: f32,
+        scale: SystemScale,
     },
 }
 
@@ -60,7 +61,7 @@ struct WindowSize(UVec2);
 /// Physical pixels per logical pixel, finite and at least [`MIN_SCALE`], so a label stays
 /// readable.
 #[derive(Clone, Copy, Debug)]
-struct WindowScale(f32);
+struct WindowScale(SystemScale);
 
 impl Cli {
     pub(crate) fn launch(self) -> Launch {
@@ -103,13 +104,17 @@ impl FromStr for WindowScale {
     type Err = String;
 
     fn from_str(text: &str) -> Result<Self, Self::Err> {
-        match text.parse::<f32>() {
-            Ok(scale) if scale.is_finite() && scale >= MIN_SCALE => Ok(Self(scale)),
-            _ => Err(format!(
-                "'{text}' is no scale; give the physical pixels per logical pixel, {MIN_SCALE} \
-                 or more"
-            )),
-        }
+        text.parse::<f32>()
+            .ok()
+            .filter(|scale| *scale >= MIN_SCALE)
+            .and_then(SystemScale::new)
+            .map(Self)
+            .ok_or_else(|| {
+                format!(
+                    "'{text}' is no scale; give the physical pixels per logical pixel, \
+                     {MIN_SCALE} or more"
+                )
+            })
     }
 }
 
@@ -120,6 +125,7 @@ mod tests {
     use clap::Parser;
     use clap::error::ErrorKind;
     use glam::UVec2;
+    use palantir::SystemScale;
 
     use crate::cli::{Cli, Launch, WindowScale, WindowSize};
 
@@ -149,7 +155,7 @@ mod tests {
             Ok(Launch::McpHeadless {
                 document: None,
                 size: UVec2::new(1600, 1000),
-                scale: 1.0,
+                scale: SystemScale::ONE,
             })
         );
         assert_eq!(
@@ -165,7 +171,7 @@ mod tests {
             Ok(Launch::McpHeadless {
                 document: scene(),
                 size: UVec2::new(800, 600),
-                scale: 2.0,
+                scale: SystemScale::new(2.0).unwrap(),
             })
         );
 
@@ -208,7 +214,7 @@ mod tests {
                 format!("'{none}' is no window; give each side from 1 to 8192 pixels")
             );
         }
-        assert_eq!("0.25".parse::<WindowScale>().unwrap().0, 0.25);
+        assert_eq!("0.25".parse::<WindowScale>().unwrap().0.get(), 0.25);
         for bad in ["0.24", "NaN", "inf", "-2", "two"] {
             assert_eq!(
                 bad.parse::<WindowScale>().unwrap_err(),
