@@ -84,7 +84,7 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
         .response
         .snapshot();
     if content.hovered() {
-        ui.set_cursor(CursorIcon::Pointer);
+        ui.request_cursor(CursorIcon::Pointer);
     }
     // The card's one action: open this node's value at full resolution. Asked
     // for here, where the clickable area is built, so the id it senses on and

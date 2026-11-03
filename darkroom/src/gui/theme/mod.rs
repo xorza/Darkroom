@@ -26,8 +26,8 @@ pub(crate) mod type_colors;
 pub(crate) mod viewer_theme;
 
 use palantir::{
-    BackdropFilter, ButtonTheme, Chrome, Corners, Metrics, RadiusSteps, RgbaF32, ShadowGeometry,
-    SpaceSteps, Spacing, Stroke, StrokeSteps, TextEditTheme, TextSteps,
+    AnimationSpec, BackdropFilter, ButtonTheme, Chrome, Corners, Metrics, RadiusSteps, RgbaF32,
+    ShadowGeometry, SpaceSteps, Spacing, Stroke, StrokeSteps, TextEditTheme, TextSteps,
 };
 
 use scenarium::DataType;
@@ -407,7 +407,7 @@ const fn metrics(elevation: &ElevationScale) -> Metrics {
             offset: elevation.floating.offset,
             blur: elevation.floating.blur,
         },
-        transition: None,
+        transition: AnimationSpec::SNAP,
     }
 }
 

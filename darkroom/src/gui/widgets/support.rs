@@ -3,9 +3,9 @@
 //! chips in [`chip`](crate::gui::widgets::chip).
 
 use palantir::{
-    Align, Block, ButtonTheme, Chrome, Configure, Corners, FontFamily, FontWeight, Rect,
-    ResponseSnapshot, RgbaF32, Sizing, SlotDefaults, Spacing, StatefulLook, TextInput, TextStyle,
-    TextWrap, Tooltip, Ui, WidgetLook,
+    Align, AnimationSpec, Block, ButtonTheme, Chrome, Configure, Corners, FontFamily, FontWeight,
+    Rect, ResponseSnapshot, RgbaF32, Sizing, SlotDefaults, Spacing, StatefulLook, TextInput,
+    TextStyle, TextWrap, Tooltip, Ui, WidgetLook,
 };
 
 use glam::Vec2;
@@ -134,7 +134,7 @@ pub(crate) const fn flush_button(unselected: StatefulLook, selected: StatefulLoo
         defaults: SlotDefaults {
             padding: Spacing::ZERO,
             margin: Spacing::ZERO,
-            animation: None,
+            animation: AnimationSpec::SNAP,
         },
     }
 }
