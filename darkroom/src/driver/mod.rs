@@ -50,10 +50,10 @@ pub enum DisplayKind {
     /// palantir's deviceless frontend: input, layout and hit tests, no pixels. Test code.
     #[cfg(feature = "internals")]
     Cpu,
-    /// [`DisplayKind::Gpu`] on the one device palantir's `headless_test_gpu` leases to the test
-    /// process, which panics where no adapter is. Test code: tests run in parallel in one
-    /// process, and a device created on one Vulkan instance while another enumerated its adapters
-    /// crashed in the Vulkan loader on lavapipe (CI run 40528808017).
+    /// [`DisplayKind::Gpu`] on the device palantir's `headless_test_gpu` lends the tests that run
+    /// at once, leased for the session; it panics where no adapter is. Test code: tests run in
+    /// parallel in one process, and a device created on one Vulkan instance while another
+    /// enumerated its adapters crashed in the Vulkan loader on lavapipe (CI run 40528808017).
     #[cfg(feature = "internals")]
     TestGpu,
 }

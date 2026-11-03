@@ -6,8 +6,7 @@ use std::time::Duration;
 
 use palantir::wgpu::{Features, PowerPreference};
 use palantir::{
-    Depth, GpuRequestError, Harness, InspectedWidget, PlayError, RequestedGpu, Screenshot, Ui,
-    WindowCommand,
+    Depth, Harness, InspectedWidget, PlayError, RequestedGpu, Screenshot, Ui, WindowCommand,
 };
 
 use crate::core::io::preferences::preferences_store::PreferencesStore;
@@ -28,6 +27,11 @@ pub(crate) struct Offscreen {
     app: App,
     /// Boxed: it holds a whole `Ui`, kilobytes a driver need not carry inline.
     harness: Box<Harness>,
+    /// The device a [`DisplayKind::TestGpu`] harness draws on. Declared after `harness`, as fields
+    /// drop in order: the lease outlives the handles the harness holds.
+    #[cfg(feature = "internals")]
+    #[expect(clippy::absolute_paths, reason = "a gated field takes no gated import")]
+    _test_gpu: Option<palantir::internals::HeadlessTestGpuLease>,
     /// The window commands the harness had recorded when this app launched: a close past them
     /// is this app's quit.
     launched_at: usize,
@@ -37,11 +41,41 @@ impl Offscreen {
     /// An app on an empty document in a window `config` describes, or the error of a GPU display
     /// on a machine with no usable adapter.
     pub(crate) fn new(config: SessionConfig) -> Result<Self, DriverError> {
-        let mut harness = Box::new(harness(config)?);
+        #[cfg(feature = "internals")]
+        let mut test_gpu = None;
+        let depth = match config.display {
+            DisplayKind::Gpu => {
+                // No optional features: the editor draws with what every adapter has.
+                let gpu =
+                    RequestedGpu::headless(PowerPreference::HighPerformance, Features::empty())?;
+                Depth::gpu(gpu.gpu)
+            }
+            #[cfg(feature = "internals")]
+            #[expect(clippy::absolute_paths, reason = "a gated arm takes no gated import")]
+            DisplayKind::TestGpu => Depth::gpu(
+                test_gpu
+                    .insert(palantir::internals::headless_test_gpu())
+                    .handles(),
+            ),
+            #[cfg(feature = "internals")]
+            DisplayKind::Cpu => Depth::Record,
+        };
+        // The harness's own settles step a frame as this driver's do.
+        let mut harness = Box::new(
+            Harness::builder(config.size)
+                .system_scale(config.scale)
+                .frame_dt(FRAME)
+                .settle_frames(SETTLE_FRAMES)
+                .background_wait(BACKGROUND_WAIT)
+                .depth(depth)
+                .build(),
+        );
         let app = launch(harness.ui_mut());
         Ok(Self {
             app,
             harness,
+            #[cfg(feature = "internals")]
+            _test_gpu: test_gpu,
             launched_at: 0,
         })
     }
@@ -141,32 +175,6 @@ impl Offscreen {
         self.running()?;
         settled.map_err(|error| DriverError::played(step, error))
     }
-}
-
-/// The window `config` describes, on its display's device.
-fn harness(config: SessionConfig) -> Result<Harness, GpuRequestError> {
-    // The harness's own settles step a frame as this driver's do.
-    let builder = Harness::builder(config.size)
-        .system_scale(config.scale)
-        .frame_dt(FRAME)
-        .settle_frames(SETTLE_FRAMES)
-        .background_wait(BACKGROUND_WAIT);
-    Ok(match config.display {
-        DisplayKind::Gpu => {
-            // No optional features: the editor draws with what every adapter has.
-            let gpu = RequestedGpu::headless(PowerPreference::HighPerformance, Features::empty())?;
-            builder.depth(Depth::gpu(gpu.gpu)).build()
-        }
-        #[cfg(feature = "internals")]
-        #[expect(clippy::absolute_paths, reason = "a gated arm takes no gated import")]
-        DisplayKind::TestGpu => builder
-            .depth(Depth::gpu(
-                palantir::internals::headless_test_gpu().handles(),
-            ))
-            .build(),
-        #[cfg(feature = "internals")]
-        DisplayKind::Cpu => builder.depth(Depth::Record).build(),
-    })
 }
 
 /// An app on an empty document.
