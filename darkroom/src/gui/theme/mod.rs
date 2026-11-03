@@ -407,6 +407,9 @@ const fn metrics(elevation: &ElevationScale) -> Metrics {
             offset: elevation.floating.offset,
             blur: elevation.floating.blur,
         },
+        // Darkroom frosts its own floats, held for the muted ink, and keeps the modal opaque
+        // under its scrim (`palantir_bridge::theme`).
+        float_frost: None,
         transition: AnimationSpec::SNAP,
     }
 }
