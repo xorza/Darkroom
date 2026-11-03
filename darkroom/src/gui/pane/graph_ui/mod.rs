@@ -102,7 +102,7 @@ pub(crate) struct GraphUi {
     /// [`Document::shows_graph`], so there is no second spelling of visibility
     /// to keep in step with the first.
     ///
-    /// [`Ui::frame_id`] and not [`Ui::render_frame_id`]: the latter counts
+    /// [`Ui::record_frame_id`] and not [`Ui::render_frame_id`]: the latter counts
     /// painted frames too, and a paint-only frame runs no record pass at all —
     /// so an idle caret blink (the new-node palette's search field is enough)
     /// would open a gap here while the canvas never went anywhere, and the next
@@ -283,9 +283,9 @@ impl GraphUi {
     /// cases both mean *still here* and must not read as an appearance: the
     /// previous frame (the ordinary steady state) and *this* frame — a frame
     /// that owes a relayout records twice, and both passes read the same
-    /// [`Ui::frame_id`]. Only a gap wider than that is an absence.
+    /// [`Ui::record_frame_id`]. Only a gap wider than that is an absence.
     fn appearing(&mut self, ui: &Ui) -> bool {
-        let frame = ui.frame_id();
+        let frame = ui.record_frame_id();
         let appearing = self
             .last_prepass_frame
             .is_none_or(|last| last.saturating_add(1) < frame);

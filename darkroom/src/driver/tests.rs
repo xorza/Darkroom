@@ -309,7 +309,7 @@ fn a_node_locator_names_exactly_one_node() {
 }
 
 /// Two clicks on a node's title with a key between them stay two clicks: the second waits out
-/// the double-click window whatever came between. A double click there opens its rename field;
+/// the double-click interval whatever came between. A double click there opens its rename field;
 /// the caret blinks there, and the session still settles with the field focused.
 #[test]
 fn a_focused_text_field_still_settles() {

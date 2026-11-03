@@ -185,8 +185,8 @@ impl WireUi {
         // frames coming — without this it only redraws when some other
         // widget's hover change happens to wake a frame). `BUTTONS` delivers
         // the terminating press.
-        ui.watch_pointer(PointerWake::MOVE | PointerWake::BUTTONS);
-        let ended = ui.pointer_events().iter().find_map(|ev| match ev {
+        let events = ui.pointer_events(PointerWake::MOVE | PointerWake::BUTTONS);
+        let ended = events.iter().find_map(|ev| match ev {
             PointerEvent::Pressed {
                 button: button @ (PointerButton::Left | PointerButton::Right),
                 ..

@@ -162,7 +162,7 @@ impl CanvasHarness {
         }
     }
 
-    /// Let the double-click window lapse, so the next press opens a fresh
+    /// Let the double-click interval lapse, so the next press opens a fresh
     /// click rather than extending the last one. Records no frame: a press is
     /// stamped when it arrives, so the gap alone separates the runs.
     pub(crate) fn advance_past_double_click(&mut self) {
