@@ -252,7 +252,7 @@ impl NodeUi {
         let row_tracks = &mut state.row_tracks;
         let panel = Panel::vstack()
             .id(wid::body(node.node_id))
-            .pos(node.pos)
+            .at(node.pos)
             // A preview needs room for a thumbnail; every other node keeps the
             // theme's own floor.
             .min_size(if node.preview() {

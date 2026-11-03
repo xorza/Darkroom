@@ -152,7 +152,7 @@ impl TieWidgets {
             let hit = axes.hit_rect();
             let body = Panel::zstack()
                 .id(wid::tie_body(band.tie))
-                .pos(hit.min)
+                .at(hit.min)
                 .size((Sizing::fixed(hit.size.w), Sizing::fixed(hit.size.h)))
                 .sense(Sense::CLICK | Sense::DRAG)
                 .show(ui, |_| {});
@@ -187,7 +187,7 @@ impl TieWidgets {
         let side = KNOB_HIT_RADIUS * 2.0;
         let knob = Panel::zstack()
             .id(wid::tie_knob(tie))
-            .pos(center - Vec2::splat(KNOB_HIT_RADIUS))
+            .at(center - Vec2::splat(KNOB_HIT_RADIUS))
             .size(side)
             .sense(Sense::CLICK | Sense::DRAG)
             .show(ui, |_| {});

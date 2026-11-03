@@ -198,7 +198,7 @@ impl<'a> PortGlyph<'a> {
                 let [l, t, r, b] = margin.to_array();
                 panel.margin(Spacing::new(l - inset, t - inset, r - inset, b - inset))
             }
-            Placement::CenteredOn(point) => panel.pos(point - Vec2::splat(hit * 0.5)),
+            Placement::CenteredOn(point) => panel.at(point - Vec2::splat(hit * 0.5)),
         };
         let shown = panel.show(ui, |ui| {
             glyph.draw(ui, theme.stroke.line, theme.radius.mark);
