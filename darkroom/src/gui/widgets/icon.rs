@@ -251,7 +251,8 @@ impl Pen {
         let (x, y, w, h) = rect;
         let outer = self.rect((x - half, y - half, w + STROKE, h + STROKE));
         ui.add_shape(
-            Shape::rect(outer)
+            Shape::rect()
+                .at(outer)
                 .corners((radius + half) * self.k)
                 .border(self.stroke),
         );
@@ -259,7 +260,8 @@ impl Pen {
 
     fn fill(self, ui: &mut Ui, rect: (f32, f32, f32, f32), radius: f32) {
         ui.add_shape(
-            Shape::rect(self.rect(rect))
+            Shape::rect()
+                .at(self.rect(rect))
                 .corners(radius * self.k)
                 .fill(self.color),
         );

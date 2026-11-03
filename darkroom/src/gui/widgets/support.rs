@@ -91,7 +91,9 @@ pub(crate) fn figure_width(ui: &mut Ui, style: &TextStyle, glyphs: u8) -> f32 {
 
 /// A small circle of radius `r` centered on `center`, for the caller to fill.
 pub(crate) fn dot(center: Vec2, r: f32) -> RectShape {
-    Shape::rect(Rect::new(center.x - r, center.y - r, 2.0 * r, 2.0 * r)).corners(r)
+    Shape::rect()
+        .at(Rect::new(center.x - r, center.y - r, 2.0 * r, 2.0 * r))
+        .corners(r)
 }
 
 /// A filled circle of the theme's `icon.dot` side that takes its side in layout, so a label flows

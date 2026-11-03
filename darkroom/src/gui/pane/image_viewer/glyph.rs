@@ -39,14 +39,14 @@ impl Swatch {
         let radius = theme.radius.mark;
         let rect = Rect::new(o, o, d, d);
         if let Some(fill) = flat_fill(theme, mode) {
-            ui.add_shape(Shape::rect(rect).corners(radius).fill(fill));
+            ui.add_shape(Shape::rect().at(rect).corners(radius).fill(fill));
         } else {
             let (light, dark) = (theme.viewer.checker_light, theme.viewer.checker_dark);
-            ui.add_shape(Shape::rect(rect).corners(radius).fill(dark));
+            ui.add_shape(Shape::rect().at(rect).corners(radius).fill(dark));
             // Two light quads on the diagonal make the 2×2 mini checker.
             let h = d * 0.5;
             for cell in [Rect::new(o, o, h, h), Rect::new(o + h, o + h, h, h)] {
-                ui.add_shape(Shape::rect(cell).fill(light));
+                ui.add_shape(Shape::rect().at(cell).fill(light));
             }
         }
         // Ring on top so the checker quads can't cover it.
@@ -56,7 +56,8 @@ impl Swatch {
             theme.viewer.swatch_ring
         };
         ui.add_shape(
-            Shape::rect(rect)
+            Shape::rect()
+                .at(rect)
                 .corners(radius)
                 .border(Stroke::new(ring, theme.stroke.line)),
         );

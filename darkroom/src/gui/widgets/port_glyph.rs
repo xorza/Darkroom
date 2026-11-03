@@ -265,12 +265,13 @@ impl Painted {
                 // lands the ring's inner edge exactly on the fill's outer edge.
                 if let Some(color) = outline {
                     ui.add_shape(
-                        Shape::rect(rect.inflated(ring))
+                        Shape::rect()
+                            .at(rect.inflated(ring))
                             .corners(radius + ring)
                             .border(Stroke::new(color, ring)),
                     );
                 }
-                let disc = Shape::rect(rect).corners(radius);
+                let disc = Shape::rect().at(rect).corners(radius);
                 ui.add_shape(if hollow {
                     disc.border(Stroke::new(fill, ring))
                 } else {

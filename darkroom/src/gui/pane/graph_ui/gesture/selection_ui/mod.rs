@@ -205,7 +205,8 @@ impl SelectionUi {
             return;
         }
         ui.add_shape(
-            Shape::rect(rect)
+            Shape::rect()
+                .at(rect)
                 .fill(theme.colors.selection_fill())
                 .border(border(theme, zoom)),
         );
