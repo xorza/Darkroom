@@ -76,7 +76,7 @@ pub(super) fn theme(
         &mut theme.tooltip.panel,
         &mut theme.color_picker.popup.panel,
     ] {
-        *panel = theme::frosted(panel, p.text_muted);
+        *panel = theme::GLASS.dress(panel, p.text_muted);
     }
     theme
 }

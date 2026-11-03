@@ -26,8 +26,9 @@ pub(crate) mod type_colors;
 pub(crate) mod viewer_theme;
 
 use palantir::{
-    AnimationSpec, BackdropFilter, ButtonTheme, Chrome, Corners, Metrics, RadiusSteps, RgbaF32,
-    ShadowGeometry, SpaceSteps, Spacing, Stroke, StrokeSteps, TextEditTheme, TextSteps,
+    AnimationSpec, BackdropFilter, ButtonTheme, Chrome, Corners, FloatMaterial, Metrics,
+    RadiusSteps, RgbaF32, ShadowGeometry, SpaceSteps, Spacing, Stroke, StrokeSteps, TextEditTheme,
+    TextSteps,
 };
 
 use scenarium::DataType;
@@ -320,7 +321,7 @@ impl Theme {
         let metrics = metrics(&elevation);
         let palantir = palantir_bridge::theme(&pal, &metrics, &icon);
         let primary_button = ButtonTheme::accent(&pal, &metrics);
-        let pill = frosted(
+        let pill = GLASS.dress(
             &Chrome::rounded(colors.surround_bg, Corners::all(radius.float)),
             ink.muted,
         );
@@ -409,31 +410,23 @@ const fn metrics(elevation: &ElevationScale) -> Metrics {
         },
         // Darkroom frosts its own floats, held for the muted ink, and keeps the modal opaque
         // under its scrim (`palantir_bridge::theme`).
-        float_frost: None,
+        float_material: None,
         transition: AnimationSpec::SNAP,
     }
 }
 
-/// `chrome` as the frosted glass every surface that floats over content wears, the popups and the
-/// toolbar pills: its own solid fill as a tint at 0.72 alpha over a backdrop blurred by σ 20
-/// logical px, wide enough that a node's title under it reads as color, not as text, and capped
-/// so `ink`, the dimmest ink the surface paints, keeps its contrast at 4.5:1, as Fluent puts
-/// acrylic under flyouts and in-app surfaces
+/// The frosted glass every surface that floats over content wears, the popups and the toolbar
+/// pills: its own solid fill as a tint at 0.72 alpha over a backdrop blurred by σ 20 logical px,
+/// wide enough that a node's title under it reads as color, not as text, and bound so the
+/// dimmest ink the surface paints keeps its contrast at 4.5:1, as Fluent puts acrylic under
+/// flyouts and in-app surfaces
 /// ([in-app acrylic](https://learn.microsoft.com/windows/apps/develop/ui/in-app-acrylic)).
 /// Refused: a tint alone, 1.18:1 over a white image; a frosted modal, whose scrim leaves nothing
 /// to see through.
-pub(super) fn frosted(chrome: &Chrome, ink: RgbaF32) -> Chrome {
-    let tint = chrome
-        .fill
-        .as_solid()
-        .expect("a floating surface has a solid fill")
-        .with_alpha(0.72);
-    Chrome {
-        fill: tint.into(),
-        ..chrome.clone()
-    }
-    .with_backdrop_filter(BackdropFilter::frosted(20.0).with_max_luminance_for(ink, tint))
-}
+pub(super) const GLASS: FloatMaterial = FloatMaterial {
+    filter: BackdropFilter::frosted(20.0),
+    tint_alpha: 0.72,
+};
 
 /// `base` with every state's border in `color`, its width kept.
 fn error_bordered(base: &TextEditTheme, color: RgbaF32) -> TextEditTheme {
