@@ -181,9 +181,8 @@ impl NodePalette<'_> {
         MenuSeparator::new().show(ui);
         // Read off the popup's own presses rather than `key_pressed`: the search field holds the
         // focus and its scope takes the arrow keys, which a single-line field leaves unused.
-        ui.watch_keyboard(KeyboardWake::KEY);
         let last = search.rows.len().saturating_sub(1);
-        for press in ui.keyboard_events() {
+        for press in ui.keyboard_events(KeyboardWake::KEY) {
             let to = match press.key {
                 Key::ArrowDown => (search.focused + 1).min(last),
                 Key::ArrowUp => search.focused.saturating_sub(1),
