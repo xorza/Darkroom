@@ -45,8 +45,8 @@ desktop for an agent or a test.
   the desktop window through `Remote` between two frames. Refused: a request queue in the app.
 - **The harness drives the real `App`**, with its runtime, worker and previews. Refused: a
   fixture library, which cannot open a real project.
-- **MCP over stdio, nothing else on stdout**; `.mcp.json` starts the binary `cargo drive run mcp`
-  builds. Refused: a loopback HTTP server, and `cargo run`, whose build outlasts the client's
+- **MCP over stdio, nothing else on stdout**; `.mcp.json` starts the binary `cargo mcp` builds.
+  Refused: a loopback HTTP server, and `cargo run`, whose build outlasts the client's
   timeout ([MCP transports](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)).
 - **The process is the session.** An open replaces the project, a quit or a panic ends the
   server; a window outlives its server. Refused: sessions inside one server.

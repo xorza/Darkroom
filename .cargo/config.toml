@@ -1,8 +1,21 @@
-# x86-64-v3 (Haswell, 2013; Excavator, 2015) is the x86 baseline: AVX2, FMA, BMI2 and F16C are
-# static, `simd` refuses a build without AVX2 and FMA, and no code checks the CPU at run time.
-# `cfg`-scoped rather than `[build]` so non-x86 targets aren't handed a CPU they aren't.
+# x86-64-v3 is the x86 baseline: `simd` refuses a build without AVX2 and FMA.
 [target.'cfg(target_arch = "x86_64")']
 rustflags = ["-C", "target-cpu=x86-64-v3"]
-# Rustdoc compiles each crate too, and `simd` refuses a build without AVX2 and FMA: without the
-# same CPU its docs do not build.
 rustdocflags = ["-C", "target-cpu=x86-64-v3"]
+
+# `--workspace` in each lane: `default-members` holds `app` alone.
+[alias]
+gate-lint = "clippy --workspace --all-targets --all-features --keep-going -- -D warnings"
+gate-lint-nogpu = "clippy --workspace --all-targets --features lumos/ml,lumos/real-data,common/introspect-derive,darkroom/profile-with-tracy --keep-going -- -D warnings"
+gate-ship = "clippy --workspace --keep-going -- -D warnings"
+# No `real-data`, which reads the gitignored dataset, nor `profile-with-tracy`, which opens the
+# Tracy socket.
+gate-test = "test --workspace --tests --no-fail-fast --features imaginarium/wgpu,lumos/ml,common/introspect-derive"
+real-data = "test -p lumos --all-features"
+mcp = "build -p darkroom-app --profile mcp"
+# `--bench *`, not `--benches`, which also selects each library and binary.
+bench-all = "bench --workspace --bench * --features imaginarium/wgpu"
+bench-once = "test --workspace --bench * --features imaginarium/wgpu"
+# `simd` alone: `libraw-sys` builds LibRaw's C++ for the target.
+lint-x86 = "clippy -p simd --all-targets --all-features --target x86_64-unknown-linux-gnu -- -D warnings"
+lint-aarch64 = "clippy -p simd --all-targets --all-features --target aarch64-unknown-linux-gnu -- -D warnings"

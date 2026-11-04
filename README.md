@@ -84,14 +84,8 @@ takes its nodes from `lens`, over `imaginarium`, `lumos` and `fits-well`.
 
 ## Develop
 
-Every check runs through [cargo-drive](https://github.com/xorza/drive), from the
-workspace root:
-
-```sh
-cargo install --locked --git https://github.com/xorza/drive
-cargo drive check   # format and lints
-cargo drive test    # the tests
-cargo drive gate    # everything CI runs
-```
+Every check is a cargo alias of `.cargo/config.toml`, run from the workspace
+root; the Verification section of `AGENTS.md` chains them into the gate, which
+CI runs too.
 
 `AGENTS.md` and each crate's own hold the project's decisions.

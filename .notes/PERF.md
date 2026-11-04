@@ -14,7 +14,7 @@ centroid, background mesh, demosaic, wavelet, stretch, warp). Branch `perf-simd`
 
 ## Build RAM peaks
 
-- x86, `cargo drive bench` (darkroom, imaginarium and lumos bench binaries, fat LTO): 11.4 to
+- x86, `cargo bench-all` (darkroom, imaginarium and lumos bench binaries, fat LTO): 11.4 to
   15.3 GiB system-wide used, from about 6 GiB idle. One build at a time.
 - Mac, the same with `CARGO_BUILD_JOBS=4`: fits in 8 GiB; one build at a time, none while it
   benches.

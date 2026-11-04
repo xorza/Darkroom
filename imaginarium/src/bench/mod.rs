@@ -1,4 +1,4 @@
-//! The criterion benches, which `benches/imaginarium.rs` runs: `cargo drive bench`.
+//! The criterion benches, which `benches/imaginarium.rs` runs: `cargo bench-all`.
 //!
 //! Two kinds, and every case is one. An `atomic` case times one kernel on the unit dispatch hands
 //! it, once for each variant: the scalar reference, and the kernel compiled for each tier this CPU

@@ -44,25 +44,29 @@ Windows, `libclang-dev` on Linux.
 
 ## Verification
 
-`cargo drive` runs every check. The driver is `cargo-drive`, installed with
-`cargo install --locked --git https://github.com/xorza/drive`; the drive table
-in the root `Cargo.toml` names the version the project needs, and another
-version refuses to run. Run it from the root.
+The gate is one chain of plain cargo commands, run from the root. Each is an
+alias in `.cargo/config.toml`, and the chain stops at the first that fails:
 
 ```
-cargo drive check              # fmt, then the lints over every target and feature
-cargo drive test [args]        # the tests with default features; the runner's arguments pick some
-cargo drive bench [args]       # the benches; a filter, or --test to run each case once
-cargo drive gate               # every lint and test lane, as CI runs it with --ci
-cargo drive run <name> [args]  # a command of the root's own, from its drive table
+cargo fmt --all && cargo gate-lint && cargo gate-lint-nogpu && cargo gate-ship && cargo gate-test
 ```
 
-Pick each by what it tells and what it costs, as dev time counts: a filtered `test` is the
-cheapest way to see an edit work and compiles it too; `check` adds the lints, a second compile,
-worth it once a piece of work stands; `gate` runs every lane, minutes long. **Run `gate` before
-a turn that changed code ends.**
+Each command reports every error it finds, through `--keep-going` and
+`--no-fail-fast`, so one failed run shows all of its own. `fmt --all` also
+formats the submodules, each by its own `rustfmt.toml`. **Run the gate before
+a turn that changed code ends, and before each push**: master takes direct
+pushes, and CI runs the same lanes on three OSes.
 
-An agent sees the editor through the `darkroom` MCP server: `cargo drive run mcp`
+A filtered `cargo gate-test <name>` is the cheapest way to see an edit work: it
+builds the gate's own test shape, so the gate finds that build fresh. A change
+in `palantir` or `fits-well` also runs that submodule's own gate, from its
+folder, as its `AGENTS.md` says.
+
+`cargo real-data [filter]` runs the tests that read the gitignored dataset. A
+change in `simd` also lints the other architecture, with `cargo lint-x86` or
+`cargo lint-aarch64`.
+
+An agent sees the editor through the `darkroom` MCP server: `cargo mcp`
 builds it, and Claude Code starts it, `darkroom --mcp --headless`, from
 `.mcp.json` on its next launch. Then
 `darkroom_open {"project": "darkroom/sample/sample.darkroom", "copy": true}` and
@@ -91,8 +95,9 @@ it; an `integration` case times a pipeline stage, a frame or a public entry
 point end to end on a scene. An id is `<kind>/<group>/<case>`, and criterion's
 filter selects by it; a crate with GPU cases puts the backend first in every
 case, so `'/cpu/'` opens no device. An `atomic` case of a vector kernel runs
-for the scalar reference and each tier the CPU has. `cargo drive bench` runs
-the benches of the root it runs in; each submodule runs its own.
+for the scalar reference and each tier the CPU has. `cargo bench-all` runs
+every bench of the workspace and `cargo bench-once` each case once, criterion's
+arguments after a `--`; each submodule runs its own.
 
 ## Conventions
 
@@ -147,7 +152,6 @@ the benches of the root it runs in; each submodule runs its own.
 ## Names
 
 One word, one meaning, in the workspace crates; the submodules keep their own.
-`cargo drive vocabulary` lists every declared name and word for a review.
 
 - **A wire joins an output to an input.** `Binding` is what an input holds,
   `Const` or `Wire`; the GUI draws a wire and an event subscription alike as

@@ -20,9 +20,6 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  # fits-well's test runner: its drive table keeps nextest's default, which ran its suite in 0.48 s
-  # where `cargo test` took 0.75 s.
-  NEXTEST_VERSION: 0.9.148
 
 defaults:
   run:
@@ -70,16 +67,25 @@ jobs:
         with:
           # Only master writes, so a pull request cannot evict what master reads.
           save-if: ${{ github.ref == 'refs/heads/master' }}
-      # The driver's master, which the cache's `~/.cargo/bin` keeps until it moves, as palantir's
-      # CI installs it. A master the drive table's `version` does not take fails the gate, and
-      # names the version it is. Nextest builds only when its version moves.
-      - run: cargo install --locked --git https://github.com/xorza/drive
-      - run: cargo install --locked cargo-nextest --version "$NEXTEST_VERSION"
-      # `--ci` runs past a failure, so one run reports every step. The core size limit is the
-      # shell's own, so it is raised in the step that runs the tests.
-      - run: |
+      # The gate of AGENTS.md, one step per command. Each runs past an earlier failure, so one run
+      # reports every lane. palantir and fits-well are built here as dependencies alone: each
+      # repository's own CI runs its lanes. `--locked` goes before the alias, as an alias's own
+      # arguments end with clippy's.
+      - run: cargo fmt --all --check
+      - if: ${{ !cancelled() }}
+        run: cargo --locked gate-lint
+      - if: ${{ !cancelled() }}
+        run: cargo --locked gate-lint-nogpu
+      - if: ${{ !cancelled() }}
+        run: cargo --locked gate-ship
+      # The build apart from the run, so each shows its own time.
+      - if: ${{ !cancelled() }}
+        run: cargo --locked gate-test --no-run
+      # The core size limit is the shell's own, so it is raised in the step that runs the tests.
+      - if: ${{ !cancelled() }}
+        run: |
           if [ "$RUNNER_OS" = Linux ]; then ulimit -c unlimited; fi
-          cargo drive gate --ci
+          cargo --locked gate-test
       # The backtrace of every thread of each crashed binary, as gdb reads its core.
       - name: Backtrace crashes
         if: failure() && runner.os == 'Linux'

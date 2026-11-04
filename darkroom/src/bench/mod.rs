@@ -1,4 +1,4 @@
-//! The criterion benches, which `benches/darkroom.rs` runs: `cargo drive bench`.
+//! The criterion benches, which `benches/darkroom.rs` runs: `cargo bench-all`.
 //!
 //! The kinds, the id shape and the sampling are palantir's (`palantir::bench::kind` and `palantir::bench::backends`), as
 //! darkroom's one case is palantir's frame through the editor's widgets: an `integration` case

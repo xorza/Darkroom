@@ -1,4 +1,4 @@
-//! The criterion benches, which `benches/lumos.rs` runs: `cargo drive bench`.
+//! The criterion benches, which `benches/lumos.rs` runs: `cargo bench-all`.
 //!
 //! Two kinds, and every bench is one: `atomic`, one operation on the unit production gives it (a
 //! tile, a stamp, a row, a pixel's stack of frames, or the frame an operation takes whole);

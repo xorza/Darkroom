@@ -20,38 +20,6 @@ resolver = "3"
 version = "0.1.0"
 edition = "2024"
 
-
-[workspace.metadata.drive]
-version = "0.2.7"
-test = [
-    { all-features-but = [
-        "lumos/real-data",
-        "darkroom/profile-with-tracy",
-    ] },
-]
-test-runner = "cargo-test"
-lint = ["--all-features", { all-features-but = ["imaginarium/wgpu"] }]
-bench = "--features imaginarium/wgpu"
-
-[workspace.metadata.drive.commands.lint-x86]
-steps = [
-    { build = "clippy -p simd --all-targets --all-features --target x86_64-unknown-linux-gnu", env = { CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS = "-D warnings" } },
-]
-
-[workspace.metadata.drive.commands.lint-aarch64]
-steps = [
-    { build = "clippy -p simd --all-targets --all-features --target aarch64-unknown-linux-gnu", env = { CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS = "-D warnings" } },
-]
-
-# The tests that read the gitignored dataset in `test_data/lumos_data/`, only when asked; the
-# arguments go to the test binaries, as a name filter.
-[workspace.metadata.drive.commands.real-data]
-steps = [{ cargo = "test -p lumos --all-features", args = true }]
-
-[workspace.metadata.drive.commands.mcp]
-steps = [{ build = "build -p darkroom-app --profile mcp" }]
-
-
 [workspace.dependencies]
 common = { path = "common" }
 common-derive = { path = "common/common-derive" }
