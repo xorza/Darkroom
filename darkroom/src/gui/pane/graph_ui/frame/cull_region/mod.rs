@@ -37,8 +37,17 @@ impl CullRegion {
         rect.is_none_or(|rect| self.keeps_rect(rect))
     }
 
+    /// Whether `rect` reaches the visible region, edges included. A closed test, not
+    /// `Rect::intersects`, which needs a shared area: a level wire's control hull has no height,
+    /// and its stroke paints all the same, within the [`CULL_MARGIN`] the region holds for it.
     pub(crate) fn keeps_rect(self, rect: Rect) -> bool {
-        self.visible.is_none_or(|visible| visible.intersects(rect))
+        self.visible.is_none_or(|visible| {
+            let (seen, reach) = (visible.max(), rect.max());
+            rect.min.x <= seen.x
+                && visible.min.x <= reach.x
+                && rect.min.y <= seen.y
+                && visible.min.y <= reach.y
+        })
     }
 }
 

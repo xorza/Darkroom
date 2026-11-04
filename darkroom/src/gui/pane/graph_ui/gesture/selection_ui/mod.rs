@@ -110,11 +110,14 @@ impl SelectionUi {
         if self.band.is_none()
             && ctx.gesture() == Some(CanvasGesture::Select)
             && let Some(p) = resp.pointer_local
+            && let Some(travel) = resp.left.drag.delta()
         {
-            let w = graph_ctx.viewport().to_world(p);
+            // The band opens where the press went down, not where the drag latched past its
+            // threshold, so the corner under the press is the band's.
+            let viewport = graph_ctx.viewport();
             let band = RubberBand {
-                start: w,
-                cur: w,
+                start: viewport.to_world(p - travel),
+                cur: viewport.to_world(p),
                 // Shift is a gesture *parameter* (extend vs replace), not
                 // arbitration — read it here, not in the classifier.
                 // Captured once, so the per-frame union never re-reads the

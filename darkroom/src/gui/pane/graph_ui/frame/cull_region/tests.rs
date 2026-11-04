@@ -57,15 +57,19 @@ fn wire_cull_uses_the_control_hull() {
         visible: Some(Rect::new(0.0, 0.0, 100.0, 100.0)),
     };
     // Level wire: zero-height hull box, handles between the ends.
-    let flat = |x0: f32, x1: f32| Wire {
-        p0: Vec2::new(x0, 50.0),
-        p1: Vec2::new(x0 + 10.0, 50.0),
-        p2: Vec2::new(x1 - 10.0, 50.0),
-        p3: Vec2::new(x1, 50.0),
+    let level = |x0: f32, x1: f32, y: f32| Wire {
+        p0: Vec2::new(x0, y),
+        p1: Vec2::new(x0 + 10.0, y),
+        p2: Vec2::new(x1 - 10.0, y),
+        p3: Vec2::new(x1, y),
     };
+    let flat = |x0: f32, x1: f32| level(x0, x1, 50.0);
 
     // Both endpoints off-screen left/right, hull crosses the view.
     assert!(region.keeps_rect(flat(-50.0, 150.0).hull()));
+    // A hull of no height is kept on the region's edge, and dropped a pixel past it.
+    assert!(region.keeps_rect(level(-50.0, 150.0, 0.0).hull()));
+    assert!(!region.keeps_rect(level(-50.0, 150.0, -1.0).hull()));
     // Entirely right of the view.
     assert!(!region.keeps_rect(flat(200.0, 300.0).hull()));
     // Endpoints outside the view, but a handle drags the hull in —
