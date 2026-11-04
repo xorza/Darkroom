@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use palantir::{InspectedWidget, PlayError, Remote, Ui};
+use palantir::{AgentWindow, InspectedWidget, PlayError, Remote, Ui};
 
 use crate::driver::action::Play;
 use crate::driver::error::DriverError;
@@ -62,9 +62,10 @@ impl WindowBackend {
 
     /// Refuse to go on once the window closed: the session ends with it.
     pub(crate) fn running(&self) -> Result<(), DriverError> {
-        match self.link.handle.last_frame(MAIN_WINDOW) {
-            Some(_) => Ok(()),
-            None => Err(DriverError::WindowClosed),
+        if self.link.handle.is_open(MAIN_WINDOW) {
+            Ok(())
+        } else {
+            Err(DriverError::WindowClosed)
         }
     }
 

@@ -4,9 +4,11 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use palantir::wgpu::{Features, PowerPreference};
+use palantir::PowerPreference;
+use palantir::wgpu::Features;
 use palantir::{
-    Depth, Harness, InspectedWidget, PlayError, RequestedGpu, Screenshot, Ui, WindowCommand,
+    AgentWindow, Depth, Harness, InspectedWidget, PlayError, RequestedGpu, Screenshot, Ui,
+    WindowCommand,
 };
 
 use crate::core::io::preferences::preferences_store::PreferencesStore;
@@ -90,7 +92,8 @@ impl Offscreen {
     pub(crate) fn play(&mut self, action: &Play) -> Result<u32, DriverError> {
         let played = self
             .harness
-            .play(&mut self.app, std::slice::from_ref(action))
+            .session(&mut self.app)
+            .play(std::slice::from_ref(action))
             .map_err(|failed| DriverError::played(&format!("{action:?}"), failed.error));
         self.running()?;
         played
@@ -149,7 +152,8 @@ impl Offscreen {
         let rect = region.rect(&self.app, self.harness.ui())?;
         let screenshot: Screenshot =
             self.harness
-                .shot(&mut self.app, rect)
+                .session(&mut self.app)
+                .shot(rect)
                 .map_err(|error| match error {
                     PlayError::EmptyRegion => DriverError::EmptyRegion {
                         region: format!("{region:?}"),
@@ -171,7 +175,7 @@ impl Offscreen {
     /// in real time. A frame that quits the editor ends the step with [`DriverError::Quit`]: every
     /// step ends here, so no call goes on past a quit, whatever it guards at its start.
     pub(crate) fn settle(&mut self, step: &str) -> Result<u32, DriverError> {
-        let settled = self.harness.settle(&mut self.app);
+        let settled = self.harness.session(&mut self.app).settle();
         self.running()?;
         settled.map_err(|error| DriverError::played(step, error))
     }

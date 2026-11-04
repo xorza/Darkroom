@@ -3,9 +3,9 @@ use std::path::PathBuf;
 use std::str;
 
 use common::{SerdeFormat, TempDir, fs};
-use glam::{IVec2, UVec2};
+use glam::IVec2;
 use lens::MlModelPaths;
-use palantir::ImageFilter;
+use palantir::{ImageFilter, Size};
 
 use crate::core::io::preferences::error::{PreferencesLoadError, PreferencesSaveError};
 use crate::core::io::preferences::interface_size::InterfaceSize;
@@ -45,7 +45,7 @@ fn preferences_roundtrip() {
         relative_paths: false,
         interface_size: InterfaceSize::OFFERED[4],
         window: Some(WindowState {
-            size: UVec2::new(1440, 900),
+            size: Size::new(1440.0, 900.0),
             maximized: true,
             physical_pos: Some(IVec2::new(120, -40)),
         }),
@@ -96,10 +96,10 @@ fn partial_preferences_fill_defaults() {
             },
         ),
         (
-            b"(window: Some((size: (800, 600))))",
+            b"(window: Some((size: (800, 600.5))))",
             Preferences {
                 window: Some(WindowState {
-                    size: UVec2::new(800, 600),
+                    size: Size::new(800.0, 600.5),
                     maximized: false,
                     physical_pos: None,
                 }),
@@ -111,6 +111,15 @@ fn partial_preferences_fill_defaults() {
             .deserialize(text)
             .expect("partial preferences deserialize");
         assert_eq!(preferences, expected, "{}", String::from_utf8_lossy(text));
+    }
+    // A window size palantir cannot open is refused at the load, not at the window.
+    for text in [
+        b"(window: Some((size: (0, 600))))".as_slice(),
+        b"(window: Some((size: (800, inf))))",
+        b"(window: Some((maximized: true)))",
+    ] {
+        let read: Result<Preferences, _> = SerdeFormat::Ron.deserialize(text);
+        assert!(read.is_err(), "{}", String::from_utf8_lossy(text));
     }
 }
 

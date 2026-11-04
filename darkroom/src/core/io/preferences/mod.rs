@@ -6,9 +6,11 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use common::{SerdeFormat, fs};
-use glam::{IVec2, UVec2};
+use glam::IVec2;
 use lens::MlModelPaths;
-use palantir::ImageFilter;
+use palantir::widget::domain;
+use palantir::{ImageFilter, Size};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 use crate::core::io::document::saved_paths::SavedPaths;
 use crate::core::io::preferences::error::{PreferencesLoadError, PreferencesSaveError};
@@ -23,7 +25,7 @@ const PREFERENCES_FILE: &str = "darkroom.preferences.ron";
 /// and editor behavior.
 /// Reloaded on startup so darkroom reopens where the user left off.
 /// `#[serde(default)]` so a partial preferences file still deserializes.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub(crate) struct Preferences {
     /// Document to reopen on launch. `None` starts with an empty document.
@@ -94,16 +96,42 @@ impl Default for ViewerPreferences {
 /// so it restores to the same apparent size on a differently-scaled
 /// monitor); `physical_pos` is physical pixels, absent when the platform
 /// doesn't report it (Wayland). `maximized` restores the maximized state
-/// while `size` remains what to return to when un-maximized. glam vecs
-/// serialize as `[x, y]` arrays.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
-#[serde(default)]
+/// while `size` remains what to return to when un-maximized.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct WindowState {
-    /// Logical inner size `[w, h]`.
-    pub(crate) size: UVec2,
+    /// Logical inner size `(w, h)`, positive on both axes, as palantir opens no window of
+    /// another; a file without one holds no window state.
+    #[serde(
+        serialize_with = "write_window_size",
+        deserialize_with = "read_window_size"
+    )]
+    pub(crate) size: Size,
+    #[serde(default)]
     pub(crate) maximized: bool,
-    /// Physical outer position `[x, y]`; `None` on Wayland.
+    /// Physical outer position `(x, y)`; `None` on Wayland.
+    #[serde(default)]
     pub(crate) physical_pos: Option<IVec2>,
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's `serialize_with` passes the field by reference"
+)]
+fn write_window_size<S: Serializer>(size: &Size, serializer: S) -> Result<S::Ok, S::Error> {
+    (size.w, size.h).serialize(serializer)
+}
+
+/// A window size as the file holds it, refused unless positive on both axes: the load is where
+/// a bad size stops, before it reaches the window.
+fn read_window_size<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Size, D::Error> {
+    let (w, h) = <(f32, f32)>::deserialize(deserializer)?;
+    if domain::is_positive(w) && domain::is_positive(h) {
+        Ok(Size::new(w, h))
+    } else {
+        Err(de::Error::custom(format_args!(
+            "a window size must be positive on both axes, got ({w}, {h})"
+        )))
+    }
 }
 
 impl Default for Preferences {
