@@ -50,15 +50,17 @@ in the root `Cargo.toml` names the version the project needs, and another
 version refuses to run. Run it from the root.
 
 ```
-cargo drive check              # after each change: fmt, then the lints
+cargo drive check              # fmt, then the lints over every target and feature
 cargo drive test [args]        # the tests with default features; the runner's arguments pick some
 cargo drive bench [args]       # the benches; a filter, or --test to run each case once
-cargo drive gate               # the full check, every lint and test lane, as CI runs it with --ci
+cargo drive gate               # every lint and test lane, as CI runs it with --ci
 cargo drive run <name> [args]  # a command of the root's own, from its drive table
 ```
 
-`check` after each change, `test` after a batch of them, and `gate` once, when the task is done:
-it runs every lint and test lane, which `check` and `test` leave out to stay fast.
+Pick each by what it tells and what it costs, as dev time counts: a filtered `test` is the
+cheapest way to see an edit work and compiles it too; `check` adds the lints, a second compile,
+worth it once a piece of work stands; `gate` runs every lane, minutes long. **Run `gate` before
+a turn that changed code ends.**
 
 An agent sees the editor through the `darkroom` MCP server: `cargo drive run mcp`
 builds it, and Claude Code starts it, `darkroom --mcp --headless`, from
