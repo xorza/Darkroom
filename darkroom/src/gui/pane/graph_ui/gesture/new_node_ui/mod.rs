@@ -145,14 +145,14 @@ impl NewNodeUi {
             id_salt: "new_node_popup",
             max_height: Some(max_height),
         };
-        let chosen = self.menu.show(ui, shape, |ui, popup| {
+        let chosen = self.menu.show(ui, shape, |ui| {
             let palette = NodePalette {
                 graph_ctx,
                 pos,
                 scroll_cap,
                 opening,
             };
-            palette.body(ui, popup, search)
+            palette.body(ui, search)
         });
 
         let picked = chosen?;

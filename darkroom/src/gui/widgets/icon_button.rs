@@ -99,9 +99,8 @@ impl IconButton {
             .show_with(ui, |ui, text| {
                 icon.draw(ui, Rect::new(inset, inset, side, side), text.color);
             });
-        let snapshot = button.response.snapshot();
         let clicked = kind == Kind::Press && button.response.clicked();
-        support::tooltip_after(ui, &snapshot, Some(tooltip));
+        support::tooltip_after(ui, &button.response, Some(tooltip));
         clicked
     }
 }

@@ -168,7 +168,7 @@ impl ConstEditor<'_> {
                     _ => None,
                 };
                 // The blocking dialog runs after authoring, so this button only records its click.
-                let snapshot = Button::new()
+                let button = Button::new()
                     .id(field.id)
                     .label(label)
                     .style(&field.theme.button)
@@ -176,9 +176,8 @@ impl ConstEditor<'_> {
                     .text_align(Align::LEFT)
                     .size(Sizing::FILL)
                     .min_size((field.theme.width, 0.0))
-                    .show(ui)
-                    .snapshot();
-                support::tooltip_after(ui, &snapshot, tooltip);
+                    .show(ui);
+                support::tooltip_after(ui, &button, tooltip);
                 None
             }
             DataType::Enum(type_id) => {

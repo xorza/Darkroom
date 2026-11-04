@@ -4,7 +4,7 @@
 use std::ops::Range;
 
 use palantir::{
-    Align, Block, Chrome, CloseHandle, Configure, Corners, EditEnd, FontWeight, Key, KeyboardWake,
+    Align, Block, Chrome, Configure, Corners, EditEnd, FontWeight, Key, KeyboardWake,
     MenuSeparator, Panel, RgbaF32, Scroll, Sense, Sizing, Spacing, Text, TextEdit, TextStyle,
     TextWrap, Ui, VAlign, WidgetId, fmt,
 };
@@ -127,12 +127,7 @@ impl<'a> NodePalette<'a> {
 impl NodePalette<'_> {
     /// Record the search field and the rows `search` matches, and move or pick the focused row
     /// on Up, Down and Enter.
-    pub(super) fn body(
-        &self,
-        ui: &mut Ui,
-        popup: &CloseHandle,
-        search: &mut Search,
-    ) -> Option<GraphIntent> {
+    pub(super) fn body(&self, ui: &mut Ui, search: &mut Search) -> Option<GraphIntent> {
         let opened = self.opening == Opening::Fresh;
         let theme = self.graph_ctx.theme();
         let search_id = new_node_ui::search_field_wid();
@@ -241,7 +236,7 @@ impl NodePalette<'_> {
             let row = submitted.then(|| search.rows.get(search.focused))??;
             row.entry(library)
         })?;
-        popup.close();
+        ui.close_overlay();
         Some(self.add(chosen))
     }
 
@@ -346,8 +341,7 @@ impl Row<'_> {
                         }
                     });
             })
-            .response
-            .snapshot();
+            .response;
         row.clicked()
     }
 }

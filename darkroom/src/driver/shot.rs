@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use glam::UVec2;
-use palantir::{DockView, Found, Image, LocateError, Rect, Screenshot, Ui};
+use palantir::{Found, Image, LocateError, Rect, Screenshot, Ui};
 use serde::Serialize;
 
 use crate::core::document::tab_ref::TabRef;
@@ -146,7 +146,7 @@ fn pane(app: &App, ui: &Ui, name: &str) -> Result<Rect, DriverError> {
                 matches: groups
                     .iter()
                     .filter_map(|group| {
-                        ui.response_for(DockView::pane_id(MainWindow::dock_wid(), group.id()))
+                        ui.response_for(group.id().pane_id(MainWindow::dock_wid()))
                             .rect
                             .map(Found::center_of)
                     })
@@ -155,7 +155,7 @@ fn pane(app: &App, ui: &Ui, name: &str) -> Result<Rect, DriverError> {
             .into());
         }
     };
-    ui.response_for(DockView::pane_id(MainWindow::dock_wid(), group.id()))
+    ui.response_for(group.id().pane_id(MainWindow::dock_wid()))
         .rect
         .filter(|rect| !rect.is_paint_empty())
         .ok_or_else(|| LocateError::OffScreen { locator }.into())

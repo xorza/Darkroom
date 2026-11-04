@@ -166,7 +166,7 @@ fn show(ui: &mut Ui, theme: &Theme, file_name: Option<&str>, tail: &str) -> Disc
         let mut choice = DiscardChoice::Stay;
         let resp = Modal::new()
             .id_salt(("discard_dialog", "modal"))
-            .show(ui, |ui, _| {
+            .show(ui, |ui| {
                 Panel::vstack()
                     .id(body_wid())
                     .max_size((title_measure(theme), f32::INFINITY))

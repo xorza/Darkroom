@@ -51,7 +51,7 @@ fn item(ui: &mut Ui, label: &'static str, shortcut: Option<Shortcut>, enabled: b
 }
 
 fn file_menu(bar: &mut MenuBarMenus<'_>, out: &mut Requests) {
-    bar.menu("File", |ui, _| {
+    bar.menu("File", |ui| {
         let file = [
             ("New", Some(shortcuts::NEW), FileCommand::New),
             ("Open…", Some(shortcuts::OPEN), FileCommand::Open),
@@ -81,7 +81,7 @@ fn file_menu(bar: &mut MenuBarMenus<'_>, out: &mut Requests) {
 fn edit_menu(bar: &mut MenuBarMenus<'_>, ctx: WindowCtx<'_>, out: &mut Requests) {
     let (open, app) = (ctx.open(), ctx.app());
     let selected = !open.document.main_view.selected.is_empty();
-    bar.menu("Edit", |ui, _| {
+    bar.menu("Edit", |ui| {
         if item(ui, "Undo", Some(shortcuts::UNDO), open.can_undo()) {
             out.push_app(AppCommand::Undo);
         }
@@ -108,7 +108,7 @@ fn graph_menu(bar: &mut MenuBarMenus<'_>, ctx: WindowCtx<'_>, out: &mut Requests
     let app = ctx.app();
     let activity = app.run_state().activity();
     let selected = !ctx.document().main_view.selected.is_empty();
-    bar.menu("Graph", |ui, _| {
+    bar.menu("Graph", |ui| {
         let running = activity.is_executing();
         if item(ui, "Run", Some(shortcuts::RUN), !running) {
             out.push_app(AppCommand::Run(RunCommand::Once));
@@ -144,7 +144,7 @@ fn graph_menu(bar: &mut MenuBarMenus<'_>, ctx: WindowCtx<'_>, out: &mut Requests
 }
 
 fn view_menu(bar: &mut MenuBarMenus<'_>, out: &mut Requests) {
-    bar.menu("View", |ui, _| {
+    bar.menu("View", |ui| {
         if item(ui, "Copy View as Image", None, true) {
             out.push_app(AppCommand::View(ViewCommand::CopyImage));
         }
@@ -176,8 +176,7 @@ fn document_name(ui: &mut Ui, ctx: WindowCtx<'_>) {
             let style = support::body_text(ui, theme);
             Text::new(fmt!(ui, "{name}")).style(&style).show(ui);
         })
-        .response
-        .snapshot();
+        .response;
     let folder = path
         .and_then(|path| path.parent())
         .map(|folder| fmt!(ui, "{}", folder.display()));

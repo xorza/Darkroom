@@ -81,8 +81,7 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
                     .show(ui);
             }
         })
-        .response
-        .snapshot();
+        .response;
     if content.hovered() {
         ui.request_cursor(CursorIcon::Pointer);
     }

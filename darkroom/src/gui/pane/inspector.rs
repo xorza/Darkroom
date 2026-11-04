@@ -428,8 +428,7 @@ impl InspectedPort<'_> {
                     .text_wrap(TextWrap::Ellipsis)
                     .size((Sizing::FILL, Sizing::HUG))
                     .sense(Sense::HOVER)
-                    .show(ui)
-                    .snapshot();
+                    .show(ui);
                 let shown_type = fmt!(ui, "{type_name}");
                 support::tooltip_after(ui, &name, Some(shown_type));
                 match value {

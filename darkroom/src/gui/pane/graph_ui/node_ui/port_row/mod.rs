@@ -40,7 +40,7 @@ use crate::gui::port_ref::PortKind;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::hover::Hover;
 use crate::gui::widgets::port_glyph;
-use crate::gui::widgets::port_glyph::{PortGlyph, PortGlyphResponse};
+use crate::gui::widgets::port_glyph::PortGlyph;
 use crate::gui::widgets::support;
 use scenarium::EventPort;
 
@@ -159,12 +159,11 @@ impl PortLabel<'_> {
     /// selection and drag, so the press has to fall through. Muted ink — the
     /// value column is each row's strong element, not the label.
     fn show(self, ui: &mut Ui, theme: &Theme) {
-        let snapshot = Text::new(self.name)
+        let label = Text::new(self.name)
             .style(&label_style(ui, theme))
             .sense(Sense::HOVER)
-            .show(ui)
-            .snapshot();
-        support::tooltip_after(ui, &snapshot, self.tooltip);
+            .show(ui);
+        support::tooltip_after(ui, &label, self.tooltip);
     }
 }
 
@@ -274,7 +273,7 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
             // — render just the label (+ its inline const editor).
             if input.const_only() {
                 label.show(ui, theme);
-                PortGlyphResponse::default()
+                None
             } else {
                 let mut circle = PortGlyph::circle(wid, diameter, fill)
                     .margin(margin)
@@ -287,18 +286,13 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
                 }
                 let glyph = circle.show(ui, theme);
                 label.show(ui, theme);
-                glyph
+                Some(glyph)
             }
         });
-    // Open on right-click anywhere on the cell — circle or label. Pulled into
-    // locals so the response's `&Ui` borrow ends before the reads below.
+    // Open on right-click anywhere on the cell — circle or label.
     let glyph = cell.inner;
-    let (menu_id, cell_secondary, cell_double) = (
-        cell.response.id,
-        cell.response.right.clicked(),
-        cell.response.left.double_clicked(),
-    );
-    if cell_secondary || glyph.secondary_clicked {
+    let menu_id = cell.response.id;
+    if cell.response.right.clicked() || glyph.is_some_and(|glyph| glyph.right.clicked()) {
         open_port_context_menu(ui, menu_id);
     }
     // Double-click on the circle or the label toggles the binding: clear it,
@@ -309,7 +303,8 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
     // pass, and a double-click is action input — which always earns a second
     // pass — so the body re-arranges at its settled size with its wires
     // re-anchored before the frame paints.
-    if cell_double || glyph.double_clicked {
+    if cell.response.left.double_clicked() || glyph.is_some_and(|glyph| glyph.left.double_clicked())
+    {
         match input.binding() {
             // Boundary ports route the interface — no const affordance, so an
             // unbound one has nothing to seed (its label double-click renames).
@@ -328,7 +323,7 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
     }
     Menu::for_id(menu_id)
         .size((Sizing::HUG, Sizing::HUG))
-        .show(ui, |ui, _| {
+        .show(ui, |ui| {
             // Resolved once for both the enable test and the value the pick
             // pushes — the fallback literal is built on read, not stored.
             let default = input.default();
@@ -475,15 +470,14 @@ fn output_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, output: OutputCtx<'
                 .show(ui, theme)
         });
     // Right-click anywhere on the cell (circle or label) opens the port menu —
-    // mirrors the input side's binding menu. Pulled into locals so the
-    // response's `&Ui` borrow ends before the read below.
+    // mirrors the input side's binding menu.
     let glyph = cell.inner;
-    let (menu_id, cell_secondary) = (cell.response.id, cell.response.right.clicked());
+    let menu_id = cell.response.id;
     // An output may feed many inputs, so a double-click on its circle clears
     // each consumer. Same pre-paint timing as the input side: the intents drain
     // at the end of this pass, and the second pass a double-click earns
     // re-arranges every node that lost a wire.
-    if glyph.double_clicked {
+    if glyph.left.double_clicked() {
         record.out.extend_graph(
             node_ctx
                 .graph_ctx
@@ -492,7 +486,7 @@ fn output_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, output: OutputCtx<'
                 .map(|(consumer, _)| GraphIntent::set_input(consumer, None)),
         );
     }
-    if cell_secondary || glyph.secondary_clicked {
+    if cell.response.right.clicked() || glyph.right.clicked() {
         open_port_context_menu(ui, menu_id);
     }
     // "Add preview" — spawn a preview node already wired to this output. What it
@@ -500,7 +494,7 @@ fn output_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, output: OutputCtx<'
     // other. Hidden when the library has no preview func.
     Menu::for_id(menu_id)
         .size((Sizing::HUG, Sizing::HUG))
-        .show(ui, |ui, _| {
+        .show(ui, |ui| {
             if let Some(func) = preview_sink::registered(node_ctx.graph_ctx.library())
                 && MenuItem::new("Add preview").show(ui).clicked()
             {

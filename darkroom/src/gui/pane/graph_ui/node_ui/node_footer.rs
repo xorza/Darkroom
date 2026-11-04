@@ -71,8 +71,7 @@ fn error_line(ui: &mut Ui, theme: &Theme, message: &str) {
         .text_wrap(TextWrap::Ellipsis)
         .size((Sizing::FILL, Sizing::HUG))
         .sense(Sense::HOVER)
-        .show(ui)
-        .snapshot();
+        .show(ui);
     support::tooltip_after(ui, &line, Some(message));
 }
 

@@ -54,10 +54,8 @@ impl<'a> Link<'a> {
             .focusable(false)
             .style(&style)
             .show(ui);
-        let snapshot = response.snapshot();
-        let clicked = response.clicked();
-        support::tooltip_after(ui, &snapshot, tooltip);
-        clicked
+        support::tooltip_after(ui, &response, tooltip);
+        response.clicked()
     }
 }
 

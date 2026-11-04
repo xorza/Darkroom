@@ -3,7 +3,9 @@
 
 use glam::Vec2;
 use palantir::widget::Shape;
-use palantir::{Configure, Panel, Rect, RgbaF32, Sense, Spacing, Stroke, TextInput, Ui, WidgetId};
+use palantir::{
+    Configure, Panel, Rect, Response, RgbaF32, Sense, Spacing, Stroke, TextInput, Ui, WidgetId,
+};
 
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support;
@@ -59,7 +61,7 @@ enum Placement {
 /// intent. What the glyph owns is the part every caller was repeating: the
 /// [`HIT_SCALE`]-grown sensing box, `CLICK | DRAG` so it intercepts the press
 /// before the node body under it and can latch a wire drag, and the tooltip
-/// recorded after its own `ui` borrow ends.
+/// recorded after it.
 ///
 /// The explicit `wid` is not optional: these ids are reconstructed from domain
 /// coordinates by passes that never record the glyph (the geometry rebuild,
@@ -70,21 +72,6 @@ pub(crate) struct PortGlyph<'a> {
     glyph: Painted,
     placement: Placement,
     tooltip: Option<TextInput<'a>>,
-}
-
-/// What a [`PortGlyph`] saw this frame.
-///
-/// Plain bools rather than the palantir `Response` they come from: that
-/// borrows `Ui`, so it could not escape the panel closure a glyph is usually
-/// recorded inside — and these are the two edges every caller reads.
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct PortGlyphResponse {
-    /// Left-double-clicked — the binding toggle on a port circle.
-    pub(crate) double_clicked: bool,
-    /// Right-clicked. The glyph senses its own `CLICK` and consumes hits over
-    /// its rect, so a cell wrapping one must read this too: a right-click
-    /// landed on the glyph never reaches the cell (no bubbling).
-    pub(crate) secondary_clicked: bool,
 }
 
 impl<'a> PortGlyph<'a> {
@@ -179,9 +166,13 @@ impl<'a> PortGlyph<'a> {
         self
     }
 
-    /// Record the glyph. A ring, an [`outline`](Self::outline) or a [`hollow`](Self::hollow)
-    /// circle's, strokes at the theme's `stroke.line`, and a triangle rounds at `radius.mark`.
-    pub(crate) fn show(self, ui: &mut Ui, theme: &Theme) -> PortGlyphResponse {
+    /// Record the glyph and answer its response: a left double-click is the binding toggle on a
+    /// port circle, and a right-click its menu. The glyph senses its own `CLICK` and takes the
+    /// hits over its rect, so a cell wrapping one reads its right-click too: one landed on the
+    /// glyph never reaches the cell. A ring, an [`outline`](Self::outline) or a
+    /// [`hollow`](Self::hollow) circle's, strokes at the theme's `stroke.line`, and a triangle
+    /// rounds at `radius.mark`.
+    pub(crate) fn show(self, ui: &mut Ui, theme: &Theme) -> Response {
         let Self {
             wid,
             glyph,
@@ -203,15 +194,8 @@ impl<'a> PortGlyph<'a> {
         let shown = panel.show(ui, |ui| {
             glyph.draw(ui, theme.stroke.line, theme.radius.mark);
         });
-        // Take the owned snapshot + the click edges so the glyph's `ui` borrow
-        // ends before the tooltip records into `ui`.
-        let snapshot = shown.response.snapshot();
-        let response = PortGlyphResponse {
-            double_clicked: shown.response.left.double_clicked(),
-            secondary_clicked: shown.response.right.clicked(),
-        };
-        support::tooltip_after(ui, &snapshot, tooltip);
-        response
+        support::tooltip_after(ui, &shown.response, tooltip);
+        shown.response
     }
 }
 

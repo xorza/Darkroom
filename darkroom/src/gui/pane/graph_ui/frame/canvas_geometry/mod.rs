@@ -179,19 +179,19 @@ impl CanvasGeometry {
             };
             for kind in [PortKind::Input, PortKind::Output] {
                 for port in n.ports(kind) {
-                    let r = ui.response_for(wid::port_circle(port));
+                    let r = ui.response_for(wid::port_circle(port)).state;
                     self.ports.record(port, r, place);
                 }
             }
             // Emitter event glyphs, drag sources for subscription wires.
             for ev in n.event_ports() {
-                let r = ui.response_for(wid::event_glyph(ev));
+                let r = ui.response_for(wid::event_glyph(ev)).state;
                 self.events.record(ev, r, place);
             }
             // The subscription pin only exists on sink nodes (only they
             // render one — see `header::subscription_glyph`).
             if n.sink() {
-                let r = ui.response_for(wid::subscription_glyph(n.node_id));
+                let r = ui.response_for(wid::subscription_glyph(n.node_id)).state;
                 self.subs.record(n.node_id, r, place);
             }
         }

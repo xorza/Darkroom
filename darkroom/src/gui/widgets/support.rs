@@ -4,8 +4,8 @@
 
 use palantir::{
     Align, AnimationSpec, Block, ButtonTheme, Chrome, Configure, Corners, FontFamily, FontWeight,
-    Rect, ResponseSnapshot, RgbaF32, Sizing, SlotDefaults, Spacing, StatefulLook, TextInput,
-    TextStyle, TextWrap, Tooltip, Ui, WidgetLook,
+    Rect, Response, RgbaF32, Sizing, SlotDefaults, Spacing, StatefulLook, TextInput, TextStyle,
+    TextWrap, Tooltip, Ui, WidgetLook,
 };
 
 use glam::Vec2;
@@ -141,12 +141,9 @@ pub(crate) const fn flush_button(unselected: StatefulLook, selected: StatefulLoo
     }
 }
 
-/// Shows `tooltip` as a hover tooltip anchored to `snapshot`; `None` records
-/// none. Takes an already-snapshotted response (rather than `&Response<'_>`)
-/// so a caller that just finished building the widget can end its own `ui`
-/// borrow (via `.snapshot()`) before this one needs `ui` back mutably to
-/// record the tooltip. Shared by every chip, icon button and port glyph that pairs a
-/// widget with a hover tooltip.
+/// Shows `tooltip` as a hover tooltip anchored to the widget whose response is `trigger`; `None`
+/// records none. Shared by every chip, icon button and port glyph that pairs a widget with a
+/// hover tooltip.
 ///
 /// `Option` rather than an empty-string sentinel: "this widget has no
 /// tooltip" is a different fact from "its tooltip is blank", and the port
@@ -155,10 +152,10 @@ pub(crate) const fn flush_button(unselected: StatefulLook, selected: StatefulLoo
 /// bubble actually records, and a [`fmt!`] one is already in the pass's arena.
 pub(crate) fn tooltip_after<'a>(
     ui: &mut Ui,
-    snapshot: &'a ResponseSnapshot,
+    trigger: &'a Response,
     tooltip: Option<impl Into<TextInput<'a>>>,
 ) {
     if let Some(tooltip) = tooltip {
-        Tooltip::on(snapshot, tooltip).show(ui);
+        Tooltip::on(trigger, tooltip).show(ui);
     }
 }

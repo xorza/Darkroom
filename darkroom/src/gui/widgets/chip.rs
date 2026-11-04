@@ -93,13 +93,12 @@ impl Chip {
             .style(&style)
             .selected(self.selected)
             .show_with(ui, |ui, text| draw_glyph(ui, s, text.color));
-        let snapshot = button.response.snapshot();
         let clicked = button.response.clicked();
         let tooltip: TextInput<'_> = match self.shortcut {
             Some(shortcut) => fmt!(ui, "{} \u{b7} {shortcut}", self.tooltip).into(),
             None => self.tooltip.into(),
         };
-        support::tooltip_after(ui, &snapshot, Some(tooltip));
+        support::tooltip_after(ui, &button.response, Some(tooltip));
         clicked
     }
 

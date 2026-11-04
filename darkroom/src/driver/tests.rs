@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use common::{TempDir, fs};
 use glam::{UVec2, Vec2};
-use palantir::{DockView, LocateError, PointerButton, Rect, ShortcutMods, SystemScale};
+use palantir::{LocateError, PointerButton, Rect, ShortcutMods, SystemScale};
 use scenarium::{Binding, ConstValue, InputPort, NodeId};
 use tracing::{callsite, subscriber};
 use tracing_subscriber::layer::SubscriberExt as _;
@@ -606,11 +606,8 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
         .offscreen()
         .with_app(|app, ui| {
             let layout = &app.open_document().document.layout;
-            ui.response_for(DockView::pane_id(
-                MainWindow::dock_wid(),
-                layout.primary().id(),
-            ))
-            .rect
+            ui.response_for(layout.primary().id().pane_id(MainWindow::dock_wid()))
+                .rect
         })
         .unwrap();
     let pane = driver

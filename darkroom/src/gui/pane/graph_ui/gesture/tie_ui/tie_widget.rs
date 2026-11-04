@@ -155,23 +155,19 @@ impl TieWidgets {
                 .at(hit.min)
                 .size((Sizing::fixed(hit.size.w), Sizing::fixed(hit.size.h)))
                 .sense(Sense::CLICK | Sense::DRAG)
-                .show(ui, |_| {});
-            let (clicked, grabbed, menu) = (
-                body.response.clicked(),
-                body.response.left.drag.started(),
-                body.response.right.clicked(),
-            );
-            if menu {
+                .show(ui, |_| {})
+                .response;
+            if body.right.clicked() {
                 recorded.menu_opened.get_or_insert(band.tie);
             }
-            if clicked {
+            if body.clicked() {
                 pass.out.extend_graph(GraphIntent::click(
                     click_mode,
                     draw_ctx.graph_ctx().selected(),
                     item,
                 ));
             }
-            if grabbed && recorded.grab.is_none() {
+            if body.left.drag.started() && recorded.grab.is_none() {
                 recorded.grab = Some(grab(draw_ctx, band.tie, pass.out));
             }
             if selected {

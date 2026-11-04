@@ -10,8 +10,7 @@ use std::f32::consts::FRAC_PI_4;
 
 use palantir::{
     Align, Checkbox, Configure, DockDrop, DockOperation, EditableLabel, Menu, MenuItem,
-    MenuSeparator, Modifiers, Panel, ResponseSnapshot, Separator, Sizing, SplitSide, Ui, VAlign,
-    WidgetId,
+    MenuSeparator, Modifiers, Panel, Separator, Sizing, SplitSide, Ui, VAlign, WidgetId,
 };
 
 use scenarium::{CacheMode, NodeId};
@@ -214,11 +213,8 @@ fn cache_button(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     )
     .selected(ram || disk)
     .show(ui, theme);
-    let trigger = ResponseSnapshot {
-        id: wid,
-        state: ui.response_for(wid),
-    };
-    Menu::below(&trigger).show(ui, |ui, _| {
+    let trigger = ui.response_for(wid);
+    Menu::below(&trigger).show(ui, |ui| {
         let mut keep_ram = ram;
         if Checkbox::new(&mut keep_ram)
             .label("Keep in RAM")

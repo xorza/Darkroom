@@ -110,7 +110,7 @@ impl<K: Copy> ItemMenu<K> {
             id_salt,
             max_height: None,
         };
-        let choice = self.menu.show(ui, shape, |ui, _| body(ui, target))?;
+        let choice = self.menu.show(ui, shape, |ui| body(ui, target))?;
         Some(Pick { target, choice })
     }
 }

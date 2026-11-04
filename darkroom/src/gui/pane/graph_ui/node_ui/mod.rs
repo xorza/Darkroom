@@ -284,10 +284,6 @@ impl NodeUi {
                     node_footer::show(ui, node_ctx);
                 }
             });
-        // Pull the body response's flags into locals so its `&Ui` borrow ends
-        // before the handle scan below. (`Response` is a lazy probe over
-        // `response_for`, so reading the body through either is the same
-        // last-frame state.)
         let body_clicked = panel.response.clicked();
         let mut response = NodeResponse {
             menu_opened: panel.response.right.clicked(),
