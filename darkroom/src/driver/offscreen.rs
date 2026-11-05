@@ -4,6 +4,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+use glam::UVec2;
 use palantir::PowerPreference;
 use palantir::wgpu::Features;
 use palantir::{
@@ -39,6 +40,15 @@ pub(crate) struct Offscreen {
     launched_at: usize,
 }
 
+/// A window of `size` on a device that makes textures up to `limit` per side, which a smaller
+/// adapter than a desktop's can refuse.
+pub(super) fn check_window(size: UVec2, limit: u32) -> Result<(), DriverError> {
+    if size.max_element() > limit {
+        return Err(DriverError::WindowTooLarge { size, limit });
+    }
+    Ok(())
+}
+
 impl Offscreen {
     /// An app on an empty document in a window `config` describes, or the error of a GPU display
     /// on a machine with no usable adapter.
@@ -50,6 +60,7 @@ impl Offscreen {
                 // No optional features: the editor draws with what every adapter has.
                 let gpu =
                     RequestedGpu::headless(PowerPreference::HighPerformance, Features::empty())?;
+                check_window(config.size, gpu.gpu.max_texture_dim().get())?;
                 Depth::gpu(gpu.gpu)
             }
             #[cfg(feature = "internals")]

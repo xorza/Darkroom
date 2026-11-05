@@ -10,6 +10,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use common::{ErrorChain, thread as threads};
+use darkroom::RunConfig;
 use darkroom::driver::log_ring::LogRing;
 use darkroom::driver::{DisplayKind, Driver, SessionConfig};
 use glam::UVec2;
@@ -55,13 +56,13 @@ pub(crate) fn serve_headless(
     }
 }
 
-/// Run the editor's window on `document` on this, the main thread, and serve it from another
+/// Run the editor's window `config` describes on this, the main thread, and serve it from another
 /// until the window closes, its logs kept in `log`. The server ends when the client leaves or the
 /// session ends; the window stays for the person at it, whose edits a quit from the server would
 /// discard.
-pub(crate) fn serve_window(document: Option<PathBuf>, log: LogRing) -> ExitCode {
+pub(crate) fn serve_window(config: RunConfig, log: LogRing) -> ExitCode {
     let (sessions, session) = oneshot::channel();
-    let run = darkroom::run_driven(document, move |link| {
+    let run = darkroom::run_driven(config, move |link| {
         // Detached: the server reads stdin, which nothing interrupts, so the process ends with
         // the window whatever the server is doing. The session comes back here to end first.
         threads::spawn("darkroom-mcp", move || {

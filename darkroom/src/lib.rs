@@ -11,9 +11,8 @@ mod platform;
 use std::io;
 use std::path::PathBuf;
 
-use common::is_debug;
 use glam::UVec2;
-use palantir::{Image, WindowConfig, WinitHost, WinitHostError};
+use palantir::{DebugOverlayConfig, Image, WindowConfig, WinitHost, WinitHostError};
 use tracing_subscriber::Layer as _;
 use tracing_subscriber::layer::SubscriberExt as _;
 use tracing_subscriber::util::SubscriberInitExt as _;
@@ -28,19 +27,28 @@ use crate::gui::dialogs::{DialogFallback, Dialogs, NativeDialogFlag};
 
 pub use crate::gui::dialogs::DialogAnswer;
 
-/// Launch the Palantir desktop editor on `document` (the command-line
-/// argument, if there was one). The winit event loop owns the main thread, so
-/// this doesn't return until the window closes.
-pub fn run(document: Option<PathBuf>) -> Result<(), WinitHostError> {
-    run_driven(document, |_| {})
+/// What a window launch opens and shows.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RunConfig {
+    /// The command-line argument, if there was one.
+    pub document: Option<PathBuf>,
+    /// The diagnostics painted over the editor; none by default, in every build.
+    pub overlay: DebugOverlayConfig,
+}
+
+/// Launch the Palantir desktop editor. The winit event loop owns the main thread, so this doesn't
+/// return until the window closes.
+pub fn run(config: RunConfig) -> Result<(), WinitHostError> {
+    run_driven(config, |_| {})
 }
 
 /// [`run`], handing `serve` the link a driver on another thread reaches the window through, on
 /// the main thread once the app exists and before its first frame.
 pub fn run_driven(
-    document: Option<PathBuf>,
+    config: RunConfig,
     serve: impl FnOnce(WindowLink) + 'static,
 ) -> Result<(), WinitHostError> {
+    let RunConfig { document, overlay } = config;
     // Load preferences here, before the window exists, so a saved size /
     // position seeds the window at creation (`App::new` runs after the
     // first window is already up, too late to size it). Reuse the same
@@ -63,12 +71,6 @@ pub fn run_driven(
     let host = WinitHost::builder(MAIN_WINDOW)
         .window(window)
         .build(move |ui, handle| {
-            let mut overlay = ui.debug_overlay();
-            overlay.damage_rect = is_debug();
-            // The `settle n/m` half of this readout is how a gesture's
-            // record-pass cost gets read in the running editor — drag a
-            // node and watch whether both halves advance together.
-            overlay.frame_stats = is_debug();
             ui.set_debug_overlay(overlay);
 
             let native_dialog = NativeDialogFlag::default();

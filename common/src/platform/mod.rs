@@ -285,6 +285,18 @@ pub(crate) fn open_url(url: &str) -> io::Result<()> {
     os::open_url(url)
 }
 
+/// Join the console of the terminal that started this binary, where it would have none: Windows.
+#[cfg_attr(
+    not(windows),
+    expect(
+        clippy::missing_const_for_fn,
+        reason = "const where there is nothing to join, not on Windows"
+    )
+)]
+pub(crate) fn attach_parent_console() {
+    os::attach_parent_console();
+}
+
 /// Make the renames in `parent` durable, where the system needs a directory synced for that.
 #[cfg_attr(
     not(unix),

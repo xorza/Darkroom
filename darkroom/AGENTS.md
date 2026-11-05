@@ -107,5 +107,5 @@ by compile, plan and run. Refused: a pass-through node, which changes the graph 
   its footer. Refused: a glow per good run, and a frame per skipped node.
 - **Undo reads "Undo"**, as commands reach the history as batches of intents. Refused: a step
   name read off them, which misnames a compound command.
-- **One dialog button order on every platform**, right-aligned with the confirming one last.
+- **A dialog's buttons sit right-aligned**, the confirming one last.
   Refused: Qt's order by platform, which needs platform code in palantir.

@@ -13,6 +13,9 @@ use crate::platform::linux::cgroup_memory::CgroupMemory;
 use crate::platform::linux::mount_table::MountTable;
 use crate::platform::unix;
 
+/// Nothing to join: a binary here is never cut off from its terminal.
+pub(super) const fn attach_parent_console() {}
+
 /// Open `url` with `xdg-open`, which the desktop's own handlers answer.
 pub(super) fn open_url(url: &str) -> io::Result<()> {
     unix::spawn_detached("xdg-open", [url])

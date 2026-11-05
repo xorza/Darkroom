@@ -2,7 +2,8 @@
 //! memory limits of the job object the process runs in, the cache under `%LOCALAPPDATA%`, and the
 //! shell's open of a URL;
 //! a replace in one step that holds when the destination is open and needs no directory sync, and
-//! the file's id and change time, which come from its handle, as `Metadata` does not expose them.
+//! the file's id and change time, which come from its handle, as `Metadata` does not expose them;
+//! the console of the terminal that started a GUI binary.
 
 use std::ffi::c_void;
 use std::fs::{File, Metadata, OpenOptions};
@@ -20,6 +21,9 @@ use windows::Win32::Storage::FileSystem::{
     FILE_INFO_BY_HANDLE_CLASS, FILE_RENAME_INFO, FileBasicInfo, FileIdInfo, FileRenameInfoEx,
     GetDiskFreeSpaceExW, GetFileInformationByHandleEx, MOVEFILE_REPLACE_EXISTING,
     MOVEFILE_WRITE_THROUGH, MoveFileExW, SetFileInformationByHandle,
+};
+use windows::Win32::System::Console::{
+    ATTACH_PARENT_PROCESS, AttachConsole, GetStdHandle, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE,
 };
 use windows::Win32::System::JobObjects::{
     JOB_OBJECT_LIMIT_JOB_MEMORY, JOB_OBJECT_LIMIT_PROCESS_MEMORY, JOBOBJECT_BASIC_PROCESS_ID_LIST,
@@ -39,6 +43,17 @@ use windows::core::{Error, HSTRING, w};
 use crate::fs::PublicationMode;
 use crate::fs::file_identity::FileId;
 use crate::platform::{Observed, Stated};
+
+/// Join the console of the terminal that started this GUI binary, as Alacritty does, so `--help`,
+/// logs and a panic's message reach it. A parent that handed a pipe, as an MCP client does, keeps
+/// it. A launch from Explorer has no console to join, and the call's failure is that answer.
+pub(super) fn attach_parent_console() {
+    let handed = |which| unsafe { GetStdHandle(which) }.is_ok();
+    if handed(STD_OUTPUT_HANDLE) || handed(STD_ERROR_HANDLE) {
+        return;
+    }
+    unsafe { AttachConsole(ATTACH_PARENT_PROCESS) }.ok();
+}
 
 /// Open `url` through the shell, as Explorer opens it: no command line parses it, so `&`, `^` and
 /// `|` in a query stay part of it, where `cmd /C start` reads them as its own

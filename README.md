@@ -29,6 +29,7 @@ Windows, `libclang-dev` on Linux.
 cargo run --profile release-dev                                  # the editor window
 cargo run --profile release-dev -- darkroom/sample/sample.darkroom  # with the sample project
 cargo run --profile release-dev -- --mcp --headless              # the editor as an MCP server, no window
+cargo run --profile release-dev -- --debug-overlay                # the window, with damage and frame stats
 ```
 
 `--mcp` alone serves the open window over stdio, so an agent can drive the

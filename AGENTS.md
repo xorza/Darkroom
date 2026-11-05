@@ -132,6 +132,9 @@ arguments after a `--`; each submodule runs its own.
   `Display` too, which a chain prints twice; the cause in `Display` alone,
   which no caller can walk to
   ([error-handling project group](https://blog.rust-lang.org/inside-rust/2021/07/01/What-the-error-handling-project-group-is-working-towards.html)).
+- **One behavior in every build and on every platform**, unless the difference is speed alone or
+  the system decides it: a person's settings, what a device can hold. Refused: a diagnostic on in
+  debug alone.
 - **No backward compatibility.** Change serialized shapes and APIs freely: no
   migrations, compat shims, legacy deserializers or legacy-format tests.
 - **New ids come from `uuidgen | tr 'A-Z' 'a-z'`** — every new `common::Id`

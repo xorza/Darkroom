@@ -4,6 +4,7 @@ use std::io;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use glam::UVec2;
 use palantir::{GpuRequestError, LocateError, PlayError};
 
 use crate::gui::app::error::DrivenOpenError;
@@ -32,6 +33,12 @@ pub enum DriverError {
     EmptyRegion { region: String },
     #[error("a shot needs pixels, and this session has none: start it with the GPU display")]
     NoGpu,
+    #[error(
+        "a window of {}x{} is past this GPU's {limit} pixels a side; ask for a smaller one",
+        .size.x,
+        .size.y
+    )]
+    WindowTooLarge { size: UVec2, limit: u32 },
     #[error("the GPU device was lost before the picture came back; take the shot again")]
     DeviceLost,
     #[error("the GPU did not finish the frame in time and hangs; the shot has no pixels")]

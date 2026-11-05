@@ -5,12 +5,13 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use clap::Parser;
+use darkroom::RunConfig;
 use glam::UVec2;
-use palantir::SystemScale;
+use palantir::{DebugOverlayConfig, SystemScale};
 
 /// The largest window side a session takes, in physical pixels: wgpu's default
-/// `max_texture_dimension_2d`, which desktop adapters reach. palantir asks the adapter for its
-/// own limit, so an adapter below it panics on a larger window.
+/// `max_texture_dimension_2d`, which desktop adapters reach. An adapter below it answers a larger
+/// window with `DriverError::WindowTooLarge`.
 const MAX_WINDOW_SIDE: u32 = 8192;
 /// The smallest scale a session takes: at a quarter, a 12 px label is 3 pixels high.
 const MIN_SCALE: f32 = 0.25;
@@ -29,6 +30,10 @@ pub(crate) struct Cli {
     /// With `--mcp`, no window: the editor renders offscreen, on a GPU adapter or a software one.
     #[arg(long, requires = "mcp")]
     headless: bool,
+    /// Paint each frame's damage and the frame stats over the window. The stats' `settle n/m` shows
+    /// a gesture's record-pass cost: drag a node and watch whether both halves advance together.
+    #[arg(long, conflicts_with = "headless")]
+    debug_overlay: bool,
     /// The headless window's physical size, as `1600x1000`.
     #[arg(long, requires = "headless", default_value = "1600x1000")]
     size: WindowSize,
@@ -40,10 +45,10 @@ pub(crate) struct Cli {
 /// What a launch runs.
 #[derive(Debug, PartialEq)]
 pub(crate) enum Launch {
-    /// The editor's window, on `document` or the remembered one.
-    Window { document: Option<PathBuf> },
+    /// The editor's window, on the config's document or the remembered one.
+    Window(RunConfig),
     /// The window, and an MCP server that drives it.
-    McpWindow { document: Option<PathBuf> },
+    McpWindow(RunConfig),
     /// An MCP server that drives the editor in an offscreen window of `size` physical pixels at
     /// `scale`, on `document` or a new one.
     McpHeadless {
@@ -69,12 +74,21 @@ impl Cli {
             document,
             mcp,
             headless,
+            debug_overlay,
             size,
             scale,
         } = self;
+        let window = |document| RunConfig {
+            document,
+            overlay: DebugOverlayConfig {
+                damage_rect: debug_overlay,
+                frame_stats: debug_overlay,
+                ..DebugOverlayConfig::default()
+            },
+        };
         match (mcp, headless) {
-            (false, _) => Launch::Window { document },
-            (true, false) => Launch::McpWindow { document },
+            (false, _) => Launch::Window(window(document)),
+            (true, false) => Launch::McpWindow(window(document)),
             (true, true) => Launch::McpHeadless {
                 document,
                 size: size.0,
@@ -124,8 +138,9 @@ mod tests {
 
     use clap::Parser;
     use clap::error::ErrorKind;
+    use darkroom::RunConfig;
     use glam::UVec2;
-    use palantir::SystemScale;
+    use palantir::{DebugOverlayConfig, SystemScale};
 
     use crate::cli::{Cli, Launch, WindowScale, WindowSize};
 
@@ -141,14 +156,39 @@ mod tests {
     #[test]
     fn the_flags_pick_the_launch() {
         let scene = || Some(PathBuf::from("graphs/scene.darkroom"));
-        assert_eq!(launch(&[]), Ok(Launch::Window { document: None }));
+        let opened = |document| RunConfig {
+            document,
+            overlay: DebugOverlayConfig::default(),
+        };
+        let overlaid = |document| RunConfig {
+            document,
+            overlay: DebugOverlayConfig {
+                damage_rect: true,
+                frame_stats: true,
+                dim_undamaged: false,
+            },
+        };
+        assert_eq!(launch(&[]), Ok(Launch::Window(opened(None))));
         assert_eq!(
             launch(&["graphs/scene.darkroom"]),
-            Ok(Launch::Window { document: scene() })
+            Ok(Launch::Window(opened(scene())))
         );
         assert_eq!(
             launch(&["--mcp", "graphs/scene.darkroom"]),
-            Ok(Launch::McpWindow { document: scene() })
+            Ok(Launch::McpWindow(opened(scene())))
+        );
+        assert_eq!(
+            launch(&["--debug-overlay"]),
+            Ok(Launch::Window(overlaid(None)))
+        );
+        assert_eq!(
+            launch(&["--mcp", "--debug-overlay", "graphs/scene.darkroom"]),
+            Ok(Launch::McpWindow(overlaid(scene())))
+        );
+        assert_eq!(
+            launch(&["--mcp", "--headless", "--debug-overlay"]),
+            Err(ErrorKind::ArgumentConflict),
+            "a headless session has no window to paint over"
         );
         assert_eq!(
             launch(&["--mcp", "--headless"]),

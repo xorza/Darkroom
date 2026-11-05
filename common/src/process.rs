@@ -12,6 +12,12 @@ pub fn open_url(url: &str) -> io::Result<()> {
     platform::open_url(url)
 }
 
+/// Reach the terminal that started this binary, which a Windows GUI binary would not. Call it
+/// first in `main`, ahead of any output.
+pub fn attach_parent_console() {
+    platform::attach_parent_console();
+}
+
 /// Run `program` with `args` and the environment it inherits plus `envs`, wait for it to exit,
 /// and hand back its status and what it wrote, as `Command::output`.
 pub fn output(

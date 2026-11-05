@@ -14,6 +14,7 @@ use crate::driver::action::{Action, DRAG_STEPS, Play};
 use crate::driver::error::{ActFailure, DriverError};
 use crate::driver::locator::{EditorTarget, Locator, Side};
 use crate::driver::log_ring::LogRing;
+use crate::driver::offscreen;
 use crate::driver::shot::{NODE_MARGIN, Region, Shot};
 use crate::driver::state::{Detail, State};
 use crate::driver::{COPY_LIMIT, DisplayKind, Driver, OpenMode, SessionConfig};
@@ -742,6 +743,25 @@ fn a_save_writes_the_format_its_extension_names() {
     assert_eq!(
         io_document::load(&again).unwrap(),
         io_document::load(&dir.join("copy.darkroomz")).unwrap()
+    );
+}
+
+/// A device takes a window up to its limit per side, on either side; one pixel past it is the
+/// error, not palantir's panic on the target.
+#[test]
+fn a_window_past_the_device_limit_is_refused() {
+    let check = |x, y| offscreen::check_window(UVec2::new(x, y), 4096);
+    assert!(check(4096, 4096).is_ok());
+    for (x, y) in [(4097, 1), (1, 4097)] {
+        let error = check(x, y).unwrap_err();
+        assert!(
+            matches!(error, DriverError::WindowTooLarge { size, limit: 4096 } if size == UVec2::new(x, y)),
+            "{error:?}"
+        );
+    }
+    assert_eq!(
+        check(4097, 1).unwrap_err().to_string(),
+        "a window of 4097x1 is past this GPU's 4096 pixels a side; ask for a smaller one"
     );
 }
 
