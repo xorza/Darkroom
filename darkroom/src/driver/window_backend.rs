@@ -35,7 +35,7 @@ impl WindowBackend {
     ///
     /// When `f` panics there, with its message: the window stays, and the session ends.
     pub(crate) fn with_app<R: Send + 'static>(
-        &self,
+        &mut self,
         f: impl FnOnce(&mut App, &Ui) -> R + Send + 'static,
     ) -> Result<R, DriverError> {
         self.remote
@@ -52,7 +52,7 @@ impl WindowBackend {
     }
 
     pub(crate) fn widgets(
-        &self,
+        &mut self,
         filter: Option<&str>,
     ) -> Result<Vec<InspectedWidget>, DriverError> {
         self.remote
@@ -71,7 +71,7 @@ impl WindowBackend {
 
     /// Open `document` in the window, or a new document for none, as File ▸ Open and File ▸ New
     /// do, refusing to discard unsaved edits.
-    pub(crate) fn open(&self, document: Option<PathBuf>) -> Result<(), DriverError> {
+    pub(crate) fn open(&mut self, document: Option<PathBuf>) -> Result<(), DriverError> {
         let opened = self.with_app(move |app, _| match &document {
             Some(document) => app.open_driven(document, UnsavedEdits::Refuse),
             None => app.new_driven(UnsavedEdits::Refuse),
