@@ -386,7 +386,9 @@ impl GraphUi {
         // The keyboard half of the same phase. Last, so a chord reads the
         // document the pointer gestures above were raised against.
         shortcuts::emit(ui, CanvasCtx::new(prepass, &self.geometry), out);
-        Relayout::needed_if(appearing)
+        // A node with no measured size records hidden until its rects let its wires draw, and a
+        // cull keeps it recorded, so this ends with the next record.
+        Relayout::needed_if(appearing || self.geometry.has_unmeasured())
     }
 
     /// Record one graph pane: its gestures' record-phase halves, the canvas

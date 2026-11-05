@@ -1,4 +1,5 @@
 use glam::{UVec2, Vec2};
+use scenarium::internals::test_graph::TestGraph;
 use scenarium::{CacheMode, NodeId};
 use std::mem;
 use std::sync::Arc;
@@ -210,4 +211,37 @@ fn a_preview_node_shows_one_kind_mark_after_its_title() {
     for gone in ["sink_mark", "impure_mark"] {
         assert_eq!(h.ui.rect(wid::of_node(gone, preview)), None, "{gone}");
     }
+}
+
+/// A node with no measured size is laid out unseen, its subscription pin too, so neither takes a
+/// pointer. The next frame shows both. Removed and restored by an undo, a sink has lost its
+/// size, as a node first recorded has none.
+#[test]
+fn a_node_and_its_pin_show_once_measured() {
+    let mut h = CanvasHarness::new(TestGraph::source_sink_loose());
+    h.prime(2);
+    let sink = h
+        .ctx
+        .graph_ctx()
+        .nodes()
+        .find(|node| node.sink())
+        .expect("the fixture holds a sink")
+        .node_id;
+    let parts = [wid::body(sink), wid::subscription_glyph(sink)];
+    let listed = |h: &CanvasHarness| {
+        parts.map(|part| h.ui.widgets(None).iter().any(|widget| widget.id == part))
+    };
+    assert_eq!(listed(&h), [true, true], "a measured node shows");
+
+    let _removed = h
+        .ctx
+        .open
+        .apply_edit(GraphIntent::RemoveNode { node_id: sink }, &h.ctx.library);
+    h.frame();
+    h.graph_ui.retain_nodes(&h.ctx.open.document);
+    let _restored = h.ctx.open.undo();
+    h.frame();
+    assert_eq!(listed(&h), [false, false], "laid out unseen");
+    h.frame();
+    assert_eq!(listed(&h), [true, true], "measured, so it shows");
 }

@@ -31,6 +31,7 @@ use crate::gui::frame::app_ctx::{AppCtx, StatusInputs};
 use crate::gui::frame::frame_writes::FrameWrites;
 use crate::gui::frame::relayout::Relayout;
 use crate::gui::frame::requests::Requests;
+use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
 use std::iter;
@@ -58,6 +59,13 @@ pub(crate) struct SessionHarness {
     /// The frame's request queue — `App`'s in production. `pub(crate)` so a
     /// test can seed it the way a widget does.
     pub(crate) requests: Requests,
+}
+
+impl Session {
+    /// The canvas's geometry, for a test that reads which ports a pass could anchor a wire to.
+    pub(crate) fn geometry(&self) -> &CanvasGeometry {
+        self.main_window.graph_ui.geometry()
+    }
 }
 
 impl SessionHarness {

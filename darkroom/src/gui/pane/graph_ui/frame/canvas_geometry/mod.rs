@@ -77,9 +77,17 @@ pub(crate) struct CanvasGeometry {
     /// yields no usable world size for a node at the margin — and it is
     /// absent exactly for the culled nodes that most need one.
     node_screen: HashMap<NodeId, Rect>,
+    /// Whether the last [`Self::rebuild`] met a node with no measured size, as a node the record
+    /// has not laid out yet.
+    has_unmeasured: bool,
 }
 
 impl CanvasGeometry {
+    /// Whether the last [`Self::rebuild`] met a node with no measured size.
+    pub(crate) const fn has_unmeasured(&self) -> bool {
+        self.has_unmeasured
+    }
+
     /// The node's world-space (inner-canvas pre-transform) body rect *this
     /// frame*: the scene's current position combined with the cached measured
     /// size — so a node the document moved under a live gesture (a drag, an
@@ -147,6 +155,7 @@ impl CanvasGeometry {
         self.events.begin_frame();
         self.subs.begin_frame();
         self.node_screen.clear();
+        self.has_unmeasured = false;
         for n in graph_ctx.nodes() {
             // Port offsets within a node are stable; the node's
             // canvas-local position changes when the user drags. Take
@@ -162,6 +171,7 @@ impl CanvasGeometry {
             if let Some(r) = body.rect {
                 self.node_screen.insert(n.node_id, r);
             }
+            self.has_unmeasured |= !self.node_sizes.contains_key(&n.node_id);
             // A node that didn't record has no glyph that did either — they
             // are its descendants — so every one of their responses is the
             // default, and polling them one by one only rediscovers that.

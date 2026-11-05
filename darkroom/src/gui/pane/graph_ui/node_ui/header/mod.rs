@@ -10,7 +10,8 @@ use std::f32::consts::FRAC_PI_4;
 
 use palantir::{
     Align, Checkbox, Configure, DockDrop, DockOperation, EditableLabel, Menu, MenuItem,
-    MenuSeparator, Modifiers, Panel, Separator, Sizing, SplitSide, Ui, VAlign, WidgetId,
+    MenuSeparator, Modifiers, Panel, Separator, Sizing, SplitSide, Ui, VAlign, Visibility,
+    WidgetId,
 };
 
 use scenarium::{CacheMode, NodeId};
@@ -54,7 +55,12 @@ const NODE_NAME_MIN_WIDTH: f32 = 40.0;
 /// node (the body records after, so it hit-tests on top), while
 /// drop-snapping (rect-based) still accepts the whole box. `hover` (over
 /// while a drag snaps to it) tints the triangle as drop feedback.
-pub(super) fn subscription_pin(ui: &mut Ui, node: NodeCtx<'_>, hover: Hover) {
+pub(super) fn subscription_pin(
+    ui: &mut Ui,
+    node: NodeCtx<'_>,
+    hover: Hover,
+    visibility: Visibility,
+) {
     let theme = node.theme();
     // The emitter arrow turned an eighth of a turn, so it points down-right into
     // its node along the event wire arriving from the upper left, as Unreal
@@ -67,6 +73,7 @@ pub(super) fn subscription_pin(ui: &mut Ui, node: NodeCtx<'_>, hover: Hover) {
     )
     .turn(FRAC_PI_4)
     .centered_on(node.pos)
+    .visibility(visibility)
     .tooltip(Some(
         "Event subscription — drag to an emitter, or drop an event wire here",
     ))

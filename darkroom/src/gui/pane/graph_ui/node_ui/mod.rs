@@ -9,7 +9,7 @@ pub(crate) mod run_status;
 
 use std::mem;
 
-use palantir::{Configure, Modifiers, Panel, Sense, Shadow, Sizing, Stroke, Track, Ui};
+use palantir::{Configure, Modifiers, Panel, Sense, Shadow, Sizing, Stroke, Track, Ui, Visibility};
 use scenarium::NodeId;
 
 use crate::core::document::graph_view::StackedNode;
@@ -235,6 +235,15 @@ impl NodeUi {
         // The status frame when the last run asks for attention, else the
         // ambient elevation shadow — one slot, and live status outranks depth.
         let shadow = node_shadow(theme, node.exec_status());
+        // A node with no rects yet is laid out unseen, so it and its wires appear together: a
+        // wire reads its port's rect, which only a layout gives. As egui's `sizing_pass` measures
+        // a Ui it does not show, and React Flow draws an edge only once its nodes are measured.
+        // Refused: painting the node without its wires for a frame.
+        let visibility = if draw_ctx.geometry().node_world_rect(node).is_some() {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
 
         // The subscription pin records just before the body so it peeks out
         // from behind this node's corner while riding the same cull decision
@@ -244,6 +253,7 @@ impl NodeUi {
                 ui,
                 node,
                 Hover::from(draw_ctx.geometry().subs.is_hovered(node.node_id)),
+                visibility,
             );
         }
 
@@ -252,6 +262,7 @@ impl NodeUi {
         let row_tracks = &mut state.row_tracks;
         let panel = Panel::vstack()
             .id(wid::body(node.node_id))
+            .visibility(visibility)
             .at(node.pos)
             // A preview needs room for a thumbnail; every other node keeps the
             // theme's own floor.

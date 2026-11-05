@@ -4,7 +4,8 @@
 use glam::Vec2;
 use palantir::widget::Shape;
 use palantir::{
-    Configure, Panel, Rect, Response, RgbaF32, Sense, Spacing, Stroke, TextInput, Ui, WidgetId,
+    Configure, Panel, Rect, Response, RgbaF32, Sense, Spacing, Stroke, TextInput, Ui, Visibility,
+    WidgetId,
 };
 
 use crate::gui::theme::Theme;
@@ -71,6 +72,7 @@ pub(crate) struct PortGlyph<'a> {
     wid: WidgetId,
     glyph: Painted,
     placement: Placement,
+    visibility: Visibility,
     tooltip: Option<TextInput<'a>>,
 }
 
@@ -108,6 +110,7 @@ impl<'a> PortGlyph<'a> {
             wid,
             glyph,
             placement: Placement::Margin(Spacing::ZERO),
+            visibility: Visibility::Visible,
             tooltip: None,
         }
     }
@@ -156,6 +159,12 @@ impl<'a> PortGlyph<'a> {
         self
     }
 
+    /// Whether the glyph shows; hidden, it is still laid out, so its rect stays known.
+    pub(crate) const fn visibility(mut self, visibility: Visibility) -> Self {
+        self.visibility = visibility;
+        self
+    }
+
     /// Hover tooltip. `None` (the default) records none — which is what a
     /// port off the hovered node passes, since only that node builds tooltips.
     /// A `&'static str` stays borrowed until the bubble records; an
@@ -177,11 +186,13 @@ impl<'a> PortGlyph<'a> {
             wid,
             glyph,
             placement,
+            visibility,
             tooltip,
         } = self;
         let (hit, inset) = (glyph.hit(), glyph.inset());
         let panel = Panel::zstack()
             .id(wid)
+            .visibility(visibility)
             .size(hit)
             .sense(Sense::CLICK | Sense::DRAG);
         let panel = match placement {

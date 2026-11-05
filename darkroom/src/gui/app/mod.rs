@@ -1085,11 +1085,13 @@ mod tests {
         }
     }
 
-    /// The app, counting the record passes it runs.
+    /// The app, counting the record passes it runs. With `undo_after_pass`, it undoes once after
+    /// its next pass, where a menu's Undo lands, and asks a second pass as that click does.
     #[derive(Debug)]
     struct CountedPasses {
         app: App,
         passes: u32,
+        undo_after_pass: bool,
     }
 
     impl palantir::App for CountedPasses {
@@ -1100,6 +1102,10 @@ mod tests {
         fn record(&mut self, window: palantir::WindowToken, ui: &mut Ui) {
             self.passes += 1;
             palantir::App::record(&mut self.app, window, ui);
+            if std::mem::take(&mut self.undo_after_pass) {
+                let _edit = self.app.session.open.undo();
+                ui.request_relayout();
+            }
         }
     }
 
@@ -1116,6 +1122,7 @@ mod tests {
             let mut counted = CountedPasses {
                 app: App::offscreen(ui.ui_mut()),
                 passes: 0,
+                undo_after_pass: false,
             };
             counted.app.session.open.dirty = true;
             ui.frame_app(&mut counted);
@@ -1160,5 +1167,94 @@ mod tests {
                 "by keyboard {by_keyboard}: Return presses Save"
             );
         }
+    }
+
+    /// An edit that lands after pass A, as a menu's Undo does, first records its node in pass B,
+    /// which has no rects for it. That frame shows neither the node nor its wires, the other 5 of
+    /// the sample's 7, and asks the next frame by itself, with no input and no change under the
+    /// pointer. That frame shows the node and all 7 in one pass. An Undo from the keyboard lands
+    /// before pass A, so its own frame shows them all.
+    #[test]
+    fn a_node_and_its_wires_appear_together_after_an_undo() {
+        use glam::UVec2;
+        use palantir::Harness;
+
+        use crate::gui::frame::shortcuts;
+        use crate::gui::port_ref::PortRef;
+
+        const NODE: &str = "Auto Stretch";
+
+        let wires_anchored = |app: &App| {
+            let geometry = app.session.geometry();
+            app.session
+                .open
+                .document
+                .graph
+                .bindings
+                .iter()
+                .filter_map(|(input, binding)| match binding {
+                    Binding::Wire(output) => Some((*input, *output)),
+                    Binding::Const(_) => None,
+                })
+                .filter(|&(input, output)| {
+                    geometry.ports.center(PortRef::from(input)).is_some()
+                        && geometry.ports.center(PortRef::from(output)).is_some()
+                })
+                .count()
+        };
+        // The node's title, which a hidden node does not list: its text then rolls up to the canvas.
+        let title = |ui: &Harness| {
+            ui.widgets(Some(NODE))
+                .into_iter()
+                .find(|widget| widget.text == NODE)
+        };
+
+        let mut ui = Harness::new(UVec2::new(1600, 1000));
+        let mut counted = CountedPasses {
+            app: App::offscreen(ui.ui_mut()),
+            passes: 0,
+            undo_after_pass: false,
+        };
+        counted
+            .app
+            .open_document_at(PathBuf::from("sample/sample.darkroom"));
+        ui.ui_mut().request_repaint();
+        for _ in 0..4 {
+            ui.frame_app(&mut counted);
+        }
+        assert_eq!(wires_anchored(&counted.app), 7);
+
+        let delete = |ui: &mut Harness, counted: &mut CountedPasses| {
+            let node = title(ui).expect("the node shows").id;
+            ui.click(node);
+            ui.frame_app(counted);
+            ui.key(shortcuts::DELETE);
+            for _ in 0..2 {
+                ui.frame_app(counted);
+            }
+            assert!(title(ui).is_none(), "deleted");
+        };
+
+        delete(&mut ui, &mut counted);
+        counted.undo_after_pass = true;
+        ui.ui_mut().request_repaint();
+        counted.passes = 0;
+        let report = ui.frame_app(&mut counted);
+        assert_eq!(counted.passes, 2);
+        assert!(title(&ui).is_none(), "laid out unseen");
+        assert_eq!(wires_anchored(&counted.app), 5, "the other wires");
+        assert!(report.repaint_requested, "the edit asks the next frame");
+        counted.passes = 0;
+        let report = ui.frame_app(&mut counted);
+        assert_eq!(counted.passes, 1);
+        assert!(title(&ui).is_some(), "the node shows");
+        assert_eq!(wires_anchored(&counted.app), 7, "with all its wires");
+        assert!(!report.repaint_requested, "settled");
+
+        delete(&mut ui, &mut counted);
+        ui.key(shortcuts::UNDO);
+        ui.frame_app(&mut counted);
+        assert!(title(&ui).is_some(), "the chord's own frame shows it");
+        assert_eq!(wires_anchored(&counted.app), 7);
     }
 }
