@@ -5,7 +5,8 @@
 use std::path::PathBuf;
 
 use palantir::{
-    Button, Checkbox, Configure, Modal, OverlayClose, Panel, Sizing, Text, TextWrap, Ui, WidgetId,
+    Align, Button, Checkbox, Configure, Modal, OverlayClose, Panel, Sizing, Spacing, Text,
+    TextWrap, Ui, VAlign, WidgetId,
 };
 
 use crate::gui::theme::Theme;
@@ -149,14 +150,17 @@ impl DiscardOutcome {
 /// Returns the choice the user made this frame plus the "Don't ask again"
 /// state.
 ///
-/// The buttons sit at the right in one order on every platform, Save last in the accent, and
-/// Save takes the focus as the dialog opens, so Return presses it, as a dialog's default button
-/// does.
+/// The question in bold over what a discard costs in the muted ink, as macOS's alert sets its
+/// message over its informative text; then the commands on a footer band, the checkbox at its
+/// left, as Windows' task dialog seats its verification checkbox beside the buttons. The buttons
+/// sit at the right in one order on every platform, Save last in the accent, and Save takes the
+/// focus as the dialog opens, so Return presses it, as a dialog's default button does.
 fn show(ui: &mut Ui, theme: &Theme, file_name: Option<&str>, tail: &str) -> DiscardOutcome {
     let title = match file_name {
         Some(name) => ui.fmt(format_args!("Save changes to “{name}” before {tail}?")),
         None => ui.fmt(format_args!("Save changes before {tail}?")),
     };
+    let inset = theme.space.xl;
 
     // The checkbox's own id keys its state, so the row lives exactly as long
     // as the dialog is up: once it closes nothing records the checkbox, the
@@ -164,58 +168,71 @@ fn show(ui: &mut Ui, theme: &Theme, file_name: Option<&str>, tail: &str) -> Disc
     let dont_ask_id = dont_ask_wid();
     ui.with_state::<DontAskAgain, _>(dont_ask_id, |ui, DontAskAgain(dont_ask_again)| {
         let mut choice = DiscardChoice::Stay;
+        // The bands seat flush inside the panel's border, which the layout insets them by, and
+        // each pads its own content.
         let resp = Modal::new()
-            .id_salt(("discard_dialog", "modal"))
+            .id(modal_wid())
+            .padding(Spacing::ZERO)
             .show(ui, |ui| {
                 Panel::vstack()
-                    .id(body_wid())
-                    .max_size((title_measure(theme), f32::INFINITY))
-                    .gap(theme.space.lg)
+                    .id(message_wid())
+                    .size((Sizing::FILL, Sizing::HUG))
+                    .max_size((title_measure(theme) + 2.0 * inset, f32::INFINITY))
+                    .padding(Spacing::all(inset))
+                    .gap(theme.space.sm)
                     .show(ui, |ui| {
                         Text::new(title)
                             .id(title_wid())
                             .style(&support::title_text(ui, theme))
                             .text_wrap(TextWrap::Wrap)
                             .show(ui);
+                        Text::new("Your changes will be lost if you don't save them.")
+                            .id(detail_wid())
+                            .style(&support::muted_text(ui, theme, theme.font.body))
+                            .text_wrap(TextWrap::Wrap)
+                            .show(ui);
+                    });
+                Panel::hstack()
+                    .id(footer_wid())
+                    .size((Sizing::FILL, Sizing::HUG))
+                    .padding(Spacing::xy(inset, theme.space.lg))
+                    .gap(theme.space.sm)
+                    .child_align(Align::v(VAlign::Center))
+                    .chrome(theme.footer_chrome(theme.float_inner_radius()))
+                    .show(ui, |ui| {
                         Checkbox::new(dont_ask_again)
                             .id(dont_ask_id)
                             .label("Don't ask again")
                             .show(ui);
-                        Panel::hstack()
-                            .id_salt(("discard_dialog", "row"))
-                            .size((Sizing::FILL, Sizing::HUG))
-                            .gap(theme.space.sm)
-                            .show(ui, |ui| {
-                                support::hspacer(ui, "discard_dialog_spacer");
-                                if Button::new()
-                                    .id(discard_wid())
-                                    .label("Don't Save")
-                                    .show(ui)
-                                    .left
-                                    .clicked()
-                                {
-                                    choice = DiscardChoice::Discard;
-                                }
-                                if Button::new()
-                                    .id(cancel_wid())
-                                    .label("Cancel")
-                                    .show(ui)
-                                    .left
-                                    .clicked()
-                                {
-                                    choice = DiscardChoice::Cancel;
-                                }
-                                if Button::new()
-                                    .id(save_wid())
-                                    .label("Save")
-                                    .style(&theme.primary_button)
-                                    .show(ui)
-                                    .left
-                                    .clicked()
-                                {
-                                    choice = DiscardChoice::Save;
-                                }
-                            });
+                        support::hspacer(ui, "discard_dialog_spacer");
+                        if Button::new()
+                            .id(discard_wid())
+                            .label("Don't Save")
+                            .show(ui)
+                            .left
+                            .clicked()
+                        {
+                            choice = DiscardChoice::Discard;
+                        }
+                        if Button::new()
+                            .id(cancel_wid())
+                            .label("Cancel")
+                            .show(ui)
+                            .left
+                            .clicked()
+                        {
+                            choice = DiscardChoice::Cancel;
+                        }
+                        if Button::new()
+                            .id(save_wid())
+                            .label("Save")
+                            .style(&theme.primary_button)
+                            .show(ui)
+                            .left
+                            .clicked()
+                        {
+                            choice = DiscardChoice::Save;
+                        }
                     });
             });
         // Save holds the focus as the dialog opens, so Return presses it.
@@ -254,12 +271,24 @@ fn dont_ask_wid() -> WidgetId {
     WidgetId::from_hash("darkroom.discard_dialog.dont_ask_again")
 }
 
-fn body_wid() -> WidgetId {
-    WidgetId::from_hash("darkroom.discard_dialog.body")
+fn modal_wid() -> WidgetId {
+    WidgetId::from_hash("darkroom.discard_dialog.modal")
+}
+
+fn message_wid() -> WidgetId {
+    WidgetId::from_hash("darkroom.discard_dialog.message")
+}
+
+fn footer_wid() -> WidgetId {
+    WidgetId::from_hash("darkroom.discard_dialog.footer")
 }
 
 fn title_wid() -> WidgetId {
     WidgetId::from_hash("darkroom.discard_dialog.title")
+}
+
+fn detail_wid() -> WidgetId {
+    WidgetId::from_hash("darkroom.discard_dialog.detail")
 }
 
 fn save_wid() -> WidgetId {
@@ -288,9 +317,10 @@ pub(crate) mod internals {
 
 #[cfg(test)]
 mod tests {
-    use glam::UVec2;
+    use glam::{UVec2, Vec2};
     use palantir::Harness;
     use palantir::Key;
+    use palantir::{Chrome, Corners, Rect};
 
     use super::*;
 
@@ -329,10 +359,14 @@ mod tests {
         assert!(!open(&mut h), "the next open starts unchecked");
     }
 
-    /// The buttons sit at the body's right in one order, Don't Save, Cancel, then Save, which
-    /// wears the accent; a long file name wraps the title inside its measure; Return picks Save.
+    /// The message and the footer band under it seat flush inside the panel's 1 px hairline, the
+    /// footer rounded at the float radius less that hairline, 10 − 1 = 9. The detail line sits a
+    /// `sm` under the title, the checkbox starts the footer where the title starts the message,
+    /// one `xl` in, and the buttons end it one `xl` from the right, an `lg` under its top, in one
+    /// order, Don't Save, Cancel, then Save, which wears the accent, all centered on one line. A
+    /// long file name wraps the title inside its measure; Return picks Save.
     #[test]
-    fn save_ends_the_button_row_in_the_accent_and_return_picks_it() {
+    fn save_ends_the_footer_in_the_accent_and_return_picks_it() {
         let theme = Theme::default();
         let mut h = Harness::new(UVec2::new(1200, 800));
         let name = "a file name long enough to run well past the title's measure.darkroom";
@@ -341,21 +375,80 @@ mod tests {
         assert_eq!(choice(&mut h), DiscardChoice::Stay);
         assert_eq!(choice(&mut h), DiscardChoice::Stay);
         let rect = |wid: WidgetId| h.rect(wid).expect("recorded");
-        let [body, title, discard, cancel, save] = [
-            body_wid(),
+        let [
+            panel,
+            message,
+            footer,
+            title,
+            detail,
+            dont_ask,
+            discard,
+            cancel,
+            save,
+        ] = [
+            modal_wid().with("panel"),
+            message_wid(),
+            footer_wid(),
             title_wid(),
+            detail_wid(),
+            dont_ask_wid(),
             discard_wid(),
             cancel_wid(),
             save_wid(),
         ]
         .map(rect);
-        assert!(discard.max().x < cancel.min.x && cancel.max().x < save.min.x);
+        let inset = theme.space.xl;
+
+        let edge = theme.stroke.hairline;
+        assert_eq!(edge, 1.0);
+        assert_eq!(theme.palantir.modal.panel.border.width, edge);
         assert_eq!(
-            save.max().x,
-            body.max().x,
-            "the row ends at the body's right edge"
+            message.min,
+            panel.min + Vec2::splat(edge),
+            "flush at the top"
         );
-        assert!(body.size.w <= title_measure(&theme), "{}", body.size.w);
+        assert_eq!(
+            footer.min.y,
+            message.max().y,
+            "the footer closes the message"
+        );
+        assert_eq!(footer.min.x, message.min.x);
+        assert_eq!(footer.size.w, message.size.w);
+        assert_eq!(
+            footer.max(),
+            panel.max() - Vec2::splat(edge),
+            "flush at the bottom"
+        );
+        assert_eq!(
+            theme.footer_chrome(theme.float_inner_radius()),
+            Chrome::rounded(theme.colors.surround_bg, Corners::new(0.0, 0.0, 9.0, 9.0))
+        );
+
+        assert_eq!(title.min, message.min + Vec2::splat(inset));
+        assert_eq!(detail.min.x, title.min.x);
+        assert_eq!(detail.min.y, title.max().y + theme.space.sm);
+        assert_eq!(message.max().y, detail.max().y + inset);
+        assert_eq!(
+            dont_ask.min.x, title.min.x,
+            "the footer's content lines up with the title"
+        );
+        assert!(dont_ask.max().x < discard.min.x);
+        assert!(discard.max().x < cancel.min.x);
+        assert!(cancel.max().x < save.min.x);
+        assert_eq!(save.max().x, footer.max().x - inset);
+        assert_eq!(save.min.y, footer.min.y + theme.space.lg);
+        assert_eq!(save.max().y, footer.max().y - theme.space.lg);
+        let mid = |r: Rect| r.min.y + r.size.h / 2.0;
+        for (slot, r) in [
+            ("checkbox", dont_ask),
+            ("don't save", discard),
+            ("cancel", cancel),
+        ] {
+            assert_eq!(mid(r), mid(save), "{slot} centers on the row");
+        }
+
+        let measure = title_measure(&theme) + 2.0 * inset;
+        assert!(message.size.w <= measure, "{}", message.size.w);
         let line = theme
             .palantir
             .text

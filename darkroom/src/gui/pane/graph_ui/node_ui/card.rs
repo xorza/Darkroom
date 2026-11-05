@@ -1,9 +1,9 @@
-//! A node card's pieces: the chrome of its fact-strip footer, the padding it shares with the
-//! header, and the values a footer shows.
+//! A node card's pieces: the padding its fact-strip footer shares with the header, and the
+//! values a footer shows.
 
 use std::fmt::Display;
 
-use palantir::{Chrome, Corners, Spacing, Text, Ui, fmt};
+use palantir::{Spacing, Text, Ui, fmt};
 
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support;
@@ -43,12 +43,4 @@ impl<V: Display> LabeledValue<'_, V> {
             .show(ui);
         bare_value(ui, theme, self.value);
     }
-}
-
-/// A read-only "fact strip" footer's chrome: the surround fill, rounded on only its bottom two
-/// corners, at the card's inner radius, so it seats inside the card's stroke. Shared by a node
-/// body's footer and a preview node's image-info footer.
-pub(crate) fn footer_chrome(theme: &Theme) -> Chrome {
-    let r = theme.card_inner_radius();
-    Chrome::rounded(theme.colors.surround_bg, Corners::new(0.0, 0.0, r, r))
 }

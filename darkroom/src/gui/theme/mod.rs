@@ -252,6 +252,25 @@ impl Theme {
         (self.radius.card - self.card.border_width).max(0.0)
     }
 
+    /// The corner radius of a strip seated flush inside a floating panel's hairline, a dialog's
+    /// footer: the float radius less the hairline, as [`Self::card_inner_radius`] is a card's.
+    #[inline]
+    pub(crate) fn float_inner_radius(&self) -> f32 {
+        (self.radius.float - self.stroke.hairline).max(0.0)
+    }
+
+    /// A footer strip's chrome: the surround fill, rounded on its bottom two corners at `radius`,
+    /// the inner radius of the surface it closes, so it seats inside that surface's stroke. A
+    /// node's fact strip and a dialog's button row are one band: the surround the menu bar and
+    /// the status bar sit on, as Fluent's dialog sets its commands on a band of their own
+    /// ([ContentDialog](https://learn.microsoft.com/windows/apps/design/controls/dialogs-and-flyouts/dialogs)).
+    pub(crate) fn footer_chrome(&self, radius: f32) -> Chrome {
+        Chrome::rounded(
+            self.colors.surround_bg,
+            Corners::new(0.0, 0.0, radius, radius),
+        )
+    }
+
     /// The fill of a control that is on, an icon button's or a toolbar chip's: a wash of its
     /// `ink` over the card's fill, a step stronger under the pointer.
     pub(crate) fn on_fill(&self, ink: RgbaF32, hovered: bool) -> RgbaF32 {

@@ -39,7 +39,7 @@ pub(crate) struct Palette {
     pub(crate) canvas_dot: RgbaF32,
     /// Surround fill behind the menu bar and tab strip.
     pub(crate) surround_bg: RgbaF32,
-    /// Node body fill, and the surface tier palantir gives its own popups.
+    /// Node body fill, and the surface tier palantir gives its own popups and its modal.
     pub(crate) node_bg: RgbaF32,
     /// Resting card outline. Transparent — the shadow carries the edge.
     pub(crate) node_border: RgbaF32,

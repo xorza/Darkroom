@@ -106,7 +106,11 @@ fn default_wiring_and_menu_tweak() {
         assert!((ground - level(57)).abs() < 2e-8, "{name}: {ground}");
     }
     assert!(ui.modal.panel.backdrop_filter.is_noop());
-    assert_eq!(ui.modal.panel.fill, p.element_mid.into());
+    assert_eq!(
+        ui.modal.panel.fill,
+        p.node_bg.into(),
+        "the modal sits on the card tier"
+    );
 }
 
 /// Every palantir widget resolves its text to the type scale's body, not to palantir's 16 px

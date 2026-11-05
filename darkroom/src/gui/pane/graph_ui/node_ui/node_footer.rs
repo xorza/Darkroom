@@ -33,7 +33,7 @@ pub(super) fn show(ui: &mut Ui, node_ctx: NodeCtx<'_>) {
         .size((Sizing::FILL, Sizing::HUG))
         .padding(card::band_padding(theme))
         .gap(theme.space.xs)
-        .chrome(card::footer_chrome(theme))
+        .chrome(theme.footer_chrome(theme.card_inner_radius()))
         .show(ui, |ui| {
             Panel::hstack()
                 .id_salt("node_footer_row")
