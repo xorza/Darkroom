@@ -685,9 +685,16 @@ impl palantir::App for App {
     }
 
     fn record(&mut self, _win: palantir::WindowToken, ui: &mut Ui) {
-        // While nodes are computing, keep repainting (~20 fps) so the running
-        // node's live elapsed-so-far timer ticks — a single long node emits no
-        // progress events between its start and finish.
+        // Ahead of the session, so a menu open when the prompt comes up closes before it records,
+        // with no second pass. A close request raises it in `update`, a file handed over between
+        // frames.
+        let prompted = self.discard.is_up();
+        if prompted {
+            self.record_discard_prompt(ui);
+        }
+        // While nodes are computing, wake ten times a second so the running node's live
+        // elapsed-so-far timer ticks — a single long node emits no progress events between its
+        // start and finish.
         if self.run_state.activity().is_executing() {
             ui.request_repaint_after(Duration::from_millis(100));
         }
@@ -722,20 +729,24 @@ impl palantir::App for App {
         if ui.user_scale() != interface {
             ui.set_user_scale(interface);
         }
-        // A capture asks frames until its image lands and `update` hands it over: work the
-        // frames do, so no wake comes for it.
+        // Palantir runs frames until the image lands, and `update` hands it over.
         if let Some(capture) = &mut self.capture {
             capture.ask(ui);
-            ui.request_repaint();
         }
         // The app's one relayout request, past both tiers: everything that can
         // strand `CanvasGeometry`'s cross-frame caches has reported by here,
-        // and a single pass answers however many of them fired.
+        // and a single pass answers however many of them fired. A wire reads its port's rect,
+        // which only a layout gives, so a node's first record cannot draw its wires: the sizing
+        // pass egui's `Grid` takes through `request_discard`.
         if needs_relayout == Relayout::Needed {
             ui.request_relayout();
         }
 
-        self.record_discard_prompt(ui);
+        // A prompt the commands above raised records here, and a menu that recorded before it
+        // costs a second pass.
+        if !prompted {
+            self.record_discard_prompt(ui);
+        }
         if self.quitting {
             ui.close_window(MAIN_WINDOW);
         }
@@ -1071,6 +1082,83 @@ mod tests {
                     "the memory store writes nothing"
                 ),
             }
+        }
+    }
+
+    /// The app, counting the record passes it runs.
+    #[derive(Debug)]
+    struct CountedPasses {
+        app: App,
+        passes: u32,
+    }
+
+    impl palantir::App for CountedPasses {
+        fn update(&mut self, window: palantir::WindowToken, ui: &Ui) {
+            palantir::App::update(&mut self.app, window, ui);
+        }
+
+        fn record(&mut self, window: palantir::WindowToken, ui: &mut Ui) {
+            self.passes += 1;
+            palantir::App::record(&mut self.app, window, ui);
+        }
+    }
+
+    /// A prompt raised between frames records ahead of the menu bar, so the frame that shows it
+    /// closes an open menu in its one record pass. Save holds the focus after it, whether a click
+    /// or the keyboard opened the menu, which leaves the focus on a row of its own.
+    #[test]
+    fn a_prompt_over_an_open_menu_takes_one_pass_and_the_focus() {
+        use glam::UVec2;
+        use palantir::{Harness, Key};
+
+        for by_keyboard in [false, true] {
+            let mut ui = Harness::new(UVec2::new(800, 600));
+            let mut counted = CountedPasses {
+                app: App::offscreen(ui.ui_mut()),
+                passes: 0,
+            };
+            counted.app.session.open.dirty = true;
+            ui.frame_app(&mut counted);
+            ui.frame_app(&mut counted);
+            let widget = |ui: &Harness, text: &str| {
+                ui.widgets(Some(text))
+                    .into_iter()
+                    .find(|widget| widget.text == text)
+                    .unwrap_or_else(|| panic!("no widget reads {text:?}"))
+                    .id
+            };
+            let file = widget(&ui, "File");
+            if by_keyboard {
+                // Tab reaches the first title and shows the ring, so the menu takes focus.
+                ui.key(Key::Tab);
+                ui.frame_app(&mut counted);
+                assert_eq!(ui.ui().focus(), Some(file));
+                ui.key(Key::Enter);
+            } else {
+                ui.click(file);
+            }
+            ui.frame_app(&mut counted);
+            ui.frame_app(&mut counted);
+            assert_eq!(ui.widgets(Some("Save As")).len(), 1, "the menu is open");
+            assert_eq!(
+                ui.ui().focus().is_some_and(|focus| focus != file),
+                by_keyboard,
+                "by keyboard {by_keyboard}: the keyboard's menu takes the focus"
+            );
+
+            counted
+                .app
+                .open_document_at(PathBuf::from("/tmp/handed.darkroom"));
+            ui.ui_mut().request_repaint();
+            counted.passes = 0;
+            ui.frame_app(&mut counted);
+            assert_eq!(counted.passes, 1, "by keyboard {by_keyboard}");
+            assert_eq!(ui.widgets(Some("Save As")).len(), 0, "the menu closed");
+            assert_eq!(
+                ui.ui().focus(),
+                Some(widget(&ui, "Save")),
+                "by keyboard {by_keyboard}: Return presses Save"
+            );
         }
     }
 }

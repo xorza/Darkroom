@@ -26,6 +26,11 @@ pub(super) struct Answered {
 }
 
 impl DiscardGuard {
+    /// Whether the prompt is up, holding a transition.
+    pub(super) const fn is_up(&self) -> bool {
+        self.pending.is_some()
+    }
+
     /// Raise the prompt for `transition`, in place of any it held.
     pub(super) fn hold(&mut self, transition: PendingTransition) {
         self.pending = Some(transition);
@@ -301,18 +306,6 @@ fn discard_wid() -> WidgetId {
 
 fn cancel_wid() -> WidgetId {
     WidgetId::from_hash("darkroom.discard_dialog.cancel")
-}
-
-#[cfg(test)]
-pub(crate) mod internals {
-    use crate::gui::app::discard_dialog::DiscardGuard;
-
-    impl DiscardGuard {
-        /// Whether the prompt is up, holding a transition.
-        pub(crate) const fn is_up(&self) -> bool {
-            self.pending.is_some()
-        }
-    }
 }
 
 #[cfg(test)]

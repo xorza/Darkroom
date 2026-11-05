@@ -869,6 +869,49 @@ fn a_quit_ends_the_session() {
     );
 }
 
+/// A file handed over while a menu is open raises the prompt with no press: the frame that shows
+/// it has closed the menu, which holds no row and no barrier, so the first click reaches Cancel.
+#[test]
+fn a_prompt_raised_with_no_press_closes_the_open_menu() {
+    let mut driver = driver();
+    let dir = TempDir::new("darkroom-driver-prompt");
+    let path = fixture::project(dir.path(), &[BRIGHTNESS]);
+    driver.open(&path, OpenMode::Copy).unwrap();
+    let rows = |driver: &mut Driver, label: &str| driver.ui(Some(label), 8).unwrap().widgets.len();
+    driver
+        .act(&[
+            drag(
+                Locator::App(EditorTarget::NodeHeader(BRIGHTNESS.to_string())),
+                Locator::Point(Vec2::new(900.0, 700.0)),
+            ),
+            click(Locator::Text("File".to_string())),
+        ])
+        .unwrap();
+    assert_eq!(rows(&mut driver, "Save As"), 1, "the menu is open");
+
+    let handed = dir.path().join("handed.darkroom");
+    driver
+        .offscreen()
+        .with_app(|app, _| app.open_document_at(handed));
+    driver
+        .act(&[Action::Play(Play::Move(Locator::Point(Vec2::new(
+            1200.0, 900.0,
+        ))))])
+        .unwrap();
+    assert_eq!(rows(&mut driver, "Don't ask again"), 1, "the prompt is up");
+    assert_eq!(rows(&mut driver, "Save As"), 0, "the menu closed");
+
+    driver
+        .act(&[click(Locator::Text("Cancel".to_string()))])
+        .unwrap();
+    assert_eq!(
+        rows(&mut driver, "Don't ask again"),
+        0,
+        "one click answered it"
+    );
+    assert!(driver.state(Detail::Concise, None).unwrap().dirty);
+}
+
 /// A wire dropped on bare canvas opens the palette, and a pick adds the node and floats the wire
 /// again, bound to nothing until a click on the new node's input lands it.
 #[test]
