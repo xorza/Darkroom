@@ -209,7 +209,8 @@ async fn empty_path_skips_watcher_and_event_parks() {
         Duration::from_millis(200),
         node.func.events()[0]
             .event_lambda
-            .invoke(event_state.clone()),
+            .fires(event_state.clone())
+            .next(),
     )
     .await;
     assert!(fired.is_err(), "event must not fire without a watcher");
@@ -307,7 +308,7 @@ async fn debounce_collapses_burst_into_one_fire() {
     let lambda = func.events()[0].event_lambda.clone();
     let es = event_state.clone();
     let start = Instant::now();
-    let handle = tokio::spawn(async move { lambda.invoke(es).await });
+    let handle = tokio::spawn(async move { lambda.fires(es).next().await });
     task::yield_now().await;
 
     // Two pulses 50ms apart, both inside the 200ms window: the window restarts

@@ -39,7 +39,7 @@ pub use graph::error::{
     BindingRejection, DetachedNodeError, GraphValidationError, SubscriptionRejection, Unresolved,
 };
 pub use graph::func::error::{FuncValidationError, InvokeError, InvokeResult};
-pub use graph::func::event::{AsyncEvent, AsyncEventFn, EventLambda};
+pub use graph::func::event::{EventFires, EventLambda};
 pub use graph::func::func_builder::FuncBuilder;
 pub use graph::func::func_input::FuncInput;
 pub use graph::func::func_output::FuncOutput;
@@ -63,3 +63,12 @@ pub use worker::activity::WorkerActivity;
 pub use worker::error::{WorkerError, WorkerExited};
 pub use worker::protocol::{WorkerMessage, WorkerReport};
 pub use worker::run_summary::RunSummary;
+
+/// The allocator the allocation tests count through.
+#[cfg(test)]
+mod counting_allocator {
+    use common::internals::alloc_audit::CountingAllocator;
+
+    #[global_allocator]
+    static ALLOCATOR: CountingAllocator = CountingAllocator;
+}

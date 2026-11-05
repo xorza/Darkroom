@@ -104,7 +104,7 @@ async fn a_fired_event_does_not_reinitialize_the_event_sources() {
                 "tick",
                 EventLambda::new(move |_state| {
                     let notify = Arc::clone(&notify);
-                    Box::pin(async move { notify.notified().await })
+                    async move { notify.notified().await }
                 }),
             )
             .lambda(async_lambda!(move |_| { counter = counter.clone() } => {
@@ -147,8 +147,8 @@ async fn one_task_panicking_stops_the_loop() {
     let mut w = TestWorker::frames();
     w.graph.edit_func("Frame Event", |func| {
         func.events[0].event_lambda =
-            EventLambda::new(|_state| Box::pin(async { panic!("event loop stopped") }));
-        func.events[1].event_lambda = EventLambda::new(|_state| Box::pin(future::pending()));
+            EventLambda::new(|_state| async { panic!("event loop stopped") });
+        func.events[1].event_lambda = EventLambda::new(|_state| future::pending());
     });
     w.graph.subscribe("Frame Event", 1, "Print");
     let frame_event = w.id("Frame Event");

@@ -9,7 +9,7 @@ fn emitter(calls: &Calls) -> impl FnOnce(NodeSpec) -> NodeSpec {
     let body = calls.tally();
     move |n: NodeSpec| {
         n.output(DataType::Int)
-            .event("tick", EventLambda::new(|_state| Box::pin(async move {})))
+            .event("tick", EventLambda::new(|_state| async move {}))
             .compute(body)
     }
 }

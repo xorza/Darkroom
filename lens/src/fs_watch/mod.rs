@@ -228,7 +228,7 @@ pub fn fs_watch_library() -> Library {
             .event(
                 "Changed",
                 EventLambda::new(|state| {
-                    Box::pin(async move {
+                    async move {
                         let watch = state
                             .lock()
                             .get::<WatchState>()
@@ -247,7 +247,7 @@ pub fn fs_watch_library() -> Library {
                             // No watcher (e.g. empty/invalid path): never fire.
                             None => future::pending::<()>().await,
                         }
-                    })
+                    }
                 }),
             )
             .build(),

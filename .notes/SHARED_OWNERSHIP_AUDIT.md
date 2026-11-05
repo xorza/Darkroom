@@ -17,7 +17,7 @@ file.
 
 ## Summary
 
-- **No open bug.** The items below are simplifications: 3 uses that can go, and 6 that can
+- **No open bug.** The items below are simplifications: 3 uses that can go, and 1 that can
   change to a simpler or more standard primitive.
 
 ## Recommended order
@@ -85,36 +85,8 @@ file.
   `per_worker.rs:62`), so the owner must belong to one slot thread. The memory accounting changes
   from `workers` to `workers + 1` (`heap_bytes` in `resources.rs`).
 
-### darkroom: `Wake` wraps `palantir::Waker`
-
-- **Where:** `darkroom/src/core/wake.rs:9` (`Arc<dyn Fn()>`), built at `gui/app/mod.rs:146`.
-- **Problem:** `palantir::Waker` is already an `Arc<dyn Fn>` and is `Clone + Send + Sync`, so
-  this is a double indirection.
-- **Change:** use `palantir::Waker` directly. This needs a waker with no host in palantir for
-  `wake::internals::noop`, because `Waker::new` is `pub(crate)`. The value is low.
-
-### scenarium: smaller items
-
-- **`graph/func/event.rs:10,29`:** each event fire clones `SharedAnyState` and boxes a new future.
-  At frame rate, that is one allocation each frame. The structural fix is an event lambda that
-  returns one future for the life of the loop, so the box is allocated once for each loop start.
-  The priority is low, until events become hot.
-
-### lumos and common: smaller items
-
-- **`common/src/par/mod.rs:140,146`:** `lowest_failure` uses `Acquire` and `AcqRel` but publishes
-  no data. The outcomes are read after the scope joins. Use `Relaxed`, as `CancelToken` and
-  `first_failure.rs` do for stop hints.
-- **`lumos/src/frame_store/file_set.rs:35`:** `first: Mutex<Option<Box<First>>>` and
-  `KeptSet.probes: Vec<Mutex<Probed>>` are two take-once cells for one index. Fold `First` into
-  the cell of each path, as a `Probed::Early` variant with the vec always present. Then each path
-  has one lock. The value is small.
-- **`common/src/fs/tests.rs:112`:** the test uses `Arc<Barrier>` with `thread::spawn`. A scoped
-  thread that borrows `&Barrier` is sufficient.
-
 ## Sources
 
 - Mara Bos, *Rust Atomics and Locks*, chapters 2 and 3: stop flags, release and acquire,
   happens-before.
-- std docs: `std::thread::scope`.
 - rayon docs: `reduce`.

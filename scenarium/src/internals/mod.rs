@@ -41,7 +41,7 @@ pub fn stub_func(id: FuncId, name: impl Into<String>) -> FuncBuilder {
 
 /// An event body that does nothing, for a fixture that never fires it.
 pub fn stub_event() -> EventLambda {
-    EventLambda::new(|_| Box::pin(async {}))
+    EventLambda::new(|_| async {})
 }
 
 /// A node of func `func_id`, authored against a func with no ports — for a

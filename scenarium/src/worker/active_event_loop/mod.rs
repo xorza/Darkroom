@@ -49,10 +49,10 @@ impl ActiveEventLoop {
             let task = tasks.spawn({
                 let event_tx = event_tx.clone();
                 let pause_gate = pause_gate.clone();
-
+                let mut fires = lambda.fires(state);
                 async move {
                     loop {
-                        lambda.invoke(state.clone()).await;
+                        fires.next().await;
                         if event_tx.send(event).await.is_err() {
                             return;
                         }

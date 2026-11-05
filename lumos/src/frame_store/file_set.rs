@@ -33,6 +33,9 @@ pub(crate) struct FileSet<'a, P, D: Decoder> {
     /// The decode cache and what it holds of the set, for a run that keeps one.
     kept: Option<KeptSet>,
     /// The frame the plan was read off, and what reading it left, until its decode takes it.
+    /// Refused: one cell a path for this and its probe, which makes a product of the two
+    /// take-once states, or holds an empty slot for every path but one, to save one uncontended
+    /// lock a decode.
     first: Mutex<Option<Box<First<D>>>>,
     /// The source gains the set's frames share, each held once.
     gains: SharedGains,

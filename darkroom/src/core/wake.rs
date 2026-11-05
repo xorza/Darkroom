@@ -4,8 +4,10 @@ use std::sync::Arc;
 
 /// Opaque "wake the host loop" callback, fired from the worker thread after
 /// it posts a result so the main loop re-drains. Wired to
-/// [`palantir::HostHandle::request_repaint`], which keeps the worker module
-/// free of any specific frontend type.
+/// [`palantir::Waker::wake`], which keeps the worker module free of any
+/// specific frontend type, as the `core` module doc says. Refused:
+/// `palantir::Waker` itself, which saves one indirect call a wake and puts a
+/// GUI type in `core`.
 pub(crate) type Wake = Arc<dyn Fn() + Send + Sync>;
 
 #[cfg(feature = "internals")]

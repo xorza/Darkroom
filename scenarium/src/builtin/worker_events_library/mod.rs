@@ -152,11 +152,8 @@ pub fn worker_events_library() -> Library {
             FuncOutput::new("Frame #", DataType::Int)
                 .description("Frame counter, incremented each tick."),
         )
-        .event("Always", EventLambda::new(|_state| Box::pin(async {})))
-        .event(
-            "FPS",
-            EventLambda::new(|state| Box::pin(wait_for_fps_event(state))),
-        )
+        .event("Always", EventLambda::new(|_state| async {}))
+        .event("FPS", EventLambda::new(wait_for_fps_event))
         .build(),
     );
 

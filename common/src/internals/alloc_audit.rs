@@ -1,5 +1,5 @@
-//! Per-thread counting allocator, and the window the record-path allocation
-//! gate measures inside.
+//! [`CountingAllocator`]: a per-thread counting allocator, and the window an allocation gate
+//! measures inside. A test binary installs it as its `#[global_allocator]`.
 //!
 //! Per-thread rather than global because cargo runs tests in parallel in one
 //! process: a global counter would fold other tests' setup allocations into
@@ -7,7 +7,7 @@
 //! [`allocations`].
 //!
 //! `dealloc` is delegated unchanged. The metric is heap *operations* on the
-//! record path, not residency: a frame that reuses its buffers performs none,
+//! measured path, not residency: a pass that reuses its buffers performs none,
 //! and one that rebuilds them performs one per buffer however small each is.
 
 #![expect(
@@ -18,9 +18,6 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
-#[global_allocator]
-static ALLOCATOR: CountingAllocator = CountingAllocator;
-
 thread_local! {
     /// `const` initializers of drop-free types: neither key registers a
     /// thread destructor, so neither costs the allocator a lazy-init check.
@@ -28,8 +25,9 @@ thread_local! {
     static ALLOCS: Cell<u64> = const { Cell::new(0) };
 }
 
+/// The system allocator, counting the allocations of a thread inside [`allocations`].
 #[derive(Debug)]
-struct CountingAllocator;
+pub struct CountingAllocator;
 
 unsafe impl GlobalAlloc for CountingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
@@ -67,7 +65,7 @@ fn track() {
 }
 
 /// Heap allocations this thread performs while `body` runs.
-pub(crate) fn allocations(body: impl FnOnce()) -> u64 {
+pub fn allocations(body: impl FnOnce()) -> u64 {
     ALLOCS.with(|allocs| allocs.set(0));
     let _window = AuditWindow::open();
     body();

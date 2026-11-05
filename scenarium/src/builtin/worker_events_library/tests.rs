@@ -48,7 +48,7 @@ impl FrameSource {
     fn fps_event(&self) -> JoinHandle<()> {
         let event = self.func.events()[1].event_lambda.clone();
         let state = self.node.event_state();
-        tokio::spawn(async move { event.invoke(state).await })
+        tokio::spawn(async move { event.fires(state).next().await })
     }
 }
 

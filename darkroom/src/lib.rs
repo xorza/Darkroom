@@ -134,12 +134,14 @@ pub mod bench;
 #[cfg(feature = "internals")]
 pub mod internals;
 
+/// The allocator the record-path allocation gate counts through.
 #[cfg(test)]
-#[expect(
-    unsafe_code,
-    reason = "a `GlobalAlloc` is an `unsafe` trait; the audit counts allocations"
-)]
-mod alloc_audit;
+mod counting_allocator {
+    use common::internals::alloc_audit::CountingAllocator;
+
+    #[global_allocator]
+    static ALLOCATOR: CountingAllocator = CountingAllocator;
+}
 
 #[cfg(test)]
 mod tests {

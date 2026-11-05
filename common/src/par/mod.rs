@@ -127,6 +127,8 @@ where
     assert!(!slots.is_empty(), "a bounded map needs at least one slot");
     enter();
     let next = AtomicUsize::new(0);
+    // `Relaxed`: a stop hint that publishes no data, since the outcomes are read after the scope
+    // joins. A slot that reads it late runs an index past the failure, whose result is dropped.
     let lowest_failure = AtomicUsize::new(usize::MAX);
     let mut outcomes: Vec<SlotOutcome<R, E>> =
         slots.iter().map(|_| SlotOutcome::default()).collect();
@@ -138,13 +140,13 @@ where
             scope.spawn(format!("slot-{idx}"), move || {
                 loop {
                     let idx = next.fetch_add(1, Ordering::Relaxed);
-                    if idx >= len || idx > lowest_failure.load(Ordering::Acquire) {
+                    if idx >= len || idx > lowest_failure.load(Ordering::Relaxed) {
                         break;
                     }
                     match job(slot, idx) {
                         Ok(value) => outcome.values.push(Indexed { idx, value }),
                         Err(error) => {
-                            lowest_failure.fetch_min(idx, Ordering::AcqRel);
+                            lowest_failure.fetch_min(idx, Ordering::Relaxed);
                             outcome.failure = Some(Indexed { idx, value: error });
                             return;
                         }

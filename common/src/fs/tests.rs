@@ -2,7 +2,7 @@ use std::fs;
 use std::fs::File;
 use std::io;
 use std::io::{Seek as _, SeekFrom, Write as _};
-use std::sync::{Arc, Barrier};
+use std::sync::Barrier;
 use std::thread;
 
 use tokio::io::AsyncWriteExt as _;
@@ -109,22 +109,16 @@ fn concurrent_publications_never_interleave() {
     let payloads = (0..8)
         .map(|value| vec![b'0' + value; 32 * 1024])
         .collect::<Vec<_>>();
-    let barrier = Arc::new(Barrier::new(payloads.len()));
-    let threads = payloads
-        .iter()
-        .cloned()
-        .map(|payload| {
-            let path = path.clone();
-            let barrier = Arc::clone(&barrier);
-            thread::spawn(move || {
+    let barrier = Barrier::new(payloads.len());
+    thread::scope(|scope| {
+        for payload in &payloads {
+            let (path, barrier) = (&path, &barrier);
+            scope.spawn(move || {
                 barrier.wait();
-                publish_bytes(&path, &payload, PublicationMode::Cache).unwrap();
-            })
-        })
-        .collect::<Vec<_>>();
-    for thread in threads {
-        thread.join().unwrap();
-    }
+                publish_bytes(path, payload, PublicationMode::Cache).unwrap();
+            });
+        }
+    });
 
     let published = fs::read(&path).unwrap();
     assert!(

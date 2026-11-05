@@ -38,7 +38,7 @@ fn start_single_event_loop(lambda: EventLambda, pause_gate: &PauseGate) -> Singl
 
 #[tokio::test]
 async fn start_event_loop_forwards_events() {
-    let event_lambda = EventLambda::new(|_state| Box::pin(async move {}));
+    let event_lambda = EventLambda::new(|_state| async move {});
     let SingleLoop {
         mut active,
         node_id,
@@ -65,9 +65,9 @@ async fn start_event_loop_waits_for_callback() {
     let notify_for_event = Arc::clone(&notify);
     let event_lambda = EventLambda::new(move |_state| {
         let notify = Arc::clone(&notify_for_event);
-        Box::pin(async move {
+        async move {
             notify.notified().await;
-        })
+        }
     });
 
     let notify_for_callback = Arc::clone(&notify);
@@ -111,10 +111,10 @@ async fn pause_gate_blocks_event_loop_iterations() {
         move |_state| {
             let invocations = Arc::clone(&invocations);
             let proceed = Arc::clone(&proceed);
-            Box::pin(async move {
+            async move {
                 invocations.fetch_add(1, Ordering::SeqCst);
                 proceed.notified().await;
-            })
+            }
         }
     });
     let pause_gate = PauseGate::default();
@@ -161,7 +161,7 @@ async fn pause_gate_blocks_event_loop_iterations() {
 
 #[tokio::test]
 async fn lambda_panic_is_captured_not_unwound() {
-    let event_lambda = EventLambda::new(|_state| Box::pin(async { panic!("boom in lambda") }));
+    let event_lambda = EventLambda::new(|_state| async { panic!("boom in lambda") });
     let SingleLoop {
         mut active,
         node_id,
@@ -187,7 +187,7 @@ async fn lambda_panic_is_captured_not_unwound() {
 /// reads closed once its sibling handle is stopped.
 #[tokio::test]
 async fn stopped_event_loop_channel_is_closed() {
-    let event_lambda = EventLambda::new(|_state| Box::pin(async move {}));
+    let event_lambda = EventLambda::new(|_state| async move {});
     let SingleLoop {
         mut active,
         node_id: _node_id,

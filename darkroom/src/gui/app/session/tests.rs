@@ -4,7 +4,8 @@ use palantir::{DockOperation, Key, Modifiers};
 use scenarium::{InputPort, NodeId, OutputPort};
 use std::sync::Arc;
 
-use crate::alloc_audit;
+use common::internals::alloc_audit;
+
 use crate::core::document::internals::DocumentFixture;
 use crate::core::document::item_id::ItemId;
 use crate::core::document::tab_ref::TabRef;

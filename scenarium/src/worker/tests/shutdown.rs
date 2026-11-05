@@ -24,11 +24,11 @@ async fn exit_waits_for_active_event_cleanup_and_the_idle_report() {
         func.events[0].event_lambda = EventLambda::new(move |_state| {
             let entered = Arc::clone(&entered);
             let dropped = Arc::clone(&dropped);
-            Box::pin(async move {
+            async move {
                 let _drop = EventFutureDrop(dropped);
                 entered.notify_one();
                 future::pending::<()>().await;
-            })
+            }
         });
     });
 

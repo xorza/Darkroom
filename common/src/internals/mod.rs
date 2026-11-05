@@ -1,6 +1,11 @@
 //! Test-only helpers, reachable from downstream crates' test targets under the
 //! `internals` feature without entering the released surface.
 
+#[expect(
+    unsafe_code,
+    reason = "a `GlobalAlloc` is an `unsafe` trait; the audit counts allocations"
+)]
+pub mod alloc_audit;
 pub(crate) mod temp_file;
 pub(crate) mod unreadable;
 
