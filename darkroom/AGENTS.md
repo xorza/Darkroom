@@ -23,6 +23,10 @@ desktop for an agent or a test.
 - **See the editor through MCP.** `darkroom_open` with `copy: true` unless you mean to edit the
   file, then `darkroom_state` and `darkroom_ui` for text, `darkroom_shot` when the look matters,
   `darkroom_act` for a batch of input, `darkroom_wait_run` for a run.
+- **A second pass is the last resort.** Do not solve an issue with a relayout, a second record
+  pass or another frame. Settle the state before it records, or in the pass that reads it. A
+  second pass stays only where it is the canonical, idiomatic answer and avoids a lot of
+  complexity, and a comment at the site says why.
 - **Never sleep or count frames.** Each action waits until the editor settles; work off the frame
   reports through `App::is_busy` and wakes the window through `Ui::waker`.
 - **Sizes come from the theme's scales** — text, space, radius, stroke, icon. A literal at a call
