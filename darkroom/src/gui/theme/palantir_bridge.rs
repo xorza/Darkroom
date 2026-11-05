@@ -1,7 +1,7 @@
 //! The palantir-side half of the theme: darkroom's palette projected onto
 //! [`palantir::Palette`], and the [`palantir::Theme`] that builds.
 
-use palantir::{Stroke, TabsTheme, TextStyleOverrides};
+use palantir::{BackdropFilter, Stroke, TabsTheme, TextStyleOverrides};
 
 use crate::gui::theme;
 use crate::gui::theme::icon_scale::IconScale;
@@ -68,8 +68,8 @@ pub(super) fn theme(
     menu.panel.border.color = p.border_soft();
     // Every light-dismiss popup is frosted: the menu panel, which the menus, the node palette and
     // the combo lists wear, a bare popup's panel, the tooltip and the color picker. A modal keeps
-    // its opaque panel: it dims what is behind it under a scrim, so there is nothing to see
-    // through.
+    // its opaque panel: its scrim dims and slightly blurs what is behind it, so there is nothing
+    // to see through.
     for panel in [
         &mut theme.menu.panel,
         &mut theme.popup.panel,
@@ -78,8 +78,18 @@ pub(super) fn theme(
     ] {
         *panel = theme::GLASS.dress(panel, p.text_muted);
     }
+    theme.modal.scrim = theme
+        .modal
+        .scrim
+        .with_filter(BackdropFilter::blur(SCRIM_BLUR));
     theme
 }
+
+/// The blur under a modal's scrim, σ in logical px: a slight one, CSS's `blur(4px)` that
+/// Tailwind names `backdrop-blur-sm`, so the window behind the dialog softens while its nodes
+/// still read through the dim. Refused: the popups' σ 20 frost, which hides what the dialog asks
+/// about.
+const SCRIM_BLUR: f32 = 4.0;
 
 /// A menu's width floor: room for "Save As…" and its Ctrl+Shift+S hint a gutter apart, so the
 /// File, Edit and Graph menus open one width and a short menu does not read as a pill.

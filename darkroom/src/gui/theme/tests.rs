@@ -1,4 +1,4 @@
-use palantir::{CloseShown, SrgbaU8};
+use palantir::{CloseShown, Scrim, SrgbaU8};
 use scenarium::TypeId;
 use static_assertions::assert_not_impl_any;
 
@@ -110,6 +110,11 @@ fn default_wiring_and_menu_tweak() {
         ui.modal.panel.fill,
         p.node_bg.into(),
         "the modal sits on the card tier"
+    );
+    assert_eq!(
+        ui.modal.scrim,
+        Scrim::from(RgbaF32::hexa(0x00000080)).with_filter(BackdropFilter::blur(4.0)),
+        "palantir's half-clear dim over a slight blur"
     );
 }
 
