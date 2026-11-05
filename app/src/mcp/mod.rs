@@ -7,7 +7,7 @@ mod session_thread;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::sync::{Arc, mpsc};
+use std::sync::Arc;
 
 use common::{ErrorChain, thread as threads};
 use darkroom::driver::log_ring::LogRing;
@@ -60,7 +60,7 @@ pub(crate) fn serve_headless(
 /// session ends; the window stays for the person at it, whose edits a quit from the server would
 /// discard.
 pub(crate) fn serve_window(document: Option<PathBuf>, log: LogRing) -> ExitCode {
-    let (sessions, session) = mpsc::channel();
+    let (sessions, session) = oneshot::channel();
     let run = darkroom::run_driven(document, move |link| {
         // Detached: the server reads stdin, which nothing interrupts, so the process ends with
         // the window whatever the server is doing. The session comes back here to end first.
@@ -81,7 +81,7 @@ pub(crate) fn serve_window(document: Option<PathBuf>, log: LogRing) -> ExitCode 
     });
     // The window is gone. A session that started ends before the process, so its directory goes
     // with it; one that did not start dropped the sender.
-    if let Ok(session) = session.recv() {
+    if let Ok(session) = session.blocking_recv() {
         session.close();
     }
     match run {

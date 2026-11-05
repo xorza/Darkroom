@@ -17,7 +17,7 @@ file.
 
 ## Summary
 
-- **No open bug.** The items below are simplifications: 3 uses that can go, and 8 that can
+- **No open bug.** The items below are simplifications: 3 uses that can go, and 6 that can
   change to a simpler or more standard primitive.
 
 ## Recommended order
@@ -85,22 +85,6 @@ file.
   `per_worker.rs:62`), so the owner must belong to one slot thread. The memory accounting changes
   from `workers` to `workers + 1` (`heap_bytes` in `resources.rs`).
 
-### app: channels in the MCP server
-
-- **`session_thread.rs:76` job queue:** change the unbounded std `mpsc` to
-  `tokio::sync::mpsc::channel(N)`. Use `send().await` in `run()`, `blocking_send` in `close()` and
-  `blocking_recv` on the editor thread. The tokio docs give this as the bounded bridge between
-  sync and async code. Jobs run one at a time, and everything must have a bound.
-- **`session_thread.rs:77` (`started`) and `mcp/mod.rs:63` (`sessions`):** both are unbounded
-  channels that carry exactly one message. Use `tokio::sync::oneshot` (already imported) with
-  `blocking_recv`, or `sync_channel(1)`, so that the bound is visible.
-
-### app: `Session { driver: Option<Driver>, ended: Option<Ended> }`
-
-- **Where:** `app/src/mcp/session_thread.rs:49-50`.
-- **Change:** an enum `Live(Driver) | Ended(Ended)`. The type allows `(None, None)`, which
-  `unreachable!` at `:191` rejects. The doc line at `:215-216` occurs two times.
-
 ### darkroom: `Wake` wraps `palantir::Waker`
 
 - **Where:** `darkroom/src/core/wake.rs:9` (`Arc<dyn Fn()>`), built at `gui/app/mod.rs:146`.
@@ -132,7 +116,5 @@ file.
 
 - Mara Bos, *Rust Atomics and Locks*, chapters 2 and 3: stop flags, release and acquire,
   happens-before.
-- tokio docs, `tokio::sync::mpsc`: the bounded bridge between sync and async code.
-  `tokio::sync::oneshot`.
 - std docs: `std::thread::scope`.
 - rayon docs: `reduce`.

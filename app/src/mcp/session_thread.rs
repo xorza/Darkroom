@@ -4,9 +4,9 @@
 use common::MutexExt;
 use std::collections::HashMap;
 use std::fmt;
+use std::mem;
 use std::panic::{self, AssertUnwindSafe, PanicHookInfo};
 use std::path::Path;
-use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Mutex, OnceLock};
 use std::thread::{self, JoinHandle, ThreadId};
 
@@ -15,11 +15,17 @@ use darkroom::driver::error::DriverError;
 use darkroom::driver::log_ring::LogRing;
 use darkroom::driver::{Driver, OpenMode, SessionConfig};
 use rmcp::model::{CallToolResult, ContentBlock};
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 
 /// The last panic of each editor thread, by thread, which the panic hook writes. The hook is the
 /// process's own, so its record is a global too: installed once, in front of the hook before it.
 static PANICS: OnceLock<Mutex<HashMap<ThreadId, Option<String>>>> = OnceLock::new();
+
+/// The jobs that wait for the editor's thread. Jobs run one at a time and each call waits for its
+/// answer, so one waiting job keeps the thread busy; a call past it waits in its send. The queue
+/// is a bounded `tokio::sync::mpsc` channel, which its docs give as the bridge between sync and
+/// async code.
+const WAITING_JOBS: usize = 1;
 
 /// Work for the editor's thread, answered with the tool's content or the error the agent reads.
 type Job = Box<dyn FnOnce(&mut Session) -> Result<Vec<ContentBlock>, ToolError> + Send>;
@@ -29,7 +35,7 @@ type Job = Box<dyn FnOnce(&mut Session) -> Result<Vec<ContentBlock>, ToolError> 
 #[derive(Debug)]
 pub(crate) struct SessionThread {
     // Dropped before `_thread`, which then joins: the closed channel ends the thread's loop.
-    jobs: Sender<Request>,
+    jobs: mpsc::Sender<Request>,
     _thread: Joined,
 }
 
@@ -46,11 +52,17 @@ struct Request {
 /// What the editor's thread holds between jobs: the driver until the session ends, then why it
 /// ended.
 #[derive(Debug)]
-pub(crate) struct Session {
-    driver: Option<Driver>,
-    ended: Option<Ended>,
-    /// Told once, when the session ends, so the server ends with it.
-    on_end: Option<oneshot::Sender<Ended>>,
+pub(crate) enum Session {
+    Live(Live),
+    Ended(Ended),
+}
+
+/// A session that has not ended.
+#[derive(Debug)]
+pub(crate) struct Live {
+    driver: Driver,
+    /// Told when the session ends, so the server ends with it.
+    on_end: oneshot::Sender<Ended>,
 }
 
 /// Why a session ended.
@@ -70,15 +82,16 @@ pub(crate) struct ToolError(pub(crate) String);
 
 impl SessionThread {
     /// Start the editor's thread on the session `make` makes there, and the receiver told when
-    /// that session ends; or the error that kept the session from starting.
+    /// that session ends; or the error that kept the session from starting. It blocks until the
+    /// session starts, so an async caller runs it on a blocking thread.
     pub(crate) fn start(
         make: impl FnOnce() -> Result<Driver, DriverError> + Send + 'static,
     ) -> Result<(Self, oneshot::Receiver<Ended>), DriverError> {
-        let (jobs, requests) = mpsc::channel();
-        let (started, startup) = mpsc::channel();
+        let (jobs, requests) = mpsc::channel(WAITING_JOBS);
+        let (started, startup) = oneshot::channel();
         let (on_end, ended) = oneshot::channel();
         let handle = threads::spawn("darkroom-mcp-session", move || {
-            let panics = PanicRecord::register();
+            let _panics = PanicRecord::register();
             let driver = match make() {
                 Ok(driver) => driver,
                 Err(error) => {
@@ -87,22 +100,19 @@ impl SessionThread {
                 }
             };
             started.send(Ok(())).ok();
-            let session = Session {
-                driver: Some(driver),
-                ended: None,
-                on_end: Some(on_end),
-            };
-            serve(&requests, session, &panics);
+            serve(requests, Session::Live(Live { driver, on_end }));
         });
         let thread = Self {
             jobs,
             _thread: Joined(Some(handle)),
         };
         // A thread that ends before it answers panicked, which the hook printed.
-        match startup.recv() {
+        match startup.blocking_recv() {
             Ok(Ok(())) => Ok((thread, ended)),
             Ok(Err(error)) => Err(error),
-            Err(mpsc::RecvError) => panic!("the editor's thread panicked as the session started"),
+            Err(oneshot::error::RecvError { .. }) => {
+                panic!("the editor's thread panicked as the session started")
+            }
         }
     }
 
@@ -112,10 +122,10 @@ impl SessionThread {
     pub(crate) fn close(&self) {
         let (reply, answer) = oneshot::channel();
         let job: Job = Box::new(|session| {
-            session.stop(Ended::Closed);
+            session.end(Ended::Closed);
             Ok(Vec::new())
         });
-        if self.jobs.send(Request { job, reply }).is_ok() {
+        if self.jobs.blocking_send(Request { job, reply }).is_ok() {
             answer.blocking_recv().ok();
         }
     }
@@ -131,6 +141,7 @@ impl SessionThread {
                 job: Box::new(job),
                 reply,
             })
+            .await
             .expect("the editor's thread lives as long as the server");
         answer
             .await
@@ -153,16 +164,14 @@ pub(crate) fn launch(
 }
 
 /// Take jobs until the server drops its end, each inside the panic edge.
-fn serve(requests: &Receiver<Request>, mut session: Session, panics: &PanicRecord) {
-    while let Ok(Request { job, reply }) = requests.recv() {
+fn serve(mut requests: mpsc::Receiver<Request>, mut session: Session) {
+    while let Some(Request { job, reply }) = requests.blocking_recv() {
         let result = match panic::catch_unwind(AssertUnwindSafe(|| job(&mut session))) {
             Ok(Ok(content)) => CallToolResult::success(content),
             Ok(Err(ToolError(message))) => CallToolResult::error(vec![ContentBlock::text(message)]),
             Err(_) => {
-                let panic = panics
-                    .take()
-                    .unwrap_or_else(|| "a panic the hook did not see".to_string());
-                session.end(panic.clone());
+                let panic = take_panic();
+                session.end(Ended::Panic(panic.clone()));
                 CallToolResult::error(vec![ContentBlock::text(format!(
                     "the editor panicked: {panic}. The session is closed and the server ends with \
                      it; report the panic."
@@ -177,19 +186,18 @@ fn serve(requests: &Receiver<Request>, mut session: Session, panics: &PanicRecor
 impl Session {
     /// The session's driver, or the error that says how the session ended.
     pub(crate) fn driver(&mut self) -> Result<&mut Driver, ToolError> {
-        match (&mut self.driver, &self.ended) {
-            (Some(driver), _) => Ok(driver),
-            (None, Some(Ended::Panic(panic))) => Err(ToolError(format!(
+        match self {
+            Self::Live(live) => Ok(&mut live.driver),
+            Self::Ended(Ended::Panic(panic)) => Err(ToolError(format!(
                 "the session ended when the editor panicked: {panic}; the server is ending"
             ))),
-            (None, Some(Ended::Quit)) => Err(ToolError(
+            Self::Ended(Ended::Quit) => Err(ToolError(
                 "the session ended when an action quit the editor; the server is ending"
                     .to_string(),
             )),
-            (None, Some(Ended::Closed)) => Err(ToolError(
+            Self::Ended(Ended::Closed) => Err(ToolError(
                 "the session ended when its window closed; the server is ending".to_string(),
             )),
-            (None, None) => unreachable!("a session without a driver has ended"),
         }
     }
 
@@ -210,34 +218,28 @@ impl Session {
 
     /// End the session an action quit, as a window closes when its editor quits.
     pub(crate) fn quit(&mut self) {
-        self.stop(Ended::Quit);
+        self.end(Ended::Quit);
     }
 
-    /// End the session for `why`, dropping its driver.
-    /// End the session for `why`, dropping its driver; a session already ended keeps the reason
-    /// it ended for.
-    fn stop(&mut self, why: Ended) {
-        if self.ended.is_some() {
-            return;
-        }
-        self.driver = None;
-        self.ended(why);
-    }
-
-    /// End the session a panic left, whose state no call can trust.
-    fn end(&mut self, panic: String) {
-        // Its drop may panic too, on the same broken state; the session is gone either way.
-        let driver = self.driver.take();
-        panic::catch_unwind(AssertUnwindSafe(move || drop(driver))).ok();
-        self.ended(Ended::Panic(panic));
-    }
-
-    fn ended(&mut self, ended: Ended) {
-        if let Some(on_end) = self.on_end.take() {
-            // The server already gone: no one waits for the end.
-            on_end.send(ended.clone()).ok();
-        }
-        self.ended = Some(ended);
+    /// End a live session for `why`, and tell the server once its driver is dropped. A drop that
+    /// panics ends it by that panic, unless a panic ended it already: that state is broken, and
+    /// the first panic is the cause. A session already ended keeps the reason it ended for.
+    fn end(&mut self, why: Ended) {
+        let Live { driver, on_end } = match mem::replace(self, Self::Ended(why.clone())) {
+            Self::Live(live) => live,
+            ended @ Self::Ended(_) => {
+                *self = ended;
+                return;
+            }
+        };
+        let dropped = panic::catch_unwind(AssertUnwindSafe(move || drop(driver)));
+        let why = match why {
+            Ended::Quit | Ended::Closed if dropped.is_err() => Ended::Panic(take_panic()),
+            why => why,
+        };
+        *self = Self::Ended(why.clone());
+        // The server already gone: no one waits for the end.
+        on_end.send(why).ok();
     }
 }
 
@@ -260,15 +262,6 @@ impl PanicRecord {
         panics.lock_unpoisoned().insert(id, None);
         Self(id)
     }
-
-    /// The panic the hook recorded on this thread since the last take.
-    fn take(&self) -> Option<String> {
-        PANICS
-            .get()?
-            .lock_unpoisoned()
-            .get_mut(&self.0)
-            .and_then(Option::take)
-    }
 }
 
 impl Drop for PanicRecord {
@@ -277,6 +270,19 @@ impl Drop for PanicRecord {
             panics.lock_unpoisoned().remove(&self.0);
         }
     }
+}
+
+/// The panic the hook recorded on this thread, a registered one, since the last take.
+fn take_panic() -> String {
+    PANICS
+        .get()
+        .and_then(|panics| {
+            panics
+                .lock_unpoisoned()
+                .get_mut(&thread::current().id())
+                .and_then(Option::take)
+        })
+        .unwrap_or_else(|| "a panic the hook did not see".to_string())
 }
 
 /// Keep the message and location of a panic on a registered thread: the payload `catch_unwind`

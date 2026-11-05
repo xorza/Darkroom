@@ -35,9 +35,13 @@ async fn connect(display: DisplayKind, document: Option<PathBuf>) -> Connected {
         size: UVec2::new(800, 600),
         scale: SystemScale::ONE,
     };
-    let (session, ended) = SessionThread::start(move || {
-        session_thread::launch(config, LogRing::default(), document.as_deref())
+    let (session, ended) = task::run_blocking(move || {
+        SessionThread::start(move || {
+            session_thread::launch(config, LogRing::default(), document.as_deref())
+        })
     })
+    .await
+    .unwrap()
     .unwrap();
     let session = Arc::new(session);
     let server = DarkroomServer::new(Arc::clone(&session));
@@ -122,7 +126,7 @@ async fn the_server_lists_its_six_tools_with_their_schemas() {
     assert_eq!(properties("darkroom_wait_run"), ["timeout_s"]);
 }
 
-/// A server started on no document is on a new one. An opened fixture reports the build and its
+/// A server started on no document is on a new one, and answers calls past its job queue. An opened fixture reports the build and its
 /// nodes, and `darkroom_state` lists them; a click on a name two nodes share is a tool error
 /// that names the action it stopped at and lists both nodes, and `nth` picks one. A bad chord
 /// or a pinch factor no zoom can be refuses its batch before any of it plays. The CPU display has no shots, and an act whose shot
@@ -131,7 +135,12 @@ async fn the_server_lists_its_six_tools_with_their_schemas() {
 #[tokio::test]
 async fn an_opened_project_is_driven_through_the_tools() {
     let Connected { client, .. } = connect(DisplayKind::Cpu, None).await;
-    let early = call(&client, "darkroom_state", json!({})).await.unwrap();
+    // Three calls at once, more than the job queue holds: the ones past it wait, and each answers.
+    let state = || call(&client, "darkroom_state", json!({}));
+    let (early, second, third) = tokio::join!(state(), state(), state());
+    let (early, second, third) = (early.unwrap(), second.unwrap(), third.unwrap());
+    assert_eq!(text(&second, 0), text(&early, 0));
+    assert_eq!(text(&third, 0), text(&early, 0));
     let early: Value = serde_json::from_str(text(&early, 0)).unwrap();
     assert_eq!(
         (&early["document"], &early["nodes"]),
@@ -282,8 +291,8 @@ async fn an_opened_project_is_driven_through_the_tools() {
 /// and ends the session, which the server is told of; a call after it says how the session
 /// ended. A quit, which an action asks, ends the session too, and says so in place of the
 /// actions after it. A close, which the window's end asks, ends the session and removes its
-/// directory before it returns, and one after a quit keeps the quit. A server starts on the
-/// document it is given.
+/// directory before it returns; a close or a panic after a quit keeps the quit. A server starts
+/// on the document it is given.
 #[tokio::test]
 async fn a_panic_or_a_quit_ends_the_session() {
     let dir = TempDir::new("darkroom-mcp-panic");
@@ -319,10 +328,10 @@ async fn a_panic_or_a_quit_ends_the_session() {
     );
 
     let Connected {
+        server,
         session,
         client,
         ended,
-        ..
     } = connect(DisplayKind::Cpu, Some(project)).await;
     let quit = call(
         &client,
@@ -340,6 +349,10 @@ async fn a_panic_or_a_quit_ends_the_session() {
     assert!(matches!(ended.await, Ok(Ended::Quit)));
     // A close after the quit, as the window's end sends, keeps the reason it ended for.
     task::run_blocking(move || session.close()).await.unwrap();
+    let panicked = server
+        .run(|_| -> Result<Vec<ContentBlock>, ToolError> { panic!("late") })
+        .await;
+    assert_eq!(panicked.is_error, Some(true));
     let after = call(&client, "darkroom_state", json!({})).await.unwrap();
     assert_eq!(
         text(&after, 0),
