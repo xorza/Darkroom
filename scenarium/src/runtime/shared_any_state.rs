@@ -1,7 +1,7 @@
 use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 
-use tokio::sync::{Mutex, MutexGuard};
+use common::MutexExt;
 
 use crate::runtime::any_state::AnyState;
 
@@ -30,9 +30,12 @@ impl DerefMut for EventStateGuard<'_> {
 }
 
 impl SharedAnyState {
-    pub async fn lock(&self) -> EventStateGuard<'_> {
+    /// The state, locked. The guard is not `Send`, so a lambda that holds it across an `.await`
+    /// fails the `Send` bound of its future: a std `Mutex`, as the tokio docs prefer where no
+    /// guard crosses an `.await`, where the async one let that compile and hang a run on it.
+    pub fn lock(&self) -> EventStateGuard<'_> {
         EventStateGuard {
-            guard: self.inner.lock().await,
+            guard: self.inner.lock_unpoisoned(),
         }
     }
 }

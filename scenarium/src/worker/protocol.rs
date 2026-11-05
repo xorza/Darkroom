@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use crate::worker::error::WorkerError;
-use tokio::sync::oneshot;
 
 use crate::data::ram_usage::RamUsage;
 use crate::exec::cache::disk_store::DiskStore;
@@ -87,7 +86,13 @@ pub enum WorkerMessage {
     },
     StartEventLoop,
     StopEventLoop,
+    /// Answer once every message before it has committed: a test's round trip.
+    #[cfg(test)]
+    #[expect(
+        clippy::absolute_paths,
+        reason = "a test-only variant names its type in place of a cfg'd import"
+    )]
     Sync {
-        reply: oneshot::Sender<()>,
+        reply: tokio::sync::oneshot::Sender<()>,
     },
 }

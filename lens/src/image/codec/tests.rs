@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::borrow::Cow;
 use std::io::Cursor;
 use std::sync::Arc;
@@ -29,8 +30,8 @@ async fn decoded(bytes: Vec<u8>) -> Image {
         .decode(&mut Cursor::new(bytes), byte_len)
         .await
         .expect("image decodes");
-    let image = value
-        .into_any()
+    let any: Arc<dyn Any + Send + Sync> = value;
+    let image = any
         .downcast::<Image>()
         .expect("decoded back into a lens Image");
     Arc::try_unwrap(image).expect("the decode holds the only reference")

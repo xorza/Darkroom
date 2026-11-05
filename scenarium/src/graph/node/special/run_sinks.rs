@@ -14,7 +14,7 @@
 //! cleanly and lights up in the editor like any other sink. Wire, say, a `Frame Event` into
 //! it to re-evaluate the graph every frame.
 
-use std::sync::OnceLock;
+use std::sync::LazyLock;
 
 use crate::async_lambda;
 use crate::graph::func::Func;
@@ -29,8 +29,8 @@ const RUN_SINKS_FUNC_ID: FuncId = FuncId::literal("edec890e-5c23-49fb-a131-aaef3
 /// only effect (running all sinks) is applied by the planner, not the
 /// lambda. `sink` so the editor treats it as an event subscriber.
 pub(crate) fn run_sinks_func() -> &'static Func {
-    static F: OnceLock<Func> = OnceLock::new();
-    F.get_or_init(build_func)
+    static F: LazyLock<Func> = LazyLock::new(build_func);
+    &F
 }
 
 fn build_func() -> Func {

@@ -161,13 +161,24 @@ pub fn fs_watch_library() -> Library {
                             // Cleared path: tear the previous watcher down, or the old
                             // directory keeps firing `Changed` (and holding its OS watch)
                             // while the node outputs an empty path.
-                            event_state.lock().await.clear();
+                            event_state.lock().clear();
                         } else {
-                            let needs_rebuild = event_state
-                                .lock()
-                                .await
-                                .get::<WatchState>()
-                                .is_none_or(|w| w.path != Path::new(&path) || w.mode != mode);
+                            // One guard for the check and the retune, dropped before the
+                            // rebuild's `.await`.
+                            let needs_rebuild = {
+                                let mut guard = event_state.lock();
+                                match guard.get_mut::<WatchState>() {
+                                    Some(watch)
+                                        if watch.path == Path::new(&path) && watch.mode == mode =>
+                                    {
+                                        // Debounce is consumer-side — retune without
+                                        // tearing down the live OS watch.
+                                        watch.debounce = debounce;
+                                        false
+                                    }
+                                    _ => true,
+                                }
+                            };
                             if needs_rebuild {
                                 let watch_path = PathBuf::from(&path);
                                 // Watch registration can block on slow or network filesystems.
@@ -176,18 +187,9 @@ pub fn fs_watch_library() -> Library {
                                 })
                                 .await
                                 .map_err(|task::Shutdown| InvokeError::Cancelled)?;
-                                let mut guard = event_state.lock().await;
+                                let mut guard = event_state.lock();
                                 guard.clear();
                                 guard.set(replacement.map_err(InvokeError::external)?);
-                            } else {
-                                // Debounce is consumer-side — retune without
-                                // tearing down the live OS watch.
-                                event_state
-                                    .lock()
-                                    .await
-                                    .get_mut::<WatchState>()
-                                    .unwrap()
-                                    .debounce = debounce;
                             }
                         }
 
@@ -229,7 +231,6 @@ pub fn fs_watch_library() -> Library {
                     Box::pin(async move {
                         let watch = state
                             .lock()
-                            .await
                             .get::<WatchState>()
                             .map(|w| (Arc::clone(&w.signal), w.debounce));
                         match watch {

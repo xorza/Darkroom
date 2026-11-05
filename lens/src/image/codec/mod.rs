@@ -94,7 +94,6 @@ impl CustomValueCodec for ImageCodec {
         writer: &mut (dyn AsyncWrite + Unpin + Send),
     ) -> Result<(), CodecError> {
         let image = value
-            .as_any()
             .downcast_ref::<Image>()
             .expect("ImageCodec is only registered for the Image type");
         let record = ImageRecord {

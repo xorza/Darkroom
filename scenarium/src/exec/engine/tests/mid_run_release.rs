@@ -1,7 +1,6 @@
 use super::*;
 use common::MutexExt;
 
-use std::any::Any;
 use std::fmt;
 use std::fmt::Display;
 use std::fmt::Formatter;
@@ -55,14 +54,8 @@ impl Display for Tracked {
 }
 
 impl CustomValue for Tracked {
-    fn type_id(&self) -> TypeId {
+    fn custom_type_id(&self) -> TypeId {
         TRACKED_TYPE
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
-        self
     }
 }
 

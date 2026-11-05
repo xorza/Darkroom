@@ -6,11 +6,9 @@ mod codec;
 mod format;
 pub(crate) mod nodes;
 
-use std::any::Any;
 use std::borrow::Cow;
 use std::fmt;
 use std::fmt::{Display, Formatter};
-use std::sync::Arc;
 
 use common::USize2;
 use imaginarium::{ChannelLayout, PlanarDesc, PlanarImage};
@@ -176,16 +174,8 @@ fn plane_layout(format: imaginarium::ColorFormat) -> ChannelLayout {
 }
 
 impl CustomValue for Image {
-    fn type_id(&self) -> TypeId {
+    fn custom_type_id(&self) -> TypeId {
         IMAGE_TYPE_ID
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
-        self
     }
 
     /// The samples, the flag plane and a flat gain the image holds alone, the same sum in either

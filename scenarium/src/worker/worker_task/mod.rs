@@ -2,7 +2,6 @@ use std::fmt;
 use std::mem;
 use std::sync::Arc;
 
-use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::task;
 use tokio_util::sync::CancellationToken;
 
@@ -22,8 +21,9 @@ use crate::worker::active_event_loop::{
 use crate::worker::activity::WorkerActivity;
 use crate::worker::batch_intent::{BatchIntent, GraphOp, LoopCommand};
 use crate::worker::error::WorkerError;
+use crate::worker::mailbox::Mailbox;
 use crate::worker::pause_gate::PauseGate;
-use crate::worker::protocol::{WorkerMessage, WorkerReport};
+use crate::worker::protocol::WorkerReport;
 use crate::worker::run_summary::RunSummaryPublisher;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,11 +102,11 @@ enum WorkerWake {
 }
 
 /// What ties a [`WorkerTask`] to the [`Worker`](crate::Worker) handle that
-/// spawned it: the message stream, where reports go, and the two tokens the
-/// handle trips.
+/// spawned it: the mailbox, where reports go, and the two tokens the handle
+/// trips.
 #[derive(Debug)]
 pub(crate) struct WorkerLinks<ExecCallback> {
-    pub(crate) message_rx: UnboundedReceiver<WorkerMessage>,
+    pub(crate) mailbox: Arc<Mailbox>,
     pub(crate) callback: ExecCallback,
     pub(crate) run_cancel: CancelToken,
     pub(crate) shutdown: CancellationToken,
@@ -114,7 +114,7 @@ pub(crate) struct WorkerLinks<ExecCallback> {
 
 #[derive(Debug)]
 pub(crate) struct WorkerTask<ExecCallback> {
-    message_rx: UnboundedReceiver<WorkerMessage>,
+    mailbox: Arc<Mailbox>,
     callback: ExecCallback,
     run_cancel: CancelToken,
     shutdown: CancellationToken,
@@ -122,10 +122,16 @@ pub(crate) struct WorkerTask<ExecCallback> {
     summary: RunSummaryPublisher,
     outcome: ExecOutcome,
     intent: BatchIntent,
-    messages: Vec<WorkerMessage>,
     event_buffer: Vec<EventPort>,
     event_loop: Option<ActiveEventLoop>,
     event_loop_pause_gate: PauseGate,
+}
+
+/// A task that ends refuses every later post, however it ends.
+impl<ExecCallback> Drop for WorkerTask<ExecCallback> {
+    fn drop(&mut self) {
+        self.mailbox.close();
+    }
 }
 
 impl<ExecCallback> WorkerTask<ExecCallback>
@@ -134,13 +140,13 @@ where
 {
     pub(crate) fn new(links: WorkerLinks<ExecCallback>) -> Self {
         let WorkerLinks {
-            message_rx,
+            mailbox,
             callback,
             run_cancel,
             shutdown,
         } = links;
         Self {
-            message_rx,
+            mailbox,
             callback,
             run_cancel,
             shutdown,
@@ -148,7 +154,6 @@ where
             summary: RunSummaryPublisher::default(),
             outcome: ExecOutcome::default(),
             intent: BatchIntent::default(),
-            messages: Vec::new(),
             event_buffer: Vec::with_capacity(EVENT_LOOP_BACKPRESSURE),
             event_loop: None,
             event_loop_pause_gate: PauseGate::default(),
@@ -165,15 +170,11 @@ where
 
     async fn next_intent(&mut self) -> Option<&BatchIntent> {
         loop {
-            self.messages.clear();
             self.event_buffer.clear();
             let wake = tokio::select! {
                 biased;
                 () = self.shutdown.cancelled() => WorkerWake::Stopped,
-                count = self.message_rx.recv_many(&mut self.messages, usize::MAX) => match count {
-                    0 => WorkerWake::Stopped,
-                    _ => WorkerWake::Ready,
-                },
+                () = self.mailbox.posted() => WorkerWake::Ready,
                 wake = async {
                     self.event_loop.as_mut().unwrap().recv(&mut self.event_buffer).await
                 }, if self.event_loop.is_some() => match wake {
@@ -190,8 +191,14 @@ where
                     continue;
                 }
             }
-            self.intent
-                .reset(self.messages.drain(..), self.event_buffer.drain(..));
+            self.intent.clear();
+            self.mailbox.take_into(&mut self.intent);
+            self.intent.seeds.add_events(self.event_buffer.drain(..));
+            // A wake whose posts an earlier batch already took, as a batch the events woke takes
+            // whatever was posted beside them.
+            if self.intent.is_empty() {
+                continue;
+            }
             // The cancellation commit boundary: a cancel raised from here on
             // targets this batch's (possibly imminent) run; one raised while
             // nothing was committed clears now instead of leaking into it.
@@ -253,6 +260,7 @@ where
             (self.callback)(WorkerReport::Activity(WorkerActivity::Idle));
         }
 
+        #[cfg(test)]
         for reply in self.intent.syncs.drain(..) {
             reply.send(()).ok();
         }
@@ -356,10 +364,10 @@ where
                     assert!(self.event_loop.is_none());
                     let triggers = mem::take(&mut self.outcome.event_triggers);
                     if !triggers.is_empty() {
-                        self.event_loop = Some(
-                            ActiveEventLoop::start(triggers, self.event_loop_pause_gate.clone())
-                                .await,
-                        );
+                        self.event_loop = Some(ActiveEventLoop::start(
+                            triggers,
+                            &self.event_loop_pause_gate,
+                        ));
                         tracing::info!("Event loop started");
                     }
                 }

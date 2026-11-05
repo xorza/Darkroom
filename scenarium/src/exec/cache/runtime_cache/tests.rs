@@ -467,7 +467,6 @@ fn debug_assertions_reject_invalid_cache_arities_and_ports() {
 
 #[test]
 fn measure_resident_ram_accounts_each_owner_once_and_dedups_the_total() {
-    use std::any::Any;
     use std::fmt;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -486,14 +485,8 @@ fn measure_resident_ram_accounts_each_owner_once_and_dedups_the_total() {
         }
     }
     impl CustomValue for Payload {
-        fn type_id(&self) -> TypeId {
+        fn custom_type_id(&self) -> TypeId {
             TypeId::from_u128(0x5123)
-        }
-        fn as_any(&self) -> &dyn Any {
-            self
-        }
-        fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
-            self
         }
         fn ram_bytes(&self) -> RamUsage {
             self.calls.fetch_add(1, Ordering::Relaxed);

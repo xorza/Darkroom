@@ -1,5 +1,7 @@
 use super::*;
 
+use std::sync::Arc;
+
 use tokio::sync::Notify;
 use tokio::time;
 use tokio::time::{Duration, timeout};
@@ -18,7 +20,7 @@ struct SingleLoop {
 /// Start an event loop with a single lambda as its only trigger, on a fresh
 /// `NodeId` — the shape most `start_event_loop` tests want when they only
 /// care about one lambda's behavior.
-async fn start_single_event_loop(lambda: EventLambda, pause_gate: PauseGate) -> SingleLoop {
+fn start_single_event_loop(lambda: EventLambda, pause_gate: &PauseGate) -> SingleLoop {
     let node_id = NodeId::unique();
     let active = ActiveEventLoop::start(
         vec![EventTrigger {
@@ -30,8 +32,7 @@ async fn start_single_event_loop(lambda: EventLambda, pause_gate: PauseGate) -> 
             state: SharedAnyState::default(),
         }],
         pause_gate,
-    )
-    .await;
+    );
     SingleLoop { active, node_id }
 }
 
@@ -41,7 +42,7 @@ async fn start_event_loop_forwards_events() {
     let SingleLoop {
         mut active,
         node_id,
-    } = start_single_event_loop(event_lambda, PauseGate::default()).await;
+    } = start_single_event_loop(event_lambda, &PauseGate::default());
 
     let event = active
         .recv_event()
@@ -74,7 +75,7 @@ async fn start_event_loop_waits_for_callback() {
     let SingleLoop {
         mut active,
         node_id,
-    } = start_single_event_loop(event_lambda, PauseGate::default()).await;
+    } = start_single_event_loop(event_lambda, &PauseGate::default());
 
     // `notify_one` stores a permit, so the lambda proceeds whether or not it has parked yet.
     notify_for_callback.notify_one();
@@ -120,7 +121,7 @@ async fn pause_gate_blocks_event_loop_iterations() {
     let SingleLoop {
         mut active,
         node_id,
-    } = start_single_event_loop(event_lambda, pause_gate.clone()).await;
+    } = start_single_event_loop(event_lambda, &pause_gate);
     let settle = || time::sleep(Duration::from_millis(1));
 
     settle().await;
@@ -164,7 +165,7 @@ async fn lambda_panic_is_captured_not_unwound() {
     let SingleLoop {
         mut active,
         node_id,
-    } = start_single_event_loop(event_lambda, PauseGate::default()).await;
+    } = start_single_event_loop(event_lambda, &PauseGate::default());
     let mut events = Vec::new();
 
     let wake = active.recv(&mut events).await;
@@ -190,7 +191,7 @@ async fn stopped_event_loop_channel_is_closed() {
     let SingleLoop {
         mut active,
         node_id: _node_id,
-    } = start_single_event_loop(event_lambda, PauseGate::default()).await;
+    } = start_single_event_loop(event_lambda, &PauseGate::default());
 
     active.stop().await;
 

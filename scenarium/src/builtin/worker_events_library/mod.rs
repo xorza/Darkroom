@@ -46,7 +46,7 @@ fn fps_period(frequency: f64) -> InvokeResult<Option<Duration>> {
 async fn wait_for_fps_event(state: SharedAnyState) {
     loop {
         let delay = {
-            let state = state.lock().await;
+            let state = state.lock();
             let fps_state = state
                 .get::<FpsEventState>()
                 .expect("node must execute before registering its events");
@@ -63,7 +63,7 @@ async fn wait_for_fps_event(state: SharedAnyState) {
             time::sleep(delay).await;
         }
 
-        let mut state = state.lock().await;
+        let mut state = state.lock();
         let fps_state = state
             .get_mut::<FpsEventState>()
             .expect("node must execute before registering its events");
@@ -102,7 +102,7 @@ pub fn worker_events_library() -> Library {
                         let delta;
                         let frame_no;
                         {
-                            let mut event_state = event_state.lock().await;
+                            let mut event_state = event_state.lock();
                             if let Some(prev) = event_state.get_mut::<FpsEventState>() {
                                 delta = prev.last_exec.elapsed().as_secs_f64();
                                 frame_no = prev.frame_no;

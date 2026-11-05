@@ -3,10 +3,8 @@
 //! a "build masters" node can hand it to a "stack lights" node on a wire.
 //! `Display` reports which masters the bundle carries, and how many pixels its defect map names.
 
-use std::any::Any;
 use std::fmt;
 use std::fmt::{Display, Formatter};
-use std::sync::Arc;
 
 use lumos::CalibrationMasters;
 use scenarium::{CustomValue, DataType, RamUsage, TypeId};
@@ -22,16 +20,8 @@ pub(crate) struct Masters {
 }
 
 impl CustomValue for Masters {
-    fn type_id(&self) -> TypeId {
+    fn custom_type_id(&self) -> TypeId {
         MASTERS_TYPE_ID
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
-        self
     }
 
     fn ram_bytes(&self) -> RamUsage {

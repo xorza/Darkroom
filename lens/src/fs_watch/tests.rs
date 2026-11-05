@@ -53,10 +53,9 @@ impl WatchNode {
     }
 }
 
-async fn stored_signal(event_state: &SharedAnyState) -> Option<Arc<Notify>> {
+fn stored_signal(event_state: &SharedAnyState) -> Option<Arc<Notify>> {
     event_state
         .lock()
-        .await
         .get::<WatchState>()
         .map(|w| Arc::clone(&w.signal))
 }
@@ -125,7 +124,7 @@ async fn passes_directory_through_and_seeds_watcher() {
     let out = node.call(dir_str, true).await;
     assert_eq!(out.as_fs_path(), Some(dir_str));
 
-    let guard = event_state.lock().await;
+    let guard = event_state.lock();
     let ws = guard.get::<WatchState>().expect("watcher seeded");
     assert_eq!(ws.path, dir.path());
     assert_eq!(ws.mode, RecursiveMode::Recursive);
@@ -139,11 +138,11 @@ async fn reuses_watcher_until_params_change() {
     let event_state = node.event_state();
 
     node.call(dir_str, true).await;
-    let sig1 = stored_signal(&event_state).await.unwrap();
+    let sig1 = stored_signal(&event_state).unwrap();
 
     // Same params on re-run: the watcher must be kept, not rebuilt.
     node.call(dir_str, true).await;
-    let sig2 = stored_signal(&event_state).await.unwrap();
+    let sig2 = stored_signal(&event_state).unwrap();
     assert!(
         Arc::ptr_eq(&sig1, &sig2),
         "unchanged params must reuse watcher"
@@ -151,13 +150,13 @@ async fn reuses_watcher_until_params_change() {
 
     // Flipping `recursive` must rebuild the watcher with the new mode.
     node.call(dir_str, false).await;
-    let sig3 = stored_signal(&event_state).await.unwrap();
+    let sig3 = stored_signal(&event_state).unwrap();
     assert!(
         !Arc::ptr_eq(&sig2, &sig3),
         "changed params must rebuild watcher"
     );
 
-    let guard = event_state.lock().await;
+    let guard = event_state.lock();
     assert_eq!(
         guard.get::<WatchState>().unwrap().mode,
         RecursiveMode::NonRecursive
@@ -175,7 +174,7 @@ async fn debounce_input_retunes_the_live_watcher() {
     let mut node = WatchNode::new();
     let event_state = node.event_state();
     let debounce = || async {
-        let guard = event_state.lock().await;
+        let guard = event_state.lock();
         let watch = guard.get::<WatchState>().unwrap();
         (Arc::clone(&watch.signal), watch.debounce)
     };
@@ -203,7 +202,7 @@ async fn empty_path_skips_watcher_and_event_parks() {
 
     let out = node.call("", true).await;
     assert_eq!(out.as_fs_path(), Some(""));
-    assert!(event_state.lock().await.get::<WatchState>().is_none());
+    assert!(event_state.lock().get::<WatchState>().is_none());
 
     // Without a watcher the `changed` event must park forever, not panic.
     let fired = timeout(
@@ -227,11 +226,11 @@ async fn clearing_path_tears_down_previous_watcher() {
     let event_state = node.event_state();
 
     node.call(dir_str, true).await;
-    assert!(event_state.lock().await.get::<WatchState>().is_some());
+    assert!(event_state.lock().get::<WatchState>().is_some());
 
     node.call("", true).await;
     assert!(
-        event_state.lock().await.get::<WatchState>().is_none(),
+        event_state.lock().get::<WatchState>().is_none(),
         "the stale watcher must be dropped with its OS watch"
     );
 }
@@ -251,7 +250,7 @@ async fn invalid_replacement_drops_previous_watcher() {
         .await
         .unwrap_err();
     assert!(error.to_string().contains("watch path is not a directory"));
-    assert!(event_state.lock().await.get::<WatchState>().is_none());
+    assert!(event_state.lock().get::<WatchState>().is_none());
 
     node.call(dir.path().to_str().unwrap(), true).await;
     let missing = dir.join("missing");
@@ -264,7 +263,7 @@ async fn invalid_replacement_drops_previous_watcher() {
             .to_string()
             .contains("failed to inspect watch directory")
     );
-    assert!(event_state.lock().await.get::<WatchState>().is_none());
+    assert!(event_state.lock().get::<WatchState>().is_none());
 }
 
 #[tokio::test]
@@ -303,7 +302,7 @@ async fn debounce_collapses_burst_into_one_fire() {
     )
     .unwrap();
     let signal = Arc::clone(&ws.signal);
-    event_state.lock().await.set(ws);
+    event_state.lock().set(ws);
 
     let lambda = func.events()[0].event_lambda.clone();
     let es = event_state.clone();

@@ -1,7 +1,6 @@
 //! [`Blob`]: a custom value of raw bytes, and [`BlobCodec`], its cache codec
 //! with the knobs the cache tests turn.
 
-use std::any::Any;
 use std::fmt;
 use std::sync::Arc;
 
@@ -36,16 +35,8 @@ impl fmt::Display for Blob {
 }
 
 impl CustomValue for Blob {
-    fn type_id(&self) -> TypeId {
+    fn custom_type_id(&self) -> TypeId {
         BLOB_TYPE
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
-        self
     }
 
     fn ram_bytes(&self) -> RamUsage {
@@ -114,7 +105,6 @@ impl CustomValueCodec for BlobCodec {
         writer: &mut (dyn AsyncWrite + Unpin + Send),
     ) -> Result<(), CodecError> {
         let blob = value
-            .as_any()
             .downcast_ref::<Blob>()
             .expect("BlobCodec is only registered for Blob");
         writer.write_all(&blob.0).await?;

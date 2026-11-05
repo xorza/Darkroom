@@ -37,8 +37,8 @@ Counts of the declarations, from `rg` on 2026-11-05. The counts include tests.
 
 ## Summary
 
-- **Two open bugs:** two channels with no bound. The `palantir` `WakeLatch` bug and the four
-  test and admission bugs are fixed.
+- **One open bug:** the editor's report channel has no bound. The scenarium command channel,
+  the `palantir` `WakeLatch` bug and the four test and admission bugs are fixed.
 - **Production shared ownership is mostly correct.** Most `Arc`s carry immutable artifacts
   between the host and the worker. Most `Rc`s in `palantir` come from one deliberate decision:
   each window's `Ui` holds a clone of the host-wide `UiResources`.
@@ -47,11 +47,10 @@ Counts of the declarations, from `rg` on 2026-11-05. The counts include tests.
 
 ## Recommended order
 
-1. Fix bugs 1 and 2. Each fix needs a mailbox that merges messages, as `PreviewSink` does.
+1. Fix bug 1 with a mailbox that merges reports at push.
 2. Replace the atomic union-find in `lumos`.
 3. Replace `Arc<ScenariumLibrary>` with an owned `Library`.
-4. Change `SharedAnyState` to a std `Mutex`.
-5. Do the other simplifications in the order of this document.
+4. Do the other simplifications in the order of this document.
 
 ## Decisions taken
 
@@ -93,19 +92,6 @@ Counts of the declarations, from `rg` on 2026-11-05. The counts include tests.
   FIFO. The commands bound their count.
 - **Refused:** a std `sync_channel`. A full channel blocks a tokio worker thread inside the
   callback.
-
-### 2. The scenarium worker command channel has no bound
-
-- **Where:** `scenarium/src/worker/mod.rs:1,23,33` (`unbounded_channel::<WorkerMessage>()`) and
-  `scenarium/src/worker/worker_task/mod.rs:173` (`recv_many(&mut self.messages, usize::MAX)`).
-- **Failure:** the queue grows for as long as a run lasts. Each queued `Update` keeps its
-  `Arc<CompiledGraph>` alive until the batch drains. A long stacking run with GUI edits holds
-  each program that the edits sent. This breaks the rule that everything has a bound.
-- **Recommended fix:** `BatchIntent` already merges messages, so merge on the sender side. A
-  `Mutex<BatchIntent>` shared with the task, plus a `Notify` wake, bounds the mailbox by
-  construction. It holds one slot for graph operations and node-id sets that the program bounds.
-- **Refused:** a bounded channel with `try_send` and a `WorkerBusy` case. The GUI then must
-  handle a busy worker.
 
 ## Shared ownership to remove
 
@@ -179,43 +165,7 @@ Counts of the declarations, from `rg` on 2026-11-05. The counts include tests.
 - **Replacement:** `par::chunks(..).enumerate().map(|..| count).sum()`.
 - **Effort:** trivial.
 
-### scenarium: the start-up `Barrier` in `ActiveEventLoop`
-
-- **Where:** `scenarium/src/worker/active_event_loop/mod.rs:43-62,74-75`
-  (`Arc<tokio::sync::Barrier>` and the `yield_now` after it).
-- **History:** commit `04211ebef` added it, so that a `StartEventLoop` callback fires only after
-  each task starts to poll. That callback no longer exists.
-- **What it promises now:** only that each task reached `ready.wait()` before `lambda.invoke`. It
-  does not promise that the lambda registered its first wait, for example a `Notify` or a sleep.
-  The extra yield makes that likely on the current-thread runtime, but not on the multi-thread
-  runtime.
-- **Replacement:** a plain `tasks.spawn`. The `JoinSet` already owns the tasks, and `recv` and
-  `stop` do not depend on a task that was polled.
-- **Effort:** small. Run the `active_event_loop` and `worker/tests/event_loop` tests to make sure
-  that nothing relies on it.
-
 ## Primitives to simplify or make standard
-
-### scenarium: `SharedAnyState` uses a tokio `Mutex`
-
-- **Where:** `scenarium/src/runtime/shared_any_state.rs:4,10`.
-- **From → to:** `Arc<tokio::sync::Mutex<AnyState>>` → `Arc<std::sync::Mutex<AnyState>>`, with a
-  sync `fn lock`.
-- **Why:** no guard crosses an `.await`. The checked sites are
-  `builtin/worker_events_library` lines 49 and 66, the `lens` `fs_watch` lambda and event, and
-  the `lens` tests. The tokio docs say that the std `Mutex` is "ok and often preferred". The only
-  advantage of the async mutex is a guard that is held across an `.await`.
-- **Gain:** the std `MutexGuard` is `!Send`. The event futures (`Pin<Box<dyn Future + Send>>`)
-  and the node futures (`+ Send`) then fail to compile if a lambda holds the guard across an
-  `.await`. Today that error compiles. It hangs a run: an event lambda that holds the lock
-  across `signal.notified().await` blocks the node lambda's `lock().await` until the file
-  changes.
-- **Poisoning:** release builds use `panic = "abort"`, so poisoning occurs only in debug builds
-  and tests. There, event-lambda panics are caught and reported. Use
-  `lock().unwrap_or_else(PoisonError::into_inner)`, as `app/src/mcp/session_thread.rs:296` does.
-  This keeps the tokio behaviour, which has no poisoning.
-- **Effort:** small to medium. This changes the public API: about 2 scenarium sites, about 5
-  `lens` sites and the `lens` tests remove their `.await`.
 
 ### lumos: `ScratchPool` used as scratch for each worker
 
@@ -289,48 +239,12 @@ Counts of the declarations, from `rg` on 2026-11-05. The counts include tests.
 - **Change:** use `palantir::Waker` directly. This needs a waker with no host in palantir for
   `wake::internals::noop`, because `Waker::new` is `pub(crate)`. The value is low.
 
-### lens: `LazyLock<DataType>` statics
-
-- **Where:** `lens/src/astro/nodes/io.rs:16,26`.
-- **Change:** `fn` constructors, as `fs_watch::dir_type()`, `ml.rs::model_input` and
-  `image/nodes/io.rs:131` do. `DataType` equality compares values, so the tests at
-  `astro/nodes/tests.rs:304-328` still hold.
-
-### lens: check-then-act with three locks
-
-- **Where:** `lens/src/fs_watch/mod.rs:165-190` (three separate `event_state.lock().await`).
-- **Change:** one guard for the check and the retune. This removes the `unwrap()` that depends on
-  the current schedule. It is not a race today: a node's lambda never runs at the same time as
-  itself, and the event lambda only reads.
-
-### scenarium: `CustomValue` trait upcasting
-
-- **Where:** `scenarium/src/data/dynamic_value.rs:14-17`. `as_any` and `into_any` are written out
-  in 8 implementations across the workspace.
-- **Change:** `CustomValue: Any + Send + Sync + Display`. Trait upcasting is stable since Rust
-  1.86, and the toolchain is 1.99. Then `&*data as &dyn Any` and
-  `Arc<dyn CustomValue>` → `Arc<dyn Any + Send + Sync>` work directly.
-- **Warning:** rename `CustomValue::type_id` at the same time, for example to `custom_type_id`.
-  With `Any` as a supertrait, `arc.type_id()` on an `Arc<dyn CustomValue>` resolves to
-  `Any::type_id` on the `Arc`, and it returns a std `TypeId`. A typed site such as
-  `codecs.get(value.type_id())` fails to compile, but a Debug or print site prints the wrong id
-  with no error. This was checked in a scratch build.
-
 ### scenarium: smaller items
 
-- **`worker/protocol.rs:90`:** `WorkerMessage::Sync { reply: oneshot }` is public and always
-  compiled, but only `#[cfg(test)]` code uses it (`internals/worker.rs`). Gate it
-  `#[cfg(test)]`, as `FireEvents` is.
-- **`graph/node/special/run_sinks.rs:32`:** change `OnceLock` + `get_or_init` to
-  `static F: LazyLock<Func> = LazyLock::new(build_func)`. The std docs give `LazyLock` for an
-  init function that the declaration sets.
 - **`graph/func/event.rs:10,29`:** each event fire clones `SharedAnyState` and boxes a new future.
   At frame rate, that is one allocation each frame. The structural fix is an event lambda that
   returns one future for the life of the loop, so the box is allocated once for each loop start.
   The priority is low, until events become hot.
-- **Tests:** `internals/calls.rs:23,31,41,64` uses `SeqCst` where `Relaxed` is sufficient. The
-  counter publishes nothing, and the join or await before each read gives the happens-before. The
-  spin loop at `pause_gate/tests.rs:96` has no timeout.
 
 ### lumos and common: smaller items
 

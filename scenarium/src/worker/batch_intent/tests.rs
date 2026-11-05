@@ -1,12 +1,17 @@
 use super::*;
 
+use tokio::sync::oneshot;
+
 use crate::exec::compile::Compiler;
 use crate::graph::Graph;
+use crate::graph::identity::EventPort;
 use crate::library::Library;
 
 fn batch_intent(msgs: impl IntoIterator<Item = WorkerMessage>) -> BatchIntent {
     let mut intent = BatchIntent::default();
-    intent.reset(msgs, []);
+    for msg in msgs {
+        intent.push(msg);
+    }
     intent
 }
 
@@ -61,6 +66,7 @@ fn batch_intent_accumulates_simple_flags() {
     assert_eq!(intent.evict_cache, [node_id]);
     assert_eq!(intent.flush_cache, [node_id]);
     assert_eq!(intent.syncs.len(), 1);
+    assert!(!intent.is_empty());
 
     let event_capacity = intent.seeds.events.capacity();
     let node_capacity = intent.seeds.node_ids.capacity();
@@ -68,7 +74,10 @@ fn batch_intent_accumulates_simple_flags() {
     let flush_capacity = intent.flush_cache.capacity();
     let sync_capacity = intent.syncs.capacity();
 
-    intent.reset([WorkerMessage::StopEventLoop], []);
+    intent.clear();
+    assert!(intent.is_empty(), "a cleared batch asks for nothing");
+    intent.push(WorkerMessage::StopEventLoop);
+    assert!(!intent.is_empty(), "a loop command alone is work");
 
     assert!(intent.graph_state.is_none());
     assert!(matches!(intent.loop_request, Some(LoopCommand::Stop)));
@@ -94,21 +103,18 @@ fn batch_intent_deduplicates_events() {
         event_idx: 0,
     };
 
-    let mut intent = BatchIntent::default();
-    intent.reset(
-        [
-            WorkerMessage::FireEvents {
-                events: vec![event],
-            },
-            WorkerMessage::FireEvents {
-                events: vec![event],
-            },
-            WorkerMessage::FireEvents {
-                events: vec![event, event],
-            },
-        ],
-        [event],
-    );
+    let mut intent = batch_intent([
+        WorkerMessage::FireEvents {
+            events: vec![event],
+        },
+        WorkerMessage::FireEvents {
+            events: vec![event],
+        },
+        WorkerMessage::FireEvents {
+            events: vec![event, event],
+        },
+    ]);
+    intent.seeds.add_events([event]);
 
     assert_eq!(
         intent.seeds.events.len(),

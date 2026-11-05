@@ -14,7 +14,7 @@ use scenarium::{
 use crate::astro::config::preset::Preset;
 use crate::astro::config::stacking::{CombineMethodChoice, DetectionPreset, RegistrationPreset};
 use crate::astro::masters::{MASTERS_DATA_TYPE, Masters};
-use crate::astro::nodes::io::ASTRO_RAW_PATHS_DATA_TYPE;
+use crate::astro::nodes::io::astro_raw_paths_type;
 use crate::astro::nodes::runtime;
 use crate::image::{IMAGE_DATA_TYPE, Image};
 
@@ -112,7 +112,7 @@ pub(crate) fn register(library: &mut Library) {
         .category("Astro")
         .pure()
         .input(
-            FuncInput::required("Lights", ASTRO_RAW_PATHS_DATA_TYPE.clone())
+            FuncInput::required("Lights", astro_raw_paths_type())
                 .description("Camera-RAW light frames to stack."),
         )
         .input(

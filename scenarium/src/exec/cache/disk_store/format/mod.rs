@@ -101,7 +101,7 @@ where
                 DynamicValue::Unbound => unreachable!(),
                 DynamicValue::Static(value) => write_static(writer, value).await?,
                 DynamicValue::Custom(value) => {
-                    let type_id = value.type_id();
+                    let type_id = value.custom_type_id();
                     let codec = codecs
                         .get(type_id)
                         .expect("custom output codec was checked while writing descriptors");
@@ -292,8 +292,8 @@ where
 /// verdict [`BlobWriter::write`] would reach, answered before anything is written.
 pub(super) fn unsupported_type(outputs: &[DynamicValue], codecs: &Codecs) -> Option<TypeId> {
     outputs.iter().find_map(|value| match value {
-        DynamicValue::Custom(value) if codecs.get(value.type_id()).is_none() => {
-            Some(value.type_id())
+        DynamicValue::Custom(value) if codecs.get(value.custom_type_id()).is_none() => {
+            Some(value.custom_type_id())
         }
         _ => None,
     })
@@ -304,7 +304,7 @@ fn desc_for(value: &DynamicValue, codecs: &Codecs) -> FormatResult<OutputDesc> {
         DynamicValue::Unbound => OutputKind::Unbound,
         DynamicValue::Static(_) => OutputKind::Static,
         DynamicValue::Custom(value) => {
-            let type_id = value.type_id();
+            let type_id = value.custom_type_id();
             let codec = codecs
                 .get(type_id)
                 .ok_or(CodecFormatError::UnknownType(type_id))?;
@@ -326,7 +326,7 @@ fn desc_covers(desc: OutputDesc, value: &DynamicValue) -> bool {
         DynamicValue::Static(_) => matches!(desc.kind, OutputKind::Static),
         DynamicValue::Custom(value) => matches!(
             desc.kind,
-            OutputKind::Custom { type_id, .. } if type_id == value.type_id()
+            OutputKind::Custom { type_id, .. } if type_id == value.custom_type_id()
         ),
     }
 }

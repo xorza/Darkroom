@@ -13,14 +13,14 @@ use scenarium::internals::func_invoker::FuncInvoker;
 use scenarium::{ConstValue, DataType, DynamicValue, FsPathMode, FuncBehavior};
 
 use crate::astro::masters::MASTERS_DATA_TYPE;
-use crate::astro::nodes::io::{ASTRO_IMAGE_PATH_DATA_TYPE, ASTRO_RAW_PATHS_DATA_TYPE};
+use crate::astro::nodes::io::{astro_image_path_type, astro_raw_paths_type};
 use crate::astro::nodes::{MlModelPaths, astro_library};
 use crate::config_node::config_data_type;
 use crate::image::{IMAGE_DATA_TYPE, Image};
 
 #[test]
 fn astro_image_path_filter_matches_preview_extensions() {
-    let DataType::FsPath(cfg) = &*ASTRO_IMAGE_PATH_DATA_TYPE else {
+    let DataType::FsPath(cfg) = &astro_image_path_type() else {
         panic!("expected an FsPath data type");
     };
     assert_eq!(cfg.mode, FsPathMode::ExistingFile);
@@ -29,7 +29,7 @@ fn astro_image_path_filter_matches_preview_extensions() {
 
 #[test]
 fn astro_raw_paths_are_a_filtered_multi_file_picker() {
-    let DataType::FsPath(cfg) = &*ASTRO_RAW_PATHS_DATA_TYPE else {
+    let DataType::FsPath(cfg) = &astro_raw_paths_type() else {
         panic!("expected an FsPath data type");
     };
     assert_eq!(cfg.mode, FsPathMode::ExistingFiles);
@@ -301,14 +301,14 @@ fn astro_nodes_are_registered_with_their_ports() {
     }
 
     let load = lib.by_name("Load Astro Image").unwrap();
-    assert_eq!(load.inputs()[0].data_type, *ASTRO_IMAGE_PATH_DATA_TYPE);
+    assert_eq!(load.inputs()[0].data_type, astro_image_path_type());
 
     // Pure: the digest folds each selected calibration file's identity.
     let masters = lib.by_name("Build Masters").unwrap();
     assert_eq!(masters.behavior(), FuncBehavior::Pure);
     for input in &masters.inputs()[..4] {
         assert!(!input.required, "calibration frame sets are optional");
-        assert_eq!(input.data_type, *ASTRO_RAW_PATHS_DATA_TYPE);
+        assert_eq!(input.data_type, astro_raw_paths_type());
     }
     assert_eq!(masters.inputs()[4].data_type, DataType::Float);
     assert_eq!(
@@ -325,7 +325,7 @@ fn astro_nodes_are_registered_with_their_ports() {
     // reference picks the sharpest frame with enough stars, with no sentinel standing in for it.
     let stack = lib.by_name("Stack Lights").unwrap();
     assert_eq!(stack.behavior(), FuncBehavior::Pure);
-    assert_eq!(stack.inputs()[0].data_type, *ASTRO_RAW_PATHS_DATA_TYPE);
+    assert_eq!(stack.inputs()[0].data_type, astro_raw_paths_type());
     assert!(stack.inputs()[0].required, "light frames are required");
     assert_eq!(stack.inputs()[1].data_type, MASTERS_DATA_TYPE);
     assert!(!stack.inputs()[1].required, "masters are optional");

@@ -1,5 +1,7 @@
 use std::time::Instant;
 
+use std::sync::Arc;
+
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -9,45 +11,71 @@ use crate::exec::report::run_reporter::RunPhase;
 use crate::exec::report::run_reporter::RunReporter;
 use crate::graph::identity::NodeId;
 use crate::worker::batch_intent::{BatchIntent, GraphOp, LoopCommand};
+use crate::worker::mailbox::Mailbox;
 use crate::worker::protocol::{WorkerMessage, WorkerReport};
 use crate::worker::worker_task::{
     EventLoopTransition, PendingRun, WorkerLinks, WorkerRunReporter, WorkerTask,
 };
 
+/// Every post since the last batch merges into the next one, a wake whose posts were taken
+/// returns no empty batch, the batches swap buffers rather than allocate them, and a shutdown
+/// ends the stream with a post waiting. Once the task drops, a post fails.
 #[tokio::test]
-async fn next_intent_receives_many_messages_into_a_reusable_buffer() {
-    let (tx, rx) = mpsc::unbounded_channel();
+async fn next_intent_takes_every_post_since_the_last_batch() {
+    let mailbox = Arc::new(Mailbox::default());
     let node_id = NodeId::unique();
-    tx.send(WorkerMessage::Clear).unwrap();
-    tx.send(WorkerMessage::RunNodes {
-        node_ids: vec![node_id],
-    })
-    .unwrap();
+    mailbox.post([WorkerMessage::Clear]).unwrap();
+    mailbox
+        .post([WorkerMessage::RunNodes {
+            node_ids: vec![node_id],
+        }])
+        .unwrap();
     let shutdown = CancellationToken::new();
     let mut task = WorkerTask::new(WorkerLinks {
-        message_rx: rx,
+        mailbox: Arc::clone(&mailbox),
         callback: |_: WorkerReport| {},
         run_cancel: CancelToken::new(),
         shutdown: shutdown.clone(),
     });
 
-    {
+    let capacity = {
         let intent = task.next_intent().await.unwrap();
         assert!(matches!(intent.graph_state, Some(GraphOp::Clear)));
         assert_eq!(intent.seeds.node_ids, [node_id]);
-    }
-    assert!(task.messages.is_empty());
-    let capacity = task.messages.capacity();
-    assert!(capacity >= 2);
+        intent.seeds.node_ids.capacity()
+    };
 
-    tx.send(WorkerMessage::StopEventLoop).unwrap();
+    mailbox.post([WorkerMessage::StopEventLoop]).unwrap();
+    mailbox
+        .post([WorkerMessage::RunNodes {
+            node_ids: vec![node_id, node_id],
+        }])
+        .unwrap();
     let intent = task.next_intent().await.unwrap();
     assert!(matches!(intent.loop_request, Some(LoopCommand::Stop)));
-    assert_eq!(task.messages.capacity(), capacity);
+    assert!(
+        intent.graph_state.is_none(),
+        "the first batch took the clear"
+    );
+    assert_eq!(intent.seeds.node_ids, [node_id]);
 
-    tx.send(WorkerMessage::Clear).unwrap();
+    mailbox
+        .post([WorkerMessage::RunNodes {
+            node_ids: vec![node_id],
+        }])
+        .unwrap();
+    let intent = task.next_intent().await.unwrap();
+    assert_eq!(
+        intent.seeds.node_ids.capacity(),
+        capacity,
+        "the first batch's buffer came back"
+    );
+
+    mailbox.post([WorkerMessage::Clear]).unwrap();
     shutdown.cancel();
     assert!(task.next_intent().await.is_none());
+    drop(task);
+    assert!(mailbox.post([WorkerMessage::Clear]).is_err());
 }
 
 #[test]
@@ -134,12 +162,9 @@ fn pending_run_couples_event_source_initialization_to_loop_rebuild() {
 
     let node_id = NodeId::unique();
     let mut explicit = BatchIntent::default();
-    explicit.reset(
-        [WorkerMessage::RunNodes {
-            node_ids: vec![node_id],
-        }],
-        [],
-    );
+    explicit.push(WorkerMessage::RunNodes {
+        node_ids: vec![node_id],
+    });
     let run = PendingRun::take(&mut explicit, EventLoopTransition::Preserve).unwrap();
     assert!(!run.start_event_loop);
     assert!(!run.seeds.event_sources);

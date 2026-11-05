@@ -14,7 +14,6 @@
 //! derives them on its own types — and where a config's shape does not fit the
 //! field model, the astro module's `config` declares a flat projection instead.
 
-use std::any::Any;
 use std::fmt;
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -38,16 +37,8 @@ const fn wire_type_id<T: Introspect>() -> TypeId {
 pub(crate) struct ConfigValue<T>(pub(crate) T);
 
 impl<T: Introspect + Clone + fmt::Debug + Send + Sync + 'static> CustomValue for ConfigValue<T> {
-    fn type_id(&self) -> TypeId {
+    fn custom_type_id(&self) -> TypeId {
         wire_type_id::<T>()
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
-        self
     }
 }
 

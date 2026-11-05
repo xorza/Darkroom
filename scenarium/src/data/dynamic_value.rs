@@ -11,13 +11,22 @@ use crate::data::const_value::ConstValue;
 use crate::data::data_type::TypeId;
 use crate::data::ram_usage::RamUsage;
 
-pub trait CustomValue: Send + Sync + Display + 'static {
-    fn type_id(&self) -> TypeId;
-    fn as_any(&self) -> &dyn Any;
-    fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync>;
+/// A value of a type the library registered, carried between nodes behind an `Arc`. `Any` as a
+/// supertrait upcasts it for a downcast, as Rust 1.86's trait upcasting allows. Its own type id is
+/// [`Self::custom_type_id`], never `type_id`, which `Any` names for std's.
+pub trait CustomValue: Any + Send + Sync + Display {
+    fn custom_type_id(&self) -> TypeId;
 
     fn ram_bytes(&self) -> RamUsage {
         RamUsage::default()
+    }
+}
+
+impl dyn CustomValue {
+    /// The value as a `T`, if it is one, as `dyn Error::downcast_ref` reads an error.
+    pub fn downcast_ref<T: CustomValue>(&self) -> Option<&T> {
+        let any: &dyn Any = self;
+        any.downcast_ref()
     }
 }
 
@@ -36,7 +45,7 @@ impl Debug for DynamicValue {
             Self::Static(value) => write!(f, "{value:?}"),
             Self::Custom(data) => f
                 .debug_struct("Custom")
-                .field("type_id", &data.type_id())
+                .field("type_id", &data.custom_type_id())
                 .finish_non_exhaustive(),
         }
     }
@@ -84,7 +93,7 @@ impl DynamicValue {
 
     pub fn as_custom<T: CustomValue>(&self) -> Option<&T> {
         match self {
-            Self::Custom(data) => data.as_any().downcast_ref::<T>(),
+            Self::Custom(data) => data.downcast_ref::<T>(),
             _ => None,
         }
     }
@@ -93,11 +102,11 @@ impl DynamicValue {
         let Self::Custom(data) = self else {
             return Err(self);
         };
-        if data.as_any().downcast_ref::<T>().is_none() {
+        if data.downcast_ref::<T>().is_none() {
             return Err(Self::Custom(data));
         }
-        let typed = data
-            .into_any()
+        let any: Arc<dyn Any + Send + Sync> = data;
+        let typed = any
             .downcast::<T>()
             .expect("custom type checked before downcast");
         Arc::try_unwrap(typed).map_err(|shared| Self::Custom(shared))
@@ -261,6 +270,18 @@ mod tests {
     #[derive(Debug)]
     struct UnknownPick;
 
+    impl Display for UnknownPick {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            write!(f, "unknown pick")
+        }
+    }
+
+    impl CustomValue for UnknownPick {
+        fn custom_type_id(&self) -> TypeId {
+            TypeId::from_u128(0xbb)
+        }
+    }
+
     impl FromStr for Pick {
         type Err = UnknownPick;
 
@@ -276,16 +297,8 @@ mod tests {
     }
 
     impl CustomValue for Tag {
-        fn type_id(&self) -> TypeId {
+        fn custom_type_id(&self) -> TypeId {
             TypeId::from_u128(0xaa)
-        }
-
-        fn as_any(&self) -> &dyn Any {
-            self
-        }
-
-        fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
-            self
         }
     }
 
@@ -364,5 +377,18 @@ mod tests {
             DynamicValue::Unbound.into_custom::<Tag>().unwrap_err(),
             DynamicValue::Unbound
         ));
+
+        // Another type's downcast misses, and the debug form names the library's type id, not
+        // std's, which `Any::type_id` would give.
+        let tag = DynamicValue::from_custom(Tag("t"));
+        assert!(tag.as_custom::<UnknownPick>().is_none());
+        assert!(matches!(
+            tag.into_custom::<UnknownPick>(),
+            Err(DynamicValue::Custom(_))
+        ));
+        assert_eq!(
+            format!("{:?}", DynamicValue::from_custom(Tag("t"))),
+            format!("Custom {{ type_id: {:?}, .. }}", TypeId::from_u128(0xaa))
+        );
     }
 }

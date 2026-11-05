@@ -1,6 +1,6 @@
 //! Astro path types and image loading.
 
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use lumos::{LoadCtx, PREVIEW_IMAGE_EXTENSIONS, RAW_EXTENSIONS};
 use scenarium::{
@@ -13,7 +13,8 @@ use crate::image::{IMAGE_DATA_TYPE, Image};
 
 const LOAD_ASTRO_IMAGE_FUNC_ID: FuncId = FuncId::literal("fbcc8899-efc3-40e0-a6fd-8743f86edbd3");
 
-pub(super) static ASTRO_IMAGE_PATH_DATA_TYPE: LazyLock<DataType> = LazyLock::new(|| {
+/// One image file of a format a preview opens.
+pub(super) fn astro_image_path_type() -> DataType {
     DataType::FsPath(Arc::new(FsPathConfig::with_extensions(
         FsPathMode::ExistingFile,
         PREVIEW_IMAGE_EXTENSIONS
@@ -21,14 +22,15 @@ pub(super) static ASTRO_IMAGE_PATH_DATA_TYPE: LazyLock<DataType> = LazyLock::new
             .map(ToString::to_string)
             .collect(),
     )))
-});
+}
 
-pub(super) static ASTRO_RAW_PATHS_DATA_TYPE: LazyLock<DataType> = LazyLock::new(|| {
+/// Raw files, one or more.
+pub(super) fn astro_raw_paths_type() -> DataType {
     DataType::FsPath(Arc::new(FsPathConfig::with_extensions(
         FsPathMode::ExistingFiles,
         RAW_EXTENSIONS.iter().map(ToString::to_string).collect(),
     )))
-});
+}
 
 pub(crate) fn register(library: &mut Library) {
     library.add(
@@ -59,7 +61,7 @@ pub(crate) fn register(library: &mut Library) {
         .category("Astro")
         .pure()
         .input(
-            FuncInput::required("Path", ASTRO_IMAGE_PATH_DATA_TYPE.clone())
+            FuncInput::required("Path", astro_image_path_type())
                 .description("FITS, camera-RAW, or standard image file to load."),
         )
         .output(FuncOutput::new("Image", IMAGE_DATA_TYPE).description("Decoded frame."))

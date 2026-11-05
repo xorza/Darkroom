@@ -20,7 +20,7 @@ pub struct Calls(Arc<AtomicUsize>);
 impl Calls {
     /// How many times a body of this counter has run.
     pub fn count(&self) -> usize {
-        self.0.load(Ordering::SeqCst)
+        self.0.load(Ordering::Relaxed)
     }
 
     /// Count one call by hand, for a body the combinators below have no shape
@@ -28,7 +28,7 @@ impl Calls {
     ///
     /// [`compute`]: crate::internals::test_graph::NodeSpec::compute
     pub fn bump(&self) {
-        self.0.fetch_add(1, Ordering::SeqCst);
+        self.0.fetch_add(1, Ordering::Relaxed);
     }
 
     /// `body`, counted.
@@ -38,7 +38,7 @@ impl Calls {
     ) -> impl Fn(&[DynamicValue]) -> ConstValue + Send + Sync + 'static {
         let calls = self.clone();
         move |inputs| {
-            calls.0.fetch_add(1, Ordering::SeqCst);
+            calls.0.fetch_add(1, Ordering::Relaxed);
             body(inputs)
         }
     }
@@ -61,6 +61,8 @@ impl Calls {
     /// output says both that the node ran and how many times it has.
     pub fn tally(&self) -> impl Fn(&[DynamicValue]) -> ConstValue + Send + Sync + 'static {
         let calls = self.clone();
-        move |_| ConstValue::Int(i64::try_from(calls.0.fetch_add(1, Ordering::SeqCst)).unwrap() + 1)
+        move |_| {
+            ConstValue::Int(i64::try_from(calls.0.fetch_add(1, Ordering::Relaxed)).unwrap() + 1)
+        }
     }
 }

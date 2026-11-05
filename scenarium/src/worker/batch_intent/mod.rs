@@ -1,12 +1,10 @@
 use std::sync::Arc;
 
-use tokio::sync::oneshot;
-
 use crate::containers::unique;
 use crate::exec::cache::disk_store::DiskStore;
 use crate::exec::compile::compiled_graph::CompiledGraph;
 use crate::exec::seeds::RunSeeds;
-use crate::graph::identity::{EventPort, NodeId};
+use crate::graph::identity::NodeId;
 use crate::worker::protocol::WorkerMessage;
 
 #[derive(Debug)]
@@ -46,55 +44,81 @@ pub(crate) struct BatchIntent {
     pub(crate) seeds: RunSeeds,
     pub(crate) evict_cache: Vec<NodeId>,
     pub(crate) flush_cache: Vec<NodeId>,
-    pub(crate) syncs: Vec<oneshot::Sender<()>>,
+    /// What waits for this batch to commit, as a test's `Sync` does.
+    #[cfg(test)]
+    #[expect(
+        clippy::absolute_paths,
+        reason = "a test-only field names its type in place of a cfg'd import"
+    )]
+    pub(crate) syncs: Vec<tokio::sync::oneshot::Sender<()>>,
 }
 
 impl BatchIntent {
-    pub(crate) fn reset(
-        &mut self,
-        msgs: impl IntoIterator<Item = WorkerMessage>,
-        events: impl IntoIterator<Item = EventPort>,
-    ) {
-        self.clear();
-        for msg in msgs {
-            match msg {
-                // A graph op supersedes the node seeds named before it: they
-                // asked about the program it replaces, so one its program
-                // lacks is void rather than inconsistent. A seed named after
-                // the last graph op still fails the run when absent.
-                WorkerMessage::Update { compiled } => {
-                    self.seeds
-                        .node_ids
-                        .retain(|&node_id| compiled.contains(node_id));
-                    self.graph_state = Some(GraphOp::Replace(compiled));
-                }
-                WorkerMessage::Clear => {
-                    self.seeds.node_ids.clear();
-                    self.graph_state = Some(GraphOp::Clear);
-                }
-                WorkerMessage::EvictCache { node_ids } => {
-                    unique::extend(&mut self.evict_cache, node_ids);
-                }
-                WorkerMessage::FlushCache { node_ids } => {
-                    unique::extend(&mut self.flush_cache, node_ids);
-                }
-                WorkerMessage::FlushAllCaches => self.flush_all_caches = true,
-                WorkerMessage::SetDiskStore(cache) => self.disk_store = Some(cache),
-                WorkerMessage::RunSinks => self.seeds.sinks = true,
-                WorkerMessage::RunNodes { node_ids } => {
-                    unique::extend(&mut self.seeds.node_ids, node_ids);
-                }
-                #[cfg(test)]
-                WorkerMessage::FireEvents { events } => self.seeds.add_events(events),
-                WorkerMessage::StartEventLoop => self.loop_request = Some(LoopCommand::Start),
-                WorkerMessage::StopEventLoop => self.loop_request = Some(LoopCommand::Stop),
-                WorkerMessage::Sync { reply } => self.syncs.push(reply),
+    /// Merge `msg` into the batch, after the messages merged before it.
+    pub(crate) fn push(&mut self, msg: WorkerMessage) {
+        match msg {
+            // A graph op supersedes the node seeds named before it: they
+            // asked about the program it replaces, so one its program
+            // lacks is void rather than inconsistent. A seed named after
+            // the last graph op still fails the run when absent.
+            WorkerMessage::Update { compiled } => {
+                self.seeds
+                    .node_ids
+                    .retain(|&node_id| compiled.contains(node_id));
+                self.graph_state = Some(GraphOp::Replace(compiled));
             }
+            WorkerMessage::Clear => {
+                self.seeds.node_ids.clear();
+                self.graph_state = Some(GraphOp::Clear);
+            }
+            WorkerMessage::EvictCache { node_ids } => {
+                unique::extend(&mut self.evict_cache, node_ids);
+            }
+            WorkerMessage::FlushCache { node_ids } => {
+                unique::extend(&mut self.flush_cache, node_ids);
+            }
+            WorkerMessage::FlushAllCaches => self.flush_all_caches = true,
+            WorkerMessage::SetDiskStore(cache) => self.disk_store = Some(cache),
+            WorkerMessage::RunSinks => self.seeds.sinks = true,
+            WorkerMessage::RunNodes { node_ids } => {
+                unique::extend(&mut self.seeds.node_ids, node_ids);
+            }
+            #[cfg(test)]
+            WorkerMessage::FireEvents { events } => self.seeds.add_events(events),
+            WorkerMessage::StartEventLoop => self.loop_request = Some(LoopCommand::Start),
+            WorkerMessage::StopEventLoop => self.loop_request = Some(LoopCommand::Stop),
+            #[cfg(test)]
+            WorkerMessage::Sync { reply } => self.syncs.push(reply),
         }
-        self.seeds.add_events(events);
     }
 
-    fn clear(&mut self) {
+    /// Whether the batch asks the worker for nothing.
+    pub(crate) fn is_empty(&self) -> bool {
+        let Self {
+            graph_state,
+            disk_store,
+            flush_all_caches,
+            loop_request,
+            seeds,
+            evict_cache,
+            flush_cache,
+            #[cfg(test)]
+            syncs,
+        } = self;
+        let empty = graph_state.is_none()
+            && disk_store.is_none()
+            && !flush_all_caches
+            && loop_request.is_none()
+            && seeds.is_empty()
+            && evict_cache.is_empty()
+            && flush_cache.is_empty();
+        #[cfg(test)]
+        let empty = empty && syncs.is_empty();
+        empty
+    }
+
+    /// Forget the batch, keeping the buffers.
+    pub(crate) fn clear(&mut self) {
         self.graph_state = None;
         self.disk_store = None;
         self.flush_all_caches = false;
@@ -102,6 +126,7 @@ impl BatchIntent {
         self.seeds.clear();
         self.evict_cache.clear();
         self.flush_cache.clear();
+        #[cfg(test)]
         self.syncs.clear();
     }
 }

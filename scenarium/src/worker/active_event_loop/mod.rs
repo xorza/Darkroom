@@ -1,8 +1,6 @@
 use std::any::Any;
-use std::sync::Arc;
 
 use hashbrown::HashMap;
-use tokio::sync::Barrier;
 use tokio::sync::mpsc::{Receiver, channel};
 use tokio::task;
 use tokio::task::{Id, JoinSet};
@@ -34,15 +32,10 @@ pub(crate) struct ActiveEventLoop {
 }
 
 impl ActiveEventLoop {
-    pub(crate) async fn start(event_triggers: Vec<EventTrigger>, pause_gate: PauseGate) -> Self {
+    pub(crate) fn start(event_triggers: Vec<EventTrigger>, pause_gate: &PauseGate) -> Self {
         assert!(!event_triggers.is_empty());
 
         let (event_tx, events) = channel::<EventPort>(EVENT_LOOP_BACKPRESSURE);
-        let participants = event_triggers
-            .len()
-            .checked_add(1)
-            .expect("event trigger count overflow");
-        let ready = Arc::new(Barrier::new(participants));
         let mut tasks = JoinSet::new();
         let mut task_nodes = HashMap::with_capacity(event_triggers.len());
 
@@ -55,11 +48,9 @@ impl ActiveEventLoop {
             let node_id = event.node_id;
             let task = tasks.spawn({
                 let event_tx = event_tx.clone();
-                let ready = Arc::clone(&ready);
                 let pause_gate = pause_gate.clone();
 
                 async move {
-                    ready.wait().await;
                     loop {
                         lambda.invoke(state.clone()).await;
                         if event_tx.send(event).await.is_err() {
@@ -73,9 +64,6 @@ impl ActiveEventLoop {
             let prev = task_nodes.insert(task.id(), node_id);
             debug_assert!(prev.is_none(), "duplicate event task id");
         }
-
-        ready.wait().await;
-        task::yield_now().await;
 
         Self {
             tasks,

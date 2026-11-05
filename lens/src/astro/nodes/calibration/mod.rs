@@ -16,7 +16,7 @@ use scenarium::{
 };
 
 use crate::astro::masters::{MASTERS_DATA_TYPE, Masters};
-use crate::astro::nodes::io::ASTRO_RAW_PATHS_DATA_TYPE;
+use crate::astro::nodes::io::astro_raw_paths_type;
 use crate::astro::nodes::runtime;
 
 const BUILD_MASTERS_FUNC_ID: FuncId = FuncId::literal("f2f6f1ff-5b10-409c-900f-d6b48750a529");
@@ -205,7 +205,7 @@ pub(crate) fn register(library: &mut Library) {
 }
 
 fn frames_input(name: &str, what: &str) -> FuncInput {
-    FuncInput::optional(name, ASTRO_RAW_PATHS_DATA_TYPE.clone())
+    FuncInput::optional(name, astro_raw_paths_type())
         .description(format!("Camera-RAW {what} to stack."))
 }
 
