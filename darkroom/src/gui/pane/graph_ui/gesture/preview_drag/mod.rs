@@ -11,7 +11,7 @@
 //! from its own latch candidates under the same modifier ([`modifier_held`]), so exactly one
 //! controller claims the press.
 
-use std::sync::Arc;
+use std::rc::Rc;
 
 use glam::Vec2;
 use palantir::{Modifiers, Ui};
@@ -70,7 +70,7 @@ pub(crate) fn start(ui: &mut Ui, ctx: CanvasCtx<'_>) -> Option<PreviewStart> {
     Some(PreviewStart {
         grab: Grab {
             item: ItemId::Node(node_id),
-            members: Arc::from([DragStart {
+            members: Rc::from([DragStart {
                 item: ItemId::Node(node_id),
                 pos: center,
             }]),

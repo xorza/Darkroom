@@ -5,7 +5,9 @@
 //!
 //! **`tracing` is the record.** Every entry is emitted through it, so the
 //! structured log is the complete history regardless of frontend and nothing
-//! here has to keep one. The history beside the slot is `cfg(test)` only: it
+//! here has to keep one. A worker report's entry is emitted as the worker
+//! posts it, in the order and at the time it ran, and parked later through
+//! [`StatusLog::park_error`]. The history beside the slot is `cfg(test)` only: it
 //! exists so a test can assert *which* failures a path reported, and how
 //! many, which the slot cannot express — it holds one at a time.
 
@@ -66,7 +68,13 @@ impl StatusLog {
     /// Record a failure: error-logged through `tracing`, and parked in the
     /// sticky slot in place of whatever failure it held.
     pub(crate) fn error(&mut self, family: StatusFamily, line: String) {
-        tracing::error!(target: "darkroom::status", "{line}");
+        log_error(&line);
+        self.park_error(family, line);
+    }
+
+    /// Park a failure that [`log_error`] logged where it happened, in place of whatever failure
+    /// the slot held: a worker report, logged as the worker posts it.
+    pub(crate) fn park_error(&mut self, family: StatusFamily, line: String) {
         self.park(family, Severity::Error, line);
     }
 
@@ -107,6 +115,12 @@ impl StatusLog {
             line: &entry.line,
         })
     }
+}
+
+/// Log `line` as [`StatusLog::error`] logs it, for a failure logged where it happens and parked
+/// later through [`StatusLog::park_error`].
+pub(crate) fn log_error(line: &str) {
+    tracing::error!(target: "darkroom::status", "{line}");
 }
 
 #[cfg(test)]

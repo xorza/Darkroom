@@ -17,6 +17,7 @@ use crate::gui::app::session::internals::SessionHarness;
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::FileCommand;
 use crate::gui::frame::app_command::RunCommand;
+use crate::gui::frame::app_command::ViewCommand;
 use crate::gui::pane::graph_ui::toolbar;
 use crate::gui::pane::graph_ui::wid;
 use crate::gui::pane::image_viewer::ImageViewer;
@@ -54,7 +55,7 @@ const AUDITED_FRAMES: usize = 64;
 fn a_settled_frame_records_without_allocating() {
     let mut ui = Harness::new(UVec2::new(1200, 800));
     let mut app = App::offscreen(ui.ui_mut());
-    let library = Arc::clone(app.runtime.library.cur());
+    let library = app.runtime.library.cur();
     let func = library.by_name("Brightness / Contrast").unwrap();
     let mut fixture = DocumentFixture::default();
     let nodes: [NodeId; 6] = std::array::from_fn(|_| fixture.add(func));
@@ -99,9 +100,9 @@ fn a_settled_frame_records_without_allocating() {
 
 /// Opening a viewer by clicking a preview card lands its tab *inside* the
 /// record that read the click. The tab is drawn by the pass after that one
-/// — a click makes the frame record twice — and a viewer queues its
-/// full-resolution conversion as it draws, so the conversion starts in the
-/// same frame the click opened it, with the thumbnail standing in until it
+/// — a click makes the frame record twice — and a viewer asks for its
+/// full-resolution conversion as it draws, so the frame the click opened it
+/// raises the one ask, with the thumbnail standing in until the texture
 /// lands.
 #[test]
 fn a_viewer_opened_by_click_queues_its_full_image_in_that_same_frame() {
@@ -126,7 +127,7 @@ fn a_viewer_opened_by_click_queues_its_full_image_in_that_same_frame() {
     );
 
     test.ui.click(wid::preview_image(node));
-    let _ = test.frame();
+    let commands = test.frame();
     assert!(
         test.session
             .open
@@ -141,12 +142,27 @@ fn a_viewer_opened_by_click_queues_its_full_image_in_that_same_frame() {
         "the conversion runs off the frame, so the click frame draws the \
          thumbnail in its place"
     );
-    // Nothing between the click frame and the settle asks again, so a
-    // conversion that lands is one that frame queued.
+    let [
+        AppCommand::View(ViewCommand::ConvertFull {
+            node_id: asked,
+            max_dim,
+        }),
+    ] = commands[..]
+    else {
+        panic!("the click frame raised {commands:?}, not the one ask");
+    };
+    assert_eq!(asked, node);
+    // As `App::run_command` applies it; nothing else asks before the settle,
+    // so a conversion that lands is the one that frame asked for.
+    test.run_state.previews_mut().convert_full(asked, max_dim);
     test.run_state.previews_mut().settle(test.ui.ui());
     assert!(
         resident(&test),
         "the pass that drew the new tab queued its conversion"
+    );
+    assert!(
+        test.frame().is_empty(),
+        "a viewer whose texture is resident asks for nothing"
     );
 }
 

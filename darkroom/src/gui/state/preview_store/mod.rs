@@ -6,15 +6,20 @@
 //! held until a viewer first asks for the full texture; a non-image as its
 //! formatted text. Until then the card keeps showing what it showed before.
 //!
+//! The store changes only through `&mut`: the record pass reads it, and a viewer that finds its
+//! full texture unasked raises a command the app applies after the pass, as immediate-mode
+//! widgets hand their requests up. Refused: a `RefCell` and a job sender in each image, which let
+//! the record pass change the store it reads.
+//!
 //! [`PreviewConverter`]: preview_converter::PreviewConverter
 
 pub(crate) mod error;
 mod job_queue;
 pub(crate) mod preview_converter;
 
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
+use std::mem;
 use std::num::NonZeroU32;
 
 use common::{ErrorChain, USize2};
@@ -27,7 +32,6 @@ use scenarium::{DynamicValue, NodeId};
 use crate::core::document::Document;
 use crate::core::wake::Wake;
 use crate::gui::state::preview_store::error::DrawablePreviewError;
-use crate::gui::state::preview_store::job_queue::Jobs;
 use crate::gui::state::preview_store::preview_converter::{
     Card, Converted, Job, Outcome, PreviewConverter, Thumbnail, Ticket, Work,
 };
@@ -112,17 +116,10 @@ pub(crate) struct DrawablePreview {
     /// prepared from the same source and so is described by the same figures.
     pub(crate) preview: DrawableImage,
     /// The full-resolution texture, or the source still waiting to become one.
-    /// Read only through [`Self::full`], which is what starts the conversion.
-    full: RefCell<FullImage>,
+    full: FullImage,
     pub(crate) source_bytes: usize,
-    /// The node and the publish this image came from — what a full raster
-    /// converted from it is addressed to.
-    node_id: NodeId,
+    /// The publish this image came from, which a full raster converted from it names.
     ticket: Ticket,
-    /// Where [`Self::full`] queues the full-resolution conversion. The record
-    /// pass asks with `&self`, so the image carries its own sender rather than
-    /// reaching for the store's.
-    jobs: Jobs,
 }
 
 /// The publishes of one node still converting: every ticket from `oldest` to
@@ -152,18 +149,21 @@ enum FullImage {
 }
 
 /// What a viewer draws for a stored image: the full-resolution texture, or,
-/// while that converts, the thumbnail standing in for it at the same `texels`,
+/// until that lands, the thumbnail standing in for it at the same `texels`,
 /// so the framing does not move when the texture arrives.
 #[derive(Clone, Debug)]
 pub(crate) enum FullView {
     Ready(DrawableImage),
     Converting(DrawableImage),
+    /// No viewer asked for the full texture yet: the one that draws this asks, through
+    /// [`PreviewStore::convert_full`].
+    Unasked(DrawableImage),
 }
 
 impl FullView {
     pub(crate) const fn image(&self) -> &DrawableImage {
         match self {
-            Self::Ready(image) | Self::Converting(image) => image,
+            Self::Ready(image) | Self::Converting(image) | Self::Unasked(image) => image,
         }
     }
 }
@@ -192,9 +192,9 @@ impl PreviewStore {
     pub(crate) fn in_flight(&self) -> bool {
         !self.converting.is_empty()
             || self.entries.values().any(|content| {
-                content.image().is_some_and(|image| {
-                    matches!(*image.full.borrow(), FullImage::Converting { .. })
-                })
+                content
+                    .image()
+                    .is_some_and(|image| matches!(image.full, FullImage::Converting { .. }))
             })
     }
 
@@ -253,11 +253,34 @@ impl PreviewStore {
                 Landing {
                     entries,
                     converting,
-                    converter,
                 },
                 ui,
                 converted,
             );
+        }
+    }
+
+    /// Queue the full-resolution conversion of `node_id`'s image, its longest edge capped to
+    /// `max_dim`, as a viewer asks for one it found [`FullView::Unasked`]. An image asked for
+    /// already, and a value that is no image or is gone, convert nothing: a second viewer of the
+    /// node may ask in the same pass.
+    ///
+    /// **Lazy.** The full raster is the source's own resolution — a full-sensor frame is hundreds
+    /// of MB of RGBA8 — and only a viewer pane ever wants one; a preview card draws the
+    /// thumbnail. A pane records only when its tab is the visible one, so a viewer stacked behind
+    /// another converts nothing.
+    pub(crate) fn convert_full(&mut self, node_id: NodeId, max_dim: Option<NonZeroU32>) {
+        let Some(StoredContent::Image(image)) = self.entries.get_mut(&node_id) else {
+            return;
+        };
+        let texels = capped_target(image.preview.native_size, max_dim);
+        match mem::replace(&mut image.full, FullImage::Converting { texels }) {
+            FullImage::Pending(source) => self.converter.jobs().send(Job {
+                node_id,
+                ticket: image.ticket,
+                work: Work::Full { source, texels },
+            }),
+            asked => image.full = asked,
         }
     }
 
@@ -301,7 +324,6 @@ impl PreviewStore {
 struct Landing<'a> {
     entries: &'a mut HashMap<NodeId, StoredContent>,
     converting: &'a mut HashMap<NodeId, Converting>,
-    converter: &'a PreviewConverter,
 }
 
 /// Land one finished conversion, or drop it when it no longer has a place.
@@ -314,7 +336,7 @@ fn accept(landing: Landing<'_>, ui: &Ui, converted: Converted) {
     match outcome {
         Outcome::Card(card) => land_card(landing, ui, node_id, ticket, card),
         Outcome::Full(raster) => {
-            if let Some(StoredContent::Image(image)) = landing.entries.get(&node_id)
+            if let Some(StoredContent::Image(image)) = landing.entries.get_mut(&node_id)
                 && image.ticket == ticket
             {
                 image.land_full(ui, &raster);
@@ -330,7 +352,6 @@ fn land_card(landing: Landing<'_>, ui: &Ui, node_id: NodeId, ticket: Ticket, car
     let Landing {
         entries,
         converting,
-        converter,
     } = landing;
     let Some(span) = converting.get_mut(&node_id) else {
         return;
@@ -361,10 +382,8 @@ fn land_card(landing: Landing<'_>, ui: &Ui, node_id: NodeId, ticket: Ticket, car
                         native_format,
                     },
                     source_bytes: source.ram_usage().total(),
-                    full: RefCell::new(FullImage::Pending(source)),
-                    node_id,
+                    full: FullImage::Pending(source),
                     ticket,
-                    jobs: converter.jobs().clone(),
                 }),
                 Err(error) => StoredContent::Error(error.into()),
             }
@@ -374,39 +393,18 @@ fn land_card(landing: Landing<'_>, ui: &Ui, node_id: NodeId, ticket: Ticket, car
 }
 
 impl DrawablePreview {
-    /// What a viewer draws for this image. The first ask queues the
-    /// full-resolution conversion, and until it lands the thumbnail stands in
-    /// at the full texture's size.
-    ///
-    /// **Lazy.** The full raster is the source's own resolution — a
-    /// full-sensor frame is hundreds of MB of RGBA8 — and only a viewer pane
-    /// ever wants one; a preview card draws the thumbnail. Asking is therefore
-    /// the whole scoping rule: a pane records only when its tab is the visible
-    /// one, so a viewer stacked behind another converts nothing.
-    ///
-    /// `&self` because that ask comes from the record pass, which holds the
-    /// run projection immutably (see [`AppCtx`](crate::gui::frame::app_ctx::AppCtx)).
-    /// The borrow is taken, resolved and dropped inside this call, so nothing
-    /// can observe the cell mid-change or hold it across a frame.
+    /// What a viewer draws for this image: until the full texture lands, the thumbnail stands
+    /// in at the full texture's size, which `ui`'s texture limit caps.
     ///
     /// A failure is stored, not just returned: it is terminal, so a broken
     /// image is diagnosed once rather than retried on every frame that draws
     /// it.
     pub(crate) fn full(&self, ui: &Ui) -> Result<FullView, DrawablePreviewError> {
-        let mut full = self.full.borrow_mut();
-        if let FullImage::Pending(source) = &*full {
-            let texels = capped_target(self.preview.native_size, ui.max_image_dimension());
-            self.jobs.send(Job {
-                node_id: self.node_id,
-                ticket: self.ticket,
-                work: Work::Full {
-                    source: source.clone(),
-                    texels,
-                },
-            });
-            *full = FullImage::Converting { texels };
-        }
-        match &*full {
+        match &self.full {
+            FullImage::Pending(_) => Ok(FullView::Unasked(DrawableImage {
+                texels: capped_target(self.preview.native_size, ui.max_image_dimension()),
+                ..self.preview.clone()
+            })),
             FullImage::Resident(handle) => Ok(FullView::Ready(DrawableImage {
                 handle: handle.clone(),
                 texels: handle.size(),
@@ -417,18 +415,16 @@ impl DrawablePreview {
                 ..self.preview.clone()
             })),
             FullImage::Failed(error) => Err(error.clone()),
-            FullImage::Pending(_) => unreachable!("the pending source was just queued"),
         }
     }
 
     /// Register the full raster converted for this image.
-    fn land_full(&self, ui: &Ui, raster: &Raster) {
-        let mut full = self.full.borrow_mut();
+    fn land_full(&mut self, ui: &Ui, raster: &Raster) {
         debug_assert!(
-            matches!(*full, FullImage::Converting { .. }),
+            matches!(self.full, FullImage::Converting { .. }),
             "a full raster lands only on the image that asked for it"
         );
-        *full = match ui.load_image(raster) {
+        self.full = match ui.load_image(raster) {
             Ok(handle) => FullImage::Resident(handle),
             Err(error) => FullImage::Failed(error.into()),
         };
@@ -508,17 +504,10 @@ pub(crate) mod internals {
         /// Land `converted`, as a frame does.
         #[cfg(test)]
         pub(crate) fn land_one(&mut self, ui: &Ui, converted: Converted) {
-            let Self {
-                entries,
-                converting,
-                converter,
-                ..
-            } = self;
             accept(
                 Landing {
-                    entries,
-                    converting,
-                    converter,
+                    entries: &mut self.entries,
+                    converting: &mut self.converting,
                 },
                 ui,
                 converted,
@@ -550,17 +539,10 @@ pub(crate) mod internals {
                     newest: ticket,
                 },
             );
-            let Self {
-                entries,
-                converting,
-                converter,
-                ..
-            } = self;
             land_card(
                 Landing {
-                    entries,
-                    converting,
-                    converter,
+                    entries: &mut self.entries,
+                    converting: &mut self.converting,
                 },
                 ui,
                 node_id,
@@ -577,7 +559,7 @@ pub(crate) mod internals {
         /// The one question a test can't ask through [`DrawablePreview::full`],
         /// since asking that *is* what queues it.
         pub(crate) fn is_full_resident(&self) -> bool {
-            matches!(&*self.full.borrow(), FullImage::Resident(_))
+            matches!(self.full, FullImage::Resident(_))
         }
     }
 

@@ -11,10 +11,8 @@ use crate::core::preview_sink::{self, PreviewSink};
 
 #[derive(Debug)]
 pub(crate) struct RuntimeLibrary {
-    /// The registry as last composed. Replaced whole on a recompose, never
-    /// edited, so a frame that cloned the `Arc` keeps reading one registry
-    /// throughout.
-    cur: Arc<ScenariumLibrary>,
+    /// The registry as last composed. Replaced whole on a recompose, never edited.
+    cur: ScenariumLibrary,
     model_paths: MlModelPaths,
     /// Where the preview func's lambda publishes. Created once and captured by
     /// every recomposed snapshot, so the values in flight survive a settings
@@ -26,7 +24,7 @@ impl RuntimeLibrary {
     pub(crate) fn new(model_paths: &MlModelPaths) -> Self {
         let previews = Arc::new(PreviewSink::default());
         Self {
-            cur: Arc::new(compose(model_paths, &previews)),
+            cur: compose(model_paths, &previews),
             model_paths: model_paths.clone(),
             previews,
         }
@@ -41,11 +39,11 @@ impl RuntimeLibrary {
     }
 
     fn recompose(&mut self) {
-        self.cur = Arc::new(compose(&self.model_paths, &self.previews));
+        self.cur = compose(&self.model_paths, &self.previews);
     }
 
     /// The registry as last composed.
-    pub(crate) const fn cur(&self) -> &Arc<ScenariumLibrary> {
+    pub(crate) const fn cur(&self) -> &ScenariumLibrary {
         &self.cur
     }
 }

@@ -5,8 +5,6 @@
 //! this resolves them against — a test that needs no context at all stops
 //! there. Everything that records a canvas builds on this.
 
-use std::sync::Arc;
-
 use scenarium::{Library, NodeId};
 
 use crate::core::document::internals::{self, DocumentFixture};
@@ -30,7 +28,7 @@ use crate::gui::theme::Theme;
 #[derive(Debug)]
 pub(crate) struct GraphCtxFixture {
     pub(crate) open: OpenDocument,
-    pub(crate) library: Arc<Library>,
+    pub(crate) library: Library,
     pub(crate) run_state: RunState,
     pub(crate) theme: Theme,
 }
@@ -39,7 +37,7 @@ impl Default for GraphCtxFixture {
     fn default() -> Self {
         Self {
             open: OpenDocument::default(),
-            library: Arc::default(),
+            library: Library::default(),
             run_state: RunState::new(wake::internals::noop()),
             theme: Theme::default(),
         }
@@ -53,7 +51,7 @@ impl GraphCtxFixture {
         let DocumentFixture { document, library } = fixture.into();
         Self {
             open: OpenDocument::over(document),
-            library: Arc::new(library),
+            library,
             ..Self::default()
         }
     }

@@ -40,7 +40,7 @@ use palantir::{
 use crate::core::document::Document;
 use crate::core::document::viewport::Viewport;
 use crate::core::io::preferences::{ViewerBg, ViewerPreferences};
-use crate::gui::frame::app_command::{AppCommand, PreferencesCommand};
+use crate::gui::frame::app_command::{AppCommand, PreferencesCommand, ViewCommand};
 use crate::gui::frame::requests::Requests;
 use crate::gui::pane::image_viewer::camera::VIEWER_ZOOM;
 use crate::gui::pane::image_viewer::glyph::Swatch;
@@ -126,13 +126,7 @@ enum ShownSource {
 }
 
 impl ShownSource {
-    /// Read the store's entry for this viewer's node, queueing its
-    /// full-resolution conversion if this is the first pass to ask.
-    ///
-    /// Asking here is what scopes the conversion: this runs from the record of
-    /// a pane that is being drawn, so only a viewer actually on screen ever
-    /// costs one. The preview card never asks; its thumbnail is already
-    /// resident, and stands in until the full texture lands.
+    /// Read the store's entry for this viewer's node.
     fn resolve(source: Option<&StoredContent>, ui: &Ui) -> Self {
         match source {
             None => Self::Nothing,
@@ -276,10 +270,17 @@ impl ImageViewer {
         // handing it the whole store is one lookup by an id that cannot
         // disagree with the one keying the pane's widgets.
         //
-        // Resolving is also what queues a not-yet-converted full-resolution
-        // texture. The thumbnail stands in until it lands, and the converter
-        // wakes the host when it does, so the pane owes itself no later frame.
+        // A full texture no one asked for is asked for here, which scopes the conversion: this
+        // runs from the record of a pane that is drawn, so only a viewer on screen costs one. The
+        // thumbnail stands in until it lands, and the converter wakes the host when it does, so
+        // the pane owes itself no later frame.
         let source = ShownSource::resolve(previews.get(self.node_id), ui);
+        if let ShownSource::Image(FullView::Unasked(_)) = source {
+            out.push_app(AppCommand::View(ViewCommand::ConvertFull {
+                node_id: self.node_id,
+                max_dim: ui.max_image_dimension(),
+            }));
+        }
         self.sync_source(source.image().map(|view| view.image().texels));
         self.apply_gestures(ui, source.image().map(FullView::image), pane);
 
@@ -544,7 +545,7 @@ impl Display for HeaderReadout<'_> {
         if texels != native_size {
             f.write_str(" · downscaled view")?;
         }
-        if matches!(self.shown, FullView::Converting(_)) {
+        if matches!(self.shown, FullView::Converting(_) | FullView::Unasked(_)) {
             f.write_str(" · preparing full resolution")?;
         }
         if let Some(zoom) = self.zoom {

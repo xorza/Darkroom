@@ -16,4 +16,4 @@ pub(crate) mod runtime_host;
 pub(crate) mod runtime_library;
 pub(crate) mod status_log;
 pub(crate) mod wake;
-mod worker_bridge;
+pub(crate) mod worker_bridge;

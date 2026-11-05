@@ -1,19 +1,15 @@
 //! The bridge between the editor's `RuntimeHost` and the background
 //! graph-evaluation `Worker` (`scenarium::worker`). The worker runs on its
-//! own tokio runtime; this type owns that runtime, the worker handle, and a
-//! sync channel the worker's callback posts results onto. The host loop
-//! ([`App::update`](crate::gui::app::App)) drains the channel each frame and is
-//! woken from off-thread via the [`Wake`] callback.
-//!
-//! Outbound commands retain FIFO order, with program installation separate
-//! from execution; inbound is a plain `std::sync::mpsc` because the consumer
-//! is the synchronous frame loop on the main thread.
+//! own tokio runtime; this type owns that runtime, the worker handle, and the
+//! [`ReportMailbox`] the worker's callback posts results into. The host loop
+//! ([`App::update`](crate::gui::app::App)) drains it each frame and is woken
+//! from off-thread via the [`Wake`] callback.
 
+use std::collections::VecDeque;
 use std::fmt;
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::sync::Arc;
-use std::sync::mpsc::{Receiver, Sender, channel};
 
 use common::{BgRuntime, ErrorChain};
 use scenarium::CompiledGraph;
@@ -21,7 +17,11 @@ use scenarium::DiskStore;
 use scenarium::NodeId;
 use scenarium::{Worker, WorkerExited, WorkerMessage, WorkerReport};
 
+use crate::core::status_log;
 use crate::core::wake::Wake;
+use crate::core::worker_bridge::report_mailbox::ReportMailbox;
+
+pub(crate) mod report_mailbox;
 
 /// Every command here answers whether the worker took it. A send only fails
 /// once the worker task is gone, and then *no report will ever arrive* — so a
@@ -29,7 +29,7 @@ use crate::core::wake::Wake;
 /// never report back.
 pub(crate) struct WorkerBridge {
     worker: Worker,
-    rx: Receiver<WorkerReport>,
+    reports: Arc<ReportMailbox>,
     runtime: BgRuntime,
 }
 
@@ -43,16 +43,25 @@ impl WorkerBridge {
     /// Spin up the worker on a fresh multi-thread runtime. Starts memory-only; the
     /// host installs the disk-backed output cache (codec registry + store
     /// root) via [`Self::set_disk_store`]. The callback runs on a worker thread:
-    /// it forwards the result over `tx` and asks the host to paint, so the next
-    /// frame drains it.
+    /// it posts the result into the mailbox and asks the host to paint, so the
+    /// next frame drains it.
     pub(crate) fn new(wake: Wake) -> Self {
         let runtime = BgRuntime::new("darkroom-worker");
-        let (tx, rx) = channel::<WorkerReport>();
+        let reports = Arc::new(ReportMailbox::default());
+        let posted = Arc::clone(&reports);
         // `Worker`'s `tokio::spawn` needs an ambient runtime.
-        let worker = runtime.enter(|| Worker::new(move |report| deliver(&tx, &wake, report)));
+        let worker = runtime.enter(|| {
+            Worker::new(move |report| {
+                if let Some(arrival) = Arrival::of(&report) {
+                    arrival.log();
+                }
+                posted.post(report);
+                (wake)();
+            })
+        });
         Self {
             worker,
-            rx,
+            reports,
             runtime,
         }
     }
@@ -158,10 +167,11 @@ impl WorkerBridge {
         self.worker.send(WorkerMessage::StopEventLoop)
     }
 
-    /// Non-blocking drain of everything the worker has posted since the
-    /// last frame.
-    pub(crate) fn drain(&self) -> impl Iterator<Item = WorkerReport> + '_ {
-        self.rx.try_iter()
+    /// Swap everything the worker posted since the last frame into
+    /// `reports`, which is empty, merged ([`ReportMailbox`]); the runs that
+    /// ended in a report a later one superseded.
+    pub(crate) fn drain(&self, reports: &mut VecDeque<WorkerReport>) -> u64 {
+        self.reports.drain(reports)
     }
 }
 
@@ -176,9 +186,40 @@ impl Drop for WorkerBridge {
     }
 }
 
-fn deliver(tx: &Sender<WorkerReport>, wake: &Wake, report: WorkerReport) {
-    tx.send(report).ok();
-    (wake)();
+/// What a report records in the log, logged as the worker posts it. The log then holds each run in
+/// the order and at the time it ran, also while a hidden window folds nothing and the mailbox
+/// merges the report away; the fold only shows it.
+#[derive(Debug, PartialEq, Eq)]
+enum Arrival {
+    /// A worker error, in the line the status log shows it with.
+    Error(String),
+    /// A run cancelled after `executed_node_count` nodes.
+    Cancelled { executed_node_count: usize },
+}
+
+impl Arrival {
+    fn of(report: &WorkerReport) -> Option<Self> {
+        match report {
+            WorkerReport::Error(error) => Some(Self::Error(ErrorChain::new(error).to_string())),
+            WorkerReport::Completed(summary) if summary.cancelled => Some(Self::Cancelled {
+                executed_node_count: summary.executed_node_count,
+            }),
+            WorkerReport::Installed { .. }
+            | WorkerReport::Cleared
+            | WorkerReport::Activity(_)
+            | WorkerReport::Progress { .. }
+            | WorkerReport::Completed(_) => None,
+        }
+    }
+
+    fn log(&self) {
+        match self {
+            Self::Error(line) => status_log::log_error(line),
+            Self::Cancelled {
+                executed_node_count,
+            } => tracing::info!("run cancelled after {executed_node_count} node(s)"),
+        }
+    }
 }
 
 #[cfg(test)]

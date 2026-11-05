@@ -24,7 +24,7 @@ use crate::driver::log_ring::LogRing;
 use crate::driver::window_link::WindowLink;
 use crate::gui::MAIN_WINDOW;
 use crate::gui::app::{App, LaunchInputs};
-use crate::gui::dialogs::{DialogFallback, Dialogs};
+use crate::gui::dialogs::{DialogFallback, Dialogs, NativeDialogFlag};
 
 pub use crate::gui::dialogs::DialogAnswer;
 
@@ -71,8 +71,8 @@ pub fn run_driven(
             overlay.frame_stats = is_debug();
             ui.set_debug_overlay(overlay);
 
-            let dialogs = Dialogs::new(DialogFallback::Native);
-            let native_open = dialogs.native_open();
+            let native_dialog = NativeDialogFlag::default();
+            let dialogs = Dialogs::new(DialogFallback::Native(native_dialog.clone()));
             let app = App::new(
                 ui,
                 LaunchInputs {
@@ -81,7 +81,7 @@ pub fn run_driven(
                     dialogs,
                 },
             );
-            serve(WindowLink::new(handle, native_open));
+            serve(WindowLink::new(handle, native_dialog));
             app
         })?;
 

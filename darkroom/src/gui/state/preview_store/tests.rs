@@ -116,7 +116,9 @@ fn native_size_refuses_an_edge_no_texture_holds() {
 /// asks for one — the card itself needs the thumbnail alone — and neither
 /// conversion runs on the thread that asks. The card lands once its thumbnail
 /// is converted; until the full texture lands, the thumbnail stands in for it
-/// at the full texture's size, so the viewer's framing never moves.
+/// at the full texture's size, unasked and then converting, so the viewer's
+/// framing never moves. An ask of an image asked for already, or of a node
+/// with no value, changes nothing.
 #[test]
 fn the_full_texture_converts_on_the_first_ask_and_is_reused_after() {
     let arena = Harness::builder(UVec2::ONE).mono().build();
@@ -152,13 +154,26 @@ fn the_full_texture_converts_on_the_first_ask_and_is_reused_after() {
     // the source's own size — and until it lands, the thumbnail is drawn
     // there.
     assert_eq!(arena.ui().max_image_dimension(), None);
+    let FullView::Unasked(unasked) = image.full(arena.ui()).expect("a valid image converts") else {
+        panic!("no viewer asked yet");
+    };
+    assert_eq!(unasked.handle.size(), UVec2::new(256, 128));
+    assert_eq!(unasked.texels, UVec2::new(1024, 512));
+    assert!(!store.in_flight(), "reading the image asks for nothing");
+
+    store.convert_full(node, None);
+    store.convert_full(NodeId::unique(), None);
+    let StoredContent::Image(image) = &store.entries[&node] else {
+        panic!("the image stays the same entry");
+    };
     let FullView::Converting(stand_in) = image.full(arena.ui()).expect("a valid image converts")
     else {
-        panic!("the first ask queues the conversion");
+        panic!("the ask queues the conversion");
     };
     assert_eq!(stand_in.handle.size(), UVec2::new(256, 128));
     assert_eq!(stand_in.texels, UVec2::new(1024, 512));
     assert!(!image.is_full_resident());
+    assert!(store.in_flight());
 
     store.settle(arena.ui());
     let StoredContent::Image(image) = &store.entries[&node] else {
@@ -178,6 +193,14 @@ fn the_full_texture_converts_on_the_first_ask_and_is_reused_after() {
 
     // Asking again answers from the stored texture. It cannot convert again
     // even in principle: the image gave its source up to the conversion.
+    store.convert_full(node, None);
+    assert!(
+        !store.in_flight(),
+        "a resident texture is not asked for again"
+    );
+    let StoredContent::Image(image) = &store.entries[&node] else {
+        panic!("the image stays the same entry");
+    };
     let FullView::Ready(again) = image.full(arena.ui()).expect("still uploaded") else {
         panic!("a resident texture stays resident");
     };

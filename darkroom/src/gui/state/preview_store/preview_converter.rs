@@ -1,6 +1,7 @@
 //! [`PreviewConverter`]: the thread that turns published values into rasters.
 
-use std::sync::mpsc::{self, Receiver, TryIter};
+use std::iter;
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 
 use common::thread;
 
@@ -23,9 +24,8 @@ use crate::gui::state::preview_store::{
 /// the main thread only registers the finished raster.
 ///
 /// Each finished job wakes the host, so a result lands on the next frame even
-/// when nothing else would draw one. The thread ends when its last sender is
-/// dropped: the store's own, and the clone each stored image keeps for its
-/// full-resolution ask.
+/// when nothing else would draw one. The thread ends when the store drops its
+/// [`Jobs`].
 #[derive(Debug)]
 pub(crate) struct PreviewConverter {
     jobs: Jobs,
@@ -116,15 +116,23 @@ impl PreviewConverter {
         Self { jobs, results }
     }
 
-    /// Where jobs are queued — cloned into each image, which queues its own
-    /// full-resolution job.
+    /// Where the store queues jobs.
     pub(super) const fn jobs(&self) -> &Jobs {
         &self.jobs
     }
 
     /// Every result finished since the last call, without waiting.
-    pub(super) fn ready(&self) -> TryIter<'_, Converted> {
-        self.results.try_iter()
+    ///
+    /// # Panics
+    ///
+    /// When the converter thread panicked, after the results it sent before: while the store
+    /// holds its [`Jobs`], the thread ends only so.
+    pub(super) fn ready(&self) -> impl Iterator<Item = Converted> + '_ {
+        iter::from_fn(|| match self.results.try_recv() {
+            Ok(converted) => Some(converted),
+            Err(TryRecvError::Empty) => None,
+            Err(TryRecvError::Disconnected) => panic!("the preview converter thread panicked"),
+        })
     }
 }
 
@@ -198,5 +206,44 @@ pub(crate) mod internals {
     /// lands one conversion every frame and times the landing alone.
     pub(crate) fn convert_here(value: DynamicValue) -> Card {
         card(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc;
+
+    use scenarium::NodeId;
+
+    use crate::gui::state::preview_store::job_queue;
+    use crate::gui::state::preview_store::preview_converter::{
+        Card, Converted, Outcome, PreviewConverter, Ticket,
+    };
+
+    /// A converter whose thread is gone hands out the result the thread sent first, then panics:
+    /// a dead thread cannot leave its previews converting with no report.
+    #[test]
+    #[should_panic(expected = "the preview converter thread panicked")]
+    fn a_dead_converter_thread_panics_after_its_results() {
+        let (jobs, inbox) = job_queue::queue();
+        drop(inbox);
+        let (outbox, results) = mpsc::channel();
+        let node_id = NodeId::unique();
+        outbox
+            .send(Converted {
+                node_id,
+                ticket: Ticket::default(),
+                outcome: Outcome::Card(Card::Text("7".to_owned())),
+            })
+            .unwrap();
+        drop(outbox);
+        let converter = PreviewConverter { jobs, results };
+
+        let mut ready = converter.ready();
+        let first = ready
+            .next()
+            .expect("the result sent before the thread died");
+        assert_eq!(first.node_id, node_id);
+        let _ = ready.next();
     }
 }

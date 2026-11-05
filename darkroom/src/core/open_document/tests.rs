@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::rc::Rc;
 
 use common::TempDir;
 use glam::Vec2;
@@ -282,13 +282,13 @@ fn only_a_batch_wholly_in_a_gesture_folds_into_it() {
     let start = open.document.main_view.node_placements[&node].pos;
     let mut queue = DocumentQueue::default();
     let gesture = queue.open_gesture();
-    let members: Arc<[DragStart]> = Arc::from([DragStart {
+    let members: Rc<[DragStart]> = Rc::from([DragStart {
         item: ItemId::Node(node),
         pos: start,
     }]);
     let frame = |x: f32| GraphIntent::MoveSelection {
         gesture,
-        members: Arc::clone(&members),
+        members: Rc::clone(&members),
         offset: Vec2::new(x, 0.0),
     };
     let mut drain = |open: &mut OpenDocument, intents: Vec<GraphIntent>| {
@@ -371,7 +371,7 @@ fn the_revision_follows_the_node_set_and_every_edit_dirties() {
         &mut open,
         GraphIntent::MoveSelection {
             gesture,
-            members: Arc::from([DragStart {
+            members: Rc::from([DragStart {
                 item: ItemId::Node(node),
                 pos: placed,
             }]),
@@ -424,13 +424,13 @@ fn a_cancel_takes_the_gesture_back_whole() {
         spawned,
         open.document.graph.find(node).unwrap().clone(),
     );
-    let placed: Arc<[DragStart]> = Arc::from([DragStart {
+    let placed: Rc<[DragStart]> = Rc::from([DragStart {
         item: ItemId::Node(spawned),
         pos: Vec2::new(40.0, 40.0),
     }]);
     let frame = |x: f32| GraphIntent::MoveSelection {
         gesture,
-        members: Arc::clone(&placed),
+        members: Rc::clone(&placed),
         offset: Vec2::new(x, 0.0),
     };
     let drain = |open: &mut OpenDocument, queue: &mut DocumentQueue| {
@@ -454,13 +454,13 @@ fn a_cancel_takes_the_gesture_back_whole() {
     // leaves alone: the fallback move puts the member back as its own entry.
     let start = open.document.main_view.node_placements[&node].pos;
     let gesture = queue.open_gesture();
-    let members: Arc<[DragStart]> = Arc::from([DragStart {
+    let members: Rc<[DragStart]> = Rc::from([DragStart {
         item: ItemId::Node(node),
         pos: start,
     }]);
     let moved = |x: f32| GraphIntent::MoveSelection {
         gesture,
-        members: Arc::clone(&members),
+        members: Rc::clone(&members),
         offset: Vec2::new(x, 0.0),
     };
     queue.push_graph(moved(10.0));

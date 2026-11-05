@@ -8,7 +8,7 @@
 //! Everything after that lives here in [`GroupDrag::prepass`].
 
 use std::collections::BTreeSet;
-use std::sync::Arc;
+use std::rc::Rc;
 
 use glam::Vec2;
 use palantir::{Ui, WidgetId};
@@ -48,7 +48,7 @@ pub(crate) struct Grab {
     /// selected, else just the grabbed one, with the ties inside the moving
     /// nodes ([`with_inner_ties`]). Includes the grabbed node itself.
     /// Shared with each frame's intent, so a frame copies no list.
-    pub(crate) members: Arc<[DragStart]>,
+    pub(crate) members: Rc<[DragStart]>,
     /// The widget whose drag delta drives the gesture, captured at latch so
     /// later frames can `ui.response_for(handle)` without the caller having
     /// to remember which of its several grab targets started it.
@@ -145,7 +145,7 @@ impl Anchor {
     fn frame(&self, offset: Vec2) -> GraphIntent {
         GraphIntent::MoveSelection {
             gesture: self.gesture,
-            members: Arc::clone(&self.grab.members),
+            members: Rc::clone(&self.grab.members),
             offset,
         }
     }
@@ -154,7 +154,7 @@ impl Anchor {
 /// The selection's members at their current positions, with the ties inside
 /// its nodes — [`GroupDrag::latch`]'s `members` for a drag that grabbed an
 /// already-selected member.
-pub(crate) fn selected_group(draw_ctx: DrawCtx<'_>) -> Arc<[DragStart]> {
+pub(crate) fn selected_group(draw_ctx: DrawCtx<'_>) -> Rc<[DragStart]> {
     let graph_ctx = draw_ctx.graph_ctx();
     let view = graph_ctx.view();
     let nodes = graph_ctx
@@ -179,7 +179,7 @@ pub(crate) fn selected_group(draw_ctx: DrawCtx<'_>) -> Arc<[DragStart]> {
 /// among the member nodes, at its current position: a drag of a node set
 /// takes the ties inside it. `darkroom/AGENTS.md`, "Wire ties", "A node set takes the
 /// ties inside it", holds the decision.
-pub(crate) fn with_inner_ties(view: &GraphView, mut members: Vec<DragStart>) -> Arc<[DragStart]> {
+pub(crate) fn with_inner_ties(view: &GraphView, mut members: Vec<DragStart>) -> Rc<[DragStart]> {
     let nodes: BTreeSet<NodeId> = members
         .iter()
         .filter_map(|member| member.item.node())

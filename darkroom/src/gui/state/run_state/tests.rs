@@ -8,6 +8,7 @@ use scenarium::LogEntry;
 use scenarium::NodeStatus;
 
 use crate::core::wake;
+use crate::core::worker_bridge::report_mailbox::ReportMailbox;
 use crate::gui::state::preview_store::StoredContent;
 
 fn node_id(n: u128) -> NodeId {
@@ -469,4 +470,129 @@ fn with_no_failure_the_cause_is_the_first_node_missing_an_input() {
             cancelled: true,
         }
     );
+}
+
+/// The run reports of one cycle of a live event loop: it executes, `node` makes progress, and
+/// the run ends in `end`, back in the loop.
+fn event_run(node: NodeId, end: WorkerReport) -> [WorkerReport; 4] {
+    [
+        WorkerReport::Activity(WorkerActivity::Executing),
+        WorkerReport::Progress {
+            node_id: node,
+            phase: RunPhase::Succeeded { elapsed_secs: 0.5 },
+        },
+        end,
+        WorkerReport::Activity(WorkerActivity::EventLoop),
+    ]
+}
+
+fn run_error(node: NodeId) -> WorkerReport {
+    WorkerReport::Error(WorkerError::Exec {
+        error: scenarium::ExecError::NodeSeedNotFound { node_id: node },
+    })
+}
+
+fn installed(nodes: [NodeId; 2]) -> WorkerReport {
+    WorkerReport::Installed {
+        compiled: Arc::new(CompiledGraph::bare(nodes)),
+        cache_ram: RamUsage { cpu: 7, gpu: 0 },
+    }
+}
+
+/// The runs of a live event loop: two that fail and two that end, a structural error, then three
+/// more, so each merge rule and the barrier meet the runs on each side of them.
+fn event_loop_stream([a, b]: [NodeId; 2]) -> Vec<WorkerReport> {
+    let mut stream = vec![installed([a, b])];
+    stream.extend(event_run(a, completed_status(&[(a, 1.0)], &[])));
+    stream.extend(event_run(b, run_error(b)));
+    stream.extend(event_run(a, completed_status(&[(a, 2.0)], &[b])));
+    stream.extend(event_run(b, run_error(a)));
+    stream.push(WorkerReport::Error(WorkerError::EventLambdaPanic {
+        node_id: a,
+        message: "boom".to_owned(),
+    }));
+    stream.extend(event_run(a, run_error(b)));
+    stream.extend(event_run(b, completed_status(&[(b, 3.0)], &[])));
+    stream.extend(event_run(a, run_error(a)));
+    stream
+}
+
+/// Each prefix of [`event_loop_stream`] folds through the mailbox to what folding each of its
+/// reports leaves: the nodes, the activity, the RAM, the outcome, the status line and the count of
+/// runs ended. The whole stream keeps 8 of its 30 reports: on each side of the barrier, the last
+/// `Completed`, the error after it and the last `Activity`, with the `Installed` and the barrier:
+/// the run 3 `Completed` drops the run 1 one, the run 4 error the run 2 one, and the run 7 error
+/// the run 5 one, which leaves 3 superseded runs.
+#[test]
+fn a_merged_report_stream_folds_as_the_whole_stream() {
+    let nodes = [1, 2].map(node_id);
+    let whole_len = event_loop_stream(nodes).len();
+    assert_eq!(whole_len, 30);
+    for prefix_len in 0..=whole_len {
+        let mut folded = RunState::new(wake::internals::noop());
+        let mut folded_log = StatusLog::default();
+        for report in event_loop_stream(nodes).into_iter().take(prefix_len) {
+            folded.apply_report(report, &mut folded_log);
+        }
+
+        let mailbox = ReportMailbox::default();
+        for report in event_loop_stream(nodes).into_iter().take(prefix_len) {
+            mailbox.post(report);
+        }
+        let mut merged = RunState::new(wake::internals::noop());
+        let mut merged_log = StatusLog::default();
+        let mut kept = VecDeque::new();
+        let superseded_runs = mailbox.drain(&mut kept);
+        if prefix_len == whole_len {
+            assert_eq!(kept.len(), 8);
+            assert_eq!(superseded_runs, 3);
+        }
+        merged.runs_ended += superseded_runs;
+        for report in kept {
+            merged.apply_report(report, &mut merged_log);
+        }
+
+        assert_eq!(
+            merged.runs_ended(),
+            folded.runs_ended(),
+            "prefix {prefix_len}"
+        );
+        assert_eq!(merged.nodes, folded.nodes, "prefix {prefix_len}");
+        assert_eq!(merged.activity, folded.activity, "prefix {prefix_len}");
+        assert_eq!(merged.cache_ram, folded.cache_ram, "prefix {prefix_len}");
+        assert_eq!(merged.outcome, folded.outcome, "prefix {prefix_len}");
+        assert_eq!(
+            format!("{:?}", merged_log.cur()),
+            format!("{:?}", folded_log.cur()),
+            "prefix {prefix_len}"
+        );
+        if prefix_len == whole_len {
+            assert_eq!(folded.runs_ended(), 7);
+        }
+    }
+}
+
+/// A long event loop behind a hidden window keeps the install and the last run alone: 100 runs
+/// that each complete leave the `Installed`, the last `Completed` and the last `Activity`, and
+/// carry the other 99 runs as a count.
+#[test]
+fn a_long_event_loop_keeps_its_last_run_alone() {
+    let [a, b] = [1, 2].map(node_id);
+    let mailbox = ReportMailbox::default();
+    mailbox.post(installed([a, b]));
+    for _ in 0..100 {
+        for report in event_run(a, completed_status(&[(a, 1.0)], &[])) {
+            mailbox.post(report);
+        }
+    }
+    let mut kept = VecDeque::new();
+    assert_eq!(mailbox.drain(&mut kept), 99);
+    assert!(matches!(
+        kept.make_contiguous(),
+        [
+            WorkerReport::Installed { .. },
+            WorkerReport::Completed(_),
+            WorkerReport::Activity(WorkerActivity::EventLoop),
+        ]
+    ));
 }

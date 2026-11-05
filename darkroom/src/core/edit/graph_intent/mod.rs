@@ -27,7 +27,7 @@ pub(crate) mod route_insert;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::iter;
-use std::sync::Arc;
+use std::rc::Rc;
 
 use glam::Vec2;
 use scenarium::{
@@ -106,7 +106,7 @@ pub(crate) enum GraphIntent {
     MoveSelection {
         gesture: GestureId,
         /// Shared with the drag that latched them, so a frame copies no list.
-        members: Arc<[DragStart]>,
+        members: Rc<[DragStart]>,
         offset: Vec2,
     },
     RenameNode {

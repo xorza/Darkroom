@@ -34,7 +34,8 @@
 
 pub(crate) mod run_outcome;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+use std::mem;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -95,7 +96,7 @@ pub(crate) enum ExecStatus {
 }
 
 /// Everything the editor knows about one node from the last run.
-#[derive(Default, Debug)]
+#[derive(Default, Debug, PartialEq)]
 pub(crate) struct NodeRunState {
     status: ExecStatus,
     logs: Vec<NodeLog>,
@@ -160,6 +161,8 @@ pub(crate) struct RunState {
     /// The worker merges the run commands of one batch into one run, so this counts runs, not
     /// requests.
     runs_ended: u64,
+    /// The reports a drain swaps in, kept for its buffer.
+    reports: VecDeque<WorkerReport>,
     /// RAM held by the worker's runtime cache (system RAM vs GPU VRAM), as of
     /// the last report that measured it: a completed run, or an install —
     /// which releases the values of every node the new program dropped, and
@@ -193,6 +196,7 @@ impl RunState {
             compiled: None,
             activity: WorkerActivity::default(),
             runs_ended: 0,
+            reports: VecDeque::new(),
             cache_ram: RamUsage::default(),
             published: HashMap::new(),
             outcome: None,
@@ -207,6 +211,10 @@ impl RunState {
     /// The preview values the frame shows, and their conversions.
     pub(crate) const fn previews(&self) -> &PreviewStore {
         &self.previews
+    }
+
+    pub(crate) const fn previews_mut(&mut self) -> &mut PreviewStore {
+        &mut self.previews
     }
 
     pub(crate) const fn activity(&self) -> WorkerActivity {
@@ -263,9 +271,12 @@ impl RunState {
     /// is taken by [`Self::sync_previews`], so this stays a pure fold and names
     /// no `Ui`.
     fn drain_reports(&mut self, runtime: &RuntimeHost, status: &mut StatusLog) {
-        for report in runtime.drain_worker() {
+        let mut reports = mem::take(&mut self.reports);
+        self.runs_ended += runtime.drain_worker(&mut reports);
+        while let Some(report) = reports.pop_front() {
             self.apply_report(report, status);
         }
+        self.reports = reports;
     }
 
     /// Fold one report. Split out from the drain so it can be exercised
@@ -295,17 +306,12 @@ impl RunState {
                     self.runs_ended += 1;
                     self.clear();
                 }
-                status.error(StatusFamily::Run, ErrorChain::new(&error).to_string());
+                // Logged as the worker posted it (`worker_bridge::log_arrival`).
+                status.park_error(StatusFamily::Run, ErrorChain::new(&error).to_string());
             }
             WorkerReport::Activity(activity) => self.activity = activity,
             WorkerReport::Progress { node_id, phase } => self.apply_progress(node_id, phase),
             WorkerReport::Completed(summary) => {
-                if summary.cancelled {
-                    tracing::info!(
-                        "run cancelled after {} node(s)",
-                        summary.executed_node_count
-                    );
-                }
                 // A completed run supersedes any lingering failure message
                 // from an earlier event-loop tick.
                 status.succeeded(StatusFamily::Run);
@@ -351,11 +357,10 @@ impl RunState {
 
     /// Replace the last completed run with the worker's authoritative summary.
     fn replace_results(&mut self, update: &RunSummary) {
-        let compiled = Arc::clone(
-            self.compiled
-                .as_ref()
-                .expect("worker reported results before installing a compiled graph"),
-        );
+        let compiled = self
+            .compiled
+            .as_ref()
+            .expect("worker reported results before installing a compiled graph");
         self.cache_ram = update.cache_ram;
         self.outcome = Some(RunOutcome::of(update));
         #[expect(
@@ -368,7 +373,7 @@ impl RunState {
             node.ram = RamUsage::default();
         }
         for node in &update.nodes {
-            assert_reported(&compiled, node.node_id);
+            assert_reported(compiled, node.node_id);
             if let Some(status) = &node.status {
                 let status = match status {
                     NodeExecStatus::Cached => ExecStatus::Cached,
@@ -392,7 +397,7 @@ impl RunState {
             }
         }
         for entry in &update.logs {
-            assert_reported(&compiled, entry.node_id);
+            assert_reported(compiled, entry.node_id);
             self.nodes
                 .entry(entry.node_id)
                 .or_default()
@@ -500,7 +505,6 @@ pub(crate) mod internals {
     #[cfg(test)]
     use scenarium::{NodeId, RamUsage};
 
-    use crate::gui::state::preview_store::PreviewStore;
     use crate::gui::state::run_state::RunState;
     #[cfg(test)]
     use std::sync::Arc;
@@ -514,11 +518,6 @@ pub(crate) mod internals {
     use crate::gui::state::run_state::{ExecStatus, NodeRunState};
 
     impl RunState {
-        /// The preview store, for a test or a bench that publishes or lands a value itself.
-        pub(crate) const fn previews_mut(&mut self) -> &mut PreviewStore {
-            &mut self.previews
-        }
-
         #[cfg(test)]
         pub(crate) fn status(&self, id: NodeId) -> ExecStatus {
             self.node(id)

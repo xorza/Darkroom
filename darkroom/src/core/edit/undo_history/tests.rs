@@ -1,5 +1,5 @@
 use std::collections::BTreeSet;
-use std::sync::Arc;
+use std::rc::Rc;
 
 use glam::Vec2;
 use scenarium::{Library, NodeId};
@@ -26,7 +26,7 @@ struct Harness {
 #[derive(Debug)]
 struct Drag {
     gesture: GestureId,
-    members: Arc<[DragStart]>,
+    members: Rc<[DragStart]>,
 }
 
 impl Harness {
@@ -110,7 +110,7 @@ impl Harness {
     fn drag(&mut self, drag: &Drag, offset: Vec2) {
         self.frame(GraphIntent::MoveSelection {
             gesture: drag.gesture,
-            members: Arc::clone(&drag.members),
+            members: Rc::clone(&drag.members),
             offset,
         });
     }

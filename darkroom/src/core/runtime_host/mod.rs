@@ -3,7 +3,7 @@
 //! top, so worker construction and the drain/run primitives live here rather
 //! than in the shell.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -317,9 +317,11 @@ impl RuntimeHost {
         }
     }
 
-    /// Non-blocking drain of worker results posted since the last frame.
-    pub(crate) fn drain_worker(&self) -> impl Iterator<Item = WorkerReport> + '_ {
-        self.worker.drain()
+    /// Swap the worker results posted since the last frame into `reports`,
+    /// which is empty; the runs that ended in a result a later one superseded
+    /// ([`WorkerBridge::drain`]).
+    pub(crate) fn drain_worker(&self, reports: &mut VecDeque<WorkerReport>) -> u64 {
+        self.worker.drain(reports)
     }
 
     /// Non-blocking drain of every preview value the worker's lambdas published

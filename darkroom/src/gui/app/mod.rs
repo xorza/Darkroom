@@ -230,6 +230,9 @@ impl App {
                 self.capture = Some(ViewCapture::new(CaptureTarget::Clipboard));
             }
             AppCommand::View(ViewCommand::Frame(framing)) => self.session.frame_graph(framing),
+            AppCommand::View(ViewCommand::ConvertFull { node_id, max_dim }) => {
+                self.run_state.previews_mut().convert_full(node_id, max_dim);
+            }
             AppCommand::View(ViewCommand::SaveImage) => {
                 if let Some(path) = self.dialogs.save_path(SavedFile::PNG, None) {
                     self.capture = Some(ViewCapture::new(CaptureTarget::Png(path)));
@@ -689,16 +692,14 @@ impl palantir::App for App {
             ui.request_repaint_after(Duration::from_millis(100));
         }
 
-        // One library snapshot for this record pass (a cheap Arc clone).
-        // A command that publishes below is visible to pass B or the next frame.
-        let library = Arc::clone(self.runtime.library.cur());
         // The frame's read-only world, composed once here: everything below
         // derives its own context from this one rather than taking the refs
         // again.
-        let ctx = AppCtx::new(&self.theme, &library, &self.run_state).with_status(StatusInputs {
-            message: self.status.cur(),
-            process_memory: self.process_memory.sample(ui.now()),
-        });
+        let ctx = AppCtx::new(&self.theme, self.runtime.library.cur(), &self.run_state)
+            .with_status(StatusInputs {
+                message: self.status.cur(),
+                process_memory: self.process_memory.sample(ui.now()),
+            });
         let mut needs_relayout = self.session.frame(
             ui,
             ctx,
@@ -761,7 +762,7 @@ impl App {
     }
 
     /// The library this session resolves the document's funcs against.
-    pub(crate) const fn library(&self) -> &Arc<Library> {
+    pub(crate) const fn library(&self) -> &Library {
         self.runtime.library.cur()
     }
 

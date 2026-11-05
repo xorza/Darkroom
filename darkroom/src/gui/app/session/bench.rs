@@ -26,7 +26,7 @@
 
 use common::{Buffer2, USize2};
 use imaginarium::PlanarImage;
-use std::sync::Arc;
+use std::rc::Rc;
 
 use criterion::Criterion;
 use glam::Vec2;
@@ -38,7 +38,7 @@ use palantir::internals::Timing;
 use palantir::internals::frame_fixture::{BENCH_DPR, BENCH_SURFACE};
 use palantir::{ColorScheme, Depth, Harness};
 use palantir::{FramePaint, OffscreenHost, Ui};
-use scenarium::{Binding, DynamicValue, Func, Graph, InputPort, Library, NodeId};
+use scenarium::{Binding, DynamicValue, Func, Graph, InputPort, NodeId};
 
 use crate::core::document::Document;
 use crate::core::document::item_id::ItemId;
@@ -112,7 +112,7 @@ impl Scenario {
 #[derive(Debug)]
 struct Editor {
     session: Session,
-    library: Arc<Library>,
+    library: RuntimeLibrary,
     theme: Theme,
     run_state: RunState,
     preferences: Preferences,
@@ -123,7 +123,7 @@ struct Editor {
     laid_out: bool,
     /// What the `drag` scenario moves, from where it starts: the second chain's blend, on screen
     /// at the camera's zoom, which three wires reach.
-    dragged: Arc<[DragStart]>,
+    dragged: Rc<[DragStart]>,
     /// The two images the `preview` scenario lands in turn, each converted once
     /// up front: in production the converter's thread does that, off every
     /// frame, so a frame here times the landing alone.
@@ -134,7 +134,7 @@ impl Editor {
     /// The made graph over the shipped library, every preview publishing an image.
     fn new() -> Self {
         let runtime = RuntimeLibrary::new(&MlModelPaths::default());
-        let library = Arc::clone(runtime.cur());
+        let library = runtime.cur();
         let func = |name: &str| -> Func {
             library
                 .by_name(name)
@@ -145,7 +145,7 @@ impl Editor {
         let adjust = func("Brightness / Contrast");
         let transform = func("Transform");
         let blend = func("Blend");
-        let show = preview_sink::registered(&library)
+        let show = preview_sink::registered(library)
             .expect("the runtime library holds the preview node")
             .clone();
 
@@ -169,12 +169,12 @@ impl Editor {
 
         Self {
             session: Session::new(OpenDocument::over(document)),
-            library,
+            library: runtime,
             theme: Theme::default(),
             run_state: RunState::new(wake::internals::noop()),
             preferences: Preferences::default(),
             requests: Requests::default(),
-            dragged: Arc::new([DragStart {
+            dragged: Rc::new([DragStart {
                 item: ItemId::Node(chains[DRAGGED_CHAIN][BLEND]),
                 pos: Vec2::ZERO,
             }]),
@@ -223,7 +223,7 @@ impl Editor {
                     .pos = Vec2::new(cols[col], chain as f32 * row);
             }
         }
-        self.dragged = Arc::new([DragStart {
+        self.dragged = Rc::new([DragStart {
             item: ItemId::Node(self.chains[DRAGGED_CHAIN][BLEND]),
             pos: Vec2::new(cols[BLEND], DRAGGED_CHAIN as f32 * row),
         }]);
@@ -256,11 +256,12 @@ impl Editor {
             }
             Scenario::Drag => GraphIntent::MoveSelection {
                 gesture,
-                members: Arc::clone(&self.dragged),
+                members: Rc::clone(&self.dragged),
                 offset: Vec2::new(if n.is_multiple_of(2) { 1.0 } else { 0.0 }, 0.0),
             },
         };
-        if Relayout::after(self.session.open.apply_edit(intent, &self.library)) == Relayout::Needed
+        if Relayout::after(self.session.open.apply_edit(intent, self.library.cur()))
+            == Relayout::Needed
         {
             ui.request_relayout();
         }
@@ -281,7 +282,7 @@ impl Editor {
             self.laid_out = true;
             ui.request_relayout();
         }
-        let ctx = AppCtx::new(&self.theme, &self.library, &self.run_state);
+        let ctx = AppCtx::new(&self.theme, self.library.cur(), &self.run_state);
         let relayout = self.session.frame(
             ui,
             ctx,

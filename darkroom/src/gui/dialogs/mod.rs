@@ -21,9 +21,6 @@ use crate::core::io::document::document_format::DocumentFormat;
 pub(crate) struct Dialogs {
     queued: VecDeque<DialogAnswer>,
     fallback: DialogFallback,
-    /// Raised while a native dialog is open, which blocks the main thread until the person
-    /// answers: a driver on another thread reads it to say why the editor does not answer.
-    native_open: Arc<AtomicBool>,
 }
 
 /// One scripted answer to a file dialog, which the next dialog the app opens takes.
@@ -38,13 +35,42 @@ pub enum DialogAnswer {
 }
 
 /// What answers an ask with no queued answer left.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub(crate) enum DialogFallback {
-    /// The platform's file dialogs, which block until the person answers.
-    Native,
+    /// The platform's file dialogs, which block until the person answers, with the flag raised
+    /// while one is open.
+    Native(NativeDialogFlag),
     /// A cancel, and an error for the driver to report: a session no one can see must not block
     /// on a dialog.
     Refuse,
+}
+
+/// Raised while a native dialog is open, which blocks the main thread until the person answers:
+/// a driver on another thread reads it to say why the editor does not answer.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct NativeDialogFlag(Arc<AtomicBool>);
+
+/// Lowers the flag when dropped, so a dialog that panics does not leave it raised.
+#[derive(Debug)]
+struct RaisedFlag<'a>(&'a AtomicBool);
+
+impl NativeDialogFlag {
+    /// Whether a native dialog is open now.
+    pub(crate) fn is_raised(&self) -> bool {
+        // Relaxed: the flag publishes no other data, and a reader acts on its value alone.
+        self.0.load(Ordering::Relaxed)
+    }
+
+    fn raise(&self) -> RaisedFlag<'_> {
+        self.0.store(true, Ordering::Relaxed);
+        RaisedFlag(&self.0)
+    }
+}
+
+impl Drop for RaisedFlag<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Relaxed);
+    }
 }
 
 /// One file type a save dialog offers: the label of its filter, and its extension.
@@ -126,17 +152,11 @@ impl<'a> SavedFile<'a> {
 
 impl Dialogs {
     /// No answers queued, `fallback` behind them.
-    pub(crate) fn new(fallback: DialogFallback) -> Self {
+    pub(crate) const fn new(fallback: DialogFallback) -> Self {
         Self {
             queued: VecDeque::new(),
             fallback,
-            native_open: Arc::default(),
         }
-    }
-
-    /// The flag raised while a native dialog is open.
-    pub(crate) fn native_open(&self) -> Arc<AtomicBool> {
-        Arc::clone(&self.native_open)
     }
 
     /// Queue `answer` for the next ask the queue reaches.
@@ -222,15 +242,13 @@ impl Dialogs {
         }
     }
 
-    /// `native` for [`DialogFallback::Native`], the flag raised while it runs, else a refusal
+    /// `native` for [`DialogFallback::Native`], its flag raised while it runs, else a refusal
     /// of `ask`.
     fn fall_back<T>(&self, ask: &str, native: impl FnOnce() -> Option<T>) -> Option<T> {
-        match self.fallback {
-            DialogFallback::Native => {
-                self.native_open.store(true, Ordering::Release);
-                let answer = native();
-                self.native_open.store(false, Ordering::Release);
-                answer
+        match &self.fallback {
+            DialogFallback::Native(flag) => {
+                let _raised = flag.raise();
+                native()
             }
             DialogFallback::Refuse => unanswered(ask, None),
         }
@@ -333,174 +351,4 @@ fn pick_dir() -> Option<PathBuf> {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::path::{self, PathBuf};
-
-    use common::{TempDir, fs};
-
-    use crate::core::io::document::document_format::DocumentFormat;
-    use crate::gui::dialogs::{
-        DialogAnswer, DialogFallback, Dialogs, SavedFile, normalize_file_selection,
-    };
-
-    /// A save adds its kind's extension to a bare name and puts it in place of another, and keeps
-    /// one that matches without regard to case. Only an extended name that exists and differs
-    /// from the pick is owed a second confirmation: a bare name over nothing, and a pick that
-    /// already carries the extension (the dialog asked about that very file), are not.
-    #[test]
-    fn only_an_existing_extended_name_needs_confirming_again() {
-        let extended = |kind: SavedFile<'_>, name: &str| kind.extended(PathBuf::from(name));
-        assert_eq!(
-            extended(SavedFile::project(DocumentFormat::Ron), "scene"),
-            PathBuf::from("scene.darkroom")
-        );
-        assert_eq!(
-            extended(SavedFile::project(DocumentFormat::Ron), "scene.json"),
-            PathBuf::from("scene.darkroom")
-        );
-        assert_eq!(
-            extended(SavedFile::project(DocumentFormat::Ron), "scene.DARKROOM"),
-            PathBuf::from("scene.DARKROOM")
-        );
-        assert_eq!(
-            extended(SavedFile::project(DocumentFormat::Ron), "scene.darkroomz"),
-            PathBuf::from("scene.darkroomz"),
-            "the compressed file type is the project's too"
-        );
-        assert_eq!(
-            extended(SavedFile::project(DocumentFormat::Ron), "scene.DARKROOMZ"),
-            PathBuf::from("scene.DARKROOMZ")
-        );
-        assert_eq!(
-            extended(SavedFile::project(DocumentFormat::ZippedRon), "scene"),
-            PathBuf::from("scene.darkroomz"),
-            "a bare name takes the open project's format"
-        );
-        assert_eq!(
-            extended(
-                SavedFile::project(DocumentFormat::ZippedRon),
-                "scene.darkroom"
-            ),
-            PathBuf::from("scene.darkroom"),
-            "and the other type stays the person's pick"
-        );
-        assert_eq!(extended(SavedFile::PNG, "view"), PathBuf::from("view.png"));
-        assert_eq!(
-            extended(SavedFile::PNG, "view.darkroom"),
-            PathBuf::from("view.png"),
-            "another kind's extension is replaced"
-        );
-        assert_eq!(
-            extended(SavedFile::PNG, "view.PNG"),
-            PathBuf::from("view.PNG")
-        );
-
-        let project = SavedFile::project(DocumentFormat::Ron);
-        let dir = TempDir::new("darkroom-save-target");
-        let bare = dir.join("scene");
-        let extended = dir.join("scene.darkroom");
-        assert_eq!(
-            project.unconfirmed_target(&bare),
-            None,
-            "nothing to replace yet"
-        );
-
-        fs::write(&extended, b"x").unwrap();
-        assert_eq!(project.unconfirmed_target(&bare), Some(extended.clone()));
-        assert_eq!(
-            SavedFile::PNG.unconfirmed_target(&bare),
-            None,
-            "another kind's file is not the one a save replaces"
-        );
-        assert_eq!(
-            project.unconfirmed_target(&extended),
-            None,
-            "the dialog confirmed this file itself"
-        );
-        assert_eq!(
-            project.unconfirmed_target(&dir.join("scene.DARKROOM")),
-            None,
-            "the extension matches without regard to case, so nothing is appended"
-        );
-    }
-
-    #[test]
-    fn file_selection_is_sorted_deduplicated_and_nonempty() {
-        assert_eq!(normalize_file_selection(Vec::new()), None);
-        assert_eq!(
-            normalize_file_selection(vec![
-                PathBuf::from("b.fit"),
-                PathBuf::from("a.fit"),
-                PathBuf::from("b.fit"),
-            ]),
-            Some(vec![PathBuf::from("a.fit"), PathBuf::from("b.fit")])
-        );
-    }
-
-    /// Queued answers go to the asks in order, each of its own shape and absolute, as a native
-    /// dialog's are: a relative one is taken against the working directory. The project save adds
-    /// the extension, as the native one does, and so does a new file of one extension; the file
-    /// list comes back sorted and once each. A
-    /// cancel, an answer of the other shape, and an ask past the last answer all read as `None`,
-    /// the last one from the refusing fallback; an answer queued after that goes to the next ask.
-    #[test]
-    fn queued_answers_go_to_the_asks_in_order_before_the_fallback() {
-        // As a native dialog answers: absolute, so `/p` on Windows takes the working drive.
-        let abs = |path: &str| path::absolute(path).unwrap();
-        let mut dialogs = Dialogs::new(DialogFallback::Refuse);
-        for answer in [
-            DialogAnswer::Path(PathBuf::from("/p/scene.darkroom")),
-            DialogAnswer::Path(PathBuf::from("/p/copy")),
-            DialogAnswer::Paths(vec![PathBuf::from("/d/b.fit"), PathBuf::from("/d/a.fit")]),
-            DialogAnswer::Cancel,
-            DialogAnswer::Paths(vec![PathBuf::from("/d/c.fit")]),
-            DialogAnswer::Path(PathBuf::from("/d")),
-            DialogAnswer::Path(PathBuf::from("inputs/x.fit")),
-            DialogAnswer::Path(PathBuf::from("/o/out")),
-            DialogAnswer::Path(PathBuf::from("/o/out")),
-        ] {
-            dialogs.queue(answer);
-        }
-        assert_eq!(
-            dialogs.project_open_path(None),
-            Some(abs("/p/scene.darkroom"))
-        );
-        assert_eq!(
-            dialogs.save_path(SavedFile::project(DocumentFormat::Ron), None),
-            Some(abs("/p/copy.darkroom"))
-        );
-        assert_eq!(
-            dialogs.existing_files(&["fit"]),
-            Some(vec![abs("/d/a.fit"), abs("/d/b.fit")])
-        );
-        assert_eq!(dialogs.new_file(&[]), None, "cancelled");
-        assert_eq!(
-            dialogs.existing_file(&["fit"]),
-            None,
-            "a list for a one-file ask"
-        );
-        assert_eq!(dialogs.dir(), Some(abs("/d")));
-        let relative = dialogs.existing_file(&["fit"]).unwrap();
-        assert!(relative.is_absolute(), "{}", relative.display());
-        assert_eq!(
-            relative,
-            abs("inputs/x.fit"),
-            "taken against the working directory"
-        );
-        assert_eq!(
-            dialogs.new_file(&["png"]),
-            Some(abs("/o/out.png")),
-            "one extension is added"
-        );
-        assert_eq!(
-            dialogs.new_file(&["png", "tiff"]),
-            Some(abs("/o/out")),
-            "of several none is the name's"
-        );
-        assert_eq!(dialogs.dir(), None, "no answer left");
-        assert_eq!(dialogs.existing_files(&[]), None, "no answer left");
-
-        dialogs.queue(DialogAnswer::Path(PathBuf::from("/q")));
-        assert_eq!(dialogs.dir(), Some(abs("/q")), "a later answer wins again");
-    }
-}
+mod tests;

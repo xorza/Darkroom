@@ -6,6 +6,7 @@
 //! open document, the runtime, the preferences and the dialogs, so it belongs
 //! to the owner of all of them rather than to the command.
 
+use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -58,8 +59,8 @@ pub(crate) enum FileCommand {
     SaveAs,
 }
 
-/// What the window shows: an image of it as the next frame paints it, and where the graph's
-/// camera looks.
+/// What the window shows: an image of it as the next frame paints it, where the graph's camera
+/// looks, and the full-resolution image a viewer draws.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum ViewCommand {
     /// Put the image on the clipboard.
@@ -69,6 +70,16 @@ pub(crate) enum ViewCommand {
     /// Frame the graph as the canvas toolbar's button does, from a surface outside the canvas.
     /// The canvas raises the camera move in its next prepass, over that frame's selection.
     Frame(Framing),
+    /// Convert `node_id`'s stored image at full resolution, its longest edge capped to `max_dim`,
+    /// as [`PreviewStore::convert_full`] does: a viewer raises it for an image it found
+    /// [`FullView::Unasked`].
+    ///
+    /// [`PreviewStore::convert_full`]: crate::gui::state::preview_store::PreviewStore::convert_full
+    /// [`FullView::Unasked`]: crate::gui::state::preview_store::FullView::Unasked
+    ConvertFull {
+        node_id: NodeId,
+        max_dim: Option<NonZeroU32>,
+    },
 }
 
 /// Graph execution + the worker event loop. Commands only request work;

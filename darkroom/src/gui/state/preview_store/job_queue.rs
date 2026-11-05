@@ -9,8 +9,7 @@ use std::sync::{Arc, Condvar, Mutex};
 
 use crate::gui::state::preview_store::preview_converter::{Job, Work};
 
-/// Where jobs are queued: the store's, and a clone in each stored image. The converter thread's
-/// [`Inbox`] ends once the last is dropped.
+/// Where the store queues jobs. The converter thread's [`Inbox`] ends once it is dropped.
 pub(super) struct Jobs(Arc<Shared>);
 
 /// The converter thread's end of the queue.
@@ -24,8 +23,8 @@ struct Shared {
 #[derive(Default)]
 struct Queue {
     jobs: VecDeque<Job>,
-    /// The [`Jobs`] alive, whose last drop ends the [`Inbox`].
-    senders: usize,
+    /// Whether the [`Jobs`] is dropped, which ends the [`Inbox`].
+    closed: bool,
     /// Whether the [`Inbox`] is alive: it dies only with the thread, which panicked then.
     inbox: bool,
 }
@@ -34,7 +33,6 @@ struct Queue {
 pub(super) fn queue() -> (Jobs, Inbox) {
     let shared = Arc::new(Shared {
         queue: Mutex::new(Queue {
-            senders: 1,
             inbox: true,
             ..Queue::default()
         }),
@@ -68,34 +66,24 @@ impl Jobs {
     }
 }
 
-impl Clone for Jobs {
-    fn clone(&self) -> Self {
-        self.0.queue.lock_unpoisoned().senders += 1;
-        Self(Arc::clone(&self.0))
-    }
-}
-
 impl Drop for Jobs {
     fn drop(&mut self) {
-        let mut queue = self.0.queue.lock_unpoisoned();
-        queue.senders -= 1;
-        if queue.senders == 0 {
-            self.0.ready.notify_one();
-        }
+        self.0.queue.lock_unpoisoned().closed = true;
+        self.0.ready.notify_one();
     }
 }
 
 impl Iterator for Inbox {
     type Item = Job;
 
-    /// The next job, waiting for one; `None` once every [`Jobs`] is dropped and none waits.
+    /// The next job, waiting for one; `None` once the [`Jobs`] is dropped and none waits.
     fn next(&mut self) -> Option<Job> {
         let mut queue = self.0.queue.lock_unpoisoned();
         loop {
             if let Some(job) = queue.jobs.pop_front() {
                 return Some(job);
             }
-            if queue.senders == 0 {
+            if queue.closed {
                 return None;
             }
             queue = self.0.ready.wait_unpoisoned(queue);
@@ -143,9 +131,9 @@ mod tests {
 
     /// A node's second card conversion replaces its first where it waits, and another node's and
     /// a full raster's queue behind it; the inbox hands them out in that order, and ends once the
-    /// last sender is dropped and nothing waits.
+    /// sender is dropped and nothing waits.
     #[test]
-    fn a_newer_card_replaces_the_one_waiting_and_the_inbox_ends_with_its_senders() {
+    fn a_newer_card_replaces_the_one_waiting_and_the_inbox_ends_with_its_sender() {
         let (a, b) = (NodeId::unique(), NodeId::unique());
         let tickets: Vec<Ticket> = (0..4)
             .scan(Ticket::default(), |ticket, _| {
@@ -155,10 +143,9 @@ mod tests {
             .collect();
         let thumbnail = |value: i64| Work::Thumbnail(DynamicValue::from(value));
         let (jobs, inbox) = queue();
-        let image = jobs.clone();
         jobs.send(job(a, tickets[0], thumbnail(1)));
         jobs.send(job(b, tickets[1], thumbnail(2)));
-        image.send(job(
+        jobs.send(job(
             a,
             tickets[2],
             Work::Full {
@@ -167,7 +154,7 @@ mod tests {
             },
         ));
         jobs.send(job(a, tickets[3], thumbnail(4)));
-        drop((jobs, image));
+        drop(jobs);
 
         let order: Vec<(NodeId, Ticket, String)> = inbox
             .map(|job| {

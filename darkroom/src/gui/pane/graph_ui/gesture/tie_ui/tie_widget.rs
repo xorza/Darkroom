@@ -2,7 +2,7 @@
 //! size of the band and its head; a selected one records its knob too. A hover lights the tie's
 //! wires, a press selects it and starts the group drag, and the knob's drag turns the band.
 
-use std::sync::Arc;
+use std::rc::Rc;
 
 use glam::Vec2;
 use palantir::{Configure, Modifiers, Panel, Sense, Sizing, Ui};
@@ -217,7 +217,7 @@ fn grab(draw_ctx: DrawCtx<'_>, tie: TieId, out: &mut Requests) -> Grab {
             graph_ctx.selected(),
             item,
         ));
-        Arc::from([DragStart {
+        Rc::from([DragStart {
             item,
             pos: graph_ctx.view().ties[&tie].pos,
         }])
