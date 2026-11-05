@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use common::{TempDir, fs};
 use glam::{UVec2, Vec2};
+use palantir::Action as PalantirAction;
 use palantir::{LocateError, PointerButton, Rect, ShortcutMods, SystemScale};
 use scenarium::{Binding, ConstValue, InputPort, NodeId};
 use tracing::{callsite, subscriber};
@@ -10,7 +11,7 @@ use tracing_subscriber::layer::SubscriberExt as _;
 
 use crate::core::io::document as io_document;
 use crate::core::io::document::saved_paths::SavedPaths;
-use crate::driver::action::{Action, DRAG_STEPS, Play};
+use crate::driver::action::{Action, Play};
 use crate::driver::error::{ActFailure, DriverError};
 use crate::driver::locator::{EditorTarget, Locator, Side};
 use crate::driver::log_ring::LogRing;
@@ -85,7 +86,7 @@ fn drag(from: Locator, to: Locator) -> Action {
         to,
         button: PointerButton::Left,
         mods: ShortcutMods::NONE,
-        steps: DRAG_STEPS,
+        steps: PalantirAction::DRAG_STEPS,
     })
 }
 

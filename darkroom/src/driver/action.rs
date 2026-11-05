@@ -7,9 +7,6 @@ use crate::gui::dialogs::DialogAnswer;
 /// One step of input, over the editor's places as well as palantir's.
 pub type Play = palantir::Action<EditorTarget>;
 
-/// Pointer moves a drag takes from its start to its end when the call names none.
-pub const DRAG_STEPS: u32 = palantir::Action::DRAG_STEPS;
-
 /// One step the driver plays. It runs frames until the editor settles after each.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {

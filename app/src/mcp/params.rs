@@ -5,12 +5,13 @@ use std::path::PathBuf;
 
 use darkroom::DialogAnswer;
 use darkroom::driver::OpenMode;
-use darkroom::driver::action::{Action, DRAG_STEPS, Play};
+use darkroom::driver::action::{Action, Play};
 use darkroom::driver::error::DriverError;
 use darkroom::driver::locator::{EditorTarget, Locator, Side};
 use darkroom::driver::shot::Region;
 use darkroom::driver::state::Detail;
 use glam::Vec2;
+use palantir::Action as PalantirAction;
 use palantir::{PointerButton, Rect, Shortcut, ShortcutMods, ZoomFactor};
 use rmcp::schemars::JsonSchema;
 use serde::Deserialize;
@@ -264,7 +265,7 @@ impl TryFrom<ActionParam> for Action {
                 to: to.into(),
                 button: button.into(),
                 mods: modifiers(&mods),
-                steps: steps.unwrap_or(DRAG_STEPS),
+                steps: steps.unwrap_or(PalantirAction::DRAG_STEPS),
             }),
             ActionParam::Scroll { at, delta } => play(Play::ScrollPixels {
                 at: at.into(),
