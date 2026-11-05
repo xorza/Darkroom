@@ -54,7 +54,7 @@ fn apply(c: &mut Criterion) {
 /// flat, the defects detected and the flat prepared.
 pub(crate) fn integration(c: &mut Criterion) {
     let cfa_type = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
-    // The bench's median iteration on a AMD CPU, x86-64-v3.
+    // The bench's median iteration on a mobile AMD CPU, x86-64-v3.
     let iteration = Duration::from_millis(6620);
     let mut group = Kind::Integration.group(c, "pipeline/masters", Scale::Slow { iteration });
     group.throughput(Throughput::Elements(

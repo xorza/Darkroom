@@ -22,7 +22,7 @@ use crate::interleaved::interleaved_image::InterleavedImage;
 use crate::ops::affine_warp::cpu::BilinearKernel;
 use crate::ops::affine_warp::{AffineWarp, FilterMode, cpu};
 
-/// The slowest GPU case's iteration as measured on a Radeon mobile AMD iGPU (bilinear RGBA f32, 326 ms):
+/// The slowest GPU case's iteration as measured on a mobile AMD iGPU (bilinear RGBA f32, 326 ms):
 /// the round trip copies the frame to the device and back.
 #[cfg(feature = "wgpu")]
 const GPU_ITERATION: Duration = Duration::from_millis(330);

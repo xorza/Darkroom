@@ -24,7 +24,7 @@ use crate::ops::blend::{Blend, BlendMode, cpu};
 /// A partial mix, so neither layer passes through unchanged.
 const ALPHA: f32 = 0.5;
 
-/// The slowest GPU case's iteration as measured on a Radeon mobile AMD iGPU (RGBA f32, 468 ms): the round
+/// The slowest GPU case's iteration as measured on a mobile AMD iGPU (RGBA f32, 468 ms): the round
 /// trip copies the frame to the device and back.
 #[cfg(feature = "wgpu")]
 const GPU_ITERATION: Duration = Duration::from_millis(470);

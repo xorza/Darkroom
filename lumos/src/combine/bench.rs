@@ -48,7 +48,7 @@ fn set(c: &mut Criterion) {
     let lights = OnceCell::new();
     let lights = || lights.get_or_init(|| Lights::of(field));
     let set = format!("{STACKED_LIGHTS}x{}", field.name());
-    // The slowest bench's iteration, `light_preset/spilled_cold`'s median on a AMD CPU,
+    // The slowest bench's iteration, `light_preset/spilled_cold`'s median on a mobile AMD CPU,
     // x86-64-v3.
     let iteration = Duration::from_millis(2550);
     let mut group = Kind::Integration.group(c, "combine", Scale::Slow { iteration });

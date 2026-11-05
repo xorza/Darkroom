@@ -7,10 +7,10 @@ centroid, background mesh, demosaic, wavelet, stretch, warp). Branch `perf-simd`
 
 ## Hosts
 
-- **x86**: AMD CPU (Zen 3+), 8 cores, 27 GiB. Atomic cases pinned to CPU 2 with
-  `taskset`; integration cases on every core.
-- **Mac**: Apple laptop (4 P + 4 E cores), 8 GiB, fanless, macOS: no core pinning; runs drift by a
-  few percent with temperature, so a Mac verdict needs three rounds.
+- **x86**: a mobile AMD CPU. Atomic cases pinned to one core with `taskset`; integration cases on
+  every core.
+- **Mac**: a fanless Apple laptop, macOS: no core pinning; runs drift by a few percent with
+  temperature, so a Mac verdict needs three rounds.
 
 ## Build RAM peaks
 

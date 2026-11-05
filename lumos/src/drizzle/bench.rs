@@ -40,7 +40,7 @@ pub(crate) fn integration(c: &mut Criterion) {
 fn stage(c: &mut Criterion) {
     let field = Field::Typical;
     let frames = OnceCell::new();
-    // The bench's median iteration on a AMD CPU, x86-64-v3.
+    // The bench's median iteration on a mobile AMD CPU, x86-64-v3.
     let iteration = Duration::from_millis(7200);
     let mut group = Kind::Integration.group(c, "drizzle", Scale::Slow { iteration });
     group.throughput(Throughput::Elements(
@@ -79,7 +79,7 @@ fn stage(c: &mut Criterion) {
 fn end_to_end(c: &mut Criterion) {
     let field = Field::Typical;
     let cfa_type = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
-    // The bench's median iteration on a AMD CPU, x86-64-v3.
+    // The bench's median iteration on a mobile AMD CPU, x86-64-v3.
     let iteration = Duration::from_millis(64_730);
     let mut group = Kind::Integration.group(c, "pipeline/drizzle", Scale::Slow { iteration });
     group.throughput(Throughput::Elements((LIGHTS * FRAME.pixel_count()) as u64));

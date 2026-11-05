@@ -40,7 +40,7 @@ const BORDER: usize = 4;
 pub(super) const INTERPOLATED_BORDER: usize = 10;
 
 /// The side of a tile, where its phase planes stay in a core's cache, and even, so that every
-/// tile starts on the frame's phase. On a AMD CPU (512 KiB of L2 per core), built for plain
+/// tile starts on the frame's phase. On a mobile AMD CPU (512 KiB of L2 per core), built for plain
 /// x86-64, a 24 MP frame demosaics in 66 ms with tiles of 128, against 66 ms at 96, 65 ms at 112,
 /// 67 ms at 144, 69 ms at 160, 77 ms at 192 and 105 ms at 256.
 const TILE: usize = 128;

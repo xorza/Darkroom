@@ -39,7 +39,7 @@ use crate::image::cfa::xtrans_pattern::XTransPattern;
 use crate::memory::footprint::Footprint;
 use common::USize2;
 
-/// The side of a tile, where its buffers stay in a core's cache. On a AMD CPU (512 KiB of L2
+/// The side of a tile, where its buffers stay in a core's cache. On a mobile AMD CPU (512 KiB of L2
 /// per core) a 26 MP frame demosaics in 245 ms at one pass and 703 ms at three with tiles of 96,
 /// against 251 and 866 ms at librtprocess's 114 and 431 and 1152 ms at 144; below 84 the overlap
 /// each tile computes again costs more than the cache saves.

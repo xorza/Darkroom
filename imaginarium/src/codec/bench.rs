@@ -105,7 +105,7 @@ const fn extension(file: RasterFormat) -> &'static str {
 }
 
 /// The sampling of a file format's cases, from the slowest iteration of its saves and reads as
-/// measured on a AMD CPU: PNG 468 ms (RGBA u16), JPEG 336 ms (RGB u8), TIFF 201 ms.
+/// measured on a mobile AMD CPU: PNG 468 ms (RGBA u16), JPEG 336 ms (RGB u8), TIFF 201 ms.
 const fn scale(file: RasterFormat) -> Scale {
     match file {
         RasterFormat::Png => Scale::Slow {

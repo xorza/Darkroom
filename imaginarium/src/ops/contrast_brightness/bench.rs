@@ -23,7 +23,7 @@ use crate::ops::contrast_brightness::{ContrastBrightness, cpu};
 /// `v * contrast + offset` the kernels evaluate has a nonzero offset.
 const OP: ContrastBrightness = ContrastBrightness::new(1.2, 0.05);
 
-/// The slowest GPU case's iteration as measured on a Radeon mobile AMD iGPU (RGBA f32, 315 ms): the round
+/// The slowest GPU case's iteration as measured on a mobile AMD iGPU (RGBA f32, 315 ms): the round
 /// trip copies the frame to the device and back.
 #[cfg(feature = "wgpu")]
 const GPU_ITERATION: Duration = Duration::from_millis(320);

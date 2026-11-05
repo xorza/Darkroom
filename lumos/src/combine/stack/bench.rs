@@ -15,7 +15,7 @@ use crate::progress::progress_monitor::ProgressMonitor;
 
 pub(crate) fn integration(c: &mut Criterion) {
     let field = Field::Typical;
-    // The bench's median iteration on a AMD CPU, x86-64-v3.
+    // The bench's median iteration on a mobile AMD CPU, x86-64-v3.
     let iteration = Duration::from_millis(2110);
     let mut group = Kind::Integration.group(c, "pipeline/stack", Scale::Slow { iteration });
     group.throughput(Throughput::Elements((LIGHTS * FRAME.pixel_count()) as u64));

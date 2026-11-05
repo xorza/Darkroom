@@ -51,7 +51,7 @@ impl Isa for Avx2Fma {
     type U16 = Avx2U16;
     type I32 = Avx2I32;
 
-    /// Measured 0.64–0.70 of `vdivps` on the conversions to `f32` on Zen 3, where the divide is
+    /// Measured 0.64–0.70 of `vdivps` on the conversions to `f32` on a mobile AMD CPU, where the divide is
     /// the bottleneck; on NEON the divide is the faster.
     #[inline(always)]
     fn div_full_scale(self, values: Avx2F32, scale: FullScale) -> Avx2F32 {

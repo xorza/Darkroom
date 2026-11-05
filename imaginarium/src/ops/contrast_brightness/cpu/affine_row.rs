@@ -92,7 +92,7 @@ impl Kernel for AffineRow<'_, f32> {
 /// The affine's constants, lane by lane, set once per row. An alpha lane takes `x · 1 + (−0)`,
 /// which keeps every value as it is, a signed zero and a NaN included: a select of the input there
 /// would let the compiler turn the select and its store into a masked store, which measured six
-/// times slower on Zen 3.
+/// times slower on a mobile AMD CPU.
 #[derive(Debug, Clone, Copy)]
 struct Lanes<F: F32x8> {
     scale: F,

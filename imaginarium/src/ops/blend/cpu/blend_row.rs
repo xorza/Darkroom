@@ -6,7 +6,7 @@
 //! integer paths *divide* by the full scale, as [`Sample::to_unit`] does, where multiplying by
 //! the reciprocal would be cheaper but disagrees for 126 of the 256 byte values, and the alpha
 //! mix rounds its multiplies and its add apart. Refused: a `div_scale` on `F32x8`, exact and the
-//! faster quotient for a conversion, which measured 1.00–1.16× slower here on Zen 3: the blend
+//! faster quotient for a conversion, which measured 1.00–1.16× slower here on a mobile AMD CPU: the blend
 //! keeps the float pipes busy, and the divider runs beside them.
 
 use simd::{

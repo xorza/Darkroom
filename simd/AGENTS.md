@@ -38,7 +38,7 @@ that names a vector register. imaginarium and lumos build their kernels on it.
   the hardware paths load whole lanes and send a vector with a lane past either
   end lane by lane, which only an image's first and last pixels do. A `u16` or
   `f32` pixel pair is one load and a transpose: AVX2's gather a channel
-  measured no faster on Zen 3, and NEON has no gather.
+  measured no faster on a mobile AMD CPU, and NEON has no gather.
 - **A row's last partial group runs the kernel's own step**, from the row's
   last whole group, overlapping the one before, or padded in a row shorter
   than a group, into a scratch group whose new part is copied out; in place,

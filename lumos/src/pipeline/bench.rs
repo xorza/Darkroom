@@ -145,7 +145,7 @@ fn end_to_end(c: &mut Criterion) {
     let field = Field::Typical;
     let cfa_type = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
     let masters = OnceCell::new();
-    // The slowest bench's iteration, `rggb/spilled`'s median on a AMD CPU, x86-64-v3.
+    // The slowest bench's iteration, `rggb/spilled`'s median on a mobile AMD CPU, x86-64-v3.
     let iteration = Duration::from_millis(18_340);
     let mut group = Kind::Integration.group(
         c,
