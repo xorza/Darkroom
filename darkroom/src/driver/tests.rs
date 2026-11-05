@@ -188,13 +188,22 @@ fn clicks_drags_and_keys_edit_the_document() {
 }
 
 /// A world point resolves to the screen point where the canvas draws it: a node placed at its
-/// world position has its body's corner there.
+/// world position has its body's corner there, under a pan off the pixel grid too: a touchpad
+/// scroll of (−10.3, −20.3) pans by (10.3, 20.3), which the canvas draws landed at (10, 20) at 1×.
 #[test]
 fn a_world_point_lands_on_the_canvas_where_nodes_are_placed() {
     let mut driver = driver();
     let dir = TempDir::new("darkroom-driver-world");
     let path = fixture::project(dir.path(), &[BRIGHTNESS]);
     driver.open(&path, OpenMode::Copy).unwrap();
+    driver
+        .act(&[Action::Play(Play::ScrollPixels {
+            at: Locator::Point(Vec2::new(800.0, 500.0)),
+            delta: Vec2::new(-10.3, -20.3),
+        })])
+        .unwrap();
+    let pan = driver.app().open_document().document.main_view.viewport.pan;
+    assert_eq!(pan, Vec2::new(10.3, 20.3), "the stored pan stays exact");
     let pos = placed(&driver, BRIGHTNESS);
     let world = driver
         .offscreen()

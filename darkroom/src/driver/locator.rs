@@ -52,8 +52,14 @@ impl Locate<App> for EditorTarget {
                     .response_for(canvas::outer_wid())
                     .rect
                     .ok_or_else(|| LocateError::OffScreen { locator: locator() })?;
-                let viewport = app.open_document().document.main_view.viewport;
-                let at = canvas.min + viewport.pan + *point * viewport.zoom;
+                // The camera the canvas draws through, so a world point lands where it paints.
+                let camera = app
+                    .open_document()
+                    .document
+                    .main_view
+                    .viewport
+                    .landed(ui.display());
+                let at = canvas.min + camera.pan + *point * camera.zoom;
                 out.push(Found {
                     rect: Rect::new(at.x, at.y, 0.0, 0.0),
                     point: at,

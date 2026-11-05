@@ -50,7 +50,9 @@ impl CameraGesture {
     /// - **Pinch** (`Sense::PINCH`): zoom about the cursor, with the
     ///   `Response::pointer_local` pivot.
     pub(crate) fn prepass(&mut self, ui: &Ui, ctx: PrepassCtx<'_>, out: &mut Requests) {
-        let viewport = ctx.graph_ctx().viewport();
+        // The stored camera, not the landed one the canvas draws: the input folds onto the exact
+        // pan, so a zoom keeps its pivot under the pointer.
+        let viewport = ctx.graph_ctx().view().viewport;
         if ctx.cancelled()
             && let Some(back) = self.cancel_pan(viewport)
         {

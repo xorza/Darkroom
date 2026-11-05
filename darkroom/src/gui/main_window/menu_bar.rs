@@ -1,6 +1,6 @@
 use palantir::{
-    Align, Configure, DockOperation, MenuBar, MenuBarMenus, MenuItem, MenuSeparator, Panel, Sense,
-    Shortcut, Sizing, Text, Ui, VAlign, fmt,
+    Align, Configure, DockOperation, Grid, MenuBar, MenuBarMenus, MenuItem, MenuSeparator, Panel,
+    Sense, Shortcut, Sizing, Text, TextWrap, Track, Ui, VAlign, WidgetId, fmt,
 };
 use scenarium::NodeId;
 
@@ -14,20 +14,28 @@ use crate::gui::frame::window_ctx::WindowCtx;
 use crate::gui::pane::graph_ui::gesture::pan_zoom::Framing;
 use crate::gui::widgets::support;
 
-/// Top-of-window menu bar: palantir's [`MenuBar`] at the left, and the document's name at the
-/// center, with a dot while it has unsaved edits.
+/// Top-of-window menu bar: palantir's [`MenuBar`] at the left, and the document's name, with a
+/// dot while it has unsaved edits, centered on the window while the menus leave it room, pushed
+/// right against them where they do not, and cut in its middle where even that is too narrow.
+/// A grid of a fill, a hug and a fill track, CSS's `1fr auto 1fr`: the fill tracks split what
+/// is left evenly, and each keeps its content's floor, so the menus widen theirs and the name
+/// moves over. Refused: a name centered in the window over the menus, which it overlapped in a
+/// narrow window.
 ///
 /// A pick goes onto `out` in whichever tier it belongs to: graph edits as intents, the file
 /// lifecycle, the history, the run, the view and `Quit` as [`AppCommand`]s for `App` to run after
 /// the pass, Preferences as the [`DockOperation`] that opens its tab. Every item with a chord
 /// shows it, read from [`shortcuts`], the table its handler reads.
 pub(crate) fn show(ui: &mut Ui, ctx: WindowCtx<'_>, out: &mut Requests) {
-    Panel::zstack()
-        .id_salt("menu_bar")
+    Grid::new()
+        .id(bar_wid())
         .size((Sizing::FILL, Sizing::HUG))
+        .cols([Track::FILL, Track::HUG, Track::FILL])
+        .rows([Track::HUG])
         .show(ui, |ui| {
             MenuBar::new()
-                .id_salt("menu_bar_menus")
+                .id(menus_wid())
+                .grid_cell((0, 0))
                 .size((Sizing::HUG, Sizing::HUG))
                 .align(Align::LEFT)
                 .show(ui, |bar| {
@@ -163,7 +171,8 @@ fn document_name(ui: &mut Ui, ctx: WindowCtx<'_>) {
         .and_then(|path| path.file_name())
         .map_or_else(|| "Untitled".into(), |name| name.to_string_lossy());
     let row = Panel::hstack()
-        .id_salt("menu_bar_document")
+        .id(document_wid())
+        .grid_cell((0, 1))
         .size((Sizing::HUG, Sizing::HUG))
         .align(Align::CENTER)
         .gap(theme.space.sm)
@@ -174,7 +183,10 @@ fn document_name(ui: &mut Ui, ctx: WindowCtx<'_>) {
                 support::dot_cell(ui, "menu_bar_dirty", theme, theme.ink.muted);
             }
             let style = support::body_text(ui, theme);
-            Text::new(fmt!(ui, "{name}")).style(&style).show(ui);
+            Text::new(fmt!(ui, "{name}"))
+                .style(&style)
+                .text_wrap(TextWrap::EllipsisMiddle)
+                .show(ui);
         })
         .response;
     let folder = path
@@ -183,8 +195,23 @@ fn document_name(ui: &mut Ui, ctx: WindowCtx<'_>) {
     support::tooltip_after(ui, &row, folder);
 }
 
+fn bar_wid() -> WidgetId {
+    WidgetId::from_hash("darkroom.menu_bar")
+}
+
+fn menus_wid() -> WidgetId {
+    WidgetId::from_hash("darkroom.menu_bar.menus")
+}
+
+fn document_wid() -> WidgetId {
+    WidgetId::from_hash("darkroom.menu_bar.document")
+}
+
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
+    use glam::UVec2;
     use palantir::{InspectedWidget, Shortcut};
 
     use crate::core::document::internals::DocumentFixture;
@@ -193,6 +220,7 @@ mod tests {
     use crate::gui::app::session::internals::SessionHarness;
     use crate::gui::frame::app_command::{AppCommand, FileCommand, RunCommand, ViewCommand};
     use crate::gui::frame::shortcuts;
+    use crate::gui::main_window::menu_bar::{bar_wid, document_wid, menus_wid};
     use crate::gui::pane::graph_ui::gesture::pan_zoom::Framing;
 
     /// The visible widget whose text starts with `label`: a menu row's text is its label, then
@@ -282,5 +310,49 @@ mod tests {
         h.prime(2);
         assert!(!widget(&h, "Undo").disabled, "the selection is an entry");
         assert!(!widget(&h, "Delete").disabled, "one node selected");
+    }
+
+    /// The document's name centers on the window while the menus leave it room, moves right
+    /// against them where they do not, and is cut in its middle where even that is too narrow;
+    /// the menus stay at the left throughout. At 1200 px the name's center is the bar's; at 600
+    /// px the even split, (600 − name) / 2, is under the menus' width, so the name starts where
+    /// the menus end, at its full width; at 420 px it has less than that width past the menus,
+    /// so it is cut to fit there, centered in it, its last glyph's slack on both sides.
+    #[test]
+    fn the_name_centers_then_moves_past_the_menus_then_is_cut() {
+        let mut h = SessionHarness::new(DocumentFixture::probes(1));
+        h.session.open.path = Some(PathBuf::from(
+            "/tmp/a-document-name-long-enough-to-cut.darkroom",
+        ));
+        let mut at = |width: u32| {
+            h.ui.resize(UVec2::new(width, 800));
+            h.prime(2);
+            let rect = |wid| h.ui.rect(wid).expect("recorded");
+            [bar_wid(), menus_wid(), document_wid()].map(rect)
+        };
+
+        let [bar, menus, name] = at(1200);
+        let full = name.size.w;
+        assert_eq!(menus.min.x, bar.min.x);
+        assert_eq!(name.center().x, bar.center().x, "centered on the window");
+        assert!(name.min.x > menus.max().x, "clear of the menus");
+
+        let [bar, menus, name] = at(600);
+        assert!((bar.size.w - full) / 2.0 < menus.size.w);
+        assert!(menus.size.w + full <= bar.size.w);
+        assert_eq!(menus.min.x, bar.min.x);
+        assert_eq!(name.min.x, menus.max().x, "moved against the menus");
+        assert_eq!(name.size.w, full, "whole");
+
+        let [bar, menus, name] = at(420);
+        let left = bar.max().x - menus.max().x;
+        assert!(left < full);
+        assert_eq!(menus.min.x, bar.min.x);
+        assert!(name.size.w <= left, "cut to what is left: {}", name.size.w);
+        assert_eq!(
+            name.center().x,
+            f32::midpoint(menus.max().x, bar.max().x),
+            "centered in what is left"
+        );
     }
 }

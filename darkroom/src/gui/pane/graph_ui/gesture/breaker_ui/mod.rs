@@ -58,7 +58,7 @@ impl BreakerUi {
         };
         match self.stroke.step(ui, ctx, latch) {
             StrokeStep::Started(at) => self.scribble.restart(at),
-            StrokeStep::Moved(at) => self.scribble.add_point(at, ctx.graph_ctx().viewport().zoom),
+            StrokeStep::Moved(at) => self.scribble.add_point(at, ctx.graph_ctx().camera().zoom),
             StrokeStep::Released => release(&mut self.scribble, out),
             StrokeStep::Idle => {}
         }

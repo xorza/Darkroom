@@ -468,7 +468,7 @@ impl GraphUi {
             .rebuild(graph_ctx.view(), |wire| Span::of(geometry, wire));
         let ctx = CanvasCtx::new(PrepassCtx::new(graph_ctx, self.input), &self.geometry);
         let theme = ctx.theme();
-        let viewport = graph_ctx.viewport();
+        let viewport = graph_ctx.camera();
         // Effective selection to paint: the live rubber-band preview while
         // a band is in flight, else the committed set.
         // The preview is kept out of the document, so a band in flight

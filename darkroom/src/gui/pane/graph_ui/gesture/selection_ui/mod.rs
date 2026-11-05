@@ -114,7 +114,7 @@ impl SelectionUi {
         {
             // The band opens where the press went down, not where the drag latched past its
             // threshold, so the corner under the press is the band's.
-            let viewport = graph_ctx.viewport();
+            let viewport = graph_ctx.camera();
             let band = RubberBand {
                 start: viewport.to_world(p - travel),
                 cur: viewport.to_world(p),
@@ -141,7 +141,7 @@ impl SelectionUi {
             return;
         };
         if let Some(p) = resp.pointer_local {
-            band.cur = graph_ctx.viewport().to_world(p);
+            band.cur = graph_ctx.camera().to_world(p);
         }
         let rect = band.rect();
         // Swept into the reused preview buffer: refilled from scratch every

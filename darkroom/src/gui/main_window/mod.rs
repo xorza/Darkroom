@@ -106,7 +106,7 @@ impl MainWindow {
                 // Reached from `active_tabs`, so a pane is showing the graph
                 // by construction — which is what `GraphUi::prepass` asserts.
                 TabRef::Graph => {
-                    request_relayout |= graph_ui.prepass(ui, GraphCtx::new(ctx), out);
+                    request_relayout |= graph_ui.prepass(ui, GraphCtx::new(ctx, ui.display()), out);
                 }
                 // Neither derives a document mutation from input: preferences
                 // edits go through their own widgets, and a viewer only

@@ -94,7 +94,8 @@ impl DockTabs for DockPanes<'_> {
             TabRef::Graph => {
                 // The context carries everything the canvas reads — theme
                 // and run included, through the `ctx` it is composed from.
-                self.graph_ui.draw(ui, GraphCtx::new(ctx), self.out);
+                self.graph_ui
+                    .draw(ui, GraphCtx::new(ctx, ui.display()), self.out);
             }
             TabRef::Preferences => {
                 PreferencesForm {
@@ -104,7 +105,7 @@ impl DockTabs for DockPanes<'_> {
                 .show(ui, self.preferences);
             }
             TabRef::Inspector(target) => {
-                inspector::show(ui, GraphCtx::new(ctx), target, self.out);
+                inspector::show(ui, GraphCtx::new(ctx, ui.display()), target, self.out);
             }
             TabRef::ImageViewer(node_id) => {
                 let title = image_viewer::node_label(ctx.document(), node_id);

@@ -173,7 +173,7 @@ impl SubscriptionUi {
         let Some(state) = self.state.as_ref().copied() else {
             return;
         };
-        let pointer = canvas::world_pointer(ui, graph_ctx.viewport());
+        let pointer = canvas::world_pointer(ui, graph_ctx.camera());
         let (p0, p3) = match state {
             InFlight::FromEmitter(drag) => {
                 let Some(p0) = geometry.events.center(drag.from) else {
@@ -195,7 +195,7 @@ impl SubscriptionUi {
             }
         };
         let theme = graph_ctx.theme();
-        let width = theme.canvas.wire_at(graph_ctx.viewport().zoom);
+        let width = theme.canvas.wire_at(graph_ctx.camera().zoom);
         WirePaint::from(theme.port.event).stroke(ui, &Wire::event(p0, p3), width);
     }
 }

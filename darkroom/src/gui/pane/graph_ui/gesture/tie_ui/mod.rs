@@ -55,7 +55,7 @@ impl TieUi {
             Some(CanvasGesture::Tie(button)) => Some(button),
             _ => None,
         };
-        let zoom = ctx.graph_ctx().viewport().zoom;
+        let zoom = ctx.graph_ctx().camera().zoom;
         match self.stroke.step(ui, ctx, latch) {
             StrokeStep::Started(at) => self.line.restart(at, zoom),
             StrokeStep::Moved(at) => self.line.reach(at, zoom),

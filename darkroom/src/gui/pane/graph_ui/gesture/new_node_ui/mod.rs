@@ -105,7 +105,7 @@ impl NewNodeUi {
         let opening = if (pending_source.is_some() || ctx.gesture() == Some(CanvasGesture::NewNode))
             && let (Some(local), Some(rect)) = (resp.pointer_local, resp.rect)
         {
-            self.world_pos = graph_ctx.viewport().to_world(local);
+            self.world_pos = graph_ctx.camera().to_world(local);
             self.source = pending_source;
             self.menu.open_at(rect.min + local);
             // Fresh open: empty the filter, read the graph's own

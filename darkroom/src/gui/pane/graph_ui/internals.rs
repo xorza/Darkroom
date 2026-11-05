@@ -8,7 +8,7 @@
 
 use glam::{UVec2, Vec2};
 use palantir::Harness;
-use palantir::{Configure, DockOperation, Panel, Rect, Sizing, Ui, WidgetId};
+use palantir::{Configure, DockOperation, Panel, Rect, Sizing, SystemScale, Ui, WidgetId};
 use scenarium::NodeId;
 
 use crate::core::document::Document;
@@ -85,6 +85,15 @@ impl CanvasHarness {
         Self::over(Harness::builder(surface).mono().build(), fixture)
     }
 
+    /// [`SURFACE`], still mono, on a display at `scale`: for the tests about where the canvas
+    /// lands on physical pixels.
+    pub(crate) fn scaled(fixture: impl Into<DocumentFixture>, scale: SystemScale) -> Self {
+        Self::over(
+            Harness::builder(SURFACE).mono().system_scale(scale).build(),
+            fixture,
+        )
+    }
+
     /// Real text shaping: node headers and menu rows size to their labels, so
     /// mono metrics would put every one of them in the wrong place.
     pub(crate) fn shaping_text(fixture: impl Into<DocumentFixture>, surface: UVec2) -> Self {
@@ -146,7 +155,7 @@ impl CanvasHarness {
         } = self;
         let _ = ui.frame_value(|recorder: &mut Ui| {
             let mut out = Requests::default();
-            graph_ui.prepass(recorder, ctx.graph_ctx(), &mut out);
+            graph_ui.prepass(recorder, ctx.graph_ctx_on(recorder.display()), &mut out);
             let _ = ctx.open.drain_requests(out.document(), &ctx.library);
             draw(graph_ui, ctx, recorder, &mut out);
             out
@@ -275,7 +284,7 @@ impl CanvasHarness {
 /// The record body both frame drivers run.
 fn record(graph_ui: &mut GraphUi, ctx: &GraphCtxFixture, recorder: &mut Ui) -> Requests {
     let mut out = Requests::default();
-    graph_ui.prepass(recorder, ctx.graph_ctx(), &mut out);
+    graph_ui.prepass(recorder, ctx.graph_ctx_on(recorder.display()), &mut out);
     draw(graph_ui, ctx, recorder, &mut out);
     out
 }
@@ -286,6 +295,6 @@ fn draw(graph_ui: &mut GraphUi, ctx: &GraphCtxFixture, recorder: &mut Ui, out: &
         .id_salt("pane")
         .size(Sizing::FILL)
         .show(recorder, |ui| {
-            graph_ui.draw(ui, ctx.graph_ctx(), out);
+            graph_ui.draw(ui, ctx.graph_ctx_on(ui.display()), out);
         });
 }

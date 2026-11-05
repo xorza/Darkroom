@@ -1,6 +1,9 @@
+use palantir::SystemScale;
+
 use super::*;
 use crate::core::document::internals::DocumentFixture;
 use crate::gui::graph_ctx::internals::GraphCtxFixture;
+use crate::gui::pane::graph_ui::internals::CanvasHarness;
 
 #[test]
 fn node_bounds_uses_cached_sizes_and_falls_back_to_points() {
@@ -84,4 +87,51 @@ fn fit_target_centers_at_the_tighter_scale() {
             "{bounds:?} centered"
         );
     }
+}
+
+/// The canvas draws through the camera landed on the display, and keeps the stored one exact. At
+/// 2× a stored pan of (10.3, 20.3) draws at (10.5, 20.5): the probe at (40, 40) lands its body at
+/// the canvas's corner + (50.5, 60.5), on whole physical px, (101, 121) past it. The context the
+/// canvas reads hands that landed camera, and the document still holds (10.3, 20.3).
+#[test]
+fn the_canvas_draws_a_fractional_pan_on_whole_physical_px() {
+    let stored = Viewport {
+        pan: Vec2::new(10.3, 20.3),
+        zoom: 1.0,
+    };
+    let mut h = CanvasHarness::scaled(DocumentFixture::probes(1), SystemScale::new(2.0).unwrap());
+    let node = h.node(0);
+    assert_eq!(
+        h.document().main_view.node_placements[&node].pos,
+        Vec2::new(40.0, 40.0)
+    );
+    h.document_mut().main_view.viewport = stored;
+    h.prime(2);
+
+    let corner =
+        h.ui.rect(canvas::outer_wid())
+            .expect("the canvas shows")
+            .min;
+    let body = h.node_rect(node);
+    assert_eq!(body.min - corner, Vec2::new(50.5, 60.5));
+    assert_eq!((body.min - corner) * 2.0, Vec2::new(101.0, 121.0));
+    assert_eq!(
+        corner * 2.0,
+        (corner * 2.0).round(),
+        "the canvas starts on a pixel"
+    );
+
+    let display = h.ui.frame_value(|ui| ui.display());
+    assert_eq!(
+        h.ctx.graph_ctx_on(display).camera(),
+        Viewport {
+            pan: Vec2::new(10.5, 20.5),
+            zoom: 1.0,
+        }
+    );
+    assert_eq!(
+        h.document().main_view.viewport,
+        stored,
+        "the stored camera stays exact"
+    );
 }

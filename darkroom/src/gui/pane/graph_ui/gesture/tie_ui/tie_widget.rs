@@ -108,7 +108,7 @@ impl TieWidgets {
             AngleSnap::Free
         };
         if let Some(pointer) = ui.response_for(canvas::outer_wid()).pointer_local {
-            let offset = graph_ctx.viewport().to_world(pointer) - center;
+            let offset = graph_ctx.camera().to_world(pointer) - center;
             out.push_graph(turn(TieAngle::Pinned(knob_angle(offset, snap))));
         }
     }

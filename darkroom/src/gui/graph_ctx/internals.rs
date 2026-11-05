@@ -5,6 +5,7 @@
 //! this resolves them against — a test that needs no context at all stops
 //! there. Everything that records a canvas builds on this.
 
+use palantir::Display;
 use scenarium::{Library, NodeId};
 
 use crate::core::document::internals::{self, DocumentFixture};
@@ -72,10 +73,15 @@ impl GraphCtxFixture {
         internals::nth_in_paint_order(&self.open.document.main_view, i)
     }
 
-    /// The context over this fixture, derived from an [`AppCtx`] whose
-    /// status-bar inputs sit at their empty defaults — no canvas reader
-    /// sees them.
+    /// [`Self::graph_ctx_on`] the default display, 1× and snapping: for a test that reads the
+    /// context outside a frame.
     pub(crate) fn graph_ctx(&self) -> GraphCtx<'_> {
+        self.graph_ctx_on(Display::default())
+    }
+
+    /// The context over this fixture on `display`, derived from an [`AppCtx`] whose status-bar
+    /// inputs sit at their empty defaults — no canvas reader sees them.
+    pub(crate) fn graph_ctx_on(&self, display: Display) -> GraphCtx<'_> {
         let Self {
             open,
             library,
@@ -83,6 +89,6 @@ impl GraphCtxFixture {
             theme,
         } = self;
         let app = AppCtx::new(theme, library, run_state);
-        GraphCtx::new(WindowCtx::new(app, open))
+        GraphCtx::new(WindowCtx::new(app, open), display)
     }
 }

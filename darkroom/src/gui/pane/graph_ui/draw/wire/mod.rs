@@ -117,7 +117,7 @@ impl WirePass<'_, '_, '_> {
         let theme = self.draw_ctx.theme();
         theme
             .canvas
-            .wire_at(self.draw_ctx.graph_ctx().viewport().zoom)
+            .wire_at(self.draw_ctx.graph_ctx().camera().zoom)
     }
 
     /// Cull, breaker-probe, tier, and paint one committed wire, its `pieces`

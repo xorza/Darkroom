@@ -21,6 +21,7 @@ pub(crate) mod output_ctx;
 
 use std::collections::BTreeSet;
 
+use palantir::Display;
 use scenarium::{DataType, Graph, InputPort, Library, NodeId, OutputPort, Subscription};
 
 use crate::core::document::Document;
@@ -60,6 +61,8 @@ pub(crate) struct GraphCtx<'a> {
     /// Whether a pane is showing this graph, snapshot when the context was
     /// composed. See [`Self::is_visible`].
     is_visible: bool,
+    /// The document's camera as this frame's display draws it. See [`Self::camera`].
+    camera: Viewport,
 }
 
 impl<'a> GraphCtx<'a> {
@@ -70,10 +73,11 @@ impl<'a> GraphCtx<'a> {
     /// with no nodes on an active tab is a legitimate pane, and one that
     /// answered "no nodes, so no pane" would leave a fresh document with no
     /// canvas to place its first node on.
-    pub(crate) fn new(window: WindowCtx<'a>) -> Self {
+    pub(crate) fn new(window: WindowCtx<'a>, display: Display) -> Self {
         let document = window.document();
         Self {
             is_visible: document.shows_graph(),
+            camera: document.main_view.viewport.landed(display),
             window,
         }
     }
@@ -109,8 +113,11 @@ impl<'a> GraphCtx<'a> {
         &self.document().main_view
     }
 
-    pub(crate) const fn viewport(self) -> Viewport {
-        self.view().viewport
+    /// The camera the canvas draws and hit-tests through: the stored one
+    /// [landed](Viewport::landed) on this frame's display. Every reader of the canvas's space takes
+    /// this one; only the gesture that moves the camera reads the exact [`GraphView::viewport`].
+    pub(crate) const fn camera(self) -> Viewport {
+        self.camera
     }
 
     /// The palette and metrics every widget in this pane paints from.
