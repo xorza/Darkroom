@@ -1,4 +1,5 @@
 use super::*;
+use common::MutexExt;
 use common::fs;
 
 /// A disk-persisted node's output survives a fresh engine (reopen), its
@@ -317,7 +318,7 @@ async fn redefined_output_type_rekeys_and_recomputes() {
         });
         g.add("consume", move |n: NodeSpec| {
             n.sink().input(DataType::Any).observes(move |inputs| {
-                *received.lock().unwrap() = inputs[0].as_f64().unwrap_or(f64::NAN);
+                *received.lock_unpoisoned() = inputs[0].as_f64().unwrap_or(f64::NAN);
             })
         });
         g.wire("produce", "consume");
@@ -328,7 +329,7 @@ async fn redefined_output_type_rekeys_and_recomputes() {
     let mut e = TestEngine::over(build(false, &runs, &received)).with_disk_store(dir.path());
     e.run_sinks().await;
     assert_eq!(runs.count(), 1);
-    assert_eq!(*received.lock().unwrap(), 7.0);
+    assert_eq!(*received.lock_unpoisoned(), 7.0);
 
     // Run 2 (Float): the Float output re-keys produce's digest away from the
     // Int blob's key, so it isn't found — produce recomputes as Float.
@@ -340,7 +341,7 @@ async fn redefined_output_type_rekeys_and_recomputes() {
         "the Float output re-keys away from the stale Int blob, so produce recomputes"
     );
     assert_eq!(
-        *received.lock().unwrap(),
+        *received.lock_unpoisoned(),
         1.5,
         "consume receives the recomputed Float, never the stale Int"
     );

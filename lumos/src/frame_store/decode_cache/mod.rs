@@ -5,8 +5,9 @@ pub(crate) mod cached_source;
 pub(crate) mod frame_spill;
 pub(crate) mod kept_frame;
 
+use common::MutexExt;
 use std::path::Path;
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
 
 use crate::frame::admitted::Admitted;
 use crate::frame_store::decode_cache::cached_source::CachedSource;
@@ -87,7 +88,7 @@ impl DecodeCache {
     /// Write `gain` to its file, unless this run wrote it already.
     fn keep_gain(&self, spill: &FrameSpill<'_>, gain: &FlatGain) -> Result<(), FrameStoreError> {
         let key = gain.key();
-        let mut written = self.gains.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut written = self.gains.lock_unpoisoned();
         if written.contains(&key) {
             return Ok(());
         }

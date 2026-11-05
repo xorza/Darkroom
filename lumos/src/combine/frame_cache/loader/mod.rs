@@ -22,6 +22,7 @@ use crate::image::error::FrameDimensionMismatch;
 use crate::image::frame_desc;
 use crate::image::metadata::image_metadata::ImageMetadata;
 use crate::image::stackable_image::StackableImage;
+use crate::ingest::error::AdmissionError;
 use crate::ingest::frame_check::FrameCheck;
 use crate::ingest::frame_intake::{FrameIntake, IntakePlan};
 use crate::ingest::ingest_run::IngestRun;
@@ -51,7 +52,7 @@ impl LoadedCache {
     where
         D: Decoder,
         S: FrameStep<D::Image>,
-        E: From<StackError> + From<S::Error> + From<Cancelled> + Send,
+        E: From<StackError> + From<AdmissionError> + From<S::Error> + From<Cancelled> + Send,
     {
         let SteppedPaths { paths, step } = frames;
         debug_assert!(!paths.is_empty(), "`combine_cached` refuses an empty set");

@@ -22,7 +22,6 @@ use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::linear_image::LinearImage;
-use crate::ingest::error::AdmissionError;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::internals::cfa::make_cfa;
 use crate::internals::fits::write_fits;

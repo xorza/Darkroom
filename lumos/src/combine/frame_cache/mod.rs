@@ -49,6 +49,7 @@ use crate::image::linear_image::LinearImage;
 use crate::image::metadata::dark_comparison::DarkComparison;
 use crate::image::metadata::image_metadata::ImageMetadata;
 use crate::image::metadata::observation_header::ObservationHeader;
+use crate::ingest::error::AdmissionError;
 use crate::ingest::frame_check::FrameCheck;
 use crate::ingest::ingest_run::IngestRun;
 use crate::ingest::set_facts::SetFacts;
@@ -657,7 +658,7 @@ impl FrameCache {
     where
         P: AsRef<Path>,
         S: FrameStep<CfaImage>,
-        E: From<StackError> + From<S::Error> + From<Cancelled> + Send,
+        E: From<StackError> + From<AdmissionError> + From<S::Error> + From<Cancelled> + Send,
     {
         let paths: Vec<&Path> = frames.paths.iter().map(AsRef::as_ref).collect();
         let frames = SteppedPaths {

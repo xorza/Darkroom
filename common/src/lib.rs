@@ -72,6 +72,7 @@ mod error_chain;
 mod float_ext;
 mod id;
 mod introspect;
+mod mutex_ext;
 #[expect(unsafe_code, reason = "memory maps and the OS calls behind them")]
 mod platform;
 mod serde;
@@ -101,6 +102,7 @@ pub use introspect::{
     FieldDesc, FieldKind, FieldValue, FloatKind, IntegerKind, IntegerValue, Introspect,
     IntrospectEnum, IntrospectError, IntrospectFloat, IntrospectInteger,
 };
+pub use mutex_ext::{CondvarExt, MutexExt};
 pub use par::per_worker::PerWorker;
 #[cfg(feature = "internals")]
 pub use par::worker_pool::WorkerPool;

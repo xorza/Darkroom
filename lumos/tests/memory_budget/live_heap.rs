@@ -1,5 +1,7 @@
 //! [`LiveHeap`]: the bytes this binary's allocations hold, counted as the allocator serves them.
 
+use crate::alone::alone;
+use crate::session::Session;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
@@ -56,10 +58,14 @@ impl LiveHeap {
         self.peak.load(Ordering::Relaxed)
     }
 
-    /// Count the peak again from what the counted allocations hold now, which this returns.
+    /// Count the peak again from what the counted allocations hold now, which this returns. The
+    /// peak falls to the floor before `live` is read, and takes it by `fetch_max`: an allocation
+    /// of another thread after the fall raises the peak past it, where a store of `live` read
+    /// first would overwrite a higher peak set between the read and the store.
     pub(crate) fn restart_peak(&self) -> isize {
+        self.peak.store(isize::MIN, Ordering::Relaxed);
         let live = self.live_bytes();
-        self.peak.store(live, Ordering::Relaxed);
+        self.peak.fetch_max(live, Ordering::Relaxed);
         live
     }
 
@@ -106,8 +112,30 @@ unsafe impl GlobalAlloc for LiveHeap {
         unsafe { System.dealloc(pointer, layout) }
     }
 
+    /// The new block counts before the old one goes: a block that moves is copied while both are
+    /// held. A block that grows in place over-reads by the old size, which a peak may; it never
+    /// under-reads.
     unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, size: usize) -> *mut u8 {
-        self.resized(layout.size(), size);
+        self.resized(0, size);
+        self.resized(layout.size(), 0);
         unsafe { System.realloc(pointer, layout, size) }
     }
+}
+
+/// A block that grows counts both its blocks at its peak: 4096 B reserved, then grown to 8192 B,
+/// peaks at 4096 + 8192 = 12288 B, as a block that moves is copied while both are held, and keeps
+/// 8192 B. Counting the growth as one change would read a peak of 8192 B.
+#[test]
+fn a_growth_counts_the_old_block_beside_the_new() {
+    alone(|| {
+        let session = Session::on_workers("lumos_budget_live_heap_realloc", 1);
+        let measured = session.measure(|| {
+            let mut bytes: Vec<u8> = Vec::with_capacity(4096);
+            bytes.reserve_exact(8192);
+            bytes
+        });
+        assert_eq!(measured.value.capacity(), 8192);
+        assert_eq!(measured.peak_bytes, 12288);
+        assert_eq!(measured.kept_bytes, 8192);
+    });
 }

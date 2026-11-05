@@ -23,6 +23,7 @@ pub(super) mod per_worker;
 #[cfg(feature = "internals")]
 pub(super) mod worker_pool;
 
+use crate::mutex_ext::MutexExt;
 use std::ops::RangeBounds;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -199,8 +200,7 @@ where
         .collect();
     self::slots(cells.len(), slots, |slot, idx| {
         let item = cells[idx]
-            .lock()
-            .expect("no holder of this lock panicked")
+            .lock_unpoisoned()
             .take()
             .expect("each index is claimed by exactly one slot");
         job(slot, idx, item)

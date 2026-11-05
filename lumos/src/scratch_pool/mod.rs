@@ -11,11 +11,12 @@
 //! once are at most the bodies running. Scratch that lives for one call only, as the demosaic's
 //! tiles do, is a `common::PerWorker` made for the call instead.
 
+use common::MutexExt;
 use std::fmt::Debug;
 use std::mem;
 use std::mem::ManuallyDrop;
 use std::ops::{Deref, DerefMut};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 use common::Buffer2;
@@ -114,7 +115,7 @@ impl<T: Scratch> ScratchPool<T> {
     }
 
     pub(crate) fn shape(&self) -> T::Shape {
-        lock(&self.shelf).shape
+        self.shelf.lock_unpoisoned().shape
     }
 
     /// Serve `shape` from now on. A change drops every free value, and every value still leased is
@@ -125,7 +126,7 @@ impl<T: Scratch> ScratchPool<T> {
     )]
     pub(crate) fn reshape(&mut self, shape: T::Shape) {
         let stale = {
-            let mut shelf = lock(&self.shelf);
+            let mut shelf = self.shelf.lock_unpoisoned();
             if shelf.shape == shape {
                 return;
             }
@@ -142,14 +143,14 @@ impl<T: Scratch> ScratchPool<T> {
         reason = "only the pool's owner clears it, never a lease"
     )]
     pub(crate) fn clear(&mut self) {
-        let free = mem::take(&mut lock(&self.shelf).free);
+        let free = mem::take(&mut self.shelf.lock_unpoisoned().free);
         drop(free);
     }
 
     /// A free value fitted to the pool's shape, or a fresh one.
     pub(crate) fn acquire(&self) -> Pooled<T> {
         let (reused, shape, generation) = {
-            let mut shelf = lock(&self.shelf);
+            let mut shelf = self.shelf.lock_unpoisoned();
             (shelf.free.pop(), shelf.shape, shelf.generation)
         };
         let value = match reused {
@@ -205,26 +206,20 @@ impl<T: Scratch> Drop for Pooled<T> {
             );
             return;
         }
-        let mut shelf = lock(&self.shelf);
+        let mut shelf = self.shelf.lock_unpoisoned();
         if shelf.generation == self.generation {
             shelf.free.push(value);
         }
     }
 }
 
-/// The shelf, poisoned or not: every critical section on it is a push, a pop or a swap of plain
-/// fields, so no panic can leave it half-updated.
-fn lock<T: Scratch>(shelf: &Mutex<Shelf<T>>) -> MutexGuard<'_, Shelf<T>> {
-    shelf.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
 #[cfg(feature = "internals")]
 pub(crate) mod internals {
     use std::mem::ManuallyDrop;
 
-    #[cfg(test)]
-    use crate::scratch_pool;
     use crate::scratch_pool::{Pooled, Scratch, ScratchPool};
+    #[cfg(test)]
+    use common::MutexExt;
 
     impl<T: Scratch> Pooled<T> {
         /// `value` on lease from a pool of its own, for a fixture built outside any pool.
@@ -246,13 +241,13 @@ pub(crate) mod internals {
         /// How many values are free: once warm, the high-water mark of concurrent leases.
         #[cfg(test)]
         pub(crate) fn pooled(&self) -> usize {
-            scratch_pool::lock(&self.shelf).free.len()
+            self.shelf.lock_unpoisoned().free.len()
         }
 
         /// Whether every free value passes `predicate`.
         #[cfg(test)]
         pub(crate) fn all_free(&self, predicate: impl Fn(&T) -> bool) -> bool {
-            scratch_pool::lock(&self.shelf).free.iter().all(predicate)
+            self.shelf.lock_unpoisoned().free.iter().all(predicate)
         }
     }
 }

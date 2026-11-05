@@ -219,6 +219,17 @@ mod tests {
     use crate::internals::create_test_image;
     use crate::internals::gpu::test_gpu;
 
+    /// Raises its flag as it drops, so the poll thread stops however the read-back ends, a panic
+    /// included: `thread::scope` joins the thread before it passes the panic on, and would wait
+    /// for it for ever. `Relaxed`, as the flag publishes no other data.
+    struct StopOnDrop<'a>(&'a AtomicBool);
+
+    impl Drop for StopOnDrop<'_> {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Relaxed);
+        }
+    }
+
     /// Every format, at a width whose packed size is not a whole number of words, comes
     /// back byte for byte — through both readback paths and a buffer copy.
     #[test]
@@ -239,13 +250,13 @@ mod tests {
             let done = AtomicBool::new(false);
             let read_back = thread::scope(|scope| {
                 scope.spawn("gpu-poll", || {
-                    while !done.load(Ordering::Acquire) {
+                    while !done.load(Ordering::Relaxed) {
                         gpu.device.poll(wgpu::PollType::Poll).unwrap();
+                        std::thread::yield_now();
                     }
                 });
-                let read_back = pollster::block_on(copy.to_image_async(gpu)).unwrap();
-                done.store(true, Ordering::Release);
-                read_back
+                let _stop = StopOnDrop(&done);
+                pollster::block_on(copy.to_image_async(gpu)).unwrap()
             });
             assert_eq!(read_back.bytes(), image.bytes(), "{format}, async");
         }

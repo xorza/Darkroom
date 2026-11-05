@@ -1,8 +1,9 @@
 //! [`FileSet`]: a frame set's files as a run takes them, each read once.
 
+use common::MutexExt;
 use std::mem;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::Mutex;
 
 use crate::frame::admitted::Admitted;
 use crate::frame::frame_info::{DecoderBytes, FrameInfo};
@@ -240,7 +241,7 @@ impl<'a, P: AsRef<Path>, D: Decoder> FileSet<'a, P, D> {
             (info, Early::Decoded(image))
         };
         let held = early.held_bytes();
-        let mut first = lock(&self.first);
+        let mut first = self.first.lock_unpoisoned();
         debug_assert!(first.is_none(), "a plan peeks its set once");
         *first = Some(Box::new(First { idx, early }));
         Ok(SetPeek {
@@ -261,7 +262,7 @@ impl<'a, P: AsRef<Path>, D: Decoder> FileSet<'a, P, D> {
         let mut gains: Vec<KeptGain> = Vec::new();
         let mut bytes = 0;
         for probed in &kept.probes {
-            let probed = lock(probed);
+            let probed = probed.lock_unpoisoned();
             let Some(Committed { decoded, .. }) = probed.committed() else {
                 continue;
             };
@@ -361,7 +362,7 @@ impl<'a, P: AsRef<Path>, D: Decoder> FileSet<'a, P, D> {
 
     /// What the plan's read left of frame `idx`, taken.
     fn take_early(&self, idx: usize) -> Option<Early<D>> {
-        let mut first = lock(&self.first);
+        let mut first = self.first.lock_unpoisoned();
         if first.as_ref().is_some_and(|first| first.idx == idx) {
             first.take().map(|first| first.early)
         } else {
@@ -382,7 +383,7 @@ impl<'a, P: AsRef<Path>, D: Decoder> FileSet<'a, P, D> {
         ctx: &LoadCtx,
     ) -> Result<Probe, LoadError> {
         let read = early.is_some();
-        match mem::replace(&mut *lock(&kept.probes[idx]), Probed::Taken) {
+        match mem::replace(&mut *kept.probes[idx].lock_unpoisoned(), Probed::Taken) {
             Probed::Found(probe) if read || probe.source.is_current() => return Ok(*probe),
             Probed::Unread if read => {
                 return Err(FrameStoreError::SourceChanged {
@@ -412,7 +413,7 @@ fn probe<D: Decoder>(cache: &DecodeCache, path: &Path, ctx: &LoadCtx) -> Probed 
 /// What a plan reads off a frame the cache holds: its shape, pattern and gain as committed, and no
 /// decoder, as none runs.
 fn committed_info(probed: &Mutex<Probed>) -> FrameInfo {
-    let probed = lock(probed);
+    let probed = probed.lock_unpoisoned();
     let committed = probed
         .committed()
         .expect("a frame the cache holds was probed");
@@ -426,12 +427,6 @@ fn committed_info(probed: &Mutex<Probed>) -> FrameInfo {
             .gain
             .map_or(0, |gain| gain.bytes(desc.size())),
     }
-}
-
-/// `mutex` locked, poisoned or not: every critical section on it is a take or a store of plain
-/// fields, so no panic can leave it half-updated.
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 #[cfg(test)]

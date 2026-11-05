@@ -39,6 +39,20 @@ disallowed-types = [
 # A group's sampling is set through `common::bench::Scale`, the one policy every
 # crate's cases share; `Scale::apply` alone calls these.
 disallowed-methods = [
+    # A poisoned lock is a logic error (`AGENTS.md`, "A poisoned lock is a logic error"): every
+    # lock goes through `crate::sync`'s extension traits.
+    { path = "std::sync::Mutex::lock", reason = "lock through `crate::sync`, which panics on a poisoned lock" },
+    { path = "std::sync::Mutex::try_lock", reason = "lock through `crate::sync`, which panics on a poisoned lock" },
+    { path = "std::sync::Mutex::into_inner", reason = "lock through `crate::sync`, which panics on a poisoned lock" },
+    { path = "std::sync::Mutex::get_mut", reason = "lock through `crate::sync`, which panics on a poisoned lock" },
+    { path = "std::sync::RwLock::read", reason = "lock through `crate::sync`, which panics on a poisoned lock" },
+    { path = "std::sync::RwLock::write", reason = "lock through `crate::sync`, which panics on a poisoned lock" },
+    { path = "std::sync::RwLock::into_inner", reason = "lock through `crate::sync`, which panics on a poisoned lock" },
+    { path = "std::sync::RwLock::get_mut", reason = "lock through `crate::sync`, which panics on a poisoned lock" },
+    { path = "std::sync::Condvar::wait", reason = "lock through `crate::sync`, which panics on a poisoned lock" },
+    { path = "std::sync::Condvar::wait_while", reason = "lock through `crate::sync`, which panics on a poisoned lock" },
+    { path = "std::sync::Condvar::wait_timeout", reason = "lock through `crate::sync`, which panics on a poisoned lock" },
+    { path = "std::sync::Condvar::wait_timeout_while", reason = "lock through `crate::sync`, which panics on a poisoned lock" },
     { path = "criterion::BenchmarkGroup::sample_size", reason = "set a group's sampling through `common::bench::Scale`" },
     { path = "criterion::BenchmarkGroup::warm_up_time", reason = "set a group's sampling through `common::bench::Scale`" },
     { path = "criterion::BenchmarkGroup::measurement_time", reason = "set a group's sampling through `common::bench::Scale`" },

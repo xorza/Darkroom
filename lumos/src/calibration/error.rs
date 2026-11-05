@@ -10,6 +10,7 @@ use crate::frame::error::ConditionMismatch;
 use crate::image::cfa::cfa_color::CfaColor;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::metadata::sample_domain::SampleDomain;
+use crate::ingest::error::AdmissionError;
 use common::USize2;
 
 /// A calibration master does not describe the same measurement as the light it is applied to.
@@ -203,6 +204,13 @@ pub enum MasterStackError {
         role: MasterRole,
         source: ConditionMismatch,
     },
+}
+
+/// A frame the stack refused at admission, as the stack refuses it.
+impl From<AdmissionError> for MasterStackError {
+    fn from(error: AdmissionError) -> Self {
+        Self::Stack(error.into())
+    }
 }
 
 /// A cancelled stack.

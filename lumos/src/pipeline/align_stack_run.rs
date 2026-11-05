@@ -366,23 +366,20 @@ impl AlignStackRun<'_> {
         };
         intake.intake.complete_one();
 
-        // Every other light, the `k`th of them light `k`, or `k + 1` from the reference on.
-        let mut lights = intake
-            .intake
-            .map(0..count - 1, &mut workers, |worker, other| {
-                let idx = other + usize::from(other >= reference);
-                let Loaded {
-                    image, measured, ..
-                } = files.prepare(idx, intake.intake.ctx())?;
-                let DetectedLight { frame, diagnostics } =
-                    intake.detect(&mut worker.detector, idx, image, measured)?;
-                let parked = registrar.park(&mut worker.warped, idx, frame.resident())?;
-                intake.intake.complete_one();
-                Ok::<_, AlignStackError>(ParkedLight {
-                    parked,
-                    detection: diagnostics,
-                })
-            })?;
+        let others = (0..count).filter(|&idx| idx != reference);
+        let mut lights = intake.intake.map(others, &mut workers, |worker, idx| {
+            let Loaded {
+                image, measured, ..
+            } = files.prepare(idx, intake.intake.ctx())?;
+            let DetectedLight { frame, diagnostics } =
+                intake.detect(&mut worker.detector, idx, image, measured)?;
+            let parked = registrar.park(&mut worker.warped, idx, frame.resident())?;
+            intake.intake.complete_one();
+            Ok::<_, AlignStackError>(ParkedLight {
+                parked,
+                detection: diagnostics,
+            })
+        })?;
         lights.insert(reference, reference_light);
         // A worker's warp set is a warped frame's worth, its detector's pool the planes detection
         // holds, and the registrar's scratch a warp's flag planes: the combine sizes its chunks

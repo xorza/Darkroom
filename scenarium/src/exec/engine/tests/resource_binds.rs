@@ -1,4 +1,5 @@
 use super::*;
+use common::MutexExt;
 
 use std::sync::Mutex;
 
@@ -23,7 +24,7 @@ impl Observed {
         self.annotates.count()
     }
     fn captured(&self) -> String {
-        self.captured.lock().unwrap().clone()
+        self.captured.lock_unpoisoned().clone()
     }
 }
 
@@ -58,7 +59,7 @@ fn capture(observed: Observed) -> impl FnOnce(NodeSpec) -> NodeSpec {
     move |n: NodeSpec| {
         n.sink().input(DataType::Any).lambda(async_lambda!(
             move |Invocation { inputs, .. }| { captured = Arc::clone(&observed.captured) } => {
-                *captured.lock().unwrap() = inputs[0].as_string().unwrap_or_default().to_string();
+                *captured.lock_unpoisoned() = inputs[0].as_string().unwrap_or_default().to_string();
                 Ok(())
             }
         ))

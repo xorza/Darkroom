@@ -20,7 +20,6 @@ use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::metadata::bg_split::BgSplit;
-use crate::ingest::error::AdmissionError;
 use crate::internals::cfa::make_cfa;
 use crate::math::statistics;
 use crate::memory::budget::Budget;

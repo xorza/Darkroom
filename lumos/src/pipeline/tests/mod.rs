@@ -1,3 +1,4 @@
+use common::MutexExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -81,8 +82,7 @@ fn aligns_shifted_frames_into_a_sharp_stack() {
         let reports = Arc::clone(&reports);
         move |report: StackingProgress| {
             reports
-                .lock()
-                .unwrap()
+                .lock_unpoisoned()
                 .push((report.stage, report.cur, report.total));
         }
     });
@@ -146,7 +146,7 @@ fn aligns_shifted_frames_into_a_sharp_stack() {
 
     // The pipeline's own stages reach the callback, not just the combine's. Counters come off
     // shared atomics, so the reports arrive in any order — sort before comparing.
-    let reports = reports.lock().unwrap();
+    let reports = reports.lock_unpoisoned();
     // In arrival order: the parallel stages report through one counter, so the callback sees each
     // count once and in order, however the workers finish.
     let currents = |wanted: StackingStage| {
@@ -1005,8 +1005,7 @@ fn both_front_ends_report_the_same_stages() {
 
     let stages = |reports: &Mutex<Vec<(StackingStage, usize, usize)>>| {
         let mut seen: Vec<StackingStage> = reports
-            .lock()
-            .unwrap()
+            .lock_unpoisoned()
             .iter()
             .map(|(stage, ..)| *stage)
             .collect();
@@ -1020,8 +1019,7 @@ fn both_front_ends_report_the_same_stages() {
             let reports = Arc::clone(&reports);
             move |progress| {
                 reports
-                    .lock()
-                    .unwrap()
+                    .lock_unpoisoned()
                     .push((progress.stage, progress.cur, progress.total));
             }
         });
@@ -1088,8 +1086,7 @@ fn both_front_ends_report_the_same_stages() {
     two_pass.retain(|stage| *stage != StackingStage::Registering);
     assert_eq!(stages(&one_pass_reports), two_pass);
     let preparing: Vec<(usize, usize)> = one_pass_reports
-        .lock()
-        .unwrap()
+        .lock_unpoisoned()
         .iter()
         .filter(|(stage, ..)| *stage == StackingStage::Preparing)
         .map(|&(_, cur, total)| (cur, total))

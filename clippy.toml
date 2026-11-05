@@ -46,6 +46,20 @@ disallowed-types = [
 ]
 
 disallowed-methods = [
+    # A poisoned lock is a logic error (`AGENTS.md`, "A poisoned lock is a logic error"): every
+    # lock goes through `common::sync`'s extension traits.
+    { path = "std::sync::Mutex::lock", reason = "lock through `common::sync`, which panics on a poisoned lock" },
+    { path = "std::sync::Mutex::try_lock", reason = "lock through `common::sync`, which panics on a poisoned lock" },
+    { path = "std::sync::Mutex::into_inner", reason = "lock through `common::sync`, which panics on a poisoned lock" },
+    { path = "std::sync::Mutex::get_mut", reason = "lock through `common::sync`, which panics on a poisoned lock" },
+    { path = "std::sync::RwLock::read", reason = "lock through `common::sync`, which panics on a poisoned lock" },
+    { path = "std::sync::RwLock::write", reason = "lock through `common::sync`, which panics on a poisoned lock" },
+    { path = "std::sync::RwLock::into_inner", reason = "lock through `common::sync`, which panics on a poisoned lock" },
+    { path = "std::sync::RwLock::get_mut", reason = "lock through `common::sync`, which panics on a poisoned lock" },
+    { path = "std::sync::Condvar::wait", reason = "lock through `common::sync`, which panics on a poisoned lock" },
+    { path = "std::sync::Condvar::wait_while", reason = "lock through `common::sync`, which panics on a poisoned lock" },
+    { path = "std::sync::Condvar::wait_timeout", reason = "lock through `common::sync`, which panics on a poisoned lock" },
+    { path = "std::sync::Condvar::wait_timeout_while", reason = "lock through `common::sync`, which panics on a poisoned lock" },
     # I/O and thread creation go through `common`, which has its own `clippy.toml` without these.
     { path = "std::fs::read", reason = "go through `common::fs`, the one route to the file system" },
     { path = "std::fs::read_to_string", reason = "go through `common::fs`, the one route to the file system" },

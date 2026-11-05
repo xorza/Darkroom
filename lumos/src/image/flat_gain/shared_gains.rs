@@ -1,6 +1,7 @@
 //! [`SharedGains`]: the source gains a run's frames share, each held once.
 
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use common::MutexExt;
+use std::sync::{Arc, Mutex};
 
 use crate::image::flat_gain::FlatGain;
 use crate::image::flat_gain::gain_key::GainKey;
@@ -17,7 +18,8 @@ pub(crate) struct SharedGains {
 impl SharedGains {
     /// The gain of `key`, when the run holds it.
     pub(crate) fn get(&self, key: GainKey) -> Option<Arc<FlatGain>> {
-        self.lock()
+        self.held
+            .lock_unpoisoned()
             .iter()
             .find(|gain| gain.key() == key)
             .map(Arc::clone)
@@ -27,17 +29,12 @@ impl SharedGains {
     /// now on.
     pub(crate) fn share(&self, gain: FlatGain) -> Arc<FlatGain> {
         let key = gain.key();
-        let mut held = self.lock();
+        let mut held = self.held.lock_unpoisoned();
         if let Some(shared) = held.iter().find(|held| held.key() == key) {
             return Arc::clone(shared);
         }
         let shared = Arc::new(gain);
         held.push(Arc::clone(&shared));
         shared
-    }
-
-    /// The gains, poisoned or not: every critical section is a find or a push.
-    fn lock(&self) -> MutexGuard<'_, Vec<Arc<FlatGain>>> {
-        self.held.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }

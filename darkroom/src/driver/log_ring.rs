@@ -1,8 +1,9 @@
 //! [`LogRing`]: the warnings and errors the editor logs, kept for the driver to report.
 
+use common::MutexExt;
 use std::collections::VecDeque;
 use std::fmt;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use tracing::field::{Field, Visit};
 use tracing::{Event, Subscriber};
@@ -32,11 +33,7 @@ impl LogRing {
 
     /// The lines logged since the last call, oldest first.
     pub(crate) fn drain(&self) -> Vec<String> {
-        self.lines
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .drain(..)
-            .collect()
+        self.lines.lock_unpoisoned().drain(..).collect()
     }
 }
 
@@ -51,7 +48,7 @@ impl<S: Subscriber> Layer<S> for RingLayer {
         let mut message = Message::default();
         event.record(&mut message);
         let line = format!("{} {}: {}", metadata.level(), metadata.target(), message.0);
-        let mut lines = self.0.lines.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut lines = self.0.lines.lock_unpoisoned();
         if lines.len() == CAPACITY {
             lines.pop_front();
         }

@@ -87,6 +87,7 @@ pub(crate) mod internals {
 
 #[cfg(test)]
 mod tests {
+    use common::MutexExt;
     use std::path::Path;
     use std::sync::{Arc, Mutex};
 
@@ -111,7 +112,9 @@ mod tests {
         let reports = Arc::new(Mutex::new(Vec::new()));
         let progress = ProgressCallback::new({
             let reports = Arc::clone(&reports);
-            move |report| reports.lock().unwrap().push((report.cur, report.total))
+            move |report| {
+                reports.lock_unpoisoned().push((report.cur, report.total));
+            }
         });
         let cancel = CancelToken::new();
         let mut config = IngestConfig {
@@ -150,6 +153,6 @@ mod tests {
         let whole = run.into_monitor();
         assert!(whole.cancel.is_cancelled());
         whole.progress.report(1, 1, StackingStage::Combining);
-        assert_eq!(*reports.lock().unwrap(), [(1, 2), (2, 2), (1, 1)]);
+        assert_eq!(*reports.lock_unpoisoned(), [(1, 2), (2, 2), (1, 1)]);
     }
 }

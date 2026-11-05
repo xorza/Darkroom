@@ -1,6 +1,7 @@
 //! [`PerWorker`]: scratch a parallel loop's bodies take one worker's share of.
 
-use std::sync::{Mutex, MutexGuard, TryLockError};
+use crate::mutex_ext::MutexExt;
+use std::sync::{Mutex, MutexGuard};
 
 use crate::par;
 
@@ -60,10 +61,7 @@ impl<S> PerWorker<S> {
     pub fn get(&self) -> MutexGuard<'_, S> {
         let (outside, workers) = self.slots.split_last().expect("one slot outside the pool");
         let Some(idx) = rayon::current_thread_index() else {
-            return outside
-                .0
-                .lock()
-                .expect("no body that held the slot outside the pool panicked");
+            return outside.0.lock_unpoisoned();
         };
         let slot = workers.get(idx).unwrap_or_else(|| {
             panic!(
@@ -71,24 +69,18 @@ impl<S> PerWorker<S> {
                 workers.len()
             )
         });
-        match slot.0.try_lock() {
-            Ok(slot) => slot,
-            Err(TryLockError::WouldBlock) => {
-                panic!(
-                    "worker {idx}'s slot is taken: a guard held across parallel work, or slots \
-                     two pools share"
-                )
-            }
-            Err(TryLockError::Poisoned(_)) => {
-                panic!("a body that held worker {idx}'s slot panicked")
-            }
-        }
+        slot.0.try_lock_unpoisoned().unwrap_or_else(|| {
+            panic!(
+                "worker {idx}'s slot is taken: a guard held across parallel work, or slots two \
+                 pools share"
+            )
+        })
     }
 
     /// Every slot, for the owner to read or reset between runs.
     pub fn iter_mut(&mut self) -> impl ExactSizeIterator<Item = &mut S> {
         self.slots
             .iter_mut()
-            .map(|slot| slot.0.get_mut().expect("no body that held a slot panicked"))
+            .map(|slot| slot.0.get_mut_unpoisoned())
     }
 }

@@ -1,8 +1,9 @@
 //! ONNX-backed denoise and star-removal nodes.
 
+use common::MutexExt;
 use std::mem;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 
 use common::FileIdentity;
 use lumos::{MlDenoise, MlError, OnnxModel, RemoveStars};
@@ -37,7 +38,7 @@ fn register_denoise(library: &mut Library, model_path: &Path) {
                 let (output, kept) =
                     runtime::run_on_planes(mem::take(&mut inputs[0]), move |mut image| {
                         let kept = KeptModel::current(kept, path, denoise)?;
-                        let output = kept.lock().apply(&mut image, &cancel).map(|()| image);
+                        let output = kept.model.lock_unpoisoned().apply(&mut image, &cancel).map(|()| image);
                         Ok::<_, MlError>((output, kept))
                     })
                     .await?;
@@ -74,7 +75,7 @@ fn register_star_removal(library: &mut Library, model_path: &Path) {
                     let (result, kept) =
                         runtime::run_on_planes(mem::take(&mut inputs[0]), move |image| {
                             let kept = KeptModel::current(kept, path, star_removal)?;
-                            let result = kept.lock().split(image, &cancel);
+                            let result = kept.model.lock_unpoisoned().split(image, &cancel);
                             Ok::<_, MlError>((result, kept))
                         })
                         .await?;
@@ -88,7 +89,7 @@ fn register_star_removal(library: &mut Library, model_path: &Path) {
                         move |mut image| {
                             let kept = KeptModel::current(kept, path, star_removal)?;
                             let starless =
-                                kept.lock().apply(&mut image, &cancel).map(|()| image);
+                                kept.model.lock_unpoisoned().apply(&mut image, &cancel).map(|()| image);
                             Ok::<_, MlError>((starless, kept))
                         },
                     )
@@ -152,6 +153,7 @@ fn star_removal(path: &Path) -> Result<RemoveStars, MlError> {
 struct KeptModel<T> {
     path: PathBuf,
     identity: FileIdentity,
+    /// Locked for one run: a node runs one at a time, so nothing waits on it.
     model: Arc<Mutex<T>>,
 }
 
@@ -188,13 +190,6 @@ impl<T: Send + 'static> KeptModel<T> {
             model,
         })
     }
-
-    /// The model, for one run: a node runs one at a time, so nothing waits on it.
-    fn lock(&self) -> MutexGuard<'_, T> {
-        self.model
-            .lock()
-            .expect("a model's run that panicked ended the process")
-    }
 }
 
 #[cfg(test)]
@@ -206,6 +201,7 @@ mod tests {
     use scenarium::{AnyState, InvokeError};
 
     use crate::astro::nodes::ml::{KeptModel, invoke_error};
+    use common::MutexExt;
 
     /// A model's cancel reaches the executor as the run's cancel, and its other failures as the
     /// node's own.
@@ -238,7 +234,7 @@ mod tests {
         let run = |state: &mut AnyState| {
             let kept = KeptModel::<u32>::shared(state, &path);
             let kept = KeptModel::current(kept, path.clone(), load).unwrap();
-            let model = *kept.lock();
+            let model = *kept.model.lock_unpoisoned();
             state.set(kept);
             model
         };

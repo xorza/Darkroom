@@ -3,6 +3,7 @@ mod dark_scale;
 mod real_data;
 mod synthetic;
 
+use common::MutexExt;
 use std::convert::Infallible;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -2228,7 +2229,7 @@ fn the_builder_calibrates_the_flats_and_keeps_each_master() {
         }
 
         fn store(&self, key: Kept, _: &CfaImage) -> Result<(), Infallible> {
-            self.stored.lock().unwrap().push(key);
+            self.stored.lock_unpoisoned().push(key);
             Ok(())
         }
     }
@@ -2304,7 +2305,7 @@ fn the_builder_calibrates_the_flats_and_keeps_each_master() {
     assert_eq!(flat.data()[(0, 0)] / flat.data()[(3, 3)], 0.5);
     assert!(masters.dark.is_some(), "the held dark is in the set");
     assert_eq!(
-        *cache.stored.lock().unwrap(),
+        *cache.stored.lock_unpoisoned(),
         [
             Kept {
                 role: MasterRole::Bias,

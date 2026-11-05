@@ -2,9 +2,10 @@
 //! node, so a node that publishes faster than its values convert holds two values, the one
 //! converting and the newest.
 
+use common::{CondvarExt, MutexExt};
 use std::collections::VecDeque;
 use std::fmt;
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Condvar, Mutex};
 
 use crate::gui::state::preview_store::preview_converter::{Job, Work};
 
@@ -50,7 +51,7 @@ impl Jobs {
     ///
     /// When the converter thread panicked: a broken invariant, not a condition to carry on from.
     pub(super) fn send(&self, job: Job) {
-        let mut queue = self.0.lock();
+        let mut queue = self.0.queue.lock_unpoisoned();
         assert!(queue.inbox, "the preview converter thread panicked");
         let waiting = if matches!(job.work, Work::Thumbnail(_)) {
             queue.jobs.iter_mut().find(|waiting| {
@@ -69,14 +70,14 @@ impl Jobs {
 
 impl Clone for Jobs {
     fn clone(&self) -> Self {
-        self.0.lock().senders += 1;
+        self.0.queue.lock_unpoisoned().senders += 1;
         Self(Arc::clone(&self.0))
     }
 }
 
 impl Drop for Jobs {
     fn drop(&mut self) {
-        let mut queue = self.0.lock();
+        let mut queue = self.0.queue.lock_unpoisoned();
         queue.senders -= 1;
         if queue.senders == 0 {
             self.0.ready.notify_one();
@@ -89,7 +90,7 @@ impl Iterator for Inbox {
 
     /// The next job, waiting for one; `None` once every [`Jobs`] is dropped and none waits.
     fn next(&mut self) -> Option<Job> {
-        let mut queue = self.0.lock();
+        let mut queue = self.0.queue.lock_unpoisoned();
         loop {
             if let Some(job) = queue.jobs.pop_front() {
                 return Some(job);
@@ -97,31 +98,21 @@ impl Iterator for Inbox {
             if queue.senders == 0 {
                 return None;
             }
-            queue = self
-                .0
-                .ready
-                .wait(queue)
-                .unwrap_or_else(PoisonError::into_inner);
+            queue = self.0.ready.wait_unpoisoned(queue);
         }
     }
 }
 
 impl Drop for Inbox {
     fn drop(&mut self) {
-        self.0.lock().inbox = false;
-    }
-}
-
-impl Shared {
-    fn lock(&self) -> MutexGuard<'_, Queue> {
-        self.queue.lock().unwrap_or_else(PoisonError::into_inner)
+        self.0.queue.lock_unpoisoned().inbox = false;
     }
 }
 
 impl fmt::Debug for Jobs {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Jobs")
-            .field("waiting", &self.0.lock().jobs.len())
+            .field("waiting", &self.0.queue.lock_unpoisoned().jobs.len())
             .finish()
     }
 }
@@ -129,7 +120,7 @@ impl fmt::Debug for Jobs {
 impl fmt::Debug for Inbox {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Inbox")
-            .field("waiting", &self.0.lock().jobs.len())
+            .field("waiting", &self.0.queue.lock_unpoisoned().jobs.len())
             .finish()
     }
 }

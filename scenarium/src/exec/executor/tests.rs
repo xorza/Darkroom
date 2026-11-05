@@ -11,6 +11,7 @@ use crate::graph::func::lambda::{FuncLambda, internals};
 use crate::graph::identity::{FuncId, NodeId};
 use crate::graph::node::CacheMode;
 use crate::internals::program::ProgramBuilder;
+use common::MutexExt;
 
 fn producer() -> FuncLambda {
     async_lambda!(|Invocation { outputs, .. }| {
@@ -312,7 +313,7 @@ async fn a_lambda_reads_the_execution_node_it_is_running_as() {
         let probe = Arc::clone(seen);
         async_lambda!(
             move |Invocation { ctx, outputs, .. }| { seen = Arc::clone(&probe) } => {
-                seen.lock().unwrap().push(ctx.cur_node_id());
+                seen.lock_unpoisoned().push(ctx.cur_node_id());
                 outputs[0] = DynamicValue::Static(ConstValue::Int(wrote));
                 Ok(())
             }
@@ -324,7 +325,7 @@ async fn a_lambda_reads_the_execution_node_it_is_running_as() {
     prog.runs().go().await;
 
     // Index order is id order, and placement mints ascending ids, so `a` runs first.
-    assert_eq!(*seen.lock().unwrap(), vec![a.node_id, b.node_id]);
+    assert_eq!(*seen.lock_unpoisoned(), vec![a.node_id, b.node_id]);
 }
 
 /// A node seed ("run to this node") demands the node's output but does not
@@ -342,7 +343,7 @@ async fn a_node_seed_demands_its_output_without_retaining_it() {
         .outputs(1)
         .lambda(async_lambda!(
             move |Invocation { demand, outputs, .. }| { seen = Arc::clone(&probe_seen) } => {
-                *seen.lock().unwrap() = Some(demand[0]);
+                *seen.lock_unpoisoned() = Some(demand[0]);
                 outputs[0] = DynamicValue::Static(ConstValue::Int(7));
                 Ok(())
             }
@@ -353,7 +354,7 @@ async fn a_node_seed_demands_its_output_without_retaining_it() {
     // reclaimed the instant it's stored.
     let mut unseeded = prog.runs().readers([0]);
     unseeded.go().await;
-    assert_eq!(*seen.lock().unwrap(), Some(OutputDemand::Skip));
+    assert_eq!(*seen.lock_unpoisoned(), Some(OutputDemand::Skip));
     assert!(
         unseeded.outputs(a).is_none(),
         "unseeded Skip root is drained at store time: {:?}",
@@ -362,7 +363,7 @@ async fn a_node_seed_demands_its_output_without_retaining_it() {
 
     let mut seeded = prog.runs().readers([0]).demand(a, 0).seeded(a);
     seeded.go().await;
-    assert_eq!(*seen.lock().unwrap(), Some(OutputDemand::Produce));
+    assert_eq!(*seen.lock_unpoisoned(), Some(OutputDemand::Produce));
     assert!(
         seeded.outputs(a).is_none(),
         "targeting controls demand, not RAM retention: {:?}",

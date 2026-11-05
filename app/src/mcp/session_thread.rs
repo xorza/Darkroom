@@ -1,12 +1,13 @@
 //! [`SessionThread`]: the one thread the editor lives on, and the edge where a panic in it ends
 //! the session, which the server ends with, rather than unwinding through the server.
 
+use common::MutexExt;
 use std::collections::HashMap;
 use std::fmt;
 use std::panic::{self, AssertUnwindSafe, PanicHookInfo};
 use std::path::Path;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
+use std::sync::{Mutex, OnceLock};
 use std::thread::{self, JoinHandle, ThreadId};
 
 use common::{ErrorChain, thread as threads};
@@ -248,28 +249,32 @@ impl PanicRecord {
     /// Record this thread's panics from now on, installing the hook on the first call.
     fn register() -> Self {
         let id = thread::current().id();
-        lock(PANICS.get_or_init(|| {
+        let panics = PANICS.get_or_init(|| {
             let previous = panic::take_hook();
             panic::set_hook(Box::new(move |info| {
                 record(info);
                 previous(info);
             }));
             Mutex::default()
-        }))
-        .insert(id, None);
+        });
+        panics.lock_unpoisoned().insert(id, None);
         Self(id)
     }
 
     /// The panic the hook recorded on this thread since the last take.
     fn take(&self) -> Option<String> {
-        lock(PANICS.get()?).get_mut(&self.0).and_then(Option::take)
+        PANICS
+            .get()?
+            .lock_unpoisoned()
+            .get_mut(&self.0)
+            .and_then(Option::take)
     }
 }
 
 impl Drop for PanicRecord {
     fn drop(&mut self) {
         if let Some(panics) = PANICS.get() {
-            lock(panics).remove(&self.0);
+            panics.lock_unpoisoned().remove(&self.0);
         }
     }
 }
@@ -280,20 +285,13 @@ fn record(info: &PanicHookInfo<'_>) {
     let Some(panics) = PANICS.get() else {
         return;
     };
-    if let Some(slot) = lock(panics).get_mut(&thread::current().id()) {
+    if let Some(slot) = panics.lock_unpoisoned().get_mut(&thread::current().id()) {
         let message = info.payload_as_str().unwrap_or("a panic with no message");
         let location = info
             .location()
             .map_or_else(String::new, |location| format!(" at {location}"));
         *slot = Some(format!("{message}{location}"));
     }
-}
-
-/// The record, whatever a panic left it as: each write is one whole entry.
-fn lock(
-    panics: &Mutex<HashMap<ThreadId, Option<String>>>,
-) -> MutexGuard<'_, HashMap<ThreadId, Option<String>>> {
-    panics.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 impl Drop for Joined {

@@ -1,3 +1,4 @@
+use common::MutexExt;
 use std::sync::{Arc, Mutex};
 
 use crate::progress::progress_callback::ProgressCallback;
@@ -10,11 +11,11 @@ fn callback_reports_exact_progress_and_default_is_silent() {
     let reports = Arc::new(Mutex::new(Vec::new()));
     let callback = ProgressCallback::new({
         let reports = Arc::clone(&reports);
-        move |progress| reports.lock().unwrap().push(progress)
+        move |progress| reports.lock_unpoisoned().push(progress)
     });
     callback.report(3, 5, StackingStage::Combining);
 
-    let reports = reports.lock().unwrap();
+    let reports = reports.lock_unpoisoned();
     let [StackingProgress { cur, total, stage }] = reports.as_slice() else {
         panic!("expected one progress report");
     };

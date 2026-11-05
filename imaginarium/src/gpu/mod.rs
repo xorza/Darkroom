@@ -12,10 +12,10 @@ use crate::gpu::compute_kernel::ComputeKernel;
 pub struct Gpu {
     pub(crate) device: wgpu::Device,
     pub(crate) queue: wgpu::Queue,
-    kernels: [OnceLock<ComputeKernel>; GpuOp::COUNT],
+    kernels: Kernels,
 }
 
-/// The ops with a GPU kernel: a closed set, each kernel cached in its slot of [`Gpu`].
+/// The ops with a GPU kernel: a closed set, each kernel cached in its slot of [`Kernels`].
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum GpuOp {
     ContrastBrightness,
@@ -23,8 +23,24 @@ pub(crate) enum GpuOp {
     AffineWarp,
 }
 
-impl GpuOp {
-    const COUNT: usize = 3;
+/// Each op's kernel, compiled on its first use: a slot for each [`GpuOp`], which the match in
+/// [`Kernels::slot`] reaches, so a new op is a compile error until it has one. Refused: an array
+/// sized by a hand-kept count and indexed by `op as usize`, which a new op outran at run time.
+#[derive(Debug, Default)]
+struct Kernels {
+    contrast_brightness: OnceLock<ComputeKernel>,
+    blend: OnceLock<ComputeKernel>,
+    affine_warp: OnceLock<ComputeKernel>,
+}
+
+impl Kernels {
+    const fn slot(&self, op: GpuOp) -> &OnceLock<ComputeKernel> {
+        match op {
+            GpuOp::ContrastBrightness => &self.contrast_brightness,
+            GpuOp::Blend => &self.blend,
+            GpuOp::AffineWarp => &self.affine_warp,
+        }
+    }
 }
 
 impl Gpu {
@@ -60,7 +76,7 @@ impl Gpu {
         Ok(Self {
             device,
             queue,
-            kernels: Default::default(),
+            kernels: Kernels::default(),
         })
     }
 
@@ -70,7 +86,7 @@ impl Gpu {
         op: GpuOp,
         compile: impl FnOnce(&Self) -> ComputeKernel,
     ) -> &ComputeKernel {
-        self.kernels[op as usize].get_or_init(|| compile(self))
+        self.kernels.slot(op).get_or_init(|| compile(self))
     }
 
     /// Polls the device, blocking until all pending operations complete.

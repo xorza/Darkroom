@@ -45,7 +45,7 @@ impl<'a> FrameIntake<'a> {
     /// The intake of `plan`'s frames under `run`.
     pub(crate) fn new(plan: IntakePlan, run: &'a IngestRun) -> Self {
         Self {
-            admission: FrameAdmission::new(plan.desc, &run.ctx.cancel),
+            admission: FrameAdmission::new(plan.desc, plan.frame_count, &run.ctx.cancel),
             ctx: run.ctx.for_decode_slots(plan.decode_slots.max(1)),
             done: StageCounter::new(&run.progress, plan.stage, plan.frame_count),
         }
@@ -100,25 +100,31 @@ impl<'a> FrameIntake<'a> {
         self.done.complete_one()
     }
 
-    /// Run `job` over the frames of `idxs`, one slot to each frame in flight and at most
-    /// `slots.len()` at once, the results in index order. A cancel stops the frames not yet
-    /// started.
+    /// Run `job` over `frames`, each a frame's index in ascending order, one slot to each frame
+    /// in flight and at most `slots.len()` at once, the results in that order. A cancel stops the
+    /// frames not yet started.
     pub(crate) fn map<S, R, E>(
         &self,
-        idxs: Range<usize>,
+        frames: impl IntoIterator<Item = usize>,
         slots: &mut [S],
         job: impl Fn(&mut S, usize) -> Result<R, E> + Sync,
     ) -> Result<Vec<R>, E>
     where
         S: Send,
         R: Send,
-        E: Send + From<Cancelled>,
+        E: Send + From<Cancelled> + From<AdmissionError>,
     {
-        let start = idxs.start;
-        par::slots(idxs.len(), slots, |slot, offset| {
-            Cancelled::check(&self.ctx.cancel)?;
-            job(slot, start + offset)
+        let frames: Vec<usize> = frames.into_iter().collect();
+        debug_assert!(
+            frames.is_sorted_by(|a, b| a < b),
+            "frames in ascending order"
+        );
+        par::slots(frames.len(), slots, |slot, at| {
+            let idx = frames[at];
+            Failed::at(idx, Cancelled::check(&self.ctx.cancel).map_err(E::from))?;
+            Failed::at(idx, job(slot, idx))
         })
+        .map_err(|failed| self.settle(failed))
     }
 
     /// [`Self::map`] for jobs whose workers carry nothing from one frame to the next: at most
@@ -131,13 +137,15 @@ impl<'a> FrameIntake<'a> {
     ) -> Result<Vec<R>, E>
     where
         R: Send,
-        E: Send + From<Cancelled>,
+        E: Send + From<Cancelled> + From<AdmissionError>,
     {
         let start = idxs.start;
         par::slots(idxs.len(), &mut vec![(); width], |(), offset| {
-            Cancelled::check(&self.ctx.cancel)?;
-            job(start + offset)
+            let idx = start + offset;
+            Failed::at(idx, Cancelled::check(&self.ctx.cancel).map_err(E::from))?;
+            Failed::at(idx, job(idx))
         })
+        .map_err(|failed| self.settle(failed))
     }
 
     /// [`Self::map`] over `items` the caller hands over, each moved into its job, so a frame's
@@ -152,11 +160,36 @@ impl<'a> FrameIntake<'a> {
         T: Send,
         S: Send,
         R: Send,
-        E: Send + From<Cancelled>,
+        E: Send + From<Cancelled> + From<AdmissionError>,
     {
         par::slots_owned(items, slots, |slot, idx, item| {
-            Cancelled::check(&self.ctx.cancel)?;
-            job(slot, idx, item)
+            Failed::at(idx, Cancelled::check(&self.ctx.cancel).map_err(E::from))?;
+            Failed::at(idx, job(slot, idx, item))
         })
+        .map_err(|failed| self.settle(failed))
+    }
+
+    /// The failure a sequential run names for `failed`: a frame below it whose facts differ from
+    /// frame 0's, admitted before they were known, comes first ([`FrameAdmission::first_mismatch`]).
+    /// Every frame below `failed` passed, as `par::slots` returns the lowest failure.
+    fn settle<E: From<AdmissionError>>(&self, failed: Failed<E>) -> E {
+        self.admission
+            .first_mismatch(failed.idx)
+            .map_or(failed.error, E::from)
+    }
+}
+
+/// A frame's failure in a parallel run, with the frame's index, which [`FrameIntake::settle`]
+/// checks the frames below.
+#[derive(Debug)]
+struct Failed<E> {
+    idx: usize,
+    error: E,
+}
+
+impl<E> Failed<E> {
+    /// `result`, its error taken as frame `idx`'s.
+    fn at<T>(idx: usize, result: Result<T, E>) -> Result<T, Self> {
+        result.map_err(|error| Self { idx, error })
     }
 }

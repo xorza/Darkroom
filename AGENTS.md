@@ -107,6 +107,10 @@ arguments after a `--`; each submodule runs its own.
 - **A library takes bytes, readers and writers, never paths**; the caller
   opens through `common::fs`. The submodules and imaginarium's codecs are
   such libraries.
+- **A poisoned lock is a logic error.** Locks go through `common::MutexExt` and `CondvarExt`,
+  which panic on poison; `clippy.toml` refuses the direct calls. Refused: recovering, which lets
+  a test pass over data a panic left half-changed; `parking_lot`, whose guard turns `Send`
+  build-wide under `send_guard`.
 - **Parallel loops do not nest.** `common::par` refuses a loop started inside
   another: rayon has no work isolation, so a worker that waits in an inner loop
   runs other jobs on its stack, and a per-thread scratch is not its own.

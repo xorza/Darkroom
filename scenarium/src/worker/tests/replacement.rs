@@ -1,5 +1,6 @@
 use super::*;
 use crate::internals::test_graph::NodeSpec;
+use common::{CondvarExt, MutexExt};
 
 /// An `Update` arriving mid-run is installed only after the running program
 /// reports — so the completion still describes the program that ran.
@@ -21,8 +22,8 @@ async fn a_replacement_queued_mid_run_is_installed_after_the_running_program() {
         node.output(DataType::Int).compute(move |_| {
             started.notify_one();
             let (lock, wake) = &*release;
-            let held = lock.lock().unwrap();
-            drop(wake.wait_while(held, |released| !*released).unwrap());
+            let held = lock.lock_unpoisoned();
+            drop(wake.wait_while_unpoisoned(held, |released| !*released));
             ConstValue::Int(7)
         })
     });
@@ -51,7 +52,7 @@ async fn a_replacement_queued_mid_run_is_installed_after_the_running_program() {
     });
     {
         let (lock, wake) = &*release;
-        *lock.lock().unwrap() = true;
+        *lock.lock_unpoisoned() = true;
         wake.notify_one();
     }
     w.sync().await;

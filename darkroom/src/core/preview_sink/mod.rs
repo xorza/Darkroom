@@ -11,6 +11,7 @@
 //! this: the node is a sink (so an ambient run reaches it), it reads its input
 //! like any consumer, and nothing about it is special to the engine.
 
+use common::MutexExt;
 use std::collections::HashMap;
 use std::mem;
 use std::sync::{Arc, Mutex};
@@ -40,7 +41,7 @@ impl PreviewSink {
     /// Worker side: publish `value` as `node_id`'s current one, dropping
     /// whatever it was showing before.
     fn publish(&self, node_id: NodeId, value: DynamicValue) {
-        self.latest.lock().unwrap().insert(node_id, value);
+        self.latest.lock_unpoisoned().insert(node_id, value);
     }
 
     /// GUI side: swap everything published since the last drain into the
@@ -48,7 +49,7 @@ impl PreviewSink {
     /// and a drain allocates nothing; the lock is held only for the swap.
     pub(crate) fn drain_into(&self, buffer: &mut HashMap<NodeId, DynamicValue>) {
         debug_assert!(buffer.is_empty(), "the last drain's values were not taken");
-        mem::swap(&mut *self.latest.lock().unwrap(), buffer);
+        mem::swap(&mut *self.latest.lock_unpoisoned(), buffer);
     }
 }
 

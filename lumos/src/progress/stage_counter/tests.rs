@@ -1,3 +1,4 @@
+use common::MutexExt;
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
@@ -15,7 +16,9 @@ fn parallel_completions_report_in_order() {
     let callback = ProgressCallback::new({
         let reports = Arc::clone(&reports);
         move |progress| {
-            reports.lock().unwrap().push((progress.cur, progress.total));
+            reports
+                .lock_unpoisoned()
+                .push((progress.cur, progress.total));
         }
     });
     let counter = StageCounter::new(&callback, StackingStage::Loading, 64);
@@ -23,7 +26,7 @@ fn parallel_completions_report_in_order() {
         counter.complete_one();
     });
     let expected: Vec<_> = (1..=64).map(|cur| (cur, 64)).collect();
-    assert_eq!(*reports.lock().unwrap(), expected);
+    assert_eq!(*reports.lock_unpoisoned(), expected);
 }
 
 /// A callback that runs rayon work of its own still sees every count in order: a worker waiting
@@ -46,14 +49,14 @@ fn a_callback_that_uses_rayon_completes() {
                 (0..8).into_par_iter().for_each(|_| {
                     std::thread::sleep(Duration::from_micros(20));
                 });
-                reports.lock().unwrap().push(progress.cur);
+                reports.lock_unpoisoned().push(progress.cur);
             }
         });
         let counter = StageCounter::new(&callback, StackingStage::Loading, 256);
         par::into_iter(0..256).for_each(|_| {
             counter.complete_one();
         });
-        sender.send(reports.lock().unwrap().clone()).unwrap();
+        sender.send(reports.lock_unpoisoned().clone()).unwrap();
     });
     let reports = receiver
         .recv_timeout(Duration::from_secs(10))

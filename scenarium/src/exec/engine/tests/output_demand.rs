@@ -1,3 +1,4 @@
+use common::MutexExt;
 use std::sync::Mutex;
 
 use super::*;
@@ -15,7 +16,7 @@ async fn unused_output_marked_skip() {
             .output(DataType::Int)
             .lambda(async_lambda!(
                 move |Invocation { demand, outputs, .. }| { seen = Arc::clone(&seen) } => {
-                    seen.lock().unwrap().extend_from_slice(demand);
+                    seen.lock_unpoisoned().extend_from_slice(demand);
                     outputs[0] = ConstValue::Int(1).into();
                     outputs[1] = ConstValue::Int(2).into();
                     Ok(())
@@ -35,7 +36,7 @@ async fn unused_output_marked_skip() {
     );
     assert_eq!(e.readers("split"), [1, 0]);
     assert_eq!(
-        *seen.lock().unwrap(),
+        *seen.lock_unpoisoned(),
         [OutputDemand::Produce, OutputDemand::Skip],
         "the lambda saw the same demand the sweep resolved"
     );
@@ -70,7 +71,7 @@ async fn cached_node_reruns_when_a_previously_skipped_output_becomes_needed() {
         move |n: NodeSpec| {
             n.sink().input(DataType::Int).lambda(async_lambda!(
                 move |Invocation { inputs, .. }| { received = Arc::clone(&received) } => {
-                    received.lock().unwrap().push(inputs[0].as_i64().unwrap());
+                    received.lock_unpoisoned().push(inputs[0].as_i64().unwrap());
                     Ok(())
                 }
             ))
@@ -91,7 +92,7 @@ async fn cached_node_reruns_when_a_previously_skipped_output_becomes_needed() {
     e.run_sinks().await;
 
     assert_eq!(calls.count(), 2);
-    let mut received = received.lock().unwrap().clone();
+    let mut received = received.lock_unpoisoned().clone();
     received.sort_unstable();
     assert_eq!(received, [10, 10, 20]);
 }

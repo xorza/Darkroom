@@ -1,4 +1,5 @@
 use super::*;
+use common::MutexExt;
 
 use std::any::Any;
 use std::fmt;
@@ -33,7 +34,7 @@ struct Tracked {
 impl Tracked {
     fn new(tracker: Arc<Mutex<LiveTracker>>) -> Self {
         {
-            let mut t = tracker.lock().unwrap();
+            let mut t = tracker.lock_unpoisoned();
             t.cur += 1;
             t.peak = t.peak.max(t.cur);
         }
@@ -43,7 +44,7 @@ impl Tracked {
 
 impl Drop for Tracked {
     fn drop(&mut self) {
-        self.tracker.lock().unwrap().cur -= 1;
+        self.tracker.lock_unpoisoned().cur -= 1;
     }
 }
 
@@ -113,7 +114,7 @@ async fn chain_peak(relay_mode: CacheMode) -> usize {
 
     let mut e = TestEngine::over(g);
     e.run_sinks().await;
-    tracker.lock().unwrap().peak
+    tracker.lock_unpoisoned().peak
 }
 
 /// The cache mode drives peak residency. With `None`, each stage's output is freed the
@@ -158,7 +159,7 @@ async fn probe_run(relay_mode: CacheMode, probes: usize) -> ProbeRun {
             n.sink().input(tracked()).lambda(async_lambda!(
                 move |Invocation { inputs, .. }| { reads = Arc::clone(&reads) } => {
                     let value = mem::take(&mut inputs[0]);
-                    reads.lock().unwrap().push(value.into_custom::<Tracked>().is_ok());
+                    reads.lock_unpoisoned().push(value.into_custom::<Tracked>().is_ok());
                     Ok(())
                 }
             ))
@@ -170,8 +171,8 @@ async fn probe_run(relay_mode: CacheMode, probes: usize) -> ProbeRun {
     // release exactly the retained value `live_after` is here to observe.
     let mut e = TestEngine::over(g);
     e.run_sinks().await;
-    let unique_reads = reads.lock().unwrap().clone();
-    let live_after = tracker.lock().unwrap().cur;
+    let unique_reads = reads.lock_unpoisoned().clone();
+    let live_after = tracker.lock_unpoisoned().cur;
     ProbeRun {
         unique_reads,
         live_after,
