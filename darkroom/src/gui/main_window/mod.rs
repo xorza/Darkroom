@@ -2,7 +2,7 @@ pub(crate) mod dock_panes;
 pub(crate) mod menu_bar;
 pub(crate) mod status_bar;
 
-use palantir::InputCtx;
+use palantir::UpdateCtx;
 use std::collections::HashMap;
 
 use palantir::{
@@ -15,6 +15,7 @@ use crate::core::document::graph_revision::GraphRevision;
 use crate::core::document::tab_ref::TabRef;
 use crate::core::open_document::OpenDocument;
 use crate::gui::frame::frame_writes::FrameWrites;
+use crate::gui::frame::input_end::InputEnd;
 use crate::gui::frame::relayout::Relayout;
 use crate::gui::frame::requests::Requests;
 use crate::gui::frame::window_ctx::WindowCtx;
@@ -77,13 +78,13 @@ impl MainWindow {
     /// undo, and are validated before a save.
     pub(crate) fn scan_navigation(
         &mut self,
-        input_ctx: &mut InputCtx<'_>,
+        update_ctx: &mut UpdateCtx<'_>,
         ctx: WindowCtx<'_>,
         out: &mut Requests,
     ) {
         let ops = &mut self.dock_ops;
         ops.clear();
-        DockView::scan(input_ctx, Self::dock_wid(), &ctx.document().layout, ops);
+        DockView::scan(update_ctx, Self::dock_wid(), &ctx.document().layout, ops);
         for op in ops.drain(..) {
             out.push_view(op);
         }
@@ -93,27 +94,28 @@ impl MainWindow {
     /// already-settled active graph, plus the per-pane visibility reconcile
     /// that has to happen before them.
     ///
-    /// Returns whether any pane became visible this frame — the caller turns
-    /// that into a relayout request, since a canvas that has never recorded
-    /// has no cached geometry to draw its first frame from. A pane that
-    /// *vanished* needs no pass and is never visited here at all. Reported
-    /// rather than requested because this pass has no business deciding when
-    /// the frame's accumulated signals are spent.
+    /// Returns what the graph's stage leaves the frame, which holds whether any pane became visible
+    /// this frame — the caller turns that into a relayout request, since a canvas that has never
+    /// recorded has no cached geometry to draw its first frame from. A pane that *vanished* needs
+    /// no pass and is never visited here at all. Reported rather than requested because this pass
+    /// has no business deciding when the frame's accumulated signals are spent.
     pub(crate) fn prepass(
         &mut self,
-        input_ctx: &mut InputCtx<'_>,
+        update_ctx: &mut UpdateCtx<'_>,
         ctx: WindowCtx<'_>,
         out: &mut Requests,
-    ) -> Relayout {
+    ) -> InputEnd {
         let Self { graph_ui, .. } = self;
-        let mut request_relayout = Relayout::NotNeeded;
+        let mut end = InputEnd::default();
         for tab in ctx.document().layout.active_tabs() {
             match tab {
                 // Reached from `active_tabs`, so a pane is showing the graph
                 // by construction — which is what `GraphUi::prepass` asserts.
                 TabRef::Graph => {
-                    request_relayout |=
-                        graph_ui.prepass(input_ctx, GraphCtx::new(ctx, input_ctx.display()), out);
+                    let graph =
+                        graph_ui.prepass(update_ctx, GraphCtx::new(ctx, update_ctx.display()), out);
+                    end.outcome = graph.outcome;
+                    end.relayout |= graph.relayout;
                 }
                 // Neither derives a document mutation from input: preferences
                 // edits go through their own widgets, and a viewer only
@@ -121,7 +123,7 @@ impl MainWindow {
                 TabRef::Preferences | TabRef::ImageViewer(_) | TabRef::Inspector(_) => {}
             }
         }
-        request_relayout
+        end
     }
 
     /// Ready the panes on screen for a record pass that no input stage ran just before; see

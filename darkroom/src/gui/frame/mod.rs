@@ -7,6 +7,7 @@
 pub(crate) mod app_command;
 pub(crate) mod app_ctx;
 pub(crate) mod frame_writes;
+pub(crate) mod input_end;
 pub(crate) mod relayout;
 pub(crate) mod requests;
 pub(crate) mod shortcuts;

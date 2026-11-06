@@ -101,7 +101,7 @@ impl WireUi {
     /// for more than an edit.
     pub(crate) fn prepass(
         &mut self,
-        input_ctx: &mut palantir::InputCtx<'_>,
+        update_ctx: &mut palantir::UpdateCtx<'_>,
         ctx: CanvasCtx<'_>,
         out: &mut Requests,
     ) -> Option<WireEnd> {
@@ -110,7 +110,7 @@ impl WireUi {
         // The output column drops out while the preview-spawn chord is
         // held: that chord is the preview drag's, so the two controllers
         // never both latch one press.
-        let preview_chord = preview_drag::modifier_held(input_ctx.input);
+        let preview_chord = preview_drag::modifier_held(update_ctx.input);
         if self.state.is_none()
             && let Some(drag) = GlyphDrag::latch(&geometry.ports, |port| {
                 !preview_chord || port.kind == PortKind::Input
@@ -134,12 +134,12 @@ impl WireUi {
         }
 
         // Refresh the compatible port under the pointer for both modes.
-        state.drag.snap = scan_snap_target(input_ctx.input, ctx, state.drag.from);
+        state.drag.snap = scan_snap_target(update_ctx.input, ctx, state.drag.from);
         self.state = Some(state);
 
         match state.mode {
-            DragMode::Held => self.resolve_held(input_ctx.input, ctx, state.drag, out),
-            DragMode::Floating => self.resolve_floating(input_ctx, state.drag, out),
+            DragMode::Held => self.resolve_held(update_ctx.input, ctx, state.drag, out),
+            DragMode::Floating => self.resolve_floating(update_ctx, state.drag, out),
         }
     }
 
@@ -177,7 +177,7 @@ impl WireUi {
     /// handled in `prepass`.
     fn resolve_floating(
         &mut self,
-        input_ctx: &mut palantir::InputCtx<'_>,
+        update_ctx: &mut palantir::UpdateCtx<'_>,
         drag: GlyphDrag<PortRef, PortRef>,
         out: &mut Requests,
     ) -> Option<WireEnd> {
@@ -186,7 +186,7 @@ impl WireUi {
         // frames coming — without this it only redraws when some other
         // widget's hover change happens to wake a frame). `BUTTONS` delivers
         // the terminating press.
-        let events = input_ctx.pointer_events(PointerWake::MOVE | PointerWake::BUTTONS);
+        let events = update_ctx.pointer_events(PointerWake::MOVE | PointerWake::BUTTONS);
         let ended = events.iter().find_map(|ev| match ev {
             PointerEvent::Pressed {
                 button: button @ (PointerButton::Left | PointerButton::Right),

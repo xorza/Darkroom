@@ -54,7 +54,7 @@ impl TieMenuUi {
         graph_ctx: GraphCtx<'_>,
         tie: TieId,
     ) -> Option<GraphIntent> {
-        self.menu.open_on(ui, graph_ctx, tie)
+        self.menu.open_on(ui.update_ctx().input, graph_ctx, tie)
     }
 
     /// Record the menu and turn this frame's pick into its intent. `ties` is the last pass's

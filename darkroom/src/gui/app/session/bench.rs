@@ -20,6 +20,10 @@
 //! - **`drag`**: one node moves, and the wires on it reroute.
 //! - **`preview`**: the preview node the viewer shows publishes a new 24 MP image, as a run
 //!   publishes one.
+//! - **`click`**, CPU alone: a press and a release in turn on bare canvas, which the input stage
+//!   handles, so each frame records once.
+//! - **`typing`**, CPU alone: a key and a Backspace in turn in a text const, which a record reads,
+//!   so each frame records twice.
 //!
 //! A scenario changes the editor as production does: the camera and the drag are one held
 //! gesture of edit intents through `OpenDocument::apply_edit`, whose relayout the frame takes.
@@ -39,7 +43,9 @@ use palantir::bench::case_group::CaseGroup;
 use palantir::bench::kind::{Kind, Scale};
 use palantir::bench::scene::{BENCH_DPR, BENCH_SURFACE};
 use palantir::internals::Timing;
-use palantir::{App, ColorScheme, Depth, Harness, InputCtx, WindowToken};
+use palantir::{
+    App, ColorScheme, Depth, Harness, InputOutcome, Key, PointerButton, UpdateCtx, WindowToken,
+};
 use palantir::{FramePaint, ImageDownsample, OffscreenHost, Ui};
 use scenarium::{DynamicValue, NodeId};
 
@@ -59,6 +65,7 @@ use crate::gui::frame::app_ctx::AppCtx;
 use crate::gui::frame::frame_writes::FrameWrites;
 use crate::gui::frame::relayout::Relayout;
 use crate::gui::frame::requests::Requests;
+use crate::gui::pane::graph_ui::canvas;
 use crate::gui::state::preview_store::preview_converter::{self, Card};
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
@@ -76,6 +83,10 @@ const PAN_FRAMES: u32 = 256;
 const ZOOM_IN: f32 = 1.1;
 /// The most a case waits for the viewer's full image, which the converter's thread makes.
 const FULL_IMAGE_WAIT: Duration = Duration::from_secs(60);
+/// Where the `click` scenario presses, in the canvas: bare, past the toolbar and above the nodes.
+const BARE_CANVAS: Vec2 = Vec2::new(80.0, 20.0);
+/// The value of the text const the `typing` scenario edits.
+const TEXT_CONST: &str = "frameNo_";
 /// Frames each scenario runs before its paint is checked.
 const SETTLE_FRAMES: u32 = 4;
 
@@ -87,16 +98,25 @@ enum Scenario {
     Pan,
     Preview,
     Zoom,
+    Click,
+    Typing,
 }
 
 impl Scenario {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 7] = [
         Self::Cached,
         Self::Drag,
         Self::Pan,
         Self::Preview,
         Self::Zoom,
+        Self::Click,
+        Self::Typing,
     ];
+
+    /// Plays input, which a [`Harness`] frame takes, so the CPU backend alone.
+    const fn plays_input(self) -> bool {
+        matches!(self, Self::Click | Self::Typing)
+    }
 
     const fn label(self) -> &'static str {
         match self {
@@ -105,6 +125,8 @@ impl Scenario {
             Self::Pan => "pan",
             Self::Preview => "preview",
             Self::Zoom => "zoom",
+            Self::Click => "click",
+            Self::Typing => "typing",
         }
     }
 }
@@ -168,12 +190,12 @@ impl Editor {
 
     /// Land an image on every preview node, as a finished run does once its
     /// conversions finish.
-    fn publish_previews(&mut self, ui: &Ui) {
+    fn publish_previews(&mut self, ui: &mut Ui) {
         for (idx, node) in self.previews.iter().enumerate() {
             let card = self.converted[idx % 2].clone();
             self.run_state
                 .previews_mut()
-                .land_converted(ui, *node, card);
+                .land_converted(&ui.update_ctx(), *node, card);
         }
     }
 
@@ -181,16 +203,16 @@ impl Editor {
     fn advance(&mut self, scenario: Scenario, ui: &mut Ui, n: u32) {
         // One held drag for the whole run, so its frames fold into one undo entry.
         let gesture = GestureId::default().next();
-        self.run_state.previews_mut().land(ui);
+        self.run_state.previews_mut().land(&ui.update_ctx());
         let intent = match scenario {
-            Scenario::Cached => return,
+            Scenario::Cached | Scenario::Click | Scenario::Typing => return,
             // Its publishes would replace the image the viewer is waiting for.
             Scenario::Preview if self.converts_full => return,
             Scenario::Preview => {
                 let card = self.converted[(n % 2) as usize].clone();
                 self.run_state
                     .previews_mut()
-                    .land_converted(ui, PUBLISHED, card);
+                    .land_converted(&ui.update_ctx(), PUBLISHED, card);
                 return;
             }
             Scenario::Pan => {
@@ -218,14 +240,6 @@ impl Editor {
         }
     }
 
-    /// The sweeps of `App::update`, once a frame before its first record pass.
-    fn update(&mut self) {
-        self.run_state
-            .previews_mut()
-            .reconcile(&self.session.open.document);
-        self.session.reconcile_caches();
-    }
-
     fn run_commands(&mut self) {
         while let Some(command) = self.requests.pop_app() {
             let AppCommand::View(ViewCommand::ConvertFull { node_id, max_dim }) = command else {
@@ -238,12 +252,18 @@ impl Editor {
     }
 }
 
-/// The input stage and the record passes as `App` runs them.
+/// The sweeps, the input stage and the record passes as `App` runs them.
 impl App for Editor {
-    fn input(&mut self, _: WindowToken, mut input_ctx: InputCtx<'_>) {
+    fn update(&mut self, _: WindowToken, mut update_ctx: UpdateCtx<'_>) -> InputOutcome {
+        self.run_state
+            .previews_mut()
+            .reconcile(&self.session.open.document);
+        self.session.reconcile_caches();
         let ctx = AppCtx::new(&self.theme, self.library.cur(), &self.run_state);
-        self.input_relayout = self.session.input(&mut input_ctx, ctx, &mut self.requests);
+        let end = self.session.input(&mut update_ctx, ctx, &mut self.requests);
+        self.input_relayout = end.relayout;
         self.run_commands();
+        end.outcome
     }
 
     fn record(&mut self, _: WindowToken, ui: &mut Ui) {
@@ -289,6 +309,37 @@ fn stacked_frame(level: f32) -> DynamicValue {
     let size = USize2::new(6000, 4000);
     let planes = std::array::from_fn(|_| Buffer2::new_filled(size, level));
     DynamicValue::from_custom(lens::Image::from(PlanarImage::new_rgb(planes)))
+}
+
+/// The input of frame `n` of `scenario`. Each press leaves the double-click span behind, so each is
+/// its own click. The focus goes to the text const on the first frame it shows.
+fn play_input(scenario: Scenario, frontend: &mut Harness, n: u32) {
+    match scenario {
+        // The first frames lay the canvas out, so a press has a rect to land in.
+        Scenario::Click if n < 2 => {}
+        Scenario::Click => {
+            if n.is_multiple_of(2) {
+                frontend.advance_past_double_click();
+                let bare = frontend.point_in(canvas::outer_wid(), BARE_CANVAS);
+                frontend.press(bare, PointerButton::Left);
+            } else {
+                frontend.release(PointerButton::Left);
+            }
+        }
+        Scenario::Typing => {
+            if frontend.ui().focus().is_none() {
+                let field = frontend.widgets(Some(TEXT_CONST)).first().map(|w| w.id);
+                if let Some(field) = field {
+                    frontend.ui_mut().set_focus(field);
+                }
+            } else if n.is_multiple_of(2) {
+                frontend.key(Key::Char('x'));
+            } else {
+                frontend.key(Key::Backspace);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// One editor-frame case: the document in `scenario`, painted on `backend`.
@@ -337,7 +388,7 @@ impl FrameCase {
             let paint = step(&mut editor);
             if scenario == Scenario::Cached {
                 assert_eq!(paint, FramePaint::Skip, "a still editor paints nothing");
-            } else {
+            } else if scenario != Scenario::Click {
                 assert_ne!(
                     paint,
                     FramePaint::Skip,
@@ -355,6 +406,9 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
     let mut group = Kind::Integration.group(c, "editor_frame", Scale::Frame);
     for backend in backends.all() {
         for scenario in Scenario::ALL {
+            if scenario.plays_input() && backend != Backend::Cpu {
+                continue;
+            }
             let case = FrameCase { scenario, backend };
             match backend {
                 Backend::Cpu => case.measure(&mut group, || {
@@ -373,7 +427,7 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
                             published = true;
                         }
                         editor.advance(scenario, ui, n);
-                        editor.update();
+                        play_input(scenario, &mut frontend, n);
                         frontend.frame_app(editor).paint()
                     }
                 }),
@@ -389,11 +443,10 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
                     let mut published = false;
                     move |editor: &mut Editor, n: u32| {
                         if !published {
-                            editor.publish_previews(host.ui());
+                            editor.publish_previews(host.ui_mut());
                             published = true;
                         }
                         editor.advance(scenario, host.ui_mut(), n);
-                        editor.update();
                         let paint = host
                             .set_system_scale(BENCH_DPR)
                             .frame(target.as_target(), editor)

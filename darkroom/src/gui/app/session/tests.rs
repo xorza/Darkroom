@@ -77,7 +77,9 @@ fn a_settled_frame_records_without_allocating() {
     app.run_state
         .previews_mut()
         .publish(preview, preview_store::internals::opaque_image_value());
-    app.run_state.previews_mut().settle(ui.ui());
+    app.run_state
+        .previews_mut()
+        .settle(&ui.ui_mut().update_ctx());
     // Each frame asked, as a wake asks one: a frame nothing asked for paints only and records
     // nothing, which would audit nothing.
     let full_frame = |ui: &mut Harness, app: &mut App| {
@@ -113,7 +115,9 @@ fn a_viewer_opened_by_click_queues_its_full_image_in_that_same_frame() {
     test.run_state
         .previews_mut()
         .publish(node, preview_store::internals::opaque_image_value());
-    test.run_state.previews_mut().settle(test.ui.ui());
+    test.run_state
+        .previews_mut()
+        .settle(&test.ui.ui_mut().update_ctx());
     test.prime(2);
 
     let resident = |test: &SessionHarness| {
@@ -156,7 +160,9 @@ fn a_viewer_opened_by_click_queues_its_full_image_in_that_same_frame() {
     // As `App::run_command` applies it; nothing else asks before the settle,
     // so a conversion that lands is the one that frame asked for.
     test.run_state.previews_mut().convert_full(asked, max_dim);
-    test.run_state.previews_mut().settle(test.ui.ui());
+    test.run_state
+        .previews_mut()
+        .settle(&test.ui.ui_mut().update_ctx());
     assert!(
         resident(&test),
         "the pass that drew the new tab queued its conversion"

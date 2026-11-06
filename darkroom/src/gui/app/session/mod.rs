@@ -19,12 +19,13 @@ use crate::core::open_document::OpenDocument;
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::FileCommand;
 use crate::gui::frame::app_command::RunCommand;
+use crate::gui::frame::input_end::InputEnd;
 use crate::gui::frame::relayout::Relayout;
 use crate::gui::frame::requests::Requests;
 use crate::gui::frame::window_ctx::WindowCtx;
 use crate::gui::main_window::MainWindow;
 use crate::gui::pane::graph_ui::gesture::pan_zoom::Framing;
-use palantir::{InputCtx, Shortcut, Ui};
+use palantir::{Shortcut, Ui, UpdateCtx};
 use scenarium::Graph;
 use std::mem;
 
@@ -77,39 +78,44 @@ impl Session {
     ///    visible needs a relayout: it may never have recorded, and a dock op raises no geometry
     ///    signal of its own.
     ///
-    /// Returns whether the stage stranded the canvas's cached geometry, which `App` spends in its
-    /// record, so the whole app requests a relayout from exactly one place.
+    /// Returns what the frame's records may read of the input, and whether the stage stranded the
+    /// canvas's cached geometry, which `App` spends in its record, so the whole app requests a
+    /// relayout from exactly one place.
     #[must_use]
     pub(crate) fn input(
         &mut self,
-        input_ctx: &mut InputCtx<'_>,
+        update_ctx: &mut UpdateCtx<'_>,
         ctx: AppCtx<'_>,
         requests: &mut Requests,
-    ) -> Relayout {
+    ) -> InputEnd {
         debug_assert!(requests.is_empty(), "the last frame left requests behind");
-        let mut needs_relayout = self.apply_undo_redo(input_ctx);
+        let mut needs_relayout = self.apply_undo_redo(update_ctx);
         self.main_window
-            .scan_navigation(input_ctx, WindowCtx::new(ctx, &self.open), requests);
+            .scan_navigation(update_ctx, WindowCtx::new(ctx, &self.open), requests);
         needs_relayout |=
             Relayout::after(self.open.drain_requests(requests.document(), ctx.library()));
 
-        needs_relayout |=
-            self.main_window
-                .prepass(input_ctx, WindowCtx::new(ctx, &self.open), requests);
+        let end = self
+            .main_window
+            .prepass(update_ctx, WindowCtx::new(ctx, &self.open), requests);
+        needs_relayout |= end.relayout;
         needs_relayout |=
             Relayout::after(self.open.drain_requests(requests.document(), ctx.library()));
 
         // The file/run/quit chords only queue an `AppCommand`, so they need no drain of their own.
-        menu_shortcut(input_ctx, requests);
+        menu_shortcut(update_ctx, requests);
         self.input_ran = true;
-        needs_relayout
+        InputEnd {
+            outcome: end.outcome,
+            relayout: needs_relayout,
+        }
     }
 
     /// One record pass against `ctx`: authors the widget tree, draining what it raises against the
     /// document, and leaves the app tier queued in the `writes` requests for the shell.
     ///
-    /// A pass that no input stage ran just before settles first: the first frame's warmup, and a
-    /// second pass, which reads the rects of the pass before it.
+    /// A pass that no input stage ran just before settles first: the one past the first frame's
+    /// warmup, and a second pass, each of which reads the rects of the pass before it.
     ///
     /// Returns whether the pass stranded the canvas's cached geometry. Resizes driven by something
     /// other than an `UndoStep`, as the header's elapsed-time label growing as a run reports, are
@@ -162,9 +168,9 @@ impl Session {
     /// holds focus palantir grants it to that field's scope and this
     /// read answers `false` on its own.
     #[must_use]
-    fn apply_undo_redo(&mut self, input_ctx: &mut InputCtx<'_>) -> Relayout {
-        let undo = input_ctx.shortcut_pressed(shortcuts::UNDO);
-        let redo = input_ctx.shortcut_pressed(shortcuts::REDO);
+    fn apply_undo_redo(&mut self, update_ctx: &mut UpdateCtx<'_>) -> Relayout {
+        let undo = update_ctx.shortcut_pressed(shortcuts::UNDO);
+        let redo = update_ctx.shortcut_pressed(shortcuts::REDO);
         // The document owns its history and what a replay means; this layer
         // only says which direction the chord asked for.
         if undo {
@@ -208,10 +214,10 @@ const MENU_CHORDS: [(Shortcut, AppCommand); 6] = [
 /// first match, and the chords after it stay watched: palantir records the frame again with no
 /// input, and that pass reads them all (`Ui::shortcut_pressed`). Read outside every scope, so a
 /// chord a focused field claims does not reach them.
-fn menu_shortcut(input_ctx: &mut InputCtx<'_>, requests: &mut Requests) {
+fn menu_shortcut(update_ctx: &mut UpdateCtx<'_>, requests: &mut Requests) {
     if let Some((_, command)) = MENU_CHORDS
         .iter()
-        .find(|(chord, _)| input_ctx.shortcut_pressed(*chord))
+        .find(|(chord, _)| update_ctx.shortcut_pressed(*chord))
     {
         requests.push_app(command.clone());
     }

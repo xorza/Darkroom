@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use palantir::Ui;
+use palantir::{Input, Ui};
 
 use crate::core::document::item_id::ItemId;
 use crate::core::edit::graph_intent::GraphIntent;
@@ -17,10 +17,8 @@ use crate::gui::pane::graph_ui::gesture::anchored_menu::{AnchoredMenu, PopupShap
 /// pick that needs it.
 ///
 /// What the caller still owns is the items and where a pick goes — an
-/// `AppCommand` or a `GraphIntent`. Which item was right-clicked is settled by
-/// its draw, which reports it, as
-/// [`NodeDrawOutcome::menu_opened`](crate::gui::pane::graph_ui::node_ui::NodeDrawOutcome)
-/// does for a node.
+/// `AppCommand` or a `GraphIntent` — and which item was right-clicked: the input stage settles a
+/// node's, and a tie's draw reports its own.
 #[derive(Debug)]
 pub(crate) struct ItemMenu<K> {
     menu: AnchoredMenu,
@@ -69,15 +67,13 @@ impl<K: Copy> ItemMenu<K> {
     /// selection edit; a pick lands frames later, so the selection is committed well before it
     /// is read back.
     ///
-    /// `target` comes from the record pass that drew it, so the document
-    /// holds it at the open; [`Self::retain`] keeps that true across the
-    /// frames the popup stays. Called *after*
-    /// that draw, because the menu is the canvas's state and the draw holds it
-    /// shared; the popup itself records on the next pass, which a right-click
-    /// guarantees (action input always earns one).
+    /// `target` comes from a click on its widget, so the document holds it at the open;
+    /// [`Self::retain`] keeps that true across the frames the popup stays. The popup records on the
+    /// next [`Self::show`]: in the same pass for a node's open in the input stage, and in the
+    /// second pass the click earns for a tie's, which its draw reports after the menu showed.
     pub(crate) fn open_on(
         &mut self,
-        ui: &mut Ui,
+        input: &mut Input,
         graph_ctx: GraphCtx<'_>,
         target: K,
     ) -> Option<GraphIntent>
@@ -87,7 +83,7 @@ impl<K: Copy> ItemMenu<K> {
         // A press that opened the menu has a pointer position by construction;
         // this is only for the frames where the pointer left the window
         // between the click and this read.
-        let at = ui.pointer_pos()?;
+        let at = input.pointer_pos()?;
         self.target = Some(target);
         self.menu.open_at(at);
         let item = target.into();

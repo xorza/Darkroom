@@ -26,7 +26,7 @@ use common::{ErrorChain, USize2};
 use glam::UVec2;
 use imaginarium::{ColorFormat, InterleavedDesc};
 use lens::Image;
-use palantir::{Image as Raster, ImageHandle, Ui};
+use palantir::{Image as Raster, ImageHandle, Ui, UpdateCtx};
 use scenarium::{DynamicValue, NodeId};
 
 use crate::core::document::Document;
@@ -241,7 +241,7 @@ impl PreviewStore {
     /// replaces what the node showed, unless its value was removed since it
     /// was published; a full raster goes to the image that asked for it,
     /// unless that image was replaced meanwhile.
-    pub(crate) fn land(&mut self, ui: &Ui) {
+    pub(crate) fn land(&mut self, ctx: &UpdateCtx<'_>) {
         let Self {
             entries,
             converting,
@@ -254,7 +254,7 @@ impl PreviewStore {
                     entries,
                     converting,
                 },
-                ui,
+                ctx,
                 converted,
             );
         }
@@ -327,19 +327,19 @@ struct Landing<'a> {
 }
 
 /// Land one finished conversion, or drop it when it no longer has a place.
-fn accept(landing: Landing<'_>, ui: &Ui, converted: Converted) {
+fn accept(landing: Landing<'_>, ctx: &UpdateCtx<'_>, converted: Converted) {
     let Converted {
         node_id,
         ticket,
         outcome,
     } = converted;
     match outcome {
-        Outcome::Card(card) => land_card(landing, ui, node_id, ticket, card),
+        Outcome::Card(card) => land_card(landing, ctx, node_id, ticket, card),
         Outcome::Full(raster) => {
             if let Some(StoredContent::Image(image)) = landing.entries.get_mut(&node_id)
                 && image.ticket == ticket
             {
-                image.land_full(ui, &raster);
+                image.land_full(ctx, &raster);
             }
         }
     }
@@ -348,7 +348,13 @@ fn accept(landing: Landing<'_>, ui: &Ui, converted: Converted) {
 /// Land `node_id`'s card from publish `ticket`, unless no conversion of the
 /// node is pending — its value was removed or swept — or this one was
 /// published before a removal voided it.
-fn land_card(landing: Landing<'_>, ui: &Ui, node_id: NodeId, ticket: Ticket, card: Card) {
+fn land_card(
+    landing: Landing<'_>,
+    ctx: &UpdateCtx<'_>,
+    node_id: NodeId,
+    ticket: Ticket,
+    card: Card,
+) {
     let Landing {
         entries,
         converting,
@@ -373,7 +379,7 @@ fn land_card(landing: Landing<'_>, ui: &Ui, node_id: NodeId, ticket: Ticket, car
                 native_size,
                 native_format,
             } = thumbnail;
-            match ui.load_image(&raster) {
+            match ctx.load_image(&raster) {
                 Ok(handle) => StoredContent::Image(DrawablePreview {
                     preview: DrawableImage {
                         texels: handle.size(),
@@ -419,12 +425,12 @@ impl DrawablePreview {
     }
 
     /// Register the full raster converted for this image.
-    fn land_full(&mut self, ui: &Ui, raster: &Raster) {
+    fn land_full(&mut self, ctx: &UpdateCtx<'_>, raster: &Raster) {
         debug_assert!(
             matches!(self.full, FullImage::Converting { .. }),
             "a full raster lands only on the image that asked for it"
         );
-        self.full = match ui.load_image(raster) {
+        self.full = match ctx.load_image(raster) {
             Ok(handle) => FullImage::Resident(handle),
             Err(error) => FullImage::Failed(error.into()),
         };
@@ -482,17 +488,17 @@ pub(crate) mod internals {
         /// Wait for every conversion in flight, and land each — what a test
         /// does where production waits for the next frame.
         #[cfg(test)]
-        pub(crate) fn settle(&mut self, ui: &Ui) {
+        pub(crate) fn settle(&mut self, ctx: &UpdateCtx<'_>) {
             while self.in_flight() {
-                self.land_next(ui);
+                self.land_next(ctx);
             }
         }
 
         /// Wait for the next finished conversion, and land it alone.
         #[cfg(test)]
-        pub(crate) fn land_next(&mut self, ui: &Ui) {
+        pub(crate) fn land_next(&mut self, ctx: &UpdateCtx<'_>) {
             let converted = self.converter.wait();
-            self.land_one(ui, converted);
+            self.land_one(ctx, converted);
         }
 
         /// Wait for the next finished conversion, and hold it unlanded.
@@ -503,13 +509,13 @@ pub(crate) mod internals {
 
         /// Land `converted`, as a frame does.
         #[cfg(test)]
-        pub(crate) fn land_one(&mut self, ui: &Ui, converted: Converted) {
+        pub(crate) fn land_one(&mut self, ctx: &UpdateCtx<'_>, converted: Converted) {
             accept(
                 Landing {
                     entries: &mut self.entries,
                     converting: &mut self.converting,
                 },
-                ui,
+                ctx,
                 converted,
             );
         }
@@ -537,7 +543,7 @@ pub(crate) mod internals {
         /// Land `card` as `node_id`'s newest publish, on the calling thread —
         /// for a bench that lands one conversion every frame and times the
         /// landing alone.
-        pub(crate) fn land_converted(&mut self, ui: &Ui, node_id: NodeId, card: Card) {
+        pub(crate) fn land_converted(&mut self, ctx: &UpdateCtx<'_>, node_id: NodeId, card: Card) {
             let ticket = self.last_ticket.next();
             self.last_ticket = ticket;
             self.converting.insert(
@@ -552,7 +558,7 @@ pub(crate) mod internals {
                     entries: &mut self.entries,
                     converting: &mut self.converting,
                 },
-                ui,
+                ctx,
                 node_id,
                 ticket,
                 card,

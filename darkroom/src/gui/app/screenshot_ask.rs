@@ -1,7 +1,7 @@
 //! [`ScreenshotAsk`]: how far one ask for a screenshot got, from the frame that asks to the one
 //! its image lands in.
 
-use palantir::{Rect, Screenshot, ScreenshotId, Ui};
+use palantir::{Rect, Screenshot, ScreenshotId, Ui, UpdateCtx};
 
 /// One ask for an image of the window, made once, by the record pass of a frame.
 #[derive(Clone, Copy, Debug, Default)]
@@ -35,10 +35,10 @@ impl ScreenshotAsk {
 
     /// What this ask got, once it got it: its image in the frame `ui` it lands in, or none for a
     /// region that held no pixel.
-    pub(crate) fn landed<'ui>(&self, ui: &'ui Ui) -> Option<Landed<'ui>> {
+    pub(crate) fn landed<'c>(&self, ctx: &'c UpdateCtx<'_>) -> Option<Landed<'c>> {
         match *self {
             Self::Unasked => None,
-            Self::Asked(id) => ui.screenshot_taken(id).map(Landed::Shot),
+            Self::Asked(id) => ctx.screenshot_taken(id).map(Landed::Shot),
             Self::Empty => Some(Landed::Empty),
         }
     }
@@ -65,10 +65,15 @@ mod tests {
             let first = inside;
             inside.ask(ui, Some(Rect::new(20.0, 0.0, 10.0, 10.0)));
             assert!(matches!((first, inside), (ScreenshotAsk::Asked(a), ScreenshotAsk::Asked(b)) if a == b));
-            assert!(inside.landed(ui).is_none(), "no image yet");
+            assert!(inside.landed(&ui.update_ctx()).is_none(), "no image yet");
             outside.ask(ui, Some(Rect::new(500.0, 500.0, 10.0, 10.0)));
-            assert!(matches!(outside.landed(ui), Some(Landed::Empty)));
+            assert!(matches!(outside.landed(&ui.update_ctx()), Some(Landed::Empty)));
         });
-        assert!(ScreenshotAsk::default().landed(h.ui()).is_none(), "unasked");
+        assert!(
+            ScreenshotAsk::default()
+                .landed(&h.ui_mut().update_ctx())
+                .is_none(),
+            "unasked"
+        );
     }
 }

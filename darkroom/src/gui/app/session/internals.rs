@@ -16,7 +16,7 @@
 //! frame; [`SessionHarness::frame`] returns the commands of every pass, in order.
 
 use glam::UVec2;
-use palantir::{App, ColorScheme, Harness, InputCtx, Ui, WindowToken};
+use palantir::{App, ColorScheme, Harness, InputOutcome, Ui, UpdateCtx, WindowToken};
 use scenarium::Library;
 
 use crate::core::document::internals::DocumentFixture;
@@ -56,11 +56,12 @@ struct SessionFrame<'a> {
 }
 
 impl App for SessionFrame<'_> {
-    fn input(&mut self, _: WindowToken, mut input_ctx: InputCtx<'_>) {
+    fn update(&mut self, _: WindowToken, mut update_ctx: UpdateCtx<'_>) -> InputOutcome {
         let ctx = AppCtx::new(self.theme, self.library, self.run_state);
-        let _needs_relayout = self.session.input(&mut input_ctx, ctx, self.requests);
+        let end = self.session.input(&mut update_ctx, ctx, self.requests);
         self.commands
             .extend(iter::from_fn(|| self.requests.pop_app()));
+        end.outcome
     }
 
     fn record(&mut self, _: WindowToken, ui: &mut Ui) {

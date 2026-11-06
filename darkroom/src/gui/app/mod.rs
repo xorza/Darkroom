@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use common::ErrorChain;
-use palantir::{ColorScheme, Preference, Ui, UiPreferences};
+use palantir::{ColorScheme, Preference, Ui, UiPreferences, UpdateCtx};
 use scenarium::Binding;
 use scenarium::ConstValue;
 use scenarium::FsPathMode;
@@ -47,7 +47,7 @@ pub(crate) mod view_capture;
 /// The editor shell: it owns the open document and the runtime services
 /// evaluating it, and lends the document to the [`Session`] that authors each
 /// frame. `App` also owns preferences, dialogs, theme, and exit policy.
-/// `update` drains external queues once, `input` runs `Session::input` once, and replayable
+/// `update` drains external queues and runs `Session::input` once, and replayable
 /// `record` runs `Session::record` and handles actions only in the pass that receives input.
 #[derive(Debug)]
 pub(crate) struct App {
@@ -256,8 +256,8 @@ impl App {
     /// are refreshed only while the window is floating; a maximized window
     /// keeps its last floating geometry so un-maximizing on the next launch
     /// lands at the right size.
-    fn track_window_state(&mut self, ui: &Ui) {
-        let geom = ui.window_geometry();
+    fn track_window_state(&mut self, ctx: &UpdateCtx<'_>) {
+        let geom = ctx.window_geometry();
         match &mut self.preferences.window {
             Some(w) => {
                 w.maximized = geom.placement.maximized;
@@ -332,8 +332,8 @@ impl App {
     /// The titlebar X. The window stays open only while the prompt is up
     /// ([`DiscardGuard::record`] calls `keep_open`); with nothing to
     /// protect, the close proceeds untouched.
-    fn handle_close_request(&mut self, ui: &Ui) {
-        if !ui.close_requested() {
+    fn handle_close_request(&mut self, ctx: &UpdateCtx<'_>) {
+        if !ctx.close_requested() {
             return;
         }
 
@@ -616,15 +616,19 @@ impl App {
     }
 
     /// Hand the image that landed this frame to the capture that asked for it.
-    fn deliver_capture(&mut self, ui: &Ui) {
-        let Some(landed) = self.capture.as_ref().and_then(|capture| capture.landed(ui)) else {
+    fn deliver_capture(&mut self, ctx: &UpdateCtx<'_>) {
+        let Some(landed) = self
+            .capture
+            .as_ref()
+            .and_then(|capture| capture.landed(ctx))
+        else {
             return;
         };
         let capture = self
             .capture
             .take()
             .expect("the capture its image landed for");
-        match capture.deliver(landed, &ui.clipboard()) {
+        match capture.deliver(landed, &ctx.clipboard()) {
             Ok(()) => self.status.succeeded(StatusFamily::View),
             Err(error) => self
                 .status
@@ -655,10 +659,14 @@ fn unicode(path: PathBuf) -> Result<String, NonUnicodePath> {
 }
 
 impl palantir::App for App {
-    fn update(&mut self, _win: palantir::WindowToken, ui: &Ui) {
+    fn update(
+        &mut self,
+        _win: palantir::WindowToken,
+        mut update_ctx: UpdateCtx<'_>,
+    ) -> palantir::InputOutcome {
         // Keep the persisted window geometry current so a save on quit
         // captures the latest size / position.
-        self.track_window_state(ui);
+        self.track_window_state(&update_ctx);
 
         // Everything derived from the run and the document, swept once a
         // frame — **the one place that happens**. All of these caches outlive
@@ -680,22 +688,22 @@ impl palantir::App for App {
                 runtime: &self.runtime,
                 status: &mut self.status,
             },
-            ui,
+            &update_ctx,
             &self.session.open.document,
         );
         self.session.reconcile_caches();
 
-        self.deliver_capture(ui);
-        self.handle_close_request(ui);
-    }
+        self.deliver_capture(&update_ctx);
+        self.handle_close_request(&update_ctx);
 
-    fn input(&mut self, _win: palantir::WindowToken, mut input_ctx: palantir::InputCtx<'_>) {
         let ctx = AppCtx::new(&self.theme, self.runtime.library.cur(), &self.run_state);
-        let mut needs_relayout = self.session.input(&mut input_ctx, ctx, &mut self.requests);
+        let end = self.session.input(&mut update_ctx, ctx, &mut self.requests);
+        let mut needs_relayout = end.relayout;
         while let Some(command) = self.requests.pop_app() {
             needs_relayout |= self.run_command(command);
         }
         self.input_relayout = needs_relayout;
+        end.outcome
     }
 
     fn record(&mut self, _win: palantir::WindowToken, ui: &mut Ui) {
@@ -1110,12 +1118,12 @@ mod tests {
     }
 
     impl palantir::App for CountedPasses {
-        fn update(&mut self, window: palantir::WindowToken, ui: &Ui) {
-            palantir::App::update(&mut self.app, window, ui);
-        }
-
-        fn input(&mut self, window: palantir::WindowToken, ctx: palantir::InputCtx<'_>) {
-            palantir::App::input(&mut self.app, window, ctx);
+        fn update(
+            &mut self,
+            window: palantir::WindowToken,
+            ctx: UpdateCtx<'_>,
+        ) -> palantir::InputOutcome {
+            palantir::App::update(&mut self.app, window, ctx)
         }
 
         fn record(&mut self, window: palantir::WindowToken, ui: &mut Ui) {
@@ -1126,6 +1134,141 @@ mod tests {
                 ui.request_relayout();
             }
         }
+    }
+
+    /// The wires of `app`'s document whose two ports both have a place on the canvas.
+    fn wires_anchored(app: &App) -> usize {
+        use crate::gui::port_ref::PortRef;
+
+        let geometry = app.session.geometry();
+        app.session
+            .open
+            .document
+            .graph
+            .bindings
+            .iter()
+            .filter_map(|(input, binding)| match binding {
+                Binding::Wire(output) => Some((*input, *output)),
+                Binding::Const(_) => None,
+            })
+            .filter(|&(input, output)| {
+                geometry.ports.center(PortRef::from(input)).is_some()
+                    && geometry.ports.center(PortRef::from(output)).is_some()
+            })
+            .count()
+    }
+
+    /// A window's first frame runs `update` ahead of the warmup, as no frame is on screen for it to
+    /// read, so the warmup and the pass past it take the document from no rects to every wire
+    /// anchored, in two records.
+    #[test]
+    fn a_cold_window_anchors_every_wire_in_its_first_frame() {
+        use glam::UVec2;
+        use palantir::OffscreenHost;
+        use palantir::internals::headless_test_gpu;
+
+        let gpu = headless_test_gpu();
+        let target = gpu.target("darkroom.test.cold", UVec2::new(1600, 1000));
+        let mut host = OffscreenHost::builder(gpu.handles()).build();
+        let mut counted = CountedPasses {
+            app: App::offscreen(host.ui_mut()),
+            passes: 0,
+            undo_after_pass: false,
+        };
+        counted
+            .app
+            .open_document_at(PathBuf::from("sample/sample.darkroom"));
+        host.frame(target.as_target(), &mut counted);
+        assert_eq!(counted.passes, 2, "the warmup and the pass past it");
+        assert_eq!(wires_anchored(&counted.app), 7);
+    }
+
+    /// A click the input stage takes records once and shows in that pass: on a node's body, which
+    /// selects, on bare canvas, which clears it, and a right click, which opens the node's menu. A
+    /// click on a widget the record reads, a menu title, takes the second pass as before.
+    #[test]
+    fn a_click_the_input_stage_takes_records_once() {
+        use glam::{UVec2, Vec2};
+        use palantir::{Harness, Locator, PointerButton};
+
+        use crate::gui::pane::graph_ui::{canvas, wid};
+
+        const NODE: &str = "Auto Stretch";
+
+        let mut ui = Harness::new(UVec2::new(1600, 1000));
+        let mut counted = CountedPasses {
+            app: App::offscreen(ui.ui_mut()),
+            passes: 0,
+            undo_after_pass: false,
+        };
+        counted
+            .app
+            .open_document_at(PathBuf::from("sample/sample.darkroom"));
+        ui.ui_mut().request_repaint();
+        for _ in 0..4 {
+            ui.frame_app(&mut counted);
+        }
+        let selected =
+            |counted: &CountedPasses| counted.app.session.open.document.main_view.selected.len();
+        let node = counted
+            .app
+            .session
+            .open
+            .document
+            .graph
+            .iter()
+            .find(|node| node.name == NODE)
+            .expect("the sample holds the node")
+            .node_id;
+        let body = wid::body(node);
+        // The click's release frame, past the press frame the harness runs before it.
+        let click = |ui: &mut Harness, counted: &mut CountedPasses, at: Locator, button| {
+            ui.advance_past_double_click();
+            ui.press(at, button);
+            ui.frame_app(counted);
+            ui.release(button);
+            counted.passes = 0;
+            ui.frame_app(counted);
+            counted.passes
+        };
+
+        assert_eq!(
+            click(&mut ui, &mut counted, body.into(), PointerButton::Left),
+            1,
+            "a click on a body"
+        );
+        assert_eq!(selected(&counted), 1, "the click selected");
+
+        let bare = ui.point_in(canvas::outer_wid(), Vec2::new(4.0, 4.0));
+        assert_eq!(
+            click(&mut ui, &mut counted, bare.into(), PointerButton::Left),
+            1,
+            "a click on bare canvas"
+        );
+        assert_eq!(selected(&counted), 0, "the click cleared it");
+
+        assert_eq!(
+            click(&mut ui, &mut counted, body.into(), PointerButton::Right),
+            1,
+            "a right click on a body"
+        );
+        assert_eq!(selected(&counted), 1, "the right click selected");
+        assert_eq!(ui.widgets(Some("Remove")).len(), 1, "the menu shows");
+        ui.key(palantir::Key::Escape);
+        ui.frame_app(&mut counted);
+        ui.frame_app(&mut counted);
+
+        let title = ui
+            .widgets(Some("File"))
+            .into_iter()
+            .find(|widget| widget.text == "File")
+            .expect("the menu bar shows")
+            .id;
+        assert_eq!(
+            click(&mut ui, &mut counted, title.into(), PointerButton::Left),
+            2,
+            "a click on a menu title"
+        );
     }
 
     /// A prompt raised between frames records ahead of the menu bar, so the frame that shows it
@@ -1199,28 +1342,9 @@ mod tests {
         use palantir::Harness;
 
         use crate::gui::frame::shortcuts;
-        use crate::gui::port_ref::PortRef;
 
         const NODE: &str = "Auto Stretch";
 
-        let wires_anchored = |app: &App| {
-            let geometry = app.session.geometry();
-            app.session
-                .open
-                .document
-                .graph
-                .bindings
-                .iter()
-                .filter_map(|(input, binding)| match binding {
-                    Binding::Wire(output) => Some((*input, *output)),
-                    Binding::Const(_) => None,
-                })
-                .filter(|&(input, output)| {
-                    geometry.ports.center(PortRef::from(input)).is_some()
-                        && geometry.ports.center(PortRef::from(output)).is_some()
-                })
-                .count()
-        };
         // The node's title, which a hidden node does not list: its text then rolls up to the canvas.
         let title = |ui: &Harness| {
             ui.widgets(Some(NODE))

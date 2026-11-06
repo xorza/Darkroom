@@ -7,7 +7,7 @@
 //! test that skipped a phase would be exercising a frame the app never performs.
 
 use glam::{UVec2, Vec2};
-use palantir::{App, Harness, InputCtx, WindowToken};
+use palantir::{App, Harness, InputOutcome, UpdateCtx, WindowToken};
 use palantir::{Configure, DockOperation, Panel, Rect, Sizing, SystemScale, Ui, WidgetId};
 use scenarium::NodeId;
 
@@ -60,6 +60,8 @@ pub(crate) struct CanvasHarness {
     /// `pub(crate)` so a test can edit the document between frames, the way an
     /// undo edits it under a running gesture.
     pub(crate) ctx: GraphCtxFixture,
+    /// What the last frame's input stage answered.
+    pub(crate) outcome: InputOutcome,
     /// The app commands the last [`Self::frame`] raised. Kept beside the
     /// intents that call returns rather than folded into them: the canvas
     /// raises both tiers, and a test is almost always about one of them.
@@ -106,6 +108,7 @@ impl CanvasHarness {
             ui,
             graph_ui: GraphUi::default(),
             ctx: GraphCtxFixture::over(fixture),
+            outcome: InputOutcome::Record,
             commands: Vec::new(),
             view_ops: Vec::new(),
         }
@@ -120,11 +123,13 @@ impl CanvasHarness {
             ui,
             graph_ui,
             ctx,
+            outcome,
             commands,
             view_ops,
         } = self;
         let mut frame = CanvasFrame::new(graph_ui, ctx, AppliesIntents::No);
         ui.frame_app(&mut frame);
+        *outcome = frame.outcome;
         let mut out = frame.finish(ui);
         view_ops.clear();
         let intents: Vec<GraphIntent> = out
@@ -292,6 +297,8 @@ struct CanvasFrame<'a> {
     ctx: &'a mut GraphCtxFixture,
     applies: AppliesIntents,
     out: Requests,
+    /// What the last input stage answered.
+    outcome: InputOutcome,
     /// An input stage ran since the last record pass, as `Session` holds it.
     input_ran: bool,
     /// The last frame that recorded.
@@ -309,6 +316,7 @@ impl<'a> CanvasFrame<'a> {
             ctx,
             applies,
             out: Requests::default(),
+            outcome: InputOutcome::Record,
             input_ran: false,
             recorded_at: None,
         }
@@ -335,14 +343,16 @@ impl<'a> CanvasFrame<'a> {
 }
 
 impl App for CanvasFrame<'_> {
-    fn input(&mut self, _: WindowToken, mut input_ctx: InputCtx<'_>) {
+    fn update(&mut self, _: WindowToken, mut update_ctx: UpdateCtx<'_>) -> InputOutcome {
         self.out = Requests::default();
-        let graph_ctx = self.ctx.graph_ctx_on(input_ctx.display());
-        let _ = self
+        let graph_ctx = self.ctx.graph_ctx_on(update_ctx.display());
+        let end = self
             .graph_ui
-            .prepass(&mut input_ctx, graph_ctx, &mut self.out);
+            .prepass(&mut update_ctx, graph_ctx, &mut self.out);
         self.apply();
         self.input_ran = true;
+        self.outcome = end.outcome;
+        end.outcome
     }
 
     fn record(&mut self, _: WindowToken, recorder: &mut Ui) {

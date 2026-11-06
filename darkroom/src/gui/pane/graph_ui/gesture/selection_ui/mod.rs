@@ -97,15 +97,8 @@ impl SelectionUi {
     /// [`Self::preview`]); `Document`/undo are only touched once, by the
     /// committing `SetSelection` emitted on release. The context's Esc —
     /// resolved once by the canvas — drops the band without emitting.
-    ///
-    /// A click on bare canvas clears the selection: node panels hit-test first, so it fires only
-    /// when the click missed every node, and an empty selection records no no-op entry. A *drag*
-    /// there is the rubber band.
     pub(crate) fn apply(&mut self, ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
         let graph_ctx = ctx.graph_ctx();
-        if ctx.gesture() == Some(CanvasGesture::Deselect) && !graph_ctx.selected().is_empty() {
-            out.push_graph(GraphIntent::clear_selection());
-        }
         let resp = ui.response_for(canvas::outer_wid());
         if self.band.is_none()
             && ctx.gesture() == Some(CanvasGesture::Select)

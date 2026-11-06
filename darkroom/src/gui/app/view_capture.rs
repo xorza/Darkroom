@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use common::fs::{self, PublicationMode};
 use image::codecs::png::PngEncoder;
 use image::{ExtendedColorType, ImageEncoder, ImageError};
-use palantir::{Clipboard, Image, Ui};
+use palantir::{Clipboard, Image, Ui, UpdateCtx};
 
 use crate::gui::app::error::ViewCaptureError;
 use crate::gui::app::screenshot_ask::{Landed, ScreenshotAsk};
@@ -43,8 +43,8 @@ impl ViewCapture {
     }
 
     /// What this capture's ask got, once it got it.
-    pub(crate) fn landed<'ui>(&self, ui: &'ui Ui) -> Option<Landed<'ui>> {
-        self.asked.landed(ui)
+    pub(crate) fn landed<'c>(&self, ctx: &'c UpdateCtx<'_>) -> Option<Landed<'c>> {
+        self.asked.landed(ctx)
     }
 
     /// Put what landed where the target says.

@@ -195,7 +195,10 @@ mod tests {
             .run_state
             .previews_mut()
             .publish(node, preview_store::internals::opaque_image_value());
-        h.ctx.run_state.previews_mut().settle(h.ui.ui());
+        h.ctx
+            .run_state
+            .previews_mut()
+            .settle(&h.ui.ui_mut().update_ctx());
         h.prime(2);
         assert!(h.view_ops.is_empty(), "nothing asked for before the click");
 

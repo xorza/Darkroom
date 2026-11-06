@@ -9,7 +9,7 @@ pub(crate) mod run_status;
 
 use std::mem;
 
-use palantir::{Configure, Modifiers, Panel, Sense, Shadow, Sizing, Stroke, Track, Ui, Visibility};
+use palantir::{Configure, Panel, Sense, Shadow, Sizing, Stroke, Track, Ui, Visibility};
 use scenarium::NodeId;
 
 use crate::core::document::graph_view::StackedNode;
@@ -70,36 +70,6 @@ pub(super) struct NodePass<'a, 'p> {
     pub(super) out: &'a mut Requests,
 }
 
-/// What one record pass's node draw saw but could not act on itself.
-///
-/// Each drives state the draw itself holds *shared* — the context menu because
-/// it is the canvas's and not a node's, the group drag because the canvas owns
-/// one — so the clicks are seen here and applied by the caller once the draw is
-/// over and both can be taken `&mut`.
-#[derive(Default, Debug)]
-pub(crate) struct NodeDrawOutcome {
-    /// The node whose body was right-clicked, opening its context menu.
-    pub(crate) menu_opened: Option<NodeId>,
-    /// The drag a node's body or title press started, for the canvas's one group drag to latch.
-    pub(crate) grab: Option<Grab>,
-}
-
-/// What drawing **one** node reports back: the signals its own widgets
-/// produced but could not act on, in the shape palantir's
-/// `TextEditResponse` uses — the drawer is authoritative about what it did
-/// with this frame's input, so no caller re-polls for it.
-///
-/// Booleans, because this is one node. Which node across the scene is
-/// [`NodeDrawOutcome`]'s
-/// question, and folding these into it is the loop's
-/// job rather than the node's.
-#[derive(Default, Debug)]
-pub(super) struct NodeResponse {
-    pub(super) menu_opened: bool,
-    /// The drag a body or title press started, for the canvas's one group drag to latch.
-    pub(super) grab: Option<Grab>,
-}
-
 impl NodeUi {
     /// Drop the focus hysteresis. `row_tracks` and `paint_order` are scratch grown to the
     /// largest scene seen, not gesture state, so they keep their capacity across the reset.
@@ -109,12 +79,10 @@ impl NodeUi {
 
     /// Record the widget tree of every scene node `pass` retains (plus
     /// the focus-owning node — see the loop comment), skipping off-screen ones
-    /// entirely, and report what the draw saw but could not act on — see
-    /// [`NodeDrawOutcome`]. Emits selection/raise intents for body clicks and
-    /// reports the grab of a body/title drag (port circles capture
-    /// their own presses via `Sense::CLICK`, so drags don't latch off the port
-    /// grabs).
-    pub(super) fn draw_all(&mut self, ui: &mut Ui, pass: &mut NodePass<'_, '_>) -> NodeDrawOutcome {
+    /// entirely, and report the grab of a body/title drag, for the canvas's one group drag to latch
+    /// (port circles capture their own presses via `Sense::CLICK`, so drags don't latch off the
+    /// port grabs).
+    pub(super) fn draw_all(&mut self, ui: &mut Ui, pass: &mut NodePass<'_, '_>) -> Option<Grab> {
         let draw_ctx = pass.draw_ctx;
         // Paint back-to-front, so the last item drawn is frontmost. Each
         // item's depth is persisted view state, so a raised node stays raised
@@ -133,7 +101,7 @@ impl NodeUi {
         // past the blur (`focus_kept_last`): focus clears before the record,
         // and that first post-blur record is where the edit's pending draft
         // commits.
-        let mut outcome = NodeDrawOutcome::default();
+        let mut grab = None;
         let mut focus_kept = None;
         // Swapped out for the sweep because each node hands the whole `NodeUi`
         // to its widget; it goes back below with its capacity, so only a graph
@@ -163,16 +131,11 @@ impl NodeUi {
             }
             let node_ctx = n.with_hover(wid::hover(ui, n.node_id));
             let node = self.draw_node(ui, node_ctx, pass);
-            if node.menu_opened {
-                outcome.menu_opened.get_or_insert(n.node_id);
-            }
-            if outcome.grab.is_none() {
-                outcome.grab = node.grab;
-            }
+            grab = grab.or(node);
         }
         self.paint_order = order;
         self.focus_kept_last = focus_kept;
-        outcome
+        grab
     }
 
     /// Record one node's body, `node_ctx`, over the state every node on the canvas shares: one
@@ -183,7 +146,7 @@ impl NodeUi {
         ui: &mut Ui,
         node_ctx: NodeCtx<'_>,
         pass: &mut NodePass<'_, '_>,
-    ) -> NodeResponse {
+    ) -> Option<Grab> {
         let state = self;
         let NodePass {
             draw_ctx,
@@ -229,9 +192,6 @@ impl NodeUi {
         } else {
             theme.card_border(tier)
         };
-        // Sample modifiers before the panel borrows `ui` for the rest
-        // of this scope (the click handler below can't reborrow it).
-        let click_mode = ClickMode::with_shift(ui.modifiers().contains(Modifiers::SHIFT));
         // The status frame when the last run asks for attention, else the
         // ambient elevation shadow — one slot, and live status outranks depth.
         let shadow = node_shadow(theme, node.exec_status());
@@ -260,7 +220,7 @@ impl NodeUi {
         // Borrowed off `self` before the body closure so it can't conflict
         // with the drag latch below, which reads a different field.
         let row_tracks = &mut state.row_tracks;
-        let panel = Panel::vstack()
+        Panel::vstack()
             .id(wid::body(node.node_id))
             .visibility(visibility)
             .at(node.pos)
@@ -295,60 +255,39 @@ impl NodeUi {
                     node_footer::show(ui, node_ctx);
                 }
             });
-        let body_clicked = panel.response.clicked();
-        let mut response = NodeResponse {
-            menu_opened: panel.response.right.clicked(),
-            grab: None,
-        };
-
-        // Click without drag → select. Plain click selects only this
-        // node; Shift-click toggles its membership in the current
-        // selection. `UndoStep::is_noop` filters a click that doesn't
-        // change the set (e.g. clicking the sole selected node).
-        if body_clicked {
-            out.extend_graph(GraphIntent::click(
-                click_mode,
-                node_ctx.graph_ctx.selected(),
-                ItemId::Node(node.node_id),
-            ));
-        }
-
         // Latch the anchor on the press-frame edge, off whichever of this
         // node's handles caught the press. Read here, where the handles are
         // built, over the same curated list they are drawn from; subsequent
         // frames' `prepass` peeks `response_for(widget_id)` before record runs
         // and converts `drag_delta` into a `MoveSelection` applied to
         // `Document` before the record reads it back.
-        if let Some(handle) =
-            wid::drag_handles(node.node_id).find(|w| ui.response_for(*w).left.drag.started())
-        {
-            // Grabbing a node already in the selection drags the whole
-            // group together;
-            // grabbing an unselected node selects only it and drags it
-            // alone.
-            let members = if selected {
-                group_drag::selected_group(draw_ctx)
-            } else {
-                out.extend_graph(GraphIntent::click(
-                    ClickMode::Replace,
-                    node_ctx.graph_ctx.selected(),
-                    ItemId::Node(node.node_id),
-                ));
-                group_drag::with_inner_ties(
-                    node_ctx.graph_ctx.view(),
-                    vec![DragStart {
-                        item: ItemId::Node(node.node_id),
-                        pos: node.pos,
-                    }],
-                )
-            };
-            response.grab = Some(Grab {
-                item: ItemId::Node(node.node_id),
-                members,
-                handle,
-            });
-        }
-        response
+        let handle =
+            wid::drag_handles(node.node_id).find(|w| ui.response_for(*w).left.drag.started())?;
+        // Grabbing a node already in the selection drags the whole
+        // group together;
+        // grabbing an unselected node selects only it and drags it
+        // alone.
+        let members = if selected {
+            group_drag::selected_group(draw_ctx)
+        } else {
+            out.extend_graph(GraphIntent::click(
+                ClickMode::Replace,
+                node_ctx.graph_ctx.selected(),
+                ItemId::Node(node.node_id),
+            ));
+            group_drag::with_inner_ties(
+                node_ctx.graph_ctx.view(),
+                vec![DragStart {
+                    item: ItemId::Node(node.node_id),
+                    pos: node.pos,
+                }],
+            )
+        };
+        Some(Grab {
+            item: ItemId::Node(node.node_id),
+            members,
+            handle,
+        })
     }
 }
 

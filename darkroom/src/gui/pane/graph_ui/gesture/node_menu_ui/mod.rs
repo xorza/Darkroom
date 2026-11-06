@@ -1,4 +1,4 @@
-use palantir::{MenuItem, MenuSeparator, Ui};
+use palantir::{Input, MenuItem, MenuSeparator, Ui};
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
@@ -44,22 +44,21 @@ impl NodeMenuUi {
         self.menu.is_open()
     }
 
-    /// Open the menu on `node`, which the record pass just saw right-clicked; see
+    /// Open the menu on `node`, which the input stage just saw right-clicked; see
     /// [`ItemMenu::open_on`]. Returns the selection edit, when it needs one.
     pub(crate) fn open_on(
         &mut self,
-        ui: &mut Ui,
+        input: &mut Input,
         graph_ctx: GraphCtx<'_>,
         node: NodeId,
     ) -> Option<GraphIntent> {
-        self.menu.open_on(ui, graph_ctx, node)
+        self.menu.open_on(input, graph_ctx, node)
     }
 
     /// Record the menu and resolve this frame's pick onto `out` — a run as
     /// the [`AppCommand`] it means, the structural picks as ordinary intents.
     ///
-    /// Opening is [`Self::open_on`]'s, called after the node draw that saw the
-    /// right-click; this only ever shows a menu already latched.
+    /// Opening is [`Self::open_on`]'s; this only ever shows a menu already latched.
     pub(crate) fn apply(&mut self, ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
         let graph_ctx = ctx.graph_ctx();
         self.menu.retain(|node_id| graph_ctx.contains(node_id));
