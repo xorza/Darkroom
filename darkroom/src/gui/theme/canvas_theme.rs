@@ -17,8 +17,8 @@ pub(crate) struct CanvasTheme {
     /// 4 px grid. Wrapped by a power-of-2 multiplier as the user zooms so the field never
     /// collapses into noise — see `gui::pane::graph_ui::canvas_bg`.
     pub(crate) dot_spacing: f32,
-    /// A backdrop dot's on-screen radius (px) where the wrapped tile is [`Self::dot_spacing`]
-    /// wide. The dot scales with its tile across a wrap band, to twice this where the tile is
+    /// A backdrop dot's on-screen radius (px) where the wrapped pitch is [`Self::dot_spacing`]
+    /// wide. The dot scales with its pitch across a wrap band, to twice this where the pitch is
     /// twice as wide.
     pub(crate) dot_radius: f32,
     /// A wire whose endpoint no longer resolves, and a node a breaker crosses.

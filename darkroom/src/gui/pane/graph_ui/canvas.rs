@@ -25,6 +25,11 @@ pub(crate) fn outer_wid() -> WidgetId {
     WidgetId::from_hash("darkroom.graph.canvas.outer")
 }
 
+/// The panel that moves and scales the dot lattice.
+pub(super) fn dots_wid() -> WidgetId {
+    WidgetId::from_hash("darkroom.graph.canvas.dots")
+}
+
 /// Stable id for the inner (transformed) canvas. Used as the widget seed and
 /// for resolving the canvas's pre-transform origin in wire draws.
 pub(super) fn inner_wid() -> WidgetId {
