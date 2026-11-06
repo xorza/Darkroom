@@ -44,8 +44,8 @@ impl Controls<'_> {
     }
 
     /// The nearest/bilinear magnification toggle: accent-filled while nearest
-    /// is active. Flips `filter` on click; returns whether it changed.
-    pub(super) fn filter_toggle(self, ui: &mut Ui, filter: &mut ImageFilter) -> bool {
+    /// is active. Flips `filter` on click.
+    pub(super) fn filter_toggle(self, ui: &mut Ui, filter: &mut ImageFilter) {
         let nearest = *filter == ImageFilter::Nearest;
         let tooltip = if nearest {
             "Zoom-in sampling: nearest — click for bilinear"
@@ -61,9 +61,7 @@ impl Controls<'_> {
             } else {
                 ImageFilter::Nearest
             };
-            return true;
         }
-        false
     }
 }
 

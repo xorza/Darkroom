@@ -26,8 +26,7 @@ use crate::gui::app::session::Session;
 use crate::gui::app::view_capture::{CaptureTarget, ViewCapture};
 use crate::gui::dialogs::{Dialogs, SavedFile};
 use crate::gui::frame::app_command::{
-    AppCommand, EditCommand, FileCommand, MlModelKind, PathPick, PreferencesCommand, RunCommand,
-    ViewCommand,
+    AppCommand, EditCommand, FileCommand, MlModelKind, PathPick, RunCommand, ViewCommand,
 };
 use crate::gui::frame::app_ctx::AppCtx;
 use crate::gui::frame::input_stage::InputStage;
@@ -75,10 +74,11 @@ pub(crate) struct App {
     /// A quit asked this pass, which closes the window as the pass ends.
     quitting: bool,
     /// Persisted session state: the last document, the window, the viewer
-    /// and model choices. Written on every change through
-    /// [`Self::save_preferences`], so the next launch reopens where the user
-    /// left off.
+    /// and model choices. A form edits it in place, and [`Self::sync_preferences`] finds the
+    /// change, so the next launch reopens where the user left off.
     preferences: Preferences,
+    /// The copy last handed to the store, which [`Self::sync_preferences`] compares with.
+    saved_preferences: Preferences,
     /// Where [`Self::preferences`] persist: [`PreferencesStore::Memory`] when the file existed
     /// but could not be read, so the file stays as the user has it.
     preferences_store: PreferencesStore,
@@ -175,6 +175,7 @@ impl App {
             status,
             theme: Theme::default(),
             quitting: false,
+            saved_preferences: preferences.clone(),
             preferences,
             preferences_store,
             dialogs,
@@ -196,7 +197,7 @@ impl App {
         // persisted, so the next launch does not fail on it again.
         if forgot_remembered {
             app.preferences.document_path = None;
-            app.save_preferences();
+            app.sync_preferences();
         }
         app
     }
@@ -217,10 +218,7 @@ impl App {
             AppCommand::File(FileCommand::Save) => self.save_cur(),
             AppCommand::File(FileCommand::SaveAs) => self.save_document_as(),
             AppCommand::Run(run) => self.run(run),
-            AppCommand::Preferences(PreferencesCommand::Changed) => self.apply_preferences(),
-            AppCommand::Preferences(PreferencesCommand::PickMlModel(kind)) => {
-                self.pick_ml_model(kind);
-            }
+            AppCommand::PickMlModel(kind) => self.pick_ml_model(kind),
             AppCommand::Edit(EditCommand::PickInputPath(pick)) => {
                 self.pick_input_path(&pick);
             }
@@ -349,7 +347,7 @@ impl App {
         }
         let resolution = outcome.resolve(self.session.open.is_dirty());
         if resolution.silence_prompt {
-            self.set_confirm_unsaved(false);
+            self.preferences.confirm_unsaved_changes = false;
         }
         if resolution.proceed {
             self.perform(transition);
@@ -513,20 +511,24 @@ impl App {
     /// after a successful document lifecycle transition.
     fn remember_document_path(&mut self) {
         self.preferences.document_path = self.session.open.path().map(Path::to_path_buf);
-        self.save_preferences();
     }
 
-    /// Re-derive everything that depends on [`Preferences`] and persist it.
-    ///
-    /// [`Preferences`]: crate::core::io::preferences::Preferences
-    fn apply_preferences(&mut self) {
+    /// Carry a changed choice to what depends on it and persist it, once each pass past everything
+    /// that edits one. Edits come in place, so no surface reports one and none can forget to, as a
+    /// lost save shows no error. Allocates only on a change. Refused: a clone per frame, which
+    /// allocates each frame; a setter per field, against palantir's bound widgets.
+    fn sync_preferences(&mut self) {
+        if self.preferences.same_choices(&self.saved_preferences) {
+            return;
+        }
         self.runtime.set_ml_model_paths(&self.preferences.ml_models);
         self.save_preferences();
     }
 
     /// Persist the preferences, surfacing a failed write in the status
     /// bar — the one save path every caller routes through, so a broken
-    /// preferences file can't fail silently.
+    /// preferences file can't fail silently. A failed write counts as saved too: the next change
+    /// tries again, and an unchanged frame writes nothing.
     fn save_preferences(&mut self) {
         match self.preferences_store.save(&self.preferences) {
             Ok(Saved::File) => self.status.succeeded(StatusFamily::Preferences),
@@ -536,25 +538,13 @@ impl App {
                 .status
                 .error(StatusFamily::Preferences, ErrorChain::new(&err).to_string()),
         }
+        self.saved_preferences.clone_from(&self.preferences);
     }
 
     fn pick_ml_model(&mut self, kind: MlModelKind) {
         if let Some(path) = self.dialogs.existing_file(&["onnx"]) {
-            self.set_ml_model_path(kind, path);
+            *kind.path_mut(&mut self.preferences.ml_models) = path;
         }
-    }
-
-    fn set_ml_model_path(&mut self, kind: MlModelKind, path: PathBuf) {
-        *kind.path_mut(&mut self.preferences.ml_models) = path;
-        self.apply_preferences();
-    }
-
-    /// Persist whether discarding unsaved changes prompts to save.
-    /// Shared by the Preferences checkbox (via `Changed`) and the prompt's
-    /// "Don't ask again", which calls this directly.
-    fn set_confirm_unsaved(&mut self, on: bool) {
-        self.preferences.confirm_unsaved_changes = on;
-        self.save_preferences();
     }
 
     /// Hand `command` to the runtime and report its outcome. A command that
@@ -750,6 +740,7 @@ impl palantir::App for App {
         if !prompted {
             self.record_discard_prompt(ui);
         }
+        self.sync_preferences();
         if self.quitting {
             ui.close_window(MAIN_WINDOW);
         }
@@ -1065,6 +1056,8 @@ mod tests {
                 Some(document.as_path()),
                 "{store:?}"
             );
+            ui.ui_mut().request_repaint();
+            ui.frame_app(&mut app);
             if !readable {
                 assert_eq!(app.preferences_store, PreferencesStore::Memory);
                 assert!(
@@ -1295,6 +1288,109 @@ mod tests {
             2,
             "a click on a menu title"
         );
+    }
+
+    /// A change saves once, however it came: a form's edit in place, then nothing while no choice
+    /// moves, a resize included, and an edit back saves again. A deleted file shows each write. A
+    /// failed write does not retry until the next change.
+    #[test]
+    fn a_change_saves_once_a_resize_nothing_and_an_edit_back_again() {
+        use common::{TempDir, fs};
+        use glam::UVec2;
+        use palantir::Harness;
+
+        use crate::core::document::tab_ref::TabRef;
+        use crate::gui::dialogs::DialogFallback;
+
+        let dir = TempDir::new("darkroom-preferences-saves");
+        let file = dir.join("darkroom.preferences.ron");
+        let store = PreferencesStore::File(file.clone());
+        let mut ui = Harness::new(UVec2::new(800, 600));
+        let mut app = App::new(
+            ui.ui_mut(),
+            LaunchInputs {
+                preferences: store.clone().open(),
+                document: None,
+                dialogs: Dialogs::new(DialogFallback::Refuse),
+            },
+        );
+        let frame = |ui: &mut Harness, app: &mut App| {
+            ui.ui_mut().request_repaint();
+            ui.frame_app(app);
+        };
+        frame(&mut ui, &mut app);
+        assert!(!fs::exists(&file), "a launch writes nothing");
+
+        // The Preferences tab's own checkbox, through a real click.
+        app.session
+            .open
+            .document_mut()
+            .layout
+            .apply(palantir::DockOperation::OpenTab {
+                tab: TabRef::Preferences,
+            });
+        frame(&mut ui, &mut app);
+        frame(&mut ui, &mut app);
+        let label = "Ask to save unsaved changes";
+        let checkbox = |ui: &Harness| {
+            ui.widgets(Some(label))
+                .first()
+                .expect("the tab shows the checkbox")
+                .id
+        };
+        let id = checkbox(&ui);
+        ui.click(id);
+        frame(&mut ui, &mut app);
+        assert!(
+            !app.preferences.confirm_unsaved_changes,
+            "the click edited it"
+        );
+        assert!(
+            !store.clone().open().preferences.confirm_unsaved_changes,
+            "the edit reached the file"
+        );
+
+        fs::remove_file(&file).unwrap();
+        frame(&mut ui, &mut app);
+        assert!(!fs::exists(&file), "no change, no write");
+
+        let before = app.preferences.window;
+        ui.resize(UVec2::new(900, 700));
+        frame(&mut ui, &mut app);
+        assert_ne!(app.preferences.window, before, "the geometry followed");
+        assert!(!fs::exists(&file), "a resize writes nothing");
+
+        app.preferences.confirm_unsaved_changes = true;
+        frame(&mut ui, &mut app);
+        assert!(
+            store.open().preferences.confirm_unsaved_changes,
+            "the edit back reached the file"
+        );
+
+        // A model path also reaches the library that a new node takes its default from.
+        let model = dir.join("denoise.onnx");
+        app.preferences.ml_models.denoise.clone_from(&model);
+        frame(&mut ui, &mut app);
+        let denoise = app.runtime.library.cur().by_name("ML Denoise").unwrap();
+        assert_eq!(
+            denoise.inputs()[1].default_value,
+            Some(ConstValue::FsPath(model.to_str().unwrap().to_string())),
+        );
+
+        // A failed write reports itself and waits for the next change, not the next frame: a
+        // folder in the file's place refuses it, and is gone before the frame that would retry.
+        fs::remove_file(&file).unwrap();
+        fs::create_dir(&file).unwrap();
+        app.preferences.relative_paths = !app.preferences.relative_paths;
+        frame(&mut ui, &mut app);
+        assert!(app.status.cur().is_some(), "the failure reports itself");
+        fs::remove_dir(&file).unwrap();
+        frame(&mut ui, &mut app);
+        assert!(!fs::exists(&file), "no retry with no change");
+        app.preferences.relative_paths = !app.preferences.relative_paths;
+        frame(&mut ui, &mut app);
+        assert!(fs::exists(&file), "the next change writes");
+        assert!(app.status.cur().is_none(), "and clears the failure");
     }
 
     /// A framing chip takes the one route a framing has, a command the record raises, and lands in

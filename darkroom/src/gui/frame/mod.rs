@@ -3,6 +3,9 @@
 //! [`record_stage`]), what a record takes past them ([`window_parts`], [`requests`]), and the
 //! commands a surface raises for the shell ([`app_command`], [`framing`]). Data only — the levels
 //! that act on it import it, and it imports none of them.
+//!
+//! The update path takes a stage and the record path `(ui, stage)`. A level adds to its stage's
+//! context and hands it down, and nothing returns upward but the frame's `InputOutcome`.
 
 pub(crate) mod app_command;
 pub(crate) mod app_ctx;

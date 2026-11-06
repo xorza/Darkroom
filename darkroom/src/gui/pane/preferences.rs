@@ -3,11 +3,9 @@
 //! centered width-capped column of labeled sections.
 //! Rendered by `main_window` when the active tab is `TabRef::Preferences`.
 //!
-//! It edits the borrowed [`Preferences`] **in place** and reports a single
-//! [`PreferencesCommand::Changed`] whenever any field moved. `App` synchronizes and
-//! persists derived state after authoring, so adding a preference is just
-//! another widget here; no new command or handler. The "Browse…" buttons
-//! return [`PreferencesCommand::PickMlModel`] so `App` can open the blocking dialog
+//! It edits the borrowed [`Preferences`] **in place**, and `App` finds the change after the record
+//! and persists it, so adding a preference is just another widget here; no new command or handler.
+//! The "Browse…" buttons raise [`AppCommand::PickMlModel`] so `App` can open the blocking dialog
 //! after authoring has released its borrows.
 
 use std::path::{Path, PathBuf};
@@ -22,7 +20,7 @@ use palantir::{
 use crate::core::io::preferences::Preferences;
 use crate::core::io::preferences::interface_size::InterfaceSize;
 use crate::gui::frame::app_command::AppCommand;
-use crate::gui::frame::app_command::{MlModelKind, PreferencesCommand};
+use crate::gui::frame::app_command::MlModelKind;
 use crate::gui::frame::requests::Requests;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::link::Link;
@@ -33,7 +31,7 @@ use crate::gui::widgets::support;
 const COL_WIDTH: f32 = 720.0;
 
 /// The preferences form for one record pass: the theme it paints with and
-/// the sink its edits queue into.
+/// the sink its Browse buttons raise their picks into.
 #[derive(Debug)]
 pub(crate) struct PreferencesForm<'a> {
     pub(crate) theme: &'a Theme,
@@ -41,8 +39,7 @@ pub(crate) struct PreferencesForm<'a> {
 }
 
 impl PreferencesForm<'_> {
-    /// Draw the form, editing `preferences` in place, and queue whatever the edit
-    /// needs `App` to run: persist + re-sync, or a Browse dialog.
+    /// Draw the form, editing `preferences` in place, and queue a Browse dialog for `App` to run.
     pub(crate) fn show(mut self, ui: &mut Ui, preferences: &mut Preferences) {
         let theme = self.theme;
         Panel::vstack()
@@ -83,15 +80,10 @@ impl PreferencesForm<'_> {
                             ),
                         ];
                         for (row, (value, label)) in (BEHAVIOR_ROW + 1..).zip(toggles) {
-                            if Checkbox::new(value)
+                            Checkbox::new(value)
                                 .label(label)
                                 .grid_cell((row, 1))
-                                .show(ui)
-                                .changed
-                            {
-                                self.out
-                                    .push_app(AppCommand::Preferences(PreferencesCommand::Changed));
-                            }
+                                .show(ui);
                         }
 
                         // ML models — caller-supplied ONNX files the ml_denoise /
@@ -124,9 +116,8 @@ impl PreferencesForm<'_> {
     }
 
     /// The interface size: a label in the form's label column and a dropdown of the offered
-    /// sizes. A pick writes `size` in place and queues [`PreferencesCommand::Changed`]; the app
-    /// applies it from the next frame.
-    fn interface_size_row(&mut self, ui: &mut Ui, size: &mut InterfaceSize) {
+    /// sizes. A pick writes `size` in place; the app applies it from the next frame.
+    fn interface_size_row(&self, ui: &mut Ui, size: &mut InterfaceSize) {
         let row = APPEARANCE_ROW + 1;
         self.label(ui, "Interface size", row);
         let offered: &'static [InterfaceSize] = &InterfaceSize::OFFERED;
@@ -142,8 +133,6 @@ impl PreferencesForm<'_> {
             .changed;
         if changed {
             *size = *picked;
-            self.out
-                .push_app(AppCommand::Preferences(PreferencesCommand::Changed));
         }
     }
 
@@ -154,8 +143,7 @@ impl PreferencesForm<'_> {
     /// the CLI tool plus unzip/point-at-the-`.onnx` guidance).
     ///
     /// Writes the path `kind` names in `paths` in place and queues
-    /// [`PreferencesCommand::Changed`] on an edited path, or
-    /// [`PreferencesCommand::PickMlModel`] when Browse is clicked.
+    /// [`AppCommand::PickMlModel`] when Browse is clicked.
     fn model_row(&mut self, ui: &mut Ui, row: ModelRow, paths: &mut MlModelPaths) {
         let ModelRow {
             row: at,
@@ -191,8 +179,6 @@ impl PreferencesForm<'_> {
             let response = edit.show(ui);
             if let Some(text) = response.committed_text {
                 *path = PathBuf::from(text);
-                self.out
-                    .push_app(AppCommand::Preferences(PreferencesCommand::Changed));
             }
             if response.committed {
                 // Re-stat on every commit — even an unchanged path: the file may have appeared
@@ -210,10 +196,7 @@ impl PreferencesForm<'_> {
                 .left
                 .clicked()
             {
-                self.out
-                    .push_app(AppCommand::Preferences(PreferencesCommand::PickMlModel(
-                        kind,
-                    )));
+                self.out.push_app(AppCommand::PickMlModel(kind));
             }
 
             // Under the field and the button: the error, then how to get the file.
@@ -398,7 +381,6 @@ mod tests {
     use super::*;
     use glam::UVec2;
     use palantir::Key;
-    use std::iter;
 
     use common::{TempDir, TempFile, internals};
     use palantir::Harness;
@@ -464,17 +446,9 @@ mod tests {
                 }
                 .model_row(ui, row, paths);
             });
-            iter::from_fn(|| out.pop_app())
-                .filter(|command| {
-                    matches!(
-                        command,
-                        AppCommand::Preferences(PreferencesCommand::Changed)
-                    )
-                })
-                .count()
         };
         let type_x = |h: &mut Harness,
-                      frame: &mut dyn FnMut(&mut Harness, &mut MlModelPaths) -> usize,
+                      frame: &mut dyn FnMut(&mut Harness, &mut MlModelPaths),
                       paths: &mut MlModelPaths| {
             let center = h.rect(wid).expect("path field arranged").center();
             h.click(center);
@@ -482,17 +456,20 @@ mod tests {
             h.key(Key::End);
             frame(h, paths);
             h.key(Key::Char('x'));
-            assert_eq!(frame(h, paths), 0, "typing queues nothing");
+            frame(h, paths);
+            assert_eq!(
+                paths.denoise,
+                PathBuf::from("/a.onnx"),
+                "typing writes nothing"
+            );
         };
 
         frame(&mut h, &mut paths);
         type_x(&mut h, &mut frame, &mut paths);
         h.key(Key::Escape);
-        let mut queued = 0;
         for _ in 0..3 {
-            queued += frame(&mut h, &mut paths);
+            frame(&mut h, &mut paths);
         }
-        assert_eq!(queued, 0, "Escape must queue no change");
         assert_eq!(
             paths.denoise,
             PathBuf::from("/a.onnx"),
@@ -501,8 +478,12 @@ mod tests {
 
         type_x(&mut h, &mut frame, &mut paths);
         h.key(Key::Enter);
-        assert_eq!(frame(&mut h, &mut paths), 1, "Enter queues one change");
-        assert_eq!(paths.denoise, PathBuf::from("/a.onnxx"));
+        frame(&mut h, &mut paths);
+        assert_eq!(
+            paths.denoise,
+            PathBuf::from("/a.onnxx"),
+            "Enter writes the draft"
+        );
         assert_eq!(
             paths.star_removal,
             MlModelPaths::default().star_removal,

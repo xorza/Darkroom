@@ -40,7 +40,7 @@ use palantir::{
 use crate::core::document::Document;
 use crate::core::document::viewport::Viewport;
 use crate::core::io::preferences::{ViewerBg, ViewerPreferences};
-use crate::gui::frame::app_command::{AppCommand, PreferencesCommand, ViewCommand};
+use crate::gui::frame::app_command::{AppCommand, ViewCommand};
 use crate::gui::frame::requests::Requests;
 use crate::gui::pane::image_viewer::camera::VIEWER_ZOOM;
 use crate::gui::pane::image_viewer::glyph::Swatch;
@@ -183,7 +183,7 @@ pub(crate) struct ViewerPane<'a> {
 }
 
 /// What a viewer writes this frame: the shared viewer preferences its controls edit, and the
-/// queue their change is reported on.
+/// queue it asks for its full-resolution image on.
 #[derive(Debug)]
 pub(crate) struct ViewerWrites<'a> {
     pub(crate) preferences: &'a mut ViewerPreferences,
@@ -254,8 +254,8 @@ impl ImageViewer {
 
     /// Draw the viewer into `view` (the whole tab content). Borrows the
     /// centralized texture, applies last frame's pan/zoom gestures, then
-    /// paints the image (or message), header, and controls. A change to the shared viewer
-    /// preferences queues [`PreferencesCommand::Changed`], as the Preferences tab's does.
+    /// paints the image (or message), header, and controls, which edit the shared viewer
+    /// preferences in place, as the Preferences tab's do.
     pub(crate) fn show(
         &mut self,
         ui: &mut Ui,
@@ -290,7 +290,6 @@ impl ImageViewer {
 
         // The checker draws over the theme's backdrop.
         let fill = glyph::flat_fill(theme, preferences.bg).unwrap_or(theme.canvas.bg);
-        let mut preferences_changed = false;
         Panel::zstack()
             .id(pane_wid(self.node_id))
             .size(Sizing::FILL)
@@ -322,7 +321,7 @@ impl ImageViewer {
                         pane: pane_view,
                         view,
                     };
-                    preferences_changed = self.top_row(ui, shown, preferences);
+                    self.top_row(ui, shown, preferences);
                 }
                 // Complementary to the image above, so this is the same
                 // either/or the enum states — never a second thing drawn over
@@ -346,9 +345,6 @@ impl ImageViewer {
                     .show(ui, theme);
                 }
             });
-        if preferences_changed {
-            out.push_app(AppCommand::Preferences(PreferencesCommand::Changed));
-        }
     }
 
     /// The screen-fixed checkerboard backdrop across the whole pane. One
@@ -375,13 +371,8 @@ impl ImageViewer {
 
     /// The row along the pane's top: the readout at the left, cut with an ellipsis where it would
     /// reach the control panel at the right. One row lays both out, so the readout yields to the
-    /// panel in the frame they share. Returns `true` when `preferences` changed.
-    fn top_row(
-        &mut self,
-        ui: &mut Ui,
-        shown: Shown<'_>,
-        preferences: &mut ViewerPreferences,
-    ) -> bool {
+    /// panel in the frame they share.
+    fn top_row(&mut self, ui: &mut Ui, shown: Shown<'_>, preferences: &mut ViewerPreferences) {
         let margin = shown.pane.theme.space.sm;
         Panel::hstack()
             .id(top_row_wid(self.node_id))
@@ -392,9 +383,8 @@ impl ImageViewer {
             .show(ui, |ui| {
                 self.header(ui, shown);
                 support::hspacer(ui, "viewer_top_spacer");
-                self.controls(ui, shown, preferences)
-            })
-            .inner
+                self.controls(ui, shown, preferences);
+            });
     }
 
     /// The top-left readout: source node, native dimensions and pixel
@@ -423,22 +413,15 @@ impl ImageViewer {
     /// pills, opaque chip buttons raised off each pill. The top
     /// pill frames the view (fit, 100%); the column below edits the
     /// shared appearance preferences — the backdrop radio stack and,
-    /// past a rule, the sampling toggle. Returns `true` when `preferences`
-    /// changed. Drawn after the image so the buttons hit-test above the
+    /// past a rule, the sampling toggle. Drawn after the image so the buttons hit-test above the
     /// pane's gesture surface. Framing clicks land next frame (responses
     /// lag the record by one frame) — imperceptible.
-    fn controls(
-        &mut self,
-        ui: &mut Ui,
-        shown: Shown<'_>,
-        preferences: &mut ViewerPreferences,
-    ) -> bool {
+    fn controls(&mut self, ui: &mut Ui, shown: Shown<'_>, preferences: &mut ViewerPreferences) {
         let (theme, pane) = (shown.pane.theme, shown.pane.size);
         let controls = Controls {
             node_id: self.node_id,
             theme,
         };
-        let mut changed = false;
         Panel::vstack()
             .id(controls.wid("panel"))
             .size((Sizing::HUG, Sizing::HUG))
@@ -470,14 +453,12 @@ impl ImageViewer {
                         }) && !selected
                         {
                             preferences.bg = mode;
-                            changed = true;
                         }
                     }
                     pill::rule(ui, theme);
-                    changed |= controls.filter_toggle(ui, &mut preferences.mag_filter);
+                    controls.filter_toggle(ui, &mut preferences.mag_filter);
                 });
             });
-        changed
     }
 
     /// Fold last frame's pane gestures into the viewport: left/middle-drag

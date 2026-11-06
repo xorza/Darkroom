@@ -134,6 +134,32 @@ fn read_window_size<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Size, 
     }
 }
 
+impl Preferences {
+    /// Whether `other` holds the same choices: everything but the window's geometry, which moves
+    /// with each resize and is written only on the way out.
+    ///
+    /// Destructured, so a field added to [`Preferences`] does not compile until it says which it is.
+    pub(crate) fn same_choices(&self, other: &Self) -> bool {
+        let Self {
+            document_path,
+            load_last_document,
+            confirm_unsaved_changes,
+            relative_paths,
+            interface_size,
+            window: _,
+            viewer,
+            ml_models,
+        } = self;
+        *document_path == other.document_path
+            && *load_last_document == other.load_last_document
+            && *confirm_unsaved_changes == other.confirm_unsaved_changes
+            && *relative_paths == other.relative_paths
+            && *interface_size == other.interface_size
+            && *viewer == other.viewer
+            && *ml_models == other.ml_models
+    }
+}
+
 impl Default for Preferences {
     fn default() -> Self {
         Self {

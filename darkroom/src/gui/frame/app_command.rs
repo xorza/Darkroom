@@ -30,8 +30,8 @@ pub(crate) enum AppCommand {
     File(FileCommand),
     /// Graph execution + worker event loop.
     Run(RunCommand),
-    /// Preferences edits.
-    Preferences(PreferencesCommand),
+    /// Pick a file for one of the ML nodes' models, in a blocking dialog.
+    PickMlModel(MlModelKind),
     /// Node edits raised via a dialog.
     Edit(EditCommand),
     /// An image of the window, and where the graph's camera looks.
@@ -101,18 +101,6 @@ pub(crate) enum RunCommand {
     StartEvents,
     /// Stop the worker's event loop.
     StopEvents,
-}
-
-/// Preferences UI actions.
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum PreferencesCommand {
-    /// A field of [`crate::core::io::preferences::Preferences`] was edited
-    /// in place — by the Preferences tab (any checkbox / radio / path field)
-    /// or the image viewer's toolbar (backdrop / sampling). `App` synchronizes
-    /// derived state and persists it — one command for every field, so adding
-    /// a preference needs no new command.
-    Changed,
-    PickMlModel(MlModelKind),
 }
 
 /// Which of the ML nodes' model files a Browse pick sets.
