@@ -3,8 +3,7 @@
 //!
 //! The dock itself is palantir's ([`palantir::DockView`]); this is the
 //! whole of darkroom's side of it. Adding a pane *kind* is a new arm in
-//! [`DockPanes::content`] and one in [`DockPanes::title`], and nothing
-//! else.
+//! [`tab_label`] and one in [`DockPanes::body`], and nothing else.
 
 use std::collections::HashMap;
 use std::fmt;

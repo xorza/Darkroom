@@ -149,7 +149,7 @@ pub(crate) const fn flush_button(unselected: StatefulLook, selected: StatefulLoo
 /// tooltip" is a different fact from "its tooltip is blank", and the port
 /// glyphs — the one family that decides per frame — now say which they mean.
 /// Any text form is accepted: a `&'static str` tooltip stays borrowed until the
-/// bubble actually records, and a [`fmt!`] one is already in the pass's arena.
+/// bubble actually records, and a [`fmt!`](palantir::fmt) one is already in the pass's arena.
 pub(crate) fn tooltip_after<'a>(
     ui: &mut Ui,
     trigger: &'a Response,

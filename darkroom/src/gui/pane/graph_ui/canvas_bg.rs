@@ -26,9 +26,9 @@ const FRINGE: f32 = 0.5;
 /// the camera ever shows, so a pan or a zoom only moves and scales it, and a frame copies it once.
 ///
 /// Refused: one tiled image over the canvas, which blends every pixel of it for the few the dots
-/// cover, a `pan` frame at 1.04 ms against the mesh's 0.79 ms on an Apple laptop, and a `zoom` frame
-/// at 1.15 ms against 0.87 ms; a shape per dot, 0.89 ms and 0.96 ms, which also took a still frame
-/// from 84 to 110 µs, where the mesh takes it to 88 µs, as each dot is one more shape to record.
+/// cover, a `pan` frame at 1.04 ms against the mesh's 0.76 ms on an Apple laptop, and a `zoom` frame
+/// at 1.15 ms against 0.97 ms; a shape per dot, 0.89 ms and 0.96 ms, which also took a still frame
+/// from 84 to 110 µs, where the mesh takes it to 89 µs, as each dot is one more shape to record.
 #[derive(Default, Debug)]
 pub(super) struct CanvasBg {
     mesh: Mesh,

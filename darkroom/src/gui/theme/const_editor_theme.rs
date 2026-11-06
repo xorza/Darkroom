@@ -10,7 +10,7 @@ use crate::gui::widgets::hover::Hover;
 const VALUE_EDITOR_WIDTH: f32 = 100.0;
 /// Upper bound on the value column: editors fill the column up to here, then a
 /// long value (a wide enum/preset dropdown, a long path) ellipsizes instead of
-/// stretching the node out. Read by [`ConstEditorTheme::from_palette`],
+/// stretching the node out. Read by [`ConstEditorTheme::with_box`],
 /// which sizes the editor itself.
 const VALUE_EDITOR_MAX_WIDTH: f32 = 240.0;
 
