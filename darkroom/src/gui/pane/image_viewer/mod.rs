@@ -83,6 +83,9 @@ pub(crate) struct ImageViewer {
     /// [`ViewerPreferences`] — one persisted setting shared by every
     /// viewer tab, threaded into [`Self::show`] each frame.
     checker: Option<ImageHandle>,
+    /// How the shown image shrinks: area averaging keeps its source brightness. The editor bench
+    /// alone sets another.
+    downsample: ImageDownsample,
 }
 
 /// Drawn when a viewer's node has published nothing yet and no run has said why. An invitation
@@ -203,6 +206,7 @@ impl ImageViewer {
             view: None,
             pan_anchor: None,
             checker: None,
+            downsample: ImageDownsample::Mean,
         }
     }
 
@@ -304,8 +308,7 @@ impl ImageViewer {
                     let image = Shape::image(shown.handle.clone())
                         .min_filter(ImageFilter::Linear)
                         .mag_filter(preferences.mag_filter)
-                        // Area averaging preserves source brightness when minifying.
-                        .downsample(ImageDownsample::Mean);
+                        .downsample(self.downsample);
                     ui.add_shape(match self.effective_view(ui, shown, pane) {
                         Some(v) => image
                             .at(camera::draw_rect(logical_size(shown, ui), v))
@@ -592,6 +595,18 @@ fn top_row_wid(node_id: NodeId) -> WidgetId {
 /// viewer tabs can't cross-feed their gesture responses.
 fn pane_wid(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("darkroom.image_viewer.pane", node_id))
+}
+
+#[cfg(feature = "internals")]
+pub(crate) mod internals {
+    use super::*;
+
+    impl ImageViewer {
+        /// Shrink the shown image with `downsample`.
+        pub(crate) const fn set_downsample(&mut self, downsample: ImageDownsample) {
+            self.downsample = downsample;
+        }
+    }
 }
 
 #[cfg(test)]

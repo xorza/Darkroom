@@ -4,6 +4,8 @@
 //! The document holds its own workspace: the graph, an image viewer and the inspector docked
 //! around it, at the camera it was saved with. Every preview node shows a 24 MP float image,
 //! planar as a stacked frame lumos publishes. Its inputs are absent, as no case runs the graph.
+//! The viewer shrinks that image with one tap, not the editor's area average, which would hide the
+//! rest of a `pan` or `zoom` frame: 0.6 ms of its 2.4 ms on an Apple laptop.
 //!
 //! - **`cpu`**: record through encode and compose on palantir's deviceless frontend, as the
 //!   palantir frame's `cpu` backend does.
@@ -37,7 +39,7 @@ use palantir::bench::kind::{Kind, Scale};
 use palantir::bench::scene::{BENCH_DPR, BENCH_SURFACE};
 use palantir::internals::Timing;
 use palantir::{ColorScheme, Depth, Harness};
-use palantir::{FramePaint, OffscreenHost, Ui};
+use palantir::{FramePaint, ImageDownsample, OffscreenHost, Ui};
 use scenarium::{DynamicValue, NodeId};
 
 use crate::core::document::Document;
@@ -305,6 +307,13 @@ impl FrameCase {
                 step(&mut editor);
             }
             editor.converts_full = false;
+            editor
+                .session
+                .main_window
+                .image_viewers
+                .get_mut(&PUBLISHED)
+                .expect("the published node's tab is the one the viewer shows")
+                .set_downsample(ImageDownsample::Single);
             for _ in 0..SETTLE_FRAMES {
                 step(&mut editor);
             }
@@ -356,7 +365,7 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
                     let target = gpu.target("darkroom.editor_frame", BENCH_SURFACE);
                     let mut host = OffscreenHost::builder(gpu.handles())
                         .collect_gpu_stats(false)
-                        .retained_target(true)
+                        .swapchain_present()
                         .build();
                     host.ui_mut()
                         .set_theme_for(ColorScheme::Dark, Theme::default().palantir);
