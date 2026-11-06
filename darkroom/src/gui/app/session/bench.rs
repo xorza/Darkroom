@@ -26,11 +26,10 @@
 //!   so each frame records twice.
 //!
 //! A scenario changes the editor as production does: the camera and the drag are one held
-//! gesture of edit intents through `OpenDocument::apply_edit`, whose relayout the frame takes.
+//! gesture of edit intents through `Session::apply_edit`, whose relayout the frame takes.
 
 use common::{Buffer2, USize2};
 use imaginarium::PlanarImage;
-use std::mem;
 use std::path::Path;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -63,7 +62,6 @@ use crate::gui::app::session::Session;
 use crate::gui::frame::app_command::{AppCommand, ViewCommand};
 use crate::gui::frame::app_ctx::AppCtx;
 use crate::gui::frame::frame_writes::FrameWrites;
-use crate::gui::frame::relayout::Relayout;
 use crate::gui::frame::requests::Requests;
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::state::preview_store::preview_converter::{self, Card};
@@ -134,8 +132,6 @@ impl Scenario {
 /// The editor's state as `App` holds it, over the document.
 #[derive(Debug)]
 struct Editor {
-    /// What the input stage owes the layout engine, which the record spends.
-    input_relayout: Relayout,
     session: Session,
     library: RuntimeLibrary,
     theme: Theme,
@@ -172,7 +168,6 @@ impl Editor {
         }]);
 
         Self {
-            input_relayout: Relayout::NotNeeded,
             session: Session::new(open),
             library: runtime,
             theme: Theme::default(),
@@ -233,11 +228,8 @@ impl Editor {
                 offset: Vec2::new(if n.is_multiple_of(2) { 1.0 } else { 0.0 }, 0.0),
             },
         };
-        if Relayout::after(self.session.open.apply_edit(intent, self.library.cur()))
-            == Relayout::Needed
-        {
-            ui.request_relayout();
-        }
+        self.session
+            .apply_edit(intent, self.library.cur(), &mut self.requests);
     }
 
     fn run_commands(&mut self) {
@@ -260,16 +252,14 @@ impl App for Editor {
             .reconcile(&self.session.open.document);
         self.session.reconcile_caches();
         let ctx = AppCtx::new(&self.theme, self.library.cur(), &self.run_state);
-        let end = self.session.input(&mut update_ctx, ctx, &mut self.requests);
-        self.input_relayout = end.relayout;
+        let outcome = self.session.input(&mut update_ctx, ctx, &mut self.requests);
         self.run_commands();
-        end.outcome
+        outcome
     }
 
     fn record(&mut self, _: WindowToken, ui: &mut Ui) {
         let ctx = AppCtx::new(&self.theme, self.library.cur(), &self.run_state);
-        let mut relayout = mem::take(&mut self.input_relayout);
-        relayout |= self.session.record(
+        self.session.record(
             ui,
             ctx,
             FrameWrites {
@@ -278,9 +268,7 @@ impl App for Editor {
             },
         );
         self.run_commands();
-        if relayout == Relayout::Needed {
-            ui.request_relayout();
-        }
+        self.requests.spend_relayout(ui);
     }
 }
 

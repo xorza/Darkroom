@@ -21,6 +21,16 @@ impl EditFacts {
         renamed: false,
         binding_kind: false,
     };
+
+    /// Whether this edit leaves a frontend's cached geometry behind. A node that came has no cached
+    /// port offsets at all, and a rename or a const editor shown or hidden changes a measured size;
+    /// a move or a reorder changes neither, as a port center resolves as `node.pos + cached offset`.
+    /// Getting a move wrong is expensive rather than incorrect: a node drag emits one step per
+    /// gesture frame, so a spurious relayout doubles the whole editor pipeline for the length of the
+    /// drag.
+    pub(crate) const fn strands_geometry(self) -> bool {
+        self.node_set || self.renamed || self.binding_kind
+    }
 }
 
 impl BitOr for EditFacts {
@@ -39,5 +49,41 @@ impl BitOr for EditFacts {
 impl BitOrAssign for EditFacts {
     fn bitor_assign(&mut self, rhs: Self) {
         *self = *self | rhs;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::core::edit::edit_facts::EditFacts;
+
+    /// Each fact alone strands the geometry, and an edit with none, a move, does not.
+    #[test]
+    fn each_shape_fact_strands_the_geometry() {
+        for (facts, strands) in [
+            (EditFacts::NONE, false),
+            (
+                EditFacts {
+                    node_set: true,
+                    ..EditFacts::NONE
+                },
+                true,
+            ),
+            (
+                EditFacts {
+                    renamed: true,
+                    ..EditFacts::NONE
+                },
+                true,
+            ),
+            (
+                EditFacts {
+                    binding_kind: true,
+                    ..EditFacts::NONE
+                },
+                true,
+            ),
+        ] {
+            assert_eq!(facts.strands_geometry(), strands, "{facts:?}");
+        }
     }
 }

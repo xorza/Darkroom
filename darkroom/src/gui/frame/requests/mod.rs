@@ -2,11 +2,13 @@
 //! order it asked.
 
 use std::collections::VecDeque;
+use std::mem;
 
-use palantir::DockOperation;
+use palantir::{DockOperation, Ui};
 
 use crate::core::document::tab_ref::TabRef;
 use crate::core::edit::document_queue::DocumentQueue;
+use crate::core::edit::edit_facts::EditFacts;
 use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::frame::app_command::AppCommand;
@@ -32,10 +34,18 @@ use crate::gui::frame::app_command::AppCommand;
 /// answering the same frame both get what they asked for, in the order the
 /// frame produced them. Across tiers there is no order to keep, since the app
 /// tier runs after the whole pass rather than interleaved with the document's.
+///
+/// It also holds what the frame owes palantir's layout engine, so any level that strands the
+/// canvas's cross-frame geometry says so where it holds this queue, and `App` spends it once. A
+/// debt outlives the drains, and goes from the update to the record that spends it. Refused: a
+/// value each level returns, which came up six levels and across the two hooks by hand, and which a
+/// test app could drop.
 #[derive(Debug, Default)]
 pub(crate) struct Requests {
     document: DocumentQueue,
     app: VecDeque<AppCommand>,
+    /// Whether anything stranded the canvas's cross-frame geometry since the last spend.
+    relayout_owed: bool,
 }
 
 impl Requests {
@@ -101,9 +111,41 @@ impl Requests {
         self.app.pop_front()
     }
 
+    /// Owe a relayout: something remeasured, as a canvas appeared or a node has no size yet, so the
+    /// cached geometry read next frame would be stale.
+    pub(crate) const fn owe_relayout(&mut self) {
+        self.relayout_owed = true;
+    }
+
+    /// Owe a relayout if the edit that reported `facts` strands the geometry.
+    pub(crate) const fn owe_relayout_after(&mut self, facts: EditFacts) {
+        self.relayout_owed |= facts.strands_geometry();
+    }
+
+    /// Ask `ui` for the relayout owed, if one is: however many levels owed it, one pass answers. A
+    /// wire reads its port's rect, which only a layout gives, so a node's first record cannot draw
+    /// its wires: the sizing pass egui's `Grid` takes through `request_discard`.
+    pub(crate) fn spend_relayout(&mut self, ui: &mut Ui) {
+        if mem::take(&mut self.relayout_owed) {
+            ui.request_relayout();
+        }
+    }
+
     /// Whether no tier holds a request: so between two record passes, as each drains its own.
     pub(crate) fn is_empty(&self) -> bool {
         self.document.is_empty() && self.app.is_empty()
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use crate::gui::frame::requests::Requests;
+
+    impl Requests {
+        /// Whether a relayout is owed and not spent.
+        pub(crate) const fn owes_relayout(&self) -> bool {
+            self.relayout_owed
+        }
     }
 }
 

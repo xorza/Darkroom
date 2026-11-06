@@ -1,3 +1,5 @@
+use glam::UVec2;
+use palantir::Harness;
 use scenarium::NodeId;
 use std::iter;
 
@@ -63,4 +65,37 @@ fn each_level_drains_its_own_tier_and_leaves_the_rest_queued() {
         out.document().is_empty(),
         "and the queue is empty once both have drained"
     );
+}
+
+/// A debt comes from a direct owe, or from an edit that strands the geometry and from no other, and
+/// a spend asks one pass and clears it, however many levels owed it: 1 record for no debt and a
+/// move's facts, 2 for a debt, and 1 again past the spend.
+#[test]
+fn a_relayout_owed_takes_one_pass_and_a_spend_clears_it() {
+    let mut h = Harness::builder(UVec2::ONE).mono().build();
+    let mut out = Requests::default();
+    let passes = |h: &mut Harness, out: &mut Requests| {
+        let mut passes = 0;
+        h.ui_mut().request_repaint();
+        h.frame(|ui| {
+            passes += 1;
+            out.spend_relayout(ui);
+        });
+        passes
+    };
+    assert_eq!(passes(&mut h, &mut out), 1, "nothing owed");
+
+    out.owe_relayout_after(EditFacts::NONE);
+    assert!(!out.owes_relayout(), "a move strands nothing");
+
+    out.owe_relayout();
+    out.owe_relayout_after(EditFacts {
+        renamed: true,
+        ..EditFacts::NONE
+    });
+    assert!(out.owes_relayout());
+    assert!(out.is_empty(), "a debt is no request");
+    assert_eq!(passes(&mut h, &mut out), 2, "two debts, one pass");
+    assert!(!out.owes_relayout());
+    assert_eq!(passes(&mut h, &mut out), 1, "spent");
 }

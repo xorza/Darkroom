@@ -216,7 +216,7 @@ fn the_run_lines_link_selects_and_frames_the_cause() {
         ),
         "{commands:?}"
     );
-    let _relayout = h.drain();
+    h.drain();
     assert_eq!(
         h.session.open.document.main_view.selected,
         BTreeSet::from([ItemId::Node(cause)])
@@ -225,7 +225,7 @@ fn the_run_lines_link_selects_and_frames_the_cause() {
     let before = h.session.open.document.main_view.viewport;
     h.session.frame_graph(Framing::ShowSelected);
     h.frame();
-    let _relayout = h.drain();
+    h.drain();
     assert_ne!(
         h.session.open.document.main_view.viewport, before,
         "the next prepass framed the selection"

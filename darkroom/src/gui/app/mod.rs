@@ -1,4 +1,3 @@
-use std::mem;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -32,7 +31,6 @@ use crate::gui::frame::app_command::{
 };
 use crate::gui::frame::app_ctx::{AppCtx, StatusInputs};
 use crate::gui::frame::frame_writes::FrameWrites;
-use crate::gui::frame::relayout::Relayout;
 use crate::gui::frame::requests::Requests;
 use crate::gui::state::process_memory::ProcessMemory;
 use crate::gui::state::run_state::{RunFeed, RunState};
@@ -54,9 +52,6 @@ pub(crate) struct App {
     /// The document being edited and the UI showing it — replaced as a unit
     /// when a different file is opened, since neither outlives the other.
     session: Session,
-    /// What this frame's input stage owes the layout engine, which `App::record` spends: the one
-    /// place in the app that asks for a relayout.
-    input_relayout: Relayout,
     /// The func library, the evaluation worker, and the status log they
     /// report into — everything the document is executed against.
     runtime: RuntimeHost,
@@ -185,7 +180,6 @@ impl App {
             capture: None,
             process_memory: ProcessMemory::new(),
             requests: Requests::default(),
-            input_relayout: Relayout::NotNeeded,
         };
         // Onto the Ui before frame 1, so palantir's own widgets paint right and the first frame
         // is at the remembered size. Darkroom has one look, Ayu Graphite's dark, so it pins the
@@ -208,12 +202,9 @@ impl App {
     /// Run a command the frame raised, once the pass that raised it is over:
     /// every one needs `&mut App`, a blocking dialog, or both.
     ///
-    /// Returns whether it stranded the canvas's cached geometry. Only an edit
-    /// can — the rest touch state no canvas measures against — but it is
-    /// reported rather than requested here, so that `App::record` stays the one
-    /// place in the app that asks for a relayout.
-    #[must_use]
-    fn run_command(&mut self, command: AppCommand) -> Relayout {
+    /// Only an edit can strand the canvas's cached geometry, and it owes that on the requests: the
+    /// rest touch state no canvas measures against.
+    fn run_command(&mut self, command: AppCommand) {
         match command {
             // Both replace the open document, so they clear the
             // unsaved-changes guard before doing anything.
@@ -229,7 +220,7 @@ impl App {
                 self.pick_ml_model(kind);
             }
             AppCommand::Edit(EditCommand::PickInputPath(pick)) => {
-                return self.pick_input_path(&pick);
+                self.pick_input_path(&pick);
             }
             AppCommand::View(ViewCommand::CopyImage) => {
                 self.capture = Some(ViewCapture::new(CaptureTarget::Clipboard));
@@ -243,11 +234,10 @@ impl App {
                     self.capture = Some(ViewCapture::new(CaptureTarget::Png(path)));
                 }
             }
-            AppCommand::Undo => return Relayout::after(self.session.open.undo()),
-            AppCommand::Redo => return Relayout::after(self.session.open.redo()),
+            AppCommand::Undo => self.session.undo(&mut self.requests),
+            AppCommand::Redo => self.session.redo(&mut self.requests),
             AppCommand::Quit => self.guard_discard(PendingTransition::Quit),
         }
-        Relayout::NotNeeded
     }
 
     /// Mirror the window's live geometry into the persisted preferences
@@ -379,14 +369,9 @@ impl App {
 
     /// Open a file dialog for a node's `FsPath` const input and, if the
     /// user makes a selection, apply the chosen paths as a `SetInput` edit. Runs after
-    /// authoring, so it goes through `OpenDocument::apply_edit` rather than
+    /// authoring, so it goes through [`Session::apply_edit`] rather than
     /// the frame's intent drain.
-    ///
-    /// Reports the edit's relayout need rather than acting on it — this runs
-    /// after `Session::record` has handed its own back, and `App::record`
-    /// spends both together.
-    #[must_use]
-    fn pick_input_path(&mut self, pick: &PathPick) -> Relayout {
+    fn pick_input_path(&mut self, pick: &PathPick) {
         let extensions: Vec<&str> = pick.config.extensions.iter().map(String::as_str).collect();
         let picked = match pick.config.mode {
             FsPathMode::ExistingFile => self.dialogs.existing_file(&extensions).map(fs_path),
@@ -395,22 +380,23 @@ impl App {
             FsPathMode::Dir => self.dialogs.dir().map(fs_path),
         };
         let value = match picked {
-            None => return Relayout::NotNeeded,
+            None => return,
             Some(Ok(value)) => value,
             Some(Err(error)) => {
                 self.status
                     .error(StatusFamily::Edit, ErrorChain::new(&error).to_string());
-                return Relayout::NotNeeded;
+                return;
             }
         };
         self.status.succeeded(StatusFamily::Edit);
-        Relayout::after(self.session.open.apply_edit(
+        self.session.apply_edit(
             GraphIntent::SetInput {
                 input: pick.port,
                 to: Some(Binding::Const(value)),
             },
             self.runtime.library.cur(),
-        ))
+            &mut self.requests,
+        );
     }
 
     /// Prompt for a project file and load it. The
@@ -697,13 +683,11 @@ impl palantir::App for App {
         self.handle_close_request(&update_ctx);
 
         let ctx = AppCtx::new(&self.theme, self.runtime.library.cur(), &self.run_state);
-        let end = self.session.input(&mut update_ctx, ctx, &mut self.requests);
-        let mut needs_relayout = end.relayout;
+        let outcome = self.session.input(&mut update_ctx, ctx, &mut self.requests);
         while let Some(command) = self.requests.pop_app() {
-            needs_relayout |= self.run_command(command);
+            self.run_command(command);
         }
-        self.input_relayout = needs_relayout;
-        end.outcome
+        outcome
     }
 
     fn record(&mut self, _win: palantir::WindowToken, ui: &mut Ui) {
@@ -729,8 +713,7 @@ impl palantir::App for App {
                 message: self.status.cur(),
                 process_memory: self.process_memory.sample(ui.now()),
             });
-        let mut needs_relayout = mem::take(&mut self.input_relayout);
-        needs_relayout |= self.session.record(
+        self.session.record(
             ui,
             ctx,
             FrameWrites {
@@ -744,7 +727,7 @@ impl palantir::App for App {
         // while a command runs, which is what lets `App::run_command` take all
         // of `self`.
         while let Some(command) = self.requests.pop_app() {
-            needs_relayout |= self.run_command(command);
+            self.run_command(command);
         }
         // The Preferences tab edits the size in place; palantir takes a new one from the next
         // frame, and only a new one, as each re-rasterizes every glyph.
@@ -756,14 +739,9 @@ impl palantir::App for App {
         if let Some(capture) = &mut self.capture {
             capture.ask(ui);
         }
-        // The app's one relayout request, past both tiers: everything that can
-        // strand `CanvasGeometry`'s cross-frame caches has reported by here,
-        // and a single pass answers however many of them fired. A wire reads its port's rect,
-        // which only a layout gives, so a node's first record cannot draw its wires: the sizing
-        // pass egui's `Grid` takes through `request_discard`.
-        if needs_relayout == Relayout::Needed {
-            ui.request_relayout();
-        }
+        // The app's one relayout request, past both tiers: everything that can strand
+        // `CanvasGeometry`'s cross-frame caches has owed by here.
+        self.requests.spend_relayout(ui);
 
         // A prompt the commands above raised records here, and a menu that recorded before it
         // costs a second pass.
@@ -870,6 +848,8 @@ pub(crate) mod internals {
 
 #[cfg(test)]
 mod tests {
+    use std::mem;
+
     use super::*;
 
     /// A Unicode pick becomes the value as it is. One unit that is not Unicode
@@ -962,7 +942,7 @@ mod tests {
         let mut app = App::offscreen(ui.ui_mut());
         assert!(!ui.frame_app(&mut app).repaint_requested, "nothing waits");
         assert!(!app.is_busy());
-        let _ = app.run_command(AppCommand::View(ViewCommand::CopyImage));
+        app.run_command(AppCommand::View(ViewCommand::CopyImage));
         assert!(
             ui.frame_app(&mut app).repaint_requested,
             "the capture waits"
@@ -975,7 +955,7 @@ mod tests {
         assert!(!ui.frame_app(&mut app).repaint_requested);
 
         assert!(ui.window_commands().is_empty());
-        let _ = app.run_command(AppCommand::Quit);
+        app.run_command(AppCommand::Quit);
         ui.frame_app(&mut app);
         assert!(matches!(
             ui.window_commands(),
@@ -1077,7 +1057,7 @@ mod tests {
                 },
             );
             assert_eq!(app.session.open.path, None, "{store:?}: launched empty");
-            let _ = app.run_command(AppCommand::File(FileCommand::Open));
+            app.run_command(AppCommand::File(FileCommand::Open));
             assert_eq!(app.session.open.path.as_ref(), Some(&document), "{store:?}");
             if !readable {
                 assert_eq!(app.preferences_store, PreferencesStore::Memory);
@@ -1369,6 +1349,8 @@ mod tests {
 
         let delete = |ui: &mut Harness, counted: &mut CountedPasses| {
             let node = title(ui).expect("the node shows").id;
+            // A second click in the span would open the title's rename editor, which takes the key.
+            ui.advance_past_double_click();
             ui.click(node);
             ui.frame_app(counted);
             ui.key(shortcuts::DELETE);
@@ -1376,6 +1358,8 @@ mod tests {
                 ui.frame_app(counted);
             }
             assert!(title(ui).is_none(), "deleted");
+            let document = &counted.app.session.open.document;
+            assert!(document.graph.iter().all(|node| node.name != NODE));
         };
 
         delete(&mut ui, &mut counted);
@@ -1398,6 +1382,16 @@ mod tests {
         ui.key(shortcuts::UNDO);
         ui.frame_app(&mut counted);
         assert!(title(&ui).is_some(), "the chord's own frame shows it");
+        assert_eq!(wires_anchored(&counted.app), 7);
+
+        // An edit no frame raised owes its pass too, as a command run between frames does.
+        delete(&mut ui, &mut counted);
+        counted.app.run_command(AppCommand::Undo);
+        ui.ui_mut().request_repaint();
+        counted.passes = 0;
+        ui.frame_app(&mut counted);
+        assert_eq!(counted.passes, 2, "the record and the relayout it owed");
+        assert!(title(&ui).is_some(), "the command's frame shows it");
         assert_eq!(wires_anchored(&counted.app), 7);
     }
 }

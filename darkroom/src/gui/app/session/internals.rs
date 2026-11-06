@@ -28,7 +28,6 @@ use crate::gui::app::session::Session;
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_ctx::{AppCtx, StatusInputs};
 use crate::gui::frame::frame_writes::FrameWrites;
-use crate::gui::frame::relayout::Relayout;
 use crate::gui::frame::requests::Requests;
 use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
 use crate::gui::state::run_state::RunState;
@@ -41,8 +40,7 @@ const SURFACE: UVec2 = UVec2::new(1200, 800);
 
 /// One frame's run of the session, as `App` runs it. The commands are drained in each hook, as
 /// `App` drains them, which includes the frames the harness runs first to deliver held input, where
-/// a chord pressed before a click lands. What it owes a relayout is dropped: production hands it to
-/// `App::record`, and this harness asserts on commands and documents, not on layout passes.
+/// a chord pressed before a click lands, and it spends the relayout owed as `App::record` does.
 #[derive(Debug)]
 struct SessionFrame<'a> {
     session: &'a mut Session,
@@ -58,10 +56,10 @@ struct SessionFrame<'a> {
 impl App for SessionFrame<'_> {
     fn update(&mut self, _: WindowToken, mut update_ctx: UpdateCtx<'_>) -> InputOutcome {
         let ctx = AppCtx::new(self.theme, self.library, self.run_state);
-        let end = self.session.input(&mut update_ctx, ctx, self.requests);
+        let outcome = self.session.input(&mut update_ctx, ctx, self.requests);
         self.commands
             .extend(iter::from_fn(|| self.requests.pop_app()));
-        end.outcome
+        outcome
     }
 
     fn record(&mut self, _: WindowToken, ui: &mut Ui) {
@@ -69,7 +67,7 @@ impl App for SessionFrame<'_> {
             message: None,
             process_memory: self.process_memory,
         });
-        let _needs_relayout = self.session.record(
+        self.session.record(
             ui,
             ctx,
             FrameWrites {
@@ -79,6 +77,7 @@ impl App for SessionFrame<'_> {
         );
         self.commands
             .extend(iter::from_fn(|| self.requests.pop_app()));
+        self.requests.spend_relayout(ui);
     }
 }
 
@@ -135,25 +134,20 @@ impl SessionHarness {
     }
 
     /// Push one intent through the real edit path, as a widget's does.
-    /// Reports whether it stranded the canvas's cached geometry.
-    pub(crate) fn apply(&mut self, intent: GraphIntent) -> Relayout {
-        Relayout::after(self.session.open.apply_edit(intent, &self.library))
+    pub(crate) fn apply(&mut self, intent: GraphIntent) {
+        self.session
+            .apply_edit(intent, &self.library, &mut self.requests);
     }
 
-    /// Drain the queued intents into the document, as the frame's edit phase
-    /// does. Reports whether the batch stranded the canvas's cached geometry.
-    pub(crate) fn drain(&mut self) -> Relayout {
-        Relayout::after(
-            self.session
-                .open
-                .drain_requests(self.requests.document(), &self.library),
-        )
+    /// Drain the queued intents into the document, as the frame's edit phase does.
+    pub(crate) fn drain(&mut self) {
+        self.session.drain(&self.library, &mut self.requests);
     }
 
     /// Take back the last undoable entry. Reports whether there was one.
     pub(crate) fn undo(&mut self) -> bool {
         let took = self.session.open.can_undo();
-        let _relayout = self.session.open.undo();
+        self.session.undo(&mut self.requests);
         took
     }
 

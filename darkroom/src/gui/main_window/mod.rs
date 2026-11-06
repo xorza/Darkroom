@@ -2,7 +2,7 @@ pub(crate) mod dock_panes;
 pub(crate) mod menu_bar;
 pub(crate) mod status_bar;
 
-use palantir::UpdateCtx;
+use palantir::{InputOutcome, UpdateCtx};
 use std::collections::HashMap;
 
 use palantir::{
@@ -15,8 +15,6 @@ use crate::core::document::graph_revision::GraphRevision;
 use crate::core::document::tab_ref::TabRef;
 use crate::core::open_document::OpenDocument;
 use crate::gui::frame::frame_writes::FrameWrites;
-use crate::gui::frame::input_end::InputEnd;
-use crate::gui::frame::relayout::Relayout;
 use crate::gui::frame::requests::Requests;
 use crate::gui::frame::window_ctx::WindowCtx;
 use crate::gui::graph_ctx::GraphCtx;
@@ -94,28 +92,25 @@ impl MainWindow {
     /// already-settled active graph, plus the per-pane visibility reconcile
     /// that has to happen before them.
     ///
-    /// Returns what the graph's stage leaves the frame, which holds whether any pane became visible
-    /// this frame — the caller turns that into a relayout request, since a canvas that has never
-    /// recorded has no cached geometry to draw its first frame from. A pane that *vanished* needs
-    /// no pass and is never visited here at all. Reported rather than requested because this pass
-    /// has no business deciding when the frame's accumulated signals are spent.
+    /// Returns what the frame's records may read of the input. A pane that became visible this frame
+    /// owes a relayout on `out`, since a canvas that has never recorded has no cached geometry to
+    /// draw its first frame from. A pane that *vanished* needs no pass and is never visited here at
+    /// all.
     pub(crate) fn prepass(
         &mut self,
         update_ctx: &mut UpdateCtx<'_>,
         ctx: WindowCtx<'_>,
         out: &mut Requests,
-    ) -> InputEnd {
+    ) -> InputOutcome {
         let Self { graph_ui, .. } = self;
-        let mut end = InputEnd::default();
+        let mut outcome = InputOutcome::Record;
         for tab in ctx.document().layout.active_tabs() {
             match tab {
                 // Reached from `active_tabs`, so a pane is showing the graph
                 // by construction — which is what `GraphUi::prepass` asserts.
                 TabRef::Graph => {
-                    let graph =
+                    outcome =
                         graph_ui.prepass(update_ctx, GraphCtx::new(ctx, update_ctx.display()), out);
-                    end.outcome = graph.outcome;
-                    end.relayout |= graph.relayout;
                 }
                 // Neither derives a document mutation from input: preferences
                 // edits go through their own widgets, and a viewer only
@@ -123,29 +118,20 @@ impl MainWindow {
                 TabRef::Preferences | TabRef::ImageViewer(_) | TabRef::Inspector(_) => {}
             }
         }
-        end
+        outcome
     }
 
     /// Ready the panes on screen for a record pass that no input stage ran just before; see
     /// [`GraphUi::settle`].
-    pub(crate) fn settle(
-        &mut self,
-        ui: &mut Ui,
-        ctx: WindowCtx<'_>,
-        out: &mut Requests,
-    ) -> Relayout {
+    pub(crate) fn settle(&mut self, ui: &mut Ui, ctx: WindowCtx<'_>, out: &mut Requests) {
         let Self { graph_ui, .. } = self;
-        let mut relayout = Relayout::NotNeeded;
         for tab in ctx.document().layout.active_tabs() {
             match tab {
-                TabRef::Graph => {
-                    relayout |= graph_ui.settle(ui, GraphCtx::new(ctx, ui.display()), out);
-                }
+                TabRef::Graph => graph_ui.settle(ui, GraphCtx::new(ctx, ui.display()), out),
                 // None keeps anything a second pass reads from the rects of the first.
                 TabRef::Preferences | TabRef::ImageViewer(_) | TabRef::Inspector(_) => {}
             }
         }
-        relayout
     }
 
     pub(crate) fn frame(&mut self, ui: &mut Ui, ctx: WindowCtx<'_>, writes: FrameWrites<'_>) {
@@ -258,7 +244,7 @@ mod tests {
         window.reconcile(&h.ctx.open);
         assert!(cached(&window, leaves), "no revision move, no sweep");
 
-        let _relayout = h
+        let _facts = h
             .ctx
             .open
             .apply_edit(GraphIntent::RemoveNode { node_id: stays }, &h.ctx.library);

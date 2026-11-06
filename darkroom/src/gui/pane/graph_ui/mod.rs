@@ -35,8 +35,6 @@ use crate::core::document::Document;
 use crate::core::document::item_id::ItemId;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::click_mode::ClickMode;
-use crate::gui::frame::input_end::InputEnd;
-use crate::gui::frame::relayout::Relayout;
 use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::canvas_bg::CanvasBg;
@@ -304,20 +302,14 @@ impl GraphUi {
         update_ctx: &mut UpdateCtx<'_>,
         graph_ctx: GraphCtx<'_>,
         out: &mut Requests,
-    ) -> InputEnd {
+    ) -> InputOutcome {
         debug_assert!(
             graph_ctx.is_visible(),
             "the prepass is reached from an active Graph tab"
         );
         // A click that ends a gesture is that gesture's, whatever it lands on.
         let idle = !self.in_flight();
-        // First: a canvas back from being away drops the gesture state it left
-        // latched, since a drag still held would otherwise resume under a
-        // pointer that has long since moved on.
-        let appearing = self.appearing(update_ctx.record_frame_id());
-        if appearing {
-            self.reset_gestures();
-        }
+        self.open_pass(update_ctx.record_frame_id(), out);
         // Resolve the frame's bare-canvas gesture and park it for `draw` to
         // read back — the classification is one response poll, and both
         // phases must agree on the winner.
@@ -394,15 +386,10 @@ impl GraphUi {
         // document the pointer gestures above were raised against.
         shortcuts::emit(update_ctx, CanvasCtx::new(prepass, &self.geometry), out);
         let keyless = update_ctx.keyboard_events(KeyboardWake::NONE).is_empty();
-        InputEnd {
-            outcome: if idle && took_clicks && keyless {
-                InputOutcome::Handled
-            } else {
-                InputOutcome::Record
-            },
-            // A node with no measured size records hidden until its rects let its wires draw, and
-            // a cull keeps it recorded, so this ends with the next record.
-            relayout: Relayout::needed_if(appearing || self.geometry.has_unmeasured()),
+        if idle && took_clicks && keyless {
+            InputOutcome::Handled
+        } else {
+            InputOutcome::Record
         }
     }
 
@@ -468,26 +455,32 @@ impl GraphUi {
     /// so what it left for the draw goes; the geometry is built again, and a framing the last
     /// record raised lands here.
     /// Refused: a replay of the prepass, which ran each gesture again on a level read.
-    pub(crate) fn settle(
-        &mut self,
-        ui: &mut Ui,
-        graph_ctx: GraphCtx<'_>,
-        out: &mut Requests,
-    ) -> Relayout {
-        let appearing = self.appearing(ui.record_frame_id());
-        if appearing {
-            self.reset_gestures();
-        }
+    pub(crate) fn settle(&mut self, ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
+        self.open_pass(ui.record_frame_id(), out);
         self.input = CanvasInput::default();
         let input = ui.update_ctx().input;
         self.geometry.rebuild(input, graph_ctx);
         self.finish_geometry(input, graph_ctx, out);
-        Relayout::needed_if(appearing || self.geometry.has_unmeasured())
     }
 
-    /// What follows a rebuilt geometry on any path: the snapped ports read as hovered, and a
-    /// pending framing lands on the rects it now holds.
+    /// What opens a pass on any path: a canvas back from being away drops the gesture state it left
+    /// latched, since a drag still held would otherwise resume under a pointer that has long since
+    /// moved on, and owes a relayout.
+    fn open_pass(&mut self, frame: u64, out: &mut Requests) {
+        if self.appearing(frame) {
+            self.reset_gestures();
+            out.owe_relayout();
+        }
+    }
+
+    /// What follows a rebuilt geometry on any path: the snapped ports read as hovered, a pending
+    /// framing lands on the rects it now holds, and a node with no measured size owes a relayout. It
+    /// records hidden until its rects let its wires draw, and a cull keeps it recorded, so this ends
+    /// with the next record.
     fn finish_geometry(&mut self, input: &Input, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
+        if self.geometry.has_unmeasured() {
+            out.owe_relayout();
+        }
         self.wire_ui.bake_snap_hover(&mut self.geometry);
         self.subscription_ui.bake_snap_hover(&mut self.geometry);
         if let Some(framing) = self.framing.take() {
@@ -841,8 +834,8 @@ mod tests {
             let mut out = Requests::default();
             let ui = h.ui.ui_mut();
             let graph_ctx = h.ctx.graph_ctx_on(ui.display());
-            let relayout = h.graph_ui.settle(ui, graph_ctx, &mut out);
-            assert_eq!(relayout, Relayout::NotNeeded);
+            h.graph_ui.settle(ui, graph_ctx, &mut out);
+            assert!(!out.owes_relayout());
             out
         };
         let mut out = settle(&mut h);

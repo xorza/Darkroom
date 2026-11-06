@@ -183,7 +183,7 @@ fn the_inspect_button_selects_its_node_and_opens_one_inspector() {
                 .center(),
         );
         h.frame();
-        let _relayout = h.drain();
+        h.drain();
         assert_eq!(
             h.session.open.document.main_view.selected,
             BTreeSet::from([ItemId::Node(node_id)])
@@ -214,8 +214,8 @@ fn a_preview_node_shows_one_kind_mark_after_its_title() {
 }
 
 /// A node with no measured size is laid out unseen, its subscription pin too, so neither takes a
-/// pointer. The next frame shows both. Removed and restored by an undo, a sink has lost its
-/// size, as a node first recorded has none.
+/// pointer, and it owes a relayout, whose pass shows both. Removed and restored by an undo, a sink
+/// has lost its size, as a node first recorded has none.
 #[test]
 fn a_node_and_its_pin_show_once_measured() {
     let mut h = CanvasHarness::new(TestGraph::source_sink_loose());
@@ -241,7 +241,9 @@ fn a_node_and_its_pin_show_once_measured() {
     h.graph_ui.retain_nodes(&h.ctx.open.document);
     let _restored = h.ctx.open.undo();
     h.frame();
-    assert_eq!(listed(&h), [false, false], "laid out unseen");
-    h.frame();
-    assert_eq!(listed(&h), [true, true], "measured, so it shows");
+    assert_eq!(
+        listed(&h),
+        [true, true],
+        "the first pass laid it out unseen, and the relayout it owed shows it, measured",
+    );
 }

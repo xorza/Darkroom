@@ -334,10 +334,11 @@ impl<'a> CanvasFrame<'a> {
 
     fn apply(&mut self) {
         if self.applies == AppliesIntents::Yes {
-            let _ = self
+            let facts = self
                 .ctx
                 .open
                 .drain_requests(self.out.document(), &self.ctx.library);
+            self.out.owe_relayout_after(facts);
         }
     }
 }
@@ -346,13 +347,12 @@ impl App for CanvasFrame<'_> {
     fn update(&mut self, _: WindowToken, mut update_ctx: UpdateCtx<'_>) -> InputOutcome {
         self.out = Requests::default();
         let graph_ctx = self.ctx.graph_ctx_on(update_ctx.display());
-        let end = self
+        self.outcome = self
             .graph_ui
             .prepass(&mut update_ctx, graph_ctx, &mut self.out);
         self.apply();
         self.input_ran = true;
-        self.outcome = end.outcome;
-        end.outcome
+        self.outcome
     }
 
     fn record(&mut self, _: WindowToken, recorder: &mut Ui) {
@@ -360,7 +360,7 @@ impl App for CanvasFrame<'_> {
         let mut later_pass = Requests::default();
         if !first_pass {
             let graph_ctx = self.ctx.graph_ctx_on(recorder.display());
-            let _ = self.graph_ui.settle(recorder, graph_ctx, &mut later_pass);
+            self.graph_ui.settle(recorder, graph_ctx, &mut later_pass);
         }
         let out = if first_pass {
             &mut self.out
@@ -368,6 +368,7 @@ impl App for CanvasFrame<'_> {
             &mut later_pass
         };
         draw(self.graph_ui, self.ctx, recorder, out);
+        out.spend_relayout(recorder);
         self.recorded_at = Some(recorder.render_frame_id());
     }
 }

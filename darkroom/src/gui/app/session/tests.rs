@@ -330,3 +330,51 @@ fn image_viewer_tabs_dedupe_per_node_and_prune_state_on_close() {
         "closing the tab drops its navigation state"
     );
 }
+
+/// Every route an edit takes owes what it strands, and spending clears it: a rename strands the
+/// geometry through the queue, through one edit, through its undo and through its redo, and a
+/// selection strands nothing on any of them.
+#[test]
+fn each_edit_route_owes_what_it_strands() {
+    let mut test = SessionHarness::new(DocumentFixture::probes(1));
+    let node_id = test
+        .session
+        .open
+        .document
+        .graph
+        .iter()
+        .next()
+        .unwrap()
+        .node_id;
+    let rename = |to: &str| GraphIntent::RenameNode {
+        node_id,
+        to: to.to_owned(),
+    };
+    let select = || GraphIntent::SetSelection {
+        to: [ItemId::Node(node_id)].into_iter().collect(),
+    };
+    let owed_then_clear = |test: &mut SessionHarness| {
+        let owed = test.requests.owes_relayout();
+        test.ui.frame(|ui| test.requests.spend_relayout(ui));
+        owed
+    };
+
+    test.apply(select());
+    assert!(!owed_then_clear(&mut test), "one edit, a selection");
+    test.requests.push_graph(select());
+    test.drain();
+    assert!(!owed_then_clear(&mut test), "the queue, a selection");
+
+    test.apply(rename("one"));
+    assert!(owed_then_clear(&mut test), "one edit, a rename");
+    test.requests.push_graph(rename("two"));
+    test.drain();
+    assert!(owed_then_clear(&mut test), "the queue, a rename");
+    assert!(test.undo());
+    assert!(owed_then_clear(&mut test), "an undo of a rename");
+    let SessionHarness {
+        session, requests, ..
+    } = &mut test;
+    session.redo(requests);
+    assert!(owed_then_clear(&mut test), "a redo of a rename");
+}

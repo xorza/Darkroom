@@ -260,7 +260,7 @@ mod tests {
             let mut h = SessionHarness::new(DocumentFixture::probes(1));
             if row == "Undo" {
                 let node_id = h.session.open.document.graph.iter().next().unwrap().node_id;
-                let _relayout = h.apply(GraphIntent::SetSelection {
+                h.apply(GraphIntent::SetSelection {
                     to: [ItemId::Node(node_id)].into(),
                 });
             }
@@ -304,7 +304,7 @@ mod tests {
         assert!(widget(&h, "Delete").disabled, "nothing selected");
 
         let node_id = h.session.open.document.graph.iter().next().unwrap().node_id;
-        let _relayout = h.apply(GraphIntent::SetSelection {
+        h.apply(GraphIntent::SetSelection {
             to: [ItemId::Node(node_id)].into(),
         });
         h.prime(2);

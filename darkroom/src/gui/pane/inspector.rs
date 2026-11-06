@@ -557,7 +557,7 @@ mod tests {
             DocumentFixture::probes(1).with_tab(TabRef::Inspector(InspectTarget::Selection));
         let mut h = SessionHarness::new(fixture);
         let node_id = h.session.open.document.graph.iter().next().unwrap().node_id;
-        let _relayout = h.apply(GraphIntent::SetSelection {
+        h.apply(GraphIntent::SetSelection {
             to: [ItemId::Node(node_id)].into(),
         });
         h.prime(3);
@@ -607,7 +607,7 @@ mod tests {
             let mut h =
                 SessionHarness::new(fixture.with_tab(TabRef::Inspector(InspectTarget::Selection)));
             let node_id = h.session.open.document.graph.iter().next().unwrap().node_id;
-            let _relayout = h.apply(GraphIntent::SetSelection {
+            h.apply(GraphIntent::SetSelection {
                 to: [ItemId::Node(node_id)].into(),
             });
             h.prime(3);
