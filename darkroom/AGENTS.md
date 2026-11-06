@@ -17,6 +17,8 @@ desktop for an agent or a test.
   (`make darkroom`, then copy). Never edit it by hand.
 - `sample/` — the sample project. Change it in the editor, never by a script: a test opens it
   and runs it to its previews.
+- `src/gui/app/session/bench.darkroom` — the document the editor bench measures. Change it in the
+  editor, never by a script: a test opens it, and its inputs are absent, as no case runs it.
 
 ## Guidance
 

@@ -526,6 +526,14 @@ pub(crate) mod internals {
             self.entries.is_empty()
         }
 
+        /// Whether `node_id`'s full image has landed, for a bench that waits for its viewer.
+        pub(crate) fn full_landed(&self, node_id: NodeId) -> bool {
+            matches!(
+                self.entries.get(&node_id),
+                Some(StoredContent::Image(image)) if matches!(image.full, FullImage::Resident(_))
+            )
+        }
+
         /// Land `card` as `node_id`'s newest publish, on the calling thread —
         /// for a bench that lands one conversion every frame and times the
         /// landing alone.
