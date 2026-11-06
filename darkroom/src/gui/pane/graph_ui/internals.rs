@@ -3,7 +3,7 @@
 //!
 //! One type rather than a closure per test file because the subject under test
 //! is the same machinery in each case — a frame runs the phases `MainWindow`
-//! runs, `prepass` → `draw`, and only the gesture driven through it differs. A
+//! runs, `input` → `record`, and only the gesture driven through it differs. A
 //! test that skipped a phase would be exercising a frame the app never performs.
 
 use glam::{UVec2, Vec2};
@@ -18,10 +18,11 @@ use crate::core::edit::document_request::DocumentRequest;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::input_stage::InputStage;
+use crate::gui::frame::record_stage::RecordStage;
 use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::internals::GraphCtxFixture;
 use crate::gui::pane::graph_ui::GraphUi;
-use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
+use crate::gui::pane::graph_ui::scene::canvas_geometry::CanvasGeometry;
 use crate::gui::pane::graph_ui::wid;
 use crate::gui::port_ref::PortRef;
 use std::iter;
@@ -154,7 +155,7 @@ impl CanvasHarness {
         intents
     }
 
-    /// One canvas frame as the window runs it: the prepass, its graph intents applied to the
+    /// One canvas frame as the window runs it: the input stage, its graph intents applied to the
     /// document, then the record, which reads the document they left, as the session drains
     /// them between the two. [`Self::frame`] hands its intents back unapplied instead, so a test
     /// reads exactly what a gesture raised.
@@ -348,7 +349,7 @@ impl App for CanvasFrame<'_> {
     fn update(&mut self, _: WindowToken, mut update_ctx: UpdateCtx<'_>) -> InputOutcome {
         self.out = Requests::default();
         let ctx = self.ctx.graph_ctx_on(update_ctx.display());
-        self.outcome = self.graph_ui.prepass(&mut InputStage {
+        self.outcome = self.graph_ui.input(&mut InputStage {
             update: &mut update_ctx,
             ctx,
             out: &mut self.out,
@@ -374,18 +375,24 @@ impl App for CanvasFrame<'_> {
         } else {
             &mut later_pass
         };
-        draw(self.graph_ui, self.ctx, recorder, out);
+        record_in_pane(self.graph_ui, self.ctx, recorder, out);
         out.spend_relayout(recorder);
         self.recorded_at = Some(recorder.render_frame_id());
     }
 }
 
 /// The canvas's record half, inside the pane a dock gives it.
-fn draw(graph_ui: &mut GraphUi, ctx: &GraphCtxFixture, recorder: &mut Ui, out: &mut Requests) {
+fn record_in_pane(
+    graph_ui: &mut GraphUi,
+    ctx: &GraphCtxFixture,
+    recorder: &mut Ui,
+    out: &mut Requests,
+) {
     Panel::vstack()
         .id_salt("pane")
         .size(Sizing::FILL)
         .show(recorder, |ui| {
-            graph_ui.draw(ui, ctx.graph_ctx_on(ui.display()), out);
+            let ctx = ctx.graph_ctx_on(ui.display());
+            graph_ui.record(ui, &mut RecordStage { ctx, out });
         });
 }

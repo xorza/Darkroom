@@ -1338,7 +1338,7 @@ fn stale_references_still_refuse_quietly() {
 #[test]
 fn selection_and_move_drop_members_whose_widget_is_gone() {
     // The rubber band and a group drag both snapshot identities when the
-    // gesture starts, and undo runs before the gesture prepass — so a
+    // gesture starts, and undo runs before the gesture input stage — so a
     // member can disappear mid-gesture. Recording it verbatim would leave
     // `selected` naming an item the view can't render, which is exactly
     // `GraphViewValidationError::MissingSelectedItem`.

@@ -15,7 +15,7 @@ use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::frame::framing::Framing;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::canvas;
-use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
+use crate::gui::pane::graph_ui::scene::canvas_geometry::CanvasGeometry;
 use crate::gui::widgets::zoom_range::ZoomRange;
 
 /// The canvas's zoom range.

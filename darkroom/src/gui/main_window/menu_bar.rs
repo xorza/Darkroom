@@ -9,6 +9,7 @@ use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
 use crate::gui::frame::app_command::{AppCommand, FileCommand, RunCommand, ViewCommand};
 use crate::gui::frame::framing::Framing;
+use crate::gui::frame::record_stage::RecordStage;
 use crate::gui::frame::requests::Requests;
 use crate::gui::frame::shortcuts;
 use crate::gui::graph_ctx::GraphCtx;
@@ -22,11 +23,12 @@ use crate::gui::widgets::support;
 /// moves over. Refused: a name centered in the window over the menus, which it overlapped in a
 /// narrow window.
 ///
-/// A pick goes onto `out` in whichever tier it belongs to: graph edits as intents, the file
-/// lifecycle, the history, the run, the view and `Quit` as [`AppCommand`]s for `App` to run after
-/// the pass, Preferences as the [`DockOperation`] that opens its tab. Every item with a chord
+/// A pick goes onto the stage's requests in whichever tier it belongs to: graph edits as intents,
+/// the file lifecycle, the history, the run, the view and `Quit` as [`AppCommand`]s for `App` to
+/// run after the pass, Preferences as the [`DockOperation`] that opens its tab. Every item with a chord
 /// shows it, read from [`shortcuts`], the table its handler reads.
-pub(crate) fn show(ui: &mut Ui, ctx: GraphCtx<'_>, out: &mut Requests) {
+pub(crate) fn show(ui: &mut Ui, stage: &mut RecordStage<'_, GraphCtx<'_>>) {
+    let ctx = stage.ctx;
     Grid::new()
         .id(bar_wid())
         .size((Sizing::FILL, Sizing::HUG))
@@ -39,10 +41,10 @@ pub(crate) fn show(ui: &mut Ui, ctx: GraphCtx<'_>, out: &mut Requests) {
                 .size((Sizing::HUG, Sizing::HUG))
                 .align(Align::LEFT)
                 .show(ui, |bar| {
-                    file_menu(bar, out);
-                    edit_menu(bar, ctx, out);
-                    graph_menu(bar, ctx, out);
-                    view_menu(bar, out);
+                    file_menu(bar, stage.out);
+                    edit_menu(bar, stage);
+                    graph_menu(bar, stage);
+                    view_menu(bar, stage.out);
                 });
             document_name(ui, ctx);
         });
@@ -86,7 +88,8 @@ fn file_menu(bar: &mut MenuBarMenus<'_>, out: &mut Requests) {
 
 /// The history and the selection's edits. Duplicate drops the wires from producers outside the
 /// selection, as Ctrl+D does.
-fn edit_menu(bar: &mut MenuBarMenus<'_>, ctx: GraphCtx<'_>, out: &mut Requests) {
+fn edit_menu(bar: &mut MenuBarMenus<'_>, stage: &mut RecordStage<'_, GraphCtx<'_>>) {
+    let (ctx, out) = (stage.ctx, &mut *stage.out);
     let open = ctx.open();
     let selected = !open.document().main_view.selected.is_empty();
     bar.menu("Edit", |ui| {
@@ -112,7 +115,8 @@ fn edit_menu(bar: &mut MenuBarMenus<'_>, ctx: GraphCtx<'_>, out: &mut Requests) 
 }
 
 /// The run and the camera: what the canvas toolbar does, by name and with its keys.
-fn graph_menu(bar: &mut MenuBarMenus<'_>, ctx: GraphCtx<'_>, out: &mut Requests) {
+fn graph_menu(bar: &mut MenuBarMenus<'_>, stage: &mut RecordStage<'_, GraphCtx<'_>>) {
+    let (ctx, out) = (stage.ctx, &mut *stage.out);
     let activity = ctx.run_state().activity();
     let selected = !ctx.document().main_view.selected.is_empty();
     bar.menu("Graph", |ui| {

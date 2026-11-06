@@ -20,12 +20,12 @@ use crate::core::edit::graph_intent::route_insert::RouteInsert;
 use crate::gui::frame::input_stage::InputStage;
 use crate::gui::frame::requests::Requests;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
+use crate::gui::pane::graph_ui::canvas_input::CanvasGesture;
 use crate::gui::pane::graph_ui::draw::tie::band::{BandInk, BandLook};
+use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
 use crate::gui::pane::graph_ui::gesture::button_stroke::{ButtonStroke, StrokeStep};
 use crate::gui::pane::graph_ui::gesture::tie_ui::tie_line::{TieLine, WireCrossing};
 use crate::gui::pane::graph_ui::gesture::tie_ui::tie_probe::TieProbe;
-use crate::gui::pane::graph_ui::prepass_ctx::CanvasGesture;
-use crate::gui::theme::Theme;
 
 /// The tie line in flight, as [`BreakerUi`](crate::gui::pane::graph_ui::gesture::breaker_ui::BreakerUi)
 /// holds the breaker: the stroke holds the latched button, and the line's crossing buffers
@@ -80,7 +80,8 @@ impl TieUi {
     /// Paint the line, in the selection colour, over the band it will put where it crosses wires
     /// and no tie: centered on the mean of its crossings, square to the mean of the crossed
     /// strands, a slot for each, as feedforward shows a gesture's result before it ends.
-    pub(crate) fn draw(&self, ui: &mut Ui, theme: &Theme, zoom: f32) {
+    pub(crate) fn record(&self, ui: &mut Ui, ctx: DrawCtx<'_>) {
+        let (theme, zoom) = (ctx.theme(), ctx.zoom());
         if !self.stroke.in_flight() {
             return;
         }

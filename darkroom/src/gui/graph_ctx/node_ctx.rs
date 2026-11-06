@@ -38,7 +38,7 @@ enum Declaration<'a> {
 ///
 /// **Available for the whole frame**, unlike the passes above it: a
 /// [`GraphCtx`] is all it takes to resolve one, so the hit sweep at frame top,
-/// the prepass gestures, and the record all read nodes through this same type.
+/// the input stage's gestures, and the record all read nodes through this same type.
 /// The facts that only a *record* has settled — the effective selection and
 /// the cull region — stay on
 /// [`DrawCtx`](crate::gui::pane::graph_ui::draw_ctx::DrawCtx), which travels beside

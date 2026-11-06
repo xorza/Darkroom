@@ -1,5 +1,5 @@
 use super::*;
-use crate::gui::pane::graph_ui::frame::wire::Wire;
+use crate::gui::pane::graph_ui::scene::wire::Wire;
 
 #[test]
 fn region_inverts_the_canvas_transform() {

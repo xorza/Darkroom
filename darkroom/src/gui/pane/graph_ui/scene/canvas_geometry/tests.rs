@@ -104,7 +104,7 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
     );
 }
 
-/// A drag frame moves its node in the drain between the prepass and the record, and the ports
+/// A drag frame moves its node in the drain between the input stage and the record, and the ports
 /// the record draws wires to sit on the moved node: each center keeps its offset from the node's
 /// position in the document the record reads, not the position before the move.
 #[test]

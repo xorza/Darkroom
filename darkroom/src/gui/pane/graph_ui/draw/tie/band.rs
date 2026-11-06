@@ -7,7 +7,7 @@ use glam::Vec2;
 use palantir::widget::{CircularArc, LineCap, Shape};
 use palantir::{Rect, RgbaF32, Size, Stroke, Ui};
 
-use crate::gui::pane::graph_ui::frame::tie_layout::{Band, SLOT_SPACING};
+use crate::gui::pane::graph_ui::scene::tie_layout::{Band, SLOT_SPACING};
 use crate::gui::theme::Theme;
 
 /// The band's shape, as an icon's artwork is its own; its strokes are the theme's `stroke.fine`.

@@ -5,7 +5,7 @@
 //! The caller owns the hit-testing that decides *what* got grabbed — a node
 //! body or its title, or a tie's band — and hands the result to
 //! [`GroupDrag::latch`].
-//! Everything after that lives here in [`GroupDrag::prepass`].
+//! Everything after that lives here in [`GroupDrag::input`].
 
 use std::collections::BTreeSet;
 use std::rc::Rc;
@@ -24,11 +24,11 @@ use crate::gui::frame::input_stage::InputStage;
 use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
-use crate::gui::pane::graph_ui::prepass_ctx::PrepassCtx;
+use crate::gui::pane::graph_ui::unsettled_ctx::UnsettledCtx;
 
 /// One in-flight group drag, or none.
 ///
-/// [`Self::prepass`] is the whole per-frame lifecycle: the grabbed item left
+/// [`Self::input`] is the whole per-frame lifecycle: the grabbed item left
 /// the view, a fresh gesture relatched on the same widget, Esc
 /// cancelled it, the drag released, or it moved and commits. Every committed
 /// position is `start + drag_delta` against the snapshot taken at latch — not
@@ -43,7 +43,7 @@ pub(crate) struct GroupDrag {
 /// widget whose drag drives them.
 #[derive(Debug)]
 pub(crate) struct Grab {
-    /// The item the pointer grabbed, which [`GroupDrag::prepass`] checks
+    /// The item the pointer grabbed, which [`GroupDrag::input`] checks
     /// against the view.
     pub(crate) item: ItemId,
     /// Every item moving with this drag, at its position when the drag
@@ -113,7 +113,7 @@ impl GroupDrag {
     /// Runs pre-record, so the move lands in `Document` before the pass that
     /// draws the moved items: they paint at the cursor in Pass A with no
     /// relayout retry.
-    pub(crate) fn prepass(&mut self, stage: &mut InputStage<'_, '_, PrepassCtx<'_>>) {
+    pub(crate) fn input(&mut self, stage: &mut InputStage<'_, '_, UnsettledCtx<'_>>) {
         let ctx = stage.ctx;
         let graph_ctx = ctx.graph_ctx();
         // An item deleted mid-drag (breaker swipe, undo) takes its drag with

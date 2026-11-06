@@ -5,3 +5,5 @@
 - `cargo doc -p darkroom --no-deps --document-private-items` warns of a redundant explicit link target in `darkroom/src/gui/pane/inspector.rs`, line 3.
 
 - A left drag inside a node's title while its rename field is open latches the group drag and moves the node, because `wid::rename` stays a drag handle while `EditableLabel` shows its `TextEdit`.
+
+- `cargo doc -p darkroom --no-deps --document-private-items` warns of an unresolved link to `Ui::response_for` in `darkroom/src/gui/pane/graph_ui/scene/canvas_geometry/mod.rs`.

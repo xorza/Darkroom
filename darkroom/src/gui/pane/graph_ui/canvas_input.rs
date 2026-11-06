@@ -1,13 +1,10 @@
-//! The canvas's context before its geometry settles: the graph plus what this
-//! frame's input means on it, which bare-canvas gesture a press latches among them, the one
-//! place that precedence is decided.
+//! What this frame's input means on the canvas: which bare-canvas gesture a press latches among
+//! them, the one place that precedence is decided, and what Esc does.
 
 use palantir::{Modifiers, PointerButton, ResponseState};
 
-use crate::gui::graph_ctx::GraphCtx;
-
 /// What this frame's input means on the canvas, resolved once at the top of
-/// [`GraphUi::prepass`](crate::gui::pane::graph_ui::GraphUi::prepass) and read
+/// [`GraphUi::input`](crate::gui::pane::graph_ui::GraphUi::input) and read
 /// back by every controller after it: which bare-canvas gesture latched, and what
 /// Esc does. It lives on the update path alone, so no record reads an edge that is spent.
 ///
@@ -34,7 +31,7 @@ impl CanvasInput {
 ///
 /// Covers the *latch* frame only: continuation of an in-flight gesture is tracked by each
 /// controller's own state, and wheel/pinch zoom coexists with everything (handled in
-/// `CameraGesture::prepass`, not here).
+/// `CameraGesture::input`, not here).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum CanvasGesture {
     /// Middle-button drag → viewport pan.
@@ -122,46 +119,12 @@ pub(crate) enum Escape {
     Deselects,
 }
 
-/// The graph canvas before its geometry is settled: the graph, plus what this
-/// frame's input means on it.
-///
-/// The prepass level of the context chain, between the [`GraphCtx`] and the
-/// [`CanvasCtx`](crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx), which adds the geometry. The
-/// three prepass steps that run *before*
-/// [`CanvasGeometry::rebuild`](crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry::rebuild)
-/// — pan/zoom, the group drag's advance and the tie knob's turn — take this, so they read the frame's input without a
-/// geometry someone is still writing.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct PrepassCtx<'a> {
-    graph_ctx: GraphCtx<'a>,
-    input: CanvasInput,
-}
-
-impl<'a> PrepassCtx<'a> {
-    pub(super) const fn new(graph_ctx: GraphCtx<'a>, input: CanvasInput) -> Self {
-        Self { graph_ctx, input }
-    }
-
-    pub(crate) const fn graph_ctx(self) -> GraphCtx<'a> {
-        self.graph_ctx
-    }
-
-    pub(crate) const fn input(self) -> CanvasInput {
-        self.input
-    }
-
-    /// Whether this frame's Esc cancels whatever gesture is in flight.
-    pub(crate) const fn cancelled(self) -> bool {
-        self.input.cancelled()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use glam::Vec2;
     use palantir::{ButtonPhase, ButtonState, Drag, Modifiers, PointerButton, ResponseState};
 
-    use crate::gui::pane::graph_ui::prepass_ctx::{CanvasGesture, SecondaryPress};
+    use crate::gui::pane::graph_ui::canvas_input::{CanvasGesture, SecondaryPress};
 
     /// Every arm, each from the one button edge that latches it: a drag start beats a click, the
     /// modifiers pick the drag's gesture, a double click opens the palette over the plain click's

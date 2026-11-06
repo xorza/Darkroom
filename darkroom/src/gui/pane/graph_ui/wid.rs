@@ -4,7 +4,7 @@
 //! Every id under a node is reconstructible from its domain coordinates — a
 //! [`NodeId`], and for the per-port widgets a [`PortRef`] — so any pass can
 //! `response_for` last frame's state without threading a cache. That is what
-//! lets the prepass read clicks before the record, and the breaker and the
+//! lets the input stage read clicks before the record, and the breaker and the
 //! geometry rebuild probe arranged rects before the widgets round-trip their
 //! own responses.
 //!

@@ -1,22 +1,23 @@
 //! The canvas's frame-wide context: the graph plus the three facts the
-//! prepass settles before any controller reads them.
+//! input stage settles before any controller reads them.
 
 use crate::gui::graph_ctx::GraphCtx;
-use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
-use crate::gui::pane::graph_ui::prepass_ctx::{CanvasGesture, CanvasInput, Escape, PrepassCtx};
+use crate::gui::pane::graph_ui::canvas_input::{CanvasGesture, CanvasInput, Escape};
+use crate::gui::pane::graph_ui::scene::canvas_geometry::CanvasGeometry;
+use crate::gui::pane::graph_ui::unsettled_ctx::UnsettledCtx;
 
 /// The graph canvas for this frame: the graph, plus the three facts
-/// [`GraphUi::prepass`](crate::gui::pane::graph_ui::GraphUi::prepass) resolves
+/// [`GraphUi::input`](crate::gui::pane::graph_ui::GraphUi::input) resolves
 /// once and every controller then reads — the port and node geometry, the
 /// bare-canvas gesture that latched, and whether Esc cancelled it.
 ///
-/// The canvas level of the context chain, built from the [`PrepassCtx`], so the compiler holds the
-/// three facts to one frame.
+/// The canvas level of the context chain, built from the [`UnsettledCtx`], so the compiler holds
+/// the three facts to one frame.
 ///
 /// **It exists only once the geometry is settled.** The table is borrowed
-/// shared for the context's whole life, so the three prepass steps that run
+/// shared for the context's whole life, so the three input steps that run
 /// *before* [`CanvasGeometry::rebuild`] — pan/zoom, the group drag's advance and the tie knob's
-/// turn — take the [`PrepassCtx`], and `bake_snap_hover` (which needs the table
+/// turn — take the [`UnsettledCtx`], and `bake_snap_hover` (which needs the table
 /// `&mut` again) ends it. That ordering is the point rather than an
 /// inconvenience: a controller holding one of these cannot be reading a
 /// geometry someone is still writing.
@@ -28,10 +29,10 @@ pub(crate) struct CanvasCtx<'a> {
 }
 
 impl<'a> CanvasCtx<'a> {
-    pub(super) const fn new(prepass: PrepassCtx<'a>, geometry: &'a CanvasGeometry) -> Self {
+    pub(super) const fn new(unsettled: UnsettledCtx<'a>, geometry: &'a CanvasGeometry) -> Self {
         Self {
-            graph_ctx: prepass.graph_ctx(),
-            input: prepass.input(),
+            graph_ctx: unsettled.graph_ctx(),
+            input: unsettled.input(),
             geometry,
         }
     }

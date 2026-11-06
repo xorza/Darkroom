@@ -9,10 +9,10 @@ use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph_ui::draw::wire::WirePaint;
 use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
-use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
-use crate::gui::pane::graph_ui::frame::wire::Wire;
 use crate::gui::pane::graph_ui::gesture::glyph_drag::GlyphDrag;
 use crate::gui::pane::graph_ui::gesture::preview_drag;
+use crate::gui::pane::graph_ui::scene::canvas_geometry::CanvasGeometry;
+use crate::gui::pane::graph_ui::scene::wire::Wire;
 use crate::gui::port_ref::{PortKind, PortRef};
 
 /// Owns the in-flight new wire — a held drag or a free-floating
@@ -40,7 +40,7 @@ pub(crate) enum WireEnd {
 /// The in-flight wire being created: a [`GlyphDrag`] within the data-port
 /// domain (both ends are `PortRef`s — a wire can be pulled from either kind),
 /// plus which terminating input ends it. Both modes share one preview renderer
-/// ([`WireUi::draw_in_flight`]), snap tracking, and data, so `mode` is a
+/// ([`WireUi::record`]), snap tracking, and data, so `mode` is a
 /// discriminant rather than distinct payloads.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct InFlight {
@@ -77,7 +77,7 @@ impl WireUi {
     /// clicks the exact port to land it. Called in the record that saw the pick.
     ///
     /// `start` was latched frames earlier, so a Ctrl+Z in between can have removed its node.
-    /// Not latching is how the wire drops, the same answer `prepass`'s re-latch gives for the same
+    /// Not latching is how the wire drops, the same answer `input`'s re-latch gives for the same
     /// window.
     pub(crate) fn resume(&mut self, start: PortRef, graph_ctx: GraphCtx<'_>) {
         if graph_ctx.contains(start.node_id) {
@@ -111,7 +111,7 @@ impl WireUi {
     /// picked. The context's Esc — resolved once by the canvas — drops either
     /// mode without emitting anything. Reports how the wire ended, when that asks the canvas
     /// for more than an edit.
-    pub(crate) fn prepass(
+    pub(crate) fn input(
         &mut self,
         stage: &mut InputStage<'_, '_, CanvasCtx<'_>>,
     ) -> Option<WireEnd> {
@@ -137,9 +137,9 @@ impl WireUi {
             self.state = None;
         }
         let mut state = self.state.take()?;
-        // Both modes span frames, and undo runs before this prepass, so the node the wire grew out
-        // of can be deleted under it. Not re-latching is how the gesture drops — a commit against a
-        // dead producer is refused at the edit boundary anyway, silently.
+        // Both modes span frames, and undo runs before this input stage, so the node the wire grew
+        // out of can be deleted under it. Not re-latching is how the gesture drops — a commit
+        // against a dead producer is refused at the edit boundary anyway, silently.
         if !graph_ctx.contains(state.drag.node()) {
             return None;
         }
@@ -186,7 +186,7 @@ impl WireUi {
     /// global pointer stream (subscribe to wake it; it's empty otherwise).
     /// Left-click lands the wire on a compatible port (or cancels if over
     /// none); right-click cancels (and suppresses the palette); Esc is
-    /// handled in `prepass`.
+    /// handled in `input`.
     fn resolve_floating(
         &mut self,
         stage: &mut InputStage<'_, '_, CanvasCtx<'_>>,
@@ -238,7 +238,7 @@ impl WireUi {
     /// center to either the snapped target's center (when set) or the
     /// pointer position. Drawn inside the inner canvas so coordinates
     /// share the pan/zoom transform with permanent wires.
-    pub(crate) fn draw_in_flight(&self, ui: &mut Ui, ctx: DrawCtx<'_>) {
+    pub(crate) fn record(&self, ui: &mut Ui, ctx: DrawCtx<'_>) {
         let (graph_ctx, geometry) = (ctx.graph_ctx(), ctx.geometry());
         let Some(state) = self.state.as_ref().copied() else {
             return;
@@ -252,7 +252,7 @@ impl WireUi {
             return;
         };
         // Orient handles by kind: outputs grow rightward, inputs grow
-        // leftward. Same dx algebra as `draw` so the preview matches
+        // leftward. Same dx algebra as [`WireUi::record`] so the preview matches
         // the eventual permanent curve exactly when snapped.
         let (p0, p3) = match start_port.kind {
             PortKind::Output => (start, end),
@@ -263,7 +263,7 @@ impl WireUi {
         let theme = graph_ctx.theme();
         let drag_data_type = graph_ctx.data_type(start_port);
         let color = theme.port_color(drag_data_type);
-        let width = theme.canvas.wire_at(graph_ctx.camera().zoom);
+        let width = theme.canvas.wire_at(ctx.zoom());
         WirePaint::from(color).stroke(ui, &Wire::data(p0, p3), width);
     }
 }

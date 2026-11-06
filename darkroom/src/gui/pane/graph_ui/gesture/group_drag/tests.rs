@@ -12,7 +12,7 @@ use crate::gui::pane::graph_ui::internals::CanvasHarness;
 /// A drag on a node body moves that node, by the pointer's travel.
 ///
 /// The input stage latches it off the frame's edge on one of the node's `drag_handles`, and moves
-/// the node in that frame; later frames' `prepass` turns that handle's `drag_delta` into a
+/// the node in that frame; later frames' `input` turns that handle's `drag_delta` into a
 /// `MoveSelection`. So this drives a real press-and-travel through the harness — nothing else in
 /// the suite latches a body drag, and a latch that silently stopped firing would leave every node
 /// unmovable with the whole rest of the canvas green.
@@ -32,7 +32,7 @@ fn a_body_drag_moves_the_node_by_the_pointers_travel() {
     let latched = h.frame();
     assert_eq!(moved(&latched).map(|(_, offset)| offset), Some(travel));
 
-    // Next frame, `GroupDrag::prepass` advances the anchor, by the whole travel from the latch.
+    // Next frame, `GroupDrag::input` advances the anchor, by the whole travel from the latch.
     let intents = h.frame();
     let (members, offset) = moved(&intents)
         .unwrap_or_else(|| panic!("a body drag must emit a MoveSelection: {intents:?}"));

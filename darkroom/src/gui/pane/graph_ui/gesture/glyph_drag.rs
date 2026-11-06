@@ -4,7 +4,7 @@ use glam::Vec2;
 use scenarium::NodeId;
 
 use crate::gui::node_key::NodeKey;
-use crate::gui::pane::graph_ui::frame::canvas_geometry::port_layer::PortLayer;
+use crate::gui::pane::graph_ui::scene::canvas_geometry::port_layer::PortLayer;
 
 /// One in-flight wire drag: the glyph the press latched (`from`, a key in
 /// layer `A`) and the compatible glyph currently under the pointer (`snap`, a

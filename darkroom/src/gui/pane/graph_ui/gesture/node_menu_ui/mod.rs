@@ -6,7 +6,7 @@ use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::RunCommand;
 use scenarium::NodeId;
 
-use crate::gui::frame::requests::Requests;
+use crate::gui::frame::record_stage::RecordStage;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph_ui::gesture::item_menu::ItemMenu;
@@ -54,11 +54,12 @@ impl NodeMenuUi {
         self.menu.open_on(input, graph_ctx, node)
     }
 
-    /// Record the menu and resolve this frame's pick onto `out` — a run as
+    /// Record the menu and resolve this frame's pick onto the stage's requests — a run as
     /// the [`AppCommand`] it means, the structural picks as ordinary intents.
     ///
     /// Opening is [`Self::open_on`]'s; this only ever shows a menu already latched.
-    pub(crate) fn record(&mut self, ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
+    pub(crate) fn record(&mut self, ui: &mut Ui, stage: &mut RecordStage<'_, GraphCtx<'_>>) {
+        let (graph_ctx, out) = (stage.ctx, &mut *stage.out);
         self.menu.retain(|node_id| graph_ctx.contains(node_id));
         let pick = self.menu.show(ui, "node_body_menu", |ui, node_id| {
             let mut chosen = None;

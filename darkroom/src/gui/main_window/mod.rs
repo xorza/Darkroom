@@ -15,10 +15,10 @@ use crate::core::document::graph_revision::GraphRevision;
 use crate::core::document::tab_ref::TabRef;
 use crate::core::open_document::OpenDocument;
 use crate::gui::frame::input_stage::InputStage;
+use crate::gui::frame::record_stage::RecordStage;
 use crate::gui::frame::window_parts::WindowParts;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::main_window::dock_panes::DockPanes;
-use crate::gui::main_window::status_bar::StatusBar;
 use crate::gui::pane::graph_ui::GraphUi;
 use crate::gui::pane::image_viewer::ImageViewer;
 
@@ -34,7 +34,7 @@ const MIN_PANE: f32 = 220.0;
 ///
 /// Each entry point takes a [`GraphCtx`], the frame's world *and* the document it is showing,
 /// settled by the time the caller reaches it, and everything below this file takes that context:
-/// in an [`InputStage`] on the update path.
+/// in an [`InputStage`] on the update path, and a [`RecordStage`] on the record path.
 #[derive(Default, Debug)]
 pub(crate) struct MainWindow {
     pub(crate) graph_ui: GraphUi,
@@ -64,7 +64,7 @@ impl MainWindow {
     /// its wires draw in Pass B, no first-frame gap.
     ///
     /// The dock is the whole of it. The panes' own input reads are the
-    /// prepass's, over the arrangement this phase's drain settles.
+    /// input stage's, over the arrangement this phase's drain settles.
     ///
     /// The scan emits into the window's own buffer and the ops are then
     /// handed to the frame's queue, which is where every other darkroom
@@ -80,7 +80,7 @@ impl MainWindow {
         }
     }
 
-    /// Edit-phase prepass: input-derived graph mutations for the
+    /// Input stage: input-derived graph mutations for the
     /// already-settled active graph, plus the per-pane visibility reconcile
     /// that has to happen before them.
     ///
@@ -88,13 +88,13 @@ impl MainWindow {
     /// owes a relayout, since a canvas that has never recorded has no cached geometry to
     /// draw its first frame from. A pane that *vanished* needs no pass and is never visited here at
     /// all.
-    pub(crate) fn prepass(&mut self, stage: &mut InputStage<'_, '_, GraphCtx<'_>>) -> InputOutcome {
+    pub(crate) fn input(&mut self, stage: &mut InputStage<'_, '_, GraphCtx<'_>>) -> InputOutcome {
         let mut outcome = InputOutcome::Record;
         for tab in stage.ctx.document().layout.active_tabs() {
             match tab {
                 // Reached from `active_tabs`, so a pane is showing the graph by construction.
                 TabRef::Graph => {
-                    outcome = self.graph_ui.prepass(stage);
+                    outcome = self.graph_ui.input(stage);
                 }
                 // Neither derives a document mutation from input: preferences
                 // edits go through their own widgets, and a viewer only
@@ -117,12 +117,17 @@ impl MainWindow {
         }
     }
 
-    pub(crate) fn frame(&mut self, ui: &mut Ui, ctx: GraphCtx<'_>, parts: WindowParts<'_>) {
+    pub(crate) fn record(
+        &mut self,
+        ui: &mut Ui,
+        stage: &mut RecordStage<'_, GraphCtx<'_>>,
+        parts: WindowParts<'_>,
+    ) {
         let WindowParts {
             preferences,
-            requests: out,
             status,
         } = parts;
+        let ctx = stage.ctx;
         // The menu bar rides its own surround band; the dock fills the
         // space between it and the status bar.
         let fill = ctx.theme().colors.surround_bg;
@@ -139,14 +144,13 @@ impl MainWindow {
                 .child_align(Align::v(VAlign::Bottom))
                 .chrome(Chrome::fill(fill))
                 .show(ui, |ui| {
-                    menu_bar::show(ui, ctx, out);
+                    menu_bar::show(ui, stage);
                 });
             let mut panes = DockPanes {
-                ctx,
+                stage: stage.with(ctx),
                 graph_ui,
                 image_viewers,
                 preferences,
-                out,
             };
             dock_ops.clear();
             DockView::new(Self::dock_wid(), &ctx.document().layout, dock_ops)
@@ -156,10 +160,10 @@ impl MainWindow {
             // Ratio drags and split-menu picks, onto the frame's own
             // queue — the same route the navigation scan's ops take.
             for op in dock_ops.drain(..) {
-                out.push_view(op);
+                stage.out.push_view(op);
             }
             // Bottom surround band: the run line and the memory readout, below the panes.
-            StatusBar { ctx, status, out }.show(ui);
+            status_bar::show(ui, stage, status);
         });
     }
 

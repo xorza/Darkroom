@@ -12,6 +12,9 @@ use crate::core::edit::graph_intent::click_mode::ClickMode;
 use crate::gui::frame::input_stage::InputStage;
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
+use crate::gui::pane::graph_ui::canvas_input::{
+    CanvasGesture, CanvasInput, Escape, SecondaryPress,
+};
 use crate::gui::pane::graph_ui::gesture::breaker_ui::BreakerUi;
 use crate::gui::pane::graph_ui::gesture::group_drag::{self, GroupDrag};
 use crate::gui::pane::graph_ui::gesture::new_node_ui::NewNodeUi;
@@ -24,9 +27,7 @@ use crate::gui::pane::graph_ui::gesture::tie_ui::TieUi;
 use crate::gui::pane::graph_ui::gesture::tie_ui::tie_menu_ui::TieMenuUi;
 use crate::gui::pane::graph_ui::gesture::tie_ui::tie_widget::{self, TieWidgets};
 use crate::gui::pane::graph_ui::gesture::wire_ui::{WireEnd, WireUi};
-use crate::gui::pane::graph_ui::prepass_ctx::{
-    CanvasGesture, CanvasInput, Escape, PrepassCtx, SecondaryPress,
-};
+use crate::gui::pane::graph_ui::unsettled_ctx::UnsettledCtx;
 use crate::gui::pane::graph_ui::wid;
 
 /// The controllers of the gestures in flight, which the canvas drives once a frame on the update
@@ -164,10 +165,10 @@ impl Gestures {
     }
 
     /// The controllers that run ahead of the geometry's rebuild, as none reads it.
-    pub(crate) fn before_geometry(&mut self, stage: &mut InputStage<'_, '_, PrepassCtx<'_>>) {
-        self.camera.prepass(stage);
-        self.group_drag.prepass(stage);
-        self.tie_widgets.prepass(stage);
+    pub(crate) fn before_geometry(&mut self, stage: &mut InputStage<'_, '_, UnsettledCtx<'_>>) {
+        self.camera.input(stage);
+        self.group_drag.input(stage);
+        self.tie_widgets.input(stage);
     }
 
     /// The controllers that read the settled geometry, each edge of the frame acted on. Reports
@@ -183,7 +184,7 @@ impl Gestures {
             self.group_drag.latch(start, stage.update.input, stage.out);
         }
         let canvas = stage.update.input.response_for(canvas::outer_wid());
-        let dropped = match self.wire_ui.prepass(stage) {
+        let dropped = match self.wire_ui.input(stage) {
             Some(WireEnd::DroppedOnCanvas(source)) => Some(source),
             // The press that ended a floating wire is spent, its release too when it lands this
             // same frame: the palette sees no click.
@@ -203,7 +204,7 @@ impl Gestures {
         // Subscription wires (emitter → subscriber) latch and commit here, for the same reasons as
         // the wire gesture above; an emitter glyph and a data port can't both latch (different
         // widget-id spaces).
-        self.subscription_ui.prepass(stage);
+        self.subscription_ui.input(stage);
         self.selection_ui.input(stage);
         self.breaker_ui.input(stage);
         self.tie_ui.input(stage);

@@ -7,9 +7,9 @@ use crate::core::document::viewport::Viewport;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::frame::input_stage::InputStage;
 use crate::gui::pane::graph_ui::canvas;
+use crate::gui::pane::graph_ui::canvas_input::CanvasGesture;
 use crate::gui::pane::graph_ui::gesture::pan_zoom;
-use crate::gui::pane::graph_ui::prepass_ctx::CanvasGesture;
-use crate::gui::pane::graph_ui::prepass_ctx::PrepassCtx;
+use crate::gui::pane::graph_ui::unsettled_ctx::UnsettledCtx;
 use crate::gui::widgets::pan_drag;
 
 /// The camera's held input: a middle-button pan, from its press to its release. Wheel, touchpad
@@ -48,7 +48,7 @@ impl CameraGesture {
     ///   `-y` (wheel up) → zoom in.
     /// - **Pinch** (`Sense::PINCH`): zoom about the cursor, with the
     ///   `Response::pointer_local` pivot.
-    pub(crate) fn prepass(&mut self, stage: &mut InputStage<'_, '_, PrepassCtx<'_>>) {
+    pub(crate) fn input(&mut self, stage: &mut InputStage<'_, '_, UnsettledCtx<'_>>) {
         let ctx = stage.ctx;
         // The stored camera, not the landed one the canvas draws: the input folds onto the exact
         // pan, so a zoom keeps its pivot under the pointer.

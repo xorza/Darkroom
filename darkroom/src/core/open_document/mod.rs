@@ -153,7 +153,7 @@ impl OpenDocument {
     /// Take everything `requests` holds for this document, apply it, and leave
     /// the document self-consistent.
     ///
-    /// Called three times a frame — after the navigation scan, the prepass,
+    /// Called three times a frame — after the navigation scan, the input stage,
     /// and the record — so a request raised in one phase lands before the next
     /// reads the document.
     #[must_use]

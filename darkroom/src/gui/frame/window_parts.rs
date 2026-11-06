@@ -1,16 +1,13 @@
-//! [`WindowParts`]: what one record of the window takes past its context.
+//! [`WindowParts`]: what one record of the window takes past its stage.
 
 use crate::core::io::preferences::Preferences;
 use crate::core::status_log::StatusMessage;
-use crate::gui::frame::requests::Requests;
 
-/// What a window's record takes past its context: the preferences its forms edit in place, the
-/// requests its surfaces raise, and what only its status bar reads. The sinks outlive the frame,
-/// and the record borrows them for its pass.
+/// What a window's record takes past its stage: the preferences its forms edit in place, and what
+/// only its status bar reads.
 #[derive(Debug)]
 pub(crate) struct WindowParts<'a> {
     pub(crate) preferences: &'a mut Preferences,
-    pub(crate) requests: &'a mut Requests,
     pub(crate) status: StatusInputs<'a>,
 }
 

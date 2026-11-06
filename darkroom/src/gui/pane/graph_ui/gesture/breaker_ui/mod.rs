@@ -8,11 +8,11 @@ use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::frame::input_stage::InputStage;
 use crate::gui::frame::requests::Requests;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
+use crate::gui::pane::graph_ui::canvas_input::CanvasGesture;
+use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
 use crate::gui::pane::graph_ui::gesture::breaker_ui::breaker_probe::BreakerProbe;
 use crate::gui::pane::graph_ui::gesture::breaker_ui::scribble::Scribble;
 use crate::gui::pane::graph_ui::gesture::button_stroke::{ButtonStroke, StrokeStep};
-use crate::gui::pane::graph_ui::prepass_ctx::CanvasGesture;
-use crate::gui::theme::Theme;
 
 /// Owns the active wire-breaker gesture (RMB / Ctrl+LMB drag on
 /// the outer canvas). Hands out a `BreakerProbe` to the canvas record so node
@@ -82,7 +82,8 @@ impl BreakerUi {
 
     /// Paint the polyline. No-op when no gesture is active or the
     /// polyline has < 2 samples (a `restart` with no `add_point`).
-    pub(crate) fn draw(&self, ui: &mut Ui, theme: &Theme, zoom: f32) {
+    pub(crate) fn record(&self, ui: &mut Ui, ctx: DrawCtx<'_>) {
+        let (theme, zoom) = (ctx.theme(), ctx.zoom());
         if !self.stroke.in_flight() || self.scribble.points.len() < 2 {
             return;
         }

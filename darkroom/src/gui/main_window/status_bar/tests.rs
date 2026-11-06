@@ -168,7 +168,7 @@ fn the_run_line_leads_with_the_worst_of_the_run() {
 }
 
 /// The run line's link selects the node that failed and asks the canvas to frame it, and the
-/// canvas's next prepass moves the camera onto it.
+/// canvas's next input stage moves the camera onto it.
 #[test]
 fn the_run_lines_link_selects_and_frames_the_cause() {
     use scenarium::{InvokeError, NodeExecStatus, NodeStatus, RunError, RunSummary};
@@ -241,6 +241,6 @@ fn the_run_lines_link_selects_and_frames_the_cause() {
     assert_ne!(
         h.session.open.document().main_view.viewport,
         before,
-        "the next prepass framed the selection"
+        "the next input stage framed the selection"
     );
 }

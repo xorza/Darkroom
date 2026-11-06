@@ -28,9 +28,11 @@ use crate::core::wake;
 use crate::gui::app::session::Session;
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_ctx::AppCtx;
+use crate::gui::frame::input_stage::InputStage;
+use crate::gui::frame::record_stage::RecordStage;
 use crate::gui::frame::requests::Requests;
 use crate::gui::frame::window_parts::{StatusInputs, WindowParts};
-use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
+use crate::gui::pane::graph_ui::scene::canvas_geometry::CanvasGeometry;
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
 use std::iter;
@@ -58,7 +60,11 @@ struct SessionFrame<'a> {
 impl App for SessionFrame<'_> {
     fn update(&mut self, _: WindowToken, mut update_ctx: UpdateCtx<'_>) -> InputOutcome {
         let ctx = AppCtx::new(self.theme, self.library, self.run_state);
-        let outcome = self.session.input(&mut update_ctx, ctx, self.requests);
+        let outcome = self.session.input(&mut InputStage {
+            update: &mut update_ctx,
+            ctx,
+            out: self.requests,
+        });
         self.commands
             .extend(iter::from_fn(|| self.requests.pop_app()));
         outcome
@@ -68,10 +74,12 @@ impl App for SessionFrame<'_> {
         let ctx = AppCtx::new(self.theme, self.library, self.run_state);
         self.session.record(
             ui,
-            ctx,
+            &mut RecordStage {
+                ctx,
+                out: self.requests,
+            },
             WindowParts {
                 preferences: self.preferences,
-                requests: self.requests,
                 status: StatusInputs {
                     message: self.status_message,
                     process_memory: self.process_memory,

@@ -86,7 +86,7 @@ but that one bundle, a handle, a context and `out`, repeats with no name.
 |---|---|---|
 | `AppCtx` | `theme`, `library`, `run_state` | Session |
 | `GraphCtx` | `app`, `open`, `camera` | Surround, panes, node handles |
-| `PrepassCtx` | `graph`, `input: CanvasInput` | Update path, before the geometry settles |
+| `UnsettledCtx` | `graph`, `input: CanvasInput` | Update path, before the geometry settles |
 | `CanvasCtx` | `graph`, `input`, `geometry` | Update path, after it settles |
 | `DrawCtx` | `graph`, `geometry`, `selected`, `cull` | Record path |
 
@@ -190,21 +190,8 @@ but that one bundle, a handle, a context and `out`, repeats with no name.
 # Part 2: Plan
 
 Each batch leaves the gates green. Batch 1, the relayout sink, batch 2, the layers, batch 3, the
-contexts, batch 4, the update path, and batch 5, the gestures in one stage, have landed.
-
-## Batch 6: record path
-
-Files: `gui/frame/record_stage.rs` (new), `gui/main_window/*`, `gui/pane/{inspector,preferences}.rs`,
-`gui/pane/image_viewer/mod.rs`, `gui/pane/graph_ui/{mod,toolbar}.rs`, `gui/pane/graph_ui/gesture/*`,
-`gui/pane/graph_ui/node_ui/*`, `gui/pane/graph_ui/draw/*`.
-
-- [ ] `record_stage.rs`: `RecordStage`. `(ui, ctx, out)` at 17 signatures becomes `(ui, stage)`, as
-  `inspector.rs:45,89`, `toolbar.rs:48`, `menu_bar.rs` and `status_bar`.
-- [ ] `breaker_ui/mod.rs:83`, `selection_ui/mod.rs:195`, `tie_ui/mod.rs:81`, `wire_ui/mod.rs:226`,
-  `subscription_ui.rs:171`: one `record(ui, ctx: DrawCtx)`, and `theme` and `zoom` go.
-- [ ] `NodePass`, `TiePass`, `WirePass`, `NodeRecord`: hold a `RecordStage` and their extras.
-- [ ] Names: `MainWindow::frame` and `GraphUi::draw` become `record`, `prepass` becomes `input`, and
-  `pane/graph_ui/frame/` becomes `pane/graph_ui/scene/`, as "frame" is one pass of the render loop.
+contexts, batch 4, the update path, batch 5, the gestures in one stage, and batch 6, the record path,
+have landed.
 
 ## Batch 7: one preference route
 

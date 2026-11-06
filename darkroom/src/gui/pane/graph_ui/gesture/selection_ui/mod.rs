@@ -9,7 +9,8 @@ use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::frame::input_stage::InputStage;
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
-use crate::gui::pane::graph_ui::prepass_ctx::CanvasGesture;
+use crate::gui::pane::graph_ui::canvas_input::CanvasGesture;
+use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
 use crate::gui::theme::Theme;
 
 /// Rubber-band multi-selection. A plain left-drag on empty canvas
@@ -172,7 +173,8 @@ impl SelectionUi {
     ///
     /// The border is a hairline on screen at every `zoom`: palantir scales a stroke by the
     /// canvas's transform, so its world width is the hairline over the zoom.
-    pub(crate) fn draw(&self, ui: &mut Ui, theme: &Theme, zoom: f32) {
+    pub(crate) fn record(&self, ui: &mut Ui, ctx: DrawCtx<'_>) {
+        let (theme, zoom) = (ctx.theme(), ctx.zoom());
         let Some(band) = self.band.as_ref() else {
             return;
         };

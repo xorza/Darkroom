@@ -14,7 +14,7 @@ use scenarium::NodeId;
 
 use crate::core::document::graph_view::StackedNode;
 use crate::core::document::item_id::ItemId;
-use crate::gui::frame::requests::Requests;
+use crate::gui::frame::record_stage::RecordStage;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
 use crate::gui::pane::graph_ui::gesture::breaker_ui::breaker_probe::BreakerProbe;
@@ -27,7 +27,7 @@ use crate::gui::theme::{CardTier, Theme};
 /// Owns rendering of every graph node.
 ///
 /// `draw_all` is the single entry point; `GraphUi` calls it once per frame after
-/// [`crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry`] has been rebuilt from
+/// [`crate::gui::pane::graph_ui::scene::canvas_geometry::CanvasGeometry`] has been rebuilt from
 /// last-frame's responses.
 #[derive(Default, Debug)]
 pub(super) struct NodeUi {
@@ -55,14 +55,12 @@ pub(super) struct NodeUi {
     paint_order: Vec<StackedNode>,
 }
 
-/// The canvas pass every node body records in: the draw context, the breaker
-/// probe the bodies mark hits against, and the queue their widgets raise edits
-/// into.
+/// The canvas pass every node body records in: its stage, whose requests their widgets raise edits
+/// into, and the breaker probe the bodies mark hits against.
 #[derive(Debug)]
 pub(super) struct NodePass<'a, 'p> {
-    pub(super) draw_ctx: DrawCtx<'a>,
+    pub(super) stage: RecordStage<'a, DrawCtx<'a>>,
     pub(super) probe: &'a mut BreakerProbe<'p>,
-    pub(super) out: &'a mut Requests,
 }
 
 impl NodeUi {
@@ -76,7 +74,7 @@ impl NodeUi {
     /// the focus-owning node — see the loop comment), skipping off-screen ones
     /// entirely.
     pub(super) fn draw_all(&mut self, ui: &mut Ui, pass: &mut NodePass<'_, '_>) {
-        let draw_ctx = pass.draw_ctx;
+        let draw_ctx = pass.stage.ctx;
         // Paint back-to-front, so the last item drawn is frontmost. Each
         // item's depth is persisted view state, so a raised node stays raised
         // across save/load and tab switches; `GraphIntent::Raise` lifts a
@@ -131,12 +129,8 @@ impl NodeUi {
     /// Record one node's body, `node_ctx`, over `row_tracks`, one buffer the whole frame slices out
     /// of, which per-node widget state would reallocate.
     fn draw_node(&mut self, ui: &mut Ui, node_ctx: NodeCtx<'_>, pass: &mut NodePass<'_, '_>) {
-        let NodePass {
-            draw_ctx,
-            probe,
-            out,
-        } = pass;
-        let draw_ctx = *draw_ctx;
+        let NodePass { stage, probe } = pass;
+        let draw_ctx = stage.ctx;
         let (theme, node) = (node_ctx.theme(), node_ctx);
 
         // Probe the body against the breaker polyline. Hit → recolor border
@@ -223,8 +217,7 @@ impl NodeUi {
             .show(ui, |ui| {
                 let mut record = NodeRecord {
                     node: node_ctx,
-                    draw: draw_ctx,
-                    out,
+                    stage: stage.with(draw_ctx),
                 };
                 header::show(ui, &mut record);
                 port_row::show(ui, &mut record, row_tracks);

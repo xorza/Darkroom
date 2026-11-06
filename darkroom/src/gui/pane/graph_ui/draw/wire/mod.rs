@@ -11,7 +11,7 @@
 //!
 //! **The gesture.** [`GlyphDrag`](crate::gui::pane::graph_ui::gesture::glyph_drag::GlyphDrag) is one drag from a latched glyph to
 //! whatever compatible glyph the pointer is over, generic over the two
-//! [`PortLayer`](crate::gui::pane::graph_ui::frame::canvas_geometry::port_layer::PortLayer) key domains it
+//! [`PortLayer`](crate::gui::pane::graph_ui::scene::canvas_geometry::port_layer::PortLayer) key domains it
 //! spans: a data wire drags `PortRef → PortRef`, an event wire drags `EventPort → NodeId` or —
 //! started from the other end — `NodeId → EventPort`. Latching, the release edge, the fixed end's
 //! node, and where the preview's free end sits are stated once here; each family still owns which
@@ -28,10 +28,10 @@ use crate::core::document::wire_key::DataWire;
 use crate::core::document::wire_key::WireKey;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
-use crate::gui::pane::graph_ui::frame::tie_layout::TieLayout;
-use crate::gui::pane::graph_ui::frame::wire::{BEZIER_SAMPLES, Wire};
 use crate::gui::pane::graph_ui::gesture::breaker_ui::breaker_probe::BreakerProbe;
 use crate::gui::pane::graph_ui::gesture::tie_ui::tie_probe::TieProbe;
+use crate::gui::pane::graph_ui::scene::tie_layout::TieLayout;
+use crate::gui::pane::graph_ui::scene::wire::{BEZIER_SAMPLES, Wire};
 use crate::gui::pane::graph_ui::wid;
 use crate::gui::port_ref::PortRef;
 use crate::gui::theme::color;
@@ -114,10 +114,7 @@ pub(crate) struct WirePass<'a, 'p, 't> {
 impl WirePass<'_, '_, '_> {
     /// A wire's width at the camera's zoom, before its emphasis tier.
     fn wire_width(&self) -> f32 {
-        let theme = self.draw_ctx.theme();
-        theme
-            .canvas
-            .wire_at(self.draw_ctx.graph_ctx().camera().zoom)
+        self.draw_ctx.theme().canvas.wire_at(self.draw_ctx.zoom())
     }
 
     /// Cull, breaker-probe, tier, and paint one committed wire, its `pieces`

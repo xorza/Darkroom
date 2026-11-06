@@ -8,8 +8,8 @@ use glam::Vec2;
 use crate::core::document::graph_view::GraphView;
 use crate::core::document::tie::{TieAngle, TieId};
 use crate::core::document::wire_key::{DataWire, WireKey};
-use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
-use crate::gui::pane::graph_ui::frame::wire::Wire;
+use crate::gui::pane::graph_ui::scene::canvas_geometry::CanvasGeometry;
+use crate::gui::pane::graph_ui::scene::wire::Wire;
 use crate::gui::port_ref::PortRef;
 
 /// World units between two strands of a band, and the band's length past its outer strands.

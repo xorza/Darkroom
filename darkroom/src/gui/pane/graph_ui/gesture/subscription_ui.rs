@@ -8,9 +8,9 @@ use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph_ui::draw::wire::WirePaint;
 use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
-use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
-use crate::gui::pane::graph_ui::frame::wire::Wire;
 use crate::gui::pane::graph_ui::gesture::glyph_drag::GlyphDrag;
+use crate::gui::pane::graph_ui::scene::canvas_geometry::CanvasGeometry;
+use crate::gui::pane::graph_ui::scene::wire::Wire;
 use scenarium::EventPort;
 
 /// Owns the in-flight subscription wire — an emitter *or* subscriber drag.
@@ -76,7 +76,7 @@ impl SubscriptionUi {
     /// end, and commit a `SetSubscription { to: true }` on release over
     /// a valid target. The context's Esc — resolved once by the canvas —
     /// drops the wire.
-    pub(crate) fn prepass(&mut self, stage: &mut InputStage<'_, '_, CanvasCtx<'_>>) {
+    pub(crate) fn input(&mut self, stage: &mut InputStage<'_, '_, CanvasCtx<'_>>) {
         let ctx = stage.ctx;
         let (graph_ctx, geometry) = (ctx.graph_ctx(), ctx.geometry());
         // Latch a fresh drag only when idle. An emitter and a pin can't both
@@ -170,7 +170,7 @@ impl SubscriptionUi {
     /// from is fixed to its glyph; the free end follows the snapped opposite
     /// glyph (when set) or the pointer. The emitter is always `p0` so the
     /// preview keeps a committed wire's shape regardless of drag direction.
-    pub(crate) fn draw_in_flight(&self, ui: &mut Ui, ctx: DrawCtx<'_>) {
+    pub(crate) fn record(&self, ui: &mut Ui, ctx: DrawCtx<'_>) {
         let (graph_ctx, geometry) = (ctx.graph_ctx(), ctx.geometry());
         let Some(state) = self.state.as_ref().copied() else {
             return;
@@ -197,7 +197,7 @@ impl SubscriptionUi {
             }
         };
         let theme = graph_ctx.theme();
-        let width = theme.canvas.wire_at(graph_ctx.camera().zoom);
+        let width = theme.canvas.wire_at(ctx.zoom());
         WirePaint::from(theme.port.event).stroke(ui, &Wire::event(p0, p3), width);
     }
 }

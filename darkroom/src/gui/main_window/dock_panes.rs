@@ -20,7 +20,7 @@ use crate::core::document::Document;
 use crate::core::document::inspect_target::InspectTarget;
 use crate::core::document::tab_ref::TabRef;
 use crate::core::io::preferences::Preferences;
-use crate::gui::frame::requests::Requests;
+use crate::gui::frame::record_stage::RecordStage;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::GraphUi;
 use crate::gui::pane::image_viewer::{self, ImageViewer, ViewerPane, ViewerWrites};
@@ -35,11 +35,10 @@ use crate::gui::widgets::format;
 /// borrows one capture at a time.
 #[derive(Debug)]
 pub(crate) struct DockPanes<'a> {
-    pub(crate) ctx: GraphCtx<'a>,
+    pub(crate) stage: RecordStage<'a, GraphCtx<'a>>,
     pub(crate) graph_ui: &'a mut GraphUi,
     pub(crate) image_viewers: &'a mut HashMap<NodeId, ImageViewer>,
     pub(crate) preferences: &'a mut Preferences,
-    pub(crate) out: &'a mut Requests,
 }
 
 /// The name a tab's chip shows, written on demand: an inspector held on a node names it.
@@ -82,24 +81,24 @@ impl DockTabs for DockPanes<'_> {
     type Tab = TabRef;
 
     fn label(&mut self, ui: &mut Ui, tab: TabRef) -> InternedStr {
-        fmt!(ui, "{}", tab_label(self.ctx.document(), tab))
+        fmt!(ui, "{}", tab_label(self.stage.ctx.document(), tab))
     }
 
     fn body(&mut self, ui: &mut Ui, tab: TabRef, size: Option<Size>) {
-        let ctx = self.ctx;
+        let ctx = self.stage.ctx;
         match tab {
             TabRef::Graph => {
-                self.graph_ui.draw(ui, ctx, self.out);
+                self.graph_ui.record(ui, &mut self.stage);
             }
             TabRef::Preferences => {
                 PreferencesForm {
                     theme: ctx.theme(),
-                    out: self.out,
+                    out: self.stage.out,
                 }
                 .show(ui, self.preferences);
             }
             TabRef::Inspector(target) => {
-                inspector::show(ui, ctx, target, self.out);
+                inspector::show(ui, &mut self.stage, target);
             }
             TabRef::ImageViewer(node_id) => {
                 let title = image_viewer::node_label(ctx.document(), node_id);
@@ -122,7 +121,7 @@ impl DockTabs for DockPanes<'_> {
                     pane,
                     ViewerWrites {
                         preferences: &mut self.preferences.viewer,
-                        out: self.out,
+                        out: self.stage.out,
                     },
                 );
             }

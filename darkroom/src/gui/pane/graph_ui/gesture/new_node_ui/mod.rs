@@ -11,14 +11,14 @@ use glam::Vec2;
 use palantir::widget::domain;
 use palantir::{Input, Ui, WidgetId};
 
-use crate::gui::frame::requests::Requests;
+use crate::gui::frame::record_stage::RecordStage;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
+use crate::gui::pane::graph_ui::canvas_input::CanvasGesture;
 use crate::gui::pane::graph_ui::gesture::anchored_menu::{AnchoredMenu, PopupShape};
 use crate::gui::pane::graph_ui::gesture::new_node_ui::node_palette::{NodePalette, Opening};
 use crate::gui::pane::graph_ui::gesture::new_node_ui::palette_rows::PaletteRows;
-use crate::gui::pane::graph_ui::prepass_ctx::CanvasGesture;
 use crate::gui::port_ref::PortRef;
 use crate::gui::theme::Theme;
 
@@ -111,15 +111,15 @@ impl NewNodeUi {
         self.opening = Opening::Fresh;
     }
 
-    /// Record the palette while it is open, the `AddNode` a pick raises onto `out`.
+    /// Record the palette while it is open, and raise the `AddNode` a pick means.
     /// Returns the source of the dropped wire that opened it, when a pick lands, which floats
     /// again so the user clicks the exact port to land it rather than it auto-attaching.
     pub(crate) fn record(
         &mut self,
         ui: &mut Ui,
-        graph_ctx: GraphCtx<'_>,
-        out: &mut Requests,
+        stage: &mut RecordStage<'_, GraphCtx<'_>>,
     ) -> Option<PortRef> {
+        let graph_ctx = stage.ctx;
         // Everything below is per-open work — the height arithmetic reads
         // the display and a last-frame rect — so nothing but an open palette
         // should pay for it. `show` would answer `None` anyway, but only
@@ -160,7 +160,7 @@ impl NewNodeUi {
         });
 
         let picked = chosen?;
-        out.push_graph(picked);
+        stage.out.push_graph(picked);
         self.source
     }
 }

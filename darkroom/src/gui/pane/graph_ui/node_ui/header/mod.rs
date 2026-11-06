@@ -95,6 +95,7 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
         .show(ui, |ui| {
             if node.runnable() && run_button(ui, node) {
                 record
+                    .stage
                     .out
                     .push_app(AppCommand::Run(RunCommand::Node(node.node_id)));
             }
@@ -117,7 +118,7 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
             {
                 // Inspect this node: select it alone, and show the inspector that follows the
                 // selection.
-                record.out.push_graph(GraphIntent::SetSelection {
+                record.stage.out.push_graph(GraphIntent::SetSelection {
                     to: BTreeSet::from([ItemId::Node(node.node_id)]),
                 });
                 show_inspector(record);
@@ -149,15 +150,18 @@ fn show_inspector(record: &mut NodeRecord<'_, '_>) {
     let tab = TabRef::Inspector(InspectTarget::Selection);
     let layout = &record.node.graph_ctx.document().layout;
     if layout.all_tabs().any(|open| open == tab) {
-        record.out.push_view(DockOperation::ActivateTab { tab });
+        record
+            .stage
+            .out
+            .push_view(DockOperation::ActivateTab { tab });
         return;
     }
-    record.out.push_view(DockOperation::OpenTab { tab });
+    record.stage.out.push_view(DockOperation::OpenTab { tab });
     if let Some(graph) = layout
         .groups()
         .find(|group| group.tabs().contains(&TabRef::Graph))
     {
-        record.out.push_view(DockOperation::MoveTab {
+        record.stage.out.push_view(DockOperation::MoveTab {
             tab,
             to: DockDrop::Split {
                 group: graph.id(),
@@ -197,7 +201,7 @@ fn disable_button(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     .selected(node.disabled())
     .show(ui, theme)
     {
-        record.out.push_graph(GraphIntent::SetNodeProperty {
+        record.stage.out.push_graph(GraphIntent::SetNodeProperty {
             node_id: node.node_id,
             to: NodeProperty::Disabled(!node.disabled()),
         });
@@ -228,7 +232,7 @@ fn cache_button(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
             .show(ui)
             .changed
         {
-            record.out.push_graph(GraphIntent::SetNodeProperty {
+            record.stage.out.push_graph(GraphIntent::SetNodeProperty {
                 node_id: node.node_id,
                 to: NodeProperty::RuntimeCache(CacheMode::from_bits(keep_ram, disk)),
             });
@@ -239,7 +243,7 @@ fn cache_button(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
             .show(ui)
             .changed
         {
-            record.out.push_graph(GraphIntent::SetNodeProperty {
+            record.stage.out.push_graph(GraphIntent::SetNodeProperty {
                 node_id: node.node_id,
                 to: NodeProperty::RuntimeCache(CacheMode::from_bits(ram, save_disk)),
             });
@@ -247,6 +251,7 @@ fn cache_button(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
             // which the value would reach disk only when the node next recomputed.
             if save_disk {
                 record
+                    .stage
                     .out
                     .push_app(AppCommand::Run(RunCommand::FlushCache(node.node_id)));
             }
@@ -254,6 +259,7 @@ fn cache_button(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
         MenuSeparator::new().show(ui);
         if MenuItem::new("Clear cache").show(ui).clicked() {
             record
+                .stage
                 .out
                 .push_app(AppCommand::Run(RunCommand::EvictCache(node.node_id)));
         }
@@ -280,12 +286,12 @@ fn title(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
         .min_size((NODE_NAME_MIN_WIDTH, 0.0))
         .show(ui);
     if let Some(to) = title.committed_text {
-        record.out.push_graph(GraphIntent::RenameNode {
+        record.stage.out.push_graph(GraphIntent::RenameNode {
             node_id: node.node_id,
             to,
         });
     } else if !title.editing && title.response.clicked() {
-        record.out.extend_graph(GraphIntent::click(
+        record.stage.out.extend_graph(GraphIntent::click(
             mode,
             node.graph_ctx.selected(),
             ItemId::Node(node.node_id),

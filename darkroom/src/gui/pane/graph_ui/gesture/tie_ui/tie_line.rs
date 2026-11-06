@@ -5,8 +5,8 @@ use glam::Vec2;
 use crate::core::document::tie::TieId;
 use crate::core::document::wire_key::WireKey;
 use crate::gui::pane::graph_ui::draw::tie::band::BandAxes;
-use crate::gui::pane::graph_ui::frame::wire::Wire;
 use crate::gui::pane::graph_ui::gesture::segments;
+use crate::gui::pane::graph_ui::scene::wire::Wire;
 
 /// A line shorter than this on screen, in logical px, crosses nothing: a press that barely
 /// moved, which is as far at every zoom.
@@ -159,10 +159,10 @@ mod tests {
     use crate::core::document::tie::TieId;
     use crate::core::document::wire_key::{DataWire, WireKey};
     use crate::gui::pane::graph_ui::draw::tie::band::BandAxes;
-    use crate::gui::pane::graph_ui::frame::wire::Wire;
     use crate::gui::pane::graph_ui::gesture::tie_ui::tie_line::{
         TieCrossing, TieLine, WireCrossing,
     };
+    use crate::gui::pane::graph_ui::scene::wire::Wire;
 
     fn line(start: Vec2, end: Vec2, zoom: f32) -> TieLine {
         let mut line = TieLine::default();

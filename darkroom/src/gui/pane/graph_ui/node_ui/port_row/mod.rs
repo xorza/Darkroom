@@ -224,7 +224,7 @@ fn label_style(ui: &Ui, theme: &Theme) -> TextStyle {
 /// The circle's `WidgetId` is the deterministic `wid::port_circle(port)`, so
 /// `CanvasGeometry`/snap/draw reconstruct it from domain coords.
 fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCtx<'_>) {
-    let (node_ctx, draw_ctx) = (record.node, record.draw);
+    let (node_ctx, draw_ctx) = (record.node, record.stage.ctx);
     let theme = node_ctx.theme();
     let port = input.port_ref();
     let tooltip = PortTooltip {
@@ -310,13 +310,14 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
             // unbound one has nothing to seed (its label double-click renames).
             None => {
                 if let Some(default) = input.default() {
-                    record.out.push_graph(GraphIntent::set_input(
+                    record.stage.out.push_graph(GraphIntent::set_input(
                         input.port(),
                         Binding::Const(default),
                     ));
                 }
             }
             Some(_) => record
+                .stage
                 .out
                 .push_graph(GraphIntent::set_input(input.port(), None)),
         }
@@ -336,6 +337,7 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
                 && let Some(value) = default
             {
                 record
+                    .stage
                     .out
                     .push_graph(GraphIntent::set_input(input.port(), Binding::Const(value)));
             }
@@ -346,6 +348,7 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
                 .clicked()
             {
                 record
+                    .stage
                     .out
                     .push_graph(GraphIntent::set_input(input.port(), None));
             }
@@ -393,6 +396,7 @@ fn value_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCtx<'_>)
         && let DataType::FsPath(config) = data_type
     {
         record
+            .stage
             .out
             .push_app(AppCommand::Edit(EditCommand::PickInputPath(PathPick {
                 port,
@@ -414,6 +418,7 @@ fn value_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCtx<'_>)
     });
     if let Some(new_value) = edited {
         record
+            .stage
             .out
             .push_graph(GraphIntent::set_input(port, Binding::Const(new_value)));
     }
@@ -437,7 +442,7 @@ fn value_column<R>(ui: &mut Ui, port: InputPort, body: impl FnOnce(&mut Ui) -> R
 /// satellite can end up anywhere on the canvas, not just overhanging this
 /// node).
 fn output_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, output: OutputCtx<'_>) {
-    let (node_ctx, draw_ctx) = (record.node, record.draw);
+    let (node_ctx, draw_ctx) = (record.node, record.stage.ctx);
     let theme = node_ctx.theme();
     let port = output.port_ref();
     let data_type = output.data_type();
@@ -478,7 +483,7 @@ fn output_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, output: OutputCtx<'
     // at the end of this pass, and the second pass a double-click earns
     // re-arranges every node that lost a wire.
     if glyph.left.double_clicked() {
-        record.out.extend_graph(
+        record.stage.out.extend_graph(
             node_ctx
                 .graph_ctx
                 .wires()
@@ -506,7 +511,7 @@ fn output_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, output: OutputCtx<'
                     .ports
                     .center(port)
                     .map_or(Vec2::ZERO, |center| center + PREVIEW_SPAWN_OFFSET);
-                record.out.extend_graph(
+                record.stage.out.extend_graph(
                     PreviewSpawn {
                         port: output.port(),
                         pos,
@@ -538,7 +543,7 @@ struct EventRow<'a> {
 impl EventRow<'_> {
     fn show(self, ui: &mut Ui, record: &NodeRecord<'_, '_>) {
         let Self { idx, row, event } = self;
-        let (node_ctx, draw_ctx) = (record.node, record.draw);
+        let (node_ctx, draw_ctx) = (record.node, record.stage.ctx);
         let theme = node_ctx.theme();
         let node_id = node_ctx.node_id;
         let margin = theme.port_margin(PortKind::Output, theme.port.radius());

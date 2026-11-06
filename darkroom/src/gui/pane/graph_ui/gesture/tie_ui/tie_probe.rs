@@ -4,8 +4,8 @@ use glam::Vec2;
 
 use crate::core::document::tie::TieId;
 use crate::core::document::wire_key::WireKey;
-use crate::gui::pane::graph_ui::frame::wire::Wire;
 use crate::gui::pane::graph_ui::gesture::tie_ui::tie_line::{TieCrossing, TieLine, WireCrossing};
+use crate::gui::pane::graph_ui::scene::wire::Wire;
 
 /// The tie line in flight, threaded through the wire and band draws so each records what the
 /// line crosses with the geometry it paints, as the breaker probe does.

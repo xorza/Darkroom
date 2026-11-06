@@ -156,7 +156,7 @@ fn a_piece_paints_its_share_of_the_wire_ramp() {
 fn the_pieces_share_the_ramp_by_chord_length() {
     use glam::Vec2;
 
-    use crate::gui::pane::graph_ui::frame::wire::Wire;
+    use crate::gui::pane::graph_ui::scene::wire::Wire;
 
     let straight = |x0: f32, x1: f32| Wire {
         p0: Vec2::new(x0, 0.0),

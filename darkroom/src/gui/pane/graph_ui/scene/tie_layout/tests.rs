@@ -7,7 +7,7 @@ use crate::core::document::graph_view::GraphView;
 use crate::core::document::route::Route;
 use crate::core::document::tie::{Tie, TieAngle, TieId};
 use crate::core::document::wire_key::{DataWire, WireKey};
-use crate::gui::pane::graph_ui::frame::tie_layout::{Span, TieLayout};
+use crate::gui::pane::graph_ui::scene::tie_layout::{Span, TieLayout};
 
 /// A data wire of its own, from a fresh node to another.
 fn wire() -> WireKey {
@@ -160,7 +160,7 @@ fn a_tied_wire_keeps_its_tangent_through_the_slot() {
 fn a_tied_event_wire_meets_its_pin_from_the_up_left() {
     use scenarium::{EventPort, Subscription};
 
-    use crate::gui::pane::graph_ui::frame::wire::Wire;
+    use crate::gui::pane::graph_ui::scene::wire::Wire;
 
     let event = WireKey::Event(Subscription::new(
         EventPort::new(NodeId::unique(), 0),

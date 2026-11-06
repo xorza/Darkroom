@@ -4,8 +4,8 @@ use glam::Vec2;
 use palantir::Rect;
 use scenarium::{InputPort, NodeId, Subscription};
 
-use crate::gui::pane::graph_ui::frame::wire::Wire;
 use crate::gui::pane::graph_ui::gesture::segments;
+use crate::gui::pane::graph_ui::scene::wire::Wire;
 
 /// Polyline samples closer than this on screen, in logical px, are dropped — keeps the breaker
 /// from accumulating sub-pixel duplicates on a slow drag. On screen rather than in world units,

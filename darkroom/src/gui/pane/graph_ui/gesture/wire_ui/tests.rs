@@ -8,8 +8,9 @@ use super::*;
 use crate::core::document::internals::DocumentFixture;
 use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::internals::GraphCtxFixture;
+use crate::gui::pane::graph_ui::canvas_input::CanvasInput;
 use crate::gui::pane::graph_ui::internals::CanvasHarness;
-use crate::gui::pane::graph_ui::prepass_ctx::{CanvasInput, PrepassCtx};
+use crate::gui::pane::graph_ui::unsettled_ctx::UnsettledCtx;
 use crate::gui::pane::graph_ui::wid;
 
 /// Two two-in/one-out nodes wired producer → consumer — enough graph for a
@@ -84,13 +85,13 @@ fn the_snap_type_check_reads_the_input_against_the_output_from_either_end() {
     }
 }
 
-/// Run one canvas prepass with a wire latched from `start` and report whether
+/// Run one canvas input stage with a wire latched from `start` and report whether
 /// it is still in flight afterwards. Deliberately `Floating`: it is the mode
 /// the fixture can express (a `Held` wire needs a real button release edge off
 /// the port geometry, which a bare fixture has none of) — and the more exposed
 /// one, since no button is held, so it can sit across an arbitrary number of
 /// undos.
-fn prepass_with_wire_from(fixture: &GraphCtxFixture, start: PortRef) -> Option<InFlight> {
+fn input_with_wire_from(fixture: &GraphCtxFixture, start: PortRef) -> Option<InFlight> {
     let mut arena = Harness::builder(UVec2::ONE).mono().build();
     let mut wires = WireUi {
         state: Some(InFlight {
@@ -105,24 +106,24 @@ fn prepass_with_wire_from(fixture: &GraphCtxFixture, start: PortRef) -> Option<I
     // than through the bare-canvas classification.
     let geometry = CanvasGeometry::default();
     let ctx = CanvasCtx::new(
-        PrepassCtx::new(fixture.graph_ctx(), CanvasInput::default()),
+        UnsettledCtx::new(fixture.graph_ctx(), CanvasInput::default()),
         &geometry,
     );
-    wires.prepass(&mut InputStage {
+    wires.input(&mut InputStage {
         update: &mut arena.ui_mut().update_ctx(),
         ctx,
         out: &mut out,
     });
     assert!(
         out.document().is_empty(),
-        "an untouched prepass emits nothing"
+        "an untouched input stage emits nothing"
     );
     wires.state.as_ref().copied()
 }
 
 #[test]
 fn a_wire_drops_when_its_start_node_leaves_the_scene() {
-    // Undo runs before the canvas prepass, so the node a wire grew out
+    // Undo runs before the canvas input stage, so the node a wire grew out
     // of can vanish mid-drag. The gesture has to let go: a commit
     // against a dead producer is refused at the edit boundary anyway
     // (silently), and until then `GraphCtx::port_type` reports the start as
@@ -136,13 +137,13 @@ fn a_wire_drops_when_its_start_node_leaves_the_scene() {
     } = fixture();
     let live = PortRef::output(producer, 0);
     assert!(
-        prepass_with_wire_from(&f, live).is_some(),
+        input_with_wire_from(&f, live).is_some(),
         "a wire from a node still in the scene stays in flight"
     );
 
     let gone = PortRef::output(NodeId::unique(), 0);
     assert!(
-        prepass_with_wire_from(&f, gone).is_none(),
+        input_with_wire_from(&f, gone).is_none(),
         "a wire from a vanished node drops"
     );
 }
@@ -195,7 +196,7 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
     // Now the same gesture backwards, with the document holding the edge that
     // release just described: consumer.out0 → producer.in0 would close the
     // loop, so the wire must not snap and the release must commit nothing.
-    // The filter answers that off `Document::graph_for` — a prepass handed the
+    // The filter answers that off `Document::graph_for` — an input stage handed the
     // wrong graph would go on snapping cycles with every other assertion here
     // still green.
     h.document_mut()

@@ -3,8 +3,8 @@
 use crate::core::document::item_id::ItemId;
 
 use crate::gui::graph_ctx::GraphCtx;
-use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
-use crate::gui::pane::graph_ui::frame::cull_region::CullRegion;
+use crate::gui::pane::graph_ui::scene::canvas_geometry::CanvasGeometry;
+use crate::gui::pane::graph_ui::scene::cull_region::CullRegion;
 use crate::gui::pane::graph_ui::selection::Selection;
 use crate::gui::theme::Theme;
 
@@ -47,6 +47,11 @@ impl<'a> DrawCtx<'a> {
 
     pub(crate) const fn cull(self) -> CullRegion {
         self.cull
+    }
+
+    /// The zoom this pass paints at: a screen-sized stroke divides by it.
+    pub(crate) const fn zoom(self) -> f32 {
+        self.graph_ctx.camera().zoom
     }
 
     /// Whether `item` paints selected this pass.

@@ -22,6 +22,7 @@ use crate::gui::frame::app_command::FileCommand;
 use crate::gui::frame::app_command::RunCommand;
 use crate::gui::frame::framing::Framing;
 use crate::gui::frame::input_stage::InputStage;
+use crate::gui::frame::record_stage::RecordStage;
 use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::main_window::MainWindow;
@@ -64,7 +65,7 @@ impl Session {
 
     /// The frame's input stage, once a frame before any record: everything input means against
     /// the document, drained so the first record pass sees it settled. Leaves the app tier queued
-    /// in `requests` for the shell.
+    /// in the stage's requests for the shell.
     ///
     /// Each phase ends in a drain, as a phase reads the document and the next one must see what the
     /// previous asked for. So each takes a stage over a `GraphCtx` composed right here, over the
@@ -73,38 +74,29 @@ impl Session {
     /// 1. NAVIGATION: settle which tab is active: the undo/redo chords, and tab and chip clicks
     ///    read off last frame's responses, whose hit on a node the undo just removed finds nothing.
     ///    First, so a switched-to tab records in the same present's first pass.
-    /// 2. PREPASS: reconcile pane visibility, rebuild the canvas's projection, then emit the
+    /// 2. INPUT: reconcile pane visibility, rebuild the canvas's projection, then emit the
     ///    input-derived graph mutations (drag, pan/zoom, wire commit). A canvas that just became
     ///    visible needs a relayout: it may never have recorded, and a dock op raises no geometry
     ///    signal of its own.
     ///
     /// Returns what the frame's records may read of the input. What the stage stranded of the
-    /// canvas's cached geometry it owes on `requests`.
-    pub(crate) fn input(
-        &mut self,
-        update_ctx: &mut UpdateCtx<'_>,
-        ctx: AppCtx<'_>,
-        requests: &mut Requests,
-    ) -> InputOutcome {
-        debug_assert!(requests.is_empty(), "the last frame left requests behind");
-        self.apply_undo_redo(update_ctx, requests);
-        let display = update_ctx.display();
-        self.main_window.scan_navigation(&mut InputStage {
-            update: update_ctx,
-            ctx: GraphCtx::new(ctx, &self.open, display),
-            out: requests,
-        });
-        self.drain(ctx.library(), requests);
+    /// canvas's cached geometry it owes on its requests.
+    pub(crate) fn input(&mut self, stage: &mut InputStage<'_, '_, AppCtx<'_>>) -> InputOutcome {
+        debug_assert!(stage.out.is_empty(), "the last frame left requests behind");
+        let library = stage.ctx.library();
+        self.apply_undo_redo(stage.update, stage.out);
+        let display = stage.update.display();
+        self.main_window
+            .scan_navigation(&mut stage.with(GraphCtx::new(stage.ctx, &self.open, display)));
+        self.drain(library, stage.out);
 
-        let outcome = self.main_window.prepass(&mut InputStage {
-            update: update_ctx,
-            ctx: GraphCtx::new(ctx, &self.open, display),
-            out: requests,
-        });
-        self.drain(ctx.library(), requests);
+        let outcome = self
+            .main_window
+            .input(&mut stage.with(GraphCtx::new(stage.ctx, &self.open, display)));
+        self.drain(library, stage.out);
 
         // The file/run/quit chords only queue an `AppCommand`, so they need no drain of their own.
-        menu_shortcut(update_ctx, requests);
+        menu_shortcut(stage.update, stage.out);
         self.input_ran = true;
         outcome
     }
@@ -136,8 +128,8 @@ impl Session {
         requests.owe_relayout_after(self.open.redo());
     }
 
-    /// One record pass against `ctx`: authors the widget tree, draining what it raises against the
-    /// document, and leaves the app tier queued in the requests for the shell.
+    /// One record pass against `stage`'s context: authors the widget tree, draining what it raises
+    /// against the document, and leaves the app tier queued in the requests for the shell.
     ///
     /// A pass that no input stage ran just before settles first: the one past the first frame's
     /// warmup, and a second pass, each of which reads the rects of the pass before it.
@@ -146,34 +138,31 @@ impl Session {
     /// driven by something other than an `UndoStep`, as the header's elapsed-time label growing as a
     /// run reports, are not covered: they leave `CanvasGeometry`'s offsets stale for one frame rather
     /// than buying a pass.
-    pub(crate) fn record(&mut self, ui: &mut Ui, ctx: AppCtx<'_>, parts: WindowParts<'_>) {
-        let WindowParts {
-            preferences,
-            requests,
-            status,
-        } = parts;
-        debug_assert!(requests.is_empty(), "the last pass left requests behind");
+    pub(crate) fn record(
+        &mut self,
+        ui: &mut Ui,
+        stage: &mut RecordStage<'_, AppCtx<'_>>,
+        parts: WindowParts<'_>,
+    ) {
+        debug_assert!(stage.out.is_empty(), "the last pass left requests behind");
+        let library = stage.ctx.library();
         let display = ui.display();
         if !mem::take(&mut self.input_ran) {
             self.main_window.settle(&mut InputStage {
                 update: &mut ui.update_ctx(),
-                ctx: GraphCtx::new(ctx, &self.open, display),
-                out: requests,
+                ctx: GraphCtx::new(stage.ctx, &self.open, display),
+                out: stage.out,
             });
-            self.drain(ctx.library(), requests);
+            self.drain(library, stage.out);
         }
-        self.main_window.frame(
+        self.main_window.record(
             ui,
-            GraphCtx::new(ctx, &self.open, display),
-            WindowParts {
-                preferences,
-                requests,
-                status,
-            },
+            &mut stage.with(GraphCtx::new(stage.ctx, &self.open, display)),
+            parts,
         );
         // Graph edits the record surfaced (cache toggle, const edit), plus the tab
         // strip's dock ops.
-        self.drain(ctx.library(), requests);
+        self.drain(library, stage.out);
     }
 
     /// Ctrl+Z / Ctrl+Shift+Z. Replays undo/redo against the document
@@ -199,7 +188,7 @@ impl Session {
         }
     }
 
-    /// Frame the graph in the canvas's next prepass; see [`ViewCommand::Frame`].
+    /// Frame the graph in the canvas's next input stage; see [`ViewCommand::Frame`].
     ///
     /// [`ViewCommand::Frame`]: crate::gui::frame::app_command::ViewCommand::Frame
     pub(crate) const fn frame_graph(&mut self, framing: Framing) {
@@ -208,7 +197,7 @@ impl Session {
 
     /// Release the canvas's `NodeId`-keyed caches for nodes the document has
     /// stopped holding. Driven by `App::update` once a
-    /// frame — [`Self::frame`] runs per *record pass*, so a sweep here would
+    /// frame — [`Self::record`] runs per *record pass*, so a sweep here would
     /// run twice on a frame carrying action input.
     pub(super) fn reconcile_caches(&mut self) {
         self.main_window.reconcile(&self.open);

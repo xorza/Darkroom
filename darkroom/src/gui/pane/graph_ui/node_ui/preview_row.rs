@@ -94,7 +94,7 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     // asks. Deduped by `OpenTab`, so clicking a card whose viewer is already
     // open just activates it.
     if content.clicked() {
-        record.out.push_view(DockOperation::OpenTab {
+        record.stage.out.push_view(DockOperation::OpenTab {
             tab: TabRef::ImageViewer(node.node_id),
         });
     }

@@ -6,11 +6,11 @@ use palantir::{Input, InternedStr, MenuItem, MenuSeparator, Ui, fmt};
 use crate::core::document::tie::{TieAngle, TieId};
 use crate::core::document::wire_key::{DataWire, WireKey};
 use crate::core::edit::graph_intent::GraphIntent;
-use crate::gui::frame::requests::Requests;
+use crate::gui::frame::record_stage::RecordStage;
 use crate::gui::graph_ctx::GraphCtx;
-use crate::gui::pane::graph_ui::frame::tie_layout::TieLayout;
 use crate::gui::pane::graph_ui::gesture::item_menu::ItemMenu;
 use crate::gui::pane::graph_ui::gesture::tie_ui::tie_widget::{AngleSnap, knob_angle};
+use crate::gui::pane::graph_ui::scene::tie_layout::TieLayout;
 
 /// Right-click on a tie: release one of its wires, pin or free its angle, or remove it. A
 /// Release entry under the pointer lights its strand, so the pick names the wire it shows.
@@ -61,10 +61,10 @@ impl TieMenuUi {
     pub(crate) fn record(
         &mut self,
         ui: &mut Ui,
-        graph_ctx: GraphCtx<'_>,
+        stage: &mut RecordStage<'_, GraphCtx<'_>>,
         ties: &TieLayout,
-        out: &mut Requests,
     ) {
+        let (graph_ctx, out) = (stage.ctx, &mut *stage.out);
         let view = graph_ctx.view();
         let mut lit = None;
         self.menu.retain(|tie| view.ties.contains_key(&tie));

@@ -1,7 +1,7 @@
 //! The in-flight gesture controllers, plus the machinery they share.
 //!
 //! Each owns one gesture's cross-frame state, consumes only the
-//! [`CanvasGesture`](crate::gui::pane::graph_ui::prepass_ctx::CanvasGesture) variant the
+//! [`CanvasGesture`](crate::gui::pane::graph_ui::canvas_input::CanvasGesture) variant the
 //! canvas classified for it, and emits its result as intents rather than
 //! editing the document — so the precedence among them lives in one match
 //! upstairs and never has to be kept disjoint by hand down here.

@@ -21,10 +21,10 @@ use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph_ui::draw::tie::band::{BandAxes, BandInk, BandLook, KNOB_HIT_RADIUS};
 use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
-use crate::gui::pane::graph_ui::frame::tie_layout::TieLayout;
 use crate::gui::pane::graph_ui::gesture::group_drag::{self, Grab, GrabStart};
 use crate::gui::pane::graph_ui::gesture::tie_ui::tie_probe::TieProbe;
-use crate::gui::pane::graph_ui::prepass_ctx::PrepassCtx;
+use crate::gui::pane::graph_ui::scene::tie_layout::TieLayout;
+use crate::gui::pane::graph_ui::unsettled_ctx::UnsettledCtx;
 use crate::gui::pane::graph_ui::wid;
 
 /// The step a knob turned with Shift rounds to, in degrees, as design tools snap.
@@ -73,7 +73,7 @@ impl TieWidgets {
 
     /// Pre-record: turn a held knob's band to the pointer. The frames of one knob drag fold into
     /// one undo entry; Esc puts the angle back.
-    pub(crate) fn prepass(&mut self, stage: &mut InputStage<'_, '_, PrepassCtx<'_>>) {
+    pub(crate) fn input(&mut self, stage: &mut InputStage<'_, '_, UnsettledCtx<'_>>) {
         let ctx = stage.ctx;
         let input = &mut *stage.update.input;
         let out = &mut *stage.out;

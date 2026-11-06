@@ -8,7 +8,7 @@ use scenarium::NodeId;
 use crate::core::document::graph_view::GraphView;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
-use crate::gui::pane::graph_ui::frame::canvas_geometry::port_layer::{NodePlace, PortLayer};
+use crate::gui::pane::graph_ui::scene::canvas_geometry::port_layer::{NodePlace, PortLayer};
 use crate::gui::pane::graph_ui::wid;
 use crate::gui::port_ref::{PortKind, PortRef};
 use scenarium::EventPort;
@@ -18,9 +18,9 @@ pub(crate) mod port_layer;
 /// The canvas's response-derived geometry: a per-frame snapshot of every port-ish glyph plus the
 /// cross-frame node-size cache, all filled by one [`Self::rebuild`] pass polling
 /// [`Ui::response_for`] on deterministic widget ids. Rebuilt in
-/// [`crate::gui::pane::graph_ui::GraphUi::prepass`], its centers moved by
+/// [`crate::gui::pane::graph_ui::GraphUi::input`], its centers moved by
 /// [`Self::reposition`] to where the record finds the nodes, and reused by
-/// [`crate::gui::pane::graph_ui::GraphUi::draw`]. Each glyph snapshot keeps the few fields read
+/// [`crate::gui::pane::graph_ui::GraphUi::record`]. Each glyph snapshot keeps the few fields read
 /// of it instead of the whole `ResponseState`.
 ///
 /// Ports that haven't recorded yet (first frame after a node spawns)
@@ -147,7 +147,7 @@ impl CanvasGeometry {
     /// polls live here: the body poll below is at once the node's cached size
     /// and its screen rect.
     ///
-    /// Runs in [`crate::gui::pane::graph_ui::GraphUi::prepass`]. It clears and
+    /// Runs in [`crate::gui::pane::graph_ui::GraphUi::input`]. It clears and
     /// refills the per-frame snapshots whole, so nothing carries over from the
     /// frame before.
     pub(crate) fn rebuild(&mut self, input: &Input, graph_ctx: GraphCtx<'_>) {

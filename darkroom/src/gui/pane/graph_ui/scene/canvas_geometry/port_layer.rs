@@ -78,8 +78,9 @@ impl<K: NodeKey> PortLayer<K> {
         self.live.insert(key, info);
     }
 
-    /// Move each center to its node's position in `view`, which the drain between the prepass
-    /// and the record moves a dragged node to; the interaction state stays as the prepass read it.
+    /// Move each center to its node's position in `view`, which the drain between the input stage
+    /// and the record moves a dragged node to; the interaction state stays as the input stage read
+    /// it.
     #[expect(
         clippy::iter_over_hash_type,
         reason = "each center moves on its own, so the order changes nothing"
@@ -95,7 +96,7 @@ impl<K: NodeKey> PortLayer<K> {
     }
 
     /// Drop the offsets of every glyph on a node `keep` refuses; see
-    /// [`CanvasGeometry::retain_nodes`](crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry::retain_nodes).
+    /// [`CanvasGeometry::retain_nodes`](crate::gui::pane::graph_ui::scene::canvas_geometry::CanvasGeometry::retain_nodes).
     pub(super) fn retain_nodes(&mut self, keep: impl Fn(NodeId) -> bool) {
         self.offsets.retain(|key, _| keep(key.node()));
     }
@@ -200,7 +201,7 @@ struct PortInfo {
     /// `true` when the port should paint with its hover color. Filled
     /// from `response.hovered` in `rebuild`; an active wire
     /// drag's snap target gets it forced on via `set_hovered` after
-    /// `WireUi::prepass` (palantir's drag-capture suppression
+    /// `WireUi::input` (palantir's drag-capture suppression
     /// otherwise hides the snap target from `response.hovered`).
     hovered: bool,
     /// One-frame edge: pointer-down → drag latched on this port this
