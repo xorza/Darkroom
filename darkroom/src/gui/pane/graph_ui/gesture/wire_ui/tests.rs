@@ -6,6 +6,7 @@ use scenarium::{DataType, InputPort, NodeId};
 
 use super::*;
 use crate::core::document::internals::DocumentFixture;
+use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::internals::GraphCtxFixture;
 use crate::gui::pane::graph_ui::internals::CanvasHarness;
 use crate::gui::pane::graph_ui::prepass_ctx::{CanvasInput, PrepassCtx};
@@ -107,7 +108,11 @@ fn prepass_with_wire_from(fixture: &GraphCtxFixture, start: PortRef) -> Option<I
         PrepassCtx::new(fixture.graph_ctx(), CanvasInput::default()),
         &geometry,
     );
-    wires.prepass(&mut arena.ui_mut().update_ctx(), ctx, &mut out);
+    wires.prepass(&mut InputStage {
+        update: &mut arena.ui_mut().update_ctx(),
+        ctx,
+        out: &mut out,
+    });
     assert!(
         out.document().is_empty(),
         "an untouched prepass emits nothing"

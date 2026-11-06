@@ -5,7 +5,7 @@
 use std::rc::Rc;
 
 use glam::Vec2;
-use palantir::{Configure, Input, Modifiers, Panel, Sense, Sizing, Ui};
+use palantir::{Configure, Modifiers, Panel, Sense, Sizing, Ui};
 
 use crate::core::document::item_id::ItemId;
 use crate::core::document::tie::{TieAngle, TieId};
@@ -13,6 +13,7 @@ use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::click_mode::ClickMode;
 use crate::core::edit::graph_intent::drag_start::DragStart;
+use crate::gui::frame::input_stage::InputStage;
 use crate::gui::frame::requests::Requests;
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::draw::tie::band::{BandAxes, BandInk, BandLook, KNOB_HIT_RADIUS};
@@ -79,7 +80,10 @@ impl TieWidgets {
 
     /// Pre-record: turn a held knob's band to the pointer. The frames of one knob drag fold into
     /// one undo entry; Esc puts the angle back.
-    pub(crate) fn prepass(&mut self, input: &mut Input, ctx: PrepassCtx<'_>, out: &mut Requests) {
+    pub(crate) fn prepass(&mut self, stage: &mut InputStage<'_, '_, PrepassCtx<'_>>) {
+        let ctx = stage.ctx;
+        let input = &mut *stage.update.input;
+        let out = &mut *stage.out;
         let Some(knob) = self.knob.as_ref().copied() else {
             return;
         };

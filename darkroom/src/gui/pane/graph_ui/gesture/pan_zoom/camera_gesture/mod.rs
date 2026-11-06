@@ -2,11 +2,10 @@
 
 use common::FloatExt;
 use glam::Vec2;
-use palantir::Input;
 
 use crate::core::document::viewport::Viewport;
 use crate::core::edit::graph_intent::GraphIntent;
-use crate::gui::frame::requests::Requests;
+use crate::gui::frame::input_stage::InputStage;
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::gesture::pan_zoom;
 use crate::gui::pane::graph_ui::prepass_ctx::CanvasGesture;
@@ -49,23 +48,18 @@ impl CameraGesture {
     ///   `-y` (wheel up) → zoom in.
     /// - **Pinch** (`Sense::PINCH`): zoom about the cursor, with the
     ///   `Response::pointer_local` pivot.
-    pub(crate) fn prepass(
-        &mut self,
-        input: &Input,
-        line_px: f32,
-        ctx: PrepassCtx<'_>,
-        out: &mut Requests,
-    ) {
+    pub(crate) fn prepass(&mut self, stage: &mut InputStage<'_, '_, PrepassCtx<'_>>) {
+        let ctx = stage.ctx;
         // The stored camera, not the landed one the canvas draws: the input folds onto the exact
         // pan, so a zoom keeps its pivot under the pointer.
         let viewport = ctx.graph_ctx().view().viewport;
         if ctx.cancelled()
             && let Some(back) = self.cancel_pan(viewport)
         {
-            out.push_graph(back);
+            stage.out.push_graph(back);
             return;
         }
-        let resp = input.response_for(canvas::outer_wid());
+        let resp = stage.update.input.response_for(canvas::outer_wid());
         let mut v = viewport;
         // Pan latch comes from the central classification; continuation and
         // wheel/pinch zoom below read the response directly (not arbitration).
@@ -73,6 +67,7 @@ impl CameraGesture {
             self.pan = Some(viewport.pan);
         }
         pan_drag::fold(&mut self.pan, resp.middle.drag.delta(), &mut v.pan);
+        let line_px = stage.update.theme().text.line_height();
         pan_zoom::CANVAS_ZOOM.fold_scroll(&mut v, line_px, &resp);
         // Only emit when the gesture actually moved the viewport (approx
         // compare — exact float `!=` would emit on the last-bit noise the
@@ -82,7 +77,7 @@ impl CameraGesture {
         let unchanged =
             v.pan.approximately_eq(viewport.pan) && v.zoom.approximately_eq(viewport.zoom);
         if !unchanged {
-            out.push_graph(GraphIntent::SetViewport { to: v });
+            stage.out.push_graph(GraphIntent::SetViewport { to: v });
         }
     }
 

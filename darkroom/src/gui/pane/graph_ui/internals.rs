@@ -17,6 +17,7 @@ use crate::core::document::tab_ref::TabRef;
 use crate::core::edit::document_request::DocumentRequest;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::frame::app_command::AppCommand;
+use crate::gui::frame::input_stage::InputStage;
 use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::internals::GraphCtxFixture;
 use crate::gui::pane::graph_ui::GraphUi;
@@ -346,10 +347,12 @@ impl<'a> CanvasFrame<'a> {
 impl App for CanvasFrame<'_> {
     fn update(&mut self, _: WindowToken, mut update_ctx: UpdateCtx<'_>) -> InputOutcome {
         self.out = Requests::default();
-        let graph_ctx = self.ctx.graph_ctx_on(update_ctx.display());
-        self.outcome = self
-            .graph_ui
-            .prepass(&mut update_ctx, graph_ctx, &mut self.out);
+        let ctx = self.ctx.graph_ctx_on(update_ctx.display());
+        self.outcome = self.graph_ui.prepass(&mut InputStage {
+            update: &mut update_ctx,
+            ctx,
+            out: &mut self.out,
+        });
         self.apply();
         self.input_ran = true;
         self.outcome
@@ -359,8 +362,12 @@ impl App for CanvasFrame<'_> {
         let first_pass = mem::take(&mut self.input_ran);
         let mut later_pass = Requests::default();
         if !first_pass {
-            let graph_ctx = self.ctx.graph_ctx_on(recorder.display());
-            self.graph_ui.settle(recorder, graph_ctx, &mut later_pass);
+            let ctx = self.ctx.graph_ctx_on(recorder.display());
+            self.graph_ui.settle(&mut InputStage {
+                update: &mut recorder.update_ctx(),
+                ctx,
+                out: &mut later_pass,
+            });
         }
         let out = if first_pass {
             &mut self.out

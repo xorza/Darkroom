@@ -27,8 +27,8 @@ pub(crate) mod toolbar;
 pub(crate) mod wid;
 
 use palantir::{
-    Chrome, Configure, Input, InputOutcome, Key, KeyboardWake, Modifiers, Panel, PointerButton,
-    PointerEdge, Sense, Sizing, TranslateScale, Ui, UpdateCtx,
+    Chrome, Configure, InputOutcome, Key, KeyboardWake, Modifiers, Panel, PointerButton,
+    PointerEdge, Sense, Sizing, TranslateScale, Ui,
 };
 
 use crate::core::document::Document;
@@ -36,6 +36,7 @@ use crate::core::document::item_id::ItemId;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::click_mode::ClickMode;
 use crate::gui::frame::framing::Framing;
+use crate::gui::frame::input_stage::InputStage;
 use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::canvas_bg::CanvasBg;
@@ -296,15 +297,11 @@ impl GraphUi {
         appearing
     }
 
-    pub(crate) fn prepass(
-        &mut self,
-        update_ctx: &mut UpdateCtx<'_>,
-        graph_ctx: GraphCtx<'_>,
-        out: &mut Requests,
-    ) -> InputOutcome {
+    pub(crate) fn prepass(&mut self, stage: &mut InputStage<'_, '_, GraphCtx<'_>>) -> InputOutcome {
+        let graph_ctx = stage.ctx;
         // A click that ends a gesture is that gesture's, whatever it lands on.
         let idle = !self.in_flight();
-        self.open_pass(update_ctx.record_frame_id(), out);
+        self.open_pass(stage.update.record_frame_id(), stage.out);
         // Resolve the frame's bare-canvas gesture and park it for `draw` to
         // read back — the classification is one response poll, and both
         // phases must agree on the winner.
@@ -316,8 +313,8 @@ impl GraphUi {
         // Esc cancels what is in flight, whatever the modifiers: Ctrl still held from a spawn
         // drag's chord must not swallow the cancel. Deselect, a command, is plain Esc alone. Both
         // read every frame, so each stays watched.
-        let cancel = update_ctx.key_pressed(Key::Escape);
-        let plain = update_ctx.shortcut_pressed(Key::Escape);
+        let cancel = stage.update.key_pressed(Key::Escape);
+        let plain = stage.update.shortcut_pressed(Key::Escape);
         let escape = if self.in_flight() && cancel {
             Escape::Cancels
         } else if plain {
@@ -325,40 +322,47 @@ impl GraphUi {
         } else {
             Escape::Unpressed
         };
-        let canvas = update_ctx.input.response_for(canvas::outer_wid());
+        let canvas = stage.update.input.response_for(canvas::outer_wid());
         self.input = CanvasInput {
-            gesture: CanvasGesture::classify(&canvas, update_ctx.input.modifiers(), self.secondary),
+            gesture: CanvasGesture::classify(
+                &canvas,
+                stage.update.input.modifiers(),
+                self.secondary,
+            ),
             escape,
             dropped_wire: None,
         };
         let prepass = PrepassCtx::new(graph_ctx, self.input);
-        let line_px = update_ctx.theme().text.line_height();
-        self.camera.prepass(update_ctx.input, line_px, prepass, out);
-        let dragging = self.group_drag.prepass(update_ctx.input, prepass, out);
-        self.tie_widgets.prepass(update_ctx.input, prepass, out);
+        let mut before_geometry = stage.with(prepass);
+        self.camera.prepass(&mut before_geometry);
+        let dragging = self.group_drag.prepass(&mut before_geometry);
+        self.tie_widgets.prepass(&mut before_geometry);
         // One walk, filling the geometry caches off the per-node and per-port
         // responses.
-        self.geometry.rebuild(update_ctx.input, graph_ctx);
+        self.geometry.rebuild(stage.update.input, graph_ctx);
         // Everything below reads the settled geometry, so from here the canvas
         // has a context of its own.
-        let ctx = CanvasCtx::new(prepass, &self.geometry);
+        let mut settled = stage.with(CanvasCtx::new(prepass, &self.geometry));
         // Both port-drag claimants sit *after* the rebuild so they read this
-        // frame's drag edges and centers, and `preview_drag_modifier` keeps
+        // frame's drag edges and centers, and `preview_drag::modifier_held` keeps
         // them disjoint: the preview spawn takes the output column under the
         // chord, the wire gesture takes it otherwise.
-        if !dragging && let Some(start) = preview_drag::start(update_ctx.input, ctx) {
-            let gesture = self.group_drag.latch(start.grab, out);
-            out.extend_graph_in(gesture, start.spawn);
+        if !dragging && let Some(start) = preview_drag::start(settled.update.input, settled.ctx) {
+            let gesture = self.group_drag.latch(start.grab, settled.out);
+            settled.out.extend_graph_in(gesture, start.spawn);
         }
-        match self.wire_ui.prepass(update_ctx, ctx, out) {
+        match self.wire_ui.prepass(&mut settled) {
             // The palette, which reads the input in the record, opens on the dropped wire.
             Some(WireEnd::DroppedOnCanvas(source)) => self.input.dropped_wire = Some(source),
             // The press that ended a floating wire is spent, its release too when it lands this
             // same frame: the palette sees no click.
             Some(WireEnd::Secondary) => {
                 self.secondary = SecondaryPress::Spent;
-                self.input.gesture =
-                    CanvasGesture::classify(&canvas, update_ctx.input.modifiers(), self.secondary);
+                self.input.gesture = CanvasGesture::classify(
+                    &canvas,
+                    settled.update.input.modifiers(),
+                    self.secondary,
+                );
             }
             None => {}
         }
@@ -370,17 +374,17 @@ impl GraphUi {
         // the same pre-record reasons as the wire gesture above; an
         // emitter glyph and a data port can't both latch (different widget-id
         // spaces).
-        self.subscription_ui.prepass(update_ctx.input, ctx, out);
+        self.subscription_ui.prepass(&mut settled);
         // Last, once: both wire gestures have settled their snap targets
         // above, and the flags this writes are document-unique, so the draw
         // reads finished geometry. Taking the table back `&mut` is what ends
-        // `ctx` — nothing below may read one.
-        self.finish_geometry(update_ctx.input, graph_ctx, out);
-        let took_clicks = self.take_clicks(update_ctx.input, graph_ctx, out);
+        // `settled` — nothing below may read one.
+        self.finish_geometry(stage);
+        let took_clicks = self.take_clicks(stage);
         // The keyboard half of the same phase. Last, so a chord reads the
         // document the pointer gestures above were raised against.
-        shortcuts::emit(update_ctx, CanvasCtx::new(prepass, &self.geometry), out);
-        let keyless = update_ctx.keyboard_events(KeyboardWake::NONE).is_empty();
+        shortcuts::emit(&mut stage.with(CanvasCtx::new(prepass, &self.geometry)));
+        let keyless = stage.update.keyboard_events(KeyboardWake::NONE).is_empty();
         if idle && took_clicks && keyless {
             InputOutcome::Handled
         } else {
@@ -396,12 +400,10 @@ impl GraphUi {
     ///
     /// Whether the frame's edges are all such clicks, so no record has anything left to read. A
     /// click on a node's title, chip or field is its widget's, and a drag's edges are its gesture's.
-    fn take_clicks(
-        &mut self,
-        input: &mut Input,
-        graph_ctx: GraphCtx<'_>,
-        out: &mut Requests,
-    ) -> bool {
+    fn take_clicks(&mut self, stage: &mut InputStage<'_, '_, GraphCtx<'_>>) -> bool {
+        let graph_ctx = stage.ctx;
+        let input = &mut *stage.update.input;
+        let out = &mut *stage.out;
         let mode = ClickMode::with_shift(input.modifiers().contains(Modifiers::SHIFT));
         let selected = graph_ctx.selected();
         let (mut took, mut all) = (false, true);
@@ -450,12 +452,11 @@ impl GraphUi {
     /// so what it left for the draw goes; the geometry is built again, and a framing the last
     /// record raised lands here.
     /// Refused: a replay of the prepass, which ran each gesture again on a level read.
-    pub(crate) fn settle(&mut self, ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
-        self.open_pass(ui.record_frame_id(), out);
+    pub(crate) fn settle(&mut self, stage: &mut InputStage<'_, '_, GraphCtx<'_>>) {
+        self.open_pass(stage.update.record_frame_id(), stage.out);
         self.input = CanvasInput::default();
-        let input = ui.update_ctx().input;
-        self.geometry.rebuild(input, graph_ctx);
-        self.finish_geometry(input, graph_ctx, out);
+        self.geometry.rebuild(stage.update.input, stage.ctx);
+        self.finish_geometry(stage);
     }
 
     /// What opens a pass on any path: a canvas back from being away drops the gesture state it left
@@ -472,15 +473,18 @@ impl GraphUi {
     /// framing lands on the rects it now holds, and a node with no measured size owes a relayout. It
     /// records hidden until its rects let its wires draw, and a cull keeps it recorded, so this ends
     /// with the next record.
-    fn finish_geometry(&mut self, input: &Input, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
+    fn finish_geometry(&mut self, stage: &mut InputStage<'_, '_, GraphCtx<'_>>) {
         if self.geometry.has_unmeasured() {
-            out.owe_relayout();
+            stage.out.owe_relayout();
         }
         self.wire_ui.bake_snap_hover(&mut self.geometry);
         self.subscription_ui.bake_snap_hover(&mut self.geometry);
         if let Some(framing) = self.framing.take() {
-            let prepass = PrepassCtx::new(graph_ctx, self.input);
-            out.extend_graph(framing.intent(input, CanvasCtx::new(prepass, &self.geometry)));
+            let prepass = PrepassCtx::new(stage.ctx, self.input);
+            let canvas = CanvasCtx::new(prepass, &self.geometry);
+            stage
+                .out
+                .extend_graph(framing.intent(stage.update.input, canvas));
         }
     }
 
@@ -824,8 +828,12 @@ mod tests {
         let settle = |h: &mut CanvasHarness| {
             let mut out = Requests::default();
             let ui = h.ui.ui_mut();
-            let graph_ctx = h.ctx.graph_ctx_on(ui.display());
-            h.graph_ui.settle(ui, graph_ctx, &mut out);
+            let ctx = h.ctx.graph_ctx_on(ui.display());
+            h.graph_ui.settle(&mut InputStage {
+                update: &mut ui.update_ctx(),
+                ctx,
+                out: &mut out,
+            });
             assert!(!out.owes_relayout());
             out
         };

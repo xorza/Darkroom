@@ -2,7 +2,7 @@ use palantir::{Input, PointerButton, PointerEvent, PointerWake, Ui};
 use scenarium::Binding;
 
 use crate::core::edit::graph_intent::GraphIntent;
-use crate::gui::frame::requests::Requests;
+use crate::gui::frame::input_stage::InputStage;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::input_ctx::InputCtx;
 use crate::gui::pane::graph_ui::canvas;
@@ -101,16 +101,15 @@ impl WireUi {
     /// for more than an edit.
     pub(crate) fn prepass(
         &mut self,
-        update_ctx: &mut palantir::UpdateCtx<'_>,
-        ctx: CanvasCtx<'_>,
-        out: &mut Requests,
+        stage: &mut InputStage<'_, '_, CanvasCtx<'_>>,
     ) -> Option<WireEnd> {
+        let ctx = stage.ctx;
         let (graph_ctx, geometry) = (ctx.graph_ctx(), ctx.geometry());
         // Latch a fresh port drag only when idle.
         // The output column drops out while the preview-spawn chord is
         // held: that chord is the preview drag's, so the two controllers
         // never both latch one press.
-        let preview_chord = preview_drag::modifier_held(update_ctx.input);
+        let preview_chord = preview_drag::modifier_held(stage.update.input);
         if self.state.is_none()
             && let Some(drag) = GlyphDrag::latch(&geometry.ports, |port| {
                 !preview_chord || port.kind == PortKind::Input
@@ -134,12 +133,12 @@ impl WireUi {
         }
 
         // Refresh the compatible port under the pointer for both modes.
-        state.drag.snap = scan_snap_target(update_ctx.input, ctx, state.drag.from);
+        state.drag.snap = scan_snap_target(stage.update.input, ctx, state.drag.from);
         self.state = Some(state);
 
         match state.mode {
-            DragMode::Held => self.resolve_held(update_ctx.input, ctx, state.drag, out),
-            DragMode::Floating => self.resolve_floating(update_ctx, state.drag, out),
+            DragMode::Held => self.resolve_held(stage, state.drag),
+            DragMode::Floating => self.resolve_floating(stage, state.drag),
         }
     }
 
@@ -148,11 +147,12 @@ impl WireUi {
     /// drop on empty canvas. While the button is still down, keep the wire.
     fn resolve_held(
         &mut self,
-        input: &mut Input,
-        ctx: CanvasCtx<'_>,
+        stage: &mut InputStage<'_, '_, CanvasCtx<'_>>,
         drag: GlyphDrag<PortRef, PortRef>,
-        out: &mut Requests,
     ) -> Option<WireEnd> {
+        let ctx = stage.ctx;
+        let input = &mut *stage.update.input;
+        let out = &mut *stage.out;
         if drag.held(&ctx.geometry().ports) {
             return None;
         }
@@ -177,16 +177,17 @@ impl WireUi {
     /// handled in `prepass`.
     fn resolve_floating(
         &mut self,
-        update_ctx: &mut palantir::UpdateCtx<'_>,
+        stage: &mut InputStage<'_, '_, CanvasCtx<'_>>,
         drag: GlyphDrag<PortRef, PortRef>,
-        out: &mut Requests,
     ) -> Option<WireEnd> {
         // `MOVE` wakes a repaint on every cursor move so the wire tracks the
         // pointer (no button is held, so there's no drag-capture keeping
         // frames coming — without this it only redraws when some other
         // widget's hover change happens to wake a frame). `BUTTONS` delivers
         // the terminating press.
-        let events = update_ctx.pointer_events(PointerWake::MOVE | PointerWake::BUTTONS);
+        let events = stage
+            .update
+            .pointer_events(PointerWake::MOVE | PointerWake::BUTTONS);
         let ended = events.iter().find_map(|ev| match ev {
             PointerEvent::Pressed {
                 button: button @ (PointerButton::Left | PointerButton::Right),
@@ -197,7 +198,9 @@ impl WireUi {
         match ended {
             Some(PointerButton::Left) => {
                 self.state = None;
-                out.extend_graph(drag.snap.map(|end| wire(drag.from, end)));
+                stage
+                    .out
+                    .extend_graph(drag.snap.map(|end| wire(drag.from, end)));
                 None
             }
             Some(PointerButton::Right) => {

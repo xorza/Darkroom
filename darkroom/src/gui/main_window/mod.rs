@@ -2,7 +2,7 @@ pub(crate) mod dock_panes;
 pub(crate) mod menu_bar;
 pub(crate) mod status_bar;
 
-use palantir::{InputOutcome, UpdateCtx};
+use palantir::InputOutcome;
 use std::collections::HashMap;
 
 use palantir::{
@@ -14,7 +14,7 @@ use scenarium::NodeId;
 use crate::core::document::graph_revision::GraphRevision;
 use crate::core::document::tab_ref::TabRef;
 use crate::core::open_document::OpenDocument;
-use crate::gui::frame::requests::Requests;
+use crate::gui::frame::input_stage::InputStage;
 use crate::gui::frame::window_parts::WindowParts;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::main_window::dock_panes::DockPanes;
@@ -33,7 +33,8 @@ const MIN_PANE: f32 = 220.0;
 /// [`DockPanes`]'s. Adding a new pane *kind* is a new arm there.
 ///
 /// Each entry point takes a [`GraphCtx`], the frame's world *and* the document it is showing,
-/// settled by the time the caller reaches it, and everything below this file takes that context.
+/// settled by the time the caller reaches it, and everything below this file takes that context:
+/// in an [`InputStage`] on the update path.
 #[derive(Default, Debug)]
 pub(crate) struct MainWindow {
     pub(crate) graph_ui: GraphUi,
@@ -69,17 +70,13 @@ impl MainWindow {
     /// handed to the frame's queue, which is where every other darkroom
     /// surface puts one: dock ops travel beside graph edits, stay out of
     /// undo, and are validated before a save.
-    pub(crate) fn scan_navigation(
-        &mut self,
-        update_ctx: &mut UpdateCtx<'_>,
-        ctx: GraphCtx<'_>,
-        out: &mut Requests,
-    ) {
+    pub(crate) fn scan_navigation(&mut self, stage: &mut InputStage<'_, '_, GraphCtx<'_>>) {
         let ops = &mut self.dock_ops;
         ops.clear();
-        DockView::scan(update_ctx, Self::dock_wid(), &ctx.document().layout, ops);
+        let layout = &stage.ctx.document().layout;
+        DockView::scan(stage.update, Self::dock_wid(), layout, ops);
         for op in ops.drain(..) {
-            out.push_view(op);
+            stage.out.push_view(op);
         }
     }
 
@@ -88,22 +85,16 @@ impl MainWindow {
     /// that has to happen before them.
     ///
     /// Returns what the frame's records may read of the input. A pane that became visible this frame
-    /// owes a relayout on `out`, since a canvas that has never recorded has no cached geometry to
+    /// owes a relayout, since a canvas that has never recorded has no cached geometry to
     /// draw its first frame from. A pane that *vanished* needs no pass and is never visited here at
     /// all.
-    pub(crate) fn prepass(
-        &mut self,
-        update_ctx: &mut UpdateCtx<'_>,
-        ctx: GraphCtx<'_>,
-        out: &mut Requests,
-    ) -> InputOutcome {
-        let Self { graph_ui, .. } = self;
+    pub(crate) fn prepass(&mut self, stage: &mut InputStage<'_, '_, GraphCtx<'_>>) -> InputOutcome {
         let mut outcome = InputOutcome::Record;
-        for tab in ctx.document().layout.active_tabs() {
+        for tab in stage.ctx.document().layout.active_tabs() {
             match tab {
                 // Reached from `active_tabs`, so a pane is showing the graph by construction.
                 TabRef::Graph => {
-                    outcome = graph_ui.prepass(update_ctx, ctx, out);
+                    outcome = self.graph_ui.prepass(stage);
                 }
                 // Neither derives a document mutation from input: preferences
                 // edits go through their own widgets, and a viewer only
@@ -116,11 +107,10 @@ impl MainWindow {
 
     /// Ready the panes on screen for a record pass that no input stage ran just before; see
     /// [`GraphUi::settle`].
-    pub(crate) fn settle(&mut self, ui: &mut Ui, ctx: GraphCtx<'_>, out: &mut Requests) {
-        let Self { graph_ui, .. } = self;
-        for tab in ctx.document().layout.active_tabs() {
+    pub(crate) fn settle(&mut self, stage: &mut InputStage<'_, '_, GraphCtx<'_>>) {
+        for tab in stage.ctx.document().layout.active_tabs() {
             match tab {
-                TabRef::Graph => graph_ui.settle(ui, ctx, out),
+                TabRef::Graph => self.graph_ui.settle(stage),
                 // None keeps anything a second pass reads from the rects of the first.
                 TabRef::Preferences | TabRef::ImageViewer(_) | TabRef::Inspector(_) => {}
             }

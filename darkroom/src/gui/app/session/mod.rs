@@ -21,6 +21,7 @@ use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::FileCommand;
 use crate::gui::frame::app_command::RunCommand;
 use crate::gui::frame::framing::Framing;
+use crate::gui::frame::input_stage::InputStage;
 use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::main_window::MainWindow;
@@ -66,8 +67,8 @@ impl Session {
     /// in `requests` for the shell.
     ///
     /// Each phase ends in a drain, as a phase reads the document and the next one must see what the
-    /// previous asked for. So each takes a `GraphCtx` composed right here, over the document as
-    /// the drain before it left it.
+    /// previous asked for. So each takes a stage over a `GraphCtx` composed right here, over the
+    /// document as the drain before it left it.
     ///
     /// 1. NAVIGATION: settle which tab is active: the undo/redo chords, and tab and chip clicks
     ///    read off last frame's responses, whose hit on a node the undo just removed finds nothing.
@@ -88,18 +89,18 @@ impl Session {
         debug_assert!(requests.is_empty(), "the last frame left requests behind");
         self.apply_undo_redo(update_ctx, requests);
         let display = update_ctx.display();
-        self.main_window.scan_navigation(
-            update_ctx,
-            GraphCtx::new(ctx, &self.open, display),
-            requests,
-        );
+        self.main_window.scan_navigation(&mut InputStage {
+            update: update_ctx,
+            ctx: GraphCtx::new(ctx, &self.open, display),
+            out: requests,
+        });
         self.drain(ctx.library(), requests);
 
-        let outcome = self.main_window.prepass(
-            update_ctx,
-            GraphCtx::new(ctx, &self.open, display),
-            requests,
-        );
+        let outcome = self.main_window.prepass(&mut InputStage {
+            update: update_ctx,
+            ctx: GraphCtx::new(ctx, &self.open, display),
+            out: requests,
+        });
         self.drain(ctx.library(), requests);
 
         // The file/run/quit chords only queue an `AppCommand`, so they need no drain of their own.
@@ -154,8 +155,11 @@ impl Session {
         debug_assert!(requests.is_empty(), "the last pass left requests behind");
         let display = ui.display();
         if !mem::take(&mut self.input_ran) {
-            self.main_window
-                .settle(ui, GraphCtx::new(ctx, &self.open, display), requests);
+            self.main_window.settle(&mut InputStage {
+                update: &mut ui.update_ctx(),
+                ctx: GraphCtx::new(ctx, &self.open, display),
+                out: requests,
+            });
             self.drain(ctx.library(), requests);
         }
         self.main_window.frame(

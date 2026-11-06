@@ -16,12 +16,13 @@ below removes them with one rule for the whole GUI:
 > context and hands it down. Nothing returns upward except the frame's `InputOutcome`.**
 
 ```rust
-// gui/frame/stage.rs
+// gui/frame/input_stage.rs
 pub(crate) struct InputStage<'a, 'u, C> {
     pub(crate) update: &'a mut UpdateCtx<'u>,
     pub(crate) ctx: C,
     pub(crate) out: &'a mut Requests,
 }
+// gui/frame/record_stage.rs
 pub(crate) struct RecordStage<'a, C> {
     pub(crate) ctx: C,
     pub(crate) out: &'a mut Requests,
@@ -190,26 +191,12 @@ but that one bundle, a handle, a context and `out`, repeats with no name.
 
 # Part 2: Plan
 
-Each batch leaves the gates green. Batch 1, the relayout sink, batch 2, the layers, and batch 3, the
-contexts, have landed.
-
-## Batch 4: update path
-
-Files: `gui/frame/stage.rs` (new), `gui/app/session/mod.rs`,
-`gui/main_window/mod.rs`, `gui/pane/graph_ui/{mod,internals}.rs`, `gui/pane/graph_ui/gesture/*`,
-`gui/app/session/bench.rs`.
-
-- [ ] `stage.rs`: `InputStage` and `with`.
-- [ ] `main_window/mod.rs:81,104`, `graph_ui/mod.rs:302`, `shortcuts.rs:30`, `wire_ui/mod.rs:104,180`:
-  take the stage.
-- [ ] `camera_gesture/mod.rs:52`, `group_drag/mod.rs:99`, `tie_widget.rs:82`, `subscription_ui.rs:78`:
-  take the stage, and `line_px` goes, as `stage.update.theme()` gives it.
-- [ ] `wire_ui/mod.rs:149`: the four-argument `resolve_held` takes the stage and its drag.
-- [ ] Tests that call a controller, as `wire_ui/tests.rs:110`, use one harness helper to build a stage.
+Each batch leaves the gates green. Batch 1, the relayout sink, batch 2, the layers, batch 3, the
+contexts, and batch 4, the update path, have landed.
 
 ## Batch 5: gestures in one stage
 
-Needs batch 4. Files: `gui/pane/graph_ui/{mod,prepass_ctx,canvas_ctx}.rs`, `gui/pane/graph_ui/node_ui/mod.rs`,
+Files: `gui/pane/graph_ui/{mod,prepass_ctx,canvas_ctx}.rs`, `gui/pane/graph_ui/node_ui/mod.rs`,
 `gui/pane/graph_ui/gesture/{selection_ui,breaker_ui,tie_ui,new_node_ui,button_stroke}*`.
 
 - [ ] `selection_ui/mod.rs:100`, `breaker_ui/mod.rs:52`, `tie_ui/mod.rs:53`, `button_stroke.rs:44`: `apply`
@@ -231,11 +218,11 @@ Needs batch 4. Files: `gui/pane/graph_ui/{mod,prepass_ctx,canvas_ctx}.rs`, `gui/
 
 ## Batch 6: record path
 
-Needs batch 5. Files: `gui/frame/stage.rs`, `gui/main_window/*`, `gui/pane/{inspector,preferences}.rs`,
+Needs batch 5. Files: `gui/frame/record_stage.rs` (new), `gui/main_window/*`, `gui/pane/{inspector,preferences}.rs`,
 `gui/pane/image_viewer/mod.rs`, `gui/pane/graph_ui/{mod,toolbar}.rs`, `gui/pane/graph_ui/gesture/*`,
 `gui/pane/graph_ui/node_ui/*`, `gui/pane/graph_ui/draw/*`.
 
-- [ ] `stage.rs`: `RecordStage`. `(ui, ctx, out)` at 17 signatures becomes `(ui, stage)`, as
+- [ ] `record_stage.rs`: `RecordStage`. `(ui, ctx, out)` at 17 signatures becomes `(ui, stage)`, as
   `inspector.rs:45,89`, `toolbar.rs:48`, `menu_bar.rs` and `status_bar`.
 - [ ] `breaker_ui/mod.rs:83`, `selection_ui/mod.rs:195`, `tie_ui/mod.rs:81`, `wire_ui/mod.rs:226`,
   `subscription_ui.rs:171`: one `record(ui, ctx: DrawCtx)`, and `theme` and `zoom` go.

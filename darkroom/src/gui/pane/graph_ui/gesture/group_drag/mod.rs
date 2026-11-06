@@ -11,7 +11,7 @@ use std::collections::BTreeSet;
 use std::rc::Rc;
 
 use glam::Vec2;
-use palantir::{Input, WidgetId};
+use palantir::WidgetId;
 use scenarium::NodeId;
 
 use crate::core::document::graph_view::GraphView;
@@ -19,6 +19,7 @@ use crate::core::document::item_id::ItemId;
 use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::drag_start::DragStart;
+use crate::gui::frame::input_stage::InputStage;
 use crate::gui::frame::requests::Requests;
 use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
 use crate::gui::pane::graph_ui::prepass_ctx::PrepassCtx;
@@ -96,12 +97,8 @@ impl GroupDrag {
     /// Runs pre-record, so the move lands in `Document` before the pass that
     /// draws the moved items: they paint at the cursor in Pass A with no
     /// relayout retry.
-    pub(crate) fn prepass(
-        &mut self,
-        input: &Input,
-        ctx: PrepassCtx<'_>,
-        out: &mut Requests,
-    ) -> bool {
+    pub(crate) fn prepass(&mut self, stage: &mut InputStage<'_, '_, PrepassCtx<'_>>) -> bool {
+        let ctx = stage.ctx;
         let graph_ctx = ctx.graph_ctx();
         // An item deleted mid-drag (breaker swipe, undo) takes its drag with
         // it: left in place the anchor would emit against a missing item.
@@ -115,7 +112,7 @@ impl GroupDrag {
         let Some(anchor) = &self.anchor else {
             return false;
         };
-        let resp = input.response_for(anchor.grab.handle);
+        let resp = stage.update.input.response_for(anchor.grab.handle);
         // `drag_started` on a still-active anchor means a *new* gesture just
         // latched on the same widget. Emitting with the stale start
         // positions would snap the group back to the previous gesture's
@@ -127,7 +124,9 @@ impl GroupDrag {
         if ctx.cancelled() {
             // The gesture's whole entry goes back, a spawn it joined too; should an edit in
             // between have sealed it, the members go back to where the drag latched them.
-            out.push_cancel(anchor.gesture, anchor.frame(Vec2::ZERO));
+            stage
+                .out
+                .push_cancel(anchor.gesture, anchor.frame(Vec2::ZERO));
             self.anchor = None;
             return true;
         }
@@ -139,7 +138,7 @@ impl GroupDrag {
         };
         // Palantir reports drag deltas in the widget's pre-transform frame,
         // which is the same canvas-world space item positions live in.
-        out.push_graph(anchor.frame(delta));
+        stage.out.push_graph(anchor.frame(delta));
         true
     }
 }
