@@ -5,12 +5,11 @@
 use palantir::{Modifiers, PointerButton, ResponseState};
 
 use crate::gui::graph_ctx::GraphCtx;
-use crate::gui::port_ref::PortRef;
 
 /// What this frame's input means on the canvas, resolved once at the top of
 /// [`GraphUi::prepass`](crate::gui::pane::graph_ui::GraphUi::prepass) and read
-/// back by every phase after it: which bare-canvas gesture latched, what
-/// Esc does, and the wire a release dropped on empty canvas.
+/// back by every controller after it: which bare-canvas gesture latched, and what
+/// Esc does. It lives on the update path alone, so no record reads an edge that is spent.
 ///
 /// Read there rather than per controller because each is one fact about the
 /// frame, and controllers polling them separately is how they grew different
@@ -19,9 +18,6 @@ use crate::gui::port_ref::PortRef;
 pub(crate) struct CanvasInput {
     pub(crate) gesture: Option<CanvasGesture>,
     pub(crate) escape: Escape,
-    /// The source of a held wire released over empty canvas this frame, which opens the
-    /// new-node palette; the wire floats from it again once a node is picked.
-    pub(crate) dropped_wire: Option<PortRef>,
 }
 
 impl CanvasInput {
@@ -131,9 +127,9 @@ pub(crate) enum Escape {
 ///
 /// The prepass level of the context chain, between the [`GraphCtx`] and the
 /// [`CanvasCtx`](crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx), which adds the geometry. The
-/// two prepass steps that run *before*
+/// three prepass steps that run *before*
 /// [`CanvasGeometry::rebuild`](crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry::rebuild)
-/// — pan/zoom and the node-drag advance — take this, so they read the frame's input without a
+/// — pan/zoom, the group drag's advance and the tie knob's turn — take this, so they read the frame's input without a
 /// geometry someone is still writing.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct PrepassCtx<'a> {

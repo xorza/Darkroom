@@ -1162,8 +1162,9 @@ mod tests {
     }
 
     /// A click the input stage takes records once and shows in that pass: on a node's body, which
-    /// selects, on bare canvas, which clears it, and a right click, which opens the node's menu. A
-    /// click on a widget the record reads, a menu title, takes the second pass as before.
+    /// selects, on bare canvas, which clears it, and a right click, which opens the node's menu. So
+    /// do a drag's latch and stop, a node's and a rubber band's. A click on a widget the record
+    /// reads, a menu title, takes the second pass as before.
     #[test]
     fn a_click_the_input_stage_takes_records_once() {
         use glam::{UVec2, Vec2};
@@ -1198,6 +1199,14 @@ mod tests {
             .find(|node| node.name == NODE)
             .expect("the sample holds the node")
             .node_id;
+        let moved_from = counted
+            .app
+            .session
+            .open
+            .document()
+            .main_view
+            .node_placements[&node]
+            .pos;
         let body = wid::body(node);
         // The click's release frame, past the press frame the harness runs before it.
         let click = |ui: &mut Harness, counted: &mut CountedPasses, at: Locator, button| {
@@ -1236,6 +1245,37 @@ mod tests {
         ui.frame_app(&mut counted);
         ui.frame_app(&mut counted);
 
+        // The passes of a left drag from `from`'s latch frame and its stop frame.
+        let drag = |ui: &mut Harness, counted: &mut CountedPasses, from: Vec2| {
+            ui.advance_past_double_click();
+            ui.press(from, PointerButton::Left);
+            ui.frame_app(counted);
+            ui.drag_to(from + Vec2::new(30.0, 20.0));
+            counted.passes = 0;
+            ui.frame_app(counted);
+            let latch = counted.passes;
+            ui.release(PointerButton::Left);
+            counted.passes = 0;
+            ui.frame_app(counted);
+            [latch, counted.passes]
+        };
+        let footer = ui.rect(wid::footer(node)).expect("the node shows").center();
+        assert_eq!(drag(&mut ui, &mut counted, footer), [1, 1], "a node's drag");
+        assert_eq!(
+            counted
+                .app
+                .session
+                .open
+                .document()
+                .main_view
+                .node_placements[&node]
+                .pos,
+            moved_from + Vec2::new(30.0, 20.0),
+            "the node followed"
+        );
+        let band = ui.point_in(canvas::outer_wid(), Vec2::new(4.0, 4.0));
+        assert_eq!(drag(&mut ui, &mut counted, band), [1, 1], "a band's drag");
+
         let title = ui
             .widgets(Some("File"))
             .into_iter()
@@ -1247,6 +1287,50 @@ mod tests {
             2,
             "a click on a menu title"
         );
+    }
+
+    /// A framing chip takes the one route a framing has, a command the record raises, and lands in
+    /// the second pass of its click: Reset view from zoom 2 ends at zoom 1, in that frame.
+    #[test]
+    fn a_framing_chip_lands_in_its_clicks_second_pass() {
+        use glam::UVec2;
+        use palantir::{Harness, PointerButton};
+
+        use crate::gui::pane::graph_ui::toolbar;
+
+        let mut ui = Harness::new(UVec2::new(1600, 1000));
+        let mut counted = CountedPasses {
+            app: App::offscreen(ui.ui_mut()),
+            passes: 0,
+            undo_after_pass: false,
+        };
+        counted
+            .app
+            .open_document_at(PathBuf::from("sample/sample.darkroom"));
+        ui.ui_mut().request_repaint();
+        for _ in 0..4 {
+            ui.frame_app(&mut counted);
+        }
+        counted
+            .app
+            .session
+            .open
+            .document_mut()
+            .main_view
+            .viewport
+            .zoom = 2.0;
+        ui.ui_mut().request_repaint();
+        ui.frame_app(&mut counted);
+
+        let chip = toolbar::internals::reset_view_chip_wid();
+        ui.press(chip, PointerButton::Left);
+        ui.frame_app(&mut counted);
+        ui.release(PointerButton::Left);
+        counted.passes = 0;
+        ui.frame_app(&mut counted);
+        assert_eq!(counted.passes, 2, "the click's two passes");
+        let view = &counted.app.session.open.document().main_view;
+        assert_eq!(view.viewport.zoom, 1.0, "the framing landed");
     }
 
     /// A prompt raised between frames records ahead of the menu bar, so the frame that shows it

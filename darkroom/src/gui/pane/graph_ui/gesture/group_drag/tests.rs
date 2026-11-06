@@ -11,12 +11,11 @@ use crate::gui::pane::graph_ui::internals::CanvasHarness;
 
 /// A drag on a node body moves that node, by the pointer's travel.
 ///
-/// The latch is read where the body is drawn: `NodeUi::draw_node` walks the
-/// node's own `drag_handles` for a fresh press, and later frames' `prepass`
-/// turns that handle's `drag_delta` into a `MoveSelection`. So this drives a
-/// real press-and-travel through the harness — nothing else in the suite
-/// latches a body drag, and a latch that silently stopped firing would leave
-/// every node unmovable with the whole rest of the canvas green.
+/// The input stage latches it off the frame's edge on one of the node's `drag_handles`, and moves
+/// the node in that frame; later frames' `prepass` turns that handle's `drag_delta` into a
+/// `MoveSelection`. So this drives a real press-and-travel through the harness — nothing else in
+/// the suite latches a body drag, and a latch that silently stopped firing would leave every node
+/// unmovable with the whole rest of the canvas green.
 #[test]
 fn a_body_drag_moves_the_node_by_the_pointers_travel() {
     let mut h = CanvasHarness::new(DocumentFixture::probes(2));
@@ -24,16 +23,16 @@ fn a_body_drag_moves_the_node_by_the_pointers_travel() {
     let start = h.document().main_view.node_placements[&dragged].pos;
     h.prime(2);
 
-    // Press the body, then travel past the drag threshold. The sweep sees
-    // the latch on the frame after the travel; the record consumes it.
+    // Press the body, then travel past the drag threshold: the latch's own frame moves the node.
     let grab = h.node_center(dragged);
     h.ui.press(grab, PointerButton::Left);
     h.frame();
     let travel = Vec2::new(37.0, -21.0);
     h.ui.drag_to(grab + travel);
-    h.frame();
+    let latched = h.frame();
+    assert_eq!(moved(&latched).map(|(_, offset)| offset), Some(travel));
 
-    // Next frame, `NodeUi::prepass` advances the anchor the record latched.
+    // Next frame, `GroupDrag::prepass` advances the anchor, by the whole travel from the latch.
     let intents = h.frame();
     let (members, offset) = moved(&intents)
         .unwrap_or_else(|| panic!("a body drag must emit a MoveSelection: {intents:?}"));
@@ -74,6 +73,50 @@ fn a_body_drag_moves_the_node_by_the_pointers_travel() {
         None,
         "a cancelled drag moves nothing: {after:?}"
     );
+}
+
+/// The selection a grab makes joins the drag's one undo entry: one Ctrl+Z takes back both, and Esc
+/// takes back both while the pointer holds.
+#[test]
+fn a_grab_selects_and_moves_in_one_undo_entry() {
+    let mut h = CanvasHarness::new(DocumentFixture::probes(2));
+    let dragged = h.node(0);
+    let start = h.document().main_view.node_placements[&dragged].pos;
+    h.prime(2);
+    let selected = |h: &CanvasHarness| h.document().main_view.selected.len();
+    let pos = |h: &CanvasHarness| h.document().main_view.node_placements[&dragged].pos;
+    let grab = h.node_center(dragged);
+    let (first, second) = (Vec2::new(40.0, 0.0), Vec2::new(90.0, 30.0));
+
+    h.ui.press(grab, PointerButton::Left);
+    h.frame_applied();
+    h.ui.drag_to(grab + first);
+    h.frame_applied();
+    assert_eq!((selected(&h), pos(&h)), (1, start + first), "the latch");
+    h.ui.drag_to(grab + second);
+    h.frame_applied();
+    assert_eq!(
+        (selected(&h), pos(&h)),
+        (1, start + second),
+        "a later frame"
+    );
+    h.ui.release(PointerButton::Left);
+    h.frame_applied();
+
+    let _ = h.ctx.open.undo();
+    assert_eq!(
+        (selected(&h), pos(&h)),
+        (0, start),
+        "one undo takes back both"
+    );
+
+    h.ui.press(grab, PointerButton::Left);
+    h.frame_applied();
+    h.ui.drag_to(grab + first);
+    h.frame_applied();
+    h.ui.key(Key::Escape);
+    h.frame_applied();
+    assert_eq!((selected(&h), pos(&h)), (0, start), "Esc takes back both");
 }
 
 /// Esc cancels what is in flight, and deselects only when nothing was: a

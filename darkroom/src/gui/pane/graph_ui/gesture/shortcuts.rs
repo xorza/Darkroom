@@ -40,7 +40,9 @@ pub(crate) fn emit(stage: &mut InputStage<'_, '_, CanvasCtx<'_>>) {
         out.push_graph(GraphIntent::clear_selection());
     }
     // Ctrl+0 is the toolbar's reset view: 1:1, centered on the content.
-    if reset_zoom && let Some(reset) = Framing::Reset.intent(stage.update.input, ctx) {
+    if reset_zoom
+        && let Some(reset) = Framing::Reset.intent(stage.update.input, graph_ctx, ctx.geometry())
+    {
         out.push_graph(reset);
     }
     // Ctrl+D drops wires from producers outside the selection; keeping them

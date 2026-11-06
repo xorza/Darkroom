@@ -118,12 +118,11 @@ pub(super) fn tie_knob(tie: TieId) -> WidgetId {
     WidgetId::from_hash(("darkroom.graph.tie", "knob", tie))
 }
 
-/// Every widget whose drag moves `node_id`'s body, in the order `NodeUi::draw_node` tries them.
+/// Every widget whose drag moves `node_id`'s body.
 ///
 /// Not just the body panel: the header title doubles as a drag handle — its
 /// idle label senses `DRAG` and **swallows the press**, so the body never sees
-/// one latched there. (While renaming, the title is a `TextEdit` with no
-/// `DRAG`, so it can't fire mid-edit.)
+/// one latched there.
 ///
 /// Deliberately *curated*, not "everything under the node". Port circles,
 /// header chips, and the inline const editors are all inside the body panel and

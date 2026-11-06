@@ -6,7 +6,7 @@ use palantir::{Modifiers, Rect, Stroke, Ui};
 
 use crate::core::document::item_id::ItemId;
 use crate::core::edit::graph_intent::GraphIntent;
-use crate::gui::frame::requests::Requests;
+use crate::gui::frame::input_stage::InputStage;
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph_ui::prepass_ctx::CanvasGesture;
@@ -33,12 +33,6 @@ pub(crate) struct SelectionUi {
     /// rebuild it every frame of every drag.
     /// [`Self::preview`] is what says whether the contents mean anything.
     swept: Vec<ItemId>,
-    /// Whether the draw reads [`Self::swept`]. Empty when no band is in
-    /// flight — draw falls back to the committed selection. A slot of
-    /// its own, not the band's, because it deliberately outlives the band
-    /// by one frame: the release frame paints the final selection while
-    /// the `SetSelection` is still draining.
-    preview: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -67,12 +61,11 @@ impl RubberBand {
 }
 
 impl SelectionUi {
-    /// Drop the in-flight band and its preview. `swept` is cleared in place —
+    /// Drop the in-flight band. `swept` is cleared in place —
     /// keeping the allocation is the whole reason it is a `Vec`.
     pub(crate) fn reset(&mut self) {
         self.band = None;
         self.swept.clear();
-        self.preview = false;
     }
 
     /// Whether a band is in flight.
@@ -84,22 +77,21 @@ impl SelectionUi {
     /// paint against; `None` when no band is active (the caller falls back to
     /// the committed selection).
     pub(crate) fn preview(&self) -> Option<&[ItemId]> {
-        if !self.preview {
-            return None;
-        }
-        Some(&self.swept)
+        self.band.is_some().then_some(&self.swept)
     }
 
     /// Drive the gesture from the outer-canvas response: latch on an
     /// unmodified left-drag-start, track the live corner, and recompute
-    /// the swept set every frame. The set is stashed in `self.preview` so
-    /// nodes highlight *live* as the rectangle moves (read back via
-    /// [`Self::preview`]); `Document`/undo are only touched once, by the
-    /// committing `SetSelection` emitted on release. The context's Esc —
+    /// the swept set every frame, so nodes highlight *live* as the rectangle
+    /// moves (read back via [`Self::preview`]); `Document`/undo are only touched
+    /// once, by the committing `SetSelection` emitted on release, which the
+    /// release frame's record reads. The context's Esc —
     /// resolved once by the canvas — drops the band without emitting.
-    pub(crate) fn apply(&mut self, ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
+    pub(crate) fn input(&mut self, stage: &mut InputStage<'_, '_, CanvasCtx<'_>>) {
+        let ctx = stage.ctx;
         let graph_ctx = ctx.graph_ctx();
-        let resp = ui.response_for(canvas::outer_wid());
+        let input = &mut *stage.update.input;
+        let resp = input.response_for(canvas::outer_wid());
         if self.band.is_none()
             && ctx.gesture() == Some(CanvasGesture::Select)
             && let Some(p) = resp.pointer_local
@@ -115,7 +107,7 @@ impl SelectionUi {
                 // arbitration — read it here, not in the classifier.
                 // Captured once, so the per-frame union never re-reads the
                 // document.
-                base: if ui.modifiers().contains(Modifiers::SHIFT) {
+                base: if input.modifiers().contains(Modifiers::SHIFT) {
                     graph_ctx.selected().clone()
                 } else {
                     BTreeSet::new()
@@ -127,10 +119,6 @@ impl SelectionUi {
             self.band = None;
         }
         let Some(mut band) = self.band.take() else {
-            // No band in flight — just cancelled, or committed last frame.
-            // Either way drop the preview so node draw falls back to the
-            // committed selection.
-            self.preview = false;
             return;
         };
         if let Some(p) = resp.pointer_local {
@@ -167,23 +155,15 @@ impl SelectionUi {
         // so both properties `Selection::Swept` promises are restored here.
         swept.sort_unstable();
         swept.dedup();
-        // Still dragging → stash the updated corner and leave the preview in
-        // place (node draw reads it via `preview()` for live highlight).
-        // A `None` delta is the release edge that commits.
+        // Still dragging → stash the updated corner. A `None` delta is the release edge that
+        // commits, and only the committing frame pays for the owned set the intent carries.
         if resp.left.drag.delta().is_some() {
             self.band = Some(band);
-            self.preview = true;
             return;
         }
-        // Only the committing frame pays for the owned set the intent
-        // carries. The preview stays up for *this* (release) frame's draw so
-        // it paints the final selection; the `SetSelection` drains
-        // post-record, and next frame — band now `None` — the early return
-        // above clears the preview and draw falls back to the committed set.
-        out.push_graph(GraphIntent::SetSelection {
+        stage.out.push_graph(GraphIntent::SetSelection {
             to: swept.iter().copied().collect(),
         });
-        self.preview = true;
     }
 
     /// Paint the in-progress rectangle. Drawn inside the inner canvas so

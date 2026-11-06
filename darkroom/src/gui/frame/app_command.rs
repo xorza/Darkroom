@@ -67,7 +67,7 @@ pub(crate) enum ViewCommand {
     CopyImage,
     /// Prompt for a file and save the image there as a PNG.
     SaveImage,
-    /// Frame the graph as the canvas toolbar's button does, from a surface outside the canvas.
+    /// Frame the graph, as the canvas toolbar's button and the status bar's link ask.
     /// The canvas raises the camera move as it next readies a pass, over that frame's selection.
     Frame(Framing),
     /// Convert `node_id`'s stored image at full resolution, its longest edge capped to `max_dim`,

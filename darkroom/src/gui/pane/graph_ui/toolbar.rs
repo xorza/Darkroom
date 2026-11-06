@@ -4,18 +4,17 @@
 //! selected) stacked beneath on a second pill.
 //! The buttons are opaque chips raised off the pill, so the toolbar stays
 //! legible over both the canvas and any node under it. All carry
-//! hover tooltips; the toggles paint "toggled" while their action is in flight
-//! and map to an [`AppCommand`], while the framing buttons emit an
-//! `GraphIntent::SetViewport` directly.
+//! hover tooltips; the toggles paint "toggled" while their action is in flight,
+//! and each button maps to an [`AppCommand`].
 
 use palantir::{Align, Configure, Panel, Sizing, Spacing, Ui, WidgetId};
 
 use crate::gui::frame::app_command::AppCommand;
-use crate::gui::frame::app_command::RunCommand;
+use crate::gui::frame::app_command::{RunCommand, ViewCommand};
 use crate::gui::frame::framing::Framing;
 use crate::gui::frame::requests::Requests;
 use crate::gui::frame::shortcuts;
-use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
+use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::widgets::chip::Chip;
 use crate::gui::widgets::icon::Icon;
 use crate::gui::widgets::pill;
@@ -41,12 +40,11 @@ fn show_selected_wid() -> WidgetId {
     WidgetId::from_hash("darkroom.graph.show_selected_button")
 }
 
-/// Draw the toolbar over the graph view's top-left corner. A run/events click
-/// queues its [`AppCommand`]; a view-framing click queues a
-/// `GraphIntent::SetViewport`. It hit-tests above the canvas (drawn after it),
-/// so a click on a button never starts a pan.
-pub(super) fn show(ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
-    let (theme, graph_ctx) = (ctx.theme(), ctx.graph_ctx());
+/// Draw the toolbar over the graph view's top-left corner. A click queues its
+/// [`AppCommand`]. It hit-tests above the canvas (drawn after it), so a click on
+/// a button never starts a pan.
+pub(super) fn show(ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
+    let theme = graph_ctx.theme();
     let run_state = graph_ctx.run_state();
     Panel::vstack()
         .id_salt("graph_toolbar")
@@ -101,9 +99,8 @@ pub(super) fn show(ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
             });
 
             // View-framing actions, stacked under the run row on their own
-            // pill. Each emits a `SetViewport` intent, so they ride the same
-            // path as a manual pan/zoom rather than mutating the viewport out
-            // of band.
+            // pill. Each takes the one route a framing has, which lands it in
+            // this click's second pass.
             let framing = Panel::vstack()
                 .id_salt("graph_toolbar_framing")
                 .child_align(Align::TOP_LEFT);
@@ -112,20 +109,24 @@ pub(super) fn show(ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
                     .shortcut(shortcuts::RESET_VIEW)
                     .show_icon(ui, theme, Icon::ResetView)
                 {
-                    out.extend_graph(Framing::Reset.intent(ui.update_ctx().input, ctx));
+                    frame(out, Framing::Reset);
                 }
                 if Chip::new(show_all_wid(), "Show all").show_icon(ui, theme, Icon::ShowAll) {
-                    out.extend_graph(Framing::ShowAll.intent(ui.update_ctx().input, ctx));
+                    frame(out, Framing::ShowAll);
                 }
                 if Chip::new(show_selected_wid(), "Show selected").show_icon(
                     ui,
                     theme,
                     Icon::ShowSelected,
                 ) {
-                    out.extend_graph(Framing::ShowSelected.intent(ui.update_ctx().input, ctx));
+                    frame(out, Framing::ShowSelected);
                 }
             });
         });
+}
+
+fn frame(out: &mut Requests, framing: Framing) {
+    out.push_app(AppCommand::View(ViewCommand::Frame(framing)));
 }
 
 #[cfg(test)]
@@ -135,5 +136,10 @@ pub(crate) mod internals {
     /// The run/cancel chip, for the tests that click it.
     pub(crate) fn run_chip_wid() -> WidgetId {
         run_button_wid()
+    }
+
+    /// The reset-view chip, for the tests that click it.
+    pub(crate) fn reset_view_chip_wid() -> WidgetId {
+        reset_view_wid()
     }
 }

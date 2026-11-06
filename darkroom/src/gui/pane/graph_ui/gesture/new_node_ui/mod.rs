@@ -5,11 +5,14 @@
 pub(crate) mod node_palette;
 pub(crate) mod palette_rows;
 
+use std::mem;
+
 use glam::Vec2;
 use palantir::widget::domain;
-use palantir::{Ui, WidgetId};
+use palantir::{Input, Ui, WidgetId};
 
 use crate::gui::frame::requests::Requests;
+use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph_ui::gesture::anchored_menu::{AnchoredMenu, PopupShape};
@@ -39,6 +42,8 @@ pub(crate) struct NewNodeUi {
     /// filters and ranks the listed entries by name, category and
     /// description. Empty ⇒ everything shows.
     search: Search,
+    /// Whether the input stage opened the palette for the record to come.
+    opening: Opening,
 }
 
 /// The palette's search text, its case-folded copy, and the rows it matched.
@@ -79,6 +84,7 @@ impl NewNodeUi {
         self.source = None;
         self.search.text.clear();
         self.search.folded.clear();
+        self.opening = Opening::Standing;
     }
 
     /// Whether the palette is open.
@@ -86,37 +92,34 @@ impl NewNodeUi {
         self.menu.is_open()
     }
 
-    /// Open the palette from a bare RMB / double-click, or from a wire dropped on empty canvas
-    /// this frame, and record it while it is open, the `AddNode` a pick raises onto `out`.
+    /// Open the palette from a bare RMB / double-click, or from a wire `dropped` on empty canvas
+    /// this frame. Placement is the same — under the pointer.
+    pub(crate) fn open(&mut self, input: &Input, ctx: CanvasCtx<'_>, dropped: Option<PortRef>) {
+        if dropped.is_none() && ctx.gesture() != Some(CanvasGesture::NewNode) {
+            return;
+        }
+        let resp = input.response_for(canvas::outer_wid());
+        let (Some(local), Some(rect)) = (resp.pointer_local, resp.rect) else {
+            return;
+        };
+        self.world_pos = ctx.graph_ctx().camera().to_world(local);
+        self.source = dropped;
+        self.menu.open_at(rect.min + local);
+        // Fresh open: empty the filter, read the graph's own definitions once, and focus the
+        // search field in the record so the user can type straight away.
+        self.search.text.clear();
+        self.opening = Opening::Fresh;
+    }
+
+    /// Record the palette while it is open, the `AddNode` a pick raises onto `out`.
     /// Returns the source of the dropped wire that opened it, when a pick lands, which floats
     /// again so the user clicks the exact port to land it rather than it auto-attaching.
-    pub(crate) fn apply(
+    pub(crate) fn record(
         &mut self,
         ui: &mut Ui,
-        ctx: CanvasCtx<'_>,
+        graph_ctx: GraphCtx<'_>,
         out: &mut Requests,
     ) -> Option<PortRef> {
-        let pending_source = ctx.dropped_wire();
-        let graph_ctx = ctx.graph_ctx();
-        let resp = ui.response_for(canvas::outer_wid());
-        // Open the palette either from a bare RMB / double-click (`NewNode`
-        // gesture) or from a wire dropped on empty canvas
-        // (`pending_source`). Placement is the same — under the pointer.
-        let opening = if (pending_source.is_some() || ctx.gesture() == Some(CanvasGesture::NewNode))
-            && let (Some(local), Some(rect)) = (resp.pointer_local, resp.rect)
-        {
-            self.world_pos = graph_ctx.camera().to_world(local);
-            self.source = pending_source;
-            self.menu.open_at(rect.min + local);
-            // Fresh open: empty the filter, read the graph's own
-            // definitions once, and focus the search field this frame so
-            // the user can type straight away.
-            self.search.text.clear();
-            Opening::Fresh
-        } else {
-            Opening::Standing
-        };
-
         // Everything below is per-open work — the height arithmetic reads
         // the display and a last-frame rect — so nothing but an open palette
         // should pay for it. `show` would answer `None` anyway, but only
@@ -124,6 +127,7 @@ impl NewNodeUi {
         if !self.menu.is_open() {
             return None;
         }
+        let opening = mem::take(&mut self.opening);
 
         // Cap the palette height to the window so a short window scrolls
         // the overflow (via the inner vertical `Scroll`) instead of

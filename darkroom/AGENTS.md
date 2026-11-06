@@ -79,8 +79,8 @@ desktop for an agent or a test.
 
 - **The camera is outside the undo history.** Pan and zoom are saved but never undone, as
   Photoshop keeps them out of History.
-- **A held gesture is one entry, and Esc takes it back whole**, a preview spawn and its drag
-  alike. Refused: Blender's Shift+D, where Esc leaves the copy.
+- **A held gesture is one entry, and Esc takes it back whole**, a preview spawn or the selection a
+  press makes and its drag alike. Refused: Blender's Shift+D, where Esc leaves the copy.
 
 ### Wire ties
 

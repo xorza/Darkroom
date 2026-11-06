@@ -14,22 +14,17 @@ use scenarium::NodeId;
 
 use crate::core::document::graph_view::StackedNode;
 use crate::core::document::item_id::ItemId;
-use crate::core::edit::graph_intent::GraphIntent;
-use crate::core::edit::graph_intent::click_mode::ClickMode;
-use crate::core::edit::graph_intent::drag_start::DragStart;
 use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
 use crate::gui::pane::graph_ui::gesture::breaker_ui::breaker_probe::BreakerProbe;
-use crate::gui::pane::graph_ui::gesture::group_drag::{self, Grab};
 use crate::gui::pane::graph_ui::node_ui::node_record::NodeRecord;
 use crate::gui::pane::graph_ui::wid;
 use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::hover::Hover;
 use crate::gui::theme::{CardTier, Theme};
 
-/// Owns rendering of every graph node; a body or title press reports its grab, which the
-/// canvas's one group drag latches.
+/// Owns rendering of every graph node.
 ///
 /// `draw_all` is the single entry point; `GraphUi` calls it once per frame after
 /// [`crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry`] has been rebuilt from
@@ -79,10 +74,8 @@ impl NodeUi {
 
     /// Record the widget tree of every scene node `pass` retains (plus
     /// the focus-owning node — see the loop comment), skipping off-screen ones
-    /// entirely, and report the grab of a body/title drag, for the canvas's one group drag to latch
-    /// (port circles capture their own presses via `Sense::CLICK`, so drags don't latch off the
-    /// port grabs).
-    pub(super) fn draw_all(&mut self, ui: &mut Ui, pass: &mut NodePass<'_, '_>) -> Option<Grab> {
+    /// entirely.
+    pub(super) fn draw_all(&mut self, ui: &mut Ui, pass: &mut NodePass<'_, '_>) {
         let draw_ctx = pass.draw_ctx;
         // Paint back-to-front, so the last item drawn is frontmost. Each
         // item's depth is persisted view state, so a raised node stays raised
@@ -101,7 +94,6 @@ impl NodeUi {
         // past the blur (`focus_kept_last`): focus clears before the record,
         // and that first post-blur record is where the edit's pending draft
         // commits.
-        let mut grab = None;
         let mut focus_kept = None;
         // Swapped out for the sweep because each node hands the whole `NodeUi`
         // to its widget; it goes back below with its capacity, so only a graph
@@ -130,24 +122,15 @@ impl NodeUi {
                 continue;
             }
             let node_ctx = n.with_hover(wid::hover(ui, n.node_id));
-            let node = self.draw_node(ui, node_ctx, pass);
-            grab = grab.or(node);
+            self.draw_node(ui, node_ctx, pass);
         }
         self.paint_order = order;
         self.focus_kept_last = focus_kept;
-        grab
     }
 
-    /// Record one node's body, `node_ctx`, over the state every node on the canvas shares: one
-    /// pointer so one drag, and `row_tracks` one buffer the whole frame slices out of, which
-    /// per-node widget state would reallocate.
-    fn draw_node(
-        &mut self,
-        ui: &mut Ui,
-        node_ctx: NodeCtx<'_>,
-        pass: &mut NodePass<'_, '_>,
-    ) -> Option<Grab> {
-        let state = self;
+    /// Record one node's body, `node_ctx`, over `row_tracks`, one buffer the whole frame slices out
+    /// of, which per-node widget state would reallocate.
+    fn draw_node(&mut self, ui: &mut Ui, node_ctx: NodeCtx<'_>, pass: &mut NodePass<'_, '_>) {
         let NodePass {
             draw_ctx,
             probe,
@@ -217,9 +200,7 @@ impl NodeUi {
             );
         }
 
-        // Borrowed off `self` before the body closure so it can't conflict
-        // with the drag latch below, which reads a different field.
-        let row_tracks = &mut state.row_tracks;
+        let row_tracks = &mut self.row_tracks;
         Panel::vstack()
             .id(wid::body(node.node_id))
             .visibility(visibility)
@@ -255,39 +236,6 @@ impl NodeUi {
                     node_footer::show(ui, node_ctx);
                 }
             });
-        // Latch the anchor on the press-frame edge, off whichever of this
-        // node's handles caught the press. Read here, where the handles are
-        // built, over the same curated list they are drawn from; subsequent
-        // frames' `prepass` peeks `response_for(widget_id)` before record runs
-        // and converts `drag_delta` into a `MoveSelection` applied to
-        // `Document` before the record reads it back.
-        let handle =
-            wid::drag_handles(node.node_id).find(|w| ui.response_for(*w).left.drag.started())?;
-        // Grabbing a node already in the selection drags the whole
-        // group together;
-        // grabbing an unselected node selects only it and drags it
-        // alone.
-        let members = if selected {
-            group_drag::selected_group(draw_ctx)
-        } else {
-            out.extend_graph(GraphIntent::click(
-                ClickMode::Replace,
-                node_ctx.graph_ctx.selected(),
-                ItemId::Node(node.node_id),
-            ));
-            group_drag::with_inner_ties(
-                node_ctx.graph_ctx.view(),
-                vec![DragStart {
-                    item: ItemId::Node(node.node_id),
-                    pos: node.pos,
-                }],
-            )
-        };
-        Some(Grab {
-            item: ItemId::Node(node.node_id),
-            members,
-            handle,
-        })
     }
 }
 

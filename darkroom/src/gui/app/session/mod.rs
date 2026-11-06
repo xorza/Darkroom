@@ -171,7 +171,7 @@ impl Session {
                 status,
             },
         );
-        // Graph edits the record surfaced (node select, cache toggle, const edit), plus the tab
+        // Graph edits the record surfaced (cache toggle, const edit), plus the tab
         // strip's dock ops.
         self.drain(ctx.library(), requests);
     }

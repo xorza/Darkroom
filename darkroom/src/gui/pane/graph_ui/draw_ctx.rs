@@ -3,7 +3,6 @@
 use crate::core::document::item_id::ItemId;
 
 use crate::gui::graph_ctx::GraphCtx;
-use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
 use crate::gui::pane::graph_ui::frame::cull_region::CullRegion;
 use crate::gui::pane::graph_ui::selection::Selection;
@@ -19,33 +18,20 @@ use crate::gui::theme::Theme;
 /// keeps.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct DrawCtx<'a> {
-    graph_ctx: GraphCtx<'a>,
-    geometry: &'a CanvasGeometry,
+    pub(super) graph_ctx: GraphCtx<'a>,
+    pub(super) geometry: &'a CanvasGeometry,
     /// Effective selection to paint: the graph's committed set or,
     /// mid-rubber-band, the live sweep — one type, so the draw substitutes
     /// them without caring which it got, and the gesture never writes its
     /// preview into the document.
-    selected: Selection<'a>,
+    pub(super) selected: Selection<'a>,
     /// What the viewport keeps. Carried here rather than passed beside the
     /// context because every reader of one is a reader of the
     /// other: a pass that records nodes decides per node whether to.
-    cull: CullRegion,
+    pub(super) cull: CullRegion,
 }
 
 impl<'a> DrawCtx<'a> {
-    pub(super) const fn new(
-        canvas: CanvasCtx<'a>,
-        selected: Selection<'a>,
-        cull: CullRegion,
-    ) -> Self {
-        Self {
-            graph_ctx: canvas.graph_ctx(),
-            geometry: canvas.geometry(),
-            selected,
-            cull,
-        }
-    }
-
     /// The palette and metrics this pass paints from, off the pane's context.
     pub(crate) const fn theme(self) -> &'a Theme {
         self.graph_ctx.theme()

@@ -11,17 +11,19 @@ use std::collections::BTreeSet;
 use std::rc::Rc;
 
 use glam::Vec2;
-use palantir::WidgetId;
+use palantir::{Input, WidgetId};
 use scenarium::NodeId;
 
 use crate::core::document::graph_view::GraphView;
 use crate::core::document::item_id::ItemId;
 use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::graph_intent::GraphIntent;
+use crate::core::edit::graph_intent::click_mode::ClickMode;
 use crate::core::edit::graph_intent::drag_start::DragStart;
 use crate::gui::frame::input_stage::InputStage;
 use crate::gui::frame::requests::Requests;
-use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
+use crate::gui::graph_ctx::GraphCtx;
+use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph_ui::prepass_ctx::PrepassCtx;
 
 /// One in-flight group drag, or none.
@@ -56,6 +58,15 @@ pub(crate) struct Grab {
     pub(crate) handle: WidgetId,
 }
 
+/// What a press latches: what it grabbed, and the edits that land with it, in the drag's one undo
+/// gesture, so Esc and a Ctrl+Z take them back with the move.
+#[derive(Debug)]
+pub(crate) struct GrabStart {
+    pub(crate) grab: Grab,
+    /// A selection the press made, or the node a preview drag spawns.
+    pub(crate) joined: Vec<GraphIntent>,
+}
+
 /// The latched drag: what was grabbed, and the undo gesture every frame of
 /// it folds into.
 #[derive(Debug)]
@@ -77,17 +88,22 @@ impl GroupDrag {
         self.anchor.is_some()
     }
 
-    /// Start (or replace) the gesture on `grab`, and name it, for edits that join it.
-    pub(crate) fn latch(&mut self, grab: Grab, out: &mut Requests) -> GestureId {
+    /// Start (or replace) the gesture on what `start` grabbed, and move it to where the pointer
+    /// has travelled, as a latch is past the drag threshold. A frame with no later input still
+    /// shows the move.
+    pub(crate) fn latch(&mut self, start: GrabStart, input: &Input, out: &mut Requests) {
+        let GrabStart { grab, joined } = start;
         let gesture = out.open_gesture();
-        self.anchor = Some(Anchor { grab, gesture });
-        gesture
+        out.extend_graph_in(gesture, joined);
+        let anchor = Anchor { grab, gesture };
+        if let Some(delta) = input.response_for(anchor.grab.handle).left.drag.delta() {
+            out.push_graph(anchor.frame(delta));
+        }
+        self.anchor = Some(anchor);
     }
 
     /// Advance one frame, pushing this frame's `GraphIntent::MoveSelection`
-    /// while the drag is held, and reporting whether the drag owned the frame.
-    /// A caller that also latches fresh drags skips its own scan while this
-    /// returns `true`.
+    /// while the drag is held.
     ///
     /// A cancelling Esc takes the drag's undo entry back whole, which puts
     /// every member back where the drag latched it, and ends the drag; the
@@ -97,7 +113,7 @@ impl GroupDrag {
     /// Runs pre-record, so the move lands in `Document` before the pass that
     /// draws the moved items: they paint at the cursor in Pass A with no
     /// relayout retry.
-    pub(crate) fn prepass(&mut self, stage: &mut InputStage<'_, '_, PrepassCtx<'_>>) -> bool {
+    pub(crate) fn prepass(&mut self, stage: &mut InputStage<'_, '_, PrepassCtx<'_>>) {
         let ctx = stage.ctx;
         let graph_ctx = ctx.graph_ctx();
         // An item deleted mid-drag (breaker swipe, undo) takes its drag with
@@ -110,7 +126,7 @@ impl GroupDrag {
             self.anchor = None;
         }
         let Some(anchor) = &self.anchor else {
-            return false;
+            return;
         };
         let resp = stage.update.input.response_for(anchor.grab.handle);
         // `drag_started` on a still-active anchor means a *new* gesture just
@@ -119,7 +135,7 @@ impl GroupDrag {
         // start point; the caller's latch scan picks the new one up instead.
         if resp.left.drag.started() {
             self.anchor = None;
-            return false;
+            return;
         }
         if ctx.cancelled() {
             // The gesture's whole entry goes back, a spawn it joined too; should an edit in
@@ -128,18 +144,17 @@ impl GroupDrag {
                 .out
                 .push_cancel(anchor.gesture, anchor.frame(Vec2::ZERO));
             self.anchor = None;
-            return true;
+            return;
         }
         // No delta means the drag isn't latched anymore — release, or the
         // pointer left the surface.
         let Some(delta) = resp.left.drag.delta() else {
             self.anchor = None;
-            return false;
+            return;
         };
         // Palantir reports drag deltas in the widget's pre-transform frame,
         // which is the same canvas-world space item positions live in.
         stage.out.push_graph(anchor.frame(delta));
-        true
     }
 }
 
@@ -155,15 +170,39 @@ impl Anchor {
     }
 }
 
+/// The group drag of `node`, pressed on its `handle`: with the selection when the node is in it,
+/// else alone, selected, with the ties inside it.
+pub(crate) fn node_grab(node: NodeCtx<'_>, handle: WidgetId) -> GrabStart {
+    let graph_ctx = node.graph_ctx;
+    let item = ItemId::Node(node.node_id);
+    let (members, joined) = if graph_ctx.is_selected(item) {
+        (selected_group(graph_ctx), Vec::new())
+    } else {
+        let alone = vec![DragStart {
+            item,
+            pos: node.pos,
+        }];
+        let selects = GraphIntent::click(ClickMode::Replace, graph_ctx.selected(), item);
+        (with_inner_ties(graph_ctx.view(), alone), selects.collect())
+    };
+    GrabStart {
+        grab: Grab {
+            item,
+            members,
+            handle,
+        },
+        joined,
+    }
+}
+
 /// The selection's members at their current positions, with the ties inside
 /// its nodes — [`GroupDrag::latch`]'s `members` for a drag that grabbed an
 /// already-selected member.
-pub(crate) fn selected_group(draw_ctx: DrawCtx<'_>) -> Rc<[DragStart]> {
-    let graph_ctx = draw_ctx.graph_ctx();
+pub(crate) fn selected_group(graph_ctx: GraphCtx<'_>) -> Rc<[DragStart]> {
     let view = graph_ctx.view();
     let nodes = graph_ctx
         .nodes()
-        .filter(|n| draw_ctx.is_selected(ItemId::Node(n.node_id)))
+        .filter(|n| graph_ctx.is_selected(ItemId::Node(n.node_id)))
         .map(|n| DragStart {
             item: ItemId::Node(n.node_id),
             pos: n.pos,
@@ -171,7 +210,7 @@ pub(crate) fn selected_group(draw_ctx: DrawCtx<'_>) -> Rc<[DragStart]> {
     let ties = view
         .ties
         .iter()
-        .filter(|(tie, _)| draw_ctx.is_selected(ItemId::Tie(**tie)))
+        .filter(|(tie, _)| graph_ctx.is_selected(ItemId::Tie(**tie)))
         .map(|(tie, placed)| DragStart {
             item: ItemId::Tie(*tie),
             pos: placed.pos,

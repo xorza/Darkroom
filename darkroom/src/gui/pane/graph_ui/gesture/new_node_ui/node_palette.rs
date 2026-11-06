@@ -103,12 +103,13 @@ pub(super) struct NodePalette<'a> {
 }
 
 /// Whether the palette opened this frame.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum Opening {
     /// Opened this frame: the search field takes the focus, and the rows are
     /// filtered afresh against the library as it is now.
     Fresh,
     /// Open since an earlier frame.
+    #[default]
     Standing,
 }
 

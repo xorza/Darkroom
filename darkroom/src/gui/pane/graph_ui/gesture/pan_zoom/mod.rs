@@ -15,7 +15,6 @@ use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::frame::framing::Framing;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::canvas;
-use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
 use crate::gui::widgets::zoom_range::ZoomRange;
 
@@ -27,14 +26,18 @@ const CANVAS_ZOOM: ZoomRange = ZoomRange { min: 0.1, max: 5.0 };
 const FIT_MARGIN: f32 = 40.0;
 
 impl Framing {
-    /// The `SetViewport` intent this framing implies on the canvas `ctx`, or
+    /// The `SetViewport` intent this framing implies on the canvas, or
     /// `None` when there's nothing to frame — `ShowSelected` with an empty
     /// selection, no nodes to fit, or the viewport not yet measured. The pane
     /// size comes from the outer canvas's `layout_rect`; node extents come
     /// from the geometry's cross-frame size cache, position from
     /// `NodeCtx::pos`.
-    pub(crate) fn intent(self, input: &Input, ctx: CanvasCtx<'_>) -> Option<GraphIntent> {
-        let (geometry, graph_ctx) = (ctx.geometry(), ctx.graph_ctx());
+    pub(crate) fn intent(
+        self,
+        input: &Input,
+        graph_ctx: GraphCtx<'_>,
+        geometry: &CanvasGeometry,
+    ) -> Option<GraphIntent> {
         let vp = input.response_for(canvas::outer_wid()).layout_rect?.size;
         let pane = Vec2::new(vp.w, vp.h);
         let to = match self {

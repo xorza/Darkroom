@@ -186,39 +186,15 @@ but that one bundle, a handle, a context and `out`, repeats with no name.
 
 - **Saving.** I have no number for a drag latch. The `click` case measured 111 µs for one record, layout
   and cascade on bare canvas, on one high-end laptop core.
-- **The move of the rubber band and the breaker.** I read their reads, but did not build them. A read in
-  the record that the list above misses shows as a failed test.
 
 # Part 2: Plan
 
 Each batch leaves the gates green. Batch 1, the relayout sink, batch 2, the layers, batch 3, the
-contexts, and batch 4, the update path, have landed.
-
-## Batch 5: gestures in one stage
-
-Files: `gui/pane/graph_ui/{mod,prepass_ctx,canvas_ctx}.rs`, `gui/pane/graph_ui/node_ui/mod.rs`,
-`gui/pane/graph_ui/gesture/{selection_ui,breaker_ui,tie_ui,new_node_ui,button_stroke}*`.
-
-- [ ] `selection_ui/mod.rs:100`, `breaker_ui/mod.rs:52`, `tie_ui/mod.rs:53`, `button_stroke.rs:44`: `apply`
-  becomes `input`, read off `stage.update.input`.
-- [ ] `node_ui/mod.rs:258-290`: the grab latch moves to the input stage, with `Grab`'s selection edit, and
-  `draw_all` and `draw_node` return nothing.
-- [ ] `tie_widget.rs:164-201`: the tie's click, right click and grab move too, and `TiesRecorded` goes.
-  `open_on` takes `&mut Input` alone, and `tie_menu_ui.rs:51` follows.
-- [ ] `new_node_ui/mod.rs:101`: the palette's opening moves. Its rows stay in the record.
-- [ ] `graph_ui/mod.rs:417`: `take_clicks` becomes `claims(action)`, which also takes latches and stops on
-  the outer canvas, node handles and ties, and answers `Handled`. Extend
-  `the_stage_answers_handled_only_for_a_click_it_takes_alone`: a latch and a stop now answer `Handled`,
-  and a title's click stays `Record`.
-- [ ] `graph_ui/mod.rs:134`: the field `input` goes, with its reset in `settle`, and `CanvasInput` lives on
-  the stack of `GraphUi::input`. `canvas_ctx.rs` holds it only on the update path.
-- [ ] `graph_ui/mod.rs:146-163`: `Gestures` holds the controllers, and `CanvasCtx::new` by hand goes.
-- [ ] Add a pass count to `a_click_the_input_stage_takes_records_once`: a node drag's latch and stop, and
-  a rubber band's, each take 1.
+contexts, batch 4, the update path, and batch 5, the gestures in one stage, have landed.
 
 ## Batch 6: record path
 
-Needs batch 5. Files: `gui/frame/record_stage.rs` (new), `gui/main_window/*`, `gui/pane/{inspector,preferences}.rs`,
+Files: `gui/frame/record_stage.rs` (new), `gui/main_window/*`, `gui/pane/{inspector,preferences}.rs`,
 `gui/pane/image_viewer/mod.rs`, `gui/pane/graph_ui/{mod,toolbar}.rs`, `gui/pane/graph_ui/gesture/*`,
 `gui/pane/graph_ui/node_ui/*`, `gui/pane/graph_ui/draw/*`.
 

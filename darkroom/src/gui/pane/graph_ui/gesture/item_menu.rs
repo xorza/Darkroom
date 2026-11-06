@@ -17,8 +17,8 @@ use crate::gui::pane::graph_ui::gesture::anchored_menu::{AnchoredMenu, PopupShap
 /// pick that needs it.
 ///
 /// What the caller still owns is the items and where a pick goes — an
-/// `AppCommand` or a `GraphIntent` — and which item was right-clicked: the input stage settles a
-/// node's, and a tie's draw reports its own.
+/// `AppCommand` or a `GraphIntent` — and which item was right-clicked, which the input stage
+/// settles.
 #[derive(Debug)]
 pub(crate) struct ItemMenu<K> {
     menu: AnchoredMenu,
@@ -69,8 +69,7 @@ impl<K: Copy> ItemMenu<K> {
     ///
     /// `target` comes from a click on its widget, so the document holds it at the open;
     /// [`Self::retain`] keeps that true across the frames the popup stays. The popup records on the
-    /// next [`Self::show`]: in the same pass for a node's open in the input stage, and in the
-    /// second pass the click earns for a tie's, which its draw reports after the menu showed.
+    /// next [`Self::show`], in the input stage's own frame.
     pub(crate) fn open_on(
         &mut self,
         input: &mut Input,

@@ -8,6 +8,7 @@ use crate::gui::graph_ctx::input_ctx::InputCtx;
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph_ui::draw::wire::WirePaint;
+use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
 use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
 use crate::gui::pane::graph_ui::frame::wire::Wire;
 use crate::gui::pane::graph_ui::gesture::glyph_drag::GlyphDrag;
@@ -85,6 +86,17 @@ impl WireUi {
                 mode: DragMode::Floating,
             });
         }
+    }
+
+    /// Whether the wire in flight follows the pointer with no button held.
+    pub(crate) const fn floating(&self) -> bool {
+        matches!(
+            self.state,
+            Some(InFlight {
+                mode: DragMode::Floating,
+                ..
+            })
+        )
     }
 
     /// Drive the in-flight wire: latch a fresh drag, track the snap
@@ -226,7 +238,7 @@ impl WireUi {
     /// center to either the snapped target's center (when set) or the
     /// pointer position. Drawn inside the inner canvas so coordinates
     /// share the pan/zoom transform with permanent wires.
-    pub(crate) fn draw_in_flight(&self, ui: &mut Ui, ctx: CanvasCtx<'_>) {
+    pub(crate) fn draw_in_flight(&self, ui: &mut Ui, ctx: DrawCtx<'_>) {
         let (graph_ctx, geometry) = (ctx.graph_ctx(), ctx.geometry());
         let Some(state) = self.state.as_ref().copied() else {
             return;

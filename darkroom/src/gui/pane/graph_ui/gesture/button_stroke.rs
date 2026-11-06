@@ -1,7 +1,7 @@
 //! [`ButtonStroke`]: a stroke across the bare canvas, held by the button that latched it.
 
 use glam::Vec2;
-use palantir::{PointerButton, Ui};
+use palantir::{Input, PointerButton};
 
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
@@ -43,11 +43,11 @@ impl ButtonStroke {
     /// drags, and end on its release. The context's Esc drops it.
     pub(crate) fn step(
         &mut self,
-        ui: &Ui,
+        input: &Input,
         ctx: CanvasCtx<'_>,
         latch: Option<PointerButton>,
     ) -> StrokeStep {
-        let resp = ui.response_for(canvas::outer_wid());
+        let resp = input.response_for(canvas::outer_wid());
         let viewport = ctx.graph_ctx().camera();
         let at = resp.pointer_local.map(|local| viewport.to_world(local));
         if ctx.cancelled() {

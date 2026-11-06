@@ -5,7 +5,9 @@
 use std::rc::Rc;
 
 use glam::Vec2;
-use palantir::{Configure, Modifiers, Panel, Sense, Sizing, Ui};
+use palantir::{
+    Configure, Modifiers, Panel, PointerAction, PointerButton, PointerEdge, Sense, Sizing, Ui,
+};
 
 use crate::core::document::item_id::ItemId;
 use crate::core::document::tie::{TieAngle, TieId};
@@ -14,12 +16,13 @@ use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::click_mode::ClickMode;
 use crate::core::edit::graph_intent::drag_start::DragStart;
 use crate::gui::frame::input_stage::InputStage;
-use crate::gui::frame::requests::Requests;
+use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::canvas;
+use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph_ui::draw::tie::band::{BandAxes, BandInk, BandLook, KNOB_HIT_RADIUS};
 use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
 use crate::gui::pane::graph_ui::frame::tie_layout::TieLayout;
-use crate::gui::pane::graph_ui::gesture::group_drag::{self, Grab};
+use crate::gui::pane::graph_ui::gesture::group_drag::{self, Grab, GrabStart};
 use crate::gui::pane::graph_ui::gesture::tie_ui::tie_probe::TieProbe;
 use crate::gui::pane::graph_ui::prepass_ctx::PrepassCtx;
 use crate::gui::pane::graph_ui::wid;
@@ -27,19 +30,10 @@ use crate::gui::pane::graph_ui::wid;
 /// The step a knob turned with Shift rounds to, in degrees, as design tools snap.
 const SNAP_DEGREES: f32 = 15.0;
 
-/// The ties' own gesture, the knob drag that turns one; a press on a tie reports a grab, which
-/// the canvas's one group drag latches.
+/// The ties' own gesture, the knob drag that turns one.
 #[derive(Default, Debug)]
 pub(crate) struct TieWidgets {
     knob: Option<KnobDrag>,
-}
-
-/// What recording the ties reports: the tie a right-click landed on, whose menu the caller
-/// opens once the draw is over, and the drag a press started.
-#[derive(Debug, Default)]
-pub(crate) struct TiesRecorded {
-    pub(crate) menu_opened: Option<TieId>,
-    pub(crate) grab: Option<Grab>,
 }
 
 /// A knob held: the tie it turns, the angle to put back on Esc, and the undo gesture its frames
@@ -51,14 +45,13 @@ struct KnobDrag {
     gesture: GestureId,
 }
 
-/// The canvas pass the ties record in: the draw context, the layout of their bands, the tie line
-/// they light under, and the queue their presses raise edits into.
+/// The canvas pass the ties record in: the draw context, the layout of their bands, and the tie
+/// line they light under.
 #[derive(Debug)]
 pub(crate) struct TiePass<'a, 't> {
     pub(crate) draw_ctx: DrawCtx<'a>,
     pub(crate) ties: &'a TieLayout,
     pub(crate) line: &'a mut TieProbe<'t>,
-    pub(crate) out: &'a mut Requests,
 }
 
 /// Whether a knob turned with Shift snaps to [`SNAP_DEGREES`].
@@ -121,15 +114,50 @@ impl TieWidgets {
         }
     }
 
+    /// A knob's left click and drag edges: its double-click frees the angle, and its drag latches
+    /// the turn. Reports whether `action` was one.
+    pub(crate) fn claims_knob(
+        &mut self,
+        tie: TieId,
+        action: PointerAction,
+        stage: &mut InputStage<'_, '_, CanvasCtx<'_>>,
+    ) -> bool {
+        if action.button != PointerButton::Left {
+            return false;
+        }
+        match action.edge {
+            PointerEdge::Clicked { count } => {
+                if count == 2 {
+                    stage.out.push_graph(GraphIntent::SetTieAngle {
+                        tie,
+                        angle: TieAngle::Auto,
+                        gesture: None,
+                    });
+                }
+                true
+            }
+            PointerEdge::DragStarted => {
+                self.knob = Some(KnobDrag {
+                    tie,
+                    from: stage.ctx.graph_ctx().view().ties[&tie].angle,
+                    gesture: stage.out.open_gesture(),
+                });
+                true
+            }
+            PointerEdge::DragStopped => true,
+            PointerEdge::Pressed { .. } => false,
+        }
+    }
+}
+
+impl TiePass<'_, '_> {
     /// Paint each band with a strand on screen and record its targets: the hover and press
     /// target, and on a selected tie its knob. Runs after the wires and before the node bodies,
     /// so a body covers a band as it covers wires, and wins a press over it.
-    pub(crate) fn record(&mut self, ui: &mut Ui, pass: &mut TiePass<'_, '_>) -> TiesRecorded {
-        let mut recorded = TiesRecorded::default();
-        let draw_ctx = pass.draw_ctx;
+    pub(crate) fn record(&mut self, ui: &mut Ui) {
+        let draw_ctx = self.draw_ctx;
         let theme = draw_ctx.theme();
-        let click_mode = ClickMode::with_shift(ui.modifiers().contains(Modifiers::SHIFT));
-        for band in pass
+        for band in self
             .ties
             .bands()
             .iter()
@@ -141,7 +169,7 @@ impl TieWidgets {
             }
             let item = ItemId::Tie(band.tie);
             let selected = draw_ctx.is_selected(item);
-            let ink = if pass.line.cross_band(band.tie, axes.reach()) {
+            let ink = if self.line.cross_band(band.tie, axes.reach()) {
                 BandInk::Crossed
             } else if selected || ui.response_for(wid::tie_body(band.tie)).hovered() {
                 BandInk::Lit
@@ -158,82 +186,50 @@ impl TieWidgets {
                 },
             );
             let hit = axes.hit_rect();
-            let body = Panel::zstack()
+            Panel::zstack()
                 .id(wid::tie_body(band.tie))
                 .at(hit.min)
                 .size((Sizing::fixed(hit.size.w), Sizing::fixed(hit.size.h)))
                 .sense(Sense::CLICK | Sense::DRAG)
-                .show(ui, |_| {})
-                .response;
-            if body.right.clicked() {
-                recorded.menu_opened.get_or_insert(band.tie);
-            }
-            if body.clicked() {
-                pass.out.extend_graph(GraphIntent::click(
-                    click_mode,
-                    draw_ctx.graph_ctx().selected(),
-                    item,
-                ));
-            }
-            if body.left.drag.started() && recorded.grab.is_none() {
-                recorded.grab = Some(grab(draw_ctx, band.tie, pass.out));
-            }
+                .show(ui, |_| {});
             if selected {
-                self.knob(ui, band.tie, band.angle, axes.knob_center(), pass.out);
+                record_knob(ui, band.tie, axes.knob_center());
             }
-        }
-        recorded
-    }
-
-    /// Record the knob of a selected tie: its drag latches the turn, and a double-click frees
-    /// the angle.
-    fn knob(&mut self, ui: &mut Ui, tie: TieId, angle: TieAngle, center: Vec2, out: &mut Requests) {
-        let side = KNOB_HIT_RADIUS * 2.0;
-        let knob = Panel::zstack()
-            .id(wid::tie_knob(tie))
-            .at(center - Vec2::splat(KNOB_HIT_RADIUS))
-            .size(side)
-            .sense(Sense::CLICK | Sense::DRAG)
-            .show(ui, |_| {});
-        if knob.response.left.double_clicked() {
-            out.push_graph(GraphIntent::SetTieAngle {
-                tie,
-                angle: TieAngle::Auto,
-                gesture: None,
-            });
-        }
-        if knob.response.left.drag.started() {
-            self.knob = Some(KnobDrag {
-                tie,
-                from: angle,
-                gesture: out.open_gesture(),
-            });
         }
     }
 }
 
+/// Record the knob of a selected tie, whose edges [`TieWidgets::claims_knob`] reads.
+fn record_knob(ui: &mut Ui, tie: TieId, center: Vec2) {
+    Panel::zstack()
+        .id(wid::tie_knob(tie))
+        .at(center - Vec2::splat(KNOB_HIT_RADIUS))
+        .size(KNOB_HIT_RADIUS * 2.0)
+        .sense(Sense::CLICK | Sense::DRAG)
+        .show(ui, |_| {});
+}
+
 /// The group drag of a pressed tie: with the selection when the tie is in it, else alone,
 /// selected, with the ties inside the moving nodes, which are none.
-fn grab(draw_ctx: DrawCtx<'_>, tie: TieId, out: &mut Requests) -> Grab {
-    let graph_ctx = draw_ctx.graph_ctx();
+pub(crate) fn grab(graph_ctx: GraphCtx<'_>, tie: TieId) -> GrabStart {
     let item = ItemId::Tie(tie);
-    let members = if draw_ctx.is_selected(item) {
-        group_drag::selected_group(draw_ctx)
+    let (members, joined) = if graph_ctx.is_selected(item) {
+        (group_drag::selected_group(graph_ctx), Vec::new())
     } else {
-        out.extend_graph(GraphIntent::click(
-            ClickMode::Replace,
-            graph_ctx.selected(),
-            item,
-        ));
-        Rc::from([DragStart {
+        let selects = GraphIntent::click(ClickMode::Replace, graph_ctx.selected(), item);
+        let alone = Rc::from([DragStart {
             item,
             pos: graph_ctx.view().ties[&tie].pos,
-        }])
+        }]);
+        (alone, selects.collect())
     };
-    Grab {
-        item,
-        members,
-        handle: wid::tie_body(tie),
+    GrabStart {
+        grab: Grab {
+            item,
+            members,
+            handle: wid::tie_body(tie),
+        },
+        joined,
     }
 }
 

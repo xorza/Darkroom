@@ -22,7 +22,7 @@ use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::drag_start::DragStart;
 use crate::core::preview_sink;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
-use crate::gui::pane::graph_ui::gesture::group_drag::Grab;
+use crate::gui::pane::graph_ui::gesture::group_drag::{Grab, GrabStart};
 use crate::gui::pane::graph_ui::wid;
 
 /// Whether the modifier reserving an output-port drag for spawning a preview is held. The one
@@ -37,15 +37,9 @@ pub(crate) const fn modifier_held(input: &mut Input) -> bool {
 /// spawns, for the canvas's one group drag to latch, and the edits that spawn it, which join the
 /// drag's gesture so an Esc takes the spawn back with the drag: `darkroom/AGENTS.md`, "Undo", "A
 /// held gesture is one entry, and Esc takes it back whole".
-#[derive(Debug)]
-pub(crate) struct PreviewStart {
-    pub(crate) grab: Grab,
-    pub(crate) spawn: [GraphIntent; 2],
-}
-
 /// The preview a Ctrl+drag off an output port starts this frame, or `None`. Asked only while no
 /// drag is in flight: one pointer holds one drag.
-pub(crate) fn start(input: &mut Input, ctx: CanvasCtx<'_>) -> Option<PreviewStart> {
+pub(crate) fn start(input: &mut Input, ctx: CanvasCtx<'_>) -> Option<GrabStart> {
     let (graph_ctx, geometry) = (ctx.graph_ctx(), ctx.geometry());
     if !modifier_held(input) {
         return None;
@@ -67,7 +61,7 @@ pub(crate) fn start(input: &mut Input, ctx: CanvasCtx<'_>) -> Option<PreviewStar
     // anchor is the port circle — the widget that owns this press; the node
     // itself has not been recorded yet and has no response to poll. Started
     // *at* the port, so it visually grows out of the circle.
-    Some(PreviewStart {
+    Some(GrabStart {
         grab: Grab {
             item: ItemId::Node(node_id),
             members: Rc::from([DragStart {
@@ -76,12 +70,13 @@ pub(crate) fn start(input: &mut Input, ctx: CanvasCtx<'_>) -> Option<PreviewStar
             }]),
             handle: wid::port_circle(port),
         },
-        spawn: PreviewSpawn {
+        joined: PreviewSpawn {
             port: output,
             pos: center,
             node_id,
         }
-        .intents(func),
+        .intents(func)
+        .into(),
     })
 }
 

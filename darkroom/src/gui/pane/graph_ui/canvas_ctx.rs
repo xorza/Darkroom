@@ -4,8 +4,6 @@
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
 use crate::gui::pane::graph_ui::prepass_ctx::{CanvasGesture, CanvasInput, Escape, PrepassCtx};
-use crate::gui::port_ref::PortRef;
-use crate::gui::theme::Theme;
 
 /// The graph canvas for this frame: the graph, plus the three facts
 /// [`GraphUi::prepass`](crate::gui::pane::graph_ui::GraphUi::prepass) resolves
@@ -16,9 +14,9 @@ use crate::gui::theme::Theme;
 /// three facts to one frame.
 ///
 /// **It exists only once the geometry is settled.** The table is borrowed
-/// shared for the context's whole life, so the two prepass steps that run
-/// *before* [`CanvasGeometry::rebuild`] — pan/zoom and the node-drag advance —
-/// take the [`PrepassCtx`], and `bake_snap_hover` (which needs the table
+/// shared for the context's whole life, so the three prepass steps that run
+/// *before* [`CanvasGeometry::rebuild`] — pan/zoom, the group drag's advance and the tie knob's
+/// turn — take the [`PrepassCtx`], and `bake_snap_hover` (which needs the table
 /// `&mut` again) ends it. That ordering is the point rather than an
 /// inconvenience: a controller holding one of these cannot be reading a
 /// geometry someone is still writing.
@@ -42,10 +40,6 @@ impl<'a> CanvasCtx<'a> {
         self.graph_ctx
     }
 
-    pub(crate) const fn theme(self) -> &'a Theme {
-        self.graph_ctx().theme()
-    }
-
     /// Last frame's port centers and node rects.
     pub(crate) const fn geometry(self) -> &'a CanvasGeometry {
         self.geometry
@@ -58,9 +52,10 @@ impl<'a> CanvasCtx<'a> {
         self.input.gesture
     }
 
-    /// The source of the wire a release dropped on empty canvas this frame.
-    pub(super) const fn dropped_wire(self) -> Option<PortRef> {
-        self.input.dropped_wire
+    /// This context with the gesture a later read of the frame classified.
+    pub(super) const fn with_gesture(mut self, gesture: Option<CanvasGesture>) -> Self {
+        self.input.gesture = gesture;
+        self
     }
 
     /// Whether this frame's Esc cancels whatever gesture is in flight.

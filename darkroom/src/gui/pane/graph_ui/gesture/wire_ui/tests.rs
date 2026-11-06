@@ -234,21 +234,24 @@ fn a_right_press_that_ends_a_floating_wire_opens_no_palette() {
     };
 
     let CanvasHarness { graph_ui, ctx, .. } = &mut h;
-    graph_ui.wire_ui.resume(start, ctx.graph_ctx());
+    graph_ui.gestures.wire_ui.resume(start, ctx.graph_ctx());
     // A frame for the floating wire to ask for the pointer's presses.
     h.frame();
-    assert!(h.graph_ui.wire_ui.in_flight());
+    assert!(h.graph_ui.gestures.wire_ui.in_flight());
     right_click(&mut h);
-    assert!(!h.graph_ui.wire_ui.in_flight(), "the press ended the wire");
     assert!(
-        !h.graph_ui.new_node_ui.in_flight(),
+        !h.graph_ui.gestures.wire_ui.in_flight(),
+        "the press ended the wire"
+    );
+    assert!(
+        !h.graph_ui.gestures.new_node_ui.in_flight(),
         "its release opened no palette"
     );
 
     h.advance_past_double_click();
     right_click(&mut h);
     assert!(
-        h.graph_ui.new_node_ui.in_flight(),
+        h.graph_ui.gestures.new_node_ui.in_flight(),
         "a right click alone opens it"
     );
 }

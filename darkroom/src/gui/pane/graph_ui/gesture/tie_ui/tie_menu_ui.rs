@@ -1,14 +1,13 @@
 //! [`TieMenuUi`]: the menu a right-click on a tie opens. `darkroom/AGENTS.md`, "Wire ties", "One
 //! wire leaves through the tie's menu", holds the decision.
 
-use palantir::{InternedStr, MenuItem, MenuSeparator, Ui, fmt};
+use palantir::{Input, InternedStr, MenuItem, MenuSeparator, Ui, fmt};
 
 use crate::core::document::tie::{TieAngle, TieId};
 use crate::core::document::wire_key::{DataWire, WireKey};
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::GraphCtx;
-use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph_ui::frame::tie_layout::TieLayout;
 use crate::gui::pane::graph_ui::gesture::item_menu::ItemMenu;
 use crate::gui::pane::graph_ui::gesture::tie_ui::tie_widget::{AngleSnap, knob_angle};
@@ -46,27 +45,26 @@ impl TieMenuUi {
         self.lit
     }
 
-    /// Open the menu on `tie`, which the record pass just saw right-clicked; see
+    /// Open the menu on `tie`, which the input stage just saw right-clicked; see
     /// [`ItemMenu::open_on`]. Returns the selection edit, when it needs one.
     pub(crate) fn open_on(
         &mut self,
-        ui: &mut Ui,
+        input: &mut Input,
         graph_ctx: GraphCtx<'_>,
         tie: TieId,
     ) -> Option<GraphIntent> {
-        self.menu.open_on(ui.update_ctx().input, graph_ctx, tie)
+        self.menu.open_on(input, graph_ctx, tie)
     }
 
     /// Record the menu and turn this frame's pick into its intent. `ties` is the last pass's
     /// layout, whose band angle a Pin keeps.
-    pub(crate) fn apply(
+    pub(crate) fn record(
         &mut self,
         ui: &mut Ui,
-        ctx: CanvasCtx<'_>,
+        graph_ctx: GraphCtx<'_>,
         ties: &TieLayout,
         out: &mut Requests,
     ) {
-        let graph_ctx = ctx.graph_ctx();
         let view = graph_ctx.view();
         let mut lit = None;
         self.menu.retain(|tie| view.ties.contains_key(&tie));

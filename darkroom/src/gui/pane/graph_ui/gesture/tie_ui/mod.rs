@@ -17,6 +17,7 @@ use crate::core::document::item_id::ItemId;
 use crate::core::document::tie::TieId;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::route_insert::RouteInsert;
+use crate::gui::frame::input_stage::InputStage;
 use crate::gui::frame::requests::Requests;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph_ui::draw::tie::band::{BandInk, BandLook};
@@ -50,16 +51,17 @@ impl TieUi {
     /// Drive the line from the outer canvas response: latch it on a tie chord, move its end
     /// with the pointer, and on release tie what the last record pass found it crossing. The
     /// context's Esc drops it.
-    pub(crate) fn apply(&mut self, ui: &Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
+    pub(crate) fn input(&mut self, stage: &mut InputStage<'_, '_, CanvasCtx<'_>>) {
+        let ctx = stage.ctx;
         let latch = match ctx.gesture() {
             Some(CanvasGesture::Tie(button)) => Some(button),
             _ => None,
         };
         let zoom = ctx.graph_ctx().camera().zoom;
-        match self.stroke.step(ui, ctx, latch) {
+        match self.stroke.step(stage.update.input, ctx, latch) {
             StrokeStep::Started(at) => self.line.restart(at, zoom),
             StrokeStep::Moved(at) => self.line.reach(at, zoom),
-            StrokeStep::Released => release(&self.line, ctx.graph_ctx().view(), out),
+            StrokeStep::Released => release(&self.line, ctx.graph_ctx().view(), stage.out),
             StrokeStep::Idle => {}
         }
     }

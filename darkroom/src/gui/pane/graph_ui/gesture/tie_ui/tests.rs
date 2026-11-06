@@ -1,5 +1,5 @@
 use glam::Vec2;
-use palantir::{Modifiers, PointerButton};
+use palantir::{InputOutcome, Modifiers, PointerButton};
 use scenarium::{InputPort, OutputPort};
 
 use crate::core::document::internals::DocumentFixture;
@@ -49,9 +49,9 @@ fn the_tie_line_is_the_breakers_chord_plus_shift() {
         h.frame();
         let graph_ui = &h.graph_ui;
         let latched = [
-            (graph_ui.breaker_ui.in_flight(), Latched::Breaker),
-            (graph_ui.tie_ui.in_flight(), Latched::TieLine),
-            (graph_ui.selection_ui.in_flight(), Latched::Band),
+            (graph_ui.gestures.breaker_ui.in_flight(), Latched::Breaker),
+            (graph_ui.gestures.tie_ui.in_flight(), Latched::TieLine),
+            (graph_ui.gestures.selection_ui.in_flight(), Latched::Band),
         ]
         .into_iter()
         .filter_map(|(on, which)| on.then_some(which))
@@ -223,6 +223,7 @@ fn a_tie_clicks_drags_and_sweeps_as_a_node_does() {
     h.frame();
     h.ui.drag_to(center + Vec2::new(10.0, 0.0));
     h.frame();
+    assert_eq!(h.outcome, InputOutcome::Handled, "the tie's latch");
     h.ui.drag_to(center + Vec2::new(30.0, -20.0));
     let moved = h.frame();
     let moves: Vec<_> = moved
@@ -241,6 +242,9 @@ fn a_tie_clicks_drags_and_sweeps_as_a_node_does() {
         Some((vec![ItemId::Tie(tie)], Vec2::new(30.0, -20.0))),
         "the tie drags alone, by the pointer's travel from the press: {moved:?}"
     );
+    h.ui.release(PointerButton::Left);
+    h.frame();
+    assert_eq!(h.outcome, InputOutcome::Handled, "the tie's stop");
 
     let (mut h, tie) = one_tie(false);
     h.ui.press(Vec2::new(430.0, 600.0), PointerButton::Left);
@@ -272,6 +276,7 @@ fn the_knob_of_a_selected_tie_pins_and_frees_its_angle() {
     h.frame();
     h.ui.drag_to(knob + Vec2::new(0.0, 10.0));
     h.frame();
+    assert_eq!(h.outcome, InputOutcome::Handled, "the knob's latch");
     let below = Vec2::new(470.0, 250.0) + Vec2::new(0.0, 60.0);
     h.ui.drag_to(below);
     let turned = h.frame();
@@ -293,6 +298,7 @@ fn the_knob_of_a_selected_tie_pins_and_frees_its_angle() {
     );
     h.ui.release(PointerButton::Left);
     h.frame();
+    assert_eq!(h.outcome, InputOutcome::Handled, "the knob's stop");
 
     let (mut h, tie) = one_tie(true);
     h.document_mut().main_view.ties.get_mut(&tie).unwrap().angle = TieAngle::Pinned(30.0);
@@ -387,7 +393,7 @@ fn the_tie_menu_releases_pins_and_removes() {
     h.ui.hover(h.ui.rect(rows[1]).expect("the widget shows").center());
     h.frame();
     assert_eq!(
-        h.graph_ui.tie_menu.lit(),
+        h.graph_ui.gestures.tie_menu.lit(),
         Some(wires[1]),
         "the hovered entry lights its wire"
     );

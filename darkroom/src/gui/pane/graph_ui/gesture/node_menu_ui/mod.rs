@@ -9,7 +9,6 @@ use scenarium::NodeId;
 use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
-use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph_ui::gesture::item_menu::ItemMenu;
 
 /// Right-click on a node body → a small popup with actions on the node.
@@ -59,8 +58,7 @@ impl NodeMenuUi {
     /// the [`AppCommand`] it means, the structural picks as ordinary intents.
     ///
     /// Opening is [`Self::open_on`]'s; this only ever shows a menu already latched.
-    pub(crate) fn apply(&mut self, ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
-        let graph_ctx = ctx.graph_ctx();
+    pub(crate) fn record(&mut self, ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
         self.menu.retain(|node_id| graph_ctx.contains(node_id));
         let pick = self.menu.show(ui, "node_body_menu", |ui, node_id| {
             let mut chosen = None;

@@ -121,6 +121,11 @@ fn a_shift_band_unions_with_the_committed_selection_counting_overlap_once() {
         ),
         "the shift band commits both nodes exactly once: {intents:?} (a = {a:?}, b = {b:?})"
     );
+    assert_eq!(
+        h.graph_ui.gestures.selection_ui.preview(),
+        None,
+        "the release frame paints the committed set, which its drain just wrote"
+    );
 }
 
 /// The band's border is one hairline on screen at every zoom: its world width times the zoom
