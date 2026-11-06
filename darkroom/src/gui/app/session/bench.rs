@@ -347,7 +347,7 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
                         .build();
                     frontend
                         .ui_mut()
-                        .set_theme_for(ColorScheme::Dark, Theme::default().palantir);
+                        .set_theme(ColorScheme::Dark, Theme::default().palantir);
                     let mut published = false;
                     move |editor: &mut Editor, n: u32| {
                         let ui = frontend.ui_mut();
@@ -368,7 +368,7 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
                         .swapchain_present()
                         .build();
                     host.ui_mut()
-                        .set_theme_for(ColorScheme::Dark, Theme::default().palantir);
+                        .set_theme(ColorScheme::Dark, Theme::default().palantir);
                     let mut published = false;
                     move |editor: &mut Editor, n: u32| {
                         if !published {
