@@ -77,7 +77,12 @@ impl MainWindow {
     pub(crate) fn scan_navigation(&mut self, ui: &mut Ui, ctx: WindowCtx<'_>, out: &mut Requests) {
         let ops = &mut self.dock_ops;
         ops.clear();
-        DockView::scan(ui, Self::dock_wid(), &ctx.document().layout, ops);
+        DockView::scan(
+            &mut ui.input_ctx(),
+            Self::dock_wid(),
+            &ctx.document().layout,
+            ops,
+        );
         for op in ops.drain(..) {
             out.push_view(op);
         }
