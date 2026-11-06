@@ -107,7 +107,7 @@ fn prepass_with_wire_from(fixture: &GraphCtxFixture, start: PortRef) -> Option<I
         PrepassCtx::new(fixture.graph_ctx(), CanvasInput::default()),
         &geometry,
     );
-    wires.prepass(arena.ui_mut(), ctx, &mut out);
+    wires.prepass(&mut arena.ui_mut().input_ctx(), ctx, &mut out);
     assert!(
         out.document().is_empty(),
         "an untouched prepass emits nothing"

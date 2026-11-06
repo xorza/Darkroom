@@ -7,7 +7,7 @@
 //! chord names no pane of its own, so running only while a graph pane is up is what keeps Delete
 //! from removing nodes nobody is looking at.
 
-use palantir::{Key, Ui};
+use palantir::{InputCtx, Key};
 use scenarium::NodeId;
 
 use crate::core::edit::graph_intent::GraphIntent;
@@ -27,17 +27,18 @@ use crate::gui::pane::graph_ui::gesture::pan_zoom::Framing;
 ///
 /// Esc deselects only when the canvas `ctx` says nothing was in flight: only
 /// the canvas knows whether the Esc cancelled a gesture instead.
-pub(crate) fn emit(ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
+pub(crate) fn emit(input_ctx: &mut InputCtx<'_>, ctx: CanvasCtx<'_>, out: &mut Requests) {
     let graph_ctx = ctx.graph_ctx();
-    let reset_zoom = ui.shortcut_pressed(shortcuts::RESET_VIEW);
-    let duplicate = ui.shortcut_pressed(shortcuts::DUPLICATE);
-    let delete = ui.shortcut_pressed(shortcuts::DELETE) || ui.shortcut_pressed(Key::Backspace);
+    let reset_zoom = input_ctx.shortcut_pressed(shortcuts::RESET_VIEW);
+    let duplicate = input_ctx.shortcut_pressed(shortcuts::DUPLICATE);
+    let delete =
+        input_ctx.shortcut_pressed(shortcuts::DELETE) || input_ctx.shortcut_pressed(Key::Backspace);
     let view = graph_ctx.view();
     if ctx.deselects() && !view.selected.is_empty() {
         out.push_graph(GraphIntent::clear_selection());
     }
     // Ctrl+0 is the toolbar's reset view: 1:1, centered on the content.
-    if reset_zoom && let Some(reset) = Framing::Reset.intent(ui, ctx) {
+    if reset_zoom && let Some(reset) = Framing::Reset.intent(input_ctx.input, ctx) {
         out.push_graph(reset);
     }
     // Ctrl+D drops wires from producers outside the selection; keeping them

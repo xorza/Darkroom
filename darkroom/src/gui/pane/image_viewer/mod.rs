@@ -510,7 +510,7 @@ impl ImageViewer {
         }
         let drag = resp.left.drag.delta().or_else(|| resp.middle.drag.delta());
         pan_drag::fold(&mut self.pan_anchor, drag, &mut v.pan);
-        VIEWER_ZOOM.fold_scroll(&mut v, ui, &resp);
+        VIEWER_ZOOM.fold_scroll(&mut v, ui.theme().text.line_height(), &resp);
         self.view = Some(v);
     }
 }

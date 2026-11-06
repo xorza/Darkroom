@@ -1,4 +1,4 @@
-//! Whole-editor test harness: drives [`Session::frame`] through palantir's
+//! Whole-editor test harness: drives [`Session::input`] and [`Session::record`] through palantir's
 //! [`Harness`], so a test can feed a real pointer event and assert on
 //! what the editor did with it.
 //!
@@ -9,15 +9,14 @@
 //! pointer event and an intent: hit-testing, response routing, pane scoping.
 //!
 //! **The record closure runs once per record pass, not once per frame.**
-//! `Session::frame` is called from `App::record`, so on a frame with
+//! `Session::record` is called from `App::record`, so on a frame with
 //! pending action input it runs *twice*, exactly as in production. That
 //! is deliberate — it is the behaviour under test. What a caller must
 //! not do is accumulate across frames on the assumption of one call per
 //! frame; [`SessionHarness::frame`] returns the commands of every pass, in order.
 
 use glam::UVec2;
-use palantir::Ui;
-use palantir::{ColorScheme, Harness};
+use palantir::{App, ColorScheme, Harness, InputCtx, Ui, WindowToken};
 use scenarium::Library;
 
 use crate::core::document::internals::DocumentFixture;
@@ -39,6 +38,48 @@ use std::iter;
 /// Surface every editor test frames at unless it resizes. Wide enough
 /// that the dock strip lays its chips out unwrapped.
 const SURFACE: UVec2 = UVec2::new(1200, 800);
+
+/// One frame's run of the session, as `App` runs it. The commands are drained in each hook, as
+/// `App` drains them, which includes the frames the harness runs first to deliver held input, where
+/// a chord pressed before a click lands. What it owes a relayout is dropped: production hands it to
+/// `App::record`, and this harness asserts on commands and documents, not on layout passes.
+#[derive(Debug)]
+struct SessionFrame<'a> {
+    session: &'a mut Session,
+    theme: &'a Theme,
+    library: &'a Library,
+    run_state: &'a RunState,
+    preferences: &'a mut Preferences,
+    process_memory: u64,
+    requests: &'a mut Requests,
+    commands: Vec<AppCommand>,
+}
+
+impl App for SessionFrame<'_> {
+    fn input(&mut self, _: WindowToken, mut input_ctx: InputCtx<'_>) {
+        let ctx = AppCtx::new(self.theme, self.library, self.run_state);
+        let _needs_relayout = self.session.input(&mut input_ctx, ctx, self.requests);
+        self.commands
+            .extend(iter::from_fn(|| self.requests.pop_app()));
+    }
+
+    fn record(&mut self, _: WindowToken, ui: &mut Ui) {
+        let ctx = AppCtx::new(self.theme, self.library, self.run_state).with_status(StatusInputs {
+            message: None,
+            process_memory: self.process_memory,
+        });
+        let _needs_relayout = self.session.record(
+            ui,
+            ctx,
+            FrameWrites {
+                preferences: self.preferences,
+                requests: self.requests,
+            },
+        );
+        self.commands
+            .extend(iter::from_fn(|| self.requests.pop_app()));
+    }
+}
 
 #[derive(Debug)]
 pub(crate) struct SessionHarness {
@@ -137,30 +178,18 @@ impl SessionHarness {
         // frame it appears, in this harness exactly as in production.
         run_state.previews_mut().reconcile(&session.open.document);
         session.reconcile_caches();
-        let ctx = AppCtx::new(theme, library, run_state).with_status(StatusInputs {
-            message: None,
+        let mut frame = SessionFrame {
+            session,
+            theme,
+            library,
+            run_state,
+            preferences,
             process_memory: *process_memory,
-        });
-        // Drained *inside* every pass, as `App::record` does — it is the
-        // per-pass entry point in production, and executes what each pass
-        // raised. That includes the frames the harness runs first to deliver
-        // held input, which is where a chord pressed before a click lands.
-        let mut commands = Vec::new();
-        ui.frame(|recorder: &mut Ui| {
-            // Deliberately dropped: production hands this to `App::record`,
-            // which owns the app's one `request_relayout`. This harness
-            // asserts on commands and documents, not on layout passes.
-            let _needs_relayout = session.frame(
-                recorder,
-                ctx,
-                FrameWrites {
-                    preferences,
-                    requests,
-                },
-            );
-            commands.extend(iter::from_fn(|| requests.pop_app()));
-        });
-        commands
+            requests,
+            commands: Vec::new(),
+        };
+        ui.frame_app(&mut frame);
+        frame.commands
     }
 
     /// `n` frames whose commands are discarded — the editor equivalent of

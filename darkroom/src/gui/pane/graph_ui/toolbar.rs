@@ -112,17 +112,17 @@ pub(super) fn show(ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
                     .shortcut(shortcuts::RESET_VIEW)
                     .show_icon(ui, theme, Icon::ResetView)
                 {
-                    out.extend_graph(Framing::Reset.intent(ui, ctx));
+                    out.extend_graph(Framing::Reset.intent(ui.input_ctx().input, ctx));
                 }
                 if Chip::new(show_all_wid(), "Show all").show_icon(ui, theme, Icon::ShowAll) {
-                    out.extend_graph(Framing::ShowAll.intent(ui, ctx));
+                    out.extend_graph(Framing::ShowAll.intent(ui.input_ctx().input, ctx));
                 }
                 if Chip::new(show_selected_wid(), "Show selected").show_icon(
                     ui,
                     theme,
                     Icon::ShowSelected,
                 ) {
-                    out.extend_graph(Framing::ShowSelected.intent(ui, ctx));
+                    out.extend_graph(Framing::ShowSelected.intent(ui.input_ctx().input, ctx));
                 }
             });
         });

@@ -2,6 +2,7 @@ pub(crate) mod dock_panes;
 pub(crate) mod menu_bar;
 pub(crate) mod status_bar;
 
+use palantir::InputCtx;
 use std::collections::HashMap;
 
 use palantir::{
@@ -74,15 +75,15 @@ impl MainWindow {
     /// handed to the frame's queue, which is where every other darkroom
     /// surface puts one: dock ops travel beside graph edits, stay out of
     /// undo, and are validated before a save.
-    pub(crate) fn scan_navigation(&mut self, ui: &mut Ui, ctx: WindowCtx<'_>, out: &mut Requests) {
+    pub(crate) fn scan_navigation(
+        &mut self,
+        input_ctx: &mut InputCtx<'_>,
+        ctx: WindowCtx<'_>,
+        out: &mut Requests,
+    ) {
         let ops = &mut self.dock_ops;
         ops.clear();
-        DockView::scan(
-            &mut ui.input_ctx(),
-            Self::dock_wid(),
-            &ctx.document().layout,
-            ops,
-        );
+        DockView::scan(input_ctx, Self::dock_wid(), &ctx.document().layout, ops);
         for op in ops.drain(..) {
             out.push_view(op);
         }
@@ -100,7 +101,7 @@ impl MainWindow {
     /// the frame's accumulated signals are spent.
     pub(crate) fn prepass(
         &mut self,
-        ui: &mut Ui,
+        input_ctx: &mut InputCtx<'_>,
         ctx: WindowCtx<'_>,
         out: &mut Requests,
     ) -> Relayout {
@@ -111,7 +112,8 @@ impl MainWindow {
                 // Reached from `active_tabs`, so a pane is showing the graph
                 // by construction — which is what `GraphUi::prepass` asserts.
                 TabRef::Graph => {
-                    request_relayout |= graph_ui.prepass(ui, GraphCtx::new(ctx, ui.display()), out);
+                    request_relayout |=
+                        graph_ui.prepass(input_ctx, GraphCtx::new(ctx, input_ctx.display()), out);
                 }
                 // Neither derives a document mutation from input: preferences
                 // edits go through their own widgets, and a viewer only
@@ -120,6 +122,28 @@ impl MainWindow {
             }
         }
         request_relayout
+    }
+
+    /// Ready the panes on screen for a record pass that no input stage ran just before; see
+    /// [`GraphUi::settle`].
+    pub(crate) fn settle(
+        &mut self,
+        ui: &mut Ui,
+        ctx: WindowCtx<'_>,
+        out: &mut Requests,
+    ) -> Relayout {
+        let Self { graph_ui, .. } = self;
+        let mut relayout = Relayout::NotNeeded;
+        for tab in ctx.document().layout.active_tabs() {
+            match tab {
+                TabRef::Graph => {
+                    relayout |= graph_ui.settle(ui, GraphCtx::new(ctx, ui.display()), out);
+                }
+                // None keeps anything a second pass reads from the rects of the first.
+                TabRef::Preferences | TabRef::ImageViewer(_) | TabRef::Inspector(_) => {}
+            }
+        }
+        relayout
     }
 
     pub(crate) fn frame(&mut self, ui: &mut Ui, ctx: WindowCtx<'_>, writes: FrameWrites<'_>) {

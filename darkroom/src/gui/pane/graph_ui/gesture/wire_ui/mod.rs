@@ -1,4 +1,4 @@
-use palantir::{PointerButton, PointerEvent, PointerWake, Ui};
+use palantir::{Input, PointerButton, PointerEvent, PointerWake, Ui};
 use scenarium::Binding;
 
 use crate::core::edit::graph_intent::GraphIntent;
@@ -101,7 +101,7 @@ impl WireUi {
     /// for more than an edit.
     pub(crate) fn prepass(
         &mut self,
-        ui: &mut Ui,
+        input_ctx: &mut palantir::InputCtx<'_>,
         ctx: CanvasCtx<'_>,
         out: &mut Requests,
     ) -> Option<WireEnd> {
@@ -110,7 +110,7 @@ impl WireUi {
         // The output column drops out while the preview-spawn chord is
         // held: that chord is the preview drag's, so the two controllers
         // never both latch one press.
-        let preview_chord = preview_drag::modifier_held(ui);
+        let preview_chord = preview_drag::modifier_held(input_ctx.input);
         if self.state.is_none()
             && let Some(drag) = GlyphDrag::latch(&geometry.ports, |port| {
                 !preview_chord || port.kind == PortKind::Input
@@ -134,12 +134,12 @@ impl WireUi {
         }
 
         // Refresh the compatible port under the pointer for both modes.
-        state.drag.snap = scan_snap_target(ui, ctx, state.drag.from);
+        state.drag.snap = scan_snap_target(input_ctx.input, ctx, state.drag.from);
         self.state = Some(state);
 
         match state.mode {
-            DragMode::Held => self.resolve_held(ui, ctx, state.drag, out),
-            DragMode::Floating => self.resolve_floating(ui, state.drag, out),
+            DragMode::Held => self.resolve_held(input_ctx.input, ctx, state.drag, out),
+            DragMode::Floating => self.resolve_floating(input_ctx, state.drag, out),
         }
     }
 
@@ -148,7 +148,7 @@ impl WireUi {
     /// drop on empty canvas. While the button is still down, keep the wire.
     fn resolve_held(
         &mut self,
-        ui: &mut Ui,
+        input: &mut Input,
         ctx: CanvasCtx<'_>,
         drag: GlyphDrag<PortRef, PortRef>,
         out: &mut Requests,
@@ -161,11 +161,12 @@ impl WireUi {
             out.push_graph(wire(drag.from, end));
             return None;
         }
-        if let Some(set_const) = const_drop(ui, ctx, drag.from) {
+        if let Some(set_const) = const_drop(input, ctx, drag.from) {
             out.push_graph(set_const);
             return None;
         }
-        dropped_on_empty_canvas(ui, ctx.geometry()).then_some(WireEnd::DroppedOnCanvas(drag.from))
+        dropped_on_empty_canvas(input, ctx.geometry())
+            .then_some(WireEnd::DroppedOnCanvas(drag.from))
     }
 
     /// `Floating` resolve: the wire follows the cursor with no button held,
@@ -176,7 +177,7 @@ impl WireUi {
     /// handled in `prepass`.
     fn resolve_floating(
         &mut self,
-        ui: &mut Ui,
+        input_ctx: &mut palantir::InputCtx<'_>,
         drag: GlyphDrag<PortRef, PortRef>,
         out: &mut Requests,
     ) -> Option<WireEnd> {
@@ -185,7 +186,7 @@ impl WireUi {
         // frames coming — without this it only redraws when some other
         // widget's hover change happens to wake a frame). `BUTTONS` delivers
         // the terminating press.
-        let events = ui.pointer_events(PointerWake::MOVE | PointerWake::BUTTONS);
+        let events = input_ctx.pointer_events(PointerWake::MOVE | PointerWake::BUTTONS);
         let ended = events.iter().find_map(|ev| match ev {
             PointerEvent::Pressed {
                 button: button @ (PointerButton::Left | PointerButton::Right),
@@ -266,9 +267,9 @@ fn input_const_only(graph_ctx: GraphCtx<'_>, port: PortRef) -> bool {
 /// `response.hovered`: palantir suppresses `hovered` on every widget except the
 /// LMB-capture owner during a drag, so while the start port owns the capture no
 /// other port can ever read `hovered = true`.
-fn scan_snap_target(ui: &mut Ui, ctx: CanvasCtx<'_>, start: PortRef) -> Option<PortRef> {
+fn scan_snap_target(input: &mut Input, ctx: CanvasCtx<'_>, start: PortRef) -> Option<PortRef> {
     let (graph_ctx, geometry) = (ctx.graph_ctx(), ctx.geometry());
-    let pointer = ui.pointer_pos()?;
+    let pointer = input.pointer_pos()?;
     // A const-only input rejects wired bindings: a drag that starts on one never
     // snaps anywhere, so its release falls through to the set-const gesture.
     if input_const_only(graph_ctx, start) {
@@ -315,10 +316,10 @@ fn accepts_wire(graph_ctx: GraphCtx<'_>, start: PortRef, port: PortRef) -> bool 
 /// intent, or `None` when the gesture doesn't apply — drag started
 /// on an output, released off the start node, the port is unknown,
 /// or the input is already a const (don't clobber the value).
-fn const_drop(ui: &mut Ui, ctx: CanvasCtx<'_>, start: PortRef) -> Option<GraphIntent> {
+fn const_drop(input: &mut Input, ctx: CanvasCtx<'_>, start: PortRef) -> Option<GraphIntent> {
     let (graph_ctx, geometry) = (ctx.graph_ctx(), ctx.geometry());
     let port = start.input_port()?;
-    let pointer = ui.pointer_pos()?;
+    let pointer = input.pointer_pos()?;
     if !geometry.node_screen_rect(port.node_id)?.contains(pointer) {
         return None;
     }
@@ -336,11 +337,11 @@ fn const_drop(ui: &mut Ui, ctx: CanvasCtx<'_>, start: PortRef) -> Option<GraphIn
 /// palette. Both halves are screen-space, the frame the raw pointer is in;
 /// the node half comes off `CanvasGeometry`'s snapshot of this frame's body
 /// rects, taken in the same sweep `const_drop` reads.
-fn dropped_on_empty_canvas(ui: &mut Ui, geometry: &CanvasGeometry) -> bool {
-    let Some(pointer) = ui.pointer_pos() else {
+fn dropped_on_empty_canvas(input: &mut Input, geometry: &CanvasGeometry) -> bool {
+    let Some(pointer) = input.pointer_pos() else {
         return false;
     };
-    let over_canvas = ui
+    let over_canvas = input
         .response_for(canvas::outer_wid())
         .rect
         .is_some_and(|r| r.contains(pointer));

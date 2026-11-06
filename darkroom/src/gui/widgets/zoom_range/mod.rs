@@ -3,7 +3,7 @@
 //! alike, each with its own range.
 
 use glam::Vec2;
-use palantir::{ResponseState, Ui, ZoomFactor};
+use palantir::{ResponseState, ZoomFactor};
 
 use crate::core::document::viewport::Viewport;
 
@@ -37,15 +37,13 @@ impl ZoomRange {
     /// two-finger `scroll_pixels` pan, wheel `scroll_lines` zoom-about-
     /// cursor, and pinch `zoom_factor` zoom-about-cursor, clamped to this
     /// range.
-    pub(crate) fn fold_scroll(self, v: &mut Viewport, ui: &Ui, resp: &ResponseState) {
+    pub(crate) fn fold_scroll(self, v: &mut Viewport, line_px: f32, resp: &ResponseState) {
         if resp.scroll.pixels != Vec2::ZERO {
             v.pan -= resp.scroll.pixels;
         }
         if resp.scroll.lines.y != 0.0
             && let Some(pivot) = resp.pointer_local
         {
-            let text = &ui.theme().text;
-            let line_px = text.line_height();
             self.zoom_about(
                 v,
                 pivot,

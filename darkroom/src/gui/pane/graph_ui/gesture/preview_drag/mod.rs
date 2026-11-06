@@ -14,7 +14,7 @@
 use std::rc::Rc;
 
 use glam::Vec2;
-use palantir::{Modifiers, Ui};
+use palantir::{Input, Modifiers};
 use scenarium::{Binding, Func, InputPort, NodeId, OutputPort};
 
 use crate::core::document::item_id::ItemId;
@@ -29,8 +29,8 @@ use crate::gui::pane::graph_ui::wid;
 /// place that chord is decided: [`start`] claims an output drag under it, and `WireUi` drops
 /// the output column from its latch candidates under the same condition, so the two cannot drift
 /// into both claiming, or neither.
-pub(crate) const fn modifier_held(ui: &mut Ui) -> bool {
-    ui.modifiers().contains(Modifiers::CTRL)
+pub(crate) const fn modifier_held(input: &mut Input) -> bool {
+    input.modifiers().contains(Modifiers::CTRL)
 }
 
 /// A Ctrl+drag that started on an output port this frame: the grab of the preview node it
@@ -45,9 +45,9 @@ pub(crate) struct PreviewStart {
 
 /// The preview a Ctrl+drag off an output port starts this frame, or `None`. Asked only while no
 /// drag is in flight: one pointer holds one drag.
-pub(crate) fn start(ui: &mut Ui, ctx: CanvasCtx<'_>) -> Option<PreviewStart> {
+pub(crate) fn start(input: &mut Input, ctx: CanvasCtx<'_>) -> Option<PreviewStart> {
     let (graph_ctx, geometry) = (ctx.graph_ctx(), ctx.geometry());
-    if !modifier_held(ui) {
+    if !modifier_held(input) {
         return None;
     }
     let port = geometry.ports.started_drag()?;

@@ -1,3 +1,4 @@
+use std::mem;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -46,13 +47,16 @@ pub(crate) mod view_capture;
 /// The editor shell: it owns the open document and the runtime services
 /// evaluating it, and lends the document to the [`Session`] that authors each
 /// frame. `App` also owns preferences, dialogs, theme, and exit policy.
-/// `update` drains external queues once, while replayable `record` runs
-/// `Session::frame` and handles actions only in the pass that receives input.
+/// `update` drains external queues once, `input` runs `Session::input` once, and replayable
+/// `record` runs `Session::record` and handles actions only in the pass that receives input.
 #[derive(Debug)]
 pub(crate) struct App {
     /// The document being edited and the UI showing it — replaced as a unit
     /// when a different file is opened, since neither outlives the other.
     session: Session,
+    /// What this frame's input stage owes the layout engine, which `App::record` spends: the one
+    /// place in the app that asks for a relayout.
+    input_relayout: Relayout,
     /// The func library, the evaluation worker, and the status log they
     /// report into — everything the document is executed against.
     runtime: RuntimeHost,
@@ -93,7 +97,7 @@ pub(crate) struct App {
     /// [`ProcessMemory::sample`] refreshes at most once per interval, so a
     /// second record pass repeats the reading the first one drew.
     process_memory: ProcessMemory,
-    /// The frame's request queue, lent to [`Session::frame`] and drained of
+    /// The frame's request queue, lent to [`Session::input`] and [`Session::record`] and drained of
     /// its app tier here once the pass is over. Lives on `App` because both
     /// levels drain it: the editor takes what the document owns, and what is
     /// left is ours. Carries no state between frames — a field only so the
@@ -181,6 +185,7 @@ impl App {
             capture: None,
             process_memory: ProcessMemory::new(),
             requests: Requests::default(),
+            input_relayout: Relayout::NotNeeded,
         };
         // Onto the Ui before frame 1, so palantir's own widgets paint right and the first frame
         // is at the remembered size. Darkroom has one look, Ayu Graphite's dark, so it pins the
@@ -378,7 +383,7 @@ impl App {
     /// the frame's intent drain.
     ///
     /// Reports the edit's relayout need rather than acting on it — this runs
-    /// after `Session::frame` has handed its own back, and `App::record`
+    /// after `Session::record` has handed its own back, and `App::record`
     /// spends both together.
     #[must_use]
     fn pick_input_path(&mut self, pick: &PathPick) -> Relayout {
@@ -684,6 +689,15 @@ impl palantir::App for App {
         self.handle_close_request(ui);
     }
 
+    fn input(&mut self, _win: palantir::WindowToken, mut input_ctx: palantir::InputCtx<'_>) {
+        let ctx = AppCtx::new(&self.theme, self.runtime.library.cur(), &self.run_state);
+        let mut needs_relayout = self.session.input(&mut input_ctx, ctx, &mut self.requests);
+        while let Some(command) = self.requests.pop_app() {
+            needs_relayout |= self.run_command(command);
+        }
+        self.input_relayout = needs_relayout;
+    }
+
     fn record(&mut self, _win: palantir::WindowToken, ui: &mut Ui) {
         // Ahead of the session, so a menu open when the prompt comes up closes before it records,
         // with no second pass. A close request raises it in `update`, a file handed over between
@@ -707,7 +721,8 @@ impl palantir::App for App {
                 message: self.status.cur(),
                 process_memory: self.process_memory.sample(ui.now()),
             });
-        let mut needs_relayout = self.session.frame(
+        let mut needs_relayout = mem::take(&mut self.input_relayout);
+        needs_relayout |= self.session.record(
             ui,
             ctx,
             FrameWrites {
@@ -1099,10 +1114,14 @@ mod tests {
             palantir::App::update(&mut self.app, window, ui);
         }
 
+        fn input(&mut self, window: palantir::WindowToken, ctx: palantir::InputCtx<'_>) {
+            palantir::App::input(&mut self.app, window, ctx);
+        }
+
         fn record(&mut self, window: palantir::WindowToken, ui: &mut Ui) {
             self.passes += 1;
             palantir::App::record(&mut self.app, window, ui);
-            if std::mem::take(&mut self.undo_after_pass) {
+            if mem::take(&mut self.undo_after_pass) {
                 let _edit = self.app.session.open.undo();
                 ui.request_relayout();
             }

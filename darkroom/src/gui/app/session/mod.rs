@@ -24,8 +24,9 @@ use crate::gui::frame::requests::Requests;
 use crate::gui::frame::window_ctx::WindowCtx;
 use crate::gui::main_window::MainWindow;
 use crate::gui::pane::graph_ui::gesture::pan_zoom::Framing;
-use palantir::{Shortcut, Ui};
+use palantir::{InputCtx, Shortcut, Ui};
 use scenarium::Graph;
+use std::mem;
 
 use crate::gui::frame::app_ctx::AppCtx;
 use crate::gui::frame::frame_writes::FrameWrites;
@@ -33,6 +34,8 @@ use crate::gui::frame::shortcuts;
 
 #[derive(Debug)]
 pub(crate) struct Session {
+    /// Whether an input stage ran since the last record pass, so the next pass needs no settling.
+    input_ran: bool,
     /// The document being edited, its save path, and its undo history.
     pub(crate) open: OpenDocument,
     /// The panes showing it. Reset with the document rather than kept across
@@ -52,25 +55,68 @@ impl Session {
     /// Open `open` in a fresh UI.
     pub(crate) fn new(open: OpenDocument) -> Self {
         Self {
+            input_ran: false,
             open,
             main_window: MainWindow::default(),
         }
     }
 
-    /// Run one frame of the edit pipeline against `ctx` — the frame's
-    /// read-only world — draining everything it raises against the document
-    /// and leaving the app tier queued in the `writes` requests for the shell.
+    /// The frame's input stage, once a frame before any record: everything input means against
+    /// the document, drained so the first record pass sees it settled. Leaves the app tier queued
+    /// in `requests` for the shell.
     ///
-    /// The frame splits into a **navigation phase** (settle which tab is
-    /// active, from frame-top inputs) and an **edit phase** (mutate the
-    /// graph), because input that switches tabs comes from *last* frame's
-    /// click responses and must resolve before anything edits or records.
+    /// Each phase ends in a drain, as a phase reads the document and the next one must see what the
+    /// previous asked for. So each takes a `WindowCtx` composed right here, over the document as
+    /// the drain before it left it.
     ///
-    /// Returns whether the pass stranded the canvas's cached geometry. `App`
-    /// spends it once the command tier has run too, so the whole app requests
-    /// a relayout from exactly one place.
+    /// 1. NAVIGATION: settle which tab is active: the undo/redo chords, and tab and chip clicks
+    ///    read off last frame's responses, whose hit on a node the undo just removed finds nothing.
+    ///    First, so a switched-to tab records in the same present's first pass.
+    /// 2. PREPASS: reconcile pane visibility, rebuild the canvas's projection, then emit the
+    ///    input-derived graph mutations (drag, pan/zoom, wire commit). A canvas that just became
+    ///    visible needs a relayout: it may never have recorded, and a dock op raises no geometry
+    ///    signal of its own.
+    ///
+    /// Returns whether the stage stranded the canvas's cached geometry, which `App` spends in its
+    /// record, so the whole app requests a relayout from exactly one place.
     #[must_use]
-    pub(crate) fn frame(
+    pub(crate) fn input(
+        &mut self,
+        input_ctx: &mut InputCtx<'_>,
+        ctx: AppCtx<'_>,
+        requests: &mut Requests,
+    ) -> Relayout {
+        debug_assert!(requests.is_empty(), "the last frame left requests behind");
+        let mut needs_relayout = self.apply_undo_redo(input_ctx);
+        self.main_window
+            .scan_navigation(input_ctx, WindowCtx::new(ctx, &self.open), requests);
+        needs_relayout |=
+            Relayout::after(self.open.drain_requests(requests.document(), ctx.library()));
+
+        needs_relayout |=
+            self.main_window
+                .prepass(input_ctx, WindowCtx::new(ctx, &self.open), requests);
+        needs_relayout |=
+            Relayout::after(self.open.drain_requests(requests.document(), ctx.library()));
+
+        // The file/run/quit chords only queue an `AppCommand`, so they need no drain of their own.
+        menu_shortcut(input_ctx, requests);
+        self.input_ran = true;
+        needs_relayout
+    }
+
+    /// One record pass against `ctx`: authors the widget tree, draining what it raises against the
+    /// document, and leaves the app tier queued in the `writes` requests for the shell.
+    ///
+    /// A pass that no input stage ran just before settles first: the first frame's warmup, and a
+    /// second pass, which reads the rects of the pass before it.
+    ///
+    /// Returns whether the pass stranded the canvas's cached geometry. Resizes driven by something
+    /// other than an `UndoStep`, as the header's elapsed-time label growing as a run reports, are
+    /// not covered: they leave `CanvasGeometry`'s offsets stale for one frame rather than buying a
+    /// pass.
+    #[must_use]
+    pub(crate) fn record(
         &mut self,
         ui: &mut Ui,
         ctx: AppCtx<'_>,
@@ -80,60 +126,15 @@ impl Session {
             preferences,
             requests,
         } = writes;
-        // Each pass drains the document tier and its caller the app tier, so a second pass of the
-        // frame inherits nothing the first ran.
         debug_assert!(requests.is_empty(), "the last pass left requests behind");
-        // The frame's relayout accumulator, owned here for exactly as long as
-        // the frame it describes. Every pass that can strand
-        // `CanvasGeometry`'s cross-frame caches reports upward into it, and it
-        // is handed to `App` to spend — so there is no flag to reset, and none
-        // to leak into the next frame.
-        //
-        // Three phases, each ending in a drain. That is the shape because a
-        // phase reads the document and the next one must see what the previous
-        // asked for; the drain between them is a document mutation, which is
-        // why no two adjacent phases can collapse into one call on the UI.
-        //
-        // Each phase takes a `WindowCtx` composed right here, over the document
-        // as the drain before it left it. That is the level of the context
-        // chain carrying a document, and this is why it cannot be composed
-        // once for the frame: the drains need the document exclusively, so a
-        // longer-lived context would have nothing able to run between phases.
-        //
-        // 1. NAVIGATION — settle which tab is active, entirely from inputs
-        //    available before the record: the undo/redo chords, and tab and
-        //    chip clicks read off *last* frame's responses. Those responses
-        //    are last frame's while the document they resolve against is this
-        //    frame's, so a hit on a node the undo just removed simply finds
-        //    nothing. It runs first so a switched-to tab records in the same
-        //    present's Pass A, with no first-frame gap. A tab whose node the
-        //    undo just removed is pruned by the mutation itself — see
-        //    `OpenDocument::land`.
-        let mut needs_relayout = self.apply_undo_redo(ui);
-        self.main_window
-            .scan_navigation(ui, WindowCtx::new(ctx, &self.open), requests);
-        needs_relayout |=
-            Relayout::after(self.open.drain_requests(requests.document(), ctx.library()));
-
-        // 2. PREPASS — reconcile pane visibility, rebuild the canvas's
-        //    projection, then emit the input-derived graph mutations (drag,
-        //    pan/zoom, wire commit). Drained before the record so Pass A
-        //    sees the settled document. Driven by the panes on screen, like the
-        //    record below — a pane kind that grows input handling gets an arm
-        //    there rather than another question here. A canvas that just
-        //    became visible needs a relayout: it may never have recorded, and
-        //    a dock op raises no geometry signal of its own.
-        needs_relayout |= self
-            .main_window
-            .prepass(ui, WindowCtx::new(ctx, &self.open), requests);
-        needs_relayout |=
-            Relayout::after(self.open.drain_requests(requests.document(), ctx.library()));
-
-        // 3. RECORD — author the widget tree. The file/run/quit chords are
-        //    read just ahead of it: unlike undo/redo they only queue an
-        //    `AppCommand`, so they need no drain of their own and simply have
-        //    to land before `App` takes the tier.
-        menu_shortcut(ui, requests);
+        let mut needs_relayout = Relayout::NotNeeded;
+        if !mem::take(&mut self.input_ran) {
+            needs_relayout |=
+                self.main_window
+                    .settle(ui, WindowCtx::new(ctx, &self.open), requests);
+            needs_relayout |=
+                Relayout::after(self.open.drain_requests(requests.document(), ctx.library()));
+        }
         self.main_window.frame(
             ui,
             WindowCtx::new(ctx, &self.open),
@@ -142,15 +143,10 @@ impl Session {
                 requests,
             },
         );
-        // Graph edits the record surfaced (node select, cache toggle, const
-        // edit), plus the tab strip's dock ops.
+        // Graph edits the record surfaced (node select, cache toggle, const edit), plus the tab
+        // strip's dock ops.
         needs_relayout |=
             Relayout::after(self.open.drain_requests(requests.document(), ctx.library()));
-
-        // Resizes driven by something other than an `UndoStep` — the header's
-        // elapsed-time label growing as a run reports — are not covered: they
-        // leave `CanvasGeometry`'s offsets stale for one frame rather than
-        // buying a pass.
         needs_relayout
     }
 
@@ -166,9 +162,9 @@ impl Session {
     /// holds focus palantir grants it to that field's scope and this
     /// read answers `false` on its own.
     #[must_use]
-    fn apply_undo_redo(&mut self, ui: &mut Ui) -> Relayout {
-        let undo = ui.shortcut_pressed(shortcuts::UNDO);
-        let redo = ui.shortcut_pressed(shortcuts::REDO);
+    fn apply_undo_redo(&mut self, input_ctx: &mut InputCtx<'_>) -> Relayout {
+        let undo = input_ctx.shortcut_pressed(shortcuts::UNDO);
+        let redo = input_ctx.shortcut_pressed(shortcuts::REDO);
         // The document owns its history and what a replay means; this layer
         // only says which direction the chord asked for.
         if undo {
@@ -212,10 +208,10 @@ const MENU_CHORDS: [(Shortcut, AppCommand); 6] = [
 /// first match, and the chords after it stay watched: palantir records the frame again with no
 /// input, and that pass reads them all (`Ui::shortcut_pressed`). Read outside every scope, so a
 /// chord a focused field claims does not reach them.
-fn menu_shortcut(ui: &mut Ui, requests: &mut Requests) {
+fn menu_shortcut(input_ctx: &mut InputCtx<'_>, requests: &mut Requests) {
     if let Some((_, command)) = MENU_CHORDS
         .iter()
-        .find(|(chord, _)| ui.shortcut_pressed(*chord))
+        .find(|(chord, _)| input_ctx.shortcut_pressed(*chord))
     {
         requests.push_app(command.clone());
     }

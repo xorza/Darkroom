@@ -5,7 +5,7 @@
 use std::rc::Rc;
 
 use glam::Vec2;
-use palantir::{Configure, Modifiers, Panel, Sense, Sizing, Ui};
+use palantir::{Configure, Input, Modifiers, Panel, Sense, Sizing, Ui};
 
 use crate::core::document::item_id::ItemId;
 use crate::core::document::tie::{TieAngle, TieId};
@@ -79,7 +79,7 @@ impl TieWidgets {
 
     /// Pre-record: turn a held knob's band to the pointer. The frames of one knob drag fold into
     /// one undo entry; Esc puts the angle back.
-    pub(crate) fn prepass(&mut self, ui: &mut Ui, ctx: PrepassCtx<'_>, out: &mut Requests) {
+    pub(crate) fn prepass(&mut self, input: &mut Input, ctx: PrepassCtx<'_>, out: &mut Requests) {
         let Some(knob) = self.knob.as_ref().copied() else {
             return;
         };
@@ -97,17 +97,21 @@ impl TieWidgets {
         let center = graph_ctx.view().ties.get(&knob.tie).map(|tie| tie.pos);
         let (Some(center), Some(_)) = (
             center,
-            ui.response_for(wid::tie_knob(knob.tie)).left.drag.delta(),
+            input
+                .response_for(wid::tie_knob(knob.tie))
+                .left
+                .drag
+                .delta(),
         ) else {
             self.knob = None;
             return;
         };
-        let snap = if ui.modifiers().contains(Modifiers::SHIFT) {
+        let snap = if input.modifiers().contains(Modifiers::SHIFT) {
             AngleSnap::Steps
         } else {
             AngleSnap::Free
         };
-        if let Some(pointer) = ui.response_for(canvas::outer_wid()).pointer_local {
+        if let Some(pointer) = input.response_for(canvas::outer_wid()).pointer_local {
             let offset = graph_ctx.camera().to_world(pointer) - center;
             out.push_graph(turn(TieAngle::Pinned(knob_angle(offset, snap))));
         }

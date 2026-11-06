@@ -26,6 +26,7 @@
 
 use common::{Buffer2, USize2};
 use imaginarium::PlanarImage;
+use std::mem;
 use std::path::Path;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -38,7 +39,7 @@ use palantir::bench::case_group::CaseGroup;
 use palantir::bench::kind::{Kind, Scale};
 use palantir::bench::scene::{BENCH_DPR, BENCH_SURFACE};
 use palantir::internals::Timing;
-use palantir::{ColorScheme, Depth, Harness};
+use palantir::{App, ColorScheme, Depth, Harness, InputCtx, WindowToken};
 use palantir::{FramePaint, ImageDownsample, OffscreenHost, Ui};
 use scenarium::{DynamicValue, NodeId};
 
@@ -111,6 +112,8 @@ impl Scenario {
 /// The editor's state as `App` holds it, over the document.
 #[derive(Debug)]
 struct Editor {
+    /// What the input stage owes the layout engine, which the record spends.
+    input_relayout: Relayout,
     session: Session,
     library: RuntimeLibrary,
     theme: Theme,
@@ -147,6 +150,7 @@ impl Editor {
         }]);
 
         Self {
+            input_relayout: Relayout::NotNeeded,
             session: Session::new(open),
             library: runtime,
             theme: Theme::default(),
@@ -222,17 +226,7 @@ impl Editor {
         self.session.reconcile_caches();
     }
 
-    /// One record pass as `App::record` runs it.
-    fn record(&mut self, ui: &mut Ui) {
-        let ctx = AppCtx::new(&self.theme, self.library.cur(), &self.run_state);
-        let relayout = self.session.frame(
-            ui,
-            ctx,
-            FrameWrites {
-                preferences: &mut self.preferences,
-                requests: &mut self.requests,
-            },
-        );
+    fn run_commands(&mut self) {
         while let Some(command) = self.requests.pop_app() {
             let AppCommand::View(ViewCommand::ConvertFull { node_id, max_dim }) = command else {
                 panic!("a frame with no input raises only a viewer's ask: {command:?}");
@@ -241,6 +235,29 @@ impl Editor {
                 self.run_state.previews_mut().convert_full(node_id, max_dim);
             }
         }
+    }
+}
+
+/// The input stage and the record passes as `App` runs them.
+impl App for Editor {
+    fn input(&mut self, _: WindowToken, mut input_ctx: InputCtx<'_>) {
+        let ctx = AppCtx::new(&self.theme, self.library.cur(), &self.run_state);
+        self.input_relayout = self.session.input(&mut input_ctx, ctx, &mut self.requests);
+        self.run_commands();
+    }
+
+    fn record(&mut self, _: WindowToken, ui: &mut Ui) {
+        let ctx = AppCtx::new(&self.theme, self.library.cur(), &self.run_state);
+        let mut relayout = mem::take(&mut self.input_relayout);
+        relayout |= self.session.record(
+            ui,
+            ctx,
+            FrameWrites {
+                preferences: &mut self.preferences,
+                requests: &mut self.requests,
+            },
+        );
+        self.run_commands();
         if relayout == Relayout::Needed {
             ui.request_relayout();
         }
@@ -357,7 +374,7 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
                         }
                         editor.advance(scenario, ui, n);
                         editor.update();
-                        frontend.frame(|ui| editor.record(ui)).paint()
+                        frontend.frame_app(editor).paint()
                     }
                 }),
                 Backend::Gpu => case.measure(&mut group, || {
@@ -377,10 +394,9 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
                         }
                         editor.advance(scenario, host.ui_mut(), n);
                         editor.update();
-                        let mut app = |ui: &mut Ui| editor.record(ui);
                         let paint = host
                             .set_system_scale(BENCH_DPR)
-                            .frame(target.as_target(), &mut app)
+                            .frame(target.as_target(), editor)
                             .paint();
                         gpu.wait();
                         paint

@@ -26,7 +26,7 @@ pub(crate) mod selection;
 pub(crate) mod toolbar;
 pub(crate) mod wid;
 
-use palantir::{Chrome, Configure, Key, Panel, Sense, Sizing, TranslateScale, Ui};
+use palantir::{Chrome, Configure, Input, InputCtx, Key, Panel, Sense, Sizing, TranslateScale, Ui};
 
 use crate::core::document::Document;
 use crate::gui::frame::relayout::Relayout;
@@ -281,11 +281,10 @@ impl GraphUi {
     /// Reads the frame stamp rather than a visibility flag, so nothing has to
     /// run while the canvas is off screen for it to notice coming back. Two
     /// cases both mean *still here* and must not read as an appearance: the
-    /// previous frame (the ordinary steady state) and *this* frame — a frame
-    /// that owes a relayout records twice, and both passes read the same
+    /// previous frame (the ordinary steady state) and *this* frame — the input
+    /// stage and a settle of one frame read the same
     /// [`Ui::record_frame_id`]. Only a gap wider than that is an absence.
-    fn appearing(&mut self, ui: &Ui) -> bool {
-        let frame = ui.record_frame_id();
+    fn appearing(&mut self, frame: u64) -> bool {
         let appearing = self
             .last_prepass_frame
             .is_none_or(|last| last.saturating_add(1) < frame);
@@ -295,7 +294,7 @@ impl GraphUi {
 
     pub(crate) fn prepass(
         &mut self,
-        ui: &mut Ui,
+        input_ctx: &mut InputCtx<'_>,
         graph_ctx: GraphCtx<'_>,
         out: &mut Requests,
     ) -> Relayout {
@@ -306,7 +305,7 @@ impl GraphUi {
         // First: a canvas back from being away drops the gesture state it left
         // latched, since a drag still held would otherwise resume under a
         // pointer that has long since moved on.
-        let appearing = self.appearing(ui);
+        let appearing = self.appearing(input_ctx.record_frame_id());
         if appearing {
             self.reset_gestures();
         }
@@ -321,8 +320,8 @@ impl GraphUi {
         // Esc cancels what is in flight, whatever the modifiers: Ctrl still held from a spawn
         // drag's chord must not swallow the cancel. Deselect, a command, is plain Esc alone. Both
         // read every frame, so each stays watched.
-        let cancel = ui.key_pressed(Key::Escape);
-        let plain = ui.shortcut_pressed(Key::Escape);
+        let cancel = input_ctx.key_pressed(Key::Escape);
+        let plain = input_ctx.shortcut_pressed(Key::Escape);
         let escape = if self.in_flight() && cancel {
             Escape::Cancels
         } else if plain {
@@ -330,22 +329,20 @@ impl GraphUi {
         } else {
             Escape::Unpressed
         };
-        let canvas = ui.response_for(canvas::outer_wid());
-        if !canvas.right.held() && !canvas.right.released() {
-            self.secondary = SecondaryPress::Free;
-        }
+        let canvas = input_ctx.input.response_for(canvas::outer_wid());
         self.input = CanvasInput {
-            gesture: CanvasGesture::classify(&canvas, ui.modifiers(), self.secondary),
+            gesture: CanvasGesture::classify(&canvas, input_ctx.input.modifiers(), self.secondary),
             escape,
             dropped_wire: None,
         };
         let prepass = PrepassCtx::new(graph_ctx, self.input);
-        self.camera.prepass(ui, prepass, out);
-        let dragging = self.group_drag.prepass(ui, prepass, out);
-        self.tie_widgets.prepass(ui, prepass, out);
+        let line_px = input_ctx.theme().text.line_height();
+        self.camera.prepass(input_ctx.input, line_px, prepass, out);
+        let dragging = self.group_drag.prepass(input_ctx.input, prepass, out);
+        self.tie_widgets.prepass(input_ctx.input, prepass, out);
         // One walk, filling the geometry caches off the per-node and per-port
         // responses.
-        self.geometry.rebuild(ui, graph_ctx);
+        self.geometry.rebuild(input_ctx.input, graph_ctx);
         // Everything below reads the settled geometry, so from here the canvas
         // has a context of its own.
         let ctx = CanvasCtx::new(prepass, &self.geometry);
@@ -353,11 +350,11 @@ impl GraphUi {
         // frame's drag edges and centers, and `preview_drag_modifier` keeps
         // them disjoint: the preview spawn takes the output column under the
         // chord, the wire gesture takes it otherwise.
-        if !dragging && let Some(start) = preview_drag::start(ui, ctx) {
+        if !dragging && let Some(start) = preview_drag::start(input_ctx.input, ctx) {
             let gesture = self.group_drag.latch(start.grab, out);
             out.extend_graph_in(gesture, start.spawn);
         }
-        match self.wire_ui.prepass(ui, ctx, out) {
+        match self.wire_ui.prepass(input_ctx, ctx, out) {
             // The palette, which reads the input in the record, opens on the dropped wire.
             Some(WireEnd::DroppedOnCanvas(source)) => self.input.dropped_wire = Some(source),
             // The press that ended a floating wire is spent, its release too when it lands this
@@ -365,30 +362,62 @@ impl GraphUi {
             Some(WireEnd::Secondary) => {
                 self.secondary = SecondaryPress::Spent;
                 self.input.gesture =
-                    CanvasGesture::classify(&canvas, ui.modifiers(), self.secondary);
+                    CanvasGesture::classify(&canvas, input_ctx.input.modifiers(), self.secondary);
             }
             None => {}
+        }
+        // Past the classifications that read it, so a release still spends the press it ends.
+        if !canvas.right.held() {
+            self.secondary = SecondaryPress::Free;
         }
         // Subscription wires (emitter → subscriber) latch/commit here, for
         // the same pre-record reasons as the wire gesture above; an
         // emitter glyph and a data port can't both latch (different widget-id
         // spaces).
-        self.subscription_ui.prepass(ui, ctx, out);
+        self.subscription_ui.prepass(input_ctx.input, ctx, out);
         // Last, once: both wire gestures have settled their snap targets
         // above, and the flags this writes are document-unique, so the draw
         // reads finished geometry. Taking the table back `&mut` is what ends
         // `ctx` — nothing below may read one.
-        self.wire_ui.bake_snap_hover(&mut self.geometry);
-        self.subscription_ui.bake_snap_hover(&mut self.geometry);
-        if let Some(framing) = self.framing.take() {
-            out.extend_graph(framing.intent(ui, CanvasCtx::new(prepass, &self.geometry)));
-        }
+        self.finish_geometry(input_ctx.input, graph_ctx, out);
         // The keyboard half of the same phase. Last, so a chord reads the
         // document the pointer gestures above were raised against.
-        shortcuts::emit(ui, CanvasCtx::new(prepass, &self.geometry), out);
+        shortcuts::emit(input_ctx, CanvasCtx::new(prepass, &self.geometry), out);
         // A node with no measured size records hidden until its rects let its wires draw, and a
         // cull keeps it recorded, so this ends with the next record.
         Relayout::needed_if(appearing || self.geometry.has_unmeasured())
+    }
+
+    /// Ready the canvas for a record pass that no input stage ran just before: the first frame's
+    /// warmup, and a second pass, which reads the rects of the pass before it. The input was spent,
+    /// so what it left for the draw goes; the geometry is built again, and a framing the last
+    /// record raised lands here.
+    pub(crate) fn settle(
+        &mut self,
+        ui: &mut Ui,
+        graph_ctx: GraphCtx<'_>,
+        out: &mut Requests,
+    ) -> Relayout {
+        let appearing = self.appearing(ui.record_frame_id());
+        if appearing {
+            self.reset_gestures();
+        }
+        self.input = CanvasInput::default();
+        let input = ui.input_ctx().input;
+        self.geometry.rebuild(input, graph_ctx);
+        self.finish_geometry(input, graph_ctx, out);
+        Relayout::needed_if(appearing || self.geometry.has_unmeasured())
+    }
+
+    /// What follows a rebuilt geometry on any path: the snapped ports read as hovered, and a
+    /// pending framing lands on the rects it now holds.
+    fn finish_geometry(&mut self, input: &Input, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
+        self.wire_ui.bake_snap_hover(&mut self.geometry);
+        self.subscription_ui.bake_snap_hover(&mut self.geometry);
+        if let Some(framing) = self.framing.take() {
+            let prepass = PrepassCtx::new(graph_ctx, self.input);
+            out.extend_graph(framing.intent(input, CanvasCtx::new(prepass, &self.geometry)));
+        }
     }
 
     /// Record one graph pane: its gestures' record-phase halves, the canvas
@@ -621,6 +650,45 @@ mod tests {
 
     use super::*;
 
+    /// A settle drops what the input stage left for the draw, which the first pass spent, and
+    /// lands a framing the record raised: a reset from zoom 2 moves the camera, once.
+    #[test]
+    fn a_settle_spends_the_input_and_lands_a_framing() {
+        use crate::core::document::internals::DocumentFixture;
+        use crate::core::edit::document_request::DocumentRequest;
+        use crate::core::edit::graph_intent::GraphIntent;
+        use crate::gui::pane::graph_ui::gesture::pan_zoom::Framing;
+        use crate::gui::pane::graph_ui::internals::CanvasHarness;
+
+        let mut h = CanvasHarness::new(DocumentFixture::probes(1));
+        h.document_mut().main_view.viewport.zoom = 2.0;
+        h.prime(2);
+        h.graph_ui.input.gesture = Some(CanvasGesture::Deselect);
+        h.graph_ui.request_framing(Framing::Reset);
+
+        let settle = |h: &mut CanvasHarness| {
+            let mut out = Requests::default();
+            let ui = h.ui.ui_mut();
+            let graph_ctx = h.ctx.graph_ctx_on(ui.display());
+            let relayout = h.graph_ui.settle(ui, graph_ctx, &mut out);
+            assert_eq!(relayout, Relayout::NotNeeded);
+            out
+        };
+        let mut out = settle(&mut h);
+        assert_eq!(h.graph_ui.input, CanvasInput::default());
+        let requests: Vec<_> = out.document().drain().collect();
+        assert!(matches!(
+            requests[..],
+            [DocumentRequest::Graph(GraphIntent::SetViewport { .. })],
+        ));
+        let mut again = settle(&mut h);
+        assert_eq!(
+            again.document().drain().count(),
+            0,
+            "the framing lands once"
+        );
+    }
+
     /// The prepass runs only while the pane shows the graph, so the frame
     /// stamp — not a visibility flag — is what tells the canvas it was away.
     ///
@@ -634,17 +702,17 @@ mod tests {
         let mut graph_ui = GraphUi::default();
 
         assert!(
-            graph_ui.appearing(h.ui()),
+            graph_ui.appearing(h.ui().record_frame_id()),
             "a canvas that has never recorded is appearing"
         );
         assert!(
-            !graph_ui.appearing(h.ui()),
+            !graph_ui.appearing(h.ui().record_frame_id()),
             "a second pass of the same frame is the same appearance, not a new one"
         );
 
         h.frame(|_| {});
         assert!(
-            !graph_ui.appearing(h.ui()),
+            !graph_ui.appearing(h.ui().record_frame_id()),
             "the next consecutive frame is the steady state"
         );
 
@@ -652,11 +720,11 @@ mod tests {
         h.frame(|_| {});
         h.frame(|_| {});
         assert!(
-            graph_ui.appearing(h.ui()),
+            graph_ui.appearing(h.ui().record_frame_id()),
             "a gap means it was away and is back"
         );
         assert!(
-            !graph_ui.appearing(h.ui()),
+            !graph_ui.appearing(h.ui().record_frame_id()),
             "and the reappearance is reported once, not per pass"
         );
     }

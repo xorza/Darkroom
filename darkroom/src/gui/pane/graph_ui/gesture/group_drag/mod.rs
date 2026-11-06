@@ -11,7 +11,7 @@ use std::collections::BTreeSet;
 use std::rc::Rc;
 
 use glam::Vec2;
-use palantir::{Ui, WidgetId};
+use palantir::{Input, WidgetId};
 use scenarium::NodeId;
 
 use crate::core::document::graph_view::GraphView;
@@ -96,7 +96,12 @@ impl GroupDrag {
     /// Runs pre-record, so the move lands in `Document` before the pass that
     /// draws the moved items: they paint at the cursor in Pass A with no
     /// relayout retry.
-    pub(crate) fn prepass(&mut self, ui: &Ui, ctx: PrepassCtx<'_>, out: &mut Requests) -> bool {
+    pub(crate) fn prepass(
+        &mut self,
+        input: &Input,
+        ctx: PrepassCtx<'_>,
+        out: &mut Requests,
+    ) -> bool {
         let graph_ctx = ctx.graph_ctx();
         // An item deleted mid-drag (breaker swipe, undo) takes its drag with
         // it: left in place the anchor would emit against a missing item.
@@ -110,7 +115,7 @@ impl GroupDrag {
         let Some(anchor) = &self.anchor else {
             return false;
         };
-        let resp = ui.response_for(anchor.grab.handle);
+        let resp = input.response_for(anchor.grab.handle);
         // `drag_started` on a still-active anchor means a *new* gesture just
         // latched on the same widget. Emitting with the stale start
         // positions would snap the group back to the previous gesture's

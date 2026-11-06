@@ -7,7 +7,7 @@
 //! test that skipped a phase would be exercising a frame the app never performs.
 
 use glam::{UVec2, Vec2};
-use palantir::Harness;
+use palantir::{App, Harness, InputCtx, WindowToken};
 use palantir::{Configure, DockOperation, Panel, Rect, Sizing, SystemScale, Ui, WidgetId};
 use scenarium::NodeId;
 
@@ -24,6 +24,7 @@ use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
 use crate::gui::pane::graph_ui::wid;
 use crate::gui::port_ref::PortRef;
 use std::iter;
+use std::mem;
 
 impl GraphUi {
     /// The canvas's cross-frame geometry cache, for the tests that assert
@@ -122,7 +123,9 @@ impl CanvasHarness {
             commands,
             view_ops,
         } = self;
-        let mut out = ui.frame_value(|recorder: &mut Ui| record(graph_ui, ctx, recorder));
+        let mut frame = CanvasFrame::new(graph_ui, ctx, AppliesIntents::No);
+        ui.frame_app(&mut frame);
+        let mut out = frame.finish(ui);
         view_ops.clear();
         let intents: Vec<GraphIntent> = out
             .document()
@@ -153,13 +156,9 @@ impl CanvasHarness {
         let Self {
             ui, graph_ui, ctx, ..
         } = self;
-        let _ = ui.frame_value(|recorder: &mut Ui| {
-            let mut out = Requests::default();
-            graph_ui.prepass(recorder, ctx.graph_ctx_on(recorder.display()), &mut out);
-            let _ = ctx.open.drain_requests(out.document(), &ctx.library);
-            draw(graph_ui, ctx, recorder, &mut out);
-            out
-        });
+        let mut frame = CanvasFrame::new(graph_ui, ctx, AppliesIntents::Yes);
+        ui.frame_app(&mut frame);
+        let _ = frame.finish(ui);
     }
 
     /// `n` frames whose intents are discarded. Two is the minimum before
@@ -185,12 +184,9 @@ impl CanvasHarness {
         let Self {
             ui, graph_ui, ctx, ..
         } = self;
-        let mut recorded = false;
-        ui.frame(|recorder: &mut Ui| {
-            recorded = true;
-            let _ = record(graph_ui, ctx, recorder);
-        });
-        recorded
+        let mut frame = CanvasFrame::new(graph_ui, ctx, AppliesIntents::No);
+        ui.frame_app(&mut frame);
+        frame.recorded_at == Some(ui.ui().render_frame_id())
     }
 
     pub(crate) fn document(&self) -> &Document {
@@ -281,12 +277,89 @@ impl CanvasHarness {
     }
 }
 
-/// The record body both frame drivers run.
-fn record(graph_ui: &mut GraphUi, ctx: &GraphCtxFixture, recorder: &mut Ui) -> Requests {
-    let mut out = Requests::default();
-    graph_ui.prepass(recorder, ctx.graph_ctx_on(recorder.display()), &mut out);
-    draw(graph_ui, ctx, recorder, &mut out);
-    out
+/// Whether a frame applies the graph intents it raises to the document, as the session's drains do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AppliesIntents {
+    No,
+    Yes,
+}
+
+/// One canvas frame as the window runs it. It keeps what the input stage and the first record pass
+/// raised, as a later pass has no edges to raise anything from.
+#[derive(Debug)]
+struct CanvasFrame<'a> {
+    graph_ui: &'a mut GraphUi,
+    ctx: &'a mut GraphCtxFixture,
+    applies: AppliesIntents,
+    out: Requests,
+    /// An input stage ran since the last record pass, as `Session` holds it.
+    input_ran: bool,
+    /// The last frame that recorded.
+    recorded_at: Option<u64>,
+}
+
+impl<'a> CanvasFrame<'a> {
+    fn new(
+        graph_ui: &'a mut GraphUi,
+        ctx: &'a mut GraphCtxFixture,
+        applies: AppliesIntents,
+    ) -> Self {
+        Self {
+            graph_ui,
+            ctx,
+            applies,
+            out: Requests::default(),
+            input_ran: false,
+            recorded_at: None,
+        }
+    }
+
+    /// What the last frame raised. A frame that ran no record raised nothing a test can read.
+    fn finish(self, ui: &Harness) -> Requests {
+        assert_eq!(
+            self.recorded_at,
+            Some(ui.ui().render_frame_id()),
+            "the last frame ran no record pass",
+        );
+        self.out
+    }
+
+    fn apply(&mut self) {
+        if self.applies == AppliesIntents::Yes {
+            let _ = self
+                .ctx
+                .open
+                .drain_requests(self.out.document(), &self.ctx.library);
+        }
+    }
+}
+
+impl App for CanvasFrame<'_> {
+    fn input(&mut self, _: WindowToken, mut input_ctx: InputCtx<'_>) {
+        self.out = Requests::default();
+        let graph_ctx = self.ctx.graph_ctx_on(input_ctx.display());
+        let _ = self
+            .graph_ui
+            .prepass(&mut input_ctx, graph_ctx, &mut self.out);
+        self.apply();
+        self.input_ran = true;
+    }
+
+    fn record(&mut self, _: WindowToken, recorder: &mut Ui) {
+        let first_pass = mem::take(&mut self.input_ran);
+        let mut later_pass = Requests::default();
+        if !first_pass {
+            let graph_ctx = self.ctx.graph_ctx_on(recorder.display());
+            let _ = self.graph_ui.settle(recorder, graph_ctx, &mut later_pass);
+        }
+        let out = if first_pass {
+            &mut self.out
+        } else {
+            &mut later_pass
+        };
+        draw(self.graph_ui, self.ctx, recorder, out);
+        self.recorded_at = Some(recorder.render_frame_id());
+    }
 }
 
 /// The canvas's record half, inside the pane a dock gives it.
