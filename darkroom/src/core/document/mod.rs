@@ -142,13 +142,6 @@ impl Document {
         }
     }
 
-    /// Whether the graph is on a canvas — i.e. some pane's visible tab is the
-    /// graph pane. What the scene projects, and what the canvas prepass gates
-    /// on.
-    pub(crate) fn shows_graph(&self) -> bool {
-        self.layout.active_tabs().any(|tab| tab == TabRef::Graph)
-    }
-
     /// Whether the document holds `node_id`, as a graph node or a stub.
     ///
     /// The retention rule for every `NodeId`-keyed cache that outlives the

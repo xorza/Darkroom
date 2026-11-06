@@ -22,7 +22,8 @@ use crate::core::status_log::Severity;
 use crate::gui::frame::app_command::{AppCommand, ViewCommand};
 use crate::gui::frame::framing::Framing;
 use crate::gui::frame::requests::Requests;
-use crate::gui::frame::window_ctx::WindowCtx;
+use crate::gui::frame::window_parts::StatusInputs;
+use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::state::run_state::run_outcome::RunOutcome;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::format::bytes::Bytes;
@@ -40,45 +41,56 @@ pub(crate) fn wid() -> WidgetId {
     WidgetId::from_hash("darkroom.status_bar")
 }
 
-/// Draw the bottom status bar. A link in the run line raises its edits on `out`.
-pub(crate) fn show(ui: &mut Ui, ctx: WindowCtx<'_>, out: &mut Requests) {
-    let app = ctx.app();
-    let theme = app.theme();
-    let ram = MemoryLabel::resolve(app.process_memory(), app.run_state().cache_ram());
-    // A row's height, and its text at the inset of a menu title's on the band above.
-    let inset = theme.surround_inset() + theme.space.md;
-    Panel::hstack()
-        .id(wid())
-        .size((Sizing::FILL, Sizing::fixed(theme.row_height())))
-        .child_align(Align::v(VAlign::Center))
-        .padding(Spacing::xy(inset, 0.0))
-        .gap(theme.space.sm)
-        .chrome(Chrome::fill(theme.colors.surround_bg))
-        .show(ui, |ui| {
-            // A failed action outranks the run's tally: it is what just went wrong.
-            if let Some(message) = app.status_message() {
-                let color = match message.severity {
-                    Severity::Error => theme.status.error,
-                    Severity::Warning => theme.status.warning,
+/// The bottom status bar, and what it reads and writes.
+#[derive(Debug)]
+pub(crate) struct StatusBar<'a> {
+    pub(crate) ctx: GraphCtx<'a>,
+    pub(crate) status: StatusInputs<'a>,
+    /// Where a link in the run line raises its edits.
+    pub(crate) out: &'a mut Requests,
+}
+
+impl StatusBar<'_> {
+    /// Draw the bar.
+    pub(crate) fn show(self, ui: &mut Ui) {
+        let Self { ctx, status, out } = self;
+        let theme = ctx.theme();
+        let ram = MemoryLabel::resolve(status.process_memory, ctx.run_state().cache_ram());
+        // A row's height, and its text at the inset of a menu title's on the band above.
+        let inset = theme.surround_inset() + theme.space.md;
+        Panel::hstack()
+            .id(wid())
+            .size((Sizing::FILL, Sizing::fixed(theme.row_height())))
+            .child_align(Align::v(VAlign::Center))
+            .padding(Spacing::xy(inset, 0.0))
+            .gap(theme.space.sm)
+            .chrome(Chrome::fill(theme.colors.surround_bg))
+            .show(ui, |ui| {
+                // A failed action outranks the run's tally: it is what just went wrong.
+                if let Some(message) = status.message {
+                    let color = match message.severity {
+                        Severity::Error => theme.status.error,
+                        Severity::Warning => theme.status.warning,
+                    };
+                    let style = support::colored_text(ui, color, theme.font.body);
+                    Text::new(message.line).style(&style).show(ui);
+                } else if let Some(outcome) = ctx.run_state().outcome() {
+                    run_line(ui, ctx, outcome, out);
+                }
+                support::hspacer(ui, "status_spacer");
+                let view = &ctx.document().main_view;
+                let counts = CountsClause {
+                    node_count: ctx.document().graph.len(),
+                    selected_count: view.selected.len(),
                 };
-                let style = support::colored_text(ui, color, theme.font.body);
-                Text::new(message.line).style(&style).show(ui);
-            } else if let Some(outcome) = app.run_state().outcome() {
-                run_line(ui, ctx, outcome, out);
-            }
-            support::hspacer(ui, "status_spacer");
-            let view = &ctx.document().main_view;
-            let counts = CountsClause {
-                node_count: ctx.document().graph.len(),
-                selected_count: view.selected.len(),
-            };
-            Readout {
-                counts,
-                zoom: view.viewport.zoom,
-                ram,
-            }
-            .show(ui, theme);
-        });
+                Readout {
+                    counts,
+                    zoom: view.viewport.zoom,
+                    ram,
+                }
+                .show(ui, theme);
+            });
+    }
 }
 
 /// The canvas zoom's width floor in figures: `Percent` writes the canvas's 10 % to 500 % in 3 or
@@ -164,8 +176,8 @@ impl<T: Display> Figure<T> {
 
 /// What the last run came to, in the ink of its worst case, and — when a node needs a look —
 /// a link that selects it and frames it.
-fn run_line(ui: &mut Ui, ctx: WindowCtx<'_>, outcome: RunOutcome, out: &mut Requests) {
-    let theme = ctx.app().theme();
+fn run_line(ui: &mut Ui, ctx: GraphCtx<'_>, outcome: RunOutcome, out: &mut Requests) {
+    let theme = ctx.theme();
     let color = if outcome.failed_count > 0 {
         theme.status.error
     } else if outcome.missing_count > 0 {

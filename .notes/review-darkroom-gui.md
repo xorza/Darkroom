@@ -190,26 +190,12 @@ but that one bundle, a handle, a context and `out`, repeats with no name.
 
 # Part 2: Plan
 
-Each batch leaves the gates green. Batch 3 needs nothing before it. Batch 1, the relayout sink, and
-batch 2, the layers, have landed.
-
-## Batch 3: contexts
-
-Files: `gui/frame/{app_ctx,window_ctx,frame_writes}.rs`, `gui/graph_ctx/mod.rs`, `gui/main_window/*`,
-`gui/app/mod.rs`, `gui/app/session/mod.rs`, `gui/pane/graph_ui/{canvas_ctx,draw_ctx}.rs`.
-
-- [ ] `graph_ctx/mod.rs:48,63,79,92`, `graph_ui/mod.rs:309,508`: `is_visible` goes, with its stale doc on
-  "the hit sweep" and the two asserts a match arm already proves.
-- [ ] `window_ctx.rs`: merge into `GraphCtx`, built from `app`, `open` and `display`. Sites build no second
-  level at `dock_panes.rs` and `main_window/mod.rs:116,142`.
-- [ ] `app_ctx.rs:38,97`: `StatusInputs` goes to `WindowParts`, which replaces `FrameWrites`, and
-  `with_status` goes.
-- [ ] `canvas_ctx.rs:28`, `draw_ctx.rs:28`: hold `graph` and their own fields, with no nested level and
-  no forwarding getter.
+Each batch leaves the gates green. Batch 1, the relayout sink, batch 2, the layers, and batch 3, the
+contexts, have landed.
 
 ## Batch 4: update path
 
-Needs batch 3. Files: `gui/frame/stage.rs` (new), `gui/app/session/mod.rs`,
+Files: `gui/frame/stage.rs` (new), `gui/app/session/mod.rs`,
 `gui/main_window/mod.rs`, `gui/pane/graph_ui/{mod,internals}.rs`, `gui/pane/graph_ui/gesture/*`,
 `gui/app/session/bench.rs`.
 
@@ -245,7 +231,7 @@ Needs batch 4. Files: `gui/pane/graph_ui/{mod,prepass_ctx,canvas_ctx}.rs`, `gui/
 
 ## Batch 6: record path
 
-Needs batches 3 and 5. Files: `gui/frame/stage.rs`, `gui/main_window/*`, `gui/pane/{inspector,preferences}.rs`,
+Needs batch 5. Files: `gui/frame/stage.rs`, `gui/main_window/*`, `gui/pane/{inspector,preferences}.rs`,
 `gui/pane/image_viewer/mod.rs`, `gui/pane/graph_ui/{mod,toolbar}.rs`, `gui/pane/graph_ui/gesture/*`,
 `gui/pane/graph_ui/node_ui/*`, `gui/pane/graph_ui/draw/*`.
 

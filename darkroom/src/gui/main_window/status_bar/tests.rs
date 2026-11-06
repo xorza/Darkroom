@@ -3,6 +3,7 @@ use palantir::Harness;
 
 use super::*;
 use crate::core::document::internals::DocumentFixture;
+use crate::core::status_log::StatusMessage;
 use crate::gui::app::session::internals::SessionHarness;
 
 /// The memory clause leads with the process and sums both cache pools; no footprint leaves no
@@ -207,6 +208,17 @@ fn the_run_lines_link_selects_and_frames_the_cause() {
     });
     h.prime(2);
     let link = cause_link_wid();
+    h.status_message = Some(StatusMessage {
+        severity: Severity::Warning,
+        line: "the save failed",
+    });
+    h.prime(2);
+    assert!(
+        h.ui.rect(link).is_none(),
+        "a failed action outranks the run"
+    );
+    h.status_message = None;
+    h.prime(2);
     h.ui.click(h.ui.rect(link).expect("the widget shows").center());
     let commands = h.frame();
     assert!(

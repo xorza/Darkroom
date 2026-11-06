@@ -13,7 +13,6 @@ use crate::core::document::item_id::ItemId;
 use crate::core::open_document::OpenDocument;
 use crate::core::wake;
 use crate::gui::frame::app_ctx::AppCtx;
-use crate::gui::frame::window_ctx::WindowCtx;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
@@ -22,7 +21,7 @@ use crate::gui::theme::Theme;
 /// against.
 ///
 /// The document is held the way the session holds it — as an [`OpenDocument`],
-/// which is what a [`WindowCtx`] takes: a fixture that kept the bare
+/// which is what a [`GraphCtx`] takes: a fixture that kept the bare
 /// [`Document`](crate::core::document::Document) could not compose one. It
 /// starts saved; a test about the unsaved-changes dot sets
 /// [`OpenDocument::is_dirty`] on it.
@@ -89,6 +88,6 @@ impl GraphCtxFixture {
             theme,
         } = self;
         let app = AppCtx::new(theme, library, run_state);
-        GraphCtx::new(WindowCtx::new(app, open), display)
+        GraphCtx::new(app, open, display)
     }
 }

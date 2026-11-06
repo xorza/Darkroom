@@ -29,9 +29,9 @@ use crate::gui::frame::app_command::{
     AppCommand, EditCommand, FileCommand, MlModelKind, PathPick, PreferencesCommand, RunCommand,
     ViewCommand,
 };
-use crate::gui::frame::app_ctx::{AppCtx, StatusInputs};
-use crate::gui::frame::frame_writes::FrameWrites;
+use crate::gui::frame::app_ctx::AppCtx;
 use crate::gui::frame::requests::Requests;
+use crate::gui::frame::window_parts::{StatusInputs, WindowParts};
 use crate::gui::state::process_memory::ProcessMemory;
 use crate::gui::state::run_state::{RunFeed, RunState};
 use crate::gui::theme::Theme;
@@ -702,17 +702,17 @@ impl palantir::App for App {
         // The frame's read-only world, composed once here: everything below
         // derives its own context from this one rather than taking the refs
         // again.
-        let ctx = AppCtx::new(&self.theme, self.runtime.library.cur(), &self.run_state)
-            .with_status(StatusInputs {
-                message: self.status.cur(),
-                process_memory: self.process_memory.sample(ui.now()),
-            });
+        let ctx = AppCtx::new(&self.theme, self.runtime.library.cur(), &self.run_state);
         self.session.record(
             ui,
             ctx,
-            FrameWrites {
+            WindowParts {
                 preferences: &mut self.preferences,
                 requests: &mut self.requests,
+                status: StatusInputs {
+                    message: self.status.cur(),
+                    process_memory: self.process_memory.sample(ui.now()),
+                },
             },
         );
         // What the session left behind: every command the frame raised, in the

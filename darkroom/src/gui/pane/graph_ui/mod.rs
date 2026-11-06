@@ -41,7 +41,7 @@ use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::canvas_bg::CanvasBg;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph_ui::draw::wire::{WireEmphasis, WirePass, WireSet};
-use crate::gui::pane::graph_ui::draw_ctx::{DrawCtx, PaintFacts};
+use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
 use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
 use crate::gui::pane::graph_ui::frame::cull_region::CullRegion;
 use crate::gui::pane::graph_ui::frame::tie_layout::{Span, TieLayout};
@@ -103,9 +103,8 @@ pub(crate) struct GraphUi {
     /// The prepass runs only while a pane is showing the graph, so a *gap*
     /// here means the canvas was away — which is how it notices its own
     /// reappearance without anything having to run on its behalf while it was
-    /// gone. A stamp rather than a cached `bool` copy of
-    /// [`Document::shows_graph`], so there is no second spelling of visibility
-    /// to keep in step with the first.
+    /// gone. A stamp rather than a cached `bool`, so there is no second spelling of visibility to
+    /// keep in step with the active tabs.
     ///
     /// [`Ui::record_frame_id`] and not [`Ui::render_frame_id`]: the latter counts
     /// painted frames too, and a paint-only frame runs no record pass at all —
@@ -303,10 +302,6 @@ impl GraphUi {
         graph_ctx: GraphCtx<'_>,
         out: &mut Requests,
     ) -> InputOutcome {
-        debug_assert!(
-            graph_ctx.is_visible(),
-            "the prepass is reached from an active Graph tab"
-        );
         // A click that ends a gesture is that gesture's, whatever it lands on.
         let idle = !self.in_flight();
         self.open_pass(update_ctx.record_frame_id(), out);
@@ -497,10 +492,6 @@ impl GraphUi {
     /// Anything the pane asks for — graph edits, and the commands a chip or a
     /// menu pick means — lands on `out` in the order it was raised.
     pub(crate) fn draw(&mut self, ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
-        debug_assert!(
-            graph_ctx.is_visible(),
-            "the record is reached from an active Graph tab"
-        );
         // Pan/zoom was already folded into the document in `prepass`, and the
         // contexts built below read it straight off there, so the transform
         // sees the up-to-date viewport with nothing to re-sync. The gesture
@@ -631,7 +622,7 @@ impl GraphUi {
                         // One bundle for everything the canvas records, built
                         // out here rather than inside the probe scope so both
                         // passes read the same refs.
-                        let draw_ctx = DrawCtx::new(ctx, PaintFacts { selected, cull });
+                        let draw_ctx = DrawCtx::new(ctx, selected, cull);
                         {
                             let mut probe = self.breaker_ui.probe();
                             let mut tie_line = self.tie_ui.probe();

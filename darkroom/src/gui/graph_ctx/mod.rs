@@ -2,7 +2,7 @@
 //! and the last run.
 //!
 //! Nothing here is copied or cached. A [`GraphCtx`] is the frame's
-//! [`WindowCtx`] plus one shared reference; the handles it hands out
+//! [`AppCtx`] plus the open document; the handles it hands out
 //! ([`NodeCtx`], [`InputCtx`](input_ctx::InputCtx),
 //! [`OutputCtx`](output_ctx::OutputCtx)) each resolve one more borrow and
 //! answer every question
@@ -28,69 +28,56 @@ use crate::core::document::Document;
 use crate::core::document::graph_view::{GraphView, StackedNode};
 use crate::core::document::item_id::ItemId;
 use crate::core::document::viewport::Viewport;
-use crate::gui::frame::window_ctx::WindowCtx;
+use crate::core::open_document::OpenDocument;
+use crate::gui::frame::app_ctx::AppCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::port_ref::{PortKind, PortRef};
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
 
-/// The graph pane for this frame. `Copy` (the window context plus one shared
-/// ref), so it threads through the draw chain like `DrawCtx`.
+/// The frame's world and the open document it shows: what every surface at window level and below
+/// reads. `Copy` (shared refs and one small value), so it threads through the draw chain like
+/// `DrawCtx`.
 ///
-/// The canvas level of the context chain: it carries the frame's
-/// [`WindowCtx`] rather than restating the refs inside it, so a widget
-/// reaches the theme, the library and the last run through the same context it
-/// asks about nodes — one path to each, and nothing under the canvas has to
-/// name the app or window level at all.
+/// It takes the [`OpenDocument`] rather than the bare [`Document`] because the window shows both
+/// halves of it: the graph and its pane arrangement, and the unsaved-changes flag, a fact about the
+/// document *and* the file behind it. Read-only, so nothing here can reach the edit history the pair
+/// also holds.
 ///
-/// Composing one always succeeds: the document, the library and the run are
-/// there whether or not a pane happens to be showing the graph. Whether one
-/// is rides along as [`Self::is_visible`], because only a single pass cares —
-/// the hit sweep, which runs before the tab set settles. Every other reader is
-/// reached only from a pane that is drawing, and the two entry points that
-/// bridge the two worlds say so with a `debug_assert!` rather than making
-/// every call site unwrap.
+/// **Composed per phase, never per frame.** The document reference cannot outlive the phase that
+/// took it: the session drains the frame's requests into the document between phases, and that
+/// mutation needs the document exclusively. So one of these is built at each call into
+/// [`MainWindow`](crate::gui::main_window::MainWindow), over the document as it stands at that
+/// instant.
+///
+/// A widget reaches the theme, the library and the last run through the same context it asks about
+/// nodes, one path to each. Refused: a window level above this one, whose only addition below it
+/// was the camera.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct GraphCtx<'a> {
-    /// The window's context, one level up: the document this pane's graph
-    /// lives in, plus the frame's read-only world — the theme every widget
-    /// paints from, the library each node's declaration resolves through, and
-    /// the last run's per-node verdicts — status, retained RAM, unfed inputs,
-    /// and the compiled program's word on what is a sink.
-    window: WindowCtx<'a>,
-    /// Whether a pane is showing this graph, snapshot when the context was
-    /// composed. See [`Self::is_visible`].
-    is_visible: bool,
+    /// The frame's read-only world: the theme every widget paints from, the library each node's
+    /// declaration resolves through, and the last run's per-node verdicts.
+    app: AppCtx<'a>,
+    /// The document this frame shows, and the file behind it.
+    open: &'a OpenDocument,
     /// The document's camera as this frame's display draws it. See [`Self::camera`].
     camera: Viewport,
 }
 
 impl<'a> GraphCtx<'a> {
-    /// Derive the graph pane's context from the `window`'s — the frame's
-    /// read-only world and the document it is showing.
-    ///
-    /// Visibility is asked of the *document*, not of its contents: a graph
-    /// with no nodes on an active tab is a legitimate pane, and one that
-    /// answered "no nodes, so no pane" would leave a fresh document with no
-    /// canvas to place its first node on.
-    pub(crate) fn new(window: WindowCtx<'a>, display: Display) -> Self {
-        let document = window.document();
+    /// The context of `open` under the frame's `app` on `display`.
+    pub(crate) fn new(app: AppCtx<'a>, open: &'a OpenDocument, display: Display) -> Self {
         Self {
-            is_visible: document.shows_graph(),
-            camera: document.main_view.viewport.landed(display),
-            window,
+            camera: open.document().main_view.viewport.landed(display),
+            app,
+            open,
         }
     }
 
-    /// Whether a pane is showing this graph.
-    ///
-    /// Resolved once when the context was composed rather than asked of the
-    /// layout per call, so it obeys the module's one rule: every accessor is a
-    /// field read. The hit sweep is the one reader — it runs at the top of the
-    /// frame, before the navigation phase settles which tabs are active, so it
-    /// cannot assume a canvas.
-    pub(crate) const fn is_visible(self) -> bool {
-        self.is_visible
+    /// The open document whole: its content *and* the file it came from. For the tab strip, which
+    /// also shows [`OpenDocument::is_dirty`].
+    pub(crate) const fn open(self) -> &'a OpenDocument {
+        self.open
     }
 
     /// The whole document behind this context.
@@ -100,7 +87,7 @@ impl<'a> GraphCtx<'a> {
     /// describe. Prefer [`Self::body`] / [`Self::view`], which say which
     /// half is being read.
     pub(crate) const fn document(self) -> &'a Document {
-        self.window.document()
+        self.open.document()
     }
 
     /// The authoring graph this pane shows.
@@ -122,21 +109,21 @@ impl<'a> GraphCtx<'a> {
 
     /// The palette and metrics every widget in this pane paints from.
     pub(crate) const fn theme(self) -> &'a Theme {
-        self.window.app().theme()
+        self.app.theme()
     }
 
     /// The library every node's declaration is resolved through — for the
     /// readers that need type metadata a port doesn't carry (an enum's
     /// registered variants, a type's display name).
     pub(crate) const fn library(self) -> &'a Library {
-        self.window.app().library()
+        self.app.library()
     }
 
     /// The last run's results, for the readers that want more of a node than
     /// its [`NodeCtx`] surfaces — its logs, its failure message, the value
     /// a preview published.
     pub(crate) const fn run_state(self) -> &'a RunState {
-        self.window.app().run_state()
+        self.app.run_state()
     }
 
     /// The declared type of `port`, read straight off the graph and the

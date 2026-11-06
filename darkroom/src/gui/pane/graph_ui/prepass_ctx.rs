@@ -24,6 +24,13 @@ pub(crate) struct CanvasInput {
     pub(crate) dropped_wire: Option<PortRef>,
 }
 
+impl CanvasInput {
+    /// Whether this frame's Esc cancels whatever gesture is in flight.
+    pub(crate) const fn cancelled(self) -> bool {
+        !matches!(self.escape, Escape::Unpressed)
+    }
+}
+
 /// Which bare-canvas gesture a fresh press or click latches this frame. Resolved once by
 /// [`CanvasGesture::classify`], so each controller under
 /// [`gesture`](crate::gui::pane::graph_ui::gesture) consumes only its own variant and none keeps
@@ -149,7 +156,7 @@ impl<'a> PrepassCtx<'a> {
 
     /// Whether this frame's Esc cancels whatever gesture is in flight.
     pub(crate) const fn cancelled(self) -> bool {
-        !matches!(self.input.escape, Escape::Unpressed)
+        self.input.cancelled()
     }
 }
 

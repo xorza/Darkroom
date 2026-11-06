@@ -21,7 +21,6 @@ use crate::core::document::inspect_target::InspectTarget;
 use crate::core::document::tab_ref::TabRef;
 use crate::core::io::preferences::Preferences;
 use crate::gui::frame::requests::Requests;
-use crate::gui::frame::window_ctx::WindowCtx;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::GraphUi;
 use crate::gui::pane::image_viewer::{self, ImageViewer, ViewerPane, ViewerWrites};
@@ -36,7 +35,7 @@ use crate::gui::widgets::format;
 /// borrows one capture at a time.
 #[derive(Debug)]
 pub(crate) struct DockPanes<'a> {
-    pub(crate) ctx: WindowCtx<'a>,
+    pub(crate) ctx: GraphCtx<'a>,
     pub(crate) graph_ui: &'a mut GraphUi,
     pub(crate) image_viewers: &'a mut HashMap<NodeId, ImageViewer>,
     pub(crate) preferences: &'a mut Preferences,
@@ -88,27 +87,23 @@ impl DockTabs for DockPanes<'_> {
 
     fn body(&mut self, ui: &mut Ui, tab: TabRef, size: Option<Size>) {
         let ctx = self.ctx;
-        let app = ctx.app();
         match tab {
             TabRef::Graph => {
-                // The context carries everything the canvas reads — theme
-                // and run included, through the `ctx` it is composed from.
-                self.graph_ui
-                    .draw(ui, GraphCtx::new(ctx, ui.display()), self.out);
+                self.graph_ui.draw(ui, ctx, self.out);
             }
             TabRef::Preferences => {
                 PreferencesForm {
-                    theme: app.theme(),
+                    theme: ctx.theme(),
                     out: self.out,
                 }
                 .show(ui, self.preferences);
             }
             TabRef::Inspector(target) => {
-                inspector::show(ui, GraphCtx::new(ctx, ui.display()), target, self.out);
+                inspector::show(ui, ctx, target, self.out);
             }
             TabRef::ImageViewer(node_id) => {
                 let title = image_viewer::node_label(ctx.document(), node_id);
-                let previews = app.run_state().previews();
+                let previews = ctx.run_state().previews();
                 let viewer = self
                     .image_viewers
                     .entry(node_id)
@@ -116,10 +111,10 @@ impl DockTabs for DockPanes<'_> {
                 // Viewer-toolbar edits ride the same in-place preferences path
                 // as the Preferences tab, and report on the same queue.
                 let pane = ViewerPane {
-                    theme: app.theme(),
+                    theme: ctx.theme(),
                     title,
                     previews,
-                    status: app.run_state().exec_status(node_id),
+                    status: ctx.run_state().exec_status(node_id),
                     size: size.map(Vec2::from),
                 };
                 viewer.show(

@@ -1,13 +1,12 @@
-//! What every UI surface speaks: the frame's read-only context chain
-//! ([`app_ctx`], [`window_ctx`]), what a frame may write ([`frame_writes`],
+//! What every UI surface speaks: the root of the frame's read-only context chain
+//! ([`app_ctx`]), what a record takes past it ([`window_parts`],
 //! [`requests`]), and the commands a surface raises for the shell
 //! ([`app_command`], [`framing`]). Data only — the levels that act on it import it, and it
 //! imports none of them.
 
 pub(crate) mod app_command;
 pub(crate) mod app_ctx;
-pub(crate) mod frame_writes;
 pub(crate) mod framing;
 pub(crate) mod requests;
 pub(crate) mod shortcuts;
-pub(crate) mod window_ctx;
+pub(crate) mod window_parts;

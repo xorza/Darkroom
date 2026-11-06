@@ -22,15 +22,15 @@ use crate::gui::frame::app_command::FileCommand;
 use crate::gui::frame::app_command::RunCommand;
 use crate::gui::frame::framing::Framing;
 use crate::gui::frame::requests::Requests;
-use crate::gui::frame::window_ctx::WindowCtx;
+use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::main_window::MainWindow;
 use palantir::{InputOutcome, Shortcut, Ui, UpdateCtx};
 use scenarium::{Graph, Library};
 use std::mem;
 
 use crate::gui::frame::app_ctx::AppCtx;
-use crate::gui::frame::frame_writes::FrameWrites;
 use crate::gui::frame::shortcuts;
+use crate::gui::frame::window_parts::WindowParts;
 
 #[derive(Debug)]
 pub(crate) struct Session {
@@ -66,7 +66,7 @@ impl Session {
     /// in `requests` for the shell.
     ///
     /// Each phase ends in a drain, as a phase reads the document and the next one must see what the
-    /// previous asked for. So each takes a `WindowCtx` composed right here, over the document as
+    /// previous asked for. So each takes a `GraphCtx` composed right here, over the document as
     /// the drain before it left it.
     ///
     /// 1. NAVIGATION: settle which tab is active: the undo/redo chords, and tab and chip clicks
@@ -87,13 +87,19 @@ impl Session {
     ) -> InputOutcome {
         debug_assert!(requests.is_empty(), "the last frame left requests behind");
         self.apply_undo_redo(update_ctx, requests);
-        self.main_window
-            .scan_navigation(update_ctx, WindowCtx::new(ctx, &self.open), requests);
+        let display = update_ctx.display();
+        self.main_window.scan_navigation(
+            update_ctx,
+            GraphCtx::new(ctx, &self.open, display),
+            requests,
+        );
         self.drain(ctx.library(), requests);
 
-        let outcome =
-            self.main_window
-                .prepass(update_ctx, WindowCtx::new(ctx, &self.open), requests);
+        let outcome = self.main_window.prepass(
+            update_ctx,
+            GraphCtx::new(ctx, &self.open, display),
+            requests,
+        );
         self.drain(ctx.library(), requests);
 
         // The file/run/quit chords only queue an `AppCommand`, so they need no drain of their own.
@@ -130,7 +136,7 @@ impl Session {
     }
 
     /// One record pass against `ctx`: authors the widget tree, draining what it raises against the
-    /// document, and leaves the app tier queued in the `writes` requests for the shell.
+    /// document, and leaves the app tier queued in the requests for the shell.
     ///
     /// A pass that no input stage ran just before settles first: the one past the first frame's
     /// warmup, and a second pass, each of which reads the rects of the pass before it.
@@ -139,23 +145,26 @@ impl Session {
     /// driven by something other than an `UndoStep`, as the header's elapsed-time label growing as a
     /// run reports, are not covered: they leave `CanvasGeometry`'s offsets stale for one frame rather
     /// than buying a pass.
-    pub(crate) fn record(&mut self, ui: &mut Ui, ctx: AppCtx<'_>, writes: FrameWrites<'_>) {
-        let FrameWrites {
+    pub(crate) fn record(&mut self, ui: &mut Ui, ctx: AppCtx<'_>, parts: WindowParts<'_>) {
+        let WindowParts {
             preferences,
             requests,
-        } = writes;
+            status,
+        } = parts;
         debug_assert!(requests.is_empty(), "the last pass left requests behind");
+        let display = ui.display();
         if !mem::take(&mut self.input_ran) {
             self.main_window
-                .settle(ui, WindowCtx::new(ctx, &self.open), requests);
+                .settle(ui, GraphCtx::new(ctx, &self.open, display), requests);
             self.drain(ctx.library(), requests);
         }
         self.main_window.frame(
             ui,
-            WindowCtx::new(ctx, &self.open),
-            FrameWrites {
+            GraphCtx::new(ctx, &self.open, display),
+            WindowParts {
                 preferences,
                 requests,
+                status,
             },
         );
         // Graph edits the record surfaced (node select, cache toggle, const edit), plus the tab

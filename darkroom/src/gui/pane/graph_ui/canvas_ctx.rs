@@ -3,7 +3,7 @@
 
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
-use crate::gui::pane::graph_ui::prepass_ctx::{CanvasGesture, Escape, PrepassCtx};
+use crate::gui::pane::graph_ui::prepass_ctx::{CanvasGesture, CanvasInput, Escape, PrepassCtx};
 use crate::gui::port_ref::PortRef;
 use crate::gui::theme::Theme;
 
@@ -12,9 +12,8 @@ use crate::gui::theme::Theme;
 /// once and every controller then reads — the port and node geometry, the
 /// bare-canvas gesture that latched, and whether Esc cancelled it.
 ///
-/// The canvas level of the context chain, derived from the [`PrepassCtx`] and
-/// answering everything that one does, so the compiler holds the three facts
-/// to one frame.
+/// The canvas level of the context chain, built from the [`PrepassCtx`], so the compiler holds the
+/// three facts to one frame.
 ///
 /// **It exists only once the geometry is settled.** The table is borrowed
 /// shared for the context's whole life, so the two prepass steps that run
@@ -25,17 +24,22 @@ use crate::gui::theme::Theme;
 /// geometry someone is still writing.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct CanvasCtx<'a> {
-    prepass: PrepassCtx<'a>,
+    graph_ctx: GraphCtx<'a>,
+    input: CanvasInput,
     geometry: &'a CanvasGeometry,
 }
 
 impl<'a> CanvasCtx<'a> {
     pub(super) const fn new(prepass: PrepassCtx<'a>, geometry: &'a CanvasGeometry) -> Self {
-        Self { prepass, geometry }
+        Self {
+            graph_ctx: prepass.graph_ctx(),
+            input: prepass.input(),
+            geometry,
+        }
     }
 
     pub(crate) const fn graph_ctx(self) -> GraphCtx<'a> {
-        self.prepass.graph_ctx()
+        self.graph_ctx
     }
 
     pub(crate) const fn theme(self) -> &'a Theme {
@@ -51,22 +55,22 @@ impl<'a> CanvasCtx<'a> {
     /// the classification is this module's arbitration, and no reader outside
     /// it has a use for the answer.
     pub(super) const fn gesture(self) -> Option<CanvasGesture> {
-        self.prepass.input().gesture
+        self.input.gesture
     }
 
     /// The source of the wire a release dropped on empty canvas this frame.
     pub(super) const fn dropped_wire(self) -> Option<PortRef> {
-        self.prepass.input().dropped_wire
+        self.input.dropped_wire
     }
 
     /// Whether this frame's Esc cancels whatever gesture is in flight.
     pub(super) const fn cancelled(self) -> bool {
-        self.prepass.cancelled()
+        self.input.cancelled()
     }
 
     /// Whether this frame's Esc clears the selection: pressed with nothing in
     /// flight.
     pub(super) const fn deselects(self) -> bool {
-        matches!(self.prepass.input().escape, Escape::Deselects)
+        matches!(self.input.escape, Escape::Deselects)
     }
 }

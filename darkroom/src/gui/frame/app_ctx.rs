@@ -2,23 +2,19 @@
 
 use scenarium::Library;
 
-use crate::core::status_log::StatusMessage;
-
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
 
 /// The frame's read-only world, threaded down the UI tree: the theme, the
-/// func library, the last run's projections, and the status-bar inputs.
+/// func library and the last run's projections.
 /// `Copy` (shared refs only), so a subtree takes one parameter rather than a
 /// growing fan-out of `&`s.
 ///
 /// **The root of the context chain.** Every level below derives its own
 /// context from the one above rather than restating its refs:
-/// [`WindowCtx`](crate::gui::frame::window_ctx::WindowCtx) pairs this with the
-/// document being edited, [`GraphCtx`](crate::gui::graph_ctx::GraphCtx) adds
-/// whether a pane shows the graph, and everything under the canvas reads the theme, the library and the run back off *that* — which is why
-/// nothing below [`MainWindow`](crate::gui::main_window::MainWindow) names this
-/// type.
+/// [`GraphCtx`](crate::gui::graph_ctx::GraphCtx) pairs this with the
+/// document being edited, and everything under it reads the theme, the library and the run back
+/// off *that*.
 ///
 /// **No document here**, deliberately: `App` composes one of these once per
 /// record pass and then hands the session a `&mut` for the frame, so a
@@ -35,12 +31,9 @@ pub(crate) struct AppCtx<'a> {
     /// Last run's centralized runtime state: per-node status/logs and the
     /// latest published values read by preview cards and viewers.
     run_state: &'a RunState,
-    status: StatusInputs<'a>,
 }
 
 impl<'a> AppCtx<'a> {
-    /// The frame's world with no status-bar inputs: no error, no memory
-    /// figure — see [`Self::with_status`].
     pub(crate) const fn new(
         theme: &'a Theme,
         library: &'a Library,
@@ -50,16 +43,7 @@ impl<'a> AppCtx<'a> {
             theme,
             library,
             run_state,
-            status: StatusInputs {
-                message: None,
-                process_memory: 0,
-            },
         }
-    }
-
-    /// This world with the status bar reading `status`.
-    pub(crate) const fn with_status(self, status: StatusInputs<'a>) -> Self {
-        Self { status, ..self }
     }
 
     pub(crate) const fn theme(self) -> &'a Theme {
@@ -75,26 +59,4 @@ impl<'a> AppCtx<'a> {
     pub(crate) const fn run_state(self) -> &'a RunState {
         self.run_state
     }
-
-    /// The last failure or warning (the engine's
-    /// [`StatusLog::cur`](crate::core::status_log::StatusLog::cur)),
-    /// shown in the status bar until a success of its family clears it.
-    pub(crate) const fn status_message(self) -> Option<StatusMessage<'a>> {
-        self.status.message
-    }
-
-    /// This process's resident bytes (see
-    /// [`ProcessMemory`](crate::gui::state::process_memory::ProcessMemory)), rendered as the
-    /// status bar's `MEM` clause.
-    pub(crate) const fn process_memory(self) -> u64 {
-        self.status.process_memory
-    }
-}
-
-/// The status-bar inputs `App` owns beside the run projection, whose cache figure the bar reads
-/// too: bundled because they travel together and only the bar reads them.
-#[derive(Clone, Copy, Default, Debug)]
-pub(crate) struct StatusInputs<'a> {
-    pub(crate) message: Option<StatusMessage<'a>>,
-    pub(crate) process_memory: u64,
 }

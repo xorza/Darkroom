@@ -14,11 +14,11 @@ use scenarium::NodeId;
 use crate::core::document::graph_revision::GraphRevision;
 use crate::core::document::tab_ref::TabRef;
 use crate::core::open_document::OpenDocument;
-use crate::gui::frame::frame_writes::FrameWrites;
 use crate::gui::frame::requests::Requests;
-use crate::gui::frame::window_ctx::WindowCtx;
+use crate::gui::frame::window_parts::WindowParts;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::main_window::dock_panes::DockPanes;
+use crate::gui::main_window::status_bar::StatusBar;
 use crate::gui::pane::graph_ui::GraphUi;
 use crate::gui::pane::image_viewer::ImageViewer;
 
@@ -32,13 +32,8 @@ const MIN_PANE: f32 = 220.0;
 /// [`DockView`]'s, and what each tab kind looks like is
 /// [`DockPanes`]'s. Adding a new pane *kind* is a new arm there.
 ///
-/// **Where the graph context is composed.** Each entry point below takes a
-/// [`WindowCtx`] — the frame's world *and* the document it is showing, settled
-/// by the time the caller reaches it, so the composition point and the call
-/// are the same instant — and derives its own [`GraphCtx`] from it. Keeping
-/// that here rather than in `Session` means the editor shell never has to name
-/// the canvas subsystem's view type, and everything below this file takes that
-/// context alone rather than it *and* the levels it came from.
+/// Each entry point takes a [`GraphCtx`], the frame's world *and* the document it is showing,
+/// settled by the time the caller reaches it, and everything below this file takes that context.
 #[derive(Default, Debug)]
 pub(crate) struct MainWindow {
     pub(crate) graph_ui: GraphUi,
@@ -77,7 +72,7 @@ impl MainWindow {
     pub(crate) fn scan_navigation(
         &mut self,
         update_ctx: &mut UpdateCtx<'_>,
-        ctx: WindowCtx<'_>,
+        ctx: GraphCtx<'_>,
         out: &mut Requests,
     ) {
         let ops = &mut self.dock_ops;
@@ -99,18 +94,16 @@ impl MainWindow {
     pub(crate) fn prepass(
         &mut self,
         update_ctx: &mut UpdateCtx<'_>,
-        ctx: WindowCtx<'_>,
+        ctx: GraphCtx<'_>,
         out: &mut Requests,
     ) -> InputOutcome {
         let Self { graph_ui, .. } = self;
         let mut outcome = InputOutcome::Record;
         for tab in ctx.document().layout.active_tabs() {
             match tab {
-                // Reached from `active_tabs`, so a pane is showing the graph
-                // by construction — which is what `GraphUi::prepass` asserts.
+                // Reached from `active_tabs`, so a pane is showing the graph by construction.
                 TabRef::Graph => {
-                    outcome =
-                        graph_ui.prepass(update_ctx, GraphCtx::new(ctx, update_ctx.display()), out);
+                    outcome = graph_ui.prepass(update_ctx, ctx, out);
                 }
                 // Neither derives a document mutation from input: preferences
                 // edits go through their own widgets, and a viewer only
@@ -123,29 +116,26 @@ impl MainWindow {
 
     /// Ready the panes on screen for a record pass that no input stage ran just before; see
     /// [`GraphUi::settle`].
-    pub(crate) fn settle(&mut self, ui: &mut Ui, ctx: WindowCtx<'_>, out: &mut Requests) {
+    pub(crate) fn settle(&mut self, ui: &mut Ui, ctx: GraphCtx<'_>, out: &mut Requests) {
         let Self { graph_ui, .. } = self;
         for tab in ctx.document().layout.active_tabs() {
             match tab {
-                TabRef::Graph => graph_ui.settle(ui, GraphCtx::new(ctx, ui.display()), out),
+                TabRef::Graph => graph_ui.settle(ui, ctx, out),
                 // None keeps anything a second pass reads from the rects of the first.
                 TabRef::Preferences | TabRef::ImageViewer(_) | TabRef::Inspector(_) => {}
             }
         }
     }
 
-    pub(crate) fn frame(&mut self, ui: &mut Ui, ctx: WindowCtx<'_>, writes: FrameWrites<'_>) {
-        let FrameWrites {
+    pub(crate) fn frame(&mut self, ui: &mut Ui, ctx: GraphCtx<'_>, parts: WindowParts<'_>) {
+        let WindowParts {
             preferences,
             requests: out,
-        } = writes;
-        // The frame's world without the document, for the surfaces below that
-        // read one and not the other: the surround bands take the app context,
-        // the panes take the whole thing.
-        let app = ctx.app();
+            status,
+        } = parts;
         // The menu bar rides its own surround band; the dock fills the
         // space between it and the status bar.
-        let fill = app.theme().colors.surround_bg;
+        let fill = ctx.theme().colors.surround_bg;
         let Self {
             graph_ui,
             image_viewers,
@@ -179,7 +169,7 @@ impl MainWindow {
                 out.push_view(op);
             }
             // Bottom surround band: the run line and the memory readout, below the panes.
-            status_bar::show(ui, ctx, out);
+            StatusBar { ctx, status, out }.show(ui);
         });
     }
 

@@ -23,12 +23,13 @@ use crate::core::document::internals::DocumentFixture;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::io::preferences::Preferences;
 use crate::core::open_document::OpenDocument;
+use crate::core::status_log::StatusMessage;
 use crate::core::wake;
 use crate::gui::app::session::Session;
 use crate::gui::frame::app_command::AppCommand;
-use crate::gui::frame::app_ctx::{AppCtx, StatusInputs};
-use crate::gui::frame::frame_writes::FrameWrites;
+use crate::gui::frame::app_ctx::AppCtx;
 use crate::gui::frame::requests::Requests;
+use crate::gui::frame::window_parts::{StatusInputs, WindowParts};
 use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
@@ -49,6 +50,7 @@ struct SessionFrame<'a> {
     run_state: &'a RunState,
     preferences: &'a mut Preferences,
     process_memory: u64,
+    status_message: Option<StatusMessage<'a>>,
     requests: &'a mut Requests,
     commands: Vec<AppCommand>,
 }
@@ -63,16 +65,17 @@ impl App for SessionFrame<'_> {
     }
 
     fn record(&mut self, _: WindowToken, ui: &mut Ui) {
-        let ctx = AppCtx::new(self.theme, self.library, self.run_state).with_status(StatusInputs {
-            message: None,
-            process_memory: self.process_memory,
-        });
+        let ctx = AppCtx::new(self.theme, self.library, self.run_state);
         self.session.record(
             ui,
             ctx,
-            FrameWrites {
+            WindowParts {
                 preferences: self.preferences,
                 requests: self.requests,
+                status: StatusInputs {
+                    message: self.status_message,
+                    process_memory: self.process_memory,
+                },
             },
         );
         self.commands
@@ -97,6 +100,8 @@ pub(crate) struct SessionHarness {
     /// no-reading path, so a test asserting on geometry isn't reading a
     /// figure that moves between runs; set it to pin the `MEM` clause.
     pub(crate) process_memory: u64,
+    /// The status bar's line, `App`'s status log in production.
+    pub(crate) status_message: Option<StatusMessage<'static>>,
     /// The frame's request queue — `App`'s in production. `pub(crate)` so a
     /// test can seed it the way a widget does.
     pub(crate) requests: Requests,
@@ -129,6 +134,7 @@ impl SessionHarness {
             run_state: RunState::new(wake::internals::noop()),
             preferences: Preferences::default(),
             process_memory: 0,
+            status_message: None,
             requests: Requests::default(),
         }
     }
@@ -162,6 +168,7 @@ impl SessionHarness {
             run_state,
             preferences,
             process_memory,
+            status_message,
             requests,
         } = self;
         // `App::update`'s sweeps, once a frame before its first pass: the preview store against
@@ -180,6 +187,7 @@ impl SessionHarness {
             run_state,
             preferences,
             process_memory: *process_memory,
+            status_message: *status_message,
             requests,
             commands: Vec::new(),
         };

@@ -8,28 +8,17 @@ use crate::gui::graph_ctx::internals::GraphCtxFixture;
 use crate::gui::graph_ctx::output_ctx::OutputCtx;
 use crate::gui::port_ref::PortKind;
 
-/// Composing a context does not ask whether anyone is looking — the document,
-/// the library and the run resolve either way — so visibility rides along as a
-/// field for the one pass that runs before the tab set settles.
-///
-/// It tracks the *active tab*, never the graph's contents, and the two come
-/// apart in both directions: an empty graph on a Graph tab is a real pane (a
-/// fresh document needs a canvas to place its first node on), and a populated
-/// graph still reads back with every pane showing something else.
+/// Composing a context does not ask whether anyone is looking: the document, the library and the
+/// run resolve either way. An empty graph has no nodes on a Graph tab, as a fresh document's canvas
+/// has, and a populated one reads back with every pane showing something else.
 #[test]
-fn visibility_tracks_the_active_tab_not_the_graph_contents() {
+fn a_context_reads_the_graph_whichever_tab_shows() {
     let empty_but_shown = GraphCtxFixture::over(DocumentFixture::default());
-    assert!(empty_but_shown.graph_ctx().is_visible());
     assert_eq!(empty_but_shown.graph_ctx().nodes().count(), 0);
 
     let populated_but_hidden =
         GraphCtxFixture::over(DocumentFixture::probes(2).with_tab(TabRef::Preferences));
-    assert!(!populated_but_hidden.graph_ctx().is_visible());
-    assert_eq!(
-        populated_but_hidden.graph_ctx().nodes().count(),
-        2,
-        "the graph still reads back — only the pane showing it is gone"
-    );
+    assert_eq!(populated_but_hidden.graph_ctx().nodes().count(), 2);
 }
 
 #[test]

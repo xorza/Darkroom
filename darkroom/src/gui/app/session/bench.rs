@@ -61,8 +61,8 @@ use crate::core::wake;
 use crate::gui::app::session::Session;
 use crate::gui::frame::app_command::{AppCommand, ViewCommand};
 use crate::gui::frame::app_ctx::AppCtx;
-use crate::gui::frame::frame_writes::FrameWrites;
 use crate::gui::frame::requests::Requests;
+use crate::gui::frame::window_parts::{StatusInputs, WindowParts};
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::state::preview_store::preview_converter::{self, Card};
 use crate::gui::state::run_state::RunState;
@@ -262,9 +262,10 @@ impl App for Editor {
         self.session.record(
             ui,
             ctx,
-            FrameWrites {
+            WindowParts {
                 preferences: &mut self.preferences,
                 requests: &mut self.requests,
+                status: StatusInputs::default(),
             },
         );
         self.run_commands();
