@@ -133,8 +133,7 @@ pub(crate) struct Theme {
     /// theme clone per frame.
     pub(crate) field_error: TextEditTheme,
 
-    /// A floating toolbar's pill: the surround's color over the popups' frosted glass, so a
-    /// readout on it holds its contrast over the image under it.
+    /// A floating toolbar's pill: the surround's color at [`PILL_ALPHA`].
     pub(crate) pill: Chrome,
 
     /// A dialog's primary action, the one Return picks: palantir's button filled with the accent.
@@ -340,9 +339,9 @@ impl Theme {
         let metrics = metrics(&elevation);
         let palantir = palantir_bridge::theme(&pal, &metrics, &icon);
         let primary_button = ButtonTheme::accent(&pal, &metrics);
-        let pill = GLASS.dress(
-            &Chrome::rounded(colors.surround_bg, Corners::all(radius.float)),
-            ink.muted,
+        let pill = Chrome::rounded(
+            colors.surround_bg.with_alpha(PILL_ALPHA),
+            Corners::all(radius.float),
         );
         let field_error = error_bordered(&palantir.text_edit, status.error);
         Self {
@@ -434,9 +433,14 @@ const fn metrics(elevation: &ElevationScale) -> Metrics {
     }
 }
 
-/// The frosted glass every surface that floats over content wears, the popups and the toolbar
-/// pills: its own solid fill as a tint at 0.72 alpha over a backdrop blurred by σ 20 logical px,
-/// wide enough that a node's title under it reads as color, not as text, and bound so the
+/// A toolbar pill's alpha: over a white image, the muted ink of a readout on it holds 5.05:1, and
+/// 0.9724 is the least that holds 4.5:1. Refused: a frosted pill, whose five blurs took 0.72 ms of
+/// a 1.76 ms pan frame on an Apple laptop, as the whole window repaints; a pill at the popups'
+/// 0.72 with no blur, 1.24:1.
+const PILL_ALPHA: f32 = 0.98;
+
+/// The frosted glass the popups wear: its own solid fill as a tint at 0.72 alpha over a backdrop
+/// blurred by σ 20 logical px, wide enough that a node's title under it reads as color, not as text, and bound so the
 /// dimmest ink the surface paints keeps its contrast at 4.5:1, as Fluent puts acrylic under
 /// flyouts and in-app surfaces
 /// ([in-app acrylic](https://learn.microsoft.com/windows/apps/develop/ui/in-app-acrylic)).

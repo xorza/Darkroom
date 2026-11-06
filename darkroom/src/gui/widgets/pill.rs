@@ -1,4 +1,4 @@
-//! Shared layout for floating view toolbars: the frosted group pill the
+//! Shared layout for floating view toolbars: the group pill the
 //! [`Chip`](crate::gui::widgets::chip::Chip) buttons ride on. Used by the
 //! graph canvas toolbar and the image viewer's control panel; each caller
 //! keeps its own glyphs and toggle color policy.
@@ -7,9 +7,9 @@ use palantir::{Configure, Panel, Sense, Separator, Sizing, Spacing, Ui};
 
 use crate::gui::theme::Theme;
 
-/// One frosted group pill: `panel` (a caller-configured `Panel::hstack`
+/// One group pill: `panel` (a caller-configured `Panel::hstack`
 /// / `vstack` carrying its id and any alignment) dressed in the shared
-/// pill layout — hugging, chip gap, pill padding, frosted backdrop — for the
+/// pill layout — hugging, chip gap, pill padding, fill — for the
 /// caller to show. The pill senses pointer gestures itself, so a drag or
 /// scroll starting between chips stays on the pill instead of falling
 /// through to the canvas or image beneath.

@@ -2,8 +2,8 @@
 //! run/cancel toggle and an event-loop start/stop toggle side by side on one
 //! pill, with three view-framing buttons (reset view, show all, show
 //! selected) stacked beneath on a second pill.
-//! The frosted pills keep the toolbar legible over both the canvas and any
-//! node under it; the buttons are opaque chips raised off the pill. All carry
+//! The buttons are opaque chips raised off the pill, so the toolbar stays
+//! legible over both the canvas and any node under it. All carry
 //! hover tooltips; the toggles paint "toggled" while their action is in flight
 //! and map to an [`AppCommand`], while the framing buttons emit an
 //! `GraphIntent::SetViewport` directly.

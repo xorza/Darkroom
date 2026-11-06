@@ -5,7 +5,7 @@
 //! around it, at the camera it was saved with. Every preview node shows a 24 MP float image,
 //! planar as a stacked frame lumos publishes. Its inputs are absent, as no case runs the graph.
 //! The viewer shrinks that image with one tap, not the editor's area average, which would hide the
-//! rest of a `pan` or `zoom` frame: 0.6 ms of its 2.4 ms on an Apple laptop.
+//! rest of a `pan` or `zoom` frame: 0.6 ms on an Apple laptop.
 //!
 //! - **`cpu`**: record through encode and compose on palantir's deviceless frontend, as the
 //!   palantir frame's `cpu` backend does.

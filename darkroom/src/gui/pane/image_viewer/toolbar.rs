@@ -1,4 +1,4 @@
-//! The viewer's overlay: the frosted readout pill, the backdrop
+//! The viewer's overlay: the readout pill, the backdrop
 //! roster the control panel loops over, and the one toggle with a state of its
 //! own.
 //!
@@ -72,7 +72,7 @@ pub(super) fn controls_wid(node_id: NodeId, key: &'static str) -> WidgetId {
     WidgetId::from_hash(("darkroom.image_viewer.controls", node_id, key))
 }
 
-/// A frosted readout pill — the text sibling of the toolbar pills, at their height —
+/// A readout pill — the text sibling of the toolbar pills, at their height —
 /// dressing `panel` (caller-configured id + placement) in the shared
 /// pill chrome around one line of `text` in `ink`, cut with an ellipsis past `max_width`. Used
 /// by the header readout and the empty-pane hint.

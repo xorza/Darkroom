@@ -36,7 +36,8 @@ desktop for an agent or a test.
 - **One formatter per kind of value** — `ShownValue`, `Percent`, `format::node_name`, the byte
   sizes — shared by the canvas and the inspector.
 - **A tint over a known ground is `color::wash`**; `with_alpha` only over content the code does
-  not know. A surface that floats over content wears `theme::frosted`.
+  not know. A popup that floats over content wears `theme::GLASS`; a toolbar pill has no blur,
+  and an alpha that holds a readout's contrast.
 - **A widget id reads `darkroom.<area>.<name>`.**
 - **A palette change goes through ayu-graphite**, so every target keeps one source.
 

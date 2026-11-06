@@ -326,7 +326,7 @@ impl ImageViewer {
                 }
                 // Complementary to the image above, so this is the same
                 // either/or the enum states — never a second thing drawn over
-                // the picture. On the frosted readout pill, so the line stays
+                // the picture. On the readout pill, so the line stays
                 // legible over the checker/white backdrops too.
                 if let Some(hint) = source.hint(status) {
                     // A failure reads in the error ink; every other line invites, muted.
@@ -420,7 +420,7 @@ impl ImageViewer {
 
     /// The floating control panel in the pane's top-right corner — the
     /// viewer twin of the graph toolbar: function groups on stacked
-    /// frosted pills, opaque chip buttons raised off each pill. The top
+    /// pills, opaque chip buttons raised off each pill. The top
     /// pill frames the view (fit, 100%); the column below edits the
     /// shared appearance preferences — the backdrop radio stack and,
     /// past a rule, the sampling toggle. Returns `true` when `preferences`
