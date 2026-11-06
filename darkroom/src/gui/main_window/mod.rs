@@ -192,7 +192,7 @@ impl MainWindow {
     /// sweep. Both live here because `MainWindow` owns both, so a new cache
     /// joins them rather than earning its own call site.
     pub(crate) fn reconcile(&mut self, open: &OpenDocument) {
-        let document = &open.document;
+        let document = open.document();
         let revision = open.graph_revision();
         if self.swept_at != Some(revision) {
             self.graph_ui.retain_nodes(document);
@@ -240,7 +240,7 @@ mod tests {
         window.reconcile(&h.ctx.open);
         assert!(cached(&window, stays) && cached(&window, leaves));
 
-        h.ctx.open.document.remove_node(leaves);
+        h.ctx.open.document_mut().remove_node(leaves);
         window.reconcile(&h.ctx.open);
         assert!(cached(&window, leaves), "no revision move, no sweep");
 

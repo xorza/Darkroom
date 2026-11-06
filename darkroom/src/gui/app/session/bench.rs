@@ -159,7 +159,7 @@ impl Editor {
     fn new() -> Self {
         let runtime = RuntimeLibrary::new(&MlModelPaths::default());
         let open = open_document(&runtime);
-        let document = &open.document;
+        let document = open.document();
         let previews = preview_nodes(document);
         let camera = document.main_view.viewport;
         let dragged = Rc::new([DragStart {
@@ -249,7 +249,7 @@ impl App for Editor {
     fn update(&mut self, _: WindowToken, mut update_ctx: UpdateCtx<'_>) -> InputOutcome {
         self.run_state
             .previews_mut()
-            .reconcile(&self.session.open.document);
+            .reconcile(self.session.open.document());
         self.session.reconcile_caches();
         let ctx = AppCtx::new(&self.theme, self.library.cur(), &self.run_state);
         let outcome = self.session.input(&mut update_ctx, ctx, &mut self.requests);
@@ -466,7 +466,7 @@ mod tests {
     #[test]
     fn the_document_opens_clean_and_holds_what_the_cases_move() {
         let open = open_document(&RuntimeLibrary::new(&MlModelPaths::default()));
-        let document = &open.document;
+        let document = open.document();
 
         let previews = preview_nodes(document);
         assert_eq!(previews.len(), 4);

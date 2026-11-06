@@ -55,7 +55,7 @@ impl Locate<App> for EditorTarget {
                 // The camera the canvas draws through, so a world point lands where it paints.
                 let camera = app
                     .open_document()
-                    .document
+                    .document()
                     .main_view
                     .viewport
                     .landed(ui.display());
@@ -68,7 +68,7 @@ impl Locate<App> for EditorTarget {
             Self::Node(node) | Self::NodeHeader(node) | Self::Port { node, .. } => {
                 let ids = node_ids(app, node);
                 if ids.is_empty() {
-                    let graph = &app.open_document().document.graph;
+                    let graph = &app.open_document().document().graph;
                     return Err(LocateError::NotFound {
                         locator: locator(),
                         nearest: nearest(
@@ -117,7 +117,7 @@ fn visible(rect: Option<Rect>) -> Option<Rect> {
 /// The nodes named `node` by their name or their id, in the document's order.
 fn node_ids(app: &App, node: &str) -> Vec<NodeId> {
     app.open_document()
-        .document
+        .document()
         .graph
         .iter()
         .filter(|candidate| candidate.name == node || candidate.node_id.to_string() == node)
@@ -135,7 +135,7 @@ fn find_port(
 ) -> Result<PortRef, LocateError> {
     let node = app
         .open_document()
-        .document
+        .document()
         .graph
         .find(node_id)
         .expect("a node the locator found is in the graph");

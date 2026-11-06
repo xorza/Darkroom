@@ -25,8 +25,8 @@ use crate::gui::pane::graph_ui::gesture::group_drag::{self, Grab};
 use crate::gui::pane::graph_ui::node_ui::node_record::NodeRecord;
 use crate::gui::pane::graph_ui::wid;
 use crate::gui::state::run_state::ExecStatus;
+use crate::gui::theme::hover::Hover;
 use crate::gui::theme::{CardTier, Theme};
-use crate::gui::widgets::hover::Hover;
 
 /// Owns rendering of every graph node; a body or title press reports its grab, which the
 /// canvas's one group drag latches.

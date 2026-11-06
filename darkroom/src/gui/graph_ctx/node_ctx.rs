@@ -11,7 +11,7 @@ use crate::gui::port_ref::{PortKind, PortRef};
 use crate::gui::state::run_state::{ExecStatus, NodeRunState};
 use crate::gui::theme::Theme;
 use crate::gui::theme::const_editor_theme::ConstEditorTheme;
-use crate::gui::widgets::hover::Hover;
+use crate::gui::theme::hover::Hover;
 
 /// The `kind_label` a stub reports when the library holds no func under its
 /// id — see [`NodeCtx::stub`].

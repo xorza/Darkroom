@@ -4,9 +4,8 @@
 use palantir::{BackdropFilter, Stroke, TabsTheme, TextStyleOverrides};
 
 use crate::gui::theme;
-use crate::gui::theme::icon_scale::IconScale;
+use crate::gui::theme::icon_scale::{self, IconScale};
 use crate::gui::theme::palette::Palette;
-use crate::gui::widgets::icon;
 
 /// darkroom's roles as the [`palantir::Palette`] that
 /// [`palantir::Theme::from_parts`] wants, so every widget palantir paints
@@ -102,7 +101,7 @@ const MENU_MIN_WIDTH: f32 = 240.0;
 const fn tab_close(tabs: &mut TabsTheme, icon: &IconScale) {
     let close = icon.inline;
     tabs.close_size = close.side();
-    tabs.close_glyph_span = icon::cross_span(close.icon);
-    tabs.close_glyph_width = icon::stroke_width(close.icon);
+    tabs.close_glyph_span = icon_scale::cross_span(close.icon);
+    tabs.close_glyph_width = icon_scale::stroke_width(close.icon);
     tabs.close.active.chrome.border = Stroke::NONE;
 }

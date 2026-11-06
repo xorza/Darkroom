@@ -12,10 +12,10 @@ use palantir::{Align, Configure, Panel, Sizing, Spacing, Ui, WidgetId};
 
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::RunCommand;
+use crate::gui::frame::framing::Framing;
 use crate::gui::frame::requests::Requests;
 use crate::gui::frame::shortcuts;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
-use crate::gui::pane::graph_ui::gesture::pan_zoom::Framing;
 use crate::gui::widgets::chip::Chip;
 use crate::gui::widgets::icon::Icon;
 use crate::gui::widgets::pill;

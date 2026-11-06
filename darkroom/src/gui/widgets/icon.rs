@@ -7,27 +7,8 @@ use palantir::{Rect, RgbaF32, Stroke, Ui};
 use glam::Vec2;
 use palantir::widget::{CircularArc, LineCap, LineJoin, Shape};
 
+use crate::gui::theme::icon_scale::{CROSS_SPAN, GRID, STROKE};
 use crate::gui::widgets::support;
-
-/// The side of the grid an icon's artwork is drawn on, scaled to the box it paints in.
-///
-/// 24 units with a 2-unit stroke, the grid and weight of the open icon sets (Lucide, Feather,
-/// Material Symbols at weight 400), so a 16 px icon strokes at 1.33 px and a 18 px one at 1.5 px.
-const GRID: f32 = 24.0;
-const STROKE: f32 = 2.0;
-
-/// The span of [`Icon::Cross`]'s arms on the grid, centered.
-const CROSS_SPAN: f32 = 12.0;
-
-/// The stroke an icon drawn in a `side` box wears.
-pub(crate) const fn stroke_width(side: f32) -> f32 {
-    side / GRID * STROKE
-}
-
-/// The span of [`Icon::Cross`]'s arms in a `side` box, for a widget that draws the cross itself.
-pub(crate) const fn cross_span(side: f32) -> f32 {
-    side / GRID * CROSS_SPAN
-}
 
 /// One glyph of the editor's icon set: stroke artwork on a 24-unit grid, one stroke width, round
 /// caps and joins, painted in one ink. Refused: letters as icons (`R`, `D`, `i`), and font glyphs

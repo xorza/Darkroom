@@ -1,6 +1,26 @@
-//! [`IconScale`]: the theme's icon boxes.
+//! [`IconScale`]: the theme's icon boxes, and the grid their artwork is drawn on.
 
 use palantir::TextSteps;
+
+/// The side of the grid an icon's artwork is drawn on, scaled to the box it paints in.
+///
+/// 24 units with a 2-unit stroke, the grid and weight of the open icon sets (Lucide, Feather,
+/// Material Symbols at weight 400), so a 16 px icon strokes at 1.33 px and a 18 px one at 1.5 px.
+pub(crate) const GRID: f32 = 24.0;
+pub(crate) const STROKE: f32 = 2.0;
+
+/// The span of the cross icon's arms on the grid, centered.
+pub(crate) const CROSS_SPAN: f32 = 12.0;
+
+/// The stroke an icon drawn in a `side` box wears.
+pub(crate) const fn stroke_width(side: f32) -> f32 {
+    side / GRID * STROKE
+}
+
+/// The span of the cross icon's arms in a `side` box, for a widget that draws the cross itself.
+pub(crate) const fn cross_span(side: f32) -> f32 {
+    side / GRID * CROSS_SPAN
+}
 
 /// An icon's side and the room around it in its button, each side.
 #[derive(Clone, Copy, Debug, PartialEq)]

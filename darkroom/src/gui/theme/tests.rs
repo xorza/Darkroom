@@ -3,7 +3,7 @@ use scenarium::TypeId;
 use static_assertions::assert_not_impl_any;
 
 use super::*;
-use crate::gui::widgets::hover::Hover;
+use crate::gui::theme::hover::Hover;
 use crate::gui::widgets::port_glyph;
 
 assert_not_impl_any!(Theme: Copy);

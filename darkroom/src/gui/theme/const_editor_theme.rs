@@ -5,7 +5,7 @@ use palantir::{
 };
 
 use crate::gui::theme::color;
-use crate::gui::widgets::hover::Hover;
+use crate::gui::theme::hover::Hover;
 
 const VALUE_EDITOR_WIDTH: f32 = 100.0;
 /// Upper bound on the value column: editors fill the column up to here, then a

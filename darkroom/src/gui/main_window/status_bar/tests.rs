@@ -180,7 +180,7 @@ fn the_run_lines_link_selects_and_frames_the_cause() {
     let ids: Vec<_> = h
         .session
         .open
-        .document
+        .document()
         .graph
         .iter()
         .map(|node| node.node_id)
@@ -218,16 +218,17 @@ fn the_run_lines_link_selects_and_frames_the_cause() {
     );
     h.drain();
     assert_eq!(
-        h.session.open.document.main_view.selected,
+        h.session.open.document().main_view.selected,
         BTreeSet::from([ItemId::Node(cause)])
     );
 
-    let before = h.session.open.document.main_view.viewport;
+    let before = h.session.open.document().main_view.viewport;
     h.session.frame_graph(Framing::ShowSelected);
     h.frame();
     h.drain();
     assert_ne!(
-        h.session.open.document.main_view.viewport, before,
+        h.session.open.document().main_view.viewport,
+        before,
         "the next prepass framed the selection"
     );
 }

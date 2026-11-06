@@ -104,7 +104,7 @@ fn placed(driver: &Driver, name: &str) -> Vec2 {
     driver
         .app()
         .open_document()
-        .document
+        .document()
         .main_view
         .node_placements[&id]
         .pos
@@ -114,7 +114,7 @@ fn node_id(driver: &Driver, name: &str) -> NodeId {
     driver
         .app()
         .open_document()
-        .document
+        .document()
         .graph
         .iter()
         .find(|node| node.name == name)
@@ -204,7 +204,13 @@ fn a_world_point_lands_on_the_canvas_where_nodes_are_placed() {
             delta: Vec2::new(-10.3, -20.3),
         })])
         .unwrap();
-    let pan = driver.app().open_document().document.main_view.viewport.pan;
+    let pan = driver
+        .app()
+        .open_document()
+        .document()
+        .main_view
+        .viewport
+        .pan;
     assert_eq!(pan, Vec2::new(10.3, 20.3), "the stored pan stays exact");
     let pos = placed(&driver, BRIGHTNESS);
     let world = driver
@@ -616,7 +622,7 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
     let rect = driver
         .offscreen()
         .with_app(|app, ui| {
-            let layout = &app.open_document().document.layout;
+            let layout = &app.open_document().document().layout;
             ui.response_for(layout.primary().id().pane_id(MainWindow::dock_wid()))
                 .rect
         })

@@ -136,7 +136,7 @@ fn a_viewer_opened_by_click_queues_its_full_image_in_that_same_frame() {
     assert!(
         test.session
             .open
-            .document
+            .document()
             .layout
             .all_tabs()
             .any(|t| t == TabRef::ImageViewer(node)),
@@ -198,13 +198,16 @@ fn dirty_flag_tracks_content_edits_not_navigation() {
     let node_id = NodeId::unique();
 
     test.apply(GraphIntent::add_node(Vec2::ZERO, node_id, node));
-    assert!(test.session.open.dirty, "adding a node is savable work");
+    assert!(
+        test.session.open.is_dirty(),
+        "adding a node is savable work"
+    );
 
-    test.session.open.dirty = false;
+    test.session.open.set_dirty(false);
     test.apply(GraphIntent::SetSelection {
         to: [ItemId::Node(node_id)].into_iter().collect(),
     });
-    assert!(!test.session.open.dirty, "selecting is navigation");
+    assert!(!test.session.open.is_dirty(), "selecting is navigation");
 }
 
 /// Pane arrangement is navigation: the op lands on the layout but
@@ -225,27 +228,27 @@ fn dock_ops_apply_without_entering_the_undo_history_or_dirtying() {
     ));
 
     let tab = TabRef::ImageViewer(node_id);
-    test.session.open.dirty = false;
+    test.session.open.set_dirty(false);
     test.requests.push_view(DockOperation::OpenTab { tab });
     test.drain();
     assert!(
         test.session
             .open
-            .document
+            .document()
             .layout
             .all_tabs()
             .any(|t| t == tab),
         "the viewer tab opened"
     );
     assert!(
-        !test.session.open.dirty,
+        !test.session.open.is_dirty(),
         "arranging panes is navigation, not savable work"
     );
 
     // One undo takes back the node, and its viewer tab goes with it.
     assert!(test.undo(), "the node add is the only entry");
     assert_eq!(
-        test.session.open.document.graph.len(),
+        test.session.open.document().graph.len(),
         0,
         "the node came back out"
     );
@@ -253,7 +256,7 @@ fn dock_ops_apply_without_entering_the_undo_history_or_dirtying() {
         !test
             .session
             .open
-            .document
+            .document()
             .layout
             .all_tabs()
             .any(|t| t == tab),
@@ -306,7 +309,7 @@ fn image_viewer_tabs_dedupe_per_node_and_prune_state_on_close() {
     assert_eq!(
         test.session
             .open
-            .document
+            .document()
             .layout
             .all_tabs()
             .filter(|t| *t == tab)
@@ -321,7 +324,7 @@ fn image_viewer_tabs_dedupe_per_node_and_prune_state_on_close() {
         .insert(node_id, ImageViewer::new(node_id));
     test.session
         .open
-        .document
+        .document_mut()
         .layout
         .apply(DockOperation::CloseTab { tab });
     test.session.reconcile_caches();
@@ -340,7 +343,7 @@ fn each_edit_route_owes_what_it_strands() {
     let node_id = test
         .session
         .open
-        .document
+        .document()
         .graph
         .iter()
         .next()

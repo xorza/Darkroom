@@ -20,10 +20,10 @@ use crate::core::open_document::OpenDocument;
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::FileCommand;
 use crate::gui::frame::app_command::RunCommand;
+use crate::gui::frame::framing::Framing;
 use crate::gui::frame::requests::Requests;
 use crate::gui::frame::window_ctx::WindowCtx;
 use crate::gui::main_window::MainWindow;
-use crate::gui::pane::graph_ui::gesture::pan_zoom::Framing;
 use palantir::{InputOutcome, Shortcut, Ui, UpdateCtx};
 use scenarium::{Graph, Library};
 use std::mem;
@@ -49,7 +49,7 @@ impl Session {
     /// across this boundary that is not a frame concern, so it is named here
     /// rather than spelled out at each of `App`'s run commands.
     pub(crate) const fn graph(&self) -> &Graph {
-        &self.open.document.graph
+        &self.open.document().graph
     }
 
     /// Open `open` in a fresh UI.

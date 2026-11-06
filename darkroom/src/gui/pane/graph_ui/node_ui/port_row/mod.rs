@@ -38,7 +38,7 @@ use crate::gui::pane::graph_ui::node_ui::node_record::NodeRecord;
 use crate::gui::pane::graph_ui::wid;
 use crate::gui::port_ref::PortKind;
 use crate::gui::theme::Theme;
-use crate::gui::widgets::hover::Hover;
+use crate::gui::theme::hover::Hover;
 use crate::gui::widgets::port_glyph;
 use crate::gui::widgets::port_glyph::PortGlyph;
 use crate::gui::widgets::support;

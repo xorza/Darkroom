@@ -195,13 +195,13 @@ impl CanvasHarness {
     }
 
     pub(crate) fn document(&self) -> &Document {
-        &self.ctx.open.document
+        self.ctx.open.document()
     }
 
     /// The document, to edit between frames — an undo moving a node out from
     /// under a live gesture is the case this exists for.
     pub(crate) fn document_mut(&mut self) -> &mut Document {
-        &mut self.ctx.open.document
+        self.ctx.open.document_mut()
     }
 
     /// The `i`th node in placement order.

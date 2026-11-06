@@ -66,8 +66,8 @@ impl StepSignals {
 
 #[derive(Debug)]
 pub(crate) struct OpenDocument {
-    pub(crate) document: Document,
-    pub(crate) path: Option<PathBuf>,
+    document: Document,
+    path: Option<PathBuf>,
     /// Whether `document` differs from what is at `path` — the pair that gives the flag its
     /// meaning, which is why it lives here rather than on a frontend. Set by any content-changing
     /// edit (new edits, undo/redo replay, direct graph mutations), cleared by [`Self::save_to`].
@@ -76,7 +76,7 @@ pub(crate) struct OpenDocument {
     ///
     /// It can read "dirty" after an undo returns the document to its saved
     /// state — the safe direction (prompt rather than silently discard).
-    pub(crate) dirty: bool,
+    dirty: bool,
     /// The state of the graph's node set; moved by every edit, undo or redo
     /// that adds or removes a node.
     revision: GraphRevision,
@@ -116,6 +116,21 @@ pub(crate) struct Launched {
 }
 
 impl OpenDocument {
+    /// The document, which only this type's edits change.
+    pub(crate) const fn document(&self) -> &Document {
+        &self.document
+    }
+
+    /// The file behind the document, `None` for one never saved.
+    pub(crate) fn path(&self) -> Option<&Path> {
+        self.path.as_deref()
+    }
+
+    /// Whether the document differs from what is at [`Self::path`].
+    pub(crate) const fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
     /// Whether an undo would take an entry back.
     pub(crate) fn can_undo(&self) -> bool {
         self.history.can_undo()
@@ -448,6 +463,9 @@ impl BatchGesture {
 
 #[cfg(feature = "internals")]
 pub(crate) mod internals {
+    #[cfg(test)]
+    use std::path::PathBuf;
+
     use crate::core::document::Document;
     use crate::core::open_document::OpenDocument;
 
@@ -460,6 +478,24 @@ pub(crate) mod internals {
                 document,
                 ..Self::default()
             }
+        }
+
+        /// The document to write straight, as a fixture sets a scene up with no edit.
+        #[cfg(test)]
+        pub(crate) const fn document_mut(&mut self) -> &mut Document {
+            &mut self.document
+        }
+
+        /// Mark whether the document differs from its file, as an edit and a save do.
+        #[cfg(test)]
+        pub(crate) const fn set_dirty(&mut self, dirty: bool) {
+            self.dirty = dirty;
+        }
+
+        /// Name the file behind the document, as a save does.
+        #[cfg(test)]
+        pub(crate) fn set_path(&mut self, path: PathBuf) {
+            self.path = Some(path);
         }
     }
 }

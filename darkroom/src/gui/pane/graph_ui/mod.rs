@@ -35,6 +35,7 @@ use crate::core::document::Document;
 use crate::core::document::item_id::ItemId;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::click_mode::ClickMode;
+use crate::gui::frame::framing::Framing;
 use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::canvas_bg::CanvasBg;
@@ -48,7 +49,6 @@ use crate::gui::pane::graph_ui::gesture::breaker_ui::BreakerUi;
 use crate::gui::pane::graph_ui::gesture::group_drag::GroupDrag;
 use crate::gui::pane::graph_ui::gesture::new_node_ui::NewNodeUi;
 use crate::gui::pane::graph_ui::gesture::node_menu_ui::NodeMenuUi;
-use crate::gui::pane::graph_ui::gesture::pan_zoom::Framing;
 use crate::gui::pane::graph_ui::gesture::pan_zoom::camera_gesture::CameraGesture;
 use crate::gui::pane::graph_ui::gesture::preview_drag;
 use crate::gui::pane::graph_ui::gesture::selection_ui::SelectionUi;
@@ -821,7 +821,7 @@ mod tests {
         use crate::core::document::internals::DocumentFixture;
         use crate::core::edit::document_request::DocumentRequest;
         use crate::core::edit::graph_intent::GraphIntent;
-        use crate::gui::pane::graph_ui::gesture::pan_zoom::Framing;
+        use crate::gui::frame::framing::Framing;
         use crate::gui::pane::graph_ui::internals::CanvasHarness;
 
         let mut h = CanvasHarness::new(DocumentFixture::probes(1));

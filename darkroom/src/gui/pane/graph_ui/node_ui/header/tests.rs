@@ -161,7 +161,7 @@ fn the_inspect_button_selects_its_node_and_opens_one_inspector() {
     let ids: Vec<NodeId> = h
         .session
         .open
-        .document
+        .document()
         .graph
         .iter()
         .map(|node| node.node_id)
@@ -169,7 +169,7 @@ fn the_inspect_button_selects_its_node_and_opens_one_inspector() {
     let inspectors = |h: &SessionHarness| {
         h.session
             .open
-            .document
+            .document()
             .layout
             .all_tabs()
             .filter(|tab| *tab == TabRef::Inspector(InspectTarget::Selection))
@@ -185,7 +185,7 @@ fn the_inspect_button_selects_its_node_and_opens_one_inspector() {
         h.frame();
         h.drain();
         assert_eq!(
-            h.session.open.document.main_view.selected,
+            h.session.open.document().main_view.selected,
             BTreeSet::from([ItemId::Node(node_id)])
         );
         assert_eq!(inspectors(&h), 1, "one inspector tab");
@@ -238,7 +238,7 @@ fn a_node_and_its_pin_show_once_measured() {
         .open
         .apply_edit(GraphIntent::RemoveNode { node_id: sink }, &h.ctx.library);
     h.frame();
-    h.graph_ui.retain_nodes(&h.ctx.open.document);
+    h.graph_ui.retain_nodes(h.ctx.open.document());
     let _restored = h.ctx.open.undo();
     h.frame();
     assert_eq!(

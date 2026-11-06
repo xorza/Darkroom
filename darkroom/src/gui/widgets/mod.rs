@@ -4,7 +4,6 @@
 //! own intent.
 pub(crate) mod chip;
 pub(crate) mod format;
-pub(crate) mod hover;
 pub(crate) mod icon;
 pub(crate) mod icon_button;
 pub(crate) mod link;

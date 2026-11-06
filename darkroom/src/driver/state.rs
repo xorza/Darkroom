@@ -112,7 +112,7 @@ impl State {
         log: Vec<String>,
     ) -> Self {
         let open = app.open_document();
-        let document = &open.document;
+        let document = open.document();
         let graph = &document.graph;
         let library = app.library();
         let detailed = detail == Detail::Detailed;
@@ -123,8 +123,8 @@ impl State {
         let mut widgets = Vec::new();
         ui.inspect(&mut widgets);
         Self {
-            document: open.path.as_ref().map(|path| path.display().to_string()),
-            dirty: open.dirty,
+            document: open.path().map(|path| path.display().to_string()),
+            dirty: open.is_dirty(),
             omitted: matching.len().saturating_sub(NODE_LIMIT),
             nodes: matching
                 .into_iter()

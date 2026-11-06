@@ -165,7 +165,7 @@ impl App {
             open,
             forgot_remembered,
         } = OpenDocument::open_at_launch(document, remembered, &mut status, runtime.library.cur());
-        runtime.set_document_cache(open.path.as_deref());
+        runtime.set_document_cache(open.path());
         let mut app = Self {
             session: Session::new(open),
             runtime,
@@ -280,7 +280,7 @@ impl App {
     /// unsaved changes and the confirm preference both hold. The single
     /// predicate behind every path that replaces or discards the document.
     const fn needs_discard_confirmation(&self) -> bool {
-        self.session.open.dirty && self.preferences.confirm_unsaved_changes
+        self.session.open.is_dirty() && self.preferences.confirm_unsaved_changes
     }
 
     /// Carry out `transition`, or raise the unsaved-changes prompt first when
@@ -345,7 +345,7 @@ impl App {
         if outcome.choice == DiscardChoice::Save {
             self.save_cur();
         }
-        let resolution = outcome.resolve(self.session.open.dirty);
+        let resolution = outcome.resolve(self.session.open.is_dirty());
         if resolution.silence_prompt {
             self.set_confirm_unsaved(false);
         }
@@ -358,8 +358,7 @@ impl App {
         let file_name = self
             .session
             .open
-            .path
-            .as_deref()
+            .path()
             .and_then(|p| p.file_name())
             .and_then(|s| s.to_str());
         if let Some(answered) = self.discard.record(ui, &self.theme, file_name) {
@@ -404,10 +403,7 @@ impl App {
     /// the guard cleared, so cancelling the unsaved-changes prompt never costs
     /// the user a file choice.
     fn load_picked_document(&mut self) {
-        if let Some(path) = self
-            .dialogs
-            .project_open_path(self.session.open.path.as_deref())
-        {
+        if let Some(path) = self.dialogs.project_open_path(self.session.open.path()) {
             let _ = self.load_document(&path);
         }
     }
@@ -449,8 +445,7 @@ impl App {
         // it, so there is no window where fresh panes hold a stale graph's
         // gesture state.
         self.session = Session::new(open);
-        self.runtime
-            .set_document_cache(self.session.open.path.as_deref());
+        self.runtime.set_document_cache(self.session.open.path());
         self.remember_document_path();
         self.status.succeeded(StatusFamily::Document);
     }
@@ -473,7 +468,7 @@ impl App {
     /// Cmd+S: overwrite the current file, in the format its extension names, if
     /// there is one, else fall back to Save As (first save of a fresh document).
     fn save_cur(&mut self) {
-        match self.session.open.path.clone() {
+        match self.session.open.path().map(Path::to_path_buf) {
             Some(path) => self.save_document(&path),
             None => self.save_document_as(),
         }
@@ -482,7 +477,7 @@ impl App {
     /// Cmd+Shift+S / "Save As…": always prompt for a destination, whose file type names the
     /// format, plain or compressed, the open project's first; a new document's is plain.
     fn save_document_as(&mut self) {
-        let cur = self.session.open.path.as_deref();
+        let cur = self.session.open.path();
         let format = cur
             .and_then(DocumentFormat::of_path)
             .unwrap_or(DocumentFormat::Ron);
@@ -501,8 +496,7 @@ impl App {
             .save_to(path, self.preferences.saved_paths())
         {
             Ok(()) => {
-                self.runtime
-                    .set_document_cache(self.session.open.path.as_deref());
+                self.runtime.set_document_cache(self.session.open.path());
                 self.remember_document_path();
                 self.status.succeeded(StatusFamily::Document);
             }
@@ -516,7 +510,7 @@ impl App {
     /// Mirror the open document's active path into persisted preferences
     /// after a successful document lifecycle transition.
     fn remember_document_path(&mut self) {
-        self.preferences.document_path = self.session.open.path.clone();
+        self.preferences.document_path = self.session.open.path().map(Path::to_path_buf);
         self.save_preferences();
     }
 
@@ -675,7 +669,7 @@ impl palantir::App for App {
                 status: &mut self.status,
             },
             &update_ctx,
-            &self.session.open.document,
+            self.session.open.document(),
         );
         self.session.reconcile_caches();
 
@@ -808,9 +802,9 @@ impl App {
     }
 
     fn check_unsaved(&self, unsaved: UnsavedEdits) -> Result<(), DrivenOpenError> {
-        if unsaved == UnsavedEdits::Refuse && self.session.open.dirty {
+        if unsaved == UnsavedEdits::Refuse && self.session.open.is_dirty() {
             Err(DrivenOpenError::Unsaved {
-                document: self.session.open.path.clone(),
+                document: self.session.open.path().map(Path::to_path_buf),
             })
         } else {
             Ok(())
@@ -903,10 +897,10 @@ mod tests {
         ] {
             let mut ui = Harness::new(UVec2::new(800, 600));
             let mut app = App::offscreen(ui.ui_mut());
-            app.session.open.dirty = true;
+            app.session.open.set_dirty(true);
             app.open_document_at(handed.clone());
             assert!(app.discard.is_up(), "{choice:?}: the prompt holds the open");
-            assert_eq!(app.session.open.path, None);
+            assert_eq!(app.session.open.path(), None);
 
             let answered = app
                 .discard
@@ -918,9 +912,9 @@ mod tests {
             app.apply_discard_outcome(answered);
             assert!(!app.discard.is_up(), "{choice:?}: the answer takes it down");
             assert_eq!(
-                (app.session.open.path.as_ref(), app.session.open.dirty),
+                (app.session.open.path(), app.session.open.is_dirty()),
                 if opened {
-                    (Some(&handed), false)
+                    (Some(handed.as_path()), false)
                 } else {
                     (None, true)
                 },
@@ -982,7 +976,7 @@ mod tests {
         let mut ui = Harness::new(UVec2::new(800, 600));
         let mut app = App::offscreen(ui.ui_mut());
         app.open_driven(&document, UnsavedEdits::Refuse).unwrap();
-        assert_eq!(app.session.open.path.as_ref(), Some(&document));
+        assert_eq!(app.session.open.path(), Some(document.as_path()));
 
         fs::write(&document, b"not a document").unwrap();
         match app.open_driven(&document, UnsavedEdits::Refuse) {
@@ -993,12 +987,12 @@ mod tests {
             other => panic!("{other:?}"),
         }
         assert_eq!(
-            app.session.open.path.as_ref(),
-            Some(&document),
+            app.session.open.path(),
+            Some(document.as_path()),
             "still open"
         );
 
-        app.session.open.dirty = true;
+        app.session.open.set_dirty(true);
         let unsaved = DrivenOpenError::Unsaved {
             document: Some(document.clone()),
         };
@@ -1007,10 +1001,10 @@ mod tests {
             Err(unsaved.clone())
         );
         assert_eq!(app.new_driven(UnsavedEdits::Refuse), Err(unsaved));
-        assert!(app.session.open.dirty, "the edits stay");
+        assert!(app.session.open.is_dirty(), "the edits stay");
         app.new_driven(UnsavedEdits::Discard).unwrap();
-        assert_eq!(app.session.open.path, None, "a discard goes through");
-        assert!(!app.session.open.dirty);
+        assert_eq!(app.session.open.path(), None, "a discard goes through");
+        assert!(!app.session.open.is_dirty());
     }
 
     /// An app on the driver's host: a scripted Open dialog opens the answered document; with a
@@ -1056,9 +1050,13 @@ mod tests {
                     dialogs,
                 },
             );
-            assert_eq!(app.session.open.path, None, "{store:?}: launched empty");
+            assert_eq!(app.session.open.path(), None, "{store:?}: launched empty");
             app.run_command(AppCommand::File(FileCommand::Open));
-            assert_eq!(app.session.open.path.as_ref(), Some(&document), "{store:?}");
+            assert_eq!(
+                app.session.open.path(),
+                Some(document.as_path()),
+                "{store:?}"
+            );
             if !readable {
                 assert_eq!(app.preferences_store, PreferencesStore::Memory);
                 assert!(
@@ -1123,7 +1121,7 @@ mod tests {
         let geometry = app.session.geometry();
         app.session
             .open
-            .document
+            .document()
             .graph
             .bindings
             .iter()
@@ -1189,12 +1187,12 @@ mod tests {
             ui.frame_app(&mut counted);
         }
         let selected =
-            |counted: &CountedPasses| counted.app.session.open.document.main_view.selected.len();
+            |counted: &CountedPasses| counted.app.session.open.document().main_view.selected.len();
         let node = counted
             .app
             .session
             .open
-            .document
+            .document()
             .graph
             .iter()
             .find(|node| node.name == NODE)
@@ -1266,7 +1264,7 @@ mod tests {
                 passes: 0,
                 undo_after_pass: false,
             };
-            counted.app.session.open.dirty = true;
+            counted.app.session.open.set_dirty(true);
             ui.frame_app(&mut counted);
             ui.frame_app(&mut counted);
             let widget = |ui: &Harness, text: &str| {
@@ -1358,7 +1356,7 @@ mod tests {
                 ui.frame_app(counted);
             }
             assert!(title(ui).is_none(), "deleted");
-            let document = &counted.app.session.open.document;
+            let document = counted.app.session.open.document();
             assert!(document.graph.iter().all(|node| node.name != NODE));
         };
 

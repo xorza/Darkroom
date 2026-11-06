@@ -171,7 +171,7 @@ impl SessionHarness {
         // Nothing here materializes a viewer's texture: the pane uploads its
         // own when it records, so an open tab draws at full resolution on the
         // frame it appears, in this harness exactly as in production.
-        run_state.previews_mut().reconcile(&session.open.document);
+        run_state.previews_mut().reconcile(session.open.document());
         session.reconcile_caches();
         let mut frame = SessionFrame {
             session,

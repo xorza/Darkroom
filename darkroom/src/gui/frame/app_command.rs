@@ -13,7 +13,7 @@ use std::sync::Arc;
 use lens::MlModelPaths;
 use scenarium::{FsPathConfig, InputPort, NodeId};
 
-use crate::gui::pane::graph_ui::gesture::pan_zoom::Framing;
+use crate::gui::frame::framing::Framing;
 
 /// A command a UI surface (the menu bar, the keyboard chords, the graph
 /// toolbar, a node's header chips and context menu, an inline path-picker, the

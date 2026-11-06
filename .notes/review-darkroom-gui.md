@@ -190,20 +190,8 @@ but that one bundle, a handle, a context and `out`, repeats with no name.
 
 # Part 2: Plan
 
-Each batch leaves the gates green. Batches 2 and 3 need nothing before them. Batch 1, the relayout
-sink, has landed.
-
-## Batch 2: layers
-
-Files: `gui/frame/app_command.rs`, `gui/pane/graph_ui/gesture/pan_zoom/mod.rs`,
-`gui/theme/{const_editor_theme,palantir_bridge,icon_scale,mod}.rs`, `gui/widgets/{hover,icon}.rs`,
-`core/open_document/mod.rs`.
-
-- [ ] `app_command.rs:16`: `Framing` moves to `gui/frame`, and `impl Framing` stays in `pan_zoom`.
-- [ ] `const_editor_theme.rs:8`, `palantir_bridge.rs:9`: `Hover` to `theme`, the two icon sizes to
-  `icon_scale`, and each import in `widgets` follows.
-- [ ] `open_document/mod.rs:69-79`: private fields, getters, and setters under `internals` for the tests
-  at `app/mod.rs:926,1021,1289` and `menu_bar.rs:324`.
+Each batch leaves the gates green. Batch 3 needs nothing before it. Batch 1, the relayout sink, and
+batch 2, the layers, have landed.
 
 ## Batch 3: contexts
 

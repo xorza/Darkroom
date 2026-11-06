@@ -28,7 +28,7 @@ use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph_ui::node_ui::card;
 use crate::gui::pane::graph_ui::node_ui::node_record::NodeRecord;
 use crate::gui::pane::graph_ui::wid;
-use crate::gui::widgets::hover::Hover;
+use crate::gui::theme::hover::Hover;
 use crate::gui::widgets::icon::Icon;
 use crate::gui::widgets::icon_button::IconButton;
 use crate::gui::widgets::port_glyph::PortGlyph;

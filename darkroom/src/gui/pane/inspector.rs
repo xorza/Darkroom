@@ -556,7 +556,15 @@ mod tests {
         let fixture =
             DocumentFixture::probes(1).with_tab(TabRef::Inspector(InspectTarget::Selection));
         let mut h = SessionHarness::new(fixture);
-        let node_id = h.session.open.document.graph.iter().next().unwrap().node_id;
+        let node_id = h
+            .session
+            .open
+            .document()
+            .graph
+            .iter()
+            .next()
+            .unwrap()
+            .node_id;
         h.apply(GraphIntent::SetSelection {
             to: [ItemId::Node(node_id)].into(),
         });
@@ -606,7 +614,15 @@ mod tests {
         let inspect = |fixture: DocumentFixture| {
             let mut h =
                 SessionHarness::new(fixture.with_tab(TabRef::Inspector(InspectTarget::Selection)));
-            let node_id = h.session.open.document.graph.iter().next().unwrap().node_id;
+            let node_id = h
+                .session
+                .open
+                .document()
+                .graph
+                .iter()
+                .next()
+                .unwrap()
+                .node_id;
             h.apply(GraphIntent::SetSelection {
                 to: [ItemId::Node(node_id)].into(),
             });

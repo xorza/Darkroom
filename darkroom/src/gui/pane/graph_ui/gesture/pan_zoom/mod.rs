@@ -12,6 +12,7 @@ use palantir::{Input, Rect, Size};
 use crate::core::document::item_id::ItemId;
 use crate::core::document::viewport::Viewport;
 use crate::core::edit::graph_intent::GraphIntent;
+use crate::gui::frame::framing::Framing;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
@@ -24,19 +25,6 @@ const CANVAS_ZOOM: ZoomRange = ZoomRange { min: 0.1, max: 5.0 };
 /// Breathing room (logical px) left on every side when fitting content
 /// to the viewport, so framed nodes don't butt against the pane edge.
 const FIT_MARGIN: f32 = 40.0;
-
-/// One of the graph toolbar's one-shot framings. A descriptor resolved at
-/// its call site into a `GraphIntent::SetViewport`, never queued itself, so
-/// a reframe moves the camera as a manual pan/zoom does.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Framing {
-    /// Reset to 1:1 zoom, centered on all nodes (world origin when empty).
-    Reset,
-    /// Fit every node in the view.
-    ShowAll,
-    /// Fit the selected nodes; a no-op when nothing is selected.
-    ShowSelected,
-}
 
 impl Framing {
     /// The `SetViewport` intent this framing implies on the canvas `ctx`, or

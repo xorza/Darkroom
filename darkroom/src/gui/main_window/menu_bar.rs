@@ -8,10 +8,10 @@ use crate::core::document::tab_ref::TabRef;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
 use crate::gui::frame::app_command::{AppCommand, FileCommand, RunCommand, ViewCommand};
+use crate::gui::frame::framing::Framing;
 use crate::gui::frame::requests::Requests;
 use crate::gui::frame::shortcuts;
 use crate::gui::frame::window_ctx::WindowCtx;
-use crate::gui::pane::graph_ui::gesture::pan_zoom::Framing;
 use crate::gui::widgets::support;
 
 /// Top-of-window menu bar: palantir's [`MenuBar`] at the left, and the document's name, with a
@@ -88,7 +88,7 @@ fn file_menu(bar: &mut MenuBarMenus<'_>, out: &mut Requests) {
 /// selection, as Ctrl+D does.
 fn edit_menu(bar: &mut MenuBarMenus<'_>, ctx: WindowCtx<'_>, out: &mut Requests) {
     let (open, app) = (ctx.open(), ctx.app());
-    let selected = !open.document.main_view.selected.is_empty();
+    let selected = !open.document().main_view.selected.is_empty();
     bar.menu("Edit", |ui| {
         if item(ui, "Undo", Some(shortcuts::UNDO), open.can_undo()) {
             out.push_app(AppCommand::Undo);
@@ -99,14 +99,14 @@ fn edit_menu(bar: &mut MenuBarMenus<'_>, ctx: WindowCtx<'_>, out: &mut Requests)
         MenuSeparator::new().show(ui);
         if item(ui, "Duplicate", Some(shortcuts::DUPLICATE), selected) {
             out.extend_graph(GraphIntent::duplicate(
-                &open.document,
+                open.document(),
                 app.library(),
                 IncomingWires::Drop,
                 || NodeId::unique().as_u128(),
             ));
         }
         if item(ui, "Delete", Some(shortcuts::DELETE), selected) {
-            out.extend_graph(GraphIntent::remove_selection(&open.document.main_view));
+            out.extend_graph(GraphIntent::remove_selection(&open.document().main_view));
         }
     });
 }
@@ -166,7 +166,7 @@ fn view_menu(bar: &mut MenuBarMenus<'_>, out: &mut Requests) {
 /// unsaved edits; its folder is the tooltip.
 fn document_name(ui: &mut Ui, ctx: WindowCtx<'_>) {
     let (open, theme) = (ctx.open(), ctx.app().theme());
-    let path = open.path.as_deref();
+    let path = open.path();
     let name = path
         .and_then(|path| path.file_name())
         .map_or_else(|| "Untitled".into(), |name| name.to_string_lossy());
@@ -179,7 +179,7 @@ fn document_name(ui: &mut Ui, ctx: WindowCtx<'_>) {
         .child_align(Align::v(VAlign::Center))
         .sense(Sense::HOVER)
         .show(ui, |ui| {
-            if open.dirty {
+            if open.is_dirty() {
                 support::dot_cell(ui, "menu_bar_dirty", theme, theme.ink.muted);
             }
             let style = support::body_text(ui, theme);
@@ -219,9 +219,9 @@ mod tests {
     use crate::core::edit::graph_intent::GraphIntent;
     use crate::gui::app::session::internals::SessionHarness;
     use crate::gui::frame::app_command::{AppCommand, FileCommand, RunCommand, ViewCommand};
+    use crate::gui::frame::framing::Framing;
     use crate::gui::frame::shortcuts;
     use crate::gui::main_window::menu_bar::{bar_wid, document_wid, menus_wid};
-    use crate::gui::pane::graph_ui::gesture::pan_zoom::Framing;
 
     /// The visible widget whose text starts with `label`: a menu row's text is its label, then
     /// its chord.
@@ -259,7 +259,15 @@ mod tests {
         for (menu, row, chord) in cases {
             let mut h = SessionHarness::new(DocumentFixture::probes(1));
             if row == "Undo" {
-                let node_id = h.session.open.document.graph.iter().next().unwrap().node_id;
+                let node_id = h
+                    .session
+                    .open
+                    .document()
+                    .graph
+                    .iter()
+                    .next()
+                    .unwrap()
+                    .node_id;
                 h.apply(GraphIntent::SetSelection {
                     to: [ItemId::Node(node_id)].into(),
                 });
@@ -303,7 +311,15 @@ mod tests {
         assert!(widget(&h, "Undo").disabled, "nothing to undo yet");
         assert!(widget(&h, "Delete").disabled, "nothing selected");
 
-        let node_id = h.session.open.document.graph.iter().next().unwrap().node_id;
+        let node_id = h
+            .session
+            .open
+            .document()
+            .graph
+            .iter()
+            .next()
+            .unwrap()
+            .node_id;
         h.apply(GraphIntent::SetSelection {
             to: [ItemId::Node(node_id)].into(),
         });
@@ -321,7 +337,7 @@ mod tests {
     #[test]
     fn the_name_centers_then_moves_past_the_menus_then_is_cut() {
         let mut h = SessionHarness::new(DocumentFixture::probes(1));
-        h.session.open.path = Some(PathBuf::from(
+        h.session.open.set_path(PathBuf::from(
             "/tmp/a-document-name-long-enough-to-cut.darkroom",
         ));
         let mut at = |width: u32| {

@@ -21,7 +21,7 @@ use crate::core::document::tie::TieId;
 use crate::core::document::wire_key::WireKey;
 use crate::gui::port_ref::PortRef;
 
-use crate::gui::widgets::hover::Hover;
+use crate::gui::theme::hover::Hover;
 
 /// A node-keyed widget id under `tag`.
 pub(super) fn of_node(tag: &'static str, node_id: NodeId) -> WidgetId {

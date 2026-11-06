@@ -35,7 +35,7 @@ use crate::gui::pane::graph_ui::gesture::tie_ui::tie_probe::TieProbe;
 use crate::gui::pane::graph_ui::wid;
 use crate::gui::port_ref::PortRef;
 use crate::gui::theme::color;
-use crate::gui::widgets::hover::Hover;
+use crate::gui::theme::hover::Hover;
 
 /// What one wire paints with: its stroke color, and the ramp that color
 /// multiplies along the curve when the two ends differ.

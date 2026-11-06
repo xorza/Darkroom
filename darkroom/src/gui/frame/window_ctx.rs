@@ -42,10 +42,10 @@ impl<'a> WindowCtx<'a> {
 
     /// The document this phase is reading — the graph, and the pane
     /// arrangement around it. The projection nearly every reader wants; the
-    /// tab strip, which also shows [`OpenDocument::dirty`], takes the pair
+    /// tab strip, which also shows [`OpenDocument::is_dirty`], takes the pair
     /// through [`Self::open`] instead.
     pub(crate) const fn document(self) -> &'a Document {
-        &self.open.document
+        self.open.document()
     }
 
     /// The open document whole — its content *and* the file it came from.

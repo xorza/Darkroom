@@ -42,7 +42,7 @@ pub(super) trait Reversible {
     /// Whether replaying this — in either direction — changes *saved*
     /// document content, as opposed to pure navigation (camera, selection,
     /// stacking) that isn't worth prompting to save on exit. Drives
-    /// `OpenDocument::dirty`.
+    /// `OpenDocument::is_dirty`.
     fn dirties_document(&self) -> bool;
 
     /// What replaying this, in either direction, changes of the document's shape. The node

@@ -120,7 +120,7 @@ impl Region {
 
 /// The pane rect of the one group whose visible tab is named `name`.
 fn pane(app: &App, ui: &Ui, name: &str) -> Result<Rect, DriverError> {
-    let document = &app.open_document().document;
+    let document = app.open_document().document();
     let layout = &document.layout;
     let locator = format!("{:?}", Region::Pane(name.to_string()));
     let label = |tab: TabRef| dock_panes::tab_label(document, tab);
@@ -203,7 +203,7 @@ fn legend(screenshot: &Screenshot, picture: UVec2, app: &App, ui: &Ui) -> Vec<Le
     };
     let library = app.library();
     let mut nodes = Vec::new();
-    for node in app.open_document().document.graph.iter() {
+    for node in app.open_document().document().graph.iter() {
         let Some(rect) = place(ui.response_for(wid::body(node.node_id)).rect) else {
             continue;
         };

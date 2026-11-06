@@ -14,6 +14,7 @@ pub(crate) mod card_theme;
 pub(crate) mod color;
 pub(crate) mod const_editor_theme;
 pub(crate) mod elevation_scale;
+pub(crate) mod hover;
 pub(crate) mod icon_scale;
 pub(crate) mod inks;
 pub(crate) mod palantir_bridge;
@@ -162,7 +163,7 @@ pub(crate) enum CardTier {
 
 impl Theme {
     /// The color a port of `data_type` paints at rest, and the wires touching it; see
-    /// [`Hover::lift`](crate::gui::widgets::hover::Hover::lift). The built-in scalars and the
+    /// [`Hover::lift`](crate::gui::theme::hover::Hover::lift). The built-in scalars and the
     /// lens image type, the dominant payload on a darkroom canvas, take a fixed hue each from
     /// [`TypeColors`]; another custom or enum type lands on a ramp slot by its type id, so
     /// distinct types read distinct and stay stable. `Any`, which only an input declares, has no

@@ -25,7 +25,7 @@ use crate::gui::theme::Theme;
 /// which is what a [`WindowCtx`] takes: a fixture that kept the bare
 /// [`Document`](crate::core::document::Document) could not compose one. It
 /// starts saved; a test about the unsaved-changes dot sets
-/// [`OpenDocument::dirty`] on it.
+/// [`OpenDocument::is_dirty`] on it.
 #[derive(Debug)]
 pub(crate) struct GraphCtxFixture {
     pub(crate) open: OpenDocument,
@@ -60,7 +60,7 @@ impl GraphCtxFixture {
     /// Give the graph a committed selection.
     pub(crate) fn with_selection(mut self, selected: impl IntoIterator<Item = NodeId>) -> Self {
         self.open
-            .document
+            .document_mut()
             .main_view
             .selected
             .extend(selected.into_iter().map(ItemId::Node));
@@ -70,7 +70,7 @@ impl GraphCtxFixture {
     /// The `i`th node in placement order — [`DocumentFixture::node`] over the
     /// document this fixture took ownership of.
     pub(crate) fn node(&self, i: usize) -> NodeId {
-        internals::nth_in_paint_order(&self.open.document.main_view, i)
+        internals::nth_in_paint_order(&self.open.document().main_view, i)
     }
 
     /// [`Self::graph_ctx_on`] the default display, 1× and snapping: for a test that reads the
