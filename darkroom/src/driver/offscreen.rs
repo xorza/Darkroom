@@ -27,8 +27,6 @@ pub(crate) struct Offscreen {
     app: App,
     /// What the window paints with, which a lost device's replacement opens again.
     display: DisplayKind,
-    /// Physical pixels, which a replacement device must hold a texture of.
-    size: UVec2,
     /// Boxed: it holds a whole `Ui`, kilobytes a driver need not carry inline.
     harness: Box<Harness>,
 }
@@ -64,7 +62,6 @@ impl Offscreen {
         Ok(Self {
             app,
             display: config.display,
-            size: config.size,
             harness,
         })
     }
@@ -83,8 +80,9 @@ impl Offscreen {
     /// "The editor harness", "A lost device is replaced offscreen too".
     pub(crate) fn painting_session(&mut self) -> Result<HarnessSession<'_, App>, DriverError> {
         if self.harness.is_device_lost() {
-            let gpu =
-                open_gpu(self.display, self.size)?.expect("a lost device was a GPU display's");
+            // The window keeps its size on the new device, which must hold a texture of it.
+            let size = self.harness.ui().display().physical();
+            let gpu = open_gpu(self.display, size)?.expect("a lost device was a GPU display's");
             self.harness.recover(gpu);
         }
         Ok(self.session())
