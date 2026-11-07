@@ -83,7 +83,7 @@ impl<'a> NodeBuilder<'a> {
     pub(crate) fn input(self, binding: ExecBinding) -> Self {
         self.push_input(ExecInput {
             required: false,
-            stamps_fs_path: false,
+            fs_path: false,
             binding,
         })
     }
@@ -93,7 +93,7 @@ impl<'a> NodeBuilder<'a> {
     pub(crate) fn required(self, binding: ExecBinding) -> Self {
         self.push_input(ExecInput {
             required: true,
-            stamps_fs_path: false,
+            fs_path: false,
             binding,
         })
     }
@@ -109,7 +109,7 @@ impl<'a> NodeBuilder<'a> {
     pub(crate) fn fs_path_input(self, binding: ExecBinding) -> Self {
         self.push_input(ExecInput {
             required: false,
-            stamps_fs_path: true,
+            fs_path: true,
             binding,
         })
     }

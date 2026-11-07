@@ -6,8 +6,9 @@
 use std::borrow::Cow;
 use std::path::{self, Component, Path, PathBuf};
 
+use scenarium::PathForm;
+
 use crate::core::document::Document;
-use crate::core::document::path_form::PathForm;
 use crate::core::io::document::error::DocumentLoadError;
 
 /// How a save writes a path that lies inside the document's folder.

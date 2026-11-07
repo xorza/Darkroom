@@ -26,6 +26,7 @@ use common::{CancelToken, ErrorChain};
 
 use crate::containers::col::Col;
 use crate::data::dynamic_value::DynamicValue;
+use crate::data::path_form::PathForm;
 use crate::data::ram_usage::RamUsage;
 use crate::exec::idx::{NodeIdx, OutputAddr, OutputIdx};
 use crate::exec::report::event_trigger::EventTrigger;
@@ -528,7 +529,9 @@ impl ExecFrame<'_, '_> {
         self.reporter
             .progress(node_id, RunPhase::Started { at: invoke_start });
 
-        let result = {
+        let result = if let Some(refusal) = self.foreign_path_input(node_idx) {
+            Err(refusal)
+        } else {
             let node = &mut self.nodes[node_idx];
             e_node
                 .lambda
@@ -652,6 +655,27 @@ impl ExecFrame<'_, '_> {
                     state: event_state.clone(),
                 }),
         );
+    }
+
+    /// The first path input of `node_idx` in the absolute form of another system. It reads the
+    /// values [`Self::collect_inputs`] resolved, so a const and a wire's value alike pass through.
+    fn foreign_path_input(&self, node_idx: NodeIdx) -> Option<RunError> {
+        let declared = &self.program.inputs[self.program[node_idx].inputs];
+        declared
+            .iter()
+            .zip(self.inputs.iter())
+            .enumerate()
+            .filter(|(_, (input, _))| input.fs_path)
+            .find_map(|(idx, (_, value))| {
+                let path = value
+                    .as_fs_paths()?
+                    .iter()
+                    .find(|path| PathForm::of(path) == PathForm::Foreign)?;
+                Some(RunError::ForeignPath {
+                    idx,
+                    path: path.clone(),
+                })
+            })
     }
 
     fn collect_inputs(&mut self, node_idx: NodeIdx) {

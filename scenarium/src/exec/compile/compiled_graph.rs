@@ -42,8 +42,9 @@ pub(crate) enum ExecBinding {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ExecInput {
     pub(crate) required: bool,
-    /// Whether a bound value's filesystem referent contributes to this input's digest.
-    pub(crate) stamps_fs_path: bool,
+    /// Whether the port declares a path: a bound value's filesystem referent contributes to this
+    /// input's digest, and a run refuses a value this system cannot read as written.
+    pub(crate) fs_path: bool,
     pub(crate) binding: ExecBinding,
 }
 

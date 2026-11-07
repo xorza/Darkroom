@@ -208,7 +208,7 @@ fn summary(compiled: &CompiledGraph, authored: &[NodeId]) -> Vec<String> {
             };
             out.push(format!(
                 "  in required={} fs_path={} {binding}",
-                input.required, input.stamps_fs_path
+                input.required, input.fs_path
             ));
         }
         out.push(format!("  outputs {}", e_node.outputs.len));

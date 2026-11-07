@@ -8,7 +8,7 @@ use std::path::{Component, Path};
 /// document saved on one system can name a path outside its folder that way. Cost: a file a Unix
 /// system names `C:\x` reads as another system's path.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum PathForm {
+pub enum PathForm {
     /// Empty, as an unset input holds.
     Unset,
     /// Absolute on this system.
@@ -21,7 +21,7 @@ pub(crate) enum PathForm {
 }
 
 impl PathForm {
-    pub(crate) fn of(value: &str) -> Self {
+    pub fn of(value: &str) -> Self {
         if value.is_empty() {
             return Self::Unset;
         }
@@ -51,7 +51,7 @@ const fn has_drive_root(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::document::path_form::PathForm;
+    use crate::data::path_form::PathForm;
     use std::path::Path;
 
     /// Each string is read on every OS: a form that this system calls absolute is `Absolute`, and

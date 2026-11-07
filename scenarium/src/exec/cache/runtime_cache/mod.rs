@@ -415,7 +415,7 @@ impl RuntimeCache {
                     // the Bind-side counterpart of the `Const` arm's fold. Needs the
                     // producer's value; unreadable (pre-run) ⇒ `None`, re-stamped at reach
                     // time by the run loop.
-                    if input.stamps_fs_path {
+                    if input.fs_path {
                         self.hash_bound_fs_path(&mut hasher, addr)?;
                     }
                 }
@@ -503,7 +503,7 @@ impl RuntimeCache {
                 // fold's stricter accessor would see almost nothing here.
                 // Over-requesting costs one walk; under-requesting costs a
                 // node its pruning.
-                ExecBinding::Wire(address) if input.stamps_fs_path => self.slots[address.node_idx]
+                ExecBinding::Wire(address) if input.fs_path => self.slots[address.node_idx]
                     .output_values()
                     .and_then(|values| values.get(address.port_idx as usize))
                     .and_then(DynamicValue::as_fs_paths),

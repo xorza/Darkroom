@@ -181,7 +181,7 @@ impl Compiler {
             let node_inputs = compiled.inputs.append(func.inputs().iter().enumerate().map(
                 |(port_idx, func_input)| ExecInput {
                     required: func_input.required,
-                    stamps_fs_path: matches!(&func_input.data_type, DataType::FsPath(_)),
+                    fs_path: matches!(&func_input.data_type, DataType::FsPath(_)),
                     binding: self.lower(graph.bindings.get(&InputPort::new(node_id, port_idx))),
                 },
             ));

@@ -32,7 +32,6 @@ pub(crate) mod inspect_target;
 pub(crate) mod item_id;
 mod layout_file;
 pub(crate) mod load_report;
-pub(crate) mod path_form;
 pub(crate) mod route;
 pub(crate) mod stubs;
 pub(crate) mod tab_ref;
@@ -47,7 +46,7 @@ use glam::Vec2;
 use palantir::DockState;
 use scenarium::{
     Binding, ConstValue, DetachedNode, DetachedNodeParts, Detachment, Graph as CoreGraph, Library,
-    Node, NodeId,
+    Node, NodeId, PathForm,
 };
 use serde::{Deserialize, Serialize};
 
@@ -56,7 +55,6 @@ use crate::core::document::graph_view::{GraphView, NodePlacement};
 use crate::core::document::inspect_target::InspectTarget;
 use crate::core::document::item_id::ItemId;
 use crate::core::document::load_report::{DocumentRepair, ForeignPath, LoadReport};
-use crate::core::document::path_form::PathForm;
 use crate::core::document::route::Route;
 use crate::core::document::stubs::Stubs;
 use crate::core::document::tab_ref::TabRef;

@@ -167,6 +167,86 @@ async fn upstream_error_retires_skipped_reads_without_harming_live_readers() {
 }
 
 #[tokio::test]
+async fn a_path_in_another_systems_form_fails_its_node_before_the_lambda_runs() {
+    let of_form = |form| {
+        [String::from("/x"), String::from(r"C:\x")]
+            .into_iter()
+            .find(|path| PathForm::of(path) == form)
+            .unwrap()
+    };
+    let foreign = of_form(PathForm::Foreign);
+    let absolute = of_form(PathForm::Absolute);
+    let path = |value: &str| ConstValue::FsPath(String::from(value));
+    let bound_path = |value: &str| ExecBinding::Const(path(value));
+    let refused = || async_lambda!(|_| { panic!("a refused path must not reach the lambda") });
+
+    let mut prog = ProgramBuilder::default();
+    let const_refused = prog
+        .node()
+        .fs_path_input(bound_path(&foreign))
+        .lambda(refused())
+        .add();
+    let source = prog
+        .node()
+        .const_input(ConstValue::FsPaths(vec![absolute.clone(), foreign.clone()]))
+        .outputs(1)
+        .lambda(async_lambda!(|Invocation {
+                                   inputs, outputs, ..
+                               }| {
+            let paths = inputs[0].as_fs_paths().unwrap().to_vec();
+            outputs[0] = DynamicValue::Static(ConstValue::FsPaths(paths));
+            Ok(())
+        }))
+        .add();
+    let wire_refused = prog
+        .node()
+        .const_input(1)
+        .fs_path_input(source.out(0))
+        .outputs(1)
+        .lambda(refused())
+        .add();
+    let blocked = prog
+        .node()
+        .input(wire_refused.out(0))
+        .lambda(refused())
+        .add();
+    let mut accepted = Vec::new();
+    for value in [absolute.as_str(), "a.fit", ""] {
+        let node = prog.node().fs_path_input(bound_path(value));
+        accepted.push(node.outputs(1).lambda(producer()).add());
+    }
+    // A foreign string in an input that does not name a file stays free, as `source` shows too.
+    let undeclared = prog.node().const_input(path(&foreign));
+    accepted.push(undeclared.outputs(1).lambda(producer()).add());
+
+    let mut run = prog.runs();
+    run.go().await;
+
+    let text = |node| match run.error(node) {
+        Some(error @ RunError::ForeignPath { .. }) => error.to_string(),
+        other => panic!("a foreign path must fail as a refusal, got {other:?}"),
+    };
+    assert_eq!(
+        text(const_refused),
+        format!("input 0 names {foreign:?}, a path this system cannot read as written")
+    );
+    assert_eq!(
+        text(wire_refused),
+        format!("input 1 names {foreign:?}, a path this system cannot read as written")
+    );
+    assert!(matches!(
+        run.error(blocked),
+        Some(RunError::SkippedUpstream)
+    ));
+    for node in accepted {
+        assert!(run.error(node).is_none());
+    }
+    // `source`, the four accepted and the two refused all reach their turn, and a lambda of the
+    // refused two would panic.
+    assert_eq!(run.ran_count(), 7);
+}
+
+#[tokio::test]
 async fn cancellation_retires_reads_owned_by_the_unreached_tail() {
     let mut prog = ProgramBuilder::default();
     let cancel = async_lambda!(|Invocation { ctx, .. }| {

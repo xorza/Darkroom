@@ -75,7 +75,8 @@ desktop for an agent or a test.
   point at another file
   ([Blender](https://docs.blender.org/manual/en/latest/files/blend/open_save.html)).
 - **A path in another system's absolute form stays as the file holds it**, in memory and on Save;
-  the load report names it. Refused: refusing the load, which makes a whole
+  the load report names it, and the executor fails the node that reads it, as this system would
+  read it as another path. Refused: refusing the load, which makes a whole
   project unopenable for one outside path; clearing the input, which a Save then loses on every
   system; the `typed-path` crate, a dependency for a check of a few lines.
 

@@ -43,6 +43,12 @@ pub enum RunError {
     CacheLoadFailed,
     #[error("demanded outputs {outputs:?} were left unbound")]
     OutputsNotProduced { outputs: Vec<usize> },
+    /// A path input holds a [`PathForm::Foreign`](crate::data::path_form::PathForm::Foreign) path,
+    /// as a document saved on another system can. Refused before the lambda runs: this system
+    /// would read it as something else, as Windows reads `/data/a.fit` on the current drive, and
+    /// quietly open or write another file.
+    #[error("input {idx} names {path:?}, a path this system cannot read as written")]
+    ForeignPath { idx: usize, path: String },
     #[error("cancelled before completing")]
     Cancelled,
 }
