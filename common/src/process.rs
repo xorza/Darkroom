@@ -7,9 +7,11 @@ use std::process::{Command, Output};
 use crate::platform;
 
 /// Open `url` with the program the user's desktop opens it with, a browser for a web address,
-/// and leave that program running.
-pub fn open_url(url: &str) -> io::Result<()> {
-    platform::open_url(url)
+/// and leave that program running. `on_failure` hears a failure, now or from another thread when
+/// the program ends, as no system answers at once for all of them. One route for every failure on
+/// every system. Refused: logging here, as this crate has no logger.
+pub fn open_url(url: &str, on_failure: impl FnOnce(io::Error) + Send + 'static) {
+    platform::open_url(url, on_failure);
 }
 
 /// Reach the terminal that started this binary, which a Windows GUI binary would not. Call it

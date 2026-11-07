@@ -34,6 +34,13 @@ that names a vector register. imaginarium and lumos build their kernels on it.
   every Isa. A narrow takes lanes in range by contract, which `Portable`
   asserts: NEON's saturating narrows measured up to 1.7× slower than its plain
   ones.
+- **A kernel is bit-identical to its reference on one architecture; a new NaN's
+  bits are not the same across two.** An op that makes a NaN, as `0.0 / 0.0` does,
+  sets its sign on x86 and clears it on aarch64, and the reference runs on the
+  same CPU as the kernel, so no test sees it
+  ([Rust](https://doc.rust-lang.org/std/primitive.f32.html) leaves that sign
+  non-deterministic). Refused: rewriting each NaN, a cost per op for bits no
+  reader takes as a value.
 - **A gather never reads outside its table.** A lane outside it reads zero;
   the hardware paths load whole lanes and send a vector with a lane past either
   end lane by lane, which only an image's first and last pixels do. A `u16` or

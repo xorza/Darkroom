@@ -58,7 +58,7 @@ pub(super) fn attach_parent_console() {
 /// Open `url` through the shell, as Explorer opens it: no command line parses it, so `&`, `^` and
 /// `|` in a query stay part of it, where `cmd /C start` reads them as its own
 /// ([ShellExecuteW](https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shellexecutew)).
-pub(super) fn open_url(url: &str) -> io::Result<()> {
+pub(super) fn open_url(url: &str, on_failure: impl FnOnce(io::Error) + Send + 'static) {
     let instance = unsafe {
         ShellExecuteW(
             None,
@@ -72,12 +72,10 @@ pub(super) fn open_url(url: &str) -> io::Result<()> {
     // Above 32 is success; at or below, the code is one of the shell's own `SE_ERR_*`, which no
     // system error names.
     let code = instance.0 as usize;
-    if code > 32 {
-        Ok(())
-    } else {
-        Err(io::Error::other(format!(
+    if code <= 32 {
+        on_failure(io::Error::other(format!(
             "the shell did not open {url}: ShellExecuteW returned {code}"
-        )))
+        )));
     }
 }
 

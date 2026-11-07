@@ -1,10 +1,5 @@
 # Open issues
 
 - darkroom never checks `ImageHandle::is_resident`. After the window host recovers from a lost GPU device, every image darkroom registered paints nothing: the viewer checker tile (`darkroom/src/gui/pane/image_viewer/mod.rs`, `draw_checker`) and every preview thumbnail and full texture in `darkroom/src/gui/state/preview_store`, which keeps no texels or source to upload again once a full texture is resident. A full texture also keeps the size `Ui::max_image_dimension` capped it to on the lost device.
-- `libraw/build.rs` sets no `-ffp-contract`, so the compilers' defaults can fuse float operations in LibRaw on aarch64, whose baseline has FMA, and not on x64, whose LibRaw build has none.
 - `lumos` calls the system's libm (`powf`, `exp`, `ln`, `sin`, `atan2` and others) in code that produces results, so the last bit of a result can differ by OS. No CI lane compares results across lanes.
-- The file watch node's description promises to ignore metadata-only events (`lens/src/fs_watch/mod.rs`), but on Windows `notify` reports an attribute or security change as `Modify(Any)`, which `is_content_change` keeps. The comment on `is_content_change` names FSEvents for `Modify(Any)`, which `notify`'s `fsevent` backend does not send.
-- `open_url` reports a failure of the shell on Windows, and on Linux and macOS only a missing program: the reaper in `unix::spawn_detached` (`common/src/platform/unix.rs`) drops the exit status of `xdg-open` and `open`.
-- The doc of `Libraw::camera_clock` says it returns the camera's own clock, but a wall-clock time inside the spring gap of the machine's time zone comes back moved.
-- `simd/AGENTS.md` says every op is specified to the bit, but an operation that makes a new NaN gives a set sign bit on x86 and a clear one on aarch64.
 - A node opens a path of another system as this system reads it, so on Windows `/data/a.fit` from a document saved on Linux or macOS reads `C:\data\a.fit` if the current drive holds that file, where the load report calls the path foreign.

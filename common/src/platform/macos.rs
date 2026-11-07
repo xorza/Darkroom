@@ -12,8 +12,8 @@ use crate::platform::unix;
 pub(super) const fn attach_parent_console() {}
 
 /// Open `url` with `open`, which Launch Services answers.
-pub(super) fn open_url(url: &str) -> io::Result<()> {
-    unix::spawn_detached("open", [url])
+pub(super) fn open_url(url: &str, on_failure: impl FnOnce(io::Error) + Send + 'static) {
+    unix::spawn_detached("open", [url], on_failure);
 }
 
 /// The host's available memory.

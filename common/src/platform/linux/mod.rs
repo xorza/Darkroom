@@ -17,8 +17,8 @@ use crate::platform::unix;
 pub(super) const fn attach_parent_console() {}
 
 /// Open `url` with `xdg-open`, which the desktop's own handlers answer.
-pub(super) fn open_url(url: &str) -> io::Result<()> {
-    unix::spawn_detached("xdg-open", [url])
+pub(super) fn open_url(url: &str, on_failure: impl FnOnce(io::Error) + Send + 'static) {
+    unix::spawn_detached("xdg-open", [url], on_failure);
 }
 
 /// The host's available memory, or less where this process's control groups leave less.

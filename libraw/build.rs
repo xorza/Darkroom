@@ -44,6 +44,12 @@ fn compile(root: &Path) {
         .include(root)
         .files(&sources)
         .flag_if_supported("-pthread")
+        // No fused multiply-add: aarch64 has FMA in its baseline, where this x64 build has none, and
+        // Clang's `on` and GCC's `fast` defaults would round float stages differently on the two.
+        // Refused: the defaults, which an LLVM issue and a GCC report trace such a difference to
+        // (<https://github.com/llvm/llvm-project/issues/91824>). Cost: possibly slower float code on
+        // aarch64. MSVC takes no such flag, and x64 has no FMA to fuse with here.
+        .flag_if_supported("-ffp-contract=off")
         // The decoders at full optimization in every profile, so a dev build decodes at the speed
         // a release does, while the crate's own Rust keeps its profile's level.
         .opt_level(3)

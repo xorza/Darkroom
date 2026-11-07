@@ -119,9 +119,9 @@ impl Debug for WatchState {
 /// else: `Access` (reads/opens/closes) and the uncategorized `Any`/`Other`
 /// catch-alls. The one carve-out is metadata-only `Modify`s (access/write time,
 /// permissions, ownership, xattrs) — that's where an access-time bump lands, so
-/// it's filtered too. `Modify(Any)` is still kept: some backends (macOS
-/// `FSEvents`) report a real write that coarsely, and dropping it would swallow
-/// genuine changes.
+/// it's filtered too. `Modify(Any)` is still kept: `notify`'s Windows backend reports a real write
+/// that coarsely, and dropping it would swallow genuine changes. Cost: it reports an attribute or
+/// security change the same way, so one of those fires on Windows alone, for one extra run.
 const fn is_content_change(kind: EventKind) -> bool {
     match kind {
         EventKind::Modify(ModifyKind::Metadata(_)) => false,
@@ -199,7 +199,8 @@ pub fn fs_watch_library() -> Library {
             .category("System")
             .description(
                 "Passes a directory through unchanged and fires `Changed` when files are added, \
-                 removed, renamed, or written — ignoring access-time and other metadata-only events.",
+                 removed, renamed, or written. It ignores access-time and other metadata-only events, \
+                 except on Windows, which reports an attribute change as a write.",
             )
             .input(
                 FuncInput::required("Directory", dir_type())

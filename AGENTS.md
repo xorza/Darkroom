@@ -118,7 +118,8 @@ arguments after a `--`; each submodule runs its own.
 - **Arch code lives in `simd` alone.** No other crate holds `std::arch`,
   `#[target_feature]` or a `cfg(target_arch)`; `clippy.toml` refuses the
   register types elsewhere. A kernel is generic over `simd::Isa`.
-- **Every vector kernel is bit-identical to its scalar reference**, and a test
+- **Every vector kernel is bit-identical to its scalar reference** on one
+  architecture (`simd/AGENTS.md` holds the NaN limit across two), and a test
   holds each tier the CPU has to it, the special values of its inputs
   included.
 - **`From` and `TryFrom` are lossless.** A conversion that loses data is a

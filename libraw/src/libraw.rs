@@ -206,7 +206,9 @@ impl Libraw {
 
     /// The camera's clock at capture as ISO 8601 text with no zone, or `None` when the file states
     /// no time. LibRaw reads it as a local time of this machine; read back in the same zone, it is
-    /// the camera's own clock, in whatever zone that was set to.
+    /// the camera's own clock, in whatever zone that was set to. A time inside this machine's
+    /// spring gap does not exist here, so `mktime` moves it and it reads moved. Accepted: a fix
+    /// needs a parse of each format LibRaw reads, and this is metadata, which no pixel reads.
     pub fn camera_clock(&self) -> Option<String> {
         let mut text: [c_char; 20] = [0; 20];
         let written = unsafe {

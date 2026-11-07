@@ -14,6 +14,9 @@ or the doc comment of the system that it governs. Then delete the change from th
 - The bundled font names, to `hide_installed_bundled` in `palantir/src/text/font_scope.rs`.
 - The foreign absolute paths, to `darkroom/AGENTS.md`, "A path in another system's absolute form
   stays as the file holds it".
+- The LibRaw flag, to `libraw/build.rs`.
+- The file watch, URL failure and camera clock corrections, to their doc comments.
+- The NaN limit, to `simd/AGENTS.md`.
 
 ## Background
 
@@ -69,12 +72,7 @@ No finding is a data-loss bug in a common workflow.
 | Finding | Effect | Evidence | Decision |
 |---|---|---|---|
 | System math library in results | The last bit of a result differs by OS | Rust docs state it, size not measured | `ops` module over `libm`, with a digest test |
-| LibRaw can fuse float operations on aarch64 | LibRaw output can differ by architecture | Compiler docs state it, not measured | `-ffp-contract=off` |
-| File watch fires on metadata on Windows | A doc promise fails on one OS | Confirmed in source | Correct the docs |
-| A failed URL open reports on Windows only | A failure is quiet on Linux and macOS | Confirmed in source | Log the exit status |
 | Shortcut labels follow a platform convention | `⌘S` against `Ctrl+S` | Confirmed in source | Keep `⌥⇧⌘S` on macOS |
-| Camera clock depends on the machine's zone | One wall-clock hour can shift | Derived from source | Correct the doc |
-| A new NaN has other bits on x86 and aarch64 | A scope limit on "bit-identical" | Rust docs state it | State the limit |
 
 ## Approved dependencies
 
@@ -85,8 +83,8 @@ This approval applies only to the change below.
 
 ## Implementation order
 
-1. The LibRaw flag, then the `ops` modules with their digest test.
-2. The doc corrections, in any order.
+1. The digest test.
+2. The `ops` modules: `palantir`, then `common` with `lumos`, then `fits-well`.
 
 ## Decisions
 
@@ -143,59 +141,6 @@ through libm. Bevy makes it a feature. Here it is the one behavior, with no feat
 - An exception in the rule for the last bit: it conflicts with the `oklab::cbrt` decision, and a
   threshold can still move a decision.
 
-### LibRaw can fuse float operations on aarch64
-
-**Where:** `libraw/build.rs`, which sets no `-ffp-contract`.
-
-**Behavior:** Clang's default is `on`, which fuses within one statement
-([Clang](https://clang.llvm.org/docs/UsersManual.html)). GCC's default for this build is `fast`,
-which fuses across statements ([GCC](https://gcc.gnu.org/onlinedocs/gcc/Optimize-Options.html)).
-A fused operation needs FMA in the target. aarch64 has it in its baseline. The `cc` crate does not
-pass the workspace's `target-cpu=x86-64-v3` to the compiler, so the x64 build of LibRaw has no FMA.
-
-**Effect:** `UnpackedRaw::processed_by_libraw` runs for a sensor that `lumos` does not demosaic and
-for a chosen LibRaw quality. Its float stages can round differently on aarch64 and x64. The 16-bit
-output hides most of that. This review did not measure it, and no CI test runs it on real data.
-
-**Decision: add `-ffp-contract=off` through `flag_if_supported` in `libraw/build.rs`.** It touches no
-upstream source. This is the known fix: an
-[LLVM issue](https://www.github.com/llvm/llvm-project/issues/91824) and a
-[GCC report](https://mail-archive.com/gcc-patches@gcc.gnu.org/msg303356.html) both resolve an aarch64
-difference with it, [GSL's RPM](https://git.almalinux.org/rpms/gsl/commit/1fdd10c1a061741349e429c93679ad5e487d6ad7)
-sets it on aarch64, and [Blender](https://developer.blender.org/rB406d74769597e318117ad5b3837e7283d9fd2aa5)
-turned contraction off for the same reason.
-
-**Cost:** A possible small slowdown of LibRaw's float code on aarch64. `flag_if_supported` skips the
-flag for MSVC. LibRaw's own libm calls stay, so this removes one cause of a difference and not all of
-them.
-
-### File watch fires on metadata on Windows
-
-**Where:** `lens/src/fs_watch/mod.rs:125`.
-
-**Behavior:** The node's description promises to ignore metadata-only events, and
-`is_content_change` keeps `Modify(Any)`. `notify` 8 asks Windows for attribute and security changes
-(`windows.rs:284`) and reports each as `Modify(Any)` (`windows.rs:449`). inotify and FSEvents report
-them as `Modify(Metadata)`, which the filter drops.
-
-**The comment names the wrong backend.** It says that FSEvents reports a write as `Modify(Any)`. In
-`notify` 8 the `fsevent` backend sends no `Modify(Any)`, and it reports a write as `Modify(Data)`.
-Windows is the coarse one.
-
-**Decision: correct the comment, and state the Windows behavior in the node's description.** The cost
-of a false fire is one extra run, and `notify` gives no way to tell the two events apart on Windows.
-
-### A failed URL open reports on Windows only
-
-**Where:** `open_url` in `common/src/platform/`.
-
-**Behavior:** Windows returns the failure of `ShellExecuteW`. Linux and macOS start `xdg-open` or
-`open` through `spawn_detached`, whose reaper thread drops the exit status. So only a missing program
-reports on those two systems. The caller in `darkroom/src/gui/pane/preferences.rs:367` logs an error.
-
-**Decision: the reaper logs a nonzero exit status.** The log then reads the same on all three systems.
-The caller does not wait for the exit, as the call must not block the frame.
-
 ### Shortcut labels follow a platform convention
 
 **Where:** `Platform::labels_with_symbols` in `palantir/src/common/platform.rs`.
@@ -209,31 +154,6 @@ Control, Option, Shift, Command. This is a deliberate exception to "a convention
 and it applies to a label only. The chord itself stays the same on every OS.
 
 **Refused:** Names on every OS, such as `Cmd+Shift+Alt+S`.
-
-### Camera clock depends on the machine's zone
-
-**Where:** `Libraw::camera_clock` in `libraw/src/libraw.rs:210`.
-
-**Behavior:** LibRaw converts the camera's text through `mktime`, and the shim converts it back
-through `localtime`. The doc says that this returns the camera's own clock. A wall-clock time inside
-the machine zone's spring gap does not exist there, so `mktime` moves it. The value reaches the
-image's `date_local` metadata.
-
-**Decision: correct the doc comment, and accept the gap.** A fix needs a parse of each format that
-LibRaw reads. The value is metadata, and no pixel depends on it.
-
-### A new NaN has other bits on x86 and aarch64
-
-**Where:** `simd/AGENTS.md`, "Every op is specified to the bit".
-
-**Behavior:** An operation that makes a new NaN, such as `0.0 / 0.0`, gives a set sign bit on x86 and
-a clear one on aarch64. The [Rust docs](https://doc.rust-lang.org/std/primitive.f32.html) state that
-this sign is non-deterministic. The scalar reference runs on the same CPU as the kernel, so the tests
-pass, and they cannot see this.
-
-**Decision: state the limit in `simd/AGENTS.md`.** A kernel is bit-identical to its reference on one
-architecture, and NaN bits are not the same across two. Change nothing else. The digest test must not
-hash a NaN's bits.
 
 ## Accepted differences
 

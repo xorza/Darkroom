@@ -59,7 +59,8 @@ extern "C" unsigned libraw_lumos_crx_coding(libraw_data_t *lr, int *enc_type, in
 }
 
 // LibRaw reads the EXIF capture time with `mktime`, as a local time of the machine decoding it;
-// `localtime` in the same process gives the camera's clock back, whatever zone this machine is in.
+// `localtime` in the same process gives the camera's clock back, whatever zone this machine is in,
+// except a time inside that zone's spring gap, which `mktime` moved.
 extern "C" unsigned libraw_lumos_camera_clock(libraw_data_t *lr, char *text, size_t capacity)
 {
   time_t stamp = lr->other.timestamp;

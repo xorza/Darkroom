@@ -281,8 +281,8 @@ pub(crate) fn symlink_dir(original: &Path, link: &Path) -> io::Result<()> {
 }
 
 /// Open `url` with the program the desktop opens it with, leaving that program running.
-pub(crate) fn open_url(url: &str) -> io::Result<()> {
-    os::open_url(url)
+pub(crate) fn open_url(url: &str, on_failure: impl FnOnce(io::Error) + Send + 'static) {
+    os::open_url(url, on_failure);
 }
 
 /// Join the console of the terminal that started this binary, where it would have none: Windows.

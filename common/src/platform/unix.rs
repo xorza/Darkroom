@@ -20,14 +20,22 @@ use crate::thread;
 
 /// Start `program` with `args` and leave it running: nothing reads its output, and a thread of
 /// its own waits for its exit, so the system reaps it rather than keep a zombie until this
-/// process ends.
+/// process ends. `on_failure` hears a start that fails, here, or a nonzero exit, on that thread.
 pub(super) fn spawn_detached(
-    program: impl AsRef<OsStr>,
+    program: &str,
     args: impl IntoIterator<Item = impl AsRef<OsStr>>,
-) -> io::Result<()> {
-    let mut child = Command::new(program).args(args).spawn()?;
-    thread::spawn("child-reaper", move || child.wait().ok());
-    Ok(())
+    on_failure: impl FnOnce(io::Error) + Send + 'static,
+) {
+    let mut child = match Command::new(program).args(args).spawn() {
+        Ok(child) => child,
+        Err(error) => return on_failure(error),
+    };
+    let program = program.to_owned();
+    thread::spawn("child-reaper", move || match child.wait() {
+        Ok(status) if status.success() => {}
+        Ok(status) => on_failure(io::Error::other(format!("{program} ended with {status}"))),
+        Err(error) => on_failure(error),
+    });
 }
 
 /// A new file at `path`, unlinked as soon as it is created, before any data goes in. A crash in
@@ -153,5 +161,39 @@ pub(crate) mod internals {
     pub(crate) fn set_uncommon_permissions(path: &Path) -> Option<Permissions> {
         fs::set_permissions(path, Permissions::from_mode(0o640)).unwrap();
         Some(fs::metadata(path).unwrap().permissions())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    use crate::platform::unix::spawn_detached;
+
+    /// What `on_failure` of a run of `program` hears, `None` by the time the program's reaper
+    /// thread ends with nothing to say.
+    fn failure_of(program: &str, args: &[&str]) -> Option<String> {
+        let (send, receive) = mpsc::channel::<io::Error>();
+        spawn_detached(program, args, move |error| send.send(error).unwrap());
+        // Disconnected once the reaper drops `on_failure` unheard. The bound is for a hang alone.
+        match receive.recv_timeout(Duration::from_secs(10)) {
+            Ok(error) => Some(error.to_string()),
+            Err(mpsc::RecvTimeoutError::Disconnected) => None,
+            Err(mpsc::RecvTimeoutError::Timeout) => panic!("{program} never ended"),
+        }
+    }
+
+    /// A program that succeeds says nothing, a nonzero exit says so with the program and its code,
+    /// and a program that does not start says so at once.
+    #[test]
+    fn a_failure_reaches_the_callback() {
+        assert_eq!(failure_of("sh", &["-c", "exit 0"]), None);
+        assert_eq!(
+            failure_of("sh", &["-c", "exit 3"]).as_deref(),
+            Some("sh ended with exit status: 3")
+        );
+        assert!(failure_of("darkroom-no-such-program", &[]).is_some());
     }
 }

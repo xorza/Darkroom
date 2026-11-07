@@ -98,7 +98,7 @@ fn classifies_filesystem_event_kinds() {
     assert!(is_content_change(EventKind::Modify(ModifyKind::Name(
         RenameMode::Both
     ))));
-    // Coarse `Modify(Any)` is kept — macOS FSEvents reports real writes that way.
+    // Coarse `Modify(Any)` is kept: `notify`'s Windows backend reports real writes that way.
     assert!(is_content_change(EventKind::Modify(ModifyKind::Any)));
 
     // Dropped: metadata-only changes (incl. access time), reads, and the
