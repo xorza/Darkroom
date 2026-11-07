@@ -549,7 +549,7 @@ fn a_folder_a_copy_would_break_is_refused() {
 /// 325 × 241, the body at (24, 24) in it. A rect of the canvas at the node's place, 100 × 50 at
 /// zoom 1, starts at the body's corner, and one past the window or of negative size is empty. A
 /// pane's shot is its rect, rounded out; a name no visible tab shows lists those that are. The CPU
-/// display lays the node out where the GPU one does, and has no shots.
+/// display lays the node out where the GPU one does, and has no shots and no device to lose.
 #[test]
 fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
     let window = UVec2::new(400, 340);
@@ -672,6 +672,13 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
         cpu.shot(&Region::Window, 100),
         Err(DriverError::NoGpu)
     ));
+    assert!(matches!(
+        cpu.act(&[Action::LoseDevice]),
+        Err(ActFailure {
+            ran: 0,
+            error: DriverError::NoGpu
+        })
+    ));
 }
 
 /// View ▸ Copy View as Image puts an image on the clipboard, which then holds no text; View ▸
@@ -707,6 +714,29 @@ fn the_view_menu_copies_and_saves_the_window() {
     let saved = decode(&fs::read(dir.join("view.png")).unwrap());
     let shot = driver.shot(&Region::Window, 400).unwrap();
     assert_eq!(saved, decode(&shot.png));
+}
+
+/// A lost device is replaced before the next frame paints, and every texture is made again on the
+/// new one: a shot after the loss is the window as the shot before it showed it. The action loses
+/// the device and settles on the new one.
+#[test]
+fn a_lost_device_is_replaced_and_the_editor_paints_as_before() {
+    let mut driver = small(DisplayKind::IsolatedTestGpu);
+    let dir = TempDir::new("darkroom-driver-lose");
+    let path = fixture::project(dir.path(), &[BRIGHTNESS]);
+    driver.open(&path, OpenMode::Copy).unwrap();
+    let before = decode(&driver.shot(&Region::Window, 400).unwrap().png);
+
+    driver.offscreen().lose_device().unwrap();
+    assert!(driver.offscreen().is_device_lost());
+    let after = decode(&driver.shot(&Region::Window, 400).unwrap().png);
+    assert!(!driver.offscreen().is_device_lost());
+    assert_eq!(after, before);
+
+    driver.act(&[Action::LoseDevice]).unwrap();
+    assert!(!driver.offscreen().is_device_lost());
+    let again = decode(&driver.shot(&Region::Window, 400).unwrap().png);
+    assert_eq!(again, before);
 }
 
 /// The extension names the format: a `.darkroomz` project saves zipped, and Save As to a bare

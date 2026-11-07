@@ -63,6 +63,10 @@ desktop for an agent or a test.
   dialog scripted under `--mcp`, which cancels the person's own.
 - **A screenshot is product API**: `darkroom_shot` asks through `Ui::request_screenshot`, as View ▸
   Copy View as Image does. Refused: a test-only readback.
+- **A lost device is replaced offscreen too**, before the next frame paints, through the call the
+  start made, as the window's host replaces it; `lose_device` in `darkroom_act` loses it on
+  either backend, so an agent sees the editor recover. Refused: a session that ends with its
+  device, which a GPU reset under a headless server would end for good.
 - **No CPU display in the product**: headless needs a GPU adapter, and a software one counts.
   Refused: a silent fallback, which passes tests that never ran.
 

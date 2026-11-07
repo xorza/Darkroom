@@ -387,17 +387,17 @@ async fn a_panic_or_a_quit_ends_the_session() {
 }
 
 /// On the GPU display a shot comes back as a PNG image block and its legend, which names the
-/// node; an action can end in one.
+/// node; an action can end in one. A lost device is replaced before the actions after it.
 #[tokio::test]
 async fn a_shot_is_an_image_and_its_legend() {
     let dir = TempDir::new("darkroom-mcp-shot");
     let project = fixture::project(dir.path(), &[BRIGHTNESS]);
-    let Connected { client, .. } = connect(DisplayKind::TestGpu, Some(project)).await;
+    let Connected { client, .. } = connect(DisplayKind::IsolatedTestGpu, Some(project)).await;
     let acted = call(
         &client,
         "darkroom_act",
         json!({
-            "actions": [{ "click": { "at": { "node": BRIGHTNESS } } }],
+            "actions": ["lose_device", { "click": { "at": { "node": BRIGHTNESS } } }],
             "shot": { "region": { "node": BRIGHTNESS }, "max_side": 200 },
         }),
     )

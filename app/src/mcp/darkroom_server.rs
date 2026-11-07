@@ -101,7 +101,8 @@ impl DarkroomServer {
 
     #[tool(
         description = "Play input into the editor: clicks, double clicks, drags, scrolls, \
-        pinches, key chords, typed text, and the answers file dialogs take. The editor settles \
+        pinches, key chords, typed text, the answers file dialogs take, and a GPU device loss, \
+        \"lose_device\", to see the editor recover. The editor settles \
         after each action; the first that fails stops the rest, and one that quits the editor \
         ends the session and the server. Name each place with a locator: \
         node, header, port, text, world, screen, offset or nth. Answers with the selection, the \

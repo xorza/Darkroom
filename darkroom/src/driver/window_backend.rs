@@ -64,6 +64,14 @@ impl WindowBackend {
             .map_err(|error| DriverError::played("the widget list", error))
     }
 
+    /// Lose the window host's device between two frames; the host opens a new one before the
+    /// next frame, which the next settle waits for.
+    pub(crate) fn lose_device(&mut self) -> Result<(), DriverError> {
+        self.remote
+            .lose_device()
+            .map_err(|error| DriverError::played("the device loss", error))
+    }
+
     /// Refuse to go on once the window closed: the session ends with it.
     pub(crate) fn running(&self) -> Result<(), DriverError> {
         if self.link.handle.is_open(MAIN_WINDOW) {

@@ -96,6 +96,15 @@ impl Backend {
         }
     }
 
+    /// Lose the device the editor paints with; the next frame paints on a new one. In the window
+    /// every window of the app loses it.
+    pub(crate) fn lose_device(&mut self) -> Result<(), DriverError> {
+        match self {
+            Self::Offscreen(offscreen) => offscreen.lose_device(),
+            Self::Window(window) => window.lose_device(),
+        }
+    }
+
     pub(crate) fn settle(&mut self, step: &str) -> Result<u32, DriverError> {
         match self {
             Self::Offscreen(offscreen) => offscreen.settle(step),
@@ -114,7 +123,9 @@ impl Backend {
     /// A capture of `region`, as a later frame paints it.
     pub(crate) fn shot(&mut self, region: &Region, max_side: u32) -> Result<Capture, DriverError> {
         match self {
-            Self::Offscreen(offscreen) => Capture::take(&mut offscreen.session(), region, max_side),
+            Self::Offscreen(offscreen) => {
+                Capture::take(&mut offscreen.painting_session()?, region, max_side)
+            }
             Self::Window(window) => Capture::take(window.remote(), region, max_side),
         }
     }

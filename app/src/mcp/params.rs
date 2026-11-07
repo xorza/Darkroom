@@ -143,6 +143,10 @@ pub(crate) enum ActionParam {
     Type(String),
     /// The answer the next file dialog gets. Queue it before the action that opens the dialog.
     Answer(AnswerParam),
+    /// Lose the GPU device, as a GPU hang or a driver reset does, to see the editor recover: it
+    /// paints whole on a new device before the next action. In the window, every window of the
+    /// app loses it.
+    LoseDevice,
 }
 
 /// A place in the window: by what the editor shows first, by text next, by position last.
@@ -283,6 +287,7 @@ impl TryFrom<ActionParam> for Action {
             }
             ActionParam::Type(text) => play(Play::InsertText(text)),
             ActionParam::Answer(answer) => Ok(Self::Answer(answer.into())),
+            ActionParam::LoseDevice => Ok(Self::LoseDevice),
         }
     }
 }

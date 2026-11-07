@@ -31,7 +31,7 @@ pub enum DriverError {
     UnsettledInTime { step: String, waited: Duration },
     #[error("{region} covers none of the window; pick a region inside it")]
     EmptyRegion { region: String },
-    #[error("a shot needs pixels, and this session has none: start it with the GPU display")]
+    #[error("this session paints with no GPU: start it with the GPU display")]
     NoGpu,
     #[error(
         "a window of {}x{} is past this GPU's {limit} pixels a side; ask for a smaller one",

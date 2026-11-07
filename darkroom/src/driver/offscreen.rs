@@ -8,7 +8,8 @@ use glam::UVec2;
 use palantir::PowerPreference;
 use palantir::wgpu::Features;
 use palantir::{
-    AgentWindow, Depth, Harness, HarnessSession, InspectedWidget, RequestedGpu, Ui, WindowCommand,
+    AgentWindow, Depth, Gpu, Harness, HarnessSession, InspectedWidget, RequestedGpu, Ui,
+    WindowCommand,
 };
 
 use crate::core::io::preferences::preferences_store::PreferencesStore;
@@ -26,6 +27,10 @@ const FRAME: Duration = Duration::from_nanos(16_666_667);
 #[derive(Debug)]
 pub(crate) struct Offscreen {
     app: App,
+    /// What the window paints with, which a lost device's replacement opens again.
+    display: DisplayKind,
+    /// Physical pixels, which a replacement device must hold a texture of.
+    size: UVec2,
     /// Boxed: it holds a whole `Ui`, kilobytes a driver need not carry inline.
     harness: Box<Harness>,
     /// The window commands the harness had recorded when this app launched: a close past them
@@ -46,19 +51,9 @@ impl Offscreen {
     /// An app on an empty document in a window `config` describes, or the error of a GPU display
     /// on a machine with no usable adapter.
     pub(crate) fn new(config: SessionConfig) -> Result<Self, DriverError> {
-        let depth = match config.display {
-            DisplayKind::Gpu => {
-                // No optional features: the editor draws with what every adapter has.
-                let gpu =
-                    RequestedGpu::headless(PowerPreference::HighPerformance, Features::empty())?;
-                check_window(config.size, gpu.gpu.max_texture_dim().get())?;
-                Depth::gpu(gpu.gpu)
-            }
-            #[cfg(feature = "internals")]
-            #[expect(clippy::absolute_paths, reason = "a gated arm takes no gated import")]
-            DisplayKind::TestGpu => Depth::gpu(palantir::internals::headless_test_gpu().handles()),
-            #[cfg(feature = "internals")]
-            DisplayKind::Cpu => Depth::Record,
+        let depth = match open_gpu(config.display, config.size)? {
+            Some(gpu) => Depth::gpu(gpu),
+            None => Depth::Record,
         };
         // The harness's own settles step a frame as this driver's do.
         let mut harness = Box::new(
@@ -73,6 +68,8 @@ impl Offscreen {
         let app = launch(harness.ui_mut());
         Ok(Self {
             app,
+            display: config.display,
+            size: config.size,
             harness,
             launched_at: 0,
         })
@@ -87,12 +84,37 @@ impl Offscreen {
         self.harness.session(&mut self.app)
     }
 
+    /// [`Self::session`] on a device that draws: a lost one is replaced first, through the call
+    /// the start made, as a window's host replaces it before its next frame. `darkroom/AGENTS.md`,
+    /// "The editor harness", "A lost device is replaced offscreen too".
+    pub(crate) fn painting_session(&mut self) -> Result<HarnessSession<'_, App>, DriverError> {
+        if self.harness.is_device_lost() {
+            let gpu =
+                open_gpu(self.display, self.size)?.expect("a lost device was a GPU display's");
+            self.harness.recover(gpu);
+        }
+        Ok(self.session())
+    }
+
+    /// Lose the window's device, as a GPU hang does; the next painting session replaces it.
+    pub(crate) fn lose_device(&mut self) -> Result<(), DriverError> {
+        #[cfg(feature = "internals")]
+        assert!(
+            !matches!(self.display, DisplayKind::TestGpu),
+            "a test that loses the device takes DisplayKind::IsolatedTestGpu: the shared one is \
+             every test's"
+        );
+        self.session()
+            .lose_device()
+            .map_err(|error| DriverError::played("the device loss", error))
+    }
+
     /// Play `action`, as palantir's harness plays it, settling after each step it takes, the
     /// previews converting included ([`App::is_busy`](palantir::App::is_busy)). A step that quits
     /// the editor ends with [`DriverError::Quit`].
     pub(crate) fn play(&mut self, action: &Play) -> Result<u32, DriverError> {
         let played = self
-            .session()
+            .painting_session()?
             .play(std::slice::from_ref(action))
             .map_err(|failed| DriverError::played(&format!("{action:?}"), failed.error));
         self.running()?;
@@ -152,10 +174,31 @@ impl Offscreen {
     /// in real time. A frame that quits the editor ends the step with [`DriverError::Quit`]: every
     /// step ends here, so no call goes on past a quit, whatever it guards at its start.
     pub(crate) fn settle(&mut self, step: &str) -> Result<u32, DriverError> {
-        let settled = self.session().settle();
+        let settled = self.painting_session()?.settle();
         self.running()?;
         settled.map_err(|error| DriverError::played(step, error))
     }
+}
+
+/// The device `display` paints with, opened as the start and each replacement of a lost one open
+/// it, or none for a display that paints nothing; refused when the window is past what it holds.
+fn open_gpu(display: DisplayKind, size: UVec2) -> Result<Option<Gpu>, DriverError> {
+    let gpu = match display {
+        // No optional features: the editor draws with what every adapter has.
+        DisplayKind::Gpu => {
+            RequestedGpu::headless(PowerPreference::HighPerformance, Features::empty())?.gpu
+        }
+        #[cfg(feature = "internals")]
+        #[expect(clippy::absolute_paths, reason = "a gated arm takes no gated import")]
+        DisplayKind::TestGpu => palantir::internals::headless_test_gpu().handles(),
+        #[cfg(feature = "internals")]
+        #[expect(clippy::absolute_paths, reason = "a gated arm takes no gated import")]
+        DisplayKind::IsolatedTestGpu => palantir::internals::isolated_headless_test_gpu().handles(),
+        #[cfg(feature = "internals")]
+        DisplayKind::Cpu => return Ok(None),
+    };
+    check_window(size, gpu.max_texture_dim().get())?;
+    Ok(Some(gpu))
 }
 
 /// An app on an empty document.
@@ -178,6 +221,10 @@ pub(crate) mod internals {
     impl Offscreen {
         pub(crate) const fn app(&self) -> &App {
             &self.app
+        }
+
+        pub(crate) fn is_device_lost(&self) -> bool {
+            self.harness.is_device_lost()
         }
     }
 }

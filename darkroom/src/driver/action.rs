@@ -14,4 +14,7 @@ pub enum Action {
     Play(Play),
     /// Queue the answer the next file dialog gets.
     Answer(DialogAnswer),
+    /// Lose the GPU device, as a GPU hang or a driver reset does, to see the editor recover: the
+    /// settle after it paints the whole editor on a new device.
+    LoseDevice,
 }

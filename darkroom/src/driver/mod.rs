@@ -56,6 +56,11 @@ pub enum DisplayKind {
     /// enumerated its adapters crashed in the Vulkan loader on lavapipe (CI run 40528808017).
     #[cfg(feature = "internals")]
     TestGpu,
+    /// [`DisplayKind::TestGpu`] on a device of its own, palantir's `isolated_headless_test_gpu`
+    /// on the same adapter, for a test that loses it: the shared device is every test's. Test
+    /// code.
+    #[cfg(feature = "internals")]
+    IsolatedTestGpu,
 }
 
 /// Where [`Driver::open`] opens a project. `darkroom/AGENTS.md`, "The editor harness", "A
@@ -260,6 +265,10 @@ impl Driver {
         let step = format!("{action:?}");
         match action {
             Action::Play(action) => self.backend.play(action),
+            Action::LoseDevice => {
+                self.backend.lose_device()?;
+                self.backend.settle(&step)
+            }
             Action::Answer(answer) => {
                 let answer = answer.clone();
                 self.backend
