@@ -72,8 +72,8 @@ use crate::gui::pane::graph_ui::unsettled_ctx::UnsettledCtx;
 /// this frame into a single [`CanvasGesture`](canvas_input::CanvasGesture).
 /// `input` resolves it once per frame, and each controller is handed that
 /// classification and consumes only its own variant, so there's no hand-kept disjointness across files — the
-/// precedence lives in one match. Wheel/pinch zoom isn't a latch gesture (it
-/// coexists), so it stays inside `CameraGesture::input` regardless of the
+/// precedence lives in one match. Scroll and pinch aren't latch gestures (they
+/// coexist), so they stay inside `CameraGesture::input` regardless of the
 /// classification.
 ///
 /// Node panels and port circles live in the *inner* canvas and hit-test
@@ -297,7 +297,8 @@ impl GraphUi {
         //   convention; left-drag is the rubber-band selection). Pulled via
         //   `Ui::drag_delta_by(.., PointerButton::Middle)`, since the
         //   left-only `ResponseState::drag_delta` doesn't carry middle.
-        // - `SCROLL`: mouse wheel / touchpad swipe = zoom-about-cursor.
+        // - `SCROLL`: mouse wheel / touchpad swipe = pan, under the command
+        //   key zoom-about-cursor.
         // - `PINCH`: touchpad pinch = zoom-about-cursor.
         // Node panels (descendants of the *inner* canvas, which
         // carries the pan/zoom transform) hit-test first; only bare

@@ -1,3 +1,6 @@
+use glam::UVec2;
+use palantir::{Harness, Rect};
+
 use super::*;
 
 /// The canvas's range — any range does, and this one has room on both sides
@@ -149,16 +152,177 @@ fn a_frame_scrolls_on_any_scroll_channel() {
 
     let mut pixels = idle;
     pixels.scroll.pixels = Vec2::new(0.0, 3.0);
-    let mut lines = idle;
-    lines.scroll.lines.y = -1.0;
+    let mut notches = idle;
+    notches.scroll.notches.y = -1.0;
+    let mut sideways = idle;
+    sideways.scroll.notches.x = 1.0;
     let mut pinch = idle;
     pinch.scroll.zoom = ZoomFactor::new(1.1).unwrap();
-    for resp in [pixels, lines, pinch] {
+    for resp in [pixels, notches, sideways, pinch] {
         assert!(scrolled(&resp), "{:?}", resp.scroll);
     }
+}
 
-    // A horizontal wheel delta drives nothing here, so it is no scroll.
-    let mut sideways = idle;
-    sideways.scroll.lines.x = 1.0;
-    assert!(!scrolled(&sideways));
+/// A frame reads the response's delta, pointer and rect and the theme's line height, and the
+/// command key alone selects the zoom: Shift, which turns a wheel sideways, does not.
+#[test]
+fn a_scroll_frame_reads_its_surface_and_the_command_key() {
+    let delta = ScrollDelta {
+        pixels: Vec2::new(1.0, 2.0),
+        ..ScrollDelta::default()
+    };
+    let mut resp = ResponseState {
+        scroll: delta,
+        pointer_local: Some(Vec2::new(3.0, 4.0)),
+        layout_rect: Some(Rect::new(5.0, 6.0, 70.0, 80.0)),
+        ..ResponseState::default()
+    };
+
+    let mut h = Harness::new(UVec2::new(100, 100));
+    let line_px = h.ui().theme().text.line_height();
+    for (mods, action) in [
+        (Modifiers::NONE, ScrollAction::Pan),
+        (Modifiers::SHIFT, ScrollAction::Pan),
+        (Modifiers::CTRL, ScrollAction::Zoom),
+        (Modifiers::CTRL | Modifiers::SHIFT, ScrollAction::Zoom),
+    ] {
+        h.hold_modifiers(mods);
+        let frame = ScrollFrame::of(h.ui(), &resp);
+        assert_eq!(frame.action, action, "{mods:?}");
+        assert_eq!(frame.delta, delta);
+        assert_eq!(frame.pivot, Some(Vec2::new(3.0, 4.0)));
+        assert_eq!(frame.pane, Size::new(70.0, 80.0));
+        assert_eq!(frame.line_px, line_px);
+    }
+
+    resp.layout_rect = None;
+    assert_eq!(ScrollFrame::of(h.ui(), &resp).pane, Size::ZERO);
+}
+
+/// A frame at the viewport's start, 20 px a line, in an 800 × 600 pane.
+fn frame(action: ScrollAction, delta: ScrollDelta) -> ScrollFrame {
+    ScrollFrame {
+        delta,
+        pivot: Some(Vec2::new(100.0, 50.0)),
+        pane: Size::new(800.0, 600.0),
+        line_px: 20.0,
+        action,
+    }
+}
+
+const START: Viewport = Viewport {
+    pan: Vec2::new(10.0, 20.0),
+    zoom: 2.0,
+};
+
+fn folded(frame: ScrollFrame) -> Viewport {
+    let mut v = START;
+    RANGE.fold_scroll(&mut v, frame);
+    v
+}
+
+fn zoomed(factor: f32) -> Viewport {
+    let mut v = START;
+    RANGE.zoom_about(&mut v, Vec2::new(100.0, 50.0), factor);
+    v
+}
+
+/// With no command key every unit pans, on both axes, whatever device sent it: pixels as they
+/// are, lines at 20 px, a page at max(0.875 × 600, 600 − 40) = 560 px. The zoom does not move.
+#[test]
+fn a_scroll_pans_in_every_unit() {
+    let rows = [
+        (
+            ScrollDelta {
+                pixels: Vec2::new(3.0, 4.0),
+                ..ScrollDelta::default()
+            },
+            Vec2::new(7.0, 16.0),
+        ),
+        (
+            ScrollDelta {
+                lines: Vec2::new(1.0, -2.0),
+                notches: Vec2::new(1.0, -2.0),
+                ..ScrollDelta::default()
+            },
+            Vec2::new(-10.0, 60.0),
+        ),
+        (
+            ScrollDelta {
+                notches: Vec2::new(0.0, 1.0),
+                pages: Vec2::new(0.0, 1.0),
+                ..ScrollDelta::default()
+            },
+            Vec2::new(10.0, -540.0),
+        ),
+        (
+            ScrollDelta {
+                notches: Vec2::new(0.0, 1.0),
+                ..ScrollDelta::default()
+            },
+            START.pan,
+        ),
+    ];
+    for (delta, pan) in rows {
+        assert_eq!(
+            folded(frame(ScrollAction::Pan, delta)),
+            Viewport { pan, zoom: 2.0 },
+            "{delta:?}",
+        );
+    }
+}
+
+/// Under the command key a scroll zooms about the pointer and pans nothing else: a notch is 20 px
+/// of zoom, and a setting of three lines per notch leaves that step alone.
+#[test]
+fn a_scroll_under_the_command_key_zooms_by_notches() {
+    let notch = ScrollDelta {
+        notches: Vec2::new(0.0, -1.0),
+        lines: Vec2::new(0.0, -1.0),
+        ..ScrollDelta::default()
+    };
+    let three_lines = ScrollDelta {
+        lines: Vec2::new(0.0, -3.0),
+        ..notch
+    };
+    let one_step = zoomed(scroll_to_zoom_factor(-20.0));
+    assert_ne!(one_step, START);
+    assert_eq!(folded(frame(ScrollAction::Zoom, notch)), one_step);
+    assert_eq!(folded(frame(ScrollAction::Zoom, three_lines)), one_step);
+
+    let pixels = ScrollDelta {
+        pixels: Vec2::new(0.0, 8.0),
+        ..ScrollDelta::default()
+    };
+    assert_eq!(
+        folded(frame(ScrollAction::Zoom, pixels)),
+        zoomed(scroll_to_zoom_factor(8.0)),
+    );
+
+    // A sideways scroll has no step to zoom by.
+    let sideways = ScrollDelta {
+        notches: Vec2::new(1.0, 0.0),
+        lines: Vec2::new(1.0, 0.0),
+        ..ScrollDelta::default()
+    };
+    assert_eq!(folded(frame(ScrollAction::Zoom, sideways)), START);
+
+    // With the pointer off the surface there is no pivot to zoom about.
+    let off = ScrollFrame {
+        pivot: None,
+        ..frame(ScrollAction::Zoom, notch)
+    };
+    assert_eq!(folded(off), START);
+}
+
+/// A pinch zooms about the pointer with or without the command key.
+#[test]
+fn a_pinch_zooms_under_either_action() {
+    let pinch = ScrollDelta {
+        zoom: ZoomFactor::new(1.5).unwrap(),
+        ..ScrollDelta::default()
+    };
+    for action in [ScrollAction::Pan, ScrollAction::Zoom] {
+        assert_eq!(folded(frame(action, pinch)), zoomed(1.5), "{action:?}");
+    }
 }

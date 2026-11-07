@@ -13,6 +13,7 @@ use crate::gui::pane::graph_ui::canvas_input::CanvasGesture;
 use crate::gui::pane::graph_ui::gesture::pan_zoom;
 use crate::gui::pane::graph_ui::unsettled_ctx::UnsettledCtx;
 use crate::gui::widgets::pan_drag;
+use crate::gui::widgets::zoom_range::ScrollFrame;
 
 /// The camera's held input: a middle-button pan, from its press to its release. Wheel, touchpad
 /// and pinch input has no press to hold. The camera is outside the undo history, so a pan is no
@@ -43,11 +44,10 @@ impl CameraGesture {
     /// - **Middle-button drag** (`Sense::DRAG` + `Ui::drag_delta_by`): canvas
     ///   pan, `anchor + delta` from the latch until release. Left-drag stays with
     ///   rubber-band selection.
-    /// - **Scroll** (`Sense::SCROLL`): a two-finger touchpad swipe pans, and a
-    ///   mouse wheel zooms about the cursor (graph-editor convention: Figma /
-    ///   Blender node editor / `ComfyUI`). Palantir ingests the scroll delta
-    ///   already negated, so `+y` means "scroll content down" → zoom out, and
-    ///   `-y` (wheel up) → zoom in.
+    /// - **Scroll** (`Sense::SCROLL`): a wheel or a touchpad swipe pans, and either zooms about
+    ///   the cursor under the command key (`darkroom/AGENTS.md`, "One scroll rule"). Palantir
+    ///   ingests the scroll delta already negated, so `+y` means "scroll content down" → zoom
+    ///   out, and `-y` (wheel up) → zoom in.
     /// - **Pinch** (`Sense::PINCH`): zoom about the cursor, with the
     ///   `Response::pointer_local` pivot.
     pub(crate) fn input(&mut self, ui: &Ui, stage: &mut Stage<'_, UnsettledCtx<'_>>) {
@@ -64,13 +64,12 @@ impl CameraGesture {
         let resp = ui.response_for(canvas::outer_wid());
         let mut v = viewport;
         // Pan latch comes from the central classification; continuation and
-        // wheel/pinch zoom below read the response directly (not arbitration).
+        // scroll and pinch below read the response directly (not arbitration).
         if ctx.input().gesture == Some(CanvasGesture::Pan) {
             self.pan = Some(viewport.pan);
         }
         pan_drag::fold(&mut self.pan, resp.middle.drag.delta(), &mut v.pan);
-        let line_px = ui.theme().text.line_height();
-        pan_zoom::CANVAS_ZOOM.fold_scroll(&mut v, line_px, &resp);
+        pan_zoom::CANVAS_ZOOM.fold_scroll(&mut v, ScrollFrame::of(ui, &resp));
         // Only emit when the gesture actually moved the viewport (approx
         // compare — exact float `!=` would emit on the last-bit noise the
         // zoom-about-cursor algebra leaves behind, which `approximately_eq`

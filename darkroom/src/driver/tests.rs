@@ -189,6 +189,29 @@ fn clicks_drags_and_keys_edit_the_document() {
     assert!(detail.wires.is_empty(), "undone: {:?}", detail.wires);
 }
 
+/// A notched wheel pans the canvas as a touchpad does, through the real input path: two lines at
+/// the theme's line height, with the zoom left alone.
+#[test]
+fn a_wheel_pans_the_canvas() {
+    let mut driver = driver();
+    let dir = TempDir::new("darkroom-driver-wheel");
+    let path = fixture::project(dir.path(), &[BRIGHTNESS]);
+    driver.open(&path, OpenMode::Copy).unwrap();
+    let before = driver.app().open_document().document().main_view.viewport;
+    driver
+        .act(&[Action::Play(Play::ScrollLines {
+            at: Locator::Point(Vec2::new(800.0, 500.0)),
+            delta: Vec2::new(0.0, -2.0),
+        })])
+        .unwrap();
+    let line_px = driver
+        .offscreen()
+        .with_app(|_, ui| ui.theme().text.line_height());
+    let after = driver.app().open_document().document().main_view.viewport;
+    assert_eq!(after.pan, before.pan + Vec2::new(0.0, 2.0 * line_px));
+    assert_eq!(after.zoom, before.zoom);
+}
+
 /// A world point resolves to the screen point where the canvas draws it: a node placed at its
 /// world position has its body's corner there, under a pan off the pixel grid too: a touchpad
 /// scroll of (−10.3, −20.3) pans by (10.3, 20.3), which the canvas draws landed at (10, 20) at 1×.

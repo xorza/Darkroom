@@ -3,7 +3,9 @@
 This is a temporary proposal. When a change lands, its lasting decision moves into the `AGENTS.md`
 or the doc comment of the system that it governs. Then delete the change from this file.
 
-**Status:** Each finding has a decision. No code changed yet.
+**Status:** Each open finding has a decision. The touchpad rule and the Windows wheel setting
+landed, and their decisions moved to `darkroom/AGENTS.md`, "One scroll rule", and
+`palantir/AGENTS.md`, "A person's scroll setting moves a scroll, not a zoom".
 
 ## Background
 
@@ -58,14 +60,12 @@ No finding is a data-loss bug in a common workflow.
 
 | Finding | Effect | Evidence | Decision |
 |---|---|---|---|
-| Touchpad swipe pans or zooms by OS | No touchpad route to pan the graph on Windows and X11 | Confirmed in source | One rule on every OS, no setting |
 | Windows main thread stack is 1 MiB | A crash that only Windows can show, and CI cannot see | Size confirmed, overflow not shown | Reserve 8 MiB in the binary |
 | Windows runs a backend CI does not test | Vulkan runs in production, Dx12 in CI | Confirmed in source | Keep Vulkan first, add a Vulkan lane |
 | An installed font replaces a bundled font | Text look and widths change by machine | Confirmed in source | Bundled faces own their names |
 | A foreign absolute path changes at load | A Save on Windows rewrites a Unix path | Derived from std docs | Keep the bytes, and report |
 | System math library in results | The last bit of a result differs by OS | Rust docs state it, size not measured | `ops` module over `libm`, with a digest test |
 | LibRaw can fuse float operations on aarch64 | LibRaw output can differ by architecture | Compiler docs state it, not measured | `-ffp-contract=off` |
-| Wheel setting and step differ by OS | A person's Windows setting has no effect | Confirmed in source | Honor the setting for scroll |
 | File watch fires on metadata on Windows | A doc promise fails on one OS | Confirmed in source | Correct the docs |
 | A failed URL open reports on Windows only | A failure is quiet on Linux and macOS | Confirmed in source | Log the exit status |
 | Shortcut labels follow a platform convention | `⌘S` against `Ctrl+S` | Confirmed in source | Keep `⌥⇧⌘S` on macOS |
@@ -74,79 +74,21 @@ No finding is a data-loss bug in a common workflow.
 
 ## Approved dependencies
 
-These two approvals apply only to the changes below.
+This approval applies only to the change below.
 
 - **`libm` 0.2**, direct, in each project that gets an `ops` module. `Cargo.lock` and
   `palantir/Cargo.lock` already hold it through other crates.
-- **`windows-sys`**, direct, for the Windows target of `palantir` alone. `winit` 0.30 already brings
-  version 0.52 into `palantir/Cargo.lock`, and the change should use the same version.
 
 ## Implementation order
 
-1. The touchpad rule and the wheel setting, as both change the same input code.
-2. The Windows main thread stack.
-3. The Vulkan lane in `palantir` CI.
-4. The bundled font names.
-5. The foreign absolute paths.
-6. The LibRaw flag, then the `ops` modules with their digest test.
-7. The doc corrections, in any order.
+1. The Windows main thread stack.
+2. The Vulkan lane in `palantir` CI.
+3. The bundled font names.
+4. The foreign absolute paths.
+5. The LibRaw flag, then the `ops` modules with their digest test.
+6. The doc corrections, in any order.
 
 ## Decisions
-
-### Touchpad swipe pans or zooms by OS
-
-**Where:** `ZoomRange::fold_scroll` in `darkroom/src/gui/widgets/zoom_range/mod.rs:40`, and the
-translator in `palantir/src/host/winit/input/translator/mod.rs:151`.
-
-Darkroom picks the gesture from the unit of the event: pixels pan, and lines zoom. The unit tells
-the device on only two of the four window systems.
-
-| System | Two-finger swipe from `winit` 0.30.13 | Darkroom result | Pinch from `winit` |
-|---|---|---|---|
-| macOS | `PixelDelta` (`macos/view.rs:670`) | Pan | `PinchGesture` |
-| Wayland | `PixelDelta` (`wayland/seat/pointer/mod.rs:206`) | Pan | None |
-| Windows | `LineDelta` (`windows/event_loop.rs:1739`) | Zoom | Ctrl and wheel, read as zoom |
-| X11 | `LineDelta` (`x11/event_processor.rs:1164`) | Zoom | None |
-
-**Effect:**
-
-- The same gesture does two different things.
-- On Windows and X11 a sideways swipe does nothing, as `fold_scroll` reads only `lines.y`.
-- Left-drag on the graph canvas is the rubber band, and the graph has no other pan input than the
-  middle button. A touchpad with no middle button thus has no route to pan the graph.
-- The image viewer also pans by left-drag, so only its swipe differs.
-
-**Decision: one rule on every OS, with no setting.** Scroll pans in either unit and on both axes.
-The command key with scroll zooms about the cursor. Pinch zooms. The unit of an event no longer
-selects a gesture. This holds the rule that a chord means the same everywhere, with the command key
-as its only substitution. [Figma](https://help.figma.com/hc/en-us/articles/360041065034-Adjust-your-zoom-and-view-options)
-zooms with the command key and the wheel, and with pinch on a touchpad. The `pan` value of
-[tldraw's `wheelBehavior`](https://tldraw.dev/examples/camera-options) does the same.
-
-**Cost:** A plain mouse wheel stops zooming, which departs from the default of
-[Godot's `GraphEdit`](https://docs.godotengine.org/en/4.3/classes/class_graphedit.html).
-
-**What follows from it:**
-
-- Windows pinch needs no special case, as
-  [it arrives as Ctrl and wheel](https://groups.google.com/a/chromium.org/g/chromium-dev/c/L_kaBhYFi5U/m/RIMFBx12dJoJ).
-- The doc comment at `camera_gesture/mod.rs:46` cites Figma for "a mouse wheel zooms". Figma's help
-  does not say that, so the comment changes with the code.
-- The `winit` docs at 0.30.13 list `PinchGesture` for macOS and iOS. A later
-  [`winit` change](https://github.com/rust-windowing/winit/pull/3656/files) adds Wayland, so Wayland
-  pinch waits for a `winit` update. Confirm the release that holds it before you rely on it. That
-  change does not add X11.
-
-**Refused:**
-
-- A setting for a plain wheel, as
-  [Godot's `panning_scheme`](https://docs.godotengine.org/en/4.3/classes/class_graphedit.html) and
-  tldraw offer: one more pick, and a touchpad swipe zooms while it is on.
-- A read of the device through Direct Manipulation, as
-  [Blender does on Windows](https://lists.blender.org/pipermail/bf-blender-cvs/2022-May/173122.html):
-  large platform code in palantir, and X11 stays open.
-- A read of the delta, as [proposed for Firefox](https://bugzilla.mozilla.org/show_bug.cgi?id=1568676):
-  a guess, as a high-resolution wheel also sends fractions of a notch.
 
 ### Windows main thread stack is 1 MiB
 
@@ -370,37 +312,6 @@ turned contraction off for the same reason.
 flag for MSVC. LibRaw's own libm calls stay, so this removes one cause of a difference and not all of
 them.
 
-### Wheel setting and step differ by OS
-
-**Where:** `fold_scroll` multiplies `lines.y` by the line height, and
-`palantir/src/host/winit/input/translator/mod.rs:152` passes `LineDelta` on as lines.
-
-**Behavior:** Windows reports notches, `delta / WHEEL_DELTA`. X11 reports a fraction of the device's
-increment. macOS reports `scrollingDeltaY` for a plain wheel, which the system accelerates. A search
-of `palantir/src` for the Windows setting of lines per notch found no use of it, so that setting has
-no effect.
-
-**Decision: honor the Windows setting for scroll, and keep zoom per notch.** palantir's Windows host
-reads `SPI_GETWHEELSCROLLLINES` and scales scroll by it. The other systems apply their own setting
-before the event arrives. Microsoft's
-[sample](https://devblogs.microsoft.com/oldnewthing/20030807-00/?p=42963) reads the setting at each
-wheel message, and [WebKit](https://opensource.apple.com/source/WebCore/WebCore-7600.8.9/platform/win/WheelEventWin.cpp.auto.html)
-also reads it. [GTK issue 1408](https://gitlab.gnome.org/GNOME/gtk/issues/1408) found that the scale
-breaks a wheel that zooms, so zoom must not read the scaled value.
-
-**What follows from it:**
-
-- `InputEvent::ScrollLines` documents a raw line count. The event must keep notches apart from lines,
-  which changes palantir's public API and so runs `cargo drive surface`.
-- A value of 0 means no scroll. `WHEEL_PAGESCROLL` means one page per notch, and the change must
-  handle that case too.
-- The call lives in `palantir/src/host/winit/platform/windows.rs`, and the other platform files state
-  that they have nothing to do.
-
-**Cost:** A direct `windows-sys` dependency on Windows.
-
-**Refused:** Ignoring the setting: a person's setting would have no effect, which breaks the rule.
-
 ### File watch fires on metadata on Windows
 
 **Where:** `lens/src/fs_watch/mod.rs:125`.
@@ -482,6 +393,7 @@ Each of these is a system decision or changes speed alone. None needs a change.
 | `route_opened_documents` on macOS alone | Launch Services sends an event where the others use argv |
 | Font fallback and locale in the window | Installed fonts are what the machine holds |
 | Vsync, present mode and frame latency per backend | Speed alone |
+| A Windows wheel notch scrolls 3 lines by default, and one line elsewhere | The Windows setting decides it. AppKit applies its own speed, and the X11 and Wayland protocols state none |
 | `ScratchFile`, `replace` and `sync_parent` per OS | One contract, each with its own system calls |
 | OpenMP in LibRaw depends on the toolchain | Speed alone, and `libraw::OPENMP` states it |
 | Memory limits: cgroups on Linux, job objects on Windows | What a device can hold |

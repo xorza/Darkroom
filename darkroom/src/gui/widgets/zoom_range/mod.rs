@@ -3,7 +3,7 @@
 //! alike, each with its own range.
 
 use glam::Vec2;
-use palantir::{ResponseState, ZoomFactor};
+use palantir::{Modifiers, ResponseState, ScrollDelta, Size, Ui, ZoomFactor};
 
 use crate::core::document::viewport::Viewport;
 
@@ -12,8 +12,43 @@ use crate::core::document::viewport::Viewport;
 /// exact.
 pub(crate) fn scrolled(resp: &ResponseState) -> bool {
     resp.scroll.pixels != Vec2::ZERO
-        || resp.scroll.lines.y != 0.0
+        || resp.scroll.notches != Vec2::ZERO
         || resp.scroll.zoom != ZoomFactor::ONE
+}
+
+/// What a scroll does on a surface: `darkroom/AGENTS.md`, "One scroll rule".
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ScrollAction {
+    Pan,
+    /// The command key is held.
+    Zoom,
+}
+
+/// One frame's scroll and pinch input on a surface, as [`ZoomRange::fold_scroll`] reads it.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ScrollFrame {
+    delta: ScrollDelta,
+    pivot: Option<Vec2>,
+    pane: Size,
+    line_px: f32,
+    action: ScrollAction,
+}
+
+impl ScrollFrame {
+    /// The frame `resp` reports, under the modifiers held now.
+    pub(crate) fn of(ui: &Ui, resp: &ResponseState) -> Self {
+        Self {
+            delta: resp.scroll,
+            pivot: resp.pointer_local,
+            pane: resp.layout_rect.map_or(Size::ZERO, |rect| rect.size),
+            line_px: ui.theme().text.line_height(),
+            action: if ui.peek_modifiers().contains(Modifiers::CTRL) {
+                ScrollAction::Zoom
+            } else {
+                ScrollAction::Pan
+            },
+        }
+    }
 }
 
 /// The zoom factors a surface allows. Pinch / scroll-zoom deltas multiply in;
@@ -33,27 +68,33 @@ pub(crate) struct ZoomRange {
 impl ZoomRange {
     /// Fold one frame's scroll/pinch deltas from `resp` into `v` — the
     /// shared half of the canvas and image-viewer pan/zoom gestures (drag
-    /// panning stays with each caller, whose button policy differs):
-    /// two-finger `scroll_pixels` pan, wheel `scroll_lines` zoom-about-
-    /// cursor, and pinch `zoom_factor` zoom-about-cursor, clamped to this
-    /// range.
-    pub(crate) fn fold_scroll(self, v: &mut Viewport, line_px: f32, resp: &ResponseState) {
-        if resp.scroll.pixels != Vec2::ZERO {
-            v.pan -= resp.scroll.pixels;
+    /// panning stays with each caller, whose button policy differs): a
+    /// scroll in any unit pans, a scroll under the command key zooms about
+    /// the cursor by the wheel's notches, and a pinch zooms about the
+    /// cursor, clamped to this range.
+    pub(crate) fn fold_scroll(self, v: &mut Viewport, frame: ScrollFrame) {
+        let ScrollFrame {
+            delta,
+            pivot,
+            pane,
+            line_px,
+            action,
+        } = frame;
+        match action {
+            ScrollAction::Pan => v.pan -= delta.pan(line_px, pane),
+            ScrollAction::Zoom => {
+                let delta_y = delta.pixels.y + delta.notches.y * line_px;
+                if delta_y != 0.0
+                    && let Some(pivot) = pivot
+                {
+                    self.zoom_about(v, pivot, scroll_to_zoom_factor(delta_y));
+                }
+            }
         }
-        if resp.scroll.lines.y != 0.0
-            && let Some(pivot) = resp.pointer_local
+        if delta.zoom != ZoomFactor::ONE
+            && let Some(pivot) = pivot
         {
-            self.zoom_about(
-                v,
-                pivot,
-                scroll_to_zoom_factor(resp.scroll.lines.y * line_px),
-            );
-        }
-        if resp.scroll.zoom != ZoomFactor::ONE
-            && let Some(pivot) = resp.pointer_local
-        {
-            self.zoom_about(v, pivot, resp.scroll.zoom.get());
+            self.zoom_about(v, pivot, delta.zoom.get());
         }
     }
 
@@ -82,7 +123,7 @@ impl ZoomRange {
     }
 }
 
-/// Per-pixel base for converting wheel / touchpad scroll into a
+/// Per-pixel base for converting a scroll under the command key into a
 /// multiplicative zoom factor. Tuned so a single classic wheel notch
 /// (~16-20 logical px after palantir's line→pixel conversion) yields
 /// roughly a 4-5% zoom step, while a fast touchpad swipe (~50-100 px

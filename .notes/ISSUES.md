@@ -1,7 +1,6 @@
 # Open issues
 
 - darkroom never checks `ImageHandle::is_resident`. After the window host recovers from a lost GPU device, every image darkroom registered paints nothing: the viewer checker tile (`darkroom/src/gui/pane/image_viewer/mod.rs`, `draw_checker`) and every preview thumbnail and full texture in `darkroom/src/gui/state/preview_store`, which keeps no texels or source to upload again once a full texture is resident. A full texture also keeps the size `Ui::max_image_dimension` capped it to on the lost device.
-- A two-finger touchpad swipe pans the graph canvas and the image viewer on macOS and Wayland, where `winit` sends `PixelDelta`, and zooms them on Windows and X11, where it sends `LineDelta` (`ZoomRange::fold_scroll`, `darkroom/src/gui/widgets/zoom_range/mod.rs`). On Windows and X11 a touchpad with no middle button has no input that pans the graph canvas.
 - A path in a document in the absolute form of another OS is not reported at load (`saved_paths::resolve`, `darkroom/src/core/io/document/saved_paths.rs`). On Windows `/data/a.fit` becomes `C:\data\a.fit` in memory and in the next Save. On Linux and macOS `C:\data\a.fit` becomes one file name under the document's folder.
 - `darkroom-app` sets no main thread stack size, so that thread has the linker's 1 MB on Windows and the system's limit elsewhere. No test runs on that stack.
 - `libraw/build.rs` sets no `-ffp-contract`, so the compilers' defaults can fuse float operations in LibRaw on aarch64, whose baseline has FMA, and not on x64, whose LibRaw build has none.

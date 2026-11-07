@@ -58,7 +58,7 @@ use crate::gui::widgets::icon::Icon;
 use crate::gui::widgets::pan_drag;
 use crate::gui::widgets::pill;
 use crate::gui::widgets::support;
-use crate::gui::widgets::zoom_range;
+use crate::gui::widgets::zoom_range::{self, ScrollFrame};
 
 /// One image-viewer tab's state: what it shows and how it's framed.
 /// Lives in the `MainWindow`'s per-node viewer map, keyed by (and
@@ -462,7 +462,7 @@ impl ImageViewer {
     }
 
     /// Fold last frame's pane gestures into the viewport: left/middle-drag
-    /// pans, wheel/pinch zooms about the cursor, two-finger scroll pans,
+    /// and scroll pan, command-scroll and pinch zoom about the cursor,
     /// double-click resets to fit. The fit viewport materializes into an
     /// explicit one on the first adjusting gesture.
     fn apply_gestures(&mut self, ui: &Ui, shown: Option<&DrawableImage>, pane: Option<Vec2>) {
@@ -491,7 +491,7 @@ impl ImageViewer {
         }
         let drag = resp.left.drag.delta().or_else(|| resp.middle.drag.delta());
         pan_drag::fold(&mut self.pan_anchor, drag, &mut v.pan);
-        VIEWER_ZOOM.fold_scroll(&mut v, ui.theme().text.line_height(), &resp);
+        VIEWER_ZOOM.fold_scroll(&mut v, ScrollFrame::of(ui, &resp));
         self.view = Some(v);
     }
 }

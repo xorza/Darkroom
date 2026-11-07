@@ -30,7 +30,7 @@ impl CanvasInput {
 /// itself disjoint from the others by hand.
 ///
 /// Covers the *latch* frame only: continuation of an in-flight gesture is tracked by each
-/// controller's own state, and wheel/pinch zoom coexists with everything (handled in
+/// controller's own state, and scroll and pinch coexist with everything (handled in
 /// `CameraGesture::input`, not here).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum CanvasGesture {

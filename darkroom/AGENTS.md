@@ -99,6 +99,20 @@ by compile, plan and run. Refused: a pass-through node, which changes the graph 
 - **One wire leaves through the tie's menu**. Refused: dragging a strand out of the band.
 - **The band is neutral and paints over wires, under nodes**, so the wire colors stay the types.
 
+### Input
+
+- **One scroll rule.** On every OS a scroll pans in any unit, the command key with a scroll zooms
+  about the pointer, and a pinch zooms. `winit`'s unit names a device on macOS and Wayland alone:
+  Windows and X11 report a touchpad in lines, so a rule by unit zooms there and leaves a touchpad
+  with no middle button no way to pan the graph. Cost: a plain wheel does not zoom. Refused: a
+  setting for a plain wheel, as [Godot](https://docs.godotengine.org/en/4.3/classes/class_graphedit.html)
+  offers, one more pick; a read of the device through Direct Manipulation, as
+  [Blender](https://lists.blender.org/pipermail/bf-blender-cvs/2022-May/173122.html) does, large
+  platform code that leaves X11 open; a read of a fraction of a notch, a guess, as a
+  high-resolution wheel sends fractions too
+  ([Figma](https://help.figma.com/hc/en-us/articles/360041065034-Adjust-your-zoom-and-view-options)
+  zooms with the command key and a pinch).
+
 ### The look
 
 - **A status and a type share a hue, never a form**: a status is a frame, a footer word and the

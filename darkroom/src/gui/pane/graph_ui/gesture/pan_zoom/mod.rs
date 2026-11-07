@@ -1,5 +1,5 @@
-//! Canvas viewport gesture: middle-drag pan, wheel/pinch zoom-about-cursor
-//! within the canvas's [`ZoomRange`], and the toolbar's framings. Split out of
+//! Canvas viewport gesture: middle-drag and scroll pan, command-scroll and pinch
+//! zoom-about-cursor within the canvas's [`ZoomRange`], and the toolbar's framings. Split out of
 //! `canvas` so the orchestration there isn't tangled with the (independently
 //! testable) viewport algebra. The gesture emits `GraphIntent::SetViewport`,
 //! the one way the document's camera moves.
