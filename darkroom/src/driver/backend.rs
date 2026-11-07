@@ -51,7 +51,7 @@ impl Backend {
         }
     }
 
-    /// Play `action` and settle, the editor's own work included; the frames it ran.
+    /// Play `action` and settle, the editor's own work included; the frames it recorded.
     pub(crate) fn play(&mut self, action: &Play) -> Result<u32, DriverError> {
         match self {
             Self::Offscreen(offscreen) => offscreen.play(action),

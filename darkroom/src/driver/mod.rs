@@ -96,7 +96,7 @@ pub struct Driver {
 /// What an action changed.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ActReport {
-    /// Frames the actions ran.
+    /// Frames the actions recorded.
     pub frames: u32,
     /// The selected nodes after them, by name.
     pub selection: Vec<String>,
