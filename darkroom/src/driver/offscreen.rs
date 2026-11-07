@@ -28,11 +28,6 @@ pub(crate) struct Offscreen {
     app: App,
     /// Boxed: it holds a whole `Ui`, kilobytes a driver need not carry inline.
     harness: Box<Harness>,
-    /// The device a [`DisplayKind::TestGpu`] harness draws on. Declared after `harness`, as fields
-    /// drop in order: the lease outlives the handles the harness holds.
-    #[cfg(feature = "internals")]
-    #[expect(clippy::absolute_paths, reason = "a gated field takes no gated import")]
-    _test_gpu: Option<palantir::internals::HeadlessTestGpuLease>,
     /// The window commands the harness had recorded when this app launched: a close past them
     /// is this app's quit.
     launched_at: usize,
@@ -51,8 +46,6 @@ impl Offscreen {
     /// An app on an empty document in a window `config` describes, or the error of a GPU display
     /// on a machine with no usable adapter.
     pub(crate) fn new(config: SessionConfig) -> Result<Self, DriverError> {
-        #[cfg(feature = "internals")]
-        let mut test_gpu = None;
         let depth = match config.display {
             DisplayKind::Gpu => {
                 // No optional features: the editor draws with what every adapter has.
@@ -63,11 +56,7 @@ impl Offscreen {
             }
             #[cfg(feature = "internals")]
             #[expect(clippy::absolute_paths, reason = "a gated arm takes no gated import")]
-            DisplayKind::TestGpu => Depth::gpu(
-                test_gpu
-                    .insert(palantir::internals::headless_test_gpu())
-                    .handles(),
-            ),
+            DisplayKind::TestGpu => Depth::gpu(palantir::internals::headless_test_gpu().handles()),
             #[cfg(feature = "internals")]
             DisplayKind::Cpu => Depth::Record,
         };
@@ -85,8 +74,6 @@ impl Offscreen {
         Ok(Self {
             app,
             harness,
-            #[cfg(feature = "internals")]
-            _test_gpu: test_gpu,
             launched_at: 0,
         })
     }

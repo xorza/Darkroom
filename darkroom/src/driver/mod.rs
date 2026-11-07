@@ -51,8 +51,8 @@ pub enum DisplayKind {
     #[cfg(feature = "internals")]
     Cpu,
     /// [`DisplayKind::Gpu`] on the device palantir's `headless_test_gpu` lends the tests that run
-    /// at once, leased for the session; it panics where no adapter is. Test code: tests run in
-    /// parallel in one process, and a device created on one Vulkan instance while another
+    /// at once; it panics where no adapter is. Test code: tests run in parallel in one process,
+    /// and a device created on one Vulkan instance while another
     /// enumerated its adapters crashed in the Vulkan loader on lavapipe (CI run 40528808017).
     #[cfg(feature = "internals")]
     TestGpu,
