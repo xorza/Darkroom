@@ -1,5 +1,5 @@
-//! [`SavedPaths`]: how a document file holds the paths its path inputs name. In memory every path
-//! is absolute; the file holds a path inside the document's folder relative to it, so the folder
+//! [`SavedPaths`]: how a document file holds the paths its path inputs name. In memory no path
+//! needs a folder; the file holds a path inside the document's folder relative to it, so the folder
 //! moves or is copied whole and its files go with it. `darkroom/AGENTS.md`, "Paths in a
 //! document", holds the decisions.
 
@@ -7,6 +7,7 @@ use std::borrow::Cow;
 use std::path::{self, Component, Path, PathBuf};
 
 use crate::core::document::Document;
+use crate::core::document::path_form::PathForm;
 use crate::core::io::document::error::DocumentLoadError;
 
 /// How a save writes a path that lies inside the document's folder.
@@ -33,11 +34,12 @@ impl SavedPaths {
 }
 
 /// Make each relative path `document` holds absolute, against the folder of `path`, the file it
-/// was read from.
+/// was read from. A path of another system stays as it is: a join would rewrite it, as
+/// `PathBuf::push` keeps a drive and drops the rest for `/data/a.fit` on Windows.
 pub(super) fn resolve(document: &mut Document, path: &Path) -> Result<(), DocumentLoadError> {
     let folder = folder(path);
     let Some(base) = folder.to_str() else {
-        if any_path(document, |value| (!absolute(value)).then_some(())) {
+        if any_path(document, |value| needs_folder(value).then_some(())) {
             return Err(DocumentLoadError::NonUnicodeFolder {
                 path: path.to_path_buf(),
             });
@@ -46,7 +48,7 @@ pub(super) fn resolve(document: &mut Document, path: &Path) -> Result<(), Docume
     };
     debug_assert!(!base.is_empty(), "an absolute folder");
     document.map_paths(|value| {
-        if absolute(value) {
+        if !needs_folder(value) {
             return None;
         }
         // Part by part, so the separators are the system's own: `inputs/a.tiff` read on Windows
@@ -74,16 +76,16 @@ fn folder(path: &Path) -> PathBuf {
     path::absolute(folder).unwrap_or_else(|_| folder.to_path_buf())
 }
 
-/// Whether `value` needs no folder: absolute, or empty, which an unset path input holds.
-fn absolute(value: &str) -> bool {
-    value.is_empty() || Path::new(value).is_absolute()
+/// Whether `value` needs a folder to read it against.
+fn needs_folder(value: &str) -> bool {
+    PathForm::of(value) == PathForm::Relative
 }
 
 /// `value` relative to `folder` when it lies inside it; `.` for the folder itself. A path that
 /// reaches its place through `..` stays absolute: a relative form would hold the `..`, and only
 /// the file system says where `..` leads past a link, so it is not folded away.
 fn relative_to(value: &str, folder: &Path) -> Option<String> {
-    if !Path::new(value).is_absolute() {
+    if PathForm::of(value) != PathForm::Absolute {
         return None;
     }
     let inner = Path::new(value).strip_prefix(folder).ok()?;
@@ -118,7 +120,7 @@ fn any_path<T>(document: &Document, mut map: impl FnMut(&str) -> Option<T>) -> b
 pub(crate) fn leaving_folder(document: &Document) -> Vec<String> {
     let mut leaving = Vec::new();
     document.for_each_path(|_, value| {
-        if !absolute(value) && climbs_out(value) {
+        if needs_folder(value) && climbs_out(value) {
             leaving.push(value.to_string());
         }
     });

@@ -11,11 +11,20 @@ use crate::core::document::tie::TieId;
 use crate::core::document::wire_key::WireKey;
 use crate::core::status_log::{StatusFamily, StatusLog};
 
-/// Every change a load made, in the order it made them. Empty for a document
-/// that was already consistent.
+/// Every change a load made, in the order it made them, and what it kept but could not read here.
+/// Empty for a document that was already consistent.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct LoadReport {
     pub(crate) repairs: Vec<DocumentRepair>,
+    pub(crate) foreign_paths: Vec<ForeignPath>,
+}
+
+/// A path in the absolute form of another system, which a load and a save keep byte for byte. No
+/// change of the document, so it leaves the document clean.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ForeignPath {
+    pub(crate) node_id: NodeId,
+    pub(crate) path: String,
 }
 
 /// One change a load made.
@@ -106,11 +115,11 @@ pub(crate) enum DocumentRepair {
 
 impl LoadReport {
     pub(crate) const fn is_empty(&self) -> bool {
-        self.repairs.is_empty()
+        self.repairs.is_empty() && self.foreign_paths.is_empty()
     }
 
-    /// Log each change, and put one line on the status bar that says how many
-    /// there were. The next save clears the line: a save accepts the changes.
+    /// Log each change and each foreign path, and put one line on the status bar that says how
+    /// many there were. The next save clears the line: a save accepts the changes.
     pub(crate) fn report(&self, status: &mut StatusLog) {
         if self.is_empty() {
             return;
@@ -118,18 +127,38 @@ impl LoadReport {
         for repair in &self.repairs {
             tracing::warn!(target: "darkroom::load", "{repair}");
         }
+        for ForeignPath { node_id, path } in &self.foreign_paths {
+            tracing::warn!(
+                target: "darkroom::load",
+                "{node_id:?} names {path:?}, a path of another system, kept as it is"
+            );
+        }
         status.warn(StatusFamily::Document, self.to_string());
     }
 }
 
-/// The status line of a load that changed something: how many changes it made.
+/// The status line of a load with something to report: how many changes it made, and how many
+/// paths of another system the document names.
 impl Display for LoadReport {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "the load made {} repair(s) to the document; save to keep them",
-            self.repairs.len()
-        )
+        if !self.repairs.is_empty() {
+            write!(
+                f,
+                "the load made {} repair(s) to the document; save to keep them",
+                self.repairs.len()
+            )?;
+        }
+        if !self.foreign_paths.is_empty() {
+            if !self.repairs.is_empty() {
+                f.write_str("; ")?;
+            }
+            write!(
+                f,
+                "the document names {} path(s) of another system",
+                self.foreign_paths.len()
+            )?;
+        }
+        Ok(())
     }
 }
 
@@ -221,5 +250,56 @@ impl Display for DocumentRepair {
                 )
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use scenarium::NodeId;
+
+    use crate::core::document::load_report::{DocumentRepair, ForeignPath, LoadReport};
+
+    /// The status line names what the load has to report, and each part alone reads whole.
+    #[test]
+    fn the_status_line_names_each_kind() {
+        let repairs = vec![DocumentRepair::ViewportReset];
+        let foreign_paths = vec![
+            ForeignPath {
+                node_id: NodeId::unique(),
+                path: "/a".to_string(),
+            },
+            ForeignPath {
+                node_id: NodeId::unique(),
+                path: "/b".to_string(),
+            },
+        ];
+        assert!(LoadReport::default().is_empty());
+        let only_repairs = LoadReport {
+            repairs: repairs.clone(),
+            ..LoadReport::default()
+        };
+        assert!(!only_repairs.is_empty());
+        assert_eq!(
+            only_repairs.to_string(),
+            "the load made 1 repair(s) to the document; save to keep them"
+        );
+        let only_paths = LoadReport {
+            foreign_paths: foreign_paths.clone(),
+            ..LoadReport::default()
+        };
+        assert!(!only_paths.is_empty());
+        assert_eq!(
+            only_paths.to_string(),
+            "the document names 2 path(s) of another system"
+        );
+        assert_eq!(
+            LoadReport {
+                repairs,
+                foreign_paths,
+            }
+            .to_string(),
+            "the load made 1 repair(s) to the document; save to keep them; the document names 2 \
+             path(s) of another system"
+        );
     }
 }

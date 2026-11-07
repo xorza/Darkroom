@@ -318,6 +318,37 @@ fn paths_inside_the_folder_are_saved_relative_and_move_with_it() {
     );
 }
 
+/// A path in either system's absolute form stays byte for byte through a save and a load and
+/// another save, on either system: a join would make `/data/a.fit` into `C:\data\a.fit` on Windows,
+/// and `C:\data\b.fit` into one file name under the folder on Unix.
+#[test]
+fn paths_of_another_system_stay_as_they_are() {
+    let dir = TempDir::new("darkroom-document-foreign");
+    let (document, nodes) = paths_document(
+        "/data/a.fit",
+        &[r"C:\data\b.fit", "C:/data/c.fit"],
+        r"\\server\share\d.fit",
+    );
+    let want = [
+        "/data/a.fit",
+        r"C:\data\b.fit",
+        "C:/data/c.fit",
+        "",
+        r"\\server\share\d.fit",
+    ];
+
+    let first = dir.join("first.darkroom");
+    save(&document, &first, SavedPaths::Relative).unwrap();
+    assert_eq!(stored(&first, nodes), want);
+
+    let loaded = load(&first).unwrap();
+    assert_eq!(paths_of(&loaded, nodes), want);
+
+    let second = dir.join("second.darkroom");
+    save(&loaded, &second, SavedPaths::Relative).unwrap();
+    assert_eq!(stored(&second, nodes), want);
+}
+
 /// A relative path that climbs out of the folder is listed, as `../x.tiff` and `a/../../y.tiff`
 /// do; one that climbs back in before leaving, `a/../b.tiff`, is not, nor is an absolute one.
 #[test]

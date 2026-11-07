@@ -32,6 +32,7 @@ pub(crate) mod inspect_target;
 pub(crate) mod item_id;
 mod layout_file;
 pub(crate) mod load_report;
+pub(crate) mod path_form;
 pub(crate) mod route;
 pub(crate) mod stubs;
 pub(crate) mod tab_ref;
@@ -40,7 +41,6 @@ pub(crate) mod viewport;
 pub(crate) mod wire_key;
 
 use std::collections::BTreeSet;
-use std::path::Path;
 use std::slice;
 
 use glam::Vec2;
@@ -55,7 +55,8 @@ use crate::core::document::error::DocumentValidationError;
 use crate::core::document::graph_view::{GraphView, NodePlacement};
 use crate::core::document::inspect_target::InspectTarget;
 use crate::core::document::item_id::ItemId;
-use crate::core::document::load_report::{DocumentRepair, LoadReport};
+use crate::core::document::load_report::{DocumentRepair, ForeignPath, LoadReport};
+use crate::core::document::path_form::PathForm;
 use crate::core::document::route::Route;
 use crate::core::document::stubs::Stubs;
 use crate::core::document::tab_ref::TabRef;
@@ -210,7 +211,19 @@ impl Document {
             "a reconciled document is consistent: {:?}",
             self.validate()
         );
-        LoadReport { repairs }
+        let mut foreign_paths = Vec::new();
+        self.for_each_path(|node_id, path| {
+            if PathForm::of(path) == PathForm::Foreign {
+                foreign_paths.push(ForeignPath {
+                    node_id,
+                    path: path.to_string(),
+                });
+            }
+        });
+        LoadReport {
+            repairs,
+            foreign_paths,
+        }
     }
 
     /// Check what [`Self::reconcile`] establishes that needs no library: the
@@ -242,7 +255,7 @@ impl Document {
         // here would be read against the working directory.
         let mut relative = None;
         self.for_each_path(|node_id, path| {
-            if relative.is_none() && !path.is_empty() && Path::new(path).is_relative() {
+            if relative.is_none() && PathForm::of(path) == PathForm::Relative {
                 relative = Some(DocumentValidationError::RelativePath {
                     node_id,
                     path: path.to_string(),

@@ -59,6 +59,6 @@ pub(crate) enum DocumentValidationError {
     MissingTab { tab: TabRef },
     #[error("node {node_id:?} is both a graph node and a stub")]
     StubInGraph { node_id: NodeId },
-    #[error("node {node_id:?} holds the relative path {path:?}, which memory holds absolute")]
+    #[error("node {node_id:?} holds the relative path {path:?}, which memory holds resolved")]
     RelativePath { node_id: NodeId, path: String },
 }

@@ -15,7 +15,8 @@
 //!   not open; resetting the port to its default, which changes the meaning
 //!   with no warning.
 //! - **The report is one status line plus the log.** One warning line says how
-//!   many changes the load made, and one `tracing` warning names each; the next
+//!   many changes the load made and how many paths of another system the document
+//!   names, and one `tracing` warning names each; the next
 //!   success of the document family, such as a save, clears the line. Refused: a list in the editor, as new UI to design
 //!   and build.
 
@@ -318,7 +319,7 @@ impl OpenDocument {
         let open = Self {
             document,
             path: Some(path),
-            dirty: !report.is_empty(),
+            dirty: !report.repairs.is_empty(),
             ..Self::default()
         };
         Ok(Loaded { open, report })

@@ -4,11 +4,12 @@ use std::rc::Rc;
 
 use common::TempDir;
 use glam::Vec2;
+use lens::MlModelPaths;
 
 use crate::core::document::Document;
 use crate::core::document::internals::DocumentFixture;
 use crate::core::document::item_id::ItemId;
-use crate::core::document::load_report::DocumentRepair;
+use crate::core::document::load_report::{DocumentRepair, ForeignPath};
 use crate::core::document::viewport::Viewport;
 use crate::core::edit::document_queue::DocumentQueue;
 use crate::core::edit::edit_facts::EditFacts;
@@ -18,6 +19,7 @@ use crate::core::io::document;
 use crate::core::io::document::error::DocumentLoadError;
 use crate::core::io::document::saved_paths::SavedPaths;
 use crate::core::open_document::{Launched, Loaded, OpenDocument};
+use crate::core::runtime_library::RuntimeLibrary;
 use crate::core::status_log::StatusLog;
 use scenarium::{
     Binding, BindingEntry, BindingRejection, Compiler, ConstValue, DataType, EventPort, FuncId,
@@ -574,5 +576,51 @@ fn the_sample_project_opens_clean() {
     assert_eq!(
         paths,
         [inputs.join("full_example.fits"), inputs.join("lena.tiff")]
+    );
+}
+
+/// A load reports the path that is absolute on the other system alone, and it leaves the document
+/// clean, as it changed nothing: each of these two paths is foreign on exactly one system.
+#[test]
+fn a_path_of_another_system_is_reported_and_leaves_the_document_clean() {
+    let dir = TempDir::new("darkroom-open-foreign");
+    let path = dir.join("scene.darkroom");
+    let library = RuntimeLibrary::new(&MlModelPaths::default());
+    let load_image = library.cur().by_name("Load Image").unwrap().clone();
+    let mut fixture = DocumentFixture::default();
+    let bound = [
+        (fixture.add(&load_image), "/data/a.fit"),
+        (fixture.add(&load_image), r"C:\data\a.fit"),
+    ];
+    let mut document = fixture.document;
+    for (node_id, value) in bound {
+        document.graph.bindings.insert(
+            InputPort::new(node_id, 0),
+            Binding::Const(ConstValue::FsPath(value.to_string())),
+        );
+    }
+    document::save(&document, &path, SavedPaths::Relative).unwrap();
+
+    let loaded = OpenDocument::load(path, library.cur()).unwrap();
+
+    let foreign: Vec<_> = bound
+        .into_iter()
+        .filter(|(_, value)| !Path::new(value).is_absolute())
+        .map(|(node_id, value)| ForeignPath {
+            node_id,
+            path: value.to_string(),
+        })
+        .collect();
+    assert_eq!(
+        foreign.len(),
+        1,
+        "one is absolute here and the other is not"
+    );
+    assert_eq!(loaded.report.foreign_paths, foreign);
+    assert!(loaded.report.repairs.is_empty());
+    assert!(!loaded.open.dirty);
+    assert_eq!(
+        loaded.report.to_string(),
+        "the document names 1 path(s) of another system"
     );
 }

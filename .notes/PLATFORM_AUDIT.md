@@ -11,6 +11,9 @@ or the doc comment of the system that it governs. Then delete the change from th
 - The Windows main thread stack, to `reserve_main_stack` in `app/build.rs`.
 - The removal of Direct3D 12, to `palantir/AGENTS.md`, "Vulkan, Metal and GL; no Direct3D 12". It
   replaced the earlier decision to keep Direct3D 12 as a fallback.
+- The bundled font names, to `hide_installed_bundled` in `palantir/src/text/font_scope.rs`.
+- The foreign absolute paths, to `darkroom/AGENTS.md`, "A path in another system's absolute form
+  stays as the file holds it".
 
 ## Background
 
@@ -65,8 +68,6 @@ No finding is a data-loss bug in a common workflow.
 
 | Finding | Effect | Evidence | Decision |
 |---|---|---|---|
-| An installed font replaces a bundled font | Text look and widths change by machine | Confirmed in source | Bundled faces own their names |
-| A foreign absolute path changes at load | A Save on Windows rewrites a Unix path | Derived from std docs | Keep the bytes, and report |
 | System math library in results | The last bit of a result differs by OS | Rust docs state it, size not measured | `ops` module over `libm`, with a digest test |
 | LibRaw can fuse float operations on aarch64 | LibRaw output can differ by architecture | Compiler docs state it, not measured | `-ffp-contract=off` |
 | File watch fires on metadata on Windows | A doc promise fails on one OS | Confirmed in source | Correct the docs |
@@ -84,76 +85,10 @@ This approval applies only to the change below.
 
 ## Implementation order
 
-1. The bundled font names.
-2. The foreign absolute paths.
-3. The LibRaw flag, then the `ops` modules with their digest test.
-4. The doc corrections, in any order.
+1. The LibRaw flag, then the `ops` modules with their digest test.
+2. The doc corrections, in any order.
 
 ## Decisions
-
-### An installed font replaces a bundled font
-
-**Where:** `palantir/src/text/font_scope.rs:35`.
-
-**Behavior:** `FontScope::System` calls `FontSystem::new_with_fonts`, which loads the system fonts
-first and the bundled faces after them (cosmic-text 0.19 `font/system.rs:438`). `fontdb` keeps
-candidates in that order and picks the best match by weight and style (`lib.rs:661`). Thus an
-installed "Inter" or "JetBrains Mono" can win over the bundled face of that name.
-
-**Effect:**
-
-- The doc of `FontScope::System` says "every installed font as glyph fallback". For these two
-  family names, an installed font is no fallback. It replaces the bundled face.
-- A person with an older Inter sees other widths and other glyphs. JetBrains Mono is common on a
-  developer's machine.
-- The harness uses `FontScope::Bundled`, so its shots can differ from the window on that machine.
-
-**Decision: the bundled faces own their names.** After the system scan, remove each system face whose
-family is a bundled name, through `FontSystem::db_mut` and `fontdb::Database::remove_face`. Add a
-test with a second face under a bundled name. This follows CSS: when an `@font-face` family has the
-name of an installed family,
-["it effectively hides the underlying font"](https://www.w3.org/TR/css-fonts-3/). A person can no
-longer replace the UI font by an install, which is the point of a bundled font.
-
-**Refused:** Loading the bundled faces first. An installed static Bold can still be the better match
-at weight 700, so the order alone does not settle it.
-
-**Not a finding:** An installed font as a fallback for a glyph that the bundled faces lack, and the
-system locale that steers that fallback. The system decides both.
-
-### A foreign absolute path changes at load
-
-**Where:** `resolve` and `absolute` in `darkroom/src/core/io/document/saved_paths.rs:37`, and the
-`RelativePath` check in `darkroom/src/core/document/mod.rs:246`.
-
-**Behavior:** A file holds a path outside the document's folder as an absolute path, in the form of
-the OS that saved it. `Path::is_absolute` reads only the form of the current OS
-([Path](https://doc.rust-lang.org/std/path/struct.Path.html#method.is_absolute)).
-
-| Path in the file | Read on | Result in memory | After a Save |
-|---|---|---|---|
-| `/data/a.fit` | Windows | `C:\data\a.fit`, as [`PathBuf::push`](https://doc.rust-lang.org/std/path/struct.PathBuf.html#method.push) keeps the drive | `C:\data\a.fit`: **the original path is gone** |
-| `C:\data\a.fit` | Linux, macOS | `<folder>/C:\data\a.fit`, one file name | `C:\data\a.fit`: kept |
-
-**Effect:** The load reports nothing. A later run fails on a file that the document never named, or
-reads another file if that path exists on the Windows drive. A trip through Windows and back breaks
-the path for the first machine. No test in `core/io/document` holds a foreign form.
-
-**Decision: keep the bytes, and report.** Classify the text by the rules of both OS forms, as Python's
-[`PureWindowsPath` and `PurePosixPath`](https://docs.python.org/3/library/pathlib.html) do with no
-file system access. A path in the absolute form of another OS stays byte-identical in memory and on
-Save. The load report names it, as the root `AGENTS.md` asks of each inconsistency at load. A run
-fails with that exact path.
-
-**What follows from it:** The invariant "memory holds absolute paths" becomes "absolute on some OS".
-`resolve`, `relative_to` and the `RelativePath` check use one classifier. Test `/x`, `C:\x`, `C:/x`
-and `\\server\share\x` on every OS. Each case is a string, so the test needs no OS of its own.
-
-**Refused:**
-
-- Refusing the load: one outside path would make a whole project unopenable on the other OS.
-- Clearing the input with a report: a Save then loses the path on every OS.
-- The `typed-path` crate: a dependency for a check of a few lines.
 
 ### System math library in results
 
