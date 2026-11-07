@@ -4,11 +4,10 @@
 
 use std::path::PathBuf;
 
-use palantir::{AgentWindow, InspectedWidget, PlayError, Remote, Ui};
+use palantir::{AgentWindow, InspectedWidget, Remote, Ui};
 
 use crate::driver::action::Play;
 use crate::driver::error::DriverError;
-use crate::driver::shot::{Capture, Region};
 use crate::driver::window_link::WindowLink;
 use crate::gui::MAIN_WINDOW;
 use crate::gui::app::{App, UnsavedEdits};
@@ -27,6 +26,11 @@ impl WindowBackend {
             .remote(MAIN_WINDOW)
             .with_blocked(link.native_probe());
         Self { link, remote }
+    }
+
+    /// The remote that plays and reads the window, as palantir's driver verbs take it.
+    pub(crate) const fn remote(&mut self) -> &mut Remote<App> {
+        &mut self.remote
     }
 
     /// `f` run on the main thread between two of the window's frames, against the last.
@@ -77,22 +81,6 @@ impl WindowBackend {
             None => app.new_driven(UnsavedEdits::Refuse),
         })?;
         Ok(opened?)
-    }
-
-    /// A shot of `region` as a later frame paints it: the region resolved against the last
-    /// frame, the image taken by the frame it lands in, the fit made here, off the person's
-    /// thread, and the legend read against the frame after.
-    pub(crate) fn shot(&mut self, region: &Region, max_side: u32) -> Result<Capture, DriverError> {
-        let asked = region.clone();
-        let rect = self.with_app(move |app, ui| asked.rect(app, ui))??;
-        let screenshot = self.remote.shot(rect).map_err(|error| match error {
-            PlayError::EmptyRegion => DriverError::EmptyRegion {
-                region: format!("{region:?}"),
-            },
-            error => DriverError::played(&format!("the shot of {region:?}"), error),
-        })?;
-        let picture = screenshot.image().fitted(max_side);
-        self.with_app(move |app, ui| Capture::of(&screenshot, picture, app, ui))
     }
 
     /// palantir's settle of the window: a frame that saw every sent event, asks no repaint and

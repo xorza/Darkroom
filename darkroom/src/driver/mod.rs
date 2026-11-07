@@ -171,7 +171,7 @@ impl Driver {
         self.backend.running().map_err(failed(0))?;
         self.runs_before = self
             .backend
-            .with_app(|app, _| app.run_state().runs_ended())
+            .read(|app, _| app.run_state().runs_ended())
             .map_err(failed(0))?;
         let mut frames = 0;
         for (ran, action) in actions.iter().enumerate() {
@@ -180,7 +180,7 @@ impl Driver {
         // Not `Self::state`, whose report takes the log lines a later `state` call is owed.
         let state = self
             .backend
-            .with_app(|app, ui| State::of(app, ui, Detail::Concise, None, Vec::new()))
+            .read(|app, ui| State::of(app, ui, Detail::Concise, None, Vec::new()))
             .map_err(failed(actions.len()))?;
         Ok(ActReport {
             frames,
@@ -196,7 +196,7 @@ impl Driver {
         let log = self.log.drain();
         let nodes = nodes.map(str::to_owned);
         self.backend
-            .with_app(move |app, ui| State::of(app, ui, detail, nodes.as_deref(), log))
+            .read(move |app, ui| State::of(app, ui, detail, nodes.as_deref(), log))
     }
 
     /// The visible interactive widgets whose text contains `filter`, at most `limit`.
@@ -235,7 +235,7 @@ impl Driver {
         let before = self.runs_before;
         loop {
             self.backend.settle("the run")?;
-            let (executing, ended) = self.backend.with_app(|app, _| {
+            let (executing, ended) = self.backend.read(|app, _| {
                 let run = app.run_state();
                 (run.activity().is_executing(), run.runs_ended())
             })?;

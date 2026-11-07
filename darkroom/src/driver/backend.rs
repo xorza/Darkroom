@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
 
-use palantir::{InspectedWidget, Ui};
+use palantir::{AgentWindow, InspectedWidget, Ui};
 
 use crate::driver::action::Play;
 use crate::driver::error::DriverError;
@@ -14,8 +14,7 @@ use crate::driver::shot::{Capture, Region};
 use crate::driver::window_backend::WindowBackend;
 use crate::gui::app::App;
 
-/// How long a wait on the window's background work sleeps between two looks at the app, which
-/// each run a frame of it.
+/// How long a wait on the window's background work sleeps between two looks at the app.
 const WINDOW_POLL: Duration = Duration::from_millis(5);
 
 /// The two places the editor runs: offscreen on the driver's thread, or in the desktop window on
@@ -28,7 +27,20 @@ pub(crate) enum Backend {
 }
 
 impl Backend {
-    /// `f`, which reads or changes the app, against the app and the frame it last ran.
+    /// `f`, which reads the app, against the app and the frame it last ran. It asks no frame, so a
+    /// hidden window answers and its next settle ends as it would have.
+    pub(crate) fn read<R: Send + 'static>(
+        &mut self,
+        f: impl FnOnce(&App, &Ui) -> R + Send + 'static,
+    ) -> Result<R, DriverError> {
+        match self {
+            Self::Offscreen(offscreen) => offscreen.session().read(f),
+            Self::Window(window) => window.remote().read(f),
+        }
+        .map_err(|error| DriverError::played("the read", error))
+    }
+
+    /// `f`, which changes the app, against the app and the frame it last ran.
     pub(crate) fn with_app<R: Send + 'static>(
         &mut self,
         f: impl FnOnce(&mut App, &Ui) -> R + Send + 'static,
@@ -99,10 +111,11 @@ impl Backend {
         }
     }
 
+    /// A capture of `region`, as a later frame paints it.
     pub(crate) fn shot(&mut self, region: &Region, max_side: u32) -> Result<Capture, DriverError> {
         match self {
-            Self::Offscreen(offscreen) => offscreen.shot(region, max_side),
-            Self::Window(window) => window.shot(region, max_side),
+            Self::Offscreen(offscreen) => Capture::take(&mut offscreen.session(), region, max_side),
+            Self::Window(window) => Capture::take(window.remote(), region, max_side),
         }
     }
 }

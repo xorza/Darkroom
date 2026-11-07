@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use glam::UVec2;
-use palantir::{Found, Image, LocateError, Rect, Screenshot, Ui};
+use palantir::{AgentWindow, Found, Image, LocateError, PlayError, Rect, Screenshot, Ui};
 use serde::Serialize;
 
 use crate::core::document::tab_ref::TabRef;
@@ -170,9 +170,35 @@ pub(crate) struct Capture {
 }
 
 impl Capture {
+    /// A shot of `region` as a later frame paints it: the region resolved against the last frame,
+    /// the image taken by the frame it lands in, the fit made here, off a window's thread, and the
+    /// legend read against the frame the image landed in or a later one. See
+    /// [`crate::driver::Driver::shot`].
+    pub(crate) fn take(
+        window: &mut impl AgentWindow<App>,
+        region: &Region,
+        max_side: u32,
+    ) -> Result<Self, DriverError> {
+        let played = |error| match error {
+            PlayError::EmptyRegion => DriverError::EmptyRegion {
+                region: format!("{region:?}"),
+            },
+            error => DriverError::played(&format!("the shot of {region:?}"), error),
+        };
+        let asked = region.clone();
+        let rect = window
+            .read(move |app, ui| asked.rect(app, ui))
+            .map_err(played)??;
+        let screenshot = window.shot(rect).map_err(played)?;
+        let picture = screenshot.image().fitted(max_side);
+        window
+            .read(move |app, ui| Self::of(&screenshot, picture, app, ui))
+            .map_err(played)
+    }
+
     /// `picture`, a fit of `screenshot`, with the legend of `app`'s nodes as `ui`'s frame lays
     /// them out, placed in it.
-    pub(crate) fn of(screenshot: &Screenshot, picture: Image, app: &App, ui: &Ui) -> Self {
+    fn of(screenshot: &Screenshot, picture: Image, app: &App, ui: &Ui) -> Self {
         let legend = legend(screenshot, picture.size(), app, ui);
         Self { picture, legend }
     }

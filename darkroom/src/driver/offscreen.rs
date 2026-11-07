@@ -8,14 +8,12 @@ use glam::UVec2;
 use palantir::PowerPreference;
 use palantir::wgpu::Features;
 use palantir::{
-    AgentWindow, Depth, Harness, InspectedWidget, PlayError, RequestedGpu, Screenshot, Ui,
-    WindowCommand,
+    AgentWindow, Depth, Harness, HarnessSession, InspectedWidget, RequestedGpu, Ui, WindowCommand,
 };
 
 use crate::core::io::preferences::preferences_store::PreferencesStore;
 use crate::driver::action::Play;
 use crate::driver::error::DriverError;
-use crate::driver::shot::{Capture, Region};
 use crate::driver::{BACKGROUND_WAIT, DisplayKind, SETTLE_FRAMES, SessionConfig};
 use crate::gui::MAIN_WINDOW;
 use crate::gui::app::{App, LaunchInputs, UnsavedEdits};
@@ -97,13 +95,17 @@ impl Offscreen {
         f(&mut self.app, self.harness.ui())
     }
 
+    /// The harness and its app, as palantir's driver verbs take them.
+    pub(crate) fn session(&mut self) -> HarnessSession<'_, App> {
+        self.harness.session(&mut self.app)
+    }
+
     /// Play `action`, as palantir's harness plays it, settling after each step it takes, the
     /// previews converting included ([`App::is_busy`](palantir::App::is_busy)). A step that quits
     /// the editor ends with [`DriverError::Quit`].
     pub(crate) fn play(&mut self, action: &Play) -> Result<u32, DriverError> {
         let played = self
-            .harness
-            .session(&mut self.app)
+            .session()
             .play(std::slice::from_ref(action))
             .map_err(|failed| DriverError::played(&format!("{action:?}"), failed.error));
         self.running()?;
@@ -158,35 +160,12 @@ impl Offscreen {
         Ok(())
     }
 
-    /// A capture of `region` as the next frame paints it; see [`crate::driver::Driver::shot`].
-    pub(crate) fn shot(&mut self, region: &Region, max_side: u32) -> Result<Capture, DriverError> {
-        let rect = region.rect(&self.app, self.harness.ui())?;
-        let screenshot: Screenshot =
-            self.harness
-                .session(&mut self.app)
-                .shot(rect)
-                .map_err(|error| match error {
-                    PlayError::EmptyRegion => DriverError::EmptyRegion {
-                        region: format!("{region:?}"),
-                    },
-                    error => DriverError::played(&format!("the shot of {region:?}"), error),
-                })?;
-        let picture = screenshot.image().fitted(max_side);
-        // The legend reads the frame the image landed in, the harness's last.
-        Ok(Capture::of(
-            &screenshot,
-            picture,
-            &self.app,
-            self.harness.ui(),
-        ))
-    }
-
     /// palantir's settle: frames until one asks no repaint, no screenshot is on its way back from
     /// the device, no wake waits and no preview converts, bounded in frames and, for a conversion,
     /// in real time. A frame that quits the editor ends the step with [`DriverError::Quit`]: every
     /// step ends here, so no call goes on past a quit, whatever it guards at its start.
     pub(crate) fn settle(&mut self, step: &str) -> Result<u32, DriverError> {
-        let settled = self.harness.session(&mut self.app).settle();
+        let settled = self.session().settle();
         self.running()?;
         settled.map_err(|error| DriverError::played(step, error))
     }
