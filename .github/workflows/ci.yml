@@ -17,10 +17,9 @@ concurrency:
 
 # No RUSTFLAGS: it would replace the x86-64-v3 flags of `.cargo/config.toml`. No
 # CARGO_INCREMENTAL: rust-cache sets it to 0.
-env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
 
+# `xorza/rust-ci` holds the steps each repository and OS shares. Its actions read bash, and a `run`
+# gets `pipefail` only from a named shell.
 defaults:
   run:
     shell: bash
@@ -43,50 +42,13 @@ jobs:
           # palantir, fits-well and LibRaw. The action fetches the `git@github.com:` URLs over
           # HTTPS, as no ssh-key is given.
           submodules: true
-      # libclang for LibRaw's bindgen, OpenSSL for the ONNX Runtime download of `ort-sys`,
-      # lavapipe, a software Vulkan adapter, so imaginarium's GPU tests run on a runner with no
-      # GPU instead of skipping, and gdb for the backtrace of a crashed test binary. macOS exposes
-      # Metal, so it needs nothing.
-      - name: Install system packages
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libclang-dev libssl-dev pkg-config mesa-vulkan-drivers gdb
-      # A Windows runner holds no Vulkan loader and no driver: LunarG's runtime brings the loader,
-      # and Mesa lavapipe, a software adapter, as wgpu's own CI installs it. `vulkaninfo` fails this
-      # step if the two do not meet, where the tests would each fail on no adapter.
-      - name: Install a software Vulkan adapter on Windows
-        if: runner.os == 'Windows'
-        shell: bash
-        env:
-          MESA_VERSION: 26.2.6
-          VULKAN_RUNTIME_VERSION: 1.4.357.0
-        run: |
-          set -e
-          runtime="VulkanRT-X64-$VULKAN_RUNTIME_VERSION-Components"
-          curl.exe -L --retry 5 "https://sdk.lunarg.com/sdk/download/$VULKAN_RUNTIME_VERSION/windows/$runtime.zip" -o vulkan-runtime.zip
-          7z.exe e vulkan-runtime.zip -ovulkan "$runtime/x64/vulkan-1.dll" "$runtime/x64/vulkaninfo.exe"
-          curl.exe -L --retry 5 "https://github.com/pal1000/mesa-dist-win/releases/download/$MESA_VERSION/mesa3d-$MESA_VERSION-release-msvc.7z" -o mesa.7z
-          7z.exe e mesa.7z -ovulkan x64/vulkan_lvp.dll x64/lvp_icd.x86_64.json
-          # The registry, as a runner is elevated and the loader ignores `VK_DRIVER_FILES` under that.
-          MSYS_NO_PATHCONV=1 reg.exe add 'HKLM\SOFTWARE\Khronos\Vulkan\Drivers' /v "$(cygpath --windows "$PWD/vulkan/lvp_icd.x86_64.json")" /t REG_DWORD /d 0 /f
-          ./vulkan/vulkaninfo.exe --summary
-          cygpath --windows "$PWD/vulkan" >> "$GITHUB_PATH"
-      # A test binary that crashes takes every test in it down with no name and no backtrace, as
-      # libtest runs them in one process: its core goes to a known directory, where Ubuntu's
-      # default pipes it to apport.
-      - name: Keep core dumps
-        if: runner.os == 'Linux'
-        run: |
-          mkdir -p /tmp/cores
-          sudo sysctl -w kernel.core_pattern=/tmp/cores/core.%e.%p
-      # Every hosted runner has rustup, so no action is needed to install the toolchain.
-      - run: rustup toolchain install stable --profile minimal --component clippy,rustfmt && rustup default stable
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      # libclang for LibRaw's bindgen, OpenSSL for the ONNX Runtime download of `ort-sys`.
+      - uses: xorza/rust-ci/setup@9629682b748c30f471b2904c9c85a520765cb542 # master
         with:
-          # Only master writes, so a pull request cannot evict what master reads.
-          save-if: ${{ github.ref == 'refs/heads/master' }}
+          apt-packages: libclang-dev libssl-dev pkg-config
+      # So imaginarium's GPU tests run on a runner with no GPU instead of skipping.
+      - uses: xorza/rust-ci/lavapipe@9629682b748c30f471b2904c9c85a520765cb542 # master
+      - uses: xorza/rust-ci/crash-capture@9629682b748c30f471b2904c9c85a520765cb542 # master
       # The gate of AGENTS.md, one step per command. Each runs past an earlier failure, so one run
       # reports every lane. palantir and fits-well are built here as dependencies alone: each
       # repository's own CI runs its lanes. `--locked` goes before the alias, as an alias's own
@@ -103,19 +65,22 @@ jobs:
       # The build apart from the run, so each shows its own time.
       - if: ${{ !cancelled() }}
         run: cargo --locked gate-test --no-run
-      # The core size limit is the shell's own, so it is raised in the step that runs the tests.
-      - if: ${{ !cancelled() }}
-        run: |
-          if [ "$RUNNER_OS" = Linux ]; then ulimit -c unlimited; fi
-          cargo --locked gate-test
-      # The backtrace of every thread of each crashed binary, as gdb reads its core.
-      - name: Backtrace crashes
-        if: failure() && runner.os == 'Linux'
-        run: |
-          shopt -s nullglob
-          for core in /tmp/cores/core.*; do
-            exe=$(file -b "$core" | sed -n "s/.*execfn: '\([^']*\)'.*/\1/p")
-            echo "::group::$core ($exe)"
-            gdb -batch -ex 'thread apply all bt' "$exe" "$core"
-            echo "::endgroup::"
-          done
+      - uses: xorza/rust-ci/test@9629682b748c30f471b2904c9c85a520765cb542 # master
+        if: ${{ !cancelled() }}
+        timeout-minutes: 45
+        with:
+          command: cargo --locked gate-test
+      - uses: xorza/rust-ci/failure-report@9629682b748c30f471b2904c9c85a520765cb542 # master
+        if: failure()
+        with:
+          paths: test_output/**
+
+  workflows:
+    name: workflow checks
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: xorza/rust-ci/workflow-check@9629682b748c30f471b2904c9c85a520765cb542 # master
