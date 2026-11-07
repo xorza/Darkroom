@@ -19,7 +19,7 @@ pub(crate) struct LoadReport {
     pub(crate) foreign_paths: Vec<ForeignPath>,
 }
 
-/// A path in the absolute form of another system, which a load and a save keep byte for byte. No
+/// A [`scenarium::PathForm::Foreign`] path, which a load and a save keep byte for byte. No
 /// change of the document, so it leaves the document clean.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ForeignPath {
@@ -130,7 +130,7 @@ impl LoadReport {
         for ForeignPath { node_id, path } in &self.foreign_paths {
             tracing::warn!(
                 target: "darkroom::load",
-                "{node_id:?} names {path:?}, a path of another system, kept as it is"
+                "{node_id:?} names {path:?}, a path this system cannot read as written, kept as it is"
             );
         }
         status.warn(StatusFamily::Document, self.to_string());
@@ -138,7 +138,7 @@ impl LoadReport {
 }
 
 /// The status line of a load with something to report: how many changes it made, and how many
-/// paths of another system the document names.
+/// paths the document names that this system cannot read as written.
 impl Display for LoadReport {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         if !self.repairs.is_empty() {
@@ -154,7 +154,7 @@ impl Display for LoadReport {
             }
             write!(
                 f,
-                "the document names {} path(s) of another system",
+                "the document names {} path(s) this system cannot read as written",
                 self.foreign_paths.len()
             )?;
         }
@@ -290,7 +290,7 @@ mod tests {
         assert!(!only_paths.is_empty());
         assert_eq!(
             only_paths.to_string(),
-            "the document names 2 path(s) of another system"
+            "the document names 2 path(s) this system cannot read as written"
         );
         assert_eq!(
             LoadReport {
@@ -299,7 +299,7 @@ mod tests {
             }
             .to_string(),
             "the load made 1 repair(s) to the document; save to keep them; the document names 2 \
-             path(s) of another system"
+             path(s) this system cannot read as written"
         );
     }
 }

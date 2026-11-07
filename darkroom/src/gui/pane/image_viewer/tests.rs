@@ -4,13 +4,32 @@ use std::cell::Cell;
 use std::sync::Arc;
 
 use imaginarium::ColorFormat;
-use palantir::Harness;
-use palantir::PointerButton;
+use palantir::internals::{headless_test_gpu, isolated_headless_test_gpu};
+use palantir::{Harness, OffscreenHost, PointerButton};
 
 use crate::core::document::internals::DocumentFixture;
 use crate::core::preview_sink;
 use crate::core::wake;
 use crate::gui::state::preview_store;
+
+/// A new device holds none of the old one's textures, and the next draw fills the same handle
+/// again.
+#[test]
+fn a_checker_tile_fills_again_on_a_new_device() {
+    let theme = Theme::default();
+    let first = isolated_headless_test_gpu();
+    let mut host = OffscreenHost::builder(first.handles()).build();
+    let mut viewer = ImageViewer::new(viewer_node());
+    let tile = viewer.checker_tile(host.ui(), &theme);
+    assert!(tile.is_resident());
+
+    let device = headless_test_gpu();
+    host.recover(device.handles());
+    assert!(!tile.is_resident());
+
+    assert!(viewer.checker_tile(host.ui(), &theme).is_resident());
+    assert!(tile.is_resident());
+}
 
 /// The header line: the fixed head, then the clauses that come and go — the
 /// capped-texture note, the still-converting note and the zoom readout, with

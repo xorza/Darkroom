@@ -621,6 +621,6 @@ fn a_path_of_another_system_is_reported_and_leaves_the_document_clean() {
     assert!(!loaded.open.dirty);
     assert_eq!(
         loaded.report.to_string(),
-        "the document names 1 path(s) of another system"
+        "the document names 1 path(s) this system cannot read as written"
     );
 }

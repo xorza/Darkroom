@@ -347,17 +347,24 @@ impl ImageViewer {
             });
     }
 
+    /// The checkerboard tile, filled again where a lost device took its texture: the theme holds
+    /// its texels, so the image needs no copy to survive the loss.
+    fn checker_tile(&mut self, ui: &Ui, theme: &Theme) -> ImageHandle {
+        const FITS: &str = "checker image fits every supported GPU";
+        let handle = self
+            .checker
+            .get_or_insert_with(|| ui.load_image(&glyph::checker_image(theme)).expect(FITS));
+        if !handle.is_resident() {
+            handle.update(&glyph::checker_image(theme)).expect(FITS);
+        }
+        handle.clone()
+    }
+
     /// The screen-fixed checkerboard backdrop across the whole pane. One
     /// tiled 2×2 texture; `Nearest` keeps the squares crisp at any pane
     /// size and DPI.
     fn draw_checker(&mut self, ui: &mut Ui, theme: &Theme, pane: Vec2) {
-        let handle = self
-            .checker
-            .get_or_insert_with(|| {
-                ui.load_image(&glyph::checker_image(theme))
-                    .expect("checker image fits every supported GPU")
-            })
-            .clone();
+        let handle = self.checker_tile(ui, theme);
         ui.add_shape(
             Shape::image(handle)
                 .fit(ImageFit::Tile {

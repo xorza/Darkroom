@@ -657,7 +657,7 @@ impl ExecFrame<'_, '_> {
         );
     }
 
-    /// The first path input of `node_idx` in the absolute form of another system. It reads the
+    /// The first path input of `node_idx` that holds a [`PathForm::Foreign`] path. It reads the
     /// values [`Self::collect_inputs`] resolved, so a const and a wire's value alike pass through.
     fn foreign_path_input(&self, node_idx: NodeIdx) -> Option<RunError> {
         let declared = &self.program.inputs[self.program[node_idx].inputs];
