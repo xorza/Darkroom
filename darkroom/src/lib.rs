@@ -39,13 +39,24 @@ pub struct RunConfig {
 /// Launch the Palantir desktop editor. The winit event loop owns the main thread, so this doesn't
 /// return until the window closes.
 pub fn run(config: RunConfig) -> Result<(), WinitHostError> {
-    run_driven(config, |_| {})
+    run_with(config, PreferencesStore::user(), |_| {})
 }
 
 /// [`run`], handing `serve` the link a driver on another thread reaches the window through, on
-/// the main thread once the app exists and before its first frame.
+/// the main thread once the app exists and before its first frame. Its preferences are the
+/// defaults, kept in memory, as an offscreen driver's are: `darkroom/AGENTS.md`, "The editor
+/// harness", "A driven session leaves the preferences file alone".
 pub fn run_driven(
     config: RunConfig,
+    serve: impl FnOnce(WindowLink) + 'static,
+) -> Result<(), WinitHostError> {
+    run_with(config, PreferencesStore::Memory, serve)
+}
+
+/// The window on the preferences `store` holds, its link handed to `serve`.
+fn run_with(
+    config: RunConfig,
+    store: PreferencesStore,
     serve: impl FnOnce(WindowLink) + 'static,
 ) -> Result<(), WinitHostError> {
     let RunConfig { document, overlay } = config;
@@ -53,7 +64,7 @@ pub fn run_driven(
     // position seeds the window at creation (`App::new` runs after the
     // first window is already up, too late to size it). Reuse the same
     // instance for the app so we don't read the file twice.
-    let preferences = PreferencesStore::user().open();
+    let preferences = store.open();
     // Reverse-DNS, and exactly the basename of
     // `packaging/linux/com.cssodessa.darkroom.desktop` — that equality is what
     // ties the window to its launcher entry, so the shell groups the two and
@@ -83,7 +94,11 @@ pub fn run_driven(
                     dialogs,
                 },
             );
-            serve(WindowLink::new(handle, native_dialog));
+            serve(WindowLink::new(
+                handle,
+                native_dialog,
+                app.quit_flag().clone(),
+            ));
             app
         })?;
 

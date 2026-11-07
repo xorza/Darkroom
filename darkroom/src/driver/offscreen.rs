@@ -9,14 +9,12 @@ use palantir::PowerPreference;
 use palantir::wgpu::Features;
 use palantir::{
     AgentWindow, Depth, Gpu, Harness, HarnessSession, InspectedWidget, RequestedGpu, Ui,
-    WindowCommand,
 };
 
 use crate::core::io::preferences::preferences_store::PreferencesStore;
 use crate::driver::action::Play;
 use crate::driver::error::DriverError;
 use crate::driver::{BACKGROUND_WAIT, DisplayKind, SETTLE_FRAMES, SessionConfig};
-use crate::gui::MAIN_WINDOW;
 use crate::gui::app::{App, LaunchInputs, UnsavedEdits};
 use crate::gui::dialogs::{DialogFallback, Dialogs};
 
@@ -33,9 +31,6 @@ pub(crate) struct Offscreen {
     size: UVec2,
     /// Boxed: it holds a whole `Ui`, kilobytes a driver need not carry inline.
     harness: Box<Harness>,
-    /// The window commands the harness had recorded when this app launched: a close past them
-    /// is this app's quit.
-    launched_at: usize,
 }
 
 /// A window of `size` on a device that makes textures up to `limit` per side, which a smaller
@@ -71,7 +66,6 @@ impl Offscreen {
             display: config.display,
             size: config.size,
             harness,
-            launched_at: 0,
         })
     }
 
@@ -135,13 +129,8 @@ impl Offscreen {
         }
     }
 
-    /// Whether this app closed its window.
     fn quit(&self) -> bool {
-        self.harness.window_commands()[self.launched_at..]
-            .iter()
-            .any(
-                |command| matches!(command, WindowCommand::Close(window) if *window == MAIN_WINDOW),
-            )
+        self.app.quit_flag().is_raised()
     }
 
     pub(crate) fn wake_pending(&self) -> bool {
@@ -159,7 +148,6 @@ impl Offscreen {
     /// person to lose it.
     pub(crate) fn open(&mut self, document: Option<PathBuf>) -> Result<(), DriverError> {
         if self.quit() {
-            self.launched_at = self.harness.window_commands().len();
             self.app = launch(self.harness.ui_mut());
         }
         match document {

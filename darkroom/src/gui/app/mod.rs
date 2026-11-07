@@ -22,6 +22,7 @@ use crate::gui::MAIN_WINDOW;
 use crate::gui::app::discard_dialog::{Answered, DiscardChoice, DiscardGuard, PendingTransition};
 use crate::gui::app::error::DrivenOpenError;
 use crate::gui::app::error::NonUnicodePath;
+use crate::gui::app::quit_flag::QuitFlag;
 use crate::gui::app::session::Session;
 use crate::gui::app::view_capture::{CaptureTarget, ViewCapture};
 use crate::gui::dialogs::{Dialogs, SavedFile};
@@ -38,6 +39,7 @@ use crate::gui::theme::Theme;
 
 mod discard_dialog;
 pub(crate) mod error;
+pub(crate) mod quit_flag;
 pub(crate) mod screenshot_ask;
 pub(crate) mod session;
 pub(crate) mod view_capture;
@@ -70,8 +72,8 @@ pub(crate) struct App {
     /// whoever is reporting.
     status: StatusLog,
     theme: Theme,
-    /// A quit asked this pass, which closes the window as the pass ends.
-    quitting: bool,
+    /// A quit asked, which closes the window as the pass ends.
+    quitting: QuitFlag,
     /// Persisted session state: the last document, the window, the viewer
     /// and model choices. A form edits it in place, and [`Self::sync_preferences`] finds the
     /// change, so the next launch reopens where the user left off.
@@ -173,7 +175,7 @@ impl App {
             run_state,
             status,
             theme: Theme::default(),
-            quitting: false,
+            quitting: QuitFlag::default(),
             saved_preferences: preferences.clone(),
             preferences,
             preferences_store,
@@ -272,7 +274,12 @@ impl App {
     /// saves in [`Self::handle_close_request`] instead.
     fn quit(&mut self) {
         self.save_preferences();
-        self.quitting = true;
+        self.quitting.raise();
+    }
+
+    /// Raised once the editor quits; a driver keeps a clone, which outlives the app.
+    pub(crate) const fn quit_flag(&self) -> &QuitFlag {
+        &self.quitting
     }
 
     /// Whether a destructive transition has to prompt before proceeding:
@@ -756,7 +763,7 @@ impl palantir::App for App {
             self.record_discard_prompt(ui);
         }
         self.sync_preferences();
-        if self.quitting {
+        if self.quitting.is_raised() {
             ui.close_window(MAIN_WINDOW);
         }
     }
@@ -938,7 +945,8 @@ mod tests {
     }
 
     /// A view capture asks frames until its image lands, and the app reads as busy only while a
-    /// preview converts, which wakes the window; File ▸ Quit closes the window as its pass ends.
+    /// preview converts, which wakes the window; File ▸ Quit raises the quit flag at once, as a
+    /// clone of it reads, and closes the window as its pass ends.
     #[test]
     fn a_capture_asks_frames_and_a_quit_closes_the_window() {
         use glam::UVec2;
@@ -963,7 +971,10 @@ mod tests {
         assert!(!ui.frame_app(&mut app).repaint_requested);
 
         assert!(ui.window_commands().is_empty());
+        let quit = app.quit_flag().clone();
+        assert!(!quit.is_raised());
         app.run_command(AppCommand::Quit);
+        assert!(quit.is_raised(), "a clone sees the quit");
         ui.frame_app(&mut app);
         assert!(matches!(
             ui.window_commands(),

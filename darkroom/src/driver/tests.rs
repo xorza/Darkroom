@@ -716,9 +716,10 @@ fn the_view_menu_copies_and_saves_the_window() {
     assert_eq!(saved, decode(&shot.png));
 }
 
-/// A lost device is replaced before the next frame paints, and every texture is made again on the
-/// new one: a shot after the loss is the window as the shot before it showed it. The action loses
-/// the device and settles on the new one.
+/// A lost device is replaced before the next frame paints, and the window's own textures are made
+/// again on the new one: a shot after the loss is the window as the shot before it showed it. The
+/// fixture has run nothing, so it shows no preview. The action loses the device and settles on the
+/// new one.
 #[test]
 fn a_lost_device_is_replaced_and_the_editor_paints_as_before() {
     let mut driver = small(DisplayKind::IsolatedTestGpu);

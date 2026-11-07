@@ -24,7 +24,8 @@ pub(crate) struct Cli {
     /// launch reopen it.
     #[arg(value_name = "FILE")]
     document: Option<PathBuf>,
-    /// Serve the editor to an agent as an MCP server on stdin and stdout.
+    /// Serve the editor to an agent as an MCP server on stdin and stdout. The editor starts on
+    /// the default preferences and saves none.
     #[arg(long)]
     mcp: bool,
     /// With `--mcp`, no window: the editor renders offscreen, on a GPU adapter or a software one.
@@ -47,7 +48,8 @@ pub(crate) struct Cli {
 pub(crate) enum Launch {
     /// The editor's window, on the config's document or the remembered one.
     Window(RunConfig),
-    /// The window, and an MCP server that drives it.
+    /// The window on the default preferences, which it saves nowhere, and an MCP server that
+    /// drives it.
     McpWindow(RunConfig),
     /// An MCP server that drives the editor in an offscreen window of `size` physical pixels at
     /// `scale`, on `document` or a new one.

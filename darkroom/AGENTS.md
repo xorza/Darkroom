@@ -59,6 +59,17 @@ desktop for an agent or a test.
   server; a window outlives its server. Refused: sessions inside one server.
 - **A project opens in place**, as a person's Open does; `copy` opens a copy in a temp folder.
   Refused: a copy by default, whose saves a person watching would have to find.
+- **A driven session leaves the preferences file alone**: the `--mcp` window starts on the
+  default preferences and keeps its changes in memory, as the offscreen editor does, so a test
+  session neither reads the person's settings nor writes them, and the path of a copy, which goes
+  with the session directory, never reaches the next launch. Cost: the `--mcp` window opens at
+  the default size, on no remembered document, and a person's own changes at it last only for
+  that session. Refused: reading the file and writing nothing, which starts each session from
+  whatever the person last set, so two runs of one test differ by machine; holding the remembered
+  document alone, which still writes a session's other changes to the shared file; no memory for
+  documents inside the session directory, which needs path resolution, I/O and a fallback
+  ([LibreOffice bug 90318](https://bugs.documentfoundation.org/show_bug.cgi?id=90318) asks the
+  same of temp copies in Recent Documents).
 - **A dialog takes a queued answer, else asks the person**, and headless refuses. Refused: every
   dialog scripted under `--mcp`, which cancels the person's own.
 - **A screenshot is product API**: `darkroom_shot` asks through `Ui::request_screenshot`, as View ▸

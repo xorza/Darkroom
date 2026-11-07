@@ -12,8 +12,9 @@ pub(crate) enum PreferencesStore {
     /// A preferences file: read at launch, rewritten on each change.
     File(PathBuf),
     /// Nowhere: the session starts on the defaults and its changes stay in memory. A session whose
-    /// file failed to load runs on this, so the file stays as the user has it; so does a harness
-    /// session, which must change nothing on the machine.
+    /// file failed to load runs on this, so the file stays as the user has it; so does a driven
+    /// session, offscreen or in a window, and a harness session, which must change nothing on the
+    /// machine.
     Memory,
 }
 

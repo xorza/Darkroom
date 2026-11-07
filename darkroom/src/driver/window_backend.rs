@@ -48,11 +48,15 @@ impl WindowBackend {
     }
 
     /// Play `action` as palantir's remote plays it, settling after each step it takes, the
-    /// previews converting included ([`App::is_busy`](palantir::App::is_busy)).
+    /// previews converting included ([`App::is_busy`](palantir::App::is_busy)). A step that quits
+    /// the editor ends with [`DriverError::Quit`].
     pub(crate) fn play(&mut self, action: &Play) -> Result<u32, DriverError> {
-        self.remote
+        let played = self
+            .remote
             .play(std::slice::from_ref(action))
-            .map_err(|failed| DriverError::played(&format!("{action:?}"), failed.error))
+            .map_err(|failed| DriverError::played(&format!("{action:?}"), failed.error));
+        self.running()?;
+        played
     }
 
     pub(crate) fn widgets(
@@ -72,9 +76,12 @@ impl WindowBackend {
             .map_err(|error| DriverError::played("the device loss", error))
     }
 
-    /// Refuse to go on once the window closed: the session ends with it.
+    /// Refuse to go on once the editor quit, as File ▸ Quit and Ctrl+Q do, or its window
+    /// closed otherwise: the session ends with it.
     pub(crate) fn running(&self) -> Result<(), DriverError> {
-        if self.link.handle.is_open(MAIN_WINDOW) {
+        if self.link.quit.is_raised() {
+            Err(DriverError::Quit)
+        } else if self.link.handle.is_open(MAIN_WINDOW) {
             Ok(())
         } else {
             Err(DriverError::WindowClosed)
@@ -92,11 +99,12 @@ impl WindowBackend {
     }
 
     /// palantir's settle of the window: a frame that saw every sent event, asks no repaint and
-    /// finds no preview converting, bounded in real time.
+    /// finds no preview converting, bounded in real time. A frame that quits the editor ends the
+    /// step with [`DriverError::Quit`].
     pub(crate) fn settle(&mut self, step: &str) -> Result<u32, DriverError> {
         self.running()?;
-        self.remote
-            .settle()
-            .map_err(|error| DriverError::played(step, error))
+        let settled = self.remote.settle();
+        self.running()?;
+        settled.map_err(|error| DriverError::played(step, error))
     }
 }
