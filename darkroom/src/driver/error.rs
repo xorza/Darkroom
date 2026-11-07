@@ -107,8 +107,7 @@ pub enum DriverError {
     )]
     WindowHidden,
     #[error(
-        "the window ran no frame within {} s; a minimized or covered window runs none, so ask \
-         the person at it to show it",
+        "the window ran no frame within {} s; its thread is busy, or hangs",
         .waited.as_secs_f32()
     )]
     NoFrame { waited: Duration },
@@ -170,6 +169,8 @@ impl DriverError {
             PlayError::DeviceLost => Self::DeviceLost,
             PlayError::GpuTimedOut => Self::GpuTimedOut,
             PlayError::Disconnected => Self::WindowClosed,
+            PlayError::Blocked => Self::NativeDialog,
+            PlayError::Hidden => Self::WindowHidden,
             PlayError::NoFrame { waited } => Self::NoFrame { waited },
             PlayError::Busy { waited } | PlayError::StillBusy { waited } => Self::UnsettledInTime {
                 step: step.to_string(),

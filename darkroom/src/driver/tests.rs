@@ -4,7 +4,7 @@ use std::time::Duration;
 use common::{TempDir, fs};
 use glam::{UVec2, Vec2};
 use palantir::Action as PalantirAction;
-use palantir::{LocateError, PointerButton, Rect, ShortcutMods, SystemScale};
+use palantir::{LocateError, PlayError, PointerButton, Rect, ShortcutMods, SystemScale};
 use scenarium::{Binding, ConstValue, InputPort, NodeId};
 use tracing::{callsite, subscriber};
 use tracing_subscriber::layer::SubscriberExt as _;
@@ -1007,4 +1007,26 @@ fn an_interface_size_pick_scales_the_ui() {
         ])
         .unwrap();
     assert_eq!(scale(&mut driver), 1.25);
+}
+
+/// A window that runs no frame says why, from the case palantir's player gave: a native dialog, a
+/// hidden window, or a plain timeout that keeps its time and asks no one to show anything.
+#[test]
+fn a_window_that_runs_no_frame_says_why() {
+    let played = |error| DriverError::played("the step", error).to_string();
+    assert_eq!(
+        played(PlayError::Blocked),
+        "the editor waits on a native file dialog, which only the person at the window answers",
+    );
+    assert_eq!(
+        played(PlayError::Hidden),
+        "the window is minimized or hidden, and runs no frame until it is shown; ask the person \
+         to show it",
+    );
+    assert_eq!(
+        played(PlayError::NoFrame {
+            waited: Duration::from_millis(1500),
+        }),
+        "the window ran no frame within 1.5 s; its thread is busy, or hangs",
+    );
 }

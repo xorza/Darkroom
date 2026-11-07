@@ -2,8 +2,6 @@
 
 use palantir::HostHandle;
 
-use crate::driver::error::DriverError;
-use crate::gui::MAIN_WINDOW;
 use crate::gui::app::App;
 use crate::gui::dialogs::NativeDialogFlag;
 
@@ -27,17 +25,5 @@ impl WindowLink {
     pub(crate) fn native_probe(&self) -> impl Fn() -> bool + Send + 'static {
         let native_dialog = self.native_dialog.clone();
         move || native_dialog.is_raised()
-    }
-
-    /// Why the window runs no frame for now, or `None` while it runs: a native dialog holds every
-    /// frame until the person answers it, and a minimized or occluded window until it shows.
-    pub(crate) fn blocked(&self) -> Option<DriverError> {
-        if self.native_dialog.is_raised() {
-            Some(DriverError::NativeDialog)
-        } else if self.handle.is_hidden(MAIN_WINDOW) {
-            Some(DriverError::WindowHidden)
-        } else {
-            None
-        }
     }
 }

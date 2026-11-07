@@ -40,7 +40,7 @@ impl WindowBackend {
     ) -> Result<R, DriverError> {
         self.remote
             .query(move |app, ui| f(app, ui))
-            .map_err(|error| self.error("the query", error))
+            .map_err(|error| DriverError::played("the query", error))
     }
 
     /// Play `action` as palantir's remote plays it, settling after each step it takes, the
@@ -48,7 +48,7 @@ impl WindowBackend {
     pub(crate) fn play(&mut self, action: &Play) -> Result<u32, DriverError> {
         self.remote
             .play(std::slice::from_ref(action))
-            .map_err(|failed| self.error(&format!("{action:?}"), failed.error))
+            .map_err(|failed| DriverError::played(&format!("{action:?}"), failed.error))
     }
 
     pub(crate) fn widgets(
@@ -57,7 +57,7 @@ impl WindowBackend {
     ) -> Result<Vec<InspectedWidget>, DriverError> {
         self.remote
             .widgets(filter)
-            .map_err(|error| self.error("the widget list", error))
+            .map_err(|error| DriverError::played("the widget list", error))
     }
 
     /// Refuse to go on once the window closed: the session ends with it.
@@ -89,7 +89,7 @@ impl WindowBackend {
             PlayError::EmptyRegion => DriverError::EmptyRegion {
                 region: format!("{region:?}"),
             },
-            error => self.error(&format!("the shot of {region:?}"), error),
+            error => DriverError::played(&format!("the shot of {region:?}"), error),
         })?;
         let picture = screenshot.image().fitted(max_side);
         self.with_app(move |app, ui| Capture::of(&screenshot, picture, app, ui))
@@ -101,14 +101,6 @@ impl WindowBackend {
         self.running()?;
         self.remote
             .settle()
-            .map_err(|error| self.error(step, error))
-    }
-
-    /// What `error` of the remote, playing `step`, means: a native dialog or a hidden window
-    /// holding the frames is said to be the reason, as the remote gave up on it at once.
-    fn error(&self, step: &str, error: PlayError) -> DriverError {
-        self.link
-            .blocked()
-            .unwrap_or_else(|| DriverError::played(step, error))
+            .map_err(|error| DriverError::played(step, error))
     }
 }
