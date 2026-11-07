@@ -3,9 +3,14 @@
 This is a temporary proposal. When a change lands, its lasting decision moves into the `AGENTS.md`
 or the doc comment of the system that it governs. Then delete the change from this file.
 
-**Status:** Each open finding has a decision. The touchpad rule and the Windows wheel setting
-landed, and their decisions moved to `darkroom/AGENTS.md`, "One scroll rule", and
-`palantir/AGENTS.md`, "A person's scroll setting moves a scroll, not a zoom".
+**Status:** Each open finding has a decision. These landed, and their decisions moved:
+
+- The touchpad rule, to `darkroom/AGENTS.md`, "One scroll rule".
+- The Windows wheel setting, to `palantir/AGENTS.md`, "A person's scroll setting moves a scroll,
+  not a zoom".
+- The Windows main thread stack, to `reserve_main_stack` in `app/build.rs`.
+- The removal of Direct3D 12, to `palantir/AGENTS.md`, "Vulkan, Metal and GL; no Direct3D 12". It
+  replaced the earlier decision to keep Direct3D 12 as a fallback.
 
 ## Background
 
@@ -60,8 +65,6 @@ No finding is a data-loss bug in a common workflow.
 
 | Finding | Effect | Evidence | Decision |
 |---|---|---|---|
-| Windows main thread stack is 1 MiB | A crash that only Windows can show, and CI cannot see | Size confirmed, overflow not shown | Reserve 8 MiB in the binary |
-| Windows runs a backend CI does not test | Vulkan runs in production, Dx12 in CI | Confirmed in source | Keep Vulkan first, add a Vulkan lane |
 | An installed font replaces a bundled font | Text look and widths change by machine | Confirmed in source | Bundled faces own their names |
 | A foreign absolute path changes at load | A Save on Windows rewrites a Unix path | Derived from std docs | Keep the bytes, and report |
 | System math library in results | The last bit of a result differs by OS | Rust docs state it, size not measured | `ops` module over `libm`, with a digest test |
@@ -81,93 +84,12 @@ This approval applies only to the change below.
 
 ## Implementation order
 
-1. The Windows main thread stack.
-2. The Vulkan lane in `palantir` CI.
-3. The bundled font names.
-4. The foreign absolute paths.
-5. The LibRaw flag, then the `ops` modules with their digest test.
-6. The doc corrections, in any order.
+1. The bundled font names.
+2. The foreign absolute paths.
+3. The LibRaw flag, then the `ops` modules with their digest test.
+4. The doc corrections, in any order.
 
 ## Decisions
-
-### Windows main thread stack is 1 MiB
-
-**Where:** `app/` holds no stack setting. A search for `stack_size`, `RUST_MIN_STACK`, `link-arg`,
-`/STACK` and `stacker` over the workspace found one unrelated word in a `fits-well` comment.
-
-**Behavior:** Rust does not set the main thread's stack
-([std::thread](https://doc.rust-lang.org/std/thread/index.html)). The Windows linker default is
-[1 MB](https://learn.microsoft.com/en-us/windows/win32/procthread/thread-stack-size). Linux and
-macOS commonly give 8 MiB through the system limit. Spawned Rust threads have 2 MiB on all three.
-
-**Why CI cannot see it:** `libtest` runs each test on a spawned thread with 2 MiB by default. Thus no
-test runs on the 1 MiB stack. Only the shipped window does.
-
-**Risk:** The main thread runs `App::record`, the recursive layout in `palantir/src/layout/pass.rs`,
-pipeline creation, the native file dialogs and the document load. This review did not measure the
-stack that they use, and it did not show an overflow.
-
-**Decision: reserve 8 MiB for the Windows binary, in `app/build.rs`.** It sends
-`cargo::rustc-link-arg-bins` with `/STACK:8388608` for MSVC and `-Wl,--stack,8388608` for GNU. The
-script already reads `CARGO_CFG_TARGET_OS`, as a build script runs on the host. 8 MiB matches the
-common limit on the other two systems. The reservation commits no physical memory until the stack
-uses it. [Slint](https://git.joshthomas.dev/language-servers/slint/commit/2ea583d9d9867f9940a9cb401ee33f1c588f6f9b)
-and [Zed's storybook crate](https://git.secluded.site/zed/blob/v0.142.6/crates/storybook/build.rs)
-use this value, and
-[rustc](https://fuchsia.googlesource.com/third_party/rust/+/1.30.1/src/rustc/rustc.rs) used the same
-two flags at 16 MiB.
-
-**Refused:**
-
-- An entry in `.cargo/config.toml`, as Slint uses: it applies to each binary of the workspace, where
-  this change concerns one.
-- A spawned thread with a large stack for the whole app: AppKit needs the main thread, so macOS
-  cannot use it, and two routes would remain.
-- A measurement first: it would not change this choice, and it is correct even with no overflow.
-
-### Windows runs a backend CI does not test
-
-**Where:** `palantir/src/gpu/device/requested_gpu.rs:107`.
-
-**Behavior:** The sort ranks adapters by device type and is stable. wgpu-core 30 lists backends in
-the order Vulkan, Metal, Dx12, Gles (`instance.rs:84`). Thus on a Windows machine with a Vulkan
-driver, Vulkan wins over Dx12 on the same GPU.
-
-**Effect:** `windows-2025` in CI has WARP, a software Dx12 adapter, and no Vulkan driver. So Windows
-with Vulkan never runs in CI, and Dx12 on a real GPU never runs in CI. In production, Dx12 runs only
-where Vulkan has no driver or opens no device.
-
-**Decision: keep Vulkan first, and add a software Vulkan run to the `palantir` Windows lane.** The
-adapter order does not change. [Bevy](https://docs.rs/crate/bevy_render/latest/source/src/settings.rs)
-and [egui](https://raw.githubusercontent.com/emilk/egui/main/crates/egui-wgpu/src/setup.rs) also
-leave the choice to wgpu's order.
-[wgpu's own CI](https://raw.githubusercontent.com/gfx-rs/wgpu/trunk/.github/workflows/ci.yml)
-installs Mesa, the Vulkan SDK and WARP on its Windows runners, so it is the model for this lane.
-
-**What follows from it:**
-
-- WARP stays. Dx12 is still the fallback for a machine with no Vulkan driver, and a known Dx12 bug in
-  the CI comment shows that it needs a run of its own.
-- `RequestedGpu` builds its instance with `new_*_from_env`, so `WGPU_BACKEND` can select each backend.
-  The Windows lane thus runs the GPU tests once per backend.
-- The wgpu workflow does not show what its install actions contain. Read `install-mesa` and
-  `install-vulkan-sdk` before you copy them.
-- The comment "vulkan is the only backend this crate builds there" in `palantir/.github/workflows/ci.yml`
-  is stale, as `palantir/Cargo.toml` enables `gles`. "Windows is here for Dx12" also needs new words.
-
-**Cost:** More CI time on a lane with a timeout of 150 minutes, and one more install step. A
-software driver tests palantir's Vulkan paths on Windows, but not a real driver. Real GPUs stay
-outside CI, as on every other lane.
-
-**Refused:**
-
-- Dx12 first, as [Chrome](https://mail.phoronix.com/news/Chrome-113-To-Ship-WebGPU) and
-  [Firefox](https://linuxiac.com/webgpu-lands-in-firefox-141-on-windows-eyes-linux-and-macos-next/)
-  use Direct3D 12 on Windows (secondary sources): the wgpu default holds for wgpu apps, FXC is slow
-  unless `dxcompiler.dll` ships, and no frame times exist to justify a change. A search summary also
-  named a Bevy issue about Vulkan resize artifacts on Windows. A direct search did not find that issue,
-  so treat it as an unconfirmed risk, and check resize on a real GPU.
-- No change: the shipped path on most Windows machines would stay untested.
 
 ### An installed font replaces a bundled font
 
@@ -436,7 +358,7 @@ Each lane proves less than its name suggests.
 |---|---|---|---|
 | `ubuntu-26.04` | x64 | lavapipe, software Vulkan | Real GPUs, Wayland, X11 |
 | `macos-26` | aarch64 | The runner's Metal | x64 macOS |
-| `windows-2025` | x64 | WARP, software Dx12 | Vulkan on Windows, which the decision above adds, and real GPUs |
+| `windows-2025` | x64 | lavapipe, software Vulkan | GL on Windows, and real GPUs |
 
 These gaps hold on all three lanes:
 
@@ -463,5 +385,7 @@ These items hold no decision, as they need a run on the OS that they name.
   protocol. palantir falls back to its own memory buffer in that second case.
 - **Fractional scale factors** on a real window on Windows and Linux.
 - **IME behavior** on a real window on each OS.
-- **Vulkan resize artifacts on Windows,** the unconfirmed report above, on a real GPU.
+- **Vulkan resize artifacts on Windows,** from a search summary that a direct search did not confirm,
+  on a real GPU.
+- **The GL fallback on Windows,** which no CI lane runs, on a machine with no Vulkan driver.
 - **Packaging and installers**, which this review did not read.

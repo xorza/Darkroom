@@ -18,7 +18,6 @@ internals = ["common/internals", "dep:criterion", "simd/internals"]
 simd = { workspace = true }
 common = { workspace = true }
 wgpu = { workspace = true, optional = true, features = [
-    "dx12",
     "metal",
     "parking_lot",
     "std",

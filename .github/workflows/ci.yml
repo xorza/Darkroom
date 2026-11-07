@@ -46,13 +46,29 @@ jobs:
       # libclang for LibRaw's bindgen, OpenSSL for the ONNX Runtime download of `ort-sys`,
       # lavapipe, a software Vulkan adapter, so imaginarium's GPU tests run on a runner with no
       # GPU instead of skipping, and gdb for the backtrace of a crashed test binary. macOS exposes
-      # Metal and Windows ships WARP, so both need nothing.
+      # Metal, so it needs nothing.
       - name: Install system packages
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libclang-dev libssl-dev pkg-config mesa-vulkan-drivers gdb
+      # A Windows runner holds no Vulkan loader and no driver: the SDK brings the loader, and Mesa
+      # lavapipe, a software adapter, as wgpu's own CI installs them.
+      - name: Install a software Vulkan adapter on Windows
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          MESA_VERSION: 26.2.6
+          VULKAN_SDK_VERSION: 1.4.357.0
+        run: |
+          set -e
+          curl.exe -L --retry 5 "https://sdk.lunarg.com/sdk/download/$VULKAN_SDK_VERSION/windows/vulkansdk-windows-X64-$VULKAN_SDK_VERSION.exe" -o vulkan-sdk-installer.exe
+          ./vulkan-sdk-installer.exe --accept-licenses --default-answer --confirm-command install
+          echo "C:/VulkanSDK/$VULKAN_SDK_VERSION/Bin" >> "$GITHUB_PATH"
+          curl.exe -L --retry 5 "https://github.com/pal1000/mesa-dist-win/releases/download/$MESA_VERSION/mesa3d-$MESA_VERSION-release-msvc.7z" -o mesa.7z
+          7z.exe e mesa.7z -omesa x64/vulkan_lvp.dll x64/lvp_icd.x86_64.json
+          echo "VK_DRIVER_FILES=$(cygpath --windows "$PWD/mesa/lvp_icd.x86_64.json")" >> "$GITHUB_ENV"
       # A test binary that crashes takes every test in it down with no name and no backtrace, as
       # libtest runs them in one process: its core goes to a known directory, where Ubuntu's
       # default pipes it to apport.
