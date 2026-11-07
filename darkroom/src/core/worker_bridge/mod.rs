@@ -2,7 +2,7 @@
 //! graph-evaluation `Worker` (`scenarium::worker`). The worker runs on its
 //! own tokio runtime; this type owns that runtime, the worker handle, and the
 //! [`ReportMailbox`] the worker's callback posts results into. The host loop
-//! ([`App::update`](crate::gui::app::App)) drains it each frame and is woken
+//! ([`App::record`](crate::gui::app::App)) drains it each frame and is woken
 //! from off-thread via the [`Wake`] callback.
 
 use std::collections::VecDeque;

@@ -42,10 +42,8 @@ use palantir::bench::case_group::CaseGroup;
 use palantir::bench::kind::{Kind, Scale};
 use palantir::bench::scene::{BENCH_DPR, BENCH_SURFACE};
 use palantir::internals::Timing;
-use palantir::{
-    App, ColorScheme, Depth, Harness, InputOutcome, Key, PointerButton, UpdateCtx, WindowToken,
-};
-use palantir::{FramePaint, ImageDownsample, OffscreenHost, Ui};
+use palantir::{App, ColorScheme, Depth, Harness, Key, PointerButton, RecordPass, Ui, WindowToken};
+use palantir::{FramePaint, ImageDownsample, OffscreenHost};
 use scenarium::{DynamicValue, NodeId};
 
 use crate::core::document::Document;
@@ -61,9 +59,8 @@ use crate::core::wake;
 use crate::gui::app::session::Session;
 use crate::gui::frame::app_command::{AppCommand, ViewCommand};
 use crate::gui::frame::app_ctx::AppCtx;
-use crate::gui::frame::input_stage::InputStage;
-use crate::gui::frame::record_stage::RecordStage;
 use crate::gui::frame::requests::Requests;
+use crate::gui::frame::stage::Stage;
 use crate::gui::frame::window_parts::{StatusInputs, WindowParts};
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::state::preview_store::preview_converter::{self, Card};
@@ -187,20 +184,20 @@ impl Editor {
 
     /// Land an image on every preview node, as a finished run does once its
     /// conversions finish.
-    fn publish_previews(&mut self, ui: &mut Ui) {
+    fn publish_previews(&mut self, ui: &Ui) {
         for (idx, node) in self.previews.iter().enumerate() {
             let card = self.converted[idx % 2].clone();
             self.run_state
                 .previews_mut()
-                .land_converted(&ui.update_ctx(), *node, card);
+                .land_converted(ui, *node, card);
         }
     }
 
     /// Set the editor to frame `n` of `scenario`, through the path production takes.
-    fn advance(&mut self, scenario: Scenario, ui: &mut Ui, n: u32) {
+    fn advance(&mut self, scenario: Scenario, ui: &Ui, n: u32) {
         // One held drag for the whole run, so its frames fold into one undo entry.
         let gesture = GestureId::default().next();
-        self.run_state.previews_mut().land(&ui.update_ctx());
+        self.run_state.previews_mut().land(ui);
         let intent = match scenario {
             Scenario::Cached | Scenario::Click | Scenario::Typing => return,
             // Its publishes would replace the image the viewer is waiting for.
@@ -209,7 +206,7 @@ impl Editor {
                 let card = self.converted[(n % 2) as usize].clone();
                 self.run_state
                     .previews_mut()
-                    .land_converted(&ui.update_ctx(), PUBLISHED, card);
+                    .land_converted(ui, PUBLISHED, card);
                 return;
             }
             Scenario::Pan => {
@@ -248,26 +245,29 @@ impl Editor {
 
 /// The sweeps, the input stage and the record passes as `App` runs them.
 impl App for Editor {
-    fn update(&mut self, _: WindowToken, mut update_ctx: UpdateCtx<'_>) -> InputOutcome {
-        self.run_state
-            .previews_mut()
-            .reconcile(self.session.open.document());
-        self.session.reconcile_caches();
+    fn record(&mut self, _: WindowToken, ui: &mut Ui) {
+        let pass = ui.record_pass();
+        if pass != RecordPass::Second {
+            self.run_state
+                .previews_mut()
+                .reconcile(self.session.open.document());
+            self.session.reconcile_caches();
+        }
         let ctx = AppCtx::new(&self.theme, self.library.cur(), &self.run_state);
-        let outcome = self.session.input(&mut InputStage {
-            update: &mut update_ctx,
+        let mut stage = Stage {
             ctx,
             out: &mut self.requests,
-        });
-        self.run_commands();
-        outcome
-    }
-
-    fn record(&mut self, _: WindowToken, ui: &mut Ui) {
+        };
+        if pass == RecordPass::First {
+            self.session.input(ui, &mut stage);
+            self.run_commands();
+        } else {
+            self.session.settle(ui, &mut stage);
+        }
         let ctx = AppCtx::new(&self.theme, self.library.cur(), &self.run_state);
         self.session.record(
             ui,
-            &mut RecordStage {
+            &mut Stage {
                 ctx,
                 out: &mut self.requests,
             },

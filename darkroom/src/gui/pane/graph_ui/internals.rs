@@ -7,7 +7,7 @@
 //! test that skipped a phase would be exercising a frame the app never performs.
 
 use glam::{UVec2, Vec2};
-use palantir::{App, Harness, InputOutcome, UpdateCtx, WindowToken};
+use palantir::{App, Harness, RecordPass, WindowToken};
 use palantir::{Configure, DockOperation, Panel, Rect, Sizing, SystemScale, Ui, WidgetId};
 use scenarium::NodeId;
 
@@ -17,16 +17,14 @@ use crate::core::document::tab_ref::TabRef;
 use crate::core::edit::document_request::DocumentRequest;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::frame::app_command::AppCommand;
-use crate::gui::frame::input_stage::InputStage;
-use crate::gui::frame::record_stage::RecordStage;
 use crate::gui::frame::requests::Requests;
+use crate::gui::frame::stage::Stage;
 use crate::gui::graph_ctx::internals::GraphCtxFixture;
 use crate::gui::pane::graph_ui::GraphUi;
 use crate::gui::pane::graph_ui::scene::canvas_geometry::CanvasGeometry;
 use crate::gui::pane::graph_ui::wid;
 use crate::gui::port_ref::PortRef;
 use std::iter;
-use std::mem;
 
 impl GraphUi {
     /// The canvas's cross-frame geometry cache, for the tests that assert
@@ -62,8 +60,6 @@ pub(crate) struct CanvasHarness {
     /// `pub(crate)` so a test can edit the document between frames, the way an
     /// undo edits it under a running gesture.
     pub(crate) ctx: GraphCtxFixture,
-    /// What the last frame's input stage answered.
-    pub(crate) outcome: InputOutcome,
     /// The app commands the last [`Self::frame`] raised. Kept beside the
     /// intents that call returns rather than folded into them: the canvas
     /// raises both tiers, and a test is almost always about one of them.
@@ -110,7 +106,6 @@ impl CanvasHarness {
             ui,
             graph_ui: GraphUi::default(),
             ctx: GraphCtxFixture::over(fixture),
-            outcome: InputOutcome::Record,
             commands: Vec::new(),
             view_ops: Vec::new(),
         }
@@ -125,13 +120,11 @@ impl CanvasHarness {
             ui,
             graph_ui,
             ctx,
-            outcome,
             commands,
             view_ops,
         } = self;
         let mut frame = CanvasFrame::new(graph_ui, ctx, AppliesIntents::No);
         ui.frame_app(&mut frame);
-        *outcome = frame.outcome;
         let mut out = frame.finish(ui);
         view_ops.clear();
         let intents: Vec<GraphIntent> = out
@@ -299,10 +292,6 @@ struct CanvasFrame<'a> {
     ctx: &'a mut GraphCtxFixture,
     applies: AppliesIntents,
     out: Requests,
-    /// What the last input stage answered.
-    outcome: InputOutcome,
-    /// An input stage ran since the last record pass, as `Session` holds it.
-    input_ran: bool,
     /// The last frame that recorded.
     recorded_at: Option<u64>,
 }
@@ -318,8 +307,6 @@ impl<'a> CanvasFrame<'a> {
             ctx,
             applies,
             out: Requests::default(),
-            outcome: InputOutcome::Record,
-            input_ran: false,
             recorded_at: None,
         }
     }
@@ -346,33 +333,28 @@ impl<'a> CanvasFrame<'a> {
 }
 
 impl App for CanvasFrame<'_> {
-    fn update(&mut self, _: WindowToken, mut update_ctx: UpdateCtx<'_>) -> InputOutcome {
-        self.out = Requests::default();
-        let ctx = self.ctx.graph_ctx_on(update_ctx.display());
-        self.outcome = self.graph_ui.input(&mut InputStage {
-            update: &mut update_ctx,
-            ctx,
-            out: &mut self.out,
-        });
-        self.apply();
-        self.input_ran = true;
-        self.outcome
-    }
-
     fn record(&mut self, _: WindowToken, recorder: &mut Ui) {
-        let first_pass = mem::take(&mut self.input_ran);
         let mut later_pass = Requests::default();
-        if !first_pass {
-            let ctx = self.ctx.graph_ctx_on(recorder.display());
-            self.graph_ui.settle(&mut InputStage {
-                update: &mut recorder.update_ctx(),
-                ctx,
-                out: &mut later_pass,
-            });
-        }
-        let out = if first_pass {
+        let ctx = self.ctx.graph_ctx_on(recorder.display());
+        let out = if recorder.record_pass() == RecordPass::First {
+            self.out = Requests::default();
+            self.graph_ui.input(
+                recorder,
+                &mut Stage {
+                    ctx,
+                    out: &mut self.out,
+                },
+            );
+            self.apply();
             &mut self.out
         } else {
+            self.graph_ui.settle(
+                recorder,
+                &mut Stage {
+                    ctx,
+                    out: &mut later_pass,
+                },
+            );
             &mut later_pass
         };
         record_in_pane(self.graph_ui, self.ctx, recorder, out);
@@ -393,6 +375,6 @@ fn record_in_pane(
         .size(Sizing::FILL)
         .show(recorder, |ui| {
             let ctx = ctx.graph_ctx_on(ui.display());
-            graph_ui.record(ui, &mut RecordStage { ctx, out });
+            graph_ui.record(ui, &mut Stage { ctx, out });
         });
 }

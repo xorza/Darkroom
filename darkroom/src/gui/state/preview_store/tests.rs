@@ -121,7 +121,7 @@ fn native_size_refuses_an_edge_no_texture_holds() {
 /// with no value, changes nothing.
 #[test]
 fn the_full_texture_converts_on_the_first_ask_and_is_reused_after() {
-    let mut arena = Harness::builder(UVec2::ONE).mono().build();
+    let arena = Harness::builder(UVec2::ONE).mono().build();
     let mut store = PreviewStore::new(wake::internals::noop());
     let node = NodeId::unique();
 
@@ -133,7 +133,7 @@ fn the_full_texture_converts_on_the_first_ask_and_is_reused_after() {
         store.entries.is_empty(),
         "publishing converts nothing on the calling thread"
     );
-    store.settle(&arena.ui_mut().update_ctx());
+    store.settle(arena.ui());
     let StoredContent::Image(image) = &store.entries[&node] else {
         panic!("an image value must create an image resource");
     };
@@ -175,7 +175,7 @@ fn the_full_texture_converts_on_the_first_ask_and_is_reused_after() {
     assert!(!image.is_full_resident());
     assert!(store.in_flight());
 
-    store.settle(&arena.ui_mut().update_ctx());
+    store.settle(arena.ui());
     let StoredContent::Image(image) = &store.entries[&node] else {
         panic!("the image stays the same entry");
     };
@@ -227,7 +227,7 @@ fn the_full_texture_converts_on_the_first_ask_and_is_reused_after() {
 /// updates — and removing the node's value voids its conversions in flight.
 #[test]
 fn a_previews_value_lives_exactly_as_long_as_its_node() {
-    let mut arena = Harness::builder(UVec2::ONE).mono().build();
+    let arena = Harness::builder(UVec2::ONE).mono().build();
     let mut store = PreviewStore::new(wake::internals::noop());
     let node = NodeId::unique();
     let mut document = document_with_preview(node);
@@ -241,7 +241,7 @@ fn a_previews_value_lives_exactly_as_long_as_its_node() {
 
     store.publish(node, int(7));
     store.publish(other, int(9));
-    store.settle(&arena.ui_mut().update_ctx());
+    store.settle(arena.ui());
     assert_eq!(shown(&store).as_deref(), Some("7"), "formatted on landing");
 
     // Held unlanded, so the newer publish comes while the older one has converted.
@@ -253,13 +253,13 @@ fn a_previews_value_lives_exactly_as_long_as_its_node() {
         Some("7"),
         "the card keeps its value while the next converts"
     );
-    store.land_one(&arena.ui_mut().update_ctx(), eight);
+    store.land_one(arena.ui(), eight);
     assert_eq!(
         shown(&store).as_deref(),
         Some("8"),
         "a finished publish lands though a newer one is still converting"
     );
-    store.land_next(&arena.ui_mut().update_ctx());
+    store.land_next(arena.ui());
     assert_eq!(shown(&store).as_deref(), Some("10"));
     assert_eq!(store.entries.len(), 2, "a re-publish replaces in place");
 
@@ -269,13 +269,13 @@ fn a_previews_value_lives_exactly_as_long_as_its_node() {
     let eleven = store.next_converted();
     store.remove(node);
     store.publish(node, int(13));
-    store.land_one(&arena.ui_mut().update_ctx(), eleven);
+    store.land_one(arena.ui(), eleven);
     assert_eq!(
         shown(&store),
         None,
         "a removed value's conversion lands nowhere"
     );
-    store.land_next(&arena.ui_mut().update_ctx());
+    store.land_next(arena.ui());
     assert_eq!(shown(&store).as_deref(), Some("13"));
 
     store.reconcile(&document);

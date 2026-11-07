@@ -7,7 +7,7 @@
 pub(crate) mod camera_gesture;
 
 use glam::Vec2;
-use palantir::{Input, Rect, Size};
+use palantir::{Rect, Size, Ui};
 
 use crate::core::document::item_id::ItemId;
 use crate::core::document::viewport::Viewport;
@@ -34,11 +34,11 @@ impl Framing {
     /// `NodeCtx::pos`.
     pub(crate) fn intent(
         self,
-        input: &Input,
+        ui: &Ui,
         graph_ctx: GraphCtx<'_>,
         geometry: &CanvasGeometry,
     ) -> Option<GraphIntent> {
-        let vp = input.response_for(canvas::outer_wid()).layout_rect?.size;
+        let vp = ui.response_for(canvas::outer_wid()).layout_rect?.size;
         let pane = Vec2::new(vp.w, vp.h);
         let to = match self {
             Self::Reset => reset_target(geometry, graph_ctx, pane),

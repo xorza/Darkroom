@@ -21,7 +21,7 @@ use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::status_log::Severity;
 use crate::gui::frame::app_command::{AppCommand, ViewCommand};
 use crate::gui::frame::framing::Framing;
-use crate::gui::frame::record_stage::RecordStage;
+use crate::gui::frame::stage::Stage;
 use crate::gui::frame::window_parts::StatusInputs;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::state::run_state::run_outcome::RunOutcome;
@@ -42,11 +42,7 @@ pub(crate) fn wid() -> WidgetId {
 }
 
 /// Draw the bottom status bar. A link in its run line raises its edits on the stage's requests.
-pub(crate) fn show(
-    ui: &mut Ui,
-    stage: &mut RecordStage<'_, GraphCtx<'_>>,
-    status: StatusInputs<'_>,
-) {
+pub(crate) fn show(ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>, status: StatusInputs<'_>) {
     let ctx = stage.ctx;
     let theme = ctx.theme();
     let ram = MemoryLabel::resolve(status.process_memory, ctx.run_state().cache_ram());
@@ -169,7 +165,7 @@ impl<T: Display> Figure<T> {
 
 /// What the last run came to, in the ink of its worst case, and — when a node needs a look —
 /// a link that selects it and frames it.
-fn run_line(ui: &mut Ui, stage: &mut RecordStage<'_, GraphCtx<'_>>, outcome: RunOutcome) {
+fn run_line(ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>, outcome: RunOutcome) {
     let ctx = stage.ctx;
     let theme = ctx.theme();
     let color = if outcome.failed_count > 0 {

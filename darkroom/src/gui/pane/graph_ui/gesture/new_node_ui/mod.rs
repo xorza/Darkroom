@@ -9,9 +9,9 @@ use std::mem;
 
 use glam::Vec2;
 use palantir::widget::domain;
-use palantir::{Input, Ui, WidgetId};
+use palantir::{Ui, WidgetId};
 
-use crate::gui::frame::record_stage::RecordStage;
+use crate::gui::frame::stage::Stage;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
@@ -94,11 +94,11 @@ impl NewNodeUi {
 
     /// Open the palette from a bare RMB / double-click, or from a wire `dropped` on empty canvas
     /// this frame. Placement is the same — under the pointer.
-    pub(crate) fn open(&mut self, input: &Input, ctx: CanvasCtx<'_>, dropped: Option<PortRef>) {
+    pub(crate) fn open(&mut self, ui: &Ui, ctx: CanvasCtx<'_>, dropped: Option<PortRef>) {
         if dropped.is_none() && ctx.gesture() != Some(CanvasGesture::NewNode) {
             return;
         }
-        let resp = input.response_for(canvas::outer_wid());
+        let resp = ui.response_for(canvas::outer_wid());
         let (Some(local), Some(rect)) = (resp.pointer_local, resp.rect) else {
             return;
         };
@@ -117,7 +117,7 @@ impl NewNodeUi {
     pub(crate) fn record(
         &mut self,
         ui: &mut Ui,
-        stage: &mut RecordStage<'_, GraphCtx<'_>>,
+        stage: &mut Stage<'_, GraphCtx<'_>>,
     ) -> Option<PortRef> {
         let graph_ctx = stage.ctx;
         // Everything below is per-open work — the height arithmetic reads

@@ -204,7 +204,7 @@ fn the_frame_that_first_draws_a_viewer_frames_it_at_the_full_size() {
         node,
         preview_store::internals::image_value(USize2::new(512, 256), ColorFormat::RGB_U8),
     );
-    store.settle(&h.ui_mut().update_ctx());
+    store.settle(h.ui());
 
     let theme = Theme::default();
     let mut preferences = ViewerPreferences::default();
@@ -257,7 +257,7 @@ fn the_frame_that_first_draws_a_viewer_frames_it_at_the_full_size() {
         zoom: 2.0,
     };
     viewer.view = Some(framing);
-    store.settle(&h.ui_mut().update_ctx());
+    store.settle(h.ui());
     frame(&mut h, &mut viewer, &store);
     assert_eq!(viewer.source_size, Some(UVec2::new(512, 256)));
     assert_eq!(
@@ -282,7 +282,7 @@ fn a_drag_starts_from_the_fit_and_a_double_click_fits_again() {
         node,
         preview_store::internals::image_value(USize2::new(512, 256), ColorFormat::RGB_U8),
     );
-    store.settle(&h.ui_mut().update_ctx());
+    store.settle(h.ui());
     let theme = Theme::default();
     let mut preferences = ViewerPreferences::default();
     let mut viewer = ImageViewer::new(node);

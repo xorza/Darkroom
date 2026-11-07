@@ -2,7 +2,6 @@ pub(crate) mod dock_panes;
 pub(crate) mod menu_bar;
 pub(crate) mod status_bar;
 
-use palantir::InputOutcome;
 use std::collections::HashMap;
 
 use palantir::{
@@ -14,8 +13,7 @@ use scenarium::NodeId;
 use crate::core::document::graph_revision::GraphRevision;
 use crate::core::document::tab_ref::TabRef;
 use crate::core::open_document::OpenDocument;
-use crate::gui::frame::input_stage::InputStage;
-use crate::gui::frame::record_stage::RecordStage;
+use crate::gui::frame::stage::Stage;
 use crate::gui::frame::window_parts::WindowParts;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::main_window::dock_panes::DockPanes;
@@ -34,7 +32,7 @@ const MIN_PANE: f32 = 220.0;
 ///
 /// Each entry point takes a [`GraphCtx`], the frame's world *and* the document it is showing,
 /// settled by the time the caller reaches it, and everything below this file takes that context:
-/// in an [`InputStage`] on the update path, and a [`RecordStage`] on the record path.
+/// in a [`Stage`], on the input stage and on the record path alike.
 #[derive(Default, Debug)]
 pub(crate) struct MainWindow {
     pub(crate) graph_ui: GraphUi,
@@ -70,11 +68,11 @@ impl MainWindow {
     /// handed to the frame's queue, which is where every other darkroom
     /// surface puts one: dock ops travel beside graph edits, stay out of
     /// undo, and are validated before a save.
-    pub(crate) fn scan_navigation(&mut self, stage: &mut InputStage<'_, '_, GraphCtx<'_>>) {
+    pub(crate) fn scan_navigation(&mut self, ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
         let ops = &mut self.dock_ops;
         ops.clear();
         let layout = &stage.ctx.document().layout;
-        DockView::scan(stage.update, Self::dock_wid(), layout, ops);
+        DockView::scan(ui, Self::dock_wid(), layout, ops);
         for op in ops.drain(..) {
             stage.out.push_view(op);
         }
@@ -84,17 +82,15 @@ impl MainWindow {
     /// already-settled active graph, plus the per-pane visibility reconcile
     /// that has to happen before them.
     ///
-    /// Returns what the frame's records may read of the input. A pane that became visible this frame
-    /// owes a relayout, since a canvas that has never recorded has no cached geometry to
-    /// draw its first frame from. A pane that *vanished* needs no pass and is never visited here at
+    /// A pane that became visible this frame owes a relayout, since a canvas that has never recorded
+    /// has no cached geometry to draw its first frame from. A pane that *vanished* needs no pass and is never visited here at
     /// all.
-    pub(crate) fn input(&mut self, stage: &mut InputStage<'_, '_, GraphCtx<'_>>) -> InputOutcome {
-        let mut outcome = InputOutcome::Record;
+    pub(crate) fn input(&mut self, ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
         for tab in stage.ctx.document().layout.active_tabs() {
             match tab {
                 // Reached from `active_tabs`, so a pane is showing the graph by construction.
                 TabRef::Graph => {
-                    outcome = self.graph_ui.input(stage);
+                    self.graph_ui.input(ui, stage);
                 }
                 // Neither derives a document mutation from input: preferences
                 // edits go through their own widgets, and a viewer only
@@ -102,15 +98,14 @@ impl MainWindow {
                 TabRef::Preferences | TabRef::ImageViewer(_) | TabRef::Inspector(_) => {}
             }
         }
-        outcome
     }
 
     /// Ready the panes on screen for a record pass that no input stage ran just before; see
     /// [`GraphUi::settle`].
-    pub(crate) fn settle(&mut self, stage: &mut InputStage<'_, '_, GraphCtx<'_>>) {
+    pub(crate) fn settle(&mut self, ui: &Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
         for tab in stage.ctx.document().layout.active_tabs() {
             match tab {
-                TabRef::Graph => self.graph_ui.settle(stage),
+                TabRef::Graph => self.graph_ui.settle(ui, stage),
                 // None keeps anything a second pass reads from the rects of the first.
                 TabRef::Preferences | TabRef::ImageViewer(_) | TabRef::Inspector(_) => {}
             }
@@ -120,7 +115,7 @@ impl MainWindow {
     pub(crate) fn record(
         &mut self,
         ui: &mut Ui,
-        stage: &mut RecordStage<'_, GraphCtx<'_>>,
+        stage: &mut Stage<'_, GraphCtx<'_>>,
         parts: WindowParts<'_>,
     ) {
         let WindowParts {
@@ -172,7 +167,7 @@ impl MainWindow {
     /// [`GraphUi::retain_nodes`]), swept only when the graph's revision moved,
     /// and the per-tab viewer state.
     ///
-    /// Driven from `App::update`, beside the preview store's
+    /// Driven from `App::sweep` once a frame, beside the preview store's
     /// sweep. Both live here because `MainWindow` owns both, so a new cache
     /// joins them rather than earning its own call site.
     pub(crate) fn reconcile(&mut self, open: &OpenDocument) {

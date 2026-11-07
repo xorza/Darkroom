@@ -1,7 +1,7 @@
 //! What a pass over the graph pane *reads*: last frame's port and node
 //! geometry, and the region the viewport keeps. Both are resolved once, ahead
 //! of the controllers, and shared by every one of them through
-//! [`CanvasCtx`](crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx) on the update path and
+//! [`CanvasCtx`](crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx) on the input stage and
 //! [`DrawCtx`](crate::gui::pane::graph_ui::draw_ctx::DrawCtx) on the record path — so nothing below
 //! re-derives what the pass already settled.
 

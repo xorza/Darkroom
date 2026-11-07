@@ -6,7 +6,7 @@ use palantir::{Modifiers, PointerButton, ResponseState};
 /// What this frame's input means on the canvas, resolved once at the top of
 /// [`GraphUi::input`](crate::gui::pane::graph_ui::GraphUi::input) and read
 /// back by every controller after it: which bare-canvas gesture latched, and what
-/// Esc does. It lives on the update path alone, so no record reads an edge that is spent.
+/// Esc does. It lives on the input stage alone.
 ///
 /// Read there rather than per controller because each is one fact about the
 /// frame, and controllers polling them separately is how they grew different

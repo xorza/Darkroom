@@ -1,6 +1,6 @@
 //! [`NodeRecord`]: one node body's record pass.
 
-use crate::gui::frame::record_stage::RecordStage;
+use crate::gui::frame::stage::Stage;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
 
@@ -14,5 +14,5 @@ use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
 #[derive(Debug)]
 pub(super) struct NodeRecord<'a, 'o> {
     pub(super) node: NodeCtx<'a>,
-    pub(super) stage: RecordStage<'o, DrawCtx<'a>>,
+    pub(super) stage: Stage<'o, DrawCtx<'a>>,
 }

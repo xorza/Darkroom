@@ -19,6 +19,7 @@ use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::FileCommand;
 use crate::gui::frame::app_command::RunCommand;
 use crate::gui::frame::app_command::ViewCommand;
+use crate::gui::frame::shortcuts;
 use crate::gui::pane::graph_ui::toolbar;
 use crate::gui::pane::graph_ui::wid;
 use crate::gui::pane::image_viewer::ImageViewer;
@@ -34,7 +35,7 @@ const SETTLE_FRAMES: u32 = 32;
 const AUDITED_FRAMES: usize = 64;
 
 /// A whole frame of the app performs no heap operation once the editor has settled: its
-/// `update`'s sweeps and every record pass, as the window runs them.
+/// its sweeps and every record pass, as the window runs them.
 ///
 /// Strict zero, because every allocation on this path would be the
 /// editor's own: a `format!` for a label palantir was going to copy into
@@ -77,9 +78,7 @@ fn a_settled_frame_records_without_allocating() {
     app.run_state
         .previews_mut()
         .publish(preview, preview_store::internals::opaque_image_value());
-    app.run_state
-        .previews_mut()
-        .settle(&ui.ui_mut().update_ctx());
+    app.run_state.previews_mut().settle(ui.ui());
     // Each frame asked, as a wake asks one: a frame nothing asked for paints only and records
     // nothing, which would audit nothing.
     let full_frame = |ui: &mut Harness, app: &mut App| {
@@ -101,6 +100,20 @@ fn a_settled_frame_records_without_allocating() {
     }
 }
 
+/// A frame reads every menu chord, also past the one that fired, so a chord that comes next still
+/// wakes the window: with nothing focused, only a watched press asks for a frame.
+#[test]
+fn a_menu_chord_leaves_the_others_watched() {
+    let mut test = SessionHarness::new(DocumentFixture::default());
+    test.prime(2);
+    test.ui.key(shortcuts::NEW);
+    assert!(matches!(
+        test.frame()[..],
+        [AppCommand::File(FileCommand::New)]
+    ));
+    assert!(test.ui.key_down(shortcuts::QUIT).repaint_requested);
+}
+
 /// Opening a viewer by clicking a preview card lands its tab *inside* the
 /// record that read the click. The tab is drawn by the pass after that one
 /// — a click makes the frame record twice — and a viewer asks for its
@@ -115,9 +128,7 @@ fn a_viewer_opened_by_click_queues_its_full_image_in_that_same_frame() {
     test.run_state
         .previews_mut()
         .publish(node, preview_store::internals::opaque_image_value());
-    test.run_state
-        .previews_mut()
-        .settle(&test.ui.ui_mut().update_ctx());
+    test.run_state.previews_mut().settle(test.ui.ui());
     test.prime(2);
 
     let resident = |test: &SessionHarness| {
@@ -160,9 +171,7 @@ fn a_viewer_opened_by_click_queues_its_full_image_in_that_same_frame() {
     // As `App::run_command` applies it; nothing else asks before the settle,
     // so a conversion that lands is the one that frame asked for.
     test.run_state.previews_mut().convert_full(asked, max_dim);
-    test.run_state
-        .previews_mut()
-        .settle(&test.ui.ui_mut().update_ctx());
+    test.run_state.previews_mut().settle(test.ui.ui());
     assert!(
         resident(&test),
         "the pass that drew the new tab queued its conversion"

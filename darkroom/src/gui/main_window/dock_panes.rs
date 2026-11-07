@@ -20,7 +20,7 @@ use crate::core::document::Document;
 use crate::core::document::inspect_target::InspectTarget;
 use crate::core::document::tab_ref::TabRef;
 use crate::core::io::preferences::Preferences;
-use crate::gui::frame::record_stage::RecordStage;
+use crate::gui::frame::stage::Stage;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::GraphUi;
 use crate::gui::pane::image_viewer::{self, ImageViewer, ViewerPane, ViewerWrites};
@@ -35,7 +35,7 @@ use crate::gui::widgets::format;
 /// borrows one capture at a time.
 #[derive(Debug)]
 pub(crate) struct DockPanes<'a> {
-    pub(crate) stage: RecordStage<'a, GraphCtx<'a>>,
+    pub(crate) stage: Stage<'a, GraphCtx<'a>>,
     pub(crate) graph_ui: &'a mut GraphUi,
     pub(crate) image_viewers: &'a mut HashMap<NodeId, ImageViewer>,
     pub(crate) preferences: &'a mut Preferences,

@@ -12,9 +12,9 @@ use palantir::{Align, Configure, Panel, Sizing, Spacing, Ui, WidgetId};
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::{RunCommand, ViewCommand};
 use crate::gui::frame::framing::Framing;
-use crate::gui::frame::record_stage::RecordStage;
 use crate::gui::frame::requests::Requests;
 use crate::gui::frame::shortcuts;
+use crate::gui::frame::stage::Stage;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::widgets::chip::Chip;
 use crate::gui::widgets::icon::Icon;
@@ -44,7 +44,7 @@ fn show_selected_wid() -> WidgetId {
 /// Draw the toolbar over the graph view's top-left corner. A click queues its
 /// [`AppCommand`]. It hit-tests above the canvas (drawn after it), so a click on
 /// a button never starts a pan.
-pub(super) fn show(ui: &mut Ui, stage: &mut RecordStage<'_, GraphCtx<'_>>) {
+pub(super) fn show(ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
     let (graph_ctx, out) = (stage.ctx, &mut *stage.out);
     let theme = graph_ctx.theme();
     let run_state = graph_ctx.run_state();

@@ -1,5 +1,5 @@
 use glam::Vec2;
-use palantir::{InputOutcome, Modifiers, PointerButton};
+use palantir::{Modifiers, PointerButton};
 use scenarium::{InputPort, OutputPort};
 
 use crate::core::document::internals::DocumentFixture;
@@ -223,7 +223,6 @@ fn a_tie_clicks_drags_and_sweeps_as_a_node_does() {
     h.frame();
     h.ui.drag_to(center + Vec2::new(10.0, 0.0));
     h.frame();
-    assert_eq!(h.outcome, InputOutcome::Handled, "the tie's latch");
     h.ui.drag_to(center + Vec2::new(30.0, -20.0));
     let moved = h.frame();
     let moves: Vec<_> = moved
@@ -244,7 +243,6 @@ fn a_tie_clicks_drags_and_sweeps_as_a_node_does() {
     );
     h.ui.release(PointerButton::Left);
     h.frame();
-    assert_eq!(h.outcome, InputOutcome::Handled, "the tie's stop");
 
     let (mut h, tie) = one_tie(false);
     h.ui.press(Vec2::new(430.0, 600.0), PointerButton::Left);
@@ -276,7 +274,6 @@ fn the_knob_of_a_selected_tie_pins_and_frees_its_angle() {
     h.frame();
     h.ui.drag_to(knob + Vec2::new(0.0, 10.0));
     h.frame();
-    assert_eq!(h.outcome, InputOutcome::Handled, "the knob's latch");
     let below = Vec2::new(470.0, 250.0) + Vec2::new(0.0, 60.0);
     h.ui.drag_to(below);
     let turned = h.frame();
@@ -298,7 +295,6 @@ fn the_knob_of_a_selected_tie_pins_and_frees_its_angle() {
     );
     h.ui.release(PointerButton::Left);
     h.frame();
-    assert_eq!(h.outcome, InputOutcome::Handled, "the knob's stop");
 
     let (mut h, tie) = one_tie(true);
     h.document_mut().main_view.ties.get_mut(&tie).unwrap().angle = TieAngle::Pinned(30.0);

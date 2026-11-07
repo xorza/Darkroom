@@ -109,11 +109,7 @@ fn input_with_wire_from(fixture: &GraphCtxFixture, start: PortRef) -> Option<InF
         UnsettledCtx::new(fixture.graph_ctx(), CanvasInput::default()),
         &geometry,
     );
-    wires.input(&mut InputStage {
-        update: &mut arena.ui_mut().update_ctx(),
-        ctx,
-        out: &mut out,
-    });
+    wires.input(arena.ui_mut(), &mut Stage { ctx, out: &mut out });
     assert!(
         out.document().is_empty(),
         "an untouched input stage emits nothing"

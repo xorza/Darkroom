@@ -1,8 +1,8 @@
-use palantir::{Input, Ui};
+use palantir::Ui;
 use scenarium::{NodeId, Subscription};
 
 use crate::core::edit::graph_intent::GraphIntent;
-use crate::gui::frame::input_stage::InputStage;
+use crate::gui::frame::stage::Stage;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
@@ -76,7 +76,7 @@ impl SubscriptionUi {
     /// end, and commit a `SetSubscription { to: true }` on release over
     /// a valid target. The context's Esc — resolved once by the canvas —
     /// drops the wire.
-    pub(crate) fn input(&mut self, stage: &mut InputStage<'_, '_, CanvasCtx<'_>>) {
+    pub(crate) fn input(&mut self, ui: &mut Ui, stage: &mut Stage<'_, CanvasCtx<'_>>) {
         let ctx = stage.ctx;
         let (graph_ctx, geometry) = (ctx.graph_ctx(), ctx.geometry());
         // Latch a fresh drag only when idle. An emitter and a pin can't both
@@ -112,11 +112,11 @@ impl SubscriptionUi {
         // release edge.
         let released = match &mut state {
             InFlight::FromEmitter(drag) => {
-                drag.snap = scan_subscription_target(stage.update.input, ctx, drag.from);
+                drag.snap = scan_subscription_target(ui, ctx, drag.from);
                 !drag.held(&geometry.events)
             }
             InFlight::FromSubscriber(drag) => {
-                drag.snap = scan_emitter_target(stage.update.input, ctx, drag.from);
+                drag.snap = scan_emitter_target(ui, ctx, drag.from);
                 !drag.held(&geometry.subs)
             }
         };
@@ -206,12 +206,8 @@ impl SubscriptionUi {
 /// sink node (the only kind that renders a pin) other than the emitter's
 /// own node. The pin-only target enforces "events connect only to
 /// subscribers"; the self-node skip rejects a node subscribing to itself.
-fn scan_subscription_target(
-    input: &mut Input,
-    ctx: CanvasCtx<'_>,
-    emitter: EventPort,
-) -> Option<NodeId> {
-    let pointer = input.pointer_pos()?;
+fn scan_subscription_target(ui: &mut Ui, ctx: CanvasCtx<'_>, emitter: EventPort) -> Option<NodeId> {
+    let pointer = ui.pointer_pos()?;
     let candidates = ctx
         .graph_ctx()
         .nodes()
@@ -224,12 +220,8 @@ fn scan_subscription_target(
 /// dragged from `subscriber`'s pin: any node's event other than the
 /// subscriber's own (a node can't subscribe to itself). Mirror of
 /// [`scan_subscription_target`] for the reverse drag.
-fn scan_emitter_target(
-    input: &mut Input,
-    ctx: CanvasCtx<'_>,
-    subscriber: NodeId,
-) -> Option<EventPort> {
-    let pointer = input.pointer_pos()?;
+fn scan_emitter_target(ui: &mut Ui, ctx: CanvasCtx<'_>, subscriber: NodeId) -> Option<EventPort> {
+    let pointer = ui.pointer_pos()?;
     let candidates = ctx
         .graph_ctx()
         .nodes()

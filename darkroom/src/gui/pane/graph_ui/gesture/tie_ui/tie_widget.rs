@@ -15,7 +15,7 @@ use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::click_mode::ClickMode;
 use crate::core::edit::graph_intent::drag_start::DragStart;
-use crate::gui::frame::input_stage::InputStage;
+use crate::gui::frame::stage::Stage;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
@@ -73,9 +73,8 @@ impl TieWidgets {
 
     /// Pre-record: turn a held knob's band to the pointer. The frames of one knob drag fold into
     /// one undo entry; Esc puts the angle back.
-    pub(crate) fn input(&mut self, stage: &mut InputStage<'_, '_, UnsettledCtx<'_>>) {
+    pub(crate) fn input(&mut self, ui: &mut Ui, stage: &mut Stage<'_, UnsettledCtx<'_>>) {
         let ctx = stage.ctx;
-        let input = &mut *stage.update.input;
         let out = &mut *stage.out;
         let Some(knob) = self.knob.as_ref().copied() else {
             return;
@@ -94,47 +93,39 @@ impl TieWidgets {
         let center = graph_ctx.view().ties.get(&knob.tie).map(|tie| tie.pos);
         let (Some(center), Some(_)) = (
             center,
-            input
-                .response_for(wid::tie_knob(knob.tie))
-                .left
-                .drag
-                .delta(),
+            ui.response_for(wid::tie_knob(knob.tie)).left.drag.delta(),
         ) else {
             self.knob = None;
             return;
         };
-        let snap = if input.modifiers().contains(Modifiers::SHIFT) {
+        let snap = if ui.modifiers().contains(Modifiers::SHIFT) {
             AngleSnap::Steps
         } else {
             AngleSnap::Free
         };
-        if let Some(pointer) = input.response_for(canvas::outer_wid()).pointer_local {
+        if let Some(pointer) = ui.response_for(canvas::outer_wid()).pointer_local {
             let offset = graph_ctx.camera().to_world(pointer) - center;
             out.push_graph(turn(TieAngle::Pinned(knob_angle(offset, snap))));
         }
     }
 
-    /// A knob's left click and drag edges: its double-click frees the angle, and its drag latches
-    /// the turn. Reports whether `action` was one.
-    pub(crate) fn claims_knob(
+    /// A knob's left edges: its double-click frees the angle, and its drag latches the turn.
+    pub(crate) fn act_on_knob(
         &mut self,
         tie: TieId,
         action: PointerAction,
-        stage: &mut InputStage<'_, '_, CanvasCtx<'_>>,
-    ) -> bool {
+        stage: &mut Stage<'_, CanvasCtx<'_>>,
+    ) {
         if action.button != PointerButton::Left {
-            return false;
+            return;
         }
         match action.edge {
-            PointerEdge::Clicked { count } => {
-                if count == 2 {
-                    stage.out.push_graph(GraphIntent::SetTieAngle {
-                        tie,
-                        angle: TieAngle::Auto,
-                        gesture: None,
-                    });
-                }
-                true
+            PointerEdge::Clicked { count: 2 } => {
+                stage.out.push_graph(GraphIntent::SetTieAngle {
+                    tie,
+                    angle: TieAngle::Auto,
+                    gesture: None,
+                });
             }
             PointerEdge::DragStarted => {
                 self.knob = Some(KnobDrag {
@@ -142,10 +133,8 @@ impl TieWidgets {
                     from: stage.ctx.graph_ctx().view().ties[&tie].angle,
                     gesture: stage.out.open_gesture(),
                 });
-                true
             }
-            PointerEdge::DragStopped => true,
-            PointerEdge::Pressed { .. } => false,
+            _ => {}
         }
     }
 }

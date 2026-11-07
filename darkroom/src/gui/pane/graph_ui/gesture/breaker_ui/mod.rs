@@ -5,8 +5,8 @@ use palantir::widget::{LineCap, LineJoin, Shape};
 use palantir::{Stroke, Ui};
 
 use crate::core::edit::graph_intent::GraphIntent;
-use crate::gui::frame::input_stage::InputStage;
 use crate::gui::frame::requests::Requests;
+use crate::gui::frame::stage::Stage;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph_ui::canvas_input::CanvasGesture;
 use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
@@ -50,7 +50,7 @@ impl BreakerUi {
     /// undo step already detaches every incoming edge and pin, so emitting
     /// both would log a redundant history entry. The context's Esc — resolved
     /// once by the canvas — drops the scribble without emitting.
-    pub(crate) fn input(&mut self, stage: &mut InputStage<'_, '_, CanvasCtx<'_>>) {
+    pub(crate) fn input(&mut self, ui: &Ui, stage: &mut Stage<'_, CanvasCtx<'_>>) {
         let ctx = stage.ctx;
         // The classifier resolves RMB-drag vs Ctrl+LMB-drag and hands back
         // the latching button, which the stroke polls for continuation.
@@ -58,7 +58,7 @@ impl BreakerUi {
             Some(CanvasGesture::Breaker(button)) => Some(button),
             _ => None,
         };
-        match self.stroke.step(stage.update.input, ctx, latch) {
+        match self.stroke.step(ui, ctx, latch) {
             StrokeStep::Started(at) => self.scribble.restart(at),
             StrokeStep::Moved(at) => self.scribble.add_point(at, ctx.graph_ctx().camera().zoom),
             StrokeStep::Released => release(&mut self.scribble, stage.out),

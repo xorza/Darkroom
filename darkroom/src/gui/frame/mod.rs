@@ -1,17 +1,15 @@
 //! What every UI surface speaks: the root of the frame's read-only context chain
-//! ([`app_ctx`]), the bundles the update and record paths hand down ([`input_stage`],
-//! [`record_stage`]), what a record takes past them ([`window_parts`], [`requests`]), and the
+//! ([`app_ctx`]), the bundle each level hands down ([`stage`]), what a record takes past it ([`window_parts`], [`requests`]), and the
 //! commands a surface raises for the shell ([`app_command`], [`framing`]). Data only — the levels
 //! that act on it import it, and it imports none of them.
 //!
-//! The update path takes a stage and the record path `(ui, stage)`. A level adds to its stage's
-//! context and hands it down, and nothing returns upward but the frame's `InputOutcome`.
+//! A level takes `(ui, stage)`, on the input stage and on the record path alike. It adds to its
+//! stage's context and hands it down, and nothing returns upward.
 
 pub(crate) mod app_command;
 pub(crate) mod app_ctx;
 pub(crate) mod framing;
-pub(crate) mod input_stage;
-pub(crate) mod record_stage;
 pub(crate) mod requests;
 pub(crate) mod shortcuts;
+pub(crate) mod stage;
 pub(crate) mod window_parts;

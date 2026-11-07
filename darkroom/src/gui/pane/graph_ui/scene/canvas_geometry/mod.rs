@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 
 use glam::Vec2;
-use palantir::{Input, Rect, Size};
+use palantir::{Rect, Size, Ui};
 use scenarium::NodeId;
 
 use crate::core::document::graph_view::GraphView;
@@ -150,7 +150,7 @@ impl CanvasGeometry {
     /// Runs in [`crate::gui::pane::graph_ui::GraphUi::input`]. It clears and
     /// refills the per-frame snapshots whole, so nothing carries over from the
     /// frame before.
-    pub(crate) fn rebuild(&mut self, input: &Input, graph_ctx: GraphCtx<'_>) {
+    pub(crate) fn rebuild(&mut self, ui: &Ui, graph_ctx: GraphCtx<'_>) {
         self.ports.begin_frame();
         self.events.begin_frame();
         self.subs.begin_frame();
@@ -164,7 +164,7 @@ impl CanvasGeometry {
             // ancestor-shared canvas-origin term cancels) and combine
             // with this frame's `n.pos` — curves anchor on the moved
             // node's *current* port positions, not last frame's.
-            let body = input.response_for(wid::body(n.node_id));
+            let body = ui.response_for(wid::body(n.node_id));
             if let Some(r) = body.layout_rect {
                 self.node_sizes.insert(n.node_id, r.size);
             }
@@ -189,19 +189,19 @@ impl CanvasGeometry {
             };
             for kind in [PortKind::Input, PortKind::Output] {
                 for port in n.ports(kind) {
-                    let r = input.response_for(wid::port_circle(port)).state;
+                    let r = ui.response_for(wid::port_circle(port)).state;
                     self.ports.record(port, r, place);
                 }
             }
             // Emitter event glyphs, drag sources for subscription wires.
             for ev in n.event_ports() {
-                let r = input.response_for(wid::event_glyph(ev)).state;
+                let r = ui.response_for(wid::event_glyph(ev)).state;
                 self.events.record(ev, r, place);
             }
             // The subscription pin only exists on sink nodes (only they
             // render one — see `header::subscription_glyph`).
             if n.sink() {
-                let r = input.response_for(wid::subscription_glyph(n.node_id)).state;
+                let r = ui.response_for(wid::subscription_glyph(n.node_id)).state;
                 self.subs.record(n.node_id, r, place);
             }
         }

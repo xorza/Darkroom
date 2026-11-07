@@ -22,7 +22,7 @@ use scenarium::{Binding, ConstValue, DataType, ValueVariant};
 use crate::core::document::inspect_target::InspectTarget;
 use crate::core::document::item_id::ItemId;
 use crate::core::document::tab_ref::TabRef;
-use crate::gui::frame::record_stage::RecordStage;
+use crate::gui::frame::stage::Stage;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::input_ctx::InputCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
@@ -42,7 +42,7 @@ use crate::gui::widgets::support;
 const LOG_LINE_CAP: usize = 20;
 
 /// Record the inspector tab showing `target`. Its pin raises the tab held on the node.
-pub(crate) fn show(ui: &mut Ui, stage: &mut RecordStage<'_, GraphCtx<'_>>, target: InspectTarget) {
+pub(crate) fn show(ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>, target: InspectTarget) {
     let ctx = stage.ctx;
     let theme = ctx.theme();
     Scroll::vertical()
@@ -87,7 +87,7 @@ fn only_node(selected: &BTreeSet<ItemId>) -> Option<NodeId> {
 }
 
 /// The node's summary: its name and kind, status, description, ports and log.
-fn body(ui: &mut Ui, stage: &mut RecordStage<'_, NodeCtx<'_>>, target: InspectTarget) {
+fn body(ui: &mut Ui, stage: &mut Stage<'_, NodeCtx<'_>>, target: InspectTarget) {
     let node = stage.ctx;
     let theme = node.theme();
     let logs = node.graph_ctx.run_state().logs(node.node_id);

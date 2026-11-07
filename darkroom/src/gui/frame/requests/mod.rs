@@ -37,9 +37,8 @@ use crate::gui::frame::app_command::AppCommand;
 ///
 /// It also holds what the frame owes palantir's layout engine, so any level that strands the
 /// canvas's cross-frame geometry says so where it holds this queue, and `App` spends it once. A
-/// debt outlives the drains, and goes from the update to the record that spends it. Refused: a
-/// value each level returns, which came up six levels and across the two hooks by hand, and which a
-/// test app could drop.
+/// debt outlives the drains, and goes from the input stage to the record that spends it. Refused: a
+/// value each level returns, which came up six levels by hand, and which a test app could drop.
 #[derive(Debug, Default)]
 pub(crate) struct Requests {
     document: DocumentQueue,

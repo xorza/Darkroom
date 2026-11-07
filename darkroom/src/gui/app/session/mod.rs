@@ -21,14 +21,12 @@ use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::FileCommand;
 use crate::gui::frame::app_command::RunCommand;
 use crate::gui::frame::framing::Framing;
-use crate::gui::frame::input_stage::InputStage;
-use crate::gui::frame::record_stage::RecordStage;
 use crate::gui::frame::requests::Requests;
+use crate::gui::frame::stage::Stage;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::main_window::MainWindow;
-use palantir::{InputOutcome, Shortcut, Ui, UpdateCtx};
+use palantir::{Shortcut, Ui};
 use scenarium::{Graph, Library};
-use std::mem;
 
 use crate::gui::frame::app_ctx::AppCtx;
 use crate::gui::frame::shortcuts;
@@ -36,8 +34,6 @@ use crate::gui::frame::window_parts::WindowParts;
 
 #[derive(Debug)]
 pub(crate) struct Session {
-    /// Whether an input stage ran since the last record pass, so the next pass needs no settling.
-    input_ran: bool,
     /// The document being edited, its save path, and its undo history.
     pub(crate) open: OpenDocument,
     /// The panes showing it. Reset with the document rather than kept across
@@ -57,14 +53,13 @@ impl Session {
     /// Open `open` in a fresh UI.
     pub(crate) fn new(open: OpenDocument) -> Self {
         Self {
-            input_ran: false,
             open,
             main_window: MainWindow::default(),
         }
     }
 
-    /// The frame's input stage, once a frame before any record: everything input means against
-    /// the document, drained so the first record pass sees it settled. Leaves the app tier queued
+    /// The frame's input stage, once a frame ahead of the widgets: everything input means against
+    /// the document, drained so the pass's record sees it settled. Leaves the app tier queued
     /// in the stage's requests for the shell.
     ///
     /// Each phase ends in a drain, as a phase reads the document and the next one must see what the
@@ -79,26 +74,26 @@ impl Session {
     ///    visible needs a relayout: it may never have recorded, and a dock op raises no geometry
     ///    signal of its own.
     ///
-    /// Returns what the frame's records may read of the input. What the stage stranded of the
-    /// canvas's cached geometry it owes on its requests.
-    pub(crate) fn input(&mut self, stage: &mut InputStage<'_, '_, AppCtx<'_>>) -> InputOutcome {
+    /// What the stage stranded of the canvas's cached geometry it owes on its requests.
+    pub(crate) fn input(&mut self, ui: &mut Ui, stage: &mut Stage<'_, AppCtx<'_>>) {
         debug_assert!(stage.out.is_empty(), "the last frame left requests behind");
         let library = stage.ctx.library();
-        self.apply_undo_redo(stage.update, stage.out);
-        let display = stage.update.display();
-        self.main_window
-            .scan_navigation(&mut stage.with(GraphCtx::new(stage.ctx, &self.open, display)));
+        self.apply_undo_redo(ui, stage.out);
+        let display = ui.display();
+        self.main_window.scan_navigation(
+            ui,
+            &mut stage.with(GraphCtx::new(stage.ctx, &self.open, display)),
+        );
         self.drain(library, stage.out);
 
-        let outcome = self
-            .main_window
-            .input(&mut stage.with(GraphCtx::new(stage.ctx, &self.open, display)));
+        self.main_window.input(
+            ui,
+            &mut stage.with(GraphCtx::new(stage.ctx, &self.open, display)),
+        );
         self.drain(library, stage.out);
 
         // The file/run/quit chords only queue an `AppCommand`, so they need no drain of their own.
-        menu_shortcut(stage.update, stage.out);
-        self.input_ran = true;
-        outcome
+        menu_shortcut(ui, stage.out);
     }
 
     /// Apply what the frame raised against the document, and owe what that strands. Each route an
@@ -128,11 +123,20 @@ impl Session {
         requests.owe_relayout_after(self.open.redo());
     }
 
+    /// Ready the panes for a pass with no input to read, ahead of its [`Self::record`]: the warmup,
+    /// and a second pass, which reads the rects of the pass before it.
+    pub(crate) fn settle(&mut self, ui: &Ui, stage: &mut Stage<'_, AppCtx<'_>>) {
+        let library = stage.ctx.library();
+        let display = ui.display();
+        self.main_window.settle(
+            ui,
+            &mut stage.with(GraphCtx::new(stage.ctx, &self.open, display)),
+        );
+        self.drain(library, stage.out);
+    }
+
     /// One record pass against `stage`'s context: authors the widget tree, draining what it raises
     /// against the document, and leaves the app tier queued in the requests for the shell.
-    ///
-    /// A pass that no input stage ran just before settles first: the one past the first frame's
-    /// warmup, and a second pass, each of which reads the rects of the pass before it.
     ///
     /// What the pass stranded of the canvas's cached geometry it owes on the requests. Resizes
     /// driven by something other than an `UndoStep`, as the header's elapsed-time label growing as a
@@ -141,20 +145,12 @@ impl Session {
     pub(crate) fn record(
         &mut self,
         ui: &mut Ui,
-        stage: &mut RecordStage<'_, AppCtx<'_>>,
+        stage: &mut Stage<'_, AppCtx<'_>>,
         parts: WindowParts<'_>,
     ) {
         debug_assert!(stage.out.is_empty(), "the last pass left requests behind");
         let library = stage.ctx.library();
         let display = ui.display();
-        if !mem::take(&mut self.input_ran) {
-            self.main_window.settle(&mut InputStage {
-                update: &mut ui.update_ctx(),
-                ctx: GraphCtx::new(stage.ctx, &self.open, display),
-                out: stage.out,
-            });
-            self.drain(library, stage.out);
-        }
         self.main_window.record(
             ui,
             &mut stage.with(GraphCtx::new(stage.ctx, &self.open, display)),
@@ -176,9 +172,9 @@ impl Session {
     /// No focus test: Ctrl+Z is `KeyClass::Edit`, so while a text field
     /// holds focus palantir grants it to that field's scope and this
     /// read answers `false` on its own.
-    fn apply_undo_redo(&mut self, update_ctx: &mut UpdateCtx<'_>, requests: &mut Requests) {
-        let undo = update_ctx.shortcut_pressed(shortcuts::UNDO);
-        let redo = update_ctx.shortcut_pressed(shortcuts::REDO);
+    fn apply_undo_redo(&mut self, ui: &mut Ui, requests: &mut Requests) {
+        let undo = ui.shortcut_pressed(shortcuts::UNDO);
+        let redo = ui.shortcut_pressed(shortcuts::REDO);
         // The document owns its history and what a replay means; this layer
         // only says which direction the chord asked for.
         if undo {
@@ -196,7 +192,7 @@ impl Session {
     }
 
     /// Release the canvas's `NodeId`-keyed caches for nodes the document has
-    /// stopped holding. Driven by `App::update` once a
+    /// stopped holding. Driven by `App::sweep` once a
     /// frame — [`Self::record`] runs per *record pass*, so a sweep here would
     /// run twice on a frame carrying action input.
     pub(super) fn reconcile_caches(&mut self) {
@@ -216,15 +212,17 @@ const MENU_CHORDS: [(Shortcut, AppCommand); 6] = [
     (shortcuts::QUIT, AppCommand::Quit),
 ];
 
-/// Queue the command of the first [`MENU_CHORDS`] chord that fired. The search stops at the
-/// first match, and the chords after it stay watched: palantir records the frame again with no
-/// input, and that pass reads them all (`Ui::shortcut_pressed`). Read outside every scope, so a
-/// chord a focused field claims does not reach them.
-fn menu_shortcut(update_ctx: &mut UpdateCtx<'_>, requests: &mut Requests) {
-    if let Some((_, command)) = MENU_CHORDS
-        .iter()
-        .find(|(chord, _)| update_ctx.shortcut_pressed(*chord))
-    {
+/// Queue the command of the first [`MENU_CHORDS`] chord that fired, and read them all, so each stays
+/// watched for the next frame. Read outside every scope, so a chord a focused field claims does not
+/// reach them.
+fn menu_shortcut(ui: &mut Ui, requests: &mut Requests) {
+    let mut fired = None;
+    for (chord, command) in &MENU_CHORDS {
+        if ui.shortcut_pressed(*chord) {
+            fired.get_or_insert(command);
+        }
+    }
+    if let Some(command) = fired {
         requests.push_app(command.clone());
     }
 }

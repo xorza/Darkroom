@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use palantir::{Input, Ui};
+use palantir::Ui;
 
 use crate::core::document::item_id::ItemId;
 use crate::core::edit::graph_intent::GraphIntent;
@@ -72,7 +72,7 @@ impl<K: Copy> ItemMenu<K> {
     /// next [`Self::show`], in the input stage's own frame.
     pub(crate) fn open_on(
         &mut self,
-        input: &mut Input,
+        ui: &mut Ui,
         graph_ctx: GraphCtx<'_>,
         target: K,
     ) -> Option<GraphIntent>
@@ -82,7 +82,7 @@ impl<K: Copy> ItemMenu<K> {
         // A press that opened the menu has a pointer position by construction;
         // this is only for the frames where the pointer left the window
         // between the click and this read.
-        let at = input.pointer_pos()?;
+        let at = ui.pointer_pos()?;
         self.target = Some(target);
         self.menu.open_at(at);
         let item = target.into();

@@ -14,7 +14,7 @@ use scenarium::NodeId;
 
 use crate::core::document::graph_view::StackedNode;
 use crate::core::document::item_id::ItemId;
-use crate::gui::frame::record_stage::RecordStage;
+use crate::gui::frame::stage::Stage;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
 use crate::gui::pane::graph_ui::gesture::breaker_ui::breaker_probe::BreakerProbe;
@@ -59,7 +59,7 @@ pub(super) struct NodeUi {
 /// into, and the breaker probe the bodies mark hits against.
 #[derive(Debug)]
 pub(super) struct NodePass<'a, 'p> {
-    pub(super) stage: RecordStage<'a, DrawCtx<'a>>,
+    pub(super) stage: Stage<'a, DrawCtx<'a>>,
     pub(super) probe: &'a mut BreakerProbe<'p>,
 }
 

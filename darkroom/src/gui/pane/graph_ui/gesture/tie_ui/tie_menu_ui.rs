@@ -1,12 +1,12 @@
 //! [`TieMenuUi`]: the menu a right-click on a tie opens. `darkroom/AGENTS.md`, "Wire ties", "One
 //! wire leaves through the tie's menu", holds the decision.
 
-use palantir::{Input, InternedStr, MenuItem, MenuSeparator, Ui, fmt};
+use palantir::{InternedStr, MenuItem, MenuSeparator, Ui, fmt};
 
 use crate::core::document::tie::{TieAngle, TieId};
 use crate::core::document::wire_key::{DataWire, WireKey};
 use crate::core::edit::graph_intent::GraphIntent;
-use crate::gui::frame::record_stage::RecordStage;
+use crate::gui::frame::stage::Stage;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::gesture::item_menu::ItemMenu;
 use crate::gui::pane::graph_ui::gesture::tie_ui::tie_widget::{AngleSnap, knob_angle};
@@ -49,11 +49,11 @@ impl TieMenuUi {
     /// [`ItemMenu::open_on`]. Returns the selection edit, when it needs one.
     pub(crate) fn open_on(
         &mut self,
-        input: &mut Input,
+        ui: &mut Ui,
         graph_ctx: GraphCtx<'_>,
         tie: TieId,
     ) -> Option<GraphIntent> {
-        self.menu.open_on(input, graph_ctx, tie)
+        self.menu.open_on(ui, graph_ctx, tie)
     }
 
     /// Record the menu and turn this frame's pick into its intent. `ties` is the last pass's
@@ -61,7 +61,7 @@ impl TieMenuUi {
     pub(crate) fn record(
         &mut self,
         ui: &mut Ui,
-        stage: &mut RecordStage<'_, GraphCtx<'_>>,
+        stage: &mut Stage<'_, GraphCtx<'_>>,
         ties: &TieLayout,
     ) {
         let (graph_ctx, out) = (stage.ctx, &mut *stage.out);

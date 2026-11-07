@@ -6,7 +6,7 @@ use palantir::{Modifiers, Rect, Stroke, Ui};
 
 use crate::core::document::item_id::ItemId;
 use crate::core::edit::graph_intent::GraphIntent;
-use crate::gui::frame::input_stage::InputStage;
+use crate::gui::frame::stage::Stage;
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph_ui::canvas_input::CanvasGesture;
@@ -88,11 +88,10 @@ impl SelectionUi {
     /// once, by the committing `SetSelection` emitted on release, which the
     /// release frame's record reads. The context's Esc —
     /// resolved once by the canvas — drops the band without emitting.
-    pub(crate) fn input(&mut self, stage: &mut InputStage<'_, '_, CanvasCtx<'_>>) {
+    pub(crate) fn input(&mut self, ui: &mut Ui, stage: &mut Stage<'_, CanvasCtx<'_>>) {
         let ctx = stage.ctx;
         let graph_ctx = ctx.graph_ctx();
-        let input = &mut *stage.update.input;
-        let resp = input.response_for(canvas::outer_wid());
+        let resp = ui.response_for(canvas::outer_wid());
         if self.band.is_none()
             && ctx.gesture() == Some(CanvasGesture::Select)
             && let Some(p) = resp.pointer_local
@@ -108,7 +107,7 @@ impl SelectionUi {
                 // arbitration — read it here, not in the classifier.
                 // Captured once, so the per-frame union never re-reads the
                 // document.
-                base: if input.modifiers().contains(Modifiers::SHIFT) {
+                base: if ui.modifiers().contains(Modifiers::SHIFT) {
                     graph_ctx.selected().clone()
                 } else {
                     BTreeSet::new()

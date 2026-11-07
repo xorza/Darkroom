@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use common::ErrorChain;
-use palantir::{ColorScheme, Preference, Ui, UiPreferences, UpdateCtx};
+use palantir::{ColorScheme, Preference, RecordPass, Ui, UiPreferences};
 use scenarium::Binding;
 use scenarium::ConstValue;
 use scenarium::FsPathMode;
@@ -29,9 +29,8 @@ use crate::gui::frame::app_command::{
     AppCommand, EditCommand, FileCommand, MlModelKind, PathPick, RunCommand, ViewCommand,
 };
 use crate::gui::frame::app_ctx::AppCtx;
-use crate::gui::frame::input_stage::InputStage;
-use crate::gui::frame::record_stage::RecordStage;
 use crate::gui::frame::requests::Requests;
+use crate::gui::frame::stage::Stage;
 use crate::gui::frame::window_parts::{StatusInputs, WindowParts};
 use crate::gui::state::process_memory::ProcessMemory;
 use crate::gui::state::run_state::{RunFeed, RunState};
@@ -46,8 +45,8 @@ pub(crate) mod view_capture;
 /// The editor shell: it owns the open document and the runtime services
 /// evaluating it, and lends the document to the [`Session`] that authors each
 /// frame. `App` also owns preferences, dialogs, theme, and exit policy.
-/// `update` drains external queues and runs `Session::input` once, and replayable
-/// `record` runs `Session::record` and handles actions only in the pass that receives input.
+/// `record` runs for each pass: the first drains external queues and runs `Session::input`, the
+/// others run `Session::settle`, and each runs `Session::record`.
 #[derive(Debug)]
 pub(crate) struct App {
     /// The document being edited and the UI showing it — replaced as a unit
@@ -90,7 +89,7 @@ pub(crate) struct App {
     capture: Option<ViewCapture>,
     /// Throttled sampler behind the status bar's `MEM` clause. Lives on
     /// `App` rather than `Session` because it measures the process, not the
-    /// document. Sampled where it is consumed rather than in `update`:
+    /// document. Sampled where it is consumed rather than in a sweep:
     /// [`ProcessMemory::sample`] refreshes at most once per interval, so a
     /// second record pass repeats the reading the first one drew.
     process_memory: ProcessMemory,
@@ -246,8 +245,8 @@ impl App {
     /// are refreshed only while the window is floating; a maximized window
     /// keeps its last floating geometry so un-maximizing on the next launch
     /// lands at the right size.
-    fn track_window_state(&mut self, ctx: &UpdateCtx<'_>) {
-        let geom = ctx.window_geometry();
+    fn track_window_state(&mut self, ui: &Ui) {
+        let geom = ui.window_geometry();
         match &mut self.preferences.window {
             Some(w) => {
                 w.maximized = geom.placement.maximized;
@@ -322,8 +321,8 @@ impl App {
     /// The titlebar X. The window stays open only while the prompt is up
     /// ([`DiscardGuard::record`] calls `keep_open`); with nothing to
     /// protect, the close proceeds untouched.
-    fn handle_close_request(&mut self, ctx: &UpdateCtx<'_>) {
-        if !ctx.close_requested() {
+    fn handle_close_request(&mut self, ui: &Ui) {
+        if !ui.close_requested() {
             return;
         }
 
@@ -587,20 +586,66 @@ impl App {
         }
     }
 
+    /// Take in what the host and the worker queued, for this pass's record to read.
+    fn sweep(&mut self, ui: &Ui) {
+        // Keep the persisted window geometry current so a save on quit
+        // captures the latest size / position.
+        self.track_window_state(ui);
+
+        // Everything derived from the run and the document, swept once a
+        // frame — **the one place that happens**. All of these caches outlive
+        // the scene on purpose (a closed tab must resolve its port centers the
+        // frame it comes back), so none can decide for itself that an entry is
+        // dead; only the document knows, and a node id is never reused.
+        //
+        // Two owners, so two calls: the run projection filters on the node
+        // that published, and everything the window caches — canvas geometry,
+        // per-tab viewer framing — goes through the session.
+        // A new cache gets a line here rather than a third call site.
+        //
+        // A node deleted later in the same frame's record is swept next frame.
+        // Nothing reads a dead entry in between — the geometry is reached
+        // through a `NodeCtx` that only resolves for live nodes — so the lag
+        // costs memory and nothing else.
+        self.run_state.sync(
+            RunFeed {
+                runtime: &self.runtime,
+                status: &mut self.status,
+            },
+            ui,
+            self.session.open.document(),
+        );
+        self.session.reconcile_caches();
+    }
+
+    /// What this frame's input means, and what the host handed over with it.
+    fn read_input(&mut self, ui: &mut Ui) {
+        self.deliver_capture(ui);
+        self.handle_close_request(ui);
+
+        let ctx = AppCtx::new(&self.theme, self.runtime.library.cur(), &self.run_state);
+        self.session.input(
+            ui,
+            &mut Stage {
+                ctx,
+                out: &mut self.requests,
+            },
+        );
+        while let Some(command) = self.requests.pop_app() {
+            self.run_command(command);
+        }
+    }
+
     /// Hand the image that landed this frame to the capture that asked for it.
-    fn deliver_capture(&mut self, ctx: &UpdateCtx<'_>) {
-        let Some(landed) = self
-            .capture
-            .as_ref()
-            .and_then(|capture| capture.landed(ctx))
-        else {
+    fn deliver_capture(&mut self, ui: &Ui) {
+        let Some(landed) = self.capture.as_ref().and_then(|capture| capture.landed(ui)) else {
             return;
         };
         let capture = self
             .capture
             .take()
             .expect("the capture its image landed for");
-        match capture.deliver(landed, &ctx.clipboard()) {
+        match capture.deliver(landed, &ui.clipboard()) {
             Ok(()) => self.status.succeeded(StatusFamily::View),
             Err(error) => self
                 .status
@@ -631,58 +676,28 @@ fn unicode(path: PathBuf) -> Result<String, NonUnicodePath> {
 }
 
 impl palantir::App for App {
-    fn update(
-        &mut self,
-        _win: palantir::WindowToken,
-        mut update_ctx: UpdateCtx<'_>,
-    ) -> palantir::InputOutcome {
-        // Keep the persisted window geometry current so a save on quit
-        // captures the latest size / position.
-        self.track_window_state(&update_ctx);
-
-        // Everything derived from the run and the document, swept once a
-        // frame — **the one place that happens**. All of these caches outlive
-        // the scene on purpose (a closed tab must resolve its port centers the
-        // frame it comes back), so none can decide for itself that an entry is
-        // dead; only the document knows, and a node id is never reused.
-        //
-        // Two owners, so two calls: the run projection filters on the node
-        // that published, and everything the window caches — canvas geometry,
-        // per-tab viewer framing — goes through the session.
-        // A new cache gets a line here rather than a third call site.
-        //
-        // A node deleted later in the same frame's record is swept next frame.
-        // Nothing reads a dead entry in between — the geometry is reached
-        // through a `NodeCtx` that only resolves for live nodes — so the lag
-        // costs memory and nothing else.
-        self.run_state.sync(
-            RunFeed {
-                runtime: &self.runtime,
-                status: &mut self.status,
-            },
-            &update_ctx,
-            self.session.open.document(),
-        );
-        self.session.reconcile_caches();
-
-        self.deliver_capture(&update_ctx);
-        self.handle_close_request(&update_ctx);
-
-        let ctx = AppCtx::new(&self.theme, self.runtime.library.cur(), &self.run_state);
-        let outcome = self.session.input(&mut InputStage {
-            update: &mut update_ctx,
-            ctx,
-            out: &mut self.requests,
-        });
-        while let Some(command) = self.requests.pop_app() {
-            self.run_command(command);
-        }
-        outcome
-    }
-
     fn record(&mut self, _win: palantir::WindowToken, ui: &mut Ui) {
+        let pass = ui.record_pass();
+        // The warmup's record reads what the sweeps set up too. The first frame's next pass sweeps
+        // again, which costs a lookup per entry.
+        if pass != RecordPass::Second {
+            self.sweep(ui);
+        }
+        if pass == RecordPass::First {
+            self.read_input(ui);
+        } else {
+            let ctx = AppCtx::new(&self.theme, self.runtime.library.cur(), &self.run_state);
+            self.session.settle(
+                ui,
+                &mut Stage {
+                    ctx,
+                    out: &mut self.requests,
+                },
+            );
+        }
+
         // Ahead of the session, so a menu open when the prompt comes up closes before it records,
-        // with no second pass. A close request raises it in `update`, a file handed over between
+        // with no second pass. A close request raises it in `read_input`, a file handed over between
         // frames.
         let prompted = self.discard.is_up();
         if prompted {
@@ -701,7 +716,7 @@ impl palantir::App for App {
         let ctx = AppCtx::new(&self.theme, self.runtime.library.cur(), &self.run_state);
         self.session.record(
             ui,
-            &mut RecordStage {
+            &mut Stage {
                 ctx,
                 out: &mut self.requests,
             },
@@ -727,7 +742,7 @@ impl palantir::App for App {
         if ui.user_scale() != interface {
             ui.set_user_scale(interface);
         }
-        // Palantir runs frames until the image lands, and `update` hands it over.
+        // Palantir runs frames until the image lands, and `read_input` hands it over.
         if let Some(capture) = &mut self.capture {
             capture.ask(ui);
         }
@@ -1097,14 +1112,6 @@ mod tests {
     }
 
     impl palantir::App for CountedPasses {
-        fn update(
-            &mut self,
-            window: palantir::WindowToken,
-            ctx: UpdateCtx<'_>,
-        ) -> palantir::InputOutcome {
-            palantir::App::update(&mut self.app, window, ctx)
-        }
-
         fn record(&mut self, window: palantir::WindowToken, ui: &mut Ui) {
             self.passes += 1;
             palantir::App::record(&mut self.app, window, ui);
@@ -1137,9 +1144,8 @@ mod tests {
             .count()
     }
 
-    /// A window's first frame runs `update` ahead of the warmup, as no frame is on screen for it to
-    /// read, so the warmup and the pass past it take the document from no rects to every wire
-    /// anchored, in two records.
+    /// A window's first frame opens with the warmup, as no frame is on screen to read, so it and the
+    /// pass past it take the document from no rects to every wire anchored, in two records.
     #[test]
     fn a_cold_window_anchors_every_wire_in_its_first_frame() {
         use glam::UVec2;
@@ -1162,12 +1168,12 @@ mod tests {
         assert_eq!(wires_anchored(&counted.app), 7);
     }
 
-    /// A click the input stage takes records once and shows in that pass: on a node's body, which
-    /// selects, on bare canvas, which clears it, and a right click, which opens the node's menu. So
-    /// do a drag's latch and stop, a node's and a rubber band's. A click on a widget the record
-    /// reads, a menu title, takes the second pass as before.
+    /// The input stage acts on a frame's input once, over the frame's two passes: a click on a node's
+    /// body, which selects, on bare canvas, which clears it, and a right click, which opens the
+    /// node's menu. So does a drag's latch and stop, a node's, which moves it once, and a rubber
+    /// band's.
     #[test]
-    fn a_click_the_input_stage_takes_records_once() {
+    fn the_input_stage_acts_once_over_a_frames_two_passes() {
         use glam::{UVec2, Vec2};
         use palantir::{Harness, Locator, PointerButton};
 
@@ -1222,7 +1228,7 @@ mod tests {
 
         assert_eq!(
             click(&mut ui, &mut counted, body.into(), PointerButton::Left),
-            1,
+            2,
             "a click on a body"
         );
         assert_eq!(selected(&counted), 1, "the click selected");
@@ -1230,14 +1236,14 @@ mod tests {
         let bare = ui.point_in(canvas::outer_wid(), Vec2::new(4.0, 4.0));
         assert_eq!(
             click(&mut ui, &mut counted, bare.into(), PointerButton::Left),
-            1,
+            2,
             "a click on bare canvas"
         );
         assert_eq!(selected(&counted), 0, "the click cleared it");
 
         assert_eq!(
             click(&mut ui, &mut counted, body.into(), PointerButton::Right),
-            1,
+            2,
             "a right click on a body"
         );
         assert_eq!(selected(&counted), 1, "the right click selected");
@@ -1261,7 +1267,7 @@ mod tests {
             [latch, counted.passes]
         };
         let footer = ui.rect(wid::footer(node)).expect("the node shows").center();
-        assert_eq!(drag(&mut ui, &mut counted, footer), [1, 1], "a node's drag");
+        assert_eq!(drag(&mut ui, &mut counted, footer), [2, 2], "a node's drag");
         assert_eq!(
             counted
                 .app
@@ -1275,7 +1281,7 @@ mod tests {
             "the node followed"
         );
         let band = ui.point_in(canvas::outer_wid(), Vec2::new(4.0, 4.0));
-        assert_eq!(drag(&mut ui, &mut counted, band), [1, 1], "a band's drag");
+        assert_eq!(drag(&mut ui, &mut counted, band), [2, 2], "a band's drag");
 
         let title = ui
             .widgets(Some("File"))

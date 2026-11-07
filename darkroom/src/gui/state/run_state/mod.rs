@@ -39,7 +39,7 @@ use std::mem;
 use std::sync::Arc;
 use std::time::Instant;
 
-use palantir::UpdateCtx;
+use palantir::Ui;
 
 use crate::core::document::Document;
 use crate::core::runtime_host::RuntimeHost;
@@ -242,14 +242,14 @@ impl RunState {
     /// this across two calls put that constraint in the caller's statement
     /// order, where nothing states it.
     ///
-    /// Runs from `App::update`, once a frame — every sweep is idempotent and
+    /// Runs from `App::sweep`, once a frame — every sweep is idempotent and
     /// costs a lookup per cached entry, while `record` runs *twice* on a frame
     /// carrying action input — and before the session rebuilds its scene, so
     /// the status and log projections it reads reflect the latest run.
-    pub(crate) fn sync(&mut self, feed: RunFeed<'_>, ctx: &UpdateCtx<'_>, document: &Document) {
+    pub(crate) fn sync(&mut self, feed: RunFeed<'_>, ui: &Ui, document: &Document) {
         let RunFeed { runtime, status } = feed;
         self.drain_reports(runtime, status);
-        self.sync_previews(runtime, ctx, document);
+        self.sync_previews(runtime, ui, document);
     }
 
     /// Fold everything `runtime`'s worker has posted since the last frame into
@@ -465,7 +465,7 @@ impl RunState {
     /// the widget. A value whose id belongs to an earlier compile is dropped —
     /// the node it named may not exist any more, and a preview only ever shows
     /// the current run's value anyway.
-    fn sync_previews(&mut self, runtime: &RuntimeHost, ctx: &UpdateCtx<'_>, document: &Document) {
+    fn sync_previews(&mut self, runtime: &RuntimeHost, ui: &Ui, document: &Document) {
         runtime.drain_previews(&mut self.published);
         #[expect(
             clippy::iter_over_hash_type,
@@ -482,7 +482,7 @@ impl RunState {
                 self.previews.publish(node_id, value);
             }
         }
-        self.previews.land(ctx);
+        self.previews.land(ui);
         self.previews.reconcile(document);
     }
 

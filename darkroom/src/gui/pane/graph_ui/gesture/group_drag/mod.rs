@@ -11,7 +11,7 @@ use std::collections::BTreeSet;
 use std::rc::Rc;
 
 use glam::Vec2;
-use palantir::{Input, WidgetId};
+use palantir::{Ui, WidgetId};
 use scenarium::NodeId;
 
 use crate::core::document::graph_view::GraphView;
@@ -20,8 +20,8 @@ use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::click_mode::ClickMode;
 use crate::core::edit::graph_intent::drag_start::DragStart;
-use crate::gui::frame::input_stage::InputStage;
 use crate::gui::frame::requests::Requests;
+use crate::gui::frame::stage::Stage;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph_ui::unsettled_ctx::UnsettledCtx;
@@ -91,12 +91,12 @@ impl GroupDrag {
     /// Start (or replace) the gesture on what `start` grabbed, and move it to where the pointer
     /// has travelled, as a latch is past the drag threshold. A frame with no later input still
     /// shows the move.
-    pub(crate) fn latch(&mut self, start: GrabStart, input: &Input, out: &mut Requests) {
+    pub(crate) fn latch(&mut self, start: GrabStart, ui: &Ui, out: &mut Requests) {
         let GrabStart { grab, joined } = start;
         let gesture = out.open_gesture();
         out.extend_graph_in(gesture, joined);
         let anchor = Anchor { grab, gesture };
-        if let Some(delta) = input.response_for(anchor.grab.handle).left.drag.delta() {
+        if let Some(delta) = ui.response_for(anchor.grab.handle).left.drag.delta() {
             out.push_graph(anchor.frame(delta));
         }
         self.anchor = Some(anchor);
@@ -113,7 +113,7 @@ impl GroupDrag {
     /// Runs pre-record, so the move lands in `Document` before the pass that
     /// draws the moved items: they paint at the cursor in Pass A with no
     /// relayout retry.
-    pub(crate) fn input(&mut self, stage: &mut InputStage<'_, '_, UnsettledCtx<'_>>) {
+    pub(crate) fn input(&mut self, ui: &Ui, stage: &mut Stage<'_, UnsettledCtx<'_>>) {
         let ctx = stage.ctx;
         let graph_ctx = ctx.graph_ctx();
         // An item deleted mid-drag (breaker swipe, undo) takes its drag with
@@ -128,7 +128,7 @@ impl GroupDrag {
         let Some(anchor) = &self.anchor else {
             return;
         };
-        let resp = stage.update.input.response_for(anchor.grab.handle);
+        let resp = ui.response_for(anchor.grab.handle);
         // `drag_started` on a still-active anchor means a *new* gesture just
         // latched on the same widget. Emitting with the stale start
         // positions would snap the group back to the previous gesture's

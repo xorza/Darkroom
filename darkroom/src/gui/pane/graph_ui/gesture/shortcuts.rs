@@ -7,14 +7,14 @@
 //! chord names no pane of its own, so running only while a graph pane is up is what keeps Delete
 //! from removing nodes nobody is looking at.
 
-use palantir::Key;
+use palantir::{Key, Ui};
 use scenarium::NodeId;
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
 use crate::gui::frame::framing::Framing;
-use crate::gui::frame::input_stage::InputStage;
 use crate::gui::frame::shortcuts;
+use crate::gui::frame::stage::Stage;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 
 /// Turn this frame's canvas chords into intents.
@@ -27,22 +27,19 @@ use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 ///
 /// Esc deselects only when the canvas `ctx` says nothing was in flight: only
 /// the canvas knows whether the Esc cancelled a gesture instead.
-pub(crate) fn emit(stage: &mut InputStage<'_, '_, CanvasCtx<'_>>) {
+pub(crate) fn emit(ui: &mut Ui, stage: &mut Stage<'_, CanvasCtx<'_>>) {
     let ctx = stage.ctx;
     let graph_ctx = ctx.graph_ctx();
-    let reset_zoom = stage.update.shortcut_pressed(shortcuts::RESET_VIEW);
-    let duplicate = stage.update.shortcut_pressed(shortcuts::DUPLICATE);
-    let delete = stage.update.shortcut_pressed(shortcuts::DELETE)
-        || stage.update.shortcut_pressed(Key::Backspace);
+    let reset_zoom = ui.shortcut_pressed(shortcuts::RESET_VIEW);
+    let duplicate = ui.shortcut_pressed(shortcuts::DUPLICATE);
+    let delete = ui.shortcut_pressed(shortcuts::DELETE) || ui.shortcut_pressed(Key::Backspace);
     let out = &mut *stage.out;
     let view = graph_ctx.view();
     if ctx.deselects() && !view.selected.is_empty() {
         out.push_graph(GraphIntent::clear_selection());
     }
     // Ctrl+0 is the toolbar's reset view: 1:1, centered on the content.
-    if reset_zoom
-        && let Some(reset) = Framing::Reset.intent(stage.update.input, graph_ctx, ctx.geometry())
-    {
+    if reset_zoom && let Some(reset) = Framing::Reset.intent(ui, graph_ctx, ctx.geometry()) {
         out.push_graph(reset);
     }
     // Ctrl+D drops wires from producers outside the selection; keeping them

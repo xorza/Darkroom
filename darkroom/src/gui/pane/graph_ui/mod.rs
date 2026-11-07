@@ -27,15 +27,12 @@ pub(crate) mod toolbar;
 pub(crate) mod unsettled_ctx;
 pub(crate) mod wid;
 
-use palantir::{
-    Chrome, Configure, InputOutcome, KeyboardWake, Panel, Sense, Sizing, TranslateScale, Ui,
-};
+use palantir::{Chrome, Configure, Panel, Sense, Sizing, TranslateScale, Ui};
 
 use crate::core::document::Document;
 use crate::gui::frame::framing::Framing;
-use crate::gui::frame::input_stage::InputStage;
-use crate::gui::frame::record_stage::RecordStage;
 use crate::gui::frame::requests::Requests;
+use crate::gui::frame::stage::Stage;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::canvas_bg::CanvasBg;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
@@ -165,42 +162,40 @@ impl GraphUi {
         appearing
     }
 
-    pub(crate) fn input(&mut self, stage: &mut InputStage<'_, '_, GraphCtx<'_>>) -> InputOutcome {
+    pub(crate) fn input(&mut self, ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
         let graph_ctx = stage.ctx;
-        let reads_edges = self.gestures.reads_edges();
-        self.open_pass(stage.update.record_frame_id(), stage.out);
+        self.open_pass(ui.record_frame_id(), stage.out);
         // One classification for the whole frame. A controller with nothing in flight has nothing
         // to cancel, so each applies this to its own state slot unconditionally and lets its
         // existing "no gesture" path do the rest.
-        let input = self.gestures.read_input(stage.update);
+        let input = self.gestures.read_input(ui);
         let unsettled = UnsettledCtx::new(graph_ctx, input);
-        self.gestures.before_geometry(&mut stage.with(unsettled));
+        self.gestures
+            .before_geometry(ui, &mut stage.with(unsettled));
         // One walk, filling the geometry caches off the per-node and per-port responses.
-        self.geometry.rebuild(stage.update.input, graph_ctx);
-        let claimed = self
-            .gestures
-            .input(&mut stage.with(CanvasCtx::new(unsettled, &self.geometry)));
+        self.geometry.rebuild(ui, graph_ctx);
+        self.gestures.input(
+            ui,
+            &mut stage.with(CanvasCtx::new(unsettled, &self.geometry)),
+        );
         // Taking the table back `&mut` is what ends the stage above: nothing below may read it.
-        self.finish_geometry(stage);
+        self.finish_geometry(ui, stage);
         // The keyboard half of the same phase. Last, so a chord reads the
         // document the pointer gestures above were raised against.
-        shortcuts::emit(&mut stage.with(CanvasCtx::new(unsettled, &self.geometry)));
-        let keyless = stage.update.keyboard_events(KeyboardWake::NONE).is_empty();
-        if claimed && keyless && !reads_edges {
-            InputOutcome::Handled
-        } else {
-            InputOutcome::Record
-        }
+        shortcuts::emit(
+            ui,
+            &mut stage.with(CanvasCtx::new(unsettled, &self.geometry)),
+        );
     }
 
     /// Ready the canvas for a record pass that no input stage ran just before: the one past the
     /// first frame's warmup, and a second pass, each of which reads the rects of the pass before it.
     /// The geometry is built again, and a framing the last record raised lands here.
     /// Refused: a replay of the input stage, which ran each gesture again on a level read.
-    pub(crate) fn settle(&mut self, stage: &mut InputStage<'_, '_, GraphCtx<'_>>) {
-        self.open_pass(stage.update.record_frame_id(), stage.out);
-        self.geometry.rebuild(stage.update.input, stage.ctx);
-        self.finish_geometry(stage);
+    pub(crate) fn settle(&mut self, ui: &Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
+        self.open_pass(ui.record_frame_id(), stage.out);
+        self.geometry.rebuild(ui, stage.ctx);
+        self.finish_geometry(ui, stage);
     }
 
     /// What opens a pass on any path: a canvas back from being away drops the gesture state it left
@@ -218,7 +213,7 @@ impl GraphUi {
     /// framing lands on the rects it now holds, and a node with no measured size owes a relayout. It
     /// records hidden until its rects let its wires draw, and a cull keeps it recorded, so this ends
     /// with the next record.
-    fn finish_geometry(&mut self, stage: &mut InputStage<'_, '_, GraphCtx<'_>>) {
+    fn finish_geometry(&mut self, ui: &Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
         if self.geometry.has_unmeasured() {
             stage.out.owe_relayout();
         }
@@ -229,7 +224,7 @@ impl GraphUi {
             .subscription_ui
             .bake_snap_hover(&mut self.geometry);
         if let Some(framing) = self.framing.take() {
-            let moved = framing.intent(stage.update.input, stage.ctx, &self.geometry);
+            let moved = framing.intent(ui, stage.ctx, &self.geometry);
             stage.out.extend_graph(moved);
         }
     }
@@ -240,7 +235,7 @@ impl GraphUi {
     ///
     /// Anything the pane asks for — graph edits, and the commands a chip or a
     /// menu pick means — lands on the stage's requests in the order it was raised.
-    pub(crate) fn record(&mut self, ui: &mut Ui, stage: &mut RecordStage<'_, GraphCtx<'_>>) {
+    pub(crate) fn record(&mut self, ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
         self.record_popups(ui, stage);
         // The toolbar overlays the canvas's top-left corner rather than
         // sitting beside it, so the two share a stack. It records *second*,
@@ -258,7 +253,7 @@ impl GraphUi {
     }
 
     /// The palette and the menus, which read the clicks on their rows as they record.
-    fn record_popups(&mut self, ui: &mut Ui, stage: &mut RecordStage<'_, GraphCtx<'_>>) {
+    fn record_popups(&mut self, ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
         let gestures = &mut self.gestures;
         // A wire released over empty canvas opened the new-node popup, and a pick re-floats it.
         if let Some(source) = gestures.new_node_ui.record(ui, stage) {
@@ -276,7 +271,7 @@ impl GraphUi {
     /// dotted backdrop, and — under the inner canvas's pan/zoom transform —
     /// the wires, node bodies, inspection panels, and in-flight
     /// gesture previews.
-    fn record_canvas(&mut self, ui: &mut Ui, stage: &mut RecordStage<'_, GraphCtx<'_>>) {
+    fn record_canvas(&mut self, ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
         let graph_ctx = stage.ctx;
         self.geometry.reposition(graph_ctx.view());
         let geometry = &self.geometry;
@@ -422,13 +417,13 @@ mod tests {
     use super::*;
     use crate::core::edit::graph_intent::GraphIntent;
 
-    /// What a frame's input stage answers: `Handled` for a click or a drag's latch and stop the
-    /// canvas takes, alone in the frame, and `Record` for any other edge, for a key beside it, past
-    /// an open popup and in a floating wire.
+    /// What a frame's input stage takes: a body's click selects, its right click opens the menu, a
+    /// bare click selects nothing, a right click there opens the palette, and a click past an open
+    /// menu closes it.
     #[test]
-    fn the_stage_answers_handled_only_for_a_click_it_takes_alone() {
+    fn the_stage_acts_on_a_click_by_where_it_lands() {
         use glam::Vec2;
-        use palantir::{InputOutcome, PointerButton};
+        use palantir::PointerButton;
         use scenarium::NodeId;
 
         use crate::core::document::internals::DocumentFixture;
@@ -447,7 +442,6 @@ mod tests {
             h.advance_past_double_click();
             h.ui.press(at, button);
             h.frame();
-            assert_eq!(h.outcome, InputOutcome::Record, "a press");
             h.ui.release(button);
             h.frame()
         }
@@ -460,7 +454,6 @@ mod tests {
 
         let (mut h, node) = fresh();
         let intents = click(&mut h, wid::body(node), PointerButton::Left);
-        assert_eq!(h.outcome, InputOutcome::Handled, "a body's click");
         assert!(
             matches!(intents[0], GraphIntent::SetSelection { .. }),
             "{intents:?}"
@@ -468,7 +461,6 @@ mod tests {
 
         let (mut h, node) = fresh();
         click(&mut h, wid::body(node), PointerButton::Right);
-        assert_eq!(h.outcome, InputOutcome::Handled, "a body's right click");
         assert!(
             h.graph_ui.gestures.node_menu.in_flight(),
             "the menu latched"
@@ -476,17 +468,14 @@ mod tests {
 
         let (mut h, _) = fresh();
         let intents = click(&mut h, BARE, PointerButton::Left);
-        assert_eq!(h.outcome, InputOutcome::Handled, "bare canvas's click");
         assert!(intents.is_empty(), "nothing selected, nothing to clear");
 
         let (mut h, _) = fresh();
         click(&mut h, BARE, PointerButton::Right);
-        assert_eq!(h.outcome, InputOutcome::Record, "the palette's right click");
         assert!(h.graph_ui.gestures.new_node_ui.in_flight());
 
         let (mut h, node) = fresh();
         click(&mut h, wid::rename(node), PointerButton::Left);
-        assert_eq!(h.outcome, InputOutcome::Record, "a title's click");
 
         let (mut h, node) = fresh();
         h.ui.press(wid::body(node), PointerButton::Left);
@@ -494,7 +483,6 @@ mod tests {
         h.ui.release(PointerButton::Left);
         h.ui.key(shortcuts::DELETE);
         h.frame();
-        assert_eq!(h.outcome, InputOutcome::Record, "a key beside the click");
 
         // The press would end a floating wire, so the wire floats from past the press.
         let (mut h, node) = fresh();
@@ -505,11 +493,6 @@ mod tests {
         graph_ui.gestures.wire_ui.resume(start, ctx.graph_ctx());
         h.ui.release(PointerButton::Left);
         h.frame();
-        assert_eq!(
-            h.outcome,
-            InputOutcome::Record,
-            "a click in a floating wire"
-        );
 
         let (mut h, node) = fresh();
         let from = h.node_center(node);
@@ -517,25 +500,20 @@ mod tests {
         h.frame();
         h.ui.drag_to(from + Vec2::new(40.0, 0.0));
         h.frame();
-        assert_eq!(h.outcome, InputOutcome::Handled, "a node drag's latch");
         h.ui.release(PointerButton::Left);
         h.frame();
-        assert_eq!(h.outcome, InputOutcome::Handled, "a node drag's stop");
 
         let (mut h, _) = fresh();
         h.ui.press(BARE, PointerButton::Left);
         h.frame();
         h.ui.drag_to(BARE + Vec2::new(40.0, 0.0));
         h.frame();
-        assert_eq!(h.outcome, InputOutcome::Handled, "a band's latch");
         h.ui.release(PointerButton::Left);
         h.frame();
-        assert_eq!(h.outcome, InputOutcome::Handled, "a band's stop");
 
         let (mut h, node) = fresh();
         click(&mut h, wid::body(node), PointerButton::Right);
         click(&mut h, BARE, PointerButton::Left);
-        assert_eq!(h.outcome, InputOutcome::Record, "a click past an open menu");
         assert!(
             !h.graph_ui.gestures.node_menu.in_flight(),
             "the menu closed"
@@ -559,11 +537,7 @@ mod tests {
             let mut out = Requests::default();
             let ui = h.ui.ui_mut();
             let ctx = h.ctx.graph_ctx_on(ui.display());
-            h.graph_ui.settle(&mut InputStage {
-                update: &mut ui.update_ctx(),
-                ctx,
-                out: &mut out,
-            });
+            h.graph_ui.settle(ui, &mut Stage { ctx, out: &mut out });
             assert!(!out.owes_relayout());
             out
         };
