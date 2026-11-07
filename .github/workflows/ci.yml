@@ -43,12 +43,12 @@ jobs:
           # HTTPS, as no ssh-key is given.
           submodules: true
       # libclang for LibRaw's bindgen, OpenSSL for the ONNX Runtime download of `ort-sys`.
-      - uses: xorza/rust-ci/setup@9629682b748c30f471b2904c9c85a520765cb542 # master
+      - uses: xorza/rust-ci/setup@5c6e2c57d2c89c894225a4fd2ac61e9129e9e32b # v1
         with:
           apt-packages: libclang-dev libssl-dev pkg-config
       # So imaginarium's GPU tests run on a runner with no GPU instead of skipping.
-      - uses: xorza/rust-ci/lavapipe@9629682b748c30f471b2904c9c85a520765cb542 # master
-      - uses: xorza/rust-ci/crash-capture@9629682b748c30f471b2904c9c85a520765cb542 # master
+      - uses: xorza/rust-ci/lavapipe@5c6e2c57d2c89c894225a4fd2ac61e9129e9e32b # v1
+      - uses: xorza/rust-ci/crash-capture@5c6e2c57d2c89c894225a4fd2ac61e9129e9e32b # v1
       # The gate of AGENTS.md, one step per command. Each runs past an earlier failure, so one run
       # reports every lane. palantir and fits-well are built here as dependencies alone: each
       # repository's own CI runs its lanes. `--locked` goes before the alias, as an alias's own
@@ -65,12 +65,12 @@ jobs:
       # The build apart from the run, so each shows its own time.
       - if: ${{ !cancelled() }}
         run: cargo --locked gate-test --no-run
-      - uses: xorza/rust-ci/test@9629682b748c30f471b2904c9c85a520765cb542 # master
+      - uses: xorza/rust-ci/test@5c6e2c57d2c89c894225a4fd2ac61e9129e9e32b # v1
         if: ${{ !cancelled() }}
         timeout-minutes: 45
         with:
           command: cargo --locked gate-test
-      - uses: xorza/rust-ci/failure-report@9629682b748c30f471b2904c9c85a520765cb542 # master
+      - uses: xorza/rust-ci/failure-report@5c6e2c57d2c89c894225a4fd2ac61e9129e9e32b # v1
         if: failure()
         with:
           paths: test_output/**
@@ -83,4 +83,4 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: xorza/rust-ci/workflow-check@9629682b748c30f471b2904c9c85a520765cb542 # master
+      - uses: xorza/rust-ci/workflow-check@5c6e2c57d2c89c894225a4fd2ac61e9129e9e32b # v1

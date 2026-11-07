@@ -73,6 +73,11 @@ builds it, and Claude Code starts it, `darkroom --mcp --headless`, from
 `darkroom_shot {}`. A project opens in place, so leave out `copy` only to edit the
 file itself.
 
+CI runs on [`xorza/rust-ci`](https://github.com/xorza/rust-ci), as `palantir` and `fits-well` do: the same lane on
+every OS, and a failure that names its crashes and failed tests. Its README holds the decisions the
+three share. `rust-toolchain.toml` pins the compiler, so rustup installs that version on the first
+use in each of the three folders.
+
 ## Test code
 
 `internals` is the one feature for what only tests and benches build. A crate
