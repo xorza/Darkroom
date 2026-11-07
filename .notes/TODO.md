@@ -3,6 +3,7 @@
 - visual node groups
 - subgraphs
 - canvas dot grid shimmers as the camera pans
+-
 - upload images again after a GPU device recovery (`Ui::device_restored`), see `ISSUES.md`
 - move the macOS `application:openURLs:` hook (`darkroom/src/platform/macos/open_files.rs`) into palantir's winit host as `App::open_files` once palantir moves past winit 0.30 and its `objc2-app-kit` 0.2
 - A/B `integration/image_ops` `ghs` and `hdr` in tree, `6a863ac54` against `f2e6bfdc9`, the commit before libm: a scratch replica of the per-pixel curves read `GhsCurve::eval` (`libm_ln_1p`, `libm_exp_m1`) ×1.36 to ×1.57 by `b`, hdr's `exp` ×1.30 and its `ln` ×0.57, and no bench of the real ops has run. A lumos bench build peaks at 2.3 GiB with `CARGO_BUILD_JOBS=4`
