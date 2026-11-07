@@ -108,8 +108,8 @@ pub(crate) enum DetailParam {
 #[schemars(crate = "rmcp::schemars")]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ActionParam {
-    /// Move the pointer there, as a hover.
-    Move(LocatorParam),
+    /// Move the pointer there.
+    Hover(LocatorParam),
     /// Press and release a button there.
     Click {
         at: LocatorParam,
@@ -247,7 +247,7 @@ impl TryFrom<ActionParam> for Action {
     fn try_from(action: ActionParam) -> Result<Self, DriverError> {
         let play = |action: Play| Ok(Self::Play(action));
         match action {
-            ActionParam::Move(at) => play(Play::Move(at.into())),
+            ActionParam::Hover(at) => play(Play::Hover(at.into())),
             ActionParam::Click { at, button, mods } => play(Play::Click {
                 at: at.into(),
                 button: button.into(),

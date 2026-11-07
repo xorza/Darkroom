@@ -176,7 +176,7 @@ async fn an_opened_project_is_driven_through_the_tools() {
         &client,
         "darkroom_act",
         json!({ "actions": [
-            { "move": { "screen": [10.0, 10.0] } },
+            { "hover": { "screen": [10.0, 10.0] } },
             { "click": { "at": { "node": BRIGHTNESS } } },
         ] }),
     )
@@ -242,7 +242,7 @@ async fn an_opened_project_is_driven_through_the_tools() {
     let acted = call(
         &client,
         "darkroom_act",
-        json!({ "actions": [{ "move": { "screen": [10.0, 10.0] } }], "shot": {} }),
+        json!({ "actions": [{ "hover": { "screen": [10.0, 10.0] } }], "shot": {} }),
     )
     .await
     .unwrap();

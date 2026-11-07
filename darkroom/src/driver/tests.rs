@@ -784,7 +784,7 @@ fn the_sample_project_runs_to_its_previews() {
     driver
         .act(&[
             key("ctrl+r"),
-            Action::Play(Play::Move(Locator::Point(Vec2::ZERO))),
+            Action::Play(Play::Hover(Locator::Point(Vec2::ZERO))),
         ])
         .unwrap();
     driver.wait_run(Duration::from_secs(30)).unwrap();
@@ -921,7 +921,7 @@ fn a_prompt_raised_with_no_press_closes_the_open_menu() {
         .offscreen()
         .with_app(|app, _| app.open_document_at(handed));
     driver
-        .act(&[Action::Play(Play::Move(Locator::Point(Vec2::new(
+        .act(&[Action::Play(Play::Hover(Locator::Point(Vec2::new(
             1200.0, 900.0,
         ))))])
         .unwrap();
