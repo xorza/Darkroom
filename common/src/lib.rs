@@ -31,7 +31,7 @@
 //!   another; [`PerWorker`] is the scratch such a body takes.
 //!
 //! [`ErrorChain`] is how every report prints an error: the error and each cause under it.
-//! [`Id`], [`FloatExt`] and [`is_debug`] stand on their own, as do [`Buffer2`], the row-major 2D
+//! [`Id`], [`FloatExt`], [`Libm`] and [`is_debug`] stand on their own, as do [`Buffer2`], the row-major 2D
 //! grid, and its geometry: [`USize2`] and [`USizeRect2`], with points as `glam`'s `USizeVec2`.
 //! `glam` is re-exported whole, as those signatures name its types.
 //! `TempFile` and the `internals` module are test scaffolding, gated behind
@@ -72,6 +72,7 @@ mod error_chain;
 mod float_ext;
 mod id;
 mod introspect;
+mod libm_ext;
 mod mutex_ext;
 #[expect(unsafe_code, reason = "memory maps and the OS calls behind them")]
 mod platform;
@@ -92,6 +93,7 @@ pub use id::Id;
 pub use internals::temp_file::TempFile;
 #[cfg(feature = "internals")]
 pub use internals::unreadable::Unreadable;
+pub use libm_ext::{Libm, LibmVec2};
 pub use platform::{
     Eviction, FileSystem, MappedFile, ResidentMemory, ScratchFile, SystemMemory, UserCache,
 };

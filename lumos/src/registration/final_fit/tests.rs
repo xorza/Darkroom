@@ -1,3 +1,4 @@
+use common::Libm;
 use common::par;
 use glam::DVec2;
 use rayon::prelude::*;
@@ -152,13 +153,13 @@ fn cauchy_variance_ratio() -> f64 {
     let (mut w2r2, mut w, mut rw_prime) = (0.0, 0.0, 0.0);
     for i in 0..steps {
         let r = (f64::from(i) + 0.5) * h;
-        let density = r * (-r * r / 2.0).exp() * h;
+        let density = r * (-r * r / 2.0).libm_exp() * h;
         let weight = 1.0 / (1.0 + r * r / c2);
         w2r2 += weight * weight * r * r * density;
         w += weight * density;
         rw_prime += r * (-2.0 * r / c2) * weight * weight * density;
     }
-    (w2r2 / 2.0) / (w + rw_prime / 2.0).powi(2)
+    (w2r2 / 2.0) / (w + rw_prime / 2.0).libm_powi(2)
 }
 
 /// The fit is as precise as the stars allow. 2000 stars under a similarity, each with its own
@@ -183,13 +184,13 @@ fn the_fit_reaches_the_cramer_rao_bound() {
     let truth = Transform::similarity(shift, angle, scale);
     let parameters = |transform: &Transform| {
         let m = transform.matrix();
-        let scale = m[0].hypot(m[3]);
-        [m[2], m[5], m[3].atan2(m[0]), scale]
+        let scale = m[0].libm_hypot(m[3]);
+        [m[2], m[5], m[3].libm_atan2(m[0]), scale]
     };
 
     // The Fisher information of (tx, ty, θ, s) for t = s·R(θ)·r + (tx, ty).
     let mut information = [[0.0f64; 4]; 4];
-    let (sin, cos) = angle.sin_cos();
+    let (sin, cos) = angle.libm_sin_cos();
     for (&r, &sigma) in poss.iter().zip(&sigmas) {
         let weight = 1.0 / ((scale * scale + 1.0) * sigma * sigma);
         let rotated = DVec2::new(cos * r.x - sin * r.y, sin * r.x + cos * r.y);
@@ -244,7 +245,7 @@ fn the_fit_reaches_the_cramer_rao_bound() {
     for (k, name) in ["tx", "ty", "θ", "s"].iter().enumerate() {
         let variance = fits
             .iter()
-            .map(|fit| (fit[k] - truth_parameters[k]).powi(2))
+            .map(|fit| (fit[k] - truth_parameters[k]).libm_powi(2))
             .sum::<f64>()
             / DRAWS as f64;
         let expected = ratio * bound[(k, k)];

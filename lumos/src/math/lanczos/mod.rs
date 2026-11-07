@@ -2,6 +2,7 @@
 
 pub(crate) mod lanczos_lut;
 
+use common::Libm;
 use std::f64::consts::PI;
 
 /// `sinc(πx) · sinc(πx/a)` — the Lanczos kernel of half-width `a`, zero beyond it — in f64,
@@ -30,7 +31,7 @@ pub(crate) fn kernel(x: f32, a: f32) -> f32 {
 /// come out exact, and the one rounded product `π·r` is of an `|r| ≤ ½`.
 fn sin_pi(t: f64) -> f64 {
     let whole = t.round();
-    let sine = (PI * (t - whole)).sin();
+    let sine = (PI * (t - whole)).libm_sin();
     if whole % 2.0 == 0.0 { sine } else { -sine }
 }
 

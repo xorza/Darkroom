@@ -2,6 +2,7 @@
 //! size of the band and its head; a selected one records its knob too. A hover lights the tie's
 //! wires, a press selects it and starts the group drag, and the knob's drag turns the band.
 
+use common::Libm;
 use std::rc::Rc;
 
 use glam::Vec2;
@@ -226,7 +227,7 @@ pub(crate) fn grab(graph_ctx: GraphCtx<'_>, tie: TieId) -> GrabStart {
 /// `+y`, in `[0, 360)`: the pointer's own angle, or with [`AngleSnap::Steps`] the nearest
 /// [`SNAP_DEGREES`] step.
 pub(crate) fn knob_angle(offset: Vec2, snap: AngleSnap) -> f32 {
-    let degrees = offset.y.atan2(offset.x).to_degrees();
+    let degrees = offset.y.libm_atan2(offset.x).to_degrees();
     let degrees = match snap {
         AngleSnap::Free => degrees,
         AngleSnap::Steps => (degrees / SNAP_DEGREES).round() * SNAP_DEGREES,

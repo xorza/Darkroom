@@ -11,6 +11,7 @@
 //! end a run whose samples never left the top quarter, and a larger consensus among the other pairs
 //! would never be drawn.
 
+use common::Libm;
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 
@@ -52,7 +53,10 @@ impl Sampler {
             sample_size,
             phase_len: guided_phase_iterations(sample_size, config),
             by_confidence,
-            weights: confidences.iter().map(|&c| (c + 0.1).powi(2)).collect(),
+            weights: confidences
+                .iter()
+                .map(|&c| (c + 0.1).libm_powi(2))
+                .collect(),
             shuffle: Vec::new(),
             keys: Vec::new(),
         }
@@ -94,7 +98,7 @@ impl Sampler {
         self.keys.clear();
         self.keys.extend(pool.iter().map(|&idx| {
             let u: f64 = self.rng.random();
-            (idx, u.powf(1.0 / self.weights[idx]))
+            (idx, u.libm_powf(1.0 / self.weights[idx]))
         }));
         self.keys
             .select_nth_unstable_by(k - 1, |a, b| b.1.total_cmp(&a.1));
@@ -155,16 +159,16 @@ pub(super) fn adaptive_iterations(
         return 1;
     }
 
-    let w_n =
-        inlier_ratio.powi(i32::try_from(sample_size).expect("a minimal sample is a few points"));
+    let w_n = inlier_ratio
+        .libm_powi(i32::try_from(sample_size).expect("a minimal sample is a few points"));
     if w_n >= 1.0 {
         return 1;
     }
 
     // `w_n ∈ (0, 1)` is guaranteed by the guards above, so `1 - w_n ∈ (0, 1)` and
     // `log_outlier < 0` — both logs are finite and negative, giving a positive count.
-    let log_conf = (1.0 - confidence).ln();
-    let log_outlier = (1.0 - w_n).ln();
+    let log_conf = (1.0 - confidence).libm_ln();
+    let log_outlier = (1.0 - w_n).libm_ln();
 
     ((log_conf / log_outlier).ceil() as usize).clamp(1, max_iterations)
 }

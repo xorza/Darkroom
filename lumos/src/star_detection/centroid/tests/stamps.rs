@@ -37,14 +37,15 @@ fn sigma_seed_is_the_truncated_second_moment() {
         let sum: f64 = arms.clone().map(g).sum();
         let second: f64 = arms.map(|i| f64::from(i * i) * g(i)).sum();
         let expected = (second / sum).sqrt();
-        let rounding = 441.0 * f64::from(f32::EPSILON) * 100.0 / sum.powi(2) / (2.0 * expected);
+        let rounding =
+            441.0 * f64::from(f32::EPSILON) * 100.0 / sum.libm_powi(2) / (2.0 * expected);
         let seed = fit.sigma_est;
         assert!(
             (seed - expected).abs() <= rounding,
             "σ {sigma}: seed {seed}, expected {expected} ± {rounding}"
         );
         assert!(
-            expected < (f64::from(sigma).powi(2) + 1.0 / 12.0).sqrt(),
+            expected < (f64::from(sigma).libm_powi(2) + 1.0 / 12.0).sqrt(),
             "σ {sigma}: truncation under-reports the sampled width"
         );
     }
@@ -235,7 +236,7 @@ fn the_annulus_reads_the_sky_around_the_star() {
     let mut residual = Buffer2::new_filled(size, 0.25f32);
     for y in 104..137 {
         for x in 104..137 {
-            if (x as f64 - 120.0).hypot(y as f64 - 120.0) < 16.0 {
+            if (x as f64 - 120.0).libm_hypot(y as f64 - 120.0) < 16.0 {
                 residual[(x, y)] = 9.0;
             }
         }

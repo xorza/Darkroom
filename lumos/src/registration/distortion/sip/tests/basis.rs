@@ -10,7 +10,7 @@ fn basis_is_every_term_at_the_point() {
     let mut basis = [0.0; MAX_TERMS];
     evaluate_basis(DVec2::new(-2.0, 3.0), terms, &mut basis[..terms.len()]);
     for (&(p, q), &value) in terms.iter().zip(&basis) {
-        let expected = (-2.0f64).powi(p as i32) * 3.0f64.powi(q as i32);
+        let expected = (-2.0f64).libm_powi(p as i32) * 3.0f64.libm_powi(q as i32);
         assert_eq!(value, expected, "u^{p}·v^{q}");
     }
     assert_eq!(

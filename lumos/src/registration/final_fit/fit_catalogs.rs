@@ -1,6 +1,7 @@
 //! [`FitCatalogs`]: the catalogs as the final fit reads them, and the passes that fit a model
 //! over them.
 
+use common::Libm;
 use glam::DVec2;
 
 use crate::math::statistics;
@@ -188,7 +189,8 @@ impl FitCatalogs {
 
             pairs.clear();
             for candidate in &candidates {
-                let robust = 1.0 / (1.0 + (candidate.normalized / (CAUCHY_TUNING * scale)).powi(2));
+                let robust =
+                    1.0 / (1.0 + (candidate.normalized / (CAUCHY_TUNING * scale)).libm_powi(2));
                 pairs.push(
                     self.reference[candidate.idxs.reference],
                     self.target[candidate.idxs.target],

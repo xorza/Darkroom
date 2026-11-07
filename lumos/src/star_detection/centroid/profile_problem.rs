@@ -131,6 +131,7 @@ impl<M: LmModel<N>, const N: usize> LmProblem<N> for ProfileProblem<'_, M> {
 pub(crate) mod internals {
     use crate::math::lm_controller::NormalEquations;
     use crate::star_detection::centroid::profile_problem::{FitData, LmModel};
+    use common::Libm;
 
     impl<'a> FitData<'a> {
         pub(crate) const fn unweighted(x: &'a [f64], y: &'a [f64], z: &'a [f64]) -> Self {
@@ -348,7 +349,7 @@ pub(crate) mod internals {
         for &(x, y) in points {
             let ModelSample { value, jacobian } = model.evaluate_and_jacobian(x, y, params);
             for i in 0..N {
-                let h = f64::EPSILON.cbrt() * params[i].abs().max(1.0);
+                let h = f64::EPSILON.libm_cbrt() * params[i].abs().max(1.0);
                 let (mut up, mut down) = (*params, *params);
                 up[i] += h;
                 down[i] -= h;

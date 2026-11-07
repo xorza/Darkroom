@@ -1,5 +1,6 @@
 //! [`NormFit`]: a set's norms fitted against its reference frame.
 
+use common::Libm;
 use std::borrow::Cow;
 
 use arrayvec::ArrayVec;
@@ -209,7 +210,7 @@ impl NormFit<'_> {
                             slot,
                         )?;
                         let relative =
-                            |variance: f64, median: f32| variance / f64::from(median).powi(2);
+                            |variance: f64, median: f32| variance / f64::from(median).libm_powi(2);
                         Ok(Some(SlotEstimate {
                             norm,
                             relative_error: MEDIAN_ERROR
@@ -273,7 +274,7 @@ impl NormFit<'_> {
             let spread = spread(idx, slot)
                 .expect("a frame gathered per channel was measured with its spread");
             let noise = stats.slot_noise(slot);
-            let signal = f64::from(spread.sigma).powi(2) - f64::from(noise).powi(2);
+            let signal = f64::from(spread.sigma).libm_powi(2) - f64::from(noise).libm_powi(2);
             if signal > SIGNAL_SIGNIFICANCE * spread_variance_error(spread, noise) {
                 Ok(MeasuredScale {
                     scale: signal.sqrt(),
@@ -316,7 +317,7 @@ impl NormFit<'_> {
                                     },
                                     relative_error: ours
                                         .relative_error
-                                        .hypot(theirs.relative_error),
+                                        .libm_hypot(theirs.relative_error),
                                 })
                             }
                             Fitted::Multiplicative => Ok(SlotEstimate {
@@ -326,7 +327,7 @@ impl NormFit<'_> {
                                     slot,
                                 )?,
                                 relative_error: median_error(idx, slot)
-                                    .hypot(median_error(reference, slot)),
+                                    .libm_hypot(median_error(reference, slot)),
                             }),
                         }
                     })
@@ -541,8 +542,8 @@ fn squared_spreads_error(spread_sigma: f32, spread: SlotSpread, noise: f32) -> f
     let spread_samples = spread.samples.max(1) as f64;
     let noise_samples = spread.samples.clamp(1, MAX_STATISTIC_SAMPLES) as f64;
     (4.0 * MAD_SIGMA_VARIANCE
-        * (f64::from(spread_sigma).powi(4) / spread_samples
-            + f64::from(noise).powi(4) / noise_samples))
+        * (f64::from(spread_sigma).libm_powi(4) / spread_samples
+            + f64::from(noise).libm_powi(4) / noise_samples))
         .sqrt()
 }
 

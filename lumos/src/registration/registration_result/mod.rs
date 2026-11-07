@@ -4,6 +4,7 @@ use crate::registration::distortion::sip::SipPolynomial;
 use crate::registration::match_idxs::MatchIdxs;
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
+use common::Libm;
 
 /// RMS error decay scale: `quality_error = exp(-rms / SCALE)`. At rms=2.0, factor ≈ 0.37.
 const QUALITY_ERROR_SCALE: f64 = 2.0;
@@ -79,7 +80,7 @@ impl RegistrationResult {
     /// Registration quality score from `0.0` to `1.0`: `exp(−rms / 2)` times the inlier count's
     /// share of 20. A result exists only above `min_matches` inliers, so no floor is needed here.
     pub fn quality_score(&self) -> f64 {
-        let error_factor = (-self.rms_error / QUALITY_ERROR_SCALE).exp();
+        let error_factor = (-self.rms_error / QUALITY_ERROR_SCALE).libm_exp();
         let count_factor = (self.inlier_count() as f64 / QUALITY_INLIER_SATURATION).min(1.0);
         error_factor * count_factor
     }

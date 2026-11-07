@@ -1,5 +1,6 @@
 //! [`StarField`]: one field of stars, exposed at a dither and written as FITS.
 
+use common::Libm;
 use std::f32::consts::{LN_2, TAU};
 use std::path::{Path, PathBuf};
 
@@ -124,14 +125,15 @@ impl StarField {
                     let distance = offset[0] * offset[0] + offset[1] * offset[1];
                     let [col, row] = pixel
                         .map(|at| usize::try_from(at).expect("the stars keep clear of the edges"));
-                    pixels[row * side + col] += peak * (-distance / (2.0 * sigma * sigma)).exp();
+                    pixels[row * side + col] +=
+                        peak * (-distance / (2.0 * sigma * sigma)).libm_exp();
                 }
             }
         }
         for sample in &mut pixels {
             // Box–Muller.
             let (u, v) = (1.0 - rng.random::<f32>(), rng.random::<f32>());
-            *sample += NOISE * (-2.0 * u.ln()).sqrt() * (TAU * v).cos();
+            *sample += NOISE * (-2.0 * u.libm_ln()).sqrt() * (TAU * v).libm_cos();
         }
         pixels
     }

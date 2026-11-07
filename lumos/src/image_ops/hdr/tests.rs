@@ -1,3 +1,4 @@
+use common::Libm;
 use std::mem;
 
 use common::Buffer2;
@@ -26,7 +27,7 @@ fn dome(size: USize2) -> Vec<f32> {
             let p = size.point_of(i);
             let (x, y) = (p.x as f32, p.y as f32);
             let r2 = (x - cx) * (x - cx) + (y - cy) * (y - cy);
-            0.1 + 0.9 * (-r2 / (2.0 * sigma * sigma)).exp()
+            0.1 + 0.9 * (-r2 / (2.0 * sigma * sigma)).libm_exp()
         })
         .collect()
 }
@@ -148,7 +149,7 @@ fn linear_hdr(px: &Buffer2<f32>, scales: usize, amount: f32) -> Vec<f32> {
 /// algebraically. Every input here is above the log floor.
 fn reference_hdr(px: &Buffer2<f32>, scales: usize, amount: f32) -> Vec<f32> {
     let size = px.size();
-    let mut c_cur = Buffer2::new(size, px.iter().map(|v| v.ln()).collect());
+    let mut c_cur = Buffer2::new(size, px.iter().map(|v| v.libm_ln()).collect());
     let mut c_next = Buffer2::new_default(size);
     let mut layers: Vec<Vec<f32>> = Vec::new();
     for j in 0..scales {
@@ -170,7 +171,7 @@ fn reference_hdr(px: &Buffer2<f32>, scales: usize, amount: f32) -> Vec<f32> {
         .map(|i| {
             let flattened = mean + keep * (residual[i] - mean);
             let details: f32 = layers.iter().map(|l| l[i]).sum();
-            (flattened + details).exp().clamp(0.0, 1.0)
+            (flattened + details).libm_exp().clamp(0.0, 1.0)
         })
         .collect()
 }
@@ -332,9 +333,9 @@ fn near_black_pixels_keep_their_ratio() {
         control[bright] / control[dim] < 1.5,
         "the control: subtraction lifts both alike"
     );
-    let logs = Buffer2::new(size, px.iter().map(|v| v.ln()).collect());
+    let logs = Buffer2::new(size, px.iter().map(|v| v.libm_ln()).collect());
     let base = residual(&logs, scales);
-    let expected = (px[bright] / px[dim]) * (-amount * (base[bright] - base[dim])).exp();
+    let expected = (px[bright] / px[dim]) * (-amount * (base[bright] - base[dim])).libm_exp();
     let mut img = rgb_image(size, [px.clone(), px.clone(), px]);
     Hdr { scales, amount }.apply(&mut img).unwrap();
     let out = img.channel(0).pixels();

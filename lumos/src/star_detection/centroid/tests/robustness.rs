@@ -59,8 +59,8 @@ fn the_windowed_centre_is_pulled_toward_a_companion_as_derived() {
         let d = f64::from(distance);
         let ratio = f64::from(amplitude) / 0.8;
         let excess = |p: f64| {
-            let primary = (-p * p / spread).exp();
-            let companion = ratio * (-(d - p) * (d - p) / spread).exp();
+            let primary = (-p * p / spread).libm_exp();
+            let companion = ratio * (-(d - p) * (d - p) / spread).libm_exp();
             p * (primary + companion) - companion * d
         };
         let (mut low, mut high) = (0.0, d / 2.0);

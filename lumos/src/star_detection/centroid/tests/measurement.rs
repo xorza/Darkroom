@@ -180,9 +180,9 @@ fn the_windowed_centroid_reports_its_propagated_noise() {
     let (mut spread, mut light) = (0.0f64, 0.0f64);
     for dy in -r..=r {
         for dx in -r..=r {
-            let w = (-((dx * dx + dy * dy) as f64) / (2.0 * window2)).exp();
+            let w = (-((dx * dx + dy * dy) as f64) / (2.0 * window2)).libm_exp();
             let value = f64::from(clean[((32 + dx) as usize, (32 + dy) as usize)] - 0.1);
-            spread += (w * dx as f64).powi(2);
+            spread += (w * dx as f64).libm_powi(2);
             light += w * value;
         }
     }

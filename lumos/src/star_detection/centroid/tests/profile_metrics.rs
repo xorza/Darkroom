@@ -141,7 +141,10 @@ fn windowed_covariance_deconvolves_to_the_source() {
             profile.shape_at(dx, dy) as f32
         });
         let measured = Measured::flat(&pixels, 0.0, 1.0);
-        let (xx, yy) = (f64::from(sigma_x).powi(2), f64::from(sigma_y).powi(2));
+        let (xx, yy) = (
+            f64::from(sigma_x).libm_powi(2),
+            f64::from(sigma_y).libm_powi(2),
+        );
         for seed in [1.0, f64::midpoint(xx, yy), 4.0 * xx.max(yy)] {
             let cov = Cov2::windowed(
                 StampAt {
@@ -222,14 +225,14 @@ fn windowed_covariance_holds_wing_noise_to_its_propagated_scatter() {
     patterns::add_gaussian_noise(pixels.pixels_mut(), NOISE, 12345);
     let measured = Measured::flat(&pixels, 0.1, NOISE);
 
-    let sigma_sq = f64::from(sigma).powi(2);
+    let sigma_sq = f64::from(sigma).libm_powi(2);
     let mut spread = 0.0;
     let mut weighted_signal = 0.0;
     let arms = -(radius as i32)..=radius as i32;
     for dy in arms.clone() {
         for dx in arms.clone() {
-            let weight = (-f64::from(dx * dx + dy * dy) / (2.0 * sigma_sq)).exp();
-            spread += (weight * f64::from(dy * dy - dx * dx)).powi(2);
+            let weight = (-f64::from(dx * dx + dy * dy) / (2.0 * sigma_sq)).libm_exp();
+            spread += (weight * f64::from(dy * dy - dx * dx)).libm_powi(2);
             weighted_signal += weight * weight;
         }
     }

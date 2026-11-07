@@ -2,6 +2,7 @@
 //! frame.
 
 use crate::star_detection::star::Star;
+use common::Libm;
 
 /// The duplicate search, with its working sets kept from frame to frame: each star's cell beside
 /// its index, and which stars it keeps.
@@ -49,7 +50,7 @@ impl Duplicates {
         if stars.len() < 2 || min_separation == 0.0 {
             return 0;
         }
-        let min_sep_sq = f64::from(min_separation).powi(2);
+        let min_sep_sq = f64::from(min_separation).libm_powi(2);
         // A cell at least the separation wide is all the search needs; one pixel at the least keeps
         // a frame's coordinates over the cell side within an `i64`, where a separation of 1e-30
         // would carry them past it.

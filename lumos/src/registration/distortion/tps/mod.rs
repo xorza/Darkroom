@@ -19,6 +19,7 @@
 
 mod distortion_map;
 
+use common::Libm;
 use glam::DVec2;
 use nalgebra::{DMatrix, DVector};
 
@@ -244,7 +245,7 @@ fn compute_normalization(points: &[DVec2]) -> PointNormalization {
 /// For r = 0, we define U(0) = 0 (the limit as r → 0).
 #[inline]
 fn tps_kernel(r: f64) -> f64 {
-    if r < 1e-10 { 0.0 } else { r * r * r.ln() }
+    if r < 1e-10 { 0.0 } else { r * r * r.libm_ln() }
 }
 
 #[cfg(test)]

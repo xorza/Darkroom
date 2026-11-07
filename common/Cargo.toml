@@ -17,6 +17,7 @@ introspect-derive = ["dep:common-derive"]
 common-derive = { workspace = true, optional = true }
 criterion = { workspace = true, optional = true, features = ["cargo_bench_support"] }
 glam = { workspace = true, features = ["serde", "std", "usize"] }
+libm = { workspace = true }
 memmap2 = { workspace = true }
 notify = { workspace = true, features = ["macos_fsevent"] }
 rayon = { workspace = true }

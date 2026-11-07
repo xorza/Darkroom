@@ -1,6 +1,7 @@
 //! One Levenberg–Marquardt fit of a star's stamp, from a start a pixel and a third of its width
 //! off.
 
+use common::Libm;
 use std::hint::black_box;
 
 use common::bench::{Kind, Scale};
@@ -52,7 +53,7 @@ impl Stamp {
         let (dx, dy) = ((idx % STAMP) as f64 - cx, (idx / STAMP) as f64 - cy);
         let r2 = dx * dx + dy * dy;
         let s2 = sigma * sigma;
-        let profile = (-r2 / (2.0 * s2)).exp();
+        let profile = (-r2 / (2.0 * s2)).libm_exp();
         let peak = amplitude * profile;
         Terms {
             model: peak + bg,
@@ -99,7 +100,7 @@ impl LmProblem<5> for Stamp {
         self.pixels
             .iter()
             .enumerate()
-            .map(|(idx, &pixel)| (pixel - Self::terms(params, idx).model).powi(2))
+            .map(|(idx, &pixel)| (pixel - Self::terms(params, idx).model).libm_powi(2))
             .sum()
     }
 

@@ -1,3 +1,4 @@
+use common::Libm;
 use std::f64::consts::LN_2;
 
 use crate::math::fwhm;
@@ -34,7 +35,7 @@ fn fwhm_sigma_conversion_roundtrip() {
 fn alpha_beta_fwhm_conversion() {
     assert_eq!(fwhm::per_alpha(1.0), 2.0);
     for (alpha, beta) in [(2.0, 2.5), (1.0, 1.5), (3.0, 4.0), (6.0, 6.0)] {
-        let exact = 2.0 * alpha * (2f64.powf(1.0 / beta) - 1.0).sqrt();
+        let exact = 2.0 * alpha * (2f64.libm_powf(1.0 / beta) - 1.0).sqrt();
         let fwhm = fwhm::from_alpha_beta(alpha, beta);
         assert!(
             (fwhm - exact).abs() <= 4.0 * f64::EPSILON * exact,

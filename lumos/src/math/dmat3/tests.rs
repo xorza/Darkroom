@@ -71,8 +71,8 @@ fn determinant_hand_computed() {
 /// - `[1 2 3; 0 1 4; 5 6 0]` has det 1, so its inverse is integers and `M·M⁻¹ = I` exactly.
 #[test]
 fn inverse_on_both_sides_of_the_threshold() {
-    let tiny = 2.0f64.powi(-17);
-    let huge = 2.0f64.powi(17);
+    let tiny = 2.0f64.libm_powi(-17);
+    let huge = 2.0f64.libm_powi(17);
     let m = from_rows([1.0, 2.0, 3.0], [0.0, 1.0, 4.0], [5.0, 6.0, 0.0]);
     for (m, inverse) in [
         (DMat3::identity(), DMat3::identity()),

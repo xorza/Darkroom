@@ -15,7 +15,7 @@ fn a_tiny_residual_keeps_its_loss() {
         (loss - 2.5e-21).abs() <= TOL * 2.5e-21,
         "loss(1e-20) = {loss}"
     );
-    assert_eq!(1.0 - (-5e-21f64).exp(), 0.0);
+    assert_eq!(1.0 - (-5e-21f64).libm_exp(), 0.0);
 }
 
 /// `threshold_sq = χ²₀.₉₉(2)·σ²` and `outlier_loss = σ²/2`: exact for σ a power of two.
@@ -37,12 +37,12 @@ fn scorer_loss_hand_values() {
     let one = WelschScorer::new(1.0);
     for (residual_sq, expected) in [
         (0.0, 0.0),
-        (1.0, 0.5 * (1.0 - (-0.5f64).exp())),
+        (1.0, 0.5 * (1.0 - (-0.5f64).libm_exp())),
         (2.0, 0.5 * (1.0 - 1.0 / E)),
-        (4.0, 0.5 * (1.0 - (-2.0f64).exp())),
+        (4.0, 0.5 * (1.0 - (-2.0f64).libm_exp())),
         (
             CHI2_99_2DOF - 0.01,
-            0.5 * (1.0 - (-(CHI2_99_2DOF - 0.01) / 2.0).exp()),
+            0.5 * (1.0 - (-(CHI2_99_2DOF - 0.01) / 2.0).libm_exp()),
         ),
         (CHI2_99_2DOF, 0.495),
         (CHI2_99_2DOF.next_up(), 0.5),
@@ -56,7 +56,7 @@ fn scorer_loss_hand_values() {
     }
     // σ = 2 at the same r² = 2: `x = 2/8`, so `2·(1 − e^{−¼})` = 0.4424 against σ = 1's 0.3161.
     let two = WelschScorer::new(2.0);
-    assert!((two.loss(2.0) - 2.0 * (1.0 - (-0.25f64).exp())).abs() <= TOL);
+    assert!((two.loss(2.0) - 2.0 * (1.0 - (-0.25f64).libm_exp())).abs() <= TOL);
 }
 
 /// The loss never falls as the residual grows.

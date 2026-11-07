@@ -10,6 +10,7 @@
 //! operation, streaming [`crate::math::wavelet::atrous_smooth`] — see [`Hdr::compress`] for why
 //! the layer pyramid is never materialized.
 
+use common::Libm;
 use std::mem;
 
 use common::{Buffer2, Introspect, par};
@@ -89,7 +90,7 @@ impl Hdr {
         let mut c_cur = Buffer2::new(
             size,
             par::into_iter(0..size.pixel_count())
-                .map(|idx| intensity.at(idx).max(LOG_FLOOR).ln())
+                .map(|idx| intensity.at(idx).max(LOG_FLOOR).libm_ln())
                 .collect(),
         );
         let mut c_next = Buffer2::new_default(size);
@@ -113,7 +114,7 @@ impl Hdr {
             .for_each(|(block, residual)| {
                 let start = block * SAMPLES_PER_BLOCK;
                 for (idx, r) in (start..).zip(residual) {
-                    *r = intensity.at(idx) * (-amount * (*r - mean)).exp();
+                    *r = intensity.at(idx) * (-amount * (*r - mean)).libm_exp();
                 }
             });
         residual

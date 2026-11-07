@@ -6,6 +6,7 @@
 //! frame; a lumos stage runs backward and is graded against this truth.
 
 use common::Buffer2;
+use common::Libm;
 
 use crate::internals::synthetic::bgs::{Gradient, NebulaConfig, Vignette, add_uniform_bg};
 use crate::internals::test_rng::TestRng;
@@ -59,13 +60,13 @@ impl LogUniformFlux {
         let (min, max) = range;
         assert!(min > 0.0 && max >= min, "invalid flux range");
         Self {
-            log_min: min.ln(),
-            log_max: max.ln(),
+            log_min: min.libm_ln(),
+            log_max: max.libm_ln(),
         }
     }
 
     fn sample(self, rng: &mut TestRng) -> f32 {
-        (self.log_min + rng.next_f32() * (self.log_max - self.log_min)).exp()
+        (self.log_min + rng.next_f32() * (self.log_max - self.log_min)).libm_exp()
     }
 }
 

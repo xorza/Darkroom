@@ -332,7 +332,7 @@ fn fast_pow_neg_accuracy_every_strategy() {
         let strategy = select_pow_strategy(beta);
         for &u in &u_values {
             let fast = fast_pow_neg(u, strategy);
-            let reference = u.powf(-beta);
+            let reference = u.libm_powf(-beta);
             let rel_err = ((fast - reference) / reference).abs();
             assert!(
                 rel_err < 1e-14,

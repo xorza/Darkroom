@@ -1,5 +1,7 @@
 //! FWHM conversions of the Gaussian and Moffat profiles.
 
+use common::Libm;
+
 /// The FWHM of a Gaussian per unit of its sigma: `2·√(2·ln 2)`.
 ///
 /// `f64` is the canonical form, and [`FWHM_PER_SIGMA_F32`] is cast from it, so the two precisions
@@ -32,7 +34,7 @@ pub(crate) fn equal_area(det: f64) -> f32 {
 
 /// The FWHM of a Moffat profile of `beta` per unit of its α: `2·√(2^(1/β) − 1)`.
 pub(crate) fn per_alpha(beta: f64) -> f64 {
-    2.0 * (2f64.powf(1.0 / beta) - 1.0).sqrt()
+    2.0 * (2f64.libm_powf(1.0 / beta) - 1.0).sqrt()
 }
 
 /// The FWHM of a Moffat profile, `α·`[`per_alpha`]`(β)`.

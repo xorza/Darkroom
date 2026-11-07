@@ -1,5 +1,6 @@
 //! The inputs the benches measure on: drawn from fixed seeds, so two runs time the same work.
 
+use common::Libm;
 use std::f32::consts::TAU;
 
 use rand::prelude::*;
@@ -11,7 +12,7 @@ pub(crate) fn gaussian(len: usize, seed: u64) -> Vec<f32> {
     (0..len)
         .map(|_| {
             let (u, v) = (1.0 - rng.random::<f32>(), rng.random::<f32>());
-            (-2.0 * u.ln()).sqrt() * (TAU * v).cos()
+            (-2.0 * u.libm_ln()).sqrt() * (TAU * v).libm_cos()
         })
         .collect()
 }

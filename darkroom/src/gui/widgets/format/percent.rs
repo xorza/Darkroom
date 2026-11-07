@@ -1,5 +1,6 @@
 //! [`Percent`]: a zoom factor read as a percentage, formatted on demand.
 
+use common::Libm;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
@@ -31,7 +32,7 @@ fn decimals(percent: f32) -> usize {
         return 0;
     }
     // The decimal exponent of the first significant digit: -1 for 0.4, -2 for 0.04.
-    let magnitude = percent.log10().floor() as i32;
+    let magnitude = percent.libm_log10().floor() as i32;
     // At most six, as an f32 holds about seven significant digits.
     usize::try_from((1 - magnitude).clamp(1, 6)).expect("clamped to 1..=6")
 }

@@ -31,6 +31,7 @@ impl PixelGaussian {
 mod tests {
     use super::*;
     use crate::math::pixel_quadrature::PixelQuadrature;
+    use common::Libm;
 
     /// The closed form against a 16-point quadrature of the profile, which errs under 1e-15 of the
     /// peak at σ 0.5, over the centre and far into the wing at σ 0.5, 1 and 3. Two erfs each 2
@@ -44,7 +45,7 @@ mod tests {
             let gaussian = PixelGaussian { sigma };
             for d in [0.0, 0.3, 0.5, 1.0, 2.5, 4.0 * sigma, 8.0 * sigma] {
                 let quadrature =
-                    rule.integrate(d, 0.0, |t, _| (-t * t / (2.0 * sigma * sigma)).exp());
+                    rule.integrate(d, 0.0, |t, _| (-t * t / (2.0 * sigma * sigma)).libm_exp());
                 let closed = gaussian.mean_at(d);
                 assert!(
                     (closed - quadrature).abs() <= 1e-14 * quadrature + 1e-15,

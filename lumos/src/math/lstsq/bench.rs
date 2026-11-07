@@ -1,6 +1,7 @@
 //! A least-squares design factored and solved at the shapes the crate fits: a cubic distortion
 //! polynomial over matched stars, and a quartic background over sampled tiles.
 
+use common::Libm;
 use std::hint::black_box;
 
 use common::bench::{self, Kind, Scale};
@@ -47,10 +48,10 @@ fn design(points: usize, degree: usize) -> DMatrix<f64> {
         .collect();
     DMatrix::from_fn(points, terms.len(), |row, col| {
         let (x, y) = (
-            f64::from(coordinates[2 * row].tanh()),
-            f64::from(coordinates[2 * row + 1].tanh()),
+            f64::from(coordinates[2 * row].libm_tanh()),
+            f64::from(coordinates[2 * row + 1].libm_tanh()),
         );
         let (i, j) = terms[col];
-        x.powi(i) * y.powi(j)
+        x.libm_powi(i) * y.libm_powi(j)
     })
 }

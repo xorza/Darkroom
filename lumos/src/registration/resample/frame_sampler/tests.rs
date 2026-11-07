@@ -1,4 +1,5 @@
 use common::Buffer2;
+use common::Libm;
 use glam::DVec2;
 use imaginarium::{ChannelLayout, PlanarDesc};
 
@@ -89,7 +90,7 @@ impl Oracle<'_> {
     /// for Lanczos-`a`, `√(2w)` for Catmull-Rom, `w` for the tent.
     fn axis(filter: Filter, stretch: f32, at: AxisPos) -> Vec<(i64, f32)> {
         let AxisPos { cell, frac } = at;
-        let w = 2f64.powi(-27);
+        let w = 2f64.libm_powi(-27);
         let (radius, tolerance) = match filter {
             Filter::Bilinear => (1, w),
             Filter::Bicubic => (2, (2.0 * w).sqrt()),
@@ -286,7 +287,7 @@ impl Oracle<'_> {
                         positive / sums.positive
                     } else {
                         let keep = if ratio > threshold {
-                            1.0 - ((ratio - threshold) / (1.0 - threshold)).powi(2)
+                            1.0 - ((ratio - threshold) / (1.0 - threshold)).libm_powi(2)
                         } else {
                             1.0
                         };
@@ -676,7 +677,7 @@ fn a_bright_pixel_keeps_its_undershoot_within_the_clamp() {
     let light_negative = f64::from(bg) * negative + f64::from(soft_bright - bg) * row[1];
     let ratio = -light_negative / light_positive;
     assert!((ratio - 0.5).abs() < 1e-3, "{ratio}");
-    let keep = 1.0 - ((ratio - 0.3) / 0.7).powi(2);
+    let keep = 1.0 - ((ratio - 0.3) / 0.7).libm_powi(2);
     let expected = (light_positive + keep * light_negative) / (positive + keep * negative);
     let soft = clamped_sample(soft_bright, bg, Some(0.3));
     assert!(
@@ -734,7 +735,7 @@ fn two_adjacent_nulls_fall_back_to_bilinear() {
     let lut = LanczosOrder::Three.lut();
     let entry = |distance: f32| f64::from(lut.at(distance * LANCZOS_LUT_RESOLUTION as f32));
     let magnitude = 2.0 * (entry(0.5) + entry(1.5).abs() + entry(2.5));
-    let expected = 1.0 - 2.0 * entry(0.5).powi(2) / (magnitude * magnitude);
+    let expected = 1.0 - 2.0 * entry(0.5).libm_powi(2) / (magnitude * magnitude);
     assert!(
         (f64::from(coverage[0]) - expected).abs() < 1e-6,
         "{} against {expected}",

@@ -1,3 +1,4 @@
+use common::Libm;
 use glam::Vec2;
 use palantir::{Modifiers, PointerButton};
 use scenarium::{InputPort, OutputPort};
@@ -182,7 +183,7 @@ fn a_line_across_nothing_ties_nothing() {
 /// 52° survives `cos`, `sin` and `atan2` to within `1e-4`, the rounding of three `f32` steps.
 #[test]
 fn the_knob_turns_to_the_pointer_in_free_or_fifteen_degree_steps() {
-    let (sin, cos) = 52f32.to_radians().sin_cos();
+    let (sin, cos) = 52f32.to_radians().libm_sin_cos();
     let at_52 = Vec2::new(cos, sin) * 40.0;
     assert!((knob_angle(at_52, AngleSnap::Free) - 52.0).abs() < 1e-4);
     assert_eq!(knob_angle(at_52, AngleSnap::Steps), 45.0);

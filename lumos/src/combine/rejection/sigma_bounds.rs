@@ -1,5 +1,6 @@
 //! The clip band the sigma-based rejectors share.
 
+use common::Libm;
 use statrs::distribution::{Continuous, ContinuousCDF, Normal};
 
 use crate::config_field::ConfigField;
@@ -44,7 +45,8 @@ impl SigmaBounds {
         let (alpha, beta) = (-f64::from(self.low), f64::from(self.high));
         let mass = normal.cdf(beta) - normal.cdf(alpha);
         let (at_alpha, at_beta) = (normal.pdf(alpha), normal.pdf(beta));
-        1.0 + (alpha * at_alpha - beta * at_beta) / mass - ((at_alpha - at_beta) / mass).powi(2)
+        1.0 + (alpha * at_alpha - beta * at_beta) / mass
+            - ((at_alpha - at_beta) / mass).libm_powi(2)
     }
 
     /// Both thresholds must be finite and positive: they scale a spread estimate, so a non-positive

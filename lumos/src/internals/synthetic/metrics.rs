@@ -4,6 +4,7 @@
 //! and reliability, astrometric error, rejection precision/recall, and noise statistics — so
 //! tests assert bounds you can compute on paper rather than eyeballing.
 
+use common::Libm;
 use glam::DVec2;
 use std::collections::HashSet;
 
@@ -170,7 +171,7 @@ pub(crate) fn pixel_stats(pixels: &[f32]) -> PixelStats {
     let mean = pixels.iter().map(|&p| f64::from(p)).sum::<f64>() / n as f64;
     let var = pixels
         .iter()
-        .map(|&p| (f64::from(p) - mean).powi(2))
+        .map(|&p| (f64::from(p) - mean).libm_powi(2))
         .sum::<f64>()
         / n as f64;
     PixelStats {
@@ -188,7 +189,7 @@ pub(crate) fn rms_diff(a: &[f32], b: &[f32]) -> f64 {
     let s: f64 = a
         .iter()
         .zip(b)
-        .map(|(x, y)| (f64::from(*x) - f64::from(*y)).powi(2))
+        .map(|(x, y)| (f64::from(*x) - f64::from(*y)).libm_powi(2))
         .sum();
     (s / a.len() as f64).sqrt()
 }

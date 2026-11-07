@@ -118,6 +118,12 @@ arguments after a `--`; each submodule runs its own.
 - **Arch code lives in `simd` alone.** No other crate holds `std::arch`,
   `#[target_feature]` or a `cfg(target_arch)`; `clippy.toml` refuses the
   register types elsewhere. A kernel is generic over `simd::Isa`.
+- **A transcendental float function goes through `common::Libm`**: `clippy.toml` refuses std's
+  `sin`, `powf`, `ln` and the rest, which call each system's libm, so a result has the same bits on
+  every system, and the snapshots of `lumos` hold each lane to them. As `bevy_math::ops` routes
+  them. Measured against Apple's libm: `powf` 3 to 6 times slower, `cbrt` 2.3, most others 1.1 to
+  1.4, and in `lumos` no `powf` runs per pixel. `palantir` and `fits-well` hold their own, as a
+  submodule stays standalone. Outside this rule: `statrs`, LibRaw and ONNX Runtime call their own.
 - **Every vector kernel is bit-identical to its scalar reference** on one
   architecture (`simd/AGENTS.md` holds the NaN limit across two), and a test
   holds each tier the CPU has to it, the special values of its inputs

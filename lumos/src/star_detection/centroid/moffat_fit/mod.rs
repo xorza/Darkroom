@@ -13,6 +13,7 @@
 
 mod simd;
 
+use common::Libm;
 use std::ops::RangeInclusive;
 
 use glam::DVec2;
@@ -142,7 +143,7 @@ impl LmModel<5> for MoffatFixedBeta {
     #[inline]
     fn point(&self, x: f64, y: f64, params: &[f64; 5]) -> f64 {
         let [x0, y0, amp, alpha, bg] = *params;
-        let r2 = (x - x0).powi(2) + (y - y0).powi(2);
+        let r2 = (x - x0).libm_powi(2) + (y - y0).libm_powi(2);
         let u = 1.0 + r2 / (alpha * alpha);
         amp * fast_pow_neg(u, self.pow_strategy) + bg
     }

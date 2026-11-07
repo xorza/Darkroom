@@ -102,7 +102,7 @@ fn asinh_endpoints_and_monotonic() {
 /// The curve `asinh(x/β) / asinh(1/β)` in f64, at the f32 `β` the curve was built from.
 fn asinh_reference(beta: f32, x: f32) -> f64 {
     let beta = f64::from(beta);
-    (f64::from(x) / beta).asinh() / (1.0 / beta).asinh()
+    (f64::from(x) / beta).libm_asinh() / (1.0 / beta).libm_asinh()
 }
 
 /// The f32 curve rounds `1/β` and `x · (1/β)` (2ε on the numerator's argument, ε on the norm's,
@@ -150,7 +150,7 @@ fn solve_beta_hits_target_background() {
     ] {
         let beta = solve_asinh_beta(median, target).unwrap();
         let got = AsinhCurve::new(beta).eval(median);
-        let exponent = beta.log10().abs();
+        let exponent = beta.libm_log10().abs();
         let ulp = exponent.next_up() - exponent;
         let bound = (LN_10 * ulp + 20.0 * f32::EPSILON) * target;
         assert!(
@@ -305,26 +305,26 @@ fn ghs_endpoints_and_monotonic_across_b_family() {
 /// The textbook GHS base `T(u)` in f64, per `b` branch.
 fn ghs_reference_t(d: f64, b: f64, u: f64) -> f64 {
     if b == 0.0 {
-        1.0 - (-d * u).exp()
+        1.0 - (-d * u).libm_exp()
     } else if b == -1.0 {
-        (d * u).ln_1p()
+        (d * u).libm_ln_1p()
     } else if b < 0.0 {
-        (1.0 - (1.0 - b * d * u).powf((b + 1.0) / b)) / (d * (b + 1.0))
+        (1.0 - (1.0 - b * d * u).libm_powf((b + 1.0) / b)) / (d * (b + 1.0))
     } else {
-        1.0 - (1.0 + b * d * u).powf(-1.0 / b)
+        1.0 - (1.0 + b * d * u).libm_powf(-1.0 / b)
     }
 }
 
 /// The textbook slope `T′(u)` of [`ghs_reference_t`].
 fn ghs_reference_tp(d: f64, b: f64, u: f64) -> f64 {
     if b == 0.0 {
-        d * (-d * u).exp()
+        d * (-d * u).libm_exp()
     } else if b == -1.0 {
         d / (1.0 + d * u)
     } else if b < 0.0 {
-        (1.0 - b * d * u).powf(1.0 / b)
+        (1.0 - b * d * u).libm_powf(1.0 / b)
     } else {
-        d * (1.0 + b * d * u).powf(-(1.0 + b) / b)
+        d * (1.0 + b * d * u).libm_powf(-(1.0 + b) / b)
     }
 }
 
@@ -488,7 +488,7 @@ fn ghs_exponential_b0_hand_computed() {
     };
     let c = GhsCurve::new(shape).unwrap();
     for (x, hand) in [(0.5f32, 0.731_059), (0.25, 0.455_054)] {
-        let closed = (1.0 - (-2.0 * f64::from(x)).exp()) / (1.0 - (-2.0f64).exp());
+        let closed = (1.0 - (-2.0 * f64::from(x)).libm_exp()) / (1.0 - (-2.0f64).libm_exp());
         assert!((closed - hand).abs() < 1e-6, "{closed} vs {hand}");
         let reference = ghs_reference(shape, f64::from(x));
         assert!(

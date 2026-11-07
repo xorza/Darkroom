@@ -2,6 +2,7 @@
 
 use crate::image::metadata::bg_split::BgSplit;
 use crate::noise::binned_samples::GainBin;
+use common::Libm;
 
 /// The weighted least-squares fit of `A·g² + S·g` to `bins`, both terms at least 0, each bin
 /// weighed by its samples over its variance squared: the inverse of its estimate's sampling
@@ -15,13 +16,13 @@ pub(crate) fn fit(bins: &[GainBin]) -> BgSplit {
     if !bins.iter().any(|bin| bin.samples > 0) {
         return BgSplit::unflattened(0.0);
     }
-    let g4 = weighted_sum(bins, |g, _| g.powi(4));
-    let g3 = weighted_sum(bins, |g, _| g.powi(3));
+    let g4 = weighted_sum(bins, |g, _| g.libm_powi(4));
+    let g3 = weighted_sum(bins, |g, _| g.libm_powi(3));
     let g2 = weighted_sum(bins, |g, _| g * g);
     let vg2 = weighted_sum(bins, |g, v| v * g * g);
     let vg = weighted_sum(bins, |g, v| v * g);
     let residual =
-        |read: f64, sky: f64| weighted_sum(bins, |g, v| (v - read * g * g - sky * g).powi(2));
+        |read: f64, sky: f64| weighted_sum(bins, |g, v| (v - read * g * g - sky * g).libm_powi(2));
     let sky_only = (0.0, vg / g2);
     let read_only = (vg2 / g4, 0.0);
     let one_term = if residual(read_only.0, read_only.1) < residual(sky_only.0, sky_only.1) {

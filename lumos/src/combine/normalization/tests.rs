@@ -200,7 +200,7 @@ fn paired_gain_recovers_scale_after_residual_clipping() {
 /// ratio of two MADs of five, `√(2 · 1.3605 / 5)`.
 #[test]
 fn an_exact_line_holds_every_residual_to_the_resolution() {
-    let h = 2.0f32.powi(-13);
+    let h = 2.0f32.libm_powi(-13);
     let frame = [0.0, 1.0, 2.0, 3.0, 4.0];
     let gain = |d: f32| {
         let reference = [
@@ -262,7 +262,7 @@ fn the_deming_error_is_the_scatter_of_the_gains() {
     let mut stated = 0.0;
     for _ in 0..draws {
         let field: Vec<f32> = (0..2000)
-            .map(|_| 0.1 + 0.5 * rng.next_f32().powi(3))
+            .map(|_| 0.1 + 0.5 * rng.next_f32().libm_powi(3))
             .collect();
         let frame: Vec<f32> = field
             .iter()
@@ -273,16 +273,20 @@ fn the_deming_error_is_the_scatter_of_the_gains() {
             .map(|&x| 1.6 * x + 0.02 + 0.015 * rng.next_gaussian_f32())
             .collect();
         let paired = paired_gain(
-            side(&frame, 0.01f64.powi(2)),
-            side(&reference, 0.015f64.powi(2)),
+            side(&frame, 0.01f64.libm_powi(2)),
+            side(&reference, 0.015f64.libm_powi(2)),
         );
         gains.push(f64::from(paired.gain));
         stated += paired.relative_error;
     }
     let mean = gains.iter().sum::<f64>() / draws as f64;
-    let scatter =
-        (gains.iter().map(|gain| (gain - mean).powi(2)).sum::<f64>() / (draws - 1) as f64).sqrt()
-            / mean;
+    let scatter = (gains
+        .iter()
+        .map(|gain| (gain - mean).libm_powi(2))
+        .sum::<f64>()
+        / (draws - 1) as f64)
+        .sqrt()
+        / mean;
     let stated = stated / draws as f64;
     assert!(
         (mean - 1.6).abs() < 3.0 * scatter * mean / (draws as f64).sqrt(),
@@ -801,13 +805,13 @@ fn global_gains_are_recovered_from_a_star_field_and_one_blank_pixel_does_not_mov
     let truth_spread: f64 = truth
         .pixels()
         .iter()
-        .map(|&t| (f64::from(t) - mean).powi(2))
+        .map(|&t| (f64::from(t) - mean).libm_powi(2))
         .sum();
     let standard_error = |k: usize| {
         let (gain, _, noise) = settings[k];
         let (gain, noise, reference_noise) = (f64::from(gain), f64::from(noise), 0.002f64);
         let frame_spread = truth_spread / (gain * gain);
-        ((reference_noise.powi(2) + gain * gain * noise.powi(2)) / frame_spread).sqrt()
+        ((reference_noise.libm_powi(2) + gain * gain * noise.libm_powi(2)) / frame_spread).sqrt()
     };
 
     let full = gains(&stored(None));

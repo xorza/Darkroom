@@ -1,5 +1,6 @@
 //! [`PixelQuadrature`]: Gauss–Legendre quadrature over one pixel.
 
+use common::Libm;
 use std::array;
 use std::sync::OnceLock;
 
@@ -42,7 +43,7 @@ impl AnalyticProfile {
             Self::Moffat { alpha, beta } => {
                 let reach = b / alpha;
                 if reach < 1.0 {
-                    -beta * (1.0 - reach * reach).ln()
+                    -beta * (1.0 - reach * reach).libm_ln()
                 } else {
                     f64::INFINITY
                 }
@@ -100,7 +101,7 @@ impl PixelQuadrature {
     /// The bound falls as the order grows, so the orders are bisected; and an order is shown
     /// sufficient by the first ρ whose bound is within the tolerance, which ends its search.
     pub(crate) fn sufficient_order(profile: AnalyticProfile, tolerance: f64) -> Option<usize> {
-        let log_tolerance = (tolerance / 2.0).ln();
+        let log_tolerance = (tolerance / 2.0).libm_ln();
         let orders: [usize; MAX_ORDER] = array::from_fn(|i| i + 1);
         let insufficient = orders.partition_point(|&order| {
             Self::least_log_bound(profile, order, log_tolerance) > log_tolerance
@@ -115,14 +116,14 @@ impl PixelQuadrature {
     fn least_log_bound(profile: AnalyticProfile, order: usize, stop: f64) -> f64 {
         let n = order as f64;
         let log_bound = |log_rho: f64| {
-            let rho = log_rho.exp();
+            let rho = log_rho.libm_exp();
             let b = (rho - 1.0 / rho) / 4.0;
-            (32.0f64 / 15.0).ln() + profile.log_modulus(b) + (2.0 - 2.0 * n) * log_rho
-                - (rho * rho - 1.0).ln()
+            (32.0f64 / 15.0).libm_ln() + profile.log_modulus(b) + (2.0 - 2.0 * n) * log_rho
+                - (rho * rho - 1.0).libm_ln()
         };
         // ρ = 1 + 1e-9 and ρ = 1e6 bracket every least: below, the `ρ² − 1` term grows without
         // bound; beyond, the modulus does, or the ellipse meets the singularity.
-        let (mut low, mut high) = (1e-9f64, 1e6f64.ln());
+        let (mut low, mut high) = (1e-9f64, 1e6f64.libm_ln());
         let ratio = (5f64.sqrt() - 1.0) / 2.0;
         let mut left = high - ratio * (high - low);
         let mut right = low + ratio * (high - low);
@@ -169,7 +170,7 @@ impl PixelQuadrature {
         let n = order as f64;
         // The roots pair as ±x, and an odd order adds 0; each pair is found once, from the right.
         for i in 0..order.div_ceil(2) {
-            let mut x = (std::f64::consts::PI * (i as f64 + 0.75) / (n + 0.5)).cos();
+            let mut x = (std::f64::consts::PI * (i as f64 + 0.75) / (n + 0.5)).libm_cos();
             for _ in 0..Self::MAX_NEWTON_STEPS {
                 let legendre = Legendre::at(order, x);
                 let step = legendre.value / legendre.slope;
@@ -238,11 +239,11 @@ mod tests {
                     order,
                     f64::NEG_INFINITY,
                 )
-                .exp();
+                .libm_exp();
                 for step in 0..=40 {
                     let d = 4.0 * sigma * f64::from(step) / 40.0;
                     let quadrature =
-                        rule.integrate(d, 0.0, |t, _| (-t * t / (2.0 * sigma * sigma)).exp());
+                        rule.integrate(d, 0.0, |t, _| (-t * t / (2.0 * sigma * sigma)).libm_exp());
                     let error = (quadrature - gaussian.mean_at(d)).abs();
                     assert!(
                         error <= bound + 4.0 * f64::EPSILON,
@@ -253,7 +254,7 @@ mod tests {
         }
         let (alpha, beta) = (0.8, 1.5);
         let reference = PixelQuadrature::gauss_legendre(MAX_ORDER);
-        let moffat = |t: f64, _| (1.0 + t * t / (alpha * alpha)).powf(-beta);
+        let moffat = |t: f64, _| (1.0 + t * t / (alpha * alpha)).libm_powf(-beta);
         for order in 1..=8 {
             let rule = PixelQuadrature::gauss_legendre(order);
             let bound = PixelQuadrature::least_log_bound(
@@ -261,7 +262,7 @@ mod tests {
                 order,
                 f64::NEG_INFINITY,
             )
-            .exp();
+            .libm_exp();
             for step in 0..=40 {
                 let d = 3.0 * f64::from(step) / 40.0;
                 let error =
@@ -272,13 +273,13 @@ mod tests {
                 );
             }
         }
-        let tolerance = 2f64.powi(-25);
+        let tolerance = 2f64.libm_powi(-25);
         assert_eq!(
             PixelQuadrature::sufficient_order(AnalyticProfile::Gaussian { sigma: 0.5 }, tolerance),
             Some(7)
         );
         let narrowest = 2.0 * 0.5 * (2.0 * std::f64::consts::LN_2).sqrt()
-            / (2.0 * (2f64.powf(1.0 / 1.01) - 1.0).sqrt());
+            / (2.0 * (2f64.libm_powf(1.0 / 1.01) - 1.0).sqrt());
         assert_eq!(
             PixelQuadrature::sufficient_order(
                 AnalyticProfile::Moffat {
@@ -325,12 +326,12 @@ mod tests {
                     .nodes()
                     .iter()
                     .zip(rule.weights())
-                    .map(|(&x, &w)| w * x.powi(k))
+                    .map(|(&x, &w)| w * x.libm_powi(k))
                     .sum();
                 let exact = if k % 2 == 1 {
                     0.0
                 } else {
-                    0.5f64.powi(k) / f64::from(k + 1)
+                    0.5f64.libm_powi(k) / f64::from(k + 1)
                 };
                 assert!(
                     (quadrature - exact).abs() <= 32.0 * f64::EPSILON,

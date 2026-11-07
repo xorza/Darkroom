@@ -1,6 +1,7 @@
 //! The registration benches: the entry `crate::bench` runs them by, and the input they share, a
 //! typical field's star catalogue in two exposures.
 
+use common::Libm;
 use common::bench::{Kind, Scale};
 use criterion::{BenchmarkId, Criterion, Throughput};
 use glam::DVec2;
@@ -74,7 +75,7 @@ impl Pair {
         sources.sort_by(|a, b| b.flux.total_cmp(&a.flux));
         let centre = DVec2::new(FRAME.width as f64, FRAME.height as f64) / 2.0;
         // k · r³ is one pixel at the corner's r = |(3000, 2000)|.
-        let lens = RadialField::new(centre, 1.0 / centre.length().powi(3));
+        let lens = RadialField::new(centre, 1.0 / centre.length().libm_powi(3));
         let dither = Transform::similarity(DVec2::new(11.0, -7.0), 0.2_f64.to_radians(), 1.0);
         let mut rng = TestRng::new(0x5E9);
         let mut star = |pos: DVec2, flux: f32| {

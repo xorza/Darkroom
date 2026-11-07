@@ -1,3 +1,4 @@
+use common::Libm;
 use std::f64::consts::TAU;
 
 use rand::{RngExt, SeedableRng};
@@ -88,7 +89,7 @@ fn mean(
 fn standard_normal(rng: &mut ChaCha8Rng) -> f32 {
     let u1 = rng.random::<f64>().max(f64::MIN_POSITIVE);
     let u2 = rng.random::<f64>();
-    ((-2.0 * u1.ln()).sqrt() * (TAU * u2).cos()) as f32
+    ((-2.0 * u1.libm_ln()).sqrt() * (TAU * u2).libm_cos()) as f32
 }
 
 /// Every config's documented defaults, its constructors, and the `Rejection` shorthands.
@@ -788,7 +789,7 @@ fn the_winsorized_estimate_converges_on_its_clamped_copy() {
         9.855_126, 9.9, 10.0, 10.0, 10.1, 10.1, 10.2, 10.3, 10.344_874,
     ];
     let mean = 90.8f64 / 9.0;
-    let squares: f64 = clamped.iter().map(|&v: &f64| (v - mean).powi(2)).sum();
+    let squares: f64 = clamped.iter().map(|&v: &f64| (v - mean).libm_powi(2)).sum();
     let expected = 1.133_392_655_462_487 * (squares / 8.0).sqrt();
     assert!(
         (f64::from(estimate.sigma) - expected).abs() < 1e-5,

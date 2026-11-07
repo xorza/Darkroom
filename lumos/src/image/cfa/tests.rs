@@ -1,3 +1,4 @@
+use common::Libm;
 use std::f64::consts::FRAC_1_SQRT_2;
 use std::sync::Arc;
 
@@ -387,10 +388,10 @@ fn a_balanced_demosaic_keeps_neutral_detail_neutral() {
     let gains = [2.0f32, 1.0, 1.5];
     let star = |x: usize, y: usize| {
         let (dx, dy) = (x as f32 - 23.6, y as f32 - 24.3);
-        0.1 + 0.8 * (-(dx * dx + dy * dy) / (2.0 * 1.3 * 1.3)).exp()
+        0.1 + 0.8 * (-(dx * dx + dy * dy) / (2.0 * 1.3 * 1.3)).libm_exp()
     };
     let soft_edge =
-        |x: usize, y: usize| 0.5 + 0.3 * ((x as f32 + 0.37 * y as f32 - 30.0) / 1.5).tanh();
+        |x: usize, y: usize| 0.5 + 0.3 * ((x as f32 + 0.37 * y as f32 - 30.0) / 1.5).libm_tanh();
     let scenes: [&dyn Fn(usize, usize) -> f32; 2] = [&star, &soft_edge];
     for cfa_type in [
         CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),

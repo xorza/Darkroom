@@ -2,6 +2,7 @@
 mod real_data;
 
 use common::Buffer2;
+use common::Libm;
 use imaginarium::{ChannelLayout, PlanarDesc};
 
 use crate::image::flags::quality_map::QualityMap;
@@ -366,7 +367,8 @@ fn structure_filling_the_frame_survives() {
         .map(|idx| {
             let (x, y) = ((idx % 128) as f32, (idx / 128) as f32);
             let phase = core::f32::consts::TAU / 32.0;
-            0.5 + 0.05 * (phase * x).sin() * (phase * y).sin() + 0.001 * rng.next_gaussian_f32()
+            0.5 + 0.05 * (phase * x).libm_sin() * (phase * y).libm_sin()
+                + 0.001 * rng.next_gaussian_f32()
         })
         .collect();
     let mut image =

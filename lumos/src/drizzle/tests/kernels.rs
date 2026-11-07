@@ -3,6 +3,7 @@
     reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
 )]
 
+use common::Libm;
 use std::f64::consts::PI;
 
 use glam::{DVec2, USizeVec2};
@@ -572,7 +573,7 @@ fn radial_drops_lose_the_flux_that_misses_the_grid() {
     // truncated at ceil(3σ) = 2. Every drop centre lands on an integer output pixel, so the tap
     // grid is separable and the deposited weight is a product of per-axis sums.
     let sigma = 1.0 / 2.3548;
-    let tap = |d: i64| (-((d * d) as f64) / (2.0 * sigma * sigma)).exp();
+    let tap = |d: i64| (-((d * d) as f64) / (2.0 * sigma * sigma)).libm_exp();
     let full: f64 = (-2..=2).map(tap).sum();
     let on_grid: f64 = (0..SIDE)
         .map(|i| {

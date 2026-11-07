@@ -1,5 +1,6 @@
 //! The text report a visual detection test writes beside its images.
 
+use common::Libm;
 use std::fmt;
 use std::io::Write;
 
@@ -41,7 +42,7 @@ impl ErrorSummary {
         errors.sort_by(f64::total_cmp);
         let n = errors.len() as f64;
         let mean = errors.iter().sum::<f64>() / n;
-        let variance = errors.iter().map(|e| (e - mean).powi(2)).sum::<f64>() / n;
+        let variance = errors.iter().map(|e| (e - mean).libm_powi(2)).sum::<f64>() / n;
         Self {
             mean,
             median: errors[errors.len() / 2],

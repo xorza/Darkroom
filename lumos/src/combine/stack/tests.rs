@@ -1,3 +1,4 @@
+use common::Libm;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -1483,9 +1484,10 @@ fn registered_global_normalization_uses_paired_signal_samples() {
     let spread: f64 = truth
         .pixels()
         .iter()
-        .map(|&t| (0.8 * (f64::from(t) - mean)).powi(2))
+        .map(|&t| (0.8 * (f64::from(t) - mean)).libm_powi(2))
         .sum();
-    let standard_error = ((0.002f64.powi(2) + 1.25f64.powi(2) * 0.006f64.powi(2)) / spread).sqrt();
+    let standard_error =
+        ((0.002f64.libm_powi(2) + 1.25f64.libm_powi(2) * 0.006f64.libm_powi(2)) / spread).sqrt();
     assert_eq!(norms[0].slots[0].gain, 1.0, "frame A is the reference");
     assert_close!(gain, 1.25, 5.0 * standard_error);
     assert!(

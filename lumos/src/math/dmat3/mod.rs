@@ -1,5 +1,6 @@
 //! Row-major 3x3 matrix of f64 values.
 
+use common::Libm;
 use std::ops::Index;
 
 use glam::DVec2;
@@ -83,7 +84,7 @@ impl DMat3 {
     pub(crate) fn inverse(&self) -> Option<Self> {
         let det = self.determinant();
         let scale = self.data.iter().fold(0.0f64, |m, v| m.max(v.abs()));
-        if det.abs() <= 1e-12 * scale.powi(3).min(1.0) {
+        if det.abs() <= 1e-12 * scale.libm_powi(3).min(1.0) {
             return None;
         }
         let inv_det = 1.0 / det;

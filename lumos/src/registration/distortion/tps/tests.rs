@@ -84,16 +84,16 @@ fn tps_kernel_known_values() {
     assert!((tps_kernel(e) - expected).abs() < 1e-12);
 
     // U(2) = 2^2 * ln(2) = 4 * 0.693147... = 2.772588...
-    let expected_2 = 4.0 * 2.0_f64.ln(); // 2.772588722239781
+    let expected_2 = 4.0 * 2.0_f64.libm_ln(); // 2.772588722239781
     assert!((tps_kernel(2.0) - expected_2).abs() < 1e-12);
 
     // U(0.5) = 0.25 * ln(0.5) = 0.25 * (-0.693147...) = -0.173286...
     // Note: U is negative for r < 1 because ln(r) < 0
-    let expected_half = 0.25 * 0.5_f64.ln(); // -0.17328679513998632
+    let expected_half = 0.25 * 0.5_f64.libm_ln(); // -0.17328679513998632
     assert!((tps_kernel(0.5) - expected_half).abs() < 1e-12);
 
     // U(10) = 100 * ln(10) = 100 * 2.302585... = 230.2585...
-    let expected_10 = 100.0 * 10.0_f64.ln(); // 230.25850929940458
+    let expected_10 = 100.0 * 10.0_f64.libm_ln(); // 230.25850929940458
     assert!((tps_kernel(10.0) - expected_10).abs() < 1e-10);
 }
 
@@ -378,8 +378,8 @@ fn tps_scaling() {
 fn tps_rotation() {
     let source = square_source_4();
     let angle = 10.0_f64.to_radians();
-    let cos_a = angle.cos();
-    let sin_a = angle.sin();
+    let cos_a = angle.libm_cos();
+    let sin_a = angle.libm_sin();
 
     let target: Vec<DVec2> = source
         .iter()
@@ -595,7 +595,7 @@ fn tps_bending_energy_affine_vs_nonaffine() {
 
     // Rotation by 0.3 radians
     let angle: f64 = 0.3;
-    let (sin_a, cos_a) = angle.sin_cos();
+    let (sin_a, cos_a) = angle.libm_sin_cos();
     let target_rot: Vec<DVec2> = source
         .iter()
         .map(|&p| DVec2::new(p.x * cos_a - p.y * sin_a, p.x * sin_a + p.y * cos_a))
@@ -810,8 +810,8 @@ fn tps_many_points() {
             let s = DVec2::new(f64::from(x), f64::from(y));
             source.push(s);
             // Deterministic perturbation: dx = 2*sin(x/100), dy = 2*cos(y/100)
-            let dx = (s.x * 0.01).sin() * 2.0;
-            let dy = (s.y * 0.01).cos() * 2.0;
+            let dx = (s.x * 0.01).libm_sin() * 2.0;
+            let dy = (s.y * 0.01).libm_cos() * 2.0;
             target.push(s + DVec2::new(dx, dy));
         }
     }
@@ -831,8 +831,8 @@ fn tps_many_points() {
         .iter()
         .position(|&p| p == DVec2::new(200.0, 300.0))
         .unwrap();
-    let expected_dx = 2.0 * (2.0_f64).sin(); // 1.8185948536...
-    let expected_dy = 2.0 * (3.0_f64).cos(); // -1.9799849932...
+    let expected_dx = 2.0 * 2.0_f64.libm_sin(); // 1.8185948536...
+    let expected_dy = 2.0 * 3.0_f64.libm_cos(); // -1.9799849932...
     let t = tps.transform(DVec2::new(200.0, 300.0));
     assert!(
         (t.x - (200.0 + expected_dx)).abs() <= EXACT_PX,

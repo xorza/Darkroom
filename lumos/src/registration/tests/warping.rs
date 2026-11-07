@@ -2,6 +2,7 @@
 //! the kernels, SIP, and the quality maps at the border.
 
 use common::Buffer2;
+use common::Libm;
 use glam::{DVec2, USizeVec2};
 use imaginarium::{ChannelLayout, PlanarDesc};
 
@@ -30,7 +31,7 @@ fn warp_with(input: &Buffer2<f32>, transform: &Transform, params: WarpConfig) ->
 
 /// Peak signal-to-noise ratio between two images of peak `max_val`, in dB; infinite for equal ones.
 fn compute_psnr(a: &[f32], b: &[f32], max_val: f32) -> f64 {
-    20.0 * (f64::from(max_val) / metrics::rms_diff(a, b)).log10()
+    20.0 * (f64::from(max_val) / metrics::rms_diff(a, b)).libm_log10()
 }
 
 /// Compute normalized cross-correlation between two images.
@@ -152,7 +153,7 @@ fn warp_similarity_roundtrip() {
 fn warp_affine_roundtrip() {
     // Affine with slight differential scaling
     let angle_rad = 0.5_f64.to_radians();
-    let (cos_a, sin_a) = (angle_rad.cos(), angle_rad.sin());
+    let (cos_a, sin_a) = (angle_rad.libm_cos(), angle_rad.libm_sin());
     let forward = Transform::affine([
         1.01 * cos_a,
         -0.99 * sin_a,

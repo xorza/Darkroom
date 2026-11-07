@@ -6,6 +6,7 @@
 )]
 
 use common::Buffer2;
+use common::Libm;
 use glam::{DVec2, USizeVec2};
 
 use common::USize2;
@@ -75,13 +76,13 @@ struct MomentReading {
 
 impl MomentReading {
     fn of(sigma_x: f32, sigma_y: f32) -> Self {
-        let sampled = |sigma: f32| f64::from(sigma).powi(2) + 1.0 / 12.0;
+        let sampled = |sigma: f32| f64::from(sigma).libm_powi(2) + 1.0 / 12.0;
         let window = f64::midpoint(sampled(sigma_x), sampled(sigma_y));
         let read =
-            |sigma: f32| f64::from(sigma).powi(2) + 1.0 / (240.0 * (window + sampled(sigma)));
+            |sigma: f32| f64::from(sigma).libm_powi(2) + 1.0 / (240.0 * (window + sampled(sigma)));
         let (read_x, read_y) = (read(sigma_x), read(sigma_y));
         Self {
-            fwhm: (FWHM_PER_SIGMA * (read_x * read_y).powf(0.25)) as f32,
+            fwhm: (FWHM_PER_SIGMA * (read_x * read_y).libm_powf(0.25)) as f32,
             eccentricity: (1.0 - read_x.min(read_y) / read_x.max(read_y)).sqrt() as f32,
         }
     }

@@ -1,6 +1,7 @@
 //! A profile integrated over every pixel of a star's stamp, at the orders the fits pick, the rules
 //! built at those orders, and the search for the order a profile needs.
 
+use common::Libm;
 use std::hint::black_box;
 
 use common::bench::{Kind, Scale};
@@ -26,7 +27,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
                 let centre = STAMP as f64 / 2.0 - 0.3;
                 let gaussian = |x: f64, y: f64| {
                     let (dx, dy) = (x - centre, y - centre);
-                    (-(dx * dx + dy * dy) / (2.0 * 1.2 * 1.2)).exp()
+                    (-(dx * dx + dy * dy) / (2.0 * 1.2 * 1.2)).libm_exp()
                 };
                 b.iter(|| {
                     let mut sum = 0.0;

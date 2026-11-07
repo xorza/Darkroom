@@ -14,6 +14,7 @@ use crate::star_detection::star_detector::stages::detect::internals::detect_star
 use crate::star_detection::tests::stage_effects::{bg_estimate, peaks};
 use crate::star_detection::tests::{ISOLATION, Scenario, isolated, near};
 use common::Buffer2;
+use common::Libm;
 use glam::DVec2;
 
 /// How far from a star's centre its candidate's peak pixel can lie. Noiseless, the peak is the
@@ -79,7 +80,7 @@ fn every_isolated_star_is_one_candidate() {
 /// — and each peak value is the native one times 2⁻²⁰, bit for bit.
 #[test]
 fn detection_is_invariant_to_the_frames_sample_scale() {
-    let scale = 2.0f32.powi(-20);
+    let scale = 2.0f32.libm_powi(-20);
     let pixels = Scenario {
         star_count: 15,
         ..Default::default()

@@ -1,5 +1,6 @@
 //! Tests for sum operations.
 
+use common::Libm;
 use std::iter;
 
 use crate::internals::test_rng::TestRng;
@@ -109,7 +110,7 @@ fn exact_sum(values: &[f32]) -> f64 {
 fn sum_f32_stays_within_reassociation_error_of_the_exact_sum() {
     let mut rng = TestRng::new(17);
     let values: Vec<f32> = (0..10_000)
-        .map(|i| (rng.next_f32() - 0.3) * 10f32.powi(i % 20 - 10))
+        .map(|i| (rng.next_f32() - 0.3) * 10f32.libm_powi(i % 20 - 10))
         .collect();
     let exact = exact_sum(&values);
     assert_ne!(

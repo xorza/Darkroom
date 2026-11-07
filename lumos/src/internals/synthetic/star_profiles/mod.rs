@@ -20,6 +20,7 @@
 //!   to absorb.
 
 use common::Buffer2;
+use common::Libm;
 use glam::Vec2;
 
 use crate::math::pixel_gaussian::PixelGaussian;
@@ -72,16 +73,16 @@ impl StarProfile {
                 angle,
             } => {
                 let (sigma_x, sigma_y) = (f64::from(sigma_x), f64::from(sigma_y));
-                let (sin_a, cos_a) = f64::from(angle).sin_cos();
+                let (sin_a, cos_a) = f64::from(angle).libm_sin_cos();
                 let x_rot = dx * cos_a + dy * sin_a;
                 let y_rot = -dx * sin_a + dy * cos_a;
                 let exponent = x_rot * x_rot / (2.0 * sigma_x * sigma_x)
                     + y_rot * y_rot / (2.0 * sigma_y * sigma_y);
-                (-exponent).exp()
+                (-exponent).libm_exp()
             }
             Self::Moffat { alpha, beta } => {
                 let alpha = f64::from(alpha);
-                (1.0 + (dx * dx + dy * dy) / (alpha * alpha)).powf(-f64::from(beta))
+                (1.0 + (dx * dx + dy * dy) / (alpha * alpha)).libm_powf(-f64::from(beta))
             }
         }
     }
@@ -99,10 +100,10 @@ impl StarProfile {
             } => {
                 // The inverse covariance's diagonal: the curvature along each pixel axis at a fixed
                 // offset along the other.
-                let (sin_a, cos_a) = f64::from(angle).sin_cos();
+                let (sin_a, cos_a) = f64::from(angle).libm_sin_cos();
                 let (wide, narrow) = (
-                    1.0 / f64::from(sigma_x).powi(2),
-                    1.0 / f64::from(sigma_y).powi(2),
+                    1.0 / f64::from(sigma_x).libm_powi(2),
+                    1.0 / f64::from(sigma_y).libm_powi(2),
                 );
                 let a = cos_a * cos_a * wide + sin_a * sin_a * narrow;
                 let c = sin_a * sin_a * wide + cos_a * cos_a * narrow;

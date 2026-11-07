@@ -70,12 +70,12 @@ fn a_detected_star_measures_as_on_its_true_sky() {
             .expect("the star measures on the true sky");
 
         let npix = (2 * radius + 1).pow(2);
-        let sigma_sq = f64::from(sigma).powi(2);
-        let contraction = sigma_sq / (sigma_sq + window_sigma.powi(2));
+        let sigma_sq = f64::from(sigma).libm_powi(2);
+        let contraction = sigma_sq / (sigma_sq + window_sigma.libm_powi(2));
         let error = (reference.pos - truth).length();
         // Plus the f64 rounding of the weighted sums, ε per term over the stamp at coordinates ≈
         // 64.
-        let bound = 1.01 * (nearest - truth).length() * contraction.powi(10)
+        let bound = 1.01 * (nearest - truth).length() * contraction.libm_powi(10)
             + npix as f64 * f64::EPSILON * truth.max_element();
         assert!(error <= bound, "σ {sigma} at {truth}: {error} > {bound}");
 
@@ -116,8 +116,8 @@ fn a_detected_star_measures_as_on_its_true_sky() {
         // near 0 — a round star's eccentricity is held through its square.
         same(
             "eccentricity²",
-            f64::from(star.eccentricity).powi(2),
-            f64::from(reference.eccentricity).powi(2),
+            f64::from(star.eccentricity).libm_powi(2),
+            f64::from(reference.eccentricity).libm_powi(2),
         );
 
         // Each pixel holds the profile's mean over it, so the stamp's pixels together hold its

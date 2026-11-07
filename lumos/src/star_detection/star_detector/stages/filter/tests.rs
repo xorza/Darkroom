@@ -1,3 +1,4 @@
+use common::Libm;
 use glam::DVec2;
 
 use crate::internals::test_rng::TestRng;
@@ -572,7 +573,7 @@ fn sort_by_flux_puts_the_brightest_first() {
 /// The reference the cell pass is held to: every pair, O(n²), each kept star dropping the later
 /// stars strictly closer than `min_separation`.
 fn brute_force_dedup(stars: &mut Vec<Star>, min_separation: f32) -> usize {
-    let min_sep_sq = f64::from(min_separation).powi(2);
+    let min_sep_sq = f64::from(min_separation).libm_powi(2);
     let mut kept = vec![true; stars.len()];
 
     for i in 0..stars.len() {

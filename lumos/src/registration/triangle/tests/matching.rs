@@ -1,4 +1,5 @@
 use super::*;
+use common::Libm;
 
 #[test]
 fn match_triangles_too_few_points() {
@@ -297,8 +298,8 @@ fn match_with_subpixel_noise() {
         .map(|i| {
             let base_x = f64::from(i % 5) * 80.0 + 100.0;
             let base_y = f64::from(i / 5) * 80.0 + 100.0;
-            let jitter_x = (f64::from(i * 13 + 7) * 0.37).sin() * 15.0;
-            let jitter_y = (f64::from(i * 17 + 3) * 0.53).cos() * 15.0;
+            let jitter_x = (f64::from(i * 13 + 7) * 0.37).libm_sin() * 15.0;
+            let jitter_y = (f64::from(i * 17 + 3) * 0.53).libm_cos() * 15.0;
             DVec2::new(base_x + jitter_x, base_y + jitter_y)
         })
         .collect();
@@ -307,8 +308,8 @@ fn match_with_subpixel_noise() {
         .iter()
         .enumerate()
         .map(|(i, p)| {
-            let noise_x = ((i * 7 + 3) as f64 * 0.73).sin() * 0.3;
-            let noise_y = ((i * 11 + 5) as f64 * 0.91).cos() * 0.3;
+            let noise_x = ((i * 7 + 3) as f64 * 0.73).libm_sin() * 0.3;
+            let noise_y = ((i * 11 + 5) as f64 * 0.91).libm_cos() * 0.3;
             DVec2::new(p.x + noise_x, p.y + noise_y)
         })
         .collect();

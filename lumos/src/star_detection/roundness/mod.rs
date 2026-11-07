@@ -1,5 +1,6 @@
 //! The DAOFIND roundness metrics.
 
+use common::Libm;
 use serde::{Deserialize, Serialize};
 
 /// The pair of DAOFIND roundness metrics measured for one source, as photutils'
@@ -142,7 +143,7 @@ impl<'a> Cutout<'a> {
         let inv_two_sigma_sq = 1.0 / (2.0 * self.psf_sigma * self.psf_sigma);
         let gaussian = |i: usize| {
             let d = i.abs_diff(c) as f64;
-            (-d * d * inv_two_sigma_sq).exp()
+            (-d * d * inv_two_sigma_sq).libm_exp()
         };
         // The PSF is separable, so its weighted marginal is its profile along `axis` times one sum.
         let across: f64 = (0..size).map(|j| gaussian(j) * triangle(j)).sum();

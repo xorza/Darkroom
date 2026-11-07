@@ -1,5 +1,6 @@
 use crate::math::statistics::CHI2_99_2DOF;
 use crate::registration::tuning::{max_sigma_from_fwhm, recovery_radius};
+use common::Libm;
 
 /// The scales have to keep their documented relationship to the FWHM, since every threshold
 /// downstream is quoted in those terms.
@@ -11,7 +12,7 @@ fn sigma_and_recovery_radius_track_the_psf_width() {
     let sigma = max_sigma_from_fwhm(3.0);
     assert_eq!(sigma, 1.5);
     let radius = recovery_radius(sigma);
-    let expected = (-2.0 * 0.01_f64.ln()).sqrt() * 1.5;
+    let expected = (-2.0 * 0.01_f64.libm_ln()).sqrt() * 1.5;
     assert!(
         (radius - expected).abs() < 1e-12,
         "recovery radius {radius} is not √χ²₀.₉₉(2)·σ_max ({expected})"

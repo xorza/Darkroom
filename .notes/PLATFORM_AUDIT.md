@@ -3,7 +3,8 @@
 This is a temporary proposal. When a change lands, its lasting decision moves into the `AGENTS.md`
 or the doc comment of the system that it governs. Then delete the change from this file.
 
-**Status:** Each open finding has a decision. These landed, and their decisions moved:
+**Status:** All implementation is done. Only the shortcut label decision and the lists below stay
+here. These landed, and their decisions moved:
 
 - The touchpad rule, to `darkroom/AGENTS.md`, "One scroll rule".
 - The Windows wheel setting, to `palantir/AGENTS.md`, "A person's scroll setting moves a scroll,
@@ -17,6 +18,8 @@ or the doc comment of the system that it governs. Then delete the change from th
 - The LibRaw flag, to `libraw/build.rs`.
 - The file watch, URL failure and camera clock corrections, to their doc comments.
 - The NaN limit, to `simd/AGENTS.md`.
+- The system math library, to `AGENTS.md`, "A transcendental float function goes through
+  `common::Libm`", with the same line in `palantir/AGENTS.md`.
 
 ## Background
 
@@ -71,75 +74,9 @@ No finding is a data-loss bug in a common workflow.
 
 | Finding | Effect | Evidence | Decision |
 |---|---|---|---|
-| System math library in results | The last bit of a result differs by OS | Rust docs state it, size not measured | `ops` module over `libm`, with a digest test |
 | Shortcut labels follow a platform convention | `⌘S` against `Ctrl+S` | Confirmed in source | Keep `⌥⇧⌘S` on macOS |
 
-## Approved dependencies
-
-This approval applies only to the change below.
-
-- **`libm` 0.2**, direct, in each project that gets an `ops` module. `Cargo.lock` and
-  `palantir/Cargo.lock` already hold it through other crates.
-
-## Implementation order
-
-1. The digest test.
-2. The `ops` modules: `palantir`, then `common` with `lumos`, then `fits-well`.
-
 ## Decisions
-
-### System math library in results
-
-**Where:** `powf`, `exp`, `ln`, `sin`, `cos`, `atan2`, `hypot`, `cbrt` and the like, in code that
-produces a result. A text search outside tests and benches found about 120 calls in `lumos`, 160 in
-`fits-well`, 35 in `palantir` and 9 in `darkroom`. The count is rough, as it also holds `powi` and
-calls named `log`. `imaginarium` has none, and `simd` has one `powi`.
-
-**Behavior:** The Rust docs state that the precision of these functions "varies by platform, Rust
-version, and can even differ within the same execution"
-([f32](https://doc.rust-lang.org/std/primitive.f32.html)). The call goes to the libm of the system.
-
-**The project already decided this once.** `palantir/src/primitives/paint/color/oklab.rs:87` refuses
-`f32::cbrt`, "whose last bit differs (MSVC's against Apple's and glibc's), so a motion, a gradient
-and a golden would differ by platform". But `animation/spring.rs`, `shape/paint/blur_plan`,
-`shape/paint/lens_optics`, the gradient geometry and `color/okhsv` still call libm.
-
-**Effect in `lumos`:** The same frames can give other bits per OS. A last-bit change is small. But
-star detection and `registration/ransac` compare against thresholds, so a change can in principle
-move a decision. The size of this effect is not measured. No CI lane compares a result with another
-lane, and the palantir goldens are local and tied to one adapter.
-
-**Decision: one `ops` module over the `libm` crate, refused direct calls, and a digest test.** This is
-the practice of [Bevy's `bevy_math::ops`](https://raw.githubusercontent.com/bevyengine/bevy/main/crates/bevy_math/src/ops.rs)
-with its [`clippy.toml`](https://raw.githubusercontent.com/bevyengine/bevy/main/crates/bevy_math/clippy.toml),
-and [Rapier's `enhanced-determinism`](https://rapier.rs/docs/user_guides/rust/determinism/) also goes
-through libm. Bevy makes it a feature. Here it is the one behavior, with no feature.
-
-**What follows from it:**
-
-- **One module per project.** `common` serves the workspace crates. `palantir` and `fits-well` each
-  hold their own, as a submodule stays standalone.
-- **`clippy.toml` refuses the direct methods** on `f32` and `f64`: `powf`, `powi`, `log`, `ln`, `log2`,
-  `log10`, `exp`, `exp2`, `exp_m1`, `ln_1p`, `cbrt`, `hypot`, `sin`, `cos`, `tan`, `asin`, `acos`,
-  `atan`, `atan2`, `sin_cos`, `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`. Tests stay under the
-  same rule.
-- **`powi` has no `libm` form,** as Bevy notes. About 56 calls exist outside tests. A small power
-  becomes `squared` or `cubed`, and a power of two becomes an exact scale.
-- **`glam` calls std in its own methods** unless its `libm` feature is on, so the feature turns on
-  wherever `glam` serves a result.
-- **`oklab::cbrt` stays.** It rounds to the nearest `f32`, which `libm::cbrtf` does not promise.
-- **The digest test** runs one synthetic scene through the `lumos` pipeline, with its digest committed,
-  so that all three CI lanes must agree. It leaves out the ONNX nodes. A Rust or `libm` update can
-  move the digest, which is a fact to learn.
-- **Bench the hot kernels** before and after, as `libm` can be slower than a system libm. Start with
-  `lumos/src/image_ops/stretch` and `lumos/src/math/pixel_quadrature`.
-
-**Refused:**
-
-- The digest test alone: a pass on one scene proves little about the others, and the known cause stays.
-- Own functions for each call, as `oklab::cbrt` does: many functions, each with its own accuracy tests.
-- An exception in the rule for the last bit: it conflicts with the `oklab::cbrt` decision, and a
-  threshold can still move a decision.
 
 ### Shortcut labels follow a platform convention
 
@@ -219,7 +156,8 @@ These gaps hold on all three lanes:
 
 - No test opens a native window. The one that does in `host/winit/tests.rs` is `#[ignore]`.
 - `cargo visual` and `cargo real-data` do not run in CI.
-- No lane compares its results with another lane. The digest test closes this gap for `lumos`.
+- No lane compares its results with another lane, except that each compares `lumos` with one
+  committed set of snapshots, to the bit.
 - Input tests call `Translator` with a `Platform` value and a `winit` event that they build. They
   prove palantir's translation, but not what each OS sends through `winit`.
 
@@ -230,7 +168,7 @@ These items hold no decision, as they need a run on the OS that they name.
 - **The ONNX Runtime nodes.** `lens` enables `lumos/ml`, and `Session::builder` uses the default CPU
   provider on every OS. The search found no ONNX Runtime statement on results across CPUs. MLAS keeps
   [separate kernels per instruction set](https://app.semanticdiff.com/gh/microsoft/onnxruntime/commit/a4e58e8feb375f266a4e80c669d7b467a11ea0a3),
-  so results may not be bit-identical. The digest test leaves these nodes out.
+  so results may not be bit-identical. The snapshots leave these nodes out.
 - **The Linux file dialog with no backend.** `rfd` tries the portal, then `zenity`, and returns `None`
   when both fail (`xdg_desktop_portal.rs:105`). Darkroom cannot tell that from a cancel, so Open would
   do nothing. `rfd` logs an error.
@@ -244,3 +182,5 @@ These items hold no decision, as they need a run on the OS that they name.
   on a real GPU.
 - **The GL fallback on Windows,** which no CI lane runs, on a machine with no Vulkan driver.
 - **Packaging and installers**, which this review did not read.
+- **`statrs` and LibRaw** call their own math, so a `lumos` snapshot may show a last-bit difference on
+  x64 that `Libm` cannot remove.

@@ -1,6 +1,7 @@
 //! The band a tie paints over its strands: a halo of the canvas colour, the band and its head,
 //! and on a selected tie the selection ring and the knob that turns it.
 
+use common::Libm;
 use std::f32::consts::{FRAC_PI_2, PI};
 
 use glam::Vec2;
@@ -189,7 +190,7 @@ impl BandAxes {
         for y in [-RING_RADIUS, RING_RADIUS] {
             ui.add_shape(Shape::line(self.at(left, y), self.at(right, y), stroke));
         }
-        let axis_angle = self.axis.y.atan2(self.axis.x);
+        let axis_angle = self.axis.y.libm_atan2(self.axis.x);
         for (x, start_angle) in [
             (right, axis_angle - FRAC_PI_2),
             (left, axis_angle + FRAC_PI_2),

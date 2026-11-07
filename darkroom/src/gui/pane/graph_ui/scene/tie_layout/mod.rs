@@ -1,5 +1,6 @@
 //! [`TieLayout`]: each tie's band and each tied wire's pieces, for one frame.
 
+use common::Libm;
 use std::f32::consts::FRAC_1_SQRT_2;
 use std::ops::Range;
 
@@ -259,7 +260,7 @@ impl TieLayout {
             let band = &self.bands[band_idx];
             let dir = match band.angle {
                 TieAngle::Pinned(degrees) => {
-                    let (sin, cos) = degrees.to_radians().sin_cos();
+                    let (sin, cos) = degrees.to_radians().libm_sin_cos();
                     Vec2::new(sin, -cos)
                 }
                 TieAngle::Auto => self.strands[range(&band.strands)]

@@ -31,6 +31,7 @@
 pub(crate) mod sip_order;
 
 use arrayvec::ArrayVec;
+use common::Libm;
 use glam::{DMat2, DVec2};
 use nalgebra::DMatrix;
 
@@ -285,7 +286,7 @@ impl<'a> SipSystem<'a> {
             coeffs_u.push(coefficient.x);
             coeffs_v.push(coefficient.y);
         }
-        let angle = linear.x_axis.y.atan2(linear.x_axis.x);
+        let angle = linear.x_axis.y.libm_atan2(linear.x_axis.x);
         let transform = match model {
             LinearModel::Translation => Transform::translation(constant),
             LinearModel::Euclidean => Transform::euclidean(constant, angle),
@@ -383,7 +384,7 @@ impl<'a> SipSystem<'a> {
             .local_geometry(DVec2::ZERO)
             .rotation;
         let at = |angle: f64| {
-            let (sin, cos) = angle.sin_cos();
+            let (sin, cos) = angle.libm_sin_cos();
             self.fit_fixed(
                 LinearModel::Euclidean,
                 DMat2::from_cols_array(&[cos, sin, -sin, cos]),

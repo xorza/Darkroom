@@ -1,6 +1,7 @@
 //! [`NoisePlane`]: the standard deviation of an image's white noise from its multiresolution
 //! support.
 
+use common::Libm;
 use std::mem;
 use std::ops::Range;
 
@@ -275,7 +276,7 @@ impl<E: Fn(usize) -> bool + Sync> NoisePlane<'_, E> {
         let binned = BinnedSamples::of(self.coefficients(), bins, |coefficients, pos| {
             gain(coefficients.idx[pos])
         });
-        bg_from_gain::fit(&binned.measure_in_turn(|run| sigma(run, size).powi(2)))
+        bg_from_gain::fit(&binned.measure_in_turn(|run| sigma(run, size).libm_powi(2)))
     }
 
     /// The coefficients of every tile's core pixels that `excluded` does not name, in tile order
@@ -709,6 +710,7 @@ impl Sums {
 
 #[cfg(test)]
 mod tests {
+    use common::Libm;
     use statrs::distribution::{ContinuousCDF, Normal};
 
     use common::Buffer2;
@@ -743,11 +745,11 @@ mod tests {
     #[test]
     fn the_first_layer_response_is_the_kernels() {
         let b = [1.0, 4.0, 6.0, 4.0, 1.0].map(|tap: f64| tap / 16.0);
-        let mut energy = 0.0;
+        let mut energy = 0.0_f64;
         for (i, row) in b.iter().enumerate() {
             for (j, col) in b.iter().enumerate() {
                 let delta = if i == 2 && j == 2 { 1.0 } else { 0.0 };
-                energy += (delta - row * col).powi(2);
+                energy += (delta - row * col).libm_powi(2);
             }
         }
         assert!((energy.sqrt() - wavelet::white_noise_sigma(0)).abs() < 1e-15);
@@ -766,7 +768,8 @@ mod tests {
         let deviation = |bound: f64| {
             let kept: Vec<f64> = values.iter().copied().filter(|v| v.abs() < bound).collect();
             let mean = kept.iter().sum::<f64>() / kept.len() as f64;
-            (kept.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (kept.len() - 1) as f64).sqrt()
+            (kept.iter().map(|v| (v - mean).libm_powi(2)).sum::<f64>() / (kept.len() - 1) as f64)
+                .sqrt()
         };
         let mut sigma = deviation(f64::INFINITY);
         for _ in 0..200 {

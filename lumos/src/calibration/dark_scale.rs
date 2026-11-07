@@ -1,6 +1,7 @@
 //! [`DarkScale`]: the factor a bias-removed dark is subtracted from a light with, fitted on the
 //! defect map's hot pixels where enough of them are clean.
 
+use common::Libm;
 use common::{PerWorker, par};
 use rayon::prelude::*;
 
@@ -140,7 +141,7 @@ impl FitLight<'_> {
                     .at(frame, &image.cfa_type(), size.point_of(idx))?;
                 Some(Pair {
                     dark: f64::from(excess) * self.dark_gain,
-                    dark_variance: (f64::from(noise) * self.dark_gain).powi(2),
+                    dark_variance: (f64::from(noise) * self.dark_gain).libm_powi(2),
                     light: less_bias(idx) - f64::from(level),
                 })
             })

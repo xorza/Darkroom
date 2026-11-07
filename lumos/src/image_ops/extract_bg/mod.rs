@@ -13,6 +13,7 @@
 //! stretch.
 
 use arrayvec::ArrayVec;
+use common::Libm;
 use common::{Buffer2, Introspect, IntrospectEnum, par};
 use nalgebra::{DMatrix, DVector};
 use rayon::prelude::*;
@@ -295,7 +296,7 @@ impl<'a> Polynomial<'a> {
         let (m, k) = (samples.len(), terms.len());
         let a = DMatrix::from_fn(m, k, |r, c| {
             let term = terms[c];
-            samples[r].x.powi(i32::from(term.x)) * samples[r].y.powi(i32::from(term.y))
+            samples[r].x.libm_powi(i32::from(term.x)) * samples[r].y.libm_powi(i32::from(term.y))
         });
         let z = DMatrix::from_fn(m, 1, |r, _| samples[r].z);
         let lstsq = Lstsq::new(a);
@@ -314,7 +315,7 @@ impl<'a> Polynomial<'a> {
         self.terms
             .iter()
             .zip(self.coeffs.iter())
-            .map(|(term, &c)| c * x.powi(i32::from(term.x)) * y.powi(i32::from(term.y)))
+            .map(|(term, &c)| c * x.libm_powi(i32::from(term.x)) * y.libm_powi(i32::from(term.y)))
             .sum()
     }
 }

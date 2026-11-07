@@ -11,6 +11,8 @@
     reason = "fdlibm's coefficients as it publishes them, so each can be checked against the source"
 )]
 
+use common::Libm;
+
 /// `erf(1)` rounded to 32 bits, the anchor of the range about 1.
 const ERX: f64 = 8.450_629_115_104_675_292_97e-1;
 /// `2/√π − 1`, for the smallest arguments.
@@ -123,7 +125,7 @@ fn tail(x: f64, split: i32) -> f64 {
         polynomial(&RB, s) / denominator(&SB, s)
     };
     let z = f64::from_bits(x.to_bits() & 0xffff_ffff_0000_0000);
-    (-z * z - 0.5625).exp() * ((z - x) * (z + x) + ratio).exp()
+    (-z * z - 0.5625).libm_exp() * ((z - x) * (z + x) + ratio).libm_exp()
 }
 
 /// The error function, `(2/√π)·∫₀ˣ e^(−t²) dt`.

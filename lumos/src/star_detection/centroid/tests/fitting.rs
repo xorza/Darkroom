@@ -75,7 +75,7 @@ fn every_method_on_a_sub_pixel_grid() {
         let star = measured
             .measure(&measured.region_at(seed), &moments, fwhm)
             .expect("the moments measure");
-        let bound = 1.01 * (seed - truth).length() * (1.0 / 1.64f64).powi(10);
+        let bound = 1.01 * (seed - truth).length() * (1.0 / 1.64f64).libm_powi(10);
         assert!(
             (star.pos - truth).length() <= bound,
             "moments at {truth}: {} against {bound}",

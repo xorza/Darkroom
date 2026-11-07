@@ -2,6 +2,7 @@
 //! and nebula-like structure.
 
 use common::Buffer2;
+use common::Libm;
 use glam::{USizeVec2, Vec2};
 
 use common::USize2;
@@ -33,8 +34,8 @@ impl Gradient {
             angle,
         } = self;
         let size = pixels.size();
-        let cos_a = angle.cos();
-        let sin_a = angle.sin();
+        let cos_a = angle.libm_cos();
+        let sin_a = angle.libm_sin();
         let project = |x: f32, y: f32| x * cos_a + y * sin_a;
         let (last_x, last_y) = ((size.width - 1) as f32, (size.height - 1) as f32);
         let corners = [
@@ -74,7 +75,7 @@ impl Vignette {
     pub(crate) fn at(self, size: USize2, x: usize, y: usize) -> f32 {
         let centre = Vec2::new(size.width as f32 / 2.0, size.height as f32 / 2.0);
         let max_r = centre.length().max(1.0);
-        let t = (Vec2::new(x as f32, y as f32).distance(centre) / max_r).powf(self.falloff);
+        let t = (Vec2::new(x as f32, y as f32).distance(centre) / max_r).libm_powf(self.falloff);
         self.center + (self.edge - self.center) * t
     }
 
@@ -132,8 +133,8 @@ impl NebulaConfig {
         let radius = self.radius * diag;
         let radius_sq = radius * radius;
 
-        let cos_a = self.angle.cos();
-        let sin_a = self.angle.sin();
+        let cos_a = self.angle.libm_cos();
+        let sin_a = self.angle.libm_sin();
 
         for y in 0..size.height {
             for x in 0..size.width {
@@ -146,7 +147,7 @@ impl NebulaConfig {
                 let r_sq = dx_rot * dx_rot + dy_rot * dy_rot;
                 let t = r_sq / radius_sq;
 
-                let falloff = (-t * self.softness).exp();
+                let falloff = (-t * self.softness).libm_exp();
                 pixels[size.idx_of(USizeVec2::new(x, y))] += self.amplitude * falloff;
             }
         }

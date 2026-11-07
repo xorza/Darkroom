@@ -7,6 +7,7 @@ mod input_map;
 pub(crate) mod kernel_plan;
 mod output_band;
 
+use common::Libm;
 use std::slice::ChunksMut;
 
 use arrayvec::ArrayVec;
@@ -323,7 +324,7 @@ impl OutputSums {
                     .zip(par::iter_mut(confidence.pixels_mut()))
                     .for_each(|(weight, confidence)| {
                         *confidence = if *weight > 0.0 && *confidence > 0.0 {
-                            (f64::from(*weight).powi(2) / f64::from(*confidence)) as f32
+                            (f64::from(*weight).libm_powi(2) / f64::from(*confidence)) as f32
                         } else {
                             0.0
                         };

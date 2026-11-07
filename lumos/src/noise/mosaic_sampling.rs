@@ -1,5 +1,6 @@
 //! [`MosaicSampling`]: the photosites of a mosaic a noise statistic samples.
 
+use common::Libm;
 use std::f32::consts::SQRT_2;
 
 use arrayvec::ArrayVec;
@@ -162,7 +163,7 @@ impl<E: Fn(usize) -> bool> MosaicSampling<E> {
             .into_iter()
             .map(|color| {
                 bg_from_gain::fit(
-                    &color.measure(|differences| f64::from(sigma(differences)).powi(2)),
+                    &color.measure(|differences| f64::from(sigma(differences)).libm_powi(2)),
                 )
             })
             .collect()

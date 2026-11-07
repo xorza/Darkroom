@@ -27,6 +27,7 @@ pub(crate) mod slot_planes;
 
 use arrayvec::ArrayVec;
 use common::IntrospectEnum;
+use common::Libm;
 
 use crate::combine::error::StackError;
 use crate::combine::normalization::norm_fit::{Fitted, NormFit};
@@ -179,7 +180,7 @@ fn select_reference_frame(frames: &[StoredFrame], to_domain: &[DomainMap]) -> us
     let mean_variance = |(frame, map): (&StoredFrame, &DomainMap)| {
         let stats = &frame.source_stats;
         (0..stats.medians.len())
-            .map(|slot| (map.gain * f64::from(stats.slot_noise(slot))).powi(2))
+            .map(|slot| (map.gain * f64::from(stats.slot_noise(slot))).libm_powi(2))
             .sum::<f64>()
             / stats.medians.len() as f64
     };

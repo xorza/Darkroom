@@ -349,7 +349,7 @@ impl Kernel for Battery {
         i32s.push(("i32 shift 31".to_string(), x.shift_right::<31>()));
         i32s.push(("i32 splat".to_string(), isa.splat_i32(-7)));
         // Integers f32 holds exactly, at both ends of `i32`'s range and around zero.
-        let end = 2.0f32.powi(31);
+        let end = -(i32::MIN as f32);
         let integral = [
             -end,
             -16_777_216.0,
@@ -718,7 +718,7 @@ fn exp_is_accurate_across_the_normal_range() {
     xs.extend([0.001, -0.001, 0.1, -0.1, PI, -PI, 1.0, -1.0]);
     for tier in IsaTier::supported() {
         for (&x, got) in xs.iter().zip(tier.run(Exp(&xs))) {
-            let want = x.exp();
+            let want = libm::exp(x);
             if want < 1e-300 {
                 assert!(got < 1e-290, "{tier} exp({x}) = {got}");
             } else {
@@ -794,7 +794,7 @@ fn frexp_and_pow2i_split_and_build_powers_of_two() {
                 [
                     [0.75, 0.5, 0.1 / 0.125, 0.5],
                     [3.0, 1.0, -3.0, -1021.0],
-                    [f64::MIN_POSITIVE, 0.5, 1.0, 2f64.powi(1023)],
+                    [f64::MIN_POSITIVE, 0.5, 1.0, libm::ldexp(1.0, 1023)],
                 ]
             ),
             "{tier}"
@@ -824,7 +824,7 @@ fn ln_f64_is_accurate_at_every_magnitude() {
         }
     }
 
-    let mut xs: Vec<f64> = (-1020..1020).map(|e| 1.37 * 2f64.powi(e)).collect();
+    let mut xs: Vec<f64> = (-1020..1020).map(|e| 1.37 * libm::ldexp(1.0, e)).collect();
     xs.extend((0..1000).map(|i| 0.5 + f64::from(i) * 5e-4));
     xs.extend([
         f64::MIN_POSITIVE,
@@ -839,7 +839,7 @@ fn ln_f64_is_accurate_at_every_magnitude() {
     xs.resize(xs.len().next_multiple_of(F64_LANES), 1.0);
     for tier in IsaTier::supported() {
         for (&x, got) in xs.iter().zip(tier.run(Ln(&xs))) {
-            let want = x.ln();
+            let want = libm::log(x);
             if want == 0.0 {
                 assert_eq!(got, 0.0, "{tier} ln({x})");
             } else {
@@ -881,9 +881,11 @@ fn ln_f32_and_asinh_f32_are_accurate_at_every_magnitude() {
         }
     }
 
-    let mut xs: Vec<f32> = (-126..128).map(|e| 1.37 * 2f32.powi(e)).collect();
+    let mut xs: Vec<f32> = (-126..128).map(|e| 1.37 * libm::ldexpf(1.0, e)).collect();
     for exponent in -30..=30 {
-        xs.extend([1.0f32, 1.7, 3.3, 7.9].map(|mantissa| mantissa * 10f32.powi(exponent)));
+        xs.extend(
+            [1.0f32, 1.7, 3.3, 7.9].map(|mantissa| mantissa * libm::powf(10.0, exponent as f32)),
+        );
     }
     xs.extend((0..1000).map(|i| 0.5 + i as f32 * 5e-4));
     xs.extend([
@@ -912,13 +914,13 @@ fn ln_f32_and_asinh_f32_are_accurate_at_every_magnitude() {
     for tier in IsaTier::supported() {
         for (&x, [ln, asinh]) in xs.iter().zip(tier.run(LnAsinh(&xs))) {
             if x >= f32::MIN_POSITIVE {
-                let error = relative(ln, f64::from(x).ln());
+                let error = relative(ln, libm::log(f64::from(x)));
                 assert!(
                     error <= f64::from(f32::EPSILON),
                     "{tier} ln({x}) = {ln}, {error:e} off"
                 );
             }
-            let error = relative(asinh, f64::from(x).asinh());
+            let error = relative(asinh, libm::asinh(f64::from(x)));
             assert!(
                 error <= 2.0 * f64::from(f32::EPSILON),
                 "{tier} asinh({x}) = {asinh}, {error:e} off"

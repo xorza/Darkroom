@@ -1,4 +1,5 @@
 use crate::math::lm_controller::{LmController, LmProblem, NormalEquations};
+use common::Libm;
 
 /// Residuals `r` and their Jacobian rows `J` (of the model, so `r = data − model` and the gradient
 /// is `Jᵀr`), gathered into the normal equations.
@@ -53,7 +54,7 @@ impl LmProblem<2> for Decay {
     fn normal_equations(&self, params: &[f64; 2]) -> NormalEquations<2> {
         let [a, b] = *params;
         equations(self.points.iter().map(|&(x, y)| {
-            let e = (-b * x).exp();
+            let e = (-b * x).libm_exp();
             (y - a * e, [e, -a * x * e])
         }))
     }
@@ -122,10 +123,10 @@ fn rosenbrock_reaches_its_minimum() {
 /// fit singular.
 #[test]
 fn a_fit_does_not_depend_on_the_data_scale() {
-    let scale = 2.0f64.powi(-40);
+    let scale = 2.0f64.libm_powi(-40);
     let decay = |amplitude: f64| Decay {
         points: (0..10)
-            .map(|x| (f64::from(x), amplitude * (-0.5 * f64::from(x)).exp()))
+            .map(|x| (f64::from(x), amplitude * (-0.5 * f64::from(x)).libm_exp()))
             .collect(),
     };
     let native = LmController::STANDARD.fit(&decay(2.0), [1.0, 1.0]).unwrap();

@@ -38,6 +38,7 @@ uuid = { version = "1.29", default-features = false }
 thiserror = { version = "2.0", default-features = false }
 bytemuck = { version = "1.25", default-features = false }
 glam = { version = "0.34", default-features = false }
+libm = { version = "0.2", default-features = false, features = ["arch"] }
 strum = { version = "0.28", default-features = false }
 rand = { version = "0.10", default-features = false }
 tokio = { version = "1.54", default-features = false }

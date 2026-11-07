@@ -1,5 +1,7 @@
 //! [`LmController`]: Levenberg–Marquardt for small dense least-squares problems.
 
+use common::Libm;
+
 /// One step's normal equations: the Hessian `JᵀWJ`, the gradient `JᵀW·r` with `r` the data less
 /// the model, and χ².
 ///
@@ -146,7 +148,7 @@ impl LmController {
                 let settled = self.is_negligible(&applied, &params, &scale);
                 params = trial;
                 chi2 = trial_chi2;
-                damping *= (1.0 - (2.0 * ratio - 1.0).powi(3)).max(1.0 / 3.0);
+                damping *= (1.0 - (2.0 * ratio - 1.0).libm_powi(3)).max(1.0 / 3.0);
                 growth = 2.0;
                 equations = problem.normal_equations(&params);
                 if settled {
@@ -172,8 +174,8 @@ impl LmController {
         let mut step_norm = 0.0;
         let mut params_norm = 0.0;
         for i in 0..N {
-            step_norm += (step[i] / scale.factors[i]).powi(2);
-            params_norm += (params[i] / scale.factors[i]).powi(2);
+            step_norm += (step[i] / scale.factors[i]).libm_powi(2);
+            params_norm += (params[i] / scale.factors[i]).libm_powi(2);
         }
         step_norm <= self.step_tolerance * self.step_tolerance * params_norm
     }

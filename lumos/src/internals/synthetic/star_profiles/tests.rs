@@ -18,7 +18,7 @@ fn gaussian_peaks_at_its_centre_and_vanishes_at_the_corner() {
 fn gaussian_value_matches_the_closed_form() {
     let star = SyntheticStar::new(Vec2::splat(10.0), 0.8, GAUSSIAN_2);
     // At 2px off-centre with sigma 2: 0.8 * exp(-4/8) = 0.8 * exp(-0.5) = 0.485225...
-    let expected = 0.8 * (-0.5f32).exp();
+    let expected = 0.8 * (-0.5f32).libm_exp();
     assert!((star.value_at(12.0, 10.0) - expected).abs() < 1e-6);
     // Radially symmetric: the same offset along y, and along the diagonal at r² = 4.
     assert!((star.value_at(10.0, 8.0) - expected).abs() < 1e-6);

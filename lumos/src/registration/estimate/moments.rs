@@ -1,6 +1,7 @@
 //! [`Moments`]: the weighted moments of matched positions that the Procrustes and affine fits are
 //! solved from.
 
+use common::Libm;
 use glam::DVec2;
 
 use crate::registration::estimate::{Pair, Pairs};
@@ -86,8 +87,8 @@ impl Moments {
         if spread <= f64::EPSILON * self.raw_spread {
             return None;
         }
-        let angle = (xy - yx).atan2(xx + yy);
-        let (sin, cos) = angle.sin_cos();
+        let angle = (xy - yx).libm_atan2(xx + yy);
+        let (sin, cos) = angle.libm_sin_cos();
         let factor = match scale {
             Scale::Unit => 1.0,
             Scale::Fitted => {

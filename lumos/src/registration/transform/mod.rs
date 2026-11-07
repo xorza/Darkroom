@@ -3,6 +3,7 @@
 pub(crate) mod linear_model;
 pub(crate) mod local_geometry;
 
+use common::Libm;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
@@ -147,8 +148,8 @@ impl Transform {
 
     /// Create Euclidean transform (translation + rotation).
     pub fn euclidean(t: DVec2, angle: f64) -> Self {
-        let cos_a = angle.cos();
-        let sin_a = angle.sin();
+        let cos_a = angle.libm_cos();
+        let sin_a = angle.libm_sin();
         Self {
             matrix: DMat3::from_array([cos_a, -sin_a, t.x, sin_a, cos_a, t.y, 0.0, 0.0, 1.0]),
             transform_type: TransformType::Euclidean,
@@ -157,8 +158,8 @@ impl Transform {
 
     /// Create similarity transform (translation + rotation + uniform scale).
     pub fn similarity(t: DVec2, angle: f64, scale: f64) -> Self {
-        let cos_a = angle.cos() * scale;
-        let sin_a = angle.sin() * scale;
+        let cos_a = angle.libm_cos() * scale;
+        let sin_a = angle.libm_sin() * scale;
         Self {
             matrix: DMat3::from_array([cos_a, -sin_a, t.x, sin_a, cos_a, t.y, 0.0, 0.0, 1.0]),
             transform_type: TransformType::Similarity,
@@ -196,8 +197,8 @@ impl Transform {
 
     /// Create rotation transform around a specified center point.
     pub fn rotation_around(center: DVec2, angle: f64) -> Self {
-        let cos_a = angle.cos();
-        let sin_a = angle.sin();
+        let cos_a = angle.libm_cos();
+        let sin_a = angle.libm_sin();
         // T(-cx,-cy) * R(angle) * T(cx,cy)
         let tx = center.x - cos_a * center.x + sin_a * center.y;
         let ty = center.y - sin_a * center.x - cos_a * center.y;

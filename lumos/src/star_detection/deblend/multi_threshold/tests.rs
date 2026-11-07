@@ -160,9 +160,9 @@ fn threshold_ladder_is_exponential_from_floor_to_peak() {
     let tolerance = |value: f32| 8.0 * f32::EPSILON * value;
     assert_eq!(ladder.level(0), 0.1);
     assert!((ladder.level(10) - 1.0).abs() <= tolerance(1.0));
-    let step = 10f32.powf(0.1);
+    let step = 10f32.libm_powf(0.1);
     for i in 1..=10 {
-        let expected = 0.1 * step.powi(i as i32);
+        let expected = 0.1 * step.libm_powi(i as i32);
         assert!(
             (ladder.level(i) - expected).abs() <= tolerance(expected),
             "level {i}: {} vs {expected}",

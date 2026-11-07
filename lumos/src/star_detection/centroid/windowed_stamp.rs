@@ -1,6 +1,7 @@
 //! [`WindowedStamp`]: a stamp under a circular Gaussian window, and the moments it weighs.
 
 use common::Buffer2;
+use common::Libm;
 use glam::{DVec2, USizeVec2};
 
 use crate::star_detection::centroid::covariance::Cov2;
@@ -60,7 +61,7 @@ impl<'a> WindowedStamp<'a> {
         for col in 0..size {
             let dx = (origin.x + col) as f64 - pos.x;
             col_offsets[col] = dx;
-            col_weights[col] = (-dx * dx * inv_two_window).exp();
+            col_weights[col] = (-dx * dx * inv_two_window).libm_exp();
         }
         Some(Self {
             residual,
@@ -79,7 +80,7 @@ impl<'a> WindowedStamp<'a> {
             let dy = y as f64 - self.pos.y;
             WindowedRow {
                 pixels: &self.residual.row(y)[self.origin.x..self.origin.x + self.size],
-                weight: (-dy * dy * self.inv_two_window).exp(),
+                weight: (-dy * dy * self.inv_two_window).libm_exp(),
                 dy,
             }
         })

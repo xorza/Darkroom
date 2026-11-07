@@ -37,7 +37,7 @@ glam = { workspace = true, features = ["f64", "i32", "serde", "std", "u32", "usi
 serde = { workspace = true, features = ["derive", "std"] }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
-nalgebra = { workspace = true, features = ["std"] }
+nalgebra = { workspace = true, features = ["libm-force", "std"] }
 statrs = { workspace = true }
 arrayvec = { workspace = true, features = ["serde"] }
 blake3 = { workspace = true, features = ["std"] }

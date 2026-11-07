@@ -4,14 +4,12 @@
 //!
 //! A snapshot pins what the code does, not what is right. A change that moves one states why;
 //! one that moves without a stated reason is a regression until shown otherwise. The comparison
-//! allows a stated tolerance rather than demanding the same bits: Rust leaves `exp`, `ln`, `powf`
-//! and the other transcendental functions to the platform's C library, whose results differ by an
-//! ulp between glibc, Apple's libm and the MSVC runtime, and between versions of one
-//! ([`f64::exp`]). Regression data compared within a tolerance, with a mode that writes it anew,
-//! is how GROMACS checks its reference data
-//! ([testutils](https://manual.gromacs.org/2022/doxygen/html-lib/group__module__testutils.xhtml)).
-//! Refused: bit-exact digests, which fail on a host or a toolchain whose libm rounds differently;
-//! a libm of the project's own, which only a need for the same bits on every host would pay for.
+//! demands the same bits on every system, which holds a result to the one behavior every system
+//! owes (`AGENTS.md`): [`common::Libm`] takes the transcendental functions out of the platform's C
+//! library, and each CI lane compares with one committed reference. Refused: a tolerance of 8 ulps
+//! for that library's rounding, which hid a difference between systems that a threshold can turn
+//! into another decision. Cost: a Rust or `libm` update that moves a bit writes the references
+//! anew, and a cache keyed by one moves with it.
 //! Each reference a cache keys by — the decodes' and the master stack's — is hashed into that
 //! cache's version, so a reference written anew moves it.
 

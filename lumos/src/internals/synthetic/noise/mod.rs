@@ -9,6 +9,7 @@
 //! Conversion: a normalized value `v` corresponds to `v * full_well_e` electrons.
 
 use crate::internals::test_rng::TestRng;
+use common::Libm;
 
 /// Draw a Poisson sample with mean `lambda` using `rng`.
 ///
@@ -21,7 +22,7 @@ fn poisson(rng: &mut TestRng, lambda: f32) -> f32 {
     }
     if lambda < 30.0 {
         // Knuth: count uniform draws until their product drops below e^-λ.
-        let threshold = (-lambda).exp();
+        let threshold = (-lambda).libm_exp();
         let mut k = 0u32;
         let mut product = 1.0f32;
         loop {

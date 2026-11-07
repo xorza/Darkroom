@@ -40,6 +40,7 @@
 
 use arrayvec::ArrayVec;
 use common::IntrospectEnum;
+use common::Libm;
 use common::par;
 use rayon::prelude::*;
 
@@ -461,13 +462,13 @@ impl GhsShape {
     fn base(self, u: f32) -> f32 {
         let Self { d, b, .. } = self;
         if b == 0.0 {
-            -(-d * u).exp_m1()
+            -(-d * u).libm_exp_m1()
         } else if b == -1.0 {
-            (d * u).ln_1p() / d
+            (d * u).libm_ln_1p() / d
         } else if b < 0.0 {
-            -(((b + 1.0) / b) * (-b * d * u).ln_1p()).exp_m1() / (d * (b + 1.0))
+            -(((b + 1.0) / b) * (-b * d * u).libm_ln_1p()).libm_exp_m1() / (d * (b + 1.0))
         } else {
-            -(-(b * d * u).ln_1p() / b).exp_m1()
+            -(-(b * d * u).libm_ln_1p() / b).libm_exp_m1()
         }
     }
 
@@ -475,11 +476,11 @@ impl GhsShape {
     fn base_slope(self, u: f32) -> f32 {
         let Self { d, b, .. } = self;
         if b == 0.0 {
-            d * (-d * u).exp()
+            d * (-d * u).libm_exp()
         } else if b < 0.0 {
-            ((-b * d * u).ln_1p() / b).exp()
+            ((-b * d * u).libm_ln_1p() / b).libm_exp()
         } else {
-            d * (-((1.0 + b) / b) * (b * d * u).ln_1p()).exp()
+            d * (-((1.0 + b) / b) * (b * d * u).libm_ln_1p()).libm_exp()
         }
     }
 }
@@ -604,13 +605,13 @@ fn solve_asinh_beta(median: f32, target_bg: f32) -> Option<f32> {
     let (mut lo, mut hi) = (-30.0f32, 5.0f32);
     for _ in 0..60 {
         let mid = f32::midpoint(lo, hi);
-        if g(10.0f32.powf(mid)) > target_bg {
+        if g(10.0f32.libm_powf(mid)) > target_bg {
             lo = mid;
         } else {
             hi = mid;
         }
     }
-    let beta = 10.0f32.powf(f32::midpoint(lo, hi));
+    let beta = 10.0f32.libm_powf(f32::midpoint(lo, hi));
     // A reachable target is met to the f32 accuracy of the curve (a few ulp, ~1e-6); a target past
     // the range's end misses by far more than this.
     ((g(beta) - target_bg).abs() <= 1e-4).then_some(beta)

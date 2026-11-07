@@ -127,7 +127,7 @@ fn shot_noise_variance_scales_with_signal() {
     let mut bright = vec![0.8f32; 200_000];
     apply_shot_noise(&mut dim, well, &mut rng);
     apply_shot_noise(&mut bright, well, &mut rng);
-    let ratio = (pixel_stats(&bright).std / pixel_stats(&dim).std).powi(2);
+    let ratio = (pixel_stats(&bright).std / pixel_stats(&dim).std).libm_powi(2);
     assert!(
         (ratio - 4.0).abs() < 0.4,
         "shot-noise variance must scale with signal: ratio {ratio:.2}"

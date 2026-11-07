@@ -1,6 +1,7 @@
 //! The dark's scale, fitted per light on the defect map's hot pixels.
 
 use common::CancelToken;
+use common::Libm;
 
 use crate::calibration::calibration_masters::CalibrationMasters;
 use crate::calibration::calibration_set::CalibrationSet;
@@ -106,7 +107,8 @@ impl Light {
                         centre.x.wrapping_add_signed(dx as isize),
                         centre.y.wrapping_add_signed(dy as isize),
                     );
-                    pixels[SIZE.idx_of(at)] += 0.2 * (-((dx * dx + dy * dy) as f32) / 2.0).exp();
+                    pixels[SIZE.idx_of(at)] +=
+                        0.2 * (-((dx * dx + dy * dy) as f32) / 2.0).libm_exp();
                 }
             }
         }
@@ -173,7 +175,7 @@ fn the_fit_recovers_the_scale_of_the_lights_dark_signal() {
         assert!((235..=241).contains(&pixels), "{scale}: {pixels} kept");
         let energy: f64 = hot[10..251]
             .iter()
-            .map(|&(_, excess)| f64::from(excess).powi(2))
+            .map(|&(_, excess)| f64::from(excess).libm_powi(2))
             .sum();
         let derived = f64::from(LIGHT_NOISE) * (1.0 + 1.0 / 168.0f64).sqrt() / energy.sqrt();
         assert!(

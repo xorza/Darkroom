@@ -1,3 +1,5 @@
+use common::Libm;
+use common::LibmVec2;
 use glam::Vec2;
 use palantir::widget::{Mesh, Shape};
 use palantir::{Configure, Panel, RgbaF32, Sizing, TranslateScale, Ui};
@@ -115,7 +117,7 @@ impl Lattice {
         let rim: Vec<Vec2> = (0..RIM_VERTICES)
             .map(|i| {
                 let angle = std::f32::consts::TAU * i as f32 / RIM_VERTICES as f32;
-                Vec2::from_angle(angle) * (radius + FRINGE)
+                Vec2::libm_from_angle(angle) * (radius + FRINGE)
             })
             .collect();
         let clear = color.with_alpha(0.0);
@@ -153,10 +155,10 @@ fn lattice_origin(pan: Vec2, pitch: f32) -> Vec2 {
 /// px on screen). `min`/`max` on the bounds keep `clamp` panic-free even
 /// if rounding inverts them.
 fn wrap_multiplier(zoom: f32) -> f32 {
-    let k_low = (MIN_WRAP / zoom).log2().ceil() as i32;
-    let k_high = (MAX_WRAP / zoom).log2().floor() as i32;
+    let k_low = (MIN_WRAP / zoom).libm_log2().ceil() as i32;
+    let k_high = (MAX_WRAP / zoom).libm_log2().floor() as i32;
     let k = 0i32.clamp(k_low.min(k_high), k_low.max(k_high));
-    2.0_f32.powi(k)
+    2.0_f32.libm_powi(k)
 }
 
 #[cfg(test)]
@@ -222,7 +224,7 @@ mod tests {
         let mut want = Mesh::new();
         want.vertex(center, RgbaF32::WHITE);
         for i in 0..6 {
-            let at = Vec2::from_angle(std::f32::consts::TAU * i as f32 / 6.0) * 1.5;
+            let at = Vec2::libm_from_angle(std::f32::consts::TAU * i as f32 / 6.0) * 1.5;
             want.vertex(center + at, RgbaF32::WHITE.with_alpha(0.0));
         }
         for i in 0..6 {

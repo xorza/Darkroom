@@ -1,4 +1,5 @@
 use common::Buffer2;
+use common::Libm;
 
 use crate::math::wavelet::{
     B3, SmoothRow, atrous_smooth, atrous_smooth_serial, max_scales, reflect, white_noise_sigma,
@@ -9,7 +10,7 @@ use simd::IsaTier;
 fn pattern(size: USize2) -> Buffer2<f32> {
     Buffer2::from_fn(size, |at| {
         let at = at.as_vec2();
-        0.5 + 0.3 * (at.x * 0.3).sin() * (at.y * 0.2).cos()
+        0.5 + 0.3 * (at.x * 0.3).libm_sin() * (at.y * 0.2).libm_cos()
     })
 }
 
@@ -152,7 +153,7 @@ fn every_tier_smooths_a_row_as_the_scalar_order_does() {
         let rows: Vec<Vec<f32>> = (0..5)
             .map(|row| {
                 (0..width)
-                    .map(|x| 0.5 + 0.3 * ((x * 7 + row * 13) as f32 * 0.37).sin())
+                    .map(|x| 0.5 + 0.3 * ((x * 7 + row * 13) as f32 * 0.37).libm_sin())
                     .collect()
             })
             .collect();

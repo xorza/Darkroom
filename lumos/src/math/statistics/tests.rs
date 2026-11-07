@@ -1,5 +1,6 @@
 //! Tests for statistical functions.
 
+use common::Libm;
 use std::f64::consts::{PI, SQRT_2};
 
 use crate::internals::assertions::assert_close;
@@ -791,10 +792,10 @@ fn median_mut_equals_the_sorted_median() {
 /// p-quantile `−2·ln(1 − p)`.
 #[test]
 fn chi2_99_2dof_is_the_one_percent_tail_of_the_two_dof_distribution() {
-    assert!((CHI2_99_2DOF - (-2.0 * 0.01_f64.ln())).abs() < 1e-12);
+    assert!((CHI2_99_2DOF - (-2.0 * 0.01_f64.libm_ln())).abs() < 1e-12);
 
     // Round trip through the CDF: exactly 1% of the distribution lies beyond it.
-    let tail = (-CHI2_99_2DOF / 2.0).exp();
+    let tail = (-CHI2_99_2DOF / 2.0).libm_exp();
     assert!((tail - 0.01).abs() < 1e-12, "tail mass {tail} is not 1%");
 }
 

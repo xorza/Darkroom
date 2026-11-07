@@ -1,5 +1,6 @@
 //! [`ModelSearch`]: one frame pair's matches, fitted by the model a registration asks for.
 
+use common::Libm;
 use std::time::Instant;
 
 use arrayvec::ArrayVec;
@@ -123,13 +124,13 @@ impl ModelSearch<'_> {
             .collect();
         union.sort_unstable_by_key(|pair| (pair.reference, pair.target));
         union.dedup();
-        let per_parameter = (4.0 * union.len() as f64).ln();
+        let per_parameter = (4.0 * union.len() as f64).libm_ln();
         let gric = |(model, fit): &(FitModel, FinalFit)| {
             union
                 .iter()
                 .map(|&pair| {
                     (self.catalogs.normalized_residual(&fit.warp, pair) / scale)
-                        .powi(2)
+                        .libm_powi(2)
                         .min(4.0)
                 })
                 .sum::<f64>()

@@ -17,6 +17,7 @@ use crate::star_detection::deblend::deblend_buffers::DeblendBuffers;
 use crate::star_detection::deblend::pixel::Pixel;
 use crate::star_detection::deblend::region::Region;
 use crate::star_detection::star_detection_config::extraction_config::Connectivity;
+use common::Libm;
 
 /// A pixel that belongs to no object of the current level: below it, or in a region too small to
 /// be one.
@@ -179,7 +180,7 @@ struct LevelCut {
 impl ThresholdLadder {
     /// Level `i` of `0..threshold_count`: `low` itself at 0.
     fn level(self, i: usize) -> f32 {
-        self.low * (self.high / self.low).powf(i as f32 / self.threshold_count as f32)
+        self.low * (self.high / self.low).libm_powf(i as f32 / self.threshold_count as f32)
     }
 }
 

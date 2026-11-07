@@ -1,3 +1,4 @@
+use common::Libm;
 use glam::DVec2;
 
 use crate::registration::error::{
@@ -67,7 +68,7 @@ fn result_keeps_matches_and_derives_diagnostics() {
     // exp(−rms / 2) · 3 / 20, the same operations in the same order.
     assert_eq!(
         result.quality_score(),
-        (-expected_rms / 2.0).exp() * (3.0 / 20.0)
+        (-expected_rms / 2.0).libm_exp() * (3.0 / 20.0)
     );
 }
 
@@ -78,13 +79,13 @@ fn quality_score_uses_error_and_saturating_inlier_factors() {
 
     // RMS = sqrt((0.01 + 0.04 + 0.0225 + 0.0025) / 4).
     let expected_rms = (0.075_f64 / 4.0).sqrt();
-    let expected_quality = (-expected_rms / 2.0).exp() * (4.0 / 20.0);
+    let expected_quality = (-expected_rms / 2.0).libm_exp() * (4.0 / 20.0);
     assert!((four.rms_error() - expected_rms).abs() < f64::EPSILON);
     assert!((four.quality_score() - expected_quality).abs() < f64::EPSILON);
 
     let twenty_five = result(Transform::identity(), identity_matches(&[0.1; 25]));
     // The inlier factor saturates at 20, so quality = exp(-0.1 / 2).
-    let saturated_quality = (-0.05_f64).exp();
+    let saturated_quality = (-0.05_f64).libm_exp();
     assert!((twenty_five.rms_error() - 0.1).abs() < f64::EPSILON);
     assert!((twenty_five.quality_score() - saturated_quality).abs() < f64::EPSILON);
 }

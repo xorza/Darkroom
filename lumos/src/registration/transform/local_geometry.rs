@@ -1,5 +1,6 @@
 //! [`LocalGeometry`]: what a transform does to a small neighbourhood of a point.
 
+use common::Libm;
 use glam::DMat2;
 
 /// The polar decomposition of a transform's Jacobian at a point, `J = R(θ)·S`: the rotation `θ`
@@ -24,10 +25,10 @@ impl LocalGeometry {
     pub(crate) fn of(jacobian: DMat2) -> Self {
         let [a, c] = jacobian.x_axis.to_array();
         let [b, d] = jacobian.y_axis.to_array();
-        let conformal = (a + d).hypot(c - b);
-        let anticonformal = (a - d).hypot(c + b);
+        let conformal = (a + d).libm_hypot(c - b);
+        let anticonformal = (a - d).libm_hypot(c + b);
         Self {
-            rotation: (c - b).atan2(a + d),
+            rotation: (c - b).libm_atan2(a + d),
             stretch: [
                 f64::midpoint(conformal, anticonformal),
                 f64::midpoint(conformal, -anticonformal),
@@ -43,6 +44,7 @@ impl LocalGeometry {
 
 #[cfg(test)]
 mod tests {
+    use common::Libm;
     use glam::{DMat2, DVec2};
 
     use crate::registration::transform::Transform;
@@ -87,7 +89,7 @@ mod tests {
         );
         let golden = f64::midpoint(1.0, 5f64.sqrt());
         let shear = geometry(1.0, 1.0, 0.0, 1.0);
-        assert_eq!(shear.rotation, (-1f64).atan2(2.0));
+        assert_eq!(shear.rotation, (-1f64).libm_atan2(2.0));
         assert!((shear.stretch[0] - golden).abs() <= 2.0 * f64::EPSILON * golden);
         assert!((shear.stretch[1] - 1.0 / golden).abs() <= 2.0 * f64::EPSILON);
         let mirror = geometry(1.0, 0.0, 0.0, -1.0);

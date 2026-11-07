@@ -9,6 +9,7 @@
 mod tier_equivalence;
 
 use common::Buffer2;
+use common::Libm;
 use imaginarium::{ChannelLayout, PlanarDesc};
 
 use crate::combine::normalization::Normalization;
@@ -309,7 +310,7 @@ fn noise_weighting_beats_equal_on_mixed_quality_frames() {
     // variance is Σ wᵢ²vᵢ/(Σ wᵢ)². The ratio of the two predicted RMSs over the frame — about 5.7,
     // the noisy frames carrying 12× the σ — holds to the two estimates' sampling error, 0.8%,
     // times 5.
-    let variance = |signal: f64, well: f64, read: f64| signal / well + (read / well).powi(2);
+    let variance = |signal: f64, well: f64, read: f64| signal / well + (read / well).libm_powi(2);
     let (low_weight, high_weight) = (
         1.0 / variance(0.1, 50_000.0, 3.0),
         1.0 / variance(0.1, 2_000.0, 30.0),
@@ -321,8 +322,9 @@ fn noise_weighting_beats_equal_on_mixed_quality_frames() {
             variance(f64::from(signal), 2_000.0, 30.0),
         );
         equal_variance += 6.0 * (low + high) / 144.0;
-        weighted_variance += 6.0 * (low_weight.powi(2) * low + high_weight.powi(2) * high)
-            / (6.0 * (low_weight + high_weight)).powi(2);
+        weighted_variance += 6.0
+            * (low_weight.libm_powi(2) * low + high_weight.libm_powi(2) * high)
+            / (6.0 * (low_weight + high_weight)).libm_powi(2);
     }
     let predicted = (equal_variance / weighted_variance).sqrt();
     let ratio = equal_rms / weighted_rms;

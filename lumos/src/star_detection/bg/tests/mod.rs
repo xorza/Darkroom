@@ -2,6 +2,7 @@
 
 mod synthetic_skies;
 
+use common::Libm;
 use std::num::NonZeroUsize;
 
 use common::Buffer2;
@@ -141,7 +142,7 @@ impl<'a> ReferenceSpline<'a> {
         let b = 1.0 - a;
         a * ys[k]
             + b * ys[k + 1]
-            + ((a.powi(3) - a) * m[k] + (b.powi(3) - b) * m[k + 1]) * h * h / 6.0
+            + ((a.libm_powi(3) - a) * m[k] + (b.libm_powi(3) - b) * m[k + 1]) * h * h / 6.0
     }
 }
 

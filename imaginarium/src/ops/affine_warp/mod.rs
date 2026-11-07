@@ -4,7 +4,8 @@ mod gpu;
 #[cfg(feature = "wgpu")]
 mod pipeline;
 
-use glam::{Affine2, Vec2};
+use common::LibmVec2;
+use glam::{Affine2, Mat2, Vec2};
 
 #[cfg(feature = "wgpu")]
 use crate::gpu::Gpu;
@@ -40,6 +41,12 @@ impl Default for AffineWarp {
     }
 }
 
+/// The rotation by `angle` radians, as `Affine2::from_angle` builds it from std's sine and cosine.
+fn turn(angle: f32) -> Affine2 {
+    let rotor = Vec2::libm_from_angle(angle);
+    Affine2::from_mat2(Mat2::from_cols(rotor, rotor.perp()))
+}
+
 impl AffineWarp {
     /// Creates a new identity transform.
     pub fn new() -> Self {
@@ -56,16 +63,15 @@ impl AffineWarp {
     /// Applies a rotation transformation (angle in radians).
     #[must_use]
     pub fn rotate(mut self, angle: f32) -> Self {
-        self.transform *= Affine2::from_angle(angle);
+        self.transform *= turn(angle);
         self
     }
 
     /// Applies a rotation around a center point (angle in radians).
     #[must_use]
     pub fn rotate_around(mut self, angle: f32, center: Vec2) -> Self {
-        self.transform *= Affine2::from_translation(center)
-            * Affine2::from_angle(angle)
-            * Affine2::from_translation(-center);
+        self.transform *=
+            Affine2::from_translation(center) * turn(angle) * Affine2::from_translation(-center);
         self
     }
 

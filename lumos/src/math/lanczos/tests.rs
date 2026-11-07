@@ -1,3 +1,4 @@
+use common::Libm;
 use std::f64::consts::PI;
 
 use crate::math::lanczos::kernel;
@@ -65,7 +66,7 @@ fn lanczos_f64(x: f64, a: f64) -> f64 {
     if x == 0.0 {
         return 1.0;
     }
-    let sinc = |t: f64| t.sin() / t;
+    let sinc = |t: f64| t.libm_sin() / t;
     sinc(PI * x) * sinc(PI * x / a)
 }
 
@@ -82,7 +83,7 @@ fn lanczos_f64(x: f64, a: f64) -> f64 {
 #[test]
 fn a_lanczos_table_read_is_the_kernel_within_the_interpolation_error() {
     let step = 1.0 / LANCZOS_LUT_RESOLUTION as f64;
-    let rounding = 2.0f64.powi(-25);
+    let rounding = 2.0f64.libm_powi(-25);
     for order in [LanczosOrder::Two, LanczosOrder::Three, LanczosOrder::Four] {
         let lut = order.lut();
         let a = order.a() as f64;

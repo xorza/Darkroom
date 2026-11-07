@@ -1,6 +1,7 @@
 //! [`PreparedFrame`]: a frame reduced to the planes detection and measurement read.
 
 use arrayvec::ArrayVec;
+use common::Libm;
 use common::{Buffer2, PerWorker, par};
 use rayon::prelude::*;
 
@@ -291,7 +292,7 @@ fn inverse_variance_weights(sigmas: [Option<f32>; 3]) -> [f32; 3] {
         .iter()
         .flatten()
         .fold(f32::INFINITY, |least, &sigma| least.min(sigma));
-    let relative = sigmas.map(|sigma| sigma.map_or(0.0, |sigma| (least / sigma).powi(2)));
+    let relative = sigmas.map(|sigma| sigma.map_or(0.0, |sigma| (least / sigma).libm_powi(2)));
     let sum: f32 = relative.iter().sum();
     relative.map(|weight| weight / sum)
 }

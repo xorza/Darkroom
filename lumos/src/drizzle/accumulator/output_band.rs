@@ -1,5 +1,6 @@
 //! One horizontal slice of the output grid, and the kernels that scatter flux into it.
 
+use common::Libm;
 use std::ops::Range;
 
 use glam::{DVec2, USizeVec2};
@@ -155,7 +156,7 @@ impl OutputBand<'_> {
                 // it, so the sum stays at least 1 however narrow the drop and however far off a
                 // pixel centre it lands, where `exp(−d²/2σ²)` underflows to a sum of 0.
                 let excess = step as f64 * (step as f64 + 2.0 * nearest);
-                (-(excess as f32) * inv_2sigma_sq).exp()
+                (-(excess as f32) * inv_2sigma_sq).libm_exp()
             }),
             KernelPlan::Lanczos { radius } => {
                 // The warp's table, within 1.1e-7 of the kernel: two `sin`s and two divisions a

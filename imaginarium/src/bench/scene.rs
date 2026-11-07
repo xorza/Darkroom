@@ -1,6 +1,7 @@
 //! The standard scene every case measures on: sky, drawn from fixed seeds so two runs time the
 //! same work.
 
+use common::Libm;
 use std::f32::consts::TAU;
 
 use common::{USize2, par};
@@ -73,6 +74,6 @@ impl SplitMix {
     /// A draw of a unit normal, by Box–Muller.
     fn gaussian(&mut self) -> f32 {
         let (u, v) = (1.0 - self.unit(), self.unit());
-        (-2.0 * u.ln()).sqrt() * (TAU * v).cos()
+        (-2.0 * u.libm_ln()).sqrt() * (TAU * v).libm_cos()
     }
 }

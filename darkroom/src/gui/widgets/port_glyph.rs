@@ -1,6 +1,7 @@
 //! The small sensing glyph a wire terminates on: a filled circle or a
 //! rounded triangle in a generously grown hit box, with a hover tooltip.
 
+use common::LibmVec2;
 use glam::Vec2;
 use palantir::widget::Shape;
 use palantir::{
@@ -235,7 +236,7 @@ impl Painted {
     fn arrow_vertices(self, turn: f32) -> [Vec2; 3] {
         let (size, inset) = (self.size, self.inset());
         let center = Vec2::splat(self.hit() * 0.5);
-        let rot = Vec2::from_angle(turn);
+        let rot = Vec2::libm_from_angle(turn);
         [
             Vec2::new(inset, inset),
             Vec2::new(inset, inset + size),

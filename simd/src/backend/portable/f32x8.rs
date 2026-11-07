@@ -117,7 +117,7 @@ impl F32x8 for PortableF32 {
     #[inline(always)]
     fn to_i32(self) -> PortableI32 {
         PortableI32(self.0.map(|lane| {
-            let end = 2.0f32.powi(31);
+            let end = -(i32::MIN as f32);
             debug_assert!(
                 lane.floor() == lane && (-end..end).contains(&lane),
                 "{lane} is no i32"

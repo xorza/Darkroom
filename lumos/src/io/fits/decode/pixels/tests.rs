@@ -1,4 +1,5 @@
 use common::CancelToken;
+use common::Libm;
 use fits_well::image::{Scaling, View as FitsView};
 
 use crate::error::Cancelled;
@@ -155,12 +156,12 @@ fn the_blank_sentinel_is_a_null_and_stays_out_of_the_integer_scan() {
 #[test]
 fn without_blank_the_most_negative_stored_integer_is_a_sample() {
     let unsigned = Scaling {
-        bzero: 2f64.powi(63),
+        bzero: 2f64.libm_powi(63),
         ..IDENTITY
     };
     let Converted { samples: out, scan } =
         convert(FitsView::I64(&[i64::MIN, i64::MAX]), unsigned, 1.0);
-    assert_eq!(out, [0.0, 2f32.powi(64)]);
+    assert_eq!(out, [0.0, 2f32.libm_powi(64)]);
     assert_eq!(scan.nulls, None);
 }
 

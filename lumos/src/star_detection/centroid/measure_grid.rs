@@ -2,6 +2,7 @@
 
 use crate::math::fwhm;
 use crate::star_detection::centroid::stamp::StampGrid;
+use common::Libm;
 
 /// Stamp radius as a multiple of FWHM. A circle of 1.75 FWHM = 4.12σ holds
 /// `1 − exp(−4.12²/2)` = 99.98% of a Gaussian's flux, and 91% of a β = 2.5 Moffat's.
@@ -80,7 +81,7 @@ impl AnnulusRadii {
     )]
     fn enclosing(fwhm: f64, stamp_radius: usize) -> Self {
         let beta = ANNULUS_MOFFAT_BETA;
-        let core = (1.0 - ANNULUS_ENCLOSED_FLUX).powf(1.0 / (1.0 - beta)) - 1.0;
+        let core = (1.0 - ANNULUS_ENCLOSED_FLUX).libm_powf(1.0 / (1.0 - beta)) - 1.0;
         let width = fwhm::per_alpha(beta);
         let radius = (fwhm * core.sqrt() / width).ceil() as usize;
         let inner = radius.max(stamp_radius + 1);

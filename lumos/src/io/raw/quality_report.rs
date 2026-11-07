@@ -5,6 +5,7 @@
 //! quality. They assert only that the two decodes share a shape: a quality ranking is a judgement
 //! to read, not a number to pin.
 
+use common::Libm;
 use std::array;
 use std::path::Path;
 
@@ -186,7 +187,7 @@ impl Compared<'_> {
                 }
                 let red_green = (predicted[0] - predicted[1]) - (actual[0] - actual[1]);
                 let blue_green = (predicted[2] - predicted[1]) - (actual[2] - actual[1]);
-                let error = red_green.hypot(blue_green);
+                let error = red_green.libm_hypot(blue_green);
                 sum += error;
                 max = max.max(error);
                 count += 1;
@@ -257,7 +258,7 @@ fn compare_channels(a: &Buffer2<f32>, b: &Buffer2<f32>, border: usize) -> Channe
     let mae = sum_abs_err / nf;
     let mse = sum_sq_err / nf;
     let psnr = if mse > 0.0 {
-        10.0 * (mean_b * mean_b / mse).log10()
+        10.0 * (mean_b * mean_b / mse).libm_log10()
     } else {
         f64::INFINITY
     };

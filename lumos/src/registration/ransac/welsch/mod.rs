@@ -8,6 +8,7 @@
 //! scale, `σ_max`, so it is not MAGSAC++.
 
 use crate::math::statistics::CHI2_99_2DOF;
+use common::Libm;
 
 /// Scores a hypothesis's residuals by the truncated Welsch loss of the module docs.
 #[derive(Debug)]
@@ -52,7 +53,7 @@ impl WelschScorer {
         // `1 − e^(−x)` by `expm1`: the subtraction would cancel to nothing for the small `x` of a
         // good fit, where the loss is ≈ r²/4.
         let x = residual_sq / (2.0 * self.max_sigma_sq);
-        self.max_sigma_sq / 2.0 * -(-x).exp_m1()
+        self.max_sigma_sq / 2.0 * -(-x).libm_exp_m1()
     }
 
     /// Whether a point counts as an inlier.

@@ -32,7 +32,7 @@ fn mean(p: &[f32]) -> f64 {
 /// Residual energy about the plane's mean — the kept sky level is not residual.
 fn energy(p: &[f32]) -> f64 {
     let m = mean(p);
-    p.iter().map(|&v| (f64::from(v) - m).powi(2)).sum()
+    p.iter().map(|&v| (f64::from(v) - m).libm_powi(2)).sum()
 }
 
 #[test]

@@ -1,4 +1,5 @@
 use crate::star_detection::roundness::{Roundness, RoundnessStamp};
+use common::Libm;
 
 /// A Gaussian of `(σx, σy)` and rotation `angle` at `(dx, dy)` from a stamp's centre.
 #[derive(Debug, Clone, Copy)]
@@ -26,13 +27,14 @@ impl Gaussian {
             offset,
         } = self;
         let size = 2 * radius + 1;
-        let (sin, cos) = angle.sin_cos();
+        let (sin, cos) = angle.libm_sin_cos();
         (0..size * size)
             .map(|idx| {
                 let x = (idx % size) as f64 - radius as f64 - offset.0;
                 let y = (idx / size) as f64 - radius as f64 - offset.1;
                 let (u, v) = (x * cos + y * sin, -x * sin + y * cos);
-                (-(u * u) / (2.0 * sigma.0 * sigma.0) - (v * v) / (2.0 * sigma.1 * sigma.1)).exp()
+                (-(u * u) / (2.0 * sigma.0 * sigma.0) - (v * v) / (2.0 * sigma.1 * sigma.1))
+                    .libm_exp()
             })
             .collect()
     }

@@ -14,6 +14,7 @@
 
 mod simd;
 
+use common::Libm;
 use std::ops::RangeInclusive;
 
 use glam::DVec2;
@@ -95,7 +96,7 @@ impl LmModel<7> for Gaussian2D {
         let dx = x - x0;
         let dy = y - y0;
         let q = dx * (a * dx + b * dy) + dy * (b * dx + c * dy);
-        amp * (-0.5 * q).exp() + bg
+        amp * (-0.5 * q).libm_exp() + bg
     }
 
     fn quadrature(&self) -> &PixelQuadrature {
@@ -217,6 +218,7 @@ impl GaussianFit {
 
 #[cfg(test)]
 mod internals {
+    use common::Libm;
     use glam::Vec2;
 
     use crate::math::lm_controller::LmFit;
@@ -233,7 +235,7 @@ mod internals {
             let dy = y - y0;
             let t = a * dx + b * dy;
             let u = b * dx + c * dy;
-            let exp_val = (-0.5 * (dx * t + dy * u)).exp();
+            let exp_val = (-0.5 * (dx * t + dy * u)).libm_exp();
             let amp_exp = amp * exp_val;
             let half_amp_exp = -0.5 * amp_exp;
             ModelSample {
@@ -305,7 +307,7 @@ mod internals {
             let dx = x - x0;
             let dy = y - y0;
             let quadratic = a * dx * dx + 2.0 * b * dx * dy + c * dy * dy;
-            let e = (-quadratic / 2.0).exp();
+            let e = (-quadratic / 2.0).libm_exp();
             [
                 amp * e * (a * dx + b * dy),
                 amp * e * (b * dx + c * dy),

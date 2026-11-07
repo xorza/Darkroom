@@ -6,6 +6,7 @@ use crate::combine::rejection::scratch_buffers::MethodScratch;
 use crate::combine::rejection::sigma_bounds::SigmaBounds;
 use crate::error::InvalidConfigField;
 use crate::math::statistics::spread::Spread;
+use common::Libm;
 
 /// Configuration for winsorized sigma clipping, after PixInsight's `WinsorizedSigmaClipping`.
 ///
@@ -103,7 +104,7 @@ impl WinsorizedClipConfig {
             let mean = clamped.iter().map(|&v| f64::from(v)).sum::<f64>() / count;
             let squares = clamped
                 .iter()
-                .map(|&v| (f64::from(v) - mean).powi(2))
+                .map(|&v| (f64::from(v) - mean).libm_powi(2))
                 .sum::<f64>();
             let next = Spread {
                 centre: mean as f32,

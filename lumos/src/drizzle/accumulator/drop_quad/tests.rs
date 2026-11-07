@@ -1,3 +1,4 @@
+use common::Libm;
 use std::f64::consts::PI;
 
 use glam::DVec2;
@@ -135,7 +136,7 @@ fn overlap_hand_values() {
 /// 2/√3`. The clipping is f64 arithmetic on irrational corners: a few ulps of 1.
 #[test]
 fn the_overlap_of_a_turned_square_is_the_square_less_four_triangles() {
-    let (sin, cos) = (PI / 6.0).sin_cos();
+    let (sin, cos) = (PI / 6.0).libm_sin_cos();
     let quad = [(-0.5, -0.5), (0.5, -0.5), (0.5, 0.5), (-0.5, 0.5)]
         .map(|(dx, dy)| DVec2::new(0.5 + dx * cos - dy * sin, 0.5 + dx * sin + dy * cos));
     let area = DropQuad {

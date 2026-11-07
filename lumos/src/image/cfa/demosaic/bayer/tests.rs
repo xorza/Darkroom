@@ -1,5 +1,6 @@
 //! Tests for Bayer CFA types and RCD demosaicing.
 
+use common::Libm;
 use common::{Buffer2, CancelToken, WorkerPool};
 
 use crate::image::cfa::bayer_pattern::BayerPattern;
@@ -334,9 +335,9 @@ fn rcd_is_the_same_on_every_bayer_phase() {
         let diagonal = if x + y > 40.0 { 0.35 } else { 0.0 };
         let anti = if x - y > 6.0 { 0.2 } else { 0.0 };
         match c {
-            0 => 0.2 + diagonal + 0.15 * (0.7 * x + 0.3 * y).sin(),
-            1 => 0.3 + anti + 0.15 * (0.5 * x - 0.6 * y).sin(),
-            _ => 0.25 + diagonal - anti + 0.1 * (0.4 * x + 0.9 * y).cos(),
+            0 => 0.2 + diagonal + 0.15 * (0.7 * x + 0.3 * y).libm_sin(),
+            1 => 0.3 + anti + 0.15 * (0.5 * x - 0.6 * y).libm_sin(),
+            _ => 0.25 + diagonal - anti + 0.1 * (0.4 * x + 0.9 * y).libm_cos(),
         }
     };
     let mosaic = |pattern: BayerPattern, dx: usize, dy: usize| -> Buffer2<f32> {

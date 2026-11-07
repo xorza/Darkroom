@@ -6,6 +6,7 @@ use crate::graph::func::func_output::FuncOutput;
 use crate::graph::func::lambda::{FuncLambda, Invocation};
 use crate::graph::identity::FuncId;
 use crate::library::Library;
+use common::Libm;
 
 const ADD_FUNC_ID: FuncId = FuncId::literal("01897c4c-ac6a-84c0-d0b7-17d49e1ae2ee");
 const SUBTRACT_FUNC_ID: FuncId = FuncId::literal("01897c50-229e-f5e4-1c60-7f1e14531da2");
@@ -196,7 +197,7 @@ pub fn math_library() -> Library {
                 description: "Base raised to Exponent.",
             },
         }
-        .binary(f64::powf),
+        .binary(f64::libm_powf),
     );
     library.add(
         FloatFunc {
@@ -242,7 +243,7 @@ pub fn math_library() -> Library {
                 description: "log_Base(Value).",
             },
         }
-        .binary(f64::log),
+        .binary(f64::libm_log),
     );
 
     library
@@ -264,7 +265,7 @@ fn trigonometry_funcs() -> [Func; 6] {
                 description: "sin(Angle).",
             },
         }
-        .unary(f64::sin),
+        .unary(f64::libm_sin),
         FloatFunc {
             id: COSINE_FUNC_ID,
             name: "Cosine",
@@ -279,7 +280,7 @@ fn trigonometry_funcs() -> [Func; 6] {
                 description: "cos(Angle).",
             },
         }
-        .unary(f64::cos),
+        .unary(f64::libm_cos),
         FloatFunc {
             id: TANGENT_FUNC_ID,
             name: "Tangent",
@@ -294,7 +295,7 @@ fn trigonometry_funcs() -> [Func; 6] {
                 description: "tan(Angle).",
             },
         }
-        .unary(f64::tan),
+        .unary(f64::libm_tan),
         FloatFunc {
             id: ARCSINE_FUNC_ID,
             name: "Arcsine",
@@ -309,7 +310,7 @@ fn trigonometry_funcs() -> [Func; 6] {
                 description: "Angle in radians.",
             },
         }
-        .unary(f64::asin),
+        .unary(f64::libm_asin),
         FloatFunc {
             id: ARCCOSINE_FUNC_ID,
             name: "Arccosine",
@@ -324,7 +325,7 @@ fn trigonometry_funcs() -> [Func; 6] {
                 description: "Angle in radians.",
             },
         }
-        .unary(f64::acos),
+        .unary(f64::libm_acos),
         FloatFunc {
             id: ARCTANGENT_FUNC_ID,
             name: "Arctangent",
@@ -339,7 +340,7 @@ fn trigonometry_funcs() -> [Func; 6] {
                 description: "Angle in radians.",
             },
         }
-        .unary(f64::atan),
+        .unary(f64::libm_atan),
     ]
 }
 
@@ -422,7 +423,8 @@ mod tests {
             ("Subtract", -1.0),
             ("Multiply", 6.0),
             ("Power", 8.0),
-            ("Logarithm", 0.630_929_753_571_457_4),
+            // ln(2) / ln(3), each through `libm`, a last bit over the true 0.63092975357145743.
+            ("Logarithm", 0.630_929_753_571_457_5),
         ] {
             let outputs = invoke(name, &[float(2.0), float(3.0)]).await.unwrap();
             assert_eq!(outputs[0].as_f64(), Some(expected), "{name}(2, 3)");
@@ -436,12 +438,12 @@ mod tests {
         // to another's kernel fails its row.
         let unary: [(&str, Kernel); 7] = [
             ("Square Root", f64::sqrt),
-            ("Sine", f64::sin),
-            ("Cosine", f64::cos),
-            ("Tangent", f64::tan),
-            ("Arcsine", f64::asin),
-            ("Arccosine", f64::acos),
-            ("Arctangent", f64::atan),
+            ("Sine", f64::libm_sin),
+            ("Cosine", f64::libm_cos),
+            ("Tangent", f64::libm_tan),
+            ("Arcsine", f64::libm_asin),
+            ("Arccosine", f64::libm_acos),
+            ("Arctangent", f64::libm_atan),
         ];
         for (name, kernel) in unary {
             let outputs = invoke(name, &[float(0.5)]).await.unwrap();

@@ -6,6 +6,7 @@ use crate::star_detection::convolution;
 use crate::star_detection::convolution::simd::{
     Convolve2dRow, ConvolveColsRow, ConvolveRow, Kernel2d, RowRing,
 };
+use common::Libm;
 use common::USize2;
 use glam::Vec2;
 use simd::Kernel;
@@ -229,7 +230,7 @@ impl EllipticalGaussian {
     fn axis_sigma(self) -> f64 {
         let major = f64::from(self.sigma);
         let minor = major * f64::from(self.axis_ratio);
-        let (sin, cos) = f64::from(self.angle).sin_cos();
+        let (sin, cos) = f64::from(self.angle).libm_sin_cos();
         let (major_precision, minor_precision) = (1.0 / (major * major), 1.0 / (minor * minor));
         let along_x = cos * cos * major_precision + sin * sin * minor_precision;
         let along_y = sin * sin * major_precision + cos * cos * minor_precision;
@@ -273,13 +274,13 @@ impl EllipticalGaussian {
 
         let sigma_major = f64::from(sigma);
         let sigma_minor = sigma_major * f64::from(axis_ratio);
-        let (sin_a, cos_a) = f64::from(angle).sin_cos();
+        let (sin_a, cos_a) = f64::from(angle).libm_sin_cos();
         let two_sigma_major_sq = 2.0 * sigma_major * sigma_major;
         let two_sigma_minor_sq = 2.0 * sigma_minor * sigma_minor;
         let profile = |x: f64, y: f64| {
             let x_rot = x * cos_a + y * sin_a;
             let y_rot = -x * sin_a + y * cos_a;
-            (-x_rot * x_rot / two_sigma_major_sq - y_rot * y_rot / two_sigma_minor_sq).exp()
+            (-x_rot * x_rot / two_sigma_major_sq - y_rot * y_rot / two_sigma_minor_sq).libm_exp()
         };
 
         let PixelRule { subdivision, order } = self

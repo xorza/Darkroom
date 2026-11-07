@@ -1,4 +1,5 @@
 use super::*;
+use common::Libm;
 use glam::{UVec2, Vec2};
 use palantir::Key;
 
@@ -202,7 +203,7 @@ fn int_speed_floors_then_scales() {
     assert_eq!(int_speed(200), 2.0);
     assert_eq!(int_speed(1000), 10.0);
     // The most negative count has no positive `i64`: |i64::MIN| = 2^63, and 2^63 · 0.01 as f64.
-    assert_eq!(int_speed(i64::MIN), 2_f64.powi(63) * 0.01);
+    assert_eq!(int_speed(i64::MIN), 2_f64.libm_powi(63) * 0.01);
 }
 
 /// A commit sets the tightest kind its text reads as, and one that reads back as the value it

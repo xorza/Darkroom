@@ -9,6 +9,7 @@ pub(crate) mod comparison;
 pub(crate) mod drawing;
 pub(crate) mod report;
 
+use common::Libm;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
@@ -59,12 +60,12 @@ impl ToneMap {
                 let Range { lo, span } = Self::range(pixels);
                 // astropy-style AsinhStretch: y = asinh(x/a) / asinh(1/a), a = soft knee.
                 let a = 0.1f32;
-                let denom = (1.0 / a).asinh();
+                let denom = (1.0 / a).libm_asinh();
                 pixels
                     .iter()
                     .map(|&p| {
                         let x = ((p - lo) / span).clamp(0.0, 1.0);
-                        ((x / a).asinh() / denom).clamp(0.0, 1.0)
+                        ((x / a).libm_asinh() / denom).clamp(0.0, 1.0)
                     })
                     .collect()
             }

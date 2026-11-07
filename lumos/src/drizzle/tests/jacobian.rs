@@ -1,3 +1,4 @@
+use common::Libm;
 use std::ops::RangeInclusive;
 
 use glam::DVec2;
@@ -26,14 +27,14 @@ use crate::math::fwhm::FWHM_PER_SIGMA;
 #[test]
 fn a_magnified_frame_weighs_less_per_output_pixel() {
     let size = USize2::new(12, 12);
-    let gaussian = |d: f64| (-d * d * FWHM_PER_SIGMA * FWHM_PER_SIGMA / 2.0).exp();
+    let gaussian = |d: f64| (-d * d * FWHM_PER_SIGMA * FWHM_PER_SIGMA / 2.0).libm_exp();
     let s: f64 = (-2..=2).map(|d| gaussian(f64::from(d))).sum();
     let bound = (2.0 * 34.0 + 1.0) * f64::from(f32::EPSILON) * 10.0;
     let magnified = Transform::scale(DVec2::splat(2.0));
     for kernel in DrizzleKernel::ALL {
         let share = match kernel {
             DrizzleKernel::Square => 0.25,
-            DrizzleKernel::Gaussian => ((1.0 + 2.0 * gaussian(2.0)) / s).powi(2),
+            DrizzleKernel::Gaussian => ((1.0 + 2.0 * gaussian(2.0)) / s).libm_powi(2),
             DrizzleKernel::Turbo | DrizzleKernel::Point | DrizzleKernel::Lanczos => 1.0,
         };
         for (transform, period_mean) in [(magnified, 0.25), (Transform::identity(), 1.0)] {

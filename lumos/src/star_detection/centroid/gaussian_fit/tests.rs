@@ -436,9 +436,9 @@ fn gaussian_fit_recovers_known_parameters() {
                 case.center.x,
                 case.center.y,
                 f64::from(case.amplitude),
-                1.0 / f64::from(case.sigma.x).powi(2),
+                1.0 / f64::from(case.sigma.x).libm_powi(2),
                 0.0,
-                1.0 / f64::from(case.sigma.y).powi(2),
+                1.0 / f64::from(case.sigma.y).libm_powi(2),
                 f64::from(case.bg),
             ];
             let order = Gaussian2D::new(ProfileBounds::of_stamp(case.fit_radius as f64), 1e-6)

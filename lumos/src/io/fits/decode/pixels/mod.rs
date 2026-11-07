@@ -1,3 +1,4 @@
+use common::Libm;
 use std::io::{Read, Seek};
 use std::mem;
 
@@ -330,7 +331,7 @@ impl SampleScan {
         } else {
             self.raw_bits.trailing_zeros()
         };
-        bscale.abs() * 2.0f64.powi(shared_zeros as i32)
+        bscale.abs() * 2.0f64.libm_powi(shared_zeros as i32)
     }
 }
 

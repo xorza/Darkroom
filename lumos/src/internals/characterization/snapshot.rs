@@ -1,4 +1,4 @@
-//! [`Snapshot`]: what a stage produced, compared with its reference file within a tolerance.
+//! [`Snapshot`]: what a stage produced, compared with its reference file bit for bit.
 
 use std::fmt::Write as _;
 use std::path::PathBuf;
@@ -9,17 +9,6 @@ use serde::{Deserialize, Serialize};
 /// The cells a plane's side is summed in, at most: 256 sums keep a plane's reference short and
 /// still name where in the plane a change landed.
 const GRID: usize = 16;
-
-/// How far a value may move from its reference, relative to the larger magnitude: 8 `f32` ulps,
-/// 2⁻²⁰. Rust leaves the precision of `exp`, `ln`, `powf` and the other transcendental functions
-/// to the platform's C library, which rounds them an ulp apart from another, and an `f32` stage
-/// carries that through a few operations. Eight ulps covers it, as `common::FloatExt` allows, and
-/// stays far below a change of the algorithm. A value from `f64` math on `f32` pixels moves as
-/// those pixels do, so `f64` values take the same bound.
-const RELATIVE: f64 = 0.000_000_953_674_316_406_25;
-/// The same bound at 1, the scale of a normalized pixel, for values near zero, whose relative
-/// difference says nothing.
-const ABSOLUTE: f64 = RELATIVE;
 
 /// The variable that, set to `update`, makes a check that fails write its reference anew.
 const UPDATE: &str = "LUMOS_SNAPSHOTS";
@@ -91,14 +80,13 @@ impl Snapshot {
         self
     }
 
-    /// Compare with the reference `snapshots/<stage>.ron`: sizes, counts and bytes exactly, every
-    /// other value within [`ABSOLUTE`] plus [`RELATIVE`] of the larger magnitude, as numpy's
-    /// `isclose` bounds it. With `LUMOS_SNAPSHOTS=update`, a reference that differs, is missing
+    /// Compare with the reference `snapshots/<stage>.ron`, every value to the bit. With
+    /// `LUMOS_SNAPSHOTS=update`, a reference that differs, is missing
     /// or does not parse is written anew instead of failing.
     ///
     /// # Panics
     ///
-    /// When the stage moved past the tolerance, or its reference is missing or unreadable.
+    /// When the stage moved, or its reference is missing or unreadable.
     pub(crate) fn check(&self, stage: &str) {
         let path = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/snapshots"))
             .join(format!("{stage}.ron"));
@@ -265,8 +253,7 @@ impl Plane {
 
 /// The weight of pixel `idx` in a cell's weighted sum, in `[1, 2)`: the top 52 bits of `idx` times
 /// 2⁶⁴/φ, Knuth's multiplicative hash, so neighbours take weights far apart. Integer arithmetic and
-/// an exact conversion, the same on every host; positive, so the weighted sum takes the plain sum's
-/// tolerance.
+/// an exact conversion, the same on every host.
 fn weight(idx: usize) -> f64 {
     let hash = (idx as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
     1.0 + (hash >> 12) as f64 / (1u64 << 52) as f64
@@ -277,9 +264,9 @@ const fn cell_side(side: usize) -> usize {
     if side == 0 { 1 } else { side.div_ceil(GRID) }
 }
 
-/// A line in `differences` for each value of `got` past the tolerance from its own in `want`, as
-/// `name` names its index, or one line for `label` when the counts differ. Two NaNs agree, as the
-/// same computation gives both.
+/// A line in `differences` for each value of `got` that is not its own in `want` to the bit, as
+/// `name` names its index, or one line for `label` when the counts differ. Two NaNs agree, as a new
+/// NaN's bits differ by architecture (`simd/AGENTS.md`).
 fn compare(
     label: &str,
     got: impl ExactSizeIterator<Item = f64>,
@@ -296,15 +283,9 @@ fn compare(
         return;
     }
     for (idx, (got, want)) in got.zip(want).enumerate() {
-        let off = (got - want).abs();
-        let agree = got == want
-            || (got.is_nan() && want.is_nan())
-            || off <= RELATIVE * got.abs().max(want.abs()) + ABSOLUTE;
+        let agree = got.to_bits() == want.to_bits() || (got.is_nan() && want.is_nan());
         if !agree {
-            differences.push(format!(
-                "{} is {got:e}, the reference {want:e}: {off:.2e} off",
-                name(idx)
-            ));
+            differences.push(format!("{} is {got:e}, the reference {want:e}", name(idx)));
         }
     }
 }
@@ -336,28 +317,27 @@ mod tests {
         assert_eq!(plane.weighted[0], weight(1) + 2.0 * weight(2));
     }
 
-    /// One `f32` ulp at 1, 2⁻²³, and 1e-7 next to zero are within the tolerance; 2⁻¹⁸ at 1, past
-    /// 2⁻²⁰ + 2⁻²⁰ = 2⁻¹⁹, and 1e-5 next to zero are not, and each is named by its index or
-    /// cell. Two NaNs agree; a count, a label or a size that differs is named whole.
+    /// One `f32` ulp at 1, 2⁻²³, and a zero of the other sign each differ, and each is named by
+    /// its index or cell. Two NaNs of either sign agree; a count, a label or a size that differs is
+    /// named whole.
     #[test]
-    fn values_agree_within_the_tolerance_and_a_difference_is_named() {
+    fn values_agree_to_the_bit_and_a_difference_is_named() {
         let values = |values: &[f32]| {
             let mut snapshot = Snapshot::default();
             snapshot.f32s("v", values);
             snapshot
         };
         let reference = values(&[1.0, 0.0, f32::NAN]);
-        let ulp = 1.0 + f32::EPSILON;
         assert!(
-            values(&[ulp, 1e-7, f32::NAN])
+            values(&[1.0, 0.0, -f32::NAN])
                 .differences(&reference)
                 .is_empty()
         );
         assert_eq!(
-            values(&[1.0 + 2f32.powi(-18), 1e-5, f32::NAN]).differences(&reference),
+            values(&[1.0 + f32::EPSILON, -0.0, f32::NAN]).differences(&reference),
             [
-                "v 0 is 1.0000038146972656e0, the reference 1e0: 3.81e-6 off",
-                "v 1 is 9.999999747378752e-6, the reference 0e0: 1.00e-5 off",
+                "v 0 is 1.0000001192092896e0, the reference 1e0",
+                "v 1 is -0e0, the reference 0e0",
             ]
         );
 
@@ -385,11 +365,10 @@ mod tests {
         assert_eq!(
             plane(0.5).differences(&plane(0.0)),
             [
-                "p max is 5e-1, the reference 0e0: 5.00e-1 off",
-                "p cell (2, 0) is 5e-1, the reference 0e0: 5.00e-1 off",
+                "p max is 5e-1, the reference 0e0",
+                "p cell (2, 0) is 5e-1, the reference 0e0",
                 &format!(
-                    "p weighted cell (2, 0) is {:e}, the reference 0e0: {:.2e} off",
-                    0.5 * weight(2),
+                    "p weighted cell (2, 0) is {:e}, the reference 0e0",
                     0.5 * weight(2)
                 ),
             ]

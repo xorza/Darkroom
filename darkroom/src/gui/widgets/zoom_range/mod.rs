@@ -2,6 +2,7 @@
 //! scroll and pinch input through — the graph canvas and the image viewer
 //! alike, each with its own range.
 
+use common::Libm;
 use glam::Vec2;
 use palantir::{Modifiers, ResponseState, ScrollDelta, Size, Ui, ZoomFactor};
 
@@ -139,7 +140,7 @@ const SCROLL_ZOOM_BASE: f32 = 1.0025;
 /// spinning up a UI. [`ZoomRange::fold_scroll`] is its one reader, for the canvas
 /// and the viewer alike.
 fn scroll_to_zoom_factor(delta_y: f32) -> f32 {
-    SCROLL_ZOOM_BASE.powf(-delta_y)
+    SCROLL_ZOOM_BASE.libm_powf(-delta_y)
 }
 
 #[cfg(test)]

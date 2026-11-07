@@ -2,6 +2,7 @@ use super::*;
 use crate::internals::invariance::Affine;
 use crate::internals::test_rng::TestRng;
 use crate::math::statistics::MAD_TO_SIGMA;
+use common::Libm;
 
 /// The centre and the MAD are medians at both parities. [1, 3, 7, 9]: centre (3 + 7)/2 = 5,
 /// deviations ranked [2, 2, 4, 4], MAD (2 + 4)/2 = 3. [1, 3, 7]: centre 3, deviations ranked
@@ -99,7 +100,7 @@ fn the_floor_takes_the_largest_of_its_three_terms() {
     let spread = |sigma| Spread { centre: 2.0, sigma };
     assert_eq!(spread(0.5).floored(0.25), 0.5);
     assert_eq!(spread(0.125).floored(0.25), 0.25);
-    assert_eq!(spread(0.0).floored(0.0), 2.0f32.powi(-22));
+    assert_eq!(spread(0.0).floored(0.0), 2.0f32.libm_powi(-22));
     assert_eq!(
         Spread {
             centre: 0.0,
@@ -108,7 +109,7 @@ fn the_floor_takes_the_largest_of_its_three_terms() {
         .floored(0.0),
         f32::from_bits(1)
     );
-    assert_eq!(f64::from(f32::from_bits(1)), 2.0f64.powi(-149));
+    assert_eq!(f64::from(f32::from_bits(1)), 2.0f64.libm_powi(-149));
 }
 
 /// The spread maps with the data: σ scales with the data and ignores an offset, the centre maps

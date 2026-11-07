@@ -1,3 +1,4 @@
+use common::Libm;
 use std::f64::consts::PI;
 
 use glam::DVec2;
@@ -174,7 +175,7 @@ fn equal_weights_fit_as_unit_weights_and_a_heavy_pair_pulls_the_fit() {
         .iter()
         .enumerate()
         .map(|(i, &r)| {
-            let wobble = (i as f64 * 1.7).sin();
+            let wobble = (i as f64 * 1.7).libm_sin();
             truth.apply(r) + DVec2::new(0.4 * wobble, -0.3 * wobble)
         })
         .collect();

@@ -2,6 +2,7 @@
 //! positions, missing and spurious stars, partial overlap, large rotations and scales, and the
 //! smallest catalogs that register.
 
+use common::Libm;
 use glam::DVec2;
 
 use crate::internals::synthetic::transforms::{StarScatter, add_star_noise};
@@ -278,11 +279,11 @@ fn every_model_recovers_an_exact_transform() {
             "rotation and differential scale",
             Affine,
             Transform::affine([
-                1.003 * 0.4f64.to_radians().cos(),
-                -0.997 * 0.4f64.to_radians().sin(),
+                1.003 * 0.4f64.to_radians().libm_cos(),
+                -0.997 * 0.4f64.to_radians().libm_sin(),
                 20.0,
-                1.003 * 0.4f64.to_radians().sin(),
-                0.997 * 0.4f64.to_radians().cos(),
+                1.003 * 0.4f64.to_radians().libm_sin(),
+                0.997 * 0.4f64.to_radians().libm_cos(),
                 -12.0,
             ]),
         ),
@@ -295,11 +296,11 @@ fn every_model_recovers_an_exact_transform() {
             "perspective and rotation",
             Homography,
             Transform::homography([
-                0.3f64.to_radians().cos(),
-                -0.3f64.to_radians().sin(),
+                0.3f64.to_radians().libm_cos(),
+                -0.3f64.to_radians().libm_sin(),
                 30.0,
-                0.3f64.to_radians().sin(),
-                0.3f64.to_radians().cos(),
+                0.3f64.to_radians().libm_sin(),
+                0.3f64.to_radians().libm_cos(),
                 -20.0,
                 2e-5,
                 1e-5,
@@ -569,11 +570,11 @@ fn missing_and_spurious_stars_are_left_out() {
                 "homography with spurious stars",
                 Homography,
                 Transform::homography([
-                    0.3f64.to_radians().cos(),
-                    -0.3f64.to_radians().sin(),
+                    0.3f64.to_radians().libm_cos(),
+                    -0.3f64.to_radians().libm_sin(),
                     30.0,
-                    0.3f64.to_radians().sin(),
-                    0.3f64.to_radians().cos(),
+                    0.3f64.to_radians().libm_sin(),
+                    0.3f64.to_radians().libm_cos(),
                     -20.0,
                     2e-5,
                     1e-5,

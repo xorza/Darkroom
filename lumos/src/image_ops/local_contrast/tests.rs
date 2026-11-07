@@ -1,4 +1,5 @@
 use common::Buffer2;
+use common::Libm;
 
 use crate::image::flags::pixel_flags::PixelFlags;
 use crate::image::flags::quality_flags::QualityFlags;
@@ -39,7 +40,7 @@ fn clahe_strength_zero_is_identity() {
 fn clahe_keeps_color_in_range() {
     let size = USize2::new(96, 96);
     let i: Vec<f32> = (0..size.pixel_count())
-        .map(|i| ((i as f32 * 0.013).sin() * 0.5 + 0.5).clamp(0.0, 1.0))
+        .map(|i| ((i as f32 * 0.013).libm_sin() * 0.5 + 0.5).clamp(0.0, 1.0))
         .collect();
     let r: Vec<f32> = i.iter().map(|&v| (2.0 * v).min(1.0)).collect();
     let mut img = rgb_image(size, [r, i.clone(), i]);
@@ -216,7 +217,9 @@ fn a_flat_histogram_maps_to_the_identity() {
 #[test]
 fn distinct_values_stay_distinct() {
     let size = USize2::new(64, 64);
-    let px: Vec<f32> = (0..4096).map(|i| (i as f32 / 4095.0).powi(2)).collect();
+    let px: Vec<f32> = (0..4096)
+        .map(|i| (i as f32 / 4095.0).libm_powi(2))
+        .collect();
     let mut img = mono_image(size, px);
     LocalContrast {
         tiles: 1,
