@@ -8,6 +8,10 @@ rustdocflags = ["-C", "target-cpu=x86-64-v3"]
 gate-lint = "clippy --workspace --all-targets --all-features --keep-going -- -D warnings"
 gate-lint-nogpu = "clippy --workspace --all-targets --features lumos/ml,lumos/real-data,common/introspect-derive,darkroom/profile-with-tracy --keep-going -- -D warnings"
 gate-ship = "clippy --workspace --keep-going -- -D warnings"
+# `-D warnings` through a `cfg(all())` entry, which cargo joins to the x86 flags above. `RUSTDOCFLAGS`
+# would replace them, and `simd` refuses a build without them. A string, as `palantir` reads this
+# file too and cargo refuses to merge a list with its string.
+gate-doc = 'doc --workspace --no-deps --document-private-items --all-features --keep-going --config target."cfg(all())".rustdocflags=["-D","warnings"]'
 # No `real-data`, which reads the gitignored dataset, nor `profile-with-tracy`, which opens the
 # Tracy socket.
 gate-test = "test --workspace --tests --no-fail-fast --features imaginarium/wgpu,lumos/ml,common/introspect-derive"

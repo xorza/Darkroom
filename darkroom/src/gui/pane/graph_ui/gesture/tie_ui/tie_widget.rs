@@ -188,7 +188,7 @@ impl TiePass<'_, '_> {
     }
 }
 
-/// Record the knob of a selected tie, whose edges [`TieWidgets::claims_knob`] reads.
+/// Record the knob of a selected tie, whose edges [`TieWidgets::act_on_knob`] reads.
 fn record_knob(ui: &mut Ui, tie: TieId, center: Vec2) {
     Panel::zstack()
         .id(wid::tie_knob(tie))

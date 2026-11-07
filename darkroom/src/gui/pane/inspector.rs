@@ -1,6 +1,6 @@
 //! The inspector pane: a read-only summary of one node — its identity, run status, inputs,
 //! outputs and log — at UI scale, in a dock tab
-//! ([`TabRef::Inspector`](crate::core::document::tab_ref::TabRef::Inspector)).
+//! ([`crate::core::document::tab_ref::TabRef::Inspector`]).
 //!
 //! The `Selection` tab follows the selection and the node header's inspect button opens it; its
 //! pin opens a tab held on that one node, which closes with the node. Input lines show the

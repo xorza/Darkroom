@@ -2,7 +2,7 @@
 
 use std::mem;
 
-use palantir::{Key, Modifiers, PointerAction, PointerButton, PointerEdge, Ui};
+use palantir::{EditableLabel, Key, Modifiers, PointerAction, PointerButton, PointerEdge, Ui};
 use scenarium::NodeId;
 
 use crate::core::document::item_id::ItemId;
@@ -245,7 +245,7 @@ impl Gestures {
 
     /// On a body, a left click selects, Shift toggles and `UndoStep::is_noop` filters a click that
     /// changes nothing, and a right click opens its menu. A left drag on either handle grabs the
-    /// node.
+    /// node, unless the handle is a title whose field is open, where a drag selects text.
     fn act_on_node(
         &mut self,
         ui: &mut Ui,
@@ -268,7 +268,9 @@ impl Gestures {
                 let opened = self.node_menu.open_on(ui, graph_ctx, node);
                 stage.out.extend_graph(opened);
             }
-            (PointerEdge::DragStarted, PointerButton::Left) => {
+            (PointerEdge::DragStarted, PointerButton::Left)
+                if !EditableLabel::is_editing(ui, action.id) =>
+            {
                 let node = graph_ctx
                     .node(node)
                     .expect("the placements list the context's own nodes");

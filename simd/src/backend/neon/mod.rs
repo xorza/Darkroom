@@ -1,12 +1,14 @@
 //! [`Neon`]: the aarch64 [`Isa`], two 128-bit registers per vector.
 //!
-//! NEON is part of the aarch64 baseline, so a [`Neon`] needs no detection and [`Isa::run`] no
-//! `#[target_feature]` entry, and every intrinsic here is sound to call on any operands. Loads and
-//! stores take arrays of exactly one vector's width, split into the two registers' halves.
+//! NEON is part of the aarch64 baseline, so a [`Neon`] needs no detection and
+//! [`IsaTier::run`](crate::IsaTier::run) no `#[target_feature]` entry, and every intrinsic here is
+//! sound to call on any operands. Loads and stores take arrays of exactly one vector's width, split
+//! into the two registers' halves.
 //!
 //! NEON's own `vmaxq`/`vminq` return NaN where either lane is NaN, which is not the compare-swap
-//! [`F32x8::max`] specifies, so they are built from a compare and a bit select instead; only
-//! [`F32x8::min_positive`], whose bound is never NaN, takes `vminq`.
+//! [`F32x8::max`](crate::F32x8::max) specifies, so they are built from a compare and a bit select
+//! instead; only [`F32x8::min_positive`](crate::F32x8::min_positive), whose bound is never NaN,
+//! takes `vminq`.
 
 pub(crate) mod f32x8;
 pub(crate) mod f64x4;
@@ -147,7 +149,7 @@ impl Isa for Neon {
         }
     }
 
-    /// Both `ld3`s, then [`interleave4`] on each half.
+    /// Both `ld3`s, then `interleave4` on each half.
     #[inline(always)]
     fn append_fourth_u8(
         self,
@@ -208,7 +210,7 @@ impl Isa for Neon {
         }
     }
 
-    /// Three channels as an `st3` of each half, four as [`interleave4`] on each half.
+    /// Three channels as an `st3` of each half, four as `interleave4` on each half.
     #[inline(always)]
     fn store_interleaved_u8<const C: usize, const G: usize>(
         self,

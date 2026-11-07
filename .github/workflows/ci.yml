@@ -78,6 +78,8 @@ jobs:
         run: cargo --locked gate-lint-nogpu
       - if: ${{ !cancelled() }}
         run: cargo --locked gate-ship
+      - if: ${{ !cancelled() }}
+        run: cargo --locked gate-doc
       # The build apart from the run, so each shows its own time.
       - if: ${{ !cancelled() }}
         run: cargo --locked gate-test --no-run

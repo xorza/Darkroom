@@ -1,4 +1,5 @@
 use glam::{UVec2, Vec2};
+use palantir::{EditableLabel, PointerButton};
 use scenarium::internals::test_graph::TestGraph;
 use scenarium::{CacheMode, NodeId};
 use std::mem;
@@ -47,6 +48,37 @@ fn the_header_is_one_row_of_run_title_cache_and_inspect() {
         body.max().x - 2.0,
         "the inspect button ends the row"
     );
+}
+
+/// A left drag on a node's title moves the node, and with its rename field open it selects text and
+/// moves nothing.
+#[test]
+fn a_drag_on_a_title_moves_the_node_unless_its_field_is_open() {
+    let drag_latches = |open: bool| {
+        let mut h = CanvasHarness::sized(DocumentFixture::probes(1), SURFACE);
+        let title = wid::rename(h.node(0));
+        h.prime(2);
+        let at = h.ui.rect(title).expect("recorded").center();
+        if open {
+            for _ in 0..2 {
+                h.ui.click(at);
+                h.frame();
+            }
+            h.ui.advance_past_double_click();
+        }
+        assert_eq!(EditableLabel::is_editing(h.ui.ui(), title), open);
+        h.ui.press(at, PointerButton::Left);
+        h.frame();
+        h.ui.drag_to(at + Vec2::new(40.0, 0.0));
+        let intents = h.frame();
+        let moved = intents
+            .iter()
+            .any(|intent| matches!(intent, GraphIntent::MoveSelection { .. }));
+        assert_eq!(moved, h.graph_ui.gestures.group_drag.in_flight());
+        moved
+    };
+    assert!(drag_latches(false));
+    assert!(!drag_latches(true));
 }
 
 /// What one pick in the cache menu raised, in the two tiers it can reach.

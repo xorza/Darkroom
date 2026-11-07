@@ -374,7 +374,7 @@ impl CfaImage {
     ///
     /// A filled photosite carries the flags of the greens it was filled from, but a repaired
     /// green's own: its value is an estimate the fill reads as the demosaic reads it, and its
-    /// flags stay on it as [`Self::demosaic`] keeps them. One with no green neighbour, which only a frame narrower than its pattern has, keeps its own sample and
+    /// flags stay on it as `Self::demosaic` keeps them. One with no green neighbour, which only a frame narrower than its pattern has, keeps its own sample and
     /// flags. A mono frame is its own proxy, its metadata whole: nothing was filled, so its
     /// quantization step and flat gain still hold.
     pub fn green_proxy(&self) -> LinearImage {

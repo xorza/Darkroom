@@ -48,7 +48,7 @@ The gate is one chain of plain cargo commands, run from the root. Each is an
 alias in `.cargo/config.toml`, and the chain stops at the first that fails:
 
 ```
-cargo fmt --all && cargo gate-lint && cargo gate-lint-nogpu && cargo gate-ship && cargo gate-test
+cargo fmt --all && cargo gate-lint && cargo gate-lint-nogpu && cargo gate-ship && cargo gate-doc && cargo gate-test
 ```
 
 Each command reports every error it finds, through `--keep-going` and
