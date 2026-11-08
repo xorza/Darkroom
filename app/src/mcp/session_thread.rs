@@ -53,7 +53,8 @@ struct Request {
 /// ended.
 #[derive(Debug)]
 pub(crate) enum Session {
-    Live(Live),
+    /// Boxed: the driver is over 200 bytes, beside an end reason of 24.
+    Live(Box<Live>),
     Ended(Ended),
 }
 
@@ -100,7 +101,7 @@ impl SessionThread {
                 }
             };
             started.send(Ok(())).ok();
-            serve(requests, Session::Live(Live { driver, on_end }));
+            serve(requests, Session::Live(Box::new(Live { driver, on_end })));
         });
         let thread = Self {
             jobs,
@@ -226,7 +227,7 @@ impl Session {
     /// the first panic is the cause. A session already ended keeps the reason it ended for.
     fn end(&mut self, why: Ended) {
         let Live { driver, on_end } = match mem::replace(self, Self::Ended(why.clone())) {
-            Self::Live(live) => live,
+            Self::Live(live) => *live,
             ended @ Self::Ended(_) => {
                 *self = ended;
                 return;
