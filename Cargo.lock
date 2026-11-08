@@ -3038,6 +3038,8 @@ dependencies = [
  "image",
  "libm",
  "mundy",
+ "objc2 0.6.5",
+ "objc2-foundation 0.3.2",
  "padding-struct",
  "palantir-anim-derive",
  "pollster",
@@ -3055,6 +3057,7 @@ dependencies = [
  "wgpu",
  "windows",
  "winit",
+ "zbus",
 ]
 
 [[package]]
