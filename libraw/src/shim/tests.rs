@@ -10,7 +10,7 @@ fn linked_library_matches_bindings() {
         | sys::LIBRAW_PATCH_VERSION;
     let linked = unsafe { sys::libraw_versionNumber() };
     assert_eq!(u32::try_from(linked).unwrap(), expected);
-    assert_eq!(expected, 0x00_16_02, "0.22.2");
+    assert_eq!(expected, 0x00_16_03, "0.22.3");
 }
 
 /// A plain Bayer dump is no SuperCCD, no float file and no CR3, and states no capture time: the
