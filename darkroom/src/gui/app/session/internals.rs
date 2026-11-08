@@ -131,7 +131,8 @@ impl SessionHarness {
         // tab strips among them. Without it a geometry assertion here
         // measures palantir's stock theme rather than darkroom's.
         ui.ui_mut()
-            .set_theme(ColorScheme::Dark, theme.palantir.clone());
+            .set_theme(ColorScheme::Dark, theme.palantir.clone())
+            .unwrap();
         Self {
             ui,
             session: Session::new(OpenDocument::over(fixture.document)),

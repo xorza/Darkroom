@@ -188,7 +188,8 @@ impl App {
         // Onto the Ui before frame 1, so palantir's own widgets paint right and the first frame
         // is at the remembered size. Darkroom has one look, Ayu Graphite's dark, so it pins the
         // dark scheme whatever the system reports.
-        ui.set_theme(ColorScheme::Dark, app.theme.palantir.clone());
+        ui.set_theme(ColorScheme::Dark, app.theme.palantir.clone())
+            .expect("darkroom's theme names no press effect");
         ui.set_preferences(UiPreferences {
             scheme: Preference::Fixed(ColorScheme::Dark),
             ..ui.preferences()
