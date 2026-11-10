@@ -244,7 +244,7 @@ fn space_above_results(ui: &Ui, theme: &Theme) -> f32 {
         },
         |(field, results)| results.min.y - field.min.y,
     );
-    let border = menu.panel.border.width;
+    let border = menu.panel.paint.border.width;
     let border = if domain::is_invisible(border) {
         0.0
     } else {

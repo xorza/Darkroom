@@ -280,10 +280,19 @@ impl Row<'_> {
             ..Chrome::default()
         };
         if self.focused {
-            chrome.fill = focus_fill(theme).into();
+            chrome.paint.fill = focus_fill(theme).into();
         } else if hovered {
             // A menu row's hover, so the palette and the menus light a row alike.
-            chrome.fill = ui.theme().menu.item.unselected.hovered.chrome.fill.clone();
+            chrome.paint.fill = ui
+                .theme()
+                .menu
+                .item
+                .unselected
+                .hovered
+                .chrome
+                .paint
+                .fill
+                .clone();
         }
         // On a lit row the secondary text takes the full ink, as VS Code's quick pick gives
         // its focused row's description `list.activeSelectionForeground`: the muted ink
@@ -309,7 +318,7 @@ impl Row<'_> {
                 Block::new()
                     .id_salt("focus_bar")
                     .size((Sizing::fixed(theme.stroke.line), Sizing::HUG))
-                    .chrome(Chrome::fill(bar))
+                    .chrome(Chrome::new(bar))
                     .show(ui);
                 Panel::vstack()
                     .id_salt("body")

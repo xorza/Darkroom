@@ -104,7 +104,7 @@ impl ConstEditorTheme {
         alpha: f32,
     ) -> Self {
         let mut button = button.clone();
-        button.unselected.normal.chrome.fill =
+        button.unselected.normal.chrome.paint.fill =
             Brush::Solid(color::wash(p.element_mid, alpha, p.element));
         let proportional = DragValueTheme {
             looks: button.unselected.clone(),

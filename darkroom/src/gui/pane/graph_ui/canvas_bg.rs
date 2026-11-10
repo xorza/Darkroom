@@ -89,7 +89,9 @@ impl CanvasBg {
                 lattice_origin(pan, spacing * scale),
                 scale,
             ))
-            .show(ui, |ui| ui.add_shape(Shape::mesh(mesh)));
+            .show(ui, |ui| {
+                ui.add_shape(Shape::mesh(mesh), RgbaF32::WHITE);
+            });
     }
 }
 

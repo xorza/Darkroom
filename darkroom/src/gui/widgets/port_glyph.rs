@@ -5,8 +5,8 @@ use common::LibmVec2;
 use glam::Vec2;
 use palantir::widget::Shape;
 use palantir::{
-    Configure, Panel, Rect, Response, RgbaF32, Sense, Spacing, Stroke, TextInput, Ui, Visibility,
-    WidgetId,
+    Border, Configure, Paint, Panel, Rect, Response, RgbaF32, Sense, Spacing, TextInput, Ui,
+    Visibility, WidgetId,
 };
 
 use crate::gui::theme::Theme;
@@ -261,22 +261,21 @@ impl Painted {
                 // lands the ring's inner edge exactly on the fill's outer edge.
                 if let Some(color) = outline {
                     ui.add_shape(
-                        Shape::rect()
-                            .at(rect.inflated(ring))
-                            .corners(radius + ring)
-                            .border(Stroke::new(color, ring)),
+                        Shape::rect().at(rect.inflated(ring)).corners(radius + ring),
+                        Paint::NONE.with_border(Border::new(color, ring)),
                     );
                 }
                 let disc = Shape::rect().at(rect).corners(radius);
-                ui.add_shape(if hollow {
-                    disc.border(Stroke::new(fill, ring))
+                let paint = if hollow {
+                    Paint::NONE.with_border(Border::new(fill, ring))
                 } else {
-                    disc.fill(fill)
-                });
+                    Paint::from(fill)
+                };
+                ui.add_shape(disc, paint);
             }
             GlyphShape::Arrow { turn } => {
                 let [a, b, apex] = self.arrow_vertices(turn);
-                ui.add_shape(Shape::triangle(a, b, apex).radius(corner).fill(fill));
+                ui.add_shape(Shape::triangle(a, b, apex).radius(corner), fill);
             }
         }
     }

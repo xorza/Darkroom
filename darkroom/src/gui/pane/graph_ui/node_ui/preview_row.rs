@@ -13,7 +13,7 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 
 use imaginarium::ColorFormat;
-use palantir::widget::Shape;
+use palantir::widget::{ImagePaint, Shape};
 use palantir::{
     Align, Configure, CursorIcon, DockOperation, ImageFit, Justify, Panel, Sense, Sizing, Text,
     TextWrap, Ui, VAlign, fmt,
@@ -59,7 +59,10 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
         .sense(if has_image { Sense::CLICK } else { Sense::NONE })
         .show(ui, |ui| {
             if let Some(image) = stored.and_then(StoredContent::image) {
-                ui.add_shape(Shape::image(image.preview.handle.clone()).fit(ImageFit::Contain));
+                ui.add_shape(
+                    Shape::rect(),
+                    ImagePaint::new(image.preview.handle.clone()).fit(ImageFit::Contain),
+                );
             } else {
                 // `message` is complementary to `image`, so this covers a
                 // formatted non-image value and a value that failed to prepare

@@ -144,7 +144,7 @@ mod tests {
 
     /// The fill a look paints.
     fn fill(look: &WidgetLook) -> RgbaF32 {
-        look.chrome.fill.as_solid().expect("a solid fill")
+        look.chrome.paint.fill.as_solid().expect("a solid fill")
     }
 
     /// An "on" button rests under the hover lift an "off" one takes, so "on" never reads as
@@ -156,7 +156,7 @@ mod tests {
         let off = press_style(&theme, theme.ink.muted);
         let lift = fill(&off.unselected.hovered);
         assert!(
-            off.unselected.normal.chrome.fill.is_noop(),
+            off.unselected.normal.chrome.paint.fill.is_noop(),
             "a resting button paints no quad"
         );
         for (ink, name) in [(theme.badge.cache, "cache"), (theme.ink.muted, "disable")] {

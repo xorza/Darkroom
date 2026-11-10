@@ -137,7 +137,7 @@ impl MainWindow {
                 .id_salt("surround_row")
                 .size((Sizing::FILL, Sizing::HUG))
                 .child_align(Align::v(VAlign::Bottom))
-                .chrome(Chrome::fill(fill))
+                .chrome(Chrome::new(fill))
                 .show(ui, |ui| {
                     menu_bar::show(ui, stage);
                 });

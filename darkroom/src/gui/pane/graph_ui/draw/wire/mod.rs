@@ -21,8 +21,8 @@ use std::ops::Range;
 
 use glam::Vec2;
 
-use palantir::widget::{CubicBezier, LineCap, Shape};
-use palantir::{ColorRamp, RgbaF32, Stroke, Ui};
+use palantir::widget::{CubicBezier, Shape};
+use palantir::{ColorRamp, LineCap, RgbaF32, Stroke, Ui};
 
 use crate::core::document::wire_key::DataWire;
 use crate::core::document::wire_key::WireKey;
@@ -50,20 +50,20 @@ impl WirePaint {
     /// `Shape` is built, so data and event curves cannot drift in width policy, cap, or
     /// primitive.
     pub(crate) fn stroke(self, ui: &mut Ui, wire: &Wire, width: f32) {
-        let mut shape = Shape::cubic_bezier(
-            CubicBezier {
+        let stroke = Stroke::new(self.color, width).with_cap(LineCap::Round);
+        let stroke = match self.ramp {
+            Some(ramp) => stroke.with_ramp(ramp),
+            None => stroke,
+        };
+        ui.add_shape(
+            Shape::cubic_bezier(CubicBezier {
                 p0: wire.p0,
                 p1: wire.p1,
                 p2: wire.p2,
                 p3: wire.p3,
-            },
-            Stroke::new(self.color, width),
-        )
-        .cap(LineCap::Round);
-        if let Some(ramp) = self.ramp {
-            shape = shape.ramp(ramp);
-        }
-        ui.add_shape(shape);
+            }),
+            stroke,
+        );
     }
 
     /// The part of this paint from `from` to `to` along the wire, both fractions of it: the ramp
@@ -187,12 +187,9 @@ impl WirePass<'_, '_, '_> {
         if broken && let Some(middle) = Middle::of(pieces) {
             let half = middle.dir.perp() * (theme.canvas.cut_bar_length * 0.5);
             ui.add_shape(
-                Shape::line(
-                    middle.at - half,
-                    middle.at + half,
-                    Stroke::new(theme.canvas.wire_broken, theme.canvas.cut_bar_width),
-                )
-                .cap(LineCap::Round),
+                Shape::line(middle.at - half, middle.at + half),
+                Stroke::new(theme.canvas.wire_broken, theme.canvas.cut_bar_width)
+                    .with_cap(LineCap::Round),
             );
         }
         broken

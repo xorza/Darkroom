@@ -1,4 +1,4 @@
-use palantir::{CloseShown, Scrim, SrgbaU8};
+use palantir::{CloseShown, SrgbaU8};
 use scenarium::TypeId;
 use static_assertions::assert_not_impl_any;
 
@@ -36,8 +36,8 @@ fn default_wiring_and_menu_tweak() {
     // The palantir half is the same palette, not palantir's own default.
     assert_eq!(theme.palantir.window_bg, p.canvas_bg);
     // The menu bar and every tab strip ride the surround band.
-    assert_eq!(theme.palantir.menu_bar.bar, Chrome::fill(p.surround_bg));
-    assert_eq!(theme.palantir.tabs.strip, Chrome::fill(p.surround_bg));
+    assert_eq!(theme.palantir.menu_bar.bar, Chrome::new(p.surround_bg));
+    assert_eq!(theme.palantir.tabs.strip, Chrome::new(p.surround_bg));
     assert!(theme.palantir.tooltip.max_size.h.is_infinite());
 
     // The open menu's trigger rests lit, as the hovered one does; a shut one rests flat.
@@ -58,9 +58,9 @@ fn default_wiring_and_menu_tweak() {
     assert_eq!(theme.row_height(), 28.0);
     // Every floating surface sits on one tier.
     let floating = theme.elevation.floating;
-    assert_eq!(menu.panel.shadow, floating);
-    assert_eq!(theme.palantir.tooltip.panel.shadow, floating);
-    assert_eq!(theme.palantir.modal.panel.shadow, floating);
+    assert_eq!(menu.panel.paint.shadow, floating);
+    assert_eq!(theme.palantir.tooltip.panel.paint.shadow, floating);
+    assert_eq!(theme.palantir.modal.panel.paint.shadow, floating);
 
     // Every light-dismiss popup is frosted glass under its own color at
     // 0.72 alpha; a modal stays opaque under its scrim. The glass's ceiling holds the muted ink,
@@ -75,8 +75,8 @@ fn default_wiring_and_menu_tweak() {
     // A toolbar pill has no blur. Over white, the #1f1f1f surround, `Y = 0.013702`, at 0.98 leaves
     // the ground at `0.02 + 0.98 · 0.013702 = 0.033428`, so the muted ink reads
     // `(0.371238 + 0.05) / (0.033428 + 0.05) = 5.05:1`.
-    assert_eq!(theme.pill.fill, p.surround_bg.with_alpha(0.98).into());
-    assert!(theme.pill.backdrop_filter.is_noop());
+    assert_eq!(theme.pill.paint.fill, p.surround_bg.with_alpha(0.98).into());
+    assert!(theme.pill.paint.material.is_none());
     let ground = 0.02 + 0.98 * p.surround_bg.luminance();
     assert!(((p.text_muted.luminance() + 0.05) / (ground + 0.05) - 5.05).abs() < 0.01);
 
@@ -98,28 +98,29 @@ fn default_wiring_and_menu_tweak() {
             0.04443538,
         ),
     ] {
-        let ceiling = glass.backdrop_filter.max_luminance.expect(name);
+        let material = glass.paint.material.expect(name);
+        let ceiling = material.max_luminance.expect(name);
         assert_eq!(
-            glass.backdrop_filter,
-            BackdropFilter::frosted(20.0).with_max_luminance(ceiling),
+            material,
+            Material::frosted(20.0).with_max_luminance(ceiling),
             "{name}"
         );
         // The hand value's eighth digit, and the derivation's f32 rounding, a few ulps of 1e-8.
         assert!((ceiling - want).abs() < 1e-7, "{name}: {ceiling}");
-        assert_eq!(glass.fill, tint.with_alpha(0.72).into(), "{name}");
+        assert_eq!(glass.paint.fill, tint.with_alpha(0.72).into(), "{name}");
         let ground = 0.28 * ceiling + 0.72 * tint.luminance();
         // The same f32 rounding, carried through: a few ulps of 4e-9.
         assert!((ground - level(57)).abs() < 2e-8, "{name}: {ground}");
     }
-    assert!(ui.modal.panel.backdrop_filter.is_noop());
+    assert!(ui.modal.panel.paint.material.is_none());
     assert_eq!(
-        ui.modal.panel.fill,
+        ui.modal.panel.paint.fill,
         p.node_bg.into(),
         "the modal sits on the card tier"
     );
     assert_eq!(
         ui.modal.scrim,
-        Scrim::from(RgbaF32::hexa(0x00000080)).with_filter(BackdropFilter::blur(4.0)),
+        Chrome::new(RgbaF32::hexa(0x00000080)).with_material(Material::blur(4.0)),
         "palantir's half-clear dim over a slight blur"
     );
 }
@@ -242,9 +243,12 @@ fn the_error_path_field_recolors_every_border_and_keeps_its_width() {
         (&base.looks.active, &error.looks.active),
         (&base.looks.disabled, &error.looks.disabled),
     ] {
-        assert_eq!(error.chrome.border.color, theme.status.error);
-        assert_eq!(error.chrome.border.width, base.chrome.border.width);
-        assert_ne!(base.chrome.border.color, theme.status.error);
+        assert_eq!(error.chrome.paint.border.color, theme.status.error);
+        assert_eq!(
+            error.chrome.paint.border.width,
+            base.chrome.paint.border.width
+        );
+        assert_ne!(base.chrome.paint.border.color, theme.status.error);
     }
 }
 
@@ -345,7 +349,7 @@ fn every_palantir_padding_and_radius_is_on_the_scale() {
         ..
     } = theme.radius;
     assert_eq!(ui.text.font_size, theme.font.body);
-    assert_eq!(ui.menu.panel.shadow, theme.elevation.floating);
+    assert_eq!(ui.menu.panel.paint.shadow, theme.elevation.floating);
     // The tab strip starts its tabs at the surround's inset, as the menu bar starts its titles.
     assert_eq!(
         theme.palantir.tabs.strip_padding.to_array()[0],
@@ -389,13 +393,25 @@ fn a_tab_chip_and_its_close_button_are_ghosts() {
     let theme = Theme::default();
     let tabs = &theme.palantir.tabs;
     let looks = &tabs.unselected;
-    assert_eq!(looks.normal.chrome.fill, Chrome::NONE.fill);
-    assert_eq!(looks.disabled.chrome.fill, Chrome::NONE.fill);
+    assert_eq!(looks.normal.chrome.paint.fill, Chrome::NONE.paint.fill);
+    assert_eq!(looks.disabled.chrome.paint.fill, Chrome::NONE.paint.fill);
     let titles = &theme.palantir.menu_bar.title;
-    assert_eq!(looks.hovered.chrome.fill, titles.hovered.chrome.fill);
-    assert_eq!(looks.active.chrome.fill, titles.active.chrome.fill);
-    assert_eq!(tabs.close.hovered.chrome.fill, titles.active.chrome.fill);
-    assert_ne!(tabs.close.hovered.chrome.fill, looks.hovered.chrome.fill);
+    assert_eq!(
+        looks.hovered.chrome.paint.fill,
+        titles.hovered.chrome.paint.fill
+    );
+    assert_eq!(
+        looks.active.chrome.paint.fill,
+        titles.active.chrome.paint.fill
+    );
+    assert_eq!(
+        tabs.close.hovered.chrome.paint.fill,
+        titles.active.chrome.paint.fill
+    );
+    assert_ne!(
+        tabs.close.hovered.chrome.paint.fill,
+        looks.hovered.chrome.paint.fill
+    );
     assert_eq!(tabs.close.normal.chrome, Chrome::NONE);
     assert_eq!(
         (

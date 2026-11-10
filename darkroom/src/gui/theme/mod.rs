@@ -27,8 +27,8 @@ pub(crate) mod type_colors;
 pub(crate) mod viewer_theme;
 
 use palantir::{
-    AnimationSpec, BackdropFilter, ButtonTheme, Chrome, Corners, FloatMaterial, Metrics,
-    RadiusSteps, RgbaF32, ShadowGeometry, SpaceSteps, Spacing, Stroke, StrokeSteps, TextEditTheme,
+    AnimationSpec, Border, ButtonTheme, Chrome, Corners, FloatMaterial, Material, Metrics,
+    RadiusSteps, RgbaF32, ShadowGeometry, SpaceSteps, Spacing, StrokeSteps, TextEditTheme,
     TextSteps,
 };
 
@@ -440,7 +440,7 @@ const fn metrics(elevation: &ElevationScale) -> Metrics {
 /// 0.72 with no blur, 1.24:1.
 const PILL_ALPHA: f32 = 0.98;
 
-/// The frosted glass the popups wear: its own solid fill as a tint at 0.72 alpha over a backdrop
+/// The frosted glass the popups wear: its own solid fill at 0.72 alpha over a backdrop
 /// blurred by σ 20 logical px, wide enough that a node's title under it reads as color, not as text, and bound so the
 /// dimmest ink the surface paints keeps its contrast at 4.5:1, as Fluent puts acrylic under
 /// flyouts and in-app surfaces
@@ -448,15 +448,15 @@ const PILL_ALPHA: f32 = 0.98;
 /// Refused: a tint alone, 1.18:1 over a white image; a frosted modal, whose scrim leaves nothing
 /// to see through.
 pub(super) const GLASS: FloatMaterial = FloatMaterial {
-    filter: BackdropFilter::frosted(20.0),
-    tint_alpha: 0.72,
+    material: Material::frosted(20.0),
+    fill_alpha: 0.72,
 };
 
 /// `base` with every state's border in `color`, its width kept.
 fn error_bordered(base: &TextEditTheme, color: RgbaF32) -> TextEditTheme {
     let mut style = base.clone();
     for look in style.looks.each_mut() {
-        look.chrome.border = Stroke::new(color, look.chrome.border.width);
+        look.chrome.paint.border = Border::new(color, look.chrome.paint.border.width);
     }
     style
 }

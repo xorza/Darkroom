@@ -315,7 +315,7 @@ impl GraphUi {
             .size(Sizing::FILL)
             .sense(Sense::CLICK | Sense::DRAG | Sense::SCROLL | Sense::PINCH)
             .clip_rect()
-            .chrome(Chrome::fill(theme.canvas.bg))
+            .chrome(Chrome::new(theme.canvas.bg))
             .show(ui, |ui| {
                 // Dotted backdrop in screen space, beneath the inner
                 // (transformed) canvas — so it paints under everything.

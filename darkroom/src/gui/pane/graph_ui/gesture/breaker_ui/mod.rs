@@ -1,8 +1,8 @@
 pub(crate) mod breaker_probe;
 pub(crate) mod scribble;
 
-use palantir::widget::{LineCap, LineJoin, Shape};
-use palantir::{Stroke, Ui};
+use palantir::widget::Shape;
+use palantir::{LineCap, LineJoin, Stroke, Ui};
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::frame::requests::Requests;
@@ -88,12 +88,10 @@ impl BreakerUi {
             return;
         }
         ui.add_shape(
-            Shape::polyline(
-                &self.scribble.points,
-                Stroke::new(theme.canvas.breaker_stroke, theme.canvas.wire_at(zoom)),
-            )
-            .cap(LineCap::Round)
-            .join(LineJoin::Round),
+            Shape::polyline(&self.scribble.points),
+            Stroke::new(theme.canvas.breaker_stroke, theme.canvas.wire_at(zoom))
+                .with_cap(LineCap::Round)
+                .with_join(LineJoin::Round),
         );
     }
 }

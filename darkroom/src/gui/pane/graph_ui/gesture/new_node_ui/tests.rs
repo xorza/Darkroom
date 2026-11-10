@@ -104,7 +104,7 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
         // exactly the gap the popup then paints its rows outside. The inset
         // around the span is the theme's padding plus the panel's border, which
         // palantir folds into the padding on every side.
-        let inset = menu.padding.sums().h + 2.0 * menu.panel.border.width;
+        let inset = menu.padding.sums().h + 2.0 * menu.panel.paint.border.width;
         let used = inset + (results.max().y - field.min.y);
         assert!(
             used <= cap + 0.5,

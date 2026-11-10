@@ -9,8 +9,8 @@ pub(crate) mod tie_probe;
 pub(crate) mod tie_widget;
 
 use glam::Vec2;
-use palantir::widget::{LineCap, Shape};
-use palantir::{Stroke, Ui};
+use palantir::widget::Shape;
+use palantir::{LineCap, Stroke, Ui};
 
 use crate::core::document::graph_view::GraphView;
 use crate::core::document::item_id::ItemId;
@@ -97,12 +97,8 @@ impl TieUi {
             );
         }
         ui.add_shape(
-            Shape::line(
-                self.line.start,
-                self.line.end,
-                Stroke::new(theme.tie.ring, theme.canvas.wire_at(zoom)),
-            )
-            .cap(LineCap::Round),
+            Shape::line(self.line.start, self.line.end),
+            Stroke::new(theme.tie.ring, theme.canvas.wire_at(zoom)).with_cap(LineCap::Round),
         );
     }
 }

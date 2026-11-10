@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use glam::Vec2;
 use palantir::widget::Shape;
-use palantir::{Modifiers, Rect, Stroke, Ui};
+use palantir::{Border, Modifiers, Paint, Rect, Ui};
 
 use crate::core::document::item_id::ItemId;
 use crate::core::edit::graph_intent::GraphIntent;
@@ -182,17 +182,15 @@ impl SelectionUi {
             return;
         }
         ui.add_shape(
-            Shape::rect()
-                .at(rect)
-                .fill(theme.colors.selection_fill())
-                .border(border(theme, zoom)),
+            Shape::rect().at(rect),
+            Paint::from(theme.colors.selection_fill()).with_border(border(theme, zoom)),
         );
     }
 }
 
 /// The band's border at `zoom`, a hairline on screen.
-fn border(theme: &Theme, zoom: f32) -> Stroke {
-    Stroke::new(
+fn border(theme: &Theme, zoom: f32) -> Border {
+    Border::new(
         theme.colors.selection_border(),
         theme.stroke.hairline / zoom,
     )

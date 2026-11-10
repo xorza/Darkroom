@@ -31,7 +31,7 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 
 use glam::{UVec2, Vec2};
-use palantir::widget::Shape;
+use palantir::widget::{ImagePaint, Shape};
 use palantir::{
     Align, Chrome, Configure, ImageDownsample, ImageFilter, ImageFit, ImageHandle, Panel, Sense,
     Sizing, Spacing, Ui, WidgetId, fmt,
@@ -295,7 +295,7 @@ impl ImageViewer {
             .size(Sizing::FILL)
             .sense(Sense::CLICK | Sense::DRAG | Sense::SCROLL | Sense::PINCH)
             .clip_rect()
-            .chrome(Chrome::fill(fill))
+            .chrome(Chrome::new(fill))
             .show(ui, |ui| {
                 if preferences.bg == ViewerBg::Checker
                     && let Some(pane) = pane
@@ -304,19 +304,20 @@ impl ImageViewer {
                 }
                 if let Some(view) = source.image() {
                     let shown = view.image();
-                    let image = Shape::image(shown.handle.clone())
+                    let image = ImagePaint::new(shown.handle.clone())
                         .min_filter(ImageFilter::Linear)
                         .mag_filter(preferences.mag_filter)
                         .downsample(self.downsample);
-                    ui.add_shape(match self.effective_view(ui, shown, pane) {
-                        Some(v) => image
-                            .at(camera::draw_rect(logical_size(shown, ui), v))
-                            .fit(ImageFit::Fill),
+                    match self.effective_view(ui, shown, pane) {
+                        Some(v) => ui.add_shape(
+                            Shape::rect().at(camera::draw_rect(logical_size(shown, ui), v)),
+                            image.fit(ImageFit::Fill),
+                        ),
                         // No framing yet — no zoom of its own and no pane to
                         // fit into. Palantir's own contain draws exactly what
                         // the fit would.
-                        None => image.fit(ImageFit::Contain),
-                    });
+                        None => ui.add_shape(Shape::rect(), image.fit(ImageFit::Contain)),
+                    };
                     let shown = Shown {
                         pane: pane_view,
                         view,
@@ -366,7 +367,8 @@ impl ImageViewer {
     fn draw_checker(&mut self, ui: &mut Ui, theme: &Theme, pane: Vec2) {
         let handle = self.checker_tile(ui, theme);
         ui.add_shape(
-            Shape::image(handle)
+            Shape::rect(),
+            ImagePaint::new(handle)
                 .fit(ImageFit::Tile {
                     offset: Vec2::ZERO,
                     scale: pane / (2.0 * theme.viewer.checker_square),

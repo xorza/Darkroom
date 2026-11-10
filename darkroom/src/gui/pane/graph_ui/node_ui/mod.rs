@@ -9,7 +9,7 @@ pub(crate) mod run_status;
 
 use std::mem;
 
-use palantir::{Configure, Panel, Sense, Shadow, Sizing, Stroke, Track, Ui, Visibility};
+use palantir::{Border, Configure, Panel, Sense, Shadow, Sizing, Track, Ui, Visibility};
 use scenarium::NodeId;
 
 use crate::core::document::graph_view::StackedNode;
@@ -211,7 +211,7 @@ impl NodeUi {
             .chrome(
                 theme
                     .card_chrome()
-                    .with_border(Stroke::new(border, border_width))
+                    .with_border(Border::new(border, border_width))
                     .with_shadow(shadow),
             )
             .show(ui, |ui| {

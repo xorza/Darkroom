@@ -5,11 +5,12 @@ use common::Libm;
 use std::f32::consts::{FRAC_PI_2, PI};
 
 use glam::Vec2;
-use palantir::widget::{CircularArc, LineCap, Shape};
-use palantir::{Rect, RgbaF32, Size, Stroke, Ui};
+use palantir::widget::Shape;
+use palantir::{LineCap, Rect, RgbaF32, Size, Stroke, Ui};
 
 use crate::gui::pane::graph_ui::scene::tie_layout::{Band, SLOT_SPACING};
 use crate::gui::theme::Theme;
+use crate::gui::widgets::support;
 
 /// The band's shape, as an icon's artwork is its own; its strokes are the theme's `stroke.fine`.
 ///
@@ -180,7 +181,10 @@ impl BandAxes {
     }
 
     fn line(self, ui: &mut Ui, [a, b]: [Vec2; 2], color: RgbaF32, width: f32) {
-        ui.add_shape(Shape::line(a, b, Stroke::new(color, width)).cap(LineCap::Round));
+        ui.add_shape(
+            Shape::line(a, b),
+            Stroke::new(color, width).with_cap(LineCap::Round),
+        );
     }
 
     /// A capsule outline around the band and its head.
@@ -188,22 +192,17 @@ impl BandAxes {
         let left = -self.half - RING_PAST_END + RING_RADIUS;
         let right = self.half - HEAD_OVERLAP + HEAD_LENGTH + RING_PAST_HEAD - RING_RADIUS;
         for y in [-RING_RADIUS, RING_RADIUS] {
-            ui.add_shape(Shape::line(self.at(left, y), self.at(right, y), stroke));
+            ui.add_shape(Shape::line(self.at(left, y), self.at(right, y)), stroke);
         }
         let axis_angle = self.axis.y.libm_atan2(self.axis.x);
         for (x, start_angle) in [
             (right, axis_angle - FRAC_PI_2),
             (left, axis_angle + FRAC_PI_2),
         ] {
-            ui.add_shape(Shape::arc(
-                CircularArc {
-                    center: self.at(x, 0.0),
-                    radius: RING_RADIUS,
-                    start_angle,
-                    sweep: PI,
-                },
+            ui.add_shape(
+                Shape::arc(start_angle, PI).at(support::around(self.at(x, 0.0), RING_RADIUS)),
                 stroke,
-            ));
+            );
         }
     }
 
@@ -212,18 +211,13 @@ impl BandAxes {
     fn knob(self, ui: &mut Ui, ring: Stroke, halo: RgbaF32, pinned: Option<RgbaF32>) {
         let ring_end = self.half - HEAD_OVERLAP + HEAD_LENGTH + RING_PAST_HEAD;
         let center = self.knob_center();
-        ui.add_shape(Shape::line(self.at(ring_end, 0.0), center, ring));
+        ui.add_shape(Shape::line(self.at(ring_end, 0.0), center), ring);
         let (fill, rim) = match pinned {
             Some(fill) => (fill, halo),
             None => (halo, ring.color),
         };
-        // A disk as a circle stroked as wide as its radius.
-        let disk = KNOB_RADIUS * 0.5;
-        ui.add_shape(Shape::circle(center, disk, Stroke::new(fill, KNOB_RADIUS)));
-        ui.add_shape(Shape::circle(
-            center,
-            KNOB_RADIUS,
-            Stroke::new(rim, ring.width),
-        ));
+        let knob = Shape::circle().at(support::around(center, KNOB_RADIUS));
+        ui.add_shape(knob, fill);
+        ui.add_shape(knob, Stroke::new(rim, ring.width));
     }
 }

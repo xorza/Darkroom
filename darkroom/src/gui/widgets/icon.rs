@@ -2,10 +2,10 @@
 
 use std::f32::consts::PI;
 
-use palantir::{Rect, RgbaF32, Stroke, Ui};
+use palantir::{Border, LineCap, LineJoin, Paint, Rect, RgbaF32, Stroke, Ui};
 
 use glam::Vec2;
-use palantir::widget::{CircularArc, LineCap, LineJoin, Shape};
+use palantir::widget::Shape;
 
 use crate::gui::theme::icon_scale::{CROSS_SPAN, GRID, STROKE};
 use crate::gui::widgets::support;
@@ -59,7 +59,9 @@ impl Icon {
         let pen = Pen {
             origin,
             k,
-            stroke: Stroke::new(color, STROKE * k),
+            stroke: Stroke::new(color, STROKE * k)
+                .with_cap(LineCap::Round)
+                .with_join(LineJoin::Round),
             color,
         };
         match self {
@@ -158,7 +160,8 @@ impl Icon {
     }
 }
 
-/// The icon grid mapped onto a box: a point `(x, y)` in grid units lands at `origin + (x, y) * k`.
+/// The icon grid mapped onto a box: a point `(x, y)` in grid units lands at `origin + (x, y) * k`,
+/// and every stroke round-capped and round-joined.
 #[derive(Clone, Copy, Debug)]
 struct Pen {
     origin: Vec2,
@@ -178,7 +181,7 @@ impl Pen {
     }
 
     fn line(self, ui: &mut Ui, a: impl Into<Vec2>, b: impl Into<Vec2>) {
-        ui.add_shape(Shape::line(self.at(a), self.at(b), self.stroke).cap(LineCap::Round));
+        ui.add_shape(Shape::line(self.at(a), self.at(b)), self.stroke);
     }
 
     /// An open stroke through `points`; at most four, the most any icon draws in one stroke.
@@ -187,11 +190,7 @@ impl Pen {
         for (to, &from) in placed.iter_mut().zip(points) {
             *to = self.at(from);
         }
-        ui.add_shape(
-            Shape::polyline(&placed[..points.len()], self.stroke)
-                .cap(LineCap::Round)
-                .join(LineJoin::Round),
-        );
+        ui.add_shape(Shape::polyline(&placed[..points.len()]), self.stroke);
     }
 
     /// A closed stroke through `points` and back to the first; at most six.
@@ -201,29 +200,25 @@ impl Pen {
             *to = self.at(from);
         }
         placed[points.len()] = placed[0];
-        ui.add_shape(
-            Shape::polyline(&placed[..=points.len()], self.stroke)
-                .cap(LineCap::Round)
-                .join(LineJoin::Round),
-        );
+        ui.add_shape(Shape::polyline(&placed[..=points.len()]), self.stroke);
     }
 
     fn circle(self, ui: &mut Ui, center: impl Into<Vec2>, radius: f32) {
-        ui.add_shape(Shape::circle(self.at(center), radius * self.k, self.stroke));
+        ui.add_shape(
+            Shape::circle().at(support::around(self.at(center), radius * self.k)),
+            self.stroke,
+        );
     }
 
     fn arc(self, ui: &mut Ui, center: impl Into<Vec2>, radius: f32, start_angle: f32, sweep: f32) {
-        let arc = CircularArc {
-            center: self.at(center),
-            radius: radius * self.k,
-            start_angle,
-            sweep,
-        };
-        ui.add_shape(Shape::arc(arc, self.stroke).cap(LineCap::Round));
+        ui.add_shape(
+            Shape::arc(start_angle, sweep).at(support::around(self.at(center), radius * self.k)),
+            self.stroke,
+        );
     }
 
     fn dot(self, ui: &mut Ui, center: impl Into<Vec2>, radius: f32) {
-        ui.add_shape(support::dot(self.at(center), radius * self.k).fill(self.color));
+        ui.add_shape(support::dot(self.at(center), radius * self.k), self.color);
     }
 
     /// A rounded-rect outline, its stroke centered on the rect's edge as a polyline's is.
@@ -232,19 +227,15 @@ impl Pen {
         let (x, y, w, h) = rect;
         let outer = self.rect((x - half, y - half, w + STROKE, h + STROKE));
         ui.add_shape(
-            Shape::rect()
-                .at(outer)
-                .corners((radius + half) * self.k)
-                .border(self.stroke),
+            Shape::rect().at(outer).corners((radius + half) * self.k),
+            Paint::NONE.with_border(Border::new(self.stroke.color, self.stroke.width)),
         );
     }
 
     fn fill(self, ui: &mut Ui, rect: (f32, f32, f32, f32), radius: f32) {
         ui.add_shape(
-            Shape::rect()
-                .at(self.rect(rect))
-                .corners(radius * self.k)
-                .fill(self.color),
+            Shape::rect().at(self.rect(rect)).corners(radius * self.k),
+            self.color,
         );
     }
 }

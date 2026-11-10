@@ -394,7 +394,7 @@ mod tests {
 
         let edge = theme.stroke.hairline;
         assert_eq!(edge, 1.0);
-        assert_eq!(theme.palantir.modal.panel.border.width, edge);
+        assert_eq!(theme.palantir.modal.panel.paint.border.width, edge);
         assert_eq!(
             message.min,
             panel.min + Vec2::splat(edge),
@@ -453,7 +453,7 @@ mod tests {
             title.size.h
         );
         assert_eq!(
-            theme.primary_button.unselected.normal.chrome.fill,
+            theme.primary_button.unselected.normal.chrome.paint.fill,
             theme.colors.accent.into()
         );
         h.key(Key::Enter);

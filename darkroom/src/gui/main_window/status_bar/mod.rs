@@ -54,7 +54,7 @@ pub(crate) fn show(ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>, status: Sta
         .child_align(Align::v(VAlign::Center))
         .padding(Spacing::xy(inset, 0.0))
         .gap(theme.space.sm)
-        .chrome(Chrome::fill(theme.colors.surround_bg))
+        .chrome(Chrome::new(theme.colors.surround_bg))
         .show(ui, |ui| {
             // A failed action outranks the run's tally: it is what just went wrong.
             if let Some(message) = status.message {

@@ -9,7 +9,7 @@ use palantir::{
 };
 
 use glam::Vec2;
-use palantir::widget::{RectShape, Shape, TextRun};
+use palantir::widget::{CircleShape, Shape, TextRun};
 
 use crate::gui::theme::Theme;
 
@@ -89,11 +89,15 @@ pub(crate) fn figure_width(ui: &mut Ui, style: &TextStyle, glyphs: u8) -> f32 {
     .w
 }
 
+/// The square a circle of radius `r` centered on `center` fills, which a circle or an arc shape
+/// takes as its rect.
+pub(crate) const fn around(center: Vec2, r: f32) -> Rect {
+    Rect::new(center.x - r, center.y - r, 2.0 * r, 2.0 * r)
+}
+
 /// A small circle of radius `r` centered on `center`, for the caller to fill.
-pub(crate) fn dot(center: Vec2, r: f32) -> RectShape {
-    Shape::rect()
-        .at(Rect::new(center.x - r, center.y - r, 2.0 * r, 2.0 * r))
-        .corners(r)
+pub(crate) const fn dot(center: Vec2, r: f32) -> CircleShape {
+    Shape::circle().at(around(center, r))
 }
 
 /// A filled circle of the theme's `icon.dot` side that takes its side in layout, so a label flows

@@ -1,7 +1,7 @@
 //! The palantir-side half of the theme: darkroom's palette projected onto
 //! [`palantir::Palette`], and the [`palantir::Theme`] that builds.
 
-use palantir::{BackdropFilter, Stroke, TabsTheme, TextStyleOverrides};
+use palantir::{Border, Material, TabsTheme, TextStyleOverrides};
 
 use crate::gui::theme;
 use crate::gui::theme::icon_scale::{self, IconScale};
@@ -64,7 +64,7 @@ pub(super) fn theme(
     let menu = &mut theme.menu;
     menu.min_width = MENU_MIN_WIDTH;
     // The panel sits inside a rule in the separators' ink, not on palantir's lit border.
-    menu.panel.border.color = p.border_soft();
+    menu.panel.paint.border.color = p.border_soft();
     // Every light-dismiss popup is frosted: the menu panel, which the menus, the node palette and
     // the combo lists wear, a bare popup's panel, the tooltip and the color picker. A modal keeps
     // its opaque panel: its scrim dims and slightly blurs what is behind it, so there is nothing
@@ -77,10 +77,7 @@ pub(super) fn theme(
     ] {
         *panel = theme::GLASS.dress(panel, p.text_muted);
     }
-    theme.modal.scrim = theme
-        .modal
-        .scrim
-        .with_filter(BackdropFilter::blur(SCRIM_BLUR));
+    theme.modal.scrim = theme.modal.scrim.with_material(Material::blur(SCRIM_BLUR));
     theme
 }
 
@@ -103,5 +100,5 @@ const fn tab_close(tabs: &mut TabsTheme, icon: &IconScale) {
     tabs.close_size = close.side();
     tabs.close_glyph_span = icon_scale::cross_span(close.icon);
     tabs.close_glyph_width = icon_scale::stroke_width(close.icon);
-    tabs.close.active.chrome.border = Stroke::NONE;
+    tabs.close.active.chrome.paint.border = Border::NONE;
 }

@@ -11,8 +11,8 @@ use std::borrow::Cow;
 use std::collections::BTreeSet;
 
 use palantir::{
-    Align, Block, Chrome, ClipMode, Configure, Corners, DockOperation, Panel, RgbaF32, Scroll,
-    Sense, Sizing, Spacing, Stroke, Text, TextInput, TextStyle, TextWrap, Ui, VAlign, WidgetId,
+    Align, Block, Border, Chrome, ClipMode, Configure, Corners, DockOperation, Panel, RgbaF32,
+    Scroll, Sense, Sizing, Spacing, Text, TextInput, TextStyle, TextWrap, Ui, VAlign, WidgetId,
     fmt,
 };
 use scenarium::LogLevel;
@@ -321,7 +321,7 @@ fn error_callout(ui: &mut Ui, theme: &Theme, message: &str) {
             Block::new()
                 .id_salt("inspector_error_bar")
                 .size((Sizing::fixed(theme.stroke.line), Sizing::FILL))
-                .chrome(Chrome::fill(error))
+                .chrome(Chrome::new(error))
                 .show(ui);
             Text::new(message)
                 .id(error_wid().with("message"))
@@ -387,7 +387,7 @@ impl PortDot {
         let chrome = match self.fill {
             DotFill::Disc => Chrome::rounded(self.color, corners),
             DotFill::Ring => Chrome::rounded(RgbaF32::TRANSPARENT, corners)
-                .with_border(Stroke::new(self.color, theme.stroke.line)),
+                .with_border(Border::new(self.color, theme.stroke.line)),
             DotFill::Blank => Chrome::NONE,
         };
         Block::new().id(wid).size(side).chrome(chrome).show(ui);
