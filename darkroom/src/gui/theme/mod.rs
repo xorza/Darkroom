@@ -27,8 +27,8 @@ pub(crate) mod type_colors;
 pub(crate) mod viewer_theme;
 
 use palantir::{
-    AnimationSpec, Border, ButtonTheme, Chrome, Corners, FloatMaterial, Material, Metrics,
-    RadiusSteps, RgbaF32, ShadowGeometry, SpaceSteps, Spacing, StrokeSteps, TextEditTheme,
+    AnimationSpec, Border, ButtonTheme, Chrome, Corners, EffectName, FloatMaterial, MaterialInput,
+    Metrics, RadiusSteps, RgbaF32, ShadowGeometry, SpaceSteps, Spacing, StrokeSteps, TextEditTheme,
     TextSteps,
 };
 
@@ -448,7 +448,9 @@ const PILL_ALPHA: f32 = 0.98;
 /// Refused: a tint alone, 1.18:1 over a white image; a frosted modal, whose scrim leaves nothing
 /// to see through.
 pub(super) const GLASS: FloatMaterial = FloatMaterial {
-    material: Material::frosted(20.0),
+    effect: EffectName::FROSTED,
+    blur: 20.0,
+    input: MaterialInput::FROSTED,
     fill_alpha: 0.72,
 };
 

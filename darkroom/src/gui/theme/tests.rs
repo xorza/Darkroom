@@ -1,4 +1,4 @@
-use palantir::{CloseShown, SrgbaU8};
+use palantir::{CloseShown, Material, SrgbaU8};
 use scenarium::TypeId;
 use static_assertions::assert_not_impl_any;
 
@@ -71,7 +71,10 @@ fn default_wiring_and_menu_tweak() {
     // On the #383838 panel, `Y = 0.039546`, the ceiling is
     // `(0.04091520 − 0.72 · 0.039546) / 0.28 = 0.04443538`. Byte 58 is
     // `0.04231141`, 4.563:1. Over white, the panel's tint alone left the ground at
-    // `0.28 + 0.72 · 0.039546 = 0.308473`, 1.18:1.
+    // `0.28 + 0.72 · 0.039546 = 0.308473`, 1.18:1. While transparency is reduced the glass draws as
+    // a plain box of the panel's tint at the least alpha that holds the same ink over a white page:
+    // `a · 0.039546 + (1 − a)` at most byte 57's `0.04091520`, so
+    // `a ≥ (1 − 0.04091520) / (1 − 0.039546) = 0.99857`, 254.64 steps, so opaque.
     // A toolbar pill has no blur. Over white, the #1f1f1f surround, `Y = 0.013702`, at 0.98 leaves
     // the ground at `0.02 + 0.98 · 0.013702 = 0.033428`, so the muted ink reads
     // `(0.371238 + 0.05) / (0.033428 + 0.05) = 5.05:1`.
@@ -98,11 +101,13 @@ fn default_wiring_and_menu_tweak() {
             0.04443538,
         ),
     ] {
-        let material = glass.paint.material.expect(name);
+        let material = glass.paint.material.clone().expect(name);
         let ceiling = material.max_luminance.expect(name);
         assert_eq!(
             material,
-            Material::frosted(20.0).with_max_luminance(ceiling),
+            Material::frosted(20.0)
+                .with_fallback(tint)
+                .with_max_luminance(ceiling),
             "{name}"
         );
         // The hand value's eighth digit, and the derivation's f32 rounding, a few ulps of 1e-8.
@@ -120,8 +125,9 @@ fn default_wiring_and_menu_tweak() {
     );
     assert_eq!(
         ui.modal.scrim,
-        Chrome::new(RgbaF32::hexa(0x00000080)).with_material(Material::blur(4.0)),
-        "palantir's half-clear dim over a slight blur"
+        Chrome::new(RgbaF32::hexa(0x00000080))
+            .with_material(Material::blur(4.0).with_fallback(RgbaF32::hexa(0x00000080))),
+        "palantir's half-clear dim over a slight blur, a plain box of it while transparency is reduced"
     );
 }
 

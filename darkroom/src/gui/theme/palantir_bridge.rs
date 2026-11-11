@@ -77,7 +77,12 @@ pub(super) fn theme(
     ] {
         *panel = theme::GLASS.dress(panel, p.text_muted);
     }
-    theme.modal.scrim = theme.modal.scrim.with_material(Material::blur(SCRIM_BLUR));
+    // A plain box of its own dim while transparency is reduced, as iOS keeps a scrim's dim.
+    let dim = theme.modal.scrim.paint.fill.clone();
+    theme.modal.scrim = theme
+        .modal
+        .scrim
+        .with_material(Material::blur(SCRIM_BLUR).with_fallback(dim));
     theme
 }
 
