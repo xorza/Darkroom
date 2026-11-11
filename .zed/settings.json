@@ -1,21 +1,21 @@
 {
-    // Keep Zed's fs watcher off high-churn build output — cargo rewrites
-    // thousands of files under target/ per build and can overflow the
-    // inotify event queue, dropping the source/git events that matter.
-    // NOTE: this list replaces Zed's defaults, so the defaults are re-listed.
-    "file_scan_exclusions": ["**/.DS_Store", "**/Thumbs.db", "**/target", "**/.git"],
+    "file_scan_exclusions": [
+        "**/.DS_Store",
+        "**/Thumbs.db",
+        "**/target",
+        "**/.git"
+    ],
     "lsp": {
         "rust-analyzer": {
             "initialization_options": {
-                // The submodules are workspaces of their own, `exclude`d from this one, so
-                // rust-analyzer loads each by its own manifest: their tests, benches, examples and
-                // member crates are no targets of this workspace.
-                "linkedProjects": ["Cargo.toml", "palantir/Cargo.toml", "fits-well/Cargo.toml"],
+                "linkedProjects": [
+                    "Cargo.toml",
+                    "palantir/Cargo.toml",
+                    "fits-well/Cargo.toml"
+                ],
                 "cargo": {
                     "features": "all",
                     "allTargets": true,
-                    // Its own target dir, so a check never waits on the gate's build lock nor
-                    // throws away the gate's artifacts with other flags.
                     "targetDir": true
                 },
                 "check": {
