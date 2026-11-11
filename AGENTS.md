@@ -126,9 +126,9 @@ arguments after a `--`; each submodule runs its own.
 - **A transcendental float function goes through `common::Libm`**: `clippy.toml` refuses std's
   `sin`, `powf`, `ln` and the rest, which call each system's libm, so a result has the same bits on
   every system, and the snapshots of `lumos` hold each lane to them. As `bevy_math::ops` routes
-  them. Measured against Apple's libm: `powf` 3 to 6 times slower, `cbrt` 2.3, most others 1.1 to
-  1.4, and in `lumos` no `powf` runs per pixel. `palantir` and `fits-well` hold their own, as a
-  submodule stays standalone. Outside this rule: `statrs`, LibRaw and ONNX Runtime call their own.
+  them. Cost: slower than a system's libm, `powf` most, so keep one off a per-pixel path.
+  `palantir` and `fits-well` hold their own, as a submodule stays standalone. Outside this rule:
+  `statrs`, LibRaw and ONNX Runtime call their own.
 - **Every vector kernel is bit-identical to its scalar reference** on one
   architecture (`simd/AGENTS.md` holds the NaN limit across two), and a test
   holds each tier the CPU has to it, the special values of its inputs
@@ -153,9 +153,11 @@ arguments after a `--`; each submodule runs its own.
   UUID, never hand-typed or invented, which can collide; `rg` it to confirm it
   is unique. A shipped id never changes: saved graphs bind to it.
 - **Decisions live in the `AGENTS.md` files and in doc comments**, each with
-  its source: a link, a measurement, the practice it follows. Refused: a
-  research folder of dated facts, which the code outgrows and no one reads
-  again.
+  its reason and source: a link or the practice it follows. A file holds what
+  stays true as the code changes, the direction, the rules and what was
+  refused, not measurements, history or what the code already states; a
+  crate's sit in its own `AGENTS.md`. Refused: a research folder of dated
+  facts, which the code outgrows and no one reads again.
 - **A document is parsed once, at load.** The load handles each inconsistency
   with the library and reports it; the edit gate keeps the document
   consistent after that. At run time and in each frame, code asserts the

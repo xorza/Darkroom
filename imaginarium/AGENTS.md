@@ -20,7 +20,7 @@ reads rasters through its codecs.
   alone. A linear stack holds values past white and below black, and clamping
   in an op loses them. This is GIMP's float mode and the unbounded linear data
   lumos's `SampleDomain` records. Refused: a clamp to `[0, 1]` in each op,
-  which made an `f32` chain lossy.
+  which makes an `f32` chain lossy.
 - **An op that moves black holds it by default.** Contrast/brightness and
   blend take `Clamp::Black` unless told otherwise, as Nuke's Grade node has
   its black clamp on and its white clamp off
@@ -28,9 +28,9 @@ reads rasters through its codecs.
   a stars layer darkened below black otherwise takes that much from every
   pixel a later Add meets, while a highlight past white is data. A blend
   holds its color channels after the alpha mix; its modes are bare formulas.
-  Refused: no clamp, as GEGL's brightness-contrast has it, which left that
+  Refused: no clamp, as GEGL's brightness-contrast has it, which leaves that
   Add wrong with nothing to show it; a fixed clamp per blend mode, Add at
-  white and Subtract at black, which lost a linear Add's star cores.
+  white and Subtract at black, which loses a linear Add's star cores.
 - **Pixels alone.** `InterleavedImage` and `PlanarImage` hold samples; lumos
   wraps the planes with its metadata, flags and flat gain. Refused: an image
   with a metadata field, which would carry FITS keywords into the raster ops.
