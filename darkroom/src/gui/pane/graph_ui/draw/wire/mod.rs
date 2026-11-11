@@ -73,7 +73,7 @@ impl WirePaint {
             color: self.color,
             ramp: self
                 .ramp
-                .map(|ramp| ColorRamp::two_stop(ramp.color_at(from), ramp.color_at(to))),
+                .map(|ramp| ColorRamp::from([ramp.color_at(from), ramp.color_at(to)])),
         }
     }
 }
@@ -478,7 +478,7 @@ impl WireEmphasis {
         }
         WirePaint {
             color: RgbaF32::WHITE,
-            ramp: Some(ColorRamp::two_stop(start, end)),
+            ramp: Some(ColorRamp::from([start, end])),
         }
     }
 

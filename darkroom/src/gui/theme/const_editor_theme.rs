@@ -1,8 +1,6 @@
 //! [`ConstEditorTheme`]: how an inline const editor is styled.
 
-use palantir::{
-    Brush, ButtonTheme, Chrome, DragValueTheme, FontFamily, RgbaF32, Spacing, TextEditTheme,
-};
+use palantir::{ButtonTheme, Chrome, DragValueTheme, FontFamily, RgbaF32, Spacing, TextEditTheme};
 
 use crate::gui::theme::color;
 use crate::gui::theme::hover::Hover;
@@ -105,7 +103,7 @@ impl ConstEditorTheme {
     ) -> Self {
         let mut button = button.clone();
         button.unselected.normal.chrome.paint.fill =
-            Brush::Solid(color::wash(p.element_mid, alpha, p.element));
+            color::wash(p.element_mid, alpha, p.element).into();
         let proportional = DragValueTheme {
             looks: button.unselected.clone(),
             defaults: button.defaults,

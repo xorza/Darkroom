@@ -5,8 +5,8 @@ use common::LibmVec2;
 use glam::Vec2;
 use palantir::widget::Shape;
 use palantir::{
-    Border, Configure, Paint, Panel, Rect, Response, RgbaF32, Sense, Spacing, TextInput, Ui,
-    Visibility, WidgetId,
+    Border, Configure, Panel, Rect, Response, RgbaF32, Sense, Spacing, TextInput, Ui, Visibility,
+    WidgetId,
 };
 
 use crate::gui::theme::Theme;
@@ -262,16 +262,15 @@ impl Painted {
                 if let Some(color) = outline {
                     ui.add_shape(
                         Shape::rect().at(rect.inflated(ring)).corners(radius + ring),
-                        Paint::NONE.with_border(Border::new(color, ring)),
+                        Border::new(color, ring),
                     );
                 }
                 let disc = Shape::rect().at(rect).corners(radius);
-                let paint = if hollow {
-                    Paint::NONE.with_border(Border::new(fill, ring))
+                if hollow {
+                    ui.add_shape(disc, Border::new(fill, ring));
                 } else {
-                    Paint::from(fill)
-                };
-                ui.add_shape(disc, paint);
+                    ui.add_shape(disc, fill);
+                }
             }
             GlyphShape::Arrow { turn } => {
                 let [a, b, apex] = self.arrow_vertices(turn);

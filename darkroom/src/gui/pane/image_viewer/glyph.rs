@@ -3,7 +3,7 @@
 //!
 //! [`Icon`]: crate::gui::widgets::icon::Icon
 
-use palantir::{Border, Paint, Rect, RgbaF32, Ui};
+use palantir::{Border, Rect, RgbaF32, Ui};
 
 use glam::UVec2;
 use palantir::widget::Shape;
@@ -57,7 +57,7 @@ impl Swatch {
         };
         ui.add_shape(
             Shape::rect().at(rect).corners(radius),
-            Paint::NONE.with_border(Border::new(ring, theme.stroke.line)),
+            Border::new(ring, theme.stroke.line),
         );
     }
 }

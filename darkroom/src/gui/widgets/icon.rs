@@ -2,7 +2,7 @@
 
 use std::f32::consts::PI;
 
-use palantir::{Border, LineCap, LineJoin, Paint, Rect, RgbaF32, Stroke, Ui};
+use palantir::{Border, LineCap, LineJoin, Rect, RgbaF32, Stroke, Ui};
 
 use glam::Vec2;
 use palantir::widget::Shape;
@@ -228,7 +228,7 @@ impl Pen {
         let outer = self.rect((x - half, y - half, w + STROKE, h + STROKE));
         ui.add_shape(
             Shape::rect().at(outer).corners((radius + half) * self.k),
-            Paint::NONE.with_border(Border::new(self.stroke.color, self.stroke.width)),
+            Border::new(self.stroke.color, self.stroke.width),
         );
     }
 
