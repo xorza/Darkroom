@@ -7,15 +7,14 @@ use common::env;
 
 use palantir::HostHandle;
 
-/// Nothing to arrange: `packaging/linux/com.cssodessa.darkroom.desktop` passes
-/// the path as `%f`, so a document opened from a file manager arrives in argv
-/// and the CLI already reads it.
+/// Nothing to arrange: `packaging/linux/com.cssodessa.darkroom.desktop` passes the path as `%f`,
+/// so it arrives in argv.
 pub(super) fn route_opened_documents<A>(_handle: HostHandle<A>, _open: fn(&mut A, PathBuf)) {}
 
 /// `$XDG_CONFIG_HOME/darkroom`, or `~/.config/darkroom` when unset.
 pub(super) fn config_dir() -> Option<PathBuf> {
-    // Flatpak points XDG_CONFIG_HOME at its per-app config directory; a
-    // hardcoded ~/.config would land outside what the sandbox grants.
+    // Flatpak points XDG_CONFIG_HOME at its per-app directory; a hardcoded ~/.config would land
+    // outside what the sandbox grants.
     resolve_config_dir(env::var_os("XDG_CONFIG_HOME"), env::var_os("HOME"))
 }
 
@@ -24,8 +23,8 @@ fn resolve_config_dir(
     xdg_config_home: Option<OsString>,
     home: Option<OsString>,
 ) -> Option<PathBuf> {
-    // is_absolute, not is_some: an empty var is set, and the spec says to
-    // ignore a relative XDG_CONFIG_HOME rather than resolve it against cwd.
+    // is_absolute, not is_some: the spec says to ignore a relative XDG_CONFIG_HOME rather than
+    // resolve it against cwd, and an empty var is set.
     xdg_config_home
         .map(PathBuf::from)
         .filter(|root| root.is_absolute())

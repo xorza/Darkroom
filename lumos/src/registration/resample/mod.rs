@@ -48,16 +48,12 @@ mod warp_kernel;
 /// smaller variance was bought with resolution, the noise it leaves is correlated between
 /// neighbours, and weighting by it would discount the unwarped reference — at confidence 1 — by
 /// about 0.79 against a Lanczos3 frame and 0.41 against a bilinear one, and beat with the
-/// sub-pixel phase across a rotated field. The price is that the mean's weights no longer make each
+/// sub-pixel phase across a rotated field. The price: the mean's weights no longer make each
 /// weighted variance equal, `wᵢvᵢ = 1`, at a warped pixel.
 ///
 /// Every field is written in full by a warp, so a result can take the next frame without clearing.
-/// That is the point of reusing them: a fresh plane costs its whole area in first-touch page
-/// faults, and the spill tier is done with a set once it is on disk, so a warp stage that reuses
-/// one set per worker pays that once instead of once per frame. Worth ~22% of a
-/// 16 MP warp (`bench_warp_into_fresh_4k` against `..._reused_4k`), or ~0.1 ms per MiB of plane —
-/// the faults are spread across rayon's workers, so this is a fraction of what a single thread
-/// would pay for the same pages.
+/// Reusing one set per worker avoids a fresh plane's first-touch page faults on every frame:
+/// measured ~22% of a 16 MP warp, ~0.1 ms per MiB of plane.
 #[derive(Debug)]
 pub struct WarpResult {
     /// The aligned image. Its flags are the carried flags — saturation and the flat's floor — of
@@ -138,9 +134,8 @@ impl WarpResult {
             transform: warp_transform,
             params: config,
         } = warp;
-        // Release assert rather than a `Result`: a non-finite border is caller error, not a runtime
-        // failure, and it reaches every pixel outside the source footprint — seeding NaN into the
-        // combine, where only a debug assert would notice. Once per frame, so the check is free.
+        // Release assert: a non-finite border is caller error, and it reaches every pixel outside
+        // the source footprint, seeding NaN into the combine.
         assert!(
             config.border_value.is_finite(),
             "warp border_value must be finite, got {}",
@@ -167,7 +162,7 @@ impl WarpResult {
             .flags
             .filter(|flags| flags.contains(QualityFlags::RESAMPLE_CARRIED))
             .map(|_| flag_scratch.output(size));
-        // The sampler borrows the flag scratch; it is done with it before the plane is kept.
+        // The sampler borrows the flag scratch, so it ends before the plane is kept.
         {
             let flagged = image
                 .flags

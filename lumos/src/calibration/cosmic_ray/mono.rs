@@ -32,9 +32,7 @@ pub(crate) const MONO_SCRATCH_PLANES: usize = 5;
 ///
 /// Five planes, not the eight the stages name. `significance`, `fine` and `noise` hold each pass's
 /// result, which the next pass updates only where a repair can have moved it; `staged` and `median`
-/// hold a stage's input and its window median, one stage at a time. On a 6144² mono frame that is
-/// 720 MB of working set instead of 1.1 GB — and, the point of the struct, no allocation at all
-/// after the first iteration.
+/// hold a stage's input and its window median, one stage at a time.
 #[derive(Debug, Default)]
 struct MonoScratch {
     /// The significance with its smooth part taken out, `S' = S − median₅(S)`.
@@ -187,11 +185,9 @@ impl<'a> MonoDetector<'a> {
 
             // Object fine structure F = median₃(I) − median₇(median₃(I)); large for real sources,
             // ~0 at a CR (median₃ already erased the spike). Clamped non-negative and no further:
-            // the only consumer divides by the noise and floors the result at
-            // `FINE_STRUCTURE_SIGMA_FLOOR`, so the guard against a vanishing F belongs there, in σ
-            // units, where it holds whatever scale the samples are in. An absolute floor here would
-            // instead read as enormous fine structure on a frame whose noise is below it, and
-            // suppress every detection.
+            // the consumer floors it at `FINE_STRUCTURE_SIGMA_FLOOR` in σ units, which holds at any
+            // sample scale; an absolute floor here would suppress every detection on a frame whose
+            // noise is below it.
             rows_within(changed, MEDIAN3_REACH, bands);
             for band in bands.iter().cloned() {
                 WindowMedian { radius: 1 }.rows(pix, OutputBand::of(staged, band), windows);
@@ -314,11 +310,8 @@ impl<'a> OutputBand<'a> {
 /// Convolves the ×2 image with `[[0,−1,0],[−1,4,−1],[0,−1,0]]`, clips negatives to 0 (keeping only
 /// sharp positive peaks), then averages each 2×2 block. Edge-clamped on the ×2 grid.
 ///
-/// The ×2 image is never materialized. Subsampling here is a block replication — every `sub`
-/// sample is `data[y2 / 2][x2 / 2]` — so it is read through that index instead of being written to
-/// a buffer four times pixel count, and the clipped Laplacian is averaged as it is produced rather
-/// than stored in a second buffer of the same size. That is 8n floats of allocation and traffic
-/// removed from every iteration; what remains is the result, written into the caller's buffer.
+/// The ×2 image is never materialized: subsampling is a block replication, so it is read through
+/// `data[y2 / 2][x2 / 2]`, and the clipped Laplacian is averaged as it is produced.
 fn laplacian_plus_rows(data: &Buffer2<f32>, out: OutputBand<'_>) {
     let size = data.size();
     let (w2, h2) = (size.width * 2, size.height * 2);
@@ -353,13 +346,10 @@ fn laplacian_plus_rows(data: &Buffer2<f32>, out: OutputBand<'_>) {
 /// The median over a `(2r+1)²` window, `r` its radius, replicating the border pixel for
 /// out-of-bounds coordinates so every output sees a full window.
 ///
-/// Deliberately not star detection's own `median_filter::MedianRows`, even
-/// though `r == 1` describes the same 3×3 median: that one *shrinks* its window at the border to
-/// the 4 or 6 in-bounds samples where this one replicates. L.A.Cosmic differences two of these
-/// windows against each other — the fine structure is `median₃ − median₇(median₃)` — so every
-/// radius here has to share one border convention. Feeding a shrunk `median₃` into that
-/// difference while `median₇` stayed replicated would corrupt the border in a way neither
-/// convention does alone. Replication is also the usual choice for astronomical median filtering.
+/// Deliberately not star detection's `median_filter::MedianRows`, even for `r == 1`: that one
+/// *shrinks* its window at the border where this one replicates. L.A.Cosmic differences two of
+/// these windows — the fine structure is `median₃ − median₇(median₃)` — so every radius here has
+/// to share one border convention, or the border is corrupted.
 ///
 /// Eight pixels at a time take their medians together by forgetful selection
 /// ([`median_of_lanes`]) on `total_cmp`'s integer keys, so each is the value `median_mut` picks,
@@ -544,14 +534,12 @@ fn rows_within(changed: &[bool], reach: usize, bands: &mut Vec<Range<usize>>) {
 /// window widens a ring at a time up to [`REPAIR_REACH`], and past that the pixel takes its local
 /// sky. Every flagged pixel is replaced, so none keeps the hit's value under a `REPAIRED` flag.
 ///
-/// The frame copy is not what makes replacements independent of each other — writes land only on
-/// masked pixels and reads only on unmasked ones, so no replacement can consult a replaced
-/// neighbour whatever order the rows run in. It is here because `pixels_mut()` is held across the
-/// reads, and it pays for itself besides: reading a separate, read-only array keeps one row's
-/// writes off the cache lines the rows above and below are reading. Aliasing the two through a raw
-/// pointer would be sound — the sets are disjoint — but measures *slower* on every run of
-/// `bench_cosmic_ray_reject_mono`: the false sharing costs more than the copy. The copy lands in
-/// the caller's `snapshot` buffer, so it is a memcpy per iteration and not an allocation.
+/// The frame copy does not make replacements independent — writes land only on masked pixels and
+/// reads only on unmasked ones, so row order never matters. It is here because the plane is
+/// mutably borrowed across the reads, and a separate read-only array also keeps one row's writes
+/// off the cache lines its neighbours read: aliasing through a raw pointer would be sound but
+/// measures slower on the `reject/mono` bench, from false sharing. The copy lands in the caller's
+/// `snapshot` buffer, so it is a memcpy, not an allocation.
 #[derive(Clone, Copy)]
 pub(super) struct PixelRepair<'a> {
     pub(super) flagged: &'a BitBuffer2,

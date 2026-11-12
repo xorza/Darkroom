@@ -84,9 +84,8 @@ async fn cached_output_survives_node_removal() {
 
 #[tokio::test]
 async fn repeated_structural_churn_stays_correct() {
-    // Grow→shrink the graph repeatedly on ONE engine, re-executing each
-    // step. Stresses the packed pools and the id-keyed rebuild across many
-    // updates (pools grow 2→4 then shrink 4→2 each round).
+    // Grow→shrink the graph repeatedly on ONE engine, re-executing each step. Stresses the packed
+    // pools and the id-keyed rebuild (pools grow 2→4 then shrink 4→2 each round).
     let mut g = TestGraph::new();
     g.add("a", |n| n.returns(2i64));
     g.add("print_a", NodeSpec::records);

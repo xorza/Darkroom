@@ -1,6 +1,6 @@
-//! Per-tile SExtractor sky estimation: pixel collection (masked/sampled), sigma-clipped robust
-//! statistics, read about the tile's own plane for the sky, and the crowding-aware Pearson-mode
-//! sky estimator for a single tile box.
+//! Per-tile SExtractor sky estimation: pixel collection (masked or sampled), σ-clipped robust
+//! statistics, the sky read about the tile's own plane, and the crowding-aware Pearson-mode
+//! estimator for a single tile box.
 
 use common::Buffer2;
 
@@ -132,7 +132,7 @@ impl TileStats {
     /// Compute the sky, about the tile's own plane, and the raw clipped σ of the pixels of `tile`,
     /// or `None` for a bad tile: one whose mask leaves less than half of it.
     ///
-    /// When a mask is provided, only unmasked pixels are used. Below half the tile, the unmasked
+    /// With a mask, only unmasked pixels are used. Below half the tile, the unmasked
     /// pixels are the margins of whatever the mask covers, and they no longer span the tile the
     /// plane fit and the sky's position assume; the grid takes such a tile from its good neighbours
     /// instead, as photutils excludes boxes past `exclude_percentile` and SExtractor flags bad
@@ -149,6 +149,7 @@ impl TileStats {
     /// where the sky changes fast across a tile the mesh follows it worst: a σ about the plane
     /// drops the threshold under that model error, and on a vignetted or nebulous field the sky's
     /// residual then joins the stars into a few large regions that hide most of them.
+    ///
     /// `input.color`, when given, limits the tile to the photosites of that color; the half is
     /// then of those photosites.
     pub(super) fn compute(

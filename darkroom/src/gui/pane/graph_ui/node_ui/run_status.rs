@@ -13,14 +13,14 @@ use crate::gui::widgets::support;
 /// The run time's width floor in figures: `Elapsed` writes at most 7, which
 /// `every_run_time_fits_the_reserved_width` pins.
 ///
-/// A node is `Hug` above a min width, so anything that changes the footer's measured width moves
-/// the node's right edge — and with it the cached intra-node offsets of every output port, which
-/// is what wires anchor to. A live timer re-formats every frame, so without a floor a running
-/// node twitches its outgoing wires each time the digit count changes (`9.99s` → `10.00s`,
-/// `999.9ms` → `1.00s`). In the inspector's chip the same floor keeps the title beside it still.
+/// A node is `Hug` above a min width, so a change in the footer's measured width moves the
+/// node's right edge and with it the output ports its wires anchor to. A live timer
+/// re-formats every frame, so without a floor a running node twitches its outgoing wires each
+/// time the digit count changes (`9.99s` → `10.00s`). In the inspector's chip the same floor
+/// keeps the title beside it still.
 ///
-/// A floor rather than a fixed width: every value up to `999999s` fits inside it and measures
-/// identically, and the rare longer one still renders rather than clipping.
+/// A floor rather than a fixed width: every value up to `999999s` measures identically, and
+/// the rare longer one still renders rather than clipping.
 const RUN_TIME_GLYPHS: u8 = 7;
 
 /// The last run's word on a node, in its status ink: a check and the time when it ran, the
@@ -131,9 +131,8 @@ mod tests {
 
     use super::*;
 
-    /// Every run time `Elapsed::new` writes, from each unit's smallest to its
-    /// widest, fits the floor the label reserves — measured with real shaping
-    /// in the label's own style, so neither side can drift alone.
+    /// Every run time `Elapsed::new` writes, from each unit's smallest to its widest, fits the
+    /// floor the label reserves, measured with real shaping in the label's own style.
     #[test]
     fn every_run_time_fits_the_reserved_width() {
         let secs = [

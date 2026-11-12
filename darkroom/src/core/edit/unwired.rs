@@ -2,8 +2,7 @@
 
 use scenarium::{Binding, Graph, InputPort, Library};
 
-/// What `port` holds once the wire into it goes: its declared default, so a
-/// preset input shows its pick again and a knob its value; else nothing.
+/// What `port` holds once the wire into it goes: its declared default, else nothing.
 pub(crate) fn binding(graph: &Graph, library: &Library, port: InputPort) -> Option<Binding> {
     let node = graph
         .find(port.node_id)

@@ -39,8 +39,9 @@ impl TriangleConfig {
             return Vec::new();
         }
 
-        // k = 10 gives C(10, 2) = 45 triangles per star, enough for robust matching (Astroalign
-        // takes k = 5); the count grows as k², for diminishing returns (k = 20 gives 190).
+        // At most k = 10: C(10, 2) = 45 triangles per star is enough for robust matching
+        // (Astroalign takes k = 5), and the count grows as k², for diminishing returns (k = 20 gives
+        // 190).
         let k_neighbors = (ref_count.min(target_count) / 3).clamp(5, 10);
 
         let ref_triangles = matching::form_triangles_kdtree(reference, k_neighbors, noise_scale);

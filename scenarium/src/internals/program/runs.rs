@@ -1,5 +1,4 @@
-//! [`Runs`]: the executor over a hand-built program, held across runs so the
-//! second sees what the first left resident.
+//! [`Runs`]: the executor over a hand-built program, held across runs.
 
 use common::CancelToken;
 
@@ -17,19 +16,12 @@ use crate::exec::schedule::{NodeState, ResolvedOutputs, RootFlags, RunSchedule};
 use crate::graph::func::lambda::OutputDemand;
 use crate::internals::program::{Placed, ProgramBuilder};
 
-/// The executor over a hand-built program, keeping its cache and run loop
-/// across [`go`](Self::go) — so a second run sees what the first left resident,
-/// which is what a reuse hit is made of.
+/// The executor over a hand-built program, keeping its cache and run loop across
+/// [`go`](Self::go), so a second run sees what the first left resident.
 ///
-/// **The run is stated, not planned.** By default every node runs with one
-/// reader per output, which is what an executor test wants: the verdicts a
-/// sweep would write are [`Sweep`]'s subject, and re-deriving them here would
-/// make every assertion depend on two passes instead of one.
-/// [`resolved`](Self::resolved) opts back into the sweep for the fixtures where
-/// what the *second* run decides is the answer.
-///
-/// Everything reads back by [`Placed`]: what a node's slot holds, and what the
-/// outcome says it did.
+/// **The run is stated, not planned.** By default every node runs with one reader per output;
+/// the verdicts a sweep would write are [`Sweep`]'s subject. [`resolved`](Self::resolved) opts
+/// back into the sweep for fixtures where what the *second* run decides is the answer.
 #[derive(Debug)]
 pub(crate) struct Runs<'a> {
     owner: &'a ProgramBuilder,
@@ -62,35 +54,29 @@ impl<'a> Runs<'a> {
         runs
     }
 
-    /// Per-output live-reader counts, replacing the default one each. An output
-    /// nothing reads is `Skip`, which is how a fixture spells a sink — released
-    /// the instant it runs — or claims more readers than really read, to prove
-    /// the release waits for the full count.
+    /// Per-output live-reader counts, replacing the default one each. An output nothing reads is
+    /// `Skip`, released the instant it runs; a count above the real readers proves the release
+    /// waits for the full count.
     pub(crate) fn readers(mut self, counts: impl IntoIterator<Item = u32>) -> Self {
         self.set_readers(counts.into_iter().collect());
         self
     }
 
-    /// Re-derive dispositions, demand, and reader counts from the cache before
-    /// every run, the way the engine does.
-    ///
-    /// The sweep overwrites whatever [`readers`](Self::readers) stated, so the
-    /// two do not combine.
+    /// Re-derive dispositions, demand, and reader counts from the cache before every run, as the
+    /// engine does. The sweep overwrites [`readers`](Self::readers), so the two do not combine.
     pub(crate) fn resolved(mut self) -> Self {
         self.resolve = true;
         self.schedule = self.owner.planned();
         self
     }
 
-    /// Override one node's disposition — a `Reuse` the fixture states rather
-    /// than provokes, or a node the planner would have blocked.
+    /// Override one node's disposition.
     pub(crate) fn state(mut self, node: Placed, state: NodeState) -> Self {
         self.schedule.states[node.node_idx] = state;
         self
     }
 
-    /// Demand one output no consumer reads — what a node seed does, and the
-    /// only way `Produce` reaches a port with a zero reader count.
+    /// Demand one output no consumer reads, as a node seed does.
     pub(crate) fn demand(mut self, node: Placed, port: usize) -> Self {
         let output_idx = self.program().output_idx(node.addr(port));
         self.schedule.outputs.demand[output_idx] = OutputDemand::Produce;
@@ -104,8 +90,7 @@ impl<'a> Runs<'a> {
         self
     }
 
-    /// Prime the cache: `values` resident under the digest this run stamps for
-    /// `node`, so it reads as a hit.
+    /// Prime the cache: `values` resident under the digest this run stamps for `node`.
     pub(crate) fn cached(
         mut self,
         node: Placed,
@@ -155,8 +140,7 @@ impl<'a> Runs<'a> {
                 outcome,
             )
             .await;
-        // No RAM is measured: filling that column is the engine's post-run
-        // release sweep, which is not part of the run loop under test.
+        // No RAM is measured: the engine's post-run release sweep fills that column.
         let mut node_ram = Col::default();
         node_ram.reset(program.e_nodes.len(), RamUsage::default());
         executor.collect_outcome(
@@ -207,8 +191,7 @@ impl<'a> Runs<'a> {
         self.outcome.cancelled
     }
 
-    /// Planned reads of `node`'s output `port` the run has not completed — zero
-    /// once every consumer has read it or had its read retired.
+    /// Planned reads of `node`'s output `port` the run has not completed or retired.
     pub(crate) fn remaining_reads(&self, node: Placed, port: usize) -> u32 {
         self.executor
             .remaining_reads(self.program().output_idx(node.addr(port)))

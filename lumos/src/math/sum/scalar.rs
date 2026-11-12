@@ -18,8 +18,8 @@ pub(super) fn sum_f32(values: &[f32]) -> f64 {
 /// Each `f32 → f64` widening is lossless and the f64 product of two f32s is exact (24+24 bits fit
 /// in 53), so every term entering these sums is exact and only the additions carry error.
 ///
-/// Iterating with `zip` stops at the shorter slice; callers assert the lengths match rather than
-/// relying on that, because a silent truncation is a wrong answer rather than a safe one.
+/// `zip` stops at the shorter slice, so callers assert the lengths match: a silent truncation is a
+/// wrong answer.
 #[inline]
 pub(super) fn weighted_sums(values: &[f32], weights: &[f32]) -> WeightedSums {
     let mut weighted_values = 0.0f64;

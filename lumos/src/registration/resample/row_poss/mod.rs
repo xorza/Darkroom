@@ -8,8 +8,8 @@ use crate::registration::transform::TransformType;
 use crate::registration::warp_transform::WarpTransform;
 use common::USize2;
 
-/// The source position of every pixel of one output row, evaluated once and read by every channel,
-/// the quality maps and the validity warp.
+/// The source position of every pixel of one output row, evaluated once and read by every channel
+/// and the quality maps.
 ///
 /// A row of a model without SIP is affine in `x` in its numerators and, for a homography, its
 /// denominator, so the row's `y` terms are taken once and each pixel adds its `x` terms. The

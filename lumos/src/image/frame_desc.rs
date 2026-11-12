@@ -5,7 +5,7 @@ use imaginarium::{ChannelLayout, PlanarDesc};
 
 use crate::image::error::FrameDescError;
 
-/// The longest side a frame may have, 2³⁰ px — some 7000 times a large sensor's.
+/// The longest side a frame may have, 2³⁰ px — tens of thousands of times a large sensor's.
 ///
 /// Pixel addressing in the resampler and the detector runs in `i32` lanes, and a side this far
 /// under `i32::MAX` leaves every coordinate, and a kernel's reach past either edge, inside that

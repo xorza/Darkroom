@@ -309,7 +309,7 @@ fn down_then_enter_adds_the_next_ranked_match() {
 }
 
 /// A name no node has is not found, with the names there are; two nodes of one name are
-/// ambiguous, with both ids, and `Nth` picks one of them; an index past them, and `Nth` over a
+/// ambiguous, with both places, and `Nth` picks one of them; an index past them, and `Nth` over a
 /// locator that cannot match several, are not found.
 #[test]
 fn a_node_locator_names_exactly_one_node() {

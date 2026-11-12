@@ -141,9 +141,8 @@ fn flushed(pick: &Pick) -> bool {
     })
 }
 
-/// Each row flips its own bit and keeps the other. Turning the disk bit **on** also flushes
-/// what the node holds in RAM to disk, without which the value would reach disk only when
-/// the node next recomputed; turning it off, or flipping RAM, flushes nothing.
+/// Each row flips its own bit and keeps the other. Turning the disk bit on also flushes what
+/// the node holds in RAM to disk; turning it off, or flipping RAM, flushes nothing.
 #[test]
 fn each_cache_row_flips_its_bit_and_the_disk_row_flushes_when_it_turns_on() {
     let cases = [

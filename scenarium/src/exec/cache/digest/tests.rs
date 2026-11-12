@@ -12,10 +12,8 @@ use crate::graph::identity::{FuncId, FuncRef};
 use crate::internals::program::node_builder::NodeBuilder;
 use crate::internals::program::{Placed, ProgramBuilder};
 
-/// A content-cacheable node of func `func`, declaring `count` `Int` outputs.
-///
-/// `Int` rather than the builder's `Any` default because the output signature
-/// folds into the digest.
+/// A content-cacheable node of func `func`, declaring `count` `Int` outputs — not the builder's
+/// `Any` default, because the output signature folds into the digest.
 fn pure(prog: &mut ProgramBuilder, func: u128, count: usize) -> NodeBuilder<'_> {
     typed(prog, func, &vec![DataType::Int; count])
 }
@@ -35,9 +33,9 @@ fn typed<'a>(prog: &'a mut ProgramBuilder, func: u128, types: &[DataType]) -> No
         .output_types(types.iter().cloned())
 }
 
-/// Every node's content digest, folded producer-first the way the executor does
-/// — each node reading its producers' just-stamped `cur_digest`, over a
-/// cache that identifies its own filesystem paths afresh.
+/// Every node's content digest, folded producer-first the way the executor does — each node
+/// reading its producers' just-stamped `cur_digest`, over a cache that identifies its own paths
+/// afresh.
 #[derive(Debug)]
 struct Digests(RuntimeCache);
 
@@ -155,8 +153,8 @@ fn const_change_propagates_downstream_only() {
 
 #[test]
 fn structurally_identical_nodes_share_digest() {
-    // Two nodes, same func, same (input-identical) bindings ⇒ equal
-    // node digests — the property that lets the store dedup repeated work.
+    // Same func, same (input-identical) bindings ⇒ equal digests — the property that lets the
+    // store dedup repeated work.
     let mut p = ProgramBuilder::default();
     let first = pure(&mut p, 10, 1).const_input(ConstValue::Int(7)).add();
     let second = pure(&mut p, 10, 1).const_input(ConstValue::Int(7)).add();
@@ -175,11 +173,10 @@ fn structurally_identical_nodes_share_digest() {
 
 #[test]
 fn fs_path_folds_file_identity_and_path() {
-    // An `FsPath` const folds its resolved file identity (len, mtime — see
-    // `fs_file_id`) on top of the path string, so a file change re-keys: this is
-    // what stops machine B serving A's result for B's files. The resolver is the
-    // real filesystem, so exercise it with a temp file. `Digests::of` re-stats it
-    // on each call (a fresh engine).
+    // An `FsPath` const folds its resolved file identity (len, mtime — see `fs_file_id`) on top
+    // of the path string, so a file change re-keys: this stops machine B serving A's result for
+    // B's files. Uses the real filesystem, via a temp file; `Digests::of` re-stats it on each
+    // call (a fresh engine).
     let selected = TempFile::with_extension("scenarium-digest-fs-path", "bin");
     let file = selected.path();
     let path = selected.to_str();
@@ -227,9 +224,8 @@ fn fs_path_folds_file_identity_and_path() {
         "path-list order is part of the authored input"
     );
 
-    // A path that is not there has no identity to fold at all: the node
-    // is left without a digest, and the executor fails it at its turn
-    // rather than keying it on an absence.
+    // A path that is not there has no identity to fold: the node is left without a digest, and
+    // the executor fails it at its turn rather than keying it on an absence.
     fs::remove_file(file).unwrap();
     assert_eq!(
         Digests::of(&p).at(single),
@@ -237,9 +233,8 @@ fn fs_path_folds_file_identity_and_path() {
         "a missing file leaves its node with no digest"
     );
 
-    // An *unset* path is not a missing one. It names nothing to stat, so the
-    // node keeps a sound key and runs — rather than being failed at stamp time
-    // over an `ENOENT` on the empty string, every run, until a file is picked.
+    // An *unset* path is not a missing one. It names nothing to stat, so the node keeps a sound
+    // key and runs, rather than failing at stamp time over an `ENOENT` on the empty string.
     let unset = |value: ConstValue| {
         let (p, node) = path_node(value);
         Digests::of(&p).at(node)
@@ -257,9 +252,8 @@ fn fs_path_folds_file_identity_and_path() {
         "an unset slot inside a list is unset too"
     );
 
-    // One unset port must not cost the *run* its batched stamping: before the
-    // walk skipped it, `metadata("")` failed the whole shared pass, and which
-    // of the other nodes had already landed was `HashSet` drain order.
+    // One unset port must not cost the *run* its batched stamping: `metadata("")` used to fail
+    // the whole shared pass, and which other nodes had landed was `HashSet` drain order.
     fs::write(file, b"x").unwrap();
     let mut batch = ProgramBuilder::default();
     let blank_node = pure(&mut batch, 11, 1)
@@ -282,10 +276,9 @@ fn fs_path_folds_file_identity_and_path() {
     );
     fs::remove_file(file).unwrap();
 
-    // The path string is folded on top of the file identity, so two nodes
-    // reading equal files under different names still key apart. Planted
-    // identities rather than real files: a constant is what makes the
-    // encoding pinnable, and no test controls a real file's mtime.
+    // The path string is folded on top of the file identity, so two nodes reading equal files
+    // under different names still key apart. Planted identities, because no test controls a real
+    // file's mtime and a constant is what makes the encoding pinnable.
     let planted = |value: ConstValue, path: &str| {
         let (p, node) = path_node(value);
         let mut cache = RuntimeCache::default();
@@ -306,10 +299,9 @@ fn fs_path_folds_file_identity_and_path() {
         d_here,
         "single-path and path-list variants must hash apart"
     );
-    // Moves only when the resource-identity encoding changes on purpose —
-    // read the new number off the failure and update it here. Every other
-    // failure of this line is accidental digest drift, which would
-    // silently invalidate every persisted cache blob.
+    // Moves only when the resource-identity encoding changes on purpose — read the new number
+    // off the failure and update it here. Any other failure is accidental digest drift, which
+    // silently invalidates every persisted cache blob.
     assert_eq!(
         d_here,
         Some(Digest([
@@ -404,14 +396,11 @@ fn bound_fs_path_folds_delivered_file_identity() {
     );
     fs::remove_file(second.path()).unwrap();
 
-    // An unset slot keys on its *position*, which is what the marker buys over
-    // skipping the slot: a Bind fold writes no authored strings alongside the
-    // identities, so a skip would leave `["", p]` and `[p, ""]` making the same
-    // two writes in the same order. Reaching that in a real run also takes a
-    // `Pure` producer that isn't — an honest one cannot deliver two values
-    // under the one digest folded just above — which is why this plants the
-    // pair rather than producing it. The marker is what keeps `hash_fs_paths`
-    // decodable from its own arguments instead of from that caller invariant.
+    // An unset slot keys on its *position*, which is what the marker buys over skipping the slot:
+    // a Bind fold writes no authored strings alongside the identities, so a skip would leave
+    // `["", p]` and `[p, ""]` making the same two writes in the same order. Reaching that in a
+    // real run also takes a `Pure` producer that isn't honest, so this plants the pair rather
+    // than producing it.
     let with_blank = |paths: Vec<String>| {
         digests_with(Some(DynamicValue::Static(ConstValue::FsPaths(paths)))).typed
     };
@@ -506,8 +495,8 @@ fn output_ports_are_disambiguated() {
 fn output_signature_folds_into_digest_and_propagates() {
     use crate::data::data_type::TypeId;
 
-    // One func declaring two different signatures: the digests must diverge on
-    // the type, on the arity, and on a custom type's identity.
+    // One func declaring two different signatures: the digests must diverge on the type, the
+    // arity, and a custom type's identity.
     let signature_pair = |left: &[DataType], right: &[DataType]| {
         let mut p = ProgramBuilder::default();
         let a = typed(&mut p, 10, left).add();
@@ -554,11 +543,9 @@ fn output_signature_folds_into_digest_and_propagates() {
 
 #[test]
 fn cycle_yields_none() {
-    // A binds B.0, B binds A.0 — a malformed program (the planner rejects it
-    // separately); the digest pass must break the recursion, not loop.
-    //
-    // The forward reference is spelled as a raw address, since the node it names
-    // does not exist until the line after.
+    // A binds B.0, B binds A.0 — a malformed program (the planner rejects it separately); the
+    // digest pass must break the recursion, not loop. The forward reference is a raw address,
+    // since the node it names does not exist until the line after.
     let mut p = ProgramBuilder::default();
     let forward = ExecBinding::Wire(OutputAddr {
         node_idx: NodeIdx(1),

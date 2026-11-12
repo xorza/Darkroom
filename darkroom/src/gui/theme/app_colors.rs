@@ -14,13 +14,12 @@ const LINK_HOVER_LIFT: f32 = 0.5;
 #[derive(Clone, Debug)]
 pub(crate) struct AppColors {
     /// The accent: the inspect button, the inspector's pin, a memory readout's VRAM pool, and the
-    /// selection: the rubber band (a translucent fill and a near-opaque border, both
-    /// derived from this) and the selected node's border, so "in the selection" reads as one
-    /// color from sweep to committed halo.
+    /// selection (the rubber band and the selected node's border), so "in the selection" reads
+    /// as one color from sweep to committed halo.
     pub(crate) accent: RgbaF32,
-    /// The band the menu bar, the status bar and every tab strip sit on: between the graph
-    /// (`canvas.bg`) and the nodes, so the surround recedes and the selected tab, which takes
-    /// `canvas.bg`, reads as one with the graph below it.
+    /// The band the menu bar, the status bar and every tab strip sit on: between `canvas.bg` and
+    /// the nodes, so the surround recedes and the selected tab, which takes `canvas.bg`, reads
+    /// as one with the graph.
     pub(crate) surround_bg: RgbaF32,
     /// A text link at rest, and lifted halfway to white under the pointer.
     pub(crate) link: RgbaF32,

@@ -1,13 +1,9 @@
 //! Whether the tier a budget selects changes the combine: the disk (spill + mmap) and in-memory
-//! tiers must combine the same frames into an identical master. This exercises the real
-//! [`load_to_disk`]/[`load_in_memory`] loaders that the in-memory `stack_images` bypasses.
+//! tiers must combine the same frames into an identical master. This exercises the file loader
+//! that the in-memory `stack_images` bypasses.
 //!
-//! The budget accounting itself is
-//! `memory::tests::planned_concurrency_never_overshoots_its_tier_budget`, which sweeps the loader's
-//! plan too; the live heap a run holds is measured by the `memory_budget` integration test.
-//!
-//! [`load_to_disk`]: crate::combine::frame_cache
-//! [`load_in_memory`]: crate::combine::frame_cache
+//! The budget accounting itself is `memory::tests::a_plan_never_overshoots_its_budget`; the live
+//! heap a run holds is measured by the `memory_budget` integration test.
 
 use std::path::{Path, PathBuf};
 
@@ -61,7 +57,6 @@ fn disk_and_memory_tiers_produce_identical_masters() {
         .collect();
 
     let master = |memory_override: u64, tag: &str| {
-        // Mean, no rejection → exact average.
         let config = StackConfig {
             combine: Combine::mean(),
             weighting: Weighting::Equal,
@@ -89,7 +84,6 @@ fn disk_and_memory_tiers_produce_identical_masters() {
         "spill and resident tiers must agree pixel-for-pixel"
     );
 
-    // Uniform inputs → uniform master.
     let first = disk_px[0];
     assert!(
         disk_px.iter().all(|&p| p == first),

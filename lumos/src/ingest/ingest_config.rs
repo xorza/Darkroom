@@ -65,7 +65,7 @@ impl IngestConfig {
         }
     }
 
-    /// Create a new cache configuration with custom cache directory.
+    /// The default configuration with `cache_dir` set.
     pub fn with_cache_dir(cache_dir: PathBuf) -> Self {
         Self {
             cache_dir,

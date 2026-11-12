@@ -29,9 +29,8 @@ fn subscription_wiring_rejects_an_endpoint_outside_the_program() {
         "the authored subscription wired one subscriber"
     );
 
-    // The artifact check catches a subscriber index that names no node. The
-    // walk cannot mint one — every index comes out of the placement, which
-    // covers exactly the graph's nodes — so it is corrupted here by hand.
+    // The artifact check catches a subscriber index that names no node. The walk cannot mint one
+    // (every index comes out of the placement), so it is corrupted here by hand.
     let past_the_end = NodeIdx(compiled.program.e_nodes.len() as u32);
     let events = compiled.node("ticker").events;
     let subscriber = compiled.program.events[events][0].subscribers.nth(0);
@@ -104,10 +103,9 @@ fn validation_rejects_a_binding_that_does_not_name_a_real_output() {
 /// nodes are authored in says nothing about the order they are adopted in — the
 /// id column is the authored set, sorted, and nothing else.
 ///
-/// The one fixture that picks its own ids: `TestGraph` numbers nodes in
-/// declaration order, which would make "sorted" and "authored" the same list
-/// and leave the sort unproven. Here they descend, so declaration order is the
-/// reverse of id order.
+/// The one fixture that picks its own ids: `TestGraph` numbers nodes in declaration order, which
+/// would make "sorted" and "authored" the same list. Here they descend, so declaration order is
+/// the reverse of id order.
 #[test]
 fn dense_order_is_id_order() {
     let mut fixture = TestGraph::new();
@@ -230,10 +228,9 @@ fn summary(compiled: &CompiledGraph, authored: &[NodeId]) -> Vec<String> {
     out
 }
 
-/// Every buffer a compile fills is owned by the `Compiler` and reused, so the
-/// hazard the reuse introduces is one compile's leftovers reaching the next.
-/// Compiling a differently shaped graph first must leave the second artifact
-/// identical to what a `Compiler` that had never run produces for it.
+/// Every buffer a compile fills is owned by the `Compiler` and reused, so the hazard is one
+/// compile's leftovers reaching the next. Compiling a differently shaped graph first must leave
+/// the second artifact identical to what a `Compiler` that had never run produces for it.
 #[test]
 fn a_reused_compiler_produces_what_a_fresh_one_does() {
     // A wider graph with more ports and an event, so any pool, run length, or
@@ -292,9 +289,8 @@ fn recompiling_one_graph_does_not_accumulate_in_the_reused_buffers() {
     assert_eq!(second.output_count, first.output_count);
 }
 
-/// A producer declaring one output of `out_ty` and a consumer declaring one
-/// required input of `in_ty`, unwired. The pair every test below is a question
-/// about — each stating for itself what, if anything, reaches that input.
+/// A producer declaring one output of `out_ty` and a consumer declaring one required input of
+/// `in_ty`, unwired. The pair every test below is a question about.
 fn pair(out_ty: DataType, in_ty: DataType) -> TestGraph {
     let mut g = TestGraph::new();
     g.add("producer", |n| n.pure().output(out_ty));
@@ -309,9 +305,9 @@ fn wired_pair(out_ty: DataType, in_ty: DataType) -> TestGraph {
     g
 }
 
-/// Every authored node becomes exactly one execution node carrying its own id,
-/// and the dense order is the id order — `Graph::iter` is a `HashMap` walk, so
-/// the order nodes are reached in must not reach the artifact.
+/// Every authored node becomes exactly one execution node carrying its own id, and the dense
+/// order is the id order — `Graph::iter` is a `HashMap` walk, so its order must not reach the
+/// artifact.
 #[test]
 fn places_one_node_per_authored_node_in_id_order() {
     let g = pair(DataType::Int, DataType::Int);

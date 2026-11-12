@@ -1,6 +1,6 @@
 //! Calibration tests on realistic forward-model frames.
 //!
-//! The unit tests in `tests.rs` and `defect_map/tests.rs` cover the calibrate/defect logic on
+//! The unit tests in `tests/mod.rs` and `defect_map/tests.rs` cover the calibrate/defect logic on
 //! uniform `constant_cfa` frames. These exercise it on **non-uniform, noisy, defect-laden** frames
 //! built from the CCD equation (`light = bias + dark + flat·signal + noise`): calibration removes
 //! a vignette + dark + bias, recovers a star field through a single noisy light, and the
@@ -216,7 +216,7 @@ fn hot_detection_sigma_threshold_picks_its_tier() {
 /// Hot pixels are measured on the dark without its bias. The bias is 0.02 with σ 0.005 noise and
 /// one pixel (1300) 0.1 high, which the dark holds too, as a dark is bias plus dark signal; the
 /// dark signal is 0.08 with σ 0.005 noise and two hot pixels (800, 1800) 0.1 high. On the dark as
-/// stacked, 1300 stands 20σ above its neighbours and was flagged hot; less the bias, only the two
+/// stacked, 1300 stands 20σ above its neighbours and would be flagged hot; less the bias, only the two
 /// dark-signal pixels are.
 #[test]
 fn a_pixel_only_the_bias_sets_apart_is_no_hot_pixel() {

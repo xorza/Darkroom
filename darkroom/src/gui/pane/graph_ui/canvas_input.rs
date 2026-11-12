@@ -8,8 +8,7 @@ use palantir::{Modifiers, PointerButton, ResponseState};
 /// back by every controller after it: which bare-canvas gesture latched, and what
 /// Esc does. It lives on the input stage alone.
 ///
-/// Read there rather than per controller because each is one fact about the
-/// frame, and controllers polling them separately is how they grew different
+/// Read there rather than per controller, as controllers polling separately grew different
 /// guards around the same key.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct CanvasInput {
@@ -106,9 +105,8 @@ impl CanvasGesture {
     }
 }
 
-/// What this frame's Esc does on the canvas. A pressed Esc cancels whatever
-/// gesture is in flight; with nothing in flight as the frame starts, it also
-/// clears the selection.
+/// What this frame's Esc does on the canvas: it cancels whatever gesture is in flight, and
+/// with nothing in flight as the frame starts, it also clears the selection.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum Escape {
     #[default]

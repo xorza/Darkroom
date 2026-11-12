@@ -39,11 +39,11 @@ pub struct ObservationHeader {
     /// interpolates, as its direction decisions assume balanced channels, and divides them out
     /// after.
     pub camera_white_balance: Option<[f32; 4]>,
-    /// Filter name (e.g. "Ha", "OIII", "L", "R"). Critical for narrowband.
+    /// Filter name (e.g. "Ha", "OIII", "L", "R").
     pub filter: Option<String>,
     /// Camera gain setting (unitless, camera-specific).
     pub gain: Option<f64>,
-    /// Electrons per ADU (e-/ADU). Used for noise modeling.
+    /// Electrons per ADU (e-/ADU).
     pub egain: Option<f64>,
     /// CCD/sensor temperature in degrees Celsius during exposure.
     pub ccd_temp: Option<f64>,

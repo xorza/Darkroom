@@ -2,32 +2,19 @@
 //! and logs, plus the latest value each preview node published. One
 //! [`RunState`] per [`App`], updated as worker reports arrive.
 //!
-//! **Two halves with different owners.** `nodes` and `previews` belong to the
-//! open document and die with it ([`RunState::clear`]); `compiled`, `activity`
-//! and `cache_ram` describe the *worker* and are only ever written by what the
-//! worker reports, because an in-flight run still reports against the program
-//! the worker acknowledged and its cache still holds what it holds. A document
-//! swap does not reset them behind the worker's back — it asks the worker to
-//! drop its program and cache, and the `Cleared` acknowledgement is what
-//! resets them.
+//! **Two halves with different owners.** `nodes` and `previews` belong to the open document and
+//! die with it ([`RunState::clear`]). `compiled`, `activity` and `cache_ram` describe the
+//! *worker* and are written only by what it reports: an in-flight run still reports against the
+//! program the worker acknowledged. A document swap asks the worker to drop its program and
+//! cache, and the `Cleared` acknowledgement resets them. Within the first half, `previews` is
+//! swept per node once a frame and `nodes` only wholesale; see the `nodes` field for why.
 //!
-//! Within the first half the two differ again, and on purpose: `previews` is
-//! swept per node once a frame, `nodes` only wholesale at a document swap or
-//! the next completed run. See the field docs for why a run record is not a
-//! node-keyed cache.
+//! A run's node statuses are keyed by execution id, and every report resolves each through the
+//! worker-confirmed [`CompiledGraph`] to exactly one authoring node; an id this install never
+//! emitted is a protocol violation, not a node to skip. Logs attribute the same way.
 //!
-//! A run's node statuses are keyed by execution id, and every report resolves
-//! each through the worker-confirmed [`CompiledGraph`] to the authoring node it
-//! came from — exactly one, and a report naming an id this install never
-//! emitted is a protocol violation rather than a node to skip. Logs attribute
-//! the same way.
-//!
-//! One execution node per authored node and one report row per execution node,
-//! so a status is *assigned*, never folded: every write here is the last word
-//! on that node for that report. The two run reports still differ in scope —
-//! a **completed** summary clears the previous run before writing, while live
-//! **progress** overwrites one node in place, so a node's displayed status is
-//! whichever report most recently mentioned it. Progress is a liveness cue and
+//! A status is assigned, never folded: a **completed** summary clears the previous run before
+//! writing, while live **progress** overwrites one node in place. Progress is a liveness cue and
 //! the completed summary is the authority that corrects it at the end.
 //!
 //! [`App`]: crate::gui::app::App
@@ -60,9 +47,8 @@ use scenarium::{WorkerError, WorkerReport};
 use crate::gui::state::preview_store::PreviewStore;
 use crate::gui::state::run_state::run_outcome::RunOutcome;
 
-/// A report row can only name a node of the compiled graph the worker
-/// acknowledged, so a miss is a protocol violation rather than a state to
-/// tolerate.
+/// A report row can only name a node of the compiled graph the worker acknowledged, so a miss
+/// is a protocol violation.
 fn assert_reported(compiled: &CompiledGraph, node_id: NodeId) {
     debug_assert!(
         compiled.contains(node_id),
@@ -70,8 +56,7 @@ fn assert_reported(compiled: &CompiledGraph, node_id: NodeId) {
     );
 }
 
-/// Per-node execution outcome of the last run, with the detail that belongs
-/// to it — so a status and its detail are one value, and cannot disagree.
+/// Per-node execution outcome of the last run, with its detail, so the two cannot disagree.
 #[derive(Clone, PartialEq, Default, Debug)]
 pub(crate) enum ExecStatus {
     #[default]
@@ -82,13 +67,11 @@ pub(crate) enum ExecStatus {
     /// The transient live state while the node computes: the instant it
     /// started, so the UI can show live elapsed-so-far.
     Running(Instant),
-    /// The input ports the run could not satisfy, by index on the node — the
-    /// run's own verdict, so a port bound to a disabled or missing producer
-    /// counts too.
+    /// The input ports the run could not satisfy, by index on the node, including a port bound
+    /// to a disabled or missing producer.
     MissingInputs(Vec<usize>),
-    /// The failure's message, so a failed node reads e.g. "no light frames
-    /// provided", not just "errored". `None` while only live progress has
-    /// reported the failure: its message arrives with the completed summary.
+    /// The failure's message; `None` while only live progress has reported the failure, as its
+    /// message arrives with the completed summary.
     Errored(Option<String>),
     /// Never ran: a node before it failed. Apart from `Errored` so the one
     /// node that failed reads as the cause and the ones it stopped do not.
@@ -125,35 +108,24 @@ pub(crate) struct NodeLog {
 /// Central runtime state for the current editor. Off the serialized state.
 #[derive(Debug)]
 pub(crate) struct RunState {
-    /// What the last run said about each node, keyed by the node that produced
-    /// it — a **record of that run**, not a cache swept against the document.
+    /// What the last run said about each node — a **record of that run**, not a cache swept
+    /// against the document, so deliberately absent from
+    /// [`Document::holds_node`](crate::core::document::Document::holds_node)'s list of
+    /// `NodeId`-keyed caches and from the once-a-frame pass that sweeps them. Reasons, in order
+    /// of weight:
     ///
-    /// So it is deliberately absent from
-    /// [`Document::holds_node`](crate::core::document::Document::holds_node)'s
-    /// list of `NodeId`-keyed caches, and from the once-a-frame pass that
-    /// sweeps them. Three reasons, in order of weight:
-    ///
-    /// 1. **Going stale on an edit is already what these mean.** Rewire a
-    ///    node's input and its `Executed` check persists untouched until the
-    ///    next run — nothing on the edit path touches this. A status says
-    ///    *what the last run said*, never *what the graph would do now*.
-    ///    Sweeping on delete would make delete-then-undo the one edit that
-    ///    discards results, and only for the restored node while every
-    ///    neighbour from the same run keeps theirs: undoing a removal
-    ///    re-attaches the node under its original id, so its entry is still
-    ///    here and still reads.
-    /// 2. **Nothing reads a dead entry.** Every reader below is called from a
-    ///    node widget, which exists only for a node the document holds. An
-    ///    entry outliving its node costs memory and nothing else.
-    /// 3. **That memory is small and already bounded.** An enum, a short
-    ///    `Vec<NodeLog>` and two strings per node, capped by the last run's
-    ///    output — and `replace_results` resets every entry at the next
-    ///    completed run. The caches that *are* swept release textures up to
-    ///    8192² RGBA8, which is what earns them a per-frame pass.
+    /// 1. **Going stale on an edit is already what these mean.** A status says *what the last
+    ///    run said*, never *what the graph would do now*. Sweeping on delete would make
+    ///    delete-then-undo the one edit that discards results, only for the restored node: undo
+    ///    re-attaches it under its original id, so its entry still reads.
+    /// 2. **Nothing reads a dead entry.** Every reader is called from a node widget, which exists
+    ///    only for a node the document holds.
+    /// 3. **The memory is small and bounded.** An enum, a short `Vec<NodeLog>` and two strings
+    ///    per node, reset by `replace_results` at the next completed run. The swept caches
+    ///    release textures up to 8192² RGBA8, which earns them a per-frame pass.
     nodes: HashMap<NodeId, NodeRunState>,
     previews: PreviewStore,
-    /// The program acknowledged by the worker's ordered report stream. Every
-    /// subsequent progress/result payload belongs to this exact compile.
+    /// The program the worker acknowledged; every later progress or result belongs to it.
     compiled: Option<Arc<CompiledGraph>>,
     activity: WorkerActivity,
     /// The runs the worker reported ended, completed or failed: a count that only grows, so a
@@ -163,16 +135,11 @@ pub(crate) struct RunState {
     runs_ended: u64,
     /// The reports a drain swaps in, kept for its buffer.
     reports: VecDeque<WorkerReport>,
-    /// RAM held by the worker's runtime cache (system RAM vs GPU VRAM), as of
-    /// the last report that measured it: a completed run, or an install —
-    /// which releases the values of every node the new program dropped, and
-    /// is the only measurement a program with nothing to run ever produces.
-    /// Explicit eviction clears this projection until the next
-    /// run because successful eviction is fire-and-forget.
+    /// RAM held by the worker's runtime cache, as of the last report that measured it: a
+    /// completed run, or an install, which is the only measurement a program with nothing to
+    /// run ever produces. Eviction clears it until the next run, as eviction has no reply.
     cache_ram: RamUsage,
-    /// The values preview nodes published since the last frame, swapped in
-    /// from the worker's side and emptied into [`Self::previews`]. Kept so the
-    /// swap reuses its capacity.
+    /// The values preview nodes published since the last frame, kept for its capacity.
     published: HashMap<NodeId, DynamicValue>,
     /// What the last completed run came to; `None` before one, and after a
     /// [`Self::clear`].
@@ -231,45 +198,26 @@ impl RunState {
         self.cache_ram
     }
 
-    /// Bring this projection up to date with everything that has happened
-    /// since the last frame: fold the worker's reports, take in the values
-    /// preview nodes published, and sweep the store against `document`.
+    /// Fold the worker's reports, take in the values preview nodes published, and sweep the
+    /// store against `document`.
     ///
-    /// One entry point because the halves are ordered and nothing may come
-    /// between them. The reports are what make `compiled` name the compile the
-    /// worker just acknowledged; take the published values in first and each
-    /// is gated against the *previous* compile and silently dropped. Splitting
-    /// this across two calls put that constraint in the caller's statement
-    /// order, where nothing states it.
+    /// One entry point because the halves are ordered: the reports make `compiled` name the
+    /// compile the worker just acknowledged, and a published value taken in first is gated
+    /// against the *previous* compile and silently dropped.
     ///
-    /// Runs from `App::sweep`, once a frame — every sweep is idempotent and
-    /// costs a lookup per cached entry, while `record` runs *twice* on a frame
-    /// carrying action input — and before the session rebuilds its scene, so
-    /// the status and log projections it reads reflect the latest run.
+    /// Runs from `App::sweep`, once a frame (every sweep is idempotent, while `record` runs
+    /// *twice* on a frame carrying action input), and before the session rebuilds its scene.
     pub(crate) fn sync(&mut self, feed: RunFeed<'_>, ui: &Ui, document: &Document) {
         let RunFeed { runtime, status } = feed;
         self.drain_reports(runtime, status);
         self.sync_previews(runtime, ui, document);
     }
 
-    /// Fold everything `runtime`'s worker has posted since the last frame into
-    /// this projection.
+    /// Fold everything `runtime`'s worker has posted since the last frame.
     ///
-    /// A completed run reprojects per-node `ExecStatus` (the frames and footers) and
-    /// per-node logs (the inspector's Log section); a failed run clears both
-    /// and surfaces in the status bar. Published preview values are not
-    /// reports: [`Self::sync_previews`] queues them for conversion, and each
-    /// lands on the frame the converter's wake schedules.
-    ///
-    /// Pulls rather than being pushed to: the worker is headless
-    /// ([`RuntimeHost`] names no GUI type), so reading across the boundary in
-    /// this direction keeps it that way, and puts the fold beside the state it
-    /// writes — every arm below lands on `self`, and only the status line
-    /// reaches back.
-    ///
-    /// Reports only — a published *value* needs a texture allocated for it and
-    /// is taken by [`Self::sync_previews`], so this stays a pure fold and names
-    /// no `Ui`.
+    /// A completed run reprojects per-node `ExecStatus` and logs; a failed run clears both and
+    /// surfaces in the status bar. Published values need a texture and are taken by
+    /// [`Self::sync_previews`], so this names no `Ui`.
     fn drain_reports(&mut self, runtime: &RuntimeHost, status: &mut StatusLog) {
         let mut reports = mem::take(&mut self.reports);
         self.runs_ended += runtime.drain_worker(&mut reports);
@@ -279,9 +227,7 @@ impl RunState {
         self.reports = reports;
     }
 
-    /// Fold one report. Split out from the drain so it can be exercised
-    /// against a report stream a test states, rather than one a live worker
-    /// would have to be driven into producing.
+    /// Fold one report; split out so a test can state the report stream.
     fn apply_report(&mut self, report: WorkerReport, status: &mut StatusLog) {
         match report {
             WorkerReport::Installed {
@@ -289,11 +235,8 @@ impl RunState {
                 cache_ram,
             } => {
                 self.compiled = Some(compiled);
-                // An install reconciles the cache onto the new program,
-                // releasing whatever the nodes it dropped were holding.
-                // The figure it carries is that resident set measured
-                // afterwards, and it is the only correction there will be
-                // when the new program has nothing to run.
+                // An install releases what the dropped nodes held; its figure is measured
+                // afterwards and the only correction when the new program has nothing to run.
                 self.cache_ram = cache_ram;
             }
             WorkerReport::Cleared => {
@@ -306,14 +249,13 @@ impl RunState {
                     self.runs_ended += 1;
                     self.clear();
                 }
-                // Logged as the worker posted it (`worker_bridge::log_arrival`).
+                // Logged as the worker posted it (`Arrival::log`).
                 status.park_error(StatusFamily::Run, ErrorChain::new(&error).to_string());
             }
             WorkerReport::Activity(activity) => self.activity = activity,
             WorkerReport::Progress { node_id, phase } => self.apply_progress(node_id, phase),
             WorkerReport::Completed(summary) => {
-                // A completed run supersedes any lingering failure message
-                // from an earlier event-loop tick.
+                // A completed run supersedes a lingering failure message.
                 status.succeeded(StatusFamily::Run);
                 self.activity = summary.activity;
                 self.runs_ended += 1;
@@ -338,10 +280,8 @@ impl RunState {
         self.nodes.get(&id).map_or(&[], |n| n.logs.as_slice())
     }
 
-    /// Live progress: assign the node's status as it arrives, overwriting
-    /// whatever the last report said — a node's newest status is its status,
-    /// and `Running` has to be replaceable by the finish that follows it. A
-    /// failure's message arrives with the completed summary.
+    /// Live progress: overwrite the node's status with the newest one, so `Running` is replaced
+    /// by the finish that follows. A failure's message arrives with the completed summary.
     fn apply_progress(&mut self, node_id: NodeId, phase: RunPhase) {
         let compiled = self
             .compiled
@@ -423,48 +363,35 @@ impl RunState {
     /// [`RuntimeHost::evict_cache`] resolved it to, which is the seed's whole
     /// downstream cone, not just the node the user clicked.
     ///
-    /// Successful eviction has no reply, so this is a projection rather than a
-    /// report: it drops what the worker is about to drop and nothing else, and
-    /// the next completed run replaces it with measured truth either way.
+    /// Successful eviction has no reply, so this is a projection, not a report: it drops what
+    /// the worker is about to drop, and the next completed run replaces it with measured truth.
     ///
-    /// The global total is the one thing that cannot be projected: it
-    /// deduplicates values shared between nodes by pointer, so subtracting the
-    /// per-node figures below would over-count whatever they share. It reads as
-    /// unknown — the status bar drops the clause — until the next run measures
-    /// it again.
+    /// The global total cannot be projected: it deduplicates values shared between nodes by
+    /// pointer, so subtracting per-node figures would over-count. It reads as unknown (the status
+    /// bar drops the clause) until the next run measures it.
     pub(crate) fn clear_cache_projections(&mut self, evicted: &[NodeId]) {
         self.cache_ram = RamUsage::default();
         for node_id in evicted {
             if let Some(node) = self.nodes.get_mut(node_id) {
                 node.ram = RamUsage::default();
             }
-            // A preview's value is a run result: with the cache behind it
-            // evicted, what it shows can no longer be re-derived without
-            // another run. A preview *outside* the cone still can — its value
-            // is still cached — so it stays on screen.
+            // With its cache evicted a preview cannot be re-derived without a run; one outside
+            // the cone is still cached and stays on screen.
             self.previews.remove(*node_id);
         }
-        // An evicted node's RAM was just zeroed, so what survives here is
-        // exactly the nodes still carrying a status or a log — the run results
-        // the eviction deliberately leaves standing.
+        // The evicted RAM is zeroed, so only nodes carrying a status or a log survive.
         self.drop_empty_nodes();
     }
 
-    /// The preview store's whole per-frame upkeep: queue what nodes published,
-    /// land the conversions that finished, then sweep what the document no
-    /// longer holds.
+    /// The preview store's per-frame upkeep: queue what nodes published, land the conversions
+    /// that finished, then sweep what the document no longer holds.
     ///
-    /// One pass because the steps are ordered. A value published this frame
-    /// queues before the landing, so a conversion of an older publish of the
-    /// same node finds itself superseded and is dropped. And both come before
-    /// the sweep, or what they wrote is reconsidered against a document that
-    /// has already been walked.
+    /// Ordered: a value published this frame queues before the landing, so a conversion of an
+    /// older publish of the same node finds itself superseded, and both come before the sweep.
     ///
-    /// Nothing to resolve on the way in: a preview is entry-only, so its
-    /// execution id attributes to exactly one authored node and that node is
-    /// the widget. A value whose id belongs to an earlier compile is dropped —
-    /// the node it named may not exist any more, and a preview only ever shows
-    /// the current run's value anyway.
+    /// A preview is entry-only, so its execution id attributes to exactly one authored node. A
+    /// value whose id belongs to an earlier compile is dropped: its node may be gone, and a
+    /// preview only shows the current run's value.
     fn sync_previews(&mut self, runtime: &RuntimeHost, ui: &Ui, document: &Document) {
         runtime.drain_previews(&mut self.published);
         #[expect(
@@ -472,8 +399,7 @@ impl RunState {
             reason = "each preview lands under its own node, so the order changes nothing"
         )]
         for (node_id, value) in self.published.drain() {
-            // The gate's borrow ends with the condition, so the store can be
-            // written in the body without cloning the compile to release it.
+            // The borrow ends with the condition, so no clone of the compile is needed.
             if self
                 .compiled
                 .as_ref()
@@ -489,10 +415,8 @@ impl RunState {
     /// Drop the document-derived half: no statuses, timings, logs, or published
     /// values. The worker-stream half is left alone — see the module doc.
     ///
-    /// Two callers, one meaning ("nothing on screen came from a run"): a run
-    /// that failed or was cleared, and a document swap
-    /// (`App::adopt_document`), where the results describe a document that is
-    /// no longer open.
+    /// Two callers: a run that failed or was cleared, and a document swap
+    /// (`App::adopt_document`), where the results describe a document no longer open.
     pub(crate) fn clear(&mut self) {
         self.nodes.clear();
         self.previews.clear();

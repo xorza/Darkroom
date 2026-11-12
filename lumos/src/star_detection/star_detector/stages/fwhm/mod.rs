@@ -113,18 +113,9 @@ struct Estimator<'a> {
 impl Estimator<'_> {
     /// Estimate FWHM from a set of detected stars.
     ///
-    /// Uses robust statistics (median + MAD) to handle outliers from
-    /// cosmic rays, saturated stars, and edge artifacts.
-    ///
-    /// # Algorithm
-    /// 1. Keep the stars that pass the quality filter ([`FilterRejection::of`]) with a plausible
-    ///    FWHM
-    /// 2. Compute median FWHM from filtered stars
-    /// 3. Reject outliers past [`FWHM_OUTLIER_SIGMA`] σ of the median, σ from the MAD
-    ///    ([`FwhmSpread`])
-    /// 4. Recompute median from remaining stars
-    ///
-    /// `fwhms` and `deviations` are scratch.
+    /// Keeps the stars that pass the quality filter ([`FilterRejection::of`]) with a plausible
+    /// FWHM, rejects those past [`FWHM_OUTLIER_SIGMA`] σ of their median, σ from the MAD
+    /// ([`FwhmSpread`]), and takes the median of the rest. `fwhms` and `deviations` are scratch.
     fn estimate(
         self,
         stars: &[Star],

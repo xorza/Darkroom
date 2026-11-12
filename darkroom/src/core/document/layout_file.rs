@@ -2,7 +2,7 @@
 //!
 //! - **The file holds palantir's `DockLayout` alone, loaded back with the graph tab pinned.**
 //!   The pinned tab is the editor's, so no file can name another. A layout palantir's load
-//!   refuses fails the decode, as a corrupt tree did before.
+//!   refuses fails the decode.
 
 use palantir::{DockLayout, DockState};
 use serde::de::Error;

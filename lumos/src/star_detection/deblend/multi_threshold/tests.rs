@@ -600,7 +600,7 @@ fn zero_valued_pixels_below_the_floor_do_not_prevent_deblending() {
         area,
     };
 
-    // Sanity-check the setup actually reaches the reported bug's precondition.
+    // The setup must reach the precondition of the case.
     let min_value = Component::new(&data, &pixels, &labels)
         .pixels()
         .map(|p| p.value)
@@ -750,7 +750,6 @@ fn buffer_reuse_consistency() {
 
 #[test]
 fn bbox_contains_all_peaks() {
-    // Verify that each deblended object's bbox contains its peak
     let TestComponent {
         pixels,
         labels,
@@ -779,7 +778,7 @@ fn bbox_contains_all_peaks() {
 
 #[test]
 fn single_threshold_level() {
-    // Test with threshold_count = 1 (edge case)
+    // threshold_count = 1: the ladder has no level above the root.
     let TestComponent {
         pixels,
         labels,
@@ -794,10 +793,8 @@ fn single_threshold_level() {
         },
     );
 
-    // Should still produce valid output
     assert!(!result.is_empty(), "Should produce at least one object");
 
-    // Area conservation
     let total_area: usize = result.iter().map(|o| o.area).sum();
     assert_eq!(total_area, data.area, "Area should be conserved");
 }

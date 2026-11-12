@@ -147,8 +147,6 @@ impl<V: F32x8> SplatCurve<V> {
         curved.max(self.zero).min(self.one)
     }
 
-    /// `color_preserve_pixel` lane by lane: black point, intensity, curve, channel scale,
-    /// highlight cap.
     #[inline(always)]
     fn color_preserve<S: Isa<F32 = V>>(self, isa: S, [r, g, b]: [V; 3]) -> [V; 3] {
         let (r, g, b) = (self.rescale(r), self.rescale(g), self.rescale(b));

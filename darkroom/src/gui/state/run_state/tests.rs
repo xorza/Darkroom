@@ -100,15 +100,12 @@ fn clearing_cache_projections_drops_the_evicted_cone_and_keeps_everything_else()
     );
 }
 
-/// `clear` splits the two halves exactly where their owners do: everything
-/// derived from the open document goes, everything describing the *worker*
-/// stays.
+/// `clear` drops everything derived from the open document and keeps everything describing the
+/// *worker*.
 ///
-/// Both sides are load-bearing for `App::adopt_document`. Node ids are
-/// persisted, so leaving the document half would reattach the previous
-/// session's statuses and preview images to a reopened document that has not
-/// run. Dropping the worker half would be worse: an in-flight run's next patch
-/// resolves through `compiled`, and clearing it turns that report into a panic.
+/// Node ids are persisted, so keeping the document half would reattach old statuses and previews
+/// to a reopened document; dropping the worker half would turn an in-flight run's next report,
+/// resolved through `compiled`, into a panic.
 #[test]
 fn clear_drops_the_document_half_and_keeps_the_worker_half() {
     let node = node_id(1);
@@ -156,14 +153,9 @@ fn clear_drops_the_document_half_and_keeps_the_worker_half() {
     assert_eq!(state.status(node), ExecStatus::Executed(0.5));
 }
 
-/// The cache readout follows the worker's own measurements and nothing else.
-/// An install carries the resident set left after reconciling — which is the
-/// only figure a program with nothing to run will ever produce — and a clear
-/// means the cache is gone.
-///
-/// The reason both matter: `App::adopt_document` asks the worker to drop its
-/// program on a File ▸ New, and the status bar would otherwise keep naming the
-/// closed document's cache until some later run measured it again.
+/// The cache readout follows the worker's own measurements and nothing else: an install carries
+/// the resident set left after reconciling, and a clear means the cache is gone, so the status
+/// bar does not keep naming a closed document's cache.
 #[test]
 fn install_and_clear_reports_carry_the_cache_reading() {
     let node = node_id(1);
@@ -252,11 +244,9 @@ fn progress_marks_the_attributed_node_running_then_finished() {
     assert_eq!(rs.status(node_id(99)), ExecStatus::None);
 }
 
-/// The completed snapshot is the authority: it clears the previous run
-/// before writing, so a node the new run says nothing about loses the
-/// status the old one gave it, and one it does report carries its detail —
-/// the failure message, the unfed ports — inside the status. So live
-/// progress that replaces the status replaces the detail with it.
+/// The completed snapshot is the authority: it clears the previous run before writing, so a
+/// node the new run does not report loses its old status, and one it reports carries its detail
+/// inside the status, which live progress replaces together with it.
 #[test]
 fn completed_snapshot_replaces_the_previous_run() {
     let executed = node_id(1);

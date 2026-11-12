@@ -43,10 +43,8 @@ impl Run {
     }
 }
 
-/// Extract the runs of one row of a mask, `row_words` of it, using word-level bit scanning.
-///
-/// Uses trailing zero counting (CTZ) for efficient run boundary detection.
-/// This is faster than bit-by-bit scanning for mixed words.
+/// Push the runs of one mask row, `row_words`, by word-level bit scanning: whole words by a
+/// comparison, mixed ones by trailing-zero counts.
 #[inline]
 pub(super) fn extract_runs_from_row(row_words: &[u64], width: usize, runs: &mut Vec<Run>) {
     let mut scan = RowScan {
@@ -100,7 +98,7 @@ struct RowScan {
 }
 
 impl RowScan {
-    /// Scan a mixed word (both 0s and 1s) starting at `base_x`, by CTZ.
+    /// Scan a word of both 0s and 1s starting at `base_x`.
     #[inline]
     fn mixed_word(&mut self, word: u64, base_x: u32, runs: &mut Vec<Run>) {
         let word_end = (base_x + 64).min(self.width);
@@ -160,10 +158,8 @@ pub(super) struct RunJoin<'a> {
 }
 
 impl RunJoin<'_> {
-    /// Merge current row's runs with previous row's runs via union-find.
-    ///
-    /// For each run in `cur_runs`, finds overlapping runs in `prev_runs` and merges
-    /// their labels. Runs without overlap get a new label via `make_set`.
+    /// Label each run of `cur_runs` by the runs of `prev_runs` it connects to, merging their
+    /// labels; a run connecting to none gets a new one.
     #[inline]
     pub(super) fn merge_with_prev(self, cur_runs: &mut [Run], prev_runs: &[Run]) {
         let Self {

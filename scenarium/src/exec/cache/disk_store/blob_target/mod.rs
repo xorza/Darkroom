@@ -49,11 +49,10 @@ impl BlobTarget {
     /// Delete a blob whose body would not decode, so the next run
     /// recomputes instead of meeting the same unreadable frame.
     ///
-    /// [`BlobTarget::covers_demand`] is header-only, so a blob with an
-    /// intact header and a corrupt body goes on passing the reuse check —
-    /// while the file survives, every run prunes the producer cone and
-    /// fails the same decode. A removal that fails is therefore reported:
-    /// nothing here can force the unlink through.
+    /// [`BlobTarget::covers_demand`] is header-only, so a blob with an intact header and a corrupt
+    /// body goes on passing the reuse check — every run would prune the producer cone and fail the
+    /// same decode. A removal that fails is therefore reported: nothing here can force the unlink
+    /// through.
     async fn delete(&self) {
         if let Err(error) = fs::remove_file_async(&self.path).await
             && error.kind() != io::ErrorKind::NotFound
@@ -85,11 +84,10 @@ impl BlobTarget {
 
     /// Open the blob and measure it, the one way all three readers below start.
     ///
-    /// The two `None`s are different answers, which is why this is not a bare
-    /// `Option`: `Ok(None)` is the ordinary absence — nothing written under this
-    /// target yet — while `Err` is a filesystem that would not answer. Both mean
-    /// "cannot serve" to every caller; only whether that is worth reporting
-    /// differs, and that is the caller's to decide.
+    /// The two `None`s are different answers: `Ok(None)` is the ordinary absence — nothing
+    /// written under this target yet — while `Err` is a filesystem that would not answer. Both
+    /// mean "cannot serve"; only whether that is worth reporting differs, and that is the
+    /// caller's to decide.
     async fn open(&self) -> io::Result<Option<OpenBlob>> {
         let file = match fs::open_async(&self.path).await {
             Ok(file) => file,
@@ -131,9 +129,8 @@ impl BlobTarget {
         codecs: &Codecs,
         demand: &[OutputDemand],
     ) -> Option<OutputSnapshot> {
-        // Unlike the two coverage checks, this runs after something already
-        // promised the blob is there, so a filesystem that will not answer is
-        // worth reporting; a plain absence still is not.
+        // This runs after something already promised the blob is there, so a filesystem that will
+        // not answer is worth reporting; a plain absence still is not.
         let mut blob = match self.open().await {
             Ok(Some(blob)) => blob,
             Ok(None) => return None,
@@ -168,10 +165,9 @@ impl BlobTarget {
     /// [`Unsupported`](StoreOutcome::Unsupported) before any I/O: the verdict
     /// is the values' alone, so no file is opened, created or written for it.
     ///
-    /// Answers rather than logs. Whether a skipped or failed write is worth
-    /// telling a human depends entirely on who asked: this runs after every
-    /// node of every run, and also from a flush a user clicked for. Only the
-    /// caller knows which, so the reporting is theirs — see [`StoreOutcome`].
+    /// Answers rather than logs: this runs after every node of every run, and also from a flush a
+    /// user clicked for, so only the caller knows whether a skipped or failed write is worth
+    /// telling a human — see [`StoreOutcome`].
     pub(crate) async fn store(
         &self,
         codecs: &Codecs,
@@ -185,9 +181,8 @@ impl BlobTarget {
             return Ok(StoreOutcome::AlreadyCovered);
         }
         let path = || self.path.clone();
-        // The store's directory is created only when a write finds it missing:
-        // the first write under a new root, or one after the root was removed.
-        // Every other write costs no directory syscall.
+        // The directory is created only when a write finds it missing (the first write under a new
+        // root, or after the root was removed), so every other write costs no directory syscall.
         let file = match AtomicFile::new(&self.path, PublicationMode::Cache).await {
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 self.create_dir().await?;

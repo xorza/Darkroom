@@ -64,14 +64,11 @@ fn drop_waits_for_worker_idle_before_runtime_shutdown() {
         );
         thread::yield_now();
     }
-    // A report is posted *before* its wake fires, so seeing one says nothing
-    // about its wake having landed yet. Settling the count against every
-    // report posted, merged away or not, is what makes the drop delta below
-    // mean the shutdown wake rather than a straggler from the run.
-    //
-    // It does settle: the loop is quiescent — the FPS event is disabled at
-    // 0 Hz, so its lambda parks forever and no further report is produced
-    // until shutdown.
+    // A report is posted *before* its wake fires, so seeing one says nothing about its wake
+    // having landed. Settling the count against every report posted, merged away or not, makes
+    // the drop delta below mean the shutdown wake rather than a straggler from the run. It does
+    // settle: the FPS event is disabled at 0 Hz, so its lambda parks forever and no further
+    // report is produced until shutdown.
     let delivered = bridge.reports.posts();
     let settle_by = Instant::now() + Duration::from_secs(5);
     while wake_count.load(Ordering::SeqCst) < delivered {
@@ -99,9 +96,7 @@ fn drop_waits_for_worker_idle_before_runtime_shutdown() {
 
 #[test]
 fn commands_report_a_dead_worker_instead_of_reading_as_queued() {
-    // A send only fails once the worker task is gone, and then no
-    // report can ever arrive — so a caller told "queued" would wait
-    // forever on a run that will never report back.
+    // A send only fails once the worker task is gone, and then no report can ever arrive.
     let mut bridge = WorkerBridge::new(wake::internals::noop());
     assert!(bridge.run_sinks().is_ok(), "a live worker takes commands");
 

@@ -5,17 +5,15 @@
 //! values, the outputs of its upstream producers, and the prepared identities of
 //! external resources it reads.
 //! [`RuntimeCache::node_digest`](crate::exec::cache::runtime_cache::RuntimeCache::node_digest)
-//! folds that into a 256-bit
-//! BLAKE3 digest, reading each `Wire` producer's *already-stamped* `cur_digest`
-//! (the resolver computes digests producer-first, so no recursive digest traversal is
+//! folds that into a 256-bit BLAKE3 digest, reading each `Wire` producer's *already-stamped*
+//! `cur_digest` (the resolver computes digests producer-first, so no recursive traversal is
 //! needed). This module owns the *encoding* — the hasher, the tags, and the [`DOMAIN`]
-//! versioning them; the fold itself is a cache method, since what it reads (slots, the path
-//! memo) is the cache's, beside the program it is handed. External identities come from that
-//! memo, filled once per run by a [`StampJob`](crate::exec::cache::stamp_job::StampJob),
-//! keeping this fold I/O-free.
-//! Equal digests ⇒ identical computation, so the digest is at once the cache key
-//! and the invalidation signal: change anything upstream and every downstream digest
-//! changes — on this machine or any other.
+//! versioning them; the fold itself is a cache method, since what it reads (slots, the path memo)
+//! is the cache's. External identities come from that memo, filled once per run by a
+//! [`StampJob`](crate::exec::cache::stamp_job::StampJob), keeping the fold I/O-free. Equal
+//! digests ⇒ identical computation, so the digest is at once the cache key and the invalidation
+//! signal: change anything upstream and every downstream digest changes — on this machine or any
+//! other.
 //!
 //! **Trust boundary (what is *not* folded).** The digest is only as honest as these
 //! assumptions; violating one is a *false hit* (a stale value served):
@@ -53,17 +51,16 @@ use crate::data::const_value::ConstValue;
 /// every cached digest when the hashing scheme itself changes.
 pub(super) const DOMAIN: &[u8] = b"scenarium-cache-v8";
 
-/// 256-bit content digest. Cross-machine stable for a given binary: equal
-/// digests mean the same function identity, params, upstream outputs, and file inputs.
-/// A newtype, not a bare `[u8; 32]`, so an arbitrary byte array can't silently pose
-/// as a digest where one is expected.
+/// 256-bit content digest. Cross-machine stable for a given binary: equal digests mean the same
+/// function identity, params, upstream outputs, and file inputs. A newtype so an arbitrary byte
+/// array can't silently pose as a digest.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub(crate) struct Digest(pub(crate) [u8; 32]);
 
-/// A fixed-size value that folds into a [`DigestHasher`] as its **little-endian** bytes, so
-/// a digest is stable across architectures. Implemented for the primitive number types plus
-/// `f32`/`f64` (by bit pattern) and `bool`. `usize`/`isize` are deliberately *not* included
-/// — their width is platform-dependent; cast to a fixed width (`x as u64`) first.
+/// A fixed-size value that folds into a [`DigestHasher`] as its **little-endian** bytes, so a
+/// digest is stable across architectures. Implemented for the primitive number types plus
+/// `f32`/`f64` (by bit pattern) and `bool`. `usize`/`isize` are deliberately *not* included —
+/// their width is platform-dependent; cast to a fixed width first.
 pub(super) trait DigestPod {
     fn write_le(self, hasher: &mut DigestHasher);
 }
@@ -97,12 +94,9 @@ impl DigestPod for bool {
 
 /// One input's discriminant in a node digest.
 ///
-/// The whole space in one place, because it is written from three folds —
-/// the per-input match, the bound-path fold beneath it, and the per-path
-/// slots beneath that — and a value repeated between them would silently
-/// make two different inputs key alike. Written through
-/// [`DigestHasher::write_input_tag`], so the byte each name stands for is
-/// decided once.
+/// The whole space in one place, because it is written from three folds (the per-input match, the
+/// bound-path fold, and the per-path slots) and a value repeated between them would silently make
+/// two different inputs key alike. Written through [`DigestHasher::write_input_tag`].
 #[derive(Clone, Copy, Debug)]
 pub(super) enum InputTag {
     /// Nothing bound.
@@ -116,17 +110,15 @@ pub(super) enum InputTag {
     /// A resource input handed something that is not a path — the marker
     /// stands alone.
     BoundMistyped = 4,
-    /// One path slot naming nothing — the state a path port sits in before
-    /// a file is chosen. Stands in place of the identity a named path would
-    /// fold, so an unset slot keys on its position.
+    /// One path slot naming nothing — the state before a file is chosen. Stands in place of the
+    /// identity a named path would fold, so an unset slot keys on its position.
     UnsetPath = 5,
 }
 
-/// A fluent builder for a [`Digest`] — a thin wrapper over the BLAKE3 hasher with
-/// digest-friendly writers, used by the framework's structural fold. Deterministic and
-/// cross-architecture stable: PODs fold little-endian
-/// ([`DigestPod`]), and variable-length data is length-prefixed
-/// ([`write_str`](Self::write_str)) so `"ab"+"c"` can't collide with `"a"+"bc"`.
+/// A fluent builder for a [`Digest`] — a thin wrapper over the BLAKE3 hasher with digest-friendly
+/// writers. Deterministic and cross-architecture stable: PODs fold little-endian
+/// ([`DigestPod`]), and variable-length data is length-prefixed ([`write_str`](Self::write_str))
+/// so `"ab"+"c"` can't collide with `"a"+"bc"`.
 #[derive(Clone, Debug)]
 pub(super) struct DigestHasher(Hasher);
 
@@ -184,13 +176,10 @@ impl DigestHasher {
         Digest(self.0.finalize().into())
     }
 
-    /// Fold one constant's *own value*: a discriminant tag plus a
-    /// length-prefixed payload (so `"ab"`+`"c"` can't collide with
-    /// `"a"`+`"bc"`).
+    /// Fold one constant's *own value*: a discriminant tag plus a length-prefixed payload.
     ///
-    /// Filesystem-path values fold only their authored path string(s) here — the
-    /// external files/dirs they point at are a separate concern, folded by the
-    /// caller through `PathIdentities::hash`, so this stays a pure,
+    /// Filesystem-path values fold only their authored path string(s) here — the files/dirs they
+    /// point at are folded by the caller through `PathIdentities::hash`, so this stays a pure,
     /// no-I/O structural fold.
     pub(super) fn write_static(&mut self, value: &ConstValue) {
         match value {

@@ -13,22 +13,18 @@ use crate::gui::node_key::NodeKey;
 /// One key-domain's port snapshot, split into two tiers by lifetime:
 ///
 /// - `live` is cleared and rebuilt every frame from last frame's responses.
-/// - `offsets` (per-widget intra-node offset, `widget_rect.center -
-///   node_rect.min`) is kept **across frames and tab switches**. An offset
-///   is layout-stable (it depends only on the node's content, not its
-///   position), so when a graph is shown again — e.g. the frame after
-///   switching back to its tab, where none of its widgets recorded last
-///   frame — centers still resolve from `node.pos + cached_offset` and
-///   wires draw on that first frame instead of popping in one frame
-///   late. Keyed by the globally-unique domain key, so it spans every open
-///   graph; on document reload the whole `GraphUi` (and this cache) is dropped.
+/// - `offsets` (per-widget intra-node offset, `widget_rect.center - node_rect.min`) is kept
+///   across frames and tab switches. An offset is layout-stable (it depends only on the node's
+///   content, not its position), so the frame after switching back to a graph's tab, where none
+///   of its widgets recorded last frame, centers still resolve from `node.pos + cached_offset`
+///   and wires draw on that first frame. Keyed by the globally-unique domain key, so it spans
+///   every open graph; on document reload the whole `GraphUi` (and this cache) is dropped.
 #[derive(Debug)]
 pub(crate) struct PortLayer<K> {
     live: HashMap<K, PortInfo>,
     offsets: HashMap<K, Vec2>,
-    /// The glyph a drag started on this frame, noted as the walk records it.
-    /// One press starts at most one drag, so the controllers latching off it
-    /// read it here instead of probing every candidate glyph.
+    /// The glyph a drag started on this frame, noted as the walk records it. One press starts at
+    /// most one drag, so the controllers latching off it need not probe every candidate glyph.
     started_drag: Option<K>,
 }
 
@@ -107,11 +103,9 @@ impl<K: NodeKey> PortLayer<K> {
         self.started_drag = None;
     }
 
-    /// The entry for a glyph whose node didn't record: its center from the
-    /// persistent offset against this frame's `node_pos`, and no interaction
-    /// state at all. Equivalent to [`Self::record`] with a default response —
-    /// which is exactly what `response_for` would have returned — without
-    /// asking for one.
+    /// The entry for a glyph whose node didn't record: its center from the persistent offset
+    /// against this frame's `node_pos`, and no interaction state. Equivalent to [`Self::record`]
+    /// with a default response, which `response_for` would have returned, without asking for one.
     pub(super) fn replay(&mut self, key: K, node_pos: Vec2) {
         let Some(offset) = self.offsets.get(&key).copied() else {
             return;
@@ -128,25 +122,19 @@ impl<K: NodeKey> PortLayer<K> {
         );
     }
 
-    /// Canvas-local pre-transform center, or `None` when the widget or its
-    /// parent node hasn't measured yet. `pub(crate)` for the port menu's "Add
-    /// preview", which spawns its node off the port circle it was opened on
-    /// (`crate::gui::pane::graph_ui::node_ui::port_row`); everything else that reads a center is
-    /// inside the canvas.
+    /// Canvas-local pre-transform center, or `None` when the widget or its parent node hasn't
+    /// measured yet. `pub(crate)` for the port menu's "Add preview"
+    /// (`crate::gui::pane::graph_ui::node_ui::port_row`), which spawns its node off the port
+    /// circle it was opened on.
     pub(crate) fn center(&self, key: K) -> Option<Vec2> {
         self.live.get(&key)?.layout_center
     }
 
-    /// First key in `keys` whose widget contains `pointer` (screen coords),
-    /// or `None` — the "which glyph is the in-flight wire hovering" scan
-    /// every snap-target search needs, differing only in the candidate
-    /// sequence it feeds in and whatever acceptance test it then applies to
-    /// the winner. Geometrically at most one glyph sits under the pointer, so
-    /// a rejected winner means "no snap", not "keep looking". Sibling of
-    /// [`Self::started_drag`].
-    ///
-    /// Tests the post-transform/clip rect, so it sees through palantir's
-    /// drag-capture hover suppression.
+    /// First key in `keys` whose widget contains `pointer` (screen coords), or `None`: the
+    /// "which glyph is the in-flight wire hovering" scan every snap-target search needs.
+    /// Geometrically at most one glyph sits under the pointer, so a rejected winner means "no
+    /// snap", not "keep looking". Tests the post-transform/clip rect, so it sees through
+    /// palantir's drag-capture hover suppression.
     pub(crate) fn first_containing(
         &self,
         pointer: Vec2,
@@ -160,9 +148,8 @@ impl<K: NodeKey> PortLayer<K> {
         })
     }
 
-    /// The glyph a drag started on this frame, or `None` — what every
-    /// drag-source controller (wire, preview spawn, event wire) latches
-    /// on, each keeping only the kinds of glyph it starts from.
+    /// The glyph a drag started on this frame, or `None`: what every drag-source controller
+    /// (wire, preview spawn, event wire) latches on, each keeping only the glyphs it starts from.
     pub(crate) const fn started_drag(&self) -> Option<K> {
         self.started_drag
     }
@@ -177,8 +164,8 @@ impl<K: NodeKey> PortLayer<K> {
         self.live.get(&key).is_some_and(|i| i.hovered)
     }
 
-    /// Force the hover flag on (idempotent) — the active drag's snap target,
-    /// which palantir's drag-capture suppression hides from `response.hovered`.
+    /// Force the hover flag on (idempotent): the active drag's snap target, which palantir's
+    /// drag-capture suppression hides from `response.hovered`.
     pub(crate) fn set_hovered(&mut self, key: K) {
         if let Some(info) = self.live.get_mut(&key) {
             info.hovered = true;
@@ -188,27 +175,21 @@ impl<K: NodeKey> PortLayer<K> {
 
 #[derive(Clone, Copy, Debug)]
 struct PortInfo {
-    /// Port-circle center in canvas-local (inner-canvas pre-transform)
-    /// coords. Computed as `node.pos + port_offset_within_node` so a
-    /// just-moved node's curves anchor on this frame's port positions
-    /// instead of last frame's stale `response.layout_rect`. `None`
-    /// when either the port or its parent node hasn't measured yet.
+    /// Port-circle center in canvas-local (inner-canvas pre-transform) coords, computed as
+    /// `node.pos + port_offset_within_node` so a just-moved node's curves anchor on this frame's
+    /// port positions, not last frame's stale `response.layout_rect`. `None` when either the
+    /// port or its parent node hasn't measured yet.
     layout_center: Option<Vec2>,
-    /// Post-transform/clip screen rect for pointer hit-test (snap).
-    /// Bypasses palantir's drag-capture hover suppression by reading
-    /// geometry directly.
+    /// Post-transform/clip screen rect for pointer hit-test (snap), which bypasses palantir's
+    /// drag-capture hover suppression by reading geometry directly.
     screen_rect: Option<Rect>,
-    /// `true` when the port should paint with its hover color. Filled
-    /// from `response.hovered` in `rebuild`; an active wire
-    /// drag's snap target gets it forced on via `set_hovered` after
-    /// `WireUi::input` (palantir's drag-capture suppression
-    /// otherwise hides the snap target from `response.hovered`).
+    /// `true` when the port should paint with its hover color. Filled from `response.hovered` in
+    /// `rebuild`; an active drag's snap target gets it forced on via `set_hovered`, as palantir's
+    /// drag-capture suppression otherwise hides it from `response.hovered`.
     hovered: bool,
-    /// One-frame edge: pointer-down → drag latched on this port this
-    /// frame. Drives wire-drag start detection.
+    /// One-frame edge: a drag latched on this port this frame.
     drag_started: bool,
-    /// Continuous: a drag is currently live on this port
-    /// (`drag_delta` is `Some` OR `drag_started` fired this frame).
-    /// Read on the start port to detect release.
+    /// Continuous: a drag is live on this port (`drag_delta` is `Some` or `drag_started` fired
+    /// this frame). Read on the start port to detect release.
     dragging: bool,
 }

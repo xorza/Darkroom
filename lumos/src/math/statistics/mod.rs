@@ -11,10 +11,9 @@ pub(crate) mod subsample;
 
 /// Replace each value with `|value − median|`, in place.
 ///
-/// Twin of [`fill_abs_deviations`], which computes the same transform into a separate buffer.
-/// They stay separate because the two contracts are incompatible, not by oversight: this one
-/// consumes its input, that one preserves it, and a single function doing both would need input
-/// and output to alias.
+/// Twin of [`fill_abs_deviations`], which writes the same transform to a separate buffer. They stay
+/// two because this one consumes its input and that one preserves it: one function doing both
+/// would need input and output to alias.
 #[inline]
 fn abs_deviation_inplace<F: Float>(values: &mut [F], median: F) {
     for v in values.iter_mut() {
@@ -74,8 +73,8 @@ fn mad_consistency(count: usize) -> f64 {
 
 /// The median of `data`, in place.
 ///
-/// Mutates the input buffer (partial sort via quickselect), and ranks NaN rather than tripping
-/// over it: the selection runs on [`OrderKeys`], in `total_cmp`'s order.
+/// Reorders `data` by selection, and ranks NaN rather than tripping over it: the selection runs on
+/// [`OrderKeys`], in `total_cmp`'s order.
 #[inline]
 pub(crate) fn median_mut<F: Float>(data: &mut [F]) -> F {
     debug_assert!(!data.is_empty());
@@ -131,8 +130,7 @@ fn median_of_partitioned_keys<F: Float>(keys: &mut [F::Key], boundary: usize) ->
 
 /// Replace `scratch` with `|value - median|` for each of `values`, leaving it exactly as long.
 ///
-/// One pass: the subtraction rides on the copy rather than following it, and the buffer's
-/// previous contents are never written before being overwritten.
+/// The subtraction rides on the copy, so the buffer's old contents are never written twice.
 ///
 /// Twin of [`abs_deviation_inplace`] — see there for why the pair does not collapse into one.
 #[inline]
@@ -154,9 +152,8 @@ pub(crate) fn mad_with_scratch<F: Float>(values: &[F], median: F, scratch: &mut 
 
 /// MAD floored at `floor_fraction * center`.
 ///
-/// A near-degenerate distribution (values nearly identical) has MAD ≈ 0, which would
-/// collapse any MAD-scaled rejection threshold to zero. Flooring at a fraction of the
-/// center keeps a usable spread estimate. Callers pass the median as `center`.
+/// Values nearly identical give a MAD near 0, which would collapse any MAD-scaled rejection
+/// threshold to zero; the floor keeps a usable spread. Callers pass the median as `center`.
 #[inline]
 pub(crate) const fn mad_floored(mad: f32, center: f32, floor_fraction: f32) -> f32 {
     mad.max(center * floor_fraction)

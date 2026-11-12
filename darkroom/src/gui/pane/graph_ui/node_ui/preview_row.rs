@@ -1,12 +1,8 @@
 //! A preview node's body content: the value wired into it.
 //!
-//! Takes the slot an ordinary node's footer occupies. A preview holds no
-//! cached output — it has no output at all — so there is nothing for that
-//! readout to report, and the value is the only thing worth the space.
-//!
-//! Not a floating widget with wiring of its own: it is a row inside a normal
-//! node body, so selection, dragging, the breaker, and the input wire all come
-//! from the node machinery unchanged.
+//! Takes the slot an ordinary node's footer occupies: a preview has no output, so no cached
+//! output to report. It is a row inside a normal node body, so selection, dragging, the
+//! breaker, and the input wire all come from the node machinery.
 
 use std::fmt;
 use std::fmt::Display;
@@ -29,15 +25,12 @@ use crate::gui::theme::Theme;
 use crate::gui::widgets::format::bytes::Bytes;
 use crate::gui::widgets::support;
 
-/// Height of the value area itself, excluding the header, port row, and info
-/// footer. Fixed, so a node does not resize as values arrive and vanish —
-/// an image letterboxes inside via `Contain`, and a non-image centers its text
-/// in the same frame.
+/// Height of the value area itself, excluding the header, port row, and info footer. Fixed, so
+/// a node does not resize as values arrive and vanish.
 const PREVIEW_CONTENT_HEIGHT: f32 = 152.0;
 
-/// What a preview shows when it has never received a value. A run that produced
-/// nothing and a preview wired to nothing are the same from here — both mean
-/// "there is no value yet", and saying more would be guessing.
+/// What a preview shows when it has never received a value: a run that produced nothing and a
+/// preview wired to nothing both mean "there is no value yet".
 const EMPTY_LABEL: &str = "No value yet";
 
 /// Draw one preview node's value area, plus the image info footer when there is
@@ -88,14 +81,9 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     if content.hovered() {
         ui.request_cursor(CursorIcon::Pointer);
     }
-    // The card's one action: open this node's value at full resolution. Asked
-    // for here, where the clickable area is built, so the id it senses on and
-    // the id its click is read from are the same one.
-    //
-    // A view request rather than a graph edit — the pane arrangement is the
-    // dock's, and `Requests` routes by what is being asked for, not by who
-    // asks. Deduped by `OpenTab`, so clicking a card whose viewer is already
-    // open just activates it.
+    // The card's one action: open this node's value at full resolution. A view request rather
+    // than a graph edit, as the pane arrangement is the dock's. Deduped by `OpenTab`, so a
+    // card whose viewer is already open just activates it.
     if content.clicked() {
         record.stage.out.push_view(DockOperation::OpenTab {
             tab: TabRef::ImageViewer(node.node_id),
@@ -106,10 +94,9 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     }
 }
 
-/// The image's info footer: resolution, pixel format (channel layout + bit depth), and original
-/// source size — styled like a node body's footer
-/// ([`node_footer`](crate::gui::pane::graph_ui::node_ui::node_footer)), so every read-only fact strip
-/// in the app reads as the same kind of thing.
+/// The image's info footer: resolution, pixel format (channel layout and bit depth), and
+/// original source size, styled like a node body's
+/// [`node_footer`](crate::gui::pane::graph_ui::node_ui::node_footer).
 fn info_row(ui: &mut Ui, theme: &Theme, image: &DrawablePreview) {
     Panel::hstack()
         .id_salt("preview_info")
@@ -117,8 +104,7 @@ fn info_row(ui: &mut Ui, theme: &Theme, image: &DrawablePreview) {
         .padding(card::band_padding(theme))
         .gap(theme.space.md)
         .child_align(Align::v(VAlign::Center))
-        // Round only the bottom corners so the strip seats into the body's
-        // rounded bottom, the way the header rounds the top.
+        // Round only the bottom corners, to seat into the body's rounded bottom.
         .chrome(theme.footer_chrome(theme.card_inner_radius()))
         .show(ui, |ui| {
             let size = image.preview.native_size;
@@ -139,11 +125,8 @@ fn info_row(ui: &mut Ui, theme: &Theme, image: &DrawablePreview) {
         });
 }
 
-/// `"RGBA \u{b7} 8-bit"`-style shorthand for a pixel format: channel layout,
-/// then per-channel bit depth.
-///
-/// Rendered on demand — the strip it feeds records once per preview node per
-/// frame, so there is nothing for a `String` to be worth.
+/// `"RGBA \u{b7} 8-bit"`-style shorthand for a pixel format: channel layout, then per-channel
+/// bit depth. Rendered on demand, so the strip builds no `String` per frame.
 #[derive(Clone, Copy, Debug)]
 struct FormatLabel(ColorFormat);
 

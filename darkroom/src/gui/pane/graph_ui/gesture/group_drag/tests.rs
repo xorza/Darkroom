@@ -13,9 +13,8 @@ use crate::gui::pane::graph_ui::internals::CanvasHarness;
 ///
 /// The input stage latches it off the frame's edge on one of the node's `drag_handles`, and moves
 /// the node in that frame; later frames' `input` turns that handle's `drag_delta` into a
-/// `MoveSelection`. So this drives a real press-and-travel through the harness — nothing else in
-/// the suite latches a body drag, and a latch that silently stopped firing would leave every node
-/// unmovable with the whole rest of the canvas green.
+/// `MoveSelection`. Nothing else in the suite latches a body drag, so this drives a real
+/// press-and-travel through the harness.
 #[test]
 fn a_body_drag_moves_the_node_by_the_pointers_travel() {
     let mut h = CanvasHarness::new(DocumentFixture::probes(2));
@@ -36,9 +35,8 @@ fn a_body_drag_moves_the_node_by_the_pointers_travel() {
     let intents = h.frame();
     let (members, offset) = moved(&intents)
         .unwrap_or_else(|| panic!("a body drag must emit a MoveSelection: {intents:?}"));
-    // Target = press-frame position + cumulative travel, so the node lands
-    // exactly where the pointer took it — and the untouched node stays out
-    // of the batch, since the grab selected only the node under it.
+    // Target = press-frame position + cumulative travel; the untouched node stays out of the
+    // batch, since the grab selected only the node under it.
     assert_eq!(
         (members, offset),
         (
@@ -119,10 +117,9 @@ fn a_grab_selects_and_moves_in_one_undo_entry() {
     assert_eq!((selected(&h), pos(&h)), (0, start), "Esc takes back both");
 }
 
-/// Esc cancels what is in flight, and deselects only when nothing was: a
-/// first Esc during a drag of the selection ends the drag and keeps the
-/// selection, and a second, with nothing left in flight, clears it. Deselect is
-/// a command, so Ctrl+Esc with nothing in flight leaves the selection.
+/// Esc cancels what is in flight, and deselects only when nothing was: a first Esc during a
+/// drag of the selection ends the drag and keeps the selection, and a second clears it. Deselect
+/// is a command, so Ctrl+Esc with nothing in flight leaves the selection.
 #[test]
 fn esc_cancels_a_drag_before_it_deselects() {
     let mut h = CanvasHarness::new(DocumentFixture::probes(2));

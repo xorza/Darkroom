@@ -56,12 +56,9 @@ pub(crate) struct InvalidFlatGain {
 
 /// A frame whose pixel grid disagrees with the one the run was set up for.
 ///
-/// Loading, alignment, the combine cache and drizzle accumulation all reject a frame for the same
-/// three reasons — which frame, the geometry the run expects, what the frame turned out to be — so
-/// they report it with this one type instead of each subsystem's error declaring the variant again.
-/// The mismatches that genuinely aren't this keep a typed variant on their module's error: a stored
-/// plane knows only its length, a pixel-weight map has no channels, and a calibration master is
-/// measured against the sensor rather than against frame 0.
+/// Loading, alignment, the combine cache and drizzle accumulation share this one error. A mismatch
+/// of another kind keeps a typed variant on its module's error: a stored plane knows only its
+/// length, a pixel-weight map has no channels, a calibration master is measured against the sensor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 #[error("frame {idx} is {actual}, expected {expected}")]
 pub struct FrameDimensionMismatch {

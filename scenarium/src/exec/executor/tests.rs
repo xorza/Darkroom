@@ -1,8 +1,7 @@
 //! The run loop over programs [`ProgramBuilder`] states directly.
 //!
-//! Every node here declares its [`CacheMode`] explicitly: which values survive
-//! which read *is* the subject, so a fixture that left retention to a default
-//! would be asserting on something it never said.
+//! Every node declares its [`CacheMode`] explicitly: which values survive which read *is* the
+//! subject, so a default would assert on something the fixture never said.
 
 use super::*;
 use crate::async_lambda;
@@ -30,8 +29,7 @@ fn relay() -> FuncLambda {
     })
 }
 
-/// Writes its first input plus one — so a consumer's output says which value
-/// reached it, not merely that one did.
+/// Writes its first input plus one — so a consumer's output says which value reached it.
 fn increment() -> FuncLambda {
     async_lambda!(|Invocation {
                        inputs, outputs, ..
@@ -111,8 +109,7 @@ async fn upstream_error_retires_skipped_reads_without_harming_live_readers() {
         outputs[0] = DynamicValue::Static(ConstValue::Int(1));
         Ok(())
     });
-    // `healthy` retains nothing, so an emptied slot below is the mid-run
-    // release and not an eviction the loop does not perform.
+    // `healthy` retains nothing, so an emptied slot below is the mid-run release, not an eviction.
     let healthy = prog.node().outputs(1).lambda(producer()).add();
     let failed = prog
         .node()
@@ -330,16 +327,14 @@ async fn unbound_output_errors_only_when_demanded() {
     ));
 }
 
-/// Retention after a run is the cache mode's call, not the reader count's.
-/// `Executor::run` does no end-of-run eviction, so an emptied slot here is the
-/// *mid-run* release and nothing else: a `None` producer is dropped the moment
-/// its last consumer reads it — and, with no consumer at all, the moment it
-/// finishes — while a `Ram` producer survives both.
+/// Retention after a run is the cache mode's call, not the reader count's. `Executor::run` does
+/// no end-of-run eviction, so an emptied slot here is the *mid-run* release: a `None` producer is
+/// dropped the moment its last consumer reads it (or, with no consumer, the moment it finishes)
+/// while a `Ram` producer survives both.
 ///
-/// `consumed` picks the shape, since a reader count has to match the wiring it
-/// describes: wired is `a(mode) → b(Ram)` with readers `[1, 1]` (b reads a, and
-/// a phantom consumer keeps b resident), unwired is two independent producers
-/// with readers `[0, 0]`.
+/// `consumed` picks the shape, since a reader count has to match the wiring: wired is
+/// `a(mode) → b(Ram)` with readers `[1, 1]` (b reads a, and a phantom consumer keeps b
+/// resident), unwired is two independent producers with readers `[0, 0]`.
 #[tokio::test]
 async fn ram_retention_survives_the_last_read_and_none_does_not() {
     for (mode, consumed) in [
@@ -351,8 +346,7 @@ async fn ram_retention_survives_the_last_read_and_none_does_not() {
         let mut prog = ProgramBuilder::default();
         let a = prog.node().cache(mode).outputs(1).lambda(producer()).add();
         let b = prog.node().cache(CacheMode::Ram).outputs(1);
-        // A consumer reads a's 7 and writes 7+1, so b's value says the read
-        // actually landed rather than merely that b ran.
+        // A consumer reads a's 7 and writes 7+1, so b's value says the read landed.
         let (b, readers, expected_b) = if consumed {
             (b.input(a.out(0)).lambda(increment()), [1, 1], 8)
         } else {
@@ -379,10 +373,9 @@ async fn ram_retention_survives_the_last_read_and_none_does_not() {
     }
 }
 
-/// A lambda can name the execution node it is running as — the hook a host-side
-/// sink (an editor value view, a per-node logger) needs to attribute what it
-/// receives. Set per invoke, so two nodes sharing one lambda still report
-/// distinct identities, and cleared once the run is over.
+/// A lambda can name the execution node it is running as — the hook a host-side sink (an editor
+/// value view, a per-node logger) needs to attribute what it receives. Set per invoke, so two
+/// nodes sharing one lambda report distinct identities, and cleared once the run is over.
 #[tokio::test]
 async fn a_lambda_reads_the_execution_node_it_is_running_as() {
     use std::sync::Mutex;
@@ -430,8 +423,7 @@ async fn a_node_seed_demands_its_output_without_retaining_it() {
         ))
         .add();
 
-    // Unseeded root, no consumers: the lambda reads `Skip` and the slot is
-    // reclaimed the instant it's stored.
+    // Unseeded root, no consumers: the lambda reads `Skip` and the slot is reclaimed on store.
     let mut unseeded = prog.runs().readers([0]);
     unseeded.go().await;
     assert_eq!(*seen.lock_unpoisoned(), Some(OutputDemand::Skip));
@@ -456,9 +448,9 @@ async fn a_node_seed_demands_its_output_without_retaining_it() {
 #[tokio::test]
 async fn a_reused_output_with_no_consumers_is_reclaimed_immediately() {
     let mut prog = ProgramBuilder::default();
-    // Only a `Pure` node earns a digest, and the run loop serves a `Reuse` by asking the
-    // cache for the value — so the fixture has to be the coherent state a resolver `Reuse`
-    // implies: a resident snapshot produced under the node's current digest.
+    // Only a `Pure` node earns a digest, and the run loop serves a `Reuse` by asking the cache,
+    // so the fixture is the state a resolver `Reuse` implies: a resident snapshot produced under
+    // the node's current digest.
     let a = prog
         .node()
         .pure()
@@ -521,16 +513,14 @@ async fn reused_consumer_does_not_delay_last_read_reclamation() {
     );
 }
 
-/// A consumer whose digest is unchanged serves its cached value even when the
-/// shared upstream re-ran for a *different* consumer and failed: the reuse verdict
-/// is checked before the errored-dependency skip, so the valid cache is neither
-/// cleared nor blamed for the upstream failure.
+/// A consumer whose digest is unchanged serves its cached value even when the shared upstream
+/// re-ran for a *different* consumer and failed: the reuse verdict precedes the
+/// errored-dependency skip, so the valid cache is neither cleared nor blamed.
 #[tokio::test]
 async fn reuse_survives_failed_upstream_rerun() {
     let mut prog = ProgramBuilder::default();
-    // A succeeds once (with 5), then fails every later invocation. Content-cacheable
-    // throughout — the fixture default is `Impure`, which has no digest and so could
-    // never be the hit under test.
+    // A succeeds once (with 5), then fails every later invocation. Content-cacheable throughout —
+    // the fixture default is `Impure`, which has no digest and could never be the hit under test.
     let a = prog
         .node()
         .pure()
@@ -589,9 +579,8 @@ async fn reuse_survives_failed_upstream_rerun() {
     assert!(run.error(b).is_none(), "B carries no error");
 }
 
-/// Lambda state follows its node by stable id across a recompile, and drops only
-/// when the node's implementation changes — a new function must not inherit the
-/// state its predecessor wrote.
+/// Lambda state follows its node by stable id across a recompile, and drops only when the node's
+/// implementation changes — a new function must not inherit its predecessor's state.
 #[tokio::test]
 async fn reconcile_keeps_lambda_state_until_the_implementation_changes() {
     // (node id, func id) per node.

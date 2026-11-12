@@ -10,13 +10,9 @@ use crate::core::edit::edit_facts::EditFacts;
 use crate::core::edit::step::change::Direction;
 use crate::core::edit::step::reversible::Reversible;
 
-/// The items a selection change toggled: the ones it added and the ones it
-/// dropped, the symmetric difference of the sets before and after. The rubber
-/// band, node and pin clicks, and Esc-deselect all land here: the caller
-/// computes the set it wants and the step keeps what changed, a Shift-click's
-/// one item rather than both whole sets. Toggling is its own inverse, so one
-/// write serves both directions: a step replays against exactly the selection
-/// its apply left.
+/// The items a selection change toggled: the symmetric difference of the sets before and after.
+/// The caller computes the set it wants and the step keeps what changed, a Shift-click's one item
+/// rather than both whole sets. Toggling is its own inverse, so one write serves both directions.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct SetSelection {
     pub(crate) toggled: BTreeSet<ItemId>,

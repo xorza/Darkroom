@@ -62,7 +62,7 @@ fn load_full_example_fits() {
     assert_eq!(pixel, (152.0 / 4_294_967_295.0_f64) as f32);
     assert_close!(f64::from(pixel) * physical_scale, 152.0, 1e-5, "{pixel}");
 
-    // New metadata fields are None for this simple test file
+    // The file states none of these.
     assert!(image.metadata.header.filter.is_none());
     assert!(image.metadata.header.gain.is_none());
     assert!(image.metadata.header.ccd_temp.is_none());

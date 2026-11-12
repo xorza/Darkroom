@@ -1,8 +1,4 @@
-//! Artifact generators for synthetic test images.
-//!
-//! Provides various artifacts commonly found in astronomical images:
-//! - Cosmic rays
-//! - CFA (Bayer) pattern artifacts
+//! Artifact generators for synthetic test images: cosmic rays and CFA (Bayer) pattern artifacts.
 
 use std::ops::Range;
 
@@ -44,10 +40,8 @@ impl CosmicRays {
             let y = (rng.next_f32() * height as f32) as usize;
             let amp = amplitude.start + rng.next_f32() * (amplitude.end - amplitude.start);
 
-            // Single pixel hit (most cosmic rays)
             pixels[y * width + x] += amp;
 
-            // Some cosmic rays have slight bleeding
             if rng.next_f32() > 0.7 {
                 let bleed = amp * 0.15;
                 if x > 0 {
@@ -65,10 +59,8 @@ impl CosmicRays {
     }
 }
 
-/// Add CFA (Bayer) pattern artifacts.
-///
-/// This simulates the checkerboard pattern visible in debayered images
-/// when color channels have different sensitivities.
+/// Scale red by `1 + 0.5·strength` and blue by `1 - 0.3·strength`, the checkerboard a debayered
+/// image shows when its channels differ in sensitivity.
 pub(crate) fn add_bayer_pattern(pixels: &mut Buffer2<f32>, strength: f32, pattern: BayerPattern) {
     let (width, height) = (pixels.width(), pixels.height());
     let r_factor = 1.0 + strength * 0.5;
@@ -105,7 +97,6 @@ mod tests {
 
         assert_eq!(poss.len(), 10);
 
-        // Check that pixels were modified
         let non_zero_count = pixels.iter().filter(|&&p| p > 0.0).count();
         assert!(non_zero_count >= 10);
     }

@@ -1,11 +1,10 @@
 use super::*;
 
-/// A required input left unbound blocks its node, and the verdict travels
-/// down every consumer — so the whole tail of the chain is out of the run
-/// while its sources still stand. The report names the exact port that
-/// failed rather than the node as a whole, and the verdict is stable: what
-/// actually *runs* can differ as pure nodes start reusing their cache, but
-/// the missing set cannot flap.
+/// A required input left unbound blocks its node, and the verdict travels down every consumer —
+/// so the whole tail of the chain is out of the run while its sources still stand. The report
+/// names the exact port that failed rather than the node as a whole, and the verdict is stable:
+/// what *runs* can differ as pure nodes start reusing their cache, but the missing set cannot
+/// flap.
 #[tokio::test]
 async fn required_missing_propagates_downstream() {
     let mut e = TestEngine::over(TestGraph::sample());
@@ -70,10 +69,9 @@ async fn optional_unbound_does_not_propagate() {
     assert!(plan.runnable().contains(&"mult"));
 }
 
-/// Executing counterpart: an optional bind to a gated upstream gates the
-/// consumer chain, so the executor never reads the absent output. Regression
-/// for the worker panicking in `collect_inputs` ("missing output values") —
-/// the planned-only siblings above can't catch it since they never execute.
+/// Executing counterpart: an optional bind to a gated upstream gates the consumer chain, so the
+/// executor never reads the absent output (else the worker panics in `collect_inputs` with
+/// "missing output values"). The planned-only siblings above never execute, so can't catch it.
 #[tokio::test]
 async fn optional_bind_to_gated_upstream_is_gated() {
     let mut e = TestEngine::over(TestGraph::sample());
@@ -88,7 +86,7 @@ async fn optional_bind_to_gated_upstream_is_gated() {
         g.edit_func("mult", |func| func.inputs[1].required = false);
     });
 
-    // Pre-fix, this panicked the worker; now the chain is gated and nothing runs.
+    // The chain is gated and nothing runs.
     let run = e.run_sinks().await;
 
     assert_eq!(run.missing_inputs(), ["Print", "mult", "sum"]);

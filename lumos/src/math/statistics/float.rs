@@ -4,12 +4,9 @@ use std::ops::Sub;
 
 /// What a median or a MAD needs of the type it is measuring.
 ///
-/// One bound rather than a `_f32`/`_f64` pair per operation. Every body in
-/// this module is the same algorithm at two precisions, and monomorphization
-/// gives each width exactly the code the hand-written pair compiled to. Both
-/// widths are needed: the polynomial surface fit in `extract_bg`
-/// works in `f64` throughout, so downcasting its residuals to run a
-/// single-precision path would lose precision inside a fitting loop.
+/// One bound instead of an `_f32`/`_f64` pair per operation. Both widths are needed: the
+/// polynomial surface fit in `extract_bg` works in `f64` throughout, and downcasting its residuals
+/// would lose precision inside a fitting loop.
 pub(crate) trait Float: Copy + Sub<Output = Self> {
     /// The signed integer of the same width: the bits of a value with its sign bit clear order
     /// as `total_cmp` orders the values, and [`Self::map_keys`] makes them so for any value.

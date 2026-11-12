@@ -22,9 +22,9 @@ pub enum ExecError {
 /// A **single node's** run-time failure, reported in that node's one
 /// [`NodeStatus`](crate::exec::report::node_status::NodeStatus) row as
 /// [`NodeExecStatus::Errored`](crate::exec::report::node_status::NodeExecStatus::Errored).
-/// Distinct from [`ExecError`](enum@ExecError) (whole-operation failures): a `RunError` always concerns
-/// exactly one node, so it can't carry a compile/plan failure, and a caller reading a node's row
-/// can't mistake a setup failure for a node's outcome.
+/// Distinct from [`ExecError`](enum@ExecError) (whole-operation failures): a `RunError` always
+/// concerns exactly one node, so a caller reading a node's row can't mistake a setup failure for
+/// a node's outcome.
 ///
 /// It names no node or func: it is always read beside the row's own `NodeId`.
 #[derive(Debug, Error, Clone)]
@@ -45,8 +45,7 @@ pub enum RunError {
     OutputsNotProduced { outputs: Vec<usize> },
     /// A path input holds a [`PathForm::Foreign`](crate::data::path_form::PathForm::Foreign) path,
     /// as a document saved on another system can. Refused before the lambda runs: this system
-    /// would read it as something else, as Windows reads `/data/a.fit` on the current drive, and
-    /// quietly open or write another file.
+    /// would read it as something else, as Windows reads `/data/a.fit` on the current drive.
     #[error("input {idx} names {path:?}, a path this system cannot read as written")]
     ForeignPath { idx: usize, path: String },
     #[error("cancelled before completing")]

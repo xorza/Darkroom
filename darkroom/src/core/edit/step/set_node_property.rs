@@ -11,10 +11,8 @@ use crate::core::edit::step::reversible::Reversible;
 /// One node property, before and after, in a variant of the one property it is about, so a
 /// revert writes a disable flag over a disable flag and never a cache mode over one.
 ///
-/// Emitted by the header badges: a sink's `D` flips `Disabled` (ambient runs
-/// exclude it; an explicit node seed overrides it once); the `R`/`↓` chips
-/// each flip one bit of `RuntimeCache` (the disk bit persists the output so a
-/// reproducible node reloads instead of recomputing).
+/// Emitted by the header badges: the disable badge flips `Disabled`, the cache chips each flip one
+/// bit of `RuntimeCache`.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct SetNodeProperty {
     pub(crate) node_id: NodeId,

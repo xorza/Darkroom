@@ -1,4 +1,4 @@
-//! StorageTier selection, frame loading, and persistent cache sidecars.
+//! Frame loading: the [`StorageTier`] a set fits, and each frame decoded into it.
 
 use std::path::Path;
 

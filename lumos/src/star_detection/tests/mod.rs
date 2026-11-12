@@ -1,7 +1,4 @@
-//! Synthetic tests for star detection algorithms.
-//!
-//! These tests use generated star fields to verify detection accuracy
-//! without requiring real calibration data.
+//! Synthetic tests for star detection: generated star fields, no real calibration data.
 //!
 //! # Where a star-detection test goes
 //!
@@ -104,8 +101,8 @@ fn detected_poss(frame: &SimFrame, config: &StarDetectionConfig) -> Vec<DVec2> {
 /// A compact forward-model detection scenario shared by the pipeline and stage tests.
 ///
 /// Defaults to a clean, brightly-detected uniform field; override fields per test. `frame()`
-/// renders it (applying cosmic-ray / Bayer artifacts via the kept primitives) into a
-/// `SimFrame` whose `image` + `truth.sources` the tests grade against.
+/// renders it, with the cosmic-ray and Bayer artifacts, into a `SimFrame` whose `image` and
+/// `truth.sources` the tests grade against.
 #[derive(Debug, Clone)]
 pub(super) struct Scenario {
     pub(super) size: USize2,

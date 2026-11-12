@@ -62,18 +62,16 @@ use crate::core::document::tie::{TieAngle, TieId};
 use crate::core::document::viewport::Viewport;
 use crate::core::preview_sink;
 
-/// The thing being edited: the authoring `Graph`, the stubs kept beside it,
-/// the editor view metadata positioning both, and the pane layout showing
-/// them. The `Library` they resolve against lives one level up on `App`
-/// (runtime-owned).
+/// The thing being edited: the authoring `Graph`, the stubs kept beside it, the editor view
+/// metadata positioning both, and the pane layout showing them. The `Library` they resolve
+/// against lives one level up on `App`.
 ///
 /// A decoded document is made consistent once, by [`Self::reconcile`] at
 /// load; every edit after keeps it so, and nothing after re-checks it.
 ///
-/// The fields are public because a caller that touches several wants them
-/// borrowed together, and destructuring is what proves they are disjoint —
-/// accessor methods would each borrow the whole `Document` and couldn't be
-/// held at once.
+/// The fields are public because a caller that touches several wants them borrowed together, and
+/// destructuring proves they are disjoint, where accessor methods would each borrow the whole
+/// `Document`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Document {
     /// Holds only nodes the library resolves, with only admitted wiring.
@@ -84,10 +82,8 @@ pub(crate) struct Document {
     pub(crate) stubs: Stubs,
     /// Places every graph node and every stub.
     pub(crate) main_view: GraphView,
-    /// The pane arrangement: open tabs grouped into split panes, plus
-    /// the focused group. Persisted like the rest of the view state, and
-    /// mutated only through a `DockOperation` — none of which is undoable, so
-    /// Ctrl+Z walks past a tab switch to the last graph edit.
+    /// The pane arrangement: open tabs grouped into split panes, plus the focused group.
+    /// Mutated only through a `DockOperation`, none of which is undoable.
     #[serde(default = "new_layout", with = "layout_file")]
     pub(crate) layout: DockState<TabRef>,
 }
@@ -104,10 +100,9 @@ impl Default for Document {
 }
 
 impl Document {
-    /// Drop a graph node from the document: the graph, its placement, its
-    /// selection membership and its viewer and inspector tabs. Every removal —
-    /// an edit, an undo or a redo — comes through here, so no tab outlives its
-    /// node.
+    /// Drop a graph node from the document: the graph, its placement, its selection membership
+    /// and its viewer and inspector tabs. Every removal (an edit, an undo or a redo) comes through
+    /// here, so no tab outlives its node.
     pub(crate) fn remove_node(&mut self, node_id: NodeId) -> DetachedNode {
         self.unplace(node_id);
         self.close_tabs(node_id);
@@ -165,15 +160,10 @@ impl Document {
         }
     }
 
-    /// [`Self::holds_node`] narrowed to preview nodes in the graph — what
-    /// retains the value one published.
-    ///
-    /// Deliberately stricter than the shared rule rather than accidentally
-    /// different, which is why it is spelled as a narrowing: the preview store
-    /// holds textures up to 8192² RGBA8, so a value whose key is not a live
-    /// preview node releases at the next sweep instead of riding on the
-    /// node's own lifetime. One node backs one on-screen card, so the node's
-    /// own id answers for the card without anything else alongside it.
+    /// [`Self::holds_node`] narrowed to preview nodes in the graph, which retains the value one
+    /// published. Deliberately stricter than the shared rule: the preview store holds textures up
+    /// to 8192² RGBA8, so a value whose key is not a live preview node releases at the next sweep
+    /// instead of riding on the node's own lifetime.
     pub(crate) fn holds_preview_node(&self, node_id: NodeId) -> bool {
         is_preview_node(&self.graph, node_id)
     }
@@ -359,8 +349,7 @@ fn reattach_stubs(
             node_id: record.node_id(),
         });
     }
-    // Wiring after every node, so an edge between two stubs that both
-    // resolve finds its other end whichever record holds it.
+    // Wiring after every node, so an edge between two resolving stubs finds its other end.
     for record in &resolving {
         let node_id = record.node_id();
         for entry in record.bindings() {
@@ -530,8 +519,7 @@ fn is_preview_node(graph: &CoreGraph, node_id: NodeId) -> bool {
         .is_some_and(preview_sink::is_func)
 }
 
-/// A fresh dock: one pane showing the graph. `Graph` is the pinned
-/// tab, so it refuses to close and the tree is never empty.
+/// A fresh dock: one pane showing the graph, the pinned tab, so the tree is never empty.
 fn new_layout() -> DockState<TabRef> {
     DockState::new(TabRef::Graph)
 }

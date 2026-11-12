@@ -19,8 +19,7 @@ pub(super) struct Neighbor {
 /// One subtree of the implicit layout: the `idxs` range `[start, end)` it occupies, and the
 /// depth it hangs at — which is what fixes its split dimension.
 ///
-/// Carried as a unit by both walks over the tree, the iterative build and the recursive descent,
-/// so neither passes three bare `usize`s that nothing but their order distinguishes.
+/// Shared by the iterative build and the recursive descent.
 #[derive(Debug, Clone, Copy)]
 struct Subtree {
     start: usize,
@@ -72,18 +71,12 @@ impl Subtree {
 
 /// A 2D k-d tree for efficient spatial queries on star positions.
 ///
-/// Uses a flat array layout where the tree structure is implicit in the
-/// permuted index array. Each level alternates split dimension (x, y).
-/// The median element of each range is the node; left/right children
-/// occupy the sub-ranges before/after the median.
-///
-/// This layout eliminates per-node child pointers, improves cache locality,
-/// and enables iterative construction.
+/// The structure is implicit in a permuted index array: each level alternates split dimension
+/// (x, y), the median of each range is the node, and its children occupy the sub-ranges either
+/// side. No per-node pointers, better cache locality, iterative construction.
 #[derive(Debug)]
 pub(crate) struct KdTree {
-    /// Permuted point indices forming the implicit tree structure.
-    /// For a range [start, end), the node is at index `mid = (start + end) / 2`.
-    /// Left subtree is [start, mid), right subtree is [mid+1, end).
+    /// Permuted point indices forming the implicit tree: see [`Subtree`].
     idxs: Vec<usize>,
     points: Vec<DVec2>,
 }
@@ -91,9 +84,8 @@ pub(crate) struct KdTree {
 impl KdTree {
     /// Build a k-d tree over `points`, which it keeps; `None` for no points.
     ///
-    /// Uses iterative median-split construction with `select_nth_unstable` for O(n log n)
-    /// partitioning without full sorting. Takes the points by value: every caller builds them for
-    /// the tree, so the tree holds that one copy rather than a second.
+    /// Median-split by `select_nth_unstable`, O(n log n) without full sorting. Takes the points by
+    /// value: every caller builds them for the tree, so the tree holds that one copy.
     pub(super) fn build(points: Vec<DVec2>) -> Option<Self> {
         if points.is_empty() {
             return None;
@@ -145,8 +137,7 @@ impl KdTree {
 
     /// Find the single nearest neighbor to a query point.
     ///
-    /// More efficient than `k_nearest(query, 1)` — uses a scalar best-distance
-    /// tracker with no heap or Vec allocation.
+    /// Cheaper than `k_nearest(query, 1)`: a scalar best-distance tracker, no heap.
     pub(super) fn nearest_one(&self, query: DVec2) -> Option<Neighbor> {
         let mut best = NearestOne(Neighbor {
             idx: 0,
@@ -158,8 +149,7 @@ impl KdTree {
 
     /// Find all point indices within a given radius, appending to a buffer.
     ///
-    /// The buffer is cleared before use. This avoids allocations when
-    /// called repeatedly in a loop. The results are in traversal order, not sorted.
+    /// The buffer is cleared first; results are in traversal order, not sorted.
     pub(super) fn radius_idxs_into(&self, query: DVec2, radius: f64, idxs: &mut Vec<usize>) {
         idxs.clear();
         let mut within = WithinRadius {
@@ -174,9 +164,8 @@ impl KdTree {
     /// is already further off than anything the visitor would still accept. Start from
     /// [`Subtree::root`].
     ///
-    /// Which points are kept, and how far "still accept" reaches, are the visitor's business — the
-    /// descent knows neither, which is what lets one traversal serve k-nearest, nearest-one and
-    /// radius search.
+    /// Which points are kept, and how far "still accept" reaches, are the visitor's business, so
+    /// one traversal serves k-nearest, nearest-one and radius search.
     fn descend(&self, subtree: Subtree, query: DVec2, visitor: &mut impl Descent) {
         if subtree.len() == 0 {
             return;
@@ -219,14 +208,13 @@ impl KdTree {
 
 /// What a [`KdTree::descend`] is collecting, and how far it still has to look to collect it.
 ///
-/// The three queries differ only in these two answers, so they are what the descent takes instead
-/// of being written into three copies of it.
+/// The three queries differ only in these two answers.
 trait Descent {
     /// Offer the point at `idx`, `dist_sq` away from the query. Keeping it is the visitor's call.
     fn visit(&mut self, idx: usize, dist_sq: f64);
 
     /// Squared distance past which no point can still be wanted, so a subtree whose split plane is
-    /// at least that far away need not be entered. `INFINITY` while nothing bounds the search yet.
+    /// farther away than that need not be entered. `INFINITY` while nothing bounds the search yet.
     fn prune_radius_sq(&self) -> f64;
 }
 
@@ -285,8 +273,7 @@ impl Descent for WithinRadius<'_> {
 /// A bounded max-heap for k-nearest neighbor search: the `k` smallest distances seen so far, with
 /// the largest of them at the root, so the one to evict is always in hand.
 ///
-/// Held in the caller's output buffer, empty at the start: the tree is queried per star, and a
-/// buffer the caller reuses allocates once, not per query.
+/// Held in the caller's output buffer, empty at the start, so a reused buffer allocates once.
 #[derive(Debug)]
 struct BoundedMaxHeap<'a> {
     /// The caller's `k`. Not `items.capacity()`, which is whatever the reused buffer grew to.

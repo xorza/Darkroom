@@ -34,7 +34,7 @@ use glam::USizeVec2;
 #[derive(Debug)]
 pub(crate) struct BgMesh {
     pub(crate) stats: Buffer2<TileStats>,
-    /// Precomputed X-coordinates of tile centers (one per tile column).
+    /// X-coordinates of tile centres, one per tile column.
     pub(crate) centers_x: Vec<f32>,
     pub(crate) centers_y: Vec<f32>,
     tile_size: usize,
@@ -50,11 +50,10 @@ impl BgMesh {
         self.measured[ty * self.stats.width() + tx]
     }
 
-    /// Create an uninitialized `BgMesh` with preallocated buffers.
+    /// A `BgMesh` with preallocated, unfilled buffers.
     ///
-    /// `tile_size` is clamped to the image dimensions rather than panicking on a small image:
-    /// a sub-tile_size image yields a coarse (possibly single-tile) grid, which the spline
-    /// interpolation path handles correctly (1-tile dimensions degenerate to a constant fill).
+    /// `tile_size` is clamped to the image, so a small image yields a coarse, possibly
+    /// single-tile grid, which the spline interpolation degenerates to a constant fill.
     ///
     /// Constructed and populated only by [`MeshWorkspace`](mesh_workspace::MeshWorkspace).
     fn new_uninit(size: USize2, tile_size: usize) -> Self {

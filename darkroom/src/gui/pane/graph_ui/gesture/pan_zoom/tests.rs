@@ -7,9 +7,8 @@ use crate::gui::pane::graph_ui::internals::CanvasHarness;
 
 #[test]
 fn node_bounds_uses_cached_sizes_and_falls_back_to_points() {
-    // Regression for "Show all leaves nodes offscreen": node extents
-    // must come from the cross-frame size cache, because a culled
-    // (off-screen) node records no response the frame the button is
+    // Regression for "Show all leaves nodes offscreen": node extents must come from the
+    // cross-frame size cache, as a culled node records no response the frame the button is
     // pressed. Three nodes:
     //   a: (0,0) 150×80      — on-screen, size cached
     //   b: (1000,500) 200×100 — culled, but its size is still cached

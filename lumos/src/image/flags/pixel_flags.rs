@@ -153,8 +153,8 @@ impl PixelFlags {
         self.bits
     }
 
-    /// Whether the pixel at `idx` carries any flag: a stage that measures only the pixels of a
-    /// plain measurement leaves it out.
+    /// Whether the pixel at `idx` carries any flag: a stage that measures only unflagged pixels
+    /// leaves it out.
     #[inline]
     pub(crate) fn is_flagged(&self, idx: usize) -> bool {
         self.bits.pixels()[idx] != 0

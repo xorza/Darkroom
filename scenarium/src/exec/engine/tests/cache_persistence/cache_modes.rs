@@ -159,9 +159,8 @@ async fn assert_mode_behavior(mode: CacheMode) {
     }
 }
 
-/// The four cache modes produce four distinct reuse / retention /
-/// persistence behaviors — the parameterized proof that the mode actually
-/// drives the engine.
+/// The four cache modes produce four distinct reuse / retention / persistence behaviors — the
+/// parameterized proof that the mode drives the engine.
 #[tokio::test]
 async fn cache_mode_matrix() {
     for mode in [
@@ -174,11 +173,10 @@ async fn cache_mode_matrix() {
     }
 }
 
-/// `None` is storage-only: it never taints downstream reproducibility.
-/// `A(None) → B(Disk)` — B still has a content digest, so it persists and,
-/// on reopen, is served from disk with A cut (not recomputed), exactly as if
-/// A were an ordinary cached node. Contrast an `Impure` A, which *would*
-/// strip B of its digest and force both to rerun.
+/// `None` is storage-only: it never taints downstream reproducibility. `A(None) → B(Disk)` — B
+/// still has a content digest, so it persists and, on reopen, is served from disk with A cut,
+/// exactly as if A were an ordinary cached node. An `Impure` A, by contrast, would strip B of its
+/// digest and force both to rerun.
 #[tokio::test]
 async fn none_upstream_does_not_disable_downstream_disk_cache() {
     let dir = TempDir::new("none-orthogonal");
@@ -208,9 +206,8 @@ async fn none_upstream_does_not_disable_downstream_disk_cache() {
         "B(Disk) persists despite its None upstream"
     );
 
-    // Reopen: B is a disk hit, so A(None) — read only by the reused B — is
-    // cut, not recomputed. Setting A to None disabled neither B's cache nor
-    // A's own reuse-cut.
+    // Reopen: B is a disk hit, so A(None) — read only by the reused B — is cut. Setting A to
+    // None disabled neither B's cache nor A's own reuse-cut.
     let mut e = e.reopen();
     let reopen = e.run_sinks().await;
     assert_eq!(reopen.cached(), ["b"], "B reloads from disk on reopen");
@@ -246,11 +243,10 @@ async fn disabling_ram_retention_releases_resident_value_on_install() {
     }
 }
 
-/// Turning a node's disk bit on publishes its resident value straight away,
-/// instead of leaving it off disk until the node next recomputes — a run that
-/// resolves to a RAM reuse never reaches the executor's store, so without the
-/// flush a `Ram → Both` node would stay absent from the store for as long as
-/// its inputs held still.
+/// Turning a node's disk bit on publishes its resident value straight away, instead of leaving it
+/// off disk until the node next recomputes — a run that resolves to a RAM reuse never reaches the
+/// executor's store, so a `Ram → Both` node would stay absent from the store while its inputs
+/// held still.
 ///
 /// And only the nodes the *installed program* calls disk-backed: `sum` is named
 /// by the same flush and stays memory-only, so the flush must skip it.
@@ -300,8 +296,8 @@ async fn enabling_disk_persists_the_resident_value_without_a_run() {
         "a named node the program still calls memory-only is skipped"
     );
 
-    // Reopening over the same store — empty RAM — serves mult from that blob,
-    // which is what proves the flush wrote the value and not an empty frame.
+    // Reopening over the same store — empty RAM — serves mult from that blob, which proves the
+    // flush wrote the value and not an empty frame.
     let mut e = e.reopen();
     let reopen = e.run_sinks().await;
     assert_eq!(
@@ -354,9 +350,8 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
     use crate::internals::blob::{BLOB_TYPE, Blob, BlobCodec};
     use crate::library::type_entry::TypeEntry;
 
-    // A pure, disk-persisted sink emitting a custom `Blob`. The type's codec
-    // is registered only when `with_codec` — and the program takes its codecs
-    // from this same library, so that one flag decides both.
+    // A pure, disk-persisted sink emitting a custom `Blob`. The type's codec is registered only
+    // when `with_codec`, and the program takes its codecs from this same library.
     let decodes = Calls::default();
     let build = |with_codec: bool, recompute: &Calls| {
         let recompute = recompute.clone();
@@ -375,8 +370,8 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
                 TypeEntry::custom("Blob")
             },
         );
-        // A `Custom` value has no `compute` shape — that writes a
-        // `ConstValue` — so this body counts itself.
+        // A `Custom` value has no `compute` shape (that writes a `ConstValue`), so this body
+        // counts itself.
         g.add("make_blob", move |n: NodeSpec| {
             n.pure()
                 .sink()

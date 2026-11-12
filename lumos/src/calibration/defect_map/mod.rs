@@ -10,22 +10,16 @@
 //!
 //! Uses robust per-color σ estimation led by **Median Absolute Deviation (MAD)**:
 //!
-//! 1. **Why MAD instead of standard deviation?**
-//!    Standard deviation is heavily influenced by outliers - the very pixels we're
-//!    trying to detect. MAD is robust: even if 49% of pixels are outliers, the
-//!    median (and thus MAD) remains accurate.
+//! 1. **MAD, not standard deviation:** the standard deviation is pulled by the very outliers being
+//!    detected; MAD stays accurate with up to 49% of pixels outliers. σ ≈ 1.4826 × MAD for a
+//!    normal distribution (1/Φ⁻¹(0.75)).
 //!
-//! 2. **The 1.4826 constant (MAD to σ conversion):**
-//!    For a normal distribution, MAD ≈ 0.6745 × σ. Therefore σ ≈ 1.4826 × MAD.
-//!    This constant comes from the inverse of the 75th percentile of the standard
-//!    normal distribution: 1/Φ⁻¹(0.75) ≈ 1.4826.
-//!
-//! 3. **CFA-aware correction:**
+//! 2. **CFA-aware correction:**
 //!    On raw CFA data, hot pixels are replaced with the median of their neighbours under the same
 //!    filter — for Bayer, the same phase, so a green in the red rows from greens in the red rows —
 //!    which preserves the CFA pattern for demosaicing and carries no Gr/Gb imbalance into a repair.
 //!
-//! 4. **Broad dark structure:**
+//! 3. **Broad dark structure:**
 //!    Per-color tile skies (each tile's Pearson mode, see [`ColorMesh`]) are bilinearly
 //!    interpolated into a smooth dark-current model before thresholding, which keeps isolated
 //!    pixels and same-color clusters as positive residuals. A pixel the model calls hot is
@@ -33,11 +27,11 @@
 //!    ([`RingReference`]), so amp glow that curves faster than the tiles, or rises past the outer
 //!    ones, does not become a defect.
 //!
-//! 5. **Adaptive sampling for large images:**
+//! 4. **Adaptive sampling for large images:**
 //!    Exact median computation is slow on full-resolution sensors. Each color receives up to 100K
 //!    samples, distributed across its CFA phases and the full sensor rows and columns.
 //!
-//! 6. **Quantization-aware zero-MAD handling:**
+//! 5. **Quantization-aware zero-MAD handling:**
 //!    A perfectly stable master can have zero MAD because its samples occupy one quantization
 //!    level. The σ floor follows the RAW ADC step propagated through master-frame stacking, with
 //!    floating-point resolution as the fallback when source quantization is unknown.

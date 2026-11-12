@@ -41,10 +41,7 @@ impl<'a> RowRing<'a> {
     }
 }
 
-/// A borrowed square 2D convolution kernel, stored row-major.
-///
-/// Bundles the coefficients with the side length they are laid out by, so the two
-/// cannot disagree, and derives the centre offset every tap is measured from.
+/// A borrowed square 2D convolution kernel, row-major, with the side length it is laid out by.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Kernel2d<'a> {
     weights: &'a [f32],

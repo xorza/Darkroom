@@ -18,7 +18,7 @@ use glam::USizeVec2;
 
 /// Cosmic-ray detection holds three full-frame masks at its peak, one bit per pixel each.
 ///
-/// As `Vec<bool>` that is 113 MB on a 6144² mono frame against 14 MB packed — enough to decide
+/// As `Vec<bool>` that is 108 MiB on a 6144² mono frame against 13.5 MiB packed — enough to decide
 /// whether a stack fits its budget, and completely invisible to the correctness tests, which run
 /// on frames small enough that either choice is free.
 #[test]
@@ -45,9 +45,9 @@ fn cosmic_ray_masks_stay_one_bit_per_pixel() {
 /// The mono detector's `f32` scratch is five frame-sized planes, *whatever* `max_iterations` is —
 /// it is allocated on the first iteration and reused by the rest.
 ///
-/// This is the side of the detector's footprint that dwarfs the masks above: 720 MB on a 6144²
-/// frame against their 14 MB. A plane added back (or a stage that allocates its own again) costs
-/// 144 MB a piece and would otherwise show up only as a stack that no longer fits its budget.
+/// This is the side of the detector's footprint that dwarfs the masks above: 720 MiB on a 6144²
+/// frame against their 13.5 MiB. A plane added back (or a stage that allocates its own again)
+/// costs 144 MiB a piece and would otherwise show up only as a stack that no longer fits its budget.
 #[test]
 fn cosmic_ray_float_scratch_is_five_frame_planes() {
     let size = USize2::new(64, 64);

@@ -263,8 +263,7 @@ fn filter_fwhm_outliers_over_every_case() {
 }
 
 /// Deduplication over every geometry that mattered, as one table, through both the brute-force
-/// and the spatial-hash path — the dispatcher picks by star count, so neither path alone would
-/// see every row.
+/// reference and the cell pass.
 ///
 /// Each case pins the *surviving fluxes in order*. Fluxes are distinct within every case, so the
 /// expected sequence identifies exactly which stars survived and in what order.

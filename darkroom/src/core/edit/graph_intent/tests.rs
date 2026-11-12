@@ -51,9 +51,8 @@ fn drag(members: &[DragStart], offset: Vec2) -> GraphIntent {
     }
 }
 
-/// Commit a whole list of intents the way one frame's drain does — each built
-/// against the document the one before it left — and hand back the steps in
-/// the order they applied, so a test can undo the lot by walking them back.
+/// Commit a list of intents as one frame's drain does, each against the document the one before
+/// left, and hand back the steps in the order applied.
 #[track_caller]
 fn commit_all(
     document: &mut Document,
@@ -83,8 +82,7 @@ fn subscribe(emitter: NodeId, subscriber: NodeId, to: bool) -> GraphIntent {
     }
 }
 
-/// A plain click always lifts its node to the front; a Shift-click that
-/// *removes* a node must not, or deselecting would jump it forward. A tie has
+/// A plain click always raises its node; a Shift-click that *removes* a node must not. A tie has
 /// no depth, so a click on one only selects.
 #[test]
 fn click_raises_unless_shift_deselects() {
@@ -152,12 +150,9 @@ fn click_raises_unless_shift_deselects() {
     }
 }
 
-/// Removing a node and undoing it is the one edit that has to put back state
-/// from three places at once — the graph record with every edge that touched
-/// the node, its placement, and its selection membership. All three come back
-/// exactly, which is what lets the step assert its own removal against them.
-/// A stub goes and comes back the same way, to the stubs rather than the
-/// graph.
+/// Undoing a node removal puts back state from three places: the graph record with every edge
+/// that touched the node, its placement, and its selection membership, which lets the step
+/// assert its own removal against them. A stub comes back the same way, to the stubs.
 #[test]
 fn a_removed_node_comes_back_whole() {
     let mut fixture = DocumentFixture::default();
@@ -210,9 +205,7 @@ fn a_removed_node_comes_back_whole() {
         .validate()
         .expect("an undone removal leaves a valid document");
 
-    // Redo takes it out again — and the step checks what came out against
-    // what it restored, so a divergence would fail here rather than silently
-    // losing an edge on the next undo.
+    // Redo takes it out again; the step checks what came out against what it restored.
     step.apply(&mut document);
     assert!(document.graph.find(a).is_none());
     assert_eq!(document.graph.bindings.get(&edge), None);
@@ -240,11 +233,9 @@ fn a_removed_node_comes_back_whole() {
         .expect("an undone stub removal leaves a valid document");
 }
 
-/// A wire that goes leaves its input on the input's declared default, so a
-/// preset input shows its pick again: cut on its own, dropped from a
-/// duplicate, or gone with the node that fed it. An input with no default is
-/// left unbound, and clearing a constant leaves it unbound too. Undo puts
-/// each wire back, and redo the default.
+/// A wire that goes leaves its input on the declared default: cut on its own, dropped from a
+/// duplicate, or gone with the node that fed it. An input with no default is left unbound, and
+/// clearing a constant leaves it unbound too. Undo puts each wire back, and redo the default.
 #[test]
 fn a_wire_that_goes_leaves_its_input_on_its_default() {
     let mut fixture = DocumentFixture::default();
@@ -461,14 +452,10 @@ fn a_new_node_takes_a_free_name() {
     );
 }
 
-/// A new node's depth is fixed when its step is built, not when the step is
-/// written — so replaying history puts it back where it was rather than in
-/// front of whatever has arrived since.
-///
-/// The divergence is only visible once a later entry restacks something:
-/// add `x` at the front, raise `y` past it, then walk both back and forward
-/// again. Reading `front_z()` at write time would redo the add at `y`'s depth
-/// and swap the two in the paint order.
+/// A new node's depth is fixed when its step is built, not written, so replaying history puts it
+/// back where it was. Visible once a later entry restacks something: add `x` at the front, raise
+/// `y` past it, then walk both back and forward. Reading `front_z()` at write time would redo the
+/// add at `y`'s depth and swap the two in the paint order.
 #[test]
 fn redo_restores_the_depth_an_add_had() {
     let mut fixture = DocumentFixture::default();
@@ -557,10 +544,9 @@ fn raising_the_frontmost_item_records_no_step() {
     assert_eq!(document.main_view.node_placements[&low].z, 4);
 }
 
-/// `a -> b` inside the selection, `c -> b` crossing out of it: the fixture the
-/// two duplicate tests share, so the only thing that differs between them is
-/// their `IncomingWires`. `b` also carries a Const on input 1, and `b`
-/// subscribes to `a`'s event, inside, and to `c`'s, crossing out.
+/// `a -> b` inside the selection, `c -> b` crossing out of it, shared by the two duplicate tests,
+/// which differ only in `IncomingWires`. `b` also carries a Const on input 1, and subscribes to
+/// `a`'s event, inside, and to `c`'s, crossing out.
 #[derive(Debug)]
 struct CrossingWire {
     document: Document,
@@ -612,10 +598,9 @@ fn clone_of(document: &Document, origin: Vec2, originals: &BTreeSet<NodeId>) -> 
         .unwrap_or_else(|| panic!("a clone offset from {origin:?}"))
 }
 
-/// Duplicating expands into ordinary intents — one add per clone, one
-/// `SetInput` per edge *inside* the set, the internal subscriptions, then the
-/// selection swap — so the whole thing commits through the same gate as any
-/// other edit and undoes as one batch.
+/// Duplicating expands into ordinary intents (one add per clone, one `SetInput` per edge
+/// *inside* the set, the internal subscriptions, then the selection swap), so it commits through
+/// the same gate as any other edit and undoes as one batch.
 #[test]
 fn duplicate_clones_wiring_and_selects_the_copies() {
     let CrossingWire {
@@ -633,8 +618,7 @@ fn duplicate_clones_wiring_and_selects_the_copies() {
         .validate()
         .expect("a duplicate leaves a valid document");
 
-    // Two fresh nodes, offset from their originals, and they are what is
-    // selected now.
+    // Two fresh nodes, offset from their originals, and selected now.
     let clones: BTreeSet<NodeId> = document
         .graph
         .iter()
@@ -650,9 +634,8 @@ fn duplicate_clones_wiring_and_selects_the_copies() {
     let a_clone = clone_of(&document, Vec2::ZERO, &originals);
     let b_clone = clone_of(&document, Vec2::new(100.0, 0.0), &originals);
 
-    // The internal edge is recreated against the clones, the const copies
-    // verbatim, the edge from outside the set is dropped, and the internal
-    // subscription is recreated.
+    // The internal edge and subscription are recreated against the clones, the const copies
+    // verbatim, and the edge from outside the set is dropped.
     assert_eq!(
         document.graph.bindings.get(&InputPort::new(b_clone, 0)),
         Some(&Binding::wire(a_clone, 0)),
@@ -677,8 +660,7 @@ fn duplicate_clones_wiring_and_selects_the_copies() {
         "the subscription to unselected c is dropped"
     );
 
-    // One batch, so one undo: every clone and its wiring goes, and the
-    // selection is the one the duplicate replaced.
+    // One batch, so one undo.
     undo_all(&mut document, &steps);
     assert_eq!(document.graph.len(), 3, "only the originals are left");
     assert_eq!(
@@ -694,8 +676,7 @@ fn duplicate_clones_wiring_and_selects_the_copies() {
         .validate()
         .expect("an undone duplicate leaves a valid document");
 
-    // ...and redo replays it forward: each clone is attached again, then the
-    // edges between them, so nothing is bound to a node that isn't back yet.
+    // Redo attaches each clone, then the edges between them.
     for step in &steps {
         step.apply(&mut document);
     }
@@ -713,11 +694,9 @@ fn duplicate_clones_wiring_and_selects_the_copies() {
         .expect("a redone duplicate leaves a valid document");
 }
 
-/// The same selection over the same crossing wire, with `IncomingWires::Keep`:
-/// the clone keeps the wire from the producer outside the set, and the
-/// subscription to the emitter outside it — each on the original, since it
-/// wasn't copied. That is the only difference from the case above, where both
-/// are dropped.
+/// The same selection with `IncomingWires::Keep`: the clone keeps the wire from the producer
+/// outside the set and the subscription to the emitter outside it, each on the original, where
+/// the case above drops both.
 #[test]
 fn duplicate_keeps_external_producers_on_request() {
     let CrossingWire {
@@ -824,9 +803,8 @@ fn invalid_viewports_are_dropped_before_mutation() {
     document.validate().unwrap();
 }
 
-/// Each one-step edit replays exactly: its revert gives back the whole
-/// document as it was before the commit, and its apply the whole document
-/// after it — not just the field it is about.
+/// Each one-step edit replays exactly: its revert gives back the whole document as before the
+/// commit, and its apply the whole document after it, not just the field it is about.
 #[test]
 fn each_edit_reverts_and_redoes_the_whole_document() {
     let mut fixture = DocumentFixture::default();
@@ -974,10 +952,8 @@ fn set_node_property_commits_and_reverts() {
     assert_eq!(document.graph.find(id).unwrap().cache, CacheMode::None);
     assert!(!document.graph.find(id).unwrap().disabled);
 
-    // Both properties ride the one `SetNodeProperty` path. A representative flip
-    // each (the cache header chips: None→Both/Ram/Disk; the disable chip: →on),
-    // committing then reverting — each iteration returns the node to its defaults,
-    // so the step's captured `from` is always None / enabled.
+    // A representative flip of each property, committed then reverted, so each iteration returns
+    // the node to its defaults and the step's captured `from` is always None / enabled.
     let cases = [
         NodeProperty::RuntimeCache(CacheMode::Both),
         NodeProperty::RuntimeCache(CacheMode::Ram),
@@ -1073,9 +1049,8 @@ fn commit_rejects_cycle_forming_bind() {
     );
 }
 
-/// Commit `intent`, which the gate refuses as `expected`, and check that the
-/// refusal left `document` exactly as it was: the gate exists to keep a
-/// malformed payload out of the write half.
+/// Commit `intent`, which the gate refuses as `expected`, and check the refusal left `document`
+/// exactly as it was.
 #[track_caller]
 fn assert_refused(
     document: &mut Document,
@@ -1095,9 +1070,8 @@ fn assert_refused(
 
 #[test]
 fn insertions_reusing_an_identity_are_refused_instead_of_panicking() {
-    // A live id would otherwise abort the process inside the write half, on
-    // `Graph::insert`'s own duplicate-id panic, and a nil one names nothing a
-    // widget could have read. Refusing at the gate states both.
+    // A live id would otherwise abort inside the write half on `Graph::insert`'s duplicate-id
+    // panic, and a nil one names nothing a widget could have read.
     let mut fixture = DocumentFixture::default();
     let live = fixture.node_at(Vec2::ZERO);
     let stub = fixture.stub_at(Vec2::new(100.0, 0.0));
@@ -1146,10 +1120,9 @@ fn insertions_reusing_an_identity_are_refused_instead_of_panicking() {
 
 #[test]
 fn malformed_payloads_are_refused_before_they_can_invalidate_the_document() {
-    // Every case here would apply cleanly and leave a document that
-    // `Document::validate` rejects, or trip an assert inside the graph — which,
-    // because saving only validates in debug builds, means a project that
-    // writes fine and won't reopen.
+    // Every case here would apply cleanly and leave a document `Document::validate` rejects, or
+    // trip an assert inside the graph; saving only validates in debug builds, so it would write
+    // fine and not reopen.
     let probe = internals::stub_func(FuncId::unique(), "probe")
         .input(FuncInput::optional("a", DataType::Int))
         .output(FuncOutput::new("out", DataType::Int))
@@ -1268,11 +1241,9 @@ fn malformed_payloads_are_refused_before_they_can_invalidate_the_document() {
 
 #[test]
 fn stale_references_still_refuse_quietly() {
-    // Widgets emit identities they read out of the live document, so the
-    // only thing they get wrong is staleness — an anchor removed between
-    // the gesture starting and the intent draining. Those stay silent;
-    // turning them into reported failures would spam the status bar on
-    // ordinary use.
+    // Widgets read identities out of the live document, so they only get staleness wrong: an
+    // anchor removed between the gesture starting and the intent draining. Those stay silent, as
+    // reporting them would spam the status bar on ordinary use.
     let mut fixture = DocumentFixture::default();
     let live = fixture.node_at(Vec2::ZERO);
     let mut document = fixture.document;
@@ -1337,11 +1308,9 @@ fn stale_references_still_refuse_quietly() {
 
 #[test]
 fn selection_and_move_drop_members_whose_widget_is_gone() {
-    // The rubber band and a group drag both snapshot identities when the
-    // gesture starts, and undo runs before the gesture input stage — so a
-    // member can disappear mid-gesture. Recording it verbatim would leave
-    // `selected` naming an item the view can't render, which is exactly
-    // `GraphViewValidationError::MissingSelectedItem`.
+    // The rubber band and a group drag snapshot identities at gesture start, and undo runs before
+    // the gesture input stage, so a member can disappear mid-gesture. Recording it verbatim would
+    // leave `selected` naming an absent item: `GraphViewValidationError::MissingSelectedItem`.
     let mut fixture = DocumentFixture::default();
     let live = fixture.node_at(Vec2::ZERO);
     let mut document = fixture.document;
@@ -1390,10 +1359,8 @@ fn selection_and_move_drop_members_whose_widget_is_gone() {
     document.validate().expect("document stays valid");
 }
 
-/// A wire onto an input its func declares const-only is refused at the gate,
-/// on an existing node and as an insertion's seed alike — the canvas never
-/// offers one, and a graph holding it fails every compile. A constant on the
-/// same input commits.
+/// A wire onto an input its func declares const-only is refused at the gate, on an existing node
+/// and as an insertion's seed alike; a constant on the same input commits.
 #[test]
 fn a_wire_onto_a_const_only_input_is_refused() {
     let knob_func = internals::stub_func(FuncId::unique(), "knob")
@@ -1447,11 +1414,9 @@ fn a_wire_onto_a_const_only_input_is_refused() {
     assert!(matches!(constant, Ok(Some(_))), "{constant:?}");
 }
 
-/// Every index an intent writes is held to the node's declaration: the probe
-/// declares one input, one output and one event, so index 0 of each commits
-/// and index 1 — the first past the end — is refused, on an existing node and
-/// on an insertion's seed alike. Clearing an undeclared input is not a write,
-/// so it is not held to anything.
+/// Every index an intent writes is held to the node's declaration: the probe declares one input,
+/// one output and one event, so index 0 of each commits and index 1 is refused, on an existing
+/// node and on an insertion's seed alike. Clearing an undeclared input is not a write.
 #[test]
 fn indices_past_the_declaration_are_refused() {
     let probe = internals::stub_func(FuncId::unique(), "probe")
@@ -1593,10 +1558,9 @@ fn tied() -> Tied {
     }
 }
 
-/// Each tie edit lands as one `SetTies` step, a tie's move as a
-/// `SetPositions`, and each leaves the view as the case says; a revert puts
-/// the document back exactly. A tie edit dirties the document and leaves the
-/// node set and the geometry caches alone.
+/// Each tie edit lands as one `SetTies` step, a tie's move as a `SetPositions`; a revert puts the
+/// document back exactly. A tie edit dirties the document and leaves the node set and the
+/// geometry caches alone.
 #[test]
 fn tie_edits_apply_and_revert() {
     let Tied {
@@ -1769,13 +1733,11 @@ fn releasing_a_ties_last_wire_removes_the_tie() {
     assert_eq!(document, before);
 }
 
-/// A wire is both of its ends: rewiring `c.0` from `a` to `b` drops the route
-/// of `ac`, while `shared` stays for `bc`; cutting `b.0` drops the route of
-/// `ab`, while `held` stays for `tick`; unsubscribing
-/// `tick` drops its route. A bind to the same output changes nothing, so it
-/// records no step and keeps the route. Removing `a` ends `ab`, `ac` and
-/// `tick`: `held`, which only they held, goes, and `shared` stays for `bc`.
-/// Each revert brings all of it back.
+/// A wire is both of its ends: rewiring `c.0` from `a` to `b` drops the route of `ac`, while
+/// `shared` stays for `bc`; cutting `b.0` drops the route of `ab`, while `held` stays for `tick`;
+/// unsubscribing `tick` drops its route. A bind to the same output records no step and keeps the
+/// route. Removing `a` ends `ab`, `ac` and `tick`: `held`, which only they held, goes, and
+/// `shared` stays for `bc`. Each revert brings all of it back.
 #[test]
 fn wiring_edits_take_the_routes_of_the_wires_they_end() {
     let Tied {
@@ -2078,13 +2040,12 @@ fn tie_intents_refuse_malformed_payloads_and_drop_stale_ones() {
     assert_eq!(document, before);
 }
 
-/// A duplicate of `a` and `b` takes the ties inside them, at the offset and
-/// with their angles, and the cloned wire runs through the clones in its
-/// original's order: `ab` runs through `second` then `first`, so `ab'` runs
-/// through `second'` then `first'`. `mixed` also holds `cb`, which comes from
-/// `c` outside the set, so even with `IncomingWires::Keep`, which keeps `cb'`,
-/// it is not cloned, and `cb'` has no route. The clones end up selected with
-/// the copied nodes, and one undo takes all of it back.
+/// A duplicate of `a` and `b` takes the ties inside them, at the offset and with their angles,
+/// and the cloned wire runs through the clones in its original's order: `ab` runs through
+/// `second` then `first`, so `ab'` runs through `second'` then `first'`. `mixed` also holds `cb`,
+/// from `c` outside the set, so even with `IncomingWires::Keep`, which keeps `cb'`, it is not
+/// cloned, and `cb'` has no route. The clones end up selected with the copied nodes, and one undo
+/// takes all of it back.
 #[test]
 fn duplicate_takes_the_ties_inside_the_set() {
     let mut fixture = DocumentFixture::default();

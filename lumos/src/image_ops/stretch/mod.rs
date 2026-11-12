@@ -147,9 +147,9 @@ impl Stretch {
     /// Apply this non-linear stretch to a stacked image in place.
     ///
     /// # Errors
-    /// [`OpError::Config`] on out-of-range parameters, and
-    /// [`OpError::UnreachableBg`] when an auto method cannot place the measured background
-    /// on its target. The image is unchanged on error.
+    /// [`OpError::Config`] on out-of-range parameters, [`OpError::NoData`] when an auto method
+    /// finds every pixel a fill, and [`OpError::UnreachableBg`] when it cannot place the measured
+    /// background on its target. The image is unchanged on error.
     pub fn apply(&self, image: &mut LinearImage) -> Result<(), OpError> {
         self.validate()?;
         match self.color {

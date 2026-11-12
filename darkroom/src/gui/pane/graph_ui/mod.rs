@@ -1,17 +1,14 @@
 //! The graph pane: the pan/zoom canvas, everything recorded on it, and the
 //! toolbar pinned to its corner.
 //!
-//! Split by what each part does with a frame rather than by what it draws:
-//! [`scene`] is what a pass reads, [`gesture`] is what turns input into
-//! intents, [`draw`] is what the record pass draws between the node bodies,
-//! and [`node_ui`] is the body itself. [`canvas`] holds the two nested canvases'
-//! ids and the coordinate space between them — the one thing every one of
-//! those needs.
+//! Split by what each part does with a frame: [`scene`] is what a pass reads, [`gesture`]
+//! turns input into intents, [`draw`] is what the record pass draws between the node bodies,
+//! and [`node_ui`] is the body itself. [`canvas`] holds the two nested canvases' ids and the
+//! coordinate space between them, which every one of those needs.
 //!
-//! This file is [`GraphUi`] and nothing else: the state a graph pane keeps
-//! across frames, the two phases that drive it ([`GraphUi::input`] and
-//! [`GraphUi::record`]), and the cache sweep ([`GraphUi::retain_nodes`]) that
-//! runs outside them.
+//! This file is [`GraphUi`]: the state a graph pane keeps across frames, the two phases that
+//! drive it ([`GraphUi::input`] and [`GraphUi::record`]), and the cache sweep
+//! ([`GraphUi::retain_nodes`]) that runs outside them.
 
 pub(crate) mod canvas;
 pub(crate) mod canvas_bg;
@@ -56,57 +53,44 @@ use crate::gui::pane::graph_ui::unsettled_ctx::UnsettledCtx;
 /// drives it: there is one pointer, so one drag, one rubber band, one open
 /// popup. The canvas widget ids are fixed for the same reason.
 ///
-/// Nothing here builds the [`GraphCtx`] it reads: `MainWindow` composes one
-/// per frame phase and threads it down, so this type never needs to name a
-/// theme, a library or a run state — the context answers for all three — and
-/// the "is the graph pane up" question is settled once at the tab dispatch
-/// rather than re-derived by every pass.
-///
-/// The frame splits accordingly: [`Self::input`] turns this frame's input
-/// into intents before the record, and [`Self::record`] records the pane from
-/// the dock's content closure.
+/// Nothing here builds the [`GraphCtx`] it reads: `MainWindow` composes one per frame phase
+/// and threads it down, and the "is the graph pane up" question is settled once at the tab
+/// dispatch. [`Self::input`] turns this frame's input into intents before the record, and
+/// [`Self::record`] records the pane from the dock's content closure.
 ///
 /// **Bare-canvas gesture arbitration.**
-/// [`CanvasGesture::classify`](canvas_input::CanvasGesture::classify) reads the
-/// outer canvas's response ([`canvas::outer_wid`]) + modifiers and resolves which gesture latches
-/// this frame into a single [`CanvasGesture`](canvas_input::CanvasGesture).
-/// `input` resolves it once per frame, and each controller is handed that
-/// classification and consumes only its own variant, so there's no hand-kept disjointness across files — the
-/// precedence lives in one match. Scroll and pinch aren't latch gestures (they
-/// coexist), so they stay inside `CameraGesture::input` regardless of the
-/// classification.
+/// [`CanvasGesture::classify`](canvas_input::CanvasGesture::classify) reads the outer canvas's
+/// response ([`canvas::outer_wid`]) and modifiers and resolves which gesture latches this
+/// frame into a single [`CanvasGesture`](canvas_input::CanvasGesture). `input` resolves it
+/// once per frame, and each controller consumes only its own variant, so the precedence lives
+/// in one match. Scroll and pinch aren't latch gestures (they coexist), so they stay inside
+/// `CameraGesture::input` regardless of the classification.
 ///
-/// Node panels and port circles live in the *inner* canvas and hit-test
-/// first, so a gesture only reaches the bare canvas (and this
-/// classification) when it missed every node/port.
+/// Node panels and port circles live in the *inner* canvas and hit-test first, so a gesture
+/// only reaches the bare canvas when it missed every node/port.
 #[derive(Default, Debug)]
 pub(crate) struct GraphUi {
-    /// The *record* frame this canvas last ran [`Self::input`] on, or `None`
-    /// before its first ever one.
+    /// The *record* frame this canvas last ran [`Self::input`] on, or `None` before its first.
     ///
-    /// The input stage runs only while a pane is showing the graph, so a *gap*
-    /// here means the canvas was away — which is how it notices its own
-    /// reappearance without anything having to run on its behalf while it was
-    /// gone. A stamp rather than a cached `bool`, so there is no second spelling of visibility to
-    /// keep in step with the active tabs.
+    /// The input stage runs only while a pane is showing the graph, so a gap here means the
+    /// canvas was away, with nothing running on its behalf meanwhile. A stamp rather than a
+    /// cached `bool`, so there is no second spelling of visibility to keep in step with the
+    /// active tabs.
     ///
-    /// [`Ui::record_frame_id`] and not [`Ui::render_frame_id`]: the latter counts
-    /// painted frames too, and a paint-only frame runs no record pass at all —
-    /// so an idle caret blink (the new-node palette's search field is enough)
-    /// would open a gap here while the canvas never went anywhere, and the next
-    /// frame would drop every in-flight gesture.
+    /// [`Ui::record_frame_id`] and not [`Ui::render_frame_id`]: the latter counts painted
+    /// frames too, and a paint-only frame (an idle caret blink) runs no record pass, so it
+    /// would open a gap while the canvas never went anywhere and drop every in-flight gesture.
     last_input_frame: Option<u64>,
     bg: CanvasBg,
-    /// Port centers, node sizes and world rects, cached across frames and
-    /// rebuilt in [`Self::input`]. Outlives the scene on purpose — a culled
-    /// node's ports still resolve off it — so it is swept by
-    /// [`Self::retain_nodes`] rather than by absence from a projection.
+    /// Port centers, node sizes and world rects, cached across frames and rebuilt in
+    /// [`Self::input`]. Outlives the scene on purpose (a culled node's ports still resolve off
+    /// it), so it is swept by [`Self::retain_nodes`], not by absence from a projection.
     ///
     /// Private: every production reader reaches it through a [`CanvasCtx`] or a [`DrawCtx`]. Tests
     /// read it through `internals`' `GraphUi::geometry`.
     geometry: CanvasGeometry,
-    /// This frame's wire ties: each band and each tied wire's pieces, rebuilt
-    /// at the top of [`Self::record_canvas`] into the buffers it keeps.
+    /// This frame's wire ties: each band and each tied wire's pieces, rebuilt at the top of
+    /// [`Self::record_canvas`].
     ties: TieLayout,
     /// The body of each node. No gesture: what it keeps is focus hysteresis and scratch.
     node_ui: NodeUi,
@@ -124,36 +108,19 @@ impl GraphUi {
     }
 
     /// Evict this canvas's `NodeId`-keyed cache, the cross-frame geometry, down to the nodes the
-    /// document still holds.
-    ///
-    /// It deliberately outlives the scene, so absence from it is no grounds on its own; see
-    /// [`CanvasGeometry::retain_nodes`].
+    /// document still holds; see [`CanvasGeometry::retain_nodes`].
     pub(crate) fn retain_nodes(&mut self, document: &Document) {
         self.geometry
             .retain_nodes(|node_id| document.holds_node(node_id));
     }
 
-    /// Take note of whether the pane is showing this canvas, and report
-    /// whether that *changed* since last frame.
+    /// Whether this input stage is the canvas's first after being away, or its first ever: the
+    /// edge that owes a relayout, since a canvas that has never recorded has no cached geometry
+    /// to draw its first frame from, and a dock op raises no edit fact of its own.
     ///
-    /// Crossing the edge drops all in-flight gesture state: a drag left
-    /// latched while the canvas was away would otherwise resume when it
-    /// comes back. The inspection panels and the cross-frame caches survive —
-    /// notably
-    /// [`CanvasGeometry`]'s port-offset table, so wires still anchor on
-    /// the first frame after a switch.
-    ///
-    /// Whether this input stage is the canvas's first after being away — the
-    /// edge that owes a relayout, since a canvas that has never recorded has
-    /// no cached geometry to draw its first frame from, and a dock op raises
-    /// no edit fact of its own.
-    ///
-    /// Reads the frame stamp rather than a visibility flag, so nothing has to
-    /// run while the canvas is off screen for it to notice coming back. Two
-    /// cases both mean *still here* and must not read as an appearance: the
-    /// previous frame (the ordinary steady state) and *this* frame — the input
-    /// stage and a settle of one frame read the same
-    /// [`Ui::record_frame_id`]. Only a gap wider than that is an absence.
+    /// Two cases both mean *still here* and must not read as an appearance: the previous frame
+    /// (the steady state) and *this* frame, as the input stage and a settle of one frame read
+    /// the same [`Ui::record_frame_id`]. Only a gap wider than that is an absence.
     fn appearing(&mut self, frame: u64) -> bool {
         let appearing = self
             .last_input_frame
@@ -237,12 +204,9 @@ impl GraphUi {
     /// menu pick means — lands on the stage's requests in the order it was raised.
     pub(crate) fn record(&mut self, ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
         self.record_popups(ui, stage);
-        // The toolbar overlays the canvas's top-left corner rather than
-        // sitting beside it, so the two share a stack. It records *second*,
-        // which is what puts it above the canvas in the hit-test: a click on a
-        // chip never starts a pan. The stacking is the pane's own business —
-        // the dock's content closure hands this method a plain `ui` and learns
-        // nothing about the overlay.
+        // The toolbar overlays the canvas's top-left corner, so the two share a stack. It
+        // records *second*, which puts it above the canvas in the hit-test: a click on a chip
+        // never starts a pan.
         Panel::zstack()
             .id_salt("graph_overlay")
             .size(Sizing::FILL)
@@ -259,17 +223,15 @@ impl GraphUi {
         if let Some(source) = gestures.new_node_ui.record(ui, stage) {
             gestures.wire_ui.resume(source, stage.ctx);
         }
-        // The menu records every frame whatever comes of it — its popup owns a
-        // lifecycle that depends on it — and everything a pick means goes onto
-        // the requests, so there is no precedence to settle here: a frame in which
-        // both a menu pick and a chip click landed raises both.
+        // The menu records every frame whatever comes of it, as its popup's lifecycle depends on
+        // it. Everything a pick means goes onto the requests, so a frame with both a menu pick
+        // and a chip click raises both.
         gestures.node_menu.record(ui, stage);
         gestures.tie_menu.record(ui, stage, &self.ties);
     }
 
-    /// The record pass's drawing half: the outer (pan-capture) canvas, the
-    /// dotted backdrop, and — under the inner canvas's pan/zoom transform —
-    /// the wires, node bodies, inspection panels, and in-flight
+    /// The record pass's drawing half: the outer (pan-capture) canvas, the dotted backdrop,
+    /// and, under the inner canvas's pan/zoom transform, the wires, node bodies and in-flight
     /// gesture previews.
     fn record_canvas(&mut self, ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
         let graph_ctx = stage.ctx;
@@ -280,35 +242,22 @@ impl GraphUi {
         let geometry = &self.geometry;
         let theme = graph_ctx.theme();
         let viewport = graph_ctx.camera();
-        // Effective selection to paint: the live rubber-band preview while
-        // a band is in flight, else the committed set.
-        // The preview is kept out of the document, so a band in flight
-        // changes what paints without recording an edit.
+        // The selection to paint: the live rubber-band preview while a band is in flight, else
+        // the committed set. The preview stays out of the document, so no edit is recorded.
         let gestures = &mut self.gestures;
         let selected = gestures.selection_ui.preview().map_or_else(
             || Selection::Committed(graph_ctx.selected()),
             Selection::swept,
         );
 
-        // Outer canvas: covers the whole pane, paints the canvas
-        // background, owns the input routing for empty-canvas
-        //  Senses:
-        // - `DRAG`: middle-button canvas pan (graph-editor
-        //   convention; left-drag is the rubber-band selection). Pulled via
-        //   `Ui::drag_delta_by(.., PointerButton::Middle)`, since the
-        //   left-only `ResponseState::drag_delta` doesn't carry middle.
-        // - `SCROLL`: mouse wheel / touchpad swipe = pan, under the command
-        //   key zoom-about-cursor.
-        // - `PINCH`: touchpad pinch = zoom-about-cursor.
-        // Node panels (descendants of the *inner* canvas, which
-        // carries the pan/zoom transform) hit-test first; only bare
-        // canvas falls through to the outer's senses.
+        // Outer canvas: covers the whole pane, paints the canvas background, owns the input
+        // routing for the bare canvas. Senses: `DRAG` is the middle-button pan (left-drag is
+        // the rubber band), `SCROLL` is pan (zoom about the cursor under the command key),
+        // `PINCH` is zoom about the cursor. Node panels hit-test first, in the inner canvas.
         //
-        // `.clip_rect()` pins the inner-canvas subtree's `paint_rect`s
-        // to the outer rect even when the inner transform zooms them
-        // way past the viewport. Without it, at high zoom a single
-        // off-screen node panel's screen rect can dwarf the surface,
-        // damage threshold sees ratio ≫ 1 and trips `Damage::Full`
+        // `.clip_rect()` pins the inner-canvas subtree's `paint_rect`s to the outer rect even
+        // when the inner transform zooms them past the viewport: without it, at high zoom one
+        // off-screen node panel's screen rect can dwarf the surface and trip `Damage::Full`
         // every pan/zoom tick.
         Panel::canvas()
             .id(canvas::outer_wid())
@@ -317,8 +266,7 @@ impl GraphUi {
             .clip_rect()
             .chrome(Chrome::new(theme.canvas.bg))
             .show(ui, |ui| {
-                // Dotted backdrop in screen space, beneath the inner
-                // (transformed) canvas — so it paints under everything.
+                // Dotted backdrop in screen space, beneath the inner canvas.
                 self.bg.draw(ui, theme, viewport);
                 Panel::canvas()
                     .id(canvas::inner_wid())
@@ -331,24 +279,20 @@ impl GraphUi {
                                 .map(|rect| rect.size),
                             &viewport,
                         );
-                        // One bundle for everything the canvas records, built
-                        // out here rather than inside the probe scope so both
-                        // passes read the same refs.
+                        // Built outside the probe scope so both passes read the same refs.
                         let draw_ctx = DrawCtx {
                             graph_ctx,
                             geometry,
                             selected,
                             cull,
                         };
-                        // Painted first so it sits beneath the
-                        // wires and node bodies.
+                        // Painted first, beneath the wires and node bodies.
                         gestures.selection_ui.record(ui, draw_ctx);
                         {
                             let mut probe = gestures.breaker_ui.probe();
                             let mut tie_line = gestures.tie_ui.probe();
-                            // One emphasis resolution for both wire families:
-                            // any wire gesture — either drag controller, an
-                            // active breaker scribble or a tie line — fades
+                            // One emphasis resolution for both wire families: any wire gesture
+                            // (either drag controller, a breaker scribble or a tie line) fades
                             // the standing set.
                             let set = if gestures.wire_ui.in_flight()
                                 || gestures.subscription_ui.in_flight()
@@ -360,13 +304,9 @@ impl GraphUi {
                                 WireSet::Standing
                             };
                             let emphasis = WireEmphasis::resolve(theme.canvas.bg, set);
-                            // Both wire renderers share these inputs, so
-                            // they're bundled once and reborrowed into each.
-                            // Subscription wires sit under the node bodies
-                            // like data wires (drawn before `draw_all`), and
-                            // share the breaker probe so they're all
-                            // cuttable — one passing behind an unrelated node
-                            // goes under it rather than drawing on top.
+                            // Both wire renderers share these inputs. Subscription wires sit
+                            // under the node bodies like data wires and share the breaker
+                            // probe, so they are all cuttable.
                             let mut wires = WirePass {
                                 draw_ctx,
                                 probe: &mut probe,
@@ -386,9 +326,8 @@ impl GraphUi {
                                 line: &mut tie_line,
                             }
                             .record(ui);
-                            // Node bodies paint back-to-front by each
-                            // placement's depth (`GraphView::paint_order`), so
-                            // a clicked node raises above its neighbours.
+                            // Back-to-front by each placement's depth (`GraphView::paint_order`),
+                            // so a clicked node raises above its neighbours.
                             self.node_ui.draw_all(
                                 ui,
                                 &mut NodePass {

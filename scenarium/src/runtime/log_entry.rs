@@ -2,7 +2,7 @@
 
 use crate::graph::identity::NodeId;
 
-/// Where a log record came from and how loud it is.
+/// How loud a log record is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogLevel {
     Info,
@@ -10,12 +10,9 @@ pub enum LogLevel {
     Error,
 }
 
-/// One node-attributed log record.
-/// [`CtxManager::log`](crate::runtime::ctx_manager::CtxManager::log) writes
-/// these while a lambda runs; a run's
-/// `ExecOutcome`
-/// carries them out, and
-/// [`RunSummary`](crate::worker::run_summary::RunSummary) republishes them.
+/// One node-attributed log record, written by
+/// [`CtxManager::log`](crate::runtime::ctx_manager::CtxManager::log) while a lambda runs and
+/// republished by [`RunSummary`](crate::worker::run_summary::RunSummary).
 #[derive(Debug, Clone)]
 pub struct LogEntry {
     pub node_id: NodeId,

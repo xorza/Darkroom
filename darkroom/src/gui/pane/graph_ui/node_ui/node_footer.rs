@@ -131,9 +131,8 @@ impl Pool {
     }
 }
 
-/// A thin two-tone bar encoding the CPU:GPU split — each segment's width is its
-/// byte share (weighted `Fill`). A single-pool footer reads as one full-width
-/// color.
+/// A thin two-tone bar encoding the CPU:GPU split, each segment weighted by its byte share. A
+/// single-pool footer reads as one full-width color.
 fn proportion_bar(ui: &mut Ui, theme: &Theme, ram: RamUsage) {
     Panel::hstack()
         .id_salt("node_mem_bar")

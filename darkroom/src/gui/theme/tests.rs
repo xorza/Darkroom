@@ -234,7 +234,7 @@ fn surfaces_stack_darkest_first() {
 }
 
 /// A disabled menu row reads dimmer than a live row's shortcut hint on the menu's surface, so a
-/// menu whose rows are all disabled does not read as live. The two were one grey.
+/// menu whose rows are all disabled does not read as live.
 #[test]
 fn a_disabled_row_is_dimmer_than_a_hint() {
     let p = Palette::load();
@@ -538,7 +538,7 @@ fn a_wash_composites_on_the_encoded_values() {
 /// A port glyph hangs on the body's edge and takes no room in its cell, so every label starts at
 /// the column inset, the border plus `space.md`, as the header's title does: the glyph's left
 /// edge sits a radius out from the body's edge, and its margins, width and the cell's gap sum to
-/// zero, for the plain 13 px circle, a required input's bigger one, and on either side.
+/// zero, for the plain 12 px circle, a required input's bigger one, and on either side.
 #[test]
 fn a_port_glyph_hangs_on_the_edge_and_leaves_its_label_at_the_inset() {
     let theme = Theme::default();

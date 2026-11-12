@@ -5,22 +5,18 @@ use crate::core::document::internals::DocumentFixture;
 use crate::gui::pane::graph_ui::internals::CanvasHarness;
 use crate::gui::pane::graph_ui::wid;
 
-/// The breaker cuts a node where the *document* says it is, not where it last
-/// painted.
+/// The breaker cuts a node where the document says it is, not where it last painted.
 ///
-/// Both rects are one frame apart whenever something moves a node out from
-/// under a live gesture — an undo, say — because `NodeCtx::pos`
-/// is mirrored pre-record while the body's own arranged rect is still last
-/// frame's. Driving that here: scribble over empty canvas, move the node onto
-/// the scribble mid-gesture, release. The cut has to land, which it only does
-/// if the probe reads the same `node_world_rect` the cull and the rubber band
-/// do rather than re-deriving one off `response_for(wid::body(..))`.
+/// The two rects are one frame apart whenever something (an undo, say) moves a node out from
+/// under a live gesture, as `NodeCtx::pos` is mirrored pre-record while the body's own arranged
+/// rect is still last frame's. Scribble over empty canvas, move the node onto the scribble
+/// mid-gesture, release: the cut lands only if the probe reads the same `node_world_rect` the
+/// cull and the rubber band do, not one derived off `response_for(wid::body(..))`.
 #[test]
 fn the_breaker_cuts_a_node_at_its_current_position_not_its_last_painted_one() {
     use palantir::PointerButton;
 
-    // Where the scribble runs: a short vertical stroke over empty canvas, well
-    // clear of where the node starts.
+    // A short vertical stroke over empty canvas, well clear of where the node starts.
     const SCRIBBLE_FROM: Vec2 = Vec2::new(600.0, 600.0);
     const SCRIBBLE_TO: Vec2 = Vec2::new(600.0, 420.0);
 
@@ -34,8 +30,7 @@ fn the_breaker_cuts_a_node_at_its_current_position_not_its_last_painted_one() {
         "the scribble must start out clear of the node, else the move proves nothing"
     );
 
-    // Right-drag over empty canvas: the gesture latches and paints a polyline
-    // nowhere near the node, so nothing is marked.
+    // Right-drag over empty canvas, nowhere near the node, so nothing is marked.
     h.ui.press(SCRIBBLE_FROM, PointerButton::Right);
     h.ui.drag_to(SCRIBBLE_TO);
     let scribbling = h.frame();
@@ -44,9 +39,8 @@ fn the_breaker_cuts_a_node_at_its_current_position_not_its_last_painted_one() {
         "a scribble in flight severs nothing until release: {scribbling:?}"
     );
 
-    // Now move the node onto the scribble, centered on its far end. This frame
-    // the document says the node is here while its arranged rect still says it
-    // is back there — the divergence the probe has to resolve the new way.
+    // Move the node onto the scribble, centered on its far end: the document says it is here
+    // while its arranged rect still says it is back there.
     h.document_mut()
         .main_view
         .node_placements

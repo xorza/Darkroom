@@ -3,9 +3,8 @@ use crate::exec::report::node_status::NodeExecStatus;
 
 use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 
-/// A pure source whose value a test can move under it — the point being
-/// that a *pure* node's digest does not notice, so the cached value stands
-/// until something re-keys it.
+/// A pure source whose value a test can move under it — a *pure* node's digest does not notice,
+/// so the cached value stands until something re-keys it.
 fn shifting_source(cell: Arc<AtomicI64>) -> impl FnOnce(NodeSpec) -> NodeSpec {
     move |n: NodeSpec| {
         n.pure()
@@ -34,8 +33,7 @@ async fn simple_compute() {
     let run = e.run_sinks().await;
     assert_eq!(run.logs(), ["35"], "sum = 2 + 5 = 7, mult = 7 * 5 = 35");
 
-    // Moving external state does not recompute: `b` is pure, so its digest
-    // is stable and the cached value stands.
+    // Moving external state does not recompute: `b` is pure, so its digest is stable.
     b.store(7, Ordering::Relaxed);
     let run = e.run_sinks().await;
     assert_eq!(run.logs(), ["35"], "a pure node does not re-read the world");
@@ -50,15 +48,13 @@ async fn simple_compute() {
 async fn schedule_stable_across_repeated_runs() {
     let mut e = TestEngine::over(TestGraph::sample());
 
-    // Three runs held at once — an outcome is a snapshot, so they can be
-    // compared rather than re-derived.
+    // Three runs held at once — an outcome is a snapshot, so they can be compared.
     let run1 = e.run_sinks().await;
     let run2 = e.run_sinks().await;
     let run3 = e.run_sinks().await;
 
-    // The first run executes everything; once the pure upstream is cached,
-    // runs 2 and 3 must schedule identically — this guards the reused
-    // per-run buffers being reset cleanly, since a missed reset would drift.
+    // The first run executes everything; once the pure upstream is cached, runs 2 and 3 must
+    // schedule identically — guarding that the reused per-run buffers are reset cleanly.
     assert_eq!(run1.ran(), ["get_b", "get_a", "sum", "mult", "Print"]);
     assert_eq!(run2.ran(), ["Print"]);
     assert_eq!(run2.ran(), run3.ran());
@@ -85,8 +81,7 @@ async fn unwritten_output_port_is_cleared_before_reexecution() {
         let invocations = Arc::clone(&invocations);
         n.pure()
             .sink()
-            // Const-bound below; changing that const is what re-keys the
-            // digest between runs.
+            // Const-bound below; changing that const re-keys the digest between runs.
             .optional(DataType::Int)
             .output(DataType::Int)
             .output(DataType::Int)
@@ -117,9 +112,8 @@ async fn unwritten_output_port_is_cleared_before_reexecution() {
         "run 1 writes both"
     );
 
-    // Invalidate the pure node while keeping its resident buffer available
-    // for the next invocation. Run 2 writes only port 0, so port 1 must not
-    // retain run 1's value.
+    // Invalidate the pure node while keeping its resident buffer for the next invocation. Run 2
+    // writes only port 0, so port 1 must not retain run 1's value.
     e.edit(|g| g.constant("partial_writer", 0, 1i64));
     let run = e.run_sinks().await;
 

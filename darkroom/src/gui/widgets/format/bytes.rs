@@ -5,24 +5,17 @@ use std::fmt::{Display, Formatter};
 
 use crate::gui::widgets::format;
 
-/// A byte magnitude that renders on demand rather than into a `String`.
+/// A byte magnitude, 1024-based, that renders on demand rather than into a `String`: bare `B`
+/// under 1 KiB, then `KiB`/`MiB` at one decimal and `GiB` at two. The unit names are IEC
+/// 80000-13's, as `KB` names 1000: `AGENTS.md`, "Names", "Bytes are KiB, MiB and GiB". The status
+/// bar and each node body's memory readout format through it, so both show identical figures.
 ///
-/// `Display` for the same reason
-/// [`Elapsed`](crate::gui::widgets::format::elapsed::Elapsed) is: every reader
-/// is a per-frame readout — the status bar's twice a frame, a node's memory
-/// footer once per pool per node — and each feeds the result into a formatter
-/// that never needed it heap-allocated.
+/// `Display` for the same reason [`Elapsed`](crate::gui::widgets::format::elapsed::Elapsed) is:
+/// every reader is a per-frame readout that feeds a formatter, which needs no heap allocation.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Bytes(u64);
 
 impl Bytes {
-    /// Human-readable byte magnitude (1024-based) — the byte analogue of
-    /// [`Elapsed`](crate::gui::widgets::format::elapsed::Elapsed): bare `B`
-    /// under 1 KiB, then `KiB`/`MiB`/`GiB` carrying 1–2 decimals, the IEC 80000-13
-    /// names of the 1024-based units, as `KB` names 1000. `AGENTS.md`, "Names",
-    /// "Bytes are KiB, MiB and GiB". Used by the
-    /// window status bar and each node body's memory readout, so both render
-    /// identical figures.
     pub(crate) const fn new(bytes: u64) -> Self {
         Self(bytes)
     }

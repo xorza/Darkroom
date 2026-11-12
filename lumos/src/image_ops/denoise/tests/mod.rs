@@ -118,8 +118,8 @@ fn strength_zero_is_identity_and_blends_between() {
     );
 
     // The removed noise depends on the input alone, so the output is affine in the strength: half
-    // strength is the midpoint of none and full, to the rounding of each scale's subtraction —
-    // two per scale, over at most 6 scales, of values ≤ 0.8: 16ε of 0.8.
+    // strength is the midpoint of none and full, to the rounding of each scale's arithmetic over
+    // the default scales, of values ≤ 0.8: bounded at 16ε of 0.8.
     let mut half = mono_image(size, px.clone());
     let mut full = mono_image(size, px.clone());
     Denoise {

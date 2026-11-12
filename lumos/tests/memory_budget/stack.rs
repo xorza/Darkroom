@@ -26,8 +26,8 @@ const FRAMES: usize = 6;
 /// those 1 690 376 B are past it.
 ///
 /// The resident stack's product then saves streamed: each HDU through one chunk of samples and
-/// fits-well's encoding of it, a 102 400-byte plane each at this size, where a whole copy of every
-/// HDU was staged before the file was written.
+/// fits-well's encoding of it, a 102 400-byte plane each at this size, never a whole copy of every
+/// HDU.
 #[test]
 fn a_stack_stays_within_its_budget() {
     alone(|| {

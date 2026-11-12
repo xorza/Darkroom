@@ -1,6 +1,4 @@
-//! `BgEstimate` generation for testing.
-//!
-//! Provides utilities to create `BgEstimate` instances for benchmarks and tests.
+//! `BgEstimate` fixtures for benchmarks and tests.
 
 use common::Buffer2;
 
@@ -15,7 +13,7 @@ use crate::star_detection::resources::DetectionResources;
 use crate::star_detection::star_detection_config::bg_config::BgConfig;
 use common::USize2;
 
-/// Create a uniform `BgEstimate` with constant background and noise values.
+/// A uniform `BgEstimate` of constant background and noise.
 pub(crate) fn uniform(size: USize2, bg: f32, noise: f32) -> BgEstimate {
     BgEstimate {
         bg: Pooled::loose(MeshSurface::uniform(bg, size), ()),

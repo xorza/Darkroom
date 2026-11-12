@@ -52,14 +52,11 @@ impl ScrollFrame {
     }
 }
 
-/// The zoom factors a surface allows. Pinch / scroll-zoom deltas multiply in;
-/// clamped each frame so pathological gestures can't drive the zoom to 0
-/// (which would make the inverse transform explode) or to a value so large
-/// that the world coordinates underflow.
+/// The zoom factors a surface allows. Zoom deltas multiply in, clamped so a gesture can't drive
+/// the zoom to 0 (the inverse transform would explode) or so large the world coordinates underflow.
 ///
-/// A type rather than a pair of bounds, because the canvas and the image viewer
-/// bound zoom differently and both pass their range into the same folding: a
-/// named range says which surface's is in play.
+/// A type rather than a pair of bounds: the canvas and the image viewer bound zoom differently
+/// and pass their range into the same folding.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct ZoomRange {
     pub(crate) min: f32,
@@ -67,12 +64,9 @@ pub(crate) struct ZoomRange {
 }
 
 impl ZoomRange {
-    /// Fold one frame's scroll/pinch deltas from `resp` into `v` — the
-    /// shared half of the canvas and image-viewer pan/zoom gestures (drag
-    /// panning stays with each caller, whose button policy differs): a
-    /// scroll in any unit pans, a scroll under the command key zooms about
-    /// the cursor by the wheel's notches, and a pinch zooms about the
-    /// cursor, clamped to this range.
+    /// Fold one frame's scroll and pinch input into `v`, clamped to this range: a scroll pans, a
+    /// scroll under the command key and a pinch zoom about the cursor. Drag panning stays with
+    /// each caller, whose button policy differs.
     pub(crate) fn fold_scroll(self, v: &mut Viewport, frame: ScrollFrame) {
         let ScrollFrame {
             delta,
@@ -99,15 +93,10 @@ impl ZoomRange {
         }
     }
 
-    /// Multiply `v`'s zoom by `factor` while holding the pre-transform point
-    /// under `pivot_local` fixed in the pane, so a gesture can fold several
-    /// inputs before emitting/committing once. Standard zoom-about-cursor
-    /// algebra: world point under cursor = `(pivot - pan) / zoom`; choose new
-    /// pan so that same world point stays under the same screen pixel after
-    /// scaling. Clamps to this range, widened to hold `v`'s own zoom, so a
-    /// zoom outside it — a fit to a tiny or a huge image — steps back toward it
-    /// and never against the step's direction; ignores non-finite /
-    /// non-positive factors.
+    /// Multiply `v`'s zoom by `factor`, keeping the world point under `pivot_local` under the same
+    /// pane pixel. Clamps to this range widened to hold `v`'s own zoom, so a zoom outside it — a
+    /// fit to a tiny or a huge image — steps back toward it and never against the step's
+    /// direction. Non-finite and non-positive factors are ignored.
     pub(crate) fn zoom_about(self, v: &mut Viewport, pivot_local: Vec2, factor: f32) {
         if !factor.is_finite() || factor <= 0.0 {
             return;
@@ -124,21 +113,13 @@ impl ZoomRange {
     }
 }
 
-/// Per-pixel base for converting a scroll under the command key into a
-/// multiplicative zoom factor. Tuned so a single classic wheel notch
-/// (~16-20 logical px after palantir's line→pixel conversion) yields
-/// roughly a 4-5% zoom step, while a fast touchpad swipe (~50-100 px
-/// in one frame) stays a controlled ~13-22% step. Lower → slower
-/// zoom, higher → snappier but jumps badly on touchpad.
+/// Per-pixel base turning a scroll under the command key into a zoom factor. Tuned so a classic
+/// wheel notch (~16-20 logical px) steps the zoom ~4-5% and a fast touchpad swipe (~50-100 px in
+/// one frame) ~13-22%; higher is snappier but jumps on a touchpad.
 const SCROLL_ZOOM_BASE: f32 = 1.0025;
 
-/// Map a one-frame vertical scroll delta (in logical px, palantir's
-/// "advance offset forward" sign convention — `+y` = scroll content
-/// down) to a multiplicative zoom factor. Negative `delta_y` (wheel
-/// up) zooms in (`factor > 1`); positive (wheel down) zooms out
-/// (`factor < 1`). Pure function so it can be unit-tested without
-/// spinning up a UI. [`ZoomRange::fold_scroll`] is its one reader, for the canvas
-/// and the viewer alike.
+/// Map a one-frame vertical scroll delta (logical px, `+y` = scroll content down) to a zoom
+/// factor: negative (wheel up) zooms in, positive (wheel down) zooms out.
 fn scroll_to_zoom_factor(delta_y: f32) -> f32 {
     SCROLL_ZOOM_BASE.libm_powf(-delta_y)
 }

@@ -37,8 +37,8 @@ impl<'a> MosaicNoiseMeasure<'a> {
         })
     }
 
-    /// The most bytes [`Self::measure`] holds over a `size` frame of `mosaic`: the larger of the pairs its noise is measured over and the samples its medians
-    /// are, which it holds one after the other.
+    /// The most bytes [`Self::measure`] holds over a `size` frame of `mosaic`: the larger of the
+    /// pairs its noise is measured over and the samples its medians are, held one after the other.
     pub(crate) fn heap_bytes(size: USize2, mosaic: Mosaic) -> usize {
         let sampling = MosaicSampling {
             size,

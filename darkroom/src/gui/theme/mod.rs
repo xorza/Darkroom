@@ -52,22 +52,12 @@ use crate::gui::theme::tint_scale::TintScale;
 use crate::gui::theme::type_colors::TypeColors;
 use crate::gui::theme::viewer_theme::ViewerTheme;
 
-/// Visual palette + layout dimensions for darkroom's UI. Owned by `App`,
-/// handed to every UI subtree through [`crate::gui::frame::app_ctx::AppCtx`] and the
-/// contexts derived from it, so call sites read off a single source
-/// instead of hard-coded constants. Layout fields live here too —
-/// node ports, const editors, etc. — so a theme swap can restyle
-/// geometry as well as color.
+/// Visual palette + layout dimensions for darkroom's UI, owned by `App` and handed to every UI
+/// subtree through [`crate::gui::frame::app_ctx::AppCtx`], so call sites read one source instead
+/// of hard-coded constants. Layout fields live here too, so a theme swap restyles geometry as
+/// well as color.
 ///
-/// Also owns the palantir [`palantir::Theme`] this app wants on its
-/// `Ui`. [`crate::gui::app::App::new`] copies `palantir` into
-/// `ui.theme` once before the first frame, so palantir-side widgets
-/// (buttons, text edits, menus, scrollbars) read from the same source.
-/// Tweak fields on `theme.palantir` during construction to
-/// override palantir's defaults.
-///
-/// Built from the baked-in [`Palette`] on every launch; there is no theme
-/// file.
+/// Built from the baked-in [`Palette`] on every launch; there is no theme file.
 #[derive(Clone, Debug)]
 pub(crate) struct Theme {
     /// Font sizes by hierarchy tier: [`TEXT`].
@@ -141,10 +131,8 @@ pub(crate) struct Theme {
     /// Darkroom's own slot, as no palantir widget resolves against it.
     pub(crate) primary_button: ButtonTheme,
 
-    /// Palantir-side widget theme. Pushed onto `Ui::theme` once at
-    /// startup so every palantir widget (Button, `TextEdit`, `MenuItem`,
-    /// Scroll, Tooltip…) reads a darkroom-tuned palette without each
-    /// call site restyling per use.
+    /// The palantir widget theme, set on the `Ui` once at startup by [`crate::gui::app::App::new`]
+    /// so every palantir widget reads a darkroom-tuned palette.
     pub(crate) palantir: palantir::Theme,
 }
 

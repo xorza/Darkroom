@@ -1,8 +1,6 @@
 //! Canvas viewport gesture: middle-drag and scroll pan, command-scroll and pinch
-//! zoom-about-cursor within the canvas's [`ZoomRange`], and the toolbar's framings. Split out of
-//! `canvas` so the orchestration there isn't tangled with the (independently
-//! testable) viewport algebra. The gesture emits `GraphIntent::SetViewport`,
-//! the one way the document's camera moves.
+//! zoom-about-cursor within the canvas's [`ZoomRange`], and the toolbar's framings. The
+//! gesture emits `GraphIntent::SetViewport`, the one way the document's camera moves.
 
 pub(crate) mod camera_gesture;
 
@@ -21,16 +19,14 @@ use crate::gui::widgets::zoom_range::ZoomRange;
 /// The canvas's zoom range.
 const CANVAS_ZOOM: ZoomRange = ZoomRange { min: 0.1, max: 5.0 };
 
-/// Breathing room (logical px) left on every side when fitting content
-/// to the viewport, so framed nodes don't butt against the pane edge.
+/// Breathing room (logical px) left on every side when fitting content to the viewport.
 const FIT_MARGIN: f32 = 40.0;
 
 impl Framing {
-    /// The `SetViewport` intent this framing implies on the canvas, or
-    /// `None` when there's nothing to frame — `ShowSelected` with an empty
-    /// selection, no nodes to fit, or the viewport not yet measured. The pane
-    /// size comes from the outer canvas's `layout_rect`; node extents come
-    /// from the geometry's cross-frame size cache, position from
+    /// The `SetViewport` intent this framing implies on the canvas, or `None` when there's
+    /// nothing to frame: `ShowSelected` with an empty selection, no nodes to fit, or the
+    /// viewport not yet measured. The pane size comes from the outer canvas's `layout_rect`;
+    /// node extents come from the geometry's cross-frame size cache, position from
     /// `NodeCtx::pos`.
     pub(crate) fn intent(
         self,
@@ -70,15 +66,12 @@ enum Bounded {
     Selected,
 }
 
-/// World-space (inner-canvas pre-transform) bounding box of the framed
-/// nodes — every node, or only the selected ones. Each node's rect comes
-/// from [`CanvasGeometry::node_world_rect`] (current `NodeCtx::pos` +
-/// cached measured size) — NOT from live responses, because culled
-/// off-screen nodes record none and would drop out of the fit entirely.
-/// A node that has never measured counts as a point at its position;
-/// the fold is manual min/max (not `Rect::union`, which treats a
-/// zero-size rect as identity and would discard that point too).
-/// `None` when no node qualifies.
+/// World-space (inner-canvas pre-transform) bounding box of the framed nodes, every node or
+/// only the selected ones. Each node's rect comes from [`CanvasGeometry::node_world_rect`]
+/// (current `NodeCtx::pos` plus cached measured size), not from live responses, as culled
+/// off-screen nodes record none and would drop out of the fit. A node that has never measured
+/// counts as a point at its position; the fold is manual min/max, as `Rect::union` treats a
+/// zero-size rect as identity and would discard that point. `None` when no node qualifies.
 fn node_bounds(
     geometry: &CanvasGeometry,
     graph_ctx: GraphCtx<'_>,
@@ -101,17 +94,15 @@ fn node_bounds(
     acc.map(|(min, max)| Rect::from_min_max(min, max))
 }
 
-/// Fit `bounds` (world coords) centered in a `viewport`-sized pane,
-/// leaving [`FIT_MARGIN`] on every side. The scale is the tighter of the
-/// two per-axis fits, never magnified past 1:1 (a lone small node
-/// shouldn't balloon), and clamped to [`CANVAS_ZOOM`]. Placing the
-/// bbox center at the viewport center uses the same `outer_local = pan +
-/// scale * world` mapping the inner-canvas transform applies.
+/// Fit `bounds` (world coords) centered in a `viewport`-sized pane, leaving [`FIT_MARGIN`] on
+/// every side. The scale is the tighter of the two per-axis fits, never magnified past 1:1 (a
+/// lone small node shouldn't balloon), and clamped to [`CANVAS_ZOOM`]. The bbox center lands at
+/// the viewport center through the inner-canvas transform's `outer_local = pan + scale * world`.
 fn fit_target(bounds: Rect, pane: Vec2) -> Viewport {
     let avail_x = (pane.x - 2.0 * FIT_MARGIN).max(1.0);
     let avail_y = (pane.y - 2.0 * FIT_MARGIN).max(1.0);
-    // A sub-pixel extent (single node, or a flat row/column) doesn't
-    // constrain its axis — treat it as unbounded so the other axis wins.
+    // A sub-pixel extent (single node, or a flat row/column) doesn't constrain its axis, so the
+    // other axis wins.
     let sx = if bounds.size.w > 1.0 {
         avail_x / bounds.size.w
     } else {

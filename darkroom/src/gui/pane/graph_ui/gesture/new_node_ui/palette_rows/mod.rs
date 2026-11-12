@@ -102,10 +102,9 @@ impl PaletteRows {
             row.entry(library)
                 .expect("a row just filtered from the library resolves in it")
         };
-        // Case-insensitive by comparison, not by key: a folded key per row
-        // would allocate one `String` each, for a question `char`-wise
-        // folding answers in place. The raw-order fallback keeps two
-        // categories that fold alike in runs of their own.
+        // Case-insensitive by comparison, not by key: a folded key per row would allocate a
+        // `String` each. The raw-order fallback keeps two categories that fold alike in runs of
+        // their own.
         self.rows.sort_by(|a, b| {
             let (a, b) = (entry(a), entry(b));
             Rank::of(a, query_lc)
@@ -182,9 +181,8 @@ fn lowercase_cmp(a: &str, b: &str) -> Ordering {
 /// Case-insensitive substring match used by the palette search. An empty
 /// (already-lowercased) query matches everything.
 ///
-/// Folds `char` by `char`, as the query was, so both sides fold by one rule
-/// and nothing is allocated; ASCII names — every built-in one — compare
-/// bytes.
+/// Folds `char` by `char`, as the query was, so both sides fold by one rule and nothing is
+/// allocated; ASCII names, every built-in one, compare bytes.
 fn name_matches(name: &str, query_lc: &str) -> bool {
     if query_lc.is_empty() {
         return true;
@@ -195,8 +193,8 @@ fn name_matches(name: &str, query_lc: &str) -> bool {
             query_lc.chars().all(|wanted| folded.next() == Some(wanted))
         });
     }
-    // Only the name folds. Folding the query here too would quietly accept a
-    // caller that forgot to, and the non-ASCII branch above can't.
+    // Only the name folds: folding the query too would quietly accept a caller that forgot to,
+    // which the non-ASCII branch above can't.
     let (name, query) = (name.as_bytes(), query_lc.as_bytes());
     name.windows(query.len()).any(|window| {
         window

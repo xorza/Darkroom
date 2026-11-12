@@ -1,9 +1,6 @@
-//! Image and plane builders for tests.
-//!
-//! Only the two that assemble something: a `LinearImage` needs its `PlanarDesc` built and
-//! its channels laid out planar, which is worth a name. Plain planes are left to
-//! `Buffer2::new_filled` / `new` / `new_default`, which are already named constructors doing
-//! three different things — wrapping them here would add a name without removing a choice.
+//! Image builders for tests: only the two that assemble something, a `LinearImage` from a
+//! `PlanarDesc` and planar channels. Plain planes stay with `Buffer2::new_filled` / `new` /
+//! `new_default`: wrapping them here would add a name without removing a choice.
 
 use common::Buffer2;
 use imaginarium::{ChannelLayout, PlanarDesc, PlanarImage};

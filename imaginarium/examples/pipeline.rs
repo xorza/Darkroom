@@ -65,7 +65,6 @@ fn main() {
         .alpha(0.4)
         .apply_gpu(&gpu, &overlay, &main, &mut blended);
 
-    // Read back once, at the end.
     let result = blended.to_image(&gpu).unwrap();
     save_image(&result, "pipeline_final.png");
 

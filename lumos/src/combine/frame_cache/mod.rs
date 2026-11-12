@@ -88,7 +88,7 @@ pub(crate) struct CombineOutput {
 }
 
 /// The output rows one combine row-task writes: the combined value, plus whichever ancillary
-/// planes were requested. Bundling them keeps one gather loop instead of one per plane subset.
+/// planes were requested.
 #[derive(Debug)]
 struct QualityRows<'a> {
     value: &'a mut [f32],
@@ -112,8 +112,8 @@ pub(crate) struct CombineRequest<'a> {
 }
 
 /// The frames feeding one combine, with their normalization parameters. Calibration masters and
-/// registered light stacks share it; what separates them is only whether their frames carry quality
-/// planes, and even an unwarped one does when its source declared pixels with no measurement.
+/// registered light stacks share it; they differ only in whether their frames carry quality planes,
+/// which an unwarped frame does too when its source declared pixels with no measurement.
 #[derive(Debug)]
 pub(crate) struct FrameCache {
     pub(crate) frames: Vec<StoredFrame>,
@@ -309,10 +309,9 @@ impl FrameCache {
     /// `combine`, and write the reduced value plus whichever [`QualityPlanes`] were requested.
     ///
     /// [`FrameGate`] alone decides whether a frame is gathered at a pixel; the sample carries its
-    /// frame's weight into the reduction, and its confidence, guaranteed positive wherever the
-    /// frame was gathered, divides its noise model. A frame carrying no frame quality contributes
-    /// everywhere at unit confidence, which is what lets calibration masters and registered light
-    /// stacks share this loop. A pixel no frame supports gets `0`.
+    /// frame's weight into the reduction, and its confidence, positive wherever the frame was
+    /// gathered, divides its noise model. A frame without frame quality contributes everywhere at
+    /// unit confidence. A pixel no frame supports gets `0`.
     pub(super) fn process_chunked<Combine>(
         &self,
         request: CombineRequest<'_>,
@@ -397,8 +396,7 @@ impl FrameCache {
                             gain.rows(pixel_offset / width..chunk_end / width)
                         })
                 }));
-                // One row bundle per output row, so an unrequested plane simply has no slice
-                // to write instead of needing its own copy of the gather loop below.
+                // One row bundle per output row: an unrequested plane has no slice to write.
                 let mut rows: Vec<QualityRows<'_>> = kept_rows.take();
                 rows.extend(output_slice.chunks_mut(width).map(|value| QualityRows {
                     value,

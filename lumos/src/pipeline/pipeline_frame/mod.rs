@@ -18,10 +18,8 @@ pub(super) enum PipelineFrame {
 }
 
 impl PipelineFrame {
-    /// The frame in RAM, as the warp reads it. A parked frame is read back whole, one pass front
-    /// to back over each of its planes: the warp then reads in whatever order its transform asks —
-    /// a column per output row for a quarter turn — from memory the plan already charges for its
-    /// source, not by faulting pages of a map the plan does not count.
+    /// The frame in RAM, as the warp reads it. A parked frame is read back whole, so the warp's
+    /// transform-order reads hit memory the plan charges for, not pages of a map it does not count.
     pub(super) fn into_resident(self) -> LinearImage {
         match self {
             Self::Resident(image) => image,

@@ -18,15 +18,13 @@ pub(crate) struct Move {
 
 /// A drag of one or more node bodies and ties in canvas-world coordinates.
 ///
-/// A multi-select drag moves the whole group as a single undo entry; a plain
-/// drag carries just the one grabbed body.
+/// A multi-select drag moves the whole group as one undo entry.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct SetPositions {
-    /// One entry per member that still had a placement when the step was
-    /// built, in the drag's member order. A member whose item vanished
-    /// mid-drag is dropped rather than refusing the whole move, so this can be
-    /// shorter than the intent that produced it — and empty, which
-    /// [`Reversible::is_noop`] then filters out.
+    /// One entry per member that still had a placement when the step was built, in the drag's
+    /// member order. A member whose item vanished mid-drag is dropped rather than refusing the
+    /// move, so this can be shorter than the intent's members, and empty, which
+    /// [`Reversible::is_noop`] filters out.
     pub(crate) moves: Vec<Move>,
 }
 
@@ -34,10 +32,9 @@ impl SetPositions {
     /// Fold `next`, a later frame of the same drag, into this step: keep each
     /// member's `from` and adopt its latest `to`.
     ///
-    /// Both frames list their members in the drag's order, and `next` lists a
-    /// subset — a member can vanish mid-drag but never join — so one walk
-    /// pairs them. A member `next` no longer carries keeps the position this
-    /// step last gave it.
+    /// Both frames list members in the drag's order and `next` lists a subset (a member can
+    /// vanish mid-drag but never join), so one walk pairs them. A member `next` no longer
+    /// carries keeps the position this step last gave it.
     pub(crate) fn absorb(&mut self, next: &Self) {
         let mut later = next.moves.iter().peekable();
         for moved in &mut self.moves {

@@ -341,13 +341,11 @@ impl NormFit<'_> {
     ///
     /// Each non-reference frame is paired with the reference through
     /// [`SamplePair::photometric_gain`]'s errors-in-variables fit, on a stratified sample of the
-    /// slot's measured pixels; the offset then puts the frame's median on the reference's. The
-    /// reference itself is the identity by definition.
+    /// slot's measured pixels; the offset then puts the frame's median on the reference's.
     ///
-    /// Fitting against the reference rather than against frame 0 and rescaling afterwards matters:
-    /// the fit clips residuals and weights each side by its own noise, so `gain(a→c)` is not
-    /// `gain(a→b) / gain(c→b)` — chaining through an arbitrary frame would put its noise into every
-    /// other frame's scale.
+    /// Fitting against the reference, not chaining through another frame: the fit clips residuals
+    /// and weights each side by its own noise, so `gain(a→c)` is not `gain(a→b) / gain(c→b)`, and
+    /// the chain would put the middle frame's noise into every scale.
     fn global(self, pixels: &[SlotPixels<'_>]) -> Result<Vec<FrameNorm>, StackError> {
         let planes = self.planes;
         let frames = planes.frames;

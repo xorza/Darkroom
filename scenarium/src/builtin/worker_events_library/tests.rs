@@ -80,16 +80,12 @@ async fn fps_event_throttles_without_source_reexecution_and_preserves_delta_cloc
 
 /// Re-executing the source must not postpone a waiting FPS event.
 ///
-/// `last_fps_emit` belongs to the event callback, which stamps it when it
-/// emits. The lambda also stamping it meant every source execution
-/// restarted the countdown, so an `Always` subscriber reading the source's
-/// outputs — the ordinary way to consume a frame tick — re-executed it
-/// faster than the period and starved the FPS event indefinitely: no
-/// error, no missed-deadline signal, just an event that never fires.
+/// `last_fps_emit` is stamped by the event callback alone: if the lambda stamped it too, every
+/// source execution would restart the countdown and an `Always` subscriber re-executing the
+/// source faster than the period would starve the FPS event with no error.
 ///
-/// Hand-traced at 2 Hz (500 ms period): the tick is armed at t=0, the
-/// source re-executes at t=250 and t=400, and the event must still fire
-/// at its original t=500 rather than being pushed out to 750 and 900.
+/// Hand-traced at 2 Hz (500 ms period): the tick is armed at t=0, the source re-executes at
+/// t=250 and t=400, and the event must still fire at t=500 rather than 750 and 900.
 #[tokio::test(start_paused = true)]
 async fn source_reexecution_does_not_postpone_a_waiting_fps_event() {
     let mut source = FrameSource::new();
@@ -107,12 +103,10 @@ async fn source_reexecution_does_not_postpone_a_waiting_fps_event() {
         assert!(!tick.is_finished(), "the event is not due yet at t={at}ms");
     }
 
-    // t=500: the deadline the event was armed for. Asserted *at* that
-    // instant rather than by awaiting the handle — `start_paused`
-    // auto-advances the clock whenever the runtime goes idle, so a
-    // postponed event still fires eventually and only the exact deadline
-    // tells the two apart. Yielding (rather than sleeping) keeps the main
-    // task runnable, which is what holds the auto-advance off.
+    // t=500: the deadline the event was armed for. Asserted *at* that instant, not by awaiting
+    // the handle: `start_paused` auto-advances the clock when the runtime goes idle, so a
+    // postponed event still fires eventually. Yielding keeps the main task runnable, which holds
+    // the auto-advance off.
     time::advance(Duration::from_millis(100)).await;
     for _ in 0..8 {
         task::yield_now().await;

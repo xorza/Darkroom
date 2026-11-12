@@ -7,14 +7,9 @@ use crate::gpu::Gpu;
 use crate::interleaved::interleaved_desc::InterleavedDesc;
 use crate::interleaved::interleaved_image::InterleavedImage;
 
-/// Image data stored on the GPU as a buffer.
-///
-/// The buffer holds the **tightly-packed** pixel bytes — no row padding (storage
-/// buffers impose none; that's a texture rule). The only concession to wgpu is
-/// that the buffer's *total* size is rounded up to a multiple of 4
-/// (`COPY_BUFFER_ALIGNMENT`); those few trailing bytes are never read back. The
-/// shaders address the buffer per-`u32`-word over this packed layout, so there
-/// is no stride.
+/// Image data on the GPU, as a storage buffer of tightly packed pixel bytes: no row padding, and
+/// no stride, the shaders addressing it per `u32` word. Only the buffer's total size is rounded
+/// up to a multiple of 4 (`COPY_BUFFER_ALIGNMENT`); those trailing bytes are never read back.
 #[derive(Debug)]
 pub struct GpuImage {
     buffer: wgpu::Buffer,
@@ -83,10 +78,8 @@ impl GpuImage {
         Ok(self.finish_readback(&staging))
     }
 
-    /// Reads the image back to the CPU asynchronously.
-    ///
-    /// The readback completes when the device is polled; the polling can happen
-    /// from another thread, and the callback then wakes this future.
+    /// Reads the image back to the CPU asynchronously: the future completes once the device is
+    /// polled, from any thread.
     pub async fn to_image_async(&self, gpu: &Gpu) -> Result<InterleavedImage, GpuError> {
         let readback = self.start_readback(gpu);
         readback.mapped.await.expect("the map callback runs once")?;
@@ -185,10 +178,8 @@ impl Readback {
     }
 }
 
-/// The packed byte size rounded up to a multiple of 4 — wgpu's
-/// `COPY_BUFFER_ALIGNMENT`, i.e. a whole number of `u32` words. The only
-/// "padding" a packed GPU buffer needs (1-3 trailing bytes on the whole buffer,
-/// never per row).
+/// The packed byte size rounded up to a multiple of 4, wgpu's `COPY_BUFFER_ALIGNMENT` and a whole
+/// number of `u32` words: the only padding a buffer has, 1-3 bytes at its end.
 const fn buffer_byte_len(desc: InterleavedDesc) -> u64 {
     desc.byte_len().next_multiple_of(4) as u64
 }

@@ -1,11 +1,9 @@
-//! The floating toolbar pinned to the graph view's top-left corner: a
-//! run/cancel toggle and an event-loop start/stop toggle side by side on one
-//! pill, with three view-framing buttons (reset view, show all, show
-//! selected) stacked beneath on a second pill.
-//! The buttons are opaque chips raised off the pill, so the toolbar stays
-//! legible over both the canvas and any node under it. All carry
-//! hover tooltips; the toggles paint "toggled" while their action is in flight,
-//! and each button maps to an [`AppCommand`].
+//! The floating toolbar pinned to the graph view's top-left corner: a run/cancel toggle and
+//! an event-loop start/stop toggle side by side on one pill, with three view-framing buttons
+//! (reset view, show all, show selected) stacked beneath on a second pill. The buttons are
+//! opaque chips raised off the pill, so the toolbar stays legible over any node under it. The
+//! toggles paint "toggled" while their action is in flight, and each button maps to an
+//! [`AppCommand`].
 
 use palantir::{Align, Configure, Panel, Sizing, Spacing, Ui, WidgetId};
 
@@ -56,17 +54,12 @@ pub(super) fn show(ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
         .margin(Spacing::new(theme.space.sm, theme.space.sm, 0.0, 0.0))
         .gap(theme.space.sm)
         .show(ui, |ui| {
-            // Top row: run/cancel + event-loop toggles, side by side on their
-            // own pill. Both compile and run the whole document.
+            // Both toggles compile and run the whole document.
             pill::dress(Panel::hstack().id_salt("graph_toolbar_run"), theme).show(ui, |ui| {
-                // Run / cancel: toggled while a one-shot run is in
-                // flight.
                 let running = run_state.activity().is_executing();
                 let run_tip = if running { "Cancel run" } else { "Run" };
-                // Run is the one primary action in the cluster — it
-                // alone idles with the accent glyph; the event-loop
-                // toggle sits muted beside it like the framing
-                // buttons below.
+                // Run alone idles with a status-colored glyph; the event-loop toggle sits muted
+                // beside it like the framing buttons below.
                 if Chip::new(run_button_wid(), run_tip)
                     .shortcut(shortcuts::RUN)
                     .selected(running)
@@ -80,7 +73,6 @@ pub(super) fn show(ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
                         RunCommand::Once
                     }));
                 }
-                // Event loop start / stop: toggled while the loop runs.
                 let event_loop_active = run_state.activity().event_loop_active();
                 let events_tip = if event_loop_active {
                     "Stop events"
@@ -100,9 +92,8 @@ pub(super) fn show(ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
                 }
             });
 
-            // View-framing actions, stacked under the run row on their own
-            // pill. Each takes the one route a framing has, which lands it in
-            // this click's second pass.
+            // Each framing action takes the one route a framing has, which lands it in this
+            // click's second pass.
             let framing = Panel::vstack()
                 .id_salt("graph_toolbar_framing")
                 .child_align(Align::TOP_LEFT);

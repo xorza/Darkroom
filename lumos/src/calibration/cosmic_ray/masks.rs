@@ -12,10 +12,9 @@ pub(crate) const CONCURRENT_MASKS: usize = 3;
 
 /// The three cosmic-ray masks a detection holds, one bit per pixel each.
 ///
-/// All three live as long as the detector and are cleared for each plane rather than rebuilt per
-/// iteration or plane, which costs nothing at the peak — [`detect_and_grow`](Self::detect_and_grow)
-/// needed all three live at once anyway, and a Bayer mosaic's largest phase runs first — and saves
-/// two frame-sized allocations per pass and three per plane.
+/// All three live as long as the detector and are cleared per plane, not rebuilt per iteration or
+/// plane: [`detect_and_grow`](Self::detect_and_grow) needs all three live at once anyway, so the
+/// peak is unchanged and the allocations are saved.
 #[derive(Debug)]
 pub(super) struct CrMasks {
     /// Every CR pixel found so far: the in-painting mask, and the count the detector returns.
@@ -56,11 +55,10 @@ impl CrMasks {
     /// carry its light, not a star's. Merges the result into `accumulated` and returns how many
     /// pixels that added — zero ends the detect→replace loop.
     ///
-    /// The contrast is van Dokkum's `L⁺/F > contrast_limit` written in astroscrappy's
-    /// noise-normalized form: comparing the significance image `S'` against
-    /// `contrast_limit·(F/noise)` (rather than raw `L⁺` against `contrast_limit·F`) puts `F` in the
-    /// same units as `S'`, so the `contrast_limit` default carries the same star-core protection as
-    /// astroscrappy/ccdproc. (Raw `L⁺ > contrast_limit·F` is ~2× more aggressive.)
+    /// The contrast is van Dokkum's `L⁺/F > contrast_limit` in astroscrappy's noise-normalized
+    /// form: `S'` against `contrast_limit·(F/noise)` puts `F` in the units of `S'`, so the default
+    /// carries the same star-core protection as astroscrappy/ccdproc; raw `L⁺ > contrast_limit·F`
+    /// is ~2× more aggressive.
     ///
     /// No pixel `never_flagged` holds is a candidate or grown into, as astroscrappy keeps its
     /// saturated stars and bad pixels out with `goodpix`.
@@ -103,8 +101,7 @@ impl CrMasks {
         .grow_box(flags, primary);
         let flags = primary;
 
-        // Word-wise: `flags & !accumulated` is what is newly set, then `accumulated |= flags`. The
-        // padding is clear in both, so whole words count no pixel past a row.
+        // Padding bits are clear in both masks, so whole words count no pixel past a row.
         let mut newly = 0usize;
         for y in 0..accumulated.size().height {
             for (acc, &new) in accumulated

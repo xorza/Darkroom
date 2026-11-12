@@ -11,8 +11,8 @@ pub(crate) const BEZIER_SAMPLES: usize = 16;
 /// link still bows out into a readable curve.
 const MIN_HANDLE: f32 = 30.0;
 
-/// Upper bound on the *vertical-gap* term of [`Wire::data`]'s handle
-/// length, so a tall forward span bows into a gentle S rather than a huge loop.
+/// Upper bound on the vertical-gap term of [`Wire::data`]'s handle length, so a tall forward
+/// span bows into a gentle S rather than a huge loop.
 const MAX_HANDLE: f32 = 120.0;
 
 /// Gain on [`Wire::data`]'s *backward-reach* term: `reach = BACKREACH_GAIN * sqrt(distance)`.
@@ -22,11 +22,9 @@ const MAX_HANDLE: f32 = 120.0;
 /// backlink (~180px) reaches ~135px.
 const BACKREACH_GAIN: f32 = 10.0;
 
-/// One wire's full cubic: the endpoints `p0` → `p3` plus the interior
-/// control points its handle rule placed. Built through [`Wire::data`] or
-/// [`Wire::event`], so the choice of rule happens once — at the only place
-/// that knows which family the curve belongs to — and every consumer
-/// downstream (cull, breaker, paint) takes the finished curve.
+/// One wire's full cubic: the endpoints `p0` → `p3` plus the interior control points its handle
+/// rule placed. Built through [`Wire::data`] or [`Wire::event`], so the rule is chosen once, where
+/// the curve's family is known, and every consumer (cull, breaker, paint) takes the finished curve.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Wire {
     pub(crate) p0: Vec2,
@@ -36,23 +34,18 @@ pub(crate) struct Wire {
 }
 
 impl Wire {
-    /// A left-to-right cubic between `p0` (the output port) and `p3` (the
-    /// input port): both handles run horizontally so the curve leaves `p0`
-    /// rightward and arrives at `p3` leftward. Shared by the permanent and
-    /// in-flight draws so a preview always matches its eventual committed
-    /// curve exactly.
+    /// A left-to-right cubic between `p0` (the output port) and `p3` (the input port): both
+    /// handles run horizontally, so the curve leaves `p0` rightward and arrives at `p3`
+    /// leftward. Shared by the permanent and in-flight draws, so a preview matches its
+    /// committed curve exactly.
     ///
     /// The handle length is the larger of two terms:
-    /// - **Forward** — half the *vertical* gap (clamped to `[MIN_HANDLE,
-    ///   MAX_HANDLE]`): near-level anchors stay taut, stacked ones bow into a
-    ///   gentle S without over-looping on a tall span.
-    /// - **Backward** — when `p3` sits *left* of `p0` the curve must double back
-    ///   on itself. A short handle whips it straight across whatever sits between
-    ///   (the "hidden under the node" look); reaching out by `BACKREACH_GAIN *
-    ///   sqrt(distance)` instead bows both ends into one wide, smooth loop that
-    ///   leaves `p0` rightward, arcs around, and re-enters `p3` leftward. The
-    ///   `sqrt` keeps the loop scaling with the backward distance (so a far-away
-    ///   `p3` still gets a proper loop, not a stub) while growing slowly enough
+    /// - **Forward**: half the vertical gap (clamped to `[MIN_HANDLE, MAX_HANDLE]`), so
+    ///   near-level anchors stay taut and stacked ones bow into a gentle S.
+    /// - **Backward**: when `p3` sits left of `p0` the curve must double back. A short handle
+    ///   whips it straight across whatever sits between; reaching out by
+    ///   `BACKREACH_GAIN * sqrt(distance)` bows both ends into one wide, smooth loop. The
+    ///   `sqrt` keeps the loop scaling with the backward distance while growing slowly enough
     ///   that it never sprawls out to the sides.
     pub(crate) fn data(p0: Vec2, p3: Vec2) -> Self {
         let vertical = ((p3.y - p0.y).abs() * 0.5).clamp(MIN_HANDLE, MAX_HANDLE);
@@ -66,11 +59,10 @@ impl Wire {
         }
     }
 
-    /// An event wire from emitter `p0` (a triangle on the right of its node)
-    /// to subscriber pin `p3` (the top-left pin). The emitter handle leaves
-    /// rightward like a data output; the subscriber handle points
-    /// **up-left**, matching the pin's outward-pointing triangle so the wire
-    /// meets it head-on.
+    /// An event wire from emitter `p0` (a triangle on the right of its node) to subscriber pin
+    /// `p3` (the top-left pin). The emitter handle leaves rightward like a data output; the
+    /// subscriber handle points up-left, matching the pin's outward-pointing triangle so the
+    /// wire meets it head-on.
     pub(crate) fn event(p0: Vec2, p3: Vec2) -> Self {
         let d = (p0.distance(p3) * 0.4).max(MIN_HANDLE);
         // (-1, -1) is up-left in screen space (y grows downward).

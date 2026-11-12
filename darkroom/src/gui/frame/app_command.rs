@@ -134,9 +134,8 @@ pub(crate) enum EditCommand {
 /// A click on an `FsPath` input's inline pick button: the port to set, and the
 /// picker config to open the dialog with.
 ///
-/// A named payload rather than the two values loose, because it travels as an
-/// `AppCommand` through `App` and back — the dialog can only run once the
-/// record pass is over, so the click and the effect are frames apart.
+/// A named payload, as it travels as an `AppCommand` through `App`: the dialog can only run once
+/// the record pass is over.
 #[derive(Clone, Debug)]
 pub(crate) struct PathPick {
     pub(crate) port: InputPort,

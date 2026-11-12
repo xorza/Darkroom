@@ -80,15 +80,10 @@ impl DataType {
         })
     }
 
-    /// Whether a value of type `source` may feed a port of type `self` — the
-    /// **wire** half of the compile-boundary gate.
-    ///
-    /// Deliberately looser than type equality: an `Any` input accepts
-    /// everything, and the three scalar kinds form one coercion class
-    /// (`is_numeric_scalar`). The **literal** half
-    /// is `accepts_const`, which reads the same class
-    /// off the value side — so wiring and constants are exactly as permissive
-    /// as what executes.
+    /// Whether a value of type `source` may feed a port of type `self`: the **wire** half of the
+    /// compile-boundary gate. Looser than type equality: an `Any` input accepts everything, and
+    /// the three scalar kinds form one coercion class (`is_numeric_scalar`). The **literal** half
+    /// is `accepts_const`, which reads the same class off the value side.
     pub(crate) fn compatible_with(&self, source: &Self) -> bool {
         if matches!(self, Self::Any) {
             return true;
@@ -100,31 +95,23 @@ impl DataType {
     }
 
     /// The scalar coercion class, type side: `Float`/`Int`/`Bool` are one kind to a runtime read,
-    /// since
-    /// [`as_f64`](ConstValue::as_f64)/[`as_i64`](ConstValue::as_i64)/[`as_bool`](ConstValue::as_bool)
-    /// convert freely between them — `Bool` reads as `0`/`1`, `Float` truncates to int, any nonzero
-    /// reads as `true`. [`ConstValue::is_numeric_scalar`] is the same class on the value side.
+    /// since [`as_f64`](ConstValue::as_f64), [`as_i64`](ConstValue::as_i64) and
+    /// [`as_bool`](ConstValue::as_bool) convert freely between them.
+    /// [`ConstValue::is_numeric_scalar`] is the same class on the value side.
     const fn is_numeric_scalar(&self) -> bool {
         matches!(self, Self::Float | Self::Int | Self::Bool)
     }
 
-    /// Whether `value` is a well-formed literal for a port declared `self` —
-    /// **the** table, read by both const gates.
+    /// Whether `value` is a well-formed literal for a port declared `self`: **the** table, read
+    /// by both const gates, which differ in exactly two arms:
     ///
-    /// The two differ in exactly the two arms below, and nowhere else, which
-    /// is why they are one function with a knob rather than two matches to
-    /// keep in step:
-    ///
-    /// - **Scalars.** [`Strictness::Authored`] takes the whole coercion class,
-    ///   so a document's literal is as permissive as the runtime read that
-    ///   consumes it. [`Strictness::Declared`] demands the exact kind, so a
-    ///   `Bool` default on an `Int` port is an authoring slip caught at
-    ///   registration rather than a coercion nobody chose.
-    /// - **Enums.** A literal is a variant *name*; whether that name is
-    ///   registered is a question only a [`Library`](crate::Library) can
-    ///   answer, so the caller supplies `enum_variant`. Declaration time has
-    ///   no registry yet and passes `|_, _| true` — `Library::register_type`
-    ///   re-checks declared defaults once the type arrives.
+    /// - **Scalars.** [`Strictness::Authored`] takes the whole coercion class, as permissive as
+    ///   the runtime read that consumes it. [`Strictness::Declared`] demands the exact kind, so a
+    ///   `Bool` default on an `Int` port is caught at registration.
+    /// - **Enums.** A literal is a variant *name*; only a [`Library`](crate::Library) knows
+    ///   whether it is registered, so the caller supplies `enum_variant`. Declaration time has no
+    ///   registry yet and passes `|_, _| true`; `Library::register_type` re-checks declared
+    ///   defaults once the type arrives.
     ///
     /// A `Custom` port has no literal form at all, and `Any` takes anything.
     pub(crate) fn accepts_const(
@@ -159,13 +146,10 @@ impl DataType {
     }
 }
 
-/// Which const gate is asking [`DataType::accepts_const`] — the whole of what
-/// separates the two.
-///
-/// They are not the same question asked twice: one polices a *declaration* a
-/// programmer wrote, before any document exists; the other polices a *literal*
-/// a user authored, against the same library a run will use. Held apart so the
-/// looser one cannot be applied where the stricter was meant.
+/// Which const gate is asking [`DataType::accepts_const`]: one polices a *declaration* a
+/// programmer wrote, before any document exists; the other a *literal* a user authored, against
+/// the library a run will use. Held apart so the looser cannot be applied where the stricter was
+/// meant.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Strictness {
     /// A `Func`'s own declared default, at registration.

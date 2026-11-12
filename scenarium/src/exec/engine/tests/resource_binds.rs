@@ -107,14 +107,11 @@ fn path_graph(data_path: &str, mode: CacheMode, observed: Observed) -> TestGraph
 /// A declared path with no determinate identity denies the node its **cache
 /// key**, not its turn.
 ///
-/// Failing the node outright read "unstampable" as "unusable", and those are
-/// different claims: a `None` digest is where every `Impure` node already
-/// sits, so the node runs — uncached — and only its lambda knows whether the
-/// path mattered. One that reads the file fails with its own message; one that
-/// never reads it, or writes the path it was handed, succeeds. What the node
-/// must not do is go quiet, because a node that asked to be cached and
-/// silently never is has no other symptom than a cache that stops hitting.
-/// Hence the warning, and hence its own test below.
+/// A `None` digest is where every `Impure` node already sits, so the node runs — uncached — and
+/// only its lambda knows whether the path mattered. One that reads the file fails with its own
+/// message; one that never reads it, or writes the path it was handed, succeeds. What the node
+/// must not do is go quiet, because a node that asked to be cached and silently never is has no
+/// other symptom than a cache that stops hitting. Hence the warning, and its own test below.
 #[tokio::test]
 async fn an_unidentifiable_path_runs_the_node_uncached() {
     let dir = TempDir::new("locked");
@@ -129,9 +126,8 @@ async fn an_unidentifiable_path_runs_the_node_uncached() {
             .any(|line| line.contains("running uncached"))
     };
 
-    // `loader` does read the file, so the locked directory reaches it as its
-    // own failure — and `dependent` skips as errored-upstream, the same
-    // cascade failing the node at stamp time produced.
+    // `loader` does read the file, so the locked directory reaches it as its own failure — and
+    // `dependent` skips as errored-upstream.
     let assert_lambda_failed = |run: &RunOutcome, loader: &str, dependent: &str| {
         assert!(
             warned(run),
@@ -166,8 +162,7 @@ async fn an_unidentifiable_path_runs_the_node_uncached() {
     drop(locked);
     assert_lambda_failed(&run, "load_text", "capture");
 
-    // The same file reached through a producer's value, known only at the
-    // node's turn. Same outcome, same route.
+    // The same file reached through a producer's value, known only at the node's turn.
     let mut e = TestEngine::over(path_graph(&data_path, CacheMode::None, Observed::default()));
     let Some(locked) = lock() else {
         return;
@@ -176,9 +171,8 @@ async fn an_unidentifiable_path_runs_the_node_uncached() {
     drop(locked);
     assert_lambda_failed(&run, "load_text", "annotate");
 
-    // The case failing at stamp time got wrong. The path is just as
-    // unstampable, but this lambda never reads it, so there is nothing for the
-    // locked directory to break: it runs, succeeds, and is merely uncached.
+    // The path is just as unstampable, but this lambda never reads it, so there is nothing for
+    // the locked directory to break: it runs, succeeds, and is merely uncached.
     let mut g = TestGraph::new();
     g.add("ignores_path", |n: NodeSpec| {
         n.pure()
@@ -213,11 +207,9 @@ async fn an_unidentifiable_path_runs_the_node_uncached() {
     );
 }
 
-/// The core regression: a path arriving over a **Bind** edge keys the loader
-/// on the file behind the *delivered value*. Editing the file re-keys and
-/// recomputes the loader (pre-fix the chain's digests never changed, so the
-/// stale decode was served forever), while an unchanged file still reuses
-/// the cache — the reach-time re-stamp keeps wired-path loaders cacheable
+/// The core regression: a path arriving over a **Bind** edge keys the loader on the file behind
+/// the *delivered value*. Editing the file re-keys and recomputes the loader, while an unchanged
+/// file still reuses the cache — the reach-time re-stamp keeps wired-path loaders cacheable
 /// instead of tainting them uncacheable.
 #[tokio::test]
 async fn wired_path_rekeys_loader_on_file_change() {
@@ -276,14 +268,12 @@ async fn wired_path_rekeys_loader_on_file_change() {
     );
 }
 
-/// Disk persistence across a reopen with a wired path: the loader's blob is
-/// keyed under the delivered path's live identity, so a fresh engine reuses
-/// it while the file is unchanged — hydrating the on-disk path producer just
-/// to stamp — and recomputes once the file changes, while the producer
-/// itself stays a disk hit. The downstream `annotate` proves the re-stamp
-/// *cascade*: on reopen its own pre-run digest is `None` too (it folds the
-/// loader's), and its reach-time re-stamp lands on its blob — the whole
-/// tainted cone skips compute, not just the loader.
+/// Disk persistence across a reopen with a wired path: the loader's blob is keyed under the
+/// delivered path's live identity, so a fresh engine reuses it while the file is unchanged —
+/// hydrating the on-disk path producer just to stamp — and recomputes once the file changes,
+/// while the producer itself stays a disk hit. The downstream `annotate` proves the re-stamp
+/// *cascade*: on reopen its own pre-run digest is `None` too, and its reach-time re-stamp lands
+/// on its blob — the whole tainted cone skips compute, not just the loader.
 #[tokio::test]
 async fn wired_path_disk_reuse_survives_reopen_until_file_changes() {
     let dir = TempDir::new("disk");

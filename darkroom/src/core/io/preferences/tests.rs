@@ -123,8 +123,6 @@ fn partial_preferences_fill_defaults() {
     }
 }
 
-/// The default reopens the last document and asks before it discards changes,
-/// remembers no window, and shows the theme backdrop with nearest sampling.
 /// Each field but the window's is a choice: a change to it reads as different, and a change to the
 /// window alone reads as the same.
 #[test]
@@ -159,6 +157,8 @@ fn every_field_but_the_window_is_a_choice() {
     assert!(resized.same_choices(&base), "the window is no choice");
 }
 
+/// The default reopens the last document and asks before it discards changes,
+/// remembers no window, and shows the theme backdrop with nearest sampling.
 #[test]
 fn default_preferences() {
     let defaults = Preferences::default();

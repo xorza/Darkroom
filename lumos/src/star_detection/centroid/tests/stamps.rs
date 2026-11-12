@@ -68,7 +68,7 @@ fn extract(pixels: &Buffer2<f32>, pos: DVec2, radius: usize) -> Option<StampFit>
 /// flat 0.5 with 0.9 at (32, 32): radius 5 about (32, 32) starts at (27, 27) and holds 121
 /// samples; radius 2 starts at (30, 30) with 25; (32.3, 32.7) rounds to (32, 33), so it starts at
 /// (30, 31) and sits at (2.3, 1.7) within it. A stamp past the frame's edge is none — the edges
-/// are `valid_stamp_position`'s to pin.
+/// are `valid_stamp_position_covers_boundaries_and_rounding`'s to pin.
 #[test]
 fn a_stamp_is_the_square_about_the_rounded_position() {
     let mut pixels = Buffer2::new_filled((64, 64), 0.5f32);

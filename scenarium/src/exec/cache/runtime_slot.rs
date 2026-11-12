@@ -15,9 +15,8 @@ impl OutputSnapshot {
         Self { values }
     }
 
-    /// The values, in output-port order. Read-only outside this file: a
-    /// snapshot's length is its node's arity, so nothing but the slot that
-    /// owns it may resize or replace what it holds.
+    /// The values, in output-port order. Read-only outside this file: a snapshot's length is its
+    /// node's arity, so nothing but the owning slot may resize or replace what it holds.
     pub(crate) fn values(&self) -> &[DynamicValue] {
         &self.values
     }
@@ -46,9 +45,8 @@ impl OutputSnapshot {
 
 /// Whether one node's cached output is resident, and whether disk backs it.
 ///
-/// Private to the slot, like the field holding it: every read and write goes
-/// through a method below, so "resident" has one definition and no caller can
-/// leave the slot in a shape the slot itself would not produce.
+/// Private to the slot, so "resident" has one definition and no caller can leave the slot in a
+/// shape the slot itself would not produce.
 #[derive(Default, Debug)]
 enum ValueState {
     /// No cached output — never produced, evicted, or cleared for re-execution.
@@ -59,12 +57,8 @@ enum ValueState {
     Resident {
         snapshot: OutputSnapshot,
         produced_under: Option<Digest>,
-        /// What disk holds for the value.
-        ///
-        /// Rides *with* the value because that is the only time it is ever read:
-        /// a reuse consults it exactly when serving from RAM, and a value that
-        /// is gone has no durability left to be wrong about. Dropping the value
-        /// therefore drops the belief, with no second call to forget.
+        /// What disk holds for the value. Rides *with* the value because it is only read when
+        /// serving from RAM, and dropping the value drops the belief with no second call.
         blob: BlobState,
     },
 }
@@ -76,8 +70,7 @@ enum BlobState {
     Owed,
     /// A blob under the value's digest is believed to be on disk.
     Written,
-    /// The value holds a type the program's codecs cannot encode, so no blob
-    /// can be written for it.
+    /// The value holds a type the program's codecs cannot encode, so no blob can be written.
     Unwritable,
 }
 
@@ -89,8 +82,7 @@ pub(crate) struct RuntimeSlot {
     /// stamped producer-first by the resolver and refreshed at execution reach only for a late
     /// bound-path identity
     /// ([`RuntimeCache::node_digest`](crate::exec::cache::runtime_cache::RuntimeCache::node_digest)).
-    /// A resident value hits iff its `produced_under` equals this — so a flipped-back input can't
-    /// serve a stale value.
+    /// A resident value hits iff its `produced_under` equals this.
     pub(crate) cur_digest: Option<Digest>,
     value: ValueState,
 }
@@ -100,31 +92,25 @@ pub(crate) struct RuntimeSlot {
 pub(crate) enum OutputRead {
     /// A clone, leaving the slot's copy resident.
     Clone,
-    /// The value itself, moved out and leaving `Unbound` behind — the
-    /// executor's last-read fast path for a non-RAM producer: the RAM copy
-    /// would be released right after anyway, and handing it over leaves the
-    /// consumer the sole `Arc` holder, so [`DynamicValue::into_custom`] can
-    /// reuse the allocation in place.
+    /// The value itself, moved out and leaving `Unbound` behind — the executor's last-read fast
+    /// path for a non-RAM producer: the consumer becomes the sole `Arc` holder, so
+    /// [`DynamicValue::into_custom`] can reuse the allocation in place.
     Take,
 }
 
 impl RuntimeSlot {
-    /// Drop the cached output. The run loop calls this on the failure paths — a node
-    /// that errored or was skipped for an errored dependency — so a stale prior value
-    /// isn't left resident as if it were this run's result. (Successful runs reuse
-    /// the buffer in place; see [`invoke_outputs`](Self::invoke_outputs).)
+    /// Drop the cached output. The run loop calls this on the failure paths — a node that
+    /// errored or was skipped for an errored dependency — so a stale prior value isn't left
+    /// resident as this run's result. (Successful runs reuse the buffer in place; see
+    /// [`invoke_outputs`](Self::invoke_outputs).)
     pub(crate) fn clear_output(&mut self) {
         self.value = ValueState::Empty;
     }
 
     /// Take a whole snapshot decoded from this node's blob — the counterpart to
-    /// [`clear_output`](Self::clear_output), and the only way a value arrives
-    /// whole rather than port by port through
-    /// [`invoke_outputs`](Self::invoke_outputs).
-    ///
-    /// Reading a blob is itself proof it is there, so residency and durability
-    /// are established in one move rather than stamped separately by each
-    /// caller.
+    /// [`clear_output`](Self::clear_output), and the only way a value arrives whole rather than
+    /// port by port through [`invoke_outputs`](Self::invoke_outputs). Reading a blob is itself
+    /// proof it is there, so residency and durability are established in one move.
     pub(crate) fn load_from_blob(&mut self, snapshot: OutputSnapshot, digest: Digest) {
         self.value = ValueState::Resident {
             snapshot,
@@ -133,17 +119,13 @@ impl RuntimeSlot {
         };
     }
 
-    /// Whether the resident value still owes a blob: none is believed to be
-    /// on disk, and none was found impossible to write.
+    /// Whether the resident value still owes a blob: none is believed to be on disk, and none was
+    /// found impossible to write.
     ///
-    /// Belief, not proof: it records what this engine last wrote or read, so a
-    /// blob deleted behind its back still reads as present. Proving it would
-    /// take a read per node per run, which is what this exists to avoid — a
-    /// user who suspects the store is the one who reaches for a flush.
-    ///
-    /// No digest to pass: this is only ever asked of a value already established
-    /// as a hit, and [`cur_snapshot`](Self::cur_snapshot) settled which
-    /// digest that was.
+    /// Belief, not proof: it records what this engine last wrote or read, so a blob deleted behind
+    /// its back still reads as present. Proving it would take a read per node per run; a user who
+    /// suspects the store reaches for a flush. No digest to pass: this is only asked of a value
+    /// already established as a hit by [`cur_snapshot`](Self::cur_snapshot).
     pub(crate) const fn owes_blob(&self) -> bool {
         matches!(
             self.value,
@@ -156,11 +138,9 @@ impl RuntimeSlot {
 
     /// Record what a store left on disk for the resident value.
     ///
-    /// A write that did not land leaves the node owing one, and the next
-    /// resident reuse tries again — which is what makes a transient full disk
-    /// heal itself rather than persist as a node that lies about being cached.
-    /// A value no codec encodes is not retried: nothing about it changes until
-    /// the value or the codecs do.
+    /// A write that did not land leaves the node owing one, and the next resident reuse tries
+    /// again, so a transient full disk heals itself. A value no codec encodes is not retried:
+    /// nothing about it changes until the value or the codecs do.
     pub(crate) const fn note_store(&mut self, outcome: &StoreResult) {
         let ValueState::Resident { blob, .. } = &mut self.value else {
             return;
@@ -204,9 +184,8 @@ impl RuntimeSlot {
         })
     }
 
-    /// Release a single output value (to `Unbound`), keeping its siblings — the
-    /// mid-run per-output release for a non-RAM producer whose one output just
-    /// went spent while others are still owed to other consumers.
+    /// Release a single output value (to `Unbound`), keeping its siblings — the mid-run release
+    /// for a non-RAM producer whose one output went spent while others are still owed.
     pub(crate) fn clear_output_port(&mut self, port_idx: u32) {
         let ValueState::Resident { snapshot, .. } = &mut self.value else {
             panic!("an output can only be released from a resident slot");
@@ -218,14 +197,10 @@ impl RuntimeSlot {
         snapshot.values[port_idx as usize] = DynamicValue::Unbound;
     }
 
-    /// The resident values, but only where they were produced under the digest
-    /// the slot currently carries — the one definition of "the bytes are here",
-    /// which cache reuse, the executor's input read, and the disk store all rely
-    /// on. A `None` current digest (an impure cone) never qualifies, nor does a
-    /// value produced under a *different* digest, which is what a changed input
-    /// leaves behind.
-    ///
-    /// It lives here because both halves of the test are this slot's own fields.
+    /// The resident values, but only where they were produced under the digest the slot currently
+    /// carries — the one definition of "the bytes are here", relied on by cache reuse, the
+    /// executor's input read, and the disk store. A `None` current digest (an impure cone) never
+    /// qualifies, nor does a value produced under a *different* digest.
     pub(crate) fn cur_snapshot(&self) -> Option<&OutputSnapshot> {
         let ValueState::Resident {
             snapshot,
@@ -238,11 +213,10 @@ impl RuntimeSlot {
         (self.cur_digest.is_some() && *produced_under == self.cur_digest).then_some(snapshot)
     }
 
-    /// Prepare the slot for a lambda invocation and hand back the output buffer the
-    /// lambda writes. A resident buffer is reused **in place**, cleared to `Unbound`,
-    /// and `resize`d to the current arity. Clearing prevents a skipped output from
-    /// retaining a value produced by an earlier run. `produced_under` stays as-is
-    /// until [`stamp_produced`](Self::stamp_produced) updates it on success.
+    /// Prepare the slot for a lambda invocation and hand back the output buffer the lambda
+    /// writes. A resident buffer is reused **in place**, cleared to `Unbound` (so a skipped output
+    /// retains nothing from an earlier run), and `resize`d to the current arity. `produced_under`
+    /// stays as-is until [`stamp_produced`](Self::stamp_produced) updates it on success.
     pub(crate) fn invoke_outputs(&mut self, output_count: usize) -> &mut [DynamicValue] {
         match &mut self.value {
             ValueState::Resident { snapshot, .. } => snapshot.reset(output_count),
@@ -279,9 +253,8 @@ impl RuntimeSlot {
             .collect()
     }
 
-    /// Stamp the resident value with the node's current content digest on a successful
-    /// run: `produced_under` turns it into a cache hit for the next run (RAM) and the
-    /// key its disk blob is stored under.
+    /// Stamp the resident value with the node's current content digest on a successful run:
+    /// `produced_under` makes it a RAM hit next run and the key its disk blob is stored under.
     pub(crate) fn stamp_produced(&mut self) {
         let digest = self.cur_digest;
         let ValueState::Resident {
@@ -293,9 +266,8 @@ impl RuntimeSlot {
             panic!("a node's output must be resident when it is stamped produced");
         };
         *produced_under = digest;
-        // A value this run just computed is not on disk until the store that
-        // follows says so — and the buffer it was written into may be carrying
-        // the previous value's answer.
+        // Not on disk until the store that follows says so, and the buffer may carry the previous
+        // value's answer.
         *blob = BlobState::Owed;
     }
 }
@@ -306,10 +278,8 @@ pub(crate) mod internals {
     use crate::exec::cache::runtime_slot::{BlobState, OutputSnapshot, RuntimeSlot, ValueState};
 
     impl RuntimeSlot {
-        /// Seed a value the run loop did not compute and no blob backs — how a
-        /// fixture stands a prior run up without one. Production has only
-        /// [`load_from_blob`](RuntimeSlot::load_from_blob), which is the one way
-        /// a whole value legitimately arrives from outside the run loop.
+        /// Seed a value the run loop did not compute and no blob backs — how a fixture stands a
+        /// prior run up. Production has only [`load_from_blob`](RuntimeSlot::load_from_blob).
         pub(crate) fn load_output(
             &mut self,
             snapshot: OutputSnapshot,

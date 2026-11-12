@@ -9,9 +9,9 @@ use crate::math::error_function;
 ///
 /// The profile fits are handed samples of their own model, so they must land on the truth to the
 /// f32 rounding of the samples (≤ 1e-6 px; see `gaussian_fit`'s `RecoveryCase`), and every one must
-/// converge. `measure_star`'s moments start at the seed and contract by 1/1.64 a step at the
-/// matched window (see `convergence`), so ten steps leave the start's error times 1.64⁻¹⁰ =
-/// 7.1e-3, with 1% for the sampling.
+/// converge. `measure_star`'s moments start at the seed and a plain fixed-point step contracts by
+/// 1/1.64 at the matched window (see `convergence`), so the converged centre is within the start's
+/// error times 1.64⁻¹⁰ = 7.1e-3, with 1% for the sampling.
 #[test]
 fn every_method_on_a_sub_pixel_grid() {
     let size = USize2::new(32, 32);

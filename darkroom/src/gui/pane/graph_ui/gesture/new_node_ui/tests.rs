@@ -31,18 +31,15 @@ fn bulk_library(n: usize) -> Library {
 /// The new-node palette keeps its search field and its results inside the
 /// height cap, at whatever height the field actually measures.
 ///
-/// The results `Scroll` has to carry an explicit cap of its own — a stack
-/// hands every non-`Fill` child its full main extent, so a `Hug` scroll offered
-/// the popup's cap takes all of it and shoves the search row past the bottom.
-/// The cap is measured off the field's real height, so both cases below run
-/// the same assertion, the second with the field's text and the popup's
-/// padding scaled well up.
+/// The results `Scroll` has to carry an explicit cap of its own: a stack hands every non-`Fill`
+/// child its full main extent, so a `Hug` scroll offered the popup's cap takes all of it and
+/// shoves the search row past the bottom. Both cases below run the same assertion, the second
+/// with the field's text and the popup's padding scaled well up.
 #[test]
 fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
     use palantir::Rect;
 
-    /// The surface the palette opens against — 900 px tall, which is what the
-    /// cap below is resolved from.
+    /// The surface the palette opens against, 900 px tall, which the cap is resolved from.
     const SURFACE: UVec2 = UVec2::new(1200, 900);
 
     /// The two rects the height cap divides between, and the cap itself.
@@ -56,12 +53,10 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
     /// Records one palette open, with `restyle` applied to the live
     /// `Ui::theme` first.
     fn open_palette(restyle: impl Fn(&mut palantir::Theme)) -> Palette {
-        // Enough rows in one category to overflow any sane cap, so the scroll
-        // is genuinely competing for the popup's height. No nodes placed: the
-        // palette is what spawns them.
+        // Enough rows in one category to overflow any sane cap, so the scroll competes for the
+        // popup's height.
         let library = bulk_library(60);
-        // Real shaping: the search field sizes to its text, which is the
-        // measurement the cap has to divide around.
+        // Real shaping: the search field sizes to its text, which the cap divides around.
         let mut h = CanvasHarness::shaping_text(
             DocumentFixture::with_library(Graph::default(), library),
             SURFACE,
@@ -69,13 +64,11 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
         restyle(h.ui.ui_mut().theme_mut());
 
         h.frame();
-        // Right-click on empty canvas opens the palette; give it two frames so
-        // the search field has measured and the cap reads its real height.
+        // Two frames, so the search field has measured and the cap reads its real height.
         h.ui.right_click(Vec2::new(500.0, 400.0));
         h.prime(2);
 
-        // The same cap `NewNodeUi::apply` resolves, against this harness's
-        // 900 px surface.
+        // The same cap `NewNodeUi::record` resolves, against this harness's surface.
         let cap = popup_cap(&h.ctx.theme, SURFACE.y as f32);
         Palette {
             field: h.ui.rect(search_row_wid()).expect("search row recorded"),
@@ -84,10 +77,9 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
         }
     }
 
-    /// The field sits above the results, and the two plus the popup's own
-    /// inset fit the cap with no slack the inset doesn't account for —
-    /// which catches an allowance that over-subtracts as well as one that
-    /// under-subtracts.
+    /// The field sits above the results, and the two plus the popup's own inset fit the cap with
+    /// no slack the inset doesn't account for, which catches an allowance that over-subtracts as
+    /// well as one that under-subtracts.
     fn assert_fits(palette: Palette, menu: &palantir::MenuTheme, label: &str) {
         let Palette {
             field,
@@ -98,12 +90,10 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
             field.max().y <= results.min.y + 0.5,
             "{label}: the results overlap the search field ({field:?} vs {results:?})",
         );
-        // Spanned from the field's top to the results' bottom rather than
-        // rebuilt from the terms `space_above_results` adds up: a term missing
-        // from both sides of a rebuilt sum cancels, and the test passes over
-        // exactly the gap the popup then paints its rows outside. The inset
-        // around the span is the theme's padding plus the panel's border, which
-        // palantir folds into the padding on every side.
+        // Spanned from the field's top to the results' bottom rather than rebuilt from the terms
+        // `space_above_results` adds up: a term missing from both sides of a rebuilt sum
+        // cancels. The inset around the span is the theme's padding plus the panel's border,
+        // which palantir folds into the padding on every side.
         let inset = menu.padding.sums().h + 2.0 * menu.panel.paint.border.width;
         let used = inset + (results.max().y - field.min.y);
         assert!(
@@ -112,9 +102,8 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
             field.size.h,
             results.size.h,
         );
-        // With 60 rows the results always want more room than they get, so the
-        // area has to claim everything the inset didn't — an allowance that
-        // over-subtracts would leave a visible dead band here.
+        // With 60 rows the results always want more room than they get, so the area has to claim
+        // everything the inset didn't; an over-subtracting allowance would leave a dead band.
         assert!(
             used >= cap - 1.0,
             "{label}: {} px of the {cap} cap went unused (used {used})",
@@ -126,9 +115,8 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
     let small = open_palette(|_| {});
     assert_fits(small, &plain.menu, "default theme");
 
-    // Now restyle both terms a fixed allowance could never track: a much
-    // bigger search field, and a much roomier popup. The results area has to
-    // give up exactly what they took.
+    // Restyle both terms a fixed allowance could never track: a much bigger search field and a
+    // much roomier popup. The results area has to give up exactly what they took.
     let mut restyled = palantir::Theme::stock(palantir::ColorScheme::Dark);
     enlarge(&mut restyled);
     let big = open_palette(enlarge);
@@ -148,18 +136,16 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
     );
 }
 
-/// An idle frame that only *paints* must not read as the canvas having been
-/// away — the open palette focuses its search field, whose caret blink wakes
-/// the runtime with no input behind it, and that wake runs no record pass.
+/// An idle frame that only paints must not read as the canvas having been away: the open
+/// palette focuses its search field, whose caret blink wakes the runtime with no input behind
+/// it, and that wake runs no record pass.
 ///
-/// A stamp that counted painted frames would see a gap at every blink, and the
-/// next real frame would reset every in-flight gesture, the palette with them.
-/// The reset is `GraphUi`-wide, so the palette here stands in for every
-/// gesture the same blink would drop.
+/// A stamp that counted painted frames would see a gap at every blink, and the next real frame
+/// would reset every in-flight gesture. The reset is `GraphUi`-wide, so the palette stands in
+/// for every gesture.
 #[test]
 fn a_caret_blink_does_not_read_as_the_canvas_having_been_away() {
-    /// Past the caret's blink half-period, so the wake has fired by the frame
-    /// below and that frame has nothing else to do.
+    /// Past the caret's blink half-period, so the wake has fired by the frame below.
     const IDLE: Duration = Duration::from_millis(600);
 
     let mut h = CanvasHarness::new(DocumentFixture::with_library(
@@ -179,9 +165,7 @@ fn a_caret_blink_does_not_read_as_the_canvas_having_been_away() {
          this test is about",
     );
 
-    // The smallest input there is: the pointer moves within the row it was
-    // already over. Nothing about the palette changed — only the frame the
-    // blink slipped in between.
+    // The smallest input there is: the pointer moves within the row it was already over.
     h.ui.hover(opened.center() + Vec2::new(1.0, 0.0));
     h.prime(1);
     assert_eq!(
@@ -191,9 +175,8 @@ fn a_caret_blink_does_not_read_as_the_canvas_having_been_away() {
     );
 }
 
-/// The search reports a change only when its fold changed, so the palette
-/// filters its rows once per edit of the query and not on every frame — and
-/// not when the edit only changed the case.
+/// The search reports a change only when its fold changed, so the palette filters once per edit
+/// of the query, not every frame and not when the edit only changed the case.
 #[test]
 fn the_search_reports_only_a_changed_fold() {
     let mut search = Search::default();

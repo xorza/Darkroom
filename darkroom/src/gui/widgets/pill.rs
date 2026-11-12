@@ -7,12 +7,10 @@ use palantir::{Configure, Panel, Sense, Separator, Sizing, Spacing, Ui};
 
 use crate::gui::theme::Theme;
 
-/// One group pill: `panel` (a caller-configured `Panel::hstack`
-/// / `vstack` carrying its id and any alignment) dressed in the shared
-/// pill layout — hugging, chip gap, pill padding, fill — for the
-/// caller to show. The pill senses pointer gestures itself, so a drag or
-/// scroll starting between chips stays on the pill instead of falling
-/// through to the canvas or image beneath.
+/// One group pill: `panel` (a caller-configured `Panel::hstack` / `vstack` carrying its id and
+/// any alignment) dressed in the shared pill layout. The pill senses pointer gestures itself, so
+/// a drag or scroll starting between chips stays on the pill instead of falling through to the
+/// canvas or image beneath.
 pub(crate) fn dress(panel: Panel, theme: &Theme) -> Panel {
     panel
         .size((Sizing::HUG, Sizing::HUG))
@@ -28,9 +26,8 @@ pub(crate) fn height(theme: &Theme) -> f32 {
     theme.icon.toolbar.side() + 2.0 * theme.space.xs
 }
 
-/// Thin horizontal rule between concept groups sharing one column
-/// (vstack) pill, inset from the pill's chrome on both ends. Grow an axis
-/// parameter when a row pill first needs one.
+/// Thin horizontal rule between concept groups sharing one column (vstack) pill, inset from the
+/// pill's chrome on both ends.
 pub(crate) fn rule(ui: &mut Ui, theme: &Theme) {
     Separator::horizontal()
         .margin(Spacing::new(theme.space.xs, 0.0, theme.space.xs, 0.0))

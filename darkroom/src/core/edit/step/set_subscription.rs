@@ -11,9 +11,8 @@ use crate::core::edit::step::set_ties::SetTies;
 
 /// Whether one `subscriber ← emitter.event` edge is wired, before and after.
 ///
-/// Subscribing and unsubscribing are exact inverses, so one step backs both:
-/// each half is simply the subscribed-state boolean, and a write means
-/// "make it so".
+/// Subscribing and unsubscribing are exact inverses, so one step backs both: each half is the
+/// subscribed-state boolean.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct SetSubscription {
     pub(crate) subscription: Subscription,

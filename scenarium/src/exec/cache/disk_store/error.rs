@@ -12,9 +12,8 @@ use crate::data::codec::error::CodecError;
 use crate::data::data_type::TypeId;
 use crate::exec::cache::disk_store::store_outcome::StoreOutcome;
 
-/// A publication that was attempted and did not land, named by the stage that
-/// broke so a report says which half of the write failed. Every arm is I/O or
-/// an external codec's own failure.
+/// A publication that was attempted and did not land, named by the stage that broke. Every arm is
+/// I/O or an external codec's own failure.
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
     #[error("could not create the cache directory for {}", path.display())]

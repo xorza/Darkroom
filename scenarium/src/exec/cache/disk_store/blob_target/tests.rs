@@ -175,10 +175,9 @@ async fn missing_and_changed_codecs_miss_before_decode() {
     assert_eq!(old_calls.count(), 0);
 }
 
-/// A type with no codec is reported as unwritten rather than as a failure: the
-/// write was fine, the library simply cannot represent this value on disk, and
-/// no retry changes that. A caller reporting to a human needs the distinction —
-/// it is the difference between "try again" and "this node will never persist".
+/// A type with no codec is reported as unwritten rather than as a failure: the write was fine,
+/// the library simply cannot represent this value on disk, and no retry changes that — the
+/// difference between "try again" and "this node will never persist".
 ///
 /// The verdict comes before any I/O under either policy: the blob's directory
 /// is not created, and no covering blob is looked for.
@@ -233,8 +232,8 @@ async fn failed_streaming_encode_preserves_previous_blob() {
             StorePolicy::KnownMiss,
         )
         .await;
-    // A codec that rejects the value it was handed is a failure, unlike a type
-    // with no codec at all — and it names the blob it could not write.
+    // A codec that rejects the value it was handed is a failure, unlike a type with no codec — and
+    // it names the blob it could not write.
     let Err(StoreError::Encode { path, source }) = &failed else {
         panic!("a failing codec must report an encode failure, got {failed:?}");
     };
@@ -270,9 +269,8 @@ async fn a_failed_publication_disturbs_nothing_around_it() {
         )
         .await;
 
-    // The blob path is a directory here. The body still streams fine — an
-    // `AtomicFile` writes to a temporary beside the destination — so the
-    // failure lands on the publication, not on the encode.
+    // The blob path is a directory here. The body still streams fine (an `AtomicFile` writes to a
+    // temporary beside the destination), so the failure lands on the publication, not the encode.
     let Err(StoreError::Publish { path, .. }) = &failed else {
         panic!("a blocked destination must fail at publication, got {failed:?}");
     };

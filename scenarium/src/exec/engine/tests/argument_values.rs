@@ -1,8 +1,7 @@
 use super::*;
 
-/// Nothing has run, so nothing is reported: an id absent from the program
-/// resolves to no values at all, and a node that is present carries neither
-/// delivered inputs nor produced outputs.
+/// Nothing has run, so nothing is reported: an id absent from the program resolves to no values,
+/// and a node that is present carries neither delivered inputs nor produced outputs.
 #[test]
 fn before_execution_reports_no_values() {
     let e = TestEngine::over(TestGraph::sample());
@@ -22,9 +21,8 @@ async fn with_bound_outputs() {
 
     e.run_sinks().await;
 
-    // The two sources emit `Float` (their lambdas cast through `f64`), which
-    // the `Int`-declared consumers read through the scalar coercion class —
-    // so the variant is worth pinning, not just the number.
+    // The two sources emit `Float` (their lambdas cast through `f64`), which the `Int`-declared
+    // consumers read through the scalar coercion class — so the variant is worth pinning.
     assert!(matches!(
         e.inputs("sum")[0],
         Some(DynamicValue::Static(ConstValue::Float(v))) if v == 2.0

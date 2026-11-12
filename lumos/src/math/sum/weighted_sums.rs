@@ -2,10 +2,9 @@
 
 /// The two f64 running totals a weighted mean is built from: `Σ vᵢwᵢ` and `Σ wᵢ`.
 ///
-/// They travel together because the ratio is only meaningful when both come from the same pass over
-/// the same elements — a backend that returned one without the other would invite a caller to pair
-/// it with a denominator counted over a different set. Keeping the division out of the kernels is
-/// also what leaves the near-zero-weight policy stated once, at the dispatch point.
+/// They travel together because the ratio only means something when both come from the same pass
+/// over the same elements. Keeping the division out of the kernels leaves the zero-weight policy
+/// stated once, in the caller.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct WeightedSums {
     pub(super) weighted_values: f64,

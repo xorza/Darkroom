@@ -1,12 +1,10 @@
-//! The ports area of a node body, laid out as a grid: input port+label
-//! (col 0), the inline const editor for that input (col 1, so every value
-//! lines up regardless of label width), a fill spacer (col 2), and the
-//! output port+label (col 3, right-aligned against the node edge). Row `i`
-//! holds input `i` and output `i`, so the two sides align. Drawn below the
-//! header by [`crate::gui::pane::graph_ui::node_ui::NodeUi`]. This module is the
-//! grid orchestration and per-cell rendering; the sensing glyph each cell
-//! terminates a wire on — circle, event triangle, hit-box growth — is the
-//! shared [`PortGlyph`] widget's.
+//! The ports area of a node body, laid out as a grid: input port and label (col 0), the
+//! inline const editor for that input (col 1, so every value lines up regardless of label
+//! width), a fill spacer (col 2), and the output port and label (col 3, right-aligned against
+//! the node edge). Row `i` holds input `i` and output `i`, so the two sides align. Drawn below
+//! the header by [`crate::gui::pane::graph_ui::node_ui::NodeUi`]. This module is the grid
+//! orchestration and per-cell rendering; the sensing glyph each cell terminates a wire on is
+//! the shared [`PortGlyph`] widget's.
 
 use std::fmt;
 use std::fmt::Display;
@@ -44,40 +42,32 @@ use crate::gui::widgets::port_glyph::PortGlyph;
 use crate::gui::widgets::support;
 use scenarium::EventPort;
 
-/// Grid columns: inputs (hug), input values (hug, capped at `max_width` — so
-/// wide editors fit but a very long one ellipsizes; the numeric `DragValue`
-/// editor caps itself so it doesn't grow this column), a fill spacer, then
-/// outputs (hug). The outputs sit in a
-/// *hug* column, not the fill, so the grid's content size includes them: a
-/// `fill` column contributes 0 to a hug-sized grid and would collapse,
-/// spilling the outputs out of the node (palantir
-/// `grid_hug_grid_collapses_fill_tracks`). The fill spacer instead claims any
-/// width beyond the ports, pushing the outputs to the node's right edge.
+/// Grid columns: inputs (hug), input values (hug, capped at `max_width`, so a very long
+/// editor ellipsizes; the numeric `DragValue` editor caps itself), a fill spacer, then outputs
+/// (hug). The outputs sit in a hug column, not the fill, so the grid's content size includes
+/// them: a `fill` column contributes 0 to a hug-sized grid and would collapse, spilling the
+/// outputs out of the node (palantir `grid_hug_grid_collapses_fill_tracks`). The fill spacer
+/// claims any width beyond the ports, pushing the outputs to the node's right edge.
 const COL_INPUT: u16 = 0;
 const COL_VALUE: u16 = 1;
-/// Claims the width beyond the ports. Nothing is placed in it — it exists so
-/// the outputs sit at the node's right edge — but it is named so the jump
-/// from [`COL_VALUE`] to [`COL_OUTPUT`] reads as deliberate.
+/// Claims the width beyond the ports; nothing is placed in it.
 const COL_SPACER: u16 = 2;
 const COL_OUTPUT: u16 = COL_SPACER + 1;
 
 /// `row_tracks` is [`NodeUi`](crate::gui::pane::graph_ui::node_ui::NodeUi)'s retained staging
-/// buffer — see its doc for why the grid's rows aren't built fresh here.
+/// buffer.
 pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, row_tracks: &mut Vec<Track>) {
     let (theme, node) = (record.node.theme(), record.node);
-    // Events list under the outputs in the same column, so the output side
-    // needs a row per output *and* per event.
+    // Events list under the outputs in the same column: a row per output and per event.
     let row_count = node
         .port_count(PortKind::Input)
         .max(node.port_count(PortKind::Output) + node.events().len());
     if row_count == 0 {
         return;
     }
-    // Fixed-height rows (font-relative) so a node's ports stay uniform whether
-    // or not an input carries an inline editor (hug makes editor rows taller).
-    // Every row of every node gets the same track, so the buffer is rebuilt
-    // only when a wider node needs more of them or the theme moves the height
-    // — not per node. Not a `const`: the height rides the theme's font size.
+    // Fixed-height rows so a node's ports stay uniform whether or not an input carries an inline
+    // editor. Every row of every node gets the same track, so the buffer is rebuilt only when a
+    // node with more rows needs more of them or the theme moves the height.
     let track = Track::fixed(theme.row_height());
     if row_tracks.len() < row_count || row_tracks.first() != Some(&track) {
         row_tracks.clear();
@@ -107,9 +97,8 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, row_tracks: &mu
         });
 }
 
-/// A port's hover tooltip: its `description` (when the func declares one,
-/// empty otherwise — the resolved [`InputCtx::description`] text) above a
-/// dimmer type line, else just the type.
+/// A port's hover tooltip: its `description` (the resolved [`InputCtx::description`] text,
+/// empty when the func declares none) above a dimmer type line, else just the type.
 #[derive(Debug, Clone, Copy)]
 struct PortTooltip<'a> {
     description: &'a str,
@@ -117,13 +106,10 @@ struct PortTooltip<'a> {
 }
 
 impl PortTooltip<'_> {
-    /// The tooltip for a port of `node_ctx`, interned straight into this pass's text
-    /// arena, so a hovered node's ports author their tooltips with no `String`
-    /// between them and the widget.
-    ///
-    /// Built only for the node under the pointer — see [`show`]. `None` off
-    /// that node, which [`support::tooltip_after`] and [`PortLabel`] both take
-    /// as "no tooltip".
+    /// The tooltip for a port of `node_ctx`, interned straight into this pass's text arena, so
+    /// no `String` sits between it and the widget. Built only for the node under the pointer;
+    /// `None` off that node, which [`support::tooltip_after`] and [`PortLabel`] take as "no
+    /// tooltip".
     fn intern(self, ui: &mut Ui, node_ctx: NodeCtx<'_>) -> Option<InternedStr> {
         let Self {
             description,
@@ -154,10 +140,9 @@ struct PortLabel<'a> {
 }
 
 impl PortLabel<'_> {
-    /// Opts into [`Sense::HOVER`] rather than capturing clicks: the label needs
-    /// a trigger anchor for the tooltip, but the node body below it owns
-    /// selection and drag, so the press has to fall through. Muted ink — the
-    /// value column is each row's strong element, not the label.
+    /// Opts into [`Sense::HOVER`] rather than capturing clicks: the label needs a trigger anchor
+    /// for the tooltip, but the node body below it owns selection and drag. Muted ink, as the
+    /// value column is each row's strong element.
     fn show(self, ui: &mut Ui, theme: &Theme) {
         let label = Text::new(self.name)
             .style(&label_style(ui, theme))
@@ -180,8 +165,7 @@ fn output_cells(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     for output in node.outputs() {
         output_cell(ui, record, output);
     }
-    // Events emit from the same (right) side; list them in the rows directly
-    // below the data outputs.
+    // Events emit from the same (right) side, in the rows directly below the data outputs.
     for (idx, event) in node.events().iter().enumerate() {
         EventRow {
             idx,
@@ -197,14 +181,12 @@ fn grid_row(idx: usize) -> u16 {
     u16::try_from(idx).expect("a node's rows fit the grid's u16 index")
 }
 
-/// Open `menu_id`'s context menu at the pointer — shared by the input and
-/// output cells, on a frame the cell or its port circle was secondary-clicked.
+/// Open `menu_id`'s context menu at the pointer, shared by the input and output cells, on a
+/// frame the cell or its port circle was secondary-clicked.
 ///
-/// The click is read by the caller before this runs: the cell's `Response`
-/// borrows `ui`, and this needs `ui` mutably. It is the cell's right-click
-/// *or* the port glyph's — the glyph senses its own `Sense::CLICK` and
-/// consumes hits over its rect, so the cell alone misses a right-click landed
-/// on the circle (no bubbling).
+/// The caller reads the click first, as the cell's `Response` borrows `ui`. It is the cell's
+/// right-click or the port glyph's: the glyph consumes hits over its rect, so the cell alone
+/// misses a right-click landed on the circle (no bubbling).
 fn open_port_context_menu(ui: &mut Ui, menu_id: WidgetId) {
     if let Some(p) = ui.pointer_pos() {
         Menu::open(ui, menu_id, p);
@@ -219,10 +201,9 @@ fn label_style(ui: &Ui, theme: &Theme) -> TextStyle {
     }
 }
 
-/// Column 0: the input port circle + label, plus the right-click binding
-/// menu (anchored here, so right-clicking the circle or label opens it).
-/// The circle's `WidgetId` is the deterministic `wid::port_circle(port)`, so
-/// `CanvasGeometry`/snap/draw reconstruct it from domain coords.
+/// Column 0: the input port circle and label, plus the right-click binding menu, anchored here
+/// so right-clicking the circle or label opens it. The circle's `WidgetId` is
+/// `wid::port_circle(port)`, so `CanvasGeometry`, snap and draw reconstruct it.
 fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCtx<'_>) {
     let (node_ctx, draw_ctx) = (record.node, record.stage.ctx);
     let theme = node_ctx.theme();
@@ -238,14 +219,11 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
     };
     let fill = Hover::from(draw_ctx.geometry().ports.is_hovered(port))
         .lift(theme.port_color(input.data_type()));
-    // Flag a port only once a run actually failed on it — not on every unbound edit — so
-    // the port does not flip as you bind/unbind. The run named the exact ports it could not
-    // feed, so only those ring, and only while the node's status is that verdict: a live re-run
-    // replaces it. A ring in the warning ink around the type's own hue, so the status takes a
-    // form of its own and the type stays readable. A required input's port reads as bigger: a
-    // disc of the footprint an optional input's circle and ring take. An optional one is the
-    // plain circle in a ring of the body's fill, which reads as the node's own surface wrapping
-    // around the port.
+    // Flag a port only once a run actually failed on it, so it does not flip as you bind/unbind:
+    // the run named the exact ports it could not feed, and only while the node's status is that
+    // verdict. A ring in the warning ink around the type's own hue keeps the type readable. A
+    // required input's port reads as bigger: a disc of the footprint an optional input's circle
+    // and ring take. An optional one is the plain circle in a ring of the body's fill.
     let (diameter, outline) = if input.missing() {
         (theme.port.size, Some(theme.status.warning))
     } else if input.required() {
@@ -258,8 +236,8 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
     };
     let margin = theme.port_margin(PortKind::Input, diameter * 0.5);
     let wid = wid::port_circle(port);
-    // Stable cell id so the label area answers a double-click of its own (the
-    // circle has its own `wid::port_circle`); also the context-menu anchor.
+    // The label area answers a double-click of its own, as the circle has its own id; also the
+    // context-menu anchor.
     let cell = Panel::hstack()
         .id(wid::input_cell(port))
         .grid_cell((grid_row(port.port_idx), COL_INPUT))
@@ -269,8 +247,7 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
         .gap(theme.space.xs)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
-            // A const-only input can't be wired, so it has no wire anchor
-            // — render just the label (+ its inline const editor).
+            // A const-only input can't be wired, so it has no wire anchor: just the label.
             if input.const_only() {
                 label.show(ui, theme);
                 None
@@ -298,11 +275,9 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
     // Double-click on the circle or the label toggles the binding: clear it,
     // or seed the default const when unbound.
     //
-    // Adding or removing a `Const` adds or removes this input's inline editor
-    // and so resizes the node. The intent drains at the end of this record
-    // pass, and a double-click is action input — which always earns a second
-    // pass — so the body re-arranges at its settled size with its wires
-    // re-anchored before the frame paints.
+    // Adding or removing a `Const` resizes the node. The intent drains at the end of this record
+    // pass, and a double-click is action input, which always earns a second pass, so the body
+    // re-arranges at its settled size with its wires re-anchored before the frame paints.
     if cell.response.left.double_clicked() || glyph.is_some_and(|glyph| glyph.left.double_clicked())
     {
         match input.binding() {
@@ -325,8 +300,7 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
     Menu::for_id(menu_id)
         .size((Sizing::HUG, Sizing::HUG))
         .show(ui, |ui| {
-            // Resolved once for both the enable test and the value the pick
-            // pushes — the fallback literal is built on read, not stored.
+            // Resolved once for both the enable test and the value the pick pushes.
             let default = input.default();
             let can_set = !matches!(input.binding(), Some(Binding::Const(_))) && default.is_some();
             if MenuItem::new("Set constant")
@@ -383,14 +357,10 @@ fn value_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCtx<'_>)
     };
     let data_type = input.data_type();
     let value_variants = input.value_variants();
-    // An `FsPath` editor draws a pick button; clicking it raises a blocking
-    // file dialog, which only `App` can run — so this is the app tier.
-    //
-    // Every const editor shares one widget family, so "which editor was
-    // clicked" would be all a canvas-level sweep could say; whether the click
-    // means *pick a path* is a question about the port's type. Answering it
-    // here costs nothing, because the type is what decided to draw the button
-    // in the first place.
+    // An `FsPath` editor draws a pick button; clicking it raises a blocking file dialog, which
+    // only `App` can run, so this is the app tier. Whether a click means "pick a path" is a
+    // question about the port's type, which decided to draw the button, so it is answered here
+    // rather than by a canvas-level sweep.
     if ui.response_for(editor_id).clicked()
         && matches!(value, ConstValue::FsPath(_) | ConstValue::FsPaths(_))
         && let DataType::FsPath(config) = data_type
@@ -425,8 +395,7 @@ fn value_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCtx<'_>)
 }
 
 /// The value column's cell of the input at `port`: filled, so every editor is the same width
-/// (the column hugs to the widest editor's content). `min_size` on the editors keeps a sensible
-/// floor; the editor fills this cell, this cell fills the column.
+/// (the column hugs to the widest editor's content). `min_size` on the editors keeps a floor.
 fn value_column<R>(ui: &mut Ui, port: InputPort, body: impl FnOnce(&mut Ui) -> R) -> R {
     Panel::hstack()
         .id_salt(("val", port.port_idx))
@@ -437,10 +406,8 @@ fn value_column<R>(ui: &mut Ui, port: InputPort, body: impl FnOnce(&mut Ui) -> R
         .inner
 }
 
-/// Column 3: the output label + circle, right-aligned (the fill column
-/// pins it to the node's right edge); the circle overhangs that edge. (A dragged
-/// satellite can end up anywhere on the canvas, not just overhanging this
-/// node).
+/// Column 3: the output label and circle, right-aligned (the fill column pins it to the node's
+/// right edge); the circle overhangs that edge.
 fn output_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, output: OutputCtx<'_>) {
     let (node_ctx, draw_ctx) = (record.node, record.stage.ctx);
     let theme = node_ctx.theme();
@@ -474,14 +441,12 @@ fn output_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, output: OutputCtx<'
                 .tooltip(tooltip)
                 .show(ui, theme)
         });
-    // Right-click anywhere on the cell (circle or label) opens the port menu —
-    // mirrors the input side's binding menu.
+    // Right-click anywhere on the cell opens the port menu, as on the input side.
     let glyph = cell.inner;
     let menu_id = cell.response.id;
-    // An output may feed many inputs, so a double-click on its circle clears
-    // each consumer. Same pre-paint timing as the input side: the intents drain
-    // at the end of this pass, and the second pass a double-click earns
-    // re-arranges every node that lost a wire.
+    // An output may feed many inputs, so a double-click on its circle clears each consumer. Same
+    // timing as the input side: the second pass a double-click earns re-arranges every node that
+    // lost a wire.
     if glyph.left.double_clicked() {
         record.stage.out.extend_graph(
             node_ctx
@@ -494,18 +459,16 @@ fn output_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, output: OutputCtx<'
     if cell.response.right.clicked() || glyph.right.clicked() {
         open_port_context_menu(ui, menu_id);
     }
-    // "Add preview" — spawn a preview node already wired to this output. What it
-    // creates is an ordinary node the user can move, delete, and undo like any
-    // other. Hidden when the library has no preview func.
+    // "Add preview" spawns an ordinary preview node already wired to this output. Hidden when
+    // the library has no preview func.
     Menu::for_id(menu_id)
         .size((Sizing::HUG, Sizing::HUG))
         .show(ui, |ui| {
             if let Some(func) = preview_sink::registered(node_ctx.graph_ctx.library())
                 && MenuItem::new("Add preview").show(ui).clicked()
             {
-                // Positioned off the port when its center is known (it is,
-                // after the first frame); otherwise the node lands at the
-                // origin and the user drags it.
+                // Off the port once its center is known (after the first frame); otherwise at the
+                // origin.
                 let pos = draw_ctx
                     .geometry()
                     .ports
@@ -523,14 +486,14 @@ fn output_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, output: OutputCtx<'
         });
 }
 
-/// Where a preview lands relative to the port it was added from: clear of the
-/// node body and a little above, so it doesn't cover what it is watching.
+/// Where a preview lands relative to the port it was added from: clear of the node body and a
+/// little above.
 const PREVIEW_SPAWN_OFFSET: Vec2 = Vec2::new(80.0, -60.0);
 
-/// One event (emitter) port row: the event name plus an event-colored triangle
-/// glyph, right-aligned and overhanging the node edge like a data output. Sits in
-/// `COL_OUTPUT` at `row` (below the data outputs). The glyph senses drags so a
-/// wire can be pulled from it to a subscriber pin (see `SubscriptionUi`).
+/// One event (emitter) port row: the event name plus an event-colored triangle glyph,
+/// right-aligned and overhanging the node edge like a data output, in `COL_OUTPUT` below the
+/// data outputs. The glyph senses drags so a wire can be pulled from it to a subscriber pin
+/// (see `SubscriptionUi`).
 #[derive(Debug, Clone, Copy)]
 struct EventRow<'a> {
     /// The event's index among the node's events.
@@ -573,14 +536,11 @@ impl EventRow<'_> {
     }
 }
 
-/// Human-readable type for a port tooltip: the picker mode (and accepted
-/// extensions) for a path, and the library's own display name for everything
-/// else — `any` for the untyped boundary placeholder, a registered
-/// `Custom`/`Enum` type's name, or the raw id when nothing is registered
-/// under it.
+/// Human-readable type for a port tooltip: the picker mode (and accepted extensions) for a
+/// path, and the library's own display name for everything else (`any` for the untyped boundary
+/// placeholder, a registered type's name, or the raw id when nothing is registered).
 ///
-/// Renders on demand rather than into a `String`: a hovered node builds one
-/// of these per port per frame, and [`PortTooltip::intern`] feeds it straight to `fmt!`.
+/// Renders on demand, as [`PortTooltip::intern`] feeds it straight to `fmt!`.
 #[derive(Debug)]
 struct TypeLabel<'a> {
     library: &'a Library,
@@ -590,8 +550,7 @@ struct TypeLabel<'a> {
 impl Display for TypeLabel<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let DataType::FsPath(config) = self.data_type else {
-            // Borrowed for every type the library knows; only an id with no
-            // entry behind it builds a string, and that one is scenarium's.
+            // Borrowed for every type the library knows; only an unregistered id builds a string.
             return f.write_str(&self.library.type_name(self.data_type));
         };
         let mode = match config.mode {
@@ -601,8 +560,7 @@ impl Display for TypeLabel<'_> {
             FsPathMode::NewFile => "save path",
         };
         write!(f, "path · {mode}")?;
-        // Written through one at a time rather than `join`ed — a joined list
-        // is exactly the intermediate string this type exists to avoid.
+        // Written one at a time, not `join`ed, which would build the intermediate string.
         if let Some((first, rest)) = config.extensions.split_first() {
             write!(f, " ({first}")?;
             for ext in rest {

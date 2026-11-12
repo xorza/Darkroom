@@ -37,11 +37,9 @@ const WORKING_SET: BufferCounts = BufferCounts {
 /// do not carry.
 const NO_DATA_MASK: usize = 1;
 
-/// The planner charges [`DetectionResources::heap_bytes`] from the pool's peak counts, which only
-/// means anything while they match what the pool actually holds. Tying the two together here is
-/// what stops the planner's figure from being a number nobody can check: a stage that grows its
-/// scratch fails [`warmed_pool_holds_the_pinned_working_set`] first, and raising `WORKING_SET` to
-/// match then fails this until the peak counts are raised too. A 64 × 64 frame's pool on one
+/// A stage that grows its scratch fails [`warmed_pool_holds_the_pinned_working_set`] first, and
+/// raising `WORKING_SET` to match then fails this until the peak counts are raised too, so the
+/// planner's [`DetectionResources::heap_bytes`] stays checkable. A 64 × 64 frame's pool on one
 /// worker holds three planes of 16 KiB — two f32 planes and the labeling's runs — four bitmasks of
 /// 64 rows of 128 bits, 1 KiB each, two surfaces over 16-px tiles, 4 × 4 of them, each 2 · 16
 /// tile values, 4 + 4 centres and a reader's 3 · 4 + 64 samples, 116 f32s, the worker's band of the

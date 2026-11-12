@@ -102,12 +102,10 @@ fn file_selection_is_sorted_deduplicated_and_nonempty() {
     );
 }
 
-/// Queued answers go to the asks in order, each of its own shape and absolute, as a native
-/// dialog's are: a relative one is taken against the working directory. The project save adds
-/// the extension, as the native one does, and so does a new file of one extension; the file
-/// list comes back sorted and once each. A
-/// cancel, an answer of the other shape, and an ask past the last answer all read as `None`,
-/// the last one from the refusing fallback; an answer queued after that goes to the next ask.
+/// Answers are absolute as a native dialog's are (a relative one is taken against the working
+/// directory); a save or new file gets its extension, a file list comes back sorted and once
+/// each. A cancel, an answer of the other shape and an ask past the last answer read as `None`,
+/// the last from the refusing fallback; an answer queued after that goes to the next ask.
 #[test]
 fn queued_answers_go_to_the_asks_in_order_before_the_fallback() {
     // As a native dialog answers: absolute, so `/p` on Windows takes the working drive.

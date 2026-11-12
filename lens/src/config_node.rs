@@ -1,17 +1,13 @@
-//! Generic config-builder nodes — the scenarium bridge over
-//! [`common`]'s struct introspection.
+//! Generic config-builder nodes: the scenarium bridge over [`common`]'s struct introspection.
 //!
-//! [`ConfigValue::builder`] turns any [`common::Introspect`] config type into a
-//! `Func` whose inputs are the type's fields (mapped from [`common::FieldDesc`]
-//! to scenarium [`DataType`]s) and whose output is the built config as a
-//! wireable [`ConfigValue`]. So a consuming node can take either a quick preset
-//! *or* a detailed config wired from a builder node.
+//! [`ConfigValue::builder`] turns any [`common::Introspect`] config type into a `Func` whose
+//! inputs are the type's fields (mapped from [`common::FieldDesc`] to scenarium [`DataType`]s)
+//! and whose output is the built config as a wireable [`ConfigValue`], so a consuming node takes
+//! either a quick preset or a detailed config wired from a builder node.
 //!
-//! The introspection itself (field reflection, labels, typed rebuild) lives in
-//! `common` and is GUI-agnostic; this module only maps it to node ports +
-//! `DynamicValue`s. A config type carries its own wire identity, the
-//! `Introspect` `TYPE_ID` and `DISPLAY_NAME` its derive declares — `lumos`
-//! derives them on its own types — and where a config's shape does not fit the
+//! The introspection itself lives in `common` and is GUI-agnostic; this module only maps it to
+//! node ports and `DynamicValue`s. A config type carries its own wire identity, the `TYPE_ID`
+//! and `DISPLAY_NAME` its `Introspect` derive declares, and where its shape does not fit the
 //! field model, the astro module's `config` declares a flat projection instead.
 
 use std::fmt;
@@ -32,7 +28,7 @@ const fn wire_type_id<T: Introspect>() -> TypeId {
     const { TypeId::literal(T::TYPE_ID) }
 }
 
-/// A built config flowing on a wire — wraps the typed value.
+/// A built config flowing on a wire.
 #[derive(Debug)]
 pub(crate) struct ConfigValue<T>(pub(crate) T);
 
@@ -171,7 +167,6 @@ fn register_field_enum(library: &mut Library, kind: &FieldKind) {
     }
 }
 
-/// A neutral field default → an authored constant.
 fn const_value(value: &FieldValue) -> ConstValue {
     match value {
         FieldValue::Int(n) => ConstValue::Int(
@@ -186,7 +181,6 @@ fn const_value(value: &FieldValue) -> ConstValue {
     }
 }
 
-/// Read an input's runtime value back into a neutral field value.
 fn field_value(kind: &FieldKind, value: &DynamicValue) -> FieldValue {
     match kind {
         FieldKind::Int(_) => FieldValue::Int(value.required_i64().into()),

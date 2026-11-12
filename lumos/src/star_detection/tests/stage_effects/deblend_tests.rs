@@ -213,11 +213,10 @@ fn a_crowded_group_splits_into_every_star() {
 /// - multi-threshold cuts the 27-px component, holding 2.498, on a ladder from 0.04 to 0.2. At its
 ///   third level, 0.0465, the faint star is its peak pixel alone, 0.0508, which holds 0.00426 above
 ///   the level: more than 0.001 of the component's flux (0.0025), so it splits there, and less than
-///   0.005 of it (0.0125), so it stays whole there and at 0.5. Its whole value, the pedestal under
-///   the split included, cleared 0.005.
+///   0.005 of it (0.0125), so it stays whole there and at 0.5.
 ///
-/// Measured on sky-included values, the 0.1 pedestal turned the relative-height bar into 0.3 · 0.3
-/// = 0.09 against a 0.15 secondary, so the first case split there and not on a zero sky.
+/// On sky-included values the 0.1 pedestal would make the relative-height bar 0.3 · 0.3 = 0.09
+/// against a 0.15 secondary, splitting the first case there and not on a zero sky.
 #[test]
 fn deblending_does_not_depend_on_the_sky_level() {
     let size = USize2::new(48, 48);

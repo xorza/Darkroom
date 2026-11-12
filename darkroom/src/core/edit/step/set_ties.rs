@@ -42,9 +42,8 @@ struct RouteChange {
 }
 
 impl SetTies {
-    /// Fold `next`, a later frame of the same held gesture, into this step:
-    /// keep each tie's and route's `from` and adopt its latest `to`, and take
-    /// any `next` changes that this step does not hold whole.
+    /// Fold `next`, a later frame of the same held gesture, into this step: keep each tie's and
+    /// route's `from` and adopt its latest `to`, and take any `next` changes this step lacks.
     pub(crate) fn absorb(&mut self, next: &Self) {
         for change in &next.ties {
             match self.ties.iter_mut().find(|open| open.tie == change.tie) {

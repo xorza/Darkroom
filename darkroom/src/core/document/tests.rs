@@ -8,12 +8,9 @@ use crate::core::document::internals::DocumentFixture;
 use crate::core::document::tie::Tie;
 use crate::core::document::wire_key::{DataWire, WireKey};
 
-/// Every `NodeId`-keyed cache sweeps against one rule, and the two
-/// narrowings of it are strict subsets — so a node that is gone is gone by
-/// all of them at once, and nothing can be retained by one sweep while
-/// another has released it.
-///
-/// Re-diverging the predicates is what this catches.
+/// Every `NodeId`-keyed cache sweeps against one rule, and the two narrowings of it are strict
+/// subsets, so a node that is gone is gone by all of them at once. Catches the predicates
+/// diverging again.
 #[test]
 fn node_liveness_is_one_rule_with_two_declared_narrowings() {
     let mut fixture = DocumentFixture::default();
@@ -37,8 +34,7 @@ fn node_liveness_is_one_rule_with_two_declared_narrowings() {
         "a stub has no viewer"
     );
 
-    // The tab lift is the same rule asked of a tab: a viewer dies exactly
-    // with its node, and the two non-node tabs never do.
+    // The same rule asked of a tab: a viewer dies with its node, the non-node tabs never do.
     assert!(document.holds_tab(TabRef::ImageViewer(preview)));
     assert!(document.holds_tab(TabRef::Graph));
     assert!(document.holds_tab(TabRef::Preferences));
@@ -91,9 +87,9 @@ fn removing_a_node_closes_its_viewer_and_its_pinned_inspector() {
 
 /// The load repairs the view and the layout around the graph, in order,
 /// and reports each repair: a bad viewport resets, a placement for no node
-/// goes, a non-finite position and a missing placement go to the origin, a
-/// selection entry with no placement goes, and a viewer on a node that is
-/// no preview node closes. A layout that pins another tab resets whole.
+/// goes, a non-finite position and a missing placement go to the origin, and
+/// a viewer on a node that is no preview node closes. A selected node that
+/// lacked a placement stays selected, as it is placed first.
 #[test]
 fn reconcile_repairs_the_view_and_the_layout() {
     let mut fixture = DocumentFixture::default();

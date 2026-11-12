@@ -44,12 +44,15 @@
 //! - [`RegistrationConfig::precise()`][precise] — More iterations, SIP distortion correction
 //! - [`RegistrationConfig::wide_field()`][wide_field] — A SIP correction under the model GRIC
 //!   chooses up to an affine map, for wide-field lenses
+//! - [`RegistrationConfig::precise_wide_field()`][precise_wide_field] — `wide_field` with
+//!   `precise`'s iteration budget and RMS gate, more stars and tighter matching
 //! - [`RegistrationConfig::mosaic()`][mosaic] — Allows larger rotations and scale differences
 //!
 //! [default]: registration_config::RegistrationConfig::default
 //! [fast]: registration_config::RegistrationConfig::fast
 //! [precise]: registration_config::RegistrationConfig::precise
 //! [wide_field]: registration_config::RegistrationConfig::wide_field
+//! [precise_wide_field]: registration_config::RegistrationConfig::precise_wide_field
 //! [mosaic]: registration_config::RegistrationConfig::mosaic
 
 pub(crate) mod distortion;

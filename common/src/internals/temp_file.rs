@@ -3,13 +3,11 @@ use std::path::{Path, PathBuf};
 use crate::internals;
 use std::fs;
 
-/// A temporary *path*, removed when the value drops — whether the test left a
-/// file there, a directory, or nothing at all.
+/// A temporary path, removed when the value drops, whether the test left a file, a directory or
+/// nothing there.
 ///
-/// Unlike [`TempDir`](crate::TempDir) nothing is created
-/// up front: the point is a name for something the code under test will write,
-/// and several fixtures turn that name into a directory precisely to make the
-/// write fail.
+/// Unlike [`TempDir`](crate::TempDir) nothing is created up front: it is a name for what the code
+/// under test will write, and several fixtures turn it into a directory to make the write fail.
 #[derive(Debug)]
 pub struct TempFile(PathBuf);
 

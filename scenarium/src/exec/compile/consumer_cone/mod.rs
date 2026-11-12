@@ -8,19 +8,16 @@ use crate::exec::idx::NodeIdx;
 /// What a set of seed nodes reaches downstream: every node that reads a seed's
 /// outputs, transitively, plus the seeds themselves.
 ///
-/// Answering that needs the program's wires reversed, which is a pure
-/// function of the program and so is **derived per call, never kept** — what
-/// asks it, what evicting a node reaches, is a user action, while an index held
-/// between calls would be stale the moment the graph is edited. What persists
-/// is the *storage*: [`RuntimeCache`] owns one of these, so the second eviction
-/// refills the buffers below instead of allocating them again.
-/// [`CompiledGraph::consumer_cone`], answering the same question for a host
-/// ahead of the eviction, has nowhere to keep one and allocates per call.
+/// Answering that needs the program's wires reversed, a pure function of the program, so it is
+/// **derived per call, never kept**: an index held between calls would be stale the moment the
+/// graph is edited. What persists is the *storage*: [`RuntimeCache`] owns one of these, so the
+/// second eviction refills the buffers below instead of allocating them again.
+/// [`CompiledGraph::consumer_cone`], answering the same question for a host ahead of the
+/// eviction, has nowhere to keep one and allocates per call.
 ///
-/// The reversed edges are one packed run per node rather than a `Vec` per node.
-/// The walk visits one node after another, so a run only ever has to be a
-/// slice, and the whole structure is four flat allocations instead of one per
-/// node.
+/// The reversed edges are one packed run per node rather than a `Vec` per node: the walk visits
+/// one node after another, so a run only has to be a slice, and the structure is a few flat
+/// allocations instead of one per node.
 ///
 /// [`RuntimeCache`]: crate::exec::cache::runtime_cache::RuntimeCache
 #[derive(Debug, Default)]
@@ -30,9 +27,8 @@ pub(crate) struct ConsumerCone {
     /// `starts[i]..starts[i + 1]` is node `i`'s run, so this holds one more
     /// entry than the program has nodes.
     starts: Vec<u32>,
-    /// The cursor the placement pass walks each run with, each ending where the
-    /// next run begins — which is what makes that pass a placement rather than
-    /// a search.
+    /// The cursor the placement pass walks each run with, each ending where the next run begins —
+    /// which makes that pass a placement rather than a search.
     filled: Vec<u32>,
     /// The walk's frontier.
     pending: Vec<NodeIdx>,
@@ -45,9 +41,8 @@ impl ConsumerCone {
     /// The reflexive transitive closure of `seeds` over `program`'s reversed
     /// wires.
     ///
-    /// Handed back in the dense index space rather than as ids: the caller
-    /// walks the same space, and converting here would only make it convert
-    /// back. Borrowed from `self`, so it lives until the next call.
+    /// Handed back in the dense index space rather than as ids: the caller walks the same space.
+    /// Borrowed from `self`, so it lives until the next call.
     pub(crate) fn of(
         &mut self,
         program: &CompiledGraph,
@@ -98,8 +93,7 @@ impl ConsumerCone {
         }
     }
 
-    /// Breadth of the cone, from the reversed edges [`reverse`](Self::reverse)
-    /// just laid down.
+    /// Depth-first closure over the reversed edges [`reverse`](Self::reverse) just laid down.
     fn walk(&mut self, seeds: impl IntoIterator<Item = NodeIdx>) {
         let Self {
             readers,

@@ -11,13 +11,11 @@ use crate::math::statistics::CHI2_99_2DOF;
 /// `σ_max` (px) for RANSAC scoring, from the median FWHM of the two star catalogs.
 ///
 /// Half the FWHM is not a centroid-noise estimate — real centroid error is
-/// `≈ FWHM / (2.355·SNR)`, one to two orders of magnitude smaller. It is an upper bound, and the
-/// quantity that makes it the right one is what it implies downstream: the RANSAC scorer treats
-/// residuals past `√χ²₀.₉₉(2)·σ_max ≈ 3.03·σ_max` as outliers, so `σ_max = FWHM/2` puts that
-/// boundary at **≈ 1.5 FWHM** — a star displaced by more than one and a half PSF widths is a
-/// different star, not a mis-centroided one. An upper bound rather than an estimate is what the
-/// scorer wants: its loss saturates at that scale, so an over-tight bound discards real matches
-/// while a loose one only costs discrimination.
+/// `≈ FWHM / (2.355·SNR)`, one to two orders of magnitude smaller. It is an upper bound: the RANSAC
+/// scorer treats residuals past `√χ²₀.₉₉(2)·σ_max ≈ 3.03·σ_max` as outliers, which puts the
+/// boundary at **≈ 1.5 FWHM**, past which a star is a different star. A bound is what the scorer
+/// wants, as its loss saturates at that scale: too tight discards real matches, too loose only
+/// costs discrimination.
 ///
 /// The 0.5 px floor covers undersampled frames: at FWHM < 1 px, half the FWHM would put the
 /// recovery radius below the centroid quantization itself. It also guarantees the `σ_max > 0`

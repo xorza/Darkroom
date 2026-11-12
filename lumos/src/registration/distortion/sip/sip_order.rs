@@ -38,7 +38,7 @@ impl SipOrder {
         self as usize
     }
 
-    /// The terms of each axis's polynomial, every `u^p·v^q` with `2 ≤ p + q ≤ order`: the
+    /// The count of terms of each axis's polynomial, every `u^p·v^q` with `2 ≤ p + q ≤ order`: the
     /// `(order + 1)(order + 2)/2` monomials up to `order` less the three of degree 0 and 1.
     pub const fn term_count(self) -> usize {
         let order = self.get();

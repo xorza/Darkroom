@@ -162,8 +162,8 @@ fn estimate_honours_the_plausibility_limits() {
 }
 
 /// The limits decide between two consistent groups. Twenty pairs agree on a 2° similarity and
-/// thirty on a quarter turn: with the limits off, the larger group wins; with a 10° limit, its
-/// every hypothesis is refused and the smaller, plausible group is the answer.
+/// thirty on a quarter turn: with the limits off, the larger group wins; with a 10° limit, every
+/// hypothesis from it is refused and the smaller, plausible group is the answer.
 #[test]
 fn the_limits_steer_ransac_to_the_plausible_group() {
     let plausible = Transform::similarity(DVec2::new(10.0, -5.0), 2.0f64.to_radians(), 1.01);

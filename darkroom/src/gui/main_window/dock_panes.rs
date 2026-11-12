@@ -30,9 +30,7 @@ use crate::gui::widgets::format;
 
 /// Everything a pane's body needs, borrowed for one record pass.
 ///
-/// A bundle rather than a closure, because the dock asks six questions
-/// per tab and a pile of builder closures would carry the same six
-/// borrows one capture at a time.
+/// A bundle rather than closures, which would each capture the same borrows.
 #[derive(Debug)]
 pub(crate) struct DockPanes<'a> {
     pub(crate) stage: Stage<'a, GraphCtx<'a>>,
@@ -107,8 +105,8 @@ impl DockTabs for DockPanes<'_> {
                     .image_viewers
                     .entry(node_id)
                     .or_insert_with(|| ImageViewer::new(node_id));
-                // Viewer-toolbar edits ride the same in-place preferences path
-                // as the Preferences tab, and report on the same queue.
+                // Viewer-toolbar edits go through the same in-place preferences path as the
+                // Preferences tab.
                 let pane = ViewerPane {
                     theme: ctx.theme(),
                     title,

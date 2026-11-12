@@ -121,12 +121,10 @@ fn local_maxima_single_peak_reports_zero_deblended() {
 
 #[test]
 fn edge_margin_swallowing_image_yields_no_regions_without_panicking() {
-    // Once 2 * edge_margin >= the smallest dimension, the retain predicate
-    // `bbox.min >= margin && bbox.max <= dim - margin` is unsatisfiable, so every region
-    // is filtered out. This must degrade gracefully (empty result, no panic/overflow)
-    // rather than crash, since detect() runs once per frame in a batch and one
-    // oddly-sized frame shouldn't abort the whole run. Covers both the exact boundary
-    // (2 * 16 == 32) and a margin past the dimension itself (saturating_sub floors at 0).
+    // Once 2 * edge_margin >= the smallest dimension, no region satisfies the edge filter: the
+    // result is empty, with no panic or overflow, so one oddly-sized frame does not abort a
+    // batch. Covers the exact boundary (2 * 16 == 32) and a margin past the dimension
+    // (saturating_sub floors at 0).
     for edge_margin in [16, 32] {
         let TestComponent {
             pixels,

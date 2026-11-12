@@ -22,14 +22,11 @@ pub(crate) enum LoopCommand {
 /// One wake's messages reduced to what the worker will actually do, one slot
 /// per kind — so a burst of edits installs once rather than N times.
 ///
-/// **The graph op is the batch's frame of reference.** Reducing to slots loses
-/// the order the messages arrived in, so the order they are *applied* in is a
-/// standing rule rather than a caller's choice, and
-/// [`WorkerTask::apply_intent`](crate::worker::worker_task::WorkerTask) states it:
-/// `graph_state` lands first, and every stage after it — the store, the cache
-/// maintenance, the run — is about the program it left installed. Anything
-/// added here that reads "the installed program" belongs after it too, or it
-/// will silently act on the one the batch is replacing.
+/// **The graph op is the batch's frame of reference.** Reducing to slots loses arrival order, so
+/// the apply order is a standing rule, stated by
+/// [`WorkerTask::apply_intent`](crate::worker::worker_task::WorkerTask): `graph_state` lands
+/// first, and every later stage (store, cache maintenance, run) is about the program it left
+/// installed. Anything added here that reads "the installed program" belongs after it too.
 #[derive(Debug, Default)]
 pub(crate) struct BatchIntent {
     pub(crate) graph_state: Option<GraphOp>,
@@ -38,9 +35,8 @@ pub(crate) struct BatchIntent {
     /// [`WorkerMessage::FlushAllCaches`].
     pub(crate) flush_all_caches: bool,
     pub(crate) loop_request: Option<LoopCommand>,
-    /// What this batch's run messages ask for, coalesced — plus the events
-    /// the running loop fired, which arrive outside any message. The same
-    /// value the engine is handed.
+    /// What this batch's run messages ask for, coalesced, plus the events the running loop fired,
+    /// which arrive outside any message.
     pub(crate) seeds: RunSeeds,
     pub(crate) evict_cache: Vec<NodeId>,
     pub(crate) flush_cache: Vec<NodeId>,
@@ -57,10 +53,9 @@ impl BatchIntent {
     /// Merge `msg` into the batch, after the messages merged before it.
     pub(crate) fn push(&mut self, msg: WorkerMessage) {
         match msg {
-            // A graph op supersedes the node seeds named before it: they
-            // asked about the program it replaces, so one its program
-            // lacks is void rather than inconsistent. A seed named after
-            // the last graph op still fails the run when absent.
+            // A graph op supersedes the node seeds named before it, which asked about the program
+            // it replaces, so one its program lacks is void. A seed named after the last graph op
+            // still fails the run when absent.
             WorkerMessage::Update { compiled } => {
                 self.seeds
                     .node_ids

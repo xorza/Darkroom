@@ -68,9 +68,8 @@ pub enum FitsChecksumPolicy {
 }
 
 impl FitsChecksumPolicy {
-    /// HDU `idx`'s checksum `report` under this policy, of the file at `path`: an error where
-    /// the policy refuses it, else the provenance it gives. Not for [`Self::Ignore`], which reads
-    /// nothing.
+    /// HDU `idx`'s checksum `report` under this policy: an error where the policy refuses it, else
+    /// the provenance it gives. Not for [`Self::Ignore`], which reads nothing.
     pub(crate) fn judge(
         self,
         report: ChecksumReport,

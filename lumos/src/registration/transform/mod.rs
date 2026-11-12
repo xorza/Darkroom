@@ -33,12 +33,9 @@ const MIN_HOMOGENEOUS_SCALE: f64 = UNIT_ROUNDOFF * COORDINATE_RANGE / NORMALIZAT
 
 /// A concrete transformation model, in increasing degrees of freedom.
 ///
-/// Ordered by complexity, which [`Transform::compose`] uses to pick the more general of two. Every
-/// variant here is something RANSAC can estimate and a [`Transform`] can hold; asking for a model
-/// to be *chosen* is [`TransformModel::Auto`](crate::TransformModel::Auto), which is a different
-/// question and a different type. No `Default`: nothing asks for "the" model, and picking one here
-/// would be an answer invented to satisfy the derive. A caller with nothing to go on wants
-/// [`TransformModel::Auto`](crate::TransformModel::Auto).
+/// Ordered by complexity, which [`Transform::compose`] uses to pick the more general of two.
+/// Choosing a model is [`TransformModel::Auto`](crate::TransformModel::Auto), a different type.
+/// No `Default`: nothing asks for "the" model, so any pick would be invented for the derive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TransformType {
     /// Translation only (2 DOF: dx, dy)
@@ -96,14 +93,12 @@ impl Default for Transform {
 impl Display for Transform {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let t = self.translation_components();
-        // At the origin, where a homography's own matrix entries act; every other model is the
-        // same everywhere.
+        // At the origin, where a homography's own matrix entries act.
         let geometry = self.local_geometry(DVec2::ZERO);
         let rotation_deg = geometry.rotation.to_degrees();
         let [major, minor] = geometry.stretch;
 
-        // Each model shows only the components it actually constrains: translation has no angle,
-        // Euclidean no scale, a similarity one scale, and the two above it a stretch per axis.
+        // Each model shows only the components it constrains.
         match self.transform_type {
             TransformType::Translation => {
                 write!(f, "Translation(dx={:.2}, dy={:.2})", t.x, t.y)
@@ -199,7 +194,7 @@ impl Transform {
     pub fn rotation_around(center: DVec2, angle: f64) -> Self {
         let cos_a = angle.libm_cos();
         let sin_a = angle.libm_sin();
-        // T(-cx,-cy) * R(angle) * T(cx,cy)
+        // T(c) · R(angle) · T(-c)
         let tx = center.x - cos_a * center.x + sin_a * center.y;
         let ty = center.y - sin_a * center.x - cos_a * center.y;
         Self {
@@ -261,14 +256,8 @@ impl Transform {
     /// - `T.apply(ref_point)` gives the corresponding target point
     /// - `T.inverse().apply(target_point)` gives the corresponding reference point
     ///
-    /// # Image Warping
-    ///
-    /// To align a target image to the reference frame (so it overlays correctly
-    /// with the reference), you need to sample the target image at positions
-    /// mapped from reference coordinates. This means using `apply()` to find
-    /// where each reference pixel maps to in the target, then sampling there.
-    ///
-    /// [`WarpConfig::warp`](crate::WarpConfig::warp) handles this automatically.
+    /// Aligning a target image samples it at the target point each reference pixel maps to;
+    /// [`WarpConfig::warp`](crate::WarpConfig::warp) does this.
     ///
     /// # Example
     ///

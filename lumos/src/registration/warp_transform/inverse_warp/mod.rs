@@ -15,8 +15,8 @@ const NEWTON_TOLERANCE_PX: f64 = 1e-6;
 /// Newton steps before a point is given up as not invertible.
 ///
 /// From the start value `T⁻¹(t)` the error is the correction itself, tens of pixels at most, and
-/// Newton halves its digits' distance to the root every step once the error is under the field's
-/// curvature radius, which a fit's field is from the start: four or five steps converge. Thirty-two
+/// Newton doubles its correct digits every step once the error is under the field's curvature
+/// radius, which a fit's field is from the start: four or five steps converge. Thirty-two
 /// leaves the margin for a strong field and still stops a point past a fold — where `r + c(r) = u`
 /// has no solution — instead of letting it wander.
 const NEWTON_MAX_ITERATIONS: usize = 32;

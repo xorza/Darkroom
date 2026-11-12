@@ -149,13 +149,9 @@ fn an_identical_type_registers_again_and_a_conflict_panics() {
 /// as a *custom* one is a wiring bug, and it is refused whichever of
 /// the two arrives first.
 ///
-/// `enum_variants` answers `None` both for "not registered yet" and
-/// for "registered as a custom type". Deferred registration makes the
-/// first legitimate, so nothing could reject the second: the library
-/// accepted the pair, and the contradiction only surfaced later and
-/// far quieter, when the enum const failed `const_satisfies` and the
-/// input lowered to unbound — indistinguishable from a port the
-/// user simply never wired.
+/// `enum_variants` answers `None` both for "not registered yet" and for "registered as a custom
+/// type", so without this gate the contradiction would surface only when the enum const failed
+/// `const_satisfies` and the input lowered to unbound, like a port never wired.
 #[test]
 fn an_enum_declaration_over_a_custom_registration_is_refused_either_order() {
     // Type first, then the func that disagrees with it.
@@ -257,13 +253,10 @@ fn add_rejects_an_enum_default_naming_no_registered_variant() {
 
 /// A refusal has to leave nothing behind.
 ///
-/// The panic alone is not the contract — installing the entry and
-/// *then* validating meant the registry kept the very declaration it
-/// had just refused, and every later `enum_variants` / `type_name`
-/// lookup resolved against it. A caller that catches the panic (a
-/// host loading a plugin library, a test) went on with a registry
-/// that reported the rejected type as registered, and a second
-/// `register_type` for the same id then failed as a *duplicate*.
+/// The panic alone is not the contract: a caller that catches it (a host loading a plugin
+/// library) must not go on with a registry that reports the rejected type as registered,
+/// resolves `enum_variants` / `type_name` against it, and fails a second `register_type` for the
+/// same id as a *duplicate*.
 #[test]
 fn register_type_rejecting_an_earlier_enum_default_installs_nothing() {
     let type_id = TypeId::unique();
@@ -325,8 +318,6 @@ fn type_entry_kinds_expose_only_valid_codec_attachments() {
 /// calls the way it does between two runs of one node.
 #[tokio::test]
 async fn an_invoked_func_keeps_its_node_state_between_calls() -> Result<(), InvokeError> {
-    // The body stashes what it computed in the node's own state, which is
-    // what the second call below reads back.
     let mut library = Library::default();
     library.add(
         Func::builder(

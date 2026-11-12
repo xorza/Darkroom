@@ -9,10 +9,10 @@ use ::simd::Kernel;
 /// One row's 3×3 neighbourhood: the row, and the rows above and below it where the image has them.
 ///
 /// Border pixels are filtered over the 4 or 6 neighbours that exist rather than over a window
-/// padded out to 9 — no sample is duplicated. That is why `cosmic_ray`'s `median_window` is a
-/// separate filter instead of calling this at `r == 1`: L.A.Cosmic differences two window sizes
-/// against each other and so needs one border convention across all of them, and it picked
-/// replication.
+/// padded out to 9 — no sample is duplicated. That is why the cosmic-ray detector's
+/// `WindowMedian` is a separate filter instead of calling this at `r == 1`: L.A.Cosmic differences
+/// two window sizes against each other and so needs one border convention across all of them, and
+/// it picked replication.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct MedianRows<'a> {
     pub(crate) above: Option<&'a [f32]>,
@@ -62,7 +62,7 @@ impl MedianRows<'_> {
                 count += 1;
             }
         }
-        // Edge rows span exactly 2 input rows × {2, 3} columns, so the neighborhood is always 4 or 6.
+        // An edge row has 2 input rows × {2, 3} columns.
         match count {
             4 => median4(&mut neighbors[..4]),
             6 => median6(&mut neighbors[..6]),

@@ -21,10 +21,9 @@ pub enum NullPolicy {
     /// Carry them: the samples are replaced with a finite fill and flagged
     /// [`QualityFlags::NO_DATA`], so the file opens and the missing pixels stay identifiable.
     ///
-    /// The default: reading a file that conforms to the standard is not opt-in behaviour. The other
-    /// load defaults refuse *ambiguity* — a cube whose color semantics nothing establishes, a
-    /// float scale no header settles; a null is unambiguous, and refusing it refuses data the
-    /// standard defines.
+    /// The default: the other load defaults refuse *ambiguity* — a cube whose color semantics
+    /// nothing establishes, a float scale no header settles; a null is unambiguous, and refusing
+    /// it refuses data the standard defines.
     #[default]
     Mask,
     /// Fail the load, naming how many there are and where the first one is.
@@ -161,19 +160,17 @@ pub struct NullSamples {
 
 /// Samples the fill's median is taken over, at most.
 ///
-/// The median of a hundred thousand values drawn evenly across a plane and the median of all
-/// twenty-four million agree to far more precision than a stand-in for missing data needs, and the
-/// bound is what keeps this off the memory preflight: the scratch is a fixed 400 KB rather than a
-/// second copy of the plane the preflight did not budget for. `defect_map::sampling` bounds its own
-/// medians the same way and for the same reason.
+/// A median of values drawn evenly across a plane agrees with the full median to far more
+/// precision than a stand-in needs, and the bound keeps the scratch a fixed 400 000 bytes rather
+/// than a second copy of the plane the memory preflight did not budget for.
+/// `defect_map::sampling` bounds its own medians the same way.
 const FILL_MEDIAN_SAMPLES: usize = 100_000;
 
 /// Replace a plane's `null_count` non-finite samples with the median of its finite ones.
 ///
-/// What sits under a null is not data and [`QualityFlags::NO_DATA`] says so, but the stages that
-/// measure a whole plane mostly do not consult the flags, so this value is what they see. The
-/// median is the frame's own background level, which leaves a masked region a flat patch instead of
-/// the hard-edged hole a zero fill would cut — and a hard edge is what manufactures star detections
+/// The stages that measure a whole plane mostly do not consult [`QualityFlags::NO_DATA`], so this
+/// value is what they see. The median is the frame's own background level, so a masked region is a
+/// flat patch, not the hard-edged hole a zero fill would cut, which manufactures star detections
 /// and drags a background estimate. A deliberate stand-in, not a correction.
 pub(crate) fn fill(samples: &mut [f32], null_count: usize) {
     fill_where(samples, |_, value| !value.is_finite(), null_count);
@@ -317,21 +314,17 @@ mod tests {
     #[test]
     fn the_fills_median_is_sampled_rather_than_taken_over_a_whole_plane() {
         // Twice the sample bound of valid data, so the stride is exactly 2 and the scratch holds
-        // `FILL_MEDIAN_SAMPLES` values instead of a second copy of the plane — the allocation the
-        // decode's memory preflight does not budget for.
-        //
-        // Valid samples are the ramp 0..200_000. Every second one is 0, 2, … 199_998, whose median
-        // is the mean of its two middle values (99_998 and 100_000) = 99_999. The whole ramp's
-        // median is 99_999.5, so the bound costs half a unit in two hundred thousand.
+        // `FILL_MEDIAN_SAMPLES` values. Valid samples are the ramp 0..200_000. Every second one is
+        // 0, 2, … 199_998, whose median is the mean of its two middle values (99_998 and 100_000)
+        // = 99_999. The whole ramp's median is 99_999.5, so the bound costs half a unit.
         const VALID: usize = 2 * FILL_MEDIAN_SAMPLES;
         let mut samples: Vec<f32> = (0..VALID).map(|idx| idx as f32).collect();
         samples.push(f32::NAN);
         null_policy::fill(&mut samples, 1);
         assert_eq!(samples[VALID], 99_999.0);
 
-        // The stride runs over the finite samples, not over plane positions: masking the whole
-        // first half would otherwise spend that half of the quota on pixels that are dropped
-        // anyway, and draw the median from the tail alone.
+        // The stride runs over the finite samples, not plane positions: otherwise the masked
+        // first half would spend half the quota on dropped pixels.
         let mut lopsided: Vec<f32> = (0..VALID)
             .map(|idx| {
                 if idx < VALID / 2 {

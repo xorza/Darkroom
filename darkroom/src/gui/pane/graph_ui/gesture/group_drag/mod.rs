@@ -2,10 +2,9 @@
 //! its whole group alongside it, one `GraphIntent::MoveSelection` per frame,
 //! all folding into one undo entry.
 //!
-//! The caller owns the hit-testing that decides *what* got grabbed — a node
-//! body or its title, or a tie's band — and hands the result to
-//! [`GroupDrag::latch`].
-//! Everything after that lives here in [`GroupDrag::input`].
+//! The caller owns the hit-testing that decides what got grabbed (a node body or its title, or
+//! a tie's band) and hands the result to [`GroupDrag::latch`]. Everything after that lives here
+//! in [`GroupDrag::input`].
 
 use std::collections::BTreeSet;
 use std::rc::Rc;
@@ -28,12 +27,10 @@ use crate::gui::pane::graph_ui::unsettled_ctx::UnsettledCtx;
 
 /// One in-flight group drag, or none.
 ///
-/// [`Self::input`] is the whole per-frame lifecycle: the grabbed item left
-/// the view, a fresh gesture relatched on the same widget, Esc
-/// cancelled it, the drag released, or it moved and commits. Every committed
-/// position is `start + drag_delta` against the snapshot taken at latch — not
-/// a running integration over the moving widget — so a dropped frame can't
-/// accumulate drift.
+/// [`Self::input`] is the whole per-frame lifecycle: the grabbed item left the view, a fresh
+/// gesture relatched on the same widget, Esc cancelled it, the drag released, or it moved and
+/// commits. Every committed position is `start + drag_delta` against the snapshot taken at
+/// latch, not a running integration, so a dropped frame can't accumulate drift.
 #[derive(Default, Debug)]
 pub(crate) struct GroupDrag {
     anchor: Option<Anchor>,
@@ -52,9 +49,8 @@ pub(crate) struct Grab {
     /// nodes ([`with_inner_ties`]). Includes the grabbed node itself.
     /// Shared with each frame's intent, so a frame copies no list.
     pub(crate) members: Rc<[DragStart]>,
-    /// The widget whose drag delta drives the gesture, captured at latch so
-    /// later frames can `ui.response_for(handle)` without the caller having
-    /// to remember which of its several grab targets started it.
+    /// The widget whose drag delta drives the gesture, captured at latch so later frames need
+    /// not know which of the caller's several grab targets started it.
     pub(crate) handle: WidgetId,
 }
 
@@ -76,9 +72,8 @@ struct Anchor {
 }
 
 impl GroupDrag {
-    /// Drop any latched drag. Called on the tab-switch reset — a drag left
-    /// latched while the canvas was away would otherwise resume when it
-    /// comes back.
+    /// Drop any latched drag, on the tab-switch reset: one left latched while the canvas was away
+    /// would otherwise resume when it comes back.
     pub(crate) fn reset(&mut self) {
         self.anchor = None;
     }
@@ -110,14 +105,13 @@ impl GroupDrag {
     /// gesture records nothing. `darkroom/AGENTS.md`, "Undo", "A held gesture
     /// is one entry, and Esc takes it back whole".
     ///
-    /// Runs pre-record, so the move lands in `Document` before the pass that
-    /// draws the moved items: they paint at the cursor in Pass A with no
-    /// relayout retry.
+    /// Runs pre-record, so the move lands in `Document` before the pass that draws the moved
+    /// items, which paint at the cursor with no relayout retry.
     pub(crate) fn input(&mut self, ui: &Ui, stage: &mut Stage<'_, UnsettledCtx<'_>>) {
         let ctx = stage.ctx;
         let graph_ctx = ctx.graph_ctx();
-        // An item deleted mid-drag (breaker swipe, undo) takes its drag with
-        // it: left in place the anchor would emit against a missing item.
+        // An item deleted mid-drag (breaker swipe, undo) takes its drag with it, as the anchor
+        // would emit against a missing item.
         if self
             .anchor
             .as_ref()
@@ -129,10 +123,9 @@ impl GroupDrag {
             return;
         };
         let resp = ui.response_for(anchor.grab.handle);
-        // `drag_started` on a still-active anchor means a *new* gesture just
-        // latched on the same widget. Emitting with the stale start
-        // positions would snap the group back to the previous gesture's
-        // start point; the caller's latch scan picks the new one up instead.
+        // `drag_started` on a still-active anchor means a new gesture just latched on the same
+        // widget. Emitting with the stale start positions would snap the group back to the
+        // previous gesture's start point; the caller's latch scan picks the new one up instead.
         if resp.left.drag.started() {
             self.anchor = None;
             return;
@@ -146,14 +139,13 @@ impl GroupDrag {
             self.anchor = None;
             return;
         }
-        // No delta means the drag isn't latched anymore — release, or the
-        // pointer left the surface.
+        // No delta means the drag isn't latched anymore: release, or the pointer left the surface.
         let Some(delta) = resp.left.drag.delta() else {
             self.anchor = None;
             return;
         };
-        // Palantir reports drag deltas in the widget's pre-transform frame,
-        // which is the same canvas-world space item positions live in.
+        // Palantir reports drag deltas in the widget's pre-transform frame, the canvas-world space
+        // item positions live in.
         stage.out.push_graph(anchor.frame(delta));
     }
 }

@@ -159,10 +159,10 @@ where
         Ok(prefix.is_some_and(|prefix| prefix.output_count == outputs.len()))
     }
 
-    /// Whether this blob can serve `demand` under its digest: [`read`](Self::read) stopped
-    /// after its header check. Reads the fixed prefix plus one descriptor per output and stops,
-    /// so a reuse verdict costs one small sequential read instead of decoding the body. Sharing
-    /// `read_header` is what keeps a probe's verdict and the later read's from drifting apart.
+    /// Whether this blob can serve `demand` under its digest: [`read`](Self::read) stopped after
+    /// its header check. Reads the fixed prefix plus one descriptor per output, so a reuse verdict
+    /// costs one small sequential read instead of decoding the body. Sharing `read_header` keeps a
+    /// probe's verdict and the later read's from drifting apart.
     pub(super) async fn covers_demand(&mut self, demand: &[OutputDemand]) -> FormatResult<bool> {
         Ok(self.read_header(demand).await?.is_some())
     }
@@ -204,9 +204,9 @@ where
     }
 
     /// The blob's descriptors, or `None` when it cannot serve `demand` — a different digest, a
-    /// different arity, a codec version the library no longer has, or a demanded output the
-    /// blob left `Unbound`. Undemanded outputs may be missing; that is what makes a narrow
-    /// snapshot reusable by a run that wants less than the one which wrote it.
+    /// different arity, a codec version the library no longer has, or a demanded output the blob
+    /// left `Unbound`. Undemanded outputs may be missing, so a narrow snapshot is reusable by a
+    /// run that wants less than the one which wrote it.
     async fn read_header(&mut self, demand: &[OutputDemand]) -> FormatResult<Option<BlobHeader>> {
         let mut descs = Vec::new();
         let prefix = self
@@ -566,8 +566,8 @@ fn desc_payload_len_offset(idx: usize) -> u64 {
 pub(crate) mod internals {
     use crate::exec::cache::disk_store::format::FORMAT_VERSION;
 
-    /// Rewrite `blob`'s format version to the one before the current: the header a blob from an
-    /// earlier build carries, which every read refuses.
+    /// Rewrite `blob`'s format version to the one before the current: the header an earlier build
+    /// wrote, which every read refuses.
     pub(crate) fn age_format(blob: &mut [u8]) {
         let older = FORMAT_VERSION - 1;
         blob[8..12].copy_from_slice(&older.to_le_bytes());

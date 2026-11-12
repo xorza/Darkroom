@@ -11,20 +11,19 @@ use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph_ui::gesture::item_menu::ItemMenu;
 
-/// Right-click on a node body → a small popup with actions on the node.
-/// The trigger scan, the per-open node latch, and the popup lifecycle are all
-/// [`ItemMenu`]'s. "Run to this node" needs only the clicked node's id
-/// and surfaces an [`AppCommand`]; the structural picks read the live
-/// selection off the context and push their intents onto the frame's queue,
-/// the same two builders the Ctrl+D and Delete chords drive.
+/// Right-click on a node body → a small popup with actions on the node. The trigger scan, the
+/// per-open node latch, and the popup lifecycle are [`ItemMenu`]'s. "Run to this node" needs
+/// only the clicked node's id and surfaces an [`AppCommand`]; the structural picks read the live
+/// selection off the context and push their intents onto the frame's queue, through the same
+/// builders the Ctrl+D and Delete chords drive.
 #[derive(Default, Debug)]
 pub(crate) struct NodeMenuUi {
     menu: ItemMenu<NodeId>,
 }
 
-/// A menu pick before routing. `Run` names the node the menu opened on; the
-/// structural picks carry only their kind, because their target is the
-/// selection (a right-click selects the node it landed on first).
+/// A menu pick before routing. `Run` names the node the menu opened on; the structural picks
+/// carry only their kind, as their target is the selection (a right-click selects the node it
+/// landed on first).
 #[derive(Copy, Clone, Debug)]
 enum MenuChoice {
     Run,
@@ -63,10 +62,8 @@ impl NodeMenuUi {
         self.menu.retain(|node_id| graph_ctx.contains(node_id));
         let pick = self.menu.show(ui, "node_body_menu", |ui, node_id| {
             let mut chosen = None;
-            // "Run to this node" and the duplicates show only when the
-            // clicked node is a graph node, not a stub (same rule as the
-            // header play chip): a stub neither runs nor copies. The body
-            // only runs while the menu is open.
+            // "Run to this node" and the duplicates show only when the clicked node is a graph
+            // node, not a stub (the header play chip's rule): a stub neither runs nor copies.
             if graph_ctx.node(node_id).is_some_and(NodeCtx::runnable) {
                 if MenuItem::new("Run to this node").show(ui).left.clicked() {
                     chosen = Some(MenuChoice::Run);
@@ -106,8 +103,8 @@ impl NodeMenuUi {
                     || NodeId::unique().as_u128(),
                 ));
             }
-            // One intent per member, batched into a single undo entry by the
-            // drain — the Delete chord's path exactly.
+            // One intent per member, batched into a single undo entry by the drain, as the Delete
+            // chord does.
             MenuChoice::Remove => out.extend_graph(GraphIntent::remove_selection(graph_ctx.view())),
         }
     }

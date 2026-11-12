@@ -7,20 +7,16 @@ use crate::gui::widgets::format;
 
 /// A run time that renders on demand rather than into a `String`.
 ///
-/// `Display` rather than an owned buffer because every caller is a
-/// per-frame label: the node footer's live timer runs once per node per
-/// frame and the inspector's status line once per open pane, and both
-/// feed the result straight into a formatter that never needed it to be
-/// heap-allocated.
+/// `Display` rather than an owned buffer: every caller is a per-frame label that feeds a
+/// formatter, which needs no heap allocation.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Elapsed(f64);
 
 impl Elapsed {
-    /// Compact run-time label: seconds → `s` / `ms` / `µs` / `ns` at the scale
-    /// that keeps 2–3 significant digits, and `<1ns` for a time above 0 that
-    /// would print as `0ns`, so a run that took time never reads as none. The
-    /// elapsed-time sibling of [`Bytes`](crate::gui::widgets::format::bytes::Bytes),
-    /// read by the node footer's live timer and the inspector's status line.
+    /// Compact run-time label from `secs`: `s` / `ms` / `µs` / `ns` at the scale that keeps 2–3
+    /// significant digits, and `<1ns` for a time above 0 that would print as `0ns`, so a run that
+    /// took time never reads as none. Read by the node footer's live timer and the inspector's
+    /// status line.
     ///
     /// Stays within 7 characters up to `999999s` (decimals drop past `999.99s`),
     /// which is what `RUN_TIME_GLYPHS` in `gui::pane::graph_ui::node_ui::run_status`

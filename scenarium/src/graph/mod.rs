@@ -1,7 +1,6 @@
 //! The authoring graph: the [`Graph`] type, the satellite types it owns
 //! ([`Node`], [`Binding`], [`CacheMode`](node::CacheMode), …), and **every method a `Graph`
-//! has**, in one impl — reads and mutations alike, so the whole surface is one
-//! file to read rather than six.
+//! has**, in one impl, so the whole surface is one file to read.
 //!
 //! The modules beside it keep what those methods work *with*: [`identity`]
 //! how a node or port is named, [`detached`] the reversible-removal records,
@@ -82,26 +81,21 @@ pub(crate) mod subscription;
 /// for what it took (an editor's duplicate) or is the only one of its identity
 /// alive at a time (undo/redo replay of a stored step).
 ///
-/// The side tables split on how they're reached, not on how sensitive they
-/// are: `bindings` is a plain map a caller keys into directly, so it is public
-/// rather than fronted by trivial accessors, while `nodes` and `subscriptions`
-/// are reached only through the methods below and so are private.
+/// `bindings` is a plain map a caller keys into directly, so it is public;
+/// `nodes` and `subscriptions` are reached only through the methods below.
 #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Graph {
-    /// Every node, keyed by the id that reaches it — so an id is unique here
-    /// by construction, and [`insert`](Self::insert) panics rather than
-    /// replacing. Decoding is the one way in that could hold a repeated id, and
-    /// [`serde::deserialize_nodes`](crate::graph::serde) refuses one instead of
-    /// letting the map absorb it.
+    /// Every node, keyed by id, so an id is unique by construction:
+    /// [`insert`](Self::insert) panics rather than replacing, and
+    /// [`serde::deserialize_nodes`](crate::graph::serde) refuses a repeated id
+    /// instead of letting the map absorb it.
     #[serde(deserialize_with = "crate::graph::serde::deserialize_nodes")]
     nodes: HashMap<NodeId, Node>,
 
-    /// Data wiring, keyed by consumer input port. Sparse: only bound ports
-    /// appear; absence means unbound. A `BTreeMap` keeps
-    /// serialization deterministic and lets a node's ports range contiguously.
-    /// Serialized as a sequence of `(port, binding)` pairs and decoded entry
-    /// by entry, so a document that repeats a port is refused rather than
-    /// loaded as a map that kept only the last binding.
+    /// Data wiring, keyed by consumer input port; absence means unbound. A `BTreeMap` keeps
+    /// serialization deterministic and a node's ports contiguous. Serialized as `(port, binding)`
+    /// pairs decoded entry by entry, so a document that repeats a port is refused rather than
+    /// loaded with only the last binding.
     #[serde(
         default,
         serialize_with = "crate::graph::serde::serialize_bindings",
@@ -109,9 +103,8 @@ pub struct Graph {
     )]
     pub bindings: BTreeMap<InputPort, Binding>,
 
-    /// Event wiring: every (emitter event → subscriber) edge, flat. A
-    /// `BTreeSet` dedups and keeps both serialization and the order a compile
-    /// reads them in deterministic.
+    /// Event wiring: every (emitter event → subscriber) edge, flat. A `BTreeSet` dedups and keeps
+    /// serialization and compile order deterministic.
     #[serde(default)]
     subscriptions: BTreeSet<Subscription>,
 }
@@ -130,11 +123,9 @@ impl Graph {
             .map(|(id, node)| NodeRef { node_id: *id, node })
     }
 
-    /// The node with `id`, or `None` if this graph has none — which is the
-    /// answer for the nil id, as no graph holds it.
+    /// The node with `id`, or `None` if this graph has none, as for the nil id.
     ///
-    /// A bare `&Node` rather than a [`NodeRef`]: the caller supplied the id, so
-    /// there is nothing to attach.
+    /// A bare `&Node` rather than a [`NodeRef`]: the caller supplied the id.
     pub fn find(&self, id: NodeId) -> Option<&Node> {
         self.nodes.get(&id)
     }
@@ -252,22 +243,14 @@ impl Graph {
     /// Whether binding an output of `producer` into an input on `consumer`
     /// would close a directed data cycle. A node wired to itself counts.
     ///
-    /// A compile asserts that no wire closes a cycle
-    /// ([`Self::validate_with`]), so this is what keeps one from being authored
-    /// at all: the editor asks before it commits a bind. Port
-    /// indices don't enter into it — a cycle is a property of the node graph,
-    /// and any output of `producer` reaching any input of `consumer` closes the
-    /// same loop.
+    /// A compile asserts that no wire closes a cycle ([`Self::validate_with`]), so the editor
+    /// asks this before it commits a bind. Port indices don't enter into it: a cycle is a
+    /// property of the node graph.
     ///
-    /// Walks *backward* from `producer` over what already feeds it; reaching
-    /// `consumer` means the proposed edge closes the loop. Const bindings aren't
-    /// edges, so they can't take part.
-    ///
-    /// Backward because `bindings` is keyed by consumer port and [`InputPort`]
-    /// orders by node before port index — so a node's own inputs are one
-    /// contiguous range, and "what feeds this node" is a lookup the map already
-    /// answers. Asking it the other way round needs a reversed index built over
-    /// every binding in the graph, whatever the answer turns out to be.
+    /// Walks *backward* from `producer` over what already feeds it; reaching `consumer` means
+    /// the edge closes the loop. Backward because [`InputPort`] orders by node before port, so
+    /// "what feeds this node" is one range of `bindings`; the other way needs a reversed index
+    /// over every binding.
     pub fn produces_cycle(&self, producer: NodeId, consumer: NodeId) -> bool {
         if producer == consumer {
             return true;
@@ -421,14 +404,10 @@ impl Graph {
 
     /// Validate this graph structurally: everything a document must satisfy to
     /// *be* a graph, answerable without a library. Decoding checks only what it
-    /// alone can see (a repeated key, which no decoded value could still show),
-    /// never the wiring below.
+    /// alone can see (a repeated key), never the wiring below.
     ///
-    /// Id *uniqueness* is therefore not among the checks: `nodes` is keyed by
-    /// id, so a duplicate cannot survive to be found here — the two ways one
-    /// could arrive are [`insert`](Self::insert), which panics, and decoding,
-    /// which refuses. Re-deriving it from the map's own keys would only ever
-    /// confirm that a map is a map.
+    /// Id uniqueness is not checked: `nodes` is keyed by id, and both ways a
+    /// duplicate could arrive, [`insert`](Self::insert) and decoding, refuse it.
     pub fn validate(&self) -> ValidationResult<()> {
         if self.nodes.contains_key(&NodeId::nil()) {
             return Err(GraphValidationError::NilNodeId);

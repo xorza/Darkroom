@@ -36,11 +36,11 @@ impl MeanCombine {
     /// The reducer of each pixel, its constants resolved once: the band's dispersion correction,
     /// and the fallback below the samples the rejection needs.
     ///
-    /// Only the mean is weighted; the rejection decides survivors from the values alone. That
-    /// matches what `ImageIntegration`, Siril and DSS do: rejection asks which samples disagree
-    /// with the others, which is a question about the normalized values, not about how much each
-    /// frame is trusted. It also keeps GESD a valid test: its critical values come from the
-    /// t-distribution for `n` iid observations, and there is no weighted form of them.
+    /// Only the mean is weighted; the rejection decides survivors from the values alone, as
+    /// `ImageIntegration`, Siril and DSS do: which samples disagree is a question about the
+    /// normalized values, not about how much each frame is trusted. It also keeps GESD a valid
+    /// test: its critical values come from the t-distribution for `n` iid observations, and there
+    /// is no weighted form of them.
     pub(crate) fn reducer(
         self,
     ) -> impl Fn(PixelSamples<'_>, &mut ScratchBuffers) -> CombinedSample + Sync + Copy {

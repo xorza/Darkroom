@@ -121,9 +121,8 @@ fn a_new_node_takes_what_its_declaration_says() {
     );
     assert_eq!(node.cache, special.func().default_cache_mode());
 
-    // A `Func` kind names an id and a signature, and resolving it takes a
-    // library this constructor does not have. So it starts unnamed and uncached — and an
-    // empty name means exactly that: a node whose func nothing has resolved.
+    // Resolving a `Func` kind takes a library this constructor does not have, so it starts
+    // unnamed and uncached: an empty name means a node whose func nothing has resolved.
     let unresolved = internals::unresolved_node(FuncId::unique());
     assert_eq!(unresolved.cache, CacheMode::None);
     assert!(unresolved.name.is_empty());
@@ -131,9 +130,8 @@ fn a_new_node_takes_what_its_declaration_says() {
 
 #[test]
 fn const_only_input_rejects_bind_but_a_normal_input_accepts_it() {
-    // One Int-in / Int-out func, so a wire between two of its instances is
-    // otherwise valid — only the `const_only` flag decides whether validation
-    // accepts it.
+    // One Int-in / Int-out func, so only the `const_only` flag decides whether validation
+    // accepts a wire between two of its instances.
     let validate = |const_only: bool| -> Result<(), GraphValidationError> {
         let mut g = TestGraph::new();
         g.add("f", |n| {
@@ -543,15 +541,14 @@ fn serialization_round_trips_a_graph_through_every_format() -> TestResult {
     Ok(())
 }
 
-/// The release-path structural guard on an untrusted document. Decoding does
-/// not validate — a host loads with `deserialize` followed by
-/// [`Graph::validate`], which is the only place every structural invariant the
-/// graph's own mutations *assert* gets **checked** instead.
+/// The release-path structural guard on an untrusted document. Decoding does not validate: a
+/// host loads with `deserialize` then [`Graph::validate`], the only place every structural
+/// invariant the graph's mutations *assert* is **checked**.
 #[test]
 fn loading_rejects_a_corrupt_graph() {
-    // A mirror of `Graph`'s wire shape. `RawValue` keeps every field's exact text,
-    // so the duplicated entry below is the only thing authored. The mirror names
-    // every field, so a new one on `Graph` fails its decode, which points here.
+    // A mirror of `Graph`'s wire shape. `RawValue` keeps every field's exact text, so the
+    // duplicated entry below is the only thing authored. Naming every field makes a new one on
+    // `Graph` fail its decode, which points here.
     #[derive(Debug, serde::Serialize, serde::Deserialize)]
     struct WireGraph {
         nodes: Box<RawValue>,
@@ -750,11 +747,10 @@ fn func_of_resolves_a_node_or_says_why_not() {
     );
 }
 
-/// A reconcile removes exactly what the library cannot hold, reports each
-/// removal in a fixed order, detaches each node that does not resolve with the
-/// wiring that touched it — an edge between two such nodes going to the one
-/// detached first — and leaves a graph that validates and compiles. `Null`
-/// stays on an optional input.
+/// A reconcile removes exactly what the library cannot hold, reports each removal in a fixed
+/// order, detaches each unresolved node with the wiring that touched it (an edge between two
+/// such nodes going to the one detached first), and leaves a graph that validates and compiles.
+/// `Null` stays on an optional input.
 #[test]
 fn reconcile_removes_exactly_what_the_library_cannot_hold() {
     let mut g = TestGraph::new();

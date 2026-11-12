@@ -7,15 +7,15 @@ use super::*;
 use crate::math::error_function;
 
 /// A lone star found by detection on an estimated sky and measured with the default config, as the
-/// pipeline runs it before the FWHM is known: one candidate at the nearest pixel, a moments
-/// centroid as far along as ten steps take it, the flux of the stamp's samples, and every metric as
-/// on the true sky.
+/// pipeline runs it before the FWHM is known: one candidate at the nearest pixel, a converged
+/// moments centroid, the flux of the stamp's samples, and every metric as on the true sky.
 ///
-/// The default method is ten weighted-moments steps with a window of `σ_w = 0.8 · σ(seed FWHM 4.0)`
-/// = 1.359 px, each step shrinking the error by `c = σ² / (σ² + σ_w²)` — see
-/// `moments_contract_and_fits_ignore_the_seed`. The flux sums the residual over the
-/// (2r+1)² stamp around the rounded centroid, r = `measure_grid::stamp_radius(4.0)` = 7, and the
-/// samples are point values of a separable profile: A · Σᵢ g(i − x₀) · Σⱼ g(j − y₀).
+/// The default method is weighted moments with a window of `σ_w = 0.8 · σ(seed FWHM 4.0)`
+/// = 1.359 px. A plain fixed-point step shrinks the error by `c = σ² / (σ² + σ_w²)`, so ten of
+/// them bound the converged centre — see `the_windowed_centroid_converges_and_the_fits_ignore_the_seed`.
+/// The flux sums the residual over the (2r+1)² stamp around the rounded centroid,
+/// r = `measure_grid::stamp_radius(4.0)` = 7, and the samples are point values of a separable
+/// profile: A · Σᵢ g(i − x₀) · Σⱼ g(j − y₀).
 #[test]
 fn a_detected_star_measures_as_on_its_true_sky() {
     const AMPLITUDE: f64 = 0.8;

@@ -11,10 +11,8 @@ use std::time::Duration;
 
 use common::ResidentMemory;
 
-/// How long a reading is reused before the next refresh. The bar renders
-/// every frame; re-entering the kernel at frame rate for a number that moves
-/// on a human timescale buys nothing. An idle app stops repainting entirely,
-/// so the on-screen figure simply holds until something else wakes a frame.
+/// How long a reading is reused before the next refresh: the number moves on a human timescale,
+/// so re-entering the kernel every frame buys nothing.
 const SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Retained, throttled sampler for this process's resident set.

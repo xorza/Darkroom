@@ -50,11 +50,9 @@ fn keyed_slot(cur_digest: Option<Digest>) -> RuntimeSlot {
     slot
 }
 
-/// One node per `(cache, behavior)` pair, each declaring a single `Int` output.
-///
-/// The output matters: `release_dead_outputs` compares a resident snapshot's
-/// length against the node's declared port count, so a fixture node declaring
-/// none while holding a value is not a shape any real program produces.
+/// One node per `(cache, behavior)` pair, each declaring a single `Int` output: the output
+/// matters because `release_dead_outputs` compares a resident snapshot's length against the
+/// node's declared port count.
 fn program_of(nodes: impl IntoIterator<Item = (CacheMode, FuncBehavior)>) -> CompiledGraph {
     let mut prog = ProgramBuilder::default();
     for (cache, behavior) in nodes {
@@ -73,9 +71,8 @@ fn ram_program(count: usize) -> CompiledGraph {
     program_of((0..count).map(|_| (CacheMode::Ram, FuncBehavior::Pure)))
 }
 
-/// Install `program` and fill the slots it opens, in index order. The only way
-/// a test gets slots: the column and the program its indices mean are written
-/// together, so a fixture cannot leave the cache describing itself wrongly.
+/// Install `program` and fill the slots it opens, in index order. The only way a test gets slots:
+/// the column and the program its indices mean are written together.
 fn install(
     cache: &mut RuntimeCache,
     program: &CompiledGraph,
@@ -275,8 +272,8 @@ fn reconcile_applies_ram_mode_downgrades_without_waiting_for_a_run() {
     }
 }
 
-/// A recompile that changes a node's implementation keeps its resident value:
-/// the value's validity is digest-keyed, and the digest folds the func identity.
+/// A recompile that changes a node's implementation keeps its resident value: validity is
+/// digest-keyed, and the digest folds the func identity.
 #[test]
 fn reconcile_keeps_the_value_when_the_implementation_changes() {
     let node_id = NodeId::from_u128(1);
@@ -302,9 +299,8 @@ fn reconcile_keeps_the_value_when_the_implementation_changes() {
     assert!(cache.slots[node_idx].output_values().is_some());
 }
 
-/// Slots follow their stable id when a recompile shifts the dense index space,
-/// which is what makes the cache self-describing: it re-pairs against nothing
-/// but the ids it already carries.
+/// Slots follow their stable id when a recompile shifts the dense index space, so the cache
+/// re-pairs against nothing but the ids it already carries.
 #[test]
 fn reconcile_follows_ids_when_the_index_space_shifts() {
     let build = |ids: &[u128]| {
@@ -329,9 +325,8 @@ fn reconcile_follows_ids_when_the_index_space_shifts() {
         make_resident(slot, digest(u128::from(i) + 1));
     }
 
-    // Node 1 is deleted and node 4 appended: ids sort to 2, 3, 4, so every
-    // surviving node slides down one index. Both programs are named, the way
-    // `ExecEngine::install` names them at the swap.
+    // Node 1 is deleted and node 4 appended: ids sort to 2, 3, 4, so every surviving node slides
+    // down one index. Both programs are named, as `ExecEngine::install` names them at the swap.
     reinstall(&mut cache, &installed, build(&[2, 3, 4]));
 
     assert_eq!(
@@ -542,9 +537,9 @@ fn measure_resident_ram_accounts_each_owner_once_and_dedups_the_total() {
     assert_eq!(total, RamUsage { cpu: 105, gpu: 10 });
     assert_eq!(total.total(), 115);
 
-    // Per-node: no cross-slot dedup — each node reports what it holds. The column spans
-    // the program, so the empty slot C reads zero rather than going unlisted. Slot A holds
-    // shared (100/10) + the 5/0 value = 105/10; slot B holds shared again = 100/10.
+    // Per-node: no cross-slot dedup — each node reports what it holds. The column spans the
+    // program, so the empty slot C reads zero. Slot A holds shared (100/10) + the 5/0 value =
+    // 105/10; slot B holds shared again = 100/10.
     assert_eq!(cache.node_ram().len(), 3);
     assert_eq!(cache.node_ram()[NodeIdx(0)], RamUsage { cpu: 105, gpu: 10 });
     assert_eq!(cache.node_ram()[NodeIdx(1)], RamUsage { cpu: 100, gpu: 10 });

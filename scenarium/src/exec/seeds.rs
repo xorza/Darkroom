@@ -15,9 +15,8 @@ pub(crate) struct RunSeeds {
     /// Include every node owning a subscribed event so it initializes the
     /// shared state and runtime triggers that drive the event loop.
     pub(crate) event_sources: bool,
-    /// Run the subscribers of these specific fired events, each one the installed
-    /// program declares: events arrive in a batch of their own, and each install
-    /// rebuilds the event loop.
+    /// Run the subscribers of these specific fired events, each one the installed program
+    /// declares.
     pub(crate) events: Vec<EventPort>,
     /// Run these exact compiled nodes and deliver every output — the on-demand "run to
     /// this node" / preview trigger. An explicitly seeded disabled node is enabled for
@@ -33,8 +32,8 @@ impl RunSeeds {
         !self.sinks && !self.event_sources && self.events.is_empty() && self.node_ids.is_empty()
     }
 
-    /// Forget everything, keeping the lists' capacity. What a worker batch
-    /// opens with, so one burst's seeds never leak into the next.
+    /// Forget everything, keeping the lists' capacity, so one burst's seeds never leak into the
+    /// next.
     pub(crate) fn clear(&mut self) {
         self.sinks = false;
         self.event_sources = false;

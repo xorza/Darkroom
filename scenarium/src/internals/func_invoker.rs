@@ -8,18 +8,12 @@ use crate::runtime::any_state::AnyState;
 use crate::runtime::ctx_manager::CtxManager;
 use crate::runtime::shared_any_state::SharedAnyState;
 
-/// The five collaborators a lambda is handed, held so a test can just say what
-/// it passes in.
+/// The collaborators a lambda is handed (context, the node's state, its shared event state, the
+/// per-output demand, a buffer to write into), held so a body's own arithmetic can be tested
+/// without a graph, schedule or cache.
 ///
-/// A body's own arithmetic — what `Add` computes, what `Concat` joins — needs no
-/// graph, no schedule and no cache, only an invoke. But an invoke takes a
-/// context, the node's persistent state, its shared event state, the run's
-/// per-output demand, and a buffer to write into.
-///
-/// **State persists across calls**, because a node's does: two calls on one
-/// invoker see the same [`AnyState`] and the same [`SharedAnyState`], the way
-/// two runs of one node would. A test that wants a node with no history builds
-/// a second invoker.
+/// **State persists across calls**, as a node's does across runs: two calls on one invoker see
+/// the same [`AnyState`] and [`SharedAnyState`]. A node with no history needs a new invoker.
 #[derive(Debug, Default)]
 pub struct FuncInvoker {
     ctx: CtxManager,
@@ -56,9 +50,8 @@ impl FuncInvoker {
         self.state.get::<T>()
     }
 
-    /// The shared state this node's *event* lambdas read — handed out cloned,
-    /// since driving an event while the body keeps being called is the whole
-    /// point of the two being separate.
+    /// The shared state this node's *event* lambdas read, handed out cloned so an event can be
+    /// driven while the body keeps being called.
     pub fn event_state(&self) -> SharedAnyState {
         self.event_state.clone()
     }

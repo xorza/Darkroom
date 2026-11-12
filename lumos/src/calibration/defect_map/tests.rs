@@ -255,9 +255,9 @@ fn cfa_stack_propagates_raw_quantization_into_hot_detection() {
 
 #[test]
 fn correct_clustered_defect_uses_only_good_neighbors() {
-    // A defect whose same-color neighbours are MOSTLY other defects must still be repaired from
-    // the few good ones — the defect mask excludes the bad neighbours. Pre-mask, the neighbour
-    // median was dominated by the cluster and left the pixel ~uncorrected (≈0.95 here).
+    // A defect whose same-color neighbours are mostly other defects must still be repaired from
+    // the few good ones: the defect mask excludes the bad neighbours, whose median would leave the
+    // pixel ~uncorrected (≈0.95 here).
     let cfa = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
     let size = USize2::new(16usize, 16usize);
     // Red pixels sit at (even,even). Target (6,6); make 5 of its 8 stride-2 red neighbours hot.

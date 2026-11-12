@@ -10,9 +10,8 @@ pub(crate) struct ExecOutcome {
     /// One row per node with something to report — a status, retained RAM, or both.
     /// `CompiledGraph` order, so a node cannot appear twice.
     pub(crate) nodes: Vec<NodeStatus>,
-    /// How many nodes invoked their lambda, successes and failures alike. Counted while
-    /// the rows are built rather than derived from them, since a failed node's row no
-    /// longer says "executed" separately.
+    /// How many nodes invoked their lambda, successes and failures alike. Counted while the rows
+    /// are built rather than derived from them.
     pub(crate) executed_node_count: usize,
     pub(crate) event_triggers: Vec<EventTrigger>,
     pub(crate) logs: Vec<LogEntry>,

@@ -1,11 +1,9 @@
-//! Shared scaffolding for real-data tests, plus the two that span more than one subsystem.
+//! Shared scaffolding for real-data tests, plus the one that spans more than one subsystem.
 //!
 //! Everything here runs against the bundled `test_data/lumos_data` dataset behind the `real-data`
 //! feature. A real-data test that exercises *one* subsystem lives with that subsystem, in its
 //! `tests/real_data.rs`. What is here is shared or cross-cutting:
 //!
-//! - [`pipeline_bench`] — full master-darks/flats → calibrate → register → stack benchmark
-//!   (`cargo test -p lumos --release bench_full_pipeline -- --ignored --nocapture`).
 //! - [`milky_way`] — the "best Milky Way" chain: green removal, stretch, denoise, HDR and CLAHE
 //!   together, so it belongs to no single image op.
 //! - [`ml_support`] (feature `ml`) — weight resolution for the `ml` prototypes in

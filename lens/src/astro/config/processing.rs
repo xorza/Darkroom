@@ -1,19 +1,15 @@
 //! Which per-frame processing configs the editor can build, and the projections
 //! for the ones whose shape it cannot edit directly.
 //!
-//! Most of these are simply the lumos config: it derives
-//! [`Introspect`] itself, so the builder node's ports *are*
-//! its fields and adding one in lumos adds a port here with no edit on this
-//! side. Their wire identity — a `TYPE_ID` that ships in saved documents and so
-//! is fixed for the life of the type, and a `DISPLAY_NAME` that is only what the
-//! editor labels that wire — is declared by their own derive in lumos.
+//! Most are the lumos config itself: it derives [`Introspect`], so the builder node's ports are
+//! its fields and a field added in lumos adds a port here. Their wire identity, a `TYPE_ID` that
+//! ships in saved documents and is fixed for the life of the type, and a `DISPLAY_NAME` that only
+//! labels the wire, is declared by their own derive in lumos.
 //!
-//! A config the field model can't express — one whose enum variants carry
-//! data, which [`IntrospectEnum`] does not describe —
-//! gets a projection instead: a flat struct of the knobs the editor offers,
-//! plus the one-way conversion that expands them back into the real config. A
-//! projection is deliberately narrower than the type it builds, so it does
-//! *not* track that type field-for-field.
+//! A config the field model can't express, one whose enum variants carry data, which
+//! [`IntrospectEnum`] does not describe, gets a projection: a flat struct of the knobs the editor
+//! offers, with a one-way conversion back into the real config. A projection is deliberately
+//! narrower than the type it builds.
 
 use common::{Introspect, IntrospectEnum};
 use lumos::{BgMode, ColorMode, ExtractBg, Scnr, ScnrProtection, Stretch, StretchMethod};

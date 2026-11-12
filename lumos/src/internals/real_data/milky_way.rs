@@ -1,7 +1,6 @@
-//! Real-data "best Milky Way" pipeline: green-removal + stretch (as in the neutralize / SCNR /
-//! renorm reference) with the new display-domain enhancers layered on — linear wavelet denoise,
-//! HDR multiscale dynamic-range compression, and CLAHE local contrast — tuned for a wide-angle
-//! Milky Way. Writes the stretched base and the enhanced result for side-by-side visual comparison.
+//! Real-data "best Milky Way" pipeline: green removal and stretch, then the display-domain
+//! enhancers (linear wavelet denoise, HDR multiscale compression, CLAHE local contrast), tuned for
+//! a wide-angle Milky Way. Writes the stretched base and the enhanced result for visual comparison.
 //! Gated behind the `real-data` feature.
 
 use crate::image::linear_image::LinearImage;
@@ -28,9 +27,8 @@ fn assert_displayable(image: &LinearImage, label: &str) {
         .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &v| {
             (lo.min(v), hi.max(v))
         });
-    // The renorm `NeutralizeBg` shifts the background additively (so it dips negative — as
-    // in the reference renorm image; save_png clamps the floor). Only the highlight ceiling is a
-    // hard display limit; the floor just shouldn't be absurd.
+    // `NeutralizeBg` shifts the background additively, so it dips negative and `save_png` clamps
+    // the floor: only the highlight ceiling is a hard display limit.
     assert!(
         max <= 1.0 + 1e-3 && min > -0.5,
         "{label} is displayable: min {min} max {max}"

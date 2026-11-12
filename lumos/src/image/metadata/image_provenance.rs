@@ -87,7 +87,7 @@ pub enum DemosaicProvenance {
 /// FITS declares this with `ROWORDER`, and the rows are decoded in file order whatever it says —
 /// Siril's rule that "`ROWORDER` shall not be used to unflip the image data for stacking", which
 /// keeps a frame's samples where the file put them. Only the Bayer phase is corrected for it, in
-/// `Bayerpat::read_cfa`.
+/// `read_cfa` of the FITS metadata reader.
 ///
 /// The consequence is that two frames of one target declaring different orders load as vertically
 /// mirrored images. Registration cannot reconcile that — triangle matching rejects a mirrored field
@@ -105,8 +105,7 @@ impl RowOrder {
     /// The FITS `ROWORDER` value for this order.
     ///
     /// The one spelling: what the writer emits, what the reader compares against, and what an error
-    /// message prints. Three copies of a format string is three chances for one of them to drift
-    /// from the file format.
+    /// message prints.
     pub(crate) const fn keyword(self) -> &'static str {
         match self {
             Self::TopDown => "TOP-DOWN",

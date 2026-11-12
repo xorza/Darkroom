@@ -13,13 +13,11 @@ use palantir::HostHandle;
 )]
 mod open_files;
 
-/// The delegate patch has to land after `EventLoop::new` built the delegate
-/// and before `run` starts driving the loop, which is exactly where
-/// [`crate::platform::route_opened_documents`] is called from.
+/// The delegate patch has to land after `EventLoop::new` built the delegate and before `run`
+/// drives the loop, where [`crate::platform::route_opened_documents`] is called from.
 ///
-/// `run_on_main` is what spans the remaining gap: a document double-clicked to
-/// launch the editor arrives before the app exists, and the host buffers the
-/// task until it does.
+/// `run_on_main` spans the remaining gap: a document double-clicked to launch the editor arrives
+/// before the app exists, and the host buffers the task until it does.
 pub(super) fn route_opened_documents<A>(handle: HostHandle<A>, open: fn(&mut A, PathBuf)) {
     open_files::install(move |path| {
         handle.run_on_main(move |app: &mut A| open(app, path)).ok();

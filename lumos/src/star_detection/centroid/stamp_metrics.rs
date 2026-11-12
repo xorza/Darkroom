@@ -120,11 +120,9 @@ impl<'a> StampMetrics<'a> {
     /// The PSF's own shape as the stamp's moments read it, an axis narrower than a pixel at 0 —
     /// see [`Cov2::less_pixel`].
     ///
-    /// Adaptive windowed second moments: Gaussian-weight by an iteratively matched window to
-    /// suppress wing noise, then deconvolve the window so FWHM and eccentricity stay unbiased. The
-    /// window is seeded from the plain moments, which stand where it cannot converge to a valid
-    /// covariance. Both are measured against the offset the flux is, so the shape and the flux
-    /// read one sky.
+    /// The adaptive windowed moments ([`Cov2::windowed`]), seeded from the plain moments, which
+    /// stand where the window cannot converge to a valid covariance. Both are measured against the
+    /// offset the flux is, so the shape and the flux read one sky.
     pub(super) fn moment_shape(&self) -> Cov2 {
         Cov2::windowed(self.stamp, self.offset, self.plain.trace() / 2.0)
             .unwrap_or(self.plain)

@@ -12,7 +12,6 @@ pub(crate) mod widgets;
 
 use palantir::WindowToken;
 
-/// darkroom is single-window; this is the token its one OS window is
-/// addressed by — passed to `WinitHost::builder`, handed back to
-/// `App::record`, and used for `HostHandle::request_repaint`.
+/// The token of darkroom's one OS window, given to `WinitHost::builder` and handed back to
+/// `App::record`.
 pub(crate) const MAIN_WINDOW: WindowToken = WindowToken(0);

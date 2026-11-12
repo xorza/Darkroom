@@ -1,4 +1,4 @@
-//! Tests for the spatial module (k-d tree).
+//! Tests for [`KdTree`].
 
 use crate::internals::test_rng::TestRng;
 use crate::registration::kd_tree::*;
@@ -49,9 +49,8 @@ struct KNearestCase {
 ///
 /// Each row pins the whole result: every rank's index and squared distance, in order.
 ///
-/// Distances are squared and hand-computed in each row's comment. They are compared to a relative
-/// 1e-9, which is far above the few ulps these arithmetic sums carry and far below the gap any
-/// real error would open — a wrong neighbour shows up in the index, not the distance.
+/// Distances are squared and hand-computed in each row's comment, compared to a relative 1e-9:
+/// far above the few ulps these sums carry, far below any real error.
 #[test]
 fn k_nearest_over_every_layout() {
     /// Ranks at distinct distances, in order.
@@ -472,18 +471,16 @@ fn heap_small_push_and_eviction() {
     });
 
     assert!(heap.is_full());
-    // Max-heap root should be the largest: 15.0
     assert!((heap.max_distance() - 15.0).abs() < 1e-10);
 
-    // Push smaller item (2.0) — should evict 15.0
+    // 2.0 evicts 15.0
     heap.push(Neighbor {
         idx: 3,
         dist_sq: 2.0,
     });
-    // New max should be 10.0
     assert!((heap.max_distance() - 10.0).abs() < 1e-10);
 
-    // Push larger item (20.0) — should be rejected
+    // 20.0 is rejected
     heap.push(Neighbor {
         idx: 4,
         dist_sq: 20.0,
@@ -521,23 +518,19 @@ fn heap_large_push_and_eviction() {
     }
 
     assert!(heap.is_full());
-    // Max should be capacity (=37)
     assert!((heap.max_distance() - capacity as f64).abs() < 1e-10);
 
-    // Push 0.5 — should evict the max (37.0)
+    // 0.5 evicts the max, 37.0
     heap.push(Neighbor {
         idx: 100,
         dist_sq: 0.5,
     });
-    // New max should be capacity-1 = 36
     assert!((heap.max_distance() - (capacity - 1) as f64).abs() < 1e-10);
 
     let result = heap_items;
     assert_eq!(result.len(), capacity);
-    // Should contain 0.5 and 1..36
     let has_half = result.iter().any(|n| (n.dist_sq - 0.5).abs() < 1e-10);
     assert!(has_half);
-    // Should NOT contain the evicted max (37.0)
     let has_max = result
         .iter()
         .any(|n| (n.dist_sq - capacity as f64).abs() < 1e-10);
@@ -560,14 +553,14 @@ fn heap_capacity_one() {
     assert!(heap.is_full());
     assert!((heap.max_distance() - 10.0).abs() < 1e-10);
 
-    // Push smaller — should replace
+    // Smaller replaces
     heap.push(Neighbor {
         idx: 1,
         dist_sq: 3.0,
     });
     assert!((heap.max_distance() - 3.0).abs() < 1e-10);
 
-    // Push larger — should be rejected
+    // Larger is rejected
     heap.push(Neighbor {
         idx: 2,
         dist_sq: 50.0,

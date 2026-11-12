@@ -153,9 +153,8 @@ fn load_tiff(input: &mut dyn BufReadSeek, max_bytes: u64) -> Result<InterleavedI
     let stated = size.pixel_count() as u64 * channel_count.count() as u64 * u64::from(bits / 8);
     check_stated(stated, max_bytes)?;
 
-    // The decoded samples are handed over whole, once they are the image's: the decoder reads only
-    // the first plane of a planar file, and every sample of a pixel with more than its color type
-    // names.
+    // The decoder reads only the first plane of a planar file, which `tiff_image`'s count check
+    // refuses, and leaves out a pixel's samples past its color type.
     match decoder.read_image()? {
         DecodingResult::U8(samples) => tiff_image(desc(SampleType::U8)?, samples),
         DecodingResult::U16(samples) => tiff_image(desc(SampleType::U16)?, samples),

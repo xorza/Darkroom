@@ -1,12 +1,11 @@
 //! The widget-id vocabulary of the canvas — a node's subtree and a tie's band — plus the
 //! queries keyed by it.
 //!
-//! Every id under a node is reconstructible from its domain coordinates — a
-//! [`NodeId`], and for the per-port widgets a [`PortRef`] — so any pass can
-//! `response_for` last frame's state without threading a cache. That is what
-//! lets the input stage read clicks before the record, and the breaker and the
-//! geometry rebuild probe arranged rects before the widgets round-trip their
-//! own responses.
+//! Every id under a node is reconstructible from its domain coordinates (a [`NodeId`], and
+//! for the per-port widgets a [`PortRef`]), so any pass can `response_for` last frame's state
+//! without threading a cache. That lets the input stage read clicks before the record, and
+//! the breaker and the geometry rebuild probe arranged rects before the widgets round-trip
+//! their own responses.
 //!
 //! A leaf, apart from the modules that record the widgets: the geometry rebuild, the gestures,
 //! the test harness, and the inspector all derive ids here for widgets they never record.
@@ -46,9 +45,8 @@ pub(super) fn of_event(tag: &'static str, event: EventPort) -> WidgetId {
     WidgetId::from_hash(("darkroom.graph.node", tag, event.node_id, event.event_idx))
 }
 
-/// The node's outer body panel — probed by the wire breaker and the
-/// geometry rebuild for last frame's arranged rect, before the panel's own
-/// response round-trips.
+/// The node's outer body panel, probed by the wire breaker and the geometry rebuild for last
+/// frame's arranged rect.
 pub(crate) fn body(node_id: NodeId) -> WidgetId {
     of_node("body", node_id)
 }
@@ -59,9 +57,8 @@ pub(crate) fn footer(node_id: NodeId) -> WidgetId {
     of_node("footer", node_id)
 }
 
-/// A node's inline title-rename editor *and* its idle label, so the same id is
-/// recorded across the label⇄editor swap. Polled by [`drag_handles`] to drag
-/// the node by its title (the idle label senses `DRAG`).
+/// A node's inline title-rename editor and its idle label, so the same id is recorded across
+/// the swap. Polled by [`drag_handles`] to drag the node by its title.
 pub(crate) fn rename(node_id: NodeId) -> WidgetId {
     of_node("title_rename", node_id)
 }
@@ -76,34 +73,30 @@ pub(super) fn const_editor(input: InputPort) -> WidgetId {
     of_port("const_editor", input.into())
 }
 
-/// An input port's cell (circle + label). Answers a double-click on the
-/// *label* area — the circle has its own [`port_circle`] and consumes
-/// hits over its own rect.
+/// An input port's cell (circle and label). Answers a double-click on the label area; the
+/// circle has its own [`port_circle`] and consumes hits over its own rect.
 pub(super) fn input_cell(port: PortRef) -> WidgetId {
     of_port("input_cell", port)
 }
 
-/// An event port glyph. A separate id space from data ports
-/// ([`port_circle`]) because events are indexed independently of outputs.
+/// An event port glyph. A separate id space from [`port_circle`], as events are indexed
+/// independently of outputs.
 pub(super) fn event_glyph(event: EventPort) -> WidgetId {
     of_event("event_glyph", event)
 }
 
-/// Stable id for a node's event-subscription pin. Keyed on the node (a
-/// subscription is whole-node, not per-port), so `CanvasGeometry` /
-/// `SubscriptionUi` reconstruct it to poll the pin's geometry as a wire
-/// drop target.
+/// A node's event-subscription pin, keyed on the node (a subscription is whole-node, not
+/// per-port), so `CanvasGeometry` and `SubscriptionUi` poll its geometry as a wire drop target.
 pub(super) fn subscription_glyph(node_id: NodeId) -> WidgetId {
     of_node("subscription_glyph", node_id)
 }
 
-/// Stable id for a preview's value area. Reconstructible from the node, so the
-/// canvas-level scan can read last frame's click without a cache.
+/// A preview's value area, so the canvas-level scan can read last frame's click.
 pub(crate) fn preview_image(node_id: NodeId) -> WidgetId {
     of_node("preview_image", node_id)
 }
 
-/// Stable id for a node's inspect button in the header.
+/// A node's inspect button in the header.
 pub(super) fn inspect_button(node_id: NodeId) -> WidgetId {
     of_node("inspect_button", node_id)
 }
@@ -120,36 +113,29 @@ pub(super) fn tie_knob(tie: TieId) -> WidgetId {
 
 /// Every widget whose drag moves `node_id`'s body.
 ///
-/// Not just the body panel: the header title doubles as a drag handle — its
-/// idle label senses `DRAG` and **swallows the press**, so the body never sees
-/// one latched there.
+/// Not just the body panel: the header title's idle label senses `DRAG` and swallows the
+/// press, so the body never sees one latched there.
 ///
-/// Deliberately *curated*, not "everything under the node". Port circles,
-/// header chips, and the inline const editors are all inside the body panel and
-/// all latch a drag of their own once the pointer travels — palantir's drag
-/// latch ignores `Sense`, so even a `Sense::CLICK` port circle reports one.
-/// Each of those owns its own gesture (a wire, a chip click, a text drag), so a
-/// subtree-wide "did anything in here start a drag" would wrongly move the node
-/// along with them. Palantir's tab chips carry the same shape for the same
-/// reason.
+/// Deliberately curated, not everything under the node. Port circles, header chips, and the
+/// inline const editors all latch a drag of their own once the pointer travels (palantir's drag
+/// latch ignores `Sense`, so even a `Sense::CLICK` port circle reports one). Each owns its own
+/// gesture, so a subtree-wide "did anything start a drag" would wrongly move the node along
+/// with them. Palantir's tab chips carry the same shape for the same reason.
 pub(super) fn drag_handles(node_id: NodeId) -> impl Iterator<Item = WidgetId> {
     [body(node_id), rename(node_id)].into_iter()
 }
 
-/// Pointer-over-node for hover-reveal affordances (the const-editor chips).
-/// The body response's own `hovered` flag misses most of the node's area —
-/// ports, chips, and editors capture the hit — so this asks whether the hover
-/// *target* sits anywhere in the node's subtree. Target-derived (not a raw
-/// `pointer_pos` rect test) on purpose: it can only change when the hover
-/// target changes, which is exactly when a repaint is already scheduled — no
-/// `MOVE` subscription needed — and it's occlusion-aware (a panel stacked over
-/// the node wins the pointer).
+/// Pointer-over-node for hover-reveal affordances (the const-editor chips). The body
+/// response's own `hovered` flag misses most of the node's area, as ports, chips, and editors
+/// capture the hit, so this asks whether the hover target sits anywhere in the node's
+/// subtree. Target-derived (not a raw `pointer_pos` rect test) on purpose: it changes only
+/// when the hover target does, when a repaint is already scheduled, so no `MOVE` subscription
+/// is needed, and it is occlusion-aware.
 ///
-/// Resolved against *last* frame's hover target and cascade, so the answer
-/// doesn't depend on where in this frame's record it is asked — which is what
-/// lets the record pass settle it at the node body — one
-/// [`NodeCtx::with_hover`](crate::gui::graph_ctx::node_ctx::NodeCtx::with_hover)
-/// per node — before the subtree that reads it has recorded.
+/// Resolved against last frame's hover target and cascade, so the answer does not depend on
+/// where in this frame's record it is asked; the record pass settles it once per node with
+/// [`NodeCtx::with_hover`](crate::gui::graph_ctx::node_ctx::NodeCtx::with_hover) before the
+/// subtree that reads it has recorded.
 pub(crate) fn hover(ui: &Ui, node_id: NodeId) -> Hover {
     Hover::from(ui.is_hover_within(body(node_id)))
 }

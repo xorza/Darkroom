@@ -70,7 +70,7 @@ pub trait Libm: Copy {
 
 use glam::Vec2;
 
-/// `Vec2`'s constructor that std's float functions serve.
+/// `Vec2`'s constructor through `Libm` rather than std's float functions.
 pub trait LibmVec2 {
     /// The unit vector at `angle` radians, in place of `Vec2::from_angle`, which `clippy.toml`
     /// refuses. Refused: `glam`'s `libm` feature, which also sends `floor`, `round` and `sqrt` of a

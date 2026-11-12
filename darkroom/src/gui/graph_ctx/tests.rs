@@ -23,9 +23,8 @@ fn a_context_reads_the_graph_whichever_tab_shows() {
 
 #[test]
 fn only_runnable_sinks_expose_the_disable_toggle() {
-    // The two axes the toggle depends on: sink or not, and resolvable or not.
-    // `can_disable` reads only the first, since a node whose func the library
-    // has never held — the third here — declares no sink.
+    // `can_disable` reads only sink-ness: a node whose func the library never held (the
+    // third) declares no sink.
     let mut g = TestGraph::new();
     let plain = g.add("plain", |n| n.output(DataType::Int));
     let sink = g.add("sink_func", NodeSpec::sink);
@@ -52,8 +51,7 @@ fn only_runnable_sinks_expose_the_disable_toggle() {
 fn a_missing_func_reads_as_a_deletable_stub() {
     use scenarium::math_library;
 
-    // A resolvable func, plus one whose id the library no longer holds — a
-    // document saved against an older library.
+    // A resolvable func, and one whose id the library no longer holds.
     let library = math_library();
     let mut graph = Graph::default();
     let mut known: Node = library.by_name("Add").unwrap().into();
@@ -61,7 +59,7 @@ fn a_missing_func_reads_as_a_deletable_stub() {
     let mut ghost =
         internals::unresolved_node(FuncId::literal("7a0265e1-9631-45bd-8ecd-1e923b67a58c"));
     ghost.name = "astro_to_image".into();
-    // And one authored against other ports of a func the library does hold.
+    // And one authored against other ports of a func the library holds.
     let add_id = library.by_name("Add").unwrap().id();
     let known_id = graph.add(known);
     let mut fixture = DocumentFixture::with_library(graph, library);
@@ -71,13 +69,11 @@ fn a_missing_func_reads_as_a_deletable_stub() {
     let fixture = GraphCtxFixture::over(fixture);
     let graph_ctx = fixture.graph_ctx();
 
-    // Both nodes resolve, not silently dropped — so the unresolvable one
-    // stays selectable and deletable to repair the document.
+    // An unresolvable node is not dropped: it stays selectable and deletable.
     assert_eq!(graph_ctx.nodes().count(), 3, "every placed node resolves");
     let known_node = graph_ctx.node(known_id).unwrap();
     let ghost_node = graph_ctx.node(ghost_id).unwrap();
 
-    // The flag tracks resolution; the label names what's missing.
     assert!(!known_node.stub(), "a resolved func is not a stub");
     assert!(ghost_node.stub());
     assert_eq!(ghost_node.kind_label(), "missing func");
@@ -88,21 +84,18 @@ fn a_missing_func_reads_as_a_deletable_stub() {
     );
     assert_eq!(changed_node.kind_label(), "changed func");
 
-    // The stub keeps its saved name and carries no ports.
     assert_eq!(ghost_node.name(), "astro_to_image");
     assert_eq!(ghost_node.inputs().len(), 0);
     assert_eq!(ghost_node.outputs().len(), 0);
     assert_eq!(ghost_node.port_count(PortKind::Input), 0);
 
-    // The resolved node, by contrast, exposes its real ports.
     assert_eq!(
         known_node.inputs().len(),
         2,
         "the resolved func still reports its interface"
     );
 
-    // Run seeding follows resolution: the resolved func can be run to even
-    // while disabled (a targeted run overrides the flag); the stub can't.
+    // A targeted run overrides the disabled flag; a stub can't be run to.
     assert!(
         known_node.disabled() && known_node.runnable(),
         "a resolved disabled func can be targeted by a one-run override"
@@ -117,9 +110,7 @@ fn a_missing_func_reads_as_a_deletable_stub() {
 fn func_events_read_in_order_alongside_outputs() {
     use scenarium::{FRAME_EVENT_FUNC_ID, worker_events_library};
 
-    // The `frame event` func declares two events ("Always", "FPS") and two
-    // data outputs ("Delta", "Frame #"); the context must surface both
-    // independently — events off the declaration, outputs unchanged.
+    // The `frame event` func declares two events and two data outputs; each reads independently.
     let library = worker_events_library();
     let mut graph = Graph::default();
     let node: Node = library.by_id(FRAME_EVENT_FUNC_ID).unwrap().into();
@@ -144,8 +135,7 @@ fn func_events_read_in_order_alongside_outputs() {
 fn subscriptions_read_from_the_graph() {
     use scenarium::{FRAME_EVENT_FUNC_ID, worker_events_library};
 
-    // Two frame-event nodes; subscribe the second to the first's "FPS"
-    // event (event_idx 1). The context must surface that one edge.
+    // The second node subscribes to the first's "FPS" event (event_idx 1).
     let library = worker_events_library();
     let mut graph = Graph::default();
     let emitter: Node = library.by_id(FRAME_EVENT_FUNC_ID).unwrap().into();
@@ -166,8 +156,6 @@ fn subscriptions_read_from_the_graph() {
 fn cache_mode_reads_verbatim_per_node() {
     use scenarium::math_library;
 
-    // One `Add` node per cache mode; each node's `cache()` must mirror its
-    // source node's mode exactly (the header reads the two bits off it).
     let library = math_library();
     let mut graph = Graph::default();
     let mut ids = Vec::new();
@@ -195,9 +183,8 @@ fn cache_mode_reads_verbatim_per_node() {
 
 #[test]
 fn impure_flag_reads_from_func_behavior() {
-    // Three funcs differing only in what the header gate reads: a `Pure` one
-    // (offers the storage toggles), an `Impure` one (no content digest, so the
-    // toggles are hidden), and an outputless sink (nothing to store).
+    // A `Pure` func offers the storage toggles, an `Impure` one has no content digest, and an
+    // outputless sink has nothing to store.
     let mut g = TestGraph::new();
     let pure_id = g.add("pure_src", |n| n.pure().output(DataType::Int));
     let impure_id = g.add("impure_src", |n| n.output(DataType::Int));
@@ -212,7 +199,6 @@ fn impure_flag_reads_from_func_behavior() {
 
     assert!(!pure.impure(), "a Pure func keeps its cache chips");
     assert!(impure.impure(), "an Impure func hides its cache chips");
-    // Both have an output, so `impure` is what tells them apart.
     assert!(
         pure.cacheable(),
         "a Pure func with an output can be cached and evicted"

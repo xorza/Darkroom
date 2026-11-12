@@ -51,10 +51,8 @@ pub(super) fn theme(
 ) -> palantir::Theme {
     let mut theme = palantir::Theme::from_parts(p, m);
 
-    // Dock splitter: the resting seam paints the surround band that frames
-    // the panes, so the gap reads as part of that surround rather than a
-    // dark line (hovered/active fill still marks the grab target); a wider
-    // seam does the visual separation.
+    // The resting seam paints the surround band, so the gap reads as part of it rather than a
+    // dark line; a wider seam does the separating. Hovered/active fill still marks the grab target.
     theme.splitter.rule = p.surround;
     theme.splitter.rule_thickness = m.space.xs;
 

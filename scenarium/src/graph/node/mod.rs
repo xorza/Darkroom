@@ -1,19 +1,13 @@
 //! One authored node, and the vocabulary for talking about one.
 //!
-//! A [`Node`] is authored data and nothing else — it does not store its own id,
-//! which lives only in the key that reaches it, so a node can be moved or
-//! remapped without carrying a stale identity. What it *is* is [`NodeKind`]: a
-//! func instance, addressed by the [`FuncRef`] it was authored against, or a
-//! built-in special. What it does with its result is
-//! [`CacheMode`]. Iterating a graph yields a [`NodeRef`](crate::graph::node_ref::NodeRef),
-//! pairing a node with
-//! the id it was found under; the lookups that *take* an id return the node
-//! alone.
+//! A [`Node`] does not store its own id, which lives only in the key that reaches it, so a node
+//! can be moved or remapped without carrying a stale identity. What it *is* is [`NodeKind`]: a
+//! func instance, addressed by the [`FuncRef`] it was authored against, or a built-in special.
+//! Iterating a graph yields a [`NodeRef`](crate::graph::node_ref::NodeRef), pairing a node with
+//! the id it was found under; the lookups that *take* an id return the node alone.
 //!
-//! What a func node instantiates — the [`Func`]
-//! declaration and the ABIs it runs through — is
-//! [`func`](crate::graph::func)'s. The module below owns the built-in
-//! [`special`] nodes.
+//! What a func node instantiates, the [`Func`] declaration, is [`func`](crate::graph::func)'s;
+//! the built-in [`special`] nodes are below.
 
 pub(crate) mod special;
 
@@ -23,9 +17,9 @@ use crate::graph::node::special::SpecialNode;
 use crate::library::Library;
 use ::serde::{Deserialize, Serialize};
 
-/// Where a node's computed output is cached — the two orthogonal storage bits
-/// *keep in RAM* ([`caches_in_ram`](Self::caches_in_ram)) and *persist to disk*
-/// ([`persists_to_disk`](Self::persists_to_disk)) as one four-state enum:
+/// Where a node's computed output is cached: the storage bits *keep in RAM*
+/// ([`caches_in_ram`](Self::caches_in_ram)) and *persist to disk*
+/// ([`persists_to_disk`](Self::persists_to_disk)) as one enum:
 ///
 /// - `None` — cache nowhere: never reused across runs, recomputed whenever its value
 ///   is needed, and dropped after the run to free RAM.
@@ -52,21 +46,18 @@ pub enum CacheMode {
 }
 
 impl CacheMode {
-    /// Whether a current reproducible value is retained in RAM and reused across runs
-    /// (`Ram`/`Both`). The other modes drop the RAM copy after each run.
+    /// Whether a current reproducible value is retained in RAM and reused across runs.
     pub const fn caches_in_ram(self) -> bool {
         matches!(self, Self::Ram | Self::Both)
     }
 
-    /// Whether the node's value is persisted to the disk store
-    /// (`Disk`/`Both`), so it survives a reload.
+    /// Whether the node's value is persisted to the disk store, so it survives a reload.
     pub const fn persists_to_disk(self) -> bool {
         matches!(self, Self::Disk | Self::Both)
     }
 
-    /// Compose a mode from the two storage bits — the inverse of
-    /// [`caches_in_ram`](Self::caches_in_ram)/[`persists_to_disk`](Self::persists_to_disk),
-    /// used by the editor's two independent cache toggles.
+    /// The inverse of [`caches_in_ram`](Self::caches_in_ram) and
+    /// [`persists_to_disk`](Self::persists_to_disk).
     pub const fn from_bits(ram: bool, disk: bool) -> Self {
         match (ram, disk) {
             (false, false) => Self::None,
@@ -77,19 +68,14 @@ impl CacheMode {
     }
 }
 
-/// What a node *is*. A plain `Func` instance, or a built-in [`SpecialNode`]
-/// (hardcoded declaration, recognized by the engine).
-///
-/// Both resolve to a [`Func`] declaration — the only difference is where that
-/// declaration comes from. Internal to the crate: hosts read a node through
-/// [`Node::func_id`], [`Node::special`] and [`Node::func`].
+/// What a node *is*: a library func instance, or a built-in [`SpecialNode`]. Both resolve to a
+/// [`Func`]; hosts read a node through [`Node::func_id`], [`Node::special`] and [`Node::func`].
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) enum NodeKind {
     /// An instance of the library func the [`FuncRef`] names, authored against
     /// the ports it records — which its bindings and subscriptions are indexed by.
     Func(FuncRef),
-    /// A built-in special node; its interface comes from
-    /// [`SpecialNode::func`].
+    /// A built-in special node, whose interface is [`SpecialNode::func`].
     Special(SpecialNode),
 }
 
@@ -154,8 +140,8 @@ impl Node {
 }
 
 impl From<&Func> for Node {
-    /// A bare func instance copying the func's name and `default_cache_mode`.
-    /// Default input bindings are seeded by `Graph::add_func_node`.
+    /// Copies the func's name and `default_cache_mode`; `Graph::add_func_node` seeds the default
+    /// input bindings.
     fn from(func: &Func) -> Self {
         Self {
             kind: NodeKind::Func(func.func_ref()),

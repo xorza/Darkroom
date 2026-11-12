@@ -1,24 +1,19 @@
 //! Bitcode-packed undo/redo history in one byte buffer.
 //!
-//! Every entry — undoable *and* redoable — lives packed back-to-back in a
-//! single `bytes: Vec<u8>`, with a parallel `entries` table of byte ranges.
-//! A `cursor` splits the applied entries (`entries[..cursor]`, undoable) from
-//! the undone ones (`entries[cursor..]`, redoable). Undo/redo are just a
-//! cursor step plus one deserialize — no second buffer, no copying bytes
-//! between buffers. A fresh edit discards the redoable tail (truncate from
-//! the end), appends, and trims the oldest entries off the front to honor a
-//! byte budget.
+//! Every entry, undoable *and* redoable, lives packed back-to-back in a single `bytes: Vec<u8>`,
+//! with a parallel `entries` table of byte ranges. A `cursor` splits the applied entries
+//! (`entries[..cursor]`, undoable) from the undone ones (`entries[cursor..]`, redoable), so
+//! undo/redo are a cursor step plus one deserialize. A fresh edit discards the redoable tail,
+//! appends, and trims the oldest entries off the front to honor a byte budget.
 //!
-//! Front eviction is O(1): a `head` marks the first live byte, so dropping
-//! the oldest entry just advances `head` (and pops the front of the
-//! `VecDeque` of ranges) — no memmove. The dead `[0, head)` prefix is
-//! reclaimed lazily by a `drain` once it grows past the budget, so that one
+//! Front eviction is O(1): a `head` marks the first live byte, so dropping the oldest entry
+//! advances `head` and pops the front of the `VecDeque` of ranges, with no memmove. The dead
+//! `[0, head)` prefix is reclaimed lazily by a `drain` once it grows past the budget, so that one
 //! memmove amortizes over a whole budget of evictions.
 //!
-//! A held gesture is the one entry not packed yet. Its frames fold into one
-//! decoded step in place, and the step is packed once, when the gesture is
-//! sealed: by the next edit, an undo or a redo. A drag frame therefore
-//! encodes nothing, and a gesture that ends where it started records nothing.
+//! A held gesture is the one entry not packed yet. Its frames fold into one decoded step in
+//! place, packed once when the gesture is sealed: by the next edit, an undo or a redo. A drag
+//! frame therefore encodes nothing, and a gesture that ends where it started records nothing.
 
 use std::collections::VecDeque;
 use std::ops::Range;
@@ -29,10 +24,9 @@ use crate::core::document::Document;
 use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::step::undo_step::UndoStep;
 
-/// The newest entry, while its gesture is still held: decoded, so each frame
-/// folds into it in place. Its steps are what the gesture did in order — a
-/// preview spawn, then the drag that places it — each frame folding into the
-/// last step where it can.
+/// The newest entry, while its gesture is still held: decoded, so each frame folds into it in
+/// place. Its steps are what the gesture did in order (a preview spawn, then the drag that places
+/// it), each frame folding into the last step where it can.
 #[derive(Debug)]
 struct OpenGesture {
     id: GestureId,
@@ -41,29 +35,23 @@ struct OpenGesture {
 
 #[derive(Debug)]
 pub(crate) struct UndoHistory {
-    /// The single packed history buffer. Live entries occupy
-    /// `[head, len)`; `[0, head)` is evicted-but-not-yet-reclaimed dead
-    /// prefix. Entry ranges are absolute indices into this buffer.
+    /// The packed history buffer. Live entries occupy `[head, len)`; `[0, head)` is the evicted,
+    /// not yet reclaimed dead prefix. Entry ranges are absolute indices into it.
     bytes: Vec<u8>,
-    /// First live byte of `bytes`. Advanced on eviction (O(1)),
-    /// reclaimed by `trim_to_limit`'s lazy compaction.
+    /// First live byte of `bytes`, advanced on eviction and reclaimed by `trim_to_limit`.
     head: usize,
     /// Byte range of each packed entry's serialized steps in `bytes`.
-    /// A `VecDeque` so front eviction (`pop_front`) is O(1) too.
     entries: VecDeque<Range<usize>>,
-    /// Boundary between applied (`entries[..cursor]`) and undone
-    /// (`entries[cursor..]`) entries. Undo decrements, redo increments, a
-    /// new edit truncates the undone tail then appends.
+    /// Boundary between applied (`entries[..cursor]`) and undone (`entries[cursor..]`) entries.
     cursor: usize,
     /// The held gesture's entry, applied and newer than every packed one.
     /// While it is open there is no undone tail: opening it discarded that.
     open: Option<OpenGesture>,
-    /// Live-byte budget (`len - head`). When a push overflows it the
-    /// oldest entries are dropped off the front; the just-pushed entry
-    /// always survives, even when it alone exceeds the budget. Bounds
-    /// history by memory rather than entry count, since one entry (e.g. a
-    /// removal carrying a whole `Node` + wiring) can dwarf many small
-    /// ones. Physical `bytes` peaks at ~2× this between compactions.
+    /// Live-byte budget (`len - head`). When a push overflows it the oldest entries are dropped
+    /// off the front; the just-pushed entry always survives, even when it alone exceeds the
+    /// budget. Bounds history by memory rather than entry count, since one entry (a removal
+    /// carrying a whole node and its wiring) can dwarf many small ones. Physical `bytes` peaks at
+    /// ~2× this between compactions.
     max_bytes: usize,
 }
 
@@ -96,9 +84,8 @@ impl UndoHistory {
         }
     }
 
-    /// Record a batch of just-applied steps as one undo entry — undoing or
-    /// redoing replays the whole batch — and leave `steps` empty, its
-    /// capacity kept for the next frame.
+    /// Record a batch of just-applied steps as one undo entry and leave `steps` empty, its
+    /// capacity kept.
     ///
     /// `gesture` names the held gesture the whole batch is part of. Its steps
     /// join the gesture's entry, each folding into the entry's last step where
@@ -133,10 +120,9 @@ impl UndoHistory {
         steps.clear();
     }
 
-    /// Take back the held `gesture`'s entry whole and forget it, as Esc on it
-    /// does: each step replays backwards, newest first, so the gesture leaves
-    /// nothing, not even an entry. `false`, touching nothing, when the open
-    /// entry is not `gesture`'s — an edit in between sealed it.
+    /// Take back the held `gesture`'s entry whole and forget it, as Esc does: each step replays
+    /// backwards, newest first, leaving not even an entry. `false`, touching nothing, when the
+    /// open entry is not `gesture`'s, as an edit in between sealed it.
     pub(crate) fn withdraw(
         &mut self,
         gesture: GestureId,
@@ -164,8 +150,6 @@ impl UndoHistory {
             return false;
         }
         self.cursor -= 1;
-        // The entry stays in the buffer — it just moved into the redoable
-        // region.
         let steps = deserialize_steps(&self.bytes[self.entries[self.cursor].clone()]);
         for step in steps.iter().rev() {
             step.revert(document);
@@ -192,10 +176,9 @@ impl UndoHistory {
         true
     }
 
-    /// Drop the redoable tail (`entries[cursor..]`) and its bytes — a new
-    /// edit makes them unreachable. Truncations from the end, so no
-    /// memmove. If that empties the live region (a full rewind then a
-    /// fresh edit), reclaim the dead prefix too.
+    /// Drop the redoable tail (`entries[cursor..]`) and its bytes, which a new edit makes
+    /// unreachable. Truncates from the end, so no memmove; if that empties the live region,
+    /// reclaim the dead prefix too.
     fn discard_redo(&mut self) {
         if self.cursor < self.entries.len() {
             let cut = self.entries[self.cursor].start;
@@ -209,25 +192,21 @@ impl UndoHistory {
     }
 
     fn trim_to_limit(&mut self) {
-        // Runs only right after a push, where every entry is applied — the
-        // eviction `cursor -= 1` below relies on it.
+        // Runs only right after a push, where every entry is applied, which the eviction
+        // `cursor -= 1` below relies on.
         debug_assert_eq!(
             self.cursor,
             self.entries.len(),
             "trim_to_limit expects all entries applied"
         );
-        // Drop the oldest entries until the live region fits the budget —
-        // minimal history loss. Each drop just advances `head` past the
-        // freed bytes and pops the front metadata entry: O(1), no memmove.
         // Always keep the last (just-pushed) entry.
         while self.entries.len() > 1 && self.bytes.len() - self.head > self.max_bytes {
             let removed = self.entries.pop_front().unwrap();
             self.head = removed.end;
             self.cursor -= 1;
         }
-        // Reclaim the dead prefix lazily, once it has grown past the
-        // budget — the one memmove amortizes over a budget of evictions,
-        // and physical `bytes` stays ~2× the budget.
+        // Lazily, so the one memmove amortizes over a budget of evictions and physical `bytes`
+        // stays ~2× the budget.
         if self.head > self.max_bytes {
             self.bytes.drain(0..self.head);
             for range in &mut self.entries {
@@ -236,8 +215,6 @@ impl UndoHistory {
             }
             self.head = 0;
         }
-        // `head` always marks the oldest live entry's start (0 when empty)
-        // — the dead prefix ends exactly where live history begins.
         debug_assert!(
             self.entries
                 .front()
@@ -246,8 +223,8 @@ impl UndoHistory {
         );
     }
 
-    /// Pack the open gesture's entry, if one is open: it is over. A gesture
-    /// that ended where it started records nothing.
+    /// Pack the open gesture's entry, if one is open. A gesture that ended where it started
+    /// records nothing.
     fn seal(&mut self) {
         let Some(mut open) = self.open.take() else {
             return;

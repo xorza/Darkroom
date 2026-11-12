@@ -1,11 +1,7 @@
 //! Connected component labeling using union-find.
 //!
-//! Optimized for sparse binary masks (typical in star detection):
-//! - Run-length encoding (RLE) based labeling for efficient processing
-//! - Word-level bit scanning to skip background regions
-//! - Strip-parallel labeling with boundary merging, down to the single strip a small image needs
-//! - Lock-free union-find with atomic operations
-//! - Minimal allocations via buffer reuse
+//! Built for sparse masks: run-length labeling over word-level bit scanning, bands labeled in
+//! parallel and stitched at their boundaries, an atomic union-find, buffers reused.
 //!
 //! The result is each component's runs, not a plane of labels: every reader walks a component's
 //! own pixels, so nothing pays for the frame's area.
@@ -132,7 +128,7 @@ pub(crate) mod internals {
             plane
         }
 
-        /// Label `mask` with a fresh labeler instead of the pool's.
+        /// Label `mask` with a fresh labeler instead of the detector's.
         pub(crate) fn from_mask(mask: &BitBuffer2, connectivity: Connectivity) -> Self {
             let mut labeler = Labeler::default();
             labeler.label(mask, connectivity);

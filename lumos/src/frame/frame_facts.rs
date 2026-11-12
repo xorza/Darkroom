@@ -9,11 +9,11 @@ use crate::image::metadata::image_provenance::RowOrder;
 use crate::image::metadata::sample_domain::SampleDomain;
 use crate::image::stackable_image::StackableImage;
 
-/// What a frame's source said about it. The domain, row order and pattern every frame of a set has
-/// to state alike — see `ingest::set_facts::SetFacts`; the capture
-/// conditions the set's product states only where every frame shares them, and the conditions a
-/// dark match left uncompared wherever any frame did. Carried with the frame's
-/// statistics because the metadata they come from is dropped for every frame but the first.
+/// What a frame's source said about it: the domain, row order and pattern every frame of a set has
+/// to state alike — see `ingest::set_facts::SetFacts` — the capture conditions the set's product
+/// states only where every frame shares them, and what a dark match left uncompared. Carried with
+/// the frame's statistics because the metadata they come from is dropped for every frame but the
+/// first.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct FrameFacts {
     /// What one sample is worth — see [`DerivedFacts::domain`](crate::DerivedFacts::domain).

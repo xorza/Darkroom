@@ -40,7 +40,7 @@ struct SetFrame<'a> {
 }
 
 impl SetFrame<'_> {
-    /// The frame loaded as an `I` through the decode cache under `cache_dir` into a spilled tier.
+    /// The frame loaded through the decode cache under `cache_dir` into a spilled tier.
     fn load<D: Decoder>(self, cache_dir: &Path) -> Result<StoredFrame, StackError> {
         let Self { source, desc, idx } = self;
         // A fresh intake per call: these tests are about one frame's cache files, not the set it
@@ -84,7 +84,7 @@ fn kept_dir(cache_dir: &Path) -> PathBuf {
     DecodeCache::open(cache_dir).unwrap().path().to_path_buf()
 }
 
-/// `path` decoded by `I` under the default context, as the decode cache names and keys it.
+/// `path` decoded by `D` under the default context, as the decode cache names and keys it.
 fn source_of<D: Decoder>(path: &Path) -> CachedSource {
     CachedSource::of(path, D::KIND, &LoadCtx::default()).unwrap()
 }

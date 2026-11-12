@@ -2,9 +2,8 @@
 //!
 //! Normalization compares frames against each other, so it can only measure where all of them have
 //! real data: the intersection of the pixels each frame contributes at, by the same [`FrameGate`]
-//! the combine gathers by. Held as one bit per pixel — a `Vec<bool>` costs
-//! 37.7 MB on a 6K frame against 4.7 MB packed — and accumulated 64 predicate results at a time, so
-//! intersecting is one read-modify-write per word rather than per pixel.
+//! the combine gathers by. Held as one bit per pixel and accumulated 64 predicate results at a
+//! time, so intersecting is one read-modify-write per word rather than per pixel.
 //!
 //! Confidence needs no pass of its own: it is positive wherever coverage is, so intersecting
 //! `confidence > 0` could only ever remove a pixel the coverage floor had already removed. That is
@@ -34,7 +33,7 @@ const _: () = assert!(
 
 #[derive(Debug)]
 pub(crate) struct CommonDomain {
-    /// One bit per pixel — a `Vec<bool>` here costs 37.7 MB on a 6K frame against 4.7 MB packed.
+    /// One bit per pixel — a `Vec<bool>` here costs 36 MiB on a 6K frame against 4.5 MiB packed.
     pub(super) valid: BitBuffer2,
     pub(super) sample_count: usize,
 }
@@ -43,8 +42,7 @@ impl CommonDomain {
     /// The all-valid mask an intersection starts from: one bit per pixel, one row, whose words
     /// the walks over a domain read whole.
     ///
-    /// Its own function so the tests can weigh exactly what [`Self::build`] allocates rather than
-    /// a copy of the expression that could drift from it.
+    /// Its own function so the tests weigh exactly what [`Self::build`] allocates.
     fn full_mask(pixel_count: usize) -> BitBuffer2 {
         BitBuffer2::new_filled(USize2::new(pixel_count, 1), true)
     }
@@ -263,9 +261,8 @@ mod tests {
     /// The common-domain mask is one bit per pixel, not one byte, [`CommonDomain::heap_bytes`] is
     /// what it holds, and it holds no pixel past the plane.
     ///
-    /// Nothing else would notice a revert to `Vec<bool>` at the sizes the tests run: the combine
-    /// would still be correct and simply hold eight times the mask, 37.7 MB against 4.7 MB at 6144²,
-    /// beside the frame data the plan charges.
+    /// Nothing else would notice a revert to `Vec<bool>`: the combine would still be correct and
+    /// simply hold eight times the mask, 36 MiB against 4.5 MiB at 6144².
     #[test]
     fn common_domain_mask_stays_one_bit_per_pixel() {
         for pixels in [1024 * 1024usize, 6144 * 6144] {

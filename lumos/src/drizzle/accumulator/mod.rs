@@ -465,7 +465,7 @@ pub(crate) mod internals {
         }
 
         /// [`Self::add_frame`] with the output band height pinned, so a test can compare band
-        /// counts.
+        /// heights.
         pub(crate) fn add_frame_with_band_rows(
             &mut self,
             frame: &DrizzleFrame<LinearImage>,

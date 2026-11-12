@@ -116,13 +116,13 @@ impl LinearImage {
         self.pixels.is_rgb()
     }
 
-    /// Get channel as Buffer2 reference (0=mono or R, 1=G, 2=B).
+    /// The plane of channel `c`: 0 is mono or R, 1 is G, 2 is B.
     pub const fn channel(&self, c: usize) -> &Buffer2<f32> {
         self.pixels.channel(c)
     }
 
-    /// Get channel as mutable Buffer2 reference. The metadata's quantization σ and mosaic noise
-    /// are dropped: they describe the samples as they were.
+    /// The plane of channel `c`, mutably. The metadata's quantization σ and mosaic noise are
+    /// dropped: they describe the samples as they were.
     pub const fn channel_mut(&mut self, c: usize) -> &mut Buffer2<f32> {
         self.samples_mut().channel_mut(c)
     }
@@ -214,9 +214,7 @@ impl LinearImage {
     }
 
     /// Per-pixel parallel in-place map that needs all three channels at once. A no-op on a
-    /// mono image, which has no cross-channel relationship for `rgb` to act on — every caller
-    /// (SCNR, background neutralization, the color-preserving stretch) is meaningless in mono and
-    /// returned early on it when the storage was interleaved.
+    /// mono image, which has no cross-channel relationship for `rgb` to act on.
     pub(crate) fn map_rgb(&mut self, rgb: impl Fn(Rgb) -> Rgb + Sync) {
         if !self.is_rgb() {
             return;
@@ -235,9 +233,8 @@ impl LinearImage {
         });
     }
 
-    /// `block` over the three planes of an RGB image in lockstep, in parallel, a block of
-    /// [`SAMPLES_PER_BLOCK`] pixels of every plane at a time, with the block's first pixel: one
-    /// band of every channel per task.
+    /// `block` over the three planes of an RGB image in lockstep, in parallel,
+    /// [`SAMPLES_PER_BLOCK`] pixels of every plane at a time, with the block's first pixel.
     pub(crate) fn rgb_blocks_mut(&mut self, block: impl Fn(usize, [&mut [f32]; 3]) + Sync) {
         debug_assert!(self.is_rgb(), "the blocks of an RGB image");
         let [r, g, b] = self.rgb_planes_mut();

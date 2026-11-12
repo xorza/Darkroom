@@ -11,35 +11,24 @@ pub struct CtxManager {
     /// Log lines emitted this run, drained into `ExecOutcome` when the
     /// run finishes.
     pub(crate) logs: Vec<LogEntry>,
-    /// The run's cooperative cancel token (the executor polls it between
-    /// nodes). A lambda offloading heavy work can clone it via
-    /// [`Self::cancel_flag`] and poll it inside that work to bail early.
-    /// Defaults to a never-token outside a cancellable run.
+    /// The run's cooperative cancel token, polled by the executor between nodes; a never-token
+    /// outside a cancellable run. See [`Self::cancel_flag`].
     pub(crate) cancel: CancelToken,
 }
 
 impl CtxManager {
-    /// A clonable handle to the run's [`CancelToken`], for a lambda to hand to
-    /// long-running work (e.g. a `spawn_blocking` lumos op) so it can poll
-    /// `token.is_cancelled()` and stop early. A never-token outside a
-    /// cancellable run.
+    /// A clonable handle to the run's [`CancelToken`], for a lambda to hand to long-running work
+    /// that polls `token.is_cancelled()` to stop early. A never-token outside a cancellable run.
     pub fn cancel_flag(&self) -> CancelToken {
         self.cancel.clone()
     }
 
-    /// The node this lambda is running as — the same attribution [`Self::log`]
-    /// stamps its lines with. For a lambda whose effect belongs to one authored
-    /// node rather than to its return value: the only thing in
-    /// [`Invocation`](crate::Invocation) that says *which* node is calling.
+    /// The node this lambda is running as, the attribution [`Self::log`] stamps its lines with:
+    /// the only thing in [`Invocation`](crate::Invocation) that says *which* node is calling.
     ///
-    /// Infallible because a lambda is the only place this is reachable, and the
-    /// executor stamps the node immediately before every invoke — clearing it
-    /// only once the whole run loop is done. Panicking here rather than handing
-    /// back an `Option` keeps that invariant stated once, instead of every
-    /// lambda re-deciding what an impossible `None` should mean.
-    ///
-    /// [`Self::log`] reads the field directly for the opposite reason: it is
-    /// *also* callable from outside a run, and a dropped log line is harmless.
+    /// Infallible because the executor stamps the node before every invoke, so an `Option` would
+    /// only make every lambda re-decide what an impossible `None` means. [`Self::log`] reads the
+    /// field directly because it is also callable outside a run, where a dropped line is harmless.
     ///
     /// # Panics
     /// Outside a node invoke — on a hand-built manager, or after a run.
@@ -48,10 +37,8 @@ impl CtxManager {
             .expect("current_node is only readable inside a lambda invoke")
     }
 
-    /// Emit a log line attributed to the node currently executing, and
-    /// mirror it to `tracing` at the matching level so headless runs
-    /// still surface output. No-op when called outside a node invoke
-    /// (`cur_node_id` unset).
+    /// Emit a log line attributed to the node currently executing, mirrored to `tracing` so
+    /// headless runs surface it. No-op outside a node invoke.
     pub fn log(&mut self, level: LogLevel, msg: impl Into<String>) {
         let Some(node_id) = self.cur_node_id else {
             return;
@@ -59,10 +46,8 @@ impl CtxManager {
         self.log_node(node_id, level, msg);
     }
 
-    /// [`log`](Self::log) for a node the caller names, rather than the one
-    /// mid-invoke — what the executor reports *about* a node before or instead
-    /// of running it, where `cur_node_id` is not yet set and the no-op above
-    /// would swallow the line.
+    /// [`log`](Self::log) for a node the caller names, for what the executor reports about a node
+    /// before or instead of running it, where `cur_node_id` is unset.
     pub(crate) fn log_node(&mut self, node_id: NodeId, level: LogLevel, msg: impl Into<String>) {
         let message = msg.into();
         match level {
@@ -95,8 +80,8 @@ pub(crate) mod internals {
     use crate::runtime::ctx_manager::CtxManager;
 
     impl CtxManager {
-        /// Stand in for the executor's per-invoke attribution, so a lambda that
-        /// reads [`CtxManager::cur_node_id`] can be tested without a run.
+        /// Stand in for the executor's per-invoke attribution, to test a lambda that reads
+        /// [`CtxManager::cur_node_id`] without a run.
         pub const fn set_cur_node(&mut self, node_id: NodeId) {
             self.cur_node_id = Some(node_id);
         }

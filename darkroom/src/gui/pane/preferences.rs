@@ -136,11 +136,9 @@ impl PreferencesForm<'_> {
         }
     }
 
-    /// One model-path row: a fixed-width label, an **editable** path field (type
-    /// or paste a path; Enter or click-away commits it, Escape drops it), a
-    /// "Browse…" button, and — beneath, indented under the field — an error line
-    /// when the committed path is broken, then a download hint (a browser link to
-    /// the CLI tool plus unzip/point-at-the-`.onnx` guidance).
+    /// One model-path row: a label, an editable path field (Enter or click-away commits, Escape
+    /// drops), a "Browse…" button, and beneath the field an error line when the committed path is
+    /// broken, then a download hint.
     ///
     /// Writes the path `kind` names in `paths` in place and queues
     /// [`AppCommand::PickMlModel`] when Browse is clicked.
@@ -171,8 +169,7 @@ impl PreferencesForm<'_> {
                 .size((Sizing::FILL, Sizing::HUG))
                 .min_size((ML_PATH_FIELD_MIN, 0.0))
                 .placeholder("/path/to/model.onnx");
-            // A broken committed path recolors the field's chrome to the error tint (message
-            // under the row says what's wrong).
+            // A broken committed path tints the field's chrome as an error.
             if problem.is_some() {
                 edit = edit.style(&theme.field_error);
             }
@@ -273,9 +270,8 @@ fn form_rows(theme: &Theme) -> [Track; ROW_COUNT] {
     rows
 }
 
-/// One ML-model row's fixed description: what it is called, which preference
-/// a Browse pick writes, and where the file comes from. Everything about the
-/// row that the form knows before it draws.
+/// One ML-model row's fixed description: its name, which preference a Browse pick writes, and
+/// where the file comes from.
 #[derive(Clone, Copy, Debug)]
 struct ModelRow {
     /// The form's grid row the field sits in; its notes take the next.
@@ -286,14 +282,11 @@ struct ModelRow {
     download_url: &'static str,
 }
 
-/// Floor of an ML-path field — it fills the leftover column width, but never
-/// collapses below a usefully-readable span.
+/// Floor of an ML-path field, which fills the leftover column width.
 const ML_PATH_FIELD_MIN: f32 = 280.0;
 
-/// What's wrong with a committed model path, or `None` when it's empty (a
-/// valid resting state — the ML nodes are optional) or healthy. Stats the
-/// filesystem, so callers refresh it only on value changes and commits —
-/// never per frame.
+/// What's wrong with a committed model path, or `None` when it's empty (the ML nodes are
+/// optional) or healthy. Stats the filesystem, so never call it per frame.
 fn path_problem(p: &Path) -> Option<&'static str> {
     if p.as_os_str().is_empty() {
         return None;
@@ -342,10 +335,8 @@ fn interface_size_wid() -> WidgetId {
     WidgetId::from_hash("darkroom.preferences.interface_size")
 }
 
-/// Guidance line under a model row: a clickable "Download … CLI ↗" link
-/// (accent-colored, brightening on hover; opens the row's download URL in the
-/// browser on click) followed by muted instructions to unzip the download and
-/// point the field at the `.onnx` inside.
+/// Guidance line under a model row: a link to the row's download URL, then muted unzip
+/// instructions.
 fn download_hint(ui: &mut Ui, theme: &Theme, row: ModelRow) {
     let ModelRow {
         download_label: link_label,

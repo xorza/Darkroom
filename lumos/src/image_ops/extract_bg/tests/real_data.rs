@@ -1,7 +1,6 @@
-//! Real-data background (gradient) extraction on the bundled stacked master. Background extraction
-//! is *canonically* a linear-domain step; this exercises it
-//! on the **stretched** master to flatten the display-domain background, saving a viewable
-//! before/after. Gated behind the `real-data` feature.
+//! Real-data background (gradient) extraction on the bundled stacked master. Extraction is
+//! canonically a linear-domain step; this runs it on the **stretched** master to flatten the
+//! display-domain background, saving a viewable before/after. Gated behind the `real-data` feature.
 
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::color_calibration::neutralize_bg::NeutralizeBg;
@@ -50,8 +49,7 @@ fn extract_flattens_background_on_stretched_master() {
 
     let before = corner_bg_spread(&img);
 
-    // Model and subtract the smooth background per channel, then re-neutralize so the now-flattened
-    // background sits at a viewable level (subtraction pulls it toward zero).
+    // Each channel keeps its own sky level, so re-neutralize to bring them to one.
     let mut extracted = img;
     ExtractBg::default().apply(&mut extracted).unwrap();
     NeutralizeBg.apply(&mut extracted).unwrap();

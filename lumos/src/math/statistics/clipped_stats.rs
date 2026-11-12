@@ -12,10 +12,9 @@ use crate::math::{statistics, sum};
 
 /// Scratch space a sigma-clip pass borrows for its per-value deviations.
 ///
-/// Exists so one clip implementation serves both buffer kinds: the tiled background walks
-/// thousands of tiles and reuses one heap `Vec`, while the centroid measure loop runs per star
-/// inside a rayon fold and must not allocate at all. Contents are never read before being
-/// written, so an implementation only has to produce a slice of the right length.
+/// One clip serves both buffer kinds: the tiled background reuses one heap `Vec` across thousands
+/// of tiles, while the centroid measure loop runs per star inside a rayon fold and must not
+/// allocate. Contents are never read before being written, so only the length matters.
 pub(crate) trait DeviationScratch {
     /// Yield exactly `len` elements to write into.
     fn sized_to(&mut self, len: usize) -> &mut [f32];
@@ -29,9 +28,8 @@ impl DeviationScratch for Vec<f32> {
 }
 
 impl<const N: usize> DeviationScratch for ArrayVec<f32, N> {
-    /// Grows to `len` rather than starting from a zeroed `[f32; N]`: the caller sizes `N` to its
-    /// worst case, so a plain array would memset the whole capacity on every call while only
-    /// `len` of it is ever used. Panics when `len > N` — a fixed buffer cannot grow.
+    /// Grows to `len` rather than zeroing a `[f32; N]`, which the caller sizes to its worst case
+    /// and would be memset whole on every call. Panics when `len > N`.
     fn sized_to(&mut self, len: usize) -> &mut [f32] {
         self.clear();
         self.extend(iter::repeat_n(0.0f32, len));
@@ -65,9 +63,8 @@ impl ClippedStats {
     /// `values` must be non-empty and NaN-free, as a NaN never passes the clip's band and so has no
     /// place among the survivors whose mean this reports, and is reordered in place.
     ///
-    /// `deviations` is borrowed scratch, overwritten in full; only its length matters. Sizing it
-    /// is [`DeviationScratch`]'s job, so a heap caller can reuse one `Vec` across calls and a
-    /// stamp-sized caller can keep its scratch on the stack, without this having to know which.
+    /// `deviations` is borrowed scratch, overwritten in full and sized by [`DeviationScratch`], so
+    /// a heap caller can reuse one `Vec` and a stamp-sized caller keep its scratch on the stack.
     pub(crate) fn sigma_clipped(
         values: &mut [f32],
         deviations: &mut impl DeviationScratch,

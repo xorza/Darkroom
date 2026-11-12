@@ -77,16 +77,11 @@ impl BilinearKernel {
     }
 }
 
-/// Applies an affine transform to `input`, sampling into `output`.
-///
-/// Output dimensions come from `output`'s descriptor (they may differ from the
-/// input's). Each output pixel center is mapped back through the inverse
-/// transform and sampled from the input; sources outside the input read as
-/// zero. This mirrors the GPU shader (`shader.wgsl`) so the two backends agree.
+/// Applies an affine transform to `input`, sampling into `output`, whose descriptor sets the
+/// result size. Sources outside the input read as zero, as in the GPU shader (`shader.wgsl`).
 ///
 /// # Panics
-/// Panics unless `input` and `output` share a color format. Their dimensions
-/// need not match — that is what makes this a resample.
+/// Panics unless `input` and `output` share a color format.
 pub(super) fn apply(warp: &AffineWarp, input: &InterleavedImage, output: &mut InterleavedImage) {
     apply_on(IsaTier::widest(), warp, input, output);
 }
@@ -116,9 +111,8 @@ pub(super) fn apply_on(
         .for_each(|(y, row)| kernel.warp_row(tier, input, map, y, row));
 }
 
-/// The scalar reference, picking the storage type and channel count the format
-/// stores pixels in: what a warp with no kernel takes, and what the tests hold
-/// every kernel to.
+/// The scalar reference: what a warp with no kernel takes, and what the tests hold every kernel
+/// to.
 pub(super) fn apply_scalar(
     warp: &AffineWarp,
     input: &InterleavedImage,
@@ -138,11 +132,9 @@ pub(super) fn apply_scalar(
     }
 }
 
-/// Channel values interpolate in their **native** range (u8 `0..=255`, u16
-/// `0..=65535`, f32 unchanged), as the GPU shader does, and narrow back by
-/// [`Sample::from_f32`], which rounds to nearest with ties to even — the rule WGSL
-/// `round` follows on the GPU. Interpolation is linear, so normalizing to `[0, 1]`
-/// first would only add a divide and a multiply per channel per tap, and a second
+/// Channel values interpolate in their native range (`u8` 0..=255, `u16` 0..=65535, `f32`
+/// unchanged), as the GPU shader does, and narrow back by [`Sample::from_f32`], ties to even as
+/// WGSL `round`. Normalizing to `[0, 1]` first would only add a divide, a multiply and a second
 /// rounding. Float output is written unclamped.
 fn apply_typed<T, const N: usize>(
     warp: &AffineWarp,

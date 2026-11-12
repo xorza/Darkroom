@@ -1,11 +1,9 @@
 //! The document currently open in a frontend, with its persistence path and
 //! the history of edits made to it.
 //!
-//! Every mutation of the document goes through this type: a frontend hands it
-//! intents and it decides what they mean, records them, and lands their
-//! outcomes. Keeping the history here rather than on a frontend is what makes
-//! that true — the two are one unit, replaced together when a different file
-//! is opened.
+//! Every mutation of the document goes through this type: a frontend hands it intents and it
+//! decides what they mean, records them, and lands their outcomes. The history lives here, not on
+//! a frontend, so the two are one unit, replaced together when a different file is opened.
 //!
 //! # Decisions
 //!
@@ -40,18 +38,15 @@ use crate::core::status_log::{StatusFamily, StatusLog};
 use common::ErrorChain;
 use scenarium::Library;
 
-/// Byte budget for the undo history's packed buffer (~1 MiB). Bounds
-/// memory rather than entry count — a single large edit can't be
-/// undone away, but the oldest entries drop once the buffer overflows.
+/// Byte budget for the undo history's packed buffer (1 MiB). Bounds memory rather than entry
+/// count: the oldest entries drop once the buffer overflows.
 const UNDO_HISTORY_BYTES: usize = 1 << 20;
 
-/// What applying one or more [`UndoStep`]s obliges the caller to do, folded
-/// off the steps' own predicates. Accumulated as a value rather than written
-/// straight onto [`OpenDocument`] because undo/redo replay folds its steps
-/// from a callback while the history itself is mutably borrowed — so both the
-/// commit path and the replay path fold into one of these and then spend it:
-/// `dirtied` lands on the document, and `facts` moves the graph revision and is reported up to
-/// the frontend, which owes its view what they change.
+/// What applying one or more [`UndoStep`]s obliges the caller to do, folded off the steps' own
+/// predicates. A value rather than written straight onto [`OpenDocument`] because replay folds
+/// its steps from a callback while the history is mutably borrowed: both the commit and replay
+/// paths fold into one and then spend it. `dirtied` lands on the document, and `facts` moves the
+/// graph revision and is reported up to the frontend, which owes its view what they change.
 #[derive(Default, Debug)]
 struct StepSignals {
     dirtied: bool,
@@ -69,22 +64,19 @@ impl StepSignals {
 pub(crate) struct OpenDocument {
     document: Document,
     path: Option<PathBuf>,
-    /// Whether `document` differs from what is at `path` — the pair that gives the flag its
-    /// meaning, which is why it lives here rather than on a frontend. Set by any content-changing
-    /// edit (new edits, undo/redo replay, direct graph mutations), cleared by [`Self::save_to`].
-    /// Pure navigation (camera, selection, pane arrangement) leaves it alone; see
+    /// Whether `document` differs from what is at `path`. Set by any content-changing edit (new
+    /// edits, undo/redo replay), cleared by [`Self::save_to`]. Pure navigation (camera,
+    /// selection, pane arrangement) leaves it alone; see
     /// [`UndoStep::dirties_document`](crate::core::edit::step::undo_step::UndoStep::dirties_document).
     ///
-    /// It can read "dirty" after an undo returns the document to its saved
-    /// state — the safe direction (prompt rather than silently discard).
+    /// It can read "dirty" after an undo returns the document to its saved state, the safe
+    /// direction (prompt rather than silently discard).
     dirty: bool,
     /// The state of the graph's node set; moved by every edit, undo or redo
     /// that adds or removes a node.
     revision: GraphRevision,
-    /// This document's undo history. Beside the document rather than on a
-    /// frontend because it *is* document state — opening another file
-    /// replaces the pair, and no UI can outlive one and inherit the other's
-    /// history.
+    /// This document's undo history, document state: opening another file replaces the pair, so
+    /// no UI can inherit the other's history.
     history: UndoHistory,
     /// The steps of the batch [`Self::commit`] is recording, kept so a frame's
     /// edits allocate no list once it has grown. Empty between commits.
@@ -92,8 +84,7 @@ pub(crate) struct OpenDocument {
 }
 
 impl Default for OpenDocument {
-    /// An empty document with a fresh history. Hand-written rather than
-    /// derived because the history needs its byte budget, which has no
+    /// An empty document with a fresh history, hand-written as the history's byte budget has no
     /// meaningful zero.
     fn default() -> Self {
         Self {
@@ -142,21 +133,17 @@ impl OpenDocument {
         self.history.can_redo()
     }
 
-    /// Apply a single `intent` and record it as its own undo entry. For edits
-    /// raised outside a frame's drain — e.g. a file-picker result handled
-    /// after the record. No-ops (and self-cancelling steps) are dropped, like
-    /// the in-frame drain.
+    /// Apply a single `intent` and record it as its own undo entry, for edits raised outside a
+    /// frame's drain, such as a file-picker result. No-ops are dropped, like the in-frame drain.
     #[must_use]
     pub(crate) fn apply_edit(&mut self, intent: GraphIntent, library: &Library) -> EditFacts {
         self.commit([DocumentRequest::Graph(intent)], library)
     }
 
-    /// Take everything `requests` holds for this document, apply it, and leave
-    /// the document self-consistent.
+    /// Take everything `requests` holds for this document and apply it.
     ///
-    /// Called three times a frame — after the navigation scan, the input stage,
-    /// and the record — so a request raised in one phase lands before the next
-    /// reads the document.
+    /// Called three times a frame (after the navigation scan, the input stage, and the record), so
+    /// a request raised in one phase lands before the next reads the document.
     #[must_use]
     pub(crate) fn drain_requests(
         &mut self,
@@ -170,28 +157,24 @@ impl OpenDocument {
         self.commit(requests.drain(), library)
     }
 
-    /// Apply `queued`, each request according to its tier: a graph edit is
-    /// built, applied, and recorded; a view op goes straight to the layout.
-    /// The app tier never reaches here — it stays queued for the shell.
+    /// Apply `queued`, each request according to its kind: a graph edit is built, applied, and
+    /// recorded; a view op goes straight to the layout.
     ///
     /// # Panics
     ///
-    /// On a malformed intent. Nothing raised here can legitimately be one:
-    /// widgets read every identity they emit out of the live document, so the
-    /// worst they build is stale — which yields no step and is dropped. A
-    /// [`MalformedIntent`](crate::core::edit::error::MalformedIntent) is
-    /// therefore our own bug, which crashes rather than going to a log nobody
-    /// reads, and the steps before it, already applied, would reach no history.
+    /// On a malformed intent. Widgets read every identity they emit out of the live document, so
+    /// the worst they build is stale, which yields no step. A
+    /// [`MalformedIntent`](crate::core::edit::error::MalformedIntent) is therefore our own bug,
+    /// which crashes rather than going to a log nobody reads, and the steps before it, already
+    /// applied, would reach no history.
     ///
-    /// No-op and stale intents are dropped per-intent, and an empty batch
-    /// records nothing. A *run* of intents becomes one undo entry, and a batch
-    /// whose every step joins a held gesture folds into that gesture's entry,
-    /// so a drag held for N frames is still one Ctrl+Z; a cancel takes the
+    /// No-op and stale intents are dropped per intent, and an empty batch records nothing. A *run*
+    /// of intents becomes one undo entry, and a batch whose every step joins a held gesture folds
+    /// into that gesture's entry, so a drag held for N frames is one Ctrl+Z; a cancel takes the
     /// gesture's open entry back whole.
     ///
-    /// Returns whether the batch stranded the canvas's cached geometry. The
-    /// batch's other outcome — a dirtied document — is landed here; only the
-    /// relayout has to travel out to whoever holds the `Ui`.
+    /// Returns the [`EditFacts`] the batch changed, which have to travel out to whoever holds the
+    /// `Ui`; the dirtied flag is landed here.
     fn commit(
         &mut self,
         queued: impl IntoIterator<Item = DocumentRequest>,
@@ -199,8 +182,8 @@ impl OpenDocument {
     ) -> EditFacts {
         debug_assert!(self.batch.is_empty(), "the last commit left steps behind");
         let mut signals = StepSignals::default();
-        // The gesture every step of the batch so far is part of: it names the
-        // batch only when no step came of an edit outside it.
+        // The gesture every step so far is part of; it names the batch only when no step came of
+        // an edit outside it.
         let mut gesture = BatchGesture::Empty;
         for item in queued {
             let (intent, joins) = match item {
@@ -233,9 +216,8 @@ impl OpenDocument {
                     }
                     (otherwise, Some(cancelled))
                 }
-                // Applied straight to the layout: pane arrangement is
-                // navigation, so it records no step, raises no signal, and
-                // breaks no run of graph edits around it.
+                // Pane arrangement is navigation: it records no step, raises no signal, and breaks
+                // no run of graph edits around it.
                 DocumentRequest::View(op) => {
                     self.document.layout.apply(op);
                     continue;
@@ -257,19 +239,17 @@ impl OpenDocument {
         self.land(&signals)
     }
 
-    /// Replay the last entry backwards, and report whether that stranded the
-    /// canvas's cached geometry. With nothing to undo it is a no-op.
+    /// Replay the last entry backwards and report what it changed. With nothing to undo it is a
+    /// no-op.
     #[must_use]
     pub(crate) fn undo(&mut self) -> EditFacts {
-        // Folded into a value first: the replay callback runs while the
-        // history is mutably borrowed, so it cannot touch `self`.
         let mut signals = StepSignals::default();
         self.history
             .undo(&mut self.document, &mut |step| signals.fold(step));
         self.land(&signals)
     }
 
-    /// Replay the next entry forwards — the mirror of [`Self::undo`].
+    /// Replay the next entry forwards, the mirror of [`Self::undo`].
     #[must_use]
     pub(crate) fn redo(&mut self) -> EditFacts {
         let mut signals = StepSignals::default();
@@ -278,15 +258,13 @@ impl OpenDocument {
         self.land(&signals)
     }
 
-    /// Land folded [`StepSignals`]. The one place each signal's *effect* is
-    /// spelled out, for both the commit path and undo/redo replay, and so the
-    /// one place a debug build checks that the edits left the document
-    /// valid, as each step promises: a step that forgets part of what it
-    /// changes, as a wiring edit that keeps the route of the wire it ended,
-    /// fails at the edit rather than at the next save.
+    /// Land folded [`StepSignals`], for both the commit path and undo/redo replay. A debug build
+    /// also checks here that the edits left the document valid, so a step that forgets part of
+    /// what it changes, as a wiring edit that keeps the route of the wire it ended, fails at the
+    /// edit rather than at the next save.
     ///
-    /// Returns the one signal whose effect is a *call* rather than a stored
-    /// flag, so it has to travel back to whoever holds the `Ui`.
+    /// Returns the facts, whose effect is a *call* rather than a stored flag, so they travel back
+    /// to whoever holds the `Ui`.
     #[must_use]
     fn land(&mut self, signals: &StepSignals) -> EditFacts {
         debug_assert!(
@@ -294,10 +272,6 @@ impl OpenDocument {
             "the edits left the document invalid: {:?}",
             self.document.validate()
         );
-        // A content edit (or an undone/redone one) leaves the document differing
-        // from the last save — barring the exact round-trip back to it, where
-        // we accept a stale "dirty" rather than tracking saved state
-        // precisely.
         self.dirty |= signals.dirtied;
         if signals.facts.node_set {
             self.revision = self.revision.next();
@@ -329,14 +303,11 @@ impl OpenDocument {
     /// command line named a file, otherwise `remembered`, the one its
     /// preferences remember, when they reopen it.
     ///
-    /// A named file outranks the remembered one, reopening preference
-    /// included — the user asked for that document by name — and a named file
-    /// that fails to load degrades to an empty document rather than falling
-    /// back to the remembered one, which would read as the file having loaded.
-    /// Either way the remembered one stands: a command-line document is this
-    /// launch's, and saving it is what makes it the remembered one. A load
-    /// that fails is reported to `status`, and a remembered one that fails is
-    /// [`Launched::forgot_remembered`].
+    /// A named file outranks the remembered one, and one that fails to load degrades to an empty
+    /// document rather than falling back to the remembered one, which would read as the file
+    /// having loaded. Either way the remembered one stands: a command-line document is this
+    /// launch's, and saving it is what makes it the remembered one. A load that fails is reported
+    /// to `status`, and a remembered one that fails is [`Launched::forgot_remembered`].
     pub(crate) fn open_at_launch(
         argument: Option<PathBuf>,
         remembered: Option<&Path>,
@@ -344,11 +315,10 @@ impl OpenDocument {
         library: &Library,
     ) -> Launched {
         let (path, is_remembered) = match (argument, remembered) {
-            // Made absolute up front: the argument is relative to the shell's
-            // working directory, which the file dialogs' anchor and the
-            // worker's disk cache both outlive. One that cannot be, an empty
-            // one or one under a working directory that is gone, does not
-            // load, as memory holds every path absolute.
+            // Made absolute up front: the argument is relative to the shell's working directory,
+            // which the file dialogs' anchor and the worker's disk cache outlive. One that cannot
+            // be, an empty one or one under a vanished working directory, does not load, as
+            // memory holds every path absolute.
             (Some(argument), _) => match path::absolute(&argument) {
                 Ok(path) => (path, false),
                 Err(error) => {
@@ -409,8 +379,7 @@ impl OpenDocument {
     }
 
     /// Write the document to `path`, in the format its extension names, and adopt it. Clears
-    /// [`dirty`](Self::dirty) — only on success, so a failed save leaves the
-    /// unsaved work still flagged.
+    /// [`dirty`](Self::dirty) only on success.
     pub(crate) fn save_to(
         &mut self,
         path: &Path,
@@ -471,9 +440,7 @@ pub(crate) mod internals {
     use crate::core::open_document::OpenDocument;
 
     impl OpenDocument {
-        /// An unsaved document over `document`, with a fresh history — the
-        /// shape a fixture wants, since `history` is private and `Default`
-        /// cannot be spread across it from outside this module.
+        /// An unsaved document over `document`, with a fresh history.
         pub(crate) fn over(document: Document) -> Self {
             Self {
                 document,

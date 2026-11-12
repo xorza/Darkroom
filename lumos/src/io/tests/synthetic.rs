@@ -338,7 +338,8 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
 
     // The two frames hold the same ADU data and were divided by spans 65535 apart, which is exactly
     // the mismatch a stack has to be able to detect. The sample domain is what makes it detectable
-    // — both frames otherwise present as `FitsNormalized` and compare equal on every other axis.
+    // — both frames otherwise present as normalized float FITS and compare equal on every other
+    // axis.
     let bare_domain = bare.metadata.derived.domain().unwrap();
     let adu_domain = adu.metadata.derived.domain().cloned().unwrap();
     assert_eq!(bare_domain.scale, 1.0);
@@ -384,8 +385,8 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
 fn fits_bunit_travels_with_the_samples_and_separates_frames_the_span_cannot() {
     // Two float frames holding identical samples, divided by the same span, differing only in the
     // quantity BUNIT says those samples measure. Nothing else in the pipeline can tell them apart:
-    // both are `FitsNormalized` at scale 1, so without the unit they would stack as if a surface
-    // brightness and a count rate were the same measurement.
+    // both are normalized float samples at scale 1, so without the unit they would stack as if a
+    // surface brightness and a count rate were the same measurement.
     let image = Image::new(vec![2, 1], vec![0.25f32, 0.5], Scaling::IDENTITY).unwrap();
     let load = |bunit: &str| {
         let mut header = Header::new();

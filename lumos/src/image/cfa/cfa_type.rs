@@ -65,7 +65,7 @@ impl CfaType {
         (0..size.height).filter(move |y| (y / period).is_multiple_of(step))
     }
 
-    /// Number of distinct color channels (1 for Mono, 3 for Bayer/X-Trans).
+    /// The number of distinct color channels: 1 for mono, 3 for a mosaic.
     pub const fn color_count(&self) -> usize {
         self.color_layout().count()
     }

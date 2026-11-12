@@ -18,9 +18,8 @@ const NOISE_FLOOR_FRACTION: f32 = 1e-4;
 /// The sky's noise per pixel, read a row or a pixel at a time, and its floor: all the stages after
 /// the sky's removal need of it.
 ///
-/// The sky level itself went into the residual plane `pixels − bg` that those stages read,
-/// so none of them can see sky-included values — the threshold, the labeling, both deblenders and
-/// the measurement all work on the source alone.
+/// The stages after the removal read the residual plane `pixels − bg`, so the threshold, the
+/// labeling, both deblenders and the measurement never see the sky level.
 #[derive(Debug)]
 pub(crate) struct SkyNoise {
     /// Per-pixel noise (σ).
@@ -86,18 +85,14 @@ pub(crate) fn noise_floor_for(scale: f32) -> f32 {
 
 /// The frame's own floor for a per-pixel noise estimate.
 ///
-/// The spline interpolates σ between tile centers and can carry it to zero wherever a tile came out
-/// flat, which would collapse `bg + σ·noise` onto `bg` and match every pixel above the sky. A fixed
-/// constant cannot be that guard: the linear domain is `[0, 1]`, but the span the decoder divided
-/// by sets the magnitude, so one frame's entire noise range can sit below a constant sized for
-/// another — a 32-bit integer FITS lands near `1e-8` — and the threshold then rejects everything
-/// instead. A fraction of this frame's own median tile σ scales with whatever it is handed.
+/// The spline can carry σ to zero wherever a tile came out flat, which would collapse
+/// `bg + σ·noise` onto `bg` and match every pixel above the sky. A fixed constant cannot guard
+/// that: the decoder's span sets the magnitude, and a 32-bit integer FITS has its whole noise range
+/// near `1e-8`. A fraction of the frame's own median tile σ scales with whatever it is handed.
 ///
-/// When no tile has a measurable spread at all — a synthetic or wholly saturated frame — the sky
-/// level stands in for it. The floor still has work to do there: the interpolated background map
-/// does not reproduce a constant sky exactly, and without a margin above that jitter every pixel
-/// clears `bg` and the whole frame labels as one component. The sky carries the frame's magnitude,
-/// so a fraction of it stays above the jitter in any domain.
+/// With no tile of measurable spread — a synthetic or wholly saturated frame — the sky level stands
+/// in, since the interpolated background does not reproduce a constant sky exactly and without a
+/// margin above that jitter the whole frame labels as one component.
 fn noise_floor_from(grid: &BgMesh, values: &mut Vec<f32>) -> f32 {
     let stats = grid.stats.pixels();
     values.clear();

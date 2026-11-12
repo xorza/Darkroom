@@ -1,13 +1,7 @@
-//! Field codecs for [`Graph`](crate::graph::Graph)'s tables — each one there
-//! because the container the field decodes *into* silently absorbs something a
-//! document must not contain.
-//!
-//! A `BTreeMap`/`HashMap` built by repeated `insert` keeps the last value for a
-//! repeated key and drops the rest, so a corrupt document loads as a smaller,
-//! quietly different graph rather than failing. Both codecs below decode entry
-//! by entry and reject the collision instead, which is what makes "keys are
-//! unique" a property of every `Graph` that exists rather than one validation
-//! could only ever assert after the evidence was gone.
+//! Field codecs for [`Graph`](crate::graph::Graph)'s tables. A map built by repeated `insert`
+//! keeps the last value for a repeated key, so a corrupt document would load as a quietly
+//! different graph. Both codecs decode entry by entry and reject the collision, since validation
+//! could only assert after the evidence was gone.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -21,8 +15,7 @@ use crate::graph::binding::Binding;
 use crate::graph::identity::{InputPort, NodeId};
 use crate::graph::node::Node;
 
-/// The binding table travels as a sequence of `(port, binding)` pairs — the
-/// document format — and decodes entry by entry so a repeated port is refused.
+/// The binding table travels as a sequence of `(port, binding)` pairs.
 pub(super) fn serialize_bindings<S: Serializer>(
     map: &BTreeMap<InputPort, Binding>,
     serializer: S,
@@ -45,14 +38,9 @@ pub(super) fn deserialize_bindings<'de, D: Deserializer<'de>>(
     Ok(map)
 }
 
-/// The node table, decoded as a map like the derive would — but refusing a
-/// repeated id.
-///
-/// This is the one collision that loses *authored data*: two entries under one
-/// id are two different nodes, and keeping the last silently rebinds every wire
-/// naming that id onto a node with other ports. Nothing downstream can tell
-/// that happened, so it has to be caught here — the only point where both
-/// entries still exist.
+/// The node table, decoded as a map like the derive would, but refusing a repeated id: two
+/// entries under one id are two different nodes, and keeping the last silently rebinds every
+/// wire naming that id. Only here do both entries still exist.
 pub(super) fn deserialize_nodes<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<HashMap<NodeId, Node>, D::Error> {
@@ -73,10 +61,8 @@ impl<'de> Visitor<'de> for NodesVisitor {
     }
 
     fn visit_map<A: MapAccess<'de>>(self, mut access: A) -> Result<Self::Value, A::Error> {
-        // The hint is the document's own claim, so a corrupt one must not
-        // decide the allocation: capped, as serde caps its own collections,
-        // to what a megabyte of entries holds, and grown past that only by
-        // entries that actually decode.
+        // The hint is the document's own claim, so it is capped, as serde caps its own
+        // collections, to what a megabyte of entries holds.
         let cap = MAX_PREALLOC_BYTES / size_of::<(NodeId, Node)>();
         let mut nodes = HashMap::with_capacity(access.size_hint().unwrap_or_default().min(cap));
         while let Some((node_id, node)) = access.next_entry::<NodeId, Node>()? {

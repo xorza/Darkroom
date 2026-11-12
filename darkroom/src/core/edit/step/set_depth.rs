@@ -10,9 +10,8 @@ use crate::core::edit::step::reversible::Reversible;
 
 /// One item's paint depth, before and after.
 ///
-/// Raising writes a depth past every other item rather than reordering a
-/// list, so no neighbour moves and the two directions are the same write with
-/// a different number — which a positional reorder could not promise.
+/// Raising writes a depth past every other item rather than reordering a list, so no neighbour
+/// moves and the two directions are the same write with a different number.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct SetDepth {
     pub(crate) node_id: NodeId,
@@ -29,14 +28,12 @@ impl Reversible for SetDepth {
             .z = *self.z.half(dir);
     }
 
-    /// Clicking what is already frontmost lands here: the click still asks for
-    /// the raise, and this is what keeps it out of the history.
+    /// Clicking what is already frontmost lands here, keeping the raise out of the history.
     fn is_noop(&self) -> bool {
         self.z.unchanged()
     }
 
-    /// Stacking rides in each item's depth and still writes on any save, like
-    /// the selection does — but a bare restack shouldn't nag on exit.
+    /// Depth is saved with each item, but a bare restack shouldn't prompt a save on exit.
     fn dirties_document(&self) -> bool {
         false
     }

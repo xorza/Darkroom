@@ -6,10 +6,7 @@ use crate::gui::theme::color;
 use crate::gui::theme::hover::Hover;
 
 const VALUE_EDITOR_WIDTH: f32 = 100.0;
-/// Upper bound on the value column: editors fill the column up to here, then a
-/// long value (a wide enum/preset dropdown, a long path) ellipsizes instead of
-/// stretching the node out. Read by [`ConstEditorTheme::with_box`],
-/// which sizes the editor itself.
+/// Upper bound on the value column: a longer value ellipsizes instead of stretching the node.
 const VALUE_EDITOR_MAX_WIDTH: f32 = 240.0;
 
 /// Per-widget theme bundle for the inline const editor on a
@@ -17,9 +14,8 @@ const VALUE_EDITOR_MAX_WIDTH: f32 = 240.0;
 /// wear, the `DragValue` look of a number in the same box, the text field a string types into,
 /// and the fixed field width.
 ///
-/// A value reads as a field at rest, as Blender's and Unreal's node inputs
-/// do: its chip wears a quiet box, a step over the node's fill at half
-/// strength, so the eye finds what it can edit before the pointer arrives.
+/// A value reads as a field at rest, as Blender's and Unreal's node inputs do: its chip wears a
+/// quiet box, a step over the node's fill at half strength.
 #[derive(Clone, Debug)]
 pub(crate) struct ConstEditorTheme {
     /// The chip a path pick, an enum and a preset show.
@@ -33,11 +29,9 @@ pub(crate) struct ConstEditorTheme {
     /// The ink an empty input's "—" reads in: an optional one left unset, or one bound to
     /// nothing that could hold a constant.
     pub(crate) unset: RgbaF32,
-    /// Minimum logical-px width of the value column — editors fill it down to
-    /// at least this.
+    /// Minimum logical-px width of the value column.
     pub(crate) width: f32,
-    /// Maximum logical-px width of the value column, so a wide editor (enum /
-    /// preset dropdown, long path) ellipsizes rather than stretching the node.
+    /// Maximum logical-px width of the value column.
     pub(crate) max_width: f32,
 }
 

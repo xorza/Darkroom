@@ -1,6 +1,4 @@
-//! Comparison image rendering for visual tests.
-//!
-//! Creates annotated images showing ground truth vs detected stars.
+//! Annotated images of ground truth against detected stars, for visual tests.
 
 use crate::internals::synthetic::metrics::match_catalogs;
 use crate::internals::synthetic::observe::ObservedSource;

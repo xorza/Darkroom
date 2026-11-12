@@ -2,9 +2,8 @@
 //! needs and none of them owns. It depends on nothing in-tree, so everything
 //! here has to make sense without knowing what a node graph or an image is.
 //!
-//! The published surface is narrower than the export list looks, because most
-//! of those names are *reached through* a handful of entry points rather than
-//! imported:
+//! The published surface is narrower than the export list looks: most names are reached through a
+//! handful of entry points rather than imported:
 //!
 //! - [`CancelToken`] — cooperative cancellation, shared across worker threads.
 //! - [`SerdeFormat`] and its [`serialize`](SerdeFormat::serialize) /
@@ -50,9 +49,8 @@
     )
 )]
 
-// Type-holding modules are private; their public surface is defined by the
-// crate-root `pub use`s below (one canonical path per item). Modules that are
-// free-function namespaces stay `pub` and are used as `common::<module>::fn`.
+// Type-holding modules are private, surfaced by the `pub use`s below; free-function namespaces
+// stay `pub`.
 
 #[cfg(feature = "internals")]
 pub mod bench;
@@ -114,9 +112,8 @@ pub use serde::{DeserializeError, SerializeError};
 pub use usize_rect2::USizeRect2;
 pub use usize2::USize2;
 
-/// Whether this build has debug assertions on — the one switch every
-/// debug-only self-check in the workspace is gated on, so those checks turn
-/// on and off together instead of each crate reading the flag its own way.
+/// Whether this build has debug assertions on: the one switch every debug-only self-check in the
+/// workspace is gated on.
 pub const fn is_debug() -> bool {
     cfg!(debug_assertions)
 }

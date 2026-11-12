@@ -178,8 +178,7 @@ impl FrameCheck<'_> {
         Ok(())
     }
 
-    /// Every sample of `channels` is finite. Chunked so cancellation is polled per chunk rather
-    /// than per sample; the pixel index is only recomputed on the error path.
+    /// Every sample of `channels` is finite.
     fn sample_channels<'s>(
         self,
         channels: impl IntoIterator<Item = &'s [f32]>,

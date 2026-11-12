@@ -113,7 +113,7 @@ impl ExtractBg {
     }
 
     /// Fit one channel's background surface. A divide needs a positive model mean to normalize
-    /// the model by, and anything else would leave the channel silently unchanged.
+    /// the model by, so it is an error otherwise.
     fn fit_plane(
         &self,
         plane: &Buffer2<f32>,
@@ -183,11 +183,9 @@ impl ExtractBg {
         let mean = surface.mean() as f32;
         match self.mode {
             BgMode::Subtract => {
-                // Only the model's variation is removed; its mean stays as the sky pedestal, as
-                // Siril does. Without it the sky sits at ≈0 and the next step that measures the
-                // background against zero (an auto stretch) has nothing to place. Each channel
-                // keeps its own level, like `Divide` — neutralizing the sky color is a separate
-                // op.
+                // The model's mean stays as the sky pedestal, as Siril does: without it the sky
+                // sits at ≈0 and an auto stretch has no background to place. Each channel keeps
+                // its own level, like `Divide`; neutralizing the sky color is a separate op.
                 surface.remove(plane, |p, m| p - (m - mean));
             }
             BgMode::Divide => {
@@ -212,7 +210,7 @@ impl ExtractBg {
     }
 }
 
-/// One robust sky sample per tile, at the tile centre, with coordinates normalized to `[-1, 1]`.
+/// One tile's sky sample, at the tile centre, with coordinates normalized to `[-1, 1]`.
 #[derive(Debug, Clone, Copy)]
 struct Sample {
     x: f64,
@@ -220,14 +218,13 @@ struct Sample {
     z: f64,
 }
 
-/// One robust sky sample per tile — the tile centre with coordinates normalized to `[-1, 1]` and
-/// the shared [`crate::bg_mesh::BgMesh`] SExtractor-style sky estimate (per-tile
-/// ±σ-clip → Pearson mode), the estimator star detection reads its sky from. Its grid 3×3 median
-/// filter is **off** here, where the detector's is on: it would bias a real gradient's boundary
-/// tiles, and outlier tiles are instead rejected by the surface fit's residual clip. The mask is
-/// the pixels holding a fill, and a tile of fills alone gives no sample: the mesh fills it from its
-/// neighbours, which would weigh them twice. A star/bright-signal mask from the star detector
-/// belongs in that slot too.
+/// One [`Sample`] per measured tile, from the shared [`crate::bg_mesh::BgMesh`] SExtractor-style
+/// sky estimate (per-tile ±σ-clip → Pearson mode), which star detection reads its sky from. Its
+/// grid 3×3 median filter is **off** here, where the detector's is on: it would bias a real
+/// gradient's boundary tiles, and outlier tiles are instead rejected by the surface fit's
+/// residual clip. The mask is the pixels holding a fill, and a tile of fills alone gives no
+/// sample: the mesh fills it from its neighbours, which would weigh them twice. A star/bright-
+/// signal mask from the star detector belongs in that slot too.
 fn collect_samples(
     channel: &Buffer2<f32>,
     fills: Option<&BitBuffer2>,

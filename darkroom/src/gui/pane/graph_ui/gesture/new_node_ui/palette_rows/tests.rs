@@ -157,10 +157,8 @@ fn name_matches_is_case_insensitive_substring_with_empty_query_wildcard() {
     // Non-substring and wrong-fragment queries reject.
     assert!(!name_matches("Gaussian Blur", "sharpen"));
     assert!(!name_matches("Blur", "blurry"));
-    // A non-lowercased query never matches a lowercased name — the
-    // contract is "query already lowercased", so this documents that a
-    // caller who forgets to fold gets no false positives. It holds on
-    // both sides of the ASCII fast path.
+    // A non-lowercased query never matches a lowercased name, so a caller who forgets to fold
+    // gets no false positives, on both sides of the ASCII fast path.
     assert!(!name_matches("blur", "BLUR"));
     assert!(!name_matches("Grün", "GRÜN"));
     // Non-ASCII names fold by the Unicode rules, not byte-wise.

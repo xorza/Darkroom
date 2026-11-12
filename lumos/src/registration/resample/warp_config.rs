@@ -104,9 +104,8 @@ impl WarpConfig {
     /// by inverse-mapping, so no input pixels are carried over. Returns a [`WarpResult`] carrying
     /// the aligned image and its quality maps (see that type).
     ///
-    /// The maps are always produced: the pipeline's only caller needs both, so there is no
-    /// unconditional cost to skip. They are geometry, not pixels, so each row's maps are written
-    /// once, from the same source positions every channel of that row samples at.
+    /// The maps are always produced, once per row from the source positions every channel of that
+    /// row samples at.
     ///
     /// # Example
     ///

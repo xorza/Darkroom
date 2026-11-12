@@ -6,16 +6,13 @@ use crate::core::document::internals::DocumentFixture;
 use crate::gui::pane::graph_ui::internals::CanvasHarness;
 use crate::gui::port_ref::PortRef;
 
-/// A node scrolled off-screen keeps resolvable port centers — and loses them
-/// once the *document* stops holding it.
+/// A node scrolled off-screen keeps resolvable port centers, and loses them once the document
+/// stops holding it.
 ///
-/// Two halves of the same cache. A culled node records nothing, so its glyphs'
-/// responses are all empty and `rebuild` reconstructs their centers from the
-/// persistent intra-node offsets instead of polling each one; that's what keeps
-/// a wire anchored to the off-screen end it runs to. Which is also why absence
-/// from the scene can't be grounds for eviction — a closed tab looks the same —
-/// so eviction is driven from outside, by whether the document still holds the
-/// node.
+/// Two halves of the same cache. A culled node records nothing, so `rebuild` reconstructs its
+/// glyphs' centers from the persistent intra-node offsets, which keeps a wire anchored to the
+/// off-screen end it runs to. Absence from the scene can't be grounds for eviction (a closed
+/// tab looks the same), so eviction is driven by whether the document still holds the node.
 #[test]
 fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
     let mut fixture = DocumentFixture::probes(2);
@@ -55,11 +52,9 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
         .ports
         .center(out_port)
         .expect("a culled port still resolves, off the cached offset");
-    // And it tracks the move rather than sticking where it last painted: the
-    // center travelled as far as the node did. Within 0.01: both centers are a
-    // position plus the cached offset in f32, and near 6000 one rounding is
-    // about 0.0005, so a few of them stay far under the bound while a stale
-    // center would miss by thousands.
+    // It tracks the move rather than sticking where it last painted: the center travelled as far
+    // as the node did. Within 0.01: both centers are a position plus the cached offset in f32,
+    // and near 6000 one rounding is about 0.0005, while a stale center would miss by thousands.
     assert!(
         (culled - anchored - shift).length() < 0.01,
         "expected the center to move by {shift:?}, got {:?}",
@@ -75,10 +70,8 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
         );
     }
 
-    // Now the document drops it for real, and the sweep runs against that
-    // document — the shape production takes, where a deleted node is gone from
-    // the graph before anything asks whether to keep its cache entries.
-    // Read off `node_sizes` directly: `node_world_rect` resolves through a
+    // Now the document drops it for real, and the sweep runs against that document, as in
+    // production. Read off `node_sizes` directly: `node_world_rect` resolves through a
     // `NodeCtx`, which a deleted node no longer has.
     h.document_mut().remove_node(leaves);
     h.graph_ui.retain_nodes(h.ctx.open.document());

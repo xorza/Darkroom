@@ -75,7 +75,6 @@ pub(crate) fn render(scene: &Scene, camera: &Camera, obs: &Observation) -> SimFr
     let width = scene.size.width;
     let height = scene.size.height;
 
-    // 1 + 2. Geometry + PSF + background → the clean (pre-flat) signal, and the truth catalog.
     let mut clean = scene.bg.render(scene.size);
     let mut observed = Vec::with_capacity(scene.sources.len());
     let psf = camera.psf.with_seeing(obs.seeing_scale);
@@ -90,17 +89,15 @@ pub(crate) fn render(scene: &Scene, camera: &Camera, obs: &Observation) -> SimFr
         });
     }
 
-    // 3. Flat field (multiplicative sensor response) → clean becomes the on-sensor signal.
     let flat = camera.flat.render(scene.size, &camera.cfa_type);
     for (c, f) in clean.iter_mut().zip(flat.iter()) {
         *c *= *f;
     }
 
-    // The raw frame starts from the clean signal; sensor effects pile on from here.
     let mut raw = clean.pixels().to_vec();
     let mut rng = TestRng::new(obs.seed);
 
-    // 4 + 5. Shot noise and dark current — skipped for a noiseless sensor.
+    // A noiseless sensor skips every stochastic layer.
     if !camera.noiseless {
         apply_shot_noise(&mut raw, camera.full_well_e, &mut rng);
         DarkCurrent {
@@ -111,14 +108,13 @@ pub(crate) fn render(scene: &Scene, camera: &Camera, obs: &Observation) -> SimFr
         .add_to(&mut raw, &mut rng);
     }
 
-    // 6. Dead pixels collect no charge.
     for &(x, y) in &camera.defects.dead {
         if x < width && y < height {
             raw[y * width + x] = 0.0;
         }
     }
 
-    // 7. Bias pedestal + bad columns (deterministic structure, always applied).
+    // Bias is deterministic structure, applied even on a noiseless sensor.
     if camera.bias.offset != 0.0 {
         for p in &mut raw {
             *p += camera.bias.offset;
@@ -132,7 +128,6 @@ pub(crate) fn render(scene: &Scene, camera: &Camera, obs: &Observation) -> SimFr
         }
     }
 
-    // 8. Read noise, at readout.
     if !camera.noiseless {
         ReadNoise {
             sigma_e: camera.read_noise_e,
@@ -141,14 +136,12 @@ pub(crate) fn render(scene: &Scene, camera: &Camera, obs: &Observation) -> SimFr
         .add_to(&mut raw, &mut rng);
     }
 
-    // 9. Hot pixels spiked.
     for &(x, y, excess) in &camera.defects.hot {
         if x < width && y < height {
             raw[y * width + x] += excess;
         }
     }
 
-    // 10. Saturate / clamp to the valid normalized range.
     for p in &mut raw {
         *p = p.clamp(0.0, camera.saturation);
     }

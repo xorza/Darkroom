@@ -5,7 +5,7 @@ use std::fmt::{Display, Formatter};
 
 /// Which of a frame's planes a validation failure is about.
 ///
-/// Names the plane in the errors below, and picks the range each one must satisfy: coverage is a
+/// Names the plane in a validation error, and picks the range each one must satisfy: coverage is a
 /// fraction of a pixel that had support, confidence an interpolation's noise factor with no upper
 /// bound. Carrying the kind rather than its label is what keeps that rule out of a string
 /// comparison.

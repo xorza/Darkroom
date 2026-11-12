@@ -16,14 +16,11 @@ use crate::gui::theme::Theme;
 /// document being edited, and everything under it reads the theme, the library and the run back
 /// off *that*.
 ///
-/// **No document here**, deliberately: `App` composes one of these once per
-/// record pass and then hands the session a `&mut` for the frame, so a
-/// document reference at this level would pin the very thing the frame's
-/// drains have to mutate. It enters the chain one level down, per phase.
+/// **No document here**, deliberately: a document reference at this level would pin what the
+/// frame's drains have to mutate. It enters the chain one level down, per phase.
 ///
-/// Only shared state belongs here. The mutable sinks a frame writes through —
-/// `Ui`, the intent buffer, the preferences — stay explicit parameters, so a
-/// context can never be the thing two call sites fight over.
+/// Only shared state belongs here. The mutable sinks a frame writes through — `Ui`, the request
+/// queue, the preferences — stay explicit parameters.
 #[derive(Copy, Clone, Debug)]
 pub(crate) struct AppCtx<'a> {
     theme: &'a Theme,

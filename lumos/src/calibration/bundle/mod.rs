@@ -40,11 +40,8 @@ use common::USize2;
 
 const BUNDLE_FORMAT: &str = "CALMASTR";
 const DEFECT_FORMAT: &str = "DEFMAP";
-/// 7: each hot pixel of the defect map keeps its excess over the dark around it and the dark's
-/// noise there. Each master's
-/// header records what calibration removed from it — the dark whether it lost its bias — and what
-/// a master of dark signal taken from it was compared on, and its flags sit in a `LUMFLAGS`
-/// extension. A bundle holds no flat-dark.
+/// Stamped in the primary and the defect table headers; a reader refuses any other. A bundle holds
+/// no flat-dark.
 const BUNDLE_VERSION: i64 = 7;
 /// A defect row's `KIND`.
 const HOT: u8 = 0;
@@ -77,8 +74,7 @@ fn write(
 
     let mut flags_written = 0;
     for (role, image) in masters.masters() {
-        // The `IMAGETYP` a role's HDU carries is its `EXTNAME` in words, so the two cannot
-        // drift.
+        // `IMAGETYP` is the `EXTNAME` in words, so the two cannot drift.
         let image_type = role.extname().replace('_', " ");
         cfa::hdu(
             image,
@@ -139,8 +135,8 @@ pub(crate) fn read(
         .map(PreparedFlat::checked_divisor)
         .transpose()?;
     let defects = idxs.defects.map(|idx| bundle.defect_map(idx)).transpose()?;
-    // The same coherence checks `from_images` runs, so a bundle read back from disk is exactly as
-    // trustworthy as one just built — and neither can exist in a state the other would reject.
+    // The builder runs the coherence checks `from_images` does, so a bundle read back is as
+    // trustworthy as one just built.
     let masters = CalibrationMasters::builder()
         .bias(bias)
         .dark(dark)

@@ -1,23 +1,19 @@
 //! Full-resolution viewers for preview nodes' runtime images, one editor tab
 //! per node ([`TabRef::ImageViewer`], deduped on open). Each visible viewer
 //! borrows its node's registered texture from the centralized preview
-//! store and keeps only navigation state. Opening or restoring a tab therefore
-//! shows an already-received value without an editor-driven notification path.
+//! store and keeps only navigation state, so opening or restoring a tab shows an
+//! already-received value without an editor-driven notification path.
 //!
 //! The full RGBA8 texture is converted by the store on demand, the first time a
 //! viewer asks for it while recording, and the image gives its source up to
-//! the conversion. Asking is what scopes it: a pane records only while its tab
-//! is the visible one, so a viewer stacked behind another holds no
-//! full-resolution texture until it is activated. One activated mid-record
-//! frames itself at full size in the pass that puts it on screen, with the
-//! thumbnail standing in until the conversion lands.
+//! the conversion. A pane records only while its tab is the visible one, so a
+//! viewer stacked behind another holds no full-resolution texture until it is
+//! activated. One activated mid-record frames itself at full size in the pass
+//! that puts it on screen, with the thumbnail standing in until the conversion lands.
 //!
-//! Split the way the graph pane is, by what each part does rather than by what
-//! it draws: [`camera`] is the affine algebra between texels, logical px and
-//! the pane, [`glyph`] is the drawn vocabulary, and [`toolbar`] is the
-//! floating toolbar the panel stamps out. This file is [`ImageViewer`] and
-//! nothing else — the state one viewer tab keeps across frames, and the record
-//! pass that drives it.
+//! [`camera`] is the affine algebra between texels, logical px and the pane, [`glyph`] the
+//! drawn vocabulary, and [`toolbar`] the floating toolbar the panel stamps out. This file
+//! is [`ImageViewer`]: the state one viewer tab keeps across frames, and the record pass.
 //!
 //! [`TabRef::ImageViewer`]: crate::core::document::tab_ref::TabRef::ImageViewer
 
@@ -60,28 +56,22 @@ use crate::gui::widgets::pill;
 use crate::gui::widgets::support;
 use crate::gui::widgets::zoom_range::{self, ScrollFrame};
 
-/// One image-viewer tab's state: what it shows and how it's framed.
-/// Lives in the `MainWindow`'s per-node viewer map, keyed by (and
-/// carrying) the [`NodeId`] its tab binds to; content is runtime-only
-/// (never persisted).
+/// One image-viewer tab's state: what it shows and how it's framed. Lives in the
+/// `MainWindow`'s per-node viewer map, keyed by the [`NodeId`] its tab binds to; never
+/// persisted.
 #[derive(Debug)]
 pub(crate) struct ImageViewer {
-    /// The preview node this viewer shows — keys the pane's widget id so
-    /// two viewer tabs never share gesture responses.
+    /// The preview node this viewer shows; keys the pane's widget id.
     node_id: NodeId,
     source_size: Option<UVec2>,
-    /// Explicit viewport once the user pans/zooms; `None` = fit-to-pane
-    /// (recomputed each frame, so it tracks pane resizes). The image's
-    /// top-left offset in pane-local logical px plus the zoom (physical
-    /// display px per texture texel). Texture dimensions are converted to
-    /// their 1:1 logical footprint before applying it.
+    /// Explicit viewport once the user pans/zooms; `None` = fit-to-pane, recomputed each
+    /// frame. The image's top-left offset in pane-local logical px plus the zoom (physical
+    /// display px per texture texel).
     view: Option<Viewport>,
     /// Pan-drag bookkeeping: the viewport pan at drag start.
     pan_anchor: Option<Vec2>,
-    /// Lazily registered checkerboard tile for the `Checker` backdrop.
-    /// The backdrop choice and magnification filter live in
-    /// [`ViewerPreferences`] — one persisted setting shared by every
-    /// viewer tab, threaded into [`Self::show`] each frame.
+    /// Lazily registered checkerboard tile for the `Checker` backdrop. The backdrop choice and
+    /// magnification filter live in [`ViewerPreferences`], shared by every viewer tab.
     checker: Option<ImageHandle>,
     /// How the shown image shrinks: area averaging keeps its source brightness. The editor bench
     /// alone sets another.
@@ -113,18 +103,14 @@ const NO_IMAGE_YET_HINT: &str = "The last run has published no image yet.";
 /// What [`StoredContent`] means to a viewer: a texture to paint, why there
 /// isn't one, or nothing published yet.
 ///
-/// Three states, so not a `Result` — "no value yet" is neither a texture nor a
-/// failure, and it is the state a freshly opened viewer sits in. No lifetime
-/// either: a texture handle is refcounted and a reason is owned, so nothing
-/// here borrows from the entry it was resolved from.
+/// Three states, so not a `Result`: "no value yet" is neither a texture nor a failure. No
+/// lifetime: a texture handle is refcounted and a reason is owned.
 #[derive(Clone, Debug)]
 enum ShownSource {
     Nothing,
     Image(FullView),
-    /// Why this value has no picture. Carries the reason rather than its
-    /// wording, so the pane decides how to say it — including for a perfectly
-    /// good non-image value, which is [`DrawablePreviewError::NotAnImage`] and
-    /// not a fault.
+    /// Why this value has no picture. Carries the reason, not its wording, so the pane
+    /// decides how to say it; a good non-image value is [`DrawablePreviewError::NotAnImage`].
     NoImage(DrawablePreviewError),
 }
 
@@ -137,9 +123,7 @@ impl ShownSource {
                 Ok(view) => Self::Image(view),
                 Err(error) => Self::NoImage(error),
             },
-            // A stored failure keeps its own reason. A perfectly good
-            // non-image value is `NotAnImage`: "7" is not what a viewer tab is
-            // for, and the preview card is what renders it.
+            // A non-image value is `NotAnImage`: the preview card renders it, not a viewer tab.
             Some(StoredContent::Error(error)) => Self::NoImage(error.clone()),
             Some(StoredContent::Text(_)) => Self::NoImage(DrawablePreviewError::NotAnImage),
         }
@@ -198,7 +182,7 @@ struct Shown<'a> {
 }
 
 impl ImageViewer {
-    /// An empty viewer for `node_id` (shows the hint until content arrives).
+    /// An empty viewer for `node_id`.
     pub(crate) const fn new(node_id: NodeId) -> Self {
         Self {
             node_id,
@@ -215,26 +199,16 @@ impl ImageViewer {
         self.pan_anchor = None;
     }
 
-    /// The framing to draw with: the user's explicit viewport, else the
-    /// recomputed fit — the single source for the draw rect, the zoom
-    /// readout, and the gesture/button math.
+    /// The framing to draw with: the user's explicit viewport, else the recomputed fit; the
+    /// single source for the draw rect, the zoom readout, and the gesture/button math.
     ///
-    /// **Only the fit needs `pane`.** A viewer carrying its own framing
-    /// already knows its rect, so it answers even on a pass where the pane has
-    /// never been arranged — which is every pass that puts a viewer tab on
-    /// screen for the first time. Gating the whole thing on a measured pane
-    /// would make a zoomed viewer draw at fit for a frame and snap to its real
-    /// scale afterwards.
+    /// Only the fit needs `pane`: an explicit viewport answers on a pass where the pane has
+    /// never been arranged, so a zoomed viewer does not draw at fit for a frame first.
     ///
-    /// `None` therefore means only "no framing yet": no explicit viewport and
-    /// no pane to fit into. [`ImageFit::Contain`] is the right picture there —
-    /// [`camera::fit_viewport`] is defined to match it — so nothing is owed a later
-    /// pass.
-    ///
-    /// Converts the texture to logical px itself rather than taking the
-    /// figure: every caller wanted the viewport, and only one of them wanted
-    /// the size too. Registered images have non-zero dims by construction, so
-    /// the fit always has a valid divisor.
+    /// `None` means no explicit viewport and no pane to fit into. [`ImageFit::Contain`] is the
+    /// right picture there, as [`camera::fit_viewport`] matches it, so nothing is owed a later
+    /// pass. Registered images have non-zero dims by construction, so the fit has a valid
+    /// divisor.
     fn effective_view(
         &self,
         ui: &Ui,
@@ -252,9 +226,8 @@ impl ImageViewer {
         }
     }
 
-    /// Draw the viewer into `view` (the whole tab content). Borrows the
-    /// centralized texture, applies last frame's pan/zoom gestures, then
-    /// paints the image (or message), header, and controls, which edit the shared viewer
+    /// Draw the viewer into the whole tab content: apply last frame's pan/zoom gestures, then
+    /// paint the image (or message), header, and controls, which edit the shared viewer
     /// preferences in place, as the Preferences tab's do.
     pub(crate) fn show(
         &mut self,
@@ -270,10 +243,6 @@ impl ImageViewer {
             size: pane,
             ..
         } = pane_view;
-        // The store rather than the entry: this viewer *is* its node, so
-        // handing it the whole store is one lookup by an id that cannot
-        // disagree with the one keying the pane's widgets.
-        //
         // A full texture no one asked for is asked for here, which scopes the conversion: this
         // runs from the record of a pane that is drawn, so only a viewer on screen costs one. The
         // thumbnail stands in until it lands, and the converter wakes the host when it does, so
@@ -313,9 +282,7 @@ impl ImageViewer {
                             Shape::rect().at(camera::draw_rect(logical_size(shown, ui), v)),
                             image.fit(ImageFit::Fill),
                         ),
-                        // No framing yet — no zoom of its own and no pane to
-                        // fit into. Palantir's own contain draws exactly what
-                        // the fit would.
+                        // No framing yet: palantir's own contain draws what the fit would.
                         None => ui.add_shape(Shape::rect(), image.fit(ImageFit::Contain)),
                     };
                     let shown = Shown {
@@ -324,10 +291,8 @@ impl ImageViewer {
                     };
                     self.top_row(ui, shown, preferences);
                 }
-                // Complementary to the image above, so this is the same
-                // either/or the enum states — never a second thing drawn over
-                // the picture. On the readout pill, so the line stays
-                // legible over the checker/white backdrops too.
+                // Never drawn over a picture: the enum is either/or. On the readout pill, so the
+                // line stays legible over every backdrop.
                 if let Some(hint) = source.hint(status) {
                     // A failure reads in the error ink; every other line invites, muted.
                     let ink = match hint {
@@ -361,9 +326,8 @@ impl ImageViewer {
         handle.clone()
     }
 
-    /// The screen-fixed checkerboard backdrop across the whole pane. One
-    /// tiled 2×2 texture; `Nearest` keeps the squares crisp at any pane
-    /// size and DPI.
+    /// The screen-fixed checkerboard backdrop across the whole pane, from one tiled 2×2
+    /// texture; `Nearest` keeps the squares crisp.
     fn draw_checker(&mut self, ui: &mut Ui, theme: &Theme, pane: Vec2) {
         let handle = self.checker_tile(ui, theme);
         ui.add_shape(
@@ -396,9 +360,7 @@ impl ImageViewer {
             });
     }
 
-    /// The top-left readout: source node, native dimensions and pixel
-    /// format, whether the view is texture-capped or still converting, and the
-    /// current zoom.
+    /// The top-left readout, a [`HeaderReadout`].
     fn header(&self, ui: &mut Ui, shown: Shown<'_>) {
         let readout = HeaderReadout {
             title: shown.pane.title,
@@ -417,14 +379,11 @@ impl ImageViewer {
         .show(ui, theme);
     }
 
-    /// The floating control panel in the pane's top-right corner — the
-    /// viewer twin of the graph toolbar: function groups on stacked
-    /// pills, opaque chip buttons raised off each pill. The top
-    /// pill frames the view (fit, 100%); the column below edits the
-    /// shared appearance preferences — the backdrop radio stack and,
-    /// past a rule, the sampling toggle. Drawn after the image so the buttons hit-test above the
-    /// pane's gesture surface. Framing clicks land next frame (responses
-    /// lag the record by one frame) — imperceptible.
+    /// The floating control panel in the pane's top-right corner, the viewer twin of the graph
+    /// toolbar. The top pill frames the view (fit, 100%); the column below edits the shared
+    /// appearance preferences: the backdrop radios and the sampling toggle. Drawn after the
+    /// image so the buttons hit-test above the pane's gesture surface. Framing clicks land
+    /// next frame, as responses lag the record by one frame.
     fn controls(&mut self, ui: &mut Ui, shown: Shown<'_>, preferences: &mut ViewerPreferences) {
         let (theme, pane) = (shown.pane.theme, shown.pane.size);
         let controls = Controls {
@@ -505,20 +464,18 @@ impl ImageViewer {
     }
 }
 
-/// The viewer's top-left readout: source node, native dimensions and pixel
-/// format, then the conditional clauses — whether the texture is capped below
-/// the source, whether the full texture is still converting, and the zoom.
+/// The viewer's top-left readout: source node, native dimensions and pixel format, then
+/// whether the texture is capped below the source, whether the full texture is still
+/// converting, and the zoom.
 ///
-/// Rendered on demand rather than assembled into a `String`: the header
-/// records every frame the pane does, and `fmt!` puts the finished line
-/// straight into the record pass's text arena.
+/// Rendered on demand rather than assembled into a `String`: `fmt!` puts the finished line
+/// straight into the record pass's text arena every frame.
 #[derive(Debug)]
 struct HeaderReadout<'a> {
     /// Never empty — [`node_label`] supplies the fallback.
     title: &'a str,
     shown: &'a FullView,
-    /// `None` only while a fit-mode viewer waits for its first arranged
-    /// pane — there is no fit zoom to report yet.
+    /// `None` only while a fit-mode viewer waits for its first arranged pane.
     zoom: Option<f32>,
 }
 
@@ -549,13 +506,8 @@ impl Display for HeaderReadout<'_> {
 }
 
 /// Display label for a viewer tab / pane header: the node's name through
-/// [`format::node_name`]. The one formatter for both the tab strip and the viewer title.
-///
-/// Borrowed from the document rather than assembled: both readers record
-/// every frame, and both arms are text something already owns. Each reader
-/// resolves its own — the strip labels the tabs it is drawing, the pane header
-/// labels the one tab it is — because one hash probe per label is cheaper than
-/// a table keyed by every tab.
+/// [`format::node_name`], borrowed from the document. Each reader resolves its own, as one
+/// hash probe per label is cheaper than a table keyed by every tab.
 pub(crate) fn node_label(document: &Document, node_id: NodeId) -> &str {
     let node = document
         .graph
@@ -564,9 +516,8 @@ pub(crate) fn node_label(document: &Document, node_id: NodeId) -> &str {
     format::node_name(&node.name)
 }
 
-/// A texture's 1:1 logical footprint on the current display — one texel per
-/// physical pixel, which is the space every viewport in this module is
-/// expressed in, so the framing math never sees raw texels.
+/// A texture's 1:1 logical footprint on the current display (one texel per physical pixel),
+/// the space every viewport in this module is expressed in.
 fn logical_size(image: &DrawableImage, ui: &Ui) -> Vec2 {
     image.texels.as_vec2() / ui.display().scale_factor()
 }
@@ -581,8 +532,7 @@ fn top_row_wid(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("darkroom.image_viewer.top_row", node_id))
 }
 
-/// Stable id for a viewer's pane — keyed by node so switching between two
-/// viewer tabs can't cross-feed their gesture responses.
+/// A viewer's pane id, keyed by node so two viewer tabs never share gesture responses.
 fn pane_wid(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("darkroom.image_viewer.pane", node_id))
 }

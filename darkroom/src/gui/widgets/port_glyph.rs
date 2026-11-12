@@ -12,12 +12,9 @@ use palantir::{
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support;
 
-/// Hover / grab box scaled past the painted glyph so ports, event triangles,
-/// and subscription pins are easier to hit and snap to, while the visible
-/// shape stays its own size. The enlarged box is also what keeps the wire
-/// hover-highlight repaint-correct: the glyph's own (hover-target) box carries
-/// the emphasis zone, so entering/leaving it is a hover-target change and
-/// repaints without any pointer subscription.
+/// Hover / grab box scaled past the painted glyph so it is easier to hit and snap to. The grown
+/// box also keeps the wire hover-highlight repaint-correct: it carries the emphasis zone, so
+/// entering or leaving it is a hover-target change and repaints without a pointer subscription.
 const HIT_SCALE: f32 = 1.8;
 
 /// What a glyph paints inside its box.
@@ -58,12 +55,10 @@ enum Placement {
 /// emitter event paints as, or the rotated triangle a subscription pin paints
 /// as. Builder chain ending in [`show`](Self::show), like a palantir widget.
 ///
-/// Domain-agnostic like the rest of `widgets` — the caller supplies the id,
-/// size, colors and tooltip, and maps the returned clicks onto its own
-/// intent. What the glyph owns is the part every caller was repeating: the
-/// [`HIT_SCALE`]-grown sensing box, `CLICK | DRAG` so it intercepts the press
-/// before the node body under it and can latch a wire drag, and the tooltip
-/// recorded after it.
+/// Domain-agnostic like the rest of `widgets`: the caller supplies the id, size, colors and
+/// tooltip, and maps the returned clicks onto its own intent. The glyph owns the
+/// [`HIT_SCALE`]-grown sensing box, `CLICK | DRAG` so it intercepts the press before the node
+/// body under it and can latch a wire drag, and the tooltip recorded after it.
 ///
 /// The explicit `wid` is not optional: these ids are reconstructed from domain
 /// coordinates by passes that never record the glyph (the geometry rebuild,
@@ -254,11 +249,8 @@ impl Painted {
             GlyphShape::Circle { outline, hollow } => {
                 let rect = Rect::new(inset, inset, size, size);
                 let radius = size * 0.5;
-                // The ring paints *before* the fill — an annulus strictly
-                // outside the fill's radius, so they don't overlap either way.
-                // A stroke paints its own rect's *inner*-edge annulus, so
-                // drawing it on `rect` would eat into the fill; inflating first
-                // lands the ring's inner edge exactly on the fill's outer edge.
+                // A stroke paints its own rect's inner-edge annulus, so drawing the ring on `rect`
+                // would eat into the fill; inflating first lands its inner edge on the fill's edge.
                 if let Some(color) = outline {
                     ui.add_shape(
                         Shape::rect().at(rect.inflated(ring)).corners(radius + ring),

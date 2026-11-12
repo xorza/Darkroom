@@ -126,10 +126,9 @@ impl FilterKernels {
     /// `1/σ²` inside the sums; this does not, and the threshold reads the local σ of the output
     /// instead.
     ///
-    /// Supports elliptical PSF shapes for stars elongated due to tracking errors, field rotation,
-    /// or optical aberrations. An ellipse whose axes lie along the pixel axes is a product of two
-    /// 1D profiles, and so is its pixel mean, so it filters in a row pass and a column pass, out to
-    /// `3σ` of the wider both ways. At any other angle the kernel is 2D: Geusebroek, van den
+    /// An ellipse whose axes lie along the pixel axes is a product of two 1D profiles, and so is
+    /// its pixel mean, so it filters in a row pass and a column pass, out to `3σ` of the wider both
+    /// ways. At any other angle the kernel is 2D: Geusebroek, van den
     /// Boomgaard and Smeulders (2003) split a rotated Gaussian into an axis pass and a skewed one,
     /// but the skewed pass interpolates between pixels, and the kernel is then no longer the PSF's
     /// pixel mean.

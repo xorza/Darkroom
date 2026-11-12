@@ -127,8 +127,8 @@ pub(crate) mod internals {
         }
     }
 
-    /// The scalar reference over one packed row pair of `format`: per-channel
-    /// blending through [`blend_value`], which the tests hold every kernel to.
+    /// The scalar reference over one packed row pair of `format`, which the tests hold every
+    /// kernel to.
     pub(crate) fn scalar_row(
         params: Blend,
         format: ColorFormat,
@@ -151,8 +151,6 @@ pub(crate) mod internals {
         out: &mut [u8],
     ) {
         let channel_count = format.channel_count.count();
-        // Channels the blend mode applies to; alpha, where the format has one, is
-        // the last channel and is left to the mix alone.
         let color_count = channel_count - usize::from(format.has_alpha());
         let src: &[T] = bytemuck::cast_slice(src);
         let dst: &[T] = bytemuck::cast_slice(dst);

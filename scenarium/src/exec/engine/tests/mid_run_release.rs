@@ -21,10 +21,10 @@ struct LiveTracker {
     peak: usize,
 }
 
-/// A custom value that registers as live on creation and deregisters on `Drop`, so the
-/// shared [`LiveTracker`] captures the peak number resident simultaneously. Cloning a
-/// `DynamicValue::Custom` clones the `Arc`, not the `Tracked`, so a value stays live until
-/// its last reference (cache slot or invoke buffer) drops — exactly what peak RAM tracks.
+/// A custom value that registers as live on creation and deregisters on `Drop`, so the shared
+/// [`LiveTracker`] captures the peak number resident simultaneously. Cloning a
+/// `DynamicValue::Custom` clones the `Arc`, not the `Tracked`, so a value stays live until its
+/// last reference (cache slot or invoke buffer) drops — which is what peak RAM tracks.
 #[derive(Debug)]
 struct Tracked {
     tracker: Arc<Mutex<LiveTracker>>,
@@ -110,10 +110,9 @@ async fn chain_peak(relay_mode: CacheMode) -> usize {
     tracker.lock_unpoisoned().peak
 }
 
-/// The cache mode drives peak residency. With `None`, each stage's output is freed the
-/// moment the next stage reads it, so only a producer/consumer pair is ever resident →
-/// peak 2, whatever the chain length. With `Ram`, every stage is retained for cross-run
-/// reuse, so all four accumulate → peak 4. That the two differ is the whole feature.
+/// The cache mode drives peak residency. With `None`, each stage's output is freed the moment the
+/// next stage reads it, so only a producer/consumer pair is ever resident → peak 2, whatever the
+/// chain length. With `Ram`, every stage is retained for cross-run reuse → peak 4.
 #[tokio::test]
 async fn none_cache_bounds_peak_residency_but_ram_accumulates() {
     assert_eq!(
@@ -160,8 +159,8 @@ async fn probe_run(relay_mode: CacheMode, probes: usize) -> ProbeRun {
         g.wire("relay", &format!("probe{probe}"));
     }
 
-    // The engine stays bound: dropping it drops its cache, which would
-    // release exactly the retained value `live_after` is here to observe.
+    // The engine stays bound: dropping it drops its cache, which would release the retained value
+    // `live_after` is here to observe.
     let mut e = TestEngine::over(g);
     e.run_sinks().await;
     let unique_reads = reads.lock_unpoisoned().clone();

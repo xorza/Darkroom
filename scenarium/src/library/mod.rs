@@ -16,33 +16,29 @@ use crate::graph::node::{Node, NodeKind};
 use crate::library::type_entry::TypeEntry;
 
 /// The runtime registry every frontend resolves against: the [`Func`]s nodes instantiate, and the
-/// nominal types (with their disk codecs). This is runtime registry state, not a persistence
-/// format; authored graphs serialize function and type ids and resolve them against a
-/// process-assembled library.
+/// nominal types (with their disk codecs). Not a persistence format: authored graphs serialize
+/// function and type ids and resolve them against a process-assembled library.
 #[derive(Default, Debug)]
 pub struct Library {
     funcs: HashMap<FuncId, Func>,
 
-    /// Registered nominal types (`Custom`/`Enum`), keyed by [`TypeId`]. Written
-    /// only by [`register_type`](Self::register_type), whose gates every entry
-    /// passes.
+    /// Registered nominal types (`Custom`/`Enum`), written only by
+    /// [`register_type`](Self::register_type).
     types: HashMap<TypeId, TypeEntry>,
-    /// The codecs among `types`, shared with each program compiled from this
-    /// library. Registration copies the map only while a program still holds
-    /// the previous one.
+    /// The codecs among `types`, shared with each program compiled from this library;
+    /// registration copies the map only while a program still holds the previous one.
     codecs: Arc<Codecs>,
 }
 
 impl Library {
-    /// The func with `id`, or `None` — which is the answer for the nil id,
-    /// as [`FuncBuilder::build`](crate::FuncBuilder::build) refuses it.
+    /// The func with `id`, or `None`, as for the nil id, which
+    /// [`FuncBuilder::build`](crate::FuncBuilder::build) refuses.
     pub fn by_id(&self, id: FuncId) -> Option<&Func> {
         self.funcs.get(&id)
     }
 
-    /// The declaration `node` instantiates, or why it has none: the library
-    /// holds no func under its id, or holds it with other ports than the node
-    /// was authored against, so its wiring would land on the wrong ports.
+    /// The declaration `node` instantiates, or why it has none: no func under its id, or other
+    /// ports than the node was authored against.
     pub fn func_of(&self, node: &Node) -> Result<&Func, Unresolved> {
         match &node.kind {
             NodeKind::Func(func_ref) => match self.by_id(func_ref.id()) {
@@ -80,10 +76,8 @@ impl Library {
         self.funcs.insert(func.id(), func);
     }
 
-    /// Register a nominal type. Registering an identical entry again does
-    /// nothing, so libraries that share a type merge; a conflicting entry under
-    /// a registered id panics — two declarations for one type is a wiring bug,
-    /// not a runtime condition.
+    /// Register a nominal type. Registering an identical entry again does nothing, so libraries
+    /// that share a type merge; a conflicting entry under a registered id panics.
     pub fn register_type(&mut self, type_id: impl Into<TypeId>, entry: TypeEntry) {
         let type_id = type_id.into();
         assert!(!type_id.is_nil());
@@ -94,15 +88,10 @@ impl Library {
             );
             return;
         }
-        // Funcs and their enum types register in either order, so the
-        // membership gate runs from both directions: `add` checks against
-        // types already present, and a fresh enum entry re-checks the funcs
-        // already added.
-        //
-        // **Before the insert**, so a refused entry never reaches `types`.
-        // Nothing is in the map yet, so the check resolves `type_id` from
-        // `entry` directly; every *other* enum a func declares was already
-        // gated when that type registered.
+        // Funcs and their enum types register in either order, so the membership gate runs from
+        // both directions: `add` checks against types already present, and a fresh enum entry
+        // re-checks the funcs already added. Before the insert, so a refused entry never reaches
+        // `types`; the check resolves `type_id` from `entry` directly.
         match entry.variants() {
             Some(variants) =>
             {
@@ -116,11 +105,9 @@ impl Library {
                     });
                 }
             }
-            // The other half of the same gate. `enum_variants` answers
-            // `None` for "not registered yet" *and* for "registered as a
-            // custom type", and deferred registration makes the first one
-            // legitimate — so `add` cannot refuse a func that declares this
-            // id as an enum, and the custom registration has to.
+            // `enum_variants` answers `None` for "not registered yet" *and* "registered as a
+            // custom type", and deferred registration makes the first legitimate, so `add`
+            // cannot refuse a func that declares this id as an enum; this registration has to.
             None =>
             {
                 #[expect(
@@ -153,25 +140,22 @@ impl Library {
         self.types.iter()
     }
 
-    /// Whether `type_id` is registered as a **custom** type — the state
-    /// [`Self::enum_variants`] cannot tell apart from "not registered at
-    /// all", since it answers `None` to both.
+    /// Whether `type_id` is registered as a **custom** type, which [`Self::enum_variants`]
+    /// cannot tell from "not registered at all".
     fn is_registered_custom(&self, type_id: TypeId) -> bool {
         self.types
             .get(&type_id)
             .is_some_and(|entry| entry.variants().is_none())
     }
 
-    /// The variant names of a registered `Enum` type — for the editor's enum
-    /// picker and the const type-check. `None` if `type_id` is unregistered or
+    /// The variant names of a registered `Enum` type; `None` if `type_id` is unregistered or
     /// names a non-enum type.
     pub fn enum_variants(&self, type_id: TypeId) -> Option<&[String]> {
         self.types.get(&type_id)?.variants()
     }
 
-    /// A short human-readable name for `ty`: the scalar keyword, `"path"`, or a
-    /// registered `Custom`/`Enum` type's display name (its raw id if the type
-    /// isn't registered in this process).
+    /// A short human-readable name for `ty`: the scalar keyword, `"path"`, or a registered
+    /// `Custom`/`Enum` type's display name (its raw id if unregistered).
     pub fn type_name(&self, ty: &DataType) -> Cow<'_, str> {
         match ty {
             DataType::Any => Cow::Borrowed("any"),
@@ -207,14 +191,10 @@ impl Library {
         }
     }
 
-    /// Whether an authored `Const` literal `value` may sit on `input` — the
-    /// `Const` half of [`Graph::admit`](crate::Graph::admit) (the `Wire` half
-    /// is [`DataType::compatible_with`]).
-    ///
-    /// The registry's whole contribution is the enum arm: a literal is a
-    /// variant *name*, and only this map says which names a type declares.
-    /// Everything else is [`FuncInput::accepts_const`], the one table both
-    /// gates read.
+    /// Whether an authored `Const` literal `value` may sit on `input`: the `Const` half of
+    /// [`Graph::admit`](crate::Graph::admit) (the `Wire` half is
+    /// [`DataType::compatible_with`]). The registry contributes only the enum arm, a variant
+    /// *name*; the rest is [`FuncInput::accepts_const`].
     pub(crate) fn const_satisfies(&self, input: &FuncInput, value: &ConstValue) -> bool {
         input.accepts_const(value, Strictness::Authored, |type_id, name| {
             self.enum_variants(type_id)
@@ -241,15 +221,12 @@ fn declared_enum_types(func: &Func) -> impl Iterator<Item = TypeId> + '_ {
     inputs.chain(outputs)
 }
 
-/// Panic when `func` declares an `Enum` default whose name isn't among
-/// its type's registered variants. Variant-kind and picker-membership
-/// checks already ran in `FuncBuilder::build`; this closes the half that
-/// needs the registry. A default on a type `variants_of` doesn't
-/// resolve passes — `register_type` re-checks when the entry arrives.
+/// Panic when `func` declares an `Enum` default whose name isn't among its type's registered
+/// variants: the half of `FuncBuilder::build`'s checks that needs the registry. A default on a
+/// type `variants_of` doesn't resolve passes; `register_type` re-checks when the entry arrives.
 ///
-/// Variants arrive through `variants_of` rather than off `&self`
-/// because [`Library::register_type`] has to run this *before* its entry
-/// is installed, so the type under test isn't in the map yet.
+/// Variants arrive through `variants_of` rather than `&self` because [`Library::register_type`]
+/// runs this *before* its entry is installed.
 fn assert_enum_defaults<'a>(func: &Func, variants_of: impl Fn(TypeId) -> Option<&'a [String]>) {
     for input in func.inputs() {
         if !input.value_variants.is_empty() {
@@ -288,8 +265,7 @@ pub(crate) mod internals {
     use crate::library::Library;
 
     impl Library {
-        /// Take a func declaration out, for a fixture that edits one and adds
-        /// it back.
+        /// Take a func declaration out, for a fixture that edits it and adds it back.
         pub(crate) fn remove(&mut self, id: FuncId) -> Option<Func> {
             self.funcs.remove(&id)
         }

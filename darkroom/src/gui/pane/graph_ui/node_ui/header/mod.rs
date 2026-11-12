@@ -1,9 +1,7 @@
-//! Node header: the title and the node's controls, in one row. Which controls —
-//! run, the kind mark, disable, the cache menu and inspect — and
-//! what each one does is this module's business; how one *looks* belongs to
-//! [`IconButton`]. Drawn as the first child of each node body by
-//! [`crate::gui::pane::graph_ui::node_ui::NodeUi`], over a 1 px rule that
-//! divides it from the ports.
+//! Node header: the title and the node's controls (run, the kind mark, disable, the cache menu
+//! and inspect), in one row. What each does is this module's business; how one looks belongs
+//! to [`IconButton`]. Drawn as the first child of each node body by
+//! [`crate::gui::pane::graph_ui::node_ui::NodeUi`], over a rule that divides it from the ports.
 
 use std::collections::BTreeSet;
 use std::f32::consts::FRAC_PI_4;
@@ -41,20 +39,16 @@ const NODE_NAME_MAX_CHARS: usize = 32;
 /// editor does not collapse to a caret when the draft is emptied.
 const NODE_NAME_MIN_WIDTH: f32 = 40.0;
 
-/// One whole-node event-subscription pin: an event-colored triangle behind
-/// the node's top-left corner, its apex pointing up-left toward the
-/// incoming wire. Recorded by `NodeUi::draw_node` immediately *before* its
-/// node's body, so it peeks out from behind the corner while keeping the
-/// node stack's paint order (above lower nodes, below raised ones) and the
-/// cull decision. The `port_glyph::HIT_SCALE`-grown box is centered on the corner
-/// (world coords) while the triangle paints port-sized — the same
-/// generous-hit-box treatment the port circles get. It's both a drop
-/// target for an emitter's event wire *and* a drag source — pulling from
-/// the *protruding* half starts a subscription wire aimed at an emitter
-/// (see `SubscriptionUi`); the body-covered half yields presses to the
-/// node (the body records after, so it hit-tests on top), while
-/// drop-snapping (rect-based) still accepts the whole box. `hover` (over
-/// while a drag snaps to it) tints the triangle as drop feedback.
+/// One whole-node event-subscription pin: an event-colored triangle behind the node's top-left
+/// corner, its apex pointing up-left toward the incoming wire. Recorded by
+/// `NodeUi::draw_node` immediately before its node's body, so it peeks out from behind the
+/// corner while keeping the node stack's paint order and the cull decision. The
+/// `port_glyph::HIT_SCALE`-grown box is centered on the corner (world coords) while the
+/// triangle paints port-sized, the generous hit box the port circles get. It is both a drop
+/// target for an emitter's event wire and a drag source: pulling from the protruding half
+/// starts a subscription wire aimed at an emitter (see `SubscriptionUi`); the body-covered
+/// half yields presses to the node, while drop-snapping (rect-based) accepts the whole box.
+/// `hover` tints the triangle as drop feedback.
 pub(super) fn subscription_pin(
     ui: &mut Ui,
     node: NodeCtx<'_>,
@@ -80,10 +74,9 @@ pub(super) fn subscription_pin(
     .show(ui, theme);
 }
 
-/// The header row: the run button, the title and its kind mark, then — pinned to the right edge
-/// by a `FILL` spacer — the disable button, the cache button and the inspect button. The sink
-/// nodes' event-subscription pin is *not* drawn here — it records at canvas level, before the
-/// node bodies, so it peeks out from behind the node's corner.
+/// The header row: the run button, the title and its kind mark, then, pinned to the right edge
+/// by a `FILL` spacer, the disable button, the cache button and the inspect button. The
+/// subscription pin is not drawn here: it records before the node bodies.
 pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     let (theme, node) = (record.node.theme(), record.node);
     Panel::hstack()

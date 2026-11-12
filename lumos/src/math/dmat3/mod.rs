@@ -5,34 +5,19 @@ use std::ops::Index;
 
 use glam::DVec2;
 
-/// Row-major 3x3 matrix of f64 values.
-///
-/// Memory layout:
-/// ```text
-/// | m[0] m[1] m[2] |
-/// | m[3] m[4] m[5] |
-/// | m[6] m[7] m[8] |
-/// ```
-///
-/// For 2D homogeneous transforms this maps to:
-/// ```text
-/// | a  b  tx |
-/// | c  d  ty |
-/// | g  h  1  |
-/// ```
+/// Row-major 3x3 matrix of f64 values; as a 2D homogeneous transform its rows are
+/// `a b tx`, `c d ty`, `g h 1`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct DMat3 {
     data: [f64; 9],
 }
 
 impl DMat3 {
-    /// Create from a raw array in row-major order.
     #[inline]
     pub(crate) const fn from_array(data: [f64; 9]) -> Self {
         Self { data }
     }
 
-    /// Create the 3x3 identity matrix.
     #[inline]
     pub(crate) const fn identity() -> Self {
         Self {
@@ -40,7 +25,6 @@ impl DMat3 {
         }
     }
 
-    /// Reference to the underlying row-major array.
     #[inline]
     pub(crate) const fn as_array(&self) -> &[f64; 9] {
         &self.data
@@ -66,7 +50,6 @@ impl DMat3 {
         }
     }
 
-    /// Compute the determinant.
     #[inline]
     pub(crate) const fn determinant(&self) -> f64 {
         let d = &self.data;
@@ -120,14 +103,8 @@ impl DMat3 {
         w > f64::EPSILON
     }
 
-    /// Apply this matrix as a 2D homogeneous transform to a point.
-    ///
-    /// Computes `(x', y')` where:
-    /// ```text
-    /// w  = m[6]*x + m[7]*y + m[8]
-    /// x' = (m[0]*x + m[1]*y + m[2]) / w
-    /// y' = (m[3]*x + m[4]*y + m[5]) / w
-    /// ```
+    /// Apply this matrix as a 2D homogeneous transform to a point, dividing by its
+    /// [`weight_at`](Self::weight_at).
     ///
     /// A point on a homography's horizon or past it ([`Self::maps_forward`] false) maps to
     /// infinity rather than panicking, so a warp treats it as out-of-bounds (→ border) instead of

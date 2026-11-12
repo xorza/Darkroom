@@ -1,8 +1,6 @@
-//! Format conversion — change an [`InterleavedImage`]'s pixel *format* (element
-//! type `u8`/`u16`/`f32` and/or channel count mono/RGB/RGBA), e.g. `RGB_U8` →
-//! `RGBA_F32`. [`convert_image`] is the single entry point: it processes rows in
-//! parallel through a vector kernel when the pair has one ([`VectorConversion`]), else
-//! the scalar reference ([`scalar`]).
+//! Format conversion: an [`InterleavedImage`]'s sample type and channel count, rows in parallel
+//! through a vector kernel when the pair has one ([`VectorConversion`]), else the scalar
+//! reference ([`scalar`]).
 
 pub(crate) mod channels;
 pub(crate) mod elements;

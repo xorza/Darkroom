@@ -1,7 +1,5 @@
-//! The runtime services behind the editor: the function library and the
-//! evaluation worker. `App` owns one and adds the frontend orchestration on
-//! top, so worker construction and the drain/run primitives live here rather
-//! than in the shell.
+//! The runtime services behind the editor: the function library and the evaluation worker. `App`
+//! owns one and adds the frontend orchestration on top.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -29,46 +27,37 @@ pub(crate) struct RuntimeHost {
     /// repeated [`set_document_cache`](Self::set_document_cache) can tell
     /// whether the root changed.
     disk_root: Option<DiskRoot>,
-    /// Whether the last compiled program holds a disk-backed (`Disk`/`Both`)
-    /// node — the one kind whose values reach the store.
+    /// Whether the last compiled program holds a disk-backed (`Disk`/`Both`) node, the one kind
+    /// whose values reach the store.
     disk_backed: bool,
-    /// Long-lived so the lowering scratch is reused across compiles instead of
-    /// reallocated per run.
+    /// Long-lived so the lowering scratch is reused across compiles.
     compiler: Compiler,
 }
 
-/// A disk-store root, and whether it was created with its `.gitignore`: done
-/// once per root, and only when a blob can land there. A new root starts
-/// unprepared, so no root change can skip it.
+/// A disk-store root, and whether it was created with its `.gitignore`: done once per root, and
+/// only when a blob can land there. A new root starts unprepared, so no change can skip it.
 #[derive(Debug)]
 struct DiskRoot {
     path: PathBuf,
     prepared: bool,
 }
 
-/// What a [`RuntimeHost::set_document_cache`] call did to the disk-store root,
-/// and therefore what the worker has to be told.
-///
-/// Named rather than inlined because the interesting part is which transitions
-/// *don't* act. The worker cannot decide this for itself: a store is replaced
-/// for several unrelated reasons, and only the host knows whether the document
-/// kept its identity across one.
+/// What a [`RuntimeHost::set_document_cache`] call did to the disk-store root, and therefore
+/// what the worker has to be told. The worker cannot decide this itself: a store is replaced for
+/// several reasons, and only the host knows whether the document kept its identity across one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CacheRootChange {
-    /// The same root: the store this would build is the one already installed.
-    /// A plain re-save lands here, and rebuilding would cost a header read per
-    /// resident disk-backed node for nothing.
+    /// The same root: the store this would build is the one already installed. A plain re-save
+    /// lands here, and rebuilding would cost a header read per resident disk-backed node.
     Unchanged,
-    /// A different root, or none at all — a document opened, closed, or saved
-    /// somewhere else. The worker takes the new store and writes nothing into
-    /// it: each location keeps its own store and refills lazily, per
-    /// [`cache::root`].
+    /// A different root, or none at all: a document opened, closed, or saved somewhere else. The
+    /// worker takes the new store and writes nothing into it: each location keeps its own store
+    /// and refills lazily, per [`cache::root`].
     Repointed,
-    /// A document that had nowhere to persist gained a root — the first save of
-    /// an unsaved document. **The one transition that owes a flush**: its
-    /// `Both`-mode values were computed memory-only, and a RAM hit never
-    /// stores, so without one they would be served from RAM for the rest of the
-    /// session and silently recompute on reopen.
+    /// A document that had nowhere to persist gained a root: the first save of an unsaved
+    /// document. **The one transition that owes a flush**: its `Both`-mode values were computed
+    /// memory-only, and a RAM hit never stores, so without one they would be served from RAM for
+    /// the session and silently recompute on reopen.
     Gained,
 }
 
@@ -95,8 +84,7 @@ impl RuntimeHost {
             disk_backed: false,
             compiler: Compiler::default(),
         };
-        // Install the store up front (memory-only until a document has a
-        // path); `set_document_cache` repoints the root as documents open.
+        // Memory-only until a document has a path; `set_document_cache` repoints the root.
         host.sync_worker_disk_store();
         host
     }
@@ -121,28 +109,23 @@ impl RuntimeHost {
         Arc::new(compiled)
     }
 
-    /// Drop the worker's installed program and the whole runtime cache behind
-    /// it — what a document swap owes, since nothing the outgoing document
-    /// computed can serve the incoming one, and those values are the editor's
-    /// largest RAM tenant by far (decoded frames and GPU textures).
+    /// Drop the worker's installed program and the whole runtime cache behind it, as a document
+    /// swap owes: nothing the outgoing document computed can serve the incoming one, and those
+    /// values (decoded frames and GPU textures) are the editor's largest RAM tenant. Without it
+    /// they sit resident until the *next* install reconciles them away, so a File ▸ New taken to
+    /// free memory frees nothing.
     ///
-    /// Without it the old document's results sit resident until the *next*
-    /// install reconciles them away, which is whenever the user next runs
-    /// something — so a File ▸ New taken to free memory frees nothing.
-    ///
-    /// The disk store is untouched: it is repointed separately by
-    /// [`Self::set_document_cache`], and the blobs the old document wrote stay
-    /// where they are for when it is reopened.
+    /// The disk store is untouched: [`Self::set_document_cache`] repoints it, and the blobs the
+    /// old document wrote stay for when it is reopened.
     pub(crate) fn clear_program(&mut self) {
         self.disk_backed = false;
         self.dispatch(WorkerBridge::clear);
     }
 
-    /// Create the disk root, with its `.gitignore`, before the first blob can
-    /// land there: once per root, and only while the program holds a
-    /// disk-backed node. A failure is logged and tried again at the next
-    /// chance: the cache still works, as blob writes make the folder, but the
-    /// folder would show in version control.
+    /// Create the disk root, with its `.gitignore`, before the first blob can land there: once
+    /// per root, and only while the program holds a disk-backed node. A failure is logged and
+    /// retried: the cache still works, as blob writes make the folder, but it would show in
+    /// version control.
     fn prepare_root(&mut self) {
         if !self.disk_backed {
             return;
@@ -160,13 +143,12 @@ impl RuntimeHost {
         }
     }
 
-    /// Point the disk cache at `document_path`'s project-local store (`<stem>.<extension>-cache/` beside
-    /// the file), so disk-backed (`Disk`/`Both`) nodes reload across sessions. `None` (an unsaved
-    /// document) is memory-only. Explicit-path cache nodes are unaffected — they always use their
-    /// own path.
+    /// Point the disk cache at `document_path`'s project-local store (`<stem>.<extension>-cache/`
+    /// beside the file), so disk-backed (`Disk`/`Both`) nodes reload across sessions. `None` (an
+    /// unsaved document) is memory-only. Explicit-path cache nodes are unaffected: they always use
+    /// their own path.
     ///
-    /// What the worker is told is [`CacheRootChange`]'s to decide — see there
-    /// for why only one of the transitions owes a flush.
+    /// What the worker is told is [`CacheRootChange`]'s to decide.
     pub(crate) fn set_document_cache(&mut self, document_path: Option<&Path>) {
         let cur = document_path.map(cache::root);
         let change = CacheRootChange::of(
@@ -184,11 +166,9 @@ impl RuntimeHost {
         // change, a run in flight or an event loop, writes into the new root
         // at once, as the flush below does.
         self.prepare_root();
-        // The attach leads the flush, and the two are not interchangeable. They
-        // usually reduce into one batch, where the worker's apply order decides
-        // and this order is moot — but the worker can wake between the sends
-        // and split them, and then the sweep would land in the batch *before*
-        // the store it is for, writing into the root being left behind.
+        // The attach must lead the flush: usually both reduce into one batch, where the worker's
+        // apply order decides, but the worker can wake between the sends and split them, and then
+        // the flush would land before the store it is for, writing into the root being left.
         self.sync_worker_disk_store();
         if change == CacheRootChange::Gained {
             self.dispatch(WorkerBridge::flush_all_caches);
@@ -239,17 +219,14 @@ impl RuntimeHost {
         }
     }
 
-    /// Compile the current graph and atomically install it with a runtime-cache
-    /// eviction for `node_id` and its compiled downstream cone.
+    /// Compile the current graph and atomically install it with a runtime-cache eviction for
+    /// `node_id` and its compiled downstream cone.
     ///
-    /// Answers with the nodes that eviction reaches, resolved against the very
-    /// artifact it installs — so a caller projecting the outcome drops exactly
-    /// what the worker drops. Nothing reaches the worker when the program
-    /// holds no work for `node_id`, as for [`Self::run_node`].
-    ///
-    /// Asking here rather than reading a reply: a successful eviction is
-    /// fire-and-forget (the worker reports only failures), and the cone is a
-    /// pure function of the artifact, so the answer is already in hand.
+    /// Answers with the nodes that eviction reaches, resolved against the very artifact it
+    /// installs, so a caller drops exactly what the worker drops. The cone is a pure function of
+    /// the artifact, and a successful eviction is fire-and-forget (the worker reports only
+    /// failures), so no reply is read. Nothing reaches the worker when the program holds no work
+    /// for `node_id`, as for [`Self::run_node`].
     pub(crate) fn evict_cache(
         &mut self,
         graph: &Graph,
@@ -261,14 +238,13 @@ impl RuntimeHost {
         Ok(evicted)
     }
 
-    /// Compile the current graph and atomically install it with a request to
-    /// persist `node_id`'s resident value — what a node needs the moment its
-    /// cache mode gains the disk bit, since a run that reuses the RAM value
-    /// never publishes a blob of its own.
+    /// Compile the current graph and atomically install it with a request to persist `node_id`'s
+    /// resident value, which a node needs the moment its cache mode gains the disk bit, since a
+    /// run that reuses the RAM value never publishes a blob.
     ///
-    /// The install has to travel with it: the worker reads the node's cache mode
-    /// off the installed program, which is still the pre-edit one here. Nothing
-    /// reaches the worker when the program holds no work for `node_id`.
+    /// The install travels with it because the worker reads the cache mode off the installed
+    /// program, still the pre-edit one here. Nothing reaches the worker when the program holds no
+    /// work for `node_id`.
     pub(crate) fn flush_cache(
         &mut self,
         graph: &Graph,
@@ -279,14 +255,13 @@ impl RuntimeHost {
         Ok(())
     }
 
-    /// Request cancellation of the in-flight run (coarse — the running node
-    /// finishes, nothing further is scheduled).
+    /// Request cancellation of the in-flight run: coarse, the running node finishes and nothing
+    /// further is scheduled.
     pub(crate) fn cancel_run(&self) {
         self.worker.cancel_run();
     }
 
-    /// Start the event loop on `graph` (compiles + loads it, then fires
-    /// events). The worker's `Update` tears down any prior loop first.
+    /// Start the event loop on `graph`. The worker's `Update` tears down any prior loop first.
     pub(crate) fn start_event_loop(&mut self, graph: &Graph) {
         let compiled = self.compile(graph);
         self.dispatch(|worker| {
@@ -302,13 +277,10 @@ impl RuntimeHost {
 
     /// Send a batch of worker commands.
     ///
-    /// A send only fails once the worker task is gone, and the host owns
-    /// that task for the whole session — it is stopped exactly once, in
-    /// [`WorkerBridge`]'s `Drop`. Reaching here therefore means the worker
-    /// panicked: a broken invariant, not a condition to report and carry
-    /// on from. Nothing can compute afterwards and no report will ever
-    /// arrive, so the honest response is to fail loudly rather than leave
-    /// the editor alive and inert.
+    /// A send only fails once the worker task is gone, and the host owns that task for the whole
+    /// session, stopping it once in [`WorkerBridge`]'s `Drop`. A failure therefore means the
+    /// worker panicked: nothing can compute afterwards and no report will arrive, so it fails
+    /// loudly rather than leave the editor alive and inert.
     fn dispatch(&self, commands: impl FnOnce(&WorkerBridge) -> Result<(), WorkerExited>) {
         if let Err(error) = commands(&self.worker) {
             let error = ErrorChain::new(&error);
@@ -317,20 +289,19 @@ impl RuntimeHost {
         }
     }
 
-    /// Swap the worker results posted since the last frame into `reports`,
-    /// which is empty; the runs that ended in a result a later one superseded
+    /// Swap the worker results posted since the last frame into `reports`, which is empty; the
+    /// returned count is of runs that ended in a result a later one superseded
     /// ([`WorkerBridge::drain`]).
     pub(crate) fn drain_worker(&self, reports: &mut VecDeque<WorkerReport>) -> u64 {
         self.worker.drain(reports)
     }
 
-    /// Non-blocking drain of every preview value the worker's lambdas published
-    /// since the last frame. Empty on an idle frame.
+    /// Non-blocking drain of every preview value the worker's lambdas published since the last
+    /// frame.
     ///
-    /// Separate from [`Self::drain_worker`] because it does not travel the
-    /// report stream: a preview node's lambda writes it directly. Ordering
-    /// against the reports does not matter — a value is only ever the *latest*
-    /// for its node, never a step in a sequence.
+    /// Separate from [`Self::drain_worker`] because it does not travel the report stream: a
+    /// preview node's lambda writes it directly. Ordering against the reports does not matter, as
+    /// a value is only ever the *latest* for its node.
     pub(crate) fn drain_previews(&self, buffer: &mut HashMap<NodeId, DynamicValue>) {
         self.library.previews.drain_into(buffer);
     }

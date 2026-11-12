@@ -1,6 +1,6 @@
-//! [`ExecEngine`] owns the run-side pieces (program, the run schedule, planner,
-//! the cross-run cache, and executor) and exposes `install` (phase 1's artifact)
-//! and `execute` (phases 2–3, run back-to-back).
+//! [`ExecEngine`] owns the run-side pieces (program, run schedule, planner, cross-run cache, and
+//! executor) and exposes `install` (phase 1's artifact) and `execute` (phases 2–3, run
+//! back-to-back).
 
 mod error;
 
@@ -25,13 +25,12 @@ use crate::exec::schedule::planner::Planner;
 use crate::exec::seeds::RunSeeds;
 use crate::graph::identity::NodeId;
 
-/// The run-side pipeline container. Shares the installed program and its execution-attribution map,
-/// the reusable `schedule` buffer, the `planner` (scheduling scratch), the cross-run `cache`
-/// (per-node outputs, plus its owned [`DiskStore`] file persistence and the caching
-/// policy), and the `executor` (run loop + context + each node's lambda state).
-/// Compilation happens on the host ([`Compiler`](crate::exec::compile::Compiler)); the
-/// engine only ever receives ready [`CompiledGraph`]s. Not serializable — the persistent form
-/// is the [`CompiledGraph`] alone.
+/// The run-side pipeline container: the installed program, the reusable `schedule` buffer, the
+/// `planner` (scheduling scratch), the cross-run `cache` (per-node outputs, plus its owned
+/// [`DiskStore`] and the caching policy), and the `executor` (run loop + context + each node's
+/// lambda state). Compilation happens on the host ([`Compiler`](crate::exec::compile::Compiler));
+/// the engine only receives ready [`CompiledGraph`]s. Not serializable — the persistent form is
+/// the [`CompiledGraph`] alone.
 #[derive(Debug, Default)]
 pub(crate) struct ExecEngine {
     /// The installed immutable artifact — the empty program until the first
@@ -39,21 +38,16 @@ pub(crate) struct ExecEngine {
     /// move the cache slots and the executor's lambda state with it, so the
     /// three never move independently.
     compiled: Arc<CompiledGraph>,
-    /// The cross-run cache, its slots index-aligned to `compiled`'s dense node
-    /// space. The cache holds no artifact handle of its own — a program reaches
-    /// its methods as an argument, from whoever is reading the pair — so "the
-    /// slots and the program are the same install" is established by
-    /// [`Self::install`] being the one place the two ever move, rather than
-    /// asserted afterwards by comparing two handles. [`Self::validate`] states
-    /// the invariants of the pair.
+    /// The cross-run cache, its slots index-aligned to `compiled`'s dense node space. It holds no
+    /// artifact handle of its own — a program reaches its methods as an argument — so "the slots
+    /// and the program are the same install" is established by [`Self::install`] being the one
+    /// place the two move. [`Self::validate`] states the invariants of the pair.
     cache: RuntimeCache,
-    /// The run loop, and each node's lambda state, aligned to `compiled` the
-    /// same way the cache slots are.
+    /// The run loop, and each node's lambda state, aligned to `compiled` like the cache slots.
     executor: Executor,
     planner: Planner,
-    /// The one per-run state buffer: the schedule the planner builds and the
-    /// dispositions, demand, and reader counts the cache-aware sweep refines it into.
-    /// Recycled across runs to avoid reallocation.
+    /// The one per-run state buffer: the schedule the planner builds and the dispositions, demand,
+    /// and reader counts the cache-aware sweep refines it into. Recycled across runs.
     schedule: RunSchedule,
 }
 
@@ -75,26 +69,20 @@ impl ExecEngine {
         self.compiled.e_nodes.is_empty()
     }
 
-    /// Install the empty program and drop every slot. The schedule keeps its
-    /// buffers: the next run plans into them from scratch.
+    /// Install the empty program and drop every slot. The schedule keeps its buffers.
     pub(crate) fn clear(&mut self) {
         self.compiled = Arc::default();
         self.cache.clear();
         self.executor.clear();
     }
 
-    /// Install a host-compiled [`CompiledGraph`] as the current program, replacing the
-    /// immutable artifact and reconciling the cache slots and the lambda state onto its
-    /// dense node space as one operation. Infallible: everything that can go wrong went
-    /// wrong at compile ([`Compiler`](crate::exec::compile::Compiler)), on the host's
-    /// thread.
+    /// Install a host-compiled [`CompiledGraph`] as the current program, replacing the artifact and
+    /// reconciling the cache slots and the lambda state onto its dense node space as one
+    /// operation. Infallible: everything that can go wrong went wrong at compile
+    /// ([`Compiler`](crate::exec::compile::Compiler)), on the host's thread.
     ///
-    /// Both programs are in hand here — the one the columns currently belong to and the
-    /// one they are moving onto — which is why each `reconcile` is told the outgoing one
-    /// rather than remembering it.
-    ///
-    /// The schedule isn't cleared here: every `execute` re-`plan`s from scratch and nothing
-    /// reads the reusable buffer between an install and the next run.
+    /// Each `reconcile` is told the outgoing program rather than remembering it, since both are in
+    /// hand here. The schedule isn't cleared: every `execute` re-`plan`s from scratch.
     pub(crate) fn install(&mut self, compiled: Arc<CompiledGraph>) {
         self.cache.reconcile(&self.compiled, &compiled);
         self.executor.reconcile(&self.compiled, &compiled);
@@ -102,13 +90,10 @@ impl ExecEngine {
         self.validate_debug();
     }
 
-    /// What the runtime cache's resident values hold right now — the same
-    /// measurement a completed run publishes, taken outside one.
-    ///
-    /// The worker reads it after an install, which is the other moment the
-    /// resident set changes size: reconciling onto a program that dropped
-    /// nodes frees their values, and a host told only by runs would keep
-    /// reporting the previous total until another run measured it.
+    /// What the runtime cache's resident values hold right now — the same measurement a completed
+    /// run publishes, taken outside one. The worker reads it after an install, since reconciling
+    /// onto a program that dropped nodes frees their values and a host told only by runs would
+    /// keep reporting the previous total.
     pub(crate) fn resident_cache_ram(&mut self) -> RamUsage {
         self.cache.measure_resident_ram()
     }
@@ -140,9 +125,9 @@ impl ExecEngine {
         // reachability + topological order + missing-input verdicts + walk roots, no
         // cache/digest state. Node seeds already identify exact compiled roots.
         //
-        // This function is the one place the three passes below run, and they must run
-        // in this order over the one buffer; each asserts `RunSchedule::validate` in
-        // debug, which is what catches a schedule spanning some other program.
+        // This function is the one place the three passes below run, and they must run in this
+        // order over the one buffer; each asserts `RunSchedule::validate` in debug, which catches
+        // a schedule spanning some other program.
         let compiled: &CompiledGraph = &self.compiled;
         self.planner.plan(compiled, seeds, &mut self.schedule)?;
 
@@ -153,13 +138,13 @@ impl ExecEngine {
             .await;
 
         // Phase 2b: cache-aware refinement, into the same buffer. Stamp digests, then derive
-        // disposition, exact output demand, and live readers together. The resolved run is
-        // authoritative: a cache-hit or blocked consumer contributes no upstream demand.
+        // disposition, exact output demand, and live readers together. A cache-hit or blocked
+        // consumer contributes no upstream demand.
         resolve::sweep(compiled, &mut self.schedule, &mut self.cache).await;
 
         // Phase 3: run the surviving schedule. Each node's disk cache is written the moment it
-        // finishes (inside the run loop), not batched here — so a long run's earlier
-        // caches are durable even if a later node fails or the run is cancelled.
+        // finishes (inside the run loop), so earlier caches are durable even if a later node fails
+        // or the run is cancelled.
         self.executor
             .run(
                 RunRequest {
@@ -175,13 +160,12 @@ impl ExecEngine {
 
         self.cache.release_dead_outputs(compiled);
 
-        // The resident set is now final (post-eviction), so this is the true
-        // cache footprint the run leaves behind — total here, per-node left on
-        // the cache for the reduction below.
+        // The resident set is now final (post-eviction): the true footprint the run leaves behind,
+        // total here, per-node left on the cache for the reduction below.
         outcome.cache_ram = self.cache.measure_resident_ram();
 
-        // Phase 4: reduce the run to one status row per node. Last, because a node's row
-        // carries the RAM it ended up holding — which the two steps above just settled.
+        // Phase 4: reduce the run to one status row per node. Last, because a node's row carries
+        // the RAM the steps above settled.
         self.executor.collect_outcome(
             CollectRequest {
                 program: compiled,
@@ -194,12 +178,11 @@ impl ExecEngine {
         Ok(())
     }
 
-    /// Persist these nodes' resident **disk-backed** (`persists_to_disk`, i.e.
-    /// `Disk`/`Both`) values now — [`evict_cache`](Self::evict_cache)'s
-    /// counterpart, for a host that just turned a node's disk bit on while its
-    /// value was already in RAM. Without it that value reaches disk only when
-    /// the node next *recomputes*: a run that resolves to a RAM reuse never
-    /// publishes a blob.
+    /// Persist these nodes' resident **disk-backed** values now —
+    /// [`evict_cache`](Self::evict_cache)'s
+    /// counterpart, for a host that just turned a node's disk bit on while its value was already
+    /// in RAM. Without it that value reaches disk only when the node next *recomputes*: a run that
+    /// resolves to a RAM reuse never publishes a blob.
     ///
     /// A node absent from the installed program, not disk-backed, or holding
     /// nothing current is skipped, and reported as nothing.
@@ -210,9 +193,8 @@ impl ExecEngine {
         self.cache.flush(&self.compiled, node_ids).await
     }
 
-    /// [`flush_cache`](Self::flush_cache) over every installed node, for when the
-    /// worker attaches a new [`DiskStore`]. This makes values computed while the
-    /// store was memory-only durable once a document receives a cache root.
+    /// [`flush_cache`](Self::flush_cache) over every installed node, for when the worker attaches
+    /// a new [`DiskStore`]: values computed while the store was memory-only become durable.
     pub(crate) async fn flush_all_caches(&mut self) -> CacheFlushReport {
         self.cache.flush_all(&self.compiled).await
     }
@@ -285,16 +267,14 @@ pub(crate) mod internals {
 
     /// Test-only inspection of the last plan's per-run flags and runtime slots.
     impl ExecEngine {
-        /// The installed artifact itself, for test-only introspection.
-        /// Production reaches the artifact and its cache through the methods
-        /// above, which is what keeps the two moving together.
+        /// The installed artifact itself; production reaches it and its cache through the methods
+        /// above, which keeps the two moving together.
         pub(crate) fn compiled(&self) -> &CompiledGraph {
             &self.compiled
         }
 
-        /// Compile + install in one step — the shape the in-tree tests are
-        /// written against. Production compiles on the host (a long-lived
-        /// [`compile::Compiler`]) and sends the artifact to the worker.
+        /// Compile + install in one step — the shape the in-tree tests are written against.
+        /// Production compiles on the host and sends the artifact to the worker.
         pub(crate) fn update(&mut self, graph: &Graph, library: &Library) {
             self.install(compile::Compiler::default().compile(graph, library).into());
         }
@@ -307,17 +287,15 @@ pub(crate) mod internals {
             Ok(())
         }
 
-        /// Where a stable id sits in the installed program — the one lookup the
-        /// introspection below shares, so a test naming a node the install does
-        /// not hold fails here rather than indexing something else.
+        /// Where a stable id sits in the installed program — the one lookup the introspection
+        /// below shares, so a test naming a node the install does not hold fails here.
         fn node_idx(&self, node_id: NodeId) -> NodeIdx {
             self.compiled()
                 .node(node_id)
                 .expect("introspection names a node of the installed program")
         }
 
-        /// The runnable nodes of the last plan, in the order the schedule
-        /// walks them — deps before consumers.
+        /// The runnable nodes of the last plan, in the order the schedule walks them.
         pub(crate) fn schedule_order(&self) -> Vec<NodeId> {
             self.schedule
                 .process_order
@@ -346,8 +324,8 @@ pub(crate) mod internals {
             &self.schedule.outputs.readers[self.compiled().by_id(node_id).outputs]
         }
 
-        /// Resident-only argument values, test inspection only: reads whatever is
-        /// in RAM, so a disk-only (not-yet-hydrated) node reads back empty.
+        /// Resident-only argument values, test inspection only: a disk-only (not-yet-hydrated)
+        /// node reads back empty.
         pub(crate) fn argument_values(&self, node_id: NodeId) -> Option<ArgumentValues> {
             let e_node = &self.compiled()[self.compiled().node(node_id)?];
 
@@ -376,8 +354,7 @@ pub(crate) mod internals {
             &self.cache[self.node_idx(node_id)]
         }
 
-        /// The attached store, for the tests that name a blob's path or corrupt
-        /// one behind the cache's back.
+        /// The attached store, for tests that name a blob's path or corrupt one.
         pub(crate) fn disk_store(&self) -> &DiskStore {
             self.cache.disk_store()
         }

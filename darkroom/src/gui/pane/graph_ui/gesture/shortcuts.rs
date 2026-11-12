@@ -2,10 +2,9 @@
 //! duplicate, and Delete/Backspace.
 //!
 //! Raised from [`GraphUi::input`](crate::gui::pane::graph_ui::GraphUi::input) beside the
-//! pointer gestures, because they are the same kind of thing — this frame's input turned into
-//! intents, drained before the record. Being reached from the canvas is also what scopes them: a
-//! chord names no pane of its own, so running only while a graph pane is up is what keeps Delete
-//! from removing nodes nobody is looking at.
+//! pointer gestures, as intents drained before the record. Being reached from the canvas also
+//! scopes them: a chord names no pane of its own, so running only while a graph pane is up
+//! keeps Delete from removing nodes nobody is looking at.
 
 use palantir::{Key, Ui};
 use scenarium::NodeId;
@@ -19,14 +18,14 @@ use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 
 /// Turn this frame's canvas chords into intents.
 ///
-/// Routed through the intent stack (not a direct document write) so they land in
-/// the undo history; the `is_noop` filter in `drain_requests` drops them when
-/// they'd change nothing. Each chord is read on its own, so chords pressed in one frame all act.
+/// Routed through the intent stack, not a direct document write, so they land in the undo
+/// history; the `is_noop` filter in `drain_requests` drops them when they'd change nothing.
+/// Each chord is read on its own, so chords pressed in one frame all act.
 /// The `Edit`-class ones stand down on their own while a text field holds focus, and Ctrl+0 /
 /// Ctrl+D are `Accel` so they keep firing mid-edit.
 ///
-/// Esc deselects only when the canvas `ctx` says nothing was in flight: only
-/// the canvas knows whether the Esc cancelled a gesture instead.
+/// Esc deselects only when the canvas `ctx` says nothing was in flight, as only the canvas
+/// knows whether the Esc cancelled a gesture instead.
 pub(crate) fn emit(ui: &mut Ui, stage: &mut Stage<'_, CanvasCtx<'_>>) {
     let ctx = stage.ctx;
     let graph_ctx = ctx.graph_ctx();
@@ -42,8 +41,8 @@ pub(crate) fn emit(ui: &mut Ui, stage: &mut Stage<'_, CanvasCtx<'_>>) {
     if reset_zoom && let Some(reset) = Framing::Reset.intent(ui, graph_ctx, ctx.geometry()) {
         out.push_graph(reset);
     }
-    // Ctrl+D drops wires from producers outside the selection; keeping them
-    // is the node menu's second Duplicate pick, which has a label to say so.
+    // Ctrl+D drops wires from producers outside the selection; keeping them is the node menu's
+    // second Duplicate pick.
     if duplicate {
         out.extend_graph(GraphIntent::duplicate(
             graph_ctx.document(),

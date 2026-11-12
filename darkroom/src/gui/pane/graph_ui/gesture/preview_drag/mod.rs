@@ -2,9 +2,9 @@
 //! port and drag it under the cursor in the same gesture.
 //!
 //! The one-gesture counterpart to the port menu's "Add preview"
-//! ([`crate::gui::pane::graph_ui::node_ui::port_row`]), which both build their intents through
-//! [`PreviewSpawn::intents`].
-//! Once the node exists this is an ordinary node drag, so the whole after-the-latch half is
+//! ([`crate::gui::pane::graph_ui::node_ui::port_row`]); both build their intents through
+//! [`PreviewSpawn::intents`]. Once the node exists this is an ordinary node drag, so the whole
+//! after-the-latch half is
 //! [`GroupDrag`](crate::gui::pane::graph_ui::gesture::group_drag::GroupDrag)'s.
 //!
 //! [`WireUi`](crate::gui::pane::graph_ui::gesture::wire_ui) drops the output column
@@ -33,12 +33,11 @@ pub(crate) const fn modifier_held(ui: &mut Ui) -> bool {
     ui.modifiers().contains(Modifiers::CTRL)
 }
 
-/// A Ctrl+drag that started on an output port this frame: the grab of the preview node it
-/// spawns, for the canvas's one group drag to latch, and the edits that spawn it, which join the
-/// drag's gesture so an Esc takes the spawn back with the drag: `darkroom/AGENTS.md`, "Undo", "A
-/// held gesture is one entry, and Esc takes it back whole".
-/// The preview a Ctrl+drag off an output port starts this frame, or `None`. Asked only while no
-/// drag is in flight: one pointer holds one drag.
+/// The preview a Ctrl+drag off an output port starts this frame, or `None`: the grab of the
+/// preview node it spawns, for the canvas's one group drag to latch, and the edits that spawn
+/// it, which join the drag's gesture so an Esc takes the spawn back with the drag
+/// (`darkroom/AGENTS.md`, "Undo", "A held gesture is one entry, and Esc takes it back whole").
+/// Asked only while no drag is in flight: one pointer holds one drag.
 pub(crate) fn start(ui: &mut Ui, ctx: CanvasCtx<'_>) -> Option<GrabStart> {
     let (graph_ctx, geometry) = (ctx.graph_ctx(), ctx.geometry());
     if !modifier_held(ui) {
@@ -50,17 +49,13 @@ pub(crate) fn start(ui: &mut Ui, ctx: CanvasCtx<'_>) -> Option<GrabStart> {
         return None;
     }
     let func = preview_sink::registered(graph_ctx.library())?;
-    // One lookup gating the whole spawn: a port that hasn't measured has no
-    // position to start from and no anchor to latch, so the node isn't
-    // created at all — the next frame's press (by which time it has
-    // measured) makes it properly, rather than stranding a card at the
-    // canvas origin with no drag holding it.
+    // One lookup gates the whole spawn: a port that hasn't measured has no position to start
+    // from, so no node is created, rather than stranding a card at the canvas origin.
     let center = geometry.ports.center(port)?;
     let node_id = NodeId::unique();
-    // A brand-new node is in no selection yet, so it drags alone. The
-    // anchor is the port circle — the widget that owns this press; the node
-    // itself has not been recorded yet and has no response to poll. Started
-    // *at* the port, so it visually grows out of the circle.
+    // A brand-new node is in no selection yet, so it drags alone. The anchor is the port circle,
+    // the widget that owns this press, as the node has no response to poll yet. Started at the
+    // port, so it grows out of the circle.
     Some(GrabStart {
         grab: Grab {
             item: ItemId::Node(node_id),
@@ -89,8 +84,8 @@ pub(crate) struct PreviewSpawn {
 }
 
 impl PreviewSpawn {
-    /// The two intents that spawn the preview `func` declares. Emitted
-    /// together so one undo removes node *and* wire.
+    /// The two intents that spawn the preview `func` declares, emitted together so one undo
+    /// removes node and wire.
     pub(crate) fn intents(self, func: &Func) -> [GraphIntent; 2] {
         let Self { port, pos, node_id } = self;
         [

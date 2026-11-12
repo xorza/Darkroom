@@ -7,12 +7,10 @@ use crate::gui::theme::palette::Palette;
 /// The app's semantic feedback palette: what an outcome *means*, not
 /// which surface reports it.
 ///
-/// Node execution is the largest consumer — `gui::pane::graph_ui::node_ui`
-/// maps an `ExecStatus` onto these — but it is not the only one, which is
-/// why these are not named for it. `error` is also the invalid-path
-/// outline in preferences, the status-bar message and `LogLevel::Error`.
-/// `warning` is `LogLevel::Warn` and an unconnected required port.
-/// `success` is the toolbar's run glyph.
+/// Node execution is the largest consumer, through `Theme::exec_ink`, but not the only one:
+/// `error` is also the invalid-path outline in preferences, the status-bar message and
+/// `LogLevel::Error`; `warning` is `LogLevel::Warn` and an unconnected required port; `success`
+/// is the toolbar's run glyph.
 #[derive(Clone, Debug)]
 pub(crate) struct StatusColors {
     /// It worked / it ran.

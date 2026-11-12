@@ -39,7 +39,7 @@ impl<'a> FrameChunk<'a> {
 
 /// The threads a chunk is read on, so a solid-state disk has more than one read in flight. Measured
 /// on `bench_spilled_mean_40`, cold, on an NVMe disk with 16 threads: 208 ms with 2, 194 with 4, 198
-/// with 8, against 235 for the faults of the maps this replaced.
+/// with 8, against 235 reading through the maps.
 const READERS: usize = 4;
 
 /// Every frame's planes over one chunk, copied out of their maps into buffers kept from chunk to

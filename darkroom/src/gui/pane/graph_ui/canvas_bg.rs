@@ -8,11 +8,9 @@ use crate::core::document::viewport::Viewport;
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::theme::Theme;
 
-/// Target on-screen dot spacing range, as a multiple of the theme's
-/// base spacing. A power-of-2 multiplier wraps the world spacing into
-/// `[base, 2·base]` px so the dot field stays a stable density instead
-/// of collapsing into noise (zoomed out) or drifting apart (zoomed in).
-/// `MAX = 2·MIN` keeps the valid-`k` interval exactly one wide, so an
+/// Target on-screen dot spacing range, as a multiple of the theme's base spacing. A
+/// power-of-2 multiplier wraps the world spacing into `[base, 2·base]` px so the dot field
+/// keeps a stable density. `MAX = 2·MIN` keeps the valid-`k` interval exactly one wide, so an
 /// integer always lands in it.
 const MIN_WRAP: f32 = 1.0;
 const MAX_WRAP: f32 = 2.0;
@@ -152,10 +150,9 @@ fn lattice_origin(pan: Vec2, pitch: f32) -> Vec2 {
     (-pan / pitch - 0.5).floor() * pitch + pan
 }
 
-/// Power-of-2 multiplier `m` such that `zoom · m` lands in
-/// `[MIN_WRAP, MAX_WRAP]` (so `spacing · zoom · m ∈ [spacing, 2·spacing]`
-/// px on screen). `min`/`max` on the bounds keep `clamp` panic-free even
-/// if rounding inverts them.
+/// Power-of-2 multiplier `m` such that `zoom · m` lands in `[MIN_WRAP, MAX_WRAP]`, so
+/// `spacing · zoom · m ∈ [spacing, 2·spacing]` px on screen. `min`/`max` on the bounds keep
+/// `clamp` panic-free even if rounding inverts them.
 fn wrap_multiplier(zoom: f32) -> f32 {
     let k_low = (MIN_WRAP / zoom).libm_log2().ceil() as i32;
     let k_high = (MAX_WRAP / zoom).libm_log2().floor() as i32;
@@ -261,10 +258,9 @@ mod tests {
         }));
     }
 
-    /// Both halves of the multiplier's contract, on one sweep: it is always a
-    /// power of two, so a zoom change lands on the same lattice rather
-    /// than sliding the grid under the nodes; and zoom·m lands in
-    /// `[MIN_WRAP, MAX_WRAP]`, so the on-screen pitch is spacing·[1, 2] px.
+    /// Both halves of the multiplier's contract, on one sweep: it is always a power of two, so
+    /// a zoom change lands on the same lattice; and zoom·m lands in `[MIN_WRAP, MAX_WRAP]`,
+    /// so the on-screen pitch is spacing·[1, 2] px.
     #[test]
     fn wrap_multiplier_is_a_power_of_two_holding_screen_spacing_in_band() {
         // m = 2^k with k the clamp of 0 into [ceil(log2(1 / zoom)), floor(log2(2 / zoom))]: a

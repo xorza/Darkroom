@@ -2,18 +2,15 @@
 //! [`Harness`], so a test can feed a real pointer event and assert on
 //! what the editor did with it.
 //!
-//! Two levels, one type. [`SessionHarness::apply`] / [`SessionHarness::drain`]
-//! reach the edit path directly and record nothing — enough for the tests
-//! about what an intent does to a document. [`SessionHarness::frame`] drives a
-//! real record pass, which is the only way to exercise what sits between a
-//! pointer event and an intent: hit-testing, response routing, pane scoping.
+//! Two levels, one type. [`SessionHarness::apply`] / [`SessionHarness::drain`] reach the edit
+//! path directly and record nothing, for tests of what an intent does to a document.
+//! [`SessionHarness::frame`] drives a real record pass, the only way to exercise what sits
+//! between a pointer event and an intent: hit-testing, response routing, pane scoping.
 //!
-//! **The record closure runs once per record pass, not once per frame.**
-//! `Session::record` is called from `App::record`, so on a frame with
-//! pending action input it runs *twice*, exactly as in production. That
-//! is deliberate — it is the behaviour under test. What a caller must
-//! not do is accumulate across frames on the assumption of one call per
-//! frame; [`SessionHarness::frame`] returns the commands of every pass, in order.
+//! **The record runs once per record pass, not once per frame.** On a frame with pending action
+//! input it runs twice, exactly as in production, which is the behavior under test; a caller must
+//! not assume one call per frame. [`SessionHarness::frame`] returns the commands of every pass,
+//! in order.
 
 use glam::UVec2;
 use palantir::{App, ColorScheme, Harness, RecordPass, Ui, WindowToken};
@@ -40,9 +37,9 @@ use std::iter;
 /// that the dock strip lays its chips out unwrapped.
 const SURFACE: UVec2 = UVec2::new(1200, 800);
 
-/// One frame's run of the session, as `App` runs it. The commands are drained after the stage and
-/// after each record, as `App` drains them, which includes the frames the harness runs first to deliver held input, where
-/// a chord pressed before a click lands, and it spends the relayout owed as `App::record` does.
+/// One frame's run of the session, as `App` runs it: the input stage on a frame's first pass,
+/// settle on a later one, then record. The commands are drained after the stage and after each
+/// record, and the relayout owed is spent, as `App::record` does.
 #[derive(Debug)]
 struct SessionFrame<'a> {
     session: &'a mut Session,
@@ -92,24 +89,21 @@ impl App for SessionFrame<'_> {
 
 #[derive(Debug)]
 pub(crate) struct SessionHarness {
-    /// The palantir side. `pub(crate)` so tests drive input and read
-    /// geometry through it directly — `h.ui.press(.., PointerButton::Left)`, `h.ui.rect(..)`.
+    /// The palantir side, which tests drive input and read geometry through directly.
     pub(crate) ui: Harness,
     pub(crate) session: Session,
     pub(crate) library: Library,
     pub(crate) theme: Theme,
-    /// The run projections the frame reads — `App`'s in production, so a
-    /// test that wants a node to look executed writes it here.
+    /// The run projections the frame reads, `App`'s in production: a test writes one here to make
+    /// a node look executed.
     pub(crate) run_state: RunState,
     pub(crate) preferences: Preferences,
-    /// Footprint handed to the status bar. `0` — the default — is the
-    /// no-reading path, so a test asserting on geometry isn't reading a
-    /// figure that moves between runs; set it to pin the `MEM` clause.
+    /// Footprint handed to the status bar. `0`, the default, is the no-reading path, so a
+    /// geometry assertion does not read a figure that moves between runs; set it to pin `MEM`.
     pub(crate) process_memory: u64,
     /// The status bar's line, `App`'s status log in production.
     pub(crate) status_message: Option<StatusMessage<'static>>,
-    /// The frame's request queue — `App`'s in production. `pub(crate)` so a
-    /// test can seed it the way a widget does.
+    /// The frame's request queue, `App`'s in production, which a test seeds as a widget does.
     pub(crate) requests: Requests,
 }
 
@@ -126,10 +120,8 @@ impl SessionHarness {
     pub(crate) fn new(fixture: DocumentFixture) -> Self {
         let theme = Theme::default();
         let mut ui = Harness::new(SURFACE);
-        // What `App::new` does before frame 1, and what every palantir
-        // widget darkroom records reads its geometry from — the dock's
-        // tab strips among them. Without it a geometry assertion here
-        // measures palantir's stock theme rather than darkroom's.
+        // As `App::new` does before frame 1: without it a geometry assertion measures palantir's
+        // stock theme rather than darkroom's.
         ui.ui_mut()
             .set_theme(ColorScheme::Dark, theme.palantir.clone())
             .unwrap();
@@ -181,10 +173,8 @@ impl SessionHarness {
         // `App::sweep`'s work, once a frame before its first pass: the preview store against
         // the document, as the run projection's sync ends, and the window's caches. The rest of
         // the sync drains a `RuntimeHost` this harness has no reason to build.
-        //
-        // Nothing here materializes a viewer's texture: the pane uploads its
-        // own when it records, so an open tab draws at full resolution on the
-        // frame it appears, in this harness exactly as in production.
+        // A viewer's texture is not materialized here: the pane uploads its own when it records,
+        // as in production.
         run_state.previews_mut().reconcile(session.open.document());
         session.reconcile_caches();
         let mut frame = SessionFrame {
@@ -202,10 +192,9 @@ impl SessionHarness {
         frame.commands
     }
 
-    /// `n` frames whose commands are discarded — the editor equivalent of
-    /// `Harness::prime`. Two is the minimum before reading geometry:
-    /// one to lay out, one for `response_for` to resolve against a
-    /// settled cascade.
+    /// `n` frames whose commands are discarded, as `Harness::prime`. Two is the minimum before
+    /// reading geometry: one to lay out, one for `response_for` to resolve against a settled
+    /// cascade.
     pub(crate) fn prime(&mut self, n: u32) {
         for _ in 0..n {
             let _ = self.frame();

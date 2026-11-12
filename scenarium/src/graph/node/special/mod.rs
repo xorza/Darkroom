@@ -1,13 +1,10 @@
 //! Built-in "special" nodes: node kinds with a hardcoded declaration that the
 //! engine recognizes by identity, rather than user-registered [`Func`]s.
 //!
-//! Modeling them as a [`SpecialNode`] enum variant on the node's kind (vs. a flag
-//! on every [`Func`]/`Node`) keeps the common path clean: a new special case is a
-//! new variant plus a hardcoded spec — its interface + lambda live in a child
-//! module here (e.g. [`run_sinks`]) — with no new field elsewhere.
-//! [`SpecialNode::func`] maps a variant to that interface; the engine then
-//! special-cases the node's *behavior* (e.g. the run-sinks promotion in the
-//! planner's root collection).
+//! A [`SpecialNode`] variant on the node's kind, rather than a flag on every [`Func`]/`Node`,
+//! keeps the common path clean: a new special case is a new variant plus a hardcoded spec in a
+//! child module (e.g. [`run_sinks`]). [`SpecialNode::func`] maps a variant to its interface; the
+//! engine special-cases the node's *behavior*.
 
 pub(crate) mod run_sinks;
 
@@ -16,15 +13,13 @@ use serde::{Deserialize, Serialize};
 use crate::graph::func::Func;
 use crate::graph::node::special::run_sinks::run_sinks_func;
 
-/// A built-in node identified by *kind*, not by a `FuncId`. Its ports + lambda
-/// come from [`func`](SpecialNode::func); the engine gives it special behavior.
+/// A built-in node identified by *kind*, not by a `FuncId`; its ports and lambda come from
+/// [`func`](SpecialNode::func).
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum SpecialNode {
-    /// An event sink with no data ports. It computes nothing; when an event it
-    /// subscribes to fires, the engine seeds the run with *every* sink node
-    /// (re-running the whole graph) instead of a data cone of its own — the
-    /// promotion lives in the planner's root collection. Interface in
-    /// `run_sinks`.
+    /// An event sink with no data ports. When an event it subscribes to fires, the engine seeds
+    /// the run with *every* sink node (re-running the whole graph) instead of a data cone of its
+    /// own. Interface in `run_sinks`.
     RunSinks,
 }
 
@@ -32,8 +27,7 @@ pub enum SpecialNode {
 pub const SPECIAL_NODES: &[SpecialNode] = &[SpecialNode::RunSinks];
 
 impl SpecialNode {
-    /// This node's hardcoded interface + lambda. Used by lowering (ports, lambda,
-    /// behavior), validation (port arity), and the editor (rendering + the node menu).
+    /// This node's hardcoded interface and lambda.
     pub fn func(self) -> &'static Func {
         match self {
             Self::RunSinks => run_sinks_func(),

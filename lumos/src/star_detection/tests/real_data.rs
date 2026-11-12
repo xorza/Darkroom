@@ -92,12 +92,10 @@ fn detect_rho_opiuchi() {
         }
     }
 
-    // Load original image for visualization (RGB_F32 for drawing functions)
     let mut output_img = read_image(&rho_opiuchi_path())
         .expect("Failed to load image")
         .convert(ColorFormat::RGB_F32);
 
-    // Draw circles around all detected stars
     for star in &result.stars {
         let radius = (star.fwhm * 1.5).max(3.0);
         draw_circle(
@@ -110,7 +108,6 @@ fn detect_rho_opiuchi() {
     }
     println!("Drew {} circles", result.stars.len());
 
-    // Convert back to RGB_U8 for saving
     let output_img = output_img.convert(ColorFormat::RGB_U8);
 
     if let Some(output_path) = internals::debug_output_path("rho-opiuchi-detection.jpg") {
@@ -164,22 +161,18 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
         println!("Saved: {name}");
     };
 
-    // 1. The measurement plane, the sky out, and the sky's noise.
     let mut frame = PreparedFrame::new(&linear_image, &config, &mut pool);
     save(&frame.measure, "01_measure");
     save(&frame.sky.noise.plane(), "02_sky_noise");
 
-    // 2. FWHM estimation.
     let fwhm_source = frame.estimate_fwhm(&config, &mut pool);
     let fwhm = fwhm_source.value();
     println!("Estimated FWHM: {fwhm:?} ({fwhm_source:?})");
 
-    // 3. The detection plane and the noise measured on it.
     let plane = frame.final_plane(fwhm, &config, &mut pool);
     save(&plane.values, "03_detection_plane");
     save(&plane.noise.noise.plane(), "04_detection_noise");
 
-    // 4. Threshold mask.
     let mut mask = pool.acquire_bit();
     plane.threshold(config.extraction.sigma_threshold, &mut mask);
     if let Some(no_data) = &frame.no_data {
@@ -189,7 +182,7 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
     visual::save_mask(&mask, &out("05_threshold_mask"));
     println!("Saved: 05_threshold_mask ({pixels_above} pixels above threshold)");
 
-    // 5. Label map, of the mask as it stands — the stage labels it undilated.
+    // The stage labels the mask undilated, as it stands here.
     let label_map = pool.labeler.label(&mask, config.extraction.connectivity);
     let label_count = label_map.label_count();
     let labels_buf = Buffer2::new((width, height), label_map.labels());
@@ -211,10 +204,9 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
     assert_eq!(stage.connected_components, label_count);
 }
 
-/// PR1 validation: inverse-variance-weighted PSF fitting should not worsen (and ideally
-/// improves) registration RMS vs unweighted, by producing lower-variance sub-pixel
-/// centroids. Runs the pair of lights through `GaussianFit` with and without a
-/// gain, registers each, and compares.
+/// Inverse-variance-weighted PSF fitting should not worsen registration RMS against unweighted:
+/// it gives lower-variance sub-pixel centroids. Runs the pair of lights through `GaussianFit` with
+/// and without a gain, registers each, and compares.
 #[test]
 fn weighted_fit_registration_rms() {
     /// What one registration of the pair reported.

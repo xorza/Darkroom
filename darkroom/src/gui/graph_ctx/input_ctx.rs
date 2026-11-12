@@ -81,8 +81,7 @@ impl<'a> InputCtx<'a> {
     /// `Custom` type that declares none — there is no `ConstValue` of it, so
     /// the port can't be given an inline const.
     ///
-    /// Owned rather than borrowed: an enum's and an `Any`'s fallbacks are
-    /// built here, not stored anywhere to point at.
+    /// Owned: an enum's and an `Any`'s fallbacks are built here, not stored.
     pub(crate) fn default(self) -> Option<ConstValue> {
         default_const_value(self.node.graph_ctx.library(), self.declared)
     }
@@ -111,17 +110,14 @@ fn takes_const(library: &Library, input: &FuncInput) -> bool {
 /// library rather than anything on the port.
 fn default_const_value(library: &Library, input: &FuncInput) -> Option<ConstValue> {
     input.default_value.clone().or_else(|| {
-        // An enum's first-variant default needs the library's registered variant
-        // list — the bare `DataType::Enum(id)` doesn't carry it, so resolve it
-        // here so an enum port gets the same const affordance as a scalar.
+        // `DataType::Enum(id)` doesn't carry its variants; the library's registry does.
         match &input.data_type {
             DataType::Enum(id) => library
                 .enum_variants(*id)
                 .and_then(|variants| variants.first())
                 .map(|first| ConstValue::Enum(first.clone())),
-            // An untyped (`Any`) port has no concrete kind to seed; start it as
-            // an empty string so the smart editor opens blank and infers the
-            // kind from whatever the user types (see `const_editor::parse_any`).
+            // An `Any` port has no kind to seed: an empty string opens the editor blank, and
+            // it infers the kind from the text typed (see `const_editor::parse_any`).
             DataType::Any => Some(ConstValue::String(String::new())),
             data_type => data_type.default_value(),
         }

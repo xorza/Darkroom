@@ -2,7 +2,6 @@ use crate::bg_mesh::mesh_workspace::{MedianFilter, MeshParams};
 use crate::bg_mesh::*;
 use crate::bit_buffer2::BitBuffer2;
 
-/// Number of sigma-clipping iterations for tests.
 const TEST_SIGMA_CLIP_ITERATIONS: usize = 2;
 
 /// Tiles of `tile_size`, the test clip passes, and the median filter.
@@ -19,7 +18,7 @@ fn make_grid(pixels: &Buffer2<f32>, tile_size: usize) -> BgMesh {
     BgMesh::computed(pixels, None, params(tile_size))
 }
 
-/// Create a `BgMesh` with mask
+/// The mesh of `pixels` in tiles of `tile_size`, leaving out the pixels `mask` sets.
 fn make_grid_with_mask(pixels: &Buffer2<f32>, tile_size: usize, mask: &BitBuffer2) -> BgMesh {
     BgMesh::computed(pixels, Some(mask), params(tile_size))
 }

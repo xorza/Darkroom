@@ -8,11 +8,9 @@ use palantir::RgbaF32;
 /// Pull `c`'s color toward `to` by `t`, a straight blend of its channels, **keeping `c`'s own
 /// alpha**.
 ///
-/// Straight, not `Lerp::lerp`, which blends premultiplied and so weighs each end's hue by
-/// its alpha: the alpha here is not blended, so neither end's may tilt the hue. Opacity on the
-/// canvas is owned by a separate rule — the wire set drops to a fixed alpha while a gesture is in
-/// flight — so a tier that shifts a *color* must leave it alone, or the two rules multiply and a
-/// dimmed wire fades twice.
+/// Straight, not `Lerp::lerp`, which blends premultiplied and so weighs each end's hue by its
+/// alpha. Opacity is owned by a separate rule (the wire set drops to a fixed alpha during a
+/// gesture), so a color shift must leave it alone, or a dimmed wire fades twice.
 pub(crate) const fn toward(c: RgbaF32, to: RgbaF32, t: f32) -> RgbaF32 {
     RgbaF32::new(
         c.r + (to.r - c.r) * t,

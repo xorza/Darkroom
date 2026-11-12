@@ -91,8 +91,8 @@ fn a_round_star_reads_only_its_phase() {
 
 /// Elongation by 2 : 1 along x reads GROUND −0.9833 and along y +0.9833; SROUND sees an axis
 /// elongation in Q₁ and Q₃ against Q₂ and Q₄, −0.3365 along x and +0.3365 along y, and a diagonal
-/// one in Q₁ and Q₃ alone, 0.6230, where GROUND reads 0. Each on the 5 × 5 cutout of PSF σ 1.5. A source of both signs cancelling GROUND's
-/// numerator to non-positive height has no roundness.
+/// one in Q₁ and Q₃ alone, 0.6230, where GROUND reads 0. Each on the 5 × 5 cutout of PSF σ 1.5. A
+/// source whose two signs cancel GROUND's numerator to a non-positive height has no roundness.
 #[test]
 fn elongation_has_its_sign_on_both_metrics() {
     for (sigma, angle, ground, sround) in [

@@ -36,15 +36,13 @@ use crate::gui::state::preview_store::preview_converter::{
     Card, Converted, Job, Outcome, PreviewConverter, Thumbnail, Ticket, Work,
 };
 
-/// Longest edge of a preview card's thumbnail — the one size darkroom picks
-/// for itself. A viewer's texture names no figure at all: it takes the
-/// source's own size, capped only by the device's texture limit.
+/// Longest edge of a preview card's thumbnail. A viewer's texture takes the source's own size,
+/// capped only by the device's texture limit.
 const PREVIEW_TEXTURE_DIM: NonZeroU32 = NonZeroU32::new(256).unwrap();
 
 #[derive(Debug)]
 pub(crate) struct PreviewStore {
-    /// Each preview node's current value, keyed by the node that published it —
-    /// a preview *is* the thing on screen, so its identity is the widget's.
+    /// Each preview node's current value, keyed by the node that published it.
     entries: HashMap<NodeId, StoredContent>,
     /// The publishes of each node still converting for its card.
     converting: HashMap<NodeId, Converting>,
@@ -60,10 +58,9 @@ pub(crate) enum StoredContent {
 }
 
 impl StoredContent {
-    /// The image behind this value, or `None` for a formatted non-image and
-    /// for a value that failed to prepare. The single downcast both readers —
-    /// the preview card and the image viewer — go through, so a new variant can't
-    /// be handled by one and silently fall through the other.
+    /// The image behind this value, or `None` for a formatted non-image and for a value that
+    /// failed to prepare. Both readers go through it, so a new variant can't be handled by one
+    /// and silently fall through the other.
     pub(crate) const fn image(&self) -> Option<&DrawablePreview> {
         match self {
             Self::Image(image) => Some(image),
@@ -71,10 +68,8 @@ impl StoredContent {
         }
     }
 
-    /// The text this value shows *in place of* an image: the formatted value
-    /// itself, or the reason it isn't renderable. `None` when [`Self::image`]
-    /// answered — the two are complementary, so a caller that renders the
-    /// image never also has a message to show.
+    /// The text this value shows in place of an image; `None` exactly when [`Self::image`]
+    /// answers.
     pub(crate) const fn message(&self) -> Option<PreviewMessage<'_>> {
         match self {
             Self::Text(text) => Some(PreviewMessage::Text(text.as_str())),
@@ -84,17 +79,14 @@ impl StoredContent {
     }
 }
 
-/// A line drawn where a preview image would be. Both readers show one — a
-/// node's preview card and a viewer pane — so both draw it from here.
+/// A line drawn where a preview image would be, by both the preview card and a viewer pane.
 ///
-/// `Display` rather than an assembled `String`: both record every frame, and
-/// the line goes straight into the record pass's text arena. A failure is a
-/// typed error rendered on the way out, so only a reader actually sitting on
-/// one pays for that rendering.
+/// `Display` rather than an assembled `String`: both record every frame, and the line goes
+/// straight into the text arena. A failure is a typed error rendered on the way out, so only a
+/// reader sitting on one pays for the rendering.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum PreviewMessage<'a> {
-    /// Text standing in for the picture: a formatted non-image value, or a
-    /// reader's own invitation before any value has arrived.
+    /// A formatted non-image value, or a reader's own invitation before any value has arrived.
     Text(&'a str),
     /// Why the value on hand could not be prepared as an image.
     Failure(&'a DrawablePreviewError),
@@ -111,9 +103,7 @@ impl fmt::Display for PreviewMessage<'_> {
 
 #[derive(Debug)]
 pub(crate) struct DrawablePreview {
-    /// The card's thumbnail, registered the moment the value arrives — and
-    /// where the native metadata lives, since the full-resolution texture is
-    /// prepared from the same source and so is described by the same figures.
+    /// The card's thumbnail; it holds the native metadata the full-resolution texture shares.
     pub(crate) preview: DrawableImage,
     /// The full-resolution texture, or the source still waiting to become one.
     full: FullImage,
@@ -125,12 +115,10 @@ pub(crate) struct DrawablePreview {
 /// The publishes of one node still converting: every ticket from `oldest` to
 /// `newest`.
 ///
-/// A node's results arrive in the order it published — one thread, and a
-/// queue where a newer publish replaces the one still waiting — so a result
-/// in this span is newer than what the card shows, and
-/// lands even while a newer publish converts. Waiting for the newest alone
-/// would starve a node that publishes faster than its frames convert: each
-/// publish would void the one before, and the card would never change.
+/// A node's results arrive in the order it published (one thread, and a newer publish replaces
+/// the one still waiting), so a result in this span is newer than what the card shows and lands
+/// even while a newer publish converts. Waiting for the newest alone would starve a node that
+/// publishes faster than its frames convert.
 #[derive(Debug, Clone, Copy)]
 struct Converting {
     oldest: Ticket,
@@ -148,9 +136,8 @@ enum FullImage {
     Failed(DrawablePreviewError),
 }
 
-/// What a viewer draws for a stored image: the full-resolution texture, or,
-/// until that lands, the thumbnail standing in for it at the same `texels`,
-/// so the framing does not move when the texture arrives.
+/// What a viewer draws for a stored image: the full-resolution texture, or, until that lands,
+/// the thumbnail at the same `texels`, so the framing does not move when it arrives.
 #[derive(Clone, Debug)]
 pub(crate) enum FullView {
     Ready(DrawableImage),
@@ -168,20 +155,15 @@ impl FullView {
     }
 }
 
-/// A registered texture plus what its source looked like before the
-/// downscale: everything a pane needs to draw one image and label it.
-///
-/// The one shape the store hands out — the card's thumbnail and the viewer's
-/// full-resolution texture are the same thing at two sizes, so neither reader
-/// needs a form of its own.
+/// A registered texture plus what its source looked like before the downscale; the one shape
+/// the store hands out, for the card's thumbnail and the viewer's full texture alike.
 #[derive(Clone, Debug)]
 pub(crate) struct DrawableImage {
     pub(crate) handle: ImageHandle,
     /// The texture size this image is framed at: the handle's own, except for a
     /// thumbnail standing in for a full texture still converting.
     pub(crate) texels: UVec2,
-    /// Source dimensions before the downscale that sized the texture — the
-    /// thumbnail's own cap, or the device's texture limit for a viewer's.
+    /// Source dimensions before the downscale that sized the texture.
     pub(crate) native_size: UVec2,
     /// Source pixel format before the RGBA8 view conversion.
     pub(crate) native_format: ColorFormat,
@@ -213,13 +195,11 @@ impl PreviewStore {
         self.entries.get(&node_id)
     }
 
-    /// Queue one preview node's freshly published value for conversion. The
-    /// card keeps what it shows until the result lands, in a later
-    /// [`Self::land`].
+    /// Queue one preview node's freshly published value for conversion. The card keeps what it
+    /// shows until a later [`Self::land`] lands the result.
     ///
-    /// No retention filter on the way in: a value arrives keyed by the node
-    /// that published it, and a node that published exists. `reconcile`
-    /// drops it once that stops being true.
+    /// No retention filter on the way in: a node that published exists. `reconcile` drops the
+    /// value once that stops being true.
     pub(crate) fn publish(&mut self, node_id: NodeId, value: DynamicValue) {
         let ticket = self.last_ticket.next();
         self.last_ticket = ticket;
@@ -265,10 +245,8 @@ impl PreviewStore {
     /// already, and a value that is no image or is gone, convert nothing: a second viewer of the
     /// node may ask in the same pass.
     ///
-    /// **Lazy.** The full raster is the source's own resolution — a full-sensor frame is hundreds
-    /// of MB of RGBA8 — and only a viewer pane ever wants one; a preview card draws the
-    /// thumbnail. A pane records only when its tab is the visible one, so a viewer stacked behind
-    /// another converts nothing.
+    /// Lazy: the full raster is the source's own resolution (hundreds of MB of RGBA8 for a
+    /// full-sensor frame), and only the visible viewer pane wants one.
     pub(crate) fn convert_full(&mut self, node_id: NodeId, max_dim: Option<NonZeroU32>) {
         let Some(StoredContent::Image(image)) = self.entries.get_mut(&node_id) else {
             return;
@@ -299,17 +277,11 @@ impl PreviewStore {
 
     /// Release every presentation resource the document no longer retains.
     ///
-    /// Run unconditionally once a frame: the retain is a lookup per stored
-    /// value, over the handful of nodes holding one. That is cheaper than the
-    /// bookkeeping a dirty flag needed — the store is written *outside* the
-    /// frame too (`land` runs from the worker drain), so a flag had to survive
-    /// until the next frame rather than resetting with it, and every edit path
-    /// that moved the retained set had to remember to raise it.
+    /// Run unconditionally once a frame: a lookup per stored value is cheaper than a dirty flag
+    /// every edit path would have to raise, and `land` writes outside the frame.
     ///
-    /// A preview's own node is its retention: delete the node and the value it
-    /// was showing has nothing left to draw it. The shared liveness rule
-    /// narrowed to preview nodes — see `Document::holds_preview_node` for why
-    /// this cache is stricter than the others.
+    /// A preview's own node is its retention. See `Document::holds_preview_node` for why this
+    /// cache is stricter than the others.
     pub(crate) fn reconcile(&mut self, document: &Document) {
         self.entries
             .retain(|node_id, _| document.holds_preview_node(*node_id));
@@ -396,9 +368,8 @@ impl DrawablePreview {
     /// What a viewer draws for this image: until the full texture lands, the thumbnail stands
     /// in at the full texture's size, which `ui`'s texture limit caps.
     ///
-    /// A failure is stored, not just returned: it is terminal, so a broken
-    /// image is diagnosed once rather than retried on every frame that draws
-    /// it.
+    /// A failure is stored, not just returned: it is terminal, so a broken image is diagnosed
+    /// once rather than retried every frame.
     pub(crate) fn full(&self, ui: &Ui) -> Result<FullView, DrawablePreviewError> {
         match &self.full {
             FullImage::Pending(_) => Ok(FullView::Unasked(DrawableImage {

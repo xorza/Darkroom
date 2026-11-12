@@ -6,8 +6,7 @@ use crate::image::cfa::cfa_color::CfaColor;
 use crate::image::cfa::demosaic::mosaic_view::MosaicPattern;
 use glam::USizeVec2;
 
-/// Bayer CFA (Color Filter Array) pattern.
-/// Represents the 2x2 pattern of color filters on the sensor.
+/// The Bayer CFA phase: how the 2x2 pattern of color filters sits on the sensor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BayerPattern {
     /// RGGB: Red at (0,0), Green at (0,1) and (1,0), Blue at (1,1)
@@ -58,8 +57,8 @@ impl BayerPattern {
     ///
     /// What a `BOTTOM-UP` FITS needs when its height is **even**: `BAYERPAT` describes the top-down
     /// image, and reversing an even number of rows lands every row on the opposite phase. An odd
-    /// height leaves the phases where they were, so the caller must not flip there — see
-    /// `Bayerpat::read_cfa`, which is where that parity is checked.
+    /// height leaves the phases where they were, so the caller must not flip there; see
+    /// `read_cfa` in the FITS metadata reader, which is where that parity is checked.
     #[must_use]
     pub const fn flip_vertical(self) -> Self {
         match self {
@@ -70,8 +69,7 @@ impl BayerPattern {
         }
     }
 
-    /// Flip the pattern horizontally (swap columns).
-    /// Used when XBAYROFF is odd.
+    /// Flip the pattern horizontally (swap columns): what an odd `XBAYROFF` needs.
     #[must_use]
     pub const fn flip_horizontal(self) -> Self {
         match self {

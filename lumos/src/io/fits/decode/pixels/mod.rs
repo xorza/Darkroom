@@ -45,9 +45,9 @@ pub(super) struct HduDecode<'a> {
 }
 
 impl HduDecode<'_> {
-    /// Decode the HDU from `reader`, its checksum checked under `policy` from the bytes the decode
-    /// reads, and judged before anything is returned: a refused checksum fails the load as before
-    /// the decode it would, at the cost of the decode.
+    /// Decode the HDU from `image`, its checksum checked under `policy` from the bytes the decode
+    /// reads, and judged before anything is returned: a refused checksum fails the load, at the
+    /// cost of the decode.
     pub(super) fn read_stream<R: Read + Seek>(
         self,
         image: ImageReader<'_, StreamSource<R>>,
@@ -91,11 +91,9 @@ impl HduDecode<'_> {
         // no decode.
         let row_order = metadata::read_row_order(header)?;
         // The unit is half the sample domain, which decides whether frames combine. An all-blank
-        // BUNIT parses to the single significant space §4.2.1.1 requires, which states no unit
-        // rather than an empty one — left alone it would disagree with every real unit. Surrounding
-        // blanks are a writer artifact rather than part of a unit name, so both ends go, and the
-        // domain comparison downstream is then plain equality — see `SampleDomain::conversion_to`
-        // for why it stops there and does not fold case.
+        // BUNIT parses to the single space §4.2.1.1 requires, which states no unit, so it is
+        // dropped; surrounding blanks are a writer artifact and go too. The comparison downstream
+        // is plain equality — see `SampleDomain::conversion_to` for why it does not fold case.
         let unit = metadata::read_text(header, keywords::BUNIT)?
             .map(|unit| unit.trim().to_owned())
             .filter(|unit| !unit.is_empty());
@@ -199,8 +197,8 @@ impl HduDecode<'_> {
             .nulls
             .resolve(&mut counted, desc.size(), saturation)?;
         if has_nulls {
-            // Only for a frame that has them, and the samples the caller is about to read are
-            // partly fill with nothing in the frame itself to say so.
+            // Only for a frame that has them: the samples the caller reads are partly fill, with
+            // nothing in the frame itself to say so.
             tracing::info!(
                 pixels = flags
                     .as_ref()

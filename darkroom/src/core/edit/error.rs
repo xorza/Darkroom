@@ -16,17 +16,11 @@ use crate::core::document::wire_key::WireKey;
 /// A payload no widget could legitimately have raised: a nil or colliding
 /// identity, a non-finite position, a link to state the document doesn't hold.
 ///
-/// **This is our own bug, not a refusal.** Widgets read every identity they
-/// emit out of the live document, so the worst they manage is *stale* — and a
-/// stale intent is not an error at all: it simply yields no step, which
-/// [`GraphIntent::commit`](crate::core::edit::graph_intent::GraphIntent::commit)
-/// drops without a word. So do a no-op and a
-/// cycle-forming bind. Only the cases below travel as an `Err`.
-///
-/// Each variant names the check that rejected it rather than carrying a
-/// formatted string, so a test can assert *which* precondition broke without
-/// matching on prose, and nothing allocates a message on a path that is
-/// supposed to be unreachable.
+/// **This is our own bug, not a refusal.** Widgets read every identity they emit out of the live
+/// document, so the worst they manage is *stale*, and a stale intent is not an error: it yields
+/// no step, which [`GraphIntent::commit`](crate::core::edit::graph_intent::GraphIntent::commit)
+/// drops silently, as it does a no-op and a cycle-forming bind. Only the cases below are an
+/// `Err`.
 #[derive(Debug, Error, Clone, Copy, PartialEq)]
 pub(crate) enum MalformedIntent {
     /// A nil id where the intent must name something: never stale, as no
@@ -36,18 +30,16 @@ pub(crate) enum MalformedIntent {
     /// A nil tie id, which no view holds, as [`Self::NilNodeId`] is for a node.
     #[error("{role} tie id is nil")]
     NilTieId { role: Role },
-    /// A new id the document already holds. Scenarium requires node ids to be
-    /// unique across the whole authoring tree, and `Graph::insert` panics
-    /// outright on a collision.
+    /// A new id the document already holds. Scenarium requires node ids unique across the whole
+    /// authoring tree, and `Graph::insert` panics on a collision.
     #[error("node {node_id:?} already exists in the document")]
     NodeAlreadyExists { node_id: NodeId },
     /// An inserted node the library cannot resolve: the graph holds only nodes
     /// it can run.
     #[error("new node does not resolve: {reason}")]
     UnresolvedNode { reason: Unresolved },
-    /// An insertion's own wiring pointing at a node the graph doesn't hold.
-    /// Unlike a stale reference this is malformed: an insertion's wiring is
-    /// authored in the same breath as its node.
+    /// An insertion's own wiring pointing at a node the graph doesn't hold. Unlike a stale
+    /// reference this is malformed: the wiring is authored together with its node.
     #[error("{role} node {node_id:?} is not in the graph")]
     NodeAbsent { role: Role, node_id: NodeId },
     /// A seed binding reading the very node it feeds: a cycle of one, which
@@ -68,14 +60,11 @@ pub(crate) enum MalformedIntent {
         subscription: Subscription,
         rejection: SubscriptionRejection,
     },
-    /// A seed binding landing somewhere other than the node being inserted.
-    /// An insertion restores exactly the wiring it recorded, so it may only
-    /// author its own node's inputs — anything else would be an edit of a
-    /// node the step does not carry.
+    /// A seed binding landing somewhere other than the node being inserted: an insertion may only
+    /// author its own node's inputs, anything else would edit a node the step does not carry.
     #[error("seed binding on {port:?} does not belong to the inserted node")]
     ForeignSeedBinding { port: InputPort },
-    /// The insertion's record is not one a graph could hold — a port seeded
-    /// twice, of which only one could survive.
+    /// The insertion's record is not one a graph could hold, as with a port seeded twice.
     #[error("the inserted node's record is malformed")]
     InsertionRecord(#[from] DetachedNodeError),
     /// Positions reach the view verbatim, and nothing after the load repairs a
@@ -91,8 +80,8 @@ pub(crate) enum MalformedIntent {
     /// A new tie that holds no wire, which no view may hold.
     #[error("new tie {tie:?} holds no wire")]
     EmptyTie { tie: TieId },
-    /// A tie line reads the wires it crosses out of the live document, so a
-    /// wire the graph does not hold is no wire it crossed.
+    /// A tie line reads the wires it crosses out of the live document, so a wire the graph does
+    /// not hold is malformed.
     #[error("wire {wire:?} is not in the graph")]
     WireAbsent { wire: WireKey },
     /// A crossed piece past the wire's last one.
@@ -110,8 +99,8 @@ pub(crate) enum MalformedIntent {
     InvalidTieAngle { tie: TieId, degrees: f32 },
 }
 
-/// Which identity or position of an intent a check was holding to — what a
-/// [`MalformedIntent`] names alongside the value it refused.
+/// Which identity or position of an intent a check was holding to, named by a
+/// [`MalformedIntent`] alongside the value it refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Role {
     /// The id an insertion introduces.

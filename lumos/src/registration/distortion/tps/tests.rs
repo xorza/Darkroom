@@ -39,7 +39,7 @@ pub(super) fn assert_near(got: DVec2, expected: DVec2, tol: f64) {
     );
 }
 
-/// Fit a TPS with default config and assert it succeeds.
+/// Fit a TPS without regularization; the fit must succeed.
 pub(super) fn fit_default(source: &[DVec2], target: &[DVec2]) -> ThinPlateSpline {
     ThinPlateSpline::fit(
         source,
@@ -247,8 +247,7 @@ fn tps_fit_mismatched_counts() {
 /// Collinear points produce a singular TPS matrix and return None.
 #[test]
 fn tps_fit_collinear_returns_none() {
-    // All points on the x-axis: the P matrix has all y_i = 0,
-    // making the system singular (P^T column 3 is all zeros).
+    // On the x-axis every y_i is 0, so P has rank 2 and the system is singular.
     let source = vec![
         DVec2::new(0.0, 0.0),
         DVec2::new(50.0, 0.0),
@@ -266,8 +265,6 @@ fn tps_fit_collinear_returns_none() {
             regularization: 0.0,
         },
     );
-    // The matrix is singular because the 3 points are collinear, so P has rank 2
-    // (the y column is all zero). This should return None.
     assert!(
         result.is_none(),
         "Collinear points should produce singular matrix"
@@ -298,7 +295,6 @@ fn tps_three_points_exact() {
         DVec2::new(100.0, 0.0),
         DVec2::new(50.0, 100.0),
     ];
-    // Translate by (3, 7)
     let target: Vec<DVec2> = source.iter().map(|&p| p + DVec2::new(3.0, 7.0)).collect();
 
     let tps = fit_default(&source, &target);
@@ -312,14 +308,12 @@ fn tps_identity() {
     let points = square_source_5();
     let tps = fit_default(&points, &points);
 
-    // Control points
     assert_control_points_exact(&tps, &points, &points);
 
     // Interior point: (25, 75) -> (25, 75)
     let t = tps.transform(DVec2::new(25.0, 75.0));
     assert_near(t, DVec2::new(25.0, 75.0), EXACT_PX);
 
-    // Bending energy should be zero for identity
     assert!(
         tps.bending_energy().abs() < 1e-10,
         "Identity bending energy should be ~0"
@@ -335,14 +329,12 @@ fn tps_translation() {
 
     let tps = fit_default(&source, &target);
 
-    // Control points
     assert_control_points_exact(&tps, &source, &target);
 
     // Interior: (50,50) -> (60,55). Translation is affine, so TPS reproduces exactly.
     let t = tps.transform(DVec2::new(50.0, 50.0));
     assert_near(t, DVec2::new(60.0, 55.0), EXACT_PX);
 
-    // Bending energy should be ~0 for affine transforms
     assert!(
         tps.bending_energy().abs() < 1e-6,
         "Translation bending energy: {}",
@@ -358,14 +350,12 @@ fn tps_scaling() {
 
     let tps = fit_default(&source, &target);
 
-    // Control points
     assert_control_points_exact(&tps, &source, &target);
 
     // Interior: (50,50)*1.1 = (55,55)
     let t = tps.transform(DVec2::new(50.0, 50.0));
     assert_near(t, DVec2::new(55.0, 55.0), EXACT_PX);
 
-    // Bending energy should be ~0 for affine
     assert!(
         tps.bending_energy().abs() < 1e-6,
         "Scaling bending energy: {}",
@@ -420,7 +410,6 @@ fn tps_barrel_distortion() {
 
     let tps = fit_default(&source, &target);
 
-    // All control-point residuals should be < 1e-5
     let residuals = tps.compute_residuals(&target);
     let max_residual = residuals.iter().copied().fold(0.0f64, f64::max);
     assert!(max_residual <= EXACT_PX, "Max residual: {max_residual}");
@@ -468,8 +457,7 @@ fn tps_large_deformation() {
     let tps = fit_default(&source, &target);
     assert_control_points_exact(&tps, &source, &target);
 
-    // Non-affine deformation must produce nonzero bending energy.
-    // Compare with identity (zero energy) to ensure it's actually different.
+    // A non-affine deformation bends; the identity does not.
     let tps_identity = fit_default(&source, &source);
     let energy_deformed = tps.bending_energy().abs();
     let energy_identity = tps_identity.bending_energy().abs();
@@ -491,12 +479,10 @@ fn tps_regularization_energy_vs_residuals() {
         DVec2::new(51.0, 49.0),
     ];
 
-    // Exact interpolation (lambda=0)
     let tps_exact = fit_default(&source, &target);
     let residuals_exact = tps_exact.compute_residuals(&target);
     let max_res_exact = residuals_exact.iter().copied().fold(0.0f64, f64::max);
 
-    // Regularized (lambda=100)
     let config_reg = TpsConfig {
         regularization: 100.0,
     };
@@ -504,19 +490,16 @@ fn tps_regularization_energy_vs_residuals() {
     let residuals_reg = tps_reg.compute_residuals(&target);
     let max_res_reg = residuals_reg.iter().copied().fold(0.0f64, f64::max);
 
-    // Exact should have near-zero residuals
     assert!(
         max_res_exact <= EXACT_PX,
         "Exact max residual: {max_res_exact}"
     );
 
-    // Regularized should have larger residuals (it doesn't pass through points)
     assert!(
         max_res_reg > max_res_exact,
         "Regularized residuals ({max_res_reg}) should exceed exact ({max_res_exact})"
     );
 
-    // Regularized should have lower bending energy
     let energy_exact = tps_exact.bending_energy().abs();
     let energy_reg = tps_reg.bending_energy().abs();
     assert!(
@@ -549,7 +532,6 @@ fn tps_regularization_monotonic_energy() {
         })
         .collect();
 
-    // Each successive energy should be <= the previous
     for i in 1..energies.len() {
         assert!(
             energies[i] <= energies[i - 1] + 1e-10,
@@ -576,7 +558,6 @@ fn tps_regularization_monotonic_energy() {
 fn tps_bending_energy_affine_vs_nonaffine() {
     let source = square_source_4();
 
-    // Identity
     let tps_id = fit_default(&source, &source);
     assert!(
         tps_id.bending_energy().abs() < 1e-10,
@@ -584,7 +565,6 @@ fn tps_bending_energy_affine_vs_nonaffine() {
         tps_id.bending_energy()
     );
 
-    // Translation by (50, 30)
     let target_trans: Vec<DVec2> = source.iter().map(|&p| p + DVec2::new(50.0, 30.0)).collect();
     let tps_trans = fit_default(&source, &target_trans);
     assert!(
@@ -593,7 +573,6 @@ fn tps_bending_energy_affine_vs_nonaffine() {
         tps_trans.bending_energy()
     );
 
-    // Rotation by 0.3 radians
     let angle: f64 = 0.3;
     let (sin_a, cos_a) = angle.libm_sin_cos();
     let target_rot: Vec<DVec2> = source
@@ -673,7 +652,6 @@ fn tps_extreme_coordinates() {
 
     let tps = fit_default(&source, &target);
 
-    // Control points should be exact
     let residuals = tps.compute_residuals(&target);
     let max_residual = residuals.iter().copied().fold(0.0f64, f64::max);
     assert!(max_residual <= EXACT_PX, "Max residual: {max_residual}");
@@ -731,7 +709,6 @@ fn tps_transform_points_consistency_and_correctness() {
 
     assert_eq!(transformed.len(), 4);
 
-    // Expected values for translation by (10, 5):
     let expected = [
         DVec2::new(35.0, 30.0),
         DVec2::new(85.0, 30.0),
@@ -745,11 +722,9 @@ fn tps_transform_points_consistency_and_correctness() {
         .zip(expected.iter())
         .enumerate()
     {
-        // Batch vs single: must be exactly identical
         let single = tps.transform(orig);
         assert_eq!(trans, single, "batch vs single {i}");
 
-        // Absolute correctness
         assert!(
             trans.abs_diff_eq(exp, EXACT_PX),
             "absolute value {i}: {trans} vs {exp}"
@@ -819,7 +794,6 @@ fn tps_many_points() {
     let tps = fit_default(&source, &target);
     assert_eq!(tps.control_point_count(), source.len());
 
-    // All residuals should be small
     let residuals = tps.compute_residuals(&target);
     let max_residual = residuals.iter().copied().fold(0.0f64, f64::max);
     assert!(max_residual <= EXACT_PX, "Max residual: {max_residual}");
@@ -870,7 +844,6 @@ fn tps_different_translations_produce_different_results() {
     // B translates in y: (50,50) -> (50,60)
     assert_near(result_b, DVec2::new(50.0, 60.0), EXACT_PX);
 
-    // Results must differ
     assert!(
         (result_a.x - result_b.x).abs() > 1.0,
         "Different translations should produce different x: A={}, B={}",
@@ -894,7 +867,6 @@ fn tps_extra_control_point_changes_behavior() {
 
     let tps_5 = fit_default(&source_5, &target_5);
 
-    // At an interior point near the center, the 5-point model should differ from the 4-point model
     let test_pt = DVec2::new(45.0, 55.0);
     let r4 = tps_4.transform(test_pt);
     let r5 = tps_5.transform(test_pt);
@@ -902,8 +874,7 @@ fn tps_extra_control_point_changes_behavior() {
     // 4-point model is pure translation: (45,55) -> (50,58)
     assert_near(r4, DVec2::new(50.0, 58.0), EXACT_PX);
 
-    // 5-point model pushes toward the extra control point's displacement
-    // So x should be > 50 and the results should differ
+    // The 5-point model is pulled toward the extra control point's displacement.
     assert!(
         (r5.x - r4.x).abs() > 1.0 || (r5.y - r4.y).abs() > 1.0,
         "Extra control point should change behavior: 4pt=({}, {}), 5pt=({}, {})",

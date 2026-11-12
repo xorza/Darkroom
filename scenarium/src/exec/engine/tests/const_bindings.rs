@@ -19,8 +19,7 @@ async fn const_binding_invokes_only_once() {
         g.constant("mult", 1, 5i64);
     });
 
-    // The const binds detach mult from its upstream, so get_a/get_b/sum are
-    // pruned out of the run entirely.
+    // The const binds detach mult from its upstream, so get_a/get_b/sum are pruned entirely.
     assert_eq!(e.run_sinks().await.ran(), ["mult", "Print"]);
     assert_eq!(e.input_i64("mult", 0), Some(3));
     assert_eq!(e.input_i64("mult", 1), Some(5));
@@ -52,15 +51,13 @@ async fn const_excludes_upstream_node_and_rebinding_restores_it() {
 
     assert_eq!(e.run_sinks().await.ran(), ["get_b", "sum", "mult", "Print"]);
 
-    // Also unbind sum[1]: sum now has all const/none inputs, so no upstream
-    // is needed at all.
+    // Also unbind sum[1]: sum now has all const/none inputs, so no upstream is needed.
     e.edit(|g| g.unbind("sum", 1));
 
     assert_eq!(e.run_sinks().await.ran(), ["sum", "mult", "Print"]);
 
-    // Switch sum[0] from const back to a bind — sum must re-execute, and its
-    // producer is served from the value it cached two runs ago rather than
-    // re-run for having sat out the runs in between.
+    // Switch sum[0] from const back to a bind — sum must re-execute, and its producer is served
+    // from the value it cached two runs ago rather than re-run.
     e.edit(|g| g.wire("get_b", "sum"));
 
     assert_eq!(e.run_sinks().await.ran(), ["sum", "mult", "Print"]);
@@ -84,8 +81,8 @@ async fn input_binding_change_recomputes_and_reuses_cached_upstream() {
     // Stable on rerun.
     assert_eq!(e.run_sinks().await.ran(), ["Print"]);
 
-    // Switch mult[0] back to a bind from the *cached* get_b — mult
-    // re-executes, but its producer is served from cache rather than re-run.
+    // Switch mult[0] back to a bind from the *cached* get_b — mult re-executes, but its producer
+    // is served from cache.
     e.edit(|g| g.wire("get_b", "mult"));
     assert_eq!(e.run_sinks().await.ran(), ["mult", "Print"]);
 }

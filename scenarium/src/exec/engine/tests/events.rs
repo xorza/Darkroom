@@ -63,9 +63,8 @@ async fn event_sources_collects_nodes_with_subscribers() {
     assert!(run.logs().is_empty(), "recv is not reached");
 }
 
-/// The bootstrap run re-initializes its event sources every time, bypassing
-/// the cache — the shared state its event lambdas read has to be freshly
-/// built even when the node's digest is unchanged.
+/// The bootstrap run re-initializes its event sources every time, bypassing the cache — the
+/// shared state its event lambdas read has to be freshly built even when the digest is unchanged.
 #[tokio::test]
 async fn bootstrap_prepares_events_and_bypasses_source_cache() {
     let EventPair { mut g, calls } = event_pair();
@@ -131,11 +130,9 @@ async fn run_sinks_node_runs_all_sinks_on_event() {
     let mut e = TestEngine::over(g);
     let run = e.run_events([e.graph.event("emit", 0)]).await;
 
-    // The sink cone ran; emit is neither a sink nor in that cone, so it did
-    // not. The `RunSinks` node is itself a sink, so it runs its no-op lambda
-    // alongside the promoted sinks rather than seeding a cone of its own.
-    // The stack pops the later-declared root first, so the portless
-    // trigger settles before the cone it promoted.
+    // The sink cone ran; emit did not. The `RunSinks` node is itself a sink, so it runs its no-op
+    // lambda alongside the promoted sinks. The stack pops the later-declared root first, so the
+    // portless trigger settles before the cone it promoted.
     assert_eq!(run.ran(), ["trigger", "source", "sink"]);
     assert_eq!(source_calls.count(), 1);
     assert_eq!(run.logs(), ["1"]);

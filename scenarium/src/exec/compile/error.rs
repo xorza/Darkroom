@@ -1,9 +1,8 @@
 //! The compiler's debug-only checks of a freshly linked artifact.
 //!
-//! These are *self-consistency* verdicts from the validation stage that
-//! follows the walk. Nothing but a bug in this crate can raise one, so they
-//! surface only through its `is_debug()`-gated wrapper — as values rather than
-//! panics, so a test can assert on exactly which invariant broke.
+//! These are *self-consistency* verdicts from the validation stage that follows the walk. Nothing
+//! but a bug in this crate can raise one, so they surface only through the `is_debug()`-gated
+//! wrapper — as values rather than panics, so a test can assert on which invariant broke.
 
 use thiserror::Error;
 
@@ -40,10 +39,8 @@ pub(crate) enum CompiledGraphValidationError {
     BindingOutputOutOfRange { node_id: NodeId, target: OutputAddr },
 }
 
-/// Which of a node's three packed port pools a fault names.
-///
-/// The arity and range checks are the same question asked of each pool, so the
-/// pool is a value the two variants carry rather than three variants apiece.
+/// Which of a node's three packed port pools a fault names. The arity and range checks are the
+/// same question asked of each pool, so the pool is a value the two variants carry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PortPool {
     Input,

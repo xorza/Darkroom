@@ -148,18 +148,14 @@ struct FixedLinearFit {
 
 impl SipPolynomial {
     /// A transform of `model` and its correction `sip`, fitted together to the joint optimum, as
-    /// astrometry.net's `fit_sip_wcs` fits a linear part and its correction: a correction `c`
-    /// carried through a linear part `A` adds `A·c`, so with `H = A·c` the warp `A·r + t₀ + H(u)`
-    /// is linear in everything but a rotation's angle, and `c` is `A⁻¹·H`.
+    /// astrometry.net's `fit_sip_wcs` does: a correction `c` carried through a linear part `A` adds
+    /// `A·c`, so with `H = A·c` the warp `A·r + t₀ + H(u)` is linear in everything but a rotation's
+    /// angle, and `c` is `A⁻¹·H`.
     ///
-    /// A translation holds `A = I` and a similarity `A = [a −b; b a]`, both linear; an affine map
-    /// frees `A`. A rotation's angle is not linear: for a fixed angle the rest is, and by the
-    /// envelope theorem the derivative of the optimum's χ² in the angle is `2·Σ wᵢ·eᵢ·R′·rᵢ` at it,
-    /// which a secant iteration drives to zero from the similarity's angle. A homography has no
-    /// SIP fit: its perspective terms act to first order as the correction's quadratic ones, and
-    /// the two are not determined together — which is why the SIP convention puts an affine map
-    /// under the polynomial, and why a [`LinearModel`] stops at one. `None` when the pairs do not
-    /// determine the fit, or its linear part is singular.
+    /// A translation holds `A = I`, a similarity `A = [a −b; b a]`, an affine map frees `A`. A
+    /// rotation's angle is found by a secant iteration on the optimum's χ² derivative in the angle,
+    /// `2·Σ wᵢ·eᵢ·R′·rᵢ` by the envelope theorem. A homography has no SIP fit: see [`LinearModel`].
+    /// `None` when the pairs do not determine the fit, or its linear part is singular.
     pub(crate) fn fit_with(
         model: LinearModel,
         pairs: SipPairs<'_>,

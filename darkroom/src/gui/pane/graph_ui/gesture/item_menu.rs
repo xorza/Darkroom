@@ -10,21 +10,17 @@ use crate::gui::graph_ctx::GraphCtx;
 
 use crate::gui::pane::graph_ui::gesture::anchored_menu::{AnchoredMenu, PopupShape};
 
-/// A context popup latched by a right-click on a canvas item, a node body or
-/// a tie — the whole shape a canvas item menu takes, from the trigger to the
-/// pick. Wraps [`AnchoredMenu`] with the one per-open extra it needs: the
-/// item `K` the menu was opened on, which the open latched frames before the
-/// pick that needs it.
+/// A context popup latched by a right-click on a canvas item, a node body or a tie. Wraps
+/// [`AnchoredMenu`] with the one per-open extra it needs: the item `K` the menu was opened on,
+/// which the open latched frames before the pick that needs it.
 ///
-/// What the caller still owns is the items and where a pick goes — an
-/// `AppCommand` or a `GraphIntent` — and which item was right-clicked, which the input stage
-/// settles.
+/// The caller still owns the items, where a pick goes (an `AppCommand` or a `GraphIntent`), and
+/// which item was right-clicked, which the input stage settles.
 #[derive(Debug)]
 pub(crate) struct ItemMenu<K> {
     menu: AnchoredMenu,
-    /// The item whose widget opened the menu. Set with the anchor and read
-    /// back by [`Self::show`]; left set after a close, which is unreachable
-    /// because the wrapped `AnchoredMenu` is what gates every read of it.
+    /// The item whose widget opened the menu. Set with the anchor and read back by
+    /// [`Self::show`]; left set after a close, as the wrapped `AnchoredMenu` gates every read.
     target: Option<K>,
 }
 
@@ -40,8 +36,8 @@ impl<K> Default for ItemMenu<K> {
 }
 
 impl<K: Copy> ItemMenu<K> {
-    /// Close the menu. `target` is left as it was — every read of it is
-    /// gated by the wrapped [`AnchoredMenu`] being open.
+    /// Close the menu. `target` is left as it was, as every read of it is gated by the wrapped
+    /// [`AnchoredMenu`] being open.
     pub(crate) const fn reset(&mut self) {
         self.menu.reset();
     }
@@ -79,9 +75,8 @@ impl<K: Copy> ItemMenu<K> {
     where
         K: Into<ItemId>,
     {
-        // A press that opened the menu has a pointer position by construction;
-        // this is only for the frames where the pointer left the window
-        // between the click and this read.
+        // A press that opened the menu has a pointer position by construction; `None` only when
+        // the pointer left the window between the click and this read.
         let at = ui.pointer_pos()?;
         self.target = Some(target);
         self.menu.open_at(at);
@@ -111,9 +106,8 @@ impl<K: Copy> ItemMenu<K> {
 }
 
 /// A pick from a [`ItemMenu`], carrying the item the menu was opened on.
-/// The two travel together because a pick means nothing without the item it
-/// applies to, and that item was latched frames earlier — not read back off
-/// whatever the pointer or the selection happens to be at click time.
+/// The two travel together because a pick means nothing without the item it applies to, which
+/// was latched frames earlier, not read off the pointer or the selection at click time.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Pick<K, T> {
     pub(crate) target: K,

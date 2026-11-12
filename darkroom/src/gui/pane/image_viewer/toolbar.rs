@@ -2,10 +2,8 @@
 //! roster the control panel loops over, and the one toggle with a state of its
 //! own.
 //!
-//! The panel's *layout* stays on [`ImageViewer`](crate::gui::pane::image_viewer::ImageViewer) — it
-//! reads and writes the viewer's framing — but everything it stamps out is
-//! here, so adding a control means adding a row to [`BACKDROPS`] or a method
-//! beside [`Controls::filter_toggle`] rather than growing the record pass.
+//! The panel's layout stays on [`ImageViewer`](crate::gui::pane::image_viewer::ImageViewer),
+//! which reads and writes the viewer's framing; everything it stamps out is here.
 
 use palantir::{
     Align, Configure, ImageFilter, Panel, RgbaF32, Sizing, Spacing, Text, TextInput, TextWrap, Ui,
@@ -38,7 +36,7 @@ pub(super) struct Controls<'a> {
 }
 
 impl Controls<'_> {
-    /// Stable id for one control-panel widget, keyed by node + role.
+    /// Id of one control-panel widget, keyed by node and role.
     pub(super) fn wid(self, key: &'static str) -> WidgetId {
         controls_wid(self.node_id, key)
     }

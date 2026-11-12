@@ -70,11 +70,10 @@ async fn update_with_evolved_func_recompiles_and_runs_new_lambda() {
 /// A func that grows an **output** must not leave its previous, shorter
 /// snapshot resident.
 ///
-/// The grown-input case above re-keys the digest, which is what retires the
-/// old value. Growing an output need not: the id is unchanged, so the stale
-/// `produced_under` still equals the stale `cur_digest`, so the RAM-retention
-/// check keeps a snapshot that would be one value short of the port list. The
-/// install retires it, so the next run recomputes both outputs.
+/// The grown-input case above re-keys the digest, which retires the old value. Growing an output
+/// need not: the id is unchanged, so the stale `produced_under` still equals the stale
+/// `cur_digest`, and the RAM-retention check would keep a snapshot one value short of the port
+/// list. The install retires it, so the next run recomputes both outputs.
 #[tokio::test]
 async fn update_with_a_grown_output_list_retires_the_shorter_snapshot() {
     use crate::async_lambda;
@@ -104,8 +103,8 @@ async fn update_with_a_grown_output_list_retires_the_shorter_snapshot() {
     let mut e = TestEngine::over(g);
     e.run_sinks().await;
 
-    // The same declaration gains an output. Installing that is where the
-    // retained snapshot had to be retired.
+    // The same declaration gains an output; installing it is where the retained snapshot must be
+    // retired.
     e.edit(|g| {
         g.evolve_func("generate", |func| {
             func.outputs.push(FuncOutput::new("W", DataType::Int));

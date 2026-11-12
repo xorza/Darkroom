@@ -87,8 +87,7 @@ impl ThinPlateSpline {
         // [Pᵀ      0] [a] = [0]
         // with K[i,j] = U(‖p_i − p_j‖), P[i,:] = [1, x_i, y_i], w the RBF weights and a the
         // affine coefficients.
-        // Row-major and contiguous, because the solver takes it that way — and because a row of
-        // `Vec`s cost one allocation per row to hold `f64`s that are read in row order anyway.
+        // Row-major and contiguous, as the solver takes it; a row of `Vec`s would allocate per row.
         let matrix_size = n + 3;
         let mut matrix = vec![0.0; matrix_size * matrix_size];
         let at = |row: usize, col: usize| row * matrix_size + col;

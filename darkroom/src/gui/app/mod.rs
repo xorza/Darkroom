@@ -57,19 +57,16 @@ pub(crate) struct App {
     /// The func library, the evaluation worker, and the status log they
     /// report into — everything the document is executed against.
     runtime: RuntimeHost,
-    /// The last completed run's per-node state, keyed by the document's
-    /// `NodeId`s: execution status (the frame and the footer), log lines, and
-    /// the values preview cards and viewers read. Owned here because `App` is
-    /// its only writer — it fills as the worker is drained — and lent to the
-    /// frame through [`AppCtx`]. Off the serialized state.
+    /// The last completed run's per-node state, keyed by the document's `NodeId`s: execution
+    /// status, log lines, and the values preview cards and viewers read. Owned here because `App`
+    /// is its only writer, as the worker is drained; lent to the frame through [`AppCtx`]. Off the
+    /// serialized state.
     run_state: RunState,
     /// The user-facing outcome log behind the status bar's sticky slot.
     ///
-    /// On `App` rather than inside the runtime because most of what reports
-    /// here is not the runtime's: file load/save outcomes, what a load
-    /// repaired, preferences failures, and the document restore at startup all
-    /// write it, and only run outcomes come from the worker side. Lent to
-    /// whoever is reporting.
+    /// On `App` rather than inside the runtime because most of what reports here is not the
+    /// runtime's: file load/save outcomes, load repairs, preferences failures and the startup
+    /// document restore; only run outcomes come from the worker side.
     status: StatusLog,
     theme: Theme,
     /// A quit asked, which closes the window as the pass ends.
@@ -89,17 +86,15 @@ pub(crate) struct App {
     discard: DiscardGuard,
     /// The image of the window a View command waits on; a second command replaces the first.
     capture: Option<ViewCapture>,
-    /// Throttled sampler behind the status bar's `MEM` clause. Lives on
-    /// `App` rather than `Session` because it measures the process, not the
-    /// document. Sampled where it is consumed rather than in a sweep:
-    /// [`ProcessMemory::sample`] refreshes at most once per interval, so a
-    /// second record pass repeats the reading the first one drew.
+    /// Throttled sampler behind the status bar's `MEM` clause. On `App` rather than `Session`
+    /// because it measures the process. Sampled where consumed, not in a sweep:
+    /// [`ProcessMemory::sample`] refreshes at most once per interval, so a second record pass
+    /// repeats the first one's reading.
     process_memory: ProcessMemory,
     /// The frame's request queue, lent to [`Session::input`] and [`Session::record`] and drained of
-    /// its app tier here once the pass is over. Lives on `App` because both
-    /// levels drain it: the editor takes what the document owns, and what is
-    /// left is ours. Carries no state between frames — a field only so the
-    /// allocation is reused.
+    /// its app tier here once the pass is over. On `App` because both levels drain it: the
+    /// editor takes what the document owns, and what is left is ours. Carries no state between
+    /// frames; a field only so the allocation is reused.
     requests: Requests,
 }
 
@@ -146,8 +141,8 @@ impl App {
         } = launch;
         let waker = ui.waker();
         let wake: Wake = Arc::new(move || waker.wake());
-        // `preferences` is loaded in `run` before the window exists, so
-        // its saved geometry can size the window at creation.
+        // `preferences` is loaded in `run` before the window exists, so its saved geometry sizes
+        // the window.
         let mut status = StatusLog::default();
         if let Some(failure) = failure {
             status.error(
@@ -242,12 +237,9 @@ impl App {
         }
     }
 
-    /// Mirror the window's live geometry into the persisted preferences
-    /// (in memory only). Called each frame so any later `preferences.save()`
-    /// — on quit — writes the current size / position. Size and position
-    /// are refreshed only while the window is floating; a maximized window
-    /// keeps its last floating geometry so un-maximizing on the next launch
-    /// lands at the right size.
+    /// Mirror the window's live geometry into the preferences, in memory only, so a save on quit
+    /// writes it. Refreshed only while the window is floating: a maximized one keeps its last
+    /// floating geometry, so un-maximizing on the next launch lands at the right size.
     fn track_window_state(&mut self, ui: &Ui) {
         let geom = ui.window_geometry();
         match &mut self.preferences.window {
@@ -268,11 +260,9 @@ impl App {
         }
     }
 
-    /// Persist preferences (including the window geometry mirrored by
-    /// [`Self::track_window_state`]) and close the window as this pass ends, which ends the
-    /// host. Every explicit quit path routes through here so geometry is saved on the
-    /// way out; the titlebar-X clean close — which never calls this —
-    /// saves in [`Self::handle_close_request`] instead.
+    /// Persist preferences (with the geometry [`Self::track_window_state`] mirrored) and close the
+    /// window as this pass ends, which ends the host. Every explicit quit routes through here; the
+    /// titlebar-X close saves in [`Self::handle_close_request`] instead.
     fn quit(&mut self) {
         self.save_preferences();
         self.quitting.raise();
@@ -283,18 +273,14 @@ impl App {
         &self.quitting
     }
 
-    /// Whether a destructive transition has to prompt before proceeding:
-    /// unsaved changes and the confirm preference both hold. The single
-    /// predicate behind every path that replaces or discards the document.
+    /// Whether a destructive transition has to prompt: unsaved changes and the confirm
+    /// preference both hold.
     const fn needs_discard_confirmation(&self) -> bool {
         self.session.open.is_dirty() && self.preferences.confirm_unsaved_changes
     }
 
-    /// Carry out `transition`, or raise the unsaved-changes prompt first when
-    /// the document holds edits worth protecting. Every path that would
-    /// discard the open document routes through here — File ▸ New, File ▸
-    /// Open, File ▸ Quit, ⌘Q — so the policy lives in one place instead of
-    /// being restated (or forgotten) per caller.
+    /// Carry out `transition`, or raise the unsaved-changes prompt first when the document holds
+    /// edits worth protecting. Every path that would discard the open document routes through here.
     fn guard_discard(&mut self, transition: PendingTransition) {
         if self.needs_discard_confirmation() {
             self.discard.hold(transition);
@@ -303,9 +289,7 @@ impl App {
         }
     }
 
-    /// Run a transition the guard cleared. `OpenPicked` picks its file here
-    /// rather than before the prompt, so a cancelled prompt doesn't leave
-    /// the user having chosen a file for nothing.
+    /// Run a transition the guard cleared. `OpenPicked` picks its file here, after the prompt.
     fn perform(&mut self, transition: PendingTransition) {
         match transition {
             PendingTransition::Quit => self.quit(),
@@ -318,17 +302,14 @@ impl App {
         }
     }
 
-    /// Open `path`, prompting first if the current document has unsaved
-    /// edits. The entry point for a document the editor did not ask for —
-    /// one the desktop hands over through
-    /// [`crate::platform::route_opened_documents`].
+    /// Open `path`, prompting first if the open document has unsaved edits. The entry point for a
+    /// document the desktop hands over through [`crate::platform::route_opened_documents`].
     pub(crate) fn open_document_at(&mut self, path: PathBuf) {
         self.guard_discard(PendingTransition::OpenAt(path));
     }
 
     /// The titlebar X. The window stays open only while the prompt is up
-    /// ([`DiscardGuard::record`] calls `keep_open`); with nothing to
-    /// protect, the close proceeds untouched.
+    /// ([`DiscardGuard::record`] calls `keep_open`); with nothing to protect, the close proceeds.
     fn handle_close_request(&mut self, ui: &Ui) {
         if !ui.close_requested() {
             return;
@@ -341,9 +322,9 @@ impl App {
     }
 
     /// Apply the prompt's answer: run the save it asked for, then let
-    /// [`DiscardOutcome::resolve`](crate::gui::app::discard_dialog::DiscardOutcome::resolve) decide — against the dirty flag that
-    /// save left behind — whether the transition goes through and whether
-    /// the guard stays on.
+    /// [`DiscardOutcome::resolve`](crate::gui::app::discard_dialog::DiscardOutcome::resolve)
+    /// decide, against the dirty flag the save left, whether the transition goes through and
+    /// whether the guard stays on.
     fn apply_discard_outcome(&mut self, answered: Answered) {
         let Answered {
             transition,
@@ -405,10 +386,7 @@ impl App {
         );
     }
 
-    /// Prompt for a project file and load it. The
-    /// [`PendingTransition::OpenPicked`] body: the picker runs here, *after*
-    /// the guard cleared, so cancelling the unsaved-changes prompt never costs
-    /// the user a file choice.
+    /// Prompt for a project file and load it: the [`PendingTransition::OpenPicked`] body.
     fn load_picked_document(&mut self) {
         if let Some(path) = self.dialogs.project_open_path(self.session.open.path()) {
             let _ = self.load_document(&path);
@@ -423,34 +401,24 @@ impl App {
     /// Swap in `open` and reset every piece of state derived from the
     /// document it replaces.
     ///
-    /// A fresh [`Session`] covers what it owns in one move: empty undo history
-    /// (restoring the old document via Cmd-Z would replay intents that no longer
-    /// match the live tree), dropped gesture state, forced scene rebuild.
+    /// A fresh [`Session`] covers what it owns in one move: empty undo history (Cmd-Z would
+    /// otherwise replay intents that no longer match the live tree) and dropped gesture state.
     ///
-    /// The run projections are `App`'s, so they are cleared here rather than
-    /// falling out of that — and they have to be: node ids are *persisted*, so
-    /// reopening a document would otherwise reattach the previous session's
-    /// statuses, timings, logs and preview images to nodes that have not run.
-    /// [`RunState::clear`](crate::gui::state::run_state::RunState::clear) drops
-    /// exactly the document-derived half and leaves
-    /// the worker-stream half (`compiled`, `activity`, `cache_ram`) standing —
-    /// an in-flight run still reports against the program the worker
-    /// acknowledged. What makes that half true again is the worker itself: the
-    /// program and its whole runtime cache go with the document, and the
-    /// `Cleared` acknowledgement is what resets the projection.
+    /// The run projections are `App`'s, so they are cleared here: node ids are persisted, so
+    /// reopening a document would otherwise reattach the previous session's statuses, timings,
+    /// logs and preview images to nodes that have not run.
+    /// [`RunState::clear`](crate::gui::state::run_state::RunState::clear) drops exactly the
+    /// document-derived half and leaves the worker-stream half (`compiled`, `activity`,
+    /// `cache_ram`) standing, as an in-flight run still reports against the program the worker
+    /// acknowledged; the worker's `Cleared` acknowledgement resets that half, as the program and
+    /// its runtime cache go with the document.
     ///
-    /// The worker's disk cache repoints too, so disk-backed nodes read the new
-    /// document's store rather than the old one's.
-    ///
-    /// A document failure on the status bar was about the document being
-    /// replaced, so every adoption clears it — an empty document as much as a
-    /// loaded one.
+    /// The worker's disk cache repoints to the new document's store. A document failure on the
+    /// status bar was about the replaced document, so every adoption clears it.
     fn adopt_document(&mut self, open: OpenDocument) {
         self.run_state.clear();
         self.runtime.clear_program();
-        // One assignment, not two: the UI showing a document is replaced with
-        // it, so there is no window where fresh panes hold a stale graph's
-        // gesture state.
+        // One assignment, so no window holds fresh panes over a stale graph's gesture state.
         self.session = Session::new(open);
         self.runtime.set_document_cache(self.session.open.path());
         self.remember_document_path();
@@ -514,8 +482,7 @@ impl App {
         }
     }
 
-    /// Mirror the open document's active path into persisted preferences
-    /// after a successful document lifecycle transition.
+    /// Mirror the open document's active path into the preferences after a successful transition.
     fn remember_document_path(&mut self) {
         self.preferences.document_path = self.session.open.path().map(Path::to_path_buf);
     }
@@ -532,10 +499,9 @@ impl App {
         self.save_preferences();
     }
 
-    /// Persist the preferences, surfacing a failed write in the status
-    /// bar — the one save path every caller routes through, so a broken
-    /// preferences file can't fail silently. A failed write counts as saved too: the next change
-    /// tries again, and an unchanged frame writes nothing.
+    /// Persist the preferences, surfacing a failed write in the status bar: the one save path, so
+    /// a broken preferences file cannot fail silently. A failed write counts as saved too: the
+    /// next change tries again, and an unchanged frame writes nothing.
     fn save_preferences(&mut self) {
         match self.preferences_store.save(&self.preferences) {
             Ok(Saved::File) => self.status.succeeded(StatusFamily::Preferences),
@@ -596,25 +562,18 @@ impl App {
 
     /// Take in what the host and the worker queued, for this pass's record to read.
     fn sweep(&mut self, ui: &Ui) {
-        // Keep the persisted window geometry current so a save on quit
-        // captures the latest size / position.
         self.track_window_state(ui);
 
-        // Everything derived from the run and the document, swept once a
-        // frame — **the one place that happens**. All of these caches outlive
-        // the scene on purpose (a closed tab must resolve its port centers the
-        // frame it comes back), so none can decide for itself that an entry is
-        // dead; only the document knows, and a node id is never reused.
+        // Everything derived from the run and the document is swept here, once a frame, and
+        // nowhere else. These caches outlive the scene on purpose (a closed tab must resolve its
+        // port centers the frame it comes back), so only the document knows an entry is dead; a
+        // node id is never reused. Two owners, so two calls: the run projection, and everything
+        // the window caches through the session. A new cache gets a line here, not a third call
+        // site.
         //
-        // Two owners, so two calls: the run projection filters on the node
-        // that published, and everything the window caches — canvas geometry,
-        // per-tab viewer framing — goes through the session.
-        // A new cache gets a line here rather than a third call site.
-        //
-        // A node deleted later in the same frame's record is swept next frame.
-        // Nothing reads a dead entry in between — the geometry is reached
-        // through a `NodeCtx` that only resolves for live nodes — so the lag
-        // costs memory and nothing else.
+        // A node deleted later in the frame's record is swept next frame; nothing reads a dead
+        // entry meanwhile, as geometry is reached through a `NodeCtx` that resolves only live
+        // nodes, so the lag costs memory alone.
         self.run_state.sync(
             RunFeed {
                 runtime: &self.runtime,
@@ -718,9 +677,7 @@ impl palantir::App for App {
             ui.request_repaint_after(Duration::from_millis(100));
         }
 
-        // The frame's read-only world, composed once here: everything below
-        // derives its own context from this one rather than taking the refs
-        // again.
+        // The frame's read-only world, composed once; everything below derives its context from it.
         let ctx = AppCtx::new(&self.theme, self.runtime.library.cur(), &self.run_state);
         self.session.record(
             ui,
@@ -736,11 +693,9 @@ impl palantir::App for App {
                 },
             },
         );
-        // What the session left behind: every command the frame raised, in the
-        // order it raised them — a keyboard chord and a click on the same
-        // frame both land. Popped one at a time so the queue is not borrowed
-        // while a command runs, which is what lets `App::run_command` take all
-        // of `self`.
+        // Every command the frame raised, in order, so a chord and a click on one frame both land.
+        // Popped one at a time so the queue is not borrowed while a command runs, which lets
+        // `App::run_command` take all of `self`.
         while let Some(command) = self.requests.pop_app() {
             self.run_command(command);
         }

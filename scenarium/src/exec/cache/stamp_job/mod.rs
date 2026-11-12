@@ -37,30 +37,22 @@ impl FsPathId {
 
 /// One stamping pass, and every buffer it works in.
 ///
-/// Owned whole, because a blocking-pool task must own what it touches:
-/// the job moves to the pool, runs, and moves back — so the walk borrows
-/// nothing of the cache that owns it, and the pass reuses its queue and
-/// scratch instead of allocating them again. Nothing of a directory
-/// survives its walk but the 32-byte digest.
-///
-/// The walk only; what a path *was* is remembered by the
-/// [`PathIdentities`](crate::exec::cache::path_identities::PathIdentities)
-/// this job belongs to.
+/// Owned whole, because a blocking-pool task must own what it touches: the job moves to the pool,
+/// runs, and moves back, so the walk borrows nothing of the cache and the pass reuses its queue
+/// and scratch. Nothing of a directory survives its walk but the 32-byte digest. The walk only;
+/// what a path *was* is remembered by the
+/// [`PathIdentities`](crate::exec::cache::path_identities::PathIdentities) this job belongs to.
 #[derive(Debug, Default)]
 pub(super) struct StampJob {
-    /// Paths queued for this pass, deduplicated — a path fifty nodes read
-    /// is stamped once.
+    /// Paths queued for this pass, deduplicated.
     requests: HashSet<String>,
     /// What the pass identified, drained into the cache's memo when the
     /// job comes home.
     stamped: Vec<(String, FsPathId)>,
-    /// Files anywhere beneath the directory being walked, relative to it,
-    /// kept as **raw bytes**.
-    ///
-    /// `to_string_lossy` would map every non-UTF-8 name onto the same
-    /// replacement text, so on any filesystem that admits arbitrary byte
-    /// names a rename between two such names would leave the directory's
-    /// identity — and so a pure node's cache key — exactly where it was.
+    /// Files anywhere beneath the directory being walked, relative to it, kept as **raw bytes**:
+    /// `to_string_lossy` would map every non-UTF-8 name onto the same replacement text, so a
+    /// rename between two such names would leave the directory's identity — and a pure node's
+    /// cache key — unchanged.
     files: Vec<PathBuf>,
     /// Directories seen but not yet listed, relative to the root.
     pending: Vec<PathBuf>,
@@ -79,8 +71,8 @@ impl StampJob {
         self.requests.contains(path)
     }
 
-    /// Whether [`run`](Self::run) has anything to do — the check that keeps an
-    /// all-const run off the blocking pool entirely.
+    /// Whether [`run`](Self::run) has anything to do — keeps an all-const run off the blocking
+    /// pool entirely.
     pub(super) fn is_queued(&self) -> bool {
         !self.requests.is_empty()
     }
@@ -91,9 +83,7 @@ impl StampJob {
         self.requests.clear();
     }
 
-    /// Hand over what the last pass identified, leaving the buffer empty for the
-    /// next one. The results live here only between the walk and the cache's
-    /// memo; nothing reads them from the job afterwards.
+    /// Hand over what the last pass identified, leaving the buffer empty for the next one.
     pub(super) fn drain_stamped(&mut self) -> impl Iterator<Item = (String, FsPathId)> + '_ {
         self.stamped.drain(..)
     }
@@ -101,21 +91,16 @@ impl StampJob {
     /// Stamp every queued path, draining the queue, and report the first path
     /// that had no determinate identity.
     ///
-    /// **An unreadable path costs its own node, not the pass.** A node whose
-    /// input cannot be identified has no sound cache key — but that is true of
-    /// *that* node, while this pass is shared by every node of the run. So the
-    /// walk carries on past a failure and the paths queued behind it still
-    /// land. The failing node is left without a digest either way, and the run
-    /// loop re-stamps it at its own turn, where the error belongs to one node
-    /// and is reported as that node's.
+    /// **An unreadable path costs its own node, not the pass.** The pass is shared by every node
+    /// of the run, so the walk carries on past a failure and the paths queued behind it still
+    /// land. The failing node is left without a digest, and the run loop re-stamps it at its own
+    /// turn, where the error is reported as that node's.
     ///
-    /// A failure is reported, never remembered: a path that would not read
-    /// during the pre-run pass may read at the node's turn, once an upstream
-    /// producer has written it, so nothing here records that a path was tried.
+    /// A failure is reported, never remembered: a path that would not read during the pre-run
+    /// pass may read at the node's turn, once an upstream producer has written it.
     ///
-    /// Cancellation is the one thing that still stops the pass where it
-    /// stands — every path left would raise it again, and no identity the walk
-    /// could still gather is wanted.
+    /// Cancellation is the one thing that stops the pass where it stands: every path left would
+    /// raise it again.
     pub(super) fn run(&mut self, cancel: &CancelToken) -> Result<(), StampError> {
         // The queue steps out so the walk can borrow the rest of the job
         // while it drains, and steps back in empty, with its capacity.
@@ -128,9 +113,7 @@ impl StampJob {
                     failure = Some(StampError::Cancelled);
                     break;
                 }
-                // The first one is what gets reported; a later path's failure
-                // would name a different node's resource just as truthfully,
-                // and one message can only carry one.
+                // The first failure is reported; one message can only carry one.
                 Err(error) => {
                     if failure.is_none() {
                         failure = Some(error);
@@ -158,31 +141,24 @@ impl StampJob {
         }
     }
 
-    /// List the subtree, then fold it — two passes, so the buffer is a
-    /// plain list of paths rather than a list of records: nothing has to
-    /// be remembered about a file between seeing it and hashing it.
+    /// List the subtree, then fold it — two passes, so the buffer is a plain list of paths.
     ///
     /// A file that vanishes between the passes fails the stamp: a subtree
     /// seen in part must not hash like one seen whole.
     ///
-    /// **Only files are folded.** A directory has no content of its own,
-    /// and everything it holds surfaces here as a file appearing,
-    /// vanishing, or changing its relative path. What that gives up is
-    /// the empty directory, which does not move the identity at all —
-    /// nothing a node reads is a function of it.
+    /// **Only files are folded.** A directory has no content of its own, and everything it holds
+    /// surfaces as a file appearing, vanishing, or changing its relative path. The empty
+    /// directory does not move the identity; nothing a node reads is a function of it.
     fn stamp_dir(&mut self, root: &Path, cancel: &CancelToken) -> Result<FsPathId, StampError> {
         self.collect_files(root, cancel)?;
-        // `read_dir` order is not a property of the directory, so the fold
-        // takes the files in an order the filesystem does not choose.
-        // Unstable: relative paths are unique, and it borrows no scratch
-        // buffer of its own.
+        // `read_dir` order is not a property of the directory, so the fold takes the files in an
+        // order the filesystem does not choose. Unstable: relative paths are unique.
         self.files.sort_unstable();
 
         let mut hasher = DigestHasher::new();
         hasher.write_pod(self.files.len() as u64);
         for rel in &self.files {
-            // `symlink_metadata`, so the second pass reads a link exactly
-            // as the first one classified it.
+            // `symlink_metadata`, so the second pass reads a link as the first classified it.
             let path = root.join(rel);
             let metadata = fs::symlink_metadata(&path).map_err(StampError::io(&path))?;
             let file = FileIdentity::from_metadata(&metadata).map_err(StampError::io(&path))?;
@@ -193,22 +169,16 @@ impl StampJob {
         Ok(FsPathId::Dir(hasher.finish()))
     }
 
-    /// Walk **the whole subtree** under `root`, listing every file beneath
-    /// it rather than only its immediate children: a pure function handed
-    /// a directory consumes it recursively, so the recursive contents are
-    /// what its output is a function of, and `root/sub/file` changing has to
-    /// move `root`'s fingerprint.
+    /// Walk **the whole subtree** under `root`, listing every file beneath it: a pure function
+    /// handed a directory consumes it recursively, so `root/sub/file` changing has to move
+    /// `root`'s fingerprint.
     ///
-    /// **Symlinks are listed, never followed.** `DirEntry::file_type`
-    /// does not traverse them, so a link to a directory is a leaf here:
-    /// the walk terminates (a link pointing back up the tree would
-    /// otherwise never stop) and repointing the link still moves the
-    /// identity. It is also the cheap question — the type usually arrives
-    /// with the directory entry itself, leaving one `stat` per file in
-    /// all and none per directory.
+    /// **Symlinks are listed, never followed.** `DirEntry::file_type` does not traverse them, so a
+    /// link to a directory is a leaf: the walk terminates (a link pointing back up the tree would
+    /// otherwise never stop) and repointing the link still moves the identity. The type usually
+    /// arrives with the directory entry, leaving one `stat` per file and none per directory.
     ///
-    /// Iterative, because the depth comes from a user-chosen directory
-    /// and a deep tree must not decide the stack size.
+    /// Iterative, because a user-chosen directory's depth must not decide the stack size.
     fn collect_files(&mut self, root: &Path, cancel: &CancelToken) -> Result<(), StampError> {
         self.files.clear();
         self.pending.clear();
@@ -242,9 +212,7 @@ pub(super) mod internals {
     use crate::exec::cache::stamp_job::FsPathId;
 
     impl FsPathId {
-        /// A file identity without a filesystem behind it, so a digest that
-        /// folds a path can be pinned to a constant — no test controls a
-        /// real file's mtime.
+        /// A file identity without a filesystem behind it — no test controls a real file's mtime.
         pub(crate) fn file(len: u64, mtime_ns: i128) -> Self {
             Self::File(FileIdentity {
                 len,

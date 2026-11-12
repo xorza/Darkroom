@@ -52,10 +52,7 @@ impl StarScatter {
     }
 }
 
-/// Convert positions to Star structs with uniform properties.
-///
-/// Creates Star structs suitable for registration testing with default properties.
-/// The FWHM is set uniformly to allow `register()` to derive `max_sigma` correctly.
+/// `poss` as stars of a uniform `fwhm`, which lets `register()` derive `max_sigma`.
 pub(crate) fn poss_to_stars(poss: &[DVec2], fwhm: f32) -> Vec<Star> {
     poss.iter()
         .enumerate()
@@ -96,13 +93,11 @@ mod tests {
         let stars = scatter.poss();
         assert_eq!(stars.len(), 100);
 
-        // Check all stars are within bounds (with margin)
         for p in &stars {
             assert!(p.x >= 50.0 && p.x <= 950.0);
             assert!(p.y >= 50.0 && p.y <= 950.0);
         }
 
-        // Check reproducibility
         assert_eq!(stars, scatter.poss());
     }
 
@@ -117,7 +112,6 @@ mod tests {
             {
                 has_different = true;
             }
-            // Noise stays within amplitude.
             assert!((orig.pos.x - noisy.pos.x).abs() <= 1.0);
             assert!((orig.pos.y - noisy.pos.y).abs() <= 1.0);
         }

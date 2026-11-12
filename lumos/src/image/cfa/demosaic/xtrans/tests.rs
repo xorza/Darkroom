@@ -14,12 +14,10 @@ use glam::USizeVec2;
 #[test]
 fn xtrans_pattern_color_at() {
     let pattern = XTRANS_PATTERN;
-    // Check corners
     assert_eq!(pattern.color_at(USizeVec2::new(0, 0)), CfaColor::Green);
     assert_eq!(pattern.color_at(USizeVec2::new(2, 0)), CfaColor::Red);
     assert_eq!(pattern.color_at(USizeVec2::new(5, 0)), CfaColor::Blue);
     assert_eq!(pattern.color_at(USizeVec2::new(0, 2)), CfaColor::Blue);
-    // Check wrapping
     assert_eq!(
         pattern.color_at(USizeVec2::new(0, 6)),
         pattern.color_at(USizeVec2::new(0, 0))

@@ -14,8 +14,8 @@ use crate::star_detection::deblend::region::Region;
 use crate::star_detection::star_detection_config::extraction_config::{Deblend, ExtractionConfig};
 use common::USize2;
 
-/// [`deblend_local_maxima`] at the default config's separation and relative height, into a fresh
-/// list.
+/// [`LocalMaximaParams::deblend`] at the default config's separation and relative height, into a
+/// fresh list.
 fn local_maxima_regions(component: &Component<'_>) -> Vec<Region> {
     let config = ExtractionConfig::default();
     let Deblend::LocalMaxima {
@@ -35,7 +35,6 @@ fn local_maxima_regions(component: &Component<'_>) -> Vec<Region> {
 
 #[test]
 fn local_vs_multi_threshold_single_star() {
-    // Both algorithms should produce same result for single star
     let TestComponent {
         pixels,
         labels,
@@ -51,32 +50,26 @@ fn local_vs_multi_threshold_single_star() {
 
     let local_result = local_maxima_regions(&Component::new(&data, &pixels, &labels));
 
-    // Multi-threshold deblending (default: threshold_count=32, min_separation=3,
-    // min_contrast=0.005)
     let mt_result =
         deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), Ladder::STANDARD);
 
     assert_eq!(local_result.len(), 1);
     assert_eq!(mt_result.len(), 1);
 
-    // Peak positions should be similar
     assert!((local_result[0].peak.x as i32 - mt_result[0].peak.x as i32).abs() <= 1);
     assert!((local_result[0].peak.y as i32 - mt_result[0].peak.y as i32).abs() <= 1);
 }
 
 #[test]
 fn local_vs_multi_threshold_two_stars() {
-    // Both algorithms should find two stars when well-separated
     let TestComponent {
         pixels,
         labels,
         data,
     } = separated_pair(0.8);
 
-    // Local maxima deblending
     let local_result = local_maxima_regions(&Component::new(&data, &pixels, &labels));
 
-    // Multi-threshold deblending
     let mt_result =
         deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), Ladder::STANDARD);
 

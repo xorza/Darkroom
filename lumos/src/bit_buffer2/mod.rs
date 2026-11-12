@@ -23,7 +23,6 @@ use crate::scratch_pool::Scratch;
 use common::USize2;
 use glam::USizeVec2;
 
-/// Number of bits per storage word.
 const BITS_PER_WORD: usize = 64;
 
 /// Row alignment in bits (128 bits = 16 bytes = 2 words).
@@ -182,19 +181,17 @@ impl BitBuffer2 {
         }
     }
 
-    /// Get a bit value at the given linear index (row-major, no padding).
+    /// The bit at the row-major linear index `idx`, which counts no padding.
     #[inline]
     pub(crate) fn get(&self, idx: usize) -> bool {
         self.get_at(self.size.point_of(idx))
     }
 
-    /// Set a bit value at the given linear index (row-major, no padding).
     #[inline]
     pub(crate) fn set(&mut self, idx: usize, value: bool) {
         self.set_at(self.size.point_of(idx), value);
     }
 
-    /// Get a bit value at the given (x, y) coordinates.
     #[inline]
     pub(crate) fn get_at(&self, pos: USizeVec2) -> bool {
         debug_assert!(self.size.contains(pos));
@@ -204,7 +201,6 @@ impl BitBuffer2 {
         (self.words[word_idx] >> bit_in_word) & 1 != 0
     }
 
-    /// Set a bit value at the given (x, y) coordinates.
     #[inline]
     pub(crate) fn set_at(&mut self, pos: USizeVec2, value: bool) {
         debug_assert!(self.size.contains(pos));
@@ -234,7 +230,7 @@ impl BitBuffer2 {
         }
     }
 
-    /// Count the number of set bits: whole words, as the padding holds none.
+    /// The number of set bits, counted by whole words as the padding holds none.
     #[inline]
     pub(crate) fn count_ones(&self) -> usize {
         self.words
@@ -265,12 +261,10 @@ impl BitBuffer2 {
     /// Fill the mask by testing every pixel, row by row in parallel, accumulating a whole word
     /// before storing it.
     ///
-    /// `predicate` takes the linear pixel index, the same one [`Self::get`] takes. This exists so
-    /// callers converting a `Vec<bool>` do not fall into `set()` per pixel, which is a
-    /// read-modify-write on a word and slower than the byte store it replaces — and so a caller
-    /// rebuilding the same mask every iteration can hand back the buffer it already has. A mask
-    /// made from another mask is word-wise instead: [`Self::get`] divides the index back into a
-    /// position.
+    /// `predicate` takes the linear pixel index [`Self::get`] takes. It spares a caller converting a
+    /// `Vec<bool>` a `set()` per pixel, a read-modify-write slower than the byte store it replaces,
+    /// and lets one rebuilding a mask every iteration reuse its buffer. A mask made from another
+    /// mask is word-wise instead: [`Self::get`] divides the index back into a position.
     ///
     /// Every word is stored, padding included, so nothing the previous holder left remains.
     pub(crate) fn fill_from_predicate(&mut self, predicate: impl Fn(usize) -> bool + Sync) {
@@ -358,16 +352,12 @@ impl BitBuffer2 {
     /// distance `radius` of it. `scratch`, of any contents and this buffer's size, holds the source
     /// while the buffer is rewritten.
     ///
-    /// A disk rather than a square, as photutils dilates its source masks: a square reaches √2
-    /// times further along the diagonals and masks sky that no source touches.
-    ///
-    /// `scratch` is this buffer's size, and `radius` at most 63.
+    /// `radius` is at most 63. A disk rather than a square, as `dilation::dilate_mask` says.
     pub(crate) fn dilate(&mut self, radius: usize, scratch: &mut Self) {
         dilation::dilate_mask(self, radius, scratch);
     }
 }
 
-/// Index by linear index.
 impl Index<usize> for BitBuffer2 {
     type Output = bool;
 

@@ -75,8 +75,7 @@ async fn execute_honors_cancel_flag_and_marks_cancelled() {
         "no node runs when cancel is set"
     );
 
-    // A fresh token runs the whole graph — nothing was cached by the run
-    // that aborted above.
+    // A fresh token runs the whole graph — the aborted run cached nothing.
     let run = e
         .run_cancellable(RunSeeds::sinks(), CancelToken::new())
         .await;
@@ -128,8 +127,7 @@ async fn cancel_mid_invoke_drops_in_flight_node_and_reruns() {
          nor a failure of its own; the run-level `cancelled` flag is what says why"
     );
 
-    // A fresh token: the partial output was dropped, so the node
-    // re-executes rather than being served from a bogus cache.
+    // A fresh token: the partial output was dropped, so the node re-executes.
     let run = e
         .run_cancellable(RunSeeds::sinks(), CancelToken::new())
         .await;
@@ -144,10 +142,9 @@ async fn cancel_mid_invoke_drops_in_flight_node_and_reruns() {
     );
 }
 
-/// A lambda that bails by returning `InvokeError::Cancelled` is reported as
-/// `RunError::Cancelled` (not a generic `Invoke` error) and dropped from the
-/// executed set — the truthful lambda-level signal, distinct from the
-/// executor's flag-check fallback covered above (asserted here without
+/// A lambda that bails by returning `InvokeError::Cancelled` is reported as `RunError::Cancelled`
+/// (not a generic `Invoke` error) and dropped from the executed set — the truthful lambda-level
+/// signal, distinct from the executor's flag-check fallback covered above (asserted without
 /// touching the flag, so only the error mapping can produce the verdict).
 #[tokio::test]
 async fn lambda_cancelled_error_maps_to_error_cancelled() {

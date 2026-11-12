@@ -44,8 +44,7 @@ impl AnyState {
         self.boxed = Some(Box::new(value));
     }
 
-    /// Drop the held value (whatever its type), releasing anything it owns —
-    /// e.g. a watcher whose RAII guard keeps an OS resource open.
+    /// Drop the held value (whatever its type), releasing anything it owns.
     pub fn clear(&mut self) {
         self.boxed = None;
     }
@@ -65,17 +64,9 @@ impl AnyState {
     ///
     /// # Panics
     ///
-    /// If the slot holds some other type. A populated slot of the wrong
-    /// type is not an empty slot: state is keyed by its owning function,
-    /// so a mismatch means two owners are reading one slot
-    /// — a wiring bug in the caller, not a runtime condition. Treating
-    /// it as empty would drop whatever the other owner put there (an
-    /// RAII watcher guard, an open handle, accumulated progress) and
-    /// hand back a freshly defaulted value, so the symptom surfaces
-    /// later as state that silently forgets itself.
-    ///
-    /// The downcast this checks is one the call already performs, so
-    /// the guard costs nothing beyond the branch that was there.
+    /// If the slot holds some other type. State is keyed by its owning function, so a mismatch
+    /// means two owners share one slot, a wiring bug; treating it as empty would drop what the
+    /// other owner put there (a watcher guard, an open handle) and hand back a fresh default.
     pub fn get_or_insert_with<T>(&mut self, make: impl FnOnce() -> T) -> &mut T
     where
         T: Any + Send,
@@ -100,9 +91,7 @@ impl AnyState {
 mod tests {
     use crate::runtime::any_state::AnyState;
 
-    /// An empty slot seeds; a populated slot of the right type is handed
-    /// back **as it stands**, which is the whole point of the helper —
-    /// a re-seed here would reset accumulated state every invocation.
+    /// An empty slot seeds; a populated slot of the right type is handed back **as it stands**.
     #[test]
     fn seeding_fills_only_an_empty_slot() {
         let mut state = AnyState::default();
@@ -122,10 +111,8 @@ mod tests {
         assert_eq!(*state.get_or_insert_with(|| 0u32), 41);
     }
 
-    /// A populated slot of the wrong type is a caller wiring bug, not an
-    /// empty slot: state is keyed by its owning function, so a mismatch
-    /// means two owners share a slot. Seeding over it would drop the
-    /// other owner's value and return a silently reset default.
+    /// A populated slot of the wrong type is a wiring bug, not an empty slot: seeding over it
+    /// would drop the other owner's value.
     #[test]
     #[should_panic(expected = "AnyState holds another type")]
     fn seeding_over_a_populated_mismatch_panics() {
@@ -134,8 +121,7 @@ mod tests {
         state.get_or_default::<u32>();
     }
 
-    /// The non-defaulting twin refuses identically — the guard lives in
-    /// the shared body, so neither entry point can drift past it.
+    /// The non-defaulting twin refuses identically.
     #[test]
     #[should_panic(expected = "AnyState holds another type")]
     fn seeding_with_a_closure_over_a_mismatch_panics() {
@@ -144,8 +130,7 @@ mod tests {
         state.get_or_insert_with(String::new);
     }
 
-    /// The non-seeding readers stay fallible: a mismatch there is a
-    /// question with an answer ("not this type"), not a wiring bug.
+    /// The non-seeding readers stay fallible: a mismatch there is an answer, not a wiring bug.
     #[test]
     fn plain_reads_report_a_mismatch_rather_than_panicking() {
         let mut state = AnyState::default();

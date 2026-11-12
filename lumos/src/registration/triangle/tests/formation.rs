@@ -124,10 +124,8 @@ fn form_triangles_kdtree_all_collinear() {
 
 #[test]
 fn form_triangles_kdtree_ratios_in_valid_range() {
-    // 5 points forming a non-degenerate pattern
     let triangles = triangles_of(&SQUARE_AND_CENTRE, 4);
 
-    // Should form multiple triangles from 5 points
     assert!(triangles.len() >= 4);
 
     // All ratios must satisfy 0 < ratio.0 <= ratio.1 <= 1.0

@@ -214,8 +214,7 @@ mod tests {
     /// Every phase's stencil is whole shells of equal distance holding at least twice its count:
     /// every same-filter offset as near as its farthest tap is in it, none farther, so a median
     /// cut short by its count favours no direction at a shared distance, and half the stencil
-    /// masked still leaves the full count. X-Trans red and blue hold 48 at least, where the
-    /// square stencil they replace held 38.
+    /// masked still leaves the full count. X-Trans red and blue hold 48 at least.
     #[test]
     fn every_stencil_is_whole_shells_with_headroom() {
         for cfa in [

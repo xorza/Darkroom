@@ -36,15 +36,11 @@ fn main() {
     );
     tracing::info!(path = %calibration_dir.display(), "Calibration directory");
 
-    // Step 1 — calibration masters from raw dark/flat/bias frames.
     tracing::info!("── Step 1/2: building calibration masters ──");
     let step = Instant::now();
     let masters = create_calibration_masters(&calibration_dir);
     tracing::info!(elapsed = elapsed(step), "Step 1 complete: masters ready");
 
-    // Step 2 — raw lights → calibrated, registered, stacked master, in one call.
-    // (`AlignStackConfig::calibrate_align_stack_paths` narrates its own load → detect → register →
-    // stack phases.)
     let light_paths =
         lumos::raw_files(&calibration_dir.join("Lights")).expect("scan raw light frames");
     assert!(!light_paths.is_empty(), "no light frames found in Lights/");
@@ -74,7 +70,6 @@ fn main() {
         "Step 2 complete: stacked master ready"
     );
 
-    // Save the stacked master.
     let output = internals::output_path("stacked_result.tiff");
     result
         .product

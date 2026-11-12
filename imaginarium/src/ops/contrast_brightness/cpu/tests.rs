@@ -119,9 +119,7 @@ fn contrast_and_brightness_map_hand_computed_values() {
 
 #[test]
 fn contrast_two_transforms_rgb_and_leaves_alpha_alone() {
-    // Same mapping as the contiguous u8 case, but laid out as RGBA pixels: the three
-    // color channels move, the fourth is copied through even where it would
-    // otherwise have clamped.
+    // Alpha is copied through even where the same value in a color channel would clamp.
     let rgb: [u8; 3] = [64, 65, 128];
     let rgb_want: [u8; 3] = [0, 2, 128];
     let alphas: [u8; 4] = [0, 64, 200, 255];
@@ -143,8 +141,7 @@ fn contrast_two_transforms_rgb_and_leaves_alpha_alone() {
 
 #[test]
 fn identity_params_leave_every_format_bit_identical() {
-    // contrast 1.0 / brightness 0.0 folds to `value * 1.0 + 0.0`, which is
-    // exact for floats too — so this is an equality check, not an epsilon one.
+    // `value * 1.0 + 0.0` is exact for floats too, so equality, not an epsilon.
     for format in ColorFormat::ALL {
         let input = create_test_image(format, USize2::new(17, 5), 0);
         let mut output = input.clone();

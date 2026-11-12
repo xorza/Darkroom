@@ -4,10 +4,9 @@
 /// moves its document to the next revision, so two equal revisions of one
 /// document hold the same nodes.
 ///
-/// Counted per document, so two documents can share a revision: a cache that
-/// keeps one must not outlive its document. The one that does — the window's
-/// node-cache sweep — lives in the `MainWindow` that `Session::new` builds
-/// afresh with each document.
+/// Counted per document, so two documents can share a revision: a cache that keeps one must not
+/// outlive its document. The window's node-cache sweep lives in the `MainWindow` that
+/// `Session::new` builds afresh with each document.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct GraphRevision(u64);
 

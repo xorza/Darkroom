@@ -10,8 +10,7 @@ fn fixture() -> Compiled {
     TestGraph::source_sink_loose().compile()
 }
 
-/// The cone back in the fixture's own names, so an assertion says which nodes
-/// were reached rather than wherever the id sort happened to place them.
+/// The cone back in the fixture's own names, so an assertion says which nodes were reached.
 fn reached<'n>(cone: &mut ConsumerCone, f: &'n Compiled, seeds: &[&str]) -> Vec<&'n str> {
     seeded(
         cone,
@@ -20,8 +19,8 @@ fn reached<'n>(cone: &mut ConsumerCone, f: &'n Compiled, seeds: &[&str]) -> Vec<
     )
 }
 
-/// [`reached`] for the seeds a fixture spells as raw ids — the one case a name
-/// cannot express, since the point is an id the program never held.
+/// [`reached`] for the seeds a fixture spells as raw ids — the one case a name cannot express: an
+/// id the program never held.
 fn seeded<'n>(cone: &mut ConsumerCone, f: &'n Compiled, seeds: &[NodeId]) -> Vec<&'n str> {
     cone.of(
         &f.program,
@@ -59,9 +58,9 @@ fn the_cone_reaches_downstream_and_stops() {
     );
 }
 
-/// [`CompiledGraph::consumer_cone`] is the same walk answered in the *id*
-/// space — what a host projecting an eviction reads. Ascending indices out of
-/// the walk over an id-sorted column means ascending ids here.
+/// [`CompiledGraph::consumer_cone`] is the same walk answered in the *id* space — what a host
+/// projecting an eviction reads. Ascending indices out of the walk over an id-sorted column mean
+/// ascending ids here.
 #[test]
 fn the_public_cone_answers_in_id_space() {
     let f = fixture();

@@ -24,7 +24,7 @@ use crate::ingest::set_facts::SetFacts;
 /// before the rest of it decodes. A frame admitted before they were known passes unchecked, so
 /// when a parallel run fails at a frame, the intake asks [`Self::first_mismatch`] below it, and
 /// names the failure a sequential admission names. The full comparison of the set, in index
-/// order, runs once every frame is in (`SetFacts::admit`). Refused: admitting frame 0 alone
+/// order, runs once every frame is in (`SetFacts::check_set`). Refused: admitting frame 0 alone
 /// first, about 20% more wall time for each run; no check before the set is in, which decodes a
 /// whole mismatched set before it fails.
 #[derive(Debug)]

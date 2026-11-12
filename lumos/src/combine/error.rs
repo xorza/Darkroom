@@ -15,7 +15,7 @@ use common::USize2;
 /// Invalid [`crate::StackConfig`] parameters.
 ///
 /// Plain range checks report through [`InvalidConfigField`]; the variants below are the
-/// constraints that aren't one — a per-element check and two that span fields.
+/// constraints that aren't one: a per-element check and the ones that span the weights or fields.
 #[derive(Debug, Error, Clone, PartialEq)]
 pub enum StackConfigError {
     #[error(transparent)]
@@ -93,10 +93,10 @@ pub enum StackError {
     )]
     UnknownGain { idx: usize },
 
-    /// A file that could not be decoded, held as the decoder's own error — which already names the
-    /// path, and stays matchable on *which* decode failed. Wrapping it in a variant of our own
-    /// printed the path twice and flattened the cause into an `io::Error`. A decode that was
-    /// cancelled arrives as [`Self::Cancelled`], never here.
+    /// A file that could not be decoded, held as the decoder's own error, which already names the
+    /// path and stays matchable on *which* decode failed. Refused: a variant of our own around an
+    /// `io::Error`, which printed the path twice and flattened the cause. A cancelled decode
+    /// arrives as [`Self::Cancelled`], never here.
     #[error(transparent)]
     ImageLoad(ImageError),
 
@@ -313,9 +313,7 @@ mod tests {
     }
 
     /// A load failure travels as the decoder's own error: the path appears once, the variant stays
-    /// matchable on which decode failed, and `source()` reaches the real cause. Wrapping it in a
-    /// `{ path, source: io::Error }` of our own printed "failed to load image '{p}': failed to read
-    /// file '{p}': …" and flattened the `ImageError` into a string.
+    /// matchable on which decode failed, and `source()` reaches the real cause.
     #[test]
     fn a_load_failure_states_the_path_once_and_stays_typed() {
         let path = PathBuf::from("/path/to/image.fits");

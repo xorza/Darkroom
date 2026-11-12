@@ -421,8 +421,7 @@ impl CalibrationMasters {
     }
 
     /// Every present master lost no more to calibration than its role can: the check `from_images`
-    /// runs on its inputs, for a bundle `fits::load` read. A flat is stored prepared, after it lost
-    /// what it held of the additive parts.
+    /// runs on its inputs, for a bundle read from a file.
     fn validate_records(&self) -> Result<(), CalibrationError> {
         self.masters()
             .try_for_each(|(role, master)| check_record(role, master))
@@ -566,11 +565,9 @@ impl CalibrationMasters {
                     master: master.to_owned(),
                 });
             }
-            // The flat divides a normalized copy of itself, so its own scale cancels; only a
-            // different stated unit disqualifies it. The subtracted master's scale is checked where
-            // it is converted (`Subtractor::map_into`). Only when both declare a domain: a
-            // synthesized master has none, and refusing on that would reject every in-memory
-            // fixture.
+            // The flat divides a normalized copy of itself, so its scale cancels; only a different
+            // stated unit disqualifies it. A subtracted master's scale is checked in
+            // `Subtractor::map_into`. Only when both declare a domain: a synthesized one has none.
             if role == MasterRole::Flat
                 && let (Some(light_domain), Some(master_domain)) =
                     (light_domain, master.metadata.derived.domain())
@@ -650,9 +647,8 @@ impl MastersBuilder {
             defect_map,
             imposed: None,
         };
-        // `from_images` checks its inputs before it touches them, so this re-checks a set built
-        // some other way, a bundle read as independent HDUs: no `CalibrationMasters` spans two
-        // sensors, so no bundle written is one a read refuses.
+        // `from_images` checks its inputs first; this checks a set built some other way, a bundle
+        // read as independent HDUs, so no `CalibrationMasters` spans two sensors.
         Sensor::shared(masters.sensors())?;
         masters.validate_records()?;
         masters.imposed = masters.imposed_flags();

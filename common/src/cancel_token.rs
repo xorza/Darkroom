@@ -3,28 +3,24 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 /// A shared, poll-only cooperative cancellation token.
 ///
-/// It carries its own "no cancellation" case ([`CancelToken::never`], the
-/// `Default`), so an operation takes a plain `CancelToken` rather than an
-/// `Option<CancelToken>` — a caller that doesn't want cancellation passes a
-/// never-token (zero-cost, no allocation) and everything downstream just polls
-/// [`is_cancelled`](Self::is_cancelled).
+/// It carries its own "no cancellation" case ([`CancelToken::never`], the `Default`), so an
+/// operation takes a plain `CancelToken` rather than an `Option<CancelToken>`; a never-token costs
+/// no allocation.
 ///
 /// A live token's flag is shared by all clones, so a holder on any thread can
-/// [`cancel`](Self::cancel) work another thread polls. There's no async wait:
-/// cooperative code checks it at safe points (a loop top, between work chunks)
-/// and bails — exactly what a `spawn_blocking` / rayon hot loop can afford. For
-/// an awaitable cancel, reach for `tokio_util`'s token instead.
+/// [`cancel`](Self::cancel) work another thread polls. There is no async wait: cooperative code
+/// polls [`is_cancelled`](Self::is_cancelled) at safe points, which a rayon hot loop can afford.
+/// For an awaitable cancel, use `tokio_util`'s token.
 ///
-/// A live token remains cancelled until [`reset`](Self::reset) is called.
-/// Resetting rearms every clone and is only safe once all work from the previous
-/// operation has joined. Ordering is `Relaxed`: the flag is standalone (it
-/// publishes no other data), so it needs no synchronization beyond the atomic.
+/// A live token stays cancelled until [`reset`](Self::reset), which rearms every clone and is safe
+/// only once all work from the previous operation has joined. Ordering is `Relaxed`: the flag
+/// publishes no other data.
 #[derive(Clone, Debug, Default)]
 pub struct CancelToken(State);
 
 #[derive(Clone, Debug, Default)]
 enum State {
-    /// Never cancels — the zero-cost stand-in for "no cancellation wired".
+    /// Never cancels.
     #[default]
     Never,
     /// A live flag; clones share it.
@@ -32,9 +28,9 @@ enum State {
 }
 
 impl CancelToken {
-    /// How many items a cancellable walk covers between polls of its token, rather than test it
-    /// per item. A granularity, not tuned to any one walk: small enough that a cancelled run stops
-    /// promptly and large enough that the poll is lost in the work.
+    /// How many items a cancellable walk covers between polls of its token. Not tuned to any one
+    /// walk: small enough that a cancelled run stops promptly, large enough that the poll is lost
+    /// in the work.
     pub const POLL_CHUNK: usize = 16_384;
 
     /// A fresh, live token that can be cancelled.
@@ -42,7 +38,7 @@ impl CancelToken {
         Self(State::Live(Arc::new(AtomicBool::new(false))))
     }
 
-    /// A token that never cancels (zero-cost opt-out; same as `default()`).
+    /// A token that never cancels; same as `default()`.
     pub const fn never() -> Self {
         Self(State::Never)
     }

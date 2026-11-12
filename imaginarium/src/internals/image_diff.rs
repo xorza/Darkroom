@@ -18,8 +18,6 @@ use crate::interleaved::interleaved_image::InterleavedImage;
 pub(crate) fn max_pixel_diff(first: &InterleavedImage, second: &InterleavedImage) -> f64 {
     first.desc().assert_same(second.desc(), "img1/img2");
 
-    // Pixel data is tightly packed, so the two buffers are one flat channel
-    // array each — there is no per-row padding to step over.
     let (a, b) = (first.bytes(), second.bytes());
     match first.desc().color_format().sample_type {
         SampleType::U8 => max_diff::<u8>(a, b),

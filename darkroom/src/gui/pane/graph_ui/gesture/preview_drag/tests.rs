@@ -7,13 +7,11 @@ use crate::gui::pane::graph_ui::internals::CanvasHarness;
 use crate::gui::pane::graph_ui::wid;
 use std::sync::Arc;
 
-/// Ctrl+drag off an output port spawns a preview node already reading it, as
-/// one batch — the one-gesture counterpart to the port menu's "Add preview".
+/// Ctrl+drag off an output port spawns a preview node already reading it, as one batch, the
+/// counterpart to the port menu's "Add preview".
 ///
-/// Drives the real chord through the harness rather than calling the gesture
-/// directly: the whole point of the modifier is that `WireUi` and
-/// `PreviewDrag` can't both claim the same press, and only a real press
-/// exercises that.
+/// Drives the real chord through the harness: the modifier exists so `WireUi` and the preview
+/// drag can't both claim the same press, and only a real press exercises that.
 #[test]
 fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
     use palantir::{Modifiers, PointerButton};
@@ -22,8 +20,7 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
     use crate::core::preview_sink::PreviewSink;
     use crate::gui::port_ref::PortRef;
 
-    // The preview func is declared but not placed — the gesture is what
-    // spawns a node from it.
+    // The preview func is declared but not placed: the gesture spawns the node.
     let mut fixture = DocumentFixture::probes(1);
     fixture
         .library
@@ -31,20 +28,18 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
     let producer = fixture.node(0);
     let out_port = PortRef::output(producer, 0);
 
-    // Two frames to record the node so its output circle has a widget id and
-    // `CanvasGeometry` a measured center; the gesture refuses an unmeasured
-    // port outright.
+    // Two frames, so the output circle has a widget id and `CanvasGeometry` a measured center;
+    // the gesture refuses an unmeasured port.
     let mut h = CanvasHarness::new(fixture);
     h.prime(2);
 
-    // Ctrl held, press on the output circle, then drag: the press frame is
-    // where `PreviewDrag` latches.
+    // Ctrl held, press on the output circle, then drag.
     h.ui.hold_modifiers(Modifiers::CTRL);
     let from = h.port_center(out_port);
     h.ui.press(wid::port_circle(out_port), PointerButton::Left);
     h.frame();
-    // `first_drag_started` polls the *drag* edge, not the press, so the
-    // pointer has to actually move past palantir's threshold.
+    // `first_drag_started` polls the drag edge, not the press, so the pointer has to move past
+    // palantir's threshold.
     h.ui.drag_to(from + Vec2::new(90.0, 40.0));
     let spawned = h.frame();
     h.ui.hold_modifiers(Modifiers::default());

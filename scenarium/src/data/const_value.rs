@@ -38,11 +38,9 @@ impl Eq for ConstValue {}
 
 impl ConstValue {
     /// The scalar coercion class, value side: the three kinds
-    /// [`as_f64`](Self::as_f64)/[`as_i64`](Self::as_i64)/[`as_bool`](Self::as_bool)
-    /// convert freely between. `DataType::is_numeric_scalar` is the same class
-    /// on the type side, and
-    /// [`DataType::accepts_const`](crate::DataType) reads this one to hold a
-    /// literal to exactly what a runtime read of it would accept.
+    /// [`as_f64`](Self::as_f64)/[`as_i64`](Self::as_i64)/[`as_bool`](Self::as_bool) convert
+    /// freely between. `DataType::is_numeric_scalar` is the type side, and
+    /// [`DataType::accepts_const`](crate::DataType) reads this one.
     pub(crate) const fn is_numeric_scalar(&self) -> bool {
         matches!(self, Self::Float(_) | Self::Int(_) | Self::Bool(_))
     }
@@ -68,12 +66,9 @@ impl ConstValue {
     /// Scalar truthiness: **any** nonzero value reads as `true`, per the
     /// coercion class on `DataType::compatible_with`.
     ///
-    /// The float arm compares against zero exactly, deliberately. A
-    /// tolerance here is not float hygiene — there is no subtraction
-    /// whose rounding it would absorb — it is a second, narrower
-    /// definition of zero that silently reads small-but-real magnitudes
-    /// (`f64::MIN_POSITIVE`, a normalized weight, a converged residual)
-    /// as `false`. NaN is not zero and so reads as `true`.
+    /// The float arm compares against zero exactly: a tolerance would be a second, narrower
+    /// definition of zero that reads small-but-real magnitudes (`f64::MIN_POSITIVE`, a converged
+    /// residual) as `false`. NaN is not zero and so reads as `true`.
     pub fn as_bool(&self) -> Option<bool> {
         match self {
             Self::Bool(value) => Some(*value),
@@ -104,9 +99,8 @@ impl ConstValue {
         }
     }
 
-    /// The paths this value names, one variant or many — a single path
-    /// answers as a one-element slice, so a caller that works over a
-    /// selection never has to special-case the singular form.
+    /// The paths this value names, one variant or many; a single path answers as a one-element
+    /// slice.
     pub fn as_fs_paths(&self) -> Option<&[String]> {
         match self {
             Self::FsPath(path) => Some(slice::from_ref(path)),
@@ -115,13 +109,10 @@ impl ConstValue {
         }
     }
 
-    /// The literal's canonical text, rendered on demand: unquoted and
-    /// full-precision, the form an editor shows and parses back — as against
-    /// [`Display`], which quotes strings and rounds floats for reading.
-    ///
-    /// A renderer rather than a `String` so a per-frame reader can write it
-    /// into a buffer it already holds — `write!(buf, "{}", v.value_text())` —
-    /// instead of taking one it would only copy out of and drop.
+    /// The literal's canonical text, rendered on demand: unquoted and full-precision, the form an
+    /// editor shows and parses back, as against [`Display`], which quotes strings and rounds
+    /// floats. A renderer rather than a `String` so a per-frame reader writes into a buffer it
+    /// already holds.
     pub const fn value_text(&self) -> ValueText<'_> {
         ValueText(self)
     }
@@ -229,8 +220,7 @@ mod tests {
         assert_eq!(ConstValue::Float(0.0).as_bool(), Some(false));
         assert_eq!(ConstValue::Float(-0.0).as_bool(), Some(false));
         assert_eq!(ConstValue::Float(0.5).as_bool(), Some(true));
-        // Any nonzero reads as true, however small. An epsilon band here
-        // would read each of these as `false` despite being real values.
+        // Any nonzero reads as true, however small.
         for tiny in [f64::MIN_POSITIVE, f64::EPSILON, -f64::EPSILON, 1e-300] {
             assert_eq!(
                 ConstValue::Float(tiny).as_bool(),
@@ -242,9 +232,8 @@ mod tests {
         assert_eq!(ConstValue::String("x".into()).as_f64(), None);
         assert_eq!(ConstValue::String("hi".into()).as_string(), Some("hi"));
         assert_eq!(ConstValue::Enum("Add".into()).as_enum(), Some("Add"));
-        // `as_fs_paths` spans both variants — a caller reading a selection
-        // sees one path as a selection of one — while `as_fs_path` stays
-        // exact about which variant it was handed.
+        // `as_fs_paths` spans both variants, while `as_fs_path` stays exact about which it was
+        // handed.
         let one_path = ConstValue::FsPath("x".into());
         assert_eq!(one_path.as_fs_path(), Some("x"));
         assert_eq!(
@@ -281,8 +270,7 @@ mod tests {
             "Linear"
         );
         assert_eq!(ConstValue::FsPaths(Vec::new()).to_value_string(), "");
-        // The renderer writes into a buffer that already holds something,
-        // which is the whole reason it exists beside the owned spelling.
+        // The renderer writes into a buffer that already holds something.
         let mut buf = String::from("> ");
         write!(buf, "{}", ConstValue::Int(7).value_text()).unwrap();
         assert_eq!(buf, "> 7");

@@ -7,7 +7,6 @@ use glam::{USizeVec2, Vec2};
 
 use common::USize2;
 
-/// Add uniform background to image.
 pub(super) fn add_uniform_bg(pixels: &mut [f32], level: f32) {
     for p in pixels.iter_mut() {
         *p += level;
@@ -121,10 +120,8 @@ impl Default for NebulaConfig {
 }
 
 impl NebulaConfig {
-    /// Add nebula-like diffuse background structure to `pixels`.
-    ///
-    /// Creates an elliptical Gaussian-like bright region to simulate
-    /// emission nebulae or light pollution gradients.
+    /// Add an elliptical Gaussian-like bright region to `pixels`, as an emission nebula or a
+    /// light-pollution gradient.
     pub(crate) fn add_to(&self, pixels: &mut Buffer2<f32>) {
         let size = pixels.size();
         let cx = self.center.x * size.width as f32;

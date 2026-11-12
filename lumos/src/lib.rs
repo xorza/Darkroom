@@ -24,10 +24,8 @@
 //! use lumos::{LoadCtx, StarDetectionConfig, StarDetector};
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! // Load an astronomical image
 //! let image = LoadCtx::default().linear("linear_light_001.fits")?;
 //!
-//! // Detect stars
 //! let config = StarDetectionConfig::default();
 //! let mut detector = StarDetector::checked(config)?;
 //! let result = detector.detect(&image);

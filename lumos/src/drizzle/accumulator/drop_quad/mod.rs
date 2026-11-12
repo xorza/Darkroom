@@ -17,10 +17,8 @@ pub(super) struct DropQuad {
 impl DropQuad {
     /// The area the drop shares with the output pixel whose lower-left corner is `corner`.
     ///
-    /// Shifts the quadrilateral so that the cell becomes the unit square `[0,1]×[0,1]`, then sums
-    /// the signed areas of its edges. Output pixels are integer-centred (pixel `o` spans `[o - 0.5,
-    /// o + 0.5]`, as at `STScI`), so a caller passes the cell's corner `o - 0.5`. Port of
-    /// `boxer()`.
+    /// Output pixels are integer-centred (pixel `o` spans `[o - 0.5, o + 0.5]`, as at `STScI`), so a
+    /// caller passes the cell's corner `o - 0.5`. Port of `boxer()`.
     #[inline]
     pub(super) fn overlap(&self, corner: DVec2) -> f64 {
         let shifted = self.corners.map(|vertex| vertex - corner);
@@ -41,12 +39,9 @@ const SGAREA_DX_MIN: f64 = 1e-14;
 /// When summed over all 4 edges of a convex quadrilateral (counterclockwise winding),
 /// the total gives the overlap area between the quadrilateral and the unit square.
 ///
-/// The body works in components rather than vectors, and deliberately: Green's theorem integrates
-/// along x with y as the integrand, so the axes have different jobs — `xlo`/`xhi` clip the segment
-/// and `ylo`/`yhi` evaluate it at those clips, and the trapezoid area multiplies an x-difference by
-/// a y-sum. Packing those into points would hide which axis each term comes from. Only the two
-/// genuinely vectorial steps are vectors: the endpoint difference, and `det` as the cross product
-/// of the endpoints.
+/// The body works in components rather than vectors on purpose: Green's theorem integrates along
+/// x with y as the integrand, so the axes have different jobs, and points would hide which axis
+/// each term comes from. Only the endpoint difference and the cross product `det` are vectors.
 #[inline]
 fn sgarea(from: DVec2, to: DVec2) -> f64 {
     let delta = to - from;

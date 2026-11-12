@@ -41,9 +41,7 @@ impl AffineKernel {
     }
 }
 
-/// Applies contrast and brightness adjustment to an image in place using CPU.
-/// The kernels read and write the same row, so the path holds no scratch buffer
-/// and allocates nothing.
+/// Adjusts `image` in place: the kernels read and write the same row, so nothing is allocated.
 pub(super) fn apply(params: ContrastBrightness, image: &mut InterleavedImage) {
     apply_on(IsaTier::widest(), params, image);
 }

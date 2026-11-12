@@ -114,9 +114,9 @@ impl<E: Fn(usize) -> bool> MosaicSampling<E> {
     /// A smoothing kernel on a mosaic mixes colors, so the multiresolution estimator does not
     /// apply. The difference of a photosite and the nearest same-color photosite to its right
     /// cancels any signal that changes slowly over that distance, and leaves the two noises: `√2·σ`
-    /// for white noise. MAD makes the stars and the hits a minority that does not count. Every row
-    /// of a Bayer and of an X-Trans pattern holds all three colors, so the neighbour is at most six
-    /// photosites away.
+    /// for white noise. MAD makes the stars and the hits a minority that does not count. A color
+    /// recurs within [`CfaType::MAX_PERIOD`] photosites on every row that holds it, so the
+    /// neighbour is at most six away.
     pub(crate) fn noise(&self, mosaic: &Buffer2<f32>) -> ArrayVec<f32, 3> {
         debug_assert_eq!(mosaic.size(), self.size, "the mosaic sampled");
         let mut differences: ArrayVec<Vec<f32>, 3> = self

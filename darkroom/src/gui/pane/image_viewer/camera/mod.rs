@@ -2,10 +2,9 @@
 //! px → the pane-local rect a [`Viewport`] paints into, plus the two framing
 //! answers (fit, zoom-about-center) built on it.
 //!
-//! The other half is [`ZoomRange`], the pan/zoom folding the viewer shares
-//! with the graph canvas. Split off here
-//! so the algebra can be read — and tested — without the widget tree around
-//! it: everything below is a pure function of sizes and viewports.
+//! The other half is [`ZoomRange`], the pan/zoom folding the viewer shares with the graph
+//! canvas. Everything below is a pure function of sizes and viewports, so it is tested
+//! without the widget tree.
 
 use glam::Vec2;
 use palantir::{Rect, Size};
@@ -13,8 +12,8 @@ use palantir::{Rect, Size};
 use crate::core::document::viewport::Viewport;
 use crate::gui::widgets::zoom_range::ZoomRange;
 
-/// Viewer zoom range — far wider than the canvas's: out to overview a
-/// full-sensor frame in a small pane, in for pixel peeping.
+/// Viewer zoom range, far wider than the canvas's: out to overview a full-sensor frame in a
+/// small pane, in for pixel peeping.
 pub(super) const VIEWER_ZOOM: ZoomRange = ZoomRange {
     min: 0.02,
     max: 32.0,

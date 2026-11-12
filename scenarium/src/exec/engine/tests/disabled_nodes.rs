@@ -28,10 +28,9 @@ async fn disabled_node_stays_compiled_but_breaks_downstream() {
     );
 }
 
-/// With `mult`'s sum-fed input made optional, disabling `sum` no longer
-/// breaks the chain: `sum` is skipped but `get_b → mult → print` still
-/// runs (mirrors `optional_unbound_does_not_propagate`, but via the
-/// disable flag rather than a cleared binding).
+/// With `mult`'s sum-fed input made optional, disabling `sum` no longer breaks the chain: `sum`
+/// is skipped but `get_b → mult → print` still runs (mirrors `optional_unbound_does_not_propagate`,
+/// via the disable flag rather than a cleared binding).
 #[tokio::test]
 async fn disabled_upstream_with_optional_consumer_still_runs() {
     let mut e = TestEngine::over(TestGraph::sample());
@@ -47,14 +46,11 @@ async fn disabled_upstream_with_optional_consumer_still_runs() {
 
 /// …and the same shape must survive **execution**, not just planning.
 ///
-/// The consumer is schedulable and the disabled producer is not in
-/// `process_order` — but resolution marked every bound producer live
-/// regardless, so it registered a reader for an output nothing would
-/// ever write. Collecting the consumer's inputs then demanded that
-/// output: on a cold cache the run died on `a resolved producer
-/// output must be resident when consumed`, and on a warm one it
-/// silently served whatever the producer had left in RAM from before
-/// it was disabled, as if it were this run's value.
+/// The consumer is schedulable and the disabled producer is not in `process_order`, so resolution
+/// must register no reader for an output nothing will write: otherwise collecting the consumer's
+/// inputs demands that output — on a cold cache the run dies on `a resolved producer output must
+/// be resident when consumed`, and on a warm one it serves whatever the producer left in RAM
+/// before it was disabled, as if it were this run's value.
 ///
 /// `mult`'s second port is the optional one, so the disabled producer feeds
 /// *that*; unbound is what optional means, and `arith`'s identity of 1 is

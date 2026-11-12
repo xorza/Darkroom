@@ -36,8 +36,7 @@ pub(super) fn validate(
                     func_id,
                 })?,
         };
-        // The same two questions asked of each of the three pools, so the pool
-        // is the only thing each call spells out.
+        // The same two questions asked of each of the three pools.
         let arity = |pool| CompiledGraphValidationError::Arity {
             node_id: *node_id,
             pool,
@@ -67,8 +66,8 @@ pub(super) fn validate(
             .get_span(e_node.events)
             .ok_or_else(|| range(PortPool::Event))?;
 
-        // Unreachable while the walk mints every subscriber from a successful
-        // placement lookup — kept as the backstop if that stops holding.
+        // Unreachable while the walk mints every subscriber from a successful placement lookup;
+        // kept as the backstop.
         for e_event in events {
             let subscribers = compiled
                 .subscribers
@@ -87,9 +86,8 @@ pub(super) fn validate(
 
         for e_input in inputs {
             if let ExecBinding::Wire(e_addr) = &e_input.binding {
-                // Unreachable while `Compiler::resolve` mints every address
-                // from a successful placement lookup — kept as the backstop if
-                // that stops holding.
+                // Unreachable while `Compiler::resolve` mints every address from a successful
+                // placement lookup; kept as the backstop.
                 let target_e_node = compiled.e_nodes.get(e_addr.node_idx).ok_or(
                     CompiledGraphValidationError::MissingBindingTarget {
                         node_id: *node_id,

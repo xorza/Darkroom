@@ -1,6 +1,5 @@
-//! A dense bitset over an index space — [`Col`](crate::containers::col::Col)'s
-//! set-shaped sibling, keyed the same way and with the same guarantee that one
-//! space's index cannot reach into another's set.
+//! A dense bitset over an index space: [`Col`](crate::containers::col::Col)'s set-shaped
+//! sibling, where one space's index likewise cannot reach into another's set.
 
 use std::marker::PhantomData;
 use std::slice;
@@ -10,10 +9,9 @@ use crate::containers::col::Idx;
 /// A dense bitset over the space `I` indexes — a visited mark for a walk over
 /// it (the schedule validator's, the eviction cone's).
 ///
-/// `I` is carried, not stored, for the same reason [`Col`](crate::containers::col::Col)
-/// carries it: one space's index cannot probe another's set. `len` is kept
-/// because word-granular indexing would let an out-of-range index land in the
-/// last word's padding bits instead of panicking.
+/// `I` is carried, not stored, as in [`Col`](crate::containers::col::Col). `len` is kept
+/// because word-granular indexing would let an out-of-range index land in the last word's
+/// padding bits instead of panicking.
 #[derive(Debug)]
 pub(crate) struct IdxSet<I> {
     words: Vec<u64>,
@@ -21,8 +19,7 @@ pub(crate) struct IdxSet<I> {
     space: PhantomData<I>,
 }
 
-/// An empty set, for any `I`. Derived, this would demand `I: Default`, which
-/// an index the set never stores has no reason to satisfy.
+/// An empty set, for any `I`; derived, this would demand `I: Default`.
 impl<I> Default for IdxSet<I> {
     fn default() -> Self {
         Self {

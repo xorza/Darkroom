@@ -40,11 +40,9 @@ pub enum BlendMode {
 /// Parameters for image blending.
 #[derive(Debug, Clone, Copy)]
 pub struct Blend {
-    /// The blend mode to use.
+    /// How a source channel combines with the destination's.
     pub mode: BlendMode,
-    /// Alpha value for blending in range [0.0, 1.0].
-    /// 0.0 = fully dst, 1.0 = fully src (for Normal mode)
-    /// For other modes, this controls the strength of the effect.
+    /// The mix of the blended value over `dst` on `[0, 1]`: 0 is `dst`, 1 the blended value.
     pub alpha: f32,
     /// The ends of the range each color channel's result is held to, after the alpha mix; an
     /// integer one saturates to its range whatever this is, and an alpha channel is not held.
@@ -67,21 +65,18 @@ impl Blend {
         }
     }
 
-    /// Builder method to set blend mode.
     #[must_use]
     pub const fn mode(mut self, mode: BlendMode) -> Self {
         self.mode = mode;
         self
     }
 
-    /// Builder method to set alpha.
     #[must_use]
     pub const fn alpha(mut self, alpha: f32) -> Self {
         self.alpha = alpha;
         self
     }
 
-    /// Builder method to set the clamp.
     #[must_use]
     pub const fn clamp(mut self, clamp: Clamp) -> Self {
         self.clamp = clamp;

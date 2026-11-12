@@ -1,26 +1,16 @@
 //! [`ProgramBuilder`]: a [`CompiledGraph`] built by hand, for the tests below
 //! the compiler.
 //!
-//! The schedule and cache tests are about topology, not authoring — they want
-//! "a source, a consumer reading its port 0, a sink" and no library at all, so
-//! they hand-build the artifact.
+//! The schedule and cache tests want "a source, a consumer reading its port 0, a sink" and no
+//! library, so they hand-build the artifact. The id↔index pair is a value ([`Placed`]), and a
+//! binding is asked of the node it points at ([`Placed::out`]).
 //!
-//! The id↔index pair is a value ([`Placed`]) rather than a convention each
-//! fixture re-derives, and a binding is asked of the node it points at
-//! ([`Placed::out`]).
+//! The compiler's own tests use the real [`Compiler`](crate::Compiler); this is for programs a
+//! compile *wouldn't* produce, such as a corrupt artifact a validator must reject.
 //!
-//! The two terminals are [`Sweep`] — what the cache-aware pass makes of a
-//! schedule — and [`Runs`], the executor over one. A sweep asks what the
-//! schedule *became*; a run asks what walking it *did*.
-//!
-//! The compiler's own tests keep using the real [`Compiler`](crate::Compiler):
-//! this is for programs a compile *wouldn't* produce — a corrupt artifact a
-//! validator must reject, or a topology that would take a library to express.
-//!
-//! The three things a fixture drives the builder with each own a file:
-//! [`NodeBuilder`](node_builder::NodeBuilder) accumulates one node,
-//! [`Sweep`](sweep::Sweep) is the cache-aware pass over a stated schedule, and
-//! [`Runs`](runs::Runs) is the executor over one.
+//! [`NodeBuilder`](node_builder::NodeBuilder) accumulates one node, [`Sweep`](sweep::Sweep) is
+//! the cache-aware pass over a stated schedule (what it *became*), and [`Runs`](runs::Runs) is
+//! the executor over one (what walking it *did*).
 
 pub(crate) mod node_builder;
 pub(crate) mod runs;
@@ -39,11 +29,8 @@ use crate::internals::program::node_builder::NodeBuilder;
 use crate::internals::program::runs::Runs;
 use crate::internals::program::sweep::Sweep;
 
-/// Where one node landed: the stable id a host names it by, and the dense
-/// index every per-run column is keyed on.
-///
-/// Carrying both is what removes the `NodeId::from_u128(idx + 1)` convention —
-/// a fixture asks the node rather than re-deriving one from the other.
+/// Where one node landed: the stable id a host names it by, and the dense index every per-run
+/// column is keyed on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Placed {
     pub(crate) node_id: NodeId,
@@ -56,8 +43,7 @@ impl Placed {
         ExecBinding::Wire(self.addr(port))
     }
 
-    /// This node's output `port` as the interned address a binding carries —
-    /// for a fixture that *names* a port rather than reads through one.
+    /// This node's output `port` as the interned address a binding carries.
     pub(crate) fn addr(self, port: usize) -> OutputAddr {
         OutputAddr {
             node_idx: self.node_idx,
@@ -89,8 +75,7 @@ impl ProgramBuilder {
         &self.program
     }
 
-    /// The finished artifact, for a test that installs it rather than planning
-    /// over it.
+    /// The finished artifact.
     pub(crate) fn into_program(self) -> CompiledGraph {
         self.program
     }
@@ -99,46 +84,38 @@ impl ProgramBuilder {
         &mut self.program
     }
 
-    /// Plan `seeds` over the program, surfacing the planner's refusal — a
-    /// dependency cycle, or a seed the program does not hold.
+    /// Plan `seeds` over the program, surfacing the planner's refusal (a dependency cycle, or a
+    /// seed the program does not hold).
     pub(crate) fn try_plan(&self, seeds: &RunSeeds) -> ExecResult<RunSchedule> {
         let mut schedule = RunSchedule::default();
         Planner::default().plan(&self.program, seeds, &mut schedule)?;
         Ok(schedule)
     }
 
-    /// [`try_plan`](Self::try_plan) for the majority of tests, where planning
-    /// succeeding is a precondition rather than the subject.
+    /// [`try_plan`](Self::try_plan), panicking on refusal.
     pub(crate) fn plan(&self, seeds: &RunSeeds) -> RunSchedule {
         self.try_plan(seeds).expect("the fixture program plans")
     }
 
-    /// Plan every sink — the ordinary "produce the outputs" run.
+    /// Plan every sink.
     pub(crate) fn plan_sinks(&self) -> RunSchedule {
         self.plan(&RunSeeds::sinks())
     }
 
-    /// Stand up the cache-aware sweep over a schedule the fixture describes
-    /// directly, rather than one the planner produced.
-    ///
-    /// Sweep tests are about what liveness and reuse do to an *already*
-    /// planned schedule, so they state the planner's output — roots, blocked
-    /// nodes — instead of arranging a graph that would provoke it.
+    /// Stand up the cache-aware sweep over a schedule the fixture states directly (roots,
+    /// blocked nodes), rather than one the planner produced.
     pub(crate) fn sweep(&self) -> Sweep<'_> {
         Sweep::new(self)
     }
 
-    /// Stand up the executor over this program — see [`Runs`].
+    /// Stand up the executor over this program.
     pub(crate) fn runs(&self) -> Runs<'_> {
         Runs::new(self)
     }
 
-    /// The planner's output, stated rather than provoked: every placed node in
-    /// `process_order`, each verdicted `initial`, and no roots yet.
-    ///
-    /// The one place the "a hand-built program's nodes run in placement order"
-    /// convention lives, so the sweep and the run loop cannot disagree about
-    /// what a fixture's schedule looks like.
+    /// The planner's output, stated rather than provoked: every placed node in `process_order`,
+    /// each verdicted `initial`, and no roots yet. The one place the "nodes run in placement
+    /// order" convention lives.
     fn staged(&self, initial: NodeState) -> RunSchedule {
         let mut schedule = RunSchedule::default();
         schedule.reset_for_program(&self.program);
@@ -158,17 +135,13 @@ impl ProgramBuilder {
         schedule
     }
 
-    /// [`rooted`](Self::rooted) at the planner's positive verdict — the
-    /// structural plan a whole-program run starts from.
-    ///
-    /// For a fixture driving a pass *below* the planner, where arranging a
-    /// graph that would provoke this plan says nothing the test is about.
+    /// [`rooted`](Self::rooted) at the planner's positive verdict: the structural plan a
+    /// whole-program run starts from.
     pub(crate) fn planned(&self) -> RunSchedule {
         self.rooted(NodeState::Cut)
     }
 
-    /// [`rooted`](Self::rooted) with every node cleared to run — the
-    /// executor's stated schedule.
+    /// [`rooted`](Self::rooted) with every node cleared to run.
     pub(super) fn running(&self) -> RunSchedule {
         self.rooted(NodeState::Run)
     }

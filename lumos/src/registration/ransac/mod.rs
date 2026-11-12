@@ -1,15 +1,8 @@
 //! RANSAC (Random Sample Consensus) for robust transformation estimation.
 //!
-//! This module implements RANSAC with a truncated Welsch loss to robustly estimate
-//! transformations in the presence of outliers: each point's residual is graded continuously at
-//! the noise scale `σ_max`, rather than cut at a hand-tuned inlier threshold.
-//!
-//! The algorithm works by:
-//! 1. Randomly sampling minimal point sets
-//! 2. Computing candidate transformations
-//! 3. Scoring with the truncated Welsch loss (continuous, not binary inlier/outlier)
-//! 4. Keeping the best model
-//! 5. Refining with least squares on inliers
+//! Hypotheses from minimal samples are scored with a truncated Welsch loss: each point's residual
+//! is graded continuously at the noise scale `σ_max`, rather than cut at a hand-tuned inlier
+//! threshold. The best is refined by local optimization (LO-RANSAC).
 
 pub(crate) mod ransac_config;
 mod sampling;
@@ -28,7 +21,7 @@ use crate::registration::ransac::sampling::Sampler;
 use crate::registration::ransac::welsch::WelschScorer;
 use crate::registration::transform::{Transform, TransformType};
 
-/// Pre-allocated buffers for local optimization (LO-RANSAC) to avoid per-iteration allocations.
+/// Buffers for local optimization (LO-RANSAC), allocated once per search.
 #[derive(Debug)]
 struct LocalOptBuffers {
     /// The inliers of the refinement that is currently best.
@@ -50,10 +43,8 @@ impl LocalOptBuffers {
 
 /// A candidate transform together with the score and inlier set it earned.
 ///
-/// The three always move as a unit — a score belongs to the transform that produced it and to
-/// the inliers it counted — so the loop swaps whole hypotheses. `inliers` is owned rather than
-/// borrowed for exactly that reason: a swap trades two vector headers and keeps both
-/// allocations for reuse, where separate fields would need three assignments to stay coherent.
+/// The three move as a unit, so the loop swaps whole hypotheses: a swap trades two vector headers
+/// and keeps both allocations for reuse.
 #[derive(Debug)]
 struct ScoredHypothesis {
     transform: Transform,
@@ -78,7 +69,7 @@ pub(super) struct RansacEstimator {
 }
 
 impl RansacEstimator {
-    /// Create a RANSAC estimator for the runtime-derived maximum noise scale.
+    /// `max_sigma` is the maximum noise scale, derived at run time.
     pub(super) fn new(config: RansacConfig, max_sigma: f64) -> Self {
         debug_assert!(
             max_sigma.is_finite() && max_sigma > 0.0,
@@ -306,8 +297,7 @@ impl<'a> Search<'a> {
     /// Local optimization: refine `hypothesis` in place by re-estimating from its inliers and
     /// re-scoring, until the score stops improving or the iterations run out (LO-RANSAC).
     ///
-    /// `hypothesis` is left exactly as it came in unless the refinement strictly improves it — see
-    /// the acceptance test at the end for why that guard is not optional.
+    /// `hypothesis` is left exactly as it came in unless the refinement strictly improves it.
     fn local_optimization(&self, hypothesis: &mut ScoredHypothesis, buffers: &mut LocalOptBuffers) {
         let min_samples = self.transform_type.min_points();
         let mut cur_transform = hypothesis.transform;

@@ -1,33 +1,28 @@
 //! Inline editor for `Binding::Const(ConstValue)` on an input port.
 //!
-//! Renders next to the port label in the node body and returns a new
-//! `ConstValue` when the user changes it. The host (`node_ui`)
-//! converts that into an `GraphIntent::SetInput` carrying a constant binding.
+//! Renders next to the port label in the node body and returns a new `ConstValue` when the
+//! user changes it. The host (`node_ui`) converts that into a `GraphIntent::SetInput`
+//! carrying a constant binding.
 //!
-//! Supports `Int`, `Float`, `Bool`, `String`, and `FsPath` (a pick button
-//! summarizing the chosen path or paths — the port row's value cell polls the
-//! click, then `App` opens the OS file dialog after authoring). `Enum` renders
-//! as a dropdown over the port's declared variants. `Any` renders as a smart
-//! text field that infers the literal's kind from the text (see
-//! [`parse_any`]).
+//! Supports `Int`, `Float`, `Bool`, `String`, and `FsPath` (a pick button summarizing the
+//! chosen path or paths; the port row's value cell polls the click, then `App` opens the OS
+//! file dialog after authoring). `Enum` renders as a dropdown over the port's declared
+//! variants. `Any` renders as a smart text field that infers the literal's kind from the
+//! text (see [`parse_any`]).
 //!
-//! Numeric fields (`Int`/`Float`) render as an editable `DragValue`
-//! (a `DragValue` field): drag horizontally to scrub, click to type an exact
-//! value. `Any` stays a plain smart text field — its editing reinterprets
-//! the literal's kind, which the numeric-only `DragValue` can't do.
+//! Numeric fields (`Int`/`Float`) render as an editable `DragValue`: drag horizontally to
+//! scrub, click to type an exact value. `Any` stays a text field, as its editing
+//! reinterprets the literal's kind, which `DragValue` can't do.
 //!
-//! Every editor emits **once per committed gesture**, not per frame: the
-//! `DragValue` reports its commit (drag release / Enter / blur), the text
-//! editors commit on Enter or focus loss. Mid-gesture the document keeps
-//! its old value — the widgets display their in-progress state themselves —
-//! so one scrub or one typed entry lands as one `SetInput` undo step.
+//! Every editor emits **once per committed gesture**, not per frame: the `DragValue` reports
+//! its commit (drag release, Enter or blur), the text editors commit on Enter or focus loss.
+//! Mid-gesture the document keeps its old value, so one scrub or one typed entry lands as one
+//! `SetInput` undo step.
 //!
-//! Textual edit state: a `TextEdit` round-trip through `i64`/`f64`
-//! formatting would clobber partial input (typing "3." would reformat
-//! to "3" on the next frame). The text fields are palantir's buffered
-//! `TextEdit`s, which keep the draft under the editor id, take the document
-//! value only while idle, and hand the draft over on its commit, which is
-//! when it is parsed.
+//! A `TextEdit` round-trip through `i64`/`f64` formatting would clobber partial input (typing
+//! "3." would reformat to "3" on the next frame). The text fields are palantir's buffered
+//! `TextEdit`s, which keep the draft under the editor id, take the document value only while
+//! idle, and hand the draft over on its commit, which is when it is parsed.
 
 use std::fmt::{self as std_fmt, Display, Formatter};
 
@@ -94,10 +89,9 @@ impl ConstEditor<'_> {
             data_type,
             value_variants,
         } = self;
-        // Picker variants (the input's `value_variants`, e.g. named config presets)
-        // override the per-type editor: a dropdown of variant names, binding the
-        // chosen variant's value. Works regardless of `data_type` (a custom config
-        // port still shows its presets).
+        // Picker variants (the input's `value_variants`, e.g. named config presets) override
+        // the per-type editor: a dropdown of variant names, binding the chosen variant's value,
+        // whatever the `data_type`.
         if !value_variants.is_empty() {
             let current = value_variants
                 .iter()
@@ -113,18 +107,15 @@ impl ConstEditor<'_> {
             )?;
             return Some(picked.value.clone());
         }
-        // The widget follows the *declared* port type, not the stored literal's
-        // kind: a coerced literal gets the declared type's editor (displaying
-        // its coerced reading), and the next commit stores the declared kind —
-        // re-canonicalizing the document. An admitted literal is in the type's
-        // coercion class, or `Null` on an optional input left unset, which
-        // shows as a read-only label.
+        // The widget follows the declared port type, not the stored literal's kind: a coerced
+        // literal gets the declared type's editor, and the next commit stores the declared kind.
+        // An admitted literal is in the type's coercion class, or `Null` on an optional input
+        // left unset, which shows as a read-only label.
         match data_type {
-            // An untyped (`Any`) port declares no concrete kind, so the literal's
-            // kind is inferred from the text (see `parse_any`). Keyed on the port
-            // type, not the stored value, so the field keeps reinterpreting across
-            // kinds — typing "42" then "hello" flips `Int` → `String` — instead of
-            // locking to the kind first entered.
+            // An untyped port declares no concrete kind, so the literal's kind is inferred from
+            // the text (see `parse_any`). Keyed on the port type, not the stored value, so
+            // typing "42" then "hello" flips `Int` → `String` rather than locking to the first
+            // kind entered.
             DataType::Any => field.any_smart(ui, value),
             DataType::Int => {
                 let Some(cur) = value.as_i64() else {
@@ -153,8 +144,8 @@ impl ConstEditor<'_> {
                 field.text(ui, cur).map(ConstValue::String)
             }
             DataType::FsPath(config) => {
-                // The admitted literal is the shape the mode takes; the pick
-                // dialog (opened per the declared config) replaces it wholesale.
+                // The admitted literal is the shape the mode takes; the pick dialog replaces it
+                // wholesale.
                 let preview = match value {
                     ConstValue::FsPath(path) => PathPreview::single(path, config.mode),
                     ConstValue::FsPaths(paths) => PathPreview::multi(paths),
@@ -181,9 +172,8 @@ impl ConstEditor<'_> {
                 None
             }
             DataType::Enum(type_id) => {
-                // A dropdown over the port's registered variants. The variant list
-                // lives on the library's `Enum` type entry, not on the value or the
-                // id-only `DataType`; an admitted literal names one of them.
+                // The variant list lives on the library's `Enum` type entry, not on the value or
+                // the id-only `DataType`; an admitted literal names one of them.
                 let Some(cur) = value.as_enum() else {
                     return field.unset(ui, value);
                 };
@@ -211,15 +201,11 @@ impl ConstEditor<'_> {
 }
 
 impl Field<'_> {
-    /// A dropdown over `pick`'s options, returning the newly picked option —
-    /// `None` when the selection is unchanged, so a frame without a pick clones nothing. Both pickers (the value-variant
-    /// override and the `Enum` port) are this widget over different option
-    /// lists, each read through its own `label`.
+    /// A dropdown over `pick`'s options, returning the newly picked option, or `None` when the
+    /// selection is unchanged. Both pickers (the value-variant override and the `Enum` port) are
+    /// this widget over different option lists, each read through its own `label`.
     ///
-    /// Generic over the row so each caller hands its own collection over — a
-    /// port's `&[ValueVariant]`, an `Enum` type's `&[String]` — rather than
-    /// projecting the labels into a fresh `Vec<&str>` on every frame the port
-    /// records.
+    /// Generic over the row, so no `Vec<&str>` of labels is projected on every frame.
     fn combo<'o, S: PartialEq>(self, ui: &mut Ui, pick: DropdownOptions<'o, S>) -> Option<&'o S> {
         let DropdownOptions {
             options,
@@ -236,13 +222,11 @@ impl Field<'_> {
         changed.then_some(current)
     }
 
-    /// Editor for an untyped (`Any`) port: one text field that reinterprets
-    /// what the user types into the tightest [`ConstValue`] — `true`/`false` →
-    /// `Bool`, an integer → `Int`, a finite decimal → `Float`, anything else →
-    /// `String`. The port declares no kind, so the kind rides on the value
-    /// itself; the ambiguity is inherent — `"42"` always reads back as `Int`,
-    /// never the string `"42"`. Returns the reinterpreted value only when the
-    /// edit committed a change: see [`any_edit`].
+    /// Editor for an untyped (`Any`) port: one text field that reinterprets what the user types
+    /// into the tightest [`ConstValue`]: `true`/`false` → `Bool`, an integer → `Int`, a finite
+    /// decimal → `Float`, anything else → `String`. The kind rides on the value itself, so
+    /// `"42"` always reads back as `Int`. Returns the reinterpreted value only when the edit
+    /// committed a change: see [`any_edit`].
     fn any_smart(self, ui: &mut Ui, value: &ConstValue) -> Option<ConstValue> {
         let shown = fmt!(ui, "{}", AnyText(value));
         any_edit(&self.text(ui, shown)?, value)
@@ -290,12 +274,9 @@ impl Field<'_> {
             .committed_text
     }
 
-    /// Editor for an `Int` const: an editable `DragValue` — drag horizontally
-    /// to scrub, click to type an exact value. Both modes, the focus swap, and
-    /// Enter/blur commit live inside the widget. The draft re-seeds from the
-    /// document value every frame and is emitted only on the widget's
-    /// `committed` frame, which carries the gesture's final value — one scrub
-    /// or typed entry lands as one change.
+    /// Editor for an `Int` const: an editable `DragValue`. The draft re-seeds from the document
+    /// value every frame and is emitted only on the widget's `committed` frame, which carries
+    /// the gesture's final value, so one scrub or typed entry lands as one change.
     fn int(self, ui: &mut Ui, cur: i64) -> Option<ConstValue> {
         let mut draft = cur;
         let committed = DragValue::new(&mut draft)
@@ -321,17 +302,16 @@ impl Field<'_> {
             .id(self.id)
             .show(ui)
             .committed;
-        // Bit-exact: matches ConstValue's PartialEq, so `1.0` → `1`
-        // (same value, different textual form) doesn't emit a change.
+        // Bit-exact, as `ConstValue`'s `PartialEq` is, so `1.0` → `1` (same value, different
+        // text) emits no change.
         (committed && draft.to_bits() != cur.to_bits()).then_some(ConstValue::Float(draft))
     }
 }
 
-/// Canonical text for an `Any` const, chosen so [`parse_any`] round-trips the
-/// numeric and bool kinds: `Float` keeps its `.0` (else `3.0` would reparse as
-/// `Int`) and `Null` shows blank (an unseeded `Any` starts empty). A `String`
-/// prints verbatim, so a numeric-looking string (`"42"`) is the one kind that
-/// doesn't round-trip — the accepted ambiguity of an untyped literal.
+/// Canonical text for an `Any` const, chosen so [`parse_any`] round-trips the numeric and bool
+/// kinds: `Float` keeps its `.0` (else `3.0` would reparse as `Int`) and `Null` shows blank. A
+/// `String` prints verbatim, so a numeric-looking string (`"42"`) is the one kind that doesn't
+/// round-trip, the accepted ambiguity of an untyped literal.
 #[derive(Clone, Copy, Debug)]
 struct AnyText<'a>(&'a ConstValue);
 
@@ -372,10 +352,8 @@ fn parse_any(text: &str) -> ConstValue {
     ConstValue::String(text.to_owned())
 }
 
-/// Drag speed for a float: ≈1% of the value's magnitude per logical pixel
-/// (floored at a unit's worth), so scrubbing feels consistent whether the
-/// value is `0.5` or `5000`. Sampled by `DragValue` at drag start, so it
-/// stays fixed for the duration of a drag.
+/// Drag speed for a float: ≈1% of the value's magnitude per logical pixel (floored at a unit's
+/// worth). Sampled by `DragValue` at drag start, so it stays fixed for the duration of a drag.
 fn float_speed(v: f64) -> f64 {
     v.abs().max(1.0) * 0.01
 }

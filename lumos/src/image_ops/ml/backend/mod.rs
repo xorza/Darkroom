@@ -201,8 +201,7 @@ fn tile_starts(dim: usize, stride: usize) -> Vec<usize> {
 }
 
 /// Fill the reused NHWC `[1,512,512,3]` `input` buffer from the tile at `(tx, ty)`, clamped to
-/// `[0,1]`. Mono replicates its single channel to R=G=B. `input` is the caller's
-/// tile-loop-lifetime scratch buffer (see [`run_tiles`]), overwritten in full every call.
+/// `[0,1]`. Mono replicates its single channel to R=G=B. `input` is overwritten in full.
 fn fill_tile_input(planar: &LinearImage, tile: USizeVec2, input: &mut [f32]) {
     let w = planar.width();
     let chans: [&[f32]; 3] = if planar.is_rgb() {

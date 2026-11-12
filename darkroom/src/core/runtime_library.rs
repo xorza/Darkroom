@@ -14,9 +14,8 @@ pub(crate) struct RuntimeLibrary {
     /// The registry as last composed. Replaced whole on a recompose, never edited.
     cur: ScenariumLibrary,
     model_paths: MlModelPaths,
-    /// Where the preview func's lambda publishes. Created once and captured by
-    /// every recomposed snapshot, so the values in flight survive a settings
-    /// change rebuilding the registry underneath them.
+    /// Where the preview func's lambda publishes. Captured by every recomposed snapshot, so
+    /// values in flight survive a settings change rebuilding the registry.
     pub(crate) previews: Arc<PreviewSink>,
 }
 
@@ -78,11 +77,9 @@ mod tests {
 
     use crate::core::runtime_library::compose;
 
-    /// Every shipped func and type id is distinct across all the libraries the editor
-    /// merges: `merge` refuses a repeated id, so composing them all is the check, and the
-    /// counts show no library was dropped along the way. The ids are hand-assigned
-    /// constants that saved graphs bind to, so a collision would make one node load as
-    /// another.
+    /// Every shipped func and type id is distinct across the merged libraries: `merge` refuses a
+    /// repeated id, so composing them all is the check, and the counts show none was dropped. The
+    /// ids are constants saved graphs bind to, so a collision would load one node as another.
     #[test]
     fn every_func_and_type_id_is_unique_across_the_libraries() {
         let paths = MlModelPaths::default();

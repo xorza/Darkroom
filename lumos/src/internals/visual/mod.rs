@@ -97,7 +97,7 @@ pub(crate) fn debug_file(name: &str) -> Option<PathBuf> {
     internals::debug_output_path(name).map(|path| path.with_extension(TEST_OUTPUT_IMAGE_EXT))
 }
 
-/// Convert an f32 mono plane to an imaginarium `RGB_F32` image under `tone`.
+/// An f32 mono plane as an `RGB_F32` image under `tone`.
 pub(crate) fn mono_to_rgb(pixels: &Buffer2<f32>, tone: ToneMap) -> InterleavedImage {
     let desc = InterleavedDesc::new(pixels.size(), ColorFormat::RGB_F32);
     let rgb: Vec<f32> = tone
@@ -108,8 +108,7 @@ pub(crate) fn mono_to_rgb(pixels: &Buffer2<f32>, tone: ToneMap) -> InterleavedIm
     InterleavedImage::new_with_data(desc, bytemuck::cast_slice(&rgb).to_vec()).unwrap()
 }
 
-/// Save imaginarium InterleavedImage to file using the configured test output format.
-/// Converts to `RGB_U8` if needed since some formats don't support float data.
+/// Save `image` as 8-bit RGB: the output formats do not take float samples.
 pub(crate) fn save_image(image: InterleavedImage, name: &str) {
     let Some(out) = debug_file(name) else {
         return;
@@ -122,7 +121,6 @@ pub(crate) fn save_image(image: InterleavedImage, name: &str) {
     raster::write_image(&out, &image_u8).expect("Failed to save image");
 }
 
-/// Convert an f32 plane to an 8-bit mono image under `tone`.
 #[expect(clippy::cast_sign_loss, reason = "a tone-mapped value lies in [0, 1]")]
 fn to_mono(pixels: &Buffer2<f32>, tone: ToneMap) -> GrayImage {
     let bytes: Vec<u8> = tone
@@ -133,21 +131,18 @@ fn to_mono(pixels: &Buffer2<f32>, tone: ToneMap) -> GrayImage {
     GrayImage::from_raw(pixels.width() as u32, pixels.height() as u32, bytes).unwrap()
 }
 
-/// Convert boolean mask to mono image.
 #[cfg(feature = "real-data")]
 fn mask_to_mono(mask: &BitBuffer2) -> GrayImage {
     let bytes: Vec<u8> = mask.iter().map(|b| if b { 255 } else { 0 }).collect();
     GrayImage::from_raw(mask.size().width as u32, mask.size().height as u32, bytes).unwrap()
 }
 
-/// Convert labeled image to colored visualization.
-///
-/// Each label gets a unique color for easy visualization.
+/// Each label in its own color, label 0 black.
 #[cfg(feature = "real-data")]
 pub(crate) fn labels_to_rgb(labels: &Buffer2<u32>) -> image::RgbImage {
     use image::{Rgb, RgbImage};
 
-    // Generate distinct colors for labels using golden ratio
+    // Hues a golden-ratio step apart keep consecutive labels distinct.
     let label_to_color = |label: u32| -> Rgb<u8> {
         if label == 0 {
             return Rgb([0, 0, 0]);
@@ -167,7 +162,6 @@ pub(crate) fn labels_to_rgb(labels: &Buffer2<u32>) -> image::RgbImage {
     RgbImage::from_raw(labels.width() as u32, labels.height() as u32, pixels).unwrap()
 }
 
-/// Convert HSV to RGB color.
 #[cfg(feature = "real-data")]
 #[expect(
     clippy::cast_sign_loss,
@@ -212,7 +206,7 @@ pub(crate) fn save_linear(image: &LinearImage, name: &str) {
     eprintln!("wrote {}", path.display());
 }
 
-/// `image` encoded as PNG, the configured extension, and written to `path`.
+/// `image` encoded as PNG and written to `path`.
 fn write_png<P>(image: &image::ImageBuffer<P, Vec<u8>>, path: &Path) -> image::ImageResult<()>
 where
     P: image::PixelWithColorType<Subpixel = u8>,
@@ -229,7 +223,6 @@ pub(crate) fn save(pixels: &Buffer2<f32>, name: &str, tone: ToneMap) {
     }
 }
 
-/// Save RGB image to file using the configured test output format.
 #[cfg(feature = "real-data")]
 pub(crate) fn save_rgb(image: &image::RgbImage, name: &str) {
     if let Some(out) = debug_file(name) {
@@ -237,7 +230,6 @@ pub(crate) fn save_rgb(image: &image::RgbImage, name: &str) {
     }
 }
 
-/// Save mask to file using the configured test output format.
 #[cfg(feature = "real-data")]
 pub(crate) fn save_mask(mask: &BitBuffer2, name: &str) {
     if let Some(out) = debug_file(name) {

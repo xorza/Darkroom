@@ -70,8 +70,8 @@ pub struct StackConfig {
     pub weighting: Weighting,
     /// Frame normalization before stacking.
     pub normalization: Normalization,
-    /// Which ancillary per-pixel planes the combine should produce. Defaults to coverage, weight
-    /// and variance — they are what makes the stacked master measurable — but each is a full
+    /// Which ancillary per-pixel planes the combine produces. The presets take
+    /// [`QualityPlanes::STANDARD`], which makes the master measurable; each plane is a full
     /// image-sized allocation, so a caller that discards them should say so.
     pub quality: QualityPlanes,
     /// The fewest samples a pixel keeps when the combine leaves samples out. A flagged sample
@@ -317,17 +317,11 @@ impl StackConfig {
         })
     }
 
-    /// The single gate every combine passes through: reject an empty frame set, validate the
-    /// configuration against the frame count, build the cache, log what the run turned out to be,
-    /// reduce, and decide whether the result is real.
+    /// The single gate every combine passes through, so validation happens in exactly one place.
     ///
-    /// Every entry point routes here — including `MasterStack`, which builds a CFA cache of its
-    /// own — so config validation happens in exactly one place rather than being a convention each
-    /// entry point has to remember.
-    ///
-    /// `build` is deferred rather than taken as a built cache so that validation runs before a
-    /// potentially long load, and so the cache — whose spilled planes hold their disk space —
-    /// drops at the end of this scope on every path.
+    /// `build` is deferred so that validation runs before a potentially long load, and so the
+    /// cache, whose spilled planes hold their disk space, drops at the end of this scope on every
+    /// path.
     pub(crate) fn combine_cached<E: From<StackError>>(
         &self,
         set: FrameSet,
@@ -343,8 +337,7 @@ impl StackConfig {
         self.validate(frame_count).map_err(StackError::from)?;
 
         let cache = build()?;
-        // Logged after the load so the tier and quality facts come from the cache itself rather
-        // than being restated at each entry point.
+        // Logged after the load so the tier and quality facts come from the cache itself.
         tracing::info!(
             ?source,
             frame_count,

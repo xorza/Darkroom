@@ -10,7 +10,6 @@ fn match_triangles_too_few_points() {
         DVec2::new(0.0, 1.0),
     ];
 
-    // Both sides need >= 3 points
     assert!(match_points(&two, &three, &TriangleConfig::default()).is_empty());
     assert!(match_points(&three, &two, &TriangleConfig::default()).is_empty());
     assert!(match_points(&two, &two, &TriangleConfig::default()).is_empty());
@@ -30,7 +29,7 @@ fn match_triangles_empty_inputs() {
 
 #[test]
 fn match_identical_star_lists() {
-    // 5 points with asymmetric pattern → each matches itself
+    // Each of the 5 points matches itself.
     let poss = SQUARE_AND_CENTRE.to_vec();
 
     let matches = match_points(&poss, &poss, &TriangleConfig::default());
@@ -284,7 +283,6 @@ fn match_sparse_field_10_stars() {
 
     let matches = match_points(&ref_poss, &target_poss, &config);
 
-    // Translation-invariant matching should find all 10 stars
     assert_eq!(matches.len(), 10);
     for m in &matches {
         assert_eq!(m.idxs.reference, m.idxs.target);
@@ -317,15 +315,13 @@ fn match_with_subpixel_noise() {
     let config = TriangleConfig::default();
     let matches = match_points(&ref_poss, &target_poss, &config);
 
-    // With 80-pixel spacing and 0.3-pixel noise, ratios change by < 0.01 tolerance
-    // Should match most of the 25 stars
+    // At 80-pixel spacing, 0.3-pixel noise moves the ratios by less than the 0.01 tolerance.
     assert!(
         matches.len() >= 20,
         "Noisy matching found only {} matches",
         matches.len()
     );
 
-    // All matches should be correct (noise is small relative to spacing)
     for m in &matches {
         assert_eq!(
             m.idxs.reference, m.idxs.target,

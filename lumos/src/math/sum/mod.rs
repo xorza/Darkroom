@@ -18,11 +18,9 @@ use ::simd::{F32_LANES, Kernel};
 
 /// Sum f32 values, returning the unrounded f64 total.
 ///
-/// The suffix names the element type, not the return type: this takes f32 samples and hands back
-/// the wider accumulator it built them in, rather than rounding on the way out. A caller that
-/// splits its input — `par_chunks` over an image plane, say — must be able to combine the partial
-/// sums without dropping to f32 between them, or the wide accumulator buys nothing at exactly the
-/// length it matters most.
+/// The suffix names the element type, not the return type: the total stays f64 so a caller that
+/// splits its input, `par_chunks` over a plane say, combines partial sums without an f32 rounding
+/// between them.
 fn sum_f32(values: &[f32]) -> f64 {
     if values.len() >= F32_LANES {
         SumF32(values).dispatch()
@@ -59,10 +57,9 @@ pub(crate) fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
     );
 
     let sums = weighted_sums(values, weights);
-    // On the total rather than per weight: this runs once per output pixel, so an O(n) scan of the
-    // weights would cost more in debug than the combine itself. A negative total is the only way
-    // negative weights reach an answer, and it would otherwise be indistinguishable from the
-    // legitimate all-zero case below.
+    // On the total, not per weight: this runs once per output pixel, so an O(n) scan would cost
+    // more in debug than the combine. A negative total is the only way negative weights reach an
+    // answer, and it would pass for the all-zero case below.
     debug_assert!(
         sums.weight_total >= 0.0,
         "weights are frame trust factors and cannot sum negative"
@@ -76,7 +73,7 @@ pub(crate) fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
 
 /// Both weighted-mean totals, from the vector kernel at one vector and up, as [`sum_f32`].
 ///
-/// The division stays with the caller so the near-zero-weight decision is stated once.
+/// The division stays with the caller so the zero-weight decision is stated once.
 fn weighted_sums(values: &[f32], weights: &[f32]) -> WeightedSums {
     if values.len() >= F32_LANES {
         WeightedSumsKernel { values, weights }.dispatch()

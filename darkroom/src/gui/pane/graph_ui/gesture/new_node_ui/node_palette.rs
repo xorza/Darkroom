@@ -24,9 +24,8 @@ use crate::gui::theme::Theme;
 use crate::gui::theme::color;
 use crate::gui::widgets::support;
 
-/// One row of a category's palette list: a library `Func` or a built-in
-/// special node. Collecting them into one type lets every source sort
-/// into one list, which is what makes a category a run inside it.
+/// One row of a category's palette list: a library `Func` or a built-in special node. One type
+/// lets every source sort into one list, which makes a category a run inside it.
 #[derive(Clone, Copy, Debug)]
 pub(super) enum PaletteEntry<'a> {
     Func(&'a Func),
@@ -65,10 +64,8 @@ impl<'a> PaletteEntry<'a> {
         }
     }
 
-    /// The node a pick of this row adds. A special node's `Func` is hardcoded
-    /// rather than library-registered, so the node it spawns comes from the
-    /// [`SpecialNode`] itself, which reads the same
-    /// hardcoded func for its name and cache mode.
+    /// The node a pick of this row adds. A special node's `Func` is hardcoded rather than
+    /// library-registered, so the node it spawns comes from the [`SpecialNode`] itself.
     fn node(self) -> Node {
         match self {
             PaletteEntry::Func(f) => f.into(),
@@ -87,15 +84,12 @@ impl<'a> PaletteEntry<'a> {
     }
 }
 
-/// Everything one palette open lists, plus where a pick lands and how the
-/// frame lays it out. Built once per body from state the whole body shares,
-/// so the column and row helpers take one borrow rather than four threaded
-/// parameters.
+/// Everything one palette open lists, plus where a pick lands and how the frame lays it out,
+/// built once per body so the helpers take one borrow.
 #[derive(Debug)]
 pub(super) struct NodePalette<'a> {
     pub(super) graph_ctx: GraphCtx<'a>,
-    /// World position the open captured — every intent a row raises places
-    /// its node here.
+    /// World position the open captured; every intent a row raises places its node here.
     pub(super) pos: Vec2,
     /// The most height the results may scroll in.
     pub(super) scroll_cap: f32,
@@ -146,9 +140,8 @@ impl NodePalette<'_> {
             .show(ui, |ui| {
                 let field = TextEdit::new(&mut search.text)
                     .id(search_id)
-                    // The field filters the palette rather than editing a value, so Esc
-                    // closes the whole popup instead of blurring the only thing in it
-                    // the user can type into.
+                    // The field filters the palette rather than editing a value, so Esc closes
+                    // the whole popup instead of blurring the only thing in it.
                     .escape_falls_through(true)
                     .placeholder("Search…")
                     .style(&theme.flat_text_edit)

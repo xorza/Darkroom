@@ -53,11 +53,9 @@ impl FrameStats {
     /// the frame's own median, so a frame with a large masked region would otherwise report the
     /// fill's level.
     ///
-    /// The other stages that measure a whole plane need no such exclusion, and the fill is why.
-    /// Star detection looks for peaks above a local background and a patch sitting *at* the
-    /// background produces none; the defect detectors look for outliers against a median the fill
-    /// by construction is; and normalization already re-measures over the pixels every frame shares
-    /// once any frame is partially covering.
+    /// Other whole-plane stages need no such exclusion: the fill sits at the background, so it
+    /// yields no star peak and no defect outlier, and normalization re-measures over the shared
+    /// pixels once any frame is partially covering.
     pub(crate) fn measure(image: &impl StackableImage) -> Self {
         Self::measure_as(image, Spreads::Skipped)
     }
@@ -137,8 +135,7 @@ impl FrameStats {
                     })
                 })
                 .collect(),
-            // One channel at a time: each estimate spreads its tiles over the workers already, and
-            // the plan charges one estimate's coefficients.
+            // One channel at a time, so the sorted copy is a plane's worth at most.
             None => (0..desc.channel_count())
                 .map(|channel| {
                     SlotLevel::of(image.channel(channel), spreads, |idx, _| measured(idx))

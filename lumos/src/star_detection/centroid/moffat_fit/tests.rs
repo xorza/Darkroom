@@ -140,7 +140,7 @@ const MOFFAT_CASES: &[MoffatCase] = &[
         bg: 0.5,
         ..clean("faint_on_bright_sky")
     },
-    // The narrowest α the fit admits at β 2.5 is 1.025, the FWHM of a Gaussian of σ 0.5.
+    // The narrowest α the fit admits at β 2.5 is 1.04, of the FWHM of a Gaussian of σ 0.5.
     with_alpha("alpha_1.1", 1.1),
     with_alpha("alpha_2", 2.0),
     with_alpha("alpha_3", 3.0),

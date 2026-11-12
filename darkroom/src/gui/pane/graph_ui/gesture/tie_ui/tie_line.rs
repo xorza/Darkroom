@@ -72,7 +72,6 @@ impl TieLine {
         self.ties.clear();
     }
 
-    /// The first crossing of the line with `pieces`, a wire from its output end, or `None`.
     /// The band a release would put, when the line crosses wires and no tie: at the mean of
     /// the crossings, square to the mean of the crossed strands, each turned to run the first's
     /// way so two strands that cross the line in opposite senses do not cancel.
@@ -107,6 +106,7 @@ impl TieLine {
         ))
     }
 
+    /// The first crossing of the line with `pieces`, a wire from its output end, or `None`.
     pub(crate) fn first_crossing(&self, wire: WireKey, pieces: &[Wire]) -> Option<WireCrossing> {
         if !self.is_long() {
             return None;

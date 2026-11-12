@@ -157,27 +157,23 @@ impl<'a> FitsHduDescription<'a> {
     /// The pipeline's linear domain is `[0, 1]`, so an integer FITS is divided by the span its own
     /// `BITPIX` and `BSCALE` declare: `|BSCALE| × (2^bits − 1)`. That maps the FITS unsigned
     /// convention (`BITPIX = 16`, `BZERO = 2¹⁵`) exactly onto `[0, 1]`, and puts a signed frame on
-    /// `[-0.5, 0.5]` around its own zero.
+    /// `[-0.5, 0.5]` around its own zero. Only the scale is applied, never an offset or a clamp:
+    /// an offset would move a signed frame's zero point, and a clamp would cut the sub-pedestal
+    /// noise tail that the calibration path depends on (see [`crate::io::raw`]'s unclamped
+    /// normalization).
     ///
-    /// Only the scale is applied — never an offset, and never a clamp. Offsetting would move a
-    /// signed frame's zero point, and clamping would cut the sub-pedestal noise tail that the
-    /// calibration path depends on (see [`crate::io::raw`]'s unclamped normalization).
+    /// A floating-point `BITPIX` declares no full scale, so the only evidence is `data_max`, the
+    /// header's `DATAMAX` as [`metadata::read_data_max`] reads it: a saturation level above
+    /// [`FLOAT_ADU_DATAMAX_MIN`] means ADU, divided by [`FLOAT_ADU_DIVISOR`], Siril's threshold and
+    /// divisor. Anything else is taken as already normalized, PixInsight's default for a float
+    /// FITS, which keeps a Lumos-written master round-tripping.
     ///
-    /// A floating-point `BITPIX` declares no full scale, so the only evidence available is
-    /// `data_max`, the header's `DATAMAX` as [`metadata::read_data_max`] reads it: a declared
-    /// saturation level above [`FLOAT_ADU_DATAMAX_MIN`] means the samples are ADU rather than
-    /// `[0, 1]` and they are divided by [`FLOAT_ADU_DIVISOR`], the threshold and divisor Siril
-    /// uses. Anything else — a `DATAMAX` of about 1, or none at all — is taken as already
-    /// normalized, which is PixInsight's default for a float FITS and what keeps a Lumos-written
-    /// master round-tripping.
-    ///
-    /// The divisor comes from the *header*, never from the pixels, and that is where this departs
-    /// from Siril: with `DATAMAX` absent it scans the data instead (three sampled pixels on the
-    /// partial-read path, which is why its full and partial reads can disagree about the same
-    /// file). A divisor read off each frame's own extrema differs frame to frame, which is exactly
-    /// what `combine` rejects a frame set for. The scan still decides one thing: a frame
-    /// taken as normalized whose samples reach past Siril's threshold is refused rather than loaded
-    /// as it stands ([`SampleScale::verify_normalized`]).
+    /// The divisor comes from the *header*, never from the pixels, which is where this departs
+    /// from Siril: with `DATAMAX` absent it scans the data (three sampled pixels on its
+    /// partial-read path, so its full and partial reads can disagree about one file). A divisor
+    /// read off each frame's own extrema differs frame to frame, which `combine` rejects a frame
+    /// set for. The scan still decides one thing: a frame taken as normalized whose samples reach
+    /// past Siril's threshold is refused ([`SampleScale::verify_normalized`]).
     fn sample_scale(
         &self,
         float_scale: FitsFloatScale,

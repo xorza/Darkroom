@@ -252,8 +252,8 @@ impl Plane {
 }
 
 /// The weight of pixel `idx` in a cell's weighted sum, in `[1, 2)`: the top 52 bits of `idx` times
-/// 2⁶⁴/φ, Knuth's multiplicative hash, so neighbours take weights far apart. Integer arithmetic and
-/// an exact conversion, the same on every host.
+/// 2⁶⁴/φ modulo 2⁶⁴, Knuth's multiplicative hash, so neighbours take weights far apart. Integer
+/// arithmetic and an exact conversion, the same on every host.
 fn weight(idx: usize) -> f64 {
     let hash = (idx as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
     1.0 + (hash >> 12) as f64 / (1u64 << 52) as f64

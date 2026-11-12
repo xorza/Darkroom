@@ -5,8 +5,7 @@ use palantir::{RgbaF32, SpaceSteps};
 
 use crate::gui::theme::palette::Palette;
 
-/// The graph canvas itself — the ground everything else sits on, and the
-/// dotted grid ruled across it.
+/// The graph canvas: its ground, and the dotted grid ruled across it.
 #[derive(Clone, Debug)]
 pub(crate) struct CanvasTheme {
     /// Ground fill behind the whole graph.
@@ -23,8 +22,8 @@ pub(crate) struct CanvasTheme {
     pub(crate) dot_radius: f32,
     /// A wire whose endpoint no longer resolves, and a node a breaker crosses.
     pub(crate) wire_broken: RgbaF32,
-    /// The bar across the middle of a wire the breaker will cut: its length, a port's side, and
-    /// its width, a wire's, in [`Self::wire_broken`].
+    /// The bar across the middle of a wire the breaker will cut, drawn in [`Self::wire_broken`]:
+    /// as long as a port's side and as wide as a wire.
     pub(crate) cut_bar_length: f32,
     pub(crate) cut_bar_width: f32,
     /// The scribble that cuts wires.

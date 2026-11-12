@@ -38,27 +38,22 @@ fn pattern_of(header: &Header, height: usize) -> BayerPattern {
 
 #[test]
 fn a_bottom_up_frame_flips_its_bayer_phase_only_when_its_height_is_even() {
-    // `BAYERPAT` describes the top-down image and the rows arrive in file order, so file row
-    // `f` holds the phase of displayed row `H - 1 - f`.
-    //
-    // H = 4: file row 0 is displayed row 3, which is phase 1 — the G/B row of an RGGB frame —
-    // and file row 1 is displayed row 2, phase 0. Reading the file top to bottom therefore
-    // gives GB then RG, which is GBRG.
+    // `BAYERPAT` describes the top-down image, so file row `f` holds the phase of displayed row
+    // `H - 1 - f`. H = 4: file row 0 is displayed row 3, phase 1 (the G/B row of an RGGB frame),
+    // so the file reads GB then RG, which is GBRG.
     assert_eq!(
         pattern_of(&bayer_header("RGGB", Some("BOTTOM-UP")), 4),
         BayerPattern::Gbrg
     );
 
-    // H = 5: file row 0 is displayed row 4, which is phase 0 again, so the file reads RG then
-    // GB and the declared pattern already describes it. Flipping here is what mis-debayered the
-    // whole frame — and odd heights are real, LibRaw reporting 4015 for the EOS 1500D.
+    // Odd H: file row 0 is displayed row H - 1, phase 0 again, so the declared pattern already
+    // describes the file. LibRaw reports 4015 for the EOS 1500D.
     assert_eq!(
         pattern_of(&bayer_header("RGGB", Some("BOTTOM-UP")), 4015),
         BayerPattern::Rggb
     );
 
-    // Top-down, and a header that declares no order at all, leave the pattern alone whatever
-    // the parity — the height only matters because reversal is what moves the phases.
+    // Top-down, or no order at all, leaves the pattern alone whatever the parity.
     for height in [4, 5] {
         assert_eq!(
             pattern_of(&bayer_header("RGGB", Some("TOP-DOWN")), height),
@@ -75,10 +70,9 @@ fn a_bottom_up_frame_flips_its_bayer_phase_only_when_its_height_is_even() {
 
 #[test]
 fn an_odd_bayer_row_offset_composes_with_the_row_order_flip() {
-    // `YBAYROFF` shifts the pattern's origin by a row, which is the same phase inversion the
-    // row-order flip applies. On an even-height bottom-up frame the two compose back to the
-    // declared pattern; on an odd-height one only the offset acts, so they no longer agree —
-    // which is exactly the composition the parity fix changes.
+    // `YBAYROFF` shifts the pattern's origin by a row, the same phase inversion the row-order
+    // flip applies: on an even-height bottom-up frame the two cancel, on an odd-height one only
+    // the offset acts.
     assert_eq!(
         pattern_of(
             bayer_header("RGGB", Some("BOTTOM-UP"))
@@ -114,8 +108,7 @@ fn row_order_is_read_from_the_header_and_defaults_to_top_down() {
         );
     }
 
-    // Anything the keyword does not spell as bottom-up is read the way a writer that omits it
-    // means — first row first.
+    // Anything not spelled as bottom-up reads as first row first.
     for declared in ["TOP-DOWN", "top-down", "anything else"] {
         header.set("ROWORDER", declared).unwrap();
         assert_eq!(
@@ -128,9 +121,8 @@ fn row_order_is_read_from_the_header_and_defaults_to_top_down() {
 
 #[test]
 fn a_lumos_written_header_separates_the_pattern_frame_from_the_sky_orientation() {
-    // What this writer emits for a bottom-up source: the rows go out as it holds them, so
-    // `ROWORDER` says the pattern applies to them as written, and `LUMROWO` carries the fact
-    // that the sky is upside-down in them.
+    // What this writer emits for a bottom-up source: `ROWORDER` says the pattern applies to the
+    // rows as written, and `LUMROWO` that the sky is upside-down in them.
     let mut header = Header::new();
     header.set("BAYERPAT", "GBRG").unwrap();
     header.set("ROWORDER", RowOrder::TopDown.keyword()).unwrap();
@@ -138,13 +130,11 @@ fn a_lumos_written_header_separates_the_pattern_frame_from_the_sky_orientation()
         .set(SOURCE_ROW_ORDER, RowOrder::BottomUp.keyword())
         .unwrap();
 
-    // The pattern is taken as written — flipping it again is what would mis-debayer the
-    // reloaded frame, and is what reading `LUMROWO` here instead would have done.
+    // The pattern is taken as written: reading `LUMROWO` here would flip it twice.
     assert_eq!(read_declared_row_order(&header).unwrap(), RowOrder::TopDown);
     assert_eq!(pattern_of(&header, 4), BayerPattern::Gbrg);
 
-    // ...while the orientation the combine compares survives the trip, so an original and a
-    // copy of it written by this crate are not read as mirrored views of each other.
+    // The orientation the combine compares survives the trip.
     assert_eq!(read_row_order(&header).unwrap(), RowOrder::BottomUp);
 
     // A file from anyone else has only `ROWORDER`, and then the two answers coincide.
@@ -197,7 +187,7 @@ fn invalid_sexagesimal_values_are_rejected() {
 }
 
 /// `BAYERPAT = 'TRUE'` says the frame is mosaiced and not in which phase: it is refused unless
-/// the load options give the phase, which then goes through the same row-order correction a
+/// the load config gives the phase, which then goes through the same row-order correction a
 /// stated one does.
 #[test]
 fn an_unstated_bayer_phase_comes_from_the_options_or_refuses_the_frame() {
@@ -220,7 +210,7 @@ fn an_unstated_bayer_phase_comes_from_the_options_or_refuses_the_frame() {
             .unwrap(),
         Some(CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Bggr)))
     );
-    // A stated phase wins over the option, which only stands in for 'TRUE'.
+    // A stated phase wins over the config, which only stands in for 'TRUE'.
     let stated = bayer_header("BGGR", None);
     assert_eq!(
         Bayerpat::Required

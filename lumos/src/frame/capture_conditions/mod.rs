@@ -1,4 +1,4 @@
-//! [`CaptureConditions`]: the exposure and sensor temperature a frame was taken under.
+//! [`CaptureConditions`]: the exposure and temperatures a frame was taken under.
 
 use serde::{Deserialize, Serialize};
 
@@ -6,9 +6,9 @@ use crate::frame::capture_condition::CaptureCondition;
 use crate::frame::error::ConditionMismatch;
 use crate::image::metadata::image_metadata::ImageMetadata;
 
-/// The exposure and sensor temperature a frame was taken under, as its source states them. Carried
-/// with the frame's statistics, because the metadata they come from is dropped for every frame but
-/// the first.
+/// The exposure, sensor and camera temperatures a frame was taken under, as its source states
+/// them. Carried with the frame's statistics, because the metadata they come from is dropped for
+/// every frame but the first.
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub(crate) struct CaptureConditions {
     /// Seconds — see [`ObservationHeader::exposure_time`](crate::ObservationHeader::exposure_time).

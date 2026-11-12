@@ -37,7 +37,6 @@ fn register_two_lights() {
         img2.channel_count()
     );
 
-    // Detect stars with precise Moffat centroids
     let star_config = StarDetectionConfig::precise_ground();
     let mut detector = StarDetector::new(star_config);
 
@@ -145,7 +144,6 @@ fn register_two_lights() {
         result.rms_error()
     );
 
-    // Warp img2 to align with img1 and measure time
     let warp_start = Instant::now();
     let warped = WarpConfig::default()
         .warp(&img2, result.warp_transform())

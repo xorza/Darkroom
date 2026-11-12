@@ -16,20 +16,16 @@ use crate::core::edit::step::set_selection::SetSelection;
 use crate::core::edit::step::set_subscription::SetSubscription;
 use crate::core::edit::step::set_ties::SetTies;
 
-/// One self-contained entry of the undo history: which kind of edit it is,
-/// and that kind's payload — the slot it touches with both halves of what
-/// went into it.
+/// One self-contained entry of the undo history: which kind of edit it is, and that kind's
+/// payload, the slot it touches with both halves of what went into it.
 ///
 /// The variants are *primitives*, not a mirror of the
-/// [`GraphIntent`](crate::core::edit::graph_intent::GraphIntent) vocabulary
-/// that produces them: one intent can lower to several steps, and two intents
-/// that are each other's inverse (add a node, remove a node) lower to one
-/// kind. Nothing here has to be kept in step with anything there.
+/// [`GraphIntent`](crate::core::edit::graph_intent::GraphIntent) vocabulary: one intent can lower
+/// to several steps, and two intents that are each other's inverse (add a node, remove a node)
+/// lower to one kind.
 ///
-/// Only graph edits are undoable: pane arrangement applies straight to the
-/// layout and records nothing, so Ctrl+Z walks past a tab switch to the last
-/// edit that changed the graph. That is why this is the whole step
-/// vocabulary rather than one arm of a wider one.
+/// Only graph edits are undoable: pane arrangement records nothing, so Ctrl+Z walks past a tab
+/// switch to the last edit that changed the graph.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum UndoStep {
     /// Boxed: a whole detached node is several times the size of every other step.
@@ -45,15 +41,12 @@ pub(crate) enum UndoStep {
 }
 
 impl UndoStep {
-    /// Forward apply: write the "to" half to `document`. Used by the initial
-    /// commit and by undo-history redo, which replays a stored step without
-    /// rebuilding it.
+    /// Write the "to" half to `document`: the initial commit, and redo of a stored step.
     pub(crate) fn apply(&self, document: &mut Document) {
         self.kind().write(document, Direction::Forward);
     }
 
-    /// Backward apply: write the "from" half to `document`. Calling this after
-    /// [`Self::apply`] restores the document to its pre-commit state.
+    /// Write the "from" half to `document`, restoring the state before [`Self::apply`].
     pub(crate) fn revert(&self, document: &mut Document) {
         self.kind().write(document, Direction::Backward);
     }
@@ -70,9 +63,8 @@ impl UndoStep {
         self.kind().facts()
     }
 
-    /// Whether `next`, a later step of the same held gesture, is a frame of
-    /// this one, which [`Self::absorb`] folds in: a move after a move, a knob
-    /// turn after a knob turn.
+    /// Whether `next`, a later step of the same held gesture, is a frame of this one, which
+    /// [`Self::absorb`] folds in: a move after a move, a tie edit after a tie edit.
     pub(crate) const fn absorbs(&self, next: &Self) -> bool {
         matches!(
             (self, next),
@@ -95,12 +87,9 @@ impl UndoStep {
         }
     }
 
-    /// The payload behind the variant, as the behaviour it implements.
-    ///
-    /// The one match that hands out a payload: everything the pipeline asks a
-    /// single step is answered by the kind's own `impl`, so a new variant adds
-    /// a line here and a file of its own rather than an arm in each of five
-    /// matches. [`Self::absorb`] matches too, as it pairs two payloads.
+    /// The payload behind the variant, as the behaviour it implements. The one match that hands
+    /// out a payload, so a new variant adds a line here and a file of its own; [`Self::absorb`]
+    /// matches too, as it pairs two payloads.
     fn kind(&self) -> &dyn Reversible {
         match self {
             Self::Node(step) => step.as_ref(),

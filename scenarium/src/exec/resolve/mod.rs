@@ -4,7 +4,7 @@
 //! this one is *what will*.
 //!
 //! Its own module because it reads both: the schedule stays structural and the cache knows
-//! nothing of liveness, so neither has to depend on the other.
+//! nothing of liveness, so neither depends on the other.
 
 use crate::exec::cache::runtime_cache::RuntimeCache;
 use crate::exec::compile::compiled_graph::CompiledGraph;
@@ -20,39 +20,35 @@ use crate::graph::func::lambda::OutputDemand;
 /// run loop, when it reaches the node.
 ///
 /// In the sweep, a running consumer marks exactly the producer ports it reads; reuse,
-/// missing-input nodes, and missing lambdas stop the walk. Producer classification
-/// happens only after every downstream consumer has contributed, so cache coverage is
-/// checked against exact demand rather than the planner's structural
-/// over-approximation.
+/// missing-input nodes, and missing lambdas stop the walk. A producer is classified only after
+/// every downstream consumer has contributed, so cache coverage is checked against exact demand
+/// rather than the planner's structural over-approximation.
 ///
-/// Every node's digest is structural (a fold of its inputs and the run's prepared
-/// filesystem snapshot), so this stamps the *whole* graph ahead of the run. The one
-/// stamp it can leave imprecise is a digest folding a Bind-delivered path value it
-/// can't read yet: that folds to `None` here — "uncacheable, must run", which keeps
-/// the node's cone alive — and the run loop prepares the identity and re-stamps at
-/// reach time once its producers have settled, possibly improving `Run` to a reuse.
+/// Every node's digest is structural (a fold of its inputs and the run's prepared filesystem
+/// snapshot), so this stamps every executing node ahead of the run. The one stamp it can leave
+/// imprecise is a digest folding a Bind-delivered path value it can't read yet: that folds to
+/// `None` here — "uncacheable, must run", which keeps the node's cone alive — and the run loop
+/// prepares the identity and re-stamps at reach time, possibly improving `Run` to a reuse.
 pub(crate) async fn sweep(
     program: &CompiledGraph,
     schedule: &mut RunSchedule,
     cache: &mut RuntimeCache,
 ) {
-    // The cache holds no program of its own, so every question below names
-    // the one `program` this schedule was planned against.
+    // The cache holds no program of its own, so every question names the `program` this schedule
+    // was planned against.
     cache.stamp_digests(program, schedule);
-    // The sweep *accumulates* demand and readers, so it starts from zero of
-    // its own accord rather than trusting whoever opened the schedule.
+    // The sweep *accumulates* demand and readers, so it starts from zero rather than trusting
+    // whoever opened the schedule.
     schedule.outputs.reset(program.output_count as usize);
     schedule.promote_roots();
 
-    // Reverse process order, so every consumer of a node has contributed
-    // its demand before the node is classified: a producer is promoted and
-    // read-counted by each live consumer on the way past, and only then
-    // asked whether a cache covers what was actually demanded. That also
-    // means a promotion can only overwrite the planner's `Cut` or an
-    // earlier consumer's `Run`, never a `Reuse` this sweep settled.
+    // Reverse process order, so every consumer of a node has contributed its demand before the
+    // node is classified: a producer is promoted and read-counted by each live consumer on the
+    // way past, and only then asked whether a cache covers what was demanded. So a promotion can
+    // only overwrite the planner's `Cut` or an earlier consumer's `Run`, never a settled `Reuse`.
     for &node_idx in schedule.process_order.iter().rev() {
-        // Reaching this body means the planner cleared the node and some
-        // consumer (or a root) promoted it — `Run` is written no other way.
+        // The planner cleared the node and some consumer (or a root) promoted it — `Run` is
+        // written no other way.
         if schedule.states[node_idx] != NodeState::Run {
             continue;
         }
@@ -60,8 +56,8 @@ pub(crate) async fn sweep(
 
         let flags = schedule.root_flags(node_idx);
         let demand = &mut schedule.outputs.demand[e_node.outputs];
-        // A node seed ("run to this node") demands every output the node has:
-        // the host asked for the node itself, not for what a consumer reads.
+        // A node seed ("run to this node") demands every output: the host asked for the node
+        // itself, not for what a consumer reads.
         if flags.is_seeded() {
             demand.fill(OutputDemand::Produce);
         }

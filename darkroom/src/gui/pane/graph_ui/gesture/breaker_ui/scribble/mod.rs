@@ -17,29 +17,24 @@ const MIN_POINT_DISTANCE: f32 = 4.0;
 /// segments, which bounds the per-frame intersection work at every zoom.
 const MAX_BREAKER_LENGTH: f32 = 2000.0;
 
-/// The breaker scribble: its samples, how far they run, and the three target
-/// sets a frame's probing marks against them. Lives in inner-canvas world
-/// (pre-transform) coords so render inside the inner canvas can use the points
-/// verbatim and intersection tests share the same frame as the cubic bezier
-/// endpoints.
+/// The breaker scribble: its samples, how far they run, and the three target sets a frame's
+/// probing marks against them. Lives in inner-canvas world (pre-transform) coords, so render
+/// inside the inner canvas can use the points verbatim and intersection tests share the frame
+/// of the cubic bezier endpoints.
 ///
 /// **Buffers, not gesture state.** This sits beside
 /// [`BreakerUi`](crate::gui::pane::graph_ui::gesture::breaker_ui::BreakerUi)'s slot rather than
-/// inside it, so a gesture that ends returns four allocations to the *next* one instead of to the
-/// allocator — the same bargain `SelectionUi::swept` and `NodeUi::row_tracks` already make. What
-/// makes that safe is the slot:
+/// inside it, so a gesture that ends returns four allocations to the next one instead of to the
+/// allocator, as `SelectionUi::swept` and `NodeUi::row_tracks` do. That is safe because
 /// [`BreakerUi::probe`](crate::gui::pane::graph_ui::gesture::breaker_ui::BreakerUi::probe) only
-/// hands these out while it is latched, so between gestures the leftovers are unreachable rather
-/// than merely stale. [`Self::restart`] is where a fresh gesture claims them.
+/// hands these out while it is latched, so between gestures the leftovers are unreachable.
+/// [`Self::restart`] is where a fresh gesture claims them.
 ///
-/// The three `broken_*` collections are each filled by one render pass's
-/// hit-test (via `BreakerProbe::mark_broken_*`) and drained by
-/// `BreakerUi::apply` on release into the matching severing `GraphIntent`. All
-/// three are cleared together at the start of every frame's probing
-/// (`begin_frame`, called from `BreakerUi::probe`) rather than each
-/// renderer clearing its own — every render pass visits its own targets at
-/// most once per frame, so within-frame duplicates aren't possible either
-/// way.
+/// The three `broken_*` collections are each filled by one render pass's hit-test (via
+/// `BreakerProbe::mark_broken_*`) and drained on release into the matching severing
+/// `GraphIntent`. All three are cleared together at the start of every frame's probing
+/// (`begin_frame`, called from `BreakerUi::probe`) rather than by each renderer; every render
+/// pass visits its own targets at most once per frame, so there are no within-frame duplicates.
 #[derive(Default, Debug)]
 pub(crate) struct Scribble {
     pub(super) points: Vec<Vec2>,
@@ -61,9 +56,8 @@ pub(crate) struct Scribble {
 }
 
 impl Scribble {
-    /// Begin a fresh scribble at `p`, keeping every buffer's capacity. The
-    /// one place a gesture's leftovers are dropped, so nothing downstream has
-    /// to ask whether what it is reading belongs to this gesture or the last.
+    /// Begin a fresh scribble at `p`, keeping every buffer's capacity. The one place a
+    /// gesture's leftovers are dropped.
     pub(super) fn restart(&mut self, p: Vec2) {
         self.points.clear();
         self.points.push(p);
@@ -73,10 +67,8 @@ impl Scribble {
         self.begin_frame();
     }
 
-    /// Clear every `broken_*` collection at the start of a frame's probing. The single point where
-    /// this happens — called once from
-    /// [`BreakerUi::probe`](crate::gui::pane::graph_ui::gesture::breaker_ui::BreakerUi::probe) —
-    /// rather than each renderer clearing its own field, which is easy to forget.
+    /// Clear every `broken_*` collection at the start of a frame's probing, called once from
+    /// [`BreakerUi::probe`](crate::gui::pane::graph_ui::gesture::breaker_ui::BreakerUi::probe).
     pub(super) fn begin_frame(&mut self) {
         self.broken.clear();
         self.broken_node_ids.clear();

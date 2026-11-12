@@ -150,11 +150,9 @@ pub(crate) const fn flush_button(unselected: StatefulLook, selected: StatefulLoo
 /// records none. Shared by every chip, icon button and port glyph that pairs a widget with a
 /// hover tooltip.
 ///
-/// `Option` rather than an empty-string sentinel: "this widget has no
-/// tooltip" is a different fact from "its tooltip is blank", and the port
-/// glyphs — the one family that decides per frame — now say which they mean.
-/// Any text form is accepted: a `&'static str` tooltip stays borrowed until the
-/// bubble actually records, and a [`fmt!`](palantir::fmt) one is already in the pass's arena.
+/// `Option` rather than an empty-string sentinel: "no tooltip" differs from "a blank tooltip".
+/// A `&'static str` stays borrowed until the bubble records, and a [`fmt!`](palantir::fmt) one is
+/// already in the pass's arena.
 pub(crate) fn tooltip_after<'a>(
     ui: &mut Ui,
     trigger: &'a Response,

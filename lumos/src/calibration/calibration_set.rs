@@ -39,9 +39,8 @@ impl<T> CalibrationSet<T> {
         }
     }
 
-    /// The four roles in bundle order, each with the component that names it. The single
-    /// place that decides what "all the roles" means — a caller that iterates cannot miss one,
-    /// and adding a fifth is a compile error here rather than a silent omission elsewhere.
+    /// The four roles in [`MasterRole::ALL`] order, each with its value. The one place that
+    /// decides what "all the roles" means: a fifth role is a compile error here, not an omission.
     pub fn iter(&self) -> impl Iterator<Item = (MasterRole, &T)> {
         MasterRole::ALL
             .into_iter()

@@ -44,7 +44,6 @@ fn flip_vertical_swaps_rows_and_is_its_own_inverse() {
     assert_eq!(BayerPattern::Gbrg.flip_vertical(), BayerPattern::Rggb);
     assert_eq!(BayerPattern::Bggr.flip_vertical(), BayerPattern::Grbg);
     assert_eq!(BayerPattern::Grbg.flip_vertical(), BayerPattern::Bggr);
-    // Double flip is identity
     assert_eq!(
         BayerPattern::Rggb.flip_vertical().flip_vertical(),
         BayerPattern::Rggb
@@ -58,7 +57,6 @@ fn flip_horizontal_swaps_columns_and_is_its_own_inverse() {
     assert_eq!(BayerPattern::Grbg.flip_horizontal(), BayerPattern::Rggb);
     assert_eq!(BayerPattern::Bggr.flip_horizontal(), BayerPattern::Gbrg);
     assert_eq!(BayerPattern::Gbrg.flip_horizontal(), BayerPattern::Bggr);
-    // Double flip is identity
     assert_eq!(
         BayerPattern::Rggb.flip_horizontal().flip_horizontal(),
         BayerPattern::Rggb

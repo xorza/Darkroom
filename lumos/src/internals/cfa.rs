@@ -35,7 +35,7 @@ pub(crate) fn cfa_from_plane(data: Buffer2<f32>, cfa_type: CfaType) -> CfaImage 
     CfaImage::from_plane(data, cfa_type, ImageMetadata::default())
 }
 
-/// Create a `CfaImage` filled with a constant value.
+/// A `CfaImage` filled with `value`.
 pub(crate) fn constant_cfa(size: USize2, value: f32, cfa_type: CfaType) -> CfaImage {
     cfa_from_plane(Buffer2::new_filled(size, value), cfa_type)
 }

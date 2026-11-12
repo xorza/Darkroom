@@ -15,11 +15,9 @@ use crate::gui::frame::app_command::AppCommand;
 
 /// A frame's requests, in the order they were raised.
 ///
-/// A surface pushes and moves on: the push methods are one vocabulary and say
-/// nothing about which level will pick the request up. Behind them the tiers
-/// are stored apart, one queue per taker, so each owner takes its own by type
-/// — [`Self::document`] for the open document, [`Self::pop_app`] for the
-/// shell — and neither has to step over, or pattern-match away, a tier its
+/// A surface pushes and moves on: the push methods say nothing about which level picks the
+/// request up. Behind them the tiers are stored apart, one queue per taker — [`Self::document`]
+/// for the open document, [`Self::pop_app`] for the shell — so neither steps over a tier its
 /// queue cannot hold.
 ///
 /// The document tier is a graph edit or a dock op; see
@@ -30,10 +28,8 @@ use crate::gui::frame::app_command::AppCommand;
 /// picks the tier by what it is asking for, never by where it sits or when it
 /// runs — the menu bar raises all three.
 ///
-/// Nothing is dropped and nothing is reordered *within* a tier: two surfaces
-/// answering the same frame both get what they asked for, in the order the
-/// frame produced them. Across tiers there is no order to keep, since the app
-/// tier runs after the whole pass rather than interleaved with the document's.
+/// Nothing is dropped or reordered *within* a tier. Across tiers there is no order to keep: the
+/// app tier runs after the whole pass, not interleaved with the document's.
 ///
 /// It also holds what the frame owes palantir's layout engine, so any level that strands the
 /// canvas's cross-frame geometry says so where it holds this queue, and `App` spends it once. A
@@ -98,14 +94,9 @@ impl Requests {
 
     /// Take the next app-tier command, in the order raised.
     ///
-    /// One at a time rather than an iterator over the lot, because running a
-    /// command needs `&mut App` and the queue lives on it: an iterator would
-    /// hold the queue borrowed for the whole loop, forcing the caller to move
-    /// the commands somewhere else first. Popping ends the borrow before each
-    /// dispatch, so the loop needs no buffer and allocates nothing.
-    ///
-    /// A `VecDeque` for that reason — `Vec::remove(0)` would be O(n) per
-    /// command, and popping the *back* would run them in reverse.
+    /// One at a time, not an iterator: running a command needs `&mut App`, which owns the queue,
+    /// so an iterator would hold it borrowed for the whole loop. A `VecDeque`, as
+    /// `Vec::remove(0)` is O(n) and popping the back runs them in reverse.
     pub(crate) fn pop_app(&mut self) -> Option<AppCommand> {
         self.app.pop_front()
     }

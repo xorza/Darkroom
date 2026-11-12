@@ -1,15 +1,11 @@
 //! The graph as the UI reads it: the document, resolved against the library
 //! and the last run.
 //!
-//! Nothing here is copied or cached. A [`GraphCtx`] is the frame's
-//! [`AppCtx`] plus the open document; the handles it hands out
-//! ([`NodeCtx`], [`InputCtx`](input_ctx::InputCtx),
-//! [`OutputCtx`](output_ctx::OutputCtx)) each resolve one more borrow and
-//! answer every question
-//! from the authority that owns it — the node's record off the document, its
-//! ports off the library's declaration, its status off the run. A widget
-//! therefore cannot read anything a frame behind, and there is nothing to
-//! invalidate when the document moves.
+//! Nothing here is copied or cached. A [`GraphCtx`] is the frame's [`AppCtx`] plus the open
+//! document; the handles it hands out ([`NodeCtx`], [`InputCtx`](input_ctx::InputCtx),
+//! [`OutputCtx`](output_ctx::OutputCtx)) each resolve one more borrow and answer from the
+//! authority that owns the fact — the node's record off the document, its ports off the library's
+//! declaration, its status off the run. A widget therefore cannot read anything a frame behind.
 //!
 //! **The one rule.** No accessor may walk the graph. Everything below is a
 //! field read, a hash lookup, or a slice index, so a per-widget call is
@@ -148,13 +144,8 @@ impl<'a> GraphCtx<'a> {
     /// This pane's placed nodes — every graph node and every stub — in no
     /// particular order.
     ///
-    /// Driven by the view's placements, which name exactly those nodes, since
-    /// a placement carries the position a node is drawn at.
-    ///
-    /// Unordered because almost nothing needs the stack: scanning for
-    /// emitters, resolving a drag anchor, framing the viewport and hit-testing
-    /// a rubber band all want the set. The one pass that draws asks for
-    /// [`Self::paint_order`] and pays for the sort there.
+    /// Driven by the view's placements. Unordered because almost nothing needs the stack; the
+    /// one pass that draws asks for [`Self::paint_order`] and pays for the sort there.
     pub(crate) fn nodes(self) -> impl Iterator<Item = NodeCtx<'a>> {
         self.view()
             .node_placements

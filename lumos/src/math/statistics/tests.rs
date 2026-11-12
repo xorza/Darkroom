@@ -689,16 +689,15 @@ fn sigma_clipped_stats_iterations_improve_result() {
     // Good values: 41 at 0.30, 40 at 0.32 (true median = 0.30, odd count = 81)
     // Outliers: 10 at 0.60, 9 at 1.50
     //
-    // Approx median of all 100 = 0.32 (value[50]).
+    // Median of all 100 = avg(value[49], value[50]) = 0.32.
     // MAD = 0.02 (devs: 41×0.02, 40×0.00, 10×0.28, 9×1.18, index 50 = 0.02).
     // sigma = 0.02 * 1.4826 = 0.0297.
     //
-    // 0 iterations (no clipping): survivors_location on 100 values.
-    //   median_mut(100): avg(values[50], max(values[0..50])) = avg(0.32, 0.32) = 0.32.
+    // 0 iterations (no clipping): the median stays 0.32.
     //
     // 3 iterations (with clipping):
     //   Iter 1: kappa=2.5, threshold = 0.074. Rejects 0.60 and 1.50 → 81 remain.
-    //   Iter 2: 81 values (odd). approx median = value[40] = 0.30.
+    //   Iter 2: 81 values (odd), median = value[40] = 0.30.
     //     MAD = 0.00, sigma = 0 → converge at 0.30.
     let base_values: Vec<f32> = {
         let mut v = vec![0.30; 41];

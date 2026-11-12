@@ -5,11 +5,7 @@ use common::Buffer2;
 use crate::internals::test_rng::TestRng;
 use common::USize2;
 
-/// Create a diagonal gradient for interpolation testing.
-///
-/// Formula: `(x + y * 0.5) / (width + height)`
-/// This creates a gradient that varies in both X and Y directions,
-/// making it useful for testing interpolation accuracy.
+/// A gradient `(x + y * 0.5) / (width + height)` that varies in both axes, for interpolation tests.
 pub(crate) fn diagonal_gradient(size: USize2) -> Buffer2<f32> {
     let scale = (size.width + size.height) as f32;
     Buffer2::from_fn(size, |at| (at.x as f32 + at.y as f32 * 0.5) / scale)

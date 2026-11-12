@@ -1,17 +1,15 @@
-//! Record-time visibility culling for the graph canvas. Only items that
-//! intersect the viewport are recorded, so an off-screen
-//! graph costs no measure/arrange/paint work. Pure world-space math;
-//! [`crate::gui::pane::graph_ui::GraphUi::record`] resolves one [`CullRegion`] per
-//! frame and threads the same policy through every recorded canvas item.
+//! Record-time visibility culling for the graph canvas. Only items that intersect the viewport
+//! are recorded, so an off-screen graph costs no measure, arrange or paint work. Pure
+//! world-space math; [`crate::gui::pane::graph_ui::GraphUi::record`] resolves one
+//! [`CullRegion`] per frame and threads it through every recorded canvas item.
 
 use glam::Vec2;
 use palantir::{Rect, Size};
 
 use crate::core::document::viewport::Viewport;
 
-/// World-space slack added around the viewport so paint that extends past
-/// an element's layout rect (status-glow shadow, wire stroke width,
-/// selection border) never pops at the screen edge.
+/// World-space slack added around the viewport so paint past an element's layout rect (status
+/// shadow, wire stroke width, selection border) never pops at the screen edge.
 const CULL_MARGIN: f32 = 16.0;
 
 #[derive(Clone, Copy, Debug)]

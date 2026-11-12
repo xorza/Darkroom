@@ -42,9 +42,8 @@ fn dilate_mask_empty() {
 
 #[test]
 fn dilate_mask_single_pixel_radius_0() {
-    // Radius 0 should not expand
     let mut mask_data = Buffer2::new_default((3, 3));
-    mask_data[4] = true; // center
+    mask_data[4] = true;
     let mask = BitBuffer2::from_plane(&mask_data);
     let mut dilated = BitBuffer2::new_filled(USize2::new(3, 3), false);
     dilate_into(&mask, 0, &mut dilated);
@@ -110,16 +109,14 @@ fn a_pixel_dilates_into_a_disk() {
 
 #[test]
 fn dilate_mask_preserves_original_pixels() {
-    // Original pixels should always be in dilated result
     let mut mask_data = Buffer2::new_default((5, 5));
     mask_data[0] = true;
-    mask_data[12] = true; // center
+    mask_data[12] = true;
     mask_data[24] = true;
     let mask = BitBuffer2::from_plane(&mask_data);
     let mut dilated = BitBuffer2::new_filled(USize2::new(5, 5), false);
     dilate_into(&mask, 1, &mut dilated);
 
-    // All original pixels must be present
     assert!(dilated.get(0));
     assert!(dilated.get(12));
     assert!(dilated.get(24));

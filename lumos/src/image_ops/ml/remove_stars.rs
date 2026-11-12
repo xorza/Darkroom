@@ -53,12 +53,10 @@ impl RemoveStars {
 
     /// Both layers: the starless image and the stars unscreened out of it.
     ///
-    /// Takes `image` by value: the model reads it into new starless planes, and once those are
-    /// done its original pixels are no longer needed, so `build_stars` overwrites `image`'s own
-    /// buffer in place to become `stars` — a copy of the input and a fresh stars image both
-    /// spared. Callers who still need the original pixels afterward should `.clone()` before
-    /// calling. Both layers keep `image`'s metadata, flags and flat gain. A run cancelled through
-    /// `cancel` returns [`MlError::Cancelled`].
+    /// Takes `image` by value: once the model has read it into new starless planes, `build_stars`
+    /// overwrites its own buffer in place to become `stars`, sparing a copy and a fresh image.
+    /// Clone it first to keep the original pixels. Both layers keep `image`'s metadata, flags and
+    /// flat gain. A run cancelled through `cancel` returns [`MlError::Cancelled`].
     pub fn split(
         &mut self,
         mut image: LinearImage,
@@ -86,10 +84,8 @@ impl RemoveStars {
 
 /// `stars = unscreen(original, starless)` — the screen-blend inverse `1 − (1−orig)/(1−starless)`,
 /// the layer that screens back over the starless image to reconstruct the original. In place:
-/// overwrites `image`'s own buffer with the result (each output sample only ever depends on the
-/// *same-index* input samples, so reading then immediately overwriting is safe). The formula is
-/// per-sample and channel-agnostic, so it runs plane by plane with no regard to which channel is
-/// which.
+/// each output sample depends only on the same-index input samples, so overwriting `image`'s own
+/// buffer is safe. Per-sample and channel-agnostic, so it runs plane by plane.
 fn build_stars(image: &mut LinearImage, starless: &LinearImage) {
     for (channel, plane) in image.planes_mut().enumerate() {
         let sless = starless.channel(channel).pixels();

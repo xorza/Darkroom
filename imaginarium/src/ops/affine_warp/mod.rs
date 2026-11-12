@@ -41,7 +41,8 @@ impl Default for AffineWarp {
     }
 }
 
-/// The rotation by `angle` radians, as `Affine2::from_angle` builds it from std's sine and cosine.
+/// The rotation by `angle` radians, as `Affine2::from_angle` builds it but from `Libm`'s sine and
+/// cosine.
 fn turn(angle: f32) -> Affine2 {
     let rotor = Vec2::libm_from_angle(angle);
     Affine2::from_mat2(Mat2::from_cols(rotor, rotor.perp()))

@@ -1,7 +1,5 @@
-//! Detection stage: threshold, label, deblend, extract regions.
-//!
-//! Thresholds the detection plane, labels its connected components and deblends them into the
-//! regions measurement reads.
+//! Detection stage: thresholds the detection plane, labels its connected components and deblends
+//! them into the regions measurement reads.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{iter, mem};
@@ -113,11 +111,9 @@ fn extract_candidates(
     } = labelled;
     let values = &plane.values;
     let size = values.size();
-    // `ExtractionConfig::validate()` can't bound `edge_margin` against the image (it doesn't know
-    // the image size), so a margin that swallows the whole image is only catchable here: the retain
-    // below needs `bbox.min >= edge_margin && bbox.max <= dim - edge_margin`, which no bbox can
-    // satisfy once `2 * edge_margin >= dim` — every region is silently filtered out. Surface it
-    // instead of leaving an empty result indistinguishable from "no stars in the image".
+    // `validate()` does not know the image size, so a margin that swallows the image is caught
+    // only here: no bbox satisfies the retain below once `2 * edge_margin >= dim`. Warn rather than
+    // leave an empty result indistinguishable from "no stars in the image".
     if 2 * config.edge_margin >= size.width.min(size.height) {
         tracing::warn!(
             "edge_margin ({}) leaves no valid interior in a {}x{} image \
@@ -212,7 +208,7 @@ fn extract_candidates(
     deblended_components
 }
 
-/// Test and bench helpers that reach into this stage.
+/// Test helpers that reach into this stage.
 #[cfg(test)]
 pub(crate) mod internals {
     use crate::scratch_pool::Pooled;

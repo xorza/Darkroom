@@ -15,9 +15,8 @@ use crate::exec::cache::disk_store::blob_target::BlobTarget;
 use crate::exec::cache::disk_store::error::RemovalError;
 use crate::graph::identity::NodeId;
 
-/// Where the node-output cache persists: a directory of blobs named by node
-/// id, or nowhere. The codecs that read and write the blobs belong to each
-/// program, so the store is the root alone.
+/// Where the node-output cache persists: a directory of blobs named by node id, or nowhere. The
+/// codecs belong to each program, so the store is the root alone.
 #[derive(Debug, Default)]
 pub struct DiskStore {
     root: Option<PathBuf>,
@@ -72,16 +71,15 @@ pub(crate) mod internals {
     use crate::graph::identity::NodeId;
 
     impl DiskStore {
-        /// Where this node's blob lives, so a fixture can corrupt, read back or
-        /// delete one without re-deriving the store's own naming.
+        /// Where this node's blob lives, so a fixture can corrupt, read back or delete one.
         pub(crate) fn blob_path(&self, node_id: NodeId) -> PathBuf {
             self.node_path(node_id)
                 .expect("a disk-backed store has a root")
         }
 
-        /// Replace the first output payload's value tag with an unknown one, leaving the
-        /// header — and so `BlobTarget::covers_demand`'s verdict — intact. Models a blob
-        /// that passes the resolver's probe and then fails to decode.
+        /// Replace the first output payload's value tag with an unknown one, leaving the header —
+        /// and so `BlobTarget::covers_demand`'s verdict — intact: a blob that passes the probe and
+        /// then fails to decode.
         pub(crate) fn corrupt_payload(&self, node_id: NodeId, output_count: usize) {
             let path = self
                 .node_path(node_id)
@@ -91,8 +89,7 @@ pub(crate) mod internals {
             fs::write(&path, bytes).unwrap();
         }
 
-        /// Rewrite the blob's header to the previous format version, the way a blob an
-        /// earlier build wrote looks to this one.
+        /// Rewrite the blob's header to the previous format version, as an earlier build wrote it.
         pub(crate) fn age_format(&self, node_id: NodeId) {
             let path = self
                 .node_path(node_id)

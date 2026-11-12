@@ -7,7 +7,6 @@ pub struct StackingProgress {
     pub cur: usize,
     /// Units of work in the stage.
     pub total: usize,
-    /// Description of current operation.
     pub stage: StackingStage,
 }
 

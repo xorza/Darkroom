@@ -297,11 +297,10 @@ fn pick_project_open_path(start: Option<&Path>) -> Option<PathBuf> {
 }
 
 /// The native dialog confirms overwriting the name the user typed, not the one
-/// [`SavedFile::extended`] makes of it — so when that one already exists,
-/// the dialog asks again with it filled in, and its own overwrite prompt
-/// answers for the file that will be replaced. A second save dialog rather than
-/// a message box, because rfd shows message boxes on Linux through zenity,
-/// which a desktop may lack, and the save then fails with nothing on screen.
+/// [`SavedFile::extended`] makes of it, so when that one exists the dialog asks again with it
+/// filled in and its own overwrite prompt answers for the file to be replaced. A second save
+/// dialog rather than a message box: rfd shows message boxes on Linux through zenity, which a
+/// desktop may lack, and the save then fails with nothing on screen.
 fn pick_save_path(kind: SavedFile<'_>, start: Option<&Path>) -> Option<PathBuf> {
     let mut picked = save_dialog(kind, start).save_file()?;
     while let Some(target) = kind.unconfirmed_target(&picked) {

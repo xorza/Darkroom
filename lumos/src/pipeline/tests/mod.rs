@@ -425,8 +425,7 @@ fn an_invalid_stack_config_is_caught_before_the_frames_are_worked() {
 
 #[test]
 fn all_non_reference_frames_dropped_errors() {
-    // With the reference produced in-place (it survives in `frames`), "nothing aligned" means
-    // only the reference remains — guard the changed `frames.len() <= 1` condition.
+    // The reference survives in `frames`, so "nothing aligned" means only the reference remains.
     let base = base_field();
     let desc = base.desc();
     let blank = || LinearImage::from_interleaved(desc, vec![0.1; desc.pixel_count()]);

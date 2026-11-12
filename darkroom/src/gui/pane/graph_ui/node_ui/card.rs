@@ -14,12 +14,9 @@ pub(crate) fn band_padding(theme: &Theme) -> Spacing {
     Spacing::xy(theme.space.md, theme.space.sm)
 }
 
-/// One mono-styled value, unlabeled — for a figure whose own shape
-/// (`1920×1080`, `RGBA · 8-bit`) already says what it is.
-///
-/// `value` renders on demand — a `Display` figure, or a `format_args!` the
-/// caller assembles at the call site — and lands in the record pass's text
-/// arena, so a per-frame fact strip builds no `String`.
+/// One mono-styled value, unlabeled, for a figure whose own shape (`1920×1080`,
+/// `RGBA · 8-bit`) already says what it is. `value` renders on demand into the record pass's
+/// text arena, so a per-frame fact strip builds no `String`.
 pub(crate) fn bare_value(ui: &mut Ui, theme: &Theme, value: impl Display) {
     let style = support::figure_text(ui, theme);
     Text::new(fmt!(ui, "{value}")).style(&style).show(ui);
@@ -33,10 +30,8 @@ pub(crate) struct LabeledValue<'a, V> {
 }
 
 impl<V: Display> LabeledValue<'_, V> {
-    /// The value as [`bare_value`] behind its label, as two direct `Text` widgets
-    /// (no wrapping panel — draw it inside the caller's own panel so its `gap`
-    /// spaces the pair like any other sibling). Shared shape behind a node body's
-    /// footer and a preview node's image-info footer.
+    /// The value as [`bare_value`] behind its label, as two direct `Text` widgets with no
+    /// wrapping panel, so the caller's own panel `gap` spaces the pair like any sibling.
     pub(crate) fn show(self, ui: &mut Ui, theme: &Theme) {
         Text::new(self.label)
             .style(&support::muted_text(ui, theme, theme.font.caption))

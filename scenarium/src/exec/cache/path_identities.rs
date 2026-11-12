@@ -13,20 +13,18 @@ use crate::exec::cache::stamp_job::{FsPathId, StampJob};
 /// The run's memo of path identities, the previous run's keys, and the
 /// off-thread walk that fills the memo.
 ///
-/// Held by the [`RuntimeCache`](crate::exec::cache::runtime_cache::RuntimeCache),
-/// which decides which paths a node reads — a const's, or a value a producer
-/// left in its slot — and folds what this hands back.
+/// Held by the [`RuntimeCache`](crate::exec::cache::runtime_cache::RuntimeCache), which decides
+/// which paths a node reads and folds what this hands back.
 #[derive(Debug, Default)]
 pub(super) struct PathIdentities {
     /// What each path this run reads was, identified once.
     cur: HashMap<String, FsPathId>,
-    /// The previous run's memo, kept for its keys: a path read again moves its
-    /// string from here to the queue, so a run over the paths of the last
-    /// allocates none. What no run asked for again is dropped a run later, so
-    /// the two hold at most two runs' paths.
+    /// The previous run's memo, kept for its keys: a path read again moves its string from here
+    /// to the queue, so a run over the last run's paths allocates none. What no run asked for
+    /// again is dropped a run later, so the two hold at most two runs' paths.
     prev: HashMap<String, FsPathId>,
-    /// The off-thread walk that fills `cur`: queue, then pass. It owns
-    /// only what crosses to the blocking pool.
+    /// The off-thread walk that fills `cur`: queue, then pass. Owns only what crosses to the
+    /// blocking pool.
     job: StampJob,
 }
 
@@ -44,10 +42,9 @@ impl PathIdentities {
         self.job.clear_queue();
     }
 
-    /// Queue `path` for the next walk, unless this run already identified it,
-    /// already queued it, or it is [unset](is_unset_path) — which has nothing
-    /// to walk, and queueing it would fail the whole pass on a `metadata("")`,
-    /// costing every other node in the batch its pre-run identity.
+    /// Queue `path` for the next walk, unless this run already identified or queued it, or it is
+    /// [unset](is_unset_path): nothing to walk, and queueing it would fail the whole pass on a
+    /// `metadata("")`, costing every other node in the batch its pre-run identity.
     pub(super) fn request(&mut self, path: &str) {
         if is_unset_path(path) || self.cur.contains_key(path) || self.job.is_requested(path) {
             return;
@@ -62,12 +59,9 @@ impl PathIdentities {
     /// Run the queued pass on the blocking pool, leaving the queue empty and
     /// what it identified in the memo.
     ///
-    /// The job goes out and comes back — it owns its queue and scratch, so
-    /// nothing is borrowed across the boundary and the memo never moves at all.
-    /// The memo takes what the pass stamped whatever its verdict, and the pass
-    /// walks past a path that will not read ([`StampJob::run`]) — so one
-    /// unreadable path costs its own node's digest and none of the identities
-    /// the same pass gathered for the rest of the run.
+    /// The job owns its queue and scratch, so nothing is borrowed across the boundary. The memo
+    /// takes what the pass stamped whatever its verdict, and the pass walks past a path that will
+    /// not read ([`StampJob::run`]), so one unreadable path costs only its own node's digest.
     pub(super) async fn walk_queued(&mut self, cancel: CancelToken) -> Result<(), StampError> {
         if !self.job.is_queued() {
             return Ok(());
@@ -86,15 +80,12 @@ impl PathIdentities {
 
     /// Fold the identities behind the paths a value names.
     ///
-    /// `None` is the failure: a path this run never stamped, leaving its node
-    /// without a sound cache key. A value naming *no* paths does not call at
-    /// all — that is a plain const, not a filesystem read.
+    /// `None` is the failure: a path this run never stamped, leaving its node without a sound
+    /// cache key. A value naming *no* paths does not call at all — a plain const.
     ///
-    /// An [unset](is_unset_path) slot is neither. It names nothing to stat, so
-    /// it folds a marker and leaves the node cacheable — "no file chosen yet"
-    /// is a state the author passes through, not a resource that failed. The
-    /// marker stands in the slot rather than being skipped: on the Bind side
-    /// the authored strings are not folded alongside, so skipping would let
+    /// An [unset](is_unset_path) slot is neither. It names nothing to stat, so it folds a marker
+    /// and leaves the node cacheable. The marker stands in the slot rather than being skipped: on
+    /// the Bind side the authored strings are not folded alongside, so skipping would let
     /// `["", p]` and `[p, ""]` key alike.
     pub(super) fn hash(&self, hasher: &mut DigestHasher, paths: &[String]) -> Option<()> {
         hasher.write_pod(paths.len() as u64);
@@ -109,15 +100,11 @@ impl PathIdentities {
     }
 }
 
-/// Whether a path string names nothing — the state a path port sits in before
-/// a file is chosen, whose placeholder is
-/// [`DataType::default_value`](crate::data::data_type::DataType::default_value)'s
-/// empty string.
+/// Whether a path string names nothing — the state before a file is chosen, whose placeholder is
+/// [`DataType::default_value`](crate::data::data_type::DataType::default_value)'s empty string.
 ///
-/// Blank after trimming, not merely empty: whitespace is what a typed-in path
-/// collects, and no such string names a file anyone meant. The path itself is
-/// never trimmed — spaces are legal at either end of a filename, so rewriting
-/// one would read a file other than the authored one.
+/// Blank after trimming, not merely empty: whitespace is what a typed-in path collects. The path
+/// itself is never trimmed — spaces are legal at either end of a filename.
 fn is_unset_path(path: &str) -> bool {
     path.trim().is_empty()
 }
@@ -142,22 +129,19 @@ pub(crate) mod internals {
             resolved
         }
 
-        /// The key the run's memo holds `path` under, for a test about whose
-        /// allocation it is.
+        /// The key the run's memo holds `path` under.
         pub(crate) fn key(&self, path: &str) -> Option<&String> {
             self.cur.get_key_value(path).map(|(key, _)| key)
         }
 
-        /// Re-key `path` with at least `capacity` bytes reserved — a key no
-        /// copy of the path would have, so a test can tell it apart.
+        /// Re-key `path` with at least `capacity` bytes reserved, so a test can tell it apart.
         pub(crate) fn widen_key(&mut self, path: &str, capacity: usize) {
             let (mut key, identity) = self.cur.remove_entry(path).unwrap();
             key.reserve_exact(capacity);
             self.cur.insert(key, identity);
         }
 
-        /// Plant a file identity without touching a filesystem, so a digest
-        /// folding a path can be pinned to a constant.
+        /// Plant a file identity without touching a filesystem.
         pub(crate) fn plant_file(&mut self, path: &str, len: u64, mtime_ns: i128) {
             self.cur
                 .insert(path.to_string(), FsPathId::file(len, mtime_ns));

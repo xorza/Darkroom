@@ -30,7 +30,7 @@ use common::USize2;
 pub(crate) struct DetectionResources {
     /// The measurement plane and the detection planes made of it.
     pub(crate) floats: ScratchPool<Buffer2<f32>>,
-    /// Threshold masks, dilation scratch.
+    /// Saturation, threshold, source and no-data masks.
     bitmasks: ScratchPool<BitBuffer2>,
     /// The sky and σ surfaces of the estimates, read a row or a pixel at a time.
     pub(crate) surfaces: ScratchPool<MeshSurface>,

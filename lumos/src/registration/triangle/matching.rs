@@ -56,8 +56,7 @@ pub(super) fn form_triangles_from_neighbors(tree: &KdTree, k: usize) -> Vec<[usi
         }
     }
 
-    // Sort + dedup is faster than HashSet for this pattern (cache-friendly,
-    // no hashing overhead, and ~50% of entries are duplicates).
+    // Faster than a HashSet here: cache-friendly, and about half the entries are duplicates.
     triangles.sort_unstable();
     triangles.dedup();
     triangles

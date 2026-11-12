@@ -291,7 +291,7 @@ fn sigma_clip_keeps_exactly_the_samples_its_bands_hold() {
     );
 }
 
-/// Review example 1.2, where the old shortcut's non-robust σ let two outliers hide each other:
+/// Review example 1.2, where a non-robust σ lets two outliers hide each other:
 /// {−0.1, −0.05, 0, 0, 0, 0, 0.05, 0.1, 10, 10} at 2.5σ.
 ///
 /// Pass 1: median 0, deviations ranked 0 0 0 0 .05 .05 .1 .1 10 10, MAD 0.05, σ = 0.05 · 1.4826 ·
@@ -308,10 +308,10 @@ fn two_outliers_do_not_hide_each_other() {
 }
 
 /// Integer bias frames with a measured background of 0.7 ADU, scaled by 2⁻¹⁶ as a 16-bit decode
-/// leaves them: more than half the samples tie at 1000, so the MAD is 0, and the old rejection
-/// stopped there and kept the hit. The floor is the background, so the band is ±2.5 · 0.7 = ±1.75
-/// ADU about 1000: it keeps the 999s, 1000s and 1001s, and drops the 1002 and the hit at 1050. The
-/// next pass has the same median and floor and drops nothing more.
+/// leaves them: more than half the samples tie at 1000, so the MAD is 0. The floor is the
+/// background, so the band is ±2.5 · 0.7 = ±1.75 ADU about 1000: it keeps the 999s, 1000s and
+/// 1001s, and drops the 1002 and the hit at 1050. The next pass has the same median and floor and
+/// drops nothing more.
 #[test]
 fn the_background_floors_a_window_of_tied_integers() {
     let adu = [
@@ -340,7 +340,7 @@ fn the_background_floors_a_window_of_tied_integers() {
 
 /// Review example 1.1, twenty samples of noise 10⁻⁴ about 0.25 and a hit at 0.5, decides the same
 /// under every exact affine map of the data, for every method, with the background mapped with
-/// the data. The old sigma-clip shortcut kept the hit at unit scale and dropped it in ADU.
+/// the data.
 #[test]
 fn every_method_decides_the_same_at_every_scale() {
     let mut rng = TestRng::new(11);
@@ -543,9 +543,9 @@ fn linear_fit_rejects_clean_data_at_a_rate_that_falls_with_the_count() {
 
 /// On clean Gaussian samples the rejected share matches the reference implementation of each method
 /// in `internals/reference/clip_rates.py`, with no floor and with the noise model's σ of 1 as the
-/// floor: sigma clip at 2.5σ, three passes, and winsorized at 3σ, one clip. Their later passes no
-/// longer rescale the window the earlier ones cut as a complete sample, which rejected 5.5% at ten
-/// samples for sigma clip and 2.3% for winsorized; the reference now gives 3.69% and 1.48%. The
+/// floor: sigma clip at 2.5σ, three passes, and winsorized at 3σ, one clip. Their later passes do
+/// not rescale the window the earlier ones cut as a complete sample, which would reject 5.5% at ten
+/// samples for sigma clip and 2.3% for winsorized; the reference gives 3.69% and 1.48%. The
 /// floor brings both near or below the Gaussian tail shares, 1.24% and 0.27%.
 ///
 /// The reference shares come from 2·10⁵, 10⁵ and 4·10⁴ trials, each with the per-trial standard
@@ -716,8 +716,7 @@ fn sigma_clip_and_winsorized_reject_clean_data_at_their_reference_rates() {
 /// - `mild`, [1, 1.1, 1.2, 0.9, 1, 1.1, 0.8, 1.3, 2]: the 2.0 is kept at 10σ and dropped at 2σ.
 /// - `three_of_ten`, seven samples from −1.5 to 1 and three at 10 (σ of the seven 0.85, so the
 ///   three sit near 12σ) at 3σ: median 0.25, MAD 1, σ 1.62; the first clamp holds the 10s at
-///   2.69, and the clamped copy, never released, keeps them there. The band drops all three. The
-///   old start, 1.134 × the plain standard deviation, put all three inside the clamp.
+///   2.69, and the clamped copy, never released, keeps them there. The band drops all three.
 /// - Three samples are no more than the minimum.
 #[test]
 fn winsorized_keeps_exactly_the_samples_its_band_holds() {
@@ -870,8 +869,8 @@ fn gesd_drops_an_outlier_and_keeps_clean_sets() {
 /// is 30/20 = 1.5 and the sum of squares 16.32 + 17·2.25 + 3·8.5² = 271.32, so the first statistic
 /// is 8.5/√(271.32/19) = 2.249, under its critical value 2.708: the three mask each other. The
 /// second removal reaches 2.717 against 2.681, and the third 3.700 against 2.652. The automatic cap
-/// ⌊0.3·20⌋ = 6 reaches the third and drops all three. The old cap of 2 stopped at the second and
-/// kept one 10.
+/// ⌊0.3·20⌋ = 6 reaches the third and drops all three; a cap of 2 would stop at the second and
+/// keep one 10.
 #[test]
 fn gesd_tests_far_enough_to_unmask_three_outliers() {
     let mut values: Vec<f32> = (0..17).map(|i| -1.6 + 0.2 * i as f32).collect();

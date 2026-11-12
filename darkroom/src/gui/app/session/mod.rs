@@ -161,22 +161,15 @@ impl Session {
         self.drain(library, stage.out);
     }
 
-    /// Ctrl+Z / Ctrl+Shift+Z. Replays undo/redo against the document
-    /// (each entry carries its own graph target).
+    /// Ctrl+Z / Ctrl+Shift+Z.
     ///
-    /// The chords are read *every frame, unconditionally* — that call both
-    /// reads the press and keeps the chord subscribed, and palantir's
-    /// keyboard wake-gate only delivers an off-focus press when its chord
-    /// was subscribed last frame (subscriptions clear each frame).
-    ///
-    /// No focus test: Ctrl+Z is `KeyClass::Edit`, so while a text field
-    /// holds focus palantir grants it to that field's scope and this
-    /// read answers `false` on its own.
+    /// Read every frame, unconditionally: the read also keeps the chord subscribed, and palantir's
+    /// keyboard wake-gate delivers an off-focus press only for a chord subscribed last frame.
+    /// No focus test: Ctrl+Z is `KeyClass::Edit`, so a focused text field's scope takes it and
+    /// the read answers `false` on its own.
     fn apply_undo_redo(&mut self, ui: &mut Ui, requests: &mut Requests) {
         let undo = ui.shortcut_pressed(shortcuts::UNDO);
         let redo = ui.shortcut_pressed(shortcuts::REDO);
-        // The document owns its history and what a replay means; this layer
-        // only says which direction the chord asked for.
         if undo {
             self.undo(requests);
         } else if redo {
@@ -191,10 +184,9 @@ impl Session {
         self.main_window.graph_ui.request_framing(framing);
     }
 
-    /// Release the canvas's `NodeId`-keyed caches for nodes the document has
-    /// stopped holding. Driven by `App::sweep` once a
-    /// frame — [`Self::record`] runs per *record pass*, so a sweep here would
-    /// run twice on a frame carrying action input.
+    /// Release the canvas's `NodeId`-keyed caches for nodes the document has stopped holding.
+    /// Driven once a frame by `App::sweep`: [`Self::record`] runs per record pass, so a sweep
+    /// there would run twice on a frame carrying action input.
     pub(super) fn reconcile_caches(&mut self) {
         self.main_window.reconcile(&self.open);
     }

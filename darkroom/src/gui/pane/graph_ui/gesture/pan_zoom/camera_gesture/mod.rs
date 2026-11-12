@@ -36,10 +36,9 @@ impl CameraGesture {
         self.pan.is_some()
     }
 
-    /// Read the outer canvas's current-frame response, compute the target
-    /// viewport, and emit a `GraphIntent::SetViewport` when it changed: the
-    /// intent, not a direct write, is the only thing that moves the document's
-    /// camera. Three independent sources:
+    /// Read the outer canvas's current-frame response, compute the target viewport, and emit a
+    /// `GraphIntent::SetViewport` when it changed; the intent is the only thing that moves the
+    /// document's camera. Three independent sources:
     ///
     /// - **Middle-button drag** (`Sense::DRAG` + `Ui::drag_delta_by`): canvas
     ///   pan, `anchor + delta` from the latch until release. Left-drag stays with
@@ -70,11 +69,10 @@ impl CameraGesture {
         }
         pan_drag::fold(&mut self.pan, resp.middle.drag.delta(), &mut v.pan);
         pan_zoom::CANVAS_ZOOM.fold_scroll(&mut v, ScrollFrame::of(ui, &resp));
-        // Only emit when the gesture actually moved the viewport (approx
-        // compare — exact float `!=` would emit on the last-bit noise the
-        // zoom-about-cursor algebra leaves behind, which `approximately_eq`
-        // reads at the pan's own magnitude rather than against a fixed
-        // epsilon a four-digit pan would swamp).
+        // Only emit when the gesture actually moved the viewport. Exact float `!=` would emit on
+        // the last-bit noise the zoom-about-cursor algebra leaves, which `approximately_eq` reads
+        // at the pan's own magnitude rather than against a fixed epsilon a four-digit pan would
+        // swamp.
         let unchanged =
             v.pan.approximately_eq(viewport.pan) && v.zoom.approximately_eq(viewport.zoom);
         if !unchanged {

@@ -30,9 +30,9 @@ use common::USize2;
 
 #[test]
 fn raw_frame_info_matches_full_decode() {
-    // `from_files` sizes its in-memory-vs-disk decision from `raw::cfa_peek` (a header peek,
-    // no decode). That peek must report exactly the dims a full decode produces, or the memory
-    // budget would be wrong; and the file it read decodes to the frame a read of its own makes.
+    // The stack sizes its memory budget from `raw::cfa_peek` (a header peek, no decode), so the
+    // peek must report exactly the dims a full decode produces; and the file it read decodes to
+    // the frame a read of its own makes.
     let paths = real_data::calibration_frames();
     let path = &paths.darks[0];
     let ctx = LoadCtx::default();
@@ -104,12 +104,9 @@ fn builds_full_master_set() {
     );
     println!("  defects: {:?}", masters.defect_summary().unwrap());
 
-    // Masters are calibration-normalized CFA data: `(value - black) * inv_range`, deliberately
-    // *unclamped* (unlike the light path) so master dark/bias keep their signed noise
-    // distribution — black-level subtraction centers an unilluminated frame near 0, so a few
-    // pixels dip just below it. Hard invariants: every pixel finite (the combine reducers
-    // assume it), each master non-degenerate (real variation, not a flat buffer), and all
-    // values within a sane normalized envelope.
+    // Masters are unclamped, so a dark or bias keeps its signed noise: black-level subtraction
+    // centers it near 0 and a few pixels dip below. Invariants: every pixel finite (the combine
+    // reducers assume it), each master non-degenerate, and all values within a sane envelope.
     let check_master = |m: &CfaImage, name: &str| {
         let px = m.data().pixels();
         assert!(

@@ -26,15 +26,13 @@ const WATCH_DIR_FUNC_ID: FuncId = FuncId::literal("1318c24c-2ac7-4a9a-a454-281bd
 struct WatchState {
     path: PathBuf,
     mode: RecursiveMode,
-    /// Trailing-edge quiet window: after the first change the event lambda keeps
-    /// absorbing follow-up changes until the directory is silent this long, then
-    /// fires once. Collapses the burst of low-level events one user action (paste,
-    /// save) produces into a single fire. Zero disables it.
+    /// Trailing-edge quiet window: after the first change the event lambda absorbs follow-ups
+    /// until the directory is silent this long, then fires once, so the burst of events one user
+    /// action produces is one fire. Zero disables it.
     debounce: Duration,
-    /// Pulsed by the watcher's callback thread on every filesystem event; the
-    /// event lambda parks on `notified()`. `notify_one` keeps a single permit
-    /// when no waiter is parked, so a change between fires is never missed and a
-    /// burst of changes collapses into one wake-up.
+    /// Pulsed by the watcher's callback thread on every filesystem event; the event lambda parks
+    /// on `notified()`. `notify_one` keeps one permit when no waiter is parked, so a change
+    /// between fires is never missed and a burst is one wake-up.
     signal: Arc<Notify>,
     /// RAII guard: held only to keep the OS watch open — dropping it removes the
     /// watch. Never read.
@@ -112,16 +110,14 @@ impl Debug for WatchState {
     }
 }
 
-/// Whether an event is a change to the directory's *contents* — a new file, a
-/// removal, a rename, or a data write.
+/// Whether an event is a change to the directory's contents: a new file, a removal, a rename, or
+/// a data write.
 ///
-/// We subscribe to exactly `Create`, `Remove`, and `Modify`, and drop everything
-/// else: `Access` (reads/opens/closes) and the uncategorized `Any`/`Other`
-/// catch-alls. The one carve-out is metadata-only `Modify`s (access/write time,
-/// permissions, ownership, xattrs) — that's where an access-time bump lands, so
-/// it's filtered too. `Modify(Any)` is still kept: `notify`'s Windows backend reports a real write
-/// that coarsely, and dropping it would swallow genuine changes. Cost: it reports an attribute or
-/// security change the same way, so one of those fires on Windows alone, for one extra run.
+/// `Create`, `Remove` and `Modify` count; `Access` and the uncategorized `Any`/`Other` do not,
+/// nor does a metadata-only `Modify` (where an access-time bump lands). `Modify(Any)` is kept:
+/// `notify`'s Windows backend reports a real write that coarsely, and dropping it would swallow
+/// genuine changes. Cost: it reports an attribute or security change the same way, so one of
+/// those fires on Windows alone, for one extra run.
 const fn is_content_change(kind: EventKind) -> bool {
     match kind {
         EventKind::Modify(ModifyKind::Metadata(_)) => false,
@@ -236,11 +232,7 @@ pub fn fs_watch_library() -> Library {
                             .map(|w| (Arc::clone(&w.signal), w.debounce));
                         match watch {
                             Some((signal, debounce)) => {
-                                // Wait for the first change of a burst...
                                 signal.notified().await;
-                                // ...then absorb follow-up changes until the
-                                // directory stays quiet for `debounce`, so one
-                                // user action fires once instead of N times.
                                 while !debounce.is_zero()
                                     && timeout(debounce, signal.notified()).await.is_ok()
                                 {}

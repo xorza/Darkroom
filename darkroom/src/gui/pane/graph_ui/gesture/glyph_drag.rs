@@ -10,17 +10,16 @@ use crate::gui::pane::graph_ui::scene::canvas_geometry::port_layer::PortLayer;
 /// layer `A`) and the compatible glyph currently under the pointer (`snap`, a
 /// key in layer `B`).
 ///
-/// Identity-only — both ends resolve their position out of `CanvasGeometry`
-/// every frame, so a drag survives node moves and relayouts. The direction of
-/// an event drag flips the two domains, which is why `A` and `B` are separate
-/// parameters rather than one: a subscriber-started drag is a
+/// Identity-only: both ends resolve their position out of `CanvasGeometry` every frame, so a
+/// drag survives node moves and relayouts. The direction of an event drag flips the two
+/// domains, hence separate `A` and `B`: a subscriber-started drag is a
 /// `GlyphDrag<NodeId, EventPort>` and an emitter-started one the reverse.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) struct GlyphDrag<A, B> {
     /// The glyph the press latched. Fixed for the drag's whole life.
     pub(crate) from: A,
-    /// Compatible glyph currently under the pointer — the preview's snap end,
-    /// the forced hover highlight, and what a release commits against.
+    /// Compatible glyph currently under the pointer: the preview's snap end, the forced hover
+    /// highlight, and what a release commits against.
     pub(crate) snap: Option<B>,
 }
 
@@ -55,8 +54,8 @@ impl<A: NodeKey, B: NodeKey> GlyphDrag<A, B> {
     /// The moving end of the preview curve: the snapped glyph's center once the drag has a target,
     /// else `pointer`, the bare pointer in canvas-world coords (see
     /// [`world_pointer`](crate::gui::pane::graph_ui::canvas::world_pointer)). `None` on a frame
-    /// where neither resolves (pointer off-window, or a snap target that hasn't measured yet) — the
-    /// preview simply doesn't paint that frame.
+    /// where neither resolves (pointer off-window, or a snap target that hasn't measured yet),
+    /// and the preview doesn't paint that frame.
     pub(crate) fn free_end(self, pointer: Option<Vec2>, layer: &PortLayer<B>) -> Option<Vec2> {
         match self.snap {
             Some(key) => layer.center(key),

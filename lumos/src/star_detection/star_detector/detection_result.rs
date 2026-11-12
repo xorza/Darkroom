@@ -55,15 +55,14 @@ pub struct DetectionDiagnostics {
     pub fwhm: FwhmSource,
 }
 
-/// Where the FWHM the detector ran with came from — the three states the matched-filter stage can
-/// end in, as one value rather than an `f32` plus a count plus a flag derived from the count, which
-/// admits combinations none of the three states describes.
+/// Where the FWHM the detector ran with came from: one of the three states the matched-filter
+/// stage can end in, so no combination of an `f32`, a count and a flag can contradict them.
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub enum FwhmSource {
     /// Matched filtering was off: auto-estimation disabled and no configured FWHM.
     #[default]
     Disabled,
-    /// Taken from configuration, or from the built-in fallback when too few stars passed to
+    /// Taken from configuration, or from the `Auto` fallback when too few stars passed to
     /// estimate one. Nothing was measured from this frame.
     Configured(f32),
     /// Measured from this frame's own stars.

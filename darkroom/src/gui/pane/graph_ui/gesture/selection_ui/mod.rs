@@ -13,45 +13,36 @@ use crate::gui::pane::graph_ui::canvas_input::CanvasGesture;
 use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
 use crate::gui::theme::Theme;
 
-/// Rubber-band multi-selection. A plain left-drag on empty canvas
-/// sweeps a rectangle; the nodes it intersects and the ties whose centers it
-/// holds highlight live as it moves, and the set is committed on release. Holding Shift at drag-start *extends* the current selection
-/// instead of replacing it. Ctrl+LMB is the breaker and RMB opens the
-/// new-node menu / breaker, so this only claims unmodified left-drags
-/// that fall through to the bare canvas (node bodies hit-test first, so
-/// a drag that starts on a node never reaches here).
+/// Rubber-band multi-selection. A plain left-drag on empty canvas sweeps a rectangle; the nodes
+/// it intersects and the ties whose centers it holds highlight live as it moves, and the set is
+/// committed on release. Holding Shift at drag-start extends the current selection instead of
+/// replacing it. Ctrl+LMB is the breaker and RMB opens the new-node menu or the breaker, so
+/// this only claims unmodified left-drags that reach the bare canvas (node bodies hit-test
+/// first).
 #[derive(Default, Debug)]
 pub(crate) struct SelectionUi {
     band: Option<RubberBand>,
-    /// The swept set while a band is active, **sorted and deduplicated** so
+    /// The swept set while a band is active, sorted and deduplicated so
     /// [`Selection::contains`](crate::gui::pane::graph_ui::selection::Selection::contains) can
     /// binary-search it. Owned here rather than written into the document, which the gesture only
     /// touches once, on release.
     ///
-    /// Refilled from scratch every frame of the drag, which is what makes the
-    /// container choice load-bearing: a `Vec`'s `clear` keeps the allocation
-    /// for the next frame, where a `BTreeSet` would drop its whole tree and
-    /// rebuild it every frame of every drag.
-    /// [`Self::preview`] is what says whether the contents mean anything.
+    /// Refilled from scratch every frame of the drag, so a `Vec`'s `clear` keeps the allocation
+    /// where a `BTreeSet` would drop and rebuild its whole tree. [`Self::preview`] says whether
+    /// the contents mean anything.
     swept: Vec<ItemId>,
 }
 
 #[derive(Clone, Debug)]
 struct RubberBand {
-    /// Anchor + live corner in inner-canvas pre-transform (world)
-    /// coords — the same frame node positions live in — so the rect and
-    /// its hit-test need no extra transform. `cur` is refreshed from
-    /// the pointer every frame.
+    /// Anchor and live corner in inner-canvas pre-transform (world) coords, the frame node
+    /// positions live in, so the rect and its hit-test need no extra transform. `cur` is
+    /// refreshed from the pointer every frame.
     start: Vec2,
     cur: Vec2,
-    /// Pre-drag selection captured at latch (empty unless Shift extends).
-    /// The swept set unions onto this each frame, so we never re-read
-    /// `GraphView::selected` mid-drag — no dependency on the document staying
-    /// untouched, and the additive base is fixed at latch.
-    ///
-    /// Inside the band, not beside it: it is captured with the gesture
-    /// and meaningless without one, and at struct level it outlived every
-    /// commit as stale state.
+    /// Pre-drag selection captured at latch (empty unless Shift extends). The swept set unions
+    /// onto this each frame, so `GraphView::selected` is never re-read mid-drag and the additive
+    /// base is fixed at latch. Inside the band, as it is meaningless without one.
     base: BTreeSet<ItemId>,
 }
 
@@ -62,8 +53,7 @@ impl RubberBand {
 }
 
 impl SelectionUi {
-    /// Drop the in-flight band. `swept` is cleared in place —
-    /// keeping the allocation is the whole reason it is a `Vec`.
+    /// Drop the in-flight band. `swept` is cleared in place, keeping its allocation.
     pub(crate) fn reset(&mut self) {
         self.band = None;
         self.swept.clear();
@@ -74,20 +64,17 @@ impl SelectionUi {
         self.band.is_some()
     }
 
-    /// The live swept set while a band is in flight, for node/pin draw to
-    /// paint against; `None` when no band is active (the caller falls back to
-    /// the committed selection).
+    /// The live swept set while a band is in flight, for node and pin draw to paint against;
+    /// `None` when no band is active (the caller falls back to the committed selection).
     pub(crate) fn preview(&self) -> Option<&[ItemId]> {
         self.band.is_some().then_some(&self.swept)
     }
 
-    /// Drive the gesture from the outer-canvas response: latch on an
-    /// unmodified left-drag-start, track the live corner, and recompute
-    /// the swept set every frame, so nodes highlight *live* as the rectangle
-    /// moves (read back via [`Self::preview`]); `Document`/undo are only touched
-    /// once, by the committing `SetSelection` emitted on release, which the
-    /// release frame's record reads. The context's Esc —
-    /// resolved once by the canvas — drops the band without emitting.
+    /// Drive the gesture from the outer-canvas response: latch on an unmodified left-drag-start,
+    /// track the live corner, and recompute the swept set every frame, so nodes highlight live
+    /// as the rectangle moves (read back via [`Self::preview`]); `Document`/undo are only
+    /// touched once, by the committing `SetSelection` emitted on release. The context's Esc
+    /// drops the band without emitting.
     pub(crate) fn input(&mut self, ui: &mut Ui, stage: &mut Stage<'_, CanvasCtx<'_>>) {
         let ctx = stage.ctx;
         let graph_ctx = ctx.graph_ctx();
@@ -103,10 +90,9 @@ impl SelectionUi {
             let band = RubberBand {
                 start: viewport.to_world(p - travel),
                 cur: viewport.to_world(p),
-                // Shift is a gesture *parameter* (extend vs replace), not
-                // arbitration — read it here, not in the classifier.
-                // Captured once, so the per-frame union never re-reads the
-                // document.
+                // Shift is a gesture parameter (extend vs replace), not arbitration, so it is read
+                // here, not in the classifier. Captured once, so the per-frame union never
+                // re-reads the document.
                 base: if ui.modifiers().contains(Modifiers::SHIFT) {
                     graph_ctx.selected().clone()
                 } else {
@@ -125,15 +111,13 @@ impl SelectionUi {
             band.cur = graph_ctx.camera().to_world(p);
         }
         let rect = band.rect();
-        // Swept into the reused preview buffer: refilled from scratch every
-        // frame the band is held, keeping its allocation across frames.
+        // Swept into the reused preview buffer, refilled every frame the band is held.
         let swept = &mut self.swept;
         swept.clear();
         swept.extend(band.base.iter().copied());
         for n in graph_ctx.nodes() {
-            // The cached-size world rect, so nodes the viewport cull
-            // skipped this frame still sweep. Never-measured nodes
-            // (first frame) can't be hit yet — skip.
+            // The cached-size world rect, so nodes the viewport cull skipped this frame still
+            // sweep. Never-measured nodes (first frame) can't be hit yet.
             let Some(body) = ctx.geometry().node_world_rect(n) else {
                 continue;
             };
@@ -150,9 +134,8 @@ impl SelectionUi {
                 .filter(|(_, placed)| rect.contains(placed.pos))
                 .map(|(&tie, _)| ItemId::Tie(tie)),
         );
-        // The base arrives sorted (it came off a `BTreeSet`) but the sweep
-        // appends in paint order and can re-add a node the base already held,
-        // so both properties `Selection::Swept` promises are restored here.
+        // The sweep appends in paint order and can re-add a node the base already held, so both
+        // properties `Selection::Swept` promises are restored here.
         swept.sort_unstable();
         swept.dedup();
         // Still dragging → stash the updated corner. A `None` delta is the release edge that
@@ -166,9 +149,9 @@ impl SelectionUi {
         });
     }
 
-    /// Paint the in-progress rectangle. Drawn inside the inner canvas so
-    /// its world coords ride the same pan/zoom transform as the nodes.
-    /// No-op when no gesture is active or the rect has no area yet.
+    /// Paint the in-progress rectangle, inside the inner canvas so its world coords ride the
+    /// same pan/zoom transform as the nodes. No-op when no gesture is active or the rect has no
+    /// area yet.
     ///
     /// The border is a hairline on screen at every `zoom`: palantir scales a stroke by the
     /// canvas's transform, so its world width is the hairline over the zoom.

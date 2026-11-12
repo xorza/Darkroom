@@ -16,29 +16,24 @@ use crate::core::io::document::saved_paths::SavedPaths;
 use crate::core::io::preferences::error::{PreferencesLoadError, PreferencesSaveError};
 use crate::core::io::preferences::interface_size::InterfaceSize;
 
-/// Preferences file name, resolved inside the platform's configuration
-/// directory. RON so it's hand-editable and matches every other file the app
-/// reads and writes.
+/// Preferences file name, resolved inside the platform's configuration directory. RON, so it's
+/// hand-editable and matches every other file the app reads and writes.
 const PREFERENCES_FILE: &str = "darkroom.preferences.ron";
 
-/// Persisted session state: the document open when the app last closed,
-/// and editor behavior.
-/// Reloaded on startup so darkroom reopens where the user left off.
+/// Persisted session state: the document open when the app last closed, and editor behavior.
 /// `#[serde(default)]` so a partial preferences file still deserializes.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub(crate) struct Preferences {
     /// Document to reopen on launch. `None` starts with an empty document.
     pub(crate) document_path: Option<PathBuf>,
-    /// Reopen `document_path` on launch. When `false`, launch starts with
-    /// an empty document (the path is still remembered, just not opened).
-    /// Defaults to `true` — the historical reopen-where-you-left-off behavior.
+    /// Reopen `document_path` on launch. When `false`, launch starts with an empty document and
+    /// the path is still remembered. Defaults to `true`.
     pub(crate) load_last_document: bool,
-    /// Prompt to save unsaved changes before any transition that would
-    /// discard them — window close, ⌘Q, File ▸ Quit, File ▸ New, File ▸
-    /// Open. When `false`, those proceed without asking. The prompt's
-    /// "Don't ask again" checkbox clears it; the Preferences tab can
-    /// restore it. Defaults to `true`.
+    /// Prompt to save unsaved changes before any transition that would discard them (window
+    /// close, ⌘Q, File ▸ Quit, File ▸ New, File ▸ Open). When `false`, those proceed without
+    /// asking. The prompt's "Don't ask again" checkbox clears it; the Preferences tab can restore
+    /// it. Defaults to `true`.
     pub(crate) confirm_unsaved_changes: bool,
     /// Save the paths inside a document's folder relative to it, so the folder moves or is copied
     /// whole and its files go with it. When `false`, a save writes every path absolute. Defaults
@@ -46,34 +41,29 @@ pub(crate) struct Preferences {
     pub(crate) relative_paths: bool,
     /// The whole UI's size, on top of the platform's scale.
     pub(crate) interface_size: InterfaceSize,
-    /// Main window geometry from the last session, restored at launch so
-    /// the editor reopens at the same size / position. `None` on first run
-    /// (platform picks).
+    /// Main window geometry from the last session. `None` on first run (platform picks).
     pub(crate) window: Option<WindowState>,
-    /// Image-viewer toolbar choices (backdrop + magnification sampling),
-    /// shared by all viewer tabs: a toolbar click in any viewer edits this
-    /// in place and persists.
+    /// Image-viewer toolbar choices (backdrop and magnification sampling), shared by all viewer
+    /// tabs.
     pub(crate) viewer: ViewerPreferences,
     /// Default ONNX model paths copied into newly-authored ML node inputs.
     pub(crate) ml_models: MlModelPaths,
 }
 
-/// Backdrop behind (and around) a viewer's image, as offered by the
-/// viewer toolbar's swatch row. A frontend-agnostic persisted choice.
+/// Backdrop behind and around a viewer's image, as offered by the viewer toolbar's swatch row.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum ViewerBg {
-    /// The editor's canvas fill — the resting default.
+    /// The editor's canvas fill.
     #[default]
     Theme,
     Black,
     White,
-    /// Neutral gray checkerboard — the transparency reference.
+    /// Neutral gray checkerboard, the transparency reference.
     Checker,
 }
 
-/// Persisted image-viewer toolbar state. One global setting (not
-/// per-tab): every viewer pane reads and edits the same choices.
+/// Persisted image-viewer toolbar state: one global setting, not per tab.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub(crate) struct ViewerPreferences {
@@ -92,11 +82,9 @@ impl Default for ViewerPreferences {
     }
 }
 
-/// Persisted main-window geometry. `size` is logical pixels (DPI-independent,
-/// so it restores to the same apparent size on a differently-scaled
-/// monitor); `physical_pos` is physical pixels, absent when the platform
-/// doesn't report it (Wayland). `maximized` restores the maximized state
-/// while `size` remains what to return to when un-maximized.
+/// Persisted main-window geometry. `size` is logical pixels, so it restores to the same apparent
+/// size on a differently-scaled monitor; `physical_pos` is physical pixels, absent when the
+/// platform doesn't report it (Wayland). `size` remains what to return to when un-maximized.
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct WindowState {
     /// Logical inner size `(w, h)`, positive on both axes, as palantir opens no window of
@@ -185,9 +173,9 @@ impl Preferences {
         }
     }
 
-    /// Read the preferences from `path`. A missing file is a first run, and
-    /// reads as the defaults; a file that cannot be read or parsed is an error,
-    /// so the caller can report it and leave the file as the user has it.
+    /// Read the preferences from `path`. A missing file is a first run and reads as the defaults;
+    /// a file that cannot be read or parsed is an error, so the caller can report it and leave the
+    /// file as the user has it.
     fn load_from(path: &Path) -> Result<Self, PreferencesLoadError> {
         let bytes = match fs::read(path) {
             Ok(bytes) => bytes,
@@ -207,13 +195,12 @@ impl Preferences {
             })
     }
 
-    /// Write the preferences to `path`. A failed persist is the caller's to
-    /// surface: it shouldn't interrupt the user's session.
+    /// Write the preferences to `path`.
     fn save_to(&self, path: &Path) -> Result<(), PreferencesSaveError> {
         let bytes = SerdeFormat::Ron.serialize(self)?;
-        // Nothing has created the configuration directory on a first run, and
-        // publication needs it to exist to place its temporary file beside the
-        // target. Skipped for the bare-name fallback, whose parent is empty.
+        // A first run has no configuration directory, and publication needs it to place its
+        // temporary file beside the target. Skipped for the bare-name fallback, whose parent is
+        // empty.
         if let Some(parent) = path
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())

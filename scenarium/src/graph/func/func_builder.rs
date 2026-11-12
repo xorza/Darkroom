@@ -12,9 +12,7 @@ use crate::graph::func::{Func, FuncBehavior, FuncEvent};
 use crate::graph::identity::{FuncId, FuncRef};
 use crate::graph::node::CacheMode;
 
-/// A func declaration in progress. Started by [`Func::builder`] or
-/// [`Func::into_builder`], set through the chained setters or the fields, and
-/// sealed by [`build`](Self::build).
+/// A func declaration in progress, started by [`Func::builder`] or [`Func::into_builder`].
 #[derive(Clone, Debug)]
 pub struct FuncBuilder {
     pub id: FuncId,
@@ -56,9 +54,7 @@ impl FuncBuilder {
         self
     }
 
-    /// Set the [`CacheMode`] that new nodes of this func adopt. Defaults to
-    /// [`CacheMode::None`]; raise it for funcs whose output is worth caching by
-    /// default.
+    /// Set the [`CacheMode`] that new nodes of this func adopt; defaults to [`CacheMode::None`].
     #[must_use]
     pub const fn default_cache_mode(mut self, mode: CacheMode) -> Self {
         self.default_cache_mode = mode;
@@ -77,9 +73,7 @@ impl FuncBuilder {
         self
     }
 
-    /// Add an output port. Build it with [`FuncOutput::new`], optionally chaining
-    /// [`FuncOutput::description`] — mirrors the [`input`](Self::input) +
-    /// [`FuncInput`] builder pattern.
+    /// Add an output port, built with [`FuncOutput::new`].
     #[must_use]
     pub fn output(mut self, output: FuncOutput) -> Self {
         self.outputs.push(output);
@@ -139,11 +133,9 @@ impl FuncBuilder {
                     input_idx,
                 });
             }
-            // A declaration is checked without a registry — no `Library`
-            // exists yet, and one may register this func before the enum types
-            // it names. So an enum default need only *be* an enum literal
-            // here; `Library::register_type` checks the name against the
-            // variants once that type arrives, from whichever side is second.
+            // No `Library` exists yet, and one may register this func before the enum types it
+            // names, so an enum default need only be an enum literal here;
+            // `Library::register_type` checks the name against the variants once both exist.
             if let Some(default) = &input.default_value
                 && !input.accepts_const(default, Strictness::Declared, |_, _| true)
             {

@@ -51,9 +51,9 @@ pub enum DisplayKind {
     #[cfg(feature = "internals")]
     Cpu,
     /// [`DisplayKind::Gpu`] on the device palantir's `headless_test_gpu` lends the tests that run
-    /// at once; it panics where no adapter is. Test code: tests run in parallel in one process,
-    /// and a device created on one Vulkan instance while another
-    /// enumerated its adapters crashed in the Vulkan loader on lavapipe (CI run 40528808017).
+    /// at once; it panics where no adapter is. Test code: a device created on one Vulkan instance
+    /// while another enumerated its adapters crashed in the Vulkan loader on lavapipe (CI run
+    /// 40528808017).
     #[cfg(feature = "internals")]
     TestGpu,
     /// [`DisplayKind::TestGpu`] on a device of its own, palantir's `isolated_headless_test_gpu`
@@ -147,8 +147,7 @@ impl Driver {
     /// Open the project at `document`, where `mode` says. A project that does not open leaves
     /// the editor as it was, as a person's Open does.
     pub fn open(&mut self, document: &Path, mode: OpenMode) -> Result<(), DriverError> {
-        // Absolute, as a native dialog answers: memory holds every path absolute, and the backend
-        // knows the document opened by its path.
+        // Absolute, as a native dialog answers: memory holds every path absolute.
         let document = path::absolute(document).map_err(|source| io_error(document, source))?;
         let opened = match mode {
             OpenMode::InPlace => document,
@@ -222,8 +221,7 @@ impl Driver {
         let dir = self.session.join("shots");
         let path = dir.join(format!("{:03}-{}.png", self.shots, region.slug()));
         let capture = self.backend.shot(region, max_side);
-        // The session settles even when the shot fails, so the next call starts from a settled
-        // frame.
+        // Settles even when the shot fails, so the next call starts from a settled frame.
         self.backend.settle(&format!("the shot of {region:?}"))?;
         let shot = Shot::new(capture?, path);
         fs::create_dir_all(&dir).map_err(|source| io_error(&dir, source))?;

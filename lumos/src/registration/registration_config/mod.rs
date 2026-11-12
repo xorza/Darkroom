@@ -69,9 +69,8 @@ impl RegistrationMatchingConfig {
 
 /// Configuration for image registration.
 ///
-/// All parameters have sensible defaults calibrated against industry standards
-/// (OpenCV, Astroalign, PixInsight). Most users only need to set `model` if they
-/// want a specific model.
+/// Defaults are calibrated against OpenCV, Astroalign and PixInsight; most callers set only
+/// `model`.
 ///
 /// # Example
 ///
@@ -216,22 +215,17 @@ impl RegistrationConfig {
     /// its iteration budget and RMS gate from [`Self::precise`], with extra stars, tighter matching
     /// and stricter confidence of its own.
     ///
-    /// Both bases are read rather than copied: a preset that re-typed `precise()`'s numbers as
-    /// literals would drift from it the first time either was tuned.
+    /// Both bases are read, not copied, so the preset cannot drift from them.
     pub fn precise_wide_field() -> Self {
         let precise = Self::precise();
         Self {
             ransac: RansacConfig {
-                // Stricter than precise(), which is this preset's own choice.
                 confidence: 0.9999,
-                // From wide_field(): no rotation or scale prior.
                 max_rotation: None,
                 scale_range: None,
-                // From precise(): the iteration budget.
                 ..precise.ransac
             },
             max_rms_error: precise.max_rms_error,
-            // Stricter than precise(): more stars, tighter matching.
             matching: RegistrationMatchingConfig {
                 max_stars: 500,
                 min_matches: 20,
@@ -241,7 +235,6 @@ impl RegistrationConfig {
                 },
                 ..Default::default()
             },
-            // From wide_field(): SIP up to an affine map, unlimited rotation/scale.
             ..Self::wide_field()
         }
     }
@@ -258,19 +251,7 @@ impl RegistrationConfig {
         }
     }
 
-    /// Validate all configuration parameters.
-    ///
-    /// # Errors
-    ///
-    /// Returns the offending field if any parameter is invalid:
-    /// - `max_stars` or `min_stars` < 3
-    /// - `max_stars` < `min_stars`
-    /// - `min_matches` < transform minimum points
-    /// - `ratio_tolerance` not in (0, 1)
-    /// - `min_votes` < 1
-    /// - invalid RANSAC configuration
-    /// - `max_rms_error` non-finite or <= 0
-    /// - invalid SIP configuration (when enabled)
+    /// Validate all configuration parameters, returning the first offending field.
     pub(crate) fn validate(&self) -> Result<(), InvalidConfigField> {
         self.matching.validate(self.model)?;
         self.ransac.validate()?;

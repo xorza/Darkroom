@@ -1,18 +1,14 @@
 //! Test fixtures, available only to in-tree tests and the downstream
 //! `internals` dev feature.
 //!
-//! [`test_graph`] is the harness: a graph and its library built together and
-//! addressed by name, which is what a fixture reaches for. [`calls`] is the
-//! counter its counted bodies are built on.
+//! [`test_graph`] is the harness: a graph and its library built together and addressed by name.
+//! [`calls`] is the counter its counted bodies are built on.
 //!
-//! What is left in this file is [`stub_func`] and [`stub_event`], the
-//! do-nothing bodies the harness deliberately cannot supply:
-//! [`NodeSpec`](test_graph::NodeSpec) names ports `in0`/`out0` by position, so a
-//! test about how an editor *renders* a port has to state its own [`Func`] —
-//! and a `Func` cannot be built without an implementation. Beside them is
-//! [`unresolved_node`], the node a decoded document holds for a func the
-//! library lost, until [`Graph::reconcile`](crate::Graph::reconcile) detaches
-//! it.
+//! This file holds [`stub_func`] and [`stub_event`], the do-nothing bodies the harness cannot
+//! supply: [`NodeSpec`](test_graph::NodeSpec) names ports `in0`/`out0` by position, so a test
+//! about how an editor *renders* a port states its own [`Func`], which needs an implementation.
+//! Beside them is [`unresolved_node`], the node a decoded document holds for a func the library
+//! lost, until [`Graph::reconcile`](crate::Graph::reconcile) detaches it.
 
 #[cfg(test)]
 pub(crate) mod blob;

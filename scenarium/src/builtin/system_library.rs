@@ -15,8 +15,6 @@ const CONCAT_FUNC_ID: FuncId = FuncId::literal("8854cccc-81d3-4e26-8b4f-e33d62e3
 pub fn system_library() -> Library {
     let mut library = Library::default();
 
-    // print: log the input value to the node log (info level), read
-    // back by the editor. Sugar over `CtxManager::log`.
     library.add(
         Func::builder(
             PRINT_FUNC_ID,

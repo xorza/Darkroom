@@ -44,12 +44,9 @@ impl Kernels {
 }
 
 impl Gpu {
-    /// Creates a new GPU context, initializing wgpu with default settings.
-    ///
-    /// The device gets wgpu's downlevel limits, which every adapter wgpu supports
-    /// meets, raised to the adapter's own buffer limits: an astrophotography frame
-    /// (24 MP of `RGBA_F32` is 384 MB) needs every byte of buffer the adapter allows,
-    /// and asking for more than it has would fail the device outright.
+    /// Opens a device with wgpu's downlevel limits, which every supported adapter meets, raised
+    /// to the adapter's own buffer limits: a 24 MP `RGBA_F32` frame is 384 MB, and asking for more
+    /// than the adapter has would fail the device.
     pub fn new() -> Result<Self, GpuError> {
         let instance = Self::instance();
 

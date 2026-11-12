@@ -14,13 +14,12 @@ const SOFT_EXCLUDED: QualityFlags = QualityFlags::SATURATED
     .union(QualityFlags::FLAT_FLOOR);
 
 /// Everything one combine job needs beyond the pixels themselves: the covering frames' samples
-/// packed to the front, with their weights, flags, frames and noise in the same order, and the
+/// packed to the front, with their weights, flags and noise in the same order, and the
 /// rejection methods' own working buffers.
 ///
 /// Leased from a [`ScratchPool`](crate::scratch_pool::ScratchPool) shaped by the frame count,
-/// rather than built for each loop, because the row loop runs once per chunk per channel — a
-/// fresh set would rebuild every vector on each of those. The gather buffers are
-/// indexed directly, so they hold the frame count as their length, not just as capacity.
+/// since the row loop runs once per chunk per channel. The gather buffers are indexed directly, so
+/// they hold the frame count as their length, not just as capacity.
 #[derive(Debug, Default)]
 pub(crate) struct CombineScratch {
     pub(super) values: Vec<f32>,

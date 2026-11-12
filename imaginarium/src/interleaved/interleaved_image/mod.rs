@@ -14,13 +14,11 @@ pub struct InterleavedImage {
 }
 
 impl InterleavedImage {
-    /// Dimensions and format derived from the owned typed storage.
     #[inline]
     pub const fn desc(&self) -> InterleavedDesc {
         InterleavedDesc::new(self.pixels.size(), self.pixels.format())
     }
 
-    /// The interleaved pixel bytes — a zero-copy `&[u8]` view of the typed buffer.
     pub fn bytes(&self) -> &[u8] {
         self.pixels.bytes()
     }
@@ -31,7 +29,6 @@ impl InterleavedImage {
         self.pixels.into_bytes()
     }
 
-    /// The interleaved pixel bytes, mutable — zero-copy; writes hit the buffer.
     pub fn bytes_mut(&mut self) -> &mut [u8] {
         self.pixels.bytes_mut()
     }
@@ -90,9 +87,8 @@ impl InterleavedImage {
         self.convert(format)
     }
 
-    /// Borrowing counterpart of [`convert`](Self::convert): converts into a freshly allocated
-    /// image, leaving `self` alone, so a caller that holds only a borrow skips the copy of the
-    /// source that `convert`'s `self` receiver would force. The same format is a full copy.
+    /// [`convert`](Self::convert) from a borrow, into a freshly allocated image: no copy of the
+    /// source first. The same format is a full copy.
     #[must_use]
     pub fn convert_to(&self, color_format: ColorFormat) -> Self {
         let source = self.desc();

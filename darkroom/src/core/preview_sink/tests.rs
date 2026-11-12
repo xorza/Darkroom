@@ -21,9 +21,8 @@ fn the_declaration_is_a_sink_that_produces_nothing() {
     assert!(is_func(func.id()));
 }
 
-/// The lambda publishes under the node it was invoked as, and a second run
-/// of the same node replaces rather than accumulates — the bound that keeps
-/// a full-resolution image from piling up.
+/// The lambda publishes under the node it was invoked as, and a second run of the same node
+/// replaces rather than accumulates, bounding full-resolution images.
 #[tokio::test]
 async fn invoking_publishes_the_latest_value_per_node() {
     let sink = Arc::new(PreviewSink::default());
@@ -65,9 +64,8 @@ async fn invoking_publishes_the_latest_value_per_node() {
     assert!(drained.is_empty(), "a drain empties the sink");
 }
 
-/// An invoke with no attribution is an executor bug, not a runtime state,
-/// so it trips scenarium's own invariant rather than silently showing
-/// nothing forever.
+/// An invoke with no attribution is an executor bug, so it trips scenarium's own invariant
+/// rather than silently showing nothing.
 #[tokio::test]
 #[should_panic(expected = "only readable inside a lambda invoke")]
 async fn an_unattributed_invoke_is_a_bug_not_a_silent_no_op() {

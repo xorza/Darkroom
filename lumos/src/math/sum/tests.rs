@@ -8,8 +8,8 @@ use crate::math::sum::simd::{SumF32, WeightedSumsKernel};
 use crate::math::sum::{mean_f32, scalar, sum_f32, weighted_mean_f32};
 use simd::IsaTier;
 
-/// Lengths that straddle both gates and the vectors' remainders: under one vector, exactly one,
-/// one past it, `sum_f32`'s crossover at 16 and one past, and well past both.
+/// Lengths that straddle the one-vector gate and the vectors' remainders: under one vector,
+/// exactly one, one past it, two vectors and one past, and well past.
 const LENGTHS: [usize; 15] = [1, 2, 3, 4, 5, 7, 8, 9, 16, 17, 63, 64, 65, 257, 1000];
 
 /// Cycles 1e6 against -1e6 so a running total cancels catastrophically, with small values between

@@ -189,7 +189,7 @@ impl LumosExtension {
         matches!(self, Self::Flags | Self::Gain)
     }
 
-    /// Whether `header` is this extension's: its `EXTNAME`, and for a plane of a name other
+    /// Whether `hdu` is this extension's: its `EXTNAME`, and for a plane of a name other
     /// writers use, its `LUMOSFMT`.
     pub(crate) fn names(self, hdu: &Hdu) -> Result<bool, FitsLoadError> {
         Ok(hdu.matches(self.extname())?

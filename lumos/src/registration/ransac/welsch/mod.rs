@@ -40,10 +40,7 @@ impl WelschScorer {
         }
     }
 
-    /// The loss of a single point.
-    ///
-    /// Lower loss = better fit. The loss smoothly transitions from 0
-    /// (perfect fit) to `outlier_loss` (clear outlier).
+    /// The loss of a single point, 0 for a perfect fit up to `outlier_loss`; lower is better.
     #[inline]
     pub(super) fn loss(&self, residual_sq: f64) -> f64 {
         if residual_sq > self.threshold_sq {

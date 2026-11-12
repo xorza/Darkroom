@@ -16,10 +16,10 @@ use crate::star_detection::centroid::profile_bounds::MIN_PROFILE_SIGMA;
 use crate::star_detection::centroid::profile_problem::{FitData, LmModel};
 use crate::star_detection::centroid::star_noise::StarNoise;
 
-/// Maximum stamp side length in pixels (31 for `stamp_radius=15`).
+/// The largest stamp side, in pixels.
 pub(super) const MAX_STAMP_SIZE: usize = 2 * MAX_STAMP_RADIUS + 1;
 
-/// Maximum stamp pixels (31×31 for `stamp_radius=15`).
+/// The most pixels a stamp holds.
 pub(super) const MAX_STAMP_PIXELS: usize = MAX_STAMP_SIZE.pow(2);
 
 /// The square of the residual of `radius` about `pos`.
@@ -51,7 +51,7 @@ impl StampAt<'_> {
     }
 }
 
-/// The stamp's own pixel coordinates, `0..2r` on each axis, flattened row-major.
+/// The stamp's own pixel coordinates, `0..=2r` on each axis, flattened row-major.
 ///
 /// Identical for every candidate of a given radius, so it is built once per detection rather than
 /// per star: both profile models read the data only through `x - x0` and `y - y0`, so fitting in
@@ -83,10 +83,9 @@ impl StampGrid {
 /// Uses `ArrayVec` to avoid heap allocations for typical stamp sizes.
 #[derive(Debug)]
 pub(super) struct StampData {
-    /// Pixel values (background-subtracted at the caller if needed), row-major over the stamp.
-    /// The matching coordinates live in the shared [`StampGrid`].
+    /// The residual's pixel values, sky not subtracted, row-major over the stamp. The matching
+    /// coordinates live in the shared [`StampGrid`].
     pub(super) z: ArrayVec<f64, MAX_STAMP_PIXELS>,
-    /// Peak pixel value within the stamp.
     pub(super) peak: f32,
     /// Image position of the stamp's top-left pixel, which [`StampGrid`]'s coordinates are
     /// relative to. Integer-valued, but f64 so shifting a fitted centre back into image
@@ -113,7 +112,8 @@ pub(super) fn min_amplitude(seed: f64) -> f64 {
 }
 
 /// Gaussian-equivalent width from a stamp's weighted second moments: for a Gaussian
-/// `E[r²] = 2σ²`, so `σ = sqrt(E[r²]/2)`. A better seed for L-M than a fixed value.
+/// `E[r²] = 2σ²`, so `σ = sqrt(E[r²]/2)`, a better seed for L-M than a fixed value; 2 px when the
+/// stamp holds no light.
 ///
 /// `max_sigma` is the widest profile the optimizer will accept, so the seed lands inside the range
 /// its own `constrain` enforces — starting outside it just spends the first iteration being clamped
@@ -155,7 +155,7 @@ impl StampFit {
     ///
     /// One pass produces all four outputs — pixel values, the peak, the second moments behind
     /// `sigma_est`, and the inverse-variance weights. Computing them per consumer instead costs an
-    /// extraction walk plus one walk each: three traversals of the same 225 f64 per candidate, on
+    /// extraction walk plus one walk each: three traversals of the same stamp per candidate, on
     /// the hottest path in `measure_star`.
     pub(super) fn prepare<const N: usize>(inputs: FitInputs<'_>) -> Option<Self> {
         let FitInputs {

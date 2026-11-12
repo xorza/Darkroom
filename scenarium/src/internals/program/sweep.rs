@@ -9,9 +9,8 @@ use crate::exec::schedule::{NodeState, RootFlags, RunSchedule};
 use crate::graph::func::lambda::OutputDemand;
 use crate::internals::program::{Placed, ProgramBuilder};
 
-/// The cache-aware sweep over a hand-stated schedule: which nodes the planner
-/// would have rooted, which it would have blocked, and what the cache already
-/// holds.
+/// The cache-aware sweep over a hand-stated schedule: which nodes the planner would have rooted
+/// or blocked, and what the cache already holds.
 #[derive(Debug)]
 pub(crate) struct Sweep<'a> {
     owner: &'a ProgramBuilder,
@@ -48,8 +47,7 @@ impl<'a> Sweep<'a> {
         self
     }
 
-    /// Prime the cache: `values` resident under the digest the sweep is about
-    /// to stamp for `node`, so it reads as a hit.
+    /// Prime the cache: `values` resident under the digest the sweep stamps for `node`.
     pub(crate) fn cached(
         mut self,
         node: Placed,
@@ -59,8 +57,7 @@ impl<'a> Sweep<'a> {
         self
     }
 
-    /// Run the sweep, handing back the schedule it refined and the cache it
-    /// stamped.
+    /// Run the sweep, handing back the schedule it refined.
     pub(crate) async fn run(self) -> Swept<'a> {
         let Sweep {
             owner,
@@ -70,8 +67,7 @@ impl<'a> Sweep<'a> {
         } = self;
         let program = &owner.program;
 
-        // `Cut` is the planner's positive verdict — runnable, nothing claimed
-        // it yet — so that is what a swept-from schedule starts at.
+        // `Cut` is the planner's positive verdict: runnable, nothing claimed it yet.
         let mut schedule = owner.staged(NodeState::Cut);
         for node in missing {
             schedule.states[node.node_idx] = NodeState::MissingInputs;
@@ -92,8 +88,7 @@ impl<'a> Sweep<'a> {
     }
 }
 
-/// What a [`Sweep`] left behind, over the program it swept — so an assertion
-/// names a node's port run without the caller re-deriving it.
+/// What a [`Sweep`] left behind, over the program it swept.
 #[derive(Debug)]
 pub(crate) struct Swept<'a> {
     program: &'a CompiledGraph,

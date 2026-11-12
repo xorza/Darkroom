@@ -3,8 +3,7 @@
 //! Creates binary masks marking the pixels of a residual above a sigma threshold: the detection
 //! plane's candidates, and the sources the sky is refined around.
 //!
-//! Uses bit-packed storage (`BitBuffer2`) for memory efficiency - each pixel
-//! uses 1 bit instead of 1 byte, reducing memory usage by 8x.
+//! Bit-packed storage (`BitBuffer2`) takes 1 bit a pixel, 8x less than a byte.
 
 pub(super) mod simd;
 pub(crate) mod threshold_params;

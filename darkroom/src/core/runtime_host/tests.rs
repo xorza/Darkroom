@@ -83,11 +83,9 @@ fn ml_defaults_follow_preferences_and_the_cache_root_follows_the_document() {
         Some(ConstValue::FsPath(updated_star_removal_path))
     );
 
-    // The disk cache is memory-only until a document has a path, then
-    // repoints as documents open and again when the path goes away.
-    // Pointing the cache at a document creates nothing on disk: its root
-    // appears, with its `.gitignore`, only when a compiled program holds a
-    // disk-backed node that can write there.
+    // The disk cache is memory-only until a document has a path, then repoints as documents
+    // open and when the path goes away. Pointing it at a document creates nothing on disk: the
+    // root appears, with its `.gitignore`, only when a compiled program holds a disk-backed node.
     let first_path = dir.join("first.darkroom");
     let second_path = dir.join("second.darkroom");
     let (first_root, second_root) = (cache::root(&first_path), cache::root(&second_path));
@@ -148,11 +146,9 @@ fn root_of(host: &RuntimeHost) -> Option<&Path> {
     host.disk_root.as_ref().map(|root| root.path.as_path())
 }
 
-/// The whole policy behind what a root change tells the worker. Only the
-/// first save of an unsaved document owes a flush of what is already
-/// resident; everything else either repoints silently or does nothing at
-/// all. Getting this wrong is what wrote a closed document's values into
-/// the newly opened one's cache directory.
+/// The policy behind what a root change tells the worker. Only the first save of an unsaved
+/// document owes a flush of what is already resident; everything else repoints silently or does
+/// nothing. A wrong one writes a closed document's values into the newly opened one's cache.
 #[test]
 fn only_gaining_a_first_root_owes_the_worker_a_flush() {
     let a = Path::new("/docs/a.darkroom-cache");

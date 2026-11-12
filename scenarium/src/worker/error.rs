@@ -1,11 +1,10 @@
 //! What the worker reports when an operation fails, and what a caller gets when
 //! there is no worker left to ask.
 //!
-//! [`WorkerError`] wraps an operation-level failure for the host — it always
-//! arrives as a [`WorkerReport::Error`](crate::worker::protocol::WorkerReport),
-//! never as a return value, because the worker runs the operation long after the
-//! call that queued it. [`WorkerExited`] is the other direction: the send-side
-//! failure every handle method returns once the task is gone.
+//! [`WorkerError`] always arrives as a
+//! [`WorkerReport::Error`](crate::worker::protocol::WorkerReport), never as a return value,
+//! because the worker runs the operation long after the call that queued it. [`WorkerExited`]
+//! is the send-side failure every handle method returns once the task is gone.
 
 use std::fmt::Display;
 
@@ -20,14 +19,12 @@ pub enum WorkerError {
         #[source]
         error: ExecError,
     },
-    /// The nodes an eviction sweep could not clear, each still carrying its own
-    /// cause. Never empty — a sweep with nothing to report sends no error.
+    /// The nodes an eviction sweep could not clear, each carrying its own cause; never empty.
     #[error("cache eviction failed for {} node(s): {}", failures.len(), join(failures))]
     CacheEviction { failures: Vec<CacheNodeFailure> },
-    /// What a flush did not leave on disk, kept apart because the two mean
-    /// different things to whoever asked: a failure may pass on the next write,
-    /// while an unsupported type never will. Both empty sends no error.
-    /// `Display` presents them together; a host may tell them apart.
+    /// What a flush did not leave on disk, kept apart because a failure may pass on the next
+    /// write while an unsupported type never will; never both empty. `Display` presents them
+    /// together.
     #[error(
         "cache flush wrote nothing for {} node(s): {}{}{}",
         failures.len() + unsupported.len(),
@@ -45,8 +42,7 @@ pub enum WorkerError {
     EventLambdaPanic { node_id: NodeId, message: String },
 }
 
-/// The `details` rendering both cache variants share: one entry per node, in
-/// the order the sweep met them.
+/// The rendering both cache variants share: one entry per node, in the order the sweep met them.
 fn join(entries: &[impl Display]) -> String {
     entries
         .iter()

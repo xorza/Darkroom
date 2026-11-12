@@ -23,11 +23,9 @@ impl EditFacts {
     };
 
     /// Whether this edit leaves a frontend's cached geometry behind. A node that came has no cached
-    /// port offsets at all, and a rename or a const editor shown or hidden changes a measured size;
-    /// a move or a reorder changes neither, as a port center resolves as `node.pos + cached offset`.
-    /// Getting a move wrong is expensive rather than incorrect: a node drag emits one step per
-    /// gesture frame, so a spurious relayout doubles the whole editor pipeline for the length of the
-    /// drag.
+    /// port offsets, and a rename or a const editor shown or hidden changes a measured size; a
+    /// move or a reorder changes neither, as a port center is `node.pos + cached offset`. A
+    /// spurious relayout on a move is costly: a node drag emits one step per gesture frame.
     pub(crate) const fn strands_geometry(self) -> bool {
         self.node_set || self.renamed || self.binding_kind
     }

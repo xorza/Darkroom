@@ -31,11 +31,9 @@ fn a_checker_tile_fills_again_on_a_new_device() {
     assert!(tile.is_resident());
 }
 
-/// The header line: the fixed head, then the clauses that come and go — the
-/// capped-texture note, the still-converting note and the zoom readout, with
-/// two significant digits under 10 %. All
-/// are conditional, so the only way to know they land in the right order is
-/// to render the combinations.
+/// The header line: the fixed head, then the conditional clauses (the capped-texture note,
+/// the still-converting note and the zoom readout, with two significant digits under 10 %),
+/// rendered in every combination to check their order.
 #[test]
 fn header_readout_adds_its_conditional_clauses_only_when_they_apply() {
     let h = Harness::builder(UVec2::ONE).mono().build();
@@ -135,12 +133,9 @@ fn sync_source_refits_only_for_size_changes_or_removal() {
     assert!(viewer.view.is_none(), "removing the source clears framing");
 }
 
-/// The ways a store entry yields no texture each carry their own reason,
-/// and the absent entry carries none — that last case draws a hint rather
-/// than an error, so it must stay distinguishable from a real failure. The
-/// hint says why from the node's last run: no run yet, the node running, a
-/// run that published nothing yet, one that could not feed it, one that
-/// stopped before it, or one in which it failed — each its own line.
+/// Each way a store entry yields no texture carries its own reason, and the absent entry
+/// carries none: it draws a hint, so it must stay distinguishable from a real failure. The
+/// hint says why from the node's last run, each case its own line.
 #[test]
 fn resolve_separates_no_entry_from_a_reason_there_is_no_image() {
     let h = Harness::builder(UVec2::ONE).mono().build();
@@ -200,17 +195,13 @@ fn resolve_separates_no_entry_from_a_reason_there_is_no_image() {
     );
 }
 
-/// One pass is the whole story: the frame that first draws a viewer frames it
-/// against the pane it was handed, at the full texture's size, with the
-/// thumbnail standing in. The full texture lands on a later frame, and the
-/// framing does not move when it does.
+/// The frame that first draws a viewer frames it in one pass against the pane it was handed,
+/// at the full texture's size, with the thumbnail standing in. The full texture lands on a
+/// later frame, and the framing does not move when it does.
 ///
-/// The pane is a parameter because a viewer cannot measure itself — its
-/// own widget is at most one pass old, and a tab switch destroys it. The
-/// dock measures its content area instead, which outlives the tab in it,
-/// so a switched-to viewer is handed a size on the very pass it records.
-/// Nothing is owed a later pass, which is what stops the scale and the
-/// zoom readout arriving a frame behind.
+/// The pane is a parameter because a viewer cannot measure itself: its own widget is at most
+/// one pass old, and a tab switch destroys it. The dock measures its content area instead, so
+/// the scale and the zoom readout never arrive a frame behind.
 #[test]
 fn the_frame_that_first_draws_a_viewer_frames_it_at_the_full_size() {
     let mut h = Harness::builder(UVec2::ONE).mono().build();

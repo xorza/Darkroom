@@ -86,8 +86,9 @@ pub(super) const QUAD_CORNERS: [DVec2; 4] = [
 /// The frame being distributed, as every band sees it: identical for all of them, and read-only.
 #[derive(Debug)]
 pub(super) struct FrameSource<'a> {
-    /// The channel planes, borrowed once for the frame. `LinearImage::channel` is an enum match and
-    /// a release assert, which a per-deposit read would pay for every output pixel a drop touches.
+    /// The channel planes, borrowed once for the frame. `StackableImage::channel` is an enum match
+    /// or a release assert, which a per-deposit read would pay for every output pixel a drop
+    /// touches.
     planes: ArrayVec<&'a [f32], MAX_CHANNELS>,
     /// The mosaic whose photosites each reach the channel of their color alone.
     mosaic: Option<Mosaic>,

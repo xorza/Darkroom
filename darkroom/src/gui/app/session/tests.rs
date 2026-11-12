@@ -34,25 +34,21 @@ const SETTLE_FRAMES: u32 = 32;
 /// window rather than after it.
 const AUDITED_FRAMES: usize = 64;
 
-/// A whole frame of the app performs no heap operation once the editor has settled: its
-/// its sweeps and every record pass, as the window runs them.
+/// A whole frame of the app performs no heap operation once the editor has settled: its sweeps
+/// and every record pass, as the window runs them.
 ///
-/// Strict zero, because every allocation on this path would be the
-/// editor's own: a `format!` for a label palantir was going to copy into
-/// its text arena anyway, or a `collect()` for a list that could have
-/// refilled a buffer the editor already owns. Both have appeared here
-/// before, and neither shows up in a profile — one frame's worth is far
-/// too small to see, and the cost is the tail it puts on the frames that
-/// happen to trip the allocator.
+/// Strict zero, because every allocation on this path would be the editor's own: a `format!`
+/// for a label palantir copies into its text arena anyway, or a `collect()` for a list that
+/// could refill a buffer the editor owns. One frame's worth is too small to show in a profile;
+/// the cost is the tail it puts on the frames that trip the allocator.
 ///
 /// The scene is the one the record path is widest over: a graph pane of
 /// nodes with const editors, wires run through two ties, one selected and pinned, a preview card
 /// holding an image, and the status bar's memory readout, which recomputes its whole line every
 /// frame.
 ///
-/// Each frame is audited on its own rather than summed, so a
-/// grow-on-the-Nth-frame allocation — a `Vec` doubling, a map rehash —
-/// fails on the frame that performed it.
+/// Each frame is audited on its own rather than summed, so a grow-on-the-Nth-frame allocation,
+/// a `Vec` doubling or a map rehash, fails on the frame that performed it.
 #[test]
 fn a_settled_frame_records_without_allocating() {
     let mut ui = Harness::new(UVec2::new(1200, 800));

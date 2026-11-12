@@ -3,17 +3,13 @@
 use common::Libm;
 use std::f64::consts::TAU;
 
-/// Deterministic LCG random number generator for reproducible test data.
-///
-/// Uses the Knuth LCG: `state = state * 6364136223846793005 + 1`.
-/// All synthetic data generators should use this instead of inline LCG closures.
+/// Deterministic Knuth LCG, `state = state * 6364136223846793005 + 1`, for reproducible test data.
 #[derive(Debug, Clone)]
 pub(crate) struct TestRng {
     state: u64,
 }
 
 impl TestRng {
-    /// Create a new RNG with the given seed.
     pub(crate) const fn new(seed: u64) -> Self {
         Self { state: seed }
     }
@@ -28,23 +24,20 @@ impl TestRng {
         self.state
     }
 
-    /// Return a random f32 in [0, 1): the top 24 bits, which an f32 holds exactly,
+    /// A random f32 in [0, 1): the top 24 bits, which an f32 holds exactly,
     /// scaled by 2⁻²⁴. More bits would round the largest values up to 1.0.
     #[inline]
     pub(crate) fn next_f32(&mut self) -> f32 {
         (self.next_u64() >> 40) as f32 * (1.0 / (1u32 << 24) as f32)
     }
 
-    /// Return a random f64 in [0, 1) with full 53-bit mantissa precision.
+    /// A random f64 in [0, 1) with full 53-bit mantissa precision.
     #[inline]
     pub(crate) fn next_f64(&mut self) -> f64 {
         (self.next_u64() >> 11) as f64 / (1u64 << 53) as f64
     }
 
-    /// Return a Gaussian-distributed f32 with mean 0 and standard deviation 1.
-    ///
-    /// Uses the Box-Muller transform. Consumes two uniform samples per call, in `f64`, then
-    /// rounded.
+    /// A standard normal f32 by Box-Muller from two [`Self::next_f32`] draws, combined in `f64`.
     #[inline]
     pub(crate) fn next_gaussian_f32(&mut self) -> f32 {
         let u1 = f64::from(self.next_f32().max(1e-10));

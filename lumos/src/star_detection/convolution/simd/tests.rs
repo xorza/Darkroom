@@ -278,8 +278,8 @@ fn convolve_cols_matches_scalar() {
 
 /// Every tier's 2D row against the scalar reference, for each odd kernel size through nine, on the
 /// two mirrored rows at each edge and one interior row. Bit for bit, as for rows; the weights rise
-/// across the kernel, so no reflection of it is itself. Widths below a vector take the gathered
-/// partial vector.
+/// across the kernel, so no reflection of it is itself. Widths below a vector run in the
+/// tap's scalar tail.
 #[test]
 fn convolve_2d_row_matches_scalar() {
     for ksize in [3, 5, 7, 9] {

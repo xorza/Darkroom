@@ -15,8 +15,7 @@ use crate::core::edit::step::set_ties::SetTies;
 pub(crate) struct SetInput {
     pub(crate) input: InputPort,
     pub(crate) binding: Change<Option<Binding>>,
-    /// The route of the wire the edit ends or rewires, and each tie that
-    /// only it held: a wire is both of its ends.
+    /// The route of the wire the edit ends or rewires, and each tie that only it held.
     pub(crate) ties: SetTies,
 }
 

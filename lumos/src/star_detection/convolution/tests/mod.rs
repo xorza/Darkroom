@@ -64,7 +64,6 @@ fn gaussian_kernel_1d_peak_at_center() {
 
 #[test]
 fn gaussian_kernel_1d_size() {
-    // Kernel radius should be ceil(3 * sigma)
     let sigma = 2.0;
     let kernel = gaussian_kernel_1d(sigma);
     let expected_radius = (3.0 * sigma).ceil() as usize;
@@ -75,7 +74,6 @@ fn gaussian_kernel_1d_size() {
 #[test]
 fn gaussian_kernel_1d_small_sigma() {
     let kernel = gaussian_kernel_1d(0.5);
-    // For sigma=0.5, radius=2, size=5
     assert_eq!(kernel.len(), 5);
     assert!(kernel[2] > 0.5, "Center should dominate for small sigma");
 }
@@ -219,7 +217,6 @@ fn gaussian_convolve_edge_handling() {
 
 #[test]
 fn gaussian_convolve_non_square_image() {
-    // 64×32 non-square image with point source at (32,16)
     let width = 64;
     let height = 32;
     let mut pixels = Buffer2::new_filled((width, height), 0.0f32);
@@ -234,7 +231,6 @@ fn gaussian_convolve_non_square_image() {
 
     assert_eq!(result.len(), width * height);
 
-    // Peak should match kernel center^2
     let kernel = gaussian_kernel_1d(2.0);
     let center = kernel[kernel.len() / 2];
     let peak = result.row(16)[32];
@@ -402,7 +398,7 @@ fn matched_filter_noise_normalization() {
             &mut temp,
         );
 
-        // Exclude the border region affected by mirror sampling.
+        // Skips the border the mirror reaches.
         let margin = 10;
         let mut sum = 0.0f64;
         let mut sum_sq = 0.0f64;

@@ -8,12 +8,9 @@ use crate::data::dynamic_value::DynamicValue;
 
 /// A shared count of how often the body it wraps was invoked.
 ///
-/// "Did this node recompute, or was it served from a cache" is the question the
-/// cache tests ask. The answer is one value, cloned into as many bodies as a
-/// fixture wants and read back with [`count`](Self::count).
-///
-/// Cheap to clone — the count is shared, not copied — so a fixture hands the
-/// same `Calls` to the graph and keeps one to assert on.
+/// Answers "did this node recompute, or was it served from a cache": one value, cloned into as
+/// many bodies as a fixture wants and read back with [`count`](Self::count). Cloning shares the
+/// count.
 #[derive(Clone, Debug, Default)]
 pub struct Calls(Arc<AtomicUsize>);
 
@@ -43,8 +40,7 @@ impl Calls {
         }
     }
 
-    /// A counted body ignoring its inputs and emitting `value` — the source
-    /// every "did the upstream recompute" fixture is built on.
+    /// A counted body ignoring its inputs and emitting `value`.
     ///
     /// [`NodeSpec::counted`] is this plus the declaration that carries it.
     ///
@@ -57,8 +53,7 @@ impl Calls {
         self.counting(move |_| value.clone())
     }
 
-    /// A counted body emitting *its own count*, this call included — so one
-    /// output says both that the node ran and how many times it has.
+    /// A counted body emitting *its own count*, this call included.
     pub fn tally(&self) -> impl Fn(&[DynamicValue]) -> ConstValue + Send + Sync + 'static {
         let calls = self.clone();
         move |_| {

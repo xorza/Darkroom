@@ -14,12 +14,11 @@ pub enum RunPhase {
     Failed { elapsed_secs: f64 },
 }
 
-/// Where a run's live feedback goes: node progress before and after each lambda. The run
-/// loop calls this **directly**, on its own thread, in the order the events happen — so a
-/// report is published as it occurs rather than when a relay next gets polled.
+/// Where a run's live feedback goes: node progress before and after each lambda. The run loop
+/// calls this **directly**, on its own thread, in the order the events happen, so a report is
+/// published as it occurs rather than when a relay next gets polled.
 ///
-/// `Send` because the run future crosses threads; `Debug` so the structs carrying one still
-/// derive it.
+/// `Send` because the run future crosses threads; `Debug` so the structs carrying one derive it.
 pub(crate) trait RunReporter: Send + Debug {
     fn progress(&mut self, node_id: NodeId, phase: RunPhase);
 }

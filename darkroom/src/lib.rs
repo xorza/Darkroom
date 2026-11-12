@@ -60,16 +60,12 @@ fn run_with(
     serve: impl FnOnce(WindowLink) + 'static,
 ) -> Result<(), WinitHostError> {
     let RunConfig { document, overlay } = config;
-    // Load preferences here, before the window exists, so a saved size /
-    // position seeds the window at creation (`App::new` runs after the
-    // first window is already up, too late to size it). Reuse the same
-    // instance for the app so we don't read the file twice.
+    // Before the window exists, so a saved size and position seed it at creation; `App::new` runs
+    // after the window is up, too late to size it.
     let preferences = store.open();
-    // Reverse-DNS, and exactly the basename of
-    // `packaging/linux/com.cssodessa.darkroom.desktop` — that equality is what
-    // ties the window to its launcher entry, so the shell groups the two and
-    // takes the taskbar icon from the entry. Wayland windows carry no identity
-    // at all without it.
+    // Reverse-DNS, and exactly the basename of `packaging/linux/com.cssodessa.darkroom.desktop`:
+    // that equality ties the window to its launcher entry, so the shell groups the two and takes
+    // the taskbar icon from the entry. A Wayland window has no identity without it.
     let mut window = WindowConfig::new("Darkroom")
         .with_app_id("com.cssodessa.darkroom")
         .with_icon(load_icon());
@@ -102,16 +98,13 @@ fn run_with(
             app
         })?;
 
-    // Between `build` and `run` because that is the only window that works on
-    // macOS; every other platform has nothing to do here.
+    // Between `build` and `run`: the only point that works on macOS.
     platform::route_opened_documents(host.handle(), App::open_document_at);
     host.run()
 }
 
-/// Decode the baked-in window icon (PNG → RGBA8) for the title bar /
-/// taskbar. Honored on Windows and Linux; macOS ignores per-window icons —
-/// its Dock icon comes from the `.app` bundle (`[package.metadata.bundle]`
-/// in `Cargo.toml`).
+/// The baked-in window icon. macOS ignores per-window icons: its Dock icon comes from the `.app`
+/// bundle (`[package.metadata.bundle]` in `Cargo.toml`).
 fn load_icon() -> Image {
     static ICON_PNG: &[u8] = include_bytes!("../assets/icons/darkroom-256.png");
     let rgba = image::load_from_memory(ICON_PNG)

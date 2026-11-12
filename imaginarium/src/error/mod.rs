@@ -68,8 +68,8 @@ pub enum CodecError {
     /// full scale.
     #[error("unsupported TIFF sample width of {0} bits")]
     TiffBitDepth(u8),
-    /// A TIFF that decodes to another count of samples than its color type and size state: a
-    /// planar file, or one with more samples to a pixel than its color type names.
+    /// A TIFF that decodes to another count of samples than its color type and size state, as a
+    /// planar file does.
     #[error("a TIFF stating a {desc} image decodes to {decoded} samples")]
     TiffLayout {
         desc: InterleavedDesc,

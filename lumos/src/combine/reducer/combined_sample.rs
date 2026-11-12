@@ -5,9 +5,8 @@ use crate::combine::reducer::sample_quality::SampleQuality;
 use crate::math::statistics;
 use crate::stack_product::PixelQuality;
 
-/// One reduced channel sample: the combined value, how many samples reached it, and — when the
-/// caller asked for the quality planes — the survivors' weight, the inverse variance of the value
-/// and the survivors' dispersion.
+/// One reduced channel sample: the combined value and — when the caller asked for the quality
+/// planes — the survivors' weight, the inverse variance of the value and the survivors' dispersion.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CombinedSample {
     pub(crate) value: f32,

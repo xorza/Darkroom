@@ -1,9 +1,6 @@
 //! A flat sky with Gaussian stars drawn straight onto it — the fixture most star-detection tests
 //! start from.
 //!
-//! Three subsystems had their own copy of this (deblend, centroid and cosmic-ray stage tests),
-//! differing only in sky level, noise sigma and whether they clamped.
-//!
 //! This is the *direct* render: no camera, no exposure, no sensor chain. Reach for
 //! [`fixtures::star_field`](crate::internals::synthetic::fixtures::star_field) instead when the test
 //! wants the full forward model and a `FrameTruth` to grade against; reach for this one when it

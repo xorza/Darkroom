@@ -11,8 +11,6 @@ fn config_dir_prefers_an_absolute_xdg_config_home() {
 
 #[test]
 fn config_dir_falls_back_to_home_config() {
-    // Unset, and — separately — set but relative, which the spec says to
-    // ignore rather than resolve against the working directory.
     for xdg in [
         None,
         Some(OsString::from("relative/xdg")),

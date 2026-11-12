@@ -19,12 +19,9 @@ fn close_preferences() -> DockOperation<TabRef> {
     }
 }
 
-/// The document drain takes both of its tiers in the order raised and
-/// leaves the app tier untouched — which is what lets the editor drain
-/// three times a frame while `App` still gets every command, in order,
-/// once the pass is over. Pinned here because the routing lives in the
-/// push methods: a tier pushed to the wrong queue would surface as a
-/// command vanishing mid-pass rather than as a type error.
+/// The document drain takes both of its tiers in the order raised and leaves the app tier
+/// queued, so the editor can drain three times a frame while `App` still gets every command, in
+/// order, after the pass. A tier pushed to the wrong queue would show as a command vanishing.
 #[test]
 fn each_level_drains_its_own_tier_and_leaves_the_rest_queued() {
     let mut out = Requests::default();

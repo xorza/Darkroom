@@ -57,16 +57,14 @@ impl CombinePlan<'_> {
     /// Combine the cached frames into one stacked product.
     ///
     /// Coverage gates a frame's contribution at a pixel while confidence divides its noise model; a
-    /// frame with neither plane contributes everywhere at unit confidence, which is what makes this
-    /// the single engine for calibration masters and registered light stacks alike.
+    /// frame with neither plane contributes everywhere at unit confidence.
     ///
     /// # Errors
     ///
     /// [`StackError::Cancelled`] if the cache's token was set. The chunk walk abandons the output
     /// between chunks rather than unwinding, so a cancelled run still produces a `StackProduct` —
-    /// one holding zeros wherever it stopped. Returning that as an error is what keeps the partial
-    /// image from being mistaken for a stack; the alternative, handing it back and trusting each
-    /// caller to consult the token, was missed by every caller but two.
+    /// one holding zeros wherever it stopped. An error keeps the partial image from being mistaken
+    /// for a stack, which trusting each caller to consult the token did not.
     pub(crate) fn combine(self, cache: &FrameCache) -> Result<StackProduct, StackError> {
         let CombinePlan {
             combine: Combine { method, small_n },

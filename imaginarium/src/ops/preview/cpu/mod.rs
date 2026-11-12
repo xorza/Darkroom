@@ -204,8 +204,7 @@ fn typed<T: PreviewSample, const N: usize>(
         let mut weighted = [T::Sum::default(); 3];
         for sy in rows.clone() {
             let row = sy * src_size.width;
-            // The footprint's columns are contiguous in the row; slice the band once (one bounds
-            // check) and walk pixels bound-free.
+            // One slice for the footprint's contiguous columns, so the pixel walk is bound-free.
             let band = &src[(row + cols.start) * N..(row + cols.end) * N];
             for pixel in band.as_chunks::<N>().0 {
                 for (acc, &value) in sum.iter_mut().zip(pixel) {

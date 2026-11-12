@@ -16,13 +16,11 @@ fn distortion_map_translation() {
     let tps = fit_default(&source, &target);
     let map = DistortionMap::from_tps(&tps, USize2::new(100, 100), 20);
 
-    // Nodes every 20 px and on the last pixel: 0, 20, 40, 60, 80, 99 — none past the frame,
-    // where the old rule put its last node at 100.
+    // Nodes every 20 px and on the last pixel, none past the frame.
     assert_eq!(map.grid, USize2::new(6, 6));
     assert_eq!(map.cols, [0, 20, 40, 60, 80, 99]);
     assert_eq!(map.rows, map.cols);
 
-    // For pure translation, every grid point should have distortion ~(5, 3)
     for gy in 0..map.grid.height {
         for gx in 0..map.grid.width {
             let d = map.get(USizeVec2::new(gx, gy)).unwrap();
@@ -33,7 +31,7 @@ fn distortion_map_translation() {
         }
     }
 
-    // Mean magnitude should be sqrt(5^2 + 3^2) = sqrt(34) = 5.83095...
+    // |(5, 3)| = sqrt(34).
     let expected_mag = 34.0_f64.sqrt();
     assert!(
         (map.mean_magnitude - expected_mag).abs() <= EXACT_PX,
@@ -42,7 +40,6 @@ fn distortion_map_translation() {
         expected_mag
     );
 
-    // Max magnitude should also be ~sqrt(34) for uniform translation
     assert!(
         (map.max_magnitude - expected_mag).abs() <= EXACT_PX,
         "Max magnitude: {} expected {}",
@@ -59,10 +56,8 @@ fn distortion_map_get_out_of_bounds() {
     let tps = fit_default(&source, &target);
     let map = DistortionMap::from_tps(&tps, USize2::new(100, 100), 50);
 
-    // Valid: within grid
     assert!(map.get(USizeVec2::ZERO).is_some());
 
-    // Invalid: beyond grid dimensions
     assert!(map.get(USizeVec2::new(map.grid.width, 0)).is_none());
     assert!(map.get(USizeVec2::new(0, map.grid.height)).is_none());
     assert!(
@@ -82,12 +77,9 @@ fn distortion_map_interpolation() {
     let tps = fit_default(&source, &target);
     let map = DistortionMap::from_tps(&tps, USize2::new(100, 100), 25);
 
-    // At grid point (0, 0): should be ~(10, 5)
     let d0 = map.interpolate(DVec2::new(0.0, 0.0));
     assert_near(d0, shift, EXACT_PX);
 
-    // At midpoint between grid nodes (37.5, 62.5):
-    // For uniform translation, bilinear interpolation of constant field = constant
     let d_mid = map.interpolate(DVec2::new(37.5, 62.5));
     assert_near(d_mid, shift, EXACT_PX);
 }

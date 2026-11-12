@@ -165,8 +165,7 @@ pub(super) fn adaptive_iterations(
         return 1;
     }
 
-    // `w_n ∈ (0, 1)` is guaranteed by the guards above, so `1 - w_n ∈ (0, 1)` and
-    // `log_outlier < 0` — both logs are finite and negative, giving a positive count.
+    // `w_n ∈ (0, 1)` by the guards above, so both logs are finite and negative.
     let log_conf = (1.0 - confidence).libm_ln();
     let log_outlier = (1.0 - w_n).libm_ln();
 

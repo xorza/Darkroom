@@ -33,9 +33,8 @@ use crate::stack_product::quality_planes::QualityPlanes;
 /// The master states the exposure and temperature its frames share. The frames of a dark or a
 /// flat-dark have to share them: its signal is one exposure's at one temperature.
 ///
-/// The preset carries its own small-frame fallback (`Combine::small_n`): the combine engine
-/// downgrades to the median below the preset's `min_frames` (e.g. `flat()` below 8), so no
-/// frame-count special-casing is needed here.
+/// The preset carries its own small-frame fallback (`Combine::small_n`), so no frame-count
+/// special-casing is needed here.
 #[derive(Debug)]
 pub(crate) struct MasterStack<'a, P> {
     pub(crate) paths: &'a [P],

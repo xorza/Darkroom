@@ -58,9 +58,7 @@ fn demo_field(size: USize2, bg: BgField, seed: u64) -> Scene {
     )
 }
 
-/// Create a checkerboard pattern.
-///
-/// Useful for phase correlation and registration tests.
+/// A checkerboard of `cell_size` cells alternating `value_a` and `value_b`.
 fn checkerboard(size: USize2, cell_size: usize, [value_a, value_b]: [f32; 2]) -> Buffer2<f32> {
     let mut pixels = vec![0.0f32; size.pixel_count()];
     for y in 0..size.height {
@@ -468,8 +466,8 @@ fn gallery_patterns() {
 #[test]
 #[ignore = "visual gallery; run with --ignored"]
 fn gallery_fixtures() {
-    // The exact forward-model fields the benchmarks now run on (fixtures::{star_field,
-    // cluster_field}), at inspectable sizes.
+    // The forward-model fields the benchmarks run on (fixtures::{star_field, cluster_field}), at
+    // inspectable sizes.
     let size = 1024;
     save(
         star_field(USize2::new(size, size), 100, 42)

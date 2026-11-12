@@ -31,11 +31,9 @@ fn directory_identity_tracks_entry_changes() {
     let dir = TempDir::new("dir");
     let path = dir.path().to_string_lossy().into_owned();
 
-    // A directory that will not list has no identity to stamp, and is
-    // deliberately *not* handed one: a marker value would be perfectly stable,
-    // so the node would go on reusing a cached result while the contents it
-    // cannot see changed underneath it. Skipped where no path can be made
-    // unreadable.
+    // A directory that will not list has no identity to stamp, and is deliberately *not* handed
+    // one: a marker value would be stable, so the node would go on reusing a cached result while
+    // the contents it cannot see changed. Skipped where no path can be made unreadable.
     let empty = fingerprint(&path);
     if let Some(locked) = Unreadable::new(dir.path()) {
         let unreadable = StampJob::default().stamp(&path, &CancelToken::never());
@@ -67,19 +65,17 @@ fn directory_identity_tracks_entry_changes() {
     assert_ne!(fingerprint(&path), after_edit);
 }
 
-/// One pass identifies the paths of every node in a run, so a path that will
-/// not read must cost its own node's digest and nothing else. Aborting on the
-/// first failure left every path behind it unstamped — and which ones those
-/// were was queue order, not anything about the graph.
+/// One pass identifies the paths of every node in a run, so a path that will not read must cost
+/// its own node's digest and nothing else. Aborting on the first failure would leave every path
+/// behind it unstamped, in queue order rather than anything about the graph.
 #[test]
 fn one_unreadable_path_does_not_cost_the_pass() {
     let dir = TempDir::new("survivors");
     let in_dir = |name: String| dir.join(name).to_string_lossy().into_owned();
-    // The queue is a `HashSet`, so the order a pass drains it in is the
-    // hasher's, reseeded per process — one readable path beside one failure
-    // would only catch an abort on the runs that happened to draw the failure
-    // first. Twelve against three: an abort keeps every readable path only
-    // when all three failures draw last, one arrangement of `C(15, 3)`.
+    // The queue is a `HashSet`, so the order a pass drains it in is the hasher's, reseeded per
+    // process — one readable path beside one failure would only catch an abort on runs that drew
+    // the failure first. Twelve against three: an abort keeps every readable path only when all
+    // three failures draw last, one arrangement of `C(15, 3)`.
     let present_paths = (0..12)
         .map(|i| {
             let path = in_dir(format!("present-{i}.bin"));
@@ -122,8 +118,8 @@ fn one_unreadable_path_does_not_cost_the_pass() {
         expected,
         "and every readable path still lands, wherever the failures fell",
     );
-    // The pass drains as it walks, so nothing sits behind a failure — which is
-    // why queueing a node's paths never has to clear the queue first.
+    // The pass drains as it walks, so nothing sits behind a failure — queueing a node's paths
+    // never has to clear the queue first.
     assert!(
         !job.is_queued(),
         "the pass drains whatever it reports, so nothing is left queued",
@@ -159,10 +155,9 @@ fn one_unreadable_path_does_not_cost_the_pass() {
     );
 }
 
-/// A pure function handed a directory consumes it recursively, so its
-/// identity has to be the whole subtree. Stamping one level deep would let
-/// everything below the first level change under a fingerprint that never
-/// moved, and the node would reuse output built from the old contents.
+/// A pure function handed a directory consumes it recursively, so its identity has to be the
+/// whole subtree: stamping one level deep would let everything below change under a fingerprint
+/// that never moved.
 #[test]
 fn directory_identity_tracks_nested_changes() {
     let dir = TempDir::new("nested");
@@ -173,8 +168,7 @@ fn directory_identity_tracks_nested_changes() {
     let base = fingerprint(&path);
     assert_eq!(fingerprint(&path), base, "a still tree stamps stably");
 
-    // The case the one-level stamp missed: a nested edit that does not
-    // touch any immediate child of the root.
+    // A nested edit that does not touch any immediate child of the root.
     fs::write(sub.join("file.bin"), b"one-plus").unwrap();
     let after_nested_edit = fingerprint(&path);
     assert_ne!(after_nested_edit, base, "nested edit must move the root");
@@ -184,9 +178,8 @@ fn directory_identity_tracks_nested_changes() {
     let after_deep_add = fingerprint(&path);
     assert_ne!(after_deep_add, after_nested_edit);
 
-    // Only files are folded, so an empty directory is an absence: there
-    // is nothing beneath it for a node to read, and nothing it can change
-    // without a file changing with it.
+    // Only files are folded, so an empty directory is an absence: nothing beneath it for a node to
+    // read, and nothing it can change without a file changing with it.
     fs::create_dir(sub.join("deeper").join("empty")).unwrap();
     assert_eq!(
         fingerprint(&path),
@@ -198,9 +191,9 @@ fn directory_identity_tracks_nested_changes() {
     assert_ne!(fingerprint(&path), after_deep_add);
 }
 
-/// One stamper walks every path of every run in the same buffers, so a
-/// walk must leave nothing of itself behind — a stale entry from the last
-/// directory would fold into the next directory's identity.
+/// One stamper walks every path of every run in the same buffers, so a walk must leave nothing
+/// of itself behind — a stale entry from the last directory would fold into the next one's
+/// identity.
 #[test]
 fn a_reused_stamper_stamps_like_a_fresh_one() {
     let dir = TempDir::new("reuse");
@@ -215,9 +208,8 @@ fn a_reused_stamper_stamps_like_a_fresh_one() {
 
     let mut job = StampJob::default();
     let expected = fingerprint_with(&mut job, &shallow_path);
-    // The buffer is genuinely retained — which is what makes a leak
-    // between walks possible. `deep` holds one file, `nested/a.bin`; the
-    // `nested` directory itself is not listed.
+    // The buffer is genuinely retained, which is what makes a leak between walks possible. `deep`
+    // holds one file, `nested/a.bin`; the `nested` directory itself is not listed.
     fingerprint_with(&mut job, &deep_path);
     assert_eq!(job.files.len(), 1, "the walked files are retained");
 
@@ -233,10 +225,9 @@ fn a_reused_stamper_stamps_like_a_fresh_one() {
     );
 }
 
-/// Entry names are folded as raw bytes. `to_string_lossy` collapses
-/// every non-UTF-8 name onto one replacement string, so two distinct
-/// names would be interchangeable without moving the fingerprint —
-/// a rename that a pure node's cache key could not see.
+/// Entry names are folded as raw bytes. `to_string_lossy` collapses every non-UTF-8 name onto one
+/// replacement string, so two distinct names would be interchangeable — a rename a pure node's
+/// cache key could not see.
 #[test]
 fn directory_identity_separates_non_utf8_names() {
     let dir = TempDir::new("bytes");
@@ -245,9 +236,8 @@ fn directory_identity_separates_non_utf8_names() {
     let first = dir.join(non_unicode_name(0));
     let second = dir.join(non_unicode_name(1));
 
-    // APFS refuses a name that is not valid UTF-8 (`EILSEQ`), so on macOS the
-    // input this test is about cannot be created at all — leave it to the
-    // filesystems that can express one rather than failing on every dev box.
+    // APFS refuses a name that is not valid UTF-8 (`EILSEQ`), so on macOS the input this test is
+    // about cannot be created — leave it to the filesystems that can express one.
     if fs::write(&first, b"same").is_err() {
         return;
     }
@@ -262,10 +252,9 @@ fn directory_identity_separates_non_utf8_names() {
     );
 }
 
-/// A file identity folds every field `common::FileIdentity` states: identities that differ
-/// in one field alone — an mtime before, at or after the epoch, a file id, a change time —
-/// digest apart. The id and the change time are what catch a rewrite that restores the
-/// mtime (`cp -p`, `rsync -t`), so a fold that dropped them would serve a stale value.
+/// A file identity folds every field `common::FileIdentity` states: identities that differ in one
+/// field alone — an mtime before, at or after the epoch, a file id, a change time — digest apart.
+/// The id and the change time catch a rewrite that restores the mtime (`cp -p`, `rsync -t`).
 #[test]
 fn file_identity_folds_every_field() {
     let base = FileIdentity {

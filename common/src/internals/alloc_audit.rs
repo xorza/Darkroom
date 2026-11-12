@@ -1,14 +1,12 @@
 //! [`CountingAllocator`]: a per-thread counting allocator, and the window an allocation gate
 //! measures inside. A test binary installs it as its `#[global_allocator]`.
 //!
-//! Per-thread rather than global because cargo runs tests in parallel in one
-//! process: a global counter would fold other tests' setup allocations into
-//! the audit. Only the auditing thread counts, and only while it sits inside
+//! Per-thread because cargo runs tests in parallel in one process: a global counter would fold
+//! other tests' setup allocations in. Only the auditing thread counts, and only inside
 //! [`allocations`].
 //!
-//! `dealloc` is delegated unchanged. The metric is heap *operations* on the
-//! measured path, not residency: a pass that reuses its buffers performs none,
-//! and one that rebuilds them performs one per buffer however small each is.
+//! The metric is heap operations on the measured path, not residency: a pass that reuses its
+//! buffers performs none, one that rebuilds them one per buffer however small.
 
 #![expect(
     clippy::disallowed_types,
@@ -19,8 +17,8 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
 thread_local! {
-    /// `const` initializers of drop-free types: neither key registers a
-    /// thread destructor, so neither costs the allocator a lazy-init check.
+    /// `const` initializers of drop-free types register no thread destructor, so the allocator
+    /// pays no lazy-init check.
     static IN_AUDIT: Cell<bool> = const { Cell::new(false) };
     static ALLOCS: Cell<u64> = const { Cell::new(0) };
 }
@@ -50,9 +48,7 @@ unsafe impl GlobalAlloc for CountingAllocator {
     }
 }
 
-/// `try_with` rather than `with`: an allocator that unwinds is a worse
-/// failure than a miscount, and the counters are the one thing here that
-/// must never panic.
+/// `try_with` rather than `with`: an allocator that unwinds is worse than a miscount.
 #[inline]
 fn track() {
     IN_AUDIT
@@ -72,8 +68,8 @@ pub fn allocations(body: impl FnOnce()) -> u64 {
     ALLOCS.with(Cell::get)
 }
 
-/// Closes the window on drop, so a panic inside the measured body cannot
-/// strand the flag and leave every later allocation on this thread counted.
+/// Closes the window on drop, so a panic in the measured body cannot leave every later allocation
+/// on this thread counted.
 #[derive(Debug)]
 struct AuditWindow;
 

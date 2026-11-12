@@ -11,10 +11,8 @@ impl NaturalSpline<'_> {
     /// Into `d2[0..n]`, the spline's second derivatives at its `n` nodes, by a tridiagonal solve
     /// with natural boundary conditions (`d2[0] = d2[n-1] = 0`).
     ///
-    /// `scratch` must have length >= `n - 2` (used for modified upper diagonal coefficients in
-    /// the Thomas algorithm). Pass a reusable buffer to avoid per-call heap allocation.
-    ///
-    /// Supports non-uniform spacing. O(n) forward elimination + back substitution.
+    /// `scratch` must have length >= `n - 2`; it holds the Thomas algorithm's modified upper
+    /// diagonal. Supports non-uniform spacing; O(n).
     pub(crate) fn second_derivatives(self, d2: &mut [f32], scratch: &mut [f32]) {
         let Self { values, centers } = self;
         let n = values.len();
@@ -22,7 +20,7 @@ impl NaturalSpline<'_> {
         debug_assert!(d2.len() >= n);
 
         if n < 3 {
-            // With < 3 points, natural spline has d2 = 0 everywhere
+            // No interior equation: a natural spline through under three nodes has d2 = 0.
             d2[..n].fill(0.0);
             return;
         }

@@ -15,12 +15,10 @@ use crate::star_detection::labeling::component_data::ComponentData;
 use crate::star_detection::star_detection_config::extraction_config::{Deblend, ExtractionConfig};
 use common::{USize2, USizeRect2};
 
-/// The default config's separation.
 fn default_separation() -> usize {
     ExtractionConfig::default().deblend_min_separation
 }
 
-/// The default config's relative height.
 fn default_relative_height() -> f32 {
     match ExtractionConfig::default().deblend {
         Deblend::LocalMaxima {
@@ -562,9 +560,9 @@ fn fast_paths_match_the_definitions() {
 
 /// A flat-topped source between two fainter strict maxima keeps its own region. The component is
 /// a band of 0.2 over x 2..22, y 9..14, with a 2×2 top of 1.0 at x 10..12, y 10..12 and single
-/// peaks of 0.8 at (4, 11) and (18, 11). A strict test found only the two fainter peaks and split
-/// the band between them, so the brightest source's pixels went to its neighbours; the top's
-/// first pixel, (10, 10), is now a peak and its region holds the whole top.
+/// peaks of 0.8 at (4, 11) and (18, 11). A strict test would find only the two fainter peaks and
+/// split the band between them; the top's first pixel, (10, 10), is a peak and its region holds
+/// the whole top.
 #[test]
 fn a_flat_topped_source_keeps_its_region_between_fainter_peaks() {
     let mut pixels = Buffer2::new_filled((24, 16), 0.0f32);

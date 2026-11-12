@@ -21,11 +21,9 @@ const DUPLICATE_WITH_INCOMING: usize = 2;
 const REMOVE: usize = 3;
 const ROW_COUNT: usize = 4;
 
-/// Open the menu on `on`, click its `row`th item, and return the intents the
-/// picking frame raised. The open and the pick are separate frames because
-/// the menu has to record before an item can be hit — the same order the real
-/// app sees them in, and what lets the pick read back the selection the open
-/// committed.
+/// Open the menu on `on`, click its `row`th item, and return the intents the picking frame
+/// raised. The open and the pick are separate frames because the menu has to record before an
+/// item can be hit, as in the app, which lets the pick read back the selection the open committed.
 fn pick(h: &mut CanvasHarness, on: NodeId, row: usize) -> Vec<GraphIntent> {
     let rows = open_menu(h, on);
     assert_eq!(
@@ -67,16 +65,12 @@ fn a_stubs_menu_offers_only_remove() {
     );
 }
 
-/// A node-body right-click selects the node it landed on before the menu
-/// opens, so whatever the user picks next acts on a coherent set.
-///
-/// It comes out of the closure the shared trigger scan takes — "which of this
-/// node's widgets opens the menu" — so it's checked through a real click
-/// rather than by calling it.
+/// A node-body right-click selects the node it landed on before the menu opens, so whatever the
+/// user picks next acts on a coherent set. Checked through a real click, as it comes out of the
+/// closure the shared trigger scan takes.
 #[test]
 fn a_node_body_right_click_selects_the_node_it_landed_on() {
-    // Two nodes, so the assertion that exactly one ends up selected has
-    // something to exclude, on a surface wide enough for the opened menu.
+    // Two nodes, so the exactly-one-selected assertion has something to exclude.
     let mut h = CanvasHarness::sized(DocumentFixture::probes(2), SURFACE);
     let func = h.node(0);
     // Two frames so every node body has recorded and carries a hit-testable
@@ -95,10 +89,9 @@ fn a_node_body_right_click_selects_the_node_it_landed_on() {
     );
 }
 
-/// "Remove" acts on the whole selection, not only the node the menu opened
-/// on — one intent per member, which the drain batches into a single undo
-/// entry. Opening on a node already in the selection leaves that selection
-/// alone, so both members survive to the pick.
+/// "Remove" acts on the whole selection, not only the node the menu opened on: one intent per
+/// member, which the drain batches into a single undo entry. Opening on a node already in the
+/// selection leaves that selection alone, so both members survive to the pick.
 #[test]
 fn remove_pick_removes_every_selected_node() {
     let mut h = CanvasHarness::shaping_text(DocumentFixture::probes(3), SURFACE);
@@ -189,9 +182,8 @@ fn duplicate_picks_differ_by_whether_incoming_wires_survive() {
     }
 }
 
-/// "Run to this node" is the one pick that names the node the menu opened on
-/// rather than the selection, and the one that leaves the graph alone — it
-/// asks `App` to run that node and edits nothing.
+/// "Run to this node" is the one pick that names the node the menu opened on rather than the
+/// selection, and the one that leaves the graph alone: it asks `App` to run that node.
 #[test]
 fn run_pick_names_the_opened_node_and_edits_nothing() {
     let mut h = CanvasHarness::shaping_text(DocumentFixture::probes(2), SURFACE);

@@ -3,7 +3,7 @@
 //! Registration and stacking depend on recovering sub-pixel translations between exposures.
 //! These render a star field through the realistic [`Camera`], re-render it shifted by a known
 //! [`Observation`] translation, and verify the detector's centroids recover that shift to well
-//! under 0.1 px — grading per-frame completeness through [`metrics`] against captured truth.
+//! under 0.1 px.
 
 use glam::DVec2;
 

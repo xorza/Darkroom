@@ -7,7 +7,7 @@ use crate::internals::synthetic::scene::BgField;
 use crate::star_detection::tests::pipeline_tests::PipelineCase;
 use crate::star_detection::tests::{Scenario, synthetic_config};
 
-/// Test: Sparse field with well-separated stars.
+/// Sparse field with well-separated stars.
 #[test]
 fn pipeline_sparse_field() {
     init_tracing();
@@ -27,7 +27,7 @@ fn pipeline_sparse_field() {
     .check();
 }
 
-/// Test: Dense field with many stars.
+/// Dense field with many stars.
 #[test]
 fn pipeline_dense_field() {
     init_tracing();
@@ -47,7 +47,7 @@ fn pipeline_dense_field() {
     .check();
 }
 
-/// Test: Moffat profile stars (more realistic PSF).
+/// Moffat profile stars (more realistic PSF).
 #[test]
 fn pipeline_moffat_profile() {
     init_tracing();
@@ -76,7 +76,7 @@ fn pipeline_moffat_profile() {
     .check();
 }
 
-/// Test: a wider PSF, 4.5 px.
+/// A wider PSF, 4.5 px.
 #[test]
 fn pipeline_wider_psf() {
     init_tracing();
@@ -97,7 +97,7 @@ fn pipeline_wider_psf() {
     .check();
 }
 
-/// Test: Wide dynamic range (bright to faint stars).
+/// Wide dynamic range (bright to faint stars).
 #[test]
 fn pipeline_dynamic_range() {
     init_tracing();
@@ -119,7 +119,7 @@ fn pipeline_dynamic_range() {
     .check();
 }
 
-/// Test: Low noise (ideal conditions).
+/// Low noise (ideal conditions).
 #[test]
 fn pipeline_low_noise() {
     init_tracing();

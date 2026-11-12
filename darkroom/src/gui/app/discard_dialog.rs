@@ -65,16 +65,13 @@ impl DiscardGuard {
     }
 }
 
-/// A transition that replaces or discards the open document. Held while
-/// the unsaved-changes prompt is up, then carried out (or dropped) by the
-/// answer.
+/// A transition that replaces or discards the open document. Held while the unsaved-changes
+/// prompt is up, then carried out or dropped by the answer.
 ///
-/// The two open variants differ only in where the path comes from:
-/// [`Self::OpenPicked`] runs the file dialog *after* the prompt clears, so a
-/// cancelled prompt doesn't leave the user having chosen a file for nothing,
-/// while [`Self::OpenAt`] already holds one handed in from outside the editor
-/// (Finder, via [`crate::platform`]). Carrying that path is what
-/// costs this `Copy`.
+/// The two open variants differ in where the path comes from: [`Self::OpenPicked`] runs the file
+/// dialog after the prompt clears, so a cancelled prompt leaves no file chosen for nothing, while
+/// [`Self::OpenAt`] holds one handed in from outside the editor (Finder, via
+/// [`crate::platform`]), which is why this is not `Copy`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum PendingTransition {
     Quit,
@@ -111,9 +108,8 @@ pub(super) enum DiscardChoice {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct DiscardOutcome {
     pub(super) choice: DiscardChoice,
-    /// "Don't ask again" checkbox state. Honored only once the transition
-    /// actually goes through — a `Cancel`, or a `Save` the user then
-    /// cancelled, leaves the preference untouched.
+    /// "Don't ask again" checkbox state. Honored only once the transition goes through: a
+    /// `Cancel`, or a `Save` the user then cancelled, leaves the preference untouched.
     pub(super) dont_ask_again: bool,
 }
 
@@ -127,15 +123,9 @@ pub(super) struct DiscardResolution {
 }
 
 impl DiscardOutcome {
-    /// Resolve the answer against whether the document is *still* dirty
-    /// after any save the answer asked for.
-    ///
-    /// Both effects hang off the transition actually going through, and
-    /// `silence_prompt` says so in one line. A `Save` the user then
-    /// cancelled — or one that failed — leaves the document dirty, so it
-    /// neither proceeds nor silences: silencing there would disable the
-    /// guard on the strength of a save that never happened, and the next
-    /// discard would go unprompted.
+    /// Resolve the answer against whether the document is *still* dirty after any save it asked
+    /// for. A `Save` that was cancelled or failed leaves it dirty, so it neither proceeds nor
+    /// silences: silencing would disable the guard on the strength of a save that never happened.
     pub(super) const fn resolve(self, still_dirty: bool) -> DiscardResolution {
         let proceed = match self.choice {
             DiscardChoice::Stay | DiscardChoice::Cancel => false,
@@ -149,11 +139,8 @@ impl DiscardOutcome {
     }
 }
 
-/// Render the modal over the current frame. `file_name` names the document
-/// in the prompt (`None` for a never-saved one) and `tail` finishes the
-/// sentence for the transition being guarded ("quitting", "closing it", …).
-/// Returns the choice the user made this frame plus the "Don't ask again"
-/// state.
+/// Render the modal over the current frame. `file_name` names the document in the prompt (`None`
+/// for a never-saved one) and `tail` finishes the sentence for the guarded transition.
 ///
 /// The question in bold over what a discard costs in the muted ink, as macOS's alert sets its
 /// message over its informative text; then the commands on a footer band, the checkbox at its
@@ -167,9 +154,8 @@ fn show(ui: &mut Ui, theme: &Theme, file_name: Option<&str>, tail: &str) -> Disc
     };
     let inset = theme.space.xl;
 
-    // The checkbox's own id keys its state, so the row lives exactly as long
-    // as the dialog is up: once it closes nothing records the checkbox, the
-    // row is swept, and the next open starts unchecked.
+    // The checkbox's own id keys its state, so the row is swept once the dialog closes and the
+    // next open starts unchecked.
     let dont_ask_id = dont_ask_wid();
     ui.with_state::<DontAskAgain, _>(dont_ask_id, |ui, DontAskAgain(dont_ask_again)| {
         let mut choice = DiscardChoice::Stay;
@@ -317,9 +303,7 @@ mod tests {
 
     use super::*;
 
-    /// The checkbox keeps its tick while the dialog is up, and the row goes
-    /// with the dialog: once a frame passes without it, the next open starts
-    /// unchecked rather than inheriting the last prompt's answer.
+    /// The checkbox keeps its tick while the dialog is up; the next open starts unchecked.
     #[test]
     fn the_checkbox_holds_while_the_dialog_is_up_and_resets_once_it_closes() {
         let theme = Theme::default();
@@ -460,9 +444,7 @@ mod tests {
         assert_eq!(choice(&mut h), DiscardChoice::Save);
     }
 
-    /// A document Finder hands over is guarded exactly like one the user
-    /// picked: same question, same wording. The two differ only in where the
-    /// path came from, and the prompt has no business exposing that.
+    /// A document Finder hands over is guarded exactly like one the user picked.
     #[test]
     fn an_externally_opened_document_prompts_like_a_picked_one() {
         let picked = PendingTransition::OpenPicked;
@@ -492,10 +474,8 @@ mod tests {
 
     #[test]
     fn only_a_transition_that_goes_through_can_silence_the_prompt() {
-        // "Don't ask again" persists only once the transition goes through.
-        // Persisted before the save ran, a cancelled Save As would leave the
-        // document open and dirty with the guard permanently off — and the
-        // next discard would take the work with it, silently.
+        // "Don't ask again" persists only once the transition goes through: persisted before the
+        // save, a cancelled Save As would leave the document dirty with the guard off.
         assert_eq!(
             answer(DiscardChoice::Save, true).resolve(true),
             resolution(false, false),

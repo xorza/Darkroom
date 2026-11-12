@@ -1,4 +1,4 @@
-//! [`ColorMesh`]: the local sky and σ of each color of a mosaic, between tile centres.
+//! [`ColorMesh`]: the local sky and noise of each color of a mosaic, between tile centres.
 
 use arrayvec::ArrayVec;
 use common::Buffer2;
@@ -20,9 +20,9 @@ use glam::USizeVec2;
 /// local level for a k-σ cut needs no continuous slope.
 ///
 /// Each color's tiles measure that color's photosites alone, so a flat-fielded frame whose colors
-/// sit at different levels gives each its own sky, and a color's σ is not inflated by the others'
-/// offsets. The 3×3 median over the tiles keeps a tile that a cluster of hot pixels or a bright
-/// object spoiled from reaching its neighbours.
+/// sit at different levels gives each its own sky, and a color's noise is not inflated by the
+/// others' offsets. The 3×3 median over the tiles keeps a tile that a cluster of hot pixels or a
+/// bright object spoiled from reaching its neighbours.
 #[derive(Debug)]
 pub(crate) struct ColorMesh {
     colors: ArrayVec<Buffer2<TileStats>, 3>,

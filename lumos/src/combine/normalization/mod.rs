@@ -108,8 +108,7 @@ impl FrameNorm {
     /// product records. With no normalization each frame is only converted into it (gain `scale_i /
     /// scale_ref`, offset from the pedestals); a fitted normalization maps every frame onto its
     /// reference frame, so its gains and offsets are then converted from the reference frame's
-    /// domain the same way. Frames whose domains agree get exactly the norms they had before
-    /// conversion existed.
+    /// domain the same way.
     pub(crate) fn measure(
         planes: SlotPlanes<'_>,
         normalization: Normalization,

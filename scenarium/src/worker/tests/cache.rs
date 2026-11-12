@@ -153,10 +153,9 @@ async fn a_disk_cached_node_survives_a_worker_restart() {
     assert_eq!(warm.logs(), ["49"]);
 }
 
-/// A flush that wrote nothing reports through the same general error the host
-/// already shows for eviction, whether the store was just attached or the host
-/// named the node. Silence would read exactly like success — while the node
-/// goes on showing itself disk-backed with nothing behind it.
+/// A flush that wrote nothing reports through the same error the host shows for eviction,
+/// whether the store was just attached or the host named the node; silence would read like
+/// success.
 #[tokio::test]
 async fn a_flush_failure_uses_the_general_worker_error_report() {
     let dir = TempDir::new("flush-error");
@@ -220,11 +219,9 @@ async fn a_flush_failure_uses_the_general_worker_error_report() {
     w.quiet();
 }
 
-/// A value whose type has no registered codec will never reach disk, however
-/// often it is retried. A flush the host asked for by node reports that — there
-/// the node is about to sit disk-backed with nothing behind it — while the
-/// sweep a store attach performs over every node stays silent, since nobody
-/// named those nodes and their types are a standing fact about the library.
+/// A value whose type has no registered codec will never reach disk. A flush the host asked for
+/// by node reports that; the sweep a store attach performs over every node stays silent, since
+/// nobody named those nodes.
 #[tokio::test]
 async fn an_unpersistable_type_is_reported_only_when_the_flush_was_requested() {
     use crate::internals::blob::{BLOB_TYPE, Blob};
@@ -287,11 +284,9 @@ async fn an_unpersistable_type_is_reported_only_when_the_flush_was_requested() {
     w.quiet();
 }
 
-/// An install re-measures the cache it reconciled onto, and the report carries
-/// the figure: a program that dropped a node releases its resident value there
-/// and then, while the next completed run may never correct the host — an empty
-/// program does not execute at all. Without this the readout keeps naming a
-/// cache that is already gone.
+/// An install re-measures the cache it reconciled onto, and the report carries the figure: a
+/// program that dropped a node releases its resident value there and then, and the next run may
+/// never correct the host, since an empty program does not execute.
 #[tokio::test]
 async fn an_install_reports_the_cache_left_after_reconciling() {
     use crate::internals::blob::{BLOB_TYPE, Blob};
@@ -355,14 +350,12 @@ async fn an_install_reports_the_cache_left_after_reconciling() {
     w.quiet();
 }
 
-/// `FlushAllCaches` writes resident disk-backed values into the attached
-/// store: a `Both`-mode value computed while no store root existed (an
-/// unsaved document) would otherwise be a RAM hit on every later run —
-/// which never stores — and silently recompute on reopen.
+/// `FlushAllCaches` writes resident disk-backed values into the attached store: a `Both`-mode
+/// value computed while no store root existed (an unsaved document) would otherwise be a RAM hit
+/// on every later run, which never stores, and recompute on reopen.
 ///
-/// And attaching the store *alone* writes nothing: a store is swapped for
-/// reasons that leave nothing owed — a document opened, or saved somewhere
-/// else — so the sweep is asked for, not inferred.
+/// Attaching the store *alone* writes nothing: a store is swapped for reasons that leave nothing
+/// owed, so the sweep is asked for, not inferred.
 #[tokio::test]
 async fn resident_disk_backed_values_are_flushed_when_asked_and_not_on_a_bare_attach() {
     let dir = TempDir::new("storeswap");
@@ -396,10 +389,9 @@ async fn resident_disk_backed_values_are_flushed_when_asked_and_not_on_a_bare_at
 /// first, so nothing of the outgoing program can be written into the incoming
 /// one's root.
 ///
-/// This is the document-open path. In the other order the closed document's
-/// resident values would land in the opened document's cache directory, under
-/// ids nothing there would ever read — and since no cache root is ever pruned,
-/// those blobs would be permanent.
+/// This is the document-open path. In the other order the closed document's resident values
+/// would land in the opened document's cache directory, under ids nothing there would read, and
+/// no cache root is ever pruned.
 #[tokio::test]
 async fn a_batch_resolves_its_graph_before_the_store_it_repoints_to() {
     let outgoing = TempDir::new("outgoing-doc");

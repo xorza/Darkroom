@@ -52,8 +52,7 @@ impl FilterOutcome {
     /// Filter stars by quality metrics, remove duplicates, and sort by flux, in the scratch of
     /// `resources`.
     ///
-    /// Returns the filtered stars and rejection statistics. Stars are returned
-    /// sorted by flux (brightest first).
+    /// Returns the filtered stars, brightest first, and rejection statistics.
     pub(crate) fn from_stars(
         mut stars: Vec<Star>,
         config: &FilterConfig,

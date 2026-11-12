@@ -31,12 +31,10 @@ use crate::io::fits;
 use common::USize2;
 use glam::USizeVec2;
 
-/// Raw CFA image - single channel with color filter pattern metadata.
-/// Represents sensor data before demosaicing.
+/// Raw CFA image: one channel of sensor data under a color filter pattern, before demosaicing.
 #[derive(Debug, Clone)]
 pub struct CfaImage {
-    /// Single-channel linear samples; calibration may put values outside `[0, 1]`.
-    /// Layout: row-major, width * height pixels.
+    /// Single-channel linear samples, row-major; calibration may put values outside `[0, 1]`.
     data: Buffer2<f32>,
     cfa_type: CfaType,
     pub metadata: ImageMetadata,
@@ -233,16 +231,15 @@ impl CfaImage {
     /// Replace every null with the median of its same-color neighbours.
     ///
     /// The demosaic reads a neighbourhood, so whatever sits under a null reaches output pixels the
-    /// mask does not cover. The resampler answers the same problem by sampling over the taps that
-    /// hold data and normalizing by their weight — `resample::flagged_sources` — but an adaptive
-    /// kernel like RCD or Markesteijn offers no such weights to normalize by. Leaving the decoder's
-    /// frame-median fill there would spread a value with no local meaning; a same-color neighbour
-    /// median spreads a plausible one, so what escapes the mask is interpolation error rather than
-    /// fabrication.
+    /// mask does not cover. The resampler normalizes by the weight of the taps that hold data
+    /// (`resample::flagged_sources`), but an adaptive kernel like RCD or Markesteijn has no such
+    /// weights. The decoder's frame-median fill would spread a value with no local meaning; a
+    /// same-color neighbour median spreads a plausible one, so what escapes the mask is
+    /// interpolation error rather than fabrication.
     ///
-    /// The same repair a `DefectMap` applies to hot and cold pixels, for the same
-    /// reason and through the same neighbour search — mask included, so a null is never repaired
-    /// from another null, nor from a value another repair made. Each repaired null is flagged
+    /// The same repair a `DefectMap` applies to hot and cold pixels, through the same neighbour
+    /// search — mask included, so a null is never repaired from another null, nor from a value
+    /// another repair made. Each repaired null is flagged
     /// [`QualityFlags::REPAIRED`] beside its `NO_DATA`, and a null already flagged so is left as
     /// it is. Calibration owns the repair and runs it once its arithmetic is done, so a pixel a
     /// master left without a measurement holds a fill, not a difference against a bound.
@@ -303,9 +300,9 @@ impl CfaImage {
         self.add_flags_where(QualityFlags::REPAIRED, |idx| nulls.get(idx));
     }
 
-    /// Demosaic this CFA image into a 3-channel `LinearImage`, an X-Trans one with `passes`, its
-    /// `mosaic_noise` measured on this mosaic before: `None` exactly for a mono sensor. Consumes
-    /// self.
+    /// Demosaic this CFA image into a 3-channel `LinearImage`, an X-Trans one with `passes`.
+    /// `mosaic_noise` is the noise measured on this mosaic before: `None` exactly for a mono
+    /// sensor.
     pub(crate) fn demosaic(
         mut self,
         passes: MarkesteijnPasses,

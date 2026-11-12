@@ -32,9 +32,9 @@ async fn explicit_cache_eviction_removes_the_downstream_ram_and_disk_cone() {
     assert_eq!(run.logs(), ["132"], "(1 + 11) * 11");
     assert_eq!(dir.entry_count(), 4);
 
-    // Evicting the source takes its whole consumer cone with it — evicting
-    // one node alone would free a slot and change nothing a later run does,
-    // since a surviving consumer would just reuse and prune it again.
+    // Evicting the source takes its whole consumer cone with it — evicting one node alone would
+    // free a slot and change nothing a later run does, since a surviving consumer would reuse and
+    // prune it again.
     let evicted = ["src_a", "sum", "mult", "print"];
     assert!(
         e.evict(["src_a"]).await.is_empty(),
@@ -65,8 +65,7 @@ async fn explicit_cache_eviction_removes_the_downstream_ram_and_disk_cone() {
         "the evicted cone recomputes, and the retained sibling blob is reused"
     );
 
-    // A blob that cannot be deleted is reported, and the rest of the cone
-    // still evicts — one failure is not a reason to abandon the sweep.
+    // A blob that cannot be deleted is reported, and the rest of the cone still evicts.
     let blocked = e.blob_path("src_a");
     fs::remove_file(&blocked).unwrap();
     fs::create_dir(&blocked).unwrap();
@@ -95,11 +94,9 @@ async fn explicit_cache_eviction_removes_the_downstream_ram_and_disk_cone() {
     }
 }
 
-/// Fan-out: a producer feeding both a reuse hit *and* a running consumer
-/// must survive the cut — the running consumer still reads it. Proves the
-/// cut is a backward union over consumers, not a forward "all consumers
-/// reused" filter (which would wrongly prune the shared producer and starve
-/// the executing branch).
+/// Fan-out: a producer feeding both a reuse hit *and* a running consumer must survive the cut —
+/// the running consumer still reads it. Proves the cut is a backward union over consumers, not a
+/// forward "all consumers reused" filter (which would wrongly prune the shared producer).
 #[tokio::test]
 async fn shared_producer_read_by_a_running_consumer_is_not_cut() {
     let dir = TempDir::new("fanout");
@@ -146,9 +143,9 @@ async fn chained_disk_cache_hydrates_only_the_live_frontier() {
     let dir = TempDir::new("chain-frontier");
     let calls = Calls::default();
 
-    // src(7) → sum(Both) = 14 → mult(Both) = 98 → print. `Both` (RAM + disk)
-    // so the frontier the run reads is kept resident — that retention is
-    // what this test asserts; pure `Disk` would drop its RAM copy.
+    // src(7) → sum(Both) = 14 → mult(Both) = 98 → print. `Both` so the frontier the run reads is
+    // kept resident — that retention is what this test asserts; pure `Disk` would drop its RAM
+    // copy.
     let mut g = TestGraph::new();
     g.add("src", |n| n.counted(7i64, &calls));
     g.add("sum", |n| n.sum().cache(CacheMode::Both));
@@ -164,10 +161,9 @@ async fn chained_disk_cache_hydrates_only_the_live_frontier() {
     e.run_sinks().await;
     assert_eq!(calls.count(), 1);
 
-    // Reopen with fresh RAM. Resolution alone settles `mult` as a reuse —
-    // its blob header covers the demand — without decoding the body: the
-    // value only enters RAM when the run loop reaches the node, so a run's
-    // reusable frontier never accumulates ahead of the first lambda.
+    // Reopen with fresh RAM. Resolution alone settles `mult` as a reuse — its blob header covers
+    // the demand — without decoding the body: the value only enters RAM when the run loop reaches
+    // the node.
     let mut e = e.reopen();
     e.plan_sinks().await;
     assert_eq!(
@@ -196,8 +192,8 @@ async fn chained_disk_cache_hydrates_only_the_live_frontier() {
          in the store until a later run's exact demand reaches it"
     );
 
-    // Swap in an empty store: the resident frontier survives, but the deeper
-    // value now has nothing to load from and must recompute when demanded.
+    // Swap in an empty store: the resident frontier survives, but the deeper value has nothing to
+    // load from and must recompute when demanded.
     let empty = TempDir::new("chain-empty");
     e.attach_disk_store(empty.path());
     assert!(
@@ -219,10 +215,9 @@ async fn chained_disk_cache_hydrates_only_the_live_frontier() {
     );
 }
 
-/// A valid disk blob for a node's *current* digest must be served even when
-/// the slot still holds a RAM value produced under a superseded digest — the
-/// stale resident value must not mask the fresh blob. Disk reuse must load
-/// the current blob before deciding an older resident value is reusable.
+/// A valid disk blob for a node's *current* digest must be served even when the slot still holds
+/// a RAM value produced under a superseded digest: the stale resident value must not mask the
+/// fresh blob.
 ///
 /// The intervening run uses `Ram` mode so it can't overwrite the node's one
 /// disk blob (a `Disk`-mode run would — the blob is keyed by node id).
@@ -244,9 +239,9 @@ async fn stale_ram_value_does_not_mask_a_valid_disk_blob() {
     let first = e.run_sinks().await;
     assert_eq!(first.logs(), ["6"]);
 
-    // Config B (Ram): mult = 5 * 7 = 35 → the slot is now resident with 35
-    // under B's digest; the disk blob still carries D_A, since Ram never
-    // writes. The same engine keeps the slot across the reinstall.
+    // Config B (Ram): mult = 5 * 7 = 35 → the slot is resident with 35 under B's digest; the disk
+    // blob still carries D_A, since Ram never writes. The same engine keeps the slot across the
+    // reinstall.
     e.edit(|g| {
         g.constant("mult", 0, 5i64);
         g.constant("mult", 1, 7i64);
@@ -285,11 +280,9 @@ async fn stale_ram_value_does_not_mask_a_valid_disk_blob() {
     );
 }
 
-/// A persisted node is written to disk the moment *it* finishes, not in a
-/// batch at the end of the run — so its blob is already on disk by the time
-/// a downstream node executes. The sink checks the store dir is non-empty
-/// when it runs; that holds only because `mult` was persisted right after it
-/// finished. Batched-at-the-end storing would leave the dir empty here.
+/// A persisted node is written to disk the moment *it* finishes, not in a batch at the end of the
+/// run — so its blob is already on disk by the time a downstream node executes. The sink checks
+/// the store dir is non-empty when it runs; batched-at-the-end storing would leave it empty.
 #[tokio::test]
 async fn persist_node_lands_on_disk_before_its_consumer_runs() {
     let dir = TempDir::new("per_node_store");
@@ -326,11 +319,9 @@ async fn persist_node_lands_on_disk_before_its_consumer_runs() {
 /// stale w.r.t. its new digest; flushing it stamped with `D_B` would overwrite
 /// the node's blob with bytes a later run at `D_B` would load as a false hit.
 ///
-/// `Both`, so the value is still resident when the flush reaches it, and a
-/// plan between the edit and the flush, so the slot's *current* digest really
-/// has moved to `D_B` — under `Disk` there would be no resident value to
-/// mis-stamp, and with no plan the slot would still be carrying `D_A`, either of
-/// which leaves the flush nothing to get wrong.
+/// `Both`, so the value is still resident when the flush reaches it, and a plan between the edit
+/// and the flush, so the slot's *current* digest has moved to `D_B` — under `Disk` there would be
+/// no resident value to mis-stamp, and with no plan the slot would still carry `D_A`.
 #[tokio::test]
 async fn flush_skips_a_value_stale_for_the_current_digest() {
     let dir = TempDir::new("stale_flush");

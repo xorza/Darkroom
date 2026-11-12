@@ -1,5 +1,5 @@
-//! One Levenberg–Marquardt fit of a star's stamp, from a start a pixel and a third of its width
-//! off.
+//! One Levenberg–Marquardt fit of a star's stamp, from a start 0.3 and 0.6 px off the centre and
+//! 0.5 px off in σ.
 
 use common::Libm;
 use std::hint::black_box;

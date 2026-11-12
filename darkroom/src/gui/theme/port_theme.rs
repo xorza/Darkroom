@@ -19,10 +19,9 @@ pub(crate) struct PortTheme {
     /// Event emitter glyphs, subscription pins, and event wires — distinct
     /// from the type-colored data ports.
     pub(crate) event: RgbaF32,
-    /// Port + event label ink — de-emphasized against the full-strength
-    /// value/editor text so each port row has one strong element. Its own
-    /// slot rather than `text_muted` at the call site: which of the row's
-    /// three inks recedes is the interface's decision to change.
+    /// Port + event label ink, de-emphasized against the value/editor text so each port row has
+    /// one strong element. Its own slot, as which of the row's three inks recedes is the
+    /// interface's decision to change.
     pub(crate) label: RgbaF32,
     /// Side of the port circle quad, 12: a whole number of pixels at scales 1, 1.5 and 2 at
     /// 100 % zoom. The circle's radius is derived as half this (see [`Self::radius`]).
@@ -35,10 +34,8 @@ pub(crate) struct PortTheme {
     /// `Theme::port_margin` (which folds in this inset and the card border)
     /// so their center sits on the body edge regardless of it.
     pub(crate) col_pad_x: f32,
-    /// The column's vertical rhythm, spent twice over: the inset below the
-    /// header rule before the first port, and the gap between adjacent ports.
-    /// One field because equal spacing is the point — a distinct top inset
-    /// would read as a misaligned first row.
+    /// The inset below the header rule before the first port and the gap between adjacent ports:
+    /// one field, as a distinct top inset would read as a misaligned first row.
     pub(crate) gap: f32,
     /// Horizontal gap between the input and output columns.
     pub(crate) cols_gap: f32,
@@ -58,8 +55,7 @@ impl PortTheme {
         }
     }
 
-    /// Derived radius for port circles — half the port side. A method rather
-    /// than a stored field so the two can't drift if someone bumps `size`.
+    /// Port circle radius, half the port side; derived so the two cannot drift.
     #[inline]
     pub(crate) fn radius(&self) -> f32 {
         self.size * 0.5

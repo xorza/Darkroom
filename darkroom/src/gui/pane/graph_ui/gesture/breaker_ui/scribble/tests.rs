@@ -3,9 +3,8 @@ use scenarium::EventPort;
 
 use super::*;
 
-/// A scribble started at `p`, the way `BreakerUi::apply` starts one — the
-/// unit under test in everything below, which is about the polyline rather
-/// than about the gesture that drives it.
+/// A scribble started at `p`, as `BreakerUi::input` starts one; everything below is about the
+/// polyline rather than the gesture that drives it.
 fn scribble_at(p: Vec2) -> Scribble {
     let mut s = Scribble::default();
     s.restart(p);
@@ -108,14 +107,12 @@ fn intersects_wire_finds_a_proper_crossing() {
     }
 }
 
-/// The point of keeping the scribble beside the slot rather than inside it: a
-/// finished gesture leaves its buffers for the next one instead of returning
-/// them to the allocator.
+/// A finished gesture leaves its buffers for the next one instead of returning them to the
+/// allocator.
 ///
-/// 49 samples 10 units apart — clear of `MIN_POINT_DISTANCE` (4) so every one
-/// is kept, and 490 total, well under `MAX_BREAKER_LENGTH` (2000) so none is
-/// clamped away. That gives 50 points including the start, so the buffer has
-/// grown past any small-vec default by the time the gesture ends.
+/// 49 samples 10 units apart are clear of `MIN_POINT_DISTANCE` (4), so every one is kept, and
+/// 490 total is well under `MAX_BREAKER_LENGTH` (2000), so none is clamped away: 50 points
+/// including the start.
 #[test]
 fn restarting_a_scribble_keeps_the_buffer_the_last_one_grew() {
     let mut s = scribble_at(Vec2::ZERO);

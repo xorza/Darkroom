@@ -217,9 +217,7 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
                 ..StackConfig::light()
             };
 
-            // `make_frame` is deterministic, so building each tier's frames from it is what makes
-            // the two sets identical — the alternative, cloning one set, has to restate that the
-            // stats came along.
+            // `make_frame` is deterministic, so each tier's frames built from it are identical.
             let ram = combine((0..n).map(make_frame).collect(), &config.clone()).unwrap();
 
             let scratch = TempDir::new("lumos_tier_test");
@@ -579,8 +577,7 @@ fn normalization_fits_a_masked_set_over_the_pixels_they_all_reached() {
 fn stack_images_rejects_frames_whose_rows_run_from_opposite_ends() {
     // Rows are decoded in the order the file stored them, so a BOTTOM-UP frame and a TOP-DOWN one
     // of the same field are upside-down relative to each other. Averaging them is meaningless, and
-    // registration cannot reconcile a mirrored field either — this names the cause where it can be
-    // seen, instead of leaving it to surface as a registration failure with no stated reason.
+    // registration cannot reconcile a mirrored field either, so the cause is named here.
     let desc = PlanarDesc::new((2, 2), ChannelLayout::Mono);
     let frame = |row_order: Option<RowOrder>| {
         let mut image = LinearImage::from_interleaved(desc, vec![1.0; 4]);
@@ -638,11 +635,10 @@ fn stack_images_rejects_frames_whose_rows_run_from_opposite_ends() {
 fn stack_images_rejects_frames_decoded_into_different_sample_domains() {
     type Declared<'a> = Option<(f64, ScaleOrigin, Option<&'a str>)>;
 
-    // The case decode-time normalization introduced: a `uint16` FITS is divided by 65535, a
-    // `float32` one holding the same ADU is taken as already normalized and divided by 1. Both
-    // present as `FitsNormalized` and agree on every other axis, and `Normalization::Global` would
-    // absorb the 65535× into its fitted gain and hand back a plausible-looking stack.
-    // FITS files from anyone but lumos record no pedestal.
+    // A `uint16` FITS is divided by 65535, a `float32` one holding the same ADU is taken as
+    // already normalized and divided by 1. Both present as `FitsNormalized` and agree on every
+    // other axis, and `Normalization::Global` would absorb the 65535× into its fitted gain and
+    // hand back a plausible-looking stack. FITS files from anyone but lumos record no pedestal.
     let domain = |scale: f64, origin: ScaleOrigin, unit: Option<&str>| SampleDomain {
         scale,
         origin,
@@ -1025,11 +1021,10 @@ fn stack_images_rejects_each_nonfinite_sample_class_with_location() {
 #[test]
 fn cancelled_combine_reports_cancellation_from_either_exit() {
     // The chunk walk abandons the output between chunks rather than unwinding, so a cancelled
-    // run still assembles a `StackProduct` — one holding zeros wherever it stopped. Both of
-    // `run_stacking`'s exits must report that as an error rather than hand it back: the
-    // early one taken when no frame carries a quantization sigma, and the normal one.
-    // The token is swapped in after the cache is built, so this exercises the combine itself
-    // rather than the loader's own cancellation check.
+    // run still assembles a `StackProduct` — one holding zeros wherever it stopped.
+    // `run_stacking` must report that as an error, with and without a quantization sigma on the
+    // frames. The token is swapped in after the cache is built, so this exercises the combine
+    // itself rather than the loader's own cancellation check.
     let desc = PlanarDesc::new((2, 1), ChannelLayout::Mono);
     let config = StackConfig {
         combine: Combine {

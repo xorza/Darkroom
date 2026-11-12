@@ -1,6 +1,6 @@
 //! End-to-end stacking tests on forward-model frame sets.
 //!
-//! The unit tests in `stack.rs` / `rejection.rs` cover the combine and rejection math on
+//! The unit tests in `stack/tests.rs` and `rejection/tests.rs` cover the combine and rejection math on
 //! uniform and hand-built pixel stacks. These verify the *statistical* behaviour on realistic
 //! frame sets with ground truth: stacking noise falls as `1/√N`, injected outliers are
 //! rejected (the master recovers the clean truth where a plain mean is contaminated), and
@@ -180,7 +180,7 @@ fn sigma_clip_rejects_injected_outliers_where_mean_is_contaminated() {
 
 /// Every rejecting combine, and the median, drops the spikes. Fifteen frames clear every method's
 /// small-stack floor — GESD's is 15 — so each runs as configured rather than as the median. The
-/// fewest frames any keeps is 9, percentile's at 20% of 15, whose mean sits within
+/// fewest frames any keeps is 9, the trim's at 20% from each end of 15, whose mean sits within
 /// 5 × `SKY_SIGMA`/√9 = 2.4e-3 of the truth; a median's √(π/2) wider spread over 15 is less.
 /// A spike kept would be 0.9/9 = 0.1 off.
 #[test]

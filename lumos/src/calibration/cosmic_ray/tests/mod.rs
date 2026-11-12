@@ -258,14 +258,11 @@ fn bayer_removes_cosmic_rays_preserves_star() {
 
 #[test]
 fn bayer_tight_star_eaten_is_a_known_limitation() {
-    // CR-2 characterization (not a goal — a documented limitation). A *tight* star (FWHM≈2.35 px in
+    // A documented limitation, pinned so a fix flips it loudly. A *tight* star (FWHM≈2.35 px in
     // the mosaic → ~1.2 px in each half-res Bayer phase plane) is undersampled there: median₃
-    // erases its core exactly like a cosmic ray, so the fine-structure test F→0 and L.A.Cosmic
-    // *cannot* tell the core from a CR at any `contrast_limit`. The per-phase detector therefore
-    // eats it. This is why the module doc steers tight / dithered OSC data to stack-time
-    // σ-rejection instead of per-frame CFA L.A.Cosmic. The test pins the behavior so a future fix
-    // (e.g. mosaic-level detection) flips it loudly. Contrast `bayer_removes_cosmic_rays_...`,
-    // which uses a *well-sampled* FWHM≈5.9 px star that survives.
+    // erases its core like a cosmic ray, so F→0 and the detector cannot tell the core from a CR at
+    // any `contrast_limit`. The module doc steers such data to stack-time σ-rejection. Contrast
+    // `bayer_removes_cosmic_rays_...`, whose well-sampled FWHM≈5.9 px star survives.
     let size = USize2::new(48, 48);
     let sky = Sky {
         level: 0.05,
@@ -315,9 +312,8 @@ fn bayer_tight_star_eaten_is_a_known_limitation() {
 
 /// An independently written reference for [`PixelRepair::apply`], asserting the property that makes
 /// the pass order-independent: it writes only masked pixels and reads only unmasked ones, so no
-/// replacement can observe another. Any future attempt to drop the frame copy depends on exactly
-/// that, and this is what would catch a change that broke it. A pixel with no unmasked neighbour
-/// within the 5×5 window widens it a ring at a time to 15×15, then takes `sky`.
+/// replacement can observe another, which dropping the frame copy depends on. A pixel with no
+/// unmasked neighbour within the 5×5 window widens it a ring at a time to 15×15, then takes `sky`.
 fn repair_via_snapshot(pixels: &Buffer2<f32>, mask: &BitBuffer2, sky: f32) -> Buffer2<f32> {
     let size = pixels.size();
     let src = pixels;
@@ -515,7 +511,7 @@ fn a_stated_gain_needs_a_unit_on_the_frame() {
 /// mesh's tile planes, which the gradient does not inflate. A 128 × 128 mono frame
 /// with the sky rising from 0.05 to 0.45 across it and white noise of σ 0.002; a hit of +0.04,
 /// 20σ, at (70, 70). The whole frame's MAD reads the gradient, about 0.1 in σ, and against that the
-/// hit is under half a σ: the old whole-frame model would never flag it.
+/// hit is under half a σ: a whole-frame noise model would never flag it.
 #[test]
 fn a_faint_hit_on_a_gradient_is_caught() {
     let size = USize2::new(128, 128);
@@ -547,8 +543,8 @@ fn a_faint_hit_on_a_gradient_is_caught() {
 /// at x = 0 (S' 6, fine structure 10 σ, so no hit of its own); D below P has S' 2. P is the hit. A
 /// is in its box and clears `detection_sigma`: the first ring takes it, contrast or not. B is in
 /// A's box and clears 1.5, and so is D in P's: the second ring takes both. C is in no first-ring
-/// pixel's box, and E in none at all. Four pixels: P, A, B and D. One ring with the contrast took
-/// two.
+/// pixel's box, and E in none at all. Four pixels: P, A, B and D; a contrast test on the first
+/// ring would take two.
 #[test]
 fn the_mask_grows_in_astroscrappys_two_rings() {
     let size = USize2::new(8, 3);

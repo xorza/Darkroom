@@ -27,14 +27,11 @@ struct Member {
 }
 
 impl Duplicates {
-    /// Remove duplicate star detections that are too close together.
-    ///
-    /// For each cluster of stars within `min_separation`, keeps the *first* star encountered in
-    /// `stars` and drops the rest: a star is a duplicate of an earlier *kept* star strictly closer
-    /// than `min_separation`, so a dropped star never suppresses a later one. Nothing here compares
-    /// `.flux`, so callers MUST pass `stars` already sorted by flux descending (as
-    /// `FilterOutcome::from_stars` does via `sort_by_flux`) for "first kept" to mean "brightest
-    /// kept".
+    /// Remove duplicate detections from `stars`, returning how many: a star is a duplicate of an
+    /// earlier *kept* star strictly closer than `min_separation`, so a dropped star never
+    /// suppresses a later one. Nothing here compares `.flux`, so callers MUST pass `stars` sorted
+    /// by flux descending (as `FilterOutcome::from_stars` does via `sort_by_flux`) for the first
+    /// kept to be the brightest.
     ///
     /// One pass in input order over the stars sorted by their cell of side `min_separation`, each
     /// cell's run in input order: a star reads the earlier stars of its own and the eight

@@ -236,7 +236,6 @@ fn gaussian_fit_rotated_ellipse() {
     let true_cy = 15.0f64;
     let bg = 0.1f32;
 
-    // Create 45° rotated ellipse
     let pixels = on_sky(
         USize2::new(width, height),
         SyntheticStar::new(
@@ -256,7 +255,6 @@ fn gaussian_fit_rotated_ellipse() {
     assert!(result.is_some(), "Should fit rotated ellipse");
     let result = result.unwrap();
 
-    // Position should still be accurate
     let error = result.pos.distance(DVec2::new(true_cx, true_cy));
     assert!(
         error < 0.1,
@@ -278,11 +276,9 @@ fn gaussian_fit_rotated_ellipse() {
     assert!((result.covariance.fwhm() - 6.230_268).abs() < 1e-5);
 }
 
-/// Test recovery from initial guess 2 pixels away from true position.
 /// Under `GaussianFit` a 45° elongated star reports the eccentricity of its true shape —
 /// √(1 − 2²/3.5²) = 0.8207 for σ 3.5 × 2.0 — and the filter rejects it as eccentric at the
-/// `high_resolution` preset's 0.5. The axis-aligned fit read it as round, σx = σy = √8.125, and
-/// passed it.
+/// `high_resolution` preset's 0.5.
 #[test]
 fn gaussian_fit_rejects_a_diagonal_elongated_star() {
     let size = USize2::new(64, 64);

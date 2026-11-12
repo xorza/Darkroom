@@ -7,9 +7,8 @@ use crate::combine::stack_config::combine_method::CombineMethod;
 /// frames reach a pixel the configured [`Combine::method`](crate::Combine::method)'s rejection
 /// statistics are unreliable, so the combine uses `fallback` there instead: at every pixel of a
 /// stack of fewer frames, and at the pixels of a larger one that only some frames cover, such as a
-/// mosaic's edges. This makes the fallback an explicit, inspectable part of the config rather than
-/// a runtime transformation. `fallback` must be rejection-free (`Median` or `Mean(None)`) so it
-/// never needs a fallback of its own.
+/// mosaic's edges. `fallback` must be rejection-free (`Median` or `Mean(None)`) so it never needs
+/// a fallback of its own.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SmallN {
     /// Frames below which `fallback` replaces the configured method.
@@ -37,10 +36,9 @@ impl SmallN {
     }
 
     /// Whether a pixel of `count` samples combines by `fallback` rather than `method`: there are
-    /// too few for its rejection. The median and a plain mean reject nothing, so they have nothing
-    /// to fall back *from*, and a fallback equal to the method is none: a method override that
-    /// inherits a preset's `min_frames` never turns a plain mean into a median at small N, or a
-    /// median into a mean.
+    /// too few for its rejection. A method that rejects nothing has nothing to fall back *from*,
+    /// and a fallback equal to the method is none, so a method override that inherits a preset's
+    /// `min_frames` never swaps a plain mean and a median at small N.
     pub(crate) fn falls_back(&self, method: CombineMethod, count: usize) -> bool {
         let does_rejection =
             matches!(method, CombineMethod::Mean(rejection) if rejection != Rejection::None);

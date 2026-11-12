@@ -246,10 +246,9 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
         assert_eq!(light.metadata.derived.calibration(), CalibrationState::NONE);
     }
 
-    // A master whose pattern matches but whose extent does not is bad input too — unchecked, the
-    // pass would index past it, which is not a report a caller can act on. Every
-    // role a bundle keeps is covered because each is applied by a different operation; the
-    // flat-dark is spent on the flat, so a bundle never holds one to check.
+    // A master whose pattern matches but whose extent does not is bad input too: unchecked, the
+    // pass would index past it. Every role a bundle keeps is covered, as each is applied by a
+    // different operation; a bundle holds no flat-dark.
     for component in [MasterRole::Dark, MasterRole::Flat, MasterRole::Bias] {
         let masters = masters_with_sized_component(component, CfaType::Mono, USize2::new(4, 4));
         let mut light = constant_cfa(USize2::new(2, 2), 0.5, CfaType::Mono);
@@ -460,8 +459,7 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
 /// A dark that kept its pedestal of 2048 ADU on a 65536 span, applied to a RAW
 /// light with the black removed on a 16384 span: the map is gain 4 and offset −2048/16384 = −0.125,
 /// so a dark holding only the pedestal, 2048/65536 = 0.03125, maps to 4 × 0.03125 − 0.125 = 0 and
-/// leaves the light as it was. Before, the scale alone was applied, and the light lost 0.125.
-/// Dyadic values, so the result is exact. The light's pedestal is then removed, and a dark whose
+/// leaves the light as it was. Dyadic values, so the result is exact. The light's pedestal is then removed, and a dark whose
 /// pedestal nobody recorded is refused rather than guessed.
 ///
 /// With a bias beside it, every frame keeping 2048 on the 65536 span — a bias of 0.03125, the dark
@@ -610,9 +608,8 @@ fn a_set_that_cannot_be_loaded_cannot_be_built() {
 
 #[test]
 fn every_component_round_trips_through_its_extname() {
-    // One name table: the writer stamps `extname()` and `bundle_idxs` recognizes the HDU by
-    // feeding it back through `from_extname`, so a role that fails to round-trip is a role that
-    // silently vanishes from a saved bundle.
+    // One name table: the writer stamps `extname()` and the reader recognizes the HDU through
+    // `from_extname`, so a role that fails to round-trip silently vanishes from a saved bundle.
     for component in MasterRole::ALL
         .into_iter()
         .map(CalibrationComponent::Master)
@@ -624,7 +621,7 @@ fn every_component_round_trips_through_its_extname() {
         );
     }
     assert_eq!(CalibrationComponent::from_extname("MASTER_LIGHT"), None);
-    // Only the flat is stored prepared; `read_master` rejects a bundle that says otherwise.
+    // Only the flat is stored prepared; `BundleReader::master` rejects a bundle that says otherwise.
     assert!(MasterRole::Flat.prepared());
     for role in [MasterRole::Dark, MasterRole::Bias, MasterRole::FlatDark] {
         assert!(!role.prepared(), "{role} must not be prepared");
@@ -1516,11 +1513,10 @@ fn ram_bytes_sums_present_frames_and_defects() {
 
 #[test]
 fn a_master_stack_rejects_an_invalid_config_before_reading_anything() {
-    // `MasterStack` builds its own CFA cache, so it is the entry point most likely to drift
-    // out of the shared `combine_cached` gate and reach the reducer unvalidated. A NaN sigma
-    // rejects every sample at every pixel and yields a silently black master; a negative one
-    // inverts the clip band and faults on the survivor range. Both are configuration errors and
-    // must be reported as such.
+    // `MasterStack` builds its own CFA cache, so it is the entry point likeliest to drift out of
+    // the shared `combine_cached` gate and reach the reducer unvalidated. A NaN sigma rejects
+    // every sample and yields a silently black master; a negative one inverts the clip band and
+    // faults on the survivor range. Both must be reported as configuration errors.
     // A path inside a fresh empty directory names no file, wherever the test runs.
     let dir = TempDir::new("lumos-invalid-config");
     let missing = [dir.join("missing.fits")];
@@ -1803,7 +1799,7 @@ fn a_dark_is_matched_to_the_light() {
         light
     };
     let bias = || constant_cfa(size, 0.125, CfaType::Mono);
-    // A flat dark has no hot pixel to fit on, so a bias-removed one is scaled by the exposures.
+    // The dark has no hot pixel to fit on, so a bias-removed one is scaled by the exposures.
     let ratio = |factor| {
         Some(DarkScale {
             factor,
@@ -2184,8 +2180,7 @@ fn flats_are_calibrated_before_they_are_combined() {
 /// then the flat-dark's dark signal scaled to the flat. The flat-darks are 1 s of the bias 1/32
 /// plus 1/64 of dark signal; the flats are 2 s of the bias, twice that dark signal, and their
 /// light. Taken from each flat, the bias leaves the dark signal, which scales by 2, so the flat
-/// master's corner reads exactly 0.5 of its centre. Before, the flat-dark went to the flats with
-/// its bias in, and a dark holding its bias cannot scale, so the 2 s flats were refused.
+/// master's corner reads exactly 0.5 of its centre.
 ///
 /// Its cache is read before each role is stacked and written once it is, under the key its read
 /// gave: it stores the bias and the flat-dark with nothing subtracted and the flats with both

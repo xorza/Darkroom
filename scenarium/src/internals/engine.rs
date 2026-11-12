@@ -1,15 +1,9 @@
-//! [`TestEngine`]: a [`TestGraph`] compiled, installed, and run — with every
-//! answer coming back **by name**.
+//! [`TestEngine`]: a [`TestGraph`] compiled, installed, and run, with every answer coming back
+//! **by name**: the engine speaks `NodeId` and `NodeIdx`, a test speaks "sum", and the bridge is
+//! crossed once, when a run finishes.
 //!
-//! The engine speaks `NodeId` and, inside, `NodeIdx`; a test speaks "sum" and
-//! "print". Bridging that per assertion is what produced
-//! `states[compiled().node(id).unwrap()]` and a trio of name↔id helpers at the
-//! top of the engine's test file. Here the bridge is crossed once, when a run
-//! finishes, and what a test reads is [`RunOutcome`] — names in, names out.
-//!
-//! **The outcome is a snapshot, not a borrow.** Every list is materialised when
-//! the run ends, so a test can hold two runs side by side and compare them, and
-//! nothing it asserts is invalidated by the next `run_*` call.
+//! **The outcome is a snapshot, not a borrow**, so a test can hold two runs side by side and
+//! compare them.
 
 use std::path::PathBuf;
 
@@ -35,16 +29,15 @@ use crate::worker::run_summary::RunSummary;
 
 /// A [`TestGraph`] with a live engine over it.
 ///
-/// The graph stays reachable, so an edit is stated the way the fixture stated
-/// the graph — by name — and [`edit`](Self::edit) recompiles behind it.
+/// The graph stays reachable, so an edit is stated by name and [`edit`](Self::edit) recompiles
+/// behind it.
 #[derive(Debug)]
 pub(crate) struct TestEngine {
     pub(crate) graph: TestGraph,
     pub(crate) engine: ExecEngine,
     outcome: ExecOutcome,
-    /// Where [`attach_disk_store`](Self::attach_disk_store) pointed the cache's
-    /// disk tier, so [`reopen`](Self::reopen) can point a fresh engine at the
-    /// same blobs.
+    /// Where [`attach_disk_store`](Self::attach_disk_store) pointed the disk tier, for
+    /// [`reopen`](Self::reopen).
     disk_root: Option<PathBuf>,
 }
 
@@ -61,12 +54,8 @@ impl TestEngine {
         engine
     }
 
-    /// A fresh engine over the same graph and the same store — the **reopen**
-    /// every persistence test is about: the blobs survive, RAM does not.
-    ///
-    /// The graph moves across rather than being rebuilt, so the new engine
-    /// addresses the very slots the blobs were written under without a fixture
-    /// having to restate its topology (and keep the two statements in step).
+    /// A fresh engine over the same graph and the same store: the blobs survive, RAM does not.
+    /// The graph moves across, so the new engine addresses the slots the blobs were written under.
     pub(crate) fn reopen(self) -> Self {
         let Self {
             graph, disk_root, ..
@@ -78,8 +67,7 @@ impl TestEngine {
         reopened
     }
 
-    /// Edit the graph and reinstall what it became — the ordinary shape of a
-    /// test that changes one thing and re-runs.
+    /// Edit the graph and reinstall what it became.
     pub(crate) fn edit(&mut self, edit: impl FnOnce(&mut TestGraph)) {
         edit(&mut self.graph);
         self.reinstall();
@@ -89,10 +77,8 @@ impl TestEngine {
         self.engine.update(&self.graph.graph, &self.graph.library);
     }
 
-    /// Point the cache's disk tier at `root`, using this graph's own codecs.
-    ///
-    /// Between runs, like a document gaining a cache directory — every reuse
-    /// verdict already given was answered from the previous store.
+    /// Point the cache's disk tier at `root`, using this graph's own codecs. Between runs, like a
+    /// document gaining a cache directory.
     pub(crate) fn attach_disk_store(&mut self, root: impl Into<PathBuf>) {
         let root = root.into();
         let store = DiskStore::new(Some(root.clone()));
@@ -100,8 +86,7 @@ impl TestEngine {
         self.disk_root = Some(root);
     }
 
-    /// [`attach_disk_store`](Self::attach_disk_store) at construction, so a
-    /// disk-backed fixture is one expression.
+    /// [`attach_disk_store`](Self::attach_disk_store) at construction.
     pub(crate) fn with_disk_store(mut self, root: impl Into<PathBuf>) -> Self {
         self.attach_disk_store(root);
         self
@@ -111,12 +96,7 @@ impl TestEngine {
         self.graph.id(name)
     }
 
-    /// Where the attached store keeps `name`'s blob — the path itself, whether
-    /// or not a run has written one there yet.
-    ///
-    /// The store names blobs by node id, which is not something a test should
-    /// have to re-derive (or go hunting for with `read_dir`) to corrupt, read
-    /// back, or delete one.
+    /// Where the attached store keeps `name`'s blob, whether or not a run has written one yet.
     pub(crate) fn blob_path(&self, name: &str) -> PathBuf {
         self.engine.disk_store().blob_path(self.id(name))
     }
@@ -127,7 +107,7 @@ impl TestEngine {
         fs::read(&path).unwrap_or_else(|error| panic!("no blob at {}: {error}", path.display()))
     }
 
-    /// Run to these exact nodes — the "run to this node" / preview trigger.
+    /// Run to these exact nodes, as "run to this node" does.
     pub(crate) async fn run_nodes<'n>(
         &mut self,
         names: impl IntoIterator<Item = &'n str>,
@@ -145,8 +125,7 @@ impl TestEngine {
             .await
     }
 
-    /// Initialize every node owning a subscribed event — the event loop's
-    /// bootstrap run.
+    /// Initialize every node owning a subscribed event, as the event loop's bootstrap run does.
     pub(crate) async fn run_event_sources(&mut self) -> RunOutcome {
         self.run(RunSeeds {
             event_sources: true,
@@ -159,10 +138,8 @@ impl TestEngine {
         self.run(RunSeeds::sinks()).await
     }
 
-    /// The general form. Panics if the operation itself is refused — a seed
-    /// naming no node, a cycle — since for all but a handful of fixtures that
-    /// is a precondition rather than the subject; [`try_run`](Self::try_run) is
-    /// for the rest.
+    /// The general form. Panics if the run is refused (a seed naming no node, a cycle);
+    /// [`try_run`](Self::try_run) is for a test whose subject that is.
     pub(crate) async fn run(&mut self, seeds: RunSeeds) -> RunOutcome {
         self.try_run(seeds).await.expect("the run completes")
     }
@@ -205,15 +182,14 @@ impl TestEngine {
         self.engine.evict_cache(node_ids).await
     }
 
-    /// Persist these nodes' resident disk-backed values now — what the editor
-    /// raises when a node's disk bit is turned on with a value already in RAM.
+    /// Persist these nodes' resident disk-backed values now, as when a node's disk bit is turned
+    /// on with a value already in RAM.
     pub(crate) async fn flush<'n>(&mut self, names: impl IntoIterator<Item = &'n str>) {
         let node_ids: Vec<NodeId> = names.into_iter().map(|name| self.id(name)).collect();
         self.engine.flush_cache(node_ids).await;
     }
 
-    /// [`flush`](Self::flush) over the whole program — the newly attached store's
-    /// own flush, without going through [`attach_disk_store`](Self::attach_disk_store).
+    /// [`flush`](Self::flush) over the whole program.
     pub(crate) async fn flush_all(&mut self) {
         self.engine.flush_all_caches().await;
     }
@@ -274,8 +250,7 @@ impl TestEngine {
         Ok(RunOutcome::snapshot(graph, engine, outcome))
     }
 
-    /// Plan and resolve without invoking any lambda — what the schedule looks
-    /// like before anything runs.
+    /// Plan and resolve without invoking any lambda.
     pub(crate) async fn plan_sinks(&mut self) -> PlanOutcome {
         self.plan(RunSeeds::sinks()).await
     }
@@ -291,11 +266,8 @@ impl TestEngine {
         Ok(PlanOutcome::snapshot(&self.graph, &self.engine))
     }
 
-    /// What the last plan or run demands of this node's outputs, and how many
-    /// live readers each has.
-    ///
-    /// Engine state rather than run output: both are settled by the sweep, and
-    /// they read the same after `plan_*` as after `run_*`.
+    /// What the last plan or run demands of this node's outputs; the same after `plan_*` as after
+    /// `run_*`.
     pub(crate) fn demand(&self, name: &str) -> &[OutputDemand] {
         self.engine.node_output_demand(self.id(name))
     }
@@ -304,8 +276,7 @@ impl TestEngine {
         self.engine.node_output_readers(self.id(name))
     }
 
-    /// This node's inputs as the run delivered them — `None` for a port
-    /// nothing fed.
+    /// This node's inputs as the run delivered them; `None` for a port nothing fed.
     pub(crate) fn inputs(&self, name: &str) -> Vec<Option<DynamicValue>> {
         let id = self.id(name);
         self.engine
@@ -314,8 +285,8 @@ impl TestEngine {
             .inputs
     }
 
-    /// This node's produced outputs, as the cache currently holds them —
-    /// empty when the run released or never wrote them.
+    /// This node's outputs as the cache currently holds them; empty when the run released or never
+    /// wrote them.
     pub(crate) fn outputs(&self, name: &str) -> Vec<DynamicValue> {
         let id = self.id(name);
         self.engine
@@ -328,26 +299,23 @@ impl TestEngine {
         self.outputs(name).get(port).cloned()
     }
 
-    /// This node's input `port` read as an integer — `None` for a port
-    /// nothing fed, and for a value no scalar coercion reaches.
+    /// This node's input `port` read as an integer; `None` for a port nothing fed, and for a
+    /// value no scalar coercion reaches.
     pub(crate) fn input_i64(&self, name: &str, port: usize) -> Option<i64> {
         let value = self.inputs(name).get(port).cloned().flatten()?;
         value.as_i64()
     }
 
-    /// This node's output `port` read as an integer.
-    ///
-    /// `DynamicValue` is not `PartialEq` — it may hold an opaque
-    /// `Arc<dyn CustomValue>` — so a scalar assertion goes through the same
-    /// coercion a consuming lambda would.
+    /// This node's output `port` read as an integer. `DynamicValue` is not `PartialEq` (it may
+    /// hold an opaque `Arc<dyn CustomValue>`), so a scalar assertion goes through the coercion a
+    /// consuming lambda would.
     pub(crate) fn output_i64(&self, name: &str, port: usize) -> Option<i64> {
         let value = self.output(name, port)?;
         value.as_i64()
     }
 }
 
-/// A finished run plus the live progress it published on the way — each event
-/// named, in the order the executor emitted it.
+/// A finished run plus the live progress it published, in the order the executor emitted it.
 #[derive(Debug)]
 pub(crate) struct ReportedRun {
     pub(crate) run: RunOutcome,
@@ -357,9 +325,7 @@ pub(crate) struct ReportedRun {
 /// The per-node facts of one finished run, keyed by name.
 #[derive(Debug)]
 pub(crate) struct RunOutcome {
-    /// Names that invoked their lambda and succeeded, in the order the
-    /// schedule reached them — deps before consumers, which is what makes
-    /// this readable as the run.
+    /// Names that invoked their lambda and succeeded, in schedule order (deps before consumers).
     ran: Vec<String>,
     /// Every row the run reported, in the program's node order.
     rows: Vec<(String, NodeStatus)>,
@@ -402,13 +368,9 @@ impl RunOutcome {
         }
     }
 
-    /// The same snapshot taken from the summary a [`Worker`] published.
-    ///
-    /// A summary carries the run's rows and its whole-run header, and nothing
-    /// else: the worker publishes what the run *produced*, never how the
-    /// schedule walked it. So this fills [`ran`](Self::ran) with the same names
-    /// sorted, and the events — which a summary also does not carry — stay
-    /// empty.
+    /// The same snapshot taken from the summary a [`Worker`] published. A summary carries the
+    /// run's rows and header only, so [`ran`](Self::ran) holds the executed names sorted, and
+    /// the armed events stay empty.
     ///
     /// [`Worker`]: crate::worker::Worker
     pub(crate) fn published(graph: &TestGraph, status: &RunSummary) -> Self {
@@ -438,19 +400,14 @@ impl RunOutcome {
         outcome
     }
 
-    /// Names that invoked their lambda and succeeded.
-    ///
-    /// In schedule order — deps before consumers — for a run this process
-    /// drove. A [`published`](Self::published) outcome has no order to give and
-    /// sorts them by name instead.
+    /// Names that invoked their lambda and succeeded, in schedule order for a run this process
+    /// drove; a [`published`](Self::published) outcome sorts them by name instead.
     pub(crate) fn ran(&self) -> Vec<&str> {
         self.ran.iter().map(String::as_str).collect()
     }
 
-    /// Served from a cache — reused, or left resident by the pre-run cut.
-    ///
-    /// Sorted by name, like every set-shaped accessor here; only
-    /// [`ran`](Self::ran) keeps an order, because *its* order is the answer.
+    /// Served from a cache, reused or left resident by the pre-run cut. Sorted by name, like
+    /// every set-shaped accessor here; only [`ran`](Self::ran) keeps an order.
     pub(crate) fn cached(&self) -> Vec<&str> {
         self.with_status(|status| matches!(status, NodeExecStatus::Cached))
     }
@@ -468,8 +425,7 @@ impl RunOutcome {
         sorted_names(&self.rows, |row| row.ram.total() > 0)
     }
 
-    /// Log lines the run emitted, in order — how a `records` node reports what
-    /// it saw.
+    /// Log lines the run emitted, in order.
     pub(crate) fn logs(&self) -> Vec<&str> {
         self.logs.iter().map(String::as_str).collect()
     }
@@ -486,8 +442,7 @@ impl RunOutcome {
         }
     }
 
-    /// The input ports the run could not satisfy on this node; empty when it
-    /// had none.
+    /// The input ports the run could not satisfy on this node.
     pub(crate) fn missing_ports(&self, name: &str) -> &[usize] {
         match self.status(name) {
             Some(NodeExecStatus::MissingInputs { ports }) => ports,
@@ -502,10 +457,8 @@ impl RunOutcome {
             .map(|(_, row)| row)
     }
 
-    /// Sorted by name, not by the program's node order: the id sort that
-    /// settles that order is not something a test states or should have to
-    /// predict, while a name list is readable and stable across a fixture whose
-    /// ids move.
+    /// Sorted by name, not by the program's node order, which an id sort settles and a test
+    /// should not have to predict.
     fn with_status(&self, matches: impl Fn(&NodeExecStatus) -> bool) -> Vec<&str> {
         sorted_names(&self.rows, |row| row.status.as_ref().is_some_and(&matches))
     }
@@ -538,10 +491,8 @@ impl PlanOutcome {
         }
     }
 
-    /// Names in the order the schedule walks them — deps before consumers.
-    ///
-    /// Distinct from [`runnable`](Self::runnable): this is the *sequence*, and
-    /// it excludes what the walk never reached.
+    /// Names in the order the schedule walks them, deps before consumers, excluding what the walk
+    /// never reached; [`runnable`](Self::runnable) is the set the planner cleared.
     pub(crate) fn scheduled(&self) -> Vec<&str> {
         self.order.iter().map(String::as_str).collect()
     }
@@ -551,8 +502,7 @@ impl PlanOutcome {
         self.where_state(NodeState::is_runnable)
     }
 
-    /// Names blocked for want of a required input — the verdict that
-    /// propagates to consumers.
+    /// Names blocked for want of a required input, a verdict that propagates to consumers.
     pub(crate) fn missing_inputs(&self) -> Vec<&str> {
         self.where_state(NodeState::missing_required_inputs)
     }
@@ -575,8 +525,7 @@ impl PlanOutcome {
     }
 }
 
-/// The names of the `rows` that `keep` holds for, sorted — the shape every
-/// set-like accessor above answers in.
+/// The names of the `rows` that `keep` holds for, sorted.
 fn sorted_names<T>(rows: &[(String, T)], keep: impl Fn(&T) -> bool) -> Vec<&str> {
     let mut names: Vec<&str> = rows
         .iter()
@@ -606,8 +555,8 @@ impl NameMap {
         }
     }
 
-    /// A node the graph no longer holds still has to report — an eviction test
-    /// names one — so an unknown id reads as its id rather than panicking.
+    /// An id the graph no longer holds (an eviction test names one) reads as itself rather than
+    /// panicking.
     fn name(&self, node_id: NodeId) -> String {
         self.by_id
             .get(&node_id)

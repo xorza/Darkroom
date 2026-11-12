@@ -18,15 +18,14 @@ use crate::gui::widgets::support;
 /// Top-of-window menu bar: palantir's [`MenuBar`] at the left, and the document's name, with a
 /// dot while it has unsaved edits, centered on the window while the menus leave it room, pushed
 /// right against them where they do not, and cut in its middle where even that is too narrow.
-/// A grid of a fill, a hug and a fill track, CSS's `1fr auto 1fr`: the fill tracks split what
-/// is left evenly, and each keeps its content's floor, so the menus widen theirs and the name
-/// moves over. Refused: a name centered in the window over the menus, which it overlapped in a
-/// narrow window.
+/// A grid of a fill, a hug and a fill track (CSS's `1fr auto 1fr`): each fill keeps its content's
+/// floor, so the menus widen theirs and the name moves over. Refused: a name centered in the
+/// window over the menus, which it overlapped in a narrow window.
 ///
-/// A pick goes onto the stage's requests in whichever tier it belongs to: graph edits as intents,
-/// the file lifecycle, the history, the run, the view and `Quit` as [`AppCommand`]s for `App` to
-/// run after the pass, Preferences as the [`DockOperation`] that opens its tab. Every item with a chord
-/// shows it, read from [`shortcuts`], the table its handler reads.
+/// A pick goes onto the stage's requests in its tier: graph edits as intents, the file lifecycle,
+/// the history, the run, the view and `Quit` as [`AppCommand`]s for `App` to run after the pass,
+/// Preferences as the [`DockOperation`] that opens its tab. Every item with a chord shows it,
+/// read from [`shortcuts`], the table its handler reads.
 pub(crate) fn show(ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
     let ctx = stage.ctx;
     Grid::new()
@@ -331,12 +330,9 @@ mod tests {
         assert!(!widget(&h, "Delete").disabled, "one node selected");
     }
 
-    /// The document's name centers on the window while the menus leave it room, moves right
-    /// against them where they do not, and is cut in its middle where even that is too narrow;
-    /// the menus stay at the left throughout. At 1200 px the name's center is the bar's; at 600
-    /// px the even split, (600 − name) / 2, is under the menus' width, so the name starts where
-    /// the menus end, at its full width; at 420 px it has less than that width past the menus,
-    /// so it is cut to fit there, centered in it, its last glyph's slack on both sides.
+    /// At 1200 px the name's center is the bar's; at 600 px the even split, (600 − name) / 2, is
+    /// under the menus' width, so the name starts where the menus end, at its full width; at 420
+    /// px it has less than that width past the menus, so it is cut to fit there, centered in it.
     #[test]
     fn the_name_centers_then_moves_past_the_menus_then_is_cut() {
         let mut h = SessionHarness::new(DocumentFixture::probes(1));

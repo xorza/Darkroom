@@ -1,15 +1,11 @@
-//! The window's bottom status bar: a thin surround strip carrying the last
-//! failed action's message or a warning (left, in the error or the warning
-//! color — run/save/load failures and what a load repaired, parked in the
-//! engine's `StatusLog` until a success of the same family clears it), else
-//! what the last run came to with a link to the node that failed; then, at
-//! the right, the graph's node and selection counts and its zoom, and the
-//! memory readout: this process's own resident footprint, plus the runtime
-//! cache's system + GPU bytes under one `Cache` clause, mirrored from the last
-//! completed `RunSummary` and shown only when the cache holds something.
-//! The graph's line is always there, so the bar is one line tall on every
-//! frame: a strip that grew and shrank would read as layout jitter and resize
-//! the dock when a run lands.
+//! The window's bottom status bar: at the left the last failed action's message or warning
+//! (in the error or warning color: run/save/load failures and what a load repaired, parked in
+//! the engine's `StatusLog` until a success of the same family clears it), else what the last
+//! run came to with a link to the node that failed; at the right the graph's node and selection
+//! counts and zoom, then the memory readout: this process's resident footprint, plus the
+//! runtime cache's system + GPU bytes under one `Cache` clause, shown only when the cache holds
+//! something. The graph's line is always there, so the bar is one line tall on every frame: a
+//! strip that grew and shrank would jitter and resize the dock when a run lands.
 
 use palantir::{
     Align, Chrome, Configure, Panel, Sizing, Spacing, Text, TextStyle, Ui, VAlign, WidgetId, fmt,
@@ -35,8 +31,7 @@ use std::fmt;
 use std::fmt::Display;
 use std::fmt::Formatter;
 
-/// The bar is a window singleton, so it carries a global id rather than a
-/// parent-scoped salt — one strip, one name, reachable from a test.
+/// A global id rather than a parent-scoped salt: the bar is a window singleton a test reaches.
 pub(crate) fn wid() -> WidgetId {
     WidgetId::from_hash("darkroom.status_bar")
 }

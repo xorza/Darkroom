@@ -159,7 +159,6 @@ pub(crate) struct PixelStats {
     pub(crate) std: f64,
 }
 
-/// Compute mean and standard deviation of `pixels`.
 pub(crate) fn pixel_stats(pixels: &[f32]) -> PixelStats {
     let n = pixels.len();
     if n == 0 {

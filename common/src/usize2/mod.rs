@@ -8,10 +8,9 @@ use glam::USizeVec2;
 
 /// How many columns and rows a 2D grid has.
 ///
-/// Distinct from [`USizeVec2`], which locates a pixel: a size has no origin, adding two sizes is
-/// meaningless, and its components are named for what they measure. Taking one instead of a
-/// `width, height` pair also makes the two impossible to transpose at a call site — they are
-/// both `usize`, so the compiler cannot otherwise tell them apart.
+/// Distinct from [`USizeVec2`], which locates a pixel: a size has no origin and adding two is
+/// meaningless. Taking one instead of a `width, height` pair of `usize`s makes the two impossible
+/// to transpose at a call site.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct USize2 {
     pub width: usize,
@@ -36,7 +35,7 @@ impl USize2 {
     /// Row-major index of `point`, for a buffer laid out by this size.
     ///
     /// # Panics
-    /// Panics in debug builds if `point` is outside the grid.
+    /// In debug builds, if `point` is outside the grid.
     #[inline]
     pub const fn idx_of(self, point: USizeVec2) -> usize {
         debug_assert!(self.contains(point), "point is outside the grid");
@@ -46,7 +45,7 @@ impl USize2 {
     /// The point `idx` addresses — the inverse of [`Self::idx_of`].
     ///
     /// # Panics
-    /// Panics in debug builds if `idx` is past the last pixel.
+    /// In debug builds, if `idx` is past the last pixel.
     #[inline]
     pub fn point_of(self, idx: usize) -> USizeVec2 {
         debug_assert!(

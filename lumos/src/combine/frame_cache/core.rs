@@ -20,9 +20,8 @@ use crate::progress::progress_monitor::ProgressMonitor;
 use crate::progress::stacking_progress::StackingStage;
 use crate::recycled::Recycled;
 
-/// Shared cache context + combine engine — everything that doesn't depend on the frame type.
-/// Owned by composition inside
-/// [`FrameCache`](crate::combine::frame_cache::FrameCache); all frames share one tier.
+/// The cache context and chunked combine engine of a
+/// [`FrameCache`](crate::combine::frame_cache::FrameCache); all its frames share one tier.
 #[derive(Debug)]
 pub(crate) struct CacheCore {
     pub(crate) tier: StorageTier,
@@ -54,9 +53,9 @@ pub(super) struct ChunkCtx<'a> {
 }
 
 impl CacheCore {
-    /// The rows the combine `stage` reads at once, and what the run holds past the budget: the
-    /// whole image for a resident stack, which reads its frames where they lie; on the disk tier
-    /// the rows the budget leaves room for beside what the run holds beside the combine, each row
+    /// The rows the combine `stage` reads at once, and the bytes the run holds past the budget:
+    /// the whole image for a resident stack, which reads its frames where they lie; on the disk
+    /// tier the rows the budget leaves room for beside what `stage` and the combine hold, each row
     /// priced by its [`CombineCost`](crate::combine::stack::combine_cost::CombineCost). The
     /// overcommit is the larger of the
     /// combine's own and the earlier stages'. A pass the floor puts past the budget says so in the
@@ -86,8 +85,8 @@ impl CacheCore {
         }
     }
 
-    /// Combine engine: walk the output in chunks of `chunk_rows` rows (see [`Self::chunk_rows`]),
-    /// and every channel within a chunk, and hand `(output_slice, ChunkCtx)` to `process`.
+    /// Walk the output in chunks of `chunk_rows` rows (see [`Self::chunk_rows`]), and every channel
+    /// within a chunk, handing `(output_slice, ChunkCtx)` to `process`.
     ///
     /// Chunk-outer, so a frame's quality planes and flags, which every channel reads, are taken
     /// once per chunk rather than once per channel. On the disk tier a chunk is copied out of the

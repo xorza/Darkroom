@@ -1,9 +1,8 @@
 //! Generic struct introspection.
 //!
-//! Describe a struct's fields — name, label, [`FieldKind`], default, required —
-//! and rebuild it from neutral [`FieldValue`]s, with **no** coupling to any GUI
-//! toolkit or value model. A consumer (e.g. an editor) maps [`FieldDesc`] to its
-//! own widgets and reads edited values back as `FieldValue`s.
+//! Describe a struct's fields — name, label, [`FieldKind`], default, required — and rebuild it
+//! from neutral [`FieldValue`]s, coupled to no GUI toolkit or value model: a consumer maps
+//! [`FieldDesc`] to its own widgets and reads edited values back as `FieldValue`s.
 //!
 //! With Common's `introspect-derive` feature, derive with
 //! `#[derive(Introspect)]`. Enum-typed fields implement [`IntrospectEnum`]
@@ -11,10 +10,9 @@
 //! `#[derive(IntrospectEnum)]` plus a stable `#[config(type_id = "…")]` UUID; the
 //! struct derive takes one too, for the value it builds.
 //!
-//! Both derives are self-contained: a type describes itself with nothing but
-//! its own definition and a `Default`. That is what lets the crate that *owns*
-//! a config type make it introspectable, instead of a consumer restating every
-//! field in a mirror type it has to keep in step by hand.
+//! Both derives are self-contained: a type describes itself with nothing but its own definition
+//! and a `Default`, so the crate that owns a config type makes it introspectable, with no mirror
+//! type in a consumer to keep in step.
 //!
 //! ```
 //! use common::{FieldValue, Introspect};

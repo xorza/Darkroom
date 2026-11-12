@@ -151,21 +151,18 @@ impl<P> Copy for CalibratedLights<'_, P> {}
 impl AlignStackConfig {
     /// Detect → register → warp → stack a set of light frames into one aligned, combined image.
     ///
-    /// All frames are expected to share the same dimensions (same sensor). The reference frame is
-    /// added to the stack unwarped; every other frame is aligned to it. Frames that fail to
-    /// register (too few stars, RANSAC failure, accuracy gate) are dropped and listed in
-    /// [`AlignStackResult::dropped`]; the stack proceeds with
-    /// whatever aligned. A single input frame is returned as its own "stack".
+    /// The reference is stacked unwarped and every other frame is aligned to it. Frames that fail
+    /// to register (too few stars, RANSAC failure, accuracy gate) are dropped and listed in
+    /// [`AlignStackResult::dropped`]; a single input frame is its own "stack".
     ///
     /// Every light must share the first one's dimensions and hold only finite samples; each is
     /// checked before its stars are detected, so a bad input is reported as one instead of
     /// surfacing from the combine after a warp has spread it.
     ///
-    /// The frames arrive decoded and resident, so the inputs are committed before this is called —
+    /// The frames arrive decoded and resident, so the inputs are committed before this is called,
     /// but the warped outputs are a second full set, and those spill to the frame store when they
-    /// would not fit alongside the inputs. For camera RAW, enter through
-    /// [`Self::calibrate_align_stack_paths`]
-    /// instead, which tiers the decode as well.
+    /// would not fit alongside the inputs. For camera RAW, use
+    /// [`Self::calibrate_align_stack_paths`], which tiers the decode as well.
     pub fn align_stack_images(
         &self,
         lights: Vec<LinearImage>,
@@ -204,10 +201,9 @@ impl AlignStackConfig {
 
     /// Calibrate, align, and stack camera-RAW or mosaic-FITS light frames end to end.
     ///
-    /// For each raw light: load it as a `CfaImage`, apply the masters (dark/flat/defect) in place,
-    /// demosaic to a `LinearImage`, and detect its stars, then register, warp and combine. A frame
-    /// that fails to **load** is a hard error (bad input); a frame that fails to **register** is
-    /// dropped and reported in [`AlignStackResult::dropped`].
+    /// Each light is loaded as a `CfaImage`, calibrated by the masters, demosaiced and detected,
+    /// then registered, warped and combined. A frame that fails to **load** is a hard error; one
+    /// that fails to **register** is dropped and reported in [`AlignStackResult::dropped`].
     ///
     /// With [`Reference::Idx`] the reference is prepared first, and each other light then goes
     /// through its preparation, its registration and its warp in one pass, written once. With
@@ -219,8 +215,7 @@ impl AlignStackConfig {
     /// won't fit the budget, every parked and warped frame goes through the frame store's memory
     /// maps and peak RAM stays flat in the frame count.
     ///
-    /// For lights already calibrated (e.g. pre-processed FITS), skip this and call
-    /// [`Self::align_stack_paths`], or
+    /// For lights already calibrated, call [`Self::align_stack_paths`], or
     /// [`Self::align_stack_images`] for frames already decoded.
     pub fn calibrate_align_stack_paths<P: AsRef<Path>>(
         &self,

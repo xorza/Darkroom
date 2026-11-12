@@ -1,15 +1,12 @@
 use glam::Vec2;
 use palantir::{Configure, Menu, Sizing, Ui};
 
-/// Shared open/close lifecycle + look for the canvas's anchored context
-/// popups (the node menu and the new-node palette). Owns only the
-/// surface-space anchor and the dismiss bookkeeping; each caller stores its
-/// own per-open extras (target node, drop position, …) as plain fields set at
-/// open-time and read at pick-time.
+/// Shared open/close lifecycle and look for the canvas's anchored context popups (the node
+/// menu and the new-node palette). Owns only the surface-space anchor and the dismiss
+/// bookkeeping; each caller stores its own per-open extras (target node, drop position, …).
 ///
-/// Carries what both controllers need: a palantir [`Menu`] at the anchor, whose
-/// open state this keeps, in the menu look with hug sizing, and the "a pick or an
-/// outside dismiss closes the menu" resolution.
+/// Carries what both controllers need: a palantir [`Menu`] at the anchor, whose open state this
+/// keeps, in the menu look, and the "a pick or an outside dismiss closes the menu" resolution.
 #[derive(Default, Debug)]
 pub(crate) struct AnchoredMenu {
     /// The surface-space point the open menu was raised at; palantir's popup keeps the place its
@@ -21,8 +18,7 @@ pub(crate) struct AnchoredMenu {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct PopupShape {
     pub(crate) id_salt: &'static str,
-    /// Caps the popup so a tall body wraps/scrolls (the new-node palette);
-    /// `None` hugs the content (the small context menus).
+    /// Caps the popup so a tall body scrolls (the new-node palette); `None` hugs the content.
     pub(crate) max_height: Option<f32>,
 }
 
@@ -37,19 +33,15 @@ impl AnchoredMenu {
         self.anchor = Some(anchor);
     }
 
-    /// Whether the menu is open.
-    ///
-    /// For a caller with per-frame setup to skip: [`Self::show`] answers
-    /// `None` for a closed menu anyway, but only *after* its arguments
-    /// have been built.
+    /// Whether the menu is open, for a caller with per-frame setup to skip: [`Self::show`]
+    /// answers `None` for a closed menu only after its arguments have been built.
     pub(crate) const fn is_open(&self) -> bool {
         self.anchor.is_some()
     }
 
-    /// Show the menu when open, recording `body` inside a palantir [`Menu`]
-    /// shaped by `shape`. `body` records the items and returns the pick
-    /// (if any); returning `Some` — or an Esc / outside-click dismiss — closes
-    /// the menu. The pick is handed back for the caller to act on.
+    /// Show the menu when open, recording `body` inside a palantir [`Menu`] shaped by `shape`.
+    /// `body` records the items and returns the pick (if any); returning `Some`, or an Esc or
+    /// outside-click dismiss, closes the menu. The pick is handed back for the caller to act on.
     pub(crate) fn show<T>(
         &mut self,
         ui: &mut Ui,

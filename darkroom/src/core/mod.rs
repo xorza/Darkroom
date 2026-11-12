@@ -2,10 +2,10 @@
 //! the evaluation worker. The GUI (`crate::gui`) is its consumer, and this
 //! layer never imports from it.
 //!
-//! It renders nothing, but it stores two palantir data types, because the
-//! document saves them: the pane arrangement is a [`palantir::DockState`],
-//! edited through [`palantir::DockOperation`], and the viewer's sampling preference
-//! is a [`palantir::ImageFilter`]. Nothing else from palantir is used here.
+//! It renders nothing, but it stores palantir's data types, because the document and the
+//! preferences save them: the pane arrangement is a [`palantir::DockState`], edited through
+//! [`palantir::DockOperation`], the viewer's sampling preference a [`palantir::ImageFilter`], the
+//! interface size a `UserScale`. Nothing that draws is used here.
 
 pub(crate) mod document;
 pub(crate) mod edit;

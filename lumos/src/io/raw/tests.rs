@@ -101,8 +101,7 @@ fn bayer_dump(samples: &Buffer2<u16>, dump: BayerDump) -> Result<UnpackedRaw, Ra
 
 /// The preview is the science frame demosaicked and clamped, bit for bit, and what lies in the
 /// masked margins reaches neither: the same visible samples under black margins and under
-/// saturated ones give the same image, its first rows and columns included, which the old preview
-/// demosaicked across the margins. A bright square on a floor near black makes the demosaic
+/// saturated ones give the same image, its first rows and columns included. A bright square on a floor near black makes the demosaic
 /// overshoot past 1 and the noise reach below 0 in the science frame; the preview holds both to
 /// `[0, 1]`.
 #[test]

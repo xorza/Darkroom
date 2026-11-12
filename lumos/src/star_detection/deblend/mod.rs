@@ -1,14 +1,6 @@
-//! Star deblending algorithms for separating overlapping sources.
-//!
-//! This module provides two deblending approaches:
-//!
-//! 1. **Local maxima deblending** (`local_maxima`): Fast algorithm that finds
-//!    peaks in a connected component and assigns pixels to the nearest peak.
-//!    Good for well-separated stars.
-//!
-//! 2. **Multi-threshold deblending** (`multi_threshold`): SExtractor-style
-//!    tree-based algorithm that uses multiple threshold levels to separate
-//!    blended sources. More accurate for crowded fields but slower.
+//! Star deblending: `local_maxima` splits a component at its peaks, fast and good for separated
+//! stars; `multi_threshold` is SExtractor's tree over several threshold levels, more accurate in
+//! crowded fields and slower.
 
 use crate::star_detection::deblend::pixel::Pixel;
 use glam::USizeVec2;
@@ -23,8 +15,8 @@ pub(super) mod multi_threshold;
 pub(super) mod pixel;
 pub(super) mod region;
 
-/// Squared Euclidean distance between two pixel positions — the one peak-separation
-/// metric shared by the Voronoi assignment and every min-separation check.
+/// Squared Euclidean distance, the one peak-separation metric of the Voronoi assignment and every
+/// min-separation check.
 #[inline]
 const fn dist_sq(a: USizeVec2, b: USizeVec2) -> usize {
     let dx = a.x.abs_diff(b.x);

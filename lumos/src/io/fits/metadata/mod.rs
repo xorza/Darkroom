@@ -327,17 +327,9 @@ pub(super) fn write_row_order(
     header: &mut Header,
     metadata: &ImageMetadata,
 ) -> fits_well::Result<()> {
-    // Two keywords, because they answer two questions that a bottom-up source pulls apart.
-    //
-    // `ROWORDER` says which rows the `BAYERPAT` below is expressed against, and that is always
-    // `TOP-DOWN` here: the rows go out in the order this writer holds them and the pattern was
-    // already converted into those terms on load, so declaring anything else would have a reload
-    // apply the phase correction a second time. Written for every sensor type, not just the
-    // mosaiced ones — a mono frame has no phase to correct but is as capable of being upside-down.
-    //
-    // `LUMROWO` says which way up the sky is, which is what survives from the source and what two
-    // frames have to agree on. Omitted for a frame this crate synthesized, which has no source to
-    // report and whose reader then falls back to `ROWORDER`.
+    // Always `TOP-DOWN`: the rows go out in the order this writer holds them, the pattern already
+    // converted, and anything else would have a reload correct the phase twice. `LUMROWO` carries
+    // the source's order, omitted for a frame this crate synthesized.
     header.set("ROWORDER", RowOrder::TopDown.keyword())?;
     if let Some(row_order) = metadata.derived.row_order() {
         header.set(SOURCE_ROW_ORDER, row_order.keyword())?;
@@ -409,20 +401,14 @@ pub(super) fn read_cfa(
     Bayerpat::Optional.read_cfa(header, height, unstated_bayer_pattern)
 }
 
-/// Where a Lumos-written file records the row order its *source* had.
-///
-/// `ROWORDER` cannot carry it. This writer emits the rows in the order it holds them and the Bayer
-/// pattern already converted into those terms, so its `ROWORDER` has to say `TOP-DOWN` — "the
-/// pattern as written applies to the rows as written" — or a reload would apply the phase
-/// correction a second time. That leaves nowhere to say which way up the sky actually is, which is
-/// the question two frames have to agree on, so it goes here.
+/// Where a Lumos-written file records the row order its *source* had: `ROWORDER` must say
+/// `TOP-DOWN` there, as the Bayer pattern is already converted, so it cannot say which way up the
+/// sky is, which is what two frames have to agree on.
 const SOURCE_ROW_ORDER: Keyword = Keyword::new("LUMROWO");
 
-/// Which way up the stored rows actually are.
-///
-/// [`SOURCE_ROW_ORDER`] where this writer left one, and `ROWORDER` otherwise — for a file from
-/// anyone else the two are the same thing, and only a Lumos round-trip separates them. This is the
-/// one the combine holds frames to agreeing on: it is about the sky, not about the pattern.
+/// Which way up the stored rows actually are: [`SOURCE_ROW_ORDER`] where this writer left one,
+/// `ROWORDER` otherwise. The one the combine holds frames to agreeing on: it is about the sky, not
+/// the pattern.
 pub(super) fn read_row_order(header: &Header) -> Result<RowOrder, FitsLoadError> {
     if let Some(recorded) = header.get_text(SOURCE_ROW_ORDER)? {
         return Ok(row_order_of(recorded));
@@ -430,10 +416,9 @@ pub(super) fn read_row_order(header: &Header) -> Result<RowOrder, FitsLoadError>
     read_declared_row_order(header)
 }
 
-/// What `ROWORDER` itself declares, which is the frame the Bayer pattern beside it is expressed in.
-///
-/// The FITS standard has no `ROWORDER`; it is a convention, and a file without it is read the way
-/// every writer that omits it means — first row first.
+/// What `ROWORDER` itself declares, the frame the Bayer pattern beside it is expressed in. The
+/// FITS standard has no `ROWORDER`; a file without it is read as first row first, as its writers
+/// mean it.
 pub(super) fn read_declared_row_order(header: &Header) -> Result<RowOrder, FitsLoadError> {
     Ok(header
         .get_text("ROWORDER")?
@@ -454,7 +439,7 @@ fn row_order_of(value: &str) -> RowOrder {
 }
 
 /// Whether a header has to state `BAYERPAT`: one whose `CFATYPE` names a Bayer mosaic does, and
-/// any other states none for an image that is no mosaic.
+/// any other may leave it out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Bayerpat {
     Required,
@@ -492,22 +477,17 @@ impl Bayerpat {
             }
         };
 
-        // `BAYERPAT` describes the top-down image and the rows are left in file order, so file row
-        // `f` of a `BOTTOM-UP` frame carries the phase of displayed row `H - 1 - f`. That is the
-        // opposite phase only when `H` is even: for odd `H`, `H - 1 - f ≡ f (mod 2)`, the declared
-        // pattern already matches the rows as stored, and flipping would invert a correct one and
-        // mis-debayer the entire frame. Odd visible heights are not hypothetical — LibRaw reports
-        // 4015 for the EOS 1500D. `ROWORDER` rather than the resolved order: the pattern is
-        // expressed against the rows as this file stores them, and a Lumos-written file separates
-        // that from which way up the sky is.
+        // `BAYERPAT` describes the top-down image and the rows stay in file order, so file row `f`
+        // of a `BOTTOM-UP` frame has the phase of displayed row `H - 1 - f`: the opposite only
+        // when `H` is even. For odd `H` (LibRaw reports 4015 for the EOS 1500D) the pattern
+        // already matches the stored rows, and flipping would mis-debayer the frame. `ROWORDER`
+        // rather than the resolved order: the pattern is expressed against the rows as stored.
         if read_declared_row_order(header)? == RowOrder::BottomUp && height.is_multiple_of(2) {
             pattern = pattern.flip_vertical();
         }
 
-        // The offsets are in the stored image's own coordinates — where the pattern starts within
-        // the data as written — so they compose onto the pattern *after* the row-order correction
-        // above has put it in file-order terms. Applying them first would express them against a
-        // display orientation the samples were never rearranged into.
+        // The offsets are in the stored image's coordinates, so they compose onto the pattern
+        // after the row-order correction has put it in file-order terms.
         let xoff = header.get_integer("XBAYROFF")?.unwrap_or(0);
         let yoff = header.get_integer("YBAYROFF")?.unwrap_or(0);
         if yoff & 1 != 0 {

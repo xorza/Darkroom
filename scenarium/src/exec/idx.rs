@@ -12,21 +12,18 @@
 //! names: they survive installs, cross the host boundary, and may enter
 //! digests.
 //!
-//! Everything below is the opposite: indices shift between compiles, so none
-//! of them may enter a digest, a persisted byte, or a host-facing report.
-//! They are assigned by the compiler's walk and never leave the execution
+//! Indices shift between compiles, so none of them may enter a digest, a persisted byte, or a
+//! host-facing report. They are assigned by the compiler's walk and never leave the execution
 //! internals.
 //!
-//! Each is one [`idx_type!`] invocation — the newtype and its `Idx` impl are
-//! the same for every space, so what is written out here is only what each
-//! space *is*.
+//! Each is one [`idx_type!`] invocation; the newtype and its `Idx` impl are the same for every
+//! space.
 
 use crate::containers::col::idx_type;
 
 idx_type!(
-    /// A node's position in the installed program's dense node vector. Install-local:
-    /// indices shift between compiles, so a `NodeIdx` must never enter a digest, a
-    /// persisted byte, or any host-facing report — those stay on
+    /// A node's position in the installed program's dense node vector. Install-local: it must
+    /// never enter a digest, a persisted byte, or any host-facing report — those stay on
     /// [`NodeId`](crate::graph::identity::NodeId).
     pub(crate) struct NodeIdx,
     "node index"
@@ -40,12 +37,10 @@ idx_type!(
 );
 
 idx_type!(
-    /// A position in the program's flat input column, packed one node's ports after
-    /// another. A node owns a [`Span<InputIdx>`](crate::containers::col::Span); this
-    /// names one port inside it.
-    ///
-    /// Positions are handed out as the walk appends, one node's run after another,
-    /// so a node owns exactly the run its own declaration claimed.
+    /// A position in the program's flat input column, packed one node's ports after another. A
+    /// node owns a [`Span<InputIdx>`](crate::containers::col::Span); this names one port inside
+    /// it. Positions are handed out as the walk appends, so a node owns exactly the run its own
+    /// declaration claimed.
     pub(crate) struct InputIdx,
     "input column index"
 );

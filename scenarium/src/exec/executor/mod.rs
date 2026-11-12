@@ -1,21 +1,18 @@
-//! The run loop and its transient state. The `Executor` owns the shared
-//! `ctx_manager`, the invoke scratch, and each node's cross-run lambda state; the
-//! per-node cross-run output cache lives in the [`RuntimeCache`]. Given a program, the
-//! [`RunSchedule`] planned and resolved against it, and that `RuntimeCache`,
-//! [`Executor::run`] invokes each scheduled node's lambda and gathers outcomes. Each
-//! node's per-run result is one [`NodeOutcome`] in the per-run outcome map.
+//! The run loop and its transient state. The `Executor` owns the shared `ctx_manager`, the invoke
+//! scratch, and each node's cross-run lambda state; the per-node cross-run output cache lives in
+//! the [`RuntimeCache`]. [`Executor::run`] invokes each scheduled node's lambda and gathers one
+//! [`NodeOutcome`] per node.
 //!
 //! **Pre-run resolution.** The loop reads a schedule
-//! [`resolve::sweep`](crate::exec::resolve::sweep) has already swept, so
-//! the disposition, output demand,
-//! and reader counts it reads were derived together and are authoritative for the whole run. A
-//! [`NodeState::Reuse`] is never re-derived after its producers may have been cut. A cut
-//! node (its cone feeds only cache hits, so a disk-cached node's stale upstream isn't
-//! recomputed on reopen) gets [`NodeOutcome::Cut`]. A missing implementation is reported
-//! without probing its cache or retaining its input cone. The one verdict the loop *improves*
-//! is a `Run` whose stamped digest is `None` because a Bind-delivered path value exists
-//! only once its producers settle: the loop prepares that identity off-thread, re-stamps at
-//! reach time, and serves the cache on a hit.
+//! [`resolve::sweep`](crate::exec::resolve::sweep)
+//! has already swept, so its disposition, output demand, and reader counts are authoritative for
+//! the whole run. A [`NodeState::Reuse`] is never re-derived after its producers may have been
+//! cut. A cut node (its cone feeds only cache hits, so a disk-cached node's stale upstream isn't
+//! recomputed on reopen) gets [`NodeOutcome::Cut`]. A missing implementation is reported without
+//! probing its cache or retaining its input cone. The one verdict the loop *improves* is a `Run`
+//! whose stamped digest is `None` because a Bind-delivered path value exists only once its
+//! producers settle: the loop prepares that identity off-thread, re-stamps at reach time, and
+//! serves the cache on a hit.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -50,10 +47,8 @@ use crate::exec::schedule::{Delivery, NodeState, RunSchedule};
 
 mod node_runtime;
 
-/// What became of a node this run — the single per-node result map, so the run-time
-/// facts can't contradict (a node can't be `Reused` yet carry a run time, or `Ran` yet
-/// also flagged errored). Carries its own `RunError`/elapsed, so nothing lives in a side
-/// map.
+/// What became of a node this run — one result map, so run-time facts can't contradict (a node
+/// can't be `Reused` yet carry a run time).
 #[derive(Debug, Clone, Default)]
 enum NodeOutcome {
     /// Not reached this run: skipped for missing inputs, below a cancel, or unscheduled.
@@ -61,9 +56,9 @@ enum NodeOutcome {
     Pending,
     /// Served from a RAM/disk cache under an unchanged digest — counted as cached.
     Reused,
-    /// Pruned by the pre-run cut: every consumer that would read this node reused a cache,
-    /// so its output is never read and its lambda is skipped. `cached` is whether its output
-    /// remains resident; unprobed disk blobs are not runtime cache state.
+    /// Pruned by the pre-run cut: every consumer that would read this node reused a cache, so its
+    /// lambda is skipped. `cached` is whether its output remains resident; unprobed disk blobs
+    /// are not runtime cache state.
     Cut { cached: bool },
     /// Its lambda ran and succeeded, taking `secs`.
     Ran { secs: f64 },
@@ -89,14 +84,13 @@ pub(crate) struct Executor {
     pub(crate) ctx_manager: CtxManager,
     /// Per-*invoke* scratch: the node's resolved inputs, refilled for each node that runs.
     inputs: Vec<DynamicValue>,
-    /// The run's mutable copy of the resolved live binding counts. Input consumption or
-    /// retirement decrements it; the resolved demand stays as the sweep left it.
+    /// The run's mutable copy of the resolved live binding counts; the resolved demand stays as
+    /// the sweep left it.
     remaining_reads: RemainingOutputReads,
-    /// Per-run outcome per node (see [`NodeOutcome`]), aligned to the program's
-    /// dense node vector. Reused across runs and rebuilt each run.
+    /// Per-run outcome per node, aligned to the program's dense node vector.
     outcomes: Col<NodeIdx, NodeOutcome>,
-    /// Each node's cross-run lambda state, aligned to the installed program's
-    /// dense node vector by [`reconcile`](Self::reconcile).
+    /// Each node's cross-run lambda state, aligned to the installed program by
+    /// [`reconcile`](Self::reconcile).
     pub(super) nodes: Col<NodeIdx, NodeRuntime>,
 }
 
@@ -105,11 +99,10 @@ pub(crate) struct Executor {
 #[derive(Debug)]
 pub(crate) struct RunRequest<'a, 'r> {
     pub(crate) program: &'a CompiledGraph,
-    /// The schedule, planned against `program` and then resolved: dispositions, demand,
-    /// and reader counts a sweep derived from both. Resolving it is
-    /// [`ExecEngine::execute`](crate::exec::engine)'s job, and the debug
-    /// [`validate`](RunSchedule::validate) after that pass is what catches a schedule
-    /// spanning some other program.
+    /// The schedule, planned against `program` and then resolved by
+    /// [`ExecEngine::execute`](crate::exec::engine); the debug
+    /// [`validate`](RunSchedule::validate) after that pass catches a schedule spanning some other
+    /// program.
     pub(crate) schedule: &'a RunSchedule,
     pub(crate) cache: &'a mut RuntimeCache,
     /// Live per-node feedback, published ahead of the final outcome.
@@ -133,8 +126,7 @@ struct RemainingOutputReads {
 }
 
 impl RemainingOutputReads {
-    /// Take this run's starting counts from the schedule the loop is about to walk —
-    /// the only source, so the counts can't come from a resolution the run isn't using.
+    /// Take this run's starting counts from the schedule the loop is about to walk.
     fn seed(&mut self, schedule: &RunSchedule) {
         self.counts.clone_from(&schedule.outputs.readers);
     }
@@ -161,9 +153,8 @@ impl RemainingOutputReads {
 }
 
 impl Executor {
-    /// Move the nodes' lambda state from the program it belongs to onto a newly
-    /// installed one ([`CompiledGraph::realign`]), dropping the state of a node
-    /// whose implementation changed.
+    /// Move the nodes' lambda state onto a newly installed program ([`CompiledGraph::realign`]),
+    /// dropping the state of a node whose implementation changed.
     pub(crate) fn reconcile(&mut self, prev: &CompiledGraph, program: &CompiledGraph) {
         program.realign(
             prev,
@@ -181,9 +172,8 @@ impl Executor {
         self.nodes.clear();
     }
 
-    /// Walk `schedule.process_order` (producer-first), giving each node one turn. The loop
-    /// itself owns only the two decisions that end it early or skip it wholesale — the
-    /// per-node work is [`ExecFrame::run_node`].
+    /// Walk `schedule.process_order` (producer-first), giving each node one turn
+    /// ([`ExecFrame::run_node`]).
     pub(crate) async fn run(&mut self, request: RunRequest<'_, '_>, outcome: &mut ExecOutcome) {
         let RunRequest {
             program,
@@ -194,9 +184,8 @@ impl Executor {
         } = request;
 
         outcome.clear();
-        // Hold the cancel flag on the context so lambdas can poll it inside
-        // off-thread work, and so the loop-top / post-loop checks below read
-        // one source.
+        // Lets lambdas poll the cancel flag inside off-thread work, and keeps the loop-top and
+        // post-loop checks on one source.
         self.ctx_manager.cancel = cancel;
         self.ctx_manager.logs.clear();
         self.outcomes
@@ -220,10 +209,9 @@ impl Executor {
             // The producer-first schedule excludes unseeded disabled nodes; the
             // resolved run cuts cache-hidden and blocked cones.
             for (process_idx, &node_idx) in schedule.process_order.iter().enumerate() {
-                // A schedule of sync-completing lambdas never suspends on its own, so
-                // without this it would hold its executor thread from the first node to the
-                // last — starving everything sharing that thread (event-loop lambdas, and
-                // every other task under a current-thread runtime).
+                // A schedule of sync-completing lambdas never suspends on its own, and would
+                // starve everything sharing its thread (event-loop lambdas, other tasks under a
+                // current-thread runtime).
                 task::yield_now().await;
 
                 if frame.ctx.cancel.is_cancelled() {
@@ -239,18 +227,14 @@ impl Executor {
         outcome.cancelled = self.ctx_manager.cancel.is_cancelled();
     }
 
-    /// Reduce this run's per-node column and the RAM it left resident into the caller's
-    /// outcome — one [`NodeStatus`] row per node, which is also the row the host publishes.
-    /// A node says nothing at all (no row) when it neither produced a result nor holds a
-    /// value: the cancelled run's tail, a node the planner excluded, a pruned cut.
+    /// Reduce this run's per-node column and the RAM it left resident into the caller's outcome —
+    /// one [`NodeStatus`] row per node, which is also the row the host publishes. A node has no
+    /// row when it neither produced a result nor holds a value: the cancelled run's tail, a node
+    /// the planner excluded, a pruned cut.
     ///
-    /// Separate from [`run`](Self::run) because `node_ram` can only be measured once the
-    /// engine has released what the run left dead — over the same program and schedule
-    /// the loop walked.
-    ///
-    /// Every column here spans the whole program, so this walks the program rather than
-    /// `process_order`: a node the run never scheduled can still hold RAM from an earlier
-    /// one, and that is the only thing it has to report.
+    /// Separate from [`run`](Self::run) because `node_ram` can only be measured once the engine
+    /// has released what the run left dead. It walks the program rather than `process_order`: a
+    /// node the run never scheduled can still hold RAM from an earlier one.
     pub(crate) fn collect_outcome(&self, request: CollectRequest<'_>, outcome: &mut ExecOutcome) {
         let CollectRequest {
             program,
@@ -259,8 +243,7 @@ impl Executor {
         } = request;
         for (node_idx, node_outcome) in self.outcomes.iter_indexed() {
             let status = match node_outcome {
-                // A reuse hit, or a node the cut pruned that still holds a resident value, are
-                // both "available, not recomputed" — reported cached.
+                // Available and not recomputed: reported cached.
                 NodeOutcome::Reused | NodeOutcome::Cut { cached: true } => {
                     Some(NodeExecStatus::Cached)
                 }
@@ -270,11 +253,10 @@ impl Executor {
                         elapsed_secs: *secs,
                     })
                 }
-                // A cancelled node didn't complete, so it has neither a run to report nor a
-                // failure of its own — the run as a whole is what was cancelled. `Skipped`
-                // alongside `Failed`: a cancel can land before the invoke, on the path walk
-                // that would have keyed it, and it is no more a failure there. A node the
-                // cut left uncached ran nothing either.
+                // A cancelled node didn't complete, so it has neither a run nor a failure of its
+                // own — the run as a whole was cancelled. `Skipped` alongside `Failed`: a cancel
+                // can land before the invoke, on the path walk that would have keyed it. A node
+                // the cut left uncached ran nothing either.
                 NodeOutcome::Failed {
                     error: RunError::Cancelled,
                     ..
@@ -293,9 +275,8 @@ impl Executor {
                 NodeOutcome::Skipped { error } => Some(NodeExecStatus::Errored {
                     error: error.clone(),
                 }),
-                // The planner may have stopped at this node for want of an input — the one
-                // verdict that isn't the run loop's to give, since a node it never reached
-                // holds no outcome of its own.
+                // The planner may have stopped at this node for want of an input — a verdict that
+                // isn't the run loop's to give, since a node it never reached holds no outcome.
                 NodeOutcome::Pending => missing_inputs(program, schedule, node_idx),
             };
             let ram = node_ram[node_idx];
@@ -314,9 +295,8 @@ impl Executor {
 /// The unsatisfied input ports of a node the planner verdicted `MissingInputs`, or
 /// `None` for any other node.
 ///
-/// Which ports is recomputed from the schedule's own predicate (the one the planner
-/// reached its verdict with) rather than stored: only the rare missing node pays for it,
-/// so it isn't worth a column spanning the program.
+/// Recomputed from the schedule's own predicate rather than stored: only the rare missing node
+/// pays for it.
 fn missing_inputs(
     program: &CompiledGraph,
     schedule: &RunSchedule,
@@ -338,14 +318,12 @@ fn missing_inputs(
     Some(NodeExecStatus::MissingInputs { ports })
 }
 
-/// One run's live state: the read-only schedule, the cache and per-invoke scratch it
-/// mutates, and the sinks it reports through. Bundled so every step of the loop is a method
-/// taking a node index rather than a closure over ten borrows — and so the disjoint-field
-/// borrows the run needs (cache vs. contexts vs. outcomes) are expressed once, here.
+/// One run's live state: the read-only schedule, the cache and per-invoke scratch it mutates, and
+/// the sinks it reports through. Bundled so every step is a method taking a node index and the
+/// disjoint-field borrows (cache vs. contexts vs. outcomes) are expressed once.
 ///
-/// `'r` is the reporter's own lifetime, kept separate from the frame's `'a`: a
-/// `&mut dyn Trait` is invariant, so sharing one lifetime would extend every borrow here to
-/// the caller's.
+/// `'r` is the reporter's own lifetime, kept separate from `'a`: a `&mut dyn Trait` is invariant,
+/// so sharing one lifetime would extend every borrow here to the caller's.
 #[derive(Debug)]
 struct ExecFrame<'a, 'r> {
     program: &'a CompiledGraph,
@@ -362,23 +340,20 @@ struct ExecFrame<'a, 'r> {
 }
 
 impl ExecFrame<'_, '_> {
-    /// One node's turn. The resolved disposition decides which of the four things happens, and it
-    /// is authoritative — a [`NodeState::Reuse`] is never re-derived here, since its producers may
-    /// already be pruned (see [`resolve::sweep`](crate::exec::resolve::sweep)).
+    /// One node's turn. The resolved disposition decides which of the four things happens and is
+    /// authoritative — a [`NodeState::Reuse`] is never re-derived here, since its producers may be
+    /// pruned (see [`resolve::sweep`](crate::exec::resolve::sweep)).
     async fn run_node(&mut self, node_idx: NodeIdx) {
         let e_node = &self.program[node_idx];
         let demand = &self.schedule.outputs.demand[e_node.outputs];
         match self.schedule.states[node_idx] {
-            // `process_order` and the state column are written by the same arm
-            // of the walk, so a scheduled node without a settled state is a
-            // broken plan — not a node to quietly skip.
+            // `process_order` and the state column are written by the same arm of the walk, so
+            // a scheduled node without a settled state is a broken plan.
             NodeState::Unvisited => unreachable!("a scheduled node has a settled state"),
-            // The planner excluded it, so it holds no result this run and its
-            // outcome stays `Pending`.
+            // The planner excluded it: no result this run, outcome stays `Pending`.
             NodeState::Disabled | NodeState::MissingInputs => {}
-            // Pruned by the pre-run cut: every consumer that would read this node reused a
-            // cache, so its output is never read. Report only a current resident value;
-            // unneeded disk blobs remain unprobed.
+            // Every consumer that would read this node reused a cache. Report only a current
+            // resident value; unneeded disk blobs remain unprobed.
             NodeState::Cut => {
                 self.node_outcomes[node_idx] = NodeOutcome::Cut {
                     cached: self.cache.is_resident_cur(node_idx),
@@ -386,8 +361,8 @@ impl ExecFrame<'_, '_> {
             }
             NodeState::Reuse => self.serve_reuse(node_idx, demand).await,
             // Reuse is settled *before* the errored-dependency check inside `invoke_node`: a
-            // digest-valid cached value stays valid even when an upstream re-ran for another
-            // consumer and failed, so it must not be cleared as skipped.
+            // digest-valid cached value stays valid when an upstream re-ran for another consumer
+            // and failed, so it must not be cleared as skipped.
             NodeState::Run => {
                 if self.needs_invoke(node_idx, demand).await {
                     self.invoke_node(node_idx, demand).await;
@@ -396,9 +371,8 @@ impl ExecFrame<'_, '_> {
         }
     }
 
-    /// Coarse cancel: stop scheduling further nodes and retire the tail's reads. A node
-    /// already mid-invoke isn't interrupted, while unreached outcomes stay `Pending` and are
-    /// omitted from the outcome.
+    /// Coarse cancel: stop scheduling further nodes and retire the tail's reads. A node already
+    /// mid-invoke isn't interrupted; unreached outcomes stay `Pending` and are omitted.
     fn retire_cancelled_tail(&mut self, from_process_idx: usize) {
         let schedule = self.schedule;
         for &node_idx in &schedule.process_order[from_process_idx..] {
@@ -408,10 +382,9 @@ impl ExecFrame<'_, '_> {
         }
     }
 
-    /// Serve a resolved reuse. The sweep only *probed* a disk hit, so the decode happens
-    /// here, at the node's own turn: producer-first order puts it ahead of every consumer
-    /// that reads it, and the release below frees it on the same last-read bookkeeping a
-    /// computed value gets.
+    /// Serve a resolved reuse. The sweep only *probed* a disk hit, so the decode happens here at
+    /// the node's own turn: producer-first order puts it ahead of every consumer, and the release
+    /// below frees it on the same last-read bookkeeping a computed value gets.
     ///
     /// A blob that stopped loading since the probe cannot fall back to running — the cut
     /// already pruned this node's producers — so it fails the node and its consumers skip as
@@ -430,23 +403,20 @@ impl ExecFrame<'_, '_> {
         }
     }
 
-    /// Whether this node's lambda still has to run — and the late second chance at reuse
-    /// that decides it.
+    /// Whether this node's lambda still has to run, after the late second chance at reuse.
     ///
     /// The one verdict the loop *improves*: a `Run` whose stamped digest is `None` because it
-    /// folds a Bind-delivered path value the sweep could not read yet
-    /// (`hash_bound_fs_path`). Its producers settled earlier in this walk — the `Run` verdict
-    /// kept them alive — so re-stamp it now and serve the cache on a hit. A genuinely
-    /// uncacheable node (an impure cone) just re-folds to `None` and runs as before.
+    /// folds a Bind-delivered path value the sweep could not read yet (`hash_bound_fs_path`). Its
+    /// producers settled earlier in this walk, so re-stamp it now and serve the cache on a hit. A
+    /// genuinely uncacheable node (an impure cone) re-folds to `None` and runs as before.
     ///
     /// `true` — nothing was improvable, the improved digest still missed, or a declared path
-    /// would not stamp: the node runs, in the last case uncached and with a warning against
-    /// its name. `false` — its turn is already settled, whether it was *served* from cache or
-    /// stopped by a cancel. The two are one answer to the caller, which asks only whether to
-    /// invoke; which of them happened is in the node's outcome.
+    /// would not stamp: the node runs, in the last case uncached and with a warning against its
+    /// name. `false` — its turn is already settled, whether *served* from cache or stopped by a
+    /// cancel; which happened is in the node's outcome.
     ///
-    /// Loading *before* retiring this node's input reads is what lets a failed load fall
-    /// through to a normal invoke here, unlike [`serve_reuse`](Self::serve_reuse).
+    /// Loading *before* retiring this node's input reads lets a failed load fall through to a
+    /// normal invoke here, unlike [`serve_reuse`](Self::serve_reuse).
     async fn needs_invoke(&mut self, node_idx: NodeIdx, demand: &[OutputDemand]) -> bool {
         if self.cache[node_idx].cur_digest.is_some() {
             return true;
@@ -463,20 +433,16 @@ impl ExecFrame<'_, '_> {
             })
             .await;
         match hydrated {
-            // The run is being torn down, so there is nothing to start here:
-            // invoking would begin work the cancel exists to stop.
+            // Torn down: invoking would begin work the cancel exists to stop.
             Err(StampError::Cancelled) => {
                 self.mark_skipped(node_idx, RunError::Cancelled);
                 false
             }
-            // A path that would not read denies this node a *cache key*, not
-            // the ability to run: its digest stays `None`, which is exactly
-            // where every `Impure` node sits, so the node runs uncached. Only
-            // the lambda knows what the path was for — one that writes the
-            // file it declares succeeds outright, and one that needed to read
-            // it fails with its own message naming what it was reading. What
-            // this arm must not do is stay quiet: never caching a node that
-            // asked to be cached is the symptom nobody would otherwise see.
+            // A path that would not read denies this node a *cache key*, not the ability to run:
+            // its digest stays `None`, as for every `Impure` node, so it runs uncached. Only the
+            // lambda knows what the path was for — one that writes the file it declares succeeds,
+            // one that needed to read it fails with its own message. This arm must not stay
+            // quiet: a node that asked to be cached and never is, is otherwise invisible.
             Err(error) => {
                 self.ctx.log_node(
                     program.node_ids[node_idx],
@@ -490,11 +456,9 @@ impl ExecFrame<'_, '_> {
             }
             Ok(ReuseOutcome::Missed) => true,
             Ok(ReuseOutcome::Served) => {
-                // It came in as `Run`, so the sweep counted it as a
-                // reader of each producer — reads it will now not take.
-                // Handing them back is what lets a producer's value go the
-                // moment its last real reader is gone. A `Reuse` node
-                // never owned them, which is why `serve_reuse` has no
+                // It came in as `Run`, so the sweep counted it as a reader of each producer;
+                // handing those reads back lets a producer's value go the moment its last real
+                // reader is gone. A `Reuse` node never owned them, hence `serve_reuse` has no
                 // such line.
                 self.abandon_input_reads(node_idx);
                 self.release_drained_outputs(node_idx);
@@ -504,8 +468,8 @@ impl ExecFrame<'_, '_> {
         }
     }
 
-    /// Invoke the node's lambda and record what came of it, persisting a success to disk
-    /// right away — so a long run's earlier caches survive a later failure or cancel.
+    /// Invoke the node's lambda and record what came of it, persisting a success to disk right
+    /// away so a long run's earlier caches survive a later failure or cancel.
     async fn invoke_node(&mut self, node_idx: NodeIdx, demand: &[OutputDemand]) {
         let program = self.program;
         let e_node = &program[node_idx];
@@ -517,13 +481,13 @@ impl ExecFrame<'_, '_> {
             return;
         }
 
-        // Read already-resolved inputs and release each producer whose last read this
-        // satisfies. A disk-reused producer was decoded at its own earlier turn.
+        // Release each producer whose last read this satisfies. A disk-reused producer was
+        // decoded at its own earlier turn.
         self.collect_inputs(node_idx);
 
         debug_assert!(matches!(self.node_outcomes[node_idx], NodeOutcome::Pending));
 
-        // Attribute any logs this node emits to it (read by `CtxManager::log`).
+        // Attribute logs this node emits to it (read by `CtxManager::log`).
         self.ctx.cur_node_id = Some(node_id);
         let invoke_start = Instant::now();
         self.reporter
@@ -545,19 +509,17 @@ impl ExecFrame<'_, '_> {
                 })
                 .await
                 .map_err(|e| match e {
-                    // A lambda that bailed on cancel reports it truthfully;
-                    // surface it as a cancel rather than a generic invoke error.
+                    // A lambda that bailed on cancel reports it truthfully.
                     InvokeError::Cancelled => RunError::Cancelled,
                     other => RunError::Invoke(Arc::new(other)),
                 })
         };
         let run_time = invoke_start.elapsed().as_secs_f64();
 
-        // A cancellable lambda reports a cancel itself (→ `RunError::Cancelled` above). This
-        // is the safety net for the rest: a lambda that doesn't poll the token (a builtin, a
-        // single decode) but ran while the run was cancelled returns `Ok` with a result from
-        // an aborted run — map that to `Cancelled` too so its output isn't cached. A genuine
-        // error stands on its own, even mid-cancel.
+        // A cancellable lambda reports a cancel itself. Safety net for one that doesn't poll the
+        // token (a builtin, a single decode) but ran while the run was cancelled: its `Ok` comes
+        // from an aborted run, so map it to `Cancelled` and don't cache it. A genuine error
+        // stands on its own, even mid-cancel.
         let result = match result {
             Ok(()) if self.ctx.cancel.is_cancelled() => Err(RunError::Cancelled),
             Ok(()) => match self.cache[node_idx].unbound_demanded_outputs(demand) {
@@ -569,8 +531,8 @@ impl ExecFrame<'_, '_> {
         let cancelled = matches!(&result, Err(RunError::Cancelled));
         let slot = &mut self.cache[node_idx];
         let succeeded = match result {
-            // The fresh output now corresponds to this node's current digest; record it so
-            // the next run's reuse check is a RAM hit.
+            // The fresh output corresponds to the node's current digest, so the next run's reuse
+            // check is a RAM hit.
             Ok(()) => {
                 slot.stamp_produced();
                 self.node_outcomes[node_idx] = NodeOutcome::Ran { secs: run_time };
@@ -602,15 +564,13 @@ impl ExecFrame<'_, '_> {
         if self.schedule.root_flags(node_idx).is_event_source() {
             self.collect_event_triggers(node_idx);
         }
-        // Persist this node's cache the moment it finishes (durable as the run progresses),
-        // not at the end of the whole run. The snapshot is taken synchronously inside
-        // `store_node`; only the write awaits, so the cache borrow doesn't cross it. The
-        // preceding reuse miss proves that no blob can cover this result.
+        // Persist the moment the node finishes, not at the end of the run. The snapshot is taken
+        // synchronously inside `store_node`; only the write awaits, so the cache borrow doesn't
+        // cross it. The preceding reuse miss proves no blob can cover this result.
         //
-        // The answer is dropped deliberately: nobody is waiting on it here, so a
-        // blob that did not land degrades into a later recompute rather than a
-        // report — the flush sweeps are where a store's answer reaches a human,
-        // because there one asked. The slot still records it, inside the store.
+        // The answer is dropped deliberately: nobody is waiting on it, so a blob that did not
+        // land degrades into a later recompute; the flush sweeps are where a store's answer
+        // reaches a human. The slot still records it, inside the store.
         let _ = self
             .cache
             .store_node(program, node_idx, StorePolicy::KnownMiss)
@@ -618,17 +578,15 @@ impl ExecFrame<'_, '_> {
         self.release_drained_outputs(node_idx);
     }
 
-    /// Drop `node_id` from this run: clear any stale cached output so it isn't served as
-    /// this run's result, and record the outcome under the caller's reason —
-    /// [`RunError::SkippedUpstream`] for an errored dependency, or
-    /// [`RunError::CacheLoadFailed`] for a probed blob that no longer loads.
+    /// Drop `node_idx` from this run: clear any stale cached output so it isn't served as this
+    /// run's result, and record `error` — [`RunError::SkippedUpstream`] for an errored
+    /// dependency, or [`RunError::CacheLoadFailed`] for a probed blob that no longer loads.
     fn mark_skipped(&mut self, node_idx: NodeIdx, error: RunError) {
         self.cache[node_idx].clear_output();
         self.node_outcomes[node_idx] = NodeOutcome::Skipped { error };
     }
 
-    /// Whether any node this one binds an input to already failed or was skipped for
-    /// an error — the check that turns an upstream failure into a skipped consumer.
+    /// Whether any node this one binds an input to already failed or was skipped for an error.
     fn has_errored_dependency(&self, node_idx: NodeIdx) -> bool {
         let program = self.program;
         program.inputs[program[node_idx].inputs]
@@ -712,8 +670,8 @@ impl ExecFrame<'_, '_> {
         }
     }
 
-    /// Abandons every bound-input read owned by a consumer that will not invoke, allowing
-    /// non-RAM producer values to be released as soon as their remaining readers disappear.
+    /// Abandons every bound-input read owned by a consumer that will not invoke, so non-RAM
+    /// producer values release once their remaining readers disappear.
     fn abandon_input_reads(&mut self, consumer_idx: NodeIdx) {
         for input in &self.program.inputs[self.program[consumer_idx].inputs] {
             if let Delivery::Wire(address) = self.schedule.delivery(input) {
@@ -756,10 +714,8 @@ pub(crate) mod internals {
     use crate::exec::idx::OutputIdx;
 
     impl Executor {
-        /// How many planned reads of one output the last run left uncompleted —
-        /// zero once every consumer has read it or had its read retired. The
-        /// mid-run release bookkeeping, which nothing outside the loop observes
-        /// in production.
+        /// How many planned reads of one output the last run left uncompleted — zero once every
+        /// consumer has read it or had its read retired.
         pub(crate) fn remaining_reads(&self, output_idx: OutputIdx) -> u32 {
             self.remaining_reads.counts[output_idx]
         }

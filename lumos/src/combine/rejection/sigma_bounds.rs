@@ -10,10 +10,9 @@ use crate::error::InvalidConfigField;
 /// spread estimate.
 ///
 /// Sigma clipping, winsorized clipping and linear-fit clipping all reject on this same asymmetric
-/// band and differ only in what they take as the reference and the spread — so the pair travels as
-/// one value rather than as two `f32`s each of them declares, documents and validates separately.
-/// Keeping them together is also what stops a low threshold reaching a rejector as its high one:
-/// two bare `f32` parameters in a row can be swapped silently, a `SigmaBounds` cannot.
+/// band and differ only in what they take as the reference and the spread, so the pair travels as
+/// one value, which also stops a low threshold reaching a rejector as its high one: two bare `f32`
+/// parameters in a row can be swapped silently.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SigmaBounds {
     /// Threshold for low outliers, below the reference.

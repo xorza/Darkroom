@@ -68,16 +68,15 @@ pub(crate) struct LmFit<const N: usize> {
 ///   doubles on every rejection in a row.
 /// - The fit has converged when a step is negligible, `‖D⁻¹·δ‖ ≤ step_tolerance·‖D⁻¹·x‖` — either
 ///   an accepted step or the undamped Gauss–Newton step from the current point, which no damping
-///   shortens; or when that Gauss–Newton step would lower χ² by at most `chi2_tolerance·χ²`, which
-///   leaves an error of at most `√chi2_tolerance` of `√χ²` in the scaled units, and is where the
-///   rounding of χ² stops a fit of a model the data do not follow exactly; or when the gradient is
-///   orthogonal to the residuals: every scaled component
-///   `g_i / √(H_ii·χ²)`, the cosine between the residuals and a column of the Jacobian, at most
-///   `gradient_tolerance`. In the scaled coordinates every parameter is in units of √χ², so the
-///   norms compare like with like and the tests hold at any scale of the data; a parameter near
-///   zero is judged against the whole vector, as Madsen, Nielsen and Tingleff state the test. At
-///   the solution of noise-free data χ² sits at rounding level and no step can lower it; the
-///   Gauss–Newton step then is negligible.
+///   shortens; or when that Gauss–Newton step would lower χ² by at most `chi2_tolerance·χ²`, an
+///   error of at most `√chi2_tolerance` of `√χ²` in the scaled units, where the rounding of χ²
+///   stops a fit of a model the data do not follow exactly; or when the gradient is orthogonal to
+///   the residuals: every scaled component `g_i / √(H_ii·χ²)`, the cosine between the residuals
+///   and a column of the Jacobian, is at most `gradient_tolerance`. In the scaled coordinates
+///   every parameter is in units of √χ², so the norms compare like with like at any scale of the
+///   data; a parameter near zero is judged against the whole vector, as Madsen, Nielsen and
+///   Tingleff state the test. On noise-free data χ² at the solution sits at rounding level, and
+///   the Gauss–Newton step is then negligible.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct LmController {
     pub(crate) max_iterations: usize,
@@ -103,7 +102,8 @@ impl LmController {
     };
 
     /// Fit `problem` from `start`; `None` when it does not converge within the iteration budget,
-    /// or when the Hessian is singular.
+    /// when the Hessian is singular or χ² is not finite, or when no damping yields a step that
+    /// lowers χ².
     pub(crate) fn fit<const N: usize>(
         &self,
         problem: &impl LmProblem<N>,
@@ -126,7 +126,7 @@ impl LmController {
                 && (self.is_negligible(&step, &params, &scale)
                     || predicted_decrease(&equations, &step) <= self.chi2_tolerance * chi2)
             {
-                // The remaining Newton correction is below the tolerance: take it and stop.
+                // The remaining Gauss–Newton correction is within tolerance: take it and stop.
                 for (value, delta) in params.iter_mut().zip(step) {
                     *value += delta;
                 }

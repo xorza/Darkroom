@@ -14,15 +14,12 @@ use crate::worker::run_summary::RunSummary;
 pub enum WorkerReport {
     Installed {
         compiled: Arc<CompiledGraph>,
-        /// What the runtime cache holds once its slots have been reconciled
-        /// onto `compiled`. Carried here because an install is the other
-        /// moment the cache changes size: a program that dropped nodes frees
-        /// their values, and a host told only by completed runs would go on
-        /// reporting the previous total until another run measured it.
+        /// What the runtime cache holds once its slots have been reconciled onto `compiled`. An
+        /// install changes the cache size too: a program that dropped nodes frees their values,
+        /// which a host told only by completed runs would not see until another run.
         cache_ram: RamUsage,
     },
-    /// The engine was emptied: no program, no cache. The cache footprint is
-    /// zero by construction, so nothing is carried.
+    /// The engine was emptied: no program, no cache, so no footprint is carried.
     Cleared,
     Error(WorkerError),
     /// What the worker is doing changed.
@@ -52,16 +49,13 @@ pub enum WorkerMessage {
     FlushCache {
         node_ids: Vec<NodeId>,
     },
-    /// The same, over every installed node: what a store owes values computed
-    /// while there was nowhere to persist them — an unsaved document that has
-    /// just been given a root.
+    /// The same, over every installed node: what a store owes values computed while there was
+    /// nowhere to persist them, as for an unsaved document just given a root.
     ///
-    /// Asked for rather than inferred from [`Self::SetDiskStore`]. A store is
-    /// replaced for several unrelated reasons — a document opened, closed, or
-    /// saved somewhere else — and only the host can tell which of them left
-    /// values owing a blob. A
-    /// worker guessing wrote the *outgoing* document's values into the
-    /// *incoming* document's root, under ids nothing there would ever read.
+    /// Asked for rather than inferred from [`Self::SetDiskStore`]: a store is replaced when a
+    /// document is opened, closed, or saved elsewhere, and only the host knows which left values
+    /// owing a blob. A worker guessing wrote the *outgoing* document's values into the
+    /// *incoming* document's root, under ids nothing there would read.
     FlushAllCaches,
     /// Attach the store the cache persists to and serves from. Attaching alone
     /// writes nothing; see [`Self::FlushAllCaches`].

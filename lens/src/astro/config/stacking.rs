@@ -1,14 +1,10 @@
 //! The editable projections behind the star-detection, registration and
 //! stacking builder nodes.
 //!
-//! Unlike the per-frame configs — which derive
-//! [`Introspect`] on the lumos type itself and need nothing
-//! here but an identity — each of these fronts a *nested* config whose full
-//! field set is far wider than a node's worth of ports. So each is a flat
-//! projection: the handful of knobs the editor offers, expanded back over
-//! `Default` on the way out. They deliberately do not track their lumos type
-//! field-for-field, and the round-trip tests below pin the subset they do
-//! carry.
+//! Unlike the per-frame configs, which derive [`Introspect`] on the lumos type itself, each of
+//! these fronts a nested config far wider than a node's worth of ports. So each is a flat
+//! projection: the handful of knobs the editor offers, expanded back over `Default`. They do not
+//! track their lumos type field-for-field, and the round-trip tests pin the subset they carry.
 
 use common::{Introspect, IntrospectEnum};
 use lumos::{

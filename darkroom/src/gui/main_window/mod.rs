@@ -40,9 +40,8 @@ pub(crate) struct MainWindow {
     /// ([`TabRef::ImageViewer`]), keyed by the preview node it shows. Textures remain
     /// centralized in the preview store.
     pub(crate) image_viewers: HashMap<NodeId, ImageViewer>,
-    /// The dock's op sink for one frame. A field so the two phases that
-    /// fill it — the navigation scan and the record — reuse one buffer's
-    /// capacity rather than building a `Vec` per frame.
+    /// The dock's op sink for one frame, kept so the navigation scan and the record reuse one
+    /// buffer.
     dock_ops: Vec<DockOperation<TabRef>>,
     /// The graph revision the canvas's node caches were last swept at. A node
     /// can only go with a step that moves the revision, so a frame at the
@@ -56,18 +55,12 @@ impl MainWindow {
         WidgetId::from_hash("darkroom.dock")
     }
 
-    /// Navigation scan: surface tab activate/close/drag-drop from *last*
-    /// frame's chip responses. Runs at the top of the frame so a switch
-    /// applies before the record — the switched-to tab records in Pass A and
-    /// its wires draw in Pass B, no first-frame gap.
+    /// Navigation scan: surface tab activate/close/drag-drop from *last* frame's chip responses.
+    /// Runs at the top of the frame so a switch applies before the record: no first-frame gap.
     ///
-    /// The dock is the whole of it. The panes' own input reads are the
-    /// input stage's, over the arrangement this phase's drain settles.
-    ///
-    /// The scan emits into the window's own buffer and the ops are then
-    /// handed to the frame's queue, which is where every other darkroom
-    /// surface puts one: dock ops travel beside graph edits, stay out of
-    /// undo, and are validated before a save.
+    /// The panes' own input reads are the input stage's, over the arrangement this phase's drain
+    /// settles. The ops are handed to the frame's queue, where dock ops travel beside graph
+    /// edits, stay out of undo, and are validated before a save.
     pub(crate) fn scan_navigation(&mut self, ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
         let ops = &mut self.dock_ops;
         ops.clear();
@@ -82,9 +75,9 @@ impl MainWindow {
     /// already-settled active graph, plus the per-pane visibility reconcile
     /// that has to happen before them.
     ///
-    /// A pane that became visible this frame owes a relayout, since a canvas that has never recorded
-    /// has no cached geometry to draw its first frame from. A pane that *vanished* needs no pass and is never visited here at
-    /// all.
+    /// A pane that became visible this frame owes a relayout, since a canvas that has never
+    /// recorded has no cached geometry to draw its first frame from. A pane that *vanished*
+    /// needs no pass and is never visited here.
     pub(crate) fn input(&mut self, ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
         for tab in stage.ctx.document().layout.active_tabs() {
             match tab {
@@ -123,8 +116,6 @@ impl MainWindow {
             status,
         } = parts;
         let ctx = stage.ctx;
-        // The menu bar rides its own surround band; the dock fills the
-        // space between it and the status bar.
         let fill = ctx.theme().colors.surround_bg;
         let Self {
             graph_ui,
@@ -152,12 +143,10 @@ impl MainWindow {
                 .min_pane(MIN_PANE)
                 .overflow(TabOverflow::Menu)
                 .show(ui, &mut panes);
-            // Ratio drags and split-menu picks, onto the frame's own
-            // queue — the same route the navigation scan's ops take.
+            // Ratio drags and split-menu picks.
             for op in dock_ops.drain(..) {
                 stage.out.push_view(op);
             }
-            // Bottom surround band: the run line and the memory readout, below the panes.
             status_bar::show(ui, stage, status);
         });
     }
@@ -167,8 +156,7 @@ impl MainWindow {
     /// [`GraphUi::retain_nodes`]), swept only when the graph's revision moved,
     /// and the per-tab viewer state.
     ///
-    /// Driven from `App::sweep` once a frame, beside the preview store's
-    /// sweep. Both live here because `MainWindow` owns both, so a new cache
+    /// Driven from `App::sweep` once a frame, beside the preview store's sweep; a new cache
     /// joins them rather than earning its own call site.
     pub(crate) fn reconcile(&mut self, open: &OpenDocument) {
         let document = open.document();
@@ -177,9 +165,7 @@ impl MainWindow {
             self.graph_ui.retain_nodes(document);
             self.swept_at = Some(revision);
         }
-        // Keyed by node, but scoped to its *tab*: a viewer's framing dies when
-        // the tab closes, not when the node does — and a closed tab's node may
-        // well still be in the graph.
+        // Scoped to the tab, not the node: a closed tab's node may still be in the graph.
         self.image_viewers.retain(|node_id, _| {
             document
                 .layout
@@ -200,11 +186,9 @@ mod tests {
     use crate::gui::main_window::MainWindow;
     use crate::gui::pane::graph_ui::internals::CanvasHarness;
 
-    /// The canvas's node caches are swept only when the graph's revision
-    /// moved. A node removed behind the edit pipeline's back — which nothing
-    /// in production does — stays cached, which is what shows a frame at the
-    /// same revision sweeps nothing; a removal through the pipeline sweeps
-    /// every node gone by then.
+    /// The canvas's node caches are swept only when the graph's revision moved: a node removed
+    /// behind the edit pipeline's back stays cached, and a removal through it sweeps every node
+    /// gone by then.
     #[test]
     fn the_node_caches_are_swept_only_after_the_revision_moves() {
         let fixture = DocumentFixture::probes(2);

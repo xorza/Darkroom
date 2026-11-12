@@ -34,22 +34,18 @@ pub struct FuncEvent {
     pub event_lambda: EventLambda,
 }
 
-/// A validated func declaration: its ports, its behavior, its implementation,
-/// and the `FuncRef` a node of it is authored against — its id with the
-/// signature of its ports, computed once when [`FuncBuilder::build`] checked it.
+/// A validated func declaration: its ports, behavior, implementation, and the `FuncRef` a node
+/// of it is authored against, computed once by [`FuncBuilder::build`].
 ///
-/// Read-only, so the signature always describes the ports beside it. To change
-/// a declaration, take it back with [`into_builder`](Self::into_builder) and
-/// build it again.
+/// Read-only, so the signature always describes the ports beside it; to change a declaration,
+/// take it back with [`into_builder`](Self::into_builder) and build it again.
 #[derive(Clone, Debug)]
 pub struct Func {
     func_ref: FuncRef,
     name: String,
     category: String,
     sink: bool,
-    /// The [`CacheMode`] a freshly created node of this func copies into its
-    /// `cache`. Only a policy for *new* nodes — existing nodes keep whatever
-    /// mode they were authored/saved with.
+    /// The [`CacheMode`] a new node of this func copies; existing nodes keep their own.
     default_cache_mode: CacheMode,
     behavior: FuncBehavior,
     description: Option<String>,
@@ -60,10 +56,8 @@ pub struct Func {
 }
 
 impl Func {
-    /// Start a func declaration around its implementation. Defaults: `Impure`,
-    /// non-sink, cached nowhere, with no category, ports or events — set the
-    /// rest with the builder's chained setters, then
-    /// [`build`](FuncBuilder::build).
+    /// Start a func declaration around its implementation. Defaults: `Impure`, non-sink, cached
+    /// nowhere, with no category, ports or events.
     pub fn builder(id: FuncId, name: impl Into<String>, lambda: FuncLambda) -> FuncBuilder {
         FuncBuilder {
             id,
@@ -146,8 +140,8 @@ impl Func {
         self.func_ref
     }
 
-    /// Whether this func recomputes every run — it has no content digest, so
-    /// no cache mode is honored on a node instantiating it.
+    /// Whether this func recomputes every run: it has no content digest, so no cache mode is
+    /// honored on a node of it.
     pub const fn impure(&self) -> bool {
         matches!(self.behavior, FuncBehavior::Impure)
     }

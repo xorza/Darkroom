@@ -10,13 +10,8 @@ use crate::core::document::internals::DocumentFixture;
 use crate::core::preview_sink;
 use crate::core::wake;
 
-/// A document holding one preview node at `node`. The id is the caller's, so a
-/// test can build the same node's document twice and have the store recognise
-/// it as one preview rather than two.
-///
-/// No viewer tab: retention is the node's alone. A viewer asks for the
-/// full-resolution upload itself, so the store does not read whether one is
-/// open or visible.
+/// A document holding one preview node at `node`; the id is the caller's, so the same node's
+/// document can be built twice. No viewer tab: retention is the node's alone.
 fn document_with_preview(node: NodeId) -> Document {
     let mut fixture = DocumentFixture::default();
     let func = preview_sink::func(Arc::default());
@@ -25,10 +20,8 @@ fn document_with_preview(node: NodeId) -> Document {
     fixture.document
 }
 
-/// The two ways a target is chosen: against a ceiling, and against none.
-/// `None` is what a viewer's texture gets on any device whose limit the source
-/// already fits under, so "the source's own dimensions" is the common answer
-/// and not an edge case.
+/// A target is chosen against a ceiling or against none; `None` is the common answer for a
+/// viewer on a device whose limit the source fits under.
 #[test]
 fn capped_target_preserves_aspect_without_upscaling() {
     let device = NonZeroU32::new(16_384);

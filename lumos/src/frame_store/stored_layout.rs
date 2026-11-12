@@ -8,7 +8,7 @@ use crate::image::flat_gain::GainGrid;
 
 /// Quality planes a warped frame carries beside its image: `coverage` and `confidence`, one
 /// image-sized plane each, channel-independent — see `registration::resample::WarpResult` and
-/// `frame_store::FrameQuality`.
+/// `frame::frame_quality::FrameQuality`.
 const FRAME_QUALITY_PLANES: usize = 2;
 
 /// What a stored frame's planes hold: its channels and its quality planes, a flag byte a pixel,

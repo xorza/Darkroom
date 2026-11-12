@@ -182,9 +182,8 @@ async fn lambda_panic_is_captured_not_unwound() {
     assert!(active.stop().await.is_empty());
 }
 
-/// Each event loop start returns a fresh receiver, and stopping one drops its
-/// pair, so events it never delivered die with the channel: the old receiver
-/// reads closed once its sibling handle is stopped.
+/// Stopping the loop aborts every sender task, so its receiver reads closed once the events
+/// already queued are drained.
 #[tokio::test]
 async fn stopped_event_loop_channel_is_closed() {
     let event_lambda = EventLambda::new(|_state| async move {});

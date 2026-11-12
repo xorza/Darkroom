@@ -19,28 +19,23 @@ enum Home {
     Stubs,
 }
 
-/// Everything the document holds about one node: the record carrying every
-/// edge that touched it and where it lives, where its body sits and how far
-/// forward it paints, and whether it was selected. What a removal takes out,
-/// and what an undo has to put back for the removal to have been reversible.
+/// Everything the document holds about one node: the record carrying every edge that touched it
+/// and where it lives, its placement, and whether it was selected. What a removal takes out and
+/// an undo puts back.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct NodeEntry {
     detached: DetachedNode,
     home: Home,
-    /// Restored verbatim rather than recomputed, so an undone delete comes
-    /// back where it was and at the depth it had — not frontmost.
+    /// Restored verbatim, so an undone delete comes back where it was and at its depth, not
+    /// frontmost.
     placement: NodePlacement,
     /// Selection membership: removal prunes it, a restore re-adds it.
     selected: bool,
 }
 
 impl NodeEntry {
-    /// Read `node_id`'s whole entry out of `document`, a graph node or a stub, or
-    /// `None` when the document no longer holds it — the ordinary outcome of
-    /// an intent that spans frames.
-    ///
-    /// One lookup answers both halves of the question: the snapshot *is* the
-    /// existence check.
+    /// Read `node_id`'s whole entry out of `document`, a graph node or a stub, or `None` when the
+    /// document no longer holds it, the ordinary outcome of an intent that spans frames.
     pub(crate) fn capture(document: &Document, node_id: NodeId) -> Option<Self> {
         let (detached, home) = match document.graph.snapshot_node(node_id) {
             Some(detached) => (detached, Home::Graph),
@@ -93,17 +88,15 @@ impl NodeEntry {
 
 /// A node's whole entry coming into the document or leaving it.
 ///
-/// Adding a node and removing one are the same edit in opposite directions,
-/// so both intents lower to this one step rather than to a pair that would
-/// have to keep their insert and remove halves in agreement: a write either
-/// puts the recorded entry back or takes the node out, as [`NodeEdit`] and
-/// the direction say.
+/// Adding a node and removing one are the same edit in opposite directions, so both intents
+/// lower to this one step: a write either puts the recorded entry back or takes the node out, as
+/// [`NodeEdit`] and the direction say.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct SetNode {
     entry: NodeEntry,
     edit: NodeEdit,
-    /// The routes of the wires a removal ends, and each tie that only they
-    /// held. Empty for an insertion, which ends no wire.
+    /// The routes of the wires a removal ends, and each tie that only they held. Empty for an
+    /// insertion.
     ties: SetTies,
 }
 
@@ -115,10 +108,8 @@ pub(crate) enum NodeEdit {
 }
 
 impl SetNode {
-    /// Put a freshly authored node into the document; undo takes it back out.
-    ///
-    /// Unselected: adding a node leaves the selection alone, and a caller that
-    /// wants the new node selected raises that as its own edit.
+    /// Put a freshly authored node into the document, unselected: a caller that wants it
+    /// selected raises that as its own edit.
     pub(crate) fn insertion(detached: DetachedNode, placement: NodePlacement) -> Self {
         Self {
             entry: NodeEntry {
@@ -132,8 +123,7 @@ impl SetNode {
         }
     }
 
-    /// Take `entry`'s node out of the document, with `ties`, the routes of
-    /// its wires; undo puts it back whole.
+    /// Take `entry`'s node out of the document, with `ties`, the routes of its wires.
     pub(crate) const fn removal(entry: NodeEntry, ties: SetTies) -> Self {
         Self {
             entry,
@@ -157,14 +147,9 @@ impl SetNode {
             })
     }
 
-    /// Drop the node, and check that what came out is what the step will put
-    /// back.
-    ///
-    /// The entry is this node's whole record, so a divergence means the
-    /// document held wiring the history never captured — which an undo would
-    /// silently discard. The check holds because a step is always reverted
-    /// against exactly the document its own apply produced: entries replay in
-    /// reverse, and so do the steps inside one.
+    /// Drop the node, and check that what came out is what the step will put back: a divergence
+    /// means the document held wiring the history never captured, which an undo would silently
+    /// discard. It holds because a step is reverted against the document its own apply produced.
     fn take_out(&self, document: &mut Document) {
         let node_id = self.entry.detached.node_id();
         let removed = match self.entry.home {

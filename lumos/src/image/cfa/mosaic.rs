@@ -48,7 +48,7 @@ impl Mosaic {
         ChannelLayout::Rgb
     }
 
-    /// Number of distinct colors: 3.
+    /// The number of distinct colors.
     pub const fn color_count(&self) -> usize {
         self.color_layout().count()
     }

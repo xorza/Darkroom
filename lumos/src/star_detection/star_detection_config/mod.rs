@@ -66,8 +66,7 @@ impl StarDetectionConfig {
     ///
     /// Wide-field setups produce larger stars (FWHM 5-8px) that may be slightly
     /// elongated at field edges due to coma and field curvature. Uses relaxed
-    /// eccentricity filtering, auto FWHM estimation, and 8-connectivity for
-    /// undersampled PSFs that may not connect well with 4-connectivity.
+    /// eccentricity filtering, auto FWHM estimation, and larger area and edge limits.
     pub fn wide_field() -> Self {
         Self {
             fwhm: FwhmConfig {

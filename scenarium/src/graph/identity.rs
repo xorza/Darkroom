@@ -3,18 +3,13 @@
 //! [`OutputPort`], [`EventPort`]), and the crate-internal [`FuncRef`] that pairs
 //! a func's id with the signature of its ports.
 //!
-//! Gathered here rather than each sitting with the type it names, so "what
-//! can this model address?" is one file. They carry no authoring state, so
-//! the execution side can speak about nodes and ports without reaching into
-//! the model behind them — [`error`](crate::graph::error) reports the ports a
-//! fault touched, and a compiled program names its nodes and ports with these
-//! same types.
+//! Gathered here so "what can this model address?" is one file. They carry no authoring state,
+//! so the execution side, and [`error`](crate::graph::error)'s reports, name nodes and ports
+//! without reaching into the model behind them.
 //!
-//! The three port addresses are the same shape on purpose and are written out
-//! rather than generated: a caller reads them from the published API, so
-//! `pub struct InputPort` is worth being greppable. They carry **one derive
-//! list, in one order** — a set that drifted between them would leave a port
-//! type missing a bound its siblings have.
+//! The three port addresses are the same shape on purpose and are written out rather than
+//! generated, so `pub struct InputPort` is greppable. They carry **one derive list, in one
+//! order**, so none is missing a bound its siblings have.
 
 use ::serde::{Deserialize, Serialize};
 use common::Id;
@@ -54,8 +49,7 @@ impl FuncRef {
     }
 }
 
-/// Address of a producer node's output port — the source side of a data
-/// binding (`Binding::Wire`).
+/// Address of a producer node's output port, the source side of a `Binding::Wire`.
 #[derive(
     Clone, Copy, Default, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash,
 )]
@@ -70,13 +64,8 @@ impl OutputPort {
     }
 }
 
-/// Address of an emitter node's event port. The event-side sibling of
-/// [`OutputPort`]: a node plus a declaration-order index, naming where an
-/// event fires from rather than where a value comes out.
-///
-/// Lives here rather than in the execution internals because it names the
-/// same thing on both sides: a node in a compiled program *is* the authored
-/// node, and its event ports are the func's.
+/// Address of an emitter node's event port: where an event fires from, by declaration-order
+/// index.
 #[derive(
     Clone, Copy, Default, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash,
 )]
@@ -91,10 +80,8 @@ impl EventPort {
     }
 }
 
-/// Address of a consumer node's input port. Keys a node's data binding in
-/// `Graph.bindings`, and reports unsatisfied inputs
-/// (the execution outcome's missing-input list) / edges the editor's breaker severs.
-/// Distinct from `OutputPort` so source/sink intent can't be confused.
+/// Address of a consumer node's input port; keys `Graph.bindings`. Distinct from `OutputPort`
+/// so source and sink can't be confused.
 #[derive(
     Clone, Copy, Default, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash,
 )]

@@ -24,22 +24,19 @@ pub(crate) const IMAGE_DATA_TYPE: DataType = DataType::Custom(IMAGE_TYPE_ID);
 /// An image on a graph wire, in whichever layout its producer had, with what it carries beside
 /// its samples.
 ///
-/// The two node domains want opposite storage: `imaginarium`'s ops take interleaved samples, while
-/// `lumos`'s astronomical ops take a planar [`LinearImage`] — one `f32` plane per channel. Rather
-/// than pick one and make the other convert at every node, an image carries whichever layout its
-/// producer produced and repacks only where a wire crosses between the domains. A chain that stays
-/// inside one domain never repacks.
+/// `imaginarium`'s ops take interleaved samples, `lumos`'s astronomical ops a planar
+/// [`LinearImage`], one `f32` plane per channel. An image carries whichever layout its producer
+/// made and repacks only where a wire crosses between the domains, so a chain inside one domain
+/// never repacks.
 ///
 /// The metadata, the flags and the flat gain describe the image, not its layout, so they sit
 /// beside the samples in either layout and a repack keeps them. They cover the image's mono or RGB
 /// planes: its size, and its channels without alpha. An `imaginarium` op takes the samples alone,
 /// so its output carries none of them.
 ///
-/// Repacking is a plain function of the value, not a hidden service: the conversion happens where a
-/// node takes ownership of its input, so there is no interior mutability and no lock. Both layouts
-/// are CPU-resident — nothing in `lens` initializes a GPU today. Device residency, when it is
-/// wanted, belongs here as a third arm, with the upload/download and pipeline cache that
-/// `imaginarium` exposes for exactly that.
+/// Repacking is a plain function of the value, where a node takes ownership of its input: no
+/// interior mutability, no lock. Both layouts are CPU-resident; device residency, when wanted,
+/// belongs here as a third arm.
 #[derive(Debug)]
 pub struct Image {
     pixels: Pixels,
@@ -122,9 +119,8 @@ impl Image {
     }
 
     /// The interleaved samples, borrowed when this image already holds them and repacked when it
-    /// does not. For the readers that only ever get a `&Image` — the `imaginarium` nodes that
-    /// write a new image, and the previewer — where taking ownership is not on offer and copying
-    /// an already-interleaved image would be pure waste.
+    /// does not: for readers that only get a `&Image`, such as the nodes that write a new image
+    /// and the previewer.
     pub fn interleaved(&self) -> Cow<'_, imaginarium::InterleavedImage> {
         match &self.pixels {
             Pixels::Interleaved(image) => Cow::Borrowed(image),

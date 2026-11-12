@@ -17,9 +17,8 @@ async fn persist_output_survives_reopen_and_invalidates_on_digest_change() {
     e.run_sinks().await;
     assert_eq!(calls.count(), 1);
 
-    // Reopen: `mult` loads from disk. Its only consumer of `src` is the
-    // reused `mult`, which never reads it, so the pre-run cut prunes `src`
-    // — a RAM-only source with no cross-session cache is *not* recomputed.
+    // Reopen: `mult` loads from disk. Its only consumer of `src` is the reused `mult`, which
+    // never reads it, so the pre-run cut prunes `src` — a RAM-only source is *not* recomputed.
     let mut e = e.reopen();
     let run = e.run_sinks().await;
     assert_eq!(
@@ -61,8 +60,7 @@ async fn persist_output_survives_reopen_and_invalidates_on_digest_change() {
         run.cached().is_empty(),
         "mult should not be cached after a digest change"
     );
-    // The blob is keyed by node id, so the recompute replaced the superseded
-    // bytes in place — the old digest's cache doesn't linger as an orphan.
+    // The blob is keyed by node id, so the recompute replaced the superseded bytes in place.
     assert_eq!(
         dir.entry_count(),
         1,
@@ -85,8 +83,7 @@ async fn a_probed_blob_that_stops_decoding_fails_its_node_and_self_heals() {
     e.run_sinks().await;
     assert_eq!(calls.count(), 1);
 
-    // Reopen, then corrupt the stored value while leaving the header the
-    // probe reads — digest, arity, per-output coverage — untouched.
+    // Reopen, then corrupt the stored value while leaving the header the probe reads untouched.
     let mut e = e.reopen();
     e.engine.disk_store().corrupt_payload(e.id("mult"), 1);
     e.plan_sinks().await;
@@ -150,8 +147,8 @@ async fn an_older_format_blob_recomputes_and_is_replaced_in_the_same_run() {
     let blob = e.blob_path("mult");
     e.engine.disk_store().age_format(e.id("mult"));
 
-    // Reopen: the probe refuses the older version before the resolver cuts the
-    // producer cone, so the blob is deleted and mult recomputes in this same run.
+    // Reopen: the probe refuses the older version before the cut, so the blob is deleted and mult
+    // recomputes in this same run.
     let mut e = e.reopen();
     let run = e.run_sinks().await;
     assert_eq!(
@@ -177,9 +174,8 @@ async fn an_older_format_blob_recomputes_and_is_replaced_in_the_same_run() {
     );
 }
 
-/// A persisted node whose disk blob is gone by the time the run reaches it
-/// must recompute, not panic. A missing blob simply misses, so the node runs
-/// and rewrites it — never pruned behind an absent value.
+/// A persisted node whose disk blob is gone by the time the run reaches it must recompute, not
+/// panic: a missing blob simply misses, so the node runs and rewrites it.
 #[tokio::test]
 async fn vanished_frontier_blob_recomputes_instead_of_panicking() {
     let dir = TempDir::new("vanish");
@@ -220,16 +216,13 @@ async fn vanished_frontier_blob_recomputes_instead_of_panicking() {
 /// A `Both`-mode node whose store failed owes a blob, and pays it on the next
 /// run — without recomputing.
 ///
-/// The RAM half of `Both` is what makes this reachable: every later run is a
-/// resident hit, served without the disk being named, and only an invoke
-/// stores. So a write that never landed would go unwritten for as long as the
-/// value stays resident, the node reporting itself disk-cached with nothing
-/// behind it until its digest moved. `Disk` alone cannot reach it — its value is
-/// released after each run, so the next one misses and recomputes.
+/// The RAM half of `Both` makes this reachable: every later run is a resident hit, served without
+/// the disk being named, and only an invoke stores. A write that never landed would go unwritten
+/// while the value stays resident. `Disk` alone cannot reach it — its value is released after
+/// each run, so the next one misses and recomputes.
 ///
-/// The debt is settled from memory, not by asking the filesystem: once a blob is
-/// known to be there, a later run must not re-probe it. Runs are not rare —
-/// an event loop executes on every tick.
+/// The debt is settled from memory, not by asking the filesystem: once a blob is known to be
+/// there, a later run must not re-probe it (an event loop executes on every tick).
 #[tokio::test]
 async fn a_both_mode_node_whose_store_failed_republishes_without_recomputing() {
     let dir = TempDir::new("store-debt");
@@ -269,9 +262,9 @@ async fn a_both_mode_node_whose_store_failed_republishes_without_recomputing() {
     );
     let published = fs::read(&blob).unwrap();
 
-    // The debt is now settled, and settled means remembered: overwrite the blob
-    // with bytes no coverage probe would accept. A third run leaves them alone,
-    // which it could only do without reading the file.
+    // The debt is settled, and settled means remembered: overwrite the blob with bytes no
+    // coverage probe would accept. A third run leaves them alone, which it could only do without
+    // reading the file.
     fs::write(&blob, b"not a blob").unwrap();
     e.run_sinks().await;
     assert_eq!(calls.count(), 1);
@@ -281,8 +274,8 @@ async fn a_both_mode_node_whose_store_failed_republishes_without_recomputing() {
         "a settled debt costs no further disk reads"
     );
 
-    // And the blob that was published is a real one: a fresh engine over the
-    // same store serves it without computing.
+    // And the published blob is a real one: a fresh engine over the same store serves it without
+    // computing.
     fs::write(&blob, published).unwrap();
     let mut e = e.reopen();
     let run = e.run_sinks().await;
@@ -290,20 +283,18 @@ async fn a_both_mode_node_whose_store_failed_republishes_without_recomputing() {
     assert_eq!(run.cached(), ["src"]);
 }
 
-/// A redefined output type can't serve a stale blob: `produce`'s func is
-/// changed `Int → Float` with the same id, but the output signature is
-/// folded into the content digest, so the Float node re-keys away from the
-/// Int blob and recomputes — the consumer sees the correct `Float`, never
-/// the stale `Int`.
+/// A redefined output type can't serve a stale blob: `produce`'s func changes `Int → Float` with
+/// the same id, but the output signature is folded into the content digest, so the Float node
+/// re-keys away from the Int blob and recomputes — the consumer sees `Float`, never the stale
+/// `Int`.
 #[tokio::test]
 async fn redefined_output_type_rekeys_and_recomputes() {
     let dir = TempDir::new("wrong-type");
     let runs = Calls::default();
     let received = Arc::new(Mutex::new(f64::NAN));
 
-    // `produce` is a pure, Disk-persisted source whose declared output type
-    // and value are `Int` or `Float`. Its id and inputs stay unchanged,
-    // isolating output-signature invalidation.
+    // `produce` is a pure, Disk-persisted source whose output type and value are `Int` or
+    // `Float`. Its id and inputs stay unchanged, isolating output-signature invalidation.
     let build = |as_float: bool, runs: &Calls, received: &Arc<Mutex<f64>>| {
         let received = Arc::clone(received);
         let value = if as_float {
@@ -331,8 +322,8 @@ async fn redefined_output_type_rekeys_and_recomputes() {
     assert_eq!(runs.count(), 1);
     assert_eq!(*received.lock_unpoisoned(), 7.0);
 
-    // Run 2 (Float): the Float output re-keys produce's digest away from the
-    // Int blob's key, so it isn't found — produce recomputes as Float.
+    // Run 2 (Float): the Float output re-keys produce's digest away from the Int blob's key, so
+    // produce recomputes as Float.
     let mut e = TestEngine::over(build(true, &runs, &received)).with_disk_store(dir.path());
     e.run_sinks().await;
     assert_eq!(

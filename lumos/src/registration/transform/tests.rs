@@ -65,7 +65,6 @@ fn similarity_with_rotation_and_scale() {
 
 #[test]
 fn affine_transform() {
-    // Shear transform
     let t = Transform::affine([1.0, 0.5, 0.0, 0.0, 1.0, 0.0]);
     let p = t.apply(DVec2::new(2.0, 2.0));
     assert_close!(p.x, 3.0, EPSILON); // 2 + 0.5*2
@@ -112,7 +111,6 @@ fn homography_transform() {
 fn default_is_identity() {
     let t = Transform::default();
     let p = t.apply(DVec2::new(42.0, -17.0));
-    // Identity: output == input
     assert_close!(p.x, 42.0, EPSILON);
     assert_close!(p.y, -17.0, EPSILON);
     assert_eq!(t.transform_type(), TransformType::Translation);
@@ -120,8 +118,6 @@ fn default_is_identity() {
 
 #[test]
 fn scale_constructor() {
-    // Transform::scale(DVec2::new(sx, sy)) creates a diagonal scaling matrix
-    // Matrix: [sx, 0, 0, 0, sy, 0, 0, 0, 1]
     // (3.0, 4.0) -> (3.0*2.0, 4.0*0.5) = (6.0, 2.0)
     let t = Transform::scale(DVec2::new(2.0, 0.5));
     let p = t.apply(DVec2::new(3.0, 4.0));
@@ -132,14 +128,8 @@ fn scale_constructor() {
 
 #[test]
 fn rotation_around_center() {
-    // Rotate 90 degrees around center (100, 100)
-    // Point (150, 100) is 50 units right of center
-    // After 90° CCW rotation: should be 50 units above center -> (100, 150)
-    //
-    // Math: T(-cx,-cy) * R(90°) * T(cx,cy)
-    // Relative to center: (50, 0)
-    // After R(90°): (0, 50)
-    // Back to absolute: (100, 150)
+    // T(c) · R(90°) · T(−c) at c = (100, 100): (150, 100) is (50, 0) from the centre, R(90°) takes
+    // it to (0, 50), back to absolute (100, 150).
     let center = DVec2::new(100.0, 100.0);
     let t = Transform::rotation_around(center, PI / 2.0);
 
@@ -147,7 +137,6 @@ fn rotation_around_center() {
     assert!((p.x - 100.0).abs() < EPSILON, "Expected x=100, got {}", p.x);
     assert!((p.y - 150.0).abs() < EPSILON, "Expected y=150, got {}", p.y);
 
-    // The center itself should remain fixed
     let center_mapped = t.apply(center);
     assert!(
         (center_mapped.x - 100.0).abs() < EPSILON,
@@ -227,14 +216,13 @@ fn compose_translation_translation() {
 
 #[test]
 fn compose_takes_more_complex_type() {
-    // When composing Translation * Affine, result should be Affine
     let t1 = Transform::translation(DVec2::new(1.0, 2.0));
     let t2 = Transform::affine([1.0, 0.5, 0.0, 0.0, 1.0, 0.0]);
 
     let composed = t1.compose(&t2);
     assert_eq!(composed.transform_type(), TransformType::Affine);
 
-    // Verify the composed transform: apply T2 first (shear), then T1 (translate)
+    // T2 (shear) applies first, then T1 (translate).
     // T2: (2,2) -> (2 + 0.5*2, 2) = (3, 2)
     // T1: (3,2) -> (3+1, 2+2) = (4, 4)
     let p = composed.apply(DVec2::new(2.0, 2.0));

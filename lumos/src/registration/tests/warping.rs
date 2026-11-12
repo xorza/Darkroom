@@ -14,9 +14,8 @@ use crate::registration::transform::{Transform, TransformType};
 use crate::registration::warp_transform::WarpTransform;
 use common::USize2;
 
-/// Helper to warp and return a new buffer (for test convenience).
-/// Visually applies the transform to the image content (stars move by T).
-/// Passes T⁻¹ to the plane warp since it uses output→input coordinate mapping.
+/// Moves the image content by `transform` (stars move by T); the plane warp maps output→input, so
+/// it is handed T⁻¹.
 fn do_warp(
     input: &Buffer2<f32>,
     transform: &Transform,
@@ -34,8 +33,8 @@ fn compute_psnr(a: &[f32], b: &[f32], max_val: f32) -> f64 {
     20.0 * (f64::from(max_val) / metrics::rms_diff(a, b)).libm_log10()
 }
 
-/// Compute normalized cross-correlation between two images.
-/// Returns value in [-1, 1], where 1 means perfect correlation.
+/// Normalized cross-correlation of two images, in [-1, 1] and 1 for a perfect one; 0 when either is
+/// flat.
 fn compute_ncc(a: &[f32], b: &[f32]) -> f64 {
     let n = a.len() as f64;
     let mean_a: f64 = a.iter().map(|&x| f64::from(x)).sum::<f64>() / n;
@@ -179,7 +178,6 @@ fn warp_affine_roundtrip() {
 
 #[test]
 fn warp_homography_roundtrip() {
-    // Mild perspective distortion
     let forward = Transform::homography([1.0, 0.0, 5.0, 0.0, 1.0, -3.0, 0.00005, 0.00003]);
     assert_eq!(forward.transform_type(), TransformType::Homography);
 
@@ -282,7 +280,7 @@ struct CentralRegions {
     b: Vec<f32>,
 }
 
-/// Extract central region of two images for comparison (avoids border artifacts).
+/// The regions `margin` pixels in from each edge, clear of border artifacts.
 fn extract_central_region(a: &Buffer2<f32>, b: &Buffer2<f32>, margin: usize) -> CentralRegions {
     let size = a.size();
     debug_assert_eq!(size, b.size(), "two images of one size");

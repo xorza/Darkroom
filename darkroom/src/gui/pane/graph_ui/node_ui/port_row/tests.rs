@@ -81,12 +81,9 @@ fn add_preview_spawns_a_node_already_wired_to_the_port() {
 /// Double-clicking a wired input's port circle clears its binding — and
 /// one click alone does not.
 ///
-/// The signal is read off the glyph widget's own returned response, not a
-/// `response_for` probe of its id after the fact. The circle senses its
-/// own `Sense::CLICK` and consumes hits over its rect, so the cell around
-/// it never sees this click (no bubbling) and only the glyph's answer can
-/// carry it — which makes this the test that the widget hands its clicks
-/// back rather than swallowing them.
+/// The signal is read off the glyph widget's own returned response. The circle senses its own
+/// `Sense::CLICK` and consumes hits over its rect, so the cell around it never sees this click
+/// (no bubbling): the test that the widget hands its clicks back rather than swallowing them.
 #[test]
 fn double_clicking_a_wired_input_port_circle_clears_its_binding() {
     use scenarium::{Binding, InputPort};
@@ -104,11 +101,9 @@ fn double_clicking_a_wired_input_port_circle_clears_its_binding() {
         .set_input_binding(input, Binding::wire(producer, 0));
     // Two frames so the circle has a widget id and a measured rect to aim at.
     h.prime(2);
-    // Nudged off the circle's exact center: an input port hangs half its
-    // width past the node's left edge, which puts its center a hair
-    // *outside* the body and on the canvas beneath. Still well inside the
-    // glyph — its box is 23.4 px across — and both clicks land on the same
-    // point, so the double-click still registers.
+    // Nudged off the circle's exact center: an input port hangs half its width past the node's
+    // left edge, which puts its center a hair outside the body, on the canvas beneath. Still well
+    // inside the glyph's 23.4 px box, and both clicks land on the same point.
     let at =
         h.ui.rect(wid::port_circle(PortRef::input(consumer, 0)))
             .expect("the widget shows")

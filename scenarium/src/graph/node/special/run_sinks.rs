@@ -1,18 +1,13 @@
 //! The [`RunSinks`](crate::graph::node::special::SpecialNode::RunSinks) special
-//! node: an event sink with no data ports. It subscribes to another
-//! node's event and, when that event fires, the engine seeds the run with
-//! *every* sink node — i.e. re-runs the whole graph — rather than just its
-//! own (empty) data cone.
+//! node: an event sink with no data ports. When an event it subscribes to fires, the engine
+//! seeds the run with *every* sink node, re-running the whole graph, rather than its own
+//! (empty) data cone.
 //!
-//! It is a `sink` because in this framework only sink nodes are event
-//! subscribers (the editor renders a subscription pin for them alone, and
-//! `collect_roots` seeds runs from them). A normal sink subscriber runs its
-//! own upstream cone when its event fires; this one has no cone, so the planner
-//! promotes its firing into a full sink run instead (see
-//! `exec::schedule::RunSchedule::collect_roots`). Its lambda is a no-op —
-//! the node is a pure trigger — but it still exists so the scheduled node runs
-//! cleanly and lights up in the editor like any other sink. Wire, say, a `Frame Event` into
-//! it to re-evaluate the graph every frame.
+//! It is a `sink` because only sink nodes are event subscribers (the editor renders a
+//! subscription pin for them alone, and `collect_roots` seeds runs from them). A normal sink
+//! subscriber runs its own upstream cone; this one has none, so the planner promotes its firing
+//! into a full sink run (see `exec::schedule::RunSchedule::collect_roots`). Its lambda is a
+//! no-op, but the node still runs so it lights up in the editor like any other sink.
 
 use std::sync::LazyLock;
 
@@ -20,14 +15,11 @@ use crate::async_lambda;
 use crate::graph::func::Func;
 use crate::graph::identity::FuncId;
 
-/// Stable `FuncId` standing in for the run-sinks node in the lowered
-/// program (outcome attribution). Not registered in any `Library`.
+/// Stands in for the run-sinks node in the lowered program; not registered in any `Library`.
 const RUN_SINKS_FUNC_ID: FuncId = FuncId::literal("edec890e-5c23-49fb-a131-aaef3844d7c7");
 
-/// The hardcoded interface for `RunSinks`, built once. No inputs, outputs,
-/// or events, and a no-op lambda: the node is a pure event-driven trigger whose
-/// only effect (running all sinks) is applied by the planner, not the
-/// lambda. `sink` so the editor treats it as an event subscriber.
+/// The hardcoded interface for `RunSinks`, built once: a `sink` so the editor treats it as an
+/// event subscriber. The planner, not the no-op lambda, applies its effect.
 pub(crate) fn run_sinks_func() -> &'static Func {
     static F: LazyLock<Func> = LazyLock::new(build_func);
     &F
@@ -59,8 +51,7 @@ mod tests {
         assert!(func.inputs().is_empty());
         assert!(func.outputs().is_empty());
         assert!(func.events().is_empty());
-        // Sink so the editor renders a subscription pin (only sinks
-        // subscribe).
+        // Only sinks subscribe, so the editor renders a subscription pin.
         assert!(func.sink());
     }
 }

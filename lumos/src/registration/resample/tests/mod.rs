@@ -268,8 +268,8 @@ fn warp_refuses_a_non_finite_border() {
 /// `warp_into` writes every plane in full, so buffers handed back dirty — NaN, or what the last
 /// frame left — come out bit for bit what a fresh `warp` gives: mono and RGB, without nulls and
 /// with them, for an affine model and a homography. The last frame flags other pixels — nulls and
-/// a saturated core elsewhere — so the planes a set keeps for a flagged frame, its validity, its
-/// grown flags and its flag plane, are each rewritten too, and the flags come out the same.
+/// a saturated core elsewhere — so the planes a set keeps for a flagged frame, its grown flags
+/// and its flag plane, are each rewritten too, and the flags come out the same.
 #[test]
 fn warp_into_overwrites_dirty_buffers_completely() {
     let size = USize2::new(20, 14);

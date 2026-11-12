@@ -6,9 +6,7 @@ use crate::color::color_format::ColorFormat;
 use crate::error::DescError;
 
 /// An interleaved image's size and pixel format: at least one pixel, and a byte count a `usize`
-/// holds. Pixel data is **always tightly packed** (`row_byte_len == width * bytes_per_pixel`, no
-/// inter-row padding) — any row alignment a GPU backend needs lives inside `GpuImage`
-/// (`src/gpu/`), never here.
+/// holds. Pixels are always tightly packed, with no inter-row padding.
 #[derive(Clone, Copy, Eq, PartialEq, Debug, Hash)]
 pub struct InterleavedDesc {
     size: USize2,
@@ -68,7 +66,6 @@ impl InterleavedDesc {
         self.color_format
     }
 
-    /// The pixels of the image.
     pub const fn pixel_count(&self) -> usize {
         self.size.pixel_count()
     }
@@ -88,10 +85,7 @@ impl InterleavedDesc {
         self.size.width * self.color_format.byte_len()
     }
 
-    /// Panics unless `other` covers the same pixel grid in the same format —
-    /// the precondition every two-image operation shares. Because descriptors
-    /// are exactly grid plus format, equality is that whole predicate.
-    ///
+    /// Panics unless `other` is equal: the precondition every two-image operation shares.
     /// `pair` names the two images in the panic message, e.g. `"src/output"`.
     #[track_caller]
     pub(crate) fn assert_same(self, other: Self, pair: &str) {

@@ -83,7 +83,7 @@ fn a_demosaiced_frame_measures_its_stars_unfiltered() {
     );
 }
 
-/// Review phase 7 and S9: detection does not depend on the frame's scale, its zero point or
+/// Detection does not depend on the frame's scale, its zero point or
 /// its orientation. The star field is put on the exact grid of `Affine::CASES`; its saturation
 /// is flagged by the decoder, with no flags, so no level stated in the frame's units enters.
 /// - Under a power-of-two scale every sum, median and product scales exactly, so the stars
@@ -170,7 +170,7 @@ fn detection_is_invariant_to_scale_zero_point_and_rotation() {
 
 #[test]
 fn fwhm_source_distinguishes_measured_from_supplied() {
-    // `value` reports what the detector ran with; only a measured one is `was_estimated`.
+    // `value` reports what the detector ran with; only a measured one is `Estimated`.
     assert_eq!(FwhmSource::Configured(3.5).value(), Some(3.5));
     assert_eq!(
         FwhmSource::Estimated {

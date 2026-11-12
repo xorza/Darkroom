@@ -20,6 +20,6 @@ pub(crate) struct StatusInputs<'a> {
     pub(crate) message: Option<StatusMessage<'a>>,
     /// This process's resident bytes (see
     /// [`ProcessMemory`](crate::gui::state::process_memory::ProcessMemory)), rendered as the bar's
-    /// `MEM` clause.
+    /// `Memory` clause.
     pub(crate) process_memory: u64,
 }

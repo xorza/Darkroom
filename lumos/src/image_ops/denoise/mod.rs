@@ -70,8 +70,7 @@ impl Threshold {
 
 /// Wavelet denoise of a *linear* image in place: à trous starlet thresholding, per channel.
 ///
-/// Run on linear data, after color calibration and before the stretch. No-op-safe on any size (the
-/// scale count is clamped to what the dimensions support).
+/// Safe on any size: the scale count is clamped to what the dimensions support.
 #[derive(Debug, Clone, Copy, Introspect)]
 #[config(type_id = "ab942729-dc49-4518-aae4-9008bd33cea1")]
 pub struct Denoise {

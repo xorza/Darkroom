@@ -9,18 +9,14 @@ use crate::star_detection::threshold_mask::simd::ProcessWords;
 use simd::Kernel;
 
 /// What a threshold comparison needs beyond the buffers: how many σ above the noise a pixel must
-/// sit, and the floor its σ is held to first.
-///
-/// Bundled rather than passed loose because they travel together through the entry points into the
-/// kernel, the same way the background interpolator hands its kernel a `SplineSegment`. A residual
-/// is detected where it exceeds `sigma · max(noise, min_noise)`.
+/// sit, and the floor its σ is held to first. A residual is detected where it exceeds
+/// `sigma · max(noise, min_noise)`.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ThresholdParams {
     /// Detection threshold in units of the local noise σ.
     pub(crate) sigma: f32,
-    /// Floor applied to each per-pixel σ, in the samples' own units — the frame's own floor,
-    /// [`SkyNoise::floor`](crate::star_detection::bg::sky_noise::SkyNoise::floor), which is
-    /// what every caller in the pipeline passes.
+    /// Floor applied to each per-pixel σ, in the samples' own units; the pipeline passes
+    /// [`SkyNoise::floor`](crate::star_detection::bg::sky_noise::SkyNoise::floor).
     pub(crate) min_noise: f32,
 }
 

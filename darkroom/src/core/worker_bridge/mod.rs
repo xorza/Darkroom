@@ -23,10 +23,9 @@ use crate::core::worker_bridge::report_mailbox::ReportMailbox;
 
 pub(crate) mod report_mailbox;
 
-/// Every command here answers whether the worker took it. A send only fails
-/// once the worker task is gone, and then *no report will ever arrive* — so a
-/// caller that assumed success would leave the UI waiting on a run that can
-/// never report back.
+/// Every command here answers whether the worker took it. A send only fails once the worker task
+/// is gone, and then *no report will ever arrive*, so a caller that assumed success would leave
+/// the UI waiting on a run that can never report back.
 pub(crate) struct WorkerBridge {
     worker: Worker,
     reports: Arc<ReportMailbox>,
@@ -40,11 +39,10 @@ impl Debug for WorkerBridge {
 }
 
 impl WorkerBridge {
-    /// Spin up the worker on a fresh multi-thread runtime. Starts memory-only; the
-    /// host installs the disk-backed output cache (codec registry + store
-    /// root) via [`Self::set_disk_store`]. The callback runs on a worker thread:
-    /// it posts the result into the mailbox and asks the host to paint, so the
-    /// next frame drains it.
+    /// Spin up the worker on a fresh multi-thread runtime. Starts memory-only; the host installs
+    /// the disk-backed output cache via [`Self::set_disk_store`]. The callback runs on a worker
+    /// thread: it posts the result into the mailbox and wakes the host, so the next frame drains
+    /// it.
     pub(crate) fn new(wake: Wake) -> Self {
         let runtime = BgRuntime::new("darkroom-worker");
         let reports = Arc::new(ReportMailbox::default());
@@ -78,9 +76,8 @@ impl WorkerBridge {
         self.worker.send(WorkerMessage::Clear)
     }
 
-    /// Install the current program and evict an authored node's cache cone as
-    /// one worker commit. Stopping the event loop keeps it from immediately
-    /// repopulating the entries being removed.
+    /// Install the current program and evict an authored node's cache cone as one worker commit.
+    /// Stopping the event loop keeps it from repopulating the entries being removed.
     pub(crate) fn install_and_evict_cache(
         &self,
         compiled: Arc<CompiledGraph>,
@@ -95,14 +92,12 @@ impl WorkerBridge {
         ])
     }
 
-    /// Install the current program and persist an authored node's resident
-    /// disk-backed value as one worker commit. The install has to lead: the
-    /// engine reads the node's cache mode off the *installed* program, so a
-    /// flush sent against the previous one would find the node not yet
+    /// Install the current program and persist an authored node's resident disk-backed value as
+    /// one worker commit. The install has to lead: the engine reads the node's cache mode off the
+    /// *installed* program, so a flush against the previous one would find the node not yet
     /// disk-backed and write nothing.
     ///
-    /// No `StopEventLoop`, unlike the eviction beside it — a flush publishes
-    /// what is already in RAM and leaves nothing for a running loop to
+    /// No `StopEventLoop`, unlike the eviction: a flush leaves nothing for a running loop to
     /// repopulate.
     pub(crate) fn install_and_flush_cache(
         &self,
@@ -122,9 +117,7 @@ impl WorkerBridge {
         self.worker.send(WorkerMessage::RunSinks)
     }
 
-    /// Execute these exact nodes in the installed program and deliver their
-    /// outputs. Plural because a run is seeded with a set — a "run to this
-    /// node" contributes one.
+    /// Execute these exact nodes in the installed program and deliver their outputs.
     pub(crate) fn run_nodes(
         &self,
         node_ids: impl IntoIterator<Item = NodeId>,
@@ -134,30 +127,27 @@ impl WorkerBridge {
         })
     }
 
-    /// Point the engine's output cache at another store root — e.g. the
-    /// active document's. Takes effect before the next run's compile.
+    /// Point the engine's output cache at another store root, such as the active document's.
     /// Attaching writes nothing; see [`Self::flush_all_caches`].
     pub(crate) fn set_disk_store(&self, cache: DiskStore) -> Result<(), WorkerExited> {
         self.worker.send(WorkerMessage::SetDiskStore(cache))
     }
 
-    /// Write every installed node's resident disk-backed value into the
-    /// attached store — what the store is owed by values computed while there
-    /// was nowhere to put them. Ordered after any `SetDiskStore` in the same
-    /// batch by the worker's apply order, so the two travel together.
+    /// Write every installed node's resident disk-backed value into the attached store, owed by
+    /// values computed while there was nowhere to put them. The worker's apply order puts it
+    /// after any `SetDiskStore` in the same batch.
     pub(crate) fn flush_all_caches(&self) -> Result<(), WorkerExited> {
         self.worker.send(WorkerMessage::FlushAllCaches)
     }
 
-    /// Request cancellation of the in-flight run. Coarse: the running node
-    /// finishes, but no further nodes are scheduled (a shared atomic the
-    /// executor polls — no command-channel round-trip).
+    /// Request cancellation of the in-flight run. Coarse: the running node finishes, but no
+    /// further nodes are scheduled. A shared atomic the executor polls, with no channel
+    /// round-trip.
     pub(crate) fn cancel_run(&self) {
         self.worker.request_cancel();
     }
 
-    /// Start the installed program's event loop, firing each emitter's events
-    /// and executing their subscribers.
+    /// Start the installed program's event loop.
     pub(crate) fn start_event_loop(&self) -> Result<(), WorkerExited> {
         self.worker.send(WorkerMessage::StartEventLoop)
     }
@@ -167,9 +157,9 @@ impl WorkerBridge {
         self.worker.send(WorkerMessage::StopEventLoop)
     }
 
-    /// Swap everything the worker posted since the last frame into
-    /// `reports`, which is empty, merged ([`ReportMailbox`]); the runs that
-    /// ended in a report a later one superseded.
+    /// Swap everything the worker posted since the last frame into `reports`, which is empty,
+    /// merged ([`ReportMailbox`]); returns the count of runs that ended in a report a later one
+    /// superseded.
     pub(crate) fn drain(&self, reports: &mut VecDeque<WorkerReport>) -> u64 {
         self.reports.drain(reports)
     }

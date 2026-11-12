@@ -11,10 +11,8 @@ use crate::gui::theme::type_colors::TypeColors;
 const AYU_GRAPHITE: &str = include_str!("../../../assets/ayu-graphite.ron");
 
 /// Every color darkroom paints with, one field per role, as loaded from
-/// `assets/ayu-graphite.ron`. This is the theme's whole color vocabulary:
-/// [`Theme::build`](crate::gui::theme::Theme::build) fills each
-/// roster from it, so a call site reads a named role instead of a hex
-/// literal and restyling is an edit to the palette rather than to the app.
+/// `assets/ayu-graphite.ron`: the theme's whole color vocabulary, which
+/// [`Theme::build`](crate::gui::theme::Theme::build) fills each roster from.
 ///
 /// Every entry is a *resting* color. A port lifts under the pointer by
 /// blending toward white (see
@@ -25,11 +23,9 @@ const AYU_GRAPHITE: &str = include_str!("../../../assets/ayu-graphite.ron");
 /// semantic layer, so a badge, a status and a wire type routinely land on the same value; each
 /// then shows in a form of its own, as `darkroom/AGENTS.md`, "A status and a type share a hue,
 /// never a form", records. Two badges meet on one head, which is why
-/// `theme::tests::badges_are_told_apart_from_each_other` pins them pairwise. State the rule, not
-/// the hex: which color a role holds is the asset's to change.
+/// `theme::tests::badges_are_told_apart_from_each_other` pins them pairwise.
 ///
-/// A role the file holds and this struct does not fails the load, as a
-/// missing one does: the generator and the struct name the same roles.
+/// A role the file holds and this struct does not fails the load, as a missing one does.
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Palette {
@@ -98,10 +94,8 @@ pub(crate) struct Palette {
 impl Palette {
     /// Parse the baked-in palette.
     ///
-    /// The file is compiled into the binary, so a parse failure means the
-    /// checked-in asset and this struct disagree — a build-time mistake,
-    /// not a runtime condition, which is why it panics rather than
-    /// returning a `Result` no caller could act on.
+    /// Panics on a parse failure: the file is compiled in, so that is a mismatch between the
+    /// checked-in asset and this struct, not a runtime condition.
     pub(super) fn load() -> Self {
         ron::from_str(AYU_GRAPHITE).expect("assets/ayu-graphite.ron matches Palette")
     }

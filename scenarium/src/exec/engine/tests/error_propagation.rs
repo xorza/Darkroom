@@ -38,8 +38,7 @@ async fn node_error_propagates_to_dependents() {
     assert!(run.error("get_b").is_none());
     assert_eq!(e.output_i64("get_b", 0), Some(42));
 
-    // The lambda's error reaches the row whole: its own message, and its own
-    // cause behind it rather than folded into a string.
+    // The lambda's error reaches the row whole: its own message, and its own cause behind it.
     e.edit(|g| {
         g.edit_func("get_a", |func| {
             func.lambda = async_lambda!(|_| {

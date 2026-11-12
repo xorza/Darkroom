@@ -41,36 +41,27 @@ impl ContrastBrightness {
         }
     }
 
-    /// Builder method to set contrast.
     #[must_use]
     pub const fn contrast(mut self, contrast: f32) -> Self {
         self.contrast = contrast;
         self
     }
 
-    /// Builder method to set brightness.
     #[must_use]
     pub const fn brightness(mut self, brightness: f32) -> Self {
         self.brightness = brightness;
         self
     }
 
-    /// Builder method to set the clamp.
     #[must_use]
     pub const fn clamp(mut self, clamp: Clamp) -> Self {
         self.clamp = clamp;
         self
     }
 
-    /// Applies contrast and brightness adjustment to an image **in place** using CPU,
-    /// so an owning caller pays no output allocation.
-    ///
-    /// The formula applied to each color channel is:
-    /// `output = (input - mid) * contrast + mid + brightness`, held to the range's ends
-    /// [`Self::clamp`] names.
-    ///
-    /// Where `mid` is the middle value of the type's range.
-    /// Alpha channel (if present) is preserved unchanged.
+    /// Adjusts `image` in place on the CPU, so an owning caller pays no output allocation: each
+    /// color channel becomes `(input - mid) * contrast + mid + brightness`, `mid` the middle of the
+    /// type's range, held to the ends [`Self::clamp`] names. Alpha is unchanged.
     pub fn apply_cpu(&self, image: &mut InterleavedImage) {
         cpu::apply(*self, image);
     }

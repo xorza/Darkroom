@@ -1,22 +1,18 @@
 //! What a widget wants the graph to look like, and how that lands.
 //!
-//! A [`GraphIntent`] is forward-only — "set X to Y", no history — and is the
-//! vocabulary every surface of the editor speaks. Turning one into something
-//! reversible is [`GraphIntent::into_step`]: it reads the state the intent
-//! overwrites out of a `&Document` and folds the two into an
-//! [`UndoStep`].
+//! A [`GraphIntent`] is forward-only ("set X to Y", no history) and is the vocabulary every
+//! surface of the editor speaks. Turning one into something reversible is
+//! [`GraphIntent::into_step`]: it reads the state the intent overwrites out of a `&Document` and
+//! folds the two into an [`UndoStep`].
 //!
-//! The two vocabularies are deliberately *not* parallel. Intents are named
-//! for what a user did, steps for what the document can take back, and the
-//! lowering between them is free to expand one into several (duplicating a
-//! selection) or to send two opposite intents to one step (adding and
-//! removing a node). Adding an intent is a variant plus an arm here; adding a
-//! step is a file in [`step`](crate::core::edit::step).
+//! The two vocabularies are deliberately *not* parallel. Intents are named for what a user did,
+//! steps for what the document can take back, and the lowering between them may expand one into
+//! several (duplicating a selection) or send two opposite intents to one step (adding and
+//! removing a node). Adding an intent is a variant plus an arm here; adding a step is a file in
+//! [`step`](crate::core::edit::step).
 //!
-//! The same split runs the other way, by *scope*: a `GraphIntent` edits the
-//! graph, while a [`DockOperation`](palantir::DockOperation) edits the
-//! layout around it. Neither can be mistaken for the other, so no code path
-//! has to carry state it will not read.
+//! The same split runs by *scope*: a `GraphIntent` edits the graph, a
+//! [`DockOperation`](palantir::DockOperation) the layout around it.
 
 pub(crate) mod click_mode;
 pub(crate) mod drag_start;
@@ -64,18 +60,14 @@ use crate::core::edit::unwired;
 use crate::core::edit::validate;
 use crate::core::edit::validate::Insertion;
 
-/// World-space offset applied to duplicated nodes so the copies don't land
-/// exactly on top of their originals.
+/// World-space offset of duplicated nodes, so copies don't land on their originals.
 const DUPLICATE_OFFSET: Vec2 = Vec2::new(32.0, 32.0);
 
-/// What the caller wants to change in the document's graph. Forward-only — no
-/// `from` fields: each variant says "set X to Y", and the previous Y is
-/// captured at commit time by [`Self::into_step`].
+/// What the caller wants to change in the document's graph. Forward-only, with no `from` fields:
+/// the previous value is captured at commit time by [`Self::into_step`].
 ///
-/// Every variant here edits the graph, and travels the frame's queue as its
-/// `Graph` tier. A mutation of the layout instead of the graph is a
-/// [`DockOperation`](palantir::DockOperation), which travels the same
-/// queue in the `View` tier.
+/// Every variant edits the graph and travels the frame's queue as its `Graph` tier; a layout
+/// mutation is a [`DockOperation`](palantir::DockOperation) in the `View` tier.
 #[derive(Debug)]
 pub(crate) enum GraphIntent {
     /// Add one node that links state the document already resolves: a func in
@@ -86,23 +78,18 @@ pub(crate) enum GraphIntent {
         pos: Vec2,
         node_id: NodeId,
         node: Node,
-        /// Initial input bindings to seed alongside the node — the caller
-        /// fills these with each input's func-declared default
-        /// (`Binding::Const`) so a fresh node lands ready to run instead of
-        /// fully unbound. Applied atomically with the node, so one undo
-        /// removes node + seeds together. They must be the new node's own
-        /// inputs; wiring *into* an existing node is a separate
+        /// Initial input bindings seeded with the node, usually each input's func-declared
+        /// default (`Binding::Const`), so one undo removes node and seeds together. They must be
+        /// the new node's own inputs; wiring *into* an existing node is a separate
         /// [`Self::SetInput`].
         bindings: Vec<BindingEntry>,
     },
     RemoveNode {
         node_id: NodeId,
     },
-    /// One frame of a drag of one or more node bodies and ties, in canvas-world
-    /// coordinates: every member of `members` moves to its start plus
-    /// `offset`. A multi-select drag moves the whole group; a plain drag
-    /// carries just the grabbed item. The frames of one `gesture` fold into
-    /// one undo entry.
+    /// One frame of a drag of one or more node bodies and ties, in canvas-world coordinates:
+    /// every member of `members` moves to its start plus `offset`. The frames of one `gesture`
+    /// fold into one undo entry.
     MoveSelection {
         gesture: GestureId,
         /// Shared with the drag that latched them, so a frame copies no list.
@@ -117,23 +104,18 @@ pub(crate) enum GraphIntent {
         input: InputPort,
         to: Option<Binding>,
     },
-    /// Replace the whole selection set. The rubber band, node/pin clicks,
-    /// and Esc-deselect all funnel through this — the caller computes
-    /// the desired final set and the undo layer captures the prior one.
+    /// Replace the whole selection set: the caller computes the final set and the undo layer
+    /// captures the prior one.
     SetSelection {
         to: BTreeSet<ItemId>,
     },
-    /// Lift a node — its body or a pinned output's preview widget — to
-    /// the top of its graph's paint stack, by setting its
-    /// [`NodePlacement::z`] past every other. Emitted when either kind is
-    /// clicked or grabbed, so clicking brings it forward. The depth is stored
-    /// view state, so it persists across save/load and tab switches and walks
-    /// with undo/redo.
+    /// Lift a node, its body or a pinned output's preview widget, to the top of its graph's paint
+    /// stack, by setting its [`NodePlacement::z`] past every other. The depth is stored view
+    /// state, so it persists across save/load and walks with undo/redo.
     Raise {
         node_id: NodeId,
     },
-    /// Set one scalar property of a node — its `disabled` flag or its cache
-    /// mode. See [`NodeProperty`].
+    /// Set one scalar property of a node: its `disabled` flag or its cache mode.
     SetNodeProperty {
         node_id: NodeId,
         to: NodeProperty,
@@ -144,9 +126,8 @@ pub(crate) enum GraphIntent {
     SetViewport {
         to: Viewport,
     },
-    /// Add (`to = true`) or remove (`false`) an event subscription: an event
-    /// wire dropped on, or severed from, a subscription pin. Idempotent — a
-    /// no-op when the subscription already matches.
+    /// Add (`to = true`) or remove (`false`) an event subscription. Idempotent: a no-op when the
+    /// subscription already matches.
     SetSubscription {
         subscription: Subscription,
         to: bool,
@@ -182,16 +163,12 @@ pub(crate) enum GraphIntent {
 }
 
 impl GraphIntent {
-    /// The intents a click on `item` produces: the selection change, plus, for
-    /// a node, a lift to the top of the paint stack so a clicked node comes to
-    /// the front. The raise is skipped when a toggling click *removes* `item`
-    /// from the selection — a node you just deselected shouldn't jump
-    /// forward. Shared by the node body, its header title and its port
-    /// labels, so clicking any of them behaves like clicking the body.
+    /// The intents a click on `item` produces: the selection change, plus, for a node, a raise to
+    /// the front. The raise is skipped when a toggling click *removes* `item` from the selection,
+    /// as a node just deselected shouldn't jump forward.
     ///
-    /// Takes the committed selection rather than a UI context: that is the
-    /// only thing either rule reads, and it keeps the click policy beside the
-    /// intents it builds instead of in the widget that raises them.
+    /// Takes the committed selection rather than a UI context, which keeps the click policy
+    /// beside the intents it builds instead of in the widget that raises them.
     pub(crate) fn click(
         mode: ClickMode,
         selected: &BTreeSet<ItemId>,
@@ -219,9 +196,7 @@ impl GraphIntent {
         Self::SetSelection { to }
     }
 
-    /// Drop the whole selection. Named rather than spelled `SetSelection`
-    /// with an empty set at each call, so a reader sees the intent and not
-    /// the mechanism.
+    /// Drop the whole selection.
     pub(crate) const fn clear_selection() -> Self {
         Self::SetSelection {
             to: BTreeSet::new(),
@@ -236,30 +211,19 @@ impl GraphIntent {
         }
     }
 
-    /// Clone `document`'s current selection: each node gets a fresh id and an
-    /// offset position, const-value bindings copy verbatim, the data and
-    /// event wires *among* the selected nodes are recreated against the
-    /// clones with the ties inside them, and the
-    /// copies end up selected. A wire whose source is *outside* the selection,
-    /// a data wire or an event subscription, goes as `incoming` says: dropped,
-    /// leaving a data input's declared default as a wire removed on its own
-    /// does ([`unwired::binding`]), or kept on the original external producer
-    /// or emitter. Each clone and tie clone takes its id from `fresh`, a random
-    /// one in the editor, a counter in a test. Empty when nothing is selected.
+    /// Clone `document`'s current selection: each node gets a fresh id and an offset position,
+    /// const-value bindings copy verbatim, the data and event wires *among* the selected nodes
+    /// are recreated against the clones with the ties inside them, and the copies end up
+    /// selected. A wire whose source is *outside* the selection, a data wire or an event
+    /// subscription, goes as `incoming` says: dropped, leaving a data input's declared default as
+    /// a wire removed on its own does ([`unwired::binding`]), or kept on the original external
+    /// producer or emitter. Each clone and tie clone takes its id from `fresh`, a random one in
+    /// the editor, a counter in a test. Empty when nothing is selected. A selected stub is
+    /// skipped: a copy of a node that cannot run has little use.
     ///
-    /// A list rather than an intent of its own: duplicating is an editor
-    /// command built out of the vocabulary, not a graph primitive. The whole
-    /// list is queued in one frame, so it commits as a single undo entry —
-    /// the same way a swipe that severs five wires does.
-    ///
-    /// Ordering matters and is the reason the internal edges come out
-    /// separately: every clone exists before anything binds to one, so no
-    /// intent in the list names a producer that isn't there yet.
-    ///
-    /// The selection's nodes are the only source of a duplicate set: Ctrl+D and
-    /// the node context menu's two Duplicate picks all act on them, the latter
-    /// because a right-click selects the node it landed on first. A selected
-    /// stub is skipped: a copy of a node that cannot run has little use.
+    /// A list rather than an intent of its own: duplicating is an editor command built out of the
+    /// vocabulary. The whole list is queued in one frame, so it commits as one undo entry. The
+    /// internal edges come out after the nodes: every clone exists before anything binds to one.
     pub(crate) fn duplicate(
         document: &Document,
         library: &Library,
@@ -267,9 +231,8 @@ impl GraphIntent {
         mut fresh: impl FnMut() -> u128,
     ) -> Vec<Self> {
         let (graph, view) = (&document.graph, &document.main_view);
-        // Resolve the whole set first, in selection order: an edge is only
-        // recognisable as internal once both of its endpoints have a fresh id,
-        // so nothing can be authored until every member has one.
+        // An edge is only recognisable as internal once both endpoints have a fresh id, so
+        // resolve the whole set first, in selection order.
         let mut clones: HashMap<NodeId, NodeId> = HashMap::with_capacity(view.selected.len());
         let mut sources = Vec::with_capacity(view.selected.len());
         for old_id in view.selected.iter().filter_map(|item| item.node()) {
@@ -421,10 +384,9 @@ impl GraphIntent {
         tie_clones.into_values().collect()
     }
 
-    /// What Delete does to `view`'s selection: one removal per member, every
-    /// node before every tie, so a frame commits them as one undo entry. A tie
-    /// that a node's removal took with it is stale by its turn and gives no
-    /// step.
+    /// What Delete does to `view`'s selection: one removal per member, every node before every
+    /// tie, committed as one undo entry. A tie a node's removal took with it is stale by its turn
+    /// and gives no step.
     pub(crate) fn remove_selection(view: &GraphView) -> impl Iterator<Item = Self> + '_ {
         view.selected.iter().map(|&item| match item {
             ItemId::Node(node_id) => Self::RemoveNode { node_id },
@@ -432,24 +394,18 @@ impl GraphIntent {
         })
     }
 
-    /// Read the state this intent overwrites out of `document` and fold the two
-    /// into a complete [`UndoStep`]. Pure — does not write to the graph.
+    /// Read the state this intent overwrites out of `document` and fold the two into a complete
+    /// [`UndoStep`]. Pure: does not write to the graph.
     ///
-    /// This is the only gate between a caller and the document, so each arm
-    /// establishes the full precondition set the step's `write` half assumes:
-    /// an `Ok` result is a proof that replaying the step trips no assert on
-    /// the way and leaves the document passing [`Document::validate`], with a
-    /// graph every compile accepts.
-    /// Widgets only ever violate the staleness half, since they read the
-    /// identities they emit out of the live document; anything else reaching
-    /// here is a bug.
+    /// This is the only gate between a caller and the document, so each arm establishes the full
+    /// precondition set the step's `write` half assumes: an `Ok` result proves replaying the step
+    /// trips no assert and leaves the document passing [`Document::validate`], with a graph every
+    /// compile accepts. Widgets only violate the staleness half; anything else is a bug.
     ///
-    /// `Ok(None)` covers what a gesture spanning frames does normally: the
-    /// anchor node vanished, or the edit is refused by design (a cycle-forming
-    /// bind). Callers drop those without a word. A [`MalformedIntent`] means
-    /// the payload could never have applied. ([`Self::MoveSelection`] and
-    /// [`Self::SetSelection`] instead drop vanished members individually
-    /// rather than refusing the whole intent.)
+    /// `Ok(None)` covers what a gesture spanning frames does normally: the anchor node vanished,
+    /// or the edit is refused by design (a cycle-forming bind). A [`MalformedIntent`] means the
+    /// payload could never have applied. ([`Self::MoveSelection`] and [`Self::SetSelection`]
+    /// instead drop vanished members individually.)
     fn into_step(
         self,
         document: &Document,
@@ -475,9 +431,8 @@ impl GraphIntent {
                         bindings: &bindings,
                     },
                 )?;
-                // The depth is fixed here rather than at write time, so a redo
-                // puts the node back at the depth the original add gave it
-                // instead of jumping it in front of whatever arrived since.
+                // Fixed here, not at write time, so a redo restores the depth the original add gave
+                // instead of jumping in front of whatever arrived since.
                 let placement = NodePlacement {
                     pos,
                     z: view.front_z(),
@@ -508,8 +463,7 @@ impl GraphIntent {
                 for member in members.iter() {
                     let to = member.pos + offset;
                     validate::finite_pos(to, Role::MoveSelection)?;
-                    // Drag-sourced (spans frames): a member whose item
-                    // vanished mid-gesture drops quietly.
+                    // A member whose item vanished mid-gesture drops quietly.
                     let Some(from) = view.pos(member.item) else {
                         continue;
                     };
@@ -542,22 +496,17 @@ impl GraphIntent {
                     }
                     to => to,
                 };
-                // Only a write is admitted: clearing removes a binding wherever
-                // it sits, which is never worse than keeping it.
+                // Only a write is admitted: clearing removes a binding wherever it sits.
                 if let Some(binding) = &to {
                     if let Binding::Wire(source) = binding {
-                        // A wire held across frames can outlive its producer,
-                        // and the bind would leave the graph with a dangling
-                        // edge.
+                        // A wire held across frames can outlive its producer.
                         if validate::live_node(graph, source.node_id, Role::SetInputProducer)?
                             .is_none()
                         {
                             return Ok(None);
                         }
-                        // A bind that would close a data cycle never lands: a
-                        // compile refuses a cyclic graph. The canvas snap
-                        // filter normally stops it earlier; this is the guard
-                        // covering every binding path.
+                        // A compile refuses a cyclic graph. The canvas snap filter normally stops
+                        // it earlier; this guards every binding path.
                         if graph.produces_cycle(source.node_id, input.node_id) {
                             return Ok(None);
                         }
@@ -571,8 +520,8 @@ impl GraphIntent {
                 }
                 let from = graph.bindings.get(&input).cloned();
                 let mut ties = TiesDraft::new(view);
-                // A wire is both of its ends: one that leaves its output
-                // leaves its ties, while a bind to the same output keeps them.
+                // A wire that leaves its output leaves its ties; a bind to the same output keeps
+                // them.
                 if let Some(Binding::Wire(output)) = from
                     && !matches!(to, Some(Binding::Wire(source)) if source == output)
                 {
@@ -585,10 +534,8 @@ impl GraphIntent {
                 })
             }
             Self::SetSelection { to } => {
-                // The rubber band snapshots identities when the drag starts, so
-                // an interleaved undo can remove one before release. Keep the
-                // members that still have a widget rather than recording a
-                // selection the view can't render.
+                // The rubber band snapshots identities at drag start, so an interleaved undo can
+                // remove one before release; keep only members the view still holds.
                 let to: BTreeSet<ItemId> =
                     to.into_iter().filter(|&item| view.holds(item)).collect();
                 UndoStep::Selection(SetSelection {
@@ -636,11 +583,8 @@ impl GraphIntent {
                 let Subscription { event, subscriber } = subscription;
                 validate::non_nil_node(event.node_id, Role::SetSubscriptionEmitter)?;
                 validate::non_nil_node(subscriber, Role::SetSubscriptionSubscriber)?;
-                // A subscribe needs both endpoints present; a stale drag onto a
-                // vanished node drops rather than recording a dangling
-                // subscription. An unsubscribe of a vanished node no-ops
-                // naturally (nothing is subscribed → from == to == false), so
-                // it needs no existence check.
+                // A subscribe needs both endpoints present. An unsubscribe of a vanished node
+                // no-ops (from == to == false), so it needs no existence check.
                 if subscribe {
                     if graph.find(event.node_id).is_none() || graph.find(subscriber).is_none() {
                         return Ok(None);
@@ -747,21 +691,16 @@ impl GraphIntent {
         }
     }
 
-    /// Build, no-op-filter, and apply one intent against `document` in a single
-    /// call — the entry every frontend drives its per-intent loop through.
+    /// Build, no-op-filter, and apply one intent against `document`: the entry every frontend
+    /// drives its per-intent loop through.
     ///
-    /// Pushes each committed [`UndoStep`] onto `steps`, in the order it
-    /// applied (the caller records them and reads their signals): none when
-    /// nothing came of the intent and nothing was written — a stale anchor, a
-    /// cycle-forming bind, or a no-op. A node's removal is followed by a
-    /// [`Self::SetInput`] for each input it fed that takes its default back,
-    /// as a wire removed on its own leaves it ([`unwired::binding`]). Only a
-    /// payload that could never have applied is an `Err` (see
-    /// [`Self::into_step`]).
+    /// Pushes each committed [`UndoStep`] onto `steps`, in the order applied: none when nothing
+    /// came of the intent (a stale anchor, a cycle-forming bind, or a no-op). A node's removal is
+    /// followed by a [`Self::SetInput`] for each input it fed that takes its default back, as a
+    /// wire removed on its own leaves it ([`unwired::binding`]). Only a payload that could never
+    /// have applied is an `Err` (see [`Self::into_step`]).
     ///
-    /// [`Self::into_step`] and [`UndoStep::apply`] stay separate for the
-    /// undo-history redo path, which applies a stored step without rebuilding it
-    /// (a redo replays already-valid history).
+    /// [`UndoStep::apply`] stays separate for redo, which replays already-valid history.
     pub(crate) fn commit(
         self,
         document: &mut Document,
@@ -781,8 +720,7 @@ impl GraphIntent {
         if step.is_noop() {
             return Ok(());
         }
-        // Read off the removal's own record, which captured every wire it
-        // ends, before the step moves into the history.
+        // Read off the removal's own record, which captured every wire it ends.
         let fed: Vec<InputPort> = match &step {
             UndoStep::Node(node) => node.fed_inputs().collect(),
             _ => Vec::new(),

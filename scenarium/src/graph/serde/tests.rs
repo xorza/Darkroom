@@ -68,10 +68,8 @@ impl<'de> Deserialize<'de> for CheckedNodes {
 /// A document naming one id twice is refused, rather than loading as a
 /// graph one node smaller.
 ///
-/// Written as raw RON because that is the only way the collision can be
-/// *expressed*: every in-memory form of a node table has already collapsed
-/// it. RON hands both entries to the visitor rather than deduping while
-/// parsing, which is what leaves the check something to find.
+/// Written as raw RON because every in-memory form of a node table has already collapsed the
+/// collision; RON hands both entries to the visitor rather than deduping while parsing.
 #[test]
 fn a_repeated_node_id_is_refused_rather_than_collapsed() {
     let node_id = NodeId::unique();
@@ -81,9 +79,8 @@ fn a_repeated_node_id_is_refused_rather_than_collapsed() {
     let second =
         ser::to_string(&internals::unresolved_node(FuncId::unique())).expect("a node serializes");
 
-    // The derived `HashMap` decode keeps the last entry and reports success;
-    // pinning that here is what makes the refusal below a behaviour rather
-    // than a coincidence of the fixture.
+    // The derived `HashMap` decode keeps the last entry and reports success, so the refusal
+    // below is a behaviour rather than a coincidence of the fixture.
     let table = format!("{{{key}:{first},{key}:{second}}}");
     let kept: HashMap<NodeId, Node> =
         ron::from_str(&table).expect("the derived decode absorbs the collision");

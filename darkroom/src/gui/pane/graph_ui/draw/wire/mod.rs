@@ -1,21 +1,21 @@
 //! Everything the canvas's two wire families share.
 //!
-//! **The curve.** A data wire ([`crate::gui::pane::graph_ui::gesture::wire_ui`]) and
-//! an event wire ([`crate::gui::pane::graph_ui::gesture::subscription_ui`]) are both one
-//! [`Wire`]: two endpoints plus the interior control points its family's handle
-//! rule placed, or, tied, one `Wire` for each piece between its ties
-//! ([`TieLayout`]). That value is what the cull test, the breaker probe, and
-//! the paint call all take, and [`WirePass::draw_wire`] runs all three in one
-//! call off the per-frame inputs both renderers need — so they stay visually
-//! identical apart from paint and handle shape, and can't drift.
+//! **The curve.** A data wire ([`crate::gui::pane::graph_ui::gesture::wire_ui`]) and an event
+//! wire ([`crate::gui::pane::graph_ui::gesture::subscription_ui`]) are both one [`Wire`]: two
+//! endpoints plus the interior control points its family's handle rule placed, or, tied, one
+//! `Wire` for each piece between its ties ([`TieLayout`]). That value is what the cull test, the
+//! breaker probe, and the paint call all take, and [`WirePass::draw_wire`] runs all three in one
+//! call off the per-frame inputs both renderers need, so they stay visually identical apart from
+//! paint and handle shape.
 //!
-//! **The gesture.** [`GlyphDrag`](crate::gui::pane::graph_ui::gesture::glyph_drag::GlyphDrag) is one drag from a latched glyph to
-//! whatever compatible glyph the pointer is over, generic over the two
-//! [`PortLayer`](crate::gui::pane::graph_ui::scene::canvas_geometry::port_layer::PortLayer) key domains it
-//! spans: a data wire drags `PortRef → PortRef`, an event wire drags `EventPort → NodeId` or —
-//! started from the other end — `NodeId → EventPort`. Latching, the release edge, the fixed end's
-//! node, and where the preview's free end sits are stated once here; each family still owns which
-//! glyphs are candidates and what a release commits.
+//! **The gesture.**
+//! [`GlyphDrag`](crate::gui::pane::graph_ui::gesture::glyph_drag::GlyphDrag) is one drag from a
+//! latched glyph to whatever compatible glyph the pointer is over, generic over the two
+//! [`PortLayer`](crate::gui::pane::graph_ui::scene::canvas_geometry::port_layer::PortLayer) key
+//! domains it spans: a data wire drags `PortRef → PortRef`, an event wire drags
+//! `EventPort → NodeId` or, from the other end, `NodeId → EventPort`. Latching, the release
+//! edge, the fixed end's node, and where the preview's free end sits are stated once there; each
+//! family owns which glyphs are candidates and what a release commits.
 
 use std::ops::Range;
 
@@ -47,8 +47,7 @@ pub(crate) struct WirePaint {
 
 impl WirePaint {
     /// Stroke `wire` `width` wide with this paint, round-capped: the single place the wire
-    /// `Shape` is built, so data and event curves cannot drift in width policy, cap, or
-    /// primitive.
+    /// `Shape` is built, so data and event curves cannot drift.
     pub(crate) fn stroke(self, ui: &mut Ui, wire: &Wire, width: f32) {
         let stroke = Stroke::new(self.color, width).with_cap(LineCap::Round);
         let stroke = match self.ramp {
@@ -85,20 +84,17 @@ impl From<RgbaF32> for WirePaint {
     }
 }
 
-/// The per-frame inputs both wire renderers need, bundled so each `draw` takes
-/// one argument instead of six. Built once in
-/// [`crate::gui::pane::graph_ui::GraphUi::record_canvas`] and passed by `&mut`, so the
-/// breaker probe reborrows into each renderer in turn.
+/// The per-frame inputs both wire renderers need, built once in
+/// [`crate::gui::pane::graph_ui::GraphUi::record_canvas`] and passed by `&mut`, so the breaker
+/// probe reborrows into each renderer in turn.
 ///
-/// The canvas-wide half is [`DrawCtx`] itself, not a re-declaration of its
-/// fields: the wires record in the same pass as the node bodies they run
-/// between, off the same theme, graph, geometry and cull, and `WirePass` was
-/// built two lines from a live `DrawCtx`. What's left here is what only a
-/// wire pass has — the breaker probe it marks hits against, and this frame's
+/// The canvas-wide half is [`DrawCtx`] itself, as the wires record in the same pass as the node
+/// bodies, off the same theme, graph, geometry and cull. What's left is what only a wire pass
+/// has: the breaker probe it marks hits against, the tie line and layout, and this frame's
 /// emphasis tier.
 #[derive(Debug)]
 pub(crate) struct WirePass<'a, 'p, 't> {
-    /// Shared with the node-body draws — `Copy`, so it rides along by value.
+    /// Shared with the node-body draws.
     pub(crate) draw_ctx: DrawCtx<'a>,
     pub(crate) probe: &'a mut BreakerProbe<'p>,
     /// The tie line in flight, which marks the pieces it crosses.
@@ -117,19 +113,17 @@ impl WirePass<'_, '_, '_> {
         self.draw_ctx.theme().canvas.wire_at(self.draw_ctx.zoom())
     }
 
-    /// Cull, breaker-probe, tier, and paint one committed wire, its `pieces`
-    /// in order from its output end, reporting whether the breaker crossed
-    /// it — the whole per-wire body, shared by both renderers so they can't
-    /// drift in culling, emphasis, or alarm color. An untied wire is one
-    /// piece; a tied one is a piece from each point to the next.
+    /// Cull, breaker-probe, tier, and paint one committed wire, its `pieces` in order from its
+    /// output end, reporting whether the breaker crossed it: the whole per-wire body, shared by
+    /// both renderers so they can't drift in culling, emphasis, or alarm color. An untied wire
+    /// is one piece; a tied one is a piece from each point to the next.
     ///
-    /// A wire the cull drops is still probed, as a stroke can pan or zoom its
-    /// crossings out of view; only its paint is skipped. The ends' `tint` is
-    /// called only for a wire painted unbroken, so a family pays for resolving
-    /// its endpoint colors only where they actually show.
+    /// A wire the cull drops is still probed, as a stroke can pan or zoom its crossings out of
+    /// view; only its paint is skipped. The ends' `tint` is called only for a wire painted
+    /// unbroken.
     ///
-    /// Recording the hit stays with the caller — only it knows the domain key
-    /// to hand `probe.mark_broken_*`.
+    /// Recording the hit stays with the caller, which knows the domain key to hand
+    /// `probe.mark_broken_*`.
     pub(crate) fn draw_wire(
         &mut self,
         ui: &mut Ui,
@@ -156,8 +150,8 @@ impl WirePass<'_, '_, '_> {
         };
         let stroke = self.emphasis.stroke(self.wire_width(), mark);
         let theme = self.draw_ctx.theme();
-        // A broken wire paints flat so the alarm read isn't diluted by the
-        // family's own gradient, and it outranks the hover tint outright.
+        // A broken wire paints flat so the alarm isn't diluted by the family's gradient, and it
+        // outranks the hover tint.
         let paint = if broken {
             WirePaint::from(theme.canvas.wire_broken)
         } else {
@@ -197,12 +191,10 @@ impl WirePass<'_, '_, '_> {
 }
 
 impl WirePass<'_, '_, '_> {
-    /// Paint every committed data wire on the current scene retained by the
-    /// pass's cull region, marking those the active breaker crosses as broken
-    /// via `probe.mark_broken_input` for the breaker's release-frame drain.
-    ///
-    /// Reads nothing but committed scene state, so it is the pass's rather than the
-    /// in-flight gesture's.
+    /// Paint every committed data wire on the current scene retained by the pass's cull region,
+    /// marking those the active breaker crosses as broken via `probe.mark_broken_input`. Reads
+    /// nothing but committed scene state, so it is the pass's rather than the in-flight
+    /// gesture's.
     pub(crate) fn draw_data_wires(&mut self, ui: &mut Ui) {
         let (graph_ctx, geometry) = (self.draw_ctx.graph_ctx(), self.draw_ctx.geometry());
         for (consumer, producer) in graph_ctx.wires() {
@@ -234,11 +226,10 @@ impl WirePass<'_, '_, '_> {
         }
     }
 
-    /// Paint every committed subscription wire on the current scene retained by
-    /// the pass's cull region, marking those the active breaker crosses as broken
-    /// via `probe.mark_broken_subscription` for the breaker's release-frame drain.
-    ///
-    /// Reads nothing but committed scene state, as [`Self::draw_data_wires`] does.
+    /// Paint every committed subscription wire on the current scene retained by the pass's cull
+    /// region, marking those the active breaker crosses as broken via
+    /// `probe.mark_broken_subscription`. Reads nothing but committed scene state, as
+    /// [`Self::draw_data_wires`] does.
     pub(crate) fn draw_event_wires(&mut self, ui: &mut Ui) {
         let (theme, graph_ctx, geometry) = (
             self.draw_ctx.theme(),
@@ -261,8 +252,7 @@ impl WirePass<'_, '_, '_> {
             );
             let untied = [Wire::event(p0, p3)];
             let pieces = self.ties.pieces(key).unwrap_or(&untied);
-            // Events carry no data type, so one neutral swatch runs the whole
-            // curve rather than a per-end gradient.
+            // Events carry no data type, so one neutral swatch runs the whole curve.
             let ends = WireEnds {
                 wire: key,
                 hover,
@@ -275,9 +265,8 @@ impl WirePass<'_, '_, '_> {
     }
 }
 
-/// The endpoint colors of a committed data wire: the two ports' type colors,
-/// so each end matches the port it touches and the wire reads as its data type
-/// (both ends share it unless the input is the untyped `Any`).
+/// The endpoint colors of a committed data wire: the two ports' type colors, so each end
+/// matches the port it touches (both ends share it unless the input is the untyped `Any`).
 fn data_tint(graph_ctx: GraphCtx<'_>, src: PortRef, tgt: PortRef) -> WireTint {
     let theme = graph_ctx.theme();
     WireTint::new(
@@ -286,9 +275,6 @@ fn data_tint(graph_ctx: GraphCtx<'_>, src: PortRef, tgt: PortRef) -> WireTint {
     )
 }
 
-/// The part of a wire's ramp each of `pieces` paints, in order from its output end: the whole
-/// wire split at the piece ends by chord length, so the pieces paint the whole one's ramp. A
-/// wire with no length gives each piece the whole ramp's end.
 /// A wire's point halfway along its length, and the way it runs there, a unit vector.
 #[derive(Clone, Copy, Debug)]
 struct Middle {
@@ -325,6 +311,9 @@ impl Middle {
     }
 }
 
+/// The part of a wire's ramp each of `pieces` paints, in order from its output end: the whole
+/// wire split at the piece ends by chord length, so the pieces paint the whole one's ramp. A
+/// wire with no length gives each piece the whole ramp's end.
 fn shares(pieces: &[Wire]) -> impl ExactSizeIterator<Item = Range<f32>> + '_ {
     let total: f32 = pieces.iter().map(Wire::chord).sum();
     let mut from = 0.0;
@@ -350,9 +339,8 @@ pub(crate) struct WireEnds<F> {
     pub(crate) tint: F,
 }
 
-/// The endpoint colors a family paints a wire with *before* this frame's
-/// emphasis tier is applied: `start` at the curve's `p0`, `end` at its `p3`,
-/// so each end of a wire visually matches the glyph it touches.
+/// The endpoint colors a family paints a wire with before this frame's emphasis tier is
+/// applied: `start` at the curve's `p0`, `end` at its `p3`.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub(crate) struct WireTint {
     start: RgbaF32,
@@ -365,9 +353,8 @@ impl WireTint {
         Self { start, end }
     }
 
-    /// One color for the whole curve — an event wire (events carry no data
-    /// type), or a data wire whose type mismatch paints it all in the warning
-    /// color.
+    /// One color for the whole curve: an event wire (events carry no data type), or a data wire
+    /// whose type mismatch paints it all in the warning color.
     pub(crate) const fn flat(color: RgbaF32) -> Self {
         Self {
             start: color,
@@ -376,33 +363,30 @@ impl WireTint {
     }
 }
 
-/// How far rest-state wire endpoint colors pull toward the canvas, so the
-/// port dots (identity) stay the brightest points on the data path and long
-/// wires don't outshine them.
+/// How far rest-state wire endpoint colors pull toward the canvas, so the port dots stay the
+/// brightest points on the data path.
 const WIRE_REST_DIM: f32 = 0.15;
 
-/// Alpha of the standing wires while a wire gesture (new-wire drag,
-/// subscription drag, breaker scribble) is active — dimming the plumbing so
-/// the preview, candidate ports, and broken-alarm wires pop.
+/// Alpha of the standing wires while a wire gesture (new-wire drag, subscription drag, breaker
+/// scribble) is active, so the preview, candidate ports, and broken-alarm wires pop.
 const WIRE_DRAG_FADE: f32 = 0.35;
 
-/// Width multiplier for an emphasized (hovered or broken-alarm) wire, so
-/// one wire stays traceable through a crossing.
+/// Width multiplier for an emphasized (hovered or broken-alarm) wire, so one stays traceable
+/// through a crossing.
 const WIRE_HOVER_WIDTH: f32 = 1.25;
 
-/// Whether any wire gesture — a new-wire drag, a subscription drag, a
-/// breaker scribble — is in flight this pass.
+/// Whether any wire gesture (a new-wire drag, a subscription drag, a breaker scribble) is in
+/// flight this pass.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum WireSet {
     /// No gesture: the standing set paints at its rest tier.
     Standing,
-    /// A gesture fades the standing set so the preview, candidate ports, and
-    /// broken-alarm wires pop.
+    /// A gesture fades the standing set.
     Faded,
 }
 
-/// What marks one wire this frame, before the pass's tier applies. A broken
-/// wire never *also* reads as hovered: the alarm hue wins outright.
+/// What marks one wire this frame, before the pass's tier applies. A broken wire never also
+/// reads as hovered: the alarm hue wins outright.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum WireMark {
     Plain,
@@ -428,12 +412,10 @@ enum Tier {
 /// is off; at rest, endpoint colors pull toward the canvas; a hovered (or
 /// broken-alarm) wire gets full strength and a width lift.
 ///
-/// Emphasis is driven by endpoint *hover targets* only (port circles,
-/// event glyphs, subscription pins — all with generously scaled hit
-/// boxes), never by raw pointer proximity to the curve: hover-target
-/// state repaints exactly when it changes, whereas pointer-derived
-/// paint needs a `MOVE` subscription (a record per mouse move) to stay
-/// fresh on screen.
+/// Emphasis is driven by endpoint hover targets only (port circles, event glyphs, subscription
+/// pins), never by raw pointer proximity to the curve: hover-target state repaints exactly when
+/// it changes, whereas pointer-derived paint needs a `MOVE` subscription (a record per mouse
+/// move) to stay fresh.
 #[derive(Debug)]
 pub(crate) struct WireEmphasis {
     set: WireSet,
@@ -441,16 +423,15 @@ pub(crate) struct WireEmphasis {
 }
 
 impl WireEmphasis {
-    /// Resolve this frame's emphasis inputs. `set` is faded while any wire
-    /// gesture is active — the callers OR together the two drag controllers
-    /// and the breaker.
+    /// Resolve this frame's emphasis inputs. `set` is faded while any wire gesture is active;
+    /// the callers OR together the two drag controllers and the breaker.
     pub(crate) const fn resolve(canvas_bg: RgbaF32, set: WireSet) -> Self {
         Self { set, canvas_bg }
     }
 
-    /// This frame's paint tier and width for one wire marked `mark`: a broken
-    /// wire paints at its rest tier — the caller takes the flat alarm color
-    /// instead — and, like a hovered one, takes the width lift.
+    /// This frame's paint tier and width for one wire marked `mark`: a broken wire paints at its
+    /// rest tier (the caller takes the flat alarm color instead) and, like a hovered one, takes
+    /// the width lift.
     fn stroke(&self, base_width: f32, mark: WireMark) -> WireStroke {
         let tier = match mark {
             WireMark::EndpointHovered if self.set == WireSet::Standing => Tier::Emphasized,
@@ -466,10 +447,9 @@ impl WireEmphasis {
         }
     }
 
-    /// The paint for a non-broken wire: `tint`'s endpoint colors run
-    /// through this frame's tier. Distinct ends ramp `p0` → `p3` over a
-    /// white stroke, so the ramp's colors are the ones that show. Equal
-    /// ends paint flat rather than ramping between two identical stops.
+    /// The paint for a non-broken wire: `tint`'s endpoint colors run through this frame's tier.
+    /// Distinct ends ramp `p0` → `p3` over a white stroke, so the ramp's colors are the ones that
+    /// show. Equal ends paint flat.
     fn paint(&self, tint: WireTint, tier: Tier) -> WirePaint {
         let start = self.tint(tint.start, tier);
         let end = self.tint(tint.end, tier);
@@ -482,9 +462,9 @@ impl WireEmphasis {
         }
     }
 
-    /// The tiered color for a (non-broken) wire endpoint. While a gesture
-    /// fades the set the fade wins over the tier — the snap target's forced
-    /// endpoint hover must not re-emphasize a faded wire.
+    /// The tiered color for a (non-broken) wire endpoint. While a gesture fades the set the fade
+    /// wins over the tier, so the snap target's forced endpoint hover does not re-emphasize a
+    /// faded wire.
     const fn tint(&self, c: RgbaF32, tier: Tier) -> RgbaF32 {
         match (self.set, tier) {
             (WireSet::Faded, _) => c.with_alpha(WIRE_DRAG_FADE),
@@ -503,13 +483,12 @@ fn width(base: f32, tier: Tier) -> f32 {
     }
 }
 
-/// How one wire paints this frame, as resolved by [`WireEmphasis::stroke`].
-/// The breaker's verdict isn't a field: [`WirePass::draw_wire`] hands it
-/// straight back to the caller, the only party that can record the hit.
+/// How one wire paints this frame, as resolved by [`WireEmphasis::stroke`]. The breaker's
+/// verdict isn't a field: [`WirePass::draw_wire`] hands it back to the caller.
 #[derive(Clone, Copy, Debug)]
 struct WireStroke {
-    /// [`Tier::Emphasized`] paints at full strength rather than the rest-dim
-    /// tint. Never for a broken wire — the alarm read wins outright.
+    /// [`Tier::Emphasized`] paints at full strength rather than the rest-dim tint. Never for a
+    /// broken wire: the alarm wins outright.
     tier: Tier,
     width: f32,
 }

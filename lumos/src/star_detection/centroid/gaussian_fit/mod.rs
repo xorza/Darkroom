@@ -34,16 +34,13 @@ use ::simd::Kernel;
 /// shape. Build one with [`GaussianFit::new`].
 #[derive(Debug, Clone, Copy)]
 pub(super) struct GaussianFit {
-    /// Position of Gaussian center (sub-pixel).
     pub(super) pos: DVec2,
     /// The profile's covariance, in px².
     pub(super) covariance: Cov2,
     /// `√((σ_x² + σ_y²)/2)` of `pos`, from the fit's `(JᵀWJ)⁻¹·χ²/(n − p)`.
     pub(super) pos_sigma: f64,
-    /// Fit diagnostics that no production caller reads — `measure_star` only uses
-    /// `pos`/`covariance` — but that tests need to verify LM convergence against
-    /// synthetic ground truth. Gated rather than carried and ignored, so a release build
-    /// neither stores them nor runs the arithmetic that fills them.
+    /// Diagnostics only tests read, to check LM convergence against synthetic ground truth: gated,
+    /// so a release build neither stores them nor runs the arithmetic that fills them.
     #[cfg(test)]
     debug: internals::GaussianFitDebug,
 }
@@ -256,13 +253,9 @@ mod internals {
     /// Fit diagnostics kept for tests; see [`GaussianFit::debug`].
     #[derive(Debug, Clone, Copy)]
     pub(super) struct GaussianFitDebug {
-        /// Amplitude of Gaussian.
         pub(super) amplitude: f32,
-        /// Background level.
         pub(super) bg: f32,
-        /// RMS residual of fit.
         pub(super) rms_residual: f32,
-        /// Number of iterations used.
         pub(super) iterations: usize,
         /// The quadrature order the fit ended at.
         pub(super) order: usize,
@@ -298,10 +291,9 @@ mod internals {
         /// The Jacobian row alone at one point, derived independently of
         /// [`Gaussian2D::point_and_jacobian`]'s fused form.
         ///
-        /// The vector kernel mirrors the fused path; this exists so the consistency test has a second
-        /// derivation of the same algebra to check it against. Keep the two written out
-        /// separately — sharing a helper between them would make the test compare an expression
-        /// with itself.
+        /// The vector kernel mirrors the fused path; this is the consistency test's second
+        /// derivation of the same algebra. Keep the two written out separately — sharing a helper
+        /// would make the test compare an expression with itself.
         pub(super) fn jacobian_row(x: f64, y: f64, params: &[f64; 7]) -> [f64; 7] {
             let [x0, y0, amp, a, b, c, _bg] = *params;
             let dx = x - x0;

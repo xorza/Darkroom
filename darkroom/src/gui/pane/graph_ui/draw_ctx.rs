@@ -20,14 +20,10 @@ use crate::gui::theme::Theme;
 pub(crate) struct DrawCtx<'a> {
     pub(super) graph_ctx: GraphCtx<'a>,
     pub(super) geometry: &'a CanvasGeometry,
-    /// Effective selection to paint: the graph's committed set or,
-    /// mid-rubber-band, the live sweep — one type, so the draw substitutes
-    /// them without caring which it got, and the gesture never writes its
-    /// preview into the document.
+    /// The selection to paint: the graph's committed set or, mid-rubber-band, the live sweep,
+    /// so the gesture never writes its preview into the document.
     pub(super) selected: Selection<'a>,
-    /// What the viewport keeps. Carried here rather than passed beside the
-    /// context because every reader of one is a reader of the
-    /// other: a pass that records nodes decides per node whether to.
+    /// What the viewport keeps; every reader of the context decides per node whether to record.
     pub(super) cull: CullRegion,
 }
 

@@ -8,8 +8,7 @@ use common::env;
 
 use palantir::HostHandle;
 
-/// Nothing to arrange: a shell file association passes the path in argv,
-/// where the CLI already reads it.
+/// Nothing to arrange: a shell file association passes the path in argv.
 pub(super) fn route_opened_documents<A>(_handle: HostHandle<A>, _open: fn(&mut A, PathBuf)) {}
 
 /// `%APPDATA%\Darkroom` — roaming, so settings follow a domain user.

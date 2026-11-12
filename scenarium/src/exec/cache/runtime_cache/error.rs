@@ -11,11 +11,9 @@ use crate::graph::identity::NodeId;
 /// One node a sweep could not do its work on, named by the id the host asked
 /// in.
 ///
-/// Not a `Result`: a sweep covers many nodes and a failure on one says nothing
-/// about the rest, so the whole sweep runs and hands back what it could not do.
-///
-/// Shared by eviction and flush. What the sweep was *trying* to do is already
-/// said by the report it arrives in, so the two need no separate types.
+/// Not a `Result`: a sweep covers many nodes and a failure on one says nothing about the rest, so
+/// the whole sweep runs and hands back what it could not do. Shared by eviction and flush; what
+/// the sweep was *trying* to do is said by the report it arrives in.
 #[derive(Debug)]
 pub struct CacheNodeFailure {
     pub node_id: NodeId,

@@ -1,4 +1,4 @@
-//! Shared decode policy: cancellation, resource ceilings, and format options.
+//! Shared decode policy: cancellation, resource controls, and format policy.
 
 use std::fs::File;
 use std::io::BufReader;

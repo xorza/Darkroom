@@ -42,7 +42,7 @@ impl StarDetector {
     ///
     /// # Errors
     ///
-    /// Returns an error when any configuration parameter is invalid.
+    /// The first invalid configuration parameter.
     pub fn checked(config: StarDetectionConfig) -> Result<Self, InvalidConfigField> {
         config.validate()?;
         Ok(Self {

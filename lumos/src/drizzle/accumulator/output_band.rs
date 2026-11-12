@@ -101,12 +101,10 @@ impl CornerLattice {
 /// them.
 ///
 /// The scatter cannot be parallelized over the input — neighbouring input pixels write overlapping
-/// output pixels — so it is parallelized over the *output*. A band owns its rows exclusively, so
-/// the deposits need no synchronisation; and because each output pixel belongs to exactly one band,
-/// and a band walks its inputs in the same order the serial loop did, every output pixel
-/// accumulates its contributions in the serial order. Bit-identical output whatever the band count
-/// is what makes this safe for a science product, and `band_count_does_not_change_the_result` pins
-/// it.
+/// output pixels — so it runs over the *output*. A band owns its rows exclusively, so deposits need
+/// no synchronisation, and a band walks its inputs in the serial order, so every output pixel
+/// accumulates in the serial order: bit-identical output whatever the band count, which
+/// `band_count_does_not_change_the_result` pins.
 #[derive(Debug)]
 pub(super) struct OutputBand<'a> {
     /// Absolute output rows this band owns.
@@ -221,10 +219,9 @@ impl OutputBand<'_> {
             source,
             |pixel| source.droplet(pixel),
             |band, pixel, drop| {
-                // Integer-center throughout: input pixel `i` is at coordinate `i` (matching star
-                // centroids / `register` / `warp`), and output pixel `o` is the cell `[o - 0.5, o +
-                // 0.5)`. The drop centre needs no coordinate adjustment, and the pixels it touches
-                // are `round(min) ..= round(max)`.
+                // Integer-centred: input pixel `i` is at coordinate `i` (as in star centroids and
+                // the warp), output pixel `o` the cell `[o - 0.5, o + 0.5)`, so the pixels a drop
+                // touches are `round(min) ..= round(max)`.
                 let (top, bottom) = (drop.centre.y - half_drop, drop.centre.y + half_drop);
                 let (left, right) = (drop.centre.x - half_drop, drop.centre.x + half_drop);
                 let Some(rows) = band.deposit_rows(top, bottom) else {
@@ -260,11 +257,8 @@ impl OutputBand<'_> {
         )
     }
 
-    /// Square kernel: true polygon clipping.
-    ///
-    /// For each input pixel, transforms all 4 corners of the (pixfrac-shrunken) drop to output
-    /// coordinates, then iterates the output pixels in the bounding box and computes the exact
-    /// overlap via [`DropQuad::overlap`].
+    /// Square kernel: true polygon clipping, each output pixel in the drop's bounding box taking
+    /// the exact overlap of [`DropQuad::overlap`].
     ///
     /// Reference: `STScI` cdrizzlebox.c `do_kernel_square`.
     fn distribute_square(
@@ -356,9 +350,8 @@ impl OutputBand<'_> {
             source,
             |pixel| source.droplet(pixel),
             |band, pixel, drop| {
-                // Integer-center: output pixel `o` is centred at `o`, so the neighbourhood is the
-                // `radius` pixels around the drop's rounded centre and the kernel distance is
-                // `o - centre` with no offset.
+                // Integer-centred: output pixel `o` is centred at `o`, so the neighbourhood is the
+                // `radius` pixels around the drop's rounded centre.
                 let nearest_row = drop.centre.y.round();
                 let nearest_col = drop.centre.x.round();
 

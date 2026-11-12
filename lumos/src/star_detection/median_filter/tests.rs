@@ -9,14 +9,12 @@ use glam::USizeVec2;
 
 #[test]
 fn single_hot_pixel() {
-    // 5x5 image with a hot pixel in center
     let mut pixels = Buffer2::new_filled((5, 5), 0.1f32);
     pixels[(2, 2)] = 1.0; // Center pixel
 
     let mut output = Buffer2::new_default((5, 5));
     apply_3x3(&pixels, &mut output);
 
-    // Hot pixel should be replaced with median of neighbors (0.1)
     assert!(
         (output[(2, 2)] - 0.1).abs() < 1e-6,
         "Hot pixel should be filtered to 0.1, got {}",
@@ -107,7 +105,6 @@ fn filters_a_3x3_image() {
 
 #[test]
 fn corner_pixels() {
-    // 4x4 image
     #[rustfmt::skip]
     let pixels = Buffer2::new((4, 4), vec![
         0.1, 0.2, 0.3, 0.4,
@@ -130,7 +127,6 @@ fn corner_pixels() {
 
 #[test]
 fn edge_pixels() {
-    // 4x4 image
     #[rustfmt::skip]
     let pixels = Buffer2::new((4, 4), vec![
         0.1, 0.2, 0.3, 0.4,
@@ -154,9 +150,7 @@ fn edge_pixels() {
 
 #[test]
 fn salt_and_pepper_noise() {
-    // Image with salt and pepper noise
     let mut pixels = Buffer2::new_filled((10, 10), 0.5f32);
-    // Add noise
     pixels[23] = 0.0; // pepper
     pixels[45] = 1.0; // salt
     pixels[67] = 0.0; // pepper
@@ -165,7 +159,6 @@ fn salt_and_pepper_noise() {
     let mut output = Buffer2::new_default((10, 10));
     apply_3x3(&pixels, &mut output);
 
-    // All noisy pixels should be close to 0.5 after filtering
     assert!(
         (output[23] - 0.5).abs() < 0.1,
         "Pepper noise should be filtered"
@@ -348,7 +341,6 @@ fn median_at_edge_truth_table() {
 
 #[test]
 fn interior_row_replaces_a_hot_pixel_with_its_neighbourhood_median() {
-    // 5x5 image with known values
     #[rustfmt::skip]
     let pixels = vec![
         0.1, 0.1, 0.1, 0.1, 0.1,
@@ -374,7 +366,6 @@ fn interior_row_replaces_a_hot_pixel_with_its_neighbourhood_median() {
 
 #[test]
 fn filter_edge_row_top() {
-    // 5x5 image
     #[rustfmt::skip]
     let pixels = vec![
         0.1, 0.2, 0.3, 0.4, 0.5,
@@ -388,7 +379,6 @@ fn filter_edge_row_top() {
     let plane = Buffer2::new((5, 5), pixels);
     MedianRows::of(&plane, 0).filter_into(&mut output_row);
 
-    // Check first pixel (corner)
     // Neighbors: [0.1, 0.2, 0.6, 0.7] -> median = (0.2 + 0.6) / 2 = 0.4
     assert!(
         (output_row[0] - 0.4).abs() < 1e-6,
@@ -399,7 +389,6 @@ fn filter_edge_row_top() {
 
 #[test]
 fn filter_edge_row_bottom() {
-    // 5x5 image
     #[rustfmt::skip]
     let pixels = vec![
         0.1, 0.2, 0.3, 0.4, 0.5,
@@ -413,7 +402,6 @@ fn filter_edge_row_bottom() {
     let plane = Buffer2::new((5, 5), pixels);
     MedianRows::of(&plane, 4).filter_into(&mut output_row);
 
-    // Check last pixel (corner)
     // Neighbors: [1.9, 2.0, 2.4, 2.5] -> median = (2.0 + 2.4) / 2 = 2.2
     assert!(
         (output_row[4] - 2.2).abs() < 1e-6,
@@ -464,7 +452,6 @@ fn filters_the_interior_of_a_4x4_image() {
 
 #[test]
 fn median_with_duplicates() {
-    // Test median functions with duplicate values
     let mut v4 = [0.3, 0.3, 0.7, 0.7];
     assert!((median4(&mut v4) - 0.5).abs() < 1e-6);
 

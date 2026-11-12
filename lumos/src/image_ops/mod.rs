@@ -18,14 +18,14 @@
 //! A convention rather than a trait, deliberately. A trait would turn nine inherent `apply`
 //! methods into trait methods, so every downstream call site would need it in scope, to save the
 //! one-line prologue and express a composability nothing uses — `lens` drives each op from its own
-//! node with its own deserialized config type, and would keep doing so. `NeutralizeBg`
-//! takes no parameters and so has no `validate` to call; that is the contract met, not skipped.
+//! node with its own deserialized config type. `NeutralizeBg` takes no parameters and so has no
+//! `validate` to call; that is the contract met, not skipped.
 //!
 //! The two `ml`-gated ops (`MlDenoise`, `RemoveStars`) hold the `OnnxModel` their caller loaded,
 //! so they `apply` through `&mut self`. A run of one lasts up to a minute, so they also take a
-//! `CancelToken`. They report `MlError`: their failures are a model that does not run, an image
-//! smaller than one tile, or a cancel, none of which is a config range that `InvalidConfigField`
-//! describes.
+//! `CancelToken`. They report `MlError`: a model that does not run, an image smaller than one
+//! tile or a cancel are no config range that `InvalidConfigField` describes (it covers only the
+//! tiling config).
 
 pub(crate) mod color_calibration;
 pub(crate) mod denoise;

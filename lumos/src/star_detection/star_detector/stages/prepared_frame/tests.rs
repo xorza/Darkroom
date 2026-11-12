@@ -47,7 +47,6 @@ fn prepare_with_star() {
     let width = 64;
     let height = 64;
     let mut data = vec![0.1f32; width * height];
-    // Add bright pixel (simulating a star)
     data[32 * width + 32] = 0.9;
 
     let dim = PlanarDesc::new((width, height), ChannelLayout::Mono);
@@ -56,7 +55,7 @@ fn prepare_with_star() {
     let pool = DetectionResources::new(USize2::new(width, height));
     let result = prepare(&image, &pool);
 
-    // Star pixel should be preserved (no CFA, no defects)
+    // A mono plane passes through unchanged.
     assert!((result[(32, 32)] - 0.9).abs() < 1e-6);
 }
 

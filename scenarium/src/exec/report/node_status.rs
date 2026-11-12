@@ -13,8 +13,7 @@ pub enum NodeExecStatus {
     Executed {
         elapsed_secs: f64,
     },
-    /// The run could not satisfy these input ports, by index on the node. Never empty:
-    /// this status exists because at least one required port went unfed.
+    /// The run could not satisfy these input ports, by index on the node. Never empty.
     MissingInputs {
         ports: Vec<usize>,
     },

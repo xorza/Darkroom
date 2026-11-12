@@ -65,8 +65,8 @@ fn planning_resets_the_output_half_to_the_programs_pool() {
 
 #[test]
 fn chain_orders_deps_before_consumers_and_schedules_all() {
-    // A → B → C (C sink). Every reachable node is scheduled — the planner is
-    // structural, so nothing is pruned as "cached" here (that's the executor's call).
+    // A → B → C (C sink). Every reachable node is scheduled — the planner is structural, so
+    // nothing is pruned as "cached" here.
     let mut prog = ProgramBuilder::default();
     let a = prog.node().outputs(1).add();
     let b = prog.node().input(a.out(0)).outputs(1).add();
@@ -102,8 +102,7 @@ fn chain_orders_deps_before_consumers_and_schedules_all() {
         "a disabled verdict cannot hide an enabled dependency"
     );
     p.process_order.swap(0, 1);
-    // Back to what the planner actually wrote — not `default()`, which is the
-    // `Unvisited` fill and would leave a scheduled node undecided.
+    // Back to what the planner actually wrote — not `default()`, the `Unvisited` fill.
     p.states[a.node_idx] = NodeState::Cut;
     p.validate(prog.program())
         .expect("restored to a valid plan");
@@ -218,10 +217,9 @@ fn delivery_follows_binding_and_producer_state() {
     );
 }
 
-/// An unbound input blocks its node only when the declaration called it
-/// required — and when it does, the verdict travels down every consumer.
-/// Optionality is the only difference between the two rows, so it is the
-/// only thing that can decide them.
+/// An unbound input blocks its node only when the declaration called it required — and when it
+/// does, the verdict travels down every consumer. Optionality is the only difference between the
+/// two rows.
 #[test]
 fn only_a_required_unbound_input_blocks_the_node_and_its_dependents() {
     for required in [true, false] {
@@ -320,17 +318,15 @@ fn a_dependency_cycle_is_a_broken_contract() {
 
 #[test]
 fn node_seed_schedules_only_its_cone_and_pins_it() {
-    // A → B → C (C sink). Seeding node B (by authoring id, which resolves
-    // straight against the program) schedules only [A, B] — C is upstream of nothing
-    // seeded — and records B as both a root and a seeded node. B's output has no
+    // A → B → C (C sink). Seeding node B (by authoring id) schedules only [A, B] — C is upstream
+    // of nothing seeded — and records B as both a root and a seeded node. B's output has no
     // scheduled consumer.
     let mut prog = ProgramBuilder::default();
     let a = prog.node().outputs(1).add();
     let b = prog.node().input(a.out(0)).outputs(1).add();
     let c = prog.node().sink().input(b.out(0)).outputs(1).add();
 
-    // One planner and one schedule across the calls below: each plan has
-    // to start from nothing, whatever the last one left.
+    // One planner and one schedule across the calls below: each plan must start from nothing.
     let mut planner = Planner::default();
     let mut p = RunSchedule::default();
     planner
@@ -370,9 +366,8 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
         "and schedules the same cone"
     );
 
-    // Seeds named against the program's order still list their roots
-    // ascending, with no sinks or event sources to sweep: the order the
-    // host named them in must not reach the schedule.
+    // Seeds named against the program's order still list their roots ascending, with no sinks or
+    // event sources to sweep.
     let seeds = RunSeeds::nodes(vec![b.node_id, a.node_id]);
     planner
         .plan(prog.program(), &seeds, &mut p)
@@ -392,10 +387,9 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     assert_eq!(p.process_order, [a, b, c].map(|node| node.node_idx));
     assert_eq!(p.seeded_roots(), vec![b.node_idx]);
 
-    // Seeding the sink itself is the case two root passes reach one node: the
-    // seed pass marks C seeded, then the sinks sweep marks it a root again.
-    // The second visit must *add* to what the first left — it is one root
-    // carrying both facts, so C is listed once and stays seeded.
+    // Seeding the sink itself is the case two root passes reach one node: the seed pass marks C
+    // seeded, then the sinks sweep marks it a root again. The second visit must *add* to what the
+    // first left, so C is listed once and stays seeded.
     let seeds = RunSeeds {
         node_ids: vec![c.node_id],
         ..RunSeeds::sinks()

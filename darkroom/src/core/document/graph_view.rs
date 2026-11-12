@@ -16,29 +16,25 @@ use crate::core::document::wire_key::WireKey;
 
 /// Where one node body sits and how far forward it paints.
 ///
-/// The two are independent: dragging a node changes `pos` and nothing else,
-/// raising it changes `z` and nothing else. Keeping the stacking order as a
-/// *value* here rather than as the position of an entry in an ordered map is
-/// what lets [`GraphView`] derive its equality and serde, and what makes
+/// The two are independent: dragging a node changes `pos` only, raising it `z` only. Keeping the
+/// stacking order as a *value* rather than as an entry's position in an ordered map lets
+/// [`GraphView`] derive its equality and serde, and makes
 /// [`SetDepth`](crate::core::edit::step::set_depth::SetDepth) a field write instead of a reorder.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct NodePlacement {
     /// Canvas-world position of the body's top-left corner.
     pub(crate) pos: Vec2,
-    /// Paint depth: higher paints later, so it sits in front. Equal depths
-    /// break by `NodeId`, so the order is total and stable across frames — see
+    /// Paint depth: higher paints later, so it sits in front. Equal depths break by `NodeId`; see
     /// [`GraphView::paint_order`].
     pub(crate) z: u32,
 }
 
-/// One entry of a [`GraphView::paint_order`] sweep, sorted by its own derived
-/// order — depth first, then id.
+/// One entry of a [`GraphView::paint_order`] sweep, sorted by its own derived order: depth first,
+/// then id.
 ///
-/// The break on `id` is what makes the order *total*: several nodes share
-/// the seed `z` of 0 until something raises them, and a comparator that let
-/// those be equal would leave their relative order at the mercy of the sort's
-/// stability. Carrying `z` alongside the id is what keeps the sort from
-/// descending [`GraphView::node_placements`] once per comparison.
+/// The break on `id` makes the order *total*: several nodes share the seed `z` of 0 until
+/// something raises them. Carrying `z` alongside the id keeps the sort from descending
+/// [`GraphView::node_placements`] once per comparison.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct StackedNode {
     /// Paint depth: higher paints later, so it sits in front.
@@ -46,23 +42,17 @@ pub(crate) struct StackedNode {
     pub(crate) node_id: NodeId,
 }
 
-/// Editor-side view metadata for the document's graph: per-node placements,
-/// the wire ties and the routes through them, the viewport, and the
-/// selection (`Document::main_view`). The graph *data*
-/// itself lives in the core `Graph`; this is purely how the editor presents
-/// and navigates it.
+/// Editor-side view metadata for the document's graph: per-node placements, the wire ties and
+/// the routes through them, the viewport, and the selection (`Document::main_view`). The graph
+/// *data* lives in the core `Graph`.
 ///
-/// Everything here is saved, so reopening a file restores the exact camera
-/// and selection. Ctrl+Z walks the selection with the structural edits but
-/// not the camera (`darkroom/AGENTS.md`, "The camera is outside the undo history").
+/// Everything here is saved. Ctrl+Z walks the selection with the structural edits but not the
+/// camera (`darkroom/AGENTS.md`, "The camera is outside the undo history").
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct GraphView {
-    /// Every node body's placement. Exactly one entry per graph node and per
-    /// stub — enforced by [`Self::validate`].
-    ///
-    /// Order-insensitive on purpose: paint order rides in each entry's
-    /// [`NodePlacement::z`], so this map is free to be keyed and compared as a
-    /// set. A caller that needs the stacking asks for [`Self::paint_order`].
+    /// Every node body's placement. Exactly one entry per graph node and per stub, enforced by
+    /// [`Self::validate`]. Order-insensitive: paint order rides in each entry's
+    /// [`NodePlacement::z`]; a caller that needs the stacking asks for [`Self::paint_order`].
     pub(crate) node_placements: BTreeMap<NodeId, NodePlacement>,
     /// Every wire tie. Each holds at least one wire, a route that names it.
     pub(crate) ties: BTreeMap<TieId, Tie>,
@@ -70,17 +60,13 @@ pub(crate) struct GraphView {
     /// wire's ends; an untied wire has none.
     pub(crate) routes: BTreeMap<WireKey, Route>,
     pub(crate) viewport: Viewport,
-    /// `BTreeSet` so equality and serialization are order-independent
-    /// (no spurious undo entries from reordering).
+    /// A `BTreeSet`, so equality and serialization are order-independent.
     pub(crate) selected: BTreeSet<ItemId>,
 }
 
 impl GraphView {
-    /// A fresh view over `graph`: one zero-positioned, unraised placement per
-    /// node, no ties, the default camera, nothing selected.
-    ///
-    /// The only way a view is built from a graph, so there is nowhere for the
-    /// two to disagree about which nodes are placed.
+    /// A fresh view over `graph`: one zero-positioned, unraised placement per node, no ties, the
+    /// default camera, nothing selected.
     pub(crate) fn new(graph: &CoreGraph) -> Self {
         Self {
             node_placements: graph
@@ -91,14 +77,11 @@ impl GraphView {
         }
     }
 
-    /// The nodes back-to-front into `out`: what a paint pass draws in order,
-    /// and the only place stacking is resolved. `out` is cleared first, so a
-    /// caller hands the same buffer over every frame.
+    /// The nodes back-to-front into `out`, which is cleared first: what a paint pass draws in
+    /// order, and the only place stacking is resolved.
     ///
-    /// Fills a caller-owned buffer rather than returning one because the
-    /// production caller is the per-frame node draw: a fresh `Vec` here would
-    /// be one allocation per graph pane per frame, sized to the whole graph
-    /// and taken before culling drops the off-screen nodes.
+    /// A caller-owned buffer, as the per-frame node draw would otherwise allocate a `Vec` sized
+    /// to the whole graph per pane per frame, before culling drops the off-screen nodes.
     pub(crate) fn paint_order(&self, out: &mut Vec<StackedNode>) {
         out.clear();
         out.reserve_exact(self.node_placements.len());
@@ -113,8 +96,8 @@ impl GraphView {
         out.sort_unstable();
     }
 
-    /// The depth that puts a node in front of every other. One past the
-    /// current maximum, so a raise never has to renumber its neighbours.
+    /// The depth that puts a node in front of every other: one past the current maximum, so a
+    /// raise never renumbers its neighbours.
     pub(crate) fn front_z(&self) -> u32 {
         self.node_placements
             .values()
@@ -154,9 +137,8 @@ impl GraphView {
                 return Err(GraphViewValidationError::NonFinitePos { node_id: *node_id });
             }
         }
-        // A map guarantees unique keys, and the graph and stubs are disjoint,
-        // so counts plus reverse membership prove the view places exactly
-        // their node set.
+        // A map has unique keys and the graph and stubs are disjoint, so counts plus reverse
+        // membership prove the view places exactly their node set.
         if self.node_placements.len() != graph.len() + stubs.len() {
             return Err(GraphViewValidationError::NodeCount);
         }

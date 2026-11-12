@@ -32,29 +32,22 @@ enum Declaration<'a> {
 /// One placed item of the graph pane — a graph node or a stub: its authoring
 /// record, its position in the paint stack, and what it declares.
 ///
-/// The leaf of the context chain, and the one level where the *item* is the
-/// level — every function below a node body is about that node, so passing it
-/// beside the context would be the same argument twice.
+/// The leaf of the context chain, where the *item* is the level: every function below a node
+/// body is about that node.
 ///
-/// **Available for the whole frame**, unlike the passes above it: a
-/// [`GraphCtx`] is all it takes to resolve one, so the hit sweep at frame top,
-/// the input stage's gestures, and the record all read nodes through this same type.
-/// The facts that only a *record* has settled — the effective selection and
-/// the cull region — stay on
-/// [`DrawCtx`](crate::gui::pane::graph_ui::draw_ctx::DrawCtx), which travels beside
-/// this rather than inside it, so a reader cannot reach for one in a phase
-/// where it does not exist yet.
+/// **Available for the whole frame**: a [`GraphCtx`] is all it takes to resolve one, so the hit
+/// sweep, the input stage's gestures and the record all read nodes through this type. The facts
+/// only a *record* has settled — the effective selection and the cull region — stay on
+/// [`DrawCtx`](crate::gui::pane::graph_ui::draw_ctx::DrawCtx), so a reader cannot reach for one
+/// in a phase where it does not exist yet.
 ///
-/// `Copy`, and the three borrows are taken once at [`Self::resolve`] — so a
-/// pass that threads one down a widget tree pays a single library lookup for
-/// the node, not one per field it reads.
+/// `Copy`, and the borrows are taken once at [`Self::resolve`]: one library lookup per node, not
+/// one per field read.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct NodeCtx<'a> {
     pub(crate) graph_ctx: GraphCtx<'a>,
     pub(crate) node_id: NodeId,
-    /// Where the node's body sits, from the view's placements. A field rather
-    /// than an accessor: the paint stack is walked by position, and every
-    /// geometry reader wants it.
+    /// Where the node's body sits, from the view's placements.
     pub(crate) pos: Vec2,
     /// The graph node, or a stub's record of one.
     node: &'a Node,
@@ -63,21 +56,16 @@ pub(crate) struct NodeCtx<'a> {
     /// while the library cannot run it: it declares no ports, and the user can
     /// still select, move and delete it.
     declaration: Declaration<'a>,
-    /// What the last run said about this node, looked up once when the node
-    /// resolves rather than at every status, memory or port read.
+    /// What the last run said about this node, looked up once at resolve.
     run: Option<&'a NodeRunState>,
     /// Whether the pointer is over this node's body — [`Hover::Rest`] until a
     /// caller that holds a `Ui` sets it through [`Self::with_hover`].
     ///
-    /// Two things hang off it, the const editors' hover-revealed chips
-    /// ([`Self::const_editor_theme`]) and whether the port rows build tooltips at all
-    /// ([`Self::tooltips`]). One field rather than a `&ConstEditorTheme` and a
-    /// flag threaded down beside each other, where no signature would say the
-    /// two are the same fact.
+    /// Drives the const editors' hover-revealed chips ([`Self::const_editor_theme`]) and whether
+    /// the port rows build tooltips ([`Self::tooltips`]): one field, as the two are one fact.
     ///
-    /// Not resolved in [`Self::resolve`] because that takes no `Ui` — and
-    /// must not, since it is what the whole frame reads nodes through. The
-    /// record pass sets it once per node body instead.
+    /// Not resolved in [`Self::resolve`], which takes no `Ui`; the record pass sets it once per
+    /// node body.
     hover: Hover,
 }
 
@@ -118,15 +106,14 @@ impl<'a> NodeCtx<'a> {
     /// record pass for everything below the node body that asks it.
     ///
     /// Takes the answer rather than a `Ui`: the widget id it comes off is
-    /// `gui::pane::graph_ui::node_ui`'s (`wid::hover`), and this type sits below
+    /// `gui::pane::graph_ui::wid::hover`'s, and this type sits below
     /// that module.
     pub(crate) const fn with_hover(self, hover: Hover) -> Self {
         Self { hover, ..self }
     }
 
-    /// Whether the port rows build their hover tooltips: their text is
-    /// composed per port per frame, and no port can be showing one while the
-    /// pointer is elsewhere, so only the node under it pays.
+    /// Whether the port rows build their hover tooltips: composed per port per frame, so
+    /// only the node under the pointer pays.
     pub(crate) const fn tooltips(self) -> bool {
         matches!(self.hover, Hover::Over)
     }
@@ -186,18 +173,15 @@ impl<'a> NodeCtx<'a> {
     /// Sink node — no outputs feed downstream, so a run has to reach it
     /// explicitly.
     ///
-    /// Read off the declaration, like every other interface fact: the flag
-    /// is the func's own, and a compile copies it verbatim rather than
-    /// deriving anything. Answering from the authoring side is also what
-    /// lets the affordances it gates — the disable toggle, the subscription
-    /// pin — render before the first compile.
+    /// Read off the declaration, so the affordances it gates — the disable toggle, the
+    /// subscription pin — render before the first compile.
     pub(crate) fn sink(self) -> bool {
         self.func().is_some_and(Func::sink)
     }
 
     /// The node holds work that recomputes every run. An impure node has no
     /// content digest, so no cache mode is ever honored; the header paints
-    /// the `~` marker off this. Declared, like [`Self::sink`].
+    /// its impure icon off this. Declared, like [`Self::sink`].
     pub(crate) fn impure(self) -> bool {
         self.func().is_some_and(Func::impure)
     }
@@ -229,12 +213,9 @@ impl<'a> NodeCtx<'a> {
     /// Whether this node can seed a "run to this node" — drives the header
     /// play chip, the context-menu item, and the port menu's "Add preview".
     ///
-    /// Everything but a stub qualifies: the stub is not in the graph, so it
-    /// has no compiled work, while a *disabled* node still runs, because a targeted
-    /// run overrides that flag for the run. Deliberately an authoring-side
-    /// fact, not a lookup in a compiled program — the palette and the header
-    /// record every frame, including before the first compile, so an
-    /// affordance can't wait on one.
+    /// Everything but a stub qualifies: a *disabled* node still runs, as a targeted run overrides
+    /// that flag. An authoring-side fact, not a lookup in a compiled program, so it holds before
+    /// the first compile.
     pub(crate) const fn runnable(self) -> bool {
         !self.stub()
     }

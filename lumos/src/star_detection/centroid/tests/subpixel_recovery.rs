@@ -65,12 +65,6 @@ fn noisy_stars_land_within_their_reported_sigma() {
     }
 }
 
-/// Both sources of the position σ agree with the scatter they predict: one star of amplitude 0.3
-/// and σ 1.7 at a sub-pixel offset under 1000 fixed-seed draws of white noise σₙ = 0.01. The mean
-/// square error about the truth, per axis, is a variance from 2000 samples (x and y), so it
-/// carries a standard error of `√(2/2000)` = 3.2% of itself; the mean reported σ² must lie within
-/// 3 of those, 9.5%. The truth's own bias is far below the noise: a Gaussian is its own model
-/// and the windowed centre lands on it within 1e-5 px.
 /// One draw's squared error per axis and reported σ², from each source.
 #[derive(Debug, Clone, Copy)]
 struct Draw {
@@ -80,6 +74,12 @@ struct Draw {
     fit_reported: f64,
 }
 
+/// Both sources of the position σ agree with the scatter they predict: one star of amplitude 0.3
+/// and σ 1.7 at a sub-pixel offset under 1000 fixed-seed draws of white noise σₙ = 0.01. The mean
+/// square error about the truth, per axis, is a variance from 2000 samples (x and y), so it
+/// carries a standard error of `√(2/2000)` = 3.2% of itself; the mean reported σ² must lie within
+/// 3 of those, 9.5%. The truth's own bias is far below the noise: a Gaussian is its own model
+/// and the windowed centre lands on it within 1e-5 px.
 #[test]
 fn the_position_sigma_matches_the_scatter() {
     const DRAWS: u64 = 1000;

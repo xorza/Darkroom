@@ -1,8 +1,7 @@
 //! The [`Compiled`] view [`TestGraph::compile`] hands back.
 //!
-//! Gated, and `pub(crate)`, because every accessor here answers with a
-//! crate-private type — an `ExecNode`, an `ExecBinding`. Nothing
-//! outside this crate could read one, so nothing outside it is offered one.
+//! `pub(crate)` because every accessor answers with a crate-private type (`ExecNode`,
+//! `ExecBinding`) that nothing outside this crate could read.
 
 use hashbrown::HashMap;
 
@@ -10,16 +9,11 @@ use crate::exec::compile::compiled_graph::{CompiledGraph, ExecBinding, ExecNode}
 use crate::exec::idx::NodeIdx;
 use crate::graph::identity::NodeId;
 
-/// A [`TestGraph`] lowered, still answering by the names the fixture gave its
-/// nodes.
+/// A [`TestGraph`] lowered, still answering by the names the fixture gave its nodes, so a test
+/// names the node it authored rather than translating an id per assertion.
 ///
-/// A compile crosses into the dense index space. Here the crossing happens
-/// once, so a test names the same node it authored rather than translating an
-/// id per assertion.
-///
-/// The artifact stays public: a test that corrupts one to prove a validator
-/// catches it, or asks something the accessors below do not shorten, reaches
-/// straight for it.
+/// The artifact stays public, for a test that corrupts one or asks what the accessors do not
+/// cover.
 #[derive(Debug)]
 pub(crate) struct Compiled {
     pub(crate) program: CompiledGraph,

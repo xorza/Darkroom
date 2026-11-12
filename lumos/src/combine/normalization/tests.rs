@@ -302,7 +302,7 @@ fn the_deming_error_is_the_scatter_of_the_gains() {
 /// move the gain: it stays at the seed. Frame [8, 9, 10, 11, 12] against reference
 /// [15, 12, 10, 9, 5]: too few pairs to seed from stars, so the seed is the ratio of the MADs, 2/1.
 /// Off it the residuals are 9, 4, 0, −3, −9, MAD 4, so the 4σ window admits all five, whose
-/// covariance is negative. The old fallback replaced the seed with unit gain.
+/// covariance is negative.
 #[test]
 fn a_fit_without_positive_covariance_keeps_the_seed() {
     let frame = [8.0, 9.0, 10.0, 11.0, 12.0];
@@ -496,8 +496,8 @@ fn stacked_frames_land_on_the_reference_level() {
 
 /// The common domain is the coverage floor's intersection, not "coverage at all". A pixel a frame
 /// barely touched is warp border fill, and measuring the photometric scale on it would compare fill
-/// against data — even though the interpolation there was perfectly confident, which is why the
-/// separate `confidence > 0` intersection this replaced could never have excluded it.
+/// against data — even though the interpolation there was perfectly confident, which is why a
+/// `confidence > 0` intersection could never exclude it.
 #[test]
 fn common_domain_excludes_pixels_covered_only_by_border_fill() {
     let desc = PlanarDesc::new((4, 1), ChannelLayout::Mono);

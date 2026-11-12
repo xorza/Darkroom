@@ -1,10 +1,8 @@
 //! The canvas a test drives real input at: a [`Harness`] surface, the
 //! [`GraphUi`] recorded onto it, and the document both read.
 //!
-//! One type rather than a closure per test file because the subject under test
-//! is the same machinery in each case — a frame runs the phases `MainWindow`
-//! runs, `input` → `record`, and only the gesture driven through it differs. A
-//! test that skipped a phase would be exercising a frame the app never performs.
+//! A frame runs the phases `MainWindow` runs, `input` → `record`, so a test never exercises a
+//! frame the app never performs.
 
 use glam::{UVec2, Vec2};
 use palantir::{App, Harness, RecordPass, WindowToken};
@@ -27,61 +25,50 @@ use crate::gui::port_ref::PortRef;
 use std::iter;
 
 impl GraphUi {
-    /// The canvas's cross-frame geometry cache, for the tests that assert
-    /// on what a record filled into it and what [`GraphUi::retain_nodes`]
-    /// released — port centers, node sizes, cached world rects.
-    ///
-    /// Shared, not `&mut`: a test reads what the passes settled, it does
-    /// not seed the cache by hand.
+    /// The canvas's cross-frame geometry cache, for the tests that assert on what a record
+    /// filled into it and what [`GraphUi::retain_nodes`] released. Shared, not `&mut`: a test
+    /// does not seed the cache by hand.
     pub(crate) fn geometry(&self) -> &CanvasGeometry {
         &self.geometry
     }
 }
 
-/// Surface every canvas test records at unless it is about size. Wide enough
-/// that [`DocumentFixture`]'s row of nodes lands on screen uncropped.
+/// Surface every canvas test records at unless it is about size, wide enough for
+/// [`DocumentFixture`]'s row of nodes.
 const SURFACE: UVec2 = UVec2::new(1200, 800);
 
-/// How far down from the anchor [`menu_rows`] sweeps, how far in from its
-/// left edge, and how fine its step. The sweep has to clear the whole menu,
-/// and the step has to be finer than its thinnest band (a separator) or a row
-/// would read as two.
+/// How far down from the anchor [`menu_rows`] sweeps, how far in from its left edge, and how
+/// fine its step: the sweep clears the whole menu, and the step is finer than its thinnest
+/// band (a separator).
 const PROBE_DEPTH: f32 = 320.0;
 const PROBE_INSET: f32 = 20.0;
 const PROBE_STEP: f32 = 2.0;
 
 #[derive(Debug)]
 pub(crate) struct CanvasHarness {
-    /// The palantir side. `pub(crate)` so tests drive input and read geometry
-    /// through it directly — `h.ui.press(.., PointerButton::Left)`, `h.ui.rect(..)`.
+    /// The palantir side, so tests drive input and read geometry through it directly.
     pub(crate) ui: Harness,
     pub(crate) graph_ui: GraphUi,
-    /// The document the canvas draws and the context it resolves through.
-    /// `pub(crate)` so a test can edit the document between frames, the way an
-    /// undo edits it under a running gesture.
+    /// The document the canvas draws and the context it resolves through, which a test can edit
+    /// between frames, the way an undo edits it under a running gesture.
     pub(crate) ctx: GraphCtxFixture,
-    /// The app commands the last [`Self::frame`] raised. Kept beside the
-    /// intents that call returns rather than folded into them: the canvas
-    /// raises both tiers, and a test is almost always about one of them.
+    /// The app commands the last [`Self::frame`] raised, kept apart from the intents that call
+    /// returns: a test is almost always about one tier.
     pub(crate) commands: Vec<AppCommand>,
-    /// The view ops the last [`Self::frame`] raised. Rare — the canvas asks
-    /// for one thing the dock owns, a viewer tab for a clicked preview card —
-    /// but real, so they are collected rather than treated as impossible.
+    /// The view ops the last [`Self::frame`] raised: the one thing the canvas asks of the dock,
+    /// a viewer tab for a clicked preview card.
     pub(crate) view_ops: Vec<DockOperation<TabRef>>,
 }
 
 impl CanvasHarness {
-    /// [`SURFACE`] with mono metrics — what a canvas test wants unless it is
-    /// about measured text or about the surface itself.
-    ///
-    /// Takes a [`DocumentFixture`] or anything that converts into one — a
-    /// [`TestGraph`](scenarium::internals::test_graph::TestGraph) goes straight in.
+    /// [`SURFACE`] with mono metrics, which a canvas test wants unless it is about measured text
+    /// or the surface itself. Takes a [`DocumentFixture`] or anything that converts into one,
+    /// such as a [`TestGraph`](scenarium::internals::test_graph::TestGraph).
     pub(crate) fn new(fixture: impl Into<DocumentFixture>) -> Self {
         Self::over(Harness::builder(SURFACE).mono().build(), fixture)
     }
 
-    /// A different surface, still mono: for the tests whose subject is what
-    /// fits on one.
+    /// A different surface, still mono.
     pub(crate) fn sized(fixture: impl Into<DocumentFixture>, surface: UVec2) -> Self {
         Self::over(Harness::builder(surface).mono().build(), fixture)
     }
@@ -95,8 +82,7 @@ impl CanvasHarness {
         )
     }
 
-    /// Real text shaping: node headers and menu rows size to their labels, so
-    /// mono metrics would put every one of them in the wrong place.
+    /// Real text shaping, for tests where node headers and menu rows must size to their labels.
     pub(crate) fn shaping_text(fixture: impl Into<DocumentFixture>, surface: UVec2) -> Self {
         Self::over(Harness::new(surface), fixture)
     }
@@ -111,10 +97,8 @@ impl CanvasHarness {
         }
     }
 
-    /// One canvas frame, in the order `MainWindow` runs its phases, returning
-    /// the graph intents it raised. App commands land in [`Self::commands`],
-    /// view ops in [`Self::view_ops`] — one tier per sink, so a test reads the
-    /// one it is about without matching the others away.
+    /// One canvas frame, in the order `MainWindow` runs its phases, returning the graph intents
+    /// it raised. App commands land in [`Self::commands`], view ops in [`Self::view_ops`].
     pub(crate) fn frame(&mut self) -> Vec<GraphIntent> {
         let Self {
             ui,
@@ -170,16 +154,14 @@ impl CanvasHarness {
         }
     }
 
-    /// Let the double-click interval lapse, so the next press opens a fresh
-    /// click rather than extending the last one. Records no frame: a press is
-    /// stamped when it arrives, so the gap alone separates the runs.
+    /// Let the double-click interval lapse, so the next press opens a fresh click. Records no
+    /// frame: a press is stamped when it arrives.
     pub(crate) fn advance_past_double_click(&mut self) {
         self.ui.advance_past_double_click();
     }
 
-    /// One frame that is allowed to be paint-only, reporting whether a record
-    /// pass ran. The wake a focused `TextEdit`'s caret blink schedules is
-    /// enough to produce one, and [`Self::frame`] panics on those.
+    /// One frame that is allowed to be paint-only (a focused `TextEdit`'s caret blink wake is
+    /// enough), reporting whether a record pass ran. [`Self::frame`] panics on those.
     pub(crate) fn try_frame(&mut self) -> bool {
         let Self {
             ui, graph_ui, ctx, ..
@@ -193,8 +175,8 @@ impl CanvasHarness {
         self.ctx.open.document()
     }
 
-    /// The document, to edit between frames — an undo moving a node out from
-    /// under a live gesture is the case this exists for.
+    /// The document, to edit between frames, as an undo moving a node out from under a live
+    /// gesture does.
     pub(crate) fn document_mut(&mut self) -> &mut Document {
         self.ctx.open.document_mut()
     }
@@ -206,12 +188,10 @@ impl CanvasHarness {
 
     /// The clickable rows of the canvas menu open at `anchor`, top to bottom.
     ///
-    /// [`MenuItem`](palantir::MenuItem) takes no caller-supplied id, so a test
-    /// finds the rows the way a pointer does: sweep a vertical line down the open
-    /// popup and keep every widget it lands on. The popup's own panel shows
-    /// through the padding above the first row, the gaps between rows, and every
-    /// separator, so it is the one widget the sweep meets repeatedly — and its
-    /// first and last sightings bracket exactly the rows.
+    /// [`MenuItem`](palantir::MenuItem) takes no caller-supplied id, so a test sweeps a
+    /// vertical line down the open popup and keeps every widget it lands on. The popup's own
+    /// panel shows through the padding, the gaps and every separator, so it is the one widget
+    /// the sweep meets repeatedly, and its first and last sightings bracket exactly the rows.
     pub(crate) fn menu_rows(&self, anchor: Vec2) -> Vec<WidgetId> {
         let mut runs: Vec<WidgetId> = Vec::new();
         let mut y = anchor.y;
@@ -237,8 +217,8 @@ impl CanvasHarness {
             .collect()
     }
 
-    /// Where `node_id`'s body last painted — post-transform, so it is the rect
-    /// a pointer aimed at the node has to land in.
+    /// Where `node_id`'s body last painted, post-transform: the rect a pointer aimed at the
+    /// node has to land in.
     pub(crate) fn node_rect(&self, node_id: NodeId) -> Rect {
         self.ui
             .rect(wid::body(node_id))
@@ -255,8 +235,8 @@ impl CanvasHarness {
             .center()
     }
 
-    /// The point a wire drag leaves `port` from, or lands on — the snap scan
-    /// tests the post-transform rect, so this is the one to aim at.
+    /// The point a wire drag leaves `port` from, or lands on: the snap scan tests the
+    /// post-transform rect.
     pub(crate) fn port_center(&self, port: PortRef) -> Vec2 {
         self.ui
             .rect(wid::port_circle(port))
@@ -264,9 +244,8 @@ impl CanvasHarness {
             .center()
     }
 
-    /// The cached world rect wires anchor to and the cull reads, or `None`
-    /// once the node's entry has been evicted. Unlike [`Self::node_rect`] this
-    /// survives the node being culled — that is the whole point of the cache.
+    /// The cached world rect wires anchor to and the cull reads, or `None` once the node's
+    /// entry has been evicted. Unlike [`Self::node_rect`] it survives the node being culled.
     pub(crate) fn node_world_rect(&self, node_id: NodeId) -> Option<Rect> {
         let Self { graph_ui, ctx, .. } = self;
         let node = ctx

@@ -119,8 +119,8 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         perturbation: Perturbation::None,
         fit_bg: None,
     },
-    // Fainter than the absolute amplitude floor the fit once had, 0.01 in data units: a faint
-    // star in normalized data.
+    // Fainter than an absolute amplitude of 0.01 in data units: a faint star in normalized data,
+    // which the floor relative to the seed must not refuse.
     RecoveryCase {
         name: "below_an_absolute_floor",
         stamp: 21,
@@ -194,7 +194,7 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         fit_bg: None,
     },
     RecoveryCase {
-        // Amplitude is clamped to a 0.01 floor, so this only pins that a fit comes back at all.
+        // A faint star: this only pins that a fit comes back at all.
         name: "low_amplitude",
         stamp: 21,
         center: DVec2::new(10.0, 10.0),

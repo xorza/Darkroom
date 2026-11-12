@@ -107,8 +107,8 @@ async fn encoded(digest: Digest, outputs: &[DynamicValue], library: &Library) ->
 
 /// One small blob's exact bytes, written out by hand from the layout rather than from the
 /// format's own constants. They move only when the layout changes on purpose, which must also
-/// bump `FORMAT_VERSION`; any other failure here is accidental drift, which would make every
-/// blob on disk unreadable or, worse, read with the wrong meaning.
+/// bump `FORMAT_VERSION`; any other failure is accidental drift, which would make every blob on
+/// disk unreadable or read with the wrong meaning.
 #[tokio::test]
 async fn a_small_blob_has_the_pinned_layout() {
     let library = BlobCodec::versioned(7, Calls::default()).library();

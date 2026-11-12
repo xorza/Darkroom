@@ -9,9 +9,7 @@
 //! library, and each CI lane compares with one committed reference. Refused: a tolerance of 8 ulps
 //! for that library's rounding, which hid a difference between systems that a threshold can turn
 //! into another decision. Cost: a Rust or `libm` update that moves a bit writes the references
-//! anew, and a cache keyed by one moves with it.
-//! Each reference a cache keys by — the decodes' and the master stack's — is hashed into that
-//! cache's version, so a reference written anew moves it.
+//! anew, which moves the version of each cache hashing one in: the decodes' and the master stack's.
 
 mod snapshot;
 
