@@ -1,4 +1,4 @@
-use palantir::{CloseShown, Material, SrgbaU8};
+use palantir::{CloseShown, SrgbaU8};
 use scenarium::TypeId;
 use static_assertions::assert_not_impl_any;
 
@@ -79,7 +79,6 @@ fn default_wiring_and_menu_tweak() {
     // the ground at `0.02 + 0.98 · 0.013702 = 0.033428`, so the muted ink reads
     // `(0.371238 + 0.05) / (0.033428 + 0.05) = 5.05:1`.
     assert_eq!(theme.pill.paint.fill, p.surround_bg.with_alpha(0.98).into());
-    assert!(theme.pill.paint.material.is_none());
     let ground = 0.02 + 0.98 * p.surround_bg.luminance();
     assert!(((p.text_muted.luminance() + 0.05) / (ground + 0.05) - 5.05).abs() < 0.01);
 
@@ -91,17 +90,24 @@ fn default_wiring_and_menu_tweak() {
         (muted + 0.05) / (level(59) + 0.05) < 4.5,
         "byte 58 is the highest"
     );
-    for (name, glass, tint, want) in [
-        ("menu", &menu.panel, p.node_bg, 0.04443538),
-        ("tooltip", &ui.tooltip.panel, p.node_bg, 0.04443538),
+    for (name, glass, worn, tint, want) in [
+        ("menu", &menu.panel, &menu.material, p.node_bg, 0.04443538),
+        (
+            "tooltip",
+            &ui.tooltip.panel,
+            &ui.tooltip.material,
+            p.node_bg,
+            0.04443538,
+        ),
         (
             "color picker",
             &ui.color_picker.popup.panel,
+            &ui.color_picker.popup.material,
             p.node_bg,
             0.04443538,
         ),
     ] {
-        let material = glass.paint.material.clone().expect(name);
+        let material = worn.clone().expect(name);
         let ceiling = material.max_luminance.expect(name);
         assert_eq!(
             material,
@@ -117,7 +123,7 @@ fn default_wiring_and_menu_tweak() {
         // The same f32 rounding, carried through: a few ulps of 4e-9.
         assert!((ground - level(57)).abs() < 2e-8, "{name}: {ground}");
     }
-    assert!(ui.modal.panel.paint.material.is_none());
+    assert!(ui.modal.panel_material.is_none());
     assert_eq!(
         ui.modal.panel.paint.fill,
         p.node_bg.into(),
@@ -125,9 +131,13 @@ fn default_wiring_and_menu_tweak() {
     );
     assert_eq!(
         ui.modal.scrim,
-        Chrome::new(RgbaF32::hexa(0x00000080))
-            .with_material(Material::blur(4.0).with_fallback(RgbaF32::hexa(0x00000080))),
-        "palantir's half-clear dim over a slight blur, a plain box of it while transparency is reduced"
+        Chrome::new(RgbaF32::hexa(0x00000080)),
+        "palantir's half-clear dim"
+    );
+    assert_eq!(
+        ui.modal.scrim_material,
+        Some(Material::blur(4.0).with_fallback(RgbaF32::hexa(0x00000080))),
+        "over a slight blur, a plain box of the dim while transparency is reduced"
     );
 }
 

@@ -69,20 +69,20 @@ pub(super) fn theme(
     // the combo lists wear, a bare popup's panel, the tooltip and the color picker. A modal keeps
     // its opaque panel: its scrim dims and slightly blurs what is behind it, so there is nothing
     // to see through.
-    for panel in [
-        &mut theme.menu.panel,
-        &mut theme.popup.panel,
-        &mut theme.tooltip.panel,
-        &mut theme.color_picker.popup.panel,
+    for (panel, material) in [
+        (&mut theme.menu.panel, &mut theme.menu.material),
+        (&mut theme.popup.panel, &mut theme.popup.material),
+        (&mut theme.tooltip.panel, &mut theme.tooltip.material),
+        (
+            &mut theme.color_picker.popup.panel,
+            &mut theme.color_picker.popup.material,
+        ),
     ] {
-        *panel = theme::GLASS.dress(panel, p.text_muted);
+        theme::GLASS.dress(panel, material, p.text_muted);
     }
     // A plain box of its own dim while transparency is reduced, as iOS keeps a scrim's dim.
     let dim = theme.modal.scrim.paint.fill.clone();
-    theme.modal.scrim = theme
-        .modal
-        .scrim
-        .with_material(Material::blur(SCRIM_BLUR).with_fallback(dim));
+    theme.modal.scrim_material = Some(Material::blur(SCRIM_BLUR).with_fallback(dim));
     theme
 }
 
