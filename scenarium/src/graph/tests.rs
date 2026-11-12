@@ -403,7 +403,7 @@ fn a_detached_node_restores_its_wiring_and_malformed_records_are_refused() {
         [InputPort::new(sum, 0), InputPort::new(sum, 1)]
     );
 
-    let before = g.graph.clone_verbatim();
+    let before = g.graph.clone();
     let edges_before = g.graph.wires().count();
     let detached = g.remove("sum");
     assert_eq!(g.graph.wires().count(), edges_before - 3);
@@ -484,7 +484,7 @@ fn a_detached_node_restores_its_wiring_and_malformed_records_are_refused() {
 
     g.graph.attach_node(detached.clone());
     assert_eq!(g.graph, before);
-    let attached = g.graph.clone_verbatim();
+    let attached = g.graph.clone();
     let twice = panic::catch_unwind(AssertUnwindSafe(|| {
         g.graph.attach_node(detached);
     }));

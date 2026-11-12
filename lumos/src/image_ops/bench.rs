@@ -1,7 +1,7 @@
 //! The stacked master's image operations, each in place on the image a user applies it to: the
-//! stretches, the background neutralization and the denoise on the linear master; the green
-//! removal, the background extraction, the HDR compression and the local contrast on the master
-//! as a stretch leaves it, neutralized and auto-STF stretched.
+//! stretches, the background extraction and neutralization and the denoise on the linear master;
+//! the green removal, the HDR compression and the local contrast on the master as a stretch leaves
+//! it, neutralized and auto-STF stretched.
 
 use std::cell::OnceCell;
 
@@ -98,10 +98,7 @@ impl Op {
 
     /// Whether the operation takes the stretched master: the display-domain enhancers do.
     const fn stretched(self) -> bool {
-        matches!(
-            self,
-            Self::Scnr | Self::ExtractBg | Self::Hdr | Self::LocalContrast
-        )
+        matches!(self, Self::Scnr | Self::Hdr | Self::LocalContrast)
     }
 
     fn apply(self, image: &mut LinearImage) {

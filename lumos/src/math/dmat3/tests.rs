@@ -30,7 +30,7 @@ const M: [f64; 9] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0];
 
 /// `identity` is the multiplicative identity on both sides.
 #[test]
-fn identity_is_the_multiplicative_identity_and_the_default() {
+fn identity_is_the_multiplicative_identity() {
     let identity = DMat3::identity();
     assert_eq!(
         *identity.as_array(),

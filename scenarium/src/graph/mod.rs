@@ -76,10 +76,9 @@ pub(crate) mod reconciled;
 mod serde;
 pub(crate) mod subscription;
 
-/// Deliberately not `Clone`: node ids are unique across a whole document, so
-/// duplicating a graph is never a neutral act — a copy either mints fresh ids
-/// for what it took (an editor's duplicate) or is the only one of its identity
-/// alive at a time (undo/redo replay of a stored step).
+/// `Clone` keeps every node id as it is, so a copy is sound only where it never lives beside its
+/// original in one document, as the copy a save rewrites and writes; an editor's duplicate mints
+/// fresh ids instead.
 ///
 /// `bindings` is a plain map a caller keys into directly, so it is public;
 /// `nodes` and `subscriptions` are reached only through the methods below.
@@ -662,20 +661,6 @@ pub(crate) mod internals {
                 .iter()
                 .find(|(_, node)| node.name == name)
                 .map(|(id, node)| NodeRef { node_id: *id, node })
-        }
-
-        /// Clone keeping every node id exactly as it is — the reason `Graph`
-        /// isn't `Clone`, since preserving identities is only sound where the
-        /// original is *not* concurrently present in the same document.
-        ///
-        /// Test-only: production replays a stored step against a graph the step
-        /// was taken from, so nothing there needs a second copy of one.
-        pub(crate) fn clone_verbatim(&self) -> Self {
-            Self {
-                nodes: self.nodes.clone(),
-                bindings: self.bindings.clone(),
-                subscriptions: self.subscriptions.clone(),
-            }
         }
     }
 }
