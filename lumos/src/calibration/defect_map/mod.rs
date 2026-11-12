@@ -153,7 +153,7 @@ impl DefectMap {
 
     /// Resident RAM held by the map: its hot pixels, its cold index list and its mask.
     pub(crate) const fn ram_bytes(&self) -> usize {
-        self.hot.idxs.len() * (size_of::<usize>() + size_of::<f32>())
+        self.hot.idxs.len() * (size_of::<usize>() + 2 * size_of::<f32>())
             + self.cold_idxs.len() * size_of::<usize>()
             + BitBuffer2::heap_bytes(self.mask.size())
     }

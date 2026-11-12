@@ -1458,7 +1458,7 @@ fn ram_bytes_sums_present_frames_and_defects() {
 
     // A defect map holds its index lists and its mask. The mask's rows pad to 128 bits, so a
     // 10-wide row is two words: 8 rows × 2 × 8 B = 128 B, all of an empty map. Three indices add
-    // 3 × 8 B.
+    // 3 × 8 B, and the two hot pixels' excess and noise 2 × 2 × 4 B.
     let mask_bytes = 8 * 2 * size_of::<u64>();
     assert_eq!(DefectMap::new(USize2::new(10, 8)).ram_bytes(), mask_bytes);
     let defects = DefectMap::from_lists(
@@ -1471,7 +1471,7 @@ fn ram_bytes_sums_present_frames_and_defects() {
         vec![7],
     )
     .unwrap();
-    let list_bytes = 3 * size_of::<usize>() + 2 * size_of::<f32>();
+    let list_bytes = 3 * size_of::<usize>() + 2 * 2 * size_of::<f32>();
     assert_eq!(defects.ram_bytes(), list_bytes + mask_bytes);
 
     // The bundle sums present roles + the defect map; absent roles add nothing.
@@ -1486,7 +1486,7 @@ fn ram_bytes_sums_present_frames_and_defects() {
         imposed: None,
     };
     // 320 (dark: 80·4) + 64 (flat: 16·4) + the flat's gain, a node at pixels 0 and 4 of each
-    // 4-pixel axis, 2 × 2 nodes of 4 B, 16 + the defects' 32 + 128.
+    // 4-pixel axis, 2 × 2 nodes of 4 B, 16 + the defects' 40 + 128.
     assert_eq!(
         masters.ram_bytes(),
         10 * 8 * 4 + 4 * 4 * 4 + 2 * 2 * 4 + list_bytes + mask_bytes
