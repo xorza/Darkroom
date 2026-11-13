@@ -5,9 +5,11 @@ rustdocflags = ["-C", "target-cpu=x86-64-v3"]
 
 # `--workspace` in each lane: `default-members` holds `app` alone.
 [alias]
-gate-lint = "clippy --workspace --all-targets --all-features --keep-going -- -D warnings"
-gate-lint-nogpu = "clippy --workspace --all-targets --features lumos/ml,lumos/real-data,common/introspect-derive,darkroom/profile-with-tracy --keep-going -- -D warnings"
-gate-ship = "clippy --workspace --keep-going -- -D warnings"
+# `build.warnings` denies cargo's own lints, as `unused_dependencies`, which clippy's `-D warnings`
+# leaves out.
+gate-lint = "clippy --workspace --all-targets --all-features --keep-going --config build.warnings=\"deny\" -- -D warnings"
+gate-lint-nogpu = "clippy --workspace --all-targets --features lumos/ml,lumos/real-data,common/introspect-derive,darkroom/profile-with-tracy --keep-going --config build.warnings=\"deny\" -- -D warnings"
+gate-ship = "clippy --workspace --keep-going --config build.warnings=\"deny\" -- -D warnings"
 # `-D warnings` through a `cfg(all())` entry, which cargo joins to the x86 flags above. `RUSTDOCFLAGS`
 # would replace them, and `simd` refuses a build without them. A string, as `palantir` reads this
 # file too and cargo refuses to merge a list with its string.
@@ -21,5 +23,5 @@ mcp = "build -p darkroom-app --profile mcp"
 bench-all = "bench --workspace --bench * --features imaginarium/wgpu"
 bench-once = "test --workspace --bench * --features imaginarium/wgpu"
 # `simd` alone: `libraw-sys` builds LibRaw's C++ for the target.
-lint-x86 = "clippy -p simd --all-targets --all-features --target x86_64-unknown-linux-gnu -- -D warnings"
-lint-aarch64 = "clippy -p simd --all-targets --all-features --target aarch64-unknown-linux-gnu -- -D warnings"
+lint-x86 = "clippy -p simd --all-targets --all-features --target x86_64-unknown-linux-gnu --config build.warnings=\"deny\" -- -D warnings"
+lint-aarch64 = "clippy -p simd --all-targets --all-features --target aarch64-unknown-linux-gnu --config build.warnings=\"deny\" -- -D warnings"

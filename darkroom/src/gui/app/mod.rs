@@ -1052,7 +1052,7 @@ mod tests {
             }
             match store {
                 PreferencesStore::File(_) if readable => assert_eq!(
-                    store.clone().open().preferences.document_path,
+                    store.open().preferences.document_path,
                     Some(document.clone()),
                     "the file store remembers the open"
                 ),

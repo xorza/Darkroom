@@ -90,8 +90,7 @@ mod tests {
     #[test]
     fn apply_cpu_adjusts_in_place_without_reallocating() {
         for format in ColorFormat::ALL {
-            let source = create_test_image(format, USize2::new(17, 5), 0);
-            let mut image = source.clone();
+            let mut image = create_test_image(format, USize2::new(17, 5), 0);
             let before = image.bytes().as_ptr();
 
             OP.apply_cpu(&mut image);

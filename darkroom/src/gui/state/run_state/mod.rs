@@ -450,7 +450,7 @@ pub(crate) mod internals {
 
         #[cfg(test)]
         pub(crate) fn ram(&self, id: NodeId) -> RamUsage {
-            self.node(id).map(NodeRunState::ram).unwrap_or_default()
+            self.node(id).map_or_default(NodeRunState::ram)
         }
 
         /// Take in `summary` as the worker's completed run of a program of exactly its rows'

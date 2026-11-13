@@ -138,8 +138,7 @@ pub(crate) fn register(library: &mut Library) {
                 let frames = |idx: usize| {
                     inputs[idx]
                         .as_fs_paths()
-                        .map(|paths| paths.iter().map(PathBuf::from).collect())
-                        .unwrap_or_default()
+                        .map_or_default(|paths| paths.iter().map(PathBuf::from).collect())
                 };
                 let request = MastersRequest {
                     frames: CalibrationSet {

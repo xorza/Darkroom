@@ -218,7 +218,7 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
             };
 
             // `make_frame` is deterministic, so each tier's frames built from it are identical.
-            let ram = combine((0..n).map(make_frame).collect(), &config.clone()).unwrap();
+            let ram = combine((0..n).map(make_frame).collect(), &config).unwrap();
 
             let scratch = TempDir::new("lumos_tier_test");
             let run_scratch = RunScratch::create(&scratch.join("cache")).unwrap();

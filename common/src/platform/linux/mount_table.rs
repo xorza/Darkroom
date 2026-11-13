@@ -33,9 +33,7 @@ impl Mount {
 impl MountTable {
     /// This process's mounts; empty where there is no `/proc/self/mountinfo` to read.
     pub(crate) fn read() -> Self {
-        std::fs::read_to_string("/proc/self/mountinfo")
-            .map(|text| Self::parse(&text))
-            .unwrap_or_default()
+        std::fs::read_to_string("/proc/self/mountinfo").map_or_default(|text| Self::parse(&text))
     }
 
     /// The mounts of `mountinfo`'s text, skipping a line that does not have its fields.

@@ -772,8 +772,7 @@ fn insert_routes(
         }
         let mut steps: Vec<TieId> = ties
             .route(wire)
-            .map(|route| route.iter().copied().collect())
-            .unwrap_or_default();
+            .map_or_default(|route| route.iter().copied().collect());
         if steps.contains(&tie) {
             return Err(MalformedIntent::TieAlreadyOnRoute { wire, tie });
         }

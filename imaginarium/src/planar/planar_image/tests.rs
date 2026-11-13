@@ -130,10 +130,7 @@ fn each_format_round_trips_through_the_planes_or_is_refused() {
             "{format}"
         );
         if format.has_alpha() {
-            for result in [
-                PlanarImage::try_from(&image),
-                PlanarImage::try_from(image.clone()),
-            ] {
+            for result in [PlanarImage::try_from(&image), PlanarImage::try_from(image)] {
                 assert_eq!(
                     result.unwrap_err(),
                     PlanesError::Alpha {

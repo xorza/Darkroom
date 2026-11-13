@@ -231,7 +231,7 @@ impl<'a> NodeCtx<'a> {
     /// Non-zero only for nodes that retain a value; drives the node body's
     /// memory readout, hidden when zero.
     pub(crate) fn ram(self) -> RamUsage {
-        self.run.map(NodeRunState::ram).unwrap_or_default()
+        self.run.map_or_default(NodeRunState::ram)
     }
 
     /// This node's input ports, in declaration order. Empty for a stub, which
