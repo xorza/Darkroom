@@ -693,7 +693,7 @@ fn the_view_menu_copies_and_saves_the_window() {
     let view = || click(Locator::Text("View".to_string()));
 
     let clipboard = driver.offscreen().with_app(|_, ui| ui.clipboard());
-    clipboard.set_text("text").unwrap();
+    clipboard.set_text("text");
     driver
         .act(&[
             view(),

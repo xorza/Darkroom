@@ -189,7 +189,7 @@ fn grid_row(idx: usize) -> u16 {
 /// misses a right-click landed on the circle (no bubbling).
 fn open_port_context_menu(ui: &mut Ui, menu_id: WidgetId) {
     if let Some(p) = ui.pointer_pos() {
-        Menu::open(ui, menu_id, p);
+        Menu::open_at(ui, menu_id, p);
     }
 }
 

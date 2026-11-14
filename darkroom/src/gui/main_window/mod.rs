@@ -139,7 +139,7 @@ impl MainWindow {
                 preferences,
             };
             dock_ops.clear();
-            DockView::new(Self::dock_wid(), &ctx.document().layout, dock_ops)
+            DockView::emitting(Self::dock_wid(), &ctx.document().layout, dock_ops)
                 .min_pane(MIN_PANE)
                 .overflow(TabOverflow::Menu)
                 .show(ui, &mut panes);

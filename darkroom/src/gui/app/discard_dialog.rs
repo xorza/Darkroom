@@ -237,7 +237,7 @@ fn show(ui: &mut Ui, theme: &Theme, file_name: Option<&str>, tail: &str) -> Disc
         // A button's choice ends the dialog, which the caller stops showing: its input goes back
         // now, not a frame late.
         if choice != DiscardChoice::Stay {
-            Modal::close(ui, resp.id);
+            ui.withdraw_input_scope(resp.id);
         }
         DiscardOutcome {
             choice,

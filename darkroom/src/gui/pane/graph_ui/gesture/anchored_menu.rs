@@ -65,7 +65,7 @@ impl AnchoredMenu {
             .show(ui, |ui| {
                 pick = body(ui);
             })
-            .is_some_and(|resp| resp.closed());
+            .closed();
         // A pick closes the menu through its row or `Ui::close_overlay`, so its input goes back with it.
         debug_assert!(pick.is_none() || closed, "a pick closes the menu");
         if closed {

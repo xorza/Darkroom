@@ -52,6 +52,10 @@ pub enum DriverError {
     BadChord { chord: String },
     #[error("a pinch factor of {factor} zooms nowhere; give a positive one, above 1 to zoom in")]
     BadPinch { factor: f32 },
+    #[error(
+        "{found:?} is a control character no key types; type a newline or a tab, or press the key"
+    )]
+    Untypable { found: char },
     #[error("a drag of {travel} px is too short to start a drag and would click; drag farther")]
     ShortDrag { travel: f32 },
     #[error(
@@ -161,6 +165,7 @@ impl DriverError {
                 step: step.to_string(),
                 frames,
             },
+            PlayError::Untypable { found } => Self::Untypable { found },
             PlayError::ShortDrag { travel } => Self::ShortDrag { travel },
             PlayError::EmptyRegion => Self::EmptyRegion {
                 region: "the region".to_string(),

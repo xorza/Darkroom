@@ -58,7 +58,10 @@ impl ViewCapture {
         };
         let image = shot.image();
         match self.target {
-            CaptureTarget::Clipboard => Ok(clipboard.set_image(image)?),
+            CaptureTarget::Clipboard => {
+                clipboard.set_image(image);
+                Ok(())
+            }
             CaptureTarget::Png(path) => fs::publish(&path, PublicationMode::Durable, |file| {
                 let mut out = BufWriter::new(file);
                 write_png(image, &mut out)?;
