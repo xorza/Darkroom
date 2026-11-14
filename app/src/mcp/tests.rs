@@ -189,7 +189,7 @@ async fn an_opened_project_is_driven_through_the_tools() {
         "{message}"
     );
     assert!(
-        message.contains("matches 2 places; pick one with Nth: 0: at ")
+        message.contains("matches 2 places; pick one with nth: 0: at ")
             && message.contains(", 1: at "),
         "{message}"
     );

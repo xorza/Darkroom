@@ -98,7 +98,7 @@ fn key(chord: &str) -> Action {
 }
 
 fn node(name: &str) -> Locator {
-    Locator::App(EditorTarget::Node(name.to_string()))
+    Locator::app(EditorTarget::Node(name.to_string()))
 }
 
 /// Where the node named `name` sits on the canvas.
@@ -139,19 +139,19 @@ fn clicks_drags_and_keys_edit_the_document() {
     assert_eq!(report.selection, [BRIGHTNESS]);
 
     let before = placed(&driver, BRIGHTNESS);
-    let header = Locator::App(EditorTarget::NodeHeader(BRIGHTNESS.to_string()));
+    let header = Locator::app(EditorTarget::NodeHeader(BRIGHTNESS.to_string()));
     driver
         .act(&[drag(header.clone(), header.offset(Vec2::new(120.0, 60.0)))])
         .unwrap();
     assert_eq!(placed(&driver, BRIGHTNESS), before + Vec2::new(120.0, 60.0));
 
     let wire = drag(
-        Locator::App(EditorTarget::Port {
+        Locator::app(EditorTarget::Port {
             node: BRIGHTNESS.to_string(),
             side: Side::Out,
             port: "Image".to_string(),
         }),
-        Locator::App(EditorTarget::Port {
+        Locator::app(EditorTarget::Port {
             node: CONVERT.to_string(),
             side: Side::In,
             port: "0".to_string(),
@@ -203,7 +203,7 @@ fn a_wheel_pans_the_canvas() {
     let before = driver.app().open_document().document().main_view.viewport;
     driver
         .act(&[Action::Play(Play::Scroll {
-            at: Locator::Point(Vec2::new(800.0, 500.0)),
+            at: Locator::point(Vec2::new(800.0, 500.0)),
             delta: WheelDelta::notches(Vec2::new(0.0, -2.0)),
         })])
         .unwrap();
@@ -226,7 +226,7 @@ fn a_world_point_lands_on_the_canvas_where_nodes_are_placed() {
     driver.open(&path, OpenMode::Copy).unwrap();
     driver
         .act(&[Action::Play(Play::Scroll {
-            at: Locator::Point(Vec2::new(800.0, 500.0)),
+            at: Locator::point(Vec2::new(800.0, 500.0)),
             delta: WheelDelta::pixels(Vec2::new(-10.3, -20.3)),
         })])
         .unwrap();
@@ -241,7 +241,7 @@ fn a_world_point_lands_on_the_canvas_where_nodes_are_placed() {
     let pos = placed(&driver, BRIGHTNESS);
     let world = driver
         .offscreen()
-        .with_app(|app, ui| Locator::App(EditorTarget::World(pos)).find(app, ui))
+        .with_app(|app, ui| Locator::app(EditorTarget::World(pos)).find(app, ui))
         .unwrap()
         .point;
     let screen = driver.state(Detail::Concise, None).unwrap().nodes[0]
@@ -261,7 +261,7 @@ fn the_new_node_palette_adds_the_node_clicked() {
     driver
         .act(&[
             Action::Play(Play::Click {
-                at: Locator::Point(Vec2::new(1200.0, 800.0)),
+                at: Locator::point(Vec2::new(1200.0, 800.0)),
                 button: PointerButton::Right,
                 mods: ShortcutMods::NONE,
             }),
@@ -290,7 +290,7 @@ fn down_then_enter_adds_the_next_ranked_match() {
     driver
         .act(&[
             Action::Play(Play::Click {
-                at: Locator::Point(Vec2::new(1200.0, 800.0)),
+                at: Locator::point(Vec2::new(1200.0, 800.0)),
                 button: PointerButton::Right,
                 mods: ShortcutMods::NONE,
             }),
@@ -312,8 +312,8 @@ fn down_then_enter_adds_the_next_ranked_match() {
 }
 
 /// A name no node has is not found, with the names there are; two nodes of one name are
-/// ambiguous, with both places, and `Nth` picks one of them; an index past them, and `Nth` over a
-/// locator that cannot match several, are not found.
+/// ambiguous, with both places, and `nth` picks one of them; an index past them is refused with
+/// the count there is.
 #[test]
 fn a_node_locator_names_exactly_one_node() {
     let mut driver = driver();
@@ -346,7 +346,7 @@ fn a_node_locator_names_exactly_one_node() {
         }) => assert_eq!(count, 2),
         other => panic!("{other:?}"),
     }
-    let header = Locator::App(EditorTarget::NodeHeader(BRIGHTNESS.to_string()));
+    let header = Locator::app(EditorTarget::NodeHeader(BRIGHTNESS.to_string()));
     let first = driver.act(&[nth(header, 0)]).unwrap();
     assert_eq!(first.selection, [BRIGHTNESS], "the first title of the two");
 }
@@ -360,7 +360,7 @@ fn a_focused_text_field_still_settles() {
     let dir = TempDir::new("darkroom-driver-focus");
     let path = fixture::project(dir.path(), &[BRIGHTNESS]);
     driver.open(&path, OpenMode::Copy).unwrap();
-    let header = || Locator::App(EditorTarget::NodeHeader(BRIGHTNESS.to_string()));
+    let header = || Locator::app(EditorTarget::NodeHeader(BRIGHTNESS.to_string()));
     driver
         .act(&[click(header()), key("escape"), click(header())])
         .unwrap();
@@ -422,8 +422,8 @@ fn a_copied_session_leaves_the_source_alone() {
     driver
         .act(&[
             drag(
-                Locator::App(EditorTarget::NodeHeader(BRIGHTNESS.to_string())),
-                Locator::Point(Vec2::new(900.0, 700.0)),
+                Locator::app(EditorTarget::NodeHeader(BRIGHTNESS.to_string())),
+                Locator::point(Vec2::new(900.0, 700.0)),
             ),
             key("ctrl+s"),
         ])
@@ -650,7 +650,7 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
         Err(DriverError::EmptyRegion { .. })
     ));
     // The title: a short window's status bar covers the footer a node's locator presses.
-    let settled = driver.act(&[click(Locator::App(EditorTarget::NodeHeader(
+    let settled = driver.act(&[click(Locator::app(EditorTarget::NodeHeader(
         BRIGHTNESS.to_string(),
     )))]);
     assert!(settled.is_ok(), "settled after the failure: {settled:?}");
@@ -709,14 +709,14 @@ fn the_view_menu_copies_and_saves_the_window() {
     let dir = TempDir::new("darkroom-driver-view");
     let path = fixture::project(dir.path(), &[BRIGHTNESS]);
     driver.open(&path, OpenMode::Copy).unwrap();
-    let view = || click(Locator::Text("View".to_string()));
+    let view = || click(Locator::text("View".to_string()));
 
     let clipboard = driver.offscreen().with_app(|_, ui| ui.clipboard());
     clipboard.set_text("text");
     driver
         .act(&[
             view(),
-            click(Locator::Text("Copy View as Image".to_string())),
+            click(Locator::text("Copy View as Image".to_string())),
         ])
         .unwrap();
     assert_eq!(clipboard.text().unwrap(), None);
@@ -725,7 +725,7 @@ fn the_view_menu_copies_and_saves_the_window() {
         .act(&[
             Action::Answer(DialogAnswer::Path(dir.join("view"))),
             view(),
-            click(Locator::Text("Save View as PNG…".to_string())),
+            click(Locator::text("Save View as PNG…".to_string())),
         ])
         .unwrap();
     let state = driver.state(Detail::Concise, None).unwrap();
@@ -799,8 +799,8 @@ fn a_save_writes_the_format_its_extension_names() {
     driver
         .act(&[
             drag(
-                Locator::App(EditorTarget::NodeHeader(BRIGHTNESS.to_string())),
-                Locator::Point(Vec2::new(900.0, 700.0)),
+                Locator::app(EditorTarget::NodeHeader(BRIGHTNESS.to_string())),
+                Locator::point(Vec2::new(900.0, 700.0)),
             ),
             key("ctrl+s"),
         ])
@@ -827,9 +827,9 @@ fn a_save_writes_the_format_its_extension_names() {
     driver
         .act(&[
             Action::Answer(DialogAnswer::Path(dir.join("again"))),
-            click(Locator::Text("File".to_string())),
+            click(Locator::text("File".to_string())),
             // The row shows the platform's own chord: Ctrl+Shift+S here, ⌘⇧S on macOS.
-            click(Locator::Text(format!("Save As… {}", shortcuts::SAVE_AS))),
+            click(Locator::text(format!("Save As… {}", shortcuts::SAVE_AS))),
         ])
         .unwrap();
     let again = dir.join("again.darkroom");
@@ -874,7 +874,7 @@ fn the_sample_project_runs_to_its_previews() {
     driver
         .act(&[
             key("ctrl+r"),
-            Action::Play(Play::Hover(Locator::Point(Vec2::ZERO))),
+            Action::Play(Play::Hover(Locator::point(Vec2::ZERO))),
         ])
         .unwrap();
     driver.wait_run(Duration::from_secs(30)).unwrap();
@@ -931,11 +931,11 @@ fn a_quit_ends_the_session() {
     driver
         .act(&[
             drag(
-                Locator::App(EditorTarget::NodeHeader(BRIGHTNESS.to_string())),
-                Locator::Point(Vec2::new(900.0, 700.0)),
+                Locator::app(EditorTarget::NodeHeader(BRIGHTNESS.to_string())),
+                Locator::point(Vec2::new(900.0, 700.0)),
             ),
             quit(),
-            click(Locator::Text("Cancel".to_string())),
+            click(Locator::text("Cancel".to_string())),
         ])
         .unwrap();
     assert!(
@@ -945,7 +945,7 @@ fn a_quit_ends_the_session() {
 
     match driver.act(&[
         quit(),
-        click(Locator::Text("Don't Save".to_string())),
+        click(Locator::text("Don't Save".to_string())),
         click(node(BRIGHTNESS)),
     ]) {
         Err(ActFailure {
@@ -972,8 +972,8 @@ fn a_quit_ends_the_session() {
 
     let report = driver
         .act(&[drag(
-            Locator::App(EditorTarget::NodeHeader(BRIGHTNESS.to_string())),
-            Locator::Point(Vec2::new(900.0, 700.0)),
+            Locator::app(EditorTarget::NodeHeader(BRIGHTNESS.to_string())),
+            Locator::point(Vec2::new(900.0, 700.0)),
         )])
         .unwrap();
     assert!(report.dirty);
@@ -998,10 +998,10 @@ fn a_prompt_raised_with_no_press_closes_the_open_menu() {
     driver
         .act(&[
             drag(
-                Locator::App(EditorTarget::NodeHeader(BRIGHTNESS.to_string())),
-                Locator::Point(Vec2::new(900.0, 700.0)),
+                Locator::app(EditorTarget::NodeHeader(BRIGHTNESS.to_string())),
+                Locator::point(Vec2::new(900.0, 700.0)),
             ),
-            click(Locator::Text("File".to_string())),
+            click(Locator::text("File".to_string())),
         ])
         .unwrap();
     assert_eq!(rows(&mut driver, "Save As"), 1, "the menu is open");
@@ -1011,7 +1011,7 @@ fn a_prompt_raised_with_no_press_closes_the_open_menu() {
         .offscreen()
         .with_app(|app, _| app.open_document_at(handed));
     driver
-        .act(&[Action::Play(Play::Hover(Locator::Point(Vec2::new(
+        .act(&[Action::Play(Play::Hover(Locator::point(Vec2::new(
             1200.0, 900.0,
         ))))])
         .unwrap();
@@ -1019,7 +1019,7 @@ fn a_prompt_raised_with_no_press_closes_the_open_menu() {
     assert_eq!(rows(&mut driver, "Save As"), 0, "the menu closed");
 
     driver
-        .act(&[click(Locator::Text("Cancel".to_string()))])
+        .act(&[click(Locator::text("Cancel".to_string()))])
         .unwrap();
     assert_eq!(
         rows(&mut driver, "Don't ask again"),
@@ -1037,13 +1037,13 @@ fn a_dropped_wire_floats_onto_the_node_its_palette_adds() {
     let dir = TempDir::new("darkroom-driver-drop");
     let path = fixture::project(dir.path(), &[BRIGHTNESS]);
     driver.open(&path, OpenMode::Copy).unwrap();
-    let output = Locator::App(EditorTarget::Port {
+    let output = Locator::app(EditorTarget::Port {
         node: BRIGHTNESS.to_string(),
         side: Side::Out,
         port: "Image".to_string(),
     });
     driver
-        .act(&[drag(output, Locator::Point(Vec2::new(1100.0, 700.0)))])
+        .act(&[drag(output, Locator::point(Vec2::new(1100.0, 700.0)))])
         .unwrap();
     // Picked by the keys: a row's text joins its name, category and description, and the
     // library may scroll Convert out of view.
@@ -1069,7 +1069,7 @@ fn a_dropped_wire_floats_onto_the_node_its_palette_adds() {
     assert_eq!(wires(&mut driver), Vec::<String>::new(), "the wire floats");
 
     driver
-        .act(&[click(Locator::App(EditorTarget::Port {
+        .act(&[click(Locator::app(EditorTarget::Port {
             node: CONVERT.to_string(),
             side: Side::In,
             port: "0".to_string(),
@@ -1090,10 +1090,10 @@ fn an_interface_size_pick_scales_the_ui() {
     assert_eq!(scale(&mut driver), 1.0, "premise: the default size");
     driver
         .act(&[
-            click(Locator::Text("File".to_string())),
-            click(Locator::Text("Preferences".to_string())),
-            click(Locator::Text("100%".to_string())),
-            click(Locator::Text("125%".to_string())),
+            click(Locator::text("File".to_string())),
+            click(Locator::text("Preferences".to_string())),
+            click(Locator::text("100%".to_string())),
+            click(Locator::text("125%".to_string())),
         ])
         .unwrap();
     assert_eq!(scale(&mut driver), 1.25);

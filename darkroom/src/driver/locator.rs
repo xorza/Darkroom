@@ -42,7 +42,7 @@ pub enum Side {
 }
 
 /// Every place a target names in the frame `ui` ran of `app`: each node of that name, in the
-/// document's order, so `Nth` picks among them.
+/// document's order, so `Locator::nth` picks among them.
 impl Locate<App> for EditorTarget {
     fn find_all(&self, app: &App, ui: &Ui, out: &mut Vec<Found>) -> Result<(), LocateError> {
         let locator = || format!("{self:?}");

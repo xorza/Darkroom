@@ -296,9 +296,9 @@ impl TryFrom<ActionParam> for Action {
 impl From<LocatorParam> for Locator {
     fn from(locator: LocatorParam) -> Self {
         match locator {
-            LocatorParam::Node(node) => Self::App(EditorTarget::Node(node)),
-            LocatorParam::Header(node) => Self::App(EditorTarget::NodeHeader(node)),
-            LocatorParam::Port { node, side, port } => Self::App(EditorTarget::Port {
+            LocatorParam::Node(node) => Self::app(EditorTarget::Node(node)),
+            LocatorParam::Header(node) => Self::app(EditorTarget::NodeHeader(node)),
+            LocatorParam::Port { node, side, port } => Self::app(EditorTarget::Port {
                 node,
                 side: match side {
                     SideParam::In => Side::In,
@@ -306,9 +306,9 @@ impl From<LocatorParam> for Locator {
                 },
                 port,
             }),
-            LocatorParam::World(point) => Self::App(EditorTarget::World(Vec2::from(point))),
-            LocatorParam::Text(text) => Self::Text(text),
-            LocatorParam::Screen(point) => Self::Point(Vec2::from(point)),
+            LocatorParam::World(point) => Self::app(EditorTarget::World(Vec2::from(point))),
+            LocatorParam::Text(text) => Self::text(text),
+            LocatorParam::Screen(point) => Self::point(Vec2::from(point)),
             LocatorParam::Offset { of, by } => Self::from(*of).offset(Vec2::from(by)),
             LocatorParam::Nth { of, index } => Self::from(*of).nth(index),
         }

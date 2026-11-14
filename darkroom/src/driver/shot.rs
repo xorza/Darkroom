@@ -76,14 +76,14 @@ impl Region {
             Self::Window => Ok(None),
             Self::Pane(name) => pane(app, ui, name).map(Some),
             Self::Node(node) => Ok(Some(
-                Locator::App(EditorTarget::Node(node.clone()))
+                Locator::app(EditorTarget::Node(node.clone()))
                     .find(app, ui)?
                     .rect
                     .inflated(NODE_MARGIN),
             )),
             Self::World(world) => {
                 let point = |at| {
-                    Locator::App(EditorTarget::World(at))
+                    Locator::app(EditorTarget::World(at))
                         .find(app, ui)
                         .map(|found| found.point)
                 };
