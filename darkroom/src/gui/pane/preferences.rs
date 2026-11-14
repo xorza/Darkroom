@@ -120,20 +120,11 @@ impl PreferencesForm<'_> {
     fn interface_size_row(&self, ui: &mut Ui, size: &mut InterfaceSize) {
         let row = APPEARANCE_ROW + 1;
         self.label(ui, "Interface size", row);
-        let offered: &'static [InterfaceSize] = &InterfaceSize::OFFERED;
-        let mut picked = offered
-            .iter()
-            .find(|offer| *offer == size)
-            .expect("a size is an offered one");
-        let changed = ComboBox::labeled(&mut picked, offered, |size| size.label())
+        ComboBox::labeled(size, InterfaceSize::OFFERED, |size| size.label())
             .id(interface_size_wid())
             .grid_cell((row, 1))
             .align(Align::LEFT)
-            .show(ui)
-            .changed;
-        if changed {
-            *size = *picked;
-        }
+            .show(ui);
     }
 
     /// One model-path row: a label, an editable path field (Enter or click-away commits, Escape

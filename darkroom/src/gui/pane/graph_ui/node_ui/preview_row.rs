@@ -11,7 +11,7 @@ use std::fmt::Formatter;
 use imaginarium::ColorFormat;
 use palantir::widget::{ImagePaint, Shape};
 use palantir::{
-    Align, Configure, CursorIcon, DockOperation, ImageFit, Justify, Panel, Sense, Sizing, Text,
+    Align, Configure, CursorIcon, DockOperation, Fit, Justify, Panel, Sense, Sizing, Text,
     TextWrap, Ui, VAlign, fmt,
 };
 
@@ -54,7 +54,7 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
             if let Some(image) = stored.and_then(StoredContent::image) {
                 ui.add_shape(
                     Shape::rect(),
-                    ImagePaint::new(image.preview.handle.clone()).fit(ImageFit::Contain),
+                    ImagePaint::new(image.preview.handle.clone()).fit(Fit::Contain),
                 );
             } else {
                 // `message` is complementary to `image`, so this covers a

@@ -29,8 +29,8 @@ use std::fmt::Formatter;
 use glam::{UVec2, Vec2};
 use palantir::widget::{ImagePaint, Shape};
 use palantir::{
-    Align, Chrome, Configure, ImageDownsample, ImageFilter, ImageFit, ImageHandle, Panel, Sense,
-    Sizing, Spacing, Ui, WidgetId, fmt,
+    Align, Chrome, Configure, Fit, ImageDownsample, ImageFilter, ImageHandle, Panel, Sense, Sizing,
+    Spacing, Ui, WidgetId, fmt,
 };
 
 use crate::core::document::Document;
@@ -205,7 +205,7 @@ impl ImageViewer {
     /// Only the fit needs `pane`: an explicit viewport answers on a pass where the pane has
     /// never been arranged, so a zoomed viewer does not draw at fit for a frame first.
     ///
-    /// `None` means no explicit viewport and no pane to fit into. [`ImageFit::Contain`] is the
+    /// `None` means no explicit viewport and no pane to fit into. [`Fit::Contain`] is the
     /// right picture there, as [`camera::fit_viewport`] matches it, so nothing is owed a later
     /// pass. Registered images have non-zero dims by construction, so the fit has a valid
     /// divisor.
@@ -280,10 +280,10 @@ impl ImageViewer {
                     match self.effective_view(ui, shown, pane) {
                         Some(v) => ui.add_shape(
                             Shape::rect().at(camera::draw_rect(logical_size(shown, ui), v)),
-                            image.fit(ImageFit::Fill),
+                            image.fit(Fit::Fill),
                         ),
                         // No framing yet: palantir's own contain draws what the fit would.
-                        None => ui.add_shape(Shape::rect(), image.fit(ImageFit::Contain)),
+                        None => ui.add_shape(Shape::rect(), image.fit(Fit::Contain)),
                     };
                     let shown = Shown {
                         pane: pane_view,
@@ -333,10 +333,7 @@ impl ImageViewer {
         ui.add_shape(
             Shape::rect(),
             ImagePaint::new(handle)
-                .fit(ImageFit::Tile {
-                    offset: Vec2::ZERO,
-                    scale: pane / (2.0 * theme.viewer.checker_square),
-                })
+                .tile(Vec2::ZERO, pane / (2.0 * theme.viewer.checker_square))
                 .min_filter(ImageFilter::Nearest)
                 .mag_filter(ImageFilter::Nearest),
         );

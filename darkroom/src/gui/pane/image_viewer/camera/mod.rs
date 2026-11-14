@@ -28,7 +28,7 @@ pub(super) fn draw_rect(image: Vec2, v: Viewport) -> Rect {
 }
 
 /// Aspect-preserving fit of `image` (its 1:1 logical footprint) in `pane`
-/// (`ImageFit::Contain` semantics, upscaling small images too), as an
+/// (`Fit::Contain` semantics, upscaling small images too), as an
 /// explicit viewport so the drawn fit and the gesture math can't drift.
 pub(super) fn fit_viewport(image: Vec2, pane: Vec2) -> Viewport {
     let zoom = (pane.x / image.x).min(pane.y / image.y);

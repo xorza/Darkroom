@@ -212,7 +212,7 @@ impl Field<'_> {
             label,
             mut current,
         } = pick;
-        let changed = ComboBox::labeled(&mut current, options, label)
+        let changed = ComboBox::labeled(&mut current, options.iter(), |option| label(option))
             .id(self.id)
             .button_style(&self.theme.button)
             .size(Sizing::FILL)

@@ -12,7 +12,7 @@ use crate::core::io::preferences::ViewerBg;
 use crate::gui::theme::Theme;
 
 /// The 2×2 checkerboard tile in the theme's checker inks — one full checker period, stamped
-/// across the pane via `ImageFit::Tile` + `ImageFilter::Nearest`.
+/// across the pane via `ImagePaint::tile` + `ImageFilter::Nearest`.
 pub(super) fn checker_image(theme: &Theme) -> palantir::Image {
     let [light, dark] =
         [theme.viewer.checker_light, theme.viewer.checker_dark].map(RgbaF32::to_srgba8);

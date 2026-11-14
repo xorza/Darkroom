@@ -41,11 +41,12 @@ fn default_wiring_and_menu_tweak() {
     assert!(theme.palantir.tooltip.max_size.h.is_infinite());
 
     // The open menu's trigger rests lit, as the hovered one does; a shut one rests flat.
-    let bar = &theme.palantir.menu_bar;
-    assert_eq!(bar.open, bar.title.hovered);
-    assert_ne!(bar.open, bar.title.normal);
-    assert_eq!(bar.title.normal.text.color, Some(p.text_muted));
-    assert_eq!(bar.open.to_animated(theme.palantir.text).text.color, p.text);
+    let title = &theme.palantir.menu_bar.title;
+    let open = &title.selected.normal;
+    assert_eq!(open, &title.unselected.hovered);
+    assert_ne!(open, &title.unselected.normal);
+    assert_eq!(title.unselected.normal.text.color, Some(p.text_muted));
+    assert_eq!(open.to_animated(theme.palantir.text).text.color, p.text);
     // A menu's rows and panel as the review drew them.
     let menu = &theme.palantir.menu;
     assert_eq!(
@@ -150,7 +151,8 @@ fn every_palantir_widget_resolves_to_the_body_tier() {
     assert_eq!(ui.text.font_size, theme.font.body);
     let looks = [
         ("button", &ui.button.unselected),
-        ("menu bar title", &ui.menu_bar.title),
+        ("menu bar title", &ui.menu_bar.title.unselected),
+        ("open menu bar title", &ui.menu_bar.title.selected),
         ("menu item", &ui.menu.item.unselected),
         ("selected menu item", &ui.menu.item.selected),
         ("selected tab", &ui.tabs.selected),
@@ -386,7 +388,7 @@ fn every_palantir_padding_and_radius_is_on_the_scale() {
     assert_eq!(ui.tabs.strip_padding.to_array(), [sm, xs, sm, 0.0]);
     assert_eq!(ui.menu_bar.bar_padding.to_array(), [sm, xs, sm, xs]);
     assert_eq!(ui.tabs.chip_padding, ui.menu.item.defaults.padding);
-    assert_eq!(ui.menu_bar.defaults.padding, ui.tabs.chip_padding);
+    assert_eq!(ui.menu_bar.title.defaults.padding, ui.tabs.chip_padding);
     assert_eq!(ui.menu_bar.gap, xs);
     assert_eq!(ui.tabs.chip_padding.to_array(), [md, sm, md, sm]);
     assert_eq!(
@@ -411,7 +413,7 @@ fn a_tab_chip_and_its_close_button_are_ghosts() {
     let looks = &tabs.unselected;
     assert_eq!(looks.normal.chrome.paint.fill, Chrome::NONE.paint.fill);
     assert_eq!(looks.disabled.chrome.paint.fill, Chrome::NONE.paint.fill);
-    let titles = &theme.palantir.menu_bar.title;
+    let titles = &theme.palantir.menu_bar.title.unselected;
     assert_eq!(
         looks.hovered.chrome.paint.fill,
         titles.hovered.chrome.paint.fill

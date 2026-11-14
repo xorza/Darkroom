@@ -724,7 +724,7 @@
     layout: (
         nodes: [
             Split((
-                direction: Row,
+                axis: X,
                 ratio: 0.6045472,
                 first: (1),
                 second: (2),
@@ -738,7 +738,7 @@
                 active: 0,
             )),
             Split((
-                direction: Col,
+                axis: Y,
                 ratio: 0.7012742,
                 first: (3),
                 second: (4),
