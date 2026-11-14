@@ -1,8 +1,7 @@
 use std::collections::BTreeSet;
 
 use glam::Vec2;
-use palantir::widget::Shape;
-use palantir::{Border, Modifiers, Paint, Rect, Ui};
+use palantir::{Border, Modifiers, Paint, Rect, Shape, Ui};
 
 use crate::core::document::item_id::ItemId;
 use crate::core::edit::graph_intent::GraphIntent;

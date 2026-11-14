@@ -3,10 +3,9 @@
 //!
 //! [`Icon`]: crate::gui::widgets::icon::Icon
 
-use palantir::{Border, Rect, RgbaF32, Ui};
+use palantir::{Border, Rect, RgbaF32, Shape, Ui};
 
 use glam::UVec2;
-use palantir::widget::Shape;
 
 use crate::core::io::preferences::ViewerBg;
 use crate::gui::theme::Theme;

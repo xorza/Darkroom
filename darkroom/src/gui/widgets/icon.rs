@@ -2,10 +2,9 @@
 
 use std::f32::consts::PI;
 
-use palantir::{Border, LineCap, LineJoin, Rect, RgbaF32, Stroke, Ui};
+use palantir::{Border, LineCap, LineJoin, Rect, RgbaF32, Shape, Stroke, Ui};
 
 use glam::Vec2;
-use palantir::widget::Shape;
 
 use crate::gui::theme::icon_scale::{CROSS_SPAN, GRID, STROKE};
 use crate::gui::widgets::support;

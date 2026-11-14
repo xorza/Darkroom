@@ -9,8 +9,7 @@ pub(crate) mod tie_probe;
 pub(crate) mod tie_widget;
 
 use glam::Vec2;
-use palantir::widget::Shape;
-use palantir::{LineCap, Stroke, Ui};
+use palantir::{LineCap, Shape, Stroke, Ui};
 
 use crate::core::document::graph_view::GraphView;
 use crate::core::document::item_id::ItemId;

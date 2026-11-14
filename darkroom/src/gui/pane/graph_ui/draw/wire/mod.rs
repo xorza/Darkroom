@@ -21,8 +21,7 @@ use std::ops::Range;
 
 use glam::Vec2;
 
-use palantir::widget::{CubicBezier, Shape};
-use palantir::{ColorRamp, LineCap, RgbaF32, Stroke, Ui};
+use palantir::{ColorRamp, CubicBezier, LineCap, RgbaF32, Shape, Stroke, Ui};
 
 use crate::core::document::wire_key::DataWire;
 use crate::core::document::wire_key::WireKey;

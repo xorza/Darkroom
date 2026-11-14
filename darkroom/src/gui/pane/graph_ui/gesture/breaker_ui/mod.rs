@@ -1,8 +1,7 @@
 pub(crate) mod breaker_probe;
 pub(crate) mod scribble;
 
-use palantir::widget::Shape;
-use palantir::{LineCap, LineJoin, Stroke, Ui};
+use palantir::{LineCap, LineJoin, Shape, Stroke, Ui};
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::frame::requests::Requests;

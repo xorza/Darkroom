@@ -9,10 +9,9 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 
 use imaginarium::ColorFormat;
-use palantir::widget::{ImagePaint, Shape};
 use palantir::{
-    Align, Configure, CursorIcon, DockOperation, Fit, Justify, Panel, Sense, SizeSpec, Sizing,
-    Text, TextWrap, Ui, VAlign, fmt,
+    Align, Configure, CursorIcon, DockOperation, Fit, ImagePaint, Justify, Panel, Sense, Shape,
+    SizeSpec, Sizing, Text, TextWrap, Ui, VAlign, fmt,
 };
 
 use crate::core::document::tab_ref::TabRef;

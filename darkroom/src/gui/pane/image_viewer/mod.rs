@@ -27,10 +27,9 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 
 use glam::{UVec2, Vec2};
-use palantir::widget::{ImagePaint, Shape};
 use palantir::{
-    Align, Chrome, Configure, Fit, ImageDownsample, ImageFilter, ImageHandle, Panel, Sense,
-    SizeSpec, Spacing, Ui, WidgetId, fmt,
+    Align, Chrome, Configure, Fit, ImageDownsample, ImageFilter, ImageHandle, ImagePaint, Panel,
+    Sense, Shape, SizeSpec, Spacing, Ui, WidgetId, fmt,
 };
 
 use crate::core::document::Document;

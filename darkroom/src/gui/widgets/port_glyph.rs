@@ -3,10 +3,9 @@
 
 use common::LibmVec2;
 use glam::Vec2;
-use palantir::widget::Shape;
 use palantir::{
-    Border, Configure, Panel, Rect, Response, RgbaF32, Sense, Spacing, TextInput, Ui, Visibility,
-    WidgetId,
+    Border, Configure, Panel, Rect, Response, RgbaF32, Sense, Shape, Spacing, TextInput, Ui,
+    Visibility, WidgetId,
 };
 
 use crate::gui::theme::Theme;

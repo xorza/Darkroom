@@ -3,13 +3,12 @@
 //! chips in [`chip`](crate::gui::widgets::chip).
 
 use palantir::{
-    Align, AnimationSpec, Block, ButtonTheme, Chrome, Configure, Corners, FontFamily, FontWeight,
-    Rect, Response, RgbaF32, SizeSpec, SlotDefaults, Spacing, StatefulLook, TextInput, TextStyle,
-    TextWrap, Tooltip, Ui, WidgetLook,
+    Align, AnimationSpec, Block, ButtonTheme, Chrome, CircleShape, Configure, Corners, FontFamily,
+    FontWeight, Rect, Response, RgbaF32, Shape, SizeSpec, SlotDefaults, Spacing, StatefulLook,
+    TextInput, TextRun, TextStyle, TextWrap, Tooltip, Ui, WidgetLook,
 };
 
 use glam::Vec2;
-use palantir::widget::{CircleShape, Shape, TextRun};
 
 use crate::gui::theme::Theme;
 

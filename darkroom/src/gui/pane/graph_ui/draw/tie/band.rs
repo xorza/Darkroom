@@ -5,8 +5,7 @@ use common::Libm;
 use std::f32::consts::{FRAC_PI_2, PI};
 
 use glam::Vec2;
-use palantir::widget::Shape;
-use palantir::{LineCap, Rect, RgbaF32, Size, Stroke, Ui};
+use palantir::{LineCap, Rect, RgbaF32, Shape, Size, Stroke, Ui};
 
 use crate::gui::pane::graph_ui::scene::tie_layout::{Band, SLOT_SPACING};
 use crate::gui::theme::Theme;

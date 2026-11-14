@@ -1,8 +1,7 @@
 use common::Libm;
 use common::LibmVec2;
 use glam::Vec2;
-use palantir::widget::{Mesh, Shape};
-use palantir::{Configure, Panel, RgbaF32, SizeSpec, TranslateScale, Ui};
+use palantir::{Configure, Mesh, Panel, RgbaF32, Shape, SizeSpec, TranslateScale, Ui};
 
 use crate::core::document::viewport::Viewport;
 use crate::gui::pane::graph_ui::canvas;
