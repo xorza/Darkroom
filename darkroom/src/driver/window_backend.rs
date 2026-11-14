@@ -54,7 +54,7 @@ impl WindowBackend {
         let played = self
             .remote
             .play(std::slice::from_ref(action))
-            .map_err(|failed| DriverError::played(&format!("{action:?}"), failed.error));
+            .map_err(|failed| DriverError::played(&format!("{action:?}"), failed.source));
         self.running()?;
         played
     }

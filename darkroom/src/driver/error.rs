@@ -25,12 +25,15 @@ pub enum DriverError {
          a project to go on"
     )]
     Quit,
-    #[error("the editor did not settle within {frames} frames after {step}")]
-    Unsettled { step: String, frames: u32 },
+    #[error("the editor still asked for frames {frames_recorded} frames after {step}")]
+    Unsettled { step: String, frames_recorded: u32 },
     #[error("the editor did not settle within {} s after {step}", .waited.as_secs_f32())]
     UnsettledInTime { step: String, waited: Duration },
     #[error("{region} covers none of the window; pick a region inside it")]
     EmptyRegion { region: String },
+    /// A failure of palantir's player the editor has no words of its own for, in palantir's.
+    #[error(transparent)]
+    Played(PlayError),
     #[error("this session paints with no GPU: start it with the GPU display")]
     NoGpu,
     #[error(
@@ -161,16 +164,16 @@ impl DriverError {
     pub(crate) fn played(step: &str, error: PlayError) -> Self {
         match error {
             PlayError::Locate(error) => Self::Locate(error),
-            PlayError::Unsettled { frames } => Self::Unsettled {
+            PlayError::Unsettled { frames_recorded } => Self::Unsettled {
                 step: step.to_string(),
-                frames,
+                frames_recorded,
             },
             PlayError::Untypable { found } => Self::Untypable { found },
             PlayError::ShortDrag { travel } => Self::ShortDrag { travel },
             PlayError::EmptyRegion => Self::EmptyRegion {
                 region: "the region".to_string(),
             },
-            PlayError::NoPixels => Self::NoGpu,
+            PlayError::NoPixels | PlayError::NoDevice => Self::NoGpu,
             PlayError::DeviceLost => Self::DeviceLost,
             PlayError::GpuTimedOut => Self::GpuTimedOut,
             PlayError::Disconnected => Self::WindowClosed,
@@ -181,6 +184,7 @@ impl DriverError {
                 step: step.to_string(),
                 waited,
             },
+            other => Self::Played(other),
         }
     }
 }

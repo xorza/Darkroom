@@ -1,7 +1,7 @@
 //! Why a published value has no image to draw.
 
 use common::USize2;
-use palantir::ImageTooLarge;
+use palantir::ImageSizeError;
 
 /// Why a preview value could not become a texture.
 ///
@@ -21,5 +21,5 @@ pub(crate) enum DrawablePreviewError {
     /// The renderer refused the texture — larger than the device's maximum
     /// 2D dimension.
     #[error(transparent)]
-    Register(#[from] ImageTooLarge),
+    Register(#[from] ImageSizeError),
 }

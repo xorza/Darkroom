@@ -107,7 +107,7 @@ impl Offscreen {
         let played = self
             .painting_session()?
             .play(std::slice::from_ref(action))
-            .map_err(|failed| DriverError::played(&format!("{action:?}"), failed.error));
+            .map_err(|failed| DriverError::played(&format!("{action:?}"), failed.source));
         self.running()?;
         played
     }
