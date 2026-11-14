@@ -12,7 +12,7 @@ use darkroom::driver::shot::Region;
 use darkroom::driver::state::Detail;
 use glam::Vec2;
 use palantir::Action as PalantirAction;
-use palantir::{PointerButton, Rect, Shortcut, ShortcutMods, ZoomFactor};
+use palantir::{PointerButton, Rect, Shortcut, ShortcutMods, WheelDelta, ZoomFactor};
 use rmcp::schemars::JsonSchema;
 use serde::Deserialize;
 use std::num::NonZeroU32;
@@ -272,9 +272,9 @@ impl TryFrom<ActionParam> for Action {
                 mods: modifiers(&mods),
                 steps: steps.unwrap_or(PalantirAction::DRAG_STEPS),
             }),
-            ActionParam::Scroll { at, delta } => play(Play::ScrollPixels {
+            ActionParam::Scroll { at, delta } => play(Play::Scroll {
                 at: at.into(),
-                delta: Vec2::from(delta),
+                delta: WheelDelta::pixels(Vec2::from(delta)),
             }),
             ActionParam::Pinch { at, factor } => play(Play::Pinch {
                 at: at.into(),

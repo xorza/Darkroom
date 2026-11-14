@@ -1,5 +1,5 @@
 use glam::UVec2;
-use palantir::{Harness, Rect, WidgetId};
+use palantir::{Harness, Rect, WheelDelta, WidgetId};
 
 use super::*;
 
@@ -151,11 +151,11 @@ fn a_frame_scrolls_on_any_scroll_channel() {
     assert!(!scrolled(&idle));
 
     let mut pixels = idle;
-    pixels.scroll.pixels = Vec2::new(0.0, 3.0);
+    pixels.scroll.wheel.pixels = Vec2::new(0.0, 3.0);
     let mut notches = idle;
-    notches.scroll.notches.y = -1.0;
+    notches.scroll.wheel.notches.y = -1.0;
     let mut sideways = idle;
-    sideways.scroll.notches.x = 1.0;
+    sideways.scroll.wheel.notches.x = 1.0;
     let mut pinch = idle;
     pinch.scroll.zoom = ZoomFactor::new(1.1).unwrap();
     for resp in [pixels, notches, sideways, pinch] {
@@ -168,7 +168,10 @@ fn a_frame_scrolls_on_any_scroll_channel() {
 #[test]
 fn a_scroll_frame_reads_its_surface_and_the_command_key() {
     let delta = ScrollDelta {
-        pixels: Vec2::new(1.0, 2.0),
+        wheel: WheelDelta {
+            pixels: Vec2::new(1.0, 2.0),
+            ..WheelDelta::ZERO
+        },
         ..ScrollDelta::default()
     };
     let mut resp = Response {
@@ -234,30 +237,42 @@ fn a_scroll_pans_in_every_unit() {
     let rows = [
         (
             ScrollDelta {
-                pixels: Vec2::new(3.0, 4.0),
+                wheel: WheelDelta {
+                    pixels: Vec2::new(3.0, 4.0),
+                    ..WheelDelta::ZERO
+                },
                 ..ScrollDelta::default()
             },
             Vec2::new(7.0, 16.0),
         ),
         (
             ScrollDelta {
-                lines: Vec2::new(1.0, -2.0),
-                notches: Vec2::new(1.0, -2.0),
+                wheel: WheelDelta {
+                    lines: Vec2::new(1.0, -2.0),
+                    notches: Vec2::new(1.0, -2.0),
+                    ..WheelDelta::ZERO
+                },
                 ..ScrollDelta::default()
             },
             Vec2::new(-10.0, 60.0),
         ),
         (
             ScrollDelta {
-                notches: Vec2::new(0.0, 1.0),
-                pages: Vec2::new(0.0, 1.0),
+                wheel: WheelDelta {
+                    notches: Vec2::new(0.0, 1.0),
+                    pages: Vec2::new(0.0, 1.0),
+                    ..WheelDelta::ZERO
+                },
                 ..ScrollDelta::default()
             },
             Vec2::new(10.0, -540.0),
         ),
         (
             ScrollDelta {
-                notches: Vec2::new(0.0, 1.0),
+                wheel: WheelDelta {
+                    notches: Vec2::new(0.0, 1.0),
+                    ..WheelDelta::ZERO
+                },
                 ..ScrollDelta::default()
             },
             START.pan,
@@ -277,12 +292,18 @@ fn a_scroll_pans_in_every_unit() {
 #[test]
 fn a_scroll_under_the_command_key_zooms_by_notches() {
     let notch = ScrollDelta {
-        notches: Vec2::new(0.0, -1.0),
-        lines: Vec2::new(0.0, -1.0),
+        wheel: WheelDelta {
+            notches: Vec2::new(0.0, -1.0),
+            lines: Vec2::new(0.0, -1.0),
+            ..WheelDelta::ZERO
+        },
         ..ScrollDelta::default()
     };
     let three_lines = ScrollDelta {
-        lines: Vec2::new(0.0, -3.0),
+        wheel: WheelDelta {
+            lines: Vec2::new(0.0, -3.0),
+            ..notch.wheel
+        },
         ..notch
     };
     let one_step = zoomed(scroll_to_zoom_factor(-20.0));
@@ -291,7 +312,10 @@ fn a_scroll_under_the_command_key_zooms_by_notches() {
     assert_eq!(folded(frame(ScrollAction::Zoom, three_lines)), one_step);
 
     let pixels = ScrollDelta {
-        pixels: Vec2::new(0.0, 8.0),
+        wheel: WheelDelta {
+            pixels: Vec2::new(0.0, 8.0),
+            ..WheelDelta::ZERO
+        },
         ..ScrollDelta::default()
     };
     assert_eq!(
@@ -301,8 +325,11 @@ fn a_scroll_under_the_command_key_zooms_by_notches() {
 
     // A sideways scroll has no step to zoom by.
     let sideways = ScrollDelta {
-        notches: Vec2::new(1.0, 0.0),
-        lines: Vec2::new(1.0, 0.0),
+        wheel: WheelDelta {
+            notches: Vec2::new(1.0, 0.0),
+            lines: Vec2::new(1.0, 0.0),
+            ..WheelDelta::ZERO
+        },
         ..ScrollDelta::default()
     };
     assert_eq!(folded(frame(ScrollAction::Zoom, sideways)), START);

@@ -4,7 +4,9 @@ use std::time::Duration;
 use common::{TempDir, fs};
 use glam::{UVec2, Vec2};
 use palantir::Action as PalantirAction;
-use palantir::{LocateError, PlayError, PointerButton, Rect, ShortcutMods, SystemScale};
+use palantir::{
+    LocateError, PlayError, PointerButton, Rect, ShortcutMods, SystemScale, WheelDelta,
+};
 use scenarium::{Binding, ConstValue, InputPort, NodeId};
 use tracing::{callsite, subscriber};
 use tracing_subscriber::layer::SubscriberExt as _;
@@ -200,9 +202,9 @@ fn a_wheel_pans_the_canvas() {
     driver.open(&path, OpenMode::Copy).unwrap();
     let before = driver.app().open_document().document().main_view.viewport;
     driver
-        .act(&[Action::Play(Play::ScrollLines {
+        .act(&[Action::Play(Play::Scroll {
             at: Locator::Point(Vec2::new(800.0, 500.0)),
-            delta: Vec2::new(0.0, -2.0),
+            delta: WheelDelta::notches(Vec2::new(0.0, -2.0)),
         })])
         .unwrap();
     let line_px = driver
@@ -223,9 +225,9 @@ fn a_world_point_lands_on_the_canvas_where_nodes_are_placed() {
     let path = fixture::project(dir.path(), &[BRIGHTNESS]);
     driver.open(&path, OpenMode::Copy).unwrap();
     driver
-        .act(&[Action::Play(Play::ScrollPixels {
+        .act(&[Action::Play(Play::Scroll {
             at: Locator::Point(Vec2::new(800.0, 500.0)),
-            delta: Vec2::new(-10.3, -20.3),
+            delta: WheelDelta::pixels(Vec2::new(-10.3, -20.3)),
         })])
         .unwrap();
     let pan = driver

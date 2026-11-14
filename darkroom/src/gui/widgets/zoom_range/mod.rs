@@ -12,8 +12,8 @@ use crate::core::document::viewport::Viewport;
 /// Palantir reports exactly zero, and a unit zoom, for none, so the tests are
 /// exact.
 pub(crate) fn scrolled(resp: &Response) -> bool {
-    resp.scroll.pixels != Vec2::ZERO
-        || resp.scroll.notches != Vec2::ZERO
+    resp.scroll.wheel.pixels != Vec2::ZERO
+        || resp.scroll.wheel.notches != Vec2::ZERO
         || resp.scroll.zoom != ZoomFactor::ONE
 }
 
@@ -78,7 +78,7 @@ impl ZoomRange {
         match action {
             ScrollAction::Pan => v.pan -= delta.pan(line_px, pane),
             ScrollAction::Zoom => {
-                let delta_y = delta.pixels.y + delta.notches.y * line_px;
+                let delta_y = delta.wheel.pixels.y + delta.wheel.notches.y * line_px;
                 if delta_y != 0.0
                     && let Some(pivot) = pivot
                 {
