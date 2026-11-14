@@ -13,6 +13,7 @@ use crate::driver::offscreen::Offscreen;
 use crate::driver::shot::{Capture, Region};
 use crate::driver::window_backend::WindowBackend;
 use crate::gui::app::App;
+use std::num::NonZeroU32;
 
 /// How long a wait on the window's background work sleeps between two looks at the app.
 const WINDOW_POLL: Duration = Duration::from_millis(5);
@@ -121,7 +122,11 @@ impl Backend {
     }
 
     /// A capture of `region`, as a later frame paints it.
-    pub(crate) fn shot(&mut self, region: &Region, max_side: u32) -> Result<Capture, DriverError> {
+    pub(crate) fn shot(
+        &mut self,
+        region: &Region,
+        max_side: NonZeroU32,
+    ) -> Result<Capture, DriverError> {
         match self {
             Self::Offscreen(offscreen) => {
                 Capture::take(&mut offscreen.painting_session()?, region, max_side)

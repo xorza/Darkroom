@@ -25,6 +25,7 @@ use crate::mcp::params::{
     WaitRunParams,
 };
 use crate::mcp::session_thread::{Session, SessionThread, ToolError};
+use std::num::NonZeroU32;
 
 /// What the server tells an agent before its first call.
 const INSTRUCTIONS: &str = "Drives the darkroom node editor, offscreen or in its window. Open a \
@@ -252,12 +253,11 @@ impl ServerHandler for DarkroomServer {
 
 /// A shot of `params`' region, as an image and its legend.
 fn take_shot(driver: &mut Driver, params: ShotParams) -> Result<Vec<ContentBlock>, ToolError> {
-    let max_side = params.max_side.unwrap_or(MAX_SIDE);
-    if max_side == 0 {
+    let Some(max_side) = NonZeroU32::new(params.max_side.unwrap_or(MAX_SIDE)) else {
         return Err(ToolError(
             "max_side is 0; give the picture's longer side in pixels".to_string(),
         ));
-    }
+    };
     let shot = driver.shot(&Region::from(params.region), max_side)?;
     // rmcp's own base64 encoder, which its prompt messages reach.
     let image = PromptMessage::new_image(Role::Assistant, &shot.png, "image/png", None, None);

@@ -32,9 +32,10 @@ use crate::driver::shot::{Region, Shot};
 use crate::driver::state::{Detail, State, UiList};
 use crate::driver::window_backend::WindowBackend;
 use crate::driver::window_link::WindowLink;
+use std::num::NonZeroU32;
 
 /// Frames an action may run before it counts as unsettled: ten seconds of UI time.
-const SETTLE_FRAMES: u32 = 600;
+const SETTLE_FRAMES: NonZeroU32 = NonZeroU32::new(600).unwrap();
 /// Real time an action may wait for the app's background work, a preview's conversion, to land.
 const BACKGROUND_WAIT: Duration = Duration::from_secs(30);
 /// The largest project folder a session copies into its directory, which sits in RAM on a tmpfs
@@ -210,12 +211,7 @@ impl Driver {
 
     /// A picture of `region` as a later frame paints it, scaled so that its longer side is at
     /// most `max_side` pixels, and written to `shots/<n>-<region>.png` in the session directory.
-    ///
-    /// # Panics
-    ///
-    /// When `max_side` is 0.
-    pub fn shot(&mut self, region: &Region, max_side: u32) -> Result<Shot, DriverError> {
-        assert!(max_side > 0, "a shot has at least one pixel a side");
+    pub fn shot(&mut self, region: &Region, max_side: NonZeroU32) -> Result<Shot, DriverError> {
         self.backend.running()?;
         self.shots += 1;
         let dir = self.session.join("shots");

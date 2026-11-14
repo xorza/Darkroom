@@ -15,6 +15,7 @@ use palantir::Action as PalantirAction;
 use palantir::{PointerButton, Rect, Shortcut, ShortcutMods, ZoomFactor};
 use rmcp::schemars::JsonSchema;
 use serde::Deserialize;
+use std::num::NonZeroU32;
 
 /// The longer side of a shot when the call names none: enough to read a node's labels in a
 /// whole window, at about 1,300 tokens for a 16:10 picture.
@@ -129,8 +130,8 @@ pub(crate) enum ActionParam {
         button: ButtonParam,
         #[serde(default)]
         mods: Vec<ModParam>,
-        /// Pointer moves on the way, 8 by default.
-        steps: Option<u32>,
+        /// Pointer moves on the way, at least 1; 8 by default.
+        steps: Option<NonZeroU32>,
     },
     /// Scroll there by `delta` logical pixels; a positive `y` scrolls content down.
     Scroll { at: LocatorParam, delta: [f32; 2] },

@@ -16,6 +16,7 @@ use crate::gui::main_window::MainWindow;
 use crate::gui::main_window::dock_panes;
 use crate::gui::pane::graph_ui::wid;
 use crate::gui::port_ref::PortRef;
+use std::num::NonZeroU32;
 
 /// The characters of a region's name a shot's file name keeps: with its number and kind, well
 /// under the 255 bytes a file name may take.
@@ -177,7 +178,7 @@ impl Capture {
     pub(crate) fn take(
         window: &mut impl AgentWindow<App>,
         region: &Region,
-        max_side: u32,
+        max_side: NonZeroU32,
     ) -> Result<Self, DriverError> {
         let played = |error| match error {
             PlayError::EmptyRegion => DriverError::EmptyRegion {

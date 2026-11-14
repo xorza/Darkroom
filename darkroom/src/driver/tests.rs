@@ -25,6 +25,7 @@ use crate::gui::main_window::MainWindow;
 use crate::gui::state::preview_store::StoredContent;
 use crate::gui::theme::Theme;
 use crate::internals::fixture;
+use std::num::NonZeroU32;
 
 const BRIGHTNESS: &str = "Brightness / Contrast";
 const CONVERT: &str = "Convert";
@@ -563,7 +564,9 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
     assert_eq!(screen, [40.0, 119.0, 277.0, 193.0]);
 
     let theme = Theme::default();
-    let whole = driver.shot(&Region::Window, 400).unwrap();
+    let whole = driver
+        .shot(&Region::Window, NonZeroU32::new(400).unwrap())
+        .unwrap();
     assert_eq!(whole.size, window);
     assert_eq!(whole.legend[0].name, BRIGHTNESS);
     assert_eq!(whole.legend[0].rect, screen);
@@ -585,7 +588,9 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
         whole.path.display()
     );
 
-    let quarter = driver.shot(&Region::Window, 100).unwrap();
+    let quarter = driver
+        .shot(&Region::Window, NonZeroU32::new(100).unwrap())
+        .unwrap();
     assert_eq!(quarter.size, UVec2::new(100, 85));
     assert_eq!(decode(&quarter.png).dimensions(), (100, 85));
     assert_eq!(quarter.legend[0].rect, screen.map(|v| v / 4.0));
@@ -606,7 +611,10 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
     );
 
     let node = driver
-        .shot(&Region::Node(BRIGHTNESS.to_string()), 1000)
+        .shot(
+            &Region::Node(BRIGHTNESS.to_string()),
+            NonZeroU32::new(1000).unwrap(),
+        )
         .unwrap();
     assert_eq!(NODE_MARGIN, 24.0);
     assert_eq!(node.size, UVec2::new(325, 241));
@@ -620,19 +628,22 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
     let world = driver
         .shot(
             &Region::World(Rect::new(corner.x, corner.y, 100.0, 50.0)),
-            1000,
+            NonZeroU32::new(1000).unwrap(),
         )
         .unwrap();
     assert_eq!(world.size, UVec2::new(100, 50));
     assert_eq!(world.legend[0].rect, [0.0, 0.0, 100.0, 50.0]);
     assert!(matches!(
-        driver.shot(&Region::World(Rect::new(1e4, 1e4, 10.0, 10.0)), 1000),
+        driver.shot(
+            &Region::World(Rect::new(1e4, 1e4, 10.0, 10.0)),
+            NonZeroU32::new(1000).unwrap()
+        ),
         Err(DriverError::EmptyRegion { .. })
     ));
     assert!(matches!(
         driver.shot(
             &Region::World(Rect::new(corner.x, corner.y, -10.0, 10.0)),
-            1000
+            NonZeroU32::new(1000).unwrap()
         ),
         Err(DriverError::EmptyRegion { .. })
     ));
@@ -651,11 +662,17 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
         })
         .unwrap();
     let pane = driver
-        .shot(&Region::Pane("Graph".to_string()), 1000)
+        .shot(
+            &Region::Pane("Graph".to_string()),
+            NonZeroU32::new(1000).unwrap(),
+        )
         .unwrap();
     let rounded = rect.max().ceil() - rect.min.floor();
     assert_eq!(pane.size.as_vec2(), rounded, "{rect:?}");
-    match driver.shot(&Region::Pane("missing".to_string()), 1000) {
+    match driver.shot(
+        &Region::Pane("missing".to_string()),
+        NonZeroU32::new(1000).unwrap(),
+    ) {
         Err(DriverError::Locate(LocateError::NotFound { nearest, .. })) => {
             assert_eq!(nearest, ["Graph"]);
         }
@@ -669,7 +686,7 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
         Some(screen)
     );
     assert!(matches!(
-        cpu.shot(&Region::Window, 100),
+        cpu.shot(&Region::Window, NonZeroU32::new(100).unwrap()),
         Err(DriverError::NoGpu)
     ));
     assert!(matches!(
@@ -712,7 +729,9 @@ fn the_view_menu_copies_and_saves_the_window() {
     let state = driver.state(Detail::Concise, None).unwrap();
     assert_eq!((state.status, state.log), (None, Vec::<String>::new()));
     let saved = decode(&fs::read(dir.join("view.png")).unwrap());
-    let shot = driver.shot(&Region::Window, 400).unwrap();
+    let shot = driver
+        .shot(&Region::Window, NonZeroU32::new(400).unwrap())
+        .unwrap();
     assert_eq!(saved, decode(&shot.png));
 }
 
@@ -726,17 +745,32 @@ fn a_lost_device_is_replaced_and_the_editor_paints_as_before() {
     let dir = TempDir::new("darkroom-driver-lose");
     let path = fixture::project(dir.path(), &[BRIGHTNESS]);
     driver.open(&path, OpenMode::Copy).unwrap();
-    let before = decode(&driver.shot(&Region::Window, 400).unwrap().png);
+    let before = decode(
+        &driver
+            .shot(&Region::Window, NonZeroU32::new(400).unwrap())
+            .unwrap()
+            .png,
+    );
 
     driver.offscreen().lose_device().unwrap();
     assert!(driver.offscreen().is_device_lost());
-    let after = decode(&driver.shot(&Region::Window, 400).unwrap().png);
+    let after = decode(
+        &driver
+            .shot(&Region::Window, NonZeroU32::new(400).unwrap())
+            .unwrap()
+            .png,
+    );
     assert!(!driver.offscreen().is_device_lost());
     assert_eq!(after, before);
 
     driver.act(&[Action::LoseDevice]).unwrap();
     assert!(!driver.offscreen().is_device_lost());
-    let again = decode(&driver.shot(&Region::Window, 400).unwrap().png);
+    let again = decode(
+        &driver
+            .shot(&Region::Window, NonZeroU32::new(400).unwrap())
+            .unwrap()
+            .png,
+    );
     assert_eq!(again, before);
 }
 
