@@ -103,7 +103,7 @@ fn info_row(ui: &mut Ui, theme: &Theme, image: &DrawablePreview) {
         .size((Sizing::FILL, Sizing::HUG))
         .padding(card::band_padding(theme))
         .gap(theme.space.md)
-        .child_align(Align::v(VAlign::Center))
+        .child_align(VAlign::Center)
         // Round only the bottom corners, to seat into the body's rounded bottom.
         .chrome(theme.footer_chrome(theme.card_inner_radius()))
         .show(ui, |ui| {
@@ -114,7 +114,7 @@ fn info_row(ui: &mut Ui, theme: &Theme, image: &DrawablePreview) {
                 .id_salt("preview_info_size")
                 .size((Sizing::HUG, Sizing::HUG))
                 .gap(theme.space.xs)
-                .child_align(Align::v(VAlign::Center))
+                .child_align(VAlign::Center)
                 .show(ui, |ui| {
                     LabeledValue {
                         label: "Source",

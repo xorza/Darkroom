@@ -4,8 +4,7 @@
 //! run, so a run's end changes no node's height.
 
 use palantir::{
-    Align, Block, Chrome, Configure, Corners, Panel, RgbaF32, Sense, Sizing, Text, TextWrap, Ui,
-    VAlign,
+    Block, Chrome, Configure, Corners, Panel, RgbaF32, Sense, Sizing, Text, TextWrap, Ui, VAlign,
 };
 use scenarium::RamUsage;
 
@@ -39,7 +38,7 @@ pub(super) fn show(ui: &mut Ui, node_ctx: NodeCtx<'_>) {
                 .id_salt("node_footer_row")
                 .size((Sizing::FILL, Sizing::HUG))
                 .gap(theme.space.md)
-                .child_align(Align::v(VAlign::Center))
+                .child_align(VAlign::Center)
                 .show(ui, |ui| {
                     let run = RunStatus::new(status);
                     match status {
@@ -110,7 +109,7 @@ impl Pool {
             .id_salt(("node_mem_meter", self.label))
             .size((Sizing::HUG, Sizing::HUG))
             .gap(theme.space.xs)
-            .child_align(Align::v(VAlign::Center))
+            .child_align(VAlign::Center)
             .show(ui, |ui| {
                 support::dot_cell(ui, "node_mem_dot", theme, self.hue);
                 LabeledValue {

@@ -124,12 +124,12 @@ impl Lattice {
         for row in 0..rows {
             for col in 0..cols {
                 let center_pos = (Vec2::new(col as f32, row as f32) + 0.5) * spacing;
-                let center = mesh.vertex(center_pos, color);
+                let center = mesh.add_vertex(center_pos, color);
                 for &offset in &rim {
-                    mesh.vertex(center_pos + offset, clear);
+                    mesh.add_vertex(center_pos + offset, clear);
                 }
                 for i in 0..RIM_VERTICES {
-                    mesh.triangle(center, center + 1 + i, center + 1 + (i + 1) % RIM_VERTICES);
+                    mesh.add_triangle(center, center + 1 + i, center + 1 + (i + 1) % RIM_VERTICES);
                 }
             }
         }
@@ -221,13 +221,13 @@ mod tests {
 
         let center = Vec2::splat(5.0);
         let mut want = Mesh::new();
-        want.vertex(center, RgbaF32::WHITE);
+        want.add_vertex(center, RgbaF32::WHITE);
         for i in 0..6 {
             let at = Vec2::libm_from_angle(std::f32::consts::TAU * i as f32 / 6.0) * 1.5;
-            want.vertex(center + at, RgbaF32::WHITE.with_alpha(0.0));
+            want.add_vertex(center + at, RgbaF32::WHITE.with_alpha(0.0));
         }
         for i in 0..6 {
-            want.triangle(0, 1 + i, 1 + (i + 1) % 6);
+            want.add_triangle(0, 1 + i, 1 + (i + 1) % 6);
         }
         assert_eq!(mesh.content_hash(), want.content_hash());
 

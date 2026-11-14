@@ -5,8 +5,8 @@
 use std::path::PathBuf;
 
 use palantir::{
-    Align, Button, Checkbox, Configure, Modal, OverlayClose, Panel, Sizing, Spacing, Text,
-    TextWrap, Ui, VAlign, WidgetId,
+    Button, Checkbox, Configure, Modal, OverlayClose, Panel, Sizing, Spacing, Text, TextWrap, Ui,
+    VAlign, WidgetId,
 };
 
 use crate::gui::theme::Theme;
@@ -188,7 +188,7 @@ fn show(ui: &mut Ui, theme: &Theme, file_name: Option<&str>, tail: &str) -> Disc
                     .size((Sizing::FILL, Sizing::HUG))
                     .padding(Spacing::xy(inset, theme.space.lg))
                     .gap(theme.space.sm)
-                    .child_align(Align::v(VAlign::Center))
+                    .child_align(VAlign::Center)
                     .chrome(theme.footer_chrome(theme.float_inner_radius()))
                     .show(ui, |ui| {
                         Checkbox::new(dont_ask_again)

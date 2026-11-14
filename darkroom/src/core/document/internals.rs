@@ -265,7 +265,7 @@ impl DocumentFixture {
     pub(crate) fn with_tab(mut self, tab: TabRef) -> Self {
         let group = self.document.layout.primary().id();
         let layout = &mut self.document.layout;
-        layout.apply(DockOperation::FocusPane { group });
+        layout.apply(DockOperation::FocusGroup { group });
         layout.apply(DockOperation::OpenTab { tab });
         self
     }

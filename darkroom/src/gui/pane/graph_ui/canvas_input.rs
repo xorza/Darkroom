@@ -1,7 +1,7 @@
 //! What this frame's input means on the canvas: which bare-canvas gesture a press latches among
 //! them, the one place that precedence is decided, and what Esc does.
 
-use palantir::{Modifiers, PointerButton, ResponseState};
+use palantir::{Modifiers, PointerButton, Response};
 
 /// What this frame's input means on the canvas, resolved once at the top of
 /// [`GraphUi::input`](crate::gui::pane::graph_ui::GraphUi::input) and read
@@ -65,7 +65,7 @@ impl CanvasGesture {
     /// press a node or port captured, as a node widget captures its own press and the canvas
     /// sees only presses that missed every one.
     pub(crate) const fn classify(
-        resp: &ResponseState,
+        resp: &Response,
         modifiers: Modifiers,
         secondary: SecondaryPress,
     ) -> Option<Self> {
@@ -120,7 +120,9 @@ pub(crate) enum Escape {
 #[cfg(test)]
 mod tests {
     use glam::Vec2;
-    use palantir::{ButtonPhase, ButtonState, Drag, Modifiers, PointerButton, ResponseState};
+    use palantir::{
+        Drag, Modifiers, PointerButton, PointerButtonPhase, PointerButtonState, Response, WidgetId,
+    };
 
     use crate::gui::pane::graph_ui::canvas_input::{CanvasGesture, SecondaryPress};
 
@@ -129,12 +131,12 @@ mod tests {
     /// deselect, and a right click spent ending a wire opens nothing.
     #[test]
     fn each_press_latches_its_gesture_by_precedence() {
-        let dragged = ButtonState {
-            phase: ButtonPhase::Held,
+        let dragged = PointerButtonState {
+            phase: PointerButtonPhase::Held,
             drag: Drag::Started { delta: Vec2::X },
         };
-        let clicked = |count| ButtonState {
-            phase: ButtonPhase::Up { click: Some(count) },
+        let clicked = |count| PointerButtonState {
+            phase: PointerButtonPhase::Up { click: Some(count) },
             drag: Drag::None,
         };
         let mods = |ctrl, shift| {
@@ -145,26 +147,32 @@ mod tests {
         };
         let none = Modifiers::default();
         let (left, right) = (PointerButton::Left, PointerButton::Right);
-        let left_by = |state| ResponseState {
+        let left_by = |state| Response {
             left: state,
-            ..ResponseState::default()
+            ..Response::idle(WidgetId::from_hash("probe"))
         };
-        let right_by = |state| ResponseState {
+        let right_by = |state| Response {
             right: state,
-            ..ResponseState::default()
+            ..Response::idle(WidgetId::from_hash("probe"))
         };
-        let middle_by = |state| ResponseState {
+        let middle_by = |state| Response {
             middle: state,
-            ..ResponseState::default()
+            ..Response::idle(WidgetId::from_hash("probe"))
         };
-        let both = ResponseState {
+        let both = Response {
             left: clicked(1),
             middle: dragged,
-            ..ResponseState::default()
+            ..Response::idle(WidgetId::from_hash("probe"))
         };
         let free = SecondaryPress::Free;
         let cases = [
-            ("idle", ResponseState::default(), none, free, None),
+            (
+                "idle",
+                Response::idle(WidgetId::from_hash("probe")),
+                none,
+                free,
+                None,
+            ),
             (
                 "middle drag",
                 middle_by(dragged),

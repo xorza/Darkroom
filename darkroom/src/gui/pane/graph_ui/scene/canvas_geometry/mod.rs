@@ -21,7 +21,7 @@ pub(crate) mod port_layer;
 /// [`crate::gui::pane::graph_ui::GraphUi::input`], its centers moved by
 /// [`Self::reposition`] to where the record finds the nodes, and reused by
 /// [`crate::gui::pane::graph_ui::GraphUi::record`]. Each glyph snapshot keeps the few fields read
-/// of it instead of the whole `ResponseState`.
+/// of it instead of the whole `Response`.
 ///
 /// Ports that haven't recorded yet (first frame after a node spawns) have an entry with
 /// `layout_center` / `screen_rect` = `None`, and the edge bools default to `false`, so
@@ -160,18 +160,18 @@ impl CanvasGeometry {
             };
             for kind in [PortKind::Input, PortKind::Output] {
                 for port in n.ports(kind) {
-                    let r = ui.response_for(wid::port_circle(port)).state;
+                    let r = ui.response_for(wid::port_circle(port));
                     self.ports.record(port, r, place);
                 }
             }
             // Emitter event glyphs, drag sources for subscription wires.
             for ev in n.event_ports() {
-                let r = ui.response_for(wid::event_glyph(ev)).state;
+                let r = ui.response_for(wid::event_glyph(ev));
                 self.events.record(ev, r, place);
             }
             // Only sink nodes render a subscription pin (see `header::subscription_pin`).
             if n.sink() {
-                let r = ui.response_for(wid::subscription_glyph(n.node_id)).state;
+                let r = ui.response_for(wid::subscription_glyph(n.node_id));
                 self.subs.record(n.node_id, r, place);
             }
         }

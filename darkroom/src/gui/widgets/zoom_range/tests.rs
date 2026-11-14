@@ -1,5 +1,5 @@
 use glam::UVec2;
-use palantir::{Harness, Rect};
+use palantir::{Harness, Rect, WidgetId};
 
 use super::*;
 
@@ -147,7 +147,7 @@ fn zoom_about_ignores_non_positive_or_non_finite_factor() {
 /// a frame with none of them does not.
 #[test]
 fn a_frame_scrolls_on_any_scroll_channel() {
-    let idle = ResponseState::default();
+    let idle = Response::idle(WidgetId::from_hash("probe"));
     assert!(!scrolled(&idle));
 
     let mut pixels = idle;
@@ -171,11 +171,11 @@ fn a_scroll_frame_reads_its_surface_and_the_command_key() {
         pixels: Vec2::new(1.0, 2.0),
         ..ScrollDelta::default()
     };
-    let mut resp = ResponseState {
+    let mut resp = Response {
         scroll: delta,
         pointer_local: Some(Vec2::new(3.0, 4.0)),
         layout_rect: Some(Rect::new(5.0, 6.0, 70.0, 80.0)),
-        ..ResponseState::default()
+        ..Response::idle(WidgetId::from_hash("probe"))
     };
 
     let mut h = Harness::new(UVec2::new(100, 100));

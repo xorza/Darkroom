@@ -7,9 +7,8 @@ use std::collections::BTreeSet;
 use std::f32::consts::FRAC_PI_4;
 
 use palantir::{
-    Align, Checkbox, Configure, DockDrop, DockOperation, EditableLabel, Menu, MenuItem,
-    MenuSeparator, Modifiers, Panel, Separator, Sizing, SplitSide, Ui, VAlign, Visibility,
-    WidgetId,
+    Checkbox, Configure, DockDrop, DockOperation, EditableLabel, Menu, MenuItem, MenuSeparator,
+    Modifiers, Panel, Separator, Sizing, SplitSide, Ui, VAlign, Visibility, WidgetId,
 };
 
 use scenarium::{CacheMode, NodeId};
@@ -84,7 +83,7 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
         .size((Sizing::FILL, Sizing::HUG))
         .padding(card::band_padding(theme))
         .gap(theme.space.xs)
-        .child_align(Align::v(VAlign::Center))
+        .child_align(VAlign::Center)
         .show(ui, |ui| {
             if node.runnable() && run_button(ui, node) {
                 record

@@ -254,7 +254,7 @@ impl Field<'_> {
             .id(id)
             .size((Sizing::fixed(theme.width), Sizing::FILL))
             .padding(editor.defaults.padding)
-            .child_align(Align::v(VAlign::Center))
+            .child_align(VAlign::Center)
             .chrome(editor.looks.normal.chrome.clone())
             .show(ui, |ui| {
                 Text::new(UNSET).color(theme.unset).show(ui);

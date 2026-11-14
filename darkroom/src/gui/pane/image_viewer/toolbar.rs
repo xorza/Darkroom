@@ -6,8 +6,8 @@
 //! which reads and writes the viewer's framing; everything it stamps out is here.
 
 use palantir::{
-    Align, Configure, ImageFilter, Panel, RgbaF32, Sizing, Spacing, Text, TextInput, TextWrap, Ui,
-    VAlign, WidgetId,
+    Configure, ImageFilter, Panel, RgbaF32, Sizing, Spacing, Text, TextInput, TextWrap, Ui, VAlign,
+    WidgetId,
 };
 use scenarium::NodeId;
 
@@ -92,7 +92,7 @@ impl Readout<'_> {
             .size((Sizing::HUG, Sizing::fixed(pill::height(theme))))
             .max_size((max_width, f32::INFINITY))
             .padding(Spacing::xy(theme.space.md, 0.0))
-            .child_align(Align::v(VAlign::Center))
+            .child_align(VAlign::Center)
             .chrome(theme.pill.clone())
             .show(ui, |ui| {
                 let style = support::colored_text(ui, ink, theme.font.body);

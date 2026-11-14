@@ -4,14 +4,14 @@
 
 use common::Libm;
 use glam::Vec2;
-use palantir::{Modifiers, ResponseState, ScrollDelta, Size, Ui, ZoomFactor};
+use palantir::{Modifiers, Response, ScrollDelta, Size, Ui, ZoomFactor};
 
 use crate::core::document::viewport::Viewport;
 
 /// Whether `resp` carries any scroll, touchpad or pinch input this frame.
 /// Palantir reports exactly zero, and a unit zoom, for none, so the tests are
 /// exact.
-pub(crate) fn scrolled(resp: &ResponseState) -> bool {
+pub(crate) fn scrolled(resp: &Response) -> bool {
     resp.scroll.pixels != Vec2::ZERO
         || resp.scroll.notches != Vec2::ZERO
         || resp.scroll.zoom != ZoomFactor::ONE
@@ -37,7 +37,7 @@ pub(crate) struct ScrollFrame {
 
 impl ScrollFrame {
     /// The frame `resp` reports, under the modifiers held now.
-    pub(crate) fn of(ui: &Ui, resp: &ResponseState) -> Self {
+    pub(crate) fn of(ui: &Ui, resp: &Response) -> Self {
         Self {
             delta: resp.scroll,
             pivot: resp.pointer_local,

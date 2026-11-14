@@ -156,7 +156,7 @@ impl PreferencesForm<'_> {
             let mut edit = TextEdit::buffered(path.to_string_lossy())
                 .id(wid)
                 .grid_cell((at, 1))
-                .align(Align::v(VAlign::Center))
+                .align(VAlign::Center)
                 .size((Sizing::FILL, Sizing::HUG))
                 .min_size((ML_PATH_FIELD_MIN, 0.0))
                 .placeholder("/path/to/model.onnx");
@@ -179,7 +179,7 @@ impl PreferencesForm<'_> {
                 .id_salt(("browse", name))
                 .label("Browse…")
                 .grid_cell((at, 2))
-                .align(Align::v(VAlign::Center))
+                .align(VAlign::Center)
                 .show(ui)
                 .left
                 .clicked()
@@ -235,7 +235,7 @@ impl PreferencesForm<'_> {
             .id_salt(("label", text))
             .style(&support::body_text(ui, theme))
             .grid_cell((row, 0))
-            .align(Align::v(VAlign::Center))
+            .align(VAlign::Center)
             .show(ui);
     }
 }
@@ -338,7 +338,7 @@ fn download_hint(ui: &mut Ui, theme: &Theme, row: ModelRow) {
     Panel::hstack()
         .id_salt("hint")
         .size((Sizing::FILL, Sizing::HUG))
-        .child_align(Align::v(VAlign::Top))
+        .child_align(VAlign::Top)
         .show(ui, |ui| {
             // The destination shows under the pointer, as the text does not spell it out. A missing
             // opener logs and degrades: the link has no error to show.

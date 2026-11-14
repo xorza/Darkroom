@@ -178,7 +178,7 @@ fn document_name(ui: &mut Ui, ctx: GraphCtx<'_>) {
         .size((Sizing::HUG, Sizing::HUG))
         .align(Align::CENTER)
         .gap(theme.space.sm)
-        .child_align(Align::v(VAlign::Center))
+        .child_align(VAlign::Center)
         .sense(Sense::HOVER)
         .show(ui, |ui| {
             if open.is_dirty() {

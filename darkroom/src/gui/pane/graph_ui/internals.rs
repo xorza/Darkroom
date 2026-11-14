@@ -168,7 +168,7 @@ impl CanvasHarness {
         } = self;
         let mut frame = CanvasFrame::new(graph_ui, ctx, AppliesIntents::No);
         ui.frame_app(&mut frame);
-        frame.recorded_at == Some(ui.ui().render_frame_id())
+        frame.recorded_at == Some(ui.ui().render_frame_idx())
     }
 
     pub(crate) fn document(&self) -> &Document {
@@ -294,7 +294,7 @@ impl<'a> CanvasFrame<'a> {
     fn finish(self, ui: &Harness) -> Requests {
         assert_eq!(
             self.recorded_at,
-            Some(ui.ui().render_frame_id()),
+            Some(ui.ui().render_frame_idx()),
             "the last frame ran no record pass",
         );
         self.out
@@ -338,7 +338,7 @@ impl App for CanvasFrame<'_> {
         };
         record_in_pane(self.graph_ui, self.ctx, recorder, out);
         out.spend_relayout(recorder);
-        self.recorded_at = Some(recorder.render_frame_id());
+        self.recorded_at = Some(recorder.render_frame_idx());
     }
 }
 

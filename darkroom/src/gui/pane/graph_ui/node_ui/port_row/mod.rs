@@ -245,7 +245,7 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
         .size((Sizing::HUG, Sizing::HUG))
         .sense(Sense::CLICK)
         .gap(theme.space.xs)
-        .child_align(Align::v(VAlign::Center))
+        .child_align(VAlign::Center)
         .show(ui, |ui| {
             // A const-only input can't be wired, so it has no wire anchor: just the label.
             if input.const_only() {
@@ -401,7 +401,7 @@ fn value_column<R>(ui: &mut Ui, port: InputPort, body: impl FnOnce(&mut Ui) -> R
         .id_salt(("val", port.port_idx))
         .grid_cell((grid_row(port.port_idx), COL_VALUE))
         .size(Sizing::FILL)
-        .child_align(Align::v(VAlign::Center))
+        .child_align(VAlign::Center)
         .show(ui, body)
         .inner
 }
@@ -429,7 +429,7 @@ fn output_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, output: OutputCtx<'
         .size((Sizing::HUG, Sizing::HUG))
         .sense(Sense::CLICK)
         .gap(theme.space.xs)
-        .child_align(Align::v(VAlign::Center))
+        .child_align(VAlign::Center)
         .show(ui, |ui| {
             PortLabel {
                 name: output.name(),
@@ -522,7 +522,7 @@ impl EventRow<'_> {
             .align(Align::RIGHT)
             .size((Sizing::HUG, Sizing::HUG))
             .gap(theme.space.xs)
-            .child_align(Align::v(VAlign::Center))
+            .child_align(VAlign::Center)
             .show(ui, |ui| {
                 // Muted like the data-port labels.
                 Text::new(event.name.as_str())

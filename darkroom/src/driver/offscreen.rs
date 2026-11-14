@@ -6,9 +6,8 @@ use std::time::Duration;
 
 use glam::UVec2;
 use palantir::PowerPreference;
-use palantir::wgpu::Features;
 use palantir::{
-    AgentWindow, Depth, Gpu, Harness, HarnessSession, InspectedWidget, RequestedGpu, Ui,
+    AgentWindow, Gpu, Harness, HarnessDepth, HarnessSession, InspectedWidget, RequestedGpu, Ui,
 };
 
 use crate::core::io::preferences::preferences_store::PreferencesStore;
@@ -45,8 +44,8 @@ impl Offscreen {
     /// on a machine with no usable adapter.
     pub(crate) fn new(config: SessionConfig) -> Result<Self, DriverError> {
         let depth = match open_gpu(config.display, config.size)? {
-            Some(gpu) => Depth::gpu(gpu),
-            None => Depth::Record,
+            Some(gpu) => HarnessDepth::gpu(gpu),
+            None => HarnessDepth::Record,
         };
         // The harness's own settles step a frame as this driver's do.
         let mut harness = Box::new(
@@ -81,7 +80,7 @@ impl Offscreen {
     pub(crate) fn painting_session(&mut self) -> Result<HarnessSession<'_, App>, DriverError> {
         if self.harness.is_device_lost() {
             // The window keeps its size on the new device, which must hold a texture of it.
-            let size = self.harness.ui().display().physical();
+            let size = self.harness.ui().display().physical_size();
             let gpu = open_gpu(self.display, size)?.expect("a lost device was a GPU display's");
             self.harness.recover(gpu);
         }
@@ -170,10 +169,7 @@ impl Offscreen {
 /// it, or none for a display that paints nothing; refused when the window is past what it holds.
 fn open_gpu(display: DisplayKind, size: UVec2) -> Result<Option<Gpu>, DriverError> {
     let gpu = match display {
-        // No optional features: the editor draws with what every adapter has.
-        DisplayKind::Gpu => {
-            RequestedGpu::headless(PowerPreference::HighPerformance, Features::empty())?.gpu
-        }
+        DisplayKind::Gpu => RequestedGpu::headless(PowerPreference::HighPerformance)?.gpu,
         #[cfg(feature = "internals")]
         #[expect(clippy::absolute_paths, reason = "a gated arm takes no gated import")]
         DisplayKind::TestGpu => palantir::internals::headless_test_gpu().handles(),
@@ -183,7 +179,7 @@ fn open_gpu(display: DisplayKind, size: UVec2) -> Result<Option<Gpu>, DriverErro
         #[cfg(feature = "internals")]
         DisplayKind::Cpu => return Ok(None),
     };
-    check_window(size, gpu.max_texture_dim().get())?;
+    check_window(size, gpu.max_texture_dimension().get())?;
     Ok(Some(gpu))
 }
 

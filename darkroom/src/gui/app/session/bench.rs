@@ -42,7 +42,9 @@ use palantir::bench::case_group::CaseGroup;
 use palantir::bench::kind::{Kind, Scale};
 use palantir::bench::scene::{BENCH_DPR, BENCH_SURFACE};
 use palantir::internals::Timing;
-use palantir::{App, ColorScheme, Depth, Harness, Key, PointerButton, RecordPass, Ui, WindowToken};
+use palantir::{
+    App, ColorScheme, Harness, HarnessDepth, Key, PointerButton, RecordPass, Ui, WindowToken,
+};
 use palantir::{FramePaint, ImageDownsample, OffscreenHost};
 use scenarium::{DynamicValue, NodeId};
 
@@ -411,11 +413,11 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
                 Backend::Cpu => case.measure(&mut group, || {
                     let mut frontend = Harness::builder(BENCH_SURFACE)
                         .system_scale(BENCH_DPR)
-                        .depth(Depth::Compose)
+                        .depth(HarnessDepth::Compose)
                         .build();
                     frontend
                         .ui_mut()
-                        .set_theme(ColorScheme::Dark, Theme::default().palantir)
+                        .set_scheme_theme(ColorScheme::Dark, Theme::default().palantir)
                         .unwrap();
                     let mut published = false;
                     move |editor: &mut Editor, n: u32| {
@@ -437,7 +439,7 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
                         .swapchain_present()
                         .build();
                     host.ui_mut()
-                        .set_theme(ColorScheme::Dark, Theme::default().palantir)
+                        .set_scheme_theme(ColorScheme::Dark, Theme::default().palantir)
                         .unwrap();
                     let mut published = false;
                     move |editor: &mut Editor, n: u32| {

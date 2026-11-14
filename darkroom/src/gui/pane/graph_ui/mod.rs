@@ -77,7 +77,7 @@ pub(crate) struct GraphUi {
     /// cached `bool`, so there is no second spelling of visibility to keep in step with the
     /// active tabs.
     ///
-    /// [`Ui::record_frame_id`] and not [`Ui::render_frame_id`]: the latter counts painted
+    /// [`Ui::record_frame_idx`] and not [`Ui::render_frame_idx`]: the latter counts painted
     /// frames too, and a paint-only frame (an idle caret blink) runs no record pass, so it
     /// would open a gap while the canvas never went anywhere and drop every in-flight gesture.
     last_input_frame: Option<u64>,
@@ -120,7 +120,7 @@ impl GraphUi {
     ///
     /// Two cases both mean *still here* and must not read as an appearance: the previous frame
     /// (the steady state) and *this* frame, as the input stage and a settle of one frame read
-    /// the same [`Ui::record_frame_id`]. Only a gap wider than that is an absence.
+    /// the same [`Ui::record_frame_idx`]. Only a gap wider than that is an absence.
     fn appearing(&mut self, frame: u64) -> bool {
         let appearing = self
             .last_input_frame
@@ -131,7 +131,7 @@ impl GraphUi {
 
     pub(crate) fn input(&mut self, ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
         let graph_ctx = stage.ctx;
-        self.open_pass(ui.record_frame_id(), stage.out);
+        self.open_pass(ui.record_frame_idx(), stage.out);
         // One classification for the whole frame. A controller with nothing in flight has nothing
         // to cancel, so each applies this to its own state slot unconditionally and lets its
         // existing "no gesture" path do the rest.
@@ -160,7 +160,7 @@ impl GraphUi {
     /// The geometry is built again, and a framing the last record raised lands here.
     /// Refused: a replay of the input stage, which ran each gesture again on a level read.
     pub(crate) fn settle(&mut self, ui: &Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
-        self.open_pass(ui.record_frame_id(), stage.out);
+        self.open_pass(ui.record_frame_idx(), stage.out);
         self.geometry.rebuild(ui, stage.ctx);
         self.finish_geometry(ui, stage);
     }
@@ -508,17 +508,17 @@ mod tests {
         let mut graph_ui = GraphUi::default();
 
         assert!(
-            graph_ui.appearing(h.ui().record_frame_id()),
+            graph_ui.appearing(h.ui().record_frame_idx()),
             "a canvas that has never recorded is appearing"
         );
         assert!(
-            !graph_ui.appearing(h.ui().record_frame_id()),
+            !graph_ui.appearing(h.ui().record_frame_idx()),
             "a second pass of the same frame is the same appearance, not a new one"
         );
 
         h.frame(|_| {});
         assert!(
-            !graph_ui.appearing(h.ui().record_frame_id()),
+            !graph_ui.appearing(h.ui().record_frame_idx()),
             "the next consecutive frame is the steady state"
         );
 
@@ -526,11 +526,11 @@ mod tests {
         h.frame(|_| {});
         h.frame(|_| {});
         assert!(
-            graph_ui.appearing(h.ui().record_frame_id()),
+            graph_ui.appearing(h.ui().record_frame_idx()),
             "a gap means it was away and is back"
         );
         assert!(
-            !graph_ui.appearing(h.ui().record_frame_id()),
+            !graph_ui.appearing(h.ui().record_frame_idx()),
             "and the reappearance is reported once, not per pass"
         );
     }

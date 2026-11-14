@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use glam::Vec2;
-use palantir::{Rect, ResponseState};
+use palantir::{Rect, Response};
 
 use scenarium::NodeId;
 
@@ -53,7 +53,7 @@ impl<K: NodeKey> PortLayer<K> {
     /// back to the cached offset so a just-shown graph still anchors. The
     /// center is the node's position plus the offset, so a moved node's glyph
     /// tracks its current position.
-    pub(super) fn record(&mut self, key: K, r: ResponseState, node: NodePlace) {
+    pub(super) fn record(&mut self, key: K, r: Response, node: NodePlace) {
         let fresh_offset = r.layout_rect.map(|rect| rect.center() - node.layout_min);
         if let Some(offset) = fresh_offset {
             self.offsets.insert(key, offset);

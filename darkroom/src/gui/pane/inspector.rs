@@ -11,9 +11,8 @@ use std::borrow::Cow;
 use std::collections::BTreeSet;
 
 use palantir::{
-    Align, Block, Border, Chrome, ClipMode, Configure, Corners, DockOperation, Panel, RgbaF32,
-    Scroll, Sense, Sizing, Spacing, Text, TextInput, TextStyle, TextWrap, Ui, VAlign, WidgetId,
-    fmt,
+    Block, Border, Chrome, ClipMode, Configure, Corners, DockOperation, Panel, RgbaF32, Scroll,
+    Sense, Sizing, Spacing, Text, TextInput, TextStyle, TextWrap, Ui, VAlign, WidgetId, fmt,
 };
 use scenarium::LogLevel;
 use scenarium::NodeId;
@@ -103,7 +102,7 @@ fn body(ui: &mut Ui, stage: &mut Stage<'_, NodeCtx<'_>>, target: InspectTarget) 
                 .id(title_wid())
                 .size((Sizing::FILL, Sizing::fixed(theme.row_height())))
                 .gap(theme.space.xs)
-                .child_align(Align::v(VAlign::Center))
+                .child_align(VAlign::Center)
                 .show(ui, |ui| {
                     Text::new(format::node_name(node.name()))
                         .id(title_wid().with("text"))
@@ -419,7 +418,7 @@ impl InspectedPort<'_> {
             .id(wid)
             .size((Sizing::FILL, Sizing::fixed(theme.row_height())))
             .gap(theme.space.sm)
-            .child_align(Align::v(VAlign::Center))
+            .child_align(VAlign::Center)
             .show(ui, |ui| {
                 dot.show(ui, theme, wid.with("dot"));
                 let name = Text::new(name)
@@ -523,7 +522,7 @@ impl<'a> PortValue<'a> {
             .id(wid)
             .size((Sizing::HUG, Sizing::FILL))
             .padding(field.rest_padding())
-            .child_align(Align::v(VAlign::Center))
+            .child_align(VAlign::Center)
             .chrome(field.rest_box().clone())
             .show(ui, |ui| {
                 Text::new(self.text)

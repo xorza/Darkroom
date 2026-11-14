@@ -123,7 +123,7 @@ impl SessionHarness {
         // As `App::new` does before frame 1: without it a geometry assertion measures palantir's
         // stock theme rather than darkroom's.
         ui.ui_mut()
-            .set_theme(ColorScheme::Dark, theme.palantir.clone())
+            .set_scheme_theme(ColorScheme::Dark, theme.palantir.clone())
             .unwrap();
         Self {
             ui,

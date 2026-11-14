@@ -4,9 +4,9 @@
 use std::ops::Range;
 
 use palantir::{
-    Align, Block, Chrome, Configure, Corners, EditEnd, FontWeight, Key, KeyboardWake,
-    MenuSeparator, Panel, RgbaF32, Scroll, Sense, Sizing, Spacing, Text, TextEdit, TextStyle,
-    TextWrap, Ui, VAlign, WidgetId, fmt,
+    Block, Chrome, Configure, Corners, EditEnd, FontWeight, Key, KeyboardWake, MenuSeparator,
+    Panel, RgbaF32, Scroll, Sense, Sizing, Spacing, Text, TextEdit, TextStyle, TextWrap, Ui,
+    VAlign, WidgetId, fmt,
 };
 
 use glam::Vec2;
@@ -136,7 +136,7 @@ impl NodePalette<'_> {
             .min_size((LIST_WIDTH, 0.0))
             .padding(Spacing::xy(theme.space.sm, theme.space.xs))
             .gap(theme.space.md)
-            .child_align(Align::v(VAlign::Center))
+            .child_align(VAlign::Center)
             .show(ui, |ui| {
                 let field = TextEdit::new(&mut search.text)
                     .id(search_id)
@@ -299,7 +299,7 @@ impl Row<'_> {
         let row = Panel::hstack()
             .id(wid)
             .size((Sizing::FILL, Sizing::HUG))
-            .child_align(Align::v(VAlign::Stretch))
+            .child_align(VAlign::Stretch)
             .sense(Sense::CLICK)
             .chrome(chrome)
             .show(ui, |ui| {
@@ -326,7 +326,7 @@ impl Row<'_> {
                         Panel::hstack()
                             .id_salt("line")
                             .size((Sizing::FILL, Sizing::HUG))
-                            .child_align(Align::v(VAlign::Center))
+                            .child_align(VAlign::Center)
                             .show(ui, |ui| {
                                 name(ui, theme, self.entry.name(), self.query_lc, lit);
                                 support::hspacer(ui, "category_spacer");
