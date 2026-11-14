@@ -53,8 +53,9 @@ impl ViewCapture {
         landed: Landed<'_>,
         clipboard: &Clipboard,
     ) -> Result<(), ViewCaptureError> {
-        let Landed::Shot(shot) = landed else {
-            return Err(ViewCaptureError::Empty);
+        let shot = match landed {
+            Landed::Shot(shot) => shot,
+            Landed::Refused(refusal) => return Err(ViewCaptureError::Refused(refusal)),
         };
         let image = shot.image();
         match self.target {

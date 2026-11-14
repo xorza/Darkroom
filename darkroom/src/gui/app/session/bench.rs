@@ -428,7 +428,7 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
                         }
                         editor.advance(scenario, ui, n);
                         play_input(scenario, &mut frontend, n);
-                        frontend.frame_app(editor).paint()
+                        frontend.frame_app(editor).paint
                     }
                 }),
                 Backend::Gpu => case.measure(&mut group, || {
@@ -451,7 +451,7 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
                         let paint = host
                             .set_system_scale(BENCH_DPR)
                             .frame(target.as_target(), editor)
-                            .paint();
+                            .paint;
                         gpu.wait();
                         paint
                     }

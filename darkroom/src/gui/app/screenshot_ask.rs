@@ -1,7 +1,7 @@
 //! [`ScreenshotAsk`]: how far one ask for a screenshot got, from the frame that asks to the one
 //! its image lands in.
 
-use palantir::{Rect, Screenshot, ScreenshotId, Ui};
+use palantir::{Rect, Screenshot, ScreenshotId, ScreenshotRefusal, Ui};
 
 /// One ask for an image of the window, made once, by the record pass of a frame.
 #[derive(Clone, Copy, Debug, Default)]
@@ -10,16 +10,16 @@ pub(crate) enum ScreenshotAsk {
     Unasked,
     /// The id the image lands under.
     Asked(ScreenshotId),
-    /// The region held no pixel, so no image comes.
-    Empty,
+    /// The window took no ask, so no image comes.
+    Refused(ScreenshotRefusal),
 }
 
 /// What a frame hands an ask.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Landed<'ui> {
     Shot(&'ui Screenshot),
-    /// The ask got no image: its region held no pixel.
-    Empty,
+    /// The ask got no image: the window took no ask.
+    Refused(ScreenshotRefusal),
 }
 
 impl ScreenshotAsk {
@@ -27,19 +27,20 @@ impl ScreenshotAsk {
     /// went out already: a replayed record pass of the asking frame must not ask twice.
     pub(crate) fn ask(&mut self, ui: &mut Ui, region: Option<Rect>) {
         if matches!(self, Self::Unasked) {
-            *self = ui
-                .request_screenshot(region)
-                .map_or(Self::Empty, Self::Asked);
+            *self = match ui.request_screenshot(region) {
+                Ok(id) => Self::Asked(id),
+                Err(refusal) => Self::Refused(refusal),
+            };
         }
     }
 
-    /// What this ask got, once it got it: its image in the frame `ui` it lands in, or none for a
-    /// region that held no pixel.
+    /// What this ask got, once it got it: its image in the frame `ui` it lands in, or the
+    /// window's refusal at once.
     pub(crate) fn landed<'c>(&self, ui: &'c Ui) -> Option<Landed<'c>> {
         match *self {
             Self::Unasked => None,
             Self::Asked(id) => ui.screenshot_taken(id).map(Landed::Shot),
-            Self::Empty => Some(Landed::Empty),
+            Self::Refused(refusal) => Some(Landed::Refused(refusal)),
         }
     }
 }
@@ -48,13 +49,13 @@ impl ScreenshotAsk {
 mod tests {
     use glam::UVec2;
     use palantir::Harness;
-    use palantir::Rect;
+    use palantir::{Rect, ScreenshotRefusal};
 
     use crate::gui::app::screenshot_ask::{Landed, ScreenshotAsk};
 
     /// An ask of a region the 64 × 48 window holds goes out once, and a second ask keeps the
     /// first; until its image lands, it got nothing. A region past the window holds no pixel: it
-    /// lands as empty at once.
+    /// is refused at once.
     #[test]
     fn an_ask_goes_out_once_and_an_empty_region_lands_at_once() {
         let mut h = Harness::builder(UVec2::new(64, 48)).mono().build();
@@ -67,7 +68,10 @@ mod tests {
             assert!(matches!((first, inside), (ScreenshotAsk::Asked(a), ScreenshotAsk::Asked(b)) if a == b));
             assert!(inside.landed(ui).is_none(), "no image yet");
             outside.ask(ui, Some(Rect::new(500.0, 500.0, 10.0, 10.0)));
-            assert!(matches!(outside.landed(ui), Some(Landed::Empty)));
+            assert!(matches!(
+                outside.landed(ui),
+                Some(Landed::Refused(ScreenshotRefusal::EmptyRegion))
+            ));
         });
         assert!(ScreenshotAsk::default().landed(h.ui()).is_none(), "unasked");
     }

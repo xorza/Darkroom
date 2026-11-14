@@ -4,6 +4,7 @@
 use std::path::PathBuf;
 
 use image::ImageError;
+use palantir::ScreenshotRefusal;
 
 /// A picked path that is not valid Unicode. A node's path input holds a
 /// `String`, and a lossy conversion would name a file that does not exist.
@@ -14,8 +15,8 @@ pub(super) struct NonUnicodePath(pub(super) PathBuf);
 /// An image of the window that could not reach its target.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ViewCaptureError {
-    #[error("the window showed nothing to copy or save")]
-    Empty,
+    #[error("the window took no image to copy or save")]
+    Refused(#[source] ScreenshotRefusal),
     #[error("saving the view to {} failed", .path.display())]
     Save {
         path: PathBuf,
