@@ -5,8 +5,8 @@ use std::ops::Range;
 
 use palantir::{
     Block, Chrome, Configure, Corners, EditEnd, FontWeight, Key, KeyboardWake, MenuSeparator,
-    Panel, RgbaF32, Scroll, Sense, Sizing, Spacing, Text, TextEdit, TextStyle, TextWrap, Ui,
-    VAlign, WidgetId, fmt,
+    Panel, RgbaF32, Scroll, Sense, SizeSpec, Sizing, Spacing, Text, TextEdit, TextStyle, TextWrap,
+    Ui, VAlign, WidgetId, fmt,
 };
 
 use glam::Vec2;
@@ -183,7 +183,7 @@ impl NodePalette<'_> {
         let mut chosen = None;
         let mut results = Scroll::vertical()
             .id(new_node_ui::results_wid())
-            .size((Sizing::HUG, Sizing::HUG))
+            .size(SizeSpec::HUG)
             .max_size((f32::INFINITY, self.scroll_cap));
         // Only when the keys or the query moved the focus: a reveal every frame would pull the
         // list back from a wheel that scrolled the focused row away.
@@ -298,7 +298,7 @@ impl Row<'_> {
         };
         let row = Panel::hstack()
             .id(wid)
-            .size((Sizing::FILL, Sizing::HUG))
+            .size(SizeSpec::FILL_W)
             .child_align(VAlign::Stretch)
             .sense(Sense::CLICK)
             .chrome(chrome)
@@ -315,7 +315,7 @@ impl Row<'_> {
                     .show(ui);
                 Panel::vstack()
                     .id_salt("body")
-                    .size((Sizing::FILL, Sizing::HUG))
+                    .size(SizeSpec::FILL_W)
                     .padding(Spacing::new(
                         theme.space.sm - theme.stroke.line,
                         theme.space.xs,
@@ -325,7 +325,7 @@ impl Row<'_> {
                     .show(ui, |ui| {
                         Panel::hstack()
                             .id_salt("line")
-                            .size((Sizing::FILL, Sizing::HUG))
+                            .size(SizeSpec::FILL_W)
                             .child_align(VAlign::Center)
                             .show(ui, |ui| {
                                 name(ui, theme, self.entry.name(), self.query_lc, lit);
@@ -339,7 +339,7 @@ impl Row<'_> {
                                 .id_salt("description")
                                 .style(&secondary)
                                 .text_wrap(TextWrap::Ellipsis)
-                                .size((Sizing::FILL, Sizing::HUG))
+                                .size(SizeSpec::FILL_W)
                                 .show(ui);
                         }
                     });
@@ -376,7 +376,7 @@ fn name(ui: &mut Ui, theme: &Theme, text: &str, query_lc: &str, lit: bool) {
     let span = match_span(text, query_lc);
     Panel::hstack()
         .id_salt("name")
-        .size((Sizing::HUG, Sizing::HUG))
+        .size(SizeSpec::HUG)
         .show(ui, |ui| match span {
             Some(span) => {
                 for (part, style) in [
@@ -428,7 +428,7 @@ fn no_match(ui: &mut Ui, theme: &Theme, query: &str) {
     let hint = support::muted_text(ui, theme, theme.font.caption);
     Panel::vstack()
         .id_salt("no_match")
-        .size((Sizing::FILL, Sizing::HUG))
+        .size(SizeSpec::FILL_W)
         .padding(Spacing::all(theme.space.sm))
         .gap(theme.space.xs)
         .show(ui, |ui| {

@@ -12,7 +12,8 @@ use std::collections::BTreeSet;
 
 use palantir::{
     Block, Border, Chrome, ClipMode, Configure, Corners, DockOperation, Panel, RgbaF32, Scroll,
-    Sense, Sizing, Spacing, Text, TextInput, TextStyle, TextWrap, Ui, VAlign, WidgetId, fmt,
+    Sense, SizeSpec, Sizing, Spacing, Text, TextInput, TextStyle, TextWrap, Ui, VAlign, WidgetId,
+    fmt,
 };
 use scenarium::LogLevel;
 use scenarium::NodeId;
@@ -46,11 +47,11 @@ pub(crate) fn show(ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>, target: Ins
     let theme = ctx.theme();
     Scroll::vertical()
         .id_salt(("inspector", target))
-        .size(Sizing::FILL)
+        .size(SizeSpec::FILL)
         .show(ui, |ui| {
             Panel::vstack()
                 .id_salt("inspector_body")
-                .size((Sizing::FILL, Sizing::HUG))
+                .size(SizeSpec::FILL_W)
                 .padding(theme.pane_padding())
                 .gap(theme.space.md)
                 .show(ui, |ui| {
@@ -93,7 +94,7 @@ fn body(ui: &mut Ui, stage: &mut Stage<'_, NodeCtx<'_>>, target: InspectTarget) 
     let error = error_message(node.exec_status());
     Panel::vstack()
         .id_salt("inspector_header")
-        .size((Sizing::FILL, Sizing::HUG))
+        .size(SizeSpec::FILL_W)
         .gap(theme.space.xxs)
         .show(ui, |ui| {
             // One row as tall as a port row, its chip and pin centered on the title, the kind
@@ -221,13 +222,13 @@ fn card(
     let wid = card_wid(caption);
     Panel::vstack()
         .id(wid)
-        .size((Sizing::FILL, Sizing::HUG))
+        .size(SizeSpec::FILL_W)
         .padding(Spacing::xy(theme.space.md, theme.space.sm))
         .chrome(theme.card_chrome())
         .show(ui, |ui| {
             Panel::hstack()
                 .id(wid.with("caption"))
-                .size((Sizing::FILL, Sizing::HUG))
+                .size(SizeSpec::FILL_W)
                 .padding(Spacing::new(0.0, 0.0, 0.0, theme.space.xs))
                 .show(ui, |ui| {
                     Text::new(caption)
@@ -290,7 +291,7 @@ fn error_message(status: &ExecStatus) -> Option<&str> {
 fn status_chip(ui: &mut Ui, theme: &Theme, status: &ExecStatus) {
     Panel::hstack()
         .id(status_wid())
-        .size((Sizing::HUG, Sizing::HUG))
+        .size(SizeSpec::HUG)
         .padding(Spacing::xy(theme.space.sm, theme.space.xxs))
         .chrome(Chrome::rounded(
             color::wash(theme.exec_ink(status), theme.tint.soft, theme.canvas.bg),
@@ -307,7 +308,7 @@ fn error_callout(ui: &mut Ui, theme: &Theme, message: &str) {
     let pad = theme.space.sm;
     Panel::hstack()
         .id(error_wid())
-        .size((Sizing::FILL, Sizing::HUG))
+        .size(SizeSpec::FILL_W)
         .padding(Spacing::new(0.0, 0.0, pad, 0.0))
         .gap(pad)
         .chrome(Chrome::rounded(
@@ -427,7 +428,7 @@ impl InspectedPort<'_> {
                         ..support::body_text(ui, theme)
                     })
                     .text_wrap(TextWrap::Ellipsis)
-                    .size((Sizing::FILL, Sizing::HUG))
+                    .size(SizeSpec::FILL_W)
                     .sense(Sense::HOVER)
                     .show(ui);
                 let shown_type = fmt!(ui, "{type_name}");
@@ -520,7 +521,7 @@ impl<'a> PortValue<'a> {
         let field = &theme.const_editor.rest;
         Panel::hstack()
             .id(wid)
-            .size((Sizing::HUG, Sizing::FILL))
+            .size(SizeSpec::FILL_H)
             .padding(field.rest_padding())
             .child_align(VAlign::Center)
             .chrome(field.rest_box().clone())

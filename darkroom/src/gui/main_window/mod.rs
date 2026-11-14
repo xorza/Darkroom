@@ -5,7 +5,7 @@ pub(crate) mod status_bar;
 use std::collections::HashMap;
 
 use palantir::{
-    Chrome, Configure, DockOperation, DockView, Panel, Sizing, TabOverflow, Ui, VAlign, WidgetId,
+    Chrome, Configure, DockOperation, DockView, Panel, SizeSpec, TabOverflow, Ui, VAlign, WidgetId,
 };
 use scenarium::NodeId;
 
@@ -122,10 +122,10 @@ impl MainWindow {
             dock_ops,
             swept_at: _,
         } = self;
-        Panel::vstack().size(Sizing::FILL).show(ui, |ui| {
+        Panel::vstack().size(SizeSpec::FILL).show(ui, |ui| {
             Panel::hstack()
                 .id_salt("surround_row")
-                .size((Sizing::FILL, Sizing::HUG))
+                .size(SizeSpec::FILL_W)
                 .child_align(VAlign::Bottom)
                 .chrome(Chrome::new(fill))
                 .show(ui, |ui| {

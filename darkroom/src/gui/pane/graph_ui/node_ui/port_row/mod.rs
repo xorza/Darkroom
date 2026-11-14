@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use glam::Vec2;
 use palantir::{
-    Align, Configure, Grid, InternedStr, Menu, MenuItem, Panel, Sense, Sizing, Spacing, Text,
+    Align, Configure, Grid, InternedStr, Menu, MenuItem, Panel, Sense, SizeSpec, Spacing, Text,
     TextStyle, Track, Ui, VAlign, WidgetId, fmt,
 };
 use scenarium::Binding;
@@ -75,7 +75,7 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, row_tracks: &mu
     }
     Grid::new()
         .id_salt("ports")
-        .size((Sizing::FILL, Sizing::HUG))
+        .size(SizeSpec::FILL_W)
         .cols([
             Track::HUG,
             Track::HUG.with_max(theme.const_editor.rest.max_width),
@@ -242,7 +242,7 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
         .id(wid::input_cell(port))
         .grid_cell((grid_row(port.port_idx), COL_INPUT))
         .align(Align::LEFT)
-        .size((Sizing::HUG, Sizing::HUG))
+        .size(SizeSpec::HUG)
         .sense(Sense::CLICK)
         .gap(theme.space.xs)
         .child_align(VAlign::Center)
@@ -297,36 +297,34 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
                 .push_graph(GraphIntent::set_input(input.port(), None)),
         }
     }
-    Menu::for_id(menu_id)
-        .size((Sizing::HUG, Sizing::HUG))
-        .show(ui, |ui| {
-            // Resolved once for both the enable test and the value the pick pushes.
-            let default = input.default();
-            let can_set = !matches!(input.binding(), Some(Binding::Const(_))) && default.is_some();
-            if MenuItem::new("Set constant")
-                .disabled(!can_set)
-                .show(ui)
-                .left
-                .clicked()
-                && let Some(value) = default
-            {
-                record
-                    .stage
-                    .out
-                    .push_graph(GraphIntent::set_input(input.port(), Binding::Const(value)));
-            }
-            if MenuItem::new("Clear binding")
-                .disabled(input.binding().is_none())
-                .show(ui)
-                .left
-                .clicked()
-            {
-                record
-                    .stage
-                    .out
-                    .push_graph(GraphIntent::set_input(input.port(), None));
-            }
-        });
+    Menu::for_id(menu_id).size(SizeSpec::HUG).show(ui, |ui| {
+        // Resolved once for both the enable test and the value the pick pushes.
+        let default = input.default();
+        let can_set = !matches!(input.binding(), Some(Binding::Const(_))) && default.is_some();
+        if MenuItem::new("Set constant")
+            .disabled(!can_set)
+            .show(ui)
+            .left
+            .clicked()
+            && let Some(value) = default
+        {
+            record
+                .stage
+                .out
+                .push_graph(GraphIntent::set_input(input.port(), Binding::Const(value)));
+        }
+        if MenuItem::new("Clear binding")
+            .disabled(input.binding().is_none())
+            .show(ui)
+            .left
+            .clicked()
+        {
+            record
+                .stage
+                .out
+                .push_graph(GraphIntent::set_input(input.port(), None));
+        }
+    });
 }
 
 /// Column 1: the inline const editor for an input bound to a `Const`, and
@@ -400,7 +398,7 @@ fn value_column<R>(ui: &mut Ui, port: InputPort, body: impl FnOnce(&mut Ui) -> R
     Panel::hstack()
         .id_salt(("val", port.port_idx))
         .grid_cell((grid_row(port.port_idx), COL_VALUE))
-        .size(Sizing::FILL)
+        .size(SizeSpec::FILL)
         .child_align(VAlign::Center)
         .show(ui, body)
         .inner
@@ -426,7 +424,7 @@ fn output_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, output: OutputCtx<'
         .id_salt(("out", port.port_idx))
         .grid_cell((grid_row(port.port_idx), COL_OUTPUT))
         .align(Align::RIGHT)
-        .size((Sizing::HUG, Sizing::HUG))
+        .size(SizeSpec::HUG)
         .sense(Sense::CLICK)
         .gap(theme.space.xs)
         .child_align(VAlign::Center)
@@ -461,29 +459,27 @@ fn output_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, output: OutputCtx<'
     }
     // "Add preview" spawns an ordinary preview node already wired to this output. Hidden when
     // the library has no preview func.
-    Menu::for_id(menu_id)
-        .size((Sizing::HUG, Sizing::HUG))
-        .show(ui, |ui| {
-            if let Some(func) = preview_sink::registered(node_ctx.graph_ctx.library())
-                && MenuItem::new("Add preview").show(ui).clicked()
-            {
-                // Off the port once its center is known (after the first frame); otherwise at the
-                // origin.
-                let pos = draw_ctx
-                    .geometry()
-                    .ports
-                    .center(port)
-                    .map_or(Vec2::ZERO, |center| center + PREVIEW_SPAWN_OFFSET);
-                record.stage.out.extend_graph(
-                    PreviewSpawn {
-                        port: output.port(),
-                        pos,
-                        node_id: NodeId::unique(),
-                    }
-                    .intents(func),
-                );
-            }
-        });
+    Menu::for_id(menu_id).size(SizeSpec::HUG).show(ui, |ui| {
+        if let Some(func) = preview_sink::registered(node_ctx.graph_ctx.library())
+            && MenuItem::new("Add preview").show(ui).clicked()
+        {
+            // Off the port once its center is known (after the first frame); otherwise at the
+            // origin.
+            let pos = draw_ctx
+                .geometry()
+                .ports
+                .center(port)
+                .map_or(Vec2::ZERO, |center| center + PREVIEW_SPAWN_OFFSET);
+            record.stage.out.extend_graph(
+                PreviewSpawn {
+                    port: output.port(),
+                    pos,
+                    node_id: NodeId::unique(),
+                }
+                .intents(func),
+            );
+        }
+    });
 }
 
 /// Where a preview lands relative to the port it was added from: clear of the node body and a
@@ -520,7 +516,7 @@ impl EventRow<'_> {
             .id_salt(("event", idx))
             .grid_cell((grid_row(row), COL_OUTPUT))
             .align(Align::RIGHT)
-            .size((Sizing::HUG, Sizing::HUG))
+            .size(SizeSpec::HUG)
             .gap(theme.space.xs)
             .child_align(VAlign::Center)
             .show(ui, |ui| {

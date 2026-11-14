@@ -9,7 +9,7 @@ pub(crate) mod run_status;
 
 use std::mem;
 
-use palantir::{Border, Configure, Panel, Sense, Shadow, Sizing, Track, Ui, Visibility};
+use palantir::{Border, Configure, Panel, Sense, Shadow, SizeSpec, Track, Ui, Visibility};
 use scenarium::NodeId;
 
 use crate::core::document::graph_view::StackedNode;
@@ -176,7 +176,7 @@ impl NodeUi {
             } else {
                 (theme.card.min_width, 0.0)
             })
-            .size((Sizing::HUG, Sizing::HUG))
+            .size(SizeSpec::HUG)
             .sense(Sense::CLICK | Sense::DRAG)
             .chrome(
                 theme

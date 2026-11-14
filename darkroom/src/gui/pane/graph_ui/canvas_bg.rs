@@ -2,7 +2,7 @@ use common::Libm;
 use common::LibmVec2;
 use glam::Vec2;
 use palantir::widget::{Mesh, Shape};
-use palantir::{Configure, Panel, RgbaF32, Sizing, TranslateScale, Ui};
+use palantir::{Configure, Panel, RgbaF32, SizeSpec, TranslateScale, Ui};
 
 use crate::core::document::viewport::Viewport;
 use crate::gui::pane::graph_ui::canvas;
@@ -82,7 +82,7 @@ impl CanvasBg {
         let mesh = &self.mesh;
         Panel::canvas()
             .id(canvas::dots_wid())
-            .size(Sizing::FILL)
+            .size(SizeSpec::FILL)
             .transform(TranslateScale::new(
                 lattice_origin(pan, spacing * scale),
                 scale,

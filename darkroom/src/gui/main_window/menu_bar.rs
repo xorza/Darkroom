@@ -1,6 +1,6 @@
 use palantir::{
     Align, Configure, DockOperation, Grid, MenuBar, MenuBarMenus, MenuItem, MenuSeparator, Panel,
-    Sense, Shortcut, Sizing, Text, TextWrap, Track, Ui, VAlign, WidgetId, fmt,
+    Sense, Shortcut, SizeSpec, Text, TextWrap, Track, Ui, VAlign, WidgetId, fmt,
 };
 use scenarium::NodeId;
 
@@ -30,14 +30,14 @@ pub(crate) fn show(ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
     let ctx = stage.ctx;
     Grid::new()
         .id(bar_wid())
-        .size((Sizing::FILL, Sizing::HUG))
+        .size(SizeSpec::FILL_W)
         .cols([Track::FILL, Track::HUG, Track::FILL])
         .rows([Track::HUG])
         .show(ui, |ui| {
             MenuBar::new()
                 .id(menus_wid())
                 .grid_cell((0, 0))
-                .size((Sizing::HUG, Sizing::HUG))
+                .size(SizeSpec::HUG)
                 .align(Align::LEFT)
                 .show(ui, |bar| {
                     file_menu(bar, stage.out);
@@ -175,7 +175,7 @@ fn document_name(ui: &mut Ui, ctx: GraphCtx<'_>) {
     let row = Panel::hstack()
         .id(document_wid())
         .grid_cell((0, 1))
-        .size((Sizing::HUG, Sizing::HUG))
+        .size(SizeSpec::HUG)
         .align(Align::CENTER)
         .gap(theme.space.sm)
         .child_align(VAlign::Center)

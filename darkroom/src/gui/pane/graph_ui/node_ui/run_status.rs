@@ -1,7 +1,7 @@
 //! [`RunStatus`]: the last run's word on a node, as its footer and the inspector's chip draw it.
 
 use palantir::{
-    Configure, Panel, Rect, RgbaF32, Sizing, Spinner, Text, TextStyle, Ui, VAlign, fmt,
+    Configure, Panel, Rect, RgbaF32, SizeSpec, Spinner, Text, TextStyle, Ui, VAlign, fmt,
 };
 
 use crate::gui::state::run_state::ExecStatus;
@@ -60,7 +60,7 @@ impl<'a> RunStatus<'a> {
         let color = theme.exec_ink(status);
         Panel::hstack()
             .id_salt("run_status")
-            .size((Sizing::HUG, Sizing::HUG))
+            .size(SizeSpec::HUG)
             .gap(theme.space.xs)
             .child_align(VAlign::Center)
             .show(ui, |ui| match status {

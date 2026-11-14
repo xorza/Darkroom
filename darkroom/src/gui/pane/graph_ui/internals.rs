@@ -5,8 +5,8 @@
 //! frame the app never performs.
 
 use glam::{UVec2, Vec2};
-use palantir::{App, Harness, RecordPass, WindowToken};
-use palantir::{Configure, DockOperation, Panel, Rect, Sizing, SystemScale, Ui, WidgetId};
+use palantir::{App, Harness, RecordPass, SizeSpec, WindowToken};
+use palantir::{Configure, DockOperation, Panel, Rect, SystemScale, Ui, WidgetId};
 use scenarium::NodeId;
 
 use crate::core::document::Document;
@@ -351,7 +351,7 @@ fn record_in_pane(
 ) {
     Panel::vstack()
         .id_salt("pane")
-        .size(Sizing::FILL)
+        .size(SizeSpec::FILL)
         .show(recorder, |ui| {
             let ctx = ctx.graph_ctx_on(ui.display());
             graph_ui.record(ui, &mut Stage { ctx, out });

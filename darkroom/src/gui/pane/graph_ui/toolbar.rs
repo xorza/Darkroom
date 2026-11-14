@@ -5,7 +5,7 @@
 //! toggles paint "toggled" while their action is in flight, and each button maps to an
 //! [`AppCommand`].
 
-use palantir::{Align, Configure, Panel, Sizing, Spacing, Ui, WidgetId};
+use palantir::{Align, Configure, Panel, SizeSpec, Spacing, Ui, WidgetId};
 
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::{RunCommand, ViewCommand};
@@ -48,7 +48,7 @@ pub(super) fn show(ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
     let run_state = graph_ctx.run_state();
     Panel::vstack()
         .id_salt("graph_toolbar")
-        .size((Sizing::HUG, Sizing::HUG))
+        .size(SizeSpec::HUG)
         .align(Align::TOP_LEFT)
         .child_align(Align::TOP_LEFT)
         .margin(Spacing::new(theme.space.sm, theme.space.sm, 0.0, 0.0))

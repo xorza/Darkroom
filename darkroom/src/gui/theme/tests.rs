@@ -370,7 +370,7 @@ fn every_palantir_padding_and_radius_is_on_the_scale() {
     assert_eq!(ui.menu.panel.paint.shadow, theme.elevation.floating);
     // The tab strip starts its tabs at the surround's inset, as the menu bar starts its titles.
     assert_eq!(
-        theme.palantir.tabs.strip_padding.to_array()[0],
+        theme.palantir.tabs.strip_padding.left(),
         theme.surround_inset()
     );
     assert_eq!(ui.dock.preview.corners, Corners::all(mark));

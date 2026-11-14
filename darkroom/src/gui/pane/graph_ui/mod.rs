@@ -24,7 +24,7 @@ pub(crate) mod toolbar;
 pub(crate) mod unsettled_ctx;
 pub(crate) mod wid;
 
-use palantir::{Chrome, Configure, Panel, Sense, Sizing, TranslateScale, Ui};
+use palantir::{Chrome, Configure, Panel, Sense, SizeSpec, TranslateScale, Ui};
 
 use crate::core::document::Document;
 use crate::gui::frame::framing::Framing;
@@ -209,7 +209,7 @@ impl GraphUi {
         // never starts a pan.
         Panel::zstack()
             .id_salt("graph_overlay")
-            .size(Sizing::FILL)
+            .size(SizeSpec::FILL)
             .show(ui, |ui| {
                 self.record_canvas(ui, stage);
                 toolbar::show(ui, stage);
@@ -261,7 +261,7 @@ impl GraphUi {
         // every pan/zoom tick.
         Panel::canvas()
             .id(canvas::outer_wid())
-            .size(Sizing::FILL)
+            .size(SizeSpec::FILL)
             .sense(Sense::CLICK | Sense::DRAG | Sense::SCROLL | Sense::PINCH)
             .clip_rect()
             .chrome(Chrome::new(theme.canvas.bg))
@@ -270,7 +270,7 @@ impl GraphUi {
                 self.bg.draw(ui, theme, viewport);
                 Panel::canvas()
                     .id(canvas::inner_wid())
-                    .size(Sizing::FILL)
+                    .size(SizeSpec::FILL)
                     .transform(TranslateScale::new(viewport.pan, viewport.zoom))
                     .show(ui, |ui| {
                         let cull = CullRegion::from_size(

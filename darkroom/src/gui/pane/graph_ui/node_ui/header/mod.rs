@@ -8,7 +8,7 @@ use std::f32::consts::FRAC_PI_4;
 
 use palantir::{
     Checkbox, Configure, DockDrop, DockOperation, EditableLabel, Menu, MenuItem, MenuSeparator,
-    Modifiers, Panel, Separator, Sizing, SplitSide, Ui, VAlign, Visibility, WidgetId,
+    Modifiers, Panel, Separator, SizeSpec, SplitSide, Ui, VAlign, Visibility, WidgetId,
 };
 
 use scenarium::{CacheMode, NodeId};
@@ -80,7 +80,7 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     let (theme, node) = (record.node.theme(), record.node);
     Panel::hstack()
         .id_salt("header")
-        .size((Sizing::FILL, Sizing::HUG))
+        .size(SizeSpec::FILL_W)
         .padding(card::band_padding(theme))
         .gap(theme.space.xs)
         .child_align(VAlign::Center)

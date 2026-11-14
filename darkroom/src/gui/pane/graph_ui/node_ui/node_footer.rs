@@ -4,7 +4,8 @@
 //! run, so a run's end changes no node's height.
 
 use palantir::{
-    Block, Chrome, Configure, Corners, Panel, RgbaF32, Sense, Sizing, Text, TextWrap, Ui, VAlign,
+    Block, Chrome, Configure, Corners, Panel, RgbaF32, Sense, SizeSpec, Sizing, Text, TextWrap, Ui,
+    VAlign,
 };
 use scenarium::RamUsage;
 
@@ -29,14 +30,14 @@ pub(super) fn show(ui: &mut Ui, node_ctx: NodeCtx<'_>) {
     let theme = node_ctx.theme();
     Panel::vstack()
         .id(wid::footer(node.node_id))
-        .size((Sizing::FILL, Sizing::HUG))
+        .size(SizeSpec::FILL_W)
         .padding(card::band_padding(theme))
         .gap(theme.space.xs)
         .chrome(theme.footer_chrome(theme.card_inner_radius()))
         .show(ui, |ui| {
             Panel::hstack()
                 .id_salt("node_footer_row")
-                .size((Sizing::FILL, Sizing::HUG))
+                .size(SizeSpec::FILL_W)
                 .gap(theme.space.md)
                 .child_align(VAlign::Center)
                 .show(ui, |ui| {
@@ -68,7 +69,7 @@ fn error_line(ui: &mut Ui, theme: &Theme, message: &str) {
     let line = Text::new(first)
         .style(&style)
         .text_wrap(TextWrap::Ellipsis)
-        .size((Sizing::FILL, Sizing::HUG))
+        .size(SizeSpec::FILL_W)
         .sense(Sense::HOVER)
         .show(ui);
     support::tooltip_after(ui, &line, Some(message));
@@ -107,7 +108,7 @@ impl Pool {
     fn meter(self, ui: &mut Ui, theme: &Theme) {
         Panel::hstack()
             .id_salt(("node_mem_meter", self.label))
-            .size((Sizing::HUG, Sizing::HUG))
+            .size(SizeSpec::HUG)
             .gap(theme.space.xs)
             .child_align(VAlign::Center)
             .show(ui, |ui| {

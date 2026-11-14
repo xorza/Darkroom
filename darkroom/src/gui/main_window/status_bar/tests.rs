@@ -55,20 +55,17 @@ fn the_readout_holds_its_width_as_its_figures_change() {
     let root = WidgetId::from_hash("readout_root");
     let mut width = |zoom: f32, process: u64, cached: u64| {
         h.frame(|ui| {
-            Panel::hstack()
-                .id(root)
-                .size((Sizing::HUG, Sizing::HUG))
-                .show(ui, |ui| {
-                    Readout {
-                        counts: CountsClause {
-                            node_count: 19,
-                            selected_count: 1,
-                        },
-                        zoom,
-                        ram: Some(MemoryLabel { process, cached }),
-                    }
-                    .show(ui, &theme);
-                });
+            Panel::hstack().id(root).size(SizeSpec::HUG).show(ui, |ui| {
+                Readout {
+                    counts: CountsClause {
+                        node_count: 19,
+                        selected_count: 1,
+                    },
+                    zoom,
+                    ram: Some(MemoryLabel { process, cached }),
+                }
+                .show(ui, &theme);
+            });
         });
         h.rect(root).expect("the readout arranged").size.w
     };

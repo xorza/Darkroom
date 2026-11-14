@@ -3,7 +3,7 @@
 //! graph canvas toolbar and the image viewer's control panel; each caller
 //! keeps its own glyphs and toggle color policy.
 
-use palantir::{Configure, Panel, Sense, Separator, Sizing, Spacing, Ui};
+use palantir::{Configure, Panel, Sense, Separator, SizeSpec, Spacing, Ui};
 
 use crate::gui::theme::Theme;
 
@@ -13,7 +13,7 @@ use crate::gui::theme::Theme;
 /// canvas or image beneath.
 pub(crate) fn dress(panel: Panel, theme: &Theme) -> Panel {
     panel
-        .size((Sizing::HUG, Sizing::HUG))
+        .size(SizeSpec::HUG)
         .gap(theme.space.xs)
         .padding(Spacing::all(theme.space.xs))
         .sense(Sense::CLICK | Sense::DRAG | Sense::SCROLL)

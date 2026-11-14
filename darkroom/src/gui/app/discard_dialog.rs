@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 
 use palantir::{
-    Button, Checkbox, Configure, Modal, OverlayClose, Panel, Sizing, Spacing, Text, TextWrap, Ui,
+    Button, Checkbox, Configure, Modal, OverlayClose, Panel, SizeSpec, Spacing, Text, TextWrap, Ui,
     VAlign, WidgetId,
 };
 
@@ -167,7 +167,7 @@ fn show(ui: &mut Ui, theme: &Theme, file_name: Option<&str>, tail: &str) -> Disc
             .show(ui, |ui| {
                 Panel::vstack()
                     .id(message_wid())
-                    .size((Sizing::FILL, Sizing::HUG))
+                    .size(SizeSpec::FILL_W)
                     .max_size((title_measure(theme) + 2.0 * inset, f32::INFINITY))
                     .padding(Spacing::all(inset))
                     .gap(theme.space.sm)
@@ -185,7 +185,7 @@ fn show(ui: &mut Ui, theme: &Theme, file_name: Option<&str>, tail: &str) -> Disc
                     });
                 Panel::hstack()
                     .id(footer_wid())
-                    .size((Sizing::FILL, Sizing::HUG))
+                    .size(SizeSpec::FILL_W)
                     .padding(Spacing::xy(inset, theme.space.lg))
                     .gap(theme.space.sm)
                     .child_align(VAlign::Center)

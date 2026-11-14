@@ -27,8 +27,8 @@
 use std::fmt::{self as std_fmt, Display, Formatter};
 
 use palantir::{
-    Align, Button, Checkbox, ComboBox, Configure, DragValue, Panel, Sizing, Text, TextEdit,
-    TextInput, TextWrap, Ui, VAlign, WidgetId, fmt,
+    Align, Button, Checkbox, ComboBox, Configure, DragValue, Panel, SizeSpec, Sizing, Text,
+    TextEdit, TextInput, TextWrap, Ui, VAlign, WidgetId, fmt,
 };
 use scenarium::{ConstValue, DataType, Library, ValueVariant};
 
@@ -165,7 +165,7 @@ impl ConstEditor<'_> {
                     .style(&field.theme.button)
                     .text_wrap(TextWrap::EllipsisMiddle)
                     .text_align(Align::LEFT)
-                    .size(Sizing::FILL)
+                    .size(SizeSpec::FILL)
                     .min_size((field.theme.width, 0.0))
                     .show(ui);
                 support::tooltip_after(ui, &button, tooltip);
@@ -215,7 +215,7 @@ impl Field<'_> {
         let changed = ComboBox::labeled(&mut current, options.iter(), |option| label(option))
             .id(self.id)
             .button_style(&self.theme.button)
-            .size(Sizing::FILL)
+            .size(SizeSpec::FILL)
             .min_size((self.theme.width, 0.0))
             .show(ui)
             .changed;

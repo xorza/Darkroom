@@ -29,8 +29,8 @@ use std::fmt::Formatter;
 use glam::{UVec2, Vec2};
 use palantir::widget::{ImagePaint, Shape};
 use palantir::{
-    Align, Chrome, Configure, Fit, ImageDownsample, ImageFilter, ImageHandle, Panel, Sense, Sizing,
-    Spacing, Ui, WidgetId, fmt,
+    Align, Chrome, Configure, Fit, ImageDownsample, ImageFilter, ImageHandle, Panel, Sense,
+    SizeSpec, Spacing, Ui, WidgetId, fmt,
 };
 
 use crate::core::document::Document;
@@ -261,7 +261,7 @@ impl ImageViewer {
         let fill = glyph::flat_fill(theme, preferences.bg).unwrap_or(theme.canvas.bg);
         Panel::zstack()
             .id(pane_wid(self.node_id))
-            .size(Sizing::FILL)
+            .size(SizeSpec::FILL)
             .sense(Sense::CLICK | Sense::DRAG | Sense::SCROLL | Sense::PINCH)
             .clip_rect()
             .chrome(Chrome::new(fill))
@@ -346,7 +346,7 @@ impl ImageViewer {
         let margin = shown.pane.theme.space.sm;
         Panel::hstack()
             .id(top_row_wid(self.node_id))
-            .size((Sizing::FILL, Sizing::HUG))
+            .size(SizeSpec::FILL_W)
             .padding(Spacing::new(margin, margin, margin, 0.0))
             .gap(margin)
             .child_align(Align::TOP_LEFT)
@@ -389,7 +389,7 @@ impl ImageViewer {
         };
         Panel::vstack()
             .id(controls.wid("panel"))
-            .size((Sizing::HUG, Sizing::HUG))
+            .size(SizeSpec::HUG)
             .child_align(Align::TOP_RIGHT)
             .gap(theme.space.sm)
             .show(ui, |ui| {

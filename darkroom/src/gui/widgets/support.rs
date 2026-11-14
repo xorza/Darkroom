@@ -4,7 +4,7 @@
 
 use palantir::{
     Align, AnimationSpec, Block, ButtonTheme, Chrome, Configure, Corners, FontFamily, FontWeight,
-    Rect, Response, RgbaF32, Sizing, SlotDefaults, Spacing, StatefulLook, TextInput, TextStyle,
+    Rect, Response, RgbaF32, SizeSpec, SlotDefaults, Spacing, StatefulLook, TextInput, TextStyle,
     TextWrap, Tooltip, Ui, WidgetLook,
 };
 
@@ -114,10 +114,7 @@ pub(crate) fn dot_cell(ui: &mut Ui, salt: &'static str, theme: &Theme, hue: Rgba
 /// An empty stretch panel pushing the following hstack siblings to the
 /// far edge. `salt` keeps sibling spacers' ids distinct.
 pub(crate) fn hspacer(ui: &mut Ui, salt: &'static str) {
-    Block::new()
-        .id_salt(salt)
-        .size((Sizing::FILL, Sizing::HUG))
-        .show(ui);
+    Block::new().id_salt(salt).size(SizeSpec::FILL_W).show(ui);
 }
 
 /// `rest` at rest and while disabled, `lit` under the pointer and while pressed: a press looks as

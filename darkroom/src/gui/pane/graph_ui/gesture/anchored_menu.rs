@@ -1,5 +1,5 @@
 use glam::Vec2;
-use palantir::{Configure, Menu, Sizing, Ui};
+use palantir::{Configure, Menu, SizeSpec, Ui};
 
 /// Shared open/close lifecycle and look for the canvas's anchored context popups (the node
 /// menu and the new-node palette). Owns only the surface-space anchor and the dismiss
@@ -55,9 +55,7 @@ impl AnchoredMenu {
         // `None` for a menu that isn't open.
         let anchor = self.anchor?;
         let mut pick = None;
-        let mut menu = Menu::at(anchor)
-            .id_salt(id_salt)
-            .size((Sizing::HUG, Sizing::HUG));
+        let mut menu = Menu::at(anchor).id_salt(id_salt).size(SizeSpec::HUG);
         if let Some(h) = max_height {
             menu = menu.max_size((f32::INFINITY, h));
         }

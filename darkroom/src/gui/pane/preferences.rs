@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use common::{ErrorChain, fs, process};
 use lens::MlModelPaths;
 use palantir::{
-    Align, Button, Checkbox, ComboBox, Configure, Grid, Panel, Sizing, Spacing, Text, TextEdit,
+    Align, Button, Checkbox, ComboBox, Configure, Grid, Panel, SizeSpec, Spacing, Text, TextEdit,
     TextWrap, Track, Ui, VAlign, WidgetId,
 };
 
@@ -44,7 +44,7 @@ impl PreferencesForm<'_> {
         let theme = self.theme;
         Panel::vstack()
             .id_salt("preferences_view")
-            .size(Sizing::FILL)
+            .size(SizeSpec::FILL)
             .padding(theme.pane_padding())
             .child_align(Align::TOP)
             .show(ui, |ui| {
@@ -54,7 +54,7 @@ impl PreferencesForm<'_> {
                 // included.
                 Grid::new()
                     .id_salt("preferences_form")
-                    .size((Sizing::FILL, Sizing::HUG))
+                    .size(SizeSpec::FILL_W)
                     .max_size((COL_WIDTH, f32::INFINITY))
                     .cols([Track::HUG, Track::FILL, Track::HUG])
                     .rows(&form_rows(theme))
@@ -157,7 +157,7 @@ impl PreferencesForm<'_> {
                 .id(wid)
                 .grid_cell((at, 1))
                 .align(VAlign::Center)
-                .size((Sizing::FILL, Sizing::HUG))
+                .size(SizeSpec::FILL_W)
                 .min_size((ML_PATH_FIELD_MIN, 0.0))
                 .placeholder("/path/to/model.onnx");
             // A broken committed path tints the field's chrome as an error.
@@ -191,7 +191,7 @@ impl PreferencesForm<'_> {
             Panel::vstack()
                 .id_salt(("notes", name))
                 .grid_cell((at + 1, 1))
-                .size((Sizing::FILL, Sizing::HUG))
+                .size(SizeSpec::FILL_W)
                 .gap(theme.space.xs)
                 .show(ui, |ui| {
                     if let Some(problem) = problem {
@@ -203,7 +203,7 @@ impl PreferencesForm<'_> {
                                 theme.font.caption,
                             ))
                             .text_wrap(TextWrap::Wrap)
-                            .size((Sizing::FILL, Sizing::HUG))
+                            .size(SizeSpec::FILL_W)
                             .show(ui);
                     }
                     download_hint(ui, theme, row);
@@ -337,7 +337,7 @@ fn download_hint(ui: &mut Ui, theme: &Theme, row: ModelRow) {
     let wid = WidgetId::from_hash(("darkroom.preferences.download_hint", link_label));
     Panel::hstack()
         .id_salt("hint")
-        .size((Sizing::FILL, Sizing::HUG))
+        .size(SizeSpec::FILL_W)
         .child_align(VAlign::Top)
         .show(ui, |ui| {
             // The destination shows under the pointer, as the text does not spell it out. A missing
@@ -354,7 +354,7 @@ fn download_hint(ui: &mut Ui, theme: &Theme, row: ModelRow) {
             Text::new(DOWNLOAD_HINT)
                 .style(&support::muted_text(ui, theme, theme.font.caption))
                 .text_wrap(TextWrap::Wrap)
-                .size((Sizing::FILL, Sizing::HUG))
+                .size(SizeSpec::FILL_W)
                 .show(ui);
         });
 }

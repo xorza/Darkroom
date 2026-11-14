@@ -8,7 +8,7 @@
 //! strip that grew and shrank would jitter and resize the dock when a run lands.
 
 use palantir::{
-    Chrome, Configure, Panel, Sizing, Spacing, Text, TextStyle, Ui, VAlign, WidgetId, fmt,
+    Chrome, Configure, Panel, SizeSpec, Sizing, Spacing, Text, TextStyle, Ui, VAlign, WidgetId, fmt,
 };
 use scenarium::RamUsage;
 
@@ -108,7 +108,7 @@ impl Readout {
         let bytes_width = support::figure_width(ui, &figures, BYTES_GLYPHS);
         Panel::hstack()
             .id_salt("status_readout")
-            .size((Sizing::HUG, Sizing::HUG))
+            .size(SizeSpec::HUG)
             .child_align(VAlign::Center)
             .show(ui, |ui| {
                 Text::new(fmt!(ui, "{counts} \u{b7} "))

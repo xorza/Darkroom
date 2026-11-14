@@ -11,8 +11,8 @@ use std::fmt::Formatter;
 use imaginarium::ColorFormat;
 use palantir::widget::{ImagePaint, Shape};
 use palantir::{
-    Align, Configure, CursorIcon, DockOperation, Fit, Justify, Panel, Sense, Sizing, Text,
-    TextWrap, Ui, VAlign, fmt,
+    Align, Configure, CursorIcon, DockOperation, Fit, Justify, Panel, Sense, SizeSpec, Sizing,
+    Text, TextWrap, Ui, VAlign, fmt,
 };
 
 use crate::core::document::tab_ref::TabRef;
@@ -100,7 +100,7 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
 fn info_row(ui: &mut Ui, theme: &Theme, image: &DrawablePreview) {
     Panel::hstack()
         .id_salt("preview_info")
-        .size((Sizing::FILL, Sizing::HUG))
+        .size(SizeSpec::FILL_W)
         .padding(card::band_padding(theme))
         .gap(theme.space.md)
         .child_align(VAlign::Center)
@@ -112,7 +112,7 @@ fn info_row(ui: &mut Ui, theme: &Theme, image: &DrawablePreview) {
             card::bare_value(ui, theme, FormatLabel(image.preview.native_format));
             Panel::hstack()
                 .id_salt("preview_info_size")
-                .size((Sizing::HUG, Sizing::HUG))
+                .size(SizeSpec::HUG)
                 .gap(theme.space.xs)
                 .child_align(VAlign::Center)
                 .show(ui, |ui| {
