@@ -2,7 +2,6 @@ use common::CancelToken;
 
 use crate::image_ops::ml::backend::OnnxModel;
 use crate::image_ops::ml::remove_stars::RemoveStars;
-use crate::internals::real_data::ml_support::onnx_weights;
 use crate::internals::{init_tracing, real_data, visual};
 
 fn max_of(p: &[f32]) -> f32 {
@@ -10,16 +9,13 @@ fn max_of(p: &[f32]) -> f32 {
 }
 
 /// Prototype: run a `StarNet2` ONNX over the full bundled (stretched) frame and write
-/// input / starless / stars PNGs. Uses the gitignored, caller-supplied `StarNet2_weights.onnx` in
-/// `test_data/` (lumos ships no model); `STARNET2_ONNX` overrides the path. Skipped if absent. The
+/// input / starless / stars PNGs, with the dataset's `StarNet2_weights.onnx`. The
 /// full frame is hundreds of 512² tiles — ~60 s on a 10-core machine. Build/run with
 /// `--features ml,real-data`.
 #[test]
 fn starnet_removes_stars() {
     init_tracing();
-    let Some(weights) = onnx_weights("STARNET2_ONNX", "StarNet2_weights.onnx") else {
-        return;
-    };
+    let weights = real_data::dataset_path("StarNet2_weights.onnx");
 
     // StarNet wants stretched display data in [0,1].
     let img = real_data::display_master();

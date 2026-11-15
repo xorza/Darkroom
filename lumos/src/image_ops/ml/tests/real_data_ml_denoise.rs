@@ -3,7 +3,6 @@ use common::CancelToken;
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::ml::backend::OnnxModel;
 use crate::image_ops::ml::ml_denoise::MlDenoise;
-use crate::internals::real_data::ml_support::onnx_weights;
 use crate::internals::{init_tracing, real_data, visual};
 
 /// Mean |adjacent-pixel difference| of the intensity — a high-frequency noise proxy (slow gradients
@@ -23,15 +22,12 @@ fn mean_adjacent_diff(image: &LinearImage) -> f32 {
 }
 
 /// Prototype: run a DeepSNR-style ONNX denoiser over the full bundled (stretched) frame and
-/// write input / denoised PNGs. Uses the gitignored `DeepSNR_weights_v2.onnx` in `test_data/`
-/// (lumos ships no model); `DEEPSNR_ONNX` overrides the path. Skipped if absent. The full frame is
+/// write input / denoised PNGs, with the dataset's `DeepSNR_weights_v2.onnx`. The full frame is
 /// hundreds of 512² tiles — ~60 s on a 10-core machine. Build/run with `--features ml,real-data`.
 #[test]
 fn deepsnr_denoises() {
     init_tracing();
-    let Some(weights) = onnx_weights("DEEPSNR_ONNX", "DeepSNR_weights_v2.onnx") else {
-        return;
-    };
+    let weights = real_data::dataset_path("DeepSNR_weights_v2.onnx");
 
     // CNN denoisers want stretched display data in [0,1].
     let img = real_data::display_master();

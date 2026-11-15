@@ -6,8 +6,6 @@
 //!
 //! - [`milky_way`] — the "best Milky Way" chain: green removal, stretch, denoise, HDR and CLAHE
 //!   together, so it belongs to no single image op.
-//! - [`ml_support`] (feature `ml`) — weight resolution for the `ml` prototypes in
-//!   `image_ops/ml/tests/`.
 
 use std::path::{Path, PathBuf};
 
@@ -135,40 +133,5 @@ pub(crate) fn first_and_last_lights() -> LightPair {
     LightPair {
         first: raw_light(&lights[0]),
         last: raw_light(&lights[lights.len() - 1]),
-    }
-}
-
-/// Weight resolution for the `ml`-gated real-data prototypes (`star_removal`, `ml_denoise`).
-#[cfg(feature = "ml")]
-pub(crate) mod ml_support {
-    use std::path::PathBuf;
-
-    use common::{env, fs};
-
-    /// Resolve caller-supplied ONNX weights: the `env_var` override, else
-    /// `test_data/<default_file>`. Returns `None` (after a skip message) when absent — lumos ships
-    /// no models, so the tests skip rather than fail when the gitignored weights aren't present.
-    #[expect(
-        clippy::print_stderr,
-        reason = "a real-data test reports the weights it skips for, as a test does"
-    )]
-    pub(crate) fn onnx_weights(env_var: &str, default_file: &str) -> Option<PathBuf> {
-        let path = env::var_os(env_var).map_or_else(
-            || {
-                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                    .join("test_data")
-                    .join(default_file)
-            },
-            PathBuf::from,
-        );
-        if fs::exists(&path) {
-            Some(path)
-        } else {
-            eprintln!(
-                "ONNX weights not found at {} (set {env_var} or drop the .onnx there); skipping",
-                path.display()
-            );
-            None
-        }
     }
 }

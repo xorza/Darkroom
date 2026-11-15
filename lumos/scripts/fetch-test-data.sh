@@ -12,8 +12,7 @@
 #   scripts/fetch-test-data.sh           # fetch + unpack (skips if already present)
 #   scripts/fetch-test-data.sh --force   # re-download and replace test_data/lumos_data/
 #
-# Idempotent: an existing test_data/lumos_data/ is left untouched unless --force. Anything
-# else in test_data/ (ONNX weights, say) is never touched.
+# Idempotent: an existing test_data/lumos_data/ is left untouched unless --force.
 
 set -euo pipefail
 
