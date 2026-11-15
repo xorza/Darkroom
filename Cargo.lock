@@ -3044,7 +3044,6 @@ dependencies = [
  "glam 0.34.3",
  "half",
  "hashbrown 0.17.1",
- "image",
  "libm",
  "mundy",
  "naga",
