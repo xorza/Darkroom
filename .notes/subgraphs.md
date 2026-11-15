@@ -41,6 +41,15 @@ module doc of the system it governs, and this file goes.
 - **Every node still resolves to a `Func`.** A subgraph node takes its ports from the
   definition's interface, and the boundary nodes take the same ports mirrored; none has a lambda,
   as the compile removes all three. So `Graph::admit` stays the one admission rule.
+- **A node id is unique inside its graph, and an authored node is addressed by its graph and its
+  id.** The graph's map of nodes makes that so by construction, and a copy of a definition keeps
+  its node ids, so it stays equal to its source. As ComfyUI, where a node id is "local to its
+  immediate graph level" and a node is located as `<uuid>:<localId>`
+  ([subgraphs](https://docs.comfy.org/custom-nodes/js/subgraphs)), and Blender, where a plain
+  tree copy keeps its node identifiers
+  ([persistent node identifiers](https://projects.blender.org/archive/blender-archive/commit/90ea1b76434fe175)).
+  Refused: ids unique across the document, a rule a file can break with no sound repair, and one
+  that makes every copy mint ids and so differ from its source for good.
 - **One `Inputs` node and one `Outputs` node.** Each port is a row; a blank last row takes a
   dragged wire and becomes a port; the inspector orders, renames and removes them; neither node
   can be deleted. As Blender ("drag a link from or to the hollow socket"), Unreal's function
@@ -65,9 +74,9 @@ module doc of the system it governs, and this file goes.
   the right index. Refused: matching by name, which darkroom's stub decision refuses already;
   the index alone, which a reorder breaks.
 - **An interface edit rewrites every instance in the same undo step.** A removed port takes the
-  wires on it in every graph of the document, and undo puts them back. A node keeps the
-  signature of its definition, as it keeps a func's, so a mismatch can only come from a file,
-  and the load makes that node a stub.
+  wires on it in every graph of the document, a retyped one the wires it no longer admits, and
+  undo puts them back. A node keeps the signature of its definition, as it keeps a func's, so a
+  mismatch can only come from a file, and the load makes that node a stub.
 - **A port made from an `Any` input is `Any`**, and feeds only `Any` inputs, by the existing
   wire rule. Where several inputs make one port, it takes the narrowest of their types.
 - **Subgraphs do not recurse.** A definition holds no node of itself, directly or through
@@ -75,11 +84,10 @@ module doc of the system it governs, and this file goes.
   Blender ("Recursive node groups are prohibited") and Substance Designer, where cyclical
   dependencies are forbidden
   ([graph instances](https://helpx.adobe.com/substance-3d-designer/substance-model-graphs/graph-instances-in-substance-model-graphs.html)).
-- **The flattened size has a bound, held at the edit gate.** Two instances a level over thirty
-  levels are 2³⁰ program nodes, and a compile has no expected failure, so the edit that would
-  pass the bound is refused.
-- **A node id is unique across the document's graphs**, as it is now across one; Make Unique
-  mints fresh ones, as Duplicate does.
+- **Nesting stops at eight levels and the flattened size has a bound, both held at the edit
+  gate.** Two instances a level over thirty levels are 2³⁰ program nodes, and a compile has no
+  expected failure, so the edit that would pass a bound is refused. Eight, as a path of eight
+  ids is 128 bytes and stays a plain value. Cost: a ninth level is refused.
 - **A wire through an instance ties every output to every input** in the cycle check. Cost: a
   loop through two ports that share nothing inside is refused, as Blender refuses it.
 - **Subscriptions stay inside one graph.** An interface has no event ports yet.
@@ -91,15 +99,20 @@ module doc of the system it governs, and this file goes.
   until it names a func's output, a constant or nothing. So a passthrough costs nothing, output
   demand prunes across the boundary and each inner node caches as any node does. As Unreal
   expands each macro instance "into a unique set of nodes during compilation".
-- **A program node's id is derived from its path.** A root node keeps its id; an inner one takes
-  a hash of its instance's program id and its own. It is the same on every compile and in every
-  session, so RAM slots and disk blobs stay with their instance. As Blender keys per-instance
-  node data by `BKE_node_instance_key` of the parent key and the group node
-  ([#108900](https://projects.blender.org/blender/blender/pulls/108900)). Refused: a counter,
-  which moves when another instance is added; ids stored per instance, a value kept where it is
-  derived.
-- **A program id is its own type.** Reports, seeds, evictions and blob names carry it; `NodeId`
-  names an authored node. The host derives it from a path, so no table crosses to the worker.
+- **A program node's id is its path**: the instances from the main graph down, then the node.
+  It is unique by construction, the same on every compile, and reads back as the place to show;
+  in the program's sorted order one instance's nodes are one run, so its status needs no table.
+  As ComfyUI's execution id, "a list of all subgraph node IDs, followed by the actual original
+  node ID" ([subgraphs](https://docs.comfy.org/custom-nodes/js/subgraphs)). Refused: a hash of
+  the path, as Blender's compute context hash
+  ([`BLI_compute_context.hh`](https://projects.blender.org/archive/blender-archive/src/commit/5cc793912efe4432b51cc7ddda4005c56fcbc93b/source/blender/blenlib/BLI_compute_context.hh)),
+  which the program would hold beside the path it still needs to name a failed node; a root
+  node's own id beside hashed inner ones, which a file can make collide.
+- **A program id is its own type, a path of bounded length held inline.** Reports, seeds,
+  evictions and viewer tabs carry it with no allocation; `NodeId` names an authored node in its
+  graph.
+- **A disk blob is named by the digest of its path and holds the path**, which a read checks, as
+  a file name has a length limit and a path of eight ids passes it.
 - **A disabled instance disables every node inside it.** An instance has no cache mode: the
   nodes inside carry their own.
 
@@ -110,14 +123,16 @@ module doc of the system it governs, and this file goes.
   instances of the same asset will get the same changes"
   ([editing assets](https://www.sidefx.com/docs/houdini/assets/edit.html)). Refused: a draft
   with Apply, a mode to enter and leave.
+- **An undo brings the graph it changes to the front** when its tab is open, and names it in the
+  status bar when not, so no undo changes only what is off screen.
 - **Duplicate and paste make another instance; Make Unique gives the selected instances a
   definition of their own.** As Blender, Grasshopper ("the two instances of the cluster will be
   entangled") and ComfyUI, whose subgraphs are "linked rather than duplicated" by default
   ([release notes](https://blog.comfy.org/p/subgraph-official-release)). Refused: a copy by
   default, as Nuke's Group, where ten copies of one pipeline are ten graphs to fix.
-- **Make Unique is shallow.** The new definition holds the same nodes under fresh ids, and its
-  inner instances name the definitions they named. As Blender's single-user copy, which
-  duplicates one data-block. A deep copy is Make Unique again, one level in.
+- **Make Unique is shallow.** The new definition has a fresh id and the same nodes under the
+  same ids, and its inner instances name the definitions they named. As Blender's single-user
+  copy, which duplicates one data-block. A deep copy is Make Unique again, one level in.
 - **The count of uses always shows**, on the node and in the pane header once it passes one,
   with Make Unique beside it. Grasshopper's users report "no visual sign of entanglement"
   ([forum](https://discourse.mcneel.com/t/cluster-disentangled-without-notice/57955)); Blender
@@ -132,15 +147,19 @@ module doc of the system it governs, and this file goes.
   node of it, a port for each source or consumer a crossing wire names; Expand puts one
   instance's nodes back with fresh ids. As Blender's Make Group and Ungroup, ComfyUI's convert
   and unpack.
+- **A collapse is refused when a wire leaves the selection and a later one returns**, and the
+  status bar names the node between: the instance would feed itself. A boundary node and a stub
+  in the selection stay where they are.
 - **An unused subgraph stays until removed.** The library list marks it, and Remove Unused clears
   them. Refused: removal with the last instance, which loses work in Blender unless a fake user
   is set. Cost: a collapse and an expand leave one behind.
 - **An instance shows the worst status inside it and the time summed**, and its footer names the
   node that failed.
 - **Copy and paste go through the system clipboard as text.** A clip is a document fragment in
-  RON: the nodes, the wires among them, their ties and places, and each subgraph they use. A
-  paste in the same document reuses the definitions; another document takes them in by the rule
-  under Sharing. Cost: a clip holds a const path as the document does.
+  RON under a header line: the nodes, the wires among them, their ties and places, and each
+  subgraph they use. A paste mints node ids for the graph it lands in and takes the subgraphs in
+  by the rule under Sharing; text with no header, or past the size bound, is not a clip and
+  pastes nothing. Cost: a clip holds a const path as the document does.
 
 ### Sharing
 
@@ -160,20 +179,36 @@ module doc of the system it governs, and this file goes.
   an asset
   ([asset libraries](https://docs.blender.org/manual/en/latest/files/asset_libraries/introduction.html)).
   Refused: a format of its own, as Nuke's `.gizmo` and Grasshopper's `.ghcluster`, with no place
-  for the wiring that shows a subgraph working. Cost: the palette reads whole documents, once,
-  at start and when the folder changes.
+  for the wiring that shows a subgraph working.
+- **The folder is read off the frame, once at start and when it changes.** A file that does not
+  load is listed with its error; an id two files hold is one entry when their digests are equal
+  and one per file, each under its file's name, when not.
+- **Identity is the id, difference a digest.** The digest covers the interface, the graph, the
+  name and description, and each subgraph it uses by that one's digest, as a git tree names its
+  children ([git objects](https://git-scm.com/book/en/v2/Git-Internals-Git-Objects)); not its
+  own id, and not its view, so moving a node changes nothing.
+- **A copy remembers the digest it last shared with the library.** Against the two current
+  digests it reads in sync, update available, changed here, or changed in both, the last of
+  which a two-way comparison cannot tell from the others. Refused: version numbers, which order
+  two copies and say nothing of a third made beside them.
 - **Nothing but an explicit Update changes a definition the document holds.** Taking in an equal
-  one under an id the document has reuses it; a different one under that id comes in as a copy
-  with a fresh id.
-- **Identity is the id, difference a digest of the content.** A library entry the document
-  holds reads "in document", and "differs" when the digests do. Update from Library and Publish
-  to Library replace one side with the other and move bindings by port id. As Simulink's Restore
-  Link and Push Link
+  one under an id the document has reuses it; a different one under that id comes in beside it
+  with a fresh id, and what came with it names that one. As Cargo builds "two separate copies"
+  of a dependency two packages need at incompatible versions
+  ([resolver](https://doc.rust-lang.org/cargo/reference/resolver.html)). Refused: one version
+  for the document, which changes a subgraph nobody touched.
+- **Update from Library is an undoable edit; Publish to Library asks first.** An Update moves
+  each instance's bindings by port id and reports each wire it drops. A Publish replaces the
+  definition inside the library file and leaves that file's main graph; it names what it
+  overwrites when the library changed since the last sync, and writes the file whole or not at
+  all. As Simulink's Restore Link and Push Link
   ([disable or break links](https://www.mathworks.com/help/simulink/ug/disable-links-to-library-blocks.html)),
-  Houdini's Match Current Definition and Save Node Type. Refused: version numbers, which say
-  which is newer and nothing a person acts on here.
+  Houdini's Match Current Definition and Save Node Type.
 - **A shared file holds no code.** It is graphs over the built-in funcs; a func the receiver
   lacks loads as a stub inside the subgraph, as in any document.
+- **A definition that enters from another file loses its output paths**, whichever way it comes:
+  a write to a path inside a subgraph is one the receiver did not pick and cannot see. A node
+  pasted onto the canvas keeps its own, which is in view.
 
 ### Resources and the archive
 
@@ -187,25 +222,39 @@ module doc of the system it governs, and this file goes.
   Refused: a folder of the document and its files, as Unreal's Migrate writes
   ([migrating assets](https://dev.epicgames.com/documentation/en-us/unreal-engine/migrating-assets-in-unreal-engine)),
   which is two things to send.
-- **Resources unpack once, beside the archive**, into `name.darkroomz-resources/`, as the disk
-  cache sits in `name.darkroomz-cache/`: at the open of the archive, or at the first use of a
-  subgraph from it. A path in memory is then an absolute path as any other, and no node, codec
-  or digest changes. As Unity's Import Package unpacks into the project
-  ([importing packages](https://docs.unity3d.com/6000.6/Documentation/Manual/AssetPackagesImport.html))
-  and Blender's Unpack writes to the current directory. Refused: reading the archive in place,
-  as Houdini's [`opdef:`](https://www.sidefx.com/docs/houdini/assets/opdef.html) paths do, which
-  every path reader then has to know, LibRaw and ONNX Runtime included; a temp folder per
-  session, which unpacks at every open and gives a path no disk cache entry outlives. Cost: the
-  bytes are on disk twice.
-- **An unpacked file is kept when its size and modified time match the entry's**, the check
-  rsync makes before it reads a byte. Cost: a file changed in place at the same size and time is
-  not restored.
+- **Resources unpack beside the archive**, into `name.darkroomz-resources/`, as the disk cache
+  sits in `name.darkroomz-cache/`. A path in memory is then an absolute path as any other, and
+  no node, codec or digest changes. As Unity's Import Package unpacks into the project
+  ([importing packages](https://docs.unity3d.com/6000.6/Documentation/Manual/AssetPackagesImport.html)).
+  Refused: reading the archive in place, as Houdini's
+  [`opdef:`](https://www.sidefx.com/docs/houdini/assets/opdef.html) paths do, which every path
+  reader then has to know, LibRaw and ONNX Runtime included; a temp folder per session, which
+  unpacks at every open and gives a path no disk cache entry outlives. Cost: the bytes are on
+  disk twice.
+- **An entry is named by the digest of its content**, `resources/<digest>/<file name>`, a folder
+  by the digest of its files. Two files of one name do not clash, one file bundled twice is one
+  entry, and a changed file is a new entry. Refused: the file name alone with a size and
+  modified-time check, which is a guess about what a name holds.
+- **An unpacked file is whole, checked and read-only.** It is written under a temporary name,
+  held to the digest in its entry's name and renamed into place, so a file that is there is the
+  one the archive holds and an interrupted unpack leaves nothing to trust. Read-only as Go keeps
+  its module cache ([module cache](https://go.dev/ref/mod#module-cache)); Cargo marks a finished
+  unpack with `.cargo-ok` for the same question
+  ([`RegistrySource`](https://doc.rust-lang.org/nightly/nightly-rustc/cargo/sources/registry/struct.RegistrySource.html)).
+- **An entry unpacks when a path that names it enters memory**: every one at the open of the
+  archive, and those a subgraph names when it is copied from the library. A folder under
+  `-resources` that no entry names is removed then.
 - **A bundled path reads `resources/…` in the file and names an entry**; a relative path that
   names none lies beside the file, as now. A save of a `.darkroomz` writes an entry for each
   const path inside its resources folder, so an archive opened and saved keeps what it had.
-- **An entry outside `resources/`, or with `..` in its name, is not unpacked**, and the load
-  report names it: an archive is another person's data
-  ([Zip Slip](https://github.com/snyk/zip-slip-vulnerability)).
+- **Only a regular file under `resources/` is unpacked.** An entry with `..` in its name, an
+  absolute one, a link, or one longer than its header declares is refused and named in the load
+  report: an archive is another person's data. The name goes through the zip crate's
+  `enclosed_name`, and no link is written, as its own extraction once wrote through one
+  ([CVE-2025-29787](https://www.sentinelone.com/vulnerability-database/cve-2025-29787/)).
+- **A resources folder that cannot be written is an error the load report names**, and the paths
+  into it stay unresolved. Refused: a second place to unpack to, which gives one archive two
+  behaviors.
 - **An output path is always stripped**, as it names no file to bundle.
 - **A stripped input takes the receiver's library default when the subgraph enters a document**,
   as a new node's input does, so a model path follows the receiver's preferences.
@@ -226,13 +275,13 @@ module doc of the system it governs, and this file goes.
 
 ## Order of work
 
-1. scenarium: definitions, the subgraph node and the boundary nodes, admission, the recursion and
-   size gates, the flatten and program ids. A test holds the program of a graph with a subgraph
-   to that of its hand-inlined twin.
+1. scenarium: definitions, the subgraph node and the boundary nodes, the graph in an authored
+   address, admission, the recursion, depth and size gates, the flatten and the program path. A
+   test holds the program of a graph with a subgraph to that of its hand-inlined twin.
 2. darkroom's core: the document holds subgraphs and their views, an intent names its graph, the
    interface steps, the load per graph.
 3. Panes: the tab, the header path, the instance a pane shows through, run state by program id.
 4. Collapse, Expand, the boundary nodes on the canvas, the interface in the inspector.
 5. Duplicate, Make Unique, the clipboard.
-6. The library folder, the palette, Update and Publish.
+6. The library folder, the palette, the digests, Update and Publish.
 7. Export: the path list, the archive's resource entries, the unpack.
