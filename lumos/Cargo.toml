@@ -38,12 +38,12 @@ serde = { workspace = true, features = ["derive", "std"] }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
 nalgebra = { workspace = true, features = ["libm-force", "std"] }
-statrs = { workspace = true }
 arrayvec = { workspace = true, features = ["serde"] }
 blake3 = { workspace = true, features = ["std"] }
 criterion = { workspace = true, optional = true, features = ["cargo_bench_support"] }
 
 [dev-dependencies]
+statrs = { workspace = true }
 simd = { workspace = true, features = ["internals"] }
 fits-well = { workspace = true, features = ["internals"] }
 libraw = { workspace = true, features = ["internals"] }

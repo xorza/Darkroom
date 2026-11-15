@@ -4,19 +4,23 @@ use crate::combine::rejection::normal_scores::{CACHE_BYTES, NormalScores};
 const SCIPY_TWO: f64 = 0.589_455_797_849_778_3;
 
 /// One sample sits at the median: Φ⁻¹(0.625/1.25) = Φ⁻¹(0.5) = 0. Two sit at
-/// ±Φ⁻¹(1.625/2.25), which SciPy gives as 0.5894558; statrs computes Φ⁻¹ through erfc⁻¹ with a
-/// relative error near 1e-15, so 1e-12 holds the value and the odd symmetry about the middle. A
-/// smaller count filled after a larger one finds its own slice.
+/// ±Φ⁻¹(1.625/2.25), which SciPy gives as 0.5894558, within 2ε, and the odd symmetry about the
+/// middle is exact at these counts: AS 241 takes `p − ½`, and here each pair of mirrored positions'
+/// `p − ½` round to each other's negation.
+/// A smaller count filled after a larger one finds its own slice.
 #[test]
 fn scores_are_blom_positions_for_each_count() {
     let mut scores = NormalScores::default();
     let five = scores.of_count(5).to_vec();
     assert_eq!(scores.of_count(1), [0.0]);
     let two = scores.of_count(2).to_vec();
-    assert!((two[1] - SCIPY_TWO).abs() < 1e-12, "{two:?}");
-    assert!((two[0] + two[1]).abs() < 1e-12, "{two:?}");
+    assert!(
+        (two[1] - SCIPY_TWO).abs() <= 2.0 * f64::EPSILON * SCIPY_TWO,
+        "{two:?}"
+    );
+    assert_eq!(two[0], -two[1]);
     for rank in 0..5 {
-        assert!((five[rank] + five[4 - rank]).abs() < 1e-12, "{five:?}");
+        assert_eq!(five[rank], -five[4 - rank], "{five:?}");
     }
     assert_eq!(scores.of_count(5), five);
 }

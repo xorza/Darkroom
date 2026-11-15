@@ -1,6 +1,6 @@
 //! [`NormalScores`]: the expected positions of sorted Gaussian samples, for every sample count.
 
-use statrs::distribution::{ContinuousCDF, Normal};
+use crate::math::normal;
 
 /// The bytes a [`NormalScores`] cache holds at most, once its rows reach one count each: a worker's
 /// share of the scratch the memory plan leaves outside its budget.
@@ -74,10 +74,9 @@ impl NormalScores {
         let row = n % self.counts.len();
         let scores = &mut self.scores[row * self.max_count..][..n];
         if self.counts[row] != n {
-            let normal = Normal::standard();
             let count = n as f64;
             for (rank, score) in scores.iter_mut().enumerate() {
-                *score = normal.inverse_cdf((rank as f64 + 1.0 - 0.375) / (count + 0.25));
+                *score = normal::quantile((rank as f64 + 1.0 - 0.375) / (count + 0.25));
             }
             self.counts[row] = n;
         }

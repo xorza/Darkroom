@@ -1,6 +1,6 @@
 //! One horizontal slice of the output grid, and the kernels that scatter flux into it.
 
-use common::Libm;
+use simd::Kernel;
 use std::ops::Range;
 
 use glam::{DVec2, USizeVec2};
@@ -9,6 +9,7 @@ use crate::drizzle::accumulator::PlaneSpan;
 use crate::drizzle::accumulator::band_scan::BandScan;
 use crate::drizzle::accumulator::drop_quad::DropQuad;
 use crate::drizzle::accumulator::frame_source::{DropOutcome, Fluxes, FrameSource, InputPixel};
+use crate::drizzle::accumulator::gaussian_taps::GaussianTaps;
 use crate::drizzle::accumulator::kernel_plan::{KernelPlan, LANCZOS_ORDER};
 use crate::math::lanczos::lanczos_lut::LANCZOS_LUT_RESOLUTION;
 use crate::scratch_pool::{Scratch, ScratchPool, Shapeless};
@@ -149,20 +150,25 @@ impl OutputBand<'_> {
             KernelPlan::Gaussian {
                 radius,
                 inv_2sigma_sq,
-            } => self.distribute_radial(source, radius, |step, nearest| {
-                // `d² − d₀²` for `d = step + d₀`: the nearest tap is 1 and every other one below
-                // it, so the sum stays at least 1 however narrow the drop and however far off a
-                // pixel centre it lands, where `exp(−d²/2σ²)` underflows to a sum of 0.
-                let excess = step as f64 * (step as f64 + 2.0 * nearest);
-                (-(excess as f32) * inv_2sigma_sq).libm_exp()
+            } => self.distribute_radial(source, radius, |nearest, out| {
+                GaussianTaps {
+                    radius,
+                    nearest,
+                    inv_2sigma_sq,
+                    out,
+                }
+                .dispatch();
             }),
             KernelPlan::Lanczos { radius } => {
                 // The warp's table, within 1.1e-7 of the kernel: two `sin`s and two divisions a
                 // tap, fourteen taps a drop, become two reads and a fused multiply-add.
                 let lut = LANCZOS_ORDER.lut();
-                self.distribute_radial(source, radius, |step, nearest| {
-                    let distance = (step as f64 + nearest) as f32;
-                    lut.at(distance.abs() * LANCZOS_LUT_RESOLUTION as f32)
+                self.distribute_radial(source, radius, |nearest, out| {
+                    out.clear();
+                    out.extend((-radius..=radius).map(|step| {
+                        let distance = (step as f64 + nearest) as f32;
+                        lut.at(distance.abs() * LANCZOS_LUT_RESOLUTION as f32)
+                    }));
                 })
             }
         }
@@ -328,10 +334,11 @@ impl OutputBand<'_> {
     /// output pixels within `radius` of the drop's rounded centre, normalized so the weights sum
     /// to 1.
     ///
-    /// `kernel(step, nearest)` is the tap `step` pixels from the drop's nearest output pixel, whose
-    /// centre lies `nearest` from the drop's, at most half a pixel. A factor common to every tap of
-    /// an axis cancels in the normalization, so a kernel may scale an axis to keep its sum
-    /// representable, and must keep it positive.
+    /// `taps(nearest, out)` fills `out` with one axis's `2·radius + 1` taps, from `−radius` to
+    /// `radius` pixels off the drop's nearest output pixel, whose centre lies `nearest` from the
+    /// drop's, at most half a pixel. A factor common to every tap of an axis cancels in the
+    /// normalization, so a kernel may scale an axis to keep its sum representable, and must keep it
+    /// positive.
     ///
     /// The normalizer runs over the drop's **whole** neighbourhood, past the edge of the output
     /// grid included: it has to be the same number in every band, and flux that falls off the grid
@@ -342,7 +349,7 @@ impl OutputBand<'_> {
         &mut self,
         source: &FrameSource<'_>,
         radius: isize,
-        kernel: impl Fn(isize, f64) -> f32,
+        taps: impl Fn(f64, &mut Vec<f32>),
     ) -> usize {
         let mut scratch = self.radial.acquire();
         let reach = radius as f64;
@@ -372,18 +379,10 @@ impl OutputBand<'_> {
                 let centre_row = nearest_row as isize;
                 let centre_col = nearest_col as isize;
                 let offsets = -radius..=radius;
-                scratch.cols.clear();
-                scratch.cols.extend(
-                    offsets
-                        .clone()
-                        .map(|dx| kernel(dx, nearest_col - drop.centre.x)),
-                );
-                scratch.rows.clear();
-                scratch.rows.extend(
-                    offsets
-                        .clone()
-                        .map(|dy| kernel(dy, nearest_row - drop.centre.y)),
-                );
+                taps(nearest_col - drop.centre.x, &mut scratch.cols);
+                taps(nearest_row - drop.centre.y, &mut scratch.rows);
+                debug_assert_eq!(scratch.cols.len(), offsets.clone().count());
+                debug_assert_eq!(scratch.rows.len(), offsets.clone().count());
                 let total = scratch.cols.iter().sum::<f32>() * scratch.rows.iter().sum::<f32>();
                 debug_assert!(total > 0.0, "a radial kernel's taps sum to {total}");
                 let fluxes = source.fluxes(pixel);

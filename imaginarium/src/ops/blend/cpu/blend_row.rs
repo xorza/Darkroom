@@ -63,12 +63,13 @@ impl Kernel for BlendRow<'_, u8> {
     fn run<S: Isa>(self, isa: S) {
         let splat = Splat::new(isa, self.params, self.alpha, u8::FULL_SCALE_F32);
         row_groups::zip::<u8, U8_LANES>(self.src, self.dst, self.out, |src, dst, out| {
-            let [src, dst] = [src, dst].map(|bytes| {
-                let (octets, _) = bytes.as_chunks::<I32_LANES>();
-                [0, 1, 2, 3].map(|idx| isa.load_u8_as_i32(&octets[idx]).to_f32() / splat.full_scale)
-            });
-            let ints = [0, 1, 2, 3].map(|idx| splat.blend_rounded(isa, src[idx], dst[idx]));
-            isa.narrow_i32_to_u8(ints).store(out);
+            let (src, _) = src.as_chunks::<I32_LANES>();
+            let (dst, _) = dst.as_chunks::<I32_LANES>();
+            let i0 = splat.blend_octets(isa, src[0], dst[0]);
+            let i1 = splat.blend_octets(isa, src[1], dst[1]);
+            let i2 = splat.blend_octets(isa, src[2], dst[2]);
+            let i3 = splat.blend_octets(isa, src[3], dst[3]);
+            isa.narrow_i32_to_u8([i0, i1, i2, i3]).store(out);
         });
     }
 }
@@ -81,11 +82,11 @@ impl Kernel for BlendRow<'_, u16> {
     fn run<S: Isa>(self, isa: S) {
         let splat = Splat::new(isa, self.params, self.alpha, u16::FULL_SCALE_F32);
         row_groups::zip::<u16, U16_LANES>(self.src, self.dst, self.out, |src, dst, out| {
-            let [src, dst] = [src, dst].map(|words| {
-                let ints = isa.load_u16(words).widen();
-                [ints.low, ints.high].map(|ints| ints.to_f32() / splat.full_scale)
-            });
-            let [low, high] = [0, 1].map(|idx| splat.blend_rounded(isa, src[idx], dst[idx]));
+            let (src, dst) = (isa.load_u16(src).widen(), isa.load_u16(dst).widen());
+            let scale = splat.full_scale;
+            let low = splat.blend_rounded(isa, src.low.to_f32() / scale, dst.low.to_f32() / scale);
+            let high =
+                splat.blend_rounded(isa, src.high.to_f32() / scale, dst.high.to_f32() / scale);
             low.narrow_u16(high).store(out);
         });
     }
@@ -156,6 +157,19 @@ impl<F: F32x8> Splat<F> {
     #[inline(always)]
     fn blend_rounded<S: Isa<F32 = F>>(self, isa: S, src: F, dst: F) -> S::I32 {
         isa.round_clamped_f32_to_i32(self.blend(src, dst) * self.full_scale, self.full_scale)
+    }
+
+    /// [`Self::blend_rounded`] of eight bytes of each row, read as samples of the full scale.
+    #[inline(always)]
+    fn blend_octets<S: Isa<F32 = F>>(
+        self,
+        isa: S,
+        src: [u8; I32_LANES],
+        dst: [u8; I32_LANES],
+    ) -> S::I32 {
+        let src = isa.load_u8_as_i32(&src).to_f32() / self.full_scale;
+        let dst = isa.load_u8_as_i32(&dst).to_f32() / self.full_scale;
+        self.blend_rounded(isa, src, dst)
     }
 
     /// `BlendMode::blend` of normalized channels, `Normal` in the alpha lanes, held to the clamp.

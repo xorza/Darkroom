@@ -66,6 +66,12 @@ pub trait Libm: Copy {
     fn libm_cbrt(self) -> Self;
     #[must_use]
     fn libm_hypot(self, other: Self) -> Self;
+    /// The error function, which std does not have: fdlibm's `s_erf.c`, under 1 ulp.
+    #[must_use]
+    fn libm_erf(self) -> Self;
+    /// `1 − erf(self)` without its cancellation, fdlibm's `erfc`, under 1 ulp.
+    #[must_use]
+    fn libm_erfc(self) -> Self;
 }
 
 use glam::Vec2;
@@ -89,7 +95,7 @@ macro_rules! impl_libm {
     ($float:ty, $sin:ident, $cos:ident, $tan:ident, $sincos:ident, $asin:ident, $acos:ident,
      $atan:ident, $atan2:ident, $sinh:ident, $cosh:ident, $tanh:ident, $asinh:ident, $acosh:ident,
      $atanh:ident, $exp:ident, $exp2:ident, $expm1:ident, $log:ident, $log1p:ident, $log2:ident,
-     $log10:ident, $pow:ident, $cbrt:ident, $hypot:ident) => {
+     $log10:ident, $pow:ident, $cbrt:ident, $hypot:ident, $erf:ident, $erfc:ident) => {
         impl Libm for $float {
             #[inline]
             fn libm_sin(self) -> Self {
@@ -205,17 +211,26 @@ macro_rules! impl_libm {
             fn libm_hypot(self, other: Self) -> Self {
                 libm::$hypot(self, other)
             }
+            #[inline]
+            fn libm_erf(self) -> Self {
+                libm::$erf(self)
+            }
+            #[inline]
+            fn libm_erfc(self) -> Self {
+                libm::$erfc(self)
+            }
         }
     };
 }
 
 impl_libm!(
     f32, sinf, cosf, tanf, sincosf, asinf, acosf, atanf, atan2f, sinhf, coshf, tanhf, asinhf,
-    acoshf, atanhf, expf, exp2f, expm1f, logf, log1pf, log2f, log10f, powf, cbrtf, hypotf
+    acoshf, atanhf, expf, exp2f, expm1f, logf, log1pf, log2f, log10f, powf, cbrtf, hypotf, erff,
+    erfcf
 );
 impl_libm!(
     f64, sin, cos, tan, sincos, asin, acos, atan, atan2, sinh, cosh, tanh, asinh, acosh, atanh,
-    exp, exp2, expm1, log, log1p, log2, log10, pow, cbrt, hypot
+    exp, exp2, expm1, log, log1p, log2, log10, pow, cbrt, hypot, erf, erfc
 );
 
 #[cfg(test)]
@@ -268,6 +283,10 @@ mod tests {
         assert_eq!(2.0_f32.libm_powf(3.0), 8.0);
         assert_eq!(27.0_f64.libm_cbrt(), 3.0);
         assert_eq!(3.0_f32.libm_hypot(4.0), 5.0);
+        assert_eq!(0.0_f64.libm_erf(), 0.0);
+        assert_eq!(0.0_f32.libm_erfc(), 1.0);
+        assert_eq!(0.0_f32.libm_erf(), 0.0);
+        assert_eq!(0.0_f64.libm_erfc(), 1.0);
     }
 
     /// The unit vector at a quarter turn, and one between, whose parts are its sine and cosine.

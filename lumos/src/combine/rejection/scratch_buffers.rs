@@ -1,9 +1,10 @@
 //! Per-thread working buffers the rejection methods refill for every pixel.
 
-use statrs::distribution::{ContinuousCDF, StudentsT};
+use std::num::NonZeroU32;
 
 use crate::combine::rejection::normal_scores::NormalScores;
 use crate::combine::rejection::sorted_samples::SortedSamples;
+use crate::math::students_t;
 
 /// Working state for the GESD test: the critical values by the count of samples a removal is made
 /// from.
@@ -42,8 +43,8 @@ impl GesdScratch {
 
     /// Rosner's critical value for a removal from `live ≥ 3` samples:
     /// `λ = (L − 1)·t / √((L − 2 + t²)·L)`, with `t` the `1 − α/(2L)` quantile of Student's t at
-    /// `L − 2` degrees of freedom. At an α no t quantile resolves, t is infinite and λ is its limit
-    /// `(L − 1)/√L`.
+    /// `L − 2` degrees of freedom, taken from its upper tail `α/(2L)`, so the least α keeps its
+    /// digits.
     pub(super) fn critical_value(&mut self, live: usize) -> f64 {
         debug_assert!(live >= 3);
         if self.critical_values.len() <= live {
@@ -51,10 +52,11 @@ impl GesdScratch {
         }
         if self.critical_values[live].is_nan() {
             let count = live as f64;
-            let probability = 1.0 - f64::from(self.alpha) / (2.0 * count);
-            let t = StudentsT::new(0.0, 1.0, count - 2.0)
-                .expect("three samples leave one degree of freedom")
-                .inverse_cdf(probability);
+            let df = u32::try_from(live - 2)
+                .ok()
+                .and_then(NonZeroU32::new)
+                .expect("three samples leave one degree of freedom, and a count fits u32");
+            let t = students_t::upper_quantile(df, f64::from(self.alpha) / (2.0 * count));
             self.critical_values[live] =
                 (count - 1.0) / (count * (1.0 + (count - 2.0) / (t * t))).sqrt();
         }

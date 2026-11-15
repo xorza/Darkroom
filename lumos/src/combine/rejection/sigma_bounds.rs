@@ -1,10 +1,10 @@
 //! The clip band the sigma-based rejectors share.
 
 use common::Libm;
-use statrs::distribution::{Continuous, ContinuousCDF, Normal};
 
 use crate::config_field::ConfigField;
 use crate::error::InvalidConfigField;
+use crate::math::normal;
 
 /// How far either side of the reference a value may sit before it is rejected, in units of the
 /// spread estimate.
@@ -40,10 +40,9 @@ impl SigmaBounds {
     /// `1 + (αφ(α) − βφ(β))/Z − ((φ(α) − φ(β))/Z)²` with `α = −low`, `β = high` and
     /// `Z = Φ(β) − Φ(α)`.
     pub(super) fn truncated_variance(self) -> f64 {
-        let normal = Normal::standard();
         let (alpha, beta) = (-f64::from(self.low), f64::from(self.high));
-        let mass = normal.cdf(beta) - normal.cdf(alpha);
-        let (at_alpha, at_beta) = (normal.pdf(alpha), normal.pdf(beta));
+        let mass = normal::cdf(beta) - normal::cdf(alpha);
+        let (at_alpha, at_beta) = (normal::pdf(alpha), normal::pdf(beta));
         1.0 + (alpha * at_alpha - beta * at_beta) / mass
             - ((at_alpha - at_beta) / mass).libm_powi(2)
     }

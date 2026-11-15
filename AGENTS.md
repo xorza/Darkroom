@@ -134,7 +134,8 @@ arguments after a `--`; each submodule runs its own.
   ([Catto](https://box2d.org/posts/2024/08/determinism/)). Refused: std's, which gives each
   system its own bits; a function of our own for every call, each needing its own accuracy
   tests. `palantir` and `fits-well` hold their own, as a submodule stays standalone. Outside this
-  rule: `statrs`, LibRaw and ONNX Runtime call their own.
+  rule: LibRaw and ONNX Runtime call their own, and `statrs` checks `lumos`'s distributions in its
+  tests alone.
 - **Every vector kernel is bit-identical to its scalar reference** on one
   architecture (`simd/AGENTS.md` holds the NaN limit across two), and a test
   holds each tier the CPU has to it, the special values of its inputs

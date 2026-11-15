@@ -3,7 +3,6 @@ use std::f64::consts::TAU;
 
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
-use statrs::distribution::{Continuous, ContinuousCDF, Normal};
 
 use crate::combine::reducer::combined_sample::CombinedSample;
 use crate::combine::reducer::pixel_samples::PixelSamples;
@@ -15,6 +14,8 @@ use crate::combine::stack_config::DEFAULT_MIN_SURVIVORS;
 use crate::combine::stack_config::small_n::SmallN;
 use crate::internals::invariance::Affine;
 use crate::internals::test_rng::TestRng;
+use crate::math::{normal, students_t};
+use std::num::NonZeroU32;
 
 /// A pixel's samples, each of background noise σ `bg`.
 #[derive(Debug, Clone, Copy)]
@@ -797,18 +798,18 @@ fn the_winsorized_estimate_converges_on_its_clamped_copy() {
 }
 
 /// The correction is `1/√v` with `v` the variance of a unit Gaussian clamped to ±1.5:
-/// `(2Φ(1.5) − 1) − 3φ(1.5) + 4.5(1 − Φ(1.5))`, through statrs. mpmath at 30 digits gives
-/// 1.13339265546248702, which the constant holds to its last bit; statrs's normal cdf is off by
-/// about 5e-12 here, so 1e-11 is the tolerance.
+/// `(2Φ(1.5) − 1) − 3φ(1.5) + 4.5·Φ(−1.5)`, through `math::normal`. mpmath at 30 digits gives
+/// 1.13339265546248702, which the constant holds to its last bit; the functions' own few ε, and
+/// the sum's, hold it within 8ε.
 #[test]
 fn the_winsorized_correction_is_the_clamped_gaussian_variance() {
-    let normal = Normal::standard();
     let c = 1.5;
     let variance =
-        (2.0 * normal.cdf(c) - 1.0) - 2.0 * c * normal.pdf(c) + 2.0 * c * c * (1.0 - normal.cdf(c));
+        (2.0 * normal::cdf(c) - 1.0) - 2.0 * c * normal::pdf(c) + 2.0 * c * c * normal::cdf(-c);
     let correction = 1.0 / variance.sqrt();
+    let want = 1.133_392_655_462_487;
     assert!(
-        (correction - 1.133_392_655_462_487).abs() < 1e-11,
+        (correction - want).abs() <= 8.0 * f64::EPSILON * want,
         "{correction}"
     );
 }
@@ -936,12 +937,24 @@ fn gesd_matches_nist_reference_example() {
     }
 }
 
-/// At an α no t quantile resolves, the critical value is the finite limit `(L − 1)/√L`.
+/// The least normal α still resolves its t quantile: at 15 samples the upper tail `α/30`, about
+/// 4e-40, at 13 degrees places `t` near 3270, so λ sits below its limit `(L − 1)/√L` by
+/// `(L − 2)/(2t²)` of it, about 6e-7, where a quantile taken from `1 − α/30` rounds to 1 and has
+/// none.
 #[test]
-fn gesd_tiny_alpha_uses_the_limiting_critical_value() {
+fn gesd_tiny_alpha_resolves_its_critical_value() {
     let mut gesd = scratch_buffers::GesdScratch::default();
     gesd.prepare(f32::MIN_POSITIVE);
-    assert_eq!(gesd.critical_value(15), 14.0 / 15.0f64.sqrt());
+    let t = students_t::upper_quantile(
+        NonZeroU32::new(13).unwrap(),
+        f64::from(f32::MIN_POSITIVE) / 30.0,
+    );
+    assert!((3000.0..3500.0).contains(&t), "{t}");
+    let limit = 14.0 / 15.0f64.sqrt();
+    let critical = gesd.critical_value(15);
+    assert_eq!(critical, 14.0 / (15.0 * (1.0 + 13.0 / (t * t))).sqrt());
+    let gap = (limit - critical) / limit;
+    assert!((gap - 6.5 / (t * t)).abs() <= 1e-3 * gap, "{gap}");
 }
 
 /// Mirrored samples drop the mirrored outliers.

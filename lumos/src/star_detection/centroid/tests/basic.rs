@@ -4,7 +4,6 @@
 )]
 
 use super::*;
-use crate::math::error_function;
 
 /// A lone star found by detection on an estimated sky and measured with the default config, as the
 /// pipeline runs it before the FWHM is known: one candidate at the nearest pixel, a converged
@@ -130,7 +129,7 @@ fn a_detected_star_measures_as_on_its_true_sky() {
             let scale = 1.0 / (2.0 * sigma_sq).sqrt();
             let (low, high) = (c - radius as f64 - 0.5 - x0, c + radius as f64 + 0.5 - x0);
             (std::f64::consts::PI * sigma_sq / 2.0).sqrt()
-                * (error_function::erf(high * scale) - error_function::erf(low * scale))
+                * ((high * scale).libm_erf() - (low * scale).libm_erf())
         };
         let expected = AMPLITUDE * span(centre.x, truth.x) * span(centre.y, truth.y);
         let rounding = npix as f64 * 3.0 * f64::from(f32::EPSILON) * (AMPLITUDE + f64::from(SKY));

@@ -3,6 +3,7 @@
 mod band_scan;
 mod drop_quad;
 pub(crate) mod frame_source;
+mod gaussian_taps;
 mod input_map;
 pub(crate) mod kernel_plan;
 mod output_band;

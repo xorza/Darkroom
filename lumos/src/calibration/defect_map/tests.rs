@@ -823,12 +823,12 @@ fn a_pixel_hot_and_dead_counts_once() {
 
 /// `LOWER_RESIDUAL_P1_TO_SIGMA` is `1 / Φ⁻¹(0.99)`: the normal CDF at its reciprocal is 0.99, to
 /// the f32 rounding of the constant (its relative ε moves the CDF by `φ(2.326)·2.326·ε`, under
-/// 1e-7) and the erf port's own error.
+/// 1e-7) and `erf`'s own error.
 #[test]
 fn the_lower_tail_constant_is_the_reciprocal_normal_percentile() {
-    use crate::math::error_function::erf;
+    use common::Libm;
     let z = 1.0 / f64::from(LOWER_RESIDUAL_P1_TO_SIGMA);
-    let cdf = f64::midpoint(1.0, erf(z / std::f64::consts::SQRT_2));
+    let cdf = f64::midpoint(1.0, (z / std::f64::consts::SQRT_2).libm_erf());
     assert!((cdf - 0.99).abs() < 1e-7, "{cdf}");
 }
 

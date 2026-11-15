@@ -2,7 +2,6 @@ use common::par;
 use rayon::prelude::*;
 
 use super::*;
-use crate::math::error_function;
 
 /// Every centroid method over a 10 × 10 grid of sub-pixel offsets in 0.1 px steps, each fit seeded
 /// at the pixel nearest the star; the cells are independent, so they run in parallel.
@@ -143,7 +142,7 @@ fn moment_metrics_of_gaussian_stars() {
         );
         if sigma_x == sigma_y {
             let scale = 1.0 / (f64::from(sigma_x) * std::f64::consts::SQRT_2);
-            let axis = error_function::erf(0.5 * scale) / error_function::erf(1.5 * scale);
+            let axis = (0.5 * scale).libm_erf() / (1.5 * scale).libm_erf();
             let sharpness = (axis * axis) as f32;
             assert!(
                 (star.sharpness - sharpness).abs() <= 1e-6,

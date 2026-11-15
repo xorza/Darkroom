@@ -711,11 +711,10 @@ impl Sums {
 #[cfg(test)]
 mod tests {
     use common::Libm;
-    use statrs::distribution::{ContinuousCDF, Normal};
 
     use common::Buffer2;
 
-    use crate::math::wavelet;
+    use crate::math::{normal, wavelet};
     use crate::noise::mrs_noise::{K, K_SIGMA_RESPONSE, NoisePlane, k_sigma_sigma, sigma};
 
     /// A frame too small for the four layers the support's response was measured with reads the
@@ -760,10 +759,9 @@ mod tests {
     /// discretization alone, under 10⁻⁵.
     #[test]
     fn the_clip_response_is_a_clipped_normals() {
-        let normal = Normal::standard();
         let count = 200_001u32;
         let values: Vec<f64> = (0..count)
-            .map(|i| normal.inverse_cdf((f64::from(i) + 0.5) / f64::from(count)))
+            .map(|i| normal::quantile((f64::from(i) + 0.5) / f64::from(count)))
             .collect();
         let deviation = |bound: f64| {
             let kept: Vec<f64> = values.iter().copied().filter(|v| v.abs() < bound).collect();
