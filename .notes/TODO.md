@@ -2,9 +2,8 @@
 - auto chosen reference frame for stacking and manually specified
 - visual node groups
 - subgraphs
-- canvas dot grid shimmers as the camera pans
--
-- upload images again after a GPU device recovery (`ImageHandle::is_resident`), see `ISSUES.md`
+
+- upload images again after a GPU device recovery (`ImageHandle::is_resident`), see `ISSUES.md`. Decided: `DrawablePreview` holds its source `DynamicValue` for life and `land` checks residency each frame; a lost thumbnail converts again from the source, a lost full texture goes back to `Unasked` so a viewer asks again at the new device's texture limit, as Blender rebuilds an image's GPU texture from its buffer (`BKE_image_get_gpu_texture`). Refused: CPU copies of the rasters, which palantir's device-loss decision refuses and whose `update` cannot resize; running the preview nodes again, which costs a run and touches run state
 - move the macOS `application:openURLs:` hook (`darkroom/src/platform/macos/open_files.rs`) into palantir's winit host as `App::open_files` once palantir moves past winit 0.30 and its `objc2-app-kit` 0.2
 - on the Windows AMD laptop (AVX2): `cargo test -p simd --lib`, `cargo test -p lumos --lib -- image_ops::` and `cargo clippy -p simd --all-targets --all-features -- -D warnings`, for `F32x8::pow2i` and `Math::{exp_f32, exp_m1_f32, ln_1p_f32}` on `avx2_fma`, which no build here compiles, and the GHS and HDR kernels on them
 - decide `statrs` in `lumos`, see `ISSUES.md`: keep it and accept a last bit per system, or port over `common::Libm` with statrs as a test oracle: the normal quantile (AS 241, as [R's `qnorm`](https://archive.linux.duke.edu/cran/web/packages/DPQ/vignettes/qnorm-asymp.pdf)), `cdf` and `pdf` over `lumos::math::error_function`, and the t quantile (Hill 1970 with Taylor steps, as [R's `qt`](https://svn.r-project.org/R/tags/R-4-6-1/src/nmath/qt.c)). No option of statrs changes it: its `no_std` path calls `num_traits::Float`, and `image` and `nalgebra` turn on `num-traits/std`. `distrs` calls std and C `erf` too
