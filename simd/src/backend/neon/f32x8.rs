@@ -163,6 +163,14 @@ impl F32x8 for NeonF32 {
     }
 
     #[inline(always)]
+    fn pow2i(self) -> Self {
+        Self {
+            low: pow2i(self.low),
+            high: pow2i(self.high),
+        }
+    }
+
+    #[inline(always)]
     fn to_i32(self) -> NeonI32 {
         unsafe {
             NeonI32 {
@@ -253,6 +261,15 @@ impl F32x8 for NeonF32 {
             vst1q_f32(halves[0].as_mut_ptr(), self.low);
             vst1q_f32(halves[1].as_mut_ptr(), self.high);
         }
+    }
+}
+
+/// [`F32x8::pow2i`] of four lanes.
+#[inline(always)]
+fn pow2i(n: float32x4_t) -> float32x4_t {
+    unsafe {
+        let biased = vaddq_s32(vcvtq_s32_f32(n), vdupq_n_s32(127));
+        vreinterpretq_f32_s32(vshlq_n_s32::<23>(biased))
     }
 }
 

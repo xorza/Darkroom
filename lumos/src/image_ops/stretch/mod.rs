@@ -50,7 +50,9 @@ use crate::image::SAMPLES_PER_BLOCK;
 use crate::image::linear_image::LinearImage;
 use crate::image::rgb::Rgb;
 use crate::image_ops::error::{AutoStretch, OpError};
-use crate::image_ops::stretch::simd::{AsinhColorPreserve, AsinhOf, AsinhPlane};
+use crate::image_ops::stretch::simd::{
+    AsinhOf, GhsBaseOf, GhsSlopeOf, ToneColorPreserve, TonePlane, VectorTone,
+};
 use crate::math::statistics::median_mad::MedianMad;
 use ::simd::Kernel;
 
@@ -450,44 +452,22 @@ struct GhsShape {
 }
 
 impl GhsShape {
-    /// The base hyperbolic function `T(u)` for `u ≥ 0`, selected on `b`. `T(0) = 0` in every case,
-    /// which is what makes the curve continuous at the symmetry point.
-    ///
-    /// Written through `ln_1p`/`expm1` so it stays accurate as `b` nears its two limits: the
-    /// textbook `1 − (1 + b·d·u)^(−1/b)` cancels as `b → 0` (in f32, 18.6% off at `b = 2e-6`,
-    /// `d = 5`) and the `b < 0` form divides by `b + 1` as `b → −1`. Only the limits themselves,
-    /// `b = 0` (exponential) and `b = −1` (logarithmic), take their own forms — the general ones
-    /// are `0/0` there exactly. Each branch fixes its own scale, which the curve's normalization
-    /// divides out.
+    /// The base hyperbolic function `T(u)` for `u ≥ 0` by the kernels' steps
+    /// ([`GhsShape::base_lanes`]).
     fn base(self, u: f32) -> f32 {
-        let Self { d, b, .. } = self;
-        if b == 0.0 {
-            -(-d * u).libm_exp_m1()
-        } else if b == -1.0 {
-            (d * u).libm_ln_1p() / d
-        } else if b < 0.0 {
-            -(((b + 1.0) / b) * (-b * d * u).libm_ln_1p()).libm_exp_m1() / (d * (b + 1.0))
-        } else {
-            -(-(b * d * u).libm_ln_1p() / b).libm_exp_m1()
-        }
+        GhsBaseOf { shape: self, u }.dispatch()
     }
 
-    /// The derivative `T'(u)` of [`Self::base`] — the slope of the linear shadow/highlight tails.
+    /// The derivative `T'(u)` of [`Self::base`] by the kernels' steps
+    /// ([`GhsShape::slope_lanes`]).
     fn base_slope(self, u: f32) -> f32 {
-        let Self { d, b, .. } = self;
-        if b == 0.0 {
-            d * (-d * u).libm_exp()
-        } else if b < 0.0 {
-            ((-b * d * u).libm_ln_1p() / b).libm_exp()
-        } else {
-            d * (-((1.0 + b) / b) * (b * d * u).libm_ln_1p()).libm_exp()
-        }
+        GhsSlopeOf { shape: self, u }.dispatch()
     }
 }
 
 /// Generalized Hyperbolic Stretch: the base curve [`GhsShape::base`] mirrored about `sp`, with
 /// linear shadow (`< lp`) and highlight (`> hp`) protection, normalized to map `[0, 1] → [0, 1]`.
-/// C¹ and monotonic. Four base evaluations are precomputed here; `eval` does two per pixel.
+/// C¹ and monotonic. Four base evaluations are precomputed here; the kernels do one per sample.
 #[derive(Debug, Clone, Copy)]
 struct GhsCurve {
     shape: GhsShape,
@@ -525,25 +505,6 @@ impl GhsCurve {
             t0,
             inv_range: 1.0 / (t1 - t0),
         })
-    }
-}
-
-impl ToneCurve for GhsCurve {
-    #[inline]
-    fn eval(&self, x: f32) -> f32 {
-        let GhsShape { sp, lp, hp, .. } = self.shape;
-        let raw = if x < lp {
-            // T1: linear, tangent to the mirrored base at lp.
-            self.tp_sp_lp * (x - lp) - self.t_sp_lp
-        } else if x < sp {
-            -self.shape.base(sp - x) // T2: mirror below sp
-        } else if x < hp {
-            self.shape.base(x - sp) // T3: base above sp
-        } else {
-            // T4: linear, tangent to the base at hp.
-            self.tp_hp_sp * (x - hp) + self.t_hp_sp
-        };
-        unit((raw - self.t0) * self.inv_range)
     }
 }
 
@@ -649,16 +610,21 @@ fn apply_curve_plane(plane: &mut [f32], curve: Curve) {
     match curve.tone {
         Tone::Identity => map_plane(plane, curve.black, IdentityCurve),
         Tone::Mtf(c) => map_plane(plane, curve.black, c),
-        Tone::Asinh(c) => par::chunks_mut(plane, SAMPLES_PER_BLOCK).for_each(|block| {
-            AsinhPlane {
-                plane: block,
-                black: curve.black,
-                curve: c,
-            }
-            .dispatch();
-        }),
-        Tone::Ghs(c) => map_plane(plane, curve.black, c),
+        Tone::Asinh(c) => apply_tone_plane(plane, curve.black, c),
+        Tone::Ghs(c) => apply_tone_plane(plane, curve.black, c),
     }
+}
+
+/// A tone with a vector kernel on one plane, band-parallel.
+fn apply_tone_plane<T: VectorTone + Sync>(plane: &mut [f32], black: BlackPoint, curve: T) {
+    par::chunks_mut(plane, SAMPLES_PER_BLOCK).for_each(|block| {
+        TonePlane {
+            plane: block,
+            black,
+            curve,
+        }
+        .dispatch();
+    });
 }
 
 fn map_plane<C: ToneCurve>(plane: &mut [f32], black: BlackPoint, curve: C) {
@@ -696,21 +662,25 @@ fn apply_color_preserving_image(image: &mut LinearImage, curve: Curve) {
     match curve.tone {
         Tone::Identity => image.map_rgb(|px| color_preserve_pixel(px, black, &IdentityCurve)),
         Tone::Mtf(c) => image.map_rgb(|px| color_preserve_pixel(px, black, &c)),
-        Tone::Asinh(c) => apply_color_preserving_asinh(image, black, c),
-        Tone::Ghs(c) => image.map_rgb(|px| color_preserve_pixel(px, black, &c)),
+        Tone::Asinh(c) => apply_color_preserving_tone(image, black, c),
+        Tone::Ghs(c) => apply_color_preserving_tone(image, black, c),
     }
 }
 
-/// Color-preserving arcsinh on an **RGB** image, band-parallel across the three planes. The curve
-/// itself, and the kernel that evaluates it, live in [`simd`].
-fn apply_color_preserving_asinh(image: &mut LinearImage, black: BlackPoint, c: AsinhCurve) {
+/// A color-preserving tone with a vector kernel on an **RGB** image, band-parallel across the
+/// three planes. The kernel lives in [`simd`].
+fn apply_color_preserving_tone<T: VectorTone + Sync>(
+    image: &mut LinearImage,
+    black: BlackPoint,
+    curve: T,
+) {
     image.rgb_blocks_mut(|_, [red, green, blue]| {
-        AsinhColorPreserve {
+        ToneColorPreserve {
             red,
             green,
             blue,
             black,
-            curve: c,
+            curve,
         }
         .dispatch();
     });
@@ -718,13 +688,35 @@ fn apply_color_preserving_asinh(image: &mut LinearImage, black: BlackPoint, c: A
 
 #[cfg(test)]
 mod internals {
-    use crate::image_ops::stretch::{AsinhCurve, Curve, IdentityCurve, Tone, ToneCurve, unit};
+    use crate::image_ops::stretch::{
+        AsinhCurve, Curve, GhsCurve, GhsShape, IdentityCurve, Tone, ToneCurve, unit,
+    };
 
     /// The scalar curve the kernels are held to: the kernels' `asinh` on one value, then their
     /// scale and clamp.
     impl ToneCurve for AsinhCurve {
         fn eval(&self, x: f32) -> f32 {
             unit(self.curved(x))
+        }
+    }
+
+    /// The scalar curve the kernels are held to: the kernels' base on one value, the branch
+    /// taken by compares.
+    impl ToneCurve for GhsCurve {
+        fn eval(&self, x: f32) -> f32 {
+            let GhsShape { sp, lp, hp, .. } = self.shape;
+            let raw = if x < lp {
+                // T1: linear, tangent to the mirrored base at lp.
+                self.tp_sp_lp * (x - lp) - self.t_sp_lp
+            } else if x < sp {
+                -self.shape.base(sp - x) // T2: mirror below sp
+            } else if x < hp {
+                self.shape.base(x - sp) // T3: base above sp
+            } else {
+                // T4: linear, tangent to the base at hp.
+                self.tp_hp_sp * (x - hp) + self.t_hp_sp
+            };
+            unit((raw - self.t0) * self.inv_range)
         }
     }
 

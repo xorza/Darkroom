@@ -115,6 +115,21 @@ impl F32x8 for PortableF32 {
     }
 
     #[inline(always)]
+    fn pow2i(self) -> Self {
+        debug_assert!(
+            self.0
+                .iter()
+                .all(|&n| n.fract() == 0.0 && (-126.0..=127.0).contains(&n)),
+            "pow2i of {:?}, not every lane an integer in [−126, 127]",
+            self.0
+        );
+        Self(
+            self.0
+                .map(|n| f32::from_bits(((n as i32 + 127) << 23).cast_unsigned())),
+        )
+    }
+
+    #[inline(always)]
     fn to_i32(self) -> PortableI32 {
         PortableI32(self.0.map(|lane| {
             let end = -(i32::MIN as f32);

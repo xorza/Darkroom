@@ -66,6 +66,12 @@ pub trait F32x8:
     #[must_use]
     fn floor(self) -> Self;
 
+    /// `2^self` for lanes that hold an integer in `[−126, 127]`; other lanes are garbage, which
+    /// `Portable` refuses in a debug build. Every Isa converts a lane toward zero, as
+    /// [`F64x4::pow2i`].
+    #[must_use]
+    fn pow2i(self) -> Self;
+
     /// Each lane, an integer in `[−2³¹, 2³¹)`, as `i32`. A lane past it, a fraction or a NaN breaks
     /// the contract, which `Portable` asserts in a debug build; the other Isas then give an
     /// unspecified value.

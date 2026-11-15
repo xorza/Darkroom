@@ -10,9 +10,9 @@
 //! operation, streaming [`crate::math::wavelet::atrous_smooth`] — see [`Hdr::compress`] for why
 //! the layer pyramid is never materialized.
 
-use common::Libm;
 use std::mem;
 
+use ::simd::Kernel;
 use common::{Buffer2, Introspect, par};
 use rayon::prelude::*;
 
@@ -22,6 +22,7 @@ use crate::image::SAMPLES_PER_BLOCK;
 use crate::image::intensity::Intensity;
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::error::OpError;
+use crate::image_ops::hdr::simd::{CompressFactor, LogIntensity};
 use crate::math::{sum, wavelet};
 
 /// The least intensity the log base reads: one 16-bit display step. A pixel below it is black on
@@ -87,12 +88,16 @@ impl Hdr {
         let size = intensity.size();
         let scales = self.scales.min(wavelet::max_scales(size));
 
-        let mut c_cur = Buffer2::new(
-            size,
-            par::into_iter(0..size.pixel_count())
-                .map(|idx| intensity.at(idx).max(LOG_FLOOR).libm_ln())
-                .collect(),
-        );
+        let mut c_cur = Buffer2::new_default(size);
+        par::chunks_mut(c_cur.pixels_mut(), SAMPLES_PER_BLOCK)
+            .enumerate()
+            .for_each(|(block, out)| {
+                LogIntensity {
+                    intensity: intensity.band(block * SAMPLES_PER_BLOCK, out.len()),
+                    out,
+                }
+                .dispatch();
+            });
         let mut c_next = Buffer2::new_default(size);
         for j in 0..scales {
             wavelet::atrous_smooth(&c_cur, &mut c_next, 1 << j);
@@ -112,10 +117,13 @@ impl Hdr {
         par::chunks_mut(residual.pixels_mut(), SAMPLES_PER_BLOCK)
             .enumerate()
             .for_each(|(block, residual)| {
-                let start = block * SAMPLES_PER_BLOCK;
-                for (idx, r) in (start..).zip(residual) {
-                    *r = intensity.at(idx) * (-amount * (*r - mean)).libm_exp();
+                CompressFactor {
+                    intensity: intensity.band(block * SAMPLES_PER_BLOCK, residual.len()),
+                    residual,
+                    mean,
+                    amount,
                 }
+                .dispatch();
             });
         residual
     }
@@ -150,6 +158,8 @@ fn data_mean(values: &[f32], intensity: Intensity<'_>) -> f32 {
     debug_assert!(count > 0, "an image of fills alone is refused before");
     (sum / count as f64) as f32
 }
+
+mod simd;
 
 #[cfg(test)]
 mod tests;

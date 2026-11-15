@@ -7,8 +7,8 @@
 /// as `bevy_math` refuses them for its `ops` module
 /// (<https://github.com/bevyengine/bevy/blob/main/crates/bevy_math/clippy.toml>). Refused: a function
 /// of our own for each, which each needs its own accuracy tests. Cost: `libm` can be slower than a
-/// system's. Each method is named for what it replaces, as an inherent method would hide a trait's
-/// of one name.
+/// system's, so a per-pixel or per-sample loop takes `simd::Math`'s functions instead. Each method
+/// is named for what it replaces, as an inherent method would hide a trait's of one name.
 pub trait Libm: Copy {
     #[must_use]
     fn libm_sin(self) -> Self;

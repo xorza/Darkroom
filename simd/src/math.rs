@@ -28,6 +28,26 @@ const EXP_LN2_LO: f64 = 1.428_606_820_309_417_3e-6;
 const EXP_MIN: f64 = -708.0;
 const EXP_MAX: f64 = 709.0;
 
+/// Cephes single-precision `expf` (`cephes/expf.c`): with `x = n·ln 2 + r`,
+/// `exp(r) ≈ 1 + r + r²·P(r)`.
+const EXP_F32_P: [f32; 6] = [
+    1.987_569_2e-4,
+    1.398_199_9e-3,
+    8.333_452e-3,
+    4.166_579_6e-2,
+    1.666_666_5e-1,
+    0.5,
+];
+
+/// ln 2 in two parts, as Cephes `expf` reduces by it.
+const EXP_F32_LN2_HI: f32 = 0.693_359_4;
+const EXP_F32_LN2_LO: f32 = -2.121_944_4e-4;
+
+/// The arguments [`Math::exp_f32`] clamps to: `ln 2⁻¹²⁶` rounded up, so the result stays normal,
+/// and 88, so `2ⁿ` stays finite at `n = 127`.
+const EXP_F32_MIN: f32 = -87.336_54;
+const EXP_F32_MAX: f32 = 88.0;
+
 /// Cephes single-precision `logf` (`cephes/logf.c`): about 1 ULP on the reduced mantissa.
 const LOG_P: [f32; 9] = [
     7.037_683_6e-2,
@@ -140,6 +160,58 @@ pub trait Math: Isa {
         y = exponent.mul_add(self.splat_f32(LOG_LN2_LO), y);
         y = self.splat_f32(-0.5).mul_add(z, y);
         exponent.mul_add(self.splat_f32(LOG_LN2_HI), m + y)
+    }
+
+    /// `exp(x)` (Cephes `expf`) within ε relative, `x` clamped to `[−87.34, 88]` first (a NaN to
+    /// −87.34), so every lane is normal and finite: `exp(88)` stands for every larger argument.
+    #[inline(always)]
+    fn exp_f32(self, x: Self::F32) -> Self::F32 {
+        let x = x
+            .min(self.splat_f32(EXP_F32_MAX))
+            .max(self.splat_f32(EXP_F32_MIN));
+        let n = x
+            .mul_add(
+                self.splat_f32(std::f32::consts::LOG2_E),
+                self.splat_f32(0.5),
+            )
+            .floor();
+        let r = x - n * self.splat_f32(EXP_F32_LN2_HI) - n * self.splat_f32(EXP_F32_LN2_LO);
+
+        let mut p = self.splat_f32(EXP_F32_P[0]);
+        for &coefficient in &EXP_F32_P[1..] {
+            p = p.mul_add(r, self.splat_f32(coefficient));
+        }
+        let exp_r = p.mul_add(r * r, r) + self.splat_f32(1.0);
+        exp_r * n.pow2i()
+    }
+
+    /// `exp(x) − 1` within 2ε relative, without the cancellation of `exp(x) − 1` near 0, for `x`
+    /// up to 88, [`Self::exp_f32`]'s range: Kahan's `(u − 1)·x / ln u` with `u = exp(x)`, whose
+    /// ratio cancels the rounding of `u`, `x` itself where `u` rounds to 1, and −1 where `u − 1`
+    /// does (Higham, *Accuracy and Stability of Numerical Algorithms*, §1.14.1). A NaN gives −1, as
+    /// [`Self::exp_f32`] takes it to the bottom of its range.
+    #[inline(always)]
+    fn exp_m1_f32(self, x: Self::F32) -> Self::F32 {
+        let one = self.splat_f32(1.0);
+        let u = self.exp_f32(x);
+        let um1 = u - one;
+        // `x / ln u` first: `(u − 1)·x` overflows near the top of the range.
+        let kahan = um1 * (x / self.ln_f32(u));
+        let minus_one = self.splat_f32(-1.0);
+        let saturated = um1.lanes_eq(minus_one).select(minus_one, kahan);
+        u.lanes_eq(one).select(x, saturated)
+    }
+
+    /// `ln(1 + x)` within 2ε relative, without the cancellation of `ln(1 + x)` near 0, for `x > −1`
+    /// with `1 + x` normal: `ln(w)·x / (w − 1)` with `w = 1 + x`, whose ratio cancels the rounding
+    /// of `w`, and `x` itself where `w` rounds to 1 (Goldberg 1991, Theorem 4).
+    #[inline(always)]
+    fn ln_1p_f32(self, x: Self::F32) -> Self::F32 {
+        let one = self.splat_f32(1.0);
+        let w = one + x;
+        let dw = w - one;
+        let goldberg = self.ln_f32(w) * (x / dw);
+        dw.lanes_eq(self.splat_f32(0.0)).select(x, goldberg)
     }
 
     /// `ln(x)` for a positive normal `x` (Cephes `log`), to a few 1e-16 relative. Cephes takes a

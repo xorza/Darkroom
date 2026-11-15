@@ -120,6 +120,9 @@ impl Kernel for Battery {
             let bounds = isa.load_f32(&[1.0, 0.5, 2.0, f32::INFINITY, 1e-40, 3.0, 1e30, 0.25]);
             f32s(format!("min positive {i}"), va.min_positive(bounds));
             f32s(format!("asinh {i}"), isa.asinh_f32(va));
+            f32s(format!("exp {i}"), isa.exp_f32(va));
+            f32s(format!("exp_m1 {i}"), isa.exp_m1_f32(va));
+            f32s(format!("ln_1p {i}"), isa.ln_1p_f32(va));
             f32s(format!("lookup {i}"), isa.lookup_f32(&TABLE, va));
             f32s(
                 format!("lookup scaled {i}"),
@@ -753,15 +756,15 @@ fn dispatch_runs_on_the_widest_supported_tier() {
 }
 
 /// `6 = 0.75 · 2³`, `1 = 0.5 · 2¹`, `0.1 = 0.8 · 2⁻³` in f32 lanes and in f64 ones, with the
-/// smallest normal `0.5 · 2⁻¹⁰²¹` in f64; `2^n` is exact at both ends of the normal range. On every
-/// tier.
+/// smallest normal `0.5 · 2⁻¹⁰²¹` in f64; `2^n` is exact at both ends of the normal range, in f32
+/// lanes and in f64 ones. On every tier.
 #[test]
 fn frexp_and_pow2i_split_and_build_powers_of_two() {
     #[derive(Debug)]
     struct Split;
 
     impl Kernel for Split {
-        type Output = ([[f32; 3]; 2], [[f64; F64_LANES]; 3]);
+        type Output = ([[f32; 3]; 2], [f32; F32_LANES], [[f64; F64_LANES]; 3]);
 
         #[inline(always)]
         fn run<S: Isa>(self, isa: S) -> Self::Output {
@@ -775,6 +778,9 @@ fn frexp_and_pow2i_split_and_build_powers_of_two() {
                     first(f32s.mantissa.to_array()),
                     first(f32s.exponent.to_array()),
                 ],
+                isa.load_f32(&[-126.0, -1.0, 0.0, 127.0, 1.0, 2.0, -2.0, 23.0])
+                    .pow2i()
+                    .to_array(),
                 [
                     f64s.mantissa.to_array(),
                     f64s.exponent.to_array(),
@@ -791,6 +797,16 @@ fn frexp_and_pow2i_split_and_build_powers_of_two() {
             tier.run(Split),
             (
                 [[0.75, 0.5, 0.1 / 0.125], [3.0, 1.0, -3.0]],
+                [
+                    f32::MIN_POSITIVE,
+                    0.5,
+                    1.0,
+                    libm::ldexpf(1.0, 127),
+                    2.0,
+                    4.0,
+                    0.25,
+                    8_388_608.0
+                ],
                 [
                     [0.75, 0.5, 0.1 / 0.125, 0.5],
                     [3.0, 1.0, -3.0, -1021.0],
@@ -925,6 +941,94 @@ fn ln_f32_and_asinh_f32_are_accurate_at_every_magnitude() {
                 error <= 2.0 * f64::from(f32::EPSILON),
                 "{tier} asinh({x}) = {asinh}, {error:e} off"
             );
+        }
+    }
+}
+
+/// `exp` holds ε relative from the bottom of its range, where the result is the smallest normal,
+/// to 88, and `exp_m1` and `ln_1p` 2ε through `x → 0`, where `exp(x) − 1` and `ln(1 + x)` lose
+/// their relative accuracy as `ε/x`, on every tier. A sweep of every f32 in each domain measured
+/// the worst at 0.71ε for `exp`, at 26.690403, 1.49ε for `exp_m1`, at −1.5318747e-5, and 1.52ε for
+/// `ln_1p`, at 511.49112, all three in the sweep here. Each is exact at its anchor, `exp(0) = 1`
+/// and `exp_m1(0) = ln_1p(0) = 0`.
+#[test]
+fn exp_f32_exp_m1_f32_and_ln_1p_f32_are_accurate_across_their_range() {
+    #[derive(Debug)]
+    struct ExpLn<'a>(&'a [f32]);
+
+    impl Kernel for ExpLn<'_> {
+        type Output = Vec<[f32; 3]>;
+
+        #[inline(always)]
+        fn run<S: Isa>(self, isa: S) -> Vec<[f32; 3]> {
+            let (chunks, []) = self.0.as_chunks::<F32_LANES>() else {
+                unreachable!("the sweep is whole vectors")
+            };
+            chunks
+                .iter()
+                .flat_map(|chunk| {
+                    let x = isa.load_f32(chunk);
+                    let exp = isa.exp_f32(x).to_array();
+                    let exp_m1 = isa.exp_m1_f32(x).to_array();
+                    let ln_1p = isa.ln_1p_f32(x).to_array();
+                    (0..F32_LANES).map(move |lane| [exp[lane], exp_m1[lane], ln_1p[lane]])
+                })
+                .collect()
+        }
+    }
+
+    let mut xs: Vec<f32> = (0..35_000).map(|i| i as f32 * 0.005 - 87.3).collect();
+    for exponent in -40..=1 {
+        xs.extend(
+            [1.0f32, -1.0, 1.7, -1.7, 3.3, -3.3, 7.9, -7.9]
+                .map(|mantissa| mantissa * libm::powf(10.0, exponent as f32)),
+        );
+    }
+    xs.extend((0..2000).map(|i| -0.999 + i as f32 * 1e-3));
+    xs.extend([
+        0.0,
+        -87.336_54,
+        88.0,
+        f32::EPSILON,
+        -f32::EPSILON,
+        1e30,
+        f32::MAX,
+        -0.999_999_9,
+        26.690_403,
+        -1.531_874_7e-5,
+        511.491_12,
+    ]);
+    xs.resize(xs.len().next_multiple_of(F32_LANES), 0.0);
+    let relative = |got: f32, want: f64| {
+        if want == 0.0 {
+            if got == 0.0 { 0.0 } else { f64::INFINITY }
+        } else {
+            (f64::from(got) - want).abs() / want.abs()
+        }
+    };
+    let epsilon = f64::from(f32::EPSILON);
+    for tier in IsaTier::supported() {
+        for (&x, [exp, exp_m1, ln_1p]) in xs.iter().zip(tier.run(ExpLn(&xs))) {
+            let wide = f64::from(x);
+            if (-87.336_54..=88.0).contains(&x) {
+                let error = relative(exp, libm::exp(wide));
+                assert!(error <= epsilon, "{tier} exp({x}) = {exp}, {error:e} off");
+                let error = relative(exp_m1, libm::expm1(wide));
+                assert!(
+                    error <= 2.0 * epsilon,
+                    "{tier} exp_m1({x}) = {exp_m1}, {error:e} off"
+                );
+            }
+            if x > -1.0 && (1.0 + x).is_normal() {
+                let error = relative(ln_1p, libm::log1p(wide));
+                assert!(
+                    error <= 2.0 * epsilon,
+                    "{tier} ln_1p({x}) = {ln_1p}, {error:e} off"
+                );
+            }
+            if x == 0.0 {
+                assert_eq!([exp, exp_m1, ln_1p], [1.0, 0.0, 0.0], "{tier}");
+            }
         }
     }
 }

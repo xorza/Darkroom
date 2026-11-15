@@ -99,6 +99,14 @@ impl F32x8 for Avx2F32 {
     }
 
     #[inline(always)]
+    fn pow2i(self) -> Self {
+        unsafe {
+            let biased = _mm256_add_epi32(_mm256_cvttps_epi32(self.0), _mm256_set1_epi32(127));
+            Self(_mm256_castsi256_ps(_mm256_slli_epi32::<23>(biased)))
+        }
+    }
+
+    #[inline(always)]
     fn to_i32(self) -> Avx2I32 {
         Avx2I32(unsafe { _mm256_cvttps_epi32(self.0) })
     }

@@ -123,12 +123,18 @@ arguments after a `--`; each submodule runs its own.
 - **Arch code lives in `simd` alone.** No other crate holds `std::arch`,
   `#[target_feature]` or a `cfg(target_arch)`; `clippy.toml` refuses the
   register types elsewhere. A kernel is generic over `simd::Isa`.
-- **A transcendental float function goes through `common::Libm`**: `clippy.toml` refuses std's
-  `sin`, `powf`, `ln` and the rest, which call each system's libm, so a result has the same bits on
+- **A transcendental float function goes through `common::Libm`, and on a per-pixel or
+  per-sample path through `simd::Math`**: `clippy.toml` refuses std's `sin`, `powf`, `ln` and the
+  rest, whose precision the [Rust docs](https://doc.rust-lang.org/std/primitive.f64.html#method.sin)
+  leave to the platform, the Rust version and even the call, so a result has the same bits on
   every system, and the snapshots of `lumos` hold each lane to them. As `bevy_math::ops` routes
-  them. Cost: slower than a system's libm, `powf` most, so keep one off a per-pixel path.
-  `palantir` and `fits-well` hold their own, as a submodule stays standalone. Outside this rule:
-  `statrs`, LibRaw and ONNX Runtime call their own.
+  them. `libm` runs several times slower than a system's libm on `powf` and f32 `exp`, so a hot
+  loop takes `simd::Math`'s own functions, eight lanes at a time with their accuracy stated and
+  tested, as Box2D writes its own for determinism and speed
+  ([Catto](https://box2d.org/posts/2024/08/determinism/)). Refused: std's, which gives each
+  system its own bits; a function of our own for every call, each needing its own accuracy
+  tests. `palantir` and `fits-well` hold their own, as a submodule stays standalone. Outside this
+  rule: `statrs`, LibRaw and ONNX Runtime call their own.
 - **Every vector kernel is bit-identical to its scalar reference** on one
   architecture (`simd/AGENTS.md` holds the NaN limit across two), and a test
   holds each tier the CPU has to it, the special values of its inputs

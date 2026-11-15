@@ -17,6 +17,14 @@ pub(crate) struct Intensity<'a> {
     flags: Option<&'a PixelFlags>,
 }
 
+/// A band of the channels an [`Intensity`] is read from: the channel itself, or the three whose
+/// [`Rgb::intensity`] it is.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum IntensityBand<'a> {
+    Mono(&'a [f32]),
+    Rgb([&'a [f32]; 3]),
+}
+
 /// The channels an [`Intensity`] is read from.
 #[derive(Debug, Clone, Copy)]
 enum Channels<'a> {
@@ -70,6 +78,18 @@ impl<'a> Intensity<'a> {
                 b: b[idx],
             }
             .intensity(),
+        }
+    }
+
+    /// The channels of the `len` pixels from row-major `start`, which a vector kernel reads as
+    /// [`Self::at`] reads one pixel.
+    pub(crate) fn band(&self, start: usize, len: usize) -> IntensityBand<'a> {
+        let range = start..start + len;
+        match self.channels {
+            Channels::Mono(pixels) => IntensityBand::Mono(&pixels[range]),
+            Channels::Rgb([r, g, b]) => {
+                IntensityBand::Rgb([&r[range.clone()], &g[range.clone()], &b[range]])
+            }
         }
     }
 
