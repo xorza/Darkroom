@@ -776,6 +776,90 @@ fn a_lost_device_is_replaced_and_the_editor_paints_as_before() {
     assert_eq!(again, before);
 }
 
+/// A lost device takes every preview's textures, and the store makes them again from the sources
+/// it keeps: after the loss settles, each preview's thumbnail is resident on the new device at its
+/// source's size, and a full texture a viewer had comes back unasked, so the viewer asks again at
+/// the new device's limit and it lands there. Each image publishes its source once, not once a
+/// frame until its card lands. Before the store kept its sources, every preview painted nothing
+/// after a loss.
+#[test]
+fn a_lost_device_takes_the_previews_and_they_convert_again() {
+    let mut driver = small(DisplayKind::IsolatedTestGpu);
+    let sample = Path::new(env!("CARGO_MANIFEST_DIR")).join("sample/sample.darkroom");
+    driver.open(&sample, OpenMode::Copy).unwrap();
+    driver.act(&[key("ctrl+r")]).unwrap();
+    driver.wait_run(Duration::from_secs(30)).unwrap();
+    let nodes =
+        ["Preview Adjusted", "Preview Astro", "Preview Blend"].map(|name| node_id(&driver, name));
+    let adjusted = nodes[0];
+    let ask_full = |driver: &mut Driver| {
+        driver.offscreen().with_app(|app, ui| {
+            app.run_state_mut()
+                .previews_mut()
+                .convert_full(adjusted, ui.max_image_dimension());
+        });
+        driver.offscreen().settle("the full texture").unwrap();
+    };
+    // Each preview: its thumbnail resident, its full texture landed, its source's size.
+    let shown = |driver: &Driver| {
+        nodes.map(|node| {
+            let image = driver
+                .app()
+                .run_state()
+                .previews()
+                .get(node)
+                .and_then(StoredContent::image)
+                .expect("each preview shows an image");
+            (
+                image.preview.handle.is_resident(),
+                image.is_full_resident(),
+                image.preview.native_size,
+            )
+        })
+    };
+    let lena = UVec2::new(895, 551);
+    let astro = UVec2::new(100, 100);
+
+    ask_full(&mut driver);
+    assert_eq!(
+        shown(&driver),
+        [
+            (true, true, lena),
+            (true, false, astro),
+            (true, false, lena)
+        ]
+    );
+
+    let publishes = |driver: &Driver| driver.app().run_state().previews().publishes();
+    let before = publishes(&driver);
+    driver.act(&[Action::LoseDevice]).unwrap();
+    assert!(!driver.offscreen().is_device_lost());
+    assert_eq!(
+        publishes(&driver) - before,
+        3,
+        "each image publishes once, however many frames its conversion takes"
+    );
+    assert_eq!(
+        shown(&driver),
+        [
+            (true, false, lena),
+            (true, false, astro),
+            (true, false, lena)
+        ],
+        "every thumbnail converts again, and the full texture waits for its viewer"
+    );
+
+    ask_full(&mut driver);
+    assert_eq!(
+        shown(&driver),
+        [
+            (true, true, lena),
+            (true, false, astro),
+            (true, false, lena)
+        ]
+    );
+}
+
 /// The extension names the format: a `.darkroomz` project saves zipped, and Save As to a bare
 /// name keeps the open project's format, so a copy of it is zipped too. A `.darkroom` name, the
 /// dialog's plain file type, writes plain RON, and a bare name from the menu's Save As… then

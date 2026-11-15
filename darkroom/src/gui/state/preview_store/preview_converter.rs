@@ -189,7 +189,17 @@ pub(crate) mod internals {
 
     use crate::gui::state::preview_store::preview_converter::{Card, card};
     #[cfg(test)]
-    use crate::gui::state::preview_store::preview_converter::{Converted, PreviewConverter};
+    use crate::gui::state::preview_store::preview_converter::{
+        Converted, PreviewConverter, Ticket,
+    };
+
+    #[cfg(test)]
+    impl Ticket {
+        /// How many publishes the store has minted up to this one.
+        pub(crate) const fn count(self) -> u64 {
+            self.0
+        }
+    }
 
     #[cfg(test)]
     impl PreviewConverter {

@@ -800,8 +800,14 @@ pub(crate) mod internals {
     use crate::core::io::preferences::preferences_store::PreferencesStore;
     use crate::gui::app::{App, LaunchInputs};
     use crate::gui::dialogs::{DialogFallback, Dialogs};
+    use crate::gui::state::run_state::RunState;
 
     impl App {
+        /// The run's state, for a test that asks what a viewer would: its full texture.
+        pub(crate) const fn run_state_mut(&mut self) -> &mut RunState {
+            &mut self.run_state
+        }
+
         /// An app on a new document, its preferences in memory and its dialogs refused, for a
         /// test that drives it frame by frame.
         pub(crate) fn offscreen(ui: &mut Ui) -> Self {

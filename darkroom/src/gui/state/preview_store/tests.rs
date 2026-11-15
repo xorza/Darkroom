@@ -184,8 +184,8 @@ fn the_full_texture_converts_on_the_first_ask_and_is_reused_after() {
     );
     assert!(image.is_full_resident());
 
-    // Asking again answers from the stored texture. It cannot convert again
-    // even in principle: the image gave its source up to the conversion.
+    // Asking again answers from the stored texture: only an unasked image
+    // converts, though it keeps its source.
     store.convert_full(node, None);
     assert!(
         !store.in_flight(),

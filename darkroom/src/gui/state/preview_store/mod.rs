@@ -3,8 +3,9 @@
 //! The store is the sole owner of preview-card and viewer textures. A
 //! published value goes to the [`PreviewConverter`]'s thread, and what comes
 //! back lands on a later frame: an image as a small thumbnail, with its source
-//! held until a viewer first asks for the full texture; a non-image as its
-//! formatted text. Until then the card keeps showing what it showed before.
+//! held for its life, which a viewer's full texture converts from and a lost
+//! device's textures convert from again; a non-image as its formatted text.
+//! Until then the card keeps showing what it showed before.
 //!
 //! The store changes only through `&mut`: the record pass reads it, and a viewer that finds its
 //! full texture unasked raises a command the app applies after the pass, as immediate-mode
@@ -19,7 +20,6 @@ pub(crate) mod preview_converter;
 
 use std::collections::HashMap;
 use std::fmt;
-use std::mem;
 use std::num::NonZeroU32;
 
 use common::{ErrorChain, USize2};
@@ -105,8 +105,15 @@ impl fmt::Display for PreviewMessage<'_> {
 pub(crate) struct DrawablePreview {
     /// The card's thumbnail; it holds the native metadata the full-resolution texture shares.
     pub(crate) preview: DrawableImage,
-    /// The full-resolution texture, or the source still waiting to become one.
+    /// The full-resolution texture, or where its conversion stands.
     full: FullImage,
+    /// The published value both textures are converted from, kept for the image's life: a lost
+    /// device takes every texture, and the image publishes this again to make both anew, as
+    /// Blender rebuilds an image's GPU texture from its buffer (`BKE_image_get_gpu_texture`).
+    /// An `Arc`, so a conversion takes a clone, not a copy. Refused: CPU copies of the rasters,
+    /// which palantir's device-loss decision refuses and whose `update` cannot resize; running
+    /// the preview nodes again, which costs a run and touches run state.
+    source: DynamicValue,
     pub(crate) source_bytes: usize,
     /// The publish this image came from, which a full raster converted from it names.
     ticket: Ticket,
@@ -125,12 +132,11 @@ struct Converting {
     newest: Ticket,
 }
 
-/// What a stored image holds for a viewer: the published value until one asks
-/// for it at full resolution, the raster being converted at `texels`, the
-/// texture from then on, or why there will never be one.
+/// What a stored image holds for a viewer: nothing until one asks for it at full resolution, the
+/// raster being converted at `texels`, the texture from then on, or why there will never be one.
 #[derive(Debug)]
 enum FullImage {
-    Pending(DynamicValue),
+    Unasked,
     Converting { texels: UVec2 },
     Resident(ImageHandle),
     Failed(DrawablePreviewError),
@@ -201,33 +207,49 @@ impl PreviewStore {
     /// No retention filter on the way in: a node that published exists. `reconcile` drops the
     /// value once that stops being true.
     pub(crate) fn publish(&mut self, node_id: NodeId, value: DynamicValue) {
-        let ticket = self.last_ticket.next();
-        self.last_ticket = ticket;
-        self.converting
-            .entry(node_id)
-            .and_modify(|span| span.newest = ticket)
-            .or_insert(Converting {
-                oldest: ticket,
-                newest: ticket,
-            });
-        self.converter.jobs().send(Job {
-            node_id,
-            ticket,
-            work: Work::Thumbnail(value),
-        });
+        Publisher {
+            converting: &mut self.converting,
+            last_ticket: &mut self.last_ticket,
+            converter: &self.converter,
+        }
+        .card(node_id, value);
     }
 
     /// Register every conversion finished since the last frame. A card
     /// replaces what the node showed, unless its value was removed since it
     /// was published; a full raster goes to the image that asked for it,
     /// unless that image was replaced meanwhile.
+    ///
+    /// First, an image a lost device took a texture of publishes its source again, as palantir
+    /// asks of an app whose [`ImageHandle::is_resident`] reads false: its card converts anew and
+    /// replaces it, and its full texture comes back unasked, so a viewer asks again at the new
+    /// device's texture limit. An image whose node converts already waits for that conversion,
+    /// so a frame before it lands publishes nothing more.
     pub(crate) fn land(&mut self, ui: &Ui) {
         let Self {
             entries,
             converting,
+            last_ticket,
             converter,
-            ..
         } = self;
+        let mut publisher = Publisher {
+            converting,
+            last_ticket,
+            converter,
+        };
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "each image publishes under its own node, so the order changes no result"
+        )]
+        for (&node_id, content) in entries.iter() {
+            if let StoredContent::Image(image) = content
+                && image.is_lost()
+                && !publisher.converting.contains_key(&node_id)
+            {
+                publisher.card(node_id, image.source.clone());
+            }
+        }
+        let Publisher { converting, .. } = publisher;
         for converted in converter.ready() {
             accept(
                 Landing {
@@ -251,15 +273,19 @@ impl PreviewStore {
         let Some(StoredContent::Image(image)) = self.entries.get_mut(&node_id) else {
             return;
         };
-        let texels = capped_target(image.preview.native_size, max_dim);
-        match mem::replace(&mut image.full, FullImage::Converting { texels }) {
-            FullImage::Pending(source) => self.converter.jobs().send(Job {
-                node_id,
-                ticket: image.ticket,
-                work: Work::Full { source, texels },
-            }),
-            asked => image.full = asked,
+        if !matches!(image.full, FullImage::Unasked) {
+            return;
         }
+        let texels = capped_target(image.preview.native_size, max_dim);
+        image.full = FullImage::Converting { texels };
+        self.converter.jobs().send(Job {
+            node_id,
+            ticket: image.ticket,
+            work: Work::Full {
+                source: image.source.clone(),
+                texels,
+            },
+        });
     }
 
     /// Drop `node_id`'s value, and void every conversion of it still in
@@ -287,6 +313,34 @@ impl PreviewStore {
             .retain(|node_id, _| document.holds_preview_node(*node_id));
         self.converting
             .retain(|node_id, _| document.holds_preview_node(*node_id));
+    }
+}
+
+/// The store's fields a publish writes, borrowed apart from the entries a restore reads.
+#[derive(Debug)]
+struct Publisher<'a> {
+    converting: &'a mut HashMap<NodeId, Converting>,
+    last_ticket: &'a mut Ticket,
+    converter: &'a PreviewConverter,
+}
+
+impl Publisher<'_> {
+    /// Queue `value` as `node_id`'s newest publish, for its card.
+    fn card(&mut self, node_id: NodeId, value: DynamicValue) {
+        let ticket = self.last_ticket.next();
+        *self.last_ticket = ticket;
+        self.converting
+            .entry(node_id)
+            .and_modify(|span| span.newest = ticket)
+            .or_insert(Converting {
+                oldest: ticket,
+                newest: ticket,
+            });
+        self.converter.jobs().send(Job {
+            node_id,
+            ticket,
+            work: Work::Thumbnail(value),
+        });
     }
 }
 
@@ -354,7 +408,8 @@ fn land_card(landing: Landing<'_>, ui: &Ui, node_id: NodeId, ticket: Ticket, car
                         native_format,
                     },
                     source_bytes: source.ram_usage().total(),
-                    full: FullImage::Pending(source),
+                    full: FullImage::Unasked,
+                    source,
                     ticket,
                 }),
                 Err(error) => StoredContent::Error(error.into()),
@@ -372,7 +427,7 @@ impl DrawablePreview {
     /// once rather than retried every frame.
     pub(crate) fn full(&self, ui: &Ui) -> Result<FullView, DrawablePreviewError> {
         match &self.full {
-            FullImage::Pending(_) => Ok(FullView::Unasked(DrawableImage {
+            FullImage::Unasked => Ok(FullView::Unasked(DrawableImage {
                 texels: capped_target(self.preview.native_size, ui.max_image_dimension()),
                 ..self.preview.clone()
             })),
@@ -387,6 +442,13 @@ impl DrawablePreview {
             })),
             FullImage::Failed(error) => Err(error.clone()),
         }
+    }
+
+    /// Whether a lost device took a texture this image shows: its thumbnail, or its full texture
+    /// once landed.
+    fn is_lost(&self) -> bool {
+        !self.preview.handle.is_resident()
+            || matches!(&self.full, FullImage::Resident(full) if !full.is_resident())
     }
 
     /// Register the full raster converted for this image.
@@ -489,6 +551,12 @@ pub(crate) mod internals {
         #[cfg(test)]
         pub(crate) fn seed(&mut self, node_id: NodeId, content: StoredContent) {
             self.entries.insert(node_id, content);
+        }
+
+        /// How many publishes the store has queued, a lost device's included.
+        #[cfg(test)]
+        pub(crate) const fn publishes(&self) -> u64 {
+            self.last_ticket.count()
         }
 
         /// Whether no node shows anything.
