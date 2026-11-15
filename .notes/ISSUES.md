@@ -5,4 +5,5 @@
 - `darkroom/src/gui/state/preview_store` never checks `ImageHandle::is_resident`. After the window host recovers from a lost GPU device, every preview thumbnail and full texture paints nothing, and the store keeps no texels or source to upload again once a full texture is resident. A full texture also keeps the size `Ui::max_image_dimension` capped it to on the lost device.
 - `lumos/scripts/fetch-test-data.sh` unpacks `DeepSNR_weights_v2.onnx` and `StarNet2_weights.onnx` into `lumos/test_data/lumos_data/`, while `internals::real_data::onnx_weights` and the sample projects read them from `lumos/test_data/`; the script also says it never touches the weights there.
 
+- `lumos/src/math/error_function.rs` ports fdlibm's `s_erf.c` beside `common::Libm`'s `libm` crate, whose `erf` and `erfc` are the same fdlibm source through musl: two routes to one function, the port with its own accuracy tests.
 - `statrs` calls std's libm in `Normal` and `StudentsT`, which `lumos`'s normal scores and sigma bounds read, so those can still differ by a last bit per system.
