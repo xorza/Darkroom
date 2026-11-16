@@ -9,8 +9,9 @@ the shape changes that keep behavior, then the features. Temporary: deleted once
 | # | Commit | State |
 |---|---|---|
 | 1 | Rename the port declarations `InputDecl` and `OutputDecl` | `78adc05e6`, pushed |
-| 2 | Name program nodes by `ProgramId` | in the worktree, reviewed |
-| 3–12 | | to do |
+| 2 | Name program nodes by `ProgramId` | `a718d77fe`, pushed |
+| 3 | Keep stubs in scenarium's `Graph` | in the worktree |
+| 4–12 | | to do |
 
 ## Rules for the series
 
@@ -42,7 +43,7 @@ the shape changes that keep behavior, then the features. Temporary: deleted once
 | `TabRef::ImageViewer(NodeId)`, `PreviewSink`/`PreviewStore` keys | `ProgramId` | 2 |
 | `darkroom/src/core/document/stubs.rs` `Stubs` | `scenarium/src/graph/stub.rs` `Stub`, held in `Graph` | 3 |
 | `Reconciled.detached: Vec<Detachment>` | `Repair::Stubbed { reason: DetachReason }` | 3 |
-| `Node.cache` field | `NodeKind::Body { cache }`, `Node::cache()`/`cache_mut()` | 3 |
+| `Node.cache` field | `NodeKind::Body { cache }`, `Node::cache()`/`cache_mut()` | 6 |
 | `library/type_entry.rs` `TypeEntry` | `data/data_type/enum_type.rs` `EnumType`, `custom_type.rs` `CustomType` | 4 |
 | `TypeId` | `EnumId`, `CustomTypeId`, `FileKindId` | 4 |
 | `DataType::FsPath(Arc<FsPathConfig>)`, `FsPathMode` | `DataType::Dir`, `DataType::File { kind, mode }`, `FileMode`, `FileKind` | 4 |
@@ -92,7 +93,7 @@ tabs carry it.
 
 A node the graph cannot hold becomes a `Stub` in the `Graph` beside its nodes, with its
 `DetachReason`; one reconcile attaches each stub that resolves again and detaches each node that
-does not. `Node.cache` moves into `NodeKind::Body`. Darkroom's `Stubs` and its attach rules go.
+does not. Darkroom's `Stubs` and its attach rules go.
 This replaces "Stubs are darkroom's, not scenarium's" in the `document` module doc.
 
 - Owns: `scenarium/src/graph/{stub,detached}.rs`, `graph/serde/`,
@@ -100,10 +101,12 @@ This replaces "Stubs are darkroom's, not scenarium's" in the `document` module d
   `core/edit/validate.rs`, `core/edit/step/set_node.rs`.
 - Partial: `graph/mod.rs` (the stub table, `resolving_stubs`, `reattach`, `unresolved`),
   `graph/reconciled.rs` (no `GraphSetReconciled` or `BoundaryAdded`), `graph/error.rs`
-  (`DetachReason::Unresolved` alone), `graph/node/mod.rs` (`Body`/`BodySource`, no `Instance` or
-  `Boundary`), `core/document/{mod,load_report}.rs`.
-- **Interim code:** `Graph::reconcile(&Library)` as a single-graph entry point, which commit 6
-  replaces with `GraphSet::reconcile`.
+  (`DetachReason::Unresolved` alone), `core/document/{mod,load_report}.rs`.
+- **Interim code:** `Graph::reconcile(&Library)` as a single-graph entry point, its steps
+  private and read against the library, which commit 6 replaces with `GraphSet::reconcile` over
+  a `Scope`.
+- Moved to commit 6: `Node.cache` into `NodeKind::Body`, as its only reason is a kind of node
+  with no cache, which commit 6 brings.
 - About +500 / −450.
 
 ## Phase 2: shape changes that keep behavior
@@ -286,3 +289,6 @@ What the series' last tree holds where the tip holds otherwise.
   `program_id(n)`, not `node_id(n)` (commit 2); commit 10 keeps the name.
 - **`darkroom/src/core/document/tests.rs`:** a test that the load closes a viewer whose path
   goes through an instance (commit 2).
+- **`scenarium/src/graph/tests.rs`:** `a_load_attaches_each_stub_that_resolves_again_with_the_wiring_that_fits`
+  on one graph (commit 3); commit 6 moves it onto `GraphSet::reconcile` beside the tip's
+  set-wide test, or drops it where that test covers each case.
