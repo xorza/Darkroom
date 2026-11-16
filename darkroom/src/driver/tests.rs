@@ -965,7 +965,10 @@ fn a_preview_inside_nested_subgraphs_publishes_under_its_path() {
     let mut outers: Vec<NodeId> = graphs
         .main()
         .iter()
-        .filter(|node| node.name == "Outer")
+        .filter(|node| {
+            node.subgraph()
+                .is_some_and(|id| graphs.subgraph(id).unwrap().name == "Outer")
+        })
         .map(|node| node.node_id)
         .collect();
     outers.sort_unstable();

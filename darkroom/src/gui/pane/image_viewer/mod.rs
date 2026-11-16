@@ -21,7 +21,7 @@ mod camera;
 mod glyph;
 mod toolbar;
 
-use scenarium::ProgramId;
+use scenarium::{Library, ProgramId};
 use std::fmt;
 use std::fmt::Display;
 use std::fmt::Formatter;
@@ -32,6 +32,7 @@ use palantir::{
     Sense, Shape, SizeSpec, Spacing, Ui, WidgetId, fmt,
 };
 
+use crate::core::document;
 use crate::core::document::Document;
 use crate::core::document::viewport::Viewport;
 use crate::core::io::preferences::{ViewerBg, ViewerPreferences};
@@ -501,10 +502,14 @@ impl Display for HeaderReadout<'_> {
     }
 }
 
-/// Display label for a viewer tab / pane header: the node's name through
-/// [`format::node_name`], borrowed from the document. Each reader resolves its own, as one
-/// path walk per label is cheaper than a table keyed by every tab.
-pub(crate) fn node_label(document: &Document, program_id: ProgramId) -> &str {
+/// Display label for a viewer tab / pane header: the node's title through
+/// [`format::node_name`], borrowed from the document, its graph resolved against `library`. Each
+/// reader resolves its own, as one path walk per label is cheaper than a table keyed by every tab.
+pub(crate) fn node_label<'a>(
+    document: &'a Document,
+    library: &'a Library,
+    program_id: ProgramId,
+) -> &'a str {
     let graph = document
         .graphs
         .graph_at(program_id.path())
@@ -514,7 +519,7 @@ pub(crate) fn node_label(document: &Document, program_id: ProgramId) -> &str {
         .graph(graph)
         .find(program_id.node_id())
         .expect("a viewer tab's node is in its graph");
-    format::node_name(&node.name)
+    format::node_name(document::title(node, document.graphs.scope(library, graph)))
 }
 
 /// A texture's 1:1 logical footprint on the current display (one texel per physical pixel),

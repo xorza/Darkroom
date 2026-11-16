@@ -146,12 +146,11 @@ impl DocumentFixture {
 
     /// Add an instance of subgraph `id`, which the document holds, at the next slot in the row.
     pub(crate) fn add_instance(&mut self, id: SubgraphId) -> NodeId {
-        let subgraph = self
-            .document
-            .graphs
-            .subgraph(id)
-            .expect("the document holds the subgraph");
-        let node = Node::instance(id, subgraph);
+        assert!(
+            self.document.graphs.subgraph(id).is_some(),
+            "the document holds the subgraph"
+        );
+        let node = Node::instance(id);
         let node_id = self.document.graphs.main_mut().add(node);
         let slot = self.document.main_view.node_placements.len();
         place(&mut self.document.main_view, node_id, row_pos(slot));

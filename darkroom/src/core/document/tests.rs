@@ -323,7 +323,7 @@ fn reconcile_keeps_one_side_per_subgraph() {
         library,
     } = fixture;
     document.graphs.insert_subgraph(unsided, subgraph);
-    let instance = Node::instance(unsided, document.graphs.subgraph(unsided).unwrap());
+    let instance = Node::instance(unsided);
     let unsided_instance = document.graphs.main_mut().add(instance);
     insert_subgraph(
         &mut document,
@@ -550,10 +550,7 @@ fn unused_subgraphs_come_outermost_first() {
         Subgraph::new("inner", Interface::default()),
     );
     let mut holder = Subgraph::new("outer", Interface::default());
-    holder.graph.add(Node::instance(
-        inner,
-        fixture.document.graphs.subgraph(inner).unwrap(),
-    ));
+    holder.graph.add(Node::instance(inner));
     insert_subgraph(&mut fixture.document, outer, holder);
     insert_subgraph(
         &mut fixture.document,
@@ -597,4 +594,35 @@ fn a_subgraph_path_is_checked_and_mapped() {
     let mut visited = Vec::new();
     document.for_each_path(|node, path| visited.push((node, path.to_string())));
     assert_eq!(visited, [(addr, "/root/inputs/x.tiff".to_string())]);
+}
+
+/// A node's title is its own name, or for an instance with none its subgraph's, which a rename
+/// of the subgraph changes on each such instance; a named instance keeps its name, and a func
+/// node with none reads blank, which a surface shows as "Unnamed".
+#[test]
+fn an_unnamed_instance_is_titled_by_its_subgraph() {
+    let mut fixture = DocumentFixture::default();
+    let id = SubgraphId::from_u128(1);
+    insert_subgraph(
+        &mut fixture.document,
+        id,
+        Subgraph::new("Denoise", Interface::default()),
+    );
+    let [unnamed, named] = [(); 2].map(|()| fixture.add_instance(id));
+    let blank = fixture.node_at(Vec2::ZERO);
+    let DocumentFixture {
+        mut document,
+        library,
+    } = fixture;
+    let main = document.graphs.main_mut();
+    main.find_mut(named).unwrap().name = "Mine".to_owned();
+    main.find_mut(blank).unwrap().name.clear();
+    let titles = |document: &Document| {
+        let scope = document.graphs.scope(&library, GraphId::Main);
+        [unnamed, named, blank]
+            .map(|node_id| title(document.graphs.main().find(node_id).unwrap(), scope).to_owned())
+    };
+    assert_eq!(titles(&document), ["Denoise", "Mine", ""]);
+    document.graphs.rename_subgraph(id, "Stars".to_owned());
+    assert_eq!(titles(&document), ["Stars", "Mine", ""]);
 }

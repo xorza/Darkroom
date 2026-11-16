@@ -32,9 +32,14 @@ fn printed_integer_part(value: f64, precision: usize) -> u64 {
         .unwrap_or(u64::MAX)
 }
 
+/// The most characters a name's inline editor takes, a node's title or a subgraph's tab.
+pub(crate) const NAME_MAX_CHARS: usize = 32;
+
 /// What a node is called on every surface that names it — a viewer's tab and title, the
-/// inspector's title, a held inspector's tab: its name, or "Unnamed" for a node whose name was
-/// cleared, so no surface reads blank and none invents a word of its own.
+/// inspector's title, a held inspector's tab: its title ([`document::title`]), or "Unnamed" for a
+/// node whose title is blank, so no surface reads blank and none invents a word of its own.
+///
+/// [`document::title`]: crate::core::document::title
 pub(crate) const fn node_name(name: &str) -> &str {
     if name.is_empty() { "Unnamed" } else { name }
 }

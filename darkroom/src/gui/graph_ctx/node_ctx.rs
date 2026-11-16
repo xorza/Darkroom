@@ -6,6 +6,7 @@ use scenarium::{
     PortId, ProgramId, RamUsage, SubgraphId, Unresolved,
 };
 
+use crate::core::document;
 use crate::core::preview_sink;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::input_ctx::InputCtx;
@@ -141,9 +142,10 @@ impl<'a> NodeCtx<'a> {
         self.graph_ctx.theme()
     }
 
-    /// The user's name for the node, empty when it carries none.
+    /// The node's title ([`document::title`]): its name, or an unnamed instance's subgraph's;
+    /// empty for any other node that carries none.
     pub(crate) fn name(self) -> &'a str {
-        &self.node.name
+        document::title(self.node, self.graph_ctx.scope())
     }
 
     /// Human-readable type identity: the declaration's name, or for a stub why the load took it
@@ -292,7 +294,11 @@ impl<'a> NodeCtx<'a> {
         let failed = instance.failed()?;
         let graphs = &self.graph_ctx.document().graphs;
         let graph = graphs.graph_at(failed.path())?;
-        Some(graphs.graph(graph).find(failed.node_id())?.name.as_str())
+        let node = graphs.graph(graph).find(failed.node_id())?;
+        Some(document::title(
+            node,
+            graphs.scope(self.graph_ctx.library(), graph),
+        ))
     }
 
     /// RAM this node's cached output currently holds (system vs GPU).

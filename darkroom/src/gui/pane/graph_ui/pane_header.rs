@@ -327,7 +327,7 @@ mod tests {
         );
         let mut enclosing = Subgraph::new("Outer", Interface::default());
         let inner_instance = NodeId::from_u128(20);
-        let placed = Node::instance(inner, fixture.document.graphs.subgraph(inner).unwrap());
+        let placed = Node::instance(inner);
         enclosing.graph.insert(inner_instance, placed);
         insert_subgraph(&mut fixture.document, outer, enclosing);
         let outer_instance = fixture.add_instance(outer);

@@ -70,7 +70,7 @@ use glam::Vec2;
 use palantir::{DockOperation, DockState, TabGroup};
 use scenarium::{
     ConstValue, DetachedNode, Graph as CoreGraph, GraphId, GraphSet, InstancePath, Library, Node,
-    NodeAddr, NodeId, PathForm, ProgramId, Stub, Subgraph, SubgraphId,
+    NodeAddr, NodeId, PathForm, ProgramId, Scope, Stub, Subgraph, SubgraphId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -576,6 +576,20 @@ impl Document {
             }
         }
     }
+}
+
+/// What a node's title reads: its own name, or for an instance with none the name of the
+/// subgraph it places, as Blender's group node shows its group's name while its label is empty,
+/// so a renamed subgraph reads renamed on each instance; empty for any other node with none,
+/// which a surface reads as "Unnamed". `scope` is the one the node's graph resolves against.
+pub(crate) fn title<'a>(node: &'a Node, scope: Scope<'a>) -> &'a str {
+    if node.name.is_empty()
+        && node.subgraph().is_some()
+        && let Ok(decl) = scope.resolve(node)
+    {
+        return decl.name();
+    }
+    &node.name
 }
 
 /// Drop `node_id`'s placement and selection membership from `view`.

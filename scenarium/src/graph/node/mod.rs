@@ -17,7 +17,6 @@ use crate::graph::identity::{FuncId, SubgraphId};
 use crate::graph::node::special::SpecialNode;
 use crate::graph::node_decl::NodeDecl;
 use crate::graph::scope::Scope;
-use crate::graph::subgraph::Subgraph;
 use ::serde::{Deserialize, Serialize};
 
 /// Where a node's computed output is cached: the storage bits *keep in RAM*
@@ -205,11 +204,13 @@ impl Node {
         }
     }
 
-    /// An instance of `subgraph`, held under `id`, named after it.
-    pub fn instance(id: SubgraphId, subgraph: &Subgraph) -> Self {
+    /// An instance of the subgraph held under `id`, with no name of its own: a host shows the
+    /// subgraph's name until the instance is named, so a renamed subgraph reads renamed on each
+    /// instance.
+    pub const fn instance(id: SubgraphId) -> Self {
         Self {
             kind: NodeKind::Instance(id),
-            name: subgraph.name.clone(),
+            name: String::new(),
             disabled: false,
         }
     }

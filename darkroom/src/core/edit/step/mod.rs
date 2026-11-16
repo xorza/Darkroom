@@ -25,6 +25,7 @@ pub(crate) mod set_positions;
 pub(crate) mod set_selection;
 pub(crate) mod set_side;
 pub(crate) mod set_subgraph;
+pub(crate) mod set_subgraph_name;
 pub(crate) mod set_subscription;
 pub(crate) mod set_ties;
 pub(crate) mod undo_step;

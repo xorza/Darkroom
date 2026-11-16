@@ -64,7 +64,7 @@ pub fn nested_preview(dir: &Path) -> PathBuf {
     let mut outer = Subgraph::new("Outer", Interface::default());
     outer
         .graph
-        .insert(NodeId::unique(), Node::instance(inner_id, &inner));
+        .insert(NodeId::unique(), Node::instance(inner_id));
     insert_subgraph(&mut fixture.document, inner_id, inner);
     let outer_id = SubgraphId::unique();
     insert_subgraph(&mut fixture.document, outer_id, outer);

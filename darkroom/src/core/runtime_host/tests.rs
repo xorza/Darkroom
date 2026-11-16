@@ -40,7 +40,7 @@ fn an_eviction_reaches_the_seed_cone_of_the_installed_program() {
     graphs.insert_subgraph(subgraph, inner);
     let instances = [NodeId::unique(), NodeId::unique()];
     for instance in instances {
-        let placed = Node::instance(subgraph, graphs.subgraph(subgraph).unwrap());
+        let placed = Node::instance(subgraph);
         graphs.main_mut().insert(instance, placed);
     }
 

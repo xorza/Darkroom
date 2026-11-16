@@ -196,7 +196,7 @@ fn an_update_takes_the_librarys_definition_and_a_publish_gives_ours() {
     assert_eq!(open.document(), &before, "one entry takes the update back");
 
     let mut file_with_instance = shared.document(&entry).clone();
-    let theirs_instance = Node::instance(id, file_with_instance.graphs.subgraph(id).unwrap());
+    let theirs_instance = Node::instance(id);
     let placed = file_with_instance.graphs.main_mut().add(theirs_instance);
     file_with_instance
         .main_view
@@ -235,9 +235,7 @@ fn a_subgraph_with_no_side_in_a_library_file_is_carried_in_a_row() {
     let [outer, inner] = [1, 2].map(SubgraphId::from_u128);
     let mut file = library_file(inner, Subgraph::new("Inner", Interface::default()), false);
     let mut enclosing = Subgraph::new("Outer", Interface::default());
-    enclosing
-        .graph
-        .add(Node::instance(inner, file.graphs.subgraph(inner).unwrap()));
+    enclosing.graph.add(Node::instance(inner));
     insert_subgraph(&mut file, outer, enclosing);
     file.sides.get_mut(&outer).unwrap().shared = true;
     file.sides.remove(&inner);

@@ -116,18 +116,10 @@ impl<'a> PaletteEntry<'a> {
         match self {
             PaletteEntry::Func(f) => alone(f.into()),
             PaletteEntry::Special(s) => alone(s.into()),
-            PaletteEntry::Subgraph { id, subgraph, .. } => alone(Node::instance(id, subgraph)),
+            PaletteEntry::Subgraph { id, .. } => alone(Node::instance(id)),
             PaletteEntry::Library { entry, shared } => {
                 let brought = bring_in(document, library, shared.carried(entry));
-                let id = brought.id(entry.id);
-                let subgraph = brought
-                    .subgraphs
-                    .iter()
-                    .find(|new| new.id == id)
-                    .map(|new| &new.subgraph)
-                    .or_else(|| document.graphs.subgraph(id))
-                    .expect("a placed entry is brought in or held");
-                let node = Node::instance(id, subgraph);
+                let node = Node::instance(brought.id(entry.id));
                 Placed {
                     subgraphs: brought.subgraphs,
                     node,

@@ -106,7 +106,7 @@ pub(crate) fn exported(
         strip(&mut subgraph.graph, library, bundled);
         graphs.insert_subgraph(held, subgraph);
     }
-    let instance = Node::instance(id, graphs.subgraph(id).expect("inserted above"));
+    let instance = Node::instance(id);
     let node_id = graphs.main_mut().add(instance);
     let mut exported = Document::from(graphs);
     exported.main_view.node_placements.insert(

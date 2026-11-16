@@ -1,7 +1,8 @@
 use std::collections::BTreeSet;
 
-use scenarium::{Binding, Compiler, GraphId, InputPort, OutputPort, numbered_port};
+use scenarium::{Binding, Compiler, GraphId, InputPort, Library, OutputPort, numbered_port};
 
+use crate::core::document;
 use crate::core::document::Document;
 use crate::core::document::internals::DocumentFixture;
 use crate::core::document::item_id::ItemId;
@@ -31,14 +32,15 @@ fn chain() -> DocumentFixture {
     fixture
 }
 
-/// The main graph's wiring by node name: each wire as `source.port -> consumer.port`, sorted,
-/// for comparing graphs whose ids differ.
-fn wiring(document: &Document) -> Vec<String> {
+/// The main graph's wiring by node title, resolved against `library`: each wire as
+/// `source.port -> consumer.port`, sorted, for comparing graphs whose ids differ.
+fn wiring(document: &Document, library: &Library) -> Vec<String> {
     let graph = document.graphs.main();
+    let scope = document.graphs.scope(library, GraphId::Main);
     let name = |id| {
         graph
             .find(id)
-            .map_or("?", |node| node.name.as_str())
+            .map_or("?", |node| document::title(node, scope))
             .to_string()
     };
     let mut wires: Vec<String> = graph
@@ -70,7 +72,7 @@ fn collapse_then_expand_gives_back_the_wiring_but_for_ids() {
     let fixture = chain();
     let b = fixture.node(1);
     let DocumentFixture { document, library } = fixture;
-    let before = wiring(&document);
+    let before = wiring(&document, &library);
     let mut open = OpenDocument::over(document);
     let mut queue = DocumentQueue::default();
 
@@ -95,7 +97,7 @@ fn collapse_then_expand_gives_back_the_wiring_but_for_ids() {
         .unwrap()
         .node_id;
     assert_eq!(
-        wiring(document),
+        wiring(document, &library),
         [
             format!(
                 "Subgraph.{:?} -> c.{:?}",
@@ -121,7 +123,7 @@ fn collapse_then_expand_gives_back_the_wiring_but_for_ids() {
     assert!(open.can_undo());
     let _ = open.undo();
     assert_eq!(
-        wiring(open.document()),
+        wiring(open.document(), &library),
         before,
         "one entry takes the collapse back"
     );
@@ -133,7 +135,7 @@ fn collapse_then_expand_gives_back_the_wiring_but_for_ids() {
     }
     let _ = open.drain_requests(&mut queue, &library);
     let document = open.document();
-    assert_eq!(wiring(document), before);
+    assert_eq!(wiring(document, &library), before);
     assert!(
         document.graphs.main().find(b).is_none(),
         "the expanded b takes a fresh id"

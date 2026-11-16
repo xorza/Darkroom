@@ -41,7 +41,7 @@ fn empty(name: &str) -> Subgraph {
 
 /// Put an instance of `placed` into `graph` under `node_id`.
 fn place(set: &mut GraphSet, graph: GraphId, node_id: NodeId, placed: SubgraphId) {
-    let node = Node::instance(placed, set.subgraph(placed).unwrap());
+    let node = Node::instance(placed);
     set.graph_mut(graph).insert(node_id, node);
 }
 
@@ -64,7 +64,7 @@ fn a_placement_that_closes_a_loop_is_refused() {
     set.insert_subgraph(s(1), empty("outer"));
     set.insert_subgraph(s(2), empty("inner"));
     place(&mut set, GraphId::Subgraph(s(1)), n(10), s(2));
-    let instance = |placed| Node::instance(placed, set.subgraph(placed).unwrap());
+    let instance = |placed| Node::instance(placed);
     let admit = |graph, placed| set.admit_nodes(graph, [&instance(placed)]);
 
     assert_eq!(
@@ -87,7 +87,7 @@ fn a_placement_that_closes_a_loop_is_refused() {
     let mut apart = GraphSet::default();
     apart.insert_subgraph(s(1), empty("first"));
     apart.insert_subgraph(s(2), empty("second"));
-    let second = Node::instance(s(2), apart.subgraph(s(2)).unwrap());
+    let second = Node::instance(s(2));
     assert_eq!(
         apart.admit_nodes(GraphId::Subgraph(s(1)), [&second]),
         Ok(())
@@ -152,7 +152,7 @@ fn a_ninth_level_is_refused_and_detached() {
     set.graph_mut(GraphId::Subgraph(s(8)))
         .insert(n(1), node(&library, SRC));
     set.main_mut().insert(n(1), node(&library, SRC));
-    let first = Node::instance(s(1), set.subgraph(s(1)).unwrap());
+    let first = Node::instance(s(1));
     assert_eq!(
         set.admit_nodes(GraphId::Main, [&first]),
         Err(PlacementRejection::TooDeep {
@@ -160,7 +160,7 @@ fn a_ninth_level_is_refused_and_detached() {
             levels: 9
         })
     );
-    let second = Node::instance(s(2), set.subgraph(s(2)).unwrap());
+    let second = Node::instance(s(2));
     assert_eq!(set.admit_nodes(GraphId::Main, [&second]), Ok(()));
 
     set.main_mut().insert(n(2), first);
@@ -535,7 +535,10 @@ fn a_new_instance_takes_its_interface_defaults() {
     );
     let node = graph.find(node_id).unwrap();
     assert_eq!(node.subgraph(), Some(s(1)));
-    assert_eq!(node.name, "gain");
+    assert!(
+        node.name.is_empty(),
+        "an instance has no name of its own: a host shows its subgraph's"
+    );
     assert_eq!(node.cache(), None, "an instance has no cache mode");
 }
 
@@ -961,7 +964,7 @@ fn a_digest_names_the_definition_and_not_its_ids() {
                 (5, node(&library, SRC)),
             ],
         );
-        let instance = Node::instance(inner, &placed);
+        let instance = Node::instance(inner);
         set.insert_subgraph(inner, placed);
         let mut order = vec![
             (1, Node::from(Boundary::Inputs)),

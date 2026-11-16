@@ -96,7 +96,7 @@ impl Doc {
 
     /// Place an instance of `subgraph` in the main graph under `node_id`.
     fn place(&mut self, node_id: NodeId, subgraph: SubgraphId) {
-        let instance = Node::instance(subgraph, self.graphs.subgraph(subgraph).unwrap());
+        let instance = Node::instance(subgraph);
         self.main().insert(node_id, instance);
     }
 }
@@ -252,7 +252,7 @@ fn a_nested_node_is_named_by_its_path_and_reads_across_both_boundaries() {
     let mut twice = Subgraph::new("twice", adder.interface.clone());
     let inputs = twice.boundary_node(Boundary::Inputs);
     let outputs = twice.boundary_node(Boundary::Outputs);
-    twice.graph.insert(n(21), Node::instance(ADDER, adder));
+    twice.graph.insert(n(21), Node::instance(ADDER));
     wire(&mut twice.graph, (n(21), A), (inputs, A));
     wire(&mut twice.graph, (n(21), B), (inputs, B));
     wire(&mut twice.graph, (outputs, SUM), (n(21), SUM));

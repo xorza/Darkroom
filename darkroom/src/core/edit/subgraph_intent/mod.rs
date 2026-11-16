@@ -25,10 +25,12 @@ use crate::core::edit::step::set_definition::SetDefinition;
 use crate::core::edit::step::set_interface::SetInterface;
 use crate::core::edit::step::set_side::SetSide;
 use crate::core::edit::step::set_subgraph::SetSubgraph;
+use crate::core::edit::step::set_subgraph_name::SetSubgraphName;
 use crate::core::edit::step::undo_step::UndoStep;
 
-/// An edit of a subgraph's definition: one coming in or going out, or its interface. Travels as
-/// a [`DocumentRequest::Subgraph`](crate::core::edit::document_request::DocumentRequest::Subgraph)
+/// An edit of a subgraph's definition: one coming in or going out, its interface or its name.
+/// Travels as a
+/// [`DocumentRequest::Subgraph`](crate::core::edit::document_request::DocumentRequest::Subgraph)
 /// and lands in the same history entry as the graph edits of its batch, as a collapse's new
 /// definition lands with the instance that places it.
 #[derive(Debug)]
@@ -40,6 +42,9 @@ pub(crate) enum SubgraphIntent {
     /// Set a subgraph's interface: what each instance and both boundary nodes show, dropping
     /// each binding the new one does not hold, in every graph.
     SetInterface { id: SubgraphId, to: Interface },
+    /// Rename a subgraph to `to`, trimmed: a blank name keeps the one it has, and one another
+    /// subgraph holds takes the next free number, as Make Unique names its copy.
+    Rename { id: SubgraphId, to: String },
     /// Mark a subgraph shared, so the library lists it while the document is a library file, or
     /// take the mark off.
     SetShared { id: SubgraphId, shared: bool },
@@ -113,6 +118,22 @@ impl SubgraphIntent {
                     return Ok(());
                 }
                 UndoStep::Interface(Box::new(SetInterface::plan(document, id, to, library)))
+            }
+            Self::Rename { id, to } => {
+                let Some(subgraph) = document.graphs.subgraph(id) else {
+                    return Ok(());
+                };
+                let wanted = to.trim();
+                if wanted.is_empty() || wanted == subgraph.name {
+                    return Ok(());
+                }
+                UndoStep::SubgraphName(SetSubgraphName {
+                    id,
+                    name: Change {
+                        from: subgraph.name.clone(),
+                        to: document.free_subgraph_name(wanted),
+                    },
+                })
             }
             Self::SetShared { id, shared } => {
                 let Some(side) = document.sides.get(&id) else {

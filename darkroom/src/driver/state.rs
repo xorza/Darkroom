@@ -6,6 +6,7 @@ use palantir::{Rect, Sense, Ui};
 use scenarium::{Binding, Graph, GraphId, InputPort, NodeDecl, OutputPort, Scope};
 use serde::Serialize;
 
+use crate::core::document;
 use crate::core::document::Document;
 use crate::gui::app::App;
 use crate::gui::pane::graph_ui::wid;
@@ -189,8 +190,13 @@ impl Report<'_> {
         let through = document.through(id);
         let listed = |name: &str| nodes.is_none_or(|part| name.contains(part));
         // By name, then id: the graph's own order is a hash map's, which no two reports share.
-        let mut matching: Vec<_> = graph.iter().filter(|node| listed(&node.name)).collect();
-        matching.sort_unstable_by(|a, b| (&a.name, a.node_id).cmp(&(&b.name, b.node_id)));
+        let mut matching: Vec<_> = graph
+            .iter()
+            .filter(|node| listed(document::title(node, scope)))
+            .collect();
+        matching.sort_unstable_by(|a, b| {
+            (document::title(a, scope), a.node_id).cmp(&(document::title(b, scope), b.node_id))
+        });
         GraphSummary {
             name: match id {
                 GraphId::Main => "main".to_string(),
@@ -210,7 +216,7 @@ impl Report<'_> {
                     let node_id = node.node_id;
                     let func = scope.resolve(&node);
                     let mut state = NodeSummary {
-                        name: node.name.clone(),
+                        name: document::title(&node, scope).to_owned(),
                         func: func
                             .map_or_else(|why| format!("{why:?}"), |func| func.name().to_string()),
                         screen: ui.response_for(wid::body(id, node_id)).rect.map(rect),
@@ -250,7 +256,11 @@ impl Report<'_> {
             selection: view
                 .selected
                 .iter()
-                .filter_map(|item| graph.find(item.node()?).map(|node| node.name.clone()))
+                .filter_map(|item| {
+                    graph
+                        .find(item.node()?)
+                        .map(|node| document::title(node, scope).to_owned())
+                })
                 .collect(),
             details: detailed.then(|| Details {
                 wires: wires(graph, scope, listed),
@@ -297,7 +307,7 @@ fn output_name(graph: &Graph, scope: Scope<'_>, output: OutputPort) -> String {
         .ok()
         .and_then(|func| func.ports().output(output.port))
         .map_or_else(|| output.port.to_string(), |port| port.name.clone());
-    format!("{}.{port}", node.name)
+    format!("{}.{port}", document::title(node, scope))
 }
 
 fn binding(graph: &Graph, scope: Scope<'_>, input: InputPort) -> Option<String> {
@@ -318,10 +328,10 @@ fn wires(graph: &Graph, scope: Scope<'_>, listed: impl Fn(&str) -> bool) -> Vec<
         let ports = scope.resolve(&node).ok().map(NodeDecl::ports);
         for (port, binding) in graph.input_bindings(node.node_id) {
             if let Binding::Wire(output) = binding
-                && (listed(&node.name)
+                && (listed(document::title(&node, scope))
                     || graph
                         .find(output.node_id)
-                        .is_some_and(|producer| listed(&producer.name)))
+                        .is_some_and(|producer| listed(document::title(producer, scope))))
             {
                 let input = ports
                     .and_then(|ports| ports.input(port.port))
@@ -329,7 +339,7 @@ fn wires(graph: &Graph, scope: Scope<'_>, listed: impl Fn(&str) -> bool) -> Vec<
                 wires.push(format!(
                     "{} -> {}.{input}",
                     output_name(graph, scope, *output),
-                    node.name
+                    document::title(&node, scope)
                 ));
             }
         }

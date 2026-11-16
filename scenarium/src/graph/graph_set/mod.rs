@@ -254,6 +254,19 @@ impl GraphSet {
             .interface = interface;
     }
 
+    /// Name subgraph `id` `name`, and hand back the name it replaces. A name holds no rule
+    /// across graphs, so nothing else changes.
+    ///
+    /// # Panics
+    /// If the set holds no subgraph `id`.
+    pub fn rename_subgraph(&mut self, id: SubgraphId, name: String) -> String {
+        let held = self
+            .subgraphs
+            .get_mut(&id)
+            .expect("a renamed subgraph is in the set");
+        mem::replace(&mut held.name, name)
+    }
+
     /// Hold `subgraph` under `id`, in place of the definition held there or beside the others,
     /// and hand back the one it replaces. No check runs: what places it may no longer fit its
     /// ports, so the caller reconciles the set after, as a publish into a library file does.

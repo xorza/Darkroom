@@ -807,7 +807,7 @@ fn a_loop_between_two_subgraphs_opens_with_one_recursive_stub_every_time() {
     }
     // Each places the other, past the edit gate that refuses the second placement.
     for (graph, placed, node_id) in [(a, b, 10), (b, a, 20)] {
-        let node = Node::instance(placed, fixture.document.graphs.subgraph(placed).unwrap());
+        let node = Node::instance(placed);
         let slot = fixture.document.slot_mut(GraphId::Subgraph(graph));
         slot.graph.insert(NodeId::from_u128(node_id), node);
         slot.view

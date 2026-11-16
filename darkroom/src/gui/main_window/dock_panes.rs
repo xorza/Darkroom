@@ -12,13 +12,16 @@ use std::fmt::Formatter;
 
 use glam::Vec2;
 use palantir::{
-    DockDrop, DockOperation, DockTabMenu, DockTabs, InternedStr, MenuItem, Size, SplitSide, Ui, fmt,
+    Configure, DockDrop, DockOperation, DockTabMenu, DockTabs, EditableLabel, InternedStr,
+    MenuItem, Size, SplitSide, TabChip, Ui, WidgetId, fmt,
 };
-use scenarium::{GraphId, ProgramId};
+use scenarium::{GraphId, Library, ProgramId, SubgraphId};
 
+use crate::core::document;
 use crate::core::document::Document;
 use crate::core::document::inspect_target::InspectTarget;
 use crate::core::document::tab_ref::TabRef;
+use crate::core::edit::subgraph_intent::SubgraphIntent;
 use crate::core::io::preferences::Preferences;
 use crate::gui::frame::doc_ctx::DocCtx;
 use crate::gui::frame::stage::Stage;
@@ -42,8 +45,12 @@ pub(crate) struct DockPanes<'a> {
 }
 
 /// The name a tab's chip shows, written on demand: a subgraph's pane names the subgraph, and an
-/// inspector held on a node names it.
-pub(crate) fn tab_label(document: &Document, tab: TabRef) -> TabLabel<'_> {
+/// inspector held on a node names it, the node's graph resolved against `library`.
+pub(crate) fn tab_label<'a>(
+    document: &'a Document,
+    library: &'a Library,
+    tab: TabRef,
+) -> TabLabel<'a> {
     match tab {
         TabRef::Graph(GraphId::Main) => TabLabel::Plain("Graph"),
         TabRef::Graph(GraphId::Subgraph(id)) => TabLabel::Plain(
@@ -55,18 +62,19 @@ pub(crate) fn tab_label(document: &Document, tab: TabRef) -> TabLabel<'_> {
         ),
         TabRef::Preferences => TabLabel::Plain("Preferences"),
         TabRef::ImageViewer(program_id) => {
-            TabLabel::Plain(image_viewer::node_label(document, program_id))
+            TabLabel::Plain(image_viewer::node_label(document, library, program_id))
         }
         TabRef::Inspector(InspectTarget::Selection) => TabLabel::Plain("Inspector"),
         TabRef::Inspector(InspectTarget::Node { addr, .. }) => {
-            TabLabel::Inspector(format::node_name(
-                &document
-                    .graphs
-                    .graph(addr.graph)
-                    .find(addr.node_id)
-                    .expect("a held inspector closes with its node")
-                    .name,
-            ))
+            let graphs = &document.graphs;
+            let node = graphs
+                .graph(addr.graph)
+                .find(addr.node_id)
+                .expect("a held inspector closes with its node");
+            TabLabel::Inspector(format::node_name(document::title(
+                node,
+                graphs.scope(library, addr.graph),
+            )))
         }
     }
 }
@@ -92,7 +100,8 @@ impl DockTabs for DockPanes<'_> {
     type Tab = TabRef;
 
     fn label(&mut self, ui: &mut Ui, tab: TabRef) -> InternedStr {
-        fmt!(ui, "{}", tab_label(self.stage.ctx.document(), tab))
+        let ctx = self.stage.ctx;
+        fmt!(ui, "{}", tab_label(ctx.document(), ctx.library(), tab))
     }
 
     fn body(&mut self, ui: &mut Ui, tab: TabRef, size: Option<Size>) {
@@ -125,7 +134,7 @@ impl DockTabs for DockPanes<'_> {
                 inspector::show(ui, &mut self.stage.with(graph_ctx), target);
             }
             TabRef::ImageViewer(program_id) => {
-                let title = image_viewer::node_label(ctx.document(), program_id);
+                let title = image_viewer::node_label(ctx.document(), ctx.library(), program_id);
                 let previews = ctx.run_state().previews();
                 let viewer = self
                     .image_viewers
@@ -152,6 +161,49 @@ impl DockTabs for DockPanes<'_> {
         }
     }
 
+    /// A subgraph's tab renames it in place: a double click on the chip, or Rename in its menu,
+    /// opens an editor of the name, as Excel's sheet tab does
+    /// ([rename a worksheet](https://support.microsoft.com/en-us/office/rename-a-worksheet-3f1f7148-ee83-404d-8ef0-9ff99fbad1f9)).
+    /// Enter or a blur commits, Escape keeps the name; the chip keeps its click, drag and close
+    /// button around the editor.
+    fn chip(&mut self, ui: &mut Ui, tab: TabRef, chip: &TabChip) {
+        let TabRef::Graph(GraphId::Subgraph(subgraph)) = tab else {
+            chip.show_label(ui);
+            return;
+        };
+        let editor = rename_wid(subgraph);
+        if ui.response_for(chip.id).left.double_clicked() {
+            EditableLabel::start_editing(ui, editor);
+        }
+        if !EditableLabel::is_editing(ui, editor) {
+            chip.show_label(ui);
+            return;
+        }
+        let name = &self
+            .stage
+            .ctx
+            .document()
+            .graphs
+            .subgraph(subgraph)
+            .expect("a subgraph's pane closes with it")
+            .name;
+        let label = EditableLabel::new(name.as_str())
+            .id(editor)
+            .style(&self.stage.ctx.theme().flat_text_edit)
+            .max_chars(format::NAME_MAX_CHARS)
+            .show(ui);
+        if let Some(to) = label.committed_text {
+            self.stage
+                .out
+                .push_subgraph(SubgraphIntent::Rename { id: subgraph, to });
+        }
+    }
+
+    /// Every tab has a menu: the splits for any, and Rename for a subgraph's.
+    fn has_tab_menu(&mut self, _tab: TabRef) -> bool {
+        true
+    }
+
     /// Every tab except the pinned main graph carries a close button.
     fn closable(&mut self, tab: TabRef) -> bool {
         tab != TabRef::Graph(GraphId::Main)
@@ -160,6 +212,11 @@ impl DockTabs for DockPanes<'_> {
     /// The keyboard-free, discoverable route to the same split a chip
     /// drag performs.
     fn tab_menu(&mut self, ui: &mut Ui, menu: DockTabMenu<'_, TabRef>) {
+        if let TabRef::Graph(GraphId::Subgraph(subgraph)) = menu.tab
+            && MenuItem::new("Rename").show(ui).left.clicked()
+        {
+            EditableLabel::start_editing(ui, rename_wid(subgraph));
+        }
         let right = MenuItem::new("Split right").show(ui).left.clicked();
         let down = MenuItem::new("Split down").show(ui).left.clicked();
         let side = if down {
@@ -177,6 +234,11 @@ impl DockTabs for DockPanes<'_> {
             });
         }
     }
+}
+
+/// The editor of `subgraph`'s name in its tab's chip: keyed by the subgraph, as it has one tab.
+pub(crate) fn rename_wid(subgraph: SubgraphId) -> WidgetId {
+    WidgetId::from_hash(("darkroom.dock.rename", subgraph))
 }
 
 #[cfg(test)]
@@ -203,8 +265,8 @@ mod tests {
         let shown = subgraph.graph.add(preview);
         insert_subgraph(&mut fixture.document, id, subgraph);
         let instance = fixture.add_instance(id);
-        let document = fixture.document;
-        let label = |tab| tab_label(&document, tab).to_string();
+        let DocumentFixture { document, library } = fixture;
+        let label = |tab| tab_label(&document, &library, tab).to_string();
 
         assert_eq!(label(TabRef::Graph(GraphId::Main)), "Graph");
         assert_eq!(label(TabRef::Graph(GraphId::Subgraph(id))), "Denoise");

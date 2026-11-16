@@ -7,6 +7,7 @@ use glam::UVec2;
 use palantir::{AgentWindow, Found, Image, LocateError, PlayError, Rect, Screenshot, Ui};
 use serde::Serialize;
 
+use crate::core::document;
 use crate::core::document::tab_ref::TabRef;
 use crate::driver::error::DriverError;
 use crate::driver::locator::{EditorTarget, Locator};
@@ -124,7 +125,7 @@ fn pane(app: &App, ui: &Ui, name: &str) -> Result<Rect, DriverError> {
     let document = app.open_document().document();
     let layout = &document.layout;
     let locator = format!("{:?}", Region::Pane(name.to_string()));
-    let label = |tab: TabRef| dock_panes::tab_label(document, tab);
+    let label = |tab: TabRef| dock_panes::tab_label(document, app.library(), tab);
     let groups: Vec<_> = layout
         .groups()
         .filter(|group| label(group.active_tab()).to_string() == name)
@@ -237,7 +238,7 @@ fn legend(screenshot: &Screenshot, picture: UVec2, app: &App, ui: &Ui) -> Vec<Le
             continue;
         };
         let mut legend = LegendNode {
-            name: node.name.clone(),
+            name: document::title(&node, scope).to_owned(),
             rect,
             inputs: Vec::new(),
             outputs: Vec::new(),

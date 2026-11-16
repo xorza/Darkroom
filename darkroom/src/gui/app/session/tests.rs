@@ -586,3 +586,63 @@ fn copy_and_paste_go_through_the_clipboard() {
     assert!(test.undo());
     assert_eq!(test.session.open.document().graphs.main().len(), 1);
 }
+
+/// A double click on a subgraph's tab opens an editor of its name in the chip, and Enter renames
+/// the subgraph, one undo entry; the tab's menu opens the same editor, and Escape keeps the name.
+#[test]
+fn a_subgraphs_tab_renames_it_in_place() {
+    use scenarium::{Interface, Subgraph, SubgraphId};
+
+    use crate::core::document::internals::insert_subgraph;
+    use crate::gui::main_window::dock_panes::rename_wid;
+
+    let mut fixture = DocumentFixture::default();
+    let id = SubgraphId::from_u128(1);
+    insert_subgraph(
+        &mut fixture.document,
+        id,
+        Subgraph::new("Denoise", Interface::default()),
+    );
+    fixture.document.layout.apply(DockOperation::OpenTab {
+        tab: TabRef::Graph(GraphId::Subgraph(id)),
+    });
+    let mut test = SessionHarness::new(fixture);
+    let name = |test: &SessionHarness| {
+        test.session
+            .open
+            .document()
+            .graphs
+            .subgraph(id)
+            .unwrap()
+            .name
+            .clone()
+    };
+    test.prime(2);
+
+    test.ui.double_click("Denoise");
+    test.prime(2);
+    assert!(
+        palantir::EditableLabel::is_editing(test.ui.ui(), rename_wid(id)),
+        "the double click opens the editor"
+    );
+    test.ui.type_text("Stars");
+    test.ui.key(Key::Enter);
+    test.prime(2);
+    assert_eq!(name(&test), "Stars");
+    assert!(test.undo());
+    assert_eq!(name(&test), "Denoise");
+
+    test.prime(2);
+    test.ui.right_click("Denoise");
+    test.prime(2);
+    test.ui.click("Rename");
+    test.prime(2);
+    let editing =
+        |test: &SessionHarness| palantir::EditableLabel::is_editing(test.ui.ui(), rename_wid(id));
+    assert!(editing(&test), "the menu's Rename opens the editor");
+    test.ui.type_text("Gone");
+    test.ui.key(Key::Escape);
+    test.prime(2);
+    assert!(!editing(&test));
+    assert_eq!(name(&test), "Denoise", "Escape keeps the name");
+}

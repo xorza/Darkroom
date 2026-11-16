@@ -195,7 +195,7 @@ fn the_documents_subgraphs_list_and_an_unused_one_is_marked() {
     let [used, unused] = [1, 2].map(SubgraphId::from_u128);
     graphs.insert_subgraph(used, Subgraph::new("Denoise", Interface::default()));
     graphs.insert_subgraph(unused, Subgraph::new("Calibrate", Interface::default()));
-    let instance = Node::instance(used, graphs.subgraph(used).unwrap());
+    let instance = Node::instance(used);
     graphs.graph_mut(GraphId::Main).add(instance);
     let shared = SharedLibrary::default();
     let sources = PaletteSources {

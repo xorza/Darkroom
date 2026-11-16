@@ -511,7 +511,7 @@ impl Graph {
     /// Add an instance of `subgraph`, held under `id`, and seed its inputs' default const
     /// bindings. Returns the new node id.
     pub fn add_instance(&mut self, id: SubgraphId, subgraph: &Subgraph) -> NodeId {
-        let node_id = self.add(Node::instance(id, subgraph));
+        let node_id = self.add(Node::instance(id));
         self.bindings.extend(
             subgraph
                 .interface

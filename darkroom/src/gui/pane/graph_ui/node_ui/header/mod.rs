@@ -26,13 +26,11 @@ use crate::gui::pane::graph_ui::node_ui::card;
 use crate::gui::pane::graph_ui::node_ui::node_record::NodeRecord;
 use crate::gui::pane::graph_ui::wid;
 use crate::gui::theme::hover::Hover;
+use crate::gui::widgets::format;
 use crate::gui::widgets::icon::Icon;
 use crate::gui::widgets::icon_button::IconButton;
 use crate::gui::widgets::port_glyph::PortGlyph;
 use crate::gui::widgets::support;
-
-/// Character cap for a node title in the inline rename editor.
-const NODE_NAME_MAX_CHARS: usize = 32;
 
 /// The title's width floor, so a short name still presents an easy double-click target and the
 /// editor does not collapse to a caret when the draft is emptied.
@@ -294,7 +292,7 @@ fn title(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
         .id(wid::rename(node.graph_ctx.graph(), node.node_id))
         .style(&node.theme().flat_text_edit)
         .bold()
-        .max_chars(NODE_NAME_MAX_CHARS)
+        .max_chars(format::NAME_MAX_CHARS)
         .editable(!node.stub())
         .min_size((NODE_NAME_MIN_WIDTH, 0.0))
         .show(ui);

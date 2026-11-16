@@ -511,7 +511,7 @@ fn an_edit_inside_a_subgraph_passes_over_its_boundary_nodes() {
         2
     );
 
-    let instance = Node::instance(id, document.graphs.subgraph(id).unwrap());
+    let instance = Node::instance(id);
     let refused = GraphIntent::add_node(Vec2::ZERO, NodeId::from_u128(50), instance.clone());
     assert_eq!(
         commit(&mut document, refused).unwrap_err(),
@@ -1161,13 +1161,13 @@ fn an_add_past_a_placement_bound_is_refused() {
     inner.graph.add(body);
     for pair in ids.windows(2).rev() {
         let mut outer = empty();
-        outer.graph.add(Node::instance(pair[1], &inner));
+        outer.graph.add(Node::instance(pair[1]));
         insert_subgraph(&mut document, pair[1], inner);
         inner = outer;
     }
     let deepest_first = inner;
-    let too_deep = Node::instance(ids[0], &deepest_first);
-    let fits = Node::instance(ids[1], document.graphs.subgraph(ids[1]).unwrap());
+    let too_deep = Node::instance(ids[0]);
+    let fits = Node::instance(ids[1]);
     insert_subgraph(&mut document, ids[0], deepest_first);
 
     let refused = NodeId::unique();

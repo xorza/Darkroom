@@ -5,6 +5,7 @@ use glam::Vec2;
 use palantir::{Found, Locate, LocateError, Rect, Ui};
 use scenarium::{GraphId, NodeId, PortId};
 
+use crate::core::document;
 use crate::gui::app::App;
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::wid;
@@ -68,11 +69,13 @@ impl Locate<App> for EditorTarget {
                     return Err(LocateError::NotFound {
                         locator: locator(),
                         nearest: nearest(
-                            document
-                                .graphs
-                                .graph(graph)
-                                .iter()
-                                .map(|candidate| candidate.name.clone()),
+                            document.graphs.graph(graph).iter().map(|candidate| {
+                                document::title(
+                                    &candidate,
+                                    document.graphs.scope(app.library(), graph),
+                                )
+                                .to_owned()
+                            }),
                             node,
                         ),
                     });
@@ -117,14 +120,16 @@ fn visible(rect: Option<Rect>) -> Option<Rect> {
     rect.filter(|rect| !rect.is_paint_empty())
 }
 
-/// The nodes of `graph` named `node` by their name or their id, in the document's order.
+/// The nodes of `graph` named `node` by their title or their id, in the document's order.
 fn node_ids(app: &App, graph: GraphId, node: &str) -> Vec<NodeId> {
-    app.open_document()
-        .document()
-        .graphs
+    let graphs = &app.open_document().document().graphs;
+    let scope = graphs.scope(app.library(), graph);
+    graphs
         .graph(graph)
         .iter()
-        .filter(|candidate| candidate.name == node || candidate.node_id.to_string() == node)
+        .filter(|candidate| {
+            document::title(candidate, scope) == node || candidate.node_id.to_string() == node
+        })
         .map(|candidate| candidate.node_id)
         .collect()
 }

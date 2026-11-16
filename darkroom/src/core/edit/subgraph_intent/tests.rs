@@ -74,10 +74,7 @@ fn a_definition_comes_and_goes_with_its_side_unless_placed() {
     document.validate().unwrap();
     let with = document.clone();
 
-    let placed = document
-        .graphs
-        .main_mut()
-        .add(Node::instance(id, &subgraph));
+    let placed = document.graphs.main_mut().add(Node::instance(id));
     document
         .main_view
         .node_placements
@@ -195,4 +192,59 @@ fn an_interface_edit_drops_wires_and_their_ties_in_every_graph_and_undo_restores
     document.validate().unwrap();
     revert(&mut document, &removed);
     assert_eq!(document, before, "both wires, routes and ties come back");
+}
+
+/// A rename takes the name trimmed, and an undo puts the old one back; a name another subgraph
+/// holds takes the next free number, as Make Unique names a copy; a blank name, or the name the
+/// subgraph has, writes nothing; a subgraph gone since writes nothing either.
+#[test]
+fn a_rename_takes_a_free_name_and_undoes() {
+    let DocumentFixture {
+        mut document,
+        library,
+    } = DocumentFixture::default();
+    let [denoise, clean] = [1, 2].map(SubgraphId::from_u128);
+    insert_subgraph(
+        &mut document,
+        denoise,
+        Subgraph::new("Denoise", Interface::default()),
+    );
+    insert_subgraph(
+        &mut document,
+        clean,
+        Subgraph::new("Clean", Interface::default()),
+    );
+    let name = |document: &Document, id| document.graphs.subgraph(id).unwrap().name.clone();
+    let rename = |document: &mut Document, id, to: &str| {
+        commit(
+            document,
+            &library,
+            SubgraphIntent::Rename {
+                id,
+                to: to.to_owned(),
+            },
+        )
+        .unwrap()
+    };
+
+    let steps = rename(&mut document, denoise, "  Stars  ");
+    assert_eq!(steps.len(), 1);
+    assert_eq!(name(&document, denoise), "Stars");
+    revert(&mut document, &steps);
+    assert_eq!(name(&document, denoise), "Denoise");
+
+    rename(&mut document, denoise, "Clean");
+    assert_eq!(
+        name(&document, denoise),
+        "Clean 2",
+        "a taken name takes a number"
+    );
+    for unchanged in ["", "   ", "Clean 2"] {
+        assert!(
+            rename(&mut document, denoise, unchanged).is_empty(),
+            "{unchanged:?} writes nothing"
+        );
+    }
+    assert_eq!(name(&document, denoise), "Clean 2");
+    assert!(rename(&mut document, SubgraphId::from_u128(9), "Gone").is_empty());
 }

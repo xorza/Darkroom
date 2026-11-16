@@ -226,7 +226,7 @@ pub(crate) fn collapse(
             .expect("a new definition places its boundary nodes")
             .pos = Vec2::new(x, centroid.y);
     }
-    let instance = Node::instance(id, &subgraph);
+    let instance = Node::instance(id);
 
     let items: BTreeSet<ItemId> = inside.iter().copied().map(ItemId::Node).collect();
     let fragment = Fragment::capture(document, graph, library, &items, IncomingWires::Drop);
