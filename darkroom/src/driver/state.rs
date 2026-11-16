@@ -4,7 +4,8 @@ use glam::Vec2;
 use palantir::InspectedWidget;
 use palantir::{Rect, Sense, Ui};
 use scenarium::{
-    Binding, GhostSource, Graph, GraphId, InputPort, NodeDecl, NodeId, OutputPort, SavedPort, Scope,
+    Binding, GhostSource, Graph, GraphId, InputPort, Listener, NodeDecl, NodeId, OutputPort,
+    SavedPort, Scope,
 };
 use serde::Serialize;
 
@@ -375,6 +376,15 @@ fn ghost_end(graph: &Graph, scope: Scope<'_>, port: PortRef, saved: Option<&Save
     }
 }
 
+/// Where a subscription lands, by name: a node's pin by its title, a trigger as `<node>.#<id>`.
+fn listener_name(graph: &Graph, scope: Scope<'_>, listener: Listener) -> String {
+    let title = node_title(graph, scope, listener.node_id());
+    match listener {
+        Listener::Pin(_) => title.to_owned(),
+        Listener::Trigger(trigger) => format!("{title}.#{}", trigger.trigger),
+    }
+}
+
 /// Every ghost of `graph`, sorted: the ghost wires and constants, then the ghost subscriptions.
 fn ghosts(graph: &Graph, scope: Scope<'_>) -> Vec<String> {
     let wiring = graph.ghost_wiring();
@@ -399,7 +409,7 @@ fn ghosts(graph: &Graph, scope: Scope<'_>) -> Vec<String> {
         format!(
             "{}.{event} => {}",
             node_title(graph, scope, subscription.event.node_id),
-            node_title(graph, scope, subscription.subscriber)
+            listener_name(graph, scope, subscription.listener)
         )
     }));
     ghosts.sort_unstable();

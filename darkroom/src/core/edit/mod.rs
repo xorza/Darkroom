@@ -13,6 +13,7 @@ pub(crate) mod gesture_id;
 pub(crate) mod graph_intent;
 pub(crate) mod make_unique;
 pub(crate) mod port_edit;
+pub(crate) mod replace_plan;
 pub(crate) mod step;
 pub(crate) mod subgraph_intent;
 pub(crate) mod undo_history;

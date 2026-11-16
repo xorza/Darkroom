@@ -1,6 +1,7 @@
 use scenarium::internals::test_graph::TestGraph;
 use scenarium::{
-    CacheMode, DataType, EventPort, FuncId, Graph, InstancePath, Node, NodeId, ProgramId, internals,
+    CacheMode, DataType, EventPort, FuncId, Graph, InstancePath, Listener, Node, NodeId, ProgramId,
+    internals,
 };
 use scenarium::{PortId, internals::test_graph::NodeSpec};
 
@@ -190,10 +191,15 @@ fn a_node_shows_the_ghost_ports_its_ghosts_name() {
             },
         }),
     );
-    graph.set_subscription_state(
+    for subscription in [
         Subscription::new(EventPort::new(a, PortId::new(4)), b),
-        SubscriptionState::Ghost(scenarium::GhostSubscription::default()),
-    );
+        Subscription::new(EventPort::new(a, PortId::new(5)), ghost),
+    ] {
+        graph.set_subscription_state(
+            subscription,
+            SubscriptionState::Ghost(scenarium::GhostSubscription::default()),
+        );
+    }
     graph.validate().unwrap();
     fixture
         .document
@@ -232,7 +238,11 @@ fn a_node_shows_the_ghost_ports_its_ghosts_name() {
             .collect::<Vec<_>>(),
         [(EventPort::new(ghost, PortId::new(1)), Some("done"))]
     );
-    assert_eq!(node.ghost_count(), 2, "the wire in and the wire out");
+    assert_eq!(
+        node.ghost_count(),
+        3,
+        "the wire in, the wire out and the subscription"
+    );
 
     let producer = graph_ctx.node(a).unwrap();
     assert_eq!(rows(producer.ghost_inputs()), []);
@@ -246,8 +256,16 @@ fn a_node_shows_the_ghost_ports_its_ghosts_name() {
             .ghost_events()
             .map(|event| (event.event, event.name))
             .collect::<Vec<_>>(),
-        [(EventPort::new(a, PortId::new(4)), None)]
+        [
+            (EventPort::new(a, PortId::new(4)), None),
+            (EventPort::new(a, PortId::new(5)), None)
+        ]
     );
+    // A ghost pin where a ghost subscription ends on a node that draws no pin: the ghost node,
+    // and `b`, whose `probe` is no sink; never on the emitter.
+    assert!(node.ghost_pinned());
+    assert!(graph_ctx.node(b).unwrap().ghost_pinned());
+    assert!(!producer.ghost_pinned());
     let consumer = graph_ctx.node(b).unwrap();
     assert_eq!(
         rows(consumer.ghost_inputs()),
@@ -302,7 +320,7 @@ fn func_events_read_in_order_alongside_outputs() {
     let fixture = GraphCtxFixture::over(DocumentFixture::with_library(graph, library));
     let n = fixture.graph_ctx().node(node_id).unwrap();
 
-    let event_names: Vec<&str> = n.events().iter().map(|e| e.name.as_str()).collect();
+    let event_names: Vec<&str> = n.events().iter().map(|e| e.name).collect();
     assert_eq!(event_names, ["Always", "FPS"], "events read in order");
     assert_eq!(n.event_ports().count(), 2, "one ref per declared event");
 
@@ -332,7 +350,7 @@ fn subscriptions_read_from_the_graph() {
 
     assert_eq!(subs.len(), 1);
     assert_eq!(subs[0].event, EventPort::new(emitter_id, PortId::new(2)));
-    assert_eq!(subs[0].subscriber, subscriber_id);
+    assert_eq!(subs[0].listener, Listener::Pin(subscriber_id));
 }
 
 #[test]
@@ -395,6 +413,39 @@ fn impure_flag_reads_from_func_behavior() {
         "an outputless func has nothing to store or evict"
     );
     assert!(!pure.sink() && !impure.sink());
+}
+
+/// An instance caches the values that leave it: one whose interface has an output shows the
+/// storage chips, starting with nothing kept, and one with no output has nothing to store; a
+/// boundary node has no cache mode.
+#[test]
+fn an_instance_with_an_output_is_cacheable() {
+    use scenarium::{Interface, Numbered, OutputDecl, PortId, Ports, Subgraph, SubgraphId};
+
+    use crate::core::document::internals::insert_subgraph;
+
+    let mut fixture = DocumentFixture::default();
+    let (with, without) = (SubgraphId::from_u128(1), SubgraphId::from_u128(2));
+    let outputs = Interface::new(Ports {
+        inputs: vec![],
+        outputs: vec![Numbered::new(
+            PortId::new(1),
+            OutputDecl::new("out", DataType::Int),
+        )],
+    });
+    insert_subgraph(&mut fixture.document, with, Subgraph::new("with", outputs));
+    insert_subgraph(
+        &mut fixture.document,
+        without,
+        Subgraph::new("without", Interface::default()),
+    );
+    let [cached, empty] = [with, without].map(|id| fixture.add_instance(id));
+    let fixture = GraphCtxFixture::over(fixture);
+    let graph_ctx = fixture.graph_ctx();
+    let cached = graph_ctx.node(cached).unwrap();
+    assert_eq!(cached.cache(), Some(CacheMode::None));
+    assert!(cached.cacheable());
+    assert!(!graph_ctx.node(empty).unwrap().cacheable());
 }
 
 /// A pane reads each run result through the instance it shows: a node of a subgraph reads its

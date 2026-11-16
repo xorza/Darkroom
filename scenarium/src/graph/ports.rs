@@ -180,6 +180,23 @@ impl OutputDecl {
     }
 }
 
+/// An event an interface fires or a trigger it hears: a name and what it is for, as a func's
+/// event declares beside its lambda.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EventDecl {
+    pub name: String,
+    pub description: Option<String>,
+}
+
+impl EventDecl {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            description: None,
+        }
+    }
+}
+
 /// The inputs and outputs a declaration shows, each in the order a node draws them.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Ports {
@@ -279,6 +296,8 @@ pub enum PortList {
     Inputs,
     Outputs,
     Events,
+    /// The triggers an interface hears: what an instance's listeners land on.
+    Triggers,
 }
 
 impl fmt::Display for PortList {
@@ -287,6 +306,7 @@ impl fmt::Display for PortList {
             Self::Inputs => "input",
             Self::Outputs => "output",
             Self::Events => "event",
+            Self::Triggers => "trigger",
         })
     }
 }

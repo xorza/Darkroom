@@ -360,6 +360,7 @@ impl ExecFrame<'_, '_> {
                 };
             }
             NodeState::Reuse => self.serve_reuse(node_idx, demand).await,
+            NodeState::Twin => self.serve_twin(node_idx, demand).await,
             // Reuse is settled *before* the errored-dependency check inside `invoke_node`: a
             // digest-valid cached value stays valid when an upstream re-ran for another consumer
             // and failed, so it must not be cleared as skipped.
@@ -401,6 +402,71 @@ impl ExecFrame<'_, '_> {
                 self.release_drained_outputs(node_idx);
             }
         }
+    }
+
+    /// Serve a twin: take each output it demands from the earlier node of the run with its digest
+    /// ([`RunSchedule::twin_of`]), which ran or was served at its own earlier turn, as a consumer
+    /// reads a wire, so the leader's values release on the same last-read bookkeeping. A leader
+    /// that failed leaves the twin skipped as errored upstream, as its own run would have been.
+    ///
+    /// Reported as served from cache: the twin ran nothing. A twin whose own mode saves to disk
+    /// owes its blob as a computed value does.
+    async fn serve_twin(&mut self, node_idx: NodeIdx, demand: &[OutputDemand]) {
+        let program = self.program;
+        let leader = self
+            .schedule
+            .twin_of(node_idx)
+            .expect("a twin names its leader");
+        let failed = self.node_outcomes[leader].error().is_some();
+        let output_count = program[node_idx].outputs.len;
+        self.inputs.clear();
+        for port_idx in 0..output_count {
+            if demand[port_idx as usize].is_skip() {
+                self.inputs.push(DynamicValue::Unbound);
+                continue;
+            }
+            let address = OutputAddr {
+                node_idx: leader,
+                port_idx,
+            };
+            if failed {
+                self.complete_planned_read(address);
+                continue;
+            }
+            let output_idx = program.output_idx(address);
+            let read = if self.remaining_reads.is_last(output_idx)
+                && !program[leader].cache.caches_in_ram()
+            {
+                OutputRead::Take
+            } else {
+                OutputRead::Clone
+            };
+            let value = self
+                .cache
+                .read_output_port(program, address, read)
+                .expect("a twin's leader is resident when the twin is reached");
+            self.complete_planned_read(address);
+            self.inputs.push(value);
+        }
+        if failed {
+            self.mark_skipped(node_idx, RunError::SkippedUpstream);
+            return;
+        }
+        let slot = &mut self.cache[node_idx];
+        for (out, value) in slot
+            .invoke_outputs(output_count as usize)
+            .iter_mut()
+            .zip(self.inputs.drain(..))
+        {
+            *out = value;
+        }
+        slot.stamp_produced();
+        self.node_outcomes[node_idx] = NodeOutcome::Reused;
+        let _ = self
+            .cache
+            .store_node(program, node_idx, StorePolicy::PreserveCovering)
+            .await;
+        self.release_drained_outputs(node_idx);
     }
 
     /// Whether this node's lambda still has to run, after the late second chance at reuse.

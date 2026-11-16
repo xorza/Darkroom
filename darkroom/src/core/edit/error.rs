@@ -1,5 +1,6 @@
 //! Why an intent could never have applied, and why the document refuses one that could.
 
+use crate::core::document::subgraph_side::ReadOnly;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
@@ -32,12 +33,19 @@ pub(crate) enum EditRefusal {
     /// subgraph inside itself, or one past a bound.
     #[error("the node was not added")]
     Placement(#[source] PlacementRejection),
-    /// A removal of one of a subgraph's two boundary nodes, which it always keeps.
-    #[error("a subgraph keeps its Inputs and Outputs nodes")]
+    /// A removal of a subgraph's `Outputs` node or its last `Inputs` node, or a second
+    /// `Outputs` node added.
+    #[error("a subgraph keeps one Outputs node and at least one Inputs node")]
     BoundaryNode,
     /// A removal of a subgraph that nodes still place.
     #[error("the subgraph is placed by {uses} node(s); remove them first")]
     SubgraphInUse { uses: usize },
+    /// An edit of the graph or interface of a subgraph that follows the library or is locked.
+    #[error("{}", match why {
+        ReadOnly::Follows => "the subgraph follows the library; Make Local to edit it",
+        ReadOnly::Locked => "the subgraph is locked; Unlock it to edit it",
+    })]
+    ReadOnly { why: ReadOnly },
 }
 
 /// A payload no widget could legitimately have raised: a nil or colliding

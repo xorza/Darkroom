@@ -10,8 +10,11 @@ use std::mem;
 use glam::Vec2;
 use palantir::widget::domain;
 use palantir::{Ui, WidgetId};
+use scenarium::NodeId;
 
+use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::subgraph_intent::SubgraphIntent;
+use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::stage::Stage;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::canvas;
@@ -43,6 +46,9 @@ pub(crate) struct NewNodeUi {
     search: Search,
     /// Whether the input stage opened the palette for the record to come.
     opening: Opening,
+    /// The node a pick replaces, when Replace with… opened the palette: a pick then raises the
+    /// Replace dialog instead of adding a node.
+    replacing: Option<NodeId>,
 }
 
 /// The palette's search text, its case-folded copy, and the rows it matched.
@@ -81,6 +87,7 @@ impl NewNodeUi {
         self.search.text.clear();
         self.search.folded.clear();
         self.opening = Opening::Standing;
+        self.replacing = None;
     }
 
     /// Whether the palette is open.
@@ -100,6 +107,7 @@ impl NewNodeUi {
         };
         self.world_pos = ctx.graph_ctx().camera().to_world(local);
         self.source = dropped;
+        self.replacing = None;
         self.menu.open_at(rect.min + local);
         // Fresh open: empty the filter, and have the record filter afresh and focus the search
         // field so the user can type straight away.
@@ -107,7 +115,21 @@ impl NewNodeUi {
         self.opening = Opening::Fresh;
     }
 
-    /// Record the palette while it is open, and raise the `AddNode` a pick means.
+    /// Open the palette under the pointer to pick the node that replaces `node_id`, as the node
+    /// menu's Replace with… asks.
+    pub(crate) fn open_replacing(&mut self, ui: &mut Ui, node_id: NodeId) {
+        let Some(pointer) = ui.pointer_pos() else {
+            return;
+        };
+        self.source = None;
+        self.replacing = Some(node_id);
+        self.menu.open_at(pointer);
+        self.search.text.clear();
+        self.opening = Opening::Fresh;
+    }
+
+    /// Record the palette while it is open, and raise the `AddNode` a pick means, or the Replace
+    /// dialog when it was opened to replace a node.
     /// Returns the source of the dropped wire that opened it, when a pick lands, which floats
     /// again so the user clicks the exact port to land it rather than it auto-attaching.
     pub(crate) fn record(
@@ -138,17 +160,34 @@ impl NewNodeUi {
             id_salt: "new_node_popup",
             max_height: Some(max_height),
         };
+        let replacing = self.replacing;
         let chosen = self.menu.show(ui, shape, |ui| {
             let palette = NodePalette {
                 graph_ctx,
                 pos,
                 scroll_cap,
                 opening,
+                replacing: replacing.is_some(),
             };
             palette.body(ui, search)
         });
 
         let picked = chosen?;
+        if let Some(node_id) = self.replacing.take() {
+            let GraphIntent::AddNode { node, .. } = picked.add else {
+                unreachable!("a palette pick adds a node");
+            };
+            debug_assert!(
+                picked.subgraphs.is_empty(),
+                "a replace lists no library entry"
+            );
+            stage.out.push_app(AppCommand::ProposeReplace {
+                graph: stage.ctx.graph(),
+                node_id,
+                with: Box::new(node),
+            });
+            return None;
+        }
         for subgraph in picked.subgraphs {
             stage
                 .out

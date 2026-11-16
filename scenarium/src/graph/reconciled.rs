@@ -10,7 +10,7 @@ use crate::graph::binding::Binding;
 use crate::graph::error::{
     DetachReason, GhostRejection, GhostSubscriptionRejection, SubscriptionRejection,
 };
-use crate::graph::identity::{InputPort, NodeId, SubgraphId};
+use crate::graph::identity::{FuncId, InputPort, NodeId, SubgraphId};
 use crate::graph::node::Boundary;
 use crate::graph::subscription::Subscription;
 
@@ -52,6 +52,13 @@ pub enum Repair {
     DuplicateGhostNode { node_id: NodeId },
     /// A ghost node that resolves again, attached to the graph.
     Reattached { node_id: NodeId },
+    /// A node or a ghost node of a func the library no longer registers, moved with its wiring
+    /// to the func its redirects end at.
+    Redirected {
+        node_id: NodeId,
+        from: FuncId,
+        to: FuncId,
+    },
     /// A node taken out of the graph and kept as a ghost node, its wiring as ghosts.
     GhostedNode {
         node_id: NodeId,
@@ -110,6 +117,12 @@ impl Display for Repair {
                 write!(
                     f,
                     "attached the ghost node {node_id:?} again: its node resolves"
+                )
+            }
+            Self::Redirected { node_id, from, to } => {
+                write!(
+                    f,
+                    "moved {node_id:?} from func {from:?}, which the library redirects, to {to:?}"
                 )
             }
             Self::GhostedNode { node_id, reason } => {

@@ -14,10 +14,13 @@
 
 use std::mem;
 
-use scenarium::{Interface, Library, Manifest, RefusedFate, Subgraph, SubgraphDigest, SubgraphId};
+use scenarium::{
+    GraphId, Interface, Library, Manifest, RefusedFate, Subgraph, SubgraphDigest, SubgraphId,
+    TypeNames,
+};
 
 use crate::core::document::Document;
-use crate::core::document::subgraph_side::SubgraphSide;
+use crate::core::document::subgraph_side::{SideMarks, SubgraphSide};
 use crate::core::edit::bring_in::{self, Carried, bring_in};
 use crate::core::edit::error::{EditRefusal, IntentError};
 use crate::core::edit::step::change::Change;
@@ -57,6 +60,10 @@ pub(crate) enum SubgraphIntent {
         id: SubgraphId,
         digest: SubgraphDigest,
     },
+    /// Make subgraph `id` follow the library, read-only, or Make Local.
+    SetFollows { id: SubgraphId, follows: bool },
+    /// Lock subgraph `id` against edits, or Unlock it.
+    SetLocked { id: SubgraphId, locked: bool },
 }
 
 /// What [`SubgraphIntent::Update`] puts in: the library's definition under the copy's id, last,
@@ -74,6 +81,10 @@ pub(crate) struct NewSubgraph {
     pub(crate) id: SubgraphId,
     pub(crate) subgraph: Subgraph,
     pub(crate) side: SubgraphSide,
+    /// The names the file it came from gave its types, which the set learns
+    /// ([`GraphSet::learn_type_names`](scenarium::GraphSet::learn_type_names)); none for one
+    /// made here.
+    pub(crate) type_names: TypeNames,
 }
 
 impl SubgraphIntent {
@@ -95,13 +106,25 @@ impl SubgraphIntent {
                 steps.push(step);
             }
         };
+        if let Self::SetInterface { id, .. } | Self::Rename { id, .. } = &self
+            && let Some(why) = document.read_only(GraphId::Subgraph(*id))
+        {
+            return Err(EditRefusal::ReadOnly { why }.into());
+        }
         let step = match self {
             Self::Add(new) => {
-                let NewSubgraph { id, subgraph, side } = *new;
+                let NewSubgraph {
+                    id,
+                    subgraph,
+                    side,
+                    type_names,
+                } = *new;
                 assert!(
                     document.graphs.subgraph(id).is_none(),
                     "a new subgraph takes a fresh id"
                 );
+                // A cache of what files said, outside the undo (`TypeNames`).
+                document.graphs.learn_type_names(&type_names, library);
                 UndoStep::Subgraph(Box::new(SetSubgraph::insertion(id, subgraph, side)))
             }
             Self::Remove { id } => {
@@ -143,36 +166,28 @@ impl SubgraphIntent {
                 })
             }
             Self::SetShared { id, shared } => {
-                let Some(side) = document.sides.get(&id) else {
+                let Some(step) = mark(document, id, |marks| marks.shared = shared) else {
                     return Ok(());
                 };
-                UndoStep::Side(SetSide {
-                    id,
-                    shared: Change {
-                        from: side.shared,
-                        to: shared,
-                    },
-                    synced: Change {
-                        from: side.synced,
-                        to: side.synced,
-                    },
-                })
+                step
             }
             Self::Synced { id, digest } => {
-                let Some(side) = document.sides.get(&id) else {
+                let Some(step) = mark(document, id, |marks| marks.synced = Some(digest)) else {
                     return Ok(());
                 };
-                UndoStep::Side(SetSide {
-                    id,
-                    shared: Change {
-                        from: side.shared,
-                        to: side.shared,
-                    },
-                    synced: Change {
-                        from: side.synced,
-                        to: Some(digest),
-                    },
-                })
+                step
+            }
+            Self::SetFollows { id, follows } => {
+                let Some(step) = mark(document, id, |marks| marks.follows = follows) else {
+                    return Ok(());
+                };
+                step
+            }
+            Self::SetLocked { id, locked } => {
+                let Some(step) = mark(document, id, |marks| marks.locked = locked) else {
+                    return Ok(());
+                };
+                step
             }
             Self::Update(update) => {
                 let Update {
@@ -186,6 +201,7 @@ impl SubgraphIntent {
                 // The definition itself is parsed against this library with those it places, as
                 // each of them is: a node it holds of a func this build lacks is a ghost node.
                 bring_in::reconcile(&mut carried, library, &manifest);
+                document.graphs.learn_type_names(manifest.types(), library);
                 let definition = carried
                     .pop()
                     .expect("an update carries its definition last");
@@ -194,7 +210,10 @@ impl SubgraphIntent {
                     "an update puts in the definition under its id"
                 );
                 let mut brought = bring_in(document, library, carried, &manifest);
-                for NewSubgraph { id, subgraph, side } in mem::take(&mut brought.subgraphs) {
+                for NewSubgraph {
+                    id, subgraph, side, ..
+                } in mem::take(&mut brought.subgraphs)
+                {
                     land(
                         UndoStep::Subgraph(Box::new(SetSubgraph::insertion(id, subgraph, side))),
                         document,
@@ -229,15 +248,15 @@ impl SubgraphIntent {
                     })),
                     document,
                 );
+                let from = document.sides[&id].marks();
                 UndoStep::Side(SetSide {
                     id,
-                    shared: Change {
-                        from: document.sides[&id].shared,
-                        to: document.sides[&id].shared,
-                    },
-                    synced: Change {
-                        from: synced,
-                        to: definition.synced,
+                    marks: Change {
+                        from: SideMarks { synced, ..from },
+                        to: SideMarks {
+                            synced: definition.synced,
+                            ..from
+                        },
                     },
                 })
             }
@@ -245,6 +264,22 @@ impl SubgraphIntent {
         land(step, document);
         Ok(())
     }
+}
+
+/// The step that changes subgraph `id`'s marks as `edit` does, or `None` for a subgraph the
+/// document no longer holds.
+fn mark(
+    document: &Document,
+    id: SubgraphId,
+    edit: impl FnOnce(&mut SideMarks),
+) -> Option<UndoStep> {
+    let from = document.sides.get(&id)?.marks();
+    let mut to = from;
+    edit(&mut to);
+    Some(UndoStep::Side(SetSide {
+        id,
+        marks: Change { from, to },
+    }))
 }
 
 #[cfg(test)]

@@ -349,3 +349,130 @@ fn a_subgraph_with_no_side_in_a_library_file_is_carried_in_a_row() {
         "a subgraph with no side shows in a row"
     );
 }
+
+/// A copy that follows the library is read-only: an edit of its graph or interface is refused
+/// with the reason, a view edit is not, and a scan whose library copy moved updates it; a copy
+/// that does not follow, or that changed here, is not updated. Make Local lifts the refusal. A
+/// lock refuses edits likewise, and travels with the copy a library place makes.
+#[test]
+fn a_followed_copy_is_read_only_and_a_scan_updates_it() {
+    use scenarium::{GraphId, Node};
+
+    use crate::core::document::item_id::ItemId;
+    use crate::core::document::subgraph_side::ReadOnly;
+    use crate::core::edit::bring_in::bring_in;
+    use crate::core::edit::collapse::{CollapseRefusal, collapse};
+    use crate::core::edit::error::{EditRefusal, IntentError};
+    use crate::core::edit::graph_intent::GraphIntent;
+
+    let dir = TempDir::new("darkroom-library-follow");
+    let [followed, still, mine] = [1, 2, 3].map(SubgraphId::from_u128);
+    let original = Subgraph::new("Denoise", inputs(&[1]));
+    let mut theirs = original.clone();
+    theirs.name = "Denoise, theirs".to_string();
+    let mut file = library_file(followed, theirs.clone(), true);
+    for id in [still, mine] {
+        insert_subgraph(&mut file, id, theirs.clone());
+        file.sides.get_mut(&id).unwrap().shared = true;
+    }
+    file.sides.get_mut(&still).unwrap().locked = true;
+    document::save(
+        &file,
+        &Library::default(),
+        &dir.join("lib.darkroom"),
+        SavedPaths::Relative,
+    )
+    .unwrap();
+    let shared = scan(dir.path());
+
+    let mut fixture = DocumentFixture::default();
+    for id in [followed, still, mine] {
+        insert_subgraph(&mut fixture.document, id, original.clone());
+        let synced = fixture.document.graphs.digest(id);
+        let side = fixture.document.sides.get_mut(&id).unwrap();
+        side.synced = Some(synced);
+        side.follows = id != still;
+    }
+    // `mine` changed here since it last synced, so it is not the library's to update.
+    fixture
+        .document
+        .graphs
+        .graph_mut(GraphId::Subgraph(mine))
+        .add(Node::from(scenarium::Boundary::Inputs));
+    let DocumentFixture {
+        mut document,
+        library,
+    } = fixture;
+
+    let updates = shared.follower_updates(&document);
+    assert_eq!(
+        updates.iter().map(|update| update.id).collect::<Vec<_>>(),
+        [followed]
+    );
+
+    let commit = |document: &mut Document, graph, intent: GraphIntent| {
+        intent.commit(document, graph, &library, &mut Vec::new())
+    };
+    let inside = GraphId::Subgraph(followed);
+    let add = GraphIntent::add_node(
+        glam::Vec2::ZERO,
+        scenarium::NodeId::unique(),
+        Node::from(scenarium::Boundary::Inputs),
+    );
+    assert_eq!(
+        commit(&mut document, inside, add.clone()),
+        Err(IntentError::Refused(EditRefusal::ReadOnly {
+            why: ReadOnly::Follows
+        }))
+    );
+    // Every planner that adds a subgraph beside its edits of the graph refuses up front, so no
+    // copy is left behind by edits the gate refuses.
+    let selection = [ItemId::Node(original.inputs_node())].into_iter().collect();
+    assert!(matches!(
+        collapse(&document, inside, &library, &selection),
+        Some(Err(CollapseRefusal::ReadOnly {
+            why: ReadOnly::Follows
+        }))
+    ));
+    let select = GraphIntent::SetSelection {
+        to: [ItemId::Node(original.inputs_node())].into_iter().collect(),
+    };
+    commit(&mut document, inside, select).unwrap();
+    let mut steps = Vec::new();
+    SubgraphIntent::SetFollows {
+        id: followed,
+        follows: false,
+    }
+    .commit(&mut document, &library, &mut steps)
+    .unwrap();
+    commit(&mut document, inside, add).unwrap();
+
+    SubgraphIntent::SetLocked {
+        id: followed,
+        locked: true,
+    }
+    .commit(&mut document, &library, &mut steps)
+    .unwrap();
+    assert_eq!(
+        SubgraphIntent::Rename {
+            id: followed,
+            to: "Mine".to_string(),
+        }
+        .commit(&mut document, &library, &mut steps),
+        Err(IntentError::Refused(EditRefusal::ReadOnly {
+            why: ReadOnly::Locked
+        }))
+    );
+
+    let entry = shared.entry(still).unwrap();
+    let placed = bring_in(
+        &Document::default(),
+        &library,
+        shared.carried(entry),
+        shared.manifest(entry),
+    );
+    assert!(
+        placed.subgraphs.iter().all(|new| new.side.locked),
+        "the author's lock travels with the copy"
+    );
+}

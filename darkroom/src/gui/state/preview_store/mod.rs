@@ -565,6 +565,15 @@ pub(crate) mod internals {
             self.entries.is_empty()
         }
 
+        /// How many nodes show an image.
+        #[cfg(test)]
+        pub(crate) fn image_count(&self) -> usize {
+            self.entries
+                .values()
+                .filter(|content| content.image().is_some())
+                .count()
+        }
+
         /// Whether `program_id`'s full image has landed, for a bench that waits for its viewer.
         pub(crate) fn full_landed(&self, program_id: ProgramId) -> bool {
             matches!(

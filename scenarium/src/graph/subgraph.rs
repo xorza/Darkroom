@@ -13,16 +13,21 @@
 //!   and Nuke's Group beside its gizmo
 //!   ([gizmos](https://learn.foundry.com/nuke/content/comp_environment/configuring_nuke/creating_sourcing_gizmos.html)):
 //!   two routes to one result, a graph stored by value in one and by id in the other.
-//! - **One `Inputs` node and one `Outputs` node, each a node told by its kind.** Each port is a
-//!   row on it, and placement, selection and wiring treat it as any node, as Blender's group input
-//!   and output, Unreal's function entry and result, and
+//! - **`Inputs` and `Outputs` nodes, each a node told by its kind.** Each port is a row on it,
+//!   and placement, selection and wiring treat it as any node, as Blender's group input and
+//!   output, Unreal's function entry and result, and
 //!   [ComfyUI](https://docs.comfy.org/interface/features/subgraph). Refused: a node per port, as
 //!   Nuke's [Input](https://learn.foundry.com/nuke/content/reference_guide/other_nodes/input.html),
 //!   whose order needs a hidden number that scripts repair ([pipe
 //!   numbers](https://www.nukepedia.com/knowledge/general-tutorials/written-tutorials/working-with-pipe-numbers/));
 //!   two reserved node ids, as ComfyUI's `-10` and `-20` ([node
 //!   ids](https://docs.comfy.org/custom-nodes/js/node-id-migration)), which rule out several
-//!   `Inputs` nodes later.
+//!   `Inputs` nodes.
+//! - **One `Outputs` node, and one or more `Inputs` nodes**, each showing the whole interface, so
+//!   a long graph reads an input where it is used, as a Blender node group holds several Group
+//!   Input nodes ([node groups](https://docs.blender.org/manual/en/latest/interface/controls/nodes/groups.html)).
+//!   A wire from any of them reads what the instance holds on that port. Refused: several
+//!   `Outputs` nodes, which would give one interface output two producers.
 
 use serde::{Deserialize, Serialize};
 
@@ -36,8 +41,9 @@ use crate::graph::node::{Boundary, Node};
 /// data-blocks with a user count
 /// ([node groups](https://docs.blender.org/manual/en/latest/interface/controls/nodes/groups.html)).
 ///
-/// Its graph holds exactly one `Inputs` and one `Outputs` node, which show the interface from
-/// the inside; the host's edit gate keeps them there, as it keeps every other rule of a graph.
+/// Its graph holds one `Outputs` node and one or more `Inputs` nodes, which show the interface
+/// from the inside; the host's edit gate keeps them there, as it keeps every other rule of a
+/// graph.
 /// An instance, an `Inputs` and an `Outputs` node each resolve to the ports the interface gives
 /// them ([`NodeDecl`](crate::NodeDecl)), with no body: the compile removes all three.
 ///
@@ -66,15 +72,33 @@ impl Subgraph {
         }
     }
 
-    /// The node of this subgraph's graph on `boundary`'s side.
-    ///
-    /// # Panics
-    /// If the graph holds no such node, which a subgraph a host keeps always does.
-    pub fn boundary_node(&self, boundary: Boundary) -> NodeId {
+    /// The `Inputs` nodes of this subgraph's graph, in no order.
+    pub fn inputs_nodes(&self) -> impl Iterator<Item = NodeId> {
         self.graph
             .iter()
-            .find(|node| node.boundary() == Some(boundary))
-            .expect("a subgraph's graph holds each boundary node")
+            .filter(|node| node.boundary() == Some(Boundary::Inputs))
+            .map(|node| node.node_id)
+    }
+
+    /// The `Inputs` node of least id: a new subgraph's one.
+    ///
+    /// # Panics
+    /// If the graph holds none, which a subgraph a host keeps never does.
+    pub fn inputs_node(&self) -> NodeId {
+        self.inputs_nodes()
+            .min()
+            .expect("a subgraph's graph holds an Inputs node")
+    }
+
+    /// The `Outputs` node of this subgraph's graph.
+    ///
+    /// # Panics
+    /// If the graph holds none, which a subgraph a host keeps never does.
+    pub fn outputs_node(&self) -> NodeId {
+        self.graph
+            .iter()
+            .find(|node| node.boundary() == Some(Boundary::Outputs))
+            .expect("a subgraph's graph holds an Outputs node")
             .node_id
     }
 }

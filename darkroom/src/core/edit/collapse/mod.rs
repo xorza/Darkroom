@@ -20,15 +20,17 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 
 use glam::Vec2;
 use scenarium::{
-    Binding, BindingEntry, Boundary, GraphId, InputDecl, InputPort, Interface, Library, Node,
-    NodeId, Numbered, OutputDecl, OutputPort, PortId, Ports, Subgraph, SubgraphId,
+    Binding, BindingEntry, GraphId, InputDecl, InputPort, Interface, Library, Node, NodeId,
+    Numbered, OutputDecl, OutputPort, PortId, Ports, Subgraph, SubgraphId, TypeNames,
 };
 use thiserror::Error;
 
 use crate::core::document::Document;
 use crate::core::document::item_id::ItemId;
+use crate::core::document::subgraph_side::ReadOnly;
 use crate::core::document::subgraph_side::SubgraphSide;
 use crate::core::edit::document_queue::DocumentQueue;
+use crate::core::edit::error::EditRefusal;
 use crate::core::edit::fragment::Fragment;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
@@ -45,10 +47,14 @@ pub(crate) enum CollapseRefusal {
     /// would feed itself.
     #[error("the selection would feed itself through {name:?}")]
     FeedsItself { node: NodeId, name: String },
-    /// An event subscription joins a node of the selection and one outside it, which an
-    /// interface, holding data ports alone, cannot carry.
+    /// An event subscription joins a node of the selection and one outside it, which a collapse,
+    /// making data ports alone, does not carry.
     #[error("{name:?} is subscribed across the selection's edge")]
     SubscriptionCrosses { node: NodeId, name: String },
+    /// The graph follows the library or is locked: a collapse would add the new subgraph and
+    /// have every edit of the graph refused.
+    #[error("{}", EditRefusal::ReadOnly { why: *why })]
+    ReadOnly { why: ReadOnly },
 }
 
 /// What a collapse raises, in order: the new definition, the edits that fill it, and the edits
@@ -91,6 +97,9 @@ pub(crate) fn collapse(
     library: &Library,
     selection: &BTreeSet<ItemId>,
 ) -> Option<Result<Collapse, CollapseRefusal>> {
+    if let Some(why) = document.read_only(graph) {
+        return Some(Err(CollapseRefusal::ReadOnly { why }));
+    }
     let held = document.graphs.graph(graph);
     let inside: BTreeSet<NodeId> = selection
         .iter()
@@ -110,7 +119,7 @@ pub(crate) fn collapse(
             .clone()
     };
     for subscription in held.subscriptions() {
-        let (emitter, subscriber) = (subscription.event.node_id, subscription.subscriber);
+        let (emitter, subscriber) = (subscription.event.node_id, subscription.listener.node_id());
         if inside.contains(&emitter) != inside.contains(&subscriber) {
             let node = if inside.contains(&emitter) {
                 subscriber
@@ -215,8 +224,8 @@ pub(crate) fn collapse(
 
     let id = SubgraphId::unique();
     let subgraph = Subgraph::new(document.free_subgraph_name("Subgraph"), interface);
-    let inputs_node = subgraph.boundary_node(Boundary::Inputs);
-    let outputs_node = subgraph.boundary_node(Boundary::Outputs);
+    let inputs_node = subgraph.inputs_node();
+    let outputs_node = subgraph.outputs_node();
     let mut side = SubgraphSide::new(&subgraph.graph);
     for (node_id, x) in [
         (inputs_node, min.x - BOUNDARY_GAP),
@@ -279,7 +288,12 @@ pub(crate) fn collapse(
     });
 
     Some(Ok(Collapse {
-        subgraph: NewSubgraph { id, subgraph, side },
+        subgraph: NewSubgraph {
+            id,
+            subgraph,
+            side,
+            type_names: TypeNames::default(),
+        },
         inside: inside_intents,
         outside,
     }))
@@ -308,8 +322,7 @@ pub(crate) fn expand(
         .graphs
         .subgraph(subgraph_id)
         .expect("an instance's subgraph is in the set");
-    let inputs_node = definition.boundary_node(Boundary::Inputs);
-    let outputs_node = definition.boundary_node(Boundary::Outputs);
+    let outputs_node = definition.outputs_node();
     let items: BTreeSet<ItemId> = definition
         .graph
         .iter()
@@ -320,9 +333,11 @@ pub(crate) fn expand(
         return vec![GraphIntent::RemoveNode { node_id: instance }];
     }
     let mut fragment = Fragment::capture(document, inner, library, &items, IncomingWires::Keep);
-    fragment.rebind_from(inputs_node, |port: PortId| {
-        held.bindings.get(&InputPort::new(instance, port)).cloned()
-    });
+    for inputs_node in definition.inputs_nodes() {
+        fragment.rebind_from(inputs_node, |port: PortId| {
+            held.bindings.get(&InputPort::new(instance, port)).cloned()
+        });
+    }
     // Fresh ids in the fragment's node order, so the outputs below follow the nodes.
     let fresh: HashMap<NodeId, NodeId> = fragment
         .node_ids()

@@ -3,6 +3,7 @@
 use crate::graph::func::{Func, FuncEvent};
 use crate::graph::identity::PortId;
 use crate::graph::node::Boundary;
+use crate::graph::ports::EventDecl;
 use crate::graph::ports::{InputDecl, Numbered, OutputDecl, Ports};
 use crate::graph::subgraph::Subgraph;
 
@@ -59,14 +60,43 @@ impl<'a> NodeDecl<'a> {
         &self.ports().outputs
     }
 
-    /// The events the node fires: a func's, as an interface has no event ports.
-    pub fn events(self) -> &'a [FuncEvent] {
-        self.func().map_or(&[], Func::events)
+    /// The events the node fires: a func's, an instance's interface events, and the `Inputs`
+    /// node's interface triggers, which it fires inside.
+    pub fn events(self) -> NodeEvents<'a> {
+        match self {
+            Self::Func(func) => NodeEvents::Func(func.events()),
+            Self::Instance(subgraph) => NodeEvents::Declared(subgraph.interface.events()),
+            Self::Boundary {
+                side: Boundary::Inputs,
+                owner,
+            } => NodeEvents::Declared(owner.interface.triggers()),
+            Self::Boundary {
+                side: Boundary::Outputs,
+                ..
+            } => NodeEvents::Declared(&[]),
+        }
     }
 
     /// The event under `id`, if the node fires one.
-    pub fn event(self, id: PortId) -> Option<&'a FuncEvent> {
-        self.func()?.event(id)
+    pub fn event(self, id: PortId) -> Option<EventRef<'a>> {
+        self.events().get(id)
+    }
+
+    /// The triggers the node hears: an instance's interface triggers, and the `Outputs` node's
+    /// interface events, which it hears inside. A node with a body hears on its pin.
+    pub fn triggers(self) -> &'a [Numbered<EventDecl>] {
+        match self {
+            Self::Instance(subgraph) => subgraph.interface.triggers(),
+            Self::Boundary {
+                side: Boundary::Outputs,
+                owner,
+            } => owner.interface.events(),
+            Self::Func(_)
+            | Self::Boundary {
+                side: Boundary::Inputs,
+                ..
+            } => &[],
+        }
     }
 
     /// The func, for a node with a body.
@@ -94,3 +124,75 @@ impl<'a> NodeDecl<'a> {
         }
     }
 }
+
+/// The events a node fires, as its declaration holds them: a func's beside their lambdas, or an
+/// interface's.
+#[derive(Clone, Copy, Debug)]
+pub enum NodeEvents<'a> {
+    Func(&'a [FuncEvent]),
+    Declared(&'a [Numbered<EventDecl>]),
+}
+
+/// One event a node fires: its id and its name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EventRef<'a> {
+    pub id: PortId,
+    pub name: &'a str,
+}
+
+impl<'a> NodeEvents<'a> {
+    pub const fn len(self) -> usize {
+        match self {
+            Self::Func(events) => events.len(),
+            Self::Declared(events) => events.len(),
+        }
+    }
+
+    pub const fn is_empty(self) -> bool {
+        self.len() == 0
+    }
+
+    /// In the order the node shows them.
+    pub fn iter(self) -> impl ExactSizeIterator<Item = EventRef<'a>> {
+        let (funcs, declared) = match self {
+            Self::Func(events) => (events, &[][..]),
+            Self::Declared(events) => (&[][..], events),
+        };
+        let funcs = funcs.iter().map(|event| EventRef {
+            id: event.id,
+            name: &event.name,
+        });
+        let declared = declared.iter().map(|event| EventRef {
+            id: event.id,
+            name: &event.name,
+        });
+        ExactChain(funcs.chain(declared), self.len())
+    }
+
+    /// The event under `id`, if the node fires one.
+    pub fn get(self, id: PortId) -> Option<EventRef<'a>> {
+        self.iter().find(|event| event.id == id)
+    }
+}
+
+/// A chain whose length is known: one of its halves is empty.
+#[derive(Debug)]
+struct ExactChain<I>(I, usize);
+
+impl<I: Iterator> Iterator for ExactChain<I> {
+    type Item = I::Item;
+
+    fn next(&mut self) -> Option<I::Item> {
+        let next = self.0.next();
+        if next.is_some() {
+            self.1 -= 1;
+        }
+        next
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.1, Some(self.1))
+    }
+}
+
+impl<I: Iterator> ExactSizeIterator for ExactChain<I> {}

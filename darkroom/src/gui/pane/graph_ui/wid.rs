@@ -16,7 +16,7 @@
 //!   id**, as a copy of a definition keeps its node ids, so two open panes can hold the same one.
 
 use palantir::{Ui, WidgetId};
-use scenarium::{GraphId, NodeId};
+use scenarium::{GraphId, NodeId, TriggerPort};
 
 use scenarium::{EventPort, InputPort};
 
@@ -113,6 +113,18 @@ pub(super) fn event_glyph(graph: GraphId, event: EventPort) -> WidgetId {
 /// per-port), so `CanvasGeometry` and `SubscriptionUi` poll its geometry as a wire drop target.
 pub(super) fn subscription_glyph(graph: GraphId, node_id: NodeId) -> WidgetId {
     of_node("subscription_glyph", graph, node_id)
+}
+
+/// A node's ghost pin, where a ghost subscription ends on a node that draws no pin of its own.
+/// An id space apart from [`subscription_glyph`], so no subscription drag starts on or snaps to
+/// it.
+pub(super) fn ghost_subscription_glyph(graph: GraphId, node_id: NodeId) -> WidgetId {
+    of_node("ghost_subscription_glyph", graph, node_id)
+}
+
+/// A trigger's glyph on an instance or an `Outputs` node, where a subscription lands.
+pub(super) fn trigger_glyph(graph: GraphId, trigger: TriggerPort) -> WidgetId {
+    WidgetId::from_hash(("trigger_glyph", graph, trigger.node_id, trigger.trigger))
 }
 
 /// A preview's value area, so the canvas-level scan can read last frame's click.

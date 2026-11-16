@@ -224,10 +224,52 @@ fn show(
                 out.push_enter(copy, Some(through));
             }
         }
-        if let Some(state) = sync
+        let side = &document.sides[&subgraph];
+        if side.follows {
+            Text::new("\u{b7} follows the library")
+                .style(&muted)
+                .show(ui);
+            if Link::new(library_wid(subgraph, "make_local"), "Make Local")
+                .tooltip("Stop following the library, and edit this copy")
+                .show(ui, theme)
+            {
+                out.push_subgraph(SubgraphIntent::SetFollows {
+                    id: subgraph,
+                    follows: false,
+                });
+            }
+        } else if let Some(state) = sync
             && let Some(entry) = graph_ctx.shared().entry(subgraph)
         {
             library_row(ui, graph_ctx, out, subgraph, entry, state, publish_asked);
+            if matches!(state, SyncState::InSync | SyncState::UpdateAvailable)
+                && Link::new(library_wid(subgraph, "follow"), "Follow")
+                    .tooltip("Keep this copy as the library's, read-only, updated as it changes")
+                    .show(ui, theme)
+            {
+                out.push_subgraph(SubgraphIntent::SetFollows {
+                    id: subgraph,
+                    follows: true,
+                });
+            }
+        }
+        let (label, tooltip) = if side.locked {
+            Text::new("\u{b7} locked").style(&muted).show(ui);
+            ("Unlock", "Allow edits of this subgraph again")
+        } else {
+            (
+                "Lock",
+                "Refuse edits of this subgraph, in every copy, until it is unlocked",
+            )
+        };
+        if Link::new(library_wid(subgraph, "lock"), label)
+            .tooltip(tooltip)
+            .show(ui, theme)
+        {
+            out.push_subgraph(SubgraphIntent::SetLocked {
+                id: subgraph,
+                locked: !side.locked,
+            });
         }
     });
 }

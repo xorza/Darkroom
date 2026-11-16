@@ -11,9 +11,9 @@ use palantir::WidgetId;
 use palantir::{
     Checkbox, ComboBox, Configure, Panel, SizeSpec, Sizing, Spacing, Text, TextEdit, Ui, VAlign,
 };
-use scenarium::{ConstValue, DataType, Interface, Library, PortId, SubgraphId};
+use scenarium::{ConstValue, DataType, EventDecl, GraphSet, Library, Numbered, PortId, SubgraphId};
 
-use crate::core::edit::port_edit::{InterfaceSide, PortEdit, Shift};
+use crate::core::edit::port_edit::{EventSide, InterfaceSide, PortEdit, Shift};
 use crate::core::edit::subgraph_intent::SubgraphIntent;
 use crate::gui::frame::requests::Requests;
 use crate::gui::pane::graph_ui::node_ui::const_editor::{ConstEditor, Field};
@@ -36,8 +36,9 @@ const SCALARS: [DataType; 6] = [
 pub(crate) struct InterfaceCard<'a> {
     pub(crate) theme: &'a Theme,
     pub(crate) library: &'a Library,
+    /// The set the subgraph is in, which names a type the library lacks as its file did.
+    pub(crate) graphs: &'a GraphSet,
     pub(crate) subgraph: SubgraphId,
-    pub(crate) interface: &'a Interface,
     pub(crate) shared: bool,
 }
 
@@ -46,10 +47,14 @@ pub(crate) fn show(ui: &mut Ui, card: InterfaceCard<'_>, out: &mut Requests) {
     let InterfaceCard {
         theme,
         library,
+        graphs,
         subgraph,
-        interface,
         shared,
     } = card;
+    let interface = &graphs
+        .subgraph(subgraph)
+        .expect("a card shows a subgraph the set holds")
+        .interface;
     let mut edit = None;
     // The choices a port's type picks among: the scalars, then the library's types by name.
     let types: Vec<(DataType, &str)> = SCALARS
@@ -89,8 +94,11 @@ pub(crate) fn show(ui: &mut Ui, card: InterfaceCard<'_>, out: &mut Requests) {
                         .map(|input| PortRow {
                             port: input.id,
                             name: &input.name,
-                            data_type: input.data_type,
-                            default: RowDefault::Input(input.default_value.as_ref()),
+                            data: Some(RowData {
+                                data_type: input.data_type,
+                                type_name: graphs.type_name(library, input.data_type),
+                                default: RowDefault::Input(input.default_value.as_ref()),
+                            }),
                         })
                         .collect::<Vec<_>>(),
                 ),
@@ -103,14 +111,61 @@ pub(crate) fn show(ui: &mut Ui, card: InterfaceCard<'_>, out: &mut Requests) {
                         .map(|output| PortRow {
                             port: output.id,
                             name: &output.name,
-                            data_type: output.data_type,
-                            default: RowDefault::Output,
+                            data: Some(RowData {
+                                data_type: output.data_type,
+                                type_name: graphs.type_name(library, output.data_type),
+                                default: RowDefault::Output,
+                            }),
                         })
                         .collect(),
                 ),
+                (
+                    InterfaceSide::Events,
+                    "Events",
+                    interface.events().iter().map(event_row).collect(),
+                ),
+                (
+                    InterfaceSide::Triggers,
+                    "Triggers",
+                    interface.triggers().iter().map(event_row).collect(),
+                ),
             ] {
                 let muted = support::muted_text(ui, theme, theme.font.caption);
-                Text::new(caption).style(&muted).show(ui);
+                Panel::hstack()
+                    .id_salt(("caption", caption))
+                    .size(SizeSpec::FILL_W)
+                    .gap(theme.space.xs)
+                    .child_align(VAlign::Center)
+                    .show(ui, |ui| {
+                        Text::new(caption).style(&muted).show(ui);
+                        // A data port is made by a wire dropped on a boundary node; an event
+                        // carries no type for a wire to give, so it is added here.
+                        let event_side = match side {
+                            InterfaceSide::Events => Some(EventSide::Events),
+                            InterfaceSide::Triggers => Some(EventSide::Triggers),
+                            InterfaceSide::Inputs | InterfaceSide::Outputs => None,
+                        };
+                        if let Some(event_side) = event_side
+                            && Link::new(port_wid(side, PortId::MIN, "add"), "+")
+                                .tooltip("Add one")
+                                .show(ui, theme)
+                        {
+                            let held = interface.event_ports();
+                            let list = match event_side {
+                                EventSide::Events => &held.events,
+                                EventSide::Triggers => &held.triggers,
+                            };
+                            edit = Some(PortEdit::AddEvent {
+                                side: event_side,
+                                port: PortId::mint(|id| list.iter().any(|event| event.id == id)),
+                                name: format!(
+                                    "{} {}",
+                                    caption.trim_end_matches('s').to_lowercase(),
+                                    list.len() + 1
+                                ),
+                            });
+                        }
+                    });
                 let last = ports.len().saturating_sub(1);
                 for (idx, row) in ports.into_iter().enumerate() {
                     let edge = Edge {
@@ -145,13 +200,32 @@ enum RowDefault<'a> {
     Output,
 }
 
-/// One port's row: its name, its type, its moves and its removal, and an input's default.
+/// One port's row: its name, a data port's type, its moves and its removal, and an input's
+/// default.
 #[derive(Debug)]
 struct PortRow<'a> {
     port: PortId,
     name: &'a str,
+    /// What a data port carries; `None` for an event or a trigger, which carries no type.
+    data: Option<RowData<'a>>,
+}
+
+/// A data port's type, and its default where it is an input.
+#[derive(Debug)]
+struct RowData<'a> {
     data_type: DataType,
+    /// What the type reads where the picker lists no such choice: a type the library lacks.
+    type_name: &'a str,
     default: RowDefault<'a>,
+}
+
+/// An event's or a trigger's row.
+fn event_row(event: &Numbered<EventDecl>) -> PortRow<'_> {
+    PortRow {
+        port: event.id,
+        name: &event.name,
+        data: None,
+    }
 }
 
 impl PortRow<'_> {
@@ -165,12 +239,7 @@ impl PortRow<'_> {
         edge: Edge,
         types: &[(DataType, &str)],
     ) -> Option<PortEdit> {
-        let Self {
-            port,
-            name,
-            data_type,
-            default,
-        } = self;
+        let Self { port, name, data } = self;
         let wid = |part: &'static str| port_wid(side, port, part);
         let field = &theme.const_editor.rest;
         let mut edit = None;
@@ -194,22 +263,24 @@ impl PortRow<'_> {
                         name: renamed,
                     });
                 }
-                let mut picked = types
-                    .iter()
-                    .copied()
-                    .find(|(option, _)| *option == data_type)
-                    .unwrap_or_else(|| (data_type, library.type_name(data_type)));
-                if ComboBox::labeled(&mut picked, types.iter().copied(), |option| option.1)
-                    .id(wid("type"))
-                    .button_style(&field.button)
-                    .show(ui)
-                    .changed
-                {
-                    edit = Some(PortEdit::Retype {
-                        side,
-                        port,
-                        data_type: picked.0,
-                    });
+                if let Some(data) = &data {
+                    let mut picked = types
+                        .iter()
+                        .copied()
+                        .find(|(option, _)| *option == data.data_type)
+                        .unwrap_or((data.data_type, data.type_name));
+                    if ComboBox::labeled(&mut picked, types.iter().copied(), |option| option.1)
+                        .id(wid("type"))
+                        .button_style(&field.button)
+                        .show(ui)
+                        .changed
+                    {
+                        edit = Some(PortEdit::Retype {
+                            side,
+                            port,
+                            data_type: picked.0,
+                        });
+                    }
                 }
                 for (part, label, shift, at_edge) in [
                     ("earlier", "\u{2191}", Shift::Earlier, edge.first),
@@ -226,7 +297,12 @@ impl PortRow<'_> {
                     edit = Some(PortEdit::Remove { side, port });
                 }
             });
-        if let RowDefault::Input(default) = default {
+        if let Some(RowData {
+            data_type,
+            default: RowDefault::Input(default),
+            ..
+        }) = data
+        {
             Panel::hstack()
                 .id(wid("default_row"))
                 .size(SizeSpec::FILL_W)
@@ -287,6 +363,8 @@ fn port_wid(side: InterfaceSide, port: PortId, part: &'static str) -> WidgetId {
     let side = match side {
         InterfaceSide::Inputs => "inputs",
         InterfaceSide::Outputs => "outputs",
+        InterfaceSide::Events => "events",
+        InterfaceSide::Triggers => "triggers",
     };
     WidgetId::from_hash(("darkroom.inspector.interface.port", side, port, part))
 }

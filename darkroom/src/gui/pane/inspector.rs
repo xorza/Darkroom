@@ -169,7 +169,7 @@ fn body(ui: &mut Ui, stage: &mut Stage<'_, NodeCtx<'_>>, target: InspectTarget) 
         );
     }
 
-    let library = node.graph_ctx.library();
+    let (library, graphs) = (node.graph_ctx.library(), &node.graph_ctx.document().graphs);
     let inputs = node.inputs();
     if inputs.len() > 0 {
         card(ui, theme, "Inputs", inputs.len(), |ui| {
@@ -183,7 +183,7 @@ fn body(ui: &mut Ui, stage: &mut Stage<'_, NodeCtx<'_>>, target: InspectTarget) 
                     } else {
                         PortDot::of(node.graph_ctx, input.data_type())
                     },
-                    type_name: library.type_name(input.data_type()),
+                    type_name: graphs.type_name(library, input.data_type()),
                     value: Some(value),
                 }
                 .show(ui, theme);
@@ -198,7 +198,7 @@ fn body(ui: &mut Ui, stage: &mut Stage<'_, NodeCtx<'_>>, target: InspectTarget) 
                     wid: port_wid(PortKind::Output, idx),
                     name: output.name(),
                     dot: PortDot::of(node.graph_ctx, output.data_type()),
-                    type_name: library.type_name(output.data_type()),
+                    type_name: graphs.type_name(library, output.data_type()),
                     value: None,
                 }
                 .show(ui, theme);
@@ -207,18 +207,12 @@ fn body(ui: &mut Ui, stage: &mut Stage<'_, NodeCtx<'_>>, target: InspectTarget) 
     }
     if let Some(subgraph) = node.shows_interface() {
         let document = node.graph_ctx.document();
-        let interface = &document
-            .graphs
-            .subgraph(subgraph)
-            .expect("a node shows the interface of a subgraph the set holds")
-            .interface;
-        let shared = document.sides[&subgraph].shared;
         let card = InterfaceCard {
             theme,
             library,
+            graphs: &document.graphs,
             subgraph,
-            interface,
-            shared,
+            shared: document.sides[&subgraph].shared,
         };
         interface_card::show(ui, card, stage.out);
     }

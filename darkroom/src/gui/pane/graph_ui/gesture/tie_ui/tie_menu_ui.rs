@@ -156,7 +156,7 @@ fn release_label(ui: &mut Ui, graph_ctx: GraphCtx<'_>, wire: WireKey) -> Interne
         WireKey::Event(subscription) => {
             let (from, to) = (
                 node(subscription.event.node_id),
-                node(subscription.subscriber),
+                node(subscription.listener.node_id()),
             );
             fmt!(
                 ui,

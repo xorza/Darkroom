@@ -128,7 +128,7 @@ impl Span {
             ),
             WireKey::Event(subscription) => (
                 geometry.event_center(subscription.event)?,
-                geometry.subs.center(subscription.subscriber)?,
+                geometry.listener_center(subscription.listener)?,
             ),
         };
         Some(Self { start, end })

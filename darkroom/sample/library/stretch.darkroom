@@ -1,0 +1,198 @@
+(
+    document: (
+        graphs: (
+            main: (
+                nodes: {},
+                bindings: [],
+                subscriptions: [],
+                ghost_nodes: {},
+                ghost_wiring: (
+                    bindings: [],
+                    subscriptions: [],
+                ),
+            ),
+            subgraphs: {
+                ("5493d86c-2444-4d73-89b3-dc02b5ea4480"): (
+                    name: "Stretch",
+                    description: None,
+                    interface: (
+                        ports: (
+                            inputs: [
+                                (
+                                    id: 3361973106,
+                                    port: (
+                                        name: "Image",
+                                        required: true,
+                                        data_type: Custom(("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2")),
+                                        description: None,
+                                        const_only: false,
+                                        default_value: None,
+                                        value_variants: [],
+                                    ),
+                                ),
+                            ],
+                            outputs: [
+                                (
+                                    id: 838726064,
+                                    port: (
+                                        name: "Image",
+                                        data_type: Custom(("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2")),
+                                        description: None,
+                                    ),
+                                ),
+                            ],
+                        ),
+                        event_ports: (
+                            events: [],
+                            triggers: [],
+                        ),
+                    ),
+                    graph: (
+                        nodes: {
+                            ("5d28633c-4b5b-440b-b93c-228402d84609"): (
+                                kind: Boundary(Inputs),
+                                name: "Inputs",
+                                disabled: false,
+                            ),
+                            ("47f037e6-4035-43d4-8910-9c1132e7db3d"): (
+                                kind: Boundary(Outputs),
+                                name: "Outputs",
+                                disabled: false,
+                            ),
+                            ("5d1f119a-d8a7-4fba-b3f9-1a873dd238bc"): (
+                                kind: Body(
+                                    source: Func(("c15248e0-006a-4a4a-9aae-b1fc7886dea1")),
+                                    cache: r#None,
+                                ),
+                                name: "Auto Stretch",
+                                disabled: false,
+                            ),
+                        },
+                        bindings: [
+                            ((
+                                node_id: ("47f037e6-4035-43d4-8910-9c1132e7db3d"),
+                                port: 838726064,
+                            ), Wire((
+                                node_id: ("5d1f119a-d8a7-4fba-b3f9-1a873dd238bc"),
+                                port: 1,
+                            ))),
+                            ((
+                                node_id: ("5d1f119a-d8a7-4fba-b3f9-1a873dd238bc"),
+                                port: 1,
+                            ), Wire((
+                                node_id: ("5d28633c-4b5b-440b-b93c-228402d84609"),
+                                port: 3361973106,
+                            ))),
+                            ((
+                                node_id: ("5d1f119a-d8a7-4fba-b3f9-1a873dd238bc"),
+                                port: 2,
+                            ), Const(Enum("auto_asinh"))),
+                        ],
+                        subscriptions: [],
+                        ghost_nodes: {},
+                        ghost_wiring: (
+                            bindings: [],
+                            subscriptions: [],
+                        ),
+                    ),
+                ),
+            },
+        ),
+        main_view: (
+            node_placements: {},
+            ties: {},
+            routes: {},
+            viewport: (
+                pan: (0.0, 0.0),
+                zoom: 1.0,
+            ),
+            selected: [],
+        ),
+        sides: {
+            ("5493d86c-2444-4d73-89b3-dc02b5ea4480"): (
+                view: (
+                    node_placements: {
+                        ("47f037e6-4035-43d4-8910-9c1132e7db3d"): (
+                            pos: (760.0, 80.0),
+                            z: 0,
+                        ),
+                        ("5d1f119a-d8a7-4fba-b3f9-1a873dd238bc"): (
+                            pos: (400.0, 80.0),
+                            z: 1,
+                        ),
+                        ("5d28633c-4b5b-440b-b93c-228402d84609"): (
+                            pos: (40.0, 80.0),
+                            z: 0,
+                        ),
+                    },
+                    ties: {},
+                    routes: {},
+                    viewport: (
+                        pan: (0.0, 0.0),
+                        zoom: 1.0,
+                    ),
+                    selected: [],
+                ),
+                through: None,
+                shared: true,
+                synced: None,
+                follows: false,
+                locked: true,
+            ),
+        },
+        layout: (
+            nodes: [
+                Group((
+                    id: (0),
+                    tabs: [
+                        Graph(Main),
+                    ],
+                    active: 0,
+                )),
+            ],
+            focused: (0),
+            next_group: 1,
+        ),
+        active: Subgraph(("5493d86c-2444-4d73-89b3-dc02b5ea4480")),
+    ),
+    manifest: (
+        funcs: {
+            ("c15248e0-006a-4a4a-9aae-b1fc7886dea1"): (
+                name: "Auto Stretch",
+                category: "Astro",
+                inputs: [
+                    (
+                        id: 1,
+                        port: (
+                            name: "Image",
+                            data_type: Custom(("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2")),
+                            default_value: None,
+                        ),
+                    ),
+                    (
+                        id: 2,
+                        port: (
+                            name: "Method",
+                            data_type: Custom(("b08bb9a1-db12-43d4-aa57-fe3e3732e917")),
+                            default_value: Some(Enum("auto_asinh")),
+                        ),
+                    ),
+                ],
+                outputs: [
+                    (
+                        id: 1,
+                        port: (
+                            name: "Image",
+                            data_type: Custom(("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2")),
+                        ),
+                    ),
+                ],
+                events: [],
+            ),
+        },
+        types: {
+            Custom(("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2")): "Image",
+            Custom(("b08bb9a1-db12-43d4-aa57-fe3e3732e917")): "Stretch",
+        },
+    ),
+)

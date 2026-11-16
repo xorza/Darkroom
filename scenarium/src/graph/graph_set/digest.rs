@@ -87,9 +87,12 @@ impl GraphSet {
     /// an instance of a subgraph the set lacks, as a ghost node may be, by its id.
     fn encode_node(&self, node: &Node, known: &mut HashMap<SubgraphId, SubgraphDigest>) -> Vec<u8> {
         match node.kind {
-            NodeKind::Instance(placed) if self.subgraph(placed).is_some() => {
+            NodeKind::Instance {
+                subgraph: placed,
+                cache,
+            } if self.subgraph(placed).is_some() => {
                 let digest = self.digest_with(placed, known);
-                encode(&(digest, &node.name, node.disabled))
+                encode(&(digest, cache, &node.name, node.disabled))
             }
             _ => encode(node),
         }

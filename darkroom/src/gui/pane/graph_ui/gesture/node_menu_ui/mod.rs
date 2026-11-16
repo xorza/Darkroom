@@ -4,7 +4,7 @@ use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::RunCommand;
-use scenarium::{NodeId, ProgramId};
+use scenarium::{Boundary, Node, NodeId, ProgramId};
 
 use crate::gui::frame::stage::Stage;
 use crate::gui::graph_ctx::GraphCtx;
@@ -26,8 +26,14 @@ pub(crate) struct NodeMenuUi {
 /// landed on first).
 #[derive(Copy, Clone, Debug)]
 enum MenuChoice {
-    Run { program_id: ProgramId },
-    Duplicate { incoming: IncomingWires },
+    Run {
+        program_id: ProgramId,
+    },
+    Duplicate {
+        incoming: IncomingWires,
+    },
+    /// Put another node in this one's place, picked from the palette.
+    Replace,
     Remove,
 }
 
@@ -54,10 +60,15 @@ impl NodeMenuUi {
     }
 
     /// Record the menu and resolve this frame's pick onto the stage's requests — a run as
-    /// the [`AppCommand`] it means, the structural picks as ordinary intents.
+    /// the [`AppCommand`] it means, the structural picks as ordinary intents. Returns the node a
+    /// Replace with… pick names, for the palette to open on.
     ///
     /// Opening is [`Self::open_on`]'s; this only ever shows a menu already latched.
-    pub(crate) fn record(&mut self, ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
+    pub(crate) fn record(
+        &mut self,
+        ui: &mut Ui,
+        stage: &mut Stage<'_, GraphCtx<'_>>,
+    ) -> Option<NodeId> {
         let (graph_ctx, out) = (stage.ctx, &mut *stage.out);
         self.menu.retain(|node_id| graph_ctx.contains(node_id));
         let pick = self.menu.show(ui, "node_body_menu", |ui, node_id| {
@@ -87,19 +98,30 @@ impl NodeMenuUi {
                 }
                 MenuSeparator::new().show(ui);
             }
-            // A subgraph keeps one boundary node a side.
-            let removable = graph_ctx
-                .body()
-                .find(node_id)
-                .is_none_or(|node| node.boundary().is_none());
+            let boundary = graph_ctx.body().find(node_id).and_then(Node::boundary);
+            // Any node with a body, an instance or a ghost node takes another in its place.
+            if boundary.is_none() && MenuItem::new("Replace with\u{2026}").show(ui).clicked() {
+                chosen = Some(MenuChoice::Replace);
+            }
+            // A subgraph keeps its `Outputs` node and one `Inputs` node.
+            let inputs_count = || {
+                graph_ctx
+                    .body()
+                    .iter()
+                    .filter(|node| node.boundary() == Some(Boundary::Inputs))
+                    .count()
+            };
+            let removable = match boundary {
+                None => true,
+                Some(Boundary::Outputs) => false,
+                Some(Boundary::Inputs) => inputs_count() > 1,
+            };
             if removable && MenuItem::new("Remove").show(ui).clicked() {
                 chosen = Some(MenuChoice::Remove);
             }
             chosen
         });
-        let Some(pick) = pick else {
-            return;
-        };
+        let pick = pick?;
         match pick.choice {
             MenuChoice::Run { program_id } => {
                 out.push_app(AppCommand::Run(RunCommand::Node(program_id)));
@@ -122,7 +144,9 @@ impl NodeMenuUi {
                 graph_ctx.graph(),
                 GraphIntent::remove_selection(graph_ctx.view()),
             ),
+            MenuChoice::Replace => return Some(pick.target),
         }
+        None
     }
 }
 

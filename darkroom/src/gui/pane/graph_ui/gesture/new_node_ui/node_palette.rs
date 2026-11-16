@@ -11,7 +11,8 @@ use palantir::{
 
 use glam::Vec2;
 use scenarium::{
-    Func, Library, Node, NodeId, Ports, SPECIAL_NODES, SpecialNode, Subgraph, SubgraphId,
+    Boundary, Func, GraphId, Library, Node, NodeId, Ports, SPECIAL_NODES, SpecialNode, Subgraph,
+    SubgraphId,
 };
 
 use crate::core::document::Document;
@@ -45,12 +46,22 @@ pub(super) enum PaletteEntry<'a> {
         entry: &'a LibraryEntry,
         shared: &'a SharedLibrary,
     },
+    /// Another `Inputs` node, listed in a subgraph's pane alone, so a long graph reads an input
+    /// where it is used.
+    Inputs,
 }
 
 /// The category the document's subgraphs list under.
 const SUBGRAPHS: &str = "Subgraphs";
 /// The category the library folder's subgraphs list under.
 const LIBRARY: &str = "Library";
+/// The category an `Inputs` node lists under, beside the subgraph it shows.
+const INTERFACE: &str = "Interface";
+/// The ports a node with none to seed shows: an `Inputs` node, whose ports are outputs.
+static NO_PORTS: Ports = Ports {
+    inputs: Vec::new(),
+    outputs: Vec::new(),
+};
 
 impl<'a> PaletteEntry<'a> {
     /// Borrowed from the palette's sources rather than from `self`, so a
@@ -61,6 +72,7 @@ impl<'a> PaletteEntry<'a> {
             PaletteEntry::Special(s) => s.func().name(),
             PaletteEntry::Subgraph { subgraph, .. } => &subgraph.name,
             PaletteEntry::Library { entry, .. } => &entry.name,
+            PaletteEntry::Inputs => "Inputs",
         }
     }
 
@@ -70,6 +82,7 @@ impl<'a> PaletteEntry<'a> {
             PaletteEntry::Special(s) => s.func().category(),
             PaletteEntry::Subgraph { .. } => SUBGRAPHS,
             PaletteEntry::Library { .. } => LIBRARY,
+            PaletteEntry::Inputs => INTERFACE,
         }
     }
 
@@ -85,6 +98,7 @@ impl<'a> PaletteEntry<'a> {
                 .path(entry)
                 .file_name()
                 .and_then(|name| name.to_str()),
+            PaletteEntry::Inputs => Some("The subgraph's inputs, read again where they are used"),
         }?;
         Some(text.lines().next().unwrap_or(text))
     }
@@ -102,6 +116,7 @@ impl<'a> PaletteEntry<'a> {
                 .expect("an entry names a subgraph of its file")
                 .interface
                 .ports(),
+            PaletteEntry::Inputs => &NO_PORTS,
         }
     }
 
@@ -117,6 +132,7 @@ impl<'a> PaletteEntry<'a> {
             PaletteEntry::Func(f) => alone(f.into()),
             PaletteEntry::Special(s) => alone(s.into()),
             PaletteEntry::Subgraph { id, .. } => alone(Node::instance(id)),
+            PaletteEntry::Inputs => alone(Node::from(Boundary::Inputs)),
             PaletteEntry::Library { entry, shared } => {
                 let brought = bring_in(
                     document,
@@ -145,6 +161,7 @@ impl<'a> PaletteEntry<'a> {
                 id: entry.id,
                 digest: entry.digest,
             },
+            PaletteEntry::Inputs => PaletteRow::Inputs,
         }
     }
 }
@@ -173,6 +190,9 @@ pub(super) struct NodePalette<'a> {
     /// The most height the results may scroll in.
     pub(super) scroll_cap: f32,
     pub(super) opening: Opening,
+    /// Opened to pick a node that replaces another: the library folder's entries, which a pick
+    /// copies in first, and an `Inputs` node are not listed.
+    pub(super) replacing: bool,
 }
 
 /// Whether the palette opened this frame.
@@ -197,9 +217,13 @@ impl<'a> NodePalette<'a> {
     }
 
     /// Every row the palette can list, in no particular order: the library's
-    /// funcs, the built-in specials, then the document's subgraphs.
-    fn entries(&self) -> impl Iterator<Item = PaletteEntry<'a>> {
+    /// funcs, the built-in specials, the document's subgraphs, and unless it replaces a node the
+    /// library folder's and, in a subgraph's pane, an `Inputs` node.
+    pub(super) fn entries(&self) -> impl Iterator<Item = PaletteEntry<'a>> {
         let sources = self.sources();
+        let replacing = self.replacing;
+        let inputs = (!replacing && matches!(self.graph_ctx.graph(), GraphId::Subgraph(_)))
+            .then_some(PaletteEntry::Inputs);
         sources
             .library
             .iter()
@@ -216,11 +240,13 @@ impl<'a> NodePalette<'a> {
                     .shared
                     .entries()
                     .iter()
+                    .filter(move |_| !replacing)
                     .map(move |entry| PaletteEntry::Library {
                         entry,
                         shared: sources.shared,
                     }),
             )
+            .chain(inputs)
     }
 }
 
@@ -341,7 +367,7 @@ impl NodePalette<'_> {
 
     /// What a pick of `entry` raises: the definitions a library entry copies in, then the
     /// `AddNode`, seeded with the entry's port defaults. Built only on a pick.
-    fn add(&self, entry: PaletteEntry<'_>) -> PalettePick {
+    pub(super) fn add(&self, entry: PaletteEntry<'_>) -> PalettePick {
         let node_id = NodeId::unique();
         let Placed { subgraphs, node } =
             entry.placed(self.graph_ctx.document(), self.graph_ctx.library());

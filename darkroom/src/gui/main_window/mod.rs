@@ -221,6 +221,8 @@ mod tests {
     /// gone by then. A canvas whose graph no tab shows goes.
     #[test]
     fn the_node_caches_are_swept_only_after_the_revision_moves() {
+        use crate::core::edit::document_request::DocumentRequest;
+
         let fixture = DocumentFixture::probes(2);
         let (stays, leaves) = (fixture.node(0), fixture.node(1));
         let mut h = CanvasHarness::new(fixture);
@@ -241,9 +243,11 @@ mod tests {
         window.reconcile(&h.ctx.open);
         assert!(cached(&window, leaves), "no revision move, no sweep");
 
-        let _facts = h.ctx.open.apply_edit(
-            GraphId::Main,
-            GraphIntent::RemoveNode { node_id: stays },
+        let _facts = h.ctx.open.apply_edits(
+            [DocumentRequest::Graph {
+                graph: GraphId::Main,
+                intent: GraphIntent::RemoveNode { node_id: stays },
+            }],
             &h.ctx.library,
         );
         window.reconcile(&h.ctx.open);

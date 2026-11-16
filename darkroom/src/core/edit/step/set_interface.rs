@@ -60,6 +60,14 @@ impl SetInterface {
                     })]);
             }
         }
+        if fate == RefusedFate::Drop {
+            for dropped in change.refused_subscriptions() {
+                drafts
+                    .entry(dropped.graph)
+                    .or_insert_with(|| TiesDraft::new(document.view(dropped.graph)))
+                    .release([WireKey::Event(dropped.subscription)]);
+            }
+        }
         let views = drafts
             .into_iter()
             .map(|(graph, draft)| ViewTies {
@@ -91,7 +99,7 @@ impl SetInterface {
     /// one, and a refused constant takes its editor with it.
     pub(super) fn facts(&self) -> EditFacts {
         let refused = self.change.refused();
-        let count = refused.len();
+        let count = refused.len() + self.change.refused_subscriptions().len();
         let (dropped, ghosted) = match self.change.fate() {
             RefusedFate::Drop => (count, 0),
             RefusedFate::Ghost => (0, count),

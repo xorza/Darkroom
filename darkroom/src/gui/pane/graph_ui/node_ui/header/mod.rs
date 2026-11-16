@@ -25,6 +25,7 @@ use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph_ui::node_ui::card;
 use crate::gui::pane::graph_ui::node_ui::node_record::NodeRecord;
 use crate::gui::pane::graph_ui::wid;
+use crate::gui::theme::color;
 use crate::gui::theme::hover::Hover;
 use crate::gui::widgets::format;
 use crate::gui::widgets::icon::Icon;
@@ -70,6 +71,30 @@ pub(super) fn subscription_pin(
     ))
     .show(ui, theme);
 }
+
+/// The ghost pin of a node a ghost subscription ends on and that draws no pin of its own: the
+/// subscription pin's arrow in the ghost ink, where nothing starts or lands.
+pub(super) fn ghost_pin(ui: &mut Ui, node: NodeCtx<'_>, hover: Hover, visibility: Visibility) {
+    let theme = node.theme();
+    let ink = color::wash(theme.port.event, GHOST_PIN_INK, theme.canvas.bg);
+    PortGlyph::arrow(
+        wid::ghost_subscription_glyph(node.graph_ctx.graph(), node.node_id),
+        theme.port.size,
+        hover.lift(ink),
+    )
+    .turn(FRAC_PI_4)
+    .centered_on(node.pos)
+    .visibility(visibility)
+    .tooltip(
+        node.tooltips().then_some(
+            "A subscription kept as a ghost ends here: this node no longer hears events",
+        ),
+    )
+    .show(ui, theme);
+}
+
+/// How much of the event ink a ghost pin keeps over the canvas: dimmed, as it is kept, not live.
+const GHOST_PIN_INK: f32 = 0.55;
 
 /// The header row: the run button, the title and its kind mark, then, pinned to the right edge
 /// by a `FILL` spacer, the disable button, the cache button and the inspect button. The

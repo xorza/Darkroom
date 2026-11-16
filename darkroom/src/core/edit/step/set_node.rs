@@ -143,6 +143,20 @@ impl SetNode {
         }
     }
 
+    /// Put `record` in where `entry`'s node was: its placement, depth and selection, as Replace
+    /// puts a node in place of the one it takes out.
+    pub(crate) fn insertion_in_place(entry: &NodeEntry, record: DetachedNode) -> Self {
+        Self {
+            entry: NodeEntry {
+                held: Held::Node(record),
+                placement: entry.placement,
+                selected: entry.selected,
+            },
+            edit: EntryEdit::Insertion,
+            ties: SetTies::default(),
+        }
+    }
+
     /// Take `entry`'s node out of the document, with `ties`, the routes of its wires.
     pub(crate) const fn removal(entry: NodeEntry, ties: SetTies) -> Self {
         Self {

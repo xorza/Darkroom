@@ -12,10 +12,13 @@ use scenarium::GraphId;
 use scenarium::Library;
 use scenarium::SubgraphId;
 
+use crate::core::edit::document_request::DocumentRequest;
 use crate::core::edit::graph_intent::GraphIntent;
+use crate::core::edit::replace_plan::ReplacePlan;
 use crate::core::edit::subgraph_intent::SubgraphIntent;
 use crate::core::io::document;
 use crate::core::io::document::document_format::DocumentFormat;
+use crate::core::io::document::resources;
 use crate::core::io::document::saved_paths::SavedPaths;
 use crate::core::io::export;
 use crate::core::io::preferences::preferences_store::{OpenedPreferences, PreferencesStore, Saved};
@@ -32,6 +35,7 @@ use crate::gui::app::error::DrivenOpenError;
 use crate::gui::app::error::NonUnicodePath;
 use crate::gui::app::export_dialog::{ExportChoice, ExportDialog};
 use crate::gui::app::quit_flag::QuitFlag;
+use crate::gui::app::replace_dialog::{ReplaceChoice, ReplaceDialog};
 use crate::gui::app::session::Session;
 use crate::gui::app::view_capture::{CaptureTarget, ViewCapture};
 use crate::gui::dialogs::{Dialogs, SavedFile};
@@ -51,6 +55,7 @@ mod discard_dialog;
 pub(crate) mod error;
 mod export_dialog;
 pub(crate) mod quit_flag;
+mod replace_dialog;
 pub(crate) mod screenshot_ask;
 pub(crate) mod session;
 pub(crate) mod view_capture;
@@ -100,6 +105,8 @@ pub(crate) struct App {
     discard: DiscardGuard,
     /// The export waiting on its dialog, while the dialog is up.
     export: Option<ExportDialog>,
+    /// The replace waiting on its dialog, while the dialog is up.
+    replace: Option<ReplaceDialog>,
     /// The image of the window a View command waits on; a second command replaces the first.
     capture: Option<ViewCapture>,
     /// Throttled sampler behind the status bar's `MEM` clause. On `App` rather than `Session`
@@ -195,6 +202,7 @@ impl App {
             dialogs,
             discard: DiscardGuard::default(),
             export: None,
+            replace: None,
             capture: None,
             process_memory: ProcessMemory::new(),
             requests: Requests::default(),
@@ -233,6 +241,7 @@ impl App {
             }
             AppCommand::File(FileCommand::Save) => self.save_cur(),
             AppCommand::File(FileCommand::SaveAs) => self.save_document_as(),
+            AppCommand::File(FileCommand::PackResources) => self.pack_resources(),
             AppCommand::Run(run) => self.run(run),
             AppCommand::PickMlModel(kind) => self.pick_ml_model(kind),
             AppCommand::Publish { subgraph } => self.publish(subgraph),
@@ -242,6 +251,20 @@ impl App {
                     subgraph,
                     self.runtime.library.cur(),
                 ));
+            }
+            AppCommand::ProposeReplace {
+                graph,
+                node_id,
+                with,
+            } => {
+                self.replace = ReplacePlan::propose(
+                    self.session.open.document(),
+                    graph,
+                    self.runtime.library.cur(),
+                    node_id,
+                    *with,
+                )
+                .map(ReplaceDialog::new);
             }
             AppCommand::PickLibraryFolder => {
                 if let Some(folder) = self.dialogs.dir() {
@@ -433,6 +456,27 @@ impl App {
         self.export = None;
     }
 
+    /// The Replace dialog while it is up, and the replace it confirmed.
+    fn record_replace_dialog(&mut self, ui: &mut Ui) {
+        let Some(dialog) = &self.replace else {
+            return;
+        };
+        let choice = dialog.record(ui, &self.theme);
+        if choice == ReplaceChoice::Stay {
+            return;
+        }
+        let dialog = self.replace.take().expect("the dialog is up");
+        if choice == ReplaceChoice::Replace {
+            let plan = dialog.into_plan();
+            self.session.apply_edit(
+                plan.graph,
+                plan.intent(),
+                self.runtime.library.cur(),
+                &mut self.requests,
+            );
+        }
+    }
+
     /// Open a file dialog for a node's path const input and, if the
     /// user makes a selection, apply the chosen paths as a `SetInput` edit. Runs after
     /// authoring, so it goes through [`Session::apply_edit`] rather than
@@ -546,6 +590,40 @@ impl App {
         if let Some(path) = self.dialogs.save_path(SavedFile::project(format), cur) {
             self.save_document(&path);
         }
+    }
+
+    /// Copy each file the document reads into its resources folder, beside its file, and point
+    /// the paths there as one edit. An untitled document has no folder until it is saved.
+    fn pack_resources(&mut self) {
+        let Some(path) = self.session.open.path().map(Path::to_path_buf) else {
+            self.status.warn(
+                StatusFamily::Document,
+                "save the document first: its resources go beside its file".to_owned(),
+            );
+            return;
+        };
+        let library = self.runtime.library.cur();
+        let packed = match resources::pack::pack(
+            self.session.open.document(),
+            library,
+            &resources::folder(&path),
+        ) {
+            Ok(packed) => packed,
+            Err(error) => {
+                self.status
+                    .error(StatusFamily::Document, ErrorChain::new(&error).to_string());
+                return;
+            }
+        };
+        let edits = packed.into_iter().map(|input| DocumentRequest::Graph {
+            graph: input.graph,
+            intent: GraphIntent::SetInput {
+                input: input.port,
+                to: Some(Binding::Const(input.value)),
+            },
+        });
+        self.session.apply_edits(edits, library, &mut self.requests);
+        self.status.succeeded(StatusFamily::Document);
     }
 
     /// Write the document to `path` and adopt it as the save target. Save-As
@@ -729,6 +807,7 @@ impl App {
             .follow(self.preferences.library_folder.as_deref());
         if self.library_scan.poll() {
             self.report_library_scan();
+            self.follow_library();
         }
     }
 
@@ -755,6 +834,28 @@ impl App {
                 format!("{} library files did not load", many.len()),
             ),
         }
+    }
+
+    /// Update each subgraph that follows the library from the scan just landed, where the
+    /// library's copy moved and this one is as it last synced, as one undo entry, and say so.
+    fn follow_library(&mut self) {
+        let updates: Vec<DocumentRequest> = self
+            .library_scan
+            .library()
+            .follower_updates(self.session.open.document())
+            .into_iter()
+            .map(|update| DocumentRequest::Subgraph(SubgraphIntent::Update(Box::new(update))))
+            .collect();
+        if updates.is_empty() {
+            return;
+        }
+        let count = updates.len();
+        self.session
+            .apply_edits(updates, self.runtime.library.cur(), &mut self.requests);
+        self.status.warn(
+            StatusFamily::Library,
+            format!("updated {count} followed subgraph(s) from the library"),
+        );
     }
 
     /// What this frame's input means, and what the host handed over with it.
@@ -906,6 +1007,7 @@ impl palantir::App for App {
             self.record_discard_prompt(ui);
         }
         self.record_export_dialog(ui);
+        self.record_replace_dialog(ui);
         self.sync_preferences();
         if self.quitting.is_raised() {
             ui.close_window(MAIN_WINDOW);
@@ -1327,7 +1429,7 @@ mod tests {
             .open_document_at(PathBuf::from("sample/sample.darkroom"));
         host.frame(target.as_target(), &mut counted);
         assert_eq!(counted.passes, 2, "the warmup and the pass past it");
-        assert_eq!(wires_anchored(&counted.app), 7);
+        assert_eq!(wires_anchored(&counted.app), 13);
     }
 
     /// The input stage acts on a frame's input once, over the frame's two passes: a click on a node's
@@ -1703,7 +1805,7 @@ mod tests {
         for _ in 0..4 {
             ui.frame_app(&mut counted);
         }
-        assert_eq!(wires_anchored(&counted.app), 7);
+        assert_eq!(wires_anchored(&counted.app), 13);
 
         let delete = |ui: &mut Harness, counted: &mut CountedPasses| {
             let node = title(ui).expect("the node shows").id;
@@ -1727,20 +1829,20 @@ mod tests {
         let report = ui.frame_app(&mut counted);
         assert_eq!(counted.passes, 2);
         assert!(title(&ui).is_none(), "laid out unseen");
-        assert_eq!(wires_anchored(&counted.app), 5, "the other wires");
+        assert_eq!(wires_anchored(&counted.app), 11, "the other wires");
         assert!(report.repaint_requested, "the edit asks the next frame");
         counted.passes = 0;
         let report = ui.frame_app(&mut counted);
         assert_eq!(counted.passes, 1);
         assert!(title(&ui).is_some(), "the node shows");
-        assert_eq!(wires_anchored(&counted.app), 7, "with all its wires");
+        assert_eq!(wires_anchored(&counted.app), 13, "with all its wires");
         assert!(!report.repaint_requested, "settled");
 
         delete(&mut ui, &mut counted);
         ui.key(shortcuts::UNDO);
         ui.frame_app(&mut counted);
         assert!(title(&ui).is_some(), "the chord's own frame shows it");
-        assert_eq!(wires_anchored(&counted.app), 7);
+        assert_eq!(wires_anchored(&counted.app), 13);
 
         // An edit no frame raised owes its pass too, as a command run between frames does.
         delete(&mut ui, &mut counted);
@@ -1750,6 +1852,77 @@ mod tests {
         ui.frame_app(&mut counted);
         assert_eq!(counted.passes, 2, "the record and the relayout it owed");
         assert!(title(&ui).is_some(), "the command's frame shows it");
-        assert_eq!(wires_anchored(&counted.app), 7);
+        assert_eq!(wires_anchored(&counted.app), 13);
+    }
+
+    /// File ▸ Pack Resources copies the file a Load Image node reads into the document's
+    /// resources folder and points its path there, as one undo entry; an untitled document has
+    /// no folder, so the command only says so.
+    #[test]
+    fn pack_resources_points_the_paths_at_the_copies_as_one_edit() {
+        use common::{TempDir, fs};
+        use glam::UVec2;
+        use palantir::Harness;
+        use scenarium::{ConstValue, InputPort, Node, PortId};
+
+        use crate::core::document::Document;
+        use crate::core::document::graph_view::NodePlacement;
+        use crate::core::io::document::saved_paths::SavedPaths;
+        use crate::gui::dialogs::DialogFallback;
+
+        let mut ui = Harness::new(UVec2::new(800, 600));
+        let mut app = App::new(
+            ui.ui_mut(),
+            LaunchInputs {
+                preferences: PreferencesStore::Memory.open(),
+                document: None,
+                dialogs: Dialogs::new(DialogFallback::Refuse),
+            },
+        );
+        app.run_command(AppCommand::File(FileCommand::PackResources));
+        assert!(
+            app.status
+                .cur()
+                .is_some_and(|message| message.line.contains("save the document first")),
+            "{:?}",
+            app.status.cur()
+        );
+
+        let dir = TempDir::new("darkroom-pack-resources");
+        let picture = dir.join("pic.tiff");
+        fs::write(&picture, b"tiff bytes").unwrap();
+        let library = app.runtime.library.cur();
+        let load = library.by_name("Load Image").unwrap();
+        let mut scene = Document::default();
+        let node_id = scene.graphs.main_mut().add(Node::from(load));
+        scene
+            .main_view
+            .node_placements
+            .insert(node_id, NodePlacement::default());
+        let port = InputPort::new(node_id, PortId::new(1));
+        let path = picture.to_str().unwrap().to_owned();
+        scene
+            .graphs
+            .main_mut()
+            .set_input_binding(port, Binding::Const(ConstValue::FsPath(path.clone())));
+        let mut open = OpenDocument::over(scene);
+        let document = dir.join("scene.darkroom");
+        open.save_to(library, &document, SavedPaths::Relative)
+            .unwrap();
+        app.open_driven(&document, UnsavedEdits::Refuse).unwrap();
+
+        app.run_command(AppCommand::File(FileCommand::PackResources));
+        let copy = dir
+            .join("scene.darkroom-resources")
+            .join(blake3::hash(b"tiff bytes").to_hex().as_str())
+            .join("pic.tiff");
+        let bound = |app: &App| app.session.open.document().graphs.main().bindings[&port].clone();
+        assert_eq!(
+            bound(&app),
+            Binding::Const(ConstValue::FsPath(copy.to_str().unwrap().to_owned()))
+        );
+        assert_eq!(fs::read(&copy).unwrap(), b"tiff bytes");
+        app.run_command(AppCommand::Undo);
+        assert_eq!(bound(&app), Binding::Const(ConstValue::FsPath(path)));
     }
 }

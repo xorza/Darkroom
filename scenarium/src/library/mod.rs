@@ -13,6 +13,8 @@
 //!   custom type has no disk codec. The same promise a ghost node makes for a node with no func: kept,
 //!   inert, shown with its reason, live again when the library has it.
 
+pub(crate) mod func_redirect;
+
 use std::collections::HashMap;
 use std::collections::hash_map::{Entry, Values};
 use std::sync::Arc;
@@ -28,9 +30,11 @@ use crate::data::data_type::{DataType, Strictness};
 use crate::graph::func::Func;
 use crate::graph::identity::FuncId;
 use crate::graph::ports::InputDecl;
+use crate::graph::type_names::TypeRef;
+use crate::library::func_redirect::{FuncRedirect, MAX_REDIRECTS};
 
 /// The name a type shows when the library does not register it.
-const UNKNOWN_TYPE: &str = "unknown type";
+pub(crate) const UNKNOWN_TYPE: &str = "unknown type";
 
 /// The runtime registry every frontend resolves against: the [`Func`]s nodes instantiate, and the
 /// types their ports name, each kind in its own table under its own id type. Not a persistence
@@ -42,6 +46,8 @@ pub struct Library {
     enums: HashMap<EnumId, EnumType>,
     custom_types: HashMap<CustomTypeId, CustomType>,
     file_kinds: HashMap<FileKindId, FileKind>,
+    /// The funcs the library no longer registers, each by the func that replaces it.
+    redirects: HashMap<FuncId, FuncRedirect>,
     /// The codecs among `custom_types`, shared with each program compiled from this library;
     /// registration copies the map only while a program still holds the previous one.
     codecs: Arc<Codecs>,
@@ -71,6 +77,42 @@ impl Library {
             "duplicate function registration"
         );
         self.funcs.insert(func.id(), func);
+    }
+
+    /// Register `redirect`, from a func id this library does not register to the func that
+    /// replaces it; [`Self::check`] holds the chain to its rules.
+    ///
+    /// # Panics
+    /// If a redirect from the same id is registered already.
+    pub fn add_redirect(&mut self, redirect: FuncRedirect) {
+        assert!(
+            !self.redirects.contains_key(&redirect.from),
+            "duplicate redirect registration"
+        );
+        self.redirects.insert(redirect.from, redirect);
+    }
+
+    /// Where a node of func `from`, which this library does not register, goes: the func at the
+    /// end of its redirects, and the one remap of them all. `None` for a registered func or one
+    /// no redirect names.
+    pub fn redirect(&self, from: FuncId) -> Option<FuncRedirect> {
+        if self.funcs.contains_key(&from) {
+            return None;
+        }
+        let first = self.redirects.get(&from)?;
+        let mut landed = first.clone();
+        for _ in 0..MAX_REDIRECTS {
+            if self.funcs.contains_key(&landed.to) {
+                return Some(landed);
+            }
+            let next = self.redirects.get(&landed.to)?;
+            landed = FuncRedirect {
+                from,
+                to: next.to,
+                remap: landed.remap.then(&next.remap),
+            };
+        }
+        None
     }
 
     /// Register an enum. Registering an identical one again does nothing, so libraries that
@@ -156,27 +198,35 @@ impl Library {
             DataType::Bool => "bool",
             DataType::String => "string",
             DataType::Dir => "directory",
-            DataType::File { kind, .. } => {
-                self.file_kind(kind).map_or(UNKNOWN_TYPE, FileKind::name)
+            DataType::File { .. } | DataType::Custom(_) | DataType::Enum(_) => {
+                TypeRef::of(data_type)
+                    .and_then(|type_ref| self.registered_name(type_ref))
+                    .unwrap_or(UNKNOWN_TYPE)
             }
-            DataType::Custom(id) => self.custom_type(id).map_or(UNKNOWN_TYPE, CustomType::name),
-            DataType::Enum(id) => self.enum_type(id).map_or(UNKNOWN_TYPE, EnumType::name),
+        }
+    }
+
+    /// Whether the library registers `type_ref`.
+    pub fn knows_type(&self, type_ref: TypeRef) -> bool {
+        match type_ref {
+            TypeRef::FileKind(kind) => self.file_kinds.contains_key(&kind),
+            TypeRef::Custom(id) => self.custom_types.contains_key(&id),
+            TypeRef::Enum(id) => self.enums.contains_key(&id),
+        }
+    }
+
+    /// The name the library registers `type_ref` under.
+    pub fn registered_name(&self, type_ref: TypeRef) -> Option<&str> {
+        match type_ref {
+            TypeRef::FileKind(kind) => self.file_kind(kind).map(FileKind::name),
+            TypeRef::Custom(id) => self.custom_type(id).map(CustomType::name),
+            TypeRef::Enum(id) => self.enum_type(id).map(EnumType::name),
         }
     }
 
     /// Whether the library registers every type `data_type` names: none for a scalar.
     pub fn knows(&self, data_type: DataType) -> bool {
-        match data_type {
-            DataType::Any
-            | DataType::Float
-            | DataType::Int
-            | DataType::Bool
-            | DataType::String
-            | DataType::Dir => true,
-            DataType::File { kind, .. } => self.file_kinds.contains_key(&kind),
-            DataType::Custom(id) => self.custom_types.contains_key(&id),
-            DataType::Enum(id) => self.enums.contains_key(&id),
-        }
+        TypeRef::of(data_type).is_none_or(|type_ref| self.knows_type(type_ref))
     }
 
     /// The registered disk codecs, as a handle a compiled program keeps.
@@ -192,10 +242,14 @@ impl Library {
             enums,
             custom_types,
             file_kinds,
+            redirects,
             codecs: _,
         } = other;
         for func in funcs.into_values() {
             self.add(func);
+        }
+        for redirect in redirects.into_values() {
+            self.add_redirect(redirect);
         }
         #[expect(
             clippy::iter_over_hash_type,
@@ -227,6 +281,21 @@ impl Library {
     /// On the first func that breaks either rule, naming the func and the port: a library is
     /// composed by code, so a gap is a bug in that code.
     pub fn check(&self) {
+        let mut redirects: Vec<&FuncRedirect> = self.redirects.values().collect();
+        redirects.sort_unstable_by_key(|redirect| redirect.from);
+        for redirect in redirects {
+            assert!(
+                !self.funcs.contains_key(&redirect.from),
+                "a redirect from {:?} names a func the library registers",
+                redirect.from
+            );
+            assert!(
+                self.redirect(redirect.from).is_some(),
+                "the redirects from {:?} loop, run past {MAX_REDIRECTS}, or end at no registered \
+                 func",
+                redirect.from
+            );
+        }
         let mut funcs: Vec<&Func> = self.funcs.values().collect();
         funcs.sort_unstable_by_key(|func| func.id());
         for func in funcs {

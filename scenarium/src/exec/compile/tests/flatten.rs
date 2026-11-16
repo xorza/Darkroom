@@ -4,9 +4,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use super::*;
-use crate::graph::identity::{EventPort, PortId};
 use crate::graph::interface::Interface;
-use crate::graph::node::CacheMode;
 use crate::graph::ports::{InputDecl, Numbered, OutputDecl, Ports};
 use crate::graph::subgraph::Subgraph;
 use crate::internals::engine::TestEngine;
@@ -55,8 +53,8 @@ fn adder_interface() -> Interface {
 /// `a` wired straight through.
 fn adder(library: &Library) -> Subgraph {
     let mut subgraph = Subgraph::new("adder", adder_interface());
-    let inputs = subgraph.boundary_node(Boundary::Inputs);
-    let outputs = subgraph.boundary_node(Boundary::Outputs);
+    let inputs = subgraph.inputs_node();
+    let outputs = subgraph.outputs_node();
     let graph = &mut subgraph.graph;
     graph.insert(n(13), node(library, ADD));
     wire(graph, (n(13), FIRST), (inputs, A));
@@ -196,6 +194,61 @@ fn a_subgraph_compiles_to_its_hand_inlined_twin() {
     assert_eq!(flattened["pass sink"][1..], ["wire src#0".to_owned()]);
 }
 
+/// An instance's cache mode joins the node inside it that makes a value leaving it, at that
+/// instance's path alone: with `adder` placed twice and instance 2 kept in RAM, its `add` keeps
+/// its value and instance 5's does not; `pass`, which only passes `src` through, leaves `src` as
+/// it was; and an `add` that saves to disk keeps both bits.
+#[test]
+fn an_instances_cache_mode_caches_the_values_that_leave_it() {
+    let cache_of = |doc: &Doc, path: ProgramId| {
+        let compiled = doc.compile();
+        compiled[compiled.node(path).unwrap()].cache
+    };
+    let mut doc = adder_doc();
+    doc.place(n(5), ADDER);
+    wire(doc.main(), (n(5), A), (n(1), FIRST));
+    *doc.main().find_mut(n(2)).unwrap().cache_mut().unwrap() = CacheMode::Ram;
+    assert_eq!(cache_of(&doc, path(&[2, 13])), CacheMode::Ram);
+    assert_eq!(cache_of(&doc, path(&[5, 13])), CacheMode::None);
+    assert_eq!(
+        cache_of(&doc, path(&[1])),
+        CacheMode::None,
+        "a passthrough's producer"
+    );
+
+    *doc.graphs
+        .graph_mut(GraphId::Subgraph(ADDER))
+        .find_mut(n(13))
+        .unwrap()
+        .cache_mut()
+        .unwrap() = CacheMode::Disk;
+    assert_eq!(cache_of(&doc, path(&[2, 13])), CacheMode::Both);
+    assert_eq!(cache_of(&doc, path(&[5, 13])), CacheMode::Disk);
+}
+
+/// A wire from a second `Inputs` node reads what the instance holds as one from the first does:
+/// with `add`'s `b` moved onto `Inputs` node 14, the program is the one the first node gives.
+#[test]
+fn a_second_inputs_node_reads_the_instances_bindings_as_the_first_does() {
+    let doc = adder_doc();
+    let mut two = adder_doc();
+    let adder = two.graphs.graph_mut(GraphId::Subgraph(ADDER));
+    adder.insert(n(14), Node::from(Boundary::Inputs));
+    wire(adder, (n(13), SECOND), (n(14), B));
+    let labels = HashMap::from([
+        (path(&[1]), "src"),
+        (path(&[2, 13]), "add"),
+        (path(&[3]), "sum sink"),
+        (path(&[4]), "pass sink"),
+    ]);
+    let compiled = labelled(&two.compile(), &labels);
+    assert_eq!(compiled, labelled(&doc.compile(), &labels));
+    assert_eq!(
+        compiled["add"][1..],
+        ["wire src#0".to_owned(), "const Int(7)".to_owned()]
+    );
+}
+
 /// A const-only interface input reaches a const-only input inside by a wire from the `Inputs`
 /// node, and the instance holds a constant there alone, so the wire lowers to that constant.
 #[test]
@@ -213,7 +266,7 @@ fn a_const_only_port_lowers_to_the_instances_constant() {
             outputs: vec![],
         }),
     );
-    let inputs = configured.boundary_node(Boundary::Inputs);
+    let inputs = configured.inputs_node();
     configured.graph.insert(n(31), node(&library, CONFIG_SINK));
     wire(&mut configured.graph, (n(31), FIRST), (inputs, CONFIG));
     let mut doc = Doc {
@@ -238,8 +291,8 @@ fn a_nested_node_is_named_by_its_path_and_reads_across_both_boundaries() {
     let mut doc = adder_doc();
     let adder = doc.graphs.subgraph(ADDER).unwrap();
     let mut twice = Subgraph::new("twice", adder.interface.clone());
-    let inputs = twice.boundary_node(Boundary::Inputs);
-    let outputs = twice.boundary_node(Boundary::Outputs);
+    let inputs = twice.inputs_node();
+    let outputs = twice.outputs_node();
     twice.graph.insert(n(21), Node::instance(ADDER));
     wire(&mut twice.graph, (n(21), A), (inputs, A));
     wire(&mut twice.graph, (n(21), B), (inputs, B));
@@ -364,6 +417,92 @@ fn a_subscription_inside_a_subgraph_stays_inside_each_instance() {
     assert_eq!(program["ticker in 2"][1..], ["subscribers []"]);
 }
 
+/// An event crosses a subgraph's boundary on its interface. `relay` fires its event `out` 301
+/// when the trigger `in` 401 is heard, by its `Inputs` node firing it into its `Outputs` node; `outer` places
+/// a `relay` 61 inside, wiring `outer`'s trigger into it and its event out, so an event goes two
+/// levels in and two out. In the main graph `ticker` 1 fires into instance 2's trigger, instance
+/// 2's event lands on `sink` 3, and a disabled instance 4 passes nothing: the ticker's
+/// subscribers are the sink alone, with no node in between, and a ticker inside `relay` that
+/// fires its `Outputs` node reaches the main graph's sink too.
+#[test]
+fn an_event_crosses_boundaries_on_the_interface() {
+    use crate::graph::identity::TriggerPort;
+    use crate::graph::interface::EventPorts;
+    use crate::graph::ports::EventDecl;
+    use crate::graph::subscription::Listener;
+
+    const OUT: PortId = PortId::new(301);
+    const IN: PortId = PortId::new(401);
+    let library = library();
+    let events = || {
+        Interface::default()
+            .with_event_ports(EventPorts {
+                events: vec![Numbered::new(OUT, EventDecl::new("out"))],
+                triggers: vec![Numbered::new(IN, EventDecl::new("in"))],
+            })
+            .unwrap()
+    };
+    let (relay_id, outer_id) = (s(80), s(81));
+    let mut relay = Subgraph::new("relay", events());
+    let (relay_in, relay_out) = (relay.inputs_node(), relay.outputs_node());
+    relay.graph.insert(n(53), node(&library, TICKER));
+    relay.graph.subscribe(
+        EventPort::new(relay_in, IN),
+        Listener::Trigger(TriggerPort::new(relay_out, OUT)),
+    );
+    relay.graph.subscribe(
+        EventPort::new(n(53), FIRST),
+        Listener::Trigger(TriggerPort::new(relay_out, OUT)),
+    );
+    let mut outer = Subgraph::new("outer", events());
+    let (outer_in, outer_out) = (outer.inputs_node(), outer.outputs_node());
+    outer.graph.insert(n(61), Node::instance(relay_id));
+    outer.graph.subscribe(
+        EventPort::new(outer_in, IN),
+        Listener::Trigger(TriggerPort::new(n(61), IN)),
+    );
+    outer.graph.subscribe(
+        EventPort::new(n(61), OUT),
+        Listener::Trigger(TriggerPort::new(outer_out, OUT)),
+    );
+    let mut doc = Doc {
+        library,
+        ..Doc::default()
+    };
+    doc.graphs.insert_subgraph(relay_id, relay);
+    doc.graphs.insert_subgraph(outer_id, outer);
+    let (ticker, sink) = (node(&doc.library, TICKER), node(&doc.library, SINK));
+    doc.main().insert(n(1), ticker);
+    doc.place(n(2), outer_id);
+    doc.main().insert(n(3), sink);
+    doc.place(n(4), outer_id);
+    doc.main().find_mut(n(4)).unwrap().disabled = true;
+    let main = doc.main();
+    main.subscribe(
+        EventPort::new(n(1), FIRST),
+        Listener::Trigger(TriggerPort::new(n(2), IN)),
+    );
+    main.subscribe(
+        EventPort::new(n(1), FIRST),
+        Listener::Trigger(TriggerPort::new(n(4), IN)),
+    );
+    main.subscribe(EventPort::new(n(2), OUT), n(3));
+    main.subscribe(EventPort::new(n(4), OUT), n(3));
+    doc.graphs.validate_with(&doc.library).unwrap();
+
+    let compiled = doc.compile();
+    let labels = HashMap::from([
+        (path(&[1]), "ticker"),
+        (path(&[3]), "sink"),
+        (path(&[2, 61, 53]), "inner ticker"),
+        (path(&[4, 61, 53]), "disabled inner ticker"),
+    ]);
+    let program = labelled(&compiled, &labels);
+    assert_eq!(program["ticker"][1..], ["subscribers [\"sink\"]"]);
+    assert_eq!(program["inner ticker"][1..], ["subscribers [\"sink\"]"]);
+    assert_eq!(program["disabled inner ticker"][1..], ["subscribers []"]);
+}
+
 /// A program the flatten built runs: the sum inside the instance reaches the sink in the main
 /// graph, `4 + 7`, and the passthrough hands `src`'s 4 on unchanged.
 #[tokio::test]
@@ -384,8 +523,8 @@ async fn a_flattened_program_runs() {
         .clone();
 
     let mut subgraph = Subgraph::new("adder", adder_interface());
-    let inputs = subgraph.boundary_node(Boundary::Inputs);
-    let outputs = subgraph.boundary_node(Boundary::Outputs);
+    let inputs = subgraph.inputs_node();
+    let outputs = subgraph.outputs_node();
     let mut inner = Node::from(&sum);
     *inner.cache_mut().unwrap() = CacheMode::None;
     subgraph.graph.insert(n(13), inner);

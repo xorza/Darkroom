@@ -10,7 +10,8 @@
 pub(crate) mod cache_flush_report;
 pub(crate) mod error;
 
-use std::collections::HashSet;
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
 use std::iter;
 use std::ops::{Index, IndexMut};
 use std::sync::Arc;
@@ -66,6 +67,9 @@ pub(crate) struct RuntimeCache {
     /// answer, not scratch, and undeduplicated: a node reports everything it holds whether or not
     /// a neighbour holds it too.
     node_ram: Col<NodeIdx, RamUsage>,
+    /// The first node of a run under each digest, while [`mark_twins`](Self::mark_twins) walks
+    /// it. Scratch, kept only so the allocation survives; it holds one entry per node at most.
+    leaders: HashMap<Digest, NodeIdx>,
 }
 
 /// Where a reuse would come from, if one is possible at all — the front half of
@@ -267,6 +271,38 @@ impl RuntimeCache {
     pub(crate) fn stamp_digests(&mut self, program: &CompiledGraph, schedule: &RunSchedule) {
         for node_idx in schedule.executing() {
             self.stamp_digest(program, schedule, node_idx);
+        }
+    }
+
+    /// Name, in `schedule`, each node the run may serve from an earlier node of this run with its
+    /// digest: equal digests mean the same computation (see [`digest`](crate::exec::cache::digest)),
+    /// so the second need not run. Walked producer-first, so the first under a digest leads. A
+    /// node with no digest, a sink, whose run is its effect, a node seeded to run, and an event
+    /// source, which must run to start its events, neither leads nor follows.
+    ///
+    /// Values are shared in RAM within the run alone; a blob stays named by its own node.
+    pub(crate) fn mark_twins(&mut self, program: &CompiledGraph, schedule: &mut RunSchedule) {
+        let leaders = &mut self.leaders;
+        leaders.clear();
+        for pos in 0..schedule.process_order.len() {
+            let node_idx = schedule.process_order[pos];
+            if !schedule.states[node_idx].is_runnable() {
+                continue;
+            }
+            let flags = schedule.root_flags(node_idx);
+            let Some(digest) = self.slots[node_idx].cur_digest else {
+                continue;
+            };
+            if program[node_idx].sink || flags.is_seeded() || flags.is_event_source() {
+                continue;
+            }
+            schedule.twins[node_idx] = match leaders.entry(digest) {
+                Entry::Occupied(leader) => Some(*leader.get()),
+                Entry::Vacant(free) => {
+                    free.insert(node_idx);
+                    None
+                }
+            };
         }
     }
 

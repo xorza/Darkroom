@@ -58,6 +58,15 @@ impl CacheMode {
         matches!(self, Self::Disk | Self::Both)
     }
 
+    /// What both modes keep: RAM where either keeps it, disk where either saves it.
+    #[must_use]
+    pub const fn join(self, other: Self) -> Self {
+        Self::from_bits(
+            self.caches_in_ram() || other.caches_in_ram(),
+            self.persists_to_disk() || other.persists_to_disk(),
+        )
+    }
+
     /// The inverse of [`caches_in_ram`](Self::caches_in_ram) and
     /// [`persists_to_disk`](Self::persists_to_disk).
     pub const fn from_bits(ram: bool, disk: bool) -> Self {
@@ -71,7 +80,8 @@ impl CacheMode {
 }
 
 /// What a node *is*. Every kind resolves to a [`NodeDecl`] through a [`Scope`], so one admission
-/// rule holds for all; only a node with a body runs and carries a [`CacheMode`].
+/// rule holds for all; only a node with a body runs, and it and an instance carry a
+/// [`CacheMode`].
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) enum NodeKind {
     /// A node that runs: a library func or a built-in special, cached as `cache` says.
@@ -79,9 +89,13 @@ pub(crate) enum NodeKind {
         source: BodySource,
         cache: CacheMode,
     },
-    /// An instance of the subgraph under the id. It has no cache mode: the nodes inside carry
-    /// their own.
-    Instance(SubgraphId),
+    /// An instance of `subgraph`. Its `cache` caches the values that leave it: the compile joins
+    /// it into each program node the subgraph's `Outputs` node reads, at this instance's path;
+    /// the nodes inside keep their own.
+    Instance {
+        subgraph: SubgraphId,
+        cache: CacheMode,
+    },
     /// One of a subgraph's two boundary nodes, which show its interface from inside.
     Boundary(Boundary),
 }
@@ -159,8 +173,36 @@ impl Node {
                 source: BodySource::Special(special),
                 ..
             } => Some(special.func().id()),
-            NodeKind::Instance(_) | NodeKind::Boundary(_) => None,
+            NodeKind::Instance { .. } | NodeKind::Boundary(_) => None,
         }
+    }
+
+    /// This node as a node of func `to`, its name, cache mode and disabled flag kept: what a load
+    /// makes of a node of a func the library redirects.
+    ///
+    /// # Panics
+    /// If this node runs no library func.
+    pub(crate) fn redirected(&self, to: FuncId) -> Self {
+        let NodeKind::Body {
+            source: BodySource::Func(_),
+            cache,
+        } = self.kind
+        else {
+            panic!("only a func node is redirected");
+        };
+        Self {
+            kind: NodeKind::Body {
+                source: BodySource::Func(to),
+                cache,
+            },
+            ..self.clone()
+        }
+    }
+
+    /// Whether the node runs: a func or a built-in, which the compile emits as a program node,
+    /// where an instance and a boundary node emit none.
+    pub const fn has_body(&self) -> bool {
+        matches!(self.kind, NodeKind::Body { .. })
     }
 
     /// The built-in this node is, if it is one.
@@ -177,7 +219,7 @@ impl Node {
     /// The subgraph this node is an instance of, if it is one.
     pub const fn subgraph(&self) -> Option<SubgraphId> {
         match self.kind {
-            NodeKind::Instance(subgraph_id) => Some(subgraph_id),
+            NodeKind::Instance { subgraph, .. } => Some(subgraph),
             _ => None,
         }
     }
@@ -188,7 +230,10 @@ impl Node {
     /// # Panics
     /// If this node is no instance.
     pub fn set_subgraph(&mut self, id: SubgraphId) {
-        let NodeKind::Instance(placed) = &mut self.kind else {
+        let NodeKind::Instance {
+            subgraph: placed, ..
+        } = &mut self.kind
+        else {
             panic!("only an instance places a subgraph");
         };
         *placed = id;
@@ -202,21 +247,21 @@ impl Node {
         }
     }
 
-    /// Where this node's output is cached, or `None` for a node with no body: an instance or a
-    /// boundary node. A fresh func node (`From<&Func>`) or special node (`From<SpecialNode>`)
-    /// copies its func's `default_cache_mode`.
+    /// Where this node's output is cached, or an instance's outputs, or `None` for a boundary
+    /// node. A fresh func node (`From<&Func>`) or special node (`From<SpecialNode>`) copies its
+    /// func's `default_cache_mode`; a fresh instance caches nothing.
     pub const fn cache(&self) -> Option<CacheMode> {
         match self.kind {
-            NodeKind::Body { cache, .. } => Some(cache),
-            NodeKind::Instance(_) | NodeKind::Boundary(_) => None,
+            NodeKind::Body { cache, .. } | NodeKind::Instance { cache, .. } => Some(cache),
+            NodeKind::Boundary(_) => None,
         }
     }
 
     /// Mutable counterpart of [`Self::cache`].
     pub const fn cache_mut(&mut self) -> Option<&mut CacheMode> {
         match &mut self.kind {
-            NodeKind::Body { cache, .. } => Some(cache),
-            NodeKind::Instance(_) | NodeKind::Boundary(_) => None,
+            NodeKind::Body { cache, .. } | NodeKind::Instance { cache, .. } => Some(cache),
+            NodeKind::Boundary(_) => None,
         }
     }
 
@@ -225,7 +270,10 @@ impl Node {
     /// instance.
     pub const fn instance(id: SubgraphId) -> Self {
         Self {
-            kind: NodeKind::Instance(id),
+            kind: NodeKind::Instance {
+                subgraph: id,
+                cache: CacheMode::None,
+            },
             name: String::new(),
             disabled: false,
         }

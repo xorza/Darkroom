@@ -163,6 +163,13 @@ impl NodeUi {
                 Hover::from(draw_ctx.geometry().subs.is_hovered(node.node_id)),
                 visibility,
             );
+        } else if node.ghost_pinned() {
+            header::ghost_pin(
+                ui,
+                node,
+                Hover::from(draw_ctx.geometry().ghost_subs.is_hovered(node.node_id)),
+                visibility,
+            );
         }
 
         let row_tracks = &mut self.row_tracks;

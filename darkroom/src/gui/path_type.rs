@@ -3,7 +3,7 @@
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-use scenarium::{DataType, FileKind, FileKindId, FileMode, Library};
+use scenarium::{DataType, FileKind, FileKindId, FileMode, GraphSet, Library};
 
 /// A port type that names a path: a directory, or a file of a registered kind taken as its mode
 /// says. What the pick button reads and which dialog it opens, parsed once off a [`DataType`].
@@ -59,9 +59,14 @@ impl PathType {
 
     /// What a port's tooltip says of the type: the kind and how the port takes it, with the
     /// extensions it lists.
-    pub(crate) const fn label(self, library: &Library) -> PathLabel<'_> {
+    pub(crate) const fn label<'a>(
+        self,
+        graphs: &'a GraphSet,
+        library: &'a Library,
+    ) -> PathLabel<'a> {
         PathLabel {
             path_type: self,
+            graphs,
             library,
         }
     }
@@ -72,6 +77,7 @@ impl PathType {
 #[derive(Debug)]
 pub(crate) struct PathLabel<'a> {
     path_type: PathType,
+    graphs: &'a GraphSet,
     library: &'a Library,
 }
 
@@ -85,7 +91,9 @@ impl Display for PathLabel<'_> {
             FileMode::OpenMany => "files",
             FileMode::Save => "save path",
         };
-        let name = self.library.type_name(DataType::File { kind, mode });
+        let name = self
+            .graphs
+            .type_name(self.library, DataType::File { kind, mode });
         write!(f, "{name} · {how}")?;
         // Written one at a time, not `join`ed, which would build the intermediate string.
         if let Some((first, rest)) = self.path_type.extensions(self.library).split_first() {
@@ -151,7 +159,13 @@ mod tests {
         let mut library = Library::default();
         library.register_file_kind(image, FileKind::new("Image", ["fit", "fits", "raf"]));
         library.register_file_kind(any, FileKind::new("File", Vec::<&str>::new()));
-        let label = |data_type| PathType::of(data_type).unwrap().label(&library).to_string();
+        let graphs = scenarium::GraphSet::default();
+        let label = |data_type| {
+            PathType::of(data_type)
+                .unwrap()
+                .label(&graphs, &library)
+                .to_string()
+        };
         let file = |kind, mode| DataType::File { kind, mode };
         assert_eq!(label(DataType::Dir), "directory");
         assert_eq!(

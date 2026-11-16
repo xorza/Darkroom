@@ -842,11 +842,13 @@ fn a_lost_device_takes_the_previews_and_they_convert_again() {
 
     let publishes = |driver: &Driver| driver.app().run_state().previews().publishes();
     let before = publishes(&driver);
+    // Every preview of the sample, those inside its subgraphs' instances included.
+    let images = u64::try_from(driver.app().run_state().previews().image_count()).unwrap();
     driver.act(&[Action::LoseDevice]).unwrap();
     assert!(!driver.offscreen().is_device_lost());
     assert_eq!(
         publishes(&driver) - before,
-        3,
+        images,
         "each image publishes once, however many frames its conversion takes"
     );
     assert_eq!(
@@ -1043,7 +1045,12 @@ fn a_window_past_the_device_limit_is_refused() {
 /// The sample project runs to completion, and each preview shows an image of its input's size:
 /// the TIFF's 895 × 551 after Brightness / Contrast and after Blend, and the FITS frame's
 /// 100 × 100 after Auto Stretch. Preview Denoised, whose input is a ghost wire from the ghost
-/// node Denoise, runs with the input unbound and shows nothing.
+/// node Denoise, runs with the input unbound and shows nothing. The two instances of Adjust show
+/// the TIFF after the Brightness / Contrast inside them, and the instance of the library's
+/// Stretch the FITS frame stretched.
+/// The Auto Stretch inside Stretch and the one in the main graph read one frame with one method,
+/// and the Brightness / Contrast inside Adjust and the one in the main graph one image with one
+/// setting, so in each pair one takes the other's values and reports cached.
 #[test]
 fn the_sample_project_runs_to_its_previews() {
     let mut driver = driver();
@@ -1059,11 +1066,23 @@ fn the_sample_project_runs_to_its_previews() {
     driver.wait_run(Duration::from_secs(30)).unwrap();
 
     let state = driver.state(Detail::Detailed, None).unwrap();
-    for node in &state.active().nodes {
+    // An instance runs nothing of its own, and Frame Event, which feeds no sink, runs once the
+    // events start.
+    let idle = ["Adjust A", "Adjust B", "Stretch", "Frame Event"];
+    // Each reads what a node inside an instance reads, under one digest, so whichever the run
+    // reaches second takes the other's values.
+    let twinned = ["Auto Stretch", "Brightness / Contrast"];
+    for node in state
+        .active()
+        .nodes
+        .iter()
+        .filter(|node| !idle.contains(&node.name.as_str()))
+    {
         assert!(
             node.run
                 .as_ref()
-                .is_some_and(|run| run.starts_with("Executed")),
+                .is_some_and(|run| run.starts_with("Executed")
+                    || (twinned.contains(&node.name.as_str()) && run == "Cached")),
             "{}: {:?}",
             node.name,
             node.run
@@ -1090,10 +1109,13 @@ fn the_sample_project_runs_to_its_previews() {
     assert_eq!(
         sizes,
         [
+            ("Preview Adjust A".to_string(), Some(lena)),
+            ("Preview Adjust B".to_string(), Some(lena)),
             ("Preview Adjusted".to_string(), Some(lena)),
             ("Preview Astro".to_string(), Some(UVec2::new(100, 100))),
             ("Preview Blend".to_string(), Some(lena)),
             ("Preview Denoised".to_string(), None),
+            ("Preview Stretch".to_string(), Some(UVec2::new(100, 100))),
         ]
     );
     let main = state.active();

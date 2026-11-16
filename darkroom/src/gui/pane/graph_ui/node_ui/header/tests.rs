@@ -262,6 +262,8 @@ fn a_preview_node_shows_one_kind_mark_after_its_title() {
 /// has lost its size, as a node first recorded has none.
 #[test]
 fn a_node_and_its_pin_show_once_measured() {
+    use crate::core::edit::document_request::DocumentRequest;
+
     let mut h = CanvasHarness::new(TestGraph::source_sink_loose());
     h.prime(2);
     let sink = h
@@ -280,9 +282,11 @@ fn a_node_and_its_pin_show_once_measured() {
     };
     assert_eq!(listed(&h), [true, true], "a measured node shows");
 
-    let _removed = h.ctx.open.apply_edit(
-        GraphId::Main,
-        GraphIntent::RemoveNode { node_id: sink },
+    let _removed = h.ctx.open.apply_edits(
+        [DocumentRequest::Graph {
+            graph: GraphId::Main,
+            intent: GraphIntent::RemoveNode { node_id: sink },
+        }],
         &h.ctx.library,
     );
     h.frame();

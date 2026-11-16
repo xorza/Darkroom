@@ -36,6 +36,7 @@ use crate::graph::error::{
     DetachReason, GraphSetValidationError, GraphValidationError, PlacementRejection,
 };
 use crate::graph::ghost_node::GhostNode;
+use crate::graph::ghost_wiring::GhostSource;
 use crate::graph::identity::{GraphId, NodeAddr, NodeId, PortId, SubgraphId};
 use crate::graph::instance_path::InstancePath;
 use crate::graph::interface::Interface;
@@ -48,8 +49,9 @@ use crate::graph::reconciled::{GraphSetReconciled, Reconciled, Repair};
 use crate::graph::saved_decl::SavedDecl;
 use crate::graph::scope::Scope;
 use crate::graph::subgraph::Subgraph;
+use crate::graph::type_names::{TypeNames, TypeRef};
 use crate::graph::{Before, Detaching, RefusedWiring};
-use crate::library::Library;
+use crate::library::{Library, UNKNOWN_TYPE};
 
 /// What a graph expands into: how deep its program paths run and how many program nodes it
 /// makes.
@@ -76,9 +78,9 @@ impl ProgramShape {
                 levels: 1,
                 node_count: 1,
             },
-            NodeKind::Instance(subgraph_id) => {
+            NodeKind::Instance { subgraph, .. } => {
                 let inner = shapes
-                    .get(subgraph_id)
+                    .get(subgraph)
                     .expect("a placed subgraph's shape is known before its instance's");
                 Self {
                     levels: inner.levels + 1,
@@ -126,6 +128,10 @@ pub struct GraphSet {
     /// document that repeats an id is refused rather than loaded with the last.
     #[serde(deserialize_with = "crate::graph::serde::deserialize_subgraphs")]
     subgraphs: BTreeMap<SubgraphId, Subgraph>,
+    /// The names files gave the types the library lacks, as [`TypeNames`] says: learned at a
+    /// load and as a definition enters, written by the next save's manifest.
+    #[serde(skip)]
+    type_names: TypeNames,
 }
 
 /// A type an interface names that the library does not register, and each interface port that
@@ -140,7 +146,7 @@ pub struct UnknownType {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct InterfacePort {
     pub subgraph: SubgraphId,
-    /// [`PortList::Inputs`] or [`PortList::Outputs`]: an interface has no events.
+    /// [`PortList::Inputs`] or [`PortList::Outputs`]: an event carries no type to be unknown.
     pub list: PortList,
     pub port: PortId,
 }
@@ -159,6 +165,7 @@ impl From<Graph> for GraphSet {
         Self {
             main,
             subgraphs: BTreeMap::new(),
+            type_names: TypeNames::default(),
         }
     }
 }
@@ -497,7 +504,8 @@ impl GraphSet {
     /// `library` gives it: what a save writes beside the set, and the next load reads to tell
     /// what changed. A ghost node holds its own.
     pub fn manifest(&self, library: &Library) -> Manifest {
-        self.graphs()
+        let funcs: Manifest = self
+            .graphs()
             .flat_map(|(graph, held)| {
                 let scope = self.scope(library, graph);
                 held.iter().filter_map(move |node| {
@@ -505,12 +513,72 @@ impl GraphSet {
                     Some((func.id(), NodeDecl::Func(func).saved()))
                 })
             })
-            .collect()
+            .collect();
+        let saved = funcs.iter().flat_map(|(_, decl)| decl_types(decl));
+        let types = saved
+            .chain(self.named_types())
+            .filter_map(TypeRef::of)
+            .filter_map(|type_ref| {
+                let name = library
+                    .registered_name(type_ref)
+                    .or_else(|| self.type_names.get(type_ref))?;
+                Some((type_ref, name))
+            })
+            .collect();
+        funcs.with_types(types)
+    }
+
+    /// Every type the set itself names, apart from what its nodes' funcs declare: each
+    /// interface's ports, each ghost node's saved declaration and each ghost's saved ports.
+    fn named_types(&self) -> impl Iterator<Item = DataType> {
+        let interfaces = self.subgraphs.values().flat_map(|subgraph| {
+            let interface = &subgraph.interface;
+            let inputs = interface.inputs().iter().map(|input| input.data_type);
+            inputs.chain(interface.outputs().iter().map(|output| output.data_type))
+        });
+        let ghosts = self.graphs().flat_map(|(_, graph)| {
+            let nodes = graph
+                .ghost_nodes()
+                .filter_map(|(_, ghost)| ghost.saved.as_ref())
+                .flat_map(decl_types);
+            let ports = graph.ghost_wiring().bindings().flat_map(|(_, ghost)| {
+                let source = match &ghost.source {
+                    GhostSource::Wire { saved, .. } => saved.as_ref(),
+                    GhostSource::Const(_) => None,
+                };
+                ghost
+                    .input
+                    .iter()
+                    .chain(source)
+                    .map(|saved| saved.data_type)
+            });
+            nodes.chain(ports)
+        });
+        interfaces.chain(ghosts)
+    }
+
+    /// The name `data_type` shows: the library's, else the one a file gave it
+    /// ([`TypeNames`]), else "unknown type".
+    pub fn type_name<'a>(&'a self, library: &'a Library, data_type: DataType) -> &'a str {
+        match TypeRef::of(data_type) {
+            None => library.type_name(data_type),
+            Some(type_ref) => library
+                .registered_name(type_ref)
+                .or_else(|| self.type_names.get(type_ref))
+                .unwrap_or(UNKNOWN_TYPE),
+        }
+    }
+
+    /// Learn each name `names` gives a type `library` lacks, as a definition from a file enters
+    /// the set.
+    pub fn learn_type_names(&mut self, names: &TypeNames, library: &Library) {
+        self.type_names.learn(names, library);
     }
 
     /// Make a decoded set one `library` can run, and report each change, graph by graph. In each
     /// graph: remove a node under the nil id, a ghost node under a node's id and the wiring that
-    /// names a missing node; attach each ghost node that resolves again; keep one boundary node
+    /// names a missing node; move each node and ghost node of a func the library redirects to the
+    /// func its redirects end at; attach each ghost node that resolves again; keep one boundary node
     /// a side in a subgraph's; make a ghost node of each node its scope does not resolve. Across
     /// them, make a ghost node of each instance that closes a loop, nests past
     /// [`ProgramShape::MAX_LEVELS`] or expands past [`ProgramShape::MAX_NODES`], taken in id
@@ -527,6 +595,7 @@ impl GraphSet {
     /// A ghost node attached and detached again as it was is no change, and its repairs are left
     /// out, so a set the load leaves as it found reports nothing.
     pub fn reconcile(&mut self, library: &Library, manifest: &Manifest) -> GraphSetReconciled {
+        self.learn_type_names(manifest.types(), library);
         let ids: Vec<GraphId> = self.graphs().map(|(graph, _)| graph).collect();
         let mut reports: BTreeMap<GraphId, Reconciled> = BTreeMap::new();
         let mut reattached: Vec<(GraphId, NodeId, GhostNode)> = Vec::new();
@@ -534,6 +603,8 @@ impl GraphSet {
         for &graph in &ids {
             let report = reports.entry(graph).or_default();
             self.graph_mut(graph).repair_structure(report);
+            self.graph_mut(graph)
+                .redirect_all(library, manifest, report);
             let resolving = self
                 .graph(graph)
                 .resolving_ghost_nodes(self.scope(library, graph));
@@ -868,6 +939,12 @@ fn over_bounds(graph: &Graph, shapes: &HashMap<SubgraphId, ProgramShape>) -> Vec
         }
     }
     refused
+}
+
+/// Each type a saved declaration's ports name.
+fn decl_types(decl: &SavedDecl) -> impl Iterator<Item = DataType> {
+    let inputs = decl.inputs.iter().map(|input| input.data_type);
+    inputs.chain(decl.outputs.iter().map(|output| output.data_type))
 }
 
 #[cfg(test)]

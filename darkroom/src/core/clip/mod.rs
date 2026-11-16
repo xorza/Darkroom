@@ -157,6 +157,7 @@ impl Clip {
                 subgraph: clip.subgraph,
                 view: clip.view,
                 synced: None,
+                locked: false,
             })
             .collect();
         let brought = bring_in(document, library, carried, &manifest);

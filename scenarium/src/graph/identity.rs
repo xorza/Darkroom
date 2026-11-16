@@ -169,6 +169,20 @@ impl EventPort {
     }
 }
 
+/// Address of a trigger a node hears, by the id its interface gives it: an instance's trigger, or
+/// the `Outputs` node's mirror of an interface event.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TriggerPort {
+    pub node_id: NodeId,
+    pub trigger: PortId,
+}
+
+impl TriggerPort {
+    pub const fn new(node_id: NodeId, trigger: PortId) -> Self {
+        Self { node_id, trigger }
+    }
+}
+
 /// Address of a consumer node's input port; keys `Graph.bindings`. Distinct from `OutputPort`
 /// so source and sink can't be confused.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]

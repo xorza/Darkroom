@@ -120,7 +120,9 @@ fn release(scribble: &mut Scribble, graph: GraphId, out: &mut Requests) {
     // A removed node already drops its subscriptions (its step captures every edge touching
     // it), so skip any whose emitter or subscriber is doomed, to avoid redundant history.
     for s in broken_subscriptions.drain(..) {
-        if broken_node_ids.contains(&s.event.node_id) || broken_node_ids.contains(&s.subscriber) {
+        if broken_node_ids.contains(&s.event.node_id)
+            || broken_node_ids.contains(&s.listener.node_id())
+        {
             continue;
         }
         out.push_graph(

@@ -26,11 +26,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::graph::RefusedWiring;
 use crate::graph::binding::Binding;
-use crate::graph::ghost_wiring::{GhostBinding, GhostSource, InputState};
+use crate::graph::ghost_wiring::{
+    GhostBinding, GhostSource, GhostSubscription, InputState, SubscriptionState,
+};
 use crate::graph::graph_set::GraphSet;
 use crate::graph::identity::{GraphId, InputPort, OutputPort, SubgraphId};
 use crate::graph::interface::Interface;
-use crate::graph::saved_decl::SavedPort;
+use crate::graph::saved_decl::{SavedEvent, SavedPort};
+use crate::graph::subscription::Subscription;
 use crate::library::Library;
 
 /// An edit of one subgraph's interface: the interface before and after, each binding the new
@@ -42,7 +45,17 @@ pub struct InterfaceChange {
     before: Interface,
     after: Interface,
     refused: Vec<RefusedBinding>,
+    refused_subscriptions: Vec<RefusedSubscription>,
     fate: RefusedFate,
+}
+
+/// A subscription an interface edit refuses, to or from an event or a trigger the new interface
+/// lacks, as the ghost it would be, with the name of an event it no longer gives.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RefusedSubscription {
+    pub graph: GraphId,
+    pub subscription: Subscription,
+    pub ghost: GhostSubscription,
 }
 
 /// What an interface edit does with each binding the new interface refuses.
@@ -96,6 +109,11 @@ impl InterfaceChange {
         &self.refused
     }
 
+    /// In graph order, then in the order each graph keeps its subscriptions.
+    pub fn refused_subscriptions(&self) -> &[RefusedSubscription] {
+        &self.refused_subscriptions
+    }
+
     pub const fn fate(&self) -> RefusedFate {
         self.fate
     }
@@ -124,6 +142,7 @@ impl GraphSet {
         let mut after = self.clone();
         after.set_interface(id, to.clone());
         let mut refused = Vec::new();
+        let mut refused_subscriptions = Vec::new();
         for (graph, held) in after.graphs() {
             let scope = after.scope(library, graph);
             let was = self.scope(library, graph);
@@ -158,10 +177,33 @@ impl GraphSet {
                 })
             };
             for refusal in held.refused_wiring(scope) {
-                let RefusedWiring::Binding { port, .. } = refusal else {
-                    unreachable!(
-                        "an interface has no event ports, so its edit refuses no subscription"
-                    );
+                let port = match refusal {
+                    RefusedWiring::Binding { port, .. } => port,
+                    RefusedWiring::Subscription { subscription, .. } => {
+                        let emitter = held
+                            .find(subscription.event.node_id)
+                            .expect("a refused subscription's emitter is held");
+                        let event = if emitter
+                            .decl(scope)
+                            .event(subscription.event.event)
+                            .is_some()
+                        {
+                            None
+                        } else {
+                            was_graph
+                                .find(subscription.event.node_id)
+                                .and_then(|node| node.decl(was).event(subscription.event.event))
+                                .map(|event| SavedEvent {
+                                    name: event.name.to_owned(),
+                                })
+                        };
+                        refused_subscriptions.push(RefusedSubscription {
+                            graph,
+                            subscription,
+                            ghost: GhostSubscription { event },
+                        });
+                        continue;
+                    }
                 };
                 let source = match held.bindings[&port].clone() {
                     Binding::Const(value) => GhostSource::Const(value),
@@ -185,6 +227,7 @@ impl GraphSet {
             before,
             after: to,
             refused,
+            refused_subscriptions,
             fate,
         }
     }
@@ -220,6 +263,23 @@ impl GraphSet {
                 "an interface edit lands on the input it recorded"
             );
             graph.set_input_state(refused.port, to);
+        }
+        for refused in &change.refused_subscriptions {
+            let after = match change.fate {
+                RefusedFate::Drop => SubscriptionState::Absent,
+                RefusedFate::Ghost => SubscriptionState::Ghost(refused.ghost.clone()),
+            };
+            let [from, to] = match side {
+                ChangeSide::After => [SubscriptionState::Live, after],
+                ChangeSide::Before => [after, SubscriptionState::Live],
+            };
+            let graph = self.graph_mut(refused.graph);
+            assert_eq!(
+                graph.subscription_state(refused.subscription),
+                from,
+                "an interface edit lands on the subscription it recorded"
+            );
+            graph.set_subscription_state(refused.subscription, to);
         }
         if side == ChangeSide::After {
             self.set_interface(change.id, change.after.clone());

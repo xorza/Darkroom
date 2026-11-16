@@ -26,6 +26,8 @@
 //!   subgraph from an archive names the unpacked file where it lies, in the library folder. Cost:
 //!   sending that document on means exporting it with the resource again.
 
+pub(crate) mod pack;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::{self, Read as _};

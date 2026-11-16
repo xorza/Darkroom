@@ -594,8 +594,9 @@ fn duplicate_skips_a_selected_ghost_node() {
         .expect("a duplicate leaves a valid document");
 }
 
-/// Inside a subgraph an edit passes over its boundary nodes: a removal of one is refused and
-/// writes nothing, and a duplicate of a selection that holds both copies only the node beside
+/// Inside a subgraph an edit passes over its boundary nodes: a removal of the `Outputs` node or
+/// the last `Inputs` node is refused and writes nothing, a second `Inputs` node comes and goes
+/// and a second `Outputs` node is refused, and a duplicate of a selection that holds both copies only the node beside
 /// them. An instance of the subgraph is refused inside itself, as it would place the subgraph in
 /// itself, and taken in the main graph.
 #[test]
@@ -604,8 +605,8 @@ fn an_edit_inside_a_subgraph_passes_over_its_boundary_nodes() {
     let id = SubgraphId::from_u128(1);
     let mut subgraph = Subgraph::new("inner", Interface::default());
     let inside = subgraph.graph.add(fixture.plain_node());
-    let inputs = subgraph.boundary_node(Boundary::Inputs);
-    let outputs = subgraph.boundary_node(Boundary::Outputs);
+    let inputs = subgraph.inputs_node();
+    let outputs = subgraph.outputs_node();
     insert_subgraph(&mut fixture.document, id, subgraph);
     let DocumentFixture {
         mut document,
@@ -627,6 +628,29 @@ fn an_edit_inside_a_subgraph_passes_over_its_boundary_nodes() {
         );
         assert_eq!(document, before, "{node_id:?} stays");
     }
+    // A second `Inputs` node comes and goes; a second `Outputs` node never comes; the last
+    // `Inputs` node stays.
+    let (second, extra_outputs) = (NodeId::from_u128(40), NodeId::from_u128(41));
+    commit(
+        &mut document,
+        GraphIntent::add_node(Vec2::ZERO, second, Node::from(Boundary::Inputs)),
+    )
+    .unwrap();
+    assert_eq!(
+        commit(
+            &mut document,
+            GraphIntent::add_node(Vec2::ZERO, extra_outputs, Node::from(Boundary::Outputs)),
+        )
+        .unwrap_err(),
+        IntentError::Refused(EditRefusal::BoundaryNode)
+    );
+    commit(&mut document, GraphIntent::RemoveNode { node_id: inputs }).unwrap();
+    assert_eq!(
+        commit(&mut document, GraphIntent::RemoveNode { node_id: second }).unwrap_err(),
+        IntentError::Refused(EditRefusal::BoundaryNode),
+        "the last Inputs node stays"
+    );
+    let inputs = second;
     document.slot_mut(graph).view.selected = [inputs, outputs, inside]
         .map(ItemId::Node)
         .into_iter()

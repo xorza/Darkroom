@@ -222,7 +222,13 @@ impl TestGraph {
 
     /// `name`'s event at position `idx`; see [`Self::input`].
     pub fn event_port(&self, name: &str, idx: usize) -> EventPort {
-        let id = self.decl(name).events()[idx].id;
+        let id = self
+            .decl(name)
+            .events()
+            .iter()
+            .nth(idx)
+            .expect("the node fires that many events")
+            .id;
         EventPort::new(self.id(name), id)
     }
 

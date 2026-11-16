@@ -16,6 +16,7 @@ use scenarium::{
 use crate::core::document::graph_view::GraphView;
 use crate::core::document::internals::{DocumentFixture, insert_subgraph};
 use crate::core::document::item_id::ItemId;
+use crate::core::document::subgraph_side::SideMarks;
 use crate::core::document::subgraph_side::SubgraphSide;
 use crate::core::edit::edit_facts::{EditFacts, Touched};
 use crate::core::edit::graph_intent::GraphIntent;
@@ -322,13 +323,19 @@ fn every_kind_answers_the_frame_questions() {
             "subgraph marked shared",
             UndoStep::Side(SetSide {
                 id: SubgraphId::from_u128(9),
-                shared: Change {
-                    from: false,
-                    to: true,
-                },
-                synced: Change {
-                    from: None,
-                    to: None,
+                marks: Change {
+                    from: SideMarks {
+                        shared: false,
+                        synced: None,
+                        follows: false,
+                        locked: false,
+                    },
+                    to: SideMarks {
+                        shared: true,
+                        synced: None,
+                        follows: false,
+                        locked: false,
+                    },
                 },
             }),
             (true, EditFacts::NONE),

@@ -5,7 +5,8 @@ use std::panic::AssertUnwindSafe;
 use common::{ErrorChain, SerdeFormat};
 
 use crate::data::data_type::DataType;
-use crate::data::data_type::custom_type::CustomTypeId;
+use crate::data::data_type::custom_type::{CustomType, CustomTypeId};
+use crate::data::data_type::enum_type::{EnumId, EnumType};
 use crate::graph::binding::Binding;
 use crate::graph::error::{
     BindingRejection, DetachReason, GraphValidationError, PlacementRejection,
@@ -22,13 +23,14 @@ use crate::graph::interface::Interface;
 use crate::graph::interface_change::InterfaceChange;
 use crate::graph::interface_change::{ChangeSide, RefusedFate};
 use crate::graph::manifest::Manifest;
-use crate::graph::node::{Boundary, Node};
+use crate::graph::node::{Boundary, CacheMode, Node};
 use crate::graph::node_decl::NodeDecl;
 use crate::graph::ports::{InputDecl, Numbered, OutputDecl, PortList, Ports};
 use crate::graph::reconciled::{Reconciled, Repair};
 use crate::graph::saved_decl::SavedPort;
 use crate::graph::subgraph::Subgraph;
 use crate::graph::subscription::Subscription;
+use crate::graph::type_names::TypeRef;
 use crate::graph::{Detaching, Graph};
 use crate::internals;
 use crate::internals::test_graph::sets::{
@@ -253,29 +255,40 @@ fn an_add_inside_a_subgraph_is_held_to_the_bound_of_each_graph_that_places_it() 
     );
 }
 
-/// A subgraph's graph holds one boundary node a side. A load keeps the lowest id of two and adds
-/// one where none is; a boundary node in the main graph, which has no interface, is kept as a
-/// ghost node.
+/// A subgraph's graph holds one `Outputs` node and one or more `Inputs` nodes. A load keeps both
+/// `Inputs` nodes it finds, keeps the lowest id of two `Outputs` nodes and adds an `Inputs` node
+/// where none is; a boundary node in the main graph, which has no interface, is kept as a ghost
+/// node.
 #[test]
-fn a_load_keeps_one_boundary_node_a_side() {
+fn a_load_keeps_every_inputs_node_and_one_outputs_node() {
     let library = library();
-    let mut subgraph = Subgraph::new("edged", Interface::default());
-    for boundary in [Boundary::Inputs, Boundary::Outputs] {
-        subgraph.graph.detach_node(subgraph.boundary_node(boundary));
+    let boundaries = |subgraph: &Subgraph| -> Vec<NodeId> {
+        subgraph.graph.iter().map(|node| node.node_id).collect()
+    };
+    let mut two_inputs = Subgraph::new("two", Interface::default());
+    for node_id in boundaries(&two_inputs) {
+        two_inputs.graph.detach_node(node_id);
     }
-    let (kept, extra) = (n(1), n(2));
-    subgraph.graph.insert(kept, Node::from(Boundary::Inputs));
-    subgraph.graph.insert(extra, Node::from(Boundary::Inputs));
+    two_inputs.graph.insert(n(1), Node::from(Boundary::Inputs));
+    two_inputs.graph.insert(n(2), Node::from(Boundary::Inputs));
+    two_inputs.graph.insert(n(3), Node::from(Boundary::Outputs));
+    two_inputs.graph.insert(n(4), Node::from(Boundary::Outputs));
+    let mut no_inputs = Subgraph::new("none", Interface::default());
+    no_inputs.graph.detach_node(no_inputs.inputs_node());
     let mut set = GraphSet::default();
-    set.insert_subgraph(s(1), subgraph);
-    let in_subgraph = set.scope(&library, GraphId::Subgraph(s(1)));
+    set.insert_subgraph(s(1), two_inputs);
+    set.insert_subgraph(s(2), no_inputs);
+    let check = |set: &GraphSet, id| {
+        set.graph(GraphId::Subgraph(id))
+            .validate_with(set.scope(&library, GraphId::Subgraph(id)))
+    };
     assert!(matches!(
-        set.graph(GraphId::Subgraph(s(1)))
-            .validate_with(in_subgraph),
-        Err(GraphValidationError::BoundaryCount {
-            boundary: Boundary::Inputs,
-            count: 2,
-        })
+        check(&set, s(1)),
+        Err(GraphValidationError::OutputsCount { count: 2 })
+    ));
+    assert!(matches!(
+        check(&set, s(2)),
+        Err(GraphValidationError::NoInputsNode)
     ));
     set.main_mut().insert(n(5), Node::from(Boundary::Outputs));
 
@@ -297,21 +310,26 @@ fn a_load_keeps_one_boundary_node_a_side() {
             reason: DetachReason::Unresolved(Unresolved::NoInterface),
         }]
     );
-    let subgraph = set.subgraph(s(1)).unwrap();
-    assert_eq!(subgraph.boundary_node(Boundary::Inputs), kept);
-    let added = subgraph.boundary_node(Boundary::Outputs);
+    let two = set.subgraph(s(1)).unwrap();
+    let mut inputs: Vec<NodeId> = two.inputs_nodes().collect();
+    inputs.sort_unstable();
+    assert_eq!(inputs, [n(1), n(2)]);
+    assert_eq!(two.inputs_node(), n(1));
+    assert_eq!(two.outputs_node(), n(3));
     assert_eq!(
         report.subgraphs[&s(1)].repairs,
-        [
-            Repair::BoundaryAdded {
-                boundary: Boundary::Outputs,
-                node_id: added,
-            },
-            Repair::GhostedNode {
-                node_id: extra,
-                reason: DetachReason::ExtraBoundary,
-            },
-        ]
+        [Repair::GhostedNode {
+            node_id: n(4),
+            reason: DetachReason::ExtraOutputs,
+        }]
+    );
+    let added = set.subgraph(s(2)).unwrap().inputs_node();
+    assert_eq!(
+        report.subgraphs[&s(2)].repairs,
+        [Repair::BoundaryAdded {
+            boundary: Boundary::Inputs,
+            node_id: added,
+        }]
     );
     set.validate_with(&library).unwrap();
 }
@@ -437,8 +455,8 @@ fn boundary_nodes_mirror_the_interface_under_the_one_admission_rule() {
         )],
     });
     let mut subgraph = Subgraph::new("mirror", interface);
-    let inputs = subgraph.boundary_node(Boundary::Inputs);
-    let outputs = subgraph.boundary_node(Boundary::Outputs);
+    let inputs = subgraph.inputs_node();
+    let outputs = subgraph.outputs_node();
     let graph = &mut subgraph.graph;
     graph.insert(n(1), node(&library, ANY_SINK));
     graph.insert(n(2), node(&library, SINK));
@@ -526,7 +544,11 @@ fn a_new_instance_takes_its_interface_defaults() {
         node.name.is_empty(),
         "an instance has no name of its own: a host shows its subgraph's"
     );
-    assert_eq!(node.cache(), None, "an instance has no cache mode");
+    assert_eq!(
+        node.cache(),
+        Some(CacheMode::None),
+        "a new instance keeps nothing of what leaves it"
+    );
 }
 
 /// A set round-trips with what its interfaces derive built again, and a file that names one
@@ -576,7 +598,7 @@ fn a_const_only_input_takes_a_wire_from_a_const_only_interface_input_alone() {
         int_port(2),
     ]);
     let mut subgraph = Subgraph::new("configured", interface);
-    let inputs_node = subgraph.boundary_node(Boundary::Inputs);
+    let inputs_node = subgraph.inputs_node();
     subgraph.graph.insert(n(1), node(&library, CONFIG_SINK));
     subgraph.graph.insert(n(2), node(&library, SRC));
     let mut set = GraphSet::default();
@@ -703,6 +725,74 @@ fn unknown_types_name_each_interface_port_that_uses_them() {
     );
 }
 
+/// A save names each registered type the set's ports name, the library's or one a file gave a
+/// type the library lacks, and no scalar; a load where the library lacks a type reads its name
+/// from the manifest, and the next save writes it again; a type nothing named stays "unknown
+/// type", and a registered type reads the library's name over a file's.
+#[test]
+fn a_file_names_the_types_its_ports_name_and_a_load_without_them_keeps_the_names() {
+    let star = CustomTypeId::from_u128(77);
+    let mode = EnumId::from_u128(78);
+    let nameless = CustomTypeId::from_u128(79);
+    let mut with = library();
+    with.register_custom_type(star, CustomType::new("Star List"));
+    with.register_enum(mode, EnumType::new("Mode", vec!["a".into()]));
+    let port =
+        |id: u32, data_type| Numbered::new(PortId::new(id), InputDecl::required("x", data_type));
+    let mut set = GraphSet::default();
+    set.insert_subgraph(
+        s(1),
+        Subgraph::new(
+            "one",
+            Interface::new(Ports {
+                inputs: vec![port(1, DataType::Int), port(2, DataType::Custom(star))],
+                outputs: vec![Numbered::new(
+                    PortId::new(3),
+                    OutputDecl::new("y", DataType::Enum(mode)),
+                )],
+            }),
+        ),
+    );
+    let names = |manifest: &Manifest| {
+        manifest
+            .types()
+            .iter()
+            .map(|(type_ref, name)| (type_ref, name.to_owned()))
+            .collect::<Vec<_>>()
+    };
+    let saved = set.manifest(&with);
+    let expected = vec![
+        (TypeRef::Custom(star), "Star List".to_owned()),
+        (TypeRef::Enum(mode), "Mode".to_owned()),
+    ];
+    assert_eq!(names(&saved), expected, "no scalar, each type once");
+
+    let without = library();
+    let mut loaded = set.clone();
+    loaded.reconcile(&without, &saved);
+    assert_eq!(
+        loaded.type_name(&without, DataType::Custom(star)),
+        "Star List"
+    );
+    assert_eq!(
+        loaded.type_name(&without, DataType::Custom(nameless)),
+        "unknown type"
+    );
+    assert_eq!(loaded.type_name(&without, DataType::Int), "int");
+    assert_eq!(
+        names(&loaded.manifest(&without)),
+        expected,
+        "a save without the types writes the names it learned"
+    );
+    let mut renamed = library();
+    renamed.register_custom_type(star, CustomType::new("Stars"));
+    assert_eq!(
+        loaded.type_name(&renamed, DataType::Custom(star)),
+        "Stars",
+        "the library's name wins"
+    );
+}
+
 const A: PortId = PortId::new(101);
 const B: PortId = PortId::new(102);
 const SUM: PortId = PortId::new(201);
@@ -724,10 +814,7 @@ fn adder_interface(a_type: DataType, b_type: DataType) -> Interface {
 fn adder_set() -> (GraphSet, Library) {
     let library = library();
     let mut adder = Subgraph::new("adder", adder_interface(DataType::Int, DataType::Int));
-    let (inputs, outputs) = (
-        adder.boundary_node(Boundary::Inputs),
-        adder.boundary_node(Boundary::Outputs),
-    );
+    let (inputs, outputs) = (adder.inputs_node(), adder.outputs_node());
     adder.graph.insert(n(13), node(&library, ADD));
     let inner = &mut adder.graph;
     inner.set_input_binding(
@@ -812,10 +899,7 @@ fn an_interface_port_removed_drops_its_wires_in_every_graph_and_undo_restores_th
         outputs: vec![],
     });
     let adder = set.subgraph(s(1)).unwrap();
-    let (inputs, outputs) = (
-        adder.boundary_node(Boundary::Inputs),
-        adder.boundary_node(Boundary::Outputs),
-    );
+    let (inputs, outputs) = (adder.inputs_node(), adder.outputs_node());
     let change = set.plan_interface(s(1), without.clone(), &library, RefusedFate::Drop);
     let inside = GraphId::Subgraph(s(1));
     let mut expected = vec![
@@ -917,7 +1001,7 @@ fn an_interface_port_removed_drops_its_wires_in_every_graph_and_undo_restores_th
 #[test]
 fn an_interface_port_retyped_drops_only_what_the_new_type_refuses() {
     let (mut set, library) = adder_set();
-    let inputs = set.subgraph(s(1)).unwrap().boundary_node(Boundary::Inputs);
+    let inputs = set.subgraph(s(1)).unwrap().inputs_node();
     let change = set.plan_interface(
         s(1),
         adder_interface(DataType::Int, DataType::String),
@@ -1071,4 +1155,85 @@ fn a_digest_names_the_definition_and_not_its_ids() {
     );
     assert_ne!(kept.digest(s(1)), one.digest(s(1)));
     assert_ne!(kept.digest(s(1)), ghosted.digest(s(1)));
+}
+
+/// A subscription lands on a trigger the listener's interface declares, and not on an
+/// instance's pin; an interface edit that takes the event away refuses the subscription from it,
+/// which a person's edit drops and an update keeps as a ghost under the event's name, and undo
+/// puts it back live.
+#[test]
+fn a_subscription_lands_on_a_declared_trigger_and_an_interface_edit_refuses_it() {
+    use crate::graph::error::SubscriptionRejection;
+    use crate::graph::ghost_wiring::{GhostSubscription, SubscriptionState};
+    use crate::graph::identity::{EventPort, TriggerPort};
+    use crate::graph::interface::EventPorts;
+    use crate::graph::interface_change::{ChangeSide, RefusedFate};
+    use crate::graph::ports::EventDecl;
+    use crate::graph::saved_decl::SavedEvent;
+    use crate::graph::subscription::{Listener, Subscription};
+    use crate::internals::test_graph::sets::TICKER;
+
+    const OUT: PortId = PortId::new(301);
+    const IN: PortId = PortId::new(401);
+    let library = library();
+    let interface = Interface::default()
+        .with_event_ports(EventPorts {
+            events: vec![Numbered::new(OUT, EventDecl::new("out"))],
+            triggers: vec![Numbered::new(IN, EventDecl::new("in"))],
+        })
+        .unwrap();
+    let mut set = GraphSet::default();
+    set.insert_subgraph(s(1), Subgraph::new("relay", interface));
+    set.main_mut().insert(n(1), node(&library, TICKER));
+    set.main_mut().insert(n(2), Node::instance(s(1)));
+    set.main_mut().insert(n(3), node(&library, SINK));
+    let tick = EventPort::new(n(1), PortId::new(1));
+    let admit = |set: &GraphSet, listener: Listener| {
+        set.main().admit_subscription(
+            set.scope(&library, GraphId::Main),
+            Subscription::new(tick, listener),
+        )
+    };
+    assert_eq!(
+        admit(&set, Listener::Trigger(TriggerPort::new(n(2), IN))),
+        Ok(())
+    );
+    assert_eq!(
+        admit(&set, Listener::Trigger(TriggerPort::new(n(2), OUT))),
+        Err(SubscriptionRejection::UndeclaredTrigger)
+    );
+    assert_eq!(
+        admit(&set, Listener::Pin(n(2))),
+        Err(SubscriptionRejection::BodilessSubscriber)
+    );
+
+    let out = Subscription::new(EventPort::new(n(2), OUT), n(3));
+    set.main_mut().subscribe(out.event, n(3));
+    set.validate_with(&library).unwrap();
+    let before = set.clone();
+    let without = Interface::default();
+    let dropped = set.plan_interface(s(1), without.clone(), &library, RefusedFate::Drop);
+    assert_eq!(dropped.refused_subscriptions().len(), 1);
+    set.write_interface(&dropped, ChangeSide::After);
+    assert_eq!(
+        set.main().subscription_state(out),
+        SubscriptionState::Absent
+    );
+    set.validate_with(&library).unwrap();
+    set.write_interface(&dropped, ChangeSide::Before);
+    assert_eq!(set, before);
+
+    let kept = set.plan_interface(s(1), without, &library, RefusedFate::Ghost);
+    set.write_interface(&kept, ChangeSide::After);
+    assert_eq!(
+        set.main().subscription_state(out),
+        SubscriptionState::Ghost(GhostSubscription {
+            event: Some(SavedEvent {
+                name: "out".to_owned(),
+            }),
+        })
+    );
+    set.validate_with(&library).unwrap();
+    set.write_interface(&kept, ChangeSide::Before);
+    assert_eq!(set, before);
 }

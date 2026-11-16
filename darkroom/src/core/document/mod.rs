@@ -84,7 +84,7 @@ use crate::core::document::inspect_target::InspectTarget;
 use crate::core::document::item_id::ItemId;
 use crate::core::document::load_report::{DocumentRepair, ForeignPath, LoadReport, ViewRepair};
 use crate::core::document::route::Route;
-use crate::core::document::subgraph_side::SubgraphSide;
+use crate::core::document::subgraph_side::{ReadOnly, SubgraphSide};
 use crate::core::document::tab_ref::TabRef;
 use crate::core::document::tie::{TieAngle, TieId};
 use crate::core::document::viewport::Viewport;
@@ -552,6 +552,15 @@ impl Document {
     }
 
     /// Each path a constant holds in any graph, the ghost nodes' included, with the node it binds.
+    /// Why `graph` takes no edit of its own, if it takes none: a subgraph that follows the
+    /// library or is locked. The one answer the gate and every planner that writes a graph read.
+    pub(crate) fn read_only(&self, graph: GraphId) -> Option<ReadOnly> {
+        match graph {
+            GraphId::Main => None,
+            GraphId::Subgraph(id) => self.sides.get(&id).and_then(SubgraphSide::read_only),
+        }
+    }
+
     pub(crate) fn for_each_path(&self, mut visit: impl FnMut(NodeAddr, &str)) {
         for (graph, held) in self.graphs.graphs() {
             for (port, value) in held.constants() {

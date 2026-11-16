@@ -37,6 +37,7 @@ pub(crate) async fn sweep(
     // The cache holds no program of its own, so every question names the `program` this schedule
     // was planned against.
     cache.stamp_digests(program, schedule);
+    cache.mark_twins(program, schedule);
     // The sweep *accumulates* demand and readers, so it starts from zero rather than trusting
     // whoever opened the schedule.
     schedule.outputs.reset(program.output_count as usize);
@@ -63,6 +64,23 @@ pub(crate) async fn sweep(
         }
         if !flags.is_event_source() && cache.probe_reuse(program, node_idx, demand).await {
             schedule.states[node_idx] = NodeState::Reuse;
+            continue;
+        }
+
+        // An earlier node of the run under the same digest makes the same values: this one takes
+        // them, reading each output it demands from that node, which must then run or be served.
+        // Its own producers are not promoted, as a reuse's are not.
+        if let Some(leader) = schedule.twins[node_idx] {
+            schedule.states[node_idx] = NodeState::Twin;
+            let promoted = schedule.states[leader].promote_to_run();
+            debug_assert!(promoted, "a twin's leader is runnable");
+            let (own, theirs) = (e_node.outputs, program[leader].outputs);
+            debug_assert_eq!(own.len, theirs.len, "equal digests mean equal arity");
+            for port in 0..own.len {
+                if !schedule.outputs.demand[own.nth(port)].is_skip() {
+                    schedule.outputs.add_reader(theirs.nth(port));
+                }
+            }
             continue;
         }
 

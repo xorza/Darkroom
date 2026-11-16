@@ -10,7 +10,7 @@ use std::num::NonZeroU32;
 use std::path::PathBuf;
 
 use lens::MlModelPaths;
-use scenarium::{GraphId, InputPort, NodeAddr, ProgramId, SubgraphId};
+use scenarium::{GraphId, InputPort, Node, NodeAddr, NodeId, ProgramId, SubgraphId};
 
 use crate::gui::frame::framing::Framing;
 use crate::gui::path_type::PathType;
@@ -39,6 +39,12 @@ pub(crate) enum AppCommand {
     Publish { subgraph: SubgraphId },
     /// Raise the export dialog for subgraph `subgraph`.
     Export { subgraph: SubgraphId },
+    /// Raise the Replace dialog for putting `with` in place of node `node_id` of `graph`.
+    ProposeReplace {
+        graph: GraphId,
+        node_id: NodeId,
+        with: Box<Node>,
+    },
     /// Node edits raised via a dialog.
     Edit(EditCommand),
     /// An image of the window, and where the graph's camera looks.
@@ -67,6 +73,8 @@ pub(crate) enum FileCommand {
     /// Always prompt for a destination, and write the document there in the format its file type
     /// names: RON text, or the text zipped.
     SaveAs,
+    /// Copy each file the document reads into its resources folder and point the paths there.
+    PackResources,
 }
 
 /// What the window shows: an image of it as the next frame paints it, where the graph's camera

@@ -11,7 +11,7 @@
 //!   notes](https://blog.comfy.org/p/subgraph-official-release)). Refused: a copy by default, as
 //!   Nuke's Group, where ten copies of one pipeline are ten graphs to fix.
 
-use scenarium::{GraphId, NodeId, SubgraphId};
+use scenarium::{GraphId, NodeId, SubgraphId, TypeNames};
 
 use crate::core::document::Document;
 use crate::core::edit::document_queue::DocumentQueue;
@@ -42,6 +42,7 @@ impl MakeUnique {
                 id: SubgraphId::unique(),
                 subgraph,
                 side,
+                type_names: TypeNames::default(),
             },
             graph,
             instances: instances.to_vec(),
@@ -49,13 +50,17 @@ impl MakeUnique {
     }
 
     /// The one subgraph `instances`, nodes of `graph`, all place, or `None` when they place none
-    /// or more than one: whether a Make Unique of them is offered, answered without the copy a
+    /// or more than one, or `graph` takes no edit, as its re-pointing would be refused and leave
+    /// the copy behind: whether a Make Unique of them is offered, answered without the copy a
     /// plan makes.
     pub(crate) fn placed(
         document: &Document,
         graph: GraphId,
         instances: &[NodeId],
     ) -> Option<SubgraphId> {
+        if document.read_only(graph).is_some() {
+            return None;
+        }
         let held = document.graphs.graph(graph);
         let mut placed = instances
             .iter()

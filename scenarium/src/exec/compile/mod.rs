@@ -30,8 +30,16 @@
 //!   demand prunes across the boundary. As Unreal expands each macro instance "into a unique set
 //!   of nodes during compilation".
 //!
-//! - **A disabled instance disables every node inside it.** An instance has no cache mode: the
-//!   nodes inside carry their own.
+//! - **A disabled instance disables every node inside it.**
+//!
+//! - **An instance's cache mode caches the values that leave it.** Its bits join the cache mode
+//!   of each program node inside it that its subgraph's `Outputs` node reads, at that instance's
+//!   path, across any passthrough inside, so two instances of one subgraph cache apart and the
+//!   nodes inside keep their own. A value that only passes through from outside is cached, or
+//!   not, where it is made. As a Houdini asset caches its output with a File Cache node at its end, not each
+//!   node inside. Refused: an override of every node inside, which caches intermediates nothing
+//!   outside reads and discards what each node chose; a mode on the subgraph, which every
+//!   instance would share.
 //!
 //! **The sort comes first.** [`Graph::iter`](crate::Graph::iter) is a `HashMap` walk, so its order is not one an
 //! artifact may depend on. Sorting the ids *before* emitting anything settles the dense index
@@ -50,10 +58,11 @@ pub(crate) mod consumer_cone;
 pub(crate) mod error;
 mod validate;
 
+use std::mem;
 use std::sync::Arc;
 
 use common::ErrorChain;
-use hashbrown::HashMap;
+use hashbrown::{HashMap, HashSet};
 
 use crate::containers::col::{Col, Idx, Span};
 use crate::exec::compile::compiled_graph::{
@@ -62,11 +71,12 @@ use crate::exec::compile::compiled_graph::{
 use crate::exec::idx::{NodeIdx, OutputAddr};
 use crate::graph::binding::Binding;
 use crate::graph::graph_set::GraphSet;
-use crate::graph::identity::{GraphId, InputPort, NodeId, SubgraphId};
+use crate::graph::identity::{EventPort, GraphId, InputPort, NodeId, PortId, SubgraphId};
 use crate::graph::instance_path::InstancePath;
-use crate::graph::node::{Boundary, NodeKind};
+use crate::graph::node::{Boundary, CacheMode, NodeKind};
 use crate::graph::node_decl::NodeDecl;
 use crate::graph::program_id::ProgramId;
+use crate::graph::subscription::Listener;
 use crate::library::Library;
 
 /// One program node awaiting placement: its id, which the sort keys on, the graph it was
@@ -117,6 +127,15 @@ impl Level {
     }
 }
 
+/// An instance with a cache mode the placement met: the level inside it, and the subgraph whose
+/// `Outputs` node names the values that leave it.
+#[derive(Debug, Clone, Copy)]
+struct CachedInstance {
+    inside: Level,
+    subgraph: SubgraphId,
+    cache: CacheMode,
+}
+
 /// How many ports the program will hold, totalled by the placement from the same declarations the
 /// walk is about to read, so each variable-length pool is allocated once instead of doubling its
 /// way to a size the placement already knew.
@@ -151,6 +170,20 @@ pub struct Compiler {
     /// The `Outputs` node of each subgraph the placement expanded, which a wire from an instance
     /// crosses into.
     outputs_nodes: HashMap<SubgraphId, NodeId>,
+    /// Each instance with a cache mode the placement expanded.
+    cached_instances: Vec<CachedInstance>,
+    /// What each placed node's cache mode gains from the instances whose values it produces, by
+    /// position in [`Self::placed`].
+    joined_cache: Vec<CacheMode>,
+    /// The pins one event reaches, as [`Self::collect_heard`] last found them.
+    heard: Vec<NodeIdx>,
+    /// The same pins by program id, as the walk meets them.
+    heard_ids: Vec<ProgramId>,
+    /// The events [`Self::collect_heard`] has yet to follow, each at its level.
+    event_stack: Vec<(Level, EventPort)>,
+    /// The events it followed, by the program id of their node, so a loop through boundaries
+    /// ends.
+    event_seen: HashSet<(ProgramId, PortId)>,
 }
 
 /// What a compile reads: the set and the library its nodes resolve against.
@@ -192,6 +225,7 @@ impl Compiler {
     /// artifact self-contained.
     fn walk(&mut self, source: Source<'_>) -> CompiledGraph {
         let totals = self.place_nodes(source);
+        self.join_instance_caches(source);
 
         // Sized from the placement, so each `append` below is a copy into space the artifact
         // already owns.
@@ -251,25 +285,23 @@ impl Compiler {
             let node_outputs = Span::new(compiled.output_count, output_count);
             compiled.output_count += output_count;
 
-            // Each event lands with its subscribers, resolved through the placement, which already
-            // covers nodes the walk has not reached. A subscription stays inside its graph, so
-            // the subscriber shares the emitter's level. The subscriptions sort by event id, which
-            // need not be the declaration's order, so each event takes its own from the node's.
-            let node_events = compiled.events.append(func.events().iter().map(|event| {
+            // Each event lands with the pins it reaches, across any boundary between, resolved
+            // through the placement, which already covers nodes the walk has not reached.
+            let mut node_events = Vec::with_capacity(func.events().len());
+            for event in func.events() {
+                self.collect_heard(source, level, EventPort::new(node_id, event.id));
                 let subscribers = compiled.subscribers.append(
-                    graph
-                        .subscriptions_of(node_id)
-                        .filter(|sub| sub.event.event == event.id)
-                        .map(|sub| self.idx(level.program_id(sub.subscriber)))
-                        .filter(|subscriber| {
-                            !pending.disabled && !self.placed[subscriber.idx()].disabled
-                        }),
+                    self.heard
+                        .iter()
+                        .copied()
+                        .filter(|heard| !pending.disabled && !self.placed[heard.idx()].disabled),
                 );
-                ExecEvent {
+                node_events.push(ExecEvent {
                     subscribers,
                     lambda: event.event_lambda.clone(),
-                }
-            }));
+                });
+            }
+            let node_events = compiled.events.append(node_events);
             debug_assert!(
                 graph
                     .subscriptions_of(node_id)
@@ -281,7 +313,7 @@ impl Compiler {
                 sink: func.sink(),
                 disabled: pending.disabled,
                 behavior: func.behavior(),
-                cache,
+                cache: cache.join(self.joined_cache[pos]),
                 special: node.special(),
                 inputs: node_inputs,
                 outputs: node_outputs,
@@ -311,10 +343,17 @@ impl Compiler {
             placed,
             frames,
             outputs_nodes,
+            cached_instances,
+            joined_cache: _,
+            heard: _,
+            heard_ids: _,
+            event_stack: _,
+            event_seen: _,
         } = self;
         placed.clear();
         frames.clear();
         outputs_nodes.clear();
+        cached_instances.clear();
         frames.push(Frame {
             level: Level::MAIN,
             disabled: false,
@@ -338,12 +377,20 @@ impl Compiler {
                             disabled,
                         });
                     }
-                    NodeKind::Instance(subgraph_id) => frames.push(Frame {
-                        level: frame
-                            .level
-                            .enter(node.node_id, GraphId::Subgraph(subgraph_id)),
-                        disabled,
-                    }),
+                    NodeKind::Instance { subgraph, cache } => {
+                        let inside = frame.level.enter(node.node_id, GraphId::Subgraph(subgraph));
+                        if cache != CacheMode::None {
+                            cached_instances.push(CachedInstance {
+                                inside,
+                                subgraph,
+                                cache,
+                            });
+                        }
+                        frames.push(Frame {
+                            level: inside,
+                            disabled,
+                        });
+                    }
                     NodeKind::Boundary(Boundary::Outputs) => {
                         if let GraphId::Subgraph(id) = frame.level.graph {
                             outputs_nodes.insert(id, node.node_id);
@@ -363,6 +410,111 @@ impl Compiler {
         );
         placed.sort_unstable_by_key(|placed| placed.program_id);
         totals
+    }
+
+    /// Fill [`Self::joined_cache`]: each cached instance's mode joins the program node inside it
+    /// that each binding on its `Outputs` node lowers to; a constant, nothing, or a wire that
+    /// passes through from outside caches nothing.
+    fn join_instance_caches(&mut self, source: Source<'_>) {
+        let mut joined = mem::take(&mut self.joined_cache);
+        joined.clear();
+        joined.resize(self.placed.len(), CacheMode::None);
+        for instance in &self.cached_instances {
+            let outputs = self.outputs_nodes[&instance.subgraph];
+            let graph = source.graphs.graph(instance.inside.graph);
+            for (_, binding) in graph.input_bindings(outputs) {
+                if let ExecBinding::Wire(addr) = self.lower(source, instance.inside, Some(binding))
+                    && self.placed[addr.node_idx.idx()]
+                        .program_id
+                        .ids()
+                        .starts_with(instance.inside.path.ids())
+                {
+                    let slot = &mut joined[addr.node_idx.idx()];
+                    *slot = slot.join(instance.cache);
+                }
+            }
+        }
+        self.joined_cache = joined;
+    }
+
+    /// Fill [`Self::heard`] with the pins `event` at `level` reaches, sorted and each once: a
+    /// subscription to a pin reaches that node; one to an instance's trigger is followed inside,
+    /// to what each of the subgraph's `Inputs` nodes fires under the trigger's id; one to the
+    /// `Outputs` node's trigger is followed out, to what the instance fires under its id. As a
+    /// binding is followed across boundaries ([`Self::lower`]), so a passthrough costs nothing.
+    /// An event met twice is followed once, so a loop through boundaries ends.
+    fn collect_heard(&mut self, source: Source<'_>, level: Level, event: EventPort) {
+        let Self {
+            heard_ids: heard,
+            event_stack: stack,
+            event_seen: seen,
+            ..
+        } = self;
+        heard.clear();
+        stack.clear();
+        seen.clear();
+        stack.push((level, event));
+        while let Some((level, event)) = stack.pop() {
+            if !seen.insert((level.program_id(event.node_id), event.event)) {
+                continue;
+            }
+            let graph = source.graphs.graph(level.graph);
+            for subscription in graph
+                .subscriptions_of(event.node_id)
+                .filter(|subscription| subscription.event.event == event.event)
+            {
+                match subscription.listener {
+                    Listener::Pin(node_id) => heard.push(level.program_id(node_id)),
+                    Listener::Trigger(trigger) => {
+                        let node = graph
+                            .find(trigger.node_id)
+                            .expect("an admitted listener is in the graph");
+                        match node.kind {
+                            NodeKind::Instance { subgraph, .. } => {
+                                let inside =
+                                    level.enter(trigger.node_id, GraphId::Subgraph(subgraph));
+                                let definition = source
+                                    .graphs
+                                    .subgraph(subgraph)
+                                    .expect("an instance's subgraph is in the set");
+                                stack.extend(definition.inputs_nodes().map(|inputs| {
+                                    (inside, EventPort::new(inputs, trigger.trigger))
+                                }));
+                            }
+                            NodeKind::Boundary(Boundary::Outputs) => {
+                                let instance = level
+                                    .path
+                                    .instance()
+                                    .expect("an `Outputs` node lies inside an instance");
+                                let path =
+                                    level.path.parent().expect("an instance lies in a graph");
+                                let graph = source
+                                    .graphs
+                                    .graph_at(path)
+                                    .expect("an instance path names instances");
+                                stack.push((
+                                    Level { graph, path },
+                                    EventPort::new(instance, trigger.trigger),
+                                ));
+                            }
+                            NodeKind::Body { .. } | NodeKind::Boundary(Boundary::Inputs) => {
+                                unreachable!("only an instance and an `Outputs` node hear triggers")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let mut heard = mem::take(&mut self.heard);
+        heard.clear();
+        heard.extend(
+            self.heard_ids
+                .iter()
+                .map(|&program_id| self.idx(program_id)),
+        );
+        heard.sort_unstable();
+        heard.dedup();
+        self.heard = heard;
     }
 
     /// Where `program_id` landed in the dense index space.
@@ -419,9 +571,9 @@ impl Compiler {
                         port_idx: u32::try_from(port_idx).expect("a func's outputs fit in u32"),
                     });
                 }
-                NodeKind::Instance(subgraph_id) => {
-                    level = level.enter(source_port.node_id, GraphId::Subgraph(subgraph_id));
-                    let outputs = self.outputs_nodes[&subgraph_id];
+                NodeKind::Instance { subgraph, .. } => {
+                    level = level.enter(source_port.node_id, GraphId::Subgraph(subgraph));
+                    let outputs = self.outputs_nodes[&subgraph];
                     source
                         .graphs
                         .graph(level.graph)

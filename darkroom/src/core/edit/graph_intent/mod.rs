@@ -27,8 +27,9 @@ use std::rc::Rc;
 
 use glam::Vec2;
 use scenarium::{
-    Binding, BindingEntry, DetachedNode, DetachedNodeParts, GhostWiring, Graph as CoreGraph,
-    GraphId, InputPort, InputState, Library, Node, NodeId, Subscription, SubscriptionState,
+    Binding, BindingEntry, Boundary, DetachedNode, DetachedNodeParts, GhostWiring,
+    Graph as CoreGraph, GraphId, InputPort, InputState, Library, Node, NodeId, NodeRemap,
+    Subscription, SubscriptionState,
 };
 
 use crate::core::document::Document;
@@ -88,6 +89,14 @@ pub(crate) enum GraphIntent {
     },
     RemoveNode {
         node_id: NodeId,
+    },
+    /// Put `with` in place of the node or ghost node `node_id`, under its id, where it was, its
+    /// wiring moved through `remap` ([`Graph::replaced`](scenarium::Graph::replaced)): what the
+    /// map names stays live where `with` takes it, the rest is kept as ghosts. One undo entry.
+    ReplaceNode {
+        node_id: NodeId,
+        with: Node,
+        remap: NodeRemap,
     },
     /// One frame of a drag of one or more node bodies and ties, in canvas-world coordinates:
     /// every member of `members` moves to its start plus `offset`. The frames of one `gesture`
@@ -228,7 +237,7 @@ impl GraphIntent {
         }
         for (subscription, _) in wiring.subscriptions() {
             to.insert(ItemId::Node(subscription.event.node_id));
-            to.insert(ItemId::Node(subscription.subscriber));
+            to.insert(ItemId::Node(subscription.listener.node_id()));
         }
         Self::SetSelection { to }
     }
@@ -253,7 +262,8 @@ impl GraphIntent {
         let subscriptions = wiring
             .subscriptions()
             .filter(|(subscription, _)| {
-                !ghost_node(subscription.event.node_id) && !ghost_node(subscription.subscriber)
+                !ghost_node(subscription.event.node_id)
+                    && !ghost_node(subscription.listener.node_id())
             })
             .map(|(subscription, _)| Self::SetSubscription {
                 subscription,
@@ -326,6 +336,14 @@ impl GraphIntent {
                 validate::fresh_node_id(graph, node_id)?;
                 validate::finite_pos(pos, Role::AddNode)?;
                 let decl = validate::resolving_node(scope, &node)?;
+                // A second `Outputs` node, which would give an interface output two producers.
+                if node.boundary() == Some(Boundary::Outputs)
+                    && graph
+                        .iter()
+                        .any(|held| held.boundary() == Some(Boundary::Outputs))
+                {
+                    return Err(EditRefusal::BoundaryNode.into());
+                }
                 // An instance that places a subgraph inside itself, or one that takes a graph past
                 // a bound.
                 document
@@ -361,12 +379,20 @@ impl GraphIntent {
             }
             Self::RemoveNode { node_id } => {
                 validate::non_nil_node(node_id, Role::RemoveNode)?;
-                // A subgraph keeps one boundary node a side; a selection that holds one deletes
-                // the rest.
-                if graph
-                    .find(node_id)
-                    .is_some_and(|node| node.boundary().is_some())
-                {
+                // A subgraph keeps its `Outputs` node and one `Inputs` node; a selection that holds
+                // them deletes the rest.
+                let kept = match graph.find(node_id).and_then(Node::boundary) {
+                    Some(Boundary::Outputs) => true,
+                    Some(Boundary::Inputs) => {
+                        graph
+                            .iter()
+                            .filter(|node| node.boundary() == Some(Boundary::Inputs))
+                            .count()
+                            == 1
+                    }
+                    None => false,
+                };
+                if kept {
                     return Err(EditRefusal::BoundaryNode.into());
                 }
                 let Some(entry) = NodeEntry::capture(document, graph_id, node_id) else {
@@ -536,11 +562,15 @@ impl GraphIntent {
             Self::SetViewport { .. } => {
                 unreachable!("`commit` writes the camera, which no step records")
             }
+            Self::ReplaceNode { .. } => {
+                unreachable!("`commit` lands a replace as two steps")
+            }
             Self::SetSubscription {
                 subscription,
                 to: subscribe,
             } => {
-                let Subscription { event, subscriber } = subscription;
+                let Subscription { event, listener } = subscription;
+                let subscriber = listener.node_id();
                 validate::non_nil_node(event.node_id, Role::SetSubscriptionEmitter)?;
                 validate::non_nil_node(subscriber, Role::SetSubscriptionSubscriber)?;
                 // A subscribe needs both endpoints present. An unsubscribe of a vanished node
@@ -645,6 +675,29 @@ impl GraphIntent {
         Ok(Some(step))
     }
 
+    /// Whether the intent writes the graph itself, not the view of it: what a read-only
+    /// subgraph refuses.
+    const fn writes_graph(&self) -> bool {
+        match self {
+            Self::AddNode { .. }
+            | Self::RemoveNode { .. }
+            | Self::ReplaceNode { .. }
+            | Self::RenameNode { .. }
+            | Self::SetInput { .. }
+            | Self::SetNodeProperty { .. }
+            | Self::SetSubscription { .. } => true,
+            Self::MoveSelection { .. }
+            | Self::SetSelection { .. }
+            | Self::Raise { .. }
+            | Self::SetViewport { .. }
+            | Self::TieWires { .. }
+            | Self::JoinTie { .. }
+            | Self::RemoveTie { .. }
+            | Self::SetTieAngle { .. }
+            | Self::ReleaseWire { .. } => false,
+        }
+    }
+
     /// The held gesture this intent is a frame of, if any.
     pub(crate) const fn gesture(&self) -> Option<GestureId> {
         match self {
@@ -671,12 +724,35 @@ impl GraphIntent {
         library: &Library,
         steps: &mut Vec<UndoStep>,
     ) -> Result<(), IntentError> {
+        if self.writes_graph()
+            && let Some(why) = document.read_only(graph)
+        {
+            return Err(EditRefusal::ReadOnly { why }.into());
+        }
         if let Self::SetViewport { to } = self {
             if !to.is_valid() {
                 return Err(MalformedIntent::InvalidViewport.into());
             }
             document.slot_mut(graph).view.viewport = to;
             return Ok(());
+        }
+        if let Self::ReplaceNode {
+            node_id,
+            with,
+            remap,
+        } = self
+        {
+            return replace(
+                document,
+                graph,
+                library,
+                ReplaceNode {
+                    node_id,
+                    with,
+                    remap,
+                },
+                steps,
+            );
         }
         let Some(step) = self.into_step(document, graph, library)? else {
             return Ok(());
@@ -706,6 +782,67 @@ impl GraphIntent {
         }
         Ok(())
     }
+}
+
+/// The parts of a [`GraphIntent::ReplaceNode`].
+#[derive(Debug)]
+struct ReplaceNode {
+    node_id: NodeId,
+    with: Node,
+    remap: NodeRemap,
+}
+
+/// Commit a replace: the node's removal, with the routes of its wires, then the record
+/// [`CoreGraph::replaced`] makes of it put in where it was, as two steps of one entry. A node the
+/// graph no longer holds is a stale intent; a `with` that does not resolve, a boundary node, or a
+/// placement the set refuses is refused.
+fn replace(
+    document: &mut Document,
+    graph_id: GraphId,
+    library: &Library,
+    replace: ReplaceNode,
+    steps: &mut Vec<UndoStep>,
+) -> Result<(), IntentError> {
+    let ReplaceNode {
+        node_id,
+        with,
+        remap,
+    } = replace;
+    validate::non_nil_node(node_id, Role::RemoveNode)?;
+    let Some(entry) = NodeEntry::capture(document, graph_id, node_id) else {
+        return Ok(());
+    };
+    let (graph, view) = (document.graphs.graph(graph_id), document.view(graph_id));
+    let scope = document.graphs.scope(library, graph_id);
+    validate::resolving_node(scope, &with)?;
+    if with.boundary().is_some()
+        || graph
+            .find(node_id)
+            .is_some_and(|node| node.boundary().is_some())
+    {
+        return Err(EditRefusal::BoundaryNode.into());
+    }
+    document
+        .graphs
+        .admit_nodes(graph_id, [&with])
+        .map_err(EditRefusal::Placement)?;
+    let record = graph.replaced(scope, node_id, with, &remap);
+    let mut ties = TiesDraft::new(view);
+    ties.release(entry.wires());
+    ties.release(entry.ghost_wires());
+    let insertion = SetNode::insertion_in_place(&entry, record);
+    for step in [
+        GraphStep::Node(Box::new(SetNode::removal(entry, ties.finish()))),
+        GraphStep::Node(Box::new(insertion)),
+    ] {
+        let step = UndoStep::Graph {
+            graph: graph_id,
+            step,
+        };
+        step.apply(document);
+        steps.push(step);
+    }
+    Ok(())
 }
 
 /// Put `tie` on each of `wires`' routes, at its crossed piece.

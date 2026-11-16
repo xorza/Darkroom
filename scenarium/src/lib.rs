@@ -58,23 +58,31 @@ pub use graph::graph_set::digest::SubgraphDigest;
 pub use graph::graph_set::{GraphSet, InterfacePort, ProgramShape, UnknownType};
 pub use graph::identity::{
     EventPort, FuncId, GraphId, InputPort, NodeAddr, NodeId, OutputPort, PortId, SubgraphId,
+    TriggerPort,
 };
 pub use graph::instance_path::{InstancePath, InstancePathError};
+pub use graph::interface::EventPorts;
 pub use graph::interface::Interface;
-pub use graph::interface_change::{ChangeSide, InterfaceChange, RefusedBinding, RefusedFate};
+pub use graph::interface_change::{
+    ChangeSide, InterfaceChange, RefusedBinding, RefusedFate, RefusedSubscription,
+};
 pub use graph::manifest::Manifest;
 pub use graph::node::special::{SPECIAL_NODES, SpecialNode};
 pub use graph::node::{Boundary, CacheMode, Node};
 pub use graph::node_decl::NodeDecl;
+pub use graph::node_decl::{EventRef, NodeEvents};
 pub use graph::node_ref::NodeRef;
-pub use graph::ports::{InputDecl, Numbered, OutputDecl, PortList, Ports, PortsError};
+pub use graph::port_map::{NodeRemap, PortMap, PortMapError};
+pub use graph::ports::{EventDecl, InputDecl, Numbered, OutputDecl, PortList, Ports, PortsError};
 pub use graph::program_id::{ProgramId, ProgramIdError};
 pub use graph::reconciled::{GraphSetReconciled, Reconciled, Repair};
 pub use graph::saved_decl::{SavedDecl, SavedEvent, SavedInput, SavedPort, ShownPort};
 pub use graph::scope::Scope;
 pub use graph::subgraph::Subgraph;
-pub use graph::subscription::Subscription;
+pub use graph::subscription::{Listener, Subscription};
+pub use graph::type_names::{TypeNames, TypeRef};
 pub use library::Library;
+pub use library::func_redirect::{FuncRedirect, MAX_REDIRECTS};
 pub use runtime::any_state::AnyState;
 pub use runtime::ctx_manager::CtxManager;
 pub use runtime::log_entry::{LogEntry, LogLevel};

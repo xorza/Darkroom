@@ -40,6 +40,7 @@ use crate::core::document::Document;
 use crate::core::document::graph_view::GraphView;
 use crate::core::document::subgraph_side::SubgraphSide;
 use crate::core::edit::bring_in::Carried;
+use crate::core::edit::subgraph_intent::Update;
 use crate::core::io::document;
 use crate::core::io::document::document_format::DocumentFormat;
 use crate::core::io::document::error::DocumentLoadError;
@@ -185,6 +186,26 @@ impl SharedLibrary {
     /// `entry`'s definition and each one it places, however deep, each after those it places,
     /// with its view: what placing it copies in. Each remembers its digest as the one it last
     /// shared with the library.
+    /// The update of each subgraph of `document` that follows the library and whose library copy
+    /// moved while it stayed as it last synced, in subgraph-id order: what a scan brings a
+    /// follower.
+    pub(crate) fn follower_updates(&self, document: &Document) -> Vec<Update> {
+        document
+            .sides
+            .iter()
+            .filter(|(_, side)| side.follows)
+            .filter_map(|(&id, side)| {
+                let entry = self.entry(id)?;
+                let state = SyncState::of(side.synced, document.graphs.digest(id), entry.digest);
+                (state == SyncState::UpdateAvailable).then(|| Update {
+                    id,
+                    carried: self.carried(entry),
+                    manifest: self.manifest(entry).clone(),
+                })
+            })
+            .collect()
+    }
+
     pub(crate) fn carried(&self, entry: &LibraryEntry) -> Vec<Carried> {
         let document = self.document(entry);
         document
@@ -197,15 +218,15 @@ impl SharedLibrary {
                     .subgraph(id)
                     .expect("a placed subgraph is in its file")
                     .clone();
-                let view = document
-                    .sides
-                    .get(&id)
-                    .map_or_else(|| GraphView::new(&subgraph.graph), |side| side.view.clone());
+                let side = document.sides.get(&id);
+                let view =
+                    side.map_or_else(|| GraphView::new(&subgraph.graph), |side| side.view.clone());
                 Carried {
                     id,
                     subgraph,
                     view,
                     synced: Some(document.graphs.digest(id)),
+                    locked: side.is_some_and(|side| side.locked),
                 }
             })
             .collect()

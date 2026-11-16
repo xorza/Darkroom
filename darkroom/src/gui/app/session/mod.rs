@@ -15,6 +15,7 @@
 //!
 //! [`App`]: crate::gui::app::App
 
+use crate::core::edit::document_request::DocumentRequest;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::open_document::OpenDocument;
 use crate::gui::frame::app_command::AppCommand;
@@ -106,7 +107,22 @@ impl Session {
         library: &Library,
         requests: &mut Requests,
     ) {
-        requests.land(self.open.apply_edit(graph, intent, library));
+        self.apply_edits(
+            [DocumentRequest::Graph { graph, intent }],
+            library,
+            requests,
+        );
+    }
+
+    /// [`Self::apply_edit`] for several edits, of graphs or of the set of them, as one undo
+    /// entry.
+    pub(crate) fn apply_edits(
+        &mut self,
+        edits: impl IntoIterator<Item = DocumentRequest>,
+        library: &Library,
+        requests: &mut Requests,
+    ) {
+        requests.land(self.open.apply_edits(edits, library));
     }
 
     /// Take back the last edit.

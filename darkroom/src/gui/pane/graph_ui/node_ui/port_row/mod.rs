@@ -16,11 +16,10 @@ use palantir::{
     TextStyle, TextWrap, Track, Ui, VAlign, WidgetId, fmt,
 };
 use scenarium::Binding;
-use scenarium::FuncEvent;
-use scenarium::Library;
 use scenarium::NodeId;
 use scenarium::{ConstValue, DataType};
 use scenarium::{GhostBinding, GhostSource, InputState};
+use scenarium::{GraphSet, Library};
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::preview_sink;
@@ -42,7 +41,7 @@ use crate::gui::theme::hover::Hover;
 use crate::gui::widgets::port_glyph;
 use crate::gui::widgets::port_glyph::PortGlyph;
 use crate::gui::widgets::support;
-use scenarium::EventPort;
+use scenarium::{EventPort, EventRef, TriggerPort};
 
 /// Grid columns: inputs (hug), input values (hug, capped at `max_width`, so a very long
 /// editor ellipsizes; the numeric `DragValue` editor caps itself), a fill spacer, then outputs
@@ -62,12 +61,14 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, row_tracks: &mu
     let (theme, node) = (record.node.theme(), record.node);
     // Events list under the outputs in the same column: a row per output and per event. The
     // ghost ports list under the declared ones on their side.
-    let row_count = (node.port_count(PortKind::Input) + node.ghost_inputs().count()).max(
-        node.port_count(PortKind::Output)
-            + node.events().len()
-            + node.ghost_outputs().count()
-            + node.ghost_events().count(),
-    );
+    let row_count =
+        (node.port_count(PortKind::Input) + node.triggers().len() + node.ghost_inputs().count())
+            .max(
+                node.port_count(PortKind::Output)
+                    + node.events().len()
+                    + node.ghost_outputs().count()
+                    + node.ghost_events().count(),
+            );
     if row_count == 0 {
         return;
     }
@@ -125,6 +126,7 @@ impl PortTooltip<'_> {
             return None;
         }
         let type_label = TypeLabel {
+            graphs: &node_ctx.graph_ctx.document().graphs,
             library: node_ctx.graph_ctx.library(),
             data_type,
         };
@@ -164,7 +166,17 @@ fn input_cells(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
         input_label_cell(ui, record, input);
         value_cell(ui, record, input);
     }
-    let declared = node.port_count(PortKind::Input);
+    // Triggers land on the same (left) side, in the rows directly below the data inputs.
+    let input_count = node.port_count(PortKind::Input);
+    for (idx, trigger) in node.triggers().iter().enumerate() {
+        TriggerRow {
+            row: input_count + idx,
+            trigger: TriggerPort::new(node.node_id, trigger.id),
+            name: &trigger.name,
+        }
+        .show(ui, record);
+    }
+    let declared = input_count + node.triggers().len();
     for (idx, ghost) in node.ghost_inputs().enumerate() {
         GhostRow {
             row: declared + idx,
@@ -557,7 +569,7 @@ const PREVIEW_SPAWN_OFFSET: Vec2 = Vec2::new(80.0, -60.0);
 struct EventRow<'a> {
     /// The grid row it sits in.
     row: usize,
-    event: &'a FuncEvent,
+    event: EventRef<'a>,
 }
 
 impl EventRow<'_> {
@@ -582,13 +594,50 @@ impl EventRow<'_> {
             .child_align(VAlign::Center)
             .show(ui, |ui| {
                 // Muted like the data-port labels.
-                Text::new(event.name.as_str())
+                Text::new(event.name)
                     .style(&label_style(ui, theme))
                     .show(ui);
                 PortGlyph::arrow(wid, theme.port.size, fill)
                     .margin(margin)
                     .tooltip(tooltip)
                     .show(ui, theme);
+            });
+    }
+}
+
+/// One trigger an instance or an `Outputs` node hears, in the input column: the event arrow
+/// pointing in, where a subscription from outside the subgraph's boundary lands, and its name.
+#[derive(Debug)]
+struct TriggerRow<'a> {
+    /// The grid row it sits in.
+    row: usize,
+    trigger: TriggerPort,
+    name: &'a str,
+}
+
+impl TriggerRow<'_> {
+    fn show(self, ui: &mut Ui, record: &NodeRecord<'_, '_>) {
+        let Self { row, trigger, name } = self;
+        let (node_ctx, draw_ctx) = (record.node, record.stage.ctx);
+        let theme = node_ctx.theme();
+        let margin = theme.port_margin(PortKind::Input, theme.port.radius());
+        let wid = wid::trigger_glyph(node_ctx.graph_ctx.graph(), trigger);
+        let fill =
+            Hover::from(draw_ctx.geometry().triggers.is_hovered(trigger)).lift(theme.port.event);
+        let tooltip = node_ctx.tooltips().then(|| fmt!(ui, "trigger: {name}"));
+        Panel::hstack()
+            .id_salt(("trigger", trigger.trigger))
+            .grid_cell((grid_row(row), COL_INPUT))
+            .align(Align::LEFT)
+            .size(SizeSpec::HUG)
+            .gap(theme.space.xs)
+            .child_align(VAlign::Center)
+            .show(ui, |ui| {
+                PortGlyph::arrow(wid, theme.port.size, fill)
+                    .margin(margin)
+                    .tooltip(tooltip)
+                    .show(ui, theme);
+                Text::new(name).style(&label_style(ui, theme)).show(ui);
             });
     }
 }
@@ -649,6 +698,7 @@ impl GhostRow<'_> {
             .then(|| match (data_type, node_ctx.ghost()) {
                 (Some(data_type), _) => {
                     let type_label = TypeLabel {
+                        graphs: &graph_ctx.document().graphs,
                         library: graph_ctx.library(),
                         data_type,
                     };
@@ -801,13 +851,14 @@ fn kept_value(ui: &mut Ui, theme: &Theme, value: &ConstValue) {
 }
 
 /// Human-readable type for a port tooltip: a path's kind, mode and extensions
-/// ([`PathType::label`]), and the library's own name for everything else (`any` for the untyped
-/// boundary placeholder, a registered type's name, or "unknown type" for one the library does not
-/// register).
+/// ([`PathType::label`]), and the set's name for everything else ([`GraphSet::type_name`]: `any`
+/// for the untyped boundary placeholder, a registered type's name, the name a file gave a type
+/// the library lacks, or "unknown type").
 ///
 /// Renders on demand, as [`PortTooltip::intern`] feeds it straight to `fmt!`.
 #[derive(Debug)]
 struct TypeLabel<'a> {
+    graphs: &'a GraphSet,
     library: &'a Library,
     data_type: DataType,
 }
@@ -815,8 +866,8 @@ struct TypeLabel<'a> {
 impl Display for TypeLabel<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match PathType::of(self.data_type) {
-            Some(path_type) => path_type.label(self.library).fmt(f),
-            None => f.write_str(self.library.type_name(self.data_type)),
+            Some(path_type) => path_type.label(self.graphs, self.library).fmt(f),
+            None => f.write_str(self.graphs.type_name(self.library, self.data_type)),
         }
     }
 }

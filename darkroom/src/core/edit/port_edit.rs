@@ -15,13 +15,19 @@
 //!   already. Refused: a blank last row on each boundary node as the drop target, a placeholder
 //!   that could be wired to another and name no type.
 
-use scenarium::{ConstValue, DataType, InputDecl, Interface, Numbered, OutputDecl, PortId};
+use scenarium::{
+    ConstValue, DataType, EventDecl, EventPorts, InputDecl, Interface, Numbered, OutputDecl, PortId,
+};
 
 /// Which list of an interface a port is in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum InterfaceSide {
     Inputs,
     Outputs,
+    /// What an instance fires.
+    Events,
+    /// What an instance hears.
+    Triggers,
 }
 
 /// Which way a [`PortEdit::Move`] moves a port in its list.
@@ -62,13 +68,33 @@ pub(crate) enum PortEdit {
         port: PortId,
         value: Option<ConstValue>,
     },
-    /// Add a port at the end of its list, under `port`, a fresh id.
+    /// Add a data port at the end of its list, under `port`, a fresh id.
     Add {
-        side: InterfaceSide,
+        side: DataSide,
         port: PortId,
         name: String,
         data_type: DataType,
     },
+    /// Add an event or a trigger at the end of its list, under `port`, a fresh id.
+    AddEvent {
+        side: EventSide,
+        port: PortId,
+        name: String,
+    },
+}
+
+/// The data lists of an interface, the sides a typed port is added to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DataSide {
+    Inputs,
+    Outputs,
+}
+
+/// The event lists of an interface, the sides an event is added to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EventSide {
+    Events,
+    Triggers,
 }
 
 impl PortEdit {
@@ -76,6 +102,7 @@ impl PortEdit {
     /// not hold, as a stale edit is, and for a default its port's type does not take.
     pub(crate) fn apply(self, interface: &Interface) -> Interface {
         let mut ports = interface.ports().clone();
+        let mut events = interface.event_ports().clone();
         match self {
             Self::Rename { side, port, name } => match side {
                 InterfaceSide::Inputs => {
@@ -87,6 +114,13 @@ impl PortEdit {
                     if let Some(output) = ports.outputs.iter_mut().find(|output| output.id == port)
                     {
                         output.name = name;
+                    }
+                }
+                InterfaceSide::Events | InterfaceSide::Triggers => {
+                    if let Some(event) = event_list(&mut events, side)
+                        .and_then(|list| list.iter_mut().find(|event| event.id == port))
+                    {
+                        event.name = name;
                     }
                 }
             },
@@ -113,6 +147,8 @@ impl PortEdit {
                         output.data_type = data_type;
                     }
                 }
+                // An event carries no type.
+                InterfaceSide::Events | InterfaceSide::Triggers => {}
             },
             Self::Move { side, port, shift } => match side {
                 InterfaceSide::Inputs => {
@@ -121,10 +157,20 @@ impl PortEdit {
                 InterfaceSide::Outputs => {
                     shift_port(&mut ports.outputs, |output| output.id == port, shift);
                 }
+                InterfaceSide::Events | InterfaceSide::Triggers => {
+                    if let Some(list) = event_list(&mut events, side) {
+                        shift_port(list, |event| event.id == port, shift);
+                    }
+                }
             },
             Self::Remove { side, port } => match side {
                 InterfaceSide::Inputs => ports.inputs.retain(|input| input.id != port),
                 InterfaceSide::Outputs => ports.outputs.retain(|output| output.id != port),
+                InterfaceSide::Events | InterfaceSide::Triggers => {
+                    if let Some(list) = event_list(&mut events, side) {
+                        list.retain(|event| event.id != port);
+                    }
+                }
             },
             Self::Default { port, value } => {
                 if let Some(input) = ports.inputs.iter_mut().find(|input| input.id == port) {
@@ -137,15 +183,37 @@ impl PortEdit {
                 name,
                 data_type,
             } => match side {
-                InterfaceSide::Inputs => ports
+                DataSide::Inputs => ports
                     .inputs
                     .push(Numbered::new(port, InputDecl::optional(name, data_type))),
-                InterfaceSide::Outputs => ports
+                DataSide::Outputs => ports
                     .outputs
                     .push(Numbered::new(port, OutputDecl::new(name, data_type))),
             },
+            Self::AddEvent { side, port, name } => {
+                let list = match side {
+                    EventSide::Events => &mut events.events,
+                    EventSide::Triggers => &mut events.triggers,
+                };
+                list.push(Numbered::new(port, EventDecl::new(name)));
+            }
         }
-        Interface::checked(ports).unwrap_or_else(|_| interface.clone())
+        // The events go with the data ports, so an edit of one list keeps the others.
+        Interface::checked(ports)
+            .and_then(|edited| edited.with_event_ports(events))
+            .unwrap_or_else(|_| interface.clone())
+    }
+}
+
+/// The event list of `events` on `side`, or `None` for a data side.
+const fn event_list(
+    events: &mut EventPorts,
+    side: InterfaceSide,
+) -> Option<&mut Vec<Numbered<EventDecl>>> {
+    match side {
+        InterfaceSide::Events => Some(&mut events.events),
+        InterfaceSide::Triggers => Some(&mut events.triggers),
+        InterfaceSide::Inputs | InterfaceSide::Outputs => None,
     }
 }
 
@@ -170,7 +238,7 @@ mod tests {
         ConstValue, DataType, InputDecl, Interface, Numbered, OutputDecl, PortId, Ports,
     };
 
-    use crate::core::edit::port_edit::{InterfaceSide, PortEdit, Shift};
+    use crate::core::edit::port_edit::{DataSide, InterfaceSide, PortEdit, Shift};
 
     fn interface() -> Interface {
         Interface::new(Ports {
@@ -287,7 +355,7 @@ mod tests {
         assert_eq!(set.inputs()[2].default_value, Some(ConstValue::Int(7)));
 
         let added = PortEdit::Add {
-            side: InterfaceSide::Outputs,
+            side: DataSide::Outputs,
             port: id(10),
             name: "more".to_string(),
             data_type: DataType::Bool,
@@ -305,5 +373,67 @@ mod tests {
             .apply(&base),
             base
         );
+    }
+
+    /// An event and a trigger are added at the end of their lists, renamed, moved and removed as a
+    /// data port is, and an edit of the data ports keeps them.
+    #[test]
+    fn events_and_triggers_take_the_edits_their_lists_take() {
+        use crate::core::edit::port_edit::EventSide;
+
+        let id = PortId::new;
+        let events = |interface: &Interface| {
+            let held = interface.event_ports();
+            let names = |list: &[Numbered<scenarium::EventDecl>]| {
+                list.iter()
+                    .map(|event| event.name.clone())
+                    .collect::<Vec<_>>()
+            };
+            (names(&held.events), names(&held.triggers))
+        };
+        let add = |interface: &Interface, side, port, name: &str| {
+            PortEdit::AddEvent {
+                side,
+                port: id(port),
+                name: name.to_string(),
+            }
+            .apply(interface)
+        };
+        let with = add(&interface(), EventSide::Events, 20, "done");
+        let with = add(&with, EventSide::Events, 21, "failed");
+        let with = add(&with, EventSide::Triggers, 30, "go");
+        let strings = |names: &[&str]| names.iter().map(ToString::to_string).collect::<Vec<_>>();
+        assert_eq!(
+            events(&with),
+            (strings(&["done", "failed"]), strings(&["go"]))
+        );
+        let moved = PortEdit::Move {
+            side: InterfaceSide::Events,
+            port: id(21),
+            shift: Shift::Earlier,
+        }
+        .apply(&with);
+        assert_eq!(events(&moved).0, strings(&["failed", "done"]));
+        let renamed = PortEdit::Rename {
+            side: InterfaceSide::Triggers,
+            port: id(30),
+            name: "start".to_string(),
+        }
+        .apply(&with);
+        assert_eq!(events(&renamed).1, strings(&["start"]));
+        let removed = PortEdit::Remove {
+            side: InterfaceSide::Events,
+            port: id(20),
+        }
+        .apply(&with);
+        assert_eq!(events(&removed).0, strings(&["failed"]));
+        let data = PortEdit::Rename {
+            side: InterfaceSide::Inputs,
+            port: id(1),
+            name: "first".to_string(),
+        }
+        .apply(&with);
+        assert_eq!(events(&data), events(&with), "a data edit keeps the events");
+        assert_eq!(names(&data)[0], "first");
     }
 }

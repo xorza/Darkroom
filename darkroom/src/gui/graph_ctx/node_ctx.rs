@@ -2,9 +2,9 @@
 
 use glam::Vec2;
 use scenarium::{
-    CacheMode, DetachReason, EventPort, Func, FuncEvent, GhostNode, GhostSource, GhostWiring,
-    GraphId, InputPort, Node, NodeAddr, NodeDecl, NodeId, PortId, ProgramId, RamUsage, SavedDecl,
-    SubgraphId, Unresolved,
+    CacheMode, DetachReason, EventDecl, EventPort, EventRef, Func, GhostNode, GhostSource,
+    GhostWiring, GraphId, InputPort, Listener, Node, NodeAddr, NodeDecl, NodeEvents, NodeId,
+    Numbered, PortId, ProgramId, RamUsage, SavedDecl, SubgraphId, TriggerPort, Unresolved,
 };
 
 use crate::core::document;
@@ -64,9 +64,7 @@ pub(crate) struct NodeCtx<'a> {
 /// The program node `node` of `graph_ctx`'s graph is in the instance the pane shows: `None` when
 /// it shows none, or for a node with no body, an instance or a boundary node, which emits none.
 fn program_id(graph_ctx: GraphCtx<'_>, node_id: NodeId, node: &Node) -> Option<ProgramId> {
-    graph_ctx
-        .program_id(node_id)
-        .filter(|_| node.cache().is_some())
+    graph_ctx.program_id(node_id).filter(|_| node.has_body())
 }
 
 /// What the last run said about one node of a pane.
@@ -161,7 +159,7 @@ impl<'a> NodeCtx<'a> {
             Err(DetachReason::Unresolved(Unresolved::MissingFunc)) => "missing func",
             Err(DetachReason::Unresolved(Unresolved::MissingSubgraph)) => "missing subgraph",
             Err(DetachReason::Unresolved(Unresolved::NoInterface)) => "boundary outside a subgraph",
-            Err(DetachReason::ExtraBoundary) => "extra boundary node",
+            Err(DetachReason::ExtraOutputs) => "extra Outputs node",
             Err(DetachReason::Recursive) => "subgraph inside itself",
             Err(DetachReason::TooDeep) => "nested too deep",
             Err(DetachReason::TooLarge) => "program too large",
@@ -306,6 +304,17 @@ impl<'a> NodeCtx<'a> {
         from_saved.chain(unknown)
     }
 
+    /// Whether the node draws a ghost pin: a ghost subscription ends on it and it draws no
+    /// subscription pin of its own, as a ghost node, or a node whose func no longer runs as a
+    /// sink. The pin is read off the wiring, as no saved declaration says sink.
+    pub(crate) fn ghost_pinned(self) -> bool {
+        !self.sink()
+            && self
+                .ghost_wiring()
+                .subscriptions()
+                .any(|(subscription, _)| subscription.listener == Listener::Pin(self.node_id))
+    }
+
     /// How many ghosts touch this node, from either end: the count its footer and the inspector
     /// show.
     pub(crate) fn ghost_count(self) -> usize {
@@ -322,8 +331,8 @@ impl<'a> NodeCtx<'a> {
         self.node.disabled
     }
 
-    /// Where this node's output is cached, or `None` for a node with no body. The header's two
-    /// storage chips toggle its RAM and disk bits.
+    /// Where this node's output is cached, or an instance's outputs, or `None` for a boundary
+    /// node. The header's two storage chips toggle its RAM and disk bits.
     pub(crate) const fn cache(self) -> Option<CacheMode> {
         self.node.cache()
     }
@@ -354,13 +363,16 @@ impl<'a> NodeCtx<'a> {
 
     /// Whether the node has an output a cache can key: the one rule behind
     /// the header's RAM/disk storage chips and its eviction chip. An impure
-    /// func has no content digest to key a cache on, and a func with no
-    /// outputs has nothing to store — a ghost node for both reasons at once.
+    /// func has no content digest to key a cache on, and a node with no
+    /// outputs has nothing to store; a ghost node and a boundary node have no
+    /// cache mode. An instance caches the values that leave it.
     pub(crate) fn cacheable(self) -> bool {
+        let Ok(decl) = self.declaration else {
+            return false;
+        };
         self.cache().is_some()
-            && self
-                .func()
-                .is_some_and(|f| !f.outputs().is_empty() && !f.impure())
+            && !decl.outputs().is_empty()
+            && !self.func().is_some_and(Func::impure)
     }
 
     /// Whether Darkroom exposes the disable toggle. Limiting it to runnable
@@ -489,13 +501,28 @@ impl<'a> NodeCtx<'a> {
     /// This node's event (emitter) ports. Events carry no data type — they
     /// are pure triggers — so the declaration is all the UI needs, and the
     /// output column lists them under the data outputs.
-    pub(crate) fn events(self) -> &'a [FuncEvent] {
-        self.declaration.map_or(&[][..], NodeDecl::events)
+    pub(crate) fn events(self) -> NodeEvents<'a> {
+        self.declaration
+            .map_or(NodeEvents::Declared(&[]), NodeDecl::events)
     }
 
     /// The event under `event`, if this node fires one.
-    pub(crate) fn event(self, event: PortId) -> Option<&'a FuncEvent> {
+    pub(crate) fn event(self, event: PortId) -> Option<EventRef<'a>> {
         self.declaration.ok()?.event(event)
+    }
+
+    /// The triggers this node hears: an instance's, and the `Outputs` node's mirror of the
+    /// interface's events. Listed in the input column, under the data inputs.
+    pub(crate) fn triggers(self) -> &'a [Numbered<EventDecl>] {
+        self.declaration.map_or(&[][..], NodeDecl::triggers)
+    }
+
+    /// Every `TriggerPort`, in declaration order: [`Self::event_ports`] for a listener's end.
+    pub(crate) fn trigger_ports(self) -> impl Iterator<Item = TriggerPort> {
+        let node_id = self.node_id;
+        self.triggers()
+            .iter()
+            .map(move |trigger| TriggerPort::new(node_id, trigger.id))
     }
 
     /// How many ports this node declares on `kind`'s side.

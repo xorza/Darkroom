@@ -127,7 +127,7 @@ use crate::graph::reconciled::{Reconciled, Repair};
 use crate::graph::saved_decl::{SavedDecl, SavedEvent, SavedInput, SavedPort, ShownPort};
 use crate::graph::scope::Scope;
 use crate::graph::subgraph::Subgraph;
-use crate::graph::subscription::Subscription;
+use crate::graph::subscription::{Listener, Subscription};
 
 pub(crate) mod binding;
 pub(crate) mod binding_entry;
@@ -145,6 +145,7 @@ pub(crate) mod manifest;
 pub(crate) mod node;
 pub(crate) mod node_decl;
 pub(crate) mod node_ref;
+pub(crate) mod port_map;
 pub(crate) mod ports;
 pub(crate) mod program_id;
 pub(crate) mod reconciled;
@@ -153,6 +154,7 @@ pub(crate) mod scope;
 mod serde;
 pub(crate) mod subgraph;
 pub(crate) mod subscription;
+pub(crate) mod type_names;
 
 /// `Clone` keeps every node id as it is, so a copy is sound only where it never lives beside its
 /// original in one document, as the copy a save rewrites and writes; an editor's duplicate mints
@@ -253,6 +255,15 @@ struct SubscriptionNote {
 pub(crate) struct AdmittedGhosts {
     bindings: Vec<InputPort>,
     subscriptions: Vec<Subscription>,
+}
+
+impl AdmittedGhosts {
+    /// Keep the ghosts that touch `node_id` alone, as an edit of one node restores no other.
+    pub(crate) fn retain_touching(&mut self, node_id: NodeId) {
+        self.bindings.retain(|port| port.node_id == node_id);
+        self.subscriptions
+            .retain(|subscription| subscription.touches(node_id));
+    }
 }
 
 /// Wiring a scope refuses: what a read of a graph under its scope answers, which the write then
@@ -550,7 +561,7 @@ impl Graph {
             self.ghost_wiring.subscription(subscription).is_some(),
             "an admitted ghost subscription is kept"
         );
-        if let Some(node_id) = [subscription.event.node_id, subscription.subscriber]
+        if let Some(node_id) = [subscription.event.node_id, subscription.listener.node_id()]
             .into_iter()
             .find(|node_id| !self.nodes.contains_key(node_id))
         {
@@ -640,9 +651,8 @@ impl Graph {
             }
         }
     }
-    /// Whether this graph may hold `subscription`: the emitter declares the
-    /// event, and the subscriber is another node with a body to run. A subscription stays inside
-    /// one graph: an interface has no event ports.
+    /// Whether this graph may hold `subscription`: the emitter declares the event, and it lands
+    /// on another node: on the pin of one with a body to run, or on a trigger the node hears.
     ///
     /// # Panics
     ///
@@ -652,15 +662,27 @@ impl Graph {
         scope: Scope<'_>,
         subscription: Subscription,
     ) -> Result<(), SubscriptionRejection> {
-        let Subscription { event, subscriber } = subscription;
-        if event.node_id == subscriber {
+        let Subscription { event, listener } = subscription;
+        if event.node_id == listener.node_id() {
             return Err(SubscriptionRejection::SelfSubscription);
         }
-        let subscriber = self
-            .find(subscriber)
-            .expect("an admitted subscription's subscriber is in the graph");
-        if !matches!(subscriber.kind, NodeKind::Body { .. }) {
-            return Err(SubscriptionRejection::BodilessSubscriber);
+        let heard = self
+            .find(listener.node_id())
+            .expect("an admitted subscription's listener is in the graph");
+        match listener {
+            Listener::Pin(_) if !matches!(heard.kind, NodeKind::Body { .. }) => {
+                return Err(SubscriptionRejection::BodilessSubscriber);
+            }
+            Listener::Trigger(trigger)
+                if !heard
+                    .decl(scope)
+                    .triggers()
+                    .iter()
+                    .any(|declared| declared.id == trigger.trigger) =>
+            {
+                return Err(SubscriptionRejection::UndeclaredTrigger);
+            }
+            Listener::Pin(_) | Listener::Trigger(_) => {}
         }
         let emitter = self
             .find(event.node_id)
@@ -870,11 +892,8 @@ impl Graph {
     }
 
     /// Make the subscription, in place of a ghost of it.
-    pub fn subscribe(&mut self, event: EventPort, subscriber: NodeId) {
-        self.set_subscription_state(
-            Subscription::new(event, subscriber),
-            SubscriptionState::Live,
-        );
+    pub fn subscribe(&mut self, event: EventPort, listener: impl Into<Listener>) {
+        self.set_subscription_state(Subscription::new(event, listener), SubscriptionState::Live);
     }
 
     /// End the subscription, a ghost of it included.
@@ -916,7 +935,7 @@ impl Graph {
             }
         }
         for (subscription, _) in self.ghost_wiring.subscriptions() {
-            let ends = [subscription.event.node_id, subscription.subscriber];
+            let ends = [subscription.event.node_id, subscription.listener.node_id()];
             if let Some(node_id) = ends.into_iter().find(|id| !self.holds(*id)) {
                 return Err(GraphValidationError::GhostMissingNode { node_id });
             }
@@ -947,10 +966,10 @@ impl Graph {
                     event: subscription.event,
                 });
             }
-            if !self.nodes.contains_key(&subscription.subscriber) {
+            if !self.nodes.contains_key(&subscription.listener.node_id()) {
                 return Err(GraphValidationError::MissingSubscriber {
                     event: subscription.event,
-                    subscriber: subscription.subscriber,
+                    subscriber: subscription.listener.node_id(),
                 });
             }
         }
@@ -978,15 +997,18 @@ impl Graph {
             }
         }
         if scope.owner().is_some() {
-            for boundary in [Boundary::Inputs, Boundary::Outputs] {
-                let count = self
-                    .nodes
+            let count = |boundary| {
+                self.nodes
                     .values()
                     .filter(|node| node.boundary() == Some(boundary))
-                    .count();
-                if count != 1 {
-                    return Err(GraphValidationError::BoundaryCount { boundary, count });
-                }
+                    .count()
+            };
+            if count(Boundary::Inputs) == 0 {
+                return Err(GraphValidationError::NoInputsNode);
+            }
+            let outputs = count(Boundary::Outputs);
+            if outputs != 1 {
+                return Err(GraphValidationError::OutputsCount { count: outputs });
             }
         }
         for (port, binding) in &self.bindings {
@@ -1050,7 +1072,8 @@ impl Graph {
         });
         let subscriptions = &self.subscriptions;
         self.ghost_wiring.subscriptions.retain(|subscription, _| {
-            let ends_held = held(subscription.event.node_id) && held(subscription.subscriber);
+            let ends_held =
+                held(subscription.event.node_id) && held(subscription.listener.node_id());
             if !ends_held {
                 repairs.push(Repair::DanglingSubscription {
                     subscription: *subscription,
@@ -1097,7 +1120,7 @@ impl Graph {
             false
         });
         self.subscriptions.retain(|subscription| {
-            let ends = [subscription.event.node_id, subscription.subscriber];
+            let ends = [subscription.event.node_id, subscription.listener.node_id()];
             let Some(off) = ends
                 .into_iter()
                 .find(|node_id| !nodes.contains_key(node_id))
@@ -1200,7 +1223,7 @@ impl Graph {
     }
 
     /// The nodes `scope` does not let this graph hold, in node-id order: each node it does not
-    /// resolve, and in a subgraph's graph each boundary node past the lowest id on its side.
+    /// resolve, and in a subgraph's graph each `Outputs` node past the lowest id.
     pub(crate) fn unresolved(&self, scope: Scope<'_>, manifest: &Manifest) -> Vec<Detaching> {
         let mut refused: Vec<Detaching> = self
             .nodes
@@ -1211,17 +1234,15 @@ impl Graph {
             })
             .collect();
         if scope.owner().is_some() {
-            for boundary in [Boundary::Inputs, Boundary::Outputs] {
-                let mut held: Vec<NodeId> = self
-                    .iter()
-                    .filter(|node| node.boundary() == Some(boundary))
-                    .map(|node| node.node_id)
-                    .collect();
-                held.sort_unstable();
-                refused.extend(held.iter().skip(1).map(|node_id| {
-                    self.detaching(scope, manifest, *node_id, DetachReason::ExtraBoundary)
-                }));
-            }
+            let mut held: Vec<NodeId> = self
+                .iter()
+                .filter(|node| node.boundary() == Some(Boundary::Outputs))
+                .map(|node| node.node_id)
+                .collect();
+            held.sort_unstable();
+            refused.extend(held.iter().skip(1).map(|node_id| {
+                self.detaching(scope, manifest, *node_id, DetachReason::ExtraOutputs)
+            }));
         }
         refused.sort_unstable_by_key(|detaching| detaching.node_id);
         refused
@@ -1320,7 +1341,9 @@ impl Graph {
                 } => {
                     self.subscriptions.remove(&subscription);
                     reconciled.repairs.push(match rejection {
-                        SubscriptionRejection::UndeclaredEvent => {
+                        // An interface that loses the event or the trigger may regain it.
+                        SubscriptionRejection::UndeclaredEvent
+                        | SubscriptionRejection::UndeclaredTrigger => {
                             self.ghost_wiring
                                 .subscriptions
                                 .insert(subscription, GhostSubscription::default());

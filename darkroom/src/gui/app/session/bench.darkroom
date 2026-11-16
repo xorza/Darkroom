@@ -3,28 +3,60 @@
         graphs: (
             main: (
                 nodes: {
-                    ("bbc78216-1118-4ec7-ad7e-5d4175fcecd2"): (
+                    ("8c44e556-5072-44fc-8802-9ae2feec2421"): (
                         kind: Body(
-                            source: Func(("ef0c2661-8553-4302-9251-95b2d383af19")),
-                            cache: r#None,
+                            source: Func(("ace786f9-8a02-4ed1-93a0-ad67bf0680f8")),
+                            cache: Both,
                         ),
-                        name: "scnr",
+                        name: "ml_denoise",
                         disabled: false,
                     ),
-                    ("7e110fc6-8391-48bc-b07b-c970827bcdd2"): (
+                    ("0d921c89-28c0-445f-a759-33f28164085e"): (
                         kind: Body(
-                            source: Func(("c15248e0-006a-4a4a-9aae-b1fc7886dea1")),
-                            cache: r#None,
-                        ),
-                        name: "auto_stretch",
-                        disabled: false,
-                    ),
-                    ("2b827f10-a3a1-4d54-bb25-a40133b3a18c"): (
-                        kind: Body(
-                            source: Func(("06b169d2-d3d8-43fb-ba80-c566fcffea44")),
+                            source: Func(("0c17bcbe-d757-43be-b184-27b429e8b434")),
                             cache: Ram,
                         ),
-                        name: "print",
+                        name: "save_image",
+                        disabled: true,
+                    ),
+                    ("609d124e-47c7-43c1-adef-32db510ac421"): (
+                        kind: Body(
+                            source: Func(("0c17bcbe-d757-43be-b184-27b429e8b434")),
+                            cache: Ram,
+                        ),
+                        name: "save_image",
+                        disabled: true,
+                    ),
+                    ("41884f76-a80f-4bb9-82c4-83e5016d37a9"): (
+                        kind: Body(
+                            source: Func(("7d08e8c7-fd22-46d4-bb86-c0bd3c9e76fe")),
+                            cache: r#None,
+                        ),
+                        name: "Preview",
+                        disabled: false,
+                    ),
+                    ("043a77db-9446-4ded-9231-8bac95b7fe12"): (
+                        kind: Body(
+                            source: Func(("ebe9a4d0-2cb1-4354-b66e-8e7bee7cb860")),
+                            cache: r#None,
+                        ),
+                        name: "brightness_contrast",
+                        disabled: false,
+                    ),
+                    ("f74c1e36-8888-4301-95b1-95e194e106c7"): (
+                        kind: Body(
+                            source: Func(("60c31a76-eed4-467c-9ba3-5c89d294a91b")),
+                            cache: Both,
+                        ),
+                        name: "remove_stars",
+                        disabled: false,
+                    ),
+                    ("fabb092d-f756-441d-b6f5-1d1e629beda1"): (
+                        kind: Body(
+                            source: Func(("975cc74b-8412-4293-b2cb-ef8d41fdd9b3")),
+                            cache: Ram,
+                        ),
+                        name: "blend",
                         disabled: false,
                     ),
                     ("12981187-f976-4192-8f54-bc3c4523544e"): (
@@ -35,20 +67,28 @@
                         name: "build_masters",
                         disabled: false,
                     ),
+                    ("7e110fc6-8391-48bc-b07b-c970827bcdd2"): (
+                        kind: Body(
+                            source: Func(("c15248e0-006a-4a4a-9aae-b1fc7886dea1")),
+                            cache: r#None,
+                        ),
+                        name: "auto_stretch",
+                        disabled: false,
+                    ),
+                    ("bbc78216-1118-4ec7-ad7e-5d4175fcecd2"): (
+                        kind: Body(
+                            source: Func(("ef0c2661-8553-4302-9251-95b2d383af19")),
+                            cache: r#None,
+                        ),
+                        name: "scnr",
+                        disabled: false,
+                    ),
                     ("2067de48-57e0-4900-b589-32320647bb55"): (
                         kind: Body(
                             source: Func(("7d08e8c7-fd22-46d4-bb86-c0bd3c9e76fe")),
                             cache: r#None,
                         ),
                         name: "ml_denoise",
-                        disabled: false,
-                    ),
-                    ("fd576928-3f2a-4ba9-9d38-1be67824652f"): (
-                        kind: Body(
-                            source: Func(("ebe9a4d0-2cb1-4354-b66e-8e7bee7cb860")),
-                            cache: r#None,
-                        ),
-                        name: "brightness_contrast",
                         disabled: false,
                     ),
                     ("5fcd3fd1-6bb5-4241-ab6e-d4397a454896"): (
@@ -67,44 +107,20 @@
                         name: "Run on Event",
                         disabled: false,
                     ),
-                    ("f69f0aa7-6de4-4660-8dc5-1ec9f19d18de"): (
+                    ("20380988-300d-4857-af58-7497acd6848a"): (
                         kind: Body(
-                            source: Func(("0c17bcbe-d757-43be-b184-27b429e8b434")),
-                            cache: Ram,
-                        ),
-                        name: "save_image",
-                        disabled: true,
-                    ),
-                    ("f74c1e36-8888-4301-95b1-95e194e106c7"): (
-                        kind: Body(
-                            source: Func(("60c31a76-eed4-467c-9ba3-5c89d294a91b")),
-                            cache: Both,
-                        ),
-                        name: "remove_stars",
-                        disabled: false,
-                    ),
-                    ("efc228bd-27f8-455a-8e22-97dbd688a2c6"): (
-                        kind: Body(
-                            source: Func(("7d08e8c7-fd22-46d4-bb86-c0bd3c9e76fe")),
+                            source: Func(("8854cccc-81d3-4e26-8b4f-e33d62e3117b")),
                             cache: r#None,
                         ),
-                        name: "brightness_contrast",
+                        name: "Concat",
                         disabled: false,
                     ),
-                    ("043a77db-9446-4ded-9231-8bac95b7fe12"): (
+                    ("fd576928-3f2a-4ba9-9d38-1be67824652f"): (
                         kind: Body(
                             source: Func(("ebe9a4d0-2cb1-4354-b66e-8e7bee7cb860")),
                             cache: r#None,
                         ),
                         name: "brightness_contrast",
-                        disabled: false,
-                    ),
-                    ("25b00fb1-cdc1-4b3f-b927-1aa43b072784"): (
-                        kind: Body(
-                            source: Func(("b02f5c42-7bda-48f6-81dd-81338efbb126")),
-                            cache: Disk,
-                        ),
-                        name: "stack_lights",
                         disabled: false,
                     ),
                     ("e156726f-3c5b-4d41-bbeb-380773608e40"): (
@@ -115,53 +131,37 @@
                         name: "blend",
                         disabled: false,
                     ),
-                    ("20380988-300d-4857-af58-7497acd6848a"): (
+                    ("25b00fb1-cdc1-4b3f-b927-1aa43b072784"): (
                         kind: Body(
-                            source: Func(("8854cccc-81d3-4e26-8b4f-e33d62e3117b")),
-                            cache: r#None,
+                            source: Func(("b02f5c42-7bda-48f6-81dd-81338efbb126")),
+                            cache: Disk,
                         ),
-                        name: "Concat",
+                        name: "stack_lights",
                         disabled: false,
                     ),
-                    ("41884f76-a80f-4bb9-82c4-83e5016d37a9"): (
+                    ("2b827f10-a3a1-4d54-bb25-a40133b3a18c"): (
+                        kind: Body(
+                            source: Func(("06b169d2-d3d8-43fb-ba80-c566fcffea44")),
+                            cache: Ram,
+                        ),
+                        name: "print",
+                        disabled: false,
+                    ),
+                    ("efc228bd-27f8-455a-8e22-97dbd688a2c6"): (
                         kind: Body(
                             source: Func(("7d08e8c7-fd22-46d4-bb86-c0bd3c9e76fe")),
                             cache: r#None,
                         ),
-                        name: "Preview",
+                        name: "brightness_contrast",
                         disabled: false,
                     ),
-                    ("609d124e-47c7-43c1-adef-32db510ac421"): (
+                    ("f69f0aa7-6de4-4660-8dc5-1ec9f19d18de"): (
                         kind: Body(
                             source: Func(("0c17bcbe-d757-43be-b184-27b429e8b434")),
                             cache: Ram,
                         ),
                         name: "save_image",
                         disabled: true,
-                    ),
-                    ("0d921c89-28c0-445f-a759-33f28164085e"): (
-                        kind: Body(
-                            source: Func(("0c17bcbe-d757-43be-b184-27b429e8b434")),
-                            cache: Ram,
-                        ),
-                        name: "save_image",
-                        disabled: true,
-                    ),
-                    ("fabb092d-f756-441d-b6f5-1d1e629beda1"): (
-                        kind: Body(
-                            source: Func(("975cc74b-8412-4293-b2cb-ef8d41fdd9b3")),
-                            cache: Ram,
-                        ),
-                        name: "blend",
-                        disabled: false,
-                    ),
-                    ("8c44e556-5072-44fc-8802-9ae2feec2421"): (
-                        kind: Body(
-                            source: Func(("ace786f9-8a02-4ed1-93a0-ad67bf0680f8")),
-                            cache: Both,
-                        ),
-                        name: "ml_denoise",
-                        disabled: false,
                     ),
                 },
                 bindings: [
@@ -482,7 +482,7 @@
                             node_id: ("5fcd3fd1-6bb5-4241-ab6e-d4397a454896"),
                             event: 2,
                         ),
-                        subscriber: ("5fb6630e-e3aa-4f4d-9b48-d8ee886a2efc"),
+                        listener: Pin(("5fb6630e-e3aa-4f4d-9b48-d8ee886a2efc")),
                     ),
                 ],
                 ghost_nodes: {},
@@ -1317,6 +1317,21 @@
                 ],
                 events: [],
             ),
+        },
+        types: {
+            Custom(("4512544e-537c-4c1c-96ad-e596cc88d60d")): "Detection",
+            Custom(("63cd4de9-b82f-4829-bea5-391da64e296f")): "Registration",
+            Custom(("843bff16-61ec-47db-9a86-64bb53c9c1cc")): "Combine",
+            Custom(("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2")): "Image",
+            Custom(("b08bb9a1-db12-43d4-aa57-fe3e3732e917")): "Stretch",
+            Custom(("cb80e688-a5ed-42fd-9087-6a9639a8b056")): "Scnr",
+            Custom(("db1bc978-1d0b-4ffc-9a74-6220eff8908e")): "Masters",
+            Enum(("3360655d-16af-47d8-a1bb-7ef0b3f0ddf9")): "Clamp",
+            Enum(("54d531cf-d353-4e30-8ea7-8823a9b5305f")): "BlendMode",
+            Enum(("6d9db73e-5c92-4332-af0d-b2eb7c95acd0")): "ConversionFormat",
+            FileKind(("404e04fb-f5c4-43dd-9ee0-684ab9b16200")): "Image",
+            FileKind(("48ace2a5-0d6c-423c-a67c-48108930fd37")): "Camera RAW",
+            FileKind(("5bea0866-9834-4ddd-be25-4c4c5fe6d3c5")): "ONNX model",
         },
     ),
 )

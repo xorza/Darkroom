@@ -69,7 +69,7 @@ pub struct SavedEvent {
 /// A declaration as a document last saw it: its name, its category, and its ports and events
 /// in the order it showed them. What a [`Manifest`](crate::Manifest) holds of each func a file
 /// names, and what a [`GhostNode`](crate::GhostNode) holds of the node it was.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SavedDecl {
     pub name: String,
     /// Empty for a declaration with none: a subgraph's.
@@ -147,7 +147,7 @@ impl NodeDecl<'_> {
                     Numbered::new(
                         event.id,
                         SavedEvent {
-                            name: event.name.clone(),
+                            name: event.name.to_owned(),
                         },
                     )
                 })

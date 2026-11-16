@@ -8,7 +8,6 @@ use thiserror::Error;
 
 use crate::graph::graph_set::ProgramShape;
 use crate::graph::identity::{EventPort, GraphId, InputPort, NodeId, OutputPort};
-use crate::graph::node::Boundary;
 use crate::graph::program_id::ProgramId;
 use crate::graph::subscription::Subscription;
 
@@ -56,8 +55,8 @@ pub enum Unresolved {
 pub enum DetachReason {
     #[error(transparent)]
     Unresolved(#[from] Unresolved),
-    #[error("its subgraph already holds a boundary node on that side")]
-    ExtraBoundary,
+    #[error("its subgraph already holds an Outputs node")]
+    ExtraOutputs,
     #[error("it places a subgraph inside itself")]
     Recursive,
     #[error("it nests subgraphs past {max} levels", max = ProgramId::MAX_LEN)]
@@ -114,6 +113,8 @@ pub enum SubscriptionRejection {
     SelfSubscription,
     #[error("the subscriber has no body to run: it is an instance or a boundary node")]
     BodilessSubscriber,
+    #[error("the listener does not hear that trigger")]
+    UndeclaredTrigger,
 }
 
 /// A graph that is not one a host may compile: its structure is broken, or it
@@ -163,8 +164,10 @@ pub enum GraphValidationError {
     },
     #[error("the wire into {port:?} closes a data cycle")]
     Cycle { port: InputPort },
-    #[error("the subgraph holds {count} {boundary:?} nodes rather than one")]
-    BoundaryCount { boundary: Boundary, count: usize },
+    #[error("the subgraph holds no Inputs node")]
+    NoInputsNode,
+    #[error("the subgraph holds {count} Outputs nodes rather than one")]
+    OutputsCount { count: usize },
     #[error("instance {node_id:?} places a subgraph inside itself")]
     Recursive { node_id: NodeId },
     #[error("the graph nests {levels} levels, past {max}", max = ProgramId::MAX_LEN)]

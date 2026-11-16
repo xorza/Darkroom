@@ -2,7 +2,7 @@ use palantir::{PointerButton, PointerEvent, PointerWake, Ui};
 use scenarium::{Binding, Boundary, GraphId, InputPort, Interface, OutputPort, PortId, SubgraphId};
 
 use crate::core::edit::graph_intent::GraphIntent;
-use crate::core::edit::port_edit::{InterfaceSide, PortEdit};
+use crate::core::edit::port_edit::{DataSide, PortEdit};
 use crate::core::edit::subgraph_intent::SubgraphIntent;
 use crate::gui::frame::requests::Requests;
 use crate::gui::frame::stage::Stage;
@@ -333,13 +333,16 @@ fn exposed_on_boundary(ui: &mut Ui, ctx: CanvasCtx<'_>, start: PortRef) -> Optio
         PortKind::Input => Boundary::Inputs,
     };
     let body = graph_ctx.body();
+    // A subgraph may hold several `Inputs` nodes; any of them takes the drop.
     let boundary = body
         .iter()
-        .find(|node| node.boundary() == Some(wanted))?
+        .filter(|node| node.boundary() == Some(wanted) && node.node_id != start.node_id)
+        .find(|node| {
+            geometry
+                .node_screen_rect(node.node_id)
+                .is_some_and(|rect| rect.contains(pointer))
+        })?
         .node_id;
-    if boundary == start.node_id || !geometry.node_screen_rect(boundary)?.contains(pointer) {
-        return None;
-    }
     let decl = body.find(start.node_id)?.decl(graph_ctx.scope());
     let interface = &graph_ctx.document().graphs.subgraph(subgraph)?.interface;
     let (edit, wire) = match start.kind {
@@ -348,7 +351,7 @@ fn exposed_on_boundary(ui: &mut Ui, ctx: CanvasCtx<'_>, start: PortRef) -> Optio
             let port = PortId::mint(|id| interface.ports().output(id).is_some());
             (
                 PortEdit::Add {
-                    side: InterfaceSide::Outputs,
+                    side: DataSide::Outputs,
                     port,
                     name: output.name.clone(),
                     data_type: output.data_type,
@@ -368,7 +371,7 @@ fn exposed_on_boundary(ui: &mut Ui, ctx: CanvasCtx<'_>, start: PortRef) -> Optio
             let port = PortId::mint(|id| interface.ports().input(id).is_some());
             (
                 PortEdit::Add {
-                    side: InterfaceSide::Inputs,
+                    side: DataSide::Inputs,
                     port,
                     name: input.name.clone(),
                     data_type: input.data_type,

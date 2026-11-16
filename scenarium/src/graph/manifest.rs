@@ -14,7 +14,8 @@
 //! - **What a load learns from it, it moves onto what needs it**: a ghost node's saved
 //!   declaration, a ghost's saved port. So a definition with its ghosts is one value in a clip,
 //!   an undo step and a library file. Refused: missing funcs' declarations in a table of the
-//!   set, which a subgraph travels without.
+//!   set, which a subgraph travels without. The names of types are the exception
+//!   ([`TypeNames`]): an id names one type for good, so the set keeps them aside.
 
 use std::collections::BTreeMap;
 
@@ -22,15 +23,28 @@ use serde::{Deserialize, Serialize};
 
 use crate::graph::identity::FuncId;
 use crate::graph::saved_decl::SavedDecl;
+use crate::graph::type_names::TypeNames;
 
-/// The saved declaration of each func a file's graphs name, as the library gave it at the save.
+/// The saved declaration of each func a file's graphs name, and the name of each type its ports
+/// name, as the library gave them at the save.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Manifest {
     #[serde(deserialize_with = "crate::graph::serde::deserialize_manifest_funcs")]
     funcs: BTreeMap<FuncId, SavedDecl>,
+    types: TypeNames,
 }
 
 impl Manifest {
+    /// The name of each registered type the file's ports name.
+    pub const fn types(&self) -> &TypeNames {
+        &self.types
+    }
+
+    /// This manifest naming its types as `types` does.
+    pub(crate) fn with_types(self, types: TypeNames) -> Self {
+        Self { types, ..self }
+    }
+
     /// The saved declaration of func `id`, if the file named a func under it.
     pub fn func(&self, id: FuncId) -> Option<&SavedDecl> {
         self.funcs.get(&id)
@@ -57,6 +71,9 @@ impl FromIterator<(FuncId, SavedDecl)> for Manifest {
         for (id, saved) in funcs {
             held.entry(id).or_insert(saved);
         }
-        Self { funcs: held }
+        Self {
+            funcs: held,
+            types: TypeNames::default(),
+        }
     }
 }

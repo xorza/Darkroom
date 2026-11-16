@@ -286,3 +286,51 @@ fn the_focused_rows_ink_keeps_its_contrast_on_the_tint() {
     let ratio = contrast(theme.colors.accent, theme.card.fill);
     assert!(ratio >= 4.5, "a resting match is {ratio:.2}:1 on the popup");
 }
+
+/// A subgraph's pane lists an `Inputs` node, which a pick adds with no binding; the main graph's
+/// does not, as it has no interface.
+#[test]
+fn only_a_subgraphs_pane_lists_an_inputs_node() {
+    use scenarium::{Boundary, GraphId, Interface, Subgraph, SubgraphId};
+
+    use crate::core::document::internals::insert_subgraph;
+    use crate::core::edit::graph_intent::GraphIntent;
+    use crate::gui::graph_ctx::internals::GraphCtxFixture;
+    use crate::gui::pane::graph_ui::gesture::new_node_ui::node_palette::{
+        NodePalette, Opening, PaletteEntry,
+    };
+
+    let mut fixture = DocumentFixture::default();
+    let id = SubgraphId::from_u128(1);
+    insert_subgraph(
+        &mut fixture.document,
+        id,
+        Subgraph::new("inner", Interface::default()),
+    );
+    let fixture = GraphCtxFixture::over(fixture);
+    let lists_inputs = |graph| {
+        let palette = NodePalette {
+            graph_ctx: fixture.graph_ctx_of(graph, palantir::Display::default()),
+            pos: Vec2::ZERO,
+            scroll_cap: 100.0,
+            opening: Opening::Standing,
+            replacing: false,
+        };
+        let inputs: Vec<_> = palette
+            .entries()
+            .filter(|entry| matches!(entry, PaletteEntry::Inputs))
+            .collect();
+        if let [entry] = inputs.as_slice() {
+            let pick = palette.add(*entry);
+            let GraphIntent::AddNode { node, bindings, .. } = pick.add else {
+                panic!("a pick adds a node");
+            };
+            assert_eq!(node.boundary(), Some(Boundary::Inputs));
+            assert!(bindings.is_empty());
+            assert!(pick.subgraphs.is_empty());
+        }
+        inputs.len()
+    };
+    assert_eq!(lists_inputs(GraphId::Subgraph(id)), 1);
+    assert_eq!(lists_inputs(GraphId::Main), 0);
+}

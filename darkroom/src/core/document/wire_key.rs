@@ -26,7 +26,9 @@ impl WireKey {
     pub(crate) const fn ends(self) -> [NodeId; 2] {
         match self {
             Self::Data(DataWire { output, input }) => [output.node_id, input.node_id],
-            Self::Event(subscription) => [subscription.event.node_id, subscription.subscriber],
+            Self::Event(subscription) => {
+                [subscription.event.node_id, subscription.listener.node_id()]
+            }
         }
     }
 

@@ -255,14 +255,14 @@ impl WirePass<'_, '_, '_> {
         for s in graph_ctx.subscriptions() {
             let (Some(p0), Some(p3)) = (
                 geometry.events.center(s.event),
-                geometry.subs.center(s.subscriber),
+                geometry.listener_center(s.listener),
             ) else {
                 continue;
             };
             let key = WireKey::Event(s);
             let hover = Hover::from(
                 geometry.events.is_hovered(s.event)
-                    || geometry.subs.is_hovered(s.subscriber)
+                    || geometry.listener_hovered(s.listener)
                     || self.lit == Some(key)
                     || wid::lit_by_tie(ui, graph_ctx.graph(), graph_ctx.view(), key),
             );
@@ -285,8 +285,7 @@ impl WirePass<'_, '_, '_> {
 impl WirePass<'_, '_, '_> {
     /// Paint every ghost wire and ghost subscription of the current scene broken into the ghost
     /// dash, between the ports and ghost ports it names, through the ties it was in. The breaker
-    /// cuts one as it cuts a wire, clearing what the input holds or the edge. A ghost whose end
-    /// shows no glyph, as an edge to a ghost node, which has no pin, paints nothing.
+    /// cuts one as it cuts a wire, clearing what the input holds or the edge.
     pub(crate) fn draw_ghost_wires(&mut self, ui: &mut Ui) {
         let (theme, graph_ctx, geometry) = (
             self.draw_ctx.theme(),
@@ -335,7 +334,7 @@ impl WirePass<'_, '_, '_> {
         for (s, _) in ghosts.subscriptions() {
             let (Some(p0), Some(p3)) = (
                 geometry.event_center(s.event),
-                geometry.subs.center(s.subscriber),
+                geometry.listener_center(s.listener),
             ) else {
                 continue;
             };
@@ -343,7 +342,7 @@ impl WirePass<'_, '_, '_> {
             let hover = Hover::from(
                 geometry.ghost_events.is_hovered(s.event)
                     || geometry.events.is_hovered(s.event)
-                    || geometry.subs.is_hovered(s.subscriber)
+                    || geometry.listener_hovered(s.listener)
                     || self.lit == Some(key)
                     || wid::lit_by_tie(ui, graph_ctx.graph(), graph_ctx.view(), key),
             );

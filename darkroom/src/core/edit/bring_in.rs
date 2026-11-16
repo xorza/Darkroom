@@ -36,6 +36,8 @@ pub(crate) struct Carried {
     pub(crate) subgraph: Subgraph,
     pub(crate) view: GraphView,
     pub(crate) synced: Option<SubgraphDigest>,
+    /// Its author's lock, which travels with every copy.
+    pub(crate) locked: bool,
 }
 
 /// What a [`bring_in`] adds, in an order whose insertions each hold, and the id each carried
@@ -112,9 +114,15 @@ pub(crate) fn bring_in(
             let side = SubgraphSide {
                 view: definition.view,
                 synced: definition.synced,
+                locked: definition.locked,
                 ..SubgraphSide::new(&subgraph.graph)
             };
-            NewSubgraph { id, subgraph, side }
+            NewSubgraph {
+                id,
+                subgraph,
+                side,
+                type_names: manifest.types().clone(),
+            }
         })
         .collect();
     BroughtIn { subgraphs, ids }
@@ -248,6 +256,7 @@ mod tests {
                 subgraph,
                 view,
                 synced: None,
+                locked: false,
             }],
             &Manifest::default(),
         );

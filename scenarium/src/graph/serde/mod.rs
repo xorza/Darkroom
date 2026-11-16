@@ -20,6 +20,7 @@ use crate::graph::node::Node;
 use crate::graph::saved_decl::SavedDecl;
 use crate::graph::subgraph::Subgraph;
 use crate::graph::subscription::Subscription;
+use crate::graph::type_names::TypeRef;
 
 /// A table whose key is a struct travels as a sequence of `(key, value)` pairs.
 pub(super) fn serialize_pairs<K: Serialize, V: Serialize, S: Serializer>(
@@ -102,6 +103,15 @@ pub(super) fn deserialize_manifest_funcs<'de, D: Deserializer<'de>>(
 ) -> Result<BTreeMap<FuncId, SavedDecl>, D::Error> {
     deserializer.deserialize_map(UniqueMapVisitor {
         what: "func id",
+        entry: PhantomData,
+    })
+}
+
+pub(super) fn deserialize_type_names<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<BTreeMap<TypeRef, String>, D::Error> {
+    deserializer.deserialize_map(UniqueMapVisitor {
+        what: "type",
         entry: PhantomData,
     })
 }

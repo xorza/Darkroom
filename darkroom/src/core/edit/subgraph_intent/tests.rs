@@ -1,7 +1,7 @@
 use glam::Vec2;
 use scenarium::{
-    Binding, Boundary, DataType, GraphId, InputDecl, InputPort, Interface, Library, Node, Numbered,
-    OutputPort, PortId, Ports, Subgraph, SubgraphId,
+    Binding, DataType, GraphId, InputDecl, InputPort, Interface, Library, Node, Numbered,
+    OutputPort, PortId, Ports, Subgraph, SubgraphId, TypeNames,
 };
 
 use crate::core::document::Document;
@@ -63,6 +63,7 @@ fn a_definition_comes_and_goes_with_its_side_unless_placed() {
             id,
             subgraph: subgraph.clone(),
             side: side.clone(),
+            type_names: TypeNames::default(),
         })),
     )
     .unwrap();
@@ -105,7 +106,7 @@ fn an_interface_edit_drops_wires_and_their_ties_in_every_graph_and_undo_restores
     let a = PortId::new(1);
     let mut subgraph = Subgraph::new("inner", inputs(vec![input(1, "a"), input(2, "b")]));
     let inside = subgraph.graph.add(fixture.plain_node());
-    let inputs_node = subgraph.boundary_node(Boundary::Inputs);
+    let inputs_node = subgraph.inputs_node();
     let inner_input = InputPort::new(inside, PortId::new(1));
     let inner_wire = WireKey::Data(DataWire {
         output: OutputPort::new(inputs_node, a),

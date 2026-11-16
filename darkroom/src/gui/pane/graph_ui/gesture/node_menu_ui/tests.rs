@@ -18,8 +18,9 @@ const SURFACE: UVec2 = UVec2::new(1600, 900);
 const RUN: usize = 0;
 const DUPLICATE: usize = 1;
 const DUPLICATE_WITH_INCOMING: usize = 2;
-const REMOVE: usize = 3;
-const ROW_COUNT: usize = 4;
+/// Replace with… sits between the duplicates and Remove.
+const REMOVE: usize = 4;
+const ROW_COUNT: usize = 5;
 
 /// Open the menu on `on`, click its `row`th item, and return the intents the picking frame
 /// raised. The open and the pick are separate frames because the menu has to record before an
@@ -46,22 +47,43 @@ fn open_menu(h: &mut CanvasHarness, on: NodeId) -> Vec<WidgetId> {
     h.menu_rows(anchor)
 }
 
-/// A ghost node neither runs nor copies, so its menu offers only Remove — which
-/// removes it.
+/// A ghost node neither runs nor copies, so its menu offers Replace with… and Remove: Remove
+/// removes it, and Replace with… opens the palette, edits nothing, and a pick there raises the
+/// Replace dialog for the ghost node, not an added node.
 #[test]
-fn a_ghost_nodes_menu_offers_only_remove() {
+fn a_ghost_nodes_menu_offers_replace_and_remove() {
     let mut fixture = DocumentFixture::probes(1);
     let ghost = fixture.add_ghost_node(DocumentFixture::missing_node());
     let mut h = CanvasHarness::shaping_text(fixture, SURFACE);
     h.document_mut().main_view.selected = [ghost].map(ItemId::Node).into_iter().collect();
 
     let rows = open_menu(&mut h, ghost);
-    assert_eq!(rows.len(), 1, "Remove is the one row");
-    h.ui.click(rows[0]);
+    assert_eq!(rows.len(), 2, "Replace with… and Remove");
+    h.ui.click(rows[1]);
     let intents = h.frame();
     assert!(
         matches!(intents[..], [GraphIntent::RemoveNode { node_id }] if node_id == ghost),
         "{intents:?}"
+    );
+
+    let rows = open_menu(&mut h, ghost);
+    h.ui.click(rows[0]);
+    assert!(h.frame().is_empty(), "Replace with… edits nothing");
+    h.frame();
+    assert!(
+        h.graph_ui.gestures.new_node_ui.in_flight(),
+        "the palette opens"
+    );
+    h.ui.key(palantir::Key::Enter);
+    let intents = h.frame();
+    assert!(intents.is_empty(), "{intents:?}");
+    assert!(
+        matches!(
+            h.commands[..],
+            [AppCommand::ProposeReplace { node_id, .. }] if node_id == ghost
+        ),
+        "{:?}",
+        h.commands
     );
 }
 

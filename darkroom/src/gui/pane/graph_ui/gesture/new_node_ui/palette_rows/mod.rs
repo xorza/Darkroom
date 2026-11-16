@@ -22,6 +22,7 @@ pub(super) enum PaletteRow {
         id: SubgraphId,
         digest: SubgraphDigest,
     },
+    Inputs,
 }
 
 /// What the palette's rows are read from: the library's funcs, the document's subgraphs and the
@@ -57,6 +58,7 @@ impl PaletteRow {
                     entry,
                     shared: sources.shared,
                 }),
+            Self::Inputs => Some(PaletteEntry::Inputs),
         }
     }
 }

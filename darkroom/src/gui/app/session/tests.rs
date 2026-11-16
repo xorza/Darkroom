@@ -449,7 +449,7 @@ fn a_click_in_one_pane_selects_nothing_in_a_copy_beside_it() {
 #[test]
 fn a_wire_dropped_on_the_outputs_node_adds_an_interface_output() {
     use palantir::PointerButton;
-    use scenarium::{Boundary, InputPort, Interface, Subgraph, SubgraphId};
+    use scenarium::{InputPort, Interface, Subgraph, SubgraphId};
 
     use crate::core::document::internals::insert_subgraph;
     use crate::gui::port_ref::PortRef;
@@ -458,7 +458,7 @@ fn a_wire_dropped_on_the_outputs_node_adds_an_interface_output() {
     let id = SubgraphId::from_u128(1);
     let mut subgraph = Subgraph::new("inner", Interface::default());
     let inside = subgraph.graph.add(fixture.plain_node());
-    let outputs = subgraph.boundary_node(Boundary::Outputs);
+    let outputs = subgraph.outputs_node();
     insert_subgraph(&mut fixture.document, id, subgraph);
     let graph = GraphId::Subgraph(id);
     let fixture = fixture.with_tab(TabRef::Graph(graph));
@@ -515,14 +515,14 @@ fn a_wire_dropped_on_the_outputs_node_adds_an_interface_output() {
 /// boundary node's removal, which writes nothing.
 #[test]
 fn a_refused_edit_raises_its_status_line() {
-    use scenarium::{Boundary, Interface, Subgraph, SubgraphId};
+    use scenarium::{Interface, Subgraph, SubgraphId};
 
     use crate::core::document::internals::insert_subgraph;
 
     let mut fixture = DocumentFixture::default();
     let id = SubgraphId::from_u128(1);
     let subgraph = Subgraph::new("inner", Interface::default());
-    let inputs = subgraph.boundary_node(Boundary::Inputs);
+    let inputs = subgraph.inputs_node();
     insert_subgraph(&mut fixture.document, id, subgraph);
     let mut test = SessionHarness::new(fixture);
     test.requests.push_graph(
@@ -534,7 +534,7 @@ fn a_refused_edit_raises_its_status_line() {
     assert!(
         matches!(
             commands.as_slice(),
-            [AppCommand::Warn(line)] if line == "a subgraph keeps its Inputs and Outputs nodes"
+            [AppCommand::Warn(line)] if line == "a subgraph keeps one Outputs node and at least one Inputs node"
         ),
         "{commands:?}"
     );

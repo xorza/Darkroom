@@ -26,6 +26,7 @@ use crate::graph::func::FuncBehavior;
 use crate::graph::func::event::EventLambda;
 use crate::graph::func::lambda::FuncLambda;
 use crate::graph::identity::FuncRef;
+use crate::graph::instance_path::InstancePath;
 use crate::graph::node::CacheMode;
 use crate::graph::node::special::SpecialNode;
 use crate::graph::program_id::ProgramId;
@@ -142,6 +143,15 @@ impl CompiledGraph {
     /// node seed a run" and "does a report naming this node belong to this install".
     pub fn contains(&self, program_id: ProgramId) -> bool {
         self.node(program_id).is_some()
+    }
+
+    /// Each program node inside the instances `path` names, the nodes of nested instances
+    /// included, in id order.
+    pub fn program_ids_within(&self, path: InstancePath) -> impl Iterator<Item = ProgramId> {
+        self.program_ids
+            .iter()
+            .copied()
+            .filter(move |program_id| program_id.ids().starts_with(path.ids()))
     }
 
     /// Whether any program node persists its value to disk, so a run of this program has a disk

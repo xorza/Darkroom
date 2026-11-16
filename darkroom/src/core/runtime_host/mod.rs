@@ -272,19 +272,26 @@ impl RuntimeHost {
     }
 
     /// Compile `graphs`, and name each program node of the authored node `addr` it holds work
-    /// for, refusing when it holds none.
+    /// for, refusing when it holds none: for an instance, each program node inside it, as its
+    /// cache mode reaches the values that leave it and a clear reaches what it holds.
     fn compiled_for_node(
         &mut self,
         graphs: &GraphSet,
         addr: NodeAddr,
     ) -> Result<NodeWork, NoCompiledWork> {
         let compiled = self.compile(graphs);
-        let program_ids: Vec<ProgramId> = graphs
-            .instances(addr.graph)
-            .into_iter()
-            .map(|path| path.node(addr.node_id))
-            .filter(|&program_id| compiled.contains(program_id))
-            .collect();
+        let instance = graphs
+            .graph(addr.graph)
+            .find(addr.node_id)
+            .is_some_and(|node| node.subgraph().is_some());
+        let mut program_ids: Vec<ProgramId> = Vec::new();
+        for path in graphs.instances(addr.graph) {
+            if instance {
+                program_ids.extend(compiled.program_ids_within(path.child(addr.node_id)));
+            } else if compiled.contains(path.node(addr.node_id)) {
+                program_ids.push(path.node(addr.node_id));
+            }
+        }
         if program_ids.is_empty() {
             Err(NoCompiledWork)
         } else {

@@ -78,6 +78,10 @@ fn file_menu(bar: &mut MenuBarMenus<'_>, out: &mut Requests) {
             }
         }
         MenuSeparator::new().show(ui);
+        if item(ui, "Pack Resources", None, true) {
+            out.push_app(AppCommand::File(FileCommand::PackResources));
+        }
+        MenuSeparator::new().show(ui);
         if item(ui, "Preferences", None, true) {
             out.push_view(DockOperation::OpenTab {
                 tab: TabRef::Preferences,

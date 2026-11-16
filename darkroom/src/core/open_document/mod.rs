@@ -30,7 +30,6 @@ use crate::core::edit::document_request::DocumentRequest;
 use crate::core::edit::edit_facts::{EditFacts, Touched};
 use crate::core::edit::error::IntentError;
 use crate::core::edit::gesture_id::GestureId;
-use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::step::undo_step::UndoStep;
 use crate::core::edit::undo_history::UndoHistory;
 use crate::core::io::document;
@@ -140,16 +139,16 @@ impl OpenDocument {
         self.history.can_redo()
     }
 
-    /// Apply a single `intent` and record it as its own undo entry, for edits raised outside a
-    /// frame's drain, such as a file-picker result. No-ops are dropped, like the in-frame drain.
+    /// Apply `edits`, of any graphs, and record them as one undo entry, for edits raised outside
+    /// a frame's drain, such as a file-picker result. No-ops are dropped, like the in-frame
+    /// drain.
     #[must_use]
-    pub(crate) fn apply_edit(
+    pub(crate) fn apply_edits(
         &mut self,
-        graph: GraphId,
-        intent: GraphIntent,
+        edits: impl IntoIterator<Item = DocumentRequest>,
         library: &Library,
     ) -> EditFacts {
-        self.commit([DocumentRequest::Graph { graph, intent }], library)
+        self.commit(edits, library)
     }
 
     /// Take everything `requests` holds for this document and apply it.

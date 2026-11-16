@@ -245,7 +245,9 @@ impl GraphUi {
         // The menu records every frame whatever comes of it, as its popup's lifecycle depends on
         // it. Everything a pick means goes onto the requests, so a frame with both a menu pick
         // and a chip click raises both.
-        gestures.node_menu.record(ui, stage);
+        if let Some(node_id) = gestures.node_menu.record(ui, stage) {
+            gestures.new_node_ui.open_replacing(ui, node_id);
+        }
         gestures.tie_menu.record(ui, stage, &self.ties);
     }
 

@@ -132,7 +132,7 @@ impl Fragment {
         }
         fragment.subscriptions = held
             .subscriptions()
-            .filter(|subscription| inside.contains(&subscription.subscriber))
+            .filter(|subscription| inside.contains(&subscription.listener.node_id()))
             .filter(|subscription| {
                 incoming == IncomingWires::Keep || inside.contains(&subscription.event.node_id)
             })
@@ -227,7 +227,9 @@ impl Fragment {
         let subscription = |subscription: Subscription| {
             Subscription::new(
                 EventPort::new(node(subscription.event.node_id), subscription.event.event),
-                node(subscription.subscriber),
+                subscription
+                    .listener
+                    .on(node(subscription.listener.node_id())),
             )
         };
         let wire = |wire: DataWire| DataWire {

@@ -63,9 +63,9 @@ impl<'a> Scope<'a> {
                 source: BodySource::Special(special),
                 ..
             } => Ok(NodeDecl::Func(special.func())),
-            NodeKind::Instance(subgraph_id) => self
+            NodeKind::Instance { subgraph, .. } => self
                 .graphs
-                .subgraph(subgraph_id)
+                .subgraph(subgraph)
                 .map(NodeDecl::Instance)
                 .ok_or(Unresolved::MissingSubgraph),
             NodeKind::Boundary(side) => self
