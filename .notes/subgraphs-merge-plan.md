@@ -18,8 +18,8 @@ the shape changes that keep behavior, then the features. Temporary: deleted once
 | 8 | The window shows a pane per graph | `21b98e664`, pushed |
 | 9 | Edit subgraphs | `032799367`, pushed |
 | 10 | Move node sets | `fc633c202`, pushed |
-| 11 | Share subgraphs | in the worktree |
-| 12 | | to do |
+| 11 | Share subgraphs | `3d4a7ce7d`, pushed |
+| 12 | Export with resources | in the worktree |
 
 ## Rules for the series
 
@@ -314,10 +314,14 @@ state: in sync, update available, changed here, changed in both. Update from Lib
 undoable edit; Publish to Library arms, then confirms, in the pane header. `darkroom` takes
 `notify`.
 
-- Owns: `darkroom/src/core/shared_library/`, `core/io/preferences/`, `core/edit/step/set_side.rs`,
-  `core/status_log/mod.rs`, `gui/frame/app_ctx.rs`, `gui/pane/preferences.rs`, the rest of
-  `pane_header.rs` and `palette_rows/`.
-- About +1 000 / −80.
+- Owns: `darkroom/src/core/shared_library/`, `core/io/preferences/`, `core/status_log/mod.rs`,
+  `core/edit/step/{set_side,set_definition}.rs`, `core/edit/subgraph_intent/`,
+  `core/edit/bring_in.rs`, `core/document/{mod,subgraph_side}.rs`, `core/open_document/mod.rs`
+  (but the archive), `gui/frame/{app_ctx,doc_ctx,app_command}.rs`, `gui/graph_ctx/`,
+  `gui/pane/{preferences,interface_card,inspector}.rs`, `gui/pane/graph_ui/{mod,pane_header}.rs`,
+  `gesture/new_node_ui/`, `gui/app/{mod,session/}` (but Export), `darkroom/Cargo.toml` and
+  `Cargo.lock` (`notify`).
+- About +1 460 / −70.
 
 ### 12. Export with resources
 
@@ -376,6 +380,12 @@ What the series' last tree holds where the tip holds otherwise.
   on a copy of the document first and a clip that does not fit pastes nothing, its `PasteError` on
   the status bar, where the tip queues it unchecked and a clip naming a func the library lacks
   panics as a malformed intent; `GraphIntent` and `NewSubgraph` derive `Clone` for it (commit 10).
+- **`darkroom/src/core/edit/bring_in.rs`:** a definition brought in is reconciled against the
+  library, a node it cannot hold kept as a stub, where the tip takes it in as written and a
+  compile panics on it (commit 11).
+- **`darkroom/src/core/shared_library/{mod,tests}.rs`:** a library file's subgraph with no side is
+  shared by none and carried in a row, where the tip indexes the side and panics
+  (`a_subgraph_with_no_side_in_a_library_file_is_carried_in_a_row`, commit 11).
 - **`darkroom/src/core/edit/graph_intent/tests.rs`:** `an_add_past_a_placement_bound_is_refused`,
   which names the depth the add would reach (commits 6 and 9).
 - **`darkroom/src/core/edit/graph_intent/mod.rs`:** the module doc says an intent folds into a
