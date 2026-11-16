@@ -13,6 +13,8 @@
 //!   graph no compile accepts.
 //! - **A collapse keeps the nodes' ids** inside the new definition, a graph of its own; an expand
 //!   mints fresh ones, as its nodes join a graph that may hold them already.
+//! - **Collapse and Expand are inverses**, as Blender's Make Group and Ungroup and ComfyUI's
+//!   convert and unpack.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 

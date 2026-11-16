@@ -1,3 +1,11 @@
+//! The editor's window: the surround around the dock and a pane per open graph.
+//!
+//! # Decisions
+//!
+//! - **A graph pane's state is per graph.** Each open graph has its own `GraphUi`: its geometry,
+//!   its gestures and the revision its caches were swept at. One pointer still makes one drag, as a
+//!   gesture latches on its own canvas.
+
 pub(crate) mod dock_panes;
 pub(crate) mod menu_bar;
 pub(crate) mod status_bar;

@@ -1,4 +1,11 @@
 //! [`DocCtx`]: the frame's world and the open document, for the surfaces around the panes.
+//!
+//! # Decisions
+//!
+//! - **The window reads the document, a pane reads one graph.** `DocCtx` is what the surround and
+//!   the dock take; `GraphCtx` adds one graph, its view, its instance path and its camera, each
+//!   resolved once when the context is made, so every accessor stays a field read. Refused: one
+//!   context that is both, which fixes "the graph" for the whole window.
 
 use std::collections::BTreeSet;
 

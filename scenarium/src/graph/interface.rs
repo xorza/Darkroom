@@ -1,4 +1,10 @@
 //! [`Interface`]: the ports a subgraph shows, on its instances and its boundary nodes.
+//!
+//! # Decisions
+//!
+//! - **A const-only input takes a wire from a const-only `Inputs` port, and from nothing else.**
+//!   An instance holds only a constant there, so the compile lowers the wire to that constant.
+//! - **An interface has no event ports**, so a subscription stays inside one graph.
 
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};

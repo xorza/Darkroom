@@ -79,7 +79,9 @@ pub(crate) enum ViewCommand {
     SaveImage,
     /// Frame `graph` in its pane, as the canvas toolbar's button, the menu and the status bar's
     /// link ask. The canvas raises the camera move as it next readies a pass, over that frame's
-    /// selection.
+    /// selection. It names its graph, so a toolbar chip frames its own pane and the menu the
+    /// active one: the active graph read when the command runs framed whichever pane last took an
+    /// edit.
     Frame { graph: GraphId, framing: Framing },
     /// Convert `program_id`'s stored image at full resolution, its longest edge capped to `max_dim`,
     /// as [`PreviewStore::convert_full`] does: a viewer raises it for an image it found

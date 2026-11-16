@@ -60,6 +60,9 @@
 //! - **A data cycle is broken in node-id order.** A depth-first walk from each
 //!   node in id order removes each wire that returns to the current path, so
 //!   every load makes the same choice. Only a hand-edited file holds one.
+//! - **A wire through an instance ties every output to every input** in the
+//!   cycle check, which reads nodes and not ports. Cost: a loop through two
+//!   ports that share nothing inside is refused, as Blender refuses it.
 //! - **An output's type is its declaration.** No output is a wildcard, so no
 //!   edit retypes a distant wire and every wire is checkable. No func declares
 //!   an `Any` output; the `Inputs` node of a subgraph shows one for a port made

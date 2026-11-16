@@ -172,6 +172,13 @@ arguments after a `--`; each submodule runs its own.
   with the library and reports it; the edit gate keeps the document
   consistent after that. At run time and in each frame, code asserts the
   document is valid and does not check it again or fall back.
+- **No value held by shared ownership is serialized.** A write copies the value once per
+  holder and a read gives each holder its own, so the sharing the type states is gone; a serialized
+  type holds the value itself, or an id into a table written once. Refused: serde's `rc` feature,
+  which "does not preserve identity and may result in multiple copies of the same data"
+  ([feature flags](https://serde.rs/feature-flags.html#rc)) and which Cargo's feature unification
+  turns on for every `Rc` and `Arc` in every crate; `#[serde(with)]` through the pointer, which
+  leaves a heap value inside a type.
 - **Raw bytes are lowercase hex in text.** A serialized field of bytes, a
   digest or a byte string, takes `#[serde(with = "common::hex_bytes")]`: a
   text format writes two hex digits a byte, as blake3, git and `Cargo.lock`
@@ -217,6 +224,20 @@ One word, one meaning, in the workspace crates; the submodules keep their own.
   ([Ubuntu units policy](https://wiki.ubuntu.com/UnitsPolicy)).
 - **A run time under 1 µs reads in ns**, and one above 0 that prints as `0ns` reads `<1ns`, so
   time taken never reads as none.
+- **A subgraph is a graph with an interface, held by a document**, and a node of it an
+  *instance*. Its *boundary nodes*, `Inputs` and `Outputs`, show its *interface*, the ports it
+  has. The main graph and the subgraphs are the *graph set*. Refused: "group", which stays free
+  for visual node groups; "function", as a `Func` is a library declaration with a lambda.
+- **A declaration is what a node resolves to**: a func, a subgraph for its instance, or a
+  subgraph for one of its boundary nodes; its *ports* are the inputs and outputs it shows.
+- **A program node is a node of the compiled program**, and an authored node inside a subgraph
+  makes one per instance; an *instance path* is the instances from the main graph down to a graph.
+- **A stub is a node its graph cannot hold**, kept in that graph as the record a detach leaves.
+- **A side is what the editor keeps beside one subgraph**: its view, the instance its pane shows
+  it through, and its place in the library. The *active graph* is the one the window's commands
+  act on; a *fragment* is a set of nodes as Duplicate, Copy, Paste, Collapse and Expand move it.
+- **The library folder holds what documents share**; `Library` stays scenarium's registry of
+  funcs and types, and a *file kind* is a registered set of file extensions under a name.
 - **The surround is the editor's menu bar, tab strip and status bar**;
   `chrome` is palantir's `Chrome` alone, a widget's fill, border, radii and
   shadow. Refused: chrome for the surround, and frame, which is one pass of the

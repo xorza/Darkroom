@@ -7,6 +7,11 @@
 //! - **The count of uses shows once it passes one**: an edit here changes every one of them, and
 //!   Grasshopper's users report "no visual sign of entanglement"
 //!   ([forum](https://discourse.mcneel.com/t/cluster-disentangled-without-notice/57955)).
+//! - **The count of uses sits here, not on the instance**, whose header has no room for it beside
+//!   its title and marks; Make Unique stands beside it.
+//! - **Publish asks in the header**, naming the file it writes and, when the library changed too,
+//!   that it overwrites those changes: one click arms it, a second writes. Refused: a modal dialog
+//!   for one yes or no beside the link that asked it.
 
 use palantir::{
     Align, Configure, DockOperation, FontWeight, Panel, Spacing, Text, TextStyle, Ui, WidgetId, fmt,

@@ -5,6 +5,11 @@
 //!   duplicates one data-block. A deep copy is Make Unique again, one level in.
 //! - **It lowers to ordinary requests**: the copy coming in, then each picked instance pointed at
 //!   it, in one batch, so one history entry.
+//! - **Duplicate and paste make another instance; Make Unique gives the picked ones a definition
+//!   of their own.** As Blender, Grasshopper ("the two instances of the cluster will be entangled")
+//!   and ComfyUI, whose subgraphs are "linked rather than duplicated" ([release
+//!   notes](https://blog.comfy.org/p/subgraph-official-release)). Refused: a copy by default, as
+//!   Nuke's Group, where ten copies of one pipeline are ten graphs to fix.
 
 use scenarium::{GraphId, NodeId, SubgraphId};
 

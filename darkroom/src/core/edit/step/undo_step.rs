@@ -1,4 +1,9 @@
 //! The undo history's whole vocabulary.
+//!
+//! # Decisions
+//!
+//! - **An intent and an undo step name their graph.** `GraphIntent` keeps its vocabulary and
+//!   travels with a `GraphId`; a step writes one graph and its view, borrowed apart from the rest.
 
 use scenarium::GraphId;
 use serde::{Deserialize, Serialize};

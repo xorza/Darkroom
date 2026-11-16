@@ -24,7 +24,14 @@
 //!
 //! - **The compile flattens; plan and execute see no hierarchy.** An instance and a boundary
 //!   node emit nothing, and each node inside an instance is a program node of its own, named by
-//!   its [`ProgramId`]: so each caches, reports and is seeded as any node is.
+//!   its [`ProgramId`]: so each caches, reports and is seeded as any node is. A binding that
+//!   reaches an instance or a boundary node is replaced by what the other side holds until it
+//!   names a func's output, a constant or nothing, so a passthrough costs nothing and output
+//!   demand prunes across the boundary. As Unreal expands each macro instance "into a unique set
+//!   of nodes during compilation".
+//!
+//! - **A disabled instance disables every node inside it.** An instance has no cache mode: the
+//!   nodes inside carry their own.
 //!
 //! **The sort comes first.** [`Graph::iter`](crate::Graph::iter) is a `HashMap` walk, so its order is not one an
 //! artifact may depend on. Sorting the ids *before* emitting anything settles the dense index

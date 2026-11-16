@@ -11,6 +11,10 @@
 //!   document then serializes, copying the list once per port.
 //! - **A file type is a registered file kind and a mode.** The mode decides the kind of value,
 //!   one path or several, and the dialog that picks it; the kind decides which files it holds.
+//!   The kind is registered, not the whole file type, so "Image" is one entry for the port that
+//!   opens one, the port that opens several and the port that saves; a kind with no extensions
+//!   is every file. As Apple's type identifiers, each a registered id with its extensions
+//!   ([uniform type identifiers](https://developer.apple.com/documentation/uniformtypeidentifiers)).
 //! - **Each kind of registered type has its own id type and its own table**, so the variant in a
 //!   type and the entry in the registry cannot disagree. Refused: one `TypeId` for all, which
 //!   needed an assert at each registration that the two agree.

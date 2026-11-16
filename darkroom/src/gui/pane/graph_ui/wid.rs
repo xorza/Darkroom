@@ -9,6 +9,11 @@
 //!
 //! A leaf, apart from the modules that record the widgets: the geometry rebuild, the gestures,
 //! the test harness, and the inspector all derive ids here for widgets they never record.
+//!
+//! # Decisions
+//!
+//! - **An authored thing is keyed by its graph and its node id, a run-time thing by its program
+//!   id**, as a copy of a definition keeps its node ids, so two open panes can hold the same one.
 
 use palantir::{Ui, WidgetId};
 use scenarium::{GraphId, NodeId};

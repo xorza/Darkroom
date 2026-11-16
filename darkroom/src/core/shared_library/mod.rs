@@ -11,6 +11,23 @@
 //!   and keeps what it read in memory: a place copies from it and an update reads it with no
 //!   disk read. A file that does not load is listed with its error; an id two files hold is one
 //!   entry when their digests are equal and one per file when not.
+//! - **A document keeps a copy of each library subgraph it uses**, and of those that one places,
+//!   under the same ids, so it opens anywhere. As Blender's Append, "the asset and all its
+//!   dependencies will be Appended (copied) into the current file" ([asset
+//!   browser](https://docs.blender.org/manual/en/latest/editors/asset_browser.html)), and Houdini's
+//!   definitions saved in the scene. Refused: a link, as Nuke's gizmo, where a script stores "only
+//!   the gizmo's name and control settings": the document then needs the library beside it, and a
+//!   result changes with a file it does not hold.
+//! - **A shared file holds no code**: its subgraphs are graphs over the built-in funcs, and a
+//!   func the receiver lacks comes in as a stub inside the subgraph, as in any document.
+//! - **Update from Library is an undoable edit; Publish to Library asks first.** An Update keeps
+//!   each instance's bindings, which name ports by id; a Publish replaces the definition inside the
+//!   library file, leaves its main graph, and writes the file whole or not at all. As Simulink's
+//!   Restore Link and Push Link ([disable or break
+//!   links](https://www.mathworks.com/help/simulink/ug/disable-links-to-library-blocks.html)) and
+//!   Houdini's Match Current Definition and Save Node Type.
+//! - **A copy remembers the digest it last shared with the library** ([`SyncState`]). Refused:
+//!   version numbers, which order two copies and say nothing of a third made beside them.
 
 pub(crate) mod scanner;
 

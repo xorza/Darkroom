@@ -1,4 +1,16 @@
 //! [`SubgraphIntent`]: an edit of the document's set of graphs, rather than of one graph.
+//!
+//! # Decisions
+//!
+//! - **A subgraph edit is a document edit**: one undo history, and the change is in every
+//!   instance at once, with no publish step inside a document. As Houdini, where "other instances
+//!   of the same asset will get the same changes" ([editing
+//!   assets](https://www.sidefx.com/docs/houdini/assets/edit.html)). Refused: a draft with Apply, a
+//!   mode to enter and leave.
+//! - **An edit of the set of graphs is a request of its own**, committed into the same history
+//!   entry as the graph edits of its batch, so a collapse, its new definition and the instance that
+//!   places it are one undo. Refused: a graph intent on the main graph that writes other graphs,
+//!   which hides what it touches.
 
 use std::mem;
 

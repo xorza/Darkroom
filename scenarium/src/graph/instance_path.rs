@@ -1,4 +1,10 @@
 //! [`InstancePath`]: the instances from the main graph down to one expansion of a graph.
+//!
+//! # Decisions
+//!
+//! - **An instance is named by its instance path, not by a program id.** An instance emits no
+//!   program node, so the path down to it is its whole address: what a compile expands under and
+//!   what a pane shows through.
 
 use std::cmp::Ordering;
 use std::fmt;

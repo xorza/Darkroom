@@ -24,7 +24,11 @@ use crate::graph::subgraph::Subgraph;
 /// A node's id, unique inside its graph: an authored node is addressed by its graph and its id
 /// ([`NodeAddr`]). As ComfyUI, where a node id is "local to its immediate graph level"
 /// ([subgraphs](https://docs.comfy.org/custom-nodes/js/subgraphs)), so a copy of a subgraph
-/// keeps its node ids and stays equal to its source.
+/// keeps its node ids and stays equal to its source, as Blender's plain tree copy keeps its node
+/// identifiers
+/// ([persistent node identifiers](https://projects.blender.org/archive/blender-archive/commit/90ea1b76434fe175)).
+/// Refused: ids unique across the document, a rule a file can break with no sound repair, and one
+/// that makes every copy mint ids and differ from its source for good.
 pub type NodeId = Id<Node>;
 /// A declaration's id in the library, not anything in a document.
 pub type FuncId = Id<Func>;

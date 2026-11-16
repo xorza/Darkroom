@@ -1,4 +1,11 @@
 //! [`Stub`]: a node its graph cannot hold, kept with its wiring and why.
+//!
+//! # Decisions
+//!
+//! - **Why a node was detached is kept with its stub**, apart from why a node does not resolve: a
+//!   node detached for a rule across graphs, a loop or a bound, resolves, so the reason cannot be
+//!   read off it again. Every stub whose node resolves is attached at the next load, and the load
+//!   decides again.
 
 use ::serde::{Deserialize, Serialize};
 

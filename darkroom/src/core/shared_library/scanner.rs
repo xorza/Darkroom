@@ -1,4 +1,10 @@
 //! [`LibraryScanner`]: the library as the last scan read it, kept current off the frame.
+//!
+//! # Decisions
+//!
+//! - **The folder is watched through `notify`**, the workspace's watcher in `common::fs`, so a
+//!   library file another window writes is listed again with no restart. Refused: a poll of the
+//!   folder's times, which reads the disk every frame or answers late.
 
 use std::fmt;
 use std::path::{Path, PathBuf};

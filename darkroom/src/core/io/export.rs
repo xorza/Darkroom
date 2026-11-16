@@ -7,7 +7,14 @@
 //! - **An export is a library document**: the definitions, the exported one marked shared, and a
 //!   main graph holding one instance of it, where its author may wire it to sample inputs. As
 //!   Blender's asset library file, an ordinary blend-file. With a file bundled it is one
-//!   `.darkroomz`; with none, a document of either form.
+//!   `.darkroomz`, as Blender packs external files into the blend-file
+//!   ([packed data](https://docs.blender.org/manual/en/latest/files/blend/packed_data.html));
+//!   with none, a document of either form. Refused: a folder of the document and its files, as
+//!   Unreal's Migrate writes, which is two things to send.
+//! - **A path the receiver must choose is an interface input.** Its value sits on the instance,
+//!   outside the definition, and an export has nothing to strip.
+//! - **Export is a Graph menu command on the selected instance, else the subgraph the pane
+//!   shows**, beside Make Unique and Remove Unused, and asks in a modal dialog, as Save does.
 
 use std::collections::BTreeSet;
 

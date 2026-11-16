@@ -1,4 +1,20 @@
 //! [`ProgramId`]: the id of a program node, which is its path.
+//!
+//! # Decisions
+//!
+//! - **A program node's id is its path**: the instances from the main graph down, then the node.
+//!   It is unique by construction, the same on every compile, and reads back as the place to show;
+//!   in the program's sorted order one instance's nodes are one run. As ComfyUI's execution id, "a
+//!   list of all subgraph node IDs, followed by the actual original node ID"
+//!   ([subgraphs](https://docs.comfy.org/custom-nodes/js/subgraphs)). Refused: a hash of the path,
+//!   as Blender's compute context hash
+//!   ([`BLI_compute_context.hh`](https://projects.blender.org/archive/blender-archive/src/commit/5cc793912efe4432b51cc7ddda4005c56fcbc93b/source/blender/blenlib/BLI_compute_context.hh)),
+//!   which the program would hold beside the path it still needs to name a failed node; a root
+//!   node's own id beside hashed inner ones, which a file can make collide.
+//! - **A program id is a value of its own, its path held inline**, bounded by
+//!   [`ProgramShape::MAX_LEVELS`](crate::ProgramShape::MAX_LEVELS), so reports, seeds, evictions
+//!   and viewer tabs carry it with no allocation. It sits with the authored addresses, so the
+//!   authoring model imports nothing of the execution side.
 
 use std::cmp::Ordering;
 use std::fmt;

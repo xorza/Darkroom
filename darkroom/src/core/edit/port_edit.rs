@@ -1,5 +1,19 @@
 //! [`PortEdit`]: one change of a subgraph's interface, as the inspector and the boundary nodes
 //! raise it.
+//!
+//! # Decisions
+//!
+//! - **A port's type is inferred when the port is made, then held as its declaration**: the first
+//!   wire names the type, the name and the default, a collapse reads them off each crossing wire,
+//!   and the inspector changes one on request. As Blender's hollow socket. Refused: a type derived
+//!   from the inner wiring on every edit, where removing the last inner wire breaks wires on
+//!   instances in other graphs; a type picked by hand first, as Unreal's Function Input ([material
+//!   function
+//!   expressions](https://dev.epicgames.com/documentation/unreal-engine/material-function-expressions-in-unreal-engine)),
+//!   two picks where a drag is one.
+//! - **A wire from `Inputs` to `Outputs` is an ordinary wire**, as the port it leaves has a type
+//!   already. Refused: a blank last row on each boundary node as the drop target, a placeholder
+//!   that could be wired to another and name no type.
 
 use scenarium::{ConstValue, DataType, InputDecl, Interface, OutputDecl, PortId};
 

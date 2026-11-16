@@ -1,4 +1,11 @@
 //! [`Fragment`]: a set of nodes of one graph, with what joins them, as it moves.
+//!
+//! # Decisions
+//!
+//! - **One fragment is what Duplicate, Copy, Paste, Collapse and Expand move**: a set of nodes
+//!   with the wires among them, their places and their ties, given ids and landed in a graph.
+//!   Duplicate is a capture and a paste into the same graph, as Unreal's graph editors duplicate by
+//!   copying and pasting the selection. Refused: the copy written out once per command, five times.
 
 use std::collections::{BTreeSet, HashMap};
 use std::mem;

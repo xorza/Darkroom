@@ -24,6 +24,28 @@
 //!   `Subgraph`, which puts the editor's layout in the framework; a `GraphSet` generic over what
 //!   a host keeps beside a subgraph, which threads a type parameter through the scope and the
 //!   compile.
+//! - **The window has one active graph**, the graph of the pane that last took input: the menu
+//!   bar, the status bar, the selection's inspector and each shortcut act on it, and an edit that
+//!   removes it hands that to the main graph. A picked tab is input on its pane, so the menus act
+//!   on the graph whose tab was just picked. As VS Code's active editor, the one that "currently
+//!   has focus"
+//!   ([`window.activeTextEditor`](https://code.visualstudio.com/api/references/vscode-api)).
+//!   Refused: the main graph's selection as the one selection; the active graph moved only by an
+//!   edit, which leaves the menus on a pane no longer in front.
+//! - **One pane per graph, shown through one instance.** The main graph has its tab and each
+//!   subgraph at most one, whose `through` names the instance whose statuses, previews and timings
+//!   it shows; opened from the palette it shows none. As Blender's Tab and ComfyUI's navigation
+//!   bar.
+//! - **Entering is navigation.** A double click on an instance, a name in the pane header and the
+//!   status bar's link to a failure inside raise one `Enter`, which sets the side's `through`,
+//!   opens or focuses the tab and makes the graph active, recording nothing. Refused: an undoable
+//!   step, as the camera and the tabs stay out of the history.
+//! - **An undo brings the graph it changes to the front** when its tab is open, and the status
+//!   bar names it when not, so no undo changes only what is off screen.
+//! - **An unused subgraph stays until removed**: the palette marks it, and the Graph menu's
+//!   Remove Unused clears them, outermost first, in one entry. Refused: removal with the last
+//!   instance, which loses work in Blender unless a fake user is set. Cost: a collapse and an
+//!   expand leave one behind.
 
 pub(crate) mod error;
 pub(crate) mod graph_revision;

@@ -19,6 +19,12 @@
 //! the completed summary is the authority that corrects it at the end.
 //!
 //! [`App`]: crate::gui::app::App
+//!
+//! # Decisions
+//!
+//! - **An instance shows the worst status inside it and the time summed**, and its footer names
+//!   the node that failed ([`InstanceRunState`]). Each report is folded into the instances above it
+//!   when it lands, not read off the graph each frame.
 
 pub(crate) mod run_outcome;
 

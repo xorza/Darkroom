@@ -1,4 +1,10 @@
 //! [`EditFacts`]: what a landed edit changed of the document's shape.
+//!
+//! # Decisions
+//!
+//! - **An edit says which graph it touched**: none, one, or several ([`Touched`]). A pane lays
+//!   out again for its own graph alone, and an interface edit, which changes ports in every graph
+//!   that places an instance, says several.
 
 use std::ops::{BitOr, BitOrAssign};
 
