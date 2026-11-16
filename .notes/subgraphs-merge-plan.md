@@ -17,8 +17,9 @@ the shape changes that keep behavior, then the features. Temporary: deleted once
 | 7 | The editor holds every graph of a document | `69549dbfb`, pushed |
 | 8 | The window shows a pane per graph | `21b98e664`, pushed |
 | 9 | Edit subgraphs | `032799367`, pushed |
-| 10 | Move node sets | in the worktree |
-| 11–12 | | to do |
+| 10 | Move node sets | `fc633c202`, pushed |
+| 11 | Share subgraphs | in the worktree |
+| 12 | | to do |
 
 ## Rules for the series
 
@@ -282,8 +283,7 @@ changed when no tab shows it.
   rows.
 - **Interim code:** the pane header is a free function, as nothing of it outlives a frame until
   commit 11 caches the library standing; the palette's pick is one `GraphIntent`. The subgraph
-  intent's doc names Make Unique's copy as what lands with the instance it repoints, where the
-  tip names a collapse.
+  intent's doc names Make Unique's copy until commit 10 brings the collapse the tip names.
 - About +3 250 / −230, of which `graph_set/tests.rs`, the interface card, `port_edit.rs` and the
   pane header are 1 200.
 
@@ -297,8 +297,14 @@ reverses it. Bringing a definition in (`bring_in.rs`) reuses an equal one by dig
 different one in beside it with a fresh id, and strips its output paths.
 
 - Owns: `darkroom/src/core/edit/{fragment,bring_in}.rs`, `core/edit/collapse/`, `core/clip/`,
-  `core/mod.rs`, `gui/frame/{clip_commands,shortcuts}.rs`, `gesture/shortcuts.rs`.
-- About +1 630.
+  `core/mod.rs`, `gui/frame/{clip_commands,shortcuts}.rs`, `gesture/shortcuts.rs`,
+  `core/edit/graph_intent/mod.rs`, `gui/app/session/tests.rs`.
+- Partial: `gui/main_window/menu_bar.rs` (all but Export).
+- Held back to commit 11: `Carried::synced`, which a place from the library carries, and
+  `BroughtIn::enter`, whose one caller is an update.
+- **Interim code:** `bring_in.rs`'s module doc names a paste alone, and its first rule says
+  nothing brought in changes a held definition, where the tip names Update.
+- About +1 700 / −190.
 
 ### 11. Share subgraphs: the library folder, Publish and Update
 
@@ -366,6 +372,10 @@ What the series' last tree holds where the tip holds otherwise.
 - **`darkroom/src/core/document/tests.rs`:** `a_subgraph_path_is_checked_and_mapped` (commit 6).
 - **`darkroom/src/core/open_document/tests.rs`:** the unknown-type test also checks the text of
   the repair it reports inside the subgraph (commit 6).
+- **`darkroom/src/core/clip/{mod,error,tests}.rs`, `gui/frame/clip_commands.rs`:** a paste lands
+  on a copy of the document first and a clip that does not fit pastes nothing, its `PasteError` on
+  the status bar, where the tip queues it unchecked and a clip naming a func the library lacks
+  panics as a malformed intent; `GraphIntent` and `NewSubgraph` derive `Clone` for it (commit 10).
 - **`darkroom/src/core/edit/graph_intent/tests.rs`:** `an_add_past_a_placement_bound_is_refused`,
   which names the depth the add would reach (commits 6 and 9).
 - **`darkroom/src/core/edit/graph_intent/mod.rs`:** the module doc says an intent folds into a
