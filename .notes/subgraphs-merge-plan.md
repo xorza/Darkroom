@@ -16,8 +16,9 @@ the shape changes that keep behavior, then the features. Temporary: deleted once
 | 6 | Subgraphs in scenarium, compiled flat | `09596151d`, pushed |
 | 7 | The editor holds every graph of a document | `69549dbfb`, pushed |
 | 8 | The window shows a pane per graph | `21b98e664`, pushed |
-| 9 | Edit subgraphs | in the worktree |
-| 10–12 | | to do |
+| 9 | Edit subgraphs | `032799367`, pushed |
+| 10 | Move node sets | in the worktree |
+| 11–12 | | to do |
 
 ## Rules for the series
 
@@ -257,23 +258,34 @@ reach any graph's pane through its tab.
 
 ### 9. Edit subgraphs
 
-`SubgraphIntent`: create, rename, set interface, Make Unique, Remove Unused, with steps
-`SetSubgraph`, `SetInterface` and `SetDefinition` in the same undo entry as their batch's graph
-edits. `InterfaceChange` is scenarium's reversible record and drops wires in every graph. A wire
-dropped on a boundary node becomes a port (`port_edit.rs`); the inspector's interface card orders,
+`SubgraphIntent`: add, remove and set interface, with steps `SetSubgraph` and `SetInterface` in
+the same undo entry as their batch's graph edits; Make Unique and Remove Unused build on them.
+`InterfaceChange` is scenarium's reversible record and drops wires in every graph. A wire dropped
+on a boundary node becomes a port (`port_edit.rs`); the inspector's interface card orders,
 renames, retypes and removes ports. The pane header shows the instance path, the use count and
 Make Unique; the palette lists the document's subgraphs. An instance rolls up the worst status
 and summed time inside, and its footer names the node that failed. A refused edit names why on
-the status bar (`EditRefusal`). An undo brings its graph to the front.
+the status bar (`EditRefusal`). An undo brings its graph to the front, or names the subgraph it
+changed when no tab shows it.
 
-- Owns: `scenarium/src/graph/interface_change.rs`,
-  `darkroom/src/core/edit/{subgraph_intent/,port_edit,make_unique,error}.rs`,
-  `core/edit/step/{set_subgraph,set_interface,set_definition,undo_step,tests}.rs`,
-  `gui/pane/interface_card.rs`, `gui/pane/graph_ui/pane_header.rs` (without Publish),
-  `gesture/new_node_ui/` (without the shared rows), `gesture/node_menu_ui/`,
-  `node_ui/node_footer.rs`, `gui/state/run_state/`, `gui/main_window/menu_bar.rs` (without Export),
-  `status_bar/tests.rs`.
-- About +3 200 / −300.
+- Owns: `scenarium/src/graph/interface_change.rs`, `graph_set/{mod,tests}.rs`, `library/mod.rs`,
+  `lib.rs`; `darkroom/src/core/edit/{subgraph_intent/,port_edit,make_unique,error,edit_facts}.rs`,
+  `core/edit/step/` apart from `set_side` and `set_definition`, `core/edit/graph_intent/`,
+  `gui/pane/{interface_card,inspector}.rs`, `gui/pane/graph_ui/pane_header.rs` (without the
+  library row), `gesture/new_node_ui/` (without the library rows), `gesture/wire_ui/`,
+  `node_ui/node_footer.rs`, `gui/state/run_state/`, `gui/graph_ctx/node_ctx.rs`.
+- Partial: `core/document/mod.rs` (no `replace_subgraph`), `core/open_document/mod.rs`,
+  `gui/app/mod.rs`, `gui/main_window/menu_bar.rs` (Make Unique and Remove Unused alone).
+- Held back to commit 11: `SubgraphIntent::{SetShared, Update, Synced}` with `SetSide` and
+  `SetDefinition`, `Document::replace_subgraph`, `OpenDocument::content_revision`, the pane
+  header's library row and its state, the interface card's Shared box, the palette's library
+  rows.
+- **Interim code:** the pane header is a free function, as nothing of it outlives a frame until
+  commit 11 caches the library standing; the palette's pick is one `GraphIntent`. The subgraph
+  intent's doc names Make Unique's copy as what lands with the instance it repoints, where the
+  tip names a collapse.
+- About +3 250 / −230, of which `graph_set/tests.rs`, the interface card, `port_edit.rs` and the
+  pane header are 1 200.
 
 ### 10. Move node sets: Duplicate, Copy, Paste, Collapse, Expand
 
@@ -354,8 +366,8 @@ What the series' last tree holds where the tip holds otherwise.
 - **`darkroom/src/core/document/tests.rs`:** `a_subgraph_path_is_checked_and_mapped` (commit 6).
 - **`darkroom/src/core/open_document/tests.rs`:** the unknown-type test also checks the text of
   the repair it reports inside the subgraph (commit 6).
-- **`darkroom/src/core/edit/graph_intent/tests.rs`:** `an_add_past_a_placement_bound_adds_nothing`
-  (commit 6); commit 9 makes it expect `EditRefusal::Placement`.
+- **`darkroom/src/core/edit/graph_intent/tests.rs`:** `an_add_past_a_placement_bound_is_refused`,
+  which names the depth the add would reach (commits 6 and 9).
 - **`darkroom/src/core/edit/graph_intent/mod.rs`:** the module doc says an intent folds into a
   `GraphStep`, not an `UndoStep` (commit 7).
 - **`darkroom/src/core/worker_bridge/tests.rs`:** the scenarium imports in one `use` (commit 6).
