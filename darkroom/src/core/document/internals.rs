@@ -47,9 +47,7 @@ fn spread(view: &mut GraphView) {
 pub(crate) fn insert_subgraph(document: &mut Document, id: SubgraphId, subgraph: Subgraph) {
     let mut side = SubgraphSide::new(&subgraph.graph);
     spread(&mut side.view);
-    document.graphs.insert_subgraph(id, subgraph);
-    let prev = document.sides.insert(id, side);
-    assert!(prev.is_none(), "a subgraph id names one side");
+    document.insert_subgraph(id, subgraph, side);
 }
 
 /// Place `node_id` at `pos`, frontmost, so paint order is the order constructors added in, which
@@ -220,7 +218,7 @@ impl DocumentFixture {
         internals::unresolved_node(FuncId::unique())
     }
 
-    /// Bind the first input of the stub `stub` to `value`, in place of its record's wiring.
+    /// Bind input 1 of the stub `stub` to `value`, in place of its record's wiring.
     pub(crate) fn bind_stub(&mut self, stub: NodeId, value: ConstValue) {
         let graph = self.document.graphs.main_mut();
         let held = graph.remove_stub(stub).expect("a stub the fixture added");

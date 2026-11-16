@@ -1,12 +1,11 @@
 use glam::{UVec2, Vec2};
 use palantir::Harness;
-use scenarium::internals::test_graph::NodeSpec;
 use scenarium::internals::test_graph::TestGraph;
-use scenarium::{DataType, InputPort, NodeId, numbered_port};
+use scenarium::{DataType, NodeId};
+use scenarium::{internals::test_graph::NodeSpec, numbered_port};
 
 use super::*;
 use crate::core::document::internals::DocumentFixture;
-use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::internals::GraphCtxFixture;
 use crate::gui::pane::graph_ui::canvas_input::CanvasInput;
 use crate::gui::pane::graph_ui::internals::CanvasHarness;

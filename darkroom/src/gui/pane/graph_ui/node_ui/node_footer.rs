@@ -5,7 +5,7 @@
 
 use palantir::{
     Block, Chrome, Configure, Corners, Panel, RgbaF32, Sense, SizeSpec, Sizing, Text, TextWrap, Ui,
-    VAlign,
+    VAlign, fmt,
 };
 use scenarium::RamUsage;
 
@@ -48,7 +48,9 @@ pub(super) fn show(ui: &mut Ui, node_ctx: NodeCtx<'_>) {
                     }
                     // A failure's message takes the row's free width, where the spacer would.
                     match status {
-                        ExecStatus::Errored(Some(message)) => error_line(ui, theme, message),
+                        ExecStatus::Errored(Some(message)) => {
+                            error_line(ui, theme, node.failed_inside(), message);
+                        }
                         _ => support::hspacer(ui, "node_footer_spacer"),
                     }
                     for pool in Pool::held(theme, ram) {
@@ -62,11 +64,16 @@ pub(super) fn show(ui: &mut Ui, node_ctx: NodeCtx<'_>) {
 }
 
 /// The failure's first line in the error ink, cut to the card's width with the whole message
-/// as its tooltip: the node says why it failed without growing to the message's length.
-fn error_line(ui: &mut Ui, theme: &Theme, message: &str) {
+/// as its tooltip: the node says why it failed without growing to the message's length. An
+/// instance names the node inside that failed before it.
+fn error_line(ui: &mut Ui, theme: &Theme, culprit: Option<&str>, message: &str) {
     let first = message.lines().next().unwrap_or(message);
     let style = support::colored_text(ui, theme.status.error, theme.font.caption);
-    let line = Text::new(first)
+    let text = match culprit {
+        Some(name) => fmt!(ui, "{name}: {first}"),
+        None => ui.intern(first),
+    };
+    let line = Text::new(text)
         .style(&style)
         .text_wrap(TextWrap::Ellipsis)
         .size(SizeSpec::FILL_W)
@@ -146,7 +153,6 @@ fn proportion_bar(ui: &mut Ui, theme: &Theme, ram: RamUsage) {
 
 #[cfg(test)]
 mod tests {
-
     use scenarium::GraphId;
 
     use crate::core::document::internals::DocumentFixture;
@@ -163,7 +169,8 @@ mod tests {
         use std::sync::Arc;
 
         use scenarium::{
-            InvokeError, NodeExecStatus, NodeStatus, ProgramId, RamUsage, RunError, RunSummary,
+            GraphId, InvokeError, NodeExecStatus, NodeStatus, ProgramId, RamUsage, RunError,
+            RunSummary,
         };
 
         use crate::gui::pane::graph_ui::node_ui::card;

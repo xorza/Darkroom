@@ -7,6 +7,8 @@ use scenarium::NodeId;
 use crate::core::document::tab_ref::TabRef;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
+use crate::core::edit::make_unique::MakeUnique;
+use crate::core::edit::subgraph_intent::SubgraphIntent;
 use crate::gui::frame::app_command::{AppCommand, FileCommand, RunCommand, ViewCommand};
 use crate::gui::frame::doc_ctx::DocCtx;
 use crate::gui::frame::framing::Framing;
@@ -158,6 +160,27 @@ fn graph_menu(bar: &mut MenuBarMenus<'_>, stage: &mut Stage<'_, DocCtx<'_>>) {
                     graph: ctx.active(),
                     framing,
                 }));
+            }
+        }
+        MenuSeparator::new().show(ui);
+        let (graph, document) = (ctx.active(), ctx.document());
+        let picked: Vec<NodeId> = ctx
+            .selected()
+            .iter()
+            .filter_map(|item| item.node())
+            .collect();
+        // Planned on the click alone, as a plan copies the whole definition.
+        let offered = MakeUnique::placed(document, graph, &picked).is_some();
+        if item(ui, "Make Unique", None, offered)
+            && let Some(unique) = MakeUnique::plan(document, graph, &picked)
+        {
+            unique.queue(out.document());
+        }
+        // One batch, so one undo entry, outermost first so each removal holds.
+        let unused = document.unused_subgraphs();
+        if item(ui, "Remove Unused Subgraphs", None, !unused.is_empty()) {
+            for id in unused {
+                out.push_subgraph(SubgraphIntent::Remove { id });
             }
         }
     });

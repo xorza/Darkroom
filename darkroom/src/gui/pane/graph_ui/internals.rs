@@ -14,6 +14,7 @@ use crate::core::document::internals::DocumentFixture;
 use crate::core::document::tab_ref::TabRef;
 use crate::core::edit::document_request::DocumentRequest;
 use crate::core::edit::graph_intent::GraphIntent;
+use crate::core::edit::subgraph_intent::SubgraphIntent;
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::requests::Requests;
 use crate::gui::frame::stage::Stage;
@@ -61,6 +62,8 @@ pub(crate) struct CanvasHarness {
     /// The subgraph panes the last [`Self::frame`] asked to enter, each with the instance it
     /// shows them through.
     pub(crate) entries: Vec<(SubgraphId, Option<InstancePath>)>,
+    /// The edits of the set of graphs the last [`Self::frame`] raised.
+    pub(crate) subgraph_edits: Vec<SubgraphIntent>,
 }
 
 impl CanvasHarness {
@@ -98,6 +101,7 @@ impl CanvasHarness {
             commands: Vec::new(),
             view_ops: Vec::new(),
             entries: Vec::new(),
+            subgraph_edits: Vec::new(),
         }
     }
 
@@ -111,12 +115,14 @@ impl CanvasHarness {
             commands,
             view_ops,
             entries,
+            subgraph_edits,
         } = self;
         let mut frame = CanvasFrame::new(graph_ui, ctx, AppliesIntents::No);
         ui.frame_app(&mut frame);
         let mut out = frame.finish(ui);
         view_ops.clear();
         entries.clear();
+        subgraph_edits.clear();
         let intents: Vec<GraphIntent> = out
             .document()
             .drain()
@@ -133,6 +139,10 @@ impl CanvasHarness {
                 }
                 DocumentRequest::Enter { subgraph, through } => {
                     entries.push((subgraph, through));
+                    None
+                }
+                DocumentRequest::Subgraph(intent) => {
+                    subgraph_edits.push(intent);
                     None
                 }
             })

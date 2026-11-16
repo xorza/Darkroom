@@ -4,6 +4,7 @@
 use std::collections::VecDeque;
 use std::mem;
 
+use common::ErrorChain;
 use palantir::{DockOperation, Ui};
 use scenarium::{GraphId, InstancePath, SubgraphId};
 
@@ -12,6 +13,7 @@ use crate::core::edit::document_queue::DocumentQueue;
 use crate::core::edit::edit_facts::EditFacts;
 use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::graph_intent::GraphIntent;
+use crate::core::edit::subgraph_intent::SubgraphIntent;
 use crate::gui::frame::app_command::AppCommand;
 
 /// A frame's requests, in the order they were raised.
@@ -90,6 +92,11 @@ impl Requests {
         self.document.push_view(op);
     }
 
+    /// Queue an edit of the set of graphs.
+    pub(crate) fn push_subgraph(&mut self, intent: SubgraphIntent) {
+        self.document.push_subgraph(intent);
+    }
+
     /// Queue the entry into `subgraph`'s pane, shown through `through`.
     pub(crate) fn push_enter(&mut self, subgraph: SubgraphId, through: Option<InstancePath>) {
         self.document.push_enter(subgraph, through);
@@ -121,6 +128,20 @@ impl Requests {
     /// cached geometry read next frame would be stale.
     pub(crate) const fn owe_relayout(&mut self) {
         self.relayout_owed = true;
+    }
+
+    /// Take what an edit reported: the relayout it owes, and the refusal the status bar names.
+    pub(crate) fn land(&mut self, facts: EditFacts) {
+        self.owe_relayout_after(facts);
+        if let Some(refusal) = facts.refused {
+            self.push_app(AppCommand::Warn(ErrorChain::new(&refusal).to_string()));
+        }
+        if facts.dropped > 0 {
+            self.push_app(AppCommand::Warn(format!(
+                "the interface edit took out {} binding(s) its ports no longer hold",
+                facts.dropped
+            )));
+        }
     }
 
     /// Owe a relayout if the edit that reported `facts` strands the geometry.

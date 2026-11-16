@@ -7,15 +7,23 @@ use crate::core::document::Document;
 use crate::core::edit::edit_facts::{EditFacts, Touched};
 use crate::core::edit::step::change::Direction;
 use crate::core::edit::step::graph_step::GraphStep;
+use crate::core::edit::step::set_interface::SetInterface;
+use crate::core::edit::step::set_subgraph::SetSubgraph;
 
 /// One self-contained entry of the undo history: an edit of one graph of the document and its
-/// view.
+/// view, or of the set of graphs or a subgraph's interface.
 ///
 /// Only edits of the document's graphs are undoable: pane arrangement records nothing, so Ctrl+Z
 /// walks past a tab switch to the last edit that changed a graph.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum UndoStep {
-    Graph { graph: GraphId, step: GraphStep },
+    Graph {
+        graph: GraphId,
+        step: GraphStep,
+    },
+    /// Boxed: a whole definition is several times the size of every other step.
+    Subgraph(Box<SetSubgraph>),
+    Interface(Box<SetInterface>),
 }
 
 impl UndoStep {
@@ -30,40 +38,54 @@ impl UndoStep {
     }
 
     fn write(&self, document: &mut Document, dir: Direction) {
-        let Self::Graph { graph, step } = self;
-        step.kind().write(document, *graph, dir);
+        match self {
+            Self::Graph { graph, step } => step.kind().write(document, *graph, dir),
+            Self::Subgraph(step) => step.write(document, dir),
+            Self::Interface(step) => step.write(document, dir),
+        }
     }
 
     pub(crate) fn is_noop(&self) -> bool {
-        let Self::Graph { step, .. } = self;
-        step.kind().is_noop()
+        match self {
+            Self::Graph { step, .. } => step.kind().is_noop(),
+            // A definition always comes or goes.
+            Self::Subgraph(_) => false,
+            Self::Interface(step) => step.is_noop(),
+        }
     }
 
     pub(crate) fn dirties_document(&self) -> bool {
-        let Self::Graph { step, .. } = self;
-        step.kind().dirties_document()
+        match self {
+            Self::Graph { step, .. } => step.kind().dirties_document(),
+            Self::Subgraph(_) | Self::Interface(_) => true,
+        }
     }
 
     /// What the step changes, and the graphs it changes.
     pub(crate) fn facts(&self) -> EditFacts {
-        let Self::Graph { graph, step } = self;
-        EditFacts {
-            touched: Touched::Graph(*graph),
-            ..step.kind().facts()
+        match self {
+            Self::Graph { graph, step } => EditFacts {
+                touched: Touched::Graph(*graph),
+                ..step.kind().facts()
+            },
+            Self::Subgraph(step) => step.facts(),
+            Self::Interface(step) => step.facts(),
         }
     }
 
     /// Whether `next`, a later step of the same held gesture, is a frame of this one, which
     /// [`Self::absorb`] folds in: a step of the same kind on the same graph.
     pub(crate) fn absorbs(&self, next: &Self) -> bool {
-        let (
-            Self::Graph { graph, step },
-            Self::Graph {
-                graph: next_graph,
-                step: next,
-            },
-        ) = (self, next);
-        graph == next_graph && step.absorbs(next)
+        match (self, next) {
+            (
+                Self::Graph { graph, step },
+                Self::Graph {
+                    graph: next_graph,
+                    step: next,
+                },
+            ) => graph == next_graph && step.absorbs(next),
+            _ => false,
+        }
     }
 
     /// Fold `next`, a later frame of the same held gesture, into this step: keep this step's
@@ -80,7 +102,10 @@ impl UndoStep {
                 graph: next_graph,
                 step: next,
             },
-        ) = (self, next);
+        ) = (self, next)
+        else {
+            panic!("a gesture folds frames of one graph's edits");
+        };
         assert_eq!(graph, next_graph, "a gesture folds frames of one graph");
         step.absorb(next);
     }

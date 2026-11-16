@@ -37,6 +37,7 @@ use crate::graph::error::{
 };
 use crate::graph::identity::{GraphId, NodeAddr, NodeId, PortId, SubgraphId};
 use crate::graph::instance_path::InstancePath;
+use crate::graph::interface::Interface;
 use crate::graph::node::{Node, NodeKind};
 use crate::graph::ports::PortList;
 use crate::graph::program_id::ProgramId;
@@ -242,6 +243,15 @@ impl GraphSet {
             "subgraph {id:?} is removed while placed"
         );
         self.subgraphs.remove(&id)
+    }
+
+    /// Put `interface` on subgraph `id` and change no binding: what an interface write does once
+    /// it has taken out what the new interface does not hold.
+    pub(super) fn set_interface(&mut self, id: SubgraphId, interface: Interface) {
+        self.subgraphs
+            .get_mut(&id)
+            .expect("an interface edit's subgraph is in the set")
+            .interface = interface;
     }
 
     /// Hold `subgraph` under `id`, in place of the definition held there or beside the others,

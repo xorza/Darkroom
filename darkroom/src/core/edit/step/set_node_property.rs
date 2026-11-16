@@ -1,6 +1,6 @@
 //! Flipping one scalar property of a node.
 
-use scenarium::{CacheMode, GraphId, NodeId};
+use scenarium::{CacheMode, GraphId, NodeId, SubgraphId};
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::Document;
@@ -24,6 +24,7 @@ pub(crate) struct SetNodeProperty {
 pub(crate) enum PropertyChange {
     Disabled(Change<bool>),
     RuntimeCache(Change<CacheMode>),
+    Subgraph(Change<SubgraphId>),
 }
 
 impl Reversible for SetNodeProperty {
@@ -40,6 +41,7 @@ impl Reversible for SetNodeProperty {
                     .cache_mut()
                     .expect("a node whose cache mode history recorded has one") = *change.half(dir);
             }
+            PropertyChange::Subgraph(change) => node.set_subgraph(*change.half(dir)),
         }
     }
 
@@ -47,6 +49,7 @@ impl Reversible for SetNodeProperty {
         match &self.property {
             PropertyChange::Disabled(change) => change.unchanged(),
             PropertyChange::RuntimeCache(change) => change.unchanged(),
+            PropertyChange::Subgraph(change) => change.unchanged(),
         }
     }
 

@@ -4,7 +4,7 @@
 use std::cmp::Ordering;
 use std::ops::Range;
 
-use scenarium::{FuncId, Library, SpecialNode};
+use scenarium::{FuncId, GraphSet, Library, SpecialNode, SubgraphId};
 
 use crate::gui::pane::graph_ui::gesture::new_node_ui::node_palette::PaletteEntry;
 
@@ -14,14 +14,31 @@ use crate::gui::pane::graph_ui::gesture::new_node_ui::node_palette::PaletteEntry
 pub(super) enum PaletteRow {
     Func(FuncId),
     Special(SpecialNode),
+    Subgraph(SubgraphId),
+}
+
+/// What the palette's rows are read from: the library's funcs and the document's subgraphs.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct PaletteSources<'a> {
+    pub(super) library: &'a Library,
+    pub(super) graphs: &'a GraphSet,
 }
 
 impl PaletteRow {
-    /// The row's entry, or `None` for a func the library no longer holds.
-    pub(super) fn entry(self, library: &Library) -> Option<PaletteEntry<'_>> {
+    /// The row's entry, or `None` for a func the library no longer holds or a subgraph the
+    /// document no longer holds.
+    pub(super) fn entry(self, sources: PaletteSources<'_>) -> Option<PaletteEntry<'_>> {
         match self {
-            Self::Func(id) => library.by_id(id).map(PaletteEntry::Func),
+            Self::Func(id) => sources.library.by_id(id).map(PaletteEntry::Func),
             Self::Special(special) => Some(PaletteEntry::Special(special)),
+            Self::Subgraph(id) => {
+                let subgraph = sources.graphs.subgraph(id)?;
+                Some(PaletteEntry::Subgraph {
+                    id,
+                    subgraph,
+                    used: sources.graphs.uses(id).next().is_some(),
+                })
+            }
         }
     }
 }
@@ -86,7 +103,7 @@ impl PaletteRows {
     /// Keep the `entries` that `query_lc` matches, in the order the palette lists them.
     pub(super) fn refilter<'a>(
         &mut self,
-        library: &'a Library,
+        sources: PaletteSources<'a>,
         entries: impl Iterator<Item = PaletteEntry<'a>>,
         query_lc: &str,
     ) {
@@ -99,8 +116,8 @@ impl PaletteRows {
                 .map(PaletteEntry::row),
         );
         let entry = |row: &PaletteRow| {
-            row.entry(library)
-                .expect("a row just filtered from the library resolves in it")
+            row.entry(sources)
+                .expect("a row just filtered from its sources resolves in them")
         };
         // Case-insensitive by comparison, not by key: a folded key per row would allocate a
         // `String` each. The raw-order fallback keeps two categories that fold alike in runs of

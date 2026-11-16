@@ -7,6 +7,7 @@ use crate::core::document::tab_ref::TabRef;
 use crate::core::edit::document_request::DocumentRequest;
 use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::graph_intent::GraphIntent;
+use crate::core::edit::subgraph_intent::SubgraphIntent;
 
 /// The requests raised against the open document, in the order raised.
 ///
@@ -79,6 +80,11 @@ impl DocumentQueue {
 
     pub(crate) fn push_view(&mut self, op: DockOperation<TabRef>) {
         self.requests.push(DocumentRequest::View(op));
+    }
+
+    /// Queue an edit of the set of graphs.
+    pub(crate) fn push_subgraph(&mut self, intent: SubgraphIntent) {
+        self.requests.push(DocumentRequest::Subgraph(intent));
     }
 
     /// Queue the entry into `subgraph`'s pane, shown through `through`.

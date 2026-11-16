@@ -1,14 +1,17 @@
 //! [`NodeProperty`]: one scalar property of a node an edit sets.
 
-use scenarium::CacheMode;
+use scenarium::{CacheMode, SubgraphId};
 use serde::{Deserialize, Serialize};
 
-/// One scalar node property an editor can toggle, and the value it sets.
-/// Both are geometry-neutral and both dirty the document, so they share one intent and one step.
+/// One scalar node property an editor can set, and the value it sets. Each is geometry-neutral
+/// and dirties the document, so they share one intent and one step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum NodeProperty {
     /// `Node::disabled` — excluded from execution unless explicitly seeded.
     Disabled(bool),
     /// `Node::cache` — where the node's output is cached (see [`CacheMode`]).
     RuntimeCache(CacheMode),
+    /// An instance's subgraph: Make Unique points the instances it picks at the copy it makes,
+    /// whose interface is the same, so no port changes.
+    Subgraph(SubgraphId),
 }

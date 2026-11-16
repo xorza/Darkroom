@@ -101,6 +101,7 @@ pub(crate) mod graph_set;
 pub(crate) mod identity;
 pub(crate) mod instance_path;
 pub(crate) mod interface;
+pub(crate) mod interface_change;
 pub(crate) mod node;
 pub(crate) mod node_decl;
 pub(crate) mod node_ref;

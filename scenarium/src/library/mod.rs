@@ -118,6 +118,29 @@ impl Library {
         self.file_kinds.get(&id)
     }
 
+    /// Each custom and enum type the library registers, ordered by name, then by id: what a port
+    /// can be retyped to beside the scalars. A file kind is left out, as its port also names how
+    /// it is taken.
+    pub fn data_types(&self) -> Vec<DataType> {
+        let mut types: Vec<DataType> = self
+            .custom_types
+            .keys()
+            .map(|&id| DataType::Custom(id))
+            .chain(self.enums.keys().map(|&id| DataType::Enum(id)))
+            .collect();
+        let id = |data_type: DataType| match data_type {
+            DataType::Custom(id) => id.as_u128(),
+            DataType::Enum(id) => id.as_u128(),
+            _ => unreachable!("the list holds custom and enum types"),
+        };
+        types.sort_by(|&a, &b| {
+            self.type_name(a)
+                .cmp(self.type_name(b))
+                .then_with(|| id(a).cmp(&id(b)))
+        });
+        types
+    }
+
     /// How many types the library registers, of every kind.
     pub fn type_count(&self) -> usize {
         self.enums.len() + self.custom_types.len() + self.file_kinds.len()

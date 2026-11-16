@@ -10,27 +10,34 @@ use palantir::{
 };
 
 use glam::Vec2;
-use scenarium::Func;
-use scenarium::Node;
-use scenarium::NodeId;
-use scenarium::{SPECIAL_NODES, SpecialNode};
+use scenarium::{Func, Node, NodeId, Ports, SPECIAL_NODES, SpecialNode, Subgraph, SubgraphId};
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::gesture::new_node_ui;
 use crate::gui::pane::graph_ui::gesture::new_node_ui::Search;
-use crate::gui::pane::graph_ui::gesture::new_node_ui::palette_rows::PaletteRow;
+use crate::gui::pane::graph_ui::gesture::new_node_ui::palette_rows::{PaletteRow, PaletteSources};
 use crate::gui::theme::Theme;
 use crate::gui::theme::color;
 use crate::gui::widgets::support;
 
-/// One row of a category's palette list: a library `Func` or a built-in special node. One type
-/// lets every source sort into one list, which makes a category a run inside it.
+/// One row of a category's palette list: a library `Func`, a built-in special node, or one of
+/// the document's subgraphs. One type lets every source sort into one list, which makes a
+/// category a run inside it.
 #[derive(Clone, Copy, Debug)]
 pub(super) enum PaletteEntry<'a> {
     Func(&'a Func),
     Special(SpecialNode),
+    /// Whether a node places it: an unused one is marked, as the library list marks it.
+    Subgraph {
+        id: SubgraphId,
+        subgraph: &'a Subgraph,
+        used: bool,
+    },
 }
+
+/// The category the document's subgraphs list under.
+const SUBGRAPHS: &str = "Subgraphs";
 
 impl<'a> PaletteEntry<'a> {
     /// Borrowed from the palette's sources rather than from `self`, so a
@@ -39,6 +46,7 @@ impl<'a> PaletteEntry<'a> {
         match self {
             PaletteEntry::Func(f) => f.name(),
             PaletteEntry::Special(s) => s.func().name(),
+            PaletteEntry::Subgraph { subgraph, .. } => &subgraph.name,
         }
     }
 
@@ -46,21 +54,27 @@ impl<'a> PaletteEntry<'a> {
         match self {
             PaletteEntry::Func(f) => f.category(),
             PaletteEntry::Special(s) => s.func().category(),
+            PaletteEntry::Subgraph { .. } => SUBGRAPHS,
         }
     }
 
-    /// The first line of what the function does, if it says.
+    /// The first line of what the entry does, if it says; an unused subgraph says so instead.
     pub(super) fn description(self) -> Option<&'a str> {
-        self.func()
-            .description()
-            .map(|text| text.lines().next().unwrap_or(text))
+        let text = match self {
+            PaletteEntry::Func(f) => f.description(),
+            PaletteEntry::Special(s) => s.func().description(),
+            PaletteEntry::Subgraph { used: false, .. } => Some("Unused: no node places it"),
+            PaletteEntry::Subgraph { subgraph, .. } => subgraph.description.as_deref(),
+        }?;
+        Some(text.lines().next().unwrap_or(text))
     }
 
-    /// The declaration the row lists and its node is named after.
-    fn func(self) -> &'a Func {
+    /// The ports a node of this entry shows, whose defaults its new node takes.
+    fn ports(self) -> &'a Ports {
         match self {
-            PaletteEntry::Func(f) => f,
-            PaletteEntry::Special(s) => s.func(),
+            PaletteEntry::Func(f) => f.ports(),
+            PaletteEntry::Special(s) => s.func().ports(),
+            PaletteEntry::Subgraph { subgraph, .. } => subgraph.interface.ports(),
         }
     }
 
@@ -70,6 +84,7 @@ impl<'a> PaletteEntry<'a> {
         match self {
             PaletteEntry::Func(f) => f.into(),
             PaletteEntry::Special(s) => s.into(),
+            PaletteEntry::Subgraph { id, subgraph, .. } => Node::instance(id, subgraph),
         }
     }
 
@@ -80,6 +95,7 @@ impl<'a> PaletteEntry<'a> {
         match self {
             PaletteEntry::Func(f) => PaletteRow::Func(f.id()),
             PaletteEntry::Special(s) => PaletteRow::Special(s),
+            PaletteEntry::Subgraph { id, .. } => PaletteRow::Subgraph(id),
         }
     }
 }
@@ -108,14 +124,29 @@ pub(super) enum Opening {
 }
 
 impl<'a> NodePalette<'a> {
+    /// What the rows are read from.
+    const fn sources(&self) -> PaletteSources<'a> {
+        PaletteSources {
+            library: self.graph_ctx.library(),
+            graphs: &self.graph_ctx.document().graphs,
+        }
+    }
+
     /// Every row the palette can list, in no particular order: the library's
-    /// funcs, then the built-in specials.
+    /// funcs, the built-in specials, then the document's subgraphs.
     fn entries(&self) -> impl Iterator<Item = PaletteEntry<'a>> {
-        self.graph_ctx
-            .library()
+        let sources = self.sources();
+        sources
+            .library
             .iter()
             .map(PaletteEntry::Func)
             .chain(SPECIAL_NODES.iter().copied().map(PaletteEntry::Special))
+            .chain(
+                sources
+                    .graphs
+                    .subgraphs()
+                    .filter_map(move |(id, _)| PaletteRow::Subgraph(id).entry(sources)),
+            )
     }
 }
 
@@ -126,7 +157,7 @@ impl NodePalette<'_> {
         let opened = self.opening == Opening::Fresh;
         let theme = self.graph_ctx.theme();
         let search_id = new_node_ui::search_field_wid();
-        let library = self.graph_ctx.library();
+        let sources = self.sources();
         // The search row: the field on the rows' left edge, and what the keys do at the right.
         let mut submitted = false;
         let mut reveal = opened;
@@ -155,7 +186,7 @@ impl NodePalette<'_> {
                 if search.fold() || opened {
                     search
                         .rows
-                        .refilter(library, self.entries(), &search.folded);
+                        .refilter(sources, self.entries(), &search.folded);
                     search.focused = 0;
                     reveal = true;
                 }
@@ -202,14 +233,14 @@ impl NodePalette<'_> {
                     // a single ranked run, the best match at the top.
                     for (start, rows) in search.rows.runs() {
                         if search.rows.grouped()
-                            && let Some(first) = rows.iter().find_map(|row| row.entry(library))
+                            && let Some(first) = rows.iter().find_map(|row| row.entry(sources))
                         {
                             caption(ui, theme, first.category());
                         }
                         // Indexed before the lookup, so a row's index stays the one Enter
                         // reads back through `PaletteRows::get`.
                         let entries = rows.iter().enumerate().filter_map(|(offset, row)| {
-                            Some((start + offset, row.entry(library)?))
+                            Some((start + offset, row.entry(sources)?))
                         });
                         for (idx, entry) in entries {
                             let row = Row {
@@ -228,22 +259,21 @@ impl NodePalette<'_> {
         });
         let chosen = chosen.or_else(|| {
             let row = submitted.then(|| search.rows.get(search.focused))??;
-            row.entry(library)
+            row.entry(sources)
         })?;
         ui.close_overlay();
         Some(self.add(chosen))
     }
 
-    /// The `AddNode` a pick of `entry` raises. A library entry and a special node name their
-    /// node after the same `Func` and seed the same default bindings from it, so only the
-    /// `Node` value itself differs — and it is built only on a pick.
+    /// The `AddNode` a pick of `entry` raises, seeded with the entry's port defaults. Built only
+    /// on a pick.
     fn add(&self, entry: PaletteEntry<'_>) -> GraphIntent {
         let node_id = NodeId::unique();
         GraphIntent::AddNode {
             pos: self.pos,
             node_id,
             node: entry.node(),
-            bindings: entry.func().ports().default_bindings(node_id).collect(),
+            bindings: entry.ports().default_bindings(node_id).collect(),
         }
     }
 }

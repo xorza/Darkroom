@@ -11,7 +11,8 @@
 //!
 //! A run's node statuses are keyed by program id, which every report names and the
 //! worker-confirmed [`CompiledGraph`] holds; an id this install never emitted is a protocol
-//! violation, not a node to skip. Logs attribute the same way.
+//! violation, not a node to skip. Logs attribute the same way. Each instance's state is folded
+//! from the nodes inside it, under the path of instances down to it.
 //!
 //! A status is assigned, never folded: a **completed** summary clears the previous run before
 //! writing, while live **progress** overwrites one node in place. Progress is a liveness cue and
@@ -21,8 +22,9 @@
 
 pub(crate) mod run_outcome;
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::mem;
+use std::ops::Bound;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -37,10 +39,10 @@ use scenarium::CompiledGraph;
 use scenarium::DynamicValue;
 use scenarium::LogLevel;
 use scenarium::NodeExecStatus;
-use scenarium::ProgramId;
 use scenarium::RamUsage;
 use scenarium::RunError;
 use scenarium::WorkerActivity;
+use scenarium::{InstancePath, ProgramId};
 use scenarium::{RunPhase, RunSummary};
 use scenarium::{WorkerError, WorkerReport};
 
@@ -78,6 +80,22 @@ pub(crate) enum ExecStatus {
     Skipped,
 }
 
+impl ExecStatus {
+    /// How much a status asks for a look, the most last: what an instance shows of the nodes
+    /// inside it.
+    const fn severity(&self) -> u8 {
+        match self {
+            Self::None => 0,
+            Self::Cached => 1,
+            Self::Executed(_) => 2,
+            Self::Running(_) => 3,
+            Self::MissingInputs(_) => 4,
+            Self::Skipped => 5,
+            Self::Errored(_) => 6,
+        }
+    }
+}
+
 /// Everything the editor knows about one node from the last run.
 #[derive(Default, Debug, PartialEq)]
 pub(crate) struct NodeRunState {
@@ -99,6 +117,60 @@ impl NodeRunState {
     }
 }
 
+/// What the nodes inside one instance came to in the last run: the status that asks most for a
+/// look among them, as [`ExecStatus::severity`] ranks them, `Executed` carrying the time they all
+/// took together and `Running` the earliest start, and the first node that failed. As a
+/// collapsed group's row sums its children in a profiler.
+#[derive(Default, Debug, PartialEq)]
+pub(crate) struct InstanceRunState {
+    status: ExecStatus,
+    /// The time every node inside that executed took, summed.
+    executed_secs: f64,
+    failed: Option<ProgramId>,
+}
+
+impl InstanceRunState {
+    pub(crate) const fn status(&self) -> &ExecStatus {
+        &self.status
+    }
+
+    /// The first node inside, in program order, the last run failed: the one an `Errored`
+    /// instance's message is.
+    pub(crate) const fn failed(&self) -> Option<ProgramId> {
+        self.failed
+    }
+
+    /// Fold in `node`, the status of the node `program_id` inside this instance, which follows
+    /// every node folded so far in program order.
+    fn absorb(&mut self, program_id: ProgramId, node: &ExecStatus) {
+        if let ExecStatus::Executed(secs) = node {
+            self.executed_secs += secs;
+        }
+        if let ExecStatus::Errored(_) = node
+            && self.failed.is_none()
+        {
+            self.failed = Some(program_id);
+        }
+        match (&self.status, node) {
+            (ExecStatus::Running(open), ExecStatus::Running(at)) if at < open => {
+                self.status = ExecStatus::Running(*at);
+            }
+            _ if node.severity() > self.status.severity() => {
+                // An instance's missing inputs are its inner nodes', which name none of its own
+                // ports.
+                self.status = match node {
+                    ExecStatus::MissingInputs(_) => ExecStatus::MissingInputs(Vec::new()),
+                    other => other.clone(),
+                };
+            }
+            _ => {}
+        }
+        if let ExecStatus::Executed(_) = self.status {
+            self.status = ExecStatus::Executed(self.executed_secs);
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NodeLog {
     pub(crate) level: LogLevel,
@@ -110,7 +182,8 @@ pub(crate) struct NodeLog {
 pub(crate) struct RunState {
     /// What the last run said about each node — a **record of that run**, not a cache swept
     /// against the document, so deliberately absent from the `NodeId`-keyed caches the
-    /// once-a-frame pass sweeps against each graph. Reasons, in order of weight:
+    /// once-a-frame pass sweeps against each graph. Reasons, in order
+    /// of weight:
     ///
     /// 1. **Going stale on an edit is already what these mean.** A status says *what the last
     ///    run said*, never *what the graph would do now*. Sweeping on delete would make
@@ -121,7 +194,16 @@ pub(crate) struct RunState {
     /// 3. **The memory is small and bounded.** An enum, a short `Vec<NodeLog>` and two strings
     ///    per node, reset by `replace_results` at the next completed run. The swept caches
     ///    release textures up to 8192² RGBA8, which earns them a per-frame pass.
-    nodes: HashMap<ProgramId, NodeRunState>,
+    ///
+    /// Ordered by program id, so the nodes inside one instance are one run of it.
+    nodes: BTreeMap<ProgramId, NodeRunState>,
+    /// What the nodes inside each instance came to, folded from `nodes` when a summary lands
+    /// and, for the instances above a progress row, once the frame's reports are in.
+    instances: HashMap<InstancePath, InstanceRunState>,
+    /// The instances above this frame's progress rows, each once: folded again by
+    /// [`Self::apply_reports`] after the last report, so a frame of rows costs one fold of each
+    /// instance they touch, not one per row. Bounded by the program's instances.
+    stale_instances: Vec<InstancePath>,
     previews: PreviewStore,
     /// The program the worker acknowledged; every later progress or result belongs to it.
     compiled: Option<Arc<CompiledGraph>>,
@@ -156,7 +238,9 @@ impl RunState {
     /// `wake` as each one finishes.
     pub(crate) fn new(wake: Wake) -> Self {
         Self {
-            nodes: HashMap::new(),
+            nodes: BTreeMap::new(),
+            instances: HashMap::new(),
+            stale_instances: Vec::new(),
             previews: PreviewStore::new(wake),
             compiled: None,
             activity: WorkerActivity::default(),
@@ -219,13 +303,32 @@ impl RunState {
     fn drain_reports(&mut self, runtime: &RuntimeHost, status: &mut StatusLog) {
         let mut reports = mem::take(&mut self.reports);
         self.runs_ended += runtime.drain_worker(&mut reports);
-        while let Some(report) = reports.pop_front() {
-            self.apply_report(report, status);
-        }
+        self.apply_reports(&mut reports, status);
         self.reports = reports;
     }
 
-    /// Fold one report; split out so a test can state the report stream.
+    /// Fold each of `reports` in order, then the instances their progress rows left stale.
+    fn apply_reports(&mut self, reports: &mut VecDeque<WorkerReport>, status: &mut StatusLog) {
+        while let Some(report) = reports.pop_front() {
+            self.apply_report(report, status);
+        }
+        for path in self.stale_instances.drain(..) {
+            let instance = path.instance().expect("a stale path names an instance");
+            let parent = path.parent().expect("a stale path names an instance");
+            let mut folded = InstanceRunState::default();
+            // Ordered by program id, the nodes inside an instance follow its own id in one run.
+            let inside = self
+                .nodes
+                .range((Bound::Excluded(parent.node(instance)), Bound::Unbounded))
+                .take_while(|(id, _)| id.ids().starts_with(path.ids()));
+            for (&program_id, node) in inside {
+                folded.absorb(program_id, &node.status);
+            }
+            self.instances.insert(path, folded);
+        }
+    }
+
+    /// Fold one report, leaving the instances above a progress row to [`Self::apply_reports`].
     fn apply_report(&mut self, report: WorkerReport, status: &mut StatusLog) {
         match report {
             WorkerReport::Installed {
@@ -274,6 +377,12 @@ impl RunState {
         self.nodes.get(&id)
     }
 
+    /// What the nodes inside the instance at `path` came to, or `None` when the last run said
+    /// nothing of any.
+    pub(crate) fn instance(&self, path: InstancePath) -> Option<&InstanceRunState> {
+        self.instances.get(&path)
+    }
+
     pub(crate) fn logs(&self, id: ProgramId) -> &[NodeLog] {
         self.nodes.get(&id).map_or(&[], |n| n.logs.as_slice())
     }
@@ -291,6 +400,33 @@ impl RunState {
             RunPhase::Succeeded { elapsed_secs } => ExecStatus::Executed(elapsed_secs),
             RunPhase::Failed { .. } => ExecStatus::Errored(None),
         };
+        let mut path = program_id.path();
+        while !path.is_main() {
+            if !self.stale_instances.contains(&path) {
+                self.stale_instances.push(path);
+            }
+            path = path
+                .parent()
+                .expect("a path past the main graph has a parent");
+        }
+    }
+
+    /// Fold every node into each instance it lies inside, afresh.
+    fn fold_instances(&mut self) {
+        self.instances.clear();
+        self.stale_instances.clear();
+        for (&program_id, node) in &self.nodes {
+            let mut path = program_id.path();
+            while !path.is_main() {
+                self.instances
+                    .entry(path)
+                    .or_default()
+                    .absorb(program_id, &node.status);
+                path = path
+                    .parent()
+                    .expect("a path past the main graph has a parent");
+            }
+        }
     }
 
     /// Replace the last completed run with the worker's authoritative summary.
@@ -301,10 +437,6 @@ impl RunState {
             .expect("worker reported results before installing a compiled graph");
         self.cache_ram = update.cache_ram;
         self.outcome = Some(RunOutcome::of(update));
-        #[expect(
-            clippy::iter_over_hash_type,
-            reason = "each node is reset alone, so the order changes nothing"
-        )]
         for node in self.nodes.values_mut() {
             node.status = ExecStatus::None;
             node.logs.clear();
@@ -312,6 +444,7 @@ impl RunState {
         }
         for node in &update.nodes {
             assert_reported(compiled, node.program_id);
+            let program_id = node.program_id;
             if let Some(status) = &node.status {
                 let status = match status {
                     NodeExecStatus::Cached => ExecStatus::Cached,
@@ -328,10 +461,10 @@ impl RunState {
                         ExecStatus::Errored(Some(ErrorChain::new(error).to_string()))
                     }
                 };
-                self.nodes.entry(node.program_id).or_default().status = status;
+                self.nodes.entry(program_id).or_default().status = status;
             }
             if node.ram.total() > 0 {
-                self.nodes.entry(node.program_id).or_default().ram = node.ram;
+                self.nodes.entry(program_id).or_default().ram = node.ram;
             }
         }
         for entry in &update.logs {
@@ -346,6 +479,7 @@ impl RunState {
                 });
         }
         self.drop_empty_nodes();
+        self.fold_instances();
     }
 
     /// Drop every node entry the last update left with nothing to show. The
@@ -416,6 +550,8 @@ impl RunState {
     /// (`App::adopt_document`), where the results describe a document no longer open.
     pub(crate) fn clear(&mut self) {
         self.nodes.clear();
+        self.instances.clear();
+        self.stale_instances.clear();
         self.previews.clear();
         self.outcome = None;
     }
@@ -436,7 +572,15 @@ pub(crate) mod internals {
     #[cfg(test)]
     use crate::core::status_log::StatusLog;
     #[cfg(test)]
-    use crate::gui::state::run_state::{ExecStatus, NodeRunState};
+    use crate::gui::state::run_state::{ExecStatus, InstanceRunState, NodeRunState};
+
+    #[cfg(test)]
+    impl InstanceRunState {
+        /// The time every node inside that executed took, summed.
+        pub(crate) const fn executed_secs(&self) -> f64 {
+            self.executed_secs
+        }
+    }
 
     impl RunState {
         #[cfg(test)]

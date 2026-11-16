@@ -1,17 +1,44 @@
-//! Why an intent could never have applied.
+//! Why an intent could never have applied, and why the document refuses one that could.
 
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
 use glam::Vec2;
 use scenarium::{
-    BindingRejection, DetachedNodeError, InputPort, NodeId, Subscription, SubscriptionRejection,
-    Unresolved,
+    BindingRejection, DetachedNodeError, InputPort, NodeId, PlacementRejection, Subscription,
+    SubscriptionRejection, Unresolved,
 };
 use thiserror::Error;
 
 use crate::core::document::tie::TieId;
 use crate::core::document::wire_key::WireKey;
+
+/// Why an intent wrote nothing: its payload could never have applied, or the document's rules
+/// refuse it.
+#[derive(Debug, Error, Clone, Copy, PartialEq)]
+pub(crate) enum IntentError {
+    #[error("a widget built a malformed intent")]
+    Malformed(#[from] MalformedIntent),
+    #[error("the edit was refused")]
+    Refused(#[from] EditRefusal),
+}
+
+/// An edit a person can ask for that the document's rules refuse: it writes nothing, and the
+/// status bar names why. Refused by design as a cycle-forming bind is, but worth a line, as no
+/// widget can hide the ask before it is made.
+#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EditRefusal {
+    /// A node whose placement [`scenarium::GraphSet::admit_nodes`] refuses: an instance of a
+    /// subgraph inside itself, or one past a bound.
+    #[error("the node was not added")]
+    Placement(#[source] PlacementRejection),
+    /// A removal of one of a subgraph's two boundary nodes, which it always keeps.
+    #[error("a subgraph keeps its Inputs and Outputs nodes")]
+    BoundaryNode,
+    /// A removal of a subgraph that nodes still place.
+    #[error("the subgraph is placed by {uses} node(s); remove them first")]
+    SubgraphInUse { uses: usize },
+}
 
 /// A payload no widget could legitimately have raised: a nil or colliding
 /// identity, a non-finite position, a link to state the document doesn't hold.
@@ -30,8 +57,8 @@ pub(crate) enum MalformedIntent {
     /// A nil tie id, which no view holds, as [`Self::NilNodeId`] is for a node.
     #[error("{role} tie id is nil")]
     NilTieId { role: Role },
-    /// A new id the document already holds. Scenarium requires node ids unique across the whole
-    /// authoring tree, and `Graph::insert` panics on a collision.
+    /// A new id the document already holds. Scenarium requires node ids unique inside a graph,
+    /// and `Graph::insert` panics on a collision.
     #[error("node {node_id:?} already exists in the document")]
     NodeAlreadyExists { node_id: NodeId },
     /// An inserted node the library cannot resolve: the graph holds only nodes
@@ -42,6 +69,10 @@ pub(crate) enum MalformedIntent {
     /// nothing of its own: the canvas draws no cache chips on one, so this is a widget's bug.
     #[error("node {node_id:?} has no body, so no cache mode")]
     NoCacheMode { node_id: NodeId },
+    /// A subgraph set on a node that is no instance, or one whose interface is not the
+    /// instance's own: a re-pointing keeps every port, so a widget offers neither.
+    #[error("node {node_id:?} cannot be pointed at that subgraph")]
+    NotRepointable { node_id: NodeId },
     /// An insertion's own wiring pointing at a node the graph doesn't hold. Unlike a stale
     /// reference this is malformed: the wiring is authored together with its node.
     #[error("{role} node {node_id:?} is not in the graph")]

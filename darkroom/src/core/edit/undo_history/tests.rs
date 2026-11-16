@@ -234,7 +234,7 @@ fn another_edit_seals_the_open_gesture() {
 
 #[test]
 fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
-    use scenarium::{Binding, InputPort};
+    use scenarium::{Binding, InputPort, OutputPort};
 
     let mut h = Harness::sample();
     let named = |h: &Harness, name: &str| {
@@ -270,7 +270,7 @@ fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
         .bindings
         .get(&InputPort::new(b, numbered_port(1)))
     {
-        Some(Binding::Wire(src)) => assert_eq!((src.node_id, src.port), (a, numbered_port(1))),
+        Some(Binding::Wire(src)) => assert_eq!(*src, OutputPort::new(a, numbered_port(1))),
         other => panic!("expected restored a->b edge, got {other:?}"),
     }
     assert!(!h.undo(), "the whole delete collapsed to one undo entry");

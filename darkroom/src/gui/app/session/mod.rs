@@ -95,7 +95,7 @@ impl Session {
     /// edit takes past the frame's drain sits beside this one, so none can leave a debt out.
     fn drain(&mut self, library: &Library, requests: &mut Requests) {
         let facts = self.open.drain_requests(requests.document(), library);
-        requests.owe_relayout_after(facts);
+        requests.land(facts);
     }
 
     /// Apply one edit outside the frame's drain, as a blocking dialog's answer is.
@@ -106,17 +106,23 @@ impl Session {
         library: &Library,
         requests: &mut Requests,
     ) {
-        requests.owe_relayout_after(self.open.apply_edit(graph, intent, library));
+        requests.land(self.open.apply_edit(graph, intent, library));
     }
 
     /// Take back the last edit.
-    pub(crate) fn undo(&mut self, requests: &mut Requests) {
-        requests.owe_relayout_after(self.open.undo());
+    ///
+    /// The graph it changed comes to the front; the one it returns has no tab to show it.
+    pub(crate) fn undo(&mut self, requests: &mut Requests) -> Option<GraphId> {
+        let facts = self.open.undo();
+        requests.owe_relayout_after(facts);
+        self.open.bring_forward(facts.touched)
     }
 
-    /// Replay the last edit taken back.
-    pub(crate) fn redo(&mut self, requests: &mut Requests) {
-        requests.owe_relayout_after(self.open.redo());
+    /// Replay the last edit taken back, the mirror of [`Self::undo`].
+    pub(crate) fn redo(&mut self, requests: &mut Requests) -> Option<GraphId> {
+        let facts = self.open.redo();
+        requests.owe_relayout_after(facts);
+        self.open.bring_forward(facts.touched)
     }
 
     /// Ready the panes for a pass with no input to read, ahead of its [`Self::record`]: the warmup,
@@ -207,7 +213,7 @@ fn menu_shortcut(ui: &mut Ui, requests: &mut Requests) {
         }
     }
     if let Some(command) = fired {
-        requests.push_app(*command);
+        requests.push_app(command.clone());
     }
 }
 

@@ -48,7 +48,7 @@ use glam::Vec2;
 use palantir::{DockOperation, DockState, TabGroup};
 use scenarium::{
     ConstValue, DetachedNode, Graph as CoreGraph, GraphId, GraphSet, InstancePath, Library, Node,
-    NodeAddr, NodeId, PathForm, ProgramId, Stub, SubgraphId,
+    NodeAddr, NodeId, PathForm, ProgramId, Stub, Subgraph, SubgraphId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -62,6 +62,7 @@ use crate::core::document::subgraph_side::SubgraphSide;
 use crate::core::document::tab_ref::TabRef;
 use crate::core::document::tie::{TieAngle, TieId};
 use crate::core::document::viewport::Viewport;
+use crate::core::edit::edit_facts::Touched;
 use crate::core::preview_sink;
 
 /// The thing being edited: its graphs, each with the stubs it keeps, the editor's view of each,
@@ -192,6 +193,101 @@ impl Document {
             tab: TabRef::Graph(graph),
         });
         self.active = graph;
+    }
+
+    /// Put `subgraph` into the document under `id`, with `side` beside it.
+    ///
+    /// # Panics
+    /// If the document holds a subgraph under `id`.
+    pub(crate) fn insert_subgraph(
+        &mut self,
+        id: SubgraphId,
+        subgraph: Subgraph,
+        side: SubgraphSide,
+    ) {
+        self.graphs.insert_subgraph(id, subgraph);
+        let prev = self.sides.insert(id, side);
+        assert!(prev.is_none(), "a subgraph id names one side");
+    }
+
+    /// Take subgraph `id` and its side out of the document, then close each tab and clear each
+    /// `through` that stopped resolving, and hand the active graph to the main graph when it was
+    /// `id`.
+    ///
+    /// # Panics
+    /// If the document holds no subgraph `id`, or a node places it.
+    pub(crate) fn remove_subgraph(&mut self, id: SubgraphId) -> (Subgraph, SubgraphSide) {
+        let subgraph = self
+            .graphs
+            .remove_subgraph(id)
+            .expect("a removed subgraph is in the set");
+        let side = self.sides.remove(&id).expect("each subgraph has a side");
+        if self.active == GraphId::Subgraph(id) {
+            self.active = GraphId::Main;
+        }
+        self.prune_views(&mut |_| {});
+        (subgraph, side)
+    }
+
+    /// `base`, or `base N` with the least `N` from 2 that no subgraph of the document is named:
+    /// the name a new definition takes.
+    pub(crate) fn free_subgraph_name(&self, base: &str) -> String {
+        let taken = |name: &str| {
+            self.graphs
+                .subgraphs()
+                .any(|(_, subgraph)| subgraph.name == name)
+        };
+        if !taken(base) {
+            return base.to_string();
+        }
+        // One name is free past the count of subgraphs.
+        let last = self.graphs.subgraphs().len() + 2;
+        (2..=last)
+            .map(|n| format!("{base} {n}"))
+            .find(|name| !taken(name))
+            .expect("a name past the count of subgraphs is free")
+    }
+
+    /// The subgraphs no node places, and then those only they placed, in the order their
+    /// removals hold: each placed by none of the subgraphs that remain. What Remove Unused takes
+    /// out; empty when every subgraph is in use.
+    pub(crate) fn unused_subgraphs(&self) -> Vec<SubgraphId> {
+        let mut unused: Vec<SubgraphId> = Vec::new();
+        // Each round finds at least one, or ends: bounded by the count of subgraphs.
+        loop {
+            let found: Vec<SubgraphId> = self
+                .graphs
+                .subgraphs()
+                .map(|(id, _)| id)
+                .filter(|id| !unused.contains(id))
+                .filter(|&id| {
+                    self.graphs.uses(id).all(|addr| match addr.graph {
+                        GraphId::Main => false,
+                        GraphId::Subgraph(holder) => unused.contains(&holder),
+                    })
+                })
+                .collect();
+            if found.is_empty() {
+                return unused;
+            }
+            unused.extend(found);
+        }
+    }
+
+    /// Bring the graph an undo or a redo wrote to the front: its tab activated and the graph made
+    /// active, when it has a tab. The graph left with no tab to show it, for the status bar to
+    /// name; `None` when the edit wrote no one graph, or one on screen now.
+    pub(crate) fn bring_forward(&mut self, touched: Touched) -> Option<GraphId> {
+        let Touched::Graph(graph) = touched else {
+            return None;
+        };
+        let tab = TabRef::Graph(graph);
+        if !self.layout.all_tabs().any(|open| open == tab) {
+            return Some(graph);
+        }
+        self.layout.apply(DockOperation::ActivateTab { tab });
+        self.active = graph;
+        None
     }
 
     /// Drop a node of `graph` from the document: the graph, its placement and its selection

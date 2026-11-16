@@ -1,7 +1,10 @@
 use palantir::{PointerButton, PointerEvent, PointerWake, Ui};
-use scenarium::{Binding, GraphId};
+use scenarium::{Binding, Boundary, GraphId, InputPort, Interface, OutputPort, PortId, SubgraphId};
 
 use crate::core::edit::graph_intent::GraphIntent;
+use crate::core::edit::port_edit::{InterfaceSide, PortEdit};
+use crate::core::edit::subgraph_intent::SubgraphIntent;
+use crate::gui::frame::requests::Requests;
 use crate::gui::frame::stage::Stage;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::input_ctx::InputCtx;
@@ -153,6 +156,10 @@ impl WireUi {
             out.push_graph(ctx.graph_ctx().graph(), wire(drag.from, end));
             return None;
         }
+        if let Some(exposed) = exposed_on_boundary(ui, ctx, drag.from) {
+            exposed.raise(ctx.graph_ctx().graph(), out);
+            return None;
+        }
         if let Some(set_const) = const_drop(ui, ctx, drag.from) {
             out.push_graph(ctx.graph_ctx().graph(), set_const);
             return None;
@@ -289,6 +296,94 @@ fn accepts_wire(graph_ctx: GraphCtx<'_>, start: PortRef, port: PortRef) -> bool 
         .admit(graph_ctx.scope(), input, &Binding::Wire(output))
         .is_ok()
         && !graph.produces_cycle(output.node_id, input.node_id)
+}
+
+/// A wire dropped on a subgraph's boundary node of the side that takes it: a port the interface
+/// gains, read off the end the wire grew out of, and the wire to it. Both land in one batch, so
+/// one history entry.
+#[derive(Debug)]
+struct Exposed {
+    subgraph: SubgraphId,
+    to: Interface,
+    wire: GraphIntent,
+}
+
+impl Exposed {
+    fn raise(self, graph: GraphId, out: &mut Requests) {
+        out.push_subgraph(SubgraphIntent::SetInterface {
+            id: self.subgraph,
+            to: self.to,
+        });
+        out.push_graph(graph, self.wire);
+    }
+}
+
+/// The port a held wire from `start` adds when released over a boundary node of a subgraph's
+/// pane: an output dropped on the `Outputs` node becomes an interface output of its type and
+/// name, wired from it; an input dropped on the `Inputs` node becomes an interface input of its
+/// declaration, wired to it. `None` off a boundary node, or on the side that does not take it.
+fn exposed_on_boundary(ui: &mut Ui, ctx: CanvasCtx<'_>, start: PortRef) -> Option<Exposed> {
+    let (graph_ctx, geometry) = (ctx.graph_ctx(), ctx.geometry());
+    let GraphId::Subgraph(subgraph) = graph_ctx.graph() else {
+        return None;
+    };
+    let pointer = ui.pointer_pos()?;
+    let wanted = match start.kind {
+        PortKind::Output => Boundary::Outputs,
+        PortKind::Input => Boundary::Inputs,
+    };
+    let body = graph_ctx.body();
+    let boundary = body
+        .iter()
+        .find(|node| node.boundary() == Some(wanted))?
+        .node_id;
+    if boundary == start.node_id || !geometry.node_screen_rect(boundary)?.contains(pointer) {
+        return None;
+    }
+    let decl = body.find(start.node_id)?.decl(graph_ctx.scope());
+    let interface = &graph_ctx.document().graphs.subgraph(subgraph)?.interface;
+    let port = PortId::unique();
+    let (edit, wire) = match start.kind {
+        PortKind::Output => {
+            let output = decl.ports().output(start.port)?;
+            (
+                PortEdit::Add {
+                    side: InterfaceSide::Outputs,
+                    port,
+                    name: output.name.clone(),
+                    data_type: output.data_type,
+                },
+                GraphIntent::SetInput {
+                    input: InputPort::new(boundary, port),
+                    to: Some(Binding::Wire(OutputPort::new(start.node_id, start.port))),
+                },
+            )
+        }
+        PortKind::Input => {
+            let input = decl.ports().input(start.port)?;
+            // A const-only input takes no wire, so no port of the interface could feed it.
+            if input.const_only {
+                return None;
+            }
+            (
+                PortEdit::Add {
+                    side: InterfaceSide::Inputs,
+                    port,
+                    name: input.name.clone(),
+                    data_type: input.data_type,
+                },
+                GraphIntent::SetInput {
+                    input: InputPort::new(start.node_id, start.port),
+                    to: Some(Binding::Wire(OutputPort::new(boundary, port))),
+                },
+            )
+        }
+    };
+    Some(Exposed {
+        subgraph,
+        to: edit.apply(interface),
+        wire,
+    })
 }
 
 /// "Set const" gesture: an input-port drag released over its own node's body (and not onto a

@@ -1,8 +1,8 @@
-use scenarium::{FuncId, Library, internals};
+use scenarium::{FuncId, GraphSet, Library, internals};
 
 use crate::gui::pane::graph_ui::gesture::new_node_ui::node_palette::PaletteEntry;
 use crate::gui::pane::graph_ui::gesture::new_node_ui::palette_rows::{
-    PaletteRows, Rank, name_matches,
+    PaletteRows, PaletteSources, Rank, name_matches,
 };
 
 /// Four rows over three categories, deliberately out of order and mixing
@@ -23,10 +23,15 @@ fn library() -> Library {
 /// The kept runs as `(category of the first row, row names)`, refiltered by `query_lc` into one
 /// `PaletteRows` the whole test reuses.
 fn shape(rows: &mut PaletteRows, library: &Library, query_lc: &str) -> Vec<(String, Vec<String>)> {
-    rows.refilter(library, library.iter().map(PaletteEntry::Func), query_lc);
+    let graphs = GraphSet::default();
+    let sources = PaletteSources {
+        library,
+        graphs: &graphs,
+    };
+    rows.refilter(sources, library.iter().map(PaletteEntry::Func), query_lc);
     rows.runs()
         .map(|(_, run)| {
-            let entries: Vec<_> = run.iter().map(|row| row.entry(library).unwrap()).collect();
+            let entries: Vec<_> = run.iter().map(|row| row.entry(sources).unwrap()).collect();
             (
                 entries[0].category().to_owned(),
                 entries.iter().map(|e| e.name().to_owned()).collect(),
@@ -172,4 +177,52 @@ fn name_matches_is_case_insensitive_substring_with_empty_query_wildcard() {
     // turn the name's into `ς` and miss a query typed in capitals.
     assert!(name_matches("ΟΔΟΣ", "οδοσ"));
     assert!(name_matches("ΜΕΓΑΛΟΣ ΔΡΟΜΟΣ", "λοσ δρ"));
+}
+
+/// The document's subgraphs list under their own category, by name, and one no node places says
+/// it is unused.
+#[test]
+fn the_documents_subgraphs_list_and_an_unused_one_is_marked() {
+    use scenarium::{GraphId, Interface, Node, Subgraph, SubgraphId};
+
+    use crate::gui::pane::graph_ui::gesture::new_node_ui::palette_rows::PaletteRow;
+
+    let library = library();
+    let mut graphs = GraphSet::default();
+    let [used, unused] = [1, 2].map(SubgraphId::from_u128);
+    graphs.insert_subgraph(used, Subgraph::new("Denoise", Interface::default()));
+    graphs.insert_subgraph(unused, Subgraph::new("Calibrate", Interface::default()));
+    let instance = Node::instance(used, graphs.subgraph(used).unwrap());
+    graphs.graph_mut(GraphId::Main).add(instance);
+    let sources = PaletteSources {
+        library: &library,
+        graphs: &graphs,
+    };
+    let entries = [used, unused]
+        .into_iter()
+        .filter_map(|id| PaletteRow::Subgraph(id).entry(sources));
+    let mut rows = PaletteRows::default();
+    rows.refilter(sources, entries, "");
+    let listed: Vec<(String, String, Option<String>)> = rows
+        .runs()
+        .flat_map(|(_, run)| run.iter().map(|row| row.entry(sources).unwrap()))
+        .map(|entry| {
+            (
+                entry.category().to_owned(),
+                entry.name().to_owned(),
+                entry.description().map(str::to_owned),
+            )
+        })
+        .collect();
+    assert_eq!(
+        listed,
+        [
+            (
+                "Subgraphs".to_owned(),
+                "Calibrate".to_owned(),
+                Some("Unused: no node places it".to_owned())
+            ),
+            ("Subgraphs".to_owned(), "Denoise".to_owned(), None),
+        ]
+    );
 }

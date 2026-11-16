@@ -2,6 +2,7 @@ use super::*;
 
 use std::collections::BTreeSet;
 use std::io;
+use std::time::Duration;
 
 use scenarium::InvokeError;
 use scenarium::LogEntry;
@@ -12,21 +13,21 @@ use crate::core::wake;
 use crate::core::worker_bridge::report_mailbox::ReportMailbox;
 use crate::gui::state::preview_store::StoredContent;
 
-fn program_id(n: u128) -> ProgramId {
+fn node_id(n: u128) -> ProgramId {
     ProgramId::from(NodeId::from_u128(n))
 }
 
 fn completed_status(executed: &[(ProgramId, f64)], errored: &[ProgramId]) -> WorkerReport {
     let mut nodes = executed
         .iter()
-        .map(|&(program_id, elapsed_secs)| NodeStatus {
-            program_id,
+        .map(|&(node_id, elapsed_secs)| NodeStatus {
+            program_id: node_id,
             status: Some(NodeExecStatus::Executed { elapsed_secs }),
             ram: RamUsage::default(),
         })
         .collect::<Vec<_>>();
-    nodes.extend(errored.iter().map(|&program_id| NodeStatus {
-        program_id,
+    nodes.extend(errored.iter().map(|&node_id| NodeStatus {
+        program_id: node_id,
         status: Some(NodeExecStatus::Errored {
             error: RunError::Invoke(Arc::new(InvokeError::external(io::Error::other(
                 "test error",
@@ -52,8 +53,8 @@ fn run_state(nodes: impl IntoIterator<Item = ProgramId>) -> RunState {
 /// it keeps its RAM figure and its preview, because its value is still cached.
 #[test]
 fn clearing_cache_projections_drops_the_evicted_cone_and_keeps_everything_else() {
-    let evicted_node = program_id(1);
-    let remaining_node = program_id(2);
+    let evicted_node = node_id(1);
+    let remaining_node = node_id(2);
     let mut state = run_state([evicted_node, remaining_node]);
     state.nodes.entry(evicted_node).or_default().status = ExecStatus::Cached;
     state.nodes.entry(evicted_node).or_default().ram = RamUsage { cpu: 11, gpu: 0 };
@@ -109,7 +110,7 @@ fn clearing_cache_projections_drops_the_evicted_cone_and_keeps_everything_else()
 /// resolved through `compiled`, into a panic.
 #[test]
 fn clear_drops_the_document_half_and_keeps_the_worker_half() {
-    let node = program_id(1);
+    let node = node_id(1);
     let mut state = run_state([node]);
     let compiled = state.compiled.clone().expect("the fixture installs one");
     state.nodes.entry(node).or_default().status = ExecStatus::Executed(1.5);
@@ -159,7 +160,7 @@ fn clear_drops_the_document_half_and_keeps_the_worker_half() {
 /// bar does not keep naming a closed document's cache.
 #[test]
 fn install_and_clear_reports_carry_the_cache_reading() {
-    let node = program_id(1);
+    let node = node_id(1);
     let mut state = run_state([node]);
     let mut log = StatusLog::default();
     state.cache_ram = RamUsage { cpu: 24, gpu: 8 };
@@ -170,7 +171,7 @@ fn install_and_clear_reports_carry_the_cache_reading() {
 
     // An install that dropped every cached node reports an empty cache, and
     // the readout follows it down.
-    let replacement = Arc::new(CompiledGraph::bare([program_id(2)]));
+    let replacement = Arc::new(CompiledGraph::bare([node_id(2)]));
     state.apply_report(
         WorkerReport::Installed {
             compiled: Arc::clone(&replacement),
@@ -215,11 +216,17 @@ fn install_and_clear_reports_carry_the_cache_reading() {
 /// worker's activity follows its own reports.
 #[test]
 fn progress_marks_the_attributed_node_running_then_finished() {
-    let (succeeds, fails) = (program_id(1), program_id(2));
+    let (succeeds, fails) = (node_id(1), node_id(2));
     let mut rs = run_state([succeeds, fails]);
     let mut log = StatusLog::default();
-    let mut progress = |rs: &mut RunState, program_id, phase| {
-        rs.apply_report(WorkerReport::Progress { program_id, phase }, &mut log);
+    let mut progress = |rs: &mut RunState, node_id, phase| {
+        rs.apply_report(
+            WorkerReport::Progress {
+                program_id: node_id,
+                phase,
+            },
+            &mut log,
+        );
     };
 
     rs.apply_report(
@@ -242,7 +249,7 @@ fn progress_marks_the_attributed_node_running_then_finished() {
     );
 
     // A node no event mentioned stays None.
-    assert_eq!(rs.status(program_id(99)), ExecStatus::None);
+    assert_eq!(rs.status(node_id(99)), ExecStatus::None);
 }
 
 /// The completed snapshot is the authority: it clears the previous run before writing, so a
@@ -250,20 +257,20 @@ fn progress_marks_the_attributed_node_running_then_finished() {
 /// inside the status, which live progress replaces together with it.
 #[test]
 fn completed_snapshot_replaces_the_previous_run() {
-    let executed = program_id(1);
-    let errored = program_id(2);
+    let executed = node_id(1);
+    let errored = node_id(2);
     let mut rs = run_state([executed, errored]);
 
     let mut log = StatusLog::default();
     rs.apply_report(
-        completed_status(&[(program_id(1), 1.0), (program_id(2), 0.25)], &[]),
+        completed_status(&[(node_id(1), 1.0), (node_id(2), 0.25)], &[]),
         &mut log,
     );
     assert_eq!(rs.status(executed), ExecStatus::Executed(1.0));
     assert_eq!(rs.status(errored), ExecStatus::Executed(0.25));
 
     // Second run: only `errored` is reported, and it failed.
-    rs.apply_report(completed_status(&[], &[program_id(2)]), &mut log);
+    rs.apply_report(completed_status(&[], &[node_id(2)]), &mut log);
     // The failure message rides along with the status — the inspector
     // shows it instead of a bare "errored".
     assert_eq!(
@@ -304,14 +311,14 @@ fn completed_snapshot_replaces_the_previous_run() {
 
     // Fourth run: a log line goes to the node it names, and a node with no status keeps an entry
     // only for the RAM it holds.
-    let holding = program_id(3);
-    let idle = program_id(4);
+    let holding = node_id(3);
+    let idle = node_id(4);
     let mut rs = run_state([executed, errored, holding, idle]);
     rs.apply_report(
         WorkerReport::Completed(Arc::new(RunSummary {
             nodes: [(holding, 7), (idle, 0)]
-                .map(|(program_id, cpu)| NodeStatus {
-                    program_id,
+                .map(|(node_id, cpu)| NodeStatus {
+                    program_id: node_id,
                     status: None,
                     ram: RamUsage { cpu, gpu: 0 },
                 })
@@ -347,7 +354,7 @@ fn completed_snapshot_replaces_the_previous_run() {
 /// each end a run; the panic ends none.
 #[test]
 fn only_a_failed_run_clears_the_last_run_statuses() {
-    let node = program_id(1);
+    let node = node_id(1);
     let mut rs = run_state([node]);
     let mut log = StatusLog::default();
     rs.apply_report(completed_status(&[(node, 1.0)], &[]), &mut log);
@@ -378,10 +385,10 @@ fn only_a_failed_run_clears_the_last_run_statuses() {
 /// failed one in the run's order, which the rows are in.
 #[test]
 fn a_skipped_node_is_not_a_failure_and_the_outcome_names_the_cause() {
-    let [ran, failed, later_failed, skipped_a, skipped_b] = [1, 2, 3, 4, 5].map(program_id);
+    let [ran, failed, later_failed, skipped_a, skipped_b] = [1, 2, 3, 4, 5].map(node_id);
     let mut rs = run_state([ran, failed, later_failed, skipped_a, skipped_b]);
-    let row = |program_id, status| NodeStatus {
-        program_id,
+    let row = |node_id, status| NodeStatus {
+        program_id: node_id,
         status: Some(status),
         ram: RamUsage::default(),
     };
@@ -435,9 +442,9 @@ fn a_skipped_node_is_not_a_failure_and_the_outcome_names_the_cause() {
 /// With no failure, the cause is the first node the run could not feed.
 #[test]
 fn with_no_failure_the_cause_is_the_first_node_missing_an_input() {
-    let [cached, missing] = [1, 2].map(program_id);
-    let row = |program_id, status| NodeStatus {
-        program_id,
+    let [cached, missing] = [1, 2].map(node_id);
+    let row = |node_id, status| NodeStatus {
+        program_id: node_id,
         status: Some(status),
         ram: RamUsage::default(),
     };
@@ -516,7 +523,7 @@ fn event_loop_stream([a, b]: [ProgramId; 2]) -> Vec<WorkerReport> {
 /// the run 5 one, which leaves 3 superseded runs.
 #[test]
 fn a_merged_report_stream_folds_as_the_whole_stream() {
-    let nodes = [1, 2].map(program_id);
+    let nodes = [1, 2].map(node_id);
     let whole_len = event_loop_stream(nodes).len();
     assert_eq!(whole_len, 30);
     for prefix_len in 0..=whole_len {
@@ -568,7 +575,7 @@ fn a_merged_report_stream_folds_as_the_whole_stream() {
 /// carry the other 99 runs as a count.
 #[test]
 fn a_long_event_loop_keeps_its_last_run_alone() {
-    let [a, b] = [1, 2].map(program_id);
+    let [a, b] = [1, 2].map(node_id);
     let mailbox = ReportMailbox::default();
     mailbox.post(installed(&[a, b]));
     for _ in 0..100 {
@@ -586,4 +593,152 @@ fn a_long_event_loop_keeps_its_last_run_alone() {
             WorkerReport::Activity(WorkerActivity::EventLoop),
         ]
     ));
+}
+
+/// Each row folds into every instance its path lies inside, outermost first. Two instances of
+/// one subgraph, `i1` and `i2`, each hold `a`, `b` and the nested instance `n` holding `c`. In
+/// `i1` all execute: `i1` reads `Executed(1.0 + 2.0 + 0.5 = 3.5)`, `i1/n` `Executed(0.5)`. In
+/// `i2` `b` fails: `i2` reads `Errored`, with its executed time `1.25 + 0.25 = 1.5` summed all
+/// the same, while `i2/n`, which holds no failure, reads `Executed(0.25)`. A progress row that
+/// lands after folds again: `a` starting in `i1` turns `i1` `Running` and leaves `i1/n` as it
+/// was. Two rows of one frame fold the instance once, after both.
+#[test]
+fn each_row_folds_into_every_instance_above_it() {
+    let [i1, i2, a, b, n, c] = [1, 2, 3, 4, 5, 6].map(NodeId::from_u128);
+    let id = |ids: &[NodeId]| ProgramId::new(ids);
+    let path = |ids: &[NodeId]| InstancePath::new(ids);
+    let mut state = run_state([
+        id(&[i1, a]),
+        id(&[i1, b]),
+        id(&[i1, n, c]),
+        id(&[i2, a]),
+        id(&[i2, b]),
+        id(&[i2, n, c]),
+    ]);
+    let mut log = StatusLog::default();
+    state.apply_reports(
+        &mut VecDeque::from([completed_status(
+            &[
+                (id(&[i1, a]), 1.0),
+                (id(&[i1, b]), 2.0),
+                (id(&[i1, n, c]), 0.5),
+                (id(&[i2, a]), 1.25),
+                (id(&[i2, n, c]), 0.25),
+            ],
+            &[id(&[i2, b])],
+        )]),
+        &mut log,
+    );
+    let instance = |state: &RunState, ids: &[NodeId]| {
+        state
+            .instance(path(ids))
+            .unwrap_or_else(|| panic!("{ids:?} holds a reported node"))
+            .status()
+            .clone()
+    };
+    assert_eq!(instance(&state, &[i1]), ExecStatus::Executed(3.5));
+    assert_eq!(instance(&state, &[i1, n]), ExecStatus::Executed(0.5));
+    assert!(
+        matches!(instance(&state, &[i2]), ExecStatus::Errored(Some(_))),
+        "the failure inside is the instance's"
+    );
+    assert_eq!(state.instance(path(&[i2])).unwrap().executed_secs(), 1.5);
+    assert_eq!(
+        state.instance(path(&[i2])).unwrap().failed(),
+        Some(id(&[i2, b]))
+    );
+    assert_eq!(state.instance(path(&[i1])).unwrap().failed(), None);
+    assert_eq!(instance(&state, &[i2, n]), ExecStatus::Executed(0.25));
+    assert!(
+        state.instance(InstancePath::MAIN).is_none(),
+        "the main graph is no instance"
+    );
+
+    let at = Instant::now();
+    state.apply_reports(
+        &mut VecDeque::from([
+            WorkerReport::Progress {
+                program_id: id(&[i1, b]),
+                phase: RunPhase::Started { at },
+            },
+            WorkerReport::Progress {
+                program_id: id(&[i1, a]),
+                phase: RunPhase::Started { at },
+            },
+        ]),
+        &mut log,
+    );
+    assert_eq!(instance(&state, &[i1]), ExecStatus::Running(at));
+    assert_eq!(instance(&state, &[i1, n]), ExecStatus::Executed(0.5));
+    assert!(matches!(
+        instance(&state, &[i2]),
+        ExecStatus::Errored(Some(_))
+    ));
+}
+
+/// An instance takes the status among its nodes that asks most for a look — `Errored` over
+/// `Skipped` over `MissingInputs` over `Running` over `Executed` over `Cached` — with its
+/// executed time summed under any of them, the earliest of two starts, and missing inputs that
+/// name none of its own ports.
+#[test]
+fn an_instance_takes_the_status_that_asks_most_for_a_look() {
+    let late = Instant::now();
+    let early = late.checked_sub(Duration::from_secs(1)).unwrap();
+    let failed = ExecStatus::Errored(Some("boom".to_string()));
+    let cases = [
+        (vec![], ExecStatus::None, 0.0),
+        (vec![ExecStatus::Cached], ExecStatus::Cached, 0.0),
+        (
+            vec![ExecStatus::Cached, ExecStatus::Executed(1.5)],
+            ExecStatus::Executed(1.5),
+            1.5,
+        ),
+        (
+            vec![
+                ExecStatus::Executed(1.0),
+                ExecStatus::Running(late),
+                ExecStatus::Executed(2.0),
+            ],
+            ExecStatus::Running(late),
+            3.0,
+        ),
+        (
+            vec![ExecStatus::Running(late), ExecStatus::Running(early)],
+            ExecStatus::Running(early),
+            0.0,
+        ),
+        (
+            vec![
+                ExecStatus::Executed(1.0),
+                ExecStatus::MissingInputs(vec![0, 2]),
+            ],
+            ExecStatus::MissingInputs(Vec::new()),
+            1.0,
+        ),
+        (
+            vec![ExecStatus::Skipped, ExecStatus::MissingInputs(vec![1])],
+            ExecStatus::Skipped,
+            0.0,
+        ),
+        (
+            vec![
+                failed.clone(),
+                ExecStatus::Skipped,
+                ExecStatus::Executed(0.25),
+            ],
+            failed,
+            0.25,
+        ),
+    ];
+    for (nodes, status, executed_secs) in cases {
+        let mut instance = InstanceRunState::default();
+        for (idx, node) in nodes.iter().enumerate() {
+            instance.absorb(node_id(idx as u128 + 1), node);
+        }
+        assert_eq!(instance.status(), &status, "{nodes:?}");
+        assert_eq!(instance.executed_secs(), executed_secs, "{nodes:?}");
+        // The first failure is the instance's: the last case fails at its first node.
+        let failed = matches!(status, ExecStatus::Errored(_)).then(|| node_id(1));
+        assert_eq!(instance.failed(), failed, "{nodes:?}");
+    }
 }

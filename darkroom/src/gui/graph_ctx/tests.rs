@@ -209,8 +209,9 @@ fn impure_flag_reads_from_func_behavior() {
 
 /// A pane reads each run result through the instance it shows: a node of a subgraph reads its
 /// program node under the side's `through`, and none when it shows none, when it can seed no run
-/// either; an instance in the main graph seeds no run, as it has no body. Two instances, `i1`
-/// where the node ran in 1.0 s and `i2` where it failed.
+/// either; an instance in the main graph reads what its inside came to and seeds no run, as it
+/// has no body, and names the node inside that failed. Two instances, `i1` where the node ran in
+/// 1.0 s and `i2` where it failed.
 #[test]
 fn run_results_read_through_the_instance_a_pane_shows() {
     use std::io;
@@ -292,6 +293,29 @@ fn run_results_read_through_the_instance_a_pane_shows() {
     assert_eq!(node.runnable(), None);
 
     let main = fixture.graph_ctx();
+    assert_eq!(
+        main.node(i1).unwrap().exec_status(),
+        &ExecStatus::Executed(1.0)
+    );
+    let failing = main.node(i2).unwrap();
+    assert!(matches!(
+        failing.exec_status(),
+        ExecStatus::Errored(Some(_))
+    ));
+    let name = &fixture
+        .open
+        .document()
+        .graphs
+        .graph(graph)
+        .find(inside)
+        .unwrap()
+        .name;
+    assert_eq!(
+        failing.failed_inside(),
+        Some(name.as_str()),
+        "the footer names it"
+    );
+    assert_eq!(main.node(i1).unwrap().failed_inside(), None);
     assert_eq!(
         main.node(i1).unwrap().runnable(),
         None,

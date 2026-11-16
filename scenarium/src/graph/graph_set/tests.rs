@@ -20,6 +20,7 @@ use crate::graph::identity::{
 };
 use crate::graph::instance_path::InstancePath;
 use crate::graph::interface::Interface;
+use crate::graph::interface_change::{ChangeSide, DroppedBinding};
 use crate::graph::node::{Boundary, Node};
 use crate::graph::node_decl::NodeDecl;
 use crate::graph::ports::{InputDecl, OutputDecl, PortList, Ports, numbered_port};
@@ -29,8 +30,9 @@ use crate::graph::subgraph::Subgraph;
 use crate::graph::subscription::Subscription;
 use crate::internals;
 use crate::internals::test_graph::sets::{
-    ANY_SINK, CONFIG_SINK, SINK, SRC, TICKER, library, n, node, s,
+    ADD, ANY_SINK, CONFIG_SINK, SINK, SRC, TICKER, library, n, node, s,
 };
+use crate::library::Library;
 
 /// A subgraph with no ports.
 fn empty(name: &str) -> Subgraph {
@@ -415,7 +417,8 @@ fn an_instance_resolves_to_its_interface_as_it_is() {
         name: "renamed".to_owned(),
         ..int_port(7)
     }]);
-    set.put_subgraph(s(1), Subgraph::new("one", renamed));
+    let change = set.plan_interface(s(1), renamed, &library);
+    set.write_interface(&change, ChangeSide::After);
     assert_eq!(name(&set), Ok("renamed".to_owned()));
 
     let mut lacking = GraphSet::from(set.main().clone());
@@ -706,6 +709,200 @@ fn unknown_types_name_each_interface_port_that_uses_them() {
             ],
         }]
     );
+}
+
+const A: PortId = PortId::from_u128(101);
+const B: PortId = PortId::from_u128(102);
+const SUM: PortId = PortId::from_u128(201);
+
+/// `adder`'s interface: `a` and `b` of `a_type` and `b_type`, and an `Int` `sum`.
+fn adder_interface(a_type: DataType, b_type: DataType) -> Interface {
+    Interface::new(Ports {
+        inputs: vec![
+            InputDecl {
+                id: A,
+                ..InputDecl::required("a", a_type)
+            },
+            InputDecl {
+                id: B,
+                ..InputDecl::required("b", b_type)
+            },
+        ],
+        outputs: vec![OutputDecl {
+            id: SUM,
+            ..OutputDecl::new("sum", DataType::Int)
+        }],
+    })
+}
+
+/// Subgraph 1, `adder`: its `Inputs` node's `a` and `b` into `add` 13, whose sum is the `Outputs`
+/// node's. The main graph: `src` 1 into instance 2's `a`, a constant 7 on its `b`, and `sink` 3
+/// reading its sum. So each interface port is bound in two graphs.
+fn adder_set() -> (GraphSet, Library) {
+    let library = library();
+    let mut adder = Subgraph::new("adder", adder_interface(DataType::Int, DataType::Int));
+    let (inputs, outputs) = (
+        adder.boundary_node(Boundary::Inputs),
+        adder.boundary_node(Boundary::Outputs),
+    );
+    adder.graph.insert(n(13), node(&library, ADD));
+    let inner = &mut adder.graph;
+    inner.set_input_binding(
+        InputPort::new(n(13), numbered_port(1)),
+        Binding::wire(inputs, A),
+    );
+    inner.set_input_binding(
+        InputPort::new(n(13), numbered_port(2)),
+        Binding::wire(inputs, B),
+    );
+    inner.set_input_binding(
+        InputPort::new(outputs, SUM),
+        Binding::wire(n(13), numbered_port(1)),
+    );
+    let mut set = GraphSet::default();
+    set.insert_subgraph(s(1), adder);
+    set.main_mut().insert(n(1), node(&library, SRC));
+    place(&mut set, GraphId::Main, n(2), s(1));
+    set.main_mut().insert(n(3), node(&library, SINK));
+    let main = set.main_mut();
+    main.set_input_binding(
+        InputPort::new(n(2), A),
+        Binding::wire(n(1), numbered_port(1)),
+    );
+    main.set_input_binding(InputPort::new(n(2), B), Binding::Const(7i64.into()));
+    main.set_input_binding(
+        InputPort::new(n(3), numbered_port(1)),
+        Binding::wire(n(2), SUM),
+    );
+    set.validate_with(&library).unwrap();
+    (set, library)
+}
+
+/// A reorder and a rename change no binding in any graph: the plan drops nothing, and the set
+/// after differs from the one before in the interface alone.
+#[test]
+fn an_interface_reorder_and_rename_drop_nothing() {
+    let (mut set, library) = adder_set();
+    let before = set.clone();
+    let [a, b] = adder_interface(DataType::Int, DataType::Int)
+        .inputs()
+        .to_owned()
+        .try_into()
+        .unwrap();
+    let reordered = Interface::new(Ports {
+        inputs: vec![
+            b,
+            InputDecl {
+                name: "alpha".to_owned(),
+                ..a
+            },
+        ],
+        outputs: adder_interface(DataType::Int, DataType::Int)
+            .outputs()
+            .to_vec(),
+    });
+    let change = set.plan_interface(s(1), reordered.clone(), &library);
+    assert!(change.dropped().is_empty());
+    set.write_interface(&change, ChangeSide::After);
+    assert_eq!(set.subgraph(s(1)).unwrap().interface, reordered);
+    for (graph, held) in before.graphs() {
+        assert_eq!(set.graph(graph), held, "{graph:?} keeps every binding");
+    }
+    set.validate_with(&library).unwrap();
+}
+
+/// A port removed takes its wiring in both graphs and nothing else: input `a` its wire on the
+/// instance and its wire from the `Inputs` node, output `sum` the sink's wire from the instance
+/// and the `Outputs` node's wire from `add`. The write lands it, and the backward write puts all
+/// four back, leaving the set as it was.
+#[test]
+fn an_interface_port_removed_drops_its_wires_in_every_graph_and_undo_restores_them() {
+    let (mut set, library) = adder_set();
+    let before = set.clone();
+    let [_, b] = adder_interface(DataType::Int, DataType::Int)
+        .inputs()
+        .to_owned()
+        .try_into()
+        .unwrap();
+    let without = Interface::new(Ports {
+        inputs: vec![b],
+        outputs: vec![],
+    });
+    let adder = set.subgraph(s(1)).unwrap();
+    let (inputs, outputs) = (
+        adder.boundary_node(Boundary::Inputs),
+        adder.boundary_node(Boundary::Outputs),
+    );
+    let change = set.plan_interface(s(1), without.clone(), &library);
+    let dropped = |graph, port, binding| DroppedBinding {
+        graph,
+        port,
+        binding,
+    };
+    let inside = GraphId::Subgraph(s(1));
+    let mut expected = vec![
+        dropped(
+            GraphId::Main,
+            InputPort::new(n(2), A),
+            Binding::wire(n(1), numbered_port(1)),
+        ),
+        dropped(
+            GraphId::Main,
+            InputPort::new(n(3), numbered_port(1)),
+            Binding::wire(n(2), SUM),
+        ),
+        dropped(
+            inside,
+            InputPort::new(n(13), numbered_port(1)),
+            Binding::wire(inputs, A),
+        ),
+        dropped(
+            inside,
+            InputPort::new(outputs, SUM),
+            Binding::wire(n(13), numbered_port(1)),
+        ),
+    ];
+    // Graph by graph, each in the order the graph keeps its bindings.
+    expected.sort_by_key(|dropped| (dropped.graph, dropped.port));
+    assert_eq!(change.dropped(), expected);
+    assert_eq!(change.before(), &before.subgraph(s(1)).unwrap().interface);
+    assert_eq!(change.after(), &without);
+
+    set.write_interface(&change, ChangeSide::After);
+    assert!(!set.main().bindings.contains_key(&InputPort::new(n(2), A)));
+    set.validate_with(&library).unwrap();
+    set.write_interface(&change, ChangeSide::Before);
+    assert_eq!(set, before);
+}
+
+/// A port retyped drops only what the new type refuses: `b` as a `String` refuses the constant 7
+/// on the instance and its wire into the `Int` input of `add`, and keeps every binding of `a`.
+#[test]
+fn an_interface_port_retyped_drops_only_what_the_new_type_refuses() {
+    let (mut set, library) = adder_set();
+    let inputs = set.subgraph(s(1)).unwrap().boundary_node(Boundary::Inputs);
+    let change = set.plan_interface(
+        s(1),
+        adder_interface(DataType::Int, DataType::String),
+        &library,
+    );
+    assert_eq!(
+        change.dropped(),
+        [
+            DroppedBinding {
+                graph: GraphId::Main,
+                port: InputPort::new(n(2), B),
+                binding: Binding::Const(7i64.into()),
+            },
+            DroppedBinding {
+                graph: GraphId::Subgraph(s(1)),
+                port: InputPort::new(n(13), numbered_port(2)),
+                binding: Binding::wire(inputs, B),
+            },
+        ]
+    );
+    set.write_interface(&change, ChangeSide::After);
+    set.validate_with(&library).unwrap();
 }
 
 /// A node of a func the library lacks is kept as a stub, stays one at each load that still lacks

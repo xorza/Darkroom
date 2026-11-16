@@ -8,23 +8,26 @@ use std::collections::BTreeSet;
 
 use glam::Vec2;
 use scenarium::{
-    Binding, CacheMode, ConstValue, EventPort, GraphId, InputPort, NodeId, OutputPort, SubgraphId,
-    Subscription, numbered_port,
+    Binding, CacheMode, ConstValue, DataType, EventPort, GraphId, InputDecl, InputPort, Interface,
+    NodeId, OutputPort, PortId, Ports, Subgraph, SubgraphId, Subscription, numbered_port,
 };
 
-use crate::core::document::internals::DocumentFixture;
+use crate::core::document::internals::{DocumentFixture, insert_subgraph};
 use crate::core::document::item_id::ItemId;
+use crate::core::document::subgraph_side::SubgraphSide;
 use crate::core::edit::edit_facts::{EditFacts, Touched};
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::step::change::Change;
 use crate::core::edit::step::graph_step::GraphStep;
 use crate::core::edit::step::set_depth::SetDepth;
 use crate::core::edit::step::set_input::SetInput;
+use crate::core::edit::step::set_interface::SetInterface;
 use crate::core::edit::step::set_node::{NodeEntry, SetNode};
 use crate::core::edit::step::set_node_name::SetNodeName;
 use crate::core::edit::step::set_node_property::{PropertyChange, SetNodeProperty};
 use crate::core::edit::step::set_positions::{Move, SetPositions};
 use crate::core::edit::step::set_selection::SetSelection;
+use crate::core::edit::step::set_subgraph::SetSubgraph;
 use crate::core::edit::step::set_subscription::SetSubscription;
 use crate::core::edit::step::set_ties::SetTies;
 use crate::core::edit::step::undo_step::UndoStep;
@@ -52,6 +55,33 @@ fn set_input(input: InputPort, from: Option<Binding>, to: Option<Binding>) -> Un
         binding: Change { from, to },
         ties: SetTies::default(),
     }))
+}
+
+/// An interface edit that removes the subgraph's one input, on which an instance in the main
+/// graph holds a constant: the edit drops it.
+fn interface_port_removal() -> UndoStep {
+    let port = PortId::from_u128(1);
+    let interface = Interface::new(Ports {
+        inputs: vec![InputDecl {
+            id: port,
+            ..InputDecl::optional("a", DataType::Int)
+        }],
+        outputs: vec![],
+    });
+    let id = SubgraphId::from_u128(9);
+    let mut fixture = DocumentFixture::default();
+    insert_subgraph(&mut fixture.document, id, Subgraph::new("inner", interface));
+    let instance = fixture.add_instance(id);
+    fixture.document.graphs.main_mut().bindings.insert(
+        InputPort::new(instance, port),
+        Binding::Const(ConstValue::Int(3)),
+    );
+    UndoStep::Interface(Box::new(SetInterface::plan(
+        &fixture.document,
+        id,
+        Interface::default(),
+        &fixture.library,
+    )))
 }
 
 fn constant(v: f64) -> Binding {
@@ -211,9 +241,43 @@ fn every_kind_answers_the_frame_questions() {
             (true, EditFacts::NONE),
         ),
         ("tie removal", tie_removal(), (true, EditFacts::NONE)),
+        (
+            "subgraph insertion",
+            UndoStep::Subgraph(Box::new(SetSubgraph::insertion(
+                SubgraphId::from_u128(9),
+                Subgraph::new("inner", Interface::default()),
+                SubgraphSide::new(&Subgraph::new("inner", Interface::default()).graph),
+            ))),
+            (
+                true,
+                EditFacts {
+                    node_set: true,
+                    touched: Touched::Graph(GraphId::Subgraph(SubgraphId::from_u128(9))),
+                    ..EditFacts::NONE
+                },
+            ),
+        ),
+        (
+            "interface edit dropping a constant",
+            interface_port_removal(),
+            (
+                true,
+                EditFacts {
+                    ports: true,
+                    binding_kind: true,
+                    dropped: 1,
+                    touched: Touched::Several,
+                    ..EditFacts::NONE
+                },
+            ),
+        ),
     ];
     let kind = |step: &UndoStep| {
-        let UndoStep::Graph { step, .. } = step;
+        let step = match step {
+            UndoStep::Graph { step, .. } => step,
+            UndoStep::Subgraph(_) => return 9,
+            UndoStep::Interface(_) => return 10,
+        };
         match step {
             GraphStep::Node(_) => 0,
             GraphStep::Positions(_) => 1,
@@ -227,18 +291,17 @@ fn every_kind_answers_the_frame_questions() {
         }
     };
     let covered: BTreeSet<u8> = cases.iter().map(|(_, step, _)| kind(step)).collect();
-    assert_eq!(covered.len(), 9, "a case for every kind");
+    assert_eq!(covered.len(), 11, "a case for every kind");
     for (what, step, answers) in &cases {
         assert!(
             !step.is_noop(),
             "{what}: a degenerate step would pin nothing"
         );
-        // Each step also touches the graph it lands in, the main graph here.
-        let (dirties, facts) = *answers;
-        let facts = EditFacts {
-            touched: Touched::Graph(GraphId::Main),
-            ..facts
-        };
+        // Each graph's step also touches the graph it lands in, the main graph here.
+        let (dirties, mut facts) = *answers;
+        if let UndoStep::Graph { .. } = step {
+            facts.touched = Touched::Graph(GraphId::Main);
+        }
         assert_eq!(
             (step.dirties_document(), step.facts()),
             (dirties, facts),

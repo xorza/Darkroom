@@ -2,8 +2,8 @@
 
 use glam::Vec2;
 use scenarium::{
-    CacheMode, DetachReason, EventPort, Func, FuncEvent, Node, NodeAddr, NodeDecl, NodeId, PortId,
-    ProgramId, RamUsage, Unresolved,
+    CacheMode, DetachReason, EventPort, Func, FuncEvent, GraphId, Node, NodeAddr, NodeDecl, NodeId,
+    PortId, ProgramId, RamUsage, SubgraphId, Unresolved,
 };
 
 use crate::core::preview_sink;
@@ -11,7 +11,7 @@ use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::input_ctx::InputCtx;
 use crate::gui::graph_ctx::output_ctx::OutputCtx;
 use crate::gui::port_ref::{PortKind, PortRef};
-use crate::gui::state::run_state::{ExecStatus, NodeRunState};
+use crate::gui::state::run_state::{ExecStatus, InstanceRunState, NodeRunState};
 use crate::gui::theme::Theme;
 use crate::gui::theme::const_editor_theme::ConstEditorTheme;
 use crate::gui::theme::hover::Hover;
@@ -44,7 +44,7 @@ pub(crate) struct NodeCtx<'a> {
     /// delete it.
     declaration: Result<NodeDecl<'a>, DetachReason>,
     /// What the last run said about this node, looked up once at resolve.
-    run: Option<&'a NodeRunState>,
+    run: RunView<'a>,
     /// Whether the pointer is over this node's body — [`Hover::Rest`] until a
     /// caller that holds a `Ui` sets it through [`Self::with_hover`].
     ///
@@ -64,6 +64,17 @@ fn program_id(graph_ctx: GraphCtx<'_>, node_id: NodeId, node: &Node) -> Option<P
         .filter(|_| node.cache().is_some())
 }
 
+/// What the last run said about one node of a pane.
+#[derive(Clone, Copy, Debug)]
+enum RunView<'a> {
+    /// Nothing: the run reported nothing of it, or the pane shows no instance.
+    None,
+    /// A node with a body, as its program node.
+    Node(&'a NodeRunState),
+    /// An instance, as the nodes inside it.
+    Instance(&'a InstanceRunState),
+}
+
 impl<'a> NodeCtx<'a> {
     /// Resolve the placed `node_id` against the document.
     ///
@@ -81,13 +92,23 @@ impl<'a> NodeCtx<'a> {
                 .expect("every placement names a graph node or a stub");
             (stub.record.node(), Err(stub.reason))
         };
+        let run_state = graph_ctx.run_state();
+        let program_id = program_id(graph_ctx, node_id, node);
+        let run = match (program_id, node.subgraph(), graph_ctx.through()) {
+            (Some(id), _, _) => run_state.node(id).map_or(RunView::None, RunView::Node),
+            // An instance shows what the nodes inside it came to.
+            (None, Some(_), Some(path)) => run_state
+                .instance(path.child(node_id))
+                .map_or(RunView::None, RunView::Instance),
+            _ => RunView::None,
+        };
         Self {
             graph_ctx,
             node_id,
             pos,
             node,
             declaration,
-            run: program_id(graph_ctx, node_id, node).and_then(|id| graph_ctx.run_state().node(id)),
+            run,
             hover: Hover::Rest,
         }
     }
@@ -210,6 +231,22 @@ impl<'a> NodeCtx<'a> {
         self.sink()
     }
 
+    /// The subgraph whose interface this node shows: an instance's, or the subgraph a boundary
+    /// node is in; `None` for any other node, and for a stub.
+    pub(crate) const fn shows_interface(self) -> Option<SubgraphId> {
+        if self.stub() {
+            return None;
+        }
+        match (
+            self.node.subgraph(),
+            self.node.boundary(),
+            self.graph_ctx.graph(),
+        ) {
+            (Some(id), _, _) | (None, Some(_), GraphId::Subgraph(id)) => Some(id),
+            _ => None,
+        }
+    }
+
     /// This node, named in the document.
     pub(crate) const fn addr(self) -> NodeAddr {
         NodeAddr::new(self.graph_ctx.graph(), self.node_id)
@@ -236,15 +273,36 @@ impl<'a> NodeCtx<'a> {
     /// Outcome of the last graph run, with its detail. Drives the node's
     /// status frame, the footer's status, the inspector's status and
     /// error lines, and the highlight on the ports the run could not feed.
-    pub(crate) fn exec_status(self) -> &'a ExecStatus {
-        self.run.map_or(&ExecStatus::None, NodeRunState::status)
+    ///
+    /// An instance's is what the nodes inside it came to: see [`InstanceRunState`].
+    pub(crate) const fn exec_status(self) -> &'a ExecStatus {
+        match self.run {
+            RunView::None => &ExecStatus::None,
+            RunView::Node(node) => node.status(),
+            RunView::Instance(instance) => instance.status(),
+        }
+    }
+
+    /// The name of the node inside this instance whose failure is its status, or `None` for a
+    /// node that is no instance, or an instance nothing inside failed.
+    pub(crate) fn failed_inside(self) -> Option<&'a str> {
+        let RunView::Instance(instance) = self.run else {
+            return None;
+        };
+        let failed = instance.failed()?;
+        let graphs = &self.graph_ctx.document().graphs;
+        let graph = graphs.graph_at(failed.path())?;
+        Some(graphs.graph(graph).find(failed.node_id())?.name.as_str())
     }
 
     /// RAM this node's cached output currently holds (system vs GPU).
     /// Non-zero only for nodes that retain a value; drives the node body's
     /// memory readout, hidden when zero.
     pub(crate) fn ram(self) -> RamUsage {
-        self.run.map_or_default(NodeRunState::ram)
+        match self.run {
+            RunView::Node(node) => node.ram(),
+            RunView::None | RunView::Instance(_) => RamUsage::default(),
+        }
     }
 
     /// This node's input ports, in declaration order. Empty for a stub, which

@@ -56,6 +56,7 @@ pub use graph::identity::{
 };
 pub use graph::instance_path::{InstancePath, InstancePathError};
 pub use graph::interface::Interface;
+pub use graph::interface_change::{ChangeSide, DroppedBinding, InterfaceChange};
 pub use graph::node::special::{SPECIAL_NODES, SpecialNode};
 pub use graph::node::{Boundary, CacheMode, Node};
 pub use graph::node_decl::NodeDecl;

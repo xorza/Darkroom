@@ -24,7 +24,7 @@ use crate::gui::path_type::PathType;
 /// can run during the pass that raises it. A UI action that only rearranges
 /// panes is not one of these — it is a
 /// [`DockOperation`](palantir::DockOperation) on the frame's queue.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub(crate) enum AppCommand {
     /// Document file lifecycle.
     File(FileCommand),
@@ -42,6 +42,9 @@ pub(crate) enum AppCommand {
     Redo,
     /// Quit the app, through the unsaved-changes prompt.
     Quit,
+    /// Park a warning on the status bar: an edit the document's rules refused, or what an edit
+    /// dropped, its causes included.
+    Warn(String),
 }
 
 /// Document file lifecycle: new / open / save / save-as, plain or zipped.

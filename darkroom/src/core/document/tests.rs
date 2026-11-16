@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use scenarium::{Binding, EventPort, InputPort, Interface, OutputPort, Subgraph, numbered_port};
+use scenarium::{Binding, EventPort, InputPort, Interface, OutputPort, numbered_port};
 
 use super::*;
 use crate::core::document::internals::{DocumentFixture, insert_subgraph};
@@ -465,6 +465,49 @@ fn entering_a_subgraph_opens_its_one_tab_through_its_instance() {
     document.validate().unwrap();
 }
 
+/// An undo brings the one graph it wrote to the front when a tab shows it, and hands back the
+/// graph no tab shows; an edit of no one graph brings nothing.
+#[test]
+fn an_undo_brings_its_graph_forward_or_names_it() {
+    use crate::core::edit::edit_facts::Touched;
+
+    let mut fixture = DocumentFixture::default();
+    let [shown, hidden] = [1, 2].map(SubgraphId::from_u128);
+    for id in [shown, hidden] {
+        insert_subgraph(
+            &mut fixture.document,
+            id,
+            Subgraph::new("inner", Interface::default()),
+        );
+    }
+    let mut document = fixture.document;
+    let tab = TabRef::Graph(GraphId::Subgraph(shown));
+    document.layout.apply(DockOperation::OpenTab { tab });
+    document.layout.apply(DockOperation::ActivateTab {
+        tab: TabRef::Graph(GraphId::Main),
+    });
+    let active_tab = |document: &Document| document.layout.active_tabs().collect::<Vec<_>>();
+    assert!(
+        !active_tab(&document).contains(&tab),
+        "premise: behind the main graph"
+    );
+
+    assert_eq!(
+        document.bring_forward(Touched::Graph(GraphId::Subgraph(shown))),
+        None
+    );
+    assert!(active_tab(&document).contains(&tab));
+    assert_eq!(document.active, GraphId::Subgraph(shown));
+    assert_eq!(
+        document.bring_forward(Touched::Graph(GraphId::Subgraph(hidden))),
+        Some(GraphId::Subgraph(hidden))
+    );
+    assert_eq!(document.active, GraphId::Subgraph(shown), "nothing moved");
+    for touched in [Touched::Nothing, Touched::Several] {
+        assert_eq!(document.bring_forward(touched), None);
+    }
+}
+
 /// Picking a graph's tab makes that graph active, as input on its pane; picking a tab that
 /// shows no graph leaves the active graph as it was.
 #[test]
@@ -492,6 +535,33 @@ fn the_active_graph_follows_the_focused_panes_tab() {
         tab: TabRef::Graph(GraphId::Main),
     });
     assert_eq!(document.active, GraphId::Main);
+}
+
+/// The unused subgraphs are those no node places, then those only they place, in an order whose
+/// removals each hold: `outer` places `inner`, and nothing places `outer`; `kept` is placed in
+/// the main graph.
+#[test]
+fn unused_subgraphs_come_outermost_first() {
+    let mut fixture = DocumentFixture::default();
+    let [inner, outer, kept] = [1, 2, 3].map(SubgraphId::from_u128);
+    insert_subgraph(
+        &mut fixture.document,
+        inner,
+        Subgraph::new("inner", Interface::default()),
+    );
+    let mut holder = Subgraph::new("outer", Interface::default());
+    holder.graph.add(Node::instance(
+        inner,
+        fixture.document.graphs.subgraph(inner).unwrap(),
+    ));
+    insert_subgraph(&mut fixture.document, outer, holder);
+    insert_subgraph(
+        &mut fixture.document,
+        kept,
+        Subgraph::new("kept", Interface::default()),
+    );
+    fixture.add_instance(kept);
+    assert_eq!(fixture.document.unused_subgraphs(), [outer, inner]);
 }
 
 /// The path walks reach a subgraph's constants: the check names a relative path there by its

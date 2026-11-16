@@ -7,7 +7,9 @@ use palantir::Action as PalantirAction;
 use palantir::{
     LocateError, PlayError, PointerButton, Rect, ShortcutMods, SystemScale, WheelDelta,
 };
-use scenarium::{Binding, ConstValue, GraphId, InputPort, NodeId, ProgramId, numbered_port};
+use scenarium::{
+    Binding, ConstValue, GraphId, InputPort, InstancePath, NodeId, ProgramId, numbered_port,
+};
 use tracing::{callsite, subscriber};
 use tracing_subscriber::layer::SubscriberExt as _;
 
@@ -25,6 +27,7 @@ use crate::gui::dialogs::DialogAnswer;
 use crate::gui::frame::shortcuts;
 use crate::gui::main_window::MainWindow;
 use crate::gui::state::preview_store::{PreviewMessage, StoredContent};
+use crate::gui::state::run_state::{ExecStatus, InstanceRunState};
 use crate::gui::theme::Theme;
 use crate::internals::fixture;
 use std::num::NonZeroU32;
@@ -935,8 +938,8 @@ fn a_save_writes_the_format_its_extension_names() {
 }
 
 /// A preview two subgraphs down runs once per instance of the outer one and publishes under its
-/// path of three ids, the outer instance, the inner and the preview. The driver's state lists each
-/// graph, the main one first.
+/// path of three ids, the outer instance, the inner and the preview; each instance of the outer
+/// one shows what its inside came to. The driver's state lists each graph, the main one first.
 #[test]
 fn a_preview_inside_nested_subgraphs_publishes_under_its_path() {
     let mut driver = driver();
@@ -983,6 +986,15 @@ fn a_preview_inside_nested_subgraphs_publishes_under_its_path() {
         assert!(
             matches!(shown, Some(PreviewMessage::Text(text)) if text == fixture::NESTED_PREVIEW_VALUE.to_string()),
             "{id:?} shows {shown:?}"
+        );
+        assert!(
+            matches!(
+                app.run_state()
+                    .instance(InstancePath::new(&[outer]))
+                    .map(InstanceRunState::status),
+                Some(ExecStatus::Executed(_))
+            ),
+            "{outer:?} shows its inside ran"
         );
     }
 

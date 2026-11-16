@@ -27,7 +27,8 @@ use crate::core::document::graph_revision::GraphRevision;
 use crate::core::document::load_report::LoadReport;
 use crate::core::edit::document_queue::DocumentQueue;
 use crate::core::edit::document_request::DocumentRequest;
-use crate::core::edit::edit_facts::EditFacts;
+use crate::core::edit::edit_facts::{EditFacts, Touched};
+use crate::core::edit::error::IntentError;
 use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::step::undo_step::UndoStep;
@@ -239,13 +240,33 @@ impl OpenDocument {
                     self.document.enter(subgraph, through);
                     continue;
                 }
+                // An edit of the set of graphs joins the batch's entry, outside any gesture.
+                DocumentRequest::Subgraph(intent) => {
+                    let committed = self.batch.len();
+                    match intent.commit(&mut self.document, library, &mut self.batch) {
+                        Ok(()) => {}
+                        Err(IntentError::Refused(refusal)) => signals.facts.refused = Some(refusal),
+                        Err(IntentError::Malformed(malformed)) => {
+                            panic!("a widget built a malformed intent: {malformed}");
+                        }
+                    }
+                    for step in &self.batch[committed..] {
+                        signals.fold(step);
+                    }
+                    if self.batch.len() > committed {
+                        gesture = gesture.and(None);
+                    }
+                    continue;
+                }
             };
             self.document.active = graph;
             let committed = self.batch.len();
-            if let Err(malformed) =
-                intent.commit(&mut self.document, graph, library, &mut self.batch)
-            {
-                panic!("a widget built a malformed intent: {malformed}");
+            match intent.commit(&mut self.document, graph, library, &mut self.batch) {
+                Ok(()) => {}
+                Err(IntentError::Refused(refusal)) => signals.facts.refused = Some(refusal),
+                Err(IntentError::Malformed(malformed)) => {
+                    panic!("a widget built a malformed intent: {malformed}");
+                }
             }
             if self.batch.len() == committed {
                 continue;
@@ -267,6 +288,12 @@ impl OpenDocument {
         self.history
             .undo(&mut self.document, &mut |step| signals.fold(step));
         self.land(&signals)
+    }
+
+    /// See [`Document::bring_forward`]: navigation, which records nothing and leaves the
+    /// document as dirty as it was.
+    pub(crate) fn bring_forward(&mut self, touched: Touched) -> Option<GraphId> {
+        self.document.bring_forward(touched)
     }
 
     /// Replay the next entry forwards, the mirror of [`Self::undo`].

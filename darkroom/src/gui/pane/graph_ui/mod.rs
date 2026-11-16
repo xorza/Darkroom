@@ -18,6 +18,7 @@ pub(crate) mod draw;
 pub(crate) mod draw_ctx;
 pub(crate) mod gesture;
 pub(crate) mod node_ui;
+pub(crate) mod pane_header;
 pub(crate) mod scene;
 pub(crate) mod selection;
 pub(crate) mod toolbar;
@@ -218,15 +219,16 @@ impl GraphUi {
     /// menu pick means — lands on the stage's requests in the order it was raised.
     pub(crate) fn record(&mut self, ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
         self.record_popups(ui, stage);
-        // The toolbar overlays the canvas's top-left corner, so the two share a stack. It
-        // records *second*, which puts it above the canvas in the hit-test: a click on a chip
-        // never starts a pan.
+        // The toolbar overlays the canvas's top-left corner and a subgraph's header its top
+        // edge, so they share a stack. They record after the canvas, which puts them above it
+        // in the hit-test: a click on a chip or a name never starts a pan.
         Panel::zstack()
             .id_salt("graph_overlay")
             .size(SizeSpec::FILL)
             .show(ui, |ui| {
                 self.record_canvas(ui, stage);
                 toolbar::show(ui, stage);
+                pane_header::show(ui, stage);
             });
     }
 

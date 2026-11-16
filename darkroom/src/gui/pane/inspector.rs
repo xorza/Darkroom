@@ -27,6 +27,7 @@ use crate::gui::graph_ctx::input_ctx::InputCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph_ui::node_ui::header;
 use crate::gui::pane::graph_ui::node_ui::run_status::RunStatus;
+use crate::gui::pane::interface_card::{self, InterfaceCard};
 use crate::gui::port_ref::PortKind;
 use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::Theme;
@@ -193,6 +194,21 @@ fn body(ui: &mut Ui, stage: &mut Stage<'_, NodeCtx<'_>>, target: InspectTarget) 
                 .show(ui, theme);
             }
         });
+    }
+    if let Some(subgraph) = node.shows_interface() {
+        let document = node.graph_ctx.document();
+        let interface = &document
+            .graphs
+            .subgraph(subgraph)
+            .expect("a node shows the interface of a subgraph the set holds")
+            .interface;
+        let card = InterfaceCard {
+            theme,
+            library,
+            subgraph,
+            interface,
+        };
+        interface_card::show(ui, card, stage.out);
     }
     // This node's lines from the last run, level-colored, capped to the most recent few, in a
     // card of their own so they read as the run's record, not as the node's fields.

@@ -1,7 +1,8 @@
 use glam::{UVec2, Vec2};
 use palantir::Harness;
 use palantir::{DockOperation, Key, Modifiers};
-use scenarium::{GraphId, InputPort, NodeId, OutputPort, ProgramId, numbered_port};
+use scenarium::{Binding, GraphId, InputPort, NodeId, OutputPort, ProgramId, numbered_port};
+use std::iter;
 use std::sync::Arc;
 
 use common::internals::alloc_audit;
@@ -441,4 +442,101 @@ fn a_click_in_one_pane_selects_nothing_in_a_copy_beside_it() {
     );
     assert!(document.view(right_graph).selected.is_empty());
     assert_eq!(document.active, left_graph);
+}
+
+/// A wire from a node's output dropped on the `Outputs` node of its subgraph's pane gives the
+/// interface an output of that port's name and type, wired from it, as one history entry.
+#[test]
+fn a_wire_dropped_on_the_outputs_node_adds_an_interface_output() {
+    use palantir::PointerButton;
+    use scenarium::{Boundary, InputPort, Interface, Subgraph, SubgraphId};
+
+    use crate::core::document::internals::insert_subgraph;
+    use crate::gui::port_ref::PortRef;
+
+    let mut fixture = DocumentFixture::default();
+    let id = SubgraphId::from_u128(1);
+    let mut subgraph = Subgraph::new("inner", Interface::default());
+    let inside = subgraph.graph.add(fixture.plain_node());
+    let outputs = subgraph.boundary_node(Boundary::Outputs);
+    insert_subgraph(&mut fixture.document, id, subgraph);
+    let graph = GraphId::Subgraph(id);
+    let fixture = fixture.with_tab(TabRef::Graph(graph));
+    let mut test = SessionHarness::new(fixture);
+    test.prime(2);
+    let from = test
+        .ui
+        .rect(wid::port_circle(
+            graph,
+            PortRef::output(inside, numbered_port(1)),
+        ))
+        .expect("the output shows")
+        .center();
+    let onto = test
+        .ui
+        .rect(wid::body(graph, outputs))
+        .expect("the Outputs node shows")
+        .center();
+
+    test.ui.press(from, PointerButton::Left);
+    test.frame();
+    test.ui.drag_to(onto);
+    test.frame();
+    test.ui.release(PointerButton::Left);
+    test.frame();
+    test.drain();
+    let document = test.session.open.document();
+    let interface = &document.graphs.subgraph(id).unwrap().interface;
+    assert_eq!(interface.outputs().len(), 1);
+    let port = interface.outputs()[0].id;
+    assert_eq!(
+        document
+            .graphs
+            .graph(graph)
+            .bindings
+            .get(&InputPort::new(outputs, port)),
+        Some(&Binding::Wire(OutputPort::new(inside, numbered_port(1))))
+    );
+    assert!(test.undo());
+    assert!(
+        test.session
+            .open
+            .document()
+            .graphs
+            .subgraph(id)
+            .unwrap()
+            .interface
+            .outputs()
+            .is_empty()
+    );
+}
+
+/// An edit the document's rules refuse reaches the shell as the status line naming why: here a
+/// boundary node's removal, which writes nothing.
+#[test]
+fn a_refused_edit_raises_its_status_line() {
+    use scenarium::{Boundary, Interface, Subgraph, SubgraphId};
+
+    use crate::core::document::internals::insert_subgraph;
+
+    let mut fixture = DocumentFixture::default();
+    let id = SubgraphId::from_u128(1);
+    let subgraph = Subgraph::new("inner", Interface::default());
+    let inputs = subgraph.boundary_node(Boundary::Inputs);
+    insert_subgraph(&mut fixture.document, id, subgraph);
+    let mut test = SessionHarness::new(fixture);
+    test.requests.push_graph(
+        GraphId::Subgraph(id),
+        GraphIntent::RemoveNode { node_id: inputs },
+    );
+    test.drain();
+    let commands: Vec<AppCommand> = iter::from_fn(|| test.requests.pop_app()).collect();
+    assert!(
+        matches!(
+            commands.as_slice(),
+            [AppCommand::Warn(line)] if line == "a subgraph keeps its Inputs and Outputs nodes"
+        ),
+        "{commands:?}"
+    );
+    assert!(!test.session.open.can_undo(), "nothing was written");
 }

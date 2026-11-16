@@ -1,13 +1,13 @@
 use std::collections::BTreeSet;
 
 use glam::Vec2;
-use scenarium::internals::test_graph::TestGraph;
 use scenarium::{
     Binding, BindingEntry, BindingRejection, Boundary, CacheMode, ConstValue, DataType,
     DetachedNodeError, EventPort, FuncId, GraphId, InputDecl, InputPort, Interface, Library, Node,
-    NodeId, OutputDecl, OutputPort, Ports, ProgramShape, Subgraph, SubgraphId, Subscription,
-    SubscriptionRejection, Unresolved, internals, numbered_port,
+    NodeId, OutputDecl, OutputPort, PlacementRejection, ProgramShape, Subgraph, SubgraphId,
+    Subscription, SubscriptionRejection, Unresolved, internals,
 };
+use scenarium::{internals::test_graph::TestGraph, numbered_port};
 
 use crate::core::document::Document;
 use crate::core::document::internals::{DocumentFixture, insert_subgraph};
@@ -17,7 +17,7 @@ use crate::core::document::tie::{Tie, TieAngle, TieId};
 use crate::core::document::viewport::Viewport;
 use crate::core::document::wire_key::{DataWire, WireKey};
 use crate::core::edit::edit_facts::{EditFacts, Touched};
-use crate::core::edit::error::{MalformedIntent, Role};
+use crate::core::edit::error::{EditRefusal, IntentError, MalformedIntent, Role};
 use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::graph_intent::click_mode::ClickMode;
 use crate::core::edit::graph_intent::drag_start::DragStart;
@@ -234,7 +234,7 @@ fn a_removed_node_comes_back_whole() {
     assert!(document.graphs.main().find(a).is_none());
     assert_eq!(document.graphs.main().bindings.get(&edge), None);
 
-    let held = document.graphs.main().stub(stub).cloned().unwrap();
+    let record = document.graphs.main().stub(stub).cloned().unwrap();
     let stub_placement = document.main_view.node_placements[&stub];
     let step = GraphIntent::RemoveNode { node_id: stub }
         .commit_one(&mut document, &fixture.library)
@@ -246,7 +246,7 @@ fn a_removed_node_comes_back_whole() {
         .validate()
         .expect("a stub's removal leaves a valid document");
     step.revert(&mut document);
-    assert_eq!(document.graphs.main().stub(stub), Some(&held));
+    assert_eq!(document.graphs.main().stub(stub), Some(&record));
     assert_eq!(document.main_view.node_placements[&stub], stub_placement);
     assert!(
         document.graphs.main().find(stub).is_none(),
@@ -458,10 +458,10 @@ fn duplicate_skips_a_selected_stub() {
         .expect("a duplicate leaves a valid document");
 }
 
-/// Inside a subgraph an edit passes over its boundary nodes: a removal of one commits nothing,
-/// and a duplicate of a selection that holds both copies only the node beside them. An instance
-/// of the subgraph adds nothing inside itself, as it would place the subgraph in itself, and is
-/// taken in the main graph.
+/// Inside a subgraph an edit passes over its boundary nodes: a removal of one is refused and
+/// writes nothing, and a duplicate of a selection that holds both copies only the node beside
+/// them. An instance of the subgraph is refused inside itself, as it would place the subgraph in
+/// itself, and taken in the main graph.
 #[test]
 fn an_edit_inside_a_subgraph_passes_over_its_boundary_nodes() {
     let mut fixture = DocumentFixture::default();
@@ -485,10 +485,9 @@ fn an_edit_inside_a_subgraph_passes_over_its_boundary_nodes() {
 
     for node_id in [inputs, outputs] {
         let before = document.clone();
-        assert!(
-            commit(&mut document, GraphIntent::RemoveNode { node_id })
-                .unwrap()
-                .is_empty()
+        assert_eq!(
+            commit(&mut document, GraphIntent::RemoveNode { node_id }).unwrap_err(),
+            IntentError::Refused(EditRefusal::BoundaryNode)
         );
         assert_eq!(document, before, "{node_id:?} stays");
     }
@@ -514,8 +513,9 @@ fn an_edit_inside_a_subgraph_passes_over_its_boundary_nodes() {
 
     let instance = Node::instance(id, document.graphs.subgraph(id).unwrap());
     let refused = GraphIntent::add_node(Vec2::ZERO, NodeId::from_u128(50), instance.clone());
-    assert!(
-        commit(&mut document, refused).unwrap().is_empty(),
+    assert_eq!(
+        commit(&mut document, refused).unwrap_err(),
+        IntentError::Refused(EditRefusal::Placement(PlacementRejection::Recursive)),
         "no subgraph inside itself"
     );
     let taken = GraphIntent::add_node(Vec2::ZERO, NodeId::from_u128(51), instance);
@@ -529,6 +529,7 @@ fn an_edit_inside_a_subgraph_passes_over_its_boundary_nodes() {
         .validate()
         .expect("the edits leave a valid document");
 }
+
 /// A new node whose name is taken takes the next free number, through an add and through a
 /// duplicate alike: the fixture's node, its copy, then a copy of both.
 #[test]
@@ -1143,17 +1144,18 @@ fn subscribe_unsubscribe_commit_and_undo() {
     );
 }
 
-/// An instance that would nest the main graph past [`ProgramShape::MAX_LEVELS`] adds nothing:
-/// subgraph `k` places subgraph `k + 1` and the last holds one node, so the first is
-/// `MAX_LEVELS` deep, and an instance of it one level more. An instance of the second fits.
+/// An instance that would nest the main graph past [`ProgramShape::MAX_LEVELS`] is refused,
+/// naming the depth it would reach, and adds nothing: subgraph `k` places subgraph `k + 1` and
+/// the last holds one node, so the first is `MAX_LEVELS` deep, and an instance of it one level
+/// more. An instance of the second fits.
 #[test]
-fn an_add_past_a_placement_bound_adds_nothing() {
+fn an_add_past_a_placement_bound_is_refused() {
     let mut fixture = DocumentFixture::default();
     let body = fixture.plain_node();
     let ids: Vec<SubgraphId> = (1..=ProgramShape::MAX_LEVELS as u128)
         .map(SubgraphId::from_u128)
         .collect();
-    let empty = || Subgraph::new("level", Interface::new(Ports::default()));
+    let empty = || Subgraph::new("level", Interface::default());
     let mut document = fixture.document;
     let mut inner = empty();
     inner.graph.add(body);
@@ -1169,12 +1171,17 @@ fn an_add_past_a_placement_bound_adds_nothing() {
     insert_subgraph(&mut document, ids[0], deepest_first);
 
     let refused = NodeId::unique();
-    assert!(
+    let mut steps = Vec::new();
+    assert_eq!(
         GraphIntent::add_node(Vec2::ZERO, refused, too_deep)
-            .commit_one(&mut document, &fixture.library)
-            .unwrap()
-            .is_none()
+            .commit(&mut document, GraphId::Main, &fixture.library, &mut steps)
+            .unwrap_err(),
+        IntentError::Refused(EditRefusal::Placement(PlacementRejection::TooDeep {
+            graph: GraphId::Main,
+            levels: ProgramShape::MAX_LEVELS + 1,
+        }))
     );
+    assert!(steps.is_empty());
     assert!(!document.graphs.main().holds(refused));
     let added = NodeId::unique();
     assert!(
@@ -1215,6 +1222,7 @@ fn set_node_property_commits_and_reverts() {
         match to {
             NodeProperty::RuntimeCache(m) => assert_eq!(node.cache(), Some(m)),
             NodeProperty::Disabled(d) => assert_eq!(node.disabled, d),
+            NodeProperty::Subgraph(_) => unreachable!("no case re-points"),
         }
         assert_eq!(
             step.facts(),
@@ -1277,6 +1285,7 @@ fn a_cache_mode_on_a_node_with_no_body_is_malformed() {
         .is_some()
     );
 }
+
 #[test]
 fn commit_rejects_cycle_forming_bind() {
     // a → b (b's input 0 bound to a's output 0).
@@ -1834,8 +1843,8 @@ fn ports_the_declaration_lacks_are_refused() {
 /// after it.
 type Edit<'a> = (&'a str, GraphIntent, &'a dyn Fn(&Document));
 
-/// Three plain nodes in a row and four wires: `ab = a.0 → b.0`, `ac = a.0 →
-/// c.0`, `bc = b.0 → c.1` and the event wire `tick = a.tick → b`. The tie
+/// Three plain nodes in a row and four wires, each end its port's number: `ab =
+/// a.1 → b.1`, `ac = a.1 → c.1`, `bc = b.1 → c.2` and the event wire `tick = a.tick → b`. The tie
 /// `held` holds `ab` and `tick` and is selected; the tie `shared` holds `ac`
 /// and `bc`.
 struct Tied {

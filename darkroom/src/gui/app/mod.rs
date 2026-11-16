@@ -8,6 +8,7 @@ use palantir::{ColorScheme, Preference, RecordPass, Ui, UiPreferences};
 use scenarium::Binding;
 use scenarium::ConstValue;
 use scenarium::FileMode;
+use scenarium::GraphId;
 use scenarium::Library;
 
 use crate::core::edit::graph_intent::GraphIntent;
@@ -239,10 +240,35 @@ impl App {
                     self.capture = Some(ViewCapture::new(CaptureTarget::Png(path)));
                 }
             }
-            AppCommand::Undo => self.session.undo(&mut self.requests),
-            AppCommand::Redo => self.session.redo(&mut self.requests),
+            AppCommand::Undo => {
+                let hidden = self.session.undo(&mut self.requests);
+                self.name_hidden_edit("undid", hidden);
+            }
+            AppCommand::Redo => {
+                let hidden = self.session.redo(&mut self.requests);
+                self.name_hidden_edit("redid", hidden);
+            }
             AppCommand::Quit => self.guard_discard(PendingTransition::Quit),
+            AppCommand::Warn(line) => self.status.warn(StatusFamily::Edit, line),
         }
+    }
+
+    /// Name on the status bar the graph an undo or a redo changed while no tab shows it, so no
+    /// undo changes only what is off screen.
+    fn name_hidden_edit(&mut self, verb: &str, hidden: Option<GraphId>) {
+        let Some(GraphId::Subgraph(id)) = hidden else {
+            return;
+        };
+        let document = self.session.open.document();
+        let name = &document
+            .graphs
+            .subgraph(id)
+            .expect("an undo writes a graph the document holds")
+            .name;
+        self.status.warn(
+            StatusFamily::Edit,
+            format!("{verb} an edit in subgraph {name:?}, which no tab shows"),
+        );
     }
 
     /// Mirror the window's live geometry into the preferences, in memory only, so a save on quit
@@ -842,8 +868,6 @@ pub(crate) mod internals {
 #[cfg(test)]
 mod tests {
     use std::mem;
-
-    use scenarium::GraphId;
 
     use super::*;
 

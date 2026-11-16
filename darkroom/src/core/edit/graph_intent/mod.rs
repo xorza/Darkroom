@@ -3,7 +3,7 @@
 //! A [`GraphIntent`] is forward-only ("set X to Y", no history) and is the vocabulary every
 //! surface of the editor speaks. Turning one into something reversible is
 //! [`GraphIntent::into_step`]: it reads the state the intent overwrites out of a `&Document` and
-//! folds the two into a [`GraphStep`].
+//! folds the two into an [`UndoStep`].
 //!
 //! The two vocabularies are deliberately *not* parallel. Intents are named for what a user did,
 //! steps for what the document can take back, and the lowering between them may expand one into
@@ -38,7 +38,7 @@ use crate::core::document::route::Route;
 use crate::core::document::tie::{Tie, TieAngle, TieId};
 use crate::core::document::viewport::Viewport;
 use crate::core::document::wire_key::{DataWire, WireKey};
-use crate::core::edit::error::{MalformedIntent, Role};
+use crate::core::edit::error::{EditRefusal, IntentError, MalformedIntent, Role};
 use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::graph_intent::click_mode::ClickMode;
 use crate::core::edit::graph_intent::drag_start::DragStart;
@@ -418,7 +418,7 @@ impl GraphIntent {
         document: &Document,
         graph_id: GraphId,
         library: &Library,
-    ) -> Result<Option<GraphStep>, MalformedIntent> {
+    ) -> Result<Option<GraphStep>, IntentError> {
         let (graph, view) = (document.graphs.graph(graph_id), document.view(graph_id));
         let scope = document.graphs.scope(library, graph_id);
         let step = match self {
@@ -432,11 +432,11 @@ impl GraphIntent {
                 validate::finite_pos(pos, Role::AddNode)?;
                 let decl = validate::resolving_node(scope, &node)?;
                 // An instance that places a subgraph inside itself, or one that takes a graph past
-                // a bound, is refused by design, as a cycle-forming bind is: the compile expands
-                // only a set within them.
-                if document.graphs.admit_nodes(graph_id, [&node]).is_err() {
-                    return Ok(None);
-                }
+                // a bound.
+                document
+                    .graphs
+                    .admit_nodes(graph_id, [&node])
+                    .map_err(EditRefusal::Placement)?;
                 validate::seed_bindings(
                     graph,
                     scope,
@@ -459,18 +459,19 @@ impl GraphIntent {
                     node,
                     bindings,
                     subscriptions: Vec::new(),
-                })?;
+                })
+                .map_err(MalformedIntent::from)?;
                 GraphStep::Node(Box::new(SetNode::insertion(detached, placement)))
             }
             Self::RemoveNode { node_id } => {
                 validate::non_nil_node(node_id, Role::RemoveNode)?;
-                // A subgraph keeps one boundary node a side, so its removal is refused by design;
-                // a selection that holds one deletes the rest.
+                // A subgraph keeps one boundary node a side; a selection that holds one deletes
+                // the rest.
                 if graph
                     .find(node_id)
                     .is_some_and(|node| node.boundary().is_some())
                 {
-                    return Ok(None);
+                    return Err(EditRefusal::BoundaryNode.into());
                 }
                 let Some(entry) = NodeEntry::capture(document, graph_id, node_id) else {
                     return Ok(None);
@@ -595,6 +596,25 @@ impl GraphIntent {
                             .ok_or(MalformedIntent::NoCacheMode { node_id })?,
                         to,
                     }),
+                    NodeProperty::Subgraph(to) => {
+                        let refused = MalformedIntent::NotRepointable { node_id };
+                        let from = node.subgraph().ok_or(refused)?;
+                        let graphs = &document.graphs;
+                        let (Some(held), Some(target)) =
+                            (graphs.subgraph(from), graphs.subgraph(to))
+                        else {
+                            return Ok(None);
+                        };
+                        if held.interface != target.interface {
+                            return Err(refused.into());
+                        }
+                        let mut placed = node.clone();
+                        placed.set_subgraph(to);
+                        graphs
+                            .admit_nodes(graph_id, [&placed])
+                            .map_err(EditRefusal::Placement)?;
+                        PropertyChange::Subgraph(Change { from, to })
+                    }
                 };
                 GraphStep::NodeProperty(SetNodeProperty { node_id, property })
             }
@@ -639,10 +659,10 @@ impl GraphIntent {
                 validate::non_nil_tie(tie, Role::TieWires)?;
                 validate::finite_pos(pos, Role::TieWires)?;
                 if view.ties.contains_key(&tie) {
-                    return Err(MalformedIntent::TieAlreadyExists { tie });
+                    return Err(MalformedIntent::TieAlreadyExists { tie }.into());
                 }
                 if wires.is_empty() {
-                    return Err(MalformedIntent::EmptyTie { tie });
+                    return Err(MalformedIntent::EmptyTie { tie }.into());
                 }
                 let mut ties = TiesDraft::new(view);
                 ties.set_tie(
@@ -679,7 +699,7 @@ impl GraphIntent {
                 if let TieAngle::Pinned(degrees) = angle
                     && !angle.is_valid()
                 {
-                    return Err(MalformedIntent::InvalidTieAngle { tie, degrees });
+                    return Err(MalformedIntent::InvalidTieAngle { tie, degrees }.into());
                 }
                 let Some(&placed) = view.ties.get(&tie) else {
                     return Ok(None);
@@ -732,10 +752,10 @@ impl GraphIntent {
         graph: GraphId,
         library: &Library,
         steps: &mut Vec<UndoStep>,
-    ) -> Result<(), MalformedIntent> {
+    ) -> Result<(), IntentError> {
         if let Self::SetViewport { to } = self {
             if !to.is_valid() {
-                return Err(MalformedIntent::InvalidViewport);
+                return Err(MalformedIntent::InvalidViewport.into());
             }
             document.slot_mut(graph).view.viewport = to;
             return Ok(());
@@ -825,7 +845,7 @@ pub(crate) mod internals {
     use scenarium::{GraphId, Library, Node, NodeId};
 
     use crate::core::document::Document;
-    use crate::core::edit::error::MalformedIntent;
+    use crate::core::edit::error::{IntentError, MalformedIntent};
     use crate::core::edit::graph_intent::GraphIntent;
     use crate::core::edit::step::undo_step::UndoStep;
 
@@ -837,7 +857,10 @@ pub(crate) mod internals {
             library: &Library,
         ) -> Result<Option<UndoStep>, MalformedIntent> {
             let mut steps = Vec::new();
-            self.commit(document, GraphId::Main, library, &mut steps)?;
+            match self.commit(document, GraphId::Main, library, &mut steps) {
+                Ok(()) | Err(IntentError::Refused(_)) => {}
+                Err(IntentError::Malformed(malformed)) => return Err(malformed),
+            }
             assert!(steps.len() <= 1, "the intent committed {steps:?}");
             Ok(steps.pop())
         }
