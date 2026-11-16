@@ -1,7 +1,9 @@
 - stacking frames (outer, inner, reference)
 - auto chosen reference frame for stacking and manually specified
 - visual node groups
+
 - ghost wires for stubs
+
 - subgraphs: event ports on an interface
 - subgraphs: a cache mode on an instance
 - subgraphs: one computed value shared by instances whose digests are equal
