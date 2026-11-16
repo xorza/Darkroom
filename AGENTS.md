@@ -53,9 +53,9 @@ cargo fmt --all && cargo gate-lint && cargo gate-lint-nogpu && cargo gate-ship &
 
 Each command reports every error it finds, through `--keep-going` and
 `--no-fail-fast`, so one failed run shows all of its own. `fmt --all` also
-formats the submodules, each by its own `rustfmt.toml`. **Run the gate before
-a turn that changed code ends, and before each push**: master takes direct
-pushes, and CI runs the same lanes on three OSes.
+formats the submodules, each by its own `rustfmt.toml`. **Run the gate once
+the work asked for is done, after its last edit, and before each push**:
+master takes direct pushes, and CI runs the same lanes on three OSes.
 
 A filtered `cargo gate-test <name>` is the cheapest way to see an edit work: it
 builds the gate's own test shape, so the gate finds that build fresh. A change
@@ -88,8 +88,7 @@ reach-in only the crate's own tests call is gated `#[cfg(test)]`. Never
 `any(test, feature = "internals")`: a wrong gate shows as dead code in a
 `--features internals` build. The one exception is a test-fixture tree: it
 compiles whole under `internals`, and an `expect(dead_code)` outside tests on
-its root covers what benches leave unused. The submodules follow the same
-rule.
+its root covers what benches leave unused.
 
 ## Benches
 
@@ -143,9 +142,9 @@ arguments after a `--`; each submodule runs its own.
 - **`From` and `TryFrom` are lossless.** A conversion that loses data is a
   named method each caller names, as `InterleavedImage::without_alpha`.
 - **Errors are cases, each in its domain**, a foreign error kept as its own
-  type. A type valid by construction has a `new` that panics and a `checked`
-  that returns the error. Refused: one `Error` of messages, which no caller
-  can match on.
+  type. A type valid by construction has a `checked` that returns the error
+  and a `new` that is sugar over it and panics on that error. Refused: one
+  `Error` of messages, which no caller can match on.
 - **An error names its cause in `source` alone**, and every report prints it
   through `common::ErrorChain`, which walks the chain. Refused: the cause in
   `Display` too, which a chain prints twice; the cause in `Display` alone,
@@ -154,8 +153,10 @@ arguments after a `--`; each submodule runs its own.
 - **One behavior in every build and on every platform**, unless the difference is speed alone or
   the system decides it: a person's settings, what a device can hold. Refused: a diagnostic on in
   debug alone.
-- **No backward compatibility.** Change serialized shapes and APIs freely: no
-  migrations, compat shims, legacy deserializers or legacy-format tests.
+- **No backward compatibility.** Change serialized shapes and the workspace
+  crates' APIs freely: no migrations, compat shims, legacy deserializers or
+  legacy-format tests. `palantir`'s public API waits for a go-ahead, as its
+  `AGENTS.md` says.
 - **New ids come from `uuidgen | tr 'A-Z' 'a-z'`** — every new `common::Id`
   UUID, never hand-typed or invented, which can collide; `rg` it to confirm it
   is unique. A shipped id never changes: saved graphs bind to it. A func's port
@@ -166,8 +167,11 @@ arguments after a `--`; each submodule runs its own.
   its reason and source: a link or the practice it follows. A file holds what
   stays true as the code changes, the direction, the rules and what was
   refused, not measurements, history or what the code already states; a
-  crate's sit in its own `AGENTS.md`. Refused: a research folder of dated
-  facts, which the code outgrows and no one reads again.
+  crate's sit in its own `AGENTS.md`.
+- **`.notes/` holds what is not a decision**: `ISSUES.md` the open issues,
+  `TODO.md` the work ahead, `PERF.md` the performance journal, and
+  `research/` the dated facts and measurements a decision cites, as
+  `palantir` and `fits-well` keep theirs.
 - **A document is parsed once, at load.** The load handles each inconsistency
   with the library and reports it; the edit gate keeps the document
   consistent after that. At run time and in each frame, code asserts the
