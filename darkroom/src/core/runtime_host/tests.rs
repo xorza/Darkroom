@@ -2,7 +2,7 @@ use std::path::Path;
 
 use common::{TempDir, fs};
 use lens::MlModelPaths;
-use scenarium::{CacheMode, ConstValue, Graph, NodeId};
+use scenarium::{CacheMode, ConstValue, Graph, NodeId, ProgramId};
 
 use crate::core::io::cache;
 use crate::core::runtime_host::error::NoCompiledWork;
@@ -29,11 +29,11 @@ fn an_eviction_reaches_the_seed_cone_of_the_installed_program() {
         .by_name("ML Denoise")
         .expect("built-in present");
     let mut graph = Graph::default();
-    let node = graph.add_func_node(func);
+    let node = ProgramId::from(graph.add_func_node(func));
 
     host.run_once(&graph);
     assert_eq!(host.evict_cache(&graph, node), Ok(vec![node]));
-    let gone = NodeId::unique();
+    let gone = ProgramId::from(NodeId::unique());
     assert_eq!(
         host.evict_cache(&graph, gone),
         Err(NoCompiledWork),

@@ -6,7 +6,7 @@ use crate::data::ram_usage::RamUsage;
 use crate::exec::cache::disk_store::DiskStore;
 use crate::exec::compile::compiled_graph::CompiledGraph;
 use crate::exec::report::run_reporter::RunPhase;
-use crate::graph::identity::NodeId;
+use crate::graph::program_id::ProgramId;
 use crate::worker::activity::WorkerActivity;
 use crate::worker::run_summary::RunSummary;
 
@@ -26,7 +26,7 @@ pub enum WorkerReport {
     Activity(WorkerActivity),
     /// A node's lambda started or finished, as the run reaches it.
     Progress {
-        node_id: NodeId,
+        program_id: ProgramId,
         phase: RunPhase,
     },
     /// A run completed. Reuses one allocation across runs while the host drops each summary
@@ -41,13 +41,13 @@ pub enum WorkerMessage {
     },
     Clear,
     EvictCache {
-        node_ids: Vec<NodeId>,
+        program_ids: Vec<ProgramId>,
     },
     /// Persist these nodes' resident disk-backed values now, rather than waiting
     /// for a run that recomputes them. Raised when a node's cache mode gains its
     /// disk bit while a value is already in RAM.
     FlushCache {
-        node_ids: Vec<NodeId>,
+        program_ids: Vec<ProgramId>,
     },
     /// The same, over every installed node: what a store owes values computed while there was
     /// nowhere to persist them, as for an unsaved document just given a root.
@@ -67,7 +67,7 @@ pub enum WorkerMessage {
     /// the program does not hold fails the run, unless a later `Update` or
     /// `Clear` in the same batch replaced the program it was named against.
     RunNodes {
-        node_ids: Vec<NodeId>,
+        program_ids: Vec<ProgramId>,
     },
     /// Run the subscribers of these events, as if the event loop fired them.
     #[cfg(test)]
@@ -76,7 +76,11 @@ pub enum WorkerMessage {
         reason = "a test-only variant names its type in place of a cfg'd import"
     )]
     FireEvents {
-        events: Vec<crate::graph::identity::EventPort>,
+        #[expect(
+            private_interfaces,
+            reason = "a test-only variant carries the crate's own event address"
+        )]
+        events: Vec<crate::exec::program_event::ProgramEvent>,
     },
     StartEventLoop,
     StopEventLoop,

@@ -7,7 +7,7 @@ use palantir::Action as PalantirAction;
 use palantir::{
     LocateError, PlayError, PointerButton, Rect, ShortcutMods, SystemScale, WheelDelta,
 };
-use scenarium::{Binding, ConstValue, InputPort, NodeId};
+use scenarium::{Binding, ConstValue, InputPort, NodeId, ProgramId};
 use tracing::{callsite, subscriber};
 use tracing_subscriber::layer::SubscriberExt as _;
 
@@ -789,8 +789,8 @@ fn a_lost_device_takes_the_previews_and_they_convert_again() {
     driver.open(&sample, OpenMode::Copy).unwrap();
     driver.act(&[key("ctrl+r")]).unwrap();
     driver.wait_run(Duration::from_secs(30)).unwrap();
-    let nodes =
-        ["Preview Adjusted", "Preview Astro", "Preview Blend"].map(|name| node_id(&driver, name));
+    let nodes = ["Preview Adjusted", "Preview Astro", "Preview Blend"]
+        .map(|name| ProgramId::from(node_id(&driver, name)));
     let adjusted = nodes[0];
     let ask_full = |driver: &mut Driver| {
         driver.offscreen().with_app(|app, ui| {
@@ -983,7 +983,7 @@ fn the_sample_project_runs_to_its_previews() {
                 .app()
                 .run_state()
                 .previews()
-                .get(node_id(&driver, &node.name))
+                .get(ProgramId::from(node_id(&driver, &node.name)))
                 .and_then(StoredContent::image)
                 .unwrap_or_else(|| panic!("{} shows an image", node.name));
             (node.name.clone(), shown.preview.native_size)

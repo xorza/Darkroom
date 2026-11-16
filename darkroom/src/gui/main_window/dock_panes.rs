@@ -14,7 +14,7 @@ use glam::Vec2;
 use palantir::{
     DockDrop, DockOperation, DockTabMenu, DockTabs, InternedStr, MenuItem, Size, SplitSide, Ui, fmt,
 };
-use scenarium::NodeId;
+use scenarium::ProgramId;
 
 use crate::core::document::Document;
 use crate::core::document::inspect_target::InspectTarget;
@@ -35,7 +35,7 @@ use crate::gui::widgets::format;
 pub(crate) struct DockPanes<'a> {
     pub(crate) stage: Stage<'a, GraphCtx<'a>>,
     pub(crate) graph_ui: &'a mut GraphUi,
-    pub(crate) image_viewers: &'a mut HashMap<NodeId, ImageViewer>,
+    pub(crate) image_viewers: &'a mut HashMap<ProgramId, ImageViewer>,
     pub(crate) preferences: &'a mut Preferences,
 }
 
@@ -98,20 +98,20 @@ impl DockTabs for DockPanes<'_> {
             TabRef::Inspector(target) => {
                 inspector::show(ui, &mut self.stage, target);
             }
-            TabRef::ImageViewer(node_id) => {
-                let title = image_viewer::node_label(ctx.document(), node_id);
+            TabRef::ImageViewer(program_id) => {
+                let title = image_viewer::node_label(ctx.document(), program_id);
                 let previews = ctx.run_state().previews();
                 let viewer = self
                     .image_viewers
-                    .entry(node_id)
-                    .or_insert_with(|| ImageViewer::new(node_id));
+                    .entry(program_id)
+                    .or_insert_with(|| ImageViewer::new(program_id));
                 // Viewer-toolbar edits go through the same in-place preferences path as the
                 // Preferences tab.
                 let pane = ViewerPane {
                     theme: ctx.theme(),
                     title,
                     previews,
-                    status: ctx.run_state().exec_status(node_id),
+                    status: ctx.run_state().exec_status(program_id),
                     size: size.map(Vec2::from),
                 };
                 viewer.show(

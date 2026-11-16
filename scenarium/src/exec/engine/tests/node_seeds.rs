@@ -74,7 +74,7 @@ async fn node_seed_combines_with_a_sink_run_without_retaining() {
     let run = e
         .run(RunSeeds {
             sinks: true,
-            node_ids: vec![e.id("sum")],
+            program_ids: vec![e.id("sum")],
             ..Default::default()
         })
         .await;
@@ -106,11 +106,11 @@ async fn unresolvable_node_seed_fails_the_run() {
     g.never_all();
     let mut e = TestEngine::over(g);
 
-    let bogus = NodeId::from_u128(0xdead_beef);
+    let bogus = ProgramId::from(NodeId::from_u128(0xdead_beef));
     let error = e
         .try_run(RunSeeds::nodes(vec![bogus]))
         .await
         .expect_err("a stale seed fails the run");
 
-    assert!(matches!(error, ExecError::NodeSeedNotFound { node_id } if node_id == bogus));
+    assert!(matches!(error, ExecError::NodeSeedNotFound { program_id } if program_id == bogus));
 }

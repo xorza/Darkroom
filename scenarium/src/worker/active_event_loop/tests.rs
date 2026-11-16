@@ -6,6 +6,8 @@ use tokio::sync::Notify;
 use tokio::time;
 use tokio::time::{Duration, timeout};
 
+use crate::graph::identity::NodeId;
+
 use crate::graph::func::event::EventLambda;
 use crate::internals::worker::PATIENCE;
 use crate::runtime::shared_any_state::SharedAnyState;
@@ -14,18 +16,18 @@ use crate::runtime::shared_any_state::SharedAnyState;
 #[derive(Debug)]
 struct SingleLoop {
     active: ActiveEventLoop,
-    node_id: NodeId,
+    program_id: ProgramId,
 }
 
 /// Start an event loop with a single lambda as its only trigger, on a fresh
 /// `NodeId` — the shape most `start_event_loop` tests want when they only
 /// care about one lambda's behavior.
 fn start_single_event_loop(lambda: EventLambda, pause_gate: &PauseGate) -> SingleLoop {
-    let node_id = NodeId::unique();
+    let program_id = ProgramId::from(NodeId::unique());
     let active = ActiveEventLoop::start(
         vec![EventTrigger {
-            event: EventPort {
-                node_id,
+            event: ProgramEvent {
+                program_id,
                 event_idx: 0,
             },
             lambda,
@@ -33,7 +35,7 @@ fn start_single_event_loop(lambda: EventLambda, pause_gate: &PauseGate) -> Singl
         }],
         pause_gate,
     );
-    SingleLoop { active, node_id }
+    SingleLoop { active, program_id }
 }
 
 #[tokio::test]
@@ -41,7 +43,7 @@ async fn start_event_loop_forwards_events() {
     let event_lambda = EventLambda::new(|_state| async move {});
     let SingleLoop {
         mut active,
-        node_id,
+        program_id,
     } = start_single_event_loop(event_lambda, &PauseGate::default());
 
     let event = active
@@ -50,8 +52,8 @@ async fn start_event_loop_forwards_events() {
         .expect("Expected event loop event");
     assert_eq!(
         event,
-        EventPort {
-            node_id,
+        ProgramEvent {
+            program_id,
             event_idx: 0
         }
     );
@@ -74,7 +76,7 @@ async fn start_event_loop_waits_for_callback() {
 
     let SingleLoop {
         mut active,
-        node_id,
+        program_id,
     } = start_single_event_loop(event_lambda, &PauseGate::default());
 
     // `notify_one` stores a permit, so the lambda proceeds whether or not it has parked yet.
@@ -86,8 +88,8 @@ async fn start_event_loop_waits_for_callback() {
         .expect("Event channel closed");
     assert_eq!(
         event,
-        EventPort {
-            node_id,
+        ProgramEvent {
+            program_id,
             event_idx: 0
         }
     );
@@ -120,7 +122,7 @@ async fn pause_gate_blocks_event_loop_iterations() {
     let pause_gate = PauseGate::default();
     let SingleLoop {
         mut active,
-        node_id,
+        program_id,
     } = start_single_event_loop(event_lambda, &pause_gate);
     let settle = || time::sleep(Duration::from_millis(1));
 
@@ -137,8 +139,8 @@ async fn pause_gate_blocks_event_loop_iterations() {
     settle().await;
     assert_eq!(
         active.recv_event().await,
-        Some(EventPort {
-            node_id,
+        Some(ProgramEvent {
+            program_id,
             event_idx: 0
         })
     );
@@ -164,7 +166,7 @@ async fn lambda_panic_is_captured_not_unwound() {
     let event_lambda = EventLambda::new(|_state| async { panic!("boom in lambda") });
     let SingleLoop {
         mut active,
-        node_id,
+        program_id,
     } = start_single_event_loop(event_lambda, &PauseGate::default());
     let mut events = Vec::new();
 
@@ -173,7 +175,7 @@ async fn lambda_panic_is_captured_not_unwound() {
         panic!("panicking lambda must wake the event loop");
     };
     assert!(events.is_empty());
-    assert_eq!(panic.node_id, node_id, "panic attributed to its node");
+    assert_eq!(panic.program_id, program_id, "panic attributed to its node");
     assert!(
         panic.message.contains("boom in lambda"),
         "panic message preserved: {}",
@@ -189,7 +191,7 @@ async fn stopped_event_loop_channel_is_closed() {
     let event_lambda = EventLambda::new(|_state| async move {});
     let SingleLoop {
         mut active,
-        node_id: _node_id,
+        program_id: _node_id,
     } = start_single_event_loop(event_lambda, &PauseGate::default());
 
     active.stop().await;

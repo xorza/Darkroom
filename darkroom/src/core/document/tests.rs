@@ -24,29 +24,35 @@ fn node_liveness_is_one_rule_with_two_declared_narrowings() {
     for node in [preview, plain] {
         assert!(document.holds_node(node), "the document holds {node:?}");
     }
-    assert!(document.holds_preview_node(preview));
+    let (preview_program, plain_program) = (ProgramId::from(preview), ProgramId::from(plain));
+    assert!(document.holds_preview_node(preview_program));
     assert!(
-        !document.holds_preview_node(plain),
+        !document.holds_preview_node(plain_program),
         "a stub retains no published value"
     );
     assert!(
-        !document.holds_tab(TabRef::ImageViewer(plain)),
+        !document.holds_tab(TabRef::ImageViewer(plain_program)),
         "a stub has no viewer"
+    );
+    let nested = ProgramId::new(&[NodeId::unique(), preview]);
+    assert!(
+        !document.holds_preview_node(nested),
+        "a path past the main graph names no node of it"
     );
 
     // The same rule asked of a tab: a viewer dies with its node, the non-node tabs never do.
-    assert!(document.holds_tab(TabRef::ImageViewer(preview)));
+    assert!(document.holds_tab(TabRef::ImageViewer(preview_program)));
     assert!(document.holds_tab(TabRef::Graph));
     assert!(document.holds_tab(TabRef::Preferences));
 
     document.graph.detach_node(preview);
     assert!(!document.holds_node(preview), "the rule says gone");
     assert!(
-        !document.holds_preview_node(preview),
+        !document.holds_preview_node(preview_program),
         "and so does the narrowing"
     );
     assert!(
-        !document.holds_tab(TabRef::ImageViewer(preview)),
+        !document.holds_tab(TabRef::ImageViewer(preview_program)),
         "and so does the tab lift"
     );
     assert!(
@@ -64,7 +70,7 @@ fn removing_a_node_closes_its_viewer_and_its_pinned_inspector() {
     let node_id = fixture.add(&preview_sink::func(Arc::default()));
     let mut document = fixture.document;
     let tabs = [
-        TabRef::ImageViewer(node_id),
+        TabRef::ImageViewer(ProgramId::from(node_id)),
         TabRef::Inspector(InspectTarget::Node(node_id)),
         TabRef::Inspector(InspectTarget::Selection),
     ];
@@ -83,6 +89,37 @@ fn removing_a_node_closes_its_viewer_and_its_pinned_inspector() {
         .collect();
     assert_eq!(open, [TabRef::Inspector(InspectTarget::Selection)]);
     document.validate().expect("no tab names the removed node");
+}
+
+/// A viewer tab is held while its path names a preview node of the main graph, and the load
+/// closes one whose path goes through an instance, as the main graph places that node once.
+#[test]
+fn reconcile_closes_a_viewer_whose_path_leaves_the_main_graph() {
+    let mut fixture = DocumentFixture::default();
+    let preview = fixture.add(&preview_sink::func(Arc::default()));
+    let DocumentFixture {
+        mut document,
+        library,
+    } = fixture;
+    let main = ProgramId::from(preview);
+    let nested = ProgramId::new(&[NodeId::unique(), preview]);
+    for program_id in [main, nested] {
+        document.layout.apply(DockOperation::OpenTab {
+            tab: TabRef::ImageViewer(program_id),
+        });
+    }
+
+    let report = document.reconcile(&library);
+    assert_eq!(
+        report.repairs,
+        [DocumentRepair::ViewerClosed { program_id: nested }]
+    );
+    let viewers: Vec<TabRef> = document
+        .layout
+        .all_tabs()
+        .filter(|tab| matches!(tab, TabRef::ImageViewer(_)))
+        .collect();
+    assert_eq!(viewers, [TabRef::ImageViewer(main)]);
 }
 
 /// The load repairs the view and the layout around the graph, in order,
@@ -111,7 +148,7 @@ fn reconcile_repairs_the_view_and_the_layout() {
         .insert(ghost, NodePlacement::default());
     document.main_view.selected = [unplaced].map(ItemId::Node).into_iter().collect();
     document.layout.apply(DockOperation::OpenTab {
-        tab: TabRef::ImageViewer(shown),
+        tab: TabRef::ImageViewer(ProgramId::from(shown)),
     });
 
     let report = document.reconcile(&library);
@@ -122,7 +159,9 @@ fn reconcile_repairs_the_view_and_the_layout() {
             DocumentRepair::PlacementDropped { node_id: ghost },
             DocumentRepair::PosReset { node_id: shown },
             DocumentRepair::Placed { node_id: unplaced },
-            DocumentRepair::ViewerClosed { node_id: shown },
+            DocumentRepair::ViewerClosed {
+                program_id: ProgramId::from(shown),
+            },
         ]
     );
     assert_eq!(document.main_view.node_placements[&shown].pos, Vec2::ZERO);

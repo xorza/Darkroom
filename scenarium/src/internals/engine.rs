@@ -1,5 +1,5 @@
 //! [`TestEngine`]: a [`TestGraph`] compiled, installed, and run, with every answer coming back
-//! **by name**: the engine speaks `NodeId` and `NodeIdx`, a test speaks "sum", and the bridge is
+//! **by name**: the engine speaks `ProgramId` and `NodeIdx`, a test speaks "sum", and the bridge is
 //! crossed once, when a run finishes.
 //!
 //! **The outcome is a snapshot, not a borrow**, so a test can hold two runs side by side and
@@ -16,6 +16,7 @@ use crate::exec::cache::disk_store::DiskStore;
 use crate::exec::cache::runtime_cache::error::CacheNodeFailure;
 use crate::exec::engine::{ExecEngine, ExecuteRequest};
 use crate::exec::error::{ExecResult, RunError};
+use crate::exec::program_event::ProgramEvent;
 use crate::exec::report::exec_outcome::ExecOutcome;
 use crate::exec::report::node_status::{NodeExecStatus, NodeStatus};
 use crate::exec::report::run_reporter::internals::{CollectingReporter, DiscardedReports};
@@ -23,7 +24,7 @@ use crate::exec::report::run_reporter::{RunPhase, RunReporter};
 use crate::exec::schedule::NodeState;
 use crate::exec::seeds::RunSeeds;
 use crate::graph::func::lambda::OutputDemand;
-use crate::graph::identity::{EventPort, NodeId};
+use crate::graph::program_id::ProgramId;
 use crate::internals::test_graph::TestGraph;
 use crate::worker::run_summary::RunSummary;
 
@@ -92,8 +93,9 @@ impl TestEngine {
         self
     }
 
-    pub(crate) fn id(&self, name: &str) -> NodeId {
-        self.graph.id(name)
+    /// The program id of `name`, a node of the main graph.
+    pub(crate) fn id(&self, name: &str) -> ProgramId {
+        ProgramId::from(self.graph.id(name))
     }
 
     /// Where the attached store keeps `name`'s blob, whether or not a run has written one yet.
@@ -112,14 +114,14 @@ impl TestEngine {
         &mut self,
         names: impl IntoIterator<Item = &'n str>,
     ) -> RunOutcome {
-        let node_ids = names.into_iter().map(|name| self.id(name)).collect();
-        self.run(RunSeeds::nodes(node_ids)).await
+        let program_ids = names.into_iter().map(|name| self.id(name)).collect();
+        self.run(RunSeeds::nodes(program_ids)).await
     }
 
     /// Fire these events, running whatever subscribes to them.
     pub(crate) async fn run_events(
         &mut self,
-        events: impl IntoIterator<Item = EventPort>,
+        events: impl IntoIterator<Item = ProgramEvent>,
     ) -> RunOutcome {
         self.run(RunSeeds::events(events.into_iter().collect()))
             .await
@@ -160,7 +162,7 @@ impl TestEngine {
             progress: reporter
                 .progress
                 .iter()
-                .map(|&(node_id, phase)| (names.name(node_id), phase))
+                .map(|&(program_id, phase)| (names.name(program_id), phase))
                 .collect(),
             run,
         }
@@ -178,15 +180,15 @@ impl TestEngine {
         &mut self,
         names: impl IntoIterator<Item = &'n str>,
     ) -> Vec<CacheNodeFailure> {
-        let node_ids: Vec<NodeId> = names.into_iter().map(|name| self.id(name)).collect();
-        self.engine.evict_cache(node_ids).await
+        let program_ids: Vec<ProgramId> = names.into_iter().map(|name| self.id(name)).collect();
+        self.engine.evict_cache(program_ids).await
     }
 
     /// Persist these nodes' resident disk-backed values now, as when a node's disk bit is turned
     /// on with a value already in RAM.
     pub(crate) async fn flush<'n>(&mut self, names: impl IntoIterator<Item = &'n str>) {
-        let node_ids: Vec<NodeId> = names.into_iter().map(|name| self.id(name)).collect();
-        self.engine.flush_cache(node_ids).await;
+        let program_ids: Vec<ProgramId> = names.into_iter().map(|name| self.id(name)).collect();
+        self.engine.flush_cache(program_ids).await;
     }
 
     /// [`flush`](Self::flush) over the whole program.
@@ -333,7 +335,7 @@ pub(crate) struct RunOutcome {
     pub(crate) executed_node_count: usize,
     pub(crate) cancelled: bool,
     /// The events a successful event source armed for the loop to spawn.
-    pub(crate) armed_events: Vec<EventPort>,
+    pub(crate) armed_events: Vec<ProgramEvent>,
     pub(crate) cache_ram: RamUsage,
 }
 
@@ -344,13 +346,13 @@ impl RunOutcome {
             ran: engine
                 .schedule_order()
                 .into_iter()
-                .filter(|&node_id| outcome.ran(node_id))
-                .map(|node_id| names.name(node_id))
+                .filter(|&program_id| outcome.ran(program_id))
+                .map(|program_id| names.name(program_id))
                 .collect(),
             rows: outcome
                 .nodes
                 .iter()
-                .map(|row| (names.name(row.node_id), row.clone()))
+                .map(|row| (names.name(row.program_id), row.clone()))
                 .collect(),
             logs: outcome
                 .logs
@@ -380,7 +382,7 @@ impl RunOutcome {
             rows: status
                 .nodes
                 .iter()
-                .map(|row| (names.name(row.node_id), row.clone()))
+                .map(|row| (names.name(row.program_id), row.clone()))
                 .collect(),
             logs: status
                 .logs
@@ -476,16 +478,16 @@ impl PlanOutcome {
         let compiled = engine.compiled();
         let names = NameMap::of(graph);
         let states = compiled
-            .node_ids
+            .program_ids
             .iter()
             .copied()
-            .map(|node_id| (names.name(node_id), engine.node_state(node_id)))
+            .map(|program_id| (names.name(program_id), engine.node_state(program_id)))
             .collect();
         Self {
             order: engine
                 .schedule_order()
                 .into_iter()
-                .map(|node_id| names.name(node_id))
+                .map(|program_id| names.name(program_id))
                 .collect(),
             states,
         }
@@ -539,7 +541,7 @@ fn sorted_names<T>(rows: &[(String, T)], keep: impl Fn(&T) -> bool) -> Vec<&str>
 /// Ids back to the names the fixture gave them.
 #[derive(Debug)]
 struct NameMap {
-    by_id: HashMap<NodeId, String>,
+    by_id: HashMap<ProgramId, String>,
 }
 
 impl NameMap {
@@ -550,17 +552,17 @@ impl NameMap {
         Self {
             by_id: graph
                 .names()
-                .map(|(node_id, name)| (node_id, name.to_owned()))
+                .map(|(program_id, name)| (program_id, name.to_owned()))
                 .collect(),
         }
     }
 
     /// An id the graph no longer holds (an eviction test names one) reads as itself rather than
     /// panicking.
-    fn name(&self, node_id: NodeId) -> String {
+    fn name(&self, program_id: ProgramId) -> String {
         self.by_id
-            .get(&node_id)
+            .get(&program_id)
             .cloned()
-            .unwrap_or_else(|| format!("{node_id:?}"))
+            .unwrap_or_else(|| format!("{program_id:?}"))
     }
 }

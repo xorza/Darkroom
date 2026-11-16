@@ -18,7 +18,7 @@ pub(crate) mod output_ctx;
 use std::collections::BTreeSet;
 
 use palantir::Display;
-use scenarium::{DataType, Graph, InputPort, Library, NodeId, OutputPort, Subscription};
+use scenarium::{DataType, Graph, InputPort, Library, NodeId, OutputPort, ProgramId, Subscription};
 
 use crate::core::document::Document;
 use crate::core::document::graph_view::{GraphView, StackedNode};
@@ -170,6 +170,12 @@ impl<'a> GraphCtx<'a> {
     pub(crate) fn node(self, node_id: NodeId) -> Option<NodeCtx<'a>> {
         let placement = *self.view().node_placements.get(&node_id)?;
         Some(NodeCtx::resolve(self, node_id, placement.pos))
+    }
+
+    /// The program node `node_id` of this graph is: the node itself, as the main graph is placed
+    /// once.
+    pub(crate) fn program_id(self, node_id: NodeId) -> ProgramId {
+        ProgramId::from(node_id)
     }
 
     /// Whether the document places `node_id`, as a graph node or a stub.

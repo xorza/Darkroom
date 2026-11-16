@@ -36,7 +36,7 @@ use crate::exec::idx::{NodeIdx, OutputAddr};
 use crate::exec::schedule::{Delivery, RunSchedule};
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::lambda::OutputDemand;
-use crate::graph::identity::NodeId;
+use crate::graph::program_id::ProgramId;
 
 /// The per-node cross-run cache plus its disk backing. `slots` is a [`Col`] aligned to the
 /// installed program; [`reconcile`](Self::reconcile) re-pairs it with a new index order by stable
@@ -149,22 +149,22 @@ impl RuntimeCache {
     pub(crate) async fn evict(
         &mut self,
         program: &CompiledGraph,
-        seeds: impl IntoIterator<Item = NodeId>,
+        seeds: impl IntoIterator<Item = ProgramId>,
     ) -> Vec<CacheNodeFailure> {
         let downstream = self.cone.of(
             program,
             seeds
                 .into_iter()
-                .filter_map(|node_id| program.node(node_id)),
+                .filter_map(|program_id| program.node(program_id)),
         );
         let mut failures = Vec::new();
         for node_idx in downstream {
-            let node_id = program.node_ids[node_idx];
-            match self.disk_store.remove_node(node_id).await {
+            let program_id = program.program_ids[node_idx];
+            match self.disk_store.remove_node(program_id).await {
                 // The removal just made the belief that a blob backed the value false.
                 Ok(()) => self.slots[node_idx].clear_output(),
                 Err(error) => failures.push(CacheNodeFailure {
-                    node_id,
+                    program_id,
                     cause: error.into(),
                 }),
             }
@@ -464,7 +464,7 @@ impl RuntimeCache {
         }
         let digest = self.slots[node_idx].cur_digest?;
         self.disk_store
-            .blob_target(program.node_ids[node_idx], digest)
+            .blob_target(program.program_ids[node_idx], digest)
     }
 
     /// Whether an unchanged output can satisfy this run's exact demand — the verdict alone,
@@ -550,7 +550,7 @@ impl RuntimeCache {
             .await;
     }
 
-    /// Write `node_id`'s freshly-computed outputs to disk the moment it finishes, so a long run's
+    /// Write `program_id`'s freshly-computed outputs to disk the moment it finishes, so a long run's
     /// earlier caches are durable even if a later node errors or the run is cancelled.
     /// [`StorePolicy::KnownMiss`] publishes directly after resolution proved reuse impossible;
     /// [`StorePolicy::PreserveCovering`] first protects a broader blob when a maintenance flush
@@ -588,13 +588,13 @@ impl RuntimeCache {
     pub(crate) async fn flush(
         &mut self,
         program: &CompiledGraph,
-        seeds: impl IntoIterator<Item = NodeId>,
+        seeds: impl IntoIterator<Item = ProgramId>,
     ) -> CacheFlushReport {
         self.flush_each(
             program,
             seeds
                 .into_iter()
-                .filter_map(|node_id| program.node(node_id)),
+                .filter_map(|program_id| program.node(program_id)),
         )
         .await
     }
@@ -631,14 +631,17 @@ impl RuntimeCache {
             else {
                 continue;
             };
-            let node_id = program.node_ids[node_idx];
+            let program_id = program.program_ids[node_idx];
             match outcome {
                 Ok(StoreOutcome::Published | StoreOutcome::AlreadyCovered) => {}
-                Ok(StoreOutcome::Unsupported { type_id }) => report
-                    .unsupported
-                    .push(CacheFlushUnsupported { node_id, type_id }),
+                Ok(StoreOutcome::Unsupported { type_id }) => {
+                    report.unsupported.push(CacheFlushUnsupported {
+                        program_id,
+                        type_id,
+                    });
+                }
                 Err(error) => report.failures.push(CacheNodeFailure {
-                    node_id,
+                    program_id,
                     cause: error.into(),
                 }),
             }

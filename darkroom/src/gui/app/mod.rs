@@ -9,6 +9,7 @@ use scenarium::Binding;
 use scenarium::ConstValue;
 use scenarium::FsPathMode;
 use scenarium::Library;
+use scenarium::ProgramId;
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::io::document::document_format::DocumentFormat;
@@ -223,8 +224,13 @@ impl App {
                 self.capture = Some(ViewCapture::new(CaptureTarget::Clipboard));
             }
             AppCommand::View(ViewCommand::Frame(framing)) => self.session.frame_graph(framing),
-            AppCommand::View(ViewCommand::ConvertFull { node_id, max_dim }) => {
-                self.run_state.previews_mut().convert_full(node_id, max_dim);
+            AppCommand::View(ViewCommand::ConvertFull {
+                program_id,
+                max_dim,
+            }) => {
+                self.run_state
+                    .previews_mut()
+                    .convert_full(program_id, max_dim);
             }
             AppCommand::View(ViewCommand::SaveImage) => {
                 if let Some(path) = self.dialogs.save_path(SavedFile::PNG, None) {
@@ -531,14 +537,17 @@ impl App {
                 self.runtime.run_once(graph);
                 Ok(())
             }
-            RunCommand::Node(node_id) => self.runtime.run_node(graph, node_id),
+            // A node of the main graph is one program node, under its own id.
+            RunCommand::Node(node_id) => self.runtime.run_node(graph, ProgramId::from(node_id)),
             // An eviction projects its outcome onto exactly the nodes it reaches.
             RunCommand::EvictCache(node_id) => self
                 .runtime
-                .evict_cache(graph, node_id)
+                .evict_cache(graph, ProgramId::from(node_id))
                 .map(|evicted| self.run_state.clear_cache_projections(&evicted)),
             // A flush only gains the value a copy on disk, so no projection moves.
-            RunCommand::FlushCache(node_id) => self.runtime.flush_cache(graph, node_id),
+            RunCommand::FlushCache(node_id) => {
+                self.runtime.flush_cache(graph, ProgramId::from(node_id))
+            }
             RunCommand::StartEvents => {
                 self.runtime.start_event_loop(graph);
                 Ok(())

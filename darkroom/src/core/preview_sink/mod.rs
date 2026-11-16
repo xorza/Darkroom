@@ -15,7 +15,7 @@ use std::mem;
 use std::sync::{Arc, Mutex};
 
 use scenarium::{
-    DataType, DynamicValue, Func, FuncId, InputDecl, Invocation, Library, NodeId, async_lambda,
+    DataType, DynamicValue, Func, FuncId, InputDecl, Invocation, Library, ProgramId, async_lambda,
 };
 
 /// Stable `FuncId` for the preview node. Persisted in every document that holds
@@ -25,23 +25,23 @@ const PREVIEW_FUNC_ID: FuncId = FuncId::literal("7d08e8c7-fd22-46d4-bb86-c0bd3c9
 /// Where a preview node's value waits between the worker thread that produced
 /// it and the frame that draws it.
 ///
-/// A map keyed by the node that published, not a queue: a preview shows *the* current value, so
-/// latest-wins keeps the sink bounded at one value per preview node however fast runs arrive,
-/// which matters for full-resolution images.
+/// A map keyed by the program node that published, not a queue: a preview shows *the* current
+/// value, so latest-wins keeps the sink bounded at one value per preview program node however
+/// fast runs arrive, which matters for full-resolution images.
 #[derive(Debug, Default)]
 pub(crate) struct PreviewSink {
-    latest: Mutex<HashMap<NodeId, DynamicValue>>,
+    latest: Mutex<HashMap<ProgramId, DynamicValue>>,
 }
 
 impl PreviewSink {
-    /// Worker side: publish `value` as `node_id`'s current one, dropping the previous.
-    fn publish(&self, node_id: NodeId, value: DynamicValue) {
-        self.latest.lock_unpoisoned().insert(node_id, value);
+    /// Worker side: publish `value` as `program_id`'s current one, dropping the previous.
+    fn publish(&self, program_id: ProgramId, value: DynamicValue) {
+        self.latest.lock_unpoisoned().insert(program_id, value);
     }
 
     /// GUI side: swap everything published since the last drain into the empty `buffer`. The
     /// maps trade places, so each keeps its capacity and a drain allocates nothing.
-    pub(crate) fn drain_into(&self, buffer: &mut HashMap<NodeId, DynamicValue>) {
+    pub(crate) fn drain_into(&self, buffer: &mut HashMap<ProgramId, DynamicValue>) {
         debug_assert!(buffer.is_empty(), "the last drain's values were not taken");
         mem::swap(&mut *self.latest.lock_unpoisoned(), buffer);
     }
@@ -59,7 +59,7 @@ pub(crate) fn func(sink: Arc<PreviewSink>) -> Func {
         async_lambda!(
             move |Invocation { ctx, inputs, .. }| { sink = Arc::clone(&sink) } => {
                 // The only thing in the invocation that says *which* preview this is.
-                sink.publish(ctx.cur_node_id(), mem::take(&mut inputs[0]));
+                sink.publish(ctx.cur_program_id(), mem::take(&mut inputs[0]));
                 Ok(())
             }
         ),

@@ -160,7 +160,9 @@ mod tests {
         use std::io;
         use std::sync::Arc;
 
-        use scenarium::{InvokeError, NodeExecStatus, NodeStatus, RamUsage, RunError, RunSummary};
+        use scenarium::{
+            InvokeError, NodeExecStatus, NodeStatus, ProgramId, RamUsage, RunError, RunSummary,
+        };
 
         use crate::gui::pane::graph_ui::node_ui::card;
 
@@ -168,7 +170,7 @@ mod tests {
         let node_id = h.node(0);
         h.ctx.run_state.complete(RunSummary {
             nodes: vec![NodeStatus {
-                node_id,
+                program_id: ProgramId::from(node_id),
                 status: Some(NodeExecStatus::Errored {
                     error: RunError::Invoke(Arc::new(InvokeError::external(io::Error::other(
                         "no light frames\nprovided",
@@ -199,7 +201,7 @@ mod tests {
     /// the end of a run moves nothing on the canvas.
     #[test]
     fn a_node_keeps_its_height_when_a_run_ends() {
-        use scenarium::{NodeExecStatus, NodeStatus, RamUsage, RunSummary};
+        use scenarium::{NodeExecStatus, NodeStatus, ProgramId, RamUsage, RunSummary};
 
         let mut h = CanvasHarness::new(DocumentFixture::probes(1));
         let node_id = h.node(0);
@@ -215,7 +217,7 @@ mod tests {
                 .h;
         h.ctx.run_state.complete(RunSummary {
             nodes: vec![NodeStatus {
-                node_id,
+                program_id: ProgramId::from(node_id),
                 status: Some(NodeExecStatus::Executed { elapsed_secs: 0.25 }),
                 ram: RamUsage::default(),
             }],

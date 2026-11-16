@@ -1,5 +1,6 @@
 use crate::containers::unique;
-use crate::graph::identity::{EventPort, NodeId};
+use crate::exec::program_event::ProgramEvent;
+use crate::graph::program_id::ProgramId;
 
 /// What seeds a run's schedule — the roots the planner walks back from. The four
 /// are independent and combine: a run can target sink nodes, the event loop's
@@ -17,19 +18,19 @@ pub(crate) struct RunSeeds {
     pub(crate) event_sources: bool,
     /// Run the subscribers of these specific fired events, each one the installed program
     /// declares.
-    pub(crate) events: Vec<EventPort>,
+    pub(crate) events: Vec<ProgramEvent>,
     /// Run these exact compiled nodes and deliver every output — the on-demand "run to
     /// this node" / preview trigger. An explicitly seeded disabled node is enabled for
     /// this run; an identity absent from the installed program fails with
     /// [`ExecError::NodeSeedNotFound`](crate::exec::error::ExecError::NodeSeedNotFound).
-    pub(crate) node_ids: Vec<NodeId>,
+    pub(crate) program_ids: Vec<ProgramId>,
 }
 
 impl RunSeeds {
     /// Whether these seeds would start no run at all — every trigger off and
     /// both lists empty.
     pub(crate) const fn is_empty(&self) -> bool {
-        !self.sinks && !self.event_sources && self.events.is_empty() && self.node_ids.is_empty()
+        !self.sinks && !self.event_sources && self.events.is_empty() && self.program_ids.is_empty()
     }
 
     /// Forget everything, keeping the lists' capacity, so one burst's seeds never leak into the
@@ -38,20 +39,21 @@ impl RunSeeds {
         self.sinks = false;
         self.event_sources = false;
         self.events.clear();
-        self.node_ids.clear();
+        self.program_ids.clear();
     }
 
     /// Seed the subscribers of `events` too — the event loop's fired events,
     /// which reach a batch outside any `Run` message.
-    pub(crate) fn add_events(&mut self, events: impl IntoIterator<Item = EventPort>) {
+    pub(crate) fn add_events(&mut self, events: impl IntoIterator<Item = ProgramEvent>) {
         unique::extend(&mut self.events, events);
     }
 }
 
 #[cfg(test)]
 pub(crate) mod internals {
+    use crate::exec::program_event::ProgramEvent;
     use crate::exec::seeds::RunSeeds;
-    use crate::graph::identity::{EventPort, NodeId};
+    use crate::graph::program_id::ProgramId;
 
     impl RunSeeds {
         pub(crate) fn sinks() -> Self {
@@ -61,14 +63,14 @@ pub(crate) mod internals {
             }
         }
 
-        pub(crate) fn nodes(node_ids: Vec<NodeId>) -> Self {
+        pub(crate) fn nodes(program_ids: Vec<ProgramId>) -> Self {
             Self {
-                node_ids,
+                program_ids,
                 ..Self::default()
             }
         }
 
-        pub(crate) fn events(events: Vec<EventPort>) -> Self {
+        pub(crate) fn events(events: Vec<ProgramEvent>) -> Self {
             Self {
                 events,
                 ..Self::default()

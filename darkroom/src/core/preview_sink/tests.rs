@@ -1,6 +1,6 @@
 use super::*;
 use scenarium::internals::func_invoker::FuncInvoker;
-use scenarium::{AnyState, ConstValue, CtxManager, SharedAnyState};
+use scenarium::{AnyState, ConstValue, CtxManager, NodeId, SharedAnyState};
 
 #[test]
 fn the_declaration_is_a_sink_that_produces_nothing() {
@@ -27,13 +27,13 @@ fn the_declaration_is_a_sink_that_produces_nothing() {
 async fn invoking_publishes_the_latest_value_per_node() {
     let sink = Arc::new(PreviewSink::default());
     let func = func(Arc::clone(&sink));
-    let first = NodeId::default();
+    let first = NodeId::from_u128(1);
 
     // Built by hand rather than through `FuncInvoker`: the test reads the
     // input slot back after the call, which the invoker does not hand out.
     let invoke = async |value: i64| {
         let mut ctx = CtxManager::default();
-        ctx.set_cur_node(first);
+        ctx.set_cur_program(ProgramId::from(first));
         let mut inputs = [DynamicValue::Static(ConstValue::Int(value))];
         func.lambda()
             .invoke(Invocation {
@@ -55,7 +55,11 @@ async fn invoking_publishes_the_latest_value_per_node() {
     let mut drained = HashMap::new();
     sink.drain_into(&mut drained);
     assert_eq!(drained.len(), 1, "one entry per node, not per invoke");
-    assert_eq!(drained[&first].as_i64(), Some(8), "the later value wins");
+    assert_eq!(
+        drained[&ProgramId::from(first)].as_i64(),
+        Some(8),
+        "the later value wins"
+    );
 
     // The drained map's storage goes back to the sink with the next drain,
     // which finds nothing.

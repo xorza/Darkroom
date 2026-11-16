@@ -168,8 +168,11 @@ async fn one_task_panicking_stops_the_loop() {
                     activities.push(summary.activity);
                 }
             }
-            WorkerReport::Error(WorkerError::EventLambdaPanic { node_id, message }) => {
-                assert_eq!(node_id, frame_event);
+            WorkerReport::Error(WorkerError::EventLambdaPanic {
+                program_id,
+                message,
+            }) => {
+                assert_eq!(program_id, frame_event);
                 assert!(message.contains("event loop stopped"));
                 break;
             }

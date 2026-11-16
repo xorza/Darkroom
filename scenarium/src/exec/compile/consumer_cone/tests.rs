@@ -1,6 +1,7 @@
 use super::*;
 use crate::data::data_type::DataType;
 use crate::graph::identity::NodeId;
+use crate::graph::program_id::ProgramId;
 use crate::internals::test_graph::compiled::Compiled;
 use crate::internals::test_graph::{NodeSpec, TestGraph};
 
@@ -21,10 +22,12 @@ fn reached<'n>(cone: &mut ConsumerCone, f: &'n Compiled, seeds: &[&str]) -> Vec<
 
 /// [`reached`] for the seeds a fixture spells as raw ids — the one case a name cannot express: an
 /// id the program never held.
-fn seeded<'n>(cone: &mut ConsumerCone, f: &'n Compiled, seeds: &[NodeId]) -> Vec<&'n str> {
+fn seeded<'n>(cone: &mut ConsumerCone, f: &'n Compiled, seeds: &[ProgramId]) -> Vec<&'n str> {
     cone.of(
         &f.program,
-        seeds.iter().filter_map(|node_id| f.program.node(*node_id)),
+        seeds
+            .iter()
+            .filter_map(|program_id| f.program.node(*program_id)),
     )
     .iter()
     .map(|node_idx| f.name(node_idx))
@@ -53,7 +56,7 @@ fn the_cone_reaches_downstream_and_stops() {
         "an unwired node reaches only itself"
     );
     assert!(
-        seeded(cone, &f, &[NodeId::unique()]).is_empty(),
+        seeded(cone, &f, &[ProgramId::from(NodeId::unique())]).is_empty(),
         "an id the program never held seeds nothing"
     );
 }
@@ -69,12 +72,17 @@ fn the_public_cone_answers_in_id_space() {
 
     assert_eq!(f.program.consumer_cone([f.id("source")]), expected);
     assert_eq!(
-        f.program.consumer_cone([f.id("source"), NodeId::unique()]),
+        f.program
+            .consumer_cone([f.id("source"), ProgramId::from(NodeId::unique())]),
         expected,
         "an id the program never held contributes nothing"
     );
-    assert!(f.program.consumer_cone([NodeId::unique()]).is_empty());
-    assert!(f.program.consumer_cone(Vec::<NodeId>::new()).is_empty());
+    assert!(
+        f.program
+            .consumer_cone([ProgramId::from(NodeId::unique())])
+            .is_empty()
+    );
+    assert!(f.program.consumer_cone(Vec::<ProgramId>::new()).is_empty());
 }
 
 /// The set is the visited mark, so a seed named twice — and a seed already

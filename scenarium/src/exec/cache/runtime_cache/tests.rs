@@ -1,4 +1,5 @@
 use crate::graph::identity::{FuncId, NodeId};
+use crate::graph::program_id::ProgramId;
 use std::panic;
 use std::sync::Arc;
 
@@ -103,8 +104,8 @@ async fn eviction_clears_only_the_output_cache() {
     let node_idx = NodeIdx(0);
     let program = ram_program(1);
     install(&mut cache, &program, [slot]);
-    let node_id = NodeId::from_u128(1);
-    let failures = cache.evict(&program, [node_id]).await;
+    let program_id = ProgramId::from(NodeId::from_u128(1));
+    let failures = cache.evict(&program, [program_id]).await;
 
     assert!(failures.is_empty());
     assert!(cache.slots[node_idx].output_values().is_none());
@@ -276,11 +277,11 @@ fn reconcile_applies_ram_mode_downgrades_without_waiting_for_a_run() {
 /// digest-keyed, and the digest folds the func identity.
 #[test]
 fn reconcile_keeps_the_value_when_the_implementation_changes() {
-    let node_id = NodeId::from_u128(1);
+    let program_id = ProgramId::from(NodeId::from_u128(1));
     let build = move |func_id| {
         let mut prog = ProgramBuilder::default();
         prog.node()
-            .id(node_id)
+            .id(program_id)
             .func(func_id)
             .pure()
             .cache(CacheMode::Ram)
@@ -307,7 +308,7 @@ fn reconcile_follows_ids_when_the_index_space_shifts() {
         let mut prog = ProgramBuilder::default();
         for id in ids {
             prog.node()
-                .id(NodeId::from_u128(*id))
+                .id(ProgramId::from(NodeId::from_u128(*id)))
                 .pure()
                 .cache(CacheMode::Ram)
                 .add();

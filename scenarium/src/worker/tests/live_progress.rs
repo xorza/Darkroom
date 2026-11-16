@@ -39,9 +39,9 @@ async fn node_patches_stream_before_completion() {
                 assert!(!exec_started, "execution started more than once");
                 exec_started = true;
             }
-            WorkerReport::Progress { node_id, phase } => {
+            WorkerReport::Progress { program_id, phase } => {
                 assert!(exec_started, "node progress arrived before execution");
-                assert_eq!(node_id, print, "progress names the node");
+                assert_eq!(program_id, print, "progress names the node");
                 match phase {
                     RunPhase::Started { .. } => started += 1,
                     RunPhase::Succeeded { .. } => node_finished += 1,

@@ -9,8 +9,9 @@
 //! Self-contained: everything a run needs was copied out of the
 //! [`Library`](crate::library::Library) at compile.
 //!
-//! **One authored node, one execution node, one [`NodeId`].** Nothing splits or merges on the way
-//! in, so resolving an authored id against the artifact is a search of its own id column.
+//! **One program node, one execution node, one [`ProgramId`].** A node of the main graph is one
+//! program node, under its own id as a path of one. Resolving a program id against the artifact is
+//! a search of its own id column.
 
 use std::mem;
 use std::ops::Index;
@@ -24,9 +25,10 @@ use crate::exec::idx::{EventIdx, InputIdx, NodeIdx, OutputAddr, OutputIdx, Subsc
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::event::EventLambda;
 use crate::graph::func::lambda::FuncLambda;
-use crate::graph::identity::{FuncRef, NodeId};
+use crate::graph::identity::FuncRef;
 use crate::graph::node::CacheMode;
 use crate::graph::node::special::SpecialNode;
+use crate::graph::program_id::ProgramId;
 
 #[derive(Clone, Debug, Default)]
 pub(crate) enum ExecBinding {
@@ -54,7 +56,7 @@ pub(crate) struct ExecEvent {
 
 /// Topology + code for one lowered node. Immutable across runs; mutable per-run
 /// state lives in `NodeIdx`-aligned columns, and cross-run cache slots are
-/// keyed by the node's stable id.
+/// keyed by the node's program id.
 ///
 /// Everything here is `Copy` but the lambda, an `Arc`, so taking one off a declaration is a
 /// refcount bump and the library stays readable behind it — which is what `Clone` is for.
@@ -98,12 +100,13 @@ pub(crate) struct ExecNode {
 /// [`Default`] is the empty artifact an engine holds before anything is installed.
 #[derive(Debug, Default)]
 pub struct CompiledGraph {
-    /// The dense node column — every per-run column and set aligns to it. Ordered by `NodeId`, so
-    /// compiled artifacts are deterministic however the authoring graph was walked.
+    /// The dense node column — every per-run column and set aligns to it. Ordered by
+    /// `ProgramId`, so compiled artifacts are deterministic however the authoring graph was
+    /// walked.
     pub(crate) e_nodes: Col<NodeIdx, ExecNode>,
-    /// `NodeIdx` → authoring-derived id, for the host boundary (reports, seeds, eviction, cache
-    /// slots) — **sorted**, so it answers the reverse direction too. See [`node`](Self::node).
-    pub(crate) node_ids: Col<NodeIdx, NodeId>,
+    /// `NodeIdx` → program id, for the host boundary (reports, seeds, eviction, cache slots) —
+    /// **sorted**, so it answers the reverse direction too. See [`node`](Self::node).
+    pub(crate) program_ids: Col<NodeIdx, ProgramId>,
     pub(crate) inputs: Col<InputIdx, ExecInput>,
     pub(crate) events: Col<EventIdx, ExecEvent>,
     /// Every event's subscribers, one event's run after another.
@@ -125,20 +128,20 @@ impl Index<NodeIdx> for CompiledGraph {
 }
 
 impl CompiledGraph {
-    /// Where an authored node landed, or `None` if this artifact holds no
+    /// Where a program node landed, or `None` if this artifact holds no
     /// compiled work for it.
     ///
-    /// The one place the authoring space crosses into the dense one. A binary search rather than
-    /// a side index: the compile places nodes in id order, so `node_ids` is already arranged for
+    /// The one place the host's ids cross into the dense space. A binary search rather than a
+    /// side index: the compile places nodes in id order, so `program_ids` is already arranged for
     /// this lookup.
-    pub(crate) fn node(&self, node_id: NodeId) -> Option<NodeIdx> {
-        self.node_ids.search_sorted(&node_id)
+    pub(crate) fn node(&self, program_id: ProgramId) -> Option<NodeIdx> {
+        self.program_ids.search_sorted(&program_id)
     }
 
-    /// Whether this artifact holds compiled work for an authored node — answers both "can this
+    /// Whether this artifact holds compiled work for a program node — answers both "can this
     /// node seed a run" and "does a report naming this node belong to this install".
-    pub fn contains(&self, node_id: NodeId) -> bool {
-        self.node(node_id).is_some()
+    pub fn contains(&self, program_id: ProgramId) -> bool {
+        self.node(program_id).is_some()
     }
 
     /// Every node that reads `seeds`' outputs, transitively, plus the seeds themselves — in this
@@ -149,11 +152,11 @@ impl CompiledGraph {
     /// user actions, not per-run work.
     ///
     /// [`WorkerMessage::EvictCache`]: crate::WorkerMessage::EvictCache
-    pub fn consumer_cone(&self, seeds: impl IntoIterator<Item = NodeId>) -> Vec<NodeId> {
+    pub fn consumer_cone(&self, seeds: impl IntoIterator<Item = ProgramId>) -> Vec<ProgramId> {
         let mut cone = ConsumerCone::default();
         cone.of(self, seeds.into_iter().filter_map(|id| self.node(id)))
             .iter()
-            .map(|node_idx| self.node_ids[node_idx])
+            .map(|node_idx| self.program_ids[node_idx])
             .collect()
     }
 
@@ -172,14 +175,14 @@ impl CompiledGraph {
     ) {
         debug_assert_eq!(
             col.len(),
-            prev.node_ids.len(),
+            prev.program_ids.len(),
             "the column spans the program it is moving from"
         );
-        let mut old = mem::replace(col, Col::with_capacity(self.node_ids.len()));
-        let mut old = prev.node_ids.iter().copied().zip(old.drain()).peekable();
-        for (node_idx, &node_id) in self.node_ids.iter_indexed() {
-            while old.next_if(|(old_id, _)| *old_id < node_id).is_some() {}
-            let entry = match old.next_if(|(old_id, _)| *old_id == node_id) {
+        let mut old = mem::replace(col, Col::with_capacity(self.program_ids.len()));
+        let mut old = prev.program_ids.iter().copied().zip(old.drain()).peekable();
+        for (node_idx, &program_id) in self.program_ids.iter_indexed() {
+            while old.next_if(|(old_id, _)| *old_id < program_id).is_some() {}
+            let entry = match old.next_if(|(old_id, _)| *old_id == program_id) {
                 Some((_, value)) => carry(node_idx, value),
                 None => fresh(node_idx),
             };
@@ -199,8 +202,9 @@ pub(crate) mod internals {
     use crate::exec::idx::NodeIdx;
     use crate::graph::func::FuncBehavior;
     use crate::graph::func::lambda::FuncLambda;
-    use crate::graph::identity::{FuncId, NodeId};
+    use crate::graph::identity::FuncId;
     use crate::graph::node::CacheMode;
+    use crate::graph::program_id::ProgramId;
     use crate::internals::portless_func_ref;
 
     impl ExecNode {
@@ -226,28 +230,28 @@ pub(crate) mod internals {
         /// Append one node, assigning the next dense index — the fixture form of the placement a
         /// compile performs.
         ///
-        /// Ascending ids, because [`node`](CompiledGraph::node) binary-searches `node_ids`.
+        /// Ascending ids, because [`node`](CompiledGraph::node) binary-searches `program_ids`.
         /// Ascending also means unique.
-        pub(crate) fn push(&mut self, id: NodeId, e_node: ExecNode) -> NodeIdx {
+        pub(crate) fn push(&mut self, id: ProgramId, e_node: ExecNode) -> NodeIdx {
             assert!(
-                self.node_ids.iter().last().is_none_or(|last| *last < id),
+                self.program_ids.iter().last().is_none_or(|last| *last < id),
                 "a program's nodes are placed in ascending id order"
             );
             let node_idx = NodeIdx(self.e_nodes.len() as u32);
-            self.node_ids.push(id);
+            self.program_ids.push(id);
             self.e_nodes.push(e_node);
             node_idx
         }
 
-        /// A program of portless nodes under `node_ids` — enough for a host
-        /// test that only resolves authored ids against a program. Sorted on
+        /// A program of portless nodes under `program_ids` — enough for a host
+        /// test that only resolves program ids against a program. Sorted on
         /// the way in, like the real walk.
-        pub fn bare(node_ids: impl IntoIterator<Item = NodeId>) -> Self {
-            let mut node_ids: Vec<NodeId> = node_ids.into_iter().collect();
-            node_ids.sort_unstable();
+        pub fn bare(program_ids: impl IntoIterator<Item = ProgramId>) -> Self {
+            let mut program_ids: Vec<ProgramId> = program_ids.into_iter().collect();
+            program_ids.sort_unstable();
             let mut compiled = Self::default();
-            for node_id in node_ids {
-                compiled.push(node_id, ExecNode::bare());
+            for program_id in program_ids {
+                compiled.push(program_id, ExecNode::bare());
             }
             compiled
         }
@@ -257,11 +261,11 @@ pub(crate) mod internals {
     /// `NodeIdx`, so nothing outside a test pays the search.
     #[cfg(test)]
     impl CompiledGraph {
-        pub(crate) fn by_id(&self, id: NodeId) -> &ExecNode {
+        pub(crate) fn by_id(&self, id: ProgramId) -> &ExecNode {
             &self[self.node(id).expect("the fixture placed this node")]
         }
 
-        pub(crate) fn by_id_mut(&mut self, id: NodeId) -> &mut ExecNode {
+        pub(crate) fn by_id_mut(&mut self, id: ProgramId) -> &mut ExecNode {
             let node_idx = self.node(id).expect("the fixture placed this node");
             &mut self.e_nodes[node_idx]
         }

@@ -119,11 +119,13 @@ fn dense_order_is_id_order() {
     }
     let compiled = Compiler::default().compile(&graph, &fixture.library);
 
-    let node_ids: Vec<_> = compiled.node_ids.iter().copied().collect();
-    let expected: Vec<NodeId> = (1..=8u128).map(NodeId::from_u128).collect();
-    assert_eq!(node_ids, expected, "nodes are adopted in id order");
+    let program_ids: Vec<_> = compiled.program_ids.iter().copied().collect();
+    let expected: Vec<ProgramId> = (1..=8u128)
+        .map(|id| ProgramId::from(NodeId::from_u128(id)))
+        .collect();
+    assert_eq!(program_ids, expected, "nodes are adopted in id order");
     for node_id in authored {
-        assert!(compiled.contains(node_id));
+        assert!(compiled.contains(ProgramId::from(node_id)));
     }
 }
 
@@ -139,11 +141,11 @@ fn validation_returns_compiled_mismatches() {
             .to_string(),
         format!(
             "execution node {:?} references missing func {missing_func:?}",
-            node.node_id
+            node.program_id
         )
     );
-    assert!(prog.program().contains(node.node_id));
-    assert!(!prog.program().contains(NodeId::unique()));
+    assert!(prog.program().contains(node.program_id));
+    assert!(!prog.program().contains(ProgramId::from(NodeId::unique())));
 }
 
 /// The arity and range faults carry the pool they found rather than naming one
@@ -151,25 +153,25 @@ fn validation_returns_compiled_mismatches() {
 /// sentence.
 #[test]
 fn a_pool_fault_names_the_pool_it_found() {
-    let node_id = NodeId::from_u128(1);
+    let program_id = ProgramId::from(NodeId::from_u128(1));
     let pools = [PortPool::Input, PortPool::Output, PortPool::Event];
 
     let arity: Vec<String> = pools
         .iter()
-        .map(|&pool| CompiledGraphValidationError::Arity { node_id, pool }.to_string())
+        .map(|&pool| CompiledGraphValidationError::Arity { program_id, pool }.to_string())
         .collect();
     let range: Vec<String> = pools
         .iter()
-        .map(|&pool| CompiledGraphValidationError::Range { node_id, pool }.to_string())
+        .map(|&pool| CompiledGraphValidationError::Range { program_id, pool }.to_string())
         .collect();
 
     assert_eq!(
         arity[0],
-        format!("execution node {node_id:?} input arity does not match its function")
+        format!("execution node {program_id:?} input arity does not match its function")
     );
     assert_eq!(
         range[2],
-        format!("execution node {node_id:?} event range is out of bounds")
+        format!("execution node {program_id:?} event range is out of bounds")
     );
 
     let all: HashSet<&String> = arity.iter().chain(range.iter()).collect();
@@ -183,12 +185,12 @@ fn a_pool_fault_names_the_pool_it_found() {
 /// Everything one compile observably produced, in a deterministic order and in
 /// the **stable id space** — bind targets and subscribers by id rather than
 /// index, so two artifacts can't match by an index coincidence.
-fn summary(compiled: &CompiledGraph, authored: &[NodeId]) -> Vec<String> {
+fn summary(compiled: &CompiledGraph, authored: &[ProgramId]) -> Vec<String> {
     let mut out = Vec::new();
     for (node_idx, e_node) in compiled.e_nodes.iter_indexed() {
-        let node_id = compiled.node_ids[node_idx];
+        let program_id = compiled.program_ids[node_idx];
         out.push(format!(
-            "node {node_id:?} func={:?} sink={} disabled={} cache={:?} special={:?}",
+            "node {program_id:?} func={:?} sink={} disabled={} cache={:?} special={:?}",
             e_node.func_ref.id(),
             e_node.sink,
             e_node.disabled,
@@ -201,7 +203,7 @@ fn summary(compiled: &CompiledGraph, authored: &[NodeId]) -> Vec<String> {
                 ExecBinding::Const(value) => format!("const {value:?}"),
                 ExecBinding::Wire(address) => format!(
                     "bind {:?}#{}",
-                    compiled.node_ids[address.node_idx], address.port_idx
+                    compiled.program_ids[address.node_idx], address.port_idx
                 ),
             };
             out.push(format!(
@@ -213,16 +215,16 @@ fn summary(compiled: &CompiledGraph, authored: &[NodeId]) -> Vec<String> {
         for event in &compiled.events[e_node.events] {
             let subscribers: Vec<_> = compiled.subscribers[event.subscribers]
                 .iter()
-                .map(|&idx| compiled.node_ids[idx])
+                .map(|&idx| compiled.program_ids[idx])
                 .collect();
             out.push(format!("  event subscribers={subscribers:?}"));
         }
     }
     // The host-facing index, which is built from its own scratch.
-    for &node_id in authored {
+    for &program_id in authored {
         out.push(format!(
-            "authored {node_id:?} compiled={}",
-            compiled.contains(node_id),
+            "authored {program_id:?} compiled={}",
+            compiled.contains(program_id),
         ));
     }
     out
@@ -250,9 +252,9 @@ fn a_reused_compiler_produces_what_a_fresh_one_does() {
     warmup.subscribe("emitter", 0, "consumer");
 
     let subject = TestGraph::source_sink_loose();
-    let authored: Vec<NodeId> = ["source", "sink", "loose"]
+    let authored: Vec<ProgramId> = ["source", "sink", "loose"]
         .iter()
-        .map(|name| subject.id(name))
+        .map(|name| ProgramId::from(subject.id(name)))
         .collect();
 
     let mut reused = Compiler::default();
@@ -274,9 +276,9 @@ fn a_reused_compiler_produces_what_a_fresh_one_does() {
 #[test]
 fn recompiling_one_graph_does_not_accumulate_in_the_reused_buffers() {
     let g = TestGraph::source_sink_loose();
-    let authored: Vec<NodeId> = ["source", "sink", "loose"]
+    let authored: Vec<ProgramId> = ["source", "sink", "loose"]
         .iter()
-        .map(|name| g.id(name))
+        .map(|name| ProgramId::from(g.id(name)))
         .collect();
     let mut compiler = Compiler::default();
 
@@ -314,12 +316,15 @@ fn places_one_node_per_authored_node_in_id_order() {
     let compiled = g.compile();
 
     assert_eq!(compiled.program.e_nodes.len(), 2);
-    let mut expected = vec![g.id("producer"), g.id("consumer")];
+    let mut expected = vec![
+        ProgramId::from(g.id("producer")),
+        ProgramId::from(g.id("consumer")),
+    ];
     expected.sort();
     assert_eq!(
         compiled
             .program
-            .node_ids
+            .program_ids
             .iter()
             .copied()
             .collect::<Vec<_>>(),

@@ -5,16 +5,16 @@ use tokio::sync::mpsc::{Receiver, channel};
 use tokio::task;
 use tokio::task::{Id, JoinSet};
 
+use crate::exec::program_event::ProgramEvent;
 use crate::exec::report::event_trigger::EventTrigger;
-use crate::graph::identity::EventPort;
-use crate::graph::identity::NodeId;
+use crate::graph::program_id::ProgramId;
 use crate::worker::pause_gate::PauseGate;
 
 pub(crate) const EVENT_LOOP_BACKPRESSURE: usize = 10;
 
 #[derive(Debug)]
 pub(crate) struct LambdaPanic {
-    pub(crate) node_id: NodeId,
+    pub(crate) program_id: ProgramId,
     pub(crate) message: String,
 }
 
@@ -27,15 +27,15 @@ pub(crate) enum EventLoopWake {
 #[derive(Debug)]
 pub(crate) struct ActiveEventLoop {
     tasks: JoinSet<()>,
-    task_nodes: HashMap<Id, NodeId>,
-    events: Receiver<EventPort>,
+    task_nodes: HashMap<Id, ProgramId>,
+    events: Receiver<ProgramEvent>,
 }
 
 impl ActiveEventLoop {
     pub(crate) fn start(event_triggers: Vec<EventTrigger>, pause_gate: &PauseGate) -> Self {
         assert!(!event_triggers.is_empty());
 
-        let (event_tx, events) = channel::<EventPort>(EVENT_LOOP_BACKPRESSURE);
+        let (event_tx, events) = channel::<ProgramEvent>(EVENT_LOOP_BACKPRESSURE);
         let mut tasks = JoinSet::new();
         let mut task_nodes = HashMap::with_capacity(event_triggers.len());
 
@@ -45,7 +45,7 @@ impl ActiveEventLoop {
             state,
         } in event_triggers
         {
-            let node_id = event.node_id;
+            let program_id = event.program_id;
             let task = tasks.spawn({
                 let event_tx = event_tx.clone();
                 let pause_gate = pause_gate.clone();
@@ -61,7 +61,7 @@ impl ActiveEventLoop {
                     }
                 }
             });
-            let prev = task_nodes.insert(task.id(), node_id);
+            let prev = task_nodes.insert(task.id(), program_id);
             debug_assert!(prev.is_none(), "duplicate event task id");
         }
 
@@ -72,7 +72,7 @@ impl ActiveEventLoop {
         }
     }
 
-    pub(crate) async fn recv(&mut self, events: &mut Vec<EventPort>) -> EventLoopWake {
+    pub(crate) async fn recv(&mut self, events: &mut Vec<ProgramEvent>) -> EventLoopWake {
         // Observe failures even when another task keeps the event stream continuously ready.
         let task_result = tokio::select! {
             biased;
@@ -88,17 +88,17 @@ impl ActiveEventLoop {
 
         match task_result {
             Ok((task_id, ())) => {
-                let node_id = self.remove_task(task_id);
-                panic!("event task for {node_id:?} exited while the event loop was active");
+                let program_id = self.remove_task(task_id);
+                panic!("event task for {program_id:?} exited while the event loop was active");
             }
             Err(error) => {
-                let node_id = self.remove_task(error.id());
+                let program_id = self.remove_task(error.id());
                 assert!(
                     error.is_panic(),
-                    "event task for {node_id:?} was cancelled while the event loop was active"
+                    "event task for {program_id:?} was cancelled while the event loop was active"
                 );
                 EventLoopWake::TaskPanicked(LambdaPanic {
-                    node_id,
+                    program_id,
                     message: panic_message(&*error.into_panic()),
                 })
             }
@@ -111,20 +111,20 @@ impl ActiveEventLoop {
         while let Some(result) = self.tasks.join_next_with_id().await {
             match result {
                 Ok((task_id, ())) => {
-                    let node_id = self.remove_task(task_id);
-                    panic!("event task for {node_id:?} exited before shutdown");
+                    let program_id = self.remove_task(task_id);
+                    panic!("event task for {program_id:?} exited before shutdown");
                 }
                 Err(error) => {
-                    let node_id = self.remove_task(error.id());
+                    let program_id = self.remove_task(error.id());
                     if error.is_panic() {
                         panics.push(LambdaPanic {
-                            node_id,
+                            program_id,
                             message: panic_message(&*error.into_panic()),
                         });
                     } else {
                         assert!(
                             error.is_cancelled(),
-                            "event task for {node_id:?} failed during shutdown: {error}"
+                            "event task for {program_id:?} failed during shutdown: {error}"
                         );
                     }
                 }
@@ -134,7 +134,7 @@ impl ActiveEventLoop {
         panics
     }
 
-    fn remove_task(&mut self, task_id: Id) -> NodeId {
+    fn remove_task(&mut self, task_id: Id) -> ProgramId {
         self.task_nodes
             .remove(&task_id)
             .unwrap_or_else(|| panic!("event task {task_id} has no node attribution"))
@@ -153,14 +153,14 @@ fn panic_message(payload: &(dyn Any + Send)) -> String {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use crate::graph::identity::EventPort;
+    use crate::exec::program_event::ProgramEvent;
     use crate::worker::active_event_loop::ActiveEventLoop;
 
     impl ActiveEventLoop {
         /// Raw next event from the loop's channel, bypassing the join-set
         /// machinery `recv` also watches — what tests want when they only
         /// care about the event stream itself.
-        pub(crate) async fn recv_event(&mut self) -> Option<EventPort> {
+        pub(crate) async fn recv_event(&mut self) -> Option<ProgramEvent> {
             self.events.recv().await
         }
     }

@@ -7,6 +7,8 @@ use tokio_util::sync::CancellationToken;
 
 use common::CancelToken;
 
+use crate::graph::program_id::ProgramId;
+
 use crate::exec::report::run_reporter::RunPhase;
 use crate::exec::report::run_reporter::RunReporter;
 use crate::graph::identity::NodeId;
@@ -23,11 +25,11 @@ use crate::worker::worker_task::{
 #[tokio::test]
 async fn next_intent_takes_every_post_since_the_last_batch() {
     let mailbox = Arc::new(Mailbox::default());
-    let node_id = NodeId::unique();
+    let program_id = ProgramId::from(NodeId::unique());
     mailbox.post([WorkerMessage::Clear]).unwrap();
     mailbox
         .post([WorkerMessage::RunNodes {
-            node_ids: vec![node_id],
+            program_ids: vec![program_id],
         }])
         .unwrap();
     let shutdown = CancellationToken::new();
@@ -41,14 +43,14 @@ async fn next_intent_takes_every_post_since_the_last_batch() {
     let capacity = {
         let intent = task.next_intent().await.unwrap();
         assert!(matches!(intent.graph_state, Some(GraphOp::Clear)));
-        assert_eq!(intent.seeds.node_ids, [node_id]);
-        intent.seeds.node_ids.capacity()
+        assert_eq!(intent.seeds.program_ids, [program_id]);
+        intent.seeds.program_ids.capacity()
     };
 
     mailbox.post([WorkerMessage::StopEventLoop]).unwrap();
     mailbox
         .post([WorkerMessage::RunNodes {
-            node_ids: vec![node_id, node_id],
+            program_ids: vec![program_id, program_id],
         }])
         .unwrap();
     let intent = task.next_intent().await.unwrap();
@@ -57,16 +59,16 @@ async fn next_intent_takes_every_post_since_the_last_batch() {
         intent.graph_state.is_none(),
         "the first batch took the clear"
     );
-    assert_eq!(intent.seeds.node_ids, [node_id]);
+    assert_eq!(intent.seeds.program_ids, [program_id]);
 
     mailbox
         .post([WorkerMessage::RunNodes {
-            node_ids: vec![node_id],
+            program_ids: vec![program_id],
         }])
         .unwrap();
     let intent = task.next_intent().await.unwrap();
     assert_eq!(
-        intent.seeds.node_ids.capacity(),
+        intent.seeds.program_ids.capacity(),
         capacity,
         "the first batch's buffer came back"
     );
@@ -158,24 +160,24 @@ fn pending_run_couples_event_source_initialization_to_loop_rebuild() {
     assert!(run.seeds.event_sources);
     assert!(!run.seeds.sinks);
     assert!(run.seeds.events.is_empty());
-    assert!(run.seeds.node_ids.is_empty());
+    assert!(run.seeds.program_ids.is_empty());
 
-    let node_id = NodeId::unique();
+    let program_id = ProgramId::from(NodeId::unique());
     let mut explicit = BatchIntent::default();
     explicit.push(WorkerMessage::RunNodes {
-        node_ids: vec![node_id],
+        program_ids: vec![program_id],
     });
     let run = PendingRun::take(&mut explicit, EventLoopTransition::Preserve).unwrap();
     assert!(!run.start_event_loop);
     assert!(!run.seeds.event_sources);
-    assert_eq!(run.seeds.node_ids, [node_id]);
+    assert_eq!(run.seeds.program_ids, [program_id]);
 }
 
 /// Each reported event reaches the host the moment it happens, by value and in order.
 #[test]
 fn worker_reporter_publishes_each_event_in_order() {
-    let first_node = NodeId::unique();
-    let second_node = NodeId::unique();
+    let first_node = ProgramId::from(NodeId::unique());
+    let second_node = ProgramId::from(NodeId::unique());
     let (tx, mut rx) = mpsc::unbounded_channel();
     let callback = |report| tx.send(report).unwrap();
     let mut reporter = WorkerRunReporter {
@@ -189,10 +191,10 @@ fn worker_reporter_publishes_each_event_in_order() {
         (first_node, RunPhase::Started { at }),
         (second_node, RunPhase::Failed { elapsed_secs: 0.25 }),
     ] {
-        let WorkerReport::Progress { node_id, phase } = rx.try_recv().unwrap() else {
+        let WorkerReport::Progress { program_id, phase } = rx.try_recv().unwrap() else {
             panic!("progress must produce a progress report");
         };
-        assert_eq!((node_id, phase), (node, expected));
+        assert_eq!((program_id, phase), (node, expected));
     }
     assert!(rx.try_recv().is_err());
 }

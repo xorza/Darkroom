@@ -316,3 +316,7 @@ disallowed-methods = [
     { path = "criterion::BenchmarkGroup::measurement_time", reason = "set a group's sampling through `common::bench::Scale`" },
     { path = "criterion::BenchmarkGroup::sampling_mode", reason = "set a group's sampling through `common::bench::Scale`" },
 ]
+# A `ProgramId` is 129 bytes, the inline path every program node is named by, and an error that
+# names a node, or a node and its dependency, carries them: boxing would allocate on each report
+# for an error no hot path returns.
+large-error-threshold = 288

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use thiserror::Error;
 
 use crate::graph::func::error::InvokeError;
-use crate::graph::identity::NodeId;
+use crate::graph::program_id::ProgramId;
 
 /// An **operation-level** failure that aborts a whole plan / run: a node seed had no
 /// occurrence ([`NodeSeedNotFound`](ExecError::NodeSeedNotFound)). It's the error type of the
@@ -15,8 +15,8 @@ use crate::graph::identity::NodeId;
 pub enum ExecError {
     /// An execution-node seed is absent from the installed compiled program. A stale
     /// identity fails the run rather than being silently skipped.
-    #[error("node seed {node_id:?} not found in the compiled program")]
-    NodeSeedNotFound { node_id: NodeId },
+    #[error("node seed {program_id:?} not found in the compiled program")]
+    NodeSeedNotFound { program_id: ProgramId },
 }
 
 /// A **single node's** run-time failure, reported in that node's one
@@ -26,7 +26,7 @@ pub enum ExecError {
 /// concerns exactly one node, so a caller reading a node's row can't mistake a setup failure for
 /// a node's outcome.
 ///
-/// It names no node or func: it is always read beside the row's own `NodeId`.
+/// It names no node or func: it is always read beside the row's own `ProgramId`.
 #[derive(Debug, Error, Clone)]
 pub enum RunError {
     /// The lambda failed, with the error it returned. Shared, so the row and

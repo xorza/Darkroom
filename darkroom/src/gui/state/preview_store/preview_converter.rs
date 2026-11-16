@@ -9,7 +9,7 @@ use glam::UVec2;
 use imaginarium::ColorFormat;
 use lens::Image;
 use palantir::Image as Raster;
-use scenarium::{DynamicValue, NodeId};
+use scenarium::{DynamicValue, ProgramId};
 
 use crate::core::wake::Wake;
 use crate::gui::state::preview_store::error::DrawablePreviewError;
@@ -46,7 +46,7 @@ impl Ticket {
 /// One conversion, and the publish it belongs to.
 #[derive(Debug)]
 pub(super) struct Job {
-    pub(super) node_id: NodeId,
+    pub(super) program_id: ProgramId,
     pub(super) ticket: Ticket,
     pub(super) work: Work,
 }
@@ -63,7 +63,7 @@ pub(super) enum Work {
 /// A finished [`Job`].
 #[derive(Debug)]
 pub(crate) struct Converted {
-    pub(super) node_id: NodeId,
+    pub(super) program_id: ProgramId,
     pub(super) ticket: Ticket,
     pub(super) outcome: Outcome,
 }
@@ -139,7 +139,7 @@ impl PreviewConverter {
 impl Job {
     fn run(self) -> Converted {
         let Self {
-            node_id,
+            program_id,
             ticket,
             work,
         } = self;
@@ -153,7 +153,7 @@ impl Job {
             }
         };
         Converted {
-            node_id,
+            program_id,
             ticket,
             outcome,
         }
@@ -223,7 +223,7 @@ pub(crate) mod internals {
 mod tests {
     use std::sync::mpsc;
 
-    use scenarium::NodeId;
+    use scenarium::{NodeId, ProgramId};
 
     use crate::gui::state::preview_store::job_queue;
     use crate::gui::state::preview_store::preview_converter::{
@@ -238,10 +238,10 @@ mod tests {
         let (jobs, inbox) = job_queue::queue();
         drop(inbox);
         let (outbox, results) = mpsc::channel();
-        let node_id = NodeId::unique();
+        let program_id = ProgramId::from(NodeId::unique());
         outbox
             .send(Converted {
-                node_id,
+                program_id,
                 ticket: Ticket::default(),
                 outcome: Outcome::Card(Card::Text("7".to_owned())),
             })
@@ -253,7 +253,7 @@ mod tests {
         let first = ready
             .next()
             .expect("the result sent before the thread died");
-        assert_eq!(first.node_id, node_id);
+        assert_eq!(first.program_id, program_id);
         let _ = ready.next();
     }
 }

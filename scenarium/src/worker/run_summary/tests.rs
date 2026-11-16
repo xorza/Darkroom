@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::graph::program_id::ProgramId;
+
 use crate::exec::error::RunError;
 use crate::exec::report::node_status::NodeExecStatus;
 use crate::graph::func::lambda::internals;
@@ -11,30 +13,30 @@ use crate::runtime::log_entry::LogLevel;
 /// publisher adds is the whole-run header.
 #[test]
 fn a_summary_publishes_the_runs_rows_verbatim() {
-    let executed = NodeId::unique();
-    let missing = NodeId::unique();
-    let failed = NodeId::unique();
-    let resident = NodeId::unique();
+    let executed = ProgramId::from(NodeId::unique());
+    let missing = ProgramId::from(NodeId::unique());
+    let failed = ProgramId::from(NodeId::unique());
+    let resident = ProgramId::from(NodeId::unique());
     let rows = vec![
         NodeStatus {
-            node_id: executed,
+            program_id: executed,
             status: Some(NodeExecStatus::Executed { elapsed_secs: 0.5 }),
             ram: RamUsage { cpu: 3, gpu: 0 },
         },
         NodeStatus {
-            node_id: missing,
+            program_id: missing,
             status: Some(NodeExecStatus::MissingInputs { ports: vec![1, 3] }),
             ram: RamUsage::default(),
         },
         NodeStatus {
-            node_id: failed,
+            program_id: failed,
             status: Some(NodeExecStatus::Errored {
                 error: RunError::Invoke(Arc::new(internals::failure("failed"))),
             }),
             ram: RamUsage::default(),
         },
         NodeStatus {
-            node_id: resident,
+            program_id: resident,
             status: None,
             ram: RamUsage { cpu: 5, gpu: 7 },
         },
@@ -43,7 +45,7 @@ fn a_summary_publishes_the_runs_rows_verbatim() {
         nodes: rows.clone(),
         executed_node_count: 2,
         logs: vec![LogEntry {
-            node_id: executed,
+            program_id: executed,
             level: LogLevel::Warn,
             message: "warning".into(),
         }],
@@ -61,7 +63,7 @@ fn a_summary_publishes_the_runs_rows_verbatim() {
 
     assert_eq!(summary.nodes.len(), rows.len());
     for (published, produced) in summary.nodes.iter().zip(&rows) {
-        assert_eq!(published.node_id, produced.node_id);
+        assert_eq!(published.program_id, produced.program_id);
         assert_eq!(published.ram, produced.ram);
         match (&published.status, &produced.status) {
             (
@@ -92,7 +94,7 @@ fn a_summary_publishes_the_runs_rows_verbatim() {
 #[test]
 fn a_dropped_summary_is_reused_and_a_held_one_is_left_alone() {
     let row = || NodeStatus {
-        node_id: NodeId::unique(),
+        program_id: ProgramId::from(NodeId::unique()),
         status: Some(NodeExecStatus::Cached),
         ram: RamUsage::default(),
     };

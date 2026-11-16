@@ -10,7 +10,7 @@ use std::fmt::Display;
 
 use crate::exec::cache::runtime_cache::error::{CacheFlushUnsupported, CacheNodeFailure};
 use crate::exec::error::ExecError;
-use crate::graph::identity::NodeId;
+use crate::graph::program_id::ProgramId;
 
 #[derive(Debug, thiserror::Error)]
 pub enum WorkerError {
@@ -38,8 +38,11 @@ pub enum WorkerError {
     },
     /// An event lambda panicked, which stops the event loop. No run failed: the
     /// last completed run's results still stand.
-    #[error("event lambda for node {node_id:?} panicked: {message}")]
-    EventLambdaPanic { node_id: NodeId, message: String },
+    #[error("event lambda for node {program_id:?} panicked: {message}")]
+    EventLambdaPanic {
+        program_id: ProgramId,
+        message: String,
+    },
 }
 
 /// The rendering both cache variants share: one entry per node, in the order the sweep met them.

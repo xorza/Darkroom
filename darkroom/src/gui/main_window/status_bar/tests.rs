@@ -168,7 +168,7 @@ fn the_run_line_leads_with_the_worst_of_the_run() {
 /// canvas's next input stage moves the camera onto it.
 #[test]
 fn the_run_lines_link_selects_and_frames_the_cause() {
-    use scenarium::{InvokeError, NodeExecStatus, NodeStatus, RunError, RunSummary};
+    use scenarium::{InvokeError, NodeExecStatus, NodeStatus, ProgramId, RunError, RunSummary};
     use std::io;
     use std::sync::Arc;
 
@@ -187,12 +187,12 @@ fn the_run_lines_link_selects_and_frames_the_cause() {
     h.run_state.complete(RunSummary {
         nodes: vec![
             NodeStatus {
-                node_id: ids[0],
+                program_id: ProgramId::from(ids[0]),
                 status: Some(NodeExecStatus::Executed { elapsed_secs: 0.5 }),
                 ram: RamUsage::default(),
             },
             NodeStatus {
-                node_id: cause,
+                program_id: ProgramId::from(cause),
                 status: Some(NodeExecStatus::Errored {
                     error: RunError::Invoke(Arc::new(InvokeError::external(io::Error::other(
                         "boom",

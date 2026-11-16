@@ -746,7 +746,7 @@
             Group((
                 id: (1),
                 tabs: [
-                    ImageViewer(("2067de48-57e0-4900-b589-32320647bb55")),
+                    ImageViewer([("2067de48-57e0-4900-b589-32320647bb55")]),
                     Inspector(Selection),
                 ],
                 active: 1,
@@ -754,8 +754,8 @@
             Group((
                 id: (2),
                 tabs: [
-                    ImageViewer(("e156726f-3c5b-4d41-bbeb-380773608e40")),
-                    ImageViewer(("efc228bd-27f8-455a-8e22-97dbd688a2c6")),
+                    ImageViewer([("e156726f-3c5b-4d41-bbeb-380773608e40")]),
+                    ImageViewer([("efc228bd-27f8-455a-8e22-97dbd688a2c6")]),
                 ],
                 active: 0,
             )),

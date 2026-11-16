@@ -1,7 +1,7 @@
 use glam::{UVec2, Vec2};
 use palantir::Harness;
 use palantir::{DockOperation, Key, Modifiers};
-use scenarium::{InputPort, NodeId, OutputPort};
+use scenarium::{InputPort, NodeId, OutputPort, ProgramId};
 use std::sync::Arc;
 
 use common::internals::alloc_audit;
@@ -68,7 +68,7 @@ fn a_settled_frame_records_without_allocating() {
     let view = &mut fixture.document.main_view;
     view.ties.get_mut(&tie).unwrap().angle = TieAngle::Pinned(30.0);
     view.selected.insert(ItemId::Tie(tie));
-    let preview = fixture.add(&preview_sink::func(Arc::default()));
+    let preview = ProgramId::from(fixture.add(&preview_sink::func(Arc::default())));
     fixture.document.validate().unwrap();
     app.adopt_document(OpenDocument::over(fixture.document));
     app.run_state
@@ -119,7 +119,8 @@ fn a_menu_chord_leaves_the_others_watched() {
 #[test]
 fn a_viewer_opened_by_click_queues_its_full_image_in_that_same_frame() {
     let mut fixture = DocumentFixture::default();
-    let node = fixture.add(&preview_sink::func(Arc::default()));
+    let node_id = fixture.add(&preview_sink::func(Arc::default()));
+    let node = ProgramId::from(node_id);
     let mut test = SessionHarness::new(fixture);
     test.run_state
         .previews_mut()
@@ -138,7 +139,7 @@ fn a_viewer_opened_by_click_queues_its_full_image_in_that_same_frame() {
         "a card-only preview never uploads its full-resolution source"
     );
 
-    test.ui.click(wid::preview_image(node));
+    test.ui.click(wid::preview_image(node_id));
     let commands = test.frame();
     assert!(
         test.session
@@ -156,7 +157,7 @@ fn a_viewer_opened_by_click_queues_its_full_image_in_that_same_frame() {
     );
     let [
         AppCommand::View(ViewCommand::ConvertFull {
-            node_id: asked,
+            program_id: asked,
             max_dim,
         }),
     ] = commands[..]
@@ -232,7 +233,7 @@ fn dock_ops_apply_without_entering_the_undo_history_or_dirtying() {
         scenarium::Node::from(&preview),
     ));
 
-    let tab = TabRef::ImageViewer(node_id);
+    let tab = TabRef::ImageViewer(ProgramId::from(node_id));
     test.session.open.set_dirty(false);
     test.requests.push_view(DockOperation::OpenTab { tab });
     test.drain();
@@ -306,7 +307,8 @@ fn image_viewer_tabs_dedupe_per_node_and_prune_state_on_close() {
     let mut fixture = DocumentFixture::default();
     let node_id = fixture.add(&preview_sink::func(Arc::default()));
     let mut test = SessionHarness::new(fixture);
-    let tab = TabRef::ImageViewer(node_id);
+    let program_id = ProgramId::from(node_id);
+    let tab = TabRef::ImageViewer(program_id);
 
     test.requests.push_view(DockOperation::OpenTab { tab });
     test.requests.push_view(DockOperation::OpenTab { tab });
@@ -326,7 +328,7 @@ fn image_viewer_tabs_dedupe_per_node_and_prune_state_on_close() {
     test.session
         .main_window
         .image_viewers
-        .insert(node_id, ImageViewer::new(node_id));
+        .insert(program_id, ImageViewer::new(program_id));
     test.session
         .open
         .document_mut()

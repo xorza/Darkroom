@@ -95,7 +95,7 @@ impl Planner {
             debug_assert!(
                 !self.entered.contains(node_idx),
                 "a compiled program is acyclic: node {:?} closes a cycle",
-                program.node_ids[node_idx]
+                program.program_ids[node_idx]
             );
 
             let e_node = &program[node_idx];

@@ -38,7 +38,8 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     let node_ctx = record.node;
     let theme = node_ctx.theme();
     let node = node_ctx;
-    let stored = node_ctx.graph_ctx.run_state().previews().get(node.node_id);
+    let program_id = node_ctx.graph_ctx.program_id(node.node_id);
+    let stored = node_ctx.graph_ctx.run_state().previews().get(program_id);
     let has_image = stored.and_then(StoredContent::image).is_some();
     let content = Panel::vstack()
         .id(wid::preview_image(node.node_id))
@@ -85,7 +86,7 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     // card whose viewer is already open just activates it.
     if content.clicked() {
         record.stage.out.push_view(DockOperation::OpenTab {
-            tab: TabRef::ImageViewer(node.node_id),
+            tab: TabRef::ImageViewer(program_id),
         });
     }
     if let Some(image) = stored.and_then(StoredContent::image) {
@@ -163,6 +164,7 @@ mod tests {
         use std::sync::Arc;
 
         use palantir::DockOperation;
+        use scenarium::ProgramId;
 
         use crate::core::document::internals::DocumentFixture;
         use crate::core::document::tab_ref::TabRef;
@@ -176,10 +178,10 @@ mod tests {
         let mut h = CanvasHarness::new(fixture);
         // The run projection `App` would have filled from a completed run:
         // without a value the card records `Sense::NONE` and swallows the click.
-        h.ctx
-            .run_state
-            .previews_mut()
-            .publish(node, preview_store::internals::opaque_image_value());
+        h.ctx.run_state.previews_mut().publish(
+            ProgramId::from(node),
+            preview_store::internals::opaque_image_value(),
+        );
         h.ctx.run_state.previews_mut().settle(h.ui.ui());
         h.prime(2);
         assert!(h.view_ops.is_empty(), "nothing asked for before the click");
@@ -192,7 +194,7 @@ mod tests {
                 h.view_ops[..],
                 [DockOperation::OpenTab {
                     tab: TabRef::ImageViewer(clicked)
-                }] if clicked == node
+                }] if clicked == ProgramId::from(node)
             ),
             "expected one OpenTab for {node:?}, got {:?}",
             h.view_ops

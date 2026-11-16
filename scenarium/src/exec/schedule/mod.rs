@@ -338,9 +338,9 @@ impl RunSchedule {
         // Node seeds ("run to this node"): each is a root, seeded so every output is computed and
         // its `disabled` flag is overridden. An id absent from the installed program is
         // inconsistent caller state.
-        for &node_id in &seeds.node_ids {
-            let Some(node_idx) = program.node(node_id) else {
-                return Err(ExecError::NodeSeedNotFound { node_id });
+        for &program_id in &seeds.program_ids {
+            let Some(node_idx) = program.node(program_id) else {
+                return Err(ExecError::NodeSeedNotFound { program_id });
             };
             self.add_root(node_idx, RootFlags::SEEDED);
         }
@@ -352,7 +352,7 @@ impl RunSchedule {
         // of their own, and each install rebuilds the event loop.
         for &event in &seeds.events {
             let owner_idx = program
-                .node(event.node_id)
+                .node(event.program_id)
                 .expect("a fired event's emitter is in the installed program");
             let e_event = program.events[program[owner_idx].events]
                 .get(event.event_idx)
@@ -436,15 +436,15 @@ impl RunSchedule {
                 .e_nodes
                 .get(node_idx)
                 .ok_or(RunScheduleValidationError::NodeOutOfRange { node_idx })?;
-            let node_id = program.node_ids[node_idx];
+            let program_id = program.program_ids[node_idx];
             let inputs = program
                 .inputs
                 .get_span(e_node.inputs)
-                .ok_or(RunScheduleValidationError::InputRange { node_id })?;
+                .ok_or(RunScheduleValidationError::InputRange { program_id })?;
             for input in inputs {
                 if let ExecBinding::Wire(addr) = &input.binding {
                     // Resolve the dependency first: an out-of-range target is the corruption to
-                    // report, not a reason to index past `seen_in_order` and `node_ids`.
+                    // report, not a reason to index past `seen_in_order` and `program_ids`.
                     let dependency = program.e_nodes.get(addr.node_idx).ok_or(
                         RunScheduleValidationError::NodeOutOfRange {
                             node_idx: addr.node_idx,
@@ -454,14 +454,14 @@ impl RunSchedule {
                         dependency.disabled && self.states[addr.node_idx] == NodeState::Disabled;
                     if !seen_in_order.contains(addr.node_idx) && !disabled_dependency {
                         return Err(RunScheduleValidationError::BeforeDependency {
-                            node_id,
-                            dependency: program.node_ids[addr.node_idx],
+                            program_id,
+                            dependency: program.program_ids[addr.node_idx],
                         });
                     }
                 }
             }
             if seen_in_order.contains(node_idx) {
-                return Err(RunScheduleValidationError::DuplicateNode { node_id });
+                return Err(RunScheduleValidationError::DuplicateNode { program_id });
             }
             seen_in_order.insert(node_idx);
         }
@@ -474,7 +474,7 @@ impl RunSchedule {
                 && !matches!(state, NodeState::Unvisited | NodeState::Disabled)
             {
                 return Err(RunScheduleValidationError::UnscheduledNodeDecided {
-                    node_id: program.node_ids[node_idx],
+                    program_id: program.program_ids[node_idx],
                     state,
                 });
             }

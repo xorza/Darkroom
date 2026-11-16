@@ -20,6 +20,7 @@ pub(crate) mod engine;
 pub(crate) mod error;
 pub(crate) mod executor;
 pub(crate) mod idx;
+pub(crate) mod program_event;
 pub(crate) mod report;
 pub(crate) mod resolve;
 pub(crate) mod schedule;

@@ -26,13 +26,13 @@ use crate::data::dynamic_value::DynamicValue;
 use crate::data::path_form::PathForm;
 use crate::data::ram_usage::RamUsage;
 use crate::exec::idx::{NodeIdx, OutputAddr, OutputIdx};
+use crate::exec::program_event::ProgramEvent;
 use crate::exec::report::event_trigger::EventTrigger;
 use crate::exec::report::exec_outcome::ExecOutcome;
 use crate::exec::report::node_status::{NodeExecStatus, NodeStatus};
 use crate::exec::report::run_reporter::{RunPhase, RunReporter};
 use crate::graph::func::error::InvokeError;
 use crate::graph::func::lambda::{Invocation, OutputDemand};
-use crate::graph::identity::EventPort;
 use crate::runtime::ctx_manager::CtxManager;
 use crate::runtime::log_entry::LogLevel;
 
@@ -222,7 +222,7 @@ impl Executor {
             }
         }
 
-        self.ctx_manager.cur_node_id = None;
+        self.ctx_manager.cur_program_id = None;
         outcome.logs.append(&mut self.ctx_manager.logs);
         outcome.cancelled = self.ctx_manager.cancel.is_cancelled();
     }
@@ -284,7 +284,7 @@ impl Executor {
                 continue;
             }
             outcome.nodes.push(NodeStatus {
-                node_id: program.node_ids[node_idx],
+                program_id: program.program_ids[node_idx],
                 status,
                 ram,
             });
@@ -445,7 +445,7 @@ impl ExecFrame<'_, '_> {
             // quiet: a node that asked to be cached and never is, is otherwise invisible.
             Err(error) => {
                 self.ctx.log_node(
-                    program.node_ids[node_idx],
+                    program.program_ids[node_idx],
                     LogLevel::Warn,
                     format!(
                         "running uncached, a declared path could not be identified: {}",
@@ -473,7 +473,7 @@ impl ExecFrame<'_, '_> {
     async fn invoke_node(&mut self, node_idx: NodeIdx, demand: &[OutputDemand]) {
         let program = self.program;
         let e_node = &program[node_idx];
-        let node_id = program.node_ids[node_idx];
+        let program_id = program.program_ids[node_idx];
 
         if self.has_errored_dependency(node_idx) {
             self.abandon_input_reads(node_idx);
@@ -488,10 +488,10 @@ impl ExecFrame<'_, '_> {
         debug_assert!(matches!(self.node_outcomes[node_idx], NodeOutcome::Pending));
 
         // Attribute logs this node emits to it (read by `CtxManager::log`).
-        self.ctx.cur_node_id = Some(node_id);
+        self.ctx.cur_program_id = Some(program_id);
         let invoke_start = Instant::now();
         self.reporter
-            .progress(node_id, RunPhase::Started { at: invoke_start });
+            .progress(program_id, RunPhase::Started { at: invoke_start });
 
         let result = if let Some(refusal) = self.foreign_path_input(node_idx) {
             Err(refusal)
@@ -555,7 +555,7 @@ impl ExecFrame<'_, '_> {
                     elapsed_secs: run_time,
                 }
             };
-            self.reporter.progress(node_id, phase);
+            self.reporter.progress(program_id, phase);
         }
         if !succeeded {
             return;
@@ -600,7 +600,7 @@ impl ExecFrame<'_, '_> {
     /// events that have a subscriber can fire.
     fn collect_event_triggers(&mut self, node_idx: NodeIdx) {
         let program = self.program;
-        let node_id = program.node_ids[node_idx];
+        let program_id = program.program_ids[node_idx];
         let event_state = &self.nodes[node_idx].event_state;
         self.outcome.event_triggers.extend(
             program.events[program[node_idx].events]
@@ -608,7 +608,7 @@ impl ExecFrame<'_, '_> {
                 .enumerate()
                 .filter(|(_, event)| !event.subscribers.is_empty())
                 .map(|(event_idx, event)| EventTrigger {
-                    event: EventPort { node_id, event_idx },
+                    event: ProgramEvent::new(program_id, event_idx),
                     lambda: event.lambda.clone(),
                     state: event_state.clone(),
                 }),

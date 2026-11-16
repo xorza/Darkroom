@@ -2,7 +2,7 @@
 
 use thiserror::Error;
 
-use crate::graph::identity::NodeId;
+use crate::graph::program_id::ProgramId;
 
 /// What [`ExecEngine::validate`](crate::exec::engine::ExecEngine)
 /// rejects: a cache or lambda state that does not span the installed program's
@@ -13,8 +13,8 @@ pub(super) enum InstallValidationError {
     NodeCount { slots: usize, expected: usize },
     #[error("node runtime state spans {runtimes} nodes, not the compiled program's {expected}")]
     RuntimeCount { runtimes: usize, expected: usize },
-    #[error("runtime cache output arity does not match node {node_id:?}")]
-    OutputArity { node_id: NodeId },
-    #[error("node runtime state owner does not match node {node_id:?}")]
-    StateOwner { node_id: NodeId },
+    #[error("runtime cache output arity does not match node {program_id:?}")]
+    OutputArity { program_id: ProgramId },
+    #[error("node runtime state owner does not match node {program_id:?}")]
+    StateOwner { program_id: ProgramId },
 }

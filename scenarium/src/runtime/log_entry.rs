@@ -1,6 +1,6 @@
 //! [`LogEntry`]: one node-attributed log record, and its [`LogLevel`].
 
-use crate::graph::identity::NodeId;
+use crate::graph::program_id::ProgramId;
 
 /// How loud a log record is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,7 +15,7 @@ pub enum LogLevel {
 /// republished by [`RunSummary`](crate::worker::run_summary::RunSummary).
 #[derive(Debug, Clone)]
 pub struct LogEntry {
-    pub node_id: NodeId,
+    pub program_id: ProgramId,
     pub level: LogLevel,
     pub message: String,
 }

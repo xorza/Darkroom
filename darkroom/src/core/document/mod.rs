@@ -46,7 +46,7 @@ use glam::Vec2;
 use palantir::DockState;
 use scenarium::{
     Binding, ConstValue, DetachedNode, DetachedNodeParts, Detachment, Graph as CoreGraph, Library,
-    Node, NodeId, PathForm,
+    Node, NodeId, PathForm, ProgramId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -126,7 +126,7 @@ impl Document {
     /// Close the tabs that show `node_id`: its viewer and an inspector pinned to it.
     fn close_tabs(&mut self, node_id: NodeId) {
         let shows = |tab: TabRef| {
-            tab == TabRef::ImageViewer(node_id)
+            tab == TabRef::ImageViewer(ProgramId::from(node_id))
                 || tab == TabRef::Inspector(InspectTarget::Node(node_id))
         };
         // `retain_tabs` rebuilds the whole node tree, so it runs only when
@@ -155,17 +155,18 @@ impl Document {
             TabRef::Graph | TabRef::Preferences | TabRef::Inspector(InspectTarget::Selection) => {
                 true
             }
-            TabRef::ImageViewer(node_id) => self.holds_preview_node(node_id),
+            TabRef::ImageViewer(program_id) => self.holds_preview_node(program_id),
             TabRef::Inspector(InspectTarget::Node(node_id)) => self.graph.find(node_id).is_some(),
         }
     }
 
-    /// [`Self::holds_node`] narrowed to preview nodes in the graph, which retains the value one
-    /// published. Deliberately stricter than the shared rule: the preview store holds textures up
-    /// to 8192² RGBA8, so a value whose key is not a live preview node releases at the next sweep
-    /// instead of riding on the node's own lifetime.
-    pub(crate) fn holds_preview_node(&self, node_id: NodeId) -> bool {
-        is_preview_node(&self.graph, node_id)
+    /// Whether `program_id` names a preview node the document holds: a node of the main graph,
+    /// held there as a preview node. The retention of the value one published. Stricter than
+    /// [`Self::holds_node`]: the preview store holds textures up to 8192² RGBA8, so a value whose
+    /// key is not a live preview node releases at the next sweep instead of riding on the node's
+    /// own lifetime.
+    pub(crate) fn holds_preview_node(&self, program_id: ProgramId) -> bool {
+        program_id.path().is_main() && is_preview_node(&self.graph, program_id.node_id())
     }
 
     /// Make a decoded document consistent with itself and `library`, and
@@ -492,8 +493,9 @@ fn repair_layout(
         .all_tabs()
         .filter_map(|tab| {
             let repair = match tab {
-                TabRef::ImageViewer(node_id) => (!is_preview_node(graph, node_id))
-                    .then_some(DocumentRepair::ViewerClosed { node_id }),
+                TabRef::ImageViewer(program_id) => (!program_id.path().is_main()
+                    || !is_preview_node(graph, program_id.node_id()))
+                .then_some(DocumentRepair::ViewerClosed { program_id }),
                 TabRef::Inspector(InspectTarget::Node(node_id)) => graph
                     .find(node_id)
                     .is_none()

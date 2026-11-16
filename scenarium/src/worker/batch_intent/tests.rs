@@ -3,8 +3,9 @@ use super::*;
 use tokio::sync::oneshot;
 
 use crate::exec::compile::Compiler;
+use crate::exec::program_event::ProgramEvent;
 use crate::graph::Graph;
-use crate::graph::identity::EventPort;
+use crate::graph::identity::NodeId;
 use crate::library::Library;
 
 fn batch_intent(msgs: impl IntoIterator<Item = WorkerMessage>) -> BatchIntent {
@@ -26,9 +27,9 @@ fn empty_compiled() -> Arc<CompiledGraph> {
 #[test]
 fn batch_intent_accumulates_simple_flags() {
     let (reply_ack, _ack_rx) = oneshot::channel();
-    let node_id = NodeId::from_u128(1);
-    let event = EventPort {
-        node_id: NodeId::unique(),
+    let program_id = ProgramId::from(NodeId::from_u128(1));
+    let event = ProgramEvent {
+        program_id: ProgramId::from(NodeId::unique()),
         event_idx: 0,
     };
 
@@ -36,20 +37,20 @@ fn batch_intent_accumulates_simple_flags() {
         WorkerMessage::Clear,
         WorkerMessage::StartEventLoop,
         WorkerMessage::EvictCache {
-            node_ids: vec![node_id],
+            program_ids: vec![program_id],
         },
         WorkerMessage::FlushCache {
-            node_ids: vec![node_id],
+            program_ids: vec![program_id],
         },
         WorkerMessage::RunSinks,
         WorkerMessage::FireEvents {
             events: vec![event],
         },
         WorkerMessage::RunNodes {
-            node_ids: vec![node_id],
+            program_ids: vec![program_id],
         },
         WorkerMessage::RunNodes {
-            node_ids: vec![node_id],
+            program_ids: vec![program_id],
         },
         WorkerMessage::Sync { reply: reply_ack },
     ]);
@@ -59,17 +60,17 @@ fn batch_intent_accumulates_simple_flags() {
     assert!(intent.seeds.sinks);
     assert_eq!(intent.seeds.events, [event]);
     assert_eq!(
-        intent.seeds.node_ids,
-        [node_id],
+        intent.seeds.program_ids,
+        [program_id],
         "duplicate node seeds union to one"
     );
-    assert_eq!(intent.evict_cache, [node_id]);
-    assert_eq!(intent.flush_cache, [node_id]);
+    assert_eq!(intent.evict_cache, [program_id]);
+    assert_eq!(intent.flush_cache, [program_id]);
     assert_eq!(intent.syncs.len(), 1);
     assert!(!intent.is_empty());
 
     let event_capacity = intent.seeds.events.capacity();
-    let node_capacity = intent.seeds.node_ids.capacity();
+    let node_capacity = intent.seeds.program_ids.capacity();
     let eviction_capacity = intent.evict_cache.capacity();
     let flush_capacity = intent.flush_cache.capacity();
     let sync_capacity = intent.syncs.capacity();
@@ -84,12 +85,12 @@ fn batch_intent_accumulates_simple_flags() {
     assert!(!intent.seeds.sinks);
     assert!(!intent.seeds.event_sources);
     assert!(intent.seeds.events.is_empty());
-    assert!(intent.seeds.node_ids.is_empty());
+    assert!(intent.seeds.program_ids.is_empty());
     assert!(intent.evict_cache.is_empty());
     assert!(intent.flush_cache.is_empty());
     assert!(intent.syncs.is_empty());
     assert_eq!(intent.seeds.events.capacity(), event_capacity);
-    assert_eq!(intent.seeds.node_ids.capacity(), node_capacity);
+    assert_eq!(intent.seeds.program_ids.capacity(), node_capacity);
     assert_eq!(intent.evict_cache.capacity(), eviction_capacity);
     assert_eq!(intent.flush_cache.capacity(), flush_capacity);
     assert_eq!(intent.syncs.capacity(), sync_capacity);
@@ -97,9 +98,9 @@ fn batch_intent_accumulates_simple_flags() {
 
 #[test]
 fn batch_intent_deduplicates_events() {
-    let node_id = NodeId::unique();
-    let event = EventPort {
-        node_id,
+    let program_id = ProgramId::from(NodeId::unique());
+    let event = ProgramEvent {
+        program_id,
         event_idx: 0,
     };
 
@@ -128,21 +129,21 @@ fn batch_intent_deduplicates_events() {
 /// and flushes another does both rather than confusing the two.
 #[test]
 fn batch_intent_accumulates_unique_cache_nodes_in_order() {
-    let first = NodeId::from_u128(1);
-    let second = NodeId::from_u128(2);
-    let third = NodeId::from_u128(3);
+    let first = ProgramId::from(NodeId::from_u128(1));
+    let second = ProgramId::from(NodeId::from_u128(2));
+    let third = ProgramId::from(NodeId::from_u128(3));
     let intent = batch_intent([
         WorkerMessage::EvictCache {
-            node_ids: vec![first, second],
+            program_ids: vec![first, second],
         },
         WorkerMessage::EvictCache {
-            node_ids: vec![second, first],
+            program_ids: vec![second, first],
         },
         WorkerMessage::FlushCache {
-            node_ids: vec![third, first],
+            program_ids: vec![third, first],
         },
         WorkerMessage::FlushCache {
-            node_ids: vec![first],
+            program_ids: vec![first],
         },
     ]);
 
@@ -162,16 +163,16 @@ fn batch_intent_accumulates_unique_cache_nodes_in_order() {
 /// after the op is kept as named, so an absent one still fails the run.
 #[test]
 fn batch_intent_graph_op_drops_node_seeds_its_program_lacks() {
-    let kept = NodeId::from_u128(1);
-    let deleted = NodeId::from_u128(2);
-    let after = NodeId::from_u128(3);
+    let kept = ProgramId::from(NodeId::from_u128(1));
+    let deleted = ProgramId::from(NodeId::from_u128(2));
+    let after = ProgramId::from(NodeId::from_u128(3));
     let both = Arc::new(CompiledGraph::bare([kept, deleted]));
     let without_deleted = Arc::new(CompiledGraph::bare([kept]));
     let update = |compiled: &Arc<CompiledGraph>| WorkerMessage::Update {
         compiled: Arc::clone(compiled),
     };
-    let run = |node_id| WorkerMessage::RunNodes {
-        node_ids: vec![node_id],
+    let run = |program_id| WorkerMessage::RunNodes {
+        program_ids: vec![program_id],
     };
 
     // `deleted` was named against `both`; `without_deleted` replaced it.
@@ -182,7 +183,7 @@ fn batch_intent_graph_op_drops_node_seeds_its_program_lacks() {
         update(&without_deleted),
         run(after),
     ]);
-    assert_eq!(intent.seeds.node_ids, [kept, after]);
+    assert_eq!(intent.seeds.program_ids, [kept, after]);
 
     let intent = batch_intent([
         update(&both),
@@ -191,7 +192,7 @@ fn batch_intent_graph_op_drops_node_seeds_its_program_lacks() {
         update(&both),
     ]);
     assert!(
-        intent.seeds.node_ids.is_empty(),
+        intent.seeds.program_ids.is_empty(),
         "a Clear voids every seed before it, even one the next program holds"
     );
 }

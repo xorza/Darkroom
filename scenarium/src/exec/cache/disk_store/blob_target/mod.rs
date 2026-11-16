@@ -18,12 +18,14 @@ use crate::exec::cache::disk_store::store_outcome::StoreOutcome;
 use crate::exec::cache::disk_store::{StorePolicy, format};
 use crate::exec::cache::runtime_slot::OutputSnapshot;
 use crate::graph::func::lambda::OutputDemand;
+use crate::graph::program_id::ProgramId;
 
-/// Where one node's blob lives and the digest it must be stored under: every
-/// read, probe and write of that blob goes through here.
+/// Where one node's blob lives, the node it holds values of, and the digest it must be stored
+/// under: every read, probe and write of that blob goes through here.
 #[derive(Debug)]
 pub(crate) struct BlobTarget {
     pub(super) path: PathBuf,
+    pub(super) program_id: ProgramId,
     pub(crate) digest: Digest,
 }
 
@@ -35,11 +37,16 @@ struct OpenBlob {
 }
 
 impl OpenBlob {
-    const fn reader<'a>(&'a mut self, digest: Digest, codecs: &'a Codecs) -> BlobReader<'a, File> {
+    const fn reader<'a>(
+        &'a mut self,
+        target: &BlobTarget,
+        codecs: &'a Codecs,
+    ) -> BlobReader<'a, File> {
         BlobReader {
             reader: &mut self.file,
             file_len: self.len,
-            digest,
+            program_id: target.program_id,
+            digest: target.digest,
             codecs,
         }
     }
@@ -102,7 +109,7 @@ impl BlobTarget {
         let Ok(Some(mut blob)) = self.open().await else {
             return false;
         };
-        blob.reader(self.digest, codecs)
+        blob.reader(self, codecs)
             .covers_outputs(outputs)
             .await
             .is_ok_and(|covers| covers)
@@ -118,7 +125,7 @@ impl BlobTarget {
         let Ok(Some(mut blob)) = self.open().await else {
             return false;
         };
-        blob.reader(self.digest, codecs)
+        blob.reader(self, codecs)
             .covers_demand(demand)
             .await
             .unwrap_or(false)
@@ -143,7 +150,7 @@ impl BlobTarget {
                 return None;
             }
         };
-        match blob.reader(self.digest, codecs).read(demand).await {
+        match blob.reader(self, codecs).read(demand).await {
             Ok(Some(values)) => Some(OutputSnapshot::new(values)),
             Ok(None) => None,
             Err(error) => {
@@ -197,6 +204,7 @@ impl BlobTarget {
         let mut writer = BufWriter::new(file);
         BlobWriter {
             writer: &mut writer,
+            program_id: self.program_id,
             digest: self.digest,
             codecs,
         }

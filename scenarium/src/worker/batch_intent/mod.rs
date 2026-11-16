@@ -4,7 +4,7 @@ use crate::containers::unique;
 use crate::exec::cache::disk_store::DiskStore;
 use crate::exec::compile::compiled_graph::CompiledGraph;
 use crate::exec::seeds::RunSeeds;
-use crate::graph::identity::NodeId;
+use crate::graph::program_id::ProgramId;
 use crate::worker::protocol::WorkerMessage;
 
 #[derive(Debug)]
@@ -38,8 +38,8 @@ pub(crate) struct BatchIntent {
     /// What this batch's run messages ask for, coalesced, plus the events the running loop fired,
     /// which arrive outside any message.
     pub(crate) seeds: RunSeeds,
-    pub(crate) evict_cache: Vec<NodeId>,
-    pub(crate) flush_cache: Vec<NodeId>,
+    pub(crate) evict_cache: Vec<ProgramId>,
+    pub(crate) flush_cache: Vec<ProgramId>,
     /// What waits for this batch to commit, as a test's `Sync` does.
     #[cfg(test)]
     #[expect(
@@ -58,25 +58,25 @@ impl BatchIntent {
             // still fails the run when absent.
             WorkerMessage::Update { compiled } => {
                 self.seeds
-                    .node_ids
-                    .retain(|&node_id| compiled.contains(node_id));
+                    .program_ids
+                    .retain(|&program_id| compiled.contains(program_id));
                 self.graph_state = Some(GraphOp::Replace(compiled));
             }
             WorkerMessage::Clear => {
-                self.seeds.node_ids.clear();
+                self.seeds.program_ids.clear();
                 self.graph_state = Some(GraphOp::Clear);
             }
-            WorkerMessage::EvictCache { node_ids } => {
-                unique::extend(&mut self.evict_cache, node_ids);
+            WorkerMessage::EvictCache { program_ids } => {
+                unique::extend(&mut self.evict_cache, program_ids);
             }
-            WorkerMessage::FlushCache { node_ids } => {
-                unique::extend(&mut self.flush_cache, node_ids);
+            WorkerMessage::FlushCache { program_ids } => {
+                unique::extend(&mut self.flush_cache, program_ids);
             }
             WorkerMessage::FlushAllCaches => self.flush_all_caches = true,
             WorkerMessage::SetDiskStore(cache) => self.disk_store = Some(cache),
             WorkerMessage::RunSinks => self.seeds.sinks = true,
-            WorkerMessage::RunNodes { node_ids } => {
-                unique::extend(&mut self.seeds.node_ids, node_ids);
+            WorkerMessage::RunNodes { program_ids } => {
+                unique::extend(&mut self.seeds.program_ids, program_ids);
             }
             #[cfg(test)]
             WorkerMessage::FireEvents { events } => self.seeds.add_events(events),

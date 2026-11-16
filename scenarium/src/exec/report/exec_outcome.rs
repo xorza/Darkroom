@@ -35,31 +35,34 @@ pub(crate) mod internals {
     use crate::exec::error::RunError;
     use crate::exec::report::exec_outcome::ExecOutcome;
     use crate::exec::report::node_status::NodeExecStatus;
-    use crate::graph::identity::NodeId;
+    use crate::graph::program_id::ProgramId;
 
     impl ExecOutcome {
         /// This node's row, or `None` when the run reported nothing for it.
-        pub(crate) fn status(&self, node_id: NodeId) -> Option<&NodeExecStatus> {
+        pub(crate) fn status(&self, program_id: ProgramId) -> Option<&NodeExecStatus> {
             self.nodes
                 .iter()
-                .find(|node| node.node_id == node_id)?
+                .find(|node| node.program_id == program_id)?
                 .status
                 .as_ref()
         }
 
         /// Whether the node invoked its lambda and succeeded.
-        pub(crate) fn ran(&self, node_id: NodeId) -> bool {
-            matches!(self.status(node_id), Some(NodeExecStatus::Executed { .. }))
+        pub(crate) fn ran(&self, program_id: ProgramId) -> bool {
+            matches!(
+                self.status(program_id),
+                Some(NodeExecStatus::Executed { .. })
+            )
         }
 
         /// Whether the node was served from a cache instead of recomputing.
-        pub(crate) fn cached(&self, node_id: NodeId) -> bool {
-            matches!(self.status(node_id), Some(NodeExecStatus::Cached))
+        pub(crate) fn cached(&self, program_id: ProgramId) -> bool {
+            matches!(self.status(program_id), Some(NodeExecStatus::Cached))
         }
 
         /// This node's failure, or `None` when it did not fail.
-        pub(crate) fn error(&self, node_id: NodeId) -> Option<&RunError> {
-            match self.status(node_id)? {
+        pub(crate) fn error(&self, program_id: ProgramId) -> Option<&RunError> {
+            match self.status(program_id)? {
                 NodeExecStatus::Errored { error, .. } => Some(error),
                 _ => None,
             }

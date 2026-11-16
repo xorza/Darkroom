@@ -10,6 +10,7 @@ use crate::graph::func::signature::FuncSignature;
 use crate::graph::identity::{FuncId, FuncRef, NodeId};
 use crate::graph::node::CacheMode;
 use crate::graph::ports::{OutputDecl, Ports};
+use crate::graph::program_id::ProgramId;
 use crate::internals;
 use crate::internals::program::{Placed, ProgramBuilder};
 
@@ -23,7 +24,7 @@ pub(crate) struct NodeBuilder<'a> {
     outputs: Vec<OutputDecl>,
     events: Vec<ExecEvent>,
     func_id: Option<FuncId>,
-    node_id: Option<NodeId>,
+    program_id: Option<ProgramId>,
 }
 
 impl<'a> NodeBuilder<'a> {
@@ -35,7 +36,7 @@ impl<'a> NodeBuilder<'a> {
             outputs: Vec::new(),
             events: Vec::new(),
             func_id: None,
-            node_id: None,
+            program_id: None,
         }
     }
 
@@ -63,9 +64,9 @@ impl<'a> NodeBuilder<'a> {
 
     /// Override the stable id this node is placed under, for a fixture that reinstalls a
     /// *different* set of nodes, where surviving ids keep their slots while the index space
-    /// shifts. Ids must still ascend, since `node_ids` is binary-searched.
-    pub(crate) fn id(mut self, node_id: NodeId) -> Self {
-        self.node_id = Some(node_id);
+    /// shifts. Ids must still ascend, since `program_ids` is binary-searched.
+    pub(crate) fn id(mut self, program_id: ProgramId) -> Self {
+        self.program_id = Some(program_id);
         self
     }
 
@@ -99,7 +100,7 @@ impl<'a> NodeBuilder<'a> {
     }
 
     /// An input whose delivered value's filesystem referent folds into this node's digest, as the
-    /// compiler writes for an `FsPath`-declared port.
+    /// compiler writes for a path-declared port.
     pub(crate) fn fs_path_input(self, binding: ExecBinding) -> Self {
         self.push_input(ExecInput {
             required: false,
@@ -151,15 +152,16 @@ impl<'a> NodeBuilder<'a> {
             outputs,
             events,
             func_id,
-            node_id,
+            program_id,
         } = self;
         let pos = owner.placed.len();
-        // Ids ascend from 1 with the placement, so `node_ids` stays sorted (which
+        // Ids ascend from 1 with the placement, so `program_ids` stays sorted (which
         // `CompiledGraph::node` binary-searches) and index 0 is not the nil id.
-        let node_id = node_id.unwrap_or_else(|| NodeId::from_u128(pos as u128 + 1));
+        let program_id =
+            program_id.unwrap_or_else(|| ProgramId::from(NodeId::from_u128(pos as u128 + 1)));
         // Keyed to the node's id, not its position: a func id that moved with the position would
         // read as a changed implementation across a reinstall and drop the node's state.
-        let func_id = func_id.unwrap_or_else(|| FuncId::from_u128(node_id.as_u128()));
+        let func_id = func_id.unwrap_or_else(|| FuncId::from_u128(program_id.node_id().as_u128()));
         let output_count = u32::try_from(outputs.len()).expect("a fixture's outputs fit in u32");
         let ports = Ports {
             inputs: Vec::new(),
@@ -170,8 +172,11 @@ impl<'a> NodeBuilder<'a> {
         e_node.outputs = Span::new(owner.program.output_count, output_count);
         owner.program.output_count += output_count;
         e_node.events = owner.program.events.append(events);
-        let node_idx = owner.program.push(node_id, e_node);
-        let placed = Placed { node_id, node_idx };
+        let node_idx = owner.program.push(program_id, e_node);
+        let placed = Placed {
+            program_id,
+            node_idx,
+        };
         owner.placed.push(placed);
         placed
     }

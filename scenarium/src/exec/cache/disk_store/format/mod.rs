@@ -14,12 +14,15 @@ use crate::data::dynamic_value::DynamicValue;
 use crate::exec::cache::digest::Digest;
 use crate::exec::cache::disk_store::error::{CodecFormatError, FormatResult, FrameError};
 use crate::graph::func::lambda::OutputDemand;
+use crate::graph::program_id::ProgramId;
 
 const MAGIC: &[u8; 8] = b"SCENBLOB";
-const FORMAT_VERSION: u32 = 10;
-const FIXED_LEN: usize = 8 + 4 + 32 + 4 + 8;
+const FORMAT_VERSION: u32 = 11;
+const PATH_OFFSET: usize = 8 + 4 + 32;
+const COUNT_OFFSET: usize = PATH_OFFSET + ProgramId::BYTES_LEN;
+const FIXED_LEN: usize = COUNT_OFFSET + 4 + 8;
 const DESC_LEN: usize = 1 + 3 + 16 + 4 + 8;
-const BODY_LEN_OFFSET: u64 = (8 + 4 + 32 + 4) as u64;
+const BODY_LEN_OFFSET: u64 = (COUNT_OFFSET + 4) as u64;
 const PAYLOAD_LEN_OFFSET: u64 = (1 + 3 + 16 + 4) as u64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -56,11 +59,12 @@ struct BlobHeader {
     descs: Vec<OutputDesc>,
 }
 
-/// A blob being written: the stream, the digest it is stored under, and the
+/// A blob being written: the stream, the program node and the digest it is stored under, and the
 /// codecs its custom values encode with.
 #[derive(Debug)]
 pub(super) struct BlobWriter<'a, W> {
     pub(super) writer: &'a mut W,
+    pub(super) program_id: ProgramId,
     pub(super) digest: Digest,
     pub(super) codecs: &'a Codecs,
 }
@@ -72,6 +76,7 @@ where
     pub(super) async fn write(self, outputs: &[DynamicValue]) -> FormatResult<()> {
         let Self {
             writer,
+            program_id,
             digest,
             codecs,
         } = self;
@@ -80,8 +85,9 @@ where
         let mut fixed = [0; FIXED_LEN];
         fixed[..8].copy_from_slice(MAGIC);
         fixed[8..12].copy_from_slice(&FORMAT_VERSION.to_le_bytes());
-        fixed[12..44].copy_from_slice(&digest.0);
-        fixed[44..48].copy_from_slice(&output_count.to_le_bytes());
+        fixed[12..PATH_OFFSET].copy_from_slice(&digest.0);
+        fixed[PATH_OFFSET..COUNT_OFFSET].copy_from_slice(&program_id.to_bytes());
+        fixed[COUNT_OFFSET..COUNT_OFFSET + 4].copy_from_slice(&output_count.to_le_bytes());
         writer.write_all(&fixed).await?;
 
         for value in outputs {
@@ -133,13 +139,13 @@ where
     }
 }
 
-/// A blob being read: the stream, the length its framing must add up to, the
-/// digest it has to be stored under to serve, and the codecs its custom values
-/// decode with.
+/// A blob being read: the stream, the length its framing must add up to, the program node and
+/// digest it has to be stored under to serve, and the codecs its custom values decode with.
 #[derive(Debug)]
 pub(super) struct BlobReader<'a, R> {
     pub(super) reader: &'a mut R,
     pub(super) file_len: u64,
+    pub(super) program_id: ProgramId,
     pub(super) digest: Digest,
     pub(super) codecs: &'a Codecs,
 }
@@ -266,9 +272,11 @@ where
         if u32::from_le_bytes(bytes[8..12].try_into().unwrap()) != FORMAT_VERSION {
             return Err(FrameError::UnsupportedVersion.into());
         }
-        let stored_digest = Digest(bytes[12..44].try_into().unwrap());
-        let output_count = u32::from_le_bytes(bytes[44..48].try_into().unwrap()) as usize;
-        let body_len = u64::from_le_bytes(bytes[48..56].try_into().unwrap());
+        let stored_digest = Digest(bytes[12..PATH_OFFSET].try_into().unwrap());
+        let stored_path = &bytes[PATH_OFFSET..COUNT_OFFSET];
+        let output_count =
+            u32::from_le_bytes(bytes[COUNT_OFFSET..COUNT_OFFSET + 4].try_into().unwrap()) as usize;
+        let body_len = u64::from_le_bytes(bytes[COUNT_OFFSET + 4..FIXED_LEN].try_into().unwrap());
         let header_len = checked_header_len(output_count)
             .and_then(|header_len| u64::try_from(header_len).ok())
             .ok_or(FrameError::HeaderLenOverflow)?;
@@ -278,7 +286,7 @@ where
         if expected_file_len != self.file_len {
             return Err(FrameError::FileLenMismatch.into());
         }
-        if stored_digest != self.digest {
+        if stored_digest != self.digest || stored_path != self.program_id.to_bytes() {
             return Ok(None);
         }
         Ok(Some(HeaderPrefix {

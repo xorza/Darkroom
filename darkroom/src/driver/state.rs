@@ -3,7 +3,7 @@
 use glam::Vec2;
 use palantir::InspectedWidget;
 use palantir::{Rect, Sense, Ui};
-use scenarium::{Binding, Func, Graph, Library, NodeId, OutputPort};
+use scenarium::{Binding, Func, Graph, Library, NodeId, OutputPort, ProgramId};
 use serde::Serialize;
 
 use crate::gui::app::App;
@@ -162,7 +162,7 @@ impl State {
                         }
                         state.run = app
                             .run_state()
-                            .node(id)
+                            .node(ProgramId::from(id))
                             .map(|node| format!("{:?}", node.status()));
                     }
                     state

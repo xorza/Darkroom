@@ -1,7 +1,7 @@
 //! [`EventTrigger`]: an event source a successful run armed.
 
+use crate::exec::program_event::ProgramEvent;
 use crate::graph::func::event::EventLambda;
-use crate::graph::identity::EventPort;
 use crate::runtime::shared_any_state::SharedAnyState;
 
 /// One `(event, lambda, state)` triple a successful event-source run armed, spawned by the worker
@@ -10,7 +10,7 @@ use crate::runtime::shared_any_state::SharedAnyState;
 /// so the executor produces these without knowing the worker that consumes them.
 #[derive(Debug)]
 pub(crate) struct EventTrigger {
-    pub(crate) event: EventPort,
+    pub(crate) event: ProgramEvent,
     pub(crate) lambda: EventLambda,
     pub(crate) state: SharedAnyState,
 }

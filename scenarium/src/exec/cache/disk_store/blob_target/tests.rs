@@ -13,12 +13,15 @@ use crate::exec::cache::disk_store::error::StoreError;
 use crate::exec::cache::disk_store::store_outcome::StoreOutcome;
 use crate::exec::cache::runtime_slot::OutputSnapshot;
 use crate::graph::func::lambda::OutputDemand;
+use crate::graph::identity::NodeId;
+use crate::graph::program_id::ProgramId;
 use crate::internals::blob::{BLOB_TYPE, Blob, BlobCodec, BlobFault};
 use crate::internals::calls::Calls;
 
 fn target(path: &Path, digest: Digest) -> BlobTarget {
     BlobTarget {
         path: path.to_path_buf(),
+        program_id: ProgramId::from(NodeId::from_u128(1)),
         digest,
     }
 }

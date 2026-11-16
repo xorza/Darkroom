@@ -171,16 +171,16 @@ impl<'a> Runs<'a> {
 
     /// Whether `node` invoked its lambda and succeeded.
     pub(crate) fn ran(&self, node: Placed) -> bool {
-        self.outcome.ran(node.node_id)
+        self.outcome.ran(node.program_id)
     }
 
     /// Whether `node` was served from a cache instead of recomputing.
     pub(crate) fn reused(&self, node: Placed) -> bool {
-        self.outcome.cached(node.node_id)
+        self.outcome.cached(node.program_id)
     }
 
     pub(crate) fn error(&self, node: Placed) -> Option<&RunError> {
-        self.outcome.error(node.node_id)
+        self.outcome.error(node.program_id)
     }
 
     pub(crate) fn ran_count(&self) -> usize {

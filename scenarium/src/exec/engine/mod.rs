@@ -23,7 +23,7 @@ use crate::exec::resolve;
 use crate::exec::schedule::RunSchedule;
 use crate::exec::schedule::planner::Planner;
 use crate::exec::seeds::RunSeeds;
-use crate::graph::identity::NodeId;
+use crate::graph::program_id::ProgramId;
 
 /// The run-side pipeline container: the installed program, the reusable `schedule` buffer, the
 /// `planner` (scheduling scratch), the cross-run `cache` (per-node outputs, plus its owned
@@ -104,9 +104,9 @@ impl ExecEngine {
 
     pub(crate) async fn evict_cache(
         &mut self,
-        node_ids: impl IntoIterator<Item = NodeId>,
+        program_ids: impl IntoIterator<Item = ProgramId>,
     ) -> Vec<CacheNodeFailure> {
-        self.cache.evict(&self.compiled, node_ids).await
+        self.cache.evict(&self.compiled, program_ids).await
     }
 
     /// Plan, resolve and run `request.seeds` into the caller-owned `outcome`. The outcome
@@ -188,9 +188,9 @@ impl ExecEngine {
     /// nothing current is skipped, and reported as nothing.
     pub(crate) async fn flush_cache(
         &mut self,
-        node_ids: impl IntoIterator<Item = NodeId>,
+        program_ids: impl IntoIterator<Item = ProgramId>,
     ) -> CacheFlushReport {
-        self.cache.flush(&self.compiled, node_ids).await
+        self.cache.flush(&self.compiled, program_ids).await
     }
 
     /// [`flush_cache`](Self::flush_cache) over every installed node, for when the worker attaches
@@ -217,14 +217,14 @@ impl ExecEngine {
 
         // Both columns span the program, as checked above, so every index reads.
         for (node_idx, e_node) in program.e_nodes.iter_indexed() {
-            let node_id = program.node_ids[node_idx];
+            let program_id = program.program_ids[node_idx];
             if let Some(output_values) = self.cache[node_idx].output_values()
                 && output_values.len() != e_node.outputs.len as usize
             {
-                return Err(InstallValidationError::OutputArity { node_id });
+                return Err(InstallValidationError::OutputArity { program_id });
             }
             if self.executor.nodes[node_idx].owner != e_node.func_ref {
-                return Err(InstallValidationError::StateOwner { node_id });
+                return Err(InstallValidationError::StateOwner { program_id });
             }
         }
         Ok(())
@@ -256,7 +256,7 @@ pub(crate) mod internals {
     use crate::exec::seeds::RunSeeds;
     use crate::graph::Graph;
     use crate::graph::func::lambda::OutputDemand;
-    use crate::graph::identity::NodeId;
+    use crate::graph::program_id::ProgramId;
     use crate::library::Library;
 
     #[derive(Debug, Default)]
@@ -289,45 +289,45 @@ pub(crate) mod internals {
 
         /// Where a stable id sits in the installed program — the one lookup the introspection
         /// below shares, so a test naming a node the install does not hold fails here.
-        fn node_idx(&self, node_id: NodeId) -> NodeIdx {
+        fn node_idx(&self, program_id: ProgramId) -> NodeIdx {
             self.compiled()
-                .node(node_id)
+                .node(program_id)
                 .expect("introspection names a node of the installed program")
         }
 
         /// The runnable nodes of the last plan, in the order the schedule walks them.
-        pub(crate) fn schedule_order(&self) -> Vec<NodeId> {
+        pub(crate) fn schedule_order(&self) -> Vec<ProgramId> {
             self.schedule
                 .process_order
                 .iter()
                 .copied()
                 .filter(|&node_idx| self.schedule.states[node_idx].is_runnable())
-                .map(|node_idx| self.compiled().node_ids[node_idx])
+                .map(|node_idx| self.compiled().program_ids[node_idx])
                 .collect()
         }
 
         /// The resolved state for a stable id — test introspection.
-        pub(crate) fn node_state(&self, node_id: NodeId) -> NodeState {
-            self.schedule.states[self.node_idx(node_id)]
+        pub(crate) fn node_state(&self, program_id: ProgramId) -> NodeState {
+            self.schedule.states[self.node_idx(program_id)]
         }
 
-        pub(crate) fn node_inputs(&self, node_id: NodeId) -> &[ExecInput] {
+        pub(crate) fn node_inputs(&self, program_id: ProgramId) -> &[ExecInput] {
             let program = self.compiled();
-            &program.inputs[program.by_id(node_id).inputs]
+            &program.inputs[program.by_id(program_id).inputs]
         }
 
-        pub(crate) fn node_output_demand(&self, node_id: NodeId) -> &[OutputDemand] {
-            &self.schedule.outputs.demand[self.compiled().by_id(node_id).outputs]
+        pub(crate) fn node_output_demand(&self, program_id: ProgramId) -> &[OutputDemand] {
+            &self.schedule.outputs.demand[self.compiled().by_id(program_id).outputs]
         }
 
-        pub(crate) fn node_output_readers(&self, node_id: NodeId) -> &[u32] {
-            &self.schedule.outputs.readers[self.compiled().by_id(node_id).outputs]
+        pub(crate) fn node_output_readers(&self, program_id: ProgramId) -> &[u32] {
+            &self.schedule.outputs.readers[self.compiled().by_id(program_id).outputs]
         }
 
         /// Resident-only argument values, test inspection only: a disk-only (not-yet-hydrated)
         /// node reads back empty.
-        pub(crate) fn argument_values(&self, node_id: NodeId) -> Option<ArgumentValues> {
-            let e_node = &self.compiled()[self.compiled().node(node_id)?];
+        pub(crate) fn argument_values(&self, program_id: ProgramId) -> Option<ArgumentValues> {
+            let e_node = &self.compiled()[self.compiled().node(program_id)?];
 
             let inputs = self.compiled().inputs[e_node.inputs]
                 .iter()
@@ -341,7 +341,7 @@ pub(crate) mod internals {
                 })
                 .collect();
 
-            let outputs = self.cache[self.node_idx(node_id)]
+            let outputs = self.cache[self.node_idx(program_id)]
                 .output_values()
                 .map_or_default(<[DynamicValue]>::to_vec);
 
@@ -349,8 +349,8 @@ pub(crate) mod internals {
         }
 
         /// The runtime slot for a stable id — test introspection.
-        pub(crate) fn slot(&self, node_id: NodeId) -> &RuntimeSlot {
-            &self.cache[self.node_idx(node_id)]
+        pub(crate) fn slot(&self, program_id: ProgramId) -> &RuntimeSlot {
+            &self.cache[self.node_idx(program_id)]
         }
 
         /// The attached store, for tests that name a blob's path or corrupt one.
@@ -360,8 +360,12 @@ pub(crate) mod internals {
 
         /// Seed a node's cached output (simulating a prior run): set the value and
         /// stamp `produced_under` from the current digest, so the planner sees a hit.
-        pub(crate) fn set_output_values(&mut self, node_id: NodeId, values: Vec<DynamicValue>) {
-            let node_idx = self.node_idx(node_id);
+        pub(crate) fn set_output_values(
+            &mut self,
+            program_id: ProgramId,
+            values: Vec<DynamicValue>,
+        ) {
+            let node_idx = self.node_idx(program_id);
             let slot = &mut self.cache[node_idx];
             let produced_under = slot.cur_digest;
             slot.load_output(OutputSnapshot::new(values), produced_under);

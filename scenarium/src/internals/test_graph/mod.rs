@@ -579,22 +579,23 @@ mod internals {
 
     use crate::exec::compile::Compiler;
     use crate::exec::compile::compiled_graph::CompiledGraph;
-    use crate::graph::identity::{EventPort, NodeId};
+    use crate::exec::program_event::ProgramEvent;
+    use crate::graph::program_id::ProgramId;
     use crate::internals::test_graph::TestGraph;
     use crate::internals::test_graph::compiled::Compiled;
 
     impl TestGraph {
         /// Every node the fixture named, under that name, which for an
         /// [`instance`](Self::instance) is not the node's own.
-        pub(crate) fn names(&self) -> impl Iterator<Item = (NodeId, &str)> {
+        pub(crate) fn names(&self) -> impl Iterator<Item = (ProgramId, &str)> {
             self.ids
                 .iter()
-                .map(|(name, node_id)| (*node_id, name.as_str()))
+                .map(|(name, node_id)| (ProgramId::from(*node_id), name.as_str()))
         }
 
-        /// `name`'s event `event_idx`.
-        pub(crate) fn event(&self, name: &str, event_idx: usize) -> EventPort {
-            EventPort::new(self.id(name), event_idx)
+        /// `name`'s event `event_idx`, as the event loop fires it.
+        pub(crate) fn event(&self, name: &str, event_idx: usize) -> ProgramEvent {
+            ProgramEvent::new(ProgramId::from(self.id(name)), event_idx)
         }
 
         /// This fixture lowered, as an install or a message carries it.
@@ -606,7 +607,10 @@ mod internals {
         pub(crate) fn compile(&self) -> Compiled {
             Compiled::new(
                 Compiler::default().compile(&self.graph, &self.library),
-                self.ids.clone(),
+                self.ids
+                    .iter()
+                    .map(|(name, node_id)| (name.clone(), ProgramId::from(*node_id)))
+                    .collect(),
             )
         }
     }

@@ -21,7 +21,7 @@ mod camera;
 mod glyph;
 mod toolbar;
 
-use scenarium::NodeId;
+use scenarium::ProgramId;
 use std::fmt;
 use std::fmt::Display;
 use std::fmt::Formatter;
@@ -56,12 +56,12 @@ use crate::gui::widgets::support;
 use crate::gui::widgets::zoom_range::{self, ScrollFrame};
 
 /// One image-viewer tab's state: what it shows and how it's framed. Lives in the
-/// `MainWindow`'s per-node viewer map, keyed by the [`NodeId`] its tab binds to; never
+/// `MainWindow`'s per-node viewer map, keyed by the [`ProgramId`] its tab binds to; never
 /// persisted.
 #[derive(Debug)]
 pub(crate) struct ImageViewer {
     /// The preview node this viewer shows; keys the pane's widget id.
-    node_id: NodeId,
+    program_id: ProgramId,
     source_size: Option<UVec2>,
     /// Explicit viewport once the user pans/zooms; `None` = fit-to-pane, recomputed each
     /// frame. The image's top-left offset in pane-local logical px plus the zoom (physical
@@ -181,10 +181,10 @@ struct Shown<'a> {
 }
 
 impl ImageViewer {
-    /// An empty viewer for `node_id`.
-    pub(crate) const fn new(node_id: NodeId) -> Self {
+    /// An empty viewer for `program_id`.
+    pub(crate) const fn new(program_id: ProgramId) -> Self {
         Self {
-            node_id,
+            program_id,
             source_size: None,
             view: None,
             pan_anchor: None,
@@ -246,10 +246,10 @@ impl ImageViewer {
         // runs from the record of a pane that is drawn, so only a viewer on screen costs one. The
         // thumbnail stands in until it lands, and the converter wakes the host when it does, so
         // the pane owes itself no later frame.
-        let source = ShownSource::resolve(previews.get(self.node_id), ui);
+        let source = ShownSource::resolve(previews.get(self.program_id), ui);
         if let ShownSource::Image(FullView::Unasked(_)) = source {
             out.push_app(AppCommand::View(ViewCommand::ConvertFull {
-                node_id: self.node_id,
+                program_id: self.program_id,
                 max_dim: ui.max_image_dimension(),
             }));
         }
@@ -259,7 +259,7 @@ impl ImageViewer {
         // The checker draws over the theme's backdrop.
         let fill = glyph::flat_fill(theme, preferences.bg).unwrap_or(theme.canvas.bg);
         Panel::zstack()
-            .id(pane_wid(self.node_id))
+            .id(pane_wid(self.program_id))
             .size(SizeSpec::FILL)
             .sense(Sense::CLICK | Sense::DRAG | Sense::SCROLL | Sense::PINCH)
             .clip_rect()
@@ -344,7 +344,7 @@ impl ImageViewer {
     fn top_row(&mut self, ui: &mut Ui, shown: Shown<'_>, preferences: &mut ViewerPreferences) {
         let margin = shown.pane.theme.space.sm;
         Panel::hstack()
-            .id(top_row_wid(self.node_id))
+            .id(top_row_wid(self.program_id))
             .size(SizeSpec::FILL_W)
             .padding(Spacing::new(margin, margin, margin, 0.0))
             .gap(margin)
@@ -367,7 +367,7 @@ impl ImageViewer {
         };
         let theme = shown.pane.theme;
         Readout {
-            panel: Panel::hstack().id(header_wid(self.node_id)),
+            panel: Panel::hstack().id(header_wid(self.program_id)),
             text: fmt!(ui, "{readout}").into(),
             ink: theme.ink.muted,
             max_width: f32::INFINITY,
@@ -383,7 +383,7 @@ impl ImageViewer {
     fn controls(&mut self, ui: &mut Ui, shown: Shown<'_>, preferences: &mut ViewerPreferences) {
         let (theme, pane) = (shown.pane.theme, shown.pane.size);
         let controls = Controls {
-            node_id: self.node_id,
+            program_id: self.program_id,
             theme,
         };
         Panel::vstack()
@@ -433,7 +433,7 @@ impl ImageViewer {
         let Some(shown) = shown else {
             return;
         };
-        let resp = ui.response_for(pane_wid(self.node_id));
+        let resp = ui.response_for(pane_wid(self.program_id));
         let Some(pane) = pane else {
             return;
         };
@@ -504,10 +504,14 @@ impl Display for HeaderReadout<'_> {
 /// Display label for a viewer tab / pane header: the node's name through
 /// [`format::node_name`], borrowed from the document. Each reader resolves its own, as one
 /// hash probe per label is cheaper than a table keyed by every tab.
-pub(crate) fn node_label(document: &Document, node_id: NodeId) -> &str {
+pub(crate) fn node_label(document: &Document, program_id: ProgramId) -> &str {
+    debug_assert!(
+        program_id.path().is_main(),
+        "a viewer tab names a node of the main graph"
+    );
     let node = document
         .graph
-        .find(node_id)
+        .find(program_id.node_id())
         .expect("a viewer tab's node is in the graph");
     format::node_name(&node.name)
 }
@@ -518,19 +522,19 @@ fn logical_size(image: &DrawableImage, ui: &Ui) -> Vec2 {
     image.texels.as_vec2() / ui.display().scale_factor()
 }
 
-/// The header readout of `node_id`'s viewer.
-fn header_wid(node_id: NodeId) -> WidgetId {
-    WidgetId::from_hash(("darkroom.image_viewer.header", node_id))
+/// The header readout of `program_id`'s viewer.
+fn header_wid(program_id: ProgramId) -> WidgetId {
+    WidgetId::from_hash(("darkroom.image_viewer.header", program_id))
 }
 
 /// The row along a viewer's top that holds its readout and its control panel.
-fn top_row_wid(node_id: NodeId) -> WidgetId {
-    WidgetId::from_hash(("darkroom.image_viewer.top_row", node_id))
+fn top_row_wid(program_id: ProgramId) -> WidgetId {
+    WidgetId::from_hash(("darkroom.image_viewer.top_row", program_id))
 }
 
 /// A viewer's pane id, keyed by node so two viewer tabs never share gesture responses.
-fn pane_wid(node_id: NodeId) -> WidgetId {
-    WidgetId::from_hash(("darkroom.image_viewer.pane", node_id))
+fn pane_wid(program_id: ProgramId) -> WidgetId {
+    WidgetId::from_hash(("darkroom.image_viewer.pane", program_id))
 }
 
 #[cfg(feature = "internals")]

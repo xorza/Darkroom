@@ -12,6 +12,7 @@ use crate::graph::func::error::InvokeError;
 use crate::graph::func::lambda::{Invocation, OutputDemand};
 use crate::graph::identity::NodeId;
 use crate::graph::node::CacheMode;
+use crate::graph::program_id::ProgramId;
 use crate::internals::calls::Calls;
 use crate::internals::engine::{ReportedRun, RunOutcome, TestEngine};
 use crate::internals::test_graph::{NodeSpec, TestGraph};

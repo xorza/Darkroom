@@ -5,8 +5,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use scenarium::{
-    Binding, Compiler, ConstValue, EventPort, ExecError, Graph, InputPort, NodeId, RunSummary,
-    WorkerActivity, WorkerError, WorkerReport, system_library, worker_events_library,
+    Binding, Compiler, ConstValue, EventPort, ExecError, Graph, InputPort, NodeId, ProgramId,
+    RunSummary, WorkerActivity, WorkerError, WorkerReport, system_library, worker_events_library,
 };
 
 use crate::core::wake;
@@ -123,7 +123,9 @@ fn an_arriving_report_records_its_error_and_its_cancel() {
     let node_id = NodeId::from_u128(2);
     let arrivals = [
         WorkerReport::Error(WorkerError::Exec {
-            error: ExecError::NodeSeedNotFound { node_id },
+            error: ExecError::NodeSeedNotFound {
+                program_id: ProgramId::from(node_id),
+            },
         }),
         WorkerReport::Completed(Arc::new(RunSummary {
             cancelled: true,
@@ -139,7 +141,8 @@ fn an_arriving_report_records_its_error_and_its_cancel() {
         arrivals,
         [
             Some(Arrival::Error(format!(
-                "execution failed: node seed {node_id:?} not found in the compiled program"
+                "execution failed: node seed {:?} not found in the compiled program",
+                ProgramId::from(node_id)
             ))),
             Some(Arrival::Cancelled {
                 executed_node_count: 3

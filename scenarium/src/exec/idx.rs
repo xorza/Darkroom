@@ -3,14 +3,11 @@
 //! containers keyed by them are [`Col`](crate::containers::col::Col) and
 //! [`IdxSet`](crate::containers::idx_set::IdxSet).
 //!
-//! This is an *index* space, not a second identity space. A node in a
-//! compiled program is the authored node, named by the same
-//! [`NodeId`](crate::graph::identity::NodeId) — and its ports by the same
-//! [`InputPort`](crate::graph::identity::InputPort) /
-//! [`OutputPort`](crate::graph::identity::OutputPort) /
-//! [`EventPort`](crate::graph::identity::EventPort). Those are the stable
-//! names: they survive installs, cross the host boundary, and may enter
-//! digests.
+//! This is an *index* space, not an identity space. A node in a compiled
+//! program is named by its [`ProgramId`](crate::graph::program_id::ProgramId),
+//! the path of instances down to the authored node, and its ports by their
+//! index on it. Those are the stable names: they survive installs, cross the
+//! host boundary, and may enter digests.
 //!
 //! Indices shift between compiles, so none of them may enter a digest, a persisted byte, or a
 //! host-facing report. They are assigned by the compiler's walk and never leave the execution
@@ -24,7 +21,7 @@ use crate::containers::col::idx_type;
 idx_type!(
     /// A node's position in the installed program's dense node vector. Install-local: it must
     /// never enter a digest, a persisted byte, or any host-facing report — those stay on
-    /// [`NodeId`](crate::graph::identity::NodeId).
+    /// [`ProgramId`](crate::graph::program_id::ProgramId).
     pub(crate) struct NodeIdx,
     "node index"
 );
@@ -59,9 +56,9 @@ idx_type!(
     "subscriber column index"
 );
 
-/// An [`OutputPort`](crate::graph::identity::OutputPort)
-/// interned into the installed program's dense index space — the hash-free form
-/// every per-run edge walk uses, resolved once at compile.
+/// A program node's output interned into the installed program's dense index
+/// space — the hash-free form every per-run edge walk uses, resolved once at
+/// compile.
 /// Install-local like [`NodeIdx`]: it must never enter a digest, a persisted
 /// byte, or a host-facing report.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

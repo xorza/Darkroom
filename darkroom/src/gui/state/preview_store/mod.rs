@@ -27,7 +27,7 @@ use glam::UVec2;
 use imaginarium::{ColorFormat, InterleavedDesc};
 use lens::Image;
 use palantir::{Image as Raster, ImageHandle, Ui};
-use scenarium::{DynamicValue, NodeId};
+use scenarium::{DynamicValue, ProgramId};
 
 use crate::core::document::Document;
 use crate::core::wake::Wake;
@@ -42,10 +42,10 @@ const PREVIEW_TEXTURE_DIM: NonZeroU32 = NonZeroU32::new(256).unwrap();
 
 #[derive(Debug)]
 pub(crate) struct PreviewStore {
-    /// Each preview node's current value, keyed by the node that published it.
-    entries: HashMap<NodeId, StoredContent>,
+    /// Each preview program node's current value, keyed by the program node that published it.
+    entries: HashMap<ProgramId, StoredContent>,
     /// The publishes of each node still converting for its card.
-    converting: HashMap<NodeId, Converting>,
+    converting: HashMap<ProgramId, Converting>,
     last_ticket: Ticket,
     converter: PreviewConverter,
 }
@@ -195,10 +195,10 @@ impl PreviewStore {
         }
     }
 
-    /// What `node_id` shows now, or `None` when nothing it published has
+    /// What `program_id` shows now, or `None` when nothing it published has
     /// landed.
-    pub(crate) fn get(&self, node_id: NodeId) -> Option<&StoredContent> {
-        self.entries.get(&node_id)
+    pub(crate) fn get(&self, program_id: ProgramId) -> Option<&StoredContent> {
+        self.entries.get(&program_id)
     }
 
     /// Queue one preview node's freshly published value for conversion. The card keeps what it
@@ -206,13 +206,13 @@ impl PreviewStore {
     ///
     /// No retention filter on the way in: a node that published exists. `reconcile` drops the
     /// value once that stops being true.
-    pub(crate) fn publish(&mut self, node_id: NodeId, value: DynamicValue) {
+    pub(crate) fn publish(&mut self, program_id: ProgramId, value: DynamicValue) {
         Publisher {
             converting: &mut self.converting,
             last_ticket: &mut self.last_ticket,
             converter: &self.converter,
         }
-        .card(node_id, value);
+        .card(program_id, value);
     }
 
     /// Register every conversion finished since the last frame. A card
@@ -241,12 +241,12 @@ impl PreviewStore {
             clippy::iter_over_hash_type,
             reason = "each image publishes under its own node, so the order changes no result"
         )]
-        for (&node_id, content) in entries.iter() {
+        for (&program_id, content) in entries.iter() {
             if let StoredContent::Image(image) = content
                 && image.is_lost()
-                && !publisher.converting.contains_key(&node_id)
+                && !publisher.converting.contains_key(&program_id)
             {
-                publisher.card(node_id, image.source.clone());
+                publisher.card(program_id, image.source.clone());
             }
         }
         let Publisher { converting, .. } = publisher;
@@ -262,15 +262,15 @@ impl PreviewStore {
         }
     }
 
-    /// Queue the full-resolution conversion of `node_id`'s image, its longest edge capped to
+    /// Queue the full-resolution conversion of `program_id`'s image, its longest edge capped to
     /// `max_dim`, as a viewer asks for one it found [`FullView::Unasked`]. An image asked for
     /// already, and a value that is no image or is gone, convert nothing: a second viewer of the
     /// node may ask in the same pass.
     ///
     /// Lazy: the full raster is the source's own resolution (hundreds of MB of RGBA8 for a
     /// full-sensor frame), and only the visible viewer pane wants one.
-    pub(crate) fn convert_full(&mut self, node_id: NodeId, max_dim: Option<NonZeroU32>) {
-        let Some(StoredContent::Image(image)) = self.entries.get_mut(&node_id) else {
+    pub(crate) fn convert_full(&mut self, program_id: ProgramId, max_dim: Option<NonZeroU32>) {
+        let Some(StoredContent::Image(image)) = self.entries.get_mut(&program_id) else {
             return;
         };
         if !matches!(image.full, FullImage::Unasked) {
@@ -279,7 +279,7 @@ impl PreviewStore {
         let texels = capped_target(image.preview.native_size, max_dim);
         image.full = FullImage::Converting { texels };
         self.converter.jobs().send(Job {
-            node_id,
+            program_id,
             ticket: image.ticket,
             work: Work::Full {
                 source: image.source.clone(),
@@ -288,11 +288,11 @@ impl PreviewStore {
         });
     }
 
-    /// Drop `node_id`'s value, and void every conversion of it still in
+    /// Drop `program_id`'s value, and void every conversion of it still in
     /// flight.
-    pub(crate) fn remove(&mut self, node_id: NodeId) {
-        self.entries.remove(&node_id);
-        self.converting.remove(&node_id);
+    pub(crate) fn remove(&mut self, program_id: ProgramId) {
+        self.entries.remove(&program_id);
+        self.converting.remove(&program_id);
     }
 
     /// Drop every value, and every conversion still in flight.
@@ -310,34 +310,34 @@ impl PreviewStore {
     /// cache is stricter than the others.
     pub(crate) fn reconcile(&mut self, document: &Document) {
         self.entries
-            .retain(|node_id, _| document.holds_preview_node(*node_id));
+            .retain(|program_id, _| document.holds_preview_node(*program_id));
         self.converting
-            .retain(|node_id, _| document.holds_preview_node(*node_id));
+            .retain(|program_id, _| document.holds_preview_node(*program_id));
     }
 }
 
 /// The store's fields a publish writes, borrowed apart from the entries a restore reads.
 #[derive(Debug)]
 struct Publisher<'a> {
-    converting: &'a mut HashMap<NodeId, Converting>,
+    converting: &'a mut HashMap<ProgramId, Converting>,
     last_ticket: &'a mut Ticket,
     converter: &'a PreviewConverter,
 }
 
 impl Publisher<'_> {
-    /// Queue `value` as `node_id`'s newest publish, for its card.
-    fn card(&mut self, node_id: NodeId, value: DynamicValue) {
+    /// Queue `value` as `program_id`'s newest publish, for its card.
+    fn card(&mut self, program_id: ProgramId, value: DynamicValue) {
         let ticket = self.last_ticket.next();
         *self.last_ticket = ticket;
         self.converting
-            .entry(node_id)
+            .entry(program_id)
             .and_modify(|span| span.newest = ticket)
             .or_insert(Converting {
                 oldest: ticket,
                 newest: ticket,
             });
         self.converter.jobs().send(Job {
-            node_id,
+            program_id,
             ticket,
             work: Work::Thumbnail(value),
         });
@@ -348,21 +348,21 @@ impl Publisher<'_> {
 /// result queue that drives it.
 #[derive(Debug)]
 struct Landing<'a> {
-    entries: &'a mut HashMap<NodeId, StoredContent>,
-    converting: &'a mut HashMap<NodeId, Converting>,
+    entries: &'a mut HashMap<ProgramId, StoredContent>,
+    converting: &'a mut HashMap<ProgramId, Converting>,
 }
 
 /// Land one finished conversion, or drop it when it no longer has a place.
 fn accept(landing: Landing<'_>, ui: &Ui, converted: Converted) {
     let Converted {
-        node_id,
+        program_id,
         ticket,
         outcome,
     } = converted;
     match outcome {
-        Outcome::Card(card) => land_card(landing, ui, node_id, ticket, card),
+        Outcome::Card(card) => land_card(landing, ui, program_id, ticket, card),
         Outcome::Full(raster) => {
-            if let Some(StoredContent::Image(image)) = landing.entries.get_mut(&node_id)
+            if let Some(StoredContent::Image(image)) = landing.entries.get_mut(&program_id)
                 && image.ticket == ticket
             {
                 image.land_full(ui, &raster);
@@ -371,22 +371,22 @@ fn accept(landing: Landing<'_>, ui: &Ui, converted: Converted) {
     }
 }
 
-/// Land `node_id`'s card from publish `ticket`, unless no conversion of the
+/// Land `program_id`'s card from publish `ticket`, unless no conversion of the
 /// node is pending — its value was removed or swept — or this one was
 /// published before a removal voided it.
-fn land_card(landing: Landing<'_>, ui: &Ui, node_id: NodeId, ticket: Ticket, card: Card) {
+fn land_card(landing: Landing<'_>, ui: &Ui, program_id: ProgramId, ticket: Ticket, card: Card) {
     let Landing {
         entries,
         converting,
     } = landing;
-    let Some(span) = converting.get_mut(&node_id) else {
+    let Some(span) = converting.get_mut(&program_id) else {
         return;
     };
     if ticket < span.oldest {
         return;
     }
     if ticket == span.newest {
-        converting.remove(&node_id);
+        converting.remove(&program_id);
     } else {
         span.oldest = ticket.next();
     }
@@ -416,7 +416,7 @@ fn land_card(landing: Landing<'_>, ui: &Ui, node_id: NodeId, ticket: Ticket, car
             }
         }
     };
-    entries.insert(node_id, content);
+    entries.insert(program_id, content);
 }
 
 impl DrawablePreview {
@@ -547,10 +547,10 @@ pub(crate) mod internals {
             );
         }
 
-        /// Show `content` for `node_id`, as a landed conversion would.
+        /// Show `content` for `program_id`, as a landed conversion would.
         #[cfg(test)]
-        pub(crate) fn seed(&mut self, node_id: NodeId, content: StoredContent) {
-            self.entries.insert(node_id, content);
+        pub(crate) fn seed(&mut self, program_id: ProgramId, content: StoredContent) {
+            self.entries.insert(program_id, content);
         }
 
         /// How many publishes the store has queued, a lost device's included.
@@ -565,22 +565,22 @@ pub(crate) mod internals {
             self.entries.is_empty()
         }
 
-        /// Whether `node_id`'s full image has landed, for a bench that waits for its viewer.
-        pub(crate) fn full_landed(&self, node_id: NodeId) -> bool {
+        /// Whether `program_id`'s full image has landed, for a bench that waits for its viewer.
+        pub(crate) fn full_landed(&self, program_id: ProgramId) -> bool {
             matches!(
-                self.entries.get(&node_id),
+                self.entries.get(&program_id),
                 Some(StoredContent::Image(image)) if matches!(image.full, FullImage::Resident(_))
             )
         }
 
-        /// Land `card` as `node_id`'s newest publish, on the calling thread —
+        /// Land `card` as `program_id`'s newest publish, on the calling thread —
         /// for a bench that lands one conversion every frame and times the
         /// landing alone.
-        pub(crate) fn land_converted(&mut self, ui: &Ui, node_id: NodeId, card: Card) {
+        pub(crate) fn land_converted(&mut self, ui: &Ui, program_id: ProgramId, card: Card) {
             let ticket = self.last_ticket.next();
             self.last_ticket = ticket;
             self.converting.insert(
-                node_id,
+                program_id,
                 Converting {
                     oldest: ticket,
                     newest: ticket,
@@ -592,7 +592,7 @@ pub(crate) mod internals {
                     converting: &mut self.converting,
                 },
                 ui,
-                node_id,
+                program_id,
                 ticket,
                 card,
             );

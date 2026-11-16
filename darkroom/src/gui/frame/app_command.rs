@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use lens::MlModelPaths;
-use scenarium::{FsPathConfig, InputPort, NodeId};
+use scenarium::{FsPathConfig, InputPort, NodeId, ProgramId};
 
 use crate::gui::frame::framing::Framing;
 
@@ -77,7 +77,7 @@ pub(crate) enum ViewCommand {
     /// [`PreviewStore::convert_full`]: crate::gui::state::preview_store::PreviewStore::convert_full
     /// [`FullView::Unasked`]: crate::gui::state::preview_store::FullView::Unasked
     ConvertFull {
-        node_id: NodeId,
+        program_id: ProgramId,
         max_dim: Option<NonZeroU32>,
     },
 }

@@ -90,7 +90,10 @@ fn only_node(selected: &BTreeSet<ItemId>) -> Option<NodeId> {
 fn body(ui: &mut Ui, stage: &mut Stage<'_, NodeCtx<'_>>, target: InspectTarget) {
     let node = stage.ctx;
     let theme = node.theme();
-    let logs = node.graph_ctx.run_state().logs(node.node_id);
+    let logs = node
+        .graph_ctx
+        .run_state()
+        .logs(node.graph_ctx.program_id(node.node_id));
     let error = error_message(node.exec_status());
     Panel::vstack()
         .id_salt("inspector_header")

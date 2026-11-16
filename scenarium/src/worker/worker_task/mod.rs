@@ -9,12 +9,12 @@ use common::CancelToken;
 
 use crate::exec::cache::runtime_cache::cache_flush_report::CacheFlushReport;
 use crate::exec::engine::{ExecEngine, ExecuteRequest};
+use crate::exec::program_event::ProgramEvent;
 use crate::exec::report::exec_outcome::ExecOutcome;
 use crate::exec::report::run_reporter::RunPhase;
 use crate::exec::report::run_reporter::RunReporter;
 use crate::exec::seeds::RunSeeds;
-use crate::graph::identity::EventPort;
-use crate::graph::identity::NodeId;
+use crate::graph::program_id::ProgramId;
 use crate::worker::active_event_loop::{
     ActiveEventLoop, EVENT_LOOP_BACKPRESSURE, EventLoopWake, LambdaPanic,
 };
@@ -116,7 +116,7 @@ pub(crate) struct WorkerTask<ExecCallback> {
     summary: RunSummaryPublisher,
     outcome: ExecOutcome,
     intent: BatchIntent,
-    event_buffer: Vec<EventPort>,
+    event_buffer: Vec<ProgramEvent>,
     event_loop: Option<ActiveEventLoop>,
     event_loop_pause_gate: PauseGate,
 }
@@ -393,7 +393,7 @@ where
         }
         for panic in panics {
             (self.callback)(WorkerReport::Error(WorkerError::EventLambdaPanic {
-                node_id: panic.node_id,
+                program_id: panic.program_id,
                 message: panic.message,
             }));
         }
@@ -430,8 +430,8 @@ impl<C> RunReporter for WorkerRunReporter<'_, C>
 where
     C: Fn(WorkerReport) + Sync,
 {
-    fn progress(&mut self, node_id: NodeId, phase: RunPhase) {
-        (self.callback)(WorkerReport::Progress { node_id, phase });
+    fn progress(&mut self, program_id: ProgramId, phase: RunPhase) {
+        (self.callback)(WorkerReport::Progress { program_id, phase });
     }
 }
 

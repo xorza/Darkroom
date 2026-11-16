@@ -46,10 +46,12 @@ pub use graph::func::lambda::{AsyncLambda, AsyncLambdaFn, FuncLambda, Invocation
 pub use graph::func::value_variant::ValueVariant;
 pub use graph::func::{Func, FuncBehavior, FuncEvent};
 pub use graph::identity::{EventPort, FuncId, InputPort, NodeId, OutputPort};
+pub use graph::instance_path::{InstancePath, InstancePathError};
 pub use graph::node::special::{SPECIAL_NODES, SpecialNode};
 pub use graph::node::{CacheMode, Node};
 pub use graph::node_ref::NodeRef;
 pub use graph::ports::{InputDecl, OutputDecl, Ports};
+pub use graph::program_id::{ProgramId, ProgramIdError};
 pub use graph::reconciled::{Detachment, Reconciled, Repair};
 pub use graph::subscription::Subscription;
 pub use library::Library;

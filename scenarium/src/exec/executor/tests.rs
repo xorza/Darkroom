@@ -9,6 +9,7 @@ use crate::data::const_value::ConstValue;
 use crate::graph::func::lambda::{FuncLambda, internals};
 use crate::graph::identity::{FuncId, NodeId};
 use crate::graph::node::CacheMode;
+use crate::graph::program_id::ProgramId;
 use crate::internals::program::ProgramBuilder;
 use common::MutexExt;
 
@@ -380,13 +381,13 @@ async fn ram_retention_survives_the_last_read_and_none_does_not() {
 async fn a_lambda_reads_the_execution_node_it_is_running_as() {
     use std::sync::Mutex;
 
-    let seen: Arc<Mutex<Vec<NodeId>>> = Arc::new(Mutex::new(Vec::new()));
+    let seen: Arc<Mutex<Vec<ProgramId>>> = Arc::new(Mutex::new(Vec::new()));
     let mut prog = ProgramBuilder::default();
-    let announce = |seen: &Arc<Mutex<Vec<NodeId>>>, wrote: i64| {
+    let announce = |seen: &Arc<Mutex<Vec<ProgramId>>>, wrote: i64| {
         let probe = Arc::clone(seen);
         async_lambda!(
             move |Invocation { ctx, outputs, .. }| { seen = Arc::clone(&probe) } => {
-                seen.lock_unpoisoned().push(ctx.cur_node_id());
+                seen.lock_unpoisoned().push(ctx.cur_program_id());
                 outputs[0] = DynamicValue::Static(ConstValue::Int(wrote));
                 Ok(())
             }
@@ -398,7 +399,7 @@ async fn a_lambda_reads_the_execution_node_it_is_running_as() {
     prog.runs().go().await;
 
     // Index order is id order, and placement mints ascending ids, so `a` runs first.
-    assert_eq!(*seen.lock_unpoisoned(), vec![a.node_id, b.node_id]);
+    assert_eq!(*seen.lock_unpoisoned(), vec![a.program_id, b.program_id]);
 }
 
 /// A node seed ("run to this node") demands the node's output but does not
@@ -586,9 +587,9 @@ async fn reconcile_keeps_lambda_state_until_the_implementation_changes() {
     // (node id, func id) per node.
     let build = |nodes: &[(u128, u128)]| {
         let mut prog = ProgramBuilder::default();
-        for &(node_id, func_id) in nodes {
+        for &(program_id, func_id) in nodes {
             prog.node()
-                .id(NodeId::from_u128(node_id))
+                .id(ProgramId::from(NodeId::from_u128(program_id)))
                 .func(FuncId::from_u128(func_id))
                 .add();
         }

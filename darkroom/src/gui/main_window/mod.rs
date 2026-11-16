@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use palantir::{
     Chrome, Configure, DockOperation, DockView, Panel, SizeSpec, TabOverflow, Ui, VAlign, WidgetId,
 };
-use scenarium::NodeId;
+use scenarium::ProgramId;
 
 use crate::core::document::graph_revision::GraphRevision;
 use crate::core::document::tab_ref::TabRef;
@@ -36,9 +36,9 @@ const MIN_PANE: f32 = 220.0;
 pub(crate) struct MainWindow {
     pub(crate) graph_ui: GraphUi,
     /// One image-viewer navigation state per rendered viewer tab
-    /// ([`TabRef::ImageViewer`]), keyed by the preview node it shows. Textures remain
+    /// ([`TabRef::ImageViewer`]), keyed by the preview program node it shows. Textures remain
     /// centralized in the preview store.
-    pub(crate) image_viewers: HashMap<NodeId, ImageViewer>,
+    pub(crate) image_viewers: HashMap<ProgramId, ImageViewer>,
     /// The dock's op sink for one frame, kept so the navigation scan and the record reuse one
     /// buffer.
     dock_ops: Vec<DockOperation<TabRef>>,
@@ -165,11 +165,11 @@ impl MainWindow {
             self.swept_at = Some(revision);
         }
         // Scoped to the tab, not the node: a closed tab's node may still be in the graph.
-        self.image_viewers.retain(|node_id, _| {
+        self.image_viewers.retain(|program_id, _| {
             document
                 .layout
                 .all_tabs()
-                .any(|t| t == TabRef::ImageViewer(*node_id))
+                .any(|t| t == TabRef::ImageViewer(*program_id))
         });
     }
 }

@@ -108,8 +108,9 @@ fn deterministic_and_per_function_distinct() {
     );
 
     // Another id under the same signature, so only the identity moves.
-    let signature = p.program().by_id(a.node_id).func_ref.signature();
-    p.program_mut().by_id_mut(a.node_id).func_ref = FuncRef::new(FuncId::from_u128(11), signature);
+    let signature = p.program().by_id(a.program_id).func_ref.signature();
+    p.program_mut().by_id_mut(a.program_id).func_ref =
+        FuncRef::new(FuncId::from_u128(11), signature);
     let refunced = Digests::of(&p);
     assert_ne!(
         first.at(a),

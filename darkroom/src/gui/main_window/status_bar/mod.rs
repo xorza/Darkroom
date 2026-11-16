@@ -178,9 +178,16 @@ fn run_line(ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>, outcome: RunOutcom
     let Some(cause) = outcome.cause else {
         return;
     };
-    let Some(node) = ctx.document().graph.find(cause) else {
+    // A cause outside the main graph has no node here to show.
+    let Some(node) = cause
+        .path()
+        .is_main()
+        .then(|| ctx.document().graph.find(cause.node_id()))
+        .flatten()
+    else {
         return;
     };
+    let cause = cause.node_id();
     let name = &node.name;
     let text = fmt!(ui, "Show {name}");
     if Link::new(cause_link_wid(), text).show(ui, theme) {

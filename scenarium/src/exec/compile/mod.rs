@@ -49,6 +49,7 @@ use crate::exec::idx::{NodeIdx, OutputAddr};
 use crate::graph::Graph;
 use crate::graph::binding::Binding;
 use crate::graph::identity::{EventPort, InputPort, NodeId, OutputPort};
+use crate::graph::program_id::ProgramId;
 use crate::library::Library;
 
 /// One node awaiting placement: its id, which the sort keys on, and the one fact about it a
@@ -123,7 +124,7 @@ impl Compiler {
         // Sized from the placement, so each `append` below is a copy into space the artifact
         // already owns.
         let mut compiled = CompiledGraph {
-            node_ids: Col::with_capacity(self.placed.len()),
+            program_ids: Col::with_capacity(self.placed.len()),
             e_nodes: Col::with_capacity(self.placed.len()),
             inputs: Col::with_capacity(totals.inputs),
             output_count: 0,
@@ -135,9 +136,11 @@ impl Compiler {
         // each event's subscribers are the run at the front of what is left.
         let mut subscriptions = graph.subscriptions().peekable();
         // The id column is a projection of the placement; the walk resolves ids against `placed`.
-        compiled
-            .node_ids
-            .append(self.placed.iter().map(|placed| placed.node_id));
+        compiled.program_ids.append(
+            self.placed
+                .iter()
+                .map(|placed| ProgramId::from(placed.node_id)),
+        );
 
         for pos in 0..self.placed.len() {
             let node_id = self.placed[pos].node_id;

@@ -53,7 +53,7 @@ impl Jobs {
         assert!(queue.inbox, "the preview converter thread panicked");
         let waiting = if matches!(job.work, Work::Thumbnail(_)) {
             queue.jobs.iter_mut().find(|waiting| {
-                waiting.node_id == job.node_id && matches!(waiting.work, Work::Thumbnail(_))
+                waiting.program_id == job.program_id && matches!(waiting.work, Work::Thumbnail(_))
             })
         } else {
             None
@@ -116,14 +116,14 @@ impl fmt::Debug for Inbox {
 #[cfg(test)]
 mod tests {
     use glam::UVec2;
-    use scenarium::{DynamicValue, NodeId};
+    use scenarium::{DynamicValue, NodeId, ProgramId};
 
     use crate::gui::state::preview_store::job_queue::queue;
     use crate::gui::state::preview_store::preview_converter::{Job, Ticket, Work};
 
-    fn job(node_id: NodeId, ticket: Ticket, work: Work) -> Job {
+    fn job(program_id: ProgramId, ticket: Ticket, work: Work) -> Job {
         Job {
-            node_id,
+            program_id,
             ticket,
             work,
         }
@@ -134,7 +134,10 @@ mod tests {
     /// sender is dropped and nothing waits.
     #[test]
     fn a_newer_card_replaces_the_one_waiting_and_the_inbox_ends_with_its_sender() {
-        let (a, b) = (NodeId::unique(), NodeId::unique());
+        let (a, b) = (
+            ProgramId::from(NodeId::unique()),
+            ProgramId::from(NodeId::unique()),
+        );
         let tickets: Vec<Ticket> = (0..4)
             .scan(Ticket::default(), |ticket, _| {
                 *ticket = ticket.next();
@@ -156,13 +159,13 @@ mod tests {
         jobs.send(job(a, tickets[3], thumbnail(4)));
         drop(jobs);
 
-        let order: Vec<(NodeId, Ticket, String)> = inbox
+        let order: Vec<(ProgramId, Ticket, String)> = inbox
             .map(|job| {
                 let work = match job.work {
                     Work::Thumbnail(value) => format!("card {value}"),
                     Work::Full { source, .. } => format!("full {source}"),
                 };
-                (job.node_id, job.ticket, work)
+                (job.program_id, job.ticket, work)
             })
             .collect();
         assert_eq!(

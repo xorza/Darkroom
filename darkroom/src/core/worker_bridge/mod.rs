@@ -14,7 +14,7 @@ use std::sync::Arc;
 use common::{BgRuntime, ErrorChain};
 use scenarium::CompiledGraph;
 use scenarium::DiskStore;
-use scenarium::NodeId;
+use scenarium::ProgramId;
 use scenarium::{Worker, WorkerExited, WorkerMessage, WorkerReport};
 
 use crate::core::status_log;
@@ -76,23 +76,23 @@ impl WorkerBridge {
         self.worker.send(WorkerMessage::Clear)
     }
 
-    /// Install the current program and evict an authored node's cache cone as one worker commit.
+    /// Install the current program and evict a program node's cache cone as one worker commit.
     /// Stopping the event loop keeps it from repopulating the entries being removed.
     pub(crate) fn install_and_evict_cache(
         &self,
         compiled: Arc<CompiledGraph>,
-        node_id: NodeId,
+        program_id: ProgramId,
     ) -> Result<(), WorkerExited> {
         self.worker.send_many([
             WorkerMessage::Update { compiled },
             WorkerMessage::EvictCache {
-                node_ids: vec![node_id],
+                program_ids: vec![program_id],
             },
             WorkerMessage::StopEventLoop,
         ])
     }
 
-    /// Install the current program and persist an authored node's resident disk-backed value as
+    /// Install the current program and persist a program node's resident disk-backed value as
     /// one worker commit. The install has to lead: the engine reads the node's cache mode off the
     /// *installed* program, so a flush against the previous one would find the node not yet
     /// disk-backed and write nothing.
@@ -102,12 +102,12 @@ impl WorkerBridge {
     pub(crate) fn install_and_flush_cache(
         &self,
         compiled: Arc<CompiledGraph>,
-        node_id: NodeId,
+        program_id: ProgramId,
     ) -> Result<(), WorkerExited> {
         self.worker.send_many([
             WorkerMessage::Update { compiled },
             WorkerMessage::FlushCache {
-                node_ids: vec![node_id],
+                program_ids: vec![program_id],
             },
         ])
     }
@@ -117,13 +117,13 @@ impl WorkerBridge {
         self.worker.send(WorkerMessage::RunSinks)
     }
 
-    /// Execute these exact nodes in the installed program and deliver their outputs.
+    /// Execute these exact program nodes in the installed program and deliver their outputs.
     pub(crate) fn run_nodes(
         &self,
-        node_ids: impl IntoIterator<Item = NodeId>,
+        program_ids: impl IntoIterator<Item = ProgramId>,
     ) -> Result<(), WorkerExited> {
         self.worker.send(WorkerMessage::RunNodes {
-            node_ids: node_ids.into_iter().collect(),
+            program_ids: program_ids.into_iter().collect(),
         })
     }
 

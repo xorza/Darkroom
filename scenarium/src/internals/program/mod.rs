@@ -24,7 +24,7 @@ use crate::exec::idx::{NodeIdx, OutputAddr};
 use crate::exec::schedule::planner::Planner;
 use crate::exec::schedule::{NodeState, RootFlags, RunSchedule};
 use crate::exec::seeds::RunSeeds;
-use crate::graph::identity::NodeId;
+use crate::graph::program_id::ProgramId;
 use crate::internals::program::node_builder::NodeBuilder;
 use crate::internals::program::runs::Runs;
 use crate::internals::program::sweep::Sweep;
@@ -33,7 +33,7 @@ use crate::internals::program::sweep::Sweep;
 /// column is keyed on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Placed {
-    pub(crate) node_id: NodeId,
+    pub(crate) program_id: ProgramId,
     pub(crate) node_idx: NodeIdx,
 }
 

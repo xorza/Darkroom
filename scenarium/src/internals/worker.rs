@@ -17,7 +17,7 @@ use crate::data::const_value::ConstValue;
 use crate::exec::cache::disk_store::DiskStore;
 use crate::exec::compile::compiled_graph::CompiledGraph;
 use crate::exec::error::ExecError;
-use crate::graph::identity::NodeId;
+use crate::graph::program_id::ProgramId;
 use crate::internals::engine::RunOutcome;
 use crate::internals::test_graph::TestGraph;
 use crate::worker::Worker;
@@ -91,8 +91,9 @@ impl TestWorker {
         Self::over(self.graph)
     }
 
-    pub(crate) fn id(&self, name: &str) -> NodeId {
-        self.graph.id(name)
+    /// The program id of `name`, a node of the main graph.
+    pub(crate) fn id(&self, name: &str) -> ProgramId {
+        ProgramId::from(self.graph.id(name))
     }
 
     /// `Update` carrying this graph as it stands.

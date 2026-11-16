@@ -97,7 +97,7 @@ impl<'a> NodeCtx<'a> {
             pos,
             node,
             declaration,
-            run: graph_ctx.run_state().node(node_id),
+            run: graph_ctx.run_state().node(graph_ctx.program_id(node_id)),
             hover: Hover::Rest,
         }
     }

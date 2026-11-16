@@ -21,10 +21,12 @@ pub(super) fn validate(
     compiled: &CompiledGraph,
     library: &Library,
 ) -> Result<(), CompiledGraphValidationError> {
-    for (node_id, e_node) in compiled.node_ids.iter().zip(compiled.e_nodes.iter()) {
+    for (program_id, e_node) in compiled.program_ids.iter().zip(compiled.e_nodes.iter()) {
         let func_id = e_node.func_ref.id();
         if func_id.is_nil() {
-            return Err(CompiledGraphValidationError::NilFuncId { node_id: *node_id });
+            return Err(CompiledGraphValidationError::NilFuncId {
+                program_id: *program_id,
+            });
         }
         // A special node's interface is its hardcoded spec, not a library func.
         let func = match e_node.special {
@@ -32,17 +34,17 @@ pub(super) fn validate(
             None => library
                 .by_id(func_id)
                 .ok_or(CompiledGraphValidationError::MissingFunc {
-                    node_id: *node_id,
+                    program_id: *program_id,
                     func_id,
                 })?,
         };
         // The same two questions asked of each of the three pools.
         let arity = |pool| CompiledGraphValidationError::Arity {
-            node_id: *node_id,
+            program_id: *program_id,
             pool,
         };
         let range = |pool| CompiledGraphValidationError::Range {
-            node_id: *node_id,
+            program_id: *program_id,
             pool,
         };
         if e_node.inputs.len as usize != func.inputs().len() {
@@ -78,7 +80,7 @@ pub(super) fn validate(
                 .find(|s| s.idx() >= compiled.e_nodes.len())
             {
                 return Err(CompiledGraphValidationError::MissingEventSubscriber {
-                    node_id: *node_id,
+                    program_id: *program_id,
                     subscriber,
                 });
             }
@@ -90,13 +92,13 @@ pub(super) fn validate(
                 // placement lookup; kept as the backstop.
                 let target_e_node = compiled.e_nodes.get(e_addr.node_idx).ok_or(
                     CompiledGraphValidationError::MissingBindingTarget {
-                        node_id: *node_id,
+                        program_id: *program_id,
                         target: *e_addr,
                     },
                 )?;
                 if e_addr.port_idx >= target_e_node.outputs.len {
                     return Err(CompiledGraphValidationError::BindingOutputOutOfRange {
-                        node_id: *node_id,
+                        program_id: *program_id,
                         target: *e_addr,
                     });
                 }

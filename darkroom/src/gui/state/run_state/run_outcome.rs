@@ -1,6 +1,6 @@
 //! [`RunOutcome`]: what the last completed run came to, as the status bar reports it.
 
-use scenarium::{NodeExecStatus, NodeId, RunError, RunSummary};
+use scenarium::{NodeExecStatus, ProgramId, RunError, RunSummary};
 
 /// The tally of one completed run's rows, and the node a reader should look at first.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -18,7 +18,7 @@ pub(crate) struct RunOutcome {
     pub(crate) missing_count: usize,
     /// The first node that failed in the run's order, else the first one missing an input: the
     /// cause a reader starts from.
-    pub(crate) cause: Option<NodeId>,
+    pub(crate) cause: Option<ProgramId>,
     pub(crate) cancelled: bool,
 }
 
@@ -37,14 +37,14 @@ impl RunOutcome {
                 Some(NodeExecStatus::Cached) => outcome.cached_count += 1,
                 Some(NodeExecStatus::MissingInputs { .. }) => {
                     outcome.missing_count += 1;
-                    first_missing.get_or_insert(row.node_id);
+                    first_missing.get_or_insert(row.program_id);
                 }
                 Some(NodeExecStatus::Errored {
                     error: RunError::SkippedUpstream,
                 }) => outcome.skipped_count += 1,
                 Some(NodeExecStatus::Errored { .. }) => {
                     outcome.failed_count += 1;
-                    outcome.cause.get_or_insert(row.node_id);
+                    outcome.cause.get_or_insert(row.program_id);
                 }
             }
         }

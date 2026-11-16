@@ -6,7 +6,7 @@ use common::TempDir;
 use glam::Vec2;
 use lens::MlModelPaths;
 use palantir::{DockDrop, DockOperation, SplitSide};
-use scenarium::{Binding, ConstValue, EventPort, InputPort, NodeId, OutputPort};
+use scenarium::{Binding, ConstValue, EventPort, InputPort, NodeId, OutputPort, ProgramId};
 
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
@@ -35,7 +35,7 @@ fn document_round_trips_in_either_format() {
     let event = fixture.subscribe(EventPort::new(a, 0), b);
     let first = fixture.tie(Vec2::new(80.0, 310.0), [data, event]);
     let second = fixture.tie(Vec2::new(140.0, 310.0), [data]);
-    let viewer = fixture.add(&preview_sink::func(Arc::default()));
+    let viewer = ProgramId::from(fixture.add(&preview_sink::func(Arc::default())));
     let mut document = fixture.document;
     document.main_view.ties.get_mut(&second).unwrap().angle = TieAngle::Pinned(45.0);
     document.main_view.selected = BTreeSet::from([ItemId::Node(a), ItemId::Tie(first)]);

@@ -46,7 +46,7 @@ use palantir::{
     App, ColorScheme, Harness, HarnessDepth, Key, PointerButton, RecordPass, Ui, WindowToken,
 };
 use palantir::{FramePaint, ImageDownsample, OffscreenHost};
-use scenarium::{DynamicValue, NodeId};
+use scenarium::{DynamicValue, NodeId, ProgramId};
 
 use crate::core::document::Document;
 use crate::core::document::item_id::ItemId;
@@ -140,7 +140,7 @@ struct Editor {
     preferences: Preferences,
     requests: Requests,
     /// The document's preview nodes.
-    previews: Vec<NodeId>,
+    previews: Vec<ProgramId>,
     /// The camera the document was saved with, which the `pan` and `zoom` scenarios move from.
     camera: Viewport,
     /// What the `drag` scenario moves, from where it starts.
@@ -208,7 +208,7 @@ impl Editor {
                 let card = self.converted[(n % 2) as usize].clone();
                 self.run_state
                     .previews_mut()
-                    .land_converted(ui, PUBLISHED, card);
+                    .land_converted(ui, ProgramId::from(PUBLISHED), card);
                 return;
             }
             Scenario::Pan => {
@@ -235,11 +235,17 @@ impl Editor {
 
     fn run_commands(&mut self) {
         while let Some(command) = self.requests.pop_app() {
-            let AppCommand::View(ViewCommand::ConvertFull { node_id, max_dim }) = command else {
+            let AppCommand::View(ViewCommand::ConvertFull {
+                program_id,
+                max_dim,
+            }) = command
+            else {
                 panic!("a frame with no input raises only a viewer's ask: {command:?}");
             };
             if self.converts_full {
-                self.run_state.previews_mut().convert_full(node_id, max_dim);
+                self.run_state
+                    .previews_mut()
+                    .convert_full(program_id, max_dim);
             }
         }
     }
@@ -293,12 +299,12 @@ fn open_document(library: &RuntimeLibrary) -> OpenDocument {
     open
 }
 
-fn preview_nodes(document: &Document) -> Vec<NodeId> {
+fn preview_nodes(document: &Document) -> Vec<ProgramId> {
     document
         .graph
         .iter()
-        .map(|node| node.node_id)
-        .filter(|&node| document.holds_preview_node(node))
+        .map(|node| ProgramId::from(node.node_id))
+        .filter(|&program_id| document.holds_preview_node(program_id))
         .collect()
 }
 
@@ -366,7 +372,11 @@ impl FrameCase {
                 paint
             };
             let asked = Instant::now();
-            while !editor.run_state.previews().full_landed(PUBLISHED) {
+            while !editor
+                .run_state
+                .previews()
+                .full_landed(ProgramId::from(PUBLISHED))
+            {
                 assert!(
                     asked.elapsed() < FULL_IMAGE_WAIT,
                     "the viewer's image lands"
@@ -378,7 +388,7 @@ impl FrameCase {
                 .session
                 .main_window
                 .image_viewers
-                .get_mut(&PUBLISHED)
+                .get_mut(&ProgramId::from(PUBLISHED))
                 .expect("the published node's tab is the one the viewer shows")
                 .set_downsample(ImageDownsample::Single);
             for _ in 0..SETTLE_FRAMES {
@@ -467,6 +477,7 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use lens::MlModelPaths;
+    use scenarium::ProgramId;
 
     use crate::core::runtime_library::RuntimeLibrary;
     use crate::gui::app::session::bench::{
@@ -483,7 +494,7 @@ mod tests {
 
         let previews = preview_nodes(document);
         assert_eq!(previews.len(), 4);
-        assert!(previews.contains(&PUBLISHED));
+        assert!(previews.contains(&ProgramId::from(PUBLISHED)));
         assert!(document.main_view.node_placements.contains_key(&DRAGGED));
 
         let mut paths = Vec::new();

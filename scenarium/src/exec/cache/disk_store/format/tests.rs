@@ -15,9 +15,17 @@ use crate::exec::cache::disk_store::format::{
     PAYLOAD_LEN_OFFSET, header_len,
 };
 use crate::graph::func::lambda::OutputDemand;
+use crate::graph::identity::NodeId;
+use crate::graph::instance_path::InstancePath;
+use crate::graph::program_id::ProgramId;
 use crate::internals::blob::{Blob, BlobCodec, BlobFault};
 use crate::internals::calls::Calls;
 use crate::library::Library;
+
+/// The program node every blob here is written for: node 7 of the main graph.
+fn node() -> ProgramId {
+    ProgramId::from(NodeId::from_u128(7))
+}
 
 /// A demand mask over `output_count` outputs with `produced` marked demanded and the rest
 /// skipped — the shape the run loop hands the decoder.
@@ -96,6 +104,7 @@ async fn encoded(digest: Digest, outputs: &[DynamicValue], library: &Library) ->
     let mut writer = ChunkedIo::<_, 3>(Cursor::new(Vec::new()));
     BlobWriter {
         writer: &mut writer,
+        program_id: node(),
         digest,
         codecs: library.codecs(),
     }
@@ -122,10 +131,15 @@ async fn a_small_blob_has_the_pinned_layout() {
 
     #[rustfmt::skip]
     let expected: Vec<u8> = [
-        // Magic, format version 10, the digest, four outputs.
+        // Magic, format version 11, the digest.
         &b"SCENBLOB"[..],
-        &[10, 0, 0, 0],
+        &[11, 0, 0, 0],
         &[0xab; 32],
+        // The path: one id, node 7 little-endian, then seven nil ids.
+        &[1],
+        &[7], &[0; 15],
+        &[0; 7 * 16],
+        // Four outputs.
         &[4, 0, 0, 0],
         // Body length: 9 (Int) + 11 (String) + 2 (Blob).
         &[22, 0, 0, 0, 0, 0, 0, 0],
@@ -147,6 +161,41 @@ async fn a_small_blob_has_the_pinned_layout() {
     ]
     .concat();
     assert_eq!(bytes, expected);
+}
+
+/// A blob holds the path it was written for, and a reader for another node finds no value in it,
+/// as for another digest: a name two paths share serves neither the other's value.
+#[tokio::test]
+async fn a_blob_of_another_node_serves_nothing() {
+    let library = BlobCodec::versioned(7, Calls::default()).library();
+    let digest = Digest([5; 32]);
+    let outputs = [DynamicValue::Static(ConstValue::Int(3))];
+    let bytes = encoded(digest, &outputs, &library).await;
+    let read = |program_id| {
+        let bytes = &bytes;
+        let library = &library;
+        async move {
+            BlobReader {
+                reader: &mut Cursor::new(bytes),
+                file_len: bytes.len() as u64,
+                program_id,
+                digest,
+                codecs: library.codecs(),
+            }
+            .read(&demand(1, &[0]))
+            .await
+            .unwrap()
+        }
+    };
+    assert!(read(node()).await.is_some(), "its own node reads it");
+    let inner = InstancePath::MAIN
+        .child(node().node_id())
+        .node(NodeId::from_u128(9));
+    assert!(read(inner).await.is_none(), "a node inside it does not");
+    assert!(
+        read(ProgramId::from(NodeId::from_u128(8))).await.is_none(),
+        "another node does not"
+    );
 }
 
 #[tokio::test]
@@ -188,6 +237,7 @@ async fn indexed_header_checks_without_body_and_all_values_round_trip() {
         BlobReader {
             reader: &mut header_only,
             file_len: bytes.len() as u64,
+            program_id: node(),
             digest,
             codecs: library.codecs()
         }
@@ -201,6 +251,7 @@ async fn indexed_header_checks_without_body_and_all_values_round_trip() {
         BlobReader {
             reader: &mut Cursor::new(&bytes),
             file_len: bytes.len() as u64,
+            program_id: node(),
             digest,
             codecs: library.codecs()
         }
@@ -215,6 +266,7 @@ async fn indexed_header_checks_without_body_and_all_values_round_trip() {
     let restored = BlobReader {
         reader: &mut reader,
         file_len: bytes.len() as u64,
+        program_id: node(),
         digest,
         codecs: library.codecs(),
     }
@@ -257,6 +309,7 @@ async fn custom_decoder_is_bounded_and_must_consume_its_payload() {
     let restored = BlobReader {
         reader: &mut Cursor::new(&bytes),
         file_len: bytes.len() as u64,
+        program_id: node(),
         digest,
         codecs: complete_library.codecs(),
     }
@@ -279,6 +332,7 @@ async fn custom_decoder_is_bounded_and_must_consume_its_payload() {
     let error = BlobReader {
         reader: &mut Cursor::new(&bytes),
         file_len: bytes.len() as u64,
+        program_id: node(),
         digest,
         codecs: underread_library.codecs(),
     }
@@ -307,6 +361,7 @@ async fn descriptors_selectively_validate_codecs_and_coverage() {
         BlobReader {
             reader: &mut Cursor::new(&bytes),
             file_len: bytes.len() as u64,
+            program_id: node(),
             digest,
             codecs: registered.codecs()
         }
@@ -322,6 +377,7 @@ async fn descriptors_selectively_validate_codecs_and_coverage() {
         BlobReader {
             reader: &mut Cursor::new(&bytes),
             file_len: bytes.len() as u64,
+            program_id: node(),
             digest,
             codecs: registered.codecs()
         }
@@ -337,6 +393,7 @@ async fn descriptors_selectively_validate_codecs_and_coverage() {
         !BlobReader {
             reader: &mut Cursor::new(&bytes),
             file_len: bytes.len() as u64,
+            program_id: node(),
             digest,
             codecs: registered.codecs()
         }
@@ -351,6 +408,7 @@ async fn descriptors_selectively_validate_codecs_and_coverage() {
         !BlobReader {
             reader: &mut Cursor::new(&bytes),
             file_len: bytes.len() as u64,
+            program_id: node(),
             digest,
             codecs: changed.codecs()
         }
@@ -400,6 +458,7 @@ async fn malformed_header_lengths_tags_and_const_values_are_rejected() {
         let error = BlobReader {
             reader: &mut Cursor::new(&bytes),
             file_len: bytes.len() as u64,
+            program_id: node(),
             digest,
             codecs: library.codecs(),
         }
@@ -417,6 +476,7 @@ async fn malformed_header_lengths_tags_and_const_values_are_rejected() {
     let error = BlobReader {
         reader: &mut Cursor::new(&invalid_bool),
         file_len: invalid_bool.len() as u64,
+        program_id: node(),
         digest,
         codecs: library.codecs(),
     }

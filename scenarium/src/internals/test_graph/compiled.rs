@@ -7,7 +7,7 @@ use hashbrown::HashMap;
 
 use crate::exec::compile::compiled_graph::{CompiledGraph, ExecBinding, ExecNode};
 use crate::exec::idx::NodeIdx;
-use crate::graph::identity::NodeId;
+use crate::graph::program_id::ProgramId;
 
 /// A [`TestGraph`] lowered, still answering by the names the fixture gave its nodes, so a test
 /// names the node it authored rather than translating an id per assertion.
@@ -17,17 +17,17 @@ use crate::graph::identity::NodeId;
 #[derive(Debug)]
 pub(crate) struct Compiled {
     pub(crate) program: CompiledGraph,
-    ids: HashMap<String, NodeId>,
-    names: HashMap<NodeId, String>,
+    ids: HashMap<String, ProgramId>,
+    names: HashMap<ProgramId, String>,
 }
 
 impl Compiled {
     /// Wrap a lowered program, deriving the reverse name map so it cannot drift
     /// from the ids it inverts.
-    pub(super) fn new(program: CompiledGraph, ids: HashMap<String, NodeId>) -> Self {
+    pub(super) fn new(program: CompiledGraph, ids: HashMap<String, ProgramId>) -> Self {
         let names = ids
             .iter()
-            .map(|(name, node_id)| (*node_id, name.clone()))
+            .map(|(name, program_id)| (*program_id, name.clone()))
             .collect();
         Self {
             program,
@@ -36,7 +36,7 @@ impl Compiled {
         }
     }
 
-    pub(crate) fn id(&self, name: &str) -> NodeId {
+    pub(crate) fn id(&self, name: &str) -> ProgramId {
         *self
             .ids
             .get(name)
@@ -53,10 +53,10 @@ impl Compiled {
     /// The name a dense index belongs to — for reading a raw address, like a
     /// wire's interned far end, back into the fixture's own vocabulary.
     pub(crate) fn name(&self, node_idx: NodeIdx) -> &str {
-        let node_id = self.program.node_ids[node_idx];
+        let program_id = self.program.program_ids[node_idx];
         self.names
-            .get(&node_id)
-            .unwrap_or_else(|| panic!("{node_id:?} is not a node this fixture named"))
+            .get(&program_id)
+            .unwrap_or_else(|| panic!("{program_id:?} is not a node this fixture named"))
     }
 
     pub(crate) fn node(&self, name: &str) -> &ExecNode {

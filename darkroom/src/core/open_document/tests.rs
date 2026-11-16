@@ -23,8 +23,8 @@ use crate::core::runtime_library::RuntimeLibrary;
 use crate::core::status_log::StatusLog;
 use scenarium::{
     Binding, BindingEntry, BindingRejection, Compiler, ConstValue, DataType, EventPort, FuncId,
-    Graph, InputDecl, InputPort, Library, Node, NodeId, OutputDecl, Repair, Subscription,
-    SubscriptionRejection, Unresolved, internals,
+    Graph, InputDecl, InputPort, Library, Node, NodeId, OutputDecl, ProgramId, Repair,
+    Subscription, SubscriptionRejection, Unresolved, internals,
 };
 
 #[test]
@@ -234,7 +234,9 @@ fn a_node_whose_ports_moved_loads_as_a_stub_and_attaches_again() {
         "the stub keeps every edge that touched it"
     );
     let compiled = Compiler::default().compile(&document.graph, &changed);
-    assert!(compiled.contains(src_id) && compiled.contains(dst_id));
+    assert!(
+        compiled.contains(ProgramId::from(src_id)) && compiled.contains(ProgramId::from(dst_id))
+    );
 
     // While `mid` is a stub, `dst` is wired to `src` instead.
     loaded

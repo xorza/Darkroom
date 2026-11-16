@@ -9,7 +9,7 @@ use common::ErrorChain;
 use lens::MlModelPaths;
 use scenarium::DiskStore;
 use scenarium::{CompiledGraph, Compiler, DynamicValue, WorkerExited, WorkerReport};
-use scenarium::{Graph, NodeId};
+use scenarium::{Graph, ProgramId};
 
 use crate::core::io::cache;
 use crate::core::runtime_host::error::NoCompiledWork;
@@ -185,7 +185,7 @@ impl RuntimeHost {
         });
     }
 
-    /// Compile `graph` and evaluate authored `node_id`, delivering its outputs
+    /// Compile `graph` and evaluate program node `program_id`, delivering its outputs
     /// for the preview fetch ("run to this node"). The node seeds the run
     /// explicitly, which overrides its `disabled` flag during planning.
     ///
@@ -195,24 +195,24 @@ impl RuntimeHost {
     pub(crate) fn run_node(
         &mut self,
         graph: &Graph,
-        node_id: NodeId,
+        program_id: ProgramId,
     ) -> Result<(), NoCompiledWork> {
-        let compiled = self.compiled_for(graph, node_id)?;
+        let compiled = self.compiled_for(graph, program_id)?;
         self.dispatch(|worker| {
             worker.install(compiled)?;
-            worker.run_nodes([node_id])
+            worker.run_nodes([program_id])
         });
         Ok(())
     }
 
-    /// Compile `graph`, refusing when the program holds no work for `node_id`.
+    /// Compile `graph`, refusing when the program holds no work for `program_id`.
     fn compiled_for(
         &mut self,
         graph: &Graph,
-        node_id: NodeId,
+        program_id: ProgramId,
     ) -> Result<Arc<CompiledGraph>, NoCompiledWork> {
         let compiled = self.compile(graph);
-        if compiled.contains(node_id) {
+        if compiled.contains(program_id) {
             Ok(compiled)
         } else {
             Err(NoCompiledWork)
@@ -220,38 +220,38 @@ impl RuntimeHost {
     }
 
     /// Compile the current graph and atomically install it with a runtime-cache eviction for
-    /// `node_id` and its compiled downstream cone.
+    /// `program_id` and its compiled downstream cone.
     ///
     /// Answers with the nodes that eviction reaches, resolved against the very artifact it
     /// installs, so a caller drops exactly what the worker drops. The cone is a pure function of
     /// the artifact, and a successful eviction is fire-and-forget (the worker reports only
     /// failures), so no reply is read. Nothing reaches the worker when the program holds no work
-    /// for `node_id`, as for [`Self::run_node`].
+    /// for `program_id`, as for [`Self::run_node`].
     pub(crate) fn evict_cache(
         &mut self,
         graph: &Graph,
-        node_id: NodeId,
-    ) -> Result<Vec<NodeId>, NoCompiledWork> {
-        let compiled = self.compiled_for(graph, node_id)?;
-        let evicted = compiled.consumer_cone([node_id]);
-        self.dispatch(|worker| worker.install_and_evict_cache(compiled, node_id));
+        program_id: ProgramId,
+    ) -> Result<Vec<ProgramId>, NoCompiledWork> {
+        let compiled = self.compiled_for(graph, program_id)?;
+        let evicted = compiled.consumer_cone([program_id]);
+        self.dispatch(|worker| worker.install_and_evict_cache(compiled, program_id));
         Ok(evicted)
     }
 
-    /// Compile the current graph and atomically install it with a request to persist `node_id`'s
+    /// Compile the current graph and atomically install it with a request to persist `program_id`'s
     /// resident value, which a node needs the moment its cache mode gains the disk bit, since a
     /// run that reuses the RAM value never publishes a blob.
     ///
     /// The install travels with it because the worker reads the cache mode off the installed
     /// program, still the pre-edit one here. Nothing reaches the worker when the program holds no
-    /// work for `node_id`.
+    /// work for `program_id`.
     pub(crate) fn flush_cache(
         &mut self,
         graph: &Graph,
-        node_id: NodeId,
+        program_id: ProgramId,
     ) -> Result<(), NoCompiledWork> {
-        let compiled = self.compiled_for(graph, node_id)?;
-        self.dispatch(|worker| worker.install_and_flush_cache(compiled, node_id));
+        let compiled = self.compiled_for(graph, program_id)?;
+        self.dispatch(|worker| worker.install_and_flush_cache(compiled, program_id));
         Ok(())
     }
 
@@ -302,7 +302,7 @@ impl RuntimeHost {
     /// Separate from [`Self::drain_worker`] because it does not travel the report stream: a
     /// preview node's lambda writes it directly. Ordering against the reports does not matter, as
     /// a value is only ever the *latest* for its node.
-    pub(crate) fn drain_previews(&self, buffer: &mut HashMap<NodeId, DynamicValue>) {
+    pub(crate) fn drain_previews(&self, buffer: &mut HashMap<ProgramId, DynamicValue>) {
         self.library.previews.drain_into(buffer);
     }
 }

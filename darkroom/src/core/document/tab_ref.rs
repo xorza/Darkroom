@@ -1,6 +1,6 @@
 //! [`TabRef`]: what an editor tab shows.
 
-use scenarium::NodeId;
+use scenarium::ProgramId;
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::inspect_target::InspectTarget;
@@ -14,10 +14,10 @@ pub(crate) enum TabRef {
     Graph,
     /// The app-preferences view.
     Preferences,
-    /// A full-resolution viewer of one preview node's runtime image, one tab per node. Content is
-    /// runtime-only (`crate::gui::pane::image_viewer`): a restored tab pulls any current value
-    /// from `RunState` when drawn. Pruned when its node is deleted.
-    ImageViewer(NodeId),
+    /// A full-resolution viewer of one preview program node's runtime image, one tab per program
+    /// node. Content is runtime-only (`crate::gui::pane::image_viewer`): a restored tab pulls any
+    /// current value from `RunState` when drawn. Pruned when its path stops naming a preview.
+    ImageViewer(ProgramId),
     /// A node's details at UI scale: its status, inputs, outputs and log. Content is
     /// runtime-only; a pinned one is pruned with its node.
     Inspector(InspectTarget),

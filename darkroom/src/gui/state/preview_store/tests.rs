@@ -4,19 +4,22 @@ use super::*;
 use palantir::Harness;
 use std::sync::Arc;
 
-use scenarium::{ConstValue, Node, SpecialNode};
+use scenarium::{ConstValue, Node, NodeId, SpecialNode};
 
 use crate::core::document::internals::DocumentFixture;
 use crate::core::preview_sink;
 use crate::core::wake;
 
-/// A document holding one preview node at `node`; the id is the caller's, so the same node's
+/// A document holding one preview node of the main graph at `node`; the id is the caller's, so the same node's
 /// document can be built twice. No viewer tab: retention is the node's alone.
-fn document_with_preview(node: NodeId) -> Document {
+fn document_with_preview(node: ProgramId) -> Document {
     let mut fixture = DocumentFixture::default();
     let func = preview_sink::func(Arc::default());
     fixture.library.add(func.clone());
-    fixture.document.graph.insert(node, Node::from(&func));
+    fixture
+        .document
+        .graph
+        .insert(node.node_id(), Node::from(&func));
     fixture.document
 }
 
@@ -116,7 +119,7 @@ fn native_size_refuses_an_edge_no_texture_holds() {
 fn the_full_texture_converts_on_the_first_ask_and_is_reused_after() {
     let arena = Harness::builder(UVec2::ONE).mono().build();
     let mut store = PreviewStore::new(wake::internals::noop());
-    let node = NodeId::unique();
+    let node = ProgramId::from(NodeId::unique());
 
     store.publish(
         node,
@@ -155,7 +158,7 @@ fn the_full_texture_converts_on_the_first_ask_and_is_reused_after() {
     assert!(!store.in_flight(), "reading the image asks for nothing");
 
     store.convert_full(node, None);
-    store.convert_full(NodeId::unique(), None);
+    store.convert_full(ProgramId::from(NodeId::unique()), None);
     let StoredContent::Image(image) = &store.entries[&node] else {
         panic!("the image stays the same entry");
     };
@@ -222,9 +225,9 @@ fn the_full_texture_converts_on_the_first_ask_and_is_reused_after() {
 fn a_previews_value_lives_exactly_as_long_as_its_node() {
     let arena = Harness::builder(UVec2::ONE).mono().build();
     let mut store = PreviewStore::new(wake::internals::noop());
-    let node = NodeId::unique();
+    let node = ProgramId::from(NodeId::unique());
     let mut document = document_with_preview(node);
-    let other = document.graph.add(Node::from(SpecialNode::RunSinks));
+    let other = ProgramId::from(document.graph.add(Node::from(SpecialNode::RunSinks)));
     let int = |value| DynamicValue::Static(ConstValue::Int(value));
     let shown = |store: &PreviewStore| match store.entries.get(&node) {
         Some(StoredContent::Text(text)) => Some(text.clone()),
@@ -281,7 +284,7 @@ fn a_previews_value_lives_exactly_as_long_as_its_node() {
         "a value keyed to a non-preview node is dropped"
     );
 
-    document.graph.detach_node(node);
+    document.graph.detach_node(node.node_id());
     store.reconcile(&document);
     assert!(
         store.entries.is_empty(),

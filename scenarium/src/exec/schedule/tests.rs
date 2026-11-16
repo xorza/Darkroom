@@ -1,6 +1,9 @@
 //! The structural pass over the [`RunSchedule`](crate::exec::schedule::RunSchedule),
 //! over bare programs, and the queries a planned schedule answers.
 
+use crate::exec::program_event::ProgramEvent;
+use crate::graph::program_id::ProgramId;
+
 use crate::exec::compile::compiled_graph::ExecBinding;
 use crate::exec::error::ExecError;
 use crate::exec::idx::{InputIdx, NodeIdx, OutputAddr, OutputIdx};
@@ -8,7 +11,7 @@ use crate::exec::schedule::planner::Planner;
 use crate::exec::schedule::{Delivery, NodeState, RootFlags, RunSchedule};
 use crate::exec::seeds::RunSeeds;
 use crate::graph::func::lambda::OutputDemand;
-use crate::graph::identity::{EventPort, NodeId};
+use crate::graph::identity::NodeId;
 use crate::internals::program::ProgramBuilder;
 
 #[test]
@@ -89,7 +92,7 @@ fn chain_orders_deps_before_consumers_and_schedules_all() {
         p.validate(prog.program()).unwrap_err().to_string(),
         format!(
             "execution node {:?} appears before dependency {:?}",
-            b.node_id, a.node_id
+            b.program_id, a.program_id
         )
     );
     p.states[a.node_idx] = NodeState::Disabled;
@@ -97,7 +100,7 @@ fn chain_orders_deps_before_consumers_and_schedules_all() {
         p.validate(prog.program()).unwrap_err().to_string(),
         format!(
             "execution node {:?} appears before dependency {:?}",
-            b.node_id, a.node_id
+            b.program_id, a.program_id
         ),
         "a disabled verdict cannot hide an enabled dependency"
     );
@@ -116,7 +119,7 @@ fn chain_orders_deps_before_consumers_and_schedules_all() {
     assert_eq!(dropped, c.node_idx);
     assert_eq!(
         p.validate(prog.program()).unwrap_err().to_string(),
-        format!("unscheduled node {:?} was decided Cut", c.node_id)
+        format!("unscheduled node {:?} was decided Cut", c.program_id)
     );
     p.process_order.push(dropped);
 
@@ -260,7 +263,7 @@ fn only_a_required_unbound_input_blocks_the_node_and_its_dependents() {
 fn explicit_seed_overrides_disabled_dependency_for_this_run() {
     let mut prog = ProgramBuilder::default();
     let producer = prog.node().outputs(1).add();
-    prog.program_mut().by_id_mut(producer.node_id).disabled = true;
+    prog.program_mut().by_id_mut(producer.program_id).disabled = true;
     let required = prog
         .node()
         .sink()
@@ -282,15 +285,15 @@ fn explicit_seed_overrides_disabled_dependency_for_this_run() {
         .plan(
             prog.program(),
             &RunSeeds {
-                node_ids: vec![producer.node_id],
+                program_ids: vec![producer.program_id],
                 ..RunSeeds::sinks()
             },
             &mut plan,
         )
         .unwrap();
-    for node_id in [producer, required, optional] {
+    for program_id in [producer, required, optional] {
         assert_eq!(
-            plan.states[node_id.node_idx],
+            plan.states[program_id.node_idx],
             NodeState::Cut,
             "the explicit producer seed makes every consumer runnable"
         );
@@ -330,7 +333,7 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     let mut planner = Planner::default();
     let mut p = RunSchedule::default();
     planner
-        .plan(prog.program(), &RunSeeds::nodes(vec![b.node_id]), &mut p)
+        .plan(prog.program(), &RunSeeds::nodes(vec![b.program_id]), &mut p)
         .expect("no cycle");
 
     assert_eq!(
@@ -350,7 +353,7 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
 
     // The same seed named twice is still one root: the seed pass marks, it
     // does not append.
-    let seeds = RunSeeds::nodes(vec![b.node_id, b.node_id]);
+    let seeds = RunSeeds::nodes(vec![b.program_id, b.program_id]);
     planner
         .plan(prog.program(), &seeds, &mut p)
         .expect("no cycle");
@@ -368,7 +371,7 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
 
     // Seeds named against the program's order still list their roots ascending, with no sinks or
     // event sources to sweep.
-    let seeds = RunSeeds::nodes(vec![b.node_id, a.node_id]);
+    let seeds = RunSeeds::nodes(vec![b.program_id, a.program_id]);
     planner
         .plan(prog.program(), &seeds, &mut p)
         .expect("no cycle");
@@ -378,7 +381,7 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     // Node seeds combine with sinks: the same seed plus `sinks` schedules
     // everything, and B stays seeded.
     let seeds = RunSeeds {
-        node_ids: vec![b.node_id],
+        program_ids: vec![b.program_id],
         ..RunSeeds::sinks()
     };
     planner
@@ -391,7 +394,7 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     // seeded, then the sinks sweep marks it a root again. The second visit must *add* to what the
     // first left, so C is listed once and stays seeded.
     let seeds = RunSeeds {
-        node_ids: vec![c.node_id],
+        program_ids: vec![c.program_id],
         ..RunSeeds::sinks()
     };
     planner
@@ -410,10 +413,10 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
 
     // A seed id absent from the program is inconsistent caller state — a hard failure,
     // not a silent skip.
-    let bogus = NodeId::from_u128(0xdead_beef);
+    let bogus = ProgramId::from(NodeId::from_u128(0xdead_beef));
     let seeds = RunSeeds::nodes(vec![bogus]);
     let err = planner.plan(prog.program(), &seeds, &mut p).unwrap_err();
-    assert!(matches!(err, ExecError::NodeSeedNotFound { node_id } if node_id == bogus));
+    assert!(matches!(err, ExecError::NodeSeedNotFound { program_id } if program_id == bogus));
 }
 
 #[test]
@@ -422,8 +425,8 @@ fn event_seed_schedules_subscribers_and_rejects_missing_ports() {
     let subscriber = prog.node().outputs(0).add();
     let emitter = prog.node().outputs(0).event([subscriber]).add();
 
-    let event = EventPort {
-        node_id: emitter.node_id,
+    let event = ProgramEvent {
+        program_id: emitter.program_id,
         event_idx: 0,
     };
     let mut planner = Planner::default();
@@ -456,7 +459,7 @@ fn event_seed_schedules_subscribers_and_rejects_missing_ports() {
             prog.program(),
             &RunSeeds {
                 event_sources: true,
-                node_ids: vec![emitter.node_id],
+                program_ids: vec![emitter.program_id],
                 ..Default::default()
             },
             &mut plan,

@@ -6,6 +6,7 @@ use std::sync::Arc;
 use imaginarium::ColorFormat;
 use palantir::internals::{headless_test_gpu, isolated_headless_test_gpu};
 use palantir::{Harness, OffscreenHost, PointerButton};
+use scenarium::NodeId;
 
 use crate::core::document::internals::DocumentFixture;
 use crate::core::preview_sink;
@@ -92,8 +93,8 @@ fn header_readout_adds_its_conditional_clauses_only_when_they_apply() {
     );
 }
 
-fn viewer_node() -> NodeId {
-    NodeId::from_u128(1)
+fn viewer_node() -> ProgramId {
+    ProgramId::from(NodeId::from_u128(1))
 }
 
 #[test]
@@ -206,7 +207,7 @@ fn resolve_separates_no_entry_from_a_reason_there_is_no_image() {
 fn the_frame_that_first_draws_a_viewer_frames_it_at_the_full_size() {
     let mut h = Harness::builder(UVec2::ONE).mono().build();
     let mut fixture = DocumentFixture::default();
-    let node = fixture.add(&preview_sink::func(Arc::default()));
+    let node = ProgramId::from(fixture.add(&preview_sink::func(Arc::default())));
     let mut store = PreviewStore::new(wake::internals::noop());
     // 512×256: a 256×128 thumbnail, and a deviceless harness caps the full
     // texture at nothing, so it keeps the source's own size.
@@ -286,7 +287,7 @@ fn a_drag_starts_from_the_fit_and_a_double_click_fits_again() {
     // A surface the pane's size, which the pane fills as its tab's content does.
     let mut h = Harness::builder(UVec2::new(800, 600)).mono().build();
     let mut fixture = DocumentFixture::default();
-    let node = fixture.add(&preview_sink::func(Arc::default()));
+    let node = ProgramId::from(fixture.add(&preview_sink::func(Arc::default())));
     let mut store = PreviewStore::new(wake::internals::noop());
     store.publish(
         node,

@@ -2,13 +2,13 @@ use super::*;
 
 /// A program of `ids`, nothing but identities — enough for the pairing the
 /// engine establishes at install.
-fn program(ids: &[NodeId]) -> Arc<CompiledGraph> {
+fn program(ids: &[ProgramId]) -> Arc<CompiledGraph> {
     Arc::new(CompiledGraph::bare(ids.iter().copied()))
 }
 
 #[test]
 fn install_holds_one_canonical_artifact_for_the_engine_and_its_cache() {
-    let compiled = program(&[NodeId::from_u128(1)]);
+    let compiled = program(&[ProgramId::from(NodeId::from_u128(1))]);
     let mut engine = ExecEngine::default();
 
     engine.install(Arc::clone(&compiled));
@@ -22,15 +22,15 @@ fn install_holds_one_canonical_artifact_for_the_engine_and_its_cache() {
 /// keeps its slot even when its dense index moves.
 #[test]
 fn install_carries_slots_across_a_shifted_index_space() {
-    let surviving = NodeId::from_u128(2);
+    let surviving = ProgramId::from(NodeId::from_u128(2));
 
     let mut engine = ExecEngine::default();
-    engine.install(program(&[NodeId::from_u128(1), surviving]));
+    engine.install(program(&[ProgramId::from(NodeId::from_u128(1)), surviving]));
     // Index 1 before the recompile: ids place in ascending order.
     engine.executor.nodes[NodeIdx(1)].state.set(17_u32);
 
     // Node 1 is dropped, so the survivor slides to index 0.
-    engine.install(program(&[surviving, NodeId::from_u128(3)]));
+    engine.install(program(&[surviving, ProgramId::from(NodeId::from_u128(3))]));
 
     assert_eq!(
         engine.executor.nodes[NodeIdx(0)].state.get::<u32>(),
@@ -43,7 +43,7 @@ fn install_carries_slots_across_a_shifted_index_space() {
 #[test]
 fn validation_rejects_a_cache_with_the_wrong_node_count() {
     let engine = ExecEngine {
-        compiled: program(&[NodeId::from_u128(1)]),
+        compiled: program(&[ProgramId::from(NodeId::from_u128(1))]),
         ..Default::default()
     };
 
@@ -61,7 +61,10 @@ fn func_nodes_keep_identity() {
 
     assert_eq!(e.engine.compiled().e_nodes.len(), e.graph.graph.len());
     for node in e.graph.graph.iter() {
-        assert!(e.engine.compiled().contains(node.node_id), "id preserved");
+        assert!(
+            e.engine.compiled().contains(ProgramId::from(node.node_id)),
+            "id preserved"
+        );
     }
 }
 

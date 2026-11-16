@@ -9,9 +9,9 @@
 //! cache, and the `Cleared` acknowledgement resets them. Within the first half, `previews` is
 //! swept per node once a frame and `nodes` only wholesale; see the `nodes` field for why.
 //!
-//! A run's node statuses are keyed by execution id, and every report resolves each through the
-//! worker-confirmed [`CompiledGraph`] to exactly one authoring node; an id this install never
-//! emitted is a protocol violation, not a node to skip. Logs attribute the same way.
+//! A run's node statuses are keyed by program id, which every report names and the
+//! worker-confirmed [`CompiledGraph`] holds; an id this install never emitted is a protocol
+//! violation, not a node to skip. Logs attribute the same way.
 //!
 //! A status is assigned, never folded: a **completed** summary clears the previous run before
 //! writing, while live **progress** overwrites one node in place. Progress is a liveness cue and
@@ -37,7 +37,7 @@ use scenarium::CompiledGraph;
 use scenarium::DynamicValue;
 use scenarium::LogLevel;
 use scenarium::NodeExecStatus;
-use scenarium::NodeId;
+use scenarium::ProgramId;
 use scenarium::RamUsage;
 use scenarium::RunError;
 use scenarium::WorkerActivity;
@@ -49,9 +49,9 @@ use crate::gui::state::run_state::run_outcome::RunOutcome;
 
 /// A report row can only name a node of the compiled graph the worker acknowledged, so a miss
 /// is a protocol violation.
-fn assert_reported(compiled: &CompiledGraph, node_id: NodeId) {
+fn assert_reported(compiled: &CompiledGraph, program_id: ProgramId) {
     debug_assert!(
-        compiled.contains(node_id),
+        compiled.contains(program_id),
         "worker report identity must belong to the acknowledged compiled graph"
     );
 }
@@ -123,7 +123,7 @@ pub(crate) struct RunState {
     /// 3. **The memory is small and bounded.** An enum, a short `Vec<NodeLog>` and two strings
     ///    per node, reset by `replace_results` at the next completed run. The swept caches
     ///    release textures up to 8192² RGBA8, which earns them a per-frame pass.
-    nodes: HashMap<NodeId, NodeRunState>,
+    nodes: HashMap<ProgramId, NodeRunState>,
     previews: PreviewStore,
     /// The program the worker acknowledged; every later progress or result belongs to it.
     compiled: Option<Arc<CompiledGraph>>,
@@ -140,7 +140,7 @@ pub(crate) struct RunState {
     /// run ever produces. Eviction clears it until the next run, as eviction has no reply.
     cache_ram: RamUsage,
     /// The values preview nodes published since the last frame, kept for its capacity.
-    published: HashMap<NodeId, DynamicValue>,
+    published: HashMap<ProgramId, DynamicValue>,
     /// What the last completed run came to; `None` before one, and after a
     /// [`Self::clear`].
     outcome: Option<RunOutcome>,
@@ -253,7 +253,7 @@ impl RunState {
                 status.park_error(StatusFamily::Run, ErrorChain::new(&error).to_string());
             }
             WorkerReport::Activity(activity) => self.activity = activity,
-            WorkerReport::Progress { node_id, phase } => self.apply_progress(node_id, phase),
+            WorkerReport::Progress { program_id, phase } => self.apply_progress(program_id, phase),
             WorkerReport::Completed(summary) => {
                 // A completed run supersedes a lingering failure message.
                 status.succeeded(StatusFamily::Run);
@@ -265,30 +265,30 @@ impl RunState {
     }
 
     /// `id`'s last-run status, [`ExecStatus::None`] for a node the last run did not report.
-    pub(crate) fn exec_status(&self, id: NodeId) -> &ExecStatus {
+    pub(crate) fn exec_status(&self, id: ProgramId) -> &ExecStatus {
         self.node(id)
             .map_or(&ExecStatus::None, NodeRunState::status)
     }
 
     /// Everything the last run said about `id`, or `None` when it said
     /// nothing — one lookup for a reader that asks several things.
-    pub(crate) fn node(&self, id: NodeId) -> Option<&NodeRunState> {
+    pub(crate) fn node(&self, id: ProgramId) -> Option<&NodeRunState> {
         self.nodes.get(&id)
     }
 
-    pub(crate) fn logs(&self, id: NodeId) -> &[NodeLog] {
+    pub(crate) fn logs(&self, id: ProgramId) -> &[NodeLog] {
         self.nodes.get(&id).map_or(&[], |n| n.logs.as_slice())
     }
 
     /// Live progress: overwrite the node's status with the newest one, so `Running` is replaced
     /// by the finish that follows. A failure's message arrives with the completed summary.
-    fn apply_progress(&mut self, node_id: NodeId, phase: RunPhase) {
+    fn apply_progress(&mut self, program_id: ProgramId, phase: RunPhase) {
         let compiled = self
             .compiled
             .as_ref()
             .expect("worker reported node progress before installing a compiled graph");
-        assert_reported(compiled, node_id);
-        self.nodes.entry(node_id).or_default().status = match phase {
+        assert_reported(compiled, program_id);
+        self.nodes.entry(program_id).or_default().status = match phase {
             RunPhase::Started { at } => ExecStatus::Running(at),
             RunPhase::Succeeded { elapsed_secs } => ExecStatus::Executed(elapsed_secs),
             RunPhase::Failed { .. } => ExecStatus::Errored(None),
@@ -313,7 +313,7 @@ impl RunState {
             node.ram = RamUsage::default();
         }
         for node in &update.nodes {
-            assert_reported(compiled, node.node_id);
+            assert_reported(compiled, node.program_id);
             if let Some(status) = &node.status {
                 let status = match status {
                     NodeExecStatus::Cached => ExecStatus::Cached,
@@ -330,16 +330,16 @@ impl RunState {
                         ExecStatus::Errored(Some(ErrorChain::new(error).to_string()))
                     }
                 };
-                self.nodes.entry(node.node_id).or_default().status = status;
+                self.nodes.entry(node.program_id).or_default().status = status;
             }
             if node.ram.total() > 0 {
-                self.nodes.entry(node.node_id).or_default().ram = node.ram;
+                self.nodes.entry(node.program_id).or_default().ram = node.ram;
             }
         }
         for entry in &update.logs {
-            assert_reported(compiled, entry.node_id);
+            assert_reported(compiled, entry.program_id);
             self.nodes
-                .entry(entry.node_id)
+                .entry(entry.program_id)
                 .or_default()
                 .logs
                 .push(NodeLog {
@@ -369,15 +369,15 @@ impl RunState {
     /// The global total cannot be projected: it deduplicates values shared between nodes by
     /// pointer, so subtracting per-node figures would over-count. It reads as unknown (the status
     /// bar drops the clause) until the next run measures it.
-    pub(crate) fn clear_cache_projections(&mut self, evicted: &[NodeId]) {
+    pub(crate) fn clear_cache_projections(&mut self, evicted: &[ProgramId]) {
         self.cache_ram = RamUsage::default();
-        for node_id in evicted {
-            if let Some(node) = self.nodes.get_mut(node_id) {
+        for program_id in evicted {
+            if let Some(node) = self.nodes.get_mut(program_id) {
                 node.ram = RamUsage::default();
             }
             // With its cache evicted a preview cannot be re-derived without a run; one outside
             // the cone is still cached and stays on screen.
-            self.previews.remove(*node_id);
+            self.previews.remove(*program_id);
         }
         // The evicted RAM is zeroed, so only nodes carrying a status or a log survive.
         self.drop_empty_nodes();
@@ -389,23 +389,22 @@ impl RunState {
     /// Ordered: a value published this frame queues before the landing, so a conversion of an
     /// older publish of the same node finds itself superseded, and both come before the sweep.
     ///
-    /// A preview is entry-only, so its execution id attributes to exactly one authored node. A
-    /// value whose id belongs to an earlier compile is dropped: its node may be gone, and a
-    /// preview only shows the current run's value.
+    /// A value whose program id belongs to an earlier compile is dropped: its node may be gone,
+    /// and a preview only shows the current run's value.
     fn sync_previews(&mut self, runtime: &RuntimeHost, ui: &Ui, document: &Document) {
         runtime.drain_previews(&mut self.published);
         #[expect(
             clippy::iter_over_hash_type,
             reason = "each preview lands under its own node, so the order changes nothing"
         )]
-        for (node_id, value) in self.published.drain() {
+        for (program_id, value) in self.published.drain() {
             // The borrow ends with the condition, so no clone of the compile is needed.
             if self
                 .compiled
                 .as_ref()
-                .is_some_and(|compiled| compiled.contains(node_id))
+                .is_some_and(|compiled| compiled.contains(program_id))
             {
-                self.previews.publish(node_id, value);
+                self.previews.publish(program_id, value);
             }
         }
         self.previews.land(ui);
@@ -427,7 +426,7 @@ impl RunState {
 #[cfg(feature = "internals")]
 pub(crate) mod internals {
     #[cfg(test)]
-    use scenarium::{NodeId, RamUsage};
+    use scenarium::{ProgramId, RamUsage};
 
     use crate::gui::state::run_state::RunState;
     #[cfg(test)]
@@ -443,13 +442,13 @@ pub(crate) mod internals {
 
     impl RunState {
         #[cfg(test)]
-        pub(crate) fn status(&self, id: NodeId) -> ExecStatus {
+        pub(crate) fn status(&self, id: ProgramId) -> ExecStatus {
             self.node(id)
                 .map_or(ExecStatus::None, |node| node.status().clone())
         }
 
         #[cfg(test)]
-        pub(crate) fn ram(&self, id: NodeId) -> RamUsage {
+        pub(crate) fn ram(&self, id: ProgramId) -> RamUsage {
             self.node(id).map_or_default(NodeRunState::ram)
         }
 
@@ -457,7 +456,7 @@ pub(crate) mod internals {
         /// nodes, for a test of what a surface shows after a run.
         #[cfg(test)]
         pub(crate) fn complete(&mut self, summary: RunSummary) {
-            let nodes = summary.nodes.iter().map(|row| row.node_id);
+            let nodes = summary.nodes.iter().map(|row| row.program_id);
             self.compiled = Some(Arc::new(CompiledGraph::bare(nodes)));
             self.apply_report(
                 WorkerReport::Completed(Arc::new(summary)),

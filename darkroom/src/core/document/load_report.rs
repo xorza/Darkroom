@@ -4,7 +4,7 @@
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-use scenarium::{BindingEntry, NodeId, Repair, Subscription, Unresolved};
+use scenarium::{BindingEntry, NodeId, ProgramId, Repair, Subscription, Unresolved};
 
 use crate::core::document::item_id::ItemId;
 use crate::core::document::tie::TieId;
@@ -105,7 +105,7 @@ pub(crate) enum DocumentRepair {
     },
     /// A viewer tab on a node that is not a preview node in the graph.
     ViewerClosed {
-        node_id: NodeId,
+        program_id: ProgramId,
     },
     /// An inspector tab pinned to a node the graph does not hold.
     InspectorClosed {
@@ -243,10 +243,10 @@ impl Display for DocumentRepair {
             Self::InspectorClosed { node_id } => {
                 write!(f, "closed the inspector of {node_id:?}, which is no node")
             }
-            Self::ViewerClosed { node_id } => {
+            Self::ViewerClosed { program_id } => {
                 write!(
                     f,
-                    "closed the viewer of {node_id:?}, which is no preview node"
+                    "closed the viewer of {program_id:?}, which is no preview node"
                 )
             }
         }

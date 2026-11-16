@@ -9,8 +9,8 @@ use super::*;
 #[tokio::test]
 async fn every_seed_is_a_silent_noop() {
     let stale_event = || WorkerMessage::FireEvents {
-        events: vec![EventPort {
-            node_id: NodeId::unique(),
+        events: vec![ProgramEvent {
+            program_id: ProgramId::from(NodeId::unique()),
             event_idx: 0,
         }],
     };

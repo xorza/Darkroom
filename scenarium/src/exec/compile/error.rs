@@ -11,32 +11,48 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 
 use crate::exec::idx::{NodeIdx, OutputAddr};
-use crate::graph::identity::{FuncId, NodeId};
+use crate::graph::identity::FuncId;
+use crate::graph::program_id::ProgramId;
 
 /// Self-consistency checks for the compile artifact. Each fallible `validate` has an
 /// `is_debug()`-gated `validate_debug` wrapper, so production call sites pay nothing
 /// while tests can inspect exact validation errors.
 #[derive(Debug, Error)]
 pub(crate) enum CompiledGraphValidationError {
-    #[error("execution node {node_id:?} has a nil func id")]
-    NilFuncId { node_id: NodeId },
-    #[error("execution node {node_id:?} references missing func {func_id:?}")]
-    MissingFunc { node_id: NodeId, func_id: FuncId },
-    #[error("execution node {node_id:?} {pool} arity does not match its function")]
-    Arity { node_id: NodeId, pool: PortPool },
-    #[error("execution node {node_id:?} {pool} range is out of bounds")]
-    Range { node_id: NodeId, pool: PortPool },
+    #[error("execution node {program_id:?} has a nil func id")]
+    NilFuncId { program_id: ProgramId },
+    #[error("execution node {program_id:?} references missing func {func_id:?}")]
+    MissingFunc {
+        program_id: ProgramId,
+        func_id: FuncId,
+    },
+    #[error("execution node {program_id:?} {pool} arity does not match its function")]
+    Arity {
+        program_id: ProgramId,
+        pool: PortPool,
+    },
+    #[error("execution node {program_id:?} {pool} range is out of bounds")]
+    Range {
+        program_id: ProgramId,
+        pool: PortPool,
+    },
     #[error(
-        "execution node {node_id:?} has an event subscriber outside the program: {subscriber:?}"
+        "execution node {program_id:?} has an event subscriber outside the program: {subscriber:?}"
     )]
     MissingEventSubscriber {
-        node_id: NodeId,
+        program_id: ProgramId,
         subscriber: NodeIdx,
     },
-    #[error("execution node {node_id:?} binds to missing output {target:?}")]
-    MissingBindingTarget { node_id: NodeId, target: OutputAddr },
-    #[error("execution node {node_id:?} binds to out-of-range output {target:?}")]
-    BindingOutputOutOfRange { node_id: NodeId, target: OutputAddr },
+    #[error("execution node {program_id:?} binds to missing output {target:?}")]
+    MissingBindingTarget {
+        program_id: ProgramId,
+        target: OutputAddr,
+    },
+    #[error("execution node {program_id:?} binds to out-of-range output {target:?}")]
+    BindingOutputOutOfRange {
+        program_id: ProgramId,
+        target: OutputAddr,
+    },
 }
 
 /// Which of a node's three packed port pools a fault names. The arity and range checks are the

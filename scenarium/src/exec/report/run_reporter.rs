@@ -3,7 +3,7 @@
 use std::fmt::Debug;
 use std::time::Instant;
 
-use crate::graph::identity::NodeId;
+use crate::graph::program_id::ProgramId;
 
 /// Where one node's lambda is, live: started at `at`, or finished after `elapsed_secs` with or
 /// without its outputs. A cancelled lambda reports no finish — it did not complete.
@@ -20,13 +20,13 @@ pub enum RunPhase {
 ///
 /// `Send` because the run future crosses threads; `Debug` so the structs carrying one derive it.
 pub(crate) trait RunReporter: Send + Debug {
-    fn progress(&mut self, node_id: NodeId, phase: RunPhase);
+    fn progress(&mut self, program_id: ProgramId, phase: RunPhase);
 }
 
 #[cfg(test)]
 pub(crate) mod internals {
     use crate::exec::report::run_reporter::{RunPhase, RunReporter};
-    use crate::graph::identity::NodeId;
+    use crate::graph::program_id::ProgramId;
 
     /// Discards a run's live feedback, for the tests that only assert on the final outcome.
     /// Production always has a host listening, so this stays test-only.
@@ -34,18 +34,18 @@ pub(crate) mod internals {
     pub(crate) struct DiscardedReports;
 
     impl RunReporter for DiscardedReports {
-        fn progress(&mut self, _node_id: NodeId, _phase: RunPhase) {}
+        fn progress(&mut self, _node_id: ProgramId, _phase: RunPhase) {}
     }
 
     /// Records everything a run reports, in order, for tests that assert on live feedback.
     #[derive(Debug, Default)]
     pub(crate) struct CollectingReporter {
-        pub(crate) progress: Vec<(NodeId, RunPhase)>,
+        pub(crate) progress: Vec<(ProgramId, RunPhase)>,
     }
 
     impl RunReporter for CollectingReporter {
-        fn progress(&mut self, node_id: NodeId, phase: RunPhase) {
-            self.progress.push((node_id, phase));
+        fn progress(&mut self, program_id: ProgramId, phase: RunPhase) {
+            self.progress.push((program_id, phase));
         }
     }
 }

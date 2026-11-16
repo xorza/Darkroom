@@ -9,7 +9,7 @@ use palantir::{
     Configure, ImageFilter, Panel, RgbaF32, Sizing, Spacing, Text, TextInput, TextWrap, Ui, VAlign,
     WidgetId,
 };
-use scenarium::NodeId;
+use scenarium::ProgramId;
 
 use crate::core::io::preferences::ViewerBg;
 use crate::gui::theme::Theme;
@@ -31,14 +31,14 @@ pub(super) const BACKDROPS: [(ViewerBg, &str, &str); 4] = [
 /// their ids, and the theme they paint with.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Controls<'a> {
-    pub(super) node_id: NodeId,
+    pub(super) program_id: ProgramId,
     pub(super) theme: &'a Theme,
 }
 
 impl Controls<'_> {
     /// Id of one control-panel widget, keyed by node and role.
     pub(super) fn wid(self, key: &'static str) -> WidgetId {
-        controls_wid(self.node_id, key)
+        controls_wid(self.program_id, key)
     }
 
     /// The nearest/bilinear magnification toggle: accent-filled while nearest
@@ -63,9 +63,9 @@ impl Controls<'_> {
     }
 }
 
-/// [`Controls::wid`] for `node_id`'s panel, read without building one.
-pub(super) fn controls_wid(node_id: NodeId, key: &'static str) -> WidgetId {
-    WidgetId::from_hash(("darkroom.image_viewer.controls", node_id, key))
+/// [`Controls::wid`] for `program_id`'s panel, read without building one.
+pub(super) fn controls_wid(program_id: ProgramId, key: &'static str) -> WidgetId {
+    WidgetId::from_hash(("darkroom.image_viewer.controls", program_id, key))
 }
 
 /// A readout pill — the text sibling of the toolbar pills, at their height —
