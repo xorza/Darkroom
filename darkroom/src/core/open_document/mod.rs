@@ -353,8 +353,12 @@ impl OpenDocument {
     /// [`Document::reconcile`]. A load that changed something leaves the
     /// document dirty, so a save accepts the changes.
     pub(crate) fn load(path: PathBuf, library: &Library) -> Result<Loaded, DocumentLoadError> {
-        let mut document = document::load(&path)?;
-        let report = document.reconcile(library);
+        let document::Loaded {
+            mut document,
+            refused,
+        } = document::load(&path)?;
+        let mut report = document.reconcile(library);
+        report.refused_entries = refused;
         let open = Self {
             document,
             path: Some(path),

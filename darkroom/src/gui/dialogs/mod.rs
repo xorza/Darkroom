@@ -113,6 +113,12 @@ impl<'a> SavedFile<'a> {
         }
     }
 
+    /// A compressed project alone: what an export that bundles files writes, as plain text holds
+    /// none.
+    pub(crate) const ARCHIVE: Self = Self {
+        types: &[COMPRESSED_PROJECT],
+    };
+
     pub(crate) const PNG: Self = Self {
         types: &[FileType {
             label: "PNG image",

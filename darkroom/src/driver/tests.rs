@@ -510,7 +510,7 @@ fn a_folder_a_copy_would_break_is_refused() {
     let mut driver = driver();
     let dir = TempDir::new("darkroom-driver-break");
     let path = fixture::project(dir.path(), &["Load Image"]);
-    let mut document = io_document::load(&path).unwrap();
+    let mut document = io_document::load(&path).unwrap().document;
     let node_id = document.graphs.main().iter().next().unwrap().node_id;
     document.graphs.main_mut().bindings.insert(
         InputPort::new(node_id, numbered_port(1)),
@@ -881,7 +881,7 @@ fn a_save_writes_the_format_its_extension_names() {
     let fixture = fixture::project(dir.path(), &[BRIGHTNESS]);
     let path = dir.join("scene.darkroomz");
     io_document::save(
-        &io_document::load(&fixture).unwrap(),
+        &io_document::load(&fixture).unwrap().document,
         &path,
         SavedPaths::Relative,
     )
@@ -932,8 +932,10 @@ fn a_save_writes_the_format_its_extension_names() {
         "and a bare name then keeps the plain format"
     );
     assert_eq!(
-        io_document::load(&again).unwrap(),
-        io_document::load(&dir.join("copy.darkroomz")).unwrap()
+        io_document::load(&again).unwrap().document,
+        io_document::load(&dir.join("copy.darkroomz"))
+            .unwrap()
+            .document
     );
 }
 

@@ -463,6 +463,7 @@ impl Document {
             repairs,
             foreign_paths,
             unknown_types: self.graphs.unknown_types(library),
+            refused_entries: Vec::new(),
         }
     }
 

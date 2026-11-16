@@ -66,7 +66,9 @@ desktop for an agent or a test.
 ### The document
 
 - **The document file** is RON text in `.darkroom`, or that text zipped in `.darkroomz`, as
-  Inkscape writes `.svg` and `.svgz`; a load reads the form the bytes show.
+  Inkscape writes `.svg` and `.svgz`; a load reads the form the bytes show. A `.darkroomz` also
+  carries the files it bundles, `resources/<digest>/<file name>`, unpacked beside it;
+  `core/io/document/resources` holds why.
 - **Paths are absolute in memory and relative inside the document's folder in the file**, never
   with `..`. Refused: relative paths in memory, which an undo after Save As would point at
   another file ([Blender](https://docs.blender.org/manual/en/latest/files/blend/open_save.html)).

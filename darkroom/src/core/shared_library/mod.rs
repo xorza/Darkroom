@@ -87,7 +87,7 @@ pub(crate) fn scan(folder: &Path) -> SharedLibrary {
     paths.sort_unstable();
     for path in paths {
         match document::load(&path) {
-            Ok(document) => library.add_file(path, document),
+            Ok(loaded) => library.add_file(path, loaded.document),
             Err(error) => library.failures.push(ScanFailure { path, error }),
         }
     }

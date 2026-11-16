@@ -37,6 +37,8 @@ pub(crate) enum AppCommand {
     /// Write subgraph `subgraph`'s definition, and those it places, into the library file that
     /// holds it, the file written whole.
     Publish { subgraph: SubgraphId },
+    /// Raise the export dialog for subgraph `subgraph`.
+    Export { subgraph: SubgraphId },
     /// Node edits raised via a dialog.
     Edit(EditCommand),
     /// An image of the window, and where the graph's camera looks.

@@ -104,6 +104,16 @@ pub(crate) enum DocumentSaveError {
         #[source]
         source: ZipError,
     },
+    /// A file a save bundles into its archive that cannot be read.
+    #[error("could not read {path} to bundle it", path = .path.display())]
+    Resource {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+    /// Files to bundle with a document saved as plain text, which holds none.
+    #[error("{path} is plain text and holds no bundled files; save it as .{ZIPPED_EXTENSION}", path = .path.display())]
+    BundleInPlainText { path: PathBuf },
 }
 
 /// Why writing a document's bytes into its file failed, before the save names the file.
@@ -113,4 +123,11 @@ pub(super) enum DocumentWriteError {
     Io(#[from] io::Error),
     #[error(transparent)]
     Archive(#[from] ZipError),
+    /// A file the archive bundles that cannot be read.
+    #[error("could not read {path} to bundle it", path = .path.display())]
+    Resource {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
 }

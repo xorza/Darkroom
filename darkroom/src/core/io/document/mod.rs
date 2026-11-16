@@ -3,69 +3,126 @@
 
 pub(crate) mod document_format;
 pub(crate) mod error;
+pub(crate) mod resources;
 pub(crate) mod saved_paths;
 
-use std::io::Read as _;
+use std::collections::BTreeSet;
+use std::fs::File;
+use std::io::{Read as _, Seek as _};
 use std::path::Path;
 
 use common::{SerdeFormat, fs};
+use zip::ZipArchive;
 
 use crate::core::document::Document;
 use crate::core::io::document::document_format::DocumentFormat;
 use crate::core::io::document::error::{DocumentLoadError, DocumentSaveError, DocumentWriteError};
+use crate::core::io::document::resources::{Bundle, RefusedEntry};
 use crate::core::io::document::saved_paths::SavedPaths;
 
 const MAX_DOCUMENT_BYTES: u64 = 256 * 1024 * 1024;
 
-/// Decode the document at `path`, in either format, each path it holds made absolute against its
-/// folder. What it holds is made consistent by [`Document::reconcile`], which the caller runs
-/// against its library.
-pub(crate) fn load(path: &Path) -> Result<Document, DocumentLoadError> {
-    let mut document = decode(path)?;
+/// A document read from its file, and each resource of its archive it names that was not unpacked.
+#[derive(Debug)]
+pub(crate) struct Loaded {
+    pub(crate) document: Document,
+    pub(crate) refused: Vec<RefusedEntry>,
+}
+
+/// Decode the document at `path`, in either format, unpack the resources of an archive it names
+/// beside it, and make each path it holds absolute against its folder. What it holds is made
+/// consistent by [`Document::reconcile`], which the caller runs against its library.
+pub(crate) fn load(path: &Path) -> Result<Loaded, DocumentLoadError> {
+    let Decoded {
+        mut document,
+        archive,
+    } = decode(path)?;
+    let refused = match archive {
+        Some(mut archive) => resources::unpack(&mut archive, path, &mut document),
+        None => Vec::new(),
+    };
     saved_paths::resolve(&mut document, path)?;
-    Ok(document)
+    Ok(Loaded { document, refused })
+}
+
+/// A document as its file holds it, and the archive that held it, which a plain text file is not.
+#[derive(Debug)]
+struct Decoded {
+    document: Document,
+    archive: Option<ZipArchive<File>>,
 }
 
 /// The document at `path` as its file holds it, in the format its bytes show.
-fn decode(path: &Path) -> Result<Document, DocumentLoadError> {
+fn decode(path: &Path) -> Result<Decoded, DocumentLoadError> {
     if DocumentFormat::of_path(path).is_none() {
         return Err(DocumentLoadError::InvalidExtension {
             path: path.to_path_buf(),
         });
     }
-    let file = fs::open(path).map_err(|source| DocumentLoadError::Open {
+    let read = |source| DocumentLoadError::Read {
+        path: path.to_path_buf(),
+        source,
+    };
+    let mut file = fs::open(path).map_err(|source| DocumentLoadError::Open {
         path: path.to_path_buf(),
         source,
     })?;
-    // One byte past the limit, so a file over it is told apart from one at it without trusting
-    // a size the file system reported before the read.
-    let mut bytes = Vec::new();
-    file.take(MAX_DOCUMENT_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|source| DocumentLoadError::Read {
-            path: path.to_path_buf(),
-            source,
-        })?;
-    if !fits(bytes.len() as u64) {
-        return Err(DocumentLoadError::DocumentTooLarge {
-            path: path.to_path_buf(),
-            size: bytes.len() as u64,
-        });
-    }
-    let ron = DocumentFormat::of(&bytes).ron(&bytes, path)?;
-    SerdeFormat::Ron
-        .deserialize(&ron)
-        .map_err(|source| DocumentLoadError::Deserialize {
-            path: path.to_path_buf(),
-            source: Box::new(source),
-        })
+    let mut signature = Vec::new();
+    (&mut file)
+        .take(2)
+        .read_to_end(&mut signature)
+        .map_err(read)?;
+    file.rewind().map_err(read)?;
+    // An archive is read where it lies, as the files it bundles may hold far more than the
+    // document limit; plain text is read whole.
+    let (ron, archive) = match DocumentFormat::of(&signature) {
+        DocumentFormat::Ron => {
+            // One byte past the limit, so a file over it is told apart from one at it without
+            // trusting a size the file system reported before the read.
+            let mut bytes = Vec::new();
+            file.take(MAX_DOCUMENT_BYTES + 1)
+                .read_to_end(&mut bytes)
+                .map_err(read)?;
+            if !fits(bytes.len() as u64) {
+                return Err(DocumentLoadError::DocumentTooLarge {
+                    path: path.to_path_buf(),
+                    size: bytes.len() as u64,
+                });
+            }
+            (bytes, None)
+        }
+        DocumentFormat::ZippedRon => {
+            let mut archive = document_format::open_archive(file, path)?;
+            (document_format::unzip(&mut archive, path)?, Some(archive))
+        }
+    };
+    let document =
+        SerdeFormat::Ron
+            .deserialize(&ron)
+            .map_err(|source| DocumentLoadError::Deserialize {
+                path: path.to_path_buf(),
+                source: Box::new(source),
+            })?;
+    Ok(Decoded { document, archive })
 }
 
-/// Write `document` to `path` in the format its extension names, its paths as `paths` says.
+/// Write `document` to `path` in the format its extension names, its paths as `paths` says: an
+/// archive bundles each file its resources folder holds that the document names.
 pub(crate) fn save(
     document: &Document,
     path: &Path,
     paths: SavedPaths,
+) -> Result<(), DocumentSaveError> {
+    save_bundling(document, path, paths, &BTreeSet::new())
+}
+
+/// [`save`], bundling each file of `extra` too: what an export picked to carry. Only an archive
+/// bundles.
+pub(crate) fn save_bundling(
+    document: &Document,
+    path: &Path,
+    paths: SavedPaths,
+    extra: &BTreeSet<String>,
 ) -> Result<(), DocumentSaveError> {
     let Some(format) = DocumentFormat::of_path(path) else {
         return Err(DocumentSaveError::InvalidExtension {
@@ -78,8 +135,23 @@ pub(crate) fn save(
         document.validate()
     );
 
+    let Bundle {
+        document: bundled,
+        files,
+    } = match format {
+        DocumentFormat::ZippedRon => resources::bundle(document, extra)?,
+        DocumentFormat::Ron if extra.is_empty() => Bundle {
+            document: document.clone(),
+            files: Vec::new(),
+        },
+        DocumentFormat::Ron => {
+            return Err(DocumentSaveError::BundleInPlainText {
+                path: path.to_path_buf(),
+            });
+        }
+    };
     let encoded = SerdeFormat::Ron
-        .serialize(paths.of(document, path).as_ref())
+        .serialize(paths.of(&bundled, path).as_ref())
         .map_err(|source| DocumentSaveError::Serialize {
             path: path.to_path_buf(),
             source,
@@ -92,13 +164,16 @@ pub(crate) fn save(
     }
 
     fs::publish(path, fs::PublicationMode::Durable, |file| {
-        format.write(file, &encoded)
+        format.write(file, &encoded, &files)
     })
     .map_err(|error| {
         let path = path.to_path_buf();
         match error {
             DocumentWriteError::Io(source) => DocumentSaveError::Publish { path, source },
             DocumentWriteError::Archive(source) => DocumentSaveError::Archive { path, source },
+            DocumentWriteError::Resource { path, source } => {
+                DocumentSaveError::Resource { path, source }
+            }
         }
     })
 }
@@ -111,7 +186,7 @@ const fn fits(size: u64) -> bool {
 
 /// The relative paths the document at `path` holds that climb out of its folder.
 pub(crate) fn paths_leaving_folder(path: &Path) -> Result<Vec<String>, DocumentLoadError> {
-    Ok(saved_paths::leaving_folder(&decode(path)?))
+    Ok(saved_paths::leaving_folder(&decode(path)?.document))
 }
 
 #[cfg(test)]

@@ -3,4 +3,5 @@
 
 pub(crate) mod cache;
 pub(crate) mod document;
+pub(crate) mod export;
 pub(crate) mod preferences;

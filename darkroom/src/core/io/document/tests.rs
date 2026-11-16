@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::io::Write as _;
 use std::sync::Arc;
 
@@ -7,14 +6,15 @@ use glam::Vec2;
 use lens::MlModelPaths;
 use palantir::{DockDrop, DockOperation, SplitSide};
 use scenarium::{
-    Binding, ConstValue, EventPort, InputPort, NodeId, OutputPort, ProgramId, numbered_port,
+    Binding, ConstValue, EventPort, InputPort, Interface, Node, NodeId, OutputPort, ProgramId,
+    Subgraph, SubgraphId, numbered_port,
 };
 
 use zip::write::SimpleFileOptions;
-use zip::{CompressionMethod, ZipArchive, ZipWriter};
+use zip::{CompressionMethod, ZipWriter};
 
 use super::*;
-use crate::core::document::internals::DocumentFixture;
+use crate::core::document::internals::{DocumentFixture, insert_subgraph};
 use crate::core::document::item_id::ItemId;
 use crate::core::document::route::Route;
 use crate::core::document::tab_ref::TabRef;
@@ -69,12 +69,12 @@ fn document_round_trips_in_either_format() {
     let zipped = dir.join("zipped.darkroomz");
     for path in [&plain, &zipped] {
         save(&document, path, SavedPaths::Relative).expect("save document");
-        assert_eq!(load(path).expect("load document"), document);
+        assert_eq!(load(path).expect("load document").document, document);
     }
     // A load reads the form the bytes show, so a zipped file named as plain RON still opens.
     let misnamed = dir.join("misnamed.darkroom");
     fs::copy(&zipped, &misnamed).unwrap();
-    assert_eq!(load(&misnamed).unwrap(), document);
+    assert_eq!(load(&misnamed).unwrap().document, document);
 
     let text = fs::read_to_string(&plain).unwrap();
     assert_eq!(ron::from_str::<Document>(&text).unwrap(), document);
@@ -115,7 +115,7 @@ fn document_extension_is_required_case_insensitively() {
 
     let uppercase = dir.join("uppercase.DARKROOM");
     save(&document, &uppercase, SavedPaths::Relative).expect("uppercase extension is valid");
-    assert_eq!(load(&uppercase).unwrap(), document);
+    assert_eq!(load(&uppercase).unwrap().document, document);
     let uppercase_zipped = dir.join("uppercase.DARKROOMZ");
     save(&document, &uppercase_zipped, SavedPaths::Relative).unwrap();
     assert!(
@@ -190,8 +190,9 @@ fn document_size_limit_rejects_the_first_byte_over_the_boundary() {
 }
 
 /// A document of path inputs: a Load Image node at `one`, a Stack Lights node at `many`, an
-/// unset Load Image node, and a stub whose record binds `stub`. Its node ids, in that order.
-fn paths_document(one: &str, many: &[&str], stub: &str) -> (Document, [NodeId; 4]) {
+/// unset Load Image node, a stub whose record binds `stub`, and a subgraph whose Load Image node
+/// is at `inner`. Its main graph's node ids, in that order.
+fn paths_document(one: &str, many: &[&str], stub: &str, inner: &str) -> (Document, [NodeId; 4]) {
     let library = RuntimeLibrary::new(&MlModelPaths::default());
     let func = |name: &str| library.cur().by_name(name).unwrap().clone();
     let mut fixture = DocumentFixture::default();
@@ -214,10 +215,21 @@ fn paths_document(one: &str, many: &[&str], stub: &str) -> (Document, [NodeId; 4
         ConstValue::FsPaths(many.iter().map(ToString::to_string).collect()),
     );
     bind(&mut document, unset, ConstValue::FsPath(String::new()));
+    let mut subgraph = Subgraph::new("inner", Interface::default());
+    let nested = NodeId::unique();
+    subgraph
+        .graph
+        .insert(nested, Node::from(&func("Load Image")));
+    subgraph.graph.bindings.insert(
+        InputPort::new(nested, numbered_port(1)),
+        Binding::Const(ConstValue::FsPath(inner.to_string())),
+    );
+    insert_subgraph(&mut document, SubgraphId::unique(), subgraph);
     (document, [load, stack, unset, stubbed])
 }
 
-/// Every path `document` holds, the stub's last, in the order [`paths_document`] binds them.
+/// Every path `document` holds, the stub's and then the subgraph's last, in the order
+/// [`paths_document`] binds them.
 fn paths_of(document: &Document, nodes: [NodeId; 4]) -> Vec<String> {
     let mut paths = Vec::new();
     for node_id in &nodes[..3] {
@@ -228,8 +240,13 @@ fn paths_of(document: &Document, nodes: [NodeId; 4]) -> Vec<String> {
         };
         paths.extend(value.as_fs_paths().unwrap().iter().cloned());
     }
-    let stub = &document.graphs.main().stub(nodes[3]).unwrap().record;
-    let Binding::Const(value) = &stub.bindings()[0].binding else {
+    let stub = document.graphs.main().stub(nodes[3]).unwrap();
+    let Binding::Const(value) = &stub.record.bindings()[0].binding else {
+        panic!("a const binding");
+    };
+    paths.extend(value.as_fs_paths().unwrap().iter().cloned());
+    let (_, subgraph) = document.graphs.subgraphs().next().unwrap();
+    let Some(Binding::Const(value)) = subgraph.graph.bindings.values().next() else {
         panic!("a const binding");
     };
     paths.extend(value.as_fs_paths().unwrap().iter().cloned());
@@ -246,7 +263,7 @@ fn stored(path: &Path, nodes: [NodeId; 4]) -> Vec<String> {
 
 /// A save writes each path inside the document's folder relative to it, `/` between its parts,
 /// and the folder itself as `.`; a path outside, one reached through `..`, and an unset one stay
-/// as they are, and a stub's path is written as the graph's are. A load reads them against the
+/// as they are, and a stub's path and a subgraph's are written as the main graph's are. A load reads them against the
 /// folder of the file it reads: a copy in another folder names the copy's files. Saved absolute, the file holds the
 /// document's own paths; and a save to a folder below leaves the old folder's paths absolute.
 #[test]
@@ -276,6 +293,7 @@ fn paths_inside_the_folder_are_saved_relative_and_move_with_it() {
             &climbs_back,
         ],
         &inside(&first, "s.tiff"),
+        &inside(&first, "i.tiff"),
     );
 
     let saved = first.join("scene.darkroom");
@@ -290,11 +308,12 @@ fn paths_inside_the_folder_are_saved_relative_and_move_with_it() {
             climbs_out.as_str(),
             climbs_back.as_str(),
             "",
-            "inputs/s.tiff"
+            "inputs/s.tiff",
+            "inputs/i.tiff"
         ]
     );
     assert_eq!(
-        load(&saved).unwrap(),
+        load(&saved).unwrap().document,
         document,
         "read back where it was written"
     );
@@ -302,7 +321,7 @@ fn paths_inside_the_folder_are_saved_relative_and_move_with_it() {
     let copy = second.join("scene.darkroom");
     fs::copy(&saved, &copy).unwrap();
     assert_eq!(
-        paths_of(&load(&copy).unwrap(), nodes),
+        paths_of(&load(&copy).unwrap().document, nodes),
         [
             inside(&second, "a.tiff"),
             inside(&second, "b.fit"),
@@ -312,6 +331,7 @@ fn paths_inside_the_folder_are_saved_relative_and_move_with_it() {
             climbs_back,
             String::new(),
             inside(&second, "s.tiff"),
+            inside(&second, "i.tiff"),
         ]
     );
 
@@ -338,6 +358,7 @@ fn paths_of_another_system_stay_as_they_are() {
         "/data/a.fit",
         &[r"C:\data\b.fit", "C:/data/c.fit"],
         r"\\server\share\d.fit",
+        "/data/e.fit",
     );
     let want = [
         "/data/a.fit",
@@ -345,13 +366,14 @@ fn paths_of_another_system_stay_as_they_are() {
         "C:/data/c.fit",
         "",
         r"\\server\share\d.fit",
+        "/data/e.fit",
     ];
 
     let first = dir.join("first.darkroom");
     save(&document, &first, SavedPaths::Relative).unwrap();
     assert_eq!(stored(&first, nodes), want);
 
-    let loaded = load(&first).unwrap();
+    let loaded = load(&first).unwrap().document;
     assert_eq!(paths_of(&loaded, nodes), want);
 
     let second = dir.join("second.darkroom");
@@ -359,8 +381,9 @@ fn paths_of_another_system_stay_as_they_are() {
     assert_eq!(stored(&second, nodes), want);
 }
 
-/// A relative path that climbs out of the folder is listed, as `../x.tiff` and `a/../../y.tiff`
-/// do; one that climbs back in before leaving, `a/../b.tiff`, is not, nor is an absolute one.
+/// A relative path that climbs out of the folder is listed, sorted, as `../x.tiff`,
+/// `a/../../y.tiff` and the subgraph's `../i.tiff` do; one that climbs back in before leaving,
+/// `a/../b.tiff`, is not, nor is an absolute one.
 #[test]
 fn relative_paths_that_leave_the_folder_are_listed() {
     let dir = TempDir::new("darkroom-document-leaving");
@@ -369,11 +392,12 @@ fn relative_paths_that_leave_the_folder_are_listed() {
         "../x.tiff",
         &["a/../b.tiff", "a/../../y.tiff", &absolute],
         "inputs/s.tiff",
+        "../i.tiff",
     );
     let path = dir.join("scene.darkroom");
     internals::write_unchecked(&document, &path);
     assert_eq!(
         paths_leaving_folder(&path).unwrap(),
-        ["../x.tiff", "a/../../y.tiff"]
+        ["../i.tiff", "../x.tiff", "a/../../y.tiff"]
     );
 }

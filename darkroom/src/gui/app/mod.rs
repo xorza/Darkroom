@@ -17,6 +17,7 @@ use crate::core::edit::subgraph_intent::SubgraphIntent;
 use crate::core::io::document;
 use crate::core::io::document::document_format::DocumentFormat;
 use crate::core::io::document::saved_paths::SavedPaths;
+use crate::core::io::export;
 use crate::core::io::preferences::preferences_store::{OpenedPreferences, PreferencesStore, Saved};
 use crate::core::io::preferences::{Preferences, WindowState};
 use crate::core::open_document::{Launched, Loaded, OpenDocument};
@@ -29,6 +30,7 @@ use crate::gui::MAIN_WINDOW;
 use crate::gui::app::discard_dialog::{Answered, DiscardChoice, DiscardGuard, PendingTransition};
 use crate::gui::app::error::DrivenOpenError;
 use crate::gui::app::error::NonUnicodePath;
+use crate::gui::app::export_dialog::{ExportChoice, ExportDialog};
 use crate::gui::app::quit_flag::QuitFlag;
 use crate::gui::app::session::Session;
 use crate::gui::app::view_capture::{CaptureTarget, ViewCapture};
@@ -47,6 +49,7 @@ use crate::gui::theme::Theme;
 
 mod discard_dialog;
 pub(crate) mod error;
+mod export_dialog;
 pub(crate) mod quit_flag;
 pub(crate) mod screenshot_ask;
 pub(crate) mod session;
@@ -95,6 +98,8 @@ pub(crate) struct App {
     dialogs: Dialogs,
     /// The unsaved-changes prompt, and the transition it holds while it is up.
     discard: DiscardGuard,
+    /// The export waiting on its dialog, while the dialog is up.
+    export: Option<ExportDialog>,
     /// The image of the window a View command waits on; a second command replaces the first.
     capture: Option<ViewCapture>,
     /// Throttled sampler behind the status bar's `MEM` clause. On `App` rather than `Session`
@@ -189,6 +194,7 @@ impl App {
             preferences_store,
             dialogs,
             discard: DiscardGuard::default(),
+            export: None,
             capture: None,
             process_memory: ProcessMemory::new(),
             requests: Requests::default(),
@@ -230,6 +236,13 @@ impl App {
             AppCommand::Run(run) => self.run(run),
             AppCommand::PickMlModel(kind) => self.pick_ml_model(kind),
             AppCommand::Publish { subgraph } => self.publish(subgraph),
+            AppCommand::Export { subgraph } => {
+                self.export = Some(ExportDialog::new(
+                    self.session.open.document(),
+                    subgraph,
+                    self.runtime.library.cur(),
+                ));
+            }
             AppCommand::PickLibraryFolder => {
                 if let Some(folder) = self.dialogs.dir() {
                     self.preferences.library_folder = Some(folder);
@@ -385,6 +398,40 @@ impl App {
         if let Some(answered) = self.discard.record(ui, &self.theme, file_name) {
             self.apply_discard_outcome(answered);
         }
+    }
+
+    /// The export dialog while it is up, and the export it asked for: the file picked, then the
+    /// library document written, bundling what the person ticked.
+    fn record_export_dialog(&mut self, ui: &mut Ui) {
+        let Some(dialog) = &mut self.export else {
+            return;
+        };
+        match dialog.record(ui, &self.theme) {
+            ExportChoice::Stay => return,
+            ExportChoice::Cancel => {}
+            ExportChoice::Export => {
+                let bundled = dialog.bundled();
+                let subgraph = dialog.subgraph();
+                let kind = if bundled.is_empty() {
+                    SavedFile::project(DocumentFormat::Ron)
+                } else {
+                    SavedFile::ARCHIVE
+                };
+                if let Some(path) = self.dialogs.save_path(kind, None) {
+                    let library = self.runtime.library.cur();
+                    let document =
+                        export::exported(self.session.open.document(), subgraph, library, &bundled);
+                    match document::save_bundling(&document, &path, SavedPaths::Relative, &bundled)
+                    {
+                        Ok(()) => self.status.succeeded(StatusFamily::Document),
+                        Err(error) => self
+                            .status
+                            .error(StatusFamily::Document, ErrorChain::new(&error).to_string()),
+                    }
+                }
+            }
+        }
+        self.export = None;
     }
 
     /// Open a file dialog for a node's path const input and, if the
@@ -857,6 +904,7 @@ impl palantir::App for App {
         if !prompted {
             self.record_discard_prompt(ui);
         }
+        self.record_export_dialog(ui);
         self.sync_preferences();
         if self.quitting.is_raised() {
             ui.close_window(MAIN_WINDOW);

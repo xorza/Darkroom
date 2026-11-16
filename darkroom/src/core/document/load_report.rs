@@ -4,12 +4,14 @@
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
+use common::ErrorChain;
 use scenarium::{GraphId, InstancePath, NodeAddr, NodeId, Repair, SubgraphId, UnknownType};
 
 use crate::core::document::item_id::ItemId;
 use crate::core::document::tab_ref::TabRef;
 use crate::core::document::tie::TieId;
 use crate::core::document::wire_key::WireKey;
+use crate::core::io::document::resources::RefusedEntry;
 use crate::core::status_log::{StatusFamily, StatusLog};
 
 /// Every change a load made, in the order it made them, and what it kept but could not read here.
@@ -21,6 +23,9 @@ pub(crate) struct LoadReport {
     /// Each type an interface names that this build's library does not register, kept as
     /// written. No change of the document, so it leaves the document clean.
     pub(crate) unknown_types: Vec<UnknownType>,
+    /// Each resource of the archive the document names that was not unpacked, whose paths stay
+    /// unresolved.
+    pub(crate) refused_entries: Vec<RefusedEntry>,
 }
 
 /// A [`scenarium::PathForm::Foreign`] path, which a load and a save keep byte for byte. No
@@ -108,7 +113,10 @@ pub(crate) enum ViewRepair {
 
 impl LoadReport {
     pub(crate) const fn is_empty(&self) -> bool {
-        self.repairs.is_empty() && self.foreign_paths.is_empty() && self.unknown_types.is_empty()
+        self.repairs.is_empty()
+            && self.foreign_paths.is_empty()
+            && self.unknown_types.is_empty()
+            && self.refused_entries.is_empty()
     }
 
     /// Log each change and each foreign path, and put one line on the status bar that says how
@@ -131,6 +139,9 @@ impl LoadReport {
                 target: "darkroom::load",
                 "{data_type:?} is no type this build registers, kept as it is on {ports:?}"
             );
+        }
+        for refused in &self.refused_entries {
+            tracing::warn!(target: "darkroom::load", "{}", ErrorChain::new(refused));
         }
         status.warn(StatusFamily::Document, self.to_string());
     }
@@ -156,6 +167,11 @@ impl Display for LoadReport {
                 self.unknown_types.len(),
                 "the document names ",
                 " type(s) this build does not register",
+            ),
+            (
+                self.refused_entries.len(),
+                "the archive holds ",
+                " resource(s) that were not unpacked",
             ),
         ];
         let mut separator = "";
@@ -313,6 +329,7 @@ mod tests {
                 repairs: repairs.to_vec(),
                 foreign_paths: paths.to_vec(),
                 unknown_types: types.to_vec(),
+                refused_entries: Vec::new(),
             };
             assert!(!report.is_empty());
             report.to_string()

@@ -3,7 +3,7 @@ use palantir::{
     Align, Configure, DockOperation, Grid, MenuBar, MenuBarMenus, MenuItem, MenuSeparator, Panel,
     Sense, Shortcut, SizeSpec, Text, TextWrap, Track, Ui, VAlign, WidgetId, fmt,
 };
-use scenarium::NodeId;
+use scenarium::{GraphId, Node, NodeId};
 
 use crate::core::document::tab_ref::TabRef;
 use crate::core::edit::collapse;
@@ -200,6 +200,24 @@ fn graph_menu(bar: &mut MenuBarMenus<'_>, stage: &mut Stage<'_, DocCtx<'_>>) {
         {
             unique.queue(out.document());
         }
+        // The one instance the selection holds, else the subgraph the active pane shows.
+        let exported = instance
+            .and_then(|node| {
+                document
+                    .graphs
+                    .graph(graph)
+                    .find(node)
+                    .and_then(Node::subgraph)
+            })
+            .or(match graph {
+                GraphId::Subgraph(id) => Some(id),
+                GraphId::Main => None,
+            });
+        if item(ui, "Export Subgraph\u{2026}", None, exported.is_some())
+            && let Some(subgraph) = exported
+        {
+            out.push_app(AppCommand::Export { subgraph });
+        }
         // One batch, so one undo entry, outermost first so each removal holds.
         let unused = document.unused_subgraphs();
         if item(ui, "Remove Unused Subgraphs", None, !unused.is_empty()) {
@@ -286,10 +304,10 @@ mod tests {
     use std::path::PathBuf;
 
     use glam::UVec2;
-    use palantir::{InspectedWidget, Shortcut};
-    use scenarium::GraphId;
+    use palantir::{InspectedWidget, Key, Shortcut};
+    use scenarium::{GraphId, Interface, Subgraph, SubgraphId};
 
-    use crate::core::document::internals::DocumentFixture;
+    use crate::core::document::internals::{DocumentFixture, insert_subgraph};
     use crate::core::document::item_id::ItemId;
     use crate::core::edit::graph_intent::GraphIntent;
     use crate::gui::app::session::internals::SessionHarness;
@@ -379,6 +397,38 @@ mod tests {
             };
             assert_eq!(text, shown, "{menu} ▸ {row} shows its chord");
         }
+    }
+
+    /// Export offers the subgraph a selected instance places, and waits for one on the main
+    /// graph with nothing picked.
+    #[test]
+    fn export_names_the_selected_instance() {
+        let mut fixture = DocumentFixture::default();
+        let id = SubgraphId::from_u128(1);
+        insert_subgraph(
+            &mut fixture.document,
+            id,
+            Subgraph::new("inner", Interface::default()),
+        );
+        let instance = fixture.add_instance(id);
+        let mut h = SessionHarness::new(fixture);
+        h.prime(2);
+        let graph = widget(&h, "Graph").id;
+        h.ui.click(graph);
+        h.frame();
+        h.prime(2);
+        assert!(widget(&h, "Export Subgraph…").disabled, "nothing picked");
+        h.ui.key(Key::Escape);
+        h.frame();
+
+        h.apply(GraphIntent::SetSelection {
+            to: [ItemId::Node(instance)].into(),
+        });
+        let commands = pick(&mut h, "Graph", "Export Subgraph…");
+        assert_eq!(
+            format!("{commands:?}"),
+            format!("{:?}", [AppCommand::Export { subgraph: id }])
+        );
     }
 
     /// Undo is greyed out on a fresh document and live after one edit.
