@@ -14,8 +14,9 @@ the shape changes that keep behavior, then the features. Temporary: deleted once
 | 4 | Make `DataType` a small value of ids | `9ddb3e708`, pushed |
 | 5 | Name ports by id | `6c01623b8`, pushed |
 | 6 | Subgraphs in scenarium, compiled flat | `09596151d`, pushed |
-| 7 | The editor holds every graph of a document | in the worktree |
-| 8–12 | | to do |
+| 7 | The editor holds every graph of a document | `69549dbfb`, pushed |
+| 8 | The window shows a pane per graph | in the worktree |
+| 9–12 | | to do |
 
 ## Rules for the series
 
@@ -70,7 +71,7 @@ the shape changes that keep behavior, then the features. Temporary: deleted once
 ### 2. Name program nodes by `ProgramId`
 
 The execution side names a node by `ProgramId`, a path of instances held inline down to the
-authored node, beside `InstancePath`; every path is a bare node id until commit 7. A disk blob is
+authored node, beside `InstancePath`; every path is a bare node id until commit 6. A disk blob is
 named by the digest of its path and holds the path, which a read checks. Reports, seeds,
 evictions, the worker protocol, the run state, the preview sink and store, and the image viewer
 tabs carry it.
@@ -203,19 +204,28 @@ every graph, and reports each type an interface names that the library does not 
 
 ### 7. The editor holds every graph of a document
 
-`Document { graphs, main_view, sides }`, each `SubgraphSide` holding its view alone
-here; `GraphSlot` borrows one graph and its view apart. Intents and undo steps name their graph
-(`DocumentRequest::Graph { graph, intent }`, `UndoStep::Graph { graph, step }`), and
-`EditFacts.touched` says which graphs an edit wrote. The load repairs every view.
+`Document { graphs, main_view, sides }`, each `SubgraphSide` holding its view alone here;
+`GraphSlot` borrows one graph and its view apart. Intents and undo steps name their graph
+(`DocumentRequest::Graph { graph, intent }`, `UndoStep::Graph { graph, step }` over a
+`GraphStep`), and `EditFacts.touched` says which graphs an edit wrote, which moves each graph's
+own revision. The load gives each subgraph a side, drops a side of none and repairs every view
+(`DocumentRepair::View { graph, repair }`). An eviction or a flush reaches every instance of the
+authored node (`NodeAddr`). Inside a subgraph an edit passes over its boundary nodes.
 
-- Owns: `darkroom/src/core/document/{mod,error,graph_revision,layout_file,internals,tests}.rs`,
-  `core/edit/{document_queue,document_request,edit_facts}.rs`, `core/edit/step/` apart from the
-  subgraph steps, `core/edit/undo_history/tests.rs`, `core/edit/graph_intent/`,
-  `core/open_document/`, `core/runtime_host/`, `internals/fixture.rs`, both fixture documents.
-- Partial: `core/document/load_report.rs`, `subgraph_side.rs` (the view alone).
-- **Interim code:** each GUI call site passes `GraphId::Main` until commit 8 gives it its pane's
-  graph.
-- About +2 400 / −1 000.
+- Owns: `darkroom/src/core/document/{mod,error,graph_revision,subgraph_side,internals,tests}.rs`,
+  `core/edit/{document_queue,document_request,edit_facts,validate}.rs`, `core/edit/step/` apart
+  from the subgraph steps, `core/edit/graph_intent/`, `core/edit/undo_history/tests.rs`,
+  `core/open_document/`, `core/runtime_host/`, `core/worker_bridge/`, both fixture documents.
+- Partial: `core/document/load_report.rs` (no `ThroughCleared`, `ActiveReset` or `TabClosed`).
+- Held back to commit 8: `internals/fixture.rs`'s `nested_preview`, whose callers are the MCP
+  tests of a preview inside an instance.
+- **Interim code:** the GUI's `Requests` queues every edit on `GraphId::Main`, and the duplicate
+  sites, `Session::apply_edit`, the window's sweep and `App::run` name the main graph, until
+  commit 8 gives each its pane's graph. A removal of a boundary node commits nothing until commit
+  9's `EditRefusal::BoundaryNode`. The load names a closed tab as `ViewerClosed` or
+  `InspectorClosed` until commit 8's `TabClosed`. The fixture's `insert_subgraph` writes the set
+  and the side itself until commit 9's `Document::insert_subgraph`.
+- About +1 060 / −590.
 
 ### 8. The window shows a pane per graph
 
@@ -334,7 +344,11 @@ What the series' last tree holds where the tip holds otherwise.
   the repair it reports inside the subgraph (commit 6).
 - **`darkroom/src/core/edit/graph_intent/tests.rs`:** `an_add_past_a_placement_bound_adds_nothing`
   (commit 6); commit 9 makes it expect `EditRefusal::Placement`.
-- **`darkroom/src/core/edit/graph_intent/tests.rs`:** `set_node_property_commits_and_reverts`
-  checks that a cache mode on an instance is refused as `NoCacheMode` (commit 6).
+- **`darkroom/src/core/edit/graph_intent/mod.rs`:** the module doc says an intent folds into a
+  `GraphStep`, not an `UndoStep` (commit 7).
+- **`darkroom/src/core/worker_bridge/tests.rs`:** the scenarium imports in one `use` (commit 6).
+- **`darkroom/src/core/document/tests.rs`:** `reconcile_keeps_one_side_per_subgraph` checks the
+  text of a repair to a subgraph's view, and `reconcile_repairs_the_view_and_the_layout` closes an
+  inspector pinned to a node the graph lacks (commit 7).
 - **`darkroom/src/gui/graph_ctx/tests.rs`:** `a_missing_func_reads_as_a_deletable_stub` checks
   that an instance resolves to its subgraph's name and has no cache and no run (commit 6).
