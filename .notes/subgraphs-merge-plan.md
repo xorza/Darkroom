@@ -15,8 +15,9 @@ the shape changes that keep behavior, then the features. Temporary: deleted once
 | 5 | Name ports by id | `6c01623b8`, pushed |
 | 6 | Subgraphs in scenarium, compiled flat | `09596151d`, pushed |
 | 7 | The editor holds every graph of a document | `69549dbfb`, pushed |
-| 8 | The window shows a pane per graph | in the worktree |
-| 9–12 | | to do |
+| 8 | The window shows a pane per graph | `21b98e664`, pushed |
+| 9 | Edit subgraphs | in the worktree |
+| 10–12 | | to do |
 
 ## Rules for the series
 
@@ -232,16 +233,27 @@ authored node (`NodeAddr`). Inside a subgraph an edit passes over its boundary n
 `DocCtx` is what the surround reads and `GraphCtx` narrows it to one graph. `MainWindow` keeps a
 `GraphUi` per open graph tab (`TabRef::Graph(GraphId)`). The window has one active graph, set by a
 picked tab or a pane's input; menus, status bar and inspector act on it. `Enter` navigates into a
-subgraph through an instance, by double click or a name in the path. `ViewCommand::Frame` names
-its graph. The driver's targets and the MCP server reach any graph's pane through its tab.
+subgraph through an instance. A pane reads each run result through the instance it shows (a
+side's `through`), and a pinned inspector keeps its own. A run names its program node and an
+eviction its authored node (`RunCommand::Node(ProgramId)`, `EvictCache(NodeAddr)`), and
+`ViewCommand::Frame` names its graph. The load clears a stale `through`, resets an active graph
+the set lacks and closes each stale tab (`TabClosed`). The driver's targets and the MCP server
+reach any graph's pane through its tab.
 
 - Owns: `darkroom/src/gui/frame/{doc_ctx,requests/,app_command}.rs`, `gui/graph_ctx/`,
-  `gui/main_window/{mod,dock_panes,status_bar/mod}.rs`, `gui/app/session/{mod,internals,
-  tests}.rs`, `gui/pane/graph_ui/{mod,internals,canvas,canvas_bg,toolbar,wid}.rs`,
-  `gui/pane/graph_ui/gesture/` apart from the files of commits 5, 9 and 10,
-  `gui/pane/graph_ui/node_ui/{header/,preview_row}.rs`, `gui/pane/inspector.rs`,
-  `core/document/{tab_ref,inspect_target}.rs`, `driver/`, `app/src/mcp/`.
-- About +2 900 / −1 600, mostly the context split.
+  `gui/main_window/{mod,dock_panes,status_bar/}`, `gui/app/session/`,
+  `gui/pane/graph_ui/{mod,internals,canvas,canvas_bg,toolbar,wid}.rs`,
+  `gui/pane/graph_ui/gesture/` apart from the palette's subgraph rows, the boundary port and the
+  clipboard, `gui/pane/graph_ui/node_ui/`, `gui/pane/inspector.rs`, `gui/pane/image_viewer/`,
+  `core/document/{tab_ref,inspect_target,layout_file,subgraph_side,error}.rs`, `driver/`,
+  `app/src/mcp/`, `internals/fixture.rs`, both fixture documents.
+- Partial: `core/document/{mod,load_report,tests}.rs`, `core/open_document/mod.rs`,
+  `core/edit/document_{request,queue}.rs`, `gui/app/mod.rs`, `gui/main_window/menu_bar.rs`.
+- Held back to commit 9: the pane header with its path, use count and Make Unique; an instance's
+  rolled-up status and the footer's culprit (`InstanceRunState`, `RunView::Instance`,
+  `failed_inside`), and the driver test's check of it; an undo bringing its graph forward;
+  `Requests::land` and `AppCommand::Warn`.
+- About +2 250 / −1 150, mostly the context split.
 
 ### 9. Edit subgraphs
 
@@ -347,8 +359,3 @@ What the series' last tree holds where the tip holds otherwise.
 - **`darkroom/src/core/edit/graph_intent/mod.rs`:** the module doc says an intent folds into a
   `GraphStep`, not an `UndoStep` (commit 7).
 - **`darkroom/src/core/worker_bridge/tests.rs`:** the scenarium imports in one `use` (commit 6).
-- **`darkroom/src/core/document/tests.rs`:** `reconcile_keeps_one_side_per_subgraph` checks the
-  text of a repair to a subgraph's view, and `reconcile_repairs_the_view_and_the_layout` closes an
-  inspector pinned to a node the graph lacks (commit 7).
-- **`darkroom/src/gui/graph_ctx/tests.rs`:** `a_missing_func_reads_as_a_deletable_stub` checks
-  that an instance resolves to its subgraph's name and has no cache and no run (commit 6).
