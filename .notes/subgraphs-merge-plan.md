@@ -19,7 +19,7 @@ the shape changes that keep behavior, then the features. Temporary: deleted once
 | 9 | Edit subgraphs | `032799367`, pushed |
 | 10 | Move node sets | `fc633c202`, pushed |
 | 11 | Share subgraphs | `3d4a7ce7d`, pushed |
-| 12 | Export with resources | in the worktree |
+| 12 | Export with resources | `3bab28c50`, pushed |
 
 ## Rules for the series
 
@@ -330,9 +330,11 @@ Export writes a document, or a `.darkroomz` bundling the resources the export di
 `darkroom/AGENTS.md` gains the archive's line; `darkroom` takes `blake3`.
 
 - Owns: `darkroom/src/core/io/{export,mod}.rs`, `core/io/document/`, `gui/app/{mod,export_dialog}.rs`,
-  `gui/dialogs/mod.rs`, the rest of `menu_bar.rs`, `darkroom/Cargo.toml`, `Cargo.lock`,
+  `gui/dialogs/mod.rs`, `gui/frame/app_command.rs`, the rest of `menu_bar.rs`, `load_report.rs`
+  and `open_document/mod.rs`, `driver/tests.rs`, `darkroom/Cargo.toml`, `Cargo.lock`,
   `darkroom/AGENTS.md`, `.notes/{subgraphs,TODO}.md`.
-- About +500 / −40.
+- About +1 900 / −150.
+- The tree then equals the tip's apart from Differences from the tip, and this plan.
 
 ## Settled
 
@@ -347,7 +349,7 @@ Export writes a document, or a `.darkroomz` bundling the resources the export di
 
 What the series' last tree holds where the tip holds otherwise.
 
-- **`scenarium/Cargo.toml`, `.notes/ISSUES.md`:** no serde `rc`, and no issue entry for it.
+- **`.notes/ISSUES.md`:** no entry for serde's `rc`, which no crate turns on.
 - **`scenarium/src/exec/compile/mod.rs`:** the closure that appends a node's inputs names each
   `input`, not `func_input` (commit 1).
 - **`scenarium/src/graph/ports.rs`:** `Ports::default_bindings` returns
