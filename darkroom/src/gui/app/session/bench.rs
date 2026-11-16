@@ -301,7 +301,8 @@ fn open_document(library: &RuntimeLibrary) -> OpenDocument {
 
 fn preview_nodes(document: &Document) -> Vec<ProgramId> {
     document
-        .graph
+        .graphs
+        .main()
         .iter()
         .map(|node| ProgramId::from(node.node_id))
         .filter(|&program_id| document.holds_preview_node(program_id))

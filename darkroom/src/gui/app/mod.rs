@@ -539,25 +539,25 @@ impl App {
     /// ago, so a node may be gone by now, which the runtime answers as nothing
     /// to run.
     fn run(&mut self, command: RunCommand) {
-        let graph = self.session.graph();
+        let graphs = self.session.graphs();
         let outcome = match command {
             RunCommand::Once => {
-                self.runtime.run_once(graph);
+                self.runtime.run_once(graphs);
                 Ok(())
             }
             // A node of the main graph is one program node, under its own id.
-            RunCommand::Node(node_id) => self.runtime.run_node(graph, ProgramId::from(node_id)),
+            RunCommand::Node(node_id) => self.runtime.run_node(graphs, ProgramId::from(node_id)),
             // An eviction projects its outcome onto exactly the nodes it reaches.
             RunCommand::EvictCache(node_id) => self
                 .runtime
-                .evict_cache(graph, ProgramId::from(node_id))
+                .evict_cache(graphs, ProgramId::from(node_id))
                 .map(|evicted| self.run_state.clear_cache_projections(&evicted)),
             // A flush only gains the value a copy on disk, so no projection moves.
             RunCommand::FlushCache(node_id) => {
-                self.runtime.flush_cache(graph, ProgramId::from(node_id))
+                self.runtime.flush_cache(graphs, ProgramId::from(node_id))
             }
             RunCommand::StartEvents => {
-                self.runtime.start_event_loop(graph);
+                self.runtime.start_event_loop(graphs);
                 Ok(())
             }
             RunCommand::Cancel => {
@@ -1120,7 +1120,8 @@ mod tests {
         app.session
             .open
             .document()
-            .graph
+            .graphs
+            .main()
             .bindings
             .iter()
             .filter_map(|(input, binding)| match binding {
@@ -1191,7 +1192,8 @@ mod tests {
             .session
             .open
             .document()
-            .graph
+            .graphs
+            .main()
             .iter()
             .find(|node| node.name == NODE)
             .expect("the sample holds the node")
@@ -1541,7 +1543,7 @@ mod tests {
             }
             assert!(title(ui).is_none(), "deleted");
             let document = counted.app.session.open.document();
-            assert!(document.graph.iter().all(|node| node.name != NODE));
+            assert!(document.graphs.main().iter().all(|node| node.name != NODE));
         };
 
         delete(&mut ui, &mut counted);

@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
 use palantir::DockOperation;
-use scenarium::{EventPort, InputPort, OutputPort, numbered_port};
+use scenarium::{
+    Binding, EventPort, InputPort, Interface, OutputPort, Ports, Subgraph, SubgraphId,
+    numbered_port,
+};
 
 use super::*;
 use crate::core::document::internals::DocumentFixture;
@@ -16,7 +19,11 @@ fn node_liveness_is_one_rule_with_two_declared_narrowings() {
     let mut fixture = DocumentFixture::default();
     let preview_func = preview_sink::func(Arc::default());
     fixture.library.add(preview_func.clone());
-    let preview = fixture.document.graph.add(Node::from(&preview_func));
+    let preview = fixture
+        .document
+        .graphs
+        .main_mut()
+        .add(Node::from(&preview_func));
     let plain = fixture.stub_at(Vec2::ZERO);
     let mut document = fixture.document;
 
@@ -45,7 +52,7 @@ fn node_liveness_is_one_rule_with_two_declared_narrowings() {
     assert!(document.holds_tab(TabRef::Graph));
     assert!(document.holds_tab(TabRef::Preferences));
 
-    document.graph.detach_node(preview);
+    document.graphs.main_mut().detach_node(preview);
     assert!(!document.holds_node(preview), "the rule says gone");
     assert!(
         !document.holds_preview_node(preview_program),
@@ -311,7 +318,42 @@ fn validation_holds_paths_absolute() {
     let document = fixture.document;
     assert!(matches!(
         document.validate(),
-        Err(DocumentValidationError::RelativePath { node_id, path })
-            if node_id == stub && path == "inputs/x.tiff"
+        Err(DocumentValidationError::RelativePath { node, path })
+            if node == NodeAddr::new(GraphId::Main, stub) && path == "inputs/x.tiff"
     ));
+}
+
+/// The path walks reach a subgraph's constants: the check names a relative path there by its
+/// graph, and a mapping rewrites it.
+#[test]
+fn a_subgraph_path_is_checked_and_mapped() {
+    use scenarium::ConstValue;
+
+    let mut fixture = DocumentFixture::default();
+    let node = fixture.plain_node();
+    let id = SubgraphId::from_u128(1);
+    let mut subgraph = Subgraph::new("inner", Interface::new(Ports::default()));
+    let inner = subgraph.graph.add(node);
+    let port = InputPort::new(inner, numbered_port(1));
+    subgraph.graph.set_input_binding(
+        port,
+        Binding::Const(ConstValue::FsPath("inputs/x.tiff".to_string())),
+    );
+    fixture.document.graphs.insert_subgraph(id, subgraph);
+    let mut document = fixture.document;
+    let addr = NodeAddr::new(GraphId::Subgraph(id), inner);
+
+    assert!(matches!(
+        document.validate(),
+        Err(DocumentValidationError::RelativePath { node, path })
+            if node == addr && path == "inputs/x.tiff"
+    ));
+    document.map_paths(|path| Some(format!("/root/{path}")));
+    assert_eq!(
+        document.graphs.graph(GraphId::Subgraph(id)).bindings[&port],
+        Binding::Const(ConstValue::FsPath("/root/inputs/x.tiff".to_string()))
+    );
+    let mut visited = Vec::new();
+    document.for_each_path(|node, path| visited.push((node, path.to_string())));
+    assert_eq!(visited, [(addr, "/root/inputs/x.tiff".to_string())]);
 }

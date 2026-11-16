@@ -2,10 +2,12 @@ use super::*;
 
 use tokio::sync::oneshot;
 
-use crate::exec::compile::Compiler;
-use crate::exec::program_event::ProgramEvent;
-use crate::graph::Graph;
 use crate::graph::identity::NodeId;
+
+use crate::exec::program_event::ProgramEvent;
+
+use crate::exec::compile::Compiler;
+use crate::graph::graph_set::GraphSet;
 use crate::library::Library;
 
 fn batch_intent(msgs: impl IntoIterator<Item = WorkerMessage>) -> BatchIntent {
@@ -20,7 +22,7 @@ fn batch_intent(msgs: impl IntoIterator<Item = WorkerMessage>) -> BatchIntent {
 /// reduced intent — the program's content is irrelevant.
 fn empty_compiled() -> Arc<CompiledGraph> {
     Compiler::default()
-        .compile(&Graph::default(), &Library::default())
+        .compile(&GraphSet::default(), &Library::default())
         .into()
 }
 

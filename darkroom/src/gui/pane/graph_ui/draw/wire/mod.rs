@@ -267,10 +267,9 @@ impl WirePass<'_, '_, '_> {
 /// The endpoint colors of a committed data wire: the two ports' type colors, so each end
 /// matches the port it touches (both ends share it unless the input is the untyped `Any`).
 fn data_tint(graph_ctx: GraphCtx<'_>, src: PortRef, tgt: PortRef) -> WireTint {
-    let theme = graph_ctx.theme();
     WireTint::new(
-        theme.port_color(graph_ctx.data_type(src)),
-        theme.port_color(graph_ctx.data_type(tgt)),
+        graph_ctx.port_color(graph_ctx.data_type(src)),
+        graph_ctx.port_color(graph_ctx.data_type(tgt)),
     )
 }
 

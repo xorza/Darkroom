@@ -1,7 +1,7 @@
-//! Field codecs for [`Graph`](crate::graph::Graph)'s tables. A map built by repeated `insert`
-//! keeps the last value for a repeated key, so a corrupt document would load as a quietly
-//! different graph. Each codec decodes entry by entry and rejects the collision, since validation
-//! could only assert after the evidence was gone.
+//! Field codecs for [`Graph`](crate::graph::Graph)'s tables and a set's subgraphs. A map built by
+//! repeated `insert` keeps the last value for a repeated key, so a corrupt document would load as
+//! a quietly different graph. Each codec decodes entry by entry and rejects the collision, since
+//! validation could only assert after the evidence was gone.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -12,9 +12,10 @@ use ::serde::{Deserialize, Deserializer, Serializer};
 use hashbrown::HashMap;
 
 use crate::graph::binding::Binding;
-use crate::graph::identity::{InputPort, NodeId};
+use crate::graph::identity::{InputPort, NodeId, SubgraphId};
 use crate::graph::node::Node;
 use crate::graph::stub::Stub;
+use crate::graph::subgraph::Subgraph;
 
 /// The binding table travels as a sequence of `(port, binding)` pairs.
 pub(super) fn serialize_bindings<S: Serializer>(
@@ -72,6 +73,35 @@ pub(super) fn deserialize_nodes<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<HashMap<NodeId, Node>, D::Error> {
     deserializer.deserialize_map(NodesVisitor)
+}
+
+/// The subgraph table, decoded as a map refusing a repeated id, as [`deserialize_nodes`] does
+/// for nodes: two subgraphs under one id are two definitions every instance of either names.
+pub(super) fn deserialize_subgraphs<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<BTreeMap<SubgraphId, Subgraph>, D::Error> {
+    deserializer.deserialize_map(SubgraphsVisitor)
+}
+
+#[derive(Debug)]
+struct SubgraphsVisitor;
+
+impl<'de> Visitor<'de> for SubgraphsVisitor {
+    type Value = BTreeMap<SubgraphId, Subgraph>;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a map of subgraph ids to subgraphs")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut access: A) -> Result<Self::Value, A::Error> {
+        let mut subgraphs = BTreeMap::new();
+        while let Some((id, subgraph)) = access.next_entry::<SubgraphId, Subgraph>()? {
+            if subgraphs.insert(id, subgraph).is_some() {
+                return Err(A::Error::custom(format!("duplicate subgraph id {id:?}")));
+            }
+        }
+        Ok(subgraphs)
+    }
 }
 
 /// The most a decode reserves on a document's word alone.

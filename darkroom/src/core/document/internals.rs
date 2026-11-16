@@ -16,8 +16,8 @@ use glam::Vec2;
 use scenarium::internals::test_graph::TestGraph;
 use scenarium::{
     Binding, BindingEntry, ConstValue, DataType, DetachReason, DetachedNode, DetachedNodeParts,
-    EventPort, Func, FuncId, Graph, InputDecl, InputPort, Library, Node, NodeId, OutputDecl,
-    OutputPort, Stub, Subscription, internals, numbered_port,
+    EventPort, Func, FuncId, GraphId, GraphSet, InputDecl, InputPort, Library, Node, NodeId,
+    OutputDecl, OutputPort, Stub, Subscription, internals, numbered_port,
 };
 
 use palantir::DockOperation;
@@ -93,10 +93,10 @@ pub(crate) struct DocumentFixture {
 }
 
 impl DocumentFixture {
-    /// A document over a hand-built `graph` and the library it resolves against, for cases
+    /// A document over hand-built `graphs` and the library it resolves against, for cases
     /// [`TestGraph`] can't express, like a node naming a func the library was never given.
-    pub(crate) fn with_library(graph: Graph, library: Library) -> Self {
-        let mut document = Document::from(graph);
+    pub(crate) fn with_library(graphs: impl Into<GraphSet>, library: Library) -> Self {
+        let mut document = Document::from(graphs.into());
         spread(&mut document.main_view);
         Self { document, library }
     }
@@ -127,7 +127,7 @@ impl DocumentFixture {
         if self.library.by_id(func.id()).is_none() {
             self.library.add(func.clone());
         }
-        let node_id = self.document.graph.add_func_node(func);
+        let node_id = self.document.graphs.main_mut().add_func_node(func);
         let slot = self.document.main_view.node_placements.len();
         place(&mut self.document.main_view, node_id, row_pos(slot));
         node_id
@@ -146,7 +146,7 @@ impl DocumentFixture {
     /// Add a [`Self::plain_node`] at exactly `pos`.
     pub(crate) fn node_at(&mut self, pos: Vec2) -> NodeId {
         let node = self.plain_node();
-        let node_id = self.document.graph.add(node);
+        let node_id = self.document.graphs.main_mut().add(node);
         place(&mut self.document.main_view, node_id, pos);
         node_id
     }
@@ -166,8 +166,10 @@ impl DocumentFixture {
 
     fn insert_stub(&mut self, node: Node, pos: Vec2) -> NodeId {
         let reason = self
-            .library
-            .func_of(&node)
+            .document
+            .graphs
+            .scope(&self.library, GraphId::Main)
+            .resolve(&node)
             .expect_err("a stub's func does not resolve");
         let node_id = NodeId::unique();
         let record = DetachedNode::new(DetachedNodeParts {
@@ -177,7 +179,7 @@ impl DocumentFixture {
             subscriptions: Vec::new(),
         })
         .expect("a stub with no wiring is a well-formed record");
-        self.document.graph.insert_stub(Stub {
+        self.document.graphs.main_mut().insert_stub(Stub {
             record,
             reason: DetachReason::from(reason),
         });
@@ -193,7 +195,7 @@ impl DocumentFixture {
 
     /// Bind the first input of the stub `stub` to `value`, in place of its record's wiring.
     pub(crate) fn bind_stub(&mut self, stub: NodeId, value: ConstValue) {
-        let graph = &mut self.document.graph;
+        let graph = self.document.graphs.main_mut();
         let held = graph.remove_stub(stub).expect("a stub the fixture added");
         graph.insert_stub(Stub {
             record: DetachedNode::new(DetachedNodeParts {
@@ -230,7 +232,8 @@ impl DocumentFixture {
     /// types fit.
     pub(crate) fn wire(&mut self, output: OutputPort, input: InputPort) -> WireKey {
         self.document
-            .graph
+            .graphs
+            .main_mut()
             .bindings
             .insert(input, Binding::Wire(output));
         WireKey::Data(DataWire { output, input })
@@ -238,7 +241,7 @@ impl DocumentFixture {
 
     /// Subscribe `subscriber` to `event`.
     pub(crate) fn subscribe(&mut self, event: EventPort, subscriber: NodeId) -> WireKey {
-        self.document.graph.subscribe(event, subscriber);
+        self.document.graphs.main_mut().subscribe(event, subscriber);
         WireKey::Event(Subscription::new(event, subscriber))
     }
 
@@ -279,6 +282,9 @@ impl From<TestGraph> for DocumentFixture {
     /// Every fixture above this one takes an `impl Into<DocumentFixture>`, so a test hands its
     /// [`TestGraph`] straight to a context or a canvas.
     fn from(g: TestGraph) -> Self {
-        Self::with_library(g.graph, g.library)
+        let TestGraph {
+            graphs, library, ..
+        } = g;
+        Self::with_library(graphs, library)
     }
 }

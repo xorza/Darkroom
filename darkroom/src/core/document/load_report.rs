@@ -4,7 +4,7 @@
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-use scenarium::{NodeId, ProgramId, Repair};
+use scenarium::{GraphId, NodeAddr, NodeId, ProgramId, Repair, UnknownType};
 
 use crate::core::document::item_id::ItemId;
 use crate::core::document::tie::TieId;
@@ -17,21 +17,27 @@ use crate::core::status_log::{StatusFamily, StatusLog};
 pub(crate) struct LoadReport {
     pub(crate) repairs: Vec<DocumentRepair>,
     pub(crate) foreign_paths: Vec<ForeignPath>,
+    /// Each type an interface names that this build's library does not register, kept as
+    /// written. No change of the document, so it leaves the document clean.
+    pub(crate) unknown_types: Vec<UnknownType>,
 }
 
 /// A [`scenarium::PathForm::Foreign`] path, which a load and a save keep byte for byte. No
 /// change of the document, so it leaves the document clean.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ForeignPath {
-    pub(crate) node_id: NodeId,
+    pub(crate) node: NodeAddr,
     pub(crate) path: String,
 }
 
 /// One change a load made.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum DocumentRepair {
-    /// A graph repair: wiring, a node the library cannot hold, or a stub it can again.
-    Graph(Repair),
+    /// A repair of one graph: wiring, a node its scope cannot hold, or a stub it can again.
+    Graph {
+        graph: GraphId,
+        repair: Repair,
+    },
     ViewportReset,
     /// A placement for no node or stub.
     PlacementDropped {
@@ -91,7 +97,7 @@ pub(crate) enum DocumentRepair {
 
 impl LoadReport {
     pub(crate) const fn is_empty(&self) -> bool {
-        self.repairs.is_empty() && self.foreign_paths.is_empty()
+        self.repairs.is_empty() && self.foreign_paths.is_empty() && self.unknown_types.is_empty()
     }
 
     /// Log each change and each foreign path, and put one line on the status bar that says how
@@ -103,36 +109,50 @@ impl LoadReport {
         for repair in &self.repairs {
             tracing::warn!(target: "darkroom::load", "{repair}");
         }
-        for ForeignPath { node_id, path } in &self.foreign_paths {
+        for ForeignPath { node, path } in &self.foreign_paths {
             tracing::warn!(
                 target: "darkroom::load",
-                "{node_id:?} names {path:?}, a path this system cannot read as written, kept as it is"
+                "{node:?} names {path:?}, a path this system cannot read as written, kept as it is"
+            );
+        }
+        for UnknownType { data_type, ports } in &self.unknown_types {
+            tracing::warn!(
+                target: "darkroom::load",
+                "{data_type:?} is no type this build registers, kept as it is on {ports:?}"
             );
         }
         status.warn(StatusFamily::Document, self.to_string());
     }
 }
 
-/// The status line of a load with something to report: how many changes it made, and how many
-/// paths the document names that this system cannot read as written.
+/// The status line of a load with something to report: how many changes it made, how many paths
+/// the document names that this system cannot read as written, and how many types it names that
+/// this build does not register.
 impl Display for LoadReport {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        if !self.repairs.is_empty() {
-            write!(
-                f,
-                "the load made {} repair(s) to the document; save to keep them",
-                self.repairs.len()
-            )?;
-        }
-        if !self.foreign_paths.is_empty() {
-            if !self.repairs.is_empty() {
-                f.write_str("; ")?;
+        let parts = [
+            (
+                self.repairs.len(),
+                "the load made ",
+                " repair(s) to the document; save to keep them",
+            ),
+            (
+                self.foreign_paths.len(),
+                "the document names ",
+                " path(s) this system cannot read as written",
+            ),
+            (
+                self.unknown_types.len(),
+                "the document names ",
+                " type(s) this build does not register",
+            ),
+        ];
+        let mut separator = "";
+        for (count, before, after) in parts {
+            if count > 0 {
+                write!(f, "{separator}{before}{count}{after}")?;
+                separator = "; ";
             }
-            write!(
-                f,
-                "the document names {} path(s) this system cannot read as written",
-                self.foreign_paths.len()
-            )?;
         }
         Ok(())
     }
@@ -141,7 +161,14 @@ impl Display for LoadReport {
 impl Display for DocumentRepair {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Graph(repair) => repair.fmt(f),
+            Self::Graph {
+                graph: GraphId::Main,
+                repair,
+            } => repair.fmt(f),
+            Self::Graph {
+                graph: GraphId::Subgraph(id),
+                repair,
+            } => write!(f, "in subgraph {id:?}, {repair}"),
             Self::ViewportReset => f.write_str("reset the viewport"),
             Self::PlacementDropped { node_id } => {
                 write!(
@@ -209,7 +236,10 @@ impl Display for DocumentRepair {
 
 #[cfg(test)]
 mod tests {
-    use scenarium::NodeId;
+    use scenarium::{
+        CustomTypeId, DataType, GraphId, InterfacePort, NodeAddr, NodeId, PortId, PortList,
+        SubgraphId, UnknownType,
+    };
 
     use crate::core::document::load_report::{DocumentRepair, ForeignPath, LoadReport};
 
@@ -217,43 +247,47 @@ mod tests {
     #[test]
     fn the_status_line_names_each_kind() {
         let repairs = vec![DocumentRepair::ViewportReset];
-        let foreign_paths = vec![
-            ForeignPath {
-                node_id: NodeId::unique(),
-                path: "/a".to_string(),
-            },
-            ForeignPath {
-                node_id: NodeId::unique(),
-                path: "/b".to_string(),
-            },
-        ];
+        let foreign_paths: Vec<ForeignPath> = ["/a", "/b"]
+            .map(|path| ForeignPath {
+                node: NodeAddr::new(GraphId::Main, NodeId::unique()),
+                path: path.to_string(),
+            })
+            .into();
+        let unknown_types = vec![UnknownType {
+            data_type: DataType::Custom(CustomTypeId::from_u128(1)),
+            ports: vec![InterfacePort {
+                subgraph: SubgraphId::from_u128(1),
+                list: PortList::Inputs,
+                port: PortId::from_u128(1),
+            }],
+        }];
         assert!(LoadReport::default().is_empty());
-        let only_repairs = LoadReport {
-            repairs: repairs.clone(),
-            ..LoadReport::default()
+        let report = |repairs: &[DocumentRepair], paths: &[ForeignPath], types: &[UnknownType]| {
+            let report = LoadReport {
+                repairs: repairs.to_vec(),
+                foreign_paths: paths.to_vec(),
+                unknown_types: types.to_vec(),
+            };
+            assert!(!report.is_empty());
+            report.to_string()
         };
-        assert!(!only_repairs.is_empty());
         assert_eq!(
-            only_repairs.to_string(),
+            report(&repairs, &[], &[]),
             "the load made 1 repair(s) to the document; save to keep them"
         );
-        let only_paths = LoadReport {
-            foreign_paths: foreign_paths.clone(),
-            ..LoadReport::default()
-        };
-        assert!(!only_paths.is_empty());
         assert_eq!(
-            only_paths.to_string(),
+            report(&[], &foreign_paths, &[]),
             "the document names 2 path(s) this system cannot read as written"
         );
         assert_eq!(
-            LoadReport {
-                repairs,
-                foreign_paths,
-            }
-            .to_string(),
+            report(&[], &[], &unknown_types),
+            "the document names 1 type(s) this build does not register"
+        );
+        assert_eq!(
+            report(&repairs, &foreign_paths, &unknown_types),
             "the load made 1 repair(s) to the document; save to keep them; the document names 2 \
-             path(s) this system cannot read as written"
+             path(s) this system cannot read as written; the document names 1 type(s) this build \
+             does not register"
         );
     }
 }

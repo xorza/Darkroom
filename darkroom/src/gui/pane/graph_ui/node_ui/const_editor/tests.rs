@@ -33,6 +33,38 @@ fn an_unset_field_shows_its_mark_and_takes_no_click() {
     assert_eq!(h.ui().focus(), None, "the click focuses nothing");
 }
 
+/// A constant of a type the library does not register, an enum's among them, shows as written
+/// and edits nothing: no picker over variants the library cannot name, and a click focuses
+/// nothing.
+#[test]
+fn an_unknown_types_constant_shows_as_written_and_takes_no_edit() {
+    use scenarium::EnumId;
+
+    let theme = Theme::default();
+    let library = Library::default();
+    let id = WidgetId::from_hash("const_editor::unknown");
+    let value = ConstValue::Enum("Bicubic".to_string());
+    let mut h = Harness::builder(UVec2::new(200, 60)).mono().build();
+    let mut record = |ui: &mut Ui| {
+        let editor = ConstEditor {
+            field: Field {
+                theme: &theme.const_editor.rest,
+                id,
+            },
+            library: &library,
+            value: &value,
+            data_type: DataType::Enum(EnumId::from_u128(78)),
+            value_variants: &[],
+        };
+        assert!(editor.show(ui).is_none());
+    };
+    h.frame(&mut record);
+    let center = h.rect(id).expect("the field is arranged").center();
+    h.click(center);
+    h.frame(&mut record);
+    assert_eq!(h.ui().focus(), None, "the click focuses nothing");
+}
+
 /// The text field commits through palantir's buffered `TextEdit`: Escape commits nothing and
 /// the next session starts at the document value, so Enter there commits nothing; Enter and a
 /// click elsewhere each commit what was typed, once, and a blur that follows Enter with no edit

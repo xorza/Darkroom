@@ -103,7 +103,7 @@ fn esc_on_a_preview_spawn_takes_the_card_back() {
         }
         h.ui.release(PointerButton::Left);
         h.frame_applied();
-        (h.document().graph.len(), h.ctx.open.can_undo())
+        (h.document().graphs.main().len(), h.ctx.open.can_undo())
     };
     assert_eq!(spawn(None), (2, true), "a placed card stays, undoable");
     for mods in [Modifiers::default(), ctrl] {

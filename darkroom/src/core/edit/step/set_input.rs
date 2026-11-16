@@ -22,7 +22,8 @@ pub(crate) struct SetInput {
 impl Reversible for SetInput {
     fn write(&self, document: &mut Document, dir: Direction) {
         document
-            .graph
+            .graphs
+            .main_mut()
             .set_input_binding(self.input, self.binding.half(dir).clone());
         self.ties.write(document, dir);
     }

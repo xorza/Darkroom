@@ -179,7 +179,8 @@ fn the_run_lines_link_selects_and_frames_the_cause() {
         .session
         .open
         .document()
-        .graph
+        .graphs
+        .main()
         .iter()
         .map(|node| node.node_id)
         .collect();

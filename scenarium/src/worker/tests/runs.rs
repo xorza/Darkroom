@@ -67,7 +67,7 @@ async fn node_seeds_override_a_disabled_node_and_run_only_its_cone() {
         "only the disabled sum's cone ran"
     );
     assert!(
-        w.graph.graph.find(sum.node_id()).unwrap().disabled,
+        w.graph.graph().find(sum.node_id()).unwrap().disabled,
         "execution does not mutate the authoring graph"
     );
 }

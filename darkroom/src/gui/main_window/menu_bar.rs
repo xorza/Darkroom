@@ -265,7 +265,8 @@ mod tests {
                     .session
                     .open
                     .document()
-                    .graph
+                    .graphs
+                    .main()
                     .iter()
                     .next()
                     .unwrap()
@@ -317,7 +318,8 @@ mod tests {
             .session
             .open
             .document()
-            .graph
+            .graphs
+            .main()
             .iter()
             .next()
             .unwrap()

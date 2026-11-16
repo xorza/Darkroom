@@ -35,7 +35,7 @@ use scenarium::{ConstValue, DataType, Library, ValueVariant};
 use crate::gui::path_type::PathType;
 use crate::gui::theme::const_editor_theme::ConstEditorTheme;
 use crate::gui::widgets::format::path_preview::PathPreview;
-use crate::gui::widgets::format::shown_value::{self, FLOAT_DECIMALS, UNSET};
+use crate::gui::widgets::format::shown_value::{self, FLOAT_DECIMALS, ShownValue, UNSET};
 use crate::gui::widgets::support;
 
 /// One const editor: the field it records as, and the literal it edits on
@@ -107,6 +107,12 @@ impl ConstEditor<'_> {
                 },
             )?;
             return Some(picked.value.clone());
+        }
+        // A type the library does not register, which a subgraph's interface keeps as written,
+        // has no editor here: its constant shows as written and stays.
+        if !library.knows(data_type) {
+            field.read_only(ui, ShownValue { value, data_type });
+            return None;
         }
         // The widget follows the declared port type, not the stored literal's kind: a coerced
         // literal gets the declared type's editor, and the next commit stores the declared kind.
@@ -245,6 +251,27 @@ impl Field<'_> {
         );
         self.empty(ui);
         None
+    }
+
+    /// A constant shown as written and not edited, in a box with an editor's resting look and
+    /// size: the value of a type the library does not register. It senses nothing, so a click
+    /// falls through to the surrounding row.
+    fn read_only(self, ui: &mut Ui, shown: ShownValue<'_>) {
+        let Self { theme, id } = self;
+        let editor = &theme.field;
+        let text = fmt!(ui, "{shown}");
+        Panel::hstack()
+            .id(id)
+            .size((Sizing::fixed(theme.width), Sizing::FILL))
+            .padding(editor.defaults.padding)
+            .child_align(VAlign::Center)
+            .chrome(editor.looks.normal.chrome.clone())
+            .show(ui, |ui| {
+                Text::new(text)
+                    .color(theme.unset)
+                    .text_wrap(TextWrap::EllipsisMiddle)
+                    .show(ui);
+            });
     }
 
     /// An input with nothing in it — left unset, or bound to nothing: [`UNSET`] in the muted ink,

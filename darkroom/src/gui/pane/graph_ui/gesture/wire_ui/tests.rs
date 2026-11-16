@@ -179,7 +179,7 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
     // The same gesture backwards, with the document holding the edge that release just
     // described: consumer.out0 → producer.in0 would close the loop, so the wire must not snap
     // and the release must commit nothing. The filter answers that off `Document::graph_for`.
-    h.document_mut().graph.set_input_binding(
+    h.document_mut().graphs.main_mut().set_input_binding(
         InputPort::new(consumer, numbered_port(1)),
         Binding::wire(producer, numbered_port(1)),
     );

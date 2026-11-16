@@ -118,7 +118,8 @@ fn node_id(driver: &Driver, name: &str) -> NodeId {
         .app()
         .open_document()
         .document()
-        .graph
+        .graphs
+        .main()
         .iter()
         .find(|node| node.name == name)
         .unwrap()
@@ -501,8 +502,8 @@ fn a_folder_a_copy_would_break_is_refused() {
     let dir = TempDir::new("darkroom-driver-break");
     let path = fixture::project(dir.path(), &["Load Image"]);
     let mut document = io_document::load(&path).unwrap();
-    let node_id = document.graph.iter().next().unwrap().node_id;
-    document.graph.bindings.insert(
+    let node_id = document.graphs.main().iter().next().unwrap().node_id;
+    document.graphs.main_mut().bindings.insert(
         InputPort::new(node_id, numbered_port(1)),
         Binding::Const(ConstValue::FsPath("../x.tiff".to_string())),
     );

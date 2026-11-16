@@ -1,15 +1,22 @@
 //! [`Ports`]: the inputs and outputs a declaration shows and is wired by, each an [`InputDecl`]
 //! or an [`OutputDecl`] under its [`PortId`].
 //!
+//! A func's ports and a subgraph's interface are both a `Ports`, held to one rule
+//! ([`Ports::check`]), so a port exposed on an interface keeps what made it: a const-only input,
+//! a picker, an enum.
+//!
 //! # Decisions
 //!
 //! - **A port's id is part of its declaration**, unique among the ports of its side. A func
 //!   numbers its ports, and a number once shipped is never changed or used again, as a protobuf
 //!   field's ("This number cannot be changed once your message type is in use", "Field numbers
 //!   should never be reused", [field numbers](https://protobuf.dev/programming-guides/proto3/#assigning)).
+//!   An interface mints a random id for each port, so two copies of a definition changed apart
+//!   never give one id to two ports.
 
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::data::const_value::ConstValue;
@@ -21,18 +28,19 @@ use crate::graph::func::value_variant::ValueVariant;
 use crate::graph::identity::{InputPort, NodeId, PortId};
 
 /// One input port a declaration shows.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InputDecl {
-    /// Nil until a [`FuncBuilder`](crate::FuncBuilder) numbers the port; a declaration refuses the
-    /// nil id ([`Ports::check`]).
+    /// Nil until a [`FuncBuilder`](crate::FuncBuilder) numbers the port or an interface mints its
+    /// id; a declaration refuses the nil id ([`Ports::check`]).
     pub id: PortId,
     pub name: String,
     pub required: bool,
     pub data_type: DataType,
     /// Hover-tooltip text in the editor (units, range, meaning); execution never reads it.
     pub description: Option<String>,
-    /// When set, this input may only hold a `Const`: a `Wire` into it is rejected by graph
-    /// validation. For inputs a node reads as configuration.
+    /// When set, this input may only hold a `Const`, or a wire from an output that holds only a
+    /// `Const` itself: the `Inputs` node's mirror of a const-only interface input. For inputs a
+    /// node reads as configuration.
     pub const_only: bool,
     pub default_value: Option<ConstValue>,
     pub value_variants: Vec<ValueVariant>,
@@ -117,10 +125,10 @@ impl InputDecl {
 }
 
 /// One output port a declaration shows.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OutputDecl {
-    /// Nil until a [`FuncBuilder`](crate::FuncBuilder) numbers the port; a declaration refuses the
-    /// nil id ([`Ports::check`]).
+    /// Nil until a [`FuncBuilder`](crate::FuncBuilder) numbers the port or an interface mints its
+    /// id; a declaration refuses the nil id ([`Ports::check`]).
     pub id: PortId,
     pub name: String,
     pub data_type: DataType,
@@ -148,7 +156,7 @@ impl OutputDecl {
 }
 
 /// The inputs and outputs a declaration shows, each in the order a node draws them.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Ports {
     pub inputs: Vec<InputDecl>,
     pub outputs: Vec<OutputDecl>,

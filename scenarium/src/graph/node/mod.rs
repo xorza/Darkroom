@@ -2,19 +2,22 @@
 //!
 //! A [`Node`] does not store its own id, which lives only in the key that reaches it, so a node
 //! can be moved or remapped without carrying a stale identity. What it *is* is [`NodeKind`]: a
-//! func instance, named by its [`FuncId`], or a built-in special.
-//! Iterating a graph yields a [`NodeRef`](crate::graph::node_ref::NodeRef), pairing a node with
-//! the id it was found under; the lookups that *take* an id return the node alone.
+//! node with a body, a library func or a built-in special, an instance of a subgraph, or one of a
+//! subgraph's two boundary nodes. Iterating a graph yields a
+//! [`NodeRef`](crate::graph::node_ref::NodeRef), pairing a node with the id it was found under;
+//! the lookups that *take* an id return the node alone.
 //!
-//! What a func node instantiates, the [`Func`] declaration, is [`func`](crate::graph::func)'s;
-//! the built-in [`special`] nodes are below.
+//! What a node declares resolves through a [`Scope`] into a [`NodeDecl`]; the built-in
+//! [`special`] nodes are below.
 
 pub(crate) mod special;
 
 use crate::graph::func::Func;
-use crate::graph::identity::FuncId;
+use crate::graph::identity::{FuncId, SubgraphId};
 use crate::graph::node::special::SpecialNode;
-use crate::library::Library;
+use crate::graph::node_decl::NodeDecl;
+use crate::graph::scope::Scope;
+use crate::graph::subgraph::Subgraph;
 use ::serde::{Deserialize, Serialize};
 
 /// Where a node's computed output is cached: the storage bits *keep in RAM*
@@ -68,14 +71,38 @@ impl CacheMode {
     }
 }
 
-/// What a node *is*: a library func instance, or a built-in [`SpecialNode`]. Both resolve to a
-/// [`Func`]; hosts read a node through [`Node::func_id`], [`Node::special`] and [`Node::func`].
+/// What a node *is*. Every kind resolves to a [`NodeDecl`] through a [`Scope`], so one admission
+/// rule holds for all; only a node with a body runs and carries a [`CacheMode`].
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) enum NodeKind {
+    /// A node that runs: a library func or a built-in special, cached as `cache` says.
+    Body {
+        source: BodySource,
+        cache: CacheMode,
+    },
+    /// An instance of the subgraph under the id. It has no cache mode: the nodes inside carry
+    /// their own.
+    Instance(SubgraphId),
+    /// One of a subgraph's two boundary nodes, which show its interface from inside.
+    Boundary(Boundary),
+}
+
+/// What a node with a body runs.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) enum BodySource {
     /// An instance of the library func under the id.
     Func(FuncId),
-    /// A built-in special node, whose interface is [`SpecialNode::func`].
+    /// A built-in special node, whose declaration is [`SpecialNode::func`].
     Special(SpecialNode),
+}
+
+/// Which of a subgraph's two boundary nodes.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum Boundary {
+    /// The node whose outputs are the interface's inputs.
+    Inputs,
+    /// The node whose inputs are the interface's outputs.
+    Outputs,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -83,49 +110,107 @@ pub struct Node {
     pub(crate) kind: NodeKind,
     pub name: String,
 
-    /// Where this node's output is cached. See [`CacheMode`]. A fresh func node
-    /// (`From<&Func>`) or special node (`From<SpecialNode>`) copies its func's
-    /// `default_cache_mode`; a node whose func nothing resolved seeds `None`.
-    pub cache: CacheMode,
-
     /// Disabled nodes remain in the compiled program but ambient planning
     /// excludes them. A binding from one behaves like an unbound input unless
     /// the disabled producer is explicitly included in that run's node seeds.
+    /// A disabled instance disables every node inside it.
     pub disabled: bool,
 }
 
 impl Node {
-    /// The declaration this node instantiates: a library func, or a special
-    /// node's built-in.
+    /// What this node declares: a library func, a special node's built-in, or the ports a
+    /// subgraph's interface gives its instances and boundary nodes.
     ///
     /// # Panics
     ///
-    /// If `library` holds no func under the node's id. A graph holds only nodes
-    /// that resolve — [`Graph::reconcile`](crate::Graph::reconcile) detaches the
-    /// rest at load — so a miss is a broken contract; a node that may not
-    /// resolve is asked through [`Library::func_of`].
-    pub fn func<'a>(&self, library: &'a Library) -> &'a Func {
-        match &self.kind {
-            NodeKind::Func(func_id) => library
-                .by_id(*func_id)
-                .expect("a graph node's func is in the library"),
-            NodeKind::Special(special) => special.func(),
+    /// If `scope` does not resolve the node. A graph holds only nodes that
+    /// resolve — [`GraphSet::reconcile`](crate::GraphSet::reconcile) keeps the
+    /// rest as stubs at load — so a miss is a broken contract; a node that may not
+    /// resolve is asked through [`Scope::resolve`].
+    pub fn decl<'a>(&self, scope: Scope<'a>) -> NodeDecl<'a> {
+        match scope.resolve(self) {
+            Ok(decl) => decl,
+            Err(reason) => panic!(
+                "a graph node resolves, and {:?} does not: {reason}",
+                self.name
+            ),
         }
     }
 
-    /// The id of the func this node instantiates, or `None` for a built-in.
+    /// The id of the func this node instantiates, or `None` for any other kind.
     pub const fn func_id(&self) -> Option<FuncId> {
         match self.kind {
-            NodeKind::Func(func_id) => Some(func_id),
-            NodeKind::Special(_) => None,
+            NodeKind::Body {
+                source: BodySource::Func(func_id),
+                ..
+            } => Some(func_id),
+            _ => None,
         }
     }
 
     /// The built-in this node is, if it is one.
     pub const fn special(&self) -> Option<SpecialNode> {
         match self.kind {
-            NodeKind::Special(special) => Some(special),
-            NodeKind::Func(_) => None,
+            NodeKind::Body {
+                source: BodySource::Special(special),
+                ..
+            } => Some(special),
+            _ => None,
+        }
+    }
+
+    /// The subgraph this node is an instance of, if it is one.
+    pub const fn subgraph(&self) -> Option<SubgraphId> {
+        match self.kind {
+            NodeKind::Instance(subgraph_id) => Some(subgraph_id),
+            _ => None,
+        }
+    }
+
+    /// Point this instance at subgraph `id`, as Make Unique points the instances it picks at the
+    /// copy it makes.
+    ///
+    /// # Panics
+    /// If this node is no instance.
+    pub fn set_subgraph(&mut self, id: SubgraphId) {
+        let NodeKind::Instance(placed) = &mut self.kind else {
+            panic!("only an instance places a subgraph");
+        };
+        *placed = id;
+    }
+
+    /// The boundary node this is, if it is one.
+    pub const fn boundary(&self) -> Option<Boundary> {
+        match self.kind {
+            NodeKind::Boundary(boundary) => Some(boundary),
+            _ => None,
+        }
+    }
+
+    /// Where this node's output is cached, or `None` for a node with no body: an instance or a
+    /// boundary node. A fresh func node (`From<&Func>`) or special node (`From<SpecialNode>`)
+    /// copies its func's `default_cache_mode`.
+    pub const fn cache(&self) -> Option<CacheMode> {
+        match self.kind {
+            NodeKind::Body { cache, .. } => Some(cache),
+            NodeKind::Instance(_) | NodeKind::Boundary(_) => None,
+        }
+    }
+
+    /// Mutable counterpart of [`Self::cache`].
+    pub const fn cache_mut(&mut self) -> Option<&mut CacheMode> {
+        match &mut self.kind {
+            NodeKind::Body { cache, .. } => Some(cache),
+            NodeKind::Instance(_) | NodeKind::Boundary(_) => None,
+        }
+    }
+
+    /// An instance of `subgraph`, held under `id`, named after it.
+    pub fn instance(id: SubgraphId, subgraph: &Subgraph) -> Self {
+        Self {
+            kind: NodeKind::Instance(id),
+            name: subgraph.name.clone(),
+            disabled: false,
         }
     }
 }
@@ -135,9 +220,11 @@ impl From<&Func> for Node {
     /// input bindings.
     fn from(func: &Func) -> Self {
         Self {
-            kind: NodeKind::Func(func.id()),
+            kind: NodeKind::Body {
+                source: BodySource::Func(func.id()),
+                cache: func.default_cache_mode(),
+            },
             name: func.name().to_owned(),
-            cache: func.default_cache_mode(),
             disabled: false,
         }
     }
@@ -148,10 +235,33 @@ impl From<SpecialNode> for Node {
     fn from(special: SpecialNode) -> Self {
         let func = special.func();
         Self {
-            kind: NodeKind::Special(special),
+            kind: NodeKind::Body {
+                source: BodySource::Special(special),
+                cache: func.default_cache_mode(),
+            },
             name: func.name().to_owned(),
-            cache: func.default_cache_mode(),
             disabled: false,
+        }
+    }
+}
+
+impl From<Boundary> for Node {
+    /// A subgraph's boundary node, named for its side.
+    fn from(boundary: Boundary) -> Self {
+        Self {
+            kind: NodeKind::Boundary(boundary),
+            name: boundary.name().to_owned(),
+            disabled: false,
+        }
+    }
+}
+
+impl Boundary {
+    /// The name a boundary node shows on its side.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Inputs => "Inputs",
+            Self::Outputs => "Outputs",
         }
     }
 }
@@ -159,7 +269,7 @@ impl From<SpecialNode> for Node {
 #[cfg(feature = "internals")]
 pub(crate) mod internals {
     use crate::graph::identity::FuncId;
-    use crate::graph::node::{CacheMode, Node, NodeKind};
+    use crate::graph::node::{BodySource, CacheMode, Node, NodeKind};
 
     impl Node {
         /// A node of func `func_id` with no wiring, before anything resolved its
@@ -167,9 +277,11 @@ pub(crate) mod internals {
         /// library that later dropped the func leaves it.
         pub(crate) const fn unresolved(func_id: FuncId) -> Self {
             Self {
-                kind: NodeKind::Func(func_id),
+                kind: NodeKind::Body {
+                    source: BodySource::Func(func_id),
+                    cache: CacheMode::None,
+                },
                 name: String::new(),
-                cache: CacheMode::None,
                 disabled: false,
             }
         }

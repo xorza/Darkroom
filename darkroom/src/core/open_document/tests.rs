@@ -7,6 +7,7 @@ use glam::Vec2;
 use lens::MlModelPaths;
 
 use crate::core::document::Document;
+use crate::core::document::graph_view::NodePlacement;
 use crate::core::document::internals::DocumentFixture;
 use crate::core::document::item_id::ItemId;
 use crate::core::document::load_report::{DocumentRepair, ForeignPath};
@@ -22,9 +23,11 @@ use crate::core::open_document::{Launched, Loaded, OpenDocument};
 use crate::core::runtime_library::RuntimeLibrary;
 use crate::core::status_log::StatusLog;
 use scenarium::{
-    Binding, BindingEntry, BindingRejection, Compiler, ConstValue, DataType, DetachReason,
-    EventPort, Func, FuncId, Graph, InputDecl, InputPort, Library, Node, NodeId, OutputDecl,
-    ProgramId, Repair, Subscription, SubscriptionRejection, Unresolved, internals, numbered_port,
+    Binding, BindingEntry, BindingRejection, Compiler, ConstValue, CustomTypeId, DataType,
+    DetachReason, EnumId, EventPort, Func, FuncId, Graph, GraphId, GraphSet, InputDecl, InputPort,
+    Interface, InterfacePort, Library, Node, NodeAddr, NodeId, OutputDecl, PortId, PortList, Ports,
+    ProgramId, Repair, Subgraph, SubgraphId, Subscription, SubscriptionRejection, UnknownType,
+    Unresolved, internals, numbered_port,
 };
 
 #[test]
@@ -178,7 +181,7 @@ fn a_node_whose_ports_changed_keeps_the_wiring_they_admit() {
     changed.add(moved.build());
     changed.add(chain.dst.clone());
     document::save(
-        &Document::from(chain.graph.clone()),
+        &Document::from(GraphSet::from(chain.graph.clone())),
         &path,
         SavedPaths::Relative,
     )
@@ -192,23 +195,29 @@ fn a_node_whose_ports_changed_keeps_the_wiring_they_admit() {
     assert_eq!(
         loaded.report.repairs,
         [
-            DocumentRepair::Graph(Repair::RejectedBinding {
-                port: chain.into_mid,
-                binding: Binding::wire(chain.src_id, numbered_port(1)),
-                rejection: BindingRejection::WireMismatch,
-            }),
-            DocumentRepair::Graph(Repair::RejectedBinding {
-                port: chain.into_dst,
-                binding: Binding::wire(chain.mid_id, numbered_port(1)),
-                rejection: BindingRejection::UndeclaredOutput,
-            }),
+            DocumentRepair::Graph {
+                graph: GraphId::Main,
+                repair: Repair::RejectedBinding {
+                    port: chain.into_mid,
+                    binding: Binding::wire(chain.src_id, numbered_port(1)),
+                    rejection: BindingRejection::WireMismatch,
+                }
+            },
+            DocumentRepair::Graph {
+                graph: GraphId::Main,
+                repair: Repair::RejectedBinding {
+                    port: chain.into_dst,
+                    binding: Binding::wire(chain.mid_id, numbered_port(1)),
+                    rejection: BindingRejection::UndeclaredOutput,
+                }
+            },
         ]
     );
     assert!(loaded.open.dirty, "a save accepts the change");
     let document = &loaded.open.document;
-    assert!(document.graph.find(chain.mid_id).is_some());
-    assert!(document.graph.stub(chain.mid_id).is_none());
-    assert!(document.graph.bindings.is_empty());
+    assert!(document.graphs.main().find(chain.mid_id).is_some());
+    assert!(document.graphs.main().stub(chain.mid_id).is_none());
+    assert!(document.graphs.main().bindings.is_empty());
 }
 
 /// A node whose func the library lacks leaves the graph as a stub with its wiring, the document
@@ -232,7 +241,7 @@ fn a_node_whose_func_is_missing_loads_as_a_stub_and_attaches_again() {
     lacking.add(chain.src.clone());
     lacking.add(chain.dst.clone());
     document::save(
-        &Document::from(chain.graph.clone()),
+        &Document::from(GraphSet::from(chain.graph.clone())),
         &first,
         SavedPaths::Relative,
     )
@@ -241,16 +250,25 @@ fn a_node_whose_func_is_missing_loads_as_a_stub_and_attaches_again() {
     let mut loaded = OpenDocument::load(first, &lacking).unwrap();
     assert_eq!(
         loaded.report.repairs,
-        [DocumentRepair::Graph(Repair::Stubbed {
-            node_id: mid_id,
-            reason: DetachReason::Unresolved(Unresolved::MissingFunc),
-        })]
+        [DocumentRepair::Graph {
+            graph: GraphId::Main,
+            repair: Repair::Stubbed {
+                node_id: mid_id,
+                reason: DetachReason::Unresolved(Unresolved::MissingFunc),
+            }
+        }]
     );
     assert!(loaded.open.dirty, "a save accepts the change");
     let document = &loaded.open.document;
-    assert!(document.graph.find(mid_id).is_none());
+    assert!(document.graphs.main().find(mid_id).is_none());
     assert_eq!(
-        document.graph.stub(mid_id).unwrap().record.bindings(),
+        document
+            .graphs
+            .main()
+            .stub(mid_id)
+            .unwrap()
+            .record
+            .bindings(),
         [
             BindingEntry {
                 port: into_mid,
@@ -263,7 +281,7 @@ fn a_node_whose_func_is_missing_loads_as_a_stub_and_attaches_again() {
         ],
         "the stub keeps every edge that touched it"
     );
-    let compiled = Compiler::default().compile(&document.graph, &lacking);
+    let compiled = Compiler::default().compile(&document.graphs, &lacking);
     assert!(
         compiled.contains(ProgramId::from(src_id)) && compiled.contains(ProgramId::from(dst_id))
     );
@@ -272,7 +290,8 @@ fn a_node_whose_func_is_missing_loads_as_a_stub_and_attaches_again() {
     loaded
         .open
         .document
-        .graph
+        .graphs
+        .main_mut()
         .set_input_binding(into_dst, Binding::wire(src_id, numbered_port(1)));
     loaded.open.save_to(&stubbed, SavedPaths::Relative).unwrap();
 
@@ -280,24 +299,30 @@ fn a_node_whose_func_is_missing_loads_as_a_stub_and_attaches_again() {
     assert_eq!(
         reattached.report.repairs,
         [
-            DocumentRepair::Graph(Repair::Reattached { node_id: mid_id }),
-            DocumentRepair::Graph(Repair::StubBindingDropped {
-                node_id: mid_id,
-                entry: BindingEntry {
-                    port: into_dst,
-                    binding: Binding::wire(mid_id, numbered_port(1)),
-                },
-            }),
+            DocumentRepair::Graph {
+                graph: GraphId::Main,
+                repair: Repair::Reattached { node_id: mid_id }
+            },
+            DocumentRepair::Graph {
+                graph: GraphId::Main,
+                repair: Repair::StubBindingDropped {
+                    node_id: mid_id,
+                    entry: BindingEntry {
+                        port: into_dst,
+                        binding: Binding::wire(mid_id, numbered_port(1)),
+                    },
+                }
+            },
         ]
     );
     let document = &reattached.open.document;
-    assert!(document.graph.stub(mid_id).is_none());
+    assert!(document.graphs.main().stub(mid_id).is_none());
     assert_eq!(
-        document.graph.bindings.get(&into_mid),
+        document.graphs.main().bindings.get(&into_mid),
         Some(&Binding::wire(src_id, numbered_port(1)))
     );
     assert_eq!(
-        document.graph.bindings.get(&into_dst),
+        document.graphs.main().bindings.get(&into_dst),
         Some(&Binding::wire(src_id, numbered_port(1))),
         "the input bound while `mid` was a stub keeps its binding"
     );
@@ -517,7 +542,7 @@ fn a_cancel_takes_the_gesture_back_whole() {
     let spawn = GraphIntent::add_node(
         Vec2::new(40.0, 40.0),
         spawned,
-        open.document.graph.find(node).unwrap().clone(),
+        open.document.graphs.main().find(node).unwrap().clone(),
     );
     let placed: Rc<[DragStart]> = Rc::from([DragStart {
         item: ItemId::Node(spawned),
@@ -536,7 +561,7 @@ fn a_cancel_takes_the_gesture_back_whole() {
     drain(&mut open, &mut queue);
     queue.push_graph(frame(10.0));
     drain(&mut open, &mut queue);
-    assert!(open.document.graph.find(spawned).is_some());
+    assert!(open.document.graphs.main().find(spawned).is_some());
     queue.push_cancel(gesture, frame(0.0));
     drain(&mut open, &mut queue);
     assert_eq!(
@@ -596,7 +621,12 @@ fn wiring_the_library_refuses_is_removed_at_load() {
         graph.insert(producer, Node::from(&probe));
         graph.insert(consumer, Node::from(&probe));
         wire(&mut graph);
-        document::save(&Document::from(graph), &path, SavedPaths::Relative).unwrap();
+        document::save(
+            &Document::from(GraphSet::from(graph)),
+            &path,
+            SavedPaths::Relative,
+        )
+        .unwrap();
         OpenDocument::load(path.clone(), &library).unwrap()
     };
 
@@ -612,9 +642,15 @@ fn wiring_the_library_refuses_is_removed_at_load() {
 
     let refused = |loaded: &Loaded| {
         assert!(loaded.open.dirty);
-        assert!(loaded.open.document.graph.bindings.is_empty());
-        assert_eq!(loaded.open.document.graph.subscriptions().len(), 0);
-        let [DocumentRepair::Graph(repair)] = &*loaded.report.repairs else {
+        assert!(loaded.open.document.graphs.main().bindings.is_empty());
+        assert_eq!(loaded.open.document.graphs.main().subscriptions().len(), 0);
+        let [
+            DocumentRepair::Graph {
+                graph: GraphId::Main,
+                repair,
+            },
+        ] = &*loaded.report.repairs
+        else {
             panic!("one graph repair, got {:?}", loaded.report.repairs);
         };
         repair.clone()
@@ -694,7 +730,7 @@ fn a_path_of_another_system_is_reported_and_leaves_the_document_clean() {
     ];
     let mut document = fixture.document;
     for (node_id, value) in bound {
-        document.graph.bindings.insert(
+        document.graphs.main_mut().bindings.insert(
             InputPort::new(node_id, numbered_port(1)),
             Binding::Const(ConstValue::FsPath(value.to_string())),
         );
@@ -707,7 +743,7 @@ fn a_path_of_another_system_is_reported_and_leaves_the_document_clean() {
         .into_iter()
         .filter(|(_, value)| !Path::new(value).is_absolute())
         .map(|(node_id, value)| ForeignPath {
-            node_id,
+            node: NodeAddr::new(GraphId::Main, node_id),
             path: value.to_string(),
         })
         .collect();
@@ -723,4 +759,90 @@ fn a_path_of_another_system_is_reported_and_leaves_the_document_clean() {
         loaded.report.to_string(),
         "the document names 1 path(s) this system cannot read as written"
     );
+}
+
+/// A subgraph whose interface names a type this build does not register loads as written, an
+/// enum's default and an instance's constant of it included: the load reports each type and each
+/// port that names it, and leaves the document clean. A repair inside a subgraph names the
+/// subgraph it was made in.
+#[test]
+fn a_subgraphs_unknown_type_is_reported_and_its_repairs_name_the_subgraph() {
+    let dir = TempDir::new("darkroom-open-unknown-type");
+    let path = dir.join("scene.darkroom");
+    let unknown = DataType::Custom(CustomTypeId::from_u128(77));
+    let unknown_enum = DataType::Enum(EnumId::from_u128(78));
+    let [port, choice] = [1, 2].map(PortId::from_u128);
+    let interface = Interface::new(Ports {
+        inputs: vec![
+            InputDecl {
+                id: port,
+                ..InputDecl::optional("mystery", unknown)
+            },
+            InputDecl {
+                id: choice,
+                ..InputDecl::optional("filter", unknown_enum)
+                    .default(ConstValue::Enum("Lanczos".to_string()))
+            },
+        ],
+        outputs: vec![],
+    });
+    let id = SubgraphId::from_u128(5);
+    let subgraph = Subgraph::new("holder", interface);
+    let mut document = Document::default();
+    let instance = document
+        .graphs
+        .main_mut()
+        .add(Node::instance(id, &subgraph));
+    document.graphs.insert_subgraph(id, subgraph);
+    document
+        .main_view
+        .node_placements
+        .insert(instance, NodePlacement::default());
+    document.graphs.main_mut().bindings.insert(
+        InputPort::new(instance, choice),
+        Binding::Const(ConstValue::Enum("Bicubic".to_string())),
+    );
+    document::save(&document, &path, SavedPaths::Relative).unwrap();
+
+    let loaded = OpenDocument::load(path.clone(), &Library::default()).unwrap();
+    let named = |data_type, port| UnknownType {
+        data_type,
+        ports: vec![InterfacePort {
+            subgraph: id,
+            list: PortList::Inputs,
+            port,
+        }],
+    };
+    assert_eq!(
+        loaded.report.unknown_types,
+        [named(unknown, port), named(unknown_enum, choice)]
+    );
+    assert_eq!(loaded.open.document(), &document, "kept as written");
+    assert!(loaded.report.repairs.is_empty());
+    assert!(!loaded.open.dirty, "a type kept as written is no change");
+
+    let ghost = NodeId::from_u128(9);
+    document
+        .graphs
+        .graph_mut(GraphId::Subgraph(id))
+        .insert(ghost, internals::unresolved_node(FuncId::from_u128(99)));
+    document::save(&document, &path, SavedPaths::Relative).unwrap();
+    let loaded = OpenDocument::load(path, &Library::default()).unwrap();
+    assert_eq!(
+        loaded.report.repairs,
+        [DocumentRepair::Graph {
+            graph: GraphId::Subgraph(id),
+            repair: Repair::Stubbed {
+                node_id: ghost,
+                reason: DetachReason::Unresolved(Unresolved::MissingFunc),
+            },
+        }]
+    );
+    assert_eq!(
+        loaded.report.repairs[0].to_string(),
+        format!(
+            "in subgraph {id:?}, kept {ghost:?} as a stub: the library holds no func under its id"
+        )
+    );
+    assert!(loaded.open.dirty);
 }

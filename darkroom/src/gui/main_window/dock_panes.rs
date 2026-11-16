@@ -50,7 +50,8 @@ pub(crate) fn tab_label(document: &Document, tab: TabRef) -> TabLabel<'_> {
         TabRef::Inspector(InspectTarget::Selection) => TabLabel::Plain("Inspector"),
         TabRef::Inspector(InspectTarget::Node(node_id)) => TabLabel::Inspector(format::node_name(
             &document
-                .graph
+                .graphs
+                .main()
                 .find(node_id)
                 .expect("a held inspector closes with its node")
                 .name,

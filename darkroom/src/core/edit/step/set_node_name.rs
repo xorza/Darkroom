@@ -18,7 +18,8 @@ pub(crate) struct SetNodeName {
 impl Reversible for SetNodeName {
     fn write(&self, document: &mut Document, dir: Direction) {
         document
-            .graph
+            .graphs
+            .main_mut()
             .find_mut(self.node_id)
             .expect("history replays a rename against the node it recorded")
             .name

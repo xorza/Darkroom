@@ -40,8 +40,8 @@ pub use graph::binding::Binding;
 pub use graph::binding_entry::BindingEntry;
 pub use graph::detached::{DetachedNode, DetachedNodeParts};
 pub use graph::error::{
-    BindingRejection, DetachReason, DetachedNodeError, GraphValidationError, SubscriptionRejection,
-    Unresolved,
+    BindingRejection, DetachReason, DetachedNodeError, GraphSetValidationError,
+    GraphValidationError, PlacementRejection, SubscriptionRejection, Unresolved,
 };
 pub use graph::func::error::{FuncValidationError, InvokeError, InvokeResult};
 pub use graph::func::event::{EventFires, EventLambda};
@@ -49,15 +49,23 @@ pub use graph::func::func_builder::FuncBuilder;
 pub use graph::func::lambda::{AsyncLambda, AsyncLambdaFn, FuncLambda, Invocation, OutputDemand};
 pub use graph::func::value_variant::ValueVariant;
 pub use graph::func::{Func, FuncBehavior, FuncEvent};
-pub use graph::identity::{EventPort, FuncId, InputPort, NodeId, OutputPort, PortId};
+pub use graph::graph_set::digest::SubgraphDigest;
+pub use graph::graph_set::{GraphSet, InterfacePort, ProgramShape, UnknownType};
+pub use graph::identity::{
+    EventPort, FuncId, GraphId, InputPort, NodeAddr, NodeId, OutputPort, PortId, SubgraphId,
+};
 pub use graph::instance_path::{InstancePath, InstancePathError};
+pub use graph::interface::Interface;
 pub use graph::node::special::{SPECIAL_NODES, SpecialNode};
-pub use graph::node::{CacheMode, Node};
+pub use graph::node::{Boundary, CacheMode, Node};
+pub use graph::node_decl::NodeDecl;
 pub use graph::node_ref::NodeRef;
 pub use graph::ports::{InputDecl, OutputDecl, PortList, Ports, PortsError, numbered_port};
 pub use graph::program_id::{ProgramId, ProgramIdError};
-pub use graph::reconciled::{Reconciled, Repair};
+pub use graph::reconciled::{GraphSetReconciled, Reconciled, Repair};
+pub use graph::scope::Scope;
 pub use graph::stub::Stub;
+pub use graph::subgraph::Subgraph;
 pub use graph::subscription::Subscription;
 pub use library::Library;
 pub use runtime::any_state::AnyState;

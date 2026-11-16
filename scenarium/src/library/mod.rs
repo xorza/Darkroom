@@ -3,9 +3,15 @@
 //! # Decisions
 //!
 //! - **A library registers every type its funcs declare**, held by [`Library::check`] once it is
-//!   composed. So a type the library lacks is one no func here declares, and no body reads a
-//!   value of it. Refused: a check at each `add` and each registration of the other's entries, as
-//!   the two arrive in either order.
+//!   composed. So a type the library lacks is one no func here declares: a document names it on
+//!   an interface port alone, and no body reads a value of it. Refused: a check at each `add` and
+//!   each registration of the other's entries, as the two arrive in either order.
+//! - **A type the library lacks is a type like any other, equal only to itself.** A newer
+//!   version, a build without a feature or a shared subgraph can name one this build does not
+//!   register; the port, its bindings and its constants stay as written. A constant of an
+//!   unknown enum is kept unchecked, an unknown file kind is within itself alone, and an unknown
+//!   custom type has no disk codec. The same promise a stub makes for a node with no func: kept,
+//!   inert, shown with its reason, live again when the library has it.
 
 use std::collections::HashMap;
 use std::collections::hash_map::{Entry, Values};
@@ -19,10 +25,8 @@ use crate::data::data_type::custom_type::{CustomType, CustomTypeId};
 use crate::data::data_type::enum_type::{EnumId, EnumType};
 use crate::data::data_type::file_kind::{FileKind, FileKindId};
 use crate::data::data_type::{DataType, Strictness};
-use crate::graph::error::Unresolved;
 use crate::graph::func::Func;
 use crate::graph::identity::FuncId;
-use crate::graph::node::{Node, NodeKind};
 use crate::graph::ports::InputDecl;
 
 /// The name a type shows when the library does not register it.
@@ -48,14 +52,6 @@ impl Library {
     /// [`FuncBuilder::build`](crate::FuncBuilder::build) refuses.
     pub fn by_id(&self, id: FuncId) -> Option<&Func> {
         self.funcs.get(&id)
-    }
-
-    /// The declaration `node` instantiates, or why it has none: no func under its id.
-    pub fn func_of(&self, node: &Node) -> Result<&Func, Unresolved> {
-        match &node.kind {
-            NodeKind::Func(func_id) => self.by_id(*func_id).ok_or(Unresolved::MissingFunc),
-            NodeKind::Special(special) => Ok(special.func()),
-        }
     }
 
     pub fn by_name(&self, name: &str) -> Option<&Func> {
@@ -250,12 +246,12 @@ impl Library {
 
     /// Whether an authored `Const` literal `value` may sit on `input`: the `Const` half of
     /// [`Graph::admit`](crate::Graph::admit), [`Self::wire_satisfies`] the `Wire` half. The
-    /// registry contributes only the enum arm, a variant *name*; the rest is
-    /// [`InputDecl::accepts_const`].
+    /// registry contributes only the enum arm, a variant *name*, which a constant of an enum the
+    /// library does not register keeps unchecked; the rest is [`InputDecl::accepts_const`].
     pub(crate) fn const_satisfies(&self, input: &InputDecl, value: &ConstValue) -> bool {
         input.accepts_const(value, Strictness::Authored, |enum_id, name| {
             self.enum_type(enum_id)
-                .is_some_and(|enum_type| enum_type.has_variant(name))
+                .is_none_or(|enum_type| enum_type.has_variant(name))
         })
     }
 

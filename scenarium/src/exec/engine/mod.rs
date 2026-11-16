@@ -254,8 +254,8 @@ pub(crate) mod internals {
     use crate::exec::resolve;
     use crate::exec::schedule::NodeState;
     use crate::exec::seeds::RunSeeds;
-    use crate::graph::Graph;
     use crate::graph::func::lambda::OutputDemand;
+    use crate::graph::graph_set::GraphSet;
     use crate::graph::program_id::ProgramId;
     use crate::library::Library;
 
@@ -275,8 +275,8 @@ pub(crate) mod internals {
 
         /// Compile + install in one step — the shape the in-tree tests are written against.
         /// Production compiles on the host and sends the artifact to the worker.
-        pub(crate) fn update(&mut self, graph: &Graph, library: &Library) {
-            self.install(compile::Compiler::default().compile(graph, library).into());
+        pub(crate) fn update(&mut self, graphs: &GraphSet, library: &Library) {
+            self.install(compile::Compiler::default().compile(graphs, library).into());
         }
 
         /// Prepare the structural plan and cache-aware resolved run without invoking lambdas.

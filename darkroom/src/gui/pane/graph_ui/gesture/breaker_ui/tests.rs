@@ -109,7 +109,8 @@ fn the_breaker_cuts_a_wire_it_crossed_after_a_pan_moves_it_out_of_view() {
     let input = InputPort::new(consumer, numbered_port(1));
     fixture
         .document
-        .graph
+        .graphs
+        .main_mut()
         .set_input_binding(input, Binding::wire(producer, numbered_port(1)));
     // Far apart, so the stroke down the wire's middle starts and ends on bare canvas.
     fixture
@@ -160,7 +161,7 @@ fn a_cut_node_takes_the_cuts_of_its_own_inputs() {
 
     let mut fixture = DocumentFixture::probes(2);
     let (producer, consumer) = (fixture.node(0), fixture.node(1));
-    fixture.document.graph.set_input_binding(
+    fixture.document.graphs.main_mut().set_input_binding(
         InputPort::new(consumer, numbered_port(1)),
         Binding::wire(producer, numbered_port(1)),
     );

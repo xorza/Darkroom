@@ -4,8 +4,9 @@ use glam::Vec2;
 use scenarium::internals::test_graph::TestGraph;
 use scenarium::{
     Binding, BindingEntry, BindingRejection, CacheMode, ConstValue, DataType, DetachedNodeError,
-    EventPort, FuncId, InputDecl, InputPort, Library, Node, NodeId, OutputDecl, OutputPort,
-    Subscription, SubscriptionRejection, Unresolved, internals, numbered_port,
+    EventPort, FuncId, InputDecl, InputPort, Interface, Library, Node, NodeId, OutputDecl,
+    OutputPort, Ports, ProgramShape, Subgraph, SubgraphId, Subscription, SubscriptionRejection,
+    Unresolved, internals, numbered_port,
 };
 
 use crate::core::document::Document;
@@ -162,10 +163,12 @@ fn a_removed_node_comes_back_whole() {
     let mut document = fixture.document;
     let edge = InputPort::new(b, numbered_port(1));
     document
-        .graph
+        .graphs
+        .main_mut()
         .set_input_binding(edge, Binding::wire(a, numbered_port(1)));
     document
-        .graph
+        .graphs
+        .main_mut()
         .subscribe(EventPort::new(a, numbered_port(1)), b);
     document.main_view.selected = [a].map(ItemId::Node).into_iter().collect();
     let placement = document.main_view.node_placements[&a];
@@ -174,20 +177,21 @@ fn a_removed_node_comes_back_whole() {
         .commit_one(&mut document, &fixture.library)
         .unwrap()
         .expect("removing a live node commits");
-    assert!(document.graph.find(a).is_none());
+    assert!(document.graphs.main().find(a).is_none());
     assert!(!document.main_view.node_placements.contains_key(&a));
     assert!(
         !document.main_view.selected.contains(&ItemId::Node(a)),
         "selection is pruned"
     );
     assert_eq!(
-        document.graph.bindings.get(&edge),
+        document.graphs.main().bindings.get(&edge),
         None,
         "the edge went with it"
     );
     assert!(
         !document
-            .graph
+            .graphs
+            .main()
             .is_subscribed(EventPort::new(a, numbered_port(1)), b),
         "so did the subscription"
     );
@@ -196,19 +200,20 @@ fn a_removed_node_comes_back_whole() {
         .expect("a removal leaves a valid document");
 
     step.revert(&mut document);
-    assert!(document.graph.find(a).is_some());
+    assert!(document.graphs.main().find(a).is_some());
     assert_eq!(
         document.main_view.node_placements[&a], placement,
         "position *and* paint depth come back, not a fresh frontmost slot"
     );
     assert!(document.main_view.selected.contains(&ItemId::Node(a)));
     assert_eq!(
-        document.graph.bindings.get(&edge),
+        document.graphs.main().bindings.get(&edge),
         Some(&Binding::wire(a, numbered_port(1)))
     );
     assert!(
         document
-            .graph
+            .graphs
+            .main()
             .is_subscribed(EventPort::new(a, numbered_port(1)), b)
     );
     document
@@ -217,25 +222,25 @@ fn a_removed_node_comes_back_whole() {
 
     // Redo takes it out again; the step checks what came out against what it restored.
     step.apply(&mut document);
-    assert!(document.graph.find(a).is_none());
-    assert_eq!(document.graph.bindings.get(&edge), None);
+    assert!(document.graphs.main().find(a).is_none());
+    assert_eq!(document.graphs.main().bindings.get(&edge), None);
 
-    let held = document.graph.stub(stub).cloned().unwrap();
+    let held = document.graphs.main().stub(stub).cloned().unwrap();
     let stub_placement = document.main_view.node_placements[&stub];
     let step = GraphIntent::RemoveNode { node_id: stub }
         .commit_one(&mut document, &fixture.library)
         .unwrap()
         .expect("removing a stub commits");
-    assert!(document.graph.stub(stub).is_none());
+    assert!(document.graphs.main().stub(stub).is_none());
     assert!(!document.main_view.node_placements.contains_key(&stub));
     document
         .validate()
         .expect("a stub's removal leaves a valid document");
     step.revert(&mut document);
-    assert_eq!(document.graph.stub(stub), Some(&held));
+    assert_eq!(document.graphs.main().stub(stub), Some(&held));
     assert_eq!(document.main_view.node_placements[&stub], stub_placement);
     assert!(
-        document.graph.find(stub).is_none(),
+        document.graphs.main().find(stub).is_none(),
         "a stub stays out of the graph"
     );
     document
@@ -265,11 +270,12 @@ fn a_wire_that_goes_leaves_its_input_on_its_default() {
     let seven = || Some(Binding::Const(ConstValue::Int(7)));
     let wire_both = |document: &mut Document| {
         for port in [knob, bare] {
-            document.graph.set_input_binding(port, wire());
+            document.graphs.main_mut().set_input_binding(port, wire());
         }
     };
-    let bindings =
-        |document: &Document| [knob, bare].map(|port| document.graph.bindings.get(&port).cloned());
+    let bindings = |document: &Document| {
+        [knob, bare].map(|port| document.graphs.main().bindings.get(&port).cloned())
+    };
 
     wire_both(&mut document);
     let cut = commit_all(
@@ -311,7 +317,8 @@ fn a_wire_that_goes_leaves_its_input_on_its_default() {
     assert_ne!(clone, node);
     assert_eq!(
         [1, 2].map(|number| document
-            .graph
+            .graphs
+            .main()
             .bindings
             .get(&InputPort::new(clone, numbered_port(number)))
             .cloned()),
@@ -392,8 +399,8 @@ fn the_gate_refuses_a_mistyped_constant_or_wire_and_a_self_subscription() {
     ] {
         assert_refused(&mut document, &library, intent, expected, what);
     }
-    assert!(document.graph.bindings.is_empty());
-    assert_eq!(document.graph.subscriptions().len(), 0);
+    assert!(document.graphs.main().bindings.is_empty());
+    assert_eq!(document.graphs.main().subscriptions().len(), 0);
 }
 
 /// Duplicate copies the selected graph nodes and skips a selected stub: a
@@ -411,8 +418,8 @@ fn duplicate_skips_a_selected_stub() {
 
     let intents = GraphIntent::duplicate(&document, &library, IncomingWires::Drop, counter());
     commit_all(&mut document, &library, intents);
-    assert_eq!(document.graph.len(), 2, "the graph node was copied");
-    assert_eq!(document.graph.stubs().len(), 1, "the stub was not");
+    assert_eq!(document.graphs.main().len(), 2, "the graph node was copied");
+    assert_eq!(document.graphs.main().stubs().len(), 1, "the stub was not");
     document
         .validate()
         .expect("a duplicate leaves a valid document");
@@ -428,10 +435,11 @@ fn a_new_node_takes_a_free_name() {
         mut document,
         library,
     } = fixture;
-    let name = document.graph.find(original).unwrap().name.clone();
+    let name = document.graphs.main().find(original).unwrap().name.clone();
     let names = |document: &Document| {
         let mut names: Vec<String> = document
-            .graph
+            .graphs
+            .main()
             .iter()
             .map(|node| node.name.clone())
             .collect();
@@ -439,7 +447,7 @@ fn a_new_node_takes_a_free_name() {
         names
     };
 
-    let node = document.graph.find(original).unwrap().clone();
+    let node = document.graphs.main().find(original).unwrap().clone();
     commit_all(
         &mut document,
         &library,
@@ -448,7 +456,8 @@ fn a_new_node_takes_a_free_name() {
     assert_eq!(names(&document), [name.clone(), format!("{name} 2")]);
 
     document.main_view.selected = document
-        .graph
+        .graphs
+        .main()
         .iter()
         .map(|node| ItemId::Node(node.node_id))
         .collect();
@@ -575,23 +584,25 @@ fn crossing_wire() -> CrossingWire {
     let b = fixture.node_at(Vec2::new(100.0, 0.0));
     let c = fixture.node_at(Vec2::new(0.0, 100.0));
     let mut document = fixture.document;
-    document.graph.set_input_binding(
+    document.graphs.main_mut().set_input_binding(
         InputPort::new(b, numbered_port(1)),
         Binding::wire(a, numbered_port(1)),
     );
-    document.graph.set_input_binding(
+    document.graphs.main_mut().set_input_binding(
         InputPort::new(b, numbered_port(2)),
         Binding::Const(ConstValue::from(7i64)),
     );
-    document.graph.set_input_binding(
+    document.graphs.main_mut().set_input_binding(
         InputPort::new(b, numbered_port(3)),
         Binding::wire(c, numbered_port(1)),
     );
     document
-        .graph
+        .graphs
+        .main_mut()
         .subscribe(EventPort::new(a, numbered_port(1)), b);
     document
-        .graph
+        .graphs
+        .main_mut()
         .subscribe(EventPort::new(c, numbered_port(1)), b);
     document.main_view.selected = [a, b].map(ItemId::Node).into_iter().collect();
     CrossingWire {
@@ -608,7 +619,8 @@ fn crossing_wire() -> CrossingWire {
 #[track_caller]
 fn clone_of(document: &Document, origin: Vec2, originals: &BTreeSet<NodeId>) -> NodeId {
     document
-        .graph
+        .graphs
+        .main()
         .iter()
         .map(|node| node.node_id)
         .find(|id| {
@@ -640,7 +652,8 @@ fn duplicate_clones_wiring_and_selects_the_copies() {
 
     // Two fresh nodes, offset from their originals, and selected now.
     let clones: BTreeSet<NodeId> = document
-        .graph
+        .graphs
+        .main()
         .iter()
         .map(|node| node.node_id)
         .filter(|id| !originals.contains(id))
@@ -658,7 +671,8 @@ fn duplicate_clones_wiring_and_selects_the_copies() {
     // verbatim, and the edge from outside the set is dropped.
     assert_eq!(
         document
-            .graph
+            .graphs
+            .main()
             .bindings
             .get(&InputPort::new(b_clone, numbered_port(1))),
         Some(&Binding::wire(a_clone, numbered_port(1))),
@@ -666,14 +680,16 @@ fn duplicate_clones_wiring_and_selects_the_copies() {
     );
     assert!(matches!(
         document
-            .graph
+            .graphs
+            .main()
             .bindings
             .get(&InputPort::new(b_clone, numbered_port(2))),
         Some(Binding::Const(_))
     ));
     assert_eq!(
         document
-            .graph
+            .graphs
+            .main()
             .bindings
             .get(&InputPort::new(b_clone, numbered_port(3))),
         None,
@@ -681,26 +697,33 @@ fn duplicate_clones_wiring_and_selects_the_copies() {
     );
     assert!(
         document
-            .graph
+            .graphs
+            .main()
             .is_subscribed(EventPort::new(a_clone, numbered_port(1)), b_clone)
     );
     assert!(
         !document
-            .graph
+            .graphs
+            .main()
             .is_subscribed(EventPort::new(c, numbered_port(1)), b_clone),
         "the subscription to unselected c is dropped"
     );
 
     // One batch, so one undo.
     undo_all(&mut document, &steps);
-    assert_eq!(document.graph.len(), 3, "only the originals are left");
+    assert_eq!(
+        document.graphs.main().len(),
+        3,
+        "only the originals are left"
+    );
     assert_eq!(
         document.main_view.selected,
         [a, b].map(ItemId::Node).into_iter().collect()
     );
     assert_eq!(
         document
-            .graph
+            .graphs
+            .main()
             .bindings
             .get(&InputPort::new(b, numbered_port(3))),
         Some(&Binding::wire(c, numbered_port(1))),
@@ -714,14 +737,15 @@ fn duplicate_clones_wiring_and_selects_the_copies() {
     for step in &steps {
         step.apply(&mut document);
     }
-    assert_eq!(document.graph.len(), 5);
+    assert_eq!(document.graphs.main().len(), 5);
     assert_eq!(
         document.main_view.selected,
         clones.iter().copied().map(ItemId::Node).collect()
     );
     assert_eq!(
         document
-            .graph
+            .graphs
+            .main()
             .bindings
             .get(&InputPort::new(b_clone, numbered_port(1))),
         Some(&Binding::wire(a_clone, numbered_port(1)))
@@ -750,7 +774,8 @@ fn duplicate_keeps_external_producers_on_request() {
     let b_clone = clone_of(&document, Vec2::new(100.0, 0.0), &originals);
     assert_eq!(
         document
-            .graph
+            .graphs
+            .main()
             .bindings
             .get(&InputPort::new(b_clone, numbered_port(3))),
         Some(&Binding::wire(c, numbered_port(1))),
@@ -758,7 +783,8 @@ fn duplicate_keeps_external_producers_on_request() {
     );
     assert!(
         document
-            .graph
+            .graphs
+            .main()
             .is_subscribed(EventPort::new(c, numbered_port(1)), b_clone),
         "the kept subscription still hears the original external emitter"
     );
@@ -927,7 +953,8 @@ fn subscribe_unsubscribe_commit_and_undo() {
         .expect("subscribe commits");
     assert!(
         document
-            .graph
+            .graphs
+            .main()
             .is_subscribed(EventPort::new(emitter, numbered_port(1)), subscriber)
     );
 
@@ -944,13 +971,15 @@ fn subscribe_unsubscribe_commit_and_undo() {
     step.revert(&mut document);
     assert!(
         !document
-            .graph
+            .graphs
+            .main()
             .is_subscribed(EventPort::new(emitter, numbered_port(1)), subscriber)
     );
     step.apply(&mut document);
     assert!(
         document
-            .graph
+            .graphs
+            .main()
             .is_subscribed(EventPort::new(emitter, numbered_port(1)), subscriber)
     );
 
@@ -961,13 +990,15 @@ fn subscribe_unsubscribe_commit_and_undo() {
         .expect("unsubscribe commits");
     assert!(
         !document
-            .graph
+            .graphs
+            .main()
             .is_subscribed(EventPort::new(emitter, numbered_port(1)), subscriber)
     );
     step.revert(&mut document);
     assert!(
         document
-            .graph
+            .graphs
+            .main()
             .is_subscribed(EventPort::new(emitter, numbered_port(1)), subscriber)
     );
 
@@ -976,7 +1007,8 @@ fn subscribe_unsubscribe_commit_and_undo() {
     step.apply(&mut document);
     assert!(
         !document
-            .graph
+            .graphs
+            .main()
             .is_subscribed(EventPort::new(emitter, numbered_port(1)), subscriber)
     );
     assert!(
@@ -988,14 +1020,60 @@ fn subscribe_unsubscribe_commit_and_undo() {
     );
 }
 
+/// An instance that would nest the main graph past [`ProgramShape::MAX_LEVELS`] adds nothing:
+/// subgraph `k` places subgraph `k + 1` and the last holds one node, so the first is
+/// `MAX_LEVELS` deep, and an instance of it one level more. An instance of the second fits.
+#[test]
+fn an_add_past_a_placement_bound_adds_nothing() {
+    let mut fixture = DocumentFixture::default();
+    let body = fixture.plain_node();
+    let ids: Vec<SubgraphId> = (1..=ProgramShape::MAX_LEVELS as u128)
+        .map(SubgraphId::from_u128)
+        .collect();
+    let empty = || Subgraph::new("level", Interface::new(Ports::default()));
+    let mut document = fixture.document;
+    let mut inner = empty();
+    inner.graph.add(body);
+    for pair in ids.windows(2).rev() {
+        let mut outer = empty();
+        outer.graph.add(Node::instance(pair[1], &inner));
+        document.graphs.insert_subgraph(pair[1], inner);
+        inner = outer;
+    }
+    let deepest_first = inner;
+    let too_deep = Node::instance(ids[0], &deepest_first);
+    let fits = Node::instance(ids[1], document.graphs.subgraph(ids[1]).unwrap());
+    document.graphs.insert_subgraph(ids[0], deepest_first);
+
+    let refused = NodeId::unique();
+    assert!(
+        GraphIntent::add_node(Vec2::ZERO, refused, too_deep)
+            .commit_one(&mut document, &fixture.library)
+            .unwrap()
+            .is_none()
+    );
+    assert!(!document.holds_node(refused));
+    let added = NodeId::unique();
+    assert!(
+        GraphIntent::add_node(Vec2::ZERO, added, fits)
+            .commit_one(&mut document, &fixture.library)
+            .unwrap()
+            .is_some()
+    );
+    assert!(document.holds_node(added));
+}
+
 #[test]
 fn set_node_property_commits_and_reverts() {
     let mut fixture = DocumentFixture::default();
     let id = fixture.node_at(Vec2::ZERO);
     let mut document = fixture.document;
     // Fresh nodes default to no caching (None) and enabled.
-    assert_eq!(document.graph.find(id).unwrap().cache, CacheMode::None);
-    assert!(!document.graph.find(id).unwrap().disabled);
+    assert_eq!(
+        document.graphs.main().find(id).unwrap().cache(),
+        Some(CacheMode::None)
+    );
+    assert!(!document.graphs.main().find(id).unwrap().disabled);
 
     // A representative flip of each property, committed then reverted, so each iteration returns
     // the node to its defaults and the step's captured `from` is always None / enabled.
@@ -1010,9 +1088,9 @@ fn set_node_property_commits_and_reverts() {
             .commit_one(&mut document, &fixture.library)
             .unwrap()
             .unwrap_or_else(|| panic!("{to:?} is a real change, not a no-op"));
-        let node = document.graph.find(id).unwrap();
+        let node = document.graphs.main().find(id).unwrap();
         match to {
-            NodeProperty::RuntimeCache(m) => assert_eq!(node.cache, m),
+            NodeProperty::RuntimeCache(m) => assert_eq!(node.cache(), Some(m)),
             NodeProperty::Disabled(d) => assert_eq!(node.disabled, d),
         }
         assert_eq!(
@@ -1021,8 +1099,12 @@ fn set_node_property_commits_and_reverts() {
             "a node-property toggle changes no shape"
         );
         step.revert(&mut document);
-        let node = document.graph.find(id).unwrap();
-        assert_eq!(node.cache, CacheMode::None, "revert restores the cache");
+        let node = document.graphs.main().find(id).unwrap();
+        assert_eq!(
+            node.cache(),
+            Some(CacheMode::None),
+            "revert restores the cache"
+        );
         assert!(!node.disabled, "revert restores the disable flag");
     }
 
@@ -1039,6 +1121,25 @@ fn set_node_property_commits_and_reverts() {
             "{to:?} equals the current value → writes nothing"
         );
     }
+
+    // A node with no body caches nothing of its own, so a cache mode set on one is malformed.
+    let sub = SubgraphId::from_u128(1);
+    let subgraph = Subgraph::new("inner", Interface::new(Ports::default()));
+    let instance = document
+        .graphs
+        .main_mut()
+        .add(Node::instance(sub, &subgraph));
+    document.graphs.insert_subgraph(sub, subgraph);
+    let to = NodeProperty::RuntimeCache(CacheMode::Ram);
+    assert!(matches!(
+        GraphIntent::SetNodeProperty {
+            node_id: instance,
+            to
+        }
+        .commit_one(&mut document, &fixture.library),
+        Err(MalformedIntent::NoCacheMode { node_id }) if node_id == instance
+    ));
+    assert_eq!(document.graphs.main().find(instance).unwrap().cache(), None);
 }
 
 #[test]
@@ -1049,7 +1150,7 @@ fn commit_rejects_cycle_forming_bind() {
     let b = fixture.node_at(Vec2::new(100.0, 0.0));
     let c = fixture.node_at(Vec2::new(0.0, 100.0));
     let mut document = fixture.document;
-    document.graph.set_input_binding(
+    document.graphs.main_mut().set_input_binding(
         InputPort::new(b, numbered_port(1)),
         Binding::wire(a, numbered_port(1)),
     );
@@ -1068,7 +1169,8 @@ fn commit_rejects_cycle_forming_bind() {
     );
     assert_eq!(
         document
-            .graph
+            .graphs
+            .main()
             .bindings
             .get(&InputPort::new(a, numbered_port(1))),
         None,
@@ -1076,7 +1178,8 @@ fn commit_rejects_cycle_forming_bind() {
     );
     assert_eq!(
         document
-            .graph
+            .graphs
+            .main()
             .bindings
             .get(&InputPort::new(b, numbered_port(1))),
         Some(&Binding::wire(a, numbered_port(1))),
@@ -1097,7 +1200,8 @@ fn commit_rejects_cycle_forming_bind() {
     );
     assert_eq!(
         document
-            .graph
+            .graphs
+            .main()
             .bindings
             .get(&InputPort::new(c, numbered_port(1))),
         Some(&Binding::wire(b, numbered_port(1))),
@@ -1360,7 +1464,10 @@ fn stale_references_still_refuse_quietly() {
             other => panic!("{what}: expected no step, got {other:?}"),
         }
     }
-    assert!(document.graph.bindings.is_empty(), "nothing was written");
+    assert!(
+        document.graphs.main().bindings.is_empty(),
+        "nothing was written"
+    );
     document.validate().expect("document stays valid");
 }
 
@@ -2149,7 +2256,7 @@ fn duplicate_takes_the_ties_inside_the_set() {
     } = fixture;
     // An event wire `a.tick → b` through `first` too, which clones as a data wire does.
     let tick = Subscription::new(EventPort::new(a, numbered_port(1)), b);
-    document.graph.subscribe(tick.event, b);
+    document.graphs.main_mut().subscribe(tick.event, b);
     let view = &mut document.main_view;
     view.routes.insert(ab, Route::new([second, first, mixed]));
     view.routes
@@ -2188,7 +2295,7 @@ fn duplicate_takes_the_ties_inside_the_set() {
         input: InputPort::new(b_clone, numbered_port(2)),
     });
     assert!(
-        cb_clone.is_held_by(&document.graph),
+        cb_clone.is_held_by(document.graphs.main()),
         "the kept incoming wire"
     );
     assert_eq!(

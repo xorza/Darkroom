@@ -26,9 +26,9 @@ impl Reversible for SetSubscription {
     fn write(&self, document: &mut Document, dir: Direction) {
         let Subscription { event, subscriber } = self.subscription;
         if *self.subscribed.half(dir) {
-            document.graph.subscribe(event, subscriber);
+            document.graphs.main_mut().subscribe(event, subscriber);
         } else {
-            document.graph.unsubscribe(event, subscriber);
+            document.graphs.main_mut().unsubscribe(event, subscriber);
         }
         self.ties.write(document, dir);
     }

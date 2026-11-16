@@ -202,7 +202,7 @@ fn paths_document(one: &str, many: &[&str], stub: &str) -> (Document, [NodeId; 4
     fixture.bind_stub(stubbed, ConstValue::FsPath(stub.to_string()));
     let mut document = fixture.document;
     let bind = |document: &mut Document, node_id, value| {
-        document.graph.bindings.insert(
+        document.graphs.main_mut().bindings.insert(
             InputPort::new(node_id, numbered_port(1)),
             Binding::Const(value),
         );
@@ -222,13 +222,13 @@ fn paths_of(document: &Document, nodes: [NodeId; 4]) -> Vec<String> {
     let mut paths = Vec::new();
     for node_id in &nodes[..3] {
         let Binding::Const(value) =
-            &document.graph.bindings[&InputPort::new(*node_id, numbered_port(1))]
+            &document.graphs.main().bindings[&InputPort::new(*node_id, numbered_port(1))]
         else {
             panic!("a const binding");
         };
         paths.extend(value.as_fs_paths().unwrap().iter().cloned());
     }
-    let stub = &document.graph.stub(nodes[3]).unwrap().record;
+    let stub = &document.graphs.main().stub(nodes[3]).unwrap().record;
     let Binding::Const(value) = &stub.bindings()[0].binding else {
         panic!("a const binding");
     };

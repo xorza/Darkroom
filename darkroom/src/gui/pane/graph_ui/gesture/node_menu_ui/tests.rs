@@ -133,7 +133,7 @@ fn duplicate_picks_differ_by_whether_incoming_wires_survive() {
         let (a, b, c) = (h.node(0), h.node(1), h.node(2));
         // The one wire crossing the selection boundary: b reads c, and only
         // {a, b} are selected.
-        h.document_mut().graph.set_input_binding(
+        h.document_mut().graphs.main_mut().set_input_binding(
             InputPort::new(b, numbered_port(1)),
             Binding::wire(c, numbered_port(1)),
         );
@@ -217,7 +217,7 @@ fn a_menu_closes_when_its_node_leaves_the_document() {
     open_menu(&mut h, gone);
     assert!(h.graph_ui.gestures.node_menu.in_flight(), "the menu opened");
 
-    h.document_mut().graph.detach_node(gone);
+    h.document_mut().graphs.main_mut().detach_node(gone);
     h.document_mut().main_view.node_placements.remove(&gone);
     h.document_mut().main_view.selected = [stays].map(ItemId::Node).into_iter().collect();
     assert!(h.frame().is_empty(), "the closing frame edits nothing");

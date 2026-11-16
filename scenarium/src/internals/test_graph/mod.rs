@@ -24,20 +24,25 @@ use crate::graph::func::event::EventLambda;
 use crate::graph::func::func_builder::FuncBuilder;
 use crate::graph::func::lambda::internals as lambda;
 use crate::graph::func::lambda::{FuncLambda, Invocation};
+use crate::graph::graph_set::GraphSet;
+use crate::graph::identity::GraphId;
 use crate::graph::identity::{EventPort, FuncId, InputPort, NodeId, OutputPort};
 use crate::graph::node::special::SpecialNode;
 use crate::graph::node::{CacheMode, Node};
+use crate::graph::node_decl::NodeDecl;
 use crate::graph::ports::{InputDecl, OutputDecl};
+use crate::graph::scope::Scope;
 use crate::internals::calls::Calls;
 use crate::library::Library;
 
-/// A graph, the library it resolves against, and the names its nodes answer to.
+/// A document — its set of graphs — the library it resolves against, and the names the main
+/// graph's nodes answer to.
 ///
-/// Both halves are public: a test that needs the real API reaches straight for them, and the
+/// The parts are public: a test that needs the real API reaches straight for them, and the
 /// methods here are only shorthand.
 #[derive(Debug, Default)]
 pub struct TestGraph {
-    pub graph: Graph,
+    pub graphs: GraphSet,
     pub library: Library,
     ids: HashMap<String, NodeId>,
     /// The next identity to mint. Ids **ascend with declaration order**, which a compile places
@@ -49,6 +54,21 @@ pub struct TestGraph {
 impl TestGraph {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// What the main graph's nodes resolve against.
+    pub fn scope(&self) -> Scope<'_> {
+        self.graphs.scope(&self.library, GraphId::Main)
+    }
+
+    /// The main graph, which the names here answer for.
+    pub const fn graph(&self) -> &Graph {
+        self.graphs.main()
+    }
+
+    /// [`Self::graph`] for writing.
+    pub const fn graph_mut(&mut self) -> &mut Graph {
+        self.graphs.main_mut()
     }
 
     /// A fixture over a library built elsewhere, holding no nodes yet, for production libraries
@@ -104,7 +124,7 @@ impl TestGraph {
         let mut node = Node::from(special);
         name.clone_into(&mut node.name);
         let node_id = NodeId::from_u128(self.mint());
-        self.graph.insert(node_id, node);
+        self.graph_mut().insert(node_id, node);
         self.bind_name(name, node_id);
         node_id
     }
@@ -114,7 +134,7 @@ impl TestGraph {
     pub fn remove(&mut self, name: &str) -> DetachedNode {
         let node_id = self.id(name);
         self.ids.remove(name);
-        self.graph.detach_node(node_id)
+        self.graph_mut().detach_node(node_id)
     }
 
     /// The stock five-node fixture for tests about the engine rather than a topology.
@@ -151,7 +171,7 @@ impl TestGraph {
         g.wire("sum", "mult");
         g.wire("get_b", ("mult", 1));
         g.wire("mult", "Print");
-        g.graph
+        g.graph()
             .validate()
             .expect("the fixture graph is well formed");
         g
@@ -175,7 +195,8 @@ impl TestGraph {
             .unwrap_or_else(|| panic!("no node named {name:?} in this fixture"))
     }
 
-    /// Bind `consumer`'s input to `producer`'s output: a bare name is the node's port 0.
+    /// Bind `consumer`'s input to `producer`'s output, each by its position on the node: a bare
+    /// name is the node's first port.
     pub fn wire<'a>(
         &mut self,
         producer: impl Into<NamedPort<'a>>,
@@ -189,25 +210,25 @@ impl TestGraph {
     /// `name`'s input at position `idx`, as the graph addresses it: by the id its declaration
     /// gives the port.
     pub fn input(&self, name: &str, idx: usize) -> InputPort {
-        let id = self.func(name).inputs()[idx].id;
+        let id = self.decl(name).inputs()[idx].id;
         InputPort::new(self.id(name), id)
     }
 
     /// `name`'s output at position `idx`; see [`Self::input`].
     pub fn output(&self, name: &str, idx: usize) -> OutputPort {
-        let id = self.func(name).outputs()[idx].id;
+        let id = self.decl(name).outputs()[idx].id;
         OutputPort::new(self.id(name), id)
     }
 
     /// `name`'s event at position `idx`; see [`Self::input`].
     pub fn event_port(&self, name: &str, idx: usize) -> EventPort {
-        let id = self.func(name).events()[idx].id;
+        let id = self.decl(name).events()[idx].id;
         EventPort::new(self.id(name), id)
     }
 
     /// What `name` declares.
-    fn func(&self, name: &str) -> &Func {
-        self.node(name).func(&self.library)
+    fn decl(&self, name: &str) -> NodeDecl<'_> {
+        self.node(name).decl(self.scope())
     }
 
     /// Put a literal on `consumer`'s input `input`.
@@ -222,17 +243,19 @@ impl TestGraph {
 
     fn set(&mut self, consumer: &str, input: usize, binding: impl Into<Option<Binding>>) {
         let port = self.input(consumer, input);
-        self.graph.set_input_binding(port, binding);
+        self.graph_mut().set_input_binding(port, binding);
     }
 
     pub fn subscribe(&mut self, emitter: &str, event_idx: usize, subscriber: &str) {
         let event = self.event_port(emitter, event_idx);
-        self.graph.subscribe(event, self.id(subscriber));
+        let subscriber = self.id(subscriber);
+        self.graph_mut().subscribe(event, subscriber);
     }
 
     pub fn unsubscribe(&mut self, emitter: &str, event_idx: usize, subscriber: &str) {
         let event = self.event_port(emitter, event_idx);
-        self.graph.unsubscribe(event, self.id(subscriber));
+        let subscriber = self.id(subscriber);
+        self.graph_mut().unsubscribe(event, subscriber);
     }
 
     pub fn disable(&mut self, name: &str) {
@@ -244,16 +267,22 @@ impl TestGraph {
     }
 
     pub fn cache(&mut self, name: &str, mode: CacheMode) {
-        self.node_mut(name).cache = mode;
+        *self
+            .node_mut(name)
+            .cache_mut()
+            .expect("a named node has a body") = mode;
     }
 
     /// Put every node on one cache mode.
     pub fn cache_all(&mut self, mode: CacheMode) {
         for &node_id in self.ids.values() {
-            self.graph
+            *self
+                .graphs
+                .main_mut()
                 .find_mut(node_id)
                 .expect("a named node is in the graph")
-                .cache = mode;
+                .cache_mut()
+                .expect("a named node has a body") = mode;
         }
     }
 
@@ -309,14 +338,14 @@ impl TestGraph {
     }
 
     fn node(&self, name: &str) -> &Node {
-        self.graph
+        self.graph()
             .find(self.id(name))
             .expect("a named node is in the graph")
     }
 
     fn node_mut(&mut self, name: &str) -> &mut Node {
         let node_id = self.id(name);
-        self.graph
+        self.graph_mut()
             .find_mut(node_id)
             .expect("a named node is in the graph")
     }
@@ -324,8 +353,8 @@ impl TestGraph {
     /// Place one node of `func` under the next ascending id, seeding its declared const defaults.
     fn place(&mut self, func: &Func) -> NodeId {
         let node_id = NodeId::from_u128(self.mint());
-        self.graph.insert(node_id, Node::from(func));
-        self.graph.bindings.extend(
+        self.graph_mut().insert(node_id, Node::from(func));
+        self.graph_mut().bindings.extend(
             func.ports()
                 .default_bindings(node_id)
                 .map(|entry| (entry.port, entry.binding)),
@@ -344,7 +373,7 @@ impl TestGraph {
     }
 }
 
-/// The number a fixture gives the port at `idx` on its side.
+/// The number the port at `idx` of its side takes: its position from 1.
 fn number(idx: usize) -> u32 {
     u32::try_from(idx + 1).expect("a fixture declares fewer than 2³² ports a side")
 }
@@ -355,8 +384,8 @@ fn failing_lambda(message: &'static str) -> FuncLambda {
 }
 
 /// The type a scalar or string literal names. A path is a bare string without
-/// the kind and mode of a `DataType::File`, an enum variant a name
-/// without its type's id, and `Null` names nothing.
+/// the kind and mode of a file type, an enum variant a name without its enum's
+/// id, and `Null` names nothing.
 fn literal_type(value: &ConstValue) -> DataType {
     match value {
         ConstValue::Float(_) => DataType::Float,
@@ -396,7 +425,8 @@ impl<'a> From<(&'a str, usize)> for NamedPort<'a> {
 }
 
 /// One node's declaration under construction: [`Func`]'s builders plus the bodies a fixture
-/// keeps writing by hand. Ports are named `in0`, `out0`, … by position.
+/// keeps writing by hand. Ports are named `in0`, `out0`, … by position, and numbered from 1 in
+/// the same order.
 #[derive(Debug)]
 pub struct NodeSpec {
     func: FuncBuilder,
@@ -586,6 +616,8 @@ impl NodeSpec {
 
 #[cfg(test)]
 pub(crate) mod compiled;
+#[cfg(test)]
+pub(crate) mod sets;
 
 #[cfg(test)]
 mod internals {
@@ -620,7 +652,7 @@ mod internals {
         /// Lower this fixture, keeping the names.
         pub(crate) fn compile(&self) -> Compiled {
             Compiled::new(
-                Compiler::default().compile(&self.graph, &self.library),
+                Compiler::default().compile(&self.graphs, &self.library),
                 self.ids
                     .iter()
                     .map(|(name, node_id)| (name.clone(), ProgramId::from(*node_id)))

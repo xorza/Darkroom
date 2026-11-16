@@ -27,7 +27,7 @@ use std::rc::Rc;
 
 use glam::Vec2;
 use scenarium::{
-    Binding, BindingEntry, DetachedNode, DetachedNodeParts, EventPort, Graph as CoreGraph,
+    Binding, BindingEntry, DetachedNode, DetachedNodeParts, EventPort, Graph as CoreGraph, GraphId,
     InputPort, Library, Node, NodeId, OutputPort, Subscription,
 };
 
@@ -230,7 +230,8 @@ impl GraphIntent {
         incoming: IncomingWires,
         mut fresh: impl FnMut() -> u128,
     ) -> Vec<Self> {
-        let (graph, view) = (&document.graph, &document.main_view);
+        let (graph, view) = (document.graphs.main(), &document.main_view);
+        let scope = document.graphs.scope(library, GraphId::Main);
         // An edge is only recognisable as internal once both endpoints have a fresh id, so
         // resolve the whole set first, in selection order.
         let mut clones: HashMap<NodeId, NodeId> = HashMap::with_capacity(view.selected.len());
@@ -273,7 +274,7 @@ impl GraphIntent {
                         }
                         match incoming {
                             IncomingWires::Keep => Some(Binding::Wire(*source)),
-                            IncomingWires::Drop => unwired::binding(graph, library, port),
+                            IncomingWires::Drop => unwired::binding(graph, scope, port),
                         }
                     }
                     Binding::Const(_) => Some(binding.clone()),
@@ -411,7 +412,8 @@ impl GraphIntent {
         document: &Document,
         library: &Library,
     ) -> Result<Option<UndoStep>, MalformedIntent> {
-        let (graph, view) = (&document.graph, &document.main_view);
+        let (graph, view) = (document.graphs.main(), &document.main_view);
+        let scope = document.graphs.scope(library, GraphId::Main);
         let step = match self {
             Self::AddNode {
                 pos,
@@ -421,13 +423,18 @@ impl GraphIntent {
             } => {
                 validate::fresh_node_id(document, node_id)?;
                 validate::finite_pos(pos, Role::AddNode)?;
-                let func = validate::resolving_node(library, &node)?;
+                let decl = validate::resolving_node(scope, &node)?;
+                // An instance that would take the main graph past a placement bound is refused by
+                // design, as a cycle-forming bind is: the compile expands only a set within them.
+                if document.graphs.admit_nodes(GraphId::Main, [&node]).is_err() {
+                    return Ok(None);
+                }
                 validate::seed_bindings(
                     graph,
-                    library,
+                    scope,
                     Insertion {
                         node_id,
-                        func,
+                        decl,
                         bindings: &bindings,
                     },
                 )?;
@@ -492,7 +499,7 @@ impl GraphIntent {
                 }
                 let to = match to {
                     None if matches!(graph.bindings.get(&input), Some(Binding::Wire(_))) => {
-                        unwired::binding(graph, library, input)
+                        unwired::binding(graph, scope, input)
                     }
                     to => to,
                 };
@@ -511,7 +518,7 @@ impl GraphIntent {
                             return Ok(None);
                         }
                     }
-                    graph.admit(library, input, binding).map_err(|rejection| {
+                    graph.admit(scope, input, binding).map_err(|rejection| {
                         MalformedIntent::Rejected {
                             port: input,
                             rejection,
@@ -567,7 +574,9 @@ impl GraphIntent {
                         to,
                     }),
                     NodeProperty::RuntimeCache(to) => PropertyChange::RuntimeCache(Change {
-                        from: node.cache,
+                        from: node
+                            .cache()
+                            .ok_or(MalformedIntent::NoCacheMode { node_id })?,
                         to,
                     }),
                 };
@@ -590,7 +599,7 @@ impl GraphIntent {
                         return Ok(None);
                     }
                     graph
-                        .admit_subscription(library, subscription)
+                        .admit_subscription(scope, subscription)
                         .map_err(|rejection| MalformedIntent::RejectedSubscription {
                             subscription,
                             rejection,
@@ -728,7 +737,10 @@ impl GraphIntent {
         step.apply(document);
         steps.push(step);
         for input in fed {
-            if let Some(to) = unwired::binding(&document.graph, library, input) {
+            let graphs = &document.graphs;
+            if let Some(to) =
+                unwired::binding(graphs.main(), graphs.scope(library, GraphId::Main), input)
+            {
                 Self::SetInput {
                     input,
                     to: Some(to),

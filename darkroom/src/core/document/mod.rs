@@ -3,10 +3,10 @@
 //! # Decisions
 //!
 //! - **A stub is scenarium's.** A node its graph cannot hold is kept in the graph beside its
-//!   nodes as a [`scenarium::Stub`], with every edge that touched it and why, so your settings
-//!   survive a library that lost its func; the load is [`CoreGraph::reconcile`]. Refused:
-//!   dropping them, as the settings are lost; remapping by port name, as a value whose meaning
-//!   changed still goes through.
+//!   nodes as a [`scenarium::Stub`], with every edge that touched it and why, so your
+//!   settings survive a library that lost its func and a definition travels whole; the load is
+//!   [`GraphSet::reconcile`]. Refused: dropping them, as the settings are lost; remapping by port
+//!   name, as a value whose meaning changed still goes through.
 //! - **A graph with a stub runs the rest.** A consumer a stub fed sees an
 //!   unbound input, as with a disabled producer. Refused: one stub refusing
 //!   every run.
@@ -38,7 +38,8 @@ use std::slice;
 use glam::Vec2;
 use palantir::DockState;
 use scenarium::{
-    ConstValue, DetachedNode, Graph as CoreGraph, Library, Node, NodeId, PathForm, ProgramId, Stub,
+    ConstValue, DetachedNode, Graph as CoreGraph, GraphId, GraphSet, Library, Node, NodeAddr,
+    NodeId, PathForm, ProgramId, Stub,
 };
 use serde::{Deserialize, Serialize};
 
@@ -65,10 +66,10 @@ use crate::core::preview_sink;
 /// `Document`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Document {
-    /// Holds only nodes the library resolves, with only admitted wiring, and keeps each node the
-    /// library cannot resolve as a stub.
-    pub(crate) graph: CoreGraph,
-    /// Places every graph node and every stub.
+    /// Each graph holds only nodes its scope resolves, with only admitted wiring, and keeps each
+    /// node it cannot hold as a stub.
+    pub(crate) graphs: GraphSet,
+    /// Places every node and every stub of the main graph.
     pub(crate) main_view: GraphView,
     /// The pane arrangement: open tabs grouped into split panes, plus the focused group.
     /// Mutated only through a `DockOperation`, none of which is undoable.
@@ -79,7 +80,7 @@ pub(crate) struct Document {
 impl Default for Document {
     fn default() -> Self {
         Self {
-            graph: CoreGraph::default(),
+            graphs: GraphSet::default(),
             main_view: GraphView::default(),
             layout: new_layout(),
         }
@@ -93,14 +94,15 @@ impl Document {
     pub(crate) fn remove_node(&mut self, node_id: NodeId) -> DetachedNode {
         self.unplace(node_id);
         self.close_tabs(node_id);
-        self.graph.detach_node(node_id)
+        self.graphs.main_mut().detach_node(node_id)
     }
 
     /// [`Self::remove_node`] for a stub. A stub has no viewer: the load closes
     /// one, and no edit opens one on a node that cannot run.
     pub(crate) fn remove_stub(&mut self, node_id: NodeId) -> Stub {
         self.unplace(node_id);
-        self.graph
+        self.graphs
+            .main_mut()
             .remove_stub(node_id)
             .expect("cannot remove a stub the document does not hold")
     }
@@ -130,7 +132,7 @@ impl Document {
     /// good, while absence from a scene means only that a node is off-screen
     /// or on a closed tab.
     pub(crate) fn holds_node(&self, node_id: NodeId) -> bool {
-        self.graph.holds(node_id)
+        self.graphs.main().holds(node_id)
     }
 
     /// Whether a tab may be open: the graph pane, `Preferences` and the
@@ -143,7 +145,9 @@ impl Document {
                 true
             }
             TabRef::ImageViewer(program_id) => self.holds_preview_node(program_id),
-            TabRef::Inspector(InspectTarget::Node(node_id)) => self.graph.find(node_id).is_some(),
+            TabRef::Inspector(InspectTarget::Node(node_id)) => {
+                self.graphs.main().find(node_id).is_some()
+            }
         }
     }
 
@@ -153,38 +157,53 @@ impl Document {
     /// key is not a live preview node releases at the next sweep instead of riding on the node's
     /// own lifetime.
     pub(crate) fn holds_preview_node(&self, program_id: ProgramId) -> bool {
-        program_id.path().is_main() && is_preview_node(&self.graph, program_id.node_id())
+        program_id.path().is_main() && is_preview_node(self.graphs.main(), program_id.node_id())
     }
 
     /// Make a decoded document consistent with itself and `library`, and
-    /// report each change: [`reconcile`](CoreGraph::reconcile) the graph, which
-    /// keeps each node it cannot hold as a stub and attaches each stub that
-    /// resolves again, then repair the view and the layout around the result.
-    /// Afterwards [`Self::validate`] holds, and the graph compiles.
+    /// report each change: [`GraphSet::reconcile`] the graphs, which keeps
+    /// each node a graph cannot hold as a stub and attaches each stub that
+    /// resolves again, then repair the view and the layout around the main
+    /// graph. Afterwards [`Self::validate`] holds, and the graphs compile.
     pub(crate) fn reconcile(&mut self, library: &Library) -> LoadReport {
+        let reconciled = self.graphs.reconcile(library);
+        let mut repairs: Vec<DocumentRepair> = reconciled
+            .main
+            .repairs
+            .into_iter()
+            .map(|repair| DocumentRepair::Graph {
+                graph: GraphId::Main,
+                repair,
+            })
+            .collect();
+        for (id, reconciled) in reconciled.subgraphs {
+            repairs.extend(
+                reconciled
+                    .repairs
+                    .into_iter()
+                    .map(|repair| DocumentRepair::Graph {
+                        graph: GraphId::Subgraph(id),
+                        repair,
+                    }),
+            );
+        }
         let Self {
-            graph,
+            graphs,
             main_view,
             layout,
         } = self;
-        let mut repairs: Vec<DocumentRepair> = graph
-            .reconcile(library)
-            .repairs
-            .into_iter()
-            .map(DocumentRepair::Graph)
-            .collect();
-        repair_view(main_view, graph, &mut repairs);
-        repair_layout(layout, graph, &mut repairs);
+        repair_view(main_view, graphs.main(), &mut repairs);
+        repair_layout(layout, graphs.main(), &mut repairs);
         debug_assert!(
             self.validate().is_ok(),
             "a reconciled document is consistent: {:?}",
             self.validate()
         );
         let mut foreign_paths = Vec::new();
-        self.for_each_path(|node_id, path| {
+        self.for_each_path(|node, path| {
             if PathForm::of(path) == PathForm::Foreign {
                 foreign_paths.push(ForeignPath {
-                    node_id,
+                    node,
                     path: path.to_string(),
                 });
             }
@@ -192,18 +211,20 @@ impl Document {
         LoadReport {
             repairs,
             foreign_paths,
+            unknown_types: self.graphs.unknown_types(library),
         }
     }
 
-    /// Check what [`Self::reconcile`] establishes that needs no library: the
-    /// graph's structure with its stubs, the view placing both, and the
-    /// layout. A debug check: a document that fails it is a bug in the load
-    /// or an edit.
-    ///
+    /// Check what [`Self::reconcile`] establishes that needs no library: each graph's structure
+    /// with its stubs, the view placing the main graph's, and the layout. A debug check: a
+    /// document that fails it is a bug in the load or an edit.
     pub(crate) fn validate(&self) -> Result<(), DocumentValidationError> {
-        self.graph.validate()?;
+        for (graph, held) in self.graphs.graphs() {
+            held.validate()
+                .map_err(|source| DocumentValidationError::Graph { graph, source })?;
+        }
         self.main_view
-            .validate(&self.graph)
+            .validate(self.graphs.main())
             .map_err(|source| DocumentValidationError::MainView { source })?;
 
         for tab in self.layout.all_tabs() {
@@ -214,10 +235,10 @@ impl Document {
         // A file holds relative paths; memory resolves each where it enters, so a relative one
         // here would be read against the working directory.
         let mut relative = None;
-        self.for_each_path(|node_id, path| {
+        self.for_each_path(|node, path| {
             if relative.is_none() && PathForm::of(path) == PathForm::Relative {
                 relative = Some(DocumentValidationError::RelativePath {
-                    node_id,
+                    node,
                     path: path.to_string(),
                 });
             }
@@ -225,38 +246,44 @@ impl Document {
         relative.map_or(Ok(()), Err)
     }
 
-    /// Each path a constant holds, the stubs' included, with the node it binds.
-    pub(crate) fn for_each_path(&self, mut visit: impl FnMut(NodeId, &str)) {
-        for (port, value) in self.graph.constants() {
-            for path in value.as_fs_paths().into_iter().flatten() {
-                visit(port.node_id, path);
+    /// Each path a constant holds in any graph, the stubs' included, with the node it binds.
+    pub(crate) fn for_each_path(&self, mut visit: impl FnMut(NodeAddr, &str)) {
+        for (graph, held) in self.graphs.graphs() {
+            for (port, value) in held.constants() {
+                for path in value.as_fs_paths().into_iter().flatten() {
+                    visit(NodeAddr::new(graph, port.node_id), path);
+                }
             }
         }
     }
 
-    /// Put `map`'s answer in place of each path a constant holds that it answers for, the stubs'
-    /// included.
+    /// Put `map`'s answer in place of each path a constant holds in any graph that it answers
+    /// for, the stubs' included.
     pub(crate) fn map_paths(&mut self, mut map: impl FnMut(&str) -> Option<String>) {
-        for value in self.graph.constants_mut() {
-            let paths: &mut [String] = match value {
-                ConstValue::FsPath(path) => slice::from_mut(path),
-                ConstValue::FsPaths(paths) => paths,
-                _ => continue,
-            };
-            for path in paths {
-                if let Some(mapped) = map(path) {
-                    *path = mapped;
+        let ids: Vec<GraphId> = self.graphs.graphs().map(|(graph, _)| graph).collect();
+        for graph in ids {
+            for value in self.graphs.graph_mut(graph).constants_mut() {
+                let paths: &mut [String] = match value {
+                    ConstValue::FsPath(path) => slice::from_mut(path),
+                    ConstValue::FsPaths(paths) => paths,
+                    _ => continue,
+                };
+                for path in paths {
+                    if let Some(mapped) = map(path) {
+                        *path = mapped;
+                    }
                 }
             }
         }
     }
 }
 
-impl From<CoreGraph> for Document {
-    fn from(graph: CoreGraph) -> Self {
-        let main_view = GraphView::new(&graph);
+impl From<GraphSet> for Document {
+    /// A document of `graphs`, its main graph laid out in a row.
+    fn from(graphs: GraphSet) -> Self {
+        let main_view = GraphView::new(graphs.main());
         Self {
-            graph,
+            graphs,
             main_view,
             layout: new_layout(),
         }

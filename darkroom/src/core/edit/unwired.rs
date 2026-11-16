@@ -1,13 +1,14 @@
 //! What an input holds once the wire into it goes.
 
-use scenarium::{Binding, Graph, InputPort, Library};
+use scenarium::{Binding, Graph, InputPort, Scope};
 
-/// What `port` holds once the wire into it goes: its declared default, else nothing.
-pub(crate) fn binding(graph: &Graph, library: &Library, port: InputPort) -> Option<Binding> {
+/// What `port`, an input of `graph` in `scope`, holds once the wire into it goes: its declared
+/// default, else nothing.
+pub(crate) fn binding(graph: &Graph, scope: Scope<'_>, port: InputPort) -> Option<Binding> {
     let node = graph
         .find(port.node_id)
         .expect("an input that loses its wire is on a graph node");
-    node.func(library)
+    node.decl(scope)
         .ports()
         .input(port.port)
         .expect("an input that loses its wire is declared")

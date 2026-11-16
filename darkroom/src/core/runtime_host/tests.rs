@@ -2,7 +2,7 @@ use std::path::Path;
 
 use common::{TempDir, fs};
 use lens::MlModelPaths;
-use scenarium::{CacheMode, ConstValue, Graph, NodeId, ProgramId};
+use scenarium::{CacheMode, ConstValue, Graph, GraphSet, NodeId, ProgramId};
 
 use crate::core::io::cache;
 use crate::core::runtime_host::error::NoCompiledWork;
@@ -30,6 +30,7 @@ fn an_eviction_reaches_the_seed_cone_of_the_installed_program() {
         .expect("built-in present");
     let mut graph = Graph::default();
     let node = ProgramId::from(graph.add_func_node(func));
+    let graph = GraphSet::from(graph);
 
     host.run_once(&graph);
     assert_eq!(host.evict_cache(&graph, node), Ok(vec![node]));
@@ -97,13 +98,13 @@ fn ml_defaults_follow_preferences_and_the_cache_root_follows_the_document() {
         "opening a document writes nothing"
     );
 
-    let mut memory_only = Graph::default();
+    let mut memory_only = GraphSet::default();
     let func = host
         .library
         .cur()
         .by_name("ML Denoise")
         .expect("built-in present");
-    let node = memory_only.add_func_node(func);
+    let node = memory_only.main_mut().add_func_node(func);
     host.run_once(&memory_only);
     assert!(
         !fs::exists(&first_root),
@@ -111,7 +112,12 @@ fn ml_defaults_follow_preferences_and_the_cache_root_follows_the_document() {
     );
 
     let mut disk_backed = memory_only;
-    disk_backed.find_mut(node).unwrap().cache = CacheMode::Disk;
+    *disk_backed
+        .main_mut()
+        .find_mut(node)
+        .unwrap()
+        .cache_mut()
+        .unwrap() = CacheMode::Disk;
     host.run_once(&disk_backed);
     assert!(
         fs::is_file(first_root.join(".gitignore")),

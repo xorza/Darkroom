@@ -132,11 +132,11 @@ async fn update_with_a_grown_output_list_retires_the_shorter_snapshot() {
 #[tokio::test]
 async fn a_detached_producer_leaves_its_consumer_missing_an_input() {
     let mut g = TestGraph::sample();
-    let get_a = g.graph.find(g.id("get_a")).unwrap().func_id().unwrap();
+    let get_a = g.graph().find(g.id("get_a")).unwrap().func_id().unwrap();
     g.library.remove(get_a);
-    let reconciled = g.graph.reconcile(&g.library);
-    assert_eq!(g.graph.stubs().len(), 1);
-    assert!(g.graph.find(g.id("get_a")).is_none());
+    let reconciled = g.graphs.reconcile(&g.library);
+    assert_eq!(g.graph().stubs().len(), 1);
+    assert!(g.graph().find(g.id("get_a")).is_none());
     assert!(!reconciled.is_empty());
 
     let mut e = TestEngine::over(g);

@@ -247,11 +247,11 @@ fn a_file_feeds_an_input_whose_kind_holds_its_own() {
     }
 }
 
-/// A constant of a registered enum must name a variant, and one of an enum the library does not
-/// register names none; a type the library does not register, of each kind, shows as "unknown
-/// type".
+/// What the library cannot tell about a type it does not register: a constant of an unknown
+/// enum is kept unchecked, while a registered enum's constant must name a variant; each kind
+/// shows as "unknown type".
 #[test]
-fn a_type_the_library_lacks_takes_no_constant_and_shows_as_unknown() {
+fn a_type_the_library_lacks_is_kept_and_shown_as_unknown() {
     let (known, unknown) = (EnumId::unique(), EnumId::unique());
     let mut library = Library::default();
     library.register_enum(known, EnumType::new("Mode", vec!["fast".into()]));
@@ -259,7 +259,11 @@ fn a_type_the_library_lacks_takes_no_constant_and_shows_as_unknown() {
     let slothful = ConstValue::Enum("slothful".into());
     assert!(library.const_satisfies(&input(known), &ConstValue::Enum("fast".into())));
     assert!(!library.const_satisfies(&input(known), &slothful));
-    assert!(!library.const_satisfies(&input(unknown), &slothful));
+    assert!(library.const_satisfies(&input(unknown), &slothful));
+    assert!(
+        !library.const_satisfies(&input(unknown), &ConstValue::Int(1)),
+        "an unknown enum still takes an enum literal alone"
+    );
 
     assert_eq!(library.type_name(DataType::Enum(known)), "Mode");
     for unknown_type in [

@@ -65,7 +65,7 @@ pub(crate) fn show(ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>, status: Sta
             support::hspacer(ui, "status_spacer");
             let view = &ctx.document().main_view;
             let counts = CountsClause {
-                node_count: ctx.document().graph.len(),
+                node_count: ctx.document().graphs.main().len(),
                 selected_count: view.selected.len(),
             };
             Readout {
@@ -182,7 +182,7 @@ fn run_line(ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>, outcome: RunOutcom
     let Some(node) = cause
         .path()
         .is_main()
-        .then(|| ctx.document().graph.find(cause.node_id()))
+        .then(|| ctx.document().graphs.main().find(cause.node_id()))
         .flatten()
     else {
         return;

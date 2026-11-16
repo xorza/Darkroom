@@ -18,7 +18,8 @@ fn document_with_preview(node: ProgramId) -> Document {
     fixture.library.add(func.clone());
     fixture
         .document
-        .graph
+        .graphs
+        .main_mut()
         .insert(node.node_id(), Node::from(&func));
     fixture.document
 }
@@ -227,7 +228,12 @@ fn a_previews_value_lives_exactly_as_long_as_its_node() {
     let mut store = PreviewStore::new(wake::internals::noop());
     let node = ProgramId::from(NodeId::unique());
     let mut document = document_with_preview(node);
-    let other = ProgramId::from(document.graph.add(Node::from(SpecialNode::RunSinks)));
+    let other = ProgramId::from(
+        document
+            .graphs
+            .main_mut()
+            .add(Node::from(SpecialNode::RunSinks)),
+    );
     let int = |value| DynamicValue::Static(ConstValue::Int(value));
     let shown = |store: &PreviewStore| match store.entries.get(&node) {
         Some(StoredContent::Text(text)) => Some(text.clone()),
@@ -284,7 +290,7 @@ fn a_previews_value_lives_exactly_as_long_as_its_node() {
         "a value keyed to a non-preview node is dropped"
     );
 
-    document.graph.detach_node(node.node_id());
+    document.graphs.main_mut().detach_node(node.node_id());
     store.reconcile(&document);
     assert!(
         store.entries.is_empty(),

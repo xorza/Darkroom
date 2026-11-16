@@ -17,7 +17,7 @@ use crate::gui::port_ref::PortRef;
 fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
     let mut fixture = DocumentFixture::probes(2);
     let (stays, leaves) = (fixture.node(0), fixture.node(1));
-    fixture.document.graph.set_input_binding(
+    fixture.document.graphs.main_mut().set_input_binding(
         InputPort::new(leaves, numbered_port(1)),
         Binding::wire(stays, numbered_port(1)),
     );

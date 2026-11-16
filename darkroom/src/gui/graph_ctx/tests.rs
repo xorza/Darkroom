@@ -1,6 +1,9 @@
 use scenarium::internals::test_graph::NodeSpec;
 use scenarium::internals::test_graph::TestGraph;
-use scenarium::{CacheMode, DataType, EventPort, FuncId, Graph, Node, internals, numbered_port};
+use scenarium::{
+    CacheMode, DataType, EventPort, FuncId, Graph, GraphSet, Interface, Node, Ports, Subgraph,
+    SubgraphId, internals, numbered_port,
+};
 
 use crate::core::document::internals::DocumentFixture;
 use crate::core::document::tab_ref::TabRef;
@@ -60,14 +63,19 @@ fn a_missing_func_reads_as_a_deletable_stub() {
         internals::unresolved_node(FuncId::literal("7a0265e1-9631-45bd-8ecd-1e923b67a58c"));
     ghost.name = "astro_to_image".into();
     let known_id = graph.add(known);
-    let mut fixture = DocumentFixture::with_library(graph, library);
+    let sub = SubgraphId::from_u128(1);
+    let subgraph = Subgraph::new("inner", Interface::new(Ports::default()));
+    let instance_id = graph.add(Node::instance(sub, &subgraph));
+    let mut graphs = GraphSet::from(graph);
+    graphs.insert_subgraph(sub, subgraph);
+    let mut fixture = DocumentFixture::with_library(graphs, library);
     let ghost_id = fixture.add_stub(ghost);
 
     let fixture = GraphCtxFixture::over(fixture);
     let graph_ctx = fixture.graph_ctx();
 
     // An unresolvable node is not dropped: it stays selectable and deletable.
-    assert_eq!(graph_ctx.nodes().count(), 2, "every placed node resolves");
+    assert_eq!(graph_ctx.nodes().count(), 3, "every placed node resolves");
     let known_node = graph_ctx.node(known_id).unwrap();
     let ghost_node = graph_ctx.node(ghost_id).unwrap();
 
@@ -94,6 +102,17 @@ fn a_missing_func_reads_as_a_deletable_stub() {
     assert!(
         !ghost_node.runnable(),
         "a stub offers no run affordance — it resolves to nothing"
+    );
+
+    // An instance resolves to its subgraph's face, but has no body to run or cache.
+    let instance = graph_ctx.node(instance_id).unwrap();
+    assert!(!instance.stub());
+    assert_eq!(instance.kind_label(), "inner");
+    assert_eq!(instance.cache(), None);
+    assert!(!instance.cacheable());
+    assert!(
+        !instance.runnable(),
+        "a node with no body is no program node"
     );
 }
 
@@ -157,7 +176,7 @@ fn cache_mode_reads_verbatim_per_node() {
         CacheMode::Both,
     ] {
         let mut node: Node = library.by_name("Add").unwrap().into();
-        node.cache = mode;
+        *node.cache_mut().unwrap() = mode;
         let node_id = graph.add(node);
         ids.push((node_id, mode));
     }
@@ -167,7 +186,7 @@ fn cache_mode_reads_verbatim_per_node() {
 
     for (id, mode) in ids {
         let node = graph_ctx.node(id).unwrap();
-        assert_eq!(node.cache(), mode, "{mode:?} reads verbatim");
+        assert_eq!(node.cache(), Some(mode), "{mode:?} reads verbatim");
         assert!(node.cacheable());
     }
 }

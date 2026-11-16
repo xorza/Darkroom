@@ -156,6 +156,10 @@ impl Theme {
     /// [`TypeColors`]; another custom or enum type lands on a ramp slot by its type id, so
     /// distinct types read distinct and stay stable. `Any`, which only an input declares, has no
     /// type identity and takes the untyped input color.
+    ///
+    /// The hue of a type as if registered: a port's color goes through
+    /// [`GraphCtx::port_color`](crate::gui::graph_ctx::GraphCtx::port_color), which gives a type
+    /// the library does not register the neutral untyped color instead.
     pub(crate) fn port_color(&self, data_type: DataType) -> RgbaF32 {
         let hues = &self.type_colors;
         let id = match data_type {

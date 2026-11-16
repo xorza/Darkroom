@@ -3,7 +3,7 @@
 use glam::Vec2;
 use palantir::InspectedWidget;
 use palantir::{Rect, Sense, Ui};
-use scenarium::{Binding, Func, Graph, InputPort, Library, OutputPort, ProgramId};
+use scenarium::{Binding, Graph, GraphId, InputPort, NodeDecl, OutputPort, ProgramId, Scope};
 use serde::Serialize;
 
 use crate::gui::app::App;
@@ -113,8 +113,8 @@ impl State {
     ) -> Self {
         let open = app.open_document();
         let document = open.document();
-        let graph = &document.graph;
-        let library = app.library();
+        let graph = document.graphs.main();
+        let scope = document.graphs.scope(app.library(), GraphId::Main);
         let detailed = detail == Detail::Detailed;
         let listed = |name: &str| nodes.is_none_or(|part| name.contains(part));
         // By name, then id: the graph's own order is a hash map's, which no two reports share.
@@ -131,7 +131,7 @@ impl State {
                 .take(NODE_LIMIT)
                 .map(|node| {
                     let id = node.node_id;
-                    let func = library.func_of(&node);
+                    let func = scope.resolve(&node);
                     let mut state = NodeSummary {
                         name: node.name.clone(),
                         func: func
@@ -150,7 +150,7 @@ impl State {
                                 .iter()
                                 .map(|input| PortSummary {
                                     name: input.name.clone(),
-                                    binding: binding(graph, library, InputPort::new(id, input.id)),
+                                    binding: binding(graph, scope, InputPort::new(id, input.id)),
                                 })
                                 .collect();
                             state.outputs = func
@@ -182,7 +182,7 @@ impl State {
             status: app.status().cur().map(|message| message.line.to_string()),
             log,
             details: detailed.then(|| Details {
-                wires: wires(graph, library, listed),
+                wires: wires(graph, scope, listed),
                 pan: document.main_view.viewport.pan,
                 zoom: document.main_view.viewport.zoom,
                 can_undo: open.can_undo(),
@@ -218,34 +218,34 @@ const fn rect(rect: Rect) -> [f32; 4] {
 }
 
 /// `<node>.<output>`, by name.
-fn output_name(graph: &Graph, library: &Library, output: OutputPort) -> String {
+fn output_name(graph: &Graph, scope: Scope<'_>, output: OutputPort) -> String {
     let Some(node) = graph.find(output.node_id) else {
         return format!("{}.{}", output.node_id, output.port);
     };
-    let port = library
-        .func_of(node)
+    let port = scope
+        .resolve(node)
         .ok()
         .and_then(|func| func.ports().output(output.port))
         .map_or_else(|| output.port.to_string(), |port| port.name.clone());
     format!("{}.{port}", node.name)
 }
 
-fn binding(graph: &Graph, library: &Library, input: InputPort) -> Option<String> {
+fn binding(graph: &Graph, scope: Scope<'_>, input: InputPort) -> Option<String> {
     graph
         .input_bindings(input.node_id)
         .find(|(port, _)| *port == input)
         .map(|(_, binding)| match binding {
-            Binding::Wire(output) => format!("wire from {}", output_name(graph, library, *output)),
+            Binding::Wire(output) => format!("wire from {}", output_name(graph, scope, *output)),
             Binding::Const(value) => format!("const {value:?}"),
         })
 }
 
 /// The wires with a node whose name `listed` keeps at either end, sorted: the graph's own order is
 /// a hash map's, which a reinsert by an undo changes.
-fn wires(graph: &Graph, library: &Library, listed: impl Fn(&str) -> bool) -> Vec<String> {
+fn wires(graph: &Graph, scope: Scope<'_>, listed: impl Fn(&str) -> bool) -> Vec<String> {
     let mut wires = Vec::new();
     for node in graph.iter() {
-        let ports = library.func_of(&node).ok().map(Func::ports);
+        let ports = scope.resolve(&node).ok().map(NodeDecl::ports);
         for (port, binding) in graph.input_bindings(node.node_id) {
             if let Binding::Wire(output) = binding
                 && (listed(&node.name)
@@ -258,7 +258,7 @@ fn wires(graph: &Graph, library: &Library, listed: impl Fn(&str) -> bool) -> Vec
                     .map_or_else(|| port.port.to_string(), |input| input.name.clone());
                 wires.push(format!(
                     "{} -> {}.{input}",
-                    output_name(graph, library, *output),
+                    output_name(graph, scope, *output),
                     node.name
                 ));
             }
@@ -270,6 +270,8 @@ fn wires(graph: &Graph, library: &Library, listed: impl Fn(&str) -> bool) -> Vec
 
 #[cfg(test)]
 mod tests {
+    use scenarium::GraphId;
+
     use crate::core::document::internals::DocumentFixture;
     use crate::driver::state::wires;
 
@@ -278,10 +280,11 @@ mod tests {
     #[test]
     fn the_wires_are_sorted_and_filtered_by_either_end() {
         let fixture = DocumentFixture::sample();
-        let graph = &fixture.document.graph;
+        let graphs = &fixture.document.graphs;
+        let (graph, scope) = (graphs.main(), graphs.scope(&fixture.library, GraphId::Main));
         // The sample wires get_a and get_b into sum, sum and get_b into mult, and mult into Print.
         assert_eq!(
-            wires(graph, &fixture.library, |_| true),
+            wires(graph, scope, |_| true),
             [
                 "get_a.out0 -> sum.in0",
                 "get_b.out0 -> mult.in1",
@@ -291,7 +294,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            wires(graph, &fixture.library, |name| name == "sum"),
+            wires(graph, scope, |name| name == "sum"),
             [
                 "get_a.out0 -> sum.in0",
                 "get_b.out0 -> sum.in1",

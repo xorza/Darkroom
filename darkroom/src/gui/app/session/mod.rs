@@ -26,7 +26,7 @@ use crate::gui::frame::stage::Stage;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::main_window::MainWindow;
 use palantir::{Shortcut, Ui};
-use scenarium::{Graph, Library};
+use scenarium::{GraphSet, Library};
 
 use crate::gui::frame::app_ctx::AppCtx;
 use crate::gui::frame::shortcuts;
@@ -43,11 +43,11 @@ pub(crate) struct Session {
 }
 
 impl Session {
-    /// The graph the runtime is compiled and run against — the one reach
+    /// The graphs the runtime is compiled and run against — the one reach
     /// across this boundary that is not a frame concern, so it is named here
     /// rather than spelled out at each of `App`'s run commands.
-    pub(crate) const fn graph(&self) -> &Graph {
-        &self.open.document().graph
+    pub(crate) const fn graphs(&self) -> &GraphSet {
+        &self.open.document().graphs
     }
 
     /// Open `open` in a fresh UI.

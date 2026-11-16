@@ -3,16 +3,16 @@
 //! has**, in one impl, so the whole surface is one file to read.
 //!
 //! The modules beside it keep what those methods work *with*: [`identity`]
-//! how a node or port is named, [`ports`] the inputs and outputs a func
-//! declares, [`detached`] the reversible-removal records, [`stub`] a node the
-//! graph cannot hold, [`error`] what validation and admission reject,
-//! [`reconciled`] what a load repaired.
+//! how a node or port is named, [`ports`] the inputs and outputs a declaration
+//! shows, [`detached`] the reversible-removal records,
+//! [`stub`] a node the graph cannot hold, [`error`] what validation and admission reject,
+//! [`reconciled`] what a load repaired, [`subgraph`] and [`graph_set`] the graphs a document
+//! holds, and [`scope`] what a graph's nodes resolve against.
 //!
-//! A graph a host keeps holds among its nodes only nodes that resolve to a
-//! [`Func`] declaration, and only wiring [`Graph::admit`] accepts; each node it
-//! cannot hold is a [`Stub`] beside them. [`Graph::reconcile`] makes a decoded
-//! graph so, and the host's edit gate keeps it so. A node's own id is the only
-//! name it has.
+//! A graph a host keeps holds among its nodes only nodes that resolve in its scope, and only
+//! wiring [`Graph::admit`] accepts; each node it cannot hold is a [`Stub`] beside them.
+//! [`GraphSet::reconcile`](crate::GraphSet::reconcile) makes a decoded set so, and the host's
+//! edit gate keeps it so. A node's own id is its only name in its graph.
 //!
 //! # Decisions
 //!
@@ -26,11 +26,12 @@
 //! - **One admission rule.** [`Graph::admit`] and [`Graph::admit_subscription`]
 //!   are the rule for the load, the edit gate and the compile's assert.
 //! - **A binding names a port by its id.** An input, an output and an event are
-//!   each a node and the id its declaration gives the port. A func that gains a
-//!   port keeps every saved node, the new port unbound; a port that leaves takes
-//!   only its own wiring, which the load refuses and reports as any binding the
-//!   declaration does not admit; a rename and a reorder change nothing. As
-//!   Blender finds a group's sockets by identifier
+//!   each a node and the id its declaration gives the port, on a func node, an
+//!   instance and a boundary node alike. A func that gains a port keeps every
+//!   saved node, the new port unbound; a port that leaves takes only its own
+//!   wiring, which the load refuses and reports as any binding the declaration
+//!   does not admit; a rename and a reorder change nothing. As Blender finds a
+//!   group's sockets by identifier
 //!   ([group creation](https://projects.blender.org/archive/blender-archive/commit/fa3ca9afdb6f1ea1b709226af3f085133e5ddc2f))
 //!   and Unreal gives a pin a persistent id as "pin name could be changed"
 //!   ([`UEdGraphPin`](https://dev.epicgames.com/documentation/unreal-engine/API/Runtime/Engine/UEdGraphPin)).
@@ -39,12 +40,16 @@
 //!   input. The compiled program stays positional: a compile maps each id to
 //!   its position once.
 //! - **A graph keeps the nodes it cannot hold.** Its stubs sit beside its nodes, the ids of the
-//!   two disjoint, so a graph is one value wherever it goes: a file, a copy. As Blender, which
-//!   swaps an unknown node for an "undefined" one in the tree and keeps its links
+//!   two disjoint, so a definition is one value wherever it goes: a clip, a library file, a
+//!   copy, a digest. As Blender, which swaps an unknown node for an "undefined" one in the tree
+//!   and keeps its links
 //!   ([undefined node](https://projects.blender.org/blender/blender/pulls/114783)). No reader of
 //!   the nodes sees a stub, so none needs a "declares nothing" branch. Refused: the stubs in the
-//!   host beside the graph, where a graph travels in two halves, the host writes the attach rules
-//!   a second time, and every edit of a node asks two containers which holds it.
+//!   host beside each graph, where a definition travels in two halves, the host writes the
+//!   attach rules a second time, and every edit of a node asks two containers which holds it.
+//! - **A repair reads, then writes.** Each step of a load asks a graph what to change under a
+//!   scope, drops the scope, and changes it. Refused: taking a graph out of its set for the call,
+//!   which leaves the set wrong while a scope reads it.
 //! - **The invariant is the host's contract, not a type.** `bindings` is a
 //!   public field and a graph holds no library, so no type can enforce
 //!   admission; the host's edit gate is the only way an edit lands.
@@ -55,8 +60,10 @@
 //! - **A data cycle is broken in node-id order.** A depth-first walk from each
 //!   node in id order removes each wire that returns to the current path, so
 //!   every load makes the same choice. Only a hand-edited file holds one.
-//! - **An output's type is its declaration.** No output is a wildcard or
-//!   `Any`, so no edit retypes a distant wire and every wire is checkable.
+//! - **An output's type is its declaration.** No output is a wildcard, so no
+//!   edit retypes a distant wire and every wire is checkable. No func declares
+//!   an `Any` output; the `Inputs` node of a subgraph shows one for a port made
+//!   from an `Any` input, held as declared, which feeds only `Any` inputs.
 //!   Refused: wildcard outputs, whose retype either removes wires you did not
 //!   touch or refuses the edit until you remove them by hand. Reroute nodes
 //!   need a new design.
@@ -75,28 +82,35 @@ use crate::graph::error::{
     BindingRejection, DetachReason, GraphValidationError, SubscriptionRejection, ValidationResult,
 };
 use crate::graph::func::Func;
-use crate::graph::identity::{EventPort, InputPort, NodeId, OutputPort, PortId};
-use crate::graph::node::Node;
+use crate::graph::identity::{EventPort, InputPort, NodeId, OutputPort, PortId, SubgraphId};
+use crate::graph::node::{Boundary, Node, NodeKind};
+use crate::graph::node_decl::NodeDecl;
 use crate::graph::node_ref::NodeRef;
 use crate::graph::reconciled::{Reconciled, Repair};
+use crate::graph::scope::Scope;
 use crate::graph::stub::Stub;
+use crate::graph::subgraph::Subgraph;
 use crate::graph::subscription::Subscription;
-use crate::library::Library;
 
 pub(crate) mod binding;
 pub(crate) mod binding_entry;
 pub(crate) mod detached;
 pub(crate) mod error;
 pub(crate) mod func;
+pub(crate) mod graph_set;
 pub(crate) mod identity;
 pub(crate) mod instance_path;
+pub(crate) mod interface;
 pub(crate) mod node;
+pub(crate) mod node_decl;
 pub(crate) mod node_ref;
 pub(crate) mod ports;
 pub(crate) mod program_id;
 pub(crate) mod reconciled;
+pub(crate) mod scope;
 mod serde;
 pub(crate) mod stub;
+pub(crate) mod subgraph;
 pub(crate) mod subscription;
 
 /// `Clone` keeps every node id as it is, so a copy is sound only where it never lives beside its
@@ -140,17 +154,18 @@ pub struct Graph {
     stubs: BTreeMap<NodeId, Stub>,
 }
 
-/// A node a reconcile takes out of its graph, and why: what a read of the graph answers, which
-/// the write then detaches.
+/// A node a reconcile takes out of its graph, and why: what a read of the graph under its scope
+/// answers, which the write then detaches.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Detaching {
-    node_id: NodeId,
-    reason: DetachReason,
+pub(crate) struct Detaching {
+    pub(crate) node_id: NodeId,
+    pub(crate) reason: DetachReason,
 }
 
-/// Wiring a library refuses: what a read of a graph answers, which the write then removes.
+/// Wiring a scope refuses: what a read of a graph under its scope answers, which the write then
+/// removes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum RefusedWiring {
+pub(crate) enum RefusedWiring {
     Binding {
         port: InputPort,
         rejection: BindingRejection,
@@ -260,7 +275,9 @@ impl Graph {
     /// Whether this graph may hold `binding` on `port`: the input is one its
     /// node declares, a constant is one the input accepts, and a wire reads an
     /// output its producer declares, of a type the input accepts, into an
-    /// input that is not const-only. The one rule a load, an edit and a
+    /// input that is not const-only unless the output holds only a constant
+    /// itself, as the `Inputs` node's mirror of a const-only interface input
+    /// does. The one rule a load, an edit and a
     /// compile hold wiring to. A cycle is the graph's question, not the
     /// binding's — see [`Self::produces_cycle`].
     ///
@@ -269,17 +286,17 @@ impl Graph {
     /// If the graph does not hold the consumer, or the producer of a wire.
     pub fn admit(
         &self,
-        library: &Library,
+        scope: Scope<'_>,
         port: InputPort,
         binding: &Binding,
     ) -> Result<(), BindingRejection> {
         let consumer = self
             .find(port.node_id)
             .expect("an admitted binding's consumer is in the graph")
-            .func(library);
-        self.admit_onto(library, consumer, port, binding)
+            .decl(scope);
+        self.admit_onto(scope, consumer, port, binding)
     }
-    /// [`Self::admit`] onto a consumer that instantiates `consumer` — for a
+    /// [`Self::admit`] onto a consumer that declares `consumer` — for a
     /// node an edit is inserting together with its bindings, which the graph
     /// does not hold yet.
     ///
@@ -288,8 +305,8 @@ impl Graph {
     /// If the graph does not hold the producer of a wire.
     pub fn admit_onto(
         &self,
-        library: &Library,
-        consumer: &Func,
+        scope: Scope<'_>,
+        consumer: NodeDecl<'_>,
         port: InputPort,
         binding: &Binding,
     ) -> Result<(), BindingRejection> {
@@ -299,25 +316,28 @@ impl Graph {
             .ok_or(BindingRejection::UndeclaredInput)?;
         match binding {
             Binding::Const(value) => {
-                if library.const_satisfies(input, value) {
+                if scope.library().const_satisfies(input, value) {
                     Ok(())
                 } else {
                     Err(BindingRejection::ConstMismatch)
                 }
             }
             Binding::Wire(source) => {
-                if input.const_only {
-                    return Err(BindingRejection::WiredConstOnly);
-                }
                 let producer = self
                     .find(source.node_id)
                     .expect("an admitted wire's producer is in the graph")
-                    .func(library);
+                    .decl(scope);
                 let output = producer
                     .ports()
                     .output(source.port)
                     .ok_or(BindingRejection::UndeclaredOutput)?;
-                if library.wire_satisfies(input.data_type, output.data_type) {
+                if input.const_only && !producer.output_is_const(source.port) {
+                    return Err(BindingRejection::WiredConstOnly);
+                }
+                if scope
+                    .library()
+                    .wire_satisfies(input.data_type, output.data_type)
+                {
                     Ok(())
                 } else {
                     Err(BindingRejection::WireMismatch)
@@ -326,24 +346,31 @@ impl Graph {
         }
     }
     /// Whether this graph may hold `subscription`: the emitter declares the
-    /// event, and the subscriber is another node.
+    /// event, and the subscriber is another node with a body to run. A subscription stays inside
+    /// one graph: an interface has no event ports.
     ///
     /// # Panics
     ///
-    /// If the graph does not hold the emitter.
+    /// If the graph does not hold the emitter or the subscriber.
     pub fn admit_subscription(
         &self,
-        library: &Library,
+        scope: Scope<'_>,
         subscription: Subscription,
     ) -> Result<(), SubscriptionRejection> {
         let Subscription { event, subscriber } = subscription;
         if event.node_id == subscriber {
             return Err(SubscriptionRejection::SelfSubscription);
         }
+        let subscriber = self
+            .find(subscriber)
+            .expect("an admitted subscription's subscriber is in the graph");
+        if !matches!(subscriber.kind, NodeKind::Body { .. }) {
+            return Err(SubscriptionRejection::BodilessSubscriber);
+        }
         let emitter = self
             .find(event.node_id)
             .expect("an admitted subscription's emitter is in the graph")
-            .func(library);
+            .decl(scope);
         if emitter.event(event.event).is_some() {
             Ok(())
         } else {
@@ -477,6 +504,20 @@ impl Graph {
         node_id
     }
 
+    /// Add an instance of `subgraph`, held under `id`, and seed its inputs' default const
+    /// bindings. Returns the new node id.
+    pub fn add_instance(&mut self, id: SubgraphId, subgraph: &Subgraph) -> NodeId {
+        let node_id = self.add(Node::instance(id, subgraph));
+        self.bindings.extend(
+            subgraph
+                .interface
+                .ports()
+                .default_bindings(node_id)
+                .map(|entry| (entry.port, entry.binding)),
+        );
+        node_id
+    }
+
     pub fn detach_node(&mut self, node_id: NodeId) -> DetachedNode {
         let detached = self
             .snapshot_node(node_id)
@@ -593,24 +634,39 @@ impl Graph {
         Ok(())
     }
 
-    /// Validate this graph as one a host may compile against `library`: the
-    /// structure, then the load contract — every node resolves, every binding
-    /// and subscription is admitted, and no wire closes a data cycle.
+    /// Validate this graph as one a host may compile in `scope`: the
+    /// structure, then the load contract — every node resolves, a subgraph's
+    /// graph holds one boundary node a side, every binding and subscription is
+    /// admitted, and no wire closes a data cycle. What lies across graphs, the
+    /// recursion and the bounds, is
+    /// [`GraphSet::validate_with`](crate::GraphSet::validate_with)'s.
     ///
-    /// What [`Self::reconcile`] establishes at load and the edit gate keeps,
-    /// so a failure here is the host's bug: a compile asserts it.
-    pub fn validate_with(&self, library: &Library) -> ValidationResult<()> {
+    /// What a load establishes and the edit gate keeps, so a failure here is
+    /// the host's bug: a compile asserts it.
+    pub fn validate_with(&self, scope: Scope<'_>) -> ValidationResult<()> {
         self.validate()?;
         for (node_id, node) in &self.nodes {
-            if let Err(reason) = library.func_of(node) {
+            if let Err(reason) = scope.resolve(node) {
                 return Err(GraphValidationError::Unresolved {
                     node_id: *node_id,
                     reason,
                 });
             }
         }
+        if scope.owner().is_some() {
+            for boundary in [Boundary::Inputs, Boundary::Outputs] {
+                let count = self
+                    .nodes
+                    .values()
+                    .filter(|node| node.boundary() == Some(boundary))
+                    .count();
+                if count != 1 {
+                    return Err(GraphValidationError::BoundaryCount { boundary, count });
+                }
+            }
+        }
         for (port, binding) in &self.bindings {
-            self.admit(library, *port, binding).map_err(|rejection| {
+            self.admit(scope, *port, binding).map_err(|rejection| {
                 GraphValidationError::RejectedBinding {
                     port: *port,
                     rejection,
@@ -618,7 +674,7 @@ impl Graph {
             })?;
         }
         for subscription in self.subscriptions() {
-            self.admit_subscription(library, subscription)
+            self.admit_subscription(scope, subscription)
                 .map_err(|rejection| GraphValidationError::RejectedSubscription {
                     subscription,
                     rejection,
@@ -630,32 +686,9 @@ impl Graph {
         Ok(())
     }
 
-    /// Make a decoded graph one `library` can run, and report each change: remove a node under
-    /// the nil id, each stub saved under a node's id and the wiring that names a missing node;
-    /// attach each stub whose node resolves again; keep each node the library does not resolve
-    /// as a stub with the wiring that touches it; remove each binding and subscription
-    /// [`admit`](Self::admit) refuses; and remove each wire that closes a data cycle. Each step
-    /// reads what to change, then changes it. Afterwards [`Self::validate_with`] holds.
-    pub fn reconcile(&mut self, library: &Library) -> Reconciled {
-        let mut reconciled = Reconciled::default();
-        self.repair_structure(&mut reconciled);
-        let resolving = self.resolving_stubs(library);
-        self.reattach(&resolving, &mut reconciled);
-        let unresolved = self.unresolved(library);
-        self.detach_into_stubs(&unresolved, &mut reconciled);
-        let refused = self.refused_wiring(library);
-        self.remove_refused(&refused, &mut reconciled);
-        debug_assert!(
-            self.validate_with(library).is_ok(),
-            "a reconciled graph holds the load contract: {:?}",
-            self.validate_with(library)
-        );
-        reconciled
-    }
-
     /// The repairs that need nothing but the graph itself: remove a node under the nil id, each
     /// stub saved under a node's id, and the wiring that names a missing node.
-    fn repair_structure(&mut self, reconciled: &mut Reconciled) {
+    pub(crate) fn repair_structure(&mut self, reconciled: &mut Reconciled) {
         let repairs = &mut reconciled.repairs;
         if self.nodes.remove(&NodeId::nil()).is_some() {
             repairs.push(Repair::NilNode);
@@ -694,12 +727,12 @@ impl Graph {
         });
     }
 
-    /// The stubs whose node `library` resolves, in node-id order: what [`Self::reattach`]
-    /// attaches.
-    fn resolving_stubs(&self, library: &Library) -> Vec<NodeId> {
+    /// The stubs whose node resolves in `scope`, in node-id order: what
+    /// [`Self::reattach`] attaches.
+    pub(crate) fn resolving_stubs(&self, scope: Scope<'_>) -> Vec<NodeId> {
         self.stubs
             .values()
-            .filter(|stub| library.func_of(stub.record.node()).is_ok())
+            .filter(|stub| scope.resolve(stub.record.node()).is_ok())
             .map(Stub::node_id)
             .collect()
     }
@@ -708,7 +741,7 @@ impl Graph {
     /// input the graph has not bound since; report each attach and each piece of wiring dropped.
     /// The nodes go in before any wiring, so an edge between two attached stubs finds its other
     /// end.
-    fn reattach(&mut self, stubs: &[NodeId], reconciled: &mut Reconciled) {
+    pub(crate) fn reattach(&mut self, stubs: &[NodeId], reconciled: &mut Reconciled) {
         let stubs: Vec<Stub> = stubs
             .iter()
             .map(|node_id| {
@@ -754,18 +787,49 @@ impl Graph {
         }
     }
 
-    /// The nodes `library` does not resolve, in node-id order, each with why.
-    fn unresolved(&self, library: &Library) -> Vec<Detaching> {
+    /// Add the boundary node a subgraph's graph lacks on each side, under a fresh id.
+    pub(crate) fn add_missing_boundaries(&mut self, reconciled: &mut Reconciled) {
+        for boundary in [Boundary::Inputs, Boundary::Outputs] {
+            if !self
+                .nodes
+                .values()
+                .any(|node| node.boundary() == Some(boundary))
+            {
+                let node_id = self.add(Node::from(boundary));
+                reconciled
+                    .repairs
+                    .push(Repair::BoundaryAdded { boundary, node_id });
+            }
+        }
+    }
+
+    /// The nodes `scope` does not let this graph hold, in node-id order: each node it does not
+    /// resolve, and in a subgraph's graph each boundary node past the lowest id on its side.
+    pub(crate) fn unresolved(&self, scope: Scope<'_>) -> Vec<Detaching> {
         let mut refused: Vec<Detaching> = self
             .nodes
             .iter()
             .filter_map(|(node_id, node)| {
-                library.func_of(node).err().map(|reason| Detaching {
+                scope.resolve(node).err().map(|reason| Detaching {
                     node_id: *node_id,
                     reason: DetachReason::from(reason),
                 })
             })
             .collect();
+        if scope.owner().is_some() {
+            for boundary in [Boundary::Inputs, Boundary::Outputs] {
+                let mut held: Vec<NodeId> = self
+                    .iter()
+                    .filter(|node| node.boundary() == Some(boundary))
+                    .map(|node| node.node_id)
+                    .collect();
+                held.sort_unstable();
+                refused.extend(held.iter().skip(1).map(|node_id| Detaching {
+                    node_id: *node_id,
+                    reason: DetachReason::ExtraBoundary,
+                }));
+            }
+        }
         refused.sort_unstable_by_key(|detaching| detaching.node_id);
         refused
     }
@@ -773,7 +837,7 @@ impl Graph {
     /// Detach each node of `refused` into a stub that keeps its reason, in the order given, and
     /// report each. Each stub holds the wiring that touched its node when it was detached, so a
     /// node detached later does not hold an edge an earlier stub took.
-    fn detach_into_stubs(&mut self, refused: &[Detaching], reconciled: &mut Reconciled) {
+    pub(crate) fn detach_into_stubs(&mut self, refused: &[Detaching], reconciled: &mut Reconciled) {
         for &Detaching { node_id, reason } in refused {
             let record = self.detach_node(node_id);
             self.insert_stub(Stub { record, reason });
@@ -781,11 +845,11 @@ impl Graph {
         }
     }
 
-    /// Each binding and subscription `library` refuses, the bindings first, each in the order
-    /// the graph keeps it: what [`Self::remove_refused`] removes.
-    fn refused_wiring(&self, library: &Library) -> Vec<RefusedWiring> {
+    /// Each binding and subscription `scope` refuses, the bindings first, each in the order the
+    /// graph keeps it: what [`Self::remove_refused`] removes.
+    pub(crate) fn refused_wiring(&self, scope: Scope<'_>) -> Vec<RefusedWiring> {
         let bindings = self.bindings.iter().filter_map(|(port, binding)| {
-            self.admit(library, *port, binding)
+            self.admit(scope, *port, binding)
                 .err()
                 .map(|rejection| RefusedWiring::Binding {
                     port: *port,
@@ -793,7 +857,7 @@ impl Graph {
                 })
         });
         let subscriptions = self.subscriptions().filter_map(|subscription| {
-            self.admit_subscription(library, subscription)
+            self.admit_subscription(scope, subscription)
                 .err()
                 .map(|rejection| RefusedWiring::Subscription {
                     subscription,
@@ -804,7 +868,11 @@ impl Graph {
     }
 
     /// Remove each piece of `refused`, then each wire that closes a data cycle, and report each.
-    fn remove_refused(&mut self, refused: &[RefusedWiring], reconciled: &mut Reconciled) {
+    pub(crate) fn remove_refused(
+        &mut self,
+        refused: &[RefusedWiring],
+        reconciled: &mut Reconciled,
+    ) {
         for &refusal in refused {
             match refusal {
                 RefusedWiring::Binding { port, rejection } => {

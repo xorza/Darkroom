@@ -9,9 +9,9 @@
 //! Self-contained: everything a run needs was copied out of the
 //! [`Library`](crate::library::Library) at compile.
 //!
-//! **One program node, one execution node, one [`ProgramId`].** A node of the main graph is one
-//! program node, under its own id as a path of one. Resolving a program id against the artifact is
-//! a search of its own id column.
+//! **One program node, one execution node, one [`ProgramId`].** An authored node outside every
+//! instance is one program node; one inside a subgraph is one per instance, each under its own
+//! path. Resolving a program id against the artifact is a search of its own id column.
 
 use std::mem;
 use std::ops::Index;
@@ -77,8 +77,8 @@ pub(crate) struct ExecNode {
     /// root is configured — see the `digest` and `disk_store` modules.
     pub(crate) cache: CacheMode,
 
-    /// `Some` for a built-in [`SpecialNode`] (lowered from
-    /// [`NodeKind::Special`](crate::graph::node::NodeKind::Special)). The planner
+    /// `Some` for a built-in [`SpecialNode`] (lowered from a
+    /// [`BodySource::Special`](crate::graph::node::BodySource::Special) node). The planner
     /// recognizes the kind — a subscribed `RunSinks` promotes a fired event
     /// into a full sinks run — and it marks the node's interface as coming
     /// from the hardcoded spec rather than the library.
@@ -101,7 +101,7 @@ pub(crate) struct ExecNode {
 #[derive(Debug, Default)]
 pub struct CompiledGraph {
     /// The dense node column — every per-run column and set aligns to it. Ordered by
-    /// `ProgramId`, so compiled artifacts are deterministic however the authoring graph was
+    /// `ProgramId`, so compiled artifacts are deterministic however the authoring graphs were
     /// walked.
     pub(crate) e_nodes: Col<NodeIdx, ExecNode>,
     /// `NodeIdx` → program id, for the host boundary (reports, seeds, eviction, cache slots) —
@@ -142,6 +142,14 @@ impl CompiledGraph {
     /// node seed a run" and "does a report naming this node belong to this install".
     pub fn contains(&self, program_id: ProgramId) -> bool {
         self.node(program_id).is_some()
+    }
+
+    /// Whether any program node persists its value to disk, so a run of this program has a disk
+    /// store to write to.
+    pub fn persists_to_disk(&self) -> bool {
+        self.e_nodes
+            .iter()
+            .any(|e_node| e_node.cache.persists_to_disk())
     }
 
     /// Every node that reads `seeds`' outputs, transitively, plus the seeds themselves — in this

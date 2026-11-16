@@ -1,6 +1,6 @@
 //! Structural validation errors for documents and their per-graph editor views.
 
-use scenarium::{GraphValidationError, NodeId};
+use scenarium::{GraphId, GraphValidationError, NodeAddr, NodeId};
 
 use crate::core::document::item_id::ItemId;
 use crate::core::document::tab_ref::TabRef;
@@ -48,8 +48,12 @@ pub(crate) enum RouteError {
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum DocumentValidationError {
-    #[error(transparent)]
-    Graph(#[from] GraphValidationError),
+    #[error("graph {graph:?}")]
+    Graph {
+        graph: GraphId,
+        #[source]
+        source: GraphValidationError,
+    },
     #[error("main view")]
     MainView {
         #[source]
@@ -57,6 +61,6 @@ pub(crate) enum DocumentValidationError {
     },
     #[error("open tab {tab:?} names no preview node in the graph")]
     MissingTab { tab: TabRef },
-    #[error("node {node_id:?} holds the relative path {path:?}, which memory holds resolved")]
-    RelativePath { node_id: NodeId, path: String },
+    #[error("node {node:?} holds the relative path {path:?}, which memory holds resolved")]
+    RelativePath { node: NodeAddr, path: String },
 }

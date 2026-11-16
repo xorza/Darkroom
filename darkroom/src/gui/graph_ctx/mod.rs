@@ -17,8 +17,11 @@ pub(crate) mod output_ctx;
 
 use std::collections::BTreeSet;
 
-use palantir::Display;
-use scenarium::{DataType, Graph, InputPort, Library, NodeId, OutputPort, ProgramId, Subscription};
+use palantir::{Display, RgbaF32};
+use scenarium::{
+    DataType, Graph, GraphId, InputPort, Library, NodeId, OutputPort, ProgramId, Scope,
+    Subscription,
+};
 
 use crate::core::document::Document;
 use crate::core::document::graph_view::{GraphView, StackedNode};
@@ -88,7 +91,7 @@ impl<'a> GraphCtx<'a> {
 
     /// The authoring graph this pane shows.
     pub(crate) const fn body(self) -> &'a Graph {
-        &self.document().graph
+        self.document().graphs.main()
     }
 
     /// Its view metadata: placements, viewport, committed selection.
@@ -115,6 +118,23 @@ impl<'a> GraphCtx<'a> {
         self.app.library()
     }
 
+    /// The color a port of `data_type` paints at rest, and the wires touching it: its type's hue
+    /// ([`Theme::port_color`]), or the neutral untyped color for a type the library does not
+    /// register, which a subgraph's interface keeps as written.
+    pub(crate) fn port_color(self, data_type: DataType) -> RgbaF32 {
+        let theme = self.theme();
+        if self.library().knows(data_type) {
+            theme.port_color(data_type)
+        } else {
+            theme.port.input
+        }
+    }
+
+    /// What the nodes of the graph this pane shows resolve against.
+    pub(crate) fn scope(self) -> Scope<'a> {
+        self.document().graphs.scope(self.library(), GraphId::Main)
+    }
+
     /// The last run's results, for the readers that want more of a node than
     /// its [`NodeCtx`] surfaces — its logs, its failure message, the value
     /// a preview published.
@@ -134,7 +154,7 @@ impl<'a> GraphCtx<'a> {
             .body()
             .find(port.node_id)
             .expect("a painted port's node is in the graph")
-            .func(self.library())
+            .decl(self.scope())
             .ports();
         let declared = match port.kind {
             PortKind::Input => ports.input(port.port).map(|input| input.data_type),

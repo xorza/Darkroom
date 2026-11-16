@@ -75,7 +75,7 @@ impl TestEngine {
     }
 
     pub(crate) fn reinstall(&mut self) {
-        self.engine.update(&self.graph.graph, &self.graph.library);
+        self.engine.update(&self.graph.graphs, &self.graph.library);
     }
 
     /// Point the cache's disk tier at `root`, using this graph's own codecs. Between runs, like a

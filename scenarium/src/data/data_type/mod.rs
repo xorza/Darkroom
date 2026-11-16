@@ -192,7 +192,7 @@ impl DataType {
 /// meant.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Strictness {
-    /// A declared default, at registration: a func's.
+    /// A declared default, at registration: a func's, or an interface's.
     Declared,
     /// A document's authored `Const`, at compile.
     Authored,

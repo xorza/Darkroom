@@ -45,9 +45,9 @@ impl NodeEntry {
     /// Read `node_id`'s whole entry out of `document`, a graph node or a stub, or `None` when the
     /// document no longer holds it, the ordinary outcome of an intent that spans frames.
     pub(crate) fn capture(document: &Document, node_id: NodeId) -> Option<Self> {
-        let held = match document.graph.snapshot_node(node_id) {
+        let held = match document.graphs.main().snapshot_node(node_id) {
             Some(record) => Held::Node(record),
-            None => Held::Stub(document.graph.stub(node_id)?.clone()),
+            None => Held::Stub(document.graphs.main().stub(node_id)?.clone()),
         };
         Some(Self {
             placement: *document
@@ -84,8 +84,8 @@ impl NodeEntry {
     fn restore(&self, document: &mut Document) {
         let node_id = self.node_id();
         match &self.held {
-            Held::Node(record) => document.graph.attach_node(record.clone()),
-            Held::Stub(stub) => document.graph.insert_stub(stub.clone()),
+            Held::Node(record) => document.graphs.main_mut().attach_node(record.clone()),
+            Held::Stub(stub) => document.graphs.main_mut().insert_stub(stub.clone()),
         }
         document
             .main_view

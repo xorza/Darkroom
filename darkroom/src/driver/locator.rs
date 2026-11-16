@@ -3,7 +3,7 @@
 
 use glam::Vec2;
 use palantir::{Found, Locate, LocateError, Rect, Ui};
-use scenarium::{NodeId, PortId};
+use scenarium::{GraphId, NodeId, PortId};
 
 use crate::gui::app::App;
 use crate::gui::pane::graph_ui::canvas;
@@ -68,7 +68,7 @@ impl Locate<App> for EditorTarget {
             Self::Node(node) | Self::NodeHeader(node) | Self::Port { node, .. } => {
                 let ids = node_ids(app, node);
                 if ids.is_empty() {
-                    let graph = &app.open_document().document().graph;
+                    let graph = app.open_document().document().graphs.main();
                     return Err(LocateError::NotFound {
                         locator: locator(),
                         nearest: nearest(
@@ -118,7 +118,8 @@ fn visible(rect: Option<Rect>) -> Option<Rect> {
 fn node_ids(app: &App, node: &str) -> Vec<NodeId> {
     app.open_document()
         .document()
-        .graph
+        .graphs
+        .main()
         .iter()
         .filter(|candidate| candidate.name == node || candidate.node_id.to_string() == node)
         .map(|candidate| candidate.node_id)
@@ -133,32 +134,32 @@ fn find_port(
     side: Side,
     port: &str,
 ) -> Result<PortRef, LocateError> {
-    let node = app
-        .open_document()
-        .document()
-        .graph
+    let graphs = &app.open_document().document().graphs;
+    let node = graphs
+        .main()
         .find(node_id)
         .expect("a node the locator found is in the graph");
-    let ports: Vec<(PortId, String)> = match app.library().func_of(node) {
-        Ok(func) => match side {
-            Side::In => func
-                .inputs()
-                .iter()
-                .map(|input| (input.id, input.name.clone()))
-                .collect(),
-            Side::Out => func
-                .outputs()
-                .iter()
-                .map(|output| (output.id, output.name.clone()))
-                .collect(),
-        },
-        Err(why) => {
-            return Err(LocateError::NotFound {
-                locator: format!("{target:?}"),
-                nearest: vec![format!("the node's func does not resolve: {why:?}")],
-            });
-        }
-    };
+    let ports: Vec<(PortId, String)> =
+        match graphs.scope(app.library(), GraphId::Main).resolve(node) {
+            Ok(func) => match side {
+                Side::In => func
+                    .inputs()
+                    .iter()
+                    .map(|input| (input.id, input.name.clone()))
+                    .collect(),
+                Side::Out => func
+                    .outputs()
+                    .iter()
+                    .map(|output| (output.id, output.name.clone()))
+                    .collect(),
+            },
+            Err(why) => {
+                return Err(LocateError::NotFound {
+                    locator: format!("{target:?}"),
+                    nearest: vec![format!("the node's func does not resolve: {why:?}")],
+                });
+            }
+        };
     let idx = ports
         .iter()
         .position(|(_, name)| name == port)

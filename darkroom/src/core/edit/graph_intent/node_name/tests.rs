@@ -12,7 +12,7 @@ fn a_taken_name_takes_the_smallest_free_number() {
         for name in names {
             fixture.add(name, |spec| spec);
         }
-        fixture.graph
+        fixture.graph().clone()
     };
     let cases: [(&[&str], &str, &str); 8] = [
         (&[], "B", "B"),

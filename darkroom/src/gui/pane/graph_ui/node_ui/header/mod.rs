@@ -206,7 +206,9 @@ fn cache_button(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     let node = record.node;
     let theme = node.theme();
     let wid = cache_button_wid(node.node_id);
-    let cache = node.cache();
+    let cache = node
+        .cache()
+        .expect("a header shows the cache button of a node with a body");
     let (ram, disk) = (cache.caches_in_ram(), cache.persists_to_disk());
     IconButton::press(
         Icon::Cache,

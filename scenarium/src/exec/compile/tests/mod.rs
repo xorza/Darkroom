@@ -4,12 +4,15 @@ use super::*;
 use crate::data::const_value::ConstValue;
 use crate::data::data_type::DataType;
 use crate::exec::compile::error::{CompiledGraphValidationError, PortPool};
+use crate::graph::Graph;
 use crate::graph::identity::FuncId;
 use crate::graph::node::Node;
 use crate::internals;
 use crate::internals::program::ProgramBuilder;
 use crate::internals::test_graph::compiled::Compiled;
 use crate::internals::test_graph::{NodeSpec, TestGraph};
+
+mod flatten;
 
 /// The walk wires a subscription to the emitter's own event slot, and the
 /// artifact carries a range backstop under it — kept because the subscriber
@@ -118,7 +121,7 @@ fn dense_order_is_id_order() {
     for &node_id in &authored {
         graph.insert(node_id, Node::from(&func));
     }
-    let compiled = Compiler::default().compile(&graph, &fixture.library);
+    let compiled = Compiler::default().compile(&GraphSet::from(graph), &fixture.library);
 
     let program_ids: Vec<_> = compiled.program_ids.iter().copied().collect();
     let expected: Vec<ProgramId> = (1..=8u128)
@@ -259,9 +262,9 @@ fn a_reused_compiler_produces_what_a_fresh_one_does() {
         .collect();
 
     let mut reused = Compiler::default();
-    reused.compile(&warmup.graph, &warmup.library);
-    let after_reuse = reused.compile(&subject.graph, &subject.library);
-    let fresh = Compiler::default().compile(&subject.graph, &subject.library);
+    reused.compile(&warmup.graphs, &warmup.library);
+    let after_reuse = reused.compile(&subject.graphs, &subject.library);
+    let fresh = Compiler::default().compile(&subject.graphs, &subject.library);
 
     assert_eq!(
         summary(&after_reuse, &authored),
@@ -283,9 +286,9 @@ fn recompiling_one_graph_does_not_accumulate_in_the_reused_buffers() {
         .collect();
     let mut compiler = Compiler::default();
 
-    let first = compiler.compile(&g.graph, &g.library);
+    let first = compiler.compile(&g.graphs, &g.library);
     let first_summary = summary(&first, &authored);
-    let second = compiler.compile(&g.graph, &g.library);
+    let second = compiler.compile(&g.graphs, &g.library);
 
     assert_eq!(summary(&second, &authored), first_summary);
     assert_eq!(second.inputs.len(), first.inputs.len());
@@ -420,7 +423,7 @@ fn a_port_lands_at_its_declared_position_whatever_its_number() {
     );
     graph.subscribe(EventPort::new(a, numbered_port(1)), b);
 
-    let compiled = Compiler::default().compile(&graph, &library);
+    let compiled = Compiler::default().compile(&GraphSet::from(graph), &library);
     let a_idx = compiled.node(ProgramId::from(a)).unwrap();
     let b_idx = compiled.node(ProgramId::from(b)).unwrap();
     let inputs = &compiled.inputs[compiled[b_idx].inputs];
@@ -436,7 +439,6 @@ fn a_port_lands_at_its_declared_position_whatever_its_number() {
     assert!(compiled.subscribers[events[0].subscribers].is_empty());
     assert_eq!(compiled.subscribers[events[1].subscribers], [b_idx]);
 }
-
 /// A graph that breaks the load contract is the host's bug, so the compile
 /// stops in every build, naming the binding the load or the edit gate should
 /// have refused.
@@ -495,6 +497,13 @@ fn wires_each_event_with_the_subscribers_resolved_for_it() {
         1,
         "one column holds every event's subscribers"
     );
+
+    // The subscription names event 2, which the program finds at its position, wherever the
+    // declaration puts it.
+    g.edit_func("emitter", |builder| builder.events.reverse());
+    let compiled = g.compile();
+    assert_eq!(compiled.subscribers("emitter", 0), ["listener"]);
+    assert!(compiled.subscribers("emitter", 1).is_empty());
 }
 
 /// A subscription whose emitter or subscriber is disabled wires nothing.

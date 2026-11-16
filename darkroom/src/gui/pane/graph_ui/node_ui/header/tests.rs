@@ -98,7 +98,13 @@ const CLEAR: usize = 2;
 fn pick(from: CacheMode, row: usize) -> Pick {
     let mut h = CanvasHarness::shaping_text(DocumentFixture::probes(1), SURFACE);
     let node_id = h.node(0);
-    h.document_mut().graph.find_mut(node_id).unwrap().cache = from;
+    *h.document_mut()
+        .graphs
+        .main_mut()
+        .find_mut(node_id)
+        .unwrap()
+        .cache_mut()
+        .unwrap() = from;
     h.prime(2);
     let button =
         h.ui.rect(cache_button_wid(node_id))
@@ -193,7 +199,8 @@ fn the_inspect_button_selects_its_node_and_opens_one_inspector() {
         .session
         .open
         .document()
-        .graph
+        .graphs
+        .main()
         .iter()
         .map(|node| node.node_id)
         .collect();

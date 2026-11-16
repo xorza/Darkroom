@@ -29,12 +29,18 @@ pub(crate) enum PropertyChange {
 impl Reversible for SetNodeProperty {
     fn write(&self, document: &mut Document, dir: Direction) {
         let node = document
-            .graph
+            .graphs
+            .main_mut()
             .find_mut(self.node_id)
             .expect("history replays a property change against the node it recorded");
         match &self.property {
             PropertyChange::Disabled(change) => node.disabled = *change.half(dir),
-            PropertyChange::RuntimeCache(change) => node.cache = *change.half(dir),
+            PropertyChange::RuntimeCache(change) => {
+                *node
+                    .cache_mut()
+                    .expect("history replays a cache mode against a node with a body") =
+                    *change.half(dir);
+            }
         }
     }
 

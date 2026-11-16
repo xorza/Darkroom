@@ -38,6 +38,10 @@ pub(crate) enum MalformedIntent {
     /// it can run.
     #[error("new node does not resolve: {reason}")]
     UnresolvedNode { reason: Unresolved },
+    /// A cache mode set on a node with no body, an instance or a boundary node, which caches
+    /// nothing of its own: the canvas draws no cache chips on one, so this is a widget's bug.
+    #[error("node {node_id:?} has no body, so no cache mode")]
+    NoCacheMode { node_id: NodeId },
     /// An insertion's own wiring pointing at a node the graph doesn't hold. Unlike a stale
     /// reference this is malformed: the wiring is authored together with its node.
     #[error("{role} node {node_id:?} is not in the graph")]

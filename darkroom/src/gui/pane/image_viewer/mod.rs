@@ -510,7 +510,8 @@ pub(crate) fn node_label(document: &Document, program_id: ProgramId) -> &str {
         "a viewer tab names a node of the main graph"
     );
     let node = document
-        .graph
+        .graphs
+        .main()
         .find(program_id.node_id())
         .expect("a viewer tab's node is in the graph");
     format::node_name(&node.name)

@@ -1,13 +1,15 @@
-//! [`Reconciled`]: what [`Graph::reconcile`](crate::Graph::reconcile) changed in a decoded graph
-//! so that it holds only what a library can run.
+//! [`Reconciled`]: what [`GraphSet::reconcile`](crate::GraphSet::reconcile) changed in each
+//! decoded graph so that it holds only what its scope can run.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
 use crate::graph::binding::Binding;
 use crate::graph::binding_entry::BindingEntry;
 use crate::graph::error::{BindingRejection, DetachReason, SubscriptionRejection};
-use crate::graph::identity::{InputPort, NodeId, OutputPort};
+use crate::graph::identity::{InputPort, NodeId, OutputPort, SubgraphId};
+use crate::graph::node::Boundary;
 use crate::graph::subscription::Subscription;
 
 /// Every change a reconcile made to one graph, in the order it made them.
@@ -20,6 +22,22 @@ impl Reconciled {
     /// Whether the graph was already one the library can run.
     pub const fn is_empty(&self) -> bool {
         self.repairs.is_empty()
+    }
+}
+
+/// Every change a load made to a set of graphs, graph by graph: what
+/// [`GraphSet::reconcile`](crate::GraphSet::reconcile) reports.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct GraphSetReconciled {
+    pub main: Reconciled,
+    /// Only the subgraphs a load changed.
+    pub subgraphs: BTreeMap<SubgraphId, Reconciled>,
+}
+
+impl GraphSetReconciled {
+    /// Whether the set was already one the library can run.
+    pub fn is_empty(&self) -> bool {
+        self.main.is_empty() && self.subgraphs.is_empty()
     }
 }
 
@@ -66,6 +84,8 @@ pub enum Repair {
         port: InputPort,
         producer: OutputPort,
     },
+    /// A subgraph's graph lacked the boundary node on one side, which this one now is.
+    BoundaryAdded { boundary: Boundary, node_id: NodeId },
 }
 
 impl Display for Repair {
@@ -117,6 +137,9 @@ impl Display for Repair {
                     f,
                     "removed the wire {producer:?} → {port:?}, which closed a data cycle"
                 )
+            }
+            Self::BoundaryAdded { boundary, node_id } => {
+                write!(f, "added the missing {boundary:?} node as {node_id:?}")
             }
         }
     }

@@ -384,7 +384,8 @@ fn the_tie_menu_releases_pins_and_removes() {
     };
     let names: Vec<String> = h
         .document()
-        .graph
+        .graphs
+        .main()
         .iter()
         .map(|node| node.name.clone())
         .collect();

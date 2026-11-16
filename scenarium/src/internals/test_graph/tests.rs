@@ -19,15 +19,14 @@ fn a_named_graph_compiles_to_one_node_per_name() {
     g.wire("double", "print");
 
     // Every name resolves to a distinct node, and the wiring is real.
-    assert_eq!(g.graph.len(), 3);
+    assert_eq!(g.graph().len(), 3);
     assert_eq!(
-        g.graph.bindings[&InputPort::new(g.id("double"), numbered_port(1))],
+        g.graph().bindings[&InputPort::new(g.id("double"), numbered_port(1))],
         Binding::wire(g.id("src"), numbered_port(1))
     );
     // `returns` declared the output its literal implies.
-    let src = g.graph.find(g.id("src")).unwrap();
-    let func = src.func(&g.library);
-    assert_eq!(func.outputs()[0].data_type, DataType::Int);
+    let src = g.graph().find(g.id("src")).unwrap();
+    assert_eq!(src.decl(g.scope()).outputs()[0].data_type, DataType::Int);
 }
 
 /// One func per node by default: editing one node's declaration leaves
@@ -43,8 +42,8 @@ fn declarations_are_per_node_unless_a_test_shares_one() {
     g.edit_func("a", |func| func.ports.inputs[0].required = false);
 
     let required = |g: &TestGraph, name: &str| {
-        let node = g.graph.find(g.id(name)).unwrap();
-        node.func(&g.library).inputs()[0].required
+        let node = g.graph().find(g.id(name)).unwrap();
+        node.decl(g.scope()).inputs()[0].required
     };
     assert!(!required(&g, "a"), "the edited declaration went optional");
     assert!(!required(&g, "a2"), "and its other instance shares it");
@@ -65,16 +64,19 @@ fn declared_defaults_seed_bindings_that_later_calls_replace() {
     let port = InputPort::new(g.id("n"), numbered_port(1));
 
     assert_eq!(
-        g.graph.bindings[&port],
+        g.graph().bindings[&port],
         Binding::Const(ConstValue::Int(3)),
         "the declaration's default is bound on instantiation"
     );
 
     g.constant("n", 0, 9i64);
-    assert_eq!(g.graph.bindings[&port], Binding::Const(ConstValue::Int(9)));
+    assert_eq!(
+        g.graph().bindings[&port],
+        Binding::Const(ConstValue::Int(9))
+    );
 
     g.unbind("n", 0);
-    assert!(!g.graph.bindings.contains_key(&port));
+    assert!(!g.graph().bindings.contains_key(&port));
 }
 
 /// The sample fixture wires what its doc claims, and its nodes carry ids
@@ -83,7 +85,7 @@ fn declared_defaults_seed_bindings_that_later_calls_replace() {
 #[test]
 fn sample_wires_five_nodes_in_declaration_order() {
     let g = TestGraph::sample();
-    assert_eq!(g.graph.len(), 5);
+    assert_eq!(g.graph().len(), 5);
 
     for (consumer, input, producer) in [
         ("sum", 0, "get_a"),
@@ -93,7 +95,7 @@ fn sample_wires_five_nodes_in_declaration_order() {
         ("Print", 0, "mult"),
     ] {
         assert_eq!(
-            g.graph.bindings[&g.input(consumer, input)],
+            g.graph().bindings[&g.input(consumer, input)],
             Binding::wire(g.id(producer), numbered_port(1)),
             "{producer} feeds {consumer}[{input}]"
         );
@@ -146,8 +148,11 @@ fn spec_flags_reach_the_declaration() {
     });
 
     let func = |g: &TestGraph, name: &str| {
-        let node = g.graph.find(g.id(name)).unwrap();
-        node.func(&g.library).clone()
+        let node = g.graph().find(g.id(name)).unwrap();
+        node.decl(g.scope())
+            .func()
+            .expect("a fixture's node has a body")
+            .clone()
     };
     let plain = func(&g, "plain");
     assert_eq!(plain.behavior(), FuncBehavior::Impure);

@@ -9,7 +9,7 @@ use common::ErrorChain;
 use lens::MlModelPaths;
 use scenarium::DiskStore;
 use scenarium::{CompiledGraph, Compiler, DynamicValue, WorkerExited, WorkerReport};
-use scenarium::{Graph, ProgramId};
+use scenarium::{GraphSet, ProgramId};
 
 use crate::core::io::cache;
 use crate::core::runtime_host::error::NoCompiledWork;
@@ -100,11 +100,11 @@ impl RuntimeHost {
         self.dispatch(|worker| worker.set_disk_store(DiskStore::new(root)));
     }
 
-    /// Compile `graph` against the current library. The document keeps its
-    /// graph one the library can run, so a compile cannot fail.
-    fn compile(&mut self, graph: &Graph) -> Arc<CompiledGraph> {
-        let compiled = self.compiler.compile(graph, self.library.cur());
-        self.disk_backed = graph.iter().any(|node| node.cache.persists_to_disk());
+    /// Compile `graphs` against the current library. The document keeps its
+    /// graphs ones the library can run, so a compile cannot fail.
+    fn compile(&mut self, graphs: &GraphSet) -> Arc<CompiledGraph> {
+        let compiled = self.compiler.compile(graphs, self.library.cur());
+        self.disk_backed = compiled.persists_to_disk();
         self.prepare_root();
         Arc::new(compiled)
     }
@@ -175,17 +175,17 @@ impl RuntimeHost {
         }
     }
 
-    /// Compile `graph` against the current library and send it to the worker
+    /// Compile `graphs` against the current library and send it to the worker
     /// for one evaluation. Results arrive via [`Self::drain_worker`].
-    pub(crate) fn run_once(&mut self, graph: &Graph) {
-        let compiled = self.compile(graph);
+    pub(crate) fn run_once(&mut self, graphs: &GraphSet) {
+        let compiled = self.compile(graphs);
         self.dispatch(|worker| {
             worker.install(compiled)?;
             worker.run_sinks()
         });
     }
 
-    /// Compile `graph` and evaluate program node `program_id`, delivering its outputs
+    /// Compile `graphs` and evaluate program node `program_id`, delivering its outputs
     /// for the preview fetch ("run to this node"). The node seeds the run
     /// explicitly, which overrides its `disabled` flag during planning.
     ///
@@ -194,10 +194,10 @@ impl RuntimeHost {
     /// [`Self::drain_worker`].
     pub(crate) fn run_node(
         &mut self,
-        graph: &Graph,
+        graphs: &GraphSet,
         program_id: ProgramId,
     ) -> Result<(), NoCompiledWork> {
-        let compiled = self.compiled_for(graph, program_id)?;
+        let compiled = self.compiled_for(graphs, program_id)?;
         self.dispatch(|worker| {
             worker.install(compiled)?;
             worker.run_nodes([program_id])
@@ -205,13 +205,13 @@ impl RuntimeHost {
         Ok(())
     }
 
-    /// Compile `graph`, refusing when the program holds no work for `program_id`.
+    /// Compile `graphs`, refusing when the program holds no work for `program_id`.
     fn compiled_for(
         &mut self,
-        graph: &Graph,
+        graphs: &GraphSet,
         program_id: ProgramId,
     ) -> Result<Arc<CompiledGraph>, NoCompiledWork> {
-        let compiled = self.compile(graph);
+        let compiled = self.compile(graphs);
         if compiled.contains(program_id) {
             Ok(compiled)
         } else {
@@ -229,10 +229,10 @@ impl RuntimeHost {
     /// for `program_id`, as for [`Self::run_node`].
     pub(crate) fn evict_cache(
         &mut self,
-        graph: &Graph,
+        graphs: &GraphSet,
         program_id: ProgramId,
     ) -> Result<Vec<ProgramId>, NoCompiledWork> {
-        let compiled = self.compiled_for(graph, program_id)?;
+        let compiled = self.compiled_for(graphs, program_id)?;
         let evicted = compiled.consumer_cone([program_id]);
         self.dispatch(|worker| worker.install_and_evict_cache(compiled, program_id));
         Ok(evicted)
@@ -247,10 +247,10 @@ impl RuntimeHost {
     /// work for `program_id`.
     pub(crate) fn flush_cache(
         &mut self,
-        graph: &Graph,
+        graphs: &GraphSet,
         program_id: ProgramId,
     ) -> Result<(), NoCompiledWork> {
-        let compiled = self.compiled_for(graph, program_id)?;
+        let compiled = self.compiled_for(graphs, program_id)?;
         self.dispatch(|worker| worker.install_and_flush_cache(compiled, program_id));
         Ok(())
     }
@@ -261,9 +261,9 @@ impl RuntimeHost {
         self.worker.cancel_run();
     }
 
-    /// Start the event loop on `graph`. The worker's `Update` tears down any prior loop first.
-    pub(crate) fn start_event_loop(&mut self, graph: &Graph) {
-        let compiled = self.compile(graph);
+    /// Start the event loop on `graphs`. The worker's `Update` tears down any prior loop first.
+    pub(crate) fn start_event_loop(&mut self, graphs: &GraphSet) {
+        let compiled = self.compile(graphs);
         self.dispatch(|worker| {
             worker.install(compiled)?;
             worker.start_event_loop()

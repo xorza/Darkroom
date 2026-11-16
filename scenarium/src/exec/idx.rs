@@ -58,7 +58,7 @@ idx_type!(
 
 /// A program node's output interned into the installed program's dense index
 /// space — the hash-free form every per-run edge walk uses, resolved once at
-/// compile.
+/// compile, across every subgraph boundary between.
 /// Install-local like [`NodeIdx`]: it must never enter a digest, a persisted
 /// byte, or a host-facing report.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

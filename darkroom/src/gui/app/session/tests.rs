@@ -254,7 +254,7 @@ fn dock_ops_apply_without_entering_the_undo_history_or_dirtying() {
     // One undo takes back the node, and its viewer tab goes with it.
     assert!(test.undo(), "the node add is the only entry");
     assert_eq!(
-        test.session.open.document().graph.len(),
+        test.session.open.document().graphs.main().len(),
         0,
         "the node came back out"
     );
@@ -351,7 +351,8 @@ fn each_edit_route_owes_what_it_strands() {
         .session
         .open
         .document()
-        .graph
+        .graphs
+        .main()
         .iter()
         .next()
         .unwrap()

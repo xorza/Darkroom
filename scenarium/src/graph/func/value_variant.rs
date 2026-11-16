@@ -1,8 +1,10 @@
 //! [`ValueVariant`]: one entry of an input's editor picker.
 
+use serde::{Deserialize, Serialize};
+
 use crate::data::const_value::ConstValue;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ValueVariant {
     pub name: String,
     pub value: ConstValue,

@@ -216,7 +216,7 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
         tooltip,
     };
     let fill = Hover::from(draw_ctx.geometry().ports.is_hovered(port))
-        .lift(theme.port_color(input.data_type()));
+        .lift(node_ctx.graph_ctx.port_color(input.data_type()));
     // Flag a port only once a run actually failed on it, so it does not flip as you bind/unbind:
     // the run named the exact ports it could not feed, and only while the node's status is that
     // verdict. A ring in the warning ink around the type's own hue keeps the type readable. A
@@ -409,8 +409,8 @@ fn output_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, output: OutputCtx<'
     let theme = node_ctx.theme();
     let port = output.port_ref();
     let data_type = output.data_type();
-    let fill =
-        Hover::from(draw_ctx.geometry().ports.is_hovered(port)).lift(theme.port_color(data_type));
+    let fill = Hover::from(draw_ctx.geometry().ports.is_hovered(port))
+        .lift(node_ctx.graph_ctx.port_color(data_type));
     let tooltip = PortTooltip {
         description: output.description(),
         data_type,

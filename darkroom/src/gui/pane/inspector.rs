@@ -168,7 +168,7 @@ fn body(ui: &mut Ui, stage: &mut Stage<'_, NodeCtx<'_>>, target: InspectTarget) 
                     dot: if input.const_only() {
                         PortDot::BLANK
                     } else {
-                        PortDot::of(theme, input.data_type())
+                        PortDot::of(node.graph_ctx, input.data_type())
                     },
                     type_name: library.type_name(input.data_type()),
                     value: Some(value),
@@ -184,7 +184,7 @@ fn body(ui: &mut Ui, stage: &mut Stage<'_, NodeCtx<'_>>, target: InspectTarget) 
                 InspectedPort {
                     wid: port_wid(PortKind::Output, idx),
                     name: output.name(),
-                    dot: PortDot::of(theme, output.data_type()),
+                    dot: PortDot::of(node.graph_ctx, output.data_type()),
                     type_name: library.type_name(output.data_type()),
                     value: None,
                 }
@@ -372,9 +372,9 @@ impl PortDot {
         fill: DotFill::Blank,
     };
 
-    fn of(theme: &Theme, data_type: DataType) -> Self {
+    fn of(graph_ctx: GraphCtx<'_>, data_type: DataType) -> Self {
         Self {
-            color: theme.port_color(data_type),
+            color: graph_ctx.port_color(data_type),
             fill: if data_type == DataType::Any {
                 DotFill::Ring
             } else {
@@ -564,7 +564,8 @@ mod tests {
             .session
             .open
             .document()
-            .graph
+            .graphs
+            .main()
             .iter()
             .next()
             .unwrap()
@@ -622,7 +623,8 @@ mod tests {
                 .session
                 .open
                 .document()
-                .graph
+                .graphs
+                .main()
                 .iter()
                 .next()
                 .unwrap()
@@ -671,19 +673,35 @@ mod tests {
         );
     }
 
-    /// A port's dot wears its type's hue, and an input that takes any type is a ring in the
-    /// untyped port's ink.
+    /// A port's dot wears its type's hue, an input that takes any type is a ring in the untyped
+    /// port's ink, and a type the library does not register is a disc in that neutral ink.
     #[test]
     fn a_port_dot_wears_its_type_hue() {
-        let theme = Theme::default();
-        let float = PortDot::of(&theme, DataType::Float);
+        use scenarium::CustomTypeId;
+
+        use crate::gui::graph_ctx::internals::GraphCtxFixture;
+
+        let fixture = GraphCtxFixture::default();
+        let (ctx, theme) = (fixture.graph_ctx(), &fixture.theme);
+        let float = PortDot::of(ctx, DataType::Float);
         assert_eq!(
             (float.color, float.fill),
             (theme.type_colors.float, DotFill::Disc)
         );
-        let any = PortDot::of(&theme, DataType::Any);
+        let any = PortDot::of(ctx, DataType::Any);
         assert_eq!((any.color, any.fill), (theme.port.input, DotFill::Ring));
         assert_ne!(float.color, any.color);
+        let unknown = DataType::Custom(CustomTypeId::from_u128(77));
+        assert_ne!(
+            theme.port_color(unknown),
+            theme.port.input,
+            "premise: it has a hue"
+        );
+        let unknown = PortDot::of(ctx, unknown);
+        assert_eq!(
+            (unknown.color, unknown.fill),
+            (theme.port.input, DotFill::Disc)
+        );
     }
 
     /// The callout shows a failure's message, and nothing for a failure without one or any

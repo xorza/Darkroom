@@ -15,7 +15,7 @@
 //! document the load contract does not hold, which every compile asserts.
 
 use glam::Vec2;
-use scenarium::{Binding, BindingEntry, Func, Graph, Library, Node, NodeId};
+use scenarium::{Binding, BindingEntry, Graph, Node, NodeDecl, NodeId, Scope};
 
 use crate::core::document::Document;
 use crate::core::document::tie::TieId;
@@ -66,11 +66,11 @@ pub(super) fn fresh_node_id(document: &Document, node_id: NodeId) -> Result<(), 
 
 /// A newly inserted node has to resolve: the graph holds only nodes the library can run.
 pub(super) fn resolving_node<'a>(
-    library: &'a Library,
+    scope: Scope<'a>,
     node: &Node,
-) -> Result<&'a Func, MalformedIntent> {
-    library
-        .func_of(node)
+) -> Result<NodeDecl<'a>, MalformedIntent> {
+    scope
+        .resolve(node)
         .map_err(|reason| MalformedIntent::UnresolvedNode { reason })
 }
 
@@ -78,7 +78,7 @@ pub(super) fn resolving_node<'a>(
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Insertion<'a> {
     pub(super) node_id: NodeId,
-    pub(super) func: &'a Func,
+    pub(super) decl: NodeDecl<'a>,
     pub(super) bindings: &'a [BindingEntry],
 }
 
@@ -88,12 +88,12 @@ pub(super) struct Insertion<'a> {
 /// [`DetachedNode::new`](scenarium::DetachedNode::new)'s rules.
 pub(super) fn seed_bindings(
     graph: &Graph,
-    library: &Library,
+    scope: Scope<'_>,
     insertion: Insertion<'_>,
 ) -> Result<(), MalformedIntent> {
     let Insertion {
         node_id,
-        func,
+        decl,
         bindings,
     } = insertion;
     for BindingEntry { port, binding } in bindings {
@@ -110,7 +110,7 @@ pub(super) fn seed_bindings(
             present_node(graph, source.node_id, Role::BindingProducer)?;
         }
         graph
-            .admit_onto(library, func, port, binding)
+            .admit_onto(scope, decl, port, binding)
             .map_err(|rejection| MalformedIntent::Rejected { port, rejection })?;
     }
     Ok(())

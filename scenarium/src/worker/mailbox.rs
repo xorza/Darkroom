@@ -73,7 +73,7 @@ mod tests {
     use std::sync::Arc;
 
     use crate::exec::compile::Compiler;
-    use crate::graph::Graph;
+    use crate::graph::graph_set::GraphSet;
     use crate::library::Library;
     use crate::worker::batch_intent::{BatchIntent, GraphOp};
     use crate::worker::mailbox::Mailbox;
@@ -85,7 +85,7 @@ mod tests {
     #[test]
     fn a_replaced_update_drops_its_program_on_merge() {
         let program =
-            || Arc::new(Compiler::default().compile(&Graph::default(), &Library::default()));
+            || Arc::new(Compiler::default().compile(&GraphSet::default(), &Library::default()));
         let (first, second) = (program(), program());
         let mailbox = Mailbox::default();
         mailbox

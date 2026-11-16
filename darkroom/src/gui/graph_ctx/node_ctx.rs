@@ -2,7 +2,8 @@
 
 use glam::Vec2;
 use scenarium::{
-    CacheMode, EventPort, Func, FuncEvent, Node, NodeId, PortId, RamUsage, Unresolved,
+    CacheMode, DetachReason, EventPort, Func, FuncEvent, Node, NodeDecl, NodeId, PortId, RamUsage,
+    Unresolved,
 };
 
 use crate::core::preview_sink;
@@ -14,18 +15,6 @@ use crate::gui::state::run_state::{ExecStatus, NodeRunState};
 use crate::gui::theme::Theme;
 use crate::gui::theme::const_editor_theme::ConstEditorTheme;
 use crate::gui::theme::hover::Hover;
-
-/// The `kind_label` a stub reports when the library holds no func under its
-/// id — see [`NodeCtx::stub`].
-const MISSING_FUNC_LABEL: &str = "missing func";
-
-/// What a placed item declares: the func a graph node instantiates, or why a
-/// stub has none.
-#[derive(Clone, Copy, Debug)]
-enum Declaration<'a> {
-    Func(&'a Func),
-    Stub(Unresolved),
-}
 
 /// One placed item of the graph pane — a graph node or a stub: its authoring
 /// record, its position in the paint stack, and what it declares.
@@ -49,11 +38,11 @@ pub(crate) struct NodeCtx<'a> {
     pub(crate) pos: Vec2,
     /// The graph node, or a stub's record of one.
     node: &'a Node,
-    /// A graph node's func — a library func or a special node's hardcoded
-    /// spec — or the reason a stub has none. A stub keeps the user's work
-    /// while the library cannot run it: it declares no ports, and the user can
-    /// still select, move and delete it.
-    declaration: Declaration<'a>,
+    /// What a graph node declares — a library func, a special node's hardcoded spec, or a
+    /// subgraph's face — or why the load kept a stub. A stub keeps the user's work while its
+    /// graph cannot hold the node: it declares no ports, and the user can still select, move and
+    /// delete it.
+    declaration: Result<NodeDecl<'a>, DetachReason>,
     /// What the last run said about this node, looked up once at resolve.
     run: Option<&'a NodeRunState>,
     /// Whether the pointer is over this node's body — [`Hover::Rest`] until a
@@ -75,19 +64,14 @@ impl<'a> NodeCtx<'a> {
     /// If the document holds no `node_id`: callers resolve placements, and the
     /// document holds a placement exactly for every graph node and stub.
     pub(super) fn resolve(graph_ctx: GraphCtx<'a>, node_id: NodeId, pos: Vec2) -> Self {
-        let library = graph_ctx.library();
         let (node, declaration) = if let Some(node) = graph_ctx.body().find(node_id) {
-            (node, Declaration::Func(node.func(library)))
+            (node, Ok(node.decl(graph_ctx.scope())))
         } else {
-            let record = &graph_ctx
+            let stub = graph_ctx
                 .body()
                 .stub(node_id)
-                .expect("every placement names a graph node or a stub")
-                .record;
-            let reason = library
-                .func_of(record.node())
-                .expect_err("a stub does not resolve");
-            (record.node(), Declaration::Stub(reason))
+                .expect("every placement names a graph node or a stub");
+            (stub.record.node(), Err(stub.reason))
         };
         Self {
             graph_ctx,
@@ -133,26 +117,35 @@ impl<'a> NodeCtx<'a> {
         &self.node.name
     }
 
-    /// Human-readable type identity: the func's name, or for a stub that its func is gone. Shown
-    /// by the inspector pane.
+    /// Human-readable type identity: the declaration's name, or for a stub why the load took it
+    /// out — see [`NodeCtx::stub`]. Shown by the inspector pane.
     pub(crate) fn kind_label(self) -> &'a str {
         match self.declaration {
-            Declaration::Func(func) => func.name(),
-            Declaration::Stub(Unresolved::MissingFunc) => MISSING_FUNC_LABEL,
+            Ok(decl) => decl.name(),
+            Err(DetachReason::Unresolved(Unresolved::MissingFunc)) => "missing func",
+            Err(DetachReason::Unresolved(Unresolved::MissingSubgraph)) => "missing subgraph",
+            Err(DetachReason::Unresolved(Unresolved::NoInterface)) => "boundary outside a subgraph",
+            Err(DetachReason::ExtraBoundary) => "extra boundary node",
+            Err(DetachReason::Recursive) => "subgraph inside itself",
+            Err(DetachReason::TooDeep) => "nested too deep",
+            Err(DetachReason::TooLarge) => "program too large",
         }
     }
 
-    /// The func's description, empty for a stub or a func that declares none.
+    /// The declaration's description, empty for a stub or a declaration that has none.
     /// Shown by the inspector pane and the new-node palette tooltip.
     pub(crate) fn description(self) -> &'a str {
-        self.func().and_then(Func::description).unwrap_or_default()
+        self.declaration
+            .ok()
+            .and_then(NodeDecl::description)
+            .unwrap_or_default()
     }
 
     /// A stub: a node the library cannot resolve, kept beside the graph.
     /// Rendered as a portless error card the user can still select, move and
     /// delete — never silently dropped.
     pub(crate) const fn stub(self) -> bool {
-        matches!(self.declaration, Declaration::Stub(_))
+        self.declaration.is_err()
     }
 
     /// Excluded from execution (`Node::disabled`). Sink headers expose the
@@ -161,10 +154,10 @@ impl<'a> NodeCtx<'a> {
         self.node.disabled
     }
 
-    /// Where this node's output is cached. The header's two storage chips
-    /// toggle its RAM and disk bits.
-    pub(crate) const fn cache(self) -> CacheMode {
-        self.node.cache
+    /// Where this node's output is cached, or `None` for a node with no body. The header's two
+    /// storage chips toggle its RAM and disk bits.
+    pub(crate) const fn cache(self) -> Option<CacheMode> {
+        self.node.cache()
     }
 
     /// Sink node — no outputs feed downstream, so a run has to reach it
@@ -196,8 +189,10 @@ impl<'a> NodeCtx<'a> {
     /// func has no content digest to key a cache on, and a func with no
     /// outputs has nothing to store — a stub for both reasons at once.
     pub(crate) fn cacheable(self) -> bool {
-        self.func()
-            .is_some_and(|f| !f.outputs().is_empty() && !f.impure())
+        self.cache().is_some()
+            && self
+                .func()
+                .is_some_and(|f| !f.outputs().is_empty() && !f.impure())
     }
 
     /// Whether Darkroom exposes the disable toggle. Limiting it to runnable
@@ -210,11 +205,11 @@ impl<'a> NodeCtx<'a> {
     /// Whether this node can seed a "run to this node" — drives the header
     /// play chip, the context-menu item, and the port menu's "Add preview".
     ///
-    /// Everything but a stub qualifies: a *disabled* node still runs, as a targeted run overrides
+    /// A node with a body qualifies: a *disabled* node still runs, as a targeted run overrides
     /// that flag. An authoring-side fact, not a lookup in a compiled program, so it holds before
     /// the first compile.
     pub(crate) const fn runnable(self) -> bool {
-        !self.stub()
+        !self.stub() && self.node.cache().is_some()
     }
 
     /// Outcome of the last graph run, with its detail. Drives the node's
@@ -234,38 +229,35 @@ impl<'a> NodeCtx<'a> {
     /// This node's input ports, in declaration order. Empty for a stub, which
     /// declares none.
     pub(crate) fn inputs(self) -> impl ExactSizeIterator<Item = InputCtx<'a>> {
-        let declared = self.func().map_or(&[][..], Func::inputs);
+        let declared = self.declaration.map_or(&[][..], NodeDecl::inputs);
         declared
             .iter()
             .enumerate()
             .map(move |(idx, input)| InputCtx::new(self, idx, input))
     }
 
-    /// The func this node instantiates, `None` for a stub.
-    pub(super) const fn func(self) -> Option<&'a Func> {
-        match self.declaration {
-            Declaration::Func(func) => Some(func),
-            Declaration::Stub(_) => None,
-        }
+    /// The func this node runs, `None` for a stub and a node with no body.
+    pub(super) fn func(self) -> Option<&'a Func> {
+        self.declaration.ok().and_then(NodeDecl::func)
     }
 
     /// The input port under `port`, if this node declares one.
     pub(crate) fn input(self, port: PortId) -> Option<InputCtx<'a>> {
-        let ports = self.func()?.ports();
+        let ports = self.declaration.ok()?.ports();
         let idx = ports.input_idx(port)?;
         Some(InputCtx::new(self, idx, &ports.inputs[idx]))
     }
 
     /// The output port under `port`, if this node declares one.
     pub(crate) fn output(self, port: PortId) -> Option<OutputCtx<'a>> {
-        let ports = self.func()?.ports();
+        let ports = self.declaration.ok()?.ports();
         let idx = ports.output_idx(port)?;
         Some(OutputCtx::new(self, idx, &ports.outputs[idx]))
     }
 
     /// This node's output ports, in declaration order.
     pub(crate) fn outputs(self) -> impl ExactSizeIterator<Item = OutputCtx<'a>> {
-        let declared = self.func().map_or(&[][..], Func::outputs);
+        let declared = self.declaration.map_or(&[][..], NodeDecl::outputs);
         declared
             .iter()
             .enumerate()
@@ -276,19 +268,19 @@ impl<'a> NodeCtx<'a> {
     /// are pure triggers — so the declaration is all the UI needs, and the
     /// output column lists them under the data outputs.
     pub(crate) fn events(self) -> &'a [FuncEvent] {
-        self.func().map_or(&[][..], Func::events)
+        self.declaration.map_or(&[][..], NodeDecl::events)
     }
 
     /// The event under `event`, if this node fires one.
     pub(crate) fn event(self, event: PortId) -> Option<&'a FuncEvent> {
-        self.func()?.event(event)
+        self.declaration.ok()?.event(event)
     }
 
     /// How many ports this node declares on `kind`'s side.
     pub(crate) fn port_count(self, kind: PortKind) -> usize {
         match kind {
-            PortKind::Input => self.func().map_or(0, |f| f.inputs().len()),
-            PortKind::Output => self.func().map_or(0, |f| f.outputs().len()),
+            PortKind::Input => self.declaration.map_or(0, |decl| decl.inputs().len()),
+            PortKind::Output => self.declaration.map_or(0, |decl| decl.outputs().len()),
         }
     }
 
@@ -298,10 +290,10 @@ impl<'a> NodeCtx<'a> {
     /// can't drift apart.
     pub(crate) fn ports(self, kind: PortKind) -> impl Iterator<Item = PortRef> {
         let node_id = self.node_id;
-        let (inputs, outputs) = match (self.func(), kind) {
-            (None, _) => (&[][..], &[][..]),
-            (Some(func), PortKind::Input) => (func.inputs(), &[][..]),
-            (Some(func), PortKind::Output) => (&[][..], func.outputs()),
+        let (inputs, outputs) = match (self.declaration, kind) {
+            (Err(_), _) => (&[][..], &[][..]),
+            (Ok(decl), PortKind::Input) => (decl.inputs(), &[][..]),
+            (Ok(decl), PortKind::Output) => (&[][..], decl.outputs()),
         };
         inputs
             .iter()

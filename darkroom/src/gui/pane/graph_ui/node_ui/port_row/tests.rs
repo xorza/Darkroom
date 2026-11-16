@@ -83,7 +83,8 @@ fn double_clicking_a_wired_input_port_circle_clears_its_binding() {
     let (producer, consumer) = (h.node(0), h.node(1));
     let input = InputPort::new(consumer, numbered_port(1));
     h.document_mut()
-        .graph
+        .graphs
+        .main_mut()
         .set_input_binding(input, Binding::wire(producer, numbered_port(1)));
     // Two frames so the circle has a widget id and a measured rect to aim at.
     h.prime(2);

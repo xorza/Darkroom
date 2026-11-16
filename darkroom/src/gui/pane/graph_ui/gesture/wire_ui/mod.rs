@@ -231,7 +231,7 @@ impl WireUi {
         // Tinted by the dragged port's data type.
         let theme = graph_ctx.theme();
         let drag_data_type = graph_ctx.data_type(start_port);
-        let color = theme.port_color(drag_data_type);
+        let color = graph_ctx.port_color(drag_data_type);
         let width = theme.canvas.wire_at(ctx.zoom());
         WirePaint::from(color).stroke(ui, &Wire::data(p0, p3), width);
     }
@@ -284,7 +284,7 @@ fn accepts_wire(graph_ctx: GraphCtx<'_>, start: PortRef, port: PortRef) -> bool 
     let output = producer.output_port().expect("a wire reads an output");
     let graph = graph_ctx.body();
     graph
-        .admit(graph_ctx.library(), input, &Binding::Wire(output))
+        .admit(graph_ctx.scope(), input, &Binding::Wire(output))
         .is_ok()
         && !graph.produces_cycle(output.node_id, input.node_id)
 }

@@ -256,7 +256,7 @@ mod tests {
         let tie = fixture.tie(Vec2::new(110.0, 0.0), [data, event]);
         let DocumentFixture { mut document, .. } = fixture;
         document.main_view.selected.insert(ItemId::Tie(tie));
-        let graph = &document.graph;
+        let graph = document.graphs.main();
         let valid = document.main_view.clone();
         valid.validate(graph).unwrap();
 

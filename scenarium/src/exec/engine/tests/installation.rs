@@ -59,8 +59,8 @@ fn validation_rejects_a_cache_with_the_wrong_node_count() {
 fn func_nodes_keep_identity() {
     let e = TestEngine::over(TestGraph::sample());
 
-    assert_eq!(e.engine.compiled().e_nodes.len(), e.graph.graph.len());
-    for node in e.graph.graph.iter() {
+    assert_eq!(e.engine.compiled().e_nodes.len(), e.graph.graph().len());
+    for node in e.graph.graph().iter() {
         assert!(
             e.engine.compiled().contains(ProgramId::from(node.node_id)),
             "id preserved"

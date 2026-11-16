@@ -239,7 +239,8 @@ fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
     let mut h = Harness::sample();
     let named = |h: &Harness, name: &str| {
         h.document
-            .graph
+            .graphs
+            .main()
             .iter()
             .find(|node| node.name == name)
             .expect("the sample holds the node")
@@ -247,7 +248,7 @@ fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
     };
     let (a, b) = (named(&h, "get_b"), named(&h, "sum"));
     // Edge a -> b, then select both for deletion.
-    h.document.graph.set_input_binding(
+    h.document.graphs.main_mut().set_input_binding(
         InputPort::new(b, numbered_port(1)),
         Binding::wire(a, numbered_port(1)),
     );
@@ -256,15 +257,16 @@ fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
     // The a->b edge is captured by a's step (before a is removed), so a
     // single undo can restore it once both nodes are back.
     h.batch([a, b].map(|node_id| GraphIntent::RemoveNode { node_id }));
-    assert!(h.document.graph.find(a).is_none());
-    assert!(h.document.graph.find(b).is_none());
+    assert!(h.document.graphs.main().find(a).is_none());
+    assert!(h.document.graphs.main().find(b).is_none());
 
     assert!(h.undo());
-    assert!(h.document.graph.find(a).is_some());
-    assert!(h.document.graph.find(b).is_some());
+    assert!(h.document.graphs.main().find(a).is_some());
+    assert!(h.document.graphs.main().find(b).is_some());
     match h
         .document
-        .graph
+        .graphs
+        .main()
         .bindings
         .get(&InputPort::new(b, numbered_port(1)))
     {
