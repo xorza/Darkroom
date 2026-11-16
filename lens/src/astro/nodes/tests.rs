@@ -10,7 +10,7 @@ use lumos::{
     SigmaThreshold, SourceProvenance,
 };
 use scenarium::internals::func_invoker::FuncInvoker;
-use scenarium::{ConstValue, DataType, DynamicValue, FsPathMode, FuncBehavior};
+use scenarium::{ConstValue, DataType, DynamicValue, FileMode, FuncBehavior};
 
 use crate::astro::masters::MASTERS_DATA_TYPE;
 use crate::astro::nodes::io::{astro_image_path_type, astro_raw_paths_type};
@@ -18,22 +18,43 @@ use crate::astro::nodes::{MlModelPaths, astro_library};
 use crate::config_node::config_data_type;
 use crate::image::{IMAGE_DATA_TYPE, Image};
 
+/// The astro library registers the file kinds its ports name: an astro image is every file a
+/// preview opens, one at a time, and raw frames are camera RAW, several at a time. RAW lies
+/// within the astro image kind, so a RAW file port feeds a load.
 #[test]
-fn astro_image_path_filter_matches_preview_extensions() {
-    let DataType::FsPath(cfg) = &astro_image_path_type() else {
-        panic!("expected an FsPath data type");
+fn the_astro_file_ports_name_their_registered_kinds() {
+    let library = astro_library(&MlModelPaths::default());
+    let kind = |data_type: DataType| {
+        let DataType::File { kind, mode } = data_type else {
+            panic!("{data_type:?} is a file type");
+        };
+        let kind = library.file_kind(kind).expect("the kind is registered");
+        (kind.name().to_owned(), kind.extensions().to_vec(), mode)
     };
-    assert_eq!(cfg.mode, FsPathMode::ExistingFile);
-    assert_eq!(cfg.extensions, PREVIEW_IMAGE_EXTENSIONS);
-}
-
-#[test]
-fn astro_raw_paths_are_a_filtered_multi_file_picker() {
-    let DataType::FsPath(cfg) = &astro_raw_paths_type() else {
-        panic!("expected an FsPath data type");
+    let extensions = |list: &[&str]| list.iter().map(ToString::to_string).collect::<Vec<_>>();
+    assert_eq!(
+        kind(astro_image_path_type()),
+        (
+            "Astro image".to_owned(),
+            extensions(PREVIEW_IMAGE_EXTENSIONS),
+            FileMode::Open
+        )
+    );
+    assert_eq!(
+        kind(astro_raw_paths_type()),
+        (
+            "Camera RAW".to_owned(),
+            extensions(RAW_EXTENSIONS),
+            FileMode::OpenMany
+        )
+    );
+    assert_eq!(library.type_name(astro_raw_paths_type()), "Camera RAW");
+    let file_kind = |data_type| match data_type {
+        DataType::File { kind, .. } => library.file_kind(kind).unwrap(),
+        _ => unreachable!("both are file types"),
     };
-    assert_eq!(cfg.mode, FsPathMode::ExistingFiles);
-    assert_eq!(cfg.extensions, RAW_EXTENSIONS);
+    assert!(file_kind(astro_raw_paths_type()).within(file_kind(astro_image_path_type())));
+    assert!(!file_kind(astro_image_path_type()).within(file_kind(astro_raw_paths_type())));
 }
 
 /// The node keeps what the decoder stated, in planes for either file: a FITS's header and
@@ -337,11 +358,15 @@ fn astro_nodes_are_registered_with_their_ports() {
         ("ML Star Removal", "StarNet2_weights.onnx"),
     ] {
         let f = lib.by_name(name).unwrap();
-        let DataType::FsPath(config) = &f.inputs()[1].data_type else {
+        let DataType::File { kind, mode } = f.inputs()[1].data_type else {
             panic!("{name}: the model is a file path");
         };
-        assert_eq!(config.mode, FsPathMode::ExistingFile, "{name}");
-        assert_eq!(config.extensions, ["onnx"], "{name}");
+        assert_eq!(mode, FileMode::Open, "{name}");
+        assert_eq!(
+            lib.file_kind(kind).unwrap().extensions(),
+            ["onnx"],
+            "{name}"
+        );
         assert_eq!(
             f.inputs()[1].default_value,
             Some(ConstValue::FsPath(model.to_owned())),

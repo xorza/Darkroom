@@ -64,6 +64,7 @@ fn compose(model_paths: &MlModelPaths, previews: &Arc<PreviewSink>) -> Scenarium
     library.merge(random_library());
     library.merge(image_library());
     library.merge(astro_library(&model_paths));
+    library.check();
     library
 }
 
@@ -73,7 +74,7 @@ mod tests {
     use std::sync::Arc;
 
     use lens::{MlModelPaths, astro_library, fs_watch_library, image_library, random_library};
-    use scenarium::{math_library, system_library, worker_events_library};
+    use scenarium::{Library, math_library, system_library, worker_events_library};
 
     use crate::core::runtime_library::compose;
 
@@ -99,8 +100,8 @@ mod tests {
             preview + parts.iter().map(|part| part.iter().count()).sum::<usize>()
         );
         assert_eq!(
-            library.types().len(),
-            parts.iter().map(|part| part.types().len()).sum::<usize>()
+            library.type_count(),
+            parts.iter().map(Library::type_count).sum::<usize>()
         );
     }
 

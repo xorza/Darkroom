@@ -4,7 +4,7 @@ use std::fmt;
 
 use common::ErrorChain;
 
-use crate::data::data_type::TypeId;
+use crate::data::data_type::custom_type::CustomTypeId;
 use crate::exec::cache::disk_store::error::{RemovalError, StoreError};
 use crate::graph::program_id::ProgramId;
 
@@ -43,7 +43,7 @@ pub enum CacheNodeError {
 #[derive(Debug)]
 pub struct CacheFlushUnsupported {
     pub program_id: ProgramId,
-    pub type_id: TypeId,
+    pub type_id: CustomTypeId,
 }
 
 impl fmt::Display for CacheFlushUnsupported {

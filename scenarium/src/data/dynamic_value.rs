@@ -8,14 +8,14 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use crate::data::const_value::ConstValue;
-use crate::data::data_type::TypeId;
+use crate::data::data_type::custom_type::CustomTypeId;
 use crate::data::ram_usage::RamUsage;
 
 /// A value of a type the library registered, carried between nodes behind an `Arc`. `Any` as a
 /// supertrait upcasts it for a downcast, as Rust 1.86's trait upcasting allows. Its own type id is
 /// [`Self::custom_type_id`], never `type_id`, which `Any` names for std's.
 pub trait CustomValue: Any + Send + Sync + Display {
-    fn custom_type_id(&self) -> TypeId;
+    fn custom_type_id(&self) -> CustomTypeId;
 
     fn ram_bytes(&self) -> RamUsage {
         RamUsage::default()
@@ -161,14 +161,14 @@ impl DynamicValue {
             .unwrap_or_else(|_unread| self.misread(any::type_name::<T>()))
     }
 
-    /// The path of a required input declared `FsPath` for one path. See
+    /// The path of a required input declared a directory or a file taken one at a time. See
     /// [`required_f64`](Self::required_f64).
     #[track_caller]
     pub fn required_fs_path(&self) -> &str {
         self.as_fs_path().unwrap_or_else(|| self.misread("a path"))
     }
 
-    /// The paths of a required input declared `FsPath`. See
+    /// The paths of a required input declared a file taken several at a time. See
     /// [`required_f64`](Self::required_f64).
     #[track_caller]
     pub fn required_fs_paths(&self) -> &[String] {
@@ -277,8 +277,8 @@ mod tests {
     }
 
     impl CustomValue for UnknownPick {
-        fn custom_type_id(&self) -> TypeId {
-            TypeId::from_u128(0xbb)
+        fn custom_type_id(&self) -> CustomTypeId {
+            CustomTypeId::from_u128(0xbb)
         }
     }
 
@@ -297,8 +297,8 @@ mod tests {
     }
 
     impl CustomValue for Tag {
-        fn custom_type_id(&self) -> TypeId {
-            TypeId::from_u128(0xaa)
+        fn custom_type_id(&self) -> CustomTypeId {
+            CustomTypeId::from_u128(0xaa)
         }
     }
 
@@ -388,7 +388,10 @@ mod tests {
         ));
         assert_eq!(
             format!("{:?}", DynamicValue::from_custom(Tag("t"))),
-            format!("Custom {{ type_id: {:?}, .. }}", TypeId::from_u128(0xaa))
+            format!(
+                "Custom {{ type_id: {:?}, .. }}",
+                CustomTypeId::from_u128(0xaa)
+            )
         );
     }
 }

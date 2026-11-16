@@ -215,7 +215,7 @@ fn menu_shortcut(ui: &mut Ui, requests: &mut Requests) {
         }
     }
     if let Some(command) = fired {
-        requests.push_app(command.clone());
+        requests.push_app(*command);
     }
 }
 

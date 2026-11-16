@@ -42,8 +42,8 @@ impl<'a> InputCtx<'a> {
         self.declared.description.as_deref().unwrap_or_default()
     }
 
-    pub(crate) const fn data_type(self) -> &'a DataType {
-        &self.declared.data_type
+    pub(crate) const fn data_type(self) -> DataType {
+        self.declared.data_type
     }
 
     /// What the graph has bound here, or `None` for an unbound port.
@@ -97,10 +97,10 @@ impl<'a> InputCtx<'a> {
 /// and the library alone.
 fn takes_const(library: &Library, input: &InputDecl) -> bool {
     input.default_value.is_some()
-        || match &input.data_type {
+        || match input.data_type {
             DataType::Enum(id) => library
-                .enum_variants(*id)
-                .is_some_and(|variants| !variants.is_empty()),
+                .enum_type(id)
+                .is_some_and(|enum_type| !enum_type.variants().is_empty()),
             DataType::Any => true,
             data_type => data_type.default_value().is_some(),
         }
@@ -111,10 +111,10 @@ fn takes_const(library: &Library, input: &InputDecl) -> bool {
 fn default_const_value(library: &Library, input: &InputDecl) -> Option<ConstValue> {
     input.default_value.clone().or_else(|| {
         // `DataType::Enum(id)` doesn't carry its variants; the library's registry does.
-        match &input.data_type {
+        match input.data_type {
             DataType::Enum(id) => library
-                .enum_variants(*id)
-                .and_then(|variants| variants.first())
+                .enum_type(id)
+                .and_then(|enum_type| enum_type.variants().first())
                 .map(|first| ConstValue::Enum(first.clone())),
             // An `Any` port has no kind to seed: an empty string opens the editor blank, and
             // it infers the kind from the text typed (see `const_editor::parse_any`).
@@ -126,7 +126,7 @@ fn default_const_value(library: &Library, input: &InputDecl) -> Option<ConstValu
 
 #[cfg(test)]
 mod tests {
-    use scenarium::{ConstValue, DataType, InputDecl, Library, TypeEntry, TypeId};
+    use scenarium::{ConstValue, CustomTypeId, DataType, EnumId, EnumType, InputDecl, Library};
 
     use crate::gui::graph_ctx::input_ctx::{default_const_value, takes_const};
 
@@ -136,10 +136,10 @@ mod tests {
     #[test]
     fn an_input_defaults_to_its_declared_value_else_its_types() {
         let mut library = Library::default();
-        let mode = TypeId::from_u128(1);
-        library.register_type(
+        let mode = EnumId::from_u128(1);
+        library.register_enum(
             mode,
-            TypeEntry::enum_with_variants("Mode", vec!["Fast".into(), "Fine".into()]),
+            EnumType::new("Mode", vec!["Fast".into(), "Fine".into()]),
         );
         let input = |data_type: DataType| InputDecl::optional("x", data_type);
         let declared = InputDecl {
@@ -152,14 +152,14 @@ mod tests {
                 input(DataType::Enum(mode)),
                 Some(ConstValue::Enum("Fast".into())),
             ),
-            (input(DataType::Enum(TypeId::from_u128(2))), None),
+            (input(DataType::Enum(EnumId::from_u128(2))), None),
             (
                 input(DataType::Any),
                 Some(ConstValue::String(String::new())),
             ),
             (input(DataType::Int), Some(ConstValue::Int(0))),
             (input(DataType::Float), Some(ConstValue::Float(0.0))),
-            (input(DataType::Custom(TypeId::from_u128(3))), None),
+            (input(DataType::Custom(CustomTypeId::from_u128(3))), None),
         ] {
             assert_eq!(
                 takes_const(&library, &port),

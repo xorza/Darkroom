@@ -8,7 +8,7 @@ use imaginarium::{ChannelLayout, ColorFormat, InterleavedDesc, InterleavedImage,
 use lumos::{FlatGain, FrameGain, ImageMetadata, LinearImage, PixelFlags};
 use scenarium::{CustomValue, CustomValueCodec, Library};
 
-use crate::image::codec::{HEADER_LEN, ImageCodec, ImageRecord, SampleOrder, image_type_entry};
+use crate::image::codec::{HEADER_LEN, ImageCodec, ImageRecord, SampleOrder, image_type};
 use crate::image::{IMAGE_TYPE_ID, Image, Pixels};
 
 fn header_len() -> usize {
@@ -351,9 +351,9 @@ fn record_layout_is_pinned() {
 #[test]
 fn register_image_type_wires_the_codec() {
     let mut library = Library::default();
-    library.register_type(IMAGE_TYPE_ID, image_type_entry());
-    let entry = library.type_entry(IMAGE_TYPE_ID).unwrap();
-    assert_eq!(entry.display_name(), "Image");
+    library.register_custom_type(IMAGE_TYPE_ID, image_type());
+    let entry = library.custom_type(IMAGE_TYPE_ID).unwrap();
+    assert_eq!(entry.name(), "Image");
     assert!(
         format!("{entry:?}").contains("ImageCodec"),
         "the entry holds the codec: {entry:?}"

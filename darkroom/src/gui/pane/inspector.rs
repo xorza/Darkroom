@@ -7,7 +7,6 @@
 //! static binding; outputs show only their label. Neither reads a runtime value — a preview node
 //! is how you look at one.
 
-use std::borrow::Cow;
 use std::collections::BTreeSet;
 
 use palantir::{
@@ -373,10 +372,10 @@ impl PortDot {
         fill: DotFill::Blank,
     };
 
-    fn of(theme: &Theme, data_type: &DataType) -> Self {
+    fn of(theme: &Theme, data_type: DataType) -> Self {
         Self {
             color: theme.port_color(data_type),
-            fill: if *data_type == DataType::Any {
+            fill: if data_type == DataType::Any {
                 DotFill::Ring
             } else {
                 DotFill::Disc
@@ -405,7 +404,7 @@ struct InspectedPort<'a> {
     wid: WidgetId,
     name: &'a str,
     dot: PortDot,
-    type_name: Cow<'a, str>,
+    type_name: &'a str,
     value: Option<PortValue<'a>>,
 }
 
@@ -677,12 +676,12 @@ mod tests {
     #[test]
     fn a_port_dot_wears_its_type_hue() {
         let theme = Theme::default();
-        let float = PortDot::of(&theme, &DataType::Float);
+        let float = PortDot::of(&theme, DataType::Float);
         assert_eq!(
             (float.color, float.fill),
             (theme.type_colors.float, DotFill::Disc)
         );
-        let any = PortDot::of(&theme, &DataType::Any);
+        let any = PortDot::of(&theme, DataType::Any);
         assert_eq!((any.color, any.fill), (theme.port.input, DotFill::Ring));
         assert_ne!(float.color, any.color);
     }

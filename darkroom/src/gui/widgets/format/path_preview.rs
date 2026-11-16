@@ -5,9 +5,9 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::path::Path;
 
-use scenarium::FsPathMode;
+use crate::gui::path_type::PathType;
 
-/// What an `FsPath` input's pick button reads: the mode's call to action
+/// What a path input's pick button reads: its path type's call to action
 /// while nothing is chosen, a single chosen path's own file name, or how many
 /// files a multi-pick holds.
 ///
@@ -27,14 +27,9 @@ pub(crate) enum PathPreview<'a> {
 
 impl<'a> PathPreview<'a> {
     /// The label for a single-path literal.
-    pub(crate) fn single(path: &'a str, mode: FsPathMode) -> Self {
+    pub(crate) fn single(path: &'a str, path_type: PathType) -> Self {
         if path.is_empty() {
-            return Self::Prompt(match mode {
-                FsPathMode::ExistingFile => "Choose file…",
-                FsPathMode::ExistingFiles => "Choose files…",
-                FsPathMode::NewFile => "Choose save path…",
-                FsPathMode::Dir => "Choose directory…",
-            });
+            return Self::Prompt(path_type.prompt());
         }
         Self::Name(
             Path::new(path)
@@ -68,26 +63,33 @@ impl Display for PathPreview<'_> {
 mod tests {
     use std::borrow::Cow;
 
-    use scenarium::FsPathMode;
+    use scenarium::{FileKindId, FileMode};
 
+    use crate::gui::path_type::PathType;
     use crate::gui::widgets::format::path_preview::PathPreview;
+
+    const FILE: PathType = PathType::File {
+        kind: FileKindId::from_u128(1),
+        mode: FileMode::Open,
+    };
+    const SAVE: PathType = PathType::File {
+        kind: FileKindId::from_u128(1),
+        mode: FileMode::Save,
+    };
 
     #[test]
     fn path_previews_distinguish_single_modes_and_multi_selections() {
-        let single = |path, mode| PathPreview::single(path, mode).to_string();
+        let single = |path, path_type| PathPreview::single(path, path_type).to_string();
         let multi = |paths: &[String]| PathPreview::multi(paths).to_string();
 
-        assert_eq!(single("", FsPathMode::ExistingFile), "Choose file…");
-        assert_eq!(single("", FsPathMode::NewFile), "Choose save path…");
-        assert_eq!(single("", FsPathMode::Dir), "Choose directory…");
-        assert_eq!(
-            single("frames/light-01.raf", FsPathMode::ExistingFile),
-            "light-01.raf"
-        );
+        assert_eq!(single("", FILE), "Choose file…");
+        assert_eq!(single("", SAVE), "Choose save path…");
+        assert_eq!(single("", PathType::Dir), "Choose directory…");
+        assert_eq!(single("frames/light-01.raf", FILE), "light-01.raf");
         // The name is a slice of the path it came from, not a rebuild of it —
         // which is what keeps a per-frame button label off the heap.
         assert!(matches!(
-            PathPreview::single("frames/light-01.raf", FsPathMode::ExistingFile),
+            PathPreview::single("frames/light-01.raf", FILE),
             PathPreview::Name(Cow::Borrowed("light-01.raf"))
         ));
 

@@ -7,9 +7,10 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 
 use lumos::CalibrationMasters;
-use scenarium::{CustomValue, DataType, RamUsage, TypeId};
+use scenarium::{CustomTypeId, CustomValue, DataType, RamUsage};
 
-pub(crate) const MASTERS_TYPE_ID: TypeId = TypeId::literal("db1bc978-1d0b-4ffc-9a74-6220eff8908e");
+pub(crate) const MASTERS_TYPE_ID: CustomTypeId =
+    CustomTypeId::literal("db1bc978-1d0b-4ffc-9a74-6220eff8908e");
 
 pub(crate) const MASTERS_DATA_TYPE: DataType = DataType::Custom(MASTERS_TYPE_ID);
 
@@ -20,7 +21,7 @@ pub(crate) struct Masters {
 }
 
 impl CustomValue for Masters {
-    fn custom_type_id(&self) -> TypeId {
+    fn custom_type_id(&self) -> CustomTypeId {
         MASTERS_TYPE_ID
     }
 

@@ -5,6 +5,7 @@ use std::fmt::{Display, Formatter};
 
 use scenarium::{ConstValue, DataType};
 
+use crate::gui::path_type::PathType;
 use crate::gui::widgets::format::path_preview::PathPreview;
 
 /// What an input with nothing in it reads, on the node and in the inspector.
@@ -21,12 +22,12 @@ pub(crate) const FLOAT_DECIMALS: usize = 3;
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ShownValue<'a> {
     pub(crate) value: &'a ConstValue,
-    pub(crate) data_type: &'a DataType,
+    pub(crate) data_type: DataType,
 }
 
 impl Display for ShownValue<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        if *self.data_type == DataType::Any {
+        if self.data_type == DataType::Any {
             return match self.value {
                 ConstValue::Null => f.write_str(UNSET),
                 value => write_untyped(value, f),
@@ -39,10 +40,9 @@ impl Display for ShownValue<'_> {
             ConstValue::Bool(value) => write!(f, "{value}"),
             ConstValue::String(value) | ConstValue::Enum(value) => f.write_str(value),
             ConstValue::FsPath(path) => {
-                let DataType::FsPath(config) = self.data_type else {
-                    unreachable!("a path literal is admitted only on a path or an untyped port");
-                };
-                PathPreview::single(path, config.mode).fmt(f)
+                let path_type = PathType::of(self.data_type)
+                    .expect("a path literal is admitted only on a path or an untyped port");
+                PathPreview::single(path, path_type).fmt(f)
             }
             ConstValue::FsPaths(paths) => PathPreview::multi(paths).fmt(f),
         }
@@ -62,9 +62,7 @@ pub(crate) fn write_untyped(value: &ConstValue, out: &mut impl fmt::Write) -> fm
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use scenarium::{ConstValue, DataType, FsPathConfig};
+    use scenarium::{ConstValue, DataType, FileKindId, FileMode};
 
     use crate::gui::widgets::format::shown_value::ShownValue;
 
@@ -73,31 +71,39 @@ mod tests {
     /// writes it, a whole float keeping its `.0` and a path whole.
     #[test]
     fn each_constant_reads_as_the_node_shows_it() {
-        let path = DataType::FsPath(Arc::new(FsPathConfig::default()));
-        let cases: [(ConstValue, &DataType, &str); 11] = [
-            (ConstValue::Float(5.0), &DataType::Float, "5.000"),
-            (ConstValue::Float(0.15), &DataType::Float, "0.150"),
-            (ConstValue::Int(-3), &DataType::Int, "-3"),
-            (ConstValue::Bool(true), &DataType::Bool, "true"),
-            (ConstValue::String("a b".into()), &DataType::String, "a b"),
+        let file = |mode| DataType::File {
+            kind: FileKindId::from_u128(1),
+            mode,
+        };
+        let cases: [(ConstValue, DataType, &str); 12] = [
+            (ConstValue::Float(5.0), DataType::Float, "5.000"),
+            (ConstValue::Float(0.15), DataType::Float, "0.150"),
+            (ConstValue::Int(-3), DataType::Int, "-3"),
+            (ConstValue::Bool(true), DataType::Bool, "true"),
+            (ConstValue::String("a b".into()), DataType::String, "a b"),
             (
                 ConstValue::FsPath("frames/light-01.raf".into()),
-                &path,
+                file(FileMode::Open),
                 "light-01.raf",
             ),
             (
                 ConstValue::FsPaths(vec!["a.raf".into(), "b.raf".into()]),
-                &path,
+                file(FileMode::OpenMany),
                 "2 files",
             ),
-            (ConstValue::Null, &DataType::Float, "\u{2014}"),
-            (ConstValue::Float(1.0), &DataType::Any, "1.0"),
+            (
+                ConstValue::FsPath(String::new()),
+                DataType::Dir,
+                "Choose directory…",
+            ),
+            (ConstValue::Null, DataType::Float, "\u{2014}"),
+            (ConstValue::Float(1.0), DataType::Any, "1.0"),
             (
                 ConstValue::FsPath("frames/a.raf".into()),
-                &DataType::Any,
+                DataType::Any,
                 "frames/a.raf",
             ),
-            (ConstValue::Null, &DataType::Any, "\u{2014}"),
+            (ConstValue::Null, DataType::Any, "\u{2014}"),
         ];
         for (value, data_type, shown) in cases {
             let text = ShownValue {

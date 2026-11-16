@@ -5,11 +5,10 @@ use scenarium::async_lambda;
 use std::io::{BufReader, BufWriter, Write};
 use std::mem;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use common::{SystemMemory, fs, task};
 use imaginarium::{RasterFormat, SUPPORTED_EXTENSIONS};
-use scenarium::{ConstValue, DataType, DynamicValue, FsPathConfig, FsPathMode, InvokeError};
+use scenarium::{ConstValue, DataType, DynamicValue, FileKind, FileKindId, FileMode, InvokeError};
 use scenarium::{Func, InputDecl, Library, OutputDecl};
 
 use crate::image::format::{AS_IS, CONVERSION_FORMAT_DATATYPE, ConversionFormat};
@@ -20,7 +19,11 @@ use scenarium::Invocation;
 const LOAD_IMAGE_FUNC_ID: FuncId = FuncId::literal("a4d9bf87-9d98-44f1-a162-7483c298be3d");
 const SAVE_IMAGE_FUNC_ID: FuncId = FuncId::literal("0c17bcbe-d757-43be-b184-27b429e8b434");
 
+/// The raster images imaginarium reads and writes.
+const IMAGE_FILE: FileKindId = FileKindId::literal("404e04fb-f5c4-43dd-9ee0-684ab9b16200");
+
 pub(super) fn register(library: &mut Library) {
+    library.register_file_kind(IMAGE_FILE, FileKind::new("Image", SUPPORTED_EXTENSIONS));
     register_load(library);
     register_save(library);
 }
@@ -73,7 +76,7 @@ fn register_load(library: &mut Library) {
         .category("Image")
         .pure()
         .input(
-            InputDecl::required("Path", image_fs_path(FsPathMode::ExistingFile))
+            InputDecl::required("Path", image_file(FileMode::Open))
                 .description("Image file to load."),
         )
         .output(OutputDecl::new("Image", IMAGE_DATA_TYPE).description("Loaded image."))
@@ -113,7 +116,7 @@ fn register_save(library: &mut Library) {
                 InputDecl::required("Image", IMAGE_DATA_TYPE).description("Image to save."),
             )
             .input(
-                InputDecl::required("Path", image_fs_path(FsPathMode::NewFile))
+                InputDecl::required("Path", image_file(FileMode::Save))
                     .description("Destination file; the extension picks the container."),
             )
             .input(
@@ -127,12 +130,9 @@ fn register_save(library: &mut Library) {
     );
 }
 
-fn image_fs_path(mode: FsPathMode) -> DataType {
-    DataType::FsPath(Arc::new(FsPathConfig::with_extensions(
+const fn image_file(mode: FileMode) -> DataType {
+    DataType::File {
+        kind: IMAGE_FILE,
         mode,
-        SUPPORTED_EXTENSIONS
-            .iter()
-            .map(ToString::to_string)
-            .collect(),
-    )))
+    }
 }

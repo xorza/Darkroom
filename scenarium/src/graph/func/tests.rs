@@ -1,7 +1,8 @@
-use std::sync::Arc;
-
 use crate::data::const_value::ConstValue;
-use crate::data::data_type::{DataType, FsPathConfig, FsPathMode, TypeId};
+use crate::data::data_type::custom_type::CustomTypeId;
+use crate::data::data_type::enum_type::EnumId;
+use crate::data::data_type::file_kind::FileKindId;
+use crate::data::data_type::{DataType, FileMode};
 use crate::graph::func::Func;
 use crate::graph::func::lambda::FuncLambda;
 use crate::graph::func::value_variant::ValueVariant;
@@ -14,10 +15,10 @@ use crate::internals;
 fn validate_rejects_invalid_identities_and_defaults() {
     let nil_input = internals::stub_func(FuncId::unique(), "input").input(InputDecl::required(
         "value",
-        DataType::Custom(TypeId::nil()),
+        DataType::Custom(CustomTypeId::nil()),
     ));
     let nil_output = internals::stub_func(FuncId::unique(), "output")
-        .output(OutputDecl::new("value", DataType::Enum(TypeId::nil())));
+        .output(OutputDecl::new("value", DataType::Enum(EnumId::nil())));
     let any_output = internals::stub_func(FuncId::unique(), "any")
         .output(OutputDecl::new("value", DataType::Any));
     let invalid = [
@@ -62,7 +63,7 @@ fn validate_rejects_invalid_identities_and_defaults() {
     default_mismatch(InputDecl::optional("v", DataType::Int).default(ConstValue::Bool(true)));
     default_mismatch(InputDecl::optional("v", DataType::Bool).default(1.0));
     default_mismatch(
-        InputDecl::optional("v", DataType::Custom(TypeId::unique()))
+        InputDecl::optional("v", DataType::Custom(CustomTypeId::unique()))
             .default(ConstValue::Enum("preset".into())),
     );
     // Null means "explicitly unset" — only an optional input may declare it.
@@ -77,7 +78,10 @@ fn validate_rejects_invalid_identities_and_defaults() {
     default_mismatch(
         InputDecl::optional(
             "v",
-            DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::ExistingFiles))),
+            DataType::File {
+                kind: FileKindId::from_u128(1),
+                mode: FileMode::OpenMany,
+            },
         )
         .default(ConstValue::FsPath("a.fits".into())),
     );
@@ -97,7 +101,10 @@ fn validate_rejects_invalid_identities_and_defaults() {
         .input(
             InputDecl::optional(
                 "paths",
-                DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::ExistingFiles))),
+                DataType::File {
+                    kind: FileKindId::from_u128(1),
+                    mode: FileMode::OpenMany,
+                },
             )
             .default(ConstValue::FsPaths(vec!["a.fits".into()])),
         )

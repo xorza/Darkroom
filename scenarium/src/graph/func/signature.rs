@@ -40,12 +40,12 @@ impl FuncSignature {
         count(&mut hasher, ports.inputs.len());
         for input in &ports.inputs {
             name(&mut hasher, &input.name);
-            write_type(&mut hasher, &input.data_type);
+            write_type(&mut hasher, input.data_type);
         }
         count(&mut hasher, ports.outputs.len());
         for output in &ports.outputs {
             name(&mut hasher, &output.name);
-            write_type(&mut hasher, &output.data_type);
+            write_type(&mut hasher, output.data_type);
         }
         count(&mut hasher, events.len());
         for event in events {
@@ -55,24 +55,27 @@ impl FuncSignature {
     }
 }
 
-/// A type as its kind, plus the identity of a custom or enum type. A path's mode and
-/// extensions are left out: they decide which values a picker offers, not where a binding
-/// lands.
-fn write_type(hasher: &mut blake3::Hasher, data_type: &DataType) {
+/// A type as its kind, plus the identity of a custom or enum type. A path is one kind, a
+/// directory or a file of any kind and mode: those decide which values a picker offers, not
+/// where a binding lands.
+fn write_type(hasher: &mut blake3::Hasher, data_type: DataType) {
     let tag: u8 = match data_type {
         DataType::Any => 0,
         DataType::Float => 1,
         DataType::Int => 2,
         DataType::Bool => 3,
         DataType::String => 4,
-        DataType::FsPath(_) => 5,
+        DataType::Dir | DataType::File { .. } => 5,
         DataType::Custom(_) => 6,
         DataType::Enum(_) => 7,
     };
     hasher.update(&[tag]);
-    if let DataType::Custom(type_id) | DataType::Enum(type_id) = data_type {
-        hasher.update(&type_id.as_u128().to_le_bytes());
-    }
+    let id = match data_type {
+        DataType::Custom(type_id) => type_id.as_u128(),
+        DataType::Enum(enum_id) => enum_id.as_u128(),
+        _ => return,
+    };
+    hasher.update(&id.to_le_bytes());
 }
 
 impl FuncSignature {

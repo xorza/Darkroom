@@ -347,8 +347,8 @@ async fn impure_cone_persist_node_is_not_disk_cached() {
 /// disk instead.
 #[tokio::test]
 async fn missing_codec_skips_disk_cache_instead_of_panicking() {
+    use crate::data::data_type::custom_type::CustomType;
     use crate::internals::blob::{BLOB_TYPE, Blob, BlobCodec};
-    use crate::library::type_entry::TypeEntry;
 
     // A pure, disk-persisted sink emitting a custom `Blob`. The type's codec is registered only
     // when `with_codec`, and the program takes its codecs from this same library.
@@ -356,10 +356,10 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
     let build = |with_codec: bool, recompute: &Calls| {
         let recompute = recompute.clone();
         let mut g = TestGraph::new();
-        g.library.register_type(
+        g.library.register_custom_type(
             BLOB_TYPE,
             if with_codec {
-                TypeEntry::custom_with_codec(
+                CustomType::with_codec(
                     "Blob",
                     Arc::new(BlobCodec {
                         decodes: decodes.clone(),
@@ -367,7 +367,7 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
                     }),
                 )
             } else {
-                TypeEntry::custom("Blob")
+                CustomType::new("Blob")
             },
         );
         // A `Custom` value has no `compute` shape (that writes a `ConstValue`), so this body

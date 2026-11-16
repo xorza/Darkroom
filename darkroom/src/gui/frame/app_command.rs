@@ -8,12 +8,12 @@
 
 use std::num::NonZeroU32;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use lens::MlModelPaths;
-use scenarium::{FsPathConfig, InputPort, NodeId, ProgramId};
+use scenarium::{InputPort, NodeId, ProgramId};
 
 use crate::gui::frame::framing::Framing;
+use crate::gui::path_type::PathType;
 
 /// A command a UI surface (the menu bar, the keyboard chords, the graph
 /// toolbar, a node's header chips and context menu, an inline path-picker, the
@@ -24,7 +24,7 @@ use crate::gui::frame::framing::Framing;
 /// can run during the pass that raises it. A UI action that only rearranges
 /// panes is not one of these — it is a
 /// [`DockOperation`](palantir::DockOperation) on the frame's queue.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) enum AppCommand {
     /// Document file lifecycle.
     File(FileCommand),
@@ -123,7 +123,7 @@ impl MlModelKind {
 /// Node edits that need a blocking dialog before applying. The dialog opens
 /// after UI authoring, then the chosen paths land as an ordinary undoable
 /// `SetInput` edit.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) enum EditCommand {
     /// Open a file dialog (filtered by the pick's picker config) for a
     /// node's `FsPath` const input, applying the chosen paths as a `SetInput`
@@ -131,15 +131,14 @@ pub(crate) enum EditCommand {
     PickInputPath(PathPick),
 }
 
-/// A click on an `FsPath` input's inline pick button: the port to set, and the
-/// picker config to open the dialog with.
+/// A click on a path input's inline pick button: the port to set, and the path type to open the
+/// dialog for.
 ///
 /// A named payload, as it travels as an `AppCommand` through `App`: the dialog can only run once
 /// the record pass is over.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct PathPick {
     pub(crate) port: InputPort,
-    /// Type-level metadata, taken from the port's `DataType` — the value
-    /// carries only the selected path strings.
-    pub(crate) config: Arc<FsPathConfig>,
+    /// Taken from the port's type — the value carries only the selected path strings.
+    pub(crate) path_type: PathType,
 }

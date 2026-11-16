@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::string::FromUtf8Error;
 
 use crate::data::codec::error::CodecError;
-use crate::data::data_type::TypeId;
+use crate::data::data_type::custom_type::CustomTypeId;
 use crate::exec::cache::disk_store::store_outcome::StoreOutcome;
 
 /// A publication that was attempted and did not land, named by the stage that broke. Every arm is
@@ -69,11 +69,17 @@ pub enum CodecFormatError {
     #[error("malformed cached output frame")]
     Frame(#[from] FrameError),
     #[error("encoding a {type_id:?} value failed")]
-    Encode { type_id: TypeId, source: CodecError },
+    Encode {
+        type_id: CustomTypeId,
+        source: CodecError,
+    },
     #[error("no cache codec registered for custom type {0:?}")]
-    UnknownType(TypeId),
+    UnknownType(CustomTypeId),
     #[error("decoding a {type_id:?} value failed")]
-    Decode { type_id: TypeId, source: CodecError },
+    Decode {
+        type_id: CustomTypeId,
+        source: CodecError,
+    },
 }
 
 /// How a blob's framing is malformed — the bytes are there, but do not add up

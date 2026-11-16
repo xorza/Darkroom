@@ -41,7 +41,6 @@ use std::iter;
 use std::sync::Arc;
 
 use crate::containers::col::{Col, Idx, Span};
-use crate::data::data_type::DataType;
 use crate::exec::compile::compiled_graph::{
     CompiledGraph, ExecBinding, ExecEvent, ExecInput, ExecNode,
 };
@@ -158,7 +157,7 @@ impl Compiler {
             let node_inputs = compiled.inputs.append(func.inputs().iter().enumerate().map(
                 |(port_idx, input)| ExecInput {
                     required: input.required,
-                    fs_path: matches!(&input.data_type, DataType::FsPath(_)),
+                    fs_path: input.data_type.is_path(),
                     binding: self.lower(graph.bindings.get(&InputPort::new(node_id, port_idx))),
                 },
             ));

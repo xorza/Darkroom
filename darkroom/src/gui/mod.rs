@@ -5,6 +5,7 @@ pub(crate) mod graph_ctx;
 pub(crate) mod main_window;
 pub(crate) mod node_key;
 pub(crate) mod pane;
+pub(crate) mod path_type;
 pub(crate) mod port_ref;
 pub(crate) mod state;
 pub(crate) mod theme;

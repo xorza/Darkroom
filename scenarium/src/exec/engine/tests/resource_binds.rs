@@ -6,7 +6,8 @@ use std::sync::Mutex;
 use common::{TempDir, TempFile, Unreadable, fs};
 
 use crate::async_lambda;
-use crate::data::data_type::{FsPathConfig, FsPathMode};
+use crate::data::data_type::FileMode;
+use crate::data::data_type::file_kind::FileKindId;
 
 /// How often each counted node ran, and what the sink last saw.
 #[derive(Debug, Default, Clone)]
@@ -28,19 +29,19 @@ impl Observed {
     }
 }
 
-fn any_path() -> DataType {
-    DataType::FsPath(Arc::new(FsPathConfig::default()))
+/// One existing file of a kind the library does not register, which wires to itself alone.
+fn file_path() -> DataType {
+    DataType::File {
+        kind: FileKindId::from_u128(1),
+        mode: FileMode::Open,
+    }
 }
 
-fn existing_file() -> DataType {
-    DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::ExistingFile)))
-}
-
-/// Reads the file its declared-`FsPath` input names, counting invocations.
+/// Reads the file its declared file input names, counting invocations.
 fn loader(observed: Observed) -> impl FnOnce(NodeSpec) -> NodeSpec {
     move |n: NodeSpec| {
         n.pure()
-            .input(existing_file())
+            .input(file_path())
             .output(DataType::String)
             .lambda(async_lambda!(
                 move |Invocation { inputs, outputs, .. }| { loads = observed.loads.clone() } => {
@@ -69,7 +70,7 @@ fn capture(observed: Observed) -> impl FnOnce(NodeSpec) -> NodeSpec {
 /// `make_path(const name) → load_text → annotate → capture`, the three pure
 /// nodes on `mode`.
 ///
-/// `make_path` is pure `String → FsPath`: a producer whose *own* digest does
+/// `make_path` is pure `String → File`: a producer whose *own* digest does
 /// not track the file, like any path-computing node. `annotate` sits
 /// downstream of the late-stamped loader, so it proves the reach-time
 /// re-stamp cascades and downstream caches still hit.
@@ -82,7 +83,7 @@ fn path_graph(data_path: &str, mode: CacheMode, observed: Observed) -> TestGraph
         n.pure()
             .cache(mode)
             .input(DataType::String)
-            .output(any_path())
+            .output(file_path())
             .compute(|inputs| ConstValue::FsPath(inputs[0].as_string().unwrap().to_string()))
     });
     g.add("load_text", |n| loader(observed.clone())(n).cache(mode));
@@ -176,7 +177,7 @@ async fn an_unidentifiable_path_runs_the_node_uncached() {
     let mut g = TestGraph::new();
     g.add("ignores_path", |n: NodeSpec| {
         n.pure()
-            .input(existing_file())
+            .input(file_path())
             .output(DataType::String)
             .compute(|_| ConstValue::String("ran".into()))
     });

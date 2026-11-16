@@ -1,6 +1,6 @@
 //! What a publication that did not fail actually did.
 
-use crate::data::data_type::TypeId;
+use crate::data::data_type::custom_type::CustomTypeId;
 
 /// What a publication that did not fail actually did.
 ///
@@ -18,5 +18,5 @@ pub(crate) enum StoreOutcome {
     /// written. Not a failure: which codecs exist is a property of the library, not of this
     /// write, and the value will go on not persisting until one is registered — which is why a
     /// caller reporting to a human wants it.
-    Unsupported { type_id: TypeId },
+    Unsupported { type_id: CustomTypeId },
 }

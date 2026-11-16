@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use imaginarium::ColorFormat;
-use scenarium::{DataType, EnumVariants, TypeId};
+use scenarium::{DataType, EnumId, EnumVariants};
 
 /// The `Format` variant that keeps the image's color format.
 pub(super) const AS_IS: &str = "As Is";
@@ -63,8 +63,8 @@ impl EnumVariants for ConversionFormat {
     }
 }
 
-pub(super) const CONVERSION_FORMAT_TYPE_ID: TypeId =
-    TypeId::literal("6d9db73e-5c92-4332-af0d-b2eb7c95acd0");
+pub(super) const CONVERSION_FORMAT_TYPE_ID: EnumId =
+    EnumId::literal("6d9db73e-5c92-4332-af0d-b2eb7c95acd0");
 
 pub(super) const CONVERSION_FORMAT_DATATYPE: DataType = DataType::Enum(CONVERSION_FORMAT_TYPE_ID);
 

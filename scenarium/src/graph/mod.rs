@@ -309,7 +309,7 @@ impl Graph {
                     .outputs()
                     .get(source.port_idx)
                     .ok_or(BindingRejection::UndeclaredOutput)?;
-                if input.data_type.compatible_with(&output.data_type) {
+                if library.wire_satisfies(input.data_type, output.data_type) {
                     Ok(())
                 } else {
                     Err(BindingRejection::WireMismatch)

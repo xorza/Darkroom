@@ -9,7 +9,7 @@ use tokio::io::{
 
 use crate::data::codec::Codecs;
 use crate::data::const_value::ConstValue;
-use crate::data::data_type::TypeId;
+use crate::data::data_type::custom_type::CustomTypeId;
 use crate::data::dynamic_value::DynamicValue;
 use crate::exec::cache::digest::Digest;
 use crate::exec::cache::disk_store::error::{CodecFormatError, FormatResult, FrameError};
@@ -29,7 +29,7 @@ const PAYLOAD_LEN_OFFSET: u64 = (1 + 3 + 16 + 4) as u64;
 enum OutputKind {
     Unbound,
     Static,
-    Custom { type_id: TypeId, version: u32 },
+    Custom { type_id: CustomTypeId, version: u32 },
 }
 
 impl OutputKind {
@@ -298,7 +298,7 @@ where
 
 /// The first custom type among `outputs` that `codecs` cannot encode — the
 /// verdict [`BlobWriter::write`] would reach, answered before anything is written.
-pub(super) fn unsupported_type(outputs: &[DynamicValue], codecs: &Codecs) -> Option<TypeId> {
+pub(super) fn unsupported_type(outputs: &[DynamicValue], codecs: &Codecs) -> Option<CustomTypeId> {
     outputs.iter().find_map(|value| match value {
         DynamicValue::Custom(value) if codecs.get(value.custom_type_id()).is_none() => {
             Some(value.custom_type_id())
@@ -373,7 +373,7 @@ async fn read_desc(reader: &mut (impl AsyncRead + Unpin)) -> FormatResult<Output
             OutputKind::Static
         }
         2 => OutputKind::Custom {
-            type_id: TypeId::from_u128(u128::from_le_bytes(type_id_bytes)),
+            type_id: CustomTypeId::from_u128(u128::from_le_bytes(type_id_bytes)),
             version,
         },
         _ => return Err(FrameError::UnknownValueTag.into()),

@@ -15,9 +15,10 @@ use imaginarium::{ChannelLayout, PlanarDesc, PlanarImage};
 use lumos::{
     FrameDescError, FrameGain, ImageMetadata, LinearImage, LinearParts, PixelFlags, frame_desc,
 };
-use scenarium::{CustomValue, DataType, DynamicValue, InputDecl, RamUsage, TypeId};
+use scenarium::{CustomTypeId, CustomValue, DataType, DynamicValue, InputDecl, RamUsage};
 
-pub const IMAGE_TYPE_ID: TypeId = TypeId::literal("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2");
+pub const IMAGE_TYPE_ID: CustomTypeId =
+    CustomTypeId::literal("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2");
 
 pub(crate) const IMAGE_DATA_TYPE: DataType = DataType::Custom(IMAGE_TYPE_ID);
 
@@ -170,7 +171,7 @@ fn plane_layout(format: imaginarium::ColorFormat) -> ChannelLayout {
 }
 
 impl CustomValue for Image {
-    fn custom_type_id(&self) -> TypeId {
+    fn custom_type_id(&self) -> CustomTypeId {
         IMAGE_TYPE_ID
     }
 

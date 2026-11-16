@@ -343,7 +343,7 @@ fn failing_lambda(message: &'static str) -> FuncLambda {
 }
 
 /// The type a scalar or string literal names. A path is a bare string without
-/// the mode and extensions of a `DataType::FsPath`, an enum variant a name
+/// the kind and mode of a `DataType::File`, an enum variant a name
 /// without its type's id, and `Null` names nothing.
 fn literal_type(value: &ConstValue) -> DataType {
     match value {

@@ -122,9 +122,7 @@ impl FuncBuilder {
             return Err(FuncValidationError::PureWithoutOutputs { func_id: self.id });
         }
         for (input_idx, input) in self.ports.inputs.iter().enumerate() {
-            if let DataType::Custom(type_id) | DataType::Enum(type_id) = &input.data_type
-                && type_id.is_nil()
-            {
+            if input.data_type.has_nil_id() {
                 return Err(FuncValidationError::NilInputType {
                     func_id: self.id,
                     input_idx,
@@ -132,7 +130,7 @@ impl FuncBuilder {
             }
             // No `Library` exists yet, and one may register this func before the enum types it
             // names, so an enum default need only be an enum literal here;
-            // `Library::register_type` checks the name against the variants once both exist.
+            // `Library::check` checks the name against the variants once the library is whole.
             if let Some(default) = &input.default_value
                 && !input.accepts_const(default, Strictness::Declared, |_, _| true)
             {
@@ -143,20 +141,17 @@ impl FuncBuilder {
             }
         }
         for (output_idx, output) in self.ports.outputs.iter().enumerate() {
-            match &output.data_type {
-                DataType::Any => {
-                    return Err(FuncValidationError::AnyOutput {
-                        func_id: self.id,
-                        output_idx,
-                    });
-                }
-                DataType::Custom(type_id) | DataType::Enum(type_id) if type_id.is_nil() => {
-                    return Err(FuncValidationError::NilOutputType {
-                        func_id: self.id,
-                        output_idx,
-                    });
-                }
-                _ => {}
+            if output.data_type == DataType::Any {
+                return Err(FuncValidationError::AnyOutput {
+                    func_id: self.id,
+                    output_idx,
+                });
+            }
+            if output.data_type.has_nil_id() {
+                return Err(FuncValidationError::NilOutputType {
+                    func_id: self.id,
+                    output_idx,
+                });
             }
         }
         Ok(())

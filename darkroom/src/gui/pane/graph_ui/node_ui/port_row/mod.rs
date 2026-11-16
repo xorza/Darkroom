@@ -9,7 +9,6 @@
 use std::fmt;
 use std::fmt::Display;
 use std::fmt::Formatter;
-use std::sync::Arc;
 
 use glam::Vec2;
 use palantir::{
@@ -21,7 +20,7 @@ use scenarium::FuncEvent;
 use scenarium::InputPort;
 use scenarium::Library;
 use scenarium::NodeId;
-use scenarium::{ConstValue, DataType, FsPathMode};
+use scenarium::{ConstValue, DataType};
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::preview_sink;
@@ -34,6 +33,7 @@ use crate::gui::pane::graph_ui::gesture::preview_drag::PreviewSpawn;
 use crate::gui::pane::graph_ui::node_ui::const_editor::{ConstEditor, Field};
 use crate::gui::pane::graph_ui::node_ui::node_record::NodeRecord;
 use crate::gui::pane::graph_ui::wid;
+use crate::gui::path_type::PathType;
 use crate::gui::port_ref::PortKind;
 use crate::gui::theme::Theme;
 use crate::gui::theme::hover::Hover;
@@ -102,7 +102,7 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, row_tracks: &mu
 #[derive(Debug, Clone, Copy)]
 struct PortTooltip<'a> {
     description: &'a str,
-    data_type: &'a DataType,
+    data_type: DataType,
 }
 
 impl PortTooltip<'_> {
@@ -258,7 +258,7 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
                 if let Some(color) = outline {
                     circle = circle.outline(color);
                 }
-                if *input.data_type() == DataType::Any {
+                if input.data_type() == DataType::Any {
                     circle = circle.hollow();
                 }
                 let glyph = circle.show(ui, theme);
@@ -355,20 +355,20 @@ fn value_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCtx<'_>)
     };
     let data_type = input.data_type();
     let value_variants = input.value_variants();
-    // An `FsPath` editor draws a pick button; clicking it raises a blocking file dialog, which
+    // A path editor draws a pick button; clicking it raises a blocking file dialog, which
     // only `App` can run, so this is the app tier. Whether a click means "pick a path" is a
     // question about the port's type, which decided to draw the button, so it is answered here
     // rather than by a canvas-level sweep.
     if ui.response_for(editor_id).clicked()
         && matches!(value, ConstValue::FsPath(_) | ConstValue::FsPaths(_))
-        && let DataType::FsPath(config) = data_type
+        && let Some(path_type) = PathType::of(data_type)
     {
         record
             .stage
             .out
             .push_app(AppCommand::Edit(EditCommand::PickInputPath(PathPick {
                 port,
-                config: Arc::clone(config),
+                path_type,
             })));
     }
     let edited = value_column(ui, port, |ui| {
@@ -532,39 +532,24 @@ impl EventRow<'_> {
     }
 }
 
-/// Human-readable type for a port tooltip: the picker mode (and accepted extensions) for a
-/// path, and the library's own display name for everything else (`any` for the untyped boundary
-/// placeholder, a registered type's name, or the raw id when nothing is registered).
+/// Human-readable type for a port tooltip: a path's kind, mode and extensions
+/// ([`PathType::label`]), and the library's own name for everything else (`any` for the untyped
+/// boundary placeholder, a registered type's name, or "unknown type" for one the library does not
+/// register).
 ///
 /// Renders on demand, as [`PortTooltip::intern`] feeds it straight to `fmt!`.
 #[derive(Debug)]
 struct TypeLabel<'a> {
     library: &'a Library,
-    data_type: &'a DataType,
+    data_type: DataType,
 }
 
 impl Display for TypeLabel<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let DataType::FsPath(config) = self.data_type else {
-            // Borrowed for every type the library knows; only an unregistered id builds a string.
-            return f.write_str(&self.library.type_name(self.data_type));
-        };
-        let mode = match config.mode {
-            FsPathMode::Dir => "directory",
-            FsPathMode::ExistingFile => "file",
-            FsPathMode::ExistingFiles => "files",
-            FsPathMode::NewFile => "save path",
-        };
-        write!(f, "path · {mode}")?;
-        // Written one at a time, not `join`ed, which would build the intermediate string.
-        if let Some((first, rest)) = config.extensions.split_first() {
-            write!(f, " ({first}")?;
-            for ext in rest {
-                write!(f, ", {ext}")?;
-            }
-            f.write_str(")")?;
+        match PathType::of(self.data_type) {
+            Some(path_type) => path_type.label(self.library).fmt(f),
+            None => f.write_str(self.library.type_name(self.data_type)),
         }
-        Ok(())
     }
 }
 

@@ -1,31 +1,44 @@
-pub(crate) mod type_entry;
+//! [`Library`]: the funcs nodes instantiate and the types their ports name.
+//!
+//! # Decisions
+//!
+//! - **A library registers every type its funcs declare**, held by [`Library::check`] once it is
+//!   composed. So a type the library lacks is one no func here declares, and no body reads a
+//!   value of it. Refused: a check at each `add` and each registration of the other's entries, as
+//!   the two arrive in either order.
 
-use std::borrow::Cow;
 use std::collections::HashMap;
-use std::collections::hash_map::Values;
+use std::collections::hash_map::{Entry, Values};
 use std::sync::Arc;
+
+use common::Id;
 
 use crate::data::codec::Codecs;
 use crate::data::const_value::ConstValue;
-use crate::data::data_type::{DataType, Strictness, TypeId};
+use crate::data::data_type::custom_type::{CustomType, CustomTypeId};
+use crate::data::data_type::enum_type::{EnumId, EnumType};
+use crate::data::data_type::file_kind::{FileKind, FileKindId};
+use crate::data::data_type::{DataType, Strictness};
 use crate::graph::error::Unresolved;
 use crate::graph::func::Func;
 use crate::graph::identity::FuncId;
 use crate::graph::node::{Node, NodeKind};
 use crate::graph::ports::InputDecl;
-use crate::library::type_entry::TypeEntry;
+
+/// The name a type shows when the library does not register it.
+const UNKNOWN_TYPE: &str = "unknown type";
 
 /// The runtime registry every frontend resolves against: the [`Func`]s nodes instantiate, and the
-/// nominal types (with their disk codecs). Not a persistence format: authored graphs serialize
-/// function and type ids and resolve them against a process-assembled library.
+/// types their ports name, each kind in its own table under its own id type. Not a persistence
+/// format: authored graphs serialize func and type ids and resolve them against a
+/// process-assembled library.
 #[derive(Default, Debug)]
 pub struct Library {
     funcs: HashMap<FuncId, Func>,
-
-    /// Registered nominal types (`Custom`/`Enum`), written only by
-    /// [`register_type`](Self::register_type).
-    types: HashMap<TypeId, TypeEntry>,
-    /// The codecs among `types`, shared with each program compiled from this library;
+    enums: HashMap<EnumId, EnumType>,
+    custom_types: HashMap<CustomTypeId, CustomType>,
+    file_kinds: HashMap<FileKindId, FileKind>,
+    /// The codecs among `custom_types`, shared with each program compiled from this library;
     /// registration copies the map only while a program still holds the previous one.
     codecs: Arc<Codecs>,
 }
@@ -59,115 +72,96 @@ impl Library {
         self.funcs.values()
     }
 
+    /// # Panics
+    /// If a func is registered under its id already.
     pub fn add(&mut self, func: Func) {
         assert!(
             !self.funcs.contains_key(&func.id()),
             "duplicate function registration"
         );
-        assert_enum_defaults(&func, |type_id| self.enum_variants(type_id));
-        for type_id in declared_enum_types(&func) {
-            assert!(
-                !self.is_registered_custom(type_id),
-                "function {:?} declares {type_id:?} as an enum, but it is registered as a \
-                 custom type",
-                func.name(),
-            );
-        }
         self.funcs.insert(func.id(), func);
     }
 
-    /// Register a nominal type. Registering an identical entry again does nothing, so libraries
-    /// that share a type merge; a conflicting entry under a registered id panics.
-    pub fn register_type(&mut self, type_id: impl Into<TypeId>, entry: TypeEntry) {
-        let type_id = type_id.into();
-        assert!(!type_id.is_nil());
-        if let Some(existing) = self.types.get(&type_id) {
-            assert!(
-                existing.same_as(&entry),
-                "conflicting registration of type {type_id:?}"
-            );
-            return;
+    /// Register an enum. Registering an identical one again does nothing, so libraries that
+    /// share it merge.
+    ///
+    /// # Panics
+    /// If `id` is nil, or another enum is registered under it.
+    pub fn register_enum(&mut self, id: EnumId, enum_type: EnumType) {
+        register(&mut self.enums, id, enum_type, PartialEq::eq);
+    }
+
+    /// Register a custom type, and its codec if it has one. Registering an identical one again
+    /// does nothing, so libraries that share it merge.
+    ///
+    /// # Panics
+    /// If `id` is nil, or another custom type is registered under it: another name, or another
+    /// codec instance.
+    pub fn register_custom_type(&mut self, id: CustomTypeId, custom_type: CustomType) {
+        let codec = custom_type.codec().map(Arc::clone);
+        if register(&mut self.custom_types, id, custom_type, CustomType::same_as)
+            && let Some(codec) = codec
+        {
+            Arc::make_mut(&mut self.codecs).insert(id, codec);
         }
-        // Funcs and their enum types register in either order, so the membership gate runs from
-        // both directions: `add` checks against types already present, and a fresh enum entry
-        // re-checks the funcs already added. Before the insert, so a refused entry never reaches
-        // `types`; the check resolves `type_id` from `entry` directly.
-        match entry.variants() {
-            Some(variants) =>
-            {
-                #[expect(
-                    clippy::iter_over_hash_type,
-                    reason = "the order changes only which func an assert names first"
-                )]
-                for func in self.funcs.values() {
-                    assert_enum_defaults(func, |declared| {
-                        (declared == type_id).then_some(variants)
-                    });
-                }
+    }
+
+    /// Register a file kind. Registering an identical one again does nothing, so libraries that
+    /// share it merge.
+    ///
+    /// # Panics
+    /// If `id` is nil, or another file kind is registered under it.
+    pub fn register_file_kind(&mut self, id: FileKindId, file_kind: FileKind) {
+        register(&mut self.file_kinds, id, file_kind, PartialEq::eq);
+    }
+
+    pub fn enum_type(&self, id: EnumId) -> Option<&EnumType> {
+        self.enums.get(&id)
+    }
+
+    pub fn custom_type(&self, id: CustomTypeId) -> Option<&CustomType> {
+        self.custom_types.get(&id)
+    }
+
+    pub fn file_kind(&self, id: FileKindId) -> Option<&FileKind> {
+        self.file_kinds.get(&id)
+    }
+
+    /// How many types the library registers, of every kind.
+    pub fn type_count(&self) -> usize {
+        self.enums.len() + self.custom_types.len() + self.file_kinds.len()
+    }
+
+    /// A short human-readable name for `data_type`: the scalar keyword, `"directory"`, or a
+    /// registered type's name, which is "unknown type" for one the library does not register.
+    pub fn type_name(&self, data_type: DataType) -> &str {
+        match data_type {
+            DataType::Any => "any",
+            DataType::Float => "float",
+            DataType::Int => "int",
+            DataType::Bool => "bool",
+            DataType::String => "string",
+            DataType::Dir => "directory",
+            DataType::File { kind, .. } => {
+                self.file_kind(kind).map_or(UNKNOWN_TYPE, FileKind::name)
             }
-            // `enum_variants` answers `None` for "not registered yet" *and* "registered as a
-            // custom type", and deferred registration makes the first legitimate, so `add`
-            // cannot refuse a func that declares this id as an enum; this registration has to.
-            None =>
-            {
-                #[expect(
-                    clippy::iter_over_hash_type,
-                    reason = "the order changes only which func an assert names first"
-                )]
-                for func in self.funcs.values() {
-                    assert!(
-                        !declared_enum_types(func).any(|declared| declared == type_id),
-                        "{type_id:?} is being registered as a custom type, but function {:?} \
-                         declares it as an enum",
-                        func.name(),
-                    );
-                }
-            }
+            DataType::Custom(id) => self.custom_type(id).map_or(UNKNOWN_TYPE, CustomType::name),
+            DataType::Enum(id) => self.enum_type(id).map_or(UNKNOWN_TYPE, EnumType::name),
         }
-        if let Some(codec) = entry.codec() {
-            Arc::make_mut(&mut self.codecs).insert(type_id, Arc::clone(codec));
-        }
-        self.types.insert(type_id, entry);
     }
 
-    /// The registered entry of `type_id`, if any.
-    pub fn type_entry(&self, type_id: TypeId) -> Option<&TypeEntry> {
-        self.types.get(&type_id)
-    }
-
-    /// Every registered type.
-    pub fn types(&self) -> impl ExactSizeIterator<Item = (&TypeId, &TypeEntry)> {
-        self.types.iter()
-    }
-
-    /// Whether `type_id` is registered as a **custom** type, which [`Self::enum_variants`]
-    /// cannot tell from "not registered at all".
-    fn is_registered_custom(&self, type_id: TypeId) -> bool {
-        self.types
-            .get(&type_id)
-            .is_some_and(|entry| entry.variants().is_none())
-    }
-
-    /// The variant names of a registered `Enum` type; `None` if `type_id` is unregistered or
-    /// names a non-enum type.
-    pub fn enum_variants(&self, type_id: TypeId) -> Option<&[String]> {
-        self.types.get(&type_id)?.variants()
-    }
-
-    /// A short human-readable name for `ty`: the scalar keyword, `"path"`, or a registered
-    /// `Custom`/`Enum` type's display name (its raw id if unregistered).
-    pub fn type_name(&self, ty: &DataType) -> Cow<'_, str> {
-        match ty {
-            DataType::Any => Cow::Borrowed("any"),
-            DataType::Float => Cow::Borrowed("float"),
-            DataType::Int => Cow::Borrowed("int"),
-            DataType::Bool => Cow::Borrowed("bool"),
-            DataType::String => Cow::Borrowed("string"),
-            DataType::FsPath(_) => Cow::Borrowed("path"),
-            DataType::Custom(id) | DataType::Enum(id) => self.types.get(id).map_or_else(
-                || Cow::Owned(id.to_string()),
-                |entry| Cow::Borrowed(entry.display_name()),
-            ),
+    /// Whether the library registers every type `data_type` names: none for a scalar.
+    pub fn knows(&self, data_type: DataType) -> bool {
+        match data_type {
+            DataType::Any
+            | DataType::Float
+            | DataType::Int
+            | DataType::Bool
+            | DataType::String
+            | DataType::Dir => true,
+            DataType::File { kind, .. } => self.file_kinds.contains_key(&kind),
+            DataType::Custom(id) => self.custom_types.contains_key(&id),
+            DataType::Enum(id) => self.enums.contains_key(&id),
         }
     }
 
@@ -176,75 +170,141 @@ impl Library {
         &self.codecs
     }
 
-    /// Add every func and type `other` holds, under the same gates
-    /// [`add`](Self::add) and [`register_type`](Self::register_type) apply.
+    /// Add every func and type `other` holds, under the rules [`add`](Self::add) and each
+    /// registration apply.
     pub fn merge(&mut self, other: Self) {
-        for func in other.funcs.into_values() {
+        let Self {
+            funcs,
+            enums,
+            custom_types,
+            file_kinds,
+            codecs: _,
+        } = other;
+        for func in funcs.into_values() {
             self.add(func);
         }
         #[expect(
             clippy::iter_over_hash_type,
             reason = "each registration is keyed, so the order changes nothing"
         )]
-        for (type_id, entry) in other.types {
-            self.register_type(type_id, entry);
+        for (id, enum_type) in enums {
+            self.register_enum(id, enum_type);
+        }
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "each registration is keyed, so the order changes nothing"
+        )]
+        for (id, custom_type) in custom_types {
+            self.register_custom_type(id, custom_type);
+        }
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "each registration is keyed, so the order changes nothing"
+        )]
+        for (id, file_kind) in file_kinds {
+            self.register_file_kind(id, file_kind);
+        }
+    }
+
+    /// Check the library is whole, once it is composed: every type a func's port names is
+    /// registered, and every enum default a func declares is a variant of its enum.
+    ///
+    /// # Panics
+    /// On the first func that breaks either rule, naming the func and the port: a library is
+    /// composed by code, so a gap is a bug in that code.
+    pub fn check(&self) {
+        let mut funcs: Vec<&Func> = self.funcs.values().collect();
+        funcs.sort_unstable_by_key(|func| func.id());
+        for func in funcs {
+            let types = func
+                .inputs()
+                .iter()
+                .map(|input| (&input.name, input.data_type))
+                .chain(
+                    func.outputs()
+                        .iter()
+                        .map(|output| (&output.name, output.data_type)),
+                );
+            for (port, data_type) in types {
+                assert!(
+                    self.knows(data_type),
+                    "function {:?} port {port:?} names {data_type:?}, which the library does not \
+                     register",
+                    func.name(),
+                );
+            }
+            for input in func.inputs() {
+                let (DataType::Enum(enum_id), Some(ConstValue::Enum(name)), true) = (
+                    input.data_type,
+                    &input.default_value,
+                    input.value_variants.is_empty(),
+                ) else {
+                    continue;
+                };
+                assert!(
+                    self.enum_type(enum_id)
+                        .is_some_and(|enum_type| enum_type.has_variant(name)),
+                    "function {:?} input {:?} defaults to {name:?}, which is not a variant of \
+                     its enum",
+                    func.name(),
+                    input.name,
+                );
+            }
         }
     }
 
     /// Whether an authored `Const` literal `value` may sit on `input`: the `Const` half of
-    /// [`Graph::admit`](crate::Graph::admit) (the `Wire` half is
-    /// [`DataType::compatible_with`]). The registry contributes only the enum arm, a variant
-    /// *name*; the rest is [`InputDecl::accepts_const`].
+    /// [`Graph::admit`](crate::Graph::admit), [`Self::wire_satisfies`] the `Wire` half. The
+    /// registry contributes only the enum arm, a variant *name*; the rest is
+    /// [`InputDecl::accepts_const`].
     pub(crate) fn const_satisfies(&self, input: &InputDecl, value: &ConstValue) -> bool {
-        input.accepts_const(value, Strictness::Authored, |type_id, name| {
-            self.enum_variants(type_id)
-                .is_some_and(|variants| variants.iter().any(|variant| variant == name))
+        input.accepts_const(value, Strictness::Authored, |enum_id, name| {
+            self.enum_type(enum_id)
+                .is_some_and(|enum_type| enum_type.has_variant(name))
         })
+    }
+
+    /// Whether an output of type `source` may feed an input of type `input`: the `Wire` half of
+    /// [`Graph::admit`](crate::Graph::admit). The registry contributes the file arm, whether the
+    /// source's file kind is within the input's; the rest is [`DataType::compatible_with`].
+    pub(crate) fn wire_satisfies(&self, input: DataType, source: DataType) -> bool {
+        input.compatible_with(source, |source, input| self.file_kind_within(source, input))
+    }
+
+    /// Whether every file the kind `source` holds, the kind `input` holds: a kind is within
+    /// itself, and a kind the library does not register within nothing else.
+    fn file_kind_within(&self, source: FileKindId, input: FileKindId) -> bool {
+        source == input
+            || self
+                .file_kind(source)
+                .zip(self.file_kind(input))
+                .is_some_and(|(source, input)| source.within(input))
     }
 }
 
-/// Every type a `func` port declares as [`DataType::Enum`], inputs and
-/// outputs alike.
-fn declared_enum_types(func: &Func) -> impl Iterator<Item = TypeId> + '_ {
-    let enum_id = |ty: &DataType| match ty {
-        DataType::Enum(type_id) => Some(*type_id),
-        _ => None,
-    };
-    let inputs = func
-        .inputs()
-        .iter()
-        .filter_map(move |i| enum_id(&i.data_type));
-    let outputs = func
-        .outputs()
-        .iter()
-        .filter_map(move |o| enum_id(&o.data_type));
-    inputs.chain(outputs)
-}
-
-/// Panic when `func` declares an `Enum` default whose name isn't among its type's registered
-/// variants: the half of `FuncBuilder::build`'s checks that needs the registry. A default on a
-/// type `variants_of` doesn't resolve passes; `register_type` re-checks when the entry arrives.
+/// Insert `entry` under `id` into `table`, or do nothing when `same` finds the one held there
+/// identical. Whether it inserted.
 ///
-/// Variants arrive through `variants_of` rather than `&self` because [`Library::register_type`]
-/// runs this *before* its entry is installed.
-fn assert_enum_defaults<'a>(func: &Func, variants_of: impl Fn(TypeId) -> Option<&'a [String]>) {
-    for input in func.inputs() {
-        if !input.value_variants.is_empty() {
-            continue;
-        }
-        let (DataType::Enum(type_id), Some(ConstValue::Enum(name))) =
-            (&input.data_type, &input.default_value)
-        else {
-            continue;
-        };
-        if let Some(variants) = variants_of(*type_id) {
+/// # Panics
+/// If `id` is nil, or the table holds another entry under it.
+fn register<M, T>(
+    table: &mut HashMap<Id<M>, T>,
+    id: Id<M>,
+    entry: T,
+    same: impl FnOnce(&T, &T) -> bool,
+) -> bool {
+    assert!(!id.is_nil(), "cannot register a type under the nil id");
+    match table.entry(id) {
+        Entry::Occupied(held) => {
             assert!(
-                variants.iter().any(|variant| variant == name),
-                "function {:?} input {:?} defaults to {name:?}, which is not a registered \
-                 variant of its enum type",
-                func.name(),
-                input.name,
+                same(held.get(), &entry),
+                "conflicting registration of type {id:?}"
             );
+            false
+        }
+        Entry::Vacant(slot) => {
+            slot.insert(entry);
+            true
         }
     }
 }

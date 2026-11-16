@@ -1,11 +1,9 @@
 //! Astro path types and image loading.
 
-use std::sync::Arc;
-
 use lumos::{LoadCtx, PREVIEW_IMAGE_EXTENSIONS, RAW_EXTENSIONS};
 use scenarium::{
-    DataType, DynamicValue, FsPathConfig, FsPathMode, Func, FuncId, InputDecl, Invocation, Library,
-    OutputDecl, async_lambda,
+    DataType, DynamicValue, FileKind, FileKindId, FileMode, Func, FuncId, InputDecl, Invocation,
+    Library, OutputDecl, async_lambda,
 };
 
 use crate::astro::nodes::runtime;
@@ -13,26 +11,36 @@ use crate::image::{IMAGE_DATA_TYPE, Image};
 
 const LOAD_ASTRO_IMAGE_FUNC_ID: FuncId = FuncId::literal("fbcc8899-efc3-40e0-a6fd-8743f86edbd3");
 
+/// The files a preview opens: FITS, camera RAW and every raster format.
+const ASTRO_IMAGE_FILE: FileKindId = FileKindId::literal("5009fdc9-bc05-4fe1-acaf-8e13bce260bf");
+/// Camera RAW files.
+const RAW_FILE: FileKindId = FileKindId::literal("48ace2a5-0d6c-423c-a67c-48108930fd37");
+
 /// One image file of a format a preview opens.
-pub(super) fn astro_image_path_type() -> DataType {
-    DataType::FsPath(Arc::new(FsPathConfig::with_extensions(
-        FsPathMode::ExistingFile,
-        PREVIEW_IMAGE_EXTENSIONS
-            .iter()
-            .map(ToString::to_string)
-            .collect(),
-    )))
+pub(super) const fn astro_image_path_type() -> DataType {
+    DataType::File {
+        kind: ASTRO_IMAGE_FILE,
+        mode: FileMode::Open,
+    }
 }
 
 /// Raw files, one or more.
-pub(super) fn astro_raw_paths_type() -> DataType {
-    DataType::FsPath(Arc::new(FsPathConfig::with_extensions(
-        FsPathMode::ExistingFiles,
-        RAW_EXTENSIONS.iter().map(ToString::to_string).collect(),
-    )))
+pub(super) const fn astro_raw_paths_type() -> DataType {
+    DataType::File {
+        kind: RAW_FILE,
+        mode: FileMode::OpenMany,
+    }
 }
 
 pub(crate) fn register(library: &mut Library) {
+    library.register_file_kind(
+        ASTRO_IMAGE_FILE,
+        FileKind::new("Astro image", PREVIEW_IMAGE_EXTENSIONS.iter().copied()),
+    );
+    library.register_file_kind(
+        RAW_FILE,
+        FileKind::new("Camera RAW", RAW_EXTENSIONS.iter().copied()),
+    );
     library.add(
         Func::builder(
             LOAD_ASTRO_IMAGE_FUNC_ID,

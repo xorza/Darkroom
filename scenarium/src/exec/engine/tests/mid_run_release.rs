@@ -8,11 +8,11 @@ use std::mem;
 use std::sync::Mutex;
 
 use crate::async_lambda;
-use crate::data::data_type::TypeId;
+use crate::data::data_type::custom_type::CustomType;
+use crate::data::data_type::custom_type::CustomTypeId;
 use crate::data::dynamic_value::CustomValue;
-use crate::library::type_entry::TypeEntry;
 
-const TRACKED_TYPE: TypeId = TypeId::literal("7266406a-8083-4e46-b661-de4308bcec96");
+const TRACKED_TYPE: CustomTypeId = CustomTypeId::literal("7266406a-8083-4e46-b661-de4308bcec96");
 
 /// Live/peak count of [`Tracked`] values resident at once during a run.
 #[derive(Debug, Default)]
@@ -54,7 +54,7 @@ impl Display for Tracked {
 }
 
 impl CustomValue for Tracked {
-    fn custom_type_id(&self) -> TypeId {
+    fn custom_type_id(&self) -> CustomTypeId {
         TRACKED_TYPE
     }
 }
@@ -83,7 +83,7 @@ fn relay(tracker: Arc<Mutex<LiveTracker>>, mode: CacheMode) -> impl FnOnce(NodeS
 fn tracked_graph() -> TestGraph {
     let mut g = TestGraph::new();
     g.library
-        .register_type(TRACKED_TYPE, TypeEntry::custom("Tracked"));
+        .register_custom_type(TRACKED_TYPE, CustomType::new("Tracked"));
     g
 }
 

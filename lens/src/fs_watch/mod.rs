@@ -14,7 +14,7 @@ use notify::event::ModifyKind;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use scenarium::Invocation;
 use scenarium::async_lambda;
-use scenarium::{ConstValue, DataType, FsPathConfig, FsPathMode};
+use scenarium::{ConstValue, DataType};
 use scenarium::{EventLambda, Func, FuncId, InputDecl, InvokeError, Library, OutputDecl};
 use tokio::sync::Notify;
 use tokio::time::timeout;
@@ -126,10 +126,6 @@ const fn is_content_change(kind: EventKind) -> bool {
     }
 }
 
-fn dir_type() -> DataType {
-    DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::Dir)))
-}
-
 /// A node that passes a directory path through unchanged and fires a `changed`
 /// event whenever the directory's contents change on disk.
 pub fn fs_watch_library() -> Library {
@@ -199,7 +195,7 @@ pub fn fs_watch_library() -> Library {
                  except on Windows, which reports an attribute change as a write.",
             )
             .input(
-                InputDecl::required("Directory", dir_type())
+                InputDecl::required("Directory", DataType::Dir)
                     .description("Directory to watch and pass through.")
                     .const_only(),
             )
@@ -219,7 +215,7 @@ pub fn fs_watch_library() -> Library {
                     .const_only(),
             )
             .output(
-                OutputDecl::new("Directory", dir_type())
+                OutputDecl::new("Directory", DataType::Dir)
                     .description("The same directory, re-emitted on each change."),
             )
             .event(

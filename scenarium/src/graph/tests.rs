@@ -4,7 +4,9 @@ use ron::ser;
 use ron::value::RawValue;
 
 use crate::data::const_value::ConstValue;
-use crate::data::data_type::{DataType, TypeId};
+use crate::data::data_type::custom_type::CustomTypeId;
+use crate::data::data_type::file_kind::FileKindId;
+use crate::data::data_type::{DataType, FileMode};
 use crate::graph::binding::Binding;
 use crate::graph::binding_entry::BindingEntry;
 use crate::graph::detached::{DetachedNode, DetachedNodeParts};
@@ -163,9 +165,6 @@ fn const_only_input_rejects_bind_but_a_normal_input_accepts_it() {
 /// mode.
 #[test]
 fn admit_holds_wires_and_consts_to_the_input_type() {
-    use crate::data::data_type::{FsPathConfig, FsPathMode};
-    use std::sync::Arc;
-
     let mut g = TestGraph::new();
     g.add("int_src", |n| n.pure().output(DataType::Int));
     g.add("str_sink", |n| n.sink().input(DataType::String));
@@ -178,7 +177,10 @@ fn admit_holds_wires_and_consts_to_the_input_type() {
     assert_eq!(admit("str_sink"), Err(BindingRejection::WireMismatch));
     assert_eq!(admit("int_sink"), Ok(()));
 
-    let path_type = |mode| DataType::FsPath(Arc::new(FsPathConfig::new(mode)));
+    let path_type = |mode| DataType::File {
+        kind: FileKindId::from_u128(1),
+        mode,
+    };
     let admits = |declared: DataType, value: ConstValue| {
         let mut g = TestGraph::new();
         g.add("sink", |n| n.sink().input(declared));
@@ -189,17 +191,17 @@ fn admit_holds_wires_and_consts_to_the_input_type() {
         (DataType::Int, ConstValue::String("x".into()), false),
         (DataType::Int, ConstValue::Float(2.5), true),
         (
-            path_type(FsPathMode::ExistingFile),
+            path_type(FileMode::Open),
             ConstValue::FsPaths(vec!["a.fit".into(), "b.fit".into()]),
             false,
         ),
         (
-            path_type(FsPathMode::ExistingFiles),
+            path_type(FileMode::OpenMany),
             ConstValue::FsPath("a.fit".into()),
             false,
         ),
         (
-            path_type(FsPathMode::ExistingFiles),
+            path_type(FileMode::OpenMany),
             ConstValue::FsPaths(vec!["a.fit".into(), "b.fit".into()]),
             true,
         ),
@@ -211,7 +213,7 @@ fn admit_holds_wires_and_consts_to_the_input_type() {
             Err(BindingRejection::ConstMismatch)
         };
         assert_eq!(
-            admits(declared.clone(), value.clone()),
+            admits(declared, value.clone()),
             expected,
             "const {value:?} on {declared:?}"
         );
@@ -850,9 +852,6 @@ fn signed_func() -> FuncBuilder {
 /// order, and the events' names — and nothing a binding does not land by.
 #[test]
 fn a_signature_covers_the_ports_and_nothing_else() {
-    use crate::data::data_type::{FsPathConfig, FsPathMode};
-    use std::sync::Arc;
-
     let signature = signed_func().build().func_ref();
     let edited = |edit: fn(&mut FuncBuilder)| {
         let mut func = signed_func();
@@ -871,7 +870,7 @@ fn a_signature_covers_the_ports_and_nothing_else() {
         }),
         ("an event renamed", |f| f.events[0].name = "tock".into()),
         ("a custom type swapped", |f| {
-            f.ports.inputs[1].data_type = DataType::Custom(TypeId::from_u128(1));
+            f.ports.inputs[1].data_type = DataType::Custom(CustomTypeId::from_u128(1));
         }),
     ];
     for (what, edit) in moves {
@@ -892,13 +891,19 @@ fn a_signature_covers_the_ports_and_nothing_else() {
     for (what, edit) in keeps {
         assert_eq!(edited(edit), signature, "{what}");
     }
-    // A path picker's mode decides what it offers, not where its binding lands.
-    let path = |mode| {
+    // A path's kind and mode decide what a picker offers, not where its binding lands.
+    let path = |data_type| {
         let mut func = signed_func();
-        func.ports.inputs[1].data_type = DataType::FsPath(Arc::new(FsPathConfig::new(mode)));
+        func.ports.inputs[1].data_type = data_type;
         func.build().func_ref()
     };
-    assert_eq!(path(FsPathMode::Dir), path(FsPathMode::NewFile));
+    assert_eq!(
+        path(DataType::Dir),
+        path(DataType::File {
+            kind: FileKindId::from_u128(1),
+            mode: FileMode::Save,
+        })
+    );
 }
 
 /// A node resolves to the func with the ports it was authored against; a func

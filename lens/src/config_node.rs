@@ -17,15 +17,15 @@ use std::sync::Arc;
 use common::{FieldKind, FieldValue, Introspect};
 use scenarium::Invocation;
 use scenarium::async_lambda;
-use scenarium::{ConstValue, CustomValue, DataType, DynamicValue, TypeId};
-use scenarium::{FuncBuilder, InputDecl, OutputDecl};
-use scenarium::{InvokeError, Library, TypeEntry};
+use scenarium::{ConstValue, CustomType, CustomTypeId, CustomValue, DataType, DynamicValue};
+use scenarium::{EnumId, EnumType, FuncBuilder, InputDecl, OutputDecl};
+use scenarium::{InvokeError, Library};
 
 use crate::node_spec::NodeSpec;
 
 /// A config type's wire type id, parsed once at compile time from its `TYPE_ID`.
-const fn wire_type_id<T: Introspect>() -> TypeId {
-    const { TypeId::literal(T::TYPE_ID) }
+const fn wire_type_id<T: Introspect>() -> CustomTypeId {
+    const { CustomTypeId::literal(T::TYPE_ID) }
 }
 
 /// A built config flowing on a wire.
@@ -33,7 +33,7 @@ const fn wire_type_id<T: Introspect>() -> TypeId {
 pub(crate) struct ConfigValue<T>(pub(crate) T);
 
 impl<T: Introspect + Clone + fmt::Debug + Send + Sync + 'static> CustomValue for ConfigValue<T> {
-    fn custom_type_id(&self) -> TypeId {
+    fn custom_type_id(&self) -> CustomTypeId {
         wire_type_id::<T>()
     }
 }
@@ -56,7 +56,7 @@ impl<T: Introspect + Clone + fmt::Debug + Send + Sync + 'static> ConfigValue<T> 
     /// `T`'s output type on `library`, so the editor can render it. The caller
     /// adds the node, under its own category.
     pub(crate) fn builder(library: &mut Library, spec: NodeSpec) -> FuncBuilder {
-        library.register_type(wire_type_id::<T>(), TypeEntry::custom(T::DISPLAY_NAME));
+        library.register_custom_type(wire_type_id::<T>(), CustomType::new(T::DISPLAY_NAME));
         let fields = FieldInputs::<T>::new(library);
         let inputs = fields.inputs();
         let lambda = async_lambda!(move |Invocation { inputs, outputs, .. }| {
@@ -142,14 +142,14 @@ fn data_type(kind: &FieldKind) -> DataType {
         FieldKind::Float(_) => DataType::Float,
         FieldKind::Bool => DataType::Bool,
         FieldKind::Str => DataType::String,
-        FieldKind::Enum { type_id, .. } => DataType::Enum(TypeId::literal(type_id)),
+        FieldKind::Enum { type_id, .. } => DataType::Enum(EnumId::literal(type_id)),
         // An `Option<T>` port is `T`'s type; optionality is the input's `required` flag.
         FieldKind::Option(inner) => data_type(inner),
     }
 }
 
 /// Register the enum type(s) a `kind` references on `library`. One enum can
-/// appear across several config builders; `register_type` takes the identical
+/// appear across several config builders; `register_enum` takes the identical
 /// registration again and panics on conflicting metadata.
 fn register_field_enum(library: &mut Library, kind: &FieldKind) {
     match kind {
@@ -158,9 +158,9 @@ fn register_field_enum(library: &mut Library, kind: &FieldKind) {
             display_name,
             variants,
         } => {
-            let id = TypeId::literal(type_id);
+            let id = EnumId::literal(type_id);
             let variants = variants.iter().map(|&variant| variant.to_owned()).collect();
-            library.register_type(id, TypeEntry::enum_with_variants(*display_name, variants));
+            library.register_enum(id, EnumType::new(*display_name, variants));
         }
         FieldKind::Option(inner) => register_field_enum(library, inner),
         _ => {}
@@ -199,7 +199,7 @@ fn field_value(kind: &FieldKind, value: &DynamicValue) -> FieldValue {
 #[cfg(test)]
 mod tests {
     use common::{FieldKind, FieldValue, FloatKind, IntegerKind, IntegerValue};
-    use scenarium::{ConstValue, DataType, DynamicValue, Library, TypeId};
+    use scenarium::{ConstValue, DataType, DynamicValue, EnumId, Library};
 
     use crate::config_node::{data_type, field_value, register_field_enum};
 
@@ -220,7 +220,7 @@ mod tests {
             display_name: "Mode",
             variants: &["a", "b"],
         };
-        let expected_id = TypeId::literal(TYPE_ID);
+        let expected_id = EnumId::literal(TYPE_ID);
         assert_eq!(data_type(&kind), DataType::Enum(expected_id));
         let renamed = FieldKind::Enum {
             type_id: TYPE_ID,
@@ -232,12 +232,9 @@ mod tests {
         let mut library = Library::default();
         register_field_enum(&mut library, &kind);
         register_field_enum(&mut library, &kind);
-        let entry = library.type_entry(expected_id).unwrap();
-        assert_eq!(entry.display_name(), "Mode");
-        assert_eq!(
-            entry.variants(),
-            Some(["a".to_string(), "b".to_string()].as_slice())
-        );
+        let entry = library.enum_type(expected_id).unwrap();
+        assert_eq!(entry.name(), "Mode");
+        assert_eq!(entry.variants(), ["a".to_string(), "b".to_string()]);
     }
 
     #[test]

@@ -2,7 +2,8 @@
 //! or an [`OutputDecl`].
 
 use crate::data::const_value::ConstValue;
-use crate::data::data_type::{DataType, Strictness, TypeId};
+use crate::data::data_type::enum_type::EnumId;
+use crate::data::data_type::{DataType, Strictness};
 use crate::graph::binding::Binding;
 use crate::graph::binding_entry::BindingEntry;
 use crate::graph::func::value_variant::ValueVariant;
@@ -87,7 +88,7 @@ impl InputDecl {
         &self,
         value: &ConstValue,
         strictness: Strictness,
-        enum_variant: impl FnOnce(TypeId, &str) -> bool,
+        enum_variant: impl FnOnce(EnumId, &str) -> bool,
     ) -> bool {
         if !self.value_variants.is_empty() {
             return self.value_variants.iter().any(|v| v.value == *value);

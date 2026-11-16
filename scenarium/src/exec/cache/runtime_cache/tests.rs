@@ -466,7 +466,7 @@ fn measure_resident_ram_accounts_each_owner_once_and_dedups_the_total() {
     use std::fmt;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use crate::data::data_type::TypeId;
+    use crate::data::data_type::custom_type::CustomTypeId;
     use crate::data::dynamic_value::CustomValue;
 
     #[derive(Debug)]
@@ -481,8 +481,8 @@ fn measure_resident_ram_accounts_each_owner_once_and_dedups_the_total() {
         }
     }
     impl CustomValue for Payload {
-        fn custom_type_id(&self) -> TypeId {
-            TypeId::from_u128(0x5123)
+        fn custom_type_id(&self) -> CustomTypeId {
+            CustomTypeId::from_u128(0x5123)
         }
         fn ram_bytes(&self) -> RamUsage {
             self.calls.fetch_add(1, Ordering::Relaxed);

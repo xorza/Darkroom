@@ -10,7 +10,7 @@ use imaginarium::{
     ChannelCount, ChannelLayout, ColorFormat, DescError, InterleavedDesc, PlanarImage, SampleType,
 };
 use lumos::{FlatGain, FrameDescError, FrameGain, ImageMetadata, PixelFlags, frame_desc};
-use scenarium::{CodecError, CustomValue, CustomValueCodec, TypeEntry};
+use scenarium::{CodecError, CustomType, CustomValue, CustomValueCodec};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
@@ -314,8 +314,8 @@ const fn format_from_bytes(bytes: [u8; 2]) -> Option<ColorFormat> {
     Some(ColorFormat::new(channel_count, sample_type))
 }
 
-pub(super) fn image_type_entry() -> TypeEntry {
-    TypeEntry::custom_with_codec("Image", Arc::new(ImageCodec))
+pub(super) fn image_type() -> CustomType {
+    CustomType::with_codec("Image", Arc::new(ImageCodec))
 }
 
 #[cfg(test)]

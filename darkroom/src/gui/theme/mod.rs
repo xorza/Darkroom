@@ -156,21 +156,21 @@ impl Theme {
     /// [`TypeColors`]; another custom or enum type lands on a ramp slot by its type id, so
     /// distinct types read distinct and stay stable. `Any`, which only an input declares, has no
     /// type identity and takes the untyped input color.
-    pub(crate) fn port_color(&self, data_type: &DataType) -> RgbaF32 {
+    pub(crate) fn port_color(&self, data_type: DataType) -> RgbaF32 {
         let hues = &self.type_colors;
-        match data_type {
-            DataType::Any => self.port.input,
-            DataType::Bool => hues.boolean,
-            DataType::Int => hues.int,
-            DataType::Float => hues.float,
-            DataType::String => hues.string,
-            DataType::FsPath(_) => hues.path,
-            DataType::Custom(id) if *id == lens::IMAGE_TYPE_ID => hues.image,
-            DataType::Custom(id) | DataType::Enum(id) => {
-                let slot = id.as_u128() % hues.ramp.len() as u128;
-                hues.ramp[usize::try_from(slot).expect("a slot is below the ramp's length")]
-            }
-        }
+        let id = match data_type {
+            DataType::Any => return self.port.input,
+            DataType::Bool => return hues.boolean,
+            DataType::Int => return hues.int,
+            DataType::Float => return hues.float,
+            DataType::String => return hues.string,
+            DataType::Dir | DataType::File { .. } => return hues.path,
+            DataType::Custom(id) if id == lens::IMAGE_TYPE_ID => return hues.image,
+            DataType::Custom(id) => id.as_u128(),
+            DataType::Enum(id) => id.as_u128(),
+        };
+        let slot = id % hues.ramp.len() as u128;
+        hues.ramp[usize::try_from(slot).expect("a slot is below the ramp's length")]
     }
 
     /// The ink of a node's last-run `status` in its footer and its inspector: the muted ink for a

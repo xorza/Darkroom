@@ -36,8 +36,9 @@
 //!   and downstream blobs.
 //! - **A reference is dereferenced only through an input declared with its resource
 //!   type.** Const and Bind-delivered references both fold the referent's identity, but
-//!   only where the consumer's input is declared `FsPath` — a lambda that reads a file
-//!   through an `Any`/`String` input keys nothing and can serve stale content. Declare the type.
+//!   only where the consumer's input is declared a directory or a file — a lambda that reads a
+//!   file through an `Any`/`String` input keys nothing and can serve stale content. Declare the
+//!   type.
 //! - **Custom-value blob format** is disk identity, not value identity. Each blob separately
 //!   stamps the versions of the codecs its values use; changing one invalidates only relevant
 //!   disk blobs without discarding semantically unchanged RAM values or downstream digests.

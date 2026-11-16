@@ -1,44 +1,30 @@
-use super::*;
-use scenarium::FsPathConfig;
+use std::sync::Arc;
 
-/// The type line of a port tooltip. A path spells out its picker mode and
-/// the extensions it accepts; everything else defers to the library's own
-/// name for the type, so a tooltip and a palette entry can't disagree.
+use super::*;
+use scenarium::{FileKind, FileKindId, FileMode};
+
+/// The type line of a port tooltip: a path names its kind, mode and extensions, everything else
+/// the library's own name for the type, so a tooltip and a palette entry can't disagree.
 #[test]
-fn type_label_spells_out_a_paths_mode_and_extension_list() {
-    let library = Library::default();
-    let label = |data_type: &DataType| {
+fn type_label_names_a_path_by_its_kind_and_any_other_type_as_the_library_does() {
+    let image = FileKindId::from_u128(1);
+    let mut library = Library::default();
+    library.register_file_kind(image, FileKind::new("Image", ["png"]));
+    let label = |data_type| {
         TypeLabel {
             library: &library,
             data_type,
         }
         .to_string()
     };
-    let path = |mode, exts: &[&str]| {
-        DataType::FsPath(Arc::new(FsPathConfig::with_extensions(
-            mode,
-            exts.iter().map(|e| (*e).to_owned()).collect(),
-        )))
-    };
-
-    // Scalars and the untyped boundary placeholder are the library's names.
-    assert_eq!(label(&DataType::Any), "any");
-    assert_eq!(label(&DataType::Float), "float");
-
-    // Every mode names itself, and an empty list adds no parenthetical.
-    assert_eq!(label(&path(FsPathMode::Dir, &[])), "path · directory");
-    assert_eq!(label(&path(FsPathMode::ExistingFile, &[])), "path · file");
-    assert_eq!(label(&path(FsPathMode::ExistingFiles, &[])), "path · files");
-    assert_eq!(label(&path(FsPathMode::NewFile, &[])), "path · save path");
-
-    // One extension, then several: the separator appears only *between* them.
+    assert_eq!(label(DataType::Any), "any");
+    assert_eq!(label(DataType::Float), "float");
     assert_eq!(
-        label(&path(FsPathMode::ExistingFile, &["fit"])),
-        "path · file (fit)"
-    );
-    assert_eq!(
-        label(&path(FsPathMode::ExistingFiles, &["fit", "fits", "raf"])),
-        "path · files (fit, fits, raf)"
+        label(DataType::File {
+            kind: image,
+            mode: FileMode::Save,
+        }),
+        "Image · save path (png)"
     );
 }
 

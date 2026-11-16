@@ -1,4 +1,3 @@
-use crate::graph::identity::FuncId;
 use std::panic;
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
@@ -9,16 +8,19 @@ use crate::async_lambda;
 use crate::data::codec::CustomValueCodec;
 use crate::data::codec::error::CodecError;
 use crate::data::const_value::ConstValue;
-use crate::data::data_type::{DataType, TypeId};
+use crate::data::data_type::custom_type::{CustomType, CustomTypeId};
+use crate::data::data_type::enum_type::{EnumId, EnumType};
+use crate::data::data_type::file_kind::{FileKind, FileKindId};
+use crate::data::data_type::{DataType, FileMode};
 use crate::data::dynamic_value::{CustomValue, DynamicValue};
 use crate::graph::func::Func;
 use crate::graph::func::error::InvokeError;
 use crate::graph::func::lambda::Invocation;
+use crate::graph::identity::FuncId;
 use crate::graph::ports::{InputDecl, OutputDecl};
 use crate::internals;
 use crate::internals::func_invoker::FuncInvoker;
 use crate::library::Library;
-use crate::library::type_entry::TypeEntry;
 
 #[derive(Debug)]
 struct StubCodec;
@@ -46,160 +48,87 @@ impl CustomValueCodec for StubCodec {
     }
 }
 
+/// Whether `register` panics.
+fn refused(register: impl FnOnce()) -> bool {
+    panic::catch_unwind(AssertUnwindSafe(register)).is_err()
+}
+
 #[test]
 fn registration_rejects_duplicate_ids_without_replacing_entries() {
     let func_id = FuncId::unique();
     let mut library = Library::default();
     library.add(internals::stub_func(func_id, "Before").build());
-    let duplicate_func = panic::catch_unwind(AssertUnwindSafe(|| {
+    assert!(refused(|| {
         library.add(internals::stub_func(func_id, "After").build());
     }));
-    assert!(duplicate_func.is_err());
     assert_eq!(library.by_id(func_id).unwrap().name(), "Before");
 
-    let type_id = TypeId::unique();
-    library.register_type(type_id, TypeEntry::custom("Before"));
-    let duplicate_type = panic::catch_unwind(AssertUnwindSafe(|| {
-        library.register_type(type_id, TypeEntry::custom("After"));
+    let custom = CustomTypeId::unique();
+    library.register_custom_type(custom, CustomType::new("Before"));
+    assert!(refused(|| {
+        library.register_custom_type(custom, CustomType::new("After"));
     }));
-    assert!(duplicate_type.is_err());
-    assert_eq!(
-        library.type_entry(type_id).unwrap().display_name(),
-        "Before"
-    );
+    assert_eq!(library.custom_type(custom).unwrap().name(), "Before");
+
+    assert!(refused(|| {
+        library.register_enum(EnumId::nil(), EnumType::new("Nil", vec![]));
+    }));
+    assert_eq!(library.type_count(), 1);
 }
 
-/// An identical type registers again as a no-op, which is what lets two
-/// libraries sharing a type merge; any difference — name, variants, codec
-/// instance, or kind — is a conflict. The codec handle a program keeps is the
-/// library's at that moment: a later registration copies the map rather than
-/// changing it under the program.
+/// An identical type registers again as a no-op, which is what lets two libraries sharing a
+/// type merge; any difference — name, variants, extensions or codec instance — is a conflict.
+/// The codec handle a program keeps is the library's at that moment: a later registration copies
+/// the map rather than changing it under the program.
 #[test]
 fn an_identical_type_registers_again_and_a_conflict_panics() {
     let codec: Arc<dyn CustomValueCodec> = Arc::new(StubCodec);
-    let custom = TypeId::unique();
-    let named = TypeId::unique();
+    let blob = CustomTypeId::unique();
+    let mode = EnumId::unique();
+    let image = FileKindId::unique();
     let mut library = Library::default();
-    library.register_type(
-        custom,
-        TypeEntry::custom_with_codec("Blob", Arc::clone(&codec)),
-    );
-    library.register_type(
-        named,
-        TypeEntry::enum_with_variants("Mode", vec!["a".into()]),
-    );
+    let register_all = |library: &mut Library| {
+        library.register_custom_type(blob, CustomType::with_codec("Blob", Arc::clone(&codec)));
+        library.register_enum(mode, EnumType::new("Mode", vec!["a".into()]));
+        library.register_file_kind(image, FileKind::new("Image", ["png"]));
+    };
+    register_all(&mut library);
     let held = Arc::clone(library.codecs());
-
-    library.register_type(
-        custom,
-        TypeEntry::custom_with_codec("Blob", Arc::clone(&codec)),
-    );
-    library.register_type(
-        named,
-        TypeEntry::enum_with_variants("Mode", vec!["a".into()]),
-    );
-    assert_eq!(library.types().len(), 2);
+    register_all(&mut library);
+    assert_eq!(library.type_count(), 3);
     assert!(
         Arc::ptr_eq(&held, library.codecs()),
         "a no-op registration leaves the handle alone"
     );
 
-    let conflicts = [
-        (
-            custom,
-            TypeEntry::custom_with_codec("Other", Arc::clone(&codec)),
-        ),
-        (
-            custom,
-            TypeEntry::custom_with_codec("Blob", Arc::new(StubCodec)),
-        ),
-        (custom, TypeEntry::custom("Blob")),
-        (
-            named,
-            TypeEntry::enum_with_variants("Mode", vec!["b".into()]),
-        ),
-        (named, TypeEntry::custom("Mode")),
-    ];
-    for (type_id, entry) in conflicts {
-        let conflict = panic::catch_unwind(AssertUnwindSafe(|| {
-            library.register_type(type_id, entry);
-        }));
-        assert!(conflict.is_err());
-    }
+    assert!(refused(|| library.register_custom_type(
+        blob,
+        CustomType::with_codec("Other", Arc::clone(&codec))
+    )));
+    assert!(refused(|| library.register_custom_type(
+        blob,
+        CustomType::with_codec("Blob", Arc::new(StubCodec))
+    )));
+    assert!(refused(
+        || library.register_custom_type(blob, CustomType::new("Blob"))
+    ));
+    assert!(refused(
+        || library.register_enum(mode, EnumType::new("Mode", vec!["b".into()]))
+    ));
+    assert!(refused(|| library.register_file_kind(
+        image,
+        FileKind::new("Image", ["png", "jpg"])
+    )));
 
-    let added = TypeId::unique();
-    library.register_type(
-        added,
-        TypeEntry::custom_with_codec("Added", Arc::new(StubCodec)),
-    );
+    let added = CustomTypeId::unique();
+    library.register_custom_type(added, CustomType::with_codec("Added", Arc::new(StubCodec)));
+    library.register_custom_type(CustomTypeId::unique(), CustomType::new("Plain"));
     assert!(library.codecs().get(added).is_some());
-    assert!(library.codecs().get(custom).is_some());
+    assert!(library.codecs().get(blob).is_some());
     assert!(
         held.get(added).is_none(),
         "the handle a program kept is unchanged"
     );
-    assert!(
-        library.codecs().get(named).is_none(),
-        "an enum has no codec"
-    );
-}
-
-/// A func declaring a type as an enum while that type is registered
-/// as a *custom* one is a wiring bug, and it is refused whichever of
-/// the two arrives first.
-///
-/// `enum_variants` answers `None` both for "not registered yet" and for "registered as a custom
-/// type", so without this gate the contradiction would surface only when the enum const failed
-/// `const_satisfies` and the input lowered to unbound, like a port never wired.
-#[test]
-fn an_enum_declaration_over_a_custom_registration_is_refused_either_order() {
-    // Type first, then the func that disagrees with it.
-    let type_id = TypeId::unique();
-    let mut library = Library::default();
-    library.register_type(type_id, TypeEntry::custom("Opaque"));
-    let func_after = panic::catch_unwind(AssertUnwindSafe(|| {
-        library.add(modal_func(type_id, "fast"));
-    }));
-    assert!(
-        func_after.is_err(),
-        "a func declaring a registered custom type as an enum must be refused",
-    );
-    assert_eq!(library.iter().len(), 0, "the refused func is not installed");
-
-    // …and the reverse order, which is the one deferred registration
-    // makes reachable in real hosts.
-    let type_id = TypeId::unique();
-    let mut library = Library::default();
-    library.add(modal_func(type_id, "fast"));
-    let type_after = panic::catch_unwind(AssertUnwindSafe(|| {
-        library.register_type(type_id, TypeEntry::custom("Opaque"));
-    }));
-    assert!(
-        type_after.is_err(),
-        "registering a custom type a func declares as an enum must be refused",
-    );
-    assert!(
-        library.type_entry(type_id).is_none(),
-        "the refused type is not installed",
-    );
-    // The id stays free for the declaration that was actually meant.
-    library.register_type(type_id, mode_entry());
-    assert!(library.enum_variants(type_id).is_some());
-}
-
-/// An *output* declaring the enum counts too — the gate reads both
-/// port lists, so a mismatch can't hide on the side with no default.
-#[test]
-#[should_panic(expected = "declares it as an enum")]
-fn an_enum_declared_only_by_an_output_still_blocks_a_custom_registration() {
-    let type_id = TypeId::unique();
-    let mut library = Library::default();
-    library.add(
-        internals::stub_func(FuncId::unique(), "emit")
-            .output(OutputDecl::new("mode", DataType::Enum(type_id)))
-            .build(),
-    );
-    library.register_type(type_id, TypeEntry::custom("Opaque"));
 }
 
 #[test]
@@ -213,104 +142,157 @@ fn a_library_iterates_exactly_its_funcs() {
     assert!(ids.iter().all(|&id| library.by_id(id).is_some()));
 }
 
-/// A func whose `mode` input defaults to the enum variant `default`.
-fn modal_func(type_id: TypeId, default: &str) -> Func {
+/// A func whose `mode` input defaults to the enum variant `default` and whose output is a
+/// `kind` file.
+fn modal_func(mode: EnumId, default: &str, kind: FileKindId) -> Func {
     internals::stub_func(FuncId::unique(), "modal")
         .input(
-            InputDecl::optional("mode", DataType::Enum(type_id))
+            InputDecl::optional("mode", DataType::Enum(mode))
                 .default(ConstValue::Enum(default.into())),
         )
+        .output(OutputDecl::new(
+            "file",
+            DataType::File {
+                kind,
+                mode: FileMode::Save,
+            },
+        ))
         .build()
 }
 
-fn mode_entry() -> TypeEntry {
-    TypeEntry::enum_with_variants("Mode", vec!["fast".into(), "slow".into()])
-}
-
+/// A library is whole when every type its funcs name is registered and every enum default is a
+/// variant, in whatever order the funcs and types arrived; `check` names the first gap, each
+/// kind of gap on its own.
 #[test]
-fn enum_defaults_must_name_registered_variants_in_either_order() {
-    // Type first: `add` gates membership on registration.
-    let type_id = TypeId::unique();
-    let mut library = Library::default();
-    library.register_type(type_id, mode_entry());
-    library.add(modal_func(type_id, "fast"));
+fn check_holds_every_declared_type_registered_and_every_enum_default_a_variant() {
+    let (mode, file) = (EnumId::unique(), FileKindId::unique());
+    let whole = || {
+        let mut library = Library::default();
+        library.add(modal_func(mode, "fast", file));
+        library.register_enum(
+            mode,
+            EnumType::new("Mode", vec!["fast".into(), "slow".into()]),
+        );
+        library.register_file_kind(file, FileKind::new("Text", ["txt"]));
+        library
+    };
+    whole().check();
 
-    // Func first: registering the enum re-checks the funcs already added.
-    let mut library = Library::default();
-    library.add(modal_func(type_id, "slow"));
-    library.register_type(type_id, mode_entry());
-}
-
-#[test]
-#[should_panic(expected = "not a registered variant")]
-fn add_rejects_an_enum_default_naming_no_registered_variant() {
-    let type_id = TypeId::unique();
-    let mut library = Library::default();
-    library.register_type(type_id, mode_entry());
-    library.add(modal_func(type_id, "slothful"));
-}
-
-/// A refusal has to leave nothing behind.
-///
-/// The panic alone is not the contract: a caller that catches it (a host loading a plugin
-/// library) must not go on with a registry that reports the rejected type as registered,
-/// resolves `enum_variants` / `type_name` against it, and fails a second `register_type` for the
-/// same id as a *duplicate*.
-#[test]
-fn register_type_rejecting_an_earlier_enum_default_installs_nothing() {
-    let type_id = TypeId::unique();
-    let mut library = Library::default();
-    library.add(modal_func(type_id, "slothful"));
-
-    let rejected = panic::catch_unwind(AssertUnwindSafe(|| {
-        library.register_type(type_id, mode_entry());
-    }));
-    let message = *rejected
-        .expect_err("an unregistered variant must be refused")
-        .downcast::<String>()
-        .expect("assert! panics carry a String");
+    let message = |library: Library| {
+        *panic::catch_unwind(AssertUnwindSafe(|| library.check()))
+            .expect_err("a library with a gap is refused")
+            .downcast::<String>()
+            .expect("assert! panics carry a String")
+    };
+    let mut no_kind = Library::default();
+    no_kind.add(modal_func(mode, "fast", file));
+    no_kind.register_enum(mode, EnumType::new("Mode", vec!["fast".into()]));
     assert!(
-        message.contains("not a registered variant"),
-        "unexpected panic: {message}",
+        message(no_kind).contains("port \"file\" names File"),
+        "the file kind is missing"
     );
 
-    assert!(
-        library.type_entry(type_id).is_none(),
-        "the refused entry must not stay installed",
-    );
-    assert_eq!(library.enum_variants(type_id), None);
-    // The id is still free, so a corrected entry registers normally
-    // rather than colliding with the rejected one.
-    library.register_type(
-        type_id,
-        TypeEntry::enum_with_variants("Mode", vec!["slothful".to_string()]),
-    );
-    assert_eq!(
-        library.enum_variants(type_id),
-        Some(["slothful".to_string()].as_slice()),
-    );
+    let mut no_enum = Library::default();
+    no_enum.add(modal_func(mode, "fast", file));
+    no_enum.register_file_kind(file, FileKind::new("Text", ["txt"]));
+    assert!(message(no_enum).contains("port \"mode\" names Enum"));
+
+    let mut no_variant = whole();
+    no_variant.add(modal_func(mode, "slothful", file));
+    assert!(message(no_variant).contains("defaults to \"slothful\", which is not a variant"));
 }
 
+/// The wire half of admission: a file feeds a file input of the same kind of value whose kind
+/// holds every file the source's does. A kind with no extensions is every file, and a kind the
+/// library does not register is within itself alone.
 #[test]
-fn type_entry_kinds_expose_only_valid_codec_attachments() {
-    let custom = TypeEntry::custom_with_codec("Custom", Arc::new(StubCodec));
-    assert_eq!(custom.display_name(), "Custom");
-    assert!(custom.variants().is_none());
-    assert!(custom.codec().is_some());
-
-    let variants = vec!["A".to_string()];
-    let enum_entry = TypeEntry::enum_with_variants("Enum", variants.clone());
-    assert_eq!(enum_entry.display_name(), "Enum");
-    assert_eq!(enum_entry.variants(), Some(variants.as_slice()));
-    assert!(enum_entry.codec().is_none());
-
+fn a_file_feeds_an_input_whose_kind_holds_its_own() {
+    let [image, png, any, unknown] = [(); 4].map(|()| FileKindId::unique());
     let mut library = Library::default();
-    let custom_id = TypeId::unique();
-    library.register_type(custom_id, custom);
-    let enum_id = TypeId::unique();
-    library.register_type(enum_id, enum_entry);
-    assert!(library.codecs().get(custom_id).is_some());
-    assert!(library.codecs().get(enum_id).is_none());
+    library.register_file_kind(image, FileKind::new("Image", ["png", "jpg", "tif"]));
+    library.register_file_kind(png, FileKind::new("PNG", ["png"]));
+    library.register_file_kind(any, FileKind::new("File", Vec::<&str>::new()));
+    let open = |kind| DataType::File {
+        kind,
+        mode: FileMode::Open,
+    };
+    let many = |kind| DataType::File {
+        kind,
+        mode: FileMode::OpenMany,
+    };
+    for (input, source, wires) in [
+        (open(image), open(png), true),
+        (open(png), open(image), false),
+        (open(image), open(image), true),
+        (many(image), open(png), false),
+        (many(image), many(png), true),
+        (open(any), open(image), true),
+        (open(image), open(any), false),
+        (open(any), open(any), true),
+        (DataType::Dir, DataType::Dir, true),
+        (DataType::Dir, open(any), false),
+        (open(unknown), open(unknown), true),
+        (open(any), open(unknown), false),
+        (open(unknown), open(png), false),
+    ] {
+        assert_eq!(
+            library.wire_satisfies(input, source),
+            wires,
+            "{source:?} into {input:?}"
+        );
+    }
+}
+
+/// A constant of a registered enum must name a variant, and one of an enum the library does not
+/// register names none; a type the library does not register, of each kind, shows as "unknown
+/// type".
+#[test]
+fn a_type_the_library_lacks_takes_no_constant_and_shows_as_unknown() {
+    let (known, unknown) = (EnumId::unique(), EnumId::unique());
+    let mut library = Library::default();
+    library.register_enum(known, EnumType::new("Mode", vec!["fast".into()]));
+    let input = |enum_id| InputDecl::required("mode", DataType::Enum(enum_id));
+    let slothful = ConstValue::Enum("slothful".into());
+    assert!(library.const_satisfies(&input(known), &ConstValue::Enum("fast".into())));
+    assert!(!library.const_satisfies(&input(known), &slothful));
+    assert!(!library.const_satisfies(&input(unknown), &slothful));
+
+    assert_eq!(library.type_name(DataType::Enum(known)), "Mode");
+    for unknown_type in [
+        DataType::Enum(unknown),
+        DataType::Custom(CustomTypeId::unique()),
+        DataType::File {
+            kind: FileKindId::unique(),
+            mode: FileMode::Open,
+        },
+    ] {
+        assert_eq!(library.type_name(unknown_type), "unknown type");
+        assert!(!library.knows(unknown_type));
+    }
+    assert_eq!(library.type_name(DataType::Dir), "directory");
+    assert!(library.knows(DataType::Dir));
+}
+
+/// A kind is within another when the other holds each of its extensions, and no extensions is
+/// every file. A registration holds each extension to one spelling.
+#[test]
+fn a_file_kind_is_within_the_kinds_that_hold_its_extensions() {
+    let image = FileKind::new("Image", ["png", "jpg"]);
+    let png = FileKind::new("PNG", ["png"]);
+    let any = FileKind::new("File", Vec::<&str>::new());
+    assert!(png.within(&image));
+    assert!(!image.within(&png));
+    assert!(image.within(&any));
+    assert!(!any.within(&image));
+    assert!(any.within(&any));
+    for bad in [&["PNG"][..], &[".png"], &[""], &["png", "png"]] {
+        assert!(
+            refused(|| {
+                FileKind::new("Bad", bad.iter().copied());
+            }),
+            "{bad:?}"
+        );
+    }
 }
 
 /// A func computes through the invoker, and its node state carries between

@@ -8,14 +8,15 @@ use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
 use crate::data::codec::error::CodecError;
 use crate::data::codec::{Codecs, CustomValueCodec};
-use crate::data::data_type::TypeId;
+use crate::data::data_type::custom_type::CustomType;
+use crate::data::data_type::custom_type::CustomTypeId;
 use crate::data::dynamic_value::{CustomValue, DynamicValue};
 use crate::data::ram_usage::RamUsage;
 use crate::internals::calls::Calls;
 use crate::library::Library;
-use crate::library::type_entry::TypeEntry;
 
-pub(crate) const BLOB_TYPE: TypeId = TypeId::literal("78391861-24da-4368-a3a5-2a6b7a47f112");
+pub(crate) const BLOB_TYPE: CustomTypeId =
+    CustomTypeId::literal("78391861-24da-4368-a3a5-2a6b7a47f112");
 
 /// Bytes on a wire, weighing their length in CPU RAM.
 #[derive(Debug, PartialEq, Eq)]
@@ -35,7 +36,7 @@ impl fmt::Display for Blob {
 }
 
 impl CustomValue for Blob {
-    fn custom_type_id(&self) -> TypeId {
+    fn custom_type_id(&self) -> CustomTypeId {
         BLOB_TYPE
     }
 
@@ -80,10 +81,7 @@ impl BlobCodec {
     /// A library holding [`Blob`] with this codec.
     pub(crate) fn library(self) -> Library {
         let mut library = Library::default();
-        library.register_type(
-            BLOB_TYPE,
-            TypeEntry::custom_with_codec("Blob", Arc::new(self)),
-        );
+        library.register_custom_type(BLOB_TYPE, CustomType::with_codec("Blob", Arc::new(self)));
         library
     }
 

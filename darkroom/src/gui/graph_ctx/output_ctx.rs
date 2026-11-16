@@ -41,7 +41,7 @@ impl<'a> OutputCtx<'a> {
         self.declared.description.as_deref().unwrap_or_default()
     }
 
-    pub(crate) const fn data_type(self) -> &'a DataType {
-        &self.declared.data_type
+    pub(crate) const fn data_type(self) -> DataType {
+        self.declared.data_type
     }
 }

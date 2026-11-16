@@ -224,8 +224,8 @@ async fn a_flush_failure_uses_the_general_worker_error_report() {
 /// nobody named those nodes.
 #[tokio::test]
 async fn an_unpersistable_type_is_reported_only_when_the_flush_was_requested() {
+    use crate::data::data_type::custom_type::CustomType;
     use crate::internals::blob::{BLOB_TYPE, Blob};
-    use crate::library::type_entry::TypeEntry;
 
     let dir = TempDir::new("flush-unsupported");
     let mut graph = TestGraph::new();
@@ -233,7 +233,7 @@ async fn an_unpersistable_type_is_reported_only_when_the_flush_was_requested() {
     // same library, so the value is unwritable by construction.
     graph
         .library
-        .register_type(BLOB_TYPE, TypeEntry::custom("Blob"));
+        .register_custom_type(BLOB_TYPE, CustomType::new("Blob"));
     graph.add("make_blob", |node| {
         node.pure()
             .sink()
@@ -289,8 +289,8 @@ async fn an_unpersistable_type_is_reported_only_when_the_flush_was_requested() {
 /// never correct the host, since an empty program does not execute.
 #[tokio::test]
 async fn an_install_reports_the_cache_left_after_reconciling() {
+    use crate::data::data_type::custom_type::CustomType;
     use crate::internals::blob::{BLOB_TYPE, Blob};
-    use crate::library::type_entry::TypeEntry;
 
     // A blob weighs its length.
     const HEAVY_CPU: usize = 4096;
@@ -298,7 +298,7 @@ async fn an_install_reports_the_cache_left_after_reconciling() {
     let mut graph = TestGraph::new();
     graph
         .library
-        .register_type(BLOB_TYPE, TypeEntry::custom("Blob"));
+        .register_custom_type(BLOB_TYPE, CustomType::new("Blob"));
     graph.add("heavy", |node| {
         node.pure()
             .sink()

@@ -299,7 +299,7 @@ mod tests {
     use std::io;
     use std::path::PathBuf;
 
-    use crate::data::data_type::TypeId;
+    use crate::data::data_type::custom_type::CustomTypeId;
     use crate::exec::cache::digest::Digest;
     use crate::exec::cache::disk_store::error::{StoreError, StoreResult};
     use crate::exec::cache::disk_store::store_outcome::StoreOutcome;
@@ -322,7 +322,7 @@ mod tests {
         };
         let unsupported = || -> StoreResult {
             Ok(StoreOutcome::Unsupported {
-                type_id: TypeId::unique(),
+                type_id: CustomTypeId::unique(),
             })
         };
         let rows: [(StoreResult, bool); 4] = [

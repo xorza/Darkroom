@@ -129,15 +129,15 @@ impl<'a> GraphCtx<'a> {
     ///
     /// If the graph does not hold `port`: a committed wire joins two declared
     /// ports, and an in-flight wire drops once its start is gone.
-    pub(crate) fn data_type(self, port: PortRef) -> &'a DataType {
+    pub(crate) fn data_type(self, port: PortRef) -> DataType {
         let func = self
             .body()
             .find(port.node_id)
             .expect("a painted port's node is in the graph")
             .func(self.library());
         match port.kind {
-            PortKind::Input => &func.inputs()[port.port_idx].data_type,
-            PortKind::Output => &func.outputs()[port.port_idx].data_type,
+            PortKind::Input => func.inputs()[port.port_idx].data_type,
+            PortKind::Output => func.outputs()[port.port_idx].data_type,
         }
     }
 

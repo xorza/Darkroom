@@ -1,5 +1,5 @@
 use palantir::{CloseShown, SrgbaU8};
-use scenarium::TypeId;
+use scenarium::CustomTypeId;
 use static_assertions::assert_not_impl_any;
 
 use super::*;
@@ -271,7 +271,7 @@ fn the_error_path_field_recolors_every_border_and_keeps_its_width() {
 }
 
 fn custom(id: u128) -> DataType {
-    DataType::Custom(TypeId::from_u128(id))
+    DataType::Custom(CustomTypeId::from_u128(id))
 }
 
 /// What a typed port's color varies with — the declared type and the hover
@@ -290,18 +290,18 @@ fn a_typed_ports_color_varies_by_type_and_hover_but_not_by_column() {
     for (i, a) in types.iter().enumerate() {
         for b in &types[i + 1..] {
             assert_ne!(
-                theme.port_color(a),
-                theme.port_color(b),
+                theme.port_color(*a),
+                theme.port_color(*b),
                 "{a:?} and {b:?} share a color",
             );
         }
     }
 
     for data_type in &types {
-        let rest = theme.port_color(data_type);
+        let rest = theme.port_color(*data_type);
         assert_ne!(
             rest,
-            Hover::Over.lift(theme.port_color(data_type)),
+            Hover::Over.lift(theme.port_color(*data_type)),
             "{data_type:?} must visibly lift on hover",
         );
     }
@@ -312,9 +312,9 @@ fn a_typed_ports_color_varies_by_type_and_hover_but_not_by_column() {
 #[test]
 fn any_falls_back_to_the_untyped_input_color() {
     let t = Theme::default();
-    assert_eq!(t.port_color(&DataType::Any), t.port.input);
+    assert_eq!(t.port_color(DataType::Any), t.port.input);
     assert_eq!(
-        Hover::Over.lift(t.port_color(&DataType::Any)),
+        Hover::Over.lift(t.port_color(DataType::Any)),
         color::hover_lift(t.port.input)
     );
 }
@@ -324,12 +324,12 @@ fn custom_types_keyed_by_type_id() {
     let t = Theme::default();
     // Ids in adjacent ramp slots → different colors (ramp entries
     // are distinct, len > 1).
-    assert_ne!(t.port_color(&custom(0)), t.port_color(&custom(1)),);
+    assert_ne!(t.port_color(custom(0)), t.port_color(custom(1)),);
     // The lens image type bypasses the ramp for its owned hue, which no
     // ramp entry may duplicate — a hash pick must never impersonate the
     // image color.
     let image_type = DataType::Custom(lens::IMAGE_TYPE_ID);
-    assert_eq!(t.port_color(&image_type), t.type_colors.image);
+    assert_eq!(t.port_color(image_type), t.type_colors.image);
     assert!(!t.type_colors.ramp.contains(&t.type_colors.image));
 }
 

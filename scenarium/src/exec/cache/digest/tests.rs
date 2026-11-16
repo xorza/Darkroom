@@ -30,7 +30,7 @@ fn typed<'a>(prog: &'a mut ProgramBuilder, func: u128, types: &[DataType]) -> No
     prog.node()
         .pure()
         .func(FuncId::from_u128(func))
-        .output_types(types.iter().cloned())
+        .output_types(types.iter().copied())
 }
 
 /// Every node's content digest, folded producer-first the way the executor does — each node
@@ -315,7 +315,7 @@ fn fs_path_folds_file_identity_and_path() {
 
 /// A **Bind-delivered** path re-keys its consumer like a const one: the fold reads the
 /// producer's delivered value and stats the pointed-at file live — but only through an
-/// `FsPath`-declared input, and only once the value is readable (unreadable ⇒ `None`,
+/// path-declared input, and only once the value is readable (unreadable ⇒ `None`,
 /// the taint the run loop's reach-time re-stamp resolves).
 #[test]
 fn bound_fs_path_folds_delivered_file_identity() {
@@ -325,7 +325,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
     let file = delivered.path();
     let path = delivered.to_str();
 
-    // A producer, a consumer whose input is `FsPath`-declared, and a control
+    // A producer, a consumer whose input is path-declared, and a control
     // consumer reading the same port through an undeclared input — no fold.
     let mut p = ProgramBuilder::default();
     let producer = pure(&mut p, 10, 1).add();
@@ -373,7 +373,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
     } = digests_with(fs_path());
     assert_ne!(
         typed_len1, typed_len3,
-        "a wired path's file change re-keys the FsPath-declared consumer"
+        "a wired path's file change re-keys the path-declared consumer"
     );
     assert_eq!(
         plain_len1, plain_len3,
@@ -494,7 +494,7 @@ fn output_ports_are_disambiguated() {
 /// type.
 #[test]
 fn output_signature_folds_into_digest_and_propagates() {
-    use crate::data::data_type::TypeId;
+    use crate::data::data_type::custom_type::CustomTypeId;
 
     // One func declaring two different signatures: the digests must diverge on the type, the
     // arity, and a custom type's identity.
@@ -512,8 +512,8 @@ fn output_signature_folds_into_digest_and_propagates() {
     assert_ne!(one_port, two_ports, "an added output port re-keys the node");
 
     let (custom_one, custom_two) = signature_pair(
-        &[DataType::Custom(TypeId::from_u128(1))],
-        &[DataType::Custom(TypeId::from_u128(2))],
+        &[DataType::Custom(CustomTypeId::from_u128(1))],
+        &[DataType::Custom(CustomTypeId::from_u128(2))],
     );
     assert_ne!(
         custom_one, custom_two,

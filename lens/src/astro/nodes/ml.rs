@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use common::FileIdentity;
 use lumos::{MlDenoise, MlError, OnnxModel, RemoveStars};
 use scenarium::{
-    AnyState, ConstValue, DataType, DynamicValue, FsPathConfig, FsPathMode, Func, FuncId,
+    AnyState, ConstValue, DataType, DynamicValue, FileKind, FileKindId, FileMode, Func, FuncId,
     InputDecl, Invocation, InvokeError, Library, OutputDecl, async_lambda,
 };
 
@@ -18,7 +18,11 @@ use crate::image::{IMAGE_DATA_TYPE, Image};
 const DENOISE_FUNC_ID: FuncId = FuncId::literal("ace786f9-8a02-4ed1-93a0-ad67bf0680f8");
 const STAR_REMOVAL_FUNC_ID: FuncId = FuncId::literal("60c31a76-eed4-467c-9ba3-5c89d294a91b");
 
+/// ONNX model files.
+const ONNX_MODEL_FILE: FileKindId = FileKindId::literal("5bea0866-9834-4ddd-be25-4c4c5fe6d3c5");
+
 pub(crate) fn register(library: &mut Library, model_paths: &MlModelPaths) {
+    library.register_file_kind(ONNX_MODEL_FILE, FileKind::new("ONNX model", ["onnx"]));
     register_denoise(library, &model_paths.denoise);
     register_star_removal(library, &model_paths.star_removal);
 }
@@ -118,10 +122,10 @@ fn register_star_removal(library: &mut Library, model_path: &Path) {
 fn model_input(name: &str, default: &Path) -> InputDecl {
     InputDecl::required(
         name,
-        DataType::FsPath(Arc::new(FsPathConfig::with_extensions(
-            FsPathMode::ExistingFile,
-            vec!["onnx".to_string()],
-        ))),
+        DataType::File {
+            kind: ONNX_MODEL_FILE,
+            mode: FileMode::Open,
+        },
     )
     .description("ONNX model file. Its file identity participates in the node cache key.")
     .default(ConstValue::FsPath(default.display().to_string()))

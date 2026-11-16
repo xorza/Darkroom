@@ -9,7 +9,7 @@ mod stacking;
 
 use std::path::PathBuf;
 
-use scenarium::{Library, TypeEntry};
+use scenarium::{CustomType, Library};
 
 use crate::astro::config;
 use crate::astro::masters::MASTERS_TYPE_ID;
@@ -34,7 +34,7 @@ impl Default for MlModelPaths {
 
 pub fn astro_library(model_paths: &MlModelPaths) -> Library {
     let mut library = Library::default();
-    library.register_type(MASTERS_TYPE_ID, TypeEntry::custom("Masters"));
+    library.register_custom_type(MASTERS_TYPE_ID, CustomType::new("Masters"));
     config::register_builders(&mut library);
     io::register(&mut library);
     calibration::register(&mut library);

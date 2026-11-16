@@ -4,7 +4,7 @@
 //! user changes it. The host (`node_ui`) converts that into a `GraphIntent::SetInput`
 //! carrying a constant binding.
 //!
-//! Supports `Int`, `Float`, `Bool`, `String`, and `FsPath` (a pick button summarizing the
+//! Supports `Int`, `Float`, `Bool`, `String`, and a path (a pick button summarizing the
 //! chosen path or paths; the port row's value cell polls the click, then `App` opens the OS
 //! file dialog after authoring). `Enum` renders as a dropdown over the port's declared
 //! variants. `Any` renders as a smart text field that infers the literal's kind from the
@@ -32,6 +32,7 @@ use palantir::{
 };
 use scenarium::{ConstValue, DataType, Library, ValueVariant};
 
+use crate::gui::path_type::PathType;
 use crate::gui::theme::const_editor_theme::ConstEditorTheme;
 use crate::gui::widgets::format::path_preview::PathPreview;
 use crate::gui::widgets::format::shown_value::{self, FLOAT_DECIMALS, UNSET};
@@ -44,7 +45,7 @@ pub(super) struct ConstEditor<'a> {
     pub(super) field: Field<'a>,
     pub(super) library: &'a Library,
     pub(super) value: &'a ConstValue,
-    pub(super) data_type: &'a DataType,
+    pub(super) data_type: DataType,
     /// The port's named presets; a non-empty list overrides the per-type
     /// editor.
     pub(super) value_variants: &'a [ValueVariant],
@@ -143,11 +144,12 @@ impl ConstEditor<'_> {
                 };
                 field.text(ui, cur).map(ConstValue::String)
             }
-            DataType::FsPath(config) => {
+            DataType::Dir | DataType::File { .. } => {
                 // The admitted literal is the shape the mode takes; the pick dialog replaces it
                 // wholesale.
+                let path_type = PathType::of(data_type).expect("a directory or a file is a path");
                 let preview = match value {
-                    ConstValue::FsPath(path) => PathPreview::single(path, config.mode),
+                    ConstValue::FsPath(path) => PathPreview::single(path, path_type),
                     ConstValue::FsPaths(paths) => PathPreview::multi(paths),
                     _ => return field.unset(ui, value),
                 };
@@ -171,15 +173,16 @@ impl ConstEditor<'_> {
                 support::tooltip_after(ui, &button, tooltip);
                 None
             }
-            DataType::Enum(type_id) => {
-                // The variant list lives on the library's `Enum` type entry, not on the value or
-                // the id-only `DataType`; an admitted literal names one of them.
+            DataType::Enum(enum_id) => {
+                // The variant list lives on the library's enum, not on the value or the id-only
+                // `DataType`; an admitted literal names one of them.
                 let Some(cur) = value.as_enum() else {
                     return field.unset(ui, value);
                 };
                 let variants = library
-                    .enum_variants(*type_id)
-                    .expect("an admitted enum literal's type is registered");
+                    .enum_type(enum_id)
+                    .expect("an admitted enum literal's type is registered")
+                    .variants();
                 let current = variants
                     .iter()
                     .find(|v| *v == cur)

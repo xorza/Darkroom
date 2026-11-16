@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use super::*;
 use crate::data::const_value::ConstValue;
+use crate::data::data_type::DataType;
 use crate::exec::compile::error::{CompiledGraphValidationError, PortPool};
 use crate::graph::identity::FuncId;
 use crate::graph::node::Node;

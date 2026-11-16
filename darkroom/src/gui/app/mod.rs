@@ -7,7 +7,7 @@ use common::ErrorChain;
 use palantir::{ColorScheme, Preference, RecordPass, Ui, UiPreferences};
 use scenarium::Binding;
 use scenarium::ConstValue;
-use scenarium::FsPathMode;
+use scenarium::FileMode;
 use scenarium::Library;
 use scenarium::ProgramId;
 
@@ -34,6 +34,7 @@ use crate::gui::frame::app_ctx::AppCtx;
 use crate::gui::frame::requests::Requests;
 use crate::gui::frame::stage::Stage;
 use crate::gui::frame::window_parts::{StatusInputs, WindowParts};
+use crate::gui::path_type::PathType;
 use crate::gui::state::process_memory::ProcessMemory;
 use crate::gui::state::run_state::{RunFeed, RunState};
 use crate::gui::theme::Theme;
@@ -218,7 +219,7 @@ impl App {
             AppCommand::Run(run) => self.run(run),
             AppCommand::PickMlModel(kind) => self.pick_ml_model(kind),
             AppCommand::Edit(EditCommand::PickInputPath(pick)) => {
-                self.pick_input_path(&pick);
+                self.pick_input_path(pick);
             }
             AppCommand::View(ViewCommand::CopyImage) => {
                 self.capture = Some(ViewCapture::new(CaptureTarget::Clipboard));
@@ -360,17 +361,24 @@ impl App {
         }
     }
 
-    /// Open a file dialog for a node's `FsPath` const input and, if the
+    /// Open a file dialog for a node's path const input and, if the
     /// user makes a selection, apply the chosen paths as a `SetInput` edit. Runs after
     /// authoring, so it goes through [`Session::apply_edit`] rather than
     /// the frame's intent drain.
-    fn pick_input_path(&mut self, pick: &PathPick) {
-        let extensions: Vec<&str> = pick.config.extensions.iter().map(String::as_str).collect();
-        let picked = match pick.config.mode {
-            FsPathMode::ExistingFile => self.dialogs.existing_file(&extensions).map(fs_path),
-            FsPathMode::ExistingFiles => self.dialogs.existing_files(&extensions).map(fs_paths),
-            FsPathMode::NewFile => self.dialogs.new_file(&extensions).map(fs_path),
-            FsPathMode::Dir => self.dialogs.dir().map(fs_path),
+    fn pick_input_path(&mut self, pick: PathPick) {
+        let extensions: Vec<&str> = pick
+            .path_type
+            .extensions(self.runtime.library.cur())
+            .iter()
+            .map(String::as_str)
+            .collect();
+        let picked = match pick.path_type {
+            PathType::Dir => self.dialogs.dir().map(fs_path),
+            PathType::File { mode, .. } => match mode {
+                FileMode::Open => self.dialogs.existing_file(&extensions).map(fs_path),
+                FileMode::OpenMany => self.dialogs.existing_files(&extensions).map(fs_paths),
+                FileMode::Save => self.dialogs.new_file(&extensions).map(fs_path),
+            },
         };
         let value = match picked {
             None => return,
