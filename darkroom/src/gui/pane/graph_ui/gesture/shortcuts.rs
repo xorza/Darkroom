@@ -7,7 +7,7 @@
 //! keeps Delete from removing nodes nobody is looking at.
 
 use palantir::{Key, Ui};
-use scenarium::NodeId;
+use scenarium::{GraphId, NodeId};
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
@@ -46,6 +46,7 @@ pub(crate) fn emit(ui: &mut Ui, stage: &mut Stage<'_, CanvasCtx<'_>>) {
     if duplicate {
         out.extend_graph(GraphIntent::duplicate(
             graph_ctx.document(),
+            GraphId::Main,
             graph_ctx.library(),
             IncomingWires::Drop,
             || NodeId::unique().as_u128(),

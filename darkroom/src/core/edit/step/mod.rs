@@ -8,10 +8,11 @@
 //!
 //! Each kind is one file, holding its payload and its [`Reversible`](reversible::Reversible)
 //! impl: how it writes and what it costs the frame. The trait is the checklist, since a kind that
-//! leaves a question unanswered does not compile; [`UndoStep`](undo_step::UndoStep) is a variant
-//! per kind.
+//! leaves a question unanswered does not compile; [`GraphStep`](graph_step::GraphStep) is a
+//! variant per kind, and [`UndoStep`](undo_step::UndoStep) names the graph it lands in.
 
 pub(crate) mod change;
+pub(crate) mod graph_step;
 pub(crate) mod reversible;
 pub(crate) mod set_depth;
 pub(crate) mod set_input;

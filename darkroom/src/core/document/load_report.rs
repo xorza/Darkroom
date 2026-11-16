@@ -4,7 +4,7 @@
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-use scenarium::{GraphId, NodeAddr, NodeId, ProgramId, Repair, UnknownType};
+use scenarium::{GraphId, NodeAddr, NodeId, ProgramId, Repair, SubgraphId, UnknownType};
 
 use crate::core::document::item_id::ItemId;
 use crate::core::document::tie::TieId;
@@ -33,11 +33,23 @@ pub(crate) struct ForeignPath {
 /// One change a load made.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum DocumentRepair {
-    /// A repair of one graph: wiring, a node its scope cannot hold, or a stub it can again.
-    Graph {
-        graph: GraphId,
-        repair: Repair,
-    },
+    /// A change to one graph: its wiring, a stub attached or a node kept as one.
+    Graph { graph: GraphId, repair: Repair },
+    /// A change to one graph's view.
+    View { graph: GraphId, repair: ViewRepair },
+    /// A subgraph with no side, given one with its nodes placed in a row.
+    SideAdded { subgraph: SubgraphId },
+    /// A side for no subgraph.
+    SideDropped { subgraph: SubgraphId },
+    /// A viewer tab on a node that is not a preview node in the graph.
+    ViewerClosed { program_id: ProgramId },
+    /// An inspector tab pinned to a node the graph does not hold.
+    InspectorClosed { node_id: NodeId },
+}
+
+/// One change a load made to a graph's view.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ViewRepair {
     ViewportReset,
     /// A placement for no node or stub.
     PlacementDropped {
@@ -84,14 +96,6 @@ pub(crate) enum DocumentRepair {
     /// A selection entry the view does not hold.
     SelectionDropped {
         item: ItemId,
-    },
-    /// A viewer tab on a node that is not a preview node in the graph.
-    ViewerClosed {
-        program_id: ProgramId,
-    },
-    /// An inspector tab pinned to a node the graph does not hold.
-    InspectorClosed {
-        node_id: NodeId,
     },
 }
 
@@ -169,6 +173,42 @@ impl Display for DocumentRepair {
                 graph: GraphId::Subgraph(id),
                 repair,
             } => write!(f, "in subgraph {id:?}, {repair}"),
+            Self::View {
+                graph: GraphId::Main,
+                repair,
+            } => repair.fmt(f),
+            Self::View {
+                graph: GraphId::Subgraph(id),
+                repair,
+            } => write!(f, "in the view of subgraph {id:?}, {repair}"),
+            Self::SideAdded { subgraph } => {
+                write!(
+                    f,
+                    "placed the nodes of subgraph {subgraph:?} in a row: it had no view"
+                )
+            }
+            Self::SideDropped { subgraph } => {
+                write!(
+                    f,
+                    "removed the view of {subgraph:?}, which names no subgraph"
+                )
+            }
+            Self::InspectorClosed { node_id } => {
+                write!(f, "closed the inspector of {node_id:?}, which is no node")
+            }
+            Self::ViewerClosed { program_id } => {
+                write!(
+                    f,
+                    "closed the viewer of {program_id:?}, which is no preview node"
+                )
+            }
+        }
+    }
+}
+
+impl Display for ViewRepair {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
             Self::ViewportReset => f.write_str("reset the viewport"),
             Self::PlacementDropped { node_id } => {
                 write!(
@@ -221,15 +261,6 @@ impl Display for DocumentRepair {
                     "removed {item:?} from the selection: the view does not hold it"
                 )
             }
-            Self::InspectorClosed { node_id } => {
-                write!(f, "closed the inspector of {node_id:?}, which is no node")
-            }
-            Self::ViewerClosed { program_id } => {
-                write!(
-                    f,
-                    "closed the viewer of {program_id:?}, which is no preview node"
-                )
-            }
         }
     }
 }
@@ -241,12 +272,15 @@ mod tests {
         SubgraphId, UnknownType,
     };
 
-    use crate::core::document::load_report::{DocumentRepair, ForeignPath, LoadReport};
+    use crate::core::document::load_report::{DocumentRepair, ForeignPath, LoadReport, ViewRepair};
 
     /// The status line names what the load has to report, and each part alone reads whole.
     #[test]
     fn the_status_line_names_each_kind() {
-        let repairs = vec![DocumentRepair::ViewportReset];
+        let repairs = vec![DocumentRepair::View {
+            graph: GraphId::Main,
+            repair: ViewRepair::ViewportReset,
+        }];
         let foreign_paths: Vec<ForeignPath> = ["/a", "/b"]
             .map(|path| ForeignPath {
                 node: NodeAddr::new(GraphId::Main, NodeId::unique()),

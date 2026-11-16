@@ -1,6 +1,6 @@
 //! Renaming one node.
 
-use scenarium::NodeId;
+use scenarium::{GraphId, NodeId};
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::Document;
@@ -16,10 +16,10 @@ pub(crate) struct SetNodeName {
 }
 
 impl Reversible for SetNodeName {
-    fn write(&self, document: &mut Document, dir: Direction) {
+    fn write(&self, document: &mut Document, graph: GraphId, dir: Direction) {
         document
-            .graphs
-            .main_mut()
+            .slot_mut(graph)
+            .graph
             .find_mut(self.node_id)
             .expect("history replays a rename against the node it recorded")
             .name

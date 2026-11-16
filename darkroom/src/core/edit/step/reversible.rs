@@ -1,5 +1,7 @@
 //! The contract every kind of undo step answers.
 
+use scenarium::GraphId;
+
 use crate::core::document::Document;
 use crate::core::edit::edit_facts::EditFacts;
 use crate::core::edit::step::change::Direction;
@@ -15,7 +17,7 @@ use crate::core::edit::step::change::Direction;
 /// Implementors are the payload structs behind
 /// [`UndoStep`](crate::core::edit::step::undo_step::UndoStep)'s variants.
 pub(super) trait Reversible {
-    /// Write one half of this step into `document`: the "to" half going forward,
+    /// Write one half of this step into `graph` of `document`: the "to" half going forward,
     /// the "from" half going back.
     ///
     /// One direction-parameterised write rather than an `apply`/`revert` pair: the two are the
@@ -26,7 +28,7 @@ pub(super) trait Reversible {
     /// entries and the steps inside an entry in reverse, so each step is reverted against the
     /// document its own apply produced. Steps that check themselves against what they overwrite
     /// rely on it.
-    fn write(&self, document: &mut Document, dir: Direction);
+    fn write(&self, document: &mut Document, graph: GraphId, dir: Direction);
 
     /// Whether writing either half would leave the document unchanged. Filtered out at commit
     /// time so phantom entries (re-selecting the same node, dragging zero pixels) never reach the

@@ -109,10 +109,8 @@ pub(crate) struct NodeLog {
 #[derive(Debug)]
 pub(crate) struct RunState {
     /// What the last run said about each node — a **record of that run**, not a cache swept
-    /// against the document, so deliberately absent from
-    /// [`Document::holds_node`](crate::core::document::Document::holds_node)'s list of
-    /// `NodeId`-keyed caches and from the once-a-frame pass that sweeps them. Reasons, in order
-    /// of weight:
+    /// against the document, so deliberately absent from the `NodeId`-keyed caches the
+    /// once-a-frame pass sweeps against each graph. Reasons, in order of weight:
     ///
     /// 1. **Going stale on an edit is already what these mean.** A status says *what the last
     ///    run said*, never *what the graph would do now*. Sweeping on delete would make

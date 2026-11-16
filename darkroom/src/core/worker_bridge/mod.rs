@@ -76,24 +76,22 @@ impl WorkerBridge {
         self.worker.send(WorkerMessage::Clear)
     }
 
-    /// Install the current program and evict a program node's cache cone as one worker commit.
+    /// Install the current program and evict program nodes' cache cone as one worker commit.
     /// Stopping the event loop keeps it from repopulating the entries being removed.
     pub(crate) fn install_and_evict_cache(
         &self,
         compiled: Arc<CompiledGraph>,
-        program_id: ProgramId,
+        program_ids: Vec<ProgramId>,
     ) -> Result<(), WorkerExited> {
         self.worker.send_many([
             WorkerMessage::Update { compiled },
-            WorkerMessage::EvictCache {
-                program_ids: vec![program_id],
-            },
+            WorkerMessage::EvictCache { program_ids },
             WorkerMessage::StopEventLoop,
         ])
     }
 
-    /// Install the current program and persist a program node's resident disk-backed value as
-    /// one worker commit. The install has to lead: the engine reads the node's cache mode off the
+    /// Install the current program and persist program nodes' resident disk-backed values as
+    /// one worker commit. The install has to lead: the engine reads each node's cache mode off the
     /// *installed* program, so a flush against the previous one would find the node not yet
     /// disk-backed and write nothing.
     ///
@@ -102,13 +100,11 @@ impl WorkerBridge {
     pub(crate) fn install_and_flush_cache(
         &self,
         compiled: Arc<CompiledGraph>,
-        program_id: ProgramId,
+        program_ids: Vec<ProgramId>,
     ) -> Result<(), WorkerExited> {
         self.worker.send_many([
             WorkerMessage::Update { compiled },
-            WorkerMessage::FlushCache {
-                program_ids: vec![program_id],
-            },
+            WorkerMessage::FlushCache { program_ids },
         ])
     }
 

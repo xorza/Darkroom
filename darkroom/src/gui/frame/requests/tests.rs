@@ -35,7 +35,7 @@ fn each_level_drains_its_own_tier_and_leaves_the_rest_queued() {
         .document()
         .drain()
         .map(|item| match item {
-            DocumentRequest::Graph(_)
+            DocumentRequest::Graph { .. }
             | DocumentRequest::InGesture { .. }
             | DocumentRequest::Cancel { .. } => "graph",
             DocumentRequest::View(_) => "view",

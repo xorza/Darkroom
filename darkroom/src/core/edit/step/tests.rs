@@ -8,15 +8,16 @@ use std::collections::BTreeSet;
 
 use glam::Vec2;
 use scenarium::{
-    Binding, CacheMode, ConstValue, EventPort, InputPort, NodeId, OutputPort, Subscription,
-    numbered_port,
+    Binding, CacheMode, ConstValue, EventPort, GraphId, InputPort, NodeId, OutputPort, SubgraphId,
+    Subscription, numbered_port,
 };
 
 use crate::core::document::internals::DocumentFixture;
 use crate::core::document::item_id::ItemId;
-use crate::core::edit::edit_facts::EditFacts;
+use crate::core::edit::edit_facts::{EditFacts, Touched};
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::step::change::Change;
+use crate::core::edit::step::graph_step::GraphStep;
 use crate::core::edit::step::set_depth::SetDepth;
 use crate::core::edit::step::set_input::SetInput;
 use crate::core::edit::step::set_node::{NodeEntry, SetNode};
@@ -28,21 +29,29 @@ use crate::core::edit::step::set_subscription::SetSubscription;
 use crate::core::edit::step::set_ties::SetTies;
 use crate::core::edit::step::undo_step::UndoStep;
 
+/// `step` on the main graph.
+const fn main(step: GraphStep) -> UndoStep {
+    UndoStep::Graph {
+        graph: GraphId::Main,
+        step,
+    }
+}
+
 fn set_positions(node_id: NodeId, from: Vec2, to: Vec2) -> UndoStep {
-    UndoStep::Positions(SetPositions {
+    main(GraphStep::Positions(SetPositions {
         moves: vec![Move {
             item: ItemId::Node(node_id),
             pos: Change { from, to },
         }],
-    })
+    }))
 }
 
 fn set_input(input: InputPort, from: Option<Binding>, to: Option<Binding>) -> UndoStep {
-    UndoStep::Input(SetInput {
+    main(GraphStep::Input(SetInput {
         input,
         binding: Change { from, to },
         ties: SetTies::default(),
-    })
+    }))
 }
 
 fn constant(v: f64) -> Binding {
@@ -50,13 +59,13 @@ fn constant(v: f64) -> Binding {
 }
 
 fn renamed(node_id: NodeId, from: &str, to: &str) -> UndoStep {
-    UndoStep::NodeName(SetNodeName {
+    main(GraphStep::NodeName(SetNodeName {
         node_id,
         name: Change {
             from: from.into(),
             to: to.into(),
         },
-    })
+    }))
 }
 
 /// A removal of a stub — the one kind that can only be built by reading a
@@ -64,8 +73,12 @@ fn renamed(node_id: NodeId, from: &str, to: &str) -> UndoStep {
 fn node_removal() -> UndoStep {
     let mut fixture = DocumentFixture::default();
     let node_id = fixture.stub_at(Vec2::ZERO);
-    let entry = NodeEntry::capture(&fixture.document, node_id).expect("the fixture placed it");
-    UndoStep::Node(Box::new(SetNode::removal(entry, SetTies::default())))
+    let entry = NodeEntry::capture(&fixture.document, GraphId::Main, node_id)
+        .expect("the fixture placed it");
+    main(GraphStep::Node(Box::new(SetNode::removal(
+        entry,
+        SetTies::default(),
+    ))))
 }
 
 /// A removal of a tie, read off a document that holds one over a wire.
@@ -158,33 +171,33 @@ fn every_kind_answers_the_frame_questions() {
         ),
         (
             "selection",
-            UndoStep::Selection(SetSelection {
+            main(GraphStep::Selection(SetSelection {
                 toggled: BTreeSet::from([ItemId::Node(node_id)]),
-            }),
+            })),
             (false, EditFacts::NONE),
         ),
         (
             "depth",
-            UndoStep::Depth(SetDepth {
+            main(GraphStep::Depth(SetDepth {
                 node_id,
                 z: Change { from: 0, to: 7 },
-            }),
+            })),
             (false, EditFacts::NONE),
         ),
         (
             "cache mode",
-            UndoStep::NodeProperty(SetNodeProperty {
+            main(GraphStep::NodeProperty(SetNodeProperty {
                 node_id,
                 property: PropertyChange::RuntimeCache(Change {
                     from: CacheMode::None,
                     to: CacheMode::Ram,
                 }),
-            }),
+            })),
             (true, EditFacts::NONE),
         ),
         (
             "subscription",
-            UndoStep::Subscription(SetSubscription {
+            main(GraphStep::Subscription(SetSubscription {
                 subscription: Subscription::new(
                     EventPort::new(node_id, numbered_port(1)),
                     NodeId::unique(),
@@ -194,21 +207,24 @@ fn every_kind_answers_the_frame_questions() {
                     to: true,
                 },
                 ties: SetTies::default(),
-            }),
+            })),
             (true, EditFacts::NONE),
         ),
         ("tie removal", tie_removal(), (true, EditFacts::NONE)),
     ];
-    let kind = |step: &UndoStep| match step {
-        UndoStep::Node(_) => 0,
-        UndoStep::Positions(_) => 1,
-        UndoStep::NodeName(_) => 2,
-        UndoStep::Input(_) => 3,
-        UndoStep::Selection(_) => 4,
-        UndoStep::Depth(_) => 5,
-        UndoStep::NodeProperty(_) => 6,
-        UndoStep::Subscription(_) => 7,
-        UndoStep::Ties(_) => 8,
+    let kind = |step: &UndoStep| {
+        let UndoStep::Graph { step, .. } = step;
+        match step {
+            GraphStep::Node(_) => 0,
+            GraphStep::Positions(_) => 1,
+            GraphStep::NodeName(_) => 2,
+            GraphStep::Input(_) => 3,
+            GraphStep::Selection(_) => 4,
+            GraphStep::Depth(_) => 5,
+            GraphStep::NodeProperty(_) => 6,
+            GraphStep::Subscription(_) => 7,
+            GraphStep::Ties(_) => 8,
+        }
     };
     let covered: BTreeSet<u8> = cases.iter().map(|(_, step, _)| kind(step)).collect();
     assert_eq!(covered.len(), 9, "a case for every kind");
@@ -217,7 +233,17 @@ fn every_kind_answers_the_frame_questions() {
             !step.is_noop(),
             "{what}: a degenerate step would pin nothing"
         );
-        assert_eq!((step.dirties_document(), step.facts()), *answers, "{what}");
+        // Each step also touches the graph it lands in, the main graph here.
+        let (dirties, facts) = *answers;
+        let facts = EditFacts {
+            touched: Touched::Graph(GraphId::Main),
+            ..facts
+        };
+        assert_eq!(
+            (step.dirties_document(), step.facts()),
+            (dirties, facts),
+            "{what}"
+        );
     }
 }
 
@@ -231,19 +257,41 @@ fn a_held_gesture_absorbs_its_next_frame_in_place() {
         item: ItemId::Node(node_id),
         pos: Change { from, to },
     };
-    let mut open = UndoStep::Positions(SetPositions {
+    let mut open = main(GraphStep::Positions(SetPositions {
         moves: vec![
             mv(a, Vec2::ZERO, Vec2::new(10.0, 0.0)),
             mv(b, Vec2::ONE, Vec2::new(11.0, 1.0)),
         ],
-    });
+    }));
+    let elsewhere = UndoStep::Graph {
+        graph: GraphId::Subgraph(SubgraphId::from_u128(1)),
+        step: GraphStep::Positions(SetPositions {
+            moves: vec![mv(a, Vec2::new(10.0, 0.0), Vec2::new(25.0, 0.0))],
+        }),
+    };
+    assert!(
+        open.absorbs(&set_positions(
+            a,
+            Vec2::new(10.0, 0.0),
+            Vec2::new(25.0, 0.0)
+        )),
+        "a frame of the same kind on the same graph"
+    );
+    assert!(
+        !open.absorbs(&elsewhere),
+        "a frame on another graph is no frame of this gesture"
+    );
     // `a` dragged on to 25; `b` vanished, so the frame no longer carries it.
     open.absorb(&set_positions(
         a,
         Vec2::new(10.0, 0.0),
         Vec2::new(25.0, 0.0),
     ));
-    let UndoStep::Positions(folded) = &open else {
+    let UndoStep::Graph {
+        step: GraphStep::Positions(folded),
+        ..
+    } = &open
+    else {
         panic!("a folded drag stays a drag: {open:?}");
     };
     let halves: Vec<_> = folded
@@ -267,8 +315,8 @@ fn a_held_gesture_absorbs_its_next_frame_in_place() {
 fn a_gesture_refuses_a_frame_of_another_kind() {
     let a = NodeId::unique();
     let mut open = set_positions(a, Vec2::ZERO, Vec2::ONE);
-    open.absorb(&UndoStep::Depth(SetDepth {
+    open.absorb(&main(GraphStep::Depth(SetDepth {
         node_id: a,
         z: Change { from: 0, to: 1 },
-    }));
+    })));
 }

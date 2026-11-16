@@ -707,6 +707,7 @@
             Node(("25b00fb1-cdc1-4b3f-b927-1aa43b072784")),
         ],
     ),
+    sides: {},
     layout: (
         nodes: [
             Split((

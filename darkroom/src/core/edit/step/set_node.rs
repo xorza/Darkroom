@@ -1,6 +1,6 @@
 //! [`SetNode`]: a node added to the document or removed from it.
 
-use scenarium::{Binding, DetachedNode, InputPort, NodeId, Stub};
+use scenarium::{Binding, DetachedNode, GraphId, InputPort, NodeId, Stub};
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::Document;
@@ -8,7 +8,7 @@ use crate::core::document::graph_view::NodePlacement;
 use crate::core::document::item_id::ItemId;
 use crate::core::document::wire_key::{DataWire, WireKey};
 use crate::core::edit::edit_facts::EditFacts;
-use crate::core::edit::step::change::Direction;
+use crate::core::edit::step::change::{Direction, EntryEdit};
 use crate::core::edit::step::reversible::Reversible;
 use crate::core::edit::step::set_ties::SetTies;
 
@@ -42,20 +42,21 @@ pub(crate) struct NodeEntry {
 }
 
 impl NodeEntry {
-    /// Read `node_id`'s whole entry out of `document`, a graph node or a stub, or `None` when the
-    /// document no longer holds it, the ordinary outcome of an intent that spans frames.
-    pub(crate) fn capture(document: &Document, node_id: NodeId) -> Option<Self> {
-        let held = match document.graphs.main().snapshot_node(node_id) {
+    /// Read `node_id`'s whole entry out of `graph` of `document`, a node or a stub, or `None`
+    /// when the graph no longer holds it, the ordinary outcome of an intent that spans frames.
+    pub(crate) fn capture(document: &Document, graph: GraphId, node_id: NodeId) -> Option<Self> {
+        let held = document.graphs.graph(graph);
+        let held = match held.snapshot_node(node_id) {
             Some(record) => Held::Node(record),
-            None => Held::Stub(document.graphs.main().stub(node_id)?.clone()),
+            None => Held::Stub(held.stub(node_id)?.clone()),
         };
+        let view = document.view(graph);
         Some(Self {
-            placement: *document
-                .main_view
+            placement: *view
                 .node_placements
                 .get(&node_id)
                 .expect("the view places every node and stub"),
-            selected: document.main_view.selected.contains(&ItemId::Node(node_id)),
+            selected: view.selected.contains(&ItemId::Node(node_id)),
             held,
         })
     }
@@ -81,18 +82,16 @@ impl NodeEntry {
         self.held.record().node_id()
     }
 
-    fn restore(&self, document: &mut Document) {
-        let node_id = self.node_id();
+    fn restore(&self, document: &mut Document, graph: GraphId) {
+        let slot = document.slot_mut(graph);
         match &self.held {
-            Held::Node(record) => document.graphs.main_mut().attach_node(record.clone()),
-            Held::Stub(stub) => document.graphs.main_mut().insert_stub(stub.clone()),
+            Held::Node(record) => slot.graph.attach_node(record.clone()),
+            Held::Stub(stub) => slot.graph.insert_stub(stub.clone()),
         }
-        document
-            .main_view
-            .node_placements
-            .insert(node_id, self.placement);
+        let node_id = self.node_id();
+        slot.view.node_placements.insert(node_id, self.placement);
         if self.selected {
-            document.main_view.selected.insert(ItemId::Node(node_id));
+            slot.view.selected.insert(ItemId::Node(node_id));
         }
     }
 }
@@ -101,21 +100,14 @@ impl NodeEntry {
 ///
 /// Adding a node and removing one are the same edit in opposite directions, so both intents
 /// lower to this one step: a write either puts the recorded entry back or takes the node out, as
-/// [`NodeEdit`] and the direction say.
+/// [`EntryEdit`] and the direction say.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct SetNode {
     entry: NodeEntry,
-    edit: NodeEdit,
+    edit: EntryEdit,
     /// The routes of the wires a removal ends, and each tie that only they held. Empty for an
     /// insertion.
     ties: SetTies,
-}
-
-/// Which way a [`SetNode`] moves its entry when it applies.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) enum NodeEdit {
-    Insertion,
-    Removal,
 }
 
 impl SetNode {
@@ -128,7 +120,7 @@ impl SetNode {
                 placement,
                 selected: false,
             },
-            edit: NodeEdit::Insertion,
+            edit: EntryEdit::Insertion,
             ties: SetTies::default(),
         }
     }
@@ -137,7 +129,7 @@ impl SetNode {
     pub(crate) const fn removal(entry: NodeEntry, ties: SetTies) -> Self {
         Self {
             entry,
-            edit: NodeEdit::Removal,
+            edit: EntryEdit::Removal,
             ties,
         }
     }
@@ -148,7 +140,7 @@ impl SetNode {
         let node_id = self.entry.node_id();
         self.entry
             .wires()
-            .filter(move |_| self.edit == NodeEdit::Removal)
+            .filter(move |_| self.edit == EntryEdit::Removal)
             .filter_map(move |wire| match wire {
                 WireKey::Data(DataWire { output, input }) if output.node_id == node_id => {
                     Some(input)
@@ -160,11 +152,11 @@ impl SetNode {
     /// Drop the node, and check that what came out is what the step will put back: a divergence
     /// means the document held wiring the history never captured, which an undo would silently
     /// discard. It holds because a step is reverted against the document its own apply produced.
-    fn take_out(&self, document: &mut Document) {
+    fn take_out(&self, document: &mut Document, graph: GraphId) {
         let node_id = self.entry.node_id();
         let removed = match self.entry.held {
-            Held::Node(_) => Held::Node(document.remove_node(node_id)),
-            Held::Stub(_) => Held::Stub(document.remove_stub(node_id)),
+            Held::Node(_) => Held::Node(document.remove_node(graph, node_id)),
+            Held::Stub(_) => Held::Stub(document.remove_stub(graph, node_id)),
         };
         debug_assert_eq!(
             removed, self.entry.held,
@@ -174,18 +166,13 @@ impl SetNode {
 }
 
 impl Reversible for SetNode {
-    fn write(&self, document: &mut Document, dir: Direction) {
-        match (self.edit, dir) {
-            (NodeEdit::Insertion, Direction::Forward)
-            | (NodeEdit::Removal, Direction::Backward) => {
-                self.entry.restore(document);
-            }
-            (NodeEdit::Insertion, Direction::Backward)
-            | (NodeEdit::Removal, Direction::Forward) => {
-                self.take_out(document);
-            }
+    fn write(&self, document: &mut Document, graph: GraphId, dir: Direction) {
+        if self.edit.puts_in(dir) {
+            self.entry.restore(document, graph);
+        } else {
+            self.take_out(document, graph);
         }
-        self.ties.write(document, dir);
+        self.ties.write(document, graph, dir);
     }
 
     /// A node always comes or goes.

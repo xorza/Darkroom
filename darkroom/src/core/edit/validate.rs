@@ -17,7 +17,6 @@
 use glam::Vec2;
 use scenarium::{Binding, BindingEntry, Graph, Node, NodeDecl, NodeId, Scope};
 
-use crate::core::document::Document;
 use crate::core::document::tie::TieId;
 use crate::core::edit::error::{MalformedIntent, Role};
 
@@ -50,15 +49,14 @@ pub(super) fn live_node(
     Ok(graph.find(node_id))
 }
 
-/// A node id an insertion introduces: one the document holds neither as a graph node nor as a
-/// stub. [`Graph::insert`] panics on a graph collision, and a stub's id in the graph too would
-/// break the document's disjoint ids.
+/// A node id an insertion into `graph` introduces: one the graph holds neither as a node nor as
+/// a stub, as [`Graph::insert`] refuses both. A node id is unique within its graph alone.
 ///
 /// Intents commit one at a time, so a batch that repeats an id fails here on its second intent,
-/// against a document the first has already been applied to.
-pub(super) fn fresh_node_id(document: &Document, node_id: NodeId) -> Result<(), MalformedIntent> {
+/// against a graph the first has already been applied to.
+pub(super) fn fresh_node_id(graph: &Graph, node_id: NodeId) -> Result<(), MalformedIntent> {
     non_nil_node(node_id, Role::New)?;
-    if document.holds_node(node_id) {
+    if graph.holds(node_id) {
         return Err(MalformedIntent::NodeAlreadyExists { node_id });
     }
     Ok(())

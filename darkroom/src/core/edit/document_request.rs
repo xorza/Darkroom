@@ -1,12 +1,14 @@
 //! One request a frontend raises against the open document.
 
 use palantir::DockOperation;
+use scenarium::GraphId;
 
 use crate::core::document::tab_ref::TabRef;
 use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::graph_intent::GraphIntent;
 
-/// A request the document applies itself: an edit of its graph, or of the pane arrangement.
+/// A request the document applies itself: an edit of one of its graphs, or of the pane
+/// arrangement.
 ///
 ///   - [`Graph`](Self::Graph): validated, applied, and recorded as an undo step; flips the
 ///     unsaved flag.
@@ -18,13 +20,18 @@ use crate::core::edit::graph_intent::GraphIntent;
 ///     past a tab switch to the last graph edit.
 #[derive(Debug)]
 pub(crate) enum DocumentRequest {
-    Graph(GraphIntent),
+    Graph {
+        graph: GraphId,
+        intent: GraphIntent,
+    },
     InGesture {
         gesture: GestureId,
+        graph: GraphId,
         intent: GraphIntent,
     },
     Cancel {
         gesture: GestureId,
+        graph: GraphId,
         otherwise: GraphIntent,
     },
     View(DockOperation<TabRef>),

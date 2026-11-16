@@ -7,13 +7,14 @@ use glam::Vec2;
 use lens::MlModelPaths;
 
 use crate::core::document::Document;
+use crate::core::document::graph_revision::GraphRevision;
 use crate::core::document::graph_view::NodePlacement;
-use crate::core::document::internals::DocumentFixture;
+use crate::core::document::internals::{DocumentFixture, insert_subgraph};
 use crate::core::document::item_id::ItemId;
 use crate::core::document::load_report::{DocumentRepair, ForeignPath};
 use crate::core::document::viewport::Viewport;
 use crate::core::edit::document_queue::DocumentQueue;
-use crate::core::edit::edit_facts::EditFacts;
+use crate::core::edit::edit_facts::{EditFacts, Touched};
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::drag_start::DragStart;
 use crate::core::io::document;
@@ -411,22 +412,28 @@ fn only_a_batch_wholly_in_a_gesture_folds_into_it() {
         members: Rc::clone(&members),
         offset: Vec2::new(x, 0.0),
     };
-    let mut drain = |open: &mut OpenDocument, intents: Vec<GraphIntent>| {
-        queue.extend_graph(intents);
-        assert_eq!(
-            open.drain_requests(&mut queue, &library),
-            EditFacts::NONE,
-            "moving and selecting remeasure nothing"
-        );
+    // Moving and selecting remeasure nothing; each step touches the main graph, and a camera
+    // move, which records no step, touches none.
+    let main = EditFacts {
+        touched: Touched::Graph(GraphId::Main),
+        ..EditFacts::NONE
+    };
+    let mut drain = |open: &mut OpenDocument, intents: Vec<GraphIntent>, facts: EditFacts| {
+        queue.extend_graph(GraphId::Main, intents);
+        assert_eq!(open.drain_requests(&mut queue, &library), facts);
     };
 
-    drain(&mut open, vec![frame(5.0)]);
+    drain(&mut open, vec![frame(5.0)], main);
     let zoomed = Viewport {
         pan: Vec2::new(30.0, 0.0),
         zoom: 2.0,
     };
-    drain(&mut open, vec![GraphIntent::SetViewport { to: zoomed }]);
-    drain(&mut open, vec![frame(9.0)]);
+    drain(
+        &mut open,
+        vec![GraphIntent::SetViewport { to: zoomed }],
+        EditFacts::NONE,
+    );
+    drain(&mut open, vec![frame(9.0)], main);
     drain(
         &mut open,
         vec![
@@ -435,20 +442,21 @@ fn only_a_batch_wholly_in_a_gesture_folds_into_it() {
                 to: BTreeSet::from([ItemId::Node(other)]),
             },
         ],
+        main,
     );
-    drain(&mut open, vec![frame(20.0)]);
+    drain(&mut open, vec![frame(20.0)], main);
 
     let pos = |open: &OpenDocument| open.document.main_view.node_placements[&node].pos - start;
     assert_eq!(pos(&open), Vec2::new(20.0, 0.0));
     assert!(open.can_undo());
-    assert_eq!(open.undo(), EditFacts::NONE);
+    assert_eq!(open.undo(), main);
     assert_eq!(
         pos(&open),
         Vec2::new(12.0, 0.0),
         "the frame after the batch"
     );
     assert!(open.can_undo());
-    assert_eq!(open.undo(), EditFacts::NONE);
+    assert_eq!(open.undo(), main);
     assert_eq!(
         pos(&open),
         Vec2::new(9.0, 0.0),
@@ -456,7 +464,7 @@ fn only_a_batch_wholly_in_a_gesture_folds_into_it() {
     );
     assert!(open.document.main_view.selected.is_empty());
     assert!(open.can_undo());
-    assert_eq!(open.undo(), EditFacts::NONE);
+    assert_eq!(open.undo(), main);
     assert_eq!(
         pos(&open),
         Vec2::ZERO,
@@ -469,21 +477,30 @@ fn only_a_batch_wholly_in_a_gesture_folds_into_it() {
     );
 }
 
-/// The graph revision moves on a change of the node set alone, which the
-/// canvas sweeps its caches on, not on a move or a selection; an edit, its
-/// undo and its redo each leave the document dirty.
+/// A graph's revision moves on a change of its node set alone, which its
+/// canvas sweeps its caches on, not on a move or a selection, nor on an edit of
+/// another graph; an edit, its undo and its redo each leave the document dirty.
 #[test]
 fn the_revision_follows_the_node_set_and_every_edit_dirties() {
     let fixture = DocumentFixture::sample();
     let node = fixture.node(0);
-    let DocumentFixture { document, library } = fixture;
+    let DocumentFixture {
+        mut document,
+        library,
+    } = fixture;
+    let other = GraphId::Subgraph(SubgraphId::from_u128(5));
+    insert_subgraph(
+        &mut document,
+        SubgraphId::from_u128(5),
+        Subgraph::new("other", Interface::default()),
+    );
     let mut open = OpenDocument::over(document);
     let mut queue = DocumentQueue::default();
     let mut drain = |open: &mut OpenDocument, intent: GraphIntent| {
-        queue.push_graph(intent);
+        queue.push_graph(GraphId::Main, intent);
         let _ = open.drain_requests(&mut queue, &library);
     };
-    let start = open.graph_revision();
+    let start = open.graph_revision(GraphId::Main);
 
     let gesture = DocumentQueue::default().open_gesture();
     let placed = open.document.main_view.node_placements[&node].pos;
@@ -505,25 +522,34 @@ fn the_revision_follows_the_node_set_and_every_edit_dirties() {
         },
     );
     assert_eq!(
-        open.graph_revision(),
+        open.graph_revision(GraphId::Main),
         start,
         "a move and a selection keep it"
     );
     assert!(open.dirty, "a move is an edit");
 
     drain(&mut open, GraphIntent::RemoveNode { node_id: node });
-    let removed = open.graph_revision();
+    let removed = open.graph_revision(GraphId::Main);
     assert_ne!(removed, start, "a removal changes the node set");
+    assert_eq!(
+        open.graph_revision(other),
+        GraphRevision::default(),
+        "an edit of the main graph leaves another graph's revision"
+    );
     open.dirty = false;
     let _ = open.undo();
     assert!(open.dirty, "undo dirties");
-    let restored = open.graph_revision();
+    let restored = open.graph_revision(GraphId::Main);
     assert_ne!(restored, removed, "undo brings the node back");
 
     open.dirty = false;
     let _ = open.redo();
     assert!(open.dirty, "redo dirties");
-    assert_ne!(open.graph_revision(), restored, "redo takes it out again");
+    assert_ne!(
+        open.graph_revision(GraphId::Main),
+        restored,
+        "redo takes it out again"
+    );
 }
 
 /// Esc on a held gesture takes its whole entry back, an edit that joined it
@@ -557,12 +583,12 @@ fn a_cancel_takes_the_gesture_back_whole() {
         let _ = open.drain_requests(queue, &library);
     };
 
-    queue.extend_graph_in(gesture, [spawn]);
+    queue.extend_graph_in(gesture, GraphId::Main, [spawn]);
     drain(&mut open, &mut queue);
-    queue.push_graph(frame(10.0));
+    queue.push_graph(GraphId::Main, frame(10.0));
     drain(&mut open, &mut queue);
     assert!(open.document.graphs.main().find(spawned).is_some());
-    queue.push_cancel(gesture, frame(0.0));
+    queue.push_cancel(gesture, GraphId::Main, frame(0.0));
     drain(&mut open, &mut queue);
     assert_eq!(
         open.document, before,
@@ -583,13 +609,16 @@ fn a_cancel_takes_the_gesture_back_whole() {
         members: Rc::clone(&members),
         offset: Vec2::new(x, 0.0),
     };
-    queue.push_graph(moved(10.0));
+    queue.push_graph(GraphId::Main, moved(10.0));
     drain(&mut open, &mut queue);
-    queue.push_graph(GraphIntent::SetSelection {
-        to: BTreeSet::from([ItemId::Node(node)]),
-    });
+    queue.push_graph(
+        GraphId::Main,
+        GraphIntent::SetSelection {
+            to: BTreeSet::from([ItemId::Node(node)]),
+        },
+    );
     drain(&mut open, &mut queue);
-    queue.push_cancel(gesture, moved(0.0));
+    queue.push_cancel(gesture, GraphId::Main, moved(0.0));
     drain(&mut open, &mut queue);
     assert_eq!(open.document.main_view.node_placements[&node].pos, start);
     assert!(
@@ -761,6 +790,52 @@ fn a_path_of_another_system_is_reported_and_leaves_the_document_clean() {
     );
 }
 
+/// A file whose two subgraphs place each other opens with the loop broken at one instance, kept
+/// as a stub whose reason is `Recursive`, and opens the same way each time.
+#[test]
+fn a_loop_between_two_subgraphs_opens_with_one_recursive_stub_every_time() {
+    let dir = TempDir::new("darkroom-open-loop");
+    let path = dir.join("scene.darkroom");
+    let [a, b] = [1, 2].map(SubgraphId::from_u128);
+    let mut fixture = DocumentFixture::default();
+    for id in [a, b] {
+        insert_subgraph(
+            &mut fixture.document,
+            id,
+            Subgraph::new(format!("{id:?}"), Interface::default()),
+        );
+    }
+    // Each places the other, past the edit gate that refuses the second placement.
+    for (graph, placed, node_id) in [(a, b, 10), (b, a, 20)] {
+        let node = Node::instance(placed, fixture.document.graphs.subgraph(placed).unwrap());
+        let slot = fixture.document.slot_mut(GraphId::Subgraph(graph));
+        slot.graph.insert(NodeId::from_u128(node_id), node);
+        slot.view
+            .node_placements
+            .insert(NodeId::from_u128(node_id), NodePlacement::default());
+    }
+    fixture.add_instance(a);
+    document::save(&fixture.document, &path, SavedPaths::Relative).unwrap();
+
+    let first = OpenDocument::load(path.clone(), &Library::default()).unwrap();
+    let stubbed: Vec<(GraphId, NodeId, DetachReason)> = first
+        .report
+        .repairs
+        .iter()
+        .filter_map(|repair| match repair {
+            DocumentRepair::Graph {
+                graph,
+                repair: Repair::Stubbed { node_id, reason },
+            } => Some((*graph, *node_id, *reason)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(stubbed.len(), 1, "{:?}", first.report.repairs);
+    assert_eq!(stubbed[0].2, DetachReason::Recursive);
+    let second = OpenDocument::load(path, &Library::default()).unwrap();
+    assert_eq!(second.report.repairs, first.report.repairs);
+    assert_eq!(second.open.document(), first.open.document());
+}
 /// A subgraph whose interface names a type this build does not register loads as written, an
 /// enum's default and an instance's constant of it included: the load reports each type and each
 /// port that names it, and leaves the document clean. A repair inside a subgraph names the
@@ -787,17 +862,14 @@ fn a_subgraphs_unknown_type_is_reported_and_its_repairs_name_the_subgraph() {
         outputs: vec![],
     });
     let id = SubgraphId::from_u128(5);
-    let subgraph = Subgraph::new("holder", interface);
-    let mut document = Document::default();
-    let instance = document
-        .graphs
-        .main_mut()
-        .add(Node::instance(id, &subgraph));
-    document.graphs.insert_subgraph(id, subgraph);
-    document
-        .main_view
-        .node_placements
-        .insert(instance, NodePlacement::default());
+    let mut fixture = DocumentFixture::default();
+    insert_subgraph(
+        &mut fixture.document,
+        id,
+        Subgraph::new("holder", interface),
+    );
+    let instance = fixture.add_instance(id);
+    let mut document = fixture.document;
     document.graphs.main_mut().bindings.insert(
         InputPort::new(instance, choice),
         Binding::Const(ConstValue::Enum("Bicubic".to_string())),
@@ -822,10 +894,12 @@ fn a_subgraphs_unknown_type_is_reported_and_its_repairs_name_the_subgraph() {
     assert!(!loaded.open.dirty, "a type kept as written is no change");
 
     let ghost = NodeId::from_u128(9);
-    document
-        .graphs
-        .graph_mut(GraphId::Subgraph(id))
+    let slot = document.slot_mut(GraphId::Subgraph(id));
+    slot.graph
         .insert(ghost, internals::unresolved_node(FuncId::from_u128(99)));
+    slot.view
+        .node_placements
+        .insert(ghost, NodePlacement::default());
     document::save(&document, &path, SavedPaths::Relative).unwrap();
     let loaded = OpenDocument::load(path, &Library::default()).unwrap();
     assert_eq!(

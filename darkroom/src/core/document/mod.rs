@@ -15,9 +15,13 @@
 //!   node that cannot run has little use.
 //! - **View and layout state is repaired, not refused.** Refused: refusing the
 //!   file, as a bad viewport alone would keep the graph closed.
-//! - **A removal closes its node's viewer.** Every removal — an edit, an undo,
-//!   a redo — goes through [`Document::remove_node`]; an undo of the removal
-//!   does not reopen the tab. Refused: scanning every tab each frame.
+//! - **A removal closes what stops resolving.** Every removal — an edit, an undo,
+//!   a redo — goes through [`Document::remove_node`], which closes each tab the removal broke;
+//!   an undo of the removal does not reopen the tab. Refused: scanning every tab each frame.
+//! - **The editor keeps a side beside each subgraph**: its view, keyed as the set's subgraphs
+//!   are. Refused: the view inside scenarium's `Subgraph`, which puts the editor's layout in the
+//!   framework; a `GraphSet` generic over what a host keeps beside a subgraph, which threads a
+//!   type parameter through the scope and the compile.
 
 pub(crate) mod error;
 pub(crate) mod graph_revision;
@@ -27,19 +31,22 @@ pub(crate) mod item_id;
 mod layout_file;
 pub(crate) mod load_report;
 pub(crate) mod route;
+pub(crate) mod subgraph_side;
 pub(crate) mod tab_ref;
 pub(crate) mod tie;
 pub(crate) mod viewport;
 pub(crate) mod wire_key;
 
-use std::collections::BTreeSet;
+use std::collections::btree_map::Entry;
+use std::collections::{BTreeMap, BTreeSet};
+use std::mem;
 use std::slice;
 
 use glam::Vec2;
 use palantir::DockState;
 use scenarium::{
     ConstValue, DetachedNode, Graph as CoreGraph, GraphId, GraphSet, Library, Node, NodeAddr,
-    NodeId, PathForm, ProgramId, Stub,
+    NodeId, PathForm, ProgramId, Stub, SubgraphId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -47,16 +54,17 @@ use crate::core::document::error::DocumentValidationError;
 use crate::core::document::graph_view::{GraphView, NodePlacement};
 use crate::core::document::inspect_target::InspectTarget;
 use crate::core::document::item_id::ItemId;
-use crate::core::document::load_report::{DocumentRepair, ForeignPath, LoadReport};
+use crate::core::document::load_report::{DocumentRepair, ForeignPath, LoadReport, ViewRepair};
 use crate::core::document::route::Route;
+use crate::core::document::subgraph_side::SubgraphSide;
 use crate::core::document::tab_ref::TabRef;
 use crate::core::document::tie::{TieAngle, TieId};
 use crate::core::document::viewport::Viewport;
 use crate::core::preview_sink;
 
-/// The thing being edited: the authoring `Graph` with the stubs it keeps, the editor view
-/// metadata positioning both, and the pane layout showing them. The `Library` they resolve
-/// against lives one level up on `App`.
+/// The thing being edited: its graphs, each with the stubs it keeps, the editor's view of each,
+/// and the pane layout showing them. The `Library` they resolve against lives one level up on
+/// `App`.
 ///
 /// A decoded document is made consistent once, by [`Self::reconcile`] at
 /// load; every edit after keeps it so, and nothing after re-checks it.
@@ -71,6 +79,8 @@ pub(crate) struct Document {
     pub(crate) graphs: GraphSet,
     /// Places every node and every stub of the main graph.
     pub(crate) main_view: GraphView,
+    /// One per subgraph of `graphs`, as a view holds one placement per node and stub.
+    pub(crate) sides: BTreeMap<SubgraphId, SubgraphSide>,
     /// The pane arrangement: open tabs grouped into split panes, plus the focused group.
     /// Mutated only through a `DockOperation`, none of which is undoable.
     #[serde(default = "new_layout", with = "layout_file")]
@@ -82,57 +92,88 @@ impl Default for Document {
         Self {
             graphs: GraphSet::default(),
             main_view: GraphView::default(),
+            sides: BTreeMap::new(),
             layout: new_layout(),
         }
     }
 }
 
+/// One graph of the document and its view, borrowed apart: what an edit of one graph writes.
+#[derive(Debug)]
+pub(crate) struct GraphSlot<'a> {
+    pub(crate) graph: &'a mut CoreGraph,
+    pub(crate) view: &'a mut GraphView,
+}
+
 impl Document {
-    /// Drop a graph node from the document: the graph, its placement, its selection membership
-    /// and its viewer and inspector tabs. Every removal (an edit, an undo or a redo) comes through
-    /// here, so no tab outlives its node.
-    pub(crate) fn remove_node(&mut self, node_id: NodeId) -> DetachedNode {
-        self.unplace(node_id);
-        self.close_tabs(node_id);
-        self.graphs.main_mut().detach_node(node_id)
+    /// The view of `graph`: its placements, ties, camera and selection.
+    ///
+    /// # Panics
+    /// If the document holds no `graph`.
+    pub(crate) fn view(&self, graph: GraphId) -> &GraphView {
+        match graph {
+            GraphId::Main => &self.main_view,
+            GraphId::Subgraph(id) => &self.sides.get(&id).expect("each subgraph has a side").view,
+        }
     }
 
-    /// [`Self::remove_node`] for a stub. A stub has no viewer: the load closes
-    /// one, and no edit opens one on a node that cannot run.
-    pub(crate) fn remove_stub(&mut self, node_id: NodeId) -> Stub {
-        self.unplace(node_id);
-        self.graphs
-            .main_mut()
+    /// `graph` and its view, to write: what an edit of one graph takes.
+    ///
+    /// # Panics
+    /// As [`Self::view`].
+    pub(crate) fn slot_mut(&mut self, graph: GraphId) -> GraphSlot<'_> {
+        let view = match graph {
+            GraphId::Main => &mut self.main_view,
+            GraphId::Subgraph(id) => {
+                &mut self
+                    .sides
+                    .get_mut(&id)
+                    .expect("each subgraph has a side")
+                    .view
+            }
+        };
+        GraphSlot {
+            graph: self.graphs.graph_mut(graph),
+            view,
+        }
+    }
+
+    /// Drop a node of `graph` from the document: the graph, its placement and its selection
+    /// membership, then each tab the removal stopped resolving. Every removal (an edit, an undo
+    /// or a redo) comes through here, so no tab outlives what it shows.
+    pub(crate) fn remove_node(&mut self, graph: GraphId, node_id: NodeId) -> DetachedNode {
+        let slot = self.slot_mut(graph);
+        unplace(slot.view, node_id);
+        let record = slot.graph.detach_node(node_id);
+        self.prune_tabs(&mut |_| {});
+        record
+    }
+
+    /// [`Self::remove_node`] for a stub. A stub has no viewer and places nothing, so nothing
+    /// else stops resolving with it.
+    pub(crate) fn remove_stub(&mut self, graph: GraphId, node_id: NodeId) -> Stub {
+        let slot = self.slot_mut(graph);
+        unplace(slot.view, node_id);
+        slot.graph
             .remove_stub(node_id)
             .expect("cannot remove a stub the document does not hold")
     }
 
-    fn unplace(&mut self, node_id: NodeId) {
-        self.main_view.node_placements.remove(&node_id);
-        self.main_view.selected.remove(&ItemId::Node(node_id));
-    }
-
-    /// Close the tabs that show `node_id`: its viewer and an inspector pinned to it.
-    fn close_tabs(&mut self, node_id: NodeId) {
-        let shows = |tab: TabRef| {
-            tab == TabRef::ImageViewer(ProgramId::from(node_id))
-                || tab == TabRef::Inspector(InspectTarget::Node(node_id))
-        };
-        // `retain_tabs` rebuilds the whole node tree, so it runs only when
-        // there is a tab to close.
-        if self.layout.all_tabs().any(shows) {
-            self.layout.retain_tabs(|tab| !shows(tab));
+    /// Close each tab the document stopped holding, handing `closed` each one.
+    fn prune_tabs(&mut self, closed: &mut impl FnMut(TabRef)) {
+        let stale: Vec<TabRef> = self
+            .layout
+            .all_tabs()
+            .filter(|&tab| !self.holds_tab(tab))
+            .collect();
+        // `retain_tabs` rebuilds the whole node tree, so it runs only when there is a tab to
+        // close.
+        if !stale.is_empty() {
+            self.layout.retain_tabs(|tab| !stale.contains(&tab));
         }
-    }
-
-    /// Whether the document holds `node_id`, as a graph node or a stub.
-    ///
-    /// The retention rule for every `NodeId`-keyed cache that outlives the
-    /// scene. Node ids are never reused, so a node absent here is gone for
-    /// good, while absence from a scene means only that a node is off-screen
-    /// or on a closed tab.
-    pub(crate) fn holds_node(&self, node_id: NodeId) -> bool {
-        self.graphs.main().holds(node_id)
+        for tab in stale {
+            closed(tab);
+        }
     }
 
     /// Whether a tab may be open: the graph pane, `Preferences` and the
@@ -152,10 +193,10 @@ impl Document {
     }
 
     /// Whether `program_id` names a preview node the document holds: a node of the main graph,
-    /// held there as a preview node. The retention of the value one published. Stricter than
-    /// [`Self::holds_node`]: the preview store holds textures up to 8192² RGBA8, so a value whose
-    /// key is not a live preview node releases at the next sweep instead of riding on the node's
-    /// own lifetime.
+    /// held there as a preview node. The retention of the value one published. Stricter than a
+    /// graph's [`Graph::holds`](scenarium::Graph::holds): the preview store holds textures up to
+    /// 8192² RGBA8, so a value whose key is not a live preview node releases at the next sweep
+    /// instead of riding on the node's own lifetime.
     pub(crate) fn holds_preview_node(&self, program_id: ProgramId) -> bool {
         program_id.path().is_main() && is_preview_node(self.graphs.main(), program_id.node_id())
     }
@@ -163,8 +204,10 @@ impl Document {
     /// Make a decoded document consistent with itself and `library`, and
     /// report each change: [`GraphSet::reconcile`] the graphs, which keeps
     /// each node a graph cannot hold as a stub and attaches each stub that
-    /// resolves again, then repair the view and the layout around the main
-    /// graph. Afterwards [`Self::validate`] holds, and the graphs compile.
+    /// resolves again; then give each subgraph a side and drop each side of
+    /// none, repair each view against its graph, and close each tab the
+    /// document no longer holds. Afterwards [`Self::validate`] holds, and the
+    /// graphs compile.
     pub(crate) fn reconcile(&mut self, library: &Library) -> LoadReport {
         let reconciled = self.graphs.reconcile(library);
         let mut repairs: Vec<DocumentRepair> = reconciled
@@ -190,10 +233,28 @@ impl Document {
         let Self {
             graphs,
             main_view,
-            layout,
+            sides,
+            ..
         } = self;
-        repair_view(main_view, graphs.main(), &mut repairs);
-        repair_layout(layout, graphs.main(), &mut repairs);
+        sides.retain(|&subgraph, _| {
+            let held = graphs.subgraph(subgraph).is_some();
+            if !held {
+                repairs.push(DocumentRepair::SideDropped { subgraph });
+            }
+            held
+        });
+        for (subgraph, held) in graphs.subgraphs() {
+            if let Entry::Vacant(side) = sides.entry(subgraph) {
+                side.insert(SubgraphSide::new(&held.graph));
+                repairs.push(DocumentRepair::SideAdded { subgraph });
+            }
+        }
+        repair_view(GraphId::Main, main_view, graphs.main(), &mut repairs);
+        for (&subgraph, side) in sides.iter_mut() {
+            let graph = GraphId::Subgraph(subgraph);
+            repair_view(graph, &mut side.view, graphs.graph(graph), &mut repairs);
+        }
+        self.prune_tabs(&mut |tab| repairs.push(closed_tab_repair(tab)));
         debug_assert!(
             self.validate().is_ok(),
             "a reconciled document is consistent: {:?}",
@@ -216,16 +277,33 @@ impl Document {
     }
 
     /// Check what [`Self::reconcile`] establishes that needs no library: each graph's structure
-    /// with its stubs, the view placing the main graph's, and the layout. A debug check: a
-    /// document that fails it is a bug in the load or an edit.
+    /// with its stubs, a side for each subgraph and for nothing else, each view against its
+    /// graph, and the layout. A debug check: a document that fails it is a bug in the load or an
+    /// edit.
     pub(crate) fn validate(&self) -> Result<(), DocumentValidationError> {
         for (graph, held) in self.graphs.graphs() {
             held.validate()
                 .map_err(|source| DocumentValidationError::Graph { graph, source })?;
         }
-        self.main_view
-            .validate(self.graphs.main())
-            .map_err(|source| DocumentValidationError::MainView { source })?;
+        if let Some(subgraph) = self
+            .graphs
+            .subgraphs()
+            .map(|(id, _)| id)
+            .find(|id| !self.sides.contains_key(id))
+            .or_else(|| {
+                self.sides
+                    .keys()
+                    .copied()
+                    .find(|&id| self.graphs.subgraph(id).is_none())
+            })
+        {
+            return Err(DocumentValidationError::SideMismatch { subgraph });
+        }
+        for (graph, held) in self.graphs.graphs() {
+            self.view(graph)
+                .validate(held)
+                .map_err(|source| DocumentValidationError::View { graph, source })?;
+        }
 
         for tab in self.layout.all_tabs() {
             if !self.holds_tab(tab) {
@@ -278,13 +356,24 @@ impl Document {
     }
 }
 
+/// Drop `node_id`'s placement and selection membership from `view`.
+fn unplace(view: &mut GraphView, node_id: NodeId) {
+    view.node_placements.remove(&node_id);
+    view.selected.remove(&ItemId::Node(node_id));
+}
+
 impl From<GraphSet> for Document {
-    /// A document of `graphs`, its main graph laid out in a row.
+    /// A document of `graphs`, each graph's nodes placed in a row.
     fn from(graphs: GraphSet) -> Self {
         let main_view = GraphView::new(graphs.main());
+        let sides = graphs
+            .subgraphs()
+            .map(|(id, subgraph)| (id, SubgraphSide::new(&subgraph.graph)))
+            .collect();
         Self {
             graphs,
             main_view,
+            sides,
             layout: new_layout(),
         }
     }
@@ -293,72 +382,78 @@ impl From<GraphSet> for Document {
 /// Reset a bad viewport, drop each placement for no node or stub, move each
 /// non-finite position to the origin, place each node or stub that has no
 /// placement at the origin, repair the ties, and drop each selection entry
-/// the view does not hold.
-fn repair_view(main_view: &mut GraphView, graph: &CoreGraph, repairs: &mut Vec<DocumentRepair>) {
-    if !main_view.viewport.is_valid() {
-        main_view.viewport = Viewport::default();
-        repairs.push(DocumentRepair::ViewportReset);
+/// the view does not hold: `view` of `graph`, which `held` is.
+fn repair_view(
+    graph: GraphId,
+    view: &mut GraphView,
+    held: &CoreGraph,
+    repairs: &mut Vec<DocumentRepair>,
+) {
+    let mut push = |repair| repairs.push(DocumentRepair::View { graph, repair });
+    if !view.viewport.is_valid() {
+        view.viewport = Viewport::default();
+        push(ViewRepair::ViewportReset);
     }
-    let placements = &mut main_view.node_placements;
+    let placements = &mut view.node_placements;
     placements.retain(|&node_id, _| {
-        let held = graph.holds(node_id);
-        if !held {
-            repairs.push(DocumentRepair::PlacementDropped { node_id });
+        let kept = held.holds(node_id);
+        if !kept {
+            push(ViewRepair::PlacementDropped { node_id });
         }
-        held
+        kept
     });
     for (&node_id, placement) in placements.iter_mut() {
         if !placement.pos.is_finite() {
             placement.pos = Vec2::ZERO;
-            repairs.push(DocumentRepair::PosReset { node_id });
+            push(ViewRepair::PosReset { node_id });
         }
     }
-    let mut unplaced: Vec<NodeId> = graph
+    let mut unplaced: Vec<NodeId> = held
         .iter()
         .map(|node| node.node_id)
-        .chain(graph.stubs().map(Stub::node_id))
+        .chain(held.stubs().map(Stub::node_id))
         .filter(|node_id| !placements.contains_key(node_id))
         .collect();
     unplaced.sort_unstable();
     for node_id in unplaced {
         placements.insert(node_id, NodePlacement::default());
-        repairs.push(DocumentRepair::Placed { node_id });
+        push(ViewRepair::Placed { node_id });
     }
-    repair_ties(main_view, graph, repairs);
-    let mut selected = std::mem::take(&mut main_view.selected);
+    repair_ties(view, held, &mut push);
+    let mut selected = mem::take(&mut view.selected);
     selected.retain(|&item| {
-        let held = main_view.holds(item);
-        if !held {
-            repairs.push(DocumentRepair::SelectionDropped { item });
+        let kept = view.holds(item);
+        if !kept {
+            push(ViewRepair::SelectionDropped { item });
         }
-        held
+        kept
     });
-    main_view.selected = selected;
+    view.selected = selected;
 }
 
 /// Drop each route to a wire the graph does not hold, each step to no tie
 /// and each repeat of a step, and each route left with no step; then drop
 /// each tie no route names, move each non-finite tie to the origin, and free
 /// each pinned angle outside `[0, 360)`.
-fn repair_ties(main_view: &mut GraphView, graph: &CoreGraph, repairs: &mut Vec<DocumentRepair>) {
-    let GraphView { ties, routes, .. } = main_view;
+fn repair_ties(view: &mut GraphView, held: &CoreGraph, push: &mut impl FnMut(ViewRepair)) {
+    let GraphView { ties, routes, .. } = view;
     routes.retain(|&wire, route| {
-        if !wire.is_held_by(graph) {
-            repairs.push(DocumentRepair::RouteDropped { wire });
+        if !wire.is_held_by(held) {
+            push(ViewRepair::RouteDropped { wire });
             return false;
         }
         let mut steps: Vec<TieId> = Vec::with_capacity(route.iter().len());
         for &tie in route.iter() {
             if !ties.contains_key(&tie) {
-                repairs.push(DocumentRepair::RouteStepDropped { wire, tie });
+                push(ViewRepair::RouteStepDropped { wire, tie });
             } else if steps.contains(&tie) {
-                repairs.push(DocumentRepair::RouteStepRepeated { wire, tie });
+                push(ViewRepair::RouteStepRepeated { wire, tie });
             } else {
                 steps.push(tie);
             }
         }
         if steps.is_empty() {
-            repairs.push(DocumentRepair::EmptyRouteDropped { wire });
+            push(ViewRepair::EmptyRouteDropped { wire });
             return false;
         }
         if steps.len() != route.iter().len() {
@@ -369,49 +464,35 @@ fn repair_ties(main_view: &mut GraphView, graph: &CoreGraph, repairs: &mut Vec<D
     let routed: BTreeSet<TieId> = routes.values().flatten().copied().collect();
     ties.retain(|&tie, placed| {
         if !routed.contains(&tie) {
-            repairs.push(DocumentRepair::TieDropped { tie });
+            push(ViewRepair::TieDropped { tie });
             return false;
         }
         if !placed.pos.is_finite() {
             placed.pos = Vec2::ZERO;
-            repairs.push(DocumentRepair::TiePosReset { tie });
+            push(ViewRepair::TiePosReset { tie });
         }
         if !placed.angle.is_valid() {
             placed.angle = TieAngle::Auto;
-            repairs.push(DocumentRepair::TieAngleFreed { tie });
+            push(ViewRepair::TieAngleFreed { tie });
         }
         true
     });
 }
 
-/// Close each viewer on a node that is no preview node in the graph, and each inspector on a
-/// node the graph does not hold.
-fn repair_layout(
-    layout: &mut DockState<TabRef>,
-    graph: &CoreGraph,
-    repairs: &mut Vec<DocumentRepair>,
-) {
-    let stale: Vec<(TabRef, DocumentRepair)> = layout
-        .all_tabs()
-        .filter_map(|tab| {
-            let repair = match tab {
-                TabRef::ImageViewer(program_id) => (!program_id.path().is_main()
-                    || !is_preview_node(graph, program_id.node_id()))
-                .then_some(DocumentRepair::ViewerClosed { program_id }),
-                TabRef::Inspector(InspectTarget::Node(node_id)) => graph
-                    .find(node_id)
-                    .is_none()
-                    .then_some(DocumentRepair::InspectorClosed { node_id }),
-                TabRef::Graph
-                | TabRef::Preferences
-                | TabRef::Inspector(InspectTarget::Selection) => None,
-            }?;
-            Some((tab, repair))
-        })
-        .collect();
-    if !stale.is_empty() {
-        layout.retain_tabs(|tab| stale.iter().all(|(closed, _)| *closed != tab));
-        repairs.extend(stale.into_iter().map(|(_, repair)| repair));
+/// The repair a load reports for closing `tab`, which the document does not hold: a viewer on a
+/// node that is no preview node, or an inspector pinned to a node the graph does not hold.
+///
+/// # Panics
+/// For a tab the document always holds.
+fn closed_tab_repair(tab: TabRef) -> DocumentRepair {
+    match tab {
+        TabRef::ImageViewer(program_id) => DocumentRepair::ViewerClosed { program_id },
+        TabRef::Inspector(InspectTarget::Node(node_id)) => {
+            DocumentRepair::InspectorClosed { node_id }
+        }
+        TabRef::Graph | TabRef::Preferences | TabRef::Inspector(InspectTarget::Selection) => {
+            unreachable!("the document always holds {tab:?}")
+        }
     }
 }
 

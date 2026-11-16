@@ -3,20 +3,20 @@ use std::collections::BTreeSet;
 use glam::Vec2;
 use scenarium::internals::test_graph::TestGraph;
 use scenarium::{
-    Binding, BindingEntry, BindingRejection, CacheMode, ConstValue, DataType, DetachedNodeError,
-    EventPort, FuncId, InputDecl, InputPort, Interface, Library, Node, NodeId, OutputDecl,
-    OutputPort, Ports, ProgramShape, Subgraph, SubgraphId, Subscription, SubscriptionRejection,
-    Unresolved, internals, numbered_port,
+    Binding, BindingEntry, BindingRejection, Boundary, CacheMode, ConstValue, DataType,
+    DetachedNodeError, EventPort, FuncId, GraphId, InputDecl, InputPort, Interface, Library, Node,
+    NodeId, OutputDecl, OutputPort, Ports, ProgramShape, Subgraph, SubgraphId, Subscription,
+    SubscriptionRejection, Unresolved, internals, numbered_port,
 };
 
 use crate::core::document::Document;
-use crate::core::document::internals::DocumentFixture;
+use crate::core::document::internals::{DocumentFixture, insert_subgraph};
 use crate::core::document::item_id::ItemId;
 use crate::core::document::route::Route;
 use crate::core::document::tie::{Tie, TieAngle, TieId};
 use crate::core::document::viewport::Viewport;
 use crate::core::document::wire_key::{DataWire, WireKey};
-use crate::core::edit::edit_facts::EditFacts;
+use crate::core::edit::edit_facts::{EditFacts, Touched};
 use crate::core::edit::error::{MalformedIntent, Role};
 use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::graph_intent::click_mode::ClickMode;
@@ -25,7 +25,16 @@ use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
 use crate::core::edit::graph_intent::node_property::NodeProperty;
 use crate::core::edit::graph_intent::route_insert::RouteInsert;
 use crate::core::edit::graph_intent::{DUPLICATE_OFFSET, GraphIntent};
+use crate::core::edit::step::graph_step::GraphStep;
 use crate::core::edit::step::undo_step::UndoStep;
+
+/// The facts of an edit of the main graph that changes no shape.
+fn main_touched() -> EditFacts {
+    EditFacts {
+        touched: Touched::Graph(GraphId::Main),
+        ..EditFacts::NONE
+    }
+}
 
 /// A duplicate's id source in a test: the next of a run of ids no fixture mints.
 fn counter() -> impl FnMut() -> u128 {
@@ -63,7 +72,7 @@ fn commit_all(
     let mut steps = Vec::new();
     for intent in intents {
         intent
-            .commit(document, library, &mut steps)
+            .commit(document, GraphId::Main, library, &mut steps)
             .expect("the batch is well formed");
     }
     steps
@@ -306,7 +315,13 @@ fn a_wire_that_goes_leaves_its_input_on_its_default() {
 
     wire_both(&mut document);
     document.main_view.selected = [node].map(ItemId::Node).into_iter().collect();
-    let intents = GraphIntent::duplicate(&document, &library, IncomingWires::Drop, counter());
+    let intents = GraphIntent::duplicate(
+        &document,
+        GraphId::Main,
+        &library,
+        IncomingWires::Drop,
+        counter(),
+    );
     let copy = commit_all(&mut document, &library, intents);
     let clone = document
         .main_view
@@ -333,7 +348,19 @@ fn a_wire_that_goes_leaves_its_input_on_its_default() {
         [GraphIntent::RemoveNode { node_id: producer }],
     );
     assert!(
-        matches!(removal.as_slice(), [UndoStep::Node(_), UndoStep::Input(_)]),
+        matches!(
+            removal.as_slice(),
+            [
+                UndoStep::Graph {
+                    step: GraphStep::Node(_),
+                    ..
+                },
+                UndoStep::Graph {
+                    step: GraphStep::Input(_),
+                    ..
+                },
+            ]
+        ),
         "the removal, then the one input with a default taking it back: {removal:?}"
     );
     assert_eq!(bindings(&document), [seven(), None]);
@@ -416,7 +443,13 @@ fn duplicate_skips_a_selected_stub() {
     } = fixture;
     document.main_view.selected = [node, stub].map(ItemId::Node).into_iter().collect();
 
-    let intents = GraphIntent::duplicate(&document, &library, IncomingWires::Drop, counter());
+    let intents = GraphIntent::duplicate(
+        &document,
+        GraphId::Main,
+        &library,
+        IncomingWires::Drop,
+        counter(),
+    );
     commit_all(&mut document, &library, intents);
     assert_eq!(document.graphs.main().len(), 2, "the graph node was copied");
     assert_eq!(document.graphs.main().stubs().len(), 1, "the stub was not");
@@ -425,6 +458,77 @@ fn duplicate_skips_a_selected_stub() {
         .expect("a duplicate leaves a valid document");
 }
 
+/// Inside a subgraph an edit passes over its boundary nodes: a removal of one commits nothing,
+/// and a duplicate of a selection that holds both copies only the node beside them. An instance
+/// of the subgraph adds nothing inside itself, as it would place the subgraph in itself, and is
+/// taken in the main graph.
+#[test]
+fn an_edit_inside_a_subgraph_passes_over_its_boundary_nodes() {
+    let mut fixture = DocumentFixture::default();
+    let id = SubgraphId::from_u128(1);
+    let mut subgraph = Subgraph::new("inner", Interface::default());
+    let inside = subgraph.graph.add(fixture.plain_node());
+    let inputs = subgraph.boundary_node(Boundary::Inputs);
+    let outputs = subgraph.boundary_node(Boundary::Outputs);
+    insert_subgraph(&mut fixture.document, id, subgraph);
+    let DocumentFixture {
+        mut document,
+        library,
+    } = fixture;
+    let graph = GraphId::Subgraph(id);
+    let commit = |document: &mut Document, intent: GraphIntent| {
+        let mut steps = Vec::new();
+        intent
+            .commit(document, graph, &library, &mut steps)
+            .map(|()| steps)
+    };
+
+    for node_id in [inputs, outputs] {
+        let before = document.clone();
+        assert!(
+            commit(&mut document, GraphIntent::RemoveNode { node_id })
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(document, before, "{node_id:?} stays");
+    }
+    document.slot_mut(graph).view.selected = [inputs, outputs, inside]
+        .map(ItemId::Node)
+        .into_iter()
+        .collect();
+    let intents =
+        GraphIntent::duplicate(&document, graph, &library, IncomingWires::Drop, counter());
+    for intent in intents {
+        commit(&mut document, intent).unwrap();
+    }
+    let held = document.graphs.graph(graph);
+    assert_eq!(
+        held.len(),
+        4,
+        "the two boundary nodes, the node and its copy"
+    );
+    assert_eq!(
+        held.iter().filter(|node| node.boundary().is_some()).count(),
+        2
+    );
+
+    let instance = Node::instance(id, document.graphs.subgraph(id).unwrap());
+    let refused = GraphIntent::add_node(Vec2::ZERO, NodeId::from_u128(50), instance.clone());
+    assert!(
+        commit(&mut document, refused).unwrap().is_empty(),
+        "no subgraph inside itself"
+    );
+    let taken = GraphIntent::add_node(Vec2::ZERO, NodeId::from_u128(51), instance);
+    let mut steps = Vec::new();
+    taken
+        .commit(&mut document, GraphId::Main, &library, &mut steps)
+        .unwrap();
+    assert_eq!(steps.len(), 1);
+    assert!(document.graphs.main().find(NodeId::from_u128(51)).is_some());
+    document
+        .validate()
+        .expect("the edits leave a valid document");
+}
 /// A new node whose name is taken takes the next free number, through an add and through a
 /// duplicate alike: the fixture's node, its copy, then a copy of both.
 #[test]
@@ -461,7 +565,13 @@ fn a_new_node_takes_a_free_name() {
         .iter()
         .map(|node| ItemId::Node(node.node_id))
         .collect();
-    let intents = GraphIntent::duplicate(&document, &library, IncomingWires::Drop, counter());
+    let intents = GraphIntent::duplicate(
+        &document,
+        GraphId::Main,
+        &library,
+        IncomingWires::Drop,
+        counter(),
+    );
     commit_all(&mut document, &library, intents);
     assert_eq!(
         names(&document),
@@ -644,7 +754,13 @@ fn duplicate_clones_wiring_and_selects_the_copies() {
     } = crossing_wire();
     let originals: BTreeSet<NodeId> = [a, b, c].into_iter().collect();
 
-    let intents = GraphIntent::duplicate(&document, &library, IncomingWires::Drop, counter());
+    let intents = GraphIntent::duplicate(
+        &document,
+        GraphId::Main,
+        &library,
+        IncomingWires::Drop,
+        counter(),
+    );
     let steps = commit_all(&mut document, &library, intents);
     document
         .validate()
@@ -769,7 +885,13 @@ fn duplicate_keeps_external_producers_on_request() {
     } = crossing_wire();
     let originals: BTreeSet<NodeId> = [a, b, c].into_iter().collect();
 
-    let intents = GraphIntent::duplicate(&document, &library, IncomingWires::Keep, counter());
+    let intents = GraphIntent::duplicate(
+        &document,
+        GraphId::Main,
+        &library,
+        IncomingWires::Keep,
+        counter(),
+    );
     commit_all(&mut document, &library, intents);
     let b_clone = clone_of(&document, Vec2::new(100.0, 0.0), &originals);
     assert_eq!(
@@ -798,6 +920,7 @@ fn duplicate_of_nothing_asks_for_nothing() {
     assert!(
         GraphIntent::duplicate(
             &fixture.document,
+            GraphId::Main,
             &fixture.library,
             IncomingWires::Drop,
             counter()
@@ -1037,13 +1160,13 @@ fn an_add_past_a_placement_bound_adds_nothing() {
     for pair in ids.windows(2).rev() {
         let mut outer = empty();
         outer.graph.add(Node::instance(pair[1], &inner));
-        document.graphs.insert_subgraph(pair[1], inner);
+        insert_subgraph(&mut document, pair[1], inner);
         inner = outer;
     }
     let deepest_first = inner;
     let too_deep = Node::instance(ids[0], &deepest_first);
     let fits = Node::instance(ids[1], document.graphs.subgraph(ids[1]).unwrap());
-    document.graphs.insert_subgraph(ids[0], deepest_first);
+    insert_subgraph(&mut document, ids[0], deepest_first);
 
     let refused = NodeId::unique();
     assert!(
@@ -1052,7 +1175,7 @@ fn an_add_past_a_placement_bound_adds_nothing() {
             .unwrap()
             .is_none()
     );
-    assert!(!document.holds_node(refused));
+    assert!(!document.graphs.main().holds(refused));
     let added = NodeId::unique();
     assert!(
         GraphIntent::add_node(Vec2::ZERO, added, fits)
@@ -1060,7 +1183,7 @@ fn an_add_past_a_placement_bound_adds_nothing() {
             .unwrap()
             .is_some()
     );
-    assert!(document.holds_node(added));
+    assert!(document.graphs.main().holds(added));
 }
 
 #[test]
@@ -1095,7 +1218,7 @@ fn set_node_property_commits_and_reverts() {
         }
         assert_eq!(
             step.facts(),
-            EditFacts::NONE,
+            main_touched(),
             "a node-property toggle changes no shape"
         );
         step.revert(&mut document);
@@ -1121,27 +1244,39 @@ fn set_node_property_commits_and_reverts() {
             "{to:?} equals the current value → writes nothing"
         );
     }
-
-    // A node with no body caches nothing of its own, so a cache mode set on one is malformed.
-    let sub = SubgraphId::from_u128(1);
-    let subgraph = Subgraph::new("inner", Interface::new(Ports::default()));
-    let instance = document
-        .graphs
-        .main_mut()
-        .add(Node::instance(sub, &subgraph));
-    document.graphs.insert_subgraph(sub, subgraph);
-    let to = NodeProperty::RuntimeCache(CacheMode::Ram);
-    assert!(matches!(
-        GraphIntent::SetNodeProperty {
-            node_id: instance,
-            to
-        }
-        .commit_one(&mut document, &fixture.library),
-        Err(MalformedIntent::NoCacheMode { node_id }) if node_id == instance
-    ));
-    assert_eq!(document.graphs.main().find(instance).unwrap().cache(), None);
 }
 
+/// A node with no body, an instance or a boundary node, caches nothing of its own, so a cache
+/// mode set on one is malformed, while its disable flag is an ordinary edit.
+#[test]
+fn a_cache_mode_on_a_node_with_no_body_is_malformed() {
+    let mut fixture = DocumentFixture::default();
+    let node_id = NodeId::unique();
+    fixture
+        .document
+        .graphs
+        .main_mut()
+        .insert(node_id, Node::from(Boundary::Inputs));
+    let mut document = fixture.document;
+    assert_eq!(
+        GraphIntent::SetNodeProperty {
+            node_id,
+            to: NodeProperty::RuntimeCache(CacheMode::Ram),
+        }
+        .commit_one(&mut document, &fixture.library)
+        .unwrap_err(),
+        MalformedIntent::NoCacheMode { node_id }
+    );
+    assert!(
+        GraphIntent::SetNodeProperty {
+            node_id,
+            to: NodeProperty::Disabled(true),
+        }
+        .commit_one(&mut document, &fixture.library)
+        .unwrap()
+        .is_some()
+    );
+}
 #[test]
 fn commit_rejects_cycle_forming_bind() {
     // a → b (b's input 0 bound to a's output 0).
@@ -1493,7 +1628,11 @@ fn selection_and_move_drop_members_whose_widget_is_gone() {
     .commit_one(&mut document, &fixture.library)
     .unwrap()
     .expect("a selection with one live member commits");
-    let UndoStep::Selection(step) = &step else {
+    let UndoStep::Graph {
+        step: GraphStep::Selection(step),
+        ..
+    } = &step
+    else {
         panic!("expected a SetSelection step, got {step:?}");
     };
     let kept: BTreeSet<ItemId> = [ItemId::Node(live)].into_iter().collect();
@@ -1512,7 +1651,11 @@ fn selection_and_move_drop_members_whose_widget_is_gone() {
     .commit_one(&mut document, &fixture.library)
     .unwrap()
     .expect("a move with one live member commits");
-    let UndoStep::Positions(step) = &step else {
+    let UndoStep::Graph {
+        step: GraphStep::Positions(step),
+        ..
+    } = &step
+    else {
         panic!("expected a SetPositions step, got {step:?}");
     };
     assert_eq!(step.moves.len(), 1, "only the surviving member is recorded");
@@ -1870,9 +2013,13 @@ fn tie_edits_apply_and_revert() {
             .commit_one(&mut document, &library)
             .unwrap()
             .unwrap_or_else(|| panic!("{what}: no step"));
-        if let UndoStep::Ties(_) = step {
+        if let UndoStep::Graph {
+            step: GraphStep::Ties(_),
+            ..
+        } = step
+        {
             assert!(step.dirties_document(), "{what}");
-            assert_eq!(step.facts(), EditFacts::NONE, "{what}");
+            assert_eq!(step.facts(), main_touched(), "{what}");
         }
         check(&document);
         document
@@ -2266,7 +2413,13 @@ fn duplicate_takes_the_ties_inside_the_set() {
     document.validate().unwrap();
     let before = document.clone();
 
-    let intents = GraphIntent::duplicate(&document, &library, IncomingWires::Keep, counter());
+    let intents = GraphIntent::duplicate(
+        &document,
+        GraphId::Main,
+        &library,
+        IncomingWires::Keep,
+        counter(),
+    );
     let steps = commit_all(&mut document, &library, intents);
     document.validate().unwrap();
     let originals = BTreeSet::from([a, b, c]);

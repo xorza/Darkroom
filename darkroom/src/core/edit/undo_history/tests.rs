@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::rc::Rc;
 
 use glam::Vec2;
-use scenarium::{Library, NodeId, numbered_port};
+use scenarium::{GraphId, Library, NodeId, numbered_port};
 
 use super::*;
 use crate::core::document::internals::{self, DocumentFixture};
@@ -87,7 +87,7 @@ impl Harness {
     fn apply(&mut self, intent: GraphIntent, steps: &mut Vec<UndoStep>) {
         let committed = steps.len();
         intent
-            .commit(&mut self.document, &self.library, steps)
+            .commit(&mut self.document, GraphId::Main, &self.library, steps)
             .expect("the intent is well formed");
         assert!(steps.len() > committed, "a test commits every intent");
     }

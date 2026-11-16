@@ -1,6 +1,7 @@
 //! Dragging node bodies and ties across the canvas.
 
 use glam::Vec2;
+use scenarium::GraphId;
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::Document;
@@ -56,8 +57,8 @@ impl SetPositions {
 }
 
 impl Reversible for SetPositions {
-    fn write(&self, document: &mut Document, dir: Direction) {
-        let view = &mut document.main_view;
+    fn write(&self, document: &mut Document, graph: GraphId, dir: Direction) {
+        let view = document.slot_mut(graph).view;
         for moved in &self.moves {
             let pos = match moved.item {
                 ItemId::Node(node_id) => view.node_placements.get_mut(&node_id).map(|p| &mut p.pos),

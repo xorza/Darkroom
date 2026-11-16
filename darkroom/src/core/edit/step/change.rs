@@ -53,3 +53,21 @@ impl Direction {
         }
     }
 }
+
+/// Which way a step that moves a whole entry moves it when it applies:
+/// adding one and removing one are the same edit in opposite directions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum EntryEdit {
+    Insertion,
+    Removal,
+}
+
+impl EntryEdit {
+    /// Whether a write in `dir` puts the entry in, rather than taking it out.
+    pub(super) const fn puts_in(self, dir: Direction) -> bool {
+        matches!(
+            (self, dir),
+            (Self::Insertion, Direction::Forward) | (Self::Removal, Direction::Backward)
+        )
+    }
+}

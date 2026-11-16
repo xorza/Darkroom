@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use scenarium::GraphId;
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::Document;
@@ -68,8 +69,8 @@ impl SetTies {
 }
 
 impl Reversible for SetTies {
-    fn write(&self, document: &mut Document, dir: Direction) {
-        let view = &mut document.main_view;
+    fn write(&self, document: &mut Document, graph: GraphId, dir: Direction) {
+        let view = document.slot_mut(graph).view;
         for change in &self.routes {
             match change.route.half(dir) {
                 Some(route) => view.routes.insert(change.wire, route.clone()),

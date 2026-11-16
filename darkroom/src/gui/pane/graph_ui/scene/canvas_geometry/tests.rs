@@ -1,6 +1,6 @@
 use glam::Vec2;
 use palantir::PointerButton;
-use scenarium::{Binding, InputPort, numbered_port};
+use scenarium::{Binding, GraphId, InputPort, numbered_port};
 
 use crate::core::document::internals::DocumentFixture;
 use crate::gui::pane::graph_ui::internals::CanvasHarness;
@@ -73,7 +73,7 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
     // Now the document drops it for real, and the sweep runs against that document, as in
     // production. Read off `node_sizes` directly: `node_world_rect` resolves through a
     // `NodeCtx`, which a deleted node no longer has.
-    h.document_mut().remove_node(leaves);
+    h.document_mut().remove_node(GraphId::Main, leaves);
     h.graph_ui.retain_nodes(h.ctx.open.document());
     assert!(
         !h.graph_ui.geometry().node_sizes.contains_key(&leaves),

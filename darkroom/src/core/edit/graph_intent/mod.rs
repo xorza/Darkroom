@@ -3,7 +3,7 @@
 //! A [`GraphIntent`] is forward-only ("set X to Y", no history) and is the vocabulary every
 //! surface of the editor speaks. Turning one into something reversible is
 //! [`GraphIntent::into_step`]: it reads the state the intent overwrites out of a `&Document` and
-//! folds the two into an [`UndoStep`].
+//! folds the two into a [`GraphStep`].
 //!
 //! The two vocabularies are deliberately *not* parallel. Intents are named for what a user did,
 //! steps for what the document can take back, and the lowering between them may expand one into
@@ -46,6 +46,7 @@ use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
 use crate::core::edit::graph_intent::node_property::NodeProperty;
 use crate::core::edit::graph_intent::route_insert::RouteInsert;
 use crate::core::edit::step::change::Change;
+use crate::core::edit::step::graph_step::GraphStep;
 use crate::core::edit::step::set_depth::SetDepth;
 use crate::core::edit::step::set_input::SetInput;
 use crate::core::edit::step::set_node::{NodeEntry, SetNode};
@@ -211,27 +212,28 @@ impl GraphIntent {
         }
     }
 
-    /// Clone `document`'s current selection: each node gets a fresh id and an offset position,
-    /// const-value bindings copy verbatim, the data and event wires *among* the selected nodes
-    /// are recreated against the clones with the ties inside them, and the copies end up
-    /// selected. A wire whose source is *outside* the selection, a data wire or an event
+    /// Clone the selection of `graph` of `document`: each node gets a fresh id and an offset
+    /// position, const-value bindings copy verbatim, the data and event wires *among* the
+    /// selected nodes are recreated against the clones with the ties inside them, and the copies
+    /// end up selected. A wire whose source is *outside* the selection, a data wire or an event
     /// subscription, goes as `incoming` says: dropped, leaving a data input's declared default as
     /// a wire removed on its own does ([`unwired::binding`]), or kept on the original external
     /// producer or emitter. Each clone and tie clone takes its id from `fresh`, a random one in
     /// the editor, a counter in a test. Empty when nothing is selected. A selected stub is
-    /// skipped: a copy of a node that cannot run has little use.
+    /// skipped, as a copy of a node that cannot run has little use, and so is a boundary node.
     ///
     /// A list rather than an intent of its own: duplicating is an editor command built out of the
     /// vocabulary. The whole list is queued in one frame, so it commits as one undo entry. The
     /// internal edges come out after the nodes: every clone exists before anything binds to one.
     pub(crate) fn duplicate(
         document: &Document,
+        graph: GraphId,
         library: &Library,
         incoming: IncomingWires,
         mut fresh: impl FnMut() -> u128,
     ) -> Vec<Self> {
-        let (graph, view) = (document.graphs.main(), &document.main_view);
-        let scope = document.graphs.scope(library, GraphId::Main);
+        let scope = document.graphs.scope(library, graph);
+        let (graph, view) = (document.graphs.graph(graph), document.view(graph));
         // An edge is only recognisable as internal once both endpoints have a fresh id, so
         // resolve the whole set first, in selection order.
         let mut clones: HashMap<NodeId, NodeId> = HashMap::with_capacity(view.selected.len());
@@ -243,6 +245,10 @@ impl GraphIntent {
             let node = graph
                 .find(old_id)
                 .expect("a selected node is a graph node or a stub");
+            // A subgraph holds one boundary node a side, and a wire from one comes from outside.
+            if node.boundary().is_some() {
+                continue;
+            }
             let new_id = NodeId::from_u128(fresh());
             clones.insert(old_id, new_id);
             sources.push((old_id, new_id, node));
@@ -395,8 +401,8 @@ impl GraphIntent {
         })
     }
 
-    /// Read the state this intent overwrites out of `document` and fold the two into a complete
-    /// [`UndoStep`]. Pure: does not write to the graph.
+    /// Read the state this intent overwrites out of `graph` of `document` and fold the two into a
+    /// complete [`GraphStep`]. Pure: does not write to the document.
     ///
     /// This is the only gate between a caller and the document, so each arm establishes the full
     /// precondition set the step's `write` half assumes: an `Ok` result proves replaying the step
@@ -410,10 +416,11 @@ impl GraphIntent {
     fn into_step(
         self,
         document: &Document,
+        graph_id: GraphId,
         library: &Library,
-    ) -> Result<Option<UndoStep>, MalformedIntent> {
-        let (graph, view) = (document.graphs.main(), &document.main_view);
-        let scope = document.graphs.scope(library, GraphId::Main);
+    ) -> Result<Option<GraphStep>, MalformedIntent> {
+        let (graph, view) = (document.graphs.graph(graph_id), document.view(graph_id));
+        let scope = document.graphs.scope(library, graph_id);
         let step = match self {
             Self::AddNode {
                 pos,
@@ -421,12 +428,13 @@ impl GraphIntent {
                 node,
                 bindings,
             } => {
-                validate::fresh_node_id(document, node_id)?;
+                validate::fresh_node_id(graph, node_id)?;
                 validate::finite_pos(pos, Role::AddNode)?;
                 let decl = validate::resolving_node(scope, &node)?;
-                // An instance that would take the main graph past a placement bound is refused by
-                // design, as a cycle-forming bind is: the compile expands only a set within them.
-                if document.graphs.admit_nodes(GraphId::Main, [&node]).is_err() {
+                // An instance that places a subgraph inside itself, or one that takes a graph past
+                // a bound, is refused by design, as a cycle-forming bind is: the compile expands
+                // only a set within them.
+                if document.graphs.admit_nodes(graph_id, [&node]).is_err() {
                     return Ok(None);
                 }
                 validate::seed_bindings(
@@ -452,16 +460,24 @@ impl GraphIntent {
                     bindings,
                     subscriptions: Vec::new(),
                 })?;
-                UndoStep::Node(Box::new(SetNode::insertion(detached, placement)))
+                GraphStep::Node(Box::new(SetNode::insertion(detached, placement)))
             }
             Self::RemoveNode { node_id } => {
                 validate::non_nil_node(node_id, Role::RemoveNode)?;
-                let Some(entry) = NodeEntry::capture(document, node_id) else {
+                // A subgraph keeps one boundary node a side, so its removal is refused by design;
+                // a selection that holds one deletes the rest.
+                if graph
+                    .find(node_id)
+                    .is_some_and(|node| node.boundary().is_some())
+                {
+                    return Ok(None);
+                }
+                let Some(entry) = NodeEntry::capture(document, graph_id, node_id) else {
                     return Ok(None);
                 };
                 let mut ties = TiesDraft::new(view);
                 ties.release(entry.wires());
-                UndoStep::Node(Box::new(SetNode::removal(entry, ties.finish())))
+                GraphStep::Node(Box::new(SetNode::removal(entry, ties.finish())))
             }
             Self::MoveSelection {
                 members, offset, ..
@@ -479,13 +495,13 @@ impl GraphIntent {
                         pos: Change { from, to },
                     });
                 }
-                UndoStep::Positions(SetPositions { moves })
+                GraphStep::Positions(SetPositions { moves })
             }
             Self::RenameNode { node_id, to } => {
                 let Some(node) = validate::live_node(graph, node_id, Role::RenameNode)? else {
                     return Ok(None);
                 };
-                UndoStep::NodeName(SetNodeName {
+                GraphStep::NodeName(SetNodeName {
                     node_id,
                     name: Change {
                         from: node.name.clone(),
@@ -534,7 +550,7 @@ impl GraphIntent {
                 {
                     ties.release([WireKey::Data(DataWire { output, input })]);
                 }
-                UndoStep::Input(SetInput {
+                GraphStep::Input(SetInput {
                     input,
                     binding: Change { from, to },
                     ties: ties.finish(),
@@ -545,7 +561,7 @@ impl GraphIntent {
                 // remove one before release; keep only members the view still holds.
                 let to: BTreeSet<ItemId> =
                     to.into_iter().filter(|&item| view.holds(item)).collect();
-                UndoStep::Selection(SetSelection {
+                GraphStep::Selection(SetSelection {
                     toggled: view.selected.symmetric_difference(&to).copied().collect(),
                 })
             }
@@ -556,7 +572,7 @@ impl GraphIntent {
                 else {
                     return Ok(None);
                 };
-                UndoStep::Depth(SetDepth {
+                GraphStep::Depth(SetDepth {
                     node_id,
                     z: Change {
                         from: placement.z,
@@ -580,7 +596,7 @@ impl GraphIntent {
                         to,
                     }),
                 };
-                UndoStep::NodeProperty(SetNodeProperty { node_id, property })
+                GraphStep::NodeProperty(SetNodeProperty { node_id, property })
             }
             Self::SetViewport { .. } => {
                 unreachable!("`commit` writes the camera, which no step records")
@@ -610,7 +626,7 @@ impl GraphIntent {
                 if from && !subscribe {
                     ties.release([WireKey::Event(subscription)]);
                 }
-                UndoStep::Subscription(SetSubscription {
+                GraphStep::Subscription(SetSubscription {
                     subscription,
                     subscribed: Change {
                         from,
@@ -637,7 +653,7 @@ impl GraphIntent {
                     }),
                 );
                 insert_routes(graph, &mut ties, tie, &wires)?;
-                UndoStep::Ties(ties.finish())
+                GraphStep::Ties(ties.finish())
             }
             // A tie gone since the gesture started is stale: no step.
             Self::JoinTie { tie, wires } => {
@@ -647,7 +663,7 @@ impl GraphIntent {
                 }
                 let mut ties = TiesDraft::new(view);
                 insert_routes(graph, &mut ties, tie, &wires)?;
-                UndoStep::Ties(ties.finish())
+                GraphStep::Ties(ties.finish())
             }
             Self::RemoveTie { tie } => {
                 validate::non_nil_tie(tie, Role::RemoveTie)?;
@@ -656,7 +672,7 @@ impl GraphIntent {
                 }
                 let mut ties = TiesDraft::new(view);
                 ties.remove_tie(tie);
-                UndoStep::Ties(ties.finish())
+                GraphStep::Ties(ties.finish())
             }
             Self::SetTieAngle { tie, angle, .. } => {
                 validate::non_nil_tie(tie, Role::SetTieAngle)?;
@@ -670,7 +686,7 @@ impl GraphIntent {
                 };
                 let mut ties = TiesDraft::new(view);
                 ties.set_tie(tie, Some(Tie { angle, ..placed }));
-                UndoStep::Ties(ties.finish())
+                GraphStep::Ties(ties.finish())
             }
             // A menu stays open across frames, so the wire may have left the
             // tie since it opened.
@@ -685,7 +701,7 @@ impl GraphIntent {
                 }
                 let mut ties = TiesDraft::new(view);
                 ties.leave(wire, tie);
-                UndoStep::Ties(ties.finish())
+                GraphStep::Ties(ties.finish())
             }
         };
         Ok(Some(step))
@@ -700,8 +716,8 @@ impl GraphIntent {
         }
     }
 
-    /// Build, no-op-filter, and apply one intent against `document`: the entry every frontend
-    /// drives its per-intent loop through.
+    /// Build, no-op-filter, and apply one intent against `graph` of `document`: the entry every
+    /// frontend drives its per-intent loop through.
     ///
     /// Pushes each committed [`UndoStep`] onto `steps`, in the order applied: none when nothing
     /// came of the intent (a stale anchor, a cycle-forming bind, or a no-op). A node's removal is
@@ -713,6 +729,7 @@ impl GraphIntent {
     pub(crate) fn commit(
         self,
         document: &mut Document,
+        graph: GraphId,
         library: &Library,
         steps: &mut Vec<UndoStep>,
     ) -> Result<(), MalformedIntent> {
@@ -720,32 +737,33 @@ impl GraphIntent {
             if !to.is_valid() {
                 return Err(MalformedIntent::InvalidViewport);
             }
-            document.main_view.viewport = to;
+            document.slot_mut(graph).view.viewport = to;
             return Ok(());
         }
-        let Some(step) = self.into_step(document, library)? else {
+        let Some(step) = self.into_step(document, graph, library)? else {
             return Ok(());
         };
+        // Read off the removal's own record, which captured every wire it ends.
+        let fed: Vec<InputPort> = match &step {
+            GraphStep::Node(node) => node.fed_inputs().collect(),
+            _ => Vec::new(),
+        };
+        let step = UndoStep::Graph { graph, step };
         if step.is_noop() {
             return Ok(());
         }
-        // Read off the removal's own record, which captured every wire it ends.
-        let fed: Vec<InputPort> = match &step {
-            UndoStep::Node(node) => node.fed_inputs().collect(),
-            _ => Vec::new(),
-        };
         step.apply(document);
         steps.push(step);
         for input in fed {
             let graphs = &document.graphs;
             if let Some(to) =
-                unwired::binding(graphs.main(), graphs.scope(library, GraphId::Main), input)
+                unwired::binding(graphs.graph(graph), graphs.scope(library, graph), input)
             {
                 Self::SetInput {
                     input,
                     to: Some(to),
                 }
-                .commit(document, library, steps)?;
+                .commit(document, graph, library, steps)?;
             }
         }
         Ok(())
@@ -804,7 +822,7 @@ fn insert_routes(
 #[cfg(test)]
 pub(crate) mod internals {
     use glam::Vec2;
-    use scenarium::{Library, Node, NodeId};
+    use scenarium::{GraphId, Library, Node, NodeId};
 
     use crate::core::document::Document;
     use crate::core::edit::error::MalformedIntent;
@@ -812,14 +830,14 @@ pub(crate) mod internals {
     use crate::core::edit::step::undo_step::UndoStep;
 
     impl GraphIntent {
-        /// [`Self::commit`] of an intent that commits at most one step.
+        /// [`Self::commit`] on the main graph of an intent that commits at most one step.
         pub(crate) fn commit_one(
             self,
             document: &mut Document,
             library: &Library,
         ) -> Result<Option<UndoStep>, MalformedIntent> {
             let mut steps = Vec::new();
-            self.commit(document, library, &mut steps)?;
+            self.commit(document, GraphId::Main, library, &mut steps)?;
             assert!(steps.len() <= 1, "the intent committed {steps:?}");
             Ok(steps.pop())
         }

@@ -9,7 +9,7 @@ use common::ErrorChain;
 use lens::MlModelPaths;
 use scenarium::DiskStore;
 use scenarium::{CompiledGraph, Compiler, DynamicValue, WorkerExited, WorkerReport};
-use scenarium::{GraphSet, ProgramId};
+use scenarium::{GraphSet, NodeAddr, ProgramId};
 
 use crate::core::io::cache;
 use crate::core::runtime_host::error::NoCompiledWork;
@@ -69,6 +69,14 @@ impl CacheRootChange {
             _ => Self::Repointed,
         }
     }
+}
+
+/// A compile and the program nodes of one authored node it holds work for, one per instance:
+/// what an eviction or a flush of that node sends.
+#[derive(Debug)]
+struct NodeWork {
+    compiled: Arc<CompiledGraph>,
+    program_ids: Vec<ProgramId>,
 }
 
 impl RuntimeHost {
@@ -220,39 +228,71 @@ impl RuntimeHost {
     }
 
     /// Compile the current graph and atomically install it with a runtime-cache eviction for
-    /// `program_id` and its compiled downstream cone.
+    /// every program node of the authored node `addr` — one per instance of its graph — and
+    /// their compiled downstream cone.
     ///
     /// Answers with the nodes that eviction reaches, resolved against the very artifact it
     /// installs, so a caller drops exactly what the worker drops. The cone is a pure function of
     /// the artifact, and a successful eviction is fire-and-forget (the worker reports only
     /// failures), so no reply is read. Nothing reaches the worker when the program holds no work
-    /// for `program_id`, as for [`Self::run_node`].
+    /// for `addr`, as for [`Self::run_node`].
     pub(crate) fn evict_cache(
         &mut self,
         graphs: &GraphSet,
-        program_id: ProgramId,
+        addr: NodeAddr,
     ) -> Result<Vec<ProgramId>, NoCompiledWork> {
-        let compiled = self.compiled_for(graphs, program_id)?;
-        let evicted = compiled.consumer_cone([program_id]);
-        self.dispatch(|worker| worker.install_and_evict_cache(compiled, program_id));
+        let NodeWork {
+            compiled,
+            program_ids,
+        } = self.compiled_for_node(graphs, addr)?;
+        let evicted = compiled.consumer_cone(program_ids.iter().copied());
+        self.dispatch(|worker| worker.install_and_evict_cache(compiled, program_ids));
         Ok(evicted)
     }
 
-    /// Compile the current graph and atomically install it with a request to persist `program_id`'s
-    /// resident value, which a node needs the moment its cache mode gains the disk bit, since a
-    /// run that reuses the RAM value never publishes a blob.
+    /// Compile the current graph and atomically install it with a request to persist the
+    /// resident value of every program node of the authored node `addr`, which a node needs the
+    /// moment its cache mode gains the disk bit, since a run that reuses the RAM value never
+    /// publishes a blob. Every instance, as the cache mode is the authored node's.
     ///
     /// The install travels with it because the worker reads the cache mode off the installed
     /// program, still the pre-edit one here. Nothing reaches the worker when the program holds no
-    /// work for `program_id`.
+    /// work for `addr`.
     pub(crate) fn flush_cache(
         &mut self,
         graphs: &GraphSet,
-        program_id: ProgramId,
+        addr: NodeAddr,
     ) -> Result<(), NoCompiledWork> {
-        let compiled = self.compiled_for(graphs, program_id)?;
-        self.dispatch(|worker| worker.install_and_flush_cache(compiled, program_id));
+        let NodeWork {
+            compiled,
+            program_ids,
+        } = self.compiled_for_node(graphs, addr)?;
+        self.dispatch(|worker| worker.install_and_flush_cache(compiled, program_ids));
         Ok(())
+    }
+
+    /// Compile `graphs`, and name each program node of the authored node `addr` it holds work
+    /// for, refusing when it holds none.
+    fn compiled_for_node(
+        &mut self,
+        graphs: &GraphSet,
+        addr: NodeAddr,
+    ) -> Result<NodeWork, NoCompiledWork> {
+        let compiled = self.compile(graphs);
+        let program_ids: Vec<ProgramId> = graphs
+            .instances(addr.graph)
+            .into_iter()
+            .map(|path| path.node(addr.node_id))
+            .filter(|&program_id| compiled.contains(program_id))
+            .collect();
+        if program_ids.is_empty() {
+            Err(NoCompiledWork)
+        } else {
+            Ok(NodeWork {
+                compiled,
+                program_ids,
+            })
+        }
     }
 
     /// Request cancellation of the in-flight run: coarse, the running node finishes and nothing

@@ -26,7 +26,7 @@ use crate::gui::frame::stage::Stage;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::main_window::MainWindow;
 use palantir::{Shortcut, Ui};
-use scenarium::{GraphSet, Library};
+use scenarium::{GraphId, GraphSet, Library};
 
 use crate::gui::frame::app_ctx::AppCtx;
 use crate::gui::frame::shortcuts;
@@ -103,14 +103,15 @@ impl Session {
         requests.owe_relayout_after(facts);
     }
 
-    /// Apply one edit outside the frame's drain, as a blocking dialog's answer is.
+    /// Apply one edit of the main graph outside the frame's drain, as a blocking dialog's answer
+    /// is.
     pub(crate) fn apply_edit(
         &mut self,
         intent: GraphIntent,
         library: &Library,
         requests: &mut Requests,
     ) {
-        requests.owe_relayout_after(self.open.apply_edit(intent, library));
+        requests.owe_relayout_after(self.open.apply_edit(GraphId::Main, intent, library));
     }
 
     /// Take back the last edit.

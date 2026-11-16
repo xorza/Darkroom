@@ -2,12 +2,11 @@ use std::sync::Arc;
 
 use palantir::DockOperation;
 use scenarium::{
-    Binding, EventPort, InputPort, Interface, OutputPort, Ports, Subgraph, SubgraphId,
-    numbered_port,
+    Binding, EventPort, InputPort, Interface, OutputPort, Ports, Subgraph, numbered_port,
 };
 
 use super::*;
-use crate::core::document::internals::DocumentFixture;
+use crate::core::document::internals::{DocumentFixture, insert_subgraph};
 use crate::core::document::tie::Tie;
 use crate::core::document::wire_key::{DataWire, WireKey};
 
@@ -27,9 +26,12 @@ fn node_liveness_is_one_rule_with_two_declared_narrowings() {
     let plain = fixture.stub_at(Vec2::ZERO);
     let mut document = fixture.document;
 
-    // The shared rule answers for a graph node and a stub alike.
+    // The graph answers for a node and a stub alike.
     for node in [preview, plain] {
-        assert!(document.holds_node(node), "the document holds {node:?}");
+        assert!(
+            document.graphs.main().holds(node),
+            "the graph holds {node:?}"
+        );
     }
     let (preview_program, plain_program) = (ProgramId::from(preview), ProgramId::from(plain));
     assert!(document.holds_preview_node(preview_program));
@@ -53,7 +55,10 @@ fn node_liveness_is_one_rule_with_two_declared_narrowings() {
     assert!(document.holds_tab(TabRef::Preferences));
 
     document.graphs.main_mut().detach_node(preview);
-    assert!(!document.holds_node(preview), "the rule says gone");
+    assert!(
+        !document.graphs.main().holds(preview),
+        "the graph says gone"
+    );
     assert!(
         !document.holds_preview_node(preview_program),
         "and so does the narrowing"
@@ -63,7 +68,7 @@ fn node_liveness_is_one_rule_with_two_declared_narrowings() {
         "and so does the tab lift"
     );
     assert!(
-        document.holds_node(plain),
+        document.graphs.main().holds(plain),
         "the surviving node is untouched"
     );
 }
@@ -88,7 +93,7 @@ fn removing_a_node_closes_its_viewer_and_its_pinned_inspector() {
         .validate()
         .expect("each tab names a node the graph holds");
 
-    document.remove_node(node_id);
+    document.remove_node(GraphId::Main, node_id);
     let open: Vec<TabRef> = document
         .layout
         .all_tabs()
@@ -131,8 +136,9 @@ fn reconcile_closes_a_viewer_whose_path_leaves_the_main_graph() {
 
 /// The load repairs the view and the layout around the graph, in order,
 /// and reports each repair: a bad viewport resets, a placement for no node
-/// goes, a non-finite position and a missing placement go to the origin, and
-/// a viewer on a node that is no preview node closes. A selected node that
+/// goes, a non-finite position and a missing placement go to the origin, a
+/// viewer on a node that is no preview node closes, and so does an inspector
+/// pinned to a node the graph does not hold. A selected node that
 /// lacked a placement stays selected, as it is placed first.
 #[test]
 fn reconcile_repairs_the_view_and_the_layout() {
@@ -157,18 +163,34 @@ fn reconcile_repairs_the_view_and_the_layout() {
     document.layout.apply(DockOperation::OpenTab {
         tab: TabRef::ImageViewer(ProgramId::from(shown)),
     });
+    document.layout.apply(DockOperation::OpenTab {
+        tab: TabRef::Inspector(InspectTarget::Node(ghost)),
+    });
 
     let report = document.reconcile(&library);
     assert_eq!(
         report.repairs,
         [
-            DocumentRepair::ViewportReset,
-            DocumentRepair::PlacementDropped { node_id: ghost },
-            DocumentRepair::PosReset { node_id: shown },
-            DocumentRepair::Placed { node_id: unplaced },
+            DocumentRepair::View {
+                graph: GraphId::Main,
+                repair: ViewRepair::ViewportReset,
+            },
+            DocumentRepair::View {
+                graph: GraphId::Main,
+                repair: ViewRepair::PlacementDropped { node_id: ghost }
+            },
+            DocumentRepair::View {
+                graph: GraphId::Main,
+                repair: ViewRepair::PosReset { node_id: shown }
+            },
+            DocumentRepair::View {
+                graph: GraphId::Main,
+                repair: ViewRepair::Placed { node_id: unplaced }
+            },
             DocumentRepair::ViewerClosed {
                 program_id: ProgramId::from(shown),
             },
+            DocumentRepair::InspectorClosed { node_id: ghost },
         ]
     );
     assert_eq!(document.main_view.node_placements[&shown].pos, Vec2::ZERO);
@@ -182,6 +204,74 @@ fn reconcile_repairs_the_view_and_the_layout() {
             .selected
             .contains(&ItemId::Node(unplaced)),
         "placed before the selection is checked, so it stays selected"
+    );
+    document.validate().expect("a reconciled document is valid");
+    assert!(
+        document.reconcile(&library).is_empty(),
+        "nothing is left to repair"
+    );
+}
+
+/// The load gives each subgraph a side and drops a side for none: a subgraph with no side gets
+/// one placed in a row, one placement per node, and each side's view is repaired against its own
+/// graph. Before it, the check names the first subgraph with no side.
+#[test]
+fn reconcile_keeps_one_side_per_subgraph() {
+    let mut fixture = DocumentFixture::default();
+    let [sided, missing, unsided] = [1, 2, 3].map(SubgraphId::from_u128);
+    let mut subgraph = Subgraph::new("unsided", Interface::default());
+    subgraph.graph.add(fixture.plain_node());
+    let DocumentFixture {
+        mut document,
+        library,
+    } = fixture;
+    document.graphs.insert_subgraph(unsided, subgraph);
+    insert_subgraph(
+        &mut document,
+        sided,
+        Subgraph::new("sided", Interface::default()),
+    );
+    let ghost = NodeId::unique();
+    document
+        .slot_mut(GraphId::Subgraph(sided))
+        .view
+        .node_placements
+        .insert(ghost, NodePlacement::default());
+    document.sides.insert(
+        missing,
+        SubgraphSide::new(&Subgraph::new("gone", Interface::default()).graph),
+    );
+    assert!(matches!(
+        document.validate(),
+        Err(DocumentValidationError::SideMismatch { subgraph }) if subgraph == unsided
+    ));
+
+    let report = document.reconcile(&library);
+    assert_eq!(
+        report.repairs,
+        [
+            DocumentRepair::SideDropped { subgraph: missing },
+            DocumentRepair::SideAdded { subgraph: unsided },
+            DocumentRepair::View {
+                graph: GraphId::Subgraph(sided),
+                repair: ViewRepair::PlacementDropped { node_id: ghost },
+            },
+        ]
+    );
+    assert_eq!(
+        report.repairs[2].to_string(),
+        format!(
+            "in the view of subgraph {sided:?}, removed the placement of {ghost:?}, which names no node"
+        )
+    );
+    assert_eq!(
+        document.sides.keys().copied().collect::<Vec<_>>(),
+        [sided, unsided]
+    );
+    assert_eq!(
+        document.sides[&unsided].view.node_placements.len(),
+        3,
+        "its two boundary nodes and its node"
     );
     document.validate().expect("a reconciled document is valid");
     assert!(
@@ -243,23 +333,53 @@ fn reconcile_repairs_the_ties() {
     assert_eq!(
         report.repairs,
         [
-            DocumentRepair::RouteStepDropped {
-                wire: w1,
-                tie: ghost
+            DocumentRepair::View {
+                graph: GraphId::Main,
+                repair: ViewRepair::RouteStepDropped {
+                    wire: w1,
+                    tie: ghost
+                }
             },
-            DocumentRepair::RouteStepRepeated { wire: w1, tie: t1 },
-            DocumentRepair::RouteDropped { wire: unheld },
-            DocumentRepair::RouteStepDropped {
-                wire: w3,
-                tie: ghost
+            DocumentRepair::View {
+                graph: GraphId::Main,
+                repair: ViewRepair::RouteStepRepeated { wire: w1, tie: t1 }
             },
-            DocumentRepair::EmptyRouteDropped { wire: w3 },
-            DocumentRepair::TiePosReset { tie: t1 },
-            DocumentRepair::TieAngleFreed { tie: t2 },
-            DocumentRepair::TieDropped { tie: t3 },
-            DocumentRepair::TieDropped { tie: t4 },
-            DocumentRepair::SelectionDropped {
-                item: ItemId::Tie(t3)
+            DocumentRepair::View {
+                graph: GraphId::Main,
+                repair: ViewRepair::RouteDropped { wire: unheld }
+            },
+            DocumentRepair::View {
+                graph: GraphId::Main,
+                repair: ViewRepair::RouteStepDropped {
+                    wire: w3,
+                    tie: ghost
+                }
+            },
+            DocumentRepair::View {
+                graph: GraphId::Main,
+                repair: ViewRepair::EmptyRouteDropped { wire: w3 }
+            },
+            DocumentRepair::View {
+                graph: GraphId::Main,
+                repair: ViewRepair::TiePosReset { tie: t1 }
+            },
+            DocumentRepair::View {
+                graph: GraphId::Main,
+                repair: ViewRepair::TieAngleFreed { tie: t2 }
+            },
+            DocumentRepair::View {
+                graph: GraphId::Main,
+                repair: ViewRepair::TieDropped { tie: t3 }
+            },
+            DocumentRepair::View {
+                graph: GraphId::Main,
+                repair: ViewRepair::TieDropped { tie: t4 }
+            },
+            DocumentRepair::View {
+                graph: GraphId::Main,
+                repair: ViewRepair::SelectionDropped {
+                    item: ItemId::Tie(t3)
+                }
             },
         ]
     );
@@ -339,7 +459,7 @@ fn a_subgraph_path_is_checked_and_mapped() {
         port,
         Binding::Const(ConstValue::FsPath("inputs/x.tiff".to_string())),
     );
-    fixture.document.graphs.insert_subgraph(id, subgraph);
+    insert_subgraph(&mut fixture.document, id, subgraph);
     let mut document = fixture.document;
     let addr = NodeAddr::new(GraphId::Subgraph(id), inner);
 

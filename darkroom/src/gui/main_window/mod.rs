@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use palantir::{
     Chrome, Configure, DockOperation, DockView, Panel, SizeSpec, TabOverflow, Ui, VAlign, WidgetId,
 };
-use scenarium::ProgramId;
+use scenarium::{GraphId, ProgramId};
 
 use crate::core::document::graph_revision::GraphRevision;
 use crate::core::document::tab_ref::TabRef;
@@ -159,7 +159,7 @@ impl MainWindow {
     /// joins them rather than earning its own call site.
     pub(crate) fn reconcile(&mut self, open: &OpenDocument) {
         let document = open.document();
-        let revision = open.graph_revision();
+        let revision = open.graph_revision(GraphId::Main);
         if self.swept_at != Some(revision) {
             self.graph_ui.retain_nodes(document);
             self.swept_at = Some(revision);
@@ -178,7 +178,7 @@ impl MainWindow {
 mod tests {
     use std::mem;
 
-    use scenarium::NodeId;
+    use scenarium::{GraphId, NodeId};
 
     use crate::core::document::internals::DocumentFixture;
     use crate::core::edit::graph_intent::GraphIntent;
@@ -202,14 +202,15 @@ mod tests {
         window.reconcile(&h.ctx.open);
         assert!(cached(&window, stays) && cached(&window, leaves));
 
-        h.ctx.open.document_mut().remove_node(leaves);
+        h.ctx.open.document_mut().remove_node(GraphId::Main, leaves);
         window.reconcile(&h.ctx.open);
         assert!(cached(&window, leaves), "no revision move, no sweep");
 
-        let _facts = h
-            .ctx
-            .open
-            .apply_edit(GraphIntent::RemoveNode { node_id: stays }, &h.ctx.library);
+        let _facts = h.ctx.open.apply_edit(
+            GraphId::Main,
+            GraphIntent::RemoveNode { node_id: stays },
+            &h.ctx.library,
+        );
         window.reconcile(&h.ctx.open);
         assert!(!cached(&window, stays) && !cached(&window, leaves));
     }

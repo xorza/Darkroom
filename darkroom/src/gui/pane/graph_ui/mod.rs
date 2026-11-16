@@ -108,10 +108,10 @@ impl GraphUi {
     }
 
     /// Evict this canvas's `NodeId`-keyed cache, the cross-frame geometry, down to the nodes the
-    /// document still holds; see [`CanvasGeometry::retain_nodes`].
+    /// main graph still holds; see [`CanvasGeometry::retain_nodes`].
     pub(crate) fn retain_nodes(&mut self, document: &Document) {
-        self.geometry
-            .retain_nodes(|node_id| document.holds_node(node_id));
+        let graph = document.graphs.main();
+        self.geometry.retain_nodes(|node_id| graph.holds(node_id));
     }
 
     /// Whether this input stage is the canvas's first after being away, or its first ever: the
@@ -485,7 +485,10 @@ mod tests {
         let requests: Vec<_> = out.document().drain().collect();
         assert!(matches!(
             requests[..],
-            [DocumentRequest::Graph(GraphIntent::SetViewport { .. })],
+            [DocumentRequest::Graph {
+                intent: GraphIntent::SetViewport { .. },
+                ..
+            }],
         ));
         let mut again = settle(&mut h);
         assert_eq!(

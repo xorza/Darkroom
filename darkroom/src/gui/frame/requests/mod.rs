@@ -5,6 +5,7 @@ use std::collections::VecDeque;
 use std::mem;
 
 use palantir::{DockOperation, Ui};
+use scenarium::GraphId;
 
 use crate::core::document::tab_ref::TabRef;
 use crate::core::edit::document_queue::DocumentQueue;
@@ -49,14 +50,14 @@ impl Requests {
         self.document.open_gesture()
     }
 
-    /// Queue a graph edit.
+    /// Queue an edit of the main graph, the one graph the window shows.
     pub(crate) fn push_graph(&mut self, intent: GraphIntent) {
-        self.document.push_graph(intent);
+        self.document.push_graph(GraphId::Main, intent);
     }
 
-    /// Queue every graph edit `iter` yields.
+    /// Queue every edit of the main graph `iter` yields.
     pub(crate) fn extend_graph(&mut self, iter: impl IntoIterator<Item = GraphIntent>) {
-        self.document.extend_graph(iter);
+        self.document.extend_graph(GraphId::Main, iter);
     }
 
     /// Queue every graph edit `iter` yields as part of the held `gesture`; see
@@ -66,12 +67,12 @@ impl Requests {
         gesture: GestureId,
         iter: impl IntoIterator<Item = GraphIntent>,
     ) {
-        self.document.extend_graph_in(gesture, iter);
+        self.document.extend_graph_in(gesture, GraphId::Main, iter);
     }
 
     /// Queue the cancel of the held `gesture`; see [`DocumentQueue::push_cancel`].
     pub(crate) fn push_cancel(&mut self, gesture: GestureId, otherwise: GraphIntent) {
-        self.document.push_cancel(gesture, otherwise);
+        self.document.push_cancel(gesture, GraphId::Main, otherwise);
     }
 
     /// Queue a mutation of the pane arrangement.

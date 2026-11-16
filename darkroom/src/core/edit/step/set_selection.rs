@@ -2,6 +2,7 @@
 
 use std::collections::BTreeSet;
 
+use scenarium::GraphId;
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::Document;
@@ -19,8 +20,8 @@ pub(crate) struct SetSelection {
 }
 
 impl Reversible for SetSelection {
-    fn write(&self, document: &mut Document, _: Direction) {
-        let selected = &mut document.main_view.selected;
+    fn write(&self, document: &mut Document, graph: GraphId, _: Direction) {
+        let selected = &mut document.slot_mut(graph).view.selected;
         for item in &self.toggled {
             if !selected.remove(item) {
                 selected.insert(*item);

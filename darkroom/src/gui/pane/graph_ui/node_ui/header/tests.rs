@@ -1,7 +1,7 @@
 use glam::{UVec2, Vec2};
 use palantir::{EditableLabel, PointerButton};
 use scenarium::internals::test_graph::TestGraph;
-use scenarium::{CacheMode, NodeId};
+use scenarium::{CacheMode, GraphId, NodeId};
 use std::mem;
 use std::sync::Arc;
 
@@ -271,10 +271,11 @@ fn a_node_and_its_pin_show_once_measured() {
     };
     assert_eq!(listed(&h), [true, true], "a measured node shows");
 
-    let _removed = h
-        .ctx
-        .open
-        .apply_edit(GraphIntent::RemoveNode { node_id: sink }, &h.ctx.library);
+    let _removed = h.ctx.open.apply_edit(
+        GraphId::Main,
+        GraphIntent::RemoveNode { node_id: sink },
+        &h.ctx.library,
+    );
     h.frame();
     h.graph_ui.retain_nodes(h.ctx.open.document());
     let _restored = h.ctx.open.undo();

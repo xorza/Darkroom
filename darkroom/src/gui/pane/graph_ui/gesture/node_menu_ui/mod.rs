@@ -4,7 +4,7 @@ use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::RunCommand;
-use scenarium::NodeId;
+use scenarium::{GraphId, NodeId};
 
 use crate::gui::frame::stage::Stage;
 use crate::gui::graph_ctx::GraphCtx;
@@ -98,6 +98,7 @@ impl NodeMenuUi {
             MenuChoice::Duplicate { incoming } => {
                 out.extend_graph(GraphIntent::duplicate(
                     graph_ctx.document(),
+                    GraphId::Main,
                     graph_ctx.library(),
                     incoming,
                     || NodeId::unique().as_u128(),

@@ -1,6 +1,6 @@
 //! Binding, rebinding, and unbinding one input port.
 
-use scenarium::{Binding, InputPort};
+use scenarium::{Binding, GraphId, InputPort};
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::Document;
@@ -20,12 +20,12 @@ pub(crate) struct SetInput {
 }
 
 impl Reversible for SetInput {
-    fn write(&self, document: &mut Document, dir: Direction) {
+    fn write(&self, document: &mut Document, graph: GraphId, dir: Direction) {
         document
-            .graphs
-            .main_mut()
+            .slot_mut(graph)
+            .graph
             .set_input_binding(self.input, self.binding.half(dir).clone());
-        self.ties.write(document, dir);
+        self.ties.write(document, graph, dir);
     }
 
     /// The ties change only with the binding.

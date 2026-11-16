@@ -17,7 +17,7 @@ use scenarium::internals::test_graph::TestGraph;
 use scenarium::{
     Binding, BindingEntry, ConstValue, DataType, DetachReason, DetachedNode, DetachedNodeParts,
     EventPort, Func, FuncId, GraphId, GraphSet, InputDecl, InputPort, Library, Node, NodeId,
-    OutputDecl, OutputPort, Stub, Subscription, internals, numbered_port,
+    OutputDecl, OutputPort, Stub, Subgraph, SubgraphId, Subscription, internals, numbered_port,
 };
 
 use palantir::DockOperation;
@@ -25,6 +25,7 @@ use palantir::DockOperation;
 use crate::core::document::Document;
 use crate::core::document::graph_view::{GraphView, NodePlacement};
 use crate::core::document::route::Route;
+use crate::core::document::subgraph_side::SubgraphSide;
 use crate::core::document::tab_ref::TabRef;
 use crate::core::document::tie::{Tie, TieAngle, TieId};
 use crate::core::document::wire_key::{DataWire, WireKey};
@@ -40,6 +41,15 @@ fn spread(view: &mut GraphView) {
             .expect("paint order lists only placed items")
             .pos = row_pos(i);
     }
+}
+
+/// Put `subgraph` into `document` under `id`, with a side whose view places its nodes in a row.
+pub(crate) fn insert_subgraph(document: &mut Document, id: SubgraphId, subgraph: Subgraph) {
+    let mut side = SubgraphSide::new(&subgraph.graph);
+    spread(&mut side.view);
+    document.graphs.insert_subgraph(id, subgraph);
+    let prev = document.sides.insert(id, side);
+    assert!(prev.is_none(), "a subgraph id names one side");
 }
 
 /// Place `node_id` at `pos`, frontmost, so paint order is the order constructors added in, which
@@ -93,11 +103,14 @@ pub(crate) struct DocumentFixture {
 }
 
 impl DocumentFixture {
-    /// A document over hand-built `graphs` and the library it resolves against, for cases
+    /// A document over hand-built `graphs` and the library they resolve against, for cases
     /// [`TestGraph`] can't express, like a node naming a func the library was never given.
     pub(crate) fn with_library(graphs: impl Into<GraphSet>, library: Library) -> Self {
         let mut document = Document::from(graphs.into());
         spread(&mut document.main_view);
+        for side in document.sides.values_mut() {
+            spread(&mut side.view);
+        }
         Self { document, library }
     }
 
@@ -128,6 +141,20 @@ impl DocumentFixture {
             self.library.add(func.clone());
         }
         let node_id = self.document.graphs.main_mut().add_func_node(func);
+        let slot = self.document.main_view.node_placements.len();
+        place(&mut self.document.main_view, node_id, row_pos(slot));
+        node_id
+    }
+
+    /// Add an instance of subgraph `id`, which the document holds, at the next slot in the row.
+    pub(crate) fn add_instance(&mut self, id: SubgraphId) -> NodeId {
+        let subgraph = self
+            .document
+            .graphs
+            .subgraph(id)
+            .expect("the document holds the subgraph");
+        let node = Node::instance(id, subgraph);
+        let node_id = self.document.graphs.main_mut().add(node);
         let slot = self.document.main_view.node_placements.len();
         place(&mut self.document.main_view, node_id, row_pos(slot));
         node_id

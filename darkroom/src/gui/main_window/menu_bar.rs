@@ -2,7 +2,7 @@ use palantir::{
     Align, Configure, DockOperation, Grid, MenuBar, MenuBarMenus, MenuItem, MenuSeparator, Panel,
     Sense, Shortcut, SizeSpec, Text, TextWrap, Track, Ui, VAlign, WidgetId, fmt,
 };
-use scenarium::NodeId;
+use scenarium::{GraphId, NodeId};
 
 use crate::core::document::tab_ref::TabRef;
 use crate::core::edit::graph_intent::GraphIntent;
@@ -102,6 +102,7 @@ fn edit_menu(bar: &mut MenuBarMenus<'_>, stage: &mut Stage<'_, GraphCtx<'_>>) {
         if item(ui, "Duplicate", Some(shortcuts::DUPLICATE), selected) {
             out.extend_graph(GraphIntent::duplicate(
                 open.document(),
+                GraphId::Main,
                 ctx.library(),
                 IncomingWires::Drop,
                 || NodeId::unique().as_u128(),

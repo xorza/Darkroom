@@ -1,6 +1,7 @@
 //! The document's share of a frame's requests.
 
 use palantir::DockOperation;
+use scenarium::GraphId;
 
 use crate::core::document::tab_ref::TabRef;
 use crate::core::edit::document_request::DocumentRequest;
@@ -28,33 +29,52 @@ impl DocumentQueue {
         self.last_gesture
     }
 
-    pub(crate) fn push_graph(&mut self, intent: GraphIntent) {
-        self.requests.push(DocumentRequest::Graph(intent));
+    /// Queue an edit of `graph`.
+    pub(crate) fn push_graph(&mut self, graph: GraphId, intent: GraphIntent) {
+        self.requests.push(DocumentRequest::Graph { graph, intent });
     }
 
-    pub(crate) fn extend_graph(&mut self, iter: impl IntoIterator<Item = GraphIntent>) {
-        self.requests
-            .extend(iter.into_iter().map(DocumentRequest::Graph));
-    }
-
-    /// Queue every graph edit `iter` yields as part of the held `gesture`, whose undo entry they
-    /// join.
-    pub(crate) fn extend_graph_in(
+    /// Queue every edit of `graph` `iter` yields.
+    pub(crate) fn extend_graph(
         &mut self,
-        gesture: GestureId,
+        graph: GraphId,
         iter: impl IntoIterator<Item = GraphIntent>,
     ) {
         self.requests.extend(
             iter.into_iter()
-                .map(|intent| DocumentRequest::InGesture { gesture, intent }),
+                .map(|intent| DocumentRequest::Graph { graph, intent }),
         );
     }
 
-    /// Queue the cancel of the held `gesture`: its open undo entry is reverted and dropped, else
-    /// `otherwise` applies.
-    pub(crate) fn push_cancel(&mut self, gesture: GestureId, otherwise: GraphIntent) {
+    /// Queue every edit of `graph` `iter` yields as part of the held `gesture`, whose undo entry
+    /// they join.
+    pub(crate) fn extend_graph_in(
+        &mut self,
+        gesture: GestureId,
+        graph: GraphId,
+        iter: impl IntoIterator<Item = GraphIntent>,
+    ) {
         self.requests
-            .push(DocumentRequest::Cancel { gesture, otherwise });
+            .extend(iter.into_iter().map(|intent| DocumentRequest::InGesture {
+                gesture,
+                graph,
+                intent,
+            }));
+    }
+
+    /// Queue the cancel of the held `gesture` on `graph`: its open undo entry is reverted and
+    /// dropped, else `otherwise` applies.
+    pub(crate) fn push_cancel(
+        &mut self,
+        gesture: GestureId,
+        graph: GraphId,
+        otherwise: GraphIntent,
+    ) {
+        self.requests.push(DocumentRequest::Cancel {
+            gesture,
+            graph,
+            otherwise,
+        });
     }
 
     pub(crate) fn push_view(&mut self, op: DockOperation<TabRef>) {

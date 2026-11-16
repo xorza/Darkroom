@@ -1,106 +1,87 @@
 //! The undo history's whole vocabulary.
 
+use scenarium::GraphId;
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::Document;
-use crate::core::edit::edit_facts::EditFacts;
+use crate::core::edit::edit_facts::{EditFacts, Touched};
 use crate::core::edit::step::change::Direction;
-use crate::core::edit::step::reversible::Reversible;
-use crate::core::edit::step::set_depth::SetDepth;
-use crate::core::edit::step::set_input::SetInput;
-use crate::core::edit::step::set_node::SetNode;
-use crate::core::edit::step::set_node_name::SetNodeName;
-use crate::core::edit::step::set_node_property::SetNodeProperty;
-use crate::core::edit::step::set_positions::SetPositions;
-use crate::core::edit::step::set_selection::SetSelection;
-use crate::core::edit::step::set_subscription::SetSubscription;
-use crate::core::edit::step::set_ties::SetTies;
+use crate::core::edit::step::graph_step::GraphStep;
 
-/// One self-contained entry of the undo history: which kind of edit it is, and that kind's
-/// payload, the slot it touches with both halves of what went into it.
+/// One self-contained entry of the undo history: an edit of one graph of the document and its
+/// view.
 ///
-/// The variants are *primitives*, not a mirror of the
-/// [`GraphIntent`](crate::core::edit::graph_intent::GraphIntent) vocabulary: one intent can lower
-/// to several steps, and two intents that are each other's inverse (add a node, remove a node)
-/// lower to one kind.
-///
-/// Only graph edits are undoable: pane arrangement records nothing, so Ctrl+Z walks past a tab
-/// switch to the last edit that changed the graph.
+/// Only edits of the document's graphs are undoable: pane arrangement records nothing, so Ctrl+Z
+/// walks past a tab switch to the last edit that changed a graph.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum UndoStep {
-    /// Boxed: a whole detached node is several times the size of every other step.
-    Node(Box<SetNode>),
-    Positions(SetPositions),
-    NodeName(SetNodeName),
-    Input(SetInput),
-    Selection(SetSelection),
-    Depth(SetDepth),
-    NodeProperty(SetNodeProperty),
-    Subscription(SetSubscription),
-    Ties(SetTies),
+    Graph { graph: GraphId, step: GraphStep },
 }
 
 impl UndoStep {
     /// Write the "to" half to `document`: the initial commit, and redo of a stored step.
     pub(crate) fn apply(&self, document: &mut Document) {
-        self.kind().write(document, Direction::Forward);
+        self.write(document, Direction::Forward);
     }
 
     /// Write the "from" half to `document`, restoring the state before [`Self::apply`].
     pub(crate) fn revert(&self, document: &mut Document) {
-        self.kind().write(document, Direction::Backward);
+        self.write(document, Direction::Backward);
+    }
+
+    fn write(&self, document: &mut Document, dir: Direction) {
+        let Self::Graph { graph, step } = self;
+        step.kind().write(document, *graph, dir);
     }
 
     pub(crate) fn is_noop(&self) -> bool {
-        self.kind().is_noop()
+        let Self::Graph { step, .. } = self;
+        step.kind().is_noop()
     }
 
     pub(crate) fn dirties_document(&self) -> bool {
-        self.kind().dirties_document()
+        let Self::Graph { step, .. } = self;
+        step.kind().dirties_document()
     }
 
+    /// What the step changes, and the graphs it changes.
     pub(crate) fn facts(&self) -> EditFacts {
-        self.kind().facts()
+        let Self::Graph { graph, step } = self;
+        EditFacts {
+            touched: Touched::Graph(*graph),
+            ..step.kind().facts()
+        }
     }
 
     /// Whether `next`, a later step of the same held gesture, is a frame of this one, which
-    /// [`Self::absorb`] folds in: a move after a move, a tie edit after a tie edit.
-    pub(crate) const fn absorbs(&self, next: &Self) -> bool {
-        matches!(
-            (self, next),
-            (Self::Positions(_), Self::Positions(_)) | (Self::Ties(_), Self::Ties(_))
-        )
+    /// [`Self::absorb`] folds in: a step of the same kind on the same graph.
+    pub(crate) fn absorbs(&self, next: &Self) -> bool {
+        let (
+            Self::Graph { graph, step },
+            Self::Graph {
+                graph: next_graph,
+                step: next,
+            },
+        ) = (self, next);
+        graph == next_graph && step.absorbs(next)
     }
 
-    /// Fold `next`, a later frame of the same held gesture, into this step:
-    /// keep this step's "from" half and adopt `next`'s "to" half, in place.
+    /// Fold `next`, a later frame of the same held gesture, into this step: keep this step's
+    /// "from" half and adopt `next`'s "to" half, in place.
     ///
     /// # Panics
     ///
-    /// If the two are not the same kind of gesture step. A gesture emits one
-    /// kind of intent for its whole life, so a mismatch is the caller's bug.
+    /// If the two are not frames of one gesture on one graph. A gesture emits one kind of intent
+    /// on one graph for its whole life, so a mismatch is the caller's bug.
     pub(crate) fn absorb(&mut self, next: &Self) {
-        match (self, next) {
-            (Self::Positions(open), Self::Positions(next)) => open.absorb(next),
-            (Self::Ties(open), Self::Ties(next)) => open.absorb(next),
-            (open, next) => panic!("a gesture cannot fold {next:?} into {open:?}"),
-        }
-    }
-
-    /// The payload behind the variant, as the behaviour it implements. The one match that hands
-    /// out a payload, so a new variant adds a line here and a file of its own; [`Self::absorb`]
-    /// matches too, as it pairs two payloads.
-    fn kind(&self) -> &dyn Reversible {
-        match self {
-            Self::Node(step) => step.as_ref(),
-            Self::Positions(step) => step,
-            Self::NodeName(step) => step,
-            Self::Input(step) => step,
-            Self::Selection(step) => step,
-            Self::Depth(step) => step,
-            Self::NodeProperty(step) => step,
-            Self::Subscription(step) => step,
-            Self::Ties(step) => step,
-        }
+        let (
+            Self::Graph { graph, step },
+            Self::Graph {
+                graph: next_graph,
+                step: next,
+            },
+        ) = (self, next);
+        assert_eq!(graph, next_graph, "a gesture folds frames of one graph");
+        step.absorb(next);
     }
 }

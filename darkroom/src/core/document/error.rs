@@ -1,6 +1,6 @@
 //! Structural validation errors for documents and their per-graph editor views.
 
-use scenarium::{GraphId, GraphValidationError, NodeAddr, NodeId};
+use scenarium::{GraphId, GraphValidationError, NodeAddr, NodeId, SubgraphId};
 
 use crate::core::document::item_id::ItemId;
 use crate::core::document::tab_ref::TabRef;
@@ -54,11 +54,14 @@ pub(crate) enum DocumentValidationError {
         #[source]
         source: GraphValidationError,
     },
-    #[error("main view")]
-    MainView {
+    #[error("the view of {graph:?}")]
+    View {
+        graph: GraphId,
         #[source]
         source: GraphViewValidationError,
     },
+    #[error("subgraph {subgraph:?} has no side, or a side names no subgraph")]
+    SideMismatch { subgraph: SubgraphId },
     #[error("open tab {tab:?} names no preview node in the graph")]
     MissingTab { tab: TabRef },
     #[error("node {node:?} holds the relative path {path:?}, which memory holds resolved")]

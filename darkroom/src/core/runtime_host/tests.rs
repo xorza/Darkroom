@@ -2,7 +2,10 @@ use std::path::Path;
 
 use common::{TempDir, fs};
 use lens::MlModelPaths;
-use scenarium::{CacheMode, ConstValue, Graph, GraphSet, NodeId, ProgramId};
+use scenarium::{
+    CacheMode, ConstValue, GraphId, GraphSet, InstancePath, Interface, Node, NodeAddr, NodeId,
+    ProgramId, Subgraph, SubgraphId,
+};
 
 use crate::core::io::cache;
 use crate::core::runtime_host::error::NoCompiledWork;
@@ -19,7 +22,8 @@ fn ml_model_default(host: &RuntimeHost, func: &str) -> Option<ConstValue> {
 
 /// An eviction reaches the seed's consumer cone in the program it installs —
 /// here the seed alone, as nothing reads it — and nothing for a node the
-/// program holds no work for.
+/// program holds no work for. A node inside a subgraph is evicted in every
+/// instance of it, as its cache mode is the authored node's.
 #[test]
 fn an_eviction_reaches_the_seed_cone_of_the_installed_program() {
     let mut host = RuntimeHost::new(wake::internals::noop(), &MlModelPaths::default());
@@ -28,21 +32,43 @@ fn an_eviction_reaches_the_seed_cone_of_the_installed_program() {
         .cur()
         .by_name("ML Denoise")
         .expect("built-in present");
-    let mut graph = Graph::default();
-    let node = ProgramId::from(graph.add_func_node(func));
-    let graph = GraphSet::from(graph);
+    let mut graphs = GraphSet::default();
+    let node = graphs.main_mut().add_func_node(func);
+    let subgraph = SubgraphId::unique();
+    let mut inner = Subgraph::new("inner", Interface::default());
+    let inside = inner.graph.add_func_node(func);
+    graphs.insert_subgraph(subgraph, inner);
+    let instances = [NodeId::unique(), NodeId::unique()];
+    for instance in instances {
+        let placed = Node::instance(subgraph, graphs.subgraph(subgraph).unwrap());
+        graphs.main_mut().insert(instance, placed);
+    }
 
-    host.run_once(&graph);
-    assert_eq!(host.evict_cache(&graph, node), Ok(vec![node]));
-    let gone = ProgramId::from(NodeId::unique());
+    host.run_once(&graphs);
+    let main = |node_id| NodeAddr::new(GraphId::Main, node_id);
     assert_eq!(
-        host.evict_cache(&graph, gone),
+        host.evict_cache(&graphs, main(node)),
+        Ok(vec![ProgramId::from(node)])
+    );
+    let mut each_instance = instances.map(|instance| InstancePath::new(&[instance]).node(inside));
+    each_instance.sort_unstable();
+    assert_eq!(
+        host.evict_cache(&graphs, NodeAddr::new(GraphId::Subgraph(subgraph), inside)),
+        Ok(each_instance.to_vec())
+    );
+    let gone = NodeId::unique();
+    assert_eq!(
+        host.evict_cache(&graphs, main(gone)),
         Err(NoCompiledWork),
         "a node the program has no work for reaches nothing"
     );
-    assert_eq!(host.run_node(&graph, gone), Err(NoCompiledWork));
-    assert_eq!(host.flush_cache(&graph, gone), Err(NoCompiledWork));
-    assert_eq!(host.run_node(&graph, node), Ok(()));
+    assert_eq!(
+        host.run_node(&graphs, ProgramId::from(gone)),
+        Err(NoCompiledWork)
+    );
+    assert_eq!(host.flush_cache(&graphs, main(gone)), Err(NoCompiledWork));
+    assert_eq!(host.run_node(&graphs, ProgramId::from(node)), Ok(()));
+    assert_eq!(host.run_node(&graphs, each_instance[1]), Ok(()));
 }
 
 #[test]

@@ -10,6 +10,7 @@ use scenarium::ConstValue;
 use scenarium::FileMode;
 use scenarium::Library;
 use scenarium::ProgramId;
+use scenarium::{GraphId, NodeAddr};
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::io::document::document_format::DocumentFormat;
@@ -550,12 +551,12 @@ impl App {
             // An eviction projects its outcome onto exactly the nodes it reaches.
             RunCommand::EvictCache(node_id) => self
                 .runtime
-                .evict_cache(graphs, ProgramId::from(node_id))
+                .evict_cache(graphs, NodeAddr::new(GraphId::Main, node_id))
                 .map(|evicted| self.run_state.clear_cache_projections(&evicted)),
             // A flush only gains the value a copy on disk, so no projection moves.
-            RunCommand::FlushCache(node_id) => {
-                self.runtime.flush_cache(graphs, ProgramId::from(node_id))
-            }
+            RunCommand::FlushCache(node_id) => self
+                .runtime
+                .flush_cache(graphs, NodeAddr::new(GraphId::Main, node_id)),
             RunCommand::StartEvents => {
                 self.runtime.start_event_loop(graphs);
                 Ok(())

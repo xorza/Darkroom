@@ -18,6 +18,7 @@
 //!   success of the document family, such as a save, clears the line. Refused: a list in the editor, as new UI to design
 //!   and build.
 
+use std::collections::HashMap;
 use std::path;
 use std::path::{Path, PathBuf};
 
@@ -36,7 +37,7 @@ use crate::core::io::document::error::{DocumentLoadError, DocumentSaveError};
 use crate::core::io::document::saved_paths::SavedPaths;
 use crate::core::status_log::{StatusFamily, StatusLog};
 use common::ErrorChain;
-use scenarium::Library;
+use scenarium::{GraphId, Library};
 
 /// Byte budget for the undo history's packed buffer (1 MiB). Bounds memory rather than entry
 /// count: the oldest entries drop once the buffer overflows.
@@ -72,9 +73,10 @@ pub(crate) struct OpenDocument {
     /// It can read "dirty" after an undo returns the document to its saved state, the safe
     /// direction (prompt rather than silently discard).
     dirty: bool,
-    /// The state of the graph's node set; moved by every edit, undo or redo
-    /// that adds or removes a node.
-    revision: GraphRevision,
+    /// The state of each graph's node set, moved by every edit, undo or redo
+    /// that adds or removes a node of that graph; a graph no edit has
+    /// changed is at the default revision.
+    revisions: HashMap<GraphId, GraphRevision>,
     /// This document's undo history, document state: opening another file replaces the pair, so
     /// no UI can inherit the other's history.
     history: UndoHistory,
@@ -91,7 +93,7 @@ impl Default for OpenDocument {
             document: Document::default(),
             path: None,
             dirty: false,
-            revision: GraphRevision::default(),
+            revisions: HashMap::new(),
             history: UndoHistory::new(UNDO_HISTORY_BYTES),
             batch: Vec::new(),
         }
@@ -136,8 +138,13 @@ impl OpenDocument {
     /// Apply a single `intent` and record it as its own undo entry, for edits raised outside a
     /// frame's drain, such as a file-picker result. No-ops are dropped, like the in-frame drain.
     #[must_use]
-    pub(crate) fn apply_edit(&mut self, intent: GraphIntent, library: &Library) -> EditFacts {
-        self.commit([DocumentRequest::Graph(intent)], library)
+    pub(crate) fn apply_edit(
+        &mut self,
+        graph: GraphId,
+        intent: GraphIntent,
+        library: &Library,
+    ) -> EditFacts {
+        self.commit([DocumentRequest::Graph { graph, intent }], library)
     }
 
     /// Take everything `requests` holds for this document and apply it.
@@ -186,20 +193,25 @@ impl OpenDocument {
         // an edit outside it.
         let mut gesture = BatchGesture::Empty;
         for item in queued {
-            let (intent, joins) = match item {
-                DocumentRequest::Graph(intent) => {
+            let (graph, intent, joins) = match item {
+                DocumentRequest::Graph { graph, intent } => {
                     let joins = intent.gesture();
-                    (intent, joins)
+                    (graph, intent, joins)
                 }
-                DocumentRequest::InGesture { gesture, intent } => {
+                DocumentRequest::InGesture {
+                    gesture,
+                    graph,
+                    intent,
+                } => {
                     debug_assert!(
                         intent.gesture().is_none_or(|own| own == gesture),
                         "an edit joins one gesture"
                     );
-                    (intent, Some(gesture))
+                    (graph, intent, Some(gesture))
                 }
                 DocumentRequest::Cancel {
                     gesture: cancelled,
+                    graph,
                     otherwise,
                 } => {
                     // The batch so far is its own entry, so the withdraw finds
@@ -214,7 +226,7 @@ impl OpenDocument {
                     if withdrawn {
                         continue;
                     }
-                    (otherwise, Some(cancelled))
+                    (graph, otherwise, Some(cancelled))
                 }
                 // Pane arrangement is navigation: it records no step, raises no signal, and breaks
                 // no run of graph edits around it.
@@ -224,7 +236,9 @@ impl OpenDocument {
                 }
             };
             let committed = self.batch.len();
-            if let Err(malformed) = intent.commit(&mut self.document, library, &mut self.batch) {
+            if let Err(malformed) =
+                intent.commit(&mut self.document, graph, library, &mut self.batch)
+            {
                 panic!("a widget built a malformed intent: {malformed}");
             }
             if self.batch.len() == committed {
@@ -274,14 +288,20 @@ impl OpenDocument {
         );
         self.dirty |= signals.dirtied;
         if signals.facts.node_set {
-            self.revision = self.revision.next();
+            let touched = signals.facts.touched;
+            for (graph, _) in self.document.graphs.graphs() {
+                if touched.reaches(graph) {
+                    let revision = self.revisions.entry(graph).or_default();
+                    *revision = revision.next();
+                }
+            }
         }
         signals.facts
     }
 
-    /// The state of the graph's node set.
-    pub(crate) const fn graph_revision(&self) -> GraphRevision {
-        self.revision
+    /// The state of `graph`'s node set.
+    pub(crate) fn graph_revision(&self, graph: GraphId) -> GraphRevision {
+        self.revisions.get(&graph).copied().unwrap_or_default()
     }
 
     /// Open the document at `path`, made consistent with `library` by

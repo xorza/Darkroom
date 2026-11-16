@@ -116,7 +116,7 @@ impl CanvasHarness {
             .drain()
             .filter_map(|request| match request {
                 // A test reads what a gesture raised: a cancel by the move it falls back on.
-                DocumentRequest::Graph(intent)
+                DocumentRequest::Graph { intent, .. }
                 | DocumentRequest::InGesture { intent, .. }
                 | DocumentRequest::Cancel {
                     otherwise: intent, ..

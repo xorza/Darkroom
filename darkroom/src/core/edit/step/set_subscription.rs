@@ -1,6 +1,6 @@
 //! Adding and removing one event-subscription edge.
 
-use scenarium::Subscription;
+use scenarium::{GraphId, Subscription};
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::Document;
@@ -23,14 +23,15 @@ pub(crate) struct SetSubscription {
 }
 
 impl Reversible for SetSubscription {
-    fn write(&self, document: &mut Document, dir: Direction) {
+    fn write(&self, document: &mut Document, graph: GraphId, dir: Direction) {
         let Subscription { event, subscriber } = self.subscription;
+        let held = document.slot_mut(graph).graph;
         if *self.subscribed.half(dir) {
-            document.graphs.main_mut().subscribe(event, subscriber);
+            held.subscribe(event, subscriber);
         } else {
-            document.graphs.main_mut().unsubscribe(event, subscriber);
+            held.unsubscribe(event, subscriber);
         }
-        self.ties.write(document, dir);
+        self.ties.write(document, graph, dir);
     }
 
     /// Dropping an event wire on a pin that already carries it lands here.
