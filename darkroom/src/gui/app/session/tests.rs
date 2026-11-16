@@ -540,3 +540,49 @@ fn a_refused_edit_raises_its_status_line() {
     );
     assert!(!test.session.open.can_undo(), "nothing was written");
 }
+
+/// Ctrl+C over a selected instance puts a clip on the clipboard, and Ctrl+V pastes another
+/// instance of the same definition, which the paste reuses, as one history entry.
+#[test]
+fn copy_and_paste_go_through_the_clipboard() {
+    use scenarium::{Interface, Subgraph, SubgraphId};
+
+    use crate::core::clip::HEADER;
+    use crate::core::document::internals::insert_subgraph;
+    use crate::core::document::item_id::ItemId;
+
+    let mut fixture = DocumentFixture::default();
+    let id = SubgraphId::from_u128(1);
+    insert_subgraph(
+        &mut fixture.document,
+        id,
+        Subgraph::new("inner", Interface::default()),
+    );
+    let instance = fixture.add_instance(id);
+    let mut test = SessionHarness::new(fixture);
+    test.apply(GraphIntent::SetSelection {
+        to: [ItemId::Node(instance)].into(),
+    });
+    test.prime(2);
+    test.ui.key(shortcuts::COPY);
+    test.frame();
+    assert!(
+        test.ui
+            .clipboard_text()
+            .is_some_and(|text| text.starts_with(HEADER)),
+        "the clipboard holds a clip"
+    );
+    test.ui.key(shortcuts::PASTE);
+    test.frame();
+    test.drain();
+    let document = test.session.open.document();
+    let instances = document
+        .graphs
+        .main()
+        .iter()
+        .filter(|node| node.subgraph() == Some(id))
+        .count();
+    assert_eq!((instances, document.graphs.subgraphs().len()), (2, 1));
+    assert!(test.undo());
+    assert_eq!(test.session.open.document().graphs.main().len(), 1);
+}

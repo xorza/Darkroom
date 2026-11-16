@@ -11,8 +11,8 @@ use crate::core::edit::step::undo_step::UndoStep;
 
 /// An edit of a subgraph's definition: one coming in or going out, or its interface. Travels as
 /// a [`DocumentRequest::Subgraph`](crate::core::edit::document_request::DocumentRequest::Subgraph)
-/// and lands in the same history entry as the graph edits of its batch, as Make Unique's copy
-/// lands with the instance it repoints.
+/// and lands in the same history entry as the graph edits of its batch, as a collapse's new
+/// definition lands with the instance that places it.
 #[derive(Debug)]
 pub(crate) enum SubgraphIntent {
     /// Put a new definition in, with its side. Boxed: a whole definition dwarfs the rest.
@@ -25,7 +25,7 @@ pub(crate) enum SubgraphIntent {
 }
 
 /// A definition [`SubgraphIntent::Add`] puts in.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct NewSubgraph {
     pub(crate) id: SubgraphId,
     pub(crate) subgraph: Subgraph,

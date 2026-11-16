@@ -8,6 +8,7 @@
 
 pub(crate) mod app_command;
 pub(crate) mod app_ctx;
+pub(crate) mod clip_commands;
 pub(crate) mod doc_ctx;
 pub(crate) mod framing;
 pub(crate) mod requests;

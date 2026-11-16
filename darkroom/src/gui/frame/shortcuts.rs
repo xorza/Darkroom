@@ -21,6 +21,8 @@ pub(crate) const REDO: Shortcut = Shortcut::new(
     Key::Char('Z'),
 );
 pub(crate) const DUPLICATE: Shortcut = Shortcut::ctrl('D');
+pub(crate) const COPY: Shortcut = Shortcut::ctrl('C');
+pub(crate) const PASTE: Shortcut = Shortcut::ctrl('V');
 /// Backspace removes the selection too; the menu shows Delete, the key a keyboard labels so.
 pub(crate) const DELETE: Shortcut = Shortcut::key(Key::Delete);
 pub(crate) const RUN: Shortcut = Shortcut::ctrl('R');

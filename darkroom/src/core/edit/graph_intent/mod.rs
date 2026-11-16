@@ -21,14 +21,14 @@ mod node_name;
 pub(crate) mod node_property;
 pub(crate) mod route_insert;
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::iter;
 use std::rc::Rc;
 
 use glam::Vec2;
 use scenarium::{
-    Binding, BindingEntry, DetachedNode, DetachedNodeParts, EventPort, Graph as CoreGraph, GraphId,
-    InputPort, Library, Node, NodeId, OutputPort, Subscription,
+    Binding, BindingEntry, DetachedNode, DetachedNodeParts, Graph as CoreGraph, GraphId, InputPort,
+    Library, Node, NodeId, Subscription,
 };
 
 use crate::core::document::Document;
@@ -39,6 +39,7 @@ use crate::core::document::tie::{Tie, TieAngle, TieId};
 use crate::core::document::viewport::Viewport;
 use crate::core::document::wire_key::{DataWire, WireKey};
 use crate::core::edit::error::{EditRefusal, IntentError, MalformedIntent, Role};
+use crate::core::edit::fragment::Fragment;
 use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::graph_intent::click_mode::ClickMode;
 use crate::core::edit::graph_intent::drag_start::DragStart;
@@ -69,7 +70,7 @@ const DUPLICATE_OFFSET: Vec2 = Vec2::new(32.0, 32.0);
 ///
 /// Every variant edits the graph and travels the frame's queue as its `Graph` tier; a layout
 /// mutation is a [`DockOperation`](palantir::DockOperation) in the `View` tier.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) enum GraphIntent {
     /// Add one node that links state the document already resolves: a func in
     /// the library, or a built-in special.
@@ -215,180 +216,25 @@ impl GraphIntent {
     /// Clone the selection of `graph` of `document`: each node gets a fresh id and an offset
     /// position, const-value bindings copy verbatim, the data and event wires *among* the
     /// selected nodes are recreated against the clones with the ties inside them, and the copies
-    /// end up selected. A wire whose source is *outside* the selection, a data wire or an event
-    /// subscription, goes as `incoming` says: dropped, leaving a data input's declared default as
-    /// a wire removed on its own does ([`unwired::binding`]), or kept on the original external
-    /// producer or emitter. Each clone and tie clone takes its id from `fresh`, a random one in
-    /// the editor, a counter in a test. Empty when nothing is selected. A selected stub is
-    /// skipped, as a copy of a node that cannot run has little use, and so is a boundary node.
+    /// end up selected. A wire whose source is *outside* the selection goes as `incoming` says
+    /// ([`Fragment::capture`]). Each clone and tie clone takes its id from `fresh`, a random one in
+    /// the editor, a counter in a test. Empty when no node is selected; a selected stub is
+    /// skipped.
     ///
     /// A list rather than an intent of its own: duplicating is an editor command built out of the
-    /// vocabulary. The whole list is queued in one frame, so it commits as one undo entry. The
-    /// internal edges come out after the nodes: every clone exists before anything binds to one.
+    /// vocabulary, a [`Fragment`] captured, remapped and landed. The whole list is queued in one
+    /// frame, so it commits as one undo entry.
     pub(crate) fn duplicate(
         document: &Document,
         graph: GraphId,
         library: &Library,
         incoming: IncomingWires,
-        mut fresh: impl FnMut() -> u128,
+        fresh: impl FnMut() -> u128,
     ) -> Vec<Self> {
-        let scope = document.graphs.scope(library, graph);
-        let (graph, view) = (document.graphs.graph(graph), document.view(graph));
-        // An edge is only recognisable as internal once both endpoints have a fresh id, so
-        // resolve the whole set first, in selection order.
-        let mut clones: HashMap<NodeId, NodeId> = HashMap::with_capacity(view.selected.len());
-        let mut sources = Vec::with_capacity(view.selected.len());
-        for old_id in view.selected.iter().filter_map(|item| item.node()) {
-            if graph.stub(old_id).is_some() {
-                continue;
-            }
-            let node = graph
-                .find(old_id)
-                .expect("a selected node is a graph node or a stub");
-            // A subgraph holds one boundary node a side, and a wire from one comes from outside.
-            if node.boundary().is_some() {
-                continue;
-            }
-            let new_id = NodeId::from_u128(fresh());
-            clones.insert(old_id, new_id);
-            sources.push((old_id, new_id, node));
-        }
-        let mut intents = Vec::new();
-        if sources.is_empty() {
-            return intents;
-        }
-
-        let mut internal = Vec::new();
-        for (old_id, new_id, node) in sources {
-            let pos = view
-                .node_placements
-                .get(&old_id)
-                .expect("the view places every node the graph holds")
-                .pos
-                + DUPLICATE_OFFSET;
-            let mut bindings = Vec::new();
-            for (port, binding) in graph.input_bindings(old_id) {
-                let input = InputPort::new(new_id, port.port);
-                let seed = match binding {
-                    Binding::Wire(source) => {
-                        if let Some(&new_source) = clones.get(&source.node_id) {
-                            internal.push(Self::SetInput {
-                                input,
-                                to: Some(Binding::wire(new_source, source.port)),
-                            });
-                            continue;
-                        }
-                        match incoming {
-                            IncomingWires::Keep => Some(Binding::Wire(*source)),
-                            IncomingWires::Drop => unwired::binding(graph, scope, port),
-                        }
-                    }
-                    Binding::Const(_) => Some(binding.clone()),
-                };
-                bindings.extend(seed.map(|binding| BindingEntry {
-                    port: input,
-                    binding,
-                }));
-            }
-            intents.push(Self::AddNode {
-                pos,
-                node_id: new_id,
-                node: node.clone(),
-                bindings,
-            });
-        }
-        intents.extend(internal);
-        for subscription in graph.subscriptions() {
-            let Some(&subscriber) = clones.get(&subscription.subscriber) else {
-                continue;
-            };
-            let emitter = match (clones.get(&subscription.event.node_id), incoming) {
-                (Some(&clone), _) => clone,
-                (None, IncomingWires::Keep) => subscription.event.node_id,
-                (None, IncomingWires::Drop) => continue,
-            };
-            intents.push(Self::SetSubscription {
-                subscription: Subscription::new(
-                    EventPort::new(emitter, subscription.event.event),
-                    subscriber,
-                ),
-                to: true,
-            });
-        }
-        let tie_clones = Self::duplicate_ties(view, &clones, &mut fresh, &mut intents);
-        intents.push(Self::SetSelection {
-            to: clones
-                .values()
-                .copied()
-                .map(ItemId::Node)
-                .chain(tie_clones.into_iter().map(ItemId::Tie))
-                .collect(),
-        });
-        intents
-    }
-
-    /// [`Self::duplicate`]'s ties: each tie whose every wire has both end
-    /// nodes among `clones`' keys, cloned at the duplicate's offset with its
-    /// angle, with each cloned wire's route through the clones in its
-    /// original's order. Pushes the intents after every cloned wire's, and
-    /// returns the clones' ids.
-    fn duplicate_ties(
-        view: &GraphView,
-        clones: &HashMap<NodeId, NodeId>,
-        fresh: &mut impl FnMut() -> u128,
-        intents: &mut Vec<Self>,
-    ) -> Vec<TieId> {
-        let tie_clones: BTreeMap<TieId, TieId> = view
-            .ties_within(|node_id| clones.contains_key(&node_id))
-            .into_iter()
-            .map(|tie| (tie, TieId::from_u128(fresh())))
-            .collect();
-        // Each cloned wire with the clones on its route, in route order. A
-        // tie that also holds a wire leaving the set is not cloned, so its
-        // step drops out.
-        let routes: Vec<(WireKey, Vec<TieId>)> = view
-            .routes
-            .iter()
-            .filter_map(|(&wire, route)| {
-                let steps: Vec<TieId> = route
-                    .iter()
-                    .filter_map(|tie| tie_clones.get(tie).copied())
-                    .collect();
-                (!steps.is_empty()).then(|| (cloned_wire(wire, clones), steps))
-            })
-            .collect();
-        let mut made = BTreeSet::new();
-        for (original, &tie) in &tie_clones {
-            let placed = view.ties[original];
-            // A clone joins each route behind the clones already made on it.
-            let wires = routes
-                .iter()
-                .filter_map(|(wire, steps)| {
-                    let idx = steps.iter().position(|&step| step == tie)?;
-                    Some(RouteInsert {
-                        wire: *wire,
-                        at: steps[..idx]
-                            .iter()
-                            .filter(|step| made.contains(*step))
-                            .count(),
-                    })
-                })
-                .collect();
-            intents.push(Self::TieWires {
-                tie,
-                pos: placed.pos + DUPLICATE_OFFSET,
-                wires,
-            });
-            if let TieAngle::Pinned(_) = placed.angle {
-                intents.push(Self::SetTieAngle {
-                    tie,
-                    angle: placed.angle,
-                    gesture: None,
-                });
-            }
-            made.insert(tie);
-        }
-        tie_clones.into_values().collect()
+        let selected = &document.view(graph).selected;
+        Fragment::capture(document, graph, library, selected, incoming)
+            .remap(fresh)
+            .into_intents(DUPLICATE_OFFSET)
     }
 
     /// What Delete does to `view`'s selection: one removal per member, every node before every
@@ -787,25 +633,6 @@ impl GraphIntent {
             }
         }
         Ok(())
-    }
-}
-
-/// `wire` between the clones of its two ends.
-///
-/// # Panics
-///
-/// When `clones` holds no clone of an end.
-fn cloned_wire(wire: WireKey, clones: &HashMap<NodeId, NodeId>) -> WireKey {
-    let clone = |node_id: NodeId| clones[&node_id];
-    match wire {
-        WireKey::Data(DataWire { output, input }) => WireKey::Data(DataWire {
-            output: OutputPort::new(clone(output.node_id), output.port),
-            input: InputPort::new(clone(input.node_id), input.port),
-        }),
-        WireKey::Event(Subscription { event, subscriber }) => WireKey::Event(Subscription::new(
-            EventPort::new(clone(event.node_id), event.event),
-            clone(subscriber),
-        )),
     }
 }
 

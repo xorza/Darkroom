@@ -1,5 +1,5 @@
 //! The canvas's keyboard chords: Esc-deselect, Ctrl+0 reset-zoom, Ctrl+D
-//! duplicate, and Delete/Backspace.
+//! duplicate, Ctrl+C and Ctrl+V copy and paste, and Delete/Backspace.
 //!
 //! Raised from [`GraphUi::input`](crate::gui::pane::graph_ui::GraphUi::input) beside the
 //! pointer gestures, as intents drained before the record. Being reached from the canvas also
@@ -11,6 +11,7 @@ use scenarium::NodeId;
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
+use crate::gui::frame::clip_commands;
 use crate::gui::frame::framing::Framing;
 use crate::gui::frame::shortcuts;
 use crate::gui::frame::stage::Stage;
@@ -31,6 +32,8 @@ pub(crate) fn emit(ui: &mut Ui, stage: &mut Stage<'_, CanvasCtx<'_>>) {
     let graph_ctx = ctx.graph_ctx();
     let reset_zoom = ui.shortcut_pressed(shortcuts::RESET_VIEW);
     let duplicate = ui.shortcut_pressed(shortcuts::DUPLICATE);
+    let copy = ui.shortcut_pressed(shortcuts::COPY);
+    let paste = ui.shortcut_pressed(shortcuts::PASTE);
     let delete = ui.shortcut_pressed(shortcuts::DELETE) || ui.shortcut_pressed(Key::Backspace);
     let out = &mut *stage.out;
     let view = graph_ctx.view();
@@ -53,6 +56,24 @@ pub(crate) fn emit(ui: &mut Ui, stage: &mut Stage<'_, CanvasCtx<'_>>) {
                 IncomingWires::Drop,
                 || NodeId::unique().as_u128(),
             ),
+        );
+    }
+    if copy {
+        clip_commands::copy(
+            ui,
+            graph_ctx.document(),
+            graph_ctx.graph(),
+            graph_ctx.library(),
+            &view.selected,
+        );
+    }
+    if paste {
+        clip_commands::paste(
+            ui,
+            graph_ctx.document(),
+            graph_ctx.graph(),
+            graph_ctx.library(),
+            out,
         );
     }
     if delete {

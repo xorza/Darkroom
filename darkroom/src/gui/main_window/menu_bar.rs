@@ -1,3 +1,4 @@
+use common::ErrorChain;
 use palantir::{
     Align, Configure, DockOperation, Grid, MenuBar, MenuBarMenus, MenuItem, MenuSeparator, Panel,
     Sense, Shortcut, SizeSpec, Text, TextWrap, Track, Ui, VAlign, WidgetId, fmt,
@@ -5,11 +6,13 @@ use palantir::{
 use scenarium::NodeId;
 
 use crate::core::document::tab_ref::TabRef;
+use crate::core::edit::collapse;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
 use crate::core::edit::make_unique::MakeUnique;
 use crate::core::edit::subgraph_intent::SubgraphIntent;
 use crate::gui::frame::app_command::{AppCommand, FileCommand, RunCommand, ViewCommand};
+use crate::gui::frame::clip_commands;
 use crate::gui::frame::doc_ctx::DocCtx;
 use crate::gui::frame::framing::Framing;
 use crate::gui::frame::requests::Requests;
@@ -113,6 +116,12 @@ fn edit_menu(bar: &mut MenuBarMenus<'_>, stage: &mut Stage<'_, DocCtx<'_>>) {
                 ),
             );
         }
+        if item(ui, "Copy", Some(shortcuts::COPY), selected) {
+            clip_commands::copy(ui, open.document(), active, ctx.library(), ctx.selected());
+        }
+        if item(ui, "Paste", Some(shortcuts::PASTE), true) {
+            clip_commands::paste(ui, open.document(), active, ctx.library(), out);
+        }
         if item(ui, "Delete", Some(shortcuts::DELETE), selected) {
             out.extend_graph(
                 active,
@@ -163,7 +172,22 @@ fn graph_menu(bar: &mut MenuBarMenus<'_>, stage: &mut Stage<'_, DocCtx<'_>>) {
             }
         }
         MenuSeparator::new().show(ui);
-        let (graph, document) = (ctx.active(), ctx.document());
+        let (graph, document, library) = (ctx.active(), ctx.document(), ctx.library());
+        if item(ui, "Collapse to Subgraph", None, selected) {
+            match collapse::collapse(document, graph, library, ctx.selected()) {
+                Some(Ok(plan)) => plan.queue(graph, out.document()),
+                Some(Err(refusal)) => {
+                    out.push_app(AppCommand::Warn(ErrorChain::new(&refusal).to_string()));
+                }
+                None => {}
+            }
+        }
+        let instance = only_instance(ctx);
+        if item(ui, "Expand Subgraph", None, instance.is_some())
+            && let Some(instance) = instance
+        {
+            out.extend_graph(graph, collapse::expand(document, graph, library, instance));
+        }
         let picked: Vec<NodeId> = ctx
             .selected()
             .iter()
@@ -184,6 +208,21 @@ fn graph_menu(bar: &mut MenuBarMenus<'_>, stage: &mut Stage<'_, DocCtx<'_>>) {
             }
         }
     });
+}
+
+/// The one node the active graph's selection holds when it is an instance, ties aside.
+fn only_instance(ctx: DocCtx<'_>) -> Option<NodeId> {
+    let mut nodes = ctx.selected().iter().filter_map(|item| item.node());
+    let node_id = nodes.next()?;
+    if nodes.next().is_some() {
+        return None;
+    }
+    ctx.document()
+        .graphs
+        .graph(ctx.active())
+        .find(node_id)?
+        .subgraph()
+        .map(|_| node_id)
 }
 
 fn view_menu(bar: &mut MenuBarMenus<'_>, out: &mut Requests) {

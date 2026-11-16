@@ -7,6 +7,7 @@
 //! [`palantir::DockOperation`], the viewer's sampling preference a [`palantir::ImageFilter`], the
 //! interface size a `UserScale`. Nothing that draws is used here.
 
+pub(crate) mod clip;
 pub(crate) mod document;
 pub(crate) mod edit;
 pub(crate) mod io;
