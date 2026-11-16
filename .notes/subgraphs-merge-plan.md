@@ -9,7 +9,7 @@ the shape changes that keep behavior, then the features. Temporary: deleted once
 | # | Commit | State |
 |---|---|---|
 | 1 | Rename the port declarations `InputDecl` and `OutputDecl` | `78adc05e6`, pushed |
-| 2 | Name program nodes by `ProgramId` | in the worktree |
+| 2 | Name program nodes by `ProgramId` | in the worktree, reviewed |
 | 3–12 | | to do |
 
 ## Rules for the series
@@ -24,8 +24,8 @@ the shape changes that keep behavior, then the features. Temporary: deleted once
   rather than taking the tip's line back, and it is listed under Differences from the tip.
 - **A file belongs to the commit that writes its final form.** A file that spans several is staged
   by hunk; the lists below mark it *partial*.
-- **The two fixture documents are rewritten in every commit that changes the file shape** (3, 4,
-  5, 8): `darkroom/sample/sample.darkroom` and `darkroom/src/gui/app/session/bench.darkroom`, each
+- **The two fixture documents are rewritten in every commit that changes the file shape** (2, 3,
+  4, 5, 8): `darkroom/sample/sample.darkroom` and `darkroom/src/gui/app/session/bench.darkroom`, each
   by a load and a save in that commit's build, never by hand.
 - Sizes are `+/−` of the files each commit owns outright, so they are approximate.
 
@@ -81,6 +81,12 @@ tabs carry it.
   `core/document/tab_ref.rs` (the `ImageViewer` arm).
 - About +1 600 / −750, mostly mechanical. Review `program_id.rs`, `instance_path.rs` and
   `disk_store/format`.
+- **Interim code:** `GraphCtx::program_id(node_id)` answers the main graph's id alone, and
+  `RunCommand` and the worker bridge's eviction and flush still name one node, which `App::run`
+  turns into its `ProgramId`; commits 8 and 9 widen them to every instance of a node.
+- Held back to commit 8: `CompiledGraph::persists_to_disk`, whose one caller is the runtime host
+  compiling a `GraphSet`.
+- The bench fixture's viewer tabs are rewritten here, as a `ProgramId` is written as its list.
 
 ### 3. Keep stubs in scenarium's `Graph`
 
@@ -276,3 +282,7 @@ What the series' last tree holds where the tip holds otherwise.
   (commit 1).
 - **`scenarium/src/graph/mod.rs`:** the module doc lists `ports` among the modules beside the
   graph (commit 1); commit 6 keeps it when it rewrites that paragraph.
+- **`darkroom/src/gui/state/run_state/tests.rs`:** the helper that makes a test's program id is
+  `program_id(n)`, not `node_id(n)` (commit 2); commit 10 keeps the name.
+- **`darkroom/src/core/document/tests.rs`:** a test that the load closes a viewer whose path
+  goes through an instance (commit 2).
