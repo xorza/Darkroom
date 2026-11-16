@@ -210,19 +210,19 @@ fn a_removed_node_comes_back_whole() {
     assert!(document.graph.find(a).is_none());
     assert_eq!(document.graph.bindings.get(&edge), None);
 
-    let record = document.stubs.get(stub).cloned().unwrap();
+    let held = document.graph.stub(stub).cloned().unwrap();
     let stub_placement = document.main_view.node_placements[&stub];
     let step = GraphIntent::RemoveNode { node_id: stub }
         .commit_one(&mut document, &fixture.library)
         .unwrap()
         .expect("removing a stub commits");
-    assert!(!document.stubs.contains(stub));
+    assert!(document.graph.stub(stub).is_none());
     assert!(!document.main_view.node_placements.contains_key(&stub));
     document
         .validate()
         .expect("a stub's removal leaves a valid document");
     step.revert(&mut document);
-    assert_eq!(document.stubs.get(stub), Some(&record));
+    assert_eq!(document.graph.stub(stub), Some(&held));
     assert_eq!(document.main_view.node_placements[&stub], stub_placement);
     assert!(
         document.graph.find(stub).is_none(),
@@ -399,7 +399,7 @@ fn duplicate_skips_a_selected_stub() {
     let intents = GraphIntent::duplicate(&document, &library, IncomingWires::Drop, counter());
     commit_all(&mut document, &library, intents);
     assert_eq!(document.graph.len(), 2, "the graph node was copied");
-    assert_eq!(document.stubs.len(), 1, "the stub was not");
+    assert_eq!(document.graph.stubs().len(), 1, "the stub was not");
     document
         .validate()
         .expect("a duplicate leaves a valid document");

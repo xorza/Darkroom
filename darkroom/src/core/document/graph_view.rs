@@ -3,13 +3,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use glam::Vec2;
-use scenarium::{DetachedNode, Graph as CoreGraph, NodeId};
+use scenarium::{Graph as CoreGraph, NodeId, Stub};
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::error::GraphViewValidationError;
 use crate::core::document::item_id::ItemId;
 use crate::core::document::route::Route;
-use crate::core::document::stubs::Stubs;
 use crate::core::document::tie::{Tie, TieId};
 use crate::core::document::viewport::Viewport;
 use crate::core::document::wire_key::WireKey;
@@ -123,11 +122,7 @@ impl GraphView {
         })
     }
 
-    pub(super) fn validate(
-        &self,
-        graph: &CoreGraph,
-        stubs: &Stubs,
-    ) -> Result<(), GraphViewValidationError> {
+    pub(super) fn validate(&self, graph: &CoreGraph) -> Result<(), GraphViewValidationError> {
         if !self.viewport.is_valid() {
             return Err(GraphViewValidationError::InvalidViewport);
         }
@@ -137,15 +132,15 @@ impl GraphView {
                 return Err(GraphViewValidationError::NonFinitePos { node_id: *node_id });
             }
         }
-        // A map has unique keys and the graph and stubs are disjoint, so counts plus reverse
+        // A map has unique keys and a graph's nodes and stubs are disjoint, so counts plus reverse
         // membership prove the view places exactly their node set.
-        if self.node_placements.len() != graph.len() + stubs.len() {
+        if self.node_placements.len() != graph.len() + graph.stubs().len() {
             return Err(GraphViewValidationError::NodeCount);
         }
         let ids = graph
             .iter()
             .map(|node| node.node_id)
-            .chain(stubs.iter().map(DetachedNode::node_id));
+            .chain(graph.stubs().map(Stub::node_id));
         for node_id in ids {
             if !self.node_placements.contains_key(&node_id) {
                 return Err(GraphViewValidationError::MissingNode { node_id });
@@ -258,9 +253,9 @@ mod tests {
         let tie = fixture.tie(Vec2::new(110.0, 0.0), [data, event]);
         let DocumentFixture { mut document, .. } = fixture;
         document.main_view.selected.insert(ItemId::Tie(tie));
-        let (graph, stubs) = (&document.graph, &document.stubs);
+        let graph = &document.graph;
         let valid = document.main_view.clone();
-        valid.validate(graph, stubs).unwrap();
+        valid.validate(graph).unwrap();
 
         let ghost = TieId::unique();
         let other_output = WireKey::Data(DataWire {
@@ -270,7 +265,7 @@ mod tests {
         let with = |change: &dyn Fn(&mut GraphView)| {
             let mut view = valid.clone();
             change(&mut view);
-            view.validate(graph, stubs)
+            view.validate(graph)
         };
         let route = |ties: &[TieId]| Route::unchecked(ties.iter().copied());
         for degrees in [0.0, 359.9] {

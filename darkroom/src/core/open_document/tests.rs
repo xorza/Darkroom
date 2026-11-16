@@ -22,9 +22,9 @@ use crate::core::open_document::{Launched, Loaded, OpenDocument};
 use crate::core::runtime_library::RuntimeLibrary;
 use crate::core::status_log::StatusLog;
 use scenarium::{
-    Binding, BindingEntry, BindingRejection, Compiler, ConstValue, DataType, EventPort, FuncId,
-    Graph, InputDecl, InputPort, Library, Node, NodeId, OutputDecl, ProgramId, Repair,
-    Subscription, SubscriptionRejection, Unresolved, internals,
+    Binding, BindingEntry, BindingRejection, Compiler, ConstValue, DataType, DetachReason,
+    EventPort, FuncId, Graph, InputDecl, InputPort, Library, Node, NodeId, OutputDecl, ProgramId,
+    Repair, Subscription, SubscriptionRejection, Unresolved, internals,
 };
 
 #[test]
@@ -211,16 +211,16 @@ fn a_node_whose_ports_moved_loads_as_a_stub_and_attaches_again() {
     let mut loaded = OpenDocument::load(first, &changed).unwrap();
     assert_eq!(
         loaded.report.repairs,
-        [DocumentRepair::Stubbed {
+        [DocumentRepair::Graph(Repair::Stubbed {
             node_id: mid_id,
-            reason: Unresolved::ChangedPorts,
-        }]
+            reason: DetachReason::Unresolved(Unresolved::ChangedPorts),
+        })]
     );
     assert!(loaded.open.dirty, "a save accepts the change");
     let document = &loaded.open.document;
     assert!(document.graph.find(mid_id).is_none());
     assert_eq!(
-        document.stubs.get(mid_id).unwrap().bindings(),
+        document.graph.stub(mid_id).unwrap().record.bindings(),
         [
             BindingEntry {
                 port: into_mid,
@@ -250,18 +250,18 @@ fn a_node_whose_ports_moved_loads_as_a_stub_and_attaches_again() {
     assert_eq!(
         reattached.report.repairs,
         [
-            DocumentRepair::Reattached { node_id: mid_id },
-            DocumentRepair::StubBindingDropped {
+            DocumentRepair::Graph(Repair::Reattached { node_id: mid_id }),
+            DocumentRepair::Graph(Repair::StubBindingDropped {
                 node_id: mid_id,
                 entry: BindingEntry {
                     port: into_dst,
                     binding: Binding::wire(mid_id, 0),
                 },
-            },
+            }),
         ]
     );
     let document = &reattached.open.document;
-    assert!(document.stubs.get(mid_id).is_none());
+    assert!(document.graph.stub(mid_id).is_none());
     assert_eq!(
         document.graph.bindings.get(&into_mid),
         Some(&Binding::wire(src_id, 0))

@@ -162,8 +162,8 @@
             ), Const(Enum("auto_asinh"))),
         ],
         subscriptions: [],
+        stubs: [],
     ),
-    stubs: [],
     main_view: (
         node_placements: {
             ("1597eb8d-1700-4637-9d30-37da1b6d28d4"): (

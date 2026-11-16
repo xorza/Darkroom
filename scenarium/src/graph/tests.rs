@@ -9,13 +9,15 @@ use crate::graph::binding::Binding;
 use crate::graph::binding_entry::BindingEntry;
 use crate::graph::detached::{DetachedNode, DetachedNodeParts};
 use crate::graph::error::{
-    BindingRejection, DetachedNodeError, GraphValidationError, SubscriptionRejection, Unresolved,
+    BindingRejection, DetachReason, DetachedNodeError, GraphValidationError, SubscriptionRejection,
+    Unresolved,
 };
 use crate::graph::func::Func;
 use crate::graph::func::func_builder::FuncBuilder;
 use crate::graph::identity::{EventPort, FuncId};
 use crate::graph::node::{CacheMode, Node, NodeKind};
 use crate::graph::reconciled::Repair;
+use crate::graph::stub::Stub;
 use crate::graph::subscription::Subscription;
 use crate::graph::{Graph, InputPort, NodeId, OutputPort};
 use crate::internals;
@@ -554,6 +556,7 @@ fn loading_rejects_a_corrupt_graph() {
         nodes: Box<RawValue>,
         bindings: Vec<Box<RawValue>>,
         subscriptions: Box<RawValue>,
+        stubs: Vec<Box<RawValue>>,
     }
 
     let mut g = TestGraph::sample();
@@ -602,6 +605,175 @@ fn loading_rejects_a_corrupt_graph() {
         message.contains("duplicate binding for input port"),
         "{message}"
     );
+
+    // Stubs decode from a sequence into a map too, so a repeated node id is caught in the decode;
+    // a stub under a node's id decodes, and validation names it.
+    let mut stubbed = TestGraph::sample();
+    let get_a = stubbed.id("get_a");
+    let record = stubbed.graph.detach_node(get_a);
+    stubbed.graph.insert_stub(Stub {
+        record: record.clone(),
+        reason: DetachReason::Unresolved(Unresolved::MissingFunc),
+    });
+    let encoded = ser::to_string(&stubbed.graph).unwrap();
+    let mut wire: WireGraph = ron::from_str(&encoded).expect("the wire shape still matches");
+    wire.stubs.push(wire.stubs[0].clone());
+    let bytes = ser::to_string(&wire).unwrap().into_bytes();
+    let error = SerdeFormat::Ron
+        .deserialize::<Graph>(&bytes)
+        .expect_err("a repeated stub id cannot decode into the stub map");
+    let message = ErrorChain::new(&error).to_string();
+    assert!(message.contains("duplicate stub for node"), "{message}");
+    let mut shadowed = stubbed.graph.clone();
+    shadowed.nodes.insert(get_a, record.node().clone());
+    assert!(matches!(
+        shadowed.validate(),
+        Err(GraphValidationError::StubHoldsNode { node_id }) if node_id == get_a
+    ));
+}
+
+/// A load attaches each stub whose node resolves again, with the wiring that still has both ends
+/// and lands on an input the graph has not bound since, and drops a stub saved under a node's id.
+/// Here the stub of `sum` holds a wire from `get_a`, which comes back; one from `get_b`, which
+/// the graph lost; one into `mult`, whose input the graph bound since; and a subscription to an
+/// emitter the graph lacks. A stub saved under `get_a`'s id goes and the node stays.
+#[test]
+fn a_load_attaches_each_stub_that_resolves_again_with_the_wiring_that_fits() {
+    let mut g = TestGraph::sample();
+    let (get_a, get_b, sum, mult) = (g.id("get_a"), g.id("get_b"), g.id("sum"), g.id("mult"));
+    let detached = g.graph.detach_node(sum);
+    let absent = Subscription::new(EventPort::new(NodeId::unique(), 0), sum);
+    let record = DetachedNode::new(DetachedNodeParts {
+        node_id: sum,
+        node: detached.node().clone(),
+        bindings: detached.bindings().to_vec(),
+        subscriptions: vec![absent],
+    })
+    .unwrap();
+    let reason = DetachReason::Unresolved(Unresolved::MissingFunc);
+    g.graph.insert_stub(Stub {
+        record: record.clone(),
+        reason,
+    });
+    g.graph.detach_node(get_b);
+    let into_mult = InputPort::new(mult, 0);
+    g.graph
+        .set_input_binding(into_mult, Binding::wire(get_a, 0));
+    let shadow = g.graph.snapshot_node(get_a).unwrap();
+    g.graph.stubs.insert(
+        get_a,
+        Stub {
+            record: shadow,
+            reason,
+        },
+    );
+
+    let reconciled = g.graph.reconcile(&g.library);
+
+    let into_sum = InputPort::new(sum, 0);
+    let dropped = record
+        .bindings()
+        .iter()
+        .filter(|entry| entry.port != into_sum)
+        .map(|entry| Repair::StubBindingDropped {
+            node_id: sum,
+            entry: entry.clone(),
+        });
+    let expected: Vec<Repair> = [
+        Repair::DuplicateStub { node_id: get_a },
+        Repair::Reattached { node_id: sum },
+    ]
+    .into_iter()
+    .chain(dropped)
+    .chain([Repair::StubSubscriptionDropped {
+        node_id: sum,
+        subscription: absent,
+    }])
+    .collect();
+    assert_eq!(reconciled.repairs, expected);
+    assert_eq!(
+        reconciled.repairs.len(),
+        5,
+        "two of the stub's three wires are dropped"
+    );
+    assert_eq!(g.graph.stubs().len(), 0);
+    assert!(g.graph.find(get_a).is_some(), "the node keeps its id");
+    assert_eq!(
+        g.graph.bindings.get(&into_sum),
+        Some(&Binding::wire(get_a, 0))
+    );
+    assert_eq!(
+        g.graph.bindings.get(&into_mult),
+        Some(&Binding::wire(get_a, 0)),
+        "the input bound since keeps its own wire"
+    );
+    assert_eq!(g.graph.subscriptions().len(), 0);
+    g.graph.validate_with(&g.library).unwrap();
+}
+
+/// A graph keeps each node it cannot hold as a stub beside its nodes: the ids of the two are
+/// disjoint, so neither an insert nor a stub takes an id the other holds; a stub round-trips with
+/// the graph; and the constants of the graph are its bindings' and its stubs', for reading and
+/// for writing.
+#[test]
+fn a_graph_keeps_its_stubs_beside_its_nodes() {
+    let mut g = TestGraph::sample();
+    g.constant("sum", 1, 4i64);
+    let (get_b, sum) = (g.id("get_b"), g.id("sum"));
+    let record = g.graph.detach_node(sum);
+    let reason = DetachReason::Unresolved(Unresolved::MissingFunc);
+    g.graph.insert_stub(Stub {
+        record: record.clone(),
+        reason,
+    });
+    let graph = g.graph.clone();
+    assert!(graph.find(sum).is_none());
+    assert_eq!(graph.stub(sum).map(|stub| stub.reason), Some(reason));
+    assert!(graph.holds(sum));
+    assert!(graph.holds(get_b));
+    assert!(!graph.holds(NodeId::unique()));
+    assert_eq!(graph.len(), 4, "a stub is no node");
+
+    let node_over_stub = panic::catch_unwind(AssertUnwindSafe(|| {
+        g.graph.insert(sum, record.node().clone());
+    }));
+    assert!(node_over_stub.is_err(), "a node takes no stub's id");
+    let shadow = g.graph.snapshot_node(get_b).unwrap();
+    let stub_over_node = panic::catch_unwind(AssertUnwindSafe(|| {
+        g.graph.insert_stub(Stub {
+            record: shadow,
+            reason,
+        });
+    }));
+    assert!(stub_over_node.is_err(), "a stub takes no node's id");
+
+    for format in SerdeFormat::ALL {
+        let bytes = format.serialize(&graph).unwrap();
+        assert_eq!(
+            format.deserialize::<Graph>(&bytes).unwrap(),
+            graph,
+            "{format:?}"
+        );
+    }
+
+    let into_sum = InputPort::new(sum, 1);
+    assert_eq!(
+        graph.constants().collect::<Vec<_>>(),
+        [(into_sum, &ConstValue::Int(4))],
+        "the sample's only constant sits in the stub's record"
+    );
+    let mut written = graph;
+    for value in written.constants_mut() {
+        *value = ConstValue::Int(9);
+    }
+    assert_eq!(
+        written.stub(sum).unwrap().record.bindings()[1],
+        BindingEntry {
+            port: into_sum,
+            binding: Binding::Const(ConstValue::Int(9)),
+        }
+    );
+    written.validate().unwrap();
 }
 
 /// Admission refuses wiring past what a node declares — an input, a
@@ -828,6 +1000,18 @@ fn reconcile_removes_exactly_what_the_library_cannot_hold() {
             Repair::DanglingSubscription {
                 subscription: Subscription::new(absent_event, dst),
             },
+            Repair::Stubbed {
+                node_id: changed,
+                reason: DetachReason::Unresolved(Unresolved::ChangedPorts),
+            },
+            Repair::Stubbed {
+                node_id: gone,
+                reason: DetachReason::Unresolved(Unresolved::MissingFunc),
+            },
+            Repair::Stubbed {
+                node_id: nil_func,
+                reason: DetachReason::Unresolved(Unresolved::MissingFunc),
+            },
             rejected(1, Binding::wire(src, 7), BindingRejection::UndeclaredOutput),
             rejected(2, Binding::wire(src, 0), BindingRejection::WiredConstOnly),
             rejected(
@@ -858,20 +1042,21 @@ fn reconcile_removes_exactly_what_the_library_cannot_hold() {
         ]
     );
 
-    let detached: Vec<_> = reconciled
-        .detached
-        .iter()
-        .map(|detachment| (detachment.record.node_id(), detachment.reason))
+    let stubs: Vec<_> = g
+        .graph
+        .stubs()
+        .map(|stub| (stub.node_id(), stub.reason))
         .collect();
     assert_eq!(
-        detached,
+        stubs,
         [
-            (changed, Unresolved::ChangedPorts),
-            (gone, Unresolved::MissingFunc),
-            (nil_func, Unresolved::MissingFunc),
-        ]
+            (changed, DetachReason::Unresolved(Unresolved::ChangedPorts)),
+            (gone, DetachReason::Unresolved(Unresolved::MissingFunc)),
+            (nil_func, DetachReason::Unresolved(Unresolved::MissingFunc)),
+        ],
+        "the stubs, in node-id order"
     );
-    let changed_record = &reconciled.detached[0].record;
+    let changed_record = &g.graph.stub(changed).unwrap().record;
     assert_eq!(
         changed_record.bindings(),
         [BindingEntry {
@@ -880,7 +1065,7 @@ fn reconcile_removes_exactly_what_the_library_cannot_hold() {
         }],
         "detached first, so the edge to `gone` is `changed`'s"
     );
-    let gone_record = &reconciled.detached[1].record;
+    let gone_record = &g.graph.stub(gone).unwrap().record;
     assert!(gone_record.bindings().is_empty());
     assert_eq!(
         gone_record.subscriptions(),

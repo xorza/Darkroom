@@ -1,6 +1,6 @@
 //! [`SetNode`]: a node added to the document or removed from it.
 
-use scenarium::{Binding, DetachedNode, InputPort, NodeId};
+use scenarium::{Binding, DetachedNode, InputPort, NodeId, Stub};
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::Document;
@@ -12,20 +12,28 @@ use crate::core::edit::step::change::Direction;
 use crate::core::edit::step::reversible::Reversible;
 use crate::core::edit::step::set_ties::SetTies;
 
-/// Where a node's record lives in the document.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-enum Home {
-    Graph,
-    Stubs,
+/// What the document holds of one node: a graph node, as the record its detach leaves, or a
+/// stub, which keeps its record and why the load took it out.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+enum Held {
+    Node(DetachedNode),
+    Stub(Stub),
 }
 
-/// Everything the document holds about one node: the record carrying every edge that touched it
-/// and where it lives, its placement, and whether it was selected. What a removal takes out and
-/// an undo puts back.
+impl Held {
+    const fn record(&self) -> &DetachedNode {
+        match self {
+            Self::Node(record) | Self::Stub(Stub { record, .. }) => record,
+        }
+    }
+}
+
+/// Everything the document holds about one node: the node or stub with every edge that touched
+/// it, its placement, and whether it was selected. What a removal takes out and an undo puts
+/// back.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct NodeEntry {
-    detached: DetachedNode,
-    home: Home,
+    held: Held,
     /// Restored verbatim, so an undone delete comes back where it was and at its depth, not
     /// frontmost.
     placement: NodePlacement,
@@ -37,9 +45,9 @@ impl NodeEntry {
     /// Read `node_id`'s whole entry out of `document`, a graph node or a stub, or `None` when the
     /// document no longer holds it, the ordinary outcome of an intent that spans frames.
     pub(crate) fn capture(document: &Document, node_id: NodeId) -> Option<Self> {
-        let (detached, home) = match document.graph.snapshot_node(node_id) {
-            Some(detached) => (detached, Home::Graph),
-            None => (document.stubs.get(node_id)?.clone(), Home::Stubs),
+        let held = match document.graph.snapshot_node(node_id) {
+            Some(record) => Held::Node(record),
+            None => Held::Stub(document.graph.stub(node_id)?.clone()),
         };
         Some(Self {
             placement: *document
@@ -48,17 +56,16 @@ impl NodeEntry {
                 .get(&node_id)
                 .expect("the view places every node and stub"),
             selected: document.main_view.selected.contains(&ItemId::Node(node_id)),
-            detached,
-            home,
+            held,
         })
     }
 
     /// The wires the graph holds on this node: none for a stub, whose
     /// record keeps its wiring off the graph.
     pub(crate) fn wires(&self) -> impl Iterator<Item = WireKey> + '_ {
-        let (bindings, subscriptions) = match self.home {
-            Home::Graph => (self.detached.bindings(), self.detached.subscriptions()),
-            Home::Stubs => (&[][..], &[][..]),
+        let (bindings, subscriptions) = match &self.held {
+            Held::Node(record) => (record.bindings(), record.subscriptions()),
+            Held::Stub(_) => (&[][..], &[][..]),
         };
         let data = bindings.iter().filter_map(|entry| match entry.binding {
             Binding::Wire(output) => Some(WireKey::Data(DataWire {
@@ -70,11 +77,15 @@ impl NodeEntry {
         data.chain(subscriptions.iter().copied().map(WireKey::Event))
     }
 
+    const fn node_id(&self) -> NodeId {
+        self.held.record().node_id()
+    }
+
     fn restore(&self, document: &mut Document) {
-        let node_id = self.detached.node_id();
-        match self.home {
-            Home::Graph => document.graph.attach_node(self.detached.clone()),
-            Home::Stubs => document.stubs.insert(self.detached.clone()),
+        let node_id = self.node_id();
+        match &self.held {
+            Held::Node(record) => document.graph.attach_node(record.clone()),
+            Held::Stub(stub) => document.graph.insert_stub(stub.clone()),
         }
         document
             .main_view
@@ -113,8 +124,7 @@ impl SetNode {
     pub(crate) fn insertion(detached: DetachedNode, placement: NodePlacement) -> Self {
         Self {
             entry: NodeEntry {
-                detached,
-                home: Home::Graph,
+                held: Held::Node(detached),
                 placement,
                 selected: false,
             },
@@ -135,7 +145,7 @@ impl SetNode {
     /// The graph inputs a removal's node fed, which its removal leaves unbound;
     /// none for an insertion.
     pub(crate) fn fed_inputs(&self) -> impl Iterator<Item = InputPort> + '_ {
-        let node_id = self.entry.detached.node_id();
+        let node_id = self.entry.node_id();
         self.entry
             .wires()
             .filter(move |_| self.edit == NodeEdit::Removal)
@@ -151,13 +161,13 @@ impl SetNode {
     /// means the document held wiring the history never captured, which an undo would silently
     /// discard. It holds because a step is reverted against the document its own apply produced.
     fn take_out(&self, document: &mut Document) {
-        let node_id = self.entry.detached.node_id();
-        let removed = match self.entry.home {
-            Home::Graph => document.remove_node(node_id),
-            Home::Stubs => document.remove_stub(node_id),
+        let node_id = self.entry.node_id();
+        let removed = match self.entry.held {
+            Held::Node(_) => Held::Node(document.remove_node(node_id)),
+            Held::Stub(_) => Held::Stub(document.remove_stub(node_id)),
         };
         debug_assert_eq!(
-            removed, self.entry.detached,
+            removed, self.entry.held,
             "removal diverged from the step that recorded it"
         );
     }

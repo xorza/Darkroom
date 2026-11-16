@@ -15,9 +15,9 @@
 use glam::Vec2;
 use scenarium::internals::test_graph::TestGraph;
 use scenarium::{
-    Binding, BindingEntry, ConstValue, DataType, DetachedNode, DetachedNodeParts, EventPort, Func,
-    FuncId, Graph, InputDecl, InputPort, Library, Node, NodeId, OutputDecl, OutputPort,
-    Subscription, internals,
+    Binding, BindingEntry, ConstValue, DataType, DetachReason, DetachedNode, DetachedNodeParts,
+    EventPort, Func, FuncId, Graph, InputDecl, InputPort, Library, Node, NodeId, OutputDecl,
+    OutputPort, Stub, Subscription, internals,
 };
 
 use palantir::DockOperation;
@@ -163,10 +163,10 @@ impl DocumentFixture {
     }
 
     fn insert_stub(&mut self, node: Node, pos: Vec2) -> NodeId {
-        assert!(
-            self.library.func_of(&node).is_err(),
-            "a stub's func does not resolve"
-        );
+        let reason = self
+            .library
+            .func_of(&node)
+            .expect_err("a stub's func does not resolve");
         let node_id = NodeId::unique();
         let record = DetachedNode::new(DetachedNodeParts {
             node_id,
@@ -175,7 +175,10 @@ impl DocumentFixture {
             subscriptions: Vec::new(),
         })
         .expect("a stub with no wiring is a well-formed record");
-        self.document.stubs.insert(record);
+        self.document.graph.insert_stub(Stub {
+            record,
+            reason: DetachReason::from(reason),
+        });
         place(&mut self.document.main_view, node_id, pos);
         node_id
     }
@@ -188,15 +191,12 @@ impl DocumentFixture {
 
     /// Bind the first input of the stub `stub` to `value`, in place of its record's wiring.
     pub(crate) fn bind_stub(&mut self, stub: NodeId, value: ConstValue) {
-        let record = self
-            .document
-            .stubs
-            .remove(stub)
-            .expect("a stub the fixture added");
-        self.document.stubs.insert(
-            DetachedNode::new(DetachedNodeParts {
+        let graph = &mut self.document.graph;
+        let held = graph.remove_stub(stub).expect("a stub the fixture added");
+        graph.insert_stub(Stub {
+            record: DetachedNode::new(DetachedNodeParts {
                 node_id: stub,
-                node: record.node().clone(),
+                node: held.record.node().clone(),
                 bindings: vec![BindingEntry {
                     port: InputPort::new(stub, 0),
                     binding: Binding::Const(value),
@@ -204,7 +204,8 @@ impl DocumentFixture {
                 subscriptions: Vec::new(),
             })
             .expect("a stub with one const binding is a well-formed record"),
-        );
+            reason: held.reason,
+        });
     }
 
     /// The `i`th node in placement order — the order the constructors add in,

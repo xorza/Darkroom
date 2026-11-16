@@ -4,7 +4,7 @@
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-use scenarium::{BindingEntry, NodeId, ProgramId, Repair, Subscription, Unresolved};
+use scenarium::{NodeId, ProgramId, Repair};
 
 use crate::core::document::item_id::ItemId;
 use crate::core::document::tie::TieId;
@@ -30,32 +30,8 @@ pub(crate) struct ForeignPath {
 /// One change a load made.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum DocumentRepair {
-    /// A stub saved under the id of a graph node, which the graph keeps.
-    DuplicateStub {
-        node_id: NodeId,
-    },
-    /// A stub whose func resolves again, attached to the graph.
-    Reattached {
-        node_id: NodeId,
-    },
-    /// A reattached stub's binding whose other end is gone, or whose input
-    /// the graph has bound since.
-    StubBindingDropped {
-        node_id: NodeId,
-        entry: BindingEntry,
-    },
-    /// A reattached stub's subscription whose other end is gone.
-    StubSubscriptionDropped {
-        node_id: NodeId,
-        subscription: Subscription,
-    },
-    /// A graph repair: wiring or a node the library cannot hold.
+    /// A graph repair: wiring, a node the library cannot hold, or a stub it can again.
     Graph(Repair),
-    /// A node the library cannot resolve, kept as a stub.
-    Stubbed {
-        node_id: NodeId,
-        reason: Unresolved,
-    },
     ViewportReset,
     /// A placement for no node or stub.
     PlacementDropped {
@@ -165,29 +141,7 @@ impl Display for LoadReport {
 impl Display for DocumentRepair {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Self::DuplicateStub { node_id } => {
-                write!(f, "removed a stub of {node_id:?}, which the graph holds")
-            }
-            Self::Reattached { node_id } => {
-                write!(f, "attached the stub {node_id:?} again: its func resolves")
-            }
-            Self::StubBindingDropped { node_id, entry } => write!(
-                f,
-                "removed {:?} on {:?} from the stub {node_id:?}: its other end is gone, or the \
-                 input is bound",
-                entry.binding, entry.port
-            ),
-            Self::StubSubscriptionDropped {
-                node_id,
-                subscription,
-            } => write!(
-                f,
-                "removed {subscription:?} from the stub {node_id:?}: its other end is gone"
-            ),
             Self::Graph(repair) => repair.fmt(f),
-            Self::Stubbed { node_id, reason } => {
-                write!(f, "kept {node_id:?} as a stub: {reason}")
-            }
             Self::ViewportReset => f.write_str("reset the viewport"),
             Self::PlacementDropped { node_id } => {
                 write!(

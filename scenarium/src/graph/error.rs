@@ -3,6 +3,7 @@
 //! a library cannot resolve, and the wiring
 //! [`admit`](crate::graph::Graph::admit) refuses.
 
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::graph::identity::NodeId;
@@ -30,12 +31,20 @@ pub enum DetachedNodeError {
 /// Why a node has no declaration in a library: what
 /// [`Library::func_of`](crate::Library::func_of) answers for a node a graph
 /// cannot hold.
-#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Error, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Unresolved {
     #[error("the library holds no func under its id")]
     MissingFunc,
     #[error("the library holds its func with other ports than it was authored against")]
     ChangedPorts,
+}
+
+/// Why a load took a node out of its graph. The [`Stub`](crate::Stub) a detach leaves keeps it,
+/// as its own answer apart from why a node does not resolve.
+#[derive(Debug, Error, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DetachReason {
+    #[error(transparent)]
+    Unresolved(#[from] Unresolved),
 }
 
 /// Why [`Graph::admit`](crate::Graph::admit) refuses a binding.
@@ -69,6 +78,8 @@ pub enum SubscriptionRejection {
 pub enum GraphValidationError {
     #[error("graph contains a node with a nil id")]
     NilNodeId,
+    #[error("a stub holds the id of node {node_id:?}")]
+    StubHoldsNode { node_id: NodeId },
     #[error("node {node_id:?} does not resolve: {reason}")]
     Unresolved { node_id: NodeId, reason: Unresolved },
     #[error("binding on missing node {node_id:?}")]

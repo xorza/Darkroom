@@ -500,8 +500,8 @@
                 subscriber: ("5fb6630e-e3aa-4f4d-9b48-d8ee886a2efc"),
             ),
         ],
+        stubs: [],
     ),
-    stubs: [],
     main_view: (
         node_placements: {
             ("043a77db-9446-4ded-9231-8bac95b7fe12"): (

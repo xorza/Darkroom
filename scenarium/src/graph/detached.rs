@@ -3,9 +3,8 @@
 //!
 //! A [`DetachedNode`] carries a removed node with all the wiring that touched it, produced by a
 //! `Graph` snapshot or detach and consumed by the matching attach, so undo restores wiring
-//! rather than reconstructing it. A host keeps the records
-//! [`Graph::reconcile`](crate::Graph::reconcile) detaches the same way, until the library
-//! resolves their nodes again.
+//! rather than reconstructing it. A [`Stub`](crate::Stub) holds one for a node its graph cannot
+//! hold, until a load resolves the node again.
 //!
 //! [`DetachedNode::new`] is the one way to build one from outside, so a malformed record is
 //! refused where it is made, not halfway through the graph edit.

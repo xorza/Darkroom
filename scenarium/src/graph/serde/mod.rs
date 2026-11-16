@@ -1,6 +1,6 @@
 //! Field codecs for [`Graph`](crate::graph::Graph)'s tables. A map built by repeated `insert`
 //! keeps the last value for a repeated key, so a corrupt document would load as a quietly
-//! different graph. Both codecs decode entry by entry and reject the collision, since validation
+//! different graph. Each codec decodes entry by entry and rejects the collision, since validation
 //! could only assert after the evidence was gone.
 
 use std::collections::BTreeMap;
@@ -14,6 +14,7 @@ use hashbrown::HashMap;
 use crate::graph::binding::Binding;
 use crate::graph::identity::{InputPort, NodeId};
 use crate::graph::node::Node;
+use crate::graph::stub::Stub;
 
 /// The binding table travels as a sequence of `(port, binding)` pairs.
 pub(super) fn serialize_bindings<S: Serializer>(
@@ -32,6 +33,32 @@ pub(super) fn deserialize_bindings<'de, D: Deserializer<'de>>(
         if map.insert(port, binding).is_some() {
             return Err(D::Error::custom(format!(
                 "duplicate binding for input port {port:?}"
+            )));
+        }
+    }
+    Ok(map)
+}
+
+/// The stubs travel as the list of stubs, in node-id order.
+pub(super) fn serialize_stubs<S: Serializer>(
+    map: &BTreeMap<NodeId, Stub>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.collect_seq(map.values())
+}
+
+/// Refuses a list that repeats a node id: two stubs under one id are two nodes, and keeping the
+/// last loses the other's settings.
+pub(super) fn deserialize_stubs<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<BTreeMap<NodeId, Stub>, D::Error> {
+    let stubs = Vec::<Stub>::deserialize(deserializer)?;
+    let mut map = BTreeMap::new();
+    for stub in stubs {
+        let node_id = stub.node_id();
+        if map.insert(node_id, stub).is_some() {
+            return Err(D::Error::custom(format!(
+                "duplicate stub for node {node_id:?}"
             )));
         }
     }

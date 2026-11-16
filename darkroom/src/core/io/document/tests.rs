@@ -218,7 +218,7 @@ fn paths_of(document: &Document, nodes: [NodeId; 4]) -> Vec<String> {
         };
         paths.extend(value.as_fs_paths().unwrap().iter().cloned());
     }
-    let stub = document.stubs.get(nodes[3]).unwrap();
+    let stub = &document.graph.stub(nodes[3]).unwrap().record;
     let Binding::Const(value) = &stub.bindings()[0].binding else {
         panic!("a const binding");
     };

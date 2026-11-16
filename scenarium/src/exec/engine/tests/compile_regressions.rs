@@ -129,8 +129,9 @@ async fn a_detached_producer_leaves_its_consumer_missing_an_input() {
     let get_a = g.graph.find(g.id("get_a")).unwrap().func_id().unwrap();
     g.library.remove(get_a);
     let reconciled = g.graph.reconcile(&g.library);
-    assert_eq!(reconciled.detached.len(), 1);
+    assert_eq!(g.graph.stubs().len(), 1);
     assert!(g.graph.find(g.id("get_a")).is_none());
+    assert!(!reconciled.is_empty());
 
     let mut e = TestEngine::over(g);
     let run = e.run_sinks().await;

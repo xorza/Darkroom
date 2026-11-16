@@ -81,11 +81,11 @@ impl<'a> NodeCtx<'a> {
         let (node, declaration) = if let Some(node) = graph_ctx.body().find(node_id) {
             (node, Declaration::Func(node.func(library)))
         } else {
-            let record = graph_ctx
-                .document()
-                .stubs
-                .get(node_id)
-                .expect("every placement names a graph node or a stub");
+            let record = &graph_ctx
+                .body()
+                .stub(node_id)
+                .expect("every placement names a graph node or a stub")
+                .record;
             let reason = library
                 .func_of(record.node())
                 .expect_err("a stub does not resolve");

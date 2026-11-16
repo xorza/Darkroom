@@ -236,7 +236,7 @@ impl GraphIntent {
         let mut clones: HashMap<NodeId, NodeId> = HashMap::with_capacity(view.selected.len());
         let mut sources = Vec::with_capacity(view.selected.len());
         for old_id in view.selected.iter().filter_map(|item| item.node()) {
-            if document.stubs.contains(old_id) {
+            if graph.stub(old_id).is_some() {
                 continue;
             }
             let node = graph

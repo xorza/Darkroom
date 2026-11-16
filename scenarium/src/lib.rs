@@ -37,7 +37,8 @@ pub use graph::binding::Binding;
 pub use graph::binding_entry::BindingEntry;
 pub use graph::detached::{DetachedNode, DetachedNodeParts};
 pub use graph::error::{
-    BindingRejection, DetachedNodeError, GraphValidationError, SubscriptionRejection, Unresolved,
+    BindingRejection, DetachReason, DetachedNodeError, GraphValidationError, SubscriptionRejection,
+    Unresolved,
 };
 pub use graph::func::error::{FuncValidationError, InvokeError, InvokeResult};
 pub use graph::func::event::{EventFires, EventLambda};
@@ -52,7 +53,8 @@ pub use graph::node::{CacheMode, Node};
 pub use graph::node_ref::NodeRef;
 pub use graph::ports::{InputDecl, OutputDecl, Ports};
 pub use graph::program_id::{ProgramId, ProgramIdError};
-pub use graph::reconciled::{Detachment, Reconciled, Repair};
+pub use graph::reconciled::{Reconciled, Repair};
+pub use graph::stub::Stub;
 pub use graph::subscription::Subscription;
 pub use library::Library;
 pub use library::type_entry::TypeEntry;
