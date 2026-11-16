@@ -1,6 +1,6 @@
 //! One output port of a node.
 
-use scenarium::{DataType, FuncOutput, OutputPort};
+use scenarium::{DataType, OutputDecl, OutputPort};
 
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::port_ref::PortRef;
@@ -10,11 +10,11 @@ use crate::gui::port_ref::PortRef;
 pub(crate) struct OutputCtx<'a> {
     node: NodeCtx<'a>,
     port_idx: usize,
-    declared: &'a FuncOutput,
+    declared: &'a OutputDecl,
 }
 
 impl<'a> OutputCtx<'a> {
-    pub(super) const fn new(node: NodeCtx<'a>, port_idx: usize, declared: &'a FuncOutput) -> Self {
+    pub(super) const fn new(node: NodeCtx<'a>, port_idx: usize, declared: &'a OutputDecl) -> Self {
         Self {
             node,
             port_idx,

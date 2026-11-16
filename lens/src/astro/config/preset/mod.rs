@@ -8,7 +8,7 @@ use std::fmt;
 
 use common::{Introspect, IntrospectEnum};
 use scenarium::ValueVariant;
-use scenarium::{ConstValue, DynamicValue, FuncInput};
+use scenarium::{ConstValue, DynamicValue, InputDecl};
 
 use crate::config_node::{ConfigValue, config_data_type};
 
@@ -26,7 +26,7 @@ pub(crate) trait Preset: IntrospectEnum + Copy + 'static {
 
     /// The input: a detailed config's wire type, with the picks as its
     /// constants and the first as its default.
-    fn input(name: &str) -> FuncInput {
+    fn input(name: &str) -> InputDecl {
         let variants = Self::VARIANTS
             .iter()
             .zip(Self::LABELS)
@@ -34,7 +34,7 @@ pub(crate) trait Preset: IntrospectEnum + Copy + 'static {
                 ValueVariant::new(variant, ConstValue::Enum(variant.to_owned())).display(label)
             })
             .collect();
-        FuncInput::required(name, config_data_type::<Self::Knobs>())
+        InputDecl::required(name, config_data_type::<Self::Knobs>())
             .description("A preset, or a detailed config wired in.")
             .variants(variants)
             .default(ConstValue::Enum(Self::VARIANTS[0].to_owned()))

@@ -243,7 +243,7 @@ impl NodePalette<'_> {
             pos: self.pos,
             node_id,
             node: entry.node(),
-            bindings: entry.func().default_bindings(node_id).collect(),
+            bindings: entry.func().ports().default_bindings(node_id).collect(),
         }
     }
 }

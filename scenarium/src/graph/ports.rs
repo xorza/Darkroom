@@ -1,11 +1,16 @@
-//! [`FuncInput`]: one input port a func declares.
+//! [`Ports`]: the inputs and outputs a declaration shows and is wired by, each an [`InputDecl`]
+//! or an [`OutputDecl`].
 
 use crate::data::const_value::ConstValue;
 use crate::data::data_type::{DataType, Strictness, TypeId};
+use crate::graph::binding::Binding;
+use crate::graph::binding_entry::BindingEntry;
 use crate::graph::func::value_variant::ValueVariant;
+use crate::graph::identity::{InputPort, NodeId};
 
+/// One input port a declaration shows.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FuncInput {
+pub struct InputDecl {
     pub name: String,
     pub required: bool,
     pub data_type: DataType,
@@ -18,7 +23,7 @@ pub struct FuncInput {
     pub value_variants: Vec<ValueVariant>,
 }
 
-impl FuncInput {
+impl InputDecl {
     /// A required input of `data_type` (no const default).
     pub fn required(name: impl Into<String>, data_type: DataType) -> Self {
         Self {
@@ -32,17 +37,11 @@ impl FuncInput {
         }
     }
 
-    /// An optional input of `data_type`; chain [`Self::default`] to seed a
-    /// const default value.
+    /// An optional input of `data_type`; chain [`Self::default`] to seed a const default value.
     pub fn optional(name: impl Into<String>, data_type: DataType) -> Self {
         Self {
-            name: name.into(),
             required: false,
-            data_type,
-            description: None,
-            const_only: false,
-            default_value: None,
-            value_variants: Vec::new(),
+            ..Self::required(name, data_type)
         }
     }
 
@@ -60,7 +59,7 @@ impl FuncInput {
         self
     }
 
-    /// Restrict this input to a `Const`; see [`FuncInput::const_only`].
+    /// Restrict this input to a `Const`; see [`InputDecl::const_only`].
     #[must_use]
     pub const fn const_only(mut self) -> Self {
         self.const_only = true;
@@ -98,5 +97,55 @@ impl FuncInput {
         }
         self.data_type
             .accepts_const(value, strictness, enum_variant)
+    }
+}
+
+/// One output port a declaration shows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OutputDecl {
+    pub name: String,
+    pub data_type: DataType,
+    /// One-line human explanation shown as the port's hover tooltip in the
+    /// editor. Display-only — execution never reads it.
+    pub description: Option<String>,
+}
+
+impl OutputDecl {
+    pub fn new(name: impl Into<String>, data_type: DataType) -> Self {
+        Self {
+            name: name.into(),
+            data_type,
+            description: None,
+        }
+    }
+
+    /// Attach the port's hover-tooltip text. See [`OutputDecl::description`].
+    #[must_use]
+    pub fn description(mut self, description: impl Into<String>) -> Self {
+        self.description = Some(description.into());
+        self
+    }
+}
+
+/// The inputs and outputs a declaration shows, each in the order a node draws them.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Ports {
+    pub inputs: Vec<InputDecl>,
+    pub outputs: Vec<OutputDecl>,
+}
+
+impl Ports {
+    /// The const bindings a fresh node of these ports starts with: one per input that declares a
+    /// default, at that input's port index.
+    pub fn default_bindings(&self, node_id: NodeId) -> impl Iterator<Item = BindingEntry> {
+        self.inputs
+            .iter()
+            .enumerate()
+            .filter_map(move |(port_idx, input)| {
+                Some(BindingEntry {
+                    port: InputPort::new(node_id, port_idx),
+                    binding: Binding::Const(input.default_value.clone()?),
+                })
+            })
     }
 }

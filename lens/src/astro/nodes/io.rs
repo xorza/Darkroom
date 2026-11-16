@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use lumos::{LoadCtx, PREVIEW_IMAGE_EXTENSIONS, RAW_EXTENSIONS};
 use scenarium::{
-    DataType, DynamicValue, FsPathConfig, FsPathMode, Func, FuncId, FuncInput, FuncOutput,
-    Invocation, Library, async_lambda,
+    DataType, DynamicValue, FsPathConfig, FsPathMode, Func, FuncId, InputDecl, Invocation, Library,
+    OutputDecl, async_lambda,
 };
 
 use crate::astro::nodes::runtime;
@@ -61,10 +61,10 @@ pub(crate) fn register(library: &mut Library) {
         .category("Astro")
         .pure()
         .input(
-            FuncInput::required("Path", astro_image_path_type())
+            InputDecl::required("Path", astro_image_path_type())
                 .description("FITS, camera-RAW, or standard image file to load."),
         )
-        .output(FuncOutput::new("Image", IMAGE_DATA_TYPE).description("Decoded frame."))
+        .output(OutputDecl::new("Image", IMAGE_DATA_TYPE).description("Decoded frame."))
         .build(),
     );
 }

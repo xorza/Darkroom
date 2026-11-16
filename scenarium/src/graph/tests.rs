@@ -657,14 +657,15 @@ type FuncEdit = (&'static str, fn(&mut FuncBuilder));
 /// A two-input, one-output, one-event func to hold a signature against.
 fn signed_func() -> FuncBuilder {
     use crate::graph::func::FuncEvent;
-    use crate::graph::func::func_input::FuncInput;
-    use crate::graph::func::func_output::FuncOutput;
+    use crate::graph::ports::{InputDecl, OutputDecl, Ports};
     FuncBuilder {
-        inputs: vec![
-            FuncInput::required("a", DataType::Int),
-            FuncInput::optional("b", DataType::String),
-        ],
-        outputs: vec![FuncOutput::new("out", DataType::Float)],
+        ports: Ports {
+            inputs: vec![
+                InputDecl::required("a", DataType::Int),
+                InputDecl::optional("b", DataType::String),
+            ],
+            outputs: vec![OutputDecl::new("out", DataType::Float)],
+        },
         events: vec![FuncEvent {
             name: "tick".into(),
             event_lambda: internals::stub_event(),
@@ -687,18 +688,18 @@ fn a_signature_covers_the_ports_and_nothing_else() {
         func.build().func_ref()
     };
     let moves: [FuncEdit; 7] = [
-        ("an input renamed", |f| f.inputs[0].name = "x".into()),
+        ("an input renamed", |f| f.ports.inputs[0].name = "x".into()),
         ("an input retyped", |f| {
-            f.inputs[0].data_type = DataType::Float;
+            f.ports.inputs[0].data_type = DataType::Float;
         }),
-        ("the inputs reordered", |f| f.inputs.swap(0, 1)),
-        ("an output dropped", |f| f.outputs.clear()),
+        ("the inputs reordered", |f| f.ports.inputs.swap(0, 1)),
+        ("an output dropped", |f| f.ports.outputs.clear()),
         ("an output retyped", |f| {
-            f.outputs[0].data_type = DataType::Int;
+            f.ports.outputs[0].data_type = DataType::Int;
         }),
         ("an event renamed", |f| f.events[0].name = "tock".into()),
         ("a custom type swapped", |f| {
-            f.inputs[1].data_type = DataType::Custom(TypeId::from_u128(1));
+            f.ports.inputs[1].data_type = DataType::Custom(TypeId::from_u128(1));
         }),
     ];
     for (what, edit) in moves {
@@ -706,12 +707,14 @@ fn a_signature_covers_the_ports_and_nothing_else() {
     }
     let keeps: [FuncEdit; 4] = [
         ("the func renamed", |f| f.name = "other".into()),
-        ("an input made optional", |f| f.inputs[0].required = false),
+        ("an input made optional", |f| {
+            f.ports.inputs[0].required = false;
+        }),
         ("a description added", |f| {
-            f.inputs[0].description = Some("explained".into());
+            f.ports.inputs[0].description = Some("explained".into());
         }),
         ("a default value set", |f| {
-            f.inputs[0].default_value = Some(ConstValue::Int(3));
+            f.ports.inputs[0].default_value = Some(ConstValue::Int(3));
         }),
     ];
     for (what, edit) in keeps {
@@ -720,7 +723,7 @@ fn a_signature_covers_the_ports_and_nothing_else() {
     // A path picker's mode decides what it offers, not where its binding lands.
     let path = |mode| {
         let mut func = signed_func();
-        func.inputs[1].data_type = DataType::FsPath(Arc::new(FsPathConfig::new(mode)));
+        func.ports.inputs[1].data_type = DataType::FsPath(Arc::new(FsPathConfig::new(mode)));
         func.build().func_ref()
     };
     assert_eq!(path(FsPathMode::Dir), path(FsPathMode::NewFile));
@@ -737,7 +740,9 @@ fn func_of_resolves_a_node_or_says_why_not() {
     let resolved = |g: &TestGraph| g.library.func_of(g.graph.find(id).unwrap()).map(Func::id);
     assert_eq!(resolved(&g), Ok(func_id));
 
-    g.edit_func("f", |func| func.inputs[0].data_type = DataType::String);
+    g.edit_func("f", |func| {
+        func.ports.inputs[0].data_type = DataType::String;
+    });
     assert_eq!(resolved(&g), Err(Unresolved::ChangedPorts));
 
     let missing = internals::unresolved_node(FuncId::from_u128(99));
@@ -800,7 +805,7 @@ fn reconcile_removes_exactly_what_the_library_cannot_hold() {
     g.graph
         .insert(nil_func, internals::unresolved_node(FuncId::nil()));
     g.edit_func("changed", |func| {
-        func.inputs[0].data_type = DataType::String;
+        func.ports.inputs[0].data_type = DataType::String;
     });
     let gone_func = g.graph.find(gone).unwrap().func_id().unwrap();
     g.library.remove(gone_func);

@@ -611,7 +611,7 @@ mod tests {
         use crate::core::edit::graph_intent::GraphIntent;
         use crate::gui::app::session::internals::SessionHarness;
         use scenarium::internals::stub_func;
-        use scenarium::{FuncId, FuncInput};
+        use scenarium::{FuncId, InputDecl};
 
         let inspect = |fixture: DocumentFixture| {
             let mut h =
@@ -633,7 +633,7 @@ mod tests {
         };
         let theme = Theme::default();
         let impure = stub_func(FuncId::unique(), "probe")
-            .input(FuncInput::optional("a", DataType::Int))
+            .input(InputDecl::optional("a", DataType::Int))
             .build();
         let mut fixture = DocumentFixture::default();
         fixture.add(&impure);

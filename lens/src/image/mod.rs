@@ -15,7 +15,7 @@ use imaginarium::{ChannelLayout, PlanarDesc, PlanarImage};
 use lumos::{
     FrameDescError, FrameGain, ImageMetadata, LinearImage, LinearParts, PixelFlags, frame_desc,
 };
-use scenarium::{CustomValue, DataType, DynamicValue, FuncInput, RamUsage, TypeId};
+use scenarium::{CustomValue, DataType, DynamicValue, InputDecl, RamUsage, TypeId};
 
 pub const IMAGE_TYPE_ID: TypeId = TypeId::literal("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2");
 
@@ -56,8 +56,8 @@ enum Pixels {
 
 impl Image {
     /// A required image input to process, named `name`.
-    pub(crate) fn input(name: &str) -> FuncInput {
-        FuncInput::required(name, IMAGE_DATA_TYPE).description("Image to process.")
+    pub(crate) fn input(name: &str) -> InputDecl {
+        InputDecl::required(name, IMAGE_DATA_TYPE).description("Image to process.")
     }
 
     /// The interleaved pixels of a required image input, owned: moved out

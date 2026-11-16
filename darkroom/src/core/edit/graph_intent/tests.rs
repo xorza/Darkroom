@@ -4,7 +4,7 @@ use glam::Vec2;
 use scenarium::internals::test_graph::TestGraph;
 use scenarium::{
     Binding, BindingEntry, BindingRejection, CacheMode, ConstValue, DataType, DetachedNodeError,
-    EventPort, FuncId, FuncInput, FuncOutput, InputPort, Library, Node, NodeId, OutputPort,
+    EventPort, FuncId, InputDecl, InputPort, Library, Node, NodeId, OutputDecl, OutputPort,
     Subscription, SubscriptionRejection, Unresolved, internals,
 };
 
@@ -240,8 +240,8 @@ fn a_removed_node_comes_back_whole() {
 fn a_wire_that_goes_leaves_its_input_on_its_default() {
     let mut fixture = DocumentFixture::default();
     let consumer = internals::stub_func(FuncId::unique(), "consumer")
-        .input(FuncInput::optional("knob", DataType::Int).default(7i64))
-        .input(FuncInput::optional("bare", DataType::Int))
+        .input(InputDecl::optional("knob", DataType::Int).default(7i64))
+        .input(InputDecl::optional("bare", DataType::Int))
         .build();
     let producer = fixture.node_at(Vec2::ZERO);
     let node = fixture.add(&consumer);
@@ -1124,8 +1124,8 @@ fn malformed_payloads_are_refused_before_they_can_invalidate_the_document() {
     // trip an assert inside the graph; saving only validates in debug builds, so it would write
     // fine and not reopen.
     let probe = internals::stub_func(FuncId::unique(), "probe")
-        .input(FuncInput::optional("a", DataType::Int))
-        .output(FuncOutput::new("out", DataType::Int))
+        .input(InputDecl::optional("a", DataType::Int))
+        .output(OutputDecl::new("out", DataType::Int))
         .build();
     let mut fixture = DocumentFixture::default();
     let live = fixture.add(&probe);
@@ -1364,10 +1364,10 @@ fn selection_and_move_drop_members_whose_widget_is_gone() {
 #[test]
 fn a_wire_onto_a_const_only_input_is_refused() {
     let knob_func = internals::stub_func(FuncId::unique(), "knob")
-        .input(FuncInput::required("strength", DataType::Float).const_only())
+        .input(InputDecl::required("strength", DataType::Float).const_only())
         .build();
     let feed_func = internals::stub_func(FuncId::unique(), "feed")
-        .output(FuncOutput::new("value", DataType::Float))
+        .output(OutputDecl::new("value", DataType::Float))
         .build();
     let mut fixture = DocumentFixture::default();
     let knob = fixture.add(&knob_func);
@@ -1420,8 +1420,8 @@ fn a_wire_onto_a_const_only_input_is_refused() {
 #[test]
 fn indices_past_the_declaration_are_refused() {
     let probe = internals::stub_func(FuncId::unique(), "probe")
-        .input(FuncInput::optional("a", DataType::Int))
-        .output(FuncOutput::new("out", DataType::Int))
+        .input(InputDecl::optional("a", DataType::Int))
+        .output(OutputDecl::new("out", DataType::Int))
         .event("tick", internals::stub_event())
         .build();
     let mut fixture = DocumentFixture::default();

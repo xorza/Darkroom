@@ -3,24 +3,23 @@ use std::sync::Arc;
 use crate::data::const_value::ConstValue;
 use crate::data::data_type::{DataType, FsPathConfig, FsPathMode, TypeId};
 use crate::graph::func::Func;
-use crate::graph::func::func_input::FuncInput;
-use crate::graph::func::func_output::FuncOutput;
 use crate::graph::func::lambda::FuncLambda;
 use crate::graph::func::value_variant::ValueVariant;
 use crate::graph::identity::FuncId;
 use crate::graph::node::CacheMode;
+use crate::graph::ports::{InputDecl, OutputDecl};
 use crate::internals;
 
 #[test]
 fn validate_rejects_invalid_identities_and_defaults() {
-    let nil_input = internals::stub_func(FuncId::unique(), "input").input(FuncInput::required(
+    let nil_input = internals::stub_func(FuncId::unique(), "input").input(InputDecl::required(
         "value",
         DataType::Custom(TypeId::nil()),
     ));
     let nil_output = internals::stub_func(FuncId::unique(), "output")
-        .output(FuncOutput::new("value", DataType::Enum(TypeId::nil())));
+        .output(OutputDecl::new("value", DataType::Enum(TypeId::nil())));
     let any_output = internals::stub_func(FuncId::unique(), "any")
-        .output(FuncOutput::new("value", DataType::Any));
+        .output(OutputDecl::new("value", DataType::Any));
     let invalid = [
         (
             "function id must not be nil".to_owned(),
@@ -52,7 +51,7 @@ fn validate_rejects_invalid_identities_and_defaults() {
 
     // Declared defaults are held to exact kinds (no scalar coercion) —
     // an authoring mismatch fails at registration, not in a document.
-    let default_mismatch = |input: FuncInput| {
+    let default_mismatch = |input: InputDecl| {
         let func = internals::stub_func(FuncId::unique(), "default").input(input);
         let expected = format!(
             "function {:?} input 0 declares a default that matches neither its type nor its picker variants",
@@ -60,23 +59,23 @@ fn validate_rejects_invalid_identities_and_defaults() {
         );
         assert_eq!(func.validate().unwrap_err().to_string(), expected);
     };
-    default_mismatch(FuncInput::optional("v", DataType::Int).default(ConstValue::Bool(true)));
-    default_mismatch(FuncInput::optional("v", DataType::Bool).default(1.0));
+    default_mismatch(InputDecl::optional("v", DataType::Int).default(ConstValue::Bool(true)));
+    default_mismatch(InputDecl::optional("v", DataType::Bool).default(1.0));
     default_mismatch(
-        FuncInput::optional("v", DataType::Custom(TypeId::unique()))
+        InputDecl::optional("v", DataType::Custom(TypeId::unique()))
             .default(ConstValue::Enum("preset".into())),
     );
     // Null means "explicitly unset" — only an optional input may declare it.
-    default_mismatch(FuncInput::required("v", DataType::Int).default(ConstValue::Null));
+    default_mismatch(InputDecl::required("v", DataType::Int).default(ConstValue::Null));
     // With picker variants the default must be one of the offered picks.
     default_mismatch(
-        FuncInput::optional("v", DataType::Int)
+        InputDecl::optional("v", DataType::Int)
             .variants(vec![ValueVariant::new("one", ConstValue::Int(1))])
             .default(2i64),
     );
     // A single-path literal doesn't satisfy a multi-file picker port.
     default_mismatch(
-        FuncInput::optional(
+        InputDecl::optional(
             "v",
             DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::ExistingFiles))),
         )
@@ -87,30 +86,30 @@ fn validate_rejects_invalid_identities_and_defaults() {
     // optional input, `Any` accepting any literal, and a picker whose variants
     // are not of its type, as a preset beside a wired config is.
     let ok = Func::builder(FuncId::unique(), "ok", FuncLambda::stub())
-        .input(FuncInput::optional("int", DataType::Int).default(2i64))
-        .input(FuncInput::optional("any", DataType::Any).default("text"))
-        .input(FuncInput::optional("unset", DataType::Int).default(ConstValue::Null))
+        .input(InputDecl::optional("int", DataType::Int).default(2i64))
+        .input(InputDecl::optional("any", DataType::Any).default("text"))
+        .input(InputDecl::optional("unset", DataType::Int).default(ConstValue::Null))
         .input(
-            FuncInput::optional("pick", DataType::Int)
+            InputDecl::optional("pick", DataType::Int)
                 .variants(vec![ValueVariant::new("one", ConstValue::Int(1))])
                 .default(1i64),
         )
         .input(
-            FuncInput::optional(
+            InputDecl::optional(
                 "paths",
                 DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::ExistingFiles))),
             )
             .default(ConstValue::FsPaths(vec!["a.fits".into()])),
         )
         .input(
-            FuncInput::required("preset", DataType::Bool)
+            InputDecl::required("preset", DataType::Bool)
                 .variants(vec![ValueVariant::new(
                     "fast",
                     ConstValue::Enum("fast".to_owned()),
                 )])
                 .default(ConstValue::Enum("fast".to_owned())),
         )
-        .output(FuncOutput::new("value", DataType::Int));
+        .output(OutputDecl::new("value", DataType::Int));
     assert_eq!(ok.validate(), Ok(()));
 }
 

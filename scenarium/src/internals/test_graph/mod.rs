@@ -22,13 +22,12 @@ use crate::graph::detached::DetachedNode;
 use crate::graph::func::Func;
 use crate::graph::func::event::EventLambda;
 use crate::graph::func::func_builder::FuncBuilder;
-use crate::graph::func::func_input::FuncInput;
-use crate::graph::func::func_output::FuncOutput;
 use crate::graph::func::lambda::internals as lambda;
 use crate::graph::func::lambda::{FuncLambda, Invocation};
 use crate::graph::identity::{EventPort, FuncId, InputPort, NodeId};
 use crate::graph::node::special::SpecialNode;
 use crate::graph::node::{CacheMode, Node, NodeKind};
+use crate::graph::ports::{InputDecl, OutputDecl};
 use crate::internals::calls::Calls;
 use crate::library::Library;
 
@@ -320,7 +319,8 @@ impl TestGraph {
         let node_id = NodeId::from_u128(self.mint());
         self.graph.insert(node_id, Node::from(func));
         self.graph.bindings.extend(
-            func.default_bindings(node_id)
+            func.ports()
+                .default_bindings(node_id)
                 .map(|entry| (entry.port, entry.binding)),
         );
         node_id
@@ -419,8 +419,8 @@ impl NodeSpec {
 
     #[must_use]
     pub fn input(mut self, data_type: DataType) -> Self {
-        let name = format!("in{}", self.func.inputs.len());
-        self.func = self.func.input(FuncInput::required(name, data_type));
+        let name = format!("in{}", self.func.ports.inputs.len());
+        self.func = self.func.input(InputDecl::required(name, data_type));
         self
     }
 
@@ -429,6 +429,7 @@ impl NodeSpec {
     pub fn const_only(mut self) -> Self {
         let last = self
             .func
+            .ports
             .inputs
             .last_mut()
             .expect("`const_only` restricts the input declared before it");
@@ -438,25 +439,25 @@ impl NodeSpec {
 
     #[must_use]
     pub fn optional(mut self, data_type: DataType) -> Self {
-        let name = format!("in{}", self.func.inputs.len());
-        self.func = self.func.input(FuncInput::optional(name, data_type));
+        let name = format!("in{}", self.func.ports.inputs.len());
+        self.func = self.func.input(InputDecl::optional(name, data_type));
         self
     }
 
     /// An optional input carrying a declared default, which a fresh node starts bound to.
     #[must_use]
     pub fn defaulted(mut self, data_type: DataType, value: impl Into<ConstValue>) -> Self {
-        let name = format!("in{}", self.func.inputs.len());
+        let name = format!("in{}", self.func.ports.inputs.len());
         self.func = self
             .func
-            .input(FuncInput::optional(name, data_type).default(value.into()));
+            .input(InputDecl::optional(name, data_type).default(value.into()));
         self
     }
 
     #[must_use]
     pub fn output(mut self, data_type: DataType) -> Self {
-        let name = format!("out{}", self.func.outputs.len());
-        self.func = self.func.output(FuncOutput::new(name, data_type));
+        let name = format!("out{}", self.func.ports.outputs.len());
+        self.func = self.func.output(OutputDecl::new(name, data_type));
         self
     }
 

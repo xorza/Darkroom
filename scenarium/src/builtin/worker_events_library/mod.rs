@@ -5,10 +5,9 @@ use crate::data::data_type::DataType;
 use crate::graph::func::Func;
 use crate::graph::func::error::{InvokeError, InvokeResult};
 use crate::graph::func::event::EventLambda;
-use crate::graph::func::func_input::FuncInput;
-use crate::graph::func::func_output::FuncOutput;
 use crate::graph::func::lambda::{FuncLambda, Invocation};
 use crate::graph::identity::FuncId;
+use crate::graph::ports::{InputDecl, OutputDecl};
 use crate::library::Library;
 use crate::runtime::shared_any_state::SharedAnyState;
 use tokio::time;
@@ -136,17 +135,17 @@ pub fn worker_events_library() -> Library {
         .description("Emits a recurring frame tick, carrying the elapsed time and frame count.")
         .category("System")
         .input(
-            FuncInput::required("Frequency", DataType::Float)
+            InputDecl::required("Frequency", DataType::Float)
                 .description("Target ticks per second (Hz). 0 disables the FPS event.")
                 .default(1.0)
                 .const_only(),
         )
         .output(
-            FuncOutput::new("Delta", DataType::Float)
+            OutputDecl::new("Delta", DataType::Float)
                 .description("Seconds elapsed since the previous frame."),
         )
         .output(
-            FuncOutput::new("Frame #", DataType::Int)
+            OutputDecl::new("Frame #", DataType::Int)
                 .description("Frame counter, incremented each tick."),
         )
         .event("Always", EventLambda::new(|_state| async {}))

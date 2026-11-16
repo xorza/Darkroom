@@ -11,7 +11,7 @@ use lumos::{
     ProgressMonitor, SigmaThreshold, WriteError,
 };
 use scenarium::{
-    DataType, DynamicValue, Func, FuncId, FuncInput, FuncOutput, Invocation, InvokeError, Library,
+    DataType, DynamicValue, Func, FuncId, InputDecl, Invocation, InvokeError, Library, OutputDecl,
     async_lambda,
 };
 
@@ -182,7 +182,7 @@ pub(crate) fn register(library: &mut Library) {
             frames_input("Flat Darks", "flat-dark frames"),
         ])
         .input(
-            FuncInput::required("Sigma", DataType::Float)
+            InputDecl::required("Sigma", DataType::Float)
                 .description(
                     "Hot-pixel defect threshold: a master-dark pixel more than this many sigma \
                      above its color's dark background is a defect. It must be finite and \
@@ -191,20 +191,20 @@ pub(crate) fn register(library: &mut Library) {
                 .default(f64::from(SigmaThreshold::DEFAULT.get())),
         )
         .input(
-            FuncInput::required("Cache", DataType::Bool)
+            InputDecl::required("Cache", DataType::Bool)
                 .description("Write each master next to its frames and reuse it next run.")
                 .default(true),
         )
         .output(
-            FuncOutput::new("Masters", MASTERS_DATA_TYPE)
+            OutputDecl::new("Masters", MASTERS_DATA_TYPE)
                 .description("Calibration masters for the wired roles."),
         )
         .build(),
     );
 }
 
-fn frames_input(name: &str, what: &str) -> FuncInput {
-    FuncInput::optional(name, astro_raw_paths_type())
+fn frames_input(name: &str, what: &str) -> InputDecl {
+    InputDecl::optional(name, astro_raw_paths_type())
         .description(format!("Camera-RAW {what} to stack."))
 }
 

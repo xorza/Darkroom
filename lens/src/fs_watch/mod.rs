@@ -15,7 +15,7 @@ use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use scenarium::Invocation;
 use scenarium::async_lambda;
 use scenarium::{ConstValue, DataType, FsPathConfig, FsPathMode};
-use scenarium::{EventLambda, Func, FuncId, FuncInput, FuncOutput, InvokeError, Library};
+use scenarium::{EventLambda, Func, FuncId, InputDecl, InvokeError, Library, OutputDecl};
 use tokio::sync::Notify;
 use tokio::time::timeout;
 
@@ -199,18 +199,18 @@ pub fn fs_watch_library() -> Library {
                  except on Windows, which reports an attribute change as a write.",
             )
             .input(
-                FuncInput::required("Directory", dir_type())
+                InputDecl::required("Directory", dir_type())
                     .description("Directory to watch and pass through.")
                     .const_only(),
             )
             .input(
-                FuncInput::required("Recursive", DataType::Bool)
+                InputDecl::required("Recursive", DataType::Bool)
                     .description("Watch subdirectories too, not just the top level.")
                     .default(true)
                     .const_only(),
             )
             .input(
-                FuncInput::required("Debounce (ms)", DataType::Int)
+                InputDecl::required("Debounce (ms)", DataType::Int)
                     .description(
                         "Quiet window after a change before firing, collapsing a burst into one \
                          event. 0 disables debouncing.",
@@ -219,7 +219,7 @@ pub fn fs_watch_library() -> Library {
                     .const_only(),
             )
             .output(
-                FuncOutput::new("Directory", dir_type())
+                OutputDecl::new("Directory", dir_type())
                     .description("The same directory, re-emitted on each change."),
             )
             .event(

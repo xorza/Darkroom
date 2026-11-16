@@ -10,9 +10,9 @@ use crate::data::const_value::ConstValue;
 use crate::data::data_type::{DataType, Strictness, TypeId};
 use crate::graph::error::Unresolved;
 use crate::graph::func::Func;
-use crate::graph::func::func_input::FuncInput;
 use crate::graph::identity::FuncId;
 use crate::graph::node::{Node, NodeKind};
+use crate::graph::ports::InputDecl;
 use crate::library::type_entry::TypeEntry;
 
 /// The runtime registry every frontend resolves against: the [`Func`]s nodes instantiate, and the
@@ -194,8 +194,8 @@ impl Library {
     /// Whether an authored `Const` literal `value` may sit on `input`: the `Const` half of
     /// [`Graph::admit`](crate::Graph::admit) (the `Wire` half is
     /// [`DataType::compatible_with`]). The registry contributes only the enum arm, a variant
-    /// *name*; the rest is [`FuncInput::accepts_const`].
-    pub(crate) fn const_satisfies(&self, input: &FuncInput, value: &ConstValue) -> bool {
+    /// *name*; the rest is [`InputDecl::accepts_const`].
+    pub(crate) fn const_satisfies(&self, input: &InputDecl, value: &ConstValue) -> bool {
         input.accepts_const(value, Strictness::Authored, |type_id, name| {
             self.enum_variants(type_id)
                 .is_some_and(|variants| variants.iter().any(|variant| variant == name))

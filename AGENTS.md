@@ -186,11 +186,12 @@ One word, one meaning, in the workspace crates; the submodules keep their own.
   wires. Refused: edge, connection and link for it — "edge" is the graph's
   general word for a wire or a subscription, and "link" a text hyperlink.
 - **Fixed short forms.** `idx`, `pos`, `ctx`/`Ctx`, `dir`, `bg`, `col`,
-  `exec`, `desc`, `cur`, `prev`, `wid` (a palantir `WidgetId`), and their
-  plurals with `s` (`idxs`, `poss`), in every name; prose and test names keep
-  whole words. A name a foreign API sets keeps its own form, as
-  `Iterator::position` and `std::task::Context`; a term of another meaning
-  keeps its own, as a sensor's dark current and palantir's `ContextMenu`.
+  `exec`, `desc`, `decl` (a declaration), `cur`, `prev`, `wid` (a palantir
+  `WidgetId`), and their plurals with `s` (`idxs`, `poss`), in every name;
+  prose and test names keep whole words. A name a foreign API sets keeps its
+  own form, as `Iterator::position` and `std::task::Context`; a term of
+  another meaning keeps its own, as a sensor's dark current and palantir's
+  `ContextMenu`.
 - **`count` is a count, `len` a count of elements or bytes, `length` a
   geometric length.** `*_count`, as std's `Iterator::count`; `len` as std's
   `len()`. Refused: `num_*` and `n_*` for a count — `SmallN` is the statistics

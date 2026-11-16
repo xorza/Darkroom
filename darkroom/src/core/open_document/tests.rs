@@ -23,7 +23,7 @@ use crate::core::runtime_library::RuntimeLibrary;
 use crate::core::status_log::StatusLog;
 use scenarium::{
     Binding, BindingEntry, BindingRejection, Compiler, ConstValue, DataType, EventPort, FuncId,
-    FuncInput, FuncOutput, Graph, InputPort, Library, Node, NodeId, Repair, Subscription,
+    Graph, InputDecl, InputPort, Library, Node, NodeId, OutputDecl, Repair, Subscription,
     SubscriptionRejection, Unresolved, internals,
 };
 
@@ -171,20 +171,20 @@ fn a_node_whose_ports_moved_loads_as_a_stub_and_attaches_again() {
     let (first, stubbed) = (dir.join("first.darkroom"), dir.join("stubbed.darkroom"));
     let int_func = |name: &str| internals::stub_func(FuncId::unique(), name).pure();
     let src = int_func("src")
-        .output(FuncOutput::new("out", DataType::Int))
+        .output(OutputDecl::new("out", DataType::Int))
         .build();
     let mid = int_func("mid")
-        .input(FuncInput::required("in", DataType::Int))
-        .output(FuncOutput::new("out", DataType::Int))
+        .input(InputDecl::required("in", DataType::Int))
+        .output(OutputDecl::new("out", DataType::Int))
         .build();
     let dst = internals::stub_func(FuncId::unique(), "dst")
         .sink()
-        .input(FuncInput::required("in", DataType::Int))
+        .input(InputDecl::required("in", DataType::Int))
         .build();
     let mut library = Library::default();
     let mut changed = Library::default();
     let mut moved = mid.clone().into_builder();
-    moved.inputs[0].data_type = DataType::String;
+    moved.ports.inputs[0].data_type = DataType::String;
     for func in [&src, &dst] {
         library.add(func.clone());
         changed.add(func.clone());
@@ -491,8 +491,8 @@ fn wiring_the_library_refuses_is_removed_at_load() {
     let dir = TempDir::new("darkroom-open-document-declaration");
     let path = dir.join("wired.darkroom");
     let probe = internals::stub_func(FuncId::unique(), "probe")
-        .input(FuncInput::optional("a", DataType::Int))
-        .output(FuncOutput::new("out", DataType::Int))
+        .input(InputDecl::optional("a", DataType::Int))
+        .output(OutputDecl::new("out", DataType::Int))
         .event("tick", internals::stub_event())
         .build();
     let mut library = Library::default();

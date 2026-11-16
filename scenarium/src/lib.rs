@@ -42,8 +42,6 @@ pub use graph::error::{
 pub use graph::func::error::{FuncValidationError, InvokeError, InvokeResult};
 pub use graph::func::event::{EventFires, EventLambda};
 pub use graph::func::func_builder::FuncBuilder;
-pub use graph::func::func_input::FuncInput;
-pub use graph::func::func_output::FuncOutput;
 pub use graph::func::lambda::{AsyncLambda, AsyncLambdaFn, FuncLambda, Invocation, OutputDemand};
 pub use graph::func::value_variant::ValueVariant;
 pub use graph::func::{Func, FuncBehavior, FuncEvent};
@@ -51,6 +49,7 @@ pub use graph::identity::{EventPort, FuncId, InputPort, NodeId, OutputPort};
 pub use graph::node::special::{SPECIAL_NODES, SpecialNode};
 pub use graph::node::{CacheMode, Node};
 pub use graph::node_ref::NodeRef;
+pub use graph::ports::{InputDecl, OutputDecl, Ports};
 pub use graph::reconciled::{Detachment, Reconciled, Repair};
 pub use graph::subscription::Subscription;
 pub use library::Library;

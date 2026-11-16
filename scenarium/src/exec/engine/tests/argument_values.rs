@@ -48,7 +48,7 @@ async fn with_bound_outputs() {
 async fn with_none_binding() {
     let mut e = TestEngine::over(TestGraph::sample());
     e.edit(|g| {
-        g.edit_func("mult", |func| func.inputs[1].required = false);
+        g.edit_func("mult", |func| func.ports.inputs[1].required = false);
         g.unbind("mult", 1);
     });
 

@@ -6,7 +6,7 @@ use scenarium::FuncId;
 use scenarium::Invocation;
 use scenarium::async_lambda;
 use scenarium::{ConstValue, DataType, DynamicValue, InvokeError};
-use scenarium::{Func, FuncInput, FuncOutput, Library};
+use scenarium::{Func, InputDecl, Library, OutputDecl};
 use strum::VariantNames;
 
 use crate::image::format::{CONVERSION_FORMAT_DATATYPE, ConversionFormat};
@@ -51,26 +51,26 @@ fn register_brightness(library: &mut Library) {
         .description("Adjusts the brightness and contrast of an image.")
         .category("Image")
         .pure()
-        .input(FuncInput::required("Image", IMAGE_DATA_TYPE).description("Image to adjust."))
+        .input(InputDecl::required("Image", IMAGE_DATA_TYPE).description("Image to adjust."))
         .input(
-            FuncInput::required("Brightness", DataType::Float)
+            InputDecl::required("Brightness", DataType::Float)
                 .description("Brightness offset in [−1, 1]. 0 leaves it unchanged.")
                 .default(0.0),
         )
         .input(
-            FuncInput::required("Contrast", DataType::Float)
+            InputDecl::required("Contrast", DataType::Float)
                 .description("Contrast multiplier. 1 leaves it unchanged.")
                 .default(1.0),
         )
         .input(clamp_input())
-        .output(FuncOutput::new("Image", IMAGE_DATA_TYPE).description("Adjusted image."))
+        .output(OutputDecl::new("Image", IMAGE_DATA_TYPE).description("Adjusted image."))
         .build(),
     );
 }
 
 /// The `Clamp` input both color ops take, at [`Clamp::DEFAULT`].
-fn clamp_input() -> FuncInput {
-    FuncInput::required("Clamp", CLAMP_DATATYPE)
+fn clamp_input() -> InputDecl {
+    InputDecl::required("Clamp", CLAMP_DATATYPE)
         .default(ConstValue::Enum(
             Clamp::VARIANTS[Clamp::DEFAULT as usize].to_owned(),
         ))
@@ -108,13 +108,13 @@ fn register_convert(library: &mut Library) {
         .description("Converts an image to a different color format.")
         .category("Image")
         .pure()
-        .input(FuncInput::required("Image", IMAGE_DATA_TYPE).description("Image to convert."))
+        .input(InputDecl::required("Image", IMAGE_DATA_TYPE).description("Image to convert."))
         .input(
-            FuncInput::required("Format", CONVERSION_FORMAT_DATATYPE)
+            InputDecl::required("Format", CONVERSION_FORMAT_DATATYPE)
                 .default(ConstValue::Enum(ColorFormat::RGB_U8.name().to_string()))
                 .description("Target color format."),
         )
-        .output(FuncOutput::new("Image", IMAGE_DATA_TYPE).description("Converted image."))
+        .output(OutputDecl::new("Image", IMAGE_DATA_TYPE).description("Converted image."))
         .build(),
     );
 }
@@ -161,27 +161,27 @@ fn register_blend(library: &mut Library) {
         .category("Image")
         .pure()
         .input(
-            FuncInput::required("Source", IMAGE_DATA_TYPE)
+            InputDecl::required("Source", IMAGE_DATA_TYPE)
                 .description("Top image (the blend source)."),
         )
         .input(
-            FuncInput::required("Destination", IMAGE_DATA_TYPE)
+            InputDecl::required("Destination", IMAGE_DATA_TYPE)
                 .description("Bottom image (the blend backdrop)."),
         )
         .input(
-            FuncInput::required("Mode", BLENDMODE_DATATYPE)
+            InputDecl::required("Mode", BLENDMODE_DATATYPE)
                 .default(ConstValue::Enum(
                     BlendMode::VARIANTS[BlendMode::default() as usize].to_owned(),
                 ))
                 .description("Blend mode."),
         )
         .input(
-            FuncInput::required("Alpha", DataType::Float)
+            InputDecl::required("Alpha", DataType::Float)
                 .description("Blend strength in [0, 1]. 1 is full source.")
                 .default(1.0),
         )
         .input(clamp_input())
-        .output(FuncOutput::new("Image", IMAGE_DATA_TYPE).description("Blended image."))
+        .output(OutputDecl::new("Image", IMAGE_DATA_TYPE).description("Blended image."))
         .build(),
     );
 }
@@ -223,33 +223,33 @@ fn register_transform(library: &mut Library) {
         .description("Applies scale, rotation, and translation to an image.")
         .category("Image")
         .pure()
-        .input(FuncInput::required("Image", IMAGE_DATA_TYPE).description("Image to transform."))
+        .input(InputDecl::required("Image", IMAGE_DATA_TYPE).description("Image to transform."))
         .input(
-            FuncInput::required("Scale X", DataType::Float)
+            InputDecl::required("Scale X", DataType::Float)
                 .description("Horizontal scale factor. 1 leaves width unchanged.")
                 .default(1.0),
         )
         .input(
-            FuncInput::required("Scale Y", DataType::Float)
+            InputDecl::required("Scale Y", DataType::Float)
                 .description("Vertical scale factor. 1 leaves height unchanged.")
                 .default(1.0),
         )
         .input(
-            FuncInput::required("Rotation", DataType::Float)
+            InputDecl::required("Rotation", DataType::Float)
                 .description("Rotation in radians, about the image center.")
                 .default(0.0),
         )
         .input(
-            FuncInput::required("Translate X", DataType::Float)
+            InputDecl::required("Translate X", DataType::Float)
                 .description("Horizontal shift in pixels.")
                 .default(0.0),
         )
         .input(
-            FuncInput::required("Translate Y", DataType::Float)
+            InputDecl::required("Translate Y", DataType::Float)
                 .description("Vertical shift in pixels.")
                 .default(0.0),
         )
-        .output(FuncOutput::new("Image", IMAGE_DATA_TYPE).description("Transformed image."))
+        .output(OutputDecl::new("Image", IMAGE_DATA_TYPE).description("Transformed image."))
         .build(),
     );
 }

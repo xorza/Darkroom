@@ -1,23 +1,17 @@
 pub(crate) mod error;
 pub(crate) mod event;
 pub(crate) mod func_builder;
-pub(crate) mod func_input;
-pub(crate) mod func_output;
 pub(crate) mod lambda;
 mod macros;
 pub(crate) mod signature;
 pub(crate) mod value_variant;
 
-use crate::graph::binding::Binding;
-use crate::graph::binding_entry::BindingEntry;
 use crate::graph::func::event::EventLambda;
 use crate::graph::func::func_builder::FuncBuilder;
-use crate::graph::func::func_input::FuncInput;
-use crate::graph::func::func_output::FuncOutput;
 use crate::graph::func::lambda::FuncLambda;
 use crate::graph::identity::{FuncId, FuncRef};
-use crate::graph::identity::{InputPort, NodeId};
 use crate::graph::node::CacheMode;
+use crate::graph::ports::{InputDecl, OutputDecl, Ports};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum FuncBehavior {
@@ -49,8 +43,7 @@ pub struct Func {
     default_cache_mode: CacheMode,
     behavior: FuncBehavior,
     description: Option<String>,
-    inputs: Vec<FuncInput>,
-    outputs: Vec<FuncOutput>,
+    ports: Ports,
     events: Vec<FuncEvent>,
     lambda: FuncLambda,
 }
@@ -67,8 +60,7 @@ impl Func {
             default_cache_mode: CacheMode::None,
             behavior: FuncBehavior::Impure,
             description: None,
-            inputs: Vec::new(),
-            outputs: Vec::new(),
+            ports: Ports::default(),
             events: Vec::new(),
             lambda,
         }
@@ -84,8 +76,7 @@ impl Func {
             default_cache_mode: self.default_cache_mode,
             behavior: self.behavior,
             description: self.description,
-            inputs: self.inputs,
-            outputs: self.outputs,
+            ports: self.ports,
             events: self.events,
             lambda: self.lambda,
         }
@@ -119,12 +110,16 @@ impl Func {
         self.description.as_deref()
     }
 
-    pub fn inputs(&self) -> &[FuncInput] {
-        &self.inputs
+    pub const fn ports(&self) -> &Ports {
+        &self.ports
     }
 
-    pub fn outputs(&self) -> &[FuncOutput] {
-        &self.outputs
+    pub fn inputs(&self) -> &[InputDecl] {
+        &self.ports.inputs
+    }
+
+    pub fn outputs(&self) -> &[OutputDecl] {
+        &self.ports.outputs
     }
 
     pub fn events(&self) -> &[FuncEvent] {
@@ -144,20 +139,6 @@ impl Func {
     /// honored on a node of it.
     pub const fn impure(&self) -> bool {
         matches!(self.behavior, FuncBehavior::Impure)
-    }
-
-    /// The const bindings a fresh instance starts with: one per input that
-    /// declares a default, at that input's port index.
-    pub fn default_bindings(&self, node_id: NodeId) -> impl Iterator<Item = BindingEntry> {
-        self.inputs
-            .iter()
-            .enumerate()
-            .filter_map(move |(port_idx, input)| {
-                Some(BindingEntry {
-                    port: InputPort::new(node_id, port_idx),
-                    binding: Binding::Const(input.default_value.clone()?),
-                })
-            })
     }
 }
 

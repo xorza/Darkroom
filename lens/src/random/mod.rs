@@ -3,7 +3,7 @@ use rand::{RngExt, SeedableRng};
 use scenarium::FuncId;
 use scenarium::Invocation;
 use scenarium::async_lambda;
-use scenarium::{DataType, Func, FuncInput, FuncOutput, Library};
+use scenarium::{DataType, Func, InputDecl, Library, OutputDecl};
 
 const RANDOM_FUNC_ID: FuncId = FuncId::literal("01897928-66cd-52cb-abeb-a5bfd7f3763e");
 
@@ -33,16 +33,16 @@ fn random_func() -> Func {
     .description("Generates a random float between min and max values.")
     .category("Math")
     .input(
-        FuncInput::required("Min", DataType::Float)
+        InputDecl::required("Min", DataType::Float)
             .description("Lower bound (inclusive).")
             .default(0.0),
     )
     .input(
-        FuncInput::required("Max", DataType::Float)
+        InputDecl::required("Max", DataType::Float)
             .description("Upper bound (exclusive).")
             .default(1.0),
     )
-    .output(FuncOutput::new("Value", DataType::Float).description("A random number in [Min, Max)."))
+    .output(OutputDecl::new("Value", DataType::Float).description("A random number in [Min, Max)."))
     .build()
 }
 

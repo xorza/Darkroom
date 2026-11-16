@@ -39,7 +39,7 @@ fn declarations_are_per_node_unless_a_test_shares_one() {
     g.add("b", |n| n.pure().input(DataType::Int).output(DataType::Int));
     g.instance("a2", "a");
 
-    g.edit_func("a", |func| func.inputs[0].required = false);
+    g.edit_func("a", |func| func.ports.inputs[0].required = false);
 
     let required = |g: &TestGraph, name: &str| {
         let node = g.graph.find(g.id(name)).unwrap();

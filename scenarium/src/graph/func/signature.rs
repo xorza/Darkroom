@@ -6,8 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::data::data_type::DataType;
 use crate::graph::func::FuncEvent;
-use crate::graph::func::func_input::FuncInput;
-use crate::graph::func::func_output::FuncOutput;
+use crate::graph::ports::Ports;
 
 /// A digest of a func's ports: its inputs' names and types, its outputs' names and types, and
 /// its events' names, in order.
@@ -25,10 +24,10 @@ impl FuncSignature {
     /// Versions the encoding below: a change to it is a change to every signature.
     const DOMAIN: &'static [u8] = b"scenarium-func-signature-v2";
 
-    /// The signature of `inputs`, `outputs` and `events`, in order — what
+    /// The signature of `ports` and `events`, in order — what
     /// [`FuncBuilder::build`](crate::graph::func::func_builder::FuncBuilder::build)
     /// seals into a [`Func`](crate::graph::func::Func).
-    pub(crate) fn of(inputs: &[FuncInput], outputs: &[FuncOutput], events: &[FuncEvent]) -> Self {
+    pub(crate) fn of(ports: &Ports, events: &[FuncEvent]) -> Self {
         let mut hasher = blake3::Hasher::new();
         hasher.update(Self::DOMAIN);
         let count = |hasher: &mut blake3::Hasher, count: usize| {
@@ -38,13 +37,13 @@ impl FuncSignature {
             hasher.update(&(name.len() as u64).to_le_bytes());
             hasher.update(name.as_bytes());
         };
-        count(&mut hasher, inputs.len());
-        for input in inputs {
+        count(&mut hasher, ports.inputs.len());
+        for input in &ports.inputs {
             name(&mut hasher, &input.name);
             write_type(&mut hasher, &input.data_type);
         }
-        count(&mut hasher, outputs.len());
-        for output in outputs {
+        count(&mut hasher, ports.outputs.len());
+        for output in &ports.outputs {
             name(&mut hasher, &output.name);
             write_type(&mut hasher, &output.data_type);
         }
@@ -98,10 +97,9 @@ mod tests {
     use common::SerdeFormat;
 
     use crate::data::data_type::DataType;
-    use crate::graph::func::func_input::FuncInput;
-    use crate::graph::func::func_output::FuncOutput;
     use crate::graph::func::signature::FuncSignature;
     use crate::graph::identity::FuncId;
+    use crate::graph::ports::{InputDecl, OutputDecl};
     use crate::internals;
 
     /// One small func's signature, from its bytes written out by hand rather than by the
@@ -112,8 +110,8 @@ mod tests {
     #[test]
     fn a_small_func_has_the_pinned_signature() {
         let func = internals::stub_func(FuncId::from_u128(1), "pinned")
-            .input(FuncInput::required("value", DataType::Int))
-            .output(FuncOutput::new("out", DataType::Float))
+            .input(InputDecl::required("value", DataType::Int))
+            .output(OutputDecl::new("out", DataType::Float))
             .event("tick", internals::stub_event())
             .build();
         let count = |n: u64| n.to_le_bytes().to_vec();

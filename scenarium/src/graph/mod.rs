@@ -3,9 +3,9 @@
 //! has**, in one impl, so the whole surface is one file to read.
 //!
 //! The modules beside it keep what those methods work *with*: [`identity`]
-//! how a node or port is named, [`detached`] the reversible-removal records,
-//! [`error`] what validation and admission reject, [`reconciled`] what a load
-//! repaired.
+//! how a node or port is named, [`ports`] the inputs and outputs a func
+//! declares, [`detached`] the reversible-removal records, [`error`] what
+//! validation and admission reject, [`reconciled`] what a load repaired.
 //!
 //! A graph a host keeps holds only nodes that resolve to a [`Func`]
 //! declaration and only wiring [`Graph::admit`] accepts: [`Graph::reconcile`]
@@ -72,6 +72,7 @@ pub(crate) mod func;
 pub(crate) mod identity;
 pub(crate) mod node;
 pub(crate) mod node_ref;
+pub(crate) mod ports;
 pub(crate) mod reconciled;
 mod serde;
 pub(crate) mod subscription;
@@ -331,7 +332,8 @@ impl Graph {
     pub fn add_func_node(&mut self, func: &Func) -> NodeId {
         let node_id = self.add(Node::from(func));
         self.bindings.extend(
-            func.default_bindings(node_id)
+            func.ports()
+                .default_bindings(node_id)
                 .map(|entry| (entry.port, entry.binding)),
         );
         node_id

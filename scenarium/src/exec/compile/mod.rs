@@ -153,9 +153,9 @@ impl Compiler {
             // as given. Each input is resolved as it is appended, so it is whole on entering the
             // pool.
             let node_inputs = compiled.inputs.append(func.inputs().iter().enumerate().map(
-                |(port_idx, func_input)| ExecInput {
-                    required: func_input.required,
-                    fs_path: matches!(&func_input.data_type, DataType::FsPath(_)),
+                |(port_idx, input)| ExecInput {
+                    required: input.required,
+                    fs_path: matches!(&input.data_type, DataType::FsPath(_)),
                     binding: self.lower(graph.bindings.get(&InputPort::new(node_id, port_idx))),
                 },
             ));

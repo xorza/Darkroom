@@ -43,7 +43,7 @@ async fn optional_bind_to_missing_propagates() {
     e.edit(|g| {
         // sum missing-required; mult[0] stays bound to sum but goes optional.
         g.unbind("sum", 0);
-        g.edit_func("mult", |func| func.inputs[0].required = false);
+        g.edit_func("mult", |func| func.ports.inputs[0].required = false);
     });
 
     let plan = e.plan_sinks().await;
@@ -60,7 +60,7 @@ async fn optional_unbound_does_not_propagate() {
     let mut e = TestEngine::over(TestGraph::sample());
     e.edit(|g| {
         g.unbind("mult", 0);
-        g.edit_func("mult", |func| func.inputs[0].required = false);
+        g.edit_func("mult", |func| func.ports.inputs[0].required = false);
     });
 
     let plan = e.plan_sinks().await;
@@ -83,7 +83,7 @@ async fn optional_bind_to_gated_upstream_is_gated() {
         // propagation specifically. mult and print end up gated.
         g.wire("get_b", "mult");
         g.wire("sum", ("mult", 1));
-        g.edit_func("mult", |func| func.inputs[1].required = false);
+        g.edit_func("mult", |func| func.ports.inputs[1].required = false);
     });
 
     // The chain is gated and nothing runs.

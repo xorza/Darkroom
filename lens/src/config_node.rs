@@ -18,7 +18,7 @@ use common::{FieldKind, FieldValue, Introspect};
 use scenarium::Invocation;
 use scenarium::async_lambda;
 use scenarium::{ConstValue, CustomValue, DataType, DynamicValue, TypeId};
-use scenarium::{FuncBuilder, FuncInput, FuncOutput};
+use scenarium::{FuncBuilder, InputDecl, OutputDecl};
 use scenarium::{InvokeError, Library, TypeEntry};
 
 use crate::node_spec::NodeSpec;
@@ -68,7 +68,7 @@ impl<T: Introspect + Clone + fmt::Debug + Send + Sync + 'static> ConfigValue<T> 
         spec.builder(lambda)
             .pure()
             .inputs(inputs)
-            .output(FuncOutput::new("Config", config_data_type::<T>()))
+            .output(OutputDecl::new("Config", config_data_type::<T>()))
     }
 }
 
@@ -105,15 +105,15 @@ impl<T: Introspect> FieldInputs<T> {
 
     /// The inputs, one per field in declaration order. Read once, as a func
     /// is declared, so the fields are read again rather than kept.
-    pub(crate) fn inputs(&self) -> Vec<FuncInput> {
+    pub(crate) fn inputs(&self) -> Vec<InputDecl> {
         T::fields()
             .iter()
             .map(|field| {
                 let data_type = data_type(&field.kind);
                 let input = if field.required {
-                    FuncInput::required(field.label, data_type)
+                    InputDecl::required(field.label, data_type)
                 } else {
-                    FuncInput::optional(field.label, data_type)
+                    InputDecl::optional(field.label, data_type)
                 };
                 input.default(const_value(&field.default))
             })

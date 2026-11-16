@@ -1,10 +1,9 @@
 use crate::async_lambda;
 use crate::data::data_type::DataType;
 use crate::graph::func::Func;
-use crate::graph::func::func_input::FuncInput;
-use crate::graph::func::func_output::FuncOutput;
 use crate::graph::func::lambda::{FuncLambda, Invocation};
 use crate::graph::identity::FuncId;
+use crate::graph::ports::{InputDecl, OutputDecl};
 use crate::library::Library;
 use common::Libm;
 
@@ -36,16 +35,16 @@ struct FloatOutputSpec {
 }
 
 impl FloatInputSpec {
-    fn declare(self) -> FuncInput {
-        FuncInput::required(self.name, DataType::Float)
+    fn declare(self) -> InputDecl {
+        InputDecl::required(self.name, DataType::Float)
             .description(self.description)
             .default(self.default)
     }
 }
 
 impl FloatOutputSpec {
-    fn declare(self) -> FuncOutput {
-        FuncOutput::new(self.name, DataType::Float).description(self.description)
+    fn declare(self) -> OutputDecl {
+        OutputDecl::new(self.name, DataType::Float).description(self.description)
     }
 }
 

@@ -7,8 +7,8 @@ use lumos::{
 use lumos::{ProgressCallback, ProgressMonitor};
 use scenarium::async_lambda;
 use scenarium::{
-    DataType, DynamicValue, Func, FuncId, FuncInput, FuncOutput, Invocation, InvokeError,
-    InvokeResult, Library, OutputDemand,
+    DataType, DynamicValue, Func, FuncId, InputDecl, Invocation, InvokeError, InvokeResult,
+    Library, OutputDecl, OutputDemand,
 };
 
 use crate::astro::config::preset::Preset;
@@ -112,26 +112,26 @@ pub(crate) fn register(library: &mut Library) {
         .category("Astro")
         .pure()
         .input(
-            FuncInput::required("Lights", astro_raw_paths_type())
+            InputDecl::required("Lights", astro_raw_paths_type())
                 .description("Camera-RAW light frames to stack."),
         )
         .input(
-            FuncInput::optional("Masters", MASTERS_DATA_TYPE)
+            InputDecl::optional("Masters", MASTERS_DATA_TYPE)
                 .description("Optional calibration masters. Unwired means no calibration."),
         )
         .input(DetectionPreset::input("Detection"))
         .input(RegistrationPreset::input("Registration"))
         .input(CombineMethodChoice::input("Combine"))
-        .input(FuncInput::optional("Reference", DataType::Int).description(
+        .input(InputDecl::optional("Reference", DataType::Int).description(
             "Alignment reference frame index; unset picks the frame with the lowest \
                      median FWHM among those with enough stars.",
         ))
-        .output(FuncOutput::new("Image", IMAGE_DATA_TYPE).description("Stacked image."))
+        .output(OutputDecl::new("Image", IMAGE_DATA_TYPE).description("Stacked image."))
         .output(
-            FuncOutput::new("Coverage", IMAGE_DATA_TYPE).description("Per-pixel frame-count map."),
+            OutputDecl::new("Coverage", IMAGE_DATA_TYPE).description("Per-pixel frame-count map."),
         )
         .output(
-            FuncOutput::new("Weight", IMAGE_DATA_TYPE)
+            OutputDecl::new("Weight", IMAGE_DATA_TYPE)
                 .description("Per-pixel accumulated weight map."),
         )
         .build(),

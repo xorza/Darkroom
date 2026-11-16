@@ -15,7 +15,7 @@ use std::mem;
 use std::sync::{Arc, Mutex};
 
 use scenarium::{
-    DataType, DynamicValue, Func, FuncId, FuncInput, Invocation, Library, NodeId, async_lambda,
+    DataType, DynamicValue, Func, FuncId, InputDecl, Invocation, Library, NodeId, async_lambda,
 };
 
 /// Stable `FuncId` for the preview node. Persisted in every document that holds
@@ -72,7 +72,7 @@ pub(crate) fn func(sink: Arc<PreviewSink>) -> Func {
          rest of the graph computes.",
     )
     .input(
-        FuncInput::optional("Value", DataType::Any)
+        InputDecl::optional("Value", DataType::Any)
             .description("The value to show. Anything can be wired here."),
     )
     .build()

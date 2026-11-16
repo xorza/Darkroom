@@ -13,9 +13,8 @@ use crate::data::data_type::{DataType, TypeId};
 use crate::data::dynamic_value::{CustomValue, DynamicValue};
 use crate::graph::func::Func;
 use crate::graph::func::error::InvokeError;
-use crate::graph::func::func_input::FuncInput;
-use crate::graph::func::func_output::FuncOutput;
 use crate::graph::func::lambda::Invocation;
+use crate::graph::ports::{InputDecl, OutputDecl};
 use crate::internals;
 use crate::internals::func_invoker::FuncInvoker;
 use crate::library::Library;
@@ -197,7 +196,7 @@ fn an_enum_declared_only_by_an_output_still_blocks_a_custom_registration() {
     let mut library = Library::default();
     library.add(
         internals::stub_func(FuncId::unique(), "emit")
-            .output(FuncOutput::new("mode", DataType::Enum(type_id)))
+            .output(OutputDecl::new("mode", DataType::Enum(type_id)))
             .build(),
     );
     library.register_type(type_id, TypeEntry::custom("Opaque"));
@@ -218,7 +217,7 @@ fn a_library_iterates_exactly_its_funcs() {
 fn modal_func(type_id: TypeId, default: &str) -> Func {
     internals::stub_func(FuncId::unique(), "modal")
         .input(
-            FuncInput::optional("mode", DataType::Enum(type_id))
+            InputDecl::optional("mode", DataType::Enum(type_id))
                 .default(ConstValue::Enum(default.into())),
         )
         .build()
@@ -336,9 +335,9 @@ async fn an_invoked_func_keeps_its_node_state_between_calls() -> Result<(), Invo
             }),
         )
         .pure()
-        .input(FuncInput::required("A", DataType::Int))
-        .input(FuncInput::required("B", DataType::Int))
-        .output(FuncOutput::new("Sum", DataType::Int))
+        .input(InputDecl::required("A", DataType::Int))
+        .input(InputDecl::required("B", DataType::Int))
+        .output(OutputDecl::new("Sum", DataType::Int))
         .build(),
     );
     let sum = library.by_name("sum").unwrap();

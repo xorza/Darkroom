@@ -1,10 +1,9 @@
 use crate::async_lambda;
 use crate::data::data_type::DataType;
 use crate::graph::func::Func;
-use crate::graph::func::func_input::FuncInput;
-use crate::graph::func::func_output::FuncOutput;
 use crate::graph::func::lambda::Invocation;
 use crate::graph::identity::FuncId;
+use crate::graph::ports::{InputDecl, OutputDecl};
 use crate::library::Library;
 
 const PRINT_FUNC_ID: FuncId = FuncId::literal("06b169d2-d3d8-43fb-ba80-c566fcffea44");
@@ -29,7 +28,7 @@ pub fn system_library() -> Library {
         .category("System")
         .sink()
         .input(
-            FuncInput::required("Value", DataType::Any)
+            InputDecl::required("Value", DataType::Any)
                 .description("Value of any type to write to the node's log (info level)."),
         )
         .build(),
@@ -53,10 +52,10 @@ pub fn system_library() -> Library {
         .category("System")
         .pure()
         .input(
-            FuncInput::required("Value", DataType::Any)
+            InputDecl::required("Value", DataType::Any)
                 .description("Value of any type to convert to text."),
         )
-        .output(FuncOutput::new("Text", DataType::String).description("The value's string form."))
+        .output(OutputDecl::new("Text", DataType::String).description("The value's string form."))
         .build(),
     );
 
@@ -81,14 +80,14 @@ pub fn system_library() -> Library {
         .category("System")
         .pure()
         .input(
-            FuncInput::required("A", DataType::Any)
+            InputDecl::required("A", DataType::Any)
                 .description("First value; its text comes first."),
         )
         .input(
-            FuncInput::required("B", DataType::Any)
+            InputDecl::required("B", DataType::Any)
                 .description("Second value; its text is appended after A."),
         )
-        .output(FuncOutput::new("Text", DataType::String).description("A's text followed by B's."))
+        .output(OutputDecl::new("Text", DataType::String).description("A's text followed by B's."))
         .build(),
     );
 

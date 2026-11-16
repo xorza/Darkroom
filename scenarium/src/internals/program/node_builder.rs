@@ -5,11 +5,11 @@ use crate::data::const_value::ConstValue;
 use crate::data::data_type::DataType;
 use crate::exec::compile::compiled_graph::{ExecBinding, ExecEvent, ExecInput, ExecNode};
 use crate::graph::func::FuncBehavior;
-use crate::graph::func::func_output::FuncOutput;
 use crate::graph::func::lambda::FuncLambda;
 use crate::graph::func::signature::FuncSignature;
 use crate::graph::identity::{FuncId, FuncRef, NodeId};
 use crate::graph::node::CacheMode;
+use crate::graph::ports::{OutputDecl, Ports};
 use crate::internals;
 use crate::internals::program::{Placed, ProgramBuilder};
 
@@ -20,7 +20,7 @@ pub(crate) struct NodeBuilder<'a> {
     owner: &'a mut ProgramBuilder,
     e_node: ExecNode,
     inputs: Vec<ExecInput>,
-    outputs: Vec<FuncOutput>,
+    outputs: Vec<OutputDecl>,
     events: Vec<ExecEvent>,
     func_id: Option<FuncId>,
     node_id: Option<NodeId>,
@@ -123,7 +123,7 @@ impl<'a> NodeBuilder<'a> {
     pub(crate) fn output_types(mut self, types: impl IntoIterator<Item = DataType>) -> Self {
         for data_type in types {
             let name = format!("out{}", self.outputs.len());
-            self.outputs.push(FuncOutput::new(name, data_type));
+            self.outputs.push(OutputDecl::new(name, data_type));
         }
         self
     }
@@ -160,9 +160,13 @@ impl<'a> NodeBuilder<'a> {
         // Keyed to the node's id, not its position: a func id that moved with the position would
         // read as a changed implementation across a reinstall and drop the node's state.
         let func_id = func_id.unwrap_or_else(|| FuncId::from_u128(node_id.as_u128()));
-        e_node.func_ref = FuncRef::new(func_id, FuncSignature::of(&[], &outputs, &[]));
-        e_node.inputs = owner.program.inputs.append(inputs);
         let output_count = u32::try_from(outputs.len()).expect("a fixture's outputs fit in u32");
+        let ports = Ports {
+            inputs: Vec::new(),
+            outputs,
+        };
+        e_node.func_ref = FuncRef::new(func_id, FuncSignature::of(&ports, &[]));
+        e_node.inputs = owner.program.inputs.append(inputs);
         e_node.outputs = Span::new(owner.program.output_count, output_count);
         owner.program.output_count += output_count;
         e_node.events = owner.program.events.append(events);

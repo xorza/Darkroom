@@ -16,7 +16,7 @@ use glam::Vec2;
 use scenarium::internals::test_graph::TestGraph;
 use scenarium::{
     Binding, BindingEntry, ConstValue, DataType, DetachedNode, DetachedNodeParts, EventPort, Func,
-    FuncId, FuncInput, FuncOutput, Graph, InputPort, Library, Node, NodeId, OutputPort,
+    FuncId, Graph, InputDecl, InputPort, Library, Node, NodeId, OutputDecl, OutputPort,
     Subscription, internals,
 };
 
@@ -69,8 +69,8 @@ fn plain_func() -> Func {
         FuncId::literal("1ed07f16-02ed-4fb2-9677-5aa67801c7ae"),
         "plain",
     )
-    .inputs(["a", "b", "c"].map(|name| FuncInput::optional(name, DataType::Int)))
-    .output(FuncOutput::new("out", DataType::Int))
+    .inputs(["a", "b", "c"].map(|name| InputDecl::optional(name, DataType::Int)))
+    .output(OutputDecl::new("out", DataType::Int))
     .event("tick", internals::stub_event())
     .build()
 }
@@ -109,8 +109,8 @@ impl DocumentFixture {
     pub(crate) fn probes(n: usize) -> Self {
         let probe = internals::stub_func(FuncId::unique(), "probe")
             .pure()
-            .input(FuncInput::optional("a", DataType::Int))
-            .output(FuncOutput::new("out", DataType::Int))
+            .input(InputDecl::optional("a", DataType::Int))
+            .output(OutputDecl::new("out", DataType::Int))
             .build();
         let mut fixture = Self::default();
         for _ in 0..n {

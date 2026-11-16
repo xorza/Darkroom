@@ -36,7 +36,7 @@ async fn disabled_upstream_with_optional_consumer_still_runs() {
     let mut e = TestEngine::over(TestGraph::sample());
     e.edit(|g| {
         g.disable("sum");
-        g.edit_func("mult", |func| func.inputs[0].required = false);
+        g.edit_func("mult", |func| func.ports.inputs[0].required = false);
     });
 
     let plan = e.plan_sinks().await;

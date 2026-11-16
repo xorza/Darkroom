@@ -9,7 +9,7 @@ use common::FileIdentity;
 use lumos::{MlDenoise, MlError, OnnxModel, RemoveStars};
 use scenarium::{
     AnyState, ConstValue, DataType, DynamicValue, FsPathConfig, FsPathMode, Func, FuncId,
-    FuncInput, FuncOutput, Invocation, InvokeError, Library, async_lambda,
+    InputDecl, Invocation, InvokeError, Library, OutputDecl, async_lambda,
 };
 
 use crate::astro::nodes::{MlModelPaths, runtime};
@@ -53,7 +53,7 @@ fn register_denoise(library: &mut Library, model_path: &Path) {
         .pure()
         .input(Image::input("Image"))
         .input(model_input("Model", model_path))
-        .output(FuncOutput::new("Image", IMAGE_DATA_TYPE).description("Processed image."))
+        .output(OutputDecl::new("Image", IMAGE_DATA_TYPE).description("Processed image."))
         .build(),
     );
 }
@@ -107,16 +107,16 @@ fn register_star_removal(library: &mut Library, model_path: &Path) {
         .input(Image::input("Image"))
         .input(model_input("Model", model_path))
         .output(
-            FuncOutput::new("Starless", IMAGE_DATA_TYPE)
+            OutputDecl::new("Starless", IMAGE_DATA_TYPE)
                 .description("The image with stars removed."),
         )
-        .output(FuncOutput::new("Stars", IMAGE_DATA_TYPE).description("The recovered star layer."))
+        .output(OutputDecl::new("Stars", IMAGE_DATA_TYPE).description("The recovered star layer."))
         .build(),
     );
 }
 
-fn model_input(name: &str, default: &Path) -> FuncInput {
-    FuncInput::required(
+fn model_input(name: &str, default: &Path) -> InputDecl {
+    InputDecl::required(
         name,
         DataType::FsPath(Arc::new(FsPathConfig::with_extensions(
             FsPathMode::ExistingFile,

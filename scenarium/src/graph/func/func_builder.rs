@@ -4,13 +4,12 @@
 use crate::data::data_type::{DataType, Strictness};
 use crate::graph::func::error::FuncValidationError;
 use crate::graph::func::event::EventLambda;
-use crate::graph::func::func_input::FuncInput;
-use crate::graph::func::func_output::FuncOutput;
 use crate::graph::func::lambda::FuncLambda;
 use crate::graph::func::signature::FuncSignature;
 use crate::graph::func::{Func, FuncBehavior, FuncEvent};
 use crate::graph::identity::{FuncId, FuncRef};
 use crate::graph::node::CacheMode;
+use crate::graph::ports::{InputDecl, OutputDecl, Ports};
 
 /// A func declaration in progress, started by [`Func::builder`] or [`Func::into_builder`].
 #[derive(Clone, Debug)]
@@ -22,8 +21,7 @@ pub struct FuncBuilder {
     pub default_cache_mode: CacheMode,
     pub behavior: FuncBehavior,
     pub description: Option<String>,
-    pub inputs: Vec<FuncInput>,
-    pub outputs: Vec<FuncOutput>,
+    pub ports: Ports,
     pub events: Vec<FuncEvent>,
     pub lambda: FuncLambda,
 }
@@ -62,21 +60,21 @@ impl FuncBuilder {
     }
 
     #[must_use]
-    pub fn input(mut self, input: FuncInput) -> Self {
-        self.inputs.push(input);
+    pub fn input(mut self, input: InputDecl) -> Self {
+        self.ports.inputs.push(input);
         self
     }
 
     #[must_use]
-    pub fn inputs(mut self, inputs: impl IntoIterator<Item = FuncInput>) -> Self {
-        self.inputs.extend(inputs);
+    pub fn inputs(mut self, inputs: impl IntoIterator<Item = InputDecl>) -> Self {
+        self.ports.inputs.extend(inputs);
         self
     }
 
-    /// Add an output port, built with [`FuncOutput::new`].
+    /// Add an output port, built with [`OutputDecl::new`].
     #[must_use]
-    pub fn output(mut self, output: FuncOutput) -> Self {
-        self.outputs.push(output);
+    pub fn output(mut self, output: OutputDecl) -> Self {
+        self.ports.outputs.push(output);
         self
     }
 
@@ -99,7 +97,7 @@ impl FuncBuilder {
         if let Err(error) = self.validate() {
             panic!("invalid function declaration {:?}: {error}", self.name);
         }
-        let signature = FuncSignature::of(&self.inputs, &self.outputs, &self.events);
+        let signature = FuncSignature::of(&self.ports, &self.events);
         Func {
             func_ref: FuncRef::new(self.id, signature),
             name: self.name,
@@ -108,8 +106,7 @@ impl FuncBuilder {
             default_cache_mode: self.default_cache_mode,
             behavior: self.behavior,
             description: self.description,
-            inputs: self.inputs,
-            outputs: self.outputs,
+            ports: self.ports,
             events: self.events,
             lambda: self.lambda,
         }
@@ -121,10 +118,10 @@ impl FuncBuilder {
         if self.id.is_nil() {
             return Err(FuncValidationError::NilId);
         }
-        if self.outputs.is_empty() && self.behavior != FuncBehavior::Impure {
+        if self.ports.outputs.is_empty() && self.behavior != FuncBehavior::Impure {
             return Err(FuncValidationError::PureWithoutOutputs { func_id: self.id });
         }
-        for (input_idx, input) in self.inputs.iter().enumerate() {
+        for (input_idx, input) in self.ports.inputs.iter().enumerate() {
             if let DataType::Custom(type_id) | DataType::Enum(type_id) = &input.data_type
                 && type_id.is_nil()
             {
@@ -145,7 +142,7 @@ impl FuncBuilder {
                 });
             }
         }
-        for (output_idx, output) in self.outputs.iter().enumerate() {
+        for (output_idx, output) in self.ports.outputs.iter().enumerate() {
             match &output.data_type {
                 DataType::Any => {
                     return Err(FuncValidationError::AnyOutput {

@@ -12,7 +12,7 @@ use lumos::{
     ScnrProtection, Stretch,
 };
 use scenarium::{
-    Func, FuncId, FuncInput, FuncLambda, FuncOutput, Invocation, Library, async_lambda,
+    Func, FuncId, FuncLambda, InputDecl, Invocation, Library, OutputDecl, async_lambda,
 };
 
 use crate::astro::config::preset::Preset;
@@ -153,11 +153,11 @@ where
     )
 }
 
-fn processing_func(spec: NodeSpec, inputs: Vec<FuncInput>, lambda: FuncLambda) -> Func {
+fn processing_func(spec: NodeSpec, inputs: Vec<InputDecl>, lambda: FuncLambda) -> Func {
     spec.builder(lambda)
         .category("Astro")
         .pure()
         .inputs(inputs)
-        .output(FuncOutput::new("Image", IMAGE_DATA_TYPE).description("Processed image."))
+        .output(OutputDecl::new("Image", IMAGE_DATA_TYPE).description("Processed image."))
         .build()
 }

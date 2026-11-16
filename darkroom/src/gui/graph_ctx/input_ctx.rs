@@ -1,6 +1,6 @@
 //! One input port of a node, with its declaration and current binding.
 
-use scenarium::{Binding, ConstValue, DataType, FuncInput, InputPort, Library, ValueVariant};
+use scenarium::{Binding, ConstValue, DataType, InputDecl, InputPort, Library, ValueVariant};
 
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::port_ref::PortRef;
@@ -11,11 +11,11 @@ use crate::gui::port_ref::PortRef;
 pub(crate) struct InputCtx<'a> {
     node: NodeCtx<'a>,
     port_idx: usize,
-    declared: &'a FuncInput,
+    declared: &'a InputDecl,
 }
 
 impl<'a> InputCtx<'a> {
-    pub(super) const fn new(node: NodeCtx<'a>, port_idx: usize, declared: &'a FuncInput) -> Self {
+    pub(super) const fn new(node: NodeCtx<'a>, port_idx: usize, declared: &'a InputDecl) -> Self {
         Self {
             node,
             port_idx,
@@ -95,7 +95,7 @@ impl<'a> InputCtx<'a> {
 
 /// See [`InputCtx::takes_const`]: the rule [`default_const_value`] follows, read off the port
 /// and the library alone.
-fn takes_const(library: &Library, input: &FuncInput) -> bool {
+fn takes_const(library: &Library, input: &InputDecl) -> bool {
     input.default_value.is_some()
         || match &input.data_type {
             DataType::Enum(id) => library
@@ -108,7 +108,7 @@ fn takes_const(library: &Library, input: &FuncInput) -> bool {
 
 /// See [`InputCtx::default`]. A free fn because the enum arm needs the
 /// library rather than anything on the port.
-fn default_const_value(library: &Library, input: &FuncInput) -> Option<ConstValue> {
+fn default_const_value(library: &Library, input: &InputDecl) -> Option<ConstValue> {
     input.default_value.clone().or_else(|| {
         // `DataType::Enum(id)` doesn't carry its variants; the library's registry does.
         match &input.data_type {
@@ -126,7 +126,7 @@ fn default_const_value(library: &Library, input: &FuncInput) -> Option<ConstValu
 
 #[cfg(test)]
 mod tests {
-    use scenarium::{ConstValue, DataType, FuncInput, Library, TypeEntry, TypeId};
+    use scenarium::{ConstValue, DataType, InputDecl, Library, TypeEntry, TypeId};
 
     use crate::gui::graph_ctx::input_ctx::{default_const_value, takes_const};
 
@@ -141,8 +141,8 @@ mod tests {
             mode,
             TypeEntry::enum_with_variants("Mode", vec!["Fast".into(), "Fine".into()]),
         );
-        let input = |data_type: DataType| FuncInput::optional("x", data_type);
-        let declared = FuncInput {
+        let input = |data_type: DataType| InputDecl::optional("x", data_type);
+        let declared = InputDecl {
             default_value: Some(ConstValue::Int(5)),
             ..input(DataType::Int)
         };

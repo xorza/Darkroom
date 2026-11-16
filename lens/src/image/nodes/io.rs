@@ -10,7 +10,7 @@ use std::sync::Arc;
 use common::{SystemMemory, fs, task};
 use imaginarium::{RasterFormat, SUPPORTED_EXTENSIONS};
 use scenarium::{ConstValue, DataType, DynamicValue, FsPathConfig, FsPathMode, InvokeError};
-use scenarium::{Func, FuncInput, FuncOutput, Library};
+use scenarium::{Func, InputDecl, Library, OutputDecl};
 
 use crate::image::format::{AS_IS, CONVERSION_FORMAT_DATATYPE, ConversionFormat};
 use crate::image::nodes::error::RasterFileError;
@@ -73,10 +73,10 @@ fn register_load(library: &mut Library) {
         .category("Image")
         .pure()
         .input(
-            FuncInput::required("Path", image_fs_path(FsPathMode::ExistingFile))
+            InputDecl::required("Path", image_fs_path(FsPathMode::ExistingFile))
                 .description("Image file to load."),
         )
-        .output(FuncOutput::new("Image", IMAGE_DATA_TYPE).description("Loaded image."))
+        .output(OutputDecl::new("Image", IMAGE_DATA_TYPE).description("Loaded image."))
         .build(),
     );
 }
@@ -110,14 +110,14 @@ fn register_save(library: &mut Library) {
             .category("Image")
             .sink()
             .input(
-                FuncInput::required("Image", IMAGE_DATA_TYPE).description("Image to save."),
+                InputDecl::required("Image", IMAGE_DATA_TYPE).description("Image to save."),
             )
             .input(
-                FuncInput::required("Path", image_fs_path(FsPathMode::NewFile))
+                InputDecl::required("Path", image_fs_path(FsPathMode::NewFile))
                     .description("Destination file; the extension picks the container."),
             )
             .input(
-                FuncInput::required("Format", CONVERSION_FORMAT_DATATYPE)
+                InputDecl::required("Format", CONVERSION_FORMAT_DATATYPE)
                     .default(ConstValue::Enum(AS_IS.to_string()))
                     .description(
                         "Convert to this color format before saving; \"As Is\" keeps the source format.",
