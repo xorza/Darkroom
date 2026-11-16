@@ -1,5 +1,5 @@
 //! [`Ports`]: the inputs and outputs a declaration shows and is wired by, each an [`InputDecl`]
-//! or an [`OutputDecl`] under its [`PortId`].
+//! or an [`OutputDecl`] under its [`PortId`], a [`Numbered`].
 //!
 //! A func's ports and a subgraph's interface are both a `Ports`, held to one rule
 //! ([`Ports::check`]), so a port exposed on an interface keeps what made it: a const-only input,
@@ -11,10 +11,16 @@
 //!   numbers its ports, and a number once shipped is never changed or used again, as a protobuf
 //!   field's ("This number cannot be changed once your message type is in use", "Field numbers
 //!   should never be reused", [field numbers](https://protobuf.dev/programming-guides/proto3/#assigning)).
-//!   An interface mints a random id for each port, so two copies of a definition changed apart
-//!   never give one id to two ports.
+//!   An interface mints a random id for each port ([`PortId::mint`]), so two copies of a
+//!   definition changed apart give one id to two ports only by the odds [`PortId`] states.
+//! - **A declaration does not hold its own id.** A list of ports holds each under its number, as
+//!   [`NodeRef`](crate::NodeRef) pairs a node with the id it was found under, and
+//!   [`FuncBuilder::input`](crate::FuncBuilder::input) and an interface are the two places that
+//!   pair them. Refused: an `id` field that is nil until the port is numbered, a state a check
+//!   had to catch.
 
 use std::fmt;
+use std::ops::{Deref, DerefMut};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -27,12 +33,36 @@ use crate::graph::binding_entry::BindingEntry;
 use crate::graph::func::value_variant::ValueVariant;
 use crate::graph::identity::{InputPort, NodeId, PortId};
 
+/// A port's declaration under its id: the item a declaration's lists of ports hold.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Numbered<T> {
+    pub id: PortId,
+    pub port: T,
+}
+
+impl<T> Numbered<T> {
+    pub const fn new(id: PortId, port: T) -> Self {
+        Self { id, port }
+    }
+}
+
+impl<T> Deref for Numbered<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.port
+    }
+}
+
+impl<T> DerefMut for Numbered<T> {
+    fn deref_mut(&mut self) -> &mut T {
+        &mut self.port
+    }
+}
+
 /// One input port a declaration shows.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InputDecl {
-    /// Nil until a [`FuncBuilder`](crate::FuncBuilder) numbers the port or an interface mints its
-    /// id; a declaration refuses the nil id ([`Ports::check`]).
-    pub id: PortId,
     pub name: String,
     pub required: bool,
     pub data_type: DataType,
@@ -50,7 +80,6 @@ impl InputDecl {
     /// A required input of `data_type` (no const default).
     pub fn required(name: impl Into<String>, data_type: DataType) -> Self {
         Self {
-            id: PortId::nil(),
             name: name.into(),
             required: true,
             data_type,
@@ -127,9 +156,6 @@ impl InputDecl {
 /// One output port a declaration shows.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OutputDecl {
-    /// Nil until a [`FuncBuilder`](crate::FuncBuilder) numbers the port or an interface mints its
-    /// id; a declaration refuses the nil id ([`Ports::check`]).
-    pub id: PortId,
     pub name: String,
     pub data_type: DataType,
     /// One-line human explanation shown as the port's hover tooltip in the
@@ -140,7 +166,6 @@ pub struct OutputDecl {
 impl OutputDecl {
     pub fn new(name: impl Into<String>, data_type: DataType) -> Self {
         Self {
-            id: PortId::nil(),
             name: name.into(),
             data_type,
             description: None,
@@ -158,13 +183,13 @@ impl OutputDecl {
 /// The inputs and outputs a declaration shows, each in the order a node draws them.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Ports {
-    pub inputs: Vec<InputDecl>,
-    pub outputs: Vec<OutputDecl>,
+    pub inputs: Vec<Numbered<InputDecl>>,
+    pub outputs: Vec<Numbered<OutputDecl>>,
 }
 
 impl Ports {
-    /// Hold these ports to the rules every declaration passes: each id is set and unique among
-    /// the ports of its side, each type names its registered entry under a set id, and each
+    /// Hold these ports to the rules every declaration passes: each id is unique among the ports
+    /// of its side, each type names its registered entry under a set id, and each
     /// default fits its input. Exact kinds for a scalar default, as nobody chose a coercion here;
     /// an enum default need only be an enum literal, as the variants are the library's, which
     /// [`Library::check`](crate::Library::check) holds it to.
@@ -201,12 +226,12 @@ impl Ports {
     }
 
     /// The input under `id`, if these ports hold one.
-    pub fn input(&self, id: PortId) -> Option<&InputDecl> {
+    pub fn input(&self, id: PortId) -> Option<&Numbered<InputDecl>> {
         self.input_idx(id).map(|idx| &self.inputs[idx])
     }
 
     /// The output under `id`, if these ports hold one.
-    pub fn output(&self, id: PortId) -> Option<&OutputDecl> {
+    pub fn output(&self, id: PortId) -> Option<&Numbered<OutputDecl>> {
         self.output_idx(id).map(|idx| &self.outputs[idx])
     }
 
@@ -233,24 +258,13 @@ impl Ports {
     }
 }
 
-/// The id of the port a func numbers `number`: what
-/// [`FuncBuilder::input`](crate::FuncBuilder::input) and its siblings give the port. A shipped
-/// number is never changed or given to another port, as a saved node's wiring names the port by
-/// it.
-pub const fn numbered_port(number: u32) -> PortId {
-    PortId::from_u128(number as u128)
-}
-
-/// Hold `ids`, the ports of one side in order, to the id rule: each set, and none twice.
+/// Hold `ids`, the ports of one side in order, to the id rule: none twice.
 pub(crate) fn check_ids(
     ids: impl IntoIterator<Item = PortId>,
     list: PortList,
 ) -> Result<(), PortsError> {
     let mut seen: Vec<PortId> = Vec::new();
     for (idx, port_id) in ids.into_iter().enumerate() {
-        if port_id.is_nil() {
-            return Err(PortsError::NilId { list, idx });
-        }
         if seen.contains(&port_id) {
             return Err(PortsError::DuplicateId { list, idx, port_id });
         }
@@ -280,8 +294,6 @@ impl fmt::Display for PortList {
 /// Why a list of ports is no declaration's: what [`Ports::check`] refuses.
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
 pub enum PortsError {
-    #[error("{list} {idx} has the nil id")]
-    NilId { list: PortList, idx: usize },
     #[error("{list} {idx} repeats the id {port_id:?} of an earlier one")]
     DuplicateId {
         list: PortList,

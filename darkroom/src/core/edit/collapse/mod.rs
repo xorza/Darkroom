@@ -21,7 +21,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use glam::Vec2;
 use scenarium::{
     Binding, BindingEntry, Boundary, GraphId, InputDecl, InputPort, Interface, Library, Node,
-    NodeId, OutputDecl, OutputPort, PortId, Ports, Subgraph, SubgraphId, numbered_port,
+    NodeId, Numbered, OutputDecl, OutputPort, PortId, Ports, Subgraph, SubgraphId,
 };
 use thiserror::Error;
 
@@ -84,7 +84,7 @@ struct Crossing {
 
 /// Plan collapsing the graph nodes of `selection` in `graph` of `document` into a new subgraph
 /// and one instance of it; `None` when the selection holds no graph node. A boundary node and a
-/// stub in the selection stay where they are.
+/// ghost node in the selection stay where they are.
 pub(crate) fn collapse(
     document: &Document,
     graph: GraphId,
@@ -176,16 +176,18 @@ pub(crate) fn collapse(
             .name
             .clone()
     };
-    let port_id = |idx: usize| numbered_port(idx as u32 + 1);
+    let port_id = |idx: usize| PortId::new(idx as u32 + 1);
     let interface = Interface::new(Ports {
         inputs: incoming
             .iter()
             .enumerate()
-            .map(|(idx, crossing)| InputDecl {
-                id: port_id(idx),
-                ..InputDecl::optional(
-                    input_name(crossing.consumers[0]),
-                    output_decl(crossing.source).data_type,
+            .map(|(idx, crossing)| {
+                Numbered::new(
+                    port_id(idx),
+                    InputDecl::optional(
+                        input_name(crossing.consumers[0]),
+                        output_decl(crossing.source).data_type,
+                    ),
                 )
             })
             .collect(),
@@ -194,10 +196,10 @@ pub(crate) fn collapse(
             .enumerate()
             .map(|(idx, crossing)| {
                 let decl = output_decl(crossing.source);
-                OutputDecl {
-                    id: port_id(idx),
-                    ..OutputDecl::new(decl.name.clone(), decl.data_type)
-                }
+                Numbered::new(
+                    port_id(idx),
+                    OutputDecl::new(decl.name.clone(), decl.data_type),
+                )
             })
             .collect(),
     });

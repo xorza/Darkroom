@@ -1,6 +1,9 @@
 //! One input port of a node, with its declaration and current binding.
 
-use scenarium::{Binding, ConstValue, DataType, InputDecl, InputPort, Library, ValueVariant};
+use scenarium::{
+    Binding, ConstValue, DataType, GhostBinding, InputDecl, InputPort, Library, Numbered,
+    ValueVariant,
+};
 
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::port_ref::PortRef;
@@ -12,11 +15,15 @@ pub(crate) struct InputCtx<'a> {
     node: NodeCtx<'a>,
     /// Where the port stands among the node's inputs, the row it draws on.
     idx: usize,
-    declared: &'a InputDecl,
+    declared: &'a Numbered<InputDecl>,
 }
 
 impl<'a> InputCtx<'a> {
-    pub(super) const fn new(node: NodeCtx<'a>, idx: usize, declared: &'a InputDecl) -> Self {
+    pub(super) const fn new(
+        node: NodeCtx<'a>,
+        idx: usize,
+        declared: &'a Numbered<InputDecl>,
+    ) -> Self {
         Self {
             node,
             idx,
@@ -49,7 +56,7 @@ impl<'a> InputCtx<'a> {
     }
 
     pub(crate) const fn data_type(self) -> DataType {
-        self.declared.data_type
+        self.declared.port.data_type
     }
 
     /// What the graph has bound here, or `None` for an unbound port.
@@ -57,15 +64,25 @@ impl<'a> InputCtx<'a> {
         self.node.graph_ctx.body().bindings.get(&self.port())
     }
 
+    /// The ghost this input holds in place of a binding: a wire or a constant the load kept
+    /// and the input no longer takes, or whose producer is a ghost.
+    pub(crate) fn ghost(self) -> Option<&'a GhostBinding> {
+        self.node
+            .graph_ctx
+            .body()
+            .ghost_wiring()
+            .binding(self.port())
+    }
+
     /// Required inputs render with more visual weight than optional ones.
     pub(crate) const fn required(self) -> bool {
-        self.declared.required
+        self.declared.port.required
     }
 
     /// Const-only inputs reject a wired binding: the wire gesture won't
     /// snap to them, so they can only hold a literal.
     pub(crate) const fn const_only(self) -> bool {
-        self.declared.const_only
+        self.declared.port.const_only
     }
 
     /// The editor picker's options for this port, e.g. named config presets.

@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use glam::Vec2;
-use scenarium::{Graph as CoreGraph, NodeId, Stub};
+use scenarium::{Graph as CoreGraph, NodeId};
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::error::GraphViewValidationError;
@@ -49,7 +49,7 @@ pub(crate) struct StackedNode {
 /// camera (`darkroom/AGENTS.md`, "The camera is outside the undo history").
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct GraphView {
-    /// Every node body's placement. Exactly one entry per graph node and per stub, enforced by
+    /// Every node body's placement. Exactly one entry per graph node and per ghost node, enforced by
     /// [`Self::validate`]. Order-insensitive: paint order rides in each entry's
     /// [`NodePlacement::z`]; a caller that needs the stacking asks for [`Self::paint_order`].
     pub(crate) node_placements: BTreeMap<NodeId, NodePlacement>,
@@ -132,15 +132,15 @@ impl GraphView {
                 return Err(GraphViewValidationError::NonFinitePos { node_id: *node_id });
             }
         }
-        // A map has unique keys and a graph's nodes and stubs are disjoint, so counts plus reverse
+        // A map has unique keys and a graph's nodes and ghost nodes are disjoint, so counts plus reverse
         // membership prove the view places exactly their node set.
-        if self.node_placements.len() != graph.len() + graph.stubs().len() {
+        if self.node_placements.len() != graph.len() + graph.ghost_nodes().len() {
             return Err(GraphViewValidationError::NodeCount);
         }
         let ids = graph
             .iter()
             .map(|node| node.node_id)
-            .chain(graph.stubs().map(Stub::node_id));
+            .chain(graph.ghost_nodes().map(|(node_id, _)| node_id));
         for node_id in ids {
             if !self.node_placements.contains_key(&node_id) {
                 return Err(GraphViewValidationError::MissingNode { node_id });
@@ -223,7 +223,7 @@ impl GraphView {
 #[cfg(test)]
 mod tests {
     use glam::Vec2;
-    use scenarium::{EventPort, InputPort, NodeId, OutputPort, numbered_port};
+    use scenarium::{EventPort, InputPort, NodeId, OutputPort, PortId};
 
     use crate::core::document::error::{GraphViewValidationError, RouteError};
     use crate::core::document::graph_view::{GraphView, NodePlacement};
@@ -249,10 +249,10 @@ mod tests {
         let mut fixture = DocumentFixture::default();
         let [a, b] = [0.0, 220.0].map(|x| fixture.node_at(Vec2::new(x, 0.0)));
         let data = fixture.wire(
-            OutputPort::new(a, numbered_port(1)),
-            InputPort::new(b, numbered_port(1)),
+            OutputPort::new(a, PortId::new(1)),
+            InputPort::new(b, PortId::new(1)),
         );
-        let event = fixture.subscribe(EventPort::new(a, numbered_port(1)), b);
+        let event = fixture.subscribe(EventPort::new(a, PortId::new(1)), b);
         let tie = fixture.tie(Vec2::new(110.0, 0.0), [data, event]);
         let DocumentFixture { mut document, .. } = fixture;
         document.main_view.selected.insert(ItemId::Tie(tie));
@@ -262,8 +262,8 @@ mod tests {
 
         let ghost = TieId::unique();
         let other_output = WireKey::Data(DataWire {
-            output: OutputPort::new(b, numbered_port(1)),
-            input: InputPort::new(b, numbered_port(1)),
+            output: OutputPort::new(b, PortId::new(1)),
+            input: InputPort::new(b, PortId::new(1)),
         });
         let with = |change: &dyn Fn(&mut GraphView)| {
             let mut view = valid.clone();

@@ -260,6 +260,7 @@ fn library_row(
         out.push_subgraph(SubgraphIntent::Update(Box::new(Update {
             id: subgraph,
             carried: shared.carried(entry),
+            manifest: shared.manifest(entry).clone(),
         })));
     }
     if state == SyncState::UpdateAvailable {

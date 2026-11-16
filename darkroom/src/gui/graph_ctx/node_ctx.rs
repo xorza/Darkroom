@@ -2,13 +2,15 @@
 
 use glam::Vec2;
 use scenarium::{
-    CacheMode, DetachReason, EventPort, Func, FuncEvent, GraphId, Node, NodeAddr, NodeDecl, NodeId,
-    PortId, ProgramId, RamUsage, SubgraphId, Unresolved,
+    CacheMode, DetachReason, EventPort, Func, FuncEvent, GhostNode, GhostSource, GhostWiring,
+    GraphId, InputPort, Node, NodeAddr, NodeDecl, NodeId, PortId, ProgramId, RamUsage, SavedDecl,
+    SubgraphId, Unresolved,
 };
 
 use crate::core::document;
 use crate::core::preview_sink;
 use crate::gui::graph_ctx::GraphCtx;
+use crate::gui::graph_ctx::ghost_port::{GhostEvent, GhostPort};
 use crate::gui::graph_ctx::input_ctx::InputCtx;
 use crate::gui::graph_ctx::output_ctx::OutputCtx;
 use crate::gui::port_ref::{PortKind, PortRef};
@@ -17,7 +19,7 @@ use crate::gui::theme::Theme;
 use crate::gui::theme::const_editor_theme::ConstEditorTheme;
 use crate::gui::theme::hover::Hover;
 
-/// One placed item of the graph pane — a graph node or a stub: its authoring
+/// One placed item of the graph pane — a graph node or a ghost node: its authoring
 /// record, its position in the paint stack, and what it declares.
 ///
 /// The leaf of the context chain, where the *item* is the level: every function below a node
@@ -37,10 +39,12 @@ pub(crate) struct NodeCtx<'a> {
     pub(crate) node_id: NodeId,
     /// Where the node's body sits, from the view's placements.
     pub(crate) pos: Vec2,
-    /// The graph node, or a stub's record of one.
+    /// The graph node, or a ghost node's record of one.
     node: &'a Node,
+    /// The ghost node this is, for what it declared when the load took it out.
+    ghost_node: Option<&'a GhostNode>,
     /// What a graph node declares — a library func, a special node's hardcoded spec, or a
-    /// subgraph's face — or why the load kept a stub. A stub keeps the user's work while its
+    /// subgraph's face — or why the load kept a ghost node. A ghost node keeps the user's work while its
     /// graph cannot hold the node: it declares no ports, and the user can still select, move and
     /// delete it.
     declaration: Result<NodeDecl<'a>, DetachReason>,
@@ -82,16 +86,16 @@ impl<'a> NodeCtx<'a> {
     /// # Panics
     ///
     /// If the document holds no `node_id`: callers resolve placements, and the
-    /// document holds a placement exactly for every graph node and stub.
+    /// document holds a placement exactly for every graph node and ghost node.
     pub(super) fn resolve(graph_ctx: GraphCtx<'a>, node_id: NodeId, pos: Vec2) -> Self {
-        let (node, declaration) = if let Some(node) = graph_ctx.body().find(node_id) {
-            (node, Ok(node.decl(graph_ctx.scope())))
+        let (node, declaration, ghost_node) = if let Some(node) = graph_ctx.body().find(node_id) {
+            (node, Ok(node.decl(graph_ctx.scope())), None)
         } else {
-            let stub = graph_ctx
+            let ghost = graph_ctx
                 .body()
-                .stub(node_id)
-                .expect("every placement names a graph node or a stub");
-            (stub.record.node(), Err(stub.reason))
+                .ghost_node(node_id)
+                .expect("every placement names a graph node or a ghost node");
+            (&ghost.node, Err(ghost.reason), Some(ghost))
         };
         let run_state = graph_ctx.run_state();
         let program_id = program_id(graph_ctx, node_id, node);
@@ -108,6 +112,7 @@ impl<'a> NodeCtx<'a> {
             node_id,
             pos,
             node,
+            ghost_node,
             declaration,
             run,
             hover: Hover::Rest,
@@ -148,8 +153,8 @@ impl<'a> NodeCtx<'a> {
         document::title(self.node, self.graph_ctx.scope())
     }
 
-    /// Human-readable type identity: the declaration's name, or for a stub why the load took it
-    /// out — see [`NodeCtx::stub`]. Shown by the inspector pane.
+    /// Human-readable type identity: the declaration's name, or for a ghost node why the load took it
+    /// out — see [`NodeCtx::ghost`]. Shown by the inspector pane.
     pub(crate) fn kind_label(self) -> &'a str {
         match self.declaration {
             Ok(decl) => decl.name(),
@@ -163,7 +168,7 @@ impl<'a> NodeCtx<'a> {
         }
     }
 
-    /// The declaration's description, empty for a stub or a declaration that has none.
+    /// The declaration's description, empty for a ghost node or a declaration that has none.
     /// Shown by the inspector pane and the new-node palette tooltip.
     pub(crate) fn description(self) -> &'a str {
         self.declaration
@@ -172,11 +177,143 @@ impl<'a> NodeCtx<'a> {
             .unwrap_or_default()
     }
 
-    /// A stub: a node the library cannot resolve, kept beside the graph.
+    /// A ghost node: a node the library cannot resolve, kept beside the graph.
     /// Rendered as a portless error card the user can still select, move and
     /// delete — never silently dropped.
-    pub(crate) const fn stub(self) -> bool {
+    pub(crate) const fn ghost(self) -> bool {
         self.declaration.is_err()
+    }
+
+    /// What a ghost node declared when the load took it out, where a save kept it: its func's
+    /// name and category, and the ports it shows.
+    pub(crate) const fn saved(self) -> Option<&'a SavedDecl> {
+        match self.ghost_node {
+            Some(ghost) => ghost.saved.as_ref(),
+            None => None,
+        }
+    }
+
+    /// The ghosts this node's graph keeps.
+    const fn ghost_wiring(self) -> &'a GhostWiring {
+        self.graph_ctx.body().ghost_wiring()
+    }
+
+    /// The inputs this node shows that its declaration does not, in the order it shows them: a
+    /// ghost node's saved inputs, then each input a ghost sits on that neither a declaration nor
+    /// a saved one gives.
+    pub(crate) fn ghost_inputs(self) -> impl Iterator<Item = GhostPort<'a>> {
+        let (node_id, wiring, saved) = (self.node_id, self.ghost_wiring(), self.saved());
+        let declaration = self.declaration;
+        let known = move |port: PortId| {
+            declaration.is_ok_and(|decl| decl.ports().input(port).is_some())
+                || saved.is_some_and(|saved| saved.input(port).is_some())
+        };
+        let from_saved = saved
+            .map_or(&[][..], |saved| &saved.inputs)
+            .iter()
+            .map(move |input| GhostPort {
+                port: PortRef::input(node_id, input.id),
+                name: Some(input.name.as_str()),
+                data_type: Some(input.data_type),
+                held: wiring.binding(InputPort::new(node_id, input.id)),
+            });
+        let unknown = wiring
+            .bindings_on(node_id)
+            .filter(move |(port, _)| !known(port.port))
+            .map(|(port, ghost)| GhostPort {
+                port: PortRef::from(port),
+                name: ghost.input.as_ref().map(|saved| saved.name.as_str()),
+                data_type: ghost.input.as_ref().map(|saved| saved.data_type),
+                held: Some(ghost),
+            });
+        from_saved.chain(unknown)
+    }
+
+    /// The outputs this node shows that its declaration does not; [`Self::ghost_inputs`] for an
+    /// output, each once however many ghost wires read it.
+    pub(crate) fn ghost_outputs(self) -> impl Iterator<Item = GhostPort<'a>> {
+        let (node_id, wiring, saved) = (self.node_id, self.ghost_wiring(), self.saved());
+        let declaration = self.declaration;
+        let known = move |port: PortId| {
+            declaration.is_ok_and(|decl| decl.ports().output(port).is_some())
+                || saved.is_some_and(|saved| saved.output(port).is_some())
+        };
+        let from_saved = saved
+            .map_or(&[][..], |saved| &saved.outputs)
+            .iter()
+            .map(move |output| GhostPort {
+                port: PortRef::output(node_id, output.id),
+                name: Some(output.name.as_str()),
+                data_type: Some(output.data_type),
+                held: None,
+            });
+        let unknown = wiring.bindings().filter_map(move |(input, ghost)| {
+            let GhostSource::Wire {
+                output,
+                saved: saved_port,
+            } = &ghost.source
+            else {
+                return None;
+            };
+            if output.node_id != node_id || known(output.port) {
+                return None;
+            }
+            // The first ghost wire that reads the output shows it.
+            let shown = wiring
+                .bindings()
+                .take_while(|(earlier, _)| *earlier < input)
+                .any(|(_, earlier)| earlier.output() == Some(*output));
+            (!shown).then(|| GhostPort {
+                port: PortRef::from(*output),
+                name: saved_port.as_ref().map(|saved| saved.name.as_str()),
+                data_type: saved_port.as_ref().map(|saved| saved.data_type),
+                held: None,
+            })
+        });
+        from_saved.chain(unknown)
+    }
+
+    /// The events this node shows that its declaration does not fire; [`Self::ghost_inputs`] for
+    /// an event, each once however many ghost subscriptions hear it.
+    pub(crate) fn ghost_events(self) -> impl Iterator<Item = GhostEvent<'a>> {
+        let (node_id, wiring, saved) = (self.node_id, self.ghost_wiring(), self.saved());
+        let declaration = self.declaration;
+        let known = move |event: PortId| {
+            declaration.is_ok_and(|decl| decl.event(event).is_some())
+                || saved.is_some_and(|saved| saved.event(event).is_some())
+        };
+        let from_saved = saved
+            .map_or(&[][..], |saved| &saved.events)
+            .iter()
+            .map(move |event| GhostEvent {
+                event: EventPort::new(node_id, event.id),
+                name: Some(event.name.as_str()),
+            });
+        let unknown = wiring
+            .subscriptions_from(node_id)
+            .filter(move |(subscription, _)| !known(subscription.event.event))
+            .filter(move |(subscription, _)| {
+                // The first ghost subscription to the event shows it.
+                !wiring
+                    .subscriptions_from(node_id)
+                    .take_while(|(earlier, _)| earlier < subscription)
+                    .any(|(earlier, _)| earlier.event == subscription.event)
+            })
+            .map(|(subscription, ghost)| GhostEvent {
+                event: subscription.event,
+                name: ghost.event.as_ref().map(|saved| saved.name.as_str()),
+            });
+        from_saved.chain(unknown)
+    }
+
+    /// How many ghosts touch this node, from either end: the count its footer and the inspector
+    /// show.
+    pub(crate) fn ghost_count(self) -> usize {
+        let wiring = self.ghost_wiring();
+        if wiring.is_empty() {
+            return 0;
+        }
+        wiring.count_touching(self.node_id)
     }
 
     /// Excluded from execution (`Node::disabled`). Sink headers expose the
@@ -208,17 +345,17 @@ impl<'a> NodeCtx<'a> {
     }
 
     /// A preview node: its body shows the value wired into it instead of the
-    /// usual output ports and memory readout. A stub is never one, so a
-    /// document whose library lost the func shows an ordinary stub card rather
+    /// usual output ports and memory readout. A ghost node is never one, so a
+    /// document whose library lost the func shows an ordinary ghost node card rather
     /// than an empty preview.
     pub(crate) fn preview(self) -> bool {
-        !self.stub() && self.node.func_id().is_some_and(preview_sink::is_func)
+        !self.ghost() && self.node.func_id().is_some_and(preview_sink::is_func)
     }
 
     /// Whether the node has an output a cache can key: the one rule behind
     /// the header's RAM/disk storage chips and its eviction chip. An impure
     /// func has no content digest to key a cache on, and a func with no
-    /// outputs has nothing to store — a stub for both reasons at once.
+    /// outputs has nothing to store — a ghost node for both reasons at once.
     pub(crate) fn cacheable(self) -> bool {
         self.cache().is_some()
             && self
@@ -234,9 +371,9 @@ impl<'a> NodeCtx<'a> {
     }
 
     /// The subgraph whose interface this node shows: an instance's, or the subgraph a boundary
-    /// node is in; `None` for any other node, and for a stub.
+    /// node is in; `None` for any other node, and for a ghost node.
     pub(crate) const fn shows_interface(self) -> Option<SubgraphId> {
-        if self.stub() {
+        if self.ghost() {
             return None;
         }
         match (
@@ -269,7 +406,7 @@ impl<'a> NodeCtx<'a> {
     /// as a targeted run overrides that flag. An authoring-side fact, not a lookup in a compiled
     /// program, so it holds before the first compile.
     pub(crate) fn runnable(self) -> Option<ProgramId> {
-        self.program_id().filter(|_| !self.stub())
+        self.program_id().filter(|_| !self.ghost())
     }
 
     /// Outcome of the last graph run, with its detail. Drives the node's
@@ -311,7 +448,7 @@ impl<'a> NodeCtx<'a> {
         }
     }
 
-    /// This node's input ports, in declaration order. Empty for a stub, which
+    /// This node's input ports, in declaration order. Empty for a ghost node, which
     /// declares none.
     pub(crate) fn inputs(self) -> impl ExactSizeIterator<Item = InputCtx<'a>> {
         let declared = self.declaration.map_or(&[][..], NodeDecl::inputs);
@@ -321,7 +458,7 @@ impl<'a> NodeCtx<'a> {
             .map(move |(idx, input)| InputCtx::new(self, idx, input))
     }
 
-    /// The func this node runs, `None` for a stub and a node with no body.
+    /// The func this node runs, `None` for a ghost node and a node with no body.
     pub(super) fn func(self) -> Option<&'a Func> {
         self.declaration.ok().and_then(NodeDecl::func)
     }

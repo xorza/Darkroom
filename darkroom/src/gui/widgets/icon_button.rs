@@ -1,4 +1,4 @@
-//! [`IconButton`]: the small ghost button and the read-only mark a node's header carries.
+//! [`IconButton`]: the small bare button and the read-only mark a node's header carries.
 
 use palantir::{
     Brush, Button, ButtonTheme, Chrome, Configure, Corners, Rect, RgbaF32, Sense,
@@ -17,7 +17,7 @@ enum Kind {
     Mark,
 }
 
-/// One icon in the control icon box with a tooltip. A control is a ghost button: no fill at rest,
+/// One icon in the control icon box with a tooltip. A control is a bare button: no fill at rest,
 /// the hover fill when the pointer is over it, and a tint of its color while it is
 /// [selected](Self::selected). Its ink is the muted ink at rest and `color` while it is on or
 /// under the pointer; the hover fill is the one a toolbar chip lifts to. Builder chain ending in

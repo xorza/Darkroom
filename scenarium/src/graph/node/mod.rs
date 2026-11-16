@@ -124,7 +124,7 @@ impl Node {
     ///
     /// If `scope` does not resolve the node. A graph holds only nodes that
     /// resolve — [`GraphSet::reconcile`](crate::GraphSet::reconcile) keeps the
-    /// rest as stubs at load — so a miss is a broken contract; a node that may not
+    /// rest as ghost nodes at load — so a miss is a broken contract; a node that may not
     /// resolve is asked through [`Scope::resolve`].
     pub fn decl<'a>(&self, scope: Scope<'a>) -> NodeDecl<'a> {
         match scope.resolve(self) {
@@ -144,6 +144,22 @@ impl Node {
                 ..
             } => Some(func_id),
             _ => None,
+        }
+    }
+
+    /// The id of the func this node's declaration is, a built-in's included, or `None` for a
+    /// node with no body: what a [`Manifest`](crate::Manifest) lists the declaration under.
+    pub(crate) fn declared_func(&self) -> Option<FuncId> {
+        match self.kind {
+            NodeKind::Body {
+                source: BodySource::Func(func_id),
+                ..
+            } => Some(func_id),
+            NodeKind::Body {
+                source: BodySource::Special(special),
+                ..
+            } => Some(special.func().id()),
+            NodeKind::Instance(_) | NodeKind::Boundary(_) => None,
         }
     }
 

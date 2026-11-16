@@ -15,9 +15,9 @@
 use glam::Vec2;
 use scenarium::internals::test_graph::TestGraph;
 use scenarium::{
-    Binding, BindingEntry, ConstValue, DataType, DetachReason, DetachedNode, DetachedNodeParts,
-    EventPort, Func, FuncId, GraphId, GraphSet, InputDecl, InputPort, Library, Node, NodeId,
-    OutputDecl, OutputPort, Stub, Subgraph, SubgraphId, Subscription, internals, numbered_port,
+    Binding, ConstValue, DataType, DetachReason, EventPort, Func, FuncId, GhostBinding, GhostNode,
+    GraphId, GraphSet, InputDecl, InputPort, InputState, Library, Node, NodeId, OutputDecl,
+    OutputPort, PortId, Subgraph, SubgraphId, Subscription, internals,
 };
 
 use palantir::DockOperation;
@@ -133,7 +133,7 @@ impl DocumentFixture {
     }
 
     /// Add one node projected from `func`, at the next slot in the row, and declare `func` in the
-    /// library unless it is already there, so the node resolves rather than reading as a stub.
+    /// library unless it is already there, so the node resolves rather than reading as a ghost node.
     pub(crate) fn add(&mut self, func: &Func) -> NodeId {
         if self.library.by_id(func.id()).is_none() {
             self.library.add(func.clone());
@@ -175,65 +175,51 @@ impl DocumentFixture {
         node_id
     }
 
-    /// Add a stub at exactly `pos`: a node naming a func no library holds, kept beside the graph
-    /// with no wiring.
-    pub(crate) fn stub_at(&mut self, pos: Vec2) -> NodeId {
-        self.insert_stub(Self::stub_node(), pos)
+    /// Add a ghost node at exactly `pos`: a node naming a func no library holds, kept beside
+    /// the graph with no wiring.
+    pub(crate) fn ghost_node_at(&mut self, pos: Vec2) -> NodeId {
+        self.insert_ghost_node(Self::missing_node(), pos)
     }
 
-    /// Keep `node`, which the library must not resolve, as a stub with no
+    /// Keep `node`, which the library must not resolve, as a ghost node with no
     /// wiring at the next slot in the row.
-    pub(crate) fn add_stub(&mut self, node: Node) -> NodeId {
+    pub(crate) fn add_ghost_node(&mut self, node: Node) -> NodeId {
         let slot = self.document.main_view.node_placements.len();
-        self.insert_stub(node, row_pos(slot))
+        self.insert_ghost_node(node, row_pos(slot))
     }
 
-    fn insert_stub(&mut self, node: Node, pos: Vec2) -> NodeId {
+    fn insert_ghost_node(&mut self, node: Node, pos: Vec2) -> NodeId {
         let reason = self
             .document
             .graphs
             .scope(&self.library, GraphId::Main)
             .resolve(&node)
-            .expect_err("a stub's func does not resolve");
+            .expect_err("a ghost node's func does not resolve");
         let node_id = NodeId::unique();
-        let record = DetachedNode::new(DetachedNodeParts {
+        self.document.graphs.main_mut().insert_ghost_node(
             node_id,
-            node,
-            bindings: Vec::new(),
-            subscriptions: Vec::new(),
-        })
-        .expect("a stub with no wiring is a well-formed record");
-        self.document.graphs.main_mut().insert_stub(Stub {
-            record,
-            reason: DetachReason::from(reason),
-        });
+            GhostNode {
+                node,
+                reason: DetachReason::from(reason),
+                saved: None,
+            },
+        );
         place(&mut self.document.main_view, node_id, pos);
         node_id
     }
 
     /// A `Func`-kind node naming a func no library holds — what
-    /// [`Self::stub_at`] places, for a test that adds it itself.
-    pub(crate) fn stub_node() -> Node {
+    /// [`Self::ghost_node_at`] places, for a test that adds it itself.
+    pub(crate) fn missing_node() -> Node {
         internals::unresolved_node(FuncId::unique())
     }
 
-    /// Bind input 1 of the stub `stub` to `value`, in place of its record's wiring.
-    pub(crate) fn bind_stub(&mut self, stub: NodeId, value: ConstValue) {
-        let graph = self.document.graphs.main_mut();
-        let held = graph.remove_stub(stub).expect("a stub the fixture added");
-        graph.insert_stub(Stub {
-            record: DetachedNode::new(DetachedNodeParts {
-                node_id: stub,
-                node: held.record.node().clone(),
-                bindings: vec![BindingEntry {
-                    port: InputPort::new(stub, numbered_port(1)),
-                    binding: Binding::Const(value),
-                }],
-                subscriptions: Vec::new(),
-            })
-            .expect("a stub with one const binding is a well-formed record"),
-            reason: held.reason,
-        });
+    /// Keep `value` as a ghost on input 1 of the ghost node `ghost`.
+    pub(crate) fn bind_ghost_node(&mut self, ghost: NodeId, value: ConstValue) {
+        self.document.graphs.main_mut().set_input_state(
+            InputPort::new(ghost, PortId::new(1)),
+            InputState::Ghost(GhostBinding::from(Binding::Const(value))),
+        );
     }
 
     /// The `i`th node in placement order — the order the constructors add in,

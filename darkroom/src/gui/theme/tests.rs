@@ -401,13 +401,13 @@ fn every_palantir_padding_and_radius_is_on_the_scale() {
     );
 }
 
-/// A tab chip is a ghost with a menu title's fills, as the two share the surround: no fill at
+/// A tab chip is a bare button with a menu title's fills, as the two share the surround: no fill at
 /// rest, `element_mid` under the pointer and `element_strong` pressed; its close button lifts on
 /// `element_strong`, the one fill that shows on a hovered chip. Its close button is the icon set's `Cross` in a 12 px
 /// box, 12 of 24 grid units across at the set's 2-unit stroke: a 6 px cross of 1 px strokes, shown
 /// on the selected chip and the one under the pointer.
 #[test]
-fn a_tab_chip_and_its_close_button_are_ghosts() {
+fn a_tab_chip_and_its_close_button_are_bare() {
     let theme = Theme::default();
     let tabs = &theme.palantir.tabs;
     let looks = &tabs.unselected;

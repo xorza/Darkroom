@@ -13,7 +13,7 @@ pub(crate) enum GraphViewValidationError {
     InvalidViewport,
     #[error("view item {node_id:?} position must be finite")]
     NonFinitePos { node_id: NodeId },
-    #[error("view items must match the graph's nodes and the stubs")]
+    #[error("view items must match the graph's nodes and the ghost nodes")]
     NodeCount,
     #[error("graph view missing a position for node {node_id:?}")]
     MissingNode { node_id: NodeId },

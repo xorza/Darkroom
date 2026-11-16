@@ -39,7 +39,7 @@ pub(crate) struct ForeignPath {
 /// One change a load made.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum DocumentRepair {
-    /// A change to one graph: its wiring, a stub attached or a node kept as one.
+    /// A change to one graph: its wiring, a ghost node attached or a node kept as one.
     Graph { graph: GraphId, repair: Repair },
     /// A change to one graph's view.
     View { graph: GraphId, repair: ViewRepair },
@@ -63,7 +63,7 @@ pub(crate) enum DocumentRepair {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ViewRepair {
     ViewportReset,
-    /// A placement for no node or stub.
+    /// A placement for no node or ghost node.
     PlacementDropped {
         node_id: NodeId,
     },
@@ -71,7 +71,7 @@ pub(crate) enum ViewRepair {
     PosReset {
         node_id: NodeId,
     },
-    /// A node or stub with no placement, placed at the origin.
+    /// A node or ghost node with no placement, placed at the origin.
     Placed {
         node_id: NodeId,
     },
@@ -152,11 +152,17 @@ impl LoadReport {
 /// this build does not register.
 impl Display for LoadReport {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let ghosts = self.repairs.iter().filter(|repair| repair.ghosts()).count();
         let parts = [
             (
-                self.repairs.len(),
+                self.repairs.len() - ghosts,
                 "the load made ",
                 " repair(s) to the document; save to keep them",
+            ),
+            (
+                ghosts,
+                "the load kept ",
+                " node(s), wire(s) or value(s) as ghosts",
             ),
             (
                 self.foreign_paths.len(),
@@ -182,6 +188,22 @@ impl Display for LoadReport {
             }
         }
         Ok(())
+    }
+}
+
+impl DocumentRepair {
+    /// Whether this is a node, a wire or a value the load kept as a ghost, which the status line
+    /// counts apart from the repairs.
+    pub(crate) const fn ghosts(&self) -> bool {
+        matches!(
+            self,
+            Self::Graph {
+                repair: Repair::GhostedNode { .. }
+                    | Repair::GhostedBinding { .. }
+                    | Repair::GhostedSubscription { .. },
+                ..
+            }
+        )
     }
 }
 
@@ -297,8 +319,8 @@ impl Display for ViewRepair {
 #[cfg(test)]
 mod tests {
     use scenarium::{
-        CustomTypeId, DataType, GraphId, InterfacePort, NodeAddr, NodeId, PortId, PortList,
-        SubgraphId, UnknownType,
+        CustomTypeId, DataType, DetachReason, GraphId, InterfacePort, NodeAddr, NodeId, PortId,
+        PortList, Repair, SubgraphId, UnknownType,
     };
 
     use crate::core::document::load_report::{DocumentRepair, ForeignPath, LoadReport};
@@ -320,7 +342,7 @@ mod tests {
             ports: vec![InterfacePort {
                 subgraph: SubgraphId::from_u128(1),
                 list: PortList::Inputs,
-                port: PortId::from_u128(1),
+                port: PortId::new(1),
             }],
         }];
         assert!(LoadReport::default().is_empty());
@@ -345,6 +367,17 @@ mod tests {
         assert_eq!(
             report(&[], &[], &unknown_types),
             "the document names 1 type(s) this build does not register"
+        );
+        let ghost = DocumentRepair::Graph {
+            graph: GraphId::Main,
+            repair: Repair::GhostedNode {
+                node_id: NodeId::unique(),
+                reason: DetachReason::TooLarge,
+            },
+        };
+        assert_eq!(
+            report(&[ghost.clone(), ghost], &[], &[]),
+            "the load kept 2 node(s), wire(s) or value(s) as ghosts"
         );
         assert_eq!(
             report(&repairs, &foreign_paths, &unknown_types),

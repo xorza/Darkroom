@@ -68,7 +68,9 @@ desktop for an agent or a test.
 - **The document file** is RON text in `.darkroom`, or that text zipped in `.darkroomz`, as
   Inkscape writes `.svg` and `.svgz`; a load reads the form the bytes show. A `.darkroomz` also
   carries the files it bundles, `resources/<digest>/<file name>`, unpacked beside it;
-  `core/io/document/resources` holds why.
+  `core/io/document/resources` holds why. Beside the document it holds a manifest, what each
+  func its graphs name declared at the save, which a load reads to tell what changed;
+  `scenarium`'s `graph/manifest` holds why.
 - **Paths are absolute in memory and relative inside the document's folder in the file**, never
   with `..`. Refused: relative paths in memory, which an undo after Save As would point at
   another file ([Blender](https://docs.blender.org/manual/en/latest/files/blend/open_save.html)).
@@ -114,6 +116,14 @@ run. Refused: a pass-through node, which changes the graph for layout.
 - **A status and a type share a hue, never a form**: a status is a frame, a footer word and the
   status bar; a type is a port dot and a wire, as Blender and Unreal draw a red Bool beside a red
   error.
+- **A ghost is a broken line and a hollow dot in its type's hue**: what a graph keeps and cannot
+  hold, under the live wires, with a footer count in the warning ink and no frame, which a run's
+  status owns. A broken line reads as broken, as Blender's developers found of their dashed
+  field links ([function flow](https://projects.blender.org/blender/blender/issues/91563)).
+  Refused: a lower alpha alone, which reads as a disabled wire.
+- **A ghost moves to another port only from its row's menu**, which lists the inputs of its
+  node that take it, so no move lands on a refusal. Refused: a drag from the ghost's dot, a
+  fourth glyph domain in the wire gesture whose drop could still be refused.
 - **The accent is palantir's dark lime**; the info status keeps Ayu's blue, which the Path wire
   shares.
 - **A good run is quiet, and one cause gets one red frame**: a node a failure skipped says so in

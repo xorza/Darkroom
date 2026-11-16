@@ -80,6 +80,17 @@ pub(crate) fn port_circle(graph: GraphId, port: PortRef) -> WidgetId {
     of_port("port_circle", graph, port)
 }
 
+/// A ghost port's hollow dot. An id space of its own, apart from [`port_circle`]: a ghost port
+/// is no end a wire drag starts on or snaps to.
+pub(super) fn ghost_port(graph: GraphId, port: PortRef) -> WidgetId {
+    of_port("ghost_port", graph, port)
+}
+
+/// A ghost event's glyph; [`ghost_port`] for an event.
+pub(super) fn ghost_event(graph: GraphId, event: EventPort) -> WidgetId {
+    of_event("ghost_event", graph, event)
+}
+
 /// An input port's inline const editor (text field, checkbox, or file-pick
 /// button).
 pub(super) fn const_editor(graph: GraphId, input: InputPort) -> WidgetId {
@@ -165,7 +176,7 @@ pub(super) fn lit_by_tie(ui: &Ui, graph: GraphId, view: &GraphView, wire: WireKe
 
 #[cfg(test)]
 mod tests {
-    use scenarium::{GraphId, NodeId, SubgraphId, numbered_port};
+    use scenarium::{GraphId, NodeId, PortId, SubgraphId};
 
     use crate::core::document::tie::TieId;
     use crate::gui::pane::graph_ui::{canvas, wid};
@@ -177,7 +188,7 @@ mod tests {
     #[test]
     fn one_node_id_in_two_graphs_has_two_sets_of_ids() {
         let (node, tie) = (NodeId::from_u128(7), TieId::from_u128(9));
-        let port = PortRef::output(node, numbered_port(1));
+        let port = PortRef::output(node, PortId::new(1));
         let ids = |graph: GraphId| {
             [
                 wid::body(graph, node),

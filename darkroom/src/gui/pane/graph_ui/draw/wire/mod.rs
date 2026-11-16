@@ -21,7 +21,8 @@ use std::ops::Range;
 
 use glam::Vec2;
 
-use palantir::{ColorRamp, CubicBezier, LineCap, RgbaF32, Shape, Stroke, Ui};
+use palantir::{ColorRamp, CubicBezier, Dash, LineCap, RgbaF32, Shape, Stroke, Ui};
+use scenarium::GhostSource;
 
 use crate::core::document::wire_key::DataWire;
 use crate::core::document::wire_key::WireKey;
@@ -45,12 +46,17 @@ pub(crate) struct WirePaint {
 }
 
 impl WirePaint {
-    /// Stroke `wire` `width` wide with this paint, round-capped: the single place the wire
-    /// `Shape` is built, so data and event curves cannot drift.
-    pub(crate) fn stroke(self, ui: &mut Ui, wire: &Wire, width: f32) {
+    /// Stroke `wire` `width` wide with this paint, round-capped, broken into `dash` where it
+    /// has one: the single place the wire `Shape` is built, so data and event curves, live and
+    /// ghost, cannot drift.
+    pub(crate) fn stroke(self, ui: &mut Ui, wire: &Wire, width: f32, dash: Option<Dash>) {
         let stroke = Stroke::new(self.color, width).with_cap(LineCap::Round);
         let stroke = match self.ramp {
             Some(ramp) => stroke.with_ramp(ramp),
+            None => stroke,
+        };
+        let stroke = match dash {
+            Some(dash) => stroke.with_dash(dash),
             None => stroke,
         };
         ui.add_shape(
@@ -133,7 +139,17 @@ impl WirePass<'_, '_, '_> {
             wire: key,
             hover: endpoint,
             tint,
+            form,
         } = ends;
+        let dash = match form {
+            WireForm::Live => None,
+            WireForm::Ghost => Some(
+                self.draw_ctx
+                    .theme()
+                    .canvas
+                    .ghost_dash_at(self.draw_ctx.zoom()),
+            ),
+        };
         let cull = self.draw_ctx.cull();
         // Probed whole, off-screen pieces too: a stroke that pans or zooms mid-gesture still
         // cuts or ties what it crossed out of view. Culled is unpainted, not unprobed.
@@ -173,7 +189,7 @@ impl WirePass<'_, '_, '_> {
             } else {
                 stroke.width
             };
-            paint.stroke(ui, piece, width);
+            paint.stroke(ui, piece, width, dash);
         }
         // A cut wire also takes a form of its own, a bar across its middle, so the alarm does
         // not rest on its hue alone.
@@ -218,6 +234,7 @@ impl WirePass<'_, '_, '_> {
                 wire: key,
                 hover,
                 tint: || data_tint(graph_ctx, src, tgt),
+                form: WireForm::Live,
             };
             if self.draw_wire(ui, pieces, ends) {
                 self.probe.mark_broken_input(consumer);
@@ -256,6 +273,87 @@ impl WirePass<'_, '_, '_> {
                 wire: key,
                 hover,
                 tint: || WireTint::flat(theme.port.event),
+                form: WireForm::Live,
+            };
+            if self.draw_wire(ui, pieces, ends) {
+                self.probe.mark_broken_subscription(s);
+            }
+        }
+    }
+}
+
+impl WirePass<'_, '_, '_> {
+    /// Paint every ghost wire and ghost subscription of the current scene broken into the ghost
+    /// dash, between the ports and ghost ports it names, through the ties it was in. The breaker
+    /// cuts one as it cuts a wire, clearing what the input holds or the edge. A ghost whose end
+    /// shows no glyph, as an edge to a ghost node, which has no pin, paints nothing.
+    pub(crate) fn draw_ghost_wires(&mut self, ui: &mut Ui) {
+        let (theme, graph_ctx, geometry) = (
+            self.draw_ctx.theme(),
+            self.draw_ctx.graph_ctx(),
+            self.draw_ctx.geometry(),
+        );
+        let ghosts = graph_ctx.body().ghost_wiring();
+        for (consumer, ghost) in ghosts.bindings() {
+            let GhostSource::Wire { output, saved } = &ghost.source else {
+                continue;
+            };
+            let (src, tgt) = (PortRef::from(*output), PortRef::from(consumer));
+            let (Some(p0), Some(p3)) = (geometry.port_center(src), geometry.port_center(tgt))
+            else {
+                continue;
+            };
+            let key = WireKey::Data(DataWire {
+                output: *output,
+                input: consumer,
+            });
+            let hover = Hover::from(
+                geometry.ghost_ports.is_hovered(src)
+                    || geometry.ghost_ports.is_hovered(tgt)
+                    || geometry.ports.is_hovered(src)
+                    || geometry.ports.is_hovered(tgt)
+                    || self.lit == Some(key)
+                    || wid::lit_by_tie(ui, graph_ctx.graph(), graph_ctx.view(), key),
+            );
+            let untied = [Wire::data(p0, p3)];
+            let pieces = self.ties.pieces(key).unwrap_or(&untied);
+            let ends = WireEnds {
+                wire: key,
+                hover,
+                tint: || {
+                    WireTint::new(
+                        graph_ctx.ghost_color(graph_ctx.ghost_end_type(src, saved.as_ref())),
+                        graph_ctx.ghost_color(graph_ctx.ghost_end_type(tgt, ghost.input.as_ref())),
+                    )
+                },
+                form: WireForm::Ghost,
+            };
+            if self.draw_wire(ui, pieces, ends) {
+                self.probe.mark_broken_input(consumer);
+            }
+        }
+        for (s, _) in ghosts.subscriptions() {
+            let (Some(p0), Some(p3)) = (
+                geometry.event_center(s.event),
+                geometry.subs.center(s.subscriber),
+            ) else {
+                continue;
+            };
+            let key = WireKey::Event(s);
+            let hover = Hover::from(
+                geometry.ghost_events.is_hovered(s.event)
+                    || geometry.events.is_hovered(s.event)
+                    || geometry.subs.is_hovered(s.subscriber)
+                    || self.lit == Some(key)
+                    || wid::lit_by_tie(ui, graph_ctx.graph(), graph_ctx.view(), key),
+            );
+            let untied = [Wire::event(p0, p3)];
+            let pieces = self.ties.pieces(key).unwrap_or(&untied);
+            let ends = WireEnds {
+                wire: key,
+                hover,
+                tint: || WireTint::flat(theme.port.event),
+                form: WireForm::Ghost,
             };
             if self.draw_wire(ui, pieces, ends) {
                 self.probe.mark_broken_subscription(s);
@@ -328,13 +426,23 @@ fn shares(pieces: &[Wire]) -> impl ExactSizeIterator<Item = Range<f32>> + '_ {
 }
 
 /// What a committed wire's ends bring to its paint: the wire they bound,
-/// whether an endpoint glyph or a tie on it is hovered, and `tint`, which
-/// resolves the colors the ends paint it with.
+/// whether an endpoint glyph or a tie on it is hovered, `tint`, which
+/// resolves the colors the ends paint it with, and whether it is live or a ghost.
 #[derive(Debug)]
 pub(crate) struct WireEnds<F> {
     pub(crate) wire: WireKey,
     pub(crate) hover: Hover,
     pub(crate) tint: F,
+    pub(crate) form: WireForm,
+}
+
+/// Whether a wire is one the graph holds or one it keeps as a ghost, which paints broken into
+/// the ghost dash, in its type's hue: a status and a type share a hue, never a form
+/// (`darkroom/AGENTS.md`, "The look").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WireForm {
+    Live,
+    Ghost,
 }
 
 /// The endpoint colors a family paints a wire with before this frame's emphasis tier is

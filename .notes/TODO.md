@@ -2,7 +2,10 @@
 - auto chosen reference frame for stacking and manually specified
 - visual node groups
 
-- ghost wires for stubs
+- ghosts: replace a ghost node with another func, with a rule for which ports correspond
+- ghosts: a func that names the func it replaces, with a port map the library declares
+- ghosts: the names of types the library lacks in the manifest, so a ghost port reads its type
+- ghosts: a ghost subscription to a ghost node drawn, which needs a pin on a ghost node
 
 - subgraphs: event ports on an interface
 - subgraphs: a cache mode on an instance

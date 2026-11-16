@@ -6,28 +6,30 @@ use common::{ErrorChain, SerdeFormat};
 
 use crate::data::data_type::DataType;
 use crate::data::data_type::custom_type::CustomTypeId;
-use crate::graph::Graph;
 use crate::graph::binding::Binding;
-use crate::graph::binding_entry::BindingEntry;
-use crate::graph::detached::{DetachedNode, DetachedNodeParts};
 use crate::graph::error::{
     BindingRejection, DetachReason, GraphValidationError, PlacementRejection,
     SubscriptionRejection, Unresolved,
 };
+use crate::graph::ghost_node::GhostNode;
+use crate::graph::ghost_wiring::{GhostBinding, GhostSource, InputState};
 use crate::graph::graph_set::{GraphSet, InterfacePort, ProgramShape, UnknownType};
 use crate::graph::identity::{
     EventPort, FuncId, GraphId, InputPort, NodeAddr, NodeId, OutputPort, PortId, SubgraphId,
 };
 use crate::graph::instance_path::InstancePath;
 use crate::graph::interface::Interface;
-use crate::graph::interface_change::{ChangeSide, DroppedBinding};
+use crate::graph::interface_change::InterfaceChange;
+use crate::graph::interface_change::{ChangeSide, RefusedFate};
+use crate::graph::manifest::Manifest;
 use crate::graph::node::{Boundary, Node};
 use crate::graph::node_decl::NodeDecl;
-use crate::graph::ports::{InputDecl, OutputDecl, PortList, Ports, numbered_port};
-use crate::graph::reconciled::Repair;
-use crate::graph::stub::Stub;
+use crate::graph::ports::{InputDecl, Numbered, OutputDecl, PortList, Ports};
+use crate::graph::reconciled::{Reconciled, Repair};
+use crate::graph::saved_decl::SavedPort;
 use crate::graph::subgraph::Subgraph;
 use crate::graph::subscription::Subscription;
+use crate::graph::{Detaching, Graph};
 use crate::internals;
 use crate::internals::test_graph::sets::{
     ADD, ANY_SINK, CONFIG_SINK, SINK, SRC, TICKER, library, n, node, s,
@@ -45,12 +47,12 @@ fn place(set: &mut GraphSet, graph: GraphId, node_id: NodeId, placed: SubgraphId
     set.graph_mut(graph).insert(node_id, node);
 }
 
-/// The repairs that took a node out into a stub, as `(node, reason)`.
-fn stubbed(repairs: &[Repair]) -> Vec<(NodeId, DetachReason)> {
+/// The repairs that made a ghost node of a node, as `(node, reason)`.
+fn ghosted(repairs: &[Repair]) -> Vec<(NodeId, DetachReason)> {
     repairs
         .iter()
         .filter_map(|repair| match repair {
-            Repair::Stubbed { node_id, reason } => Some((*node_id, *reason)),
+            Repair::GhostedNode { node_id, reason } => Some((*node_id, *reason)),
             _ => None,
         })
         .collect()
@@ -96,7 +98,7 @@ fn a_placement_that_closes_a_loop_is_refused() {
 
 /// A set where 1 places 2 and 2 places 1 is refused, naming the instance a walk from the lowest
 /// id meets on the path: 2's, as the walk enters 1, then 2, and returns to 1. A load keeps
-/// exactly that one as a stub, after which the set validates; a second load attaches it, finds
+/// exactly that one as a ghost node, after which the set validates; a second load attaches it, finds
 /// the same loop, and keeps it as it was, so it reports nothing.
 #[test]
 fn a_loop_is_refused_and_a_load_breaks_it_at_one_instance() {
@@ -114,31 +116,34 @@ fn a_loop_is_refused_and_a_load_breaks_it_at_one_instance() {
         GraphValidationError::Recursive { node_id } if node_id == n(21)
     ));
 
-    let report = set.reconcile(&library);
+    let report = set.reconcile(&library, &Manifest::default());
     assert!(report.main.is_empty());
     assert_eq!(report.subgraphs.keys().copied().collect::<Vec<_>>(), [s(2)]);
     assert_eq!(
         report.subgraphs[&s(2)].repairs,
-        [Repair::Stubbed {
+        [Repair::GhostedNode {
             node_id: n(21),
             reason: DetachReason::Recursive,
         }]
     );
     let two = set.graph(GraphId::Subgraph(s(2)));
-    assert_eq!(two.stub(n(21)).unwrap().reason, DetachReason::Recursive);
+    assert_eq!(
+        two.ghost_node(n(21)).unwrap().reason,
+        DetachReason::Recursive
+    );
     assert!(two.find(n(21)).is_none());
     assert!(set.graph(GraphId::Subgraph(s(1))).find(n(12)).is_some());
     set.validate_with(&library).unwrap();
 
     let reloaded = set.clone();
-    assert!(set.reconcile(&library).is_empty());
+    assert!(set.reconcile(&library, &Manifest::default()).is_empty());
     assert_eq!(set, reloaded);
 }
 
 /// A chain of eight subgraphs, each placing the next and the last holding a `src`, nests eight
 /// levels: the last is 1, each one up adds one. The main graph placing the first would nest
 /// nine, past [`ProgramShape::MAX_LEVELS`], so the gate refuses the add and a load keeps that
-/// one instance as a stub, keeping the chain itself.
+/// one instance as a ghost node, keeping the chain itself.
 #[test]
 fn a_ninth_level_is_refused_and_detached() {
     let library = library();
@@ -171,9 +176,9 @@ fn a_ninth_level_is_refused_and_detached() {
         GraphValidationError::TooDeep { levels: 9 }
     ));
 
-    let report = set.reconcile(&library);
+    let report = set.reconcile(&library, &Manifest::default());
     assert_eq!(
-        stubbed(&report.main.repairs),
+        ghosted(&report.main.repairs),
         [(n(2), DetachReason::TooDeep)]
     );
     assert!(report.subgraphs.is_empty());
@@ -206,9 +211,9 @@ fn a_program_past_the_node_bound_is_refused_and_detached() {
         GraphValidationError::TooLarge { node_count } if node_count == ProgramShape::MAX_NODES + 1
     ));
 
-    let report = set.reconcile(&library);
+    let report = set.reconcile(&library, &Manifest::default());
     assert_eq!(
-        stubbed(&report.main.repairs),
+        ghosted(&report.main.repairs),
         [(n(2), DetachReason::TooLarge)]
     );
     assert!(set.main().find(n(1)).is_some());
@@ -250,7 +255,7 @@ fn an_add_inside_a_subgraph_is_held_to_the_bound_of_each_graph_that_places_it() 
 
 /// A subgraph's graph holds one boundary node a side. A load keeps the lowest id of two and adds
 /// one where none is; a boundary node in the main graph, which has no interface, is kept as a
-/// stub.
+/// ghost node.
 #[test]
 fn a_load_keeps_one_boundary_node_a_side() {
     let library = library();
@@ -284,10 +289,10 @@ fn a_load_keeps_one_boundary_node_a_side() {
         }
     ));
 
-    let report = set.reconcile(&library);
+    let report = set.reconcile(&library, &Manifest::default());
     assert_eq!(
         report.main.repairs,
-        [Repair::Stubbed {
+        [Repair::GhostedNode {
             node_id: n(5),
             reason: DetachReason::Unresolved(Unresolved::NoInterface),
         }]
@@ -302,7 +307,7 @@ fn a_load_keeps_one_boundary_node_a_side() {
                 boundary: Boundary::Outputs,
                 node_id: added,
             },
-            Repair::Stubbed {
+            Repair::GhostedNode {
                 node_id: extra,
                 reason: DetachReason::ExtraBoundary,
             },
@@ -311,87 +316,69 @@ fn a_load_keeps_one_boundary_node_a_side() {
     set.validate_with(&library).unwrap();
 }
 
-/// A load attaches each stub whose node resolves again, in any graph, with the wiring that still
-/// has both ends and lands on an input the graph has not bound since, and drops a stub saved
-/// under a node's id. Here, inside subgraph 1, the stub of `sink` 3 holds a wire from `src` 1,
-/// which comes back, and a subscription to ticker 9, which the graph lacks, so it goes; in the
-/// main graph, a stub saved under the id of `src` 4 goes and the node stays.
+/// A load attaches each ghost node that resolves again, in any graph, and makes live the ghosts
+/// the graph can hold again; a ghost node saved under a node's id goes. Here, inside subgraph 1,
+/// the ghost node of `sink` 3 has a ghost wire from `src` 1, which comes back with it; in the
+/// main graph, a ghost node saved under the id of `src` 4 goes and the node stays.
 #[test]
-fn a_load_attaches_each_stub_that_resolves_again_with_the_wiring_that_fits() {
+fn a_load_attaches_each_ghost_node_that_resolves_again_with_its_wiring() {
     let library = library();
     let mut subgraph = empty("holder");
     subgraph.graph.insert(n(1), node(&library, SRC));
-    let into_sink = InputPort::new(n(3), numbered_port(1));
-    let from_ticker = Subscription::new(EventPort::new(n(9), numbered_port(1)), n(3));
-    let record = |node_id, node, bindings, subscriptions| {
-        DetachedNode::new(DetachedNodeParts {
-            node_id,
-            node,
-            bindings,
-            subscriptions,
-        })
-        .unwrap()
-    };
-    subgraph.graph.insert_stub(Stub {
-        record: record(
-            n(3),
-            node(&library, SINK),
-            vec![BindingEntry {
-                port: into_sink,
-                binding: Binding::wire(n(1), numbered_port(1)),
-            }],
-            vec![from_ticker],
-        ),
-        reason: DetachReason::Unresolved(Unresolved::MissingFunc),
-    });
+    let into_sink = InputPort::new(n(3), PortId::new(1));
+    let from_src = Binding::wire(n(1), PortId::new(1));
+    subgraph.graph.insert(n(3), node(&library, SINK));
+    subgraph
+        .graph
+        .set_input_binding(into_sink, from_src.clone());
+    let attached = subgraph.graph.clone();
+    subgraph.graph.detach_into_ghosts(
+        vec![Detaching {
+            node_id: n(3),
+            reason: DetachReason::Unresolved(Unresolved::MissingFunc),
+            saved: None,
+        }],
+        &mut Reconciled::default(),
+    );
     let mut set = GraphSet::default();
     set.insert_subgraph(s(1), subgraph);
-    let mut duplicate = set.main().clone();
-    duplicate.insert(n(4), node(&library, SRC));
     set.main_mut().insert(n(4), node(&library, SRC));
-    set.main_mut().stubs = BTreeMap::from([(
+    let duplicate = set.main().clone();
+    set.main_mut().ghost_nodes.insert(
         n(4),
-        Stub {
-            record: record(n(4), node(&library, SRC), vec![], vec![]),
+        GhostNode {
+            node: node(&library, SRC),
             reason: DetachReason::TooLarge,
+            saved: None,
         },
-    )]);
+    );
 
-    let report = set.reconcile(&library);
+    let report = set.reconcile(&library, &Manifest::default());
     assert_eq!(
         report.main.repairs,
-        [Repair::DuplicateStub { node_id: n(4) }]
+        [Repair::DuplicateGhostNode { node_id: n(4) }]
     );
     assert_eq!(*set.main(), duplicate);
     assert_eq!(
         report.subgraphs[&s(1)].repairs,
         [
             Repair::Reattached { node_id: n(3) },
-            Repair::StubSubscriptionDropped {
-                node_id: n(3),
-                subscription: from_ticker,
+            Repair::RestoredBinding {
+                port: into_sink,
+                binding: from_src,
             },
         ]
     );
-    let graph = set.graph(GraphId::Subgraph(s(1)));
-    assert_eq!(graph.stubs().len(), 0);
-    assert_eq!(
-        graph.bindings.get(&into_sink),
-        Some(&Binding::wire(n(1), numbered_port(1)))
-    );
-    assert_eq!(graph.subscriptions().len(), 0);
+    assert_eq!(*set.graph(GraphId::Subgraph(s(1))), attached);
     set.validate_with(&library).unwrap();
 }
 
-fn int_port(id: u128) -> InputDecl {
-    InputDecl {
-        id: PortId::from_u128(id),
-        ..InputDecl::required("x", DataType::Int)
-    }
+fn int_port(id: u32) -> Numbered<InputDecl> {
+    Numbered::new(PortId::new(id), InputDecl::required("x", DataType::Int))
 }
 
 /// The interface of `inputs` alone.
-fn inputs(inputs: Vec<InputDecl>) -> Interface {
+fn inputs(inputs: Vec<Numbered<InputDecl>>) -> Interface {
     Interface::new(Ports {
         inputs,
         outputs: vec![],
@@ -413,11 +400,11 @@ fn an_instance_resolves_to_its_interface_as_it_is() {
     };
     assert_eq!(name(&set), Ok("x".to_owned()));
 
-    let renamed = inputs(vec![InputDecl {
-        name: "renamed".to_owned(),
-        ..int_port(7)
-    }]);
-    let change = set.plan_interface(s(1), renamed, &library);
+    let renamed = inputs(vec![Numbered::new(
+        PortId::new(7),
+        InputDecl::required("renamed", DataType::Int),
+    )]);
+    let change = set.plan_interface(s(1), renamed, &library, RefusedFate::Drop);
     set.write_interface(&change, ChangeSide::After);
     assert_eq!(name(&set), Ok("renamed".to_owned()));
 
@@ -440,14 +427,14 @@ fn an_instance_resolves_to_its_interface_as_it_is() {
 fn boundary_nodes_mirror_the_interface_under_the_one_admission_rule() {
     let library = library();
     let interface = Interface::new(Ports {
-        inputs: vec![InputDecl {
-            id: PortId::from_u128(1),
-            ..InputDecl::required("anything", DataType::Any)
-        }],
-        outputs: vec![OutputDecl {
-            id: PortId::from_u128(2),
-            ..OutputDecl::new("count", DataType::Int)
-        }],
+        inputs: vec![Numbered::new(
+            PortId::new(1),
+            InputDecl::required("anything", DataType::Any),
+        )],
+        outputs: vec![Numbered::new(
+            PortId::new(2),
+            OutputDecl::new("count", DataType::Int),
+        )],
     });
     let mut subgraph = Subgraph::new("mirror", interface);
     let inputs = subgraph.boundary_node(Boundary::Inputs);
@@ -477,14 +464,14 @@ fn boundary_nodes_mirror_the_interface_under_the_one_admission_rule() {
     ));
     assert!(inputs_decl.func().is_none(), "a boundary node has no body");
 
-    let any_port = PortId::from_u128(1);
+    let any_port = PortId::new(1);
     let from_inputs = Binding::Wire(OutputPort::new(inputs, any_port));
     assert_eq!(
-        graph.admit(scope, InputPort::new(n(1), numbered_port(1)), &from_inputs),
+        graph.admit(scope, InputPort::new(n(1), PortId::new(1)), &from_inputs),
         Ok(())
     );
     assert_eq!(
-        graph.admit(scope, InputPort::new(n(2), numbered_port(1)), &from_inputs),
+        graph.admit(scope, InputPort::new(n(2), PortId::new(1)), &from_inputs),
         Err(BindingRejection::WireMismatch)
     );
     assert_eq!(
@@ -495,14 +482,14 @@ fn boundary_nodes_mirror_the_interface_under_the_one_admission_rule() {
     assert_eq!(
         graph.admit_subscription(
             scope,
-            Subscription::new(EventPort::new(n(3), numbered_port(1)), outputs)
+            Subscription::new(EventPort::new(n(3), PortId::new(1)), outputs)
         ),
         Err(SubscriptionRejection::BodilessSubscriber)
     );
     assert_eq!(
         graph.admit_subscription(
             scope,
-            Subscription::new(EventPort::new(n(3), numbered_port(1)), n(1))
+            Subscription::new(EventPort::new(n(3), PortId::new(1)), n(1))
         ),
         Ok(())
     );
@@ -519,17 +506,17 @@ fn boundary_nodes_mirror_the_interface_under_the_one_admission_rule() {
 /// An instance seeds its inputs' declared defaults, as a func node does.
 #[test]
 fn a_new_instance_takes_its_interface_defaults() {
-    let interface = inputs(vec![InputDecl {
-        id: PortId::from_u128(1),
-        ..InputDecl::optional("gain", DataType::Float).default(2.0)
-    }]);
+    let interface = inputs(vec![Numbered::new(
+        PortId::new(1),
+        InputDecl::optional("gain", DataType::Float).default(2.0),
+    )]);
     let subgraph = Subgraph::new("gain", interface);
     let mut graph = Graph::default();
     let node_id = graph.add_instance(s(1), &subgraph);
     assert_eq!(
         graph.input_bindings(node_id).collect::<Vec<_>>(),
         [(
-            InputPort::new(node_id, PortId::from_u128(1)),
+            InputPort::new(node_id, PortId::new(1)),
             &Binding::Const(2.0.into())
         )]
     );
@@ -582,10 +569,10 @@ fn a_set_round_trips_and_a_repeated_subgraph_id_is_refused() {
 fn a_const_only_input_takes_a_wire_from_a_const_only_interface_input_alone() {
     let library = library();
     let interface = inputs(vec![
-        InputDecl {
-            id: PortId::from_u128(1),
-            ..InputDecl::required("config", DataType::Int).const_only()
-        },
+        Numbered::new(
+            PortId::new(1),
+            InputDecl::required("config", DataType::Int).const_only(),
+        ),
         int_port(2),
     ]);
     let mut subgraph = Subgraph::new("configured", interface);
@@ -596,11 +583,11 @@ fn a_const_only_input_takes_a_wire_from_a_const_only_interface_input_alone() {
     set.insert_subgraph(s(1), subgraph);
     let scope = set.scope(&library, GraphId::Subgraph(s(1)));
     let graph = set.graph(GraphId::Subgraph(s(1)));
-    let into_config = |producer: NodeId, port: u128| {
+    let into_config = |producer: NodeId, port: u32| {
         graph.admit(
             scope,
-            InputPort::new(n(1), numbered_port(1)),
-            &Binding::Wire(OutputPort::new(producer, PortId::from_u128(port))),
+            InputPort::new(n(1), PortId::new(1)),
+            &Binding::Wire(OutputPort::new(producer, PortId::new(port))),
         )
     };
     assert_eq!(into_config(inputs_node, 1), Ok(()));
@@ -612,7 +599,7 @@ fn a_const_only_input_takes_a_wire_from_a_const_only_interface_input_alone() {
 }
 
 /// An instance path names the graph it ends in through each instance on it, and none once one
-/// is not an instance; a graph's instances are every path that ends in it; a subgraph's uses are every node that places it, a stub's included, in
+/// is not an instance; a graph's instances are every path that ends in it; a subgraph's uses are every node that places it, a ghost node's included, in
 /// each graph; a subgraph no one uses is removed, and one in use refuses.
 #[test]
 fn paths_and_uses_read_the_instances_of_every_graph() {
@@ -625,22 +612,29 @@ fn paths_and_uses_read_the_instances_of_every_graph() {
     place(&mut set, GraphId::Main, n(2), s(2));
     place(&mut set, GraphId::Main, n(3), s(1));
     set.main_mut().insert(n(4), node(&library, SRC));
-    let stubbed = set.main_mut().detach_node(n(3));
-    set.main_mut().insert_stub(Stub {
-        record: stubbed,
-        reason: DetachReason::TooLarge,
-    });
+    set.main_mut().detach_into_ghosts(
+        vec![Detaching {
+            node_id: n(3),
+            reason: DetachReason::TooLarge,
+            saved: None,
+        }],
+        &mut Reconciled::default(),
+    );
 
     let path = |ids: &[u128]| InstancePath::new(&ids.iter().copied().map(n).collect::<Vec<_>>());
     assert_eq!(set.graph_at(InstancePath::MAIN), Some(GraphId::Main));
     assert_eq!(set.graph_at(path(&[2])), Some(GraphId::Subgraph(s(2))));
     assert_eq!(set.graph_at(path(&[2, 20])), Some(GraphId::Subgraph(s(1))));
     assert_eq!(set.graph_at(path(&[4])), None, "a `src` places nothing");
-    assert_eq!(set.graph_at(path(&[3])), None, "a stub places nothing");
+    assert_eq!(
+        set.graph_at(path(&[3])),
+        None,
+        "a ghost node places nothing"
+    );
     assert_eq!(set.graph_at(path(&[9])), None);
 
     assert_eq!(set.instances(GraphId::Main), [InstancePath::MAIN]);
-    // `s(1)` is placed in the main graph by the stub `n(3)` alone, which expands nothing.
+    // `s(1)` is placed in the main graph by the ghost node `n(3)` alone, which expands nothing.
     assert_eq!(set.instances(GraphId::Subgraph(s(1))), [path(&[2, 20])]);
     assert_eq!(set.instances(GraphId::Subgraph(s(2))), [path(&[2])]);
     assert_eq!(set.instances(GraphId::Subgraph(s(3))), []);
@@ -677,10 +671,8 @@ fn paths_and_uses_read_the_instances_of_every_graph() {
 fn unknown_types_name_each_interface_port_that_uses_them() {
     let library = library();
     let unknown = DataType::Custom(CustomTypeId::from_u128(77));
-    let port = |id: u128, data_type| InputDecl {
-        id: PortId::from_u128(id),
-        ..InputDecl::required("x", data_type)
-    };
+    let port =
+        |id: u32, data_type| Numbered::new(PortId::new(id), InputDecl::required("x", data_type));
     let mut set = GraphSet::default();
     set.insert_subgraph(
         s(1),
@@ -688,18 +680,15 @@ fn unknown_types_name_each_interface_port_that_uses_them() {
             "one",
             Interface::new(Ports {
                 inputs: vec![port(1, DataType::Int), port(2, unknown)],
-                outputs: vec![OutputDecl {
-                    id: PortId::from_u128(3),
-                    ..OutputDecl::new("y", unknown)
-                }],
+                outputs: vec![Numbered::new(PortId::new(3), OutputDecl::new("y", unknown))],
             }),
         ),
     );
     set.insert_subgraph(s(2), Subgraph::new("two", inputs(vec![port(4, unknown)])));
-    let at = |subgraph, list, id: u128| InterfacePort {
+    let at = |subgraph, list, id: u32| InterfacePort {
         subgraph,
         list,
-        port: PortId::from_u128(id),
+        port: PortId::new(id),
     };
     assert_eq!(
         set.unknown_types(&library),
@@ -714,27 +703,18 @@ fn unknown_types_name_each_interface_port_that_uses_them() {
     );
 }
 
-const A: PortId = PortId::from_u128(101);
-const B: PortId = PortId::from_u128(102);
-const SUM: PortId = PortId::from_u128(201);
+const A: PortId = PortId::new(101);
+const B: PortId = PortId::new(102);
+const SUM: PortId = PortId::new(201);
 
 /// `adder`'s interface: `a` and `b` of `a_type` and `b_type`, and an `Int` `sum`.
 fn adder_interface(a_type: DataType, b_type: DataType) -> Interface {
     Interface::new(Ports {
         inputs: vec![
-            InputDecl {
-                id: A,
-                ..InputDecl::required("a", a_type)
-            },
-            InputDecl {
-                id: B,
-                ..InputDecl::required("b", b_type)
-            },
+            Numbered::new(A, InputDecl::required("a", a_type)),
+            Numbered::new(B, InputDecl::required("b", b_type)),
         ],
-        outputs: vec![OutputDecl {
-            id: SUM,
-            ..OutputDecl::new("sum", DataType::Int)
-        }],
+        outputs: vec![Numbered::new(SUM, OutputDecl::new("sum", DataType::Int))],
     })
 }
 
@@ -751,16 +731,16 @@ fn adder_set() -> (GraphSet, Library) {
     adder.graph.insert(n(13), node(&library, ADD));
     let inner = &mut adder.graph;
     inner.set_input_binding(
-        InputPort::new(n(13), numbered_port(1)),
+        InputPort::new(n(13), PortId::new(1)),
         Binding::wire(inputs, A),
     );
     inner.set_input_binding(
-        InputPort::new(n(13), numbered_port(2)),
+        InputPort::new(n(13), PortId::new(2)),
         Binding::wire(inputs, B),
     );
     inner.set_input_binding(
         InputPort::new(outputs, SUM),
-        Binding::wire(n(13), numbered_port(1)),
+        Binding::wire(n(13), PortId::new(1)),
     );
     let mut set = GraphSet::default();
     set.insert_subgraph(s(1), adder);
@@ -768,13 +748,10 @@ fn adder_set() -> (GraphSet, Library) {
     place(&mut set, GraphId::Main, n(2), s(1));
     set.main_mut().insert(n(3), node(&library, SINK));
     let main = set.main_mut();
-    main.set_input_binding(
-        InputPort::new(n(2), A),
-        Binding::wire(n(1), numbered_port(1)),
-    );
+    main.set_input_binding(InputPort::new(n(2), A), Binding::wire(n(1), PortId::new(1)));
     main.set_input_binding(InputPort::new(n(2), B), Binding::Const(7i64.into()));
     main.set_input_binding(
-        InputPort::new(n(3), numbered_port(1)),
+        InputPort::new(n(3), PortId::new(1)),
         Binding::wire(n(2), SUM),
     );
     set.validate_with(&library).unwrap();
@@ -795,17 +772,20 @@ fn an_interface_reorder_and_rename_drop_nothing() {
     let reordered = Interface::new(Ports {
         inputs: vec![
             b,
-            InputDecl {
-                name: "alpha".to_owned(),
-                ..a
-            },
+            Numbered::new(
+                a.id,
+                InputDecl {
+                    name: "alpha".to_owned(),
+                    ..a.port
+                },
+            ),
         ],
         outputs: adder_interface(DataType::Int, DataType::Int)
             .outputs()
             .to_vec(),
     });
-    let change = set.plan_interface(s(1), reordered.clone(), &library);
-    assert!(change.dropped().is_empty());
+    let change = set.plan_interface(s(1), reordered.clone(), &library, RefusedFate::Drop);
+    assert!(change.refused().is_empty());
     set.write_interface(&change, ChangeSide::After);
     assert_eq!(set.subgraph(s(1)).unwrap().interface, reordered);
     for (graph, held) in before.graphs() {
@@ -836,45 +816,99 @@ fn an_interface_port_removed_drops_its_wires_in_every_graph_and_undo_restores_th
         adder.boundary_node(Boundary::Inputs),
         adder.boundary_node(Boundary::Outputs),
     );
-    let change = set.plan_interface(s(1), without.clone(), &library);
-    let dropped = |graph, port, binding| DroppedBinding {
-        graph,
-        port,
-        binding,
-    };
+    let change = set.plan_interface(s(1), without.clone(), &library, RefusedFate::Drop);
     let inside = GraphId::Subgraph(s(1));
     let mut expected = vec![
-        dropped(
+        (
             GraphId::Main,
             InputPort::new(n(2), A),
-            Binding::wire(n(1), numbered_port(1)),
+            Binding::wire(n(1), PortId::new(1)),
         ),
-        dropped(
+        (
             GraphId::Main,
-            InputPort::new(n(3), numbered_port(1)),
+            InputPort::new(n(3), PortId::new(1)),
             Binding::wire(n(2), SUM),
         ),
-        dropped(
+        (
             inside,
-            InputPort::new(n(13), numbered_port(1)),
+            InputPort::new(n(13), PortId::new(1)),
             Binding::wire(inputs, A),
         ),
-        dropped(
+        (
             inside,
             InputPort::new(outputs, SUM),
-            Binding::wire(n(13), numbered_port(1)),
+            Binding::wire(n(13), PortId::new(1)),
         ),
     ];
     // Graph by graph, each in the order the graph keeps its bindings.
-    expected.sort_by_key(|dropped| (dropped.graph, dropped.port));
-    assert_eq!(change.dropped(), expected);
+    expected.sort_by_key(|(graph, port, _)| (*graph, *port));
+    let refused = |change: &InterfaceChange| {
+        change
+            .refused()
+            .iter()
+            .map(|refused| (refused.graph, refused.port, refused.binding()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(refused(&change), expected);
     assert_eq!(change.before(), &before.subgraph(s(1)).unwrap().interface);
     assert_eq!(change.after(), &without);
 
     set.write_interface(&change, ChangeSide::After);
     assert!(!set.main().bindings.contains_key(&InputPort::new(n(2), A)));
+    assert!(
+        set.main().ghost_wiring().is_empty(),
+        "a person's edit drops"
+    );
     set.validate_with(&library).unwrap();
     set.write_interface(&change, ChangeSide::Before);
+    assert_eq!(set, before);
+
+    // As an update does it: the same bindings kept as ghosts, each lost port under the name and
+    // type the old interface gave it, and undo makes them live again.
+    let kept = set.plan_interface(s(1), without, &library, RefusedFate::Ghost);
+    assert_eq!(refused(&kept), expected);
+    set.write_interface(&kept, ChangeSide::After);
+    let a_port = |name: &str| {
+        Some(SavedPort {
+            name: name.to_owned(),
+            data_type: DataType::Int,
+        })
+    };
+    let on_instance = set
+        .main()
+        .ghost_wiring()
+        .binding(InputPort::new(n(2), A))
+        .unwrap();
+    assert_eq!(on_instance.input, a_port("a"));
+    let from_instance = set
+        .main()
+        .ghost_wiring()
+        .binding(InputPort::new(n(3), PortId::new(1)))
+        .unwrap();
+    assert_eq!(
+        from_instance.source,
+        GhostSource::Wire {
+            output: OutputPort::new(n(2), SUM),
+            saved: a_port("sum"),
+        }
+    );
+    set.validate_with(&library).unwrap();
+
+    // A later update that brings the ports back refuses nothing and touches no ghost: each stays
+    // a ghost, its saved name outranked by the declaration, until a load or a Restore makes it
+    // live, and the set is one a compile takes.
+    let back = set.plan_interface(
+        s(1),
+        before.subgraph(s(1)).unwrap().interface.clone(),
+        &library,
+        RefusedFate::Ghost,
+    );
+    assert!(back.refused().is_empty());
+    set.write_interface(&back, ChangeSide::After);
+    set.validate_with(&library).unwrap();
+    assert_eq!(set.main().ghost_wiring().bindings().len(), 2);
+    set.write_interface(&back, ChangeSide::Before);
+    set.write_interface(&kept, ChangeSide::Before);
     assert_eq!(set, before);
 }
 
@@ -888,56 +922,69 @@ fn an_interface_port_retyped_drops_only_what_the_new_type_refuses() {
         s(1),
         adder_interface(DataType::Int, DataType::String),
         &library,
+        RefusedFate::Drop,
     );
     assert_eq!(
-        change.dropped(),
+        change
+            .refused()
+            .iter()
+            .map(|refused| (
+                refused.graph,
+                refused.port,
+                refused.binding(),
+                refused.ghost.input.clone()
+            ))
+            .collect::<Vec<_>>(),
         [
-            DroppedBinding {
-                graph: GraphId::Main,
-                port: InputPort::new(n(2), B),
-                binding: Binding::Const(7i64.into()),
-            },
-            DroppedBinding {
-                graph: GraphId::Subgraph(s(1)),
-                port: InputPort::new(n(13), numbered_port(2)),
-                binding: Binding::wire(inputs, B),
-            },
-        ]
+            (
+                GraphId::Main,
+                InputPort::new(n(2), B),
+                Binding::Const(7i64.into()),
+                None,
+            ),
+            (
+                GraphId::Subgraph(s(1)),
+                InputPort::new(n(13), PortId::new(2)),
+                Binding::wire(inputs, B),
+                None,
+            ),
+        ],
+        "a retyped port is still declared, so no ghost names it"
     );
     set.write_interface(&change, ChangeSide::After);
     set.validate_with(&library).unwrap();
 }
 
-/// A node of a func the library lacks is kept as a stub, stays one at each load that still lacks
+/// A node of a func the library lacks is kept as a ghost node, stays one at each load that still lacks
 /// it, and is attached again by the first load whose library holds it.
 #[test]
-fn a_stub_of_a_missing_func_stays_one_until_the_library_holds_it() {
+fn a_ghost_node_of_a_missing_func_stays_one_until_the_library_holds_it() {
     let mut library = library();
     let missing = FuncId::from_u128(99);
     let mut set = GraphSet::default();
     set.main_mut()
         .insert(n(1), internals::unresolved_node(missing));
     assert_eq!(
-        stubbed(&set.reconcile(&library).main.repairs),
+        ghosted(&set.reconcile(&library, &Manifest::default()).main.repairs),
         [(n(1), DetachReason::Unresolved(Unresolved::MissingFunc))]
     );
     assert!(
-        set.reconcile(&library).is_empty(),
-        "a stub that still does not resolve stays"
+        set.reconcile(&library, &Manifest::default()).is_empty(),
+        "a ghost node that still does not resolve stays"
     );
 
     library.add(internals::stub_func(missing, "found").build());
     assert_eq!(
-        set.reconcile(&library).main.repairs,
+        set.reconcile(&library, &Manifest::default()).main.repairs,
         [Repair::Reattached { node_id: n(1) }]
     );
     assert!(set.main().find(n(1)).is_some());
-    assert_eq!(set.main().stubs().len(), 0);
+    assert_eq!(set.main().ghost_nodes().len(), 0);
 }
 
 /// A digest is of the definition alone: two sets holding one definition under two ids, its
 /// nodes added in two orders and its placed subgraph under two ids, digest it alike; a renamed
-/// inner node, or a changed placed subgraph, changes it.
+/// inner node, a changed placed subgraph, or a ghost it keeps, changes it.
 #[test]
 fn a_digest_names_the_definition_and_not_its_ids() {
     let library = library();
@@ -1002,4 +1049,26 @@ fn a_digest_names_the_definition_and_not_its_ids() {
         one.digest(s(1)),
         "a placed subgraph's change reaches the one that places it"
     );
+
+    // What a graph keeps is part of its definition: a ghost node and a ghost on an input each
+    // change the digest.
+    let mut ghosted = build(s(1), s(2), false, "inner");
+    ghosted
+        .graph_mut(GraphId::Subgraph(s(1)))
+        .detach_into_ghosts(
+            vec![Detaching {
+                node_id: n(11),
+                reason: DetachReason::TooLarge,
+                saved: None,
+            }],
+            &mut Reconciled::default(),
+        );
+    assert_ne!(ghosted.digest(s(1)), one.digest(s(1)));
+    let mut kept = build(s(1), s(2), false, "inner");
+    kept.graph_mut(GraphId::Subgraph(s(1))).set_input_state(
+        InputPort::new(n(11), PortId::new(1)),
+        InputState::Ghost(GhostBinding::from(Binding::wire(n(10), PortId::new(1)))),
+    );
+    assert_ne!(kept.digest(s(1)), one.digest(s(1)));
+    assert_ne!(kept.digest(s(1)), ghosted.digest(s(1)));
 }

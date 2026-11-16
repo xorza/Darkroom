@@ -1,9 +1,10 @@
 use super::*;
 
 use crate::exec::compile::compiled_graph::ExecBinding;
-use crate::graph::ports::InputDecl;
+use crate::graph::identity::PortId;
+use crate::graph::manifest::Manifest;
 use crate::graph::ports::OutputDecl;
-use crate::graph::ports::numbered_port;
+use crate::graph::ports::{InputDecl, Numbered};
 
 /// The output pool is range-addressed: when a consumer precedes its producer
 /// in insertion order, lowering claims the producer's *index* early while
@@ -46,10 +47,10 @@ async fn update_with_evolved_func_recompiles_and_runs_new_lambda() {
     // v2: the same declaration gains an input and a different body.
     e.edit(|g| {
         g.edit_func("generate", |func| {
-            func.ports.inputs.push(InputDecl {
-                id: numbered_port(1),
-                ..InputDecl::optional("Extra", DataType::Int)
-            });
+            func.ports.inputs.push(Numbered::new(
+                PortId::new(1),
+                InputDecl::optional("Extra", DataType::Int),
+            ));
             func.lambda = async_lambda!(move |Invocation { outputs, .. }| {
                 outputs[0] = ConstValue::Int(2).into();
                 Ok(())
@@ -110,10 +111,10 @@ async fn update_with_a_grown_output_list_retires_the_shorter_snapshot() {
     // retired.
     e.edit(|g| {
         g.edit_func("generate", |func| {
-            func.ports.outputs.push(OutputDecl {
-                id: numbered_port(2),
-                ..OutputDecl::new("W", DataType::Int)
-            });
+            func.ports.outputs.push(Numbered::new(
+                PortId::new(2),
+                OutputDecl::new("W", DataType::Int),
+            ));
         });
     });
     let run = e.run_sinks().await;
@@ -134,8 +135,8 @@ async fn a_detached_producer_leaves_its_consumer_missing_an_input() {
     let mut g = TestGraph::sample();
     let get_a = g.graph().find(g.id("get_a")).unwrap().func_id().unwrap();
     g.library.remove(get_a);
-    let reconciled = g.graphs.reconcile(&g.library);
-    assert_eq!(g.graph().stubs().len(), 1);
+    let reconciled = g.graphs.reconcile(&g.library, &Manifest::default());
+    assert_eq!(g.graph().ghost_nodes().len(), 1);
     assert!(g.graph().find(g.id("get_a")).is_none());
     assert!(!reconciled.is_empty());
 

@@ -7,9 +7,9 @@ use crate::exec::compile::compiled_graph::{ExecBinding, ExecEvent, ExecInput, Ex
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::lambda::FuncLambda;
 use crate::graph::func::signature::FuncSignature;
-use crate::graph::identity::{FuncId, FuncRef, NodeId};
+use crate::graph::identity::{FuncId, FuncRef, NodeId, PortId};
 use crate::graph::node::CacheMode;
-use crate::graph::ports::{OutputDecl, Ports};
+use crate::graph::ports::{Numbered, OutputDecl, Ports};
 use crate::graph::program_id::ProgramId;
 use crate::internals;
 use crate::internals::program::{Placed, ProgramBuilder};
@@ -165,7 +165,11 @@ impl<'a> NodeBuilder<'a> {
         let output_count = u32::try_from(outputs.len()).expect("a fixture's outputs fit in u32");
         let ports = Ports {
             inputs: Vec::new(),
-            outputs,
+            outputs: outputs
+                .into_iter()
+                .zip(1..)
+                .map(|(output, number)| Numbered::new(PortId::new(number), output))
+                .collect(),
         };
         e_node.func_ref = FuncRef::new(func_id, FuncSignature::of(&ports, &[]));
         e_node.inputs = owner.program.inputs.append(inputs);

@@ -6,8 +6,8 @@ use glam::Vec2;
 use lens::MlModelPaths;
 use palantir::{DockDrop, DockOperation, SplitSide};
 use scenarium::{
-    Binding, ConstValue, EventPort, InputPort, Interface, Node, NodeId, OutputPort, ProgramId,
-    Subgraph, SubgraphId, numbered_port,
+    Binding, ConstValue, EventPort, InputPort, Interface, Node, NodeId, OutputPort, PortId,
+    ProgramId, Subgraph, SubgraphId,
 };
 
 use zip::write::SimpleFileOptions;
@@ -34,10 +34,10 @@ fn document_round_trips_in_either_format() {
     let mut fixture = DocumentFixture::sample();
     let [a, b] = [0.0, 220.0].map(|x| fixture.node_at(Vec2::new(x, 300.0)));
     let data = fixture.wire(
-        OutputPort::new(a, numbered_port(1)),
-        InputPort::new(b, numbered_port(1)),
+        OutputPort::new(a, PortId::new(1)),
+        InputPort::new(b, PortId::new(1)),
     );
-    let event = fixture.subscribe(EventPort::new(a, numbered_port(1)), b);
+    let event = fixture.subscribe(EventPort::new(a, PortId::new(1)), b);
     let first = fixture.tie(Vec2::new(80.0, 310.0), [data, event]);
     let second = fixture.tie(Vec2::new(140.0, 310.0), [data]);
     let viewer = fixture.add(&preview_sink::func(Arc::default()));
@@ -68,7 +68,7 @@ fn document_round_trips_in_either_format() {
     let plain = dir.join("plain.darkroom");
     let zipped = dir.join("zipped.darkroomz");
     for path in [&plain, &zipped] {
-        save(&document, path, SavedPaths::Relative).expect("save document");
+        save(&document, &Library::default(), path, SavedPaths::Relative).expect("save document");
         assert_eq!(load(path).expect("load document").document, document);
     }
     // A load reads the form the bytes show, so a zipped file named as plain RON still opens.
@@ -77,7 +77,12 @@ fn document_round_trips_in_either_format() {
     assert_eq!(load(&misnamed).unwrap().document, document);
 
     let text = fs::read_to_string(&plain).unwrap();
-    assert_eq!(ron::from_str::<Document>(&text).unwrap(), document);
+    let written: FileOwned = ron::from_str(&text).unwrap();
+    assert_eq!(written.document, document);
+    assert!(
+        written.manifest.is_empty(),
+        "the fixture's library holds no func of its nodes"
+    );
     assert!(
         text.lines().count() > 1,
         "pretty, so a diff shows the line that changed"
@@ -102,7 +107,7 @@ fn document_extension_is_required_case_insensitively() {
     let dir = TempDir::new("darkroom-document-extension");
     let wrong = dir.join("wrong.json");
     assert!(matches!(
-        save(&document, &wrong, SavedPaths::Relative).unwrap_err(),
+        save(&document, &Library::default(), &wrong, SavedPaths::Relative).unwrap_err(),
         DocumentSaveError::InvalidExtension { path } if path == wrong
     ));
     assert!(
@@ -114,10 +119,22 @@ fn document_extension_is_required_case_insensitively() {
     );
 
     let uppercase = dir.join("uppercase.DARKROOM");
-    save(&document, &uppercase, SavedPaths::Relative).expect("uppercase extension is valid");
+    save(
+        &document,
+        &Library::default(),
+        &uppercase,
+        SavedPaths::Relative,
+    )
+    .expect("uppercase extension is valid");
     assert_eq!(load(&uppercase).unwrap().document, document);
     let uppercase_zipped = dir.join("uppercase.DARKROOMZ");
-    save(&document, &uppercase_zipped, SavedPaths::Relative).unwrap();
+    save(
+        &document,
+        &Library::default(),
+        &uppercase_zipped,
+        SavedPaths::Relative,
+    )
+    .unwrap();
     assert!(
         fs::read(&uppercase_zipped).unwrap().starts_with(b"PK"),
         "the extension names the format without regard to case"
@@ -190,21 +207,21 @@ fn document_size_limit_rejects_the_first_byte_over_the_boundary() {
 }
 
 /// A document of path inputs: a Load Image node at `one`, a Stack Lights node at `many`, an
-/// unset Load Image node, a stub whose record binds `stub`, and a subgraph whose Load Image node
+/// unset Load Image node, a ghost node whose record binds `ghost node`, and a subgraph whose Load Image node
 /// is at `inner`. Its main graph's node ids, in that order.
-fn paths_document(one: &str, many: &[&str], stub: &str, inner: &str) -> (Document, [NodeId; 4]) {
+fn paths_document(one: &str, many: &[&str], ghost: &str, inner: &str) -> (Document, [NodeId; 4]) {
     let library = RuntimeLibrary::new(&MlModelPaths::default());
     let func = |name: &str| library.cur().by_name(name).unwrap().clone();
     let mut fixture = DocumentFixture::default();
     let load = fixture.add(&func("Load Image"));
     let stack = fixture.add(&func("Stack Lights"));
     let unset = fixture.add(&func("Load Image"));
-    let stubbed = fixture.stub_at(Vec2::ZERO);
-    fixture.bind_stub(stubbed, ConstValue::FsPath(stub.to_string()));
+    let ghosted = fixture.ghost_node_at(Vec2::ZERO);
+    fixture.bind_ghost_node(ghosted, ConstValue::FsPath(ghost.to_string()));
     let mut document = fixture.document;
     let bind = |document: &mut Document, node_id, value| {
         document.graphs.main_mut().bindings.insert(
-            InputPort::new(node_id, numbered_port(1)),
+            InputPort::new(node_id, PortId::new(1)),
             Binding::Const(value),
         );
     };
@@ -221,27 +238,32 @@ fn paths_document(one: &str, many: &[&str], stub: &str, inner: &str) -> (Documen
         .graph
         .insert(nested, Node::from(&func("Load Image")));
     subgraph.graph.bindings.insert(
-        InputPort::new(nested, numbered_port(1)),
+        InputPort::new(nested, PortId::new(1)),
         Binding::Const(ConstValue::FsPath(inner.to_string())),
     );
     insert_subgraph(&mut document, SubgraphId::unique(), subgraph);
-    (document, [load, stack, unset, stubbed])
+    (document, [load, stack, unset, ghosted])
 }
 
-/// Every path `document` holds, the stub's and then the subgraph's last, in the order
+/// Every path `document` holds, the ghost node's and then the subgraph's last, in the order
 /// [`paths_document`] binds them.
 fn paths_of(document: &Document, nodes: [NodeId; 4]) -> Vec<String> {
     let mut paths = Vec::new();
     for node_id in &nodes[..3] {
         let Binding::Const(value) =
-            &document.graphs.main().bindings[&InputPort::new(*node_id, numbered_port(1))]
+            &document.graphs.main().bindings[&InputPort::new(*node_id, PortId::new(1))]
         else {
             panic!("a const binding");
         };
         paths.extend(value.as_fs_paths().unwrap().iter().cloned());
     }
-    let stub = document.graphs.main().stub(nodes[3]).unwrap();
-    let Binding::Const(value) = &stub.record.bindings()[0].binding else {
+    let kept = document
+        .graphs
+        .main()
+        .ghost_wiring()
+        .binding(InputPort::new(nodes[3], PortId::new(1)))
+        .unwrap();
+    let Binding::Const(value) = &kept.binding() else {
         panic!("a const binding");
     };
     paths.extend(value.as_fs_paths().unwrap().iter().cloned());
@@ -255,15 +277,13 @@ fn paths_of(document: &Document, nodes: [NodeId; 4]) -> Vec<String> {
 
 /// The paths the file at `path` stores, as its RON text holds them.
 fn stored(path: &Path, nodes: [NodeId; 4]) -> Vec<String> {
-    paths_of(
-        &ron::from_str(&fs::read_to_string(path).unwrap()).unwrap(),
-        nodes,
-    )
+    let file: FileOwned = ron::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+    paths_of(&file.document, nodes)
 }
 
 /// A save writes each path inside the document's folder relative to it, `/` between its parts,
 /// and the folder itself as `.`; a path outside, one reached through `..`, and an unset one stay
-/// as they are, and a stub's path and a subgraph's are written as the main graph's are. A load reads them against the
+/// as they are, and a ghost node's path and a subgraph's are written as the main graph's are. A load reads them against the
 /// folder of the file it reads: a copy in another folder names the copy's files. Saved absolute, the file holds the
 /// document's own paths; and a save to a folder below leaves the old folder's paths absolute.
 #[test]
@@ -297,7 +317,7 @@ fn paths_inside_the_folder_are_saved_relative_and_move_with_it() {
     );
 
     let saved = first.join("scene.darkroom");
-    save(&document, &saved, SavedPaths::Relative).unwrap();
+    save(&document, &Library::default(), &saved, SavedPaths::Relative).unwrap();
     assert_eq!(
         stored(&saved, nodes),
         [
@@ -336,11 +356,17 @@ fn paths_inside_the_folder_are_saved_relative_and_move_with_it() {
     );
 
     let absolute = first.join("absolute.darkroom");
-    save(&document, &absolute, SavedPaths::Absolute).unwrap();
+    save(
+        &document,
+        &Library::default(),
+        &absolute,
+        SavedPaths::Absolute,
+    )
+    .unwrap();
     assert_eq!(stored(&absolute, nodes), paths_of(&document, nodes));
 
     let below = first.join("below").join("scene.darkroom");
-    save(&document, &below, SavedPaths::Relative).unwrap();
+    save(&document, &Library::default(), &below, SavedPaths::Relative).unwrap();
     assert_eq!(
         stored(&below, nodes),
         paths_of(&document, nodes),
@@ -370,14 +396,14 @@ fn paths_of_another_system_stay_as_they_are() {
     ];
 
     let first = dir.join("first.darkroom");
-    save(&document, &first, SavedPaths::Relative).unwrap();
+    save(&document, &Library::default(), &first, SavedPaths::Relative).unwrap();
     assert_eq!(stored(&first, nodes), want);
 
     let loaded = load(&first).unwrap().document;
     assert_eq!(paths_of(&loaded, nodes), want);
 
     let second = dir.join("second.darkroom");
-    save(&loaded, &second, SavedPaths::Relative).unwrap();
+    save(&loaded, &Library::default(), &second, SavedPaths::Relative).unwrap();
     assert_eq!(stored(&second, nodes), want);
 }
 

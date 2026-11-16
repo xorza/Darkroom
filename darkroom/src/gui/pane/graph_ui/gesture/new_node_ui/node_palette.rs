@@ -118,7 +118,12 @@ impl<'a> PaletteEntry<'a> {
             PaletteEntry::Special(s) => alone(s.into()),
             PaletteEntry::Subgraph { id, .. } => alone(Node::instance(id)),
             PaletteEntry::Library { entry, shared } => {
-                let brought = bring_in(document, library, shared.carried(entry));
+                let brought = bring_in(
+                    document,
+                    library,
+                    shared.carried(entry),
+                    shared.manifest(entry),
+                );
                 let node = Node::instance(brought.id(entry.id));
                 Placed {
                     subgraphs: brought.subgraphs,

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use lens::MlModelPaths;
 use scenarium::{
-    Binding, ConstValue, InputPort, Interface, Node, NodeId, Subgraph, SubgraphId, numbered_port,
+    Binding, ConstValue, InputPort, Interface, Node, NodeId, PortId, Subgraph, SubgraphId,
 };
 
 use crate::core::document::internals::{DocumentFixture, insert_subgraph};
@@ -57,7 +57,7 @@ pub fn nested_preview(dir: &Path) -> PathBuf {
     let mut inner = Subgraph::new("Inner", Interface::default());
     let shown = inner.graph.add_func_node(&preview);
     inner.graph.bindings.insert(
-        InputPort::new(shown, numbered_port(1)),
+        InputPort::new(shown, PortId::new(1)),
         Binding::Const(ConstValue::Int(NESTED_PREVIEW_VALUE)),
     );
     let inner_id = SubgraphId::unique();
@@ -78,7 +78,7 @@ pub fn nested_preview(dir: &Path) -> PathBuf {
 fn save(fixture: DocumentFixture, dir: &Path) -> PathBuf {
     let path = dir.join("scene.darkroom");
     OpenDocument::over(fixture.document)
-        .save_to(&path, SavedPaths::Relative)
+        .save_to(&fixture.library, &path, SavedPaths::Relative)
         .expect("a fixture project saves");
     path
 }

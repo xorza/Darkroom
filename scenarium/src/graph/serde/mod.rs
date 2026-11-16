@@ -5,65 +5,64 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::marker::PhantomData;
 
 use ::serde::de::Error as _;
 use ::serde::de::{MapAccess, Visitor};
-use ::serde::{Deserialize, Deserializer, Serializer};
+use ::serde::{Deserialize, Deserializer, Serialize, Serializer};
 use hashbrown::HashMap;
 
 use crate::graph::binding::Binding;
-use crate::graph::identity::{InputPort, NodeId, SubgraphId};
+use crate::graph::ghost_node::GhostNode;
+use crate::graph::ghost_wiring::{GhostBinding, GhostSubscription};
+use crate::graph::identity::{FuncId, InputPort, NodeId, SubgraphId};
 use crate::graph::node::Node;
-use crate::graph::stub::Stub;
+use crate::graph::saved_decl::SavedDecl;
 use crate::graph::subgraph::Subgraph;
+use crate::graph::subscription::Subscription;
 
-/// The binding table travels as a sequence of `(port, binding)` pairs.
-pub(super) fn serialize_bindings<S: Serializer>(
-    map: &BTreeMap<InputPort, Binding>,
+/// A table whose key is a struct travels as a sequence of `(key, value)` pairs.
+pub(super) fn serialize_pairs<K: Serialize, V: Serialize, S: Serializer>(
+    map: &BTreeMap<K, V>,
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
     serializer.collect_seq(map)
 }
 
+/// A table of pairs, refusing a key given twice: `what` names the entry in the refusal.
+fn unique_pairs<'de, D, K, V>(deserializer: D, what: &str) -> Result<BTreeMap<K, V>, D::Error>
+where
+    D: Deserializer<'de>,
+    K: Deserialize<'de> + Ord + Copy + fmt::Debug,
+    V: Deserialize<'de>,
+{
+    let entries = Vec::<(K, V)>::deserialize(deserializer)?;
+    let mut map = BTreeMap::new();
+    for (key, value) in entries {
+        if map.insert(key, value).is_some() {
+            return Err(D::Error::custom(format!("duplicate {what} {key:?}")));
+        }
+    }
+    Ok(map)
+}
+
 pub(super) fn deserialize_bindings<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<BTreeMap<InputPort, Binding>, D::Error> {
-    let entries = Vec::<(InputPort, Binding)>::deserialize(deserializer)?;
-    let mut map = BTreeMap::new();
-    for (port, binding) in entries {
-        if map.insert(port, binding).is_some() {
-            return Err(D::Error::custom(format!(
-                "duplicate binding for input port {port:?}"
-            )));
-        }
-    }
-    Ok(map)
+    unique_pairs(deserializer, "binding for input port")
 }
 
-/// The stubs travel as the list of stubs, in node-id order.
-pub(super) fn serialize_stubs<S: Serializer>(
-    map: &BTreeMap<NodeId, Stub>,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    serializer.collect_seq(map.values())
-}
-
-/// Refuses a list that repeats a node id: two stubs under one id are two nodes, and keeping the
-/// last loses the other's settings.
-pub(super) fn deserialize_stubs<'de, D: Deserializer<'de>>(
+/// Refuses an input given two ghosts, as [`deserialize_bindings`] refuses two bindings.
+pub(super) fn deserialize_ghost_bindings<'de, D: Deserializer<'de>>(
     deserializer: D,
-) -> Result<BTreeMap<NodeId, Stub>, D::Error> {
-    let stubs = Vec::<Stub>::deserialize(deserializer)?;
-    let mut map = BTreeMap::new();
-    for stub in stubs {
-        let node_id = stub.node_id();
-        if map.insert(node_id, stub).is_some() {
-            return Err(D::Error::custom(format!(
-                "duplicate stub for node {node_id:?}"
-            )));
-        }
-    }
-    Ok(map)
+) -> Result<BTreeMap<InputPort, GhostBinding>, D::Error> {
+    unique_pairs(deserializer, "ghost binding for input port")
+}
+
+pub(super) fn deserialize_ghost_subscriptions<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<BTreeMap<Subscription, GhostSubscription>, D::Error> {
+    unique_pairs(deserializer, "ghost of")
 }
 
 /// The node table, decoded as a map like the derive would, but refusing a repeated id: two
@@ -80,27 +79,64 @@ pub(super) fn deserialize_nodes<'de, D: Deserializer<'de>>(
 pub(super) fn deserialize_subgraphs<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<BTreeMap<SubgraphId, Subgraph>, D::Error> {
-    deserializer.deserialize_map(SubgraphsVisitor)
+    deserializer.deserialize_map(UniqueMapVisitor {
+        what: "subgraph id",
+        entry: PhantomData,
+    })
 }
 
-#[derive(Debug)]
-struct SubgraphsVisitor;
+/// The ghost nodes, decoded as a map refusing a repeated id: two ghost nodes under one id are
+/// two nodes, and keeping the last loses the other's settings.
+pub(super) fn deserialize_ghost_nodes<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<BTreeMap<NodeId, GhostNode>, D::Error> {
+    deserializer.deserialize_map(UniqueMapVisitor {
+        what: "ghost node id",
+        entry: PhantomData,
+    })
+}
 
-impl<'de> Visitor<'de> for SubgraphsVisitor {
-    type Value = BTreeMap<SubgraphId, Subgraph>;
+/// A manifest's funcs, decoded as a map refusing a repeated id.
+pub(super) fn deserialize_manifest_funcs<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<BTreeMap<FuncId, SavedDecl>, D::Error> {
+    deserializer.deserialize_map(UniqueMapVisitor {
+        what: "func id",
+        entry: PhantomData,
+    })
+}
+
+/// A map in key order that refuses a key given twice, naming it as `what`.
+struct UniqueMapVisitor<K, V> {
+    what: &'static str,
+    entry: PhantomData<fn() -> (K, V)>,
+}
+
+impl<K, V> fmt::Debug for UniqueMapVisitor<K, V> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "UniqueMapVisitor({})", self.what)
+    }
+}
+
+impl<'de, K, V> Visitor<'de> for UniqueMapVisitor<K, V>
+where
+    K: Deserialize<'de> + Ord + Copy + fmt::Debug,
+    V: Deserialize<'de>,
+{
+    type Value = BTreeMap<K, V>;
 
     fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("a map of subgraph ids to subgraphs")
+        write!(f, "a map keyed by {}", self.what)
     }
 
     fn visit_map<A: MapAccess<'de>>(self, mut access: A) -> Result<Self::Value, A::Error> {
-        let mut subgraphs = BTreeMap::new();
-        while let Some((id, subgraph)) = access.next_entry::<SubgraphId, Subgraph>()? {
-            if subgraphs.insert(id, subgraph).is_some() {
-                return Err(A::Error::custom(format!("duplicate subgraph id {id:?}")));
+        let mut map = BTreeMap::new();
+        while let Some((key, value)) = access.next_entry::<K, V>()? {
+            if map.insert(key, value).is_some() {
+                return Err(A::Error::custom(format!("duplicate {} {key:?}", self.what)));
             }
         }
-        Ok(subgraphs)
+        Ok(map)
     }
 }
 

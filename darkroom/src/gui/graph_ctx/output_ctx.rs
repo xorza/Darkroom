@@ -1,6 +1,6 @@
 //! One output port of a node.
 
-use scenarium::{DataType, OutputDecl, OutputPort};
+use scenarium::{DataType, Numbered, OutputDecl, OutputPort};
 
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::port_ref::PortRef;
@@ -11,11 +11,15 @@ pub(crate) struct OutputCtx<'a> {
     node: NodeCtx<'a>,
     /// Where the port stands among the node's outputs, the row it draws on.
     idx: usize,
-    declared: &'a OutputDecl,
+    declared: &'a Numbered<OutputDecl>,
 }
 
 impl<'a> OutputCtx<'a> {
-    pub(super) const fn new(node: NodeCtx<'a>, idx: usize, declared: &'a OutputDecl) -> Self {
+    pub(super) const fn new(
+        node: NodeCtx<'a>,
+        idx: usize,
+        declared: &'a Numbered<OutputDecl>,
+    ) -> Self {
         Self {
             node,
             idx,
@@ -48,6 +52,6 @@ impl<'a> OutputCtx<'a> {
     }
 
     pub(crate) const fn data_type(self) -> DataType {
-        self.declared.data_type
+        self.declared.port.data_type
     }
 }

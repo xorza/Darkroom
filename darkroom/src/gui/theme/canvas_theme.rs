@@ -1,7 +1,7 @@
 //! [`CanvasTheme`]: the graph canvas ground, the grid ruled across it, and the alarm inks drawn
 //! on it.
 
-use palantir::{RgbaF32, SpaceSteps};
+use palantir::{Dash, RgbaF32, SpaceSteps};
 
 use crate::gui::theme::palette::Palette;
 
@@ -32,6 +32,9 @@ pub(crate) struct CanvasTheme {
     /// pin's leader and the breaker scribble that cuts them, so the blade reads at the weight of
     /// what it severs.
     pub(crate) wire: f32,
+    /// The dash a ghost wire breaks into, at 100 % zoom: a dash and a gap of the same length,
+    /// which the wire's round caps close by its width.
+    pub(crate) ghost_dash: Dash,
 }
 
 impl CanvasTheme {
@@ -46,6 +49,7 @@ impl CanvasTheme {
             cut_bar_width: WIRE,
             breaker_stroke: p.breaker_stroke,
             wire: WIRE,
+            ghost_dash: Dash::new(space.sm, space.sm),
         }
     }
 
@@ -56,6 +60,13 @@ impl CanvasTheme {
     pub(crate) fn wire_at(&self, zoom: f32) -> f32 {
         debug_assert!(zoom > 0.0, "a zoom is positive");
         self.wire * zoom.max(1.0) / zoom
+    }
+
+    /// A ghost wire's dash at the camera's `zoom`, scaled as [`Self::wire_at`] scales its width,
+    /// so the pattern keeps its proportion to the line at every zoom.
+    pub(crate) fn ghost_dash_at(&self, zoom: f32) -> Dash {
+        let scale = self.wire_at(zoom) / self.wire;
+        Dash::new(self.ghost_dash.on * scale, self.ghost_dash.off * scale)
     }
 }
 

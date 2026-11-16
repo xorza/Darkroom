@@ -8,7 +8,7 @@
 //! - **A clip that does not fit the document pastes nothing**, and the status bar names why: one
 //!   naming a func this library lacks, or a port its declaration lacks, is text from outside, so
 //!   the paste lands on a copy of the document first, through the edit gate a widget's edit
-//!   takes; a subgraph it carries comes in reconciled, a node it cannot hold kept as a stub. Refused: queueing it unchecked, which turns another build's clip into a crash;
+//!   takes; a subgraph it carries comes in reconciled, a node it cannot hold kept as a ghost node. Refused: queueing it unchecked, which turns another build's clip into a crash;
 //!   dropping the parts that do not fit, which pastes a graph its author never wired.
 //! - **A pasted subgraph comes in by [`bring_in`]'s rules**: one equal to the definition the
 //!   document holds under its id is that definition, and one that differs comes in under a fresh
@@ -21,7 +21,7 @@ use std::str;
 
 use common::SerdeFormat;
 use glam::Vec2;
-use scenarium::{GraphId, Library, NodeId, Subgraph, SubgraphId};
+use scenarium::{GraphId, GraphSet, Library, Manifest, NodeId, Subgraph, SubgraphId};
 use serde::{Deserialize, Serialize};
 
 use crate::core::clip::error::PasteError;
@@ -36,7 +36,7 @@ use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
 use crate::core::edit::subgraph_intent::{NewSubgraph, SubgraphIntent};
 
 /// The line a clip's text starts with, which names its form.
-pub(crate) const HEADER: &str = "darkroom clip 1";
+pub(crate) const HEADER: &str = "darkroom clip 2";
 
 /// How far from where its nodes were copied a paste lands them, so a paste into the graph it was
 /// copied from does not hide the original, as a duplicate does.
@@ -45,11 +45,14 @@ pub(crate) const PASTE_OFFSET: Vec2 = Vec2::new(32.0, 32.0);
 /// The most text a clip is read from: past it the clipboard holds something else.
 pub(crate) const MAX_BYTES: usize = 16 << 20;
 
-/// A fragment and each subgraph it places, those placed first, as a copy takes them.
+/// A fragment and each subgraph it places, those placed first, as a copy takes them, with the
+/// manifest of the subgraphs: what each func they name declared in the build that copied, so a
+/// paste into a build that lacks one keeps a ghost node that says what it was.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Clip {
     fragment: Fragment,
     subgraphs: Vec<ClipSubgraph>,
+    manifest: Manifest,
 }
 
 /// One subgraph a clip carries, under the id the copied document held it under, with its view.
@@ -87,7 +90,7 @@ impl Clip {
                 }
             }
         }
-        let subgraphs = order
+        let subgraphs: Vec<ClipSubgraph> = order
             .into_iter()
             .map(|id| ClipSubgraph {
                 id,
@@ -99,8 +102,13 @@ impl Clip {
                 view: document.view(GraphId::Subgraph(id)).clone(),
             })
             .collect();
+        let mut carried = GraphSet::default();
+        for clip in &subgraphs {
+            carried.insert_subgraph(clip.id, clip.subgraph.clone());
+        }
         Some(Self {
             fragment,
+            manifest: carried.manifest(library),
             subgraphs,
         })
     }
@@ -140,6 +148,7 @@ impl Clip {
         let Self {
             mut fragment,
             subgraphs,
+            manifest,
         } = self;
         let carried = subgraphs
             .into_iter()
@@ -150,7 +159,7 @@ impl Clip {
                 synced: None,
             })
             .collect();
-        let brought = bring_in(document, library, carried);
+        let brought = bring_in(document, library, carried, &manifest);
         fragment.repoint(|id| brought.id(id));
         let fragment = fragment.remap(|| NodeId::unique().as_u128());
         let paste = Paste {

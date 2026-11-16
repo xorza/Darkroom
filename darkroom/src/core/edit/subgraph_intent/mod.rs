@@ -14,11 +14,11 @@
 
 use std::mem;
 
-use scenarium::{Interface, Library, Subgraph, SubgraphDigest, SubgraphId};
+use scenarium::{Interface, Library, Manifest, RefusedFate, Subgraph, SubgraphDigest, SubgraphId};
 
 use crate::core::document::Document;
 use crate::core::document::subgraph_side::SubgraphSide;
-use crate::core::edit::bring_in::{Carried, bring_in};
+use crate::core::edit::bring_in::{self, Carried, bring_in};
 use crate::core::edit::error::{EditRefusal, IntentError};
 use crate::core::edit::step::change::Change;
 use crate::core::edit::step::set_definition::SetDefinition;
@@ -60,11 +60,12 @@ pub(crate) enum SubgraphIntent {
 }
 
 /// What [`SubgraphIntent::Update`] puts in: the library's definition under the copy's id, last,
-/// after each definition it places.
+/// after each definition it places, and the manifest of the file they came from.
 #[derive(Debug)]
 pub(crate) struct Update {
     pub(crate) id: SubgraphId,
     pub(crate) carried: Vec<Carried>,
+    pub(crate) manifest: Manifest,
 }
 
 /// A definition [`SubgraphIntent::Add`] puts in.
@@ -117,7 +118,13 @@ impl SubgraphIntent {
                 if document.graphs.subgraph(id).is_none() {
                     return Ok(());
                 }
-                UndoStep::Interface(Box::new(SetInterface::plan(document, id, to, library)))
+                UndoStep::Interface(Box::new(SetInterface::plan(
+                    document,
+                    id,
+                    to,
+                    library,
+                    RefusedFate::Drop,
+                )))
             }
             Self::Rename { id, to } => {
                 let Some(subgraph) = document.graphs.subgraph(id) else {
@@ -168,10 +175,17 @@ impl SubgraphIntent {
                 })
             }
             Self::Update(update) => {
-                let Update { id, mut carried } = *update;
+                let Update {
+                    id,
+                    mut carried,
+                    manifest,
+                } = *update;
                 if document.graphs.subgraph(id).is_none() {
                     return Ok(());
                 }
+                // The definition itself is parsed against this library with those it places, as
+                // each of them is: a node it holds of a func this build lacks is a ghost node.
+                bring_in::reconcile(&mut carried, library, &manifest);
                 let definition = carried
                     .pop()
                     .expect("an update carries its definition last");
@@ -179,7 +193,7 @@ impl SubgraphIntent {
                     definition.id, id,
                     "an update puts in the definition under its id"
                 );
-                let mut brought = bring_in(document, library, carried);
+                let mut brought = bring_in(document, library, carried, &manifest);
                 for NewSubgraph { id, subgraph, side } in mem::take(&mut brought.subgraphs) {
                     land(
                         UndoStep::Subgraph(Box::new(SetSubgraph::insertion(id, subgraph, side))),
@@ -191,7 +205,11 @@ impl SubgraphIntent {
                 let interface = subgraph.interface.clone();
                 land(
                     UndoStep::Interface(Box::new(SetInterface::plan(
-                        document, id, interface, library,
+                        document,
+                        id,
+                        interface,
+                        library,
+                        RefusedFate::Ghost,
                     ))),
                     document,
                 );

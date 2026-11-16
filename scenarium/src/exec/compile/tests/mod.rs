@@ -399,7 +399,8 @@ fn interns_a_wire_to_the_producers_dense_address() {
 #[test]
 fn a_port_lands_at_its_declared_position_whatever_its_number() {
     use crate::graph::identity::EventPort;
-    use crate::graph::ports::{InputDecl, OutputDecl, numbered_port};
+    use crate::graph::identity::PortId;
+    use crate::graph::ports::{InputDecl, OutputDecl};
 
     let swapped = internals::stub_func(FuncId::unique(), "swapped")
         .input(2, InputDecl::optional("first", DataType::Int))
@@ -414,14 +415,14 @@ fn a_port_lands_at_its_declared_position_whatever_its_number() {
     let mut graph = Graph::default();
     let (a, b) = (graph.add_func_node(&swapped), graph.add_func_node(&swapped));
     graph.set_input_binding(
-        InputPort::new(b, numbered_port(1)),
-        Binding::wire(a, numbered_port(1)),
+        InputPort::new(b, PortId::new(1)),
+        Binding::wire(a, PortId::new(1)),
     );
     graph.set_input_binding(
-        InputPort::new(b, numbered_port(2)),
+        InputPort::new(b, PortId::new(2)),
         Binding::Const(ConstValue::Int(7)),
     );
-    graph.subscribe(EventPort::new(a, numbered_port(1)), b);
+    graph.subscribe(EventPort::new(a, PortId::new(1)), b);
 
     let compiled = Compiler::default().compile(&GraphSet::from(graph), &library);
     let a_idx = compiled.node(ProgramId::from(a)).unwrap();

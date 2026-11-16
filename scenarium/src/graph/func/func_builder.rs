@@ -9,9 +9,9 @@ use crate::graph::func::event::EventLambda;
 use crate::graph::func::lambda::FuncLambda;
 use crate::graph::func::signature::FuncSignature;
 use crate::graph::func::{Func, FuncBehavior, FuncEvent};
-use crate::graph::identity::{FuncId, FuncRef};
+use crate::graph::identity::{FuncId, FuncRef, PortId};
 use crate::graph::node::CacheMode;
-use crate::graph::ports::{InputDecl, OutputDecl, PortList, Ports, check_ids, numbered_port};
+use crate::graph::ports::{InputDecl, Numbered, OutputDecl, PortList, Ports, check_ids};
 
 /// A func declaration in progress, started by [`Func::builder`] or [`Func::into_builder`].
 #[derive(Clone, Debug)]
@@ -65,20 +65,18 @@ impl FuncBuilder {
     /// and never changes once shipped: a saved node's wiring names the port by it.
     #[must_use]
     pub fn input(mut self, number: u32, input: InputDecl) -> Self {
-        self.ports.inputs.push(InputDecl {
-            id: numbered_port(number),
-            ..input
-        });
+        self.ports
+            .inputs
+            .push(Numbered::new(PortId::new(number), input));
         self
     }
 
     /// Add an output port under the number `number`, as [`Self::input`] numbers an input.
     #[must_use]
     pub fn output(mut self, number: u32, output: OutputDecl) -> Self {
-        self.ports.outputs.push(OutputDecl {
-            id: numbered_port(number),
-            ..output
-        });
+        self.ports
+            .outputs
+            .push(Numbered::new(PortId::new(number), output));
         self
     }
 
@@ -91,7 +89,7 @@ impl FuncBuilder {
         event_lambda: EventLambda,
     ) -> Self {
         self.events.push(FuncEvent {
-            id: numbered_port(number),
+            id: PortId::new(number),
             name: name.into(),
             event_lambda,
         });

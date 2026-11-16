@@ -13,18 +13,20 @@ use std::fmt::Formatter;
 use glam::Vec2;
 use palantir::{
     Align, Configure, Grid, InternedStr, Menu, MenuItem, Panel, Sense, SizeSpec, Spacing, Text,
-    TextStyle, Track, Ui, VAlign, WidgetId, fmt,
+    TextStyle, TextWrap, Track, Ui, VAlign, WidgetId, fmt,
 };
 use scenarium::Binding;
 use scenarium::FuncEvent;
 use scenarium::Library;
 use scenarium::NodeId;
 use scenarium::{ConstValue, DataType};
+use scenarium::{GhostBinding, GhostSource, InputState};
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::preview_sink;
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::{EditCommand, PathPick};
+use crate::gui::graph_ctx::ghost_port::{GhostEvent, GhostPort};
 use crate::gui::graph_ctx::input_ctx::InputCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::graph_ctx::output_ctx::OutputCtx;
@@ -35,6 +37,7 @@ use crate::gui::pane::graph_ui::wid;
 use crate::gui::path_type::PathType;
 use crate::gui::port_ref::PortKind;
 use crate::gui::theme::Theme;
+use crate::gui::theme::color;
 use crate::gui::theme::hover::Hover;
 use crate::gui::widgets::port_glyph;
 use crate::gui::widgets::port_glyph::PortGlyph;
@@ -57,10 +60,14 @@ const COL_OUTPUT: u16 = COL_SPACER + 1;
 /// buffer.
 pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, row_tracks: &mut Vec<Track>) {
     let (theme, node) = (record.node.theme(), record.node);
-    // Events list under the outputs in the same column: a row per output and per event.
-    let row_count = node
-        .port_count(PortKind::Input)
-        .max(node.port_count(PortKind::Output) + node.events().len());
+    // Events list under the outputs in the same column: a row per output and per event. The
+    // ghost ports list under the declared ones on their side.
+    let row_count = (node.port_count(PortKind::Input) + node.ghost_inputs().count()).max(
+        node.port_count(PortKind::Output)
+            + node.events().len()
+            + node.ghost_outputs().count()
+            + node.ghost_events().count(),
+    );
     if row_count == 0 {
         return;
     }
@@ -152,9 +159,18 @@ impl PortLabel<'_> {
 }
 
 fn input_cells(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
-    for input in record.node.inputs() {
+    let node = record.node;
+    for input in node.inputs() {
         input_label_cell(ui, record, input);
         value_cell(ui, record, input);
+    }
+    let declared = node.port_count(PortKind::Input);
+    for (idx, ghost) in node.ghost_inputs().enumerate() {
+        GhostRow {
+            row: declared + idx,
+            ghost: GhostRowPort::Data(ghost),
+        }
+        .show(ui, record);
     }
 }
 
@@ -169,6 +185,18 @@ fn output_cells(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
         EventRow {
             row: output_count + idx,
             event,
+        }
+        .show(ui, record);
+    }
+    let declared = output_count + node.events().len();
+    let ghosts = node
+        .ghost_outputs()
+        .map(GhostRowPort::Data)
+        .chain(node.ghost_events().map(GhostRowPort::Event));
+    for (idx, ghost) in ghosts.enumerate() {
+        GhostRow {
+            row: declared + idx,
+            ghost,
         }
         .show(ui, record);
     }
@@ -270,7 +298,7 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
     if cell.response.right.clicked() || glyph.is_some_and(|glyph| glyph.right.clicked()) {
         open_port_context_menu(ui, menu_id);
     }
-    // Double-click on the circle or the label toggles the binding: clear it,
+    // Double-click on the circle or the label toggles the binding: clear it, a ghost included,
     // or seed the default const when unbound.
     //
     // Adding or removing a `Const` resizes the node. The intent drains at the end of this record
@@ -279,6 +307,10 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
     if cell.response.left.double_clicked() || glyph.is_some_and(|glyph| glyph.left.double_clicked())
     {
         match input.binding() {
+            None if input.ghost().is_some() => record.stage.out.push_graph(
+                record.node.graph_ctx.graph(),
+                GraphIntent::set_input(input.port(), None),
+            ),
             // Boundary ports route the interface — no const affordance, so an
             // unbound one has nothing to seed (its label double-click renames).
             None => {
@@ -311,8 +343,28 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
                 GraphIntent::set_input(input.port(), Binding::Const(value)),
             );
         }
+        // A ghost the graph can hold again, as its loop is gone, comes back as the wire or the
+        // constant it was, through the gate as any bind.
+        if let Some(ghost) = input.ghost() {
+            let graph_ctx = record.node.graph_ctx;
+            let restorable = graph_ctx
+                .body()
+                .admit_ghost(graph_ctx.scope(), input.port())
+                .is_ok();
+            if MenuItem::new("Restore")
+                .disabled(!restorable)
+                .show(ui)
+                .left
+                .clicked()
+            {
+                record.stage.out.push_graph(
+                    graph_ctx.graph(),
+                    GraphIntent::set_input(input.port(), ghost.binding()),
+                );
+            }
+        }
         if MenuItem::new("Clear binding")
-            .disabled(input.binding().is_none())
+            .disabled(input.binding().is_none() && input.ghost().is_none())
             .show(ui)
             .left
             .clicked()
@@ -336,6 +388,16 @@ fn value_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCtx<'_>)
     // The one owner of the "only Const bindings get an inline editor" filter: a wired input's
     // value is its wire, and one that takes only a wire has no field to leave empty, so neither
     // renders a value cell.
+    // An input a ghost sits on reads as wired, a ghost wire, or shows what it kept, a ghost
+    // constant: either is replaced by a bind and cleared by a double-click.
+    if input.binding().is_none()
+        && let Some(ghost) = input.ghost()
+    {
+        if let GhostSource::Const(value) = &ghost.source {
+            value_column(ui, input, |ui| kept_value(ui, node_ctx.theme(), value));
+        }
+        return;
+    }
     let value = match input.binding() {
         Some(Binding::Const(value)) => value,
         Some(Binding::Wire(_)) => return,
@@ -529,6 +591,213 @@ impl EventRow<'_> {
                     .show(ui, theme);
             });
     }
+}
+
+/// A ghost row's port: a data port's, an input or an output, or an event's.
+#[derive(Debug, Clone, Copy)]
+enum GhostRowPort<'a> {
+    Data(GhostPort<'a>),
+    Event(GhostEvent<'a>),
+}
+
+/// One row for a port its node shows and its declaration does not: a hollow dot in the hue of
+/// the type it had, where a ghost wire ends, and its name dimmed, or its number where no save
+/// kept the name; an input's kept constant beside it. Nothing wires to it: a double-click on an
+/// input's clears what it holds, as on a declared input.
+#[derive(Debug, Clone, Copy)]
+struct GhostRow<'a> {
+    /// The grid row it sits in.
+    row: usize,
+    ghost: GhostRowPort<'a>,
+}
+
+impl GhostRow<'_> {
+    fn show(self, ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
+        let Self { row, ghost } = self;
+        let (node_ctx, draw_ctx) = (record.node, record.stage.ctx);
+        let (graph_ctx, theme) = (node_ctx.graph_ctx, node_ctx.theme());
+        let graph = graph_ctx.graph();
+        let geometry = draw_ctx.geometry();
+        let ink = color::wash(theme.port.label, GHOST_INK, theme.card.fill);
+        let (side, wid, hovered, name, number, data_type, held) = match ghost {
+            GhostRowPort::Data(port) => (
+                port.port.kind,
+                wid::ghost_port(graph, port.port),
+                geometry.ghost_ports.is_hovered(port.port),
+                port.name,
+                port.port.port.get(),
+                port.data_type,
+                port.held,
+            ),
+            GhostRowPort::Event(event) => (
+                PortKind::Output,
+                wid::ghost_event(graph, event.event),
+                geometry.ghost_events.is_hovered(event.event),
+                event.name,
+                event.event.event.get(),
+                None,
+                None,
+            ),
+        };
+        let dot = match ghost {
+            GhostRowPort::Data(_) => graph_ctx.ghost_color(data_type),
+            GhostRowPort::Event(_) => theme.port.event,
+        };
+        let fill = Hover::from(hovered).lift(dot);
+        let tooltip = node_ctx
+            .tooltips()
+            .then(|| match (data_type, node_ctx.ghost()) {
+                (Some(data_type), _) => {
+                    let type_label = TypeLabel {
+                        library: graph_ctx.library(),
+                        data_type,
+                    };
+                    fmt!(ui, "{type_label}\nkept as a ghost")
+                }
+                (None, true) => fmt!(ui, "kept while the node is a ghost"),
+                (None, false) => fmt!(ui, "no longer a port of this node, kept as a ghost"),
+            });
+        let label = |ui: &mut Ui| {
+            let style = TextStyle {
+                color: ink,
+                ..ui.theme().text
+            };
+            match name {
+                Some(name) => Text::new(name).style(&style).show(ui),
+                None => Text::new(fmt!(ui, "#{number}")).style(&style).show(ui),
+            };
+        };
+        let margin = theme.port_margin(side, theme.port.radius());
+        let glyph = |ui: &mut Ui| {
+            let glyph = match ghost {
+                GhostRowPort::Data(_) => PortGlyph::circle(wid, theme.port.size, fill).hollow(),
+                GhostRowPort::Event(_) => PortGlyph::arrow(wid, theme.port.size, fill),
+            };
+            glyph.margin(margin).tooltip(tooltip).show(ui, theme)
+        };
+        let (col, align) = match side {
+            PortKind::Input => (COL_INPUT, Align::LEFT),
+            PortKind::Output => (COL_OUTPUT, Align::RIGHT),
+        };
+        // Keyed by domain as the glyph is: an output and an event of one number are two rows.
+        let salt = match ghost {
+            GhostRowPort::Data(_) => ("ghost_port", side as u8, number),
+            GhostRowPort::Event(_) => ("ghost_event", side as u8, number),
+        };
+        let cell = Panel::hstack()
+            .id_salt(salt)
+            .grid_cell((grid_row(row), col))
+            .align(align)
+            .size(SizeSpec::HUG)
+            .gap(theme.space.xs)
+            .child_align(VAlign::Center)
+            .show(ui, |ui| match side {
+                PortKind::Input => {
+                    let glyph = glyph(ui);
+                    label(ui);
+                    glyph
+                }
+                PortKind::Output => {
+                    label(ui);
+                    glyph(ui)
+                }
+            });
+        if let Some(GhostBinding {
+            source: GhostSource::Const(value),
+            ..
+        }) = held
+        {
+            Panel::hstack()
+                .id_salt(("ghost_value", number))
+                .grid_cell((grid_row(row), COL_VALUE))
+                .size(SizeSpec::FILL)
+                .child_align(VAlign::Center)
+                .show(ui, |ui| kept_value(ui, theme, value));
+        }
+        let (GhostRowPort::Data(port), Some(held)) = (ghost, held) else {
+            return;
+        };
+        let Some(input) = port.port.input_port() else {
+            return;
+        };
+        if cell.inner.left.double_clicked() {
+            record
+                .stage
+                .out
+                .push_graph(graph, GraphIntent::set_input(input, None));
+        }
+        let menu_id = cell.response.id;
+        if cell.response.right.clicked() || cell.inner.right.clicked() {
+            open_port_context_menu(ui, menu_id);
+        }
+        Menu::for_id(menu_id).size(SizeSpec::HUG).show(ui, |ui| {
+            // Re-home: what the ghost held moves to an input of the node that takes it, in one
+            // entry. Only the inputs the gate admits it on are offered.
+            for target in rehome_targets(node_ctx, held) {
+                let binding = held.binding();
+                if MenuItem::new(fmt!(ui, "Move to {}", target.name()))
+                    .show(ui)
+                    .left
+                    .clicked()
+                {
+                    record.stage.out.extend_graph(
+                        graph,
+                        [
+                            GraphIntent::set_input(target.port(), binding),
+                            GraphIntent::set_input(input, None),
+                        ],
+                    );
+                }
+            }
+            if MenuItem::new("Clear").show(ui).left.clicked() {
+                record
+                    .stage
+                    .out
+                    .push_graph(graph, GraphIntent::set_input(input, None));
+            }
+        });
+    }
+}
+
+/// The inputs of `node` that would take what `ghost` held, a wire or a constant: each declared
+/// input that holds nothing and that the edit gate's admission passes, a wire also closing no
+/// loop and reading a node, not a ghost node. What a ghost port's menu offers to move it to.
+fn rehome_targets<'a>(
+    node: NodeCtx<'a>,
+    ghost: &'a GhostBinding,
+) -> impl Iterator<Item = InputCtx<'a>> + 'a {
+    let graph_ctx = node.graph_ctx;
+    let (body, scope) = (graph_ctx.body(), graph_ctx.scope());
+    let binding = ghost.binding();
+    // A wire from a ghost node goes nowhere until the node is back.
+    let producer_held = ghost
+        .output()
+        .is_none_or(|output| body.find(output.node_id).is_some());
+    node.inputs().filter(move |target| {
+        let port = target.port();
+        producer_held
+            && body.input_state(port) == InputState::Unbound
+            && body.admit(scope, port, &binding).is_ok()
+            && !ghost
+                .output()
+                .is_some_and(|output| body.produces_cycle(output.node_id, port.node_id))
+    })
+}
+
+/// How far a ghost row's ink pulls from the label ink toward the card: it reads as kept, under
+/// the declared rows.
+const GHOST_INK: f32 = 0.55;
+
+/// A ghost constant as its row shows it, dimmed: what was set, which nothing reads now.
+fn kept_value(ui: &mut Ui, theme: &Theme, value: &ConstValue) {
+    let style = TextStyle {
+        color: color::wash(theme.port.label, GHOST_INK, theme.card.fill),
+        ..ui.theme().text
+    };
+    Text::new(fmt!(ui, "kept {}", value.value_text()))
+        .style(&style)
+        .text_wrap(TextWrap::Ellipsis)
+        .show(ui);
 }
 
 /// Human-readable type for a port tooltip: a path's kind, mode and extensions

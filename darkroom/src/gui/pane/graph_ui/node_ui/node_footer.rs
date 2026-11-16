@@ -46,6 +46,7 @@ pub(super) fn show(ui: &mut Ui, node_ctx: NodeCtx<'_>) {
                         ExecStatus::Errored(Some(_)) => run.failure_explained().show(ui, theme),
                         _ => run.show(ui, theme),
                     }
+                    ghost_count(ui, theme, node.ghost_count());
                     // A failure's message takes the row's free width, where the spacer would.
                     match status {
                         ExecStatus::Errored(Some(message)) => {
@@ -61,6 +62,26 @@ pub(super) fn show(ui: &mut Ui, node_ctx: NodeCtx<'_>) {
                 proportion_bar(ui, theme, ram);
             }
         });
+}
+
+/// How many ghosts touch the node, in the warning ink, where any do: the footer says the node
+/// keeps wiring it cannot run, with no frame, which a run's status owns.
+fn ghost_count(ui: &mut Ui, theme: &Theme, count: usize) {
+    if count == 0 {
+        return;
+    }
+    let style = support::colored_text(ui, theme.status.warning, theme.font.caption);
+    let text = if count == 1 {
+        ui.intern("1 ghost")
+    } else {
+        fmt!(ui, "{count} ghosts")
+    };
+    let label = Text::new(text).style(&style).sense(Sense::HOVER).show(ui);
+    support::tooltip_after(
+        ui,
+        &label,
+        Some("Wiring or values the node keeps and cannot run: its func or a port changed"),
+    );
 }
 
 /// The failure's first line in the error ink, cut to the card's width with the whole message

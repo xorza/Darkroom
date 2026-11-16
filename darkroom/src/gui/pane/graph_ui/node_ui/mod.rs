@@ -127,7 +127,7 @@ impl NodeUi {
         let selected = draw_ctx.is_selected(ItemId::Node(node_ctx.node_id));
         // The border width is always the selection width so selecting a node never resizes it
         // (stroke folds into padding, width-gated). Only the color changes: the breaker alarm
-        // wins, then the missing-stub color, then `Theme::card_border`'s selected or resting.
+        // wins, then the ghost node's color, then `Theme::card_border`'s selected or resting.
         let border_width = theme.card.border_width;
         let tier = if broken {
             CardTier::Broken
@@ -136,8 +136,8 @@ impl NodeUi {
         } else {
             CardTier::Resting
         };
-        let border = if node.stub() && tier != CardTier::Broken {
-            // A stub for a node whose func is gone from the library reads as broken but deletable.
+        let border = if node.ghost() && tier != CardTier::Broken {
+            // A ghost node for a node whose func is gone from the library reads as broken but deletable.
             theme.status.error
         } else {
             theme.card_border(tier)

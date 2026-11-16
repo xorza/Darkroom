@@ -126,7 +126,7 @@ impl GraphUi {
     }
 
     /// Evict this canvas's `NodeId`-keyed cache, the cross-frame geometry, down to the nodes
-    /// `graph`, the graph it shows, still holds, as a node or a stub; see
+    /// `graph`, the graph it shows, still holds, as a node or a ghost node; see
     /// [`CanvasGeometry::retain_nodes`].
     pub(crate) fn retain_nodes(&mut self, graph: &Graph) {
         self.geometry.retain_nodes(|node_id| graph.holds(node_id));
@@ -334,6 +334,8 @@ impl GraphUi {
                                 emphasis: &emphasis,
                                 ties: &self.ties,
                             };
+                            // Under the live wires, so a live wire crossing a ghost reads whole.
+                            wires.draw_ghost_wires(ui);
                             wires.draw_data_wires(ui);
                             wires.draw_event_wires(ui);
                             // Over the wires they gather, under the node
@@ -384,7 +386,7 @@ mod tests {
     fn the_stage_acts_on_a_click_by_where_it_lands() {
         use glam::Vec2;
         use palantir::PointerButton;
-        use scenarium::{NodeId, numbered_port};
+        use scenarium::{NodeId, PortId};
 
         use crate::core::document::internals::DocumentFixture;
         use crate::gui::frame::shortcuts;
@@ -452,7 +454,7 @@ mod tests {
         let (mut h, node) = fresh();
         h.ui.press(wid::body(GraphId::Main, node), PointerButton::Left);
         h.frame();
-        let start = PortRef::output(h.node(1), numbered_port(1));
+        let start = PortRef::output(h.node(1), PortId::new(1));
         let CanvasHarness { graph_ui, ctx, .. } = &mut h;
         graph_ui.gestures.wire_ui.resume(start, ctx.graph_ctx());
         h.ui.release(PointerButton::Left);

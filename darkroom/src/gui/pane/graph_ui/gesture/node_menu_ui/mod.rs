@@ -62,9 +62,9 @@ impl NodeMenuUi {
         self.menu.retain(|node_id| graph_ctx.contains(node_id));
         let pick = self.menu.show(ui, "node_body_menu", |ui, node_id| {
             let mut chosen = None;
-            // The duplicates show only when the clicked node is a graph node, not a stub: a stub
+            // The duplicates show only when the clicked node is a graph node, not a ghost node: a ghost node
             // neither runs nor copies. "Run to this node" shows by the header play chip's rule.
-            if let Some(node) = graph_ctx.node(node_id).filter(|node| !node.stub()) {
+            if let Some(node) = graph_ctx.node(node_id).filter(|node| !node.ghost()) {
                 if let Some(program_id) = node.runnable() {
                     if MenuItem::new("Run to this node").show(ui).left.clicked() {
                         chosen = Some(MenuChoice::Run { program_id });

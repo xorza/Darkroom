@@ -1,8 +1,8 @@
 use scenarium::internals::test_graph::TestGraph;
 use scenarium::{
-    CacheMode, DataType, EventPort, FuncId, Graph, InstancePath, Node, ProgramId, internals,
+    CacheMode, DataType, EventPort, FuncId, Graph, InstancePath, Node, NodeId, ProgramId, internals,
 };
-use scenarium::{internals::test_graph::NodeSpec, numbered_port};
+use scenarium::{PortId, internals::test_graph::NodeSpec};
 
 use crate::core::document::internals::DocumentFixture;
 use crate::core::document::tab_ref::TabRef;
@@ -31,7 +31,7 @@ fn only_runnable_sinks_expose_the_disable_toggle() {
     let plain = g.add("plain", |n| n.output(DataType::Int));
     let sink = g.add("sink_func", NodeSpec::sink);
     let mut fixture = DocumentFixture::from(g);
-    let ghost = fixture.add_stub(internals::unresolved_node(FuncId::unique()));
+    let ghost = fixture.add_ghost_node(internals::unresolved_node(FuncId::unique()));
     let fixture = GraphCtxFixture::over(fixture);
     let graph_ctx = fixture.graph_ctx();
 
@@ -50,7 +50,7 @@ fn only_runnable_sinks_expose_the_disable_toggle() {
 }
 
 #[test]
-fn a_missing_func_reads_as_a_deletable_stub() {
+fn a_missing_func_reads_as_a_deletable_ghost_node() {
     use scenarium::math_library;
 
     // A resolvable func, and one whose id the library no longer holds.
@@ -63,7 +63,7 @@ fn a_missing_func_reads_as_a_deletable_stub() {
     ghost.name = "astro_to_image".into();
     let known_id = graph.add(known);
     let mut fixture = DocumentFixture::with_library(graph, library);
-    let ghost_id = fixture.add_stub(ghost);
+    let ghost_id = fixture.add_ghost_node(ghost);
 
     let fixture = GraphCtxFixture::over(fixture);
     let graph_ctx = fixture.graph_ctx();
@@ -73,8 +73,8 @@ fn a_missing_func_reads_as_a_deletable_stub() {
     let known_node = graph_ctx.node(known_id).unwrap();
     let ghost_node = graph_ctx.node(ghost_id).unwrap();
 
-    assert!(!known_node.stub(), "a resolved func is not a stub");
-    assert!(ghost_node.stub());
+    assert!(!known_node.ghost(), "a resolved func is not a ghost node");
+    assert!(ghost_node.ghost());
     assert_eq!(ghost_node.kind_label(), "missing func");
 
     assert_eq!(ghost_node.name(), "astro_to_image");
@@ -88,14 +88,204 @@ fn a_missing_func_reads_as_a_deletable_stub() {
         "the resolved func still reports its interface"
     );
 
-    // A targeted run overrides the disabled flag; a stub can't be run to.
+    // A targeted run overrides the disabled flag; a ghost node can't be run to.
     assert!(
         known_node.disabled() && known_node.runnable() == Some(ProgramId::from(known_node.node_id)),
         "a resolved disabled func can be targeted by a one-run override"
     );
     assert!(
         ghost_node.runnable().is_none(),
-        "a stub offers no run affordance — it resolves to nothing"
+        "a ghost node offers no run affordance — it resolves to nothing"
+    );
+}
+
+/// The ports a node shows that no declaration gives it: a ghost node's saved ports, in its
+/// func's order, each input with the ghost it holds; and on a live node each port its ghost
+/// wiring names that the node no longer declares, an output once however many ghost wires read
+/// it, by its saved name where a save kept one. Ghost rows sit under the declared ones, and the
+/// footer counts each ghost that touches the node.
+#[test]
+fn a_node_shows_the_ghost_ports_its_ghosts_name() {
+    use scenarium::{
+        Binding, DetachReason, GhostBinding, GhostNode, GhostSource, InputPort, InputState,
+        Numbered, OutputPort, SavedDecl, SavedEvent, SavedInput, SavedPort, Subscription,
+        SubscriptionState, Unresolved,
+    };
+
+    use crate::core::document::graph_view::NodePlacement;
+    use crate::gui::graph_ctx::ghost_port::GhostPort;
+    use crate::gui::port_ref::PortRef;
+
+    fn rows<'a>(
+        ports: impl Iterator<Item = GhostPort<'a>>,
+    ) -> Vec<(PortRef, Option<&'a str>, Option<DataType>, bool)> {
+        ports
+            .map(|port| (port.port, port.name, port.data_type, port.held.is_some()))
+            .collect()
+    }
+
+    let mut fixture = DocumentFixture::probes(2);
+    let [a, b] = [0, 1].map(|i| fixture.node(i));
+    let ghost = NodeId::unique();
+    let saved = SavedDecl {
+        name: "Denoise".to_owned(),
+        category: "Astro".to_owned(),
+        inputs: vec![Numbered::new(
+            PortId::new(1),
+            SavedInput {
+                name: "Strength".to_owned(),
+                data_type: DataType::Float,
+                default_value: None,
+            },
+        )],
+        outputs: vec![Numbered::new(
+            PortId::new(1),
+            SavedPort {
+                name: "Image".to_owned(),
+                data_type: DataType::Int,
+            },
+        )],
+        events: vec![Numbered::new(
+            PortId::new(1),
+            SavedEvent {
+                name: "done".to_owned(),
+            },
+        )],
+    };
+    let graph = fixture.document.graphs.main_mut();
+    graph.insert_ghost_node(
+        ghost,
+        GhostNode {
+            node: internals::unresolved_node(FuncId::unique()),
+            reason: DetachReason::Unresolved(Unresolved::MissingFunc),
+            saved: Some(saved),
+        },
+    );
+    let kept = |binding: Binding| InputState::Ghost(GhostBinding::from(binding));
+    // `a` feeds the ghost node's Strength; the ghost node's Image feeds `b`'s input 1; `a`'s
+    // output 7, which `probe` does not declare, feeds `b`'s 9, which it does not either, and
+    // `b`'s 8 under a saved name.
+    graph.set_input_state(
+        InputPort::new(ghost, PortId::new(1)),
+        kept(Binding::wire(a, PortId::new(1))),
+    );
+    graph.set_input_state(
+        InputPort::new(b, PortId::new(1)),
+        kept(Binding::wire(ghost, PortId::new(1))),
+    );
+    graph.set_input_state(
+        InputPort::new(b, PortId::new(9)),
+        kept(Binding::wire(a, PortId::new(7))),
+    );
+    graph.set_input_state(
+        InputPort::new(b, PortId::new(8)),
+        InputState::Ghost(GhostBinding {
+            input: Some(SavedPort {
+                name: "Gain".to_owned(),
+                data_type: DataType::Float,
+            }),
+            source: GhostSource::Wire {
+                output: OutputPort::new(a, PortId::new(7)),
+                saved: None,
+            },
+        }),
+    );
+    graph.set_subscription_state(
+        Subscription::new(EventPort::new(a, PortId::new(4)), b),
+        SubscriptionState::Ghost(scenarium::GhostSubscription::default()),
+    );
+    graph.validate().unwrap();
+    fixture
+        .document
+        .main_view
+        .node_placements
+        .insert(ghost, NodePlacement::default());
+    let fixture = GraphCtxFixture::over(fixture);
+    let graph_ctx = fixture.graph_ctx();
+    let node = graph_ctx.node(ghost).unwrap();
+
+    assert_eq!(
+        node.saved().map(|saved| saved.name.as_str()),
+        Some("Denoise")
+    );
+    assert_eq!(
+        rows(node.ghost_inputs()),
+        [(
+            PortRef::input(ghost, PortId::new(1)),
+            Some("Strength"),
+            Some(DataType::Float),
+            true
+        )]
+    );
+    assert_eq!(
+        rows(node.ghost_outputs()),
+        [(
+            PortRef::output(ghost, PortId::new(1)),
+            Some("Image"),
+            Some(DataType::Int),
+            false
+        )]
+    );
+    assert_eq!(
+        node.ghost_events()
+            .map(|event| (event.event, event.name))
+            .collect::<Vec<_>>(),
+        [(EventPort::new(ghost, PortId::new(1)), Some("done"))]
+    );
+    assert_eq!(node.ghost_count(), 2, "the wire in and the wire out");
+
+    let producer = graph_ctx.node(a).unwrap();
+    assert_eq!(rows(producer.ghost_inputs()), []);
+    assert_eq!(
+        rows(producer.ghost_outputs()),
+        [(PortRef::output(a, PortId::new(7)), None, None, false)],
+        "two ghost wires read output 7: one row"
+    );
+    assert_eq!(
+        producer
+            .ghost_events()
+            .map(|event| (event.event, event.name))
+            .collect::<Vec<_>>(),
+        [(EventPort::new(a, PortId::new(4)), None)]
+    );
+    let consumer = graph_ctx.node(b).unwrap();
+    assert_eq!(
+        rows(consumer.ghost_inputs()),
+        [
+            (
+                PortRef::input(b, PortId::new(8)),
+                Some("Gain"),
+                Some(DataType::Float),
+                true
+            ),
+            (PortRef::input(b, PortId::new(9)), None, None, true),
+        ],
+        "input 1 is declared, so its ghost sits on its own row"
+    );
+    assert_eq!(consumer.ghost_count(), 4);
+    assert!(consumer.input(PortId::new(1)).unwrap().ghost().is_some());
+    assert_eq!(
+        graph_ctx.ghost_end_type(PortRef::output(ghost, PortId::new(1)), None),
+        Some(DataType::Int),
+        "a ghost node's saved output types its ghost wires"
+    );
+    assert_eq!(
+        graph_ctx.ghost_end_type(PortRef::output(a, PortId::new(7)), None),
+        None
+    );
+    let gain = SavedPort {
+        name: "Gain".to_owned(),
+        data_type: DataType::Float,
+    };
+    assert_eq!(
+        graph_ctx.ghost_end_type(PortRef::input(b, PortId::new(8)), Some(&gain)),
+        Some(DataType::Float),
+        "a port no declaration gives reads the one the ghost saved"
+    );
+    assert_eq!(
+        graph_ctx.ghost_end_type(PortRef::input(b, PortId::new(1)), Some(&gain)),
+        Some(DataType::Int),
+        "a declared port reads its declaration, whatever the ghost saved"
     );
 }
 
@@ -135,13 +325,13 @@ fn subscriptions_read_from_the_graph() {
     let emitter_id = graph.add(emitter);
     let subscriber: Node = library.by_id(FRAME_EVENT_FUNC_ID).unwrap().into();
     let subscriber_id = graph.add(subscriber);
-    graph.subscribe(EventPort::new(emitter_id, numbered_port(2)), subscriber_id);
+    graph.subscribe(EventPort::new(emitter_id, PortId::new(2)), subscriber_id);
 
     let fixture = GraphCtxFixture::over(DocumentFixture::with_library(graph, library));
     let subs: Vec<_> = fixture.graph_ctx().subscriptions().collect();
 
     assert_eq!(subs.len(), 1);
-    assert_eq!(subs[0].event, EventPort::new(emitter_id, numbered_port(2)));
+    assert_eq!(subs[0].event, EventPort::new(emitter_id, PortId::new(2)));
     assert_eq!(subs[0].subscriber, subscriber_id);
 }
 

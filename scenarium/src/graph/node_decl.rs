@@ -3,7 +3,7 @@
 use crate::graph::func::{Func, FuncEvent};
 use crate::graph::identity::PortId;
 use crate::graph::node::Boundary;
-use crate::graph::ports::{InputDecl, OutputDecl, Ports};
+use crate::graph::ports::{InputDecl, Numbered, OutputDecl, Ports};
 use crate::graph::subgraph::Subgraph;
 
 /// What a node resolves to through a [`Scope`](crate::Scope): the ports it shows and is wired
@@ -51,11 +51,11 @@ impl<'a> NodeDecl<'a> {
         }
     }
 
-    pub fn inputs(self) -> &'a [InputDecl] {
+    pub fn inputs(self) -> &'a [Numbered<InputDecl>] {
         &self.ports().inputs
     }
 
-    pub fn outputs(self) -> &'a [OutputDecl] {
+    pub fn outputs(self) -> &'a [Numbered<OutputDecl>] {
         &self.ports().outputs
     }
 

@@ -15,7 +15,7 @@
 //!   already. Refused: a blank last row on each boundary node as the drop target, a placeholder
 //!   that could be wired to another and name no type.
 
-use scenarium::{ConstValue, DataType, InputDecl, Interface, OutputDecl, PortId};
+use scenarium::{ConstValue, DataType, InputDecl, Interface, Numbered, OutputDecl, PortId};
 
 /// Which list of an interface a port is in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -137,14 +137,12 @@ impl PortEdit {
                 name,
                 data_type,
             } => match side {
-                InterfaceSide::Inputs => ports.inputs.push(InputDecl {
-                    id: port,
-                    ..InputDecl::optional(name, data_type)
-                }),
-                InterfaceSide::Outputs => ports.outputs.push(OutputDecl {
-                    id: port,
-                    ..OutputDecl::new(name, data_type)
-                }),
+                InterfaceSide::Inputs => ports
+                    .inputs
+                    .push(Numbered::new(port, InputDecl::optional(name, data_type))),
+                InterfaceSide::Outputs => ports
+                    .outputs
+                    .push(Numbered::new(port, OutputDecl::new(name, data_type))),
             },
         }
         Interface::checked(ports).unwrap_or_else(|_| interface.clone())
@@ -168,7 +166,9 @@ fn shift_port<T>(items: &mut [T], is: impl Fn(&T) -> bool, shift: Shift) {
 
 #[cfg(test)]
 mod tests {
-    use scenarium::{ConstValue, DataType, InputDecl, Interface, OutputDecl, PortId, Ports};
+    use scenarium::{
+        ConstValue, DataType, InputDecl, Interface, Numbered, OutputDecl, PortId, Ports,
+    };
 
     use crate::core::edit::port_edit::{InterfaceSide, PortEdit, Shift};
 
@@ -177,15 +177,18 @@ mod tests {
             inputs: ["a", "b", "c"]
                 .into_iter()
                 .zip(1..)
-                .map(|(name, id)| InputDecl {
-                    id: PortId::from_u128(id),
-                    ..InputDecl::optional(name, DataType::Int).default(ConstValue::Int(id as i64))
+                .map(|(name, id)| {
+                    Numbered::new(
+                        PortId::new(id),
+                        InputDecl::optional(name, DataType::Int)
+                            .default(ConstValue::Int(i64::from(id))),
+                    )
                 })
                 .collect(),
-            outputs: vec![OutputDecl {
-                id: PortId::from_u128(9),
-                ..OutputDecl::new("out", DataType::Float)
-            }],
+            outputs: vec![Numbered::new(
+                PortId::new(9),
+                OutputDecl::new("out", DataType::Float),
+            )],
         })
     }
 
@@ -204,7 +207,7 @@ mod tests {
     #[test]
     fn each_edit_leaves_the_interface_it_names() {
         let base = interface();
-        let id = PortId::from_u128;
+        let id = PortId::new;
         let inputs = InterfaceSide::Inputs;
         let moved = |port, shift| {
             PortEdit::Move {
@@ -249,6 +252,7 @@ mod tests {
             }
             .apply(&base)
             .inputs()[0]
+                .port
                 .clone()
         };
         let to_any = retyped(DataType::Any);

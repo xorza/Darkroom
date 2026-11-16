@@ -1,7 +1,8 @@
-use common::{SerdeFormat, TempDir, fs};
+use common::{TempDir, fs};
 use scenarium::{
-    Binding, ConstValue, DataType, GraphSet, InputDecl, InputPort, Interface, Node, PortId, Ports,
-    Subgraph, SubgraphDigest, SubgraphId,
+    Binding, ConstValue, DataType, GhostBinding, GhostSource, GraphSet, InputDecl, InputPort,
+    Interface, Library, Node, Numbered, PortId, Ports, SavedPort, Subgraph, SubgraphDigest,
+    SubgraphId,
 };
 
 use crate::core::document::Document;
@@ -42,7 +43,13 @@ fn a_scan_lists_each_shared_definition_once_per_digest() {
         ),
     ];
     for (name, held) in &files {
-        document::save(held, &dir.join(name), SavedPaths::Relative).unwrap();
+        document::save(
+            held,
+            &Library::default(),
+            &dir.join(name),
+            SavedPaths::Relative,
+        )
+        .unwrap();
     }
     fs::write(dir.join("broken.darkroom"), b"not a document").unwrap();
     fs::write(dir.join("notes.txt"), b"ignored").unwrap();
@@ -126,13 +133,15 @@ fn a_copys_standing_reads_off_three_digests() {
     }
 }
 
-fn inputs(ids: &[u128]) -> Interface {
+fn inputs(ids: &[u32]) -> Interface {
     Interface::new(Ports {
         inputs: ids
             .iter()
-            .map(|&id| InputDecl {
-                id: PortId::from_u128(id),
-                ..InputDecl::optional(format!("in {id}"), DataType::Int)
+            .map(|&id| {
+                Numbered::new(
+                    PortId::new(id),
+                    InputDecl::optional(format!("in {id}"), DataType::Int),
+                )
             })
             .collect(),
         outputs: vec![],
@@ -141,7 +150,7 @@ fn inputs(ids: &[u128]) -> Interface {
 
 /// A local copy that last shared `original`, with an instance holding a constant on input 1, and
 /// a library file sharing a changed definition under the same id, input 1 gone: an update puts
-/// the library's definition in place, drops the constant the new interface does not hold,
+/// the library's definition in place, keeps the constant the new interface does not hold as a ghost,
 /// records the library's digest as shared, and one undo takes it all back. A publish of the
 /// local copy writes it over the file's, marked shared, and the file's own instance loses what
 /// the local interface does not hold.
@@ -154,14 +163,20 @@ fn an_update_takes_the_librarys_definition_and_a_publish_gives_ours() {
     theirs.name = "Denoise, theirs".to_string();
     theirs.interface = inputs(&[2]);
     let file = library_file(id, theirs.clone(), true);
-    document::save(&file, &dir.join("lib.darkroom"), SavedPaths::Relative).unwrap();
+    document::save(
+        &file,
+        &Library::default(),
+        &dir.join("lib.darkroom"),
+        SavedPaths::Relative,
+    )
+    .unwrap();
     let shared = scan(dir.path());
     let entry = shared.entry(id).unwrap().clone();
 
     let mut fixture = DocumentFixture::default();
     insert_subgraph(&mut fixture.document, id, original);
     let instance = fixture.add_instance(id);
-    let port = InputPort::new(instance, PortId::from_u128(1));
+    let port = InputPort::new(instance, PortId::new(1));
     fixture
         .document
         .graphs
@@ -184,12 +199,24 @@ fn an_update_takes_the_librarys_definition_and_a_publish_gives_ours() {
     queue.push_subgraph(SubgraphIntent::Update(Box::new(Update {
         id,
         carried: shared.carried(&entry),
+        manifest: shared.manifest(&entry).clone(),
     })));
     let facts = open.drain_requests(&mut queue, &library);
-    assert_eq!(facts.dropped, 1);
+    assert_eq!((facts.dropped, facts.ghosted), (0, 1));
     let updated = open.document();
     assert_eq!(updated.graphs.subgraph(id), Some(&theirs));
     assert!(!updated.graphs.main().bindings.contains_key(&port));
+    assert_eq!(
+        updated.graphs.main().ghost_wiring().binding(port),
+        Some(&GhostBinding {
+            input: Some(SavedPort {
+                name: "in 1".to_owned(),
+                data_type: DataType::Int,
+            }),
+            source: GhostSource::Const(ConstValue::Int(5)),
+        }),
+        "the update keeps what you set on the port it removed, under the port's name"
+    );
     assert_eq!(updated.sides[&id].synced, Some(entry.digest));
     updated.validate().unwrap();
     let _ = open.undo();
@@ -202,7 +229,7 @@ fn an_update_takes_the_librarys_definition_and_a_publish_gives_ours() {
         .main_view
         .node_placements
         .insert(placed, NodePlacement::default());
-    let held_port = InputPort::new(placed, PortId::from_u128(2));
+    let held_port = InputPort::new(placed, PortId::new(2));
     file_with_instance
         .graphs
         .main_mut()
@@ -213,7 +240,13 @@ fn an_update_takes_the_librarys_definition_and_a_publish_gives_ours() {
     changed.name = "Denoise, ours".to_string();
     changed.interface = inputs(&[1]);
     ours.graphs.put_subgraph(id, changed.clone());
-    let written = published(&file_with_instance, &ours, id, &library);
+    let written = published(
+        &file_with_instance,
+        shared.manifest(&entry),
+        &ours,
+        id,
+        &library,
+    );
     assert_eq!(written.graphs.subgraph(id), Some(&changed));
     assert!(written.sides[&id].shared);
     assert_eq!(written.sides[&id].synced, Some(ours.graphs.digest(id)));
@@ -222,6 +255,68 @@ fn an_update_takes_the_librarys_definition_and_a_publish_gives_ours() {
         "the file's instance loses the port our interface does not hold"
     );
     written.validate().unwrap();
+}
+
+/// An update whose definition holds a node of a func this build lacks: the definition is parsed
+/// against this library as it comes in, with its file's manifest, so the node is a ghost node
+/// that holds what its func declared and the document stays one a compile takes.
+#[test]
+fn an_update_keeps_a_node_this_library_lacks_as_a_ghost_node() {
+    use scenarium::{DetachReason, FuncId, OutputDecl, Unresolved, internals};
+
+    let dir = TempDir::new("darkroom-library-update-lacking");
+    let id = SubgraphId::from_u128(1);
+    let original = Subgraph::new("Denoise", Interface::default());
+    let theirs_only = internals::stub_func(FuncId::unique(), "sharpen")
+        .output(1, OutputDecl::new("out", DataType::Int))
+        .build();
+    let mut their_library = Library::default();
+    their_library.add(theirs_only.clone());
+    let mut theirs = original.clone();
+    let inside = theirs.graph.add(Node::from(&theirs_only));
+    let file = library_file(id, theirs, true);
+    document::save(
+        &file,
+        &their_library,
+        &dir.join("lib.darkroom"),
+        SavedPaths::Relative,
+    )
+    .unwrap();
+    let shared = scan(dir.path());
+    let entry = shared.entry(id).unwrap().clone();
+    assert_eq!(
+        shared
+            .manifest(&entry)
+            .func(theirs_only.id())
+            .map(|saved| saved.name.as_str()),
+        Some("sharpen")
+    );
+
+    let mut fixture = DocumentFixture::default();
+    insert_subgraph(&mut fixture.document, id, original);
+    let DocumentFixture { document, library } = fixture;
+    let mut open = OpenDocument::over(document);
+    let mut queue = DocumentQueue::default();
+    queue.push_subgraph(SubgraphIntent::Update(Box::new(Update {
+        id,
+        carried: shared.carried(&entry),
+        manifest: shared.manifest(&entry).clone(),
+    })));
+    let _ = open.drain_requests(&mut queue, &library);
+    let updated = open.document();
+    let held = &updated.graphs.subgraph(id).unwrap().graph;
+    assert!(held.find(inside).is_none());
+    let ghost = held.ghost_node(inside).expect("the node is kept");
+    assert_eq!(
+        ghost.reason,
+        DetachReason::Unresolved(Unresolved::MissingFunc)
+    );
+    assert_eq!(
+        ghost.saved.as_ref().map(|saved| saved.name.as_str()),
+        Some("sharpen")
+    );
+    updated.validate().unwrap();
+    updated.graphs.validate_with(&library).unwrap();
 }
 
 /// A library file is read as written, with no reconcile: a shared subgraph placing one that has
@@ -240,8 +335,7 @@ fn a_subgraph_with_no_side_in_a_library_file_is_carried_in_a_row() {
     file.sides.get_mut(&outer).unwrap().shared = true;
     file.sides.remove(&inner);
     // Written by hand, as a save refuses a document with a subgraph and no side.
-    let bytes = SerdeFormat::Ron.serialize(&file).unwrap();
-    fs::write(dir.join("a.darkroom"), &bytes).unwrap();
+    document::internals::write_unchecked(&file, &dir.join("a.darkroom"));
 
     let library = scan(dir.path());
     let ids: Vec<SubgraphId> = library.entries().iter().map(|entry| entry.id).collect();

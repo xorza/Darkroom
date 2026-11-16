@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use scenarium::{Binding, EventPort, InputPort, Interface, OutputPort, numbered_port};
+use scenarium::{Binding, EventPort, InputPort, Interface, OutputPort, PortId};
 
 use super::*;
 use crate::core::document::internals::{DocumentFixture, insert_subgraph};
@@ -20,10 +20,10 @@ fn node_liveness_is_one_rule_with_two_declared_narrowings() {
         .graphs
         .main_mut()
         .add(Node::from(&preview_func));
-    let plain = fixture.stub_at(Vec2::ZERO);
+    let plain = fixture.ghost_node_at(Vec2::ZERO);
     let mut document = fixture.document;
 
-    // The graph answers for a node and a stub alike.
+    // The graph answers for a node and a ghost node alike.
     for node in [preview, plain] {
         assert!(
             document.graphs.main().holds(node),
@@ -34,11 +34,11 @@ fn node_liveness_is_one_rule_with_two_declared_narrowings() {
     assert!(document.holds_preview_node(preview_id));
     assert!(
         !document.holds_preview_node(plain_id),
-        "a stub retains no published value"
+        "a ghost node retains no published value"
     );
     assert!(
         !document.holds_tab(TabRef::ImageViewer(plain_id)),
-        "a stub has no viewer"
+        "a ghost node has no viewer"
     );
 
     // The same rule asked of a tab: a viewer dies with its node, the non-node tabs never do.
@@ -131,7 +131,7 @@ fn reconcile_repairs_the_view_and_the_layout() {
     let active = GraphId::Subgraph(SubgraphId::from_u128(4));
     document.active = active;
 
-    let report = document.reconcile(&library);
+    let report = document.reconcile(&library, &Manifest::default());
     assert_eq!(
         report.repairs,
         [
@@ -166,7 +166,9 @@ fn reconcile_repairs_the_view_and_the_layout() {
     );
     document.validate().expect("a reconciled document is valid");
     assert!(
-        document.reconcile(&library).is_empty(),
+        document
+            .reconcile(&library, &Manifest::default())
+            .is_empty(),
         "nothing is left to repair"
     );
 }
@@ -184,17 +186,17 @@ fn reconcile_repairs_the_ties() {
     let mut fixture = DocumentFixture::default();
     let [a, b] = [0.0, 220.0].map(|x| fixture.node_at(Vec2::new(x, 0.0)));
     let w1 = fixture.wire(
-        OutputPort::new(a, numbered_port(1)),
-        InputPort::new(b, numbered_port(1)),
+        OutputPort::new(a, PortId::new(1)),
+        InputPort::new(b, PortId::new(1)),
     );
-    let w2 = fixture.subscribe(EventPort::new(a, numbered_port(1)), b);
+    let w2 = fixture.subscribe(EventPort::new(a, PortId::new(1)), b);
     let w3 = fixture.wire(
-        OutputPort::new(a, numbered_port(1)),
-        InputPort::new(b, numbered_port(3)),
+        OutputPort::new(a, PortId::new(1)),
+        InputPort::new(b, PortId::new(3)),
     );
     let unheld = WireKey::Data(DataWire {
-        output: OutputPort::new(a, numbered_port(1)),
-        input: InputPort::new(b, numbered_port(2)),
+        output: OutputPort::new(a, PortId::new(1)),
+        input: InputPort::new(b, PortId::new(2)),
     });
     let DocumentFixture {
         mut document,
@@ -220,7 +222,7 @@ fn reconcile_repairs_the_ties() {
     .collect();
     view.selected = [ItemId::Tie(t1), ItemId::Tie(t3)].into_iter().collect();
 
-    let report = document.reconcile(&library);
+    let report = document.reconcile(&library, &Manifest::default());
     assert_eq!(
         report.repairs,
         [
@@ -279,12 +281,14 @@ fn reconcile_repairs_the_ties() {
     assert_eq!(view.selected, [ItemId::Tie(t1)].into_iter().collect());
     document.validate().expect("a reconciled document is valid");
     assert!(
-        document.reconcile(&library).is_empty(),
+        document
+            .reconcile(&library, &Manifest::default())
+            .is_empty(),
         "nothing is left to repair"
     );
 }
 
-/// A path a binding holds is absolute or unset in memory: a stub's relative one fails the
+/// A path a binding holds is absolute or unset in memory: a ghost node's relative one fails the
 /// check and names its node, while an absolute one and an empty one pass.
 #[test]
 fn validation_holds_paths_absolute() {
@@ -293,18 +297,18 @@ fn validation_holds_paths_absolute() {
     use scenarium::ConstValue;
 
     let mut fixture = DocumentFixture::sample();
-    let stub = fixture.stub_at(Vec2::ZERO);
+    let ghost = fixture.ghost_node_at(Vec2::ZERO);
     let absolute = path::absolute(Path::new("x.tiff")).unwrap();
     for valid in [absolute.to_str().unwrap(), ""] {
-        fixture.bind_stub(stub, ConstValue::FsPath(valid.to_string()));
+        fixture.bind_ghost_node(ghost, ConstValue::FsPath(valid.to_string()));
         fixture.document.validate().unwrap();
     }
-    fixture.bind_stub(stub, ConstValue::FsPath("inputs/x.tiff".to_string()));
+    fixture.bind_ghost_node(ghost, ConstValue::FsPath("inputs/x.tiff".to_string()));
     let document = fixture.document;
     assert!(matches!(
         document.validate(),
         Err(DocumentValidationError::RelativePath { node, path })
-            if node == NodeAddr::new(GraphId::Main, stub) && path == "inputs/x.tiff"
+            if node == NodeAddr::new(GraphId::Main, ghost) && path == "inputs/x.tiff"
     ));
 }
 
@@ -347,7 +351,7 @@ fn reconcile_keeps_one_side_per_subgraph() {
     }
     document.active = GraphId::Subgraph(unsided);
 
-    let report = document.reconcile(&library);
+    let report = document.reconcile(&library, &Manifest::default());
     assert_eq!(
         report.repairs,
         [
@@ -376,7 +380,9 @@ fn reconcile_keeps_one_side_per_subgraph() {
     assert!(document.holds_tab(TabRef::Graph(GraphId::Subgraph(unsided))));
     document.validate().expect("a reconciled document is valid");
     assert!(
-        document.reconcile(&library).is_empty(),
+        document
+            .reconcile(&library, &Manifest::default())
+            .is_empty(),
         "nothing is left to repair"
     );
 }
@@ -572,7 +578,7 @@ fn a_subgraph_path_is_checked_and_mapped() {
     let id = SubgraphId::from_u128(1);
     let mut subgraph = Subgraph::new("inner", Interface::default());
     let inner = subgraph.graph.add(node);
-    let port = InputPort::new(inner, numbered_port(1));
+    let port = InputPort::new(inner, PortId::new(1));
     subgraph.graph.set_input_binding(
         port,
         Binding::Const(ConstValue::FsPath("inputs/x.tiff".to_string())),

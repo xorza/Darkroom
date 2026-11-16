@@ -1,6 +1,8 @@
 //! [`WireKey`]: one wire of the graph, named by both of its ends.
 
-use scenarium::{Binding, Graph as CoreGraph, InputPort, NodeId, OutputPort, Subscription};
+use scenarium::{
+    Graph as CoreGraph, InputPort, NodeId, OutputPort, Subscription, SubscriptionState,
+};
 use serde::{Deserialize, Serialize};
 
 /// One wire, data or event, by both of its ends: rewiring either end makes another key, so a route
@@ -28,15 +30,17 @@ impl WireKey {
         }
     }
 
-    /// Whether `graph` holds this wire: the input is wired to this output, or the subscription is
-    /// made.
+    /// Whether `graph` holds this wire, live or as a ghost: the input is wired to this output,
+    /// or the subscription is made or kept. A wire is the same wire while it is a ghost, so its
+    /// route outlives a load that cannot hold it.
     pub(crate) fn is_held_by(self, graph: &CoreGraph) -> bool {
         match self {
-            Self::Data(DataWire { output, input }) => {
-                matches!(graph.bindings.get(&input), Some(Binding::Wire(source)) if *source == output)
-            }
+            Self::Data(DataWire { output, input }) => match graph.input_state_wire(input) {
+                Some(source) => source == output,
+                None => false,
+            },
             Self::Event(subscription) => {
-                graph.is_subscribed(subscription.event, subscription.subscriber)
+                graph.subscription_state(subscription) != SubscriptionState::Absent
             }
         }
     }

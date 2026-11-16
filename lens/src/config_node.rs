@@ -133,7 +133,8 @@ pub(crate) fn declare_fields<T: Introspect>(builder: FuncBuilder) -> FuncBuilder
 /// The number of the port a field named `name` declares: a hash of its Rust name, so a field
 /// moved or added keeps every other field's port, and a saved binding lands on the field it was
 /// made on. A field renamed is a new port, and a saved binding on the old one is refused and
-/// reported at load. A number another port of the func holds is refused when the func is built.
+/// reported at load. A number another port of the func holds is refused when the func is built,
+/// as is 0, which is no port's number.
 ///
 /// Refused: numbering the fields by their order, where a field moved or removed rebinds every
 /// later one; an explicit number on each field, a hundred attributes to keep unique by hand.

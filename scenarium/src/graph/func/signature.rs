@@ -19,7 +19,7 @@ pub(crate) struct FuncSignature([u8; 32]);
 
 impl FuncSignature {
     /// Versions the encoding below: a change to it is a change to every signature.
-    const DOMAIN: &'static [u8] = b"scenarium-func-signature-v3";
+    const DOMAIN: &'static [u8] = b"scenarium-func-signature-v4";
 
     /// The signature of `ports` and `events`, in order — what
     /// [`FuncBuilder::build`](crate::graph::func::func_builder::FuncBuilder::build)
@@ -32,17 +32,17 @@ impl FuncSignature {
         };
         count(&mut hasher, ports.inputs.len());
         for input in &ports.inputs {
-            hasher.update(&input.id.as_u128().to_le_bytes());
+            hasher.update(&input.id.get().to_le_bytes());
             write_type(&mut hasher, input.data_type);
         }
         count(&mut hasher, ports.outputs.len());
         for output in &ports.outputs {
-            hasher.update(&output.id.as_u128().to_le_bytes());
+            hasher.update(&output.id.get().to_le_bytes());
             write_type(&mut hasher, output.data_type);
         }
         count(&mut hasher, events.len());
         for event in events {
-            hasher.update(&event.id.as_u128().to_le_bytes());
+            hasher.update(&event.id.get().to_le_bytes());
         }
         Self(*hasher.finalize().as_bytes())
     }
@@ -103,7 +103,7 @@ mod tests {
 
     /// One small func's signature, from its bytes written out by hand rather than by the
     /// encoder: the domain, then each length-prefixed list — input 3 of kind 2 (Int), output 1 of
-    /// kind 1 (Float), event 2 — each id 16 bytes and each type its tag and 16 id bytes.
+    /// kind 1 (Float), event 2 — each port id 4 bytes and each type its tag and 16 id bytes.
     #[test]
     fn a_small_func_has_the_pinned_signature() {
         let func = internals::stub_func(FuncId::from_u128(1), "pinned")
@@ -112,19 +112,20 @@ mod tests {
             .event(2, "tick", internals::stub_event())
             .build();
         let count = |n: u64| n.to_le_bytes().to_vec();
-        let id = |n: u128| n.to_le_bytes().to_vec();
+        let port = |n: u32| n.to_le_bytes().to_vec();
+        let type_id = |n: u128| n.to_le_bytes().to_vec();
         let layout = [
-            b"scenarium-func-signature-v3".to_vec(),
+            b"scenarium-func-signature-v4".to_vec(),
             count(1),
-            id(3),
+            port(3),
             vec![2],
-            id(0),
+            type_id(0),
             count(1),
-            id(1),
+            port(1),
             vec![1],
-            id(0),
+            type_id(0),
             count(1),
-            id(2),
+            port(2),
         ]
         .concat();
         assert_eq!(

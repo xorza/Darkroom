@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use scenarium::Interface;
-use scenarium::{Binding, ChangeSide, GraphId, InterfaceChange, Library, SubgraphId};
+use scenarium::{Binding, ChangeSide, GraphId, InterfaceChange, Library, RefusedFate, SubgraphId};
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::Document;
@@ -15,7 +15,8 @@ use crate::core::edit::step::set_ties::{SetTies, TiesDraft};
 
 /// An edit of one subgraph's interface: scenarium's [`InterfaceChange`], which holds both
 /// interfaces and each binding the new one does not hold in any graph, and in each graph's view
-/// the route of each wire it drops and each tie only those wires held.
+/// the route of each wire it drops and each tie only those wires held. A wire it keeps as a
+/// ghost keeps its route, as it is the same wire.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct SetInterface {
     change: InterfaceChange,
@@ -30,7 +31,8 @@ struct ViewTies {
 }
 
 impl SetInterface {
-    /// Set subgraph `id`'s interface in `document` to `to`, planned against `library`.
+    /// Set subgraph `id`'s interface in `document` to `to`, planned against `library`, what it
+    /// refuses dropped or kept as ghosts as `fate` says.
     ///
     /// # Panics
     /// If the document holds no subgraph `id`.
@@ -39,11 +41,16 @@ impl SetInterface {
         id: SubgraphId,
         to: Interface,
         library: &Library,
+        fate: RefusedFate,
     ) -> Self {
-        let change = document.graphs.plan_interface(id, to, library);
+        let change = document.graphs.plan_interface(id, to, library, fate);
         let mut drafts: BTreeMap<GraphId, TiesDraft<'_>> = BTreeMap::new();
-        for dropped in change.dropped() {
-            if let Binding::Wire(output) = dropped.binding {
+        let dropped = change
+            .refused()
+            .iter()
+            .filter(|_| fate == RefusedFate::Drop);
+        for dropped in dropped {
+            if let Binding::Wire(output) = dropped.binding() {
                 drafts
                     .entry(dropped.graph)
                     .or_insert_with(|| TiesDraft::new(document.view(dropped.graph)))
@@ -81,16 +88,21 @@ impl SetInterface {
     }
 
     /// The ports of every instance and both boundary nodes change, in every graph that places
-    /// one, and a dropped constant takes its editor with it.
+    /// one, and a refused constant takes its editor with it.
     pub(super) fn facts(&self) -> EditFacts {
+        let refused = self.change.refused();
+        let count = refused.len();
+        let (dropped, ghosted) = match self.change.fate() {
+            RefusedFate::Drop => (count, 0),
+            RefusedFate::Ghost => (0, count),
+        };
         EditFacts {
             ports: true,
-            binding_kind: self
-                .change
-                .dropped()
+            binding_kind: refused
                 .iter()
-                .any(|dropped| matches!(dropped.binding, Binding::Const(_))),
-            dropped: self.change.dropped().len(),
+                .any(|refused| matches!(refused.binding(), Binding::Const(_))),
+            dropped,
+            ghosted,
             touched: Touched::Several,
             ..EditFacts::NONE
         }

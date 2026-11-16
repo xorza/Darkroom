@@ -1,7 +1,7 @@
 use glam::{UVec2, Vec2};
 use palantir::Harness;
 use palantir::{DockOperation, Key, Modifiers};
-use scenarium::{Binding, GraphId, InputPort, NodeId, OutputPort, ProgramId, numbered_port};
+use scenarium::{Binding, GraphId, InputPort, NodeId, OutputPort, PortId, ProgramId};
 use std::iter;
 use std::sync::Arc;
 
@@ -60,8 +60,8 @@ fn a_settled_frame_records_without_allocating() {
     let nodes: [NodeId; 6] = std::array::from_fn(|_| fixture.add(func));
     let wires = [(0, 1), (1, 2), (0, 3)].map(|(from, to)| {
         fixture.wire(
-            OutputPort::new(nodes[from], numbered_port(1)),
-            InputPort::new(nodes[to], numbered_port(1)),
+            OutputPort::new(nodes[from], PortId::new(1)),
+            InputPort::new(nodes[to], PortId::new(1)),
         )
     });
     let tie = fixture.tie(Vec2::new(300.0, 120.0), wires);
@@ -192,7 +192,7 @@ fn a_widget_built_malformed_intent_is_a_bug_not_a_refusal() {
     test.apply(GraphIntent::add_node(
         Vec2::ZERO,
         NodeId::nil(),
-        DocumentFixture::stub_node(),
+        DocumentFixture::missing_node(),
     ));
 }
 
@@ -468,7 +468,7 @@ fn a_wire_dropped_on_the_outputs_node_adds_an_interface_output() {
         .ui
         .rect(wid::port_circle(
             graph,
-            PortRef::output(inside, numbered_port(1)),
+            PortRef::output(inside, PortId::new(1)),
         ))
         .expect("the output shows")
         .center();
@@ -495,7 +495,7 @@ fn a_wire_dropped_on_the_outputs_node_adds_an_interface_output() {
             .graph(graph)
             .bindings
             .get(&InputPort::new(outputs, port)),
-        Some(&Binding::Wire(OutputPort::new(inside, numbered_port(1))))
+        Some(&Binding::Wire(OutputPort::new(inside, PortId::new(1))))
     );
     assert!(test.undo());
     assert!(

@@ -1,6 +1,6 @@
 //! Binding, rebinding, and unbinding one input port.
 
-use scenarium::{Binding, GraphId, InputPort};
+use scenarium::{Binding, GhostSource, GraphId, InputPort, InputState};
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::Document;
@@ -9,12 +9,13 @@ use crate::core::edit::step::change::{Change, Direction};
 use crate::core::edit::step::reversible::Reversible;
 use crate::core::edit::step::set_ties::SetTies;
 
-/// What one input port is bound to, before and after: a wire to a producer,
-/// an inline constant, or nothing.
+/// What one input port holds, before and after: a wire to a producer, an inline constant, a
+/// ghost of either, or nothing. An edit never makes a ghost; one that binds or clears an input
+/// takes its ghost, and the undo puts it back.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct SetInput {
     pub(crate) input: InputPort,
-    pub(crate) binding: Change<Option<Binding>>,
+    pub(crate) state: Change<InputState>,
     /// The route of the wire the edit ends or rewires, and each tie that only it held.
     pub(crate) ties: SetTies,
 }
@@ -24,13 +25,13 @@ impl Reversible for SetInput {
         document
             .slot_mut(graph)
             .graph
-            .set_input_binding(self.input, self.binding.half(dir).clone());
+            .set_input_state(self.input, self.state.half(dir).clone());
         self.ties.write(document, graph, dir);
     }
 
     /// The ties change only with the binding.
     fn is_noop(&self) -> bool {
-        self.binding.unchanged()
+        self.state.unchanged()
     }
 
     fn dirties_document(&self) -> bool {
@@ -38,10 +39,14 @@ impl Reversible for SetInput {
     }
 
     fn facts(&self) -> EditFacts {
-        let Change { from, to } = &self.binding;
+        // A kept constant shows in the value column as a constant does.
+        let constant = |state: &InputState| match state {
+            InputState::Live(binding) => matches!(binding, Binding::Const(_)),
+            InputState::Ghost(ghost) => matches!(ghost.source, GhostSource::Const(_)),
+            InputState::Unbound => false,
+        };
         EditFacts {
-            binding_kind: matches!(from, Some(Binding::Const(_)))
-                != matches!(to, Some(Binding::Const(_))),
+            binding_kind: constant(&self.state.from) != constant(&self.state.to),
             ..EditFacts::NONE
         }
     }

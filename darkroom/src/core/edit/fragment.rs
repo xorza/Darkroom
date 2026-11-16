@@ -72,7 +72,7 @@ impl Fragment {
     /// The nodes of `items` in `graph` of `document`, in `items`' order, with what joins them. A
     /// wire or a subscription that reaches a node from outside goes as `incoming` says: dropped,
     /// leaving a data input's declared default as a wire removed on its own does, or kept on the
-    /// outside producer or emitter. A stub is left out: it has no ports to join, and a copy of a
+    /// outside producer or emitter. A ghost node is left out: it has no ports to join, and a copy of a
     /// node that cannot run has little use. A boundary node is left out: a subgraph holds one of
     /// each side, and a wire from one to a node of `items` comes from outside.
     pub(crate) fn capture(
@@ -349,7 +349,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     use glam::Vec2;
-    use scenarium::{Binding, GraphId, InputPort, NodeId, OutputPort, numbered_port};
+    use scenarium::{Binding, GraphId, InputPort, NodeId, OutputPort, PortId};
 
     use crate::core::document::internals::DocumentFixture;
     use crate::core::document::item_id::ItemId;
@@ -371,8 +371,8 @@ mod tests {
         let a = fixture.node_at(a_at);
         let b = fixture.node_at(b_at);
         let wire = fixture.wire(
-            OutputPort::new(a, numbered_port(1)),
-            InputPort::new(b, numbered_port(1)),
+            OutputPort::new(a, PortId::new(1)),
+            InputPort::new(b, PortId::new(1)),
         );
         fixture.tie(tie_at, [wire]);
         let selected = BTreeSet::from([ItemId::Node(a), ItemId::Node(b)]);
@@ -397,8 +397,8 @@ mod tests {
         let (new_a, new_b, new_tie) = (new(a), new(b), TieId::from_u128(13));
         let offset = Vec2::new(32.0, 32.0);
         let cloned = DataWire {
-            output: OutputPort::new(new_a, numbered_port(1)),
-            input: InputPort::new(new_b, numbered_port(1)),
+            output: OutputPort::new(new_a, PortId::new(1)),
+            input: InputPort::new(new_b, PortId::new(1)),
         };
         let intents = fragment.into_intents(offset);
         let added: Vec<(NodeId, Vec2)> = intents

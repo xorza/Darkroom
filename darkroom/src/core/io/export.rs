@@ -20,8 +20,8 @@ use std::collections::BTreeSet;
 
 use glam::Vec2;
 use scenarium::{
-    Binding, ConstValue, DataType, FileMode, Graph, GraphId, GraphSet, Library, Node, PortId,
-    SubgraphId,
+    Binding, ConstValue, DataType, FileMode, GhostSource, Graph, GraphId, GraphSet, InputPort,
+    InputState, Library, Node, PortId, SubgraphId,
 };
 
 use common::fs;
@@ -128,8 +128,23 @@ pub(crate) fn exported(
 }
 
 /// Take out of `graph` each path constant but an input's in `bundled`: a list keeps the paths it
-/// bundles, and a binding left with none goes.
+/// bundles, and a binding left with none goes. A ghost constant that holds a path goes whole: no
+/// declaration says whether it names a file to read, and the dialog lists none of them.
 fn strip(graph: &mut Graph, library: &Library, bundled: &BTreeSet<String>) {
+    let ghost_paths: Vec<InputPort> = graph
+        .ghost_wiring()
+        .bindings()
+        .filter(|(_, ghost)| match &ghost.source {
+            GhostSource::Const(value) => value
+                .as_fs_paths()
+                .is_some_and(|paths| paths.iter().any(|path| !path.is_empty())),
+            GhostSource::Wire { .. } => false,
+        })
+        .map(|(port, _)| port)
+        .collect();
+    for port in ghost_paths {
+        graph.set_input_state(port, InputState::Unbound);
+    }
     let ports: Vec<_> = graph.bindings.keys().copied().collect();
     for port in ports {
         let output = writes(graph.find(port.node_id), port.port, library);
@@ -158,16 +173,17 @@ mod tests {
 
     use common::{TempDir, fs};
     use scenarium::{
-        Binding, ConstValue, DataType, FileKindId, FileMode, FuncId, GraphId, InputDecl, InputPort,
-        Interface, Library, Node, Subgraph, SubgraphId, internals, numbered_port,
+        Binding, ConstValue, DataType, FileKindId, FileMode, FuncId, GhostBinding, GraphId,
+        InputDecl, InputPort, InputState, Interface, Library, Node, PortId, Subgraph, SubgraphId,
+        internals,
     };
 
     use crate::core::document::internals::{DocumentFixture, insert_subgraph};
     use crate::core::io::export::{ExportPath, export_paths, exported};
 
     /// The dialog lists each path of the definition once with its size, an output marked; the
-    /// export keeps a bundled input's path, strips an unbundled one and every output, marks the
-    /// definition shared and places one instance of it.
+    /// export keeps a bundled input's path, strips an unbundled one, every output and every path
+    /// a ghost holds, marks the definition shared and places one instance of it.
     #[test]
     fn an_export_lists_each_path_and_strips_what_it_does_not_bundle() {
         let dir = TempDir::new("darkroom-export");
@@ -188,7 +204,7 @@ mod tests {
         let mut subgraph = Subgraph::new("Calibrate", Interface::default());
         let node = subgraph.graph.add(Node::from(&func));
         let path = |p: &Path| p.to_str().unwrap().to_string();
-        let port = |n| InputPort::new(node, numbered_port(n));
+        let port = |n| InputPort::new(node, PortId::new(n));
         for (n, value) in [
             (1, path(&kept)),
             (2, path(&dropped)),
@@ -199,6 +215,14 @@ mod tests {
                 .bindings
                 .insert(port(n), Binding::Const(ConstValue::FsPath(value)));
         }
+        let ghost = |value| InputState::Ghost(GhostBinding::from(Binding::Const(value)));
+        subgraph.graph.set_input_state(
+            port(4),
+            ghost(ConstValue::FsPath("/home/me/lost.fits".to_string())),
+        );
+        subgraph
+            .graph
+            .set_input_state(port(5), ghost(ConstValue::Int(7)));
         let id = SubgraphId::from_u128(1);
         let mut fixture = DocumentFixture::default();
         insert_subgraph(&mut fixture.document, id, subgraph);
@@ -233,6 +257,17 @@ mod tests {
         );
         assert_eq!(bindings.get(&port(2)), None, "unbundled, stripped");
         assert_eq!(bindings.get(&port(3)), None, "an output is always stripped");
+        let written_graph = written.graphs.graph(GraphId::Subgraph(id));
+        assert_eq!(
+            written_graph.input_state(port(4)),
+            InputState::Unbound,
+            "a ghost's path is always stripped"
+        );
+        assert_eq!(
+            written_graph.input_state(port(5)),
+            ghost(ConstValue::Int(7)),
+            "a ghost that names no file stays"
+        );
         assert!(written.sides[&id].shared);
         assert_eq!(
             written

@@ -1,8 +1,8 @@
 use glam::{UVec2, Vec2};
 use palantir::Harness;
+use scenarium::internals::test_graph::NodeSpec;
 use scenarium::internals::test_graph::TestGraph;
 use scenarium::{DataType, NodeId};
-use scenarium::{internals::test_graph::NodeSpec, numbered_port};
 
 use super::*;
 use crate::core::document::internals::DocumentFixture;
@@ -45,8 +45,8 @@ fn committing_a_same_kind_pair_is_a_broken_invariant_not_a_silent_drop() {
         producer, consumer, ..
     } = fixture();
     wire(
-        PortRef::input(consumer, numbered_port(1)),
-        PortRef::input(producer, numbered_port(1)),
+        PortRef::input(consumer, PortId::new(1)),
+        PortRef::input(producer, PortId::new(1)),
     );
 }
 
@@ -61,11 +61,11 @@ fn the_snap_type_check_reads_the_input_against_the_output_from_either_end() {
     let text = g.add("text", |n| n.input(DataType::String));
     let f = GraphCtxFixture::over(g);
     let graph_ctx = f.graph_ctx();
-    let output = PortRef::output(producer, numbered_port(1));
+    let output = PortRef::output(producer, PortId::new(1));
 
     for (input, accepted) in [
-        (PortRef::input(any, numbered_port(1)), true),
-        (PortRef::input(text, numbered_port(1)), false),
+        (PortRef::input(any, PortId::new(1)), true),
+        (PortRef::input(text, PortId::new(1)), false),
     ] {
         assert_eq!(
             accepts_wire(graph_ctx, output, input),
@@ -120,13 +120,13 @@ fn a_wire_drops_when_its_start_node_leaves_the_scene() {
         producer,
         ..
     } = fixture();
-    let live = PortRef::output(producer, numbered_port(1));
+    let live = PortRef::output(producer, PortId::new(1));
     assert!(
         input_with_wire_from(&f, live).is_some(),
         "a wire from a node still in the scene stays in flight"
     );
 
-    let gone = PortRef::output(NodeId::unique(), numbered_port(1));
+    let gone = PortRef::output(NodeId::unique(), PortId::new(1));
     assert!(
         input_with_wire_from(&f, gone).is_none(),
         "a wire from a vanished node drops"
@@ -150,8 +150,8 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
     // Two frames, so the port circles have widget ids and `CanvasGeometry` measured centers.
     h.prime(2);
 
-    let source = wid::port_circle(GraphId::Main, PortRef::output(producer, numbered_port(1)));
-    let drop_at = h.port_center(PortRef::input(consumer, numbered_port(1)));
+    let source = wid::port_circle(GraphId::Main, PortRef::output(producer, PortId::new(1)));
+    let drop_at = h.port_center(PortRef::input(consumer, PortId::new(1)));
 
     h.ui.press(source, PointerButton::Left);
     h.frame();
@@ -168,9 +168,9 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
         matches!(
             released[..],
             [GraphIntent::SetInput { input, to: Some(Binding::Wire(src)) }]
-                if input == InputPort::new(consumer, numbered_port(1))
+                if input == InputPort::new(consumer, PortId::new(1))
                     && src.node_id == producer
-                    && src.port == numbered_port(1)
+                    && src.port == PortId::new(1)
         ),
         "the release binds the port it snapped to, and nothing else: {released:?}"
     );
@@ -179,11 +179,11 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
     // described: consumer.out0 → producer.in0 would close the loop, so the wire must not snap
     // and the release must commit nothing. The filter answers that off `Document::graph_for`.
     h.document_mut().graphs.main_mut().set_input_binding(
-        InputPort::new(consumer, numbered_port(1)),
-        Binding::wire(producer, numbered_port(1)),
+        InputPort::new(consumer, PortId::new(1)),
+        Binding::wire(producer, PortId::new(1)),
     );
-    let back_source = wid::port_circle(GraphId::Main, PortRef::output(consumer, numbered_port(1)));
-    let back_drop_at = h.port_center(PortRef::input(producer, numbered_port(1)));
+    let back_source = wid::port_circle(GraphId::Main, PortRef::output(consumer, PortId::new(1)));
+    let back_drop_at = h.port_center(PortRef::input(producer, PortId::new(1)));
     h.advance_past_double_click();
     h.ui.press(back_source, PointerButton::Left);
     h.frame();
@@ -204,7 +204,7 @@ fn a_right_press_that_ends_a_floating_wire_opens_no_palette() {
     use palantir::PointerButton;
 
     let mut h = CanvasHarness::new(DocumentFixture::probes(2));
-    let start = PortRef::output(h.node(0), numbered_port(1));
+    let start = PortRef::output(h.node(0), PortId::new(1));
     h.prime(2);
     let bare = Vec2::new(600.0, 600.0);
     let right_click = |h: &mut CanvasHarness| {

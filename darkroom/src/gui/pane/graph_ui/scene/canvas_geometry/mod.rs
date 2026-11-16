@@ -48,6 +48,11 @@ pub(crate) struct CanvasGeometry {
     /// by node — a subscription is whole-node, so one pin per node. The
     /// drop target for subscription wires.
     pub(crate) subs: PortLayer<NodeId>,
+    /// Ghost ports' hollow dots, where a ghost wire ends. A layer of its own, so no wire drag
+    /// starts on one or snaps to one.
+    pub(crate) ghost_ports: PortLayer<PortRef>,
+    /// Ghost events' glyphs; [`Self::ghost_ports`] for a ghost subscription's emitter end.
+    pub(crate) ghost_events: PortLayer<EventPort>,
     /// Last measured body size per node, from the pre-transform, unclipped `layout_rect`, kept
     /// across frames like `PortLayer::offsets`: a culled node records no response, yet
     /// view-fitting and the rubber band both have to see off-screen nodes. A stale entry is off
@@ -107,6 +112,8 @@ impl CanvasGeometry {
         self.ports.reposition(view);
         self.events.reposition(view);
         self.subs.reposition(view);
+        self.ghost_ports.reposition(view);
+        self.ghost_events.reposition(view);
     }
 
     /// Drop every cross-frame entry whose node `keep` rejects.
@@ -121,6 +128,8 @@ impl CanvasGeometry {
         self.ports.retain_nodes(&keep);
         self.events.retain_nodes(&keep);
         self.subs.retain_nodes(&keep);
+        self.ghost_ports.retain_nodes(&keep);
+        self.ghost_events.retain_nodes(&keep);
         self.node_sizes.retain(|id, _| keep(*id));
     }
 
@@ -131,6 +140,8 @@ impl CanvasGeometry {
         self.ports.begin_frame();
         self.events.begin_frame();
         self.subs.begin_frame();
+        self.ghost_ports.begin_frame();
+        self.ghost_events.begin_frame();
         self.node_screen.clear();
         self.has_unmeasured = false;
         for n in graph_ctx.nodes() {
@@ -174,7 +185,30 @@ impl CanvasGeometry {
                 let r = ui.response_for(wid::subscription_glyph(graph_ctx.graph(), n.node_id));
                 self.subs.record(n.node_id, r, place);
             }
+            for ghost in n.ghost_inputs().chain(n.ghost_outputs()) {
+                let r = ui.response_for(wid::ghost_port(graph_ctx.graph(), ghost.port));
+                self.ghost_ports.record(ghost.port, r, place);
+            }
+            for ghost in n.ghost_events() {
+                let r = ui.response_for(wid::ghost_event(graph_ctx.graph(), ghost.event));
+                self.ghost_events.record(ghost.event, r, place);
+            }
         }
+    }
+
+    /// Where a wire, live or ghost, ends on the data port `port`: its circle's center, or its
+    /// ghost dot's for a port its node no longer declares.
+    pub(crate) fn port_center(&self, port: PortRef) -> Option<Vec2> {
+        self.ports
+            .center(port)
+            .or_else(|| self.ghost_ports.center(port))
+    }
+
+    /// [`Self::port_center`] for an event wire's emitter end.
+    pub(crate) fn event_center(&self, event: EventPort) -> Option<Vec2> {
+        self.events
+            .center(event)
+            .or_else(|| self.ghost_events.center(event))
     }
 
     /// Fill in `n`'s glyph snapshots from the persistent offsets alone, for a node that recorded
@@ -192,6 +226,12 @@ impl CanvasGeometry {
         }
         if n.sink() {
             self.subs.replay(n.node_id, n.pos);
+        }
+        for ghost in n.ghost_inputs().chain(n.ghost_outputs()) {
+            self.ghost_ports.replay(ghost.port, n.pos);
+        }
+        for ghost in n.ghost_events() {
+            self.ghost_events.replay(ghost.event, n.pos);
         }
     }
 }

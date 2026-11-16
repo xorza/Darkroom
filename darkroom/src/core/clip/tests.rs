@@ -138,7 +138,8 @@ fn a_paste_brings_its_subgraphs_by_digest() {
 
 /// A clip from a document whose library this one lacks: a node whose func this library lacks
 /// is no edit the gate takes, so its paste lands nothing and says why; a subgraph holding one
-/// comes in reconciled, the node kept inside it as a stub, as a load keeps it.
+/// comes in reconciled, the node kept inside it as a ghost node that holds what the clip's
+/// manifest says it declared, as a load keeps it.
 #[test]
 fn a_clip_naming_a_func_this_library_lacks() {
     use scenarium::{DetachReason, Unresolved};
@@ -187,9 +188,27 @@ fn a_clip_naming_a_func_this_library_lacks() {
     assert_eq!(placed(document), [id]);
     let held = &document.graphs.subgraph(id).unwrap().graph;
     assert!(held.find(inside).is_none());
+    let ghost = held.ghost_node(inside).expect("the node is kept");
     assert_eq!(
-        held.stub(inside).map(|stub| stub.reason),
-        Some(DetachReason::Unresolved(Unresolved::MissingFunc))
+        ghost.reason,
+        DetachReason::Unresolved(Unresolved::MissingFunc)
+    );
+    let saved = ghost
+        .saved
+        .as_ref()
+        .expect("the clip's manifest says what it was");
+    assert_eq!(
+        (
+            saved.name.as_str(),
+            saved
+                .inputs
+                .iter()
+                .map(|input| (input.id.get(), input.name.as_str()))
+                .collect::<Vec<_>>(),
+            saved.outputs.len(),
+            saved.events.len(),
+        ),
+        ("plain", vec![(1, "a"), (2, "b"), (3, "c")], 1, 1)
     );
     document
         .validate()

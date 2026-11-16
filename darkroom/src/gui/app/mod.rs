@@ -421,8 +421,7 @@ impl App {
                     let library = self.runtime.library.cur();
                     let document =
                         export::exported(self.session.open.document(), subgraph, library, &bundled);
-                    match document::save_bundling(&document, &path, SavedPaths::Relative, &bundled)
-                    {
+                    match document::save_bundling(&document, library, &path, &bundled) {
                         Ok(()) => self.status.succeeded(StatusFamily::Document),
                         Err(error) => self
                             .status
@@ -553,11 +552,11 @@ impl App {
     /// moves the document, so the worker's disk cache repoints to the new
     /// location's store — the old one stays where it is.
     fn save_document(&mut self, path: &Path) {
-        match self
-            .session
-            .open
-            .save_to(path, self.preferences.saved_paths())
-        {
+        match self.session.open.save_to(
+            self.runtime.library.cur(),
+            path,
+            self.preferences.saved_paths(),
+        ) {
             Ok(()) => {
                 self.runtime.set_document_cache(self.session.open.path());
                 self.remember_document_path();
@@ -623,13 +622,15 @@ impl App {
         let path = library.path(entry).to_path_buf();
         let document = self.session.open.document();
         let digest = document.graphs.digest(subgraph);
+        let funcs = self.runtime.library.cur();
         let file = shared_library::published(
             library.document(entry),
+            library.manifest(entry),
             document,
             subgraph,
-            self.runtime.library.cur(),
+            funcs,
         );
-        match document::save(&file, &path, SavedPaths::Relative) {
+        match document::save(&file, funcs, &path, SavedPaths::Relative) {
             Ok(()) => {
                 self.status.succeeded(StatusFamily::Library);
                 self.requests.push_subgraph(SubgraphIntent::Synced {
@@ -1058,7 +1059,7 @@ mod tests {
         let dir = TempDir::new("darkroom-discard-prompt");
         let handed = dir.join("handed.darkroom");
         OpenDocument::default()
-            .save_to(&handed, SavedPaths::Relative)
+            .save_to(&Library::default(), &handed, SavedPaths::Relative)
             .unwrap();
         for (choice, opened) in [
             (DiscardChoice::Discard, true),
@@ -1145,7 +1146,7 @@ mod tests {
         let dir = TempDir::new("darkroom-driven-open");
         let document = dir.join("scene.darkroom");
         OpenDocument::default()
-            .save_to(&document, SavedPaths::Relative)
+            .save_to(&Library::default(), &document, SavedPaths::Relative)
             .unwrap();
         let mut ui = Harness::new(UVec2::new(800, 600));
         let mut app = App::offscreen(ui.ui_mut());
@@ -1198,7 +1199,7 @@ mod tests {
         let dir = TempDir::new("darkroom-scripted-open");
         let document = dir.join("scene.darkroom");
         OpenDocument::default()
-            .save_to(&document, SavedPaths::Relative)
+            .save_to(&Library::default(), &document, SavedPaths::Relative)
             .unwrap();
         let preferences_file = dir.join("darkroom.preferences.ron");
 

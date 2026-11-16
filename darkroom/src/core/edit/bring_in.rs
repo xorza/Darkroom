@@ -7,9 +7,10 @@
 //!   dependency two packages need at incompatible versions. Refused: one version per document,
 //!   which changes a subgraph nobody touched.
 //! - **A definition that enters from another file is parsed against this library**, as a load
-//!   parses a document ([`GraphSet::reconcile`]): a node its graph cannot hold here stays a stub,
-//!   so the definition travels whole. Refused: taking it in as the other file held it, which
-//!   leaves the document a graph the compile refuses.
+//!   parses a document ([`GraphSet::reconcile`]), with the manifest its file held: a node its
+//!   graph cannot hold here stays a ghost node that says what it was, so the definition travels
+//!   whole. Refused: taking it in as the other file held it, which leaves the document a graph
+//!   the compile refuses.
 //! - **A definition that enters from another file loses its output paths**, as a write inside a
 //!   subgraph is one the receiver did not pick and cannot see; the input takes the receiver's
 //!   library default, as a new node's input does. A node pasted onto the canvas keeps its own,
@@ -18,8 +19,8 @@
 use std::collections::HashMap;
 
 use scenarium::{
-    Binding, DataType, FileMode, GraphSet, InputPort, Library, NodeId, Subgraph, SubgraphDigest,
-    SubgraphId,
+    Binding, DataType, FileMode, GraphSet, InputPort, InputState, Library, Manifest, NodeId,
+    Subgraph, SubgraphDigest, SubgraphId,
 };
 
 use crate::core::document::Document;
@@ -53,28 +54,42 @@ impl BroughtIn {
     }
 }
 
-/// Take `carried`, each definition after those it places, into `document` by the rules in the
-/// module doc, reconciled and its output paths stripped against `library`.
-pub(crate) fn bring_in(
-    document: &Document,
+/// Make each definition of `carried` one `library` can run, as a load makes a document's, read
+/// against `manifest`, the one of the file they came from: together, as each resolves the
+/// instances it places against the others. The set they make is handed back for its digests.
+pub(crate) fn reconcile(
+    carried: &mut [Carried],
     library: &Library,
-    mut carried: Vec<Carried>,
-) -> BroughtIn {
+    manifest: &Manifest,
+) -> GraphSet {
     let mut set = GraphSet::default();
-    for definition in &carried {
+    for definition in &*carried {
         set.insert_subgraph(definition.id, definition.subgraph.clone());
     }
-    for (id, reconciled) in set.reconcile(library).subgraphs {
+    for (id, reconciled) in set.reconcile(library, manifest).subgraphs {
         for repair in reconciled.repairs {
             tracing::info!(target: "darkroom::edit", "bringing in subgraph {id:?}: {repair}");
         }
     }
-    for definition in &mut carried {
+    for definition in carried {
         definition.subgraph.clone_from(
             set.subgraph(definition.id)
                 .expect("each carried definition is in the set"),
         );
     }
+    set
+}
+
+/// Take `carried`, each definition after those it places, into `document` by the rules in the
+/// module doc, reconciled against `library` and `manifest`, their file's, and its output paths
+/// stripped.
+pub(crate) fn bring_in(
+    document: &Document,
+    library: &Library,
+    mut carried: Vec<Carried>,
+    manifest: &Manifest,
+) -> BroughtIn {
+    let set = reconcile(&mut carried, library, manifest);
     let mut ids: HashMap<SubgraphId, SubgraphId> = HashMap::new();
     let mut incoming = Vec::new();
     for definition in carried {
@@ -134,7 +149,7 @@ fn take_path_defaults(subgraph: &mut Subgraph, library: &Library) {
             let port = InputPort::new(node.node_id, input.id);
             let path = matches!(input.data_type, DataType::Dir | DataType::File { .. });
             if path
-                && !graph.bindings.contains_key(&port)
+                && graph.input_state(port) == InputState::Unbound
                 && let Some(default) = &input.default_value
             {
                 defaults.push((port, default.clone()));
@@ -187,7 +202,7 @@ fn strip_output_paths(subgraph: &mut Subgraph, library: &Library) {
 mod tests {
     use scenarium::{
         Binding, ConstValue, DataType, FileKindId, FileMode, FuncId, InputDecl, InputPort,
-        Interface, Library, Node, Subgraph, SubgraphId, internals, numbered_port,
+        Interface, Library, Manifest, Node, PortId, Subgraph, SubgraphId, internals,
     };
 
     use crate::core::document::Document;
@@ -218,8 +233,8 @@ mod tests {
         let node = subgraph.graph.add(Node::from(&writer));
         let path = |name: &str| Binding::Const(ConstValue::FsPath(format!("/data/{name}")));
         let (read, write) = (
-            InputPort::new(node, numbered_port(1)),
-            InputPort::new(node, numbered_port(2)),
+            InputPort::new(node, PortId::new(1)),
+            InputPort::new(node, PortId::new(2)),
         );
         subgraph.graph.bindings.insert(read, path("in.tif"));
         subgraph.graph.bindings.insert(write, path("out.tif"));
@@ -234,6 +249,7 @@ mod tests {
                 view,
                 synced: None,
             }],
+            &Manifest::default(),
         );
         let [entered] = brought.subgraphs.as_slice() else {
             panic!("one definition comes in");
@@ -243,7 +259,7 @@ mod tests {
         assert_eq!(bindings.get(&read), Some(&path("in.tif")));
         assert_eq!(bindings.get(&write), None);
         assert_eq!(
-            bindings.get(&InputPort::new(node, numbered_port(3))),
+            bindings.get(&InputPort::new(node, PortId::new(3))),
             Some(&Binding::Const(ConstValue::FsPath(
                 "/models/here.onnx".to_string()
             ))),

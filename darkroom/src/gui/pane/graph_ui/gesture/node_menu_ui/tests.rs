@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use glam::UVec2;
 use palantir::WidgetId;
-use scenarium::{Binding, InputPort, NodeId, ProgramId, numbered_port};
+use scenarium::{Binding, InputPort, NodeId, PortId, ProgramId};
 
 use crate::core::document::internals::DocumentFixture;
 use crate::core::document::item_id::ItemId;
@@ -46,21 +46,21 @@ fn open_menu(h: &mut CanvasHarness, on: NodeId) -> Vec<WidgetId> {
     h.menu_rows(anchor)
 }
 
-/// A stub neither runs nor copies, so its menu offers only Remove — which
+/// A ghost node neither runs nor copies, so its menu offers only Remove — which
 /// removes it.
 #[test]
-fn a_stubs_menu_offers_only_remove() {
+fn a_ghost_nodes_menu_offers_only_remove() {
     let mut fixture = DocumentFixture::probes(1);
-    let stub = fixture.add_stub(DocumentFixture::stub_node());
+    let ghost = fixture.add_ghost_node(DocumentFixture::missing_node());
     let mut h = CanvasHarness::shaping_text(fixture, SURFACE);
-    h.document_mut().main_view.selected = [stub].map(ItemId::Node).into_iter().collect();
+    h.document_mut().main_view.selected = [ghost].map(ItemId::Node).into_iter().collect();
 
-    let rows = open_menu(&mut h, stub);
+    let rows = open_menu(&mut h, ghost);
     assert_eq!(rows.len(), 1, "Remove is the one row");
     h.ui.click(rows[0]);
     let intents = h.frame();
     assert!(
-        matches!(intents[..], [GraphIntent::RemoveNode { node_id }] if node_id == stub),
+        matches!(intents[..], [GraphIntent::RemoveNode { node_id }] if node_id == ghost),
         "{intents:?}"
     );
 }
@@ -134,8 +134,8 @@ fn duplicate_picks_differ_by_whether_incoming_wires_survive() {
         // The one wire crossing the selection boundary: b reads c, and only
         // {a, b} are selected.
         h.document_mut().graphs.main_mut().set_input_binding(
-            InputPort::new(b, numbered_port(1)),
-            Binding::wire(c, numbered_port(1)),
+            InputPort::new(b, PortId::new(1)),
+            Binding::wire(c, PortId::new(1)),
         );
         h.document_mut().main_view.selected = [a, b].map(ItemId::Node).into_iter().collect();
 
@@ -177,7 +177,7 @@ fn duplicate_picks_differ_by_whether_incoming_wires_survive() {
     match first {
         Some(Binding::Wire(src)) => {
             assert_eq!(src.node_id, c, "still fed by the original producer");
-            assert_eq!(src.port, numbered_port(1));
+            assert_eq!(src.port, PortId::new(1));
         }
         other => panic!("expected a Bind to c, got {other:?}"),
     }

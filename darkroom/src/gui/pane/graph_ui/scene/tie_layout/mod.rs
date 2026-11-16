@@ -123,11 +123,11 @@ impl Span {
     pub(crate) fn of(geometry: &CanvasGeometry, wire: WireKey) -> Option<Self> {
         let (start, end) = match wire {
             WireKey::Data(DataWire { output, input }) => (
-                geometry.ports.center(PortRef::from(output))?,
-                geometry.ports.center(PortRef::from(input))?,
+                geometry.port_center(PortRef::from(output))?,
+                geometry.port_center(PortRef::from(input))?,
             ),
             WireKey::Event(subscription) => (
-                geometry.events.center(subscription.event)?,
+                geometry.event_center(subscription.event)?,
                 geometry.subs.center(subscription.subscriber)?,
             ),
         };

@@ -35,17 +35,20 @@ use crate::graph::Graph;
 use crate::graph::error::{
     DetachReason, GraphSetValidationError, GraphValidationError, PlacementRejection,
 };
+use crate::graph::ghost_node::GhostNode;
 use crate::graph::identity::{GraphId, NodeAddr, NodeId, PortId, SubgraphId};
 use crate::graph::instance_path::InstancePath;
 use crate::graph::interface::Interface;
+use crate::graph::manifest::Manifest;
 use crate::graph::node::{Node, NodeKind};
+use crate::graph::node_decl::NodeDecl;
 use crate::graph::ports::PortList;
 use crate::graph::program_id::ProgramId;
 use crate::graph::reconciled::{GraphSetReconciled, Reconciled, Repair};
+use crate::graph::saved_decl::SavedDecl;
 use crate::graph::scope::Scope;
-use crate::graph::stub::Stub;
 use crate::graph::subgraph::Subgraph;
-use crate::graph::{Detaching, RefusedWiring};
+use crate::graph::{Before, Detaching, RefusedWiring};
 use crate::library::Library;
 
 /// What a graph expands into: how deep its program paths run and how many program nodes it
@@ -236,7 +239,7 @@ impl GraphSet {
     /// Take out the subgraph under `id`, or `None` if this set holds none.
     ///
     /// # Panics
-    /// If a node or a stub in any graph places it: a host removes a subgraph no one uses.
+    /// If a node or a ghost node in any graph places it: a host removes a subgraph no one uses.
     pub fn remove_subgraph(&mut self, id: SubgraphId) -> Option<Subgraph> {
         assert!(
             self.uses(id).next().is_none(),
@@ -319,7 +322,7 @@ impl GraphSet {
     }
 
     /// Every instance whose expansion is `graph`, as the compile expands them, in path order:
-    /// the main graph's own path for the main graph, none for a subgraph no node places. A stub
+    /// the main graph's own path for the main graph, none for a subgraph no node places. A ghost node
     /// expands nothing, so a path through one is none.
     ///
     /// Walks the expansion from the main graph down, at most [`ProgramShape::MAX_LEVELS`] deep, as the
@@ -366,7 +369,7 @@ impl GraphSet {
         order.push(id);
     }
 
-    /// Every node that places subgraph `id`, a stub's included, in each graph: the main graph's
+    /// Every node that places subgraph `id`, each ghost node included, in each graph: the main graph's
     /// first, then the subgraphs' in id order.
     pub fn uses(&self, id: SubgraphId) -> impl Iterator<Item = NodeAddr> {
         self.graphs().flat_map(move |(graph, held)| {
@@ -374,12 +377,12 @@ impl GraphSet {
                 .iter()
                 .filter(move |node| node.subgraph() == Some(id))
                 .map(|node| node.node_id);
-            let stubs = held
-                .stubs()
-                .filter(move |stub| stub.record.node().subgraph() == Some(id))
-                .map(Stub::node_id);
+            let ghosts = held
+                .ghost_nodes()
+                .filter(move |(_, ghost)| ghost.node.subgraph() == Some(id))
+                .map(|(node_id, _)| node_id);
             nodes
-                .chain(stubs)
+                .chain(ghosts)
                 .map(move |node_id| NodeAddr::new(graph, node_id))
         })
     }
@@ -490,85 +493,133 @@ impl GraphSet {
         Ok(())
     }
 
+    /// The saved declaration of each func a node of this set names, a built-in's included, as
+    /// `library` gives it: what a save writes beside the set, and the next load reads to tell
+    /// what changed. A ghost node holds its own.
+    pub fn manifest(&self, library: &Library) -> Manifest {
+        self.graphs()
+            .flat_map(|(graph, held)| {
+                let scope = self.scope(library, graph);
+                held.iter().filter_map(move |node| {
+                    let func = scope.resolve(&node).ok()?.func()?;
+                    Some((func.id(), NodeDecl::Func(func).saved()))
+                })
+            })
+            .collect()
+    }
+
     /// Make a decoded set one `library` can run, and report each change, graph by graph. In each
-    /// graph: remove a node under the nil id, a stub under a node's id and the wiring that names
-    /// a missing node; attach each stub whose node resolves again; keep one boundary node a side
-    /// in a subgraph's; detach into a stub each node its scope does not resolve. Across them,
-    /// detach each instance that closes a loop, nests past [`ProgramShape::MAX_LEVELS`] or
-    /// expands past [`ProgramShape::MAX_NODES`], taken in id order. Then in each graph remove each
-    /// binding and subscription its scope refuses, and each wire that closes a data cycle.
+    /// graph: remove a node under the nil id, a ghost node under a node's id and the wiring that
+    /// names a missing node; attach each ghost node that resolves again; keep one boundary node
+    /// a side in a subgraph's; make a ghost node of each node its scope does not resolve. Across
+    /// them, make a ghost node of each instance that closes a loop, nests past
+    /// [`ProgramShape::MAX_LEVELS`] or expands past [`ProgramShape::MAX_NODES`], taken in id
+    /// order. Then in each graph make a ghost of each binding and subscription its scope refuses
+    /// and of each wire that closes a data cycle, and make live each ghost it can hold again.
     /// Afterwards [`Self::validate_with`] holds.
     ///
+    /// `manifest` is what the set's file says each func declared at the save: a ghost node takes
+    /// its saved declaration from it and a ghost the saved port its node lost; a ghost constant
+    /// that was its port's default goes; and an input a func gained since takes its default.
+    /// With an empty one a load knows none of that and does none of it.
+    ///
     /// Each step reads a graph under its scope, then writes it: the scope borrows the whole set.
-    /// A stub attached and detached again as it was is no change, and its repairs are left out,
-    /// so a set the load leaves as it found reports nothing.
-    pub fn reconcile(&mut self, library: &Library) -> GraphSetReconciled {
+    /// A ghost node attached and detached again as it was is no change, and its repairs are left
+    /// out, so a set the load leaves as it found reports nothing.
+    pub fn reconcile(&mut self, library: &Library, manifest: &Manifest) -> GraphSetReconciled {
         let ids: Vec<GraphId> = self.graphs().map(|(graph, _)| graph).collect();
         let mut reports: BTreeMap<GraphId, Reconciled> = BTreeMap::new();
-        let mut reattached: Vec<(GraphId, Stub)> = Vec::new();
+        let mut reattached: Vec<(GraphId, NodeId, GhostNode)> = Vec::new();
 
         for &graph in &ids {
             let report = reports.entry(graph).or_default();
             self.graph_mut(graph).repair_structure(report);
             let resolving = self
                 .graph(graph)
-                .resolving_stubs(self.scope(library, graph));
-            reattached.extend(resolving.iter().map(|&node_id| {
-                let stub = self
-                    .graph(graph)
-                    .stub(node_id)
-                    .expect("a resolving stub is held");
-                (graph, stub.clone())
-            }));
-            self.graph_mut(graph).reattach(&resolving, report);
+                .resolving_ghost_nodes(self.scope(library, graph));
+            let ghosts = self.graph_mut(graph).reattach(&resolving, report);
+            reattached.extend(
+                resolving
+                    .iter()
+                    .zip(ghosts)
+                    .map(|(&node_id, ghost)| (graph, node_id, ghost)),
+            );
             if matches!(graph, GraphId::Subgraph(_)) {
                 self.graph_mut(graph).add_missing_boundaries(report);
             }
-            let unresolved = self.graph(graph).unresolved(self.scope(library, graph));
-            self.graph_mut(graph).detach_into_stubs(&unresolved, report);
+            let unresolved = self
+                .graph(graph)
+                .unresolved(self.scope(library, graph), manifest);
+            self.graph_mut(graph).detach_into_ghosts(unresolved, report);
         }
 
         let walk = self.walk();
-        let mut recursive: BTreeMap<GraphId, Vec<Detaching>> = BTreeMap::new();
+        let mut recursive: BTreeMap<GraphId, Vec<NodeId>> = BTreeMap::new();
         for closing in walk.closing {
-            recursive.entry(closing.graph).or_default().push(Detaching {
-                node_id: closing.node_id,
-                reason: DetachReason::Recursive,
-            });
+            recursive
+                .entry(closing.graph)
+                .or_default()
+                .push(closing.node_id);
         }
-        for (graph, mut refused) in recursive {
-            refused.sort_unstable_by_key(|detaching| detaching.node_id);
-            let report = reports.entry(graph).or_default();
-            self.graph_mut(graph).detach_into_stubs(&refused, report);
+        for (graph, mut closing) in recursive {
+            closing.sort_unstable();
+            let refused = closing
+                .into_iter()
+                .map(|node_id| Refusal {
+                    node_id,
+                    reason: DetachReason::Recursive,
+                })
+                .collect();
+            self.detach(library, manifest, graph, refused, &mut reports);
         }
 
         let mut shapes = HashMap::with_capacity(walk.post_order.len());
         for &id in &walk.post_order {
             let graph = GraphId::Subgraph(id);
             let refused = over_bounds(self.graph(graph), &shapes);
-            let report = reports.entry(graph).or_default();
-            self.graph_mut(graph).detach_into_stubs(&refused, report);
+            self.detach(library, manifest, graph, refused, &mut reports);
             shapes.insert(id, shape_of(self.graph(graph), &shapes));
         }
         let refused = over_bounds(&self.main, &shapes);
-        let report = reports.entry(GraphId::Main).or_default();
-        self.main.detach_into_stubs(&refused, report);
+        self.detach(library, manifest, GraphId::Main, refused, &mut reports);
 
         for &graph in &ids {
             let refused: Vec<RefusedWiring> =
                 self.graph(graph).refused_wiring(self.scope(library, graph));
             let report = reports.entry(graph).or_default();
-            self.graph_mut(graph).remove_refused(&refused, report);
+            self.graph_mut(graph).ghost_refused(&refused, report);
+            let admitted = self
+                .graph(graph)
+                .admitted_ghosts(self.scope(library, graph));
+            self.graph_mut(graph).restore(&admitted, report);
+
+            // What each ghost node this load attached declared.
+            let returned: HashMap<NodeId, SavedDecl> = reattached
+                .iter()
+                .filter(|(of, ..)| *of == graph)
+                .filter_map(|(_, node_id, ghost)| Some((*node_id, ghost.saved.clone()?)))
+                .collect();
+            let before = Before {
+                manifest,
+                returned: &returned,
+            };
+            let notes = self
+                .graph(graph)
+                .ghost_notes(self.scope(library, graph), before);
+            self.graph_mut(graph).note_ghosts(&notes, report);
+            let seeds =
+                self.graph(graph)
+                    .gained_defaults(self.scope(library, graph), before, &notes);
+            self.graph_mut(graph).seed_defaults(seeds, report);
         }
 
-        for (graph, before) in reattached {
-            let node_id = before.node_id();
-            if self.graph(graph).stub(node_id) == Some(&before) {
+        for (graph, node_id, before) in reattached {
+            if self.graph(graph).ghost_node(node_id) == Some(&before) {
                 reports
                     .get_mut(&graph)
-                    .expect("a graph with a reattached stub has a report")
+                    .expect("a graph with a reattached ghost node has a report")
                     .repairs
-                    .retain(|repair| !concerns_stub(repair, node_id));
+                    .retain(|repair| !reattaches(repair, node_id));
             }
         }
 
@@ -588,6 +639,27 @@ impl GraphSet {
             self.validate_with(library)
         );
         report
+    }
+
+    /// Make a ghost node of each node of `refused` in `graph`, each with what it declares.
+    fn detach(
+        &mut self,
+        library: &Library,
+        manifest: &Manifest,
+        graph: GraphId,
+        refused: Vec<Refusal>,
+        reports: &mut BTreeMap<GraphId, Reconciled>,
+    ) {
+        let scope = self.scope(library, graph);
+        let detaching: Vec<Detaching> = refused
+            .into_iter()
+            .map(|Refusal { node_id, reason }| {
+                self.graph(graph)
+                    .detaching(scope, manifest, node_id, reason)
+            })
+            .collect();
+        self.graph_mut(graph)
+            .detach_into_ghosts(detaching, reports.entry(graph).or_default());
     }
 
     /// Each type an interface names that `library` does not register, in the order the
@@ -745,13 +817,19 @@ impl GraphSet {
     }
 }
 
-/// Whether `repair` is one of the changes an attach and a detach of the stub `node_id` report.
-fn concerns_stub(repair: &Repair, node_id: NodeId) -> bool {
+/// A node a rule across graphs refuses, and which.
+#[derive(Clone, Copy, Debug)]
+struct Refusal {
+    node_id: NodeId,
+    reason: DetachReason,
+}
+
+/// Whether `repair` is one of the two an attach and a detach of the ghost node `node_id` report.
+fn reattaches(repair: &Repair, node_id: NodeId) -> bool {
     match repair {
-        Repair::Reattached { node_id: stub }
-        | Repair::StubBindingDropped { node_id: stub, .. }
-        | Repair::StubSubscriptionDropped { node_id: stub, .. }
-        | Repair::Stubbed { node_id: stub, .. } => *stub == node_id,
+        Repair::Reattached { node_id: ghost } | Repair::GhostedNode { node_id: ghost, .. } => {
+            *ghost == node_id
+        }
         _ => false,
     }
 }
@@ -766,7 +844,7 @@ fn shape_of(graph: &Graph, shapes: &HashMap<SubgraphId, ProgramShape>) -> Progra
 /// The nodes of `graph` that pass its bounds, in node-id order: each one whose own levels pass
 /// [`ProgramShape::MAX_LEVELS`], and each one that would carry the count of the nodes before it
 /// past [`ProgramShape::MAX_NODES`].
-fn over_bounds(graph: &Graph, shapes: &HashMap<SubgraphId, ProgramShape>) -> Vec<Detaching> {
+fn over_bounds(graph: &Graph, shapes: &HashMap<SubgraphId, ProgramShape>) -> Vec<Refusal> {
     let mut nodes: Vec<_> = graph
         .iter()
         .map(|node| (node.node_id, ProgramShape::of_node(&node.kind, shapes)))
@@ -776,12 +854,12 @@ fn over_bounds(graph: &Graph, shapes: &HashMap<SubgraphId, ProgramShape>) -> Vec
     let mut refused = Vec::new();
     for (node_id, shape) in nodes {
         if shape.levels > ProgramShape::MAX_LEVELS {
-            refused.push(Detaching {
+            refused.push(Refusal {
                 node_id,
                 reason: DetachReason::TooDeep,
             });
         } else if kept.beside(shape).node_count > ProgramShape::MAX_NODES {
-            refused.push(Detaching {
+            refused.push(Refusal {
                 node_id,
                 reason: DetachReason::TooLarge,
             });

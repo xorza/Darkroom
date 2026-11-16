@@ -1,754 +1,1322 @@
 (
-    graphs: (
-        main: (
-            nodes: {
-                ("609d124e-47c7-43c1-adef-32db510ac421"): (
-                    kind: Body(
-                        source: Func(("0c17bcbe-d757-43be-b184-27b429e8b434")),
-                        cache: Ram,
+    document: (
+        graphs: (
+            main: (
+                nodes: {
+                    ("bbc78216-1118-4ec7-ad7e-5d4175fcecd2"): (
+                        kind: Body(
+                            source: Func(("ef0c2661-8553-4302-9251-95b2d383af19")),
+                            cache: r#None,
+                        ),
+                        name: "scnr",
+                        disabled: false,
                     ),
-                    name: "save_image",
-                    disabled: true,
+                    ("7e110fc6-8391-48bc-b07b-c970827bcdd2"): (
+                        kind: Body(
+                            source: Func(("c15248e0-006a-4a4a-9aae-b1fc7886dea1")),
+                            cache: r#None,
+                        ),
+                        name: "auto_stretch",
+                        disabled: false,
+                    ),
+                    ("2b827f10-a3a1-4d54-bb25-a40133b3a18c"): (
+                        kind: Body(
+                            source: Func(("06b169d2-d3d8-43fb-ba80-c566fcffea44")),
+                            cache: Ram,
+                        ),
+                        name: "print",
+                        disabled: false,
+                    ),
+                    ("12981187-f976-4192-8f54-bc3c4523544e"): (
+                        kind: Body(
+                            source: Func(("f2f6f1ff-5b10-409c-900f-d6b48750a529")),
+                            cache: r#None,
+                        ),
+                        name: "build_masters",
+                        disabled: false,
+                    ),
+                    ("2067de48-57e0-4900-b589-32320647bb55"): (
+                        kind: Body(
+                            source: Func(("7d08e8c7-fd22-46d4-bb86-c0bd3c9e76fe")),
+                            cache: r#None,
+                        ),
+                        name: "ml_denoise",
+                        disabled: false,
+                    ),
+                    ("fd576928-3f2a-4ba9-9d38-1be67824652f"): (
+                        kind: Body(
+                            source: Func(("ebe9a4d0-2cb1-4354-b66e-8e7bee7cb860")),
+                            cache: r#None,
+                        ),
+                        name: "brightness_contrast",
+                        disabled: false,
+                    ),
+                    ("5fcd3fd1-6bb5-4241-ab6e-d4397a454896"): (
+                        kind: Body(
+                            source: Func(("714dbc9a-ac0a-428b-90ee-eb13c1652c9e")),
+                            cache: Ram,
+                        ),
+                        name: "frame event",
+                        disabled: false,
+                    ),
+                    ("5fb6630e-e3aa-4f4d-9b48-d8ee886a2efc"): (
+                        kind: Body(
+                            source: Special(RunSinks),
+                            cache: Ram,
+                        ),
+                        name: "Run on Event",
+                        disabled: false,
+                    ),
+                    ("f69f0aa7-6de4-4660-8dc5-1ec9f19d18de"): (
+                        kind: Body(
+                            source: Func(("0c17bcbe-d757-43be-b184-27b429e8b434")),
+                            cache: Ram,
+                        ),
+                        name: "save_image",
+                        disabled: true,
+                    ),
+                    ("f74c1e36-8888-4301-95b1-95e194e106c7"): (
+                        kind: Body(
+                            source: Func(("60c31a76-eed4-467c-9ba3-5c89d294a91b")),
+                            cache: Both,
+                        ),
+                        name: "remove_stars",
+                        disabled: false,
+                    ),
+                    ("efc228bd-27f8-455a-8e22-97dbd688a2c6"): (
+                        kind: Body(
+                            source: Func(("7d08e8c7-fd22-46d4-bb86-c0bd3c9e76fe")),
+                            cache: r#None,
+                        ),
+                        name: "brightness_contrast",
+                        disabled: false,
+                    ),
+                    ("043a77db-9446-4ded-9231-8bac95b7fe12"): (
+                        kind: Body(
+                            source: Func(("ebe9a4d0-2cb1-4354-b66e-8e7bee7cb860")),
+                            cache: r#None,
+                        ),
+                        name: "brightness_contrast",
+                        disabled: false,
+                    ),
+                    ("25b00fb1-cdc1-4b3f-b927-1aa43b072784"): (
+                        kind: Body(
+                            source: Func(("b02f5c42-7bda-48f6-81dd-81338efbb126")),
+                            cache: Disk,
+                        ),
+                        name: "stack_lights",
+                        disabled: false,
+                    ),
+                    ("e156726f-3c5b-4d41-bbeb-380773608e40"): (
+                        kind: Body(
+                            source: Func(("7d08e8c7-fd22-46d4-bb86-c0bd3c9e76fe")),
+                            cache: r#None,
+                        ),
+                        name: "blend",
+                        disabled: false,
+                    ),
+                    ("20380988-300d-4857-af58-7497acd6848a"): (
+                        kind: Body(
+                            source: Func(("8854cccc-81d3-4e26-8b4f-e33d62e3117b")),
+                            cache: r#None,
+                        ),
+                        name: "Concat",
+                        disabled: false,
+                    ),
+                    ("41884f76-a80f-4bb9-82c4-83e5016d37a9"): (
+                        kind: Body(
+                            source: Func(("7d08e8c7-fd22-46d4-bb86-c0bd3c9e76fe")),
+                            cache: r#None,
+                        ),
+                        name: "Preview",
+                        disabled: false,
+                    ),
+                    ("609d124e-47c7-43c1-adef-32db510ac421"): (
+                        kind: Body(
+                            source: Func(("0c17bcbe-d757-43be-b184-27b429e8b434")),
+                            cache: Ram,
+                        ),
+                        name: "save_image",
+                        disabled: true,
+                    ),
+                    ("0d921c89-28c0-445f-a759-33f28164085e"): (
+                        kind: Body(
+                            source: Func(("0c17bcbe-d757-43be-b184-27b429e8b434")),
+                            cache: Ram,
+                        ),
+                        name: "save_image",
+                        disabled: true,
+                    ),
+                    ("fabb092d-f756-441d-b6f5-1d1e629beda1"): (
+                        kind: Body(
+                            source: Func(("975cc74b-8412-4293-b2cb-ef8d41fdd9b3")),
+                            cache: Ram,
+                        ),
+                        name: "blend",
+                        disabled: false,
+                    ),
+                    ("8c44e556-5072-44fc-8802-9ae2feec2421"): (
+                        kind: Body(
+                            source: Func(("ace786f9-8a02-4ed1-93a0-ad67bf0680f8")),
+                            cache: Both,
+                        ),
+                        name: "ml_denoise",
+                        disabled: false,
+                    ),
+                },
+                bindings: [
+                    ((
+                        node_id: ("043a77db-9446-4ded-9231-8bac95b7fe12"),
+                        port: 1,
+                    ), Wire((
+                        node_id: ("f74c1e36-8888-4301-95b1-95e194e106c7"),
+                        port: 1,
+                    ))),
+                    ((
+                        node_id: ("043a77db-9446-4ded-9231-8bac95b7fe12"),
+                        port: 2,
+                    ), Const(Float(0.2))),
+                    ((
+                        node_id: ("043a77db-9446-4ded-9231-8bac95b7fe12"),
+                        port: 3,
+                    ), Const(Float(1.6))),
+                    ((
+                        node_id: ("043a77db-9446-4ded-9231-8bac95b7fe12"),
+                        port: 4,
+                    ), Const(Enum("Black"))),
+                    ((
+                        node_id: ("0d921c89-28c0-445f-a759-33f28164085e"),
+                        port: 1,
+                    ), Wire((
+                        node_id: ("fabb092d-f756-441d-b6f5-1d1e629beda1"),
+                        port: 1,
+                    ))),
+                    ((
+                        node_id: ("0d921c89-28c0-445f-a759-33f28164085e"),
+                        port: 2,
+                    ), Const(FsPath("output/img.png"))),
+                    ((
+                        node_id: ("0d921c89-28c0-445f-a759-33f28164085e"),
+                        port: 3,
+                    ), Const(Enum("RGB u8"))),
+                    ((
+                        node_id: ("12981187-f976-4192-8f54-bc3c4523544e"),
+                        port: 1,
+                    ), Const(FsPaths([
+                        "inputs/darks/frame_001.raw",
+                        "inputs/darks/frame_002.raw",
+                        "inputs/darks/frame_003.raw",
+                        "inputs/darks/frame_004.raw",
+                        "inputs/darks/frame_005.raw",
+                        "inputs/darks/frame_006.raw",
+                        "inputs/darks/frame_007.raw",
+                        "inputs/darks/frame_008.raw",
+                        "inputs/darks/frame_009.raw",
+                        "inputs/darks/frame_010.raw",
+                        "inputs/darks/frame_011.raw",
+                        "inputs/darks/frame_012.raw",
+                        "inputs/darks/frame_013.raw",
+                        "inputs/darks/frame_014.raw",
+                        "inputs/darks/frame_015.raw",
+                    ]))),
+                    ((
+                        node_id: ("12981187-f976-4192-8f54-bc3c4523544e"),
+                        port: 2,
+                    ), Const(FsPaths([
+                        "inputs/flats/frame_016.raw",
+                        "inputs/flats/frame_017.raw",
+                        "inputs/flats/frame_018.raw",
+                        "inputs/flats/frame_019.raw",
+                        "inputs/flats/frame_020.raw",
+                        "inputs/flats/frame_021.raw",
+                        "inputs/flats/frame_022.raw",
+                        "inputs/flats/frame_023.raw",
+                        "inputs/flats/frame_024.raw",
+                        "inputs/flats/frame_025.raw",
+                        "inputs/flats/frame_026.raw",
+                        "inputs/flats/frame_027.raw",
+                        "inputs/flats/frame_028.raw",
+                        "inputs/flats/frame_029.raw",
+                        "inputs/flats/frame_030.raw",
+                    ]))),
+                    ((
+                        node_id: ("12981187-f976-4192-8f54-bc3c4523544e"),
+                        port: 3,
+                    ), Const(FsPaths([
+                        "inputs/bias/frame_031.raw",
+                        "inputs/bias/frame_032.raw",
+                        "inputs/bias/frame_033.raw",
+                        "inputs/bias/frame_034.raw",
+                        "inputs/bias/frame_035.raw",
+                        "inputs/bias/frame_036.raw",
+                        "inputs/bias/frame_037.raw",
+                        "inputs/bias/frame_038.raw",
+                        "inputs/bias/frame_039.raw",
+                        "inputs/bias/frame_040.raw",
+                        "inputs/bias/frame_041.raw",
+                        "inputs/bias/frame_042.raw",
+                        "inputs/bias/frame_043.raw",
+                        "inputs/bias/frame_044.raw",
+                        "inputs/bias/frame_045.raw",
+                        "inputs/bias/frame_046.raw",
+                        "inputs/bias/frame_047.raw",
+                        "inputs/bias/frame_048.raw",
+                        "inputs/bias/frame_049.raw",
+                        "inputs/bias/frame_050.raw",
+                    ]))),
+                    ((
+                        node_id: ("12981187-f976-4192-8f54-bc3c4523544e"),
+                        port: 5,
+                    ), Const(Float(5.0))),
+                    ((
+                        node_id: ("12981187-f976-4192-8f54-bc3c4523544e"),
+                        port: 6,
+                    ), Const(Bool(true))),
+                    ((
+                        node_id: ("20380988-300d-4857-af58-7497acd6848a"),
+                        port: 1,
+                    ), Const(String("frameNo_"))),
+                    ((
+                        node_id: ("20380988-300d-4857-af58-7497acd6848a"),
+                        port: 2,
+                    ), Wire((
+                        node_id: ("5fcd3fd1-6bb5-4241-ab6e-d4397a454896"),
+                        port: 2,
+                    ))),
+                    ((
+                        node_id: ("2067de48-57e0-4900-b589-32320647bb55"),
+                        port: 1,
+                    ), Wire((
+                        node_id: ("8c44e556-5072-44fc-8802-9ae2feec2421"),
+                        port: 1,
+                    ))),
+                    ((
+                        node_id: ("25b00fb1-cdc1-4b3f-b927-1aa43b072784"),
+                        port: 1,
+                    ), Const(FsPaths([
+                        "inputs/lights/frame_051.raw",
+                        "inputs/lights/frame_052.raw",
+                        "inputs/lights/frame_053.raw",
+                        "inputs/lights/frame_054.raw",
+                        "inputs/lights/frame_055.raw",
+                        "inputs/lights/frame_056.raw",
+                        "inputs/lights/frame_057.raw",
+                        "inputs/lights/frame_058.raw",
+                        "inputs/lights/frame_059.raw",
+                        "inputs/lights/frame_060.raw",
+                    ]))),
+                    ((
+                        node_id: ("25b00fb1-cdc1-4b3f-b927-1aa43b072784"),
+                        port: 2,
+                    ), Wire((
+                        node_id: ("12981187-f976-4192-8f54-bc3c4523544e"),
+                        port: 1,
+                    ))),
+                    ((
+                        node_id: ("25b00fb1-cdc1-4b3f-b927-1aa43b072784"),
+                        port: 3,
+                    ), Const(Enum("precise_ground"))),
+                    ((
+                        node_id: ("25b00fb1-cdc1-4b3f-b927-1aa43b072784"),
+                        port: 4,
+                    ), Const(Enum("wide_field"))),
+                    ((
+                        node_id: ("25b00fb1-cdc1-4b3f-b927-1aa43b072784"),
+                        port: 5,
+                    ), Const(Enum("sigma_clipped"))),
+                    ((
+                        node_id: ("2b827f10-a3a1-4d54-bb25-a40133b3a18c"),
+                        port: 1,
+                    ), Wire((
+                        node_id: ("20380988-300d-4857-af58-7497acd6848a"),
+                        port: 1,
+                    ))),
+                    ((
+                        node_id: ("41884f76-a80f-4bb9-82c4-83e5016d37a9"),
+                        port: 1,
+                    ), Wire((
+                        node_id: ("fd576928-3f2a-4ba9-9d38-1be67824652f"),
+                        port: 1,
+                    ))),
+                    ((
+                        node_id: ("5fcd3fd1-6bb5-4241-ab6e-d4397a454896"),
+                        port: 1,
+                    ), Const(Float(1.0))),
+                    ((
+                        node_id: ("609d124e-47c7-43c1-adef-32db510ac421"),
+                        port: 1,
+                    ), Wire((
+                        node_id: ("f74c1e36-8888-4301-95b1-95e194e106c7"),
+                        port: 1,
+                    ))),
+                    ((
+                        node_id: ("609d124e-47c7-43c1-adef-32db510ac421"),
+                        port: 2,
+                    ), Const(FsPath("output/img2.png"))),
+                    ((
+                        node_id: ("609d124e-47c7-43c1-adef-32db510ac421"),
+                        port: 3,
+                    ), Const(Enum("RGB u8"))),
+                    ((
+                        node_id: ("7e110fc6-8391-48bc-b07b-c970827bcdd2"),
+                        port: 1,
+                    ), Wire((
+                        node_id: ("bbc78216-1118-4ec7-ad7e-5d4175fcecd2"),
+                        port: 1,
+                    ))),
+                    ((
+                        node_id: ("7e110fc6-8391-48bc-b07b-c970827bcdd2"),
+                        port: 2,
+                    ), Const(Enum("auto_stf"))),
+                    ((
+                        node_id: ("8c44e556-5072-44fc-8802-9ae2feec2421"),
+                        port: 1,
+                    ), Wire((
+                        node_id: ("043a77db-9446-4ded-9231-8bac95b7fe12"),
+                        port: 1,
+                    ))),
+                    ((
+                        node_id: ("8c44e556-5072-44fc-8802-9ae2feec2421"),
+                        port: 2,
+                    ), Const(FsPath("models/DeepSNR_weights_v2.onnx"))),
+                    ((
+                        node_id: ("bbc78216-1118-4ec7-ad7e-5d4175fcecd2"),
+                        port: 1,
+                    ), Wire((
+                        node_id: ("25b00fb1-cdc1-4b3f-b927-1aa43b072784"),
+                        port: 1,
+                    ))),
+                    ((
+                        node_id: ("bbc78216-1118-4ec7-ad7e-5d4175fcecd2"),
+                        port: 2,
+                    ), Const(Enum("average_neutral"))),
+                    ((
+                        node_id: ("e156726f-3c5b-4d41-bbeb-380773608e40"),
+                        port: 1,
+                    ), Wire((
+                        node_id: ("fabb092d-f756-441d-b6f5-1d1e629beda1"),
+                        port: 1,
+                    ))),
+                    ((
+                        node_id: ("efc228bd-27f8-455a-8e22-97dbd688a2c6"),
+                        port: 1,
+                    ), Wire((
+                        node_id: ("043a77db-9446-4ded-9231-8bac95b7fe12"),
+                        port: 1,
+                    ))),
+                    ((
+                        node_id: ("f69f0aa7-6de4-4660-8dc5-1ec9f19d18de"),
+                        port: 1,
+                    ), Wire((
+                        node_id: ("8c44e556-5072-44fc-8802-9ae2feec2421"),
+                        port: 1,
+                    ))),
+                    ((
+                        node_id: ("f69f0aa7-6de4-4660-8dc5-1ec9f19d18de"),
+                        port: 2,
+                    ), Const(FsPath("output/starless.png"))),
+                    ((
+                        node_id: ("f69f0aa7-6de4-4660-8dc5-1ec9f19d18de"),
+                        port: 3,
+                    ), Const(Enum("RGB u8"))),
+                    ((
+                        node_id: ("f74c1e36-8888-4301-95b1-95e194e106c7"),
+                        port: 1,
+                    ), Wire((
+                        node_id: ("7e110fc6-8391-48bc-b07b-c970827bcdd2"),
+                        port: 1,
+                    ))),
+                    ((
+                        node_id: ("f74c1e36-8888-4301-95b1-95e194e106c7"),
+                        port: 2,
+                    ), Const(FsPath("models/StarNet2_weights.onnx"))),
+                    ((
+                        node_id: ("fabb092d-f756-441d-b6f5-1d1e629beda1"),
+                        port: 1,
+                    ), Wire((
+                        node_id: ("8c44e556-5072-44fc-8802-9ae2feec2421"),
+                        port: 1,
+                    ))),
+                    ((
+                        node_id: ("fabb092d-f756-441d-b6f5-1d1e629beda1"),
+                        port: 2,
+                    ), Wire((
+                        node_id: ("fd576928-3f2a-4ba9-9d38-1be67824652f"),
+                        port: 1,
+                    ))),
+                    ((
+                        node_id: ("fabb092d-f756-441d-b6f5-1d1e629beda1"),
+                        port: 3,
+                    ), Const(Enum("Add"))),
+                    ((
+                        node_id: ("fabb092d-f756-441d-b6f5-1d1e629beda1"),
+                        port: 4,
+                    ), Const(Float(1.0))),
+                    ((
+                        node_id: ("fabb092d-f756-441d-b6f5-1d1e629beda1"),
+                        port: 5,
+                    ), Const(Enum("Black"))),
+                    ((
+                        node_id: ("fd576928-3f2a-4ba9-9d38-1be67824652f"),
+                        port: 1,
+                    ), Wire((
+                        node_id: ("f74c1e36-8888-4301-95b1-95e194e106c7"),
+                        port: 2,
+                    ))),
+                    ((
+                        node_id: ("fd576928-3f2a-4ba9-9d38-1be67824652f"),
+                        port: 2,
+                    ), Const(Float(-0.055))),
+                    ((
+                        node_id: ("fd576928-3f2a-4ba9-9d38-1be67824652f"),
+                        port: 3,
+                    ), Const(Float(1.084))),
+                    ((
+                        node_id: ("fd576928-3f2a-4ba9-9d38-1be67824652f"),
+                        port: 4,
+                    ), Const(Enum("Black"))),
+                ],
+                subscriptions: [
+                    (
+                        event: (
+                            node_id: ("5fcd3fd1-6bb5-4241-ab6e-d4397a454896"),
+                            event: 2,
+                        ),
+                        subscriber: ("5fb6630e-e3aa-4f4d-9b48-d8ee886a2efc"),
+                    ),
+                ],
+                ghost_nodes: {},
+                ghost_wiring: (
+                    bindings: [],
+                    subscriptions: [],
+                ),
+            ),
+            subgraphs: {},
+        ),
+        main_view: (
+            node_placements: {
+                ("043a77db-9446-4ded-9231-8bac95b7fe12"): (
+                    pos: (1807.5868, -46.54965),
+                    z: 17,
                 ),
                 ("0d921c89-28c0-445f-a759-33f28164085e"): (
-                    kind: Body(
-                        source: Func(("0c17bcbe-d757-43be-b184-27b429e8b434")),
-                        cache: Ram,
-                    ),
-                    name: "save_image",
-                    disabled: true,
-                ),
-                ("fd576928-3f2a-4ba9-9d38-1be67824652f"): (
-                    kind: Body(
-                        source: Func(("ebe9a4d0-2cb1-4354-b66e-8e7bee7cb860")),
-                        cache: r#None,
-                    ),
-                    name: "brightness_contrast",
-                    disabled: false,
-                ),
-                ("efc228bd-27f8-455a-8e22-97dbd688a2c6"): (
-                    kind: Body(
-                        source: Func(("7d08e8c7-fd22-46d4-bb86-c0bd3c9e76fe")),
-                        cache: r#None,
-                    ),
-                    name: "brightness_contrast",
-                    disabled: false,
-                ),
-                ("20380988-300d-4857-af58-7497acd6848a"): (
-                    kind: Body(
-                        source: Func(("8854cccc-81d3-4e26-8b4f-e33d62e3117b")),
-                        cache: r#None,
-                    ),
-                    name: "Concat",
-                    disabled: false,
-                ),
-                ("bbc78216-1118-4ec7-ad7e-5d4175fcecd2"): (
-                    kind: Body(
-                        source: Func(("ef0c2661-8553-4302-9251-95b2d383af19")),
-                        cache: r#None,
-                    ),
-                    name: "scnr",
-                    disabled: false,
-                ),
-                ("8c44e556-5072-44fc-8802-9ae2feec2421"): (
-                    kind: Body(
-                        source: Func(("ace786f9-8a02-4ed1-93a0-ad67bf0680f8")),
-                        cache: Both,
-                    ),
-                    name: "ml_denoise",
-                    disabled: false,
-                ),
-                ("f74c1e36-8888-4301-95b1-95e194e106c7"): (
-                    kind: Body(
-                        source: Func(("60c31a76-eed4-467c-9ba3-5c89d294a91b")),
-                        cache: Both,
-                    ),
-                    name: "remove_stars",
-                    disabled: false,
-                ),
-                ("41884f76-a80f-4bb9-82c4-83e5016d37a9"): (
-                    kind: Body(
-                        source: Func(("7d08e8c7-fd22-46d4-bb86-c0bd3c9e76fe")),
-                        cache: r#None,
-                    ),
-                    name: "Preview",
-                    disabled: false,
-                ),
-                ("7e110fc6-8391-48bc-b07b-c970827bcdd2"): (
-                    kind: Body(
-                        source: Func(("c15248e0-006a-4a4a-9aae-b1fc7886dea1")),
-                        cache: r#None,
-                    ),
-                    name: "auto_stretch",
-                    disabled: false,
-                ),
-                ("e156726f-3c5b-4d41-bbeb-380773608e40"): (
-                    kind: Body(
-                        source: Func(("7d08e8c7-fd22-46d4-bb86-c0bd3c9e76fe")),
-                        cache: r#None,
-                    ),
-                    name: "blend",
-                    disabled: false,
-                ),
-                ("f69f0aa7-6de4-4660-8dc5-1ec9f19d18de"): (
-                    kind: Body(
-                        source: Func(("0c17bcbe-d757-43be-b184-27b429e8b434")),
-                        cache: Ram,
-                    ),
-                    name: "save_image",
-                    disabled: true,
-                ),
-                ("2067de48-57e0-4900-b589-32320647bb55"): (
-                    kind: Body(
-                        source: Func(("7d08e8c7-fd22-46d4-bb86-c0bd3c9e76fe")),
-                        cache: r#None,
-                    ),
-                    name: "ml_denoise",
-                    disabled: false,
+                    pos: (2730.8987, 201.80232),
+                    z: 38,
                 ),
                 ("12981187-f976-4192-8f54-bc3c4523544e"): (
-                    kind: Body(
-                        source: Func(("f2f6f1ff-5b10-409c-900f-d6b48750a529")),
-                        cache: r#None,
-                    ),
-                    name: "build_masters",
-                    disabled: false,
+                    pos: (1226.7373, -880.64386),
+                    z: 32,
                 ),
-                ("5fcd3fd1-6bb5-4241-ab6e-d4397a454896"): (
-                    kind: Body(
-                        source: Func(("714dbc9a-ac0a-428b-90ee-eb13c1652c9e")),
-                        cache: Ram,
-                    ),
-                    name: "frame event",
-                    disabled: false,
+                ("20380988-300d-4857-af58-7497acd6848a"): (
+                    pos: (2594.988, -978.339),
+                    z: 2,
                 ),
-                ("2b827f10-a3a1-4d54-bb25-a40133b3a18c"): (
-                    kind: Body(
-                        source: Func(("06b169d2-d3d8-43fb-ba80-c566fcffea44")),
-                        cache: Ram,
-                    ),
-                    name: "print",
-                    disabled: false,
-                ),
-                ("fabb092d-f756-441d-b6f5-1d1e629beda1"): (
-                    kind: Body(
-                        source: Func(("975cc74b-8412-4293-b2cb-ef8d41fdd9b3")),
-                        cache: Ram,
-                    ),
-                    name: "blend",
-                    disabled: false,
-                ),
-                ("043a77db-9446-4ded-9231-8bac95b7fe12"): (
-                    kind: Body(
-                        source: Func(("ebe9a4d0-2cb1-4354-b66e-8e7bee7cb860")),
-                        cache: r#None,
-                    ),
-                    name: "brightness_contrast",
-                    disabled: false,
+                ("2067de48-57e0-4900-b589-32320647bb55"): (
+                    pos: (2701.5977, -405.3095),
+                    z: 59,
                 ),
                 ("25b00fb1-cdc1-4b3f-b927-1aa43b072784"): (
-                    kind: Body(
-                        source: Func(("b02f5c42-7bda-48f6-81dd-81338efbb126")),
-                        cache: Disk,
-                    ),
-                    name: "stack_lights",
-                    disabled: false,
+                    pos: (1603.1246, -922.32043),
+                    z: 69,
+                ),
+                ("2b827f10-a3a1-4d54-bb25-a40133b3a18c"): (
+                    pos: (2879.88, -952.1894),
+                    z: 35,
+                ),
+                ("41884f76-a80f-4bb9-82c4-83e5016d37a9"): (
+                    pos: (2257.6165, 687.05725),
+                    z: 64,
                 ),
                 ("5fb6630e-e3aa-4f4d-9b48-d8ee886a2efc"): (
-                    kind: Body(
-                        source: Special(RunSinks),
-                        cache: Ram,
-                    ),
-                    name: "Run on Event",
-                    disabled: false,
+                    pos: (2597.929, -665.3271),
+                    z: 3,
+                ),
+                ("5fcd3fd1-6bb5-4241-ab6e-d4397a454896"): (
+                    pos: (2230.3037, -877.5497),
+                    z: 1,
+                ),
+                ("609d124e-47c7-43c1-adef-32db510ac421"): (
+                    pos: (1895.5132, -391.27826),
+                    z: 15,
+                ),
+                ("7e110fc6-8391-48bc-b07b-c970827bcdd2"): (
+                    pos: (990.4419, -27.922207),
+                    z: 6,
+                ),
+                ("8c44e556-5072-44fc-8802-9ae2feec2421"): (
+                    pos: (2183.4417, -2.1152554),
+                    z: 68,
+                ),
+                ("bbc78216-1118-4ec7-ad7e-5d4175fcecd2"): (
+                    pos: (991.1479, -423.137),
+                    z: 49,
+                ),
+                ("e156726f-3c5b-4d41-bbeb-380773608e40"): (
+                    pos: (2697.4136, 467.03464),
+                    z: 65,
+                ),
+                ("efc228bd-27f8-455a-8e22-97dbd688a2c6"): (
+                    pos: (2282.0867, -448.17307),
+                    z: 67,
+                ),
+                ("f69f0aa7-6de4-4660-8dc5-1ec9f19d18de"): (
+                    pos: (2751.5334, -46.569458),
+                    z: 43,
+                ),
+                ("f74c1e36-8888-4301-95b1-95e194e106c7"): (
+                    pos: (1336.2095, -32.977932),
+                    z: 8,
+                ),
+                ("fabb092d-f756-441d-b6f5-1d1e629beda1"): (
+                    pos: (2259.8086, 373.90363),
+                    z: 57,
+                ),
+                ("fd576928-3f2a-4ba9-9d38-1be67824652f"): (
+                    pos: (1781.6898, 317.00525),
+                    z: 26,
                 ),
             },
-            bindings: [
-                ((
-                    node_id: ("043a77db-9446-4ded-9231-8bac95b7fe12"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ), Wire((
-                    node_id: ("f74c1e36-8888-4301-95b1-95e194e106c7"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ))),
-                ((
-                    node_id: ("043a77db-9446-4ded-9231-8bac95b7fe12"),
-                    port: ("00000000-0000-0000-0000-000000000002"),
-                ), Const(Float(0.2))),
-                ((
-                    node_id: ("043a77db-9446-4ded-9231-8bac95b7fe12"),
-                    port: ("00000000-0000-0000-0000-000000000003"),
-                ), Const(Float(1.6))),
-                ((
-                    node_id: ("043a77db-9446-4ded-9231-8bac95b7fe12"),
-                    port: ("00000000-0000-0000-0000-000000000004"),
-                ), Const(Enum("Black"))),
-                ((
-                    node_id: ("0d921c89-28c0-445f-a759-33f28164085e"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ), Wire((
-                    node_id: ("fabb092d-f756-441d-b6f5-1d1e629beda1"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ))),
-                ((
-                    node_id: ("0d921c89-28c0-445f-a759-33f28164085e"),
-                    port: ("00000000-0000-0000-0000-000000000002"),
-                ), Const(FsPath("output/img.png"))),
-                ((
-                    node_id: ("0d921c89-28c0-445f-a759-33f28164085e"),
-                    port: ("00000000-0000-0000-0000-000000000003"),
-                ), Const(Enum("RGB u8"))),
-                ((
-                    node_id: ("12981187-f976-4192-8f54-bc3c4523544e"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ), Const(FsPaths([
-                    "inputs/darks/frame_001.raw",
-                    "inputs/darks/frame_002.raw",
-                    "inputs/darks/frame_003.raw",
-                    "inputs/darks/frame_004.raw",
-                    "inputs/darks/frame_005.raw",
-                    "inputs/darks/frame_006.raw",
-                    "inputs/darks/frame_007.raw",
-                    "inputs/darks/frame_008.raw",
-                    "inputs/darks/frame_009.raw",
-                    "inputs/darks/frame_010.raw",
-                    "inputs/darks/frame_011.raw",
-                    "inputs/darks/frame_012.raw",
-                    "inputs/darks/frame_013.raw",
-                    "inputs/darks/frame_014.raw",
-                    "inputs/darks/frame_015.raw",
-                ]))),
-                ((
-                    node_id: ("12981187-f976-4192-8f54-bc3c4523544e"),
-                    port: ("00000000-0000-0000-0000-000000000002"),
-                ), Const(FsPaths([
-                    "inputs/flats/frame_016.raw",
-                    "inputs/flats/frame_017.raw",
-                    "inputs/flats/frame_018.raw",
-                    "inputs/flats/frame_019.raw",
-                    "inputs/flats/frame_020.raw",
-                    "inputs/flats/frame_021.raw",
-                    "inputs/flats/frame_022.raw",
-                    "inputs/flats/frame_023.raw",
-                    "inputs/flats/frame_024.raw",
-                    "inputs/flats/frame_025.raw",
-                    "inputs/flats/frame_026.raw",
-                    "inputs/flats/frame_027.raw",
-                    "inputs/flats/frame_028.raw",
-                    "inputs/flats/frame_029.raw",
-                    "inputs/flats/frame_030.raw",
-                ]))),
-                ((
-                    node_id: ("12981187-f976-4192-8f54-bc3c4523544e"),
-                    port: ("00000000-0000-0000-0000-000000000003"),
-                ), Const(FsPaths([
-                    "inputs/bias/frame_031.raw",
-                    "inputs/bias/frame_032.raw",
-                    "inputs/bias/frame_033.raw",
-                    "inputs/bias/frame_034.raw",
-                    "inputs/bias/frame_035.raw",
-                    "inputs/bias/frame_036.raw",
-                    "inputs/bias/frame_037.raw",
-                    "inputs/bias/frame_038.raw",
-                    "inputs/bias/frame_039.raw",
-                    "inputs/bias/frame_040.raw",
-                    "inputs/bias/frame_041.raw",
-                    "inputs/bias/frame_042.raw",
-                    "inputs/bias/frame_043.raw",
-                    "inputs/bias/frame_044.raw",
-                    "inputs/bias/frame_045.raw",
-                    "inputs/bias/frame_046.raw",
-                    "inputs/bias/frame_047.raw",
-                    "inputs/bias/frame_048.raw",
-                    "inputs/bias/frame_049.raw",
-                    "inputs/bias/frame_050.raw",
-                ]))),
-                ((
-                    node_id: ("12981187-f976-4192-8f54-bc3c4523544e"),
-                    port: ("00000000-0000-0000-0000-000000000005"),
-                ), Const(Float(5.0))),
-                ((
-                    node_id: ("12981187-f976-4192-8f54-bc3c4523544e"),
-                    port: ("00000000-0000-0000-0000-000000000006"),
-                ), Const(Bool(true))),
-                ((
-                    node_id: ("20380988-300d-4857-af58-7497acd6848a"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ), Const(String("frameNo_"))),
-                ((
-                    node_id: ("20380988-300d-4857-af58-7497acd6848a"),
-                    port: ("00000000-0000-0000-0000-000000000002"),
-                ), Wire((
-                    node_id: ("5fcd3fd1-6bb5-4241-ab6e-d4397a454896"),
-                    port: ("00000000-0000-0000-0000-000000000002"),
-                ))),
-                ((
-                    node_id: ("2067de48-57e0-4900-b589-32320647bb55"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ), Wire((
-                    node_id: ("8c44e556-5072-44fc-8802-9ae2feec2421"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ))),
-                ((
-                    node_id: ("25b00fb1-cdc1-4b3f-b927-1aa43b072784"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ), Const(FsPaths([
-                    "inputs/lights/frame_051.raw",
-                    "inputs/lights/frame_052.raw",
-                    "inputs/lights/frame_053.raw",
-                    "inputs/lights/frame_054.raw",
-                    "inputs/lights/frame_055.raw",
-                    "inputs/lights/frame_056.raw",
-                    "inputs/lights/frame_057.raw",
-                    "inputs/lights/frame_058.raw",
-                    "inputs/lights/frame_059.raw",
-                    "inputs/lights/frame_060.raw",
-                ]))),
-                ((
-                    node_id: ("25b00fb1-cdc1-4b3f-b927-1aa43b072784"),
-                    port: ("00000000-0000-0000-0000-000000000002"),
-                ), Wire((
-                    node_id: ("12981187-f976-4192-8f54-bc3c4523544e"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ))),
-                ((
-                    node_id: ("25b00fb1-cdc1-4b3f-b927-1aa43b072784"),
-                    port: ("00000000-0000-0000-0000-000000000003"),
-                ), Const(Enum("precise_ground"))),
-                ((
-                    node_id: ("25b00fb1-cdc1-4b3f-b927-1aa43b072784"),
-                    port: ("00000000-0000-0000-0000-000000000004"),
-                ), Const(Enum("wide_field"))),
-                ((
-                    node_id: ("25b00fb1-cdc1-4b3f-b927-1aa43b072784"),
-                    port: ("00000000-0000-0000-0000-000000000005"),
-                ), Const(Enum("sigma_clipped"))),
-                ((
-                    node_id: ("2b827f10-a3a1-4d54-bb25-a40133b3a18c"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ), Wire((
-                    node_id: ("20380988-300d-4857-af58-7497acd6848a"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ))),
-                ((
-                    node_id: ("41884f76-a80f-4bb9-82c4-83e5016d37a9"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ), Wire((
-                    node_id: ("fd576928-3f2a-4ba9-9d38-1be67824652f"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ))),
-                ((
-                    node_id: ("5fcd3fd1-6bb5-4241-ab6e-d4397a454896"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ), Const(Float(1.0))),
-                ((
-                    node_id: ("609d124e-47c7-43c1-adef-32db510ac421"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ), Wire((
-                    node_id: ("f74c1e36-8888-4301-95b1-95e194e106c7"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ))),
-                ((
-                    node_id: ("609d124e-47c7-43c1-adef-32db510ac421"),
-                    port: ("00000000-0000-0000-0000-000000000002"),
-                ), Const(FsPath("output/img2.png"))),
-                ((
-                    node_id: ("609d124e-47c7-43c1-adef-32db510ac421"),
-                    port: ("00000000-0000-0000-0000-000000000003"),
-                ), Const(Enum("RGB u8"))),
-                ((
-                    node_id: ("7e110fc6-8391-48bc-b07b-c970827bcdd2"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ), Wire((
-                    node_id: ("bbc78216-1118-4ec7-ad7e-5d4175fcecd2"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ))),
-                ((
-                    node_id: ("7e110fc6-8391-48bc-b07b-c970827bcdd2"),
-                    port: ("00000000-0000-0000-0000-000000000002"),
-                ), Const(Enum("auto_stf"))),
-                ((
-                    node_id: ("8c44e556-5072-44fc-8802-9ae2feec2421"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ), Wire((
-                    node_id: ("043a77db-9446-4ded-9231-8bac95b7fe12"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ))),
-                ((
-                    node_id: ("8c44e556-5072-44fc-8802-9ae2feec2421"),
-                    port: ("00000000-0000-0000-0000-000000000002"),
-                ), Const(FsPath("models/DeepSNR_weights_v2.onnx"))),
-                ((
-                    node_id: ("bbc78216-1118-4ec7-ad7e-5d4175fcecd2"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ), Wire((
-                    node_id: ("25b00fb1-cdc1-4b3f-b927-1aa43b072784"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ))),
-                ((
-                    node_id: ("bbc78216-1118-4ec7-ad7e-5d4175fcecd2"),
-                    port: ("00000000-0000-0000-0000-000000000002"),
-                ), Const(Enum("average_neutral"))),
-                ((
-                    node_id: ("e156726f-3c5b-4d41-bbeb-380773608e40"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ), Wire((
-                    node_id: ("fabb092d-f756-441d-b6f5-1d1e629beda1"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ))),
-                ((
-                    node_id: ("efc228bd-27f8-455a-8e22-97dbd688a2c6"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ), Wire((
-                    node_id: ("043a77db-9446-4ded-9231-8bac95b7fe12"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ))),
-                ((
-                    node_id: ("f69f0aa7-6de4-4660-8dc5-1ec9f19d18de"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ), Wire((
-                    node_id: ("8c44e556-5072-44fc-8802-9ae2feec2421"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ))),
-                ((
-                    node_id: ("f69f0aa7-6de4-4660-8dc5-1ec9f19d18de"),
-                    port: ("00000000-0000-0000-0000-000000000002"),
-                ), Const(FsPath("output/starless.png"))),
-                ((
-                    node_id: ("f69f0aa7-6de4-4660-8dc5-1ec9f19d18de"),
-                    port: ("00000000-0000-0000-0000-000000000003"),
-                ), Const(Enum("RGB u8"))),
-                ((
-                    node_id: ("f74c1e36-8888-4301-95b1-95e194e106c7"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ), Wire((
-                    node_id: ("7e110fc6-8391-48bc-b07b-c970827bcdd2"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ))),
-                ((
-                    node_id: ("f74c1e36-8888-4301-95b1-95e194e106c7"),
-                    port: ("00000000-0000-0000-0000-000000000002"),
-                ), Const(FsPath("models/StarNet2_weights.onnx"))),
-                ((
-                    node_id: ("fabb092d-f756-441d-b6f5-1d1e629beda1"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ), Wire((
-                    node_id: ("8c44e556-5072-44fc-8802-9ae2feec2421"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ))),
-                ((
-                    node_id: ("fabb092d-f756-441d-b6f5-1d1e629beda1"),
-                    port: ("00000000-0000-0000-0000-000000000002"),
-                ), Wire((
-                    node_id: ("fd576928-3f2a-4ba9-9d38-1be67824652f"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ))),
-                ((
-                    node_id: ("fabb092d-f756-441d-b6f5-1d1e629beda1"),
-                    port: ("00000000-0000-0000-0000-000000000003"),
-                ), Const(Enum("Add"))),
-                ((
-                    node_id: ("fabb092d-f756-441d-b6f5-1d1e629beda1"),
-                    port: ("00000000-0000-0000-0000-000000000004"),
-                ), Const(Float(1.0))),
-                ((
-                    node_id: ("fabb092d-f756-441d-b6f5-1d1e629beda1"),
-                    port: ("00000000-0000-0000-0000-000000000005"),
-                ), Const(Enum("Black"))),
-                ((
-                    node_id: ("fd576928-3f2a-4ba9-9d38-1be67824652f"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ), Wire((
-                    node_id: ("f74c1e36-8888-4301-95b1-95e194e106c7"),
-                    port: ("00000000-0000-0000-0000-000000000002"),
-                ))),
-                ((
-                    node_id: ("fd576928-3f2a-4ba9-9d38-1be67824652f"),
-                    port: ("00000000-0000-0000-0000-000000000002"),
-                ), Const(Float(-0.055))),
-                ((
-                    node_id: ("fd576928-3f2a-4ba9-9d38-1be67824652f"),
-                    port: ("00000000-0000-0000-0000-000000000003"),
-                ), Const(Float(1.084))),
-                ((
-                    node_id: ("fd576928-3f2a-4ba9-9d38-1be67824652f"),
-                    port: ("00000000-0000-0000-0000-000000000004"),
-                ), Const(Enum("Black"))),
-            ],
-            subscriptions: [
-                (
-                    event: (
-                        node_id: ("5fcd3fd1-6bb5-4241-ab6e-d4397a454896"),
-                        event: ("00000000-0000-0000-0000-000000000002"),
+            ties: {
+                ("3dd7d08e-b268-436a-8fc8-65ba6846941a"): (
+                    pos: (1671.6902, 47.853752),
+                    angle: Auto,
+                ),
+                ("ce3e8c59-aee2-4cb5-b8c5-0ecf3a36f378"): (
+                    pos: (2545.5146, 6.76511),
+                    angle: Auto,
+                ),
+                ("f6b0a704-e1a9-4cab-9185-c9b11f6c502b"): (
+                    pos: (2617.229, 427.17523),
+                    angle: Auto,
+                ),
+                ("fb6c40c5-ea64-4051-8f81-90ae351d3454"): (
+                    pos: (2157.5488, 481.0443),
+                    angle: Auto,
+                ),
+            },
+            routes: {
+                Data((
+                    output: (
+                        node_id: ("8c44e556-5072-44fc-8802-9ae2feec2421"),
+                        port: 1,
                     ),
-                    subscriber: ("5fb6630e-e3aa-4f4d-9b48-d8ee886a2efc"),
-                ),
+                    input: (
+                        node_id: ("2067de48-57e0-4900-b589-32320647bb55"),
+                        port: 1,
+                    ),
+                )): [
+                    ("ce3e8c59-aee2-4cb5-b8c5-0ecf3a36f378"),
+                ],
+                Data((
+                    output: (
+                        node_id: ("8c44e556-5072-44fc-8802-9ae2feec2421"),
+                        port: 1,
+                    ),
+                    input: (
+                        node_id: ("f69f0aa7-6de4-4660-8dc5-1ec9f19d18de"),
+                        port: 1,
+                    ),
+                )): [
+                    ("ce3e8c59-aee2-4cb5-b8c5-0ecf3a36f378"),
+                ],
+                Data((
+                    output: (
+                        node_id: ("f74c1e36-8888-4301-95b1-95e194e106c7"),
+                        port: 1,
+                    ),
+                    input: (
+                        node_id: ("043a77db-9446-4ded-9231-8bac95b7fe12"),
+                        port: 1,
+                    ),
+                )): [
+                    ("3dd7d08e-b268-436a-8fc8-65ba6846941a"),
+                ],
+                Data((
+                    output: (
+                        node_id: ("f74c1e36-8888-4301-95b1-95e194e106c7"),
+                        port: 1,
+                    ),
+                    input: (
+                        node_id: ("609d124e-47c7-43c1-adef-32db510ac421"),
+                        port: 1,
+                    ),
+                )): [
+                    ("3dd7d08e-b268-436a-8fc8-65ba6846941a"),
+                ],
+                Data((
+                    output: (
+                        node_id: ("f74c1e36-8888-4301-95b1-95e194e106c7"),
+                        port: 2,
+                    ),
+                    input: (
+                        node_id: ("fd576928-3f2a-4ba9-9d38-1be67824652f"),
+                        port: 1,
+                    ),
+                )): [
+                    ("3dd7d08e-b268-436a-8fc8-65ba6846941a"),
+                ],
+                Data((
+                    output: (
+                        node_id: ("fabb092d-f756-441d-b6f5-1d1e629beda1"),
+                        port: 1,
+                    ),
+                    input: (
+                        node_id: ("0d921c89-28c0-445f-a759-33f28164085e"),
+                        port: 1,
+                    ),
+                )): [
+                    ("f6b0a704-e1a9-4cab-9185-c9b11f6c502b"),
+                ],
+                Data((
+                    output: (
+                        node_id: ("fabb092d-f756-441d-b6f5-1d1e629beda1"),
+                        port: 1,
+                    ),
+                    input: (
+                        node_id: ("e156726f-3c5b-4d41-bbeb-380773608e40"),
+                        port: 1,
+                    ),
+                )): [
+                    ("f6b0a704-e1a9-4cab-9185-c9b11f6c502b"),
+                ],
+                Data((
+                    output: (
+                        node_id: ("fd576928-3f2a-4ba9-9d38-1be67824652f"),
+                        port: 1,
+                    ),
+                    input: (
+                        node_id: ("41884f76-a80f-4bb9-82c4-83e5016d37a9"),
+                        port: 1,
+                    ),
+                )): [
+                    ("fb6c40c5-ea64-4051-8f81-90ae351d3454"),
+                ],
+                Data((
+                    output: (
+                        node_id: ("fd576928-3f2a-4ba9-9d38-1be67824652f"),
+                        port: 1,
+                    ),
+                    input: (
+                        node_id: ("fabb092d-f756-441d-b6f5-1d1e629beda1"),
+                        port: 2,
+                    ),
+                )): [
+                    ("fb6c40c5-ea64-4051-8f81-90ae351d3454"),
+                ],
+            },
+            viewport: (
+                pan: (-300.13354, 375.5999),
+                zoom: 0.34277564,
+            ),
+            selected: [
+                Node(("25b00fb1-cdc1-4b3f-b927-1aa43b072784")),
             ],
-            stubs: [],
         ),
-        subgraphs: {},
-    ),
-    main_view: (
-        node_placements: {
-            ("043a77db-9446-4ded-9231-8bac95b7fe12"): (
-                pos: (1807.5868, -46.54965),
-                z: 17,
-            ),
-            ("0d921c89-28c0-445f-a759-33f28164085e"): (
-                pos: (2730.8987, 201.80232),
-                z: 38,
-            ),
-            ("12981187-f976-4192-8f54-bc3c4523544e"): (
-                pos: (1226.7373, -880.64386),
-                z: 32,
-            ),
-            ("20380988-300d-4857-af58-7497acd6848a"): (
-                pos: (2594.988, -978.339),
-                z: 2,
-            ),
-            ("2067de48-57e0-4900-b589-32320647bb55"): (
-                pos: (2701.5977, -405.3095),
-                z: 59,
-            ),
-            ("25b00fb1-cdc1-4b3f-b927-1aa43b072784"): (
-                pos: (1603.1246, -922.32043),
-                z: 69,
-            ),
-            ("2b827f10-a3a1-4d54-bb25-a40133b3a18c"): (
-                pos: (2879.88, -952.1894),
-                z: 35,
-            ),
-            ("41884f76-a80f-4bb9-82c4-83e5016d37a9"): (
-                pos: (2257.6165, 687.05725),
-                z: 64,
-            ),
-            ("5fb6630e-e3aa-4f4d-9b48-d8ee886a2efc"): (
-                pos: (2597.929, -665.3271),
-                z: 3,
-            ),
-            ("5fcd3fd1-6bb5-4241-ab6e-d4397a454896"): (
-                pos: (2230.3037, -877.5497),
-                z: 1,
-            ),
-            ("609d124e-47c7-43c1-adef-32db510ac421"): (
-                pos: (1895.5132, -391.27826),
-                z: 15,
-            ),
-            ("7e110fc6-8391-48bc-b07b-c970827bcdd2"): (
-                pos: (990.4419, -27.922207),
-                z: 6,
-            ),
-            ("8c44e556-5072-44fc-8802-9ae2feec2421"): (
-                pos: (2183.4417, -2.1152554),
-                z: 68,
-            ),
-            ("bbc78216-1118-4ec7-ad7e-5d4175fcecd2"): (
-                pos: (991.1479, -423.137),
-                z: 49,
-            ),
-            ("e156726f-3c5b-4d41-bbeb-380773608e40"): (
-                pos: (2697.4136, 467.03464),
-                z: 65,
-            ),
-            ("efc228bd-27f8-455a-8e22-97dbd688a2c6"): (
-                pos: (2282.0867, -448.17307),
-                z: 67,
-            ),
-            ("f69f0aa7-6de4-4660-8dc5-1ec9f19d18de"): (
-                pos: (2751.5334, -46.569458),
-                z: 43,
-            ),
-            ("f74c1e36-8888-4301-95b1-95e194e106c7"): (
-                pos: (1336.2095, -32.977932),
-                z: 8,
-            ),
-            ("fabb092d-f756-441d-b6f5-1d1e629beda1"): (
-                pos: (2259.8086, 373.90363),
-                z: 57,
-            ),
-            ("fd576928-3f2a-4ba9-9d38-1be67824652f"): (
-                pos: (1781.6898, 317.00525),
-                z: 26,
-            ),
-        },
-        ties: {
-            ("3dd7d08e-b268-436a-8fc8-65ba6846941a"): (
-                pos: (1671.6902, 47.853752),
-                angle: Auto,
-            ),
-            ("ce3e8c59-aee2-4cb5-b8c5-0ecf3a36f378"): (
-                pos: (2545.5146, 6.76511),
-                angle: Auto,
-            ),
-            ("f6b0a704-e1a9-4cab-9185-c9b11f6c502b"): (
-                pos: (2617.229, 427.17523),
-                angle: Auto,
-            ),
-            ("fb6c40c5-ea64-4051-8f81-90ae351d3454"): (
-                pos: (2157.5488, 481.0443),
-                angle: Auto,
-            ),
-        },
-        routes: {
-            Data((
-                output: (
-                    node_id: ("8c44e556-5072-44fc-8802-9ae2feec2421"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ),
-                input: (
-                    node_id: ("2067de48-57e0-4900-b589-32320647bb55"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ),
-            )): [
-                ("ce3e8c59-aee2-4cb5-b8c5-0ecf3a36f378"),
+        sides: {},
+        layout: (
+            nodes: [
+                Split((
+                    axis: X,
+                    ratio: 0.6045472,
+                    first: (1),
+                    second: (2),
+                )),
+                Group((
+                    id: (0),
+                    tabs: [
+                        Graph(Main),
+                        Preferences,
+                    ],
+                    active: 0,
+                )),
+                Split((
+                    axis: Y,
+                    ratio: 0.7012742,
+                    first: (3),
+                    second: (4),
+                )),
+                Group((
+                    id: (1),
+                    tabs: [
+                        ImageViewer([
+                            ("2067de48-57e0-4900-b589-32320647bb55"),
+                        ]),
+                        Inspector(Selection),
+                    ],
+                    active: 1,
+                )),
+                Group((
+                    id: (2),
+                    tabs: [
+                        ImageViewer([
+                            ("e156726f-3c5b-4d41-bbeb-380773608e40"),
+                        ]),
+                        ImageViewer([
+                            ("efc228bd-27f8-455a-8e22-97dbd688a2c6"),
+                        ]),
+                    ],
+                    active: 0,
+                )),
             ],
-            Data((
-                output: (
-                    node_id: ("8c44e556-5072-44fc-8802-9ae2feec2421"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ),
-                input: (
-                    node_id: ("f69f0aa7-6de4-4660-8dc5-1ec9f19d18de"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ),
-            )): [
-                ("ce3e8c59-aee2-4cb5-b8c5-0ecf3a36f378"),
-            ],
-            Data((
-                output: (
-                    node_id: ("f74c1e36-8888-4301-95b1-95e194e106c7"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ),
-                input: (
-                    node_id: ("043a77db-9446-4ded-9231-8bac95b7fe12"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ),
-            )): [
-                ("3dd7d08e-b268-436a-8fc8-65ba6846941a"),
-            ],
-            Data((
-                output: (
-                    node_id: ("f74c1e36-8888-4301-95b1-95e194e106c7"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ),
-                input: (
-                    node_id: ("609d124e-47c7-43c1-adef-32db510ac421"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ),
-            )): [
-                ("3dd7d08e-b268-436a-8fc8-65ba6846941a"),
-            ],
-            Data((
-                output: (
-                    node_id: ("f74c1e36-8888-4301-95b1-95e194e106c7"),
-                    port: ("00000000-0000-0000-0000-000000000002"),
-                ),
-                input: (
-                    node_id: ("fd576928-3f2a-4ba9-9d38-1be67824652f"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ),
-            )): [
-                ("3dd7d08e-b268-436a-8fc8-65ba6846941a"),
-            ],
-            Data((
-                output: (
-                    node_id: ("fabb092d-f756-441d-b6f5-1d1e629beda1"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ),
-                input: (
-                    node_id: ("0d921c89-28c0-445f-a759-33f28164085e"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ),
-            )): [
-                ("f6b0a704-e1a9-4cab-9185-c9b11f6c502b"),
-            ],
-            Data((
-                output: (
-                    node_id: ("fabb092d-f756-441d-b6f5-1d1e629beda1"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ),
-                input: (
-                    node_id: ("e156726f-3c5b-4d41-bbeb-380773608e40"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ),
-            )): [
-                ("f6b0a704-e1a9-4cab-9185-c9b11f6c502b"),
-            ],
-            Data((
-                output: (
-                    node_id: ("fd576928-3f2a-4ba9-9d38-1be67824652f"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ),
-                input: (
-                    node_id: ("41884f76-a80f-4bb9-82c4-83e5016d37a9"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ),
-            )): [
-                ("fb6c40c5-ea64-4051-8f81-90ae351d3454"),
-            ],
-            Data((
-                output: (
-                    node_id: ("fd576928-3f2a-4ba9-9d38-1be67824652f"),
-                    port: ("00000000-0000-0000-0000-000000000001"),
-                ),
-                input: (
-                    node_id: ("fabb092d-f756-441d-b6f5-1d1e629beda1"),
-                    port: ("00000000-0000-0000-0000-000000000002"),
-                ),
-            )): [
-                ("fb6c40c5-ea64-4051-8f81-90ae351d3454"),
-            ],
-        },
-        viewport: (
-            pan: (-300.13354, 375.5999),
-            zoom: 0.34277564,
+            focused: (0),
+            next_group: 6,
         ),
-        selected: [
-            Node(("25b00fb1-cdc1-4b3f-b927-1aa43b072784")),
-        ],
+        active: Main,
     ),
-    sides: {},
-    layout: (
-        nodes: [
-            Split((
-                axis: X,
-                ratio: 0.6045472,
-                first: (1),
-                second: (2),
-            )),
-            Group((
-                id: (0),
-                tabs: [
-                    Graph(Main),
-                    Preferences,
+    manifest: (
+        funcs: {
+            ("06b169d2-d3d8-43fb-ba80-c566fcffea44"): (
+                name: "Print",
+                category: "System",
+                inputs: [
+                    (
+                        id: 1,
+                        port: (
+                            name: "Value",
+                            data_type: Any,
+                            default_value: None,
+                        ),
+                    ),
                 ],
-                active: 0,
-            )),
-            Split((
-                axis: Y,
-                ratio: 0.7012742,
-                first: (3),
-                second: (4),
-            )),
-            Group((
-                id: (1),
-                tabs: [
-                    ImageViewer([("2067de48-57e0-4900-b589-32320647bb55")]),
-                    Inspector(Selection),
+                outputs: [],
+                events: [],
+            ),
+            ("0c17bcbe-d757-43be-b184-27b429e8b434"): (
+                name: "Save Image",
+                category: "Image",
+                inputs: [
+                    (
+                        id: 1,
+                        port: (
+                            name: "Image",
+                            data_type: Custom(("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2")),
+                            default_value: None,
+                        ),
+                    ),
+                    (
+                        id: 2,
+                        port: (
+                            name: "Path",
+                            data_type: File(
+                                kind: ("404e04fb-f5c4-43dd-9ee0-684ab9b16200"),
+                                mode: Save,
+                            ),
+                            default_value: None,
+                        ),
+                    ),
+                    (
+                        id: 3,
+                        port: (
+                            name: "Format",
+                            data_type: Enum(("6d9db73e-5c92-4332-af0d-b2eb7c95acd0")),
+                            default_value: Some(Enum("As Is")),
+                        ),
+                    ),
                 ],
-                active: 1,
-            )),
-            Group((
-                id: (2),
-                tabs: [
-                    ImageViewer([("e156726f-3c5b-4d41-bbeb-380773608e40")]),
-                    ImageViewer([("efc228bd-27f8-455a-8e22-97dbd688a2c6")]),
+                outputs: [],
+                events: [],
+            ),
+            ("60c31a76-eed4-467c-9ba3-5c89d294a91b"): (
+                name: "ML Star Removal",
+                category: "Astro",
+                inputs: [
+                    (
+                        id: 1,
+                        port: (
+                            name: "Image",
+                            data_type: Custom(("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2")),
+                            default_value: None,
+                        ),
+                    ),
+                    (
+                        id: 2,
+                        port: (
+                            name: "Model",
+                            data_type: File(
+                                kind: ("5bea0866-9834-4ddd-be25-4c4c5fe6d3c5"),
+                                mode: Open,
+                            ),
+                            default_value: Some(FsPath("/Users/xxorza/Projects/Darkroom/darkroom/StarNet2_weights.onnx")),
+                        ),
+                    ),
                 ],
-                active: 0,
-            )),
-        ],
-        focused: (0),
-        next_group: 6,
+                outputs: [
+                    (
+                        id: 1,
+                        port: (
+                            name: "Starless",
+                            data_type: Custom(("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2")),
+                        ),
+                    ),
+                    (
+                        id: 2,
+                        port: (
+                            name: "Stars",
+                            data_type: Custom(("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2")),
+                        ),
+                    ),
+                ],
+                events: [],
+            ),
+            ("714dbc9a-ac0a-428b-90ee-eb13c1652c9e"): (
+                name: "Frame Event",
+                category: "System",
+                inputs: [
+                    (
+                        id: 1,
+                        port: (
+                            name: "Frequency",
+                            data_type: Float,
+                            default_value: Some(Float(1.0)),
+                        ),
+                    ),
+                ],
+                outputs: [
+                    (
+                        id: 1,
+                        port: (
+                            name: "Delta",
+                            data_type: Float,
+                        ),
+                    ),
+                    (
+                        id: 2,
+                        port: (
+                            name: "Frame #",
+                            data_type: Int,
+                        ),
+                    ),
+                ],
+                events: [
+                    (
+                        id: 1,
+                        port: (
+                            name: "Always",
+                        ),
+                    ),
+                    (
+                        id: 2,
+                        port: (
+                            name: "FPS",
+                        ),
+                    ),
+                ],
+            ),
+            ("7d08e8c7-fd22-46d4-bb86-c0bd3c9e76fe"): (
+                name: "Preview",
+                category: "System",
+                inputs: [
+                    (
+                        id: 1,
+                        port: (
+                            name: "Value",
+                            data_type: Any,
+                            default_value: None,
+                        ),
+                    ),
+                ],
+                outputs: [],
+                events: [],
+            ),
+            ("8854cccc-81d3-4e26-8b4f-e33d62e3117b"): (
+                name: "Concat",
+                category: "System",
+                inputs: [
+                    (
+                        id: 1,
+                        port: (
+                            name: "A",
+                            data_type: Any,
+                            default_value: None,
+                        ),
+                    ),
+                    (
+                        id: 2,
+                        port: (
+                            name: "B",
+                            data_type: Any,
+                            default_value: None,
+                        ),
+                    ),
+                ],
+                outputs: [
+                    (
+                        id: 1,
+                        port: (
+                            name: "Text",
+                            data_type: String,
+                        ),
+                    ),
+                ],
+                events: [],
+            ),
+            ("975cc74b-8412-4293-b2cb-ef8d41fdd9b3"): (
+                name: "Blend",
+                category: "Image",
+                inputs: [
+                    (
+                        id: 1,
+                        port: (
+                            name: "Source",
+                            data_type: Custom(("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2")),
+                            default_value: None,
+                        ),
+                    ),
+                    (
+                        id: 2,
+                        port: (
+                            name: "Destination",
+                            data_type: Custom(("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2")),
+                            default_value: None,
+                        ),
+                    ),
+                    (
+                        id: 3,
+                        port: (
+                            name: "Mode",
+                            data_type: Enum(("54d531cf-d353-4e30-8ea7-8823a9b5305f")),
+                            default_value: Some(Enum("Normal")),
+                        ),
+                    ),
+                    (
+                        id: 4,
+                        port: (
+                            name: "Alpha",
+                            data_type: Float,
+                            default_value: Some(Float(1.0)),
+                        ),
+                    ),
+                    (
+                        id: 5,
+                        port: (
+                            name: "Clamp",
+                            data_type: Enum(("3360655d-16af-47d8-a1bb-7ef0b3f0ddf9")),
+                            default_value: Some(Enum("Black")),
+                        ),
+                    ),
+                ],
+                outputs: [
+                    (
+                        id: 1,
+                        port: (
+                            name: "Image",
+                            data_type: Custom(("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2")),
+                        ),
+                    ),
+                ],
+                events: [],
+            ),
+            ("ace786f9-8a02-4ed1-93a0-ad67bf0680f8"): (
+                name: "ML Denoise",
+                category: "Astro",
+                inputs: [
+                    (
+                        id: 1,
+                        port: (
+                            name: "Image",
+                            data_type: Custom(("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2")),
+                            default_value: None,
+                        ),
+                    ),
+                    (
+                        id: 2,
+                        port: (
+                            name: "Model",
+                            data_type: File(
+                                kind: ("5bea0866-9834-4ddd-be25-4c4c5fe6d3c5"),
+                                mode: Open,
+                            ),
+                            default_value: Some(FsPath("/Users/xxorza/Projects/Darkroom/darkroom/DeepSNR_weights_v2.onnx")),
+                        ),
+                    ),
+                ],
+                outputs: [
+                    (
+                        id: 1,
+                        port: (
+                            name: "Image",
+                            data_type: Custom(("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2")),
+                        ),
+                    ),
+                ],
+                events: [],
+            ),
+            ("b02f5c42-7bda-48f6-81dd-81338efbb126"): (
+                name: "Stack Lights",
+                category: "Astro",
+                inputs: [
+                    (
+                        id: 1,
+                        port: (
+                            name: "Lights",
+                            data_type: File(
+                                kind: ("48ace2a5-0d6c-423c-a67c-48108930fd37"),
+                                mode: OpenMany,
+                            ),
+                            default_value: None,
+                        ),
+                    ),
+                    (
+                        id: 2,
+                        port: (
+                            name: "Masters",
+                            data_type: Custom(("db1bc978-1d0b-4ffc-9a74-6220eff8908e")),
+                            default_value: None,
+                        ),
+                    ),
+                    (
+                        id: 3,
+                        port: (
+                            name: "Detection",
+                            data_type: Custom(("4512544e-537c-4c1c-96ad-e596cc88d60d")),
+                            default_value: Some(Enum("wide_field")),
+                        ),
+                    ),
+                    (
+                        id: 4,
+                        port: (
+                            name: "Registration",
+                            data_type: Custom(("63cd4de9-b82f-4829-bea5-391da64e296f")),
+                            default_value: Some(Enum("default")),
+                        ),
+                    ),
+                    (
+                        id: 5,
+                        port: (
+                            name: "Combine",
+                            data_type: Custom(("843bff16-61ec-47db-9a86-64bb53c9c1cc")),
+                            default_value: Some(Enum("sigma_clipped")),
+                        ),
+                    ),
+                    (
+                        id: 6,
+                        port: (
+                            name: "Reference",
+                            data_type: Int,
+                            default_value: None,
+                        ),
+                    ),
+                ],
+                outputs: [
+                    (
+                        id: 1,
+                        port: (
+                            name: "Image",
+                            data_type: Custom(("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2")),
+                        ),
+                    ),
+                    (
+                        id: 2,
+                        port: (
+                            name: "Coverage",
+                            data_type: Custom(("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2")),
+                        ),
+                    ),
+                    (
+                        id: 3,
+                        port: (
+                            name: "Weight",
+                            data_type: Custom(("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2")),
+                        ),
+                    ),
+                ],
+                events: [],
+            ),
+            ("c15248e0-006a-4a4a-9aae-b1fc7886dea1"): (
+                name: "Auto Stretch",
+                category: "Astro",
+                inputs: [
+                    (
+                        id: 1,
+                        port: (
+                            name: "Image",
+                            data_type: Custom(("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2")),
+                            default_value: None,
+                        ),
+                    ),
+                    (
+                        id: 2,
+                        port: (
+                            name: "Method",
+                            data_type: Custom(("b08bb9a1-db12-43d4-aa57-fe3e3732e917")),
+                            default_value: Some(Enum("auto_asinh")),
+                        ),
+                    ),
+                ],
+                outputs: [
+                    (
+                        id: 1,
+                        port: (
+                            name: "Image",
+                            data_type: Custom(("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2")),
+                        ),
+                    ),
+                ],
+                events: [],
+            ),
+            ("ebe9a4d0-2cb1-4354-b66e-8e7bee7cb860"): (
+                name: "Brightness / Contrast",
+                category: "Image",
+                inputs: [
+                    (
+                        id: 1,
+                        port: (
+                            name: "Image",
+                            data_type: Custom(("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2")),
+                            default_value: None,
+                        ),
+                    ),
+                    (
+                        id: 2,
+                        port: (
+                            name: "Brightness",
+                            data_type: Float,
+                            default_value: Some(Float(0.0)),
+                        ),
+                    ),
+                    (
+                        id: 3,
+                        port: (
+                            name: "Contrast",
+                            data_type: Float,
+                            default_value: Some(Float(1.0)),
+                        ),
+                    ),
+                    (
+                        id: 4,
+                        port: (
+                            name: "Clamp",
+                            data_type: Enum(("3360655d-16af-47d8-a1bb-7ef0b3f0ddf9")),
+                            default_value: Some(Enum("Black")),
+                        ),
+                    ),
+                ],
+                outputs: [
+                    (
+                        id: 1,
+                        port: (
+                            name: "Image",
+                            data_type: Custom(("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2")),
+                        ),
+                    ),
+                ],
+                events: [],
+            ),
+            ("edec890e-5c23-49fb-a131-aaef3844d7c7"): (
+                name: "Run on Event",
+                category: "System",
+                inputs: [],
+                outputs: [],
+                events: [],
+            ),
+            ("ef0c2661-8553-4302-9251-95b2d383af19"): (
+                name: "SCNR",
+                category: "Astro",
+                inputs: [
+                    (
+                        id: 1,
+                        port: (
+                            name: "Image",
+                            data_type: Custom(("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2")),
+                            default_value: None,
+                        ),
+                    ),
+                    (
+                        id: 2,
+                        port: (
+                            name: "Protection",
+                            data_type: Custom(("cb80e688-a5ed-42fd-9087-6a9639a8b056")),
+                            default_value: Some(Enum("average_neutral")),
+                        ),
+                    ),
+                ],
+                outputs: [
+                    (
+                        id: 1,
+                        port: (
+                            name: "Image",
+                            data_type: Custom(("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2")),
+                        ),
+                    ),
+                ],
+                events: [],
+            ),
+            ("f2f6f1ff-5b10-409c-900f-d6b48750a529"): (
+                name: "Build Masters",
+                category: "Astro",
+                inputs: [
+                    (
+                        id: 1,
+                        port: (
+                            name: "Darks",
+                            data_type: File(
+                                kind: ("48ace2a5-0d6c-423c-a67c-48108930fd37"),
+                                mode: OpenMany,
+                            ),
+                            default_value: None,
+                        ),
+                    ),
+                    (
+                        id: 2,
+                        port: (
+                            name: "Flats",
+                            data_type: File(
+                                kind: ("48ace2a5-0d6c-423c-a67c-48108930fd37"),
+                                mode: OpenMany,
+                            ),
+                            default_value: None,
+                        ),
+                    ),
+                    (
+                        id: 3,
+                        port: (
+                            name: "Bias",
+                            data_type: File(
+                                kind: ("48ace2a5-0d6c-423c-a67c-48108930fd37"),
+                                mode: OpenMany,
+                            ),
+                            default_value: None,
+                        ),
+                    ),
+                    (
+                        id: 4,
+                        port: (
+                            name: "Flat Darks",
+                            data_type: File(
+                                kind: ("48ace2a5-0d6c-423c-a67c-48108930fd37"),
+                                mode: OpenMany,
+                            ),
+                            default_value: None,
+                        ),
+                    ),
+                    (
+                        id: 5,
+                        port: (
+                            name: "Sigma",
+                            data_type: Float,
+                            default_value: Some(Float(5.0)),
+                        ),
+                    ),
+                    (
+                        id: 6,
+                        port: (
+                            name: "Cache",
+                            data_type: Bool,
+                            default_value: Some(Bool(true)),
+                        ),
+                    ),
+                ],
+                outputs: [
+                    (
+                        id: 1,
+                        port: (
+                            name: "Masters",
+                            data_type: Custom(("db1bc978-1d0b-4ffc-9a74-6220eff8908e")),
+                        ),
+                    ),
+                ],
+                events: [],
+            ),
+        },
     ),
-    active: Main,
 )

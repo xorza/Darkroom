@@ -10,7 +10,7 @@ use crate::graph::func::lambda::FuncLambda;
 use crate::graph::func::value_variant::ValueVariant;
 use crate::graph::identity::{FuncId, PortId};
 use crate::graph::node::CacheMode;
-use crate::graph::ports::{InputDecl, OutputDecl, PortList, PortsError, numbered_port};
+use crate::graph::ports::{InputDecl, OutputDecl, PortList, PortsError};
 use crate::internals;
 
 const FUNC: FuncId = FuncId::from_u128(7);
@@ -79,18 +79,11 @@ fn validate_rejects_invalid_identities_ports_and_defaults() {
             Err(FuncValidationError::PureWithoutOutputs { func_id: FUNC }),
         ),
         (
-            func().input(0, int()),
-            ports(PortsError::NilId {
-                list: PortList::Inputs,
-                idx: 0,
-            }),
-        ),
-        (
             func().input(1, int()).input(1, int()),
             ports(PortsError::DuplicateId {
                 list: PortList::Inputs,
                 idx: 1,
-                port_id: numbered_port(1),
+                port_id: PortId::new(1),
             }),
         ),
         (
@@ -102,7 +95,7 @@ fn validate_rejects_invalid_identities_ports_and_defaults() {
             ports(PortsError::DuplicateId {
                 list: PortList::Events,
                 idx: 1,
-                port_id: numbered_port(2),
+                port_id: PortId::new(2),
             }),
         ),
     ];
@@ -189,12 +182,7 @@ fn a_port_takes_the_number_its_func_gives_it() {
         .output(7, OutputDecl::new("c", DataType::Int))
         .event(2, "tick", internals::stub_event())
         .build();
-    let ids = |ids: &[u128]| {
-        ids.iter()
-            .copied()
-            .map(PortId::from_u128)
-            .collect::<Vec<_>>()
-    };
+    let ids = |ids: &[u32]| ids.iter().copied().map(PortId::new).collect::<Vec<_>>();
     assert_eq!(
         func.inputs()
             .iter()
@@ -264,9 +252,18 @@ fn node_events_expose_names_and_arity() {
 #[test]
 #[should_panic(expected = "invalid function declaration \"func\": function \
                 Id(00000000-0000-0000-0000-000000000007) declares a port no declaration may hold: \
-                input 0 has the nil id")]
+                input 1 repeats the id PortId(1) of an earlier one")]
 fn build_refuses_a_declaration_validate_refuses() {
     func()
-        .input(0, InputDecl::required("value", DataType::Int))
+        .input(1, InputDecl::required("value", DataType::Int))
+        .input(1, InputDecl::required("other", DataType::Int))
         .build();
+}
+
+/// A port numbered 0 is refused where it is numbered, as a config field whose name hashes to 0
+/// would be: 0 is no port's id.
+#[test]
+#[should_panic(expected = "a port's number is not 0")]
+fn a_port_numbered_zero_is_refused_at_the_builder() {
+    let _ = func().input(0, InputDecl::required("value", DataType::Int));
 }

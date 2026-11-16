@@ -7,7 +7,7 @@ use super::*;
 use crate::graph::identity::{EventPort, PortId};
 use crate::graph::interface::Interface;
 use crate::graph::node::CacheMode;
-use crate::graph::ports::{InputDecl, OutputDecl, Ports, numbered_port};
+use crate::graph::ports::{InputDecl, Numbered, OutputDecl, Ports};
 use crate::graph::subgraph::Subgraph;
 use crate::internals::engine::TestEngine;
 use crate::internals::test_graph::sets::{
@@ -29,36 +29,24 @@ fn wire(graph: &mut Graph, consumer: (NodeId, PortId), producer: (NodeId, PortId
 }
 
 /// The first port of each func the library declares, as it numbers them; `add`'s `b` is 2.
-const FIRST: PortId = numbered_port(1);
-const SECOND: PortId = numbered_port(2);
+const FIRST: PortId = PortId::new(1);
+const SECOND: PortId = PortId::new(2);
 /// The adder's interface ports, on its instances and its boundary nodes alike.
-const A: PortId = PortId::from_u128(101);
-const B: PortId = PortId::from_u128(102);
-const SUM: PortId = PortId::from_u128(201);
-const PASS: PortId = PortId::from_u128(202);
+const A: PortId = PortId::new(101);
+const B: PortId = PortId::new(102);
+const SUM: PortId = PortId::new(201);
+const PASS: PortId = PortId::new(202);
 
 /// Inputs `a` and optional `b`, defaulting to 5; outputs `sum` and `pass`.
 fn adder_interface() -> Interface {
     Interface::new(Ports {
         inputs: vec![
-            InputDecl {
-                id: A,
-                ..InputDecl::required("a", DataType::Int)
-            },
-            InputDecl {
-                id: B,
-                ..InputDecl::optional("b", DataType::Int).default(5i64)
-            },
+            Numbered::new(A, InputDecl::required("a", DataType::Int)),
+            Numbered::new(B, InputDecl::optional("b", DataType::Int).default(5i64)),
         ],
         outputs: vec![
-            OutputDecl {
-                id: SUM,
-                ..OutputDecl::new("sum", DataType::Int)
-            },
-            OutputDecl {
-                id: PASS,
-                ..OutputDecl::new("pass", DataType::Int)
-            },
+            Numbered::new(SUM, OutputDecl::new("sum", DataType::Int)),
+            Numbered::new(PASS, OutputDecl::new("pass", DataType::Int)),
         ],
     })
 }
@@ -213,15 +201,15 @@ fn a_subgraph_compiles_to_its_hand_inlined_twin() {
 #[test]
 fn a_const_only_port_lowers_to_the_instances_constant() {
     const CONFIGURED: SubgraphId = s(80);
-    const CONFIG: PortId = PortId::from_u128(301);
+    const CONFIG: PortId = PortId::new(301);
     let library = library();
     let mut configured = Subgraph::new(
         "configured",
         Interface::new(Ports {
-            inputs: vec![InputDecl {
-                id: CONFIG,
-                ..InputDecl::required("config", DataType::Int).const_only()
-            }],
+            inputs: vec![Numbered::new(
+                CONFIG,
+                InputDecl::required("config", DataType::Int).const_only(),
+            )],
             outputs: vec![],
         }),
     );

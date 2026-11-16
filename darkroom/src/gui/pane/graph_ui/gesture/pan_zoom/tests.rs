@@ -15,9 +15,9 @@ fn node_bounds_uses_cached_sizes_and_falls_back_to_points() {
     //   b: (1000,500) 200×100 — culled, but its size is still cached
     //   c: (-50,300) never measured — contributes a point
     let mut fixture = DocumentFixture::default();
-    let a = fixture.stub_at(Vec2::new(0.0, 0.0));
-    let b = fixture.stub_at(Vec2::new(1000.0, 500.0));
-    fixture.stub_at(Vec2::new(-50.0, 300.0));
+    let a = fixture.ghost_node_at(Vec2::new(0.0, 0.0));
+    let b = fixture.ghost_node_at(Vec2::new(1000.0, 500.0));
+    fixture.ghost_node_at(Vec2::new(-50.0, 300.0));
     let scene = GraphCtxFixture::over(fixture);
     let mut geometry = CanvasGeometry::default();
     geometry.seed_node_size(a, Size::new(150.0, 80.0));

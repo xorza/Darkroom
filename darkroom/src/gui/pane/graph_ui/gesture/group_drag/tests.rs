@@ -1,6 +1,6 @@
 use glam::Vec2;
 use palantir::{Key, Modifiers, PointerButton};
-use scenarium::{InputPort, OutputPort, numbered_port};
+use scenarium::{InputPort, OutputPort, PortId};
 
 use crate::core::document::internals::DocumentFixture;
 use crate::core::document::item_id::ItemId;
@@ -176,12 +176,12 @@ fn a_drag_of_two_nodes_takes_the_tie_between_them() {
     let mut fixture = DocumentFixture::default();
     let [a, b, c] = [0.0, 220.0, 440.0].map(|x| fixture.node_at(Vec2::new(x, 0.0)));
     let ab = fixture.wire(
-        OutputPort::new(a, numbered_port(1)),
-        InputPort::new(b, numbered_port(1)),
+        OutputPort::new(a, PortId::new(1)),
+        InputPort::new(b, PortId::new(1)),
     );
     let ac = fixture.wire(
-        OutputPort::new(a, numbered_port(1)),
-        InputPort::new(c, numbered_port(1)),
+        OutputPort::new(a, PortId::new(1)),
+        InputPort::new(c, PortId::new(1)),
     );
     let inner = fixture.tie(Vec2::new(110.0, 30.0), [ab]);
     fixture.tie(Vec2::new(200.0, 60.0), [ab, ac]);

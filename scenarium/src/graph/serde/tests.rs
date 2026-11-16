@@ -9,9 +9,9 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::graph::Graph;
 use crate::graph::binding::Binding;
+use crate::graph::identity::PortId;
 use crate::graph::identity::{FuncId, InputPort, NodeId};
 use crate::graph::node::Node;
-use crate::graph::ports::numbered_port;
 use crate::graph::serde::{deserialize_bindings, deserialize_nodes};
 use crate::internals;
 
@@ -34,7 +34,7 @@ impl<'de> Deserialize<'de> for CheckedBindings {
 /// so a release run can prove the document does not decode but not which check refused it.
 #[test]
 fn duplicate_ports_fail_in_every_binding_format() {
-    let port = InputPort::new(NodeId::unique(), numbered_port(1));
+    let port = InputPort::new(NodeId::unique(), PortId::new(1));
     let bindings = RawBindings(vec![
         (port, Binding::Const(1i64.into())),
         (port, Binding::Const(2i64.into())),

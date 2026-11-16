@@ -1,7 +1,7 @@
 use common::Libm;
 use glam::Vec2;
 use palantir::{Modifiers, PointerButton};
-use scenarium::{GraphId, InputPort, OutputPort, numbered_port};
+use scenarium::{GraphId, InputPort, OutputPort, PortId};
 
 use crate::core::document::internals::DocumentFixture;
 use crate::core::document::item_id::ItemId;
@@ -82,8 +82,8 @@ fn crossed(tie_first: bool) -> Crossed {
     ]
     .map(|(from, to, input)| {
         fixture.wire(
-            OutputPort::new(from, numbered_port(1)),
-            InputPort::new(to, numbered_port(input)),
+            OutputPort::new(from, PortId::new(1)),
+            InputPort::new(to, PortId::new(input)),
         )
     });
     if tie_first {
@@ -91,8 +91,8 @@ fn crossed(tie_first: bool) -> Crossed {
     }
     let mut h = CanvasHarness::new(fixture);
     h.prime(3);
-    let output = h.port_center(PortRef::from(OutputPort::new(left_a, numbered_port(1))));
-    let input = h.port_center(PortRef::from(InputPort::new(right_a, numbered_port(1))));
+    let output = h.port_center(PortRef::from(OutputPort::new(left_a, PortId::new(1))));
+    let input = h.port_center(PortRef::from(InputPort::new(right_a, PortId::new(1))));
     let x = f32::midpoint(output.x, input.x);
     Crossed { h, wires, x }
 }
@@ -202,8 +202,8 @@ fn one_tie(selected: bool) -> (CanvasHarness, TieId) {
     let from = fixture.node_at(Vec2::new(40.0, 200.0));
     let to = fixture.node_at(Vec2::new(700.0, 200.0));
     let wire = fixture.wire(
-        OutputPort::new(from, numbered_port(1)),
-        InputPort::new(to, numbered_port(1)),
+        OutputPort::new(from, PortId::new(1)),
+        InputPort::new(to, PortId::new(1)),
     );
     let tie = fixture.tie(Vec2::new(470.0, 250.0), [wire]);
     if selected {
@@ -337,8 +337,8 @@ fn two_wire_tie() -> (CanvasHarness, TieId, [WireKey; 2]) {
     let to = fixture.node_at(Vec2::new(700.0, 200.0));
     let wires = [1, 2].map(|input| {
         fixture.wire(
-            OutputPort::new(from, numbered_port(1)),
-            InputPort::new(to, numbered_port(input)),
+            OutputPort::new(from, PortId::new(1)),
+            InputPort::new(to, PortId::new(input)),
         )
     });
     let tie = fixture.tie(Vec2::new(470.0, 250.0), wires);

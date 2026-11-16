@@ -17,7 +17,7 @@ use crate::core::edit::error::EditRefusal;
 /// changes none of them.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct EditFacts {
-    /// A node or a stub came or went.
+    /// A node or a ghost node came or went.
     pub(crate) node_set: bool,
     /// A node's name changed.
     pub(crate) renamed: bool,
@@ -29,6 +29,8 @@ pub(crate) struct EditFacts {
     pub(crate) refused: Option<EditRefusal>,
     /// How many bindings an interface edit of the batch took out, in every graph.
     pub(crate) dropped: usize,
+    /// How many bindings an update of the batch kept as ghosts, in every graph.
+    pub(crate) ghosted: usize,
     /// Which graphs the edit wrote.
     pub(crate) touched: Touched,
 }
@@ -75,6 +77,7 @@ impl EditFacts {
         ports: false,
         refused: None,
         dropped: 0,
+        ghosted: 0,
         touched: Touched::Nothing,
     };
 
@@ -100,6 +103,7 @@ impl BitOr for EditFacts {
             ports: self.ports || rhs.ports,
             refused: rhs.refused.or(self.refused),
             dropped: self.dropped + rhs.dropped,
+            ghosted: self.ghosted + rhs.ghosted,
             touched: self.touched | rhs.touched,
         }
     }

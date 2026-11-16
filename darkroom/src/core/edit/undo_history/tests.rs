@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::rc::Rc;
 
 use glam::Vec2;
-use scenarium::{GraphId, Library, NodeId, numbered_port};
+use scenarium::{GraphId, Library, NodeId, PortId};
 
 use super::*;
 use crate::core::document::internals::{self, DocumentFixture};
@@ -249,8 +249,8 @@ fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
     let (a, b) = (named(&h, "get_b"), named(&h, "sum"));
     // Edge a -> b, then select both for deletion.
     h.document.graphs.main_mut().set_input_binding(
-        InputPort::new(b, numbered_port(1)),
-        Binding::wire(a, numbered_port(1)),
+        InputPort::new(b, PortId::new(1)),
+        Binding::wire(a, PortId::new(1)),
     );
     h.document.main_view.selected = [a, b].map(ItemId::Node).into_iter().collect();
 
@@ -268,9 +268,9 @@ fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
         .graphs
         .main()
         .bindings
-        .get(&InputPort::new(b, numbered_port(1)))
+        .get(&InputPort::new(b, PortId::new(1)))
     {
-        Some(Binding::Wire(src)) => assert_eq!(*src, OutputPort::new(a, numbered_port(1))),
+        Some(Binding::Wire(src)) => assert_eq!(*src, OutputPort::new(a, PortId::new(1))),
         other => panic!("expected restored a->b edge, got {other:?}"),
     }
     assert!(!h.undo(), "the whole delete collapsed to one undo entry");

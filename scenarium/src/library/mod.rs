@@ -10,7 +10,7 @@
 //!   version, a build without a feature or a shared subgraph can name one this build does not
 //!   register; the port, its bindings and its constants stay as written. A constant of an
 //!   unknown enum is kept unchecked, an unknown file kind is within itself alone, and an unknown
-//!   custom type has no disk codec. The same promise a stub makes for a node with no func: kept,
+//!   custom type has no disk codec. The same promise a ghost node makes for a node with no func: kept,
 //!   inert, shown with its reason, live again when the library has it.
 
 use std::collections::HashMap;

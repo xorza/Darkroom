@@ -1,5 +1,5 @@
 use glam::Vec2;
-use scenarium::{Binding, GraphId, numbered_port};
+use scenarium::{Binding, GraphId, PortId};
 
 use crate::core::document::internals::DocumentFixture;
 use crate::core::preview_sink;
@@ -26,7 +26,7 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
         .library
         .add(preview_sink::func(Arc::<PreviewSink>::default()));
     let producer = fixture.node(0);
-    let out_port = PortRef::output(producer, numbered_port(1));
+    let out_port = PortRef::output(producer, PortId::new(1));
 
     // Two frames, so the output circle has a widget id and `CanvasGeometry` a measured center;
     // the gesture refuses an unmeasured port.
@@ -66,7 +66,7 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
             GraphIntent::SetInput { input, to: Some(Binding::Wire(src)) }
                 if input.node_id == *node_id
                     && src.node_id == producer
-                    && src.port == numbered_port(1)
+                    && src.port == PortId::new(1)
         )),
         "and it is already reading the port the drag came off: {spawned:?}"
     );
@@ -89,7 +89,7 @@ fn esc_on_a_preview_spawn_takes_the_card_back() {
         fixture
             .library
             .add(preview_sink::func(Arc::<PreviewSink>::default()));
-        let out_port = PortRef::output(fixture.node(0), numbered_port(1));
+        let out_port = PortRef::output(fixture.node(0), PortId::new(1));
         let mut h = CanvasHarness::new(fixture);
         h.prime(2);
         h.ui.hold_modifiers(ctrl);

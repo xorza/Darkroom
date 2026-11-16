@@ -3,13 +3,16 @@
 use glam::Vec2;
 use palantir::InspectedWidget;
 use palantir::{Rect, Sense, Ui};
-use scenarium::{Binding, Graph, GraphId, InputPort, NodeDecl, OutputPort, Scope};
+use scenarium::{
+    Binding, GhostSource, Graph, GraphId, InputPort, NodeDecl, NodeId, OutputPort, SavedPort, Scope,
+};
 use serde::Serialize;
 
 use crate::core::document;
 use crate::core::document::Document;
 use crate::gui::app::App;
 use crate::gui::pane::graph_ui::wid;
+use crate::gui::port_ref::{PortKind, PortRef};
 
 /// The characters of a widget's text a [`UiList`] keeps: a scroll area's text is all its rows.
 pub const TEXT_CUT: usize = 120;
@@ -57,7 +60,23 @@ pub struct GraphSummary {
     pub omitted: usize,
     /// The selected nodes, by name.
     pub selection: Vec<String>,
+    /// The nodes the graph keeps and cannot hold, with what they were.
+    pub ghost_nodes: Vec<GhostNodeSummary>,
+    /// The wiring the graph keeps and cannot hold, each as
+    /// `<node>.<output> -> <node>.<input>`, `const <value> -> <node>.<input>` or
+    /// `<node>.<event> => <node>`, a port no declaration gives by its saved name or number.
+    pub ghosts: Vec<String>,
     pub details: Option<Details>,
+}
+
+/// One node a graph keeps and cannot hold.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct GhostNodeSummary {
+    pub name: String,
+    /// Why the load took it out.
+    pub reason: String,
+    /// What its func was called, where a save kept it.
+    pub was: Option<String>,
 }
 
 /// One node.
@@ -262,6 +281,16 @@ impl Report<'_> {
                         .map(|node| document::title(node, scope).to_owned())
                 })
                 .collect(),
+            ghost_nodes: graph
+                .ghost_nodes()
+                .filter(|(_, ghost)| listed(&ghost.node.name))
+                .map(|(_, ghost)| GhostNodeSummary {
+                    name: ghost.node.name.clone(),
+                    reason: ghost.reason.to_string(),
+                    was: ghost.saved.as_ref().map(|saved| saved.name.clone()),
+                })
+                .collect(),
+            ghosts: ghosts(graph, scope),
             details: detailed.then(|| Details {
                 wires: wires(graph, scope, listed),
                 pan: view.viewport.pan,
@@ -318,6 +347,63 @@ fn binding(graph: &Graph, scope: Scope<'_>, input: InputPort) -> Option<String> 
             Binding::Wire(output) => format!("wire from {}", output_name(graph, scope, *output)),
             Binding::Const(value) => format!("const {value:?}"),
         })
+}
+
+/// A node of `graph` by its title, a ghost node's included.
+fn node_title<'a>(graph: &'a Graph, scope: Scope<'a>, node_id: NodeId) -> &'a str {
+    match graph.find(node_id) {
+        Some(node) => document::title(node, scope),
+        None => graph
+            .ghost_node(node_id)
+            .map_or("?", |ghost| ghost.node.name.as_str()),
+    }
+}
+
+/// A port of `graph` by `<node>.<name>`, its name as [`Graph::shown_input`] finds it, else its
+/// number.
+fn ghost_end(graph: &Graph, scope: Scope<'_>, port: PortRef, saved: Option<&SavedPort>) -> String {
+    let shown = match port.kind {
+        PortKind::Input => graph.shown_input(scope, InputPort::new(port.node_id, port.port), saved),
+        PortKind::Output => {
+            graph.shown_output(scope, OutputPort::new(port.node_id, port.port), saved)
+        }
+    };
+    let title = node_title(graph, scope, port.node_id);
+    match shown {
+        Some(shown) => format!("{title}.{}", shown.name),
+        None => format!("{title}.#{}", port.port),
+    }
+}
+
+/// Every ghost of `graph`, sorted: the ghost wires and constants, then the ghost subscriptions.
+fn ghosts(graph: &Graph, scope: Scope<'_>) -> Vec<String> {
+    let wiring = graph.ghost_wiring();
+    let mut ghosts: Vec<String> = wiring
+        .bindings()
+        .map(|(input, ghost)| {
+            let to = ghost_end(graph, scope, PortRef::from(input), ghost.input.as_ref());
+            match &ghost.source {
+                GhostSource::Wire { output, saved } => format!(
+                    "{} -> {to}",
+                    ghost_end(graph, scope, PortRef::from(*output), saved.as_ref())
+                ),
+                GhostSource::Const(value) => format!("const {value:?} -> {to}"),
+            }
+        })
+        .collect();
+    ghosts.extend(wiring.subscriptions().map(|(subscription, ghost)| {
+        let event = ghost.event.as_ref().map_or_else(
+            || format!("#{}", subscription.event.event),
+            |saved| saved.name.clone(),
+        );
+        format!(
+            "{}.{event} => {}",
+            node_title(graph, scope, subscription.event.node_id),
+            node_title(graph, scope, subscription.subscriber)
+        )
+    }));
+    ghosts.sort_unstable();
+    ghosts
 }
 
 /// The wires with a node whose name `listed` keeps at either end, sorted: the graph's own order is

@@ -26,7 +26,7 @@ impl NodeKey for EventPort {
 
 #[cfg(test)]
 mod tests {
-    use scenarium::{EventPort, NodeId, numbered_port};
+    use scenarium::{EventPort, NodeId, PortId};
 
     use crate::gui::node_key::NodeKey;
     use crate::gui::port_ref::{PortKind, PortRef};
@@ -41,7 +41,7 @@ mod tests {
             PortRef {
                 node_id: node,
                 kind: PortKind::Input,
-                port: numbered_port(4),
+                port: PortId::new(4),
             }
             .node(),
             node
@@ -49,7 +49,7 @@ mod tests {
         assert_eq!(
             EventPort {
                 node_id: node,
-                event: numbered_port(2),
+                event: PortId::new(2),
             }
             .node(),
             node

@@ -27,8 +27,8 @@ use std::rc::Rc;
 
 use glam::Vec2;
 use scenarium::{
-    Binding, BindingEntry, DetachedNode, DetachedNodeParts, Graph as CoreGraph, GraphId, InputPort,
-    Library, Node, NodeId, Subscription,
+    Binding, BindingEntry, DetachedNode, DetachedNodeParts, GhostWiring, Graph as CoreGraph,
+    GraphId, InputPort, InputState, Library, Node, NodeId, Subscription, SubscriptionState,
 };
 
 use crate::core::document::Document;
@@ -213,12 +213,61 @@ impl GraphIntent {
         }
     }
 
+    /// What Select Ghosts selects in `graph`: each ghost node, and each node a ghost touches.
+    pub(crate) fn select_ghosts(graph: &CoreGraph) -> Self {
+        let wiring = graph.ghost_wiring();
+        let mut to: BTreeSet<ItemId> = graph
+            .ghost_nodes()
+            .map(|(node_id, _)| ItemId::Node(node_id))
+            .collect();
+        for (input, ghost) in wiring.bindings() {
+            to.insert(ItemId::Node(input.node_id));
+            if let Some(output) = ghost.output() {
+                to.insert(ItemId::Node(output.node_id));
+            }
+        }
+        for (subscription, _) in wiring.subscriptions() {
+            to.insert(ItemId::Node(subscription.event.node_id));
+            to.insert(ItemId::Node(subscription.subscriber));
+        }
+        Self::SetSelection { to }
+    }
+
+    /// What Remove Ghosts does to `graph`, committed as one undo entry: each ghost node goes with
+    /// the ghosts that touch it, and each other ghost binding and subscription is cleared.
+    pub(crate) fn remove_ghosts(graph: &CoreGraph) -> Vec<Self> {
+        let ghost_node = |node_id: NodeId| graph.ghost_node(node_id).is_some();
+        let wiring = graph.ghost_wiring();
+        let nodes = graph
+            .ghost_nodes()
+            .map(|(node_id, _)| Self::RemoveNode { node_id });
+        let bindings = wiring
+            .bindings()
+            .filter(|(input, ghost)| {
+                !ghost_node(input.node_id)
+                    && !ghost
+                        .output()
+                        .is_some_and(|output| ghost_node(output.node_id))
+            })
+            .map(|(input, _)| Self::set_input(input, None));
+        let subscriptions = wiring
+            .subscriptions()
+            .filter(|(subscription, _)| {
+                !ghost_node(subscription.event.node_id) && !ghost_node(subscription.subscriber)
+            })
+            .map(|(subscription, _)| Self::SetSubscription {
+                subscription,
+                to: false,
+            });
+        nodes.chain(bindings).chain(subscriptions).collect()
+    }
+
     /// Clone the selection of `graph` of `document`: each node gets a fresh id and an offset
     /// position, const-value bindings copy verbatim, the data and event wires *among* the
     /// selected nodes are recreated against the clones with the ties inside them, and the copies
     /// end up selected. A wire whose source is *outside* the selection goes as `incoming` says
     /// ([`Fragment::capture`]). Each clone and tie clone takes its id from `fresh`, a random one in
-    /// the editor, a counter in a test. Empty when no node is selected; a selected stub is
+    /// the editor, a counter in a test. Empty when no node is selected; a selected ghost node is
     /// skipped.
     ///
     /// A list rather than an intent of its own: duplicating is an editor command built out of the
@@ -305,6 +354,7 @@ impl GraphIntent {
                     node,
                     bindings,
                     subscriptions: Vec::new(),
+                    ghost_wiring: GhostWiring::default(),
                 })
                 .map_err(MalformedIntent::from)?;
                 GraphStep::Node(Box::new(SetNode::insertion(detached, placement)))
@@ -324,6 +374,7 @@ impl GraphIntent {
                 };
                 let mut ties = TiesDraft::new(view);
                 ties.release(entry.wires());
+                ties.release(entry.ghost_wires());
                 GraphStep::Node(Box::new(SetNode::removal(entry, ties.finish())))
             }
             Self::MoveSelection {
@@ -357,51 +408,69 @@ impl GraphIntent {
                 })
             }
             Self::SetInput { input, to } => {
-                if validate::live_node(graph, input.node_id, Role::SetInputDestination)?.is_none() {
-                    return Ok(None);
-                }
-                let to = match to {
-                    None if matches!(graph.bindings.get(&input), Some(Binding::Wire(_))) => {
-                        unwired::binding(graph, scope, input)
+                let destination =
+                    validate::live_node(graph, input.node_id, Role::SetInputDestination)?;
+                let from = graph.input_state(input);
+                let to = if let Some(binding) = to {
+                    if destination.is_none() {
+                        return Ok(None);
                     }
-                    to => to,
-                };
-                // Only a write is admitted: clearing removes a binding wherever it sits.
-                if let Some(binding) = &to {
-                    if let Binding::Wire(source) = binding {
+                    if let Binding::Wire(source) = &binding {
                         // A wire held across frames can outlive its producer.
                         if validate::live_node(graph, source.node_id, Role::SetInputProducer)?
                             .is_none()
                         {
                             return Ok(None);
                         }
-                        // A compile refuses a cyclic graph. The canvas snap filter normally stops
-                        // it earlier; this guards every binding path.
+                        // A compile refuses a cyclic graph. The canvas snap filter normally
+                        // stops it earlier; this guards every binding path.
                         if graph.produces_cycle(source.node_id, input.node_id) {
                             return Ok(None);
                         }
                     }
-                    graph.admit(scope, input, binding).map_err(|rejection| {
+                    graph.admit(scope, input, &binding).map_err(|rejection| {
                         MalformedIntent::Rejected {
                             port: input,
                             rejection,
                         }
                     })?;
+                    InputState::Live(binding)
+                } else {
+                    // Clearing removes what the input holds wherever it sits, a ghost on a
+                    // ghost node's input included. An input that loses a wire, live or ghost,
+                    // holds the default its node declares for it, as `unwired::binding` gives.
+                    let lost_wire = match &from {
+                        InputState::Live(Binding::Wire(_)) => true,
+                        InputState::Ghost(ghost) => ghost.output().is_some(),
+                        InputState::Live(Binding::Const(_)) | InputState::Unbound => false,
+                    };
+                    let default = destination
+                        .filter(|_| lost_wire)
+                        .and_then(|node| node.decl(scope).ports().input(input.port))
+                        .and_then(|declared| declared.default_value.clone());
+                    InputState::from(default.map(Binding::Const))
+                };
+                if destination.is_none() && from == to {
+                    return Ok(None);
                 }
-                let from = graph.bindings.get(&input).cloned();
                 let mut ties = TiesDraft::new(view);
-                // A wire that leaves its output leaves its ties; a bind to the same output keeps
-                // them.
-                if let Some(Binding::Wire(output)) = from
-                    && !matches!(to, Some(Binding::Wire(source)) if source == output)
+                // A wire that leaves its output leaves its ties, a ghost wire as a live one; a
+                // bind to the same output keeps them, as a restored ghost is the wire it was.
+                let wired = match &from {
+                    InputState::Live(Binding::Wire(output)) => Some(*output),
+                    InputState::Ghost(ghost) => ghost.output(),
+                    InputState::Live(Binding::Const(_)) | InputState::Unbound => None,
+                };
+                if let Some(output) = wired
+                    && !matches!(to, InputState::Live(Binding::Wire(source)) if source == output)
                 {
                     ties.release([WireKey::Data(DataWire { output, input })]);
                 }
-                GraphStep::Input(SetInput {
+                GraphStep::Input(Box::new(SetInput {
                     input,
-                    binding: Change { from, to },
+                    state: Change { from, to },
                     ties: ties.finish(),
-                })
+                }))
             }
             Self::SetSelection { to } => {
                 // The rubber band snapshots identities at drag start, so an interleaved undo can
@@ -487,17 +556,20 @@ impl GraphIntent {
                             rejection,
                         })?;
                 }
-                let from = graph.is_subscribed(event, subscriber);
+                let from = graph.subscription_state(subscription);
+                let to = if subscribe {
+                    SubscriptionState::Live
+                } else {
+                    SubscriptionState::Absent
+                };
                 let mut ties = TiesDraft::new(view);
-                if from && !subscribe {
+                // An edge that goes leaves its ties, a ghost of one as a live one.
+                if from != SubscriptionState::Absent && !subscribe {
                     ties.release([WireKey::Event(subscription)]);
                 }
                 GraphStep::Subscription(SetSubscription {
                     subscription,
-                    subscribed: Change {
-                        from,
-                        to: subscribe,
-                    },
+                    state: Change { from, to },
                     ties: ties.finish(),
                 })
             }

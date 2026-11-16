@@ -4,8 +4,8 @@ use std::path::Path;
 
 use common::{TempDir, fs};
 use scenarium::{
-    Binding, ConstValue, DataType, FileKindId, FileMode, FuncId, InputDecl, InputPort, internals,
-    numbered_port,
+    Binding, ConstValue, DataType, FileKindId, FileMode, FuncId, InputDecl, InputPort, Library,
+    PortId, internals,
 };
 use zip::write::SimpleFileOptions;
 use zip::{ZipArchive, ZipWriter};
@@ -32,7 +32,7 @@ fn reading(path: &str) -> (Document, InputPort) {
         .build();
     let mut fixture = DocumentFixture::default();
     let node = fixture.add(&reader);
-    let port = InputPort::new(node, numbered_port(1));
+    let port = InputPort::new(node, PortId::new(1));
     fixture
         .document
         .graphs
@@ -66,7 +66,7 @@ fn a_bundled_file_travels_in_the_archive_and_unpacks_beside_it() {
     let bundle = BTreeSet::from([source.to_str().unwrap().to_string()]);
     let archive = dir.join("export").join("scene.darkroomz");
     fs::create_dir_all(archive.parent().unwrap()).unwrap();
-    save_bundling(&document, &archive, SavedPaths::Relative, &bundle).unwrap();
+    save_bundling(&document, &Library::default(), &archive, &bundle).unwrap();
 
     let loaded = load(&archive).unwrap();
     assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
@@ -80,7 +80,13 @@ fn a_bundled_file_travels_in_the_archive_and_unpacks_beside_it() {
     assert!(fs::metadata(&unpacked).unwrap().permissions().readonly());
 
     let again = dir.join("elsewhere.darkroomz");
-    save(&loaded.document, &again, SavedPaths::Relative).unwrap();
+    save(
+        &loaded.document,
+        &Library::default(),
+        &again,
+        SavedPaths::Relative,
+    )
+    .unwrap();
     fs::remove_file(&source).unwrap();
     fs::remove_dir_all(folder(&archive)).unwrap();
     let reloaded = load(&again).unwrap();
@@ -93,7 +99,7 @@ fn a_bundled_file_travels_in_the_archive_and_unpacks_beside_it() {
     assert_eq!(fs::read(moved).unwrap(), b"pixels");
 
     let plain = dir.join("plain.darkroom");
-    assert!(save_bundling(&document, &plain, SavedPaths::Relative, &bundle).is_err());
+    assert!(save_bundling(&document, &Library::default(), &plain, &bundle).is_err());
 }
 
 /// An entry an archive holds is unpacked only when it is a whole, regular file under

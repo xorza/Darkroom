@@ -28,6 +28,12 @@ pub enum DetachedNodeError {
     ForeignSubscription { subscription: Subscription },
     #[error("subscription {subscription:?} appears twice")]
     DuplicateSubscription { subscription: Subscription },
+    #[error("a ghost in the record does not touch the detached node")]
+    ForeignGhost,
+    #[error("input {port:?} holds a binding and a ghost")]
+    GhostOnBoundInput { port: InputPort },
+    #[error("subscription {subscription:?} is made and kept as a ghost")]
+    GhostOfSubscription { subscription: Subscription },
 }
 
 /// Why a node declares nothing in its graph: what [`Scope::resolve`](crate::Scope::resolve)
@@ -44,7 +50,8 @@ pub enum Unresolved {
 
 /// Why a load took a node out of its graph: it declares nothing there, or it declares something
 /// a rule across the document's graphs refuses. A node detached for such a rule resolves, so the
-/// reason cannot be read off the node again; the [`Stub`](crate::Stub) a detach leaves keeps it.
+/// reason cannot be read off the node again; the [`GhostNode`](crate::GhostNode) a detach leaves
+/// keeps it.
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DetachReason {
     #[error(transparent)]
@@ -74,6 +81,29 @@ pub enum BindingRejection {
     WireMismatch,
 }
 
+/// Why a graph cannot hold a ghost binding now: what
+/// [`Graph::admit_ghost`](crate::Graph::admit_ghost) answers. Asked again at each load and for
+/// each Restore, never stored.
+#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+pub enum GhostRejection {
+    #[error("{node_id:?} is a ghost node")]
+    GhostNode { node_id: NodeId },
+    #[error(transparent)]
+    Binding(#[from] BindingRejection),
+    #[error("the wire would close a data cycle")]
+    Cycle,
+}
+
+/// Why a graph cannot hold a ghost subscription now: what
+/// [`Graph::admit_ghost_subscription`](crate::Graph::admit_ghost_subscription) answers.
+#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+pub enum GhostSubscriptionRejection {
+    #[error("{node_id:?} is a ghost node")]
+    GhostNode { node_id: NodeId },
+    #[error(transparent)]
+    Subscription(#[from] SubscriptionRejection),
+}
+
 /// Why [`Graph::admit_subscription`](crate::Graph::admit_subscription)
 /// refuses a subscription.
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
@@ -92,8 +122,14 @@ pub enum SubscriptionRejection {
 pub enum GraphValidationError {
     #[error("graph contains a node with a nil id")]
     NilNodeId,
-    #[error("a stub holds the id of node {node_id:?}")]
-    StubHoldsNode { node_id: NodeId },
+    #[error("a ghost node holds the id of node {node_id:?}")]
+    GhostHoldsNode { node_id: NodeId },
+    #[error("a ghost names {node_id:?}, which the graph holds as neither a node nor a ghost node")]
+    GhostMissingNode { node_id: NodeId },
+    #[error("input {port:?} holds a binding and a ghost")]
+    GhostOnBoundInput { port: InputPort },
+    #[error("subscription {subscription:?} is made and kept as a ghost")]
+    GhostOfSubscription { subscription: Subscription },
     #[error("node {node_id:?} does not resolve: {reason}")]
     Unresolved { node_id: NodeId, reason: Unresolved },
     #[error("binding on missing node {node_id:?}")]

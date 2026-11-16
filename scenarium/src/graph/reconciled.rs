@@ -5,10 +5,12 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
+use crate::data::const_value::ConstValue;
 use crate::graph::binding::Binding;
-use crate::graph::binding_entry::BindingEntry;
-use crate::graph::error::{BindingRejection, DetachReason, SubscriptionRejection};
-use crate::graph::identity::{InputPort, NodeId, OutputPort, SubgraphId};
+use crate::graph::error::{
+    DetachReason, GhostRejection, GhostSubscriptionRejection, SubscriptionRejection,
+};
+use crate::graph::identity::{InputPort, NodeId, SubgraphId};
 use crate::graph::node::Boundary;
 use crate::graph::subscription::Subscription;
 
@@ -46,43 +48,49 @@ impl GraphSetReconciled {
 pub enum Repair {
     /// A node under the nil id, which no lookup can address.
     NilNode,
-    /// A stub saved under the id of a node, which the graph keeps.
-    DuplicateStub { node_id: NodeId },
-    /// A stub whose node resolves again, attached to the graph.
+    /// A ghost node saved under the id of a node, which the graph keeps.
+    DuplicateGhostNode { node_id: NodeId },
+    /// A ghost node that resolves again, attached to the graph.
     Reattached { node_id: NodeId },
-    /// A reattached stub's binding whose other end is gone, or whose input the graph has bound
-    /// since.
-    StubBindingDropped {
-        node_id: NodeId,
-        entry: BindingEntry,
-    },
-    /// A reattached stub's subscription whose other end is gone.
-    StubSubscriptionDropped {
-        node_id: NodeId,
-        subscription: Subscription,
-    },
-    /// A node taken out of the graph and kept as a stub.
-    Stubbed {
+    /// A node taken out of the graph and kept as a ghost node, its wiring as ghosts.
+    GhostedNode {
         node_id: NodeId,
         reason: DetachReason,
     },
-    /// A binding whose consumer or producer the graph does not hold.
+    /// A binding, live or ghost, whose consumer or producer the graph holds as neither a node
+    /// nor a ghost node.
     DanglingBinding { port: InputPort, binding: Binding },
-    /// A subscription whose emitter or subscriber the graph does not hold.
+    /// A subscription, live or ghost, whose emitter or subscriber the graph holds as neither.
     DanglingSubscription { subscription: Subscription },
-    RejectedBinding {
+    /// A ghost saved on an input the graph has bound, which the binding replaces.
+    GhostOnBoundInput { port: InputPort, binding: Binding },
+    /// A ghost saved of a subscription the graph has made.
+    GhostOfSubscription { subscription: Subscription },
+    /// A binding the graph cannot hold, kept as a ghost.
+    GhostedBinding {
         port: InputPort,
         binding: Binding,
-        rejection: BindingRejection,
+        rejection: GhostRejection,
     },
+    /// A subscription the graph cannot hold, kept as a ghost.
+    GhostedSubscription {
+        subscription: Subscription,
+        rejection: GhostSubscriptionRejection,
+    },
+    /// A ghost binding the graph can hold again, made live.
+    RestoredBinding { port: InputPort, binding: Binding },
+    /// A ghost subscription the graph can hold again, made live.
+    RestoredSubscription { subscription: Subscription },
+    /// A ghost constant that was the default its port declared, which nobody set: removed.
+    DefaultDropped { port: InputPort, value: ConstValue },
+    /// An input its func gained, or whose default went as a ghost, bound to the default it
+    /// declares, as on a new node.
+    DefaultSeeded { port: InputPort, binding: Binding },
+    /// A subscription no graph could hold: a node to its own event, or a subscriber with no
+    /// body.
     RejectedSubscription {
         subscription: Subscription,
         rejection: SubscriptionRejection,
-    },
-    /// A wire that closed a data cycle.
-    CycleWire {
-        port: InputPort,
-        producer: OutputPort,
     },
     /// A subgraph's graph lacked the boundary node on one side, which this one now is.
     BoundaryAdded { boundary: Boundary, node_id: NodeId },
@@ -92,27 +100,20 @@ impl Display for Repair {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::NilNode => f.write_str("removed a node with the nil id"),
-            Self::DuplicateStub { node_id } => {
-                write!(f, "removed a stub of {node_id:?}, which the graph holds")
+            Self::DuplicateGhostNode { node_id } => {
+                write!(
+                    f,
+                    "removed a ghost node of {node_id:?}, which the graph holds"
+                )
             }
             Self::Reattached { node_id } => {
-                write!(f, "attached the stub {node_id:?} again: its node resolves")
+                write!(
+                    f,
+                    "attached the ghost node {node_id:?} again: its node resolves"
+                )
             }
-            Self::StubBindingDropped { node_id, entry } => write!(
-                f,
-                "removed {:?} on {:?} from the stub {node_id:?}: its other end is gone, or the \
-                 input is bound",
-                entry.binding, entry.port
-            ),
-            Self::StubSubscriptionDropped {
-                node_id,
-                subscription,
-            } => write!(
-                f,
-                "removed {subscription:?} from the stub {node_id:?}: its other end is gone"
-            ),
-            Self::Stubbed { node_id, reason } => {
-                write!(f, "kept {node_id:?} as a stub: {reason}")
+            Self::GhostedNode { node_id, reason } => {
+                write!(f, "kept {node_id:?} as a ghost node: {reason}")
             }
             Self::DanglingBinding { port, binding } => {
                 write!(
@@ -123,21 +124,52 @@ impl Display for Repair {
             Self::DanglingSubscription { subscription } => {
                 write!(f, "removed {subscription:?}, which names a missing node")
             }
-            Self::RejectedBinding {
+            Self::GhostOnBoundInput { port, binding } => {
+                write!(
+                    f,
+                    "removed the ghost {binding:?} on {port:?}: the input is bound"
+                )
+            }
+            Self::GhostOfSubscription { subscription } => {
+                write!(
+                    f,
+                    "removed the ghost of {subscription:?}: the subscription is made"
+                )
+            }
+            Self::GhostedBinding {
                 port,
                 binding,
                 rejection,
-            } => write!(f, "removed {binding:?} on {port:?}: {rejection}"),
+            } => write!(f, "kept {binding:?} on {port:?} as a ghost: {rejection}"),
+            Self::GhostedSubscription {
+                subscription,
+                rejection,
+            } => write!(f, "kept {subscription:?} as a ghost: {rejection}"),
+            Self::RestoredBinding { port, binding } => {
+                write!(
+                    f,
+                    "restored the ghost {binding:?} on {port:?}: the graph holds it again"
+                )
+            }
+            Self::RestoredSubscription { subscription } => {
+                write!(
+                    f,
+                    "restored the ghost of {subscription:?}: the graph holds it again"
+                )
+            }
+            Self::DefaultDropped { port, value } => {
+                write!(
+                    f,
+                    "removed {value:?} on {port:?}: it was the default of a port that changed"
+                )
+            }
+            Self::DefaultSeeded { port, binding } => {
+                write!(f, "bound {port:?} to its default {binding:?}")
+            }
             Self::RejectedSubscription {
                 subscription,
                 rejection,
             } => write!(f, "removed {subscription:?}: {rejection}"),
-            Self::CycleWire { port, producer } => {
-                write!(
-                    f,
-                    "removed the wire {producer:?} → {port:?}, which closed a data cycle"
-                )
-            }
             Self::BoundaryAdded { boundary, node_id } => {
                 write!(f, "added the missing {boundary:?} node as {node_id:?}")
             }

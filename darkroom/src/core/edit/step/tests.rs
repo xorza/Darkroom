@@ -8,8 +8,9 @@ use std::collections::BTreeSet;
 
 use glam::Vec2;
 use scenarium::{
-    Binding, CacheMode, ConstValue, DataType, EventPort, GraphId, InputDecl, InputPort, Interface,
-    NodeId, OutputPort, PortId, Ports, Subgraph, SubgraphId, Subscription, numbered_port,
+    Binding, CacheMode, ConstValue, DataType, EventPort, GhostBinding, GraphId, InputDecl,
+    InputPort, InputState, Interface, NodeId, Numbered, OutputPort, PortId, Ports, RefusedFate,
+    Subgraph, SubgraphId, Subscription, SubscriptionState,
 };
 
 use crate::core::document::graph_view::GraphView;
@@ -54,22 +55,22 @@ fn set_positions(node_id: NodeId, from: Vec2, to: Vec2) -> UndoStep {
 }
 
 fn set_input(input: InputPort, from: Option<Binding>, to: Option<Binding>) -> UndoStep {
-    main(GraphStep::Input(SetInput {
+    main(GraphStep::Input(Box::new(SetInput {
         input,
-        binding: Change { from, to },
+        state: Change {
+            from: from.into(),
+            to: to.into(),
+        },
         ties: SetTies::default(),
-    }))
+    })))
 }
 
 /// An interface edit that removes the subgraph's one input, on which an instance in the main
 /// graph holds a constant: the edit drops it.
 fn interface_port_removal() -> UndoStep {
-    let port = PortId::from_u128(1);
+    let port = PortId::new(1);
     let interface = Interface::new(Ports {
-        inputs: vec![InputDecl {
-            id: port,
-            ..InputDecl::optional("a", DataType::Int)
-        }],
+        inputs: vec![Numbered::new(port, InputDecl::optional("a", DataType::Int))],
         outputs: vec![],
     });
     let id = SubgraphId::from_u128(9);
@@ -85,6 +86,7 @@ fn interface_port_removal() -> UndoStep {
         id,
         Interface::default(),
         &fixture.library,
+        RefusedFate::Drop,
     )))
 }
 
@@ -102,11 +104,11 @@ fn renamed(node_id: NodeId, from: &str, to: &str) -> UndoStep {
     }))
 }
 
-/// A removal of a stub — the one kind that can only be built by reading a
+/// A removal of a ghost node — the one kind that can only be built by reading a
 /// document, since it carries everything the document held about the node.
 fn node_removal() -> UndoStep {
     let mut fixture = DocumentFixture::default();
-    let node_id = fixture.stub_at(Vec2::ZERO);
+    let node_id = fixture.ghost_node_at(Vec2::ZERO);
     let entry = NodeEntry::capture(&fixture.document, GraphId::Main, node_id)
         .expect("the fixture placed it");
     main(GraphStep::Node(Box::new(SetNode::removal(
@@ -120,8 +122,8 @@ fn tie_removal() -> UndoStep {
     let mut fixture = DocumentFixture::default();
     let [a, b] = [0.0, 200.0].map(|x| fixture.node_at(Vec2::new(x, 0.0)));
     let wire = fixture.wire(
-        OutputPort::new(a, numbered_port(1)),
-        InputPort::new(b, numbered_port(1)),
+        OutputPort::new(a, PortId::new(1)),
+        InputPort::new(b, PortId::new(1)),
     );
     let tie = fixture.tie(Vec2::new(100.0, 0.0), [wire]);
     GraphIntent::RemoveTie { tie }
@@ -146,7 +148,7 @@ fn tie_removal() -> UndoStep {
 #[test]
 fn every_kind_answers_the_frame_questions() {
     let node_id = NodeId::unique();
-    let port = InputPort::new(node_id, numbered_port(1));
+    let port = InputPort::new(node_id, PortId::new(1));
     // (what, step, [dirties, changes node set, invalidates geometry])
     let cases = [
         (
@@ -204,6 +206,39 @@ fn every_kind_answers_the_frame_questions() {
             ),
         ),
         (
+            "a kept constant cleared leaves the value column",
+            main(GraphStep::Input(Box::new(SetInput {
+                input: port,
+                state: Change {
+                    from: InputState::Ghost(GhostBinding::from(constant(1.0))),
+                    to: InputState::Unbound,
+                },
+                ties: SetTies::default(),
+            }))),
+            (
+                true,
+                EditFacts {
+                    binding_kind: true,
+                    ..EditFacts::NONE
+                },
+            ),
+        ),
+        (
+            "a ghost wire cleared, as an unbound input, shows no constant either",
+            main(GraphStep::Input(Box::new(SetInput {
+                input: port,
+                state: Change {
+                    from: InputState::Ghost(GhostBinding::from(Binding::wire(
+                        node_id,
+                        PortId::new(1),
+                    ))),
+                    to: InputState::Unbound,
+                },
+                ties: SetTies::default(),
+            }))),
+            (true, EditFacts::NONE),
+        ),
+        (
             "selection",
             main(GraphStep::Selection(SetSelection {
                 toggled: BTreeSet::from([ItemId::Node(node_id)]),
@@ -233,12 +268,12 @@ fn every_kind_answers_the_frame_questions() {
             "subscription",
             main(GraphStep::Subscription(SetSubscription {
                 subscription: Subscription::new(
-                    EventPort::new(node_id, numbered_port(1)),
+                    EventPort::new(node_id, PortId::new(1)),
                     NodeId::unique(),
                 ),
-                subscribed: Change {
-                    from: false,
-                    to: true,
+                state: Change {
+                    from: SubscriptionState::Absent,
+                    to: SubscriptionState::Live,
                 },
                 ties: SetTies::default(),
             })),

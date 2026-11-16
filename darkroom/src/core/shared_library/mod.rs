@@ -19,7 +19,7 @@
 //!   the gizmo's name and control settings": the document then needs the library beside it, and a
 //!   result changes with a file it does not hold.
 //! - **A shared file holds no code**: its subgraphs are graphs over the built-in funcs, and a
-//!   func the receiver lacks comes in as a stub inside the subgraph, as in any document.
+//!   func the receiver lacks comes in as a ghost node inside the subgraph, as in any document.
 //! - **Update from Library is an undoable edit; Publish to Library asks first.** An Update keeps
 //!   each instance's bindings, which name ports by id; a Publish replaces the definition inside the
 //!   library file, leaves its main graph, and writes the file whole or not at all. As Simulink's
@@ -34,7 +34,7 @@ pub(crate) mod scanner;
 use std::path::{Path, PathBuf};
 
 use common::fs;
-use scenarium::{Library, SubgraphDigest, SubgraphId};
+use scenarium::{Library, Manifest, SubgraphDigest, SubgraphId};
 
 use crate::core::document::Document;
 use crate::core::document::graph_view::GraphView;
@@ -55,11 +55,13 @@ pub(crate) struct SharedLibrary {
     failures: Vec<ScanFailure>,
 }
 
-/// One file of the folder that loaded: its path and the document it decodes to.
+/// One file of the folder that loaded: its path, the document it decodes to and the manifest
+/// saved beside it.
 #[derive(Debug)]
 struct LibraryFile {
     path: PathBuf,
     document: Document,
+    manifest: Manifest,
 }
 
 /// One shared subgraph the library lists.
@@ -104,7 +106,7 @@ pub(crate) fn scan(folder: &Path) -> SharedLibrary {
     paths.sort_unstable();
     for path in paths {
         match document::load(&path) {
-            Ok(loaded) => library.add_file(path, loaded.document),
+            Ok(loaded) => library.add_file(path, loaded.document, loaded.manifest),
             Err(error) => library.failures.push(ScanFailure { path, error }),
         }
     }
@@ -114,7 +116,7 @@ pub(crate) fn scan(folder: &Path) -> SharedLibrary {
 impl SharedLibrary {
     /// Take in `document` from `path`, listing each subgraph it shares that no entry lists with
     /// the same id and digest.
-    fn add_file(&mut self, path: PathBuf, document: Document) {
+    fn add_file(&mut self, path: PathBuf, document: Document, manifest: Manifest) {
         let file = self.files.len();
         for (id, subgraph) in document.graphs.subgraphs() {
             if !document.sides.get(&id).is_some_and(|side| side.shared) {
@@ -134,7 +136,11 @@ impl SharedLibrary {
                 });
             }
         }
-        self.files.push(LibraryFile { path, document });
+        self.files.push(LibraryFile {
+            path,
+            document,
+            manifest,
+        });
     }
 
     /// See the field.
@@ -170,6 +176,12 @@ impl SharedLibrary {
         &self.files[entry.file].document
     }
 
+    /// The manifest of the file that holds `entry`: what its funcs declared when it was saved,
+    /// which a place and an update read its definitions against.
+    pub(crate) fn manifest(&self, entry: &LibraryEntry) -> &Manifest {
+        &self.files[entry.file].manifest
+    }
+
     /// `entry`'s definition and each one it places, however deep, each after those it places,
     /// with its view: what placing it copies in. Each remembers its digest as the one it last
     /// shared with the library.
@@ -202,10 +214,12 @@ impl SharedLibrary {
 
 /// `file`, a library document, with `document`'s subgraph `id` and each one it places written in
 /// place of the definitions it holds under their ids, or beside them, each marked as last shared
-/// at its digest and `id` marked shared, then reconciled against `library`, as what places them
-/// there may no longer fit their ports. What a publish writes whole over the file.
+/// at its digest and `id` marked shared, then reconciled against `library` and `manifest`, the
+/// file's own, as what places them there may no longer fit their ports. What a publish writes
+/// whole over the file.
 pub(crate) fn published(
     file: &Document,
+    manifest: &Manifest,
     document: &Document,
     id: SubgraphId,
     library: &Library,
@@ -226,7 +240,7 @@ pub(crate) fn published(
         file.graphs.put_subgraph(placed, definition);
         file.sides.insert(placed, side);
     }
-    for repair in file.reconcile(library).repairs {
+    for repair in file.reconcile(library, manifest).repairs {
         tracing::info!(target: "darkroom::library", "publishing: {repair}");
     }
     file

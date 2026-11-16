@@ -97,7 +97,7 @@ impl From<OutputPort> for PortRef {
 
 #[cfg(test)]
 mod tests {
-    use scenarium::{InputPort, NodeId, OutputPort, numbered_port};
+    use scenarium::{InputPort, NodeId, OutputPort, PortId};
 
     use crate::gui::port_ref::PortRef;
 
@@ -106,8 +106,8 @@ mod tests {
     #[test]
     fn a_port_converts_only_to_its_own_kind() {
         let node = NodeId::unique();
-        let input = InputPort::new(node, numbered_port(3));
-        let output = OutputPort::new(node, numbered_port(3));
+        let input = InputPort::new(node, PortId::new(3));
+        let output = OutputPort::new(node, PortId::new(3));
 
         assert_eq!(PortRef::from(input).input_port(), Some(input));
         assert_eq!(PortRef::from(input).output_port(), None);

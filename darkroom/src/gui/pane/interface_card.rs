@@ -293,7 +293,9 @@ fn port_wid(side: InterfaceSide, port: PortId, part: &'static str) -> WidgetId {
 
 #[cfg(test)]
 mod tests {
-    use scenarium::{DataType, InputDecl, Interface, PortId, Ports, Subgraph, SubgraphId};
+    use scenarium::{
+        DataType, InputDecl, Interface, Numbered, PortId, Ports, Subgraph, SubgraphId,
+    };
 
     use crate::core::document::inspect_target::InspectTarget;
     use crate::core::document::internals::{DocumentFixture, insert_subgraph};
@@ -310,13 +312,10 @@ mod tests {
     fn the_inspector_removes_an_interface_port() {
         let mut fixture = DocumentFixture::default();
         let id = SubgraphId::from_u128(1);
-        let (a, b) = (PortId::from_u128(1), PortId::from_u128(2));
+        let (a, b) = (PortId::new(1), PortId::new(2));
         let interface = Interface::new(Ports {
             inputs: [(a, "a"), (b, "b")]
-                .map(|(id, name)| InputDecl {
-                    id,
-                    ..InputDecl::optional(name, DataType::Int)
-                })
+                .map(|(id, name)| Numbered::new(id, InputDecl::optional(name, DataType::Int)))
                 .into(),
             outputs: vec![],
         });

@@ -355,9 +355,10 @@ impl OpenDocument {
     pub(crate) fn load(path: PathBuf, library: &Library) -> Result<Loaded, DocumentLoadError> {
         let document::Loaded {
             mut document,
+            manifest,
             refused,
         } = document::load(&path)?;
-        let mut report = document.reconcile(library);
+        let mut report = document.reconcile(library, &manifest);
         report.refused_entries = refused;
         let open = Self {
             document,
@@ -447,14 +448,15 @@ impl OpenDocument {
         }
     }
 
-    /// Write the document to `path`, in the format its extension names, and adopt it. Clears
-    /// [`dirty`](Self::dirty) only on success.
+    /// Write the document to `path`, in the format its extension names, with the manifest
+    /// `library` gives it, and adopt it. Clears [`dirty`](Self::dirty) only on success.
     pub(crate) fn save_to(
         &mut self,
+        library: &Library,
         path: &Path,
         paths: SavedPaths,
     ) -> Result<(), DocumentSaveError> {
-        document::save(&self.document, path, paths)?;
+        document::save(&self.document, library, path, paths)?;
         self.path = Some(path.to_path_buf());
         self.dirty = false;
         Ok(())

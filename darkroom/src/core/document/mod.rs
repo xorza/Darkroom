@@ -2,17 +2,21 @@
 //!
 //! # Decisions
 //!
-//! - **A stub is scenarium's.** A node its graph cannot hold is kept in the graph beside its
-//!   nodes as a [`scenarium::Stub`], with every edge that touched it and why, so your
-//!   settings survive a library that lost its func and a definition travels whole; the load is
-//!   [`GraphSet::reconcile`]. Refused: dropping them, as the settings are lost; remapping by port
-//!   name, as a value whose meaning changed still goes through.
-//! - **A graph with a stub runs the rest.** A consumer a stub fed sees an
-//!   unbound input, as with a disabled producer. Refused: one stub refusing
+//! - **A ghost is scenarium's.** A node its graph cannot hold is kept in the graph beside its
+//!   nodes as a [`scenarium::GhostNode`], with why, and each binding and subscription it cannot
+//!   hold among its [`scenarium::GhostWiring`], so your settings survive a library that lost a
+//!   func or a port and a definition travels whole; the load is [`GraphSet::reconcile`].
+//!   Refused: dropping them, as the settings are lost; remapping by port name, as a value whose
+//!   meaning changed still goes through.
+//! - **A graph with a ghost runs the rest.** A consumer a ghost node fed, or one whose wire is
+//!   a ghost, sees an unbound input, as with a disabled producer. Refused: one ghost refusing
 //!   every run.
-//! - **A stub can be selected, moved and deleted, not edited or copied.** It
+//! - **A ghost node can be selected, moved and deleted, not edited or copied.** It
 //!   has no ports and a read-only title, and Duplicate skips it: a copy of a
 //!   node that cannot run has little use.
+//! - **An edit takes a ghost and never makes one.** Binding or clearing an input removes the
+//!   ghost on it in the same step, and a removed node takes the ghosts that touch it; an undo
+//!   puts each back as it was. Only a load makes a ghost or makes one live again.
 //! - **View and layout state is repaired, not refused.** Refused: refusing the
 //!   file, as a bad viewport alone would keep the graph closed.
 //! - **A removal closes what stops resolving.** Every removal — an edit, an undo,
@@ -69,8 +73,8 @@ use std::slice;
 use glam::Vec2;
 use palantir::{DockOperation, DockState, TabGroup};
 use scenarium::{
-    ConstValue, DetachedNode, Graph as CoreGraph, GraphId, GraphSet, InstancePath, Library, Node,
-    NodeAddr, NodeId, PathForm, ProgramId, Scope, Stub, Subgraph, SubgraphId,
+    ConstValue, DetachedGhost, DetachedNode, Graph as CoreGraph, GraphId, GraphSet, InstancePath,
+    Library, Manifest, Node, NodeAddr, NodeId, PathForm, ProgramId, Scope, Subgraph, SubgraphId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -87,7 +91,7 @@ use crate::core::document::viewport::Viewport;
 use crate::core::edit::edit_facts::Touched;
 use crate::core::preview_sink;
 
-/// The thing being edited: its graphs, each with the stubs it keeps, the editor's view of each,
+/// The thing being edited: its graphs, each with the ghost nodes it keeps, the editor's view of each,
 /// and the pane layout showing them. The `Library` they resolve against lives one level up on
 /// `App`.
 ///
@@ -100,11 +104,11 @@ use crate::core::preview_sink;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Document {
     /// Each graph holds only nodes its scope resolves, with only admitted wiring, and keeps each
-    /// node it cannot hold as a stub.
+    /// node it cannot hold as a ghost node.
     pub(crate) graphs: GraphSet,
-    /// Places every node and every stub of the main graph.
+    /// Places every node and every ghost node of the main graph.
     pub(crate) main_view: GraphView,
-    /// One per subgraph of `graphs`, as a view holds one placement per node and stub.
+    /// One per subgraph of `graphs`, as a view holds one placement per node and ghost node.
     pub(crate) sides: BTreeMap<SubgraphId, SubgraphSide>,
     /// The pane arrangement: open tabs grouped into split panes, plus the focused group.
     /// Mutated only through a `DockOperation`, none of which is undoable.
@@ -342,14 +346,12 @@ impl Document {
         record
     }
 
-    /// [`Self::remove_node`] for a stub. A stub has no viewer and places nothing, so nothing
-    /// else stops resolving with it.
-    pub(crate) fn remove_stub(&mut self, graph: GraphId, node_id: NodeId) -> Stub {
+    /// [`Self::remove_node`] for a ghost node. A ghost node has no viewer and places nothing, so
+    /// nothing else stops resolving with it.
+    pub(crate) fn remove_ghost_node(&mut self, graph: GraphId, node_id: NodeId) -> DetachedGhost {
         let slot = self.slot_mut(graph);
         unplace(slot.view, node_id);
-        slot.graph
-            .remove_stub(node_id)
-            .expect("cannot remove a stub the document does not hold")
+        slot.graph.detach_ghost_node(node_id)
     }
 
     /// Clear each side's `through` that stopped naming an instance of its subgraph, then close
@@ -409,14 +411,17 @@ impl Document {
 
     /// Make a decoded document consistent with itself and `library`, and
     /// report each change: [`GraphSet::reconcile`] the graphs, which keeps
-    /// each node a graph cannot hold as a stub and attaches each stub that
+    /// each node a graph cannot hold as a ghost node and attaches each ghost node that
     /// resolves again; then give each subgraph a side and drop each side of
     /// none, repair each view against its graph, clear each `through` that
     /// names no instance of its subgraph, make the main graph active in place
     /// of a graph the set lacks, and close each tab the document no longer
     /// holds. Afterwards [`Self::validate`] holds, and the graphs compile.
-    pub(crate) fn reconcile(&mut self, library: &Library) -> LoadReport {
-        let reconciled = self.graphs.reconcile(library);
+    ///
+    /// `manifest` is what the document's file says each func declared at the save, which the
+    /// graphs' reconcile reads to tell what changed; a document made in memory has an empty one.
+    pub(crate) fn reconcile(&mut self, library: &Library, manifest: &Manifest) -> LoadReport {
+        let reconciled = self.graphs.reconcile(library, manifest);
         let mut repairs: Vec<DocumentRepair> = reconciled
             .main
             .repairs
@@ -490,7 +495,7 @@ impl Document {
     }
 
     /// Check what [`Self::reconcile`] establishes that needs no library: each graph's structure
-    /// with its stubs, a side for each subgraph and for nothing else, each view against its
+    /// with its ghost nodes, a side for each subgraph and for nothing else, each view against its
     /// graph, each `through` against the set, the active graph, and the layout. A debug check: a
     /// document that fails it is a bug in the load or an edit.
     pub(crate) fn validate(&self) -> Result<(), DocumentValidationError> {
@@ -546,7 +551,7 @@ impl Document {
         relative.map_or(Ok(()), Err)
     }
 
-    /// Each path a constant holds in any graph, the stubs' included, with the node it binds.
+    /// Each path a constant holds in any graph, the ghost nodes' included, with the node it binds.
     pub(crate) fn for_each_path(&self, mut visit: impl FnMut(NodeAddr, &str)) {
         for (graph, held) in self.graphs.graphs() {
             for (port, value) in held.constants() {
@@ -558,7 +563,7 @@ impl Document {
     }
 
     /// Put `map`'s answer in place of each path a constant holds in any graph that it answers
-    /// for, the stubs' included.
+    /// for, the ghost nodes' included.
     pub(crate) fn map_paths(&mut self, mut map: impl FnMut(&str) -> Option<String>) {
         let ids: Vec<GraphId> = self.graphs.graphs().map(|(graph, _)| graph).collect();
         for graph in ids {
@@ -630,8 +635,8 @@ fn shows(graphs: &GraphSet, path: InstancePath, graph: GraphId) -> bool {
     graphs.graph_at(path) == Some(graph)
 }
 
-/// Reset a bad viewport, drop each placement for no node or stub, move each
-/// non-finite position to the origin, place each node or stub that has no
+/// Reset a bad viewport, drop each placement for no node or ghost node, move each
+/// non-finite position to the origin, place each node or ghost node that has no
 /// placement at the origin, repair the ties, and drop each selection entry
 /// the view does not hold: `view` of `graph`, which `held` is.
 fn repair_view(
@@ -662,7 +667,7 @@ fn repair_view(
     let mut unplaced: Vec<NodeId> = held
         .iter()
         .map(|node| node.node_id)
-        .chain(held.stubs().map(Stub::node_id))
+        .chain(held.ghost_nodes().map(|(node_id, _)| node_id))
         .filter(|node_id| !placements.contains_key(node_id))
         .collect();
     unplaced.sort_unstable();

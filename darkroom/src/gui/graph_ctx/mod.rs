@@ -11,6 +11,7 @@
 //! field read, a hash lookup, or a slice index, so a per-widget call is
 //! O(1) and nothing has to be rebuilt when the document moves.
 
+pub(crate) mod ghost_port;
 pub(crate) mod input_ctx;
 pub(crate) mod node_ctx;
 pub(crate) mod output_ctx;
@@ -20,7 +21,7 @@ use std::collections::BTreeSet;
 use palantir::{Display, RgbaF32};
 use scenarium::{
     DataType, Graph, GraphId, InputPort, InstancePath, Library, NodeId, OutputPort, ProgramId,
-    Scope, Subscription,
+    SavedPort, Scope, Subscription,
 };
 
 use crate::core::document::Document;
@@ -180,6 +181,35 @@ impl<'a> GraphCtx<'a> {
         }
     }
 
+    /// The type one end of a ghost wire has or had, as far as anything knows
+    /// ([`Graph::shown_input`]): `saved` is the port the ghost holds for that end. `None` paints
+    /// the neutral untyped color.
+    pub(crate) fn ghost_end_type(
+        self,
+        port: PortRef,
+        saved: Option<&SavedPort>,
+    ) -> Option<DataType> {
+        let (body, scope) = (self.body(), self.scope());
+        let shown = match port.kind {
+            PortKind::Input => {
+                body.shown_input(scope, InputPort::new(port.node_id, port.port), saved)
+            }
+            PortKind::Output => {
+                body.shown_output(scope, OutputPort::new(port.node_id, port.port), saved)
+            }
+        };
+        shown.map(|shown| shown.data_type)
+    }
+
+    /// The color a ghost port of `data_type` and the ghost wires on it paint: its type's, or the
+    /// neutral untyped color where nothing kept the type.
+    pub(crate) fn ghost_color(self, data_type: Option<DataType>) -> RgbaF32 {
+        match data_type {
+            Some(data_type) => self.port_color(data_type),
+            None => self.theme().port.input,
+        }
+    }
+
     /// The declared type of `port`, read straight off the graph and the
     /// library. For a per-wire reader that has no node context and wants none.
     ///
@@ -209,7 +239,7 @@ impl<'a> GraphCtx<'a> {
         }
     }
 
-    /// This pane's placed nodes — every graph node and every stub — in no
+    /// This pane's placed nodes — every graph node and every ghost node — in no
     /// particular order.
     ///
     /// Driven by the view's placements. Unordered because almost nothing needs the stack; the
@@ -233,14 +263,14 @@ impl<'a> GraphCtx<'a> {
         self.view().paint_order(out);
     }
 
-    /// One placed node — a graph node or a stub — or `None` for an id the
+    /// One placed node — a graph node or a ghost node — or `None` for an id the
     /// document does not hold: one deleted since the caller read the id.
     pub(crate) fn node(self, node_id: NodeId) -> Option<NodeCtx<'a>> {
         let placement = *self.view().node_placements.get(&node_id)?;
         Some(NodeCtx::resolve(self, node_id, placement.pos))
     }
 
-    /// Whether the document places `node_id`, as a graph node or a stub.
+    /// Whether the document places `node_id`, as a graph node or a ghost node.
     pub(crate) fn contains(self, node_id: NodeId) -> bool {
         self.view().node_placements.contains_key(&node_id)
     }

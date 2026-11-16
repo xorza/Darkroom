@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::document::tie::TieId;
 
-/// One item of the canvas, a node (a graph node or a stub) or a tie. The selection holds these,
+/// One item of the canvas, a node (a graph node or a ghost node) or a tie. The selection holds these,
 /// so click, band select, Delete and the group drag treat a tie as they treat a node.
 /// `darkroom/AGENTS.md`, "Wire ties", "A tie is an item", holds the decision.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

@@ -50,7 +50,7 @@ pub(super) fn live_node(
 }
 
 /// A node id an insertion into `graph` introduces: one the graph holds neither as a node nor as
-/// a stub, as [`Graph::insert`] refuses both. A node id is unique within its graph alone.
+/// a ghost node, as [`Graph::insert`] refuses both. A node id is unique within its graph alone.
 ///
 /// Intents commit one at a time, so a batch that repeats an id fails here on its second intent,
 /// against a graph the first has already been applied to.

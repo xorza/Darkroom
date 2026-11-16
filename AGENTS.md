@@ -236,7 +236,11 @@ One word, one meaning, in the workspace crates; the submodules keep their own.
   subgraph for one of its boundary nodes; its *ports* are the inputs and outputs it shows.
 - **A program node is a node of the compiled program**, and an authored node inside a subgraph
   makes one per instance; an *instance path* is the instances from the main graph down to a graph.
-- **A stub is a node its graph cannot hold**, kept in that graph as the record a detach leaves.
+- **A ghost is what a graph keeps and cannot hold**: a *ghost node*, a node its scope refuses;
+  a *ghost wire*, *ghost constant* or *ghost subscription*, wiring the scope refuses or that
+  touches a ghost node; a *ghost port*, a port such wiring names that its node no longer
+  declares. Refused: "stub" for the node, which stays the word for a test double
+  (`internals::stub_func`), beside "ghost" for its wiring.
 - **A side is what the editor keeps beside one subgraph**: its view, the instance its pane shows
   it through, and its place in the library. The *active graph* is the one the window's commands
   act on; a *fragment* is a set of nodes as Duplicate, Copy, Paste, Collapse and Expand move it.

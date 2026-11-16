@@ -1,7 +1,7 @@
 use glam::Vec2;
 use scenarium::{
-    Binding, Boundary, DataType, GraphId, InputDecl, InputPort, Interface, Library, Node,
-    OutputPort, PortId, Ports, Subgraph, SubgraphId, numbered_port,
+    Binding, Boundary, DataType, GraphId, InputDecl, InputPort, Interface, Library, Node, Numbered,
+    OutputPort, PortId, Ports, Subgraph, SubgraphId,
 };
 
 use crate::core::document::Document;
@@ -33,14 +33,11 @@ fn revert(document: &mut Document, steps: &[UndoStep]) {
     }
 }
 
-fn input(id: u128, name: &str) -> InputDecl {
-    InputDecl {
-        id: PortId::from_u128(id),
-        ..InputDecl::optional(name, DataType::Int)
-    }
+fn input(id: u32, name: &str) -> Numbered<InputDecl> {
+    Numbered::new(PortId::new(id), InputDecl::optional(name, DataType::Int))
 }
 
-fn inputs(decls: Vec<InputDecl>) -> Interface {
+fn inputs(decls: Vec<Numbered<InputDecl>>) -> Interface {
     Interface::new(Ports {
         inputs: decls,
         outputs: vec![],
@@ -105,11 +102,11 @@ fn a_definition_comes_and_goes_with_its_side_unless_placed() {
 fn an_interface_edit_drops_wires_and_their_ties_in_every_graph_and_undo_restores_them() {
     let mut fixture = DocumentFixture::default();
     let id = SubgraphId::from_u128(1);
-    let a = PortId::from_u128(1);
+    let a = PortId::new(1);
     let mut subgraph = Subgraph::new("inner", inputs(vec![input(1, "a"), input(2, "b")]));
     let inside = subgraph.graph.add(fixture.plain_node());
     let inputs_node = subgraph.boundary_node(Boundary::Inputs);
-    let inner_input = InputPort::new(inside, numbered_port(1));
+    let inner_input = InputPort::new(inside, PortId::new(1));
     let inner_wire = WireKey::Data(DataWire {
         output: OutputPort::new(inputs_node, a),
         input: inner_input,
@@ -122,7 +119,7 @@ fn an_interface_edit_drops_wires_and_their_ties_in_every_graph_and_undo_restores
     let instance = fixture.add_instance(id);
     let producer = fixture.node_at(Vec2::new(0.0, 300.0));
     let outer_wire = fixture.wire(
-        OutputPort::new(producer, numbered_port(1)),
+        OutputPort::new(producer, PortId::new(1)),
         InputPort::new(instance, a),
     );
     let outer_tie = fixture.tie(Vec2::new(50.0, 50.0), [outer_wire]);

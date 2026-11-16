@@ -473,7 +473,7 @@ impl NodeSpec {
             .inputs
             .last_mut()
             .expect("`const_only` restricts the input declared before it");
-        last.const_only = true;
+        last.port.const_only = true;
         self
     }
 

@@ -1,11 +1,14 @@
 //! [`SubgraphDigest`]: what a subgraph's definition is, apart from the id it is held under.
 //!
 //! - **A digest is of the definition alone**: its name and description, its interface, and its
-//!   graph in node id order with its stubs, each subgraph it places by its own digest. The id is
+//!   graph in node id order with its ghosts, each subgraph it places by its own digest. The id is
 //!   left out, so two documents that hold one definition under two ids digest it alike, and a
 //!   paste or an update tells an equal definition from a changed one. As Git names a tree by
 //!   its content and each subtree by its own hash. Refused: the serialized definition hashed as
 //!   it stands, whose node map has no order and whose instances name ids.
+//! - **A digest leaves saved declarations out**: what a ghost node declared and the saved port
+//!   a ghost holds are a library's words, not the author's, so two copies of a definition saved
+//!   against two versions of a library stay equal.
 
 use std::collections::HashMap;
 
@@ -60,20 +63,28 @@ impl GraphSet {
         }
         write(&encode(&graph.bindings));
         write(&encode(&graph.subscriptions().collect::<Vec<_>>()));
-        for stub in graph.stubs() {
-            write(&encode(&stub.node_id()));
-            write(&encode(&stub.reason));
-            write(&self.encode_node(stub.record.node(), known));
-            write(&encode(stub.record.bindings()));
-            write(&encode(stub.record.subscriptions()));
+        for (node_id, ghost) in graph.ghost_nodes() {
+            write(&encode(&node_id));
+            write(&encode(&ghost.reason));
+            write(&self.encode_node(&ghost.node, known));
         }
+        let ghosts = graph.ghost_wiring();
+        for (port, ghost) in ghosts.bindings() {
+            write(&encode(&(port, ghost.binding())));
+        }
+        write(&encode(
+            &ghosts
+                .subscriptions()
+                .map(|(subscription, _)| subscription)
+                .collect::<Vec<_>>(),
+        ));
         let digest = SubgraphDigest(*hasher.finalize().as_bytes());
         known.insert(id, digest);
         digest
     }
 
     /// `node`'s encoding, an instance's subgraph by that subgraph's digest rather than its id;
-    /// an instance of a subgraph the set lacks, as a stub may be, by its id.
+    /// an instance of a subgraph the set lacks, as a ghost node may be, by its id.
     fn encode_node(&self, node: &Node, known: &mut HashMap<SubgraphId, SubgraphDigest>) -> Vec<u8> {
         match node.kind {
             NodeKind::Instance(placed) if self.subgraph(placed).is_some() => {

@@ -242,7 +242,7 @@ impl WireUi {
         let drag_data_type = graph_ctx.data_type(start_port);
         let color = graph_ctx.port_color(drag_data_type);
         let width = theme.canvas.wire_at(ctx.zoom());
-        WirePaint::from(color).stroke(ui, &Wire::data(p0, p3), width);
+        WirePaint::from(color).stroke(ui, &Wire::data(p0, p3), width, None);
     }
 }
 
@@ -342,10 +342,10 @@ fn exposed_on_boundary(ui: &mut Ui, ctx: CanvasCtx<'_>, start: PortRef) -> Optio
     }
     let decl = body.find(start.node_id)?.decl(graph_ctx.scope());
     let interface = &graph_ctx.document().graphs.subgraph(subgraph)?.interface;
-    let port = PortId::unique();
     let (edit, wire) = match start.kind {
         PortKind::Output => {
             let output = decl.ports().output(start.port)?;
+            let port = PortId::mint(|id| interface.ports().output(id).is_some());
             (
                 PortEdit::Add {
                     side: InterfaceSide::Outputs,
@@ -365,6 +365,7 @@ fn exposed_on_boundary(ui: &mut Ui, ctx: CanvasCtx<'_>, start: PortRef) -> Optio
             if input.const_only {
                 return None;
             }
+            let port = PortId::mint(|id| interface.ports().input(id).is_some());
             (
                 PortEdit::Add {
                     side: InterfaceSide::Inputs,

@@ -218,6 +218,16 @@ fn graph_menu(bar: &mut MenuBarMenus<'_>, stage: &mut Stage<'_, DocCtx<'_>>) {
         {
             out.push_app(AppCommand::Export { subgraph });
         }
+        MenuSeparator::new().show(ui);
+        let held = document.graphs.graph(graph);
+        let ghosts = held.ghost_nodes().len() > 0 || !held.ghost_wiring().is_empty();
+        if item(ui, "Select Ghosts", None, ghosts) {
+            out.push_graph(graph, GraphIntent::select_ghosts(held));
+        }
+        // One batch, so one undo entry.
+        if item(ui, "Remove Ghosts", None, ghosts) {
+            out.extend_graph(graph, GraphIntent::remove_ghosts(held));
+        }
         // One batch, so one undo entry, outermost first so each removal holds.
         let unused = document.unused_subgraphs();
         if item(ui, "Remove Unused Subgraphs", None, !unused.is_empty()) {

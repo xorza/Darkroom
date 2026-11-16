@@ -10,7 +10,7 @@ use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::graph::node::Boundary;
-use crate::graph::ports::{InputDecl, OutputDecl, Ports, PortsError};
+use crate::graph::ports::{InputDecl, Numbered, OutputDecl, Ports, PortsError};
 
 /// The ports a subgraph shows, each a declaration under its id. An interface port's declaration
 /// is that of the port that made it, so a const-only input, a picker and an enum are exposed as
@@ -49,10 +49,14 @@ impl Interface {
             outputs: ports
                 .inputs
                 .iter()
-                .map(|input| OutputDecl {
-                    id: input.id,
-                    description: input.description.clone(),
-                    ..OutputDecl::new(input.name.clone(), input.data_type)
+                .map(|input| {
+                    Numbered::new(
+                        input.id,
+                        OutputDecl {
+                            description: input.description.clone(),
+                            ..OutputDecl::new(input.name.clone(), input.data_type)
+                        },
+                    )
                 })
                 .collect(),
         };
@@ -60,10 +64,14 @@ impl Interface {
             inputs: ports
                 .outputs
                 .iter()
-                .map(|output| InputDecl {
-                    id: output.id,
-                    description: output.description.clone(),
-                    ..InputDecl::optional(output.name.clone(), output.data_type)
+                .map(|output| {
+                    Numbered::new(
+                        output.id,
+                        InputDecl {
+                            description: output.description.clone(),
+                            ..InputDecl::optional(output.name.clone(), output.data_type)
+                        },
+                    )
                 })
                 .collect(),
             outputs: Vec::new(),
@@ -80,11 +88,11 @@ impl Interface {
         &self.ports
     }
 
-    pub fn inputs(&self) -> &[InputDecl] {
+    pub fn inputs(&self) -> &[Numbered<InputDecl>] {
         &self.ports.inputs
     }
 
-    pub fn outputs(&self) -> &[OutputDecl] {
+    pub fn outputs(&self) -> &[Numbered<OutputDecl>] {
         &self.ports.outputs
     }
 
@@ -137,51 +145,41 @@ mod tests {
     use crate::graph::identity::PortId;
     use crate::graph::interface::Interface;
     use crate::graph::node::Boundary;
-    use crate::graph::ports::{InputDecl, OutputDecl, PortList, Ports, PortsError};
+    use crate::graph::ports::{InputDecl, Numbered, OutputDecl, PortList, Ports, PortsError};
 
-    fn input(id: u128) -> InputDecl {
-        InputDecl {
-            id: PortId::from_u128(id),
-            ..InputDecl::optional("in", DataType::Float)
+    fn input(id: u32) -> Numbered<InputDecl> {
+        Numbered::new(
+            PortId::new(id),
+            InputDecl::optional("in", DataType::Float)
                 .default(0.5)
-                .description("gain")
-        }
+                .description("gain"),
+        )
     }
 
-    fn output(id: u128) -> OutputDecl {
-        OutputDecl {
-            id: PortId::from_u128(id),
-            ..OutputDecl::new("out", DataType::Int).description("count")
-        }
+    fn output(id: u32) -> Numbered<OutputDecl> {
+        Numbered::new(
+            PortId::new(id),
+            OutputDecl::new("out", DataType::Int).description("count"),
+        )
     }
 
-    fn ports(inputs: Vec<InputDecl>, outputs: Vec<OutputDecl>) -> Ports {
+    fn ports(inputs: Vec<Numbered<InputDecl>>, outputs: Vec<Numbered<OutputDecl>>) -> Ports {
         Ports { inputs, outputs }
     }
 
-    /// The rules a func's ports pass: an id set and unique on its side, and a default its input
-    /// takes. An input and an output may share an id, as a func's input 1 and output 1 do.
+    /// The rules a func's ports pass: an id unique on its side, and a default its input takes. An input and an output may share an id, as a func's input 1 and output 1 do.
     #[test]
     fn checked_refuses_what_a_func_refuses() {
-        assert_eq!(
-            Interface::checked(ports(vec![input(0)], vec![])).err(),
-            Some(PortsError::NilId {
-                list: PortList::Inputs,
-                idx: 0
-            })
-        );
         assert_eq!(
             Interface::checked(ports(vec![input(1), input(1)], vec![])).err(),
             Some(PortsError::DuplicateId {
                 list: PortList::Inputs,
                 idx: 1,
-                port_id: PortId::from_u128(1)
+                port_id: PortId::new(1)
             })
         );
-        let wrong_default = InputDecl {
-            default_value: Some(ConstValue::String("loud".into())),
-            ..input(1)
-        };
+        let mut wrong_default = input(1);
+        wrong_default.default_value = Some(ConstValue::String("loud".into()));
         assert_eq!(
             Interface::checked(ports(vec![wrong_default], vec![])).err(),
             Some(PortsError::InvalidDefault { idx: 0 })
@@ -196,34 +194,31 @@ mod tests {
     /// same, with no default.
     #[test]
     fn each_boundary_node_mirrors_the_ports() {
-        let required = InputDecl {
-            id: PortId::from_u128(2),
-            ..InputDecl::required("path", DataType::Dir).const_only()
-        };
+        let required = Numbered::new(
+            PortId::new(2),
+            InputDecl::required("path", DataType::Dir).const_only(),
+        );
         let interface = Interface::new(ports(vec![input(1), required], vec![output(3)]));
         assert_eq!(
             *interface.boundary_ports(Boundary::Inputs),
             ports(
                 vec![],
                 vec![
-                    OutputDecl {
-                        id: PortId::from_u128(1),
-                        ..OutputDecl::new("in", DataType::Float).description("gain")
-                    },
-                    OutputDecl {
-                        id: PortId::from_u128(2),
-                        ..OutputDecl::new("path", DataType::Dir)
-                    },
+                    Numbered::new(
+                        PortId::new(1),
+                        OutputDecl::new("in", DataType::Float).description("gain")
+                    ),
+                    Numbered::new(PortId::new(2), OutputDecl::new("path", DataType::Dir)),
                 ],
             )
         );
         assert_eq!(
             *interface.boundary_ports(Boundary::Outputs),
             ports(
-                vec![InputDecl {
-                    id: PortId::from_u128(3),
-                    ..InputDecl::optional("out", DataType::Int).description("count")
-                }],
+                vec![Numbered::new(
+                    PortId::new(3),
+                    InputDecl::optional("out", DataType::Int).description("count")
+                )],
                 vec![],
             )
         );
@@ -234,16 +229,16 @@ mod tests {
     /// apart.
     #[test]
     fn an_interface_round_trips_and_a_shared_id_is_refused() {
-        let image = InputDecl {
-            id: PortId::from_u128(2),
-            ..InputDecl::required(
+        let image = Numbered::new(
+            PortId::new(2),
+            InputDecl::required(
                 "image",
                 DataType::File {
                     kind: FileKindId::from_u128(9),
                     mode: FileMode::OpenMany,
                 },
-            )
-        };
+            ),
+        );
         let interface = Interface::new(ports(vec![input(1), image], vec![output(3)]));
         let ron = SerdeFormat::Ron.serialize(&interface).unwrap();
         assert_eq!(
@@ -251,10 +246,9 @@ mod tests {
             interface
         );
 
-        let shared = String::from_utf8(ron).unwrap().replace(
-            &format!("{:?}", PortId::from_u128(2).to_string()),
-            &format!("{:?}", PortId::from_u128(1).to_string()),
-        );
+        let ron = String::from_utf8(ron).unwrap();
+        assert_eq!(ron.matches("id: 2,").count(), 1, "{ron}");
+        let shared = ron.replace("id: 2,", "id: 1,");
         assert!(
             SerdeFormat::Ron
                 .deserialize::<Interface>(shared.as_bytes())

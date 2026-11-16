@@ -142,6 +142,12 @@ impl Requests {
                 facts.dropped
             )));
         }
+        if facts.ghosted > 0 {
+            self.push_app(AppCommand::Warn(format!(
+                "the update kept {} binding(s) its ports no longer hold as ghosts",
+                facts.ghosted
+            )));
+        }
     }
 
     /// Owe a relayout if the edit that reported `facts` strands the geometry.

@@ -300,7 +300,7 @@ impl Theme {
     /// Border color for a selectable card in `tier`. Its width is
     /// [`CardTheme::border_width`] in every tier, so selecting (or
     /// breaking) a card never resizes it — only the color changes. A caller
-    /// with an extra tier of its own (e.g. a node body's "missing" stub state)
+    /// with an extra tier of its own (e.g. a node body's "missing" ghost node state)
     /// special-cases that tier around this call instead of forcing it in here.
     #[inline]
     pub(crate) const fn card_border(&self, tier: CardTier) -> RgbaF32 {

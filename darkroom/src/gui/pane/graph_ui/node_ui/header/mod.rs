@@ -283,7 +283,7 @@ fn cache_button_wid(graph: GraphId, node_id: NodeId) -> WidgetId {
 
 /// The node title: an inline-renamable label. Double-click swaps it for
 /// a `TextEdit`; commit emits [`GraphIntent::RenameNode`], single-click
-/// selects (the label would otherwise swallow the body's click). A stub's
+/// selects (the label would otherwise swallow the body's click). A ghost node's
 /// title is read-only: its record is a frozen snapshot no edit changes.
 fn title(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     let node = record.node;
@@ -293,7 +293,7 @@ fn title(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
         .style(&node.theme().flat_text_edit)
         .bold()
         .max_chars(format::NAME_MAX_CHARS)
-        .editable(!node.stub())
+        .editable(!node.ghost())
         .min_size((NODE_NAME_MIN_WIDTH, 0.0))
         .show(ui);
     if let Some(to) = title.committed_text {

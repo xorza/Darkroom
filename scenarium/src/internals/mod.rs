@@ -8,7 +8,7 @@
 //! supply: [`NodeSpec`](test_graph::NodeSpec) names ports `in0`/`out0` by position, so a test
 //! about how an editor *renders* a port states its own [`Func`], which needs an implementation.
 //! Beside them is [`unresolved_node`], the node a decoded document holds for a func the library
-//! lost, until [`GraphSet::reconcile`](crate::GraphSet::reconcile) keeps it as a stub.
+//! lost, until [`GraphSet::reconcile`](crate::GraphSet::reconcile) keeps it as a ghost node.
 
 #[cfg(test)]
 pub(crate) mod blob;

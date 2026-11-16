@@ -8,7 +8,7 @@ use palantir::{
     LocateError, PlayError, PointerButton, Rect, ShortcutMods, SystemScale, WheelDelta,
 };
 use scenarium::{
-    Binding, ConstValue, GraphId, InputPort, InstancePath, NodeId, ProgramId, numbered_port,
+    Binding, ConstValue, GraphId, InputPort, InstancePath, Library, NodeId, PortId, ProgramId,
 };
 use tracing::{callsite, subscriber};
 use tracing_subscriber::layer::SubscriberExt as _;
@@ -21,7 +21,7 @@ use crate::driver::locator::{EditorTarget, Locator, Side};
 use crate::driver::log_ring::LogRing;
 use crate::driver::offscreen;
 use crate::driver::shot::{NODE_MARGIN, Region, Shot};
-use crate::driver::state::{Detail, GraphSummary, State};
+use crate::driver::state::{Detail, GhostNodeSummary, GraphSummary, State};
 use crate::driver::{COPY_LIMIT, DisplayKind, Driver, OpenMode, SessionConfig};
 use crate::gui::dialogs::DialogAnswer;
 use crate::gui::frame::shortcuts;
@@ -513,7 +513,7 @@ fn a_folder_a_copy_would_break_is_refused() {
     let mut document = io_document::load(&path).unwrap().document;
     let node_id = document.graphs.main().iter().next().unwrap().node_id;
     document.graphs.main_mut().bindings.insert(
-        InputPort::new(node_id, numbered_port(1)),
+        InputPort::new(node_id, PortId::new(1)),
         Binding::Const(ConstValue::FsPath("../x.tiff".to_string())),
     );
     io_document::internals::write_unchecked(&document, &path);
@@ -882,6 +882,7 @@ fn a_save_writes_the_format_its_extension_names() {
     let path = dir.join("scene.darkroomz");
     io_document::save(
         &io_document::load(&fixture).unwrap().document,
+        &Library::default(),
         &path,
         SavedPaths::Relative,
     )
@@ -1041,7 +1042,8 @@ fn a_window_past_the_device_limit_is_refused() {
 
 /// The sample project runs to completion, and each preview shows an image of its input's size:
 /// the TIFF's 895 × 551 after Brightness / Contrast and after Blend, and the FITS frame's
-/// 100 × 100 after Auto Stretch.
+/// 100 × 100 after Auto Stretch. Preview Denoised, whose input is a ghost wire from the ghost
+/// node Denoise, runs with the input unbound and shows nothing.
 #[test]
 fn the_sample_project_runs_to_its_previews() {
     let mut driver = driver();
@@ -1067,7 +1069,7 @@ fn the_sample_project_runs_to_its_previews() {
             node.run
         );
     }
-    let mut sizes: Vec<(String, UVec2)> = state
+    let mut sizes: Vec<(String, Option<UVec2>)> = state
         .active()
         .nodes
         .iter()
@@ -1079,8 +1081,8 @@ fn the_sample_project_runs_to_its_previews() {
                 .previews()
                 .get(ProgramId::from(node_id(&driver, &node.name)))
                 .and_then(StoredContent::image)
-                .unwrap_or_else(|| panic!("{} shows an image", node.name));
-            (node.name.clone(), shown.preview.native_size)
+                .map(|image| image.preview.native_size);
+            (node.name.clone(), shown)
         })
         .collect();
     sizes.sort_by(|a, b| a.0.cmp(&b.0));
@@ -1088,9 +1090,27 @@ fn the_sample_project_runs_to_its_previews() {
     assert_eq!(
         sizes,
         [
-            ("Preview Adjusted".to_string(), lena),
-            ("Preview Astro".to_string(), UVec2::new(100, 100)),
-            ("Preview Blend".to_string(), lena),
+            ("Preview Adjusted".to_string(), Some(lena)),
+            ("Preview Astro".to_string(), Some(UVec2::new(100, 100))),
+            ("Preview Blend".to_string(), Some(lena)),
+            ("Preview Denoised".to_string(), None),
+        ]
+    );
+    let main = state.active();
+    assert_eq!(
+        main.ghost_nodes,
+        [GhostNodeSummary {
+            name: "Denoise".to_string(),
+            reason: "the library holds no func under its id".to_string(),
+            was: Some("Denoise".to_string()),
+        }]
+    );
+    assert_eq!(
+        main.ghosts,
+        [
+            "Denoise.Image -> Preview Denoised.Value",
+            "Load Astro Image.Image -> Denoise.Image",
+            "const Float(0.8) -> Denoise.Strength",
         ]
     );
 }

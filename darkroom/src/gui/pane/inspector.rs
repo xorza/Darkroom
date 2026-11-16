@@ -116,7 +116,7 @@ fn body(ui: &mut Ui, stage: &mut Stage<'_, NodeCtx<'_>>, target: InspectTarget) 
                     support::hspacer(ui, "inspector_title_spacer");
                     status_chip(ui, theme, node.exec_status());
                     if target == InspectTarget::Selection
-                        && !node.stub()
+                        && !node.ghost()
                         && IconButton::press(
                             Icon::Pin,
                             pin_wid(),
@@ -141,6 +141,16 @@ fn body(ui: &mut Ui, stage: &mut Stage<'_, NodeCtx<'_>>, target: InspectTarget) 
                     node.kind_label(),
                     support::muted_text(ui, theme, theme.font.caption),
                 );
+            }
+            // What a ghost node was, where a save kept it: its func's name and category, to find
+            // the build or the plugin that has it.
+            if let Some(saved) = node.saved() {
+                let was = if saved.category.is_empty() {
+                    fmt!(ui, "was {}", saved.name)
+                } else {
+                    fmt!(ui, "was {} \u{b7} {}", saved.name, saved.category)
+                };
+                line(ui, was, support::muted_text(ui, theme, theme.font.caption));
             }
         });
     // The failure's cause under the header: what turns a generic status into an actionable

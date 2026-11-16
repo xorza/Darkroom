@@ -27,7 +27,8 @@ pub(crate) enum GraphStep {
     Node(Box<SetNode>),
     Positions(SetPositions),
     NodeName(SetNodeName),
-    Input(SetInput),
+    /// Boxed: each half holds a binding or a ghost of one, with the ports it kept.
+    Input(Box<SetInput>),
     Selection(SetSelection),
     Depth(SetDepth),
     NodeProperty(SetNodeProperty),
@@ -68,7 +69,7 @@ impl GraphStep {
             Self::Node(step) => step.as_ref(),
             Self::Positions(step) => step,
             Self::NodeName(step) => step,
-            Self::Input(step) => step,
+            Self::Input(step) => step.as_ref(),
             Self::Selection(step) => step,
             Self::Depth(step) => step,
             Self::NodeProperty(step) => step,

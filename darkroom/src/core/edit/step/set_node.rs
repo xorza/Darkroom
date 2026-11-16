@@ -1,6 +1,6 @@
 //! [`SetNode`]: a node added to the document or removed from it.
 
-use scenarium::{Binding, DetachedNode, GraphId, InputPort, NodeId, Stub};
+use scenarium::{Binding, DetachedGhost, DetachedNode, GraphId, InputPort, NodeId};
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::Document;
@@ -12,23 +12,24 @@ use crate::core::edit::step::change::{Direction, EntryEdit};
 use crate::core::edit::step::reversible::Reversible;
 use crate::core::edit::step::set_ties::SetTies;
 
-/// What the document holds of one node: a graph node, as the record its detach leaves, or a
-/// stub, which keeps its record and why the load took it out.
+/// What the document holds of one node, as the record its detach leaves: a graph node with its
+/// wiring, or a ghost node with the ghosts that touch it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 enum Held {
     Node(DetachedNode),
-    Stub(Stub),
+    Ghost(DetachedGhost),
 }
 
 impl Held {
-    const fn record(&self) -> &DetachedNode {
+    const fn node_id(&self) -> NodeId {
         match self {
-            Self::Node(record) | Self::Stub(Stub { record, .. }) => record,
+            Self::Node(record) => record.node_id(),
+            Self::Ghost(record) => record.node_id(),
         }
     }
 }
 
-/// Everything the document holds about one node: the node or stub with every edge that touched
+/// Everything the document holds about one node: the node or ghost node with every edge that touched
 /// it, its placement, and whether it was selected. What a removal takes out and an undo puts
 /// back.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -42,31 +43,31 @@ pub(crate) struct NodeEntry {
 }
 
 impl NodeEntry {
-    /// Read `node_id`'s whole entry out of `graph` of `document`, a node or a stub, or `None`
+    /// Read `node_id`'s whole entry out of `graph` of `document`, a node or a ghost node, or `None`
     /// when the graph no longer holds it, the ordinary outcome of an intent that spans frames.
     pub(crate) fn capture(document: &Document, graph: GraphId, node_id: NodeId) -> Option<Self> {
         let held = document.graphs.graph(graph);
         let held = match held.snapshot_node(node_id) {
             Some(record) => Held::Node(record),
-            None => Held::Stub(held.stub(node_id)?.clone()),
+            None => Held::Ghost(held.snapshot_ghost_node(node_id)?),
         };
         let view = document.view(graph);
         Some(Self {
             placement: *view
                 .node_placements
                 .get(&node_id)
-                .expect("the view places every node and stub"),
+                .expect("the view places every node and ghost node"),
             selected: view.selected.contains(&ItemId::Node(node_id)),
             held,
         })
     }
 
-    /// The wires the graph holds on this node: none for a stub, whose
-    /// record keeps its wiring off the graph.
+    /// The wires the graph holds on this node: none for a ghost node, whose
+    /// wiring is ghosts.
     pub(crate) fn wires(&self) -> impl Iterator<Item = WireKey> + '_ {
         let (bindings, subscriptions) = match &self.held {
             Held::Node(record) => (record.bindings(), record.subscriptions()),
-            Held::Stub(_) => (&[][..], &[][..]),
+            Held::Ghost(_) => (&[][..], &[][..]),
         };
         let data = bindings.iter().filter_map(|entry| match entry.binding {
             Binding::Wire(output) => Some(WireKey::Data(DataWire {
@@ -78,15 +79,32 @@ impl NodeEntry {
         data.chain(subscriptions.iter().copied().map(WireKey::Event))
     }
 
+    /// The ghost wires that touch this node, a node's or a ghost node's, which go with it and
+    /// take their routes.
+    pub(crate) fn ghost_wires(&self) -> impl Iterator<Item = WireKey> + '_ {
+        let wiring = match &self.held {
+            Held::Node(record) => record.ghost_wiring(),
+            Held::Ghost(record) => record.wiring(),
+        };
+        let data = wiring
+            .wires()
+            .map(|(input, output)| WireKey::Data(DataWire { output, input }));
+        data.chain(
+            wiring
+                .subscriptions()
+                .map(|(subscription, _)| WireKey::Event(subscription)),
+        )
+    }
+
     const fn node_id(&self) -> NodeId {
-        self.held.record().node_id()
+        self.held.node_id()
     }
 
     fn restore(&self, document: &mut Document, graph: GraphId) {
         let slot = document.slot_mut(graph);
         match &self.held {
             Held::Node(record) => slot.graph.attach_node(record.clone()),
-            Held::Stub(stub) => slot.graph.insert_stub(stub.clone()),
+            Held::Ghost(record) => slot.graph.attach_ghost_node(record.clone()),
         }
         let node_id = self.node_id();
         slot.view.node_placements.insert(node_id, self.placement);
@@ -156,7 +174,7 @@ impl SetNode {
         let node_id = self.entry.node_id();
         let removed = match self.entry.held {
             Held::Node(_) => Held::Node(document.remove_node(graph, node_id)),
-            Held::Stub(_) => Held::Stub(document.remove_stub(graph, node_id)),
+            Held::Ghost(_) => Held::Ghost(document.remove_ghost_node(graph, node_id)),
         };
         debug_assert_eq!(
             removed, self.entry.held,

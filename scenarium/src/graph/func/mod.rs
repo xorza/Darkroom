@@ -11,7 +11,7 @@ use crate::graph::func::func_builder::FuncBuilder;
 use crate::graph::func::lambda::FuncLambda;
 use crate::graph::identity::{FuncId, FuncRef, PortId};
 use crate::graph::node::CacheMode;
-use crate::graph::ports::{InputDecl, OutputDecl, Ports};
+use crate::graph::ports::{InputDecl, Numbered, OutputDecl, Ports};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum FuncBehavior {
@@ -116,11 +116,11 @@ impl Func {
         &self.ports
     }
 
-    pub fn inputs(&self) -> &[InputDecl] {
+    pub fn inputs(&self) -> &[Numbered<InputDecl>] {
         &self.ports.inputs
     }
 
-    pub fn outputs(&self) -> &[OutputDecl] {
+    pub fn outputs(&self) -> &[Numbered<OutputDecl>] {
         &self.ports.outputs
     }
 

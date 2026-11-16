@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use scenarium::{Binding, Compiler, GraphId, InputPort, Library, OutputPort, numbered_port};
+use scenarium::{Binding, Compiler, GraphId, InputPort, Library, OutputPort, PortId};
 
 use crate::core::document;
 use crate::core::document::Document;
@@ -25,8 +25,8 @@ fn chain() -> DocumentFixture {
     }
     for (from, to) in [(0, 1), (1, 2)] {
         fixture.wire(
-            OutputPort::new(ids[from], numbered_port(1)),
-            InputPort::new(ids[to], numbered_port(1)),
+            OutputPort::new(ids[from], PortId::new(1)),
+            InputPort::new(ids[to], PortId::new(1)),
         );
     }
     fixture
@@ -99,16 +99,8 @@ fn collapse_then_expand_gives_back_the_wiring_but_for_ids() {
     assert_eq!(
         wiring(document, &library),
         [
-            format!(
-                "Subgraph.{:?} -> c.{:?}",
-                numbered_port(1),
-                numbered_port(1)
-            ),
-            format!(
-                "a.{:?} -> Subgraph.{:?}",
-                numbered_port(1),
-                numbered_port(1)
-            ),
+            format!("Subgraph.{:?} -> c.{:?}", PortId::new(1), PortId::new(1)),
+            format!("a.{:?} -> Subgraph.{:?}", PortId::new(1), PortId::new(1)),
         ]
     );
     assert!(

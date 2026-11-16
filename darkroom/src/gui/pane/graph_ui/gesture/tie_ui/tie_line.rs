@@ -154,7 +154,7 @@ impl TieLine {
 #[cfg(test)]
 mod tests {
     use glam::Vec2;
-    use scenarium::{InputPort, NodeId, OutputPort, numbered_port};
+    use scenarium::{InputPort, NodeId, OutputPort, PortId};
 
     use crate::core::document::tie::TieId;
     use crate::core::document::wire_key::{DataWire, WireKey};
@@ -212,8 +212,8 @@ mod tests {
     fn a_line_previews_its_band_at_the_mean_of_its_crossings() {
         let wire = |x: f32, dir: Vec2| WireCrossing {
             wire: WireKey::Data(DataWire {
-                output: OutputPort::new(NodeId::unique(), numbered_port(1)),
-                input: InputPort::new(NodeId::unique(), numbered_port(1)),
+                output: OutputPort::new(NodeId::unique(), PortId::new(1)),
+                input: InputPort::new(NodeId::unique(), PortId::new(1)),
             }),
             piece: 0,
             along: x / 10.0,
@@ -240,8 +240,8 @@ mod tests {
     #[test]
     fn the_first_crossing_is_the_earliest_along_the_line() {
         let wire = WireKey::Data(DataWire {
-            output: OutputPort::new(NodeId::unique(), numbered_port(1)),
-            input: InputPort::new(NodeId::unique(), numbered_port(1)),
+            output: OutputPort::new(NodeId::unique(), PortId::new(1)),
+            input: InputPort::new(NodeId::unique(), PortId::new(1)),
         });
         // Two straight vertical pieces, the first at x = 6 and the second at x = 2.
         let vertical = |x: f32| Wire {
