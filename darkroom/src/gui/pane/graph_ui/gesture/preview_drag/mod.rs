@@ -96,7 +96,13 @@ impl PreviewSpawn {
                 bindings: func.ports().default_bindings(node_id).collect(),
             },
             GraphIntent::SetInput {
-                input: InputPort::new(node_id, 0),
+                input: InputPort::new(
+                    node_id,
+                    func.inputs()
+                        .first()
+                        .expect("a preview func takes the previewed value first")
+                        .id,
+                ),
                 to: Some(Binding::Wire(port)),
             },
         ]

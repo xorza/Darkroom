@@ -12,6 +12,7 @@ use std::error;
 use std::fmt;
 
 use crate::graph::identity::FuncId;
+use crate::graph::ports::PortsError;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum FuncValidationError {
@@ -21,18 +22,16 @@ pub enum FuncValidationError {
     NilId,
     #[error("function {func_id:?} has no outputs, so it must be impure")]
     PureWithoutOutputs { func_id: FuncId },
-    #[error("function {func_id:?} input {input_idx} has a nil nominal type id")]
-    NilInputType { func_id: FuncId, input_idx: usize },
-    #[error("function {func_id:?} output {output_idx} has a nil nominal type id")]
-    NilOutputType { func_id: FuncId, output_idx: usize },
+    #[error("function {func_id:?} declares a port no declaration may hold")]
+    Ports {
+        func_id: FuncId,
+        #[source]
+        error: PortsError,
+    },
     /// An output's type is what a wire into an input is checked against, and
     /// `Any` would pass every check.
     #[error("function {func_id:?} output {output_idx} is declared `Any`")]
     AnyOutput { func_id: FuncId, output_idx: usize },
-    #[error(
-        "function {func_id:?} input {input_idx} declares a default that matches neither its type nor its picker variants"
-    )]
-    InvalidDefault { func_id: FuncId, input_idx: usize },
 }
 
 #[derive(Debug, Error)]

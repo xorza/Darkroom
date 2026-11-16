@@ -55,9 +55,9 @@ fn register_denoise(library: &mut Library, model_path: &Path) {
         .description("Denoises a stretched image with an ONNX model (DeepSNR).")
         .category("Astro")
         .pure()
-        .input(Image::input("Image"))
-        .input(model_input("Model", model_path))
-        .output(OutputDecl::new("Image", IMAGE_DATA_TYPE).description("Processed image."))
+        .input(1, Image::input("Image"))
+        .input(2, model_input("Model", model_path))
+        .output(1, OutputDecl::new("Image", IMAGE_DATA_TYPE).description("Processed image."))
         .build(),
     );
 }
@@ -108,13 +108,13 @@ fn register_star_removal(library: &mut Library, model_path: &Path) {
         .description("Removes stars with a StarNet ONNX model (starless + stars).")
         .category("Astro")
         .pure()
-        .input(Image::input("Image"))
-        .input(model_input("Model", model_path))
+        .input(1, Image::input("Image"))
+        .input(2, model_input("Model", model_path))
         .output(
-            OutputDecl::new("Starless", IMAGE_DATA_TYPE)
+            1, OutputDecl::new("Starless", IMAGE_DATA_TYPE)
                 .description("The image with stars removed."),
         )
-        .output(OutputDecl::new("Stars", IMAGE_DATA_TYPE).description("The recovered star layer."))
+        .output(2, OutputDecl::new("Stars", IMAGE_DATA_TYPE).description("The recovered star layer."))
         .build(),
     );
 }

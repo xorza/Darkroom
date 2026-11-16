@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use glam::Vec2;
-use scenarium::{InputPort, NodeId, OutputPort};
+use scenarium::{InputPort, NodeId, OutputPort, numbered_port};
 
 use crate::core::document::graph_view::GraphView;
 use crate::core::document::route::Route;
@@ -12,8 +12,8 @@ use crate::gui::pane::graph_ui::scene::tie_layout::{Span, TieLayout};
 /// A data wire of its own, from a fresh node to another.
 fn wire() -> WireKey {
     WireKey::Data(DataWire {
-        output: OutputPort::new(NodeId::unique(), 0),
-        input: InputPort::new(NodeId::unique(), 0),
+        output: OutputPort::new(NodeId::unique(), numbered_port(1)),
+        input: InputPort::new(NodeId::unique(), numbered_port(1)),
     })
 }
 
@@ -163,7 +163,7 @@ fn a_tied_event_wire_meets_its_pin_from_the_up_left() {
     use crate::gui::pane::graph_ui::scene::wire::Wire;
 
     let event = WireKey::Event(Subscription::new(
-        EventPort::new(NodeId::unique(), 0),
+        EventPort::new(NodeId::unique(), numbered_port(1)),
         NodeId::unique(),
     ));
     let (start, end) = ((-100.0, 0.0), (100.0, 80.0));

@@ -635,7 +635,7 @@ mod tests {
         };
         let theme = Theme::default();
         let impure = stub_func(FuncId::unique(), "probe")
-            .input(InputDecl::optional("a", DataType::Int))
+            .input(1, InputDecl::optional("a", DataType::Int))
             .build();
         let mut fixture = DocumentFixture::default();
         fixture.add(&impure);

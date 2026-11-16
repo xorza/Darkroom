@@ -1,7 +1,7 @@
 use common::Libm;
 use glam::Vec2;
 use palantir::{Modifiers, PointerButton};
-use scenarium::{InputPort, OutputPort};
+use scenarium::{InputPort, OutputPort, numbered_port};
 
 use crate::core::document::internals::DocumentFixture;
 use crate::core::document::item_id::ItemId;
@@ -75,19 +75,24 @@ fn crossed(tie_first: bool) -> Crossed {
     let [left_a, left_b] = [40.0, 300.0].map(|y| fixture.node_at(Vec2::new(40.0, y)));
     let [right_a, right_b] = [40.0, 300.0].map(|y| fixture.node_at(Vec2::new(700.0, y)));
     let wires = [
-        (left_a, right_a, 0),
-        (left_a, right_b, 1),
-        (left_b, right_a, 1),
-        (left_b, right_b, 0),
+        (left_a, right_a, 1),
+        (left_a, right_b, 2),
+        (left_b, right_a, 2),
+        (left_b, right_b, 1),
     ]
-    .map(|(from, to, input)| fixture.wire(OutputPort::new(from, 0), InputPort::new(to, input)));
+    .map(|(from, to, input)| {
+        fixture.wire(
+            OutputPort::new(from, numbered_port(1)),
+            InputPort::new(to, numbered_port(input)),
+        )
+    });
     if tie_first {
         fixture.tie(Vec2::ZERO, [wires[0]]);
     }
     let mut h = CanvasHarness::new(fixture);
     h.prime(3);
-    let output = h.port_center(PortRef::from(OutputPort::new(left_a, 0)));
-    let input = h.port_center(PortRef::from(InputPort::new(right_a, 0)));
+    let output = h.port_center(PortRef::from(OutputPort::new(left_a, numbered_port(1))));
+    let input = h.port_center(PortRef::from(InputPort::new(right_a, numbered_port(1))));
     let x = f32::midpoint(output.x, input.x);
     Crossed { h, wires, x }
 }
@@ -196,7 +201,10 @@ fn one_tie(selected: bool) -> (CanvasHarness, TieId) {
     let mut fixture = DocumentFixture::default();
     let from = fixture.node_at(Vec2::new(40.0, 200.0));
     let to = fixture.node_at(Vec2::new(700.0, 200.0));
-    let wire = fixture.wire(OutputPort::new(from, 0), InputPort::new(to, 0));
+    let wire = fixture.wire(
+        OutputPort::new(from, numbered_port(1)),
+        InputPort::new(to, numbered_port(1)),
+    );
     let tie = fixture.tie(Vec2::new(470.0, 250.0), [wire]);
     if selected {
         fixture.document.main_view.selected.insert(ItemId::Tie(tie));
@@ -327,8 +335,12 @@ fn two_wire_tie() -> (CanvasHarness, TieId, [WireKey; 2]) {
     let mut fixture = DocumentFixture::default();
     let from = fixture.node_at(Vec2::new(40.0, 200.0));
     let to = fixture.node_at(Vec2::new(700.0, 200.0));
-    let wires =
-        [0, 1].map(|input| fixture.wire(OutputPort::new(from, 0), InputPort::new(to, input)));
+    let wires = [1, 2].map(|input| {
+        fixture.wire(
+            OutputPort::new(from, numbered_port(1)),
+            InputPort::new(to, numbered_port(input)),
+        )
+    });
     let tie = fixture.tie(Vec2::new(470.0, 250.0), wires);
     let mut h = CanvasHarness::sized(fixture, glam::UVec2::new(1200, 900));
     h.prime(3);

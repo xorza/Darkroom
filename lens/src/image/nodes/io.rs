@@ -76,10 +76,14 @@ fn register_load(library: &mut Library) {
         .category("Image")
         .pure()
         .input(
+            1,
             InputDecl::required("Path", image_file(FileMode::Open))
                 .description("Image file to load."),
         )
-        .output(OutputDecl::new("Image", IMAGE_DATA_TYPE).description("Loaded image."))
+        .output(
+            1,
+            OutputDecl::new("Image", IMAGE_DATA_TYPE).description("Loaded image."),
+        )
         .build(),
     );
 }
@@ -113,14 +117,14 @@ fn register_save(library: &mut Library) {
             .category("Image")
             .sink()
             .input(
-                InputDecl::required("Image", IMAGE_DATA_TYPE).description("Image to save."),
+                1, InputDecl::required("Image", IMAGE_DATA_TYPE).description("Image to save."),
             )
             .input(
-                InputDecl::required("Path", image_file(FileMode::Save))
+                2, InputDecl::required("Path", image_file(FileMode::Save))
                     .description("Destination file; the extension picks the container."),
             )
             .input(
-                InputDecl::required("Format", CONVERSION_FORMAT_DATATYPE)
+                3, InputDecl::required("Format", CONVERSION_FORMAT_DATATYPE)
                     .default(ConstValue::Enum(AS_IS.to_string()))
                     .description(
                         "Convert to this color format before saving; \"As Is\" keeps the source format.",

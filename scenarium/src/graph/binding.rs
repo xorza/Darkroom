@@ -3,7 +3,7 @@
 use ::serde::{Deserialize, Serialize};
 
 use crate::data::const_value::ConstValue;
-use crate::graph::identity::{InputPort, NodeId, OutputPort};
+use crate::graph::identity::{InputPort, NodeId, OutputPort, PortId};
 
 /// What a consumer input port is wired to; an absent port in `Graph.bindings` is unbound.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -13,9 +13,9 @@ pub enum Binding {
 }
 
 impl Binding {
-    /// A data binding wired to producer `node_id`'s output port `port_idx`.
-    pub const fn wire(node_id: NodeId, port_idx: usize) -> Self {
-        Self::Wire(OutputPort::new(node_id, port_idx))
+    /// A data binding wired to producer `node_id`'s output port `port`.
+    pub const fn wire(node_id: NodeId, port: PortId) -> Self {
+        Self::Wire(OutputPort::new(node_id, port))
     }
 
     /// Whether this binding, on `port`, touches `node_id` from either end: it lands on

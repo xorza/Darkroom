@@ -51,19 +51,27 @@ fn register_brightness(library: &mut Library) {
         .description("Adjusts the brightness and contrast of an image.")
         .category("Image")
         .pure()
-        .input(InputDecl::required("Image", IMAGE_DATA_TYPE).description("Image to adjust."))
         .input(
+            1,
+            InputDecl::required("Image", IMAGE_DATA_TYPE).description("Image to adjust."),
+        )
+        .input(
+            2,
             InputDecl::required("Brightness", DataType::Float)
                 .description("Brightness offset in [−1, 1]. 0 leaves it unchanged.")
                 .default(0.0),
         )
         .input(
+            3,
             InputDecl::required("Contrast", DataType::Float)
                 .description("Contrast multiplier. 1 leaves it unchanged.")
                 .default(1.0),
         )
-        .input(clamp_input())
-        .output(OutputDecl::new("Image", IMAGE_DATA_TYPE).description("Adjusted image."))
+        .input(4, clamp_input())
+        .output(
+            1,
+            OutputDecl::new("Image", IMAGE_DATA_TYPE).description("Adjusted image."),
+        )
         .build(),
     );
 }
@@ -108,13 +116,20 @@ fn register_convert(library: &mut Library) {
         .description("Converts an image to a different color format.")
         .category("Image")
         .pure()
-        .input(InputDecl::required("Image", IMAGE_DATA_TYPE).description("Image to convert."))
         .input(
+            1,
+            InputDecl::required("Image", IMAGE_DATA_TYPE).description("Image to convert."),
+        )
+        .input(
+            2,
             InputDecl::required("Format", CONVERSION_FORMAT_DATATYPE)
                 .default(ConstValue::Enum(ColorFormat::RGB_U8.name().to_string()))
                 .description("Target color format."),
         )
-        .output(OutputDecl::new("Image", IMAGE_DATA_TYPE).description("Converted image."))
+        .output(
+            1,
+            OutputDecl::new("Image", IMAGE_DATA_TYPE).description("Converted image."),
+        )
         .build(),
     );
 }
@@ -161,14 +176,17 @@ fn register_blend(library: &mut Library) {
         .category("Image")
         .pure()
         .input(
+            1,
             InputDecl::required("Source", IMAGE_DATA_TYPE)
                 .description("Top image (the blend source)."),
         )
         .input(
+            2,
             InputDecl::required("Destination", IMAGE_DATA_TYPE)
                 .description("Bottom image (the blend backdrop)."),
         )
         .input(
+            3,
             InputDecl::required("Mode", BLENDMODE_DATATYPE)
                 .default(ConstValue::Enum(
                     BlendMode::VARIANTS[BlendMode::default() as usize].to_owned(),
@@ -176,12 +194,16 @@ fn register_blend(library: &mut Library) {
                 .description("Blend mode."),
         )
         .input(
+            4,
             InputDecl::required("Alpha", DataType::Float)
                 .description("Blend strength in [0, 1]. 1 is full source.")
                 .default(1.0),
         )
-        .input(clamp_input())
-        .output(OutputDecl::new("Image", IMAGE_DATA_TYPE).description("Blended image."))
+        .input(5, clamp_input())
+        .output(
+            1,
+            OutputDecl::new("Image", IMAGE_DATA_TYPE).description("Blended image."),
+        )
         .build(),
     );
 }
@@ -223,33 +245,44 @@ fn register_transform(library: &mut Library) {
         .description("Applies scale, rotation, and translation to an image.")
         .category("Image")
         .pure()
-        .input(InputDecl::required("Image", IMAGE_DATA_TYPE).description("Image to transform."))
         .input(
+            1,
+            InputDecl::required("Image", IMAGE_DATA_TYPE).description("Image to transform."),
+        )
+        .input(
+            2,
             InputDecl::required("Scale X", DataType::Float)
                 .description("Horizontal scale factor. 1 leaves width unchanged.")
                 .default(1.0),
         )
         .input(
+            3,
             InputDecl::required("Scale Y", DataType::Float)
                 .description("Vertical scale factor. 1 leaves height unchanged.")
                 .default(1.0),
         )
         .input(
+            4,
             InputDecl::required("Rotation", DataType::Float)
                 .description("Rotation in radians, about the image center.")
                 .default(0.0),
         )
         .input(
+            5,
             InputDecl::required("Translate X", DataType::Float)
                 .description("Horizontal shift in pixels.")
                 .default(0.0),
         )
         .input(
+            6,
             InputDecl::required("Translate Y", DataType::Float)
                 .description("Vertical shift in pixels.")
                 .default(0.0),
         )
-        .output(OutputDecl::new("Image", IMAGE_DATA_TYPE).description("Transformed image."))
+        .output(
+            1,
+            OutputDecl::new("Image", IMAGE_DATA_TYPE).description("Transformed image."),
+        )
         .build(),
     );
 }

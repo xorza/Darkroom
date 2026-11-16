@@ -17,7 +17,6 @@ use palantir::{
 };
 use scenarium::Binding;
 use scenarium::FuncEvent;
-use scenarium::InputPort;
 use scenarium::Library;
 use scenarium::NodeId;
 use scenarium::{ConstValue, DataType};
@@ -168,7 +167,6 @@ fn output_cells(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     // Events emit from the same (right) side, in the rows directly below the data outputs.
     for (idx, event) in node.events().iter().enumerate() {
         EventRow {
-            idx,
             row: output_count + idx,
             event,
         }
@@ -240,7 +238,7 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
     // context-menu anchor.
     let cell = Panel::hstack()
         .id(wid::input_cell(port))
-        .grid_cell((grid_row(port.port_idx), COL_INPUT))
+        .grid_cell((grid_row(input.idx()), COL_INPUT))
         .align(Align::LEFT)
         .size(SizeSpec::HUG)
         .sense(Sense::CLICK)
@@ -343,7 +341,7 @@ fn value_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCtx<'_>)
         Some(Binding::Wire(_)) => return,
         None if !input.takes_const() => return,
         None => {
-            value_column(ui, port, |ui| {
+            value_column(ui, input, |ui| {
                 Field {
                     theme: node_ctx.const_editor_theme(),
                     id: editor_id,
@@ -371,7 +369,7 @@ fn value_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCtx<'_>)
                 path_type,
             })));
     }
-    let edited = value_column(ui, port, |ui| {
+    let edited = value_column(ui, input, |ui| {
         ConstEditor {
             field: Field {
                 theme: node_ctx.const_editor_theme(),
@@ -392,12 +390,12 @@ fn value_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCtx<'_>)
     }
 }
 
-/// The value column's cell of the input at `port`: filled, so every editor is the same width
+/// The value column's cell of `input`: filled, so every editor is the same width
 /// (the column hugs to the widest editor's content). `min_size` on the editors keeps a floor.
-fn value_column<R>(ui: &mut Ui, port: InputPort, body: impl FnOnce(&mut Ui) -> R) -> R {
+fn value_column<R>(ui: &mut Ui, input: InputCtx<'_>, body: impl FnOnce(&mut Ui) -> R) -> R {
     Panel::hstack()
-        .id_salt(("val", port.port_idx))
-        .grid_cell((grid_row(port.port_idx), COL_VALUE))
+        .id_salt(("val", input.port().port))
+        .grid_cell((grid_row(input.idx()), COL_VALUE))
         .size(SizeSpec::FILL)
         .child_align(VAlign::Center)
         .show(ui, body)
@@ -421,8 +419,8 @@ fn output_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, output: OutputCtx<'
     let wid = wid::port_circle(port);
     let margin = theme.port_margin(PortKind::Output, theme.port.radius());
     let cell = Panel::hstack()
-        .id_salt(("out", port.port_idx))
-        .grid_cell((grid_row(port.port_idx), COL_OUTPUT))
+        .id_salt(("out", port.port))
+        .grid_cell((grid_row(output.idx()), COL_OUTPUT))
         .align(Align::RIGHT)
         .size(SizeSpec::HUG)
         .sense(Sense::CLICK)
@@ -492,8 +490,6 @@ const PREVIEW_SPAWN_OFFSET: Vec2 = Vec2::new(80.0, -60.0);
 /// (see `SubscriptionUi`).
 #[derive(Debug, Clone, Copy)]
 struct EventRow<'a> {
-    /// The event's index among the node's events.
-    idx: usize,
     /// The grid row it sits in.
     row: usize,
     event: &'a FuncEvent,
@@ -501,19 +497,19 @@ struct EventRow<'a> {
 
 impl EventRow<'_> {
     fn show(self, ui: &mut Ui, record: &NodeRecord<'_, '_>) {
-        let Self { idx, row, event } = self;
+        let Self { row, event } = self;
         let (node_ctx, draw_ctx) = (record.node, record.stage.ctx);
         let theme = node_ctx.theme();
         let node_id = node_ctx.node_id;
         let margin = theme.port_margin(PortKind::Output, theme.port.radius());
-        let ev = EventPort::new(node_id, idx);
+        let ev = EventPort::new(node_id, event.id);
         let wid = wid::event_glyph(ev);
         let fill = Hover::from(draw_ctx.geometry().events.is_hovered(ev)).lift(theme.port.event);
         let tooltip = node_ctx
             .tooltips()
             .then(|| fmt!(ui, "event: {}", event.name));
         Panel::hstack()
-            .id_salt(("event", idx))
+            .id_salt(("event", event.id))
             .grid_cell((grid_row(row), COL_OUTPUT))
             .align(Align::RIGHT)
             .size(SizeSpec::HUG)

@@ -7,7 +7,10 @@ pub(crate) fn binding(graph: &Graph, library: &Library, port: InputPort) -> Opti
     let node = graph
         .find(port.node_id)
         .expect("an input that loses its wire is on a graph node");
-    node.func(library).inputs()[port.port_idx]
+    node.func(library)
+        .ports()
+        .input(port.port)
+        .expect("an input that loses its wire is declared")
         .default_value
         .clone()
         .map(Binding::Const)

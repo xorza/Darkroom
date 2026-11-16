@@ -250,14 +250,12 @@ fn legend(screenshot: &Screenshot, picture: UVec2, app: &App, ui: &Ui) -> Vec<Le
             legend.inputs = func
                 .inputs()
                 .iter()
-                .enumerate()
-                .filter_map(|(idx, input)| port(PortRef::input(node.node_id, idx), &input.name))
+                .filter_map(|input| port(PortRef::input(node.node_id, input.id), &input.name))
                 .collect();
             legend.outputs = func
                 .outputs()
                 .iter()
-                .enumerate()
-                .filter_map(|(idx, output)| port(PortRef::output(node.node_id, idx), &output.name))
+                .filter_map(|output| port(PortRef::output(node.node_id, output.id), &output.name))
                 .collect();
         }
         nodes.push(legend);

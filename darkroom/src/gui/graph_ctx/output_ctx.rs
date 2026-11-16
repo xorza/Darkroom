@@ -9,27 +9,33 @@ use crate::gui::port_ref::PortRef;
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct OutputCtx<'a> {
     node: NodeCtx<'a>,
-    port_idx: usize,
+    /// Where the port stands among the node's outputs, the row it draws on.
+    idx: usize,
     declared: &'a OutputDecl,
 }
 
 impl<'a> OutputCtx<'a> {
-    pub(super) const fn new(node: NodeCtx<'a>, port_idx: usize, declared: &'a OutputDecl) -> Self {
+    pub(super) const fn new(node: NodeCtx<'a>, idx: usize, declared: &'a OutputDecl) -> Self {
         Self {
             node,
-            port_idx,
+            idx,
             declared,
         }
     }
 
     /// This port's address in the graph.
     pub(crate) const fn port(self) -> OutputPort {
-        OutputPort::new(self.node.node_id, self.port_idx)
+        OutputPort::new(self.node.node_id, self.declared.id)
     }
 
     /// This port's address in the canvas's glyph domains.
     pub(crate) const fn port_ref(self) -> PortRef {
-        PortRef::output(self.node.node_id, self.port_idx)
+        PortRef::output(self.node.node_id, self.declared.id)
+    }
+
+    /// Where this port stands among the node's outputs: the row it draws on.
+    pub(crate) const fn idx(self) -> usize {
+        self.idx
     }
 
     pub(crate) fn name(self) -> &'a str {

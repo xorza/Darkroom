@@ -241,7 +241,7 @@ impl WireUi {
 /// never snaps to it or starts a bind from it.
 fn input_const_only(graph_ctx: GraphCtx<'_>, port: PortRef) -> bool {
     port.input_port()
-        .and_then(|input| graph_ctx.node(input.node_id)?.input(input.port_idx))
+        .and_then(|input| graph_ctx.node(input.node_id)?.input(input.port))
         .is_some_and(InputCtx::const_only)
 }
 
@@ -302,7 +302,7 @@ fn const_drop(ui: &mut Ui, ctx: CanvasCtx<'_>, start: PortRef) -> Option<GraphIn
         return None;
     }
     // Don't overwrite an existing const value.
-    let input = graph_ctx.node(port.node_id)?.input(port.port_idx)?;
+    let input = graph_ctx.node(port.node_id)?.input(port.port)?;
     if matches!(input.binding(), Some(Binding::Const(_))) {
         return None;
     }

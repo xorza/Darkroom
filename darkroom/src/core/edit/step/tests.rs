@@ -9,6 +9,7 @@ use std::collections::BTreeSet;
 use glam::Vec2;
 use scenarium::{
     Binding, CacheMode, ConstValue, EventPort, InputPort, NodeId, OutputPort, Subscription,
+    numbered_port,
 };
 
 use crate::core::document::internals::DocumentFixture;
@@ -71,7 +72,10 @@ fn node_removal() -> UndoStep {
 fn tie_removal() -> UndoStep {
     let mut fixture = DocumentFixture::default();
     let [a, b] = [0.0, 200.0].map(|x| fixture.node_at(Vec2::new(x, 0.0)));
-    let wire = fixture.wire(OutputPort::new(a, 0), InputPort::new(b, 0));
+    let wire = fixture.wire(
+        OutputPort::new(a, numbered_port(1)),
+        InputPort::new(b, numbered_port(1)),
+    );
     let tie = fixture.tie(Vec2::new(100.0, 0.0), [wire]);
     GraphIntent::RemoveTie { tie }
         .commit_one(&mut fixture.document, &fixture.library)
@@ -95,7 +99,7 @@ fn tie_removal() -> UndoStep {
 #[test]
 fn every_kind_answers_the_frame_questions() {
     let node_id = NodeId::unique();
-    let port = InputPort::new(node_id, 0);
+    let port = InputPort::new(node_id, numbered_port(1));
     // (what, step, [dirties, changes node set, invalidates geometry])
     let cases = [
         (
@@ -181,7 +185,10 @@ fn every_kind_answers_the_frame_questions() {
         (
             "subscription",
             UndoStep::Subscription(SetSubscription {
-                subscription: Subscription::new(EventPort::new(node_id, 0), NodeId::unique()),
+                subscription: Subscription::new(
+                    EventPort::new(node_id, numbered_port(1)),
+                    NodeId::unique(),
+                ),
                 subscribed: Change {
                     from: false,
                     to: true,

@@ -147,16 +147,20 @@ fn a_library_iterates_exactly_its_funcs() {
 fn modal_func(mode: EnumId, default: &str, kind: FileKindId) -> Func {
     internals::stub_func(FuncId::unique(), "modal")
         .input(
+            1,
             InputDecl::optional("mode", DataType::Enum(mode))
                 .default(ConstValue::Enum(default.into())),
         )
-        .output(OutputDecl::new(
-            "file",
-            DataType::File {
-                kind,
-                mode: FileMode::Save,
-            },
-        ))
+        .output(
+            1,
+            OutputDecl::new(
+                "file",
+                DataType::File {
+                    kind,
+                    mode: FileMode::Save,
+                },
+            ),
+        )
         .build()
 }
 
@@ -317,9 +321,9 @@ async fn an_invoked_func_keeps_its_node_state_between_calls() -> Result<(), Invo
             }),
         )
         .pure()
-        .input(InputDecl::required("A", DataType::Int))
-        .input(InputDecl::required("B", DataType::Int))
-        .output(OutputDecl::new("Sum", DataType::Int))
+        .input(1, InputDecl::required("A", DataType::Int))
+        .input(2, InputDecl::required("B", DataType::Int))
+        .output(1, OutputDecl::new("Sum", DataType::Int))
         .build(),
     );
     let sum = library.by_name("sum").unwrap();

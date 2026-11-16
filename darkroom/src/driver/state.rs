@@ -3,7 +3,7 @@
 use glam::Vec2;
 use palantir::InspectedWidget;
 use palantir::{Rect, Sense, Ui};
-use scenarium::{Binding, Func, Graph, Library, NodeId, OutputPort, ProgramId};
+use scenarium::{Binding, Func, Graph, InputPort, Library, OutputPort, ProgramId};
 use serde::Serialize;
 
 use crate::gui::app::App;
@@ -148,10 +148,9 @@ impl State {
                             state.inputs = func
                                 .inputs()
                                 .iter()
-                                .enumerate()
-                                .map(|(idx, input)| PortSummary {
+                                .map(|input| PortSummary {
                                     name: input.name.clone(),
-                                    binding: binding(graph, library, id, idx),
+                                    binding: binding(graph, library, InputPort::new(id, input.id)),
                                 })
                                 .collect();
                             state.outputs = func
@@ -221,20 +220,20 @@ const fn rect(rect: Rect) -> [f32; 4] {
 /// `<node>.<output>`, by name.
 fn output_name(graph: &Graph, library: &Library, output: OutputPort) -> String {
     let Some(node) = graph.find(output.node_id) else {
-        return format!("{}.{}", output.node_id, output.port_idx);
+        return format!("{}.{}", output.node_id, output.port);
     };
     let port = library
         .func_of(node)
         .ok()
-        .and_then(|func| func.outputs().get(output.port_idx))
-        .map_or_else(|| output.port_idx.to_string(), |port| port.name.clone());
+        .and_then(|func| func.ports().output(output.port))
+        .map_or_else(|| output.port.to_string(), |port| port.name.clone());
     format!("{}.{port}", node.name)
 }
 
-fn binding(graph: &Graph, library: &Library, node_id: NodeId, idx: usize) -> Option<String> {
+fn binding(graph: &Graph, library: &Library, input: InputPort) -> Option<String> {
     graph
-        .input_bindings(node_id)
-        .find(|(port, _)| port.port_idx == idx)
+        .input_bindings(input.node_id)
+        .find(|(port, _)| *port == input)
         .map(|(_, binding)| match binding {
             Binding::Wire(output) => format!("wire from {}", output_name(graph, library, *output)),
             Binding::Const(value) => format!("const {value:?}"),
@@ -246,7 +245,7 @@ fn binding(graph: &Graph, library: &Library, node_id: NodeId, idx: usize) -> Opt
 fn wires(graph: &Graph, library: &Library, listed: impl Fn(&str) -> bool) -> Vec<String> {
     let mut wires = Vec::new();
     for node in graph.iter() {
-        let inputs = library.func_of(&node).ok().map(Func::inputs);
+        let ports = library.func_of(&node).ok().map(Func::ports);
         for (port, binding) in graph.input_bindings(node.node_id) {
             if let Binding::Wire(output) = binding
                 && (listed(&node.name)
@@ -254,9 +253,9 @@ fn wires(graph: &Graph, library: &Library, listed: impl Fn(&str) -> bool) -> Vec
                         .find(output.node_id)
                         .is_some_and(|producer| listed(&producer.name)))
             {
-                let input = inputs
-                    .and_then(|inputs| inputs.get(port.port_idx))
-                    .map_or_else(|| port.port_idx.to_string(), |input| input.name.clone());
+                let input = ports
+                    .and_then(|ports| ports.input(port.port))
+                    .map_or_else(|| port.port.to_string(), |input| input.name.clone());
                 wires.push(format!(
                     "{} -> {}.{input}",
                     output_name(graph, library, *output),

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::*;
-use scenarium::{FileKind, FileKindId, FileMode};
+use scenarium::{FileKind, FileKindId, FileMode, numbered_port};
 
 /// The type line of a port tooltip: a path names its kind, mode and extensions, everything else
 /// the library's own name for the type, so a tooltip and a palette entry can't disagree.
@@ -37,7 +37,7 @@ fn add_preview_spawns_a_node_already_wired_to_the_port() {
 
     let func = preview_sink::func(Arc::default());
     let producer = NodeId::unique();
-    let port = OutputPort::new(producer, 2);
+    let port = OutputPort::new(producer, numbered_port(3));
     let center = Vec2::new(100.0, 40.0);
 
     let node_id = NodeId::unique();
@@ -59,8 +59,8 @@ fn add_preview_spawns_a_node_already_wired_to_the_port() {
     assert!(matches!(
         wire,
         GraphIntent::SetInput { input, to: Some(Binding::Wire(src)) }
-            if input == InputPort::new(node_id, 0)
-                && src == OutputPort::new(producer, 2)
+            if input == InputPort::new(node_id, numbered_port(1))
+                && src == OutputPort::new(producer, numbered_port(3))
     ));
 }
 
@@ -81,17 +81,17 @@ fn double_clicking_a_wired_input_port_circle_clears_its_binding() {
 
     let mut h = CanvasHarness::new(DocumentFixture::probes(2));
     let (producer, consumer) = (h.node(0), h.node(1));
-    let input = InputPort::new(consumer, 0);
+    let input = InputPort::new(consumer, numbered_port(1));
     h.document_mut()
         .graph
-        .set_input_binding(input, Binding::wire(producer, 0));
+        .set_input_binding(input, Binding::wire(producer, numbered_port(1)));
     // Two frames so the circle has a widget id and a measured rect to aim at.
     h.prime(2);
     // Nudged off the circle's exact center: an input port hangs half its width past the node's
     // left edge, which puts its center a hair outside the body, on the canvas beneath. Still well
     // inside the glyph's 23.4 px box, and both clicks land on the same point.
     let at =
-        h.ui.rect(wid::port_circle(PortRef::input(consumer, 0)))
+        h.ui.rect(wid::port_circle(PortRef::input(consumer, numbered_port(1))))
             .expect("the widget shows")
             .center()
             + Vec2::new(4.0, 0.0);

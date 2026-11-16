@@ -1,6 +1,6 @@
 use glam::Vec2;
 use palantir::PointerButton;
-use scenarium::{Binding, InputPort};
+use scenarium::{Binding, InputPort, numbered_port};
 
 use crate::core::document::internals::DocumentFixture;
 use crate::gui::pane::graph_ui::internals::CanvasHarness;
@@ -17,16 +17,16 @@ use crate::gui::port_ref::PortRef;
 fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
     let mut fixture = DocumentFixture::probes(2);
     let (stays, leaves) = (fixture.node(0), fixture.node(1));
-    fixture
-        .document
-        .graph
-        .set_input_binding(InputPort::new(leaves, 0), Binding::wire(stays, 0));
+    fixture.document.graph.set_input_binding(
+        InputPort::new(leaves, numbered_port(1)),
+        Binding::wire(stays, numbered_port(1)),
+    );
 
     // Both on screen and recorded, so every glyph has a fresh offset cached.
     let mut h = CanvasHarness::new(fixture);
     h.prime(2);
 
-    let out_port = PortRef::output(leaves, 0);
+    let out_port = PortRef::output(leaves, numbered_port(1));
     let anchored = h
         .graph_ui
         .geometry()
@@ -104,7 +104,7 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
 fn a_dragged_nodes_ports_follow_it_in_the_frame_that_moves_it() {
     let mut h = CanvasHarness::new(DocumentFixture::probes(2));
     let node = h.node(0);
-    let port = PortRef::output(node, 0);
+    let port = PortRef::output(node, numbered_port(1));
     h.prime(2);
     let pos = |h: &CanvasHarness| h.document().main_view.node_placements[&node].pos;
     let offset = |h: &CanvasHarness| h.graph_ui.geometry().ports.center(port).unwrap() - pos(h);

@@ -144,12 +144,11 @@ fn release_label(ui: &mut Ui, graph_ctx: GraphCtx<'_>, wire: WireKey) -> Interne
                 ui,
                 "Release {}.{} → {}.{}",
                 from.name(),
-                from.outputs()
-                    .nth(output.port_idx)
+                from.output(output.port)
                     .expect("a routed wire's output exists")
                     .name(),
                 to.name(),
-                to.input(input.port_idx)
+                to.input(input.port)
                     .expect("a routed wire's input exists")
                     .name(),
             )
@@ -163,8 +162,7 @@ fn release_label(ui: &mut Ui, graph_ctx: GraphCtx<'_>, wire: WireKey) -> Interne
                 ui,
                 "Release {}.{} → {}",
                 from.name(),
-                from.events()
-                    .get(subscription.event.event_idx)
+                from.event(subscription.event.event)
                     .expect("a routed subscription's event exists")
                     .name,
                 to.name(),

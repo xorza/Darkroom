@@ -1,5 +1,5 @@
 use palantir::Size;
-use scenarium::EventPort;
+use scenarium::{EventPort, numbered_port};
 
 use super::*;
 
@@ -18,10 +18,12 @@ fn begin_frame_clears_every_broken_collection() {
     // place all three collections clear.
     let mut b = scribble_at(Vec2::ZERO);
     let node = NodeId::from_u128(1);
-    b.broken.push(InputPort::new(node, 0));
+    b.broken.push(InputPort::new(node, numbered_port(1)));
     b.broken_node_ids.push(node);
-    b.broken_subscriptions
-        .push(Subscription::new(EventPort::new(node, 0), node));
+    b.broken_subscriptions.push(Subscription::new(
+        EventPort::new(node, numbered_port(1)),
+        node,
+    ));
 
     b.begin_frame();
 

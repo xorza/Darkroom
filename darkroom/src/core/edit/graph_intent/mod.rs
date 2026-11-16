@@ -261,13 +261,13 @@ impl GraphIntent {
                 + DUPLICATE_OFFSET;
             let mut bindings = Vec::new();
             for (port, binding) in graph.input_bindings(old_id) {
-                let input = InputPort::new(new_id, port.port_idx);
+                let input = InputPort::new(new_id, port.port);
                 let seed = match binding {
                     Binding::Wire(source) => {
                         if let Some(&new_source) = clones.get(&source.node_id) {
                             internal.push(Self::SetInput {
                                 input,
-                                to: Some(Binding::wire(new_source, source.port_idx)),
+                                to: Some(Binding::wire(new_source, source.port)),
                             });
                             continue;
                         }
@@ -302,7 +302,7 @@ impl GraphIntent {
             };
             intents.push(Self::SetSubscription {
                 subscription: Subscription::new(
-                    EventPort::new(emitter, subscription.event.event_idx),
+                    EventPort::new(emitter, subscription.event.event),
                     subscriber,
                 ),
                 to: true,
@@ -749,11 +749,11 @@ fn cloned_wire(wire: WireKey, clones: &HashMap<NodeId, NodeId>) -> WireKey {
     let clone = |node_id: NodeId| clones[&node_id];
     match wire {
         WireKey::Data(DataWire { output, input }) => WireKey::Data(DataWire {
-            output: OutputPort::new(clone(output.node_id), output.port_idx),
-            input: InputPort::new(clone(input.node_id), input.port_idx),
+            output: OutputPort::new(clone(output.node_id), output.port),
+            input: InputPort::new(clone(input.node_id), input.port),
         }),
         WireKey::Event(Subscription { event, subscriber }) => WireKey::Event(Subscription::new(
-            EventPort::new(clone(event.node_id), event.event_idx),
+            EventPort::new(clone(event.node_id), event.event),
             clone(subscriber),
         )),
     }

@@ -10,27 +10,33 @@ use crate::gui::port_ref::PortRef;
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct InputCtx<'a> {
     node: NodeCtx<'a>,
-    port_idx: usize,
+    /// Where the port stands among the node's inputs, the row it draws on.
+    idx: usize,
     declared: &'a InputDecl,
 }
 
 impl<'a> InputCtx<'a> {
-    pub(super) const fn new(node: NodeCtx<'a>, port_idx: usize, declared: &'a InputDecl) -> Self {
+    pub(super) const fn new(node: NodeCtx<'a>, idx: usize, declared: &'a InputDecl) -> Self {
         Self {
             node,
-            port_idx,
+            idx,
             declared,
         }
     }
 
     /// This port's address in the graph.
     pub(crate) const fn port(self) -> InputPort {
-        InputPort::new(self.node.node_id, self.port_idx)
+        InputPort::new(self.node.node_id, self.declared.id)
     }
 
     /// This port's address in the canvas's glyph domains.
     pub(crate) const fn port_ref(self) -> PortRef {
-        PortRef::input(self.node.node_id, self.port_idx)
+        PortRef::input(self.node.node_id, self.declared.id)
+    }
+
+    /// Where this port stands among the node's inputs: the row it draws on.
+    pub(crate) const fn idx(self) -> usize {
+        self.idx
     }
 
     pub(crate) fn name(self) -> &'a str {
@@ -73,7 +79,7 @@ impl<'a> InputCtx<'a> {
     /// unbound one. Only a `MissingInputs` status names ports, so this answers
     /// `false` under any other.
     pub(crate) fn missing(self) -> bool {
-        self.node.missing_inputs().contains(&self.port_idx)
+        self.node.missing_inputs().contains(&self.idx)
     }
 
     /// The literal this port falls back to when given a const binding: its

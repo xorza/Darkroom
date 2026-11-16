@@ -4,7 +4,6 @@ use ron::ser;
 use ron::value::RawValue;
 
 use crate::data::const_value::ConstValue;
-use crate::data::data_type::custom_type::CustomTypeId;
 use crate::data::data_type::file_kind::FileKindId;
 use crate::data::data_type::{DataType, FileMode};
 use crate::graph::binding::Binding;
@@ -16,8 +15,9 @@ use crate::graph::error::{
 };
 use crate::graph::func::Func;
 use crate::graph::func::func_builder::FuncBuilder;
-use crate::graph::identity::{EventPort, FuncId};
+use crate::graph::identity::{EventPort, FuncId, PortId};
 use crate::graph::node::{CacheMode, Node, NodeKind};
+use crate::graph::ports::{InputDecl, numbered_port};
 use crate::graph::reconciled::Repair;
 use crate::graph::stub::Stub;
 use crate::graph::subscription::Subscription;
@@ -169,10 +169,13 @@ fn admit_holds_wires_and_consts_to_the_input_type() {
     g.add("int_src", |n| n.pure().output(DataType::Int));
     g.add("str_sink", |n| n.sink().input(DataType::String));
     g.add("int_sink", |n| n.sink().input(DataType::Int));
-    let wire = Binding::wire(g.id("int_src"), 0);
+    let wire = Binding::wire(g.id("int_src"), numbered_port(1));
     let admit = |sink: &str| {
-        g.graph
-            .admit(&g.library, InputPort::new(g.id(sink), 0), &wire)
+        g.graph.admit(
+            &g.library,
+            InputPort::new(g.id(sink), numbered_port(1)),
+            &wire,
+        )
     };
     assert_eq!(admit("str_sink"), Err(BindingRejection::WireMismatch));
     assert_eq!(admit("int_sink"), Ok(()));
@@ -184,7 +187,7 @@ fn admit_holds_wires_and_consts_to_the_input_type() {
     let admits = |declared: DataType, value: ConstValue| {
         let mut g = TestGraph::new();
         g.add("sink", |n| n.sink().input(declared));
-        let port = InputPort::new(g.id("sink"), 0);
+        let port = InputPort::new(g.id("sink"), numbered_port(1));
         g.graph.admit(&g.library, port, &Binding::Const(value))
     };
     let cases = [
@@ -304,9 +307,12 @@ fn produces_cycle_reaches_a_producer_past_a_const_and_an_unbound_port() {
 #[test]
 fn binding_conversions() {
     let nid = NodeId::unique();
-    let from_port: Binding = OutputPort::new(nid, 1).into();
-    assert_eq!(from_port, Binding::wire(nid, 1));
-    assert_eq!(from_port, Binding::Wire(OutputPort::new(nid, 1)));
+    let from_port: Binding = OutputPort::new(nid, numbered_port(2)).into();
+    assert_eq!(from_port, Binding::wire(nid, numbered_port(2)));
+    assert_eq!(
+        from_port,
+        Binding::Wire(OutputPort::new(nid, numbered_port(2)))
+    );
 
     let from_value: Binding = ConstValue::Int(7).into();
     assert_eq!(from_value, Binding::Const(ConstValue::Int(7)));
@@ -316,16 +322,16 @@ fn binding_conversions() {
 fn input_bindings_are_sparse_and_none_removes_an_entry() {
     let mut g = TestGraph::sample();
 
-    let first = InputPort::new(g.id("sum"), 0);
-    let second = InputPort::new(g.id("sum"), 1);
-    let absent = InputPort::new(g.id("sum"), 2);
+    let first = InputPort::new(g.id("sum"), numbered_port(1));
+    let second = InputPort::new(g.id("sum"), numbered_port(2));
+    let absent = InputPort::new(g.id("sum"), numbered_port(3));
     assert_eq!(
         g.graph.bindings.get(&first),
-        Some(&Binding::wire(g.id("get_a"), 0))
+        Some(&Binding::wire(g.id("get_a"), numbered_port(1)))
     );
     assert_eq!(
         g.graph.bindings.get(&second),
-        Some(&Binding::wire(g.id("get_b"), 0))
+        Some(&Binding::wire(g.id("get_b"), numbered_port(1)))
     );
     assert!(!g.graph.bindings.contains_key(&absent));
 
@@ -340,46 +346,83 @@ fn subscribe_unsubscribe_is_subscribed() {
     let mut g = TestGraph::sample();
     let (emitter, sub) = (g.id("get_a"), g.id("sum"));
 
-    assert!(!g.graph.is_subscribed(EventPort::new(emitter, 0), sub));
-    g.subscribe("get_a", 0, "sum");
-    assert!(g.graph.is_subscribed(EventPort::new(emitter, 0), sub));
+    assert!(
+        !g.graph
+            .is_subscribed(EventPort::new(emitter, numbered_port(1)), sub)
+    );
+    g.graph
+        .subscribe(EventPort::new(emitter, numbered_port(1)), sub);
+    assert!(
+        g.graph
+            .is_subscribed(EventPort::new(emitter, numbered_port(1)), sub)
+    );
 
     // Distinct event_idx is a distinct edge.
-    assert!(!g.graph.is_subscribed(EventPort::new(emitter, 1), sub));
+    assert!(
+        !g.graph
+            .is_subscribed(EventPort::new(emitter, numbered_port(2)), sub)
+    );
 
     // Re-subscribing is idempotent (BTreeSet dedups).
-    g.subscribe("get_a", 0, "sum");
+    g.graph
+        .subscribe(EventPort::new(emitter, numbered_port(1)), sub);
     assert_eq!(g.graph.subscriptions().count(), 1);
 
     // One event carries several subscribers, and a second event off the same
     // emitter is its own edge — so the three coexist rather than overwriting.
     let (sub2, other) = (g.id("mult"), g.id("Print"));
-    g.subscribe("get_a", 0, "mult");
-    g.subscribe("get_a", 1, "Print");
-    assert!(g.graph.is_subscribed(EventPort::new(emitter, 0), sub));
-    assert!(g.graph.is_subscribed(EventPort::new(emitter, 0), sub2));
-    assert!(g.graph.is_subscribed(EventPort::new(emitter, 1), other));
-    assert!(!g.graph.is_subscribed(EventPort::new(emitter, 1), sub));
+    g.graph
+        .subscribe(EventPort::new(emitter, numbered_port(1)), sub2);
+    g.graph
+        .subscribe(EventPort::new(emitter, numbered_port(2)), other);
+    assert!(
+        g.graph
+            .is_subscribed(EventPort::new(emitter, numbered_port(1)), sub)
+    );
+    assert!(
+        g.graph
+            .is_subscribed(EventPort::new(emitter, numbered_port(1)), sub2)
+    );
+    assert!(
+        g.graph
+            .is_subscribed(EventPort::new(emitter, numbered_port(2)), other)
+    );
+    assert!(
+        !g.graph
+            .is_subscribed(EventPort::new(emitter, numbered_port(2)), sub)
+    );
 
     // `subscriptions` yields them in (event, subscriber) order, whatever
     // order they were authored in — the determinism a compile's subscriber
     // lists inherit.
     let mut expected = vec![
-        Subscription::new(EventPort::new(emitter, 0), sub),
-        Subscription::new(EventPort::new(emitter, 0), sub2),
-        Subscription::new(EventPort::new(emitter, 1), other),
+        Subscription::new(EventPort::new(emitter, numbered_port(1)), sub),
+        Subscription::new(EventPort::new(emitter, numbered_port(1)), sub2),
+        Subscription::new(EventPort::new(emitter, numbered_port(2)), other),
     ];
     expected.sort();
     assert_eq!(g.graph.subscriptions().collect::<Vec<_>>(), expected);
 
     // Dropping one edge leaves its siblings alone.
-    g.unsubscribe("get_a", 0, "sum");
-    assert!(!g.graph.is_subscribed(EventPort::new(emitter, 0), sub));
-    assert!(g.graph.is_subscribed(EventPort::new(emitter, 0), sub2));
-    assert!(g.graph.is_subscribed(EventPort::new(emitter, 1), other));
+    g.graph
+        .unsubscribe(EventPort::new(emitter, numbered_port(1)), sub);
+    assert!(
+        !g.graph
+            .is_subscribed(EventPort::new(emitter, numbered_port(1)), sub)
+    );
+    assert!(
+        g.graph
+            .is_subscribed(EventPort::new(emitter, numbered_port(1)), sub2)
+    );
+    assert!(
+        g.graph
+            .is_subscribed(EventPort::new(emitter, numbered_port(2)), other)
+    );
 
-    g.unsubscribe("get_a", 0, "mult");
-    g.unsubscribe("get_a", 1, "Print");
+    g.graph
+        .unsubscribe(EventPort::new(emitter, numbered_port(1)), sub2);
+    g.graph
+        .unsubscribe(EventPort::new(emitter, numbered_port(2)), other);
     assert_eq!(g.graph.subscriptions().count(), 0);
 }
 
@@ -397,21 +440,28 @@ fn a_detached_node_restores_its_wiring_and_malformed_records_are_refused() {
     let get_a = g.id("get_a");
     let mult = g.id("mult");
     // A subscription that touches `sum`, so both kinds of wiring travel.
-    g.subscribe("get_a", 0, "sum");
-    // Its own two inputs, in port order; the binding that reads it is not one.
+    g.graph
+        .subscribe(EventPort::new(get_a, numbered_port(1)), sum);
+    // Its own two inputs, in port-id order; the binding that reads it is not one.
     assert_eq!(
         g.graph
             .input_bindings(sum)
             .map(|(port, _)| port)
             .collect::<Vec<_>>(),
-        [InputPort::new(sum, 0), InputPort::new(sum, 1)]
+        [
+            InputPort::new(sum, numbered_port(1)),
+            InputPort::new(sum, numbered_port(2))
+        ]
     );
 
     let before = g.graph.clone();
     let edges_before = g.graph.wires().count();
     let detached = g.remove("sum");
     assert_eq!(g.graph.wires().count(), edges_before - 3);
-    assert!(!g.graph.is_subscribed(EventPort::new(get_a, 0), sum));
+    assert!(
+        !g.graph
+            .is_subscribed(EventPort::new(get_a, numbered_port(1)), sum)
+    );
     assert_eq!(detached.bindings().len(), 3);
     assert_eq!(detached.subscriptions().len(), 1);
 
@@ -431,13 +481,13 @@ fn a_detached_node_restores_its_wiring_and_malformed_records_are_refused() {
         "a record from outside is put in the graph's order"
     );
 
-    let foreign_port = InputPort::new(mult, 1);
+    let foreign_port = InputPort::new(mult, numbered_port(2));
     let foreign = BindingEntry {
         port: foreign_port,
         binding: Binding::Const(1i64.into()),
     };
     let first = detached.bindings()[0].clone();
-    let elsewhere = Subscription::new(EventPort::new(get_a, 0), mult);
+    let elsewhere = Subscription::new(EventPort::new(get_a, numbered_port(1)), mult);
     let own = detached.subscriptions()[0];
     let refusals = [
         (
@@ -513,12 +563,9 @@ fn add_func_node_seeds_only_the_inputs_with_defaults() {
     let id = g.id("withdefault");
 
     let func = g.library.by_name("withdefault").unwrap();
+    assert_eq!(g.graph.find(id).unwrap().kind, NodeKind::Func(func.id()));
     assert_eq!(
-        g.graph.find(id).unwrap().kind,
-        NodeKind::Func(func.func_ref())
-    );
-    assert_eq!(
-        g.graph.bindings.get(&InputPort::new(id, 0)),
+        g.graph.bindings.get(&InputPort::new(id, numbered_port(1))),
         Some(&Binding::Const(7i64.into()))
     );
 
@@ -530,8 +577,16 @@ fn add_func_node_seeds_only_the_inputs_with_defaults() {
     });
     let sum = g.id("sum");
 
-    assert!(!g.graph.bindings.contains_key(&InputPort::new(sum, 0)));
-    assert!(!g.graph.bindings.contains_key(&InputPort::new(sum, 1)));
+    assert!(
+        !g.graph
+            .bindings
+            .contains_key(&InputPort::new(sum, numbered_port(1)))
+    );
+    assert!(
+        !g.graph
+            .bindings
+            .contains_key(&InputPort::new(sum, numbered_port(2)))
+    );
 }
 
 #[test]
@@ -563,8 +618,8 @@ fn loading_rejects_a_corrupt_graph() {
 
     let mut g = TestGraph::sample();
     g.graph.set_input_binding(
-        InputPort::new(g.id("sum"), 0),
-        Binding::wire(NodeId::unique(), 0),
+        InputPort::new(g.id("sum"), numbered_port(1)),
+        Binding::wire(NodeId::unique(), numbered_port(1)),
     );
     let bytes = SerdeFormat::Bitcode.serialize(&g.graph).unwrap();
     let decoded: Graph = SerdeFormat::Bitcode
@@ -634,85 +689,6 @@ fn loading_rejects_a_corrupt_graph() {
     ));
 }
 
-/// A load attaches each stub whose node resolves again, with the wiring that still has both ends
-/// and lands on an input the graph has not bound since, and drops a stub saved under a node's id.
-/// Here the stub of `sum` holds a wire from `get_a`, which comes back; one from `get_b`, which
-/// the graph lost; one into `mult`, whose input the graph bound since; and a subscription to an
-/// emitter the graph lacks. A stub saved under `get_a`'s id goes and the node stays.
-#[test]
-fn a_load_attaches_each_stub_that_resolves_again_with_the_wiring_that_fits() {
-    let mut g = TestGraph::sample();
-    let (get_a, get_b, sum, mult) = (g.id("get_a"), g.id("get_b"), g.id("sum"), g.id("mult"));
-    let detached = g.graph.detach_node(sum);
-    let absent = Subscription::new(EventPort::new(NodeId::unique(), 0), sum);
-    let record = DetachedNode::new(DetachedNodeParts {
-        node_id: sum,
-        node: detached.node().clone(),
-        bindings: detached.bindings().to_vec(),
-        subscriptions: vec![absent],
-    })
-    .unwrap();
-    let reason = DetachReason::Unresolved(Unresolved::MissingFunc);
-    g.graph.insert_stub(Stub {
-        record: record.clone(),
-        reason,
-    });
-    g.graph.detach_node(get_b);
-    let into_mult = InputPort::new(mult, 0);
-    g.graph
-        .set_input_binding(into_mult, Binding::wire(get_a, 0));
-    let shadow = g.graph.snapshot_node(get_a).unwrap();
-    g.graph.stubs.insert(
-        get_a,
-        Stub {
-            record: shadow,
-            reason,
-        },
-    );
-
-    let reconciled = g.graph.reconcile(&g.library);
-
-    let into_sum = InputPort::new(sum, 0);
-    let dropped = record
-        .bindings()
-        .iter()
-        .filter(|entry| entry.port != into_sum)
-        .map(|entry| Repair::StubBindingDropped {
-            node_id: sum,
-            entry: entry.clone(),
-        });
-    let expected: Vec<Repair> = [
-        Repair::DuplicateStub { node_id: get_a },
-        Repair::Reattached { node_id: sum },
-    ]
-    .into_iter()
-    .chain(dropped)
-    .chain([Repair::StubSubscriptionDropped {
-        node_id: sum,
-        subscription: absent,
-    }])
-    .collect();
-    assert_eq!(reconciled.repairs, expected);
-    assert_eq!(
-        reconciled.repairs.len(),
-        5,
-        "two of the stub's three wires are dropped"
-    );
-    assert_eq!(g.graph.stubs().len(), 0);
-    assert!(g.graph.find(get_a).is_some(), "the node keeps its id");
-    assert_eq!(
-        g.graph.bindings.get(&into_sum),
-        Some(&Binding::wire(get_a, 0))
-    );
-    assert_eq!(
-        g.graph.bindings.get(&into_mult),
-        Some(&Binding::wire(get_a, 0)),
-        "the input bound since keeps its own wire"
-    );
-    assert_eq!(g.graph.subscriptions().len(), 0);
-    g.graph.validate_with(&g.library).unwrap();
-}
-
 /// A graph keeps each node it cannot hold as a stub beside its nodes: the ids of the two are
 /// disjoint, so neither an insert nor a stub takes an id the other holds; a stub round-trips with
 /// the graph; and the constants of the graph are its bindings' and its stubs', for reading and
@@ -758,7 +734,7 @@ fn a_graph_keeps_its_stubs_beside_its_nodes() {
         );
     }
 
-    let into_sum = InputPort::new(sum, 1);
+    let into_sum = InputPort::new(sum, numbered_port(2));
     assert_eq!(
         graph.constants().collect::<Vec<_>>(),
         [(into_sum, &ConstValue::Int(4))],
@@ -792,122 +768,135 @@ fn admit_refuses_undeclared_ports_events_and_a_self_subscription() {
         n.sink().optional(DataType::Int).input(DataType::Int)
     });
     let (src, dst) = (g.id("src"), g.id("dst"));
-    let admit = |port_idx, binding: Binding| {
-        g.graph
-            .admit(&g.library, InputPort::new(dst, port_idx), &binding)
+    let admit = |number, binding: Binding| {
+        g.graph.admit(
+            &g.library,
+            InputPort::new(dst, numbered_port(number)),
+            &binding,
+        )
     };
     assert_eq!(
-        admit(5, Binding::Const(ConstValue::Int(1))),
+        admit(6, Binding::Const(ConstValue::Int(1))),
         Err(BindingRejection::UndeclaredInput)
     );
     assert_eq!(
-        admit(0, Binding::wire(src, 7)),
+        admit(1, Binding::wire(src, numbered_port(8))),
         Err(BindingRejection::UndeclaredOutput)
     );
-    assert_eq!(admit(0, Binding::Const(ConstValue::Null)), Ok(()));
+    assert_eq!(admit(1, Binding::Const(ConstValue::Null)), Ok(()));
     assert_eq!(
-        admit(1, Binding::Const(ConstValue::Null)),
+        admit(2, Binding::Const(ConstValue::Null)),
         Err(BindingRejection::ConstMismatch)
     );
 
-    let subscribe = |event_idx, subscriber| {
-        let subscription = Subscription::new(EventPort::new(src, event_idx), subscriber);
+    let subscribe = |number, subscriber| {
+        let subscription =
+            Subscription::new(EventPort::new(src, numbered_port(number)), subscriber);
         g.graph.admit_subscription(&g.library, subscription)
     };
-    assert_eq!(subscribe(0, dst), Ok(()));
+    assert_eq!(subscribe(1, dst), Ok(()));
     assert_eq!(
-        subscribe(3, dst),
+        subscribe(4, dst),
         Err(SubscriptionRejection::UndeclaredEvent)
     );
     assert_eq!(
-        subscribe(0, src),
+        subscribe(1, src),
         Err(SubscriptionRejection::SelfSubscription)
     );
 }
 
-/// A named edit of a func's declaration.
-type FuncEdit = (&'static str, fn(&mut FuncBuilder));
-
-/// A two-input, one-output, one-event func to hold a signature against.
-fn signed_func() -> FuncBuilder {
-    use crate::graph::func::FuncEvent;
-    use crate::graph::ports::{InputDecl, OutputDecl, Ports};
-    FuncBuilder {
-        ports: Ports {
-            inputs: vec![
-                InputDecl::required("a", DataType::Int),
-                InputDecl::optional("b", DataType::String),
-            ],
-            outputs: vec![OutputDecl::new("out", DataType::Float)],
-        },
-        events: vec![FuncEvent {
-            name: "tick".into(),
-            event_lambda: internals::stub_event(),
-        }],
-        ..internals::stub_func(FuncId::from_u128(7), "signed")
-    }
-}
-
-/// A signature covers what a document's wiring is indexed by — the ports' names, types and
-/// order, and the events' names — and nothing a binding does not land by.
+/// A saved node's wiring names ports by id, so a func's ports may change under it: a load keeps
+/// every binding whose port is still declared and still admits it, and refuses the rest, each
+/// reported. A port gained leaves the node's wiring as it was, the new input unbound; a rename and
+/// a reorder change nothing; a port that leaves takes its own binding alone; a retype refuses
+/// what the new type does not take.
 #[test]
-fn a_signature_covers_the_ports_and_nothing_else() {
-    let signature = signed_func().build().func_ref();
-    let edited = |edit: fn(&mut FuncBuilder)| {
-        let mut func = signed_func();
-        edit(&mut func);
-        func.build().func_ref()
+fn a_func_whose_ports_change_keeps_each_binding_its_ports_still_admit() {
+    let fixture = || {
+        let mut g = TestGraph::new();
+        g.add("src", |n| n.pure().output(DataType::Int));
+        g.add("dst", |n| {
+            n.sink()
+                .input(DataType::Int)
+                .optional(DataType::Int)
+                .optional(DataType::Int)
+        });
+        g.wire("src", ("dst", 0));
+        g.constant("dst", 1, 2i64);
+        g.constant("dst", 2, 3i64);
+        g
     };
-    let moves: [FuncEdit; 7] = [
-        ("an input renamed", |f| f.ports.inputs[0].name = "x".into()),
-        ("an input retyped", |f| {
-            f.ports.inputs[0].data_type = DataType::Float;
-        }),
-        ("the inputs reordered", |f| f.ports.inputs.swap(0, 1)),
-        ("an output dropped", |f| f.ports.outputs.clear()),
-        ("an output retyped", |f| {
-            f.ports.outputs[0].data_type = DataType::Int;
-        }),
-        ("an event renamed", |f| f.events[0].name = "tock".into()),
-        ("a custom type swapped", |f| {
-            f.ports.inputs[1].data_type = DataType::Custom(CustomTypeId::from_u128(1));
-        }),
-    ];
-    for (what, edit) in moves {
-        assert_ne!(edited(edit), signature, "{what}");
-    }
-    let keeps: [FuncEdit; 4] = [
-        ("the func renamed", |f| f.name = "other".into()),
-        ("an input made optional", |f| {
-            f.ports.inputs[0].required = false;
-        }),
-        ("a description added", |f| {
-            f.ports.inputs[0].description = Some("explained".into());
-        }),
-        ("a default value set", |f| {
-            f.ports.inputs[0].default_value = Some(ConstValue::Int(3));
-        }),
-    ];
-    for (what, edit) in keeps {
-        assert_eq!(edited(edit), signature, "{what}");
-    }
-    // A path's kind and mode decide what a picker offers, not where its binding lands.
-    let path = |data_type| {
-        let mut func = signed_func();
-        func.ports.inputs[1].data_type = data_type;
-        func.build().func_ref()
+    let reconciled = |edit: fn(&mut FuncBuilder)| {
+        let mut g = fixture();
+        g.edit_func("dst", edit);
+        let report = g.graph.reconcile(&g.library);
+        assert!(g.graph.find(g.id("dst")).is_some(), "the node resolves");
+        let bindings: Vec<(PortId, Binding)> = g
+            .graph
+            .input_bindings(g.id("dst"))
+            .map(|(port, binding)| (port.port, binding.clone()))
+            .collect();
+        (bindings, report.repairs)
     };
+    let src = fixture().id("src");
+    let all = vec![
+        (numbered_port(1), Binding::wire(src, numbered_port(1))),
+        (numbered_port(2), Binding::Const(ConstValue::Int(2))),
+        (numbered_port(3), Binding::Const(ConstValue::Int(3))),
+    ];
+
+    let gained: fn(&mut FuncBuilder) = |f| {
+        f.ports.inputs.push(InputDecl {
+            id: numbered_port(4),
+            ..InputDecl::required("new", DataType::Int)
+        });
+    };
+    let renamed_and_reordered: fn(&mut FuncBuilder) = |f| {
+        f.ports.inputs[0].name = "renamed".into();
+        f.ports.inputs.swap(1, 2);
+    };
+    for edit in [gained, renamed_and_reordered] {
+        assert_eq!(reconciled(edit), (all.clone(), vec![]));
+    }
+
+    let (bindings, repairs) = reconciled(|f| {
+        f.ports.inputs.remove(1);
+    });
+    assert_eq!(bindings, [all[0].clone(), all[2].clone()]);
+    let dst = fixture().id("dst");
     assert_eq!(
-        path(DataType::Dir),
-        path(DataType::File {
-            kind: FileKindId::from_u128(1),
-            mode: FileMode::Save,
-        })
+        repairs,
+        [Repair::RejectedBinding {
+            port: InputPort::new(dst, numbered_port(2)),
+            binding: Binding::Const(ConstValue::Int(2)),
+            rejection: BindingRejection::UndeclaredInput,
+        }]
+    );
+
+    let (bindings, repairs) = reconciled(|f| {
+        f.ports.inputs[0].data_type = DataType::String;
+        f.ports.inputs[2].data_type = DataType::String;
+    });
+    assert_eq!(bindings, [all[1].clone()]);
+    assert_eq!(
+        repairs,
+        [
+            Repair::RejectedBinding {
+                port: InputPort::new(dst, numbered_port(1)),
+                binding: Binding::wire(src, numbered_port(1)),
+                rejection: BindingRejection::WireMismatch,
+            },
+            Repair::RejectedBinding {
+                port: InputPort::new(dst, numbered_port(3)),
+                binding: Binding::Const(ConstValue::Int(3)),
+                rejection: BindingRejection::ConstMismatch,
+            },
+        ]
     );
 }
 
-/// A node resolves to the func with the ports it was authored against; a func
-/// whose ports moved since, and one the library lacks, are told apart.
+/// A node resolves to the func under its id, whatever its ports are now; one the library lacks
+/// does not.
 #[test]
 fn func_of_resolves_a_node_or_says_why_not() {
     let mut g = TestGraph::new();
@@ -920,7 +909,7 @@ fn func_of_resolves_a_node_or_says_why_not() {
     g.edit_func("f", |func| {
         func.ports.inputs[0].data_type = DataType::String;
     });
-    assert_eq!(resolved(&g), Err(Unresolved::ChangedPorts));
+    assert_eq!(resolved(&g), Ok(func_id));
 
     let missing = internals::unresolved_node(FuncId::from_u128(99));
     assert_eq!(
@@ -949,48 +938,45 @@ fn reconcile_removes_exactly_what_the_library_cannot_hold() {
             .input(DataType::String)
             .input(DataType::String)
     });
-    g.add("changed", |n| {
-        n.pure().input(DataType::Int).output(DataType::Int)
-    });
     g.add("gone", |n| n.pure().output(DataType::Int));
     g.add("a", |n| n.pure().input(DataType::Int).output(DataType::Int));
     g.instance("b", "a");
-    let (src, dst, changed, gone) = (g.id("src"), g.id("dst"), g.id("changed"), g.id("gone"));
+    let (src, dst, gone) = (g.id("src"), g.id("dst"), g.id("gone"));
     let nil_func = NodeId::from_u128(50);
     let (absent_consumer, absent_emitter) = (NodeId::from_u128(77), NodeId::from_u128(79));
 
+    let dst_port = |number| InputPort::new(dst, numbered_port(number));
     g.constant("dst", 0, ConstValue::Null);
-    g.wire(("src", 7), ("dst", 1));
+    g.graph
+        .set_input_binding(dst_port(2), Binding::wire(src, numbered_port(8)));
     g.wire("src", ("dst", 2));
     g.constant("dst", 3, 1i64);
     g.wire("src", ("dst", 4));
-    g.constant("dst", 5, 1i64);
-    g.wire("gone", "changed");
+    g.graph
+        .set_input_binding(dst_port(6), Binding::Const(ConstValue::Int(1)));
     g.wire("a", "b");
     g.wire("b", "a");
     g.subscribe("src", 0, "dst");
     g.subscribe("src", 0, "src");
-    g.subscribe("src", 3, "dst");
+    g.graph
+        .subscribe(EventPort::new(src, numbered_port(4)), dst);
     g.subscribe("src", 0, "gone");
-    let absent_port = InputPort::new(absent_consumer, 0);
+    let absent_port = InputPort::new(absent_consumer, numbered_port(1));
     g.graph
         .set_input_binding(absent_port, Binding::Const(ConstValue::Int(2)));
-    let absent_event = EventPort::new(absent_emitter, 0);
+    let absent_event = EventPort::new(absent_emitter, numbered_port(1));
     g.graph.subscribe(absent_event, dst);
     let src_func = g.library.by_name("src").unwrap();
     g.graph.nodes.insert(NodeId::nil(), Node::from(src_func));
     g.graph
         .insert(nil_func, internals::unresolved_node(FuncId::nil()));
-    g.edit_func("changed", |func| {
-        func.ports.inputs[0].data_type = DataType::String;
-    });
     let gone_func = g.graph.find(gone).unwrap().func_id().unwrap();
     g.library.remove(gone_func);
 
     let reconciled = g.graph.reconcile(&g.library);
 
-    let rejected = |port_idx, binding, rejection| Repair::RejectedBinding {
-        port: InputPort::new(dst, port_idx),
+    let rejected = |number, binding, rejection| Repair::RejectedBinding {
+        port: dst_port(number),
         binding,
         rejection,
     };
@@ -1006,10 +992,6 @@ fn reconcile_removes_exactly_what_the_library_cannot_hold() {
                 subscription: Subscription::new(absent_event, dst),
             },
             Repair::Stubbed {
-                node_id: changed,
-                reason: DetachReason::Unresolved(Unresolved::ChangedPorts),
-            },
-            Repair::Stubbed {
                 node_id: gone,
                 reason: DetachReason::Unresolved(Unresolved::MissingFunc),
             },
@@ -1017,73 +999,76 @@ fn reconcile_removes_exactly_what_the_library_cannot_hold() {
                 node_id: nil_func,
                 reason: DetachReason::Unresolved(Unresolved::MissingFunc),
             },
-            rejected(1, Binding::wire(src, 7), BindingRejection::UndeclaredOutput),
-            rejected(2, Binding::wire(src, 0), BindingRejection::WiredConstOnly),
+            rejected(
+                2,
+                Binding::wire(src, numbered_port(8)),
+                BindingRejection::UndeclaredOutput
+            ),
             rejected(
                 3,
+                Binding::wire(src, numbered_port(1)),
+                BindingRejection::WiredConstOnly
+            ),
+            rejected(
+                4,
                 Binding::Const(ConstValue::Int(1)),
                 BindingRejection::ConstMismatch
             ),
-            rejected(4, Binding::wire(src, 0), BindingRejection::WireMismatch),
             rejected(
                 5,
+                Binding::wire(src, numbered_port(1)),
+                BindingRejection::WireMismatch
+            ),
+            rejected(
+                6,
                 Binding::Const(ConstValue::Int(1)),
                 BindingRejection::UndeclaredInput
             ),
             Repair::RejectedSubscription {
-                subscription: Subscription::new(EventPort::new(src, 0), src),
+                subscription: Subscription::new(EventPort::new(src, numbered_port(1)), src),
                 rejection: SubscriptionRejection::SelfSubscription,
             },
             Repair::RejectedSubscription {
-                subscription: Subscription::new(EventPort::new(src, 3), dst),
+                subscription: Subscription::new(EventPort::new(src, numbered_port(4)), dst),
                 rejection: SubscriptionRejection::UndeclaredEvent,
             },
             // The walk enters `a` first, reads `b`, and `b`'s wire from `a`
             // returns to the path.
             Repair::CycleWire {
-                port: InputPort::new(g.id("b"), 0),
-                producer: OutputPort::new(g.id("a"), 0),
+                port: InputPort::new(g.id("b"), numbered_port(1)),
+                producer: OutputPort::new(g.id("a"), numbered_port(1)),
             },
         ]
     );
 
-    let stubs: Vec<_> = g
-        .graph
-        .stubs()
-        .map(|stub| (stub.node_id(), stub.reason))
-        .collect();
     assert_eq!(
-        stubs,
-        [
-            (changed, DetachReason::Unresolved(Unresolved::ChangedPorts)),
-            (gone, DetachReason::Unresolved(Unresolved::MissingFunc)),
-            (nil_func, DetachReason::Unresolved(Unresolved::MissingFunc)),
-        ],
-        "the stubs, in node-id order"
-    );
-    let changed_record = &g.graph.stub(changed).unwrap().record;
-    assert_eq!(
-        changed_record.bindings(),
-        [BindingEntry {
-            port: InputPort::new(changed, 0),
-            binding: Binding::wire(gone, 0),
-        }],
-        "detached first, so the edge to `gone` is `changed`'s"
+        g.graph.stubs().map(Stub::node_id).collect::<Vec<_>>(),
+        [gone, nil_func],
+        "each node it detached is a stub of the graph"
     );
     let gone_record = &g.graph.stub(gone).unwrap().record;
     assert!(gone_record.bindings().is_empty());
     assert_eq!(
         gone_record.subscriptions(),
-        [Subscription::new(EventPort::new(src, 0), gone)]
+        [Subscription::new(
+            EventPort::new(src, numbered_port(1)),
+            gone
+        )]
     );
 
     assert_eq!(
         g.graph.input_bindings(dst).collect::<Vec<_>>(),
-        [(InputPort::new(dst, 0), &Binding::Const(ConstValue::Null))]
+        [(
+            InputPort::new(dst, numbered_port(1)),
+            &Binding::Const(ConstValue::Null)
+        )]
     );
     assert_eq!(
         g.graph.subscriptions().collect::<Vec<_>>(),
-        [Subscription::new(EventPort::new(src, 0), dst)]
+        [Subscription::new(
+            EventPort::new(src, numbered_port(1)),
+            dst
+        )]
     );
     assert!(g.graph.validate_with(&g.library).is_ok());
     assert_eq!(g.compile().program.e_nodes.len(), 4);
@@ -1092,14 +1077,4 @@ fn reconcile_removes_exactly_what_the_library_cannot_hold() {
         g.graph.reconcile(&g.library).is_empty(),
         "a reconciled graph needs nothing more"
     );
-}
-
-/// A node's signature survives the document round trip.
-#[test]
-fn a_signature_round_trips() -> TestResult {
-    let node = Node::from(&signed_func().build());
-    let encoded = SerdeFormat::Ron.serialize(&node)?;
-    let decoded: Node = SerdeFormat::Ron.deserialize(&encoded)?;
-    assert_eq!(decoded, node);
-    Ok(())
 }

@@ -9,7 +9,7 @@ pub(crate) mod value_variant;
 use crate::graph::func::event::EventLambda;
 use crate::graph::func::func_builder::FuncBuilder;
 use crate::graph::func::lambda::FuncLambda;
-use crate::graph::identity::{FuncId, FuncRef};
+use crate::graph::identity::{FuncId, FuncRef, PortId};
 use crate::graph::node::CacheMode;
 use crate::graph::ports::{InputDecl, OutputDecl, Ports};
 
@@ -24,12 +24,14 @@ pub enum FuncBehavior {
 
 #[derive(Clone, Debug)]
 pub struct FuncEvent {
+    /// The number the func gives the event, as it numbers its ports.
+    pub id: PortId,
     pub name: String,
     pub event_lambda: EventLambda,
 }
 
-/// A validated func declaration: its ports, behavior, implementation, and the `FuncRef` a node
-/// of it is authored against, computed once by [`FuncBuilder::build`].
+/// A validated func declaration: its ports, behavior, implementation, and the `FuncRef` a compiled
+/// node of it runs under, computed once by [`FuncBuilder::build`].
 ///
 /// Read-only, so the signature always describes the ports beside it; to change a declaration,
 /// take it back with [`into_builder`](Self::into_builder) and build it again.
@@ -126,11 +128,17 @@ impl Func {
         &self.events
     }
 
+    /// The event under `id`, if this func declares one.
+    pub fn event(&self, id: PortId) -> Option<&FuncEvent> {
+        self.events.iter().find(|event| event.id == id)
+    }
+
     pub const fn lambda(&self) -> &FuncLambda {
         &self.lambda
     }
 
-    /// The address a node of this func is authored against.
+    /// What a compiled node of this func runs: its id, and the signature its state and cached
+    /// values are keyed by.
     pub(crate) const fn func_ref(&self) -> FuncRef {
         self.func_ref
     }

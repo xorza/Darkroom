@@ -23,8 +23,8 @@ use crate::core::runtime_library::RuntimeLibrary;
 use crate::core::status_log::StatusLog;
 use scenarium::{
     Binding, BindingEntry, BindingRejection, Compiler, ConstValue, DataType, DetachReason,
-    EventPort, FuncId, Graph, InputDecl, InputPort, Library, Node, NodeId, OutputDecl, ProgramId,
-    Repair, Subscription, SubscriptionRejection, Unresolved, internals,
+    EventPort, Func, FuncId, Graph, InputDecl, InputPort, Library, Node, NodeId, OutputDecl,
+    ProgramId, Repair, Subscription, SubscriptionRejection, Unresolved, internals, numbered_port,
 };
 
 #[test]
@@ -161,59 +161,89 @@ fn a_command_line_document_outranks_the_remembered_one_and_leaves_it_alone() {
     );
 }
 
-/// A node keeps the ports it was authored against. Loaded against a library whose func moved its
-/// ports, it leaves the graph as a stub with its wiring, the document is dirty, and the graph
-/// compiles without it. Saved like that and loaded against the first library, it attaches again
-/// with its wiring — except an edge whose input the graph bound while it was a stub.
+/// A node names its func by id and its wiring names ports by id, so a func whose ports changed
+/// still resolves: the node stays in the graph, the load holds each binding to the ports as they
+/// are, and removes only what they refuse — here a wire into an input retyped to `String`, and a
+/// wire from an output renumbered from 1 to 2.
 #[test]
-fn a_node_whose_ports_moved_loads_as_a_stub_and_attaches_again() {
-    let dir = TempDir::new("darkroom-open-document-signature");
-    let (first, stubbed) = (dir.join("first.darkroom"), dir.join("stubbed.darkroom"));
-    let int_func = |name: &str| internals::stub_func(FuncId::unique(), name).pure();
-    let src = int_func("src")
-        .output(OutputDecl::new("out", DataType::Int))
-        .build();
-    let mid = int_func("mid")
-        .input(InputDecl::required("in", DataType::Int))
-        .output(OutputDecl::new("out", DataType::Int))
-        .build();
-    let dst = internals::stub_func(FuncId::unique(), "dst")
-        .sink()
-        .input(InputDecl::required("in", DataType::Int))
-        .build();
-    let mut library = Library::default();
+fn a_node_whose_ports_changed_keeps_the_wiring_they_admit() {
+    let dir = TempDir::new("darkroom-open-document-changed-ports");
+    let path = dir.join("first.darkroom");
+    let chain = Chain::new();
     let mut changed = Library::default();
-    let mut moved = mid.clone().into_builder();
+    let mut moved = chain.mid.clone().into_builder();
     moved.ports.inputs[0].data_type = DataType::String;
-    for func in [&src, &dst] {
-        library.add(func.clone());
-        changed.add(func.clone());
-    }
-    library.add(mid.clone());
+    moved.ports.outputs[0].id = numbered_port(2);
+    changed.add(chain.src.clone());
     changed.add(moved.build());
+    changed.add(chain.dst.clone());
+    document::save(
+        &Document::from(chain.graph.clone()),
+        &path,
+        SavedPaths::Relative,
+    )
+    .unwrap();
 
-    // Fixed ids, so the record's bindings sort `mid` before `dst`.
-    let [src_id, mid_id, dst_id] = [1, 2, 3].map(NodeId::from_u128);
-    let mut graph = Graph::default();
-    graph.insert(src_id, Node::from(&src));
-    graph.insert(mid_id, Node::from(&mid));
-    graph.insert(dst_id, Node::from(&dst));
-    let into_mid = InputPort::new(mid_id, 0);
-    let into_dst = InputPort::new(dst_id, 0);
-    graph.set_input_binding(into_mid, Binding::wire(src_id, 0));
-    graph.set_input_binding(into_dst, Binding::wire(mid_id, 0));
-    document::save(&Document::from(graph), &first, SavedPaths::Relative).unwrap();
-
-    let same = OpenDocument::load(first.clone(), &library).unwrap();
+    let same = OpenDocument::load(path.clone(), &chain.library()).unwrap();
     assert!(same.report.is_empty());
     assert!(!same.open.dirty);
 
-    let mut loaded = OpenDocument::load(first, &changed).unwrap();
+    let loaded = OpenDocument::load(path, &changed).unwrap();
+    assert_eq!(
+        loaded.report.repairs,
+        [
+            DocumentRepair::Graph(Repair::RejectedBinding {
+                port: chain.into_mid,
+                binding: Binding::wire(chain.src_id, numbered_port(1)),
+                rejection: BindingRejection::WireMismatch,
+            }),
+            DocumentRepair::Graph(Repair::RejectedBinding {
+                port: chain.into_dst,
+                binding: Binding::wire(chain.mid_id, numbered_port(1)),
+                rejection: BindingRejection::UndeclaredOutput,
+            }),
+        ]
+    );
+    assert!(loaded.open.dirty, "a save accepts the change");
+    let document = &loaded.open.document;
+    assert!(document.graph.find(chain.mid_id).is_some());
+    assert!(document.graph.stub(chain.mid_id).is_none());
+    assert!(document.graph.bindings.is_empty());
+}
+
+/// A node whose func the library lacks leaves the graph as a stub with its wiring, the document
+/// is dirty, and the graph compiles without it. Saved like that and loaded against a library
+/// that holds the func, it attaches again with its wiring — except an edge whose input the graph
+/// bound while it was a stub.
+#[test]
+fn a_node_whose_func_is_missing_loads_as_a_stub_and_attaches_again() {
+    let dir = TempDir::new("darkroom-open-document-stub");
+    let (first, stubbed) = (dir.join("first.darkroom"), dir.join("stubbed.darkroom"));
+    let chain = Chain::new();
+    let Chain {
+        src_id,
+        mid_id,
+        dst_id,
+        into_mid,
+        into_dst,
+        ..
+    } = chain;
+    let mut lacking = Library::default();
+    lacking.add(chain.src.clone());
+    lacking.add(chain.dst.clone());
+    document::save(
+        &Document::from(chain.graph.clone()),
+        &first,
+        SavedPaths::Relative,
+    )
+    .unwrap();
+
+    let mut loaded = OpenDocument::load(first, &lacking).unwrap();
     assert_eq!(
         loaded.report.repairs,
         [DocumentRepair::Graph(Repair::Stubbed {
             node_id: mid_id,
-            reason: DetachReason::Unresolved(Unresolved::ChangedPorts),
+            reason: DetachReason::Unresolved(Unresolved::MissingFunc),
         })]
     );
     assert!(loaded.open.dirty, "a save accepts the change");
@@ -224,16 +254,16 @@ fn a_node_whose_ports_moved_loads_as_a_stub_and_attaches_again() {
         [
             BindingEntry {
                 port: into_mid,
-                binding: Binding::wire(src_id, 0),
+                binding: Binding::wire(src_id, numbered_port(1)),
             },
             BindingEntry {
                 port: into_dst,
-                binding: Binding::wire(mid_id, 0),
+                binding: Binding::wire(mid_id, numbered_port(1)),
             },
         ],
         "the stub keeps every edge that touched it"
     );
-    let compiled = Compiler::default().compile(&document.graph, &changed);
+    let compiled = Compiler::default().compile(&document.graph, &lacking);
     assert!(
         compiled.contains(ProgramId::from(src_id)) && compiled.contains(ProgramId::from(dst_id))
     );
@@ -243,10 +273,10 @@ fn a_node_whose_ports_moved_loads_as_a_stub_and_attaches_again() {
         .open
         .document
         .graph
-        .set_input_binding(into_dst, Binding::wire(src_id, 0));
+        .set_input_binding(into_dst, Binding::wire(src_id, numbered_port(1)));
     loaded.open.save_to(&stubbed, SavedPaths::Relative).unwrap();
 
-    let reattached = OpenDocument::load(stubbed, &library).unwrap();
+    let reattached = OpenDocument::load(stubbed, &chain.library()).unwrap();
     assert_eq!(
         reattached.report.repairs,
         [
@@ -255,7 +285,7 @@ fn a_node_whose_ports_moved_loads_as_a_stub_and_attaches_again() {
                 node_id: mid_id,
                 entry: BindingEntry {
                     port: into_dst,
-                    binding: Binding::wire(mid_id, 0),
+                    binding: Binding::wire(mid_id, numbered_port(1)),
                 },
             }),
         ]
@@ -264,13 +294,74 @@ fn a_node_whose_ports_moved_loads_as_a_stub_and_attaches_again() {
     assert!(document.graph.stub(mid_id).is_none());
     assert_eq!(
         document.graph.bindings.get(&into_mid),
-        Some(&Binding::wire(src_id, 0))
+        Some(&Binding::wire(src_id, numbered_port(1)))
     );
     assert_eq!(
         document.graph.bindings.get(&into_dst),
-        Some(&Binding::wire(src_id, 0)),
+        Some(&Binding::wire(src_id, numbered_port(1))),
         "the input bound while `mid` was a stub keeps its binding"
     );
+}
+
+/// `src → mid → dst`, each carrying an `Int` through port 1, under fixed node ids so the
+/// bindings sort `mid` before `dst`.
+#[derive(Debug)]
+struct Chain {
+    src: Func,
+    mid: Func,
+    dst: Func,
+    graph: Graph,
+    src_id: NodeId,
+    mid_id: NodeId,
+    dst_id: NodeId,
+    into_mid: InputPort,
+    into_dst: InputPort,
+}
+
+impl Chain {
+    fn new() -> Self {
+        let int_func = |name: &str| internals::stub_func(FuncId::unique(), name).pure();
+        let src = int_func("src")
+            .output(1, OutputDecl::new("out", DataType::Int))
+            .build();
+        let mid = int_func("mid")
+            .input(1, InputDecl::required("in", DataType::Int))
+            .output(1, OutputDecl::new("out", DataType::Int))
+            .build();
+        let dst = internals::stub_func(FuncId::unique(), "dst")
+            .sink()
+            .input(1, InputDecl::required("in", DataType::Int))
+            .build();
+        let [src_id, mid_id, dst_id] = [1, 2, 3].map(NodeId::from_u128);
+        let mut graph = Graph::default();
+        graph.insert(src_id, Node::from(&src));
+        graph.insert(mid_id, Node::from(&mid));
+        graph.insert(dst_id, Node::from(&dst));
+        let into_mid = InputPort::new(mid_id, numbered_port(1));
+        let into_dst = InputPort::new(dst_id, numbered_port(1));
+        graph.set_input_binding(into_mid, Binding::wire(src_id, numbered_port(1)));
+        graph.set_input_binding(into_dst, Binding::wire(mid_id, numbered_port(1)));
+        Self {
+            src,
+            mid,
+            dst,
+            graph,
+            src_id,
+            mid_id,
+            dst_id,
+            into_mid,
+            into_dst,
+        }
+    }
+
+    /// A library holding all three funcs.
+    fn library(&self) -> Library {
+        let mut library = Library::default();
+        for func in [&self.src, &self.mid, &self.dst] {
+            library.add(func.clone());
+        }
+        library
+    }
 }
 
 /// A drained batch whose every step joins a held gesture folds into that
@@ -485,17 +576,17 @@ fn a_cancel_takes_the_gesture_back_whole() {
 /// A file can carry wiring on a port or event its func does not declare — no
 /// save or graph check refuses it — so the load holds every binding and
 /// subscription to the library, the same rule the edit gate applies, and
-/// removes what it refuses. Index 0 of each loads untouched; index 1, the
-/// first past the probe's one input, output and event, is removed, reported,
+/// removes what it refuses. Port 1 of each loads untouched; port 2, which the
+/// probe's one input, output and event leave undeclared, is removed, reported,
 /// and leaves the document dirty.
 #[test]
 fn wiring_the_library_refuses_is_removed_at_load() {
     let dir = TempDir::new("darkroom-open-document-declaration");
     let path = dir.join("wired.darkroom");
     let probe = internals::stub_func(FuncId::unique(), "probe")
-        .input(InputDecl::optional("a", DataType::Int))
-        .output(OutputDecl::new("out", DataType::Int))
-        .event("tick", internals::stub_event())
+        .input(1, InputDecl::optional("a", DataType::Int))
+        .output(1, OutputDecl::new("out", DataType::Int))
+        .event(1, "tick", internals::stub_event())
         .build();
     let mut library = Library::default();
     library.add(probe.clone());
@@ -510,8 +601,11 @@ fn wiring_the_library_refuses_is_removed_at_load() {
     };
 
     let declared = load(&|graph| {
-        graph.set_input_binding(InputPort::new(consumer, 0), Binding::wire(producer, 0));
-        graph.subscribe(EventPort::new(producer, 0), consumer);
+        graph.set_input_binding(
+            InputPort::new(consumer, numbered_port(1)),
+            Binding::wire(producer, numbered_port(1)),
+        );
+        graph.subscribe(EventPort::new(producer, numbered_port(1)), consumer);
     });
     assert!(declared.report.is_empty());
     assert!(!declared.open.dirty);
@@ -526,28 +620,32 @@ fn wiring_the_library_refuses_is_removed_at_load() {
         repair.clone()
     };
     let constant = Binding::Const(ConstValue::from(1i64));
-    let loaded =
-        load(&|graph| graph.set_input_binding(InputPort::new(consumer, 1), constant.clone()));
+    let loaded = load(&|graph| {
+        graph.set_input_binding(InputPort::new(consumer, numbered_port(2)), constant.clone());
+    });
     assert_eq!(
         refused(&loaded),
         Repair::RejectedBinding {
-            port: InputPort::new(consumer, 1),
+            port: InputPort::new(consumer, numbered_port(2)),
             binding: constant,
             rejection: BindingRejection::UndeclaredInput,
         }
     );
     let loaded = load(&|graph| {
-        graph.set_input_binding(InputPort::new(consumer, 0), Binding::wire(producer, 1));
+        graph.set_input_binding(
+            InputPort::new(consumer, numbered_port(1)),
+            Binding::wire(producer, numbered_port(2)),
+        );
     });
     assert_eq!(
         refused(&loaded),
         Repair::RejectedBinding {
-            port: InputPort::new(consumer, 0),
-            binding: Binding::wire(producer, 1),
+            port: InputPort::new(consumer, numbered_port(1)),
+            binding: Binding::wire(producer, numbered_port(2)),
             rejection: BindingRejection::UndeclaredOutput,
         }
     );
-    let event = EventPort::new(producer, 1);
+    let event = EventPort::new(producer, numbered_port(2));
     let loaded = load(&|graph| graph.subscribe(event, consumer));
     assert_eq!(
         refused(&loaded),
@@ -597,7 +695,7 @@ fn a_path_of_another_system_is_reported_and_leaves_the_document_clean() {
     let mut document = fixture.document;
     for (node_id, value) in bound {
         document.graph.bindings.insert(
-            InputPort::new(node_id, 0),
+            InputPort::new(node_id, numbered_port(1)),
             Binding::Const(ConstValue::FsPath(value.to_string())),
         );
     }

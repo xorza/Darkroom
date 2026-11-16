@@ -24,9 +24,9 @@ use crate::graph::func::event::EventLambda;
 use crate::graph::func::func_builder::FuncBuilder;
 use crate::graph::func::lambda::internals as lambda;
 use crate::graph::func::lambda::{FuncLambda, Invocation};
-use crate::graph::identity::{EventPort, FuncId, InputPort, NodeId};
+use crate::graph::identity::{EventPort, FuncId, InputPort, NodeId, OutputPort};
 use crate::graph::node::special::SpecialNode;
-use crate::graph::node::{CacheMode, Node, NodeKind};
+use crate::graph::node::{CacheMode, Node};
 use crate::graph::ports::{InputDecl, OutputDecl};
 use crate::internals::calls::Calls;
 use crate::library::Library;
@@ -182,8 +182,32 @@ impl TestGraph {
         consumer: impl Into<NamedPort<'a>>,
     ) {
         let (producer, consumer) = (producer.into(), consumer.into());
-        let binding = Binding::wire(self.id(producer.node), producer.idx);
+        let binding = Binding::Wire(self.output(producer.node, producer.idx));
         self.set(consumer.node, consumer.idx, binding);
+    }
+
+    /// `name`'s input at position `idx`, as the graph addresses it: by the id its declaration
+    /// gives the port.
+    pub fn input(&self, name: &str, idx: usize) -> InputPort {
+        let id = self.func(name).inputs()[idx].id;
+        InputPort::new(self.id(name), id)
+    }
+
+    /// `name`'s output at position `idx`; see [`Self::input`].
+    pub fn output(&self, name: &str, idx: usize) -> OutputPort {
+        let id = self.func(name).outputs()[idx].id;
+        OutputPort::new(self.id(name), id)
+    }
+
+    /// `name`'s event at position `idx`; see [`Self::input`].
+    pub fn event_port(&self, name: &str, idx: usize) -> EventPort {
+        let id = self.func(name).events()[idx].id;
+        EventPort::new(self.id(name), id)
+    }
+
+    /// What `name` declares.
+    fn func(&self, name: &str) -> &Func {
+        self.node(name).func(&self.library)
     }
 
     /// Put a literal on `consumer`'s input `input`.
@@ -197,17 +221,17 @@ impl TestGraph {
     }
 
     fn set(&mut self, consumer: &str, input: usize, binding: impl Into<Option<Binding>>) {
-        let port = InputPort::new(self.id(consumer), input);
+        let port = self.input(consumer, input);
         self.graph.set_input_binding(port, binding);
     }
 
     pub fn subscribe(&mut self, emitter: &str, event_idx: usize, subscriber: &str) {
-        let event = EventPort::new(self.id(emitter), event_idx);
+        let event = self.event_port(emitter, event_idx);
         self.graph.subscribe(event, self.id(subscriber));
     }
 
     pub fn unsubscribe(&mut self, emitter: &str, event_idx: usize, subscriber: &str) {
-        let event = EventPort::new(self.id(emitter), event_idx);
+        let event = self.event_port(emitter, event_idx);
         self.graph.unsubscribe(event, self.id(subscriber));
     }
 
@@ -245,23 +269,6 @@ impl TestGraph {
             .into_builder();
         edit(&mut builder);
         self.library.add(builder.build());
-    }
-
-    /// [`edit_func`](Self::edit_func) for an edit that moves ports, with every node of the func
-    /// adopting the new signature; otherwise the nodes the edit left behind do not resolve.
-    pub fn evolve_func(&mut self, name: &str, edit: impl FnOnce(&mut FuncBuilder)) {
-        self.edit_func(name, edit);
-        let func_id = self.func_id(name);
-        let cur = self.library.by_id(func_id).unwrap().func_ref();
-        let nodes: Vec<NodeId> = self
-            .graph
-            .iter()
-            .filter(|node| node.func_id() == Some(func_id))
-            .map(|node| node.node_id)
-            .collect();
-        for node in nodes {
-            self.graph.find_mut(node).unwrap().kind = NodeKind::Func(cur);
-        }
     }
 
     /// Replace what `name` declares with a body that always fails; [`NodeSpec::fails`] for a
@@ -335,6 +342,11 @@ impl TestGraph {
         let prev = self.ids.insert(name.to_owned(), node_id);
         assert!(prev.is_none(), "a fixture reused the name {name:?}");
     }
+}
+
+/// The number a fixture gives the port at `idx` on its side.
+fn number(idx: usize) -> u32 {
+    u32::try_from(idx + 1).expect("a fixture declares fewer than 2³² ports a side")
 }
 
 /// The body both `fails` methods install, so the two cannot drift.
@@ -418,10 +430,8 @@ impl NodeSpec {
     }
 
     #[must_use]
-    pub fn input(mut self, data_type: DataType) -> Self {
-        let name = format!("in{}", self.func.ports.inputs.len());
-        self.func = self.func.input(InputDecl::required(name, data_type));
-        self
+    pub fn input(self, data_type: DataType) -> Self {
+        self.push_input(|name| InputDecl::required(name, data_type))
     }
 
     /// Restricts the input declared before it to a literal, which graph validation enforces.
@@ -438,32 +448,36 @@ impl NodeSpec {
     }
 
     #[must_use]
-    pub fn optional(mut self, data_type: DataType) -> Self {
-        let name = format!("in{}", self.func.ports.inputs.len());
-        self.func = self.func.input(InputDecl::optional(name, data_type));
-        self
+    pub fn optional(self, data_type: DataType) -> Self {
+        self.push_input(|name| InputDecl::optional(name, data_type))
     }
 
     /// An optional input carrying a declared default, which a fresh node starts bound to.
     #[must_use]
-    pub fn defaulted(mut self, data_type: DataType, value: impl Into<ConstValue>) -> Self {
-        let name = format!("in{}", self.func.ports.inputs.len());
-        self.func = self
-            .func
-            .input(InputDecl::optional(name, data_type).default(value.into()));
+    pub fn defaulted(self, data_type: DataType, value: impl Into<ConstValue>) -> Self {
+        self.push_input(|name| InputDecl::optional(name, data_type).default(value.into()))
+    }
+
+    /// The next input, named `in{idx}` and numbered `idx + 1`.
+    fn push_input(mut self, input: impl FnOnce(String) -> InputDecl) -> Self {
+        let idx = self.func.ports.inputs.len();
+        self.func = self.func.input(number(idx), input(format!("in{idx}")));
         self
     }
 
     #[must_use]
     pub fn output(mut self, data_type: DataType) -> Self {
-        let name = format!("out{}", self.func.ports.outputs.len());
-        self.func = self.func.output(OutputDecl::new(name, data_type));
+        let idx = self.func.ports.outputs.len();
+        self.func = self
+            .func
+            .output(number(idx), OutputDecl::new(format!("out{idx}"), data_type));
         self
     }
 
     #[must_use]
     pub fn event(mut self, name: &str, lambda: EventLambda) -> Self {
-        self.func = self.func.event(name, lambda);
+        let idx = self.func.events.len();
+        self.func = self.func.event(number(idx), name, lambda);
         self
     }
 

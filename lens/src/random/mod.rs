@@ -33,16 +33,21 @@ fn random_func() -> Func {
     .description("Generates a random float between min and max values.")
     .category("Math")
     .input(
+        1,
         InputDecl::required("Min", DataType::Float)
             .description("Lower bound (inclusive).")
             .default(0.0),
     )
     .input(
+        2,
         InputDecl::required("Max", DataType::Float)
             .description("Upper bound (exclusive).")
             .default(1.0),
     )
-    .output(OutputDecl::new("Value", DataType::Float).description("A random number in [Min, Max)."))
+    .output(
+        1,
+        OutputDecl::new("Value", DataType::Float).description("A random number in [Min, Max)."),
+    )
     .build()
 }
 

@@ -1,6 +1,6 @@
 use scenarium::internals::test_graph::NodeSpec;
 use scenarium::internals::test_graph::TestGraph;
-use scenarium::{CacheMode, DataType, EventPort, FuncId, Graph, Node, internals};
+use scenarium::{CacheMode, DataType, EventPort, FuncId, Graph, Node, internals, numbered_port};
 
 use crate::core::document::internals::DocumentFixture;
 use crate::core::document::tab_ref::TabRef;
@@ -59,30 +59,21 @@ fn a_missing_func_reads_as_a_deletable_stub() {
     let mut ghost =
         internals::unresolved_node(FuncId::literal("7a0265e1-9631-45bd-8ecd-1e923b67a58c"));
     ghost.name = "astro_to_image".into();
-    // And one authored against other ports of a func the library holds.
-    let add_id = library.by_name("Add").unwrap().id();
     let known_id = graph.add(known);
     let mut fixture = DocumentFixture::with_library(graph, library);
     let ghost_id = fixture.add_stub(ghost);
-    let changed_id = fixture.add_stub(internals::unresolved_node(add_id));
 
     let fixture = GraphCtxFixture::over(fixture);
     let graph_ctx = fixture.graph_ctx();
 
     // An unresolvable node is not dropped: it stays selectable and deletable.
-    assert_eq!(graph_ctx.nodes().count(), 3, "every placed node resolves");
+    assert_eq!(graph_ctx.nodes().count(), 2, "every placed node resolves");
     let known_node = graph_ctx.node(known_id).unwrap();
     let ghost_node = graph_ctx.node(ghost_id).unwrap();
 
     assert!(!known_node.stub(), "a resolved func is not a stub");
     assert!(ghost_node.stub());
     assert_eq!(ghost_node.kind_label(), "missing func");
-    let changed_node = graph_ctx.node(changed_id).unwrap();
-    assert!(
-        changed_node.stub(),
-        "a func that moved its ports is a stub too"
-    );
-    assert_eq!(changed_node.kind_label(), "changed func");
 
     assert_eq!(ghost_node.name(), "astro_to_image");
     assert_eq!(ghost_node.inputs().len(), 0);
@@ -135,20 +126,20 @@ fn func_events_read_in_order_alongside_outputs() {
 fn subscriptions_read_from_the_graph() {
     use scenarium::{FRAME_EVENT_FUNC_ID, worker_events_library};
 
-    // The second node subscribes to the first's "FPS" event (event_idx 1).
+    // The second node subscribes to the first's "FPS" event, its event 2.
     let library = worker_events_library();
     let mut graph = Graph::default();
     let emitter: Node = library.by_id(FRAME_EVENT_FUNC_ID).unwrap().into();
     let emitter_id = graph.add(emitter);
     let subscriber: Node = library.by_id(FRAME_EVENT_FUNC_ID).unwrap().into();
     let subscriber_id = graph.add(subscriber);
-    graph.subscribe(EventPort::new(emitter_id, 1), subscriber_id);
+    graph.subscribe(EventPort::new(emitter_id, numbered_port(2)), subscriber_id);
 
     let fixture = GraphCtxFixture::over(DocumentFixture::with_library(graph, library));
     let subs: Vec<_> = fixture.graph_ctx().subscriptions().collect();
 
     assert_eq!(subs.len(), 1);
-    assert_eq!(subs[0].event, EventPort::new(emitter_id, 1));
+    assert_eq!(subs[0].event, EventPort::new(emitter_id, numbered_port(2)));
     assert_eq!(subs[0].subscriber, subscriber_id);
 }
 

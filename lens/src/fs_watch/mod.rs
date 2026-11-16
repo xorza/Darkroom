@@ -195,18 +195,18 @@ pub fn fs_watch_library() -> Library {
                  except on Windows, which reports an attribute change as a write.",
             )
             .input(
-                InputDecl::required("Directory", DataType::Dir)
+                1, InputDecl::required("Directory", DataType::Dir)
                     .description("Directory to watch and pass through.")
                     .const_only(),
             )
             .input(
-                InputDecl::required("Recursive", DataType::Bool)
+                2, InputDecl::required("Recursive", DataType::Bool)
                     .description("Watch subdirectories too, not just the top level.")
                     .default(true)
                     .const_only(),
             )
             .input(
-                InputDecl::required("Debounce (ms)", DataType::Int)
+                3, InputDecl::required("Debounce (ms)", DataType::Int)
                     .description(
                         "Quiet window after a change before firing, collapsing a burst into one \
                          event. 0 disables debouncing.",
@@ -215,11 +215,11 @@ pub fn fs_watch_library() -> Library {
                     .const_only(),
             )
             .output(
-                OutputDecl::new("Directory", DataType::Dir)
+                1, OutputDecl::new("Directory", DataType::Dir)
                     .description("The same directory, re-emitted on each change."),
             )
             .event(
-                "Changed",
+                1, "Changed",
                 EventLambda::new(|state| {
                     async move {
                         let watch = state

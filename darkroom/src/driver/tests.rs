@@ -7,7 +7,7 @@ use palantir::Action as PalantirAction;
 use palantir::{
     LocateError, PlayError, PointerButton, Rect, ShortcutMods, SystemScale, WheelDelta,
 };
-use scenarium::{Binding, ConstValue, InputPort, NodeId, ProgramId};
+use scenarium::{Binding, ConstValue, InputPort, NodeId, ProgramId, numbered_port};
 use tracing::{callsite, subscriber};
 use tracing_subscriber::layer::SubscriberExt as _;
 
@@ -503,7 +503,7 @@ fn a_folder_a_copy_would_break_is_refused() {
     let mut document = io_document::load(&path).unwrap();
     let node_id = document.graph.iter().next().unwrap().node_id;
     document.graph.bindings.insert(
-        InputPort::new(node_id, 0),
+        InputPort::new(node_id, numbered_port(1)),
         Binding::Const(ConstValue::FsPath("../x.tiff".to_string())),
     );
     io_document::internals::write_unchecked(&document, &path);

@@ -69,10 +69,14 @@ pub(crate) fn register(library: &mut Library) {
         .category("Astro")
         .pure()
         .input(
+            1,
             InputDecl::required("Path", astro_image_path_type())
                 .description("FITS, camera-RAW, or standard image file to load."),
         )
-        .output(OutputDecl::new("Image", IMAGE_DATA_TYPE).description("Decoded frame."))
+        .output(
+            1,
+            OutputDecl::new("Image", IMAGE_DATA_TYPE).description("Decoded frame."),
+        )
         .build(),
     );
 }

@@ -35,8 +35,6 @@ pub enum DetachedNodeError {
 pub enum Unresolved {
     #[error("the library holds no func under its id")]
     MissingFunc,
-    #[error("the library holds its func with other ports than it was authored against")]
-    ChangedPorts,
 }
 
 /// Why a load took a node out of its graph. The [`Stub`](crate::Stub) a detach leaves keeps it,
@@ -85,9 +83,9 @@ pub enum GraphValidationError {
     #[error("binding on missing node {node_id:?}")]
     BindingMissingNode { node_id: NodeId },
     #[error(
-        "node {destination_id:?} input {port_idx} binds to missing node {source_id:?}",
+        "node {destination_id:?} input {port:?} binds to missing node {source_id:?}",
         destination_id = .destination.node_id,
-        port_idx = .destination.port_idx,
+        port = .destination.port,
         source_id = .producer.node_id
     )]
     BindingMissingProducer {

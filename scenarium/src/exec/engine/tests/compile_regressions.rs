@@ -1,7 +1,9 @@
 use super::*;
 
 use crate::exec::compile::compiled_graph::ExecBinding;
-use crate::graph::ports::{InputDecl, OutputDecl};
+use crate::graph::ports::InputDecl;
+use crate::graph::ports::OutputDecl;
+use crate::graph::ports::numbered_port;
 
 /// The output pool is range-addressed: when a consumer precedes its producer
 /// in insertion order, lowering claims the producer's *index* early while
@@ -43,10 +45,11 @@ async fn update_with_evolved_func_recompiles_and_runs_new_lambda() {
 
     // v2: the same declaration gains an input and a different body.
     e.edit(|g| {
-        g.evolve_func("generate", |func| {
-            func.ports
-                .inputs
-                .push(InputDecl::optional("Extra", DataType::Int));
+        g.edit_func("generate", |func| {
+            func.ports.inputs.push(InputDecl {
+                id: numbered_port(1),
+                ..InputDecl::optional("Extra", DataType::Int)
+            });
             func.lambda = async_lambda!(move |Invocation { outputs, .. }| {
                 outputs[0] = ConstValue::Int(2).into();
                 Ok(())
@@ -106,8 +109,11 @@ async fn update_with_a_grown_output_list_retires_the_shorter_snapshot() {
     // The same declaration gains an output; installing it is where the retained snapshot must be
     // retired.
     e.edit(|g| {
-        g.evolve_func("generate", |func| {
-            func.ports.outputs.push(OutputDecl::new("W", DataType::Int));
+        g.edit_func("generate", |func| {
+            func.ports.outputs.push(OutputDecl {
+                id: numbered_port(2),
+                ..OutputDecl::new("W", DataType::Int)
+            });
         });
     });
     let run = e.run_sinks().await;

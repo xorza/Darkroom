@@ -1,5 +1,6 @@
 use super::*;
 use crate::graph::func::FuncBehavior;
+use crate::graph::ports::numbered_port;
 
 /// The builder states a whole graph — declarations, wiring and bodies — and
 /// what it produces compiles.
@@ -20,8 +21,8 @@ fn a_named_graph_compiles_to_one_node_per_name() {
     // Every name resolves to a distinct node, and the wiring is real.
     assert_eq!(g.graph.len(), 3);
     assert_eq!(
-        g.graph.bindings[&InputPort::new(g.id("double"), 0)],
-        Binding::wire(g.id("src"), 0)
+        g.graph.bindings[&InputPort::new(g.id("double"), numbered_port(1))],
+        Binding::wire(g.id("src"), numbered_port(1))
     );
     // `returns` declared the output its literal implies.
     let src = g.graph.find(g.id("src")).unwrap();
@@ -61,7 +62,7 @@ fn declared_defaults_seed_bindings_that_later_calls_replace() {
             .defaulted(DataType::Int, 3i64)
             .output(DataType::Int)
     });
-    let port = InputPort::new(g.id("n"), 0);
+    let port = InputPort::new(g.id("n"), numbered_port(1));
 
     assert_eq!(
         g.graph.bindings[&port],
@@ -92,8 +93,8 @@ fn sample_wires_five_nodes_in_declaration_order() {
         ("Print", 0, "mult"),
     ] {
         assert_eq!(
-            g.graph.bindings[&InputPort::new(g.id(consumer), input)],
-            Binding::wire(g.id(producer), 0),
+            g.graph.bindings[&g.input(consumer, input)],
+            Binding::wire(g.id(producer), numbered_port(1)),
             "{producer} feeds {consumer}[{input}]"
         );
     }

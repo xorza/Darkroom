@@ -1,6 +1,6 @@
 //! [`PortRef`]: one data port's identity in the graph.
 
-use scenarium::{InputPort, NodeId, OutputPort};
+use scenarium::{InputPort, NodeId, OutputPort, PortId};
 
 use crate::gui::node_key::NodeKey;
 
@@ -37,7 +37,7 @@ impl PortKind {
 pub(crate) struct PortRef {
     pub(crate) node_id: NodeId,
     pub(crate) kind: PortKind,
-    pub(crate) port_idx: usize,
+    pub(crate) port: PortId,
 }
 
 impl NodeKey for PortRef {
@@ -47,30 +47,30 @@ impl NodeKey for PortRef {
 }
 
 impl PortRef {
-    /// `node_id`'s `port_idx`th input — the left-column counterpart of the
+    /// `node_id`'s input `port` — the left-column counterpart of the
     /// graph's [`InputPort`].
-    pub(crate) const fn input(node_id: NodeId, port_idx: usize) -> Self {
+    pub(crate) const fn input(node_id: NodeId, port: PortId) -> Self {
         Self {
             node_id,
             kind: PortKind::Input,
-            port_idx,
+            port,
         }
     }
 
-    /// `node_id`'s `port_idx`th output — the right-column counterpart of the
+    /// `node_id`'s output `port` — the right-column counterpart of the
     /// graph's [`OutputPort`].
-    pub(crate) const fn output(node_id: NodeId, port_idx: usize) -> Self {
+    pub(crate) const fn output(node_id: NodeId, port: PortId) -> Self {
         Self {
             node_id,
             kind: PortKind::Output,
-            port_idx,
+            port,
         }
     }
 
     /// The graph's input this names, or `None` when it names an output.
     pub(crate) const fn input_port(self) -> Option<InputPort> {
         match self.kind {
-            PortKind::Input => Some(InputPort::new(self.node_id, self.port_idx)),
+            PortKind::Input => Some(InputPort::new(self.node_id, self.port)),
             PortKind::Output => None,
         }
     }
@@ -78,7 +78,7 @@ impl PortRef {
     /// The graph's output this names, or `None` when it names an input.
     pub(crate) const fn output_port(self) -> Option<OutputPort> {
         match self.kind {
-            PortKind::Output => Some(OutputPort::new(self.node_id, self.port_idx)),
+            PortKind::Output => Some(OutputPort::new(self.node_id, self.port)),
             PortKind::Input => None,
         }
     }
@@ -86,19 +86,19 @@ impl PortRef {
 
 impl From<InputPort> for PortRef {
     fn from(port: InputPort) -> Self {
-        Self::input(port.node_id, port.port_idx)
+        Self::input(port.node_id, port.port)
     }
 }
 
 impl From<OutputPort> for PortRef {
     fn from(port: OutputPort) -> Self {
-        Self::output(port.node_id, port.port_idx)
+        Self::output(port.node_id, port.port)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use scenarium::{InputPort, NodeId, OutputPort};
+    use scenarium::{InputPort, NodeId, OutputPort, numbered_port};
 
     use crate::gui::port_ref::PortRef;
 
@@ -107,8 +107,8 @@ mod tests {
     #[test]
     fn a_port_converts_only_to_its_own_kind() {
         let node = NodeId::unique();
-        let input = InputPort::new(node, 3);
-        let output = OutputPort::new(node, 3);
+        let input = InputPort::new(node, numbered_port(3));
+        let output = OutputPort::new(node, numbered_port(3));
 
         assert_eq!(PortRef::from(input).input_port(), Some(input));
         assert_eq!(PortRef::from(input).output_port(), None);

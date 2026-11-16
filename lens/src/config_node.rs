@@ -58,17 +58,14 @@ impl<T: Introspect + Clone + fmt::Debug + Send + Sync + 'static> ConfigValue<T> 
     pub(crate) fn builder(library: &mut Library, spec: NodeSpec) -> FuncBuilder {
         library.register_custom_type(wire_type_id::<T>(), CustomType::new(T::DISPLAY_NAME));
         let fields = FieldInputs::<T>::new(library);
-        let inputs = fields.inputs();
         let lambda = async_lambda!(move |Invocation { inputs, outputs, .. }| {
             fields = fields.clone(),
         } => {
             outputs[0] = DynamicValue::from_custom(Self(fields.build(inputs)?));
             Ok(())
         });
-        spec.builder(lambda)
-            .pure()
-            .inputs(inputs)
-            .output(OutputDecl::new("Config", config_data_type::<T>()))
+        declare_fields::<T>(spec.builder(lambda).pure())
+            .output(1, OutputDecl::new("Config", config_data_type::<T>()))
     }
 }
 
@@ -103,23 +100,6 @@ impl<T: Introspect> FieldInputs<T> {
         }
     }
 
-    /// The inputs, one per field in declaration order. Read once, as a func
-    /// is declared, so the fields are read again rather than kept.
-    pub(crate) fn inputs(&self) -> Vec<InputDecl> {
-        T::fields()
-            .iter()
-            .map(|field| {
-                let data_type = data_type(&field.kind);
-                let input = if field.required {
-                    InputDecl::required(field.label, data_type)
-                } else {
-                    InputDecl::optional(field.label, data_type)
-                };
-                input.default(const_value(&field.default))
-            })
-            .collect()
-    }
-
     /// The `T` that `values`, one per field in declaration order, hold.
     pub(crate) fn build(&self, values: &[DynamicValue]) -> Result<T, InvokeError> {
         debug_assert_eq!(values.len(), self.kinds.len());
@@ -131,6 +111,42 @@ impl<T: Introspect> FieldInputs<T> {
             .collect();
         T::from_fields(&values).map_err(InvokeError::external)
     }
+}
+
+/// `builder` with one input per field of `T`, in declaration order, each starting at the field's
+/// default. Read once, as a func is declared, so the fields are read again rather than kept.
+pub(crate) fn declare_fields<T: Introspect>(builder: FuncBuilder) -> FuncBuilder {
+    T::fields().into_iter().fold(builder, |builder, field| {
+        let data_type = data_type(&field.kind);
+        let input = if field.required {
+            InputDecl::required(field.label, data_type)
+        } else {
+            InputDecl::optional(field.label, data_type)
+        };
+        builder.input(
+            field_number(field.name),
+            input.default(const_value(&field.default)),
+        )
+    })
+}
+
+/// The number of the port a field named `name` declares: a hash of its Rust name, so a field
+/// moved or added keeps every other field's port, and a saved binding lands on the field it was
+/// made on. A field renamed is a new port, and a saved binding on the old one is refused and
+/// reported at load. A number another port of the func holds is refused when the func is built.
+///
+/// Refused: numbering the fields by their order, where a field moved or removed rebinds every
+/// later one; an explicit number on each field, a hundred attributes to keep unique by hand.
+fn field_number(name: &str) -> u32 {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"lens-config-field-port-v1");
+    hasher.update(name.as_bytes());
+    let digest = hasher.finalize();
+    let (bytes, _) = digest
+        .as_bytes()
+        .split_first_chunk::<4>()
+        .expect("a digest is 32 bytes");
+    u32::from_le_bytes(*bytes)
 }
 
 /// Map an introspected field kind to a scenarium port type. Enum fields map to
@@ -201,7 +217,7 @@ mod tests {
     use common::{FieldKind, FieldValue, FloatKind, IntegerKind, IntegerValue};
     use scenarium::{ConstValue, DataType, DynamicValue, EnumId, Library};
 
-    use crate::config_node::{data_type, field_value, register_field_enum};
+    use crate::config_node::{data_type, field_number, field_value, register_field_enum};
 
     #[test]
     fn maps_field_kinds_to_port_types() {
@@ -254,6 +270,14 @@ mod tests {
         let mut library = Library::default();
         register_field_enum(&mut library, &first);
         register_field_enum(&mut library, &conflicting);
+    }
+
+    /// A field's port number is a pinned hash of its Rust name: the same on every build and
+    /// different for two names.
+    #[test]
+    fn a_fields_port_number_is_a_pinned_hash_of_its_name() {
+        assert_eq!(field_number("strength"), 985_205_765);
+        assert_ne!(field_number("strength"), field_number("scales"));
     }
 
     #[test]

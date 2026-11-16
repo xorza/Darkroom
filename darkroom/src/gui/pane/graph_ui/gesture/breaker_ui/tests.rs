@@ -1,4 +1,5 @@
 use glam::Vec2;
+use scenarium::numbered_port;
 
 use super::*;
 use crate::core::document::internals::DocumentFixture;
@@ -105,11 +106,11 @@ fn the_breaker_cuts_a_wire_it_crossed_after_a_pan_moves_it_out_of_view() {
 
     let mut fixture = DocumentFixture::probes(2);
     let (producer, consumer) = (fixture.node(0), fixture.node(1));
-    let input = InputPort::new(consumer, 0);
+    let input = InputPort::new(consumer, numbered_port(1));
     fixture
         .document
         .graph
-        .set_input_binding(input, Binding::wire(producer, 0));
+        .set_input_binding(input, Binding::wire(producer, numbered_port(1)));
     // Far apart, so the stroke down the wire's middle starts and ends on bare canvas.
     fixture
         .document
@@ -124,8 +125,8 @@ fn the_breaker_cuts_a_wire_it_crossed_after_a_pan_moves_it_out_of_view() {
 
     // Down past the wire's middle, where a cubic with mirrored handles passes; 3 px off it, as
     // the middle is one of the curve's samples, where the crossing test reads touching as missing.
-    let middle = (h.port_center(PortRef::output(producer, 0))
-        + h.port_center(PortRef::input(consumer, 0)))
+    let middle = (h.port_center(PortRef::output(producer, numbered_port(1)))
+        + h.port_center(PortRef::input(consumer, numbered_port(1))))
         * 0.5
         + Vec2::new(3.0, 0.0);
     let start = middle - Vec2::new(0.0, 40.0);
@@ -159,10 +160,10 @@ fn a_cut_node_takes_the_cuts_of_its_own_inputs() {
 
     let mut fixture = DocumentFixture::probes(2);
     let (producer, consumer) = (fixture.node(0), fixture.node(1));
-    fixture
-        .document
-        .graph
-        .set_input_binding(InputPort::new(consumer, 0), Binding::wire(producer, 0));
+    fixture.document.graph.set_input_binding(
+        InputPort::new(consumer, numbered_port(1)),
+        Binding::wire(producer, numbered_port(1)),
+    );
     fixture
         .document
         .main_view
@@ -175,8 +176,8 @@ fn a_cut_node_takes_the_cuts_of_its_own_inputs() {
     h.prime(2);
 
     // 3 px off the wire's middle, which is one of its samples: see the wire test above.
-    let middle = (h.port_center(PortRef::output(producer, 0))
-        + h.port_center(PortRef::input(consumer, 0)))
+    let middle = (h.port_center(PortRef::output(producer, numbered_port(1)))
+        + h.port_center(PortRef::input(consumer, numbered_port(1))))
         * 0.5
         + Vec2::new(3.0, 0.0);
     let start = middle - Vec2::new(0.0, 40.0);

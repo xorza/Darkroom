@@ -1,7 +1,7 @@
 use glam::{UVec2, Vec2};
 use palantir::Harness;
 use palantir::{DockOperation, Key, Modifiers};
-use scenarium::{InputPort, NodeId, OutputPort, ProgramId};
+use scenarium::{InputPort, NodeId, OutputPort, ProgramId, numbered_port};
 use std::sync::Arc;
 
 use common::internals::alloc_audit;
@@ -59,8 +59,8 @@ fn a_settled_frame_records_without_allocating() {
     let nodes: [NodeId; 6] = std::array::from_fn(|_| fixture.add(func));
     let wires = [(0, 1), (1, 2), (0, 3)].map(|(from, to)| {
         fixture.wire(
-            OutputPort::new(nodes[from], 0),
-            InputPort::new(nodes[to], 0),
+            OutputPort::new(nodes[from], numbered_port(1)),
+            InputPort::new(nodes[to], numbered_port(1)),
         )
     });
     let tie = fixture.tie(Vec2::new(300.0, 120.0), wires);

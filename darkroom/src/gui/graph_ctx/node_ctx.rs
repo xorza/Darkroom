@@ -1,7 +1,9 @@
 //! One node of the graph, with its declaration resolved.
 
 use glam::Vec2;
-use scenarium::{CacheMode, EventPort, Func, FuncEvent, Node, NodeId, RamUsage, Unresolved};
+use scenarium::{
+    CacheMode, EventPort, Func, FuncEvent, Node, NodeId, PortId, RamUsage, Unresolved,
+};
 
 use crate::core::preview_sink;
 use crate::gui::graph_ctx::GraphCtx;
@@ -16,10 +18,6 @@ use crate::gui::theme::hover::Hover;
 /// The `kind_label` a stub reports when the library holds no func under its
 /// id — see [`NodeCtx::stub`].
 const MISSING_FUNC_LABEL: &str = "missing func";
-
-/// The `kind_label` a stub reports when the library holds its func with other
-/// ports than the node was authored against.
-const CHANGED_FUNC_LABEL: &str = "changed func";
 
 /// What a placed item declares: the func a graph node instantiates, or why a
 /// stub has none.
@@ -135,12 +133,11 @@ impl<'a> NodeCtx<'a> {
         &self.node.name
     }
 
-    /// Human-readable type identity: the func's name, or for a stub whether its
-    /// func is gone or changed its ports. Shown by the inspector pane.
+    /// Human-readable type identity: the func's name, or for a stub that its func is gone. Shown
+    /// by the inspector pane.
     pub(crate) fn kind_label(self) -> &'a str {
         match self.declaration {
             Declaration::Func(func) => func.name(),
-            Declaration::Stub(Unresolved::ChangedPorts) => CHANGED_FUNC_LABEL,
             Declaration::Stub(Unresolved::MissingFunc) => MISSING_FUNC_LABEL,
         }
     }
@@ -241,7 +238,7 @@ impl<'a> NodeCtx<'a> {
         declared
             .iter()
             .enumerate()
-            .map(move |(port_idx, input)| InputCtx::new(self, port_idx, input))
+            .map(move |(idx, input)| InputCtx::new(self, idx, input))
     }
 
     /// The func this node instantiates, `None` for a stub.
@@ -252,10 +249,18 @@ impl<'a> NodeCtx<'a> {
         }
     }
 
-    /// One input port by index.
-    pub(crate) fn input(self, port_idx: usize) -> Option<InputCtx<'a>> {
-        let declared = self.func()?.inputs().get(port_idx)?;
-        Some(InputCtx::new(self, port_idx, declared))
+    /// The input port under `port`, if this node declares one.
+    pub(crate) fn input(self, port: PortId) -> Option<InputCtx<'a>> {
+        let ports = self.func()?.ports();
+        let idx = ports.input_idx(port)?;
+        Some(InputCtx::new(self, idx, &ports.inputs[idx]))
+    }
+
+    /// The output port under `port`, if this node declares one.
+    pub(crate) fn output(self, port: PortId) -> Option<OutputCtx<'a>> {
+        let ports = self.func()?.ports();
+        let idx = ports.output_idx(port)?;
+        Some(OutputCtx::new(self, idx, &ports.outputs[idx]))
     }
 
     /// This node's output ports, in declaration order.
@@ -264,7 +269,7 @@ impl<'a> NodeCtx<'a> {
         declared
             .iter()
             .enumerate()
-            .map(move |(port_idx, output)| OutputCtx::new(self, port_idx, output))
+            .map(move |(idx, output)| OutputCtx::new(self, idx, output))
     }
 
     /// This node's event (emitter) ports. Events carry no data type — they
@@ -272,6 +277,11 @@ impl<'a> NodeCtx<'a> {
     /// output column lists them under the data outputs.
     pub(crate) fn events(self) -> &'a [FuncEvent] {
         self.func().map_or(&[][..], Func::events)
+    }
+
+    /// The event under `event`, if this node fires one.
+    pub(crate) fn event(self, event: PortId) -> Option<&'a FuncEvent> {
+        self.func()?.event(event)
     }
 
     /// How many ports this node declares on `kind`'s side.
@@ -282,17 +292,26 @@ impl<'a> NodeCtx<'a> {
         }
     }
 
-    /// Every `PortRef` on the given side, in port order. Single source for
+    /// Every `PortRef` on the given side, in declaration order. Single source for
     /// the "iterate a node's ports by kind" loop `CanvasGeometry::rebuild`
     /// and the wire scans all need, so scan order and paint order
     /// can't drift apart.
     pub(crate) fn ports(self, kind: PortKind) -> impl Iterator<Item = PortRef> {
         let node_id = self.node_id;
-        (0..self.port_count(kind)).map(move |port_idx| PortRef {
-            node_id,
-            kind,
-            port_idx,
-        })
+        let (inputs, outputs) = match (self.func(), kind) {
+            (None, _) => (&[][..], &[][..]),
+            (Some(func), PortKind::Input) => (func.inputs(), &[][..]),
+            (Some(func), PortKind::Output) => (&[][..], func.outputs()),
+        };
+        inputs
+            .iter()
+            .map(|input| input.id)
+            .chain(outputs.iter().map(|output| output.id))
+            .map(move |port| PortRef {
+                node_id,
+                kind,
+                port,
+            })
     }
 
     /// Every `EventPort`, in declaration order — the emitter-glyph
@@ -300,7 +319,9 @@ impl<'a> NodeCtx<'a> {
     /// and the subscription-wire scans for the same reason.
     pub(crate) fn event_ports(self) -> impl Iterator<Item = EventPort> {
         let node_id = self.node_id;
-        (0..self.events().len()).map(move |event_idx| EventPort::new(node_id, event_idx))
+        self.events()
+            .iter()
+            .map(move |event| EventPort::new(node_id, event.id))
     }
 
     /// The port indices the last run could not feed — its own verdict, so a

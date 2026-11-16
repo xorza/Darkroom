@@ -4,61 +4,127 @@ use crate::data::data_type::enum_type::EnumId;
 use crate::data::data_type::file_kind::FileKindId;
 use crate::data::data_type::{DataType, FileMode};
 use crate::graph::func::Func;
+use crate::graph::func::error::FuncValidationError;
+use crate::graph::func::func_builder::FuncBuilder;
 use crate::graph::func::lambda::FuncLambda;
 use crate::graph::func::value_variant::ValueVariant;
-use crate::graph::identity::FuncId;
+use crate::graph::identity::{FuncId, PortId};
 use crate::graph::node::CacheMode;
-use crate::graph::ports::{InputDecl, OutputDecl};
+use crate::graph::ports::{InputDecl, OutputDecl, PortList, PortsError, numbered_port};
 use crate::internals;
 
+const FUNC: FuncId = FuncId::from_u128(7);
+
+fn func() -> FuncBuilder {
+    internals::stub_func(FUNC, "func")
+}
+
+fn ports(error: PortsError) -> Result<(), FuncValidationError> {
+    Err(FuncValidationError::Ports {
+        func_id: FUNC,
+        error,
+    })
+}
+
 #[test]
-fn validate_rejects_invalid_identities_and_defaults() {
-    let nil_input = internals::stub_func(FuncId::unique(), "input").input(InputDecl::required(
-        "value",
-        DataType::Custom(CustomTypeId::nil()),
-    ));
-    let nil_output = internals::stub_func(FuncId::unique(), "output")
-        .output(OutputDecl::new("value", DataType::Enum(EnumId::nil())));
-    let any_output = internals::stub_func(FuncId::unique(), "any")
-        .output(OutputDecl::new("value", DataType::Any));
-    let invalid = [
+fn validate_rejects_invalid_identities_ports_and_defaults() {
+    let int = || InputDecl::required("value", DataType::Int);
+    let cases = [
         (
-            "function id must not be nil".to_owned(),
             internals::stub_func(FuncId::nil(), "nil"),
+            Err(FuncValidationError::NilId),
         ),
         (
-            format!(
-                "function {:?} input 0 has a nil nominal type id",
-                nil_input.id
+            func().input(
+                1,
+                InputDecl::required("value", DataType::Custom(CustomTypeId::nil())),
             ),
-            nil_input,
+            ports(PortsError::NilType {
+                list: PortList::Inputs,
+                idx: 0,
+            }),
         ),
         (
-            format!(
-                "function {:?} output 0 has a nil nominal type id",
-                nil_output.id
+            func().output(1, OutputDecl::new("value", DataType::Enum(EnumId::nil()))),
+            ports(PortsError::NilType {
+                list: PortList::Outputs,
+                idx: 0,
+            }),
+        ),
+        (
+            func().input(
+                1,
+                InputDecl::required(
+                    "file",
+                    DataType::File {
+                        kind: FileKindId::nil(),
+                        mode: FileMode::Open,
+                    },
+                ),
             ),
-            nil_output,
+            ports(PortsError::NilType {
+                list: PortList::Inputs,
+                idx: 0,
+            }),
         ),
         (
-            format!("function {:?} output 0 is declared `Any`", any_output.id),
-            any_output,
+            func().output(1, OutputDecl::new("value", DataType::Any)),
+            Err(FuncValidationError::AnyOutput {
+                func_id: FUNC,
+                output_idx: 0,
+            }),
+        ),
+        (
+            func().pure(),
+            Err(FuncValidationError::PureWithoutOutputs { func_id: FUNC }),
+        ),
+        (
+            func().input(0, int()),
+            ports(PortsError::NilId {
+                list: PortList::Inputs,
+                idx: 0,
+            }),
+        ),
+        (
+            func().input(1, int()).input(1, int()),
+            ports(PortsError::DuplicateId {
+                list: PortList::Inputs,
+                idx: 1,
+                port_id: numbered_port(1),
+            }),
+        ),
+        (
+            func().event(2, "tick", internals::stub_event()).event(
+                2,
+                "tock",
+                internals::stub_event(),
+            ),
+            ports(PortsError::DuplicateId {
+                list: PortList::Events,
+                idx: 1,
+                port_id: numbered_port(2),
+            }),
         ),
     ];
-
-    for (expected, func) in invalid {
-        assert_eq!(func.validate().unwrap_err().to_string(), expected);
+    for (func, expected) in cases {
+        assert_eq!(func.validate(), expected, "{:?}", func.name);
     }
+    // An input and an output may share a number, each unique on its own side.
+    assert_eq!(
+        func()
+            .input(1, int())
+            .output(1, OutputDecl::new("value", DataType::Int))
+            .validate(),
+        Ok(())
+    );
 
     // Declared defaults are held to exact kinds (no scalar coercion) —
     // an authoring mismatch fails at registration, not in a document.
     let default_mismatch = |input: InputDecl| {
-        let func = internals::stub_func(FuncId::unique(), "default").input(input);
-        let expected = format!(
-            "function {:?} input 0 declares a default that matches neither its type nor its picker variants",
-            func.id
+        assert_eq!(
+            func().input(1, input).validate(),
+            ports(PortsError::InvalidDefault { idx: 0 })
         );
-        assert_eq!(func.validate().unwrap_err().to_string(), expected);
     };
     default_mismatch(InputDecl::optional("v", DataType::Int).default(ConstValue::Bool(true)));
     default_mismatch(InputDecl::optional("v", DataType::Bool).default(1.0));
@@ -75,40 +141,34 @@ fn validate_rejects_invalid_identities_and_defaults() {
             .default(2i64),
     );
     // A single-path literal doesn't satisfy a multi-file picker port.
-    default_mismatch(
-        InputDecl::optional(
-            "v",
-            DataType::File {
-                kind: FileKindId::from_u128(1),
-                mode: FileMode::OpenMany,
-            },
-        )
-        .default(ConstValue::FsPath("a.fits".into())),
-    );
+    let files = DataType::File {
+        kind: FileKindId::unique(),
+        mode: FileMode::OpenMany,
+    };
+    default_mismatch(InputDecl::optional("v", files).default(ConstValue::FsPath("a.fits".into())));
 
     // Well-formed declarations: exact kinds, a variant member, Null on an
     // optional input, `Any` accepting any literal, and a picker whose variants
     // are not of its type, as a preset beside a wired config is.
     let ok = Func::builder(FuncId::unique(), "ok", FuncLambda::stub())
-        .input(InputDecl::optional("int", DataType::Int).default(2i64))
-        .input(InputDecl::optional("any", DataType::Any).default("text"))
-        .input(InputDecl::optional("unset", DataType::Int).default(ConstValue::Null))
+        .input(1, InputDecl::optional("int", DataType::Int).default(2i64))
+        .input(2, InputDecl::optional("any", DataType::Any).default("text"))
         .input(
+            3,
+            InputDecl::optional("unset", DataType::Int).default(ConstValue::Null),
+        )
+        .input(
+            4,
             InputDecl::optional("pick", DataType::Int)
                 .variants(vec![ValueVariant::new("one", ConstValue::Int(1))])
                 .default(1i64),
         )
         .input(
-            InputDecl::optional(
-                "paths",
-                DataType::File {
-                    kind: FileKindId::from_u128(1),
-                    mode: FileMode::OpenMany,
-                },
-            )
-            .default(ConstValue::FsPaths(vec!["a.fits".into()])),
+            5,
+            InputDecl::optional("paths", files).default(ConstValue::FsPaths(vec!["a.fits".into()])),
         )
         .input(
+            6,
             InputDecl::required("preset", DataType::Bool)
                 .variants(vec![ValueVariant::new(
                     "fast",
@@ -116,8 +176,46 @@ fn validate_rejects_invalid_identities_and_defaults() {
                 )])
                 .default(ConstValue::Enum("fast".to_owned())),
         )
-        .output(OutputDecl::new("value", DataType::Int));
+        .output(1, OutputDecl::new("value", DataType::Int));
     assert_eq!(ok.validate(), Ok(()));
+}
+
+/// Each port takes the number its builder call gives it, whatever was declared before it.
+#[test]
+fn a_port_takes_the_number_its_func_gives_it() {
+    let func = func()
+        .input(3, InputDecl::required("a", DataType::Int))
+        .input(1, InputDecl::required("b", DataType::Int))
+        .output(7, OutputDecl::new("c", DataType::Int))
+        .event(2, "tick", internals::stub_event())
+        .build();
+    let ids = |ids: &[u128]| {
+        ids.iter()
+            .copied()
+            .map(PortId::from_u128)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        func.inputs()
+            .iter()
+            .map(|input| input.id)
+            .collect::<Vec<_>>(),
+        ids(&[3, 1])
+    );
+    assert_eq!(
+        func.outputs()
+            .iter()
+            .map(|output| output.id)
+            .collect::<Vec<_>>(),
+        ids(&[7])
+    );
+    assert_eq!(
+        func.events()
+            .iter()
+            .map(|event| event.id)
+            .collect::<Vec<_>>(),
+        ids(&[2])
+    );
 }
 
 #[test]
@@ -151,8 +249,8 @@ fn default_cache_mode_defaults_to_none_and_builder_overrides() {
 #[test]
 fn node_events_expose_names_and_arity() {
     let emitter = internals::stub_func(FuncId::unique(), "ticker")
-        .event("tick", internals::stub_event())
-        .event("tock", internals::stub_event());
+        .event(1, "tick", internals::stub_event())
+        .event(2, "tock", internals::stub_event());
     assert_eq!(emitter.events.len(), 2);
     let names: Vec<&str> = emitter.events.iter().map(|e| e.name.as_str()).collect();
     assert_eq!(names, ["tick", "tock"]);
@@ -164,7 +262,11 @@ fn node_events_expose_names_and_arity() {
 /// `build` refuses what `validate` refuses, naming the declaration and the rule;
 /// the rules themselves are `validate`'s tests.
 #[test]
-#[should_panic(expected = "invalid function declaration \"nil\": function id must not be nil")]
+#[should_panic(expected = "invalid function declaration \"func\": function \
+                Id(00000000-0000-0000-0000-000000000007) declares a port no declaration may hold: \
+                input 0 has the nil id")]
 fn build_refuses_a_declaration_validate_refuses() {
-    internals::stub_func(FuncId::nil(), "nil").build();
+    func()
+        .input(0, InputDecl::required("value", DataType::Int))
+        .build();
 }

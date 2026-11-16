@@ -135,21 +135,24 @@ pub fn worker_events_library() -> Library {
         .description("Emits a recurring frame tick, carrying the elapsed time and frame count.")
         .category("System")
         .input(
+            1,
             InputDecl::required("Frequency", DataType::Float)
                 .description("Target ticks per second (Hz). 0 disables the FPS event.")
                 .default(1.0)
                 .const_only(),
         )
         .output(
+            1,
             OutputDecl::new("Delta", DataType::Float)
                 .description("Seconds elapsed since the previous frame."),
         )
         .output(
+            2,
             OutputDecl::new("Frame #", DataType::Int)
                 .description("Frame counter, incremented each tick."),
         )
-        .event("Always", EventLambda::new(|_state| async {}))
-        .event("FPS", EventLambda::new(wait_for_fps_event))
+        .event(1, "Always", EventLambda::new(|_state| async {}))
+        .event(2, "FPS", EventLambda::new(wait_for_fps_event))
         .build(),
     );
 

@@ -175,13 +175,12 @@ pub(crate) fn register(library: &mut Library) {
         )
         .category("Astro")
         .pure()
-        .inputs([
-            frames_input("Darks", "dark frames"),
-            frames_input("Flats", "flat frames"),
-            frames_input("Bias", "bias frames"),
-            frames_input("Flat Darks", "flat-dark frames"),
-        ])
+        .input(1, frames_input("Darks", "dark frames"))
+        .input(2, frames_input("Flats", "flat frames"))
+        .input(3, frames_input("Bias", "bias frames"))
+        .input(4, frames_input("Flat Darks", "flat-dark frames"))
         .input(
+            5,
             InputDecl::required("Sigma", DataType::Float)
                 .description(
                     "Hot-pixel defect threshold: a master-dark pixel more than this many sigma \
@@ -191,11 +190,13 @@ pub(crate) fn register(library: &mut Library) {
                 .default(f64::from(SigmaThreshold::DEFAULT.get())),
         )
         .input(
+            6,
             InputDecl::required("Cache", DataType::Bool)
                 .description("Write each master next to its frames and reuse it next run.")
                 .default(true),
         )
         .output(
+            1,
             OutputDecl::new("Masters", MASTERS_DATA_TYPE)
                 .description("Calibration masters for the wired roles."),
         )

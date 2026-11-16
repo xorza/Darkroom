@@ -72,6 +72,7 @@ pub(crate) fn func(sink: Arc<PreviewSink>) -> Func {
          rest of the graph computes.",
     )
     .input(
+        1,
         InputDecl::optional("Value", DataType::Any)
             .description("The value to show. Anything can be wired here."),
     )

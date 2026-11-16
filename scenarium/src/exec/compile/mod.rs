@@ -37,7 +37,6 @@ pub(crate) mod consumer_cone;
 pub(crate) mod error;
 mod validate;
 
-use std::iter;
 use std::sync::Arc;
 
 use crate::containers::col::{Col, Idx, Span};
@@ -47,7 +46,7 @@ use crate::exec::compile::compiled_graph::{
 use crate::exec::idx::{NodeIdx, OutputAddr};
 use crate::graph::Graph;
 use crate::graph::binding::Binding;
-use crate::graph::identity::{EventPort, InputPort, NodeId, OutputPort};
+use crate::graph::identity::{InputPort, NodeId, OutputPort};
 use crate::graph::program_id::ProgramId;
 use crate::library::Library;
 
@@ -131,9 +130,6 @@ impl Compiler {
             subscribers: Col::with_capacity(graph.subscriptions().len()),
             codecs: Arc::clone(library.codecs()),
         };
-        // Ordered by emitter, then event, like the events the walk appends, so
-        // each event's subscribers are the run at the front of what is left.
-        let mut subscriptions = graph.subscriptions().peekable();
         // The id column is a projection of the placement; the walk resolves ids against `placed`.
         compiled.program_ids.append(
             self.placed
@@ -152,46 +148,48 @@ impl Compiler {
             let special = node.special();
 
             // Every port is read fresh from the func each build, so the artifact is the library's
-            // as given. Each input is resolved as it is appended, so it is whole on entering the
-            // pool.
-            let node_inputs = compiled.inputs.append(func.inputs().iter().enumerate().map(
-                |(port_idx, input)| ExecInput {
+            // as given, in its order: the program addresses a port by position, and each binding
+            // is found by the id the declaration gives the port. Each input is resolved as it is
+            // appended, so it is whole on entering the pool.
+            let node_inputs = compiled
+                .inputs
+                .append(func.inputs().iter().map(|input| ExecInput {
                     required: input.required,
                     fs_path: input.data_type.is_path(),
-                    binding: self.lower(graph.bindings.get(&InputPort::new(node_id, port_idx))),
-                },
-            ));
+                    binding: self.lower(
+                        graph,
+                        library,
+                        graph.bindings.get(&InputPort::new(node_id, input.id)),
+                    ),
+                }));
 
             let output_count =
                 u32::try_from(func.outputs().len()).expect("a func's output count fits in u32");
             let node_outputs = Span::new(compiled.output_count, output_count);
             compiled.output_count += output_count;
 
-            // Each event lands with its subscribers, resolved through the
-            // placement, which already covers nodes the walk has not reached.
-            let node_events = compiled.events.append(func.events().iter().enumerate().map(
-                |(event_idx, event)| {
-                    let port = EventPort::new(node_id, event_idx);
-                    #[expect(clippy::debug_assert_with_mut_call, reason = "a peek moves nothing")]
-                    {
-                        debug_assert!(
-                            subscriptions.peek().is_none_or(|sub| sub.event >= port),
-                            "every subscription names an event its emitter declares"
-                        );
-                    }
-                    let subscribers = compiled.subscribers.append(
-                        iter::from_fn(|| subscriptions.next_if(|sub| sub.event == port))
-                            .filter(|sub| {
-                                !node.disabled && !self.placement(sub.subscriber).disabled
-                            })
-                            .map(|sub| self.idx(sub.subscriber)),
-                    );
-                    ExecEvent {
-                        subscribers,
-                        lambda: event.event_lambda.clone(),
-                    }
-                },
-            ));
+            // Each event lands with its subscribers, resolved through the placement, which already
+            // covers nodes the walk has not reached. The subscriptions sort by event id, which
+            // need not be the declaration's order, so each event takes its own from the node's.
+            let node_events = compiled.events.append(func.events().iter().map(|event| {
+                let subscribers = compiled.subscribers.append(
+                    graph
+                        .subscriptions_of(node_id)
+                        .filter(|sub| sub.event.event == event.id)
+                        .filter(|sub| !node.disabled && !self.placement(sub.subscriber).disabled)
+                        .map(|sub| self.idx(sub.subscriber)),
+                );
+                ExecEvent {
+                    subscribers,
+                    lambda: event.event_lambda.clone(),
+                }
+            }));
+            debug_assert!(
+                graph
+                    .subscriptions_of(node_id)
+                    .all(|sub| func.event(sub.event.event).is_some()),
+                "every subscription names an event its emitter declares"
+            );
 
             compiled.e_nodes.push(ExecNode {
                 sink: func.sink(),
@@ -207,13 +205,6 @@ impl Compiler {
             });
         }
 
-        #[expect(clippy::debug_assert_with_mut_call, reason = "a peek moves nothing")]
-        {
-            debug_assert!(
-                subscriptions.peek().is_none(),
-                "every subscription names an event its emitter declares"
-            );
-        }
         // The placement counted these from the same declarations the walk read, so a mismatch is
         // the two disagreeing about the library.
         debug_assert_eq!(compiled.inputs.len(), totals.inputs);
@@ -273,20 +264,28 @@ impl Compiler {
 
     /// What an input lowers to: its constant, the producer it is wired to, or
     /// nothing.
-    fn lower(&self, binding: Option<&Binding>) -> ExecBinding {
+    fn lower(&self, graph: &Graph, library: &Library, binding: Option<&Binding>) -> ExecBinding {
         match binding {
             None => ExecBinding::None,
             Some(Binding::Const(value)) => ExecBinding::Const(value.clone()),
-            Some(Binding::Wire(source)) => self.resolve(*source),
+            Some(Binding::Wire(source)) => self.resolve(graph, library, *source),
         }
     }
 
     /// Intern an output reference into the dense [`OutputAddr`] the producer landed at — the one
-    /// place a producer id is hashed, once per compile instead of once per run.
-    fn resolve(&self, port: OutputPort) -> ExecBinding {
+    /// place a producer id is hashed and its port's id mapped to its position, once per compile
+    /// instead of once per run.
+    fn resolve(&self, graph: &Graph, library: &Library, port: OutputPort) -> ExecBinding {
+        let port_idx = graph
+            .find(port.node_id)
+            .expect("an admitted wire's producer is in the graph")
+            .func(library)
+            .ports()
+            .output_idx(port.port)
+            .expect("an admitted wire reads an output its producer declares");
         ExecBinding::Wire(OutputAddr {
             node_idx: self.idx(port.node_id),
-            port_idx: port.port_idx as u32,
+            port_idx: u32::try_from(port_idx).expect("a func's outputs fit in u32"),
         })
     }
 }

@@ -28,21 +28,21 @@ pub(super) fn of_node(tag: &'static str, node_id: NodeId) -> WidgetId {
 }
 
 /// A port-keyed widget id — [`of_node`] for the per-port widgets, keyed by side
-/// and index as well.
+/// and port id as well.
 pub(super) fn of_port(tag: &'static str, port: PortRef) -> WidgetId {
     WidgetId::from_hash((
         "darkroom.graph.node",
         tag,
         port.node_id,
         port.kind as u8,
-        port.port_idx,
+        port.port,
     ))
 }
 
 /// An event-keyed widget id — [`of_node`] for the per-event widgets, keyed by
-/// the event's index as well.
+/// the event's id as well.
 pub(super) fn of_event(tag: &'static str, event: EventPort) -> WidgetId {
-    WidgetId::from_hash(("darkroom.graph.node", tag, event.node_id, event.event_idx))
+    WidgetId::from_hash(("darkroom.graph.node", tag, event.node_id, event.event))
 }
 
 /// The node's outer body panel, probed by the wire breaker and the geometry rebuild for last

@@ -2,7 +2,7 @@
 //!
 //! A [`Node`] does not store its own id, which lives only in the key that reaches it, so a node
 //! can be moved or remapped without carrying a stale identity. What it *is* is [`NodeKind`]: a
-//! func instance, addressed by the [`FuncRef`] it was authored against, or a built-in special.
+//! func instance, named by its [`FuncId`], or a built-in special.
 //! Iterating a graph yields a [`NodeRef`](crate::graph::node_ref::NodeRef), pairing a node with
 //! the id it was found under; the lookups that *take* an id return the node alone.
 //!
@@ -12,7 +12,7 @@
 pub(crate) mod special;
 
 use crate::graph::func::Func;
-use crate::graph::identity::{FuncId, FuncRef};
+use crate::graph::identity::FuncId;
 use crate::graph::node::special::SpecialNode;
 use crate::library::Library;
 use ::serde::{Deserialize, Serialize};
@@ -72,9 +72,8 @@ impl CacheMode {
 /// [`Func`]; hosts read a node through [`Node::func_id`], [`Node::special`] and [`Node::func`].
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) enum NodeKind {
-    /// An instance of the library func the [`FuncRef`] names, authored against
-    /// the ports it records — which its bindings and subscriptions are indexed by.
-    Func(FuncRef),
+    /// An instance of the library func under the id.
+    Func(FuncId),
     /// A built-in special node, whose interface is [`SpecialNode::func`].
     Special(SpecialNode),
 }
@@ -107,17 +106,9 @@ impl Node {
     /// resolve is asked through [`Library::func_of`].
     pub fn func<'a>(&self, library: &'a Library) -> &'a Func {
         match &self.kind {
-            NodeKind::Func(func_ref) => {
-                let func = library
-                    .by_id(func_ref.id())
-                    .expect("a graph node's func is in the library");
-                debug_assert_eq!(
-                    func.func_ref(),
-                    *func_ref,
-                    "a graph node's func has the ports it was authored against"
-                );
-                func
-            }
+            NodeKind::Func(func_id) => library
+                .by_id(*func_id)
+                .expect("a graph node's func is in the library"),
             NodeKind::Special(special) => special.func(),
         }
     }
@@ -125,7 +116,7 @@ impl Node {
     /// The id of the func this node instantiates, or `None` for a built-in.
     pub const fn func_id(&self) -> Option<FuncId> {
         match self.kind {
-            NodeKind::Func(func_ref) => Some(func_ref.id()),
+            NodeKind::Func(func_id) => Some(func_id),
             NodeKind::Special(_) => None,
         }
     }
@@ -144,7 +135,7 @@ impl From<&Func> for Node {
     /// input bindings.
     fn from(func: &Func) -> Self {
         Self {
-            kind: NodeKind::Func(func.func_ref()),
+            kind: NodeKind::Func(func.id()),
             name: func.name().to_owned(),
             cache: func.default_cache_mode(),
             disabled: false,
@@ -167,16 +158,16 @@ impl From<SpecialNode> for Node {
 
 #[cfg(feature = "internals")]
 pub(crate) mod internals {
-    use crate::graph::identity::FuncRef;
+    use crate::graph::identity::FuncId;
     use crate::graph::node::{CacheMode, Node, NodeKind};
 
     impl Node {
-        /// A node of `func_ref` with no wiring, before anything resolved its
+        /// A node of func `func_id` with no wiring, before anything resolved its
         /// func: unnamed and on `CacheMode::None`, as a document saved against a
         /// library that later dropped the func leaves it.
-        pub(crate) const fn unresolved(func_ref: FuncRef) -> Self {
+        pub(crate) const fn unresolved(func_id: FuncId) -> Self {
             Self {
-                kind: NodeKind::Func(func_ref),
+                kind: NodeKind::Func(func_id),
                 name: String::new(),
                 cache: CacheMode::None,
                 disabled: false,

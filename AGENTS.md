@@ -158,7 +158,10 @@ arguments after a `--`; each submodule runs its own.
   migrations, compat shims, legacy deserializers or legacy-format tests.
 - **New ids come from `uuidgen | tr 'A-Z' 'a-z'`** — every new `common::Id`
   UUID, never hand-typed or invented, which can collide; `rg` it to confirm it
-  is unique. A shipped id never changes: saved graphs bind to it.
+  is unique. A shipped id never changes: saved graphs bind to it. A func's port
+  ids are the numbers it gives its ports, unique on each side: one shipped is
+  never changed or given to another port, as a protobuf field number
+  ([field numbers](https://protobuf.dev/programming-guides/proto3/#assigning)).
 - **Decisions live in the `AGENTS.md` files and in doc comments**, each with
   its reason and source: a link or the practice it follows. A file holds what
   stays true as the code changes, the direction, the rules and what was

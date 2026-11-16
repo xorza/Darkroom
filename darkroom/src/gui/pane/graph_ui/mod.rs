@@ -364,7 +364,7 @@ mod tests {
     fn the_stage_acts_on_a_click_by_where_it_lands() {
         use glam::Vec2;
         use palantir::PointerButton;
-        use scenarium::NodeId;
+        use scenarium::{NodeId, numbered_port};
 
         use crate::core::document::internals::DocumentFixture;
         use crate::gui::frame::shortcuts;
@@ -428,7 +428,7 @@ mod tests {
         let (mut h, node) = fresh();
         h.ui.press(wid::body(node), PointerButton::Left);
         h.frame();
-        let start = PortRef::output(h.node(1), 0);
+        let start = PortRef::output(h.node(1), numbered_port(1));
         let CanvasHarness { graph_ui, ctx, .. } = &mut h;
         graph_ui.gestures.wire_ui.resume(start, ctx.graph_ctx());
         h.ui.release(PointerButton::Left);

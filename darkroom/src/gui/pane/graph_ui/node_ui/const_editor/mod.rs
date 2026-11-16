@@ -41,23 +41,23 @@ use crate::gui::widgets::support;
 /// One const editor: the field it records as, and the literal it edits on
 /// a port of `data_type`.
 #[derive(Debug, Clone, Copy)]
-pub(super) struct ConstEditor<'a> {
-    pub(super) field: Field<'a>,
-    pub(super) library: &'a Library,
-    pub(super) value: &'a ConstValue,
-    pub(super) data_type: DataType,
+pub(crate) struct ConstEditor<'a> {
+    pub(crate) field: Field<'a>,
+    pub(crate) library: &'a Library,
+    pub(crate) value: &'a ConstValue,
+    pub(crate) data_type: DataType,
     /// The port's named presets; a non-empty list overrides the per-type
     /// editor.
-    pub(super) value_variants: &'a [ValueVariant],
+    pub(crate) value_variants: &'a [ValueVariant],
 }
 
 /// Where one editor records: its stable id, and the theme every visual axis
 /// (button look, field width) comes off.
 #[derive(Debug, Clone, Copy)]
-pub(super) struct Field<'a> {
-    pub(super) theme: &'a ConstEditorTheme,
+pub(crate) struct Field<'a> {
+    pub(crate) theme: &'a ConstEditorTheme,
     /// Stable across frames, so the `TextEdit` / buffer state survives.
-    pub(super) id: WidgetId,
+    pub(crate) id: WidgetId,
 }
 
 /// A dropdown's options, each read through `label`, with `current` picked.

@@ -50,15 +50,10 @@ impl Library {
         self.funcs.get(&id)
     }
 
-    /// The declaration `node` instantiates, or why it has none: no func under its id, or other
-    /// ports than the node was authored against.
+    /// The declaration `node` instantiates, or why it has none: no func under its id.
     pub fn func_of(&self, node: &Node) -> Result<&Func, Unresolved> {
         match &node.kind {
-            NodeKind::Func(func_ref) => match self.by_id(func_ref.id()) {
-                Some(func) if func.func_ref() == *func_ref => Ok(func),
-                Some(_) => Err(Unresolved::ChangedPorts),
-                None => Err(Unresolved::MissingFunc),
-            },
+            NodeKind::Func(func_id) => self.by_id(*func_id).ok_or(Unresolved::MissingFunc),
             NodeKind::Special(special) => Ok(special.func()),
         }
     }

@@ -3,7 +3,7 @@
 
 use glam::Vec2;
 use palantir::{Found, Locate, LocateError, Rect, Ui};
-use scenarium::NodeId;
+use scenarium::{NodeId, PortId};
 
 use crate::gui::app::App;
 use crate::gui::pane::graph_ui::canvas;
@@ -139,17 +139,17 @@ fn find_port(
         .graph
         .find(node_id)
         .expect("a node the locator found is in the graph");
-    let names: Vec<String> = match app.library().func_of(node) {
+    let ports: Vec<(PortId, String)> = match app.library().func_of(node) {
         Ok(func) => match side {
             Side::In => func
                 .inputs()
                 .iter()
-                .map(|input| input.name.clone())
+                .map(|input| (input.id, input.name.clone()))
                 .collect(),
             Side::Out => func
                 .outputs()
                 .iter()
-                .map(|output| output.name.clone())
+                .map(|output| (output.id, output.name.clone()))
                 .collect(),
         },
         Err(why) => {
@@ -159,17 +159,18 @@ fn find_port(
             });
         }
     };
-    let idx = names
+    let idx = ports
         .iter()
-        .position(|name| name == port)
-        .or_else(|| port.parse().ok().filter(|idx| *idx < names.len()))
+        .position(|(_, name)| name == port)
+        .or_else(|| port.parse().ok().filter(|idx| *idx < ports.len()))
         .ok_or_else(|| LocateError::NotFound {
             locator: format!("{target:?}"),
-            nearest: names.clone(),
+            nearest: ports.iter().map(|(_, name)| name.clone()).collect(),
         })?;
+    let (id, _) = ports[idx];
     Ok(match side {
-        Side::In => PortRef::input(node_id, idx),
-        Side::Out => PortRef::output(node_id, idx),
+        Side::In => PortRef::input(node_id, id),
+        Side::Out => PortRef::output(node_id, id),
     })
 }
 

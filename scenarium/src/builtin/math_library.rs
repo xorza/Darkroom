@@ -61,13 +61,18 @@ struct FloatFunc<const N: usize> {
 }
 
 impl<const N: usize> FloatFunc<N> {
+    /// The func, its inputs numbered from 1 in the table's order: the table is the declaration.
     fn declare(self, lambda: FuncLambda) -> Func {
-        Func::builder(self.id, self.name, lambda)
+        let builder = Func::builder(self.id, self.name, lambda)
             .description(self.description)
             .category("Math")
-            .pure()
-            .inputs(self.inputs.map(FloatInputSpec::declare))
-            .output(self.output.declare())
+            .pure();
+        (1..)
+            .zip(self.inputs)
+            .fold(builder, |builder, (number, input)| {
+                builder.input(number, input.declare())
+            })
+            .output(1, self.output.declare())
             .build()
     }
 }
@@ -363,6 +368,7 @@ fn divide_func() -> Func {
     .category("Math")
     .pure()
     .input(
+        1,
         FloatInputSpec {
             name: "A",
             description: "Dividend.",
@@ -371,6 +377,7 @@ fn divide_func() -> Func {
         .declare(),
     )
     .input(
+        2,
         FloatInputSpec {
             name: "B",
             description: "Divisor.",
@@ -379,6 +386,7 @@ fn divide_func() -> Func {
         .declare(),
     )
     .output(
+        1,
         FloatOutputSpec {
             name: "Quotient",
             description: "A ÷ B.",
@@ -386,6 +394,7 @@ fn divide_func() -> Func {
         .declare(),
     )
     .output(
+        2,
         FloatOutputSpec {
             name: "Remainder",
             description: "A mod B.",

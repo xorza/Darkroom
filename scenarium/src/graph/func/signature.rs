@@ -1,28 +1,25 @@
-//! A func's port signature: what a document's bindings and subscriptions are indexed against.
+//! [`FuncSignature`]: a digest of a func's ports, which a compiled node's state and cached values
+//! are owned by.
 
 use std::fmt;
 
-use serde::{Deserialize, Serialize};
-
-use crate::data::data_type::DataType;
+use crate::data::data_type::{DataType, FileMode};
 use crate::graph::func::FuncEvent;
 use crate::graph::ports::Ports;
 
-/// A digest of a func's ports: its inputs' names and types, its outputs' names and types, and
-/// its events' names, in order.
+/// A digest of a func's ports: each input's and output's id and type, and each event's id, in
+/// order.
 ///
-/// Bindings and subscriptions name ports by index, so a func whose ports moved or changed type
-/// under a saved node would bind that node's wiring to the wrong ports, or silently drop it. A
-/// node records the signature of the func it was authored against; one the library does not
-/// match does not resolve ([`Library::func_of`](crate::Library::func_of)), so the load detaches
-/// it with its wiring rather than landing that wiring on the wrong ports.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub(crate) struct FuncSignature(#[serde(with = "common::hex_bytes")] [u8; 32]);
+/// A saved node names its func by id alone and its wiring names ports by id, so no document holds
+/// this. It keys what a run keeps of a node across installs and processes: its cached values and
+/// its state. A func whose ports changed, a port added, moved or retyped, keys none of what the
+/// previous ports produced. A port's name decides nothing a run reads, so a rename keeps the key.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct FuncSignature([u8; 32]);
 
 impl FuncSignature {
     /// Versions the encoding below: a change to it is a change to every signature.
-    const DOMAIN: &'static [u8] = b"scenarium-func-signature-v2";
+    const DOMAIN: &'static [u8] = b"scenarium-func-signature-v3";
 
     /// The signature of `ports` and `events`, in order — what
     /// [`FuncBuilder::build`](crate::graph::func::func_builder::FuncBuilder::build)
@@ -33,56 +30,56 @@ impl FuncSignature {
         let count = |hasher: &mut blake3::Hasher, count: usize| {
             hasher.update(&(count as u64).to_le_bytes());
         };
-        let name = |hasher: &mut blake3::Hasher, name: &str| {
-            hasher.update(&(name.len() as u64).to_le_bytes());
-            hasher.update(name.as_bytes());
-        };
         count(&mut hasher, ports.inputs.len());
         for input in &ports.inputs {
-            name(&mut hasher, &input.name);
+            hasher.update(&input.id.as_u128().to_le_bytes());
             write_type(&mut hasher, input.data_type);
         }
         count(&mut hasher, ports.outputs.len());
         for output in &ports.outputs {
-            name(&mut hasher, &output.name);
+            hasher.update(&output.id.as_u128().to_le_bytes());
             write_type(&mut hasher, output.data_type);
         }
         count(&mut hasher, events.len());
         for event in events {
-            name(&mut hasher, &event.name);
+            hasher.update(&event.id.as_u128().to_le_bytes());
         }
         Self(*hasher.finalize().as_bytes())
     }
-}
 
-/// A type as its kind, plus the identity of a custom or enum type. A path is one kind, a
-/// directory or a file of any kind and mode: those decide which values a picker offers, not
-/// where a binding lands.
-fn write_type(hasher: &mut blake3::Hasher, data_type: DataType) {
-    let tag: u8 = match data_type {
-        DataType::Any => 0,
-        DataType::Float => 1,
-        DataType::Int => 2,
-        DataType::Bool => 3,
-        DataType::String => 4,
-        DataType::Dir | DataType::File { .. } => 5,
-        DataType::Custom(_) => 6,
-        DataType::Enum(_) => 7,
-    };
-    hasher.update(&[tag]);
-    let id = match data_type {
-        DataType::Custom(type_id) => type_id.as_u128(),
-        DataType::Enum(enum_id) => enum_id.as_u128(),
-        _ => return,
-    };
-    hasher.update(&id.to_le_bytes());
-}
-
-impl FuncSignature {
     /// The digest's bytes, for a fold that keys on the signature.
     pub(crate) const fn bytes(&self) -> &[u8; 32] {
         &self.0
     }
+}
+
+/// A type as its kind, plus the identity of what it names in the library: a cached value of one
+/// custom type, enum or file kind is no value of another.
+fn write_type(hasher: &mut blake3::Hasher, data_type: DataType) {
+    let (tag, id): (u8, u128) = match data_type {
+        DataType::Any => (0, 0),
+        DataType::Float => (1, 0),
+        DataType::Int => (2, 0),
+        DataType::Bool => (3, 0),
+        DataType::String => (4, 0),
+        DataType::Dir => (5, 0),
+        DataType::Custom(type_id) => (6, type_id.as_u128()),
+        DataType::Enum(enum_id) => (7, enum_id.as_u128()),
+        DataType::File {
+            kind,
+            mode: FileMode::Open,
+        } => (8, kind.as_u128()),
+        DataType::File {
+            kind,
+            mode: FileMode::OpenMany,
+        } => (9, kind.as_u128()),
+        DataType::File {
+            kind,
+            mode: FileMode::Save,
+        } => (10, kind.as_u128()),
+    };
+    hasher.update(&[tag]);
+    hasher.update(&id.to_le_bytes());
 }
 
 impl fmt::Debug for FuncSignature {
@@ -97,67 +94,75 @@ impl fmt::Debug for FuncSignature {
 
 #[cfg(test)]
 mod tests {
-    use common::SerdeFormat;
-
-    use crate::data::data_type::DataType;
+    use crate::data::data_type::file_kind::FileKindId;
+    use crate::data::data_type::{DataType, FileMode};
     use crate::graph::func::signature::FuncSignature;
     use crate::graph::identity::FuncId;
     use crate::graph::ports::{InputDecl, OutputDecl};
     use crate::internals;
 
     /// One small func's signature, from its bytes written out by hand rather than by the
-    /// encoder: the domain, then each length-prefixed list — one input `value` of kind 2 (Int),
-    /// one output `out` of kind 1 (Float), one event `tick`. The digest is pinned too, so
-    /// an encoding that changes on purpose has to bump the domain and this pin together; any
-    /// other failure here is drift that would refuse every saved node.
+    /// encoder: the domain, then each length-prefixed list — input 3 of kind 2 (Int), output 1 of
+    /// kind 1 (Float), event 2 — each id 16 bytes and each type its tag and 16 id bytes.
     #[test]
     fn a_small_func_has_the_pinned_signature() {
         let func = internals::stub_func(FuncId::from_u128(1), "pinned")
-            .input(InputDecl::required("value", DataType::Int))
-            .output(OutputDecl::new("out", DataType::Float))
-            .event("tick", internals::stub_event())
+            .input(3, InputDecl::required("value", DataType::Int))
+            .output(1, OutputDecl::new("out", DataType::Float))
+            .event(2, "tick", internals::stub_event())
             .build();
         let count = |n: u64| n.to_le_bytes().to_vec();
-        let name = |text: &str| [count(text.len() as u64), text.as_bytes().to_vec()].concat();
+        let id = |n: u128| n.to_le_bytes().to_vec();
         let layout = [
-            b"scenarium-func-signature-v2".to_vec(),
+            b"scenarium-func-signature-v3".to_vec(),
             count(1),
-            name("value"),
+            id(3),
             vec![2],
+            id(0),
             count(1),
-            name("out"),
+            id(1),
             vec![1],
+            id(0),
             count(1),
-            name("tick"),
+            id(2),
         ]
         .concat();
-        let signature = func.func_ref().signature();
-        assert_eq!(signature.0, *blake3::hash(&layout).as_bytes());
-        // The pin, as text holds it; both forms read back.
-        let hex = "5397de314d19d188c4723d6ba61629586d9cc16175bffa3a222f1588565d8f1c";
-        let ron = SerdeFormat::Ron.serialize(&signature).unwrap();
-        assert_eq!(ron, format!("\"{hex}\"").into_bytes());
         assert_eq!(
-            SerdeFormat::Ron.deserialize::<FuncSignature>(&ron).unwrap(),
-            signature
+            func.func_ref().signature(),
+            FuncSignature(*blake3::hash(&layout).as_bytes())
         );
-        let bytes = SerdeFormat::Bitcode.serialize(&signature).unwrap();
+    }
+
+    /// The signature changes with what a run reads of a port, its id and its type, a file's
+    /// kind and mode included, and not with its name or description.
+    #[test]
+    fn a_signature_covers_ids_and_types_and_not_names() {
+        let file = |kind, mode| DataType::File {
+            kind: FileKindId::from_u128(kind),
+            mode,
+        };
+        let signature = |number: u32, input: InputDecl| {
+            internals::stub_func(FuncId::from_u128(1), "f")
+                .input(number, input)
+                .build()
+                .func_ref()
+                .signature()
+        };
+        let base = signature(1, InputDecl::required("a", file(1, FileMode::Open)));
         assert_eq!(
-            SerdeFormat::Bitcode
-                .deserialize::<FuncSignature>(&bytes)
-                .unwrap(),
-            signature
+            signature(
+                1,
+                InputDecl::optional("renamed", file(1, FileMode::Open)).description("text")
+            ),
+            base
         );
-        for bad in [
-            "5397",
-            "zz97de314d19d188c4723d6ba61629586d9cc16175bffa3a222f1588565d8f1c",
+        for changed in [
+            signature(2, InputDecl::required("a", file(1, FileMode::Open))),
+            signature(1, InputDecl::required("a", file(2, FileMode::Open))),
+            signature(1, InputDecl::required("a", file(1, FileMode::Save))),
+            signature(1, InputDecl::required("a", DataType::Dir)),
         ] {
-            assert!(
-                SerdeFormat::Ron
-                    .deserialize::<FuncSignature>(format!("\"{bad}\"").as_bytes())
-                    .is_err(),
-                "{bad}"
-            );
+            assert_ne!(changed, base);
         }
     }
 }

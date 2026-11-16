@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use palantir::DockOperation;
-use scenarium::{EventPort, InputPort, OutputPort};
+use scenarium::{EventPort, InputPort, OutputPort, numbered_port};
 
 use super::*;
 use crate::core::document::internals::DocumentFixture;
@@ -195,12 +195,18 @@ fn reconcile_repairs_the_view_and_the_layout() {
 fn reconcile_repairs_the_ties() {
     let mut fixture = DocumentFixture::default();
     let [a, b] = [0.0, 220.0].map(|x| fixture.node_at(Vec2::new(x, 0.0)));
-    let w1 = fixture.wire(OutputPort::new(a, 0), InputPort::new(b, 0));
-    let w2 = fixture.subscribe(EventPort::new(a, 0), b);
-    let w3 = fixture.wire(OutputPort::new(a, 0), InputPort::new(b, 2));
+    let w1 = fixture.wire(
+        OutputPort::new(a, numbered_port(1)),
+        InputPort::new(b, numbered_port(1)),
+    );
+    let w2 = fixture.subscribe(EventPort::new(a, numbered_port(1)), b);
+    let w3 = fixture.wire(
+        OutputPort::new(a, numbered_port(1)),
+        InputPort::new(b, numbered_port(3)),
+    );
     let unheld = WireKey::Data(DataWire {
-        output: OutputPort::new(a, 0),
-        input: InputPort::new(b, 1),
+        output: OutputPort::new(a, numbered_port(1)),
+        input: InputPort::new(b, numbered_port(2)),
     });
     let DocumentFixture {
         mut document,

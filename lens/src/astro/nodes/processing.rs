@@ -12,13 +12,13 @@ use lumos::{
     ScnrProtection, Stretch,
 };
 use scenarium::{
-    Func, FuncId, FuncLambda, InputDecl, Invocation, Library, OutputDecl, async_lambda,
+    Func, FuncBuilder, FuncId, FuncLambda, Invocation, Library, OutputDecl, async_lambda,
 };
 
 use crate::astro::config::preset::Preset;
 use crate::astro::config::processing::StretchMethodChoice;
 use crate::astro::nodes::runtime;
-use crate::config_node::FieldInputs;
+use crate::config_node::{FieldInputs, declare_fields};
 use crate::image::{IMAGE_DATA_TYPE, Image};
 use crate::node_spec::NodeSpec;
 
@@ -88,21 +88,24 @@ pub(crate) fn register(library: &mut Library) {
         LocalContrast::apply,
     );
     library.add(local_contrast);
-    library.add(processing_func(
-        NodeSpec {
-            id: NEUTRALIZE_BG_FUNC_ID,
-            name: "Neutralize Background",
-            description: "Shifts each channel so the background reads neutral gray.",
-        },
-        vec![Image::input("Image")],
-        async_lambda!(move |Invocation {
-                                inputs, outputs, ..
-                            }| {
-            let value = mem::take(&mut inputs[0]);
-            outputs[0] = runtime::run_frame_op(value, |image| NeutralizeBg.apply(image)).await?;
-            Ok(())
-        }),
-    ));
+    library.add(
+        processing_builder(
+            NodeSpec {
+                id: NEUTRALIZE_BG_FUNC_ID,
+                name: "Neutralize Background",
+                description: "Shifts each channel so the background reads neutral gray.",
+            },
+            async_lambda!(move |Invocation {
+                                    inputs, outputs, ..
+                                }| {
+                let value = mem::take(&mut inputs[0]);
+                outputs[0] =
+                    runtime::run_frame_op(value, |image| NeutralizeBg.apply(image)).await?;
+                Ok(())
+            }),
+        )
+        .build(),
+    );
 }
 
 /// A `lumos` op that rewrites a frame in place: its config's `apply`.
@@ -114,9 +117,8 @@ where
     P: Preset,
     P::Config: Send + 'static,
 {
-    processing_func(
+    processing_builder(
         spec,
-        vec![Image::input("Image"), P::input(name)],
         async_lambda!(move |Invocation {
                                 inputs, outputs, ..
                             }| {
@@ -126,6 +128,8 @@ where
             Ok(())
         }),
     )
+    .input(2, P::input(name))
+    .build()
 }
 
 /// A node over a `T` of a few plain knobs: the image, and `T`'s fields as
@@ -135,11 +139,8 @@ where
     T: Introspect + Clone + fmt::Debug + Send + Sync + 'static,
 {
     let fields = FieldInputs::<T>::new(library);
-    let mut inputs = vec![Image::input("Image")];
-    inputs.extend(fields.inputs());
-    processing_func(
+    let builder = processing_builder(
         spec,
-        inputs,
         async_lambda!(move |Invocation {
                                 inputs, outputs, ..
                             }| {
@@ -150,14 +151,19 @@ where
             outputs[0] = runtime::run_frame_op(value, move |image| op(&config, image)).await?;
             Ok(())
         }),
-    )
+    );
+    declare_fields::<T>(builder).build()
 }
 
-fn processing_func(spec: NodeSpec, inputs: Vec<InputDecl>, lambda: FuncLambda) -> Func {
+/// What every node here declares: the image as input 1 and the processed image as output 1, for
+/// the caller to add its config inputs to and build.
+fn processing_builder(spec: NodeSpec, lambda: FuncLambda) -> FuncBuilder {
     spec.builder(lambda)
         .category("Astro")
         .pure()
-        .inputs(inputs)
-        .output(OutputDecl::new("Image", IMAGE_DATA_TYPE).description("Processed image."))
-        .build()
+        .input(1, Image::input("Image"))
+        .output(
+            1,
+            OutputDecl::new("Image", IMAGE_DATA_TYPE).description("Processed image."),
+        )
 }

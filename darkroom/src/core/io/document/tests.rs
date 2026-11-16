@@ -6,7 +6,9 @@ use common::TempDir;
 use glam::Vec2;
 use lens::MlModelPaths;
 use palantir::{DockDrop, DockOperation, SplitSide};
-use scenarium::{Binding, ConstValue, EventPort, InputPort, NodeId, OutputPort, ProgramId};
+use scenarium::{
+    Binding, ConstValue, EventPort, InputPort, NodeId, OutputPort, ProgramId, numbered_port,
+};
 
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
@@ -31,20 +33,26 @@ fn document_round_trips_in_either_format() {
     let dir = TempDir::new("darkroom-document-roundtrip");
     let mut fixture = DocumentFixture::sample();
     let [a, b] = [0.0, 220.0].map(|x| fixture.node_at(Vec2::new(x, 300.0)));
-    let data = fixture.wire(OutputPort::new(a, 0), InputPort::new(b, 0));
-    let event = fixture.subscribe(EventPort::new(a, 0), b);
+    let data = fixture.wire(
+        OutputPort::new(a, numbered_port(1)),
+        InputPort::new(b, numbered_port(1)),
+    );
+    let event = fixture.subscribe(EventPort::new(a, numbered_port(1)), b);
     let first = fixture.tie(Vec2::new(80.0, 310.0), [data, event]);
     let second = fixture.tie(Vec2::new(140.0, 310.0), [data]);
-    let viewer = ProgramId::from(fixture.add(&preview_sink::func(Arc::default())));
+    let viewer = fixture.add(&preview_sink::func(Arc::default()));
     let mut document = fixture.document;
     document.main_view.ties.get_mut(&second).unwrap().angle = TieAngle::Pinned(45.0);
     document.main_view.selected = BTreeSet::from([ItemId::Node(a), ItemId::Tie(first)]);
     let primary = document.layout.primary().id();
-    for tab in [TabRef::Preferences, TabRef::ImageViewer(viewer)] {
+    for tab in [
+        TabRef::Preferences,
+        TabRef::ImageViewer(ProgramId::from(viewer)),
+    ] {
         document.layout.apply(DockOperation::OpenTab { tab });
     }
     document.layout.apply(DockOperation::MoveTab {
-        tab: TabRef::ImageViewer(viewer),
+        tab: TabRef::ImageViewer(ProgramId::from(viewer)),
         to: DockDrop::Split {
             group: primary,
             side: SplitSide::Right,
@@ -194,10 +202,10 @@ fn paths_document(one: &str, many: &[&str], stub: &str) -> (Document, [NodeId; 4
     fixture.bind_stub(stubbed, ConstValue::FsPath(stub.to_string()));
     let mut document = fixture.document;
     let bind = |document: &mut Document, node_id, value| {
-        document
-            .graph
-            .bindings
-            .insert(InputPort::new(node_id, 0), Binding::Const(value));
+        document.graph.bindings.insert(
+            InputPort::new(node_id, numbered_port(1)),
+            Binding::Const(value),
+        );
     };
     bind(&mut document, load, ConstValue::FsPath(one.to_string()));
     bind(
@@ -213,7 +221,9 @@ fn paths_document(one: &str, many: &[&str], stub: &str) -> (Document, [NodeId; 4
 fn paths_of(document: &Document, nodes: [NodeId; 4]) -> Vec<String> {
     let mut paths = Vec::new();
     for node_id in &nodes[..3] {
-        let Binding::Const(value) = &document.graph.bindings[&InputPort::new(*node_id, 0)] else {
+        let Binding::Const(value) =
+            &document.graph.bindings[&InputPort::new(*node_id, numbered_port(1))]
+        else {
             panic!("a const binding");
         };
         paths.extend(value.as_fs_paths().unwrap().iter().cloned());

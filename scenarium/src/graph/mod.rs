@@ -25,11 +25,19 @@
 //!   don't validate".
 //! - **One admission rule.** [`Graph::admit`] and [`Graph::admit_subscription`]
 //!   are the rule for the load, the edit gate and the compile's assert.
-//! - **A matching signature is not enough.** The signature covers port names,
-//!   types and order, and event names — not the `required` flag,
-//!   `const_only`, picker variants, an enum's variants or a
-//!   default. A library change to any of these keeps a node resolved but can
-//!   break a binding, so the load admits each binding of a resolved node too.
+//! - **A binding names a port by its id.** An input, an output and an event are
+//!   each a node and the id its declaration gives the port. A func that gains a
+//!   port keeps every saved node, the new port unbound; a port that leaves takes
+//!   only its own wiring, which the load refuses and reports as any binding the
+//!   declaration does not admit; a rename and a reorder change nothing. As
+//!   Blender finds a group's sockets by identifier
+//!   ([group creation](https://projects.blender.org/archive/blender-archive/commit/fa3ca9afdb6f1ea1b709226af3f085133e5ddc2f))
+//!   and Unreal gives a pin a persistent id as "pin name could be changed"
+//!   ([`UEdGraphPin`](https://dev.epicgames.com/documentation/unreal-engine/API/Runtime/Engine/UEdGraphPin)).
+//!   Refused: the port's index with a signature of the func's ports on each
+//!   node, which made every saved node of a func a stub when the func gained an
+//!   input. The compiled program stays positional: a compile maps each id to
+//!   its position once.
 //! - **A graph keeps the nodes it cannot hold.** Its stubs sit beside its nodes, the ids of the
 //!   two disjoint, so a graph is one value wherever it goes: a file, a copy. As Blender, which
 //!   swaps an unknown node for an "undefined" one in the tree and keeps its links
@@ -67,7 +75,7 @@ use crate::graph::error::{
     BindingRejection, DetachReason, GraphValidationError, SubscriptionRejection, ValidationResult,
 };
 use crate::graph::func::Func;
-use crate::graph::identity::{EventPort, InputPort, NodeId, OutputPort};
+use crate::graph::identity::{EventPort, InputPort, NodeId, OutputPort, PortId};
 use crate::graph::node::Node;
 use crate::graph::node_ref::NodeRef;
 use crate::graph::reconciled::{Reconciled, Repair};
@@ -241,11 +249,11 @@ impl Graph {
                 Binding::Wire(_) => None,
             })
     }
-    /// The bindings on `node_id`'s own inputs, in port order: one contiguous
+    /// The bindings on `node_id`'s own inputs, in port-id order: one contiguous
     /// range, as `InputPort` orders by node before port.
     pub fn input_bindings(&self, node_id: NodeId) -> impl Iterator<Item = (InputPort, &Binding)> {
         self.bindings
-            .range(InputPort::new(node_id, 0)..)
+            .range(InputPort::new(node_id, PortId::nil())..)
             .take_while(move |(port, _)| port.node_id == node_id)
             .map(|(port, binding)| (*port, binding))
     }
@@ -286,8 +294,8 @@ impl Graph {
         binding: &Binding,
     ) -> Result<(), BindingRejection> {
         let input = consumer
-            .inputs()
-            .get(port.port_idx)
+            .ports()
+            .input(port.port)
             .ok_or(BindingRejection::UndeclaredInput)?;
         match binding {
             Binding::Const(value) => {
@@ -306,8 +314,8 @@ impl Graph {
                     .expect("an admitted wire's producer is in the graph")
                     .func(library);
                 let output = producer
-                    .outputs()
-                    .get(source.port_idx)
+                    .ports()
+                    .output(source.port)
                     .ok_or(BindingRejection::UndeclaredOutput)?;
                 if library.wire_satisfies(input.data_type, output.data_type) {
                     Ok(())
@@ -336,7 +344,7 @@ impl Graph {
             .find(event.node_id)
             .expect("an admitted subscription's emitter is in the graph")
             .func(library);
-        if event.event_idx < emitter.events().len() {
+        if emitter.event(event.event).is_some() {
             Ok(())
         } else {
             Err(SubscriptionRejection::UndeclaredEvent)
@@ -414,6 +422,17 @@ impl Graph {
     }
     pub fn subscriptions(&self) -> impl ExactSizeIterator<Item = Subscription> + '_ {
         self.subscriptions.iter().copied()
+    }
+    /// The subscriptions to `emitter`'s events, by event, then subscriber: one contiguous range,
+    /// as a subscription orders by its event's node first.
+    pub(crate) fn subscriptions_of(
+        &self,
+        emitter: NodeId,
+    ) -> impl Iterator<Item = Subscription> + '_ {
+        self.subscriptions
+            .range(Subscription::new(EventPort::new(emitter, PortId::nil()), NodeId::nil())..)
+            .take_while(move |subscription| subscription.event.node_id == emitter)
+            .copied()
     }
 
     pub fn add(&mut self, node: Node) -> NodeId {

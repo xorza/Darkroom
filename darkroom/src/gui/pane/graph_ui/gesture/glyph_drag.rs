@@ -66,7 +66,7 @@ impl<A: NodeKey, B: NodeKey> GlyphDrag<A, B> {
 
 #[cfg(test)]
 mod tests {
-    use scenarium::{EventPort, NodeId};
+    use scenarium::{EventPort, NodeId, numbered_port};
 
     use crate::gui::pane::graph_ui::gesture::glyph_drag::GlyphDrag;
 
@@ -77,7 +77,7 @@ mod tests {
         let node = NodeId::unique();
         let emitter = EventPort {
             node_id: node,
-            event_idx: 0,
+            event: numbered_port(1),
         };
         assert_eq!(GlyphDrag::<EventPort, NodeId>::new(emitter).node(), node);
         assert_eq!(GlyphDrag::<NodeId, EventPort>::new(node).node(), node);

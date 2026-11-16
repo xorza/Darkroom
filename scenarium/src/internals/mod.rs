@@ -41,11 +41,10 @@ pub fn stub_event() -> EventLambda {
     EventLambda::new(|_| async {})
 }
 
-/// A node of func `func_id`, authored against a func with no ports — for a
-/// fixture whose library holds no such func: what a stale document decodes to
-/// before a reconcile detaches it.
-pub fn unresolved_node(func_id: FuncId) -> Node {
-    Node::unresolved(portless_func_ref(func_id))
+/// A node of func `func_id` — for a fixture whose library holds no such func: what a stale
+/// document decodes to before a reconcile detaches it.
+pub const fn unresolved_node(func_id: FuncId) -> Node {
+    Node::unresolved(func_id)
 }
 
 /// The address of func `func_id` declared with no ports, for a fixture that

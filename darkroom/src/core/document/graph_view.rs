@@ -223,7 +223,7 @@ impl GraphView {
 #[cfg(test)]
 mod tests {
     use glam::Vec2;
-    use scenarium::{EventPort, InputPort, NodeId, OutputPort};
+    use scenarium::{EventPort, InputPort, NodeId, OutputPort, numbered_port};
 
     use crate::core::document::error::{GraphViewValidationError, RouteError};
     use crate::core::document::graph_view::{GraphView, NodePlacement};
@@ -248,8 +248,11 @@ mod tests {
     fn validation_holds_routes_and_ties_to_the_graph() {
         let mut fixture = DocumentFixture::default();
         let [a, b] = [0.0, 220.0].map(|x| fixture.node_at(Vec2::new(x, 0.0)));
-        let data = fixture.wire(OutputPort::new(a, 0), InputPort::new(b, 0));
-        let event = fixture.subscribe(EventPort::new(a, 0), b);
+        let data = fixture.wire(
+            OutputPort::new(a, numbered_port(1)),
+            InputPort::new(b, numbered_port(1)),
+        );
+        let event = fixture.subscribe(EventPort::new(a, numbered_port(1)), b);
         let tie = fixture.tie(Vec2::new(110.0, 0.0), [data, event]);
         let DocumentFixture { mut document, .. } = fixture;
         document.main_view.selected.insert(ItemId::Tie(tie));
@@ -259,8 +262,8 @@ mod tests {
 
         let ghost = TieId::unique();
         let other_output = WireKey::Data(DataWire {
-            output: OutputPort::new(b, 0),
-            input: InputPort::new(b, 0),
+            output: OutputPort::new(b, numbered_port(1)),
+            input: InputPort::new(b, numbered_port(1)),
         });
         let with = |change: &dyn Fn(&mut GraphView)| {
             let mut view = valid.clone();

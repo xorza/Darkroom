@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::rc::Rc;
 
 use glam::Vec2;
-use scenarium::{Library, NodeId};
+use scenarium::{Library, NodeId, numbered_port};
 
 use super::*;
 use crate::core::document::internals::{self, DocumentFixture};
@@ -247,9 +247,10 @@ fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
     };
     let (a, b) = (named(&h, "get_b"), named(&h, "sum"));
     // Edge a -> b, then select both for deletion.
-    h.document
-        .graph
-        .set_input_binding(InputPort::new(b, 0), Binding::wire(a, 0));
+    h.document.graph.set_input_binding(
+        InputPort::new(b, numbered_port(1)),
+        Binding::wire(a, numbered_port(1)),
+    );
     h.document.main_view.selected = [a, b].map(ItemId::Node).into_iter().collect();
 
     // The a->b edge is captured by a's step (before a is removed), so a
@@ -261,8 +262,13 @@ fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
     assert!(h.undo());
     assert!(h.document.graph.find(a).is_some());
     assert!(h.document.graph.find(b).is_some());
-    match h.document.graph.bindings.get(&InputPort::new(b, 0)) {
-        Some(Binding::Wire(src)) => assert_eq!((src.node_id, src.port_idx), (a, 0)),
+    match h
+        .document
+        .graph
+        .bindings
+        .get(&InputPort::new(b, numbered_port(1)))
+    {
+        Some(Binding::Wire(src)) => assert_eq!((src.node_id, src.port), (a, numbered_port(1))),
         other => panic!("expected restored a->b edge, got {other:?}"),
     }
     assert!(!h.undo(), "the whole delete collapsed to one undo entry");

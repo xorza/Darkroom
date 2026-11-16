@@ -28,6 +28,7 @@ pub fn system_library() -> Library {
         .category("System")
         .sink()
         .input(
+            1,
             InputDecl::required("Value", DataType::Any)
                 .description("Value of any type to write to the node's log (info level)."),
         )
@@ -52,10 +53,14 @@ pub fn system_library() -> Library {
         .category("System")
         .pure()
         .input(
+            1,
             InputDecl::required("Value", DataType::Any)
                 .description("Value of any type to convert to text."),
         )
-        .output(OutputDecl::new("Text", DataType::String).description("The value's string form."))
+        .output(
+            1,
+            OutputDecl::new("Text", DataType::String).description("The value's string form."),
+        )
         .build(),
     );
 
@@ -80,14 +85,19 @@ pub fn system_library() -> Library {
         .category("System")
         .pure()
         .input(
+            1,
             InputDecl::required("A", DataType::Any)
                 .description("First value; its text comes first."),
         )
         .input(
+            2,
             InputDecl::required("B", DataType::Any)
                 .description("Second value; its text is appended after A."),
         )
-        .output(OutputDecl::new("Text", DataType::String).description("A's text followed by B's."))
+        .output(
+            1,
+            OutputDecl::new("Text", DataType::String).description("A's text followed by B's."),
+        )
         .build(),
     );
 

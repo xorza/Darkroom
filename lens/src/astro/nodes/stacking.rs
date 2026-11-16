@@ -112,25 +112,35 @@ pub(crate) fn register(library: &mut Library) {
         .category("Astro")
         .pure()
         .input(
+            1,
             InputDecl::required("Lights", astro_raw_paths_type())
                 .description("Camera-RAW light frames to stack."),
         )
         .input(
+            2,
             InputDecl::optional("Masters", MASTERS_DATA_TYPE)
                 .description("Optional calibration masters. Unwired means no calibration."),
         )
-        .input(DetectionPreset::input("Detection"))
-        .input(RegistrationPreset::input("Registration"))
-        .input(CombineMethodChoice::input("Combine"))
-        .input(InputDecl::optional("Reference", DataType::Int).description(
-            "Alignment reference frame index; unset picks the frame with the lowest \
+        .input(3, DetectionPreset::input("Detection"))
+        .input(4, RegistrationPreset::input("Registration"))
+        .input(5, CombineMethodChoice::input("Combine"))
+        .input(
+            6,
+            InputDecl::optional("Reference", DataType::Int).description(
+                "Alignment reference frame index; unset picks the frame with the lowest \
                      median FWHM among those with enough stars.",
-        ))
-        .output(OutputDecl::new("Image", IMAGE_DATA_TYPE).description("Stacked image."))
+            ),
+        )
         .output(
+            1,
+            OutputDecl::new("Image", IMAGE_DATA_TYPE).description("Stacked image."),
+        )
+        .output(
+            2,
             OutputDecl::new("Coverage", IMAGE_DATA_TYPE).description("Per-pixel frame-count map."),
         )
         .output(
+            3,
             OutputDecl::new("Weight", IMAGE_DATA_TYPE)
                 .description("Per-pixel accumulated weight map."),
         )

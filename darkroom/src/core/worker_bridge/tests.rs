@@ -6,7 +6,8 @@ use std::time::{Duration, Instant};
 
 use scenarium::{
     Binding, Compiler, ConstValue, EventPort, ExecError, Graph, InputPort, NodeId, ProgramId,
-    RunSummary, WorkerActivity, WorkerError, WorkerReport, system_library, worker_events_library,
+    RunSummary, WorkerActivity, WorkerError, WorkerReport, numbered_port, system_library,
+    worker_events_library,
 };
 
 use crate::core::wake;
@@ -30,14 +31,14 @@ fn drop_waits_for_worker_idle_before_runtime_shutdown() {
     let frame = graph.add(library.by_name("Frame Event").unwrap().into());
     let print = graph.add(library.by_name("Print").unwrap().into());
     graph.set_input_binding(
-        InputPort::new(frame, 0),
+        InputPort::new(frame, numbered_port(1)),
         Binding::from(ConstValue::Float(0.0)),
     );
     graph.set_input_binding(
-        InputPort::new(print, 0),
+        InputPort::new(print, numbered_port(1)),
         Binding::from(ConstValue::String("tick".to_string())),
     );
-    graph.subscribe(EventPort::new(frame, 1), print);
+    graph.subscribe(EventPort::new(frame, numbered_port(2)), print);
     let compiled = Compiler::default().compile(&graph, &library).into();
     bridge
         .install(compiled)

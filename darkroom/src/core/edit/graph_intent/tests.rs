@@ -5,7 +5,7 @@ use scenarium::internals::test_graph::TestGraph;
 use scenarium::{
     Binding, BindingEntry, BindingRejection, CacheMode, ConstValue, DataType, DetachedNodeError,
     EventPort, FuncId, InputDecl, InputPort, Library, Node, NodeId, OutputDecl, OutputPort,
-    Subscription, SubscriptionRejection, Unresolved, internals,
+    Subscription, SubscriptionRejection, Unresolved, internals, numbered_port,
 };
 
 use crate::core::document::Document;
@@ -77,7 +77,7 @@ fn undo_all(document: &mut Document, steps: &[UndoStep]) {
 
 fn subscribe(emitter: NodeId, subscriber: NodeId, to: bool) -> GraphIntent {
     GraphIntent::SetSubscription {
-        subscription: Subscription::new(EventPort::new(emitter, 0), subscriber),
+        subscription: Subscription::new(EventPort::new(emitter, numbered_port(1)), subscriber),
         to,
     }
 }
@@ -160,9 +160,13 @@ fn a_removed_node_comes_back_whole() {
     let b = fixture.node_at(Vec2::new(100.0, 0.0));
     let stub = fixture.stub_at(Vec2::new(0.0, 100.0));
     let mut document = fixture.document;
-    let edge = InputPort::new(b, 0);
-    document.graph.set_input_binding(edge, Binding::wire(a, 0));
-    document.graph.subscribe(EventPort::new(a, 0), b);
+    let edge = InputPort::new(b, numbered_port(1));
+    document
+        .graph
+        .set_input_binding(edge, Binding::wire(a, numbered_port(1)));
+    document
+        .graph
+        .subscribe(EventPort::new(a, numbered_port(1)), b);
     document.main_view.selected = [a].map(ItemId::Node).into_iter().collect();
     let placement = document.main_view.node_placements[&a];
 
@@ -182,7 +186,9 @@ fn a_removed_node_comes_back_whole() {
         "the edge went with it"
     );
     assert!(
-        !document.graph.is_subscribed(EventPort::new(a, 0), b),
+        !document
+            .graph
+            .is_subscribed(EventPort::new(a, numbered_port(1)), b),
         "so did the subscription"
     );
     document
@@ -198,9 +204,13 @@ fn a_removed_node_comes_back_whole() {
     assert!(document.main_view.selected.contains(&ItemId::Node(a)));
     assert_eq!(
         document.graph.bindings.get(&edge),
-        Some(&Binding::wire(a, 0))
+        Some(&Binding::wire(a, numbered_port(1)))
     );
-    assert!(document.graph.is_subscribed(EventPort::new(a, 0), b));
+    assert!(
+        document
+            .graph
+            .is_subscribed(EventPort::new(a, numbered_port(1)), b)
+    );
     document
         .validate()
         .expect("an undone removal leaves a valid document");
@@ -240,15 +250,18 @@ fn a_removed_node_comes_back_whole() {
 fn a_wire_that_goes_leaves_its_input_on_its_default() {
     let mut fixture = DocumentFixture::default();
     let consumer = internals::stub_func(FuncId::unique(), "consumer")
-        .input(InputDecl::optional("knob", DataType::Int).default(7i64))
-        .input(InputDecl::optional("bare", DataType::Int))
+        .input(1, InputDecl::optional("knob", DataType::Int).default(7i64))
+        .input(2, InputDecl::optional("bare", DataType::Int))
         .build();
     let producer = fixture.node_at(Vec2::ZERO);
     let node = fixture.add(&consumer);
     let library = fixture.library;
     let mut document = fixture.document;
-    let (knob, bare) = (InputPort::new(node, 0), InputPort::new(node, 1));
-    let wire = || Some(Binding::wire(producer, 0));
+    let (knob, bare) = (
+        InputPort::new(node, numbered_port(1)),
+        InputPort::new(node, numbered_port(2)),
+    );
+    let wire = || Some(Binding::wire(producer, numbered_port(1)));
     let seven = || Some(Binding::Const(ConstValue::Int(7)));
     let wire_both = |document: &mut Document| {
         for port in [knob, bare] {
@@ -297,10 +310,10 @@ fn a_wire_that_goes_leaves_its_input_on_its_default() {
         .unwrap();
     assert_ne!(clone, node);
     assert_eq!(
-        [0, 1].map(|port_idx| document
+        [1, 2].map(|number| document
             .graph
             .bindings
-            .get(&InputPort::new(clone, port_idx))
+            .get(&InputPort::new(clone, numbered_port(number)))
             .cloned()),
         [seven(), None],
         "a duplicate drops the wires from outside it as a cut does"
@@ -346,8 +359,8 @@ fn the_gate_refuses_a_mistyped_constant_or_wire_and_a_self_subscription() {
         mut document,
         library,
     } = DocumentFixture::from(g);
-    let input = InputPort::new(dst, 0);
-    let own = Subscription::new(EventPort::new(src, 0), src);
+    let input = InputPort::new(dst, numbered_port(1));
+    let own = Subscription::new(EventPort::new(src, numbered_port(1)), src);
     for (what, intent, expected) in [
         (
             "a text constant on an Int input",
@@ -359,7 +372,7 @@ fn the_gate_refuses_a_mistyped_constant_or_wire_and_a_self_subscription() {
         ),
         (
             "a String wire into an Int input",
-            GraphIntent::set_input(input, Binding::wire(src, 0)),
+            GraphIntent::set_input(input, Binding::wire(src, numbered_port(1))),
             MalformedIntent::Rejected {
                 port: input,
                 rejection: BindingRejection::WireMismatch,
@@ -562,17 +575,24 @@ fn crossing_wire() -> CrossingWire {
     let b = fixture.node_at(Vec2::new(100.0, 0.0));
     let c = fixture.node_at(Vec2::new(0.0, 100.0));
     let mut document = fixture.document;
+    document.graph.set_input_binding(
+        InputPort::new(b, numbered_port(1)),
+        Binding::wire(a, numbered_port(1)),
+    );
+    document.graph.set_input_binding(
+        InputPort::new(b, numbered_port(2)),
+        Binding::Const(ConstValue::from(7i64)),
+    );
+    document.graph.set_input_binding(
+        InputPort::new(b, numbered_port(3)),
+        Binding::wire(c, numbered_port(1)),
+    );
     document
         .graph
-        .set_input_binding(InputPort::new(b, 0), Binding::wire(a, 0));
+        .subscribe(EventPort::new(a, numbered_port(1)), b);
     document
         .graph
-        .set_input_binding(InputPort::new(b, 1), Binding::Const(ConstValue::from(7i64)));
-    document
-        .graph
-        .set_input_binding(InputPort::new(b, 2), Binding::wire(c, 0));
-    document.graph.subscribe(EventPort::new(a, 0), b);
-    document.graph.subscribe(EventPort::new(c, 0), b);
+        .subscribe(EventPort::new(c, numbered_port(1)), b);
     document.main_view.selected = [a, b].map(ItemId::Node).into_iter().collect();
     CrossingWire {
         document,
@@ -637,26 +657,37 @@ fn duplicate_clones_wiring_and_selects_the_copies() {
     // The internal edge and subscription are recreated against the clones, the const copies
     // verbatim, and the edge from outside the set is dropped.
     assert_eq!(
-        document.graph.bindings.get(&InputPort::new(b_clone, 0)),
-        Some(&Binding::wire(a_clone, 0)),
+        document
+            .graph
+            .bindings
+            .get(&InputPort::new(b_clone, numbered_port(1))),
+        Some(&Binding::wire(a_clone, numbered_port(1))),
         "a' -> b' replaces a -> b"
     );
     assert!(matches!(
-        document.graph.bindings.get(&InputPort::new(b_clone, 1)),
+        document
+            .graph
+            .bindings
+            .get(&InputPort::new(b_clone, numbered_port(2))),
         Some(Binding::Const(_))
     ));
     assert_eq!(
-        document.graph.bindings.get(&InputPort::new(b_clone, 2)),
+        document
+            .graph
+            .bindings
+            .get(&InputPort::new(b_clone, numbered_port(3))),
         None,
         "the edge from unselected c is dropped"
     );
     assert!(
         document
             .graph
-            .is_subscribed(EventPort::new(a_clone, 0), b_clone)
+            .is_subscribed(EventPort::new(a_clone, numbered_port(1)), b_clone)
     );
     assert!(
-        !document.graph.is_subscribed(EventPort::new(c, 0), b_clone),
+        !document
+            .graph
+            .is_subscribed(EventPort::new(c, numbered_port(1)), b_clone),
         "the subscription to unselected c is dropped"
     );
 
@@ -668,8 +699,11 @@ fn duplicate_clones_wiring_and_selects_the_copies() {
         [a, b].map(ItemId::Node).into_iter().collect()
     );
     assert_eq!(
-        document.graph.bindings.get(&InputPort::new(b, 2)),
-        Some(&Binding::wire(c, 0)),
+        document
+            .graph
+            .bindings
+            .get(&InputPort::new(b, numbered_port(3))),
+        Some(&Binding::wire(c, numbered_port(1))),
         "the originals' wiring was never touched"
     );
     document
@@ -686,8 +720,11 @@ fn duplicate_clones_wiring_and_selects_the_copies() {
         clones.iter().copied().map(ItemId::Node).collect()
     );
     assert_eq!(
-        document.graph.bindings.get(&InputPort::new(b_clone, 0)),
-        Some(&Binding::wire(a_clone, 0))
+        document
+            .graph
+            .bindings
+            .get(&InputPort::new(b_clone, numbered_port(1))),
+        Some(&Binding::wire(a_clone, numbered_port(1)))
     );
     document
         .validate()
@@ -712,12 +749,17 @@ fn duplicate_keeps_external_producers_on_request() {
     commit_all(&mut document, &library, intents);
     let b_clone = clone_of(&document, Vec2::new(100.0, 0.0), &originals);
     assert_eq!(
-        document.graph.bindings.get(&InputPort::new(b_clone, 2)),
-        Some(&Binding::wire(c, 0)),
+        document
+            .graph
+            .bindings
+            .get(&InputPort::new(b_clone, numbered_port(3))),
+        Some(&Binding::wire(c, numbered_port(1))),
         "the kept wire still reads the original external producer"
     );
     assert!(
-        document.graph.is_subscribed(EventPort::new(c, 0), b_clone),
+        document
+            .graph
+            .is_subscribed(EventPort::new(c, numbered_port(1)), b_clone),
         "the kept subscription still hears the original external emitter"
     );
     document.validate().unwrap();
@@ -850,7 +892,10 @@ fn each_edit_reverts_and_redoes_the_whole_document() {
         ("raise", GraphIntent::Raise { node_id: a }),
         (
             "bind",
-            GraphIntent::set_input(InputPort::new(b, 0), Binding::wire(a, 0)),
+            GraphIntent::set_input(
+                InputPort::new(b, numbered_port(1)),
+                Binding::wire(a, numbered_port(1)),
+            ),
         ),
     ];
     for (what, intent) in edits {
@@ -883,7 +928,7 @@ fn subscribe_unsubscribe_commit_and_undo() {
     assert!(
         document
             .graph
-            .is_subscribed(EventPort::new(emitter, 0), subscriber)
+            .is_subscribed(EventPort::new(emitter, numbered_port(1)), subscriber)
     );
 
     // A second identical subscribe is a no-op (from == to == true).
@@ -900,13 +945,13 @@ fn subscribe_unsubscribe_commit_and_undo() {
     assert!(
         !document
             .graph
-            .is_subscribed(EventPort::new(emitter, 0), subscriber)
+            .is_subscribed(EventPort::new(emitter, numbered_port(1)), subscriber)
     );
     step.apply(&mut document);
     assert!(
         document
             .graph
-            .is_subscribed(EventPort::new(emitter, 0), subscriber)
+            .is_subscribed(EventPort::new(emitter, numbered_port(1)), subscriber)
     );
 
     // Unsubscribe commits, removes the edge, and undo brings it back.
@@ -917,13 +962,13 @@ fn subscribe_unsubscribe_commit_and_undo() {
     assert!(
         !document
             .graph
-            .is_subscribed(EventPort::new(emitter, 0), subscriber)
+            .is_subscribed(EventPort::new(emitter, numbered_port(1)), subscriber)
     );
     step.revert(&mut document);
     assert!(
         document
             .graph
-            .is_subscribed(EventPort::new(emitter, 0), subscriber)
+            .is_subscribed(EventPort::new(emitter, numbered_port(1)), subscriber)
     );
 
     // Redo the unsubscribe (apply writes the `to = unsubscribed` half),
@@ -932,7 +977,7 @@ fn subscribe_unsubscribe_commit_and_undo() {
     assert!(
         !document
             .graph
-            .is_subscribed(EventPort::new(emitter, 0), subscriber)
+            .is_subscribed(EventPort::new(emitter, numbered_port(1)), subscriber)
     );
     assert!(
         subscribe(emitter, subscriber, false)
@@ -1004,16 +1049,17 @@ fn commit_rejects_cycle_forming_bind() {
     let b = fixture.node_at(Vec2::new(100.0, 0.0));
     let c = fixture.node_at(Vec2::new(0.0, 100.0));
     let mut document = fixture.document;
-    document
-        .graph
-        .set_input_binding(InputPort::new(b, 0), Binding::wire(a, 0));
+    document.graph.set_input_binding(
+        InputPort::new(b, numbered_port(1)),
+        Binding::wire(a, numbered_port(1)),
+    );
 
     // Wiring a's input back to b's output would close the a → b loop:
     // rejected, nothing written, the existing edge untouched.
     assert!(
         GraphIntent::SetInput {
-            input: InputPort::new(a, 0),
-            to: Some(Binding::wire(b, 0)),
+            input: InputPort::new(a, numbered_port(1)),
+            to: Some(Binding::wire(b, numbered_port(1))),
         }
         .commit_one(&mut document, &fixture.library)
         .unwrap()
@@ -1021,13 +1067,19 @@ fn commit_rejects_cycle_forming_bind() {
         "a bind that closes a cycle is rejected"
     );
     assert_eq!(
-        document.graph.bindings.get(&InputPort::new(a, 0)),
+        document
+            .graph
+            .bindings
+            .get(&InputPort::new(a, numbered_port(1))),
         None,
         "the rejected bind left a's input unbound"
     );
     assert_eq!(
-        document.graph.bindings.get(&InputPort::new(b, 0)),
-        Some(&Binding::wire(a, 0)),
+        document
+            .graph
+            .bindings
+            .get(&InputPort::new(b, numbered_port(1))),
+        Some(&Binding::wire(a, numbered_port(1))),
         "the existing a → b edge is untouched"
     );
 
@@ -1035,8 +1087,8 @@ fn commit_rejects_cycle_forming_bind() {
     // output extends the chain into a → b → c.
     assert!(
         GraphIntent::SetInput {
-            input: InputPort::new(c, 0),
-            to: Some(Binding::wire(b, 0)),
+            input: InputPort::new(c, numbered_port(1)),
+            to: Some(Binding::wire(b, numbered_port(1))),
         }
         .commit_one(&mut document, &fixture.library)
         .unwrap()
@@ -1044,8 +1096,11 @@ fn commit_rejects_cycle_forming_bind() {
         "an acyclic bind commits"
     );
     assert_eq!(
-        document.graph.bindings.get(&InputPort::new(c, 0)),
-        Some(&Binding::wire(b, 0)),
+        document
+            .graph
+            .bindings
+            .get(&InputPort::new(c, numbered_port(1))),
+        Some(&Binding::wire(b, numbered_port(1))),
     );
 }
 
@@ -1124,8 +1179,8 @@ fn malformed_payloads_are_refused_before_they_can_invalidate_the_document() {
     // trip an assert inside the graph; saving only validates in debug builds, so it would write
     // fine and not reopen.
     let probe = internals::stub_func(FuncId::unique(), "probe")
-        .input(InputDecl::optional("a", DataType::Int))
-        .output(OutputDecl::new("out", DataType::Int))
+        .input(1, InputDecl::optional("a", DataType::Int))
+        .output(1, OutputDecl::new("out", DataType::Int))
         .build();
     let mut fixture = DocumentFixture::default();
     let live = fixture.add(&probe);
@@ -1146,7 +1201,7 @@ fn malformed_payloads_are_refused_before_they_can_invalidate_the_document() {
             .map(|(port, binding)| BindingEntry { port, binding })
             .collect(),
     };
-    let own = |port_idx| InputPort::new(fresh, port_idx);
+    let own = |number| InputPort::new(fresh, numbered_port(number));
     let cases = [
         (
             "AddNode at a non-finite position",
@@ -1173,7 +1228,7 @@ fn malformed_payloads_are_refused_before_they_can_invalidate_the_document() {
         ),
         (
             "AddNode seeding a binding from a producer that isn't there",
-            seeded(vec![(own(0), Binding::wire(ghost, 0))]),
+            seeded(vec![(own(1), Binding::wire(ghost, numbered_port(1)))]),
             MalformedIntent::NodeAbsent {
                 role: Role::BindingProducer,
                 node_id: ghost,
@@ -1183,9 +1238,12 @@ fn malformed_payloads_are_refused_before_they_can_invalidate_the_document() {
             // The insertion restores exactly the wiring it recorded, so it may
             // only author its own node's inputs.
             "AddNode seeding a binding on someone else's port",
-            seeded(vec![(InputPort::new(live, 0), Binding::wire(fresh, 0))]),
+            seeded(vec![(
+                InputPort::new(live, numbered_port(1)),
+                Binding::wire(fresh, numbered_port(1)),
+            )]),
             MalformedIntent::ForeignSeedBinding {
-                port: InputPort::new(live, 0),
+                port: InputPort::new(live, numbered_port(1)),
             },
         ),
         (
@@ -1193,17 +1251,17 @@ fn malformed_payloads_are_refused_before_they_can_invalidate_the_document() {
             // is the only source that could close a cycle — and a compile
             // refuses a cyclic graph.
             "AddNode seeding an input from the new node's own output",
-            seeded(vec![(own(0), Binding::wire(fresh, 0))]),
-            MalformedIntent::CyclicSeedBinding { port: own(0) },
+            seeded(vec![(own(1), Binding::wire(fresh, numbered_port(1)))]),
+            MalformedIntent::CyclicSeedBinding { port: own(1) },
         ),
         (
             // Only one could survive, so `DetachedNode::new` refuses the record.
             "AddNode seeding one port twice",
             seeded(vec![
-                (own(0), Binding::Const(ConstValue::from(1i64))),
-                (own(0), Binding::Const(ConstValue::from(2i64))),
+                (own(1), Binding::Const(ConstValue::from(1i64))),
+                (own(1), Binding::Const(ConstValue::from(2i64))),
             ]),
-            MalformedIntent::InsertionRecord(DetachedNodeError::DuplicateBinding { port: own(0) }),
+            MalformedIntent::InsertionRecord(DetachedNodeError::DuplicateBinding { port: own(1) }),
         ),
         (
             "MoveSelection to a non-finite position",
@@ -1269,7 +1327,7 @@ fn stale_references_still_refuse_quietly() {
         (
             "SetInput onto a vanished node",
             GraphIntent::SetInput {
-                input: InputPort::new(gone, 0),
+                input: InputPort::new(gone, numbered_port(1)),
                 to: None,
             },
         ),
@@ -1278,8 +1336,8 @@ fn stale_references_still_refuse_quietly() {
             // began, so committing would leave a dangling edge.
             "SetInput from a vanished producer",
             GraphIntent::SetInput {
-                input: InputPort::new(live, 0),
-                to: Some(Binding::wire(gone, 0)),
+                input: InputPort::new(live, numbered_port(1)),
+                to: Some(Binding::wire(gone, numbered_port(1))),
             },
         ),
         (
@@ -1364,16 +1422,19 @@ fn selection_and_move_drop_members_whose_widget_is_gone() {
 #[test]
 fn a_wire_onto_a_const_only_input_is_refused() {
     let knob_func = internals::stub_func(FuncId::unique(), "knob")
-        .input(InputDecl::required("strength", DataType::Float).const_only())
+        .input(
+            1,
+            InputDecl::required("strength", DataType::Float).const_only(),
+        )
         .build();
     let feed_func = internals::stub_func(FuncId::unique(), "feed")
-        .output(OutputDecl::new("value", DataType::Float))
+        .output(1, OutputDecl::new("value", DataType::Float))
         .build();
     let mut fixture = DocumentFixture::default();
     let knob = fixture.add(&knob_func);
     let feed = fixture.add(&feed_func);
     let mut document = fixture.document;
-    let input = InputPort::new(knob, 0);
+    let input = InputPort::new(knob, numbered_port(1));
 
     let fresh = NodeId::unique();
     for (what, intent, port) in [
@@ -1381,7 +1442,7 @@ fn a_wire_onto_a_const_only_input_is_refused() {
             "a wire onto it",
             GraphIntent::SetInput {
                 input,
-                to: Some(Binding::wire(feed, 0)),
+                to: Some(Binding::wire(feed, numbered_port(1))),
             },
             input,
         ),
@@ -1392,11 +1453,11 @@ fn a_wire_onto_a_const_only_input_is_refused() {
                 node_id: fresh,
                 node: Node::from(&knob_func),
                 bindings: vec![BindingEntry {
-                    port: InputPort::new(fresh, 0),
-                    binding: Binding::wire(feed, 0),
+                    port: InputPort::new(fresh, numbered_port(1)),
+                    binding: Binding::wire(feed, numbered_port(1)),
                 }],
             },
-            InputPort::new(fresh, 0),
+            InputPort::new(fresh, numbered_port(1)),
         ),
     ] {
         let expected = MalformedIntent::Rejected {
@@ -1414,73 +1475,82 @@ fn a_wire_onto_a_const_only_input_is_refused() {
     assert!(matches!(constant, Ok(Some(_))), "{constant:?}");
 }
 
-/// Every index an intent writes is held to the node's declaration: the probe declares one input,
-/// one output and one event, so index 0 of each commits and index 1 is refused, on an existing
-/// node and on an insertion's seed alike. Clearing an undeclared input is not a write.
+/// Every port an intent writes is held to the node's declaration: the probe declares input,
+/// output and event 1, so port 1 of each commits and port 2 is refused, on an existing node and
+/// on an insertion's seed alike. Clearing an undeclared input is not a write.
 #[test]
-fn indices_past_the_declaration_are_refused() {
+fn ports_the_declaration_lacks_are_refused() {
     let probe = internals::stub_func(FuncId::unique(), "probe")
-        .input(InputDecl::optional("a", DataType::Int))
-        .output(OutputDecl::new("out", DataType::Int))
-        .event("tick", internals::stub_event())
+        .input(1, InputDecl::optional("a", DataType::Int))
+        .output(1, OutputDecl::new("out", DataType::Int))
+        .event(1, "tick", internals::stub_event())
         .build();
     let mut fixture = DocumentFixture::default();
     let (producer, consumer) = (fixture.add(&probe), fixture.add(&probe));
     let mut document = fixture.document;
     let library = &fixture.library;
     let constant = || Some(Binding::Const(ConstValue::from(1i64)));
-    let set = |port_idx: usize, to: Option<Binding>| GraphIntent::SetInput {
-        input: InputPort::new(consumer, port_idx),
+    let set = |number: u32, to: Option<Binding>| GraphIntent::SetInput {
+        input: InputPort::new(consumer, numbered_port(number)),
         to,
     };
     let fresh = NodeId::unique();
-    let seeded = |port_idx: usize, binding: Binding| GraphIntent::AddNode {
+    let seeded = |number: u32, binding: Binding| GraphIntent::AddNode {
         pos: Vec2::ZERO,
         node_id: fresh,
         node: Node::from(&probe),
         bindings: vec![BindingEntry {
-            port: InputPort::new(fresh, port_idx),
+            port: InputPort::new(fresh, numbered_port(number)),
             binding,
         }],
     };
-    let listen = |event_idx: usize| GraphIntent::SetSubscription {
-        subscription: Subscription::new(EventPort::new(producer, event_idx), consumer),
+    let listen = |number: u32| GraphIntent::SetSubscription {
+        subscription: Subscription::new(EventPort::new(producer, numbered_port(number)), consumer),
         to: true,
     };
 
     let rejected = |port, rejection| MalformedIntent::Rejected { port, rejection };
     let refusals = [
         (
-            "a constant on input 1",
-            set(1, constant()),
+            "a constant on input 2",
+            set(2, constant()),
             rejected(
-                InputPort::new(consumer, 1),
+                InputPort::new(consumer, numbered_port(2)),
                 BindingRejection::UndeclaredInput,
             ),
         ),
         (
-            "a wire from output 1",
-            set(0, Some(Binding::wire(producer, 1))),
+            "a wire from output 2",
+            set(1, Some(Binding::wire(producer, numbered_port(2)))),
             rejected(
-                InputPort::new(consumer, 0),
+                InputPort::new(consumer, numbered_port(1)),
                 BindingRejection::UndeclaredOutput,
             ),
         ),
         (
-            "a seed constant on input 1",
-            seeded(1, Binding::Const(ConstValue::from(1i64))),
-            rejected(InputPort::new(fresh, 1), BindingRejection::UndeclaredInput),
+            "a seed constant on input 2",
+            seeded(2, Binding::Const(ConstValue::from(1i64))),
+            rejected(
+                InputPort::new(fresh, numbered_port(2)),
+                BindingRejection::UndeclaredInput,
+            ),
         ),
         (
-            "a seed wire from output 1",
-            seeded(0, Binding::wire(producer, 1)),
-            rejected(InputPort::new(fresh, 0), BindingRejection::UndeclaredOutput),
+            "a seed wire from output 2",
+            seeded(1, Binding::wire(producer, numbered_port(2))),
+            rejected(
+                InputPort::new(fresh, numbered_port(1)),
+                BindingRejection::UndeclaredOutput,
+            ),
         ),
         (
-            "a subscription to event 1",
-            listen(1),
+            "a subscription to event 2",
+            listen(2),
             MalformedIntent::RejectedSubscription {
-                subscription: Subscription::new(EventPort::new(producer, 1), consumer),
+                subscription: Subscription::new(
+                    EventPort::new(producer, numbered_port(2)),
+                    consumer,
+                ),
                 rejection: SubscriptionRejection::UndeclaredEvent,
             },
         ),
@@ -1490,19 +1560,19 @@ fn indices_past_the_declaration_are_refused() {
     }
 
     assert!(
-        matches!(set(1, None).commit_one(&mut document, library), Ok(None)),
+        matches!(set(2, None).commit_one(&mut document, library), Ok(None)),
         "clearing an undeclared input writes nothing and refuses nothing"
     );
     for (what, intent) in [
-        ("a constant on input 0", set(0, constant())),
+        ("a constant on input 1", set(1, constant())),
         (
-            "a wire from output 0",
-            set(0, Some(Binding::wire(producer, 0))),
+            "a wire from output 1",
+            set(1, Some(Binding::wire(producer, numbered_port(1)))),
         ),
-        ("a subscription to event 0", listen(0)),
+        ("a subscription to event 1", listen(1)),
         (
-            "a seed wire from output 0",
-            seeded(0, Binding::wire(producer, 0)),
+            "a seed wire from output 1",
+            seeded(1, Binding::wire(producer, numbered_port(1))),
         ),
     ] {
         let committed = intent.commit_one(&mut document, library);
@@ -1533,10 +1603,19 @@ struct Tied {
 fn tied() -> Tied {
     let mut fixture = DocumentFixture::default();
     let nodes @ [a, b, c] = [0.0, 220.0, 440.0].map(|x| fixture.node_at(Vec2::new(x, 0.0)));
-    let ab = fixture.wire(OutputPort::new(a, 0), InputPort::new(b, 0));
-    let ac = fixture.wire(OutputPort::new(a, 0), InputPort::new(c, 0));
-    let bc = fixture.wire(OutputPort::new(b, 0), InputPort::new(c, 1));
-    let tick = fixture.subscribe(EventPort::new(a, 0), b);
+    let ab = fixture.wire(
+        OutputPort::new(a, numbered_port(1)),
+        InputPort::new(b, numbered_port(1)),
+    );
+    let ac = fixture.wire(
+        OutputPort::new(a, numbered_port(1)),
+        InputPort::new(c, numbered_port(1)),
+    );
+    let bc = fixture.wire(
+        OutputPort::new(b, numbered_port(1)),
+        InputPort::new(c, numbered_port(2)),
+    );
+    let tick = fixture.subscribe(EventPort::new(a, numbered_port(1)), b);
     let held = fixture.tie(Vec2::new(110.0, 20.0), [ab, tick]);
     let shared = fixture.tie(Vec2::new(330.0, 20.0), [ac, bc]);
     let DocumentFixture {
@@ -1751,10 +1830,10 @@ fn wiring_edits_take_the_routes_of_the_wires_they_end() {
         held,
         shared,
     } = tied();
-    let input = InputPort::new(b, 0);
+    let input = InputPort::new(b, numbered_port(1));
     let mut same = document.clone();
     assert!(
-        GraphIntent::set_input(input, Binding::wire(a, 0))
+        GraphIntent::set_input(input, Binding::wire(a, numbered_port(1)))
             .commit_one(&mut same, &library)
             .unwrap()
             .is_none(),
@@ -1765,7 +1844,10 @@ fn wiring_edits_take_the_routes_of_the_wires_they_end() {
     let cases: [Edit<'_>; 4] = [
         (
             "a rewire to another output",
-            GraphIntent::set_input(InputPort::new(c, 0), Binding::wire(b, 0)),
+            GraphIntent::set_input(
+                InputPort::new(c, numbered_port(1)),
+                Binding::wire(b, numbered_port(1)),
+            ),
             &|document| {
                 assert!(!document.main_view.routes.contains_key(&ac));
                 assert!(document.main_view.ties.contains_key(&shared));
@@ -1858,7 +1940,7 @@ fn tie_intents_refuse_malformed_payloads_and_drop_stale_ones() {
         held,
         ..
     } = tied();
-    let unheld = WireKey::Event(Subscription::new(EventPort::new(c, 0), a));
+    let unheld = WireKey::Event(Subscription::new(EventPort::new(c, numbered_port(1)), a));
     let fresh = TieId::unique();
     let tie_wires = |tie, wires| GraphIntent::TieWires {
         tie,
@@ -2050,8 +2132,14 @@ fn tie_intents_refuse_malformed_payloads_and_drop_stale_ones() {
 fn duplicate_takes_the_ties_inside_the_set() {
     let mut fixture = DocumentFixture::default();
     let [a, b, c] = [0.0, 220.0, 440.0].map(|x| fixture.node_at(Vec2::new(x, 0.0)));
-    let ab = fixture.wire(OutputPort::new(a, 0), InputPort::new(b, 0));
-    let cb = fixture.wire(OutputPort::new(c, 0), InputPort::new(b, 1));
+    let ab = fixture.wire(
+        OutputPort::new(a, numbered_port(1)),
+        InputPort::new(b, numbered_port(1)),
+    );
+    let cb = fixture.wire(
+        OutputPort::new(c, numbered_port(1)),
+        InputPort::new(b, numbered_port(2)),
+    );
     let first = fixture.tie(Vec2::new(150.0, 0.0), [ab]);
     let second = fixture.tie(Vec2::new(60.0, 0.0), [ab]);
     let mixed = fixture.tie(Vec2::new(300.0, 0.0), [cb]);
@@ -2060,7 +2148,7 @@ fn duplicate_takes_the_ties_inside_the_set() {
         library,
     } = fixture;
     // An event wire `a.tick → b` through `first` too, which clones as a data wire does.
-    let tick = Subscription::new(EventPort::new(a, 0), b);
+    let tick = Subscription::new(EventPort::new(a, numbered_port(1)), b);
     document.graph.subscribe(tick.event, b);
     let view = &mut document.main_view;
     view.routes.insert(ab, Route::new([second, first, mixed]));
@@ -2092,12 +2180,12 @@ fn duplicate_takes_the_ties_inside_the_set() {
     assert_eq!(view.ties[&first_clone].angle, TieAngle::Pinned(30.0));
     assert_eq!(view.ties[&second_clone].angle, TieAngle::Auto);
     let ab_clone = WireKey::Data(DataWire {
-        output: OutputPort::new(a_clone, 0),
-        input: InputPort::new(b_clone, 0),
+        output: OutputPort::new(a_clone, numbered_port(1)),
+        input: InputPort::new(b_clone, numbered_port(1)),
     });
     let cb_clone = WireKey::Data(DataWire {
-        output: OutputPort::new(c, 0),
-        input: InputPort::new(b_clone, 1),
+        output: OutputPort::new(c, numbered_port(1)),
+        input: InputPort::new(b_clone, numbered_port(2)),
     });
     assert!(
         cb_clone.is_held_by(&document.graph),
@@ -2108,7 +2196,10 @@ fn duplicate_takes_the_ties_inside_the_set() {
         Route::new([second_clone, first_clone])
     );
     assert!(!view.routes.contains_key(&cb_clone));
-    let tick_clone = WireKey::Event(Subscription::new(EventPort::new(a_clone, 0), b_clone));
+    let tick_clone = WireKey::Event(Subscription::new(
+        EventPort::new(a_clone, numbered_port(1)),
+        b_clone,
+    ));
     assert_eq!(view.routes[&tick_clone], Route::new([first_clone]));
     assert_eq!(
         view.selected,

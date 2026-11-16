@@ -1,7 +1,9 @@
 //! [`FuncBuilder`]: a func declaration in progress, checked and sealed into a
 //! [`Func`] by [`build`](FuncBuilder::build).
 
-use crate::data::data_type::{DataType, Strictness};
+use common::ErrorChain;
+
+use crate::data::data_type::DataType;
 use crate::graph::func::error::FuncValidationError;
 use crate::graph::func::event::EventLambda;
 use crate::graph::func::lambda::FuncLambda;
@@ -9,7 +11,7 @@ use crate::graph::func::signature::FuncSignature;
 use crate::graph::func::{Func, FuncBehavior, FuncEvent};
 use crate::graph::identity::{FuncId, FuncRef};
 use crate::graph::node::CacheMode;
-use crate::graph::ports::{InputDecl, OutputDecl, Ports};
+use crate::graph::ports::{InputDecl, OutputDecl, PortList, Ports, check_ids, numbered_port};
 
 /// A func declaration in progress, started by [`Func::builder`] or [`Func::into_builder`].
 #[derive(Clone, Debug)]
@@ -59,28 +61,37 @@ impl FuncBuilder {
         self
     }
 
+    /// Add an input port under the number `number`, which this func never gives another input
+    /// and never changes once shipped: a saved node's wiring names the port by it.
     #[must_use]
-    pub fn input(mut self, input: InputDecl) -> Self {
-        self.ports.inputs.push(input);
+    pub fn input(mut self, number: u32, input: InputDecl) -> Self {
+        self.ports.inputs.push(InputDecl {
+            id: numbered_port(number),
+            ..input
+        });
         self
     }
 
+    /// Add an output port under the number `number`, as [`Self::input`] numbers an input.
     #[must_use]
-    pub fn inputs(mut self, inputs: impl IntoIterator<Item = InputDecl>) -> Self {
-        self.ports.inputs.extend(inputs);
+    pub fn output(mut self, number: u32, output: OutputDecl) -> Self {
+        self.ports.outputs.push(OutputDecl {
+            id: numbered_port(number),
+            ..output
+        });
         self
     }
 
-    /// Add an output port, built with [`OutputDecl::new`].
+    /// Add an event under the number `number`, as [`Self::input`] numbers an input.
     #[must_use]
-    pub fn output(mut self, output: OutputDecl) -> Self {
-        self.ports.outputs.push(output);
-        self
-    }
-
-    #[must_use]
-    pub fn event(mut self, name: impl Into<String>, event_lambda: EventLambda) -> Self {
+    pub fn event(
+        mut self,
+        number: u32,
+        name: impl Into<String>,
+        event_lambda: EventLambda,
+    ) -> Self {
         self.events.push(FuncEvent {
+            id: numbered_port(number),
             name: name.into(),
             event_lambda,
         });
@@ -95,7 +106,11 @@ impl FuncBuilder {
     /// declared it.
     pub fn build(self) -> Func {
         if let Err(error) = self.validate() {
-            panic!("invalid function declaration {:?}: {error}", self.name);
+            panic!(
+                "invalid function declaration {:?}: {}",
+                self.name,
+                ErrorChain::new(&error)
+            );
         }
         let signature = FuncSignature::of(&self.ports, &self.events);
         Func {
@@ -113,46 +128,31 @@ impl FuncBuilder {
     }
 
     /// Check this declaration independently of a graph — what
-    /// [`build`](Self::build) asserts.
+    /// [`build`](Self::build) asserts: the rules every declaration's ports pass
+    /// ([`Ports::check`]), and a func's own, an id, an output for a pure func, no `Any` output
+    /// and each event's number.
     pub fn validate(&self) -> Result<(), FuncValidationError> {
         if self.id.is_nil() {
             return Err(FuncValidationError::NilId);
         }
+        let func_id = self.id;
         if self.ports.outputs.is_empty() && self.behavior != FuncBehavior::Impure {
-            return Err(FuncValidationError::PureWithoutOutputs { func_id: self.id });
+            return Err(FuncValidationError::PureWithoutOutputs { func_id });
         }
-        for (input_idx, input) in self.ports.inputs.iter().enumerate() {
-            if input.data_type.has_nil_id() {
-                return Err(FuncValidationError::NilInputType {
-                    func_id: self.id,
-                    input_idx,
-                });
-            }
-            // No `Library` exists yet, and one may register this func before the enum types it
-            // names, so an enum default need only be an enum literal here;
-            // `Library::check` checks the name against the variants once the library is whole.
-            if let Some(default) = &input.default_value
-                && !input.accepts_const(default, Strictness::Declared, |_, _| true)
-            {
-                return Err(FuncValidationError::InvalidDefault {
-                    func_id: self.id,
-                    input_idx,
-                });
-            }
-        }
-        for (output_idx, output) in self.ports.outputs.iter().enumerate() {
-            if output.data_type == DataType::Any {
-                return Err(FuncValidationError::AnyOutput {
-                    func_id: self.id,
-                    output_idx,
-                });
-            }
-            if output.data_type.has_nil_id() {
-                return Err(FuncValidationError::NilOutputType {
-                    func_id: self.id,
-                    output_idx,
-                });
-            }
+        self.ports
+            .check()
+            .and_then(|()| check_ids(self.events.iter().map(|event| event.id), PortList::Events))
+            .map_err(|error| FuncValidationError::Ports { func_id, error })?;
+        if let Some(output_idx) = self
+            .ports
+            .outputs
+            .iter()
+            .position(|output| output.data_type == DataType::Any)
+        {
+            return Err(FuncValidationError::AnyOutput {
+                func_id,
+                output_idx,
+            });
         }
         Ok(())
     }

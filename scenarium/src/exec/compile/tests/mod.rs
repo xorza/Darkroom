@@ -359,7 +359,7 @@ fn packs_one_port_run_per_node_from_its_declaration() {
 }
 
 /// A wire is interned to the producer's dense address as the walk resolves it —
-/// the right node index and the port index the authored wire named.
+/// the right node index, and the position of the output whose id the authored wire names.
 #[test]
 fn interns_a_wire_to_the_producers_dense_address() {
     let g = wired_pair(DataType::Int, DataType::Int);
@@ -388,6 +388,53 @@ fn interns_a_wire_to_the_producers_dense_address() {
         compiled.program.inputs[compiled.node("consumer").inputs.nth(0)].required,
         "the declaration's flag travels with the port"
     );
+}
+
+/// A port is found by its id wherever its func declares it: this func numbers each side against
+/// its order, so input 1, output 1 and event 1 are each the second of their side, and a binding,
+/// a wire and a subscription named by id land at position 1.
+#[test]
+fn a_port_lands_at_its_declared_position_whatever_its_number() {
+    use crate::graph::identity::EventPort;
+    use crate::graph::ports::{InputDecl, OutputDecl, numbered_port};
+
+    let swapped = internals::stub_func(FuncId::unique(), "swapped")
+        .input(2, InputDecl::optional("first", DataType::Int))
+        .input(1, InputDecl::optional("second", DataType::Int))
+        .output(2, OutputDecl::new("first", DataType::Int))
+        .output(1, OutputDecl::new("second", DataType::Int))
+        .event(2, "first", internals::stub_event())
+        .event(1, "second", internals::stub_event())
+        .build();
+    let mut library = Library::default();
+    library.add(swapped.clone());
+    let mut graph = Graph::default();
+    let (a, b) = (graph.add_func_node(&swapped), graph.add_func_node(&swapped));
+    graph.set_input_binding(
+        InputPort::new(b, numbered_port(1)),
+        Binding::wire(a, numbered_port(1)),
+    );
+    graph.set_input_binding(
+        InputPort::new(b, numbered_port(2)),
+        Binding::Const(ConstValue::Int(7)),
+    );
+    graph.subscribe(EventPort::new(a, numbered_port(1)), b);
+
+    let compiled = Compiler::default().compile(&graph, &library);
+    let a_idx = compiled.node(ProgramId::from(a)).unwrap();
+    let b_idx = compiled.node(ProgramId::from(b)).unwrap();
+    let inputs = &compiled.inputs[compiled[b_idx].inputs];
+    assert!(matches!(
+        inputs[0].binding,
+        ExecBinding::Const(ConstValue::Int(7))
+    ));
+    assert!(matches!(
+        inputs[1].binding,
+        ExecBinding::Wire(OutputAddr { node_idx, port_idx: 1 }) if node_idx == a_idx
+    ));
+    let events = &compiled.events[compiled[a_idx].events];
+    assert!(compiled.subscribers[events[0].subscribers].is_empty());
+    assert_eq!(compiled.subscribers[events[1].subscribers], [b_idx]);
 }
 
 /// A graph that breaks the load contract is the host's bug, so the compile
