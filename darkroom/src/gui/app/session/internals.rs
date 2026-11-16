@@ -20,6 +20,7 @@ use crate::core::document::internals::DocumentFixture;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::io::preferences::Preferences;
 use crate::core::open_document::OpenDocument;
+use crate::core::shared_library::SharedLibrary;
 use crate::core::status_log::StatusMessage;
 use crate::core::wake;
 use crate::gui::app::session::Session;
@@ -46,6 +47,7 @@ struct SessionFrame<'a> {
     theme: &'a Theme,
     library: &'a Library,
     run_state: &'a RunState,
+    shared: &'a SharedLibrary,
     preferences: &'a mut Preferences,
     process_memory: u64,
     status_message: Option<StatusMessage<'a>>,
@@ -55,7 +57,7 @@ struct SessionFrame<'a> {
 
 impl App for SessionFrame<'_> {
     fn record(&mut self, _: WindowToken, ui: &mut Ui) {
-        let ctx = AppCtx::new(self.theme, self.library, self.run_state);
+        let ctx = AppCtx::new(self.theme, self.library, self.run_state, self.shared);
         let mut stage = Stage {
             ctx,
             out: &mut *self.requests,
@@ -97,6 +99,8 @@ pub(crate) struct SessionHarness {
     /// The run projections the frame reads, `App`'s in production: a test writes one here to make
     /// a node look executed.
     pub(crate) run_state: RunState,
+    /// The library folder's subgraphs the palette lists, `App`'s scan in production.
+    pub(crate) shared: SharedLibrary,
     pub(crate) preferences: Preferences,
     /// Footprint handed to the status bar. `0`, the default, is the no-reading path, so a
     /// geometry assertion does not read a figure that moves between runs; set it to pin `MEM`.
@@ -132,6 +136,7 @@ impl SessionHarness {
             library: fixture.library,
             theme,
             run_state: RunState::new(wake::internals::noop()),
+            shared: SharedLibrary::default(),
             preferences: Preferences::default(),
             process_memory: 0,
             status_message: None,
@@ -166,6 +171,7 @@ impl SessionHarness {
             library,
             theme,
             run_state,
+            shared,
             preferences,
             process_memory,
             status_message,
@@ -183,6 +189,7 @@ impl SessionHarness {
             theme,
             library,
             run_state,
+            shared,
             preferences,
             process_memory: *process_memory,
             status_message: *status_message,

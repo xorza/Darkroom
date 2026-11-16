@@ -8,7 +8,7 @@
 //! - **A clip that does not fit the document pastes nothing**, and the status bar names why: one
 //!   naming a func this library lacks, or a port its declaration lacks, is text from outside, so
 //!   the paste lands on a copy of the document first, through the edit gate a widget's edit
-//!   takes. Refused: queueing it unchecked, which turns another build's clip into a crash;
+//!   takes; a subgraph it carries comes in reconciled, a node it cannot hold kept as a stub. Refused: queueing it unchecked, which turns another build's clip into a crash;
 //!   dropping the parts that do not fit, which pastes a graph its author never wired.
 //! - **A pasted subgraph comes in by [`bring_in`]'s rules**: one equal to the definition the
 //!   document holds under its id is that definition, and one that differs comes in under a fresh
@@ -147,6 +147,7 @@ impl Clip {
                 id: clip.id,
                 subgraph: clip.subgraph,
                 view: clip.view,
+                synced: None,
             })
             .collect();
         let brought = bring_in(document, library, carried);
@@ -163,9 +164,9 @@ impl Clip {
 
 impl Paste {
     /// Land this paste on a copy of `document`: a clip is text from outside, so an edit the gate
-    /// takes as malformed, or a subgraph that breaks the load contract, is the clip's fault,
-    /// which the paste refuses, not a widget's bug, which panics. A copy of the document per
-    /// paste, a click's cost.
+    /// takes as malformed is the clip's fault, which the paste refuses, not a widget's bug, which
+    /// panics. The subgraphs it brings come in reconciled ([`bring_in`]). A copy of the document
+    /// per paste, a click's cost.
     fn check(
         &self,
         document: &Document,
@@ -177,18 +178,20 @@ impl Paste {
         for subgraph in &self.subgraphs {
             SubgraphIntent::Add(Box::new(subgraph.clone()))
                 .commit(&mut trial, library, &mut steps)
-                .map_err(PasteError::Edit)?;
+                .map_err(PasteError)?;
         }
         for intent in &self.intents {
             intent
                 .clone()
                 .commit(&mut trial, graph, library, &mut steps)
-                .map_err(PasteError::Edit)?;
+                .map_err(PasteError)?;
         }
-        trial
-            .graphs
-            .validate_with(library)
-            .map_err(PasteError::Subgraph)
+        debug_assert!(
+            trial.graphs.validate_with(library).is_ok(),
+            "a paste of gate-checked edits and reconciled definitions holds the load contract: {:?}",
+            trial.graphs.validate_with(library)
+        );
+        Ok(())
     }
 
     /// Queue this paste into `graph`, in the order it lands: one batch, so one entry.

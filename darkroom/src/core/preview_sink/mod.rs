@@ -27,7 +27,8 @@ const PREVIEW_FUNC_ID: FuncId = FuncId::literal("7d08e8c7-fd22-46d4-bb86-c0bd3c9
 ///
 /// A map keyed by the program node that published, not a queue: a preview shows *the* current
 /// value, so latest-wins keeps the sink bounded at one value per preview program node however
-/// fast runs arrive, which matters for full-resolution images.
+/// fast runs arrive, which matters for full-resolution images. A preview inside a subgraph is a
+/// program node per instance, each with its own value.
 #[derive(Debug, Default)]
 pub(crate) struct PreviewSink {
     latest: Mutex<HashMap<ProgramId, DynamicValue>>,

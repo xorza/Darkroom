@@ -22,6 +22,8 @@ pub(crate) enum StatusFamily {
     Edit,
     /// Copying or saving an image of the window.
     View,
+    /// Reading the library folder, and publishing to it.
+    Library,
 }
 
 /// How the status bar paints a line.

@@ -7,11 +7,13 @@ use crate::core::document::Document;
 use crate::core::edit::edit_facts::{EditFacts, Touched};
 use crate::core::edit::step::change::Direction;
 use crate::core::edit::step::graph_step::GraphStep;
+use crate::core::edit::step::set_definition::SetDefinition;
 use crate::core::edit::step::set_interface::SetInterface;
+use crate::core::edit::step::set_side::SetSide;
 use crate::core::edit::step::set_subgraph::SetSubgraph;
 
 /// One self-contained entry of the undo history: an edit of one graph of the document and its
-/// view, or of the set of graphs or a subgraph's interface.
+/// view, or of the set of graphs, a subgraph's definition or its interface.
 ///
 /// Only edits of the document's graphs are undoable: pane arrangement records nothing, so Ctrl+Z
 /// walks past a tab switch to the last edit that changed a graph.
@@ -24,6 +26,9 @@ pub(crate) enum UndoStep {
     /// Boxed: a whole definition is several times the size of every other step.
     Subgraph(Box<SetSubgraph>),
     Interface(Box<SetInterface>),
+    Side(SetSide),
+    /// Boxed: two whole definitions.
+    Definition(Box<SetDefinition>),
 }
 
 impl UndoStep {
@@ -42,6 +47,8 @@ impl UndoStep {
             Self::Graph { graph, step } => step.kind().write(document, *graph, dir),
             Self::Subgraph(step) => step.write(document, dir),
             Self::Interface(step) => step.write(document, dir),
+            Self::Side(step) => step.write(document, dir),
+            Self::Definition(step) => step.write(document, dir),
         }
     }
 
@@ -51,13 +58,15 @@ impl UndoStep {
             // A definition always comes or goes.
             Self::Subgraph(_) => false,
             Self::Interface(step) => step.is_noop(),
+            Self::Side(step) => step.is_noop(),
+            Self::Definition(step) => step.is_noop(),
         }
     }
 
     pub(crate) fn dirties_document(&self) -> bool {
         match self {
             Self::Graph { step, .. } => step.kind().dirties_document(),
-            Self::Subgraph(_) | Self::Interface(_) => true,
+            Self::Subgraph(_) | Self::Interface(_) | Self::Side(_) | Self::Definition(_) => true,
         }
     }
 
@@ -70,6 +79,9 @@ impl UndoStep {
             },
             Self::Subgraph(step) => step.facts(),
             Self::Interface(step) => step.facts(),
+            // A side holds no node and no port.
+            Self::Side(_) => EditFacts::NONE,
+            Self::Definition(step) => step.facts(),
         }
     }
 

@@ -111,8 +111,43 @@ impl PreferencesForm<'_> {
                             },
                             &mut preferences.ml_models,
                         );
+
+                        self.caption(ui, "Library", LIBRARY_ROW);
+                        self.library_row(ui, &mut preferences.library_folder);
                     });
             });
+    }
+
+    /// The library folder: an editable path field, empty for none, and a "Browse…" button that
+    /// queues [`AppCommand::PickLibraryFolder`].
+    fn library_row(&mut self, ui: &mut Ui, folder: &mut Option<PathBuf>) {
+        let row = LIBRARY_ROW + 1;
+        self.label(ui, "Folder", row);
+        let shown = folder
+            .as_deref()
+            .map_or_else(Default::default, Path::to_string_lossy);
+        let response = TextEdit::buffered(shown)
+            .id(WidgetId::from_hash("darkroom.preferences.library_folder"))
+            .grid_cell((row, 1))
+            .align(VAlign::Center)
+            .size(SizeSpec::FILL_W)
+            .min_size((ML_PATH_FIELD_MIN, 0.0))
+            .placeholder("/path/to/library")
+            .show(ui);
+        if let Some(text) = response.committed_text {
+            *folder = (!text.is_empty()).then(|| PathBuf::from(text));
+        }
+        if Button::new()
+            .id_salt("browse_library")
+            .label("Browse…")
+            .grid_cell((row, 2))
+            .align(VAlign::Center)
+            .show(ui)
+            .left
+            .clicked()
+        {
+            self.out.push_app(AppCommand::PickLibraryFolder);
+        }
     }
 
     /// The interface size: a label in the form's label column and a dropdown of the offered
@@ -245,14 +280,16 @@ impl PreferencesForm<'_> {
 const APPEARANCE_ROW: u16 = 0;
 const BEHAVIOR_ROW: u16 = 2;
 const MODELS_ROW: u16 = 6;
-/// The models' caption, then each model's field row and notes row.
-const ROW_COUNT: usize = MODELS_ROW as usize + 1 + 2 * 2;
+/// Past the models' caption, then each model's field row and notes row.
+const LIBRARY_ROW: u16 = MODELS_ROW + 1 + 2 * 2;
+/// The library's caption and its folder row.
+const ROW_COUNT: usize = LIBRARY_ROW as usize + 2;
 
 /// Every row of the form: a caption and a note hug their text, and a row of controls is a
 /// row's height, so a checkbox row and a field row pitch alike.
 fn form_rows(theme: &Theme) -> [Track; ROW_COUNT] {
     let mut rows = [Track::fixed(theme.row_height()); ROW_COUNT];
-    for caption in [APPEARANCE_ROW, BEHAVIOR_ROW, MODELS_ROW] {
+    for caption in [APPEARANCE_ROW, BEHAVIOR_ROW, MODELS_ROW, LIBRARY_ROW] {
         rows[usize::from(caption)] = Track::HUG;
     }
     for notes in [MODELS_ROW + 2, MODELS_ROW + 4] {

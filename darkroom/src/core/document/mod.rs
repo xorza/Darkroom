@@ -229,6 +229,25 @@ impl Document {
         (subgraph, side)
     }
 
+    /// Put `subgraph` and its `view` in place of the definition held under `id`, its interface
+    /// the same, then close each tab and clear each `through` that stopped resolving; the
+    /// definition and view it replaces.
+    ///
+    /// # Panics
+    /// As [`GraphSet::replace_subgraph`].
+    pub(crate) fn replace_subgraph(
+        &mut self,
+        id: SubgraphId,
+        subgraph: Subgraph,
+        view: GraphView,
+    ) -> (Subgraph, GraphView) {
+        let replaced = self.graphs.replace_subgraph(id, subgraph);
+        let side = self.sides.get_mut(&id).expect("each subgraph has a side");
+        let view = mem::replace(&mut side.view, view);
+        self.prune_views(&mut |_| {});
+        (replaced, view)
+    }
+
     /// `base`, or `base N` with the least `N` from 2 that no subgraph of the document is named:
     /// the name a new definition takes.
     pub(crate) fn free_subgraph_name(&self, base: &str) -> String {

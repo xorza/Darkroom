@@ -15,6 +15,7 @@ pub(crate) mod open_document;
 pub(crate) mod preview_sink;
 pub(crate) mod runtime_host;
 pub(crate) mod runtime_library;
+pub(crate) mod shared_library;
 pub(crate) mod status_log;
 pub(crate) mod wake;
 pub(crate) mod worker_bridge;

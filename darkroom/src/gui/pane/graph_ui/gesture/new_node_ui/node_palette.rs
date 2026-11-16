@@ -10,9 +10,15 @@ use palantir::{
 };
 
 use glam::Vec2;
-use scenarium::{Func, Node, NodeId, Ports, SPECIAL_NODES, SpecialNode, Subgraph, SubgraphId};
+use scenarium::{
+    Func, Library, Node, NodeId, Ports, SPECIAL_NODES, SpecialNode, Subgraph, SubgraphId,
+};
 
+use crate::core::document::Document;
+use crate::core::edit::bring_in::bring_in;
 use crate::core::edit::graph_intent::GraphIntent;
+use crate::core::edit::subgraph_intent::NewSubgraph;
+use crate::core::shared_library::{LibraryEntry, SharedLibrary};
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::gesture::new_node_ui;
 use crate::gui::pane::graph_ui::gesture::new_node_ui::Search;
@@ -34,10 +40,17 @@ pub(super) enum PaletteEntry<'a> {
         subgraph: &'a Subgraph,
         used: bool,
     },
+    /// A subgraph the library folder shares, which a pick copies in with those it places.
+    Library {
+        entry: &'a LibraryEntry,
+        shared: &'a SharedLibrary,
+    },
 }
 
 /// The category the document's subgraphs list under.
 const SUBGRAPHS: &str = "Subgraphs";
+/// The category the library folder's subgraphs list under.
+const LIBRARY: &str = "Library";
 
 impl<'a> PaletteEntry<'a> {
     /// Borrowed from the palette's sources rather than from `self`, so a
@@ -47,6 +60,7 @@ impl<'a> PaletteEntry<'a> {
             PaletteEntry::Func(f) => f.name(),
             PaletteEntry::Special(s) => s.func().name(),
             PaletteEntry::Subgraph { subgraph, .. } => &subgraph.name,
+            PaletteEntry::Library { entry, .. } => &entry.name,
         }
     }
 
@@ -55,6 +69,7 @@ impl<'a> PaletteEntry<'a> {
             PaletteEntry::Func(f) => f.category(),
             PaletteEntry::Special(s) => s.func().category(),
             PaletteEntry::Subgraph { .. } => SUBGRAPHS,
+            PaletteEntry::Library { .. } => LIBRARY,
         }
     }
 
@@ -65,6 +80,11 @@ impl<'a> PaletteEntry<'a> {
             PaletteEntry::Special(s) => s.func().description(),
             PaletteEntry::Subgraph { used: false, .. } => Some("Unused: no node places it"),
             PaletteEntry::Subgraph { subgraph, .. } => subgraph.description.as_deref(),
+            // Its file names it apart from an entry of another file under the same id.
+            PaletteEntry::Library { entry, shared } => shared
+                .path(entry)
+                .file_name()
+                .and_then(|name| name.to_str()),
         }?;
         Some(text.lines().next().unwrap_or(text))
     }
@@ -75,16 +95,44 @@ impl<'a> PaletteEntry<'a> {
             PaletteEntry::Func(f) => f.ports(),
             PaletteEntry::Special(s) => s.func().ports(),
             PaletteEntry::Subgraph { subgraph, .. } => subgraph.interface.ports(),
+            PaletteEntry::Library { entry, shared } => shared
+                .document(entry)
+                .graphs
+                .subgraph(entry.id)
+                .expect("an entry names a subgraph of its file")
+                .interface
+                .ports(),
         }
     }
 
-    /// The node a pick of this row adds. A special node's `Func` is hardcoded rather than
+    /// What a pick of this row adds to `document`: the node, and for a library entry the
+    /// definitions it copies in first. A special node's `Func` is hardcoded rather than
     /// library-registered, so the node it spawns comes from the [`SpecialNode`] itself.
-    fn node(self) -> Node {
+    fn placed(self, document: &Document, library: &Library) -> Placed {
+        let alone = |node| Placed {
+            subgraphs: Vec::new(),
+            node,
+        };
         match self {
-            PaletteEntry::Func(f) => f.into(),
-            PaletteEntry::Special(s) => s.into(),
-            PaletteEntry::Subgraph { id, subgraph, .. } => Node::instance(id, subgraph),
+            PaletteEntry::Func(f) => alone(f.into()),
+            PaletteEntry::Special(s) => alone(s.into()),
+            PaletteEntry::Subgraph { id, subgraph, .. } => alone(Node::instance(id, subgraph)),
+            PaletteEntry::Library { entry, shared } => {
+                let brought = bring_in(document, library, shared.carried(entry));
+                let id = brought.id(entry.id);
+                let subgraph = brought
+                    .subgraphs
+                    .iter()
+                    .find(|new| new.id == id)
+                    .map(|new| &new.subgraph)
+                    .or_else(|| document.graphs.subgraph(id))
+                    .expect("a placed entry is brought in or held");
+                let node = Node::instance(id, subgraph);
+                Placed {
+                    subgraphs: brought.subgraphs,
+                    node,
+                }
+            }
         }
     }
 
@@ -96,8 +144,26 @@ impl<'a> PaletteEntry<'a> {
             PaletteEntry::Func(f) => PaletteRow::Func(f.id()),
             PaletteEntry::Special(s) => PaletteRow::Special(s),
             PaletteEntry::Subgraph { id, .. } => PaletteRow::Subgraph(id),
+            PaletteEntry::Library { entry, .. } => PaletteRow::Library {
+                id: entry.id,
+                digest: entry.digest,
+            },
         }
     }
+}
+
+/// The node a pick adds, and the definitions it copies in first.
+#[derive(Debug)]
+struct Placed {
+    subgraphs: Vec<NewSubgraph>,
+    node: Node,
+}
+
+/// What a palette pick raises, in order: the definitions it copies in, then the node it adds.
+#[derive(Debug)]
+pub(super) struct PalettePick {
+    pub(super) subgraphs: Vec<NewSubgraph>,
+    pub(super) add: GraphIntent,
 }
 
 /// Everything one palette open lists, plus where a pick lands and how the frame lays it out,
@@ -129,6 +195,7 @@ impl<'a> NodePalette<'a> {
         PaletteSources {
             library: self.graph_ctx.library(),
             graphs: &self.graph_ctx.document().graphs,
+            shared: self.graph_ctx.shared(),
         }
     }
 
@@ -147,13 +214,23 @@ impl<'a> NodePalette<'a> {
                     .subgraphs()
                     .filter_map(move |(id, _)| PaletteRow::Subgraph(id).entry(sources)),
             )
+            .chain(
+                sources
+                    .shared
+                    .entries()
+                    .iter()
+                    .map(move |entry| PaletteEntry::Library {
+                        entry,
+                        shared: sources.shared,
+                    }),
+            )
     }
 }
 
 impl NodePalette<'_> {
     /// Record the search field and the rows `search` matches, and move or pick the focused row
     /// on Up, Down and Enter.
-    pub(super) fn body(&self, ui: &mut Ui, search: &mut Search) -> Option<GraphIntent> {
+    pub(super) fn body(&self, ui: &mut Ui, search: &mut Search) -> Option<PalettePick> {
         let opened = self.opening == Opening::Fresh;
         let theme = self.graph_ctx.theme();
         let search_id = new_node_ui::search_field_wid();
@@ -265,15 +342,20 @@ impl NodePalette<'_> {
         Some(self.add(chosen))
     }
 
-    /// The `AddNode` a pick of `entry` raises, seeded with the entry's port defaults. Built only
-    /// on a pick.
-    fn add(&self, entry: PaletteEntry<'_>) -> GraphIntent {
+    /// What a pick of `entry` raises: the definitions a library entry copies in, then the
+    /// `AddNode`, seeded with the entry's port defaults. Built only on a pick.
+    fn add(&self, entry: PaletteEntry<'_>) -> PalettePick {
         let node_id = NodeId::unique();
-        GraphIntent::AddNode {
-            pos: self.pos,
-            node_id,
-            node: entry.node(),
-            bindings: entry.ports().default_bindings(node_id).collect(),
+        let Placed { subgraphs, node } =
+            entry.placed(self.graph_ctx.document(), self.graph_ctx.library());
+        PalettePick {
+            subgraphs,
+            add: GraphIntent::AddNode {
+                pos: self.pos,
+                node_id,
+                node,
+                bindings: entry.ports().default_bindings(node_id).collect(),
+            },
         }
     }
 }

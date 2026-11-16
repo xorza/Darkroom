@@ -1,5 +1,6 @@
 use scenarium::{FuncId, GraphSet, Library, internals};
 
+use crate::core::shared_library::SharedLibrary;
 use crate::gui::pane::graph_ui::gesture::new_node_ui::node_palette::PaletteEntry;
 use crate::gui::pane::graph_ui::gesture::new_node_ui::palette_rows::{
     PaletteRows, PaletteSources, Rank, name_matches,
@@ -24,9 +25,11 @@ fn library() -> Library {
 /// `PaletteRows` the whole test reuses.
 fn shape(rows: &mut PaletteRows, library: &Library, query_lc: &str) -> Vec<(String, Vec<String>)> {
     let graphs = GraphSet::default();
+    let shared = SharedLibrary::default();
     let sources = PaletteSources {
         library,
         graphs: &graphs,
+        shared: &shared,
     };
     rows.refilter(sources, library.iter().map(PaletteEntry::Func), query_lc);
     rows.runs()
@@ -194,9 +197,11 @@ fn the_documents_subgraphs_list_and_an_unused_one_is_marked() {
     graphs.insert_subgraph(unused, Subgraph::new("Calibrate", Interface::default()));
     let instance = Node::instance(used, graphs.subgraph(used).unwrap());
     graphs.graph_mut(GraphId::Main).add(instance);
+    let shared = SharedLibrary::default();
     let sources = PaletteSources {
         library: &library,
         graphs: &graphs,
+        shared: &shared,
     };
     let entries = [used, unused]
         .into_iter()

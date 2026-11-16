@@ -57,6 +57,7 @@ fn preferences_roundtrip() {
             denoise: PathBuf::from("/models/d.onnx"),
             star_removal: PathBuf::from("/models/s.onnx"),
         },
+        library_folder: Some(PathBuf::from("/library")),
     };
     let bytes = SerdeFormat::Ron
         .serialize(&populated)

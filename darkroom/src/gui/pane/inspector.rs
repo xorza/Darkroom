@@ -202,11 +202,13 @@ fn body(ui: &mut Ui, stage: &mut Stage<'_, NodeCtx<'_>>, target: InspectTarget) 
             .subgraph(subgraph)
             .expect("a node shows the interface of a subgraph the set holds")
             .interface;
+        let shared = document.sides[&subgraph].shared;
         let card = InterfaceCard {
             theme,
             library,
             subgraph,
             interface,
+            shared,
         };
         interface_card::show(ui, card, stage.out);
     }

@@ -10,13 +10,19 @@ use scenarium::ConstValue;
 use scenarium::FileMode;
 use scenarium::GraphId;
 use scenarium::Library;
+use scenarium::SubgraphId;
 
 use crate::core::edit::graph_intent::GraphIntent;
+use crate::core::edit::subgraph_intent::SubgraphIntent;
+use crate::core::io::document;
 use crate::core::io::document::document_format::DocumentFormat;
+use crate::core::io::document::saved_paths::SavedPaths;
 use crate::core::io::preferences::preferences_store::{OpenedPreferences, PreferencesStore, Saved};
 use crate::core::io::preferences::{Preferences, WindowState};
 use crate::core::open_document::{Launched, Loaded, OpenDocument};
 use crate::core::runtime_host::RuntimeHost;
+use crate::core::shared_library;
+use crate::core::shared_library::scanner::LibraryScanner;
 use crate::core::status_log::{StatusFamily, StatusLog};
 use crate::core::wake::Wake;
 use crate::gui::MAIN_WINDOW;
@@ -64,6 +70,9 @@ pub(crate) struct App {
     /// is its only writer, as the worker is drained; lent to the frame through [`AppCtx`]. Off the
     /// serialized state.
     run_state: RunState,
+    /// The library folder's shared subgraphs, scanned off the frame; lent to the frame through
+    /// [`AppCtx`].
+    library_scan: LibraryScanner,
     /// The user-facing outcome log behind the status bar's sticky slot.
     ///
     /// On `App` rather than inside the runtime because most of what reports here is not the
@@ -156,6 +165,7 @@ impl App {
             );
         }
         let run_state = RunState::new(Arc::clone(&wake));
+        let library_scan = LibraryScanner::new(Arc::clone(&wake));
         let mut runtime = RuntimeHost::new(wake, &preferences.ml_models);
         let remembered = preferences
             .document_path
@@ -170,6 +180,7 @@ impl App {
             session: Session::new(open),
             runtime,
             run_state,
+            library_scan,
             status,
             theme: Theme::default(),
             quitting: QuitFlag::default(),
@@ -218,6 +229,12 @@ impl App {
             AppCommand::File(FileCommand::SaveAs) => self.save_document_as(),
             AppCommand::Run(run) => self.run(run),
             AppCommand::PickMlModel(kind) => self.pick_ml_model(kind),
+            AppCommand::Publish { subgraph } => self.publish(subgraph),
+            AppCommand::PickLibraryFolder => {
+                if let Some(folder) = self.dialogs.dir() {
+                    self.preferences.library_folder = Some(folder);
+                }
+            }
             AppCommand::Edit(EditCommand::PickInputPath(pick)) => {
                 self.pick_input_path(pick);
             }
@@ -251,24 +268,6 @@ impl App {
             AppCommand::Quit => self.guard_discard(PendingTransition::Quit),
             AppCommand::Warn(line) => self.status.warn(StatusFamily::Edit, line),
         }
-    }
-
-    /// Name on the status bar the graph an undo or a redo changed while no tab shows it, so no
-    /// undo changes only what is off screen.
-    fn name_hidden_edit(&mut self, verb: &str, hidden: Option<GraphId>) {
-        let Some(GraphId::Subgraph(id)) = hidden else {
-            return;
-        };
-        let document = self.session.open.document();
-        let name = &document
-            .graphs
-            .subgraph(id)
-            .expect("an undo writes a graph the document holds")
-            .name;
-        self.status.warn(
-            StatusFamily::Edit,
-            format!("{verb} an edit in subgraph {name:?}, which no tab shows"),
-        );
     }
 
     /// Mirror the window's live geometry into the preferences, in memory only, so a save on quit
@@ -562,6 +561,59 @@ impl App {
         }
     }
 
+    /// Write `subgraph`'s definition and those it places into the library file that holds it,
+    /// marked shared, the file reconciled and written whole; then record the digest as the one
+    /// the copy last shared. A failure names itself on the status bar and writes nothing.
+    fn publish(&mut self, subgraph: SubgraphId) {
+        let library = self.library_scan.library();
+        let Some(entry) = library.entry(subgraph) else {
+            self.status.warn(
+                StatusFamily::Library,
+                "the library lists no one definition under this subgraph".to_string(),
+            );
+            return;
+        };
+        let path = library.path(entry).to_path_buf();
+        let document = self.session.open.document();
+        let digest = document.graphs.digest(subgraph);
+        let file = shared_library::published(
+            library.document(entry),
+            document,
+            subgraph,
+            self.runtime.library.cur(),
+        );
+        match document::save(&file, &path, SavedPaths::Relative) {
+            Ok(()) => {
+                self.status.succeeded(StatusFamily::Library);
+                self.requests.push_subgraph(SubgraphIntent::Synced {
+                    id: subgraph,
+                    digest,
+                });
+            }
+            Err(error) => self
+                .status
+                .error(StatusFamily::Library, ErrorChain::new(&error).to_string()),
+        }
+    }
+
+    /// Name on the status bar the graph an undo or a redo changed while no tab shows it, so no
+    /// undo changes only what is off screen.
+    fn name_hidden_edit(&mut self, verb: &str, hidden: Option<GraphId>) {
+        let Some(GraphId::Subgraph(id)) = hidden else {
+            return;
+        };
+        let document = self.session.open.document();
+        let name = &document
+            .graphs
+            .subgraph(id)
+            .expect("an undo writes a graph the document holds")
+            .name;
+        self.status.warn(
+            StatusFamily::Edit,
+            format!("{verb} an edit in subgraph {name:?}, which no tab shows"),
+        );
+    }
+
     /// Hand `command` to the runtime and report its outcome. A command that
     /// compiles supersedes the last run's failure; the ids were read frames
     /// ago, so a node may be gone by now, which the runtime answers as nothing
@@ -625,6 +677,36 @@ impl App {
             self.session.open.document(),
         );
         self.session.reconcile_caches();
+        self.library_scan
+            .follow(self.preferences.library_folder.as_deref());
+        if self.library_scan.poll() {
+            self.report_library_scan();
+        }
+    }
+
+    /// Name each library file the last scan could not load: logged, and counted on the status
+    /// bar, which a scan that loads them all clears.
+    fn report_library_scan(&mut self) {
+        let failures = self.library_scan.library().failures();
+        for failure in failures {
+            tracing::warn!(
+                target: "darkroom::library",
+                path = %failure.path.display(),
+                error = %ErrorChain::new(&failure.error),
+                "a library file did not load"
+            );
+        }
+        match failures {
+            [] => self.status.succeeded(StatusFamily::Library),
+            [only] => self.status.warn(
+                StatusFamily::Library,
+                format!("the library file {} did not load", only.path.display()),
+            ),
+            many => self.status.warn(
+                StatusFamily::Library,
+                format!("{} library files did not load", many.len()),
+            ),
+        }
     }
 
     /// What this frame's input means, and what the host handed over with it.
@@ -632,7 +714,12 @@ impl App {
         self.deliver_capture(ui);
         self.handle_close_request(ui);
 
-        let ctx = AppCtx::new(&self.theme, self.runtime.library.cur(), &self.run_state);
+        let ctx = AppCtx::new(
+            &self.theme,
+            self.runtime.library.cur(),
+            &self.run_state,
+            self.library_scan.library(),
+        );
         self.session.input(
             ui,
             &mut Stage {
@@ -695,7 +782,12 @@ impl palantir::App for App {
         if pass == RecordPass::First {
             self.read_input(ui);
         } else {
-            let ctx = AppCtx::new(&self.theme, self.runtime.library.cur(), &self.run_state);
+            let ctx = AppCtx::new(
+                &self.theme,
+                self.runtime.library.cur(),
+                &self.run_state,
+                self.library_scan.library(),
+            );
             self.session.settle(
                 ui,
                 &mut Stage {
@@ -720,7 +812,12 @@ impl palantir::App for App {
         }
 
         // The frame's read-only world, composed once; everything below derives its context from it.
-        let ctx = AppCtx::new(&self.theme, self.runtime.library.cur(), &self.run_state);
+        let ctx = AppCtx::new(
+            &self.theme,
+            self.runtime.library.cur(),
+            &self.run_state,
+            self.library_scan.library(),
+        );
         self.session.record(
             ui,
             &mut Stage {

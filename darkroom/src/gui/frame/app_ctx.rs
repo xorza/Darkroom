@@ -2,6 +2,7 @@
 
 use scenarium::Library;
 
+use crate::core::shared_library::SharedLibrary;
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
 
@@ -28,6 +29,8 @@ pub(crate) struct AppCtx<'a> {
     /// Last run's centralized runtime state: per-node status/logs and the
     /// latest published values read by preview cards and viewers.
     run_state: &'a RunState,
+    /// The library folder's shared subgraphs, as the last scan read them.
+    shared: &'a SharedLibrary,
 }
 
 impl<'a> AppCtx<'a> {
@@ -35,11 +38,13 @@ impl<'a> AppCtx<'a> {
         theme: &'a Theme,
         library: &'a Library,
         run_state: &'a RunState,
+        shared: &'a SharedLibrary,
     ) -> Self {
         Self {
             theme,
             library,
             run_state,
+            shared,
         }
     }
 
@@ -55,5 +60,10 @@ impl<'a> AppCtx<'a> {
     /// The last completed run's per-node verdicts and published values.
     pub(crate) const fn run_state(self) -> &'a RunState {
         self.run_state
+    }
+
+    /// The library folder's shared subgraphs, as the last scan read them.
+    pub(crate) const fn shared(self) -> &'a SharedLibrary {
+        self.shared
     }
 }

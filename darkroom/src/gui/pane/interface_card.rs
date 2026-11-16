@@ -8,7 +8,9 @@
 //!   enter and leave.
 
 use palantir::WidgetId;
-use palantir::{ComboBox, Configure, Panel, SizeSpec, Sizing, Spacing, Text, TextEdit, Ui, VAlign};
+use palantir::{
+    Checkbox, ComboBox, Configure, Panel, SizeSpec, Sizing, Spacing, Text, TextEdit, Ui, VAlign,
+};
 use scenarium::{ConstValue, DataType, Interface, Library, PortId, SubgraphId};
 
 use crate::core::edit::port_edit::{InterfaceSide, PortEdit, Shift};
@@ -36,6 +38,7 @@ pub(crate) struct InterfaceCard<'a> {
     pub(crate) library: &'a Library,
     pub(crate) subgraph: SubgraphId,
     pub(crate) interface: &'a Interface,
+    pub(crate) shared: bool,
 }
 
 /// Record the interface card, raising the edits a frame's input makes of its subgraph.
@@ -45,6 +48,7 @@ pub(crate) fn show(ui: &mut Ui, card: InterfaceCard<'_>, out: &mut Requests) {
         library,
         subgraph,
         interface,
+        shared,
     } = card;
     let mut edit = None;
     // The choices a port's type picks among: the scalars, then the library's types by name.
@@ -63,6 +67,18 @@ pub(crate) fn show(ui: &mut Ui, card: InterfaceCard<'_>, out: &mut Requests) {
             Text::new("Interface")
                 .style(&support::caption_text(ui, theme))
                 .show(ui);
+            let mut marked = shared;
+            if Checkbox::new(&mut marked)
+                .id(shared_wid())
+                .label("Shared in the library")
+                .show(ui)
+                .changed
+            {
+                out.push_subgraph(SubgraphIntent::SetShared {
+                    id: subgraph,
+                    shared: marked,
+                });
+            }
             for (side, caption, ports) in [
                 (
                     InterfaceSide::Inputs,
@@ -256,6 +272,10 @@ impl PortRow<'_> {
         }
         edit
     }
+}
+
+fn shared_wid() -> WidgetId {
+    WidgetId::from_hash("darkroom.inspector.interface.shared")
 }
 
 fn card_wid() -> WidgetId {

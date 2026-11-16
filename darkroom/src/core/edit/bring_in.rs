@@ -1,10 +1,15 @@
-//! [`bring_in`]: definitions from another file entering a document, as a paste takes them in.
+//! [`bring_in`]: definitions from another file entering a document, as a paste and a place from
+//! the library take them in.
 //!
-//! - **Nothing brought in changes a definition the document holds.** One equal to the
+//! - **Nothing but an explicit Update changes a definition the document holds.** One equal to the
 //!   definition held under its id, by digest, is that definition; a different one comes in beside
 //!   it under a fresh id, and what came with it names that one. As Cargo builds two copies of a
 //!   dependency two packages need at incompatible versions. Refused: one version per document,
 //!   which changes a subgraph nobody touched.
+//! - **A definition that enters from another file is parsed against this library**, as a load
+//!   parses a document ([`GraphSet::reconcile`]): a node its graph cannot hold here stays a stub,
+//!   so the definition travels whole. Refused: taking it in as the other file held it, which
+//!   leaves the document a graph the compile refuses.
 //! - **A definition that enters from another file loses its output paths**, as a write inside a
 //!   subgraph is one the receiver did not pick and cannot see; the input takes the receiver's
 //!   library default, as a new node's input does. A node pasted onto the canvas keeps its own,
@@ -13,7 +18,8 @@
 use std::collections::HashMap;
 
 use scenarium::{
-    Binding, DataType, FileMode, GraphSet, InputPort, Library, NodeId, Subgraph, SubgraphId,
+    Binding, DataType, FileMode, GraphSet, InputPort, Library, NodeId, Subgraph, SubgraphDigest,
+    SubgraphId,
 };
 
 use crate::core::document::Document;
@@ -21,12 +27,14 @@ use crate::core::document::graph_view::GraphView;
 use crate::core::document::subgraph_side::SubgraphSide;
 use crate::core::edit::subgraph_intent::NewSubgraph;
 
-/// A definition from another file, under the id that file held it under, with its view.
+/// A definition from another file, under the id that file held it under, with its view and the
+/// digest it last shared with the library there.
 #[derive(Debug)]
 pub(crate) struct Carried {
     pub(crate) id: SubgraphId,
     pub(crate) subgraph: Subgraph,
     pub(crate) view: GraphView,
+    pub(crate) synced: Option<SubgraphDigest>,
 }
 
 /// What a [`bring_in`] adds, in an order whose insertions each hold, and the id each carried
@@ -46,11 +54,26 @@ impl BroughtIn {
 }
 
 /// Take `carried`, each definition after those it places, into `document` by the rules in the
-/// module doc, its output paths stripped against `library`.
-pub(crate) fn bring_in(document: &Document, library: &Library, carried: Vec<Carried>) -> BroughtIn {
+/// module doc, reconciled and its output paths stripped against `library`.
+pub(crate) fn bring_in(
+    document: &Document,
+    library: &Library,
+    mut carried: Vec<Carried>,
+) -> BroughtIn {
     let mut set = GraphSet::default();
     for definition in &carried {
         set.insert_subgraph(definition.id, definition.subgraph.clone());
+    }
+    for (id, reconciled) in set.reconcile(library).subgraphs {
+        for repair in reconciled.repairs {
+            tracing::info!(target: "darkroom::edit", "bringing in subgraph {id:?}: {repair}");
+        }
+    }
+    for definition in &mut carried {
+        definition.subgraph.clone_from(
+            set.subgraph(definition.id)
+                .expect("each carried definition is in the set"),
+        );
     }
     let mut ids: HashMap<SubgraphId, SubgraphId> = HashMap::new();
     let mut incoming = Vec::new();
@@ -73,6 +96,7 @@ pub(crate) fn bring_in(document: &Document, library: &Library, carried: Vec<Carr
             enter(&mut subgraph, &ids, library);
             let side = SubgraphSide {
                 view: definition.view,
+                synced: definition.synced,
                 ..SubgraphSide::new(&subgraph.graph)
             };
             NewSubgraph { id, subgraph, side }
@@ -119,6 +143,14 @@ fn take_path_defaults(subgraph: &mut Subgraph, library: &Library) {
     }
     for (port, default) in defaults {
         graph.bindings.insert(port, Binding::Const(default));
+    }
+}
+
+impl BroughtIn {
+    /// Ready `subgraph`, carried in beside what this brought in, for the document, as each
+    /// definition it brought in was: what an update does with the definition it puts in place.
+    pub(crate) fn enter(&self, subgraph: &mut Subgraph, library: &Library) {
+        enter(subgraph, &self.ids, library);
     }
 }
 
@@ -196,7 +228,12 @@ mod tests {
         let brought = bring_in(
             &Document::default(),
             &library,
-            vec![Carried { id, subgraph, view }],
+            vec![Carried {
+                id,
+                subgraph,
+                view,
+                synced: None,
+            }],
         );
         let [entered] = brought.subgraphs.as_slice() else {
             panic!("one definition comes in");

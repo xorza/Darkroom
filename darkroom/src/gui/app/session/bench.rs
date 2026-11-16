@@ -57,6 +57,7 @@ use crate::core::edit::graph_intent::drag_start::DragStart;
 use crate::core::io::preferences::Preferences;
 use crate::core::open_document::{Loaded, OpenDocument};
 use crate::core::runtime_library::RuntimeLibrary;
+use crate::core::shared_library::SharedLibrary;
 use crate::core::wake;
 use crate::gui::app::session::Session;
 use crate::gui::frame::app_command::{AppCommand, ViewCommand};
@@ -137,6 +138,7 @@ struct Editor {
     library: RuntimeLibrary,
     theme: Theme,
     run_state: RunState,
+    shared: SharedLibrary,
     preferences: Preferences,
     requests: Requests,
     /// The document's preview nodes.
@@ -173,6 +175,7 @@ impl Editor {
             library: runtime,
             theme: Theme::default(),
             run_state: RunState::new(wake::internals::noop()),
+            shared: SharedLibrary::default(),
             preferences: Preferences::default(),
             requests: Requests::default(),
             previews,
@@ -265,7 +268,12 @@ impl App for Editor {
                 .reconcile(self.session.open.document());
             self.session.reconcile_caches();
         }
-        let ctx = AppCtx::new(&self.theme, self.library.cur(), &self.run_state);
+        let ctx = AppCtx::new(
+            &self.theme,
+            self.library.cur(),
+            &self.run_state,
+            &self.shared,
+        );
         let mut stage = Stage {
             ctx,
             out: &mut self.requests,
@@ -276,7 +284,12 @@ impl App for Editor {
         } else {
             self.session.settle(ui, &mut stage);
         }
-        let ctx = AppCtx::new(&self.theme, self.library.cur(), &self.run_state);
+        let ctx = AppCtx::new(
+            &self.theme,
+            self.library.cur(),
+            &self.run_state,
+            &self.shared,
+        );
         self.session.record(
             ui,
             &mut Stage {

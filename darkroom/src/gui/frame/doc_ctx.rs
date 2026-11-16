@@ -7,6 +7,7 @@ use scenarium::{GraphId, Library};
 use crate::core::document::Document;
 use crate::core::document::item_id::ItemId;
 use crate::core::open_document::OpenDocument;
+use crate::core::shared_library::SharedLibrary;
 use crate::gui::frame::app_ctx::AppCtx;
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
@@ -65,5 +66,10 @@ impl<'a> DocCtx<'a> {
 
     pub(crate) const fn run_state(self) -> &'a RunState {
         self.app.run_state()
+    }
+
+    /// The library folder's shared subgraphs, as the last scan read them.
+    pub(crate) const fn shared(self) -> &'a SharedLibrary {
+        self.app.shared()
     }
 }

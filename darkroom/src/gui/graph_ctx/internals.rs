@@ -11,6 +11,7 @@ use scenarium::{GraphId, Library, NodeId};
 use crate::core::document::internals::{self, DocumentFixture};
 use crate::core::document::item_id::ItemId;
 use crate::core::open_document::OpenDocument;
+use crate::core::shared_library::SharedLibrary;
 use crate::core::wake;
 use crate::gui::frame::app_ctx::AppCtx;
 use crate::gui::frame::doc_ctx::DocCtx;
@@ -31,6 +32,7 @@ pub(crate) struct GraphCtxFixture {
     pub(crate) open: OpenDocument,
     pub(crate) library: Library,
     pub(crate) run_state: RunState,
+    pub(crate) shared: SharedLibrary,
     pub(crate) theme: Theme,
 }
 
@@ -40,6 +42,7 @@ impl Default for GraphCtxFixture {
             open: OpenDocument::default(),
             library: Library::default(),
             run_state: RunState::new(wake::internals::noop()),
+            shared: SharedLibrary::default(),
             theme: Theme::default(),
         }
     }
@@ -91,9 +94,10 @@ impl GraphCtxFixture {
             open,
             library,
             run_state,
+            shared,
             theme,
         } = self;
-        let app = AppCtx::new(theme, library, run_state);
+        let app = AppCtx::new(theme, library, run_state, shared);
         GraphCtx::of(DocCtx::new(app, open), graph, display)
     }
 }

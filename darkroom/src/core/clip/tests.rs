@@ -136,17 +136,29 @@ fn a_paste_brings_its_subgraphs_by_digest() {
     document.validate().unwrap();
 }
 
-/// A clip from a document whose library this one lacks pastes nothing and says why: a node whose
-/// func this library lacks is no edit the gate takes, and a subgraph holding one breaks the load
-/// contract. The document is left as it was.
+/// A clip from a document whose library this one lacks: a node whose func this library lacks
+/// is no edit the gate takes, so its paste lands nothing and says why; a subgraph holding one
+/// comes in reconciled, the node kept inside it as a stub, as a load keeps it.
 #[test]
-fn a_clip_naming_a_func_this_library_lacks_pastes_nothing() {
-    use crate::core::clip::error::PasteError;
+fn a_clip_naming_a_func_this_library_lacks() {
+    use scenarium::{DetachReason, Unresolved};
+
     use crate::core::edit::error::{IntentError, MalformedIntent};
 
     let mut source = DocumentFixture::default();
     let node = source.node_at(Vec2::ZERO);
-    let instance = holder(&mut source, SubgraphId::from_u128(1));
+    let id = SubgraphId::from_u128(1);
+    let instance = holder(&mut source, id);
+    let inside = source
+        .document
+        .graphs
+        .subgraph(id)
+        .unwrap()
+        .graph
+        .iter()
+        .find(|node| node.boundary().is_none())
+        .unwrap()
+        .node_id;
     let copy = |item| {
         Clip::copy(
             &source.document,
@@ -156,28 +168,30 @@ fn a_clip_naming_a_func_this_library_lacks_pastes_nothing() {
         )
         .expect("the selection holds a node")
     };
-    let (lacking, target) = (Library::default(), Document::default());
+    let lacking = Library::default();
 
     let refused = copy(node)
-        .paste(&target, GraphId::Main, &lacking, Vec2::ZERO)
+        .paste(&Document::default(), GraphId::Main, &lacking, Vec2::ZERO)
         .unwrap_err();
     assert!(
         matches!(
-            refused,
-            PasteError::Edit(IntentError::Malformed(
-                MalformedIntent::UnresolvedNode { .. }
-            ))
+            refused.0,
+            IntentError::Malformed(MalformedIntent::UnresolvedNode { .. })
         ),
         "{refused:?}"
     );
-    let refused = copy(instance)
-        .paste(&target, GraphId::Main, &lacking, Vec2::ZERO)
-        .unwrap_err();
-    assert!(matches!(refused, PasteError::Subgraph(_)), "{refused:?}");
-    assert!(
-        copy(instance)
-            .paste(&target, GraphId::Main, &source.library, Vec2::ZERO)
-            .is_ok(),
-        "the same clip fits a document with the library"
+
+    let mut open = OpenDocument::over(Document::default());
+    paste(&mut open, &lacking, &copy(instance).to_text());
+    let document = open.document();
+    assert_eq!(placed(document), [id]);
+    let held = &document.graphs.subgraph(id).unwrap().graph;
+    assert!(held.find(inside).is_none());
+    assert_eq!(
+        held.stub(inside).map(|stub| stub.reason),
+        Some(DetachReason::Unresolved(Unresolved::MissingFunc))
     );
+    document
+        .validate()
+        .expect("the paste leaves a valid document");
 }

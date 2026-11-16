@@ -12,6 +12,7 @@ use scenarium::{
     NodeId, OutputPort, PortId, Ports, Subgraph, SubgraphId, Subscription, numbered_port,
 };
 
+use crate::core::document::graph_view::GraphView;
 use crate::core::document::internals::{DocumentFixture, insert_subgraph};
 use crate::core::document::item_id::ItemId;
 use crate::core::document::subgraph_side::SubgraphSide;
@@ -19,6 +20,7 @@ use crate::core::edit::edit_facts::{EditFacts, Touched};
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::step::change::Change;
 use crate::core::edit::step::graph_step::GraphStep;
+use crate::core::edit::step::set_definition::SetDefinition;
 use crate::core::edit::step::set_depth::SetDepth;
 use crate::core::edit::step::set_input::SetInput;
 use crate::core::edit::step::set_interface::SetInterface;
@@ -27,6 +29,7 @@ use crate::core::edit::step::set_node_name::SetNodeName;
 use crate::core::edit::step::set_node_property::{PropertyChange, SetNodeProperty};
 use crate::core::edit::step::set_positions::{Move, SetPositions};
 use crate::core::edit::step::set_selection::SetSelection;
+use crate::core::edit::step::set_side::SetSide;
 use crate::core::edit::step::set_subgraph::SetSubgraph;
 use crate::core::edit::step::set_subscription::SetSubscription;
 use crate::core::edit::step::set_ties::SetTies;
@@ -258,6 +261,43 @@ fn every_kind_answers_the_frame_questions() {
             ),
         ),
         (
+            "definition updated",
+            UndoStep::Definition(Box::new(SetDefinition {
+                id: SubgraphId::from_u128(9),
+                definition: Change {
+                    from: Subgraph::new("before", Interface::default()),
+                    to: Subgraph::new("after", Interface::default()),
+                },
+                view: Change {
+                    from: GraphView::default(),
+                    to: GraphView::default(),
+                },
+            })),
+            (
+                true,
+                EditFacts {
+                    node_set: true,
+                    touched: Touched::Graph(GraphId::Subgraph(SubgraphId::from_u128(9))),
+                    ..EditFacts::NONE
+                },
+            ),
+        ),
+        (
+            "subgraph marked shared",
+            UndoStep::Side(SetSide {
+                id: SubgraphId::from_u128(9),
+                shared: Change {
+                    from: false,
+                    to: true,
+                },
+                synced: Change {
+                    from: None,
+                    to: None,
+                },
+            }),
+            (true, EditFacts::NONE),
+        ),
+        (
             "interface edit dropping a constant",
             interface_port_removal(),
             (
@@ -277,6 +317,8 @@ fn every_kind_answers_the_frame_questions() {
             UndoStep::Graph { step, .. } => step,
             UndoStep::Subgraph(_) => return 9,
             UndoStep::Interface(_) => return 10,
+            UndoStep::Side(_) => return 11,
+            UndoStep::Definition(_) => return 12,
         };
         match step {
             GraphStep::Node(_) => 0,
@@ -291,7 +333,7 @@ fn every_kind_answers_the_frame_questions() {
         }
     };
     let covered: BTreeSet<u8> = cases.iter().map(|(_, step, _)| kind(step)).collect();
-    assert_eq!(covered.len(), 11, "a case for every kind");
+    assert_eq!(covered.len(), 13, "a case for every kind");
     for (what, step, answers) in &cases {
         assert!(
             !step.is_noop(),

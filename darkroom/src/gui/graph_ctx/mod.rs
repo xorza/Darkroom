@@ -27,6 +27,8 @@ use crate::core::document::Document;
 use crate::core::document::graph_view::{GraphView, StackedNode};
 use crate::core::document::item_id::ItemId;
 use crate::core::document::viewport::Viewport;
+use crate::core::open_document::OpenDocument;
+use crate::core::shared_library::SharedLibrary;
 use crate::gui::frame::doc_ctx::DocCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::port_ref::{PortKind, PortRef};
@@ -85,6 +87,11 @@ impl<'a> GraphCtx<'a> {
     /// half is being read.
     pub(crate) const fn document(self) -> &'a Document {
         self.doc.document()
+    }
+
+    /// The open document behind this context: its history and revisions beside the document.
+    pub(crate) const fn open(self) -> &'a OpenDocument {
+        self.doc.open()
     }
 
     /// The authoring graph this pane shows.
@@ -154,6 +161,11 @@ impl<'a> GraphCtx<'a> {
     /// a preview published.
     pub(crate) const fn run_state(self) -> &'a RunState {
         self.doc.run_state()
+    }
+
+    /// The library folder's shared subgraphs, as the last scan read them.
+    pub(crate) const fn shared(self) -> &'a SharedLibrary {
+        self.doc.shared()
     }
 
     /// The color a port of `data_type` paints at rest, and the wires touching it: its type's hue

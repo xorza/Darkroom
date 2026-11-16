@@ -16,6 +16,10 @@ use scenarium::{GraphId, InstancePath, SubgraphId};
 use crate::core::document::Document;
 use crate::core::document::tab_ref::TabRef;
 use crate::core::edit::make_unique::MakeUnique;
+use crate::core::edit::subgraph_intent::{SubgraphIntent, Update};
+use crate::core::shared_library::{LibraryEntry, SyncState};
+use crate::gui::frame::app_command::AppCommand;
+use crate::gui::frame::requests::Requests;
 use crate::gui::frame::stage::Stage;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::widgets::link::Link;
@@ -86,12 +90,73 @@ pub(crate) fn for_each_crumb<'a>(
     });
 }
 
-/// The header over a subgraph's pane, at its top edge's middle; nothing over the main graph's.
-/// A click on a name enters that graph's pane.
-pub(super) fn show(ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
-    let GraphId::Subgraph(subgraph) = stage.ctx.graph() else {
-        return;
-    };
+/// What the header keeps across frames: its standing against the library, worked out when the
+/// document or the library changed, and whether a publish waits on its confirmation.
+#[derive(Debug, Default)]
+pub(crate) struct PaneHeader {
+    sync: Option<SyncCache>,
+    publish_asked: bool,
+}
+
+/// A subgraph's standing against the library, as of a document content revision and a library
+/// scan: a digest walks the whole definition, so it is not worked out each frame.
+#[derive(Debug, Clone, Copy)]
+struct SyncCache {
+    subgraph: SubgraphId,
+    content: u64,
+    scan: u64,
+    state: Option<SyncState>,
+}
+
+impl PaneHeader {
+    /// Where `subgraph` of the pane's document stands against the library, reusing the last
+    /// answer while neither changed; `None` when the library lists no one entry under its id.
+    fn sync(&mut self, graph_ctx: GraphCtx<'_>, subgraph: SubgraphId) -> Option<SyncState> {
+        let (content, scan) = (
+            graph_ctx.open().content_revision(),
+            graph_ctx.shared().generation(),
+        );
+        if let Some(cache) = self.sync
+            && (cache.subgraph, cache.content, cache.scan) == (subgraph, content, scan)
+        {
+            return cache.state;
+        }
+        let document = graph_ctx.document();
+        let state = graph_ctx.shared().entry(subgraph).map(|entry| {
+            SyncState::of(
+                document.sides[&subgraph].synced,
+                document.graphs.digest(subgraph),
+                entry.digest,
+            )
+        });
+        self.sync = Some(SyncCache {
+            subgraph,
+            content,
+            scan,
+            state,
+        });
+        state
+    }
+
+    /// The header over a subgraph's pane, at its top edge's middle; nothing over the main
+    /// graph's. A click on a name enters that graph's pane.
+    pub(super) fn show(&mut self, ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
+        let GraphId::Subgraph(subgraph) = stage.ctx.graph() else {
+            return;
+        };
+        let sync = self.sync(stage.ctx, subgraph);
+        show(ui, stage, subgraph, sync, &mut self.publish_asked);
+    }
+}
+
+/// The header of `subgraph`'s pane, standing `sync` against the library.
+fn show(
+    ui: &mut Ui,
+    stage: &mut Stage<'_, GraphCtx<'_>>,
+    subgraph: SubgraphId,
+    sync: Option<SyncState>,
+    publish_asked: &mut bool,
+) {
     let (graph_ctx, out) = (stage.ctx, &mut *stage.out);
     let theme = graph_ctx.theme();
     let document = graph_ctx.document();
@@ -154,7 +219,75 @@ pub(super) fn show(ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
                 out.push_enter(copy, Some(through));
             }
         }
+        if let Some(state) = sync
+            && let Some(entry) = graph_ctx.shared().entry(subgraph)
+        {
+            library_row(ui, graph_ctx, out, subgraph, entry, state, publish_asked);
+        }
     });
+}
+
+/// The header's library part: where the subgraph stands, an Update that puts the library's
+/// definition in place, and a Publish that asks before it writes the library file.
+fn library_row(
+    ui: &mut Ui,
+    graph_ctx: GraphCtx<'_>,
+    out: &mut Requests,
+    subgraph: SubgraphId,
+    entry: &LibraryEntry,
+    state: SyncState,
+    publish_asked: &mut bool,
+) {
+    let theme = graph_ctx.theme();
+    let shared = graph_ctx.shared();
+    let muted = support::muted_text(ui, theme, theme.font.body);
+    Text::new(fmt!(ui, "\u{b7} {}", state.label()))
+        .style(&muted)
+        .show(ui);
+    if state == SyncState::InSync {
+        *publish_asked = false;
+        return;
+    }
+    if Link::new(library_wid(subgraph, "update"), "Update")
+        .tooltip("Put the library's definition in place of this one")
+        .show(ui, theme)
+    {
+        out.push_subgraph(SubgraphIntent::Update(Box::new(Update {
+            id: subgraph,
+            carried: shared.carried(entry),
+        })));
+    }
+    if state == SyncState::UpdateAvailable {
+        return;
+    }
+    let file = shared.path(entry).file_name().map_or_else(
+        || shared.path(entry).display().to_string(),
+        |name| name.to_string_lossy().into_owned(),
+    );
+    if !*publish_asked {
+        *publish_asked = Link::new(library_wid(subgraph, "publish"), "Publish")
+            .tooltip("Write this definition into the library file")
+            .show(ui, theme);
+        return;
+    }
+    // Asks first, naming what the write replaces.
+    let question = match state {
+        SyncState::ChangedInBoth => fmt!(ui, "overwrite the library's changes in {file}?"),
+        _ => fmt!(ui, "write it into {file}?"),
+    };
+    Text::new(question).style(&muted).show(ui);
+    if Link::new(library_wid(subgraph, "publish_yes"), "Publish").show(ui, theme) {
+        out.push_app(AppCommand::Publish { subgraph });
+        *publish_asked = false;
+    }
+    if Link::new(library_wid(subgraph, "publish_no"), "Cancel").show(ui, theme) {
+        *publish_asked = false;
+    }
+}
+
+/// The library part's `part` in the header over `subgraph`'s pane.
+fn library_wid(subgraph: SubgraphId, part: &'static str) -> WidgetId {
+    WidgetId::from_hash(("darkroom.graph.pane_header.library", subgraph, part))
 }
 
 /// The Make Unique link in the header over `subgraph`'s pane.

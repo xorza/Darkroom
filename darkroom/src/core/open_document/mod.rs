@@ -78,6 +78,9 @@ pub(crate) struct OpenDocument {
     /// that adds or removes a node of that graph; a graph no edit has
     /// changed is at the default revision.
     revisions: HashMap<GraphId, GraphRevision>,
+    /// Moved by every edit, undo or redo that changes saved content: what a cache of a value
+    /// read off the whole document, as a subgraph's digest, is keyed by.
+    content_revision: u64,
     /// This document's undo history, document state: opening another file replaces the pair, so
     /// no UI can inherit the other's history.
     history: UndoHistory,
@@ -95,6 +98,7 @@ impl Default for OpenDocument {
             path: None,
             dirty: false,
             revisions: HashMap::new(),
+            content_revision: 0,
             history: UndoHistory::new(UNDO_HISTORY_BYTES),
             batch: Vec::new(),
         }
@@ -320,6 +324,9 @@ impl OpenDocument {
             self.document.validate()
         );
         self.dirty |= signals.dirtied;
+        if signals.dirtied {
+            self.content_revision += 1;
+        }
         if signals.facts.node_set {
             let touched = signals.facts.touched;
             for (graph, _) in self.document.graphs.graphs() {
@@ -333,6 +340,11 @@ impl OpenDocument {
     }
 
     /// The state of `graph`'s node set.
+    /// See the field.
+    pub(crate) const fn content_revision(&self) -> u64 {
+        self.content_revision
+    }
+
     pub(crate) fn graph_revision(&self, graph: GraphId) -> GraphRevision {
         self.revisions.get(&graph).copied().unwrap_or_default()
     }

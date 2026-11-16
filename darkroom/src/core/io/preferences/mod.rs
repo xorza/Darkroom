@@ -48,6 +48,8 @@ pub(crate) struct Preferences {
     pub(crate) viewer: ViewerPreferences,
     /// Default ONNX model paths copied into newly-authored ML node inputs.
     pub(crate) ml_models: MlModelPaths,
+    /// The folder whose documents' shared subgraphs the palette lists. `None` lists none.
+    pub(crate) library_folder: Option<PathBuf>,
 }
 
 /// Backdrop behind and around a viewer's image, as offered by the viewer toolbar's swatch row.
@@ -137,6 +139,7 @@ impl Preferences {
             window: _,
             viewer,
             ml_models,
+            library_folder,
         } = self;
         *document_path == other.document_path
             && *load_last_document == other.load_last_document
@@ -145,6 +148,7 @@ impl Preferences {
             && *interface_size == other.interface_size
             && *viewer == other.viewer
             && *ml_models == other.ml_models
+            && *library_folder == other.library_folder
     }
 }
 
@@ -159,6 +163,7 @@ impl Default for Preferences {
             window: None,
             viewer: ViewerPreferences::default(),
             ml_models: MlModelPaths::default(),
+            library_folder: None,
         }
     }
 }

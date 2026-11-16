@@ -10,7 +10,7 @@ use std::num::NonZeroU32;
 use std::path::PathBuf;
 
 use lens::MlModelPaths;
-use scenarium::{GraphId, InputPort, NodeAddr, ProgramId};
+use scenarium::{GraphId, InputPort, NodeAddr, ProgramId, SubgraphId};
 
 use crate::gui::frame::framing::Framing;
 use crate::gui::path_type::PathType;
@@ -32,6 +32,11 @@ pub(crate) enum AppCommand {
     Run(RunCommand),
     /// Pick a file for one of the ML nodes' models, in a blocking dialog.
     PickMlModel(MlModelKind),
+    /// Pick the library folder, in a blocking dialog.
+    PickLibraryFolder,
+    /// Write subgraph `subgraph`'s definition, and those it places, into the library file that
+    /// holds it, the file written whole.
+    Publish { subgraph: SubgraphId },
     /// Node edits raised via a dialog.
     Edit(EditCommand),
     /// An image of the window, and where the graph's camera looks.

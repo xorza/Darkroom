@@ -11,6 +11,7 @@ use glam::Vec2;
 use palantir::widget::domain;
 use palantir::{Ui, WidgetId};
 
+use crate::core::edit::subgraph_intent::SubgraphIntent;
 use crate::gui::frame::stage::Stage;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::canvas;
@@ -148,7 +149,12 @@ impl NewNodeUi {
         });
 
         let picked = chosen?;
-        stage.out.push_graph(stage.ctx.graph(), picked);
+        for subgraph in picked.subgraphs {
+            stage
+                .out
+                .push_subgraph(SubgraphIntent::Add(Box::new(subgraph)));
+        }
+        stage.out.push_graph(stage.ctx.graph(), picked.add);
         self.source
     }
 }

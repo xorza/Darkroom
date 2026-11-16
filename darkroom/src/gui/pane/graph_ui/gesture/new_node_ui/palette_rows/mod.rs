@@ -4,7 +4,9 @@
 use std::cmp::Ordering;
 use std::ops::Range;
 
-use scenarium::{FuncId, GraphSet, Library, SpecialNode, SubgraphId};
+use scenarium::{FuncId, GraphSet, Library, SpecialNode, SubgraphDigest, SubgraphId};
+
+use crate::core::shared_library::SharedLibrary;
 
 use crate::gui::pane::graph_ui::gesture::new_node_ui::node_palette::PaletteEntry;
 
@@ -15,13 +17,20 @@ pub(super) enum PaletteRow {
     Func(FuncId),
     Special(SpecialNode),
     Subgraph(SubgraphId),
+    /// A library entry, by its id and digest, as two files may share an id.
+    Library {
+        id: SubgraphId,
+        digest: SubgraphDigest,
+    },
 }
 
-/// What the palette's rows are read from: the library's funcs and the document's subgraphs.
+/// What the palette's rows are read from: the library's funcs, the document's subgraphs and the
+/// library folder's shared ones.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct PaletteSources<'a> {
     pub(super) library: &'a Library,
     pub(super) graphs: &'a GraphSet,
+    pub(super) shared: &'a SharedLibrary,
 }
 
 impl PaletteRow {
@@ -39,6 +48,15 @@ impl PaletteRow {
                     used: sources.graphs.uses(id).next().is_some(),
                 })
             }
+            Self::Library { id, digest } => sources
+                .shared
+                .entries()
+                .iter()
+                .find(|entry| entry.id == id && entry.digest == digest)
+                .map(|entry| PaletteEntry::Library {
+                    entry,
+                    shared: sources.shared,
+                }),
         }
     }
 }

@@ -41,6 +41,7 @@ use crate::gui::pane::graph_ui::gesture::gestures::Gestures;
 use crate::gui::pane::graph_ui::gesture::shortcuts;
 use crate::gui::pane::graph_ui::gesture::tie_ui::tie_widget::TiePass;
 use crate::gui::pane::graph_ui::node_ui::{NodePass, NodeUi};
+use crate::gui::pane::graph_ui::pane_header::PaneHeader;
 use crate::gui::pane::graph_ui::scene::canvas_geometry::CanvasGeometry;
 use crate::gui::pane::graph_ui::scene::cull_region::CullRegion;
 use crate::gui::pane::graph_ui::scene::tie_layout::{Span, TieLayout};
@@ -105,6 +106,8 @@ pub(crate) struct GraphUi {
     /// with a step that moves its graph's revision, so a frame at the same one has nothing to
     /// sweep.
     swept_at: Option<GraphRevision>,
+    /// The header over a subgraph's pane.
+    header: PaneHeader,
 }
 
 impl GraphUi {
@@ -228,7 +231,7 @@ impl GraphUi {
             .show(ui, |ui| {
                 self.record_canvas(ui, stage);
                 toolbar::show(ui, stage);
-                pane_header::show(ui, stage);
+                self.header.show(ui, stage);
             });
     }
 
