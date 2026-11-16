@@ -25,11 +25,11 @@ fn close_preferences() -> DockOperation<TabRef> {
 #[test]
 fn each_level_drains_its_own_tier_and_leaves_the_rest_queued() {
     let mut out = Requests::default();
-    out.push_graph(remove_node());
+    out.push_graph(GraphId::Main, remove_node());
     out.push_app(AppCommand::Run(RunCommand::Once));
     out.push_view(close_preferences());
     out.push_app(AppCommand::Quit);
-    out.extend_graph([remove_node(), remove_node()]);
+    out.extend_graph(GraphId::Main, [remove_node(), remove_node()]);
 
     let first: Vec<&str> = out
         .document()
@@ -38,7 +38,7 @@ fn each_level_drains_its_own_tier_and_leaves_the_rest_queued() {
             DocumentRequest::Graph { .. }
             | DocumentRequest::InGesture { .. }
             | DocumentRequest::Cancel { .. } => "graph",
-            DocumentRequest::View(_) => "view",
+            DocumentRequest::View(_) | DocumentRequest::Enter { .. } => "view",
         })
         .collect();
     assert_eq!(

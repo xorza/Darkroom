@@ -10,7 +10,7 @@ use std::num::NonZeroU32;
 use std::path::PathBuf;
 
 use lens::MlModelPaths;
-use scenarium::{InputPort, NodeId, ProgramId};
+use scenarium::{GraphId, InputPort, NodeAddr, ProgramId};
 
 use crate::gui::frame::framing::Framing;
 use crate::gui::path_type::PathType;
@@ -67,10 +67,11 @@ pub(crate) enum ViewCommand {
     CopyImage,
     /// Prompt for a file and save the image there as a PNG.
     SaveImage,
-    /// Frame the graph, as the canvas toolbar's button and the status bar's link ask.
-    /// The canvas raises the camera move as it next readies a pass, over that frame's selection.
-    Frame(Framing),
-    /// Convert `node_id`'s stored image at full resolution, its longest edge capped to `max_dim`,
+    /// Frame `graph` in its pane, as the canvas toolbar's button, the menu and the status bar's
+    /// link ask. The canvas raises the camera move as it next readies a pass, over that frame's
+    /// selection.
+    Frame { graph: GraphId, framing: Framing },
+    /// Convert `program_id`'s stored image at full resolution, its longest edge capped to `max_dim`,
     /// as [`PreviewStore::convert_full`] does: a viewer raises it for an image it found
     /// [`FullView::Unasked`].
     ///
@@ -88,13 +89,14 @@ pub(crate) enum ViewCommand {
 pub(crate) enum RunCommand {
     /// Evaluate the graph once on the worker.
     Once,
-    /// Evaluate one node's upstream cone and deliver its outputs.
-    Node(NodeId),
-    /// Remove one authored node's compiled runtime-cache cone from RAM and disk.
-    EvictCache(NodeId),
-    /// Write one authored node's resident value to the disk store now — raised
-    /// when its cache mode gains the disk bit.
-    FlushCache(NodeId),
+    /// Evaluate one program node's upstream cone and deliver its outputs.
+    Node(ProgramId),
+    /// Remove one authored node's compiled runtime-cache cone, in every instance of its graph,
+    /// from RAM and disk.
+    EvictCache(NodeAddr),
+    /// Write one authored node's resident value, in every instance of its graph, to the disk
+    /// store now — raised when its cache mode gains the disk bit.
+    FlushCache(NodeAddr),
     /// Request cancellation of the in-flight run.
     Cancel,
     /// Start the worker's event loop (emitter events → run subscribers).
@@ -125,19 +127,20 @@ impl MlModelKind {
 /// `SetInput` edit.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum EditCommand {
-    /// Open a file dialog (filtered by the pick's picker config) for a
-    /// node's `FsPath` const input, applying the chosen paths as a `SetInput`
-    /// edit. Raised by the inline pick button, from the port row's value cell.
+    /// Open a file dialog (filtered by the pick's path type) for a node's path
+    /// const input, applying the chosen paths as a `SetInput` edit. Raised by
+    /// the inline pick button, from the port row's value cell.
     PickInputPath(PathPick),
 }
 
-/// A click on a path input's inline pick button: the port to set, and the path type to open the
-/// dialog for.
+/// A click on a path input's inline pick button: the graph and the port to set, and the
+/// path type that chooses the dialog and its filter.
 ///
 /// A named payload, as it travels as an `AppCommand` through `App`: the dialog can only run once
 /// the record pass is over.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct PathPick {
+    pub(crate) graph: GraphId,
     pub(crate) port: InputPort,
     /// Taken from the port's type — the value carries only the selected path strings.
     pub(crate) path_type: PathType,

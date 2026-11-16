@@ -2,17 +2,17 @@ use palantir::{
     Align, Configure, DockOperation, Grid, MenuBar, MenuBarMenus, MenuItem, MenuSeparator, Panel,
     Sense, Shortcut, SizeSpec, Text, TextWrap, Track, Ui, VAlign, WidgetId, fmt,
 };
-use scenarium::{GraphId, NodeId};
+use scenarium::NodeId;
 
 use crate::core::document::tab_ref::TabRef;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
 use crate::gui::frame::app_command::{AppCommand, FileCommand, RunCommand, ViewCommand};
+use crate::gui::frame::doc_ctx::DocCtx;
 use crate::gui::frame::framing::Framing;
 use crate::gui::frame::requests::Requests;
 use crate::gui::frame::shortcuts;
 use crate::gui::frame::stage::Stage;
-use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::widgets::support;
 
 /// Top-of-window menu bar: palantir's [`MenuBar`] at the left, and the document's name, with a
@@ -26,7 +26,7 @@ use crate::gui::widgets::support;
 /// the history, the run, the view and `Quit` as [`AppCommand`]s for `App` to run after the pass,
 /// Preferences as the [`DockOperation`] that opens its tab. Every item with a chord shows it,
 /// read from [`shortcuts`], the table its handler reads.
-pub(crate) fn show(ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
+pub(crate) fn show(ui: &mut Ui, stage: &mut Stage<'_, DocCtx<'_>>) {
     let ctx = stage.ctx;
     Grid::new()
         .id(bar_wid())
@@ -85,12 +85,12 @@ fn file_menu(bar: &mut MenuBarMenus<'_>, out: &mut Requests) {
     });
 }
 
-/// The history and the selection's edits. Duplicate drops the wires from producers outside the
-/// selection, as Ctrl+D does.
-fn edit_menu(bar: &mut MenuBarMenus<'_>, stage: &mut Stage<'_, GraphCtx<'_>>) {
+/// The history and the active graph's selection's edits. Duplicate drops the wires from producers
+/// outside the selection, as Ctrl+D does.
+fn edit_menu(bar: &mut MenuBarMenus<'_>, stage: &mut Stage<'_, DocCtx<'_>>) {
     let (ctx, out) = (stage.ctx, &mut *stage.out);
-    let open = ctx.open();
-    let selected = !open.document().main_view.selected.is_empty();
+    let (open, active) = (ctx.open(), ctx.active());
+    let selected = !ctx.selected().is_empty();
     bar.menu("Edit", |ui| {
         if item(ui, "Undo", Some(shortcuts::UNDO), open.can_undo()) {
             out.push_app(AppCommand::Undo);
@@ -100,25 +100,31 @@ fn edit_menu(bar: &mut MenuBarMenus<'_>, stage: &mut Stage<'_, GraphCtx<'_>>) {
         }
         MenuSeparator::new().show(ui);
         if item(ui, "Duplicate", Some(shortcuts::DUPLICATE), selected) {
-            out.extend_graph(GraphIntent::duplicate(
-                open.document(),
-                GraphId::Main,
-                ctx.library(),
-                IncomingWires::Drop,
-                || NodeId::unique().as_u128(),
-            ));
+            out.extend_graph(
+                active,
+                GraphIntent::duplicate(
+                    open.document(),
+                    active,
+                    ctx.library(),
+                    IncomingWires::Drop,
+                    || NodeId::unique().as_u128(),
+                ),
+            );
         }
         if item(ui, "Delete", Some(shortcuts::DELETE), selected) {
-            out.extend_graph(GraphIntent::remove_selection(&open.document().main_view));
+            out.extend_graph(
+                active,
+                GraphIntent::remove_selection(open.document().view(active)),
+            );
         }
     });
 }
 
 /// The run and the camera: what the canvas toolbar does, by name and with its keys.
-fn graph_menu(bar: &mut MenuBarMenus<'_>, stage: &mut Stage<'_, GraphCtx<'_>>) {
+fn graph_menu(bar: &mut MenuBarMenus<'_>, stage: &mut Stage<'_, DocCtx<'_>>) {
     let (ctx, out) = (stage.ctx, &mut *stage.out);
     let activity = ctx.run_state().activity();
-    let selected = !ctx.document().main_view.selected.is_empty();
+    let selected = !ctx.selected().is_empty();
     bar.menu("Graph", |ui| {
         let running = activity.is_executing();
         if item(ui, "Run", Some(shortcuts::RUN), !running) {
@@ -148,7 +154,10 @@ fn graph_menu(bar: &mut MenuBarMenus<'_>, stage: &mut Stage<'_, GraphCtx<'_>>) {
         ];
         for (label, shortcut, framing, enabled) in framings {
             if item(ui, label, shortcut, enabled) {
-                out.push_app(AppCommand::View(ViewCommand::Frame(framing)));
+                out.push_app(AppCommand::View(ViewCommand::Frame {
+                    graph: ctx.active(),
+                    framing,
+                }));
             }
         }
     });
@@ -167,7 +176,7 @@ fn view_menu(bar: &mut MenuBarMenus<'_>, out: &mut Requests) {
 
 /// The open document's file name, or "Untitled" before its first save, with a dot while it has
 /// unsaved edits; its folder is the tooltip.
-fn document_name(ui: &mut Ui, ctx: GraphCtx<'_>) {
+fn document_name(ui: &mut Ui, ctx: DocCtx<'_>) {
     let (open, theme) = (ctx.open(), ctx.theme());
     let path = open.path();
     let name = path
@@ -216,6 +225,7 @@ mod tests {
 
     use glam::UVec2;
     use palantir::{InspectedWidget, Shortcut};
+    use scenarium::GraphId;
 
     use crate::core::document::internals::DocumentFixture;
     use crate::core::document::item_id::ItemId;
@@ -282,8 +292,14 @@ mod tests {
                 "Open…" => AppCommand::File(FileCommand::Open),
                 "Undo" => AppCommand::Undo,
                 "Run" => AppCommand::Run(RunCommand::Once),
-                "Reset View" => AppCommand::View(ViewCommand::Frame(Framing::Reset)),
-                _ => AppCommand::View(ViewCommand::Frame(Framing::ShowAll)),
+                "Reset View" => AppCommand::View(ViewCommand::Frame {
+                    graph: GraphId::Main,
+                    framing: Framing::Reset,
+                }),
+                _ => AppCommand::View(ViewCommand::Frame {
+                    graph: GraphId::Main,
+                    framing: Framing::ShowAll,
+                }),
             };
             assert_eq!(
                 format!("{commands:?}"),

@@ -63,7 +63,7 @@ pub(crate) fn start(ui: &mut Ui, ctx: CanvasCtx<'_>) -> Option<GrabStart> {
                 item: ItemId::Node(node_id),
                 pos: center,
             }]),
-            handle: wid::port_circle(port),
+            handle: wid::port_circle(ctx.graph_ctx().graph(), port),
         },
         joined: PreviewSpawn {
             port: output,

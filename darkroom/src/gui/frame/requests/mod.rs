@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 use std::mem;
 
 use palantir::{DockOperation, Ui};
-use scenarium::GraphId;
+use scenarium::{GraphId, InstancePath, SubgraphId};
 
 use crate::core::document::tab_ref::TabRef;
 use crate::core::edit::document_queue::DocumentQueue;
@@ -50,34 +50,49 @@ impl Requests {
         self.document.open_gesture()
     }
 
-    /// Queue an edit of the main graph, the one graph the window shows.
-    pub(crate) fn push_graph(&mut self, intent: GraphIntent) {
-        self.document.push_graph(GraphId::Main, intent);
+    /// Queue an edit of `graph`.
+    pub(crate) fn push_graph(&mut self, graph: GraphId, intent: GraphIntent) {
+        self.document.push_graph(graph, intent);
     }
 
-    /// Queue every edit of the main graph `iter` yields.
-    pub(crate) fn extend_graph(&mut self, iter: impl IntoIterator<Item = GraphIntent>) {
-        self.document.extend_graph(GraphId::Main, iter);
+    /// Queue every edit of `graph` `iter` yields.
+    pub(crate) fn extend_graph(
+        &mut self,
+        graph: GraphId,
+        iter: impl IntoIterator<Item = GraphIntent>,
+    ) {
+        self.document.extend_graph(graph, iter);
     }
 
-    /// Queue every graph edit `iter` yields as part of the held `gesture`; see
+    /// Queue every edit of `graph` `iter` yields as part of the held `gesture`; see
     /// [`DocumentQueue::extend_graph_in`].
     pub(crate) fn extend_graph_in(
         &mut self,
         gesture: GestureId,
+        graph: GraphId,
         iter: impl IntoIterator<Item = GraphIntent>,
     ) {
-        self.document.extend_graph_in(gesture, GraphId::Main, iter);
+        self.document.extend_graph_in(gesture, graph, iter);
     }
 
-    /// Queue the cancel of the held `gesture`; see [`DocumentQueue::push_cancel`].
-    pub(crate) fn push_cancel(&mut self, gesture: GestureId, otherwise: GraphIntent) {
-        self.document.push_cancel(gesture, GraphId::Main, otherwise);
+    /// Queue the cancel of the held `gesture` on `graph`; see [`DocumentQueue::push_cancel`].
+    pub(crate) fn push_cancel(
+        &mut self,
+        gesture: GestureId,
+        graph: GraphId,
+        otherwise: GraphIntent,
+    ) {
+        self.document.push_cancel(gesture, graph, otherwise);
     }
 
     /// Queue a mutation of the pane arrangement.
     pub(crate) fn push_view(&mut self, op: DockOperation<TabRef>) {
         self.document.push_view(op);
+    }
+
+    /// Queue the entry into `subgraph`'s pane, shown through `through`.
+    pub(crate) fn push_enter(&mut self, subgraph: SubgraphId, through: Option<InstancePath>) {
+        self.document.push_enter(subgraph, through);
     }
 
     /// Queue a side effect for `App` to run after the pass.

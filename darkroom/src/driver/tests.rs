@@ -7,7 +7,7 @@ use palantir::Action as PalantirAction;
 use palantir::{
     LocateError, PlayError, PointerButton, Rect, ShortcutMods, SystemScale, WheelDelta,
 };
-use scenarium::{Binding, ConstValue, InputPort, NodeId, ProgramId, numbered_port};
+use scenarium::{Binding, ConstValue, GraphId, InputPort, NodeId, ProgramId, numbered_port};
 use tracing::{callsite, subscriber};
 use tracing_subscriber::layer::SubscriberExt as _;
 
@@ -19,12 +19,12 @@ use crate::driver::locator::{EditorTarget, Locator, Side};
 use crate::driver::log_ring::LogRing;
 use crate::driver::offscreen;
 use crate::driver::shot::{NODE_MARGIN, Region, Shot};
-use crate::driver::state::{Detail, State};
+use crate::driver::state::{Detail, GraphSummary, State};
 use crate::driver::{COPY_LIMIT, DisplayKind, Driver, OpenMode, SessionConfig};
 use crate::gui::dialogs::DialogAnswer;
 use crate::gui::frame::shortcuts;
 use crate::gui::main_window::MainWindow;
-use crate::gui::state::preview_store::StoredContent;
+use crate::gui::state::preview_store::{PreviewMessage, StoredContent};
 use crate::gui::theme::Theme;
 use crate::internals::fixture;
 use std::num::NonZeroU32;
@@ -113,6 +113,15 @@ fn placed(driver: &Driver, name: &str) -> Vec2 {
         .pos
 }
 
+/// The graph `state` names active, by value.
+fn active(state: State) -> GraphSummary {
+    state
+        .graphs
+        .into_iter()
+        .find(|graph| graph.active)
+        .expect("one graph is active")
+}
+
 fn node_id(driver: &Driver, name: &str) -> NodeId {
     driver
         .app()
@@ -160,34 +169,35 @@ fn clicks_drags_and_keys_edit_the_document() {
     );
     driver.act(&[wire]).unwrap();
     let wired = [format!("{BRIGHTNESS}.Image -> {CONVERT}.Image")];
-    let detail = driver
-        .state(Detail::Detailed, None)
-        .unwrap()
+    let detail = active(driver.state(Detail::Detailed, None).unwrap())
         .details
         .unwrap();
     assert_eq!(detail.wires, wired);
     // A filter keeps the nodes it names in either form, and the wires with one at either end.
     let names = |state: &State| -> Vec<String> {
-        state.nodes.iter().map(|node| node.name.clone()).collect()
+        state
+            .active()
+            .nodes
+            .iter()
+            .map(|node| node.name.clone())
+            .collect()
     };
     let concise = driver.state(Detail::Concise, Some("Conv")).unwrap();
     assert_eq!(
-        (names(&concise), concise.omitted),
+        (names(&concise), concise.active().omitted),
         (vec![CONVERT.to_string()], 0)
     );
     for (filter, nodes) in [(BRIGHTNESS, [BRIGHTNESS]), ("Conv", [CONVERT])] {
         let state = driver.state(Detail::Detailed, Some(filter)).unwrap();
         assert_eq!(names(&state), nodes, "{filter}");
-        assert_eq!(state.details.unwrap().wires, wired, "{filter}");
+        assert_eq!(active(state).details.unwrap().wires, wired, "{filter}");
     }
     let none = driver.state(Detail::Detailed, Some("Blur")).unwrap();
     assert_eq!(names(&none), Vec::<String>::new());
-    assert_eq!(none.details.unwrap().wires, Vec::<String>::new());
+    assert_eq!(active(none).details.unwrap().wires, Vec::<String>::new());
 
     driver.act(&[key("ctrl+z")]).unwrap();
-    let detail = driver
-        .state(Detail::Detailed, None)
-        .unwrap()
+    let detail = active(driver.state(Detail::Detailed, None).unwrap())
         .details
         .unwrap();
     assert!(detail.wires.is_empty(), "undone: {:?}", detail.wires);
@@ -245,7 +255,7 @@ fn a_world_point_lands_on_the_canvas_where_nodes_are_placed() {
         .with_app(|app, ui| Locator::app(EditorTarget::World(pos)).find(app, ui))
         .unwrap()
         .point;
-    let screen = driver.state(Detail::Concise, None).unwrap().nodes[0]
+    let screen = active(driver.state(Detail::Concise, None).unwrap()).nodes[0]
         .screen
         .unwrap();
     assert_eq!(world, Vec2::new(screen[0], screen[1]));
@@ -270,9 +280,7 @@ fn the_new_node_palette_adds_the_node_clicked() {
             key("enter"),
         ])
         .unwrap();
-    let names: Vec<String> = driver
-        .state(Detail::Concise, None)
-        .unwrap()
+    let names: Vec<String> = active(driver.state(Detail::Concise, None).unwrap())
         .nodes
         .into_iter()
         .map(|node| node.name)
@@ -302,9 +310,7 @@ fn down_then_enter_adds_the_next_ranked_match() {
             key("enter"),
         ])
         .unwrap();
-    let names: Vec<String> = driver
-        .state(Detail::Concise, None)
-        .unwrap()
+    let names: Vec<String> = active(driver.state(Detail::Concise, None).unwrap())
         .nodes
         .into_iter()
         .map(|node| node.name)
@@ -542,7 +548,7 @@ fn a_folder_a_copy_would_break_is_refused() {
 
     driver.new_document().unwrap();
     let state = driver.state(Detail::Concise, None).unwrap();
-    assert_eq!((state.document, state.nodes.len()), (None, 0));
+    assert_eq!((&state.document, state.active().nodes.len()), (&None, 0));
 }
 
 /// A shot of the whole 400 × 340 window, tall enough to hold the node, is the frame: the canvas's
@@ -561,7 +567,7 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
     let dir = TempDir::new("darkroom-driver-shot");
     let path = fixture::project(dir.path(), &[BRIGHTNESS]);
     driver.open(&path, OpenMode::Copy).unwrap();
-    let screen = driver.state(Detail::Concise, None).unwrap().nodes[0]
+    let screen = active(driver.state(Detail::Concise, None).unwrap()).nodes[0]
         .screen
         .unwrap();
     assert_eq!(screen, [40.0, 119.0, 277.0, 193.0]);
@@ -685,7 +691,7 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
     let mut cpu = sized(DisplayKind::Cpu, window);
     cpu.open(&path, OpenMode::Copy).unwrap();
     assert_eq!(
-        cpu.state(Detail::Concise, None).unwrap().nodes[0].screen,
+        active(cpu.state(Detail::Concise, None).unwrap()).nodes[0].screen,
         Some(screen)
     );
     assert!(matches!(
@@ -928,6 +934,75 @@ fn a_save_writes_the_format_its_extension_names() {
     );
 }
 
+/// A preview two subgraphs down runs once per instance of the outer one and publishes under its
+/// path of three ids, the outer instance, the inner and the preview. The driver's state lists each
+/// graph, the main one first.
+#[test]
+fn a_preview_inside_nested_subgraphs_publishes_under_its_path() {
+    let mut driver = driver();
+    let dir = TempDir::new("darkroom-driver-nested");
+    let path = fixture::nested_preview(dir.path());
+    driver.open(&path, OpenMode::InPlace).unwrap();
+    driver.act(&[key("ctrl+r")]).unwrap();
+    driver.wait_run(Duration::from_secs(30)).unwrap();
+
+    let app = driver.app();
+    let graphs = &app.open_document().document().graphs;
+    // The one instance in `graph`, and the subgraph it places.
+    let instance_in = |graph: GraphId| {
+        let node = graphs
+            .graph(graph)
+            .iter()
+            .find(|node| node.subgraph().is_some())
+            .expect("the graph places a subgraph");
+        (node.node_id, GraphId::Subgraph(node.subgraph().unwrap()))
+    };
+    let mut outers: Vec<NodeId> = graphs
+        .main()
+        .iter()
+        .filter(|node| node.name == "Outer")
+        .map(|node| node.node_id)
+        .collect();
+    outers.sort_unstable();
+    assert_eq!(outers.len(), 2);
+    let outer_graph = GraphId::Subgraph(graphs.main().find(outers[0]).unwrap().subgraph().unwrap());
+    let (inner, inner_graph) = instance_in(outer_graph);
+    let preview = graphs
+        .graph(inner_graph)
+        .iter()
+        .find(|node| node.name == "Preview")
+        .unwrap()
+        .node_id;
+    for outer in outers {
+        let id = ProgramId::new(&[outer, inner, preview]);
+        let shown = app
+            .run_state()
+            .previews()
+            .get(id)
+            .and_then(StoredContent::message);
+        assert!(
+            matches!(shown, Some(PreviewMessage::Text(text)) if text == fixture::NESTED_PREVIEW_VALUE.to_string()),
+            "{id:?} shows {shown:?}"
+        );
+    }
+
+    let state = driver.state(Detail::Concise, None).unwrap();
+    let names: Vec<(&str, bool)> = state
+        .graphs
+        .iter()
+        .map(|graph| (graph.name.as_str(), graph.active))
+        .collect();
+    assert_eq!(names[0], ("main", true), "the main graph first, and active");
+    let mut subgraphs = names[1..].to_vec();
+    subgraphs.sort_unstable();
+    assert_eq!(subgraphs, [("Inner", false), ("Outer", false)]);
+    assert_eq!(
+        state.graphs[0].nodes.len(),
+        2,
+        "the two instances of `Outer`"
+    );
+}
+
 /// A device takes a window up to its limit per side, on either side; one pixel past it is the
 /// error, not palantir's panic on the target.
 #[test]
@@ -965,7 +1040,7 @@ fn the_sample_project_runs_to_its_previews() {
     driver.wait_run(Duration::from_secs(30)).unwrap();
 
     let state = driver.state(Detail::Detailed, None).unwrap();
-    for node in &state.nodes {
+    for node in &state.active().nodes {
         assert!(
             node.run
                 .as_ref()
@@ -976,6 +1051,7 @@ fn the_sample_project_runs_to_its_previews() {
         );
     }
     let mut sizes: Vec<(String, UVec2)> = state
+        .active()
         .nodes
         .iter()
         .filter(|node| node.name.starts_with("Preview"))
@@ -1136,16 +1212,12 @@ fn a_dropped_wire_floats_onto_the_node_its_palette_adds() {
         .act(&[Action::Play(Play::Type(CONVERT.to_string())), key("enter")])
         .unwrap();
     let wires = |driver: &mut Driver| {
-        driver
-            .state(Detail::Detailed, None)
-            .unwrap()
+        active(driver.state(Detail::Detailed, None).unwrap())
             .details
             .unwrap()
             .wires
     };
-    let names: Vec<String> = driver
-        .state(Detail::Concise, None)
-        .unwrap()
+    let names: Vec<String> = active(driver.state(Detail::Concise, None).unwrap())
         .nodes
         .into_iter()
         .map(|node| node.name)

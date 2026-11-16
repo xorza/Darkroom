@@ -1,5 +1,5 @@
 use palantir::{PointerButton, PointerEvent, PointerWake, Ui};
-use scenarium::Binding;
+use scenarium::{Binding, GraphId};
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::frame::stage::Stage;
@@ -150,14 +150,15 @@ impl WireUi {
         }
         self.state = None;
         if let Some(end) = drag.snap {
-            out.push_graph(wire(drag.from, end));
+            out.push_graph(ctx.graph_ctx().graph(), wire(drag.from, end));
             return None;
         }
         if let Some(set_const) = const_drop(ui, ctx, drag.from) {
-            out.push_graph(set_const);
+            out.push_graph(ctx.graph_ctx().graph(), set_const);
             return None;
         }
-        dropped_on_empty_canvas(ui, ctx.geometry()).then_some(WireEnd::DroppedOnCanvas(drag.from))
+        dropped_on_empty_canvas(ui, ctx.graph_ctx().graph(), ctx.geometry())
+            .then_some(WireEnd::DroppedOnCanvas(drag.from))
     }
 
     /// `Floating` resolve: the wire follows the cursor with no button held, so its terminating
@@ -184,9 +185,10 @@ impl WireUi {
         match ended {
             Some(PointerButton::Left) => {
                 self.state = None;
-                stage
-                    .out
-                    .extend_graph(drag.snap.map(|end| wire(drag.from, end)));
+                stage.out.extend_graph(
+                    stage.ctx.graph_ctx().graph(),
+                    drag.snap.map(|end| wire(drag.from, end)),
+                );
                 None
             }
             Some(PointerButton::Right) => {
@@ -218,7 +220,7 @@ impl WireUi {
         let Some(start) = geometry.ports.center(start_port) else {
             return;
         };
-        let pointer = canvas::world_pointer(ui, graph_ctx.camera());
+        let pointer = canvas::world_pointer(ui, graph_ctx.graph(), graph_ctx.camera());
         let Some(end) = state.drag.free_end(pointer, &geometry.ports) else {
             return;
         };
@@ -314,12 +316,12 @@ fn const_drop(ui: &mut Ui, ctx: CanvasCtx<'_>, start: PortRef) -> Option<GraphIn
 /// space" condition that offers the new-node palette. Both halves are screen-space, as the raw
 /// pointer is; the node half comes off `CanvasGeometry`'s snapshot of this frame's body rects,
 /// taken in the same sweep `const_drop` reads.
-fn dropped_on_empty_canvas(ui: &mut Ui, geometry: &CanvasGeometry) -> bool {
+fn dropped_on_empty_canvas(ui: &mut Ui, graph: GraphId, geometry: &CanvasGeometry) -> bool {
     let Some(pointer) = ui.pointer_pos() else {
         return false;
     };
     let over_canvas = ui
-        .response_for(canvas::outer_wid())
+        .response_for(canvas::outer_wid(graph))
         .rect
         .is_some_and(|r| r.contains(pointer));
     over_canvas && !geometry.over_any_node(pointer)

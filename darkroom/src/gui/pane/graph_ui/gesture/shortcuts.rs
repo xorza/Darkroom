@@ -7,7 +7,7 @@
 //! keeps Delete from removing nodes nobody is looking at.
 
 use palantir::{Key, Ui};
-use scenarium::{GraphId, NodeId};
+use scenarium::NodeId;
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
@@ -35,25 +35,28 @@ pub(crate) fn emit(ui: &mut Ui, stage: &mut Stage<'_, CanvasCtx<'_>>) {
     let out = &mut *stage.out;
     let view = graph_ctx.view();
     if ctx.deselects() && !view.selected.is_empty() {
-        out.push_graph(GraphIntent::clear_selection());
+        out.push_graph(graph_ctx.graph(), GraphIntent::clear_selection());
     }
     // Ctrl+0 is the toolbar's reset view: 1:1, centered on the content.
     if reset_zoom && let Some(reset) = Framing::Reset.intent(ui, graph_ctx, ctx.geometry()) {
-        out.push_graph(reset);
+        out.push_graph(graph_ctx.graph(), reset);
     }
     // Ctrl+D drops wires from producers outside the selection; keeping them is the node menu's
     // second Duplicate pick.
     if duplicate {
-        out.extend_graph(GraphIntent::duplicate(
-            graph_ctx.document(),
-            GraphId::Main,
-            graph_ctx.library(),
-            IncomingWires::Drop,
-            || NodeId::unique().as_u128(),
-        ));
+        out.extend_graph(
+            graph_ctx.graph(),
+            GraphIntent::duplicate(
+                graph_ctx.document(),
+                graph_ctx.graph(),
+                graph_ctx.library(),
+                IncomingWires::Drop,
+                || NodeId::unique().as_u128(),
+            ),
+        );
     }
     if delete {
-        out.extend_graph(GraphIntent::remove_selection(view));
+        out.extend_graph(graph_ctx.graph(), GraphIntent::remove_selection(view));
     }
 }
 

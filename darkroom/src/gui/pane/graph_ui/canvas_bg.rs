@@ -2,6 +2,7 @@ use common::Libm;
 use common::LibmVec2;
 use glam::Vec2;
 use palantir::{Configure, Mesh, Panel, RgbaF32, Shape, SizeSpec, TranslateScale, Ui};
+use scenarium::GraphId;
 
 use crate::core::document::viewport::Viewport;
 use crate::gui::pane::graph_ui::canvas;
@@ -49,7 +50,7 @@ impl CanvasBg {
     /// Draw the backdrop in the outer-canvas (screen-local) frame. Call inside the outer canvas,
     /// before the inner transformed canvas, so it sits beneath every wire and node. `viewport` is
     /// the live camera.
-    pub(super) fn draw(&mut self, ui: &mut Ui, theme: &Theme, viewport: Viewport) {
+    pub(super) fn draw(&mut self, ui: &mut Ui, graph: GraphId, theme: &Theme, viewport: Viewport) {
         let Viewport { pan, zoom } = viewport;
         let spacing = theme.canvas.dot_spacing;
         if zoom <= f32::EPSILON || spacing <= f32::EPSILON {
@@ -58,7 +59,7 @@ impl CanvasBg {
         // Last frame's canvas size. A 1-frame stale count on window resize is invisible. Absent on
         // frame 1.
         let Some(size) = ui
-            .response_for(canvas::outer_wid())
+            .response_for(canvas::outer_wid(graph))
             .layout_rect
             .map(|r| Vec2::new(r.size.w, r.size.h))
         else {
@@ -80,7 +81,7 @@ impl CanvasBg {
         }
         let mesh = &self.mesh;
         Panel::canvas()
-            .id(canvas::dots_wid())
+            .id(canvas::dots_wid(graph))
             .size(SizeSpec::FILL)
             .transform(TranslateScale::new(
                 lattice_origin(pan, spacing * scale),

@@ -1,4 +1,4 @@
-//! The canvas's two widget ids and the coordinate space between them.
+//! The canvas's widget ids, one set per graph pane, and the coordinate space between them.
 //!
 //! A graph pane is two nested palantir canvases: an **outer** one that fills
 //! the pane, paints the backdrop, and owns the input routing for everything a
@@ -14,30 +14,31 @@
 
 use glam::Vec2;
 use palantir::{Ui, WidgetId};
+use scenarium::GraphId;
 
 use crate::core::document::viewport::Viewport;
 
 /// The outer (pan-capture) canvas: the rect the gestures poll, the backdrop paints, and the
 /// cull measures against.
-pub(crate) fn outer_wid() -> WidgetId {
-    WidgetId::from_hash("darkroom.graph.canvas.outer")
+pub(crate) fn outer_wid(graph: GraphId) -> WidgetId {
+    WidgetId::from_hash(("darkroom.graph.canvas.outer", graph))
 }
 
 /// The panel that moves and scales the dot lattice.
-pub(super) fn dots_wid() -> WidgetId {
-    WidgetId::from_hash("darkroom.graph.canvas.dots")
+pub(super) fn dots_wid(graph: GraphId) -> WidgetId {
+    WidgetId::from_hash(("darkroom.graph.canvas.dots", graph))
 }
 
 /// The inner (transformed) canvas. Used as the widget seed and for resolving the canvas's
 /// pre-transform origin in wire draws.
-pub(super) fn inner_wid() -> WidgetId {
-    WidgetId::from_hash("darkroom.graph.canvas.inner")
+pub(super) fn inner_wid(graph: GraphId) -> WidgetId {
+    WidgetId::from_hash(("darkroom.graph.canvas.inner", graph))
 }
 
 /// The pointer in canvas-world coords under `viewport`, or `None` off-surface: the outer
-/// canvas's local pointer, whose origin the inner one shares.
-pub(crate) fn world_pointer(ui: &Ui, viewport: Viewport) -> Option<Vec2> {
-    ui.response_for(outer_wid())
+/// canvas's local pointer of `graph`'s pane, whose origin the inner one shares.
+pub(crate) fn world_pointer(ui: &Ui, graph: GraphId, viewport: Viewport) -> Option<Vec2> {
+    ui.response_for(outer_wid(graph))
         .pointer_local
         .map(|local| viewport.to_world(local))
 }

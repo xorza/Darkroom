@@ -7,7 +7,7 @@
 use glam::{UVec2, Vec2};
 use palantir::{App, Harness, RecordPass, SizeSpec, WindowToken};
 use palantir::{Configure, DockOperation, Panel, Rect, SystemScale, Ui, WidgetId};
-use scenarium::NodeId;
+use scenarium::{GraphId, InstancePath, NodeId, SubgraphId};
 
 use crate::core::document::Document;
 use crate::core::document::internals::DocumentFixture;
@@ -58,6 +58,9 @@ pub(crate) struct CanvasHarness {
     /// The view ops the last [`Self::frame`] raised: the one thing the canvas asks of the dock,
     /// a viewer tab for a clicked preview card.
     pub(crate) view_ops: Vec<DockOperation<TabRef>>,
+    /// The subgraph panes the last [`Self::frame`] asked to enter, each with the instance it
+    /// shows them through.
+    pub(crate) entries: Vec<(SubgraphId, Option<InstancePath>)>,
 }
 
 impl CanvasHarness {
@@ -94,6 +97,7 @@ impl CanvasHarness {
             ctx: GraphCtxFixture::over(fixture),
             commands: Vec::new(),
             view_ops: Vec::new(),
+            entries: Vec::new(),
         }
     }
 
@@ -106,11 +110,13 @@ impl CanvasHarness {
             ctx,
             commands,
             view_ops,
+            entries,
         } = self;
         let mut frame = CanvasFrame::new(graph_ui, ctx, AppliesIntents::No);
         ui.frame_app(&mut frame);
         let mut out = frame.finish(ui);
         view_ops.clear();
+        entries.clear();
         let intents: Vec<GraphIntent> = out
             .document()
             .drain()
@@ -123,6 +129,10 @@ impl CanvasHarness {
                 } => Some(intent),
                 DocumentRequest::View(op) => {
                     view_ops.push(op);
+                    None
+                }
+                DocumentRequest::Enter { subgraph, through } => {
+                    entries.push((subgraph, through));
                     None
                 }
             })
@@ -221,7 +231,7 @@ impl CanvasHarness {
     /// node has to land in.
     pub(crate) fn node_rect(&self, node_id: NodeId) -> Rect {
         self.ui
-            .rect(wid::body(node_id))
+            .rect(wid::body(GraphId::Main, node_id))
             .unwrap_or_else(|| panic!("{node_id:?} recorded no body — was the frame primed?"))
     }
 
@@ -230,7 +240,7 @@ impl CanvasHarness {
     /// row's field.
     pub(crate) fn node_center(&self, node_id: NodeId) -> Vec2 {
         self.ui
-            .rect(wid::footer(node_id))
+            .rect(wid::footer(GraphId::Main, node_id))
             .expect("the widget shows")
             .center()
     }
@@ -239,7 +249,7 @@ impl CanvasHarness {
     /// post-transform rect.
     pub(crate) fn port_center(&self, port: PortRef) -> Vec2 {
         self.ui
-            .rect(wid::port_circle(port))
+            .rect(wid::port_circle(GraphId::Main, port))
             .expect("the widget shows")
             .center()
     }

@@ -1,5 +1,4 @@
 use glam::Vec2;
-use scenarium::numbered_port;
 
 use super::*;
 use crate::core::document::internals::DocumentFixture;
@@ -12,7 +11,7 @@ use crate::gui::pane::graph_ui::wid;
 /// under a live gesture, as `NodeCtx::pos` is mirrored pre-record while the body's own arranged
 /// rect is still last frame's. Scribble over empty canvas, move the node onto the scribble
 /// mid-gesture, release: the cut lands only if the probe reads the same `node_world_rect` the
-/// cull and the rubber band do, not one derived off `response_for(wid::body(..))`.
+/// cull and the rubber band do, not one derived off `response_for(wid::body(GraphId::Main, ..))`.
 #[test]
 fn the_breaker_cuts_a_node_at_its_current_position_not_its_last_painted_one() {
     use palantir::PointerButton;
@@ -83,7 +82,7 @@ fn the_breaker_cuts_a_node_it_crossed_after_a_pan_moves_it_out_of_view() {
     h.document_mut().main_view.viewport.pan += Vec2::new(-5000.0, 0.0);
     h.frame();
     assert!(
-        h.ui.rect(wid::body(node)).is_none(),
+        h.ui.rect(wid::body(GraphId::Main, node)).is_none(),
         "the node is culled now"
     );
 
@@ -100,7 +99,7 @@ fn the_breaker_cuts_a_node_it_crossed_after_a_pan_moves_it_out_of_view() {
 #[test]
 fn the_breaker_cuts_a_wire_it_crossed_after_a_pan_moves_it_out_of_view() {
     use palantir::PointerButton;
-    use scenarium::{Binding, InputPort};
+    use scenarium::{Binding, InputPort, numbered_port};
 
     use crate::gui::port_ref::PortRef;
 
@@ -155,7 +154,7 @@ fn the_breaker_cuts_a_wire_it_crossed_after_a_pan_moves_it_out_of_view() {
 #[test]
 fn a_cut_node_takes_the_cuts_of_its_own_inputs() {
     use palantir::PointerButton;
-    use scenarium::{Binding, InputPort};
+    use scenarium::{Binding, InputPort, numbered_port};
 
     use crate::gui::port_ref::PortRef;
 

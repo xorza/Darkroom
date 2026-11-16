@@ -1,9 +1,8 @@
-use scenarium::internals::test_graph::NodeSpec;
 use scenarium::internals::test_graph::TestGraph;
 use scenarium::{
-    CacheMode, DataType, EventPort, FuncId, Graph, GraphSet, Interface, Node, Ports, Subgraph,
-    SubgraphId, internals, numbered_port,
+    CacheMode, DataType, EventPort, FuncId, Graph, InstancePath, Node, ProgramId, internals,
 };
+use scenarium::{internals::test_graph::NodeSpec, numbered_port};
 
 use crate::core::document::internals::DocumentFixture;
 use crate::core::document::tab_ref::TabRef;
@@ -63,19 +62,14 @@ fn a_missing_func_reads_as_a_deletable_stub() {
         internals::unresolved_node(FuncId::literal("7a0265e1-9631-45bd-8ecd-1e923b67a58c"));
     ghost.name = "astro_to_image".into();
     let known_id = graph.add(known);
-    let sub = SubgraphId::from_u128(1);
-    let subgraph = Subgraph::new("inner", Interface::new(Ports::default()));
-    let instance_id = graph.add(Node::instance(sub, &subgraph));
-    let mut graphs = GraphSet::from(graph);
-    graphs.insert_subgraph(sub, subgraph);
-    let mut fixture = DocumentFixture::with_library(graphs, library);
+    let mut fixture = DocumentFixture::with_library(graph, library);
     let ghost_id = fixture.add_stub(ghost);
 
     let fixture = GraphCtxFixture::over(fixture);
     let graph_ctx = fixture.graph_ctx();
 
     // An unresolvable node is not dropped: it stays selectable and deletable.
-    assert_eq!(graph_ctx.nodes().count(), 3, "every placed node resolves");
+    assert_eq!(graph_ctx.nodes().count(), 2, "every placed node resolves");
     let known_node = graph_ctx.node(known_id).unwrap();
     let ghost_node = graph_ctx.node(ghost_id).unwrap();
 
@@ -96,23 +90,12 @@ fn a_missing_func_reads_as_a_deletable_stub() {
 
     // A targeted run overrides the disabled flag; a stub can't be run to.
     assert!(
-        known_node.disabled() && known_node.runnable(),
+        known_node.disabled() && known_node.runnable() == Some(ProgramId::from(known_node.node_id)),
         "a resolved disabled func can be targeted by a one-run override"
     );
     assert!(
-        !ghost_node.runnable(),
+        ghost_node.runnable().is_none(),
         "a stub offers no run affordance — it resolves to nothing"
-    );
-
-    // An instance resolves to its subgraph's face, but has no body to run or cache.
-    let instance = graph_ctx.node(instance_id).unwrap();
-    assert!(!instance.stub());
-    assert_eq!(instance.kind_label(), "inner");
-    assert_eq!(instance.cache(), None);
-    assert!(!instance.cacheable());
-    assert!(
-        !instance.runnable(),
-        "a node with no body is no program node"
     );
 }
 
@@ -222,4 +205,96 @@ fn impure_flag_reads_from_func_behavior() {
         "an outputless func has nothing to store or evict"
     );
     assert!(!pure.sink() && !impure.sink());
+}
+
+/// A pane reads each run result through the instance it shows: a node of a subgraph reads its
+/// program node under the side's `through`, and none when it shows none, when it can seed no run
+/// either; an instance in the main graph seeds no run, as it has no body. Two instances, `i1`
+/// where the node ran in 1.0 s and `i2` where it failed.
+#[test]
+fn run_results_read_through_the_instance_a_pane_shows() {
+    use std::io;
+    use std::sync::Arc;
+
+    use palantir::Display;
+    use scenarium::{
+        GraphId, Interface, InvokeError, NodeExecStatus, NodeStatus, RamUsage, RunError,
+        RunSummary, Subgraph, SubgraphId,
+    };
+
+    use crate::core::document::internals::insert_subgraph;
+    use crate::gui::state::run_state::ExecStatus;
+
+    let mut document = DocumentFixture::default();
+    let id = SubgraphId::from_u128(1);
+    let mut subgraph = Subgraph::new("inner", Interface::default());
+    let inside = subgraph.graph.add(document.plain_node());
+    insert_subgraph(&mut document.document, id, subgraph);
+    let [i1, i2] = [(); 2].map(|()| document.add_instance(id));
+    let mut fixture = GraphCtxFixture::over(document);
+    let row = |instance, status| NodeStatus {
+        program_id: InstancePath::new(&[instance]).node(inside),
+        status: Some(status),
+        ram: RamUsage::default(),
+    };
+    fixture.run_state.complete(RunSummary {
+        nodes: vec![
+            row(i1, NodeExecStatus::Executed { elapsed_secs: 1.0 }),
+            row(
+                i2,
+                NodeExecStatus::Errored {
+                    error: RunError::Invoke(Arc::new(InvokeError::external(io::Error::other(
+                        "boom",
+                    )))),
+                },
+            ),
+        ],
+        ..RunSummary::default()
+    });
+    let graph = GraphId::Subgraph(id);
+    let through = |fixture: &mut GraphCtxFixture, path: Option<InstancePath>| {
+        fixture
+            .open
+            .document_mut()
+            .sides
+            .get_mut(&id)
+            .unwrap()
+            .through = path;
+    };
+
+    through(&mut fixture, Some(InstancePath::new(&[i1])));
+    let node = fixture
+        .graph_ctx_of(graph, Display::default())
+        .node(inside)
+        .unwrap();
+    assert_eq!(node.exec_status(), &ExecStatus::Executed(1.0));
+    let in_i1 = InstancePath::new(&[i1]).node(inside);
+    assert_eq!(node.runnable(), Some(in_i1));
+
+    through(&mut fixture, Some(InstancePath::new(&[i2])));
+    let node = fixture
+        .graph_ctx_of(graph, Display::default())
+        .node(inside)
+        .unwrap();
+    assert!(matches!(node.exec_status(), ExecStatus::Errored(Some(_))));
+    assert_ne!(
+        node.runnable(),
+        Some(in_i1),
+        "each instance its own program node"
+    );
+
+    through(&mut fixture, None);
+    let node = fixture
+        .graph_ctx_of(graph, Display::default())
+        .node(inside)
+        .unwrap();
+    assert_eq!(node.exec_status(), &ExecStatus::None);
+    assert_eq!(node.runnable(), None);
+
+    let main = fixture.graph_ctx();
+    assert_eq!(
+        main.node(i1).unwrap().runnable(),
+        None,
+        "an instance has no body to run"
+    );
 }

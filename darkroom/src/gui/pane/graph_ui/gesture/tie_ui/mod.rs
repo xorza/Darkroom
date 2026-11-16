@@ -11,13 +11,13 @@ pub(crate) mod tie_widget;
 use glam::Vec2;
 use palantir::{LineCap, Shape, Stroke, Ui};
 
-use crate::core::document::graph_view::GraphView;
 use crate::core::document::item_id::ItemId;
 use crate::core::document::tie::TieId;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::route_insert::RouteInsert;
 use crate::gui::frame::requests::Requests;
 use crate::gui::frame::stage::Stage;
+use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph_ui::canvas_input::CanvasGesture;
 use crate::gui::pane::graph_ui::draw::tie::band::{BandInk, BandLook};
@@ -60,7 +60,7 @@ impl TieUi {
         match self.stroke.step(ui, ctx, latch) {
             StrokeStep::Started(at) => self.line.restart(at, zoom),
             StrokeStep::Moved(at) => self.line.reach(at, zoom),
-            StrokeStep::Released => release(&self.line, ctx.graph_ctx().view(), stage.out),
+            StrokeStep::Released => release(&self.line, ctx.graph_ctx(), stage.out),
             StrokeStep::Idle => {}
         }
     }
@@ -105,7 +105,8 @@ impl TieUi {
 /// What a released `line` ties, selecting the tie: the wires it crossed join the first tie it
 /// crossed, less those the tie holds already, or tie into a new one at the mean of their
 /// crossings. A line across nothing ties nothing.
-fn release(line: &TieLine, view: &GraphView, out: &mut Requests) {
+fn release(line: &TieLine, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
+    let (graph, view) = (graph_ctx.graph(), graph_ctx.view());
     let insert = |crossing: &WireCrossing| RouteInsert {
         wire: crossing.wire,
         at: crossing.piece,
@@ -131,7 +132,7 @@ fn release(line: &TieLine, view: &GraphView, out: &mut Requests) {
             if wires.is_empty() {
                 return;
             }
-            out.push_graph(GraphIntent::JoinTie { tie, wires });
+            out.push_graph(graph, GraphIntent::JoinTie { tie, wires });
             tie
         }
         None if line.wires.is_empty() => return,
@@ -145,17 +146,23 @@ fn release(line: &TieLine, view: &GraphView, out: &mut Requests) {
                 .iter()
                 .map(|crossing| crossing.point - first)
                 .sum();
-            out.push_graph(GraphIntent::TieWires {
-                tie,
-                pos: first + offset / line.wires.len() as f32,
-                wires: line.wires.iter().map(insert).collect(),
-            });
+            out.push_graph(
+                graph,
+                GraphIntent::TieWires {
+                    tie,
+                    pos: first + offset / line.wires.len() as f32,
+                    wires: line.wires.iter().map(insert).collect(),
+                },
+            );
             tie
         }
     };
-    out.push_graph(GraphIntent::SetSelection {
-        to: [ItemId::Tie(tie)].into_iter().collect(),
-    });
+    out.push_graph(
+        graph,
+        GraphIntent::SetSelection {
+            to: [ItemId::Tie(tie)].into_iter().collect(),
+        },
+    );
 }
 
 #[cfg(test)]

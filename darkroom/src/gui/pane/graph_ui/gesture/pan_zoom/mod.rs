@@ -34,7 +34,10 @@ impl Framing {
         graph_ctx: GraphCtx<'_>,
         geometry: &CanvasGeometry,
     ) -> Option<GraphIntent> {
-        let vp = ui.response_for(canvas::outer_wid()).layout_rect?.size;
+        let vp = ui
+            .response_for(canvas::outer_wid(graph_ctx.graph()))
+            .layout_rect?
+            .size;
         let pane = Vec2::new(vp.w, vp.h);
         let to = match self {
             Self::Reset => reset_target(geometry, graph_ctx, pane),

@@ -151,7 +151,7 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
     // Two frames, so the port circles have widget ids and `CanvasGeometry` measured centers.
     h.prime(2);
 
-    let source = wid::port_circle(PortRef::output(producer, numbered_port(1)));
+    let source = wid::port_circle(GraphId::Main, PortRef::output(producer, numbered_port(1)));
     let drop_at = h.port_center(PortRef::input(consumer, numbered_port(1)));
 
     h.ui.press(source, PointerButton::Left);
@@ -183,7 +183,7 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
         InputPort::new(consumer, numbered_port(1)),
         Binding::wire(producer, numbered_port(1)),
     );
-    let back_source = wid::port_circle(PortRef::output(consumer, numbered_port(1)));
+    let back_source = wid::port_circle(GraphId::Main, PortRef::output(consumer, numbered_port(1)));
     let back_drop_at = h.port_center(PortRef::input(producer, numbered_port(1)));
     h.advance_past_double_click();
     h.ui.press(back_source, PointerButton::Left);

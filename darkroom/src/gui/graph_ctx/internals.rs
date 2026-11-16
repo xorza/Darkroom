@@ -6,13 +6,14 @@
 //! there. Everything that records a canvas builds on this.
 
 use palantir::Display;
-use scenarium::{Library, NodeId};
+use scenarium::{GraphId, Library, NodeId};
 
 use crate::core::document::internals::{self, DocumentFixture};
 use crate::core::document::item_id::ItemId;
 use crate::core::open_document::OpenDocument;
 use crate::core::wake;
 use crate::gui::frame::app_ctx::AppCtx;
+use crate::gui::frame::doc_ctx::DocCtx;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
@@ -78,9 +79,14 @@ impl GraphCtxFixture {
         self.graph_ctx_on(Display::default())
     }
 
-    /// The context over this fixture on `display`, derived from an [`AppCtx`] whose status-bar
-    /// inputs sit at their empty defaults — no canvas reader sees them.
+    /// The context over this fixture's main graph on `display`, derived from an [`AppCtx`] whose
+    /// status-bar inputs sit at their empty defaults — no canvas reader sees them.
     pub(crate) fn graph_ctx_on(&self, display: Display) -> GraphCtx<'_> {
+        self.graph_ctx_of(GraphId::Main, display)
+    }
+
+    /// [`Self::graph_ctx_on`] for `graph` of the document.
+    pub(crate) fn graph_ctx_of(&self, graph: GraphId, display: Display) -> GraphCtx<'_> {
         let Self {
             open,
             library,
@@ -88,6 +94,6 @@ impl GraphCtxFixture {
             theme,
         } = self;
         let app = AppCtx::new(theme, library, run_state);
-        GraphCtx::new(app, open, display)
+        GraphCtx::of(DocCtx::new(app, open), graph, display)
     }
 }

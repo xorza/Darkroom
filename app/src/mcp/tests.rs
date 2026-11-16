@@ -143,7 +143,7 @@ async fn an_opened_project_is_driven_through_the_tools() {
     assert_eq!(text(&third, 0), text(&early, 0));
     let early: Value = serde_json::from_str(text(&early, 0)).unwrap();
     assert_eq!(
-        (&early["document"], &early["nodes"]),
+        (&early["document"], &early["graphs"][0]["nodes"]),
         (&Value::Null, &json!([])),
         "the session starts on a new document"
     );
@@ -156,20 +156,28 @@ async fn an_opened_project_is_driven_through_the_tools() {
     assert_eq!(opened.is_error, Some(false), "{}", text(&opened, 0));
     let opened: Value = serde_json::from_str(text(&opened, 0)).unwrap();
     assert_eq!(opened["build"], env!("DARKROOM_BUILD"));
-    assert_eq!(opened["state"]["nodes"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        opened["state"]["graphs"][0]["nodes"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
 
     let state = call(&client, "darkroom_state", json!({ "detail": "detailed" }))
         .await
         .unwrap();
     let state: Value = serde_json::from_str(text(&state, 0)).unwrap();
-    let names: Vec<&str> = state["nodes"]
+    let main = &state["graphs"][0];
+    assert_eq!(main["name"], "main");
+    let names: Vec<&str> = main["nodes"]
         .as_array()
         .unwrap()
         .iter()
         .map(|node| node["name"].as_str().unwrap())
         .collect();
     assert_eq!(names, [BRIGHTNESS, BRIGHTNESS]);
-    assert!(state["details"]["wires"].as_array().unwrap().is_empty());
+    assert!(main["details"]["wires"].as_array().unwrap().is_empty());
 
     let click = |at: Value| json!({ "actions": [{ "click": { "at": at } }] });
     let ambiguous = call(
@@ -233,7 +241,7 @@ async fn an_opened_project_is_driven_through_the_tools() {
     );
     let kept = call(&client, "darkroom_state", json!({})).await.unwrap();
     let kept: Value = serde_json::from_str(text(&kept, 0)).unwrap();
-    assert_eq!(kept["selection"], json!([BRIGHTNESS]));
+    assert_eq!(kept["graphs"][0]["selection"], json!([BRIGHTNESS]));
 
     let shot = call(&client, "darkroom_shot", json!({})).await.unwrap();
     assert_eq!(shot.is_error, Some(true));
@@ -260,7 +268,10 @@ async fn an_opened_project_is_driven_through_the_tools() {
     let new = call(&client, "darkroom_open", json!({})).await.unwrap();
     let new: Value = serde_json::from_str(text(&new, 0)).unwrap();
     assert_eq!(
-        (&new["state"]["document"], &new["state"]["nodes"]),
+        (
+            &new["state"]["document"],
+            &new["state"]["graphs"][0]["nodes"]
+        ),
         (&Value::Null, &json!([])),
         "no project is a new unsaved document"
     );

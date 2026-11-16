@@ -168,13 +168,15 @@ impl DarkroomServer {
 
     #[tool(
         description = format!(
-            "The editor as text: the open document, whether it has unsaved edits, each node by \
-             name with its rect on screen, the selection, the focus, the status line, and the \
-             warnings and errors logged since the last call. detailed adds each node's id, \
-             ports, bindings and run status, the wires, the camera and whether an undo is \
-             possible. nodes keeps the nodes whose name contains it and the wires with one at \
-             either end; the list stops at {NODE_LIMIT} nodes, and the answer says how many it \
-             left out. Example: {{\"detail\": \"detailed\", \"nodes\": \"Blur\"}}"
+            "The editor as text: the open document, whether it has unsaved edits, whether an \
+             undo is possible, each graph (the main graph first, then each subgraph, the active \
+             one marked) with each of its nodes by name with its rect on screen and its \
+             selection, the focus, the status line, and the warnings and errors logged since the \
+             last call. detailed adds each node's id, ports, bindings and run status, and each \
+             graph's wires and camera. nodes keeps the nodes whose name contains it and the \
+             wires with one at either end; each graph's list stops at {NODE_LIMIT} nodes, and \
+             the answer says how many it left out. Example: \
+             {{\"detail\": \"detailed\", \"nodes\": \"Blur\"}}"
         )
     )]
     async fn darkroom_state(&self, Parameters(params): Parameters<StateParams>) -> CallToolResult {

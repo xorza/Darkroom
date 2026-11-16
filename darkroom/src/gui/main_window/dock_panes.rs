@@ -5,7 +5,7 @@
 //! whole of darkroom's side of it. Adding a pane *kind* is a new arm in
 //! [`tab_label`] and one in [`DockPanes::body`], and nothing else.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::fmt::Display;
 use std::fmt::Formatter;
@@ -14,12 +14,13 @@ use glam::Vec2;
 use palantir::{
     DockDrop, DockOperation, DockTabMenu, DockTabs, InternedStr, MenuItem, Size, SplitSide, Ui, fmt,
 };
-use scenarium::ProgramId;
+use scenarium::{GraphId, ProgramId};
 
 use crate::core::document::Document;
 use crate::core::document::inspect_target::InspectTarget;
 use crate::core::document::tab_ref::TabRef;
 use crate::core::io::preferences::Preferences;
+use crate::gui::frame::doc_ctx::DocCtx;
 use crate::gui::frame::stage::Stage;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::GraphUi;
@@ -33,29 +34,40 @@ use crate::gui::widgets::format;
 /// A bundle rather than closures, which would each capture the same borrows.
 #[derive(Debug)]
 pub(crate) struct DockPanes<'a> {
-    pub(crate) stage: Stage<'a, GraphCtx<'a>>,
-    pub(crate) graph_ui: &'a mut GraphUi,
+    pub(crate) stage: Stage<'a, DocCtx<'a>>,
+    /// One canvas per graph a tab shows; see `MainWindow::graph_panes`.
+    pub(crate) graph_panes: &'a mut BTreeMap<GraphId, GraphUi>,
     pub(crate) image_viewers: &'a mut HashMap<ProgramId, ImageViewer>,
     pub(crate) preferences: &'a mut Preferences,
 }
 
-/// The name a tab's chip shows, written on demand: an inspector held on a node names it.
+/// The name a tab's chip shows, written on demand: a subgraph's pane names the subgraph, and an
+/// inspector held on a node names it.
 pub(crate) fn tab_label(document: &Document, tab: TabRef) -> TabLabel<'_> {
     match tab {
-        TabRef::Graph => TabLabel::Plain("Graph"),
-        TabRef::Preferences => TabLabel::Plain("Preferences"),
-        TabRef::ImageViewer(node_id) => {
-            TabLabel::Plain(image_viewer::node_label(document, node_id))
-        }
-        TabRef::Inspector(InspectTarget::Selection) => TabLabel::Plain("Inspector"),
-        TabRef::Inspector(InspectTarget::Node(node_id)) => TabLabel::Inspector(format::node_name(
+        TabRef::Graph(GraphId::Main) => TabLabel::Plain("Graph"),
+        TabRef::Graph(GraphId::Subgraph(id)) => TabLabel::Plain(
             &document
                 .graphs
-                .main()
-                .find(node_id)
-                .expect("a held inspector closes with its node")
+                .subgraph(id)
+                .expect("a subgraph's pane closes with it")
                 .name,
-        )),
+        ),
+        TabRef::Preferences => TabLabel::Plain("Preferences"),
+        TabRef::ImageViewer(program_id) => {
+            TabLabel::Plain(image_viewer::node_label(document, program_id))
+        }
+        TabRef::Inspector(InspectTarget::Selection) => TabLabel::Plain("Inspector"),
+        TabRef::Inspector(InspectTarget::Node { addr, .. }) => {
+            TabLabel::Inspector(format::node_name(
+                &document
+                    .graphs
+                    .graph(addr.graph)
+                    .find(addr.node_id)
+                    .expect("a held inspector closes with its node")
+                    .name,
+            ))
+        }
     }
 }
 
@@ -85,9 +97,14 @@ impl DockTabs for DockPanes<'_> {
 
     fn body(&mut self, ui: &mut Ui, tab: TabRef, size: Option<Size>) {
         let ctx = self.stage.ctx;
+        let display = ui.display();
         match tab {
-            TabRef::Graph => {
-                self.graph_ui.record(ui, &mut self.stage);
+            TabRef::Graph(graph) => {
+                let graph_ctx = GraphCtx::of(ctx, graph, display);
+                self.graph_panes
+                    .entry(graph)
+                    .or_default()
+                    .record(ui, &mut self.stage.with(graph_ctx));
             }
             TabRef::Preferences => {
                 PreferencesForm {
@@ -97,7 +114,15 @@ impl DockTabs for DockPanes<'_> {
                 .show(ui, self.preferences);
             }
             TabRef::Inspector(target) => {
-                inspector::show(ui, &mut self.stage, target);
+                // A held inspector reads its node's graph through the instance it was pinned to;
+                // the selection's is the active graph's, through the instance its pane shows.
+                let graph_ctx = match &target {
+                    InspectTarget::Node { addr, through } => {
+                        GraphCtx::of(ctx, addr.graph, display).through_instance(through.as_ref())
+                    }
+                    InspectTarget::Selection => GraphCtx::of(ctx, ctx.active(), display),
+                };
+                inspector::show(ui, &mut self.stage.with(graph_ctx), target);
             }
             TabRef::ImageViewer(program_id) => {
                 let title = image_viewer::node_label(ctx.document(), program_id);
@@ -127,9 +152,9 @@ impl DockTabs for DockPanes<'_> {
         }
     }
 
-    /// Every tab except the pinned graph carries a close button.
+    /// Every tab except the pinned main graph carries a close button.
     fn closable(&mut self, tab: TabRef) -> bool {
-        tab != TabRef::Graph
+        tab != TabRef::Graph(GraphId::Main)
     }
 
     /// The keyboard-free, discoverable route to the same split a chip
@@ -151,5 +176,46 @@ impl DockTabs for DockPanes<'_> {
                 },
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use scenarium::{GraphId, InstancePath, Interface, Node, NodeAddr, Subgraph, SubgraphId};
+
+    use crate::core::document::inspect_target::InspectTarget;
+    use crate::core::document::internals::{DocumentFixture, insert_subgraph};
+    use crate::core::document::tab_ref::TabRef;
+    use crate::core::preview_sink;
+    use crate::gui::main_window::dock_panes::tab_label;
+
+    /// Each tab names what it shows: the main graph's pane "Graph", a subgraph's pane the
+    /// subgraph, and a viewer and a pinned inspector the node inside the subgraph they show.
+    #[test]
+    fn a_tab_names_what_it_shows_in_any_graph() {
+        let mut fixture = DocumentFixture::default();
+        let id = SubgraphId::from_u128(1);
+        let mut subgraph = Subgraph::new("Denoise", Interface::default());
+        let mut preview = Node::from(&preview_sink::func(Arc::default()));
+        preview.name = "Shown".to_string();
+        let shown = subgraph.graph.add(preview);
+        insert_subgraph(&mut fixture.document, id, subgraph);
+        let instance = fixture.add_instance(id);
+        let document = fixture.document;
+        let label = |tab| tab_label(&document, tab).to_string();
+
+        assert_eq!(label(TabRef::Graph(GraphId::Main)), "Graph");
+        assert_eq!(label(TabRef::Graph(GraphId::Subgraph(id))), "Denoise");
+        let path = InstancePath::new(&[instance]);
+        assert_eq!(label(TabRef::ImageViewer(path.node(shown))), "Shown");
+        assert_eq!(
+            label(TabRef::Inspector(InspectTarget::Node {
+                addr: NodeAddr::new(GraphId::Subgraph(id), shown),
+                through: Some(path),
+            })),
+            "Inspector \u{b7} Shown"
+        );
     }
 }

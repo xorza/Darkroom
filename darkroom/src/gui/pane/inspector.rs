@@ -69,7 +69,7 @@ pub(crate) fn show(ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>, target: Ins
 /// The node `target` shows: the pinned one, or the selection's only node.
 fn inspected(ctx: GraphCtx<'_>, target: InspectTarget) -> Option<NodeCtx<'_>> {
     let node_id = match target {
-        InspectTarget::Node(node_id) => node_id,
+        InspectTarget::Node { addr, .. } => addr.node_id,
         InspectTarget::Selection => only_node(ctx.selected())?,
     };
     ctx.node(node_id)
@@ -90,9 +90,8 @@ fn body(ui: &mut Ui, stage: &mut Stage<'_, NodeCtx<'_>>, target: InspectTarget) 
     let node = stage.ctx;
     let theme = node.theme();
     let logs = node
-        .graph_ctx
-        .run_state()
-        .logs(node.graph_ctx.program_id(node.node_id));
+        .program_id()
+        .map_or(&[][..], |id| node.graph_ctx.run_state().logs(id));
     let error = error_message(node.exec_status());
     Panel::vstack()
         .id_salt("inspector_header")
@@ -126,7 +125,10 @@ fn body(ui: &mut Ui, stage: &mut Stage<'_, NodeCtx<'_>>, target: InspectTarget) 
                         .show(ui, theme)
                     {
                         stage.out.push_view(DockOperation::OpenTab {
-                            tab: TabRef::Inspector(InspectTarget::Node(node.node_id)),
+                            tab: TabRef::Inspector(InspectTarget::Node {
+                                addr: node.addr(),
+                                through: node.graph_ctx.through(),
+                            }),
                         });
                     }
                 });

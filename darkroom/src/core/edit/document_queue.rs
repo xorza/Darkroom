@@ -1,7 +1,7 @@
 //! The document's share of a frame's requests.
 
 use palantir::DockOperation;
-use scenarium::GraphId;
+use scenarium::{GraphId, InstancePath, SubgraphId};
 
 use crate::core::document::tab_ref::TabRef;
 use crate::core::edit::document_request::DocumentRequest;
@@ -79,6 +79,12 @@ impl DocumentQueue {
 
     pub(crate) fn push_view(&mut self, op: DockOperation<TabRef>) {
         self.requests.push(DocumentRequest::View(op));
+    }
+
+    /// Queue the entry into `subgraph`'s pane, shown through `through`.
+    pub(crate) fn push_enter(&mut self, subgraph: SubgraphId, through: Option<InstancePath>) {
+        self.requests
+            .push(DocumentRequest::Enter { subgraph, through });
     }
 
     /// Take everything queued, in the order raised.

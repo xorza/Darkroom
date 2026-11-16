@@ -1,4 +1,5 @@
 use palantir::SystemScale;
+use scenarium::GraphId;
 
 use super::*;
 use crate::core::document::internals::DocumentFixture;
@@ -108,7 +109,7 @@ fn the_canvas_draws_a_fractional_pan_on_whole_physical_px() {
     h.prime(2);
 
     let corner =
-        h.ui.rect(canvas::outer_wid())
+        h.ui.rect(canvas::outer_wid(GraphId::Main))
             .expect("the canvas shows")
             .min;
     let body = h.node_rect(node);

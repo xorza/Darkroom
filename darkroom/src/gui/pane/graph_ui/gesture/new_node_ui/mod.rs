@@ -93,7 +93,7 @@ impl NewNodeUi {
         if dropped.is_none() && ctx.gesture() != Some(CanvasGesture::NewNode) {
             return;
         }
-        let resp = ui.response_for(canvas::outer_wid());
+        let resp = ui.response_for(canvas::outer_wid(ctx.graph_ctx().graph()));
         let (Some(local), Some(rect)) = (resp.pointer_local, resp.rect) else {
             return;
         };
@@ -148,7 +148,7 @@ impl NewNodeUi {
         });
 
         let picked = chosen?;
-        stage.out.push_graph(picked);
+        stage.out.push_graph(stage.ctx.graph(), picked);
         self.source
     }
 }

@@ -5,7 +5,6 @@ use std::path::PathBuf;
 
 use glam::UVec2;
 use palantir::{AgentWindow, Found, Image, LocateError, PlayError, Rect, Screenshot, Ui};
-use scenarium::GraphId;
 use serde::Serialize;
 
 use crate::core::document::tab_ref::TabRef;
@@ -229,11 +228,12 @@ fn legend(screenshot: &Screenshot, picture: UVec2, app: &App, ui: &Ui) -> Vec<Le
         let placed = screenshot.place(rect, picture)?;
         Some([placed.min.x, placed.min.y, placed.size.w, placed.size.h])
     };
-    let graphs = &app.open_document().document().graphs;
-    let scope = graphs.scope(app.library(), GraphId::Main);
+    let document = app.open_document().document();
+    let (graphs, active) = (&document.graphs, document.active);
+    let scope = graphs.scope(app.library(), active);
     let mut nodes = Vec::new();
-    for node in graphs.main().iter() {
-        let Some(rect) = place(ui.response_for(wid::body(node.node_id)).rect) else {
+    for node in graphs.graph(active).iter() {
+        let Some(rect) = place(ui.response_for(wid::body(active, node.node_id)).rect) else {
             continue;
         };
         let mut legend = LegendNode {
@@ -244,7 +244,7 @@ fn legend(screenshot: &Screenshot, picture: UVec2, app: &App, ui: &Ui) -> Vec<Le
         };
         if let Ok(func) = scope.resolve(&node) {
             let port = |port: PortRef, name: &str| {
-                place(ui.response_for(wid::port_circle(port)).rect).map(|rect| LegendPort {
+                place(ui.response_for(wid::port_circle(active, port)).rect).map(|rect| LegendPort {
                     name: name.to_string(),
                     rect,
                 })

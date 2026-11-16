@@ -189,7 +189,7 @@ impl Driver {
             .map_err(failed(actions.len()))?;
         Ok(ActReport {
             frames,
-            selection: state.selection,
+            selection: state.active().selection.clone(),
             dirty: state.dirty,
             focus: state.focus,
         })

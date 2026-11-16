@@ -57,10 +57,10 @@ impl CameraGesture {
         if ctx.cancelled()
             && let Some(back) = self.cancel_pan(viewport)
         {
-            stage.out.push_graph(back);
+            stage.out.push_graph(stage.ctx.graph_ctx().graph(), back);
             return;
         }
-        let resp = ui.response_for(canvas::outer_wid());
+        let resp = ui.response_for(canvas::outer_wid(stage.ctx.graph_ctx().graph()));
         let mut v = viewport;
         // Pan latch comes from the central classification; continuation and
         // scroll and pinch below read the response directly (not arbitration).
@@ -76,7 +76,10 @@ impl CameraGesture {
         let unchanged =
             v.pan.approximately_eq(viewport.pan) && v.zoom.approximately_eq(viewport.zoom);
         if !unchanged {
-            stage.out.push_graph(GraphIntent::SetViewport { to: v });
+            stage.out.push_graph(
+                stage.ctx.graph_ctx().graph(),
+                GraphIntent::SetViewport { to: v },
+            );
         }
     }
 

@@ -16,12 +16,14 @@
 //! - **View and layout state is repaired, not refused.** Refused: refusing the
 //!   file, as a bad viewport alone would keep the graph closed.
 //! - **A removal closes what stops resolving.** Every removal — an edit, an undo,
-//!   a redo — goes through [`Document::remove_node`], which closes each tab the removal broke;
-//!   an undo of the removal does not reopen the tab. Refused: scanning every tab each frame.
-//! - **The editor keeps a side beside each subgraph**: its view, keyed as the set's subgraphs
-//!   are. Refused: the view inside scenarium's `Subgraph`, which puts the editor's layout in the
-//!   framework; a `GraphSet` generic over what a host keeps beside a subgraph, which threads a
-//!   type parameter through the scope and the compile.
+//!   a redo — goes through [`Document::remove_node`], which closes each tab and clears each
+//!   `through` the removal broke; an undo of the removal does not reopen the tab. Refused:
+//!   scanning every tab each frame.
+//! - **The editor keeps a side beside each subgraph**: its view and the instance its pane shows
+//!   it through, keyed as the set's subgraphs are. Refused: the view inside scenarium's
+//!   `Subgraph`, which puts the editor's layout in the framework; a `GraphSet` generic over what
+//!   a host keeps beside a subgraph, which threads a type parameter through the scope and the
+//!   compile.
 
 pub(crate) mod error;
 pub(crate) mod graph_revision;
@@ -43,10 +45,10 @@ use std::mem;
 use std::slice;
 
 use glam::Vec2;
-use palantir::DockState;
+use palantir::{DockOperation, DockState, TabGroup};
 use scenarium::{
-    ConstValue, DetachedNode, Graph as CoreGraph, GraphId, GraphSet, Library, Node, NodeAddr,
-    NodeId, PathForm, ProgramId, Stub, SubgraphId,
+    ConstValue, DetachedNode, Graph as CoreGraph, GraphId, GraphSet, InstancePath, Library, Node,
+    NodeAddr, NodeId, PathForm, ProgramId, Stub, SubgraphId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -85,6 +87,17 @@ pub(crate) struct Document {
     /// Mutated only through a `DockOperation`, none of which is undoable.
     #[serde(default = "new_layout", with = "layout_file")]
     pub(crate) layout: DockState<TabRef>,
+    /// The graph the window's commands act on: the selection a menu or the status bar reads, and
+    /// the graph a Duplicate or a Delete edits. View state, not undoable; a request against a
+    /// graph makes it the active one.
+    pub(crate) active: GraphId,
+}
+
+/// One graph of the document and its view, borrowed apart: what an edit of one graph writes.
+#[derive(Debug)]
+pub(crate) struct GraphSlot<'a> {
+    pub(crate) graph: &'a mut CoreGraph,
+    pub(crate) view: &'a mut GraphView,
 }
 
 impl Default for Document {
@@ -94,15 +107,9 @@ impl Default for Document {
             main_view: GraphView::default(),
             sides: BTreeMap::new(),
             layout: new_layout(),
+            active: GraphId::Main,
         }
     }
-}
-
-/// One graph of the document and its view, borrowed apart: what an edit of one graph writes.
-#[derive(Debug)]
-pub(crate) struct GraphSlot<'a> {
-    pub(crate) graph: &'a mut CoreGraph,
-    pub(crate) view: &'a mut GraphView,
 }
 
 impl Document {
@@ -138,14 +145,63 @@ impl Document {
         }
     }
 
+    /// The instance `graph`'s pane shows its run results through: the main graph's own path, a
+    /// subgraph's side's, or `None` for a subgraph shown through none.
+    ///
+    /// # Panics
+    /// If the document holds no `graph`.
+    pub(crate) fn through(&self, graph: GraphId) -> Option<&InstancePath> {
+        match graph {
+            GraphId::Main => Some(&InstancePath::MAIN),
+            GraphId::Subgraph(id) => self
+                .sides
+                .get(&id)
+                .expect("each subgraph has a side")
+                .through
+                .as_ref(),
+        }
+    }
+
+    /// Apply a change of the pane arrangement, then make the graph the focused pane shows the
+    /// active one: a tab picked or a pane focused is input on that pane, as VS Code's active
+    /// editor is the one that "currently has focus"
+    /// ([`window.activeTextEditor`](https://code.visualstudio.com/api/references/vscode-api)).
+    /// A focused pane that shows no graph leaves the active graph as it was.
+    pub(crate) fn apply_view(&mut self, op: DockOperation<TabRef>) {
+        self.layout.apply(op);
+        let focused = self.layout.focused();
+        if let Some(TabRef::Graph(graph)) = self.layout.group(focused).map(TabGroup::active_tab) {
+            self.active = graph;
+        }
+    }
+
+    /// Show `subgraph`'s pane through `through`, open or focus its tab, and make it the active
+    /// graph: the entry into a subgraph. Navigation, as a tab switch is: it records nothing. A
+    /// subgraph the set no longer holds, or a path that names no instance of it, raised against
+    /// an earlier frame's document, enters nothing.
+    pub(crate) fn enter(&mut self, subgraph: SubgraphId, through: Option<InstancePath>) {
+        let graph = GraphId::Subgraph(subgraph);
+        let Some(side) = self.sides.get_mut(&subgraph) else {
+            return;
+        };
+        if through.is_some_and(|path| !shows(&self.graphs, path, graph)) {
+            return;
+        }
+        side.through = through;
+        self.layout.apply(DockOperation::OpenTab {
+            tab: TabRef::Graph(graph),
+        });
+        self.active = graph;
+    }
+
     /// Drop a node of `graph` from the document: the graph, its placement and its selection
-    /// membership, then each tab the removal stopped resolving. Every removal (an edit, an undo
-    /// or a redo) comes through here, so no tab outlives what it shows.
+    /// membership, then each tab and each `through` the removal stopped resolving. Every removal
+    /// (an edit, an undo or a redo) comes through here, so no tab outlives what it shows.
     pub(crate) fn remove_node(&mut self, graph: GraphId, node_id: NodeId) -> DetachedNode {
         let slot = self.slot_mut(graph);
         unplace(slot.view, node_id);
         let record = slot.graph.detach_node(node_id);
-        self.prune_tabs(&mut |_| {});
+        self.prune_views(&mut |_| {});
         record
     }
 
@@ -159,8 +215,18 @@ impl Document {
             .expect("cannot remove a stub the document does not hold")
     }
 
-    /// Close each tab the document stopped holding, handing `closed` each one.
-    fn prune_tabs(&mut self, closed: &mut impl FnMut(TabRef)) {
+    /// Clear each side's `through` that stopped naming an instance of its subgraph, then close
+    /// each tab the document stopped holding, handing `pruned` each change.
+    fn prune_views(&mut self, pruned: &mut impl FnMut(DocumentRepair)) {
+        let Self { graphs, sides, .. } = self;
+        for (&subgraph, side) in sides.iter_mut() {
+            if let Some(path) = side.through
+                && !shows(graphs, path, GraphId::Subgraph(subgraph))
+            {
+                side.through = None;
+                pruned(DocumentRepair::ThroughCleared { subgraph, path });
+            }
+        }
         let stale: Vec<TabRef> = self
             .layout
             .all_tabs()
@@ -172,42 +238,46 @@ impl Document {
             self.layout.retain_tabs(|tab| !stale.contains(&tab));
         }
         for tab in stale {
-            closed(tab);
+            pruned(DocumentRepair::TabClosed { tab });
         }
     }
 
-    /// Whether a tab may be open: the graph pane, `Preferences` and the
-    /// selection's inspector always, a viewer exactly while its node is a
-    /// preview node in the graph, and a pinned inspector while its node is in
-    /// the graph.
+    /// Whether a tab may be open: `Preferences` and the selection's inspector always, a graph's
+    /// pane while the set holds the graph, a viewer exactly while its path names a preview node,
+    /// and a pinned inspector while its graph holds its node and its `through` names an instance
+    /// of that graph.
     pub(crate) fn holds_tab(&self, tab: TabRef) -> bool {
         match tab {
-            TabRef::Graph | TabRef::Preferences | TabRef::Inspector(InspectTarget::Selection) => {
-                true
-            }
+            TabRef::Preferences | TabRef::Inspector(InspectTarget::Selection) => true,
+            TabRef::Graph(graph) => holds_graph(&self.graphs, graph),
             TabRef::ImageViewer(program_id) => self.holds_preview_node(program_id),
-            TabRef::Inspector(InspectTarget::Node(node_id)) => {
-                self.graphs.main().find(node_id).is_some()
+            TabRef::Inspector(InspectTarget::Node { addr, through }) => {
+                holds_graph(&self.graphs, addr.graph)
+                    && self.graphs.graph(addr.graph).find(addr.node_id).is_some()
+                    && through.is_none_or(|path| shows(&self.graphs, path, addr.graph))
             }
         }
     }
 
-    /// Whether `program_id` names a preview node the document holds: a node of the main graph,
-    /// held there as a preview node. The retention of the value one published. Stricter than a
-    /// graph's [`Graph::holds`](scenarium::Graph::holds): the preview store holds textures up to
-    /// 8192² RGBA8, so a value whose key is not a live preview node releases at the next sweep
-    /// instead of riding on the node's own lifetime.
+    /// Whether `program_id` names a preview node the document holds: its path ends in a graph of
+    /// the set, which holds its node as a preview node. The retention of the value one published.
+    /// Stricter than a graph's [`Graph::holds`](scenarium::Graph::holds): the preview store holds
+    /// textures up to 8192² RGBA8, so a value whose key is not a live preview node releases at the
+    /// next sweep instead of riding on the node's own lifetime.
     pub(crate) fn holds_preview_node(&self, program_id: ProgramId) -> bool {
-        program_id.path().is_main() && is_preview_node(self.graphs.main(), program_id.node_id())
+        self.graphs
+            .graph_at(program_id.path())
+            .is_some_and(|graph| is_preview_node(self.graphs.graph(graph), program_id.node_id()))
     }
 
     /// Make a decoded document consistent with itself and `library`, and
     /// report each change: [`GraphSet::reconcile`] the graphs, which keeps
     /// each node a graph cannot hold as a stub and attaches each stub that
     /// resolves again; then give each subgraph a side and drop each side of
-    /// none, repair each view against its graph, and close each tab the
-    /// document no longer holds. Afterwards [`Self::validate`] holds, and the
-    /// graphs compile.
+    /// none, repair each view against its graph, clear each `through` that
+    /// names no instance of its subgraph, make the main graph active in place
+    /// of a graph the set lacks, and close each tab the document no longer
+    /// holds. Afterwards [`Self::validate`] holds, and the graphs compile.
     pub(crate) fn reconcile(&mut self, library: &Library) -> LoadReport {
         let reconciled = self.graphs.reconcile(library);
         let mut repairs: Vec<DocumentRepair> = reconciled
@@ -234,6 +304,7 @@ impl Document {
             graphs,
             main_view,
             sides,
+            active,
             ..
         } = self;
         sides.retain(|&subgraph, _| {
@@ -254,7 +325,11 @@ impl Document {
             let graph = GraphId::Subgraph(subgraph);
             repair_view(graph, &mut side.view, graphs.graph(graph), &mut repairs);
         }
-        self.prune_tabs(&mut |tab| repairs.push(closed_tab_repair(tab)));
+        if !holds_graph(graphs, *active) {
+            repairs.push(DocumentRepair::ActiveReset { graph: *active });
+            *active = GraphId::Main;
+        }
+        self.prune_views(&mut |repair| repairs.push(repair));
         debug_assert!(
             self.validate().is_ok(),
             "a reconciled document is consistent: {:?}",
@@ -278,8 +353,8 @@ impl Document {
 
     /// Check what [`Self::reconcile`] establishes that needs no library: each graph's structure
     /// with its stubs, a side for each subgraph and for nothing else, each view against its
-    /// graph, and the layout. A debug check: a document that fails it is a bug in the load or an
-    /// edit.
+    /// graph, each `through` against the set, the active graph, and the layout. A debug check: a
+    /// document that fails it is a bug in the load or an edit.
     pub(crate) fn validate(&self) -> Result<(), DocumentValidationError> {
         for (graph, held) in self.graphs.graphs() {
             held.validate()
@@ -304,7 +379,16 @@ impl Document {
                 .validate(held)
                 .map_err(|source| DocumentValidationError::View { graph, source })?;
         }
-
+        for (&subgraph, side) in &self.sides {
+            if let Some(path) = side.through
+                && !shows(&self.graphs, path, GraphId::Subgraph(subgraph))
+            {
+                return Err(DocumentValidationError::StaleThrough { subgraph, path });
+            }
+        }
+        if !holds_graph(&self.graphs, self.active) {
+            return Err(DocumentValidationError::ActiveMissing { graph: self.active });
+        }
         for tab in self.layout.all_tabs() {
             if !self.holds_tab(tab) {
                 return Err(DocumentValidationError::MissingTab { tab });
@@ -375,8 +459,23 @@ impl From<GraphSet> for Document {
             main_view,
             sides,
             layout: new_layout(),
+            active: GraphId::Main,
         }
     }
+}
+
+/// Whether `graphs` holds `graph`: the main graph, or a subgraph it holds.
+fn holds_graph(graphs: &GraphSet, graph: GraphId) -> bool {
+    match graph {
+        GraphId::Main => true,
+        GraphId::Subgraph(id) => graphs.subgraph(id).is_some(),
+    }
+}
+
+/// Whether `path` names an instance whose expansion is `graph`: the main graph's own path, or a
+/// path of instances that ends in `graph`.
+fn shows(graphs: &GraphSet, path: InstancePath, graph: GraphId) -> bool {
+    graphs.graph_at(path) == Some(graph)
 }
 
 /// Reset a bad viewport, drop each placement for no node or stub, move each
@@ -479,23 +578,6 @@ fn repair_ties(view: &mut GraphView, held: &CoreGraph, push: &mut impl FnMut(Vie
     });
 }
 
-/// The repair a load reports for closing `tab`, which the document does not hold: a viewer on a
-/// node that is no preview node, or an inspector pinned to a node the graph does not hold.
-///
-/// # Panics
-/// For a tab the document always holds.
-fn closed_tab_repair(tab: TabRef) -> DocumentRepair {
-    match tab {
-        TabRef::ImageViewer(program_id) => DocumentRepair::ViewerClosed { program_id },
-        TabRef::Inspector(InspectTarget::Node(node_id)) => {
-            DocumentRepair::InspectorClosed { node_id }
-        }
-        TabRef::Graph | TabRef::Preferences | TabRef::Inspector(InspectTarget::Selection) => {
-            unreachable!("the document always holds {tab:?}")
-        }
-    }
-}
-
 /// Whether `graph` holds `node_id` as a preview node.
 fn is_preview_node(graph: &CoreGraph, node_id: NodeId) -> bool {
     graph
@@ -504,9 +586,9 @@ fn is_preview_node(graph: &CoreGraph, node_id: NodeId) -> bool {
         .is_some_and(preview_sink::is_func)
 }
 
-/// A fresh dock: one pane showing the graph, the pinned tab, so the tree is never empty.
+/// A fresh dock: one pane showing the main graph, the pinned tab, so the tree is never empty.
 fn new_layout() -> DockState<TabRef> {
-    DockState::new(TabRef::Graph)
+    DockState::new(TabRef::Graph(GraphId::Main))
 }
 
 #[cfg(feature = "internals")]

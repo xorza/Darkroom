@@ -3,7 +3,7 @@
 use std::mem;
 
 use palantir::{EditableLabel, Key, Modifiers, PointerAction, PointerButton, PointerEdge, Ui};
-use scenarium::NodeId;
+use scenarium::{GraphId, Node, NodeId};
 
 use crate::core::document::item_id::ItemId;
 use crate::core::document::tie::TieId;
@@ -137,7 +137,7 @@ impl Gestures {
     /// Esc cancels what is in flight, whatever the modifiers: Ctrl still held from a spawn drag's
     /// chord must not swallow the cancel. Deselect, a command, is plain Esc alone. Both read every
     /// frame, so each stays watched.
-    pub(crate) fn read_input(&self, ui: &mut Ui) -> CanvasInput {
+    pub(crate) fn read_input(&self, ui: &mut Ui, graph: GraphId) -> CanvasInput {
         let cancel = ui.key_pressed(Key::Escape);
         let plain = ui.shortcut_pressed(Key::Escape);
         let escape = if self.in_flight() && cancel {
@@ -147,7 +147,7 @@ impl Gestures {
         } else {
             Escape::Unpressed
         };
-        let canvas = ui.response_for(canvas::outer_wid());
+        let canvas = ui.response_for(canvas::outer_wid(graph));
         CanvasInput {
             gesture: CanvasGesture::classify(&canvas, ui.modifiers(), self.secondary),
             escape,
@@ -169,9 +169,10 @@ impl Gestures {
         if !self.group_drag.in_flight()
             && let Some(start) = preview_drag::start(ui, stage.ctx)
         {
-            self.group_drag.latch(start, ui, stage.out);
+            self.group_drag
+                .latch(start, stage.ctx.graph_ctx().graph(), ui, stage.out);
         }
-        let canvas = ui.response_for(canvas::outer_wid());
+        let canvas = ui.response_for(canvas::outer_wid(stage.ctx.graph_ctx().graph()));
         let dropped = match self.wire_ui.input(ui, stage) {
             Some(WireEnd::DroppedOnCanvas(source)) => Some(source),
             // The press that ended a floating wire is spent, its release too when it lands this
@@ -211,15 +212,15 @@ impl Gestures {
     /// latch on a node's handle, a tie or its knob. A click on a node's title, chip or field is its
     /// widget's.
     fn act_on(&mut self, ui: &mut Ui, action: PointerAction, stage: &mut Stage<'_, CanvasCtx<'_>>) {
-        if action.id == canvas::outer_wid() {
+        let (graph, view) = (stage.ctx.graph_ctx().graph(), stage.ctx.graph_ctx().view());
+        if action.id == canvas::outer_wid(graph) {
             deselect_on_click(action, stage);
             return;
         }
-        let view = stage.ctx.graph_ctx().view();
         if let Some(&tie) = view
             .ties
             .keys()
-            .find(|&&tie| wid::tie_body(tie) == action.id)
+            .find(|&&tie| wid::tie_body(graph, tie) == action.id)
         {
             self.act_on_tie(ui, tie, action, stage);
             return;
@@ -227,12 +228,13 @@ impl Gestures {
         if let Some(&tie) = view
             .ties
             .keys()
-            .find(|&&tie| wid::tie_knob(tie) == action.id)
+            .find(|&&tie| wid::tie_knob(graph, tie) == action.id)
         {
             self.tie_widgets.act_on_knob(tie, action, stage);
             return;
         }
-        let handles = |node: NodeId| wid::drag_handles(node).any(|handle| handle == action.id);
+        let handles =
+            |node: NodeId| wid::drag_handles(graph, node).any(|handle| handle == action.id);
         if let Some(node) = view
             .node_placements
             .keys()
@@ -254,19 +256,30 @@ impl Gestures {
         stage: &mut Stage<'_, CanvasCtx<'_>>,
     ) {
         let graph_ctx = stage.ctx.graph_ctx();
-        let on_body = action.id == wid::body(node);
+        let on_body = action.id == wid::body(graph_ctx.graph(), node);
         match (action.edge, action.button) {
+            // A double click on an instance enters its subgraph, through this pane's path and
+            // the instance; its first click selected it.
+            (PointerEdge::Clicked { count: 2 }, PointerButton::Left)
+                if let Some(subgraph) = on_body
+                    .then(|| graph_ctx.body().find(node).and_then(Node::subgraph))
+                    .flatten() =>
+            {
+                let through = graph_ctx.through().map(|path| path.child(node));
+                stage.out.push_enter(subgraph, through);
+            }
             (PointerEdge::Clicked { .. }, PointerButton::Left) if on_body => {
                 let mode = ClickMode::with_shift(ui.modifiers().contains(Modifiers::SHIFT));
-                stage.out.extend_graph(GraphIntent::click(
-                    mode,
-                    graph_ctx.selected(),
-                    ItemId::Node(node),
-                ));
+                stage.out.extend_graph(
+                    stage.ctx.graph_ctx().graph(),
+                    GraphIntent::click(mode, graph_ctx.selected(), ItemId::Node(node)),
+                );
             }
             (PointerEdge::Clicked { .. }, PointerButton::Right) if on_body => {
                 let opened = self.node_menu.open_on(ui, graph_ctx, node);
-                stage.out.extend_graph(opened);
+                stage
+                    .out
+                    .extend_graph(stage.ctx.graph_ctx().graph(), opened);
             }
             (PointerEdge::DragStarted, PointerButton::Left)
                 if !EditableLabel::is_editing(ui, action.id) =>
@@ -275,7 +288,8 @@ impl Gestures {
                     .node(node)
                     .expect("the placements list the context's own nodes");
                 let start = group_drag::node_grab(node, action.id);
-                self.group_drag.latch(start, ui, stage.out);
+                self.group_drag
+                    .latch(start, stage.ctx.graph_ctx().graph(), ui, stage.out);
             }
             _ => {}
         }
@@ -293,19 +307,21 @@ impl Gestures {
         match (action.edge, action.button) {
             (PointerEdge::Clicked { .. }, PointerButton::Left) => {
                 let mode = ClickMode::with_shift(ui.modifiers().contains(Modifiers::SHIFT));
-                stage.out.extend_graph(GraphIntent::click(
-                    mode,
-                    graph_ctx.selected(),
-                    ItemId::Tie(tie),
-                ));
+                stage.out.extend_graph(
+                    stage.ctx.graph_ctx().graph(),
+                    GraphIntent::click(mode, graph_ctx.selected(), ItemId::Tie(tie)),
+                );
             }
             (PointerEdge::Clicked { .. }, PointerButton::Right) => {
                 let opened = self.tie_menu.open_on(ui, graph_ctx, tie);
-                stage.out.extend_graph(opened);
+                stage
+                    .out
+                    .extend_graph(stage.ctx.graph_ctx().graph(), opened);
             }
             (PointerEdge::DragStarted, PointerButton::Left) => {
                 let start = tie_widget::grab(graph_ctx, tie);
-                self.group_drag.latch(start, ui, stage.out);
+                self.group_drag
+                    .latch(start, stage.ctx.graph_ctx().graph(), ui, stage.out);
             }
             _ => {}
         }
@@ -320,6 +336,9 @@ fn deselect_on_click(action: PointerAction, stage: &mut Stage<'_, CanvasCtx<'_>>
         && stage.ctx.gesture() == Some(CanvasGesture::Deselect)
         && !stage.ctx.graph_ctx().selected().is_empty()
     {
-        stage.out.push_graph(GraphIntent::clear_selection());
+        stage.out.push_graph(
+            stage.ctx.graph_ctx().graph(),
+            GraphIntent::clear_selection(),
+        );
     }
 }

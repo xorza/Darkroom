@@ -4,16 +4,17 @@
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-use scenarium::{GraphId, NodeAddr, NodeId, ProgramId, Repair, SubgraphId, UnknownType};
+use scenarium::{GraphId, InstancePath, NodeAddr, NodeId, Repair, SubgraphId, UnknownType};
 
 use crate::core::document::item_id::ItemId;
+use crate::core::document::tab_ref::TabRef;
 use crate::core::document::tie::TieId;
 use crate::core::document::wire_key::WireKey;
 use crate::core::status_log::{StatusFamily, StatusLog};
 
 /// Every change a load made, in the order it made them, and what it kept but could not read here.
 /// Empty for a document that was already consistent.
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Default)]
 pub(crate) struct LoadReport {
     pub(crate) repairs: Vec<DocumentRepair>,
     pub(crate) foreign_paths: Vec<ForeignPath>,
@@ -41,10 +42,16 @@ pub(crate) enum DocumentRepair {
     SideAdded { subgraph: SubgraphId },
     /// A side for no subgraph.
     SideDropped { subgraph: SubgraphId },
-    /// A viewer tab on a node that is not a preview node in the graph.
-    ViewerClosed { program_id: ProgramId },
-    /// An inspector tab pinned to a node the graph does not hold.
-    InspectorClosed { node_id: NodeId },
+    /// A side's `through` that names no instance of its subgraph, cleared.
+    ThroughCleared {
+        subgraph: SubgraphId,
+        path: InstancePath,
+    },
+    /// An active graph the set does not hold, made the main graph.
+    ActiveReset { graph: GraphId },
+    /// A tab on something the document does not hold: a graph, a preview node or a pinned
+    /// inspector's node.
+    TabClosed { tab: TabRef },
 }
 
 /// One change a load made to a graph's view.
@@ -193,13 +200,19 @@ impl Display for DocumentRepair {
                     "removed the view of {subgraph:?}, which names no subgraph"
                 )
             }
-            Self::InspectorClosed { node_id } => {
-                write!(f, "closed the inspector of {node_id:?}, which is no node")
-            }
-            Self::ViewerClosed { program_id } => {
+            Self::ThroughCleared { subgraph, path } => {
                 write!(
                     f,
-                    "closed the viewer of {program_id:?}, which is no preview node"
+                    "showed subgraph {subgraph:?} through no instance: {path:?} names none of it"
+                )
+            }
+            Self::ActiveReset { graph } => {
+                write!(f, "made the main graph active: {graph:?} names no graph")
+            }
+            Self::TabClosed { tab } => {
+                write!(
+                    f,
+                    "closed the tab {tab:?}: the document does not hold what it shows"
                 )
             }
         }
@@ -272,14 +285,13 @@ mod tests {
         SubgraphId, UnknownType,
     };
 
-    use crate::core::document::load_report::{DocumentRepair, ForeignPath, LoadReport, ViewRepair};
+    use crate::core::document::load_report::{DocumentRepair, ForeignPath, LoadReport};
 
     /// The status line names what the load has to report, and each part alone reads whole.
     #[test]
     fn the_status_line_names_each_kind() {
-        let repairs = vec![DocumentRepair::View {
+        let repairs = vec![DocumentRepair::ActiveReset {
             graph: GraphId::Main,
-            repair: ViewRepair::ViewportReset,
         }];
         let foreign_paths: Vec<ForeignPath> = ["/a", "/b"]
             .map(|path| ForeignPath {

@@ -1,5 +1,5 @@
 mod card;
-mod const_editor;
+pub(crate) mod const_editor;
 pub(crate) mod header;
 mod node_footer;
 pub(super) mod node_record;
@@ -82,7 +82,7 @@ impl NodeUi {
             let n = graph_ctx
                 .node(item.node_id)
                 .expect("the paint order lists the context's own placements");
-            let keeps_focus = ui.is_focus_within(wid::body(n.node_id));
+            let keeps_focus = ui.is_focus_within(wid::body(graph_ctx.graph(), n.node_id));
             if keeps_focus {
                 focus_kept = Some(n.node_id);
             }
@@ -98,7 +98,7 @@ impl NodeUi {
                 }
                 continue;
             }
-            let node_ctx = n.with_hover(wid::hover(ui, n.node_id));
+            let node_ctx = n.with_hover(wid::hover(ui, graph_ctx.graph(), n.node_id));
             self.draw_node(ui, node_ctx, pass);
         }
         self.paint_order = order;
@@ -167,7 +167,7 @@ impl NodeUi {
 
         let row_tracks = &mut self.row_tracks;
         Panel::vstack()
-            .id(wid::body(node.node_id))
+            .id(wid::body(node.graph_ctx.graph(), node.node_id))
             .visibility(visibility)
             .at(node.pos)
             // A preview needs room for a thumbnail.

@@ -5,6 +5,7 @@ use super::*;
 use crate::core::document::internals::DocumentFixture;
 use crate::core::status_log::StatusMessage;
 use crate::gui::app::session::internals::SessionHarness;
+use scenarium::ProgramId;
 
 /// The memory clause leads with the process and sums both cache pools; no footprint leaves no
 /// clause, even with a populated cache.
@@ -168,7 +169,7 @@ fn the_run_line_leads_with_the_worst_of_the_run() {
 /// canvas's next input stage moves the camera onto it.
 #[test]
 fn the_run_lines_link_selects_and_frames_the_cause() {
-    use scenarium::{InvokeError, NodeExecStatus, NodeStatus, ProgramId, RunError, RunSummary};
+    use scenarium::{InvokeError, NodeExecStatus, NodeStatus, RunError, RunSummary};
     use std::io;
     use std::sync::Arc;
 
@@ -222,7 +223,10 @@ fn the_run_lines_link_selects_and_frames_the_cause() {
     assert!(
         matches!(
             commands[..],
-            [AppCommand::View(ViewCommand::Frame(Framing::ShowSelected))]
+            [AppCommand::View(ViewCommand::Frame {
+                graph: GraphId::Main,
+                framing: Framing::ShowSelected
+            })]
         ),
         "{commands:?}"
     );
@@ -233,12 +237,72 @@ fn the_run_lines_link_selects_and_frames_the_cause() {
     );
 
     let before = h.session.open.document().main_view.viewport;
-    h.session.frame_graph(Framing::ShowSelected);
+    h.session.frame_graph(GraphId::Main, Framing::ShowSelected);
     h.frame();
     h.drain();
     assert_ne!(
         h.session.open.document().main_view.viewport,
         before,
         "the next input stage framed the selection"
+    );
+}
+
+/// A cause inside a subgraph is shown in that subgraph's pane: the link enters it through the
+/// instance the cause ran in, selects the cause there and frames that pane.
+#[test]
+fn the_run_lines_link_enters_the_subgraph_of_its_cause() {
+    use scenarium::{
+        InstancePath, Interface, InvokeError, NodeExecStatus, NodeStatus, RunError, RunSummary,
+        Subgraph, SubgraphId,
+    };
+    use std::io;
+    use std::sync::Arc;
+
+    use crate::core::document::internals::insert_subgraph;
+    use crate::core::document::item_id::ItemId;
+
+    let mut fixture = DocumentFixture::default();
+    let id = SubgraphId::from_u128(1);
+    let mut subgraph = Subgraph::new("inner", Interface::default());
+    let inside = subgraph.graph.add(fixture.plain_node());
+    insert_subgraph(&mut fixture.document, id, subgraph);
+    let instance = fixture.add_instance(id);
+    let mut h = SessionHarness::new(fixture);
+    let path = InstancePath::new(&[instance]);
+    h.run_state.complete(RunSummary {
+        nodes: vec![NodeStatus {
+            program_id: path.node(inside),
+            status: Some(NodeExecStatus::Errored {
+                error: RunError::Invoke(Arc::new(InvokeError::external(io::Error::other("boom")))),
+            }),
+            ram: RamUsage::default(),
+        }],
+        ..RunSummary::default()
+    });
+    h.prime(2);
+    h.ui.click(
+        h.ui.rect(cause_link_wid())
+            .expect("the link shows")
+            .center(),
+    );
+    let graph = GraphId::Subgraph(id);
+    let commands = h.frame();
+    assert!(
+        matches!(
+            commands[..],
+            [AppCommand::View(ViewCommand::Frame {
+                graph: framed,
+                framing: Framing::ShowSelected
+            })] if framed == graph
+        ),
+        "{commands:?}"
+    );
+    h.drain();
+    let document = h.session.open.document();
+    assert_eq!(document.active, graph);
+    assert_eq!(document.sides[&id].through, Some(path));
+    assert_eq!(
+        document.view(graph).selected,
+        BTreeSet::from([ItemId::Node(inside)])
     );
 }

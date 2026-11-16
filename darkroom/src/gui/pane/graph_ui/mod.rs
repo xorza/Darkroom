@@ -25,8 +25,9 @@ pub(crate) mod unsettled_ctx;
 pub(crate) mod wid;
 
 use palantir::{Chrome, Configure, Panel, Sense, SizeSpec, TranslateScale, Ui};
+use scenarium::Graph;
 
-use crate::core::document::Document;
+use crate::core::document::graph_revision::GraphRevision;
 use crate::gui::frame::framing::Framing;
 use crate::gui::frame::requests::Requests;
 use crate::gui::frame::stage::Stage;
@@ -99,6 +100,10 @@ pub(crate) struct GraphUi {
     /// A framing a surface outside the canvas asked for — the status bar's link, a menu —
     /// raised as a camera move in the next input stage, which has the settled geometry it needs.
     framing: Option<Framing>,
+    /// The revision of this pane's graph its node caches were last swept at. A node can only go
+    /// with a step that moves its graph's revision, so a frame at the same one has nothing to
+    /// sweep.
+    swept_at: Option<GraphRevision>,
 }
 
 impl GraphUi {
@@ -107,10 +112,19 @@ impl GraphUi {
         self.framing = Some(framing);
     }
 
-    /// Evict this canvas's `NodeId`-keyed cache, the cross-frame geometry, down to the nodes the
-    /// main graph still holds; see [`CanvasGeometry::retain_nodes`].
-    pub(crate) fn retain_nodes(&mut self, document: &Document) {
-        let graph = document.graphs.main();
+    /// [`Self::retain_nodes`], when `revision`, the revision of the graph this pane shows, moved
+    /// since the last sweep.
+    pub(crate) fn sweep(&mut self, graph: &Graph, revision: GraphRevision) {
+        if self.swept_at != Some(revision) {
+            self.retain_nodes(graph);
+            self.swept_at = Some(revision);
+        }
+    }
+
+    /// Evict this canvas's `NodeId`-keyed cache, the cross-frame geometry, down to the nodes
+    /// `graph`, the graph it shows, still holds, as a node or a stub; see
+    /// [`CanvasGeometry::retain_nodes`].
+    pub(crate) fn retain_nodes(&mut self, graph: &Graph) {
         self.geometry.retain_nodes(|node_id| graph.holds(node_id));
     }
 
@@ -135,7 +149,7 @@ impl GraphUi {
         // One classification for the whole frame. A controller with nothing in flight has nothing
         // to cancel, so each applies this to its own state slot unconditionally and lets its
         // existing "no gesture" path do the rest.
-        let input = self.gestures.read_input(ui);
+        let input = self.gestures.read_input(ui, graph_ctx.graph());
         let unsettled = UnsettledCtx::new(graph_ctx, input);
         self.gestures
             .before_geometry(ui, &mut stage.with(unsettled));
@@ -192,7 +206,7 @@ impl GraphUi {
             .bake_snap_hover(&mut self.geometry);
         if let Some(framing) = self.framing.take() {
             let moved = framing.intent(ui, stage.ctx, &self.geometry);
-            stage.out.extend_graph(moved);
+            stage.out.extend_graph(stage.ctx.graph(), moved);
         }
     }
 
@@ -260,21 +274,21 @@ impl GraphUi {
         // off-screen node panel's screen rect can dwarf the surface and trip `Damage::Full`
         // every pan/zoom tick.
         Panel::canvas()
-            .id(canvas::outer_wid())
+            .id(canvas::outer_wid(graph_ctx.graph()))
             .size(SizeSpec::FILL)
             .sense(Sense::CLICK | Sense::DRAG | Sense::SCROLL | Sense::PINCH)
             .clip_rect()
             .chrome(Chrome::new(theme.canvas.bg))
             .show(ui, |ui| {
                 // Dotted backdrop in screen space, beneath the inner canvas.
-                self.bg.draw(ui, theme, viewport);
+                self.bg.draw(ui, graph_ctx.graph(), theme, viewport);
                 Panel::canvas()
-                    .id(canvas::inner_wid())
+                    .id(canvas::inner_wid(graph_ctx.graph()))
                     .size(SizeSpec::FILL)
                     .transform(TranslateScale::new(viewport.pan, viewport.zoom))
                     .show(ui, |ui| {
                         let cull = CullRegion::from_size(
-                            ui.response_for(canvas::outer_wid())
+                            ui.response_for(canvas::outer_wid(graph_ctx.graph()))
                                 .layout_rect
                                 .map(|rect| rect.size),
                             &viewport,
@@ -350,6 +364,7 @@ pub(crate) mod internals;
 
 #[cfg(test)]
 mod tests {
+    use scenarium::GraphId;
 
     use glam::UVec2;
     use palantir::Harness;
@@ -393,14 +408,14 @@ mod tests {
         };
 
         let (mut h, node) = fresh();
-        let intents = click(&mut h, wid::body(node), PointerButton::Left);
+        let intents = click(&mut h, wid::body(GraphId::Main, node), PointerButton::Left);
         assert!(
             matches!(intents[0], GraphIntent::SetSelection { .. }),
             "{intents:?}"
         );
 
         let (mut h, node) = fresh();
-        click(&mut h, wid::body(node), PointerButton::Right);
+        click(&mut h, wid::body(GraphId::Main, node), PointerButton::Right);
         assert!(
             h.graph_ui.gestures.node_menu.in_flight(),
             "the menu latched"
@@ -415,10 +430,14 @@ mod tests {
         assert!(h.graph_ui.gestures.new_node_ui.in_flight());
 
         let (mut h, node) = fresh();
-        click(&mut h, wid::rename(node), PointerButton::Left);
+        click(
+            &mut h,
+            wid::rename(GraphId::Main, node),
+            PointerButton::Left,
+        );
 
         let (mut h, node) = fresh();
-        h.ui.press(wid::body(node), PointerButton::Left);
+        h.ui.press(wid::body(GraphId::Main, node), PointerButton::Left);
         h.frame();
         h.ui.release(PointerButton::Left);
         h.ui.key(shortcuts::DELETE);
@@ -426,7 +445,7 @@ mod tests {
 
         // The press would end a floating wire, so the wire floats from past the press.
         let (mut h, node) = fresh();
-        h.ui.press(wid::body(node), PointerButton::Left);
+        h.ui.press(wid::body(GraphId::Main, node), PointerButton::Left);
         h.frame();
         let start = PortRef::output(h.node(1), numbered_port(1));
         let CanvasHarness { graph_ui, ctx, .. } = &mut h;
@@ -452,12 +471,49 @@ mod tests {
         h.frame();
 
         let (mut h, node) = fresh();
-        click(&mut h, wid::body(node), PointerButton::Right);
+        click(&mut h, wid::body(GraphId::Main, node), PointerButton::Right);
         click(&mut h, BARE, PointerButton::Left);
         assert!(
             !h.graph_ui.gestures.node_menu.in_flight(),
             "the menu closed"
         );
+    }
+
+    /// A double click on an instance asks to enter its subgraph through the pane's path and the
+    /// instance; on a node of a func it enters nothing.
+    #[test]
+    fn a_double_click_on_an_instance_enters_its_subgraph() {
+        use palantir::PointerButton;
+        use scenarium::{InstancePath, Interface, Subgraph, SubgraphId};
+
+        use crate::core::document::internals::{DocumentFixture, insert_subgraph};
+        use crate::gui::pane::graph_ui::internals::CanvasHarness;
+
+        let mut fixture = DocumentFixture::probes(1);
+        let id = SubgraphId::from_u128(1);
+        insert_subgraph(
+            &mut fixture.document,
+            id,
+            Subgraph::new("inner", Interface::default()),
+        );
+        let instance = fixture.add_instance(id);
+        let plain = fixture.node(0);
+        let mut h = CanvasHarness::new(fixture);
+        h.prime(2);
+        let double_click = |h: &mut CanvasHarness, node| {
+            h.advance_past_double_click();
+            for _ in 0..2 {
+                h.ui.press(wid::body(GraphId::Main, node), PointerButton::Left);
+                h.frame();
+                h.ui.release(PointerButton::Left);
+                h.frame();
+            }
+        };
+
+        double_click(&mut h, instance);
+        assert_eq!(h.entries, [(id, Some(InstancePath::new(&[instance])))]);
+        double_click(&mut h, plain);
+        assert!(h.entries.is_empty(), "{:?}", h.entries);
     }
 
     /// A settle lands a framing the record raised: a reset from zoom 2 moves the camera, once.
@@ -486,8 +542,8 @@ mod tests {
         assert!(matches!(
             requests[..],
             [DocumentRequest::Graph {
-                intent: GraphIntent::SetViewport { .. },
-                ..
+                graph: GraphId::Main,
+                intent: GraphIntent::SetViewport { .. }
             }],
         ));
         let mut again = settle(&mut h);

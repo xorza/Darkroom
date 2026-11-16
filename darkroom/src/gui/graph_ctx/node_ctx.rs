@@ -2,8 +2,8 @@
 
 use glam::Vec2;
 use scenarium::{
-    CacheMode, DetachReason, EventPort, Func, FuncEvent, Node, NodeDecl, NodeId, PortId, RamUsage,
-    Unresolved,
+    CacheMode, DetachReason, EventPort, Func, FuncEvent, Node, NodeAddr, NodeDecl, NodeId, PortId,
+    ProgramId, RamUsage, Unresolved,
 };
 
 use crate::core::preview_sink;
@@ -56,6 +56,14 @@ pub(crate) struct NodeCtx<'a> {
     hover: Hover,
 }
 
+/// The program node `node` of `graph_ctx`'s graph is in the instance the pane shows: `None` when
+/// it shows none, or for a node with no body, an instance or a boundary node, which emits none.
+fn program_id(graph_ctx: GraphCtx<'_>, node_id: NodeId, node: &Node) -> Option<ProgramId> {
+    graph_ctx
+        .program_id(node_id)
+        .filter(|_| node.cache().is_some())
+}
+
 impl<'a> NodeCtx<'a> {
     /// Resolve the placed `node_id` against the document.
     ///
@@ -79,7 +87,7 @@ impl<'a> NodeCtx<'a> {
             pos,
             node,
             declaration,
-            run: graph_ctx.run_state().node(graph_ctx.program_id(node_id)),
+            run: program_id(graph_ctx, node_id, node).and_then(|id| graph_ctx.run_state().node(id)),
             hover: Hover::Rest,
         }
     }
@@ -202,14 +210,27 @@ impl<'a> NodeCtx<'a> {
         self.sink()
     }
 
-    /// Whether this node can seed a "run to this node" — drives the header
-    /// play chip, the context-menu item, and the port menu's "Add preview".
+    /// This node, named in the document.
+    pub(crate) const fn addr(self) -> NodeAddr {
+        NodeAddr::new(self.graph_ctx.graph(), self.node_id)
+    }
+
+    /// The program node this node is in the instance the pane shows, or `None` when it shows
+    /// none or the node emits none: what a run, a preview and a viewer of this node name.
+    /// Derived on each ask rather than held, as a path is 129 bytes and the context is copied
+    /// into every port's.
+    pub(crate) fn program_id(self) -> Option<ProgramId> {
+        program_id(self.graph_ctx, self.node_id, self.node)
+    }
+
+    /// The program node this node can seed a "run to this node" as — drives the header play
+    /// chip and the context-menu item — or `None` when it can seed none.
     ///
-    /// A node with a body qualifies: a *disabled* node still runs, as a targeted run overrides
-    /// that flag. An authoring-side fact, not a lookup in a compiled program, so it holds before
-    /// the first compile.
-    pub(crate) const fn runnable(self) -> bool {
-        !self.stub() && self.node.cache().is_some()
+    /// A node with a body qualifies, shown through an instance: a *disabled* node still runs,
+    /// as a targeted run overrides that flag. An authoring-side fact, not a lookup in a compiled
+    /// program, so it holds before the first compile.
+    pub(crate) fn runnable(self) -> Option<ProgramId> {
+        self.program_id().filter(|_| !self.stub())
     }
 
     /// Outcome of the last graph run, with its detail. Drives the node's

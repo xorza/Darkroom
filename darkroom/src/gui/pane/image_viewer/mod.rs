@@ -503,17 +503,17 @@ impl Display for HeaderReadout<'_> {
 
 /// Display label for a viewer tab / pane header: the node's name through
 /// [`format::node_name`], borrowed from the document. Each reader resolves its own, as one
-/// hash probe per label is cheaper than a table keyed by every tab.
+/// path walk per label is cheaper than a table keyed by every tab.
 pub(crate) fn node_label(document: &Document, program_id: ProgramId) -> &str {
-    debug_assert!(
-        program_id.path().is_main(),
-        "a viewer tab names a node of the main graph"
-    );
+    let graph = document
+        .graphs
+        .graph_at(program_id.path())
+        .expect("a viewer tab's path is in the set");
     let node = document
         .graphs
-        .main()
+        .graph(graph)
         .find(program_id.node_id())
-        .expect("a viewer tab's node is in the graph");
+        .expect("a viewer tab's node is in its graph");
     format::node_name(&node.name)
 }
 

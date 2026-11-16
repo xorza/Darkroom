@@ -1,7 +1,7 @@
 use common::Libm;
 use glam::Vec2;
 use palantir::{Modifiers, PointerButton};
-use scenarium::{InputPort, OutputPort, numbered_port};
+use scenarium::{GraphId, InputPort, OutputPort, numbered_port};
 
 use crate::core::document::internals::DocumentFixture;
 use crate::core::document::item_id::ItemId;
@@ -276,7 +276,7 @@ fn the_knob_of_a_selected_tie_pins_and_frees_its_angle() {
 
     let (mut h, tie) = one_tie(true);
     let knob =
-        h.ui.rect(wid::tie_knob(tie))
+        h.ui.rect(wid::tie_knob(GraphId::Main, tie))
             .expect("the widget shows")
             .center();
     h.ui.press(knob, PointerButton::Left);
@@ -309,7 +309,7 @@ fn the_knob_of_a_selected_tie_pins_and_frees_its_angle() {
     h.document_mut().main_view.ties.get_mut(&tie).unwrap().angle = TieAngle::Pinned(30.0);
     h.prime(2);
     let knob =
-        h.ui.rect(wid::tie_knob(tie))
+        h.ui.rect(wid::tie_knob(GraphId::Main, tie))
             .expect("the widget shows")
             .center();
     h.advance_past_double_click();

@@ -233,11 +233,11 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
         (theme.port.size, Some(theme.card.fill))
     };
     let margin = theme.port_margin(PortKind::Input, diameter * 0.5);
-    let wid = wid::port_circle(port);
+    let wid = wid::port_circle(record.node.graph_ctx.graph(), port);
     // The label area answers a double-click of its own, as the circle has its own id; also the
     // context-menu anchor.
     let cell = Panel::hstack()
-        .id(wid::input_cell(port))
+        .id(wid::input_cell(record.node.graph_ctx.graph(), port))
         .grid_cell((grid_row(input.idx()), COL_INPUT))
         .align(Align::LEFT)
         .size(SizeSpec::HUG)
@@ -283,16 +283,16 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
             // unbound one has nothing to seed (its label double-click renames).
             None => {
                 if let Some(default) = input.default() {
-                    record.stage.out.push_graph(GraphIntent::set_input(
-                        input.port(),
-                        Binding::Const(default),
-                    ));
+                    record.stage.out.push_graph(
+                        record.node.graph_ctx.graph(),
+                        GraphIntent::set_input(input.port(), Binding::Const(default)),
+                    );
                 }
             }
-            Some(_) => record
-                .stage
-                .out
-                .push_graph(GraphIntent::set_input(input.port(), None)),
+            Some(_) => record.stage.out.push_graph(
+                record.node.graph_ctx.graph(),
+                GraphIntent::set_input(input.port(), None),
+            ),
         }
     }
     Menu::for_id(menu_id).size(SizeSpec::HUG).show(ui, |ui| {
@@ -306,10 +306,10 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
             .clicked()
             && let Some(value) = default
         {
-            record
-                .stage
-                .out
-                .push_graph(GraphIntent::set_input(input.port(), Binding::Const(value)));
+            record.stage.out.push_graph(
+                record.node.graph_ctx.graph(),
+                GraphIntent::set_input(input.port(), Binding::Const(value)),
+            );
         }
         if MenuItem::new("Clear binding")
             .disabled(input.binding().is_none())
@@ -317,10 +317,10 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
             .left
             .clicked()
         {
-            record
-                .stage
-                .out
-                .push_graph(GraphIntent::set_input(input.port(), None));
+            record.stage.out.push_graph(
+                record.node.graph_ctx.graph(),
+                GraphIntent::set_input(input.port(), None),
+            );
         }
     });
 }
@@ -332,7 +332,7 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
 fn value_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCtx<'_>) {
     let node_ctx = record.node;
     let port = input.port();
-    let editor_id = wid::const_editor(port);
+    let editor_id = wid::const_editor(record.node.graph_ctx.graph(), port);
     // The one owner of the "only Const bindings get an inline editor" filter: a wired input's
     // value is its wire, and one that takes only a wire has no field to leave empty, so neither
     // renders a value cell.
@@ -365,6 +365,7 @@ fn value_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCtx<'_>)
             .stage
             .out
             .push_app(AppCommand::Edit(EditCommand::PickInputPath(PathPick {
+                graph: record.node.graph_ctx.graph(),
                 port,
                 path_type,
             })));
@@ -383,10 +384,10 @@ fn value_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCtx<'_>)
         .show(ui)
     });
     if let Some(new_value) = edited {
-        record
-            .stage
-            .out
-            .push_graph(GraphIntent::set_input(port, Binding::Const(new_value)));
+        record.stage.out.push_graph(
+            record.node.graph_ctx.graph(),
+            GraphIntent::set_input(port, Binding::Const(new_value)),
+        );
     }
 }
 
@@ -416,7 +417,7 @@ fn output_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, output: OutputCtx<'
         data_type,
     }
     .intern(ui, node_ctx);
-    let wid = wid::port_circle(port);
+    let wid = wid::port_circle(record.node.graph_ctx.graph(), port);
     let margin = theme.port_margin(PortKind::Output, theme.port.radius());
     let cell = Panel::hstack()
         .id_salt(("out", port.port))
@@ -445,6 +446,7 @@ fn output_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, output: OutputCtx<'
     // lost a wire.
     if glyph.left.double_clicked() {
         record.stage.out.extend_graph(
+            record.node.graph_ctx.graph(),
             node_ctx
                 .graph_ctx
                 .wires()
@@ -469,6 +471,7 @@ fn output_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, output: OutputCtx<'
                 .center(port)
                 .map_or(Vec2::ZERO, |center| center + PREVIEW_SPAWN_OFFSET);
             record.stage.out.extend_graph(
+                record.node.graph_ctx.graph(),
                 PreviewSpawn {
                     port: output.port(),
                     pos,
@@ -503,7 +506,7 @@ impl EventRow<'_> {
         let node_id = node_ctx.node_id;
         let margin = theme.port_margin(PortKind::Output, theme.port.radius());
         let ev = EventPort::new(node_id, event.id);
-        let wid = wid::event_glyph(ev);
+        let wid = wid::event_glyph(node_ctx.graph_ctx.graph(), ev);
         let fill = Hover::from(draw_ctx.geometry().events.is_hovered(ev)).lift(theme.port.event);
         let tooltip = node_ctx
             .tooltips()

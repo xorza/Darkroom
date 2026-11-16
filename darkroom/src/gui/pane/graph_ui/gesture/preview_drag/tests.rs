@@ -1,5 +1,5 @@
 use glam::Vec2;
-use scenarium::{Binding, numbered_port};
+use scenarium::{Binding, GraphId, numbered_port};
 
 use crate::core::document::internals::DocumentFixture;
 use crate::core::preview_sink;
@@ -36,7 +36,10 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
     // Ctrl held, press on the output circle, then drag.
     h.ui.hold_modifiers(Modifiers::CTRL);
     let from = h.port_center(out_port);
-    h.ui.press(wid::port_circle(out_port), PointerButton::Left);
+    h.ui.press(
+        wid::port_circle(GraphId::Main, out_port),
+        PointerButton::Left,
+    );
     h.frame();
     // `first_drag_started` polls the drag edge, not the press, so the pointer has to move past
     // palantir's threshold.
@@ -91,7 +94,10 @@ fn esc_on_a_preview_spawn_takes_the_card_back() {
         h.prime(2);
         h.ui.hold_modifiers(ctrl);
         let from = h.port_center(out_port);
-        h.ui.press(wid::port_circle(out_port), PointerButton::Left);
+        h.ui.press(
+            wid::port_circle(GraphId::Main, out_port),
+            PointerButton::Left,
+        );
         h.frame_applied();
         h.ui.drag_to(from + Vec2::new(90.0, 40.0));
         h.frame_applied();

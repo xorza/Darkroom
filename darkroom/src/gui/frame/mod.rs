@@ -1,5 +1,5 @@
 //! What every UI surface speaks: the root of the frame's read-only context chain
-//! ([`app_ctx`]), the bundle each level hands down ([`stage`]), what a record takes past it ([`window_parts`], [`requests`]), and the
+//! ([`app_ctx`]) and the document over it ([`doc_ctx`]), the bundle each level hands down ([`stage`]), what a record takes past it ([`window_parts`], [`requests`]), and the
 //! commands a surface raises for the shell ([`app_command`], [`framing`]). Data only — the levels
 //! that act on it import it, and it imports none of them.
 //!
@@ -8,6 +8,7 @@
 
 pub(crate) mod app_command;
 pub(crate) mod app_ctx;
+pub(crate) mod doc_ctx;
 pub(crate) mod framing;
 pub(crate) mod requests;
 pub(crate) mod shortcuts;

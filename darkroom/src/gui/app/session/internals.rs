@@ -14,7 +14,7 @@
 
 use glam::UVec2;
 use palantir::{App, ColorScheme, Harness, RecordPass, Ui, WindowToken};
-use scenarium::Library;
+use scenarium::{GraphId, Library};
 
 use crate::core::document::internals::DocumentFixture;
 use crate::core::edit::graph_intent::GraphIntent;
@@ -108,9 +108,10 @@ pub(crate) struct SessionHarness {
 }
 
 impl Session {
-    /// The canvas's geometry, for a test that reads which ports a pass could anchor a wire to.
+    /// The main graph's canvas's geometry, for a test that reads which ports a pass could anchor
+    /// a wire to.
     pub(crate) fn geometry(&self) -> &CanvasGeometry {
-        self.main_window.graph_ui.geometry()
+        self.main_window.graph_panes[&GraphId::Main].geometry()
     }
 }
 
@@ -141,7 +142,7 @@ impl SessionHarness {
     /// Push one intent through the real edit path, as a widget's does.
     pub(crate) fn apply(&mut self, intent: GraphIntent) {
         self.session
-            .apply_edit(intent, &self.library, &mut self.requests);
+            .apply_edit(GraphId::Main, intent, &self.library, &mut self.requests);
     }
 
     /// Drain the queued intents into the document, as the frame's edit phase does.

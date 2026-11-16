@@ -20,10 +20,10 @@ use crate::core::open_document::OpenDocument;
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::FileCommand;
 use crate::gui::frame::app_command::RunCommand;
+use crate::gui::frame::doc_ctx::DocCtx;
 use crate::gui::frame::framing::Framing;
 use crate::gui::frame::requests::Requests;
 use crate::gui::frame::stage::Stage;
-use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::main_window::MainWindow;
 use palantir::{Shortcut, Ui};
 use scenarium::{GraphId, GraphSet, Library};
@@ -79,17 +79,12 @@ impl Session {
         debug_assert!(stage.out.is_empty(), "the last frame left requests behind");
         let library = stage.ctx.library();
         self.apply_undo_redo(ui, stage.out);
-        let display = ui.display();
-        self.main_window.scan_navigation(
-            ui,
-            &mut stage.with(GraphCtx::new(stage.ctx, &self.open, display)),
-        );
+        self.main_window
+            .scan_navigation(ui, &mut stage.with(DocCtx::new(stage.ctx, &self.open)));
         self.drain(library, stage.out);
 
-        self.main_window.input(
-            ui,
-            &mut stage.with(GraphCtx::new(stage.ctx, &self.open, display)),
-        );
+        self.main_window
+            .input(ui, &mut stage.with(DocCtx::new(stage.ctx, &self.open)));
         self.drain(library, stage.out);
 
         // The file/run/quit chords only queue an `AppCommand`, so they need no drain of their own.
@@ -103,15 +98,15 @@ impl Session {
         requests.owe_relayout_after(facts);
     }
 
-    /// Apply one edit of the main graph outside the frame's drain, as a blocking dialog's answer
-    /// is.
+    /// Apply one edit outside the frame's drain, as a blocking dialog's answer is.
     pub(crate) fn apply_edit(
         &mut self,
+        graph: GraphId,
         intent: GraphIntent,
         library: &Library,
         requests: &mut Requests,
     ) {
-        requests.owe_relayout_after(self.open.apply_edit(GraphId::Main, intent, library));
+        requests.owe_relayout_after(self.open.apply_edit(graph, intent, library));
     }
 
     /// Take back the last edit.
@@ -128,11 +123,8 @@ impl Session {
     /// and a second pass, which reads the rects of the pass before it.
     pub(crate) fn settle(&mut self, ui: &Ui, stage: &mut Stage<'_, AppCtx<'_>>) {
         let library = stage.ctx.library();
-        let display = ui.display();
-        self.main_window.settle(
-            ui,
-            &mut stage.with(GraphCtx::new(stage.ctx, &self.open, display)),
-        );
+        self.main_window
+            .settle(ui, &mut stage.with(DocCtx::new(stage.ctx, &self.open)));
         self.drain(library, stage.out);
     }
 
@@ -151,10 +143,9 @@ impl Session {
     ) {
         debug_assert!(stage.out.is_empty(), "the last pass left requests behind");
         let library = stage.ctx.library();
-        let display = ui.display();
         self.main_window.record(
             ui,
-            &mut stage.with(GraphCtx::new(stage.ctx, &self.open, display)),
+            &mut stage.with(DocCtx::new(stage.ctx, &self.open)),
             parts,
         );
         // Graph edits the record surfaced (cache toggle, const edit), plus the tab
@@ -178,11 +169,11 @@ impl Session {
         }
     }
 
-    /// Frame the graph in the canvas's next input stage; see [`ViewCommand::Frame`].
+    /// Frame `graph` in its canvas's next input stage; see [`ViewCommand::Frame`].
     ///
     /// [`ViewCommand::Frame`]: crate::gui::frame::app_command::ViewCommand::Frame
-    pub(crate) const fn frame_graph(&mut self, framing: Framing) {
-        self.main_window.graph_ui.request_framing(framing);
+    pub(crate) fn frame_graph(&mut self, graph: GraphId, framing: Framing) {
+        self.main_window.frame(graph, framing);
     }
 
     /// Release the canvas's `NodeId`-keyed caches for nodes the document has stopped holding.

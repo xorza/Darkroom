@@ -1,7 +1,7 @@
 use glam::{UVec2, Vec2};
 use palantir::{EditableLabel, PointerButton};
-use scenarium::internals::test_graph::TestGraph;
-use scenarium::{CacheMode, GraphId, NodeId};
+use scenarium::{CacheMode, NodeAddr, NodeId};
+use scenarium::{GraphId, internals::test_graph::TestGraph};
 use std::mem;
 use std::sync::Arc;
 
@@ -28,10 +28,10 @@ fn the_header_is_one_row_of_run_title_cache_and_inspect() {
     h.prime(2);
     let rect = |h: &CanvasHarness, id| h.ui.rect(id).expect("recorded");
     let row = [
-        wid::of_node("run_button", node_id),
-        wid::rename(node_id),
-        cache_button_wid(node_id),
-        wid::inspect_button(node_id),
+        wid::of_node("run_button", GraphId::Main, node_id),
+        wid::rename(GraphId::Main, node_id),
+        cache_button_wid(GraphId::Main, node_id),
+        wid::inspect_button(GraphId::Main, node_id),
     ]
     .map(|id| rect(&h, id));
     for pair in row.windows(2) {
@@ -56,7 +56,7 @@ fn the_header_is_one_row_of_run_title_cache_and_inspect() {
 fn a_drag_on_a_title_moves_the_node_unless_its_field_is_open() {
     let drag_latches = |open: bool| {
         let mut h = CanvasHarness::sized(DocumentFixture::probes(1), SURFACE);
-        let title = wid::rename(h.node(0));
+        let title = wid::rename(GraphId::Main, h.node(0));
         h.prime(2);
         let at = h.ui.rect(title).expect("recorded").center();
         if open {
@@ -107,10 +107,10 @@ fn pick(from: CacheMode, row: usize) -> Pick {
         .unwrap() = from;
     h.prime(2);
     let button =
-        h.ui.rect(cache_button_wid(node_id))
+        h.ui.rect(cache_button_wid(GraphId::Main, node_id))
             .expect("a cacheable node's button");
     h.ui.click(
-        h.ui.rect(cache_button_wid(node_id))
+        h.ui.rect(cache_button_wid(GraphId::Main, node_id))
             .expect("the widget shows")
             .center(),
     );
@@ -143,7 +143,7 @@ fn cache_edits(pick: &Pick) -> Vec<CacheMode> {
 
 fn flushed(pick: &Pick) -> bool {
     pick.commands.iter().any(|command| {
-        matches!(command, AppCommand::Run(RunCommand::FlushCache(id)) if *id == pick.node_id)
+        matches!(command, AppCommand::Run(RunCommand::FlushCache(addr)) if *addr == NodeAddr::new(GraphId::Main, pick.node_id))
     })
 }
 
@@ -177,7 +177,7 @@ fn clear_cache_evicts_and_edits_nothing() {
     let pick = pick(CacheMode::Ram, CLEAR);
     assert!(cache_edits(&pick).is_empty(), "{:?}", pick.intents);
     assert!(
-        matches!(pick.commands[..], [AppCommand::Run(RunCommand::EvictCache(id))] if id == pick.node_id),
+        matches!(pick.commands[..], [AppCommand::Run(RunCommand::EvictCache(addr))] if addr == NodeAddr::new(GraphId::Main, pick.node_id)),
         "{:?}",
         pick.commands
     );
@@ -216,7 +216,7 @@ fn the_inspect_button_selects_its_node_and_opens_one_inspector() {
     for node_id in [ids[0], ids[1]] {
         h.prime(2);
         h.ui.click(
-            h.ui.rect(wid::inspect_button(node_id))
+            h.ui.rect(wid::inspect_button(GraphId::Main, node_id))
                 .expect("the widget shows")
                 .center(),
         );
@@ -238,16 +238,22 @@ fn a_preview_node_shows_one_kind_mark_after_its_title() {
     let preview = fixture.add(&preview_sink::func(Arc::default()));
     let mut h = CanvasHarness::sized(fixture, SURFACE);
     h.prime(2);
-    let title = h.ui.rect(wid::rename(preview)).expect("recorded");
+    let title =
+        h.ui.rect(wid::rename(GraphId::Main, preview))
+            .expect("recorded");
     let mark =
-        h.ui.rect(wid::of_node("kind_mark", preview))
+        h.ui.rect(wid::of_node("kind_mark", GraphId::Main, preview))
             .expect("a preview has a kind mark");
     let disable =
-        h.ui.rect(wid::of_node("disable_button", preview))
+        h.ui.rect(wid::of_node("disable_button", GraphId::Main, preview))
             .expect("a sink can be disabled");
     assert!(title.max().x <= mark.min.x && mark.max().x <= disable.min.x);
     for gone in ["sink_mark", "impure_mark"] {
-        assert_eq!(h.ui.rect(wid::of_node(gone, preview)), None, "{gone}");
+        assert_eq!(
+            h.ui.rect(wid::of_node(gone, GraphId::Main, preview)),
+            None,
+            "{gone}"
+        );
     }
 }
 
@@ -265,7 +271,10 @@ fn a_node_and_its_pin_show_once_measured() {
         .find(|node| node.sink())
         .expect("the fixture holds a sink")
         .node_id;
-    let parts = [wid::body(sink), wid::subscription_glyph(sink)];
+    let parts = [
+        wid::body(GraphId::Main, sink),
+        wid::subscription_glyph(GraphId::Main, sink),
+    ];
     let listed = |h: &CanvasHarness| {
         parts.map(|part| h.ui.widgets(None).iter().any(|widget| widget.id == part))
     };
@@ -277,7 +286,7 @@ fn a_node_and_its_pin_show_once_measured() {
         &h.ctx.library,
     );
     h.frame();
-    h.graph_ui.retain_nodes(h.ctx.open.document());
+    h.graph_ui.retain_nodes(h.ctx.open.document().graphs.main());
     let _restored = h.ctx.open.undo();
     h.frame();
     assert_eq!(

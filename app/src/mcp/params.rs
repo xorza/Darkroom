@@ -61,8 +61,9 @@ pub(crate) struct ActParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(crate = "rmcp::schemars")]
 pub(crate) struct StateParams {
-    /// `concise` (the default): nodes, selection, focus, status. `detailed` adds each node's id,
-    /// ports, bindings and run status, the wires, the camera and the undo.
+    /// `concise` (the default): each graph's nodes and selection, the focus, the status and the
+    /// undo. `detailed` adds each node's id, ports, bindings and run status, and each graph's
+    /// wires and camera.
     #[serde(default)]
     pub(crate) detail: DetailParam,
     /// Only the nodes whose name contains this, and the wires with one at either end.

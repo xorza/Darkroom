@@ -11,7 +11,7 @@ use std::rc::Rc;
 
 use glam::Vec2;
 use palantir::{Ui, WidgetId};
-use scenarium::NodeId;
+use scenarium::{GraphId, NodeId};
 
 use crate::core::document::graph_view::GraphView;
 use crate::core::document::item_id::ItemId;
@@ -86,13 +86,13 @@ impl GroupDrag {
     /// Start (or replace) the gesture on what `start` grabbed, and move it to where the pointer
     /// has travelled, as a latch is past the drag threshold. A frame with no later input still
     /// shows the move.
-    pub(crate) fn latch(&mut self, start: GrabStart, ui: &Ui, out: &mut Requests) {
+    pub(crate) fn latch(&mut self, start: GrabStart, graph: GraphId, ui: &Ui, out: &mut Requests) {
         let GrabStart { grab, joined } = start;
         let gesture = out.open_gesture();
-        out.extend_graph_in(gesture, joined);
+        out.extend_graph_in(gesture, graph, joined);
         let anchor = Anchor { grab, gesture };
         if let Some(delta) = ui.response_for(anchor.grab.handle).left.drag.delta() {
-            out.push_graph(anchor.frame(delta));
+            out.push_graph(graph, anchor.frame(delta));
         }
         self.anchor = Some(anchor);
     }
@@ -135,7 +135,7 @@ impl GroupDrag {
             // between have sealed it, the members go back to where the drag latched them.
             stage
                 .out
-                .push_cancel(anchor.gesture, anchor.frame(Vec2::ZERO));
+                .push_cancel(anchor.gesture, graph_ctx.graph(), anchor.frame(Vec2::ZERO));
             self.anchor = None;
             return;
         }
@@ -146,7 +146,7 @@ impl GroupDrag {
         };
         // Palantir reports drag deltas in the widget's pre-transform frame, the canvas-world space
         // item positions live in.
-        stage.out.push_graph(anchor.frame(delta));
+        stage.out.push_graph(graph_ctx.graph(), anchor.frame(delta));
     }
 }
 

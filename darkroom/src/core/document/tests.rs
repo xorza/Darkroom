@@ -1,9 +1,6 @@
 use std::sync::Arc;
 
-use palantir::DockOperation;
-use scenarium::{
-    Binding, EventPort, InputPort, Interface, OutputPort, Ports, Subgraph, numbered_port,
-};
+use scenarium::{Binding, EventPort, InputPort, Interface, OutputPort, Subgraph, numbered_port};
 
 use super::*;
 use crate::core::document::internals::{DocumentFixture, insert_subgraph};
@@ -33,25 +30,20 @@ fn node_liveness_is_one_rule_with_two_declared_narrowings() {
             "the graph holds {node:?}"
         );
     }
-    let (preview_program, plain_program) = (ProgramId::from(preview), ProgramId::from(plain));
-    assert!(document.holds_preview_node(preview_program));
+    let [preview_id, plain_id] = [preview, plain].map(ProgramId::from);
+    assert!(document.holds_preview_node(preview_id));
     assert!(
-        !document.holds_preview_node(plain_program),
+        !document.holds_preview_node(plain_id),
         "a stub retains no published value"
     );
     assert!(
-        !document.holds_tab(TabRef::ImageViewer(plain_program)),
+        !document.holds_tab(TabRef::ImageViewer(plain_id)),
         "a stub has no viewer"
-    );
-    let nested = ProgramId::new(&[NodeId::unique(), preview]);
-    assert!(
-        !document.holds_preview_node(nested),
-        "a path past the main graph names no node of it"
     );
 
     // The same rule asked of a tab: a viewer dies with its node, the non-node tabs never do.
-    assert!(document.holds_tab(TabRef::ImageViewer(preview_program)));
-    assert!(document.holds_tab(TabRef::Graph));
+    assert!(document.holds_tab(TabRef::ImageViewer(preview_id)));
+    assert!(document.holds_tab(TabRef::Graph(GraphId::Main)));
     assert!(document.holds_tab(TabRef::Preferences));
 
     document.graphs.main_mut().detach_node(preview);
@@ -60,11 +52,11 @@ fn node_liveness_is_one_rule_with_two_declared_narrowings() {
         "the graph says gone"
     );
     assert!(
-        !document.holds_preview_node(preview_program),
+        !document.holds_preview_node(preview_id),
         "and so does the narrowing"
     );
     assert!(
-        !document.holds_tab(TabRef::ImageViewer(preview_program)),
+        !document.holds_tab(TabRef::ImageViewer(preview_id)),
         "and so does the tab lift"
     );
     assert!(
@@ -83,7 +75,10 @@ fn removing_a_node_closes_its_viewer_and_its_pinned_inspector() {
     let mut document = fixture.document;
     let tabs = [
         TabRef::ImageViewer(ProgramId::from(node_id)),
-        TabRef::Inspector(InspectTarget::Node(node_id)),
+        TabRef::Inspector(InspectTarget::Node {
+            addr: NodeAddr::new(GraphId::Main, node_id),
+            through: Some(InstancePath::MAIN),
+        }),
         TabRef::Inspector(InspectTarget::Selection),
     ];
     for tab in tabs {
@@ -103,43 +98,12 @@ fn removing_a_node_closes_its_viewer_and_its_pinned_inspector() {
     document.validate().expect("no tab names the removed node");
 }
 
-/// A viewer tab is held while its path names a preview node of the main graph, and the load
-/// closes one whose path goes through an instance, as the main graph places that node once.
-#[test]
-fn reconcile_closes_a_viewer_whose_path_leaves_the_main_graph() {
-    let mut fixture = DocumentFixture::default();
-    let preview = fixture.add(&preview_sink::func(Arc::default()));
-    let DocumentFixture {
-        mut document,
-        library,
-    } = fixture;
-    let main = ProgramId::from(preview);
-    let nested = ProgramId::new(&[NodeId::unique(), preview]);
-    for program_id in [main, nested] {
-        document.layout.apply(DockOperation::OpenTab {
-            tab: TabRef::ImageViewer(program_id),
-        });
-    }
-
-    let report = document.reconcile(&library);
-    assert_eq!(
-        report.repairs,
-        [DocumentRepair::ViewerClosed { program_id: nested }]
-    );
-    let viewers: Vec<TabRef> = document
-        .layout
-        .all_tabs()
-        .filter(|tab| matches!(tab, TabRef::ImageViewer(_)))
-        .collect();
-    assert_eq!(viewers, [TabRef::ImageViewer(main)]);
-}
-
 /// The load repairs the view and the layout around the graph, in order,
 /// and reports each repair: a bad viewport resets, a placement for no node
-/// goes, a non-finite position and a missing placement go to the origin, a
-/// viewer on a node that is no preview node closes, and so does an inspector
-/// pinned to a node the graph does not hold. A selected node that
-/// lacked a placement stays selected, as it is placed first.
+/// goes, a non-finite position and a missing placement go to the origin, an
+/// active graph the set lacks makes the main graph active, and a viewer on a
+/// node that is no preview node closes. A selected node that lacked a
+/// placement stays selected, as it is placed first.
 #[test]
 fn reconcile_repairs_the_view_and_the_layout() {
     let mut fixture = DocumentFixture::default();
@@ -160,39 +124,34 @@ fn reconcile_repairs_the_view_and_the_layout() {
         .node_placements
         .insert(ghost, NodePlacement::default());
     document.main_view.selected = [unplaced].map(ItemId::Node).into_iter().collect();
-    document.layout.apply(DockOperation::OpenTab {
-        tab: TabRef::ImageViewer(ProgramId::from(shown)),
-    });
-    document.layout.apply(DockOperation::OpenTab {
-        tab: TabRef::Inspector(InspectTarget::Node(ghost)),
-    });
+    let viewer = TabRef::ImageViewer(ProgramId::from(shown));
+    document
+        .layout
+        .apply(DockOperation::OpenTab { tab: viewer });
+    let active = GraphId::Subgraph(SubgraphId::from_u128(4));
+    document.active = active;
 
     let report = document.reconcile(&library);
     assert_eq!(
         report.repairs,
         [
-            DocumentRepair::View {
-                graph: GraphId::Main,
-                repair: ViewRepair::ViewportReset,
-            },
-            DocumentRepair::View {
-                graph: GraphId::Main,
-                repair: ViewRepair::PlacementDropped { node_id: ghost }
-            },
-            DocumentRepair::View {
-                graph: GraphId::Main,
-                repair: ViewRepair::PosReset { node_id: shown }
-            },
-            DocumentRepair::View {
-                graph: GraphId::Main,
-                repair: ViewRepair::Placed { node_id: unplaced }
-            },
-            DocumentRepair::ViewerClosed {
-                program_id: ProgramId::from(shown),
-            },
-            DocumentRepair::InspectorClosed { node_id: ghost },
+            ViewRepair::ViewportReset,
+            ViewRepair::PlacementDropped { node_id: ghost },
+            ViewRepair::PosReset { node_id: shown },
+            ViewRepair::Placed { node_id: unplaced },
         ]
+        .map(|repair| DocumentRepair::View {
+            graph: GraphId::Main,
+            repair
+        })
+        .into_iter()
+        .chain([
+            DocumentRepair::ActiveReset { graph: active },
+            DocumentRepair::TabClosed { tab: viewer },
+        ])
+        .collect::<Vec<_>>()
     );
+    assert_eq!(document.active, GraphId::Main);
     assert_eq!(document.main_view.node_placements[&shown].pos, Vec2::ZERO);
     assert_eq!(
         document.main_view.node_placements[&unplaced].pos,
@@ -212,78 +171,10 @@ fn reconcile_repairs_the_view_and_the_layout() {
     );
 }
 
-/// The load gives each subgraph a side and drops a side for none: a subgraph with no side gets
-/// one placed in a row, one placement per node, and each side's view is repaired against its own
-/// graph. Before it, the check names the first subgraph with no side.
-#[test]
-fn reconcile_keeps_one_side_per_subgraph() {
-    let mut fixture = DocumentFixture::default();
-    let [sided, missing, unsided] = [1, 2, 3].map(SubgraphId::from_u128);
-    let mut subgraph = Subgraph::new("unsided", Interface::default());
-    subgraph.graph.add(fixture.plain_node());
-    let DocumentFixture {
-        mut document,
-        library,
-    } = fixture;
-    document.graphs.insert_subgraph(unsided, subgraph);
-    insert_subgraph(
-        &mut document,
-        sided,
-        Subgraph::new("sided", Interface::default()),
-    );
-    let ghost = NodeId::unique();
-    document
-        .slot_mut(GraphId::Subgraph(sided))
-        .view
-        .node_placements
-        .insert(ghost, NodePlacement::default());
-    document.sides.insert(
-        missing,
-        SubgraphSide::new(&Subgraph::new("gone", Interface::default()).graph),
-    );
-    assert!(matches!(
-        document.validate(),
-        Err(DocumentValidationError::SideMismatch { subgraph }) if subgraph == unsided
-    ));
-
-    let report = document.reconcile(&library);
-    assert_eq!(
-        report.repairs,
-        [
-            DocumentRepair::SideDropped { subgraph: missing },
-            DocumentRepair::SideAdded { subgraph: unsided },
-            DocumentRepair::View {
-                graph: GraphId::Subgraph(sided),
-                repair: ViewRepair::PlacementDropped { node_id: ghost },
-            },
-        ]
-    );
-    assert_eq!(
-        report.repairs[2].to_string(),
-        format!(
-            "in the view of subgraph {sided:?}, removed the placement of {ghost:?}, which names no node"
-        )
-    );
-    assert_eq!(
-        document.sides.keys().copied().collect::<Vec<_>>(),
-        [sided, unsided]
-    );
-    assert_eq!(
-        document.sides[&unsided].view.node_placements.len(),
-        3,
-        "its two boundary nodes and its node"
-    );
-    document.validate().expect("a reconciled document is valid");
-    assert!(
-        document.reconcile(&library).is_empty(),
-        "nothing is left to repair"
-    );
-}
-
 /// The load repairs the ties and the routes, in order, and reports each
-/// repair. Routes go in wire order: on `w1 = a.0 → b.0`, through `[t1, ghost,
-/// t1]`, the step to no tie and the repeat go; the route keyed by `a.0 → b.1`,
-/// a wire the graph does not hold, goes; on `w3 = a.0 → b.2`, through
+/// repair. Routes go in wire order: on `w1 = a.1 → b.1`, through `[t1, ghost,
+/// t1]`, the step to no tie and the repeat go; the route keyed by `a.1 → b.2`,
+/// a wire the graph does not hold, goes; on `w3 = a.1 → b.3`, through
 /// `[ghost]`, the step goes and the route left empty with it. Then ties in id
 /// order: `t1` at NaN moves to the origin, `t2` pinned to 400° turns itself,
 /// `t3`, which no route names, goes, and so does `t4`, which only the dropped
@@ -333,55 +224,29 @@ fn reconcile_repairs_the_ties() {
     assert_eq!(
         report.repairs,
         [
-            DocumentRepair::View {
-                graph: GraphId::Main,
-                repair: ViewRepair::RouteStepDropped {
-                    wire: w1,
-                    tie: ghost
-                }
+            ViewRepair::RouteStepDropped {
+                wire: w1,
+                tie: ghost
             },
-            DocumentRepair::View {
-                graph: GraphId::Main,
-                repair: ViewRepair::RouteStepRepeated { wire: w1, tie: t1 }
+            ViewRepair::RouteStepRepeated { wire: w1, tie: t1 },
+            ViewRepair::RouteDropped { wire: unheld },
+            ViewRepair::RouteStepDropped {
+                wire: w3,
+                tie: ghost
             },
-            DocumentRepair::View {
-                graph: GraphId::Main,
-                repair: ViewRepair::RouteDropped { wire: unheld }
-            },
-            DocumentRepair::View {
-                graph: GraphId::Main,
-                repair: ViewRepair::RouteStepDropped {
-                    wire: w3,
-                    tie: ghost
-                }
-            },
-            DocumentRepair::View {
-                graph: GraphId::Main,
-                repair: ViewRepair::EmptyRouteDropped { wire: w3 }
-            },
-            DocumentRepair::View {
-                graph: GraphId::Main,
-                repair: ViewRepair::TiePosReset { tie: t1 }
-            },
-            DocumentRepair::View {
-                graph: GraphId::Main,
-                repair: ViewRepair::TieAngleFreed { tie: t2 }
-            },
-            DocumentRepair::View {
-                graph: GraphId::Main,
-                repair: ViewRepair::TieDropped { tie: t3 }
-            },
-            DocumentRepair::View {
-                graph: GraphId::Main,
-                repair: ViewRepair::TieDropped { tie: t4 }
-            },
-            DocumentRepair::View {
-                graph: GraphId::Main,
-                repair: ViewRepair::SelectionDropped {
-                    item: ItemId::Tie(t3)
-                }
+            ViewRepair::EmptyRouteDropped { wire: w3 },
+            ViewRepair::TiePosReset { tie: t1 },
+            ViewRepair::TieAngleFreed { tie: t2 },
+            ViewRepair::TieDropped { tie: t3 },
+            ViewRepair::TieDropped { tie: t4 },
+            ViewRepair::SelectionDropped {
+                item: ItemId::Tie(t3)
             },
         ]
+        .map(|repair| DocumentRepair::View {
+            graph: GraphId::Main,
+            repair
+        })
     );
     let view = &document.main_view;
     assert_eq!(
@@ -443,6 +308,192 @@ fn validation_holds_paths_absolute() {
     ));
 }
 
+/// The load gives each subgraph a side and drops a side for none: a subgraph with no side gets
+/// one placed in a row, one placement per node; a side whose `through` names no instance of its
+/// subgraph shows it through none; a tab on a graph the set lacks closes, while the active
+/// subgraph and its tab stay.
+#[test]
+fn reconcile_keeps_one_side_per_subgraph() {
+    let mut fixture = DocumentFixture::default();
+    let [sided, missing, unsided] = [1, 2, 3].map(SubgraphId::from_u128);
+    let mut subgraph = Subgraph::new("unsided", Interface::default());
+    subgraph.graph.add(fixture.plain_node());
+    let DocumentFixture {
+        mut document,
+        library,
+    } = fixture;
+    document.graphs.insert_subgraph(unsided, subgraph);
+    let instance = Node::instance(unsided, document.graphs.subgraph(unsided).unwrap());
+    let unsided_instance = document.graphs.main_mut().add(instance);
+    insert_subgraph(
+        &mut document,
+        sided,
+        Subgraph::new("sided", Interface::default()),
+    );
+    let stale = InstancePath::new(&[unsided_instance]);
+    document.sides.get_mut(&sided).unwrap().through = Some(stale);
+    document.sides.insert(
+        missing,
+        SubgraphSide::new(&Subgraph::new("gone", Interface::default()).graph),
+    );
+    document
+        .main_view
+        .node_placements
+        .insert(unsided_instance, NodePlacement::default());
+    for graph in [unsided, missing] {
+        document.layout.apply(DockOperation::OpenTab {
+            tab: TabRef::Graph(GraphId::Subgraph(graph)),
+        });
+    }
+    document.active = GraphId::Subgraph(unsided);
+
+    let report = document.reconcile(&library);
+    assert_eq!(
+        report.repairs,
+        [
+            DocumentRepair::SideDropped { subgraph: missing },
+            DocumentRepair::SideAdded { subgraph: unsided },
+            DocumentRepair::ThroughCleared {
+                subgraph: sided,
+                path: stale
+            },
+            DocumentRepair::TabClosed {
+                tab: TabRef::Graph(GraphId::Subgraph(missing))
+            },
+        ]
+    );
+    assert_eq!(
+        document.sides.keys().copied().collect::<Vec<_>>(),
+        [sided, unsided]
+    );
+    assert_eq!(
+        document.sides[&unsided].view.node_placements.len(),
+        3,
+        "its two boundary nodes and its node"
+    );
+    assert_eq!(document.sides[&sided].through, None);
+    assert_eq!(document.active, GraphId::Subgraph(unsided));
+    assert!(document.holds_tab(TabRef::Graph(GraphId::Subgraph(unsided))));
+    document.validate().expect("a reconciled document is valid");
+    assert!(
+        document.reconcile(&library).is_empty(),
+        "nothing is left to repair"
+    );
+}
+
+/// Removing an instance clears the `through` that named it and closes each tab that showed a
+/// node through it — a viewer of a preview inside, an inspector pinned through it — and leaves
+/// the subgraph's own pane open.
+#[test]
+fn removing_an_instance_clears_what_showed_through_it() {
+    let mut fixture = DocumentFixture::default();
+    let id = SubgraphId::from_u128(1);
+    let preview_func = preview_sink::func(Arc::default());
+    fixture.library.add(preview_func.clone());
+    let mut subgraph = Subgraph::new("inner", Interface::default());
+    let preview = subgraph.graph.add(Node::from(&preview_func));
+    insert_subgraph(&mut fixture.document, id, subgraph);
+    let instance = fixture.add_instance(id);
+    let mut document = fixture.document;
+    let path = InstancePath::new(&[instance]);
+    document.sides.get_mut(&id).unwrap().through = Some(path);
+    let pane = TabRef::Graph(GraphId::Subgraph(id));
+    let shown = [
+        TabRef::ImageViewer(path.node(preview)),
+        TabRef::Inspector(InspectTarget::Node {
+            addr: NodeAddr::new(GraphId::Subgraph(id), preview),
+            through: Some(path),
+        }),
+    ];
+    for tab in shown.into_iter().chain([pane]) {
+        document.layout.apply(DockOperation::OpenTab { tab });
+    }
+    document
+        .validate()
+        .expect("each tab shows what the document holds");
+
+    document.remove_node(GraphId::Main, instance);
+    assert_eq!(document.sides[&id].through, None);
+    assert!(document.layout.all_tabs().all(|tab| !shown.contains(&tab)));
+    assert!(document.layout.all_tabs().any(|tab| tab == pane));
+    document
+        .validate()
+        .expect("nothing names the removed instance");
+}
+
+/// Entering a subgraph shows it through the path given, opens its tab once however often it is
+/// entered, and makes it the active graph; a path that names no instance of it, or a subgraph
+/// the set lacks, enters nothing.
+#[test]
+fn entering_a_subgraph_opens_its_one_tab_through_its_instance() {
+    let mut fixture = DocumentFixture::default();
+    let [id, other] = [1, 2].map(SubgraphId::from_u128);
+    for subgraph in [id, other] {
+        insert_subgraph(
+            &mut fixture.document,
+            subgraph,
+            Subgraph::new("inner", Interface::default()),
+        );
+    }
+    let instance = fixture.add_instance(id);
+    let stranger = fixture.add_instance(other);
+    let mut document = fixture.document;
+    let path = InstancePath::new(&[instance]);
+    let tab = TabRef::Graph(GraphId::Subgraph(id));
+    let tabs = |document: &Document| document.layout.all_tabs().filter(|&t| t == tab).count();
+
+    document.enter(id, Some(InstancePath::new(&[stranger])));
+    assert_eq!(
+        tabs(&document),
+        0,
+        "a path into another subgraph enters nothing"
+    );
+    document.enter(SubgraphId::from_u128(9), None);
+    assert_eq!(document.active, GraphId::Main);
+
+    for _ in 0..2 {
+        document.enter(id, Some(path));
+    }
+    assert_eq!(tabs(&document), 1);
+    assert_eq!(document.sides[&id].through, Some(path));
+    assert_eq!(document.active, GraphId::Subgraph(id));
+    document.enter(id, None);
+    assert_eq!(
+        document.sides[&id].through, None,
+        "entered from no instance"
+    );
+    document.validate().unwrap();
+}
+
+/// Picking a graph's tab makes that graph active, as input on its pane; picking a tab that
+/// shows no graph leaves the active graph as it was.
+#[test]
+fn the_active_graph_follows_the_focused_panes_tab() {
+    let mut fixture = DocumentFixture::default();
+    let id = SubgraphId::from_u128(1);
+    insert_subgraph(
+        &mut fixture.document,
+        id,
+        Subgraph::new("inner", Interface::default()),
+    );
+    let mut document = fixture.document;
+    let pane = TabRef::Graph(GraphId::Subgraph(id));
+    document.apply_view(DockOperation::OpenTab { tab: pane });
+    assert_eq!(document.active, GraphId::Subgraph(id));
+    document.apply_view(DockOperation::OpenTab {
+        tab: TabRef::Preferences,
+    });
+    assert_eq!(
+        document.active,
+        GraphId::Subgraph(id),
+        "no graph on that tab"
+    );
+    document.apply_view(DockOperation::ActivateTab {
+        tab: TabRef::Graph(GraphId::Main),
+    });
+    assert_eq!(document.active, GraphId::Main);
+}
+
 /// The path walks reach a subgraph's constants: the check names a relative path there by its
 /// graph, and a mapping rewrites it.
 #[test]
@@ -452,7 +503,7 @@ fn a_subgraph_path_is_checked_and_mapped() {
     let mut fixture = DocumentFixture::default();
     let node = fixture.plain_node();
     let id = SubgraphId::from_u128(1);
-    let mut subgraph = Subgraph::new("inner", Interface::new(Ports::default()));
+    let mut subgraph = Subgraph::new("inner", Interface::default());
     let inner = subgraph.graph.add(node);
     let port = InputPort::new(inner, numbered_port(1));
     subgraph.graph.set_input_binding(

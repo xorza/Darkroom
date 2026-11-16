@@ -3,24 +3,26 @@
 use glam::Vec2;
 use palantir::InspectedWidget;
 use palantir::{Rect, Sense, Ui};
-use scenarium::{Binding, Graph, GraphId, InputPort, NodeDecl, OutputPort, ProgramId, Scope};
+use scenarium::{Binding, Graph, GraphId, InputPort, NodeDecl, OutputPort, Scope};
 use serde::Serialize;
 
+use crate::core::document::Document;
 use crate::gui::app::App;
 use crate::gui::pane::graph_ui::wid;
 
 /// The characters of a widget's text a [`UiList`] keeps: a scroll area's text is all its rows.
 pub const TEXT_CUT: usize = 120;
-/// The nodes a [`State`] lists: a detailed report of this many is about 10,000 tokens, well
-/// inside what an agent's client takes in one answer.
+/// The nodes a [`State`] lists of each graph: a detailed report of this many is about 10,000
+/// tokens, well inside what an agent's client takes in one answer.
 pub const NODE_LIMIT: usize = 100;
 
 /// How much a [`State`] holds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Detail {
-    /// The nodes by name and where they are, the selection, the focus and the status.
+    /// Each graph's nodes by name and where they are, its selection, the focus, the status and
+    /// the undo.
     Concise,
-    /// Also each node's id, ports, bindings and run status, the wires, the camera and the undo.
+    /// Also each node's id, ports, bindings and run status, and each graph's wires and camera.
     Detailed,
 }
 
@@ -30,18 +32,30 @@ pub struct State {
     /// The open document's file, `None` while it is unsaved.
     pub document: Option<String>,
     pub dirty: bool,
-    /// The nodes whose name holds the report's filter, by name, at most [`NODE_LIMIT`] of them.
-    pub nodes: Vec<NodeSummary>,
-    /// Matching nodes past the limit.
-    pub omitted: usize,
-    /// The selected nodes, by name.
-    pub selection: Vec<String>,
+    /// Each graph of the document: the main graph first, then the subgraphs in id order.
+    pub graphs: Vec<GraphSummary>,
     /// The text of the focused widget, or its id when it shows none.
     pub focus: Option<String>,
     /// The status bar's message.
     pub status: Option<String>,
     /// The warnings and errors logged since the last report.
     pub log: Vec<String>,
+    pub can_undo: bool,
+}
+
+/// One graph of the document.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct GraphSummary {
+    /// `main`, or the subgraph's name.
+    pub name: String,
+    /// Whether the window's commands act on this graph.
+    pub active: bool,
+    /// The nodes whose name holds the report's filter, by name, at most [`NODE_LIMIT`] of them.
+    pub nodes: Vec<NodeSummary>,
+    /// Matching nodes past the limit.
+    pub omitted: usize,
+    /// The selected nodes, by name.
+    pub selection: Vec<String>,
     pub details: Option<Details>,
 }
 
@@ -56,7 +70,7 @@ pub struct NodeSummary {
     pub id: Option<String>,
     pub inputs: Vec<PortSummary>,
     pub outputs: Vec<String>,
-    /// How its last run went.
+    /// How its last run went, in the instance its graph's pane shows.
     pub run: Option<String>,
 }
 
@@ -68,14 +82,13 @@ pub struct PortSummary {
     pub binding: Option<String>,
 }
 
-/// What a detailed report adds about the whole graph.
+/// What a detailed report adds about a whole graph.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Details {
     /// Every wire with a listed node's name at either end, `<node>.<output> -> <node>.<input>`.
     pub wires: Vec<String>,
     pub pan: Vec2,
     pub zoom: f32,
-    pub can_undo: bool,
 }
 
 /// The visible interactive widgets, as [`Ui::inspect`] lists them.
@@ -113,65 +126,22 @@ impl State {
     ) -> Self {
         let open = app.open_document();
         let document = open.document();
-        let graph = document.graphs.main();
-        let scope = document.graphs.scope(app.library(), GraphId::Main);
-        let detailed = detail == Detail::Detailed;
-        let listed = |name: &str| nodes.is_none_or(|part| name.contains(part));
-        // By name, then id: the graph's own order is a hash map's, which no two reports share.
-        let mut matching: Vec<_> = graph.iter().filter(|node| listed(&node.name)).collect();
-        matching.sort_unstable_by(|a, b| (&a.name, a.node_id).cmp(&(&b.name, b.node_id)));
         let mut widgets = Vec::new();
         ui.inspect(&mut widgets);
+        let report = Report {
+            app,
+            ui,
+            document,
+            detailed: detail == Detail::Detailed,
+            nodes,
+        };
         Self {
             document: open.path().map(|path| path.display().to_string()),
             dirty: open.is_dirty(),
-            omitted: matching.len().saturating_sub(NODE_LIMIT),
-            nodes: matching
-                .into_iter()
-                .take(NODE_LIMIT)
-                .map(|node| {
-                    let id = node.node_id;
-                    let func = scope.resolve(&node);
-                    let mut state = NodeSummary {
-                        name: node.name.clone(),
-                        func: func
-                            .map_or_else(|why| format!("{why:?}"), |func| func.name().to_string()),
-                        screen: ui.response_for(wid::body(id)).rect.map(rect),
-                        id: None,
-                        inputs: Vec::new(),
-                        outputs: Vec::new(),
-                        run: None,
-                    };
-                    if detailed {
-                        state.id = Some(id.to_string());
-                        if let Ok(func) = func {
-                            state.inputs = func
-                                .inputs()
-                                .iter()
-                                .map(|input| PortSummary {
-                                    name: input.name.clone(),
-                                    binding: binding(graph, scope, InputPort::new(id, input.id)),
-                                })
-                                .collect();
-                            state.outputs = func
-                                .outputs()
-                                .iter()
-                                .map(|output| output.name.clone())
-                                .collect();
-                        }
-                        state.run = app
-                            .run_state()
-                            .node(ProgramId::from(id))
-                            .map(|node| format!("{:?}", node.status()));
-                    }
-                    state
-                })
-                .collect(),
-            selection: document
-                .main_view
-                .selected
-                .iter()
-                .filter_map(|item| graph.find(item.node()?).map(|node| node.name.clone()))
+            graphs: document
+                .graphs
+                .graphs()
+                .map(|(graph, _)| report.graph(graph))
                 .collect(),
             focus: ui.focus().map(|id| {
                 widgets
@@ -181,11 +151,111 @@ impl State {
             }),
             status: app.status().cur().map(|message| message.line.to_string()),
             log,
+            can_undo: open.can_undo(),
+        }
+    }
+
+    /// The graph the window's commands act on.
+    pub fn active(&self) -> &GraphSummary {
+        self.graphs
+            .iter()
+            .find(|graph| graph.active)
+            .expect("one graph is active")
+    }
+}
+
+/// What one [`State`] reads, shared by each graph it reports.
+#[derive(Debug)]
+struct Report<'a> {
+    app: &'a App,
+    ui: &'a Ui,
+    document: &'a Document,
+    detailed: bool,
+    nodes: Option<&'a str>,
+}
+
+impl Report<'_> {
+    fn graph(&self, id: GraphId) -> GraphSummary {
+        let Self {
+            app,
+            ui,
+            document,
+            detailed,
+            nodes,
+        } = *self;
+        let graph = document.graphs.graph(id);
+        let scope = document.graphs.scope(app.library(), id);
+        let view = document.view(id);
+        let through = document.through(id);
+        let listed = |name: &str| nodes.is_none_or(|part| name.contains(part));
+        // By name, then id: the graph's own order is a hash map's, which no two reports share.
+        let mut matching: Vec<_> = graph.iter().filter(|node| listed(&node.name)).collect();
+        matching.sort_unstable_by(|a, b| (&a.name, a.node_id).cmp(&(&b.name, b.node_id)));
+        GraphSummary {
+            name: match id {
+                GraphId::Main => "main".to_string(),
+                GraphId::Subgraph(subgraph) => document
+                    .graphs
+                    .subgraph(subgraph)
+                    .expect("the set holds each graph it lists")
+                    .name
+                    .clone(),
+            },
+            active: document.active == id,
+            omitted: matching.len().saturating_sub(NODE_LIMIT),
+            nodes: matching
+                .into_iter()
+                .take(NODE_LIMIT)
+                .map(|node| {
+                    let node_id = node.node_id;
+                    let func = scope.resolve(&node);
+                    let mut state = NodeSummary {
+                        name: node.name.clone(),
+                        func: func
+                            .map_or_else(|why| format!("{why:?}"), |func| func.name().to_string()),
+                        screen: ui.response_for(wid::body(id, node_id)).rect.map(rect),
+                        id: None,
+                        inputs: Vec::new(),
+                        outputs: Vec::new(),
+                        run: None,
+                    };
+                    if detailed {
+                        state.id = Some(node_id.to_string());
+                        if let Ok(func) = func {
+                            state.inputs = func
+                                .inputs()
+                                .iter()
+                                .map(|input| PortSummary {
+                                    name: input.name.clone(),
+                                    binding: binding(
+                                        graph,
+                                        scope,
+                                        InputPort::new(node_id, input.id),
+                                    ),
+                                })
+                                .collect();
+                            state.outputs = func
+                                .outputs()
+                                .iter()
+                                .map(|output| output.name.clone())
+                                .collect();
+                        }
+                        state.run = through
+                            .and_then(|path| app.run_state().node(path.node(node_id)))
+                            .map(|node| format!("{:?}", node.status()));
+                    }
+                    state
+                })
+                .collect(),
+            selection: view
+                .selected
+                .iter()
+                .filter_map(|item| graph.find(item.node()?).map(|node| node.name.clone()))
+                .collect(),
             details: detailed.then(|| Details {
                 wires: wires(graph, scope, listed),
-                pan: document.main_view.viewport.pan,
-                zoom: document.main_view.viewport.zoom,
-                can_undo: open.can_undo(),
+                pan: view.viewport.pan,
+                zoom: view.viewport.zoom,
             }),
         }
     }

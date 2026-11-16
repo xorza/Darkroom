@@ -1,14 +1,14 @@
 //! One request a frontend raises against the open document.
 
 use palantir::DockOperation;
-use scenarium::GraphId;
+use scenarium::{GraphId, InstancePath, SubgraphId};
 
 use crate::core::document::tab_ref::TabRef;
 use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::graph_intent::GraphIntent;
 
 /// A request the document applies itself: an edit of one of its graphs, or of the pane
-/// arrangement.
+/// arrangement. A request against a graph makes it the active one.
 ///
 ///   - [`Graph`](Self::Graph): validated, applied, and recorded as an undo step; flips the
 ///     unsaved flag.
@@ -18,6 +18,8 @@ use crate::core::edit::graph_intent::GraphIntent;
 ///     else `otherwise` applies.
 ///   - [`View`](Self::View): applied in place, recording and dirtying nothing, so Ctrl+Z walks
 ///     past a tab switch to the last graph edit.
+///   - [`Enter`](Self::Enter): navigation as a view op is, into a subgraph's pane: it shows the
+///     subgraph through `through`, opens or focuses its tab, and makes it the active graph.
 #[derive(Debug)]
 pub(crate) enum DocumentRequest {
     Graph {
@@ -35,4 +37,8 @@ pub(crate) enum DocumentRequest {
         otherwise: GraphIntent,
     },
     View(DockOperation<TabRef>),
+    Enter {
+        subgraph: SubgraphId,
+        through: Option<InstancePath>,
+    },
 }

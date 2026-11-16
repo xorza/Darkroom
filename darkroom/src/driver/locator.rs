@@ -41,24 +41,21 @@ pub enum Side {
     Out,
 }
 
-/// Every place a target names in the frame `ui` ran of `app`: each node of that name, in the
-/// document's order, so `Locator::nth` picks among them.
+/// Every place a target names in the frame `ui` ran of `app`, in the active graph's pane: each
+/// node of that name, in the document's order, so `Locator::nth` picks among them.
 impl Locate<App> for EditorTarget {
     fn find_all(&self, app: &App, ui: &Ui, out: &mut Vec<Found>) -> Result<(), LocateError> {
         let locator = || format!("{self:?}");
+        let document = app.open_document().document();
+        let graph = document.active;
         match self {
             Self::World(point) => {
                 let canvas = ui
-                    .response_for(canvas::outer_wid())
+                    .response_for(canvas::outer_wid(graph))
                     .rect
                     .ok_or_else(|| LocateError::OffScreen { locator: locator() })?;
                 // The camera the canvas draws through, so a world point lands where it paints.
-                let camera = app
-                    .open_document()
-                    .document()
-                    .main_view
-                    .viewport
-                    .landed(ui.display());
+                let camera = document.view(graph).viewport.landed(ui.display());
                 let at = canvas.min + camera.pan + *point * camera.zoom;
                 out.push(Found {
                     rect: Rect::new(at.x, at.y, 0.0, 0.0),
@@ -66,13 +63,16 @@ impl Locate<App> for EditorTarget {
                 });
             }
             Self::Node(node) | Self::NodeHeader(node) | Self::Port { node, .. } => {
-                let ids = node_ids(app, node);
+                let ids = node_ids(app, graph, node);
                 if ids.is_empty() {
-                    let graph = app.open_document().document().graphs.main();
                     return Err(LocateError::NotFound {
                         locator: locator(),
                         nearest: nearest(
-                            graph.iter().map(|candidate| candidate.name.clone()),
+                            document
+                                .graphs
+                                .graph(graph)
+                                .iter()
+                                .map(|candidate| candidate.name.clone()),
                             node,
                         ),
                     });
@@ -81,19 +81,22 @@ impl Locate<App> for EditorTarget {
                     let found = match self {
                         // The footer's middle, where no widget takes the press, when it shows;
                         // the body's center can land on a port row's field.
-                        Self::Node(_) => visible(ui.response_for(wid::body(id)).rect).map(|body| {
-                            let footer = visible(ui.response_for(wid::footer(id)).rect);
-                            Found {
-                                rect: body,
-                                point: footer.map_or_else(|| body.center(), Rect::center),
-                            }
-                        }),
+                        Self::Node(_) => {
+                            visible(ui.response_for(wid::body(graph, id)).rect).map(|body| {
+                                let footer = visible(ui.response_for(wid::footer(graph, id)).rect);
+                                Found {
+                                    rect: body,
+                                    point: footer.map_or_else(|| body.center(), Rect::center),
+                                }
+                            })
+                        }
                         Self::NodeHeader(_) => {
-                            visible(ui.response_for(wid::rename(id)).rect).map(Found::center_of)
+                            visible(ui.response_for(wid::rename(graph, id)).rect)
+                                .map(Found::center_of)
                         }
                         Self::Port { side, port, .. } => {
-                            let port = find_port(self, app, id, *side, port)?;
-                            visible(ui.response_for(wid::port_circle(port)).rect)
+                            let port = find_port(self, app, graph, id, *side, port)?;
+                            visible(ui.response_for(wid::port_circle(graph, port)).rect)
                                 .map(Found::center_of)
                         }
                         Self::World(_) => unreachable!("matched above"),
@@ -114,52 +117,52 @@ fn visible(rect: Option<Rect>) -> Option<Rect> {
     rect.filter(|rect| !rect.is_paint_empty())
 }
 
-/// The nodes named `node` by their name or their id, in the document's order.
-fn node_ids(app: &App, node: &str) -> Vec<NodeId> {
+/// The nodes of `graph` named `node` by their name or their id, in the document's order.
+fn node_ids(app: &App, graph: GraphId, node: &str) -> Vec<NodeId> {
     app.open_document()
         .document()
         .graphs
-        .main()
+        .graph(graph)
         .iter()
         .filter(|candidate| candidate.name == node || candidate.node_id.to_string() == node)
         .map(|candidate| candidate.node_id)
         .collect()
 }
 
-/// The port of `node_id` on `side` named `port`, or at that index.
+/// The port of `node_id` of `graph` on `side` named `port`, or at that index.
 fn find_port(
     target: &EditorTarget,
     app: &App,
+    graph: GraphId,
     node_id: NodeId,
     side: Side,
     port: &str,
 ) -> Result<PortRef, LocateError> {
     let graphs = &app.open_document().document().graphs;
     let node = graphs
-        .main()
+        .graph(graph)
         .find(node_id)
         .expect("a node the locator found is in the graph");
-    let ports: Vec<(PortId, String)> =
-        match graphs.scope(app.library(), GraphId::Main).resolve(node) {
-            Ok(func) => match side {
-                Side::In => func
-                    .inputs()
-                    .iter()
-                    .map(|input| (input.id, input.name.clone()))
-                    .collect(),
-                Side::Out => func
-                    .outputs()
-                    .iter()
-                    .map(|output| (output.id, output.name.clone()))
-                    .collect(),
-            },
-            Err(why) => {
-                return Err(LocateError::NotFound {
-                    locator: format!("{target:?}"),
-                    nearest: vec![format!("the node's func does not resolve: {why:?}")],
-                });
-            }
-        };
+    let ports: Vec<(PortId, String)> = match graphs.scope(app.library(), graph).resolve(node) {
+        Ok(func) => match side {
+            Side::In => func
+                .inputs()
+                .iter()
+                .map(|input| (input.id, input.name.clone()))
+                .collect(),
+            Side::Out => func
+                .outputs()
+                .iter()
+                .map(|output| (output.id, output.name.clone()))
+                .collect(),
+        },
+        Err(why) => {
+            return Err(LocateError::NotFound {
+                locator: format!("{target:?}"),
+                nearest: vec![format!("the node's func does not resolve: {why:?}")],
+            });
+        }
+    };
     let idx = ports
         .iter()
         .position(|(_, name)| name == port)

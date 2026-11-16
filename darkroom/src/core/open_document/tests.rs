@@ -202,7 +202,7 @@ fn a_node_whose_ports_changed_keeps_the_wiring_they_admit() {
                     port: chain.into_mid,
                     binding: Binding::wire(chain.src_id, numbered_port(1)),
                     rejection: BindingRejection::WireMismatch,
-                }
+                },
             },
             DocumentRepair::Graph {
                 graph: GraphId::Main,
@@ -210,7 +210,7 @@ fn a_node_whose_ports_changed_keeps_the_wiring_they_admit() {
                     port: chain.into_dst,
                     binding: Binding::wire(chain.mid_id, numbered_port(1)),
                     rejection: BindingRejection::UndeclaredOutput,
-                }
+                },
             },
         ]
     );
@@ -256,7 +256,7 @@ fn a_node_whose_func_is_missing_loads_as_a_stub_and_attaches_again() {
             repair: Repair::Stubbed {
                 node_id: mid_id,
                 reason: DetachReason::Unresolved(Unresolved::MissingFunc),
-            }
+            },
         }]
     );
     assert!(loaded.open.dirty, "a save accepts the change");
@@ -302,7 +302,7 @@ fn a_node_whose_func_is_missing_loads_as_a_stub_and_attaches_again() {
         [
             DocumentRepair::Graph {
                 graph: GraphId::Main,
-                repair: Repair::Reattached { node_id: mid_id }
+                repair: Repair::Reattached { node_id: mid_id },
             },
             DocumentRepair::Graph {
                 graph: GraphId::Main,
@@ -312,7 +312,7 @@ fn a_node_whose_func_is_missing_loads_as_a_stub_and_attaches_again() {
                         port: into_dst,
                         binding: Binding::wire(mid_id, numbered_port(1)),
                     },
-                }
+                },
             },
         ]
     );
@@ -836,6 +836,7 @@ fn a_loop_between_two_subgraphs_opens_with_one_recursive_stub_every_time() {
     assert_eq!(second.report.repairs, first.report.repairs);
     assert_eq!(second.open.document(), first.open.document());
 }
+
 /// A subgraph whose interface names a type this build does not register loads as written, an
 /// enum's default and an instance's constant of it included: the load reports each type and each
 /// port that names it, and leaves the document clean. A repair inside a subgraph names the

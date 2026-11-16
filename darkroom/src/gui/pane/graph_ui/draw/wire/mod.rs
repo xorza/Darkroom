@@ -210,7 +210,7 @@ impl WirePass<'_, '_, '_> {
                 geometry.ports.is_hovered(src)
                     || geometry.ports.is_hovered(tgt)
                     || self.lit == Some(key)
-                    || wid::lit_by_tie(ui, graph_ctx.view(), key),
+                    || wid::lit_by_tie(ui, graph_ctx.graph(), graph_ctx.view(), key),
             );
             let untied = [Wire::data(p0, p3)];
             let pieces = self.ties.pieces(key).unwrap_or(&untied);
@@ -247,7 +247,7 @@ impl WirePass<'_, '_, '_> {
                 geometry.events.is_hovered(s.event)
                     || geometry.subs.is_hovered(s.subscriber)
                     || self.lit == Some(key)
-                    || wid::lit_by_tie(ui, graph_ctx.view(), key),
+                    || wid::lit_by_tie(ui, graph_ctx.graph(), graph_ctx.view(), key),
             );
             let untied = [Wire::event(p0, p3)];
             let pieces = self.ties.pieces(key).unwrap_or(&untied);

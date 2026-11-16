@@ -29,7 +29,7 @@ pub(super) fn show(ui: &mut Ui, node_ctx: NodeCtx<'_>) {
     let status = node.exec_status();
     let theme = node_ctx.theme();
     Panel::vstack()
-        .id(wid::footer(node.node_id))
+        .id(wid::footer(node.graph_ctx.graph(), node.node_id))
         .size(SizeSpec::FILL_W)
         .padding(card::band_padding(theme))
         .gap(theme.space.xs)
@@ -147,6 +147,8 @@ fn proportion_bar(ui: &mut Ui, theme: &Theme, ram: RamUsage) {
 #[cfg(test)]
 mod tests {
 
+    use scenarium::GraphId;
+
     use crate::core::document::internals::DocumentFixture;
     use crate::gui::pane::graph_ui::internals::CanvasHarness;
     use crate::gui::pane::graph_ui::wid;
@@ -182,7 +184,7 @@ mod tests {
         });
         h.prime(2);
         let footer =
-            h.ui.rect(wid::footer(node_id))
+            h.ui.rect(wid::footer(GraphId::Main, node_id))
                 .expect("a failure has a footer");
         let theme = Theme::default();
         // One label line, 12 × 1.2 = 14.4 px, on the 1/64 px grid the measurer keeps metrics on,
@@ -207,11 +209,11 @@ mod tests {
         let node_id = h.node(0);
         h.prime(2);
         assert!(
-            h.ui.rect(wid::footer(node_id)).is_some(),
+            h.ui.rect(wid::footer(GraphId::Main, node_id)).is_some(),
             "an idle node has a footer"
         );
         let before =
-            h.ui.rect(wid::body(node_id))
+            h.ui.rect(wid::body(GraphId::Main, node_id))
                 .expect("the body recorded")
                 .size
                 .h;
@@ -225,7 +227,7 @@ mod tests {
         });
         h.prime(2);
         let after =
-            h.ui.rect(wid::body(node_id))
+            h.ui.rect(wid::body(GraphId::Main, node_id))
                 .expect("the body recorded")
                 .size
                 .h;

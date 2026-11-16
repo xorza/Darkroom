@@ -26,10 +26,9 @@ impl PortKind {
 /// One data port as the canvas addresses it: an input and an output in one
 /// key, so a wire drag, a hover and a geometry table can hold either end.
 /// Domain-keyed so UI passes derive its `WidgetId` (see
-/// `wid::port_circle`) without
-/// threading a cache. Node ids are unique across the whole document, so no
-/// graph ref is needed alongside — enforced by
-/// [`Document::validate`](crate::core::document::Document::validate).
+/// `wid::port_circle`) without threading a cache. Named by the id the node's
+/// declaration gives the port, so a widget's state stays with its port when
+/// a port before it comes or goes.
 ///
 /// An edit names the graph's own [`InputPort`] or [`OutputPort`], reached
 /// through [`Self::input_port`] and [`Self::output_port`], which check the kind.

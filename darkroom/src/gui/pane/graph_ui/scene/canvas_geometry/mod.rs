@@ -139,7 +139,7 @@ impl CanvasGeometry {
             // frame's layout (same frame for both, so any ancestor-shared canvas-origin term
             // cancels) and combine with this frame's `n.pos`, so curves anchor on the moved node's
             // current port positions.
-            let body = ui.response_for(wid::body(n.node_id));
+            let body = ui.response_for(wid::body(graph_ctx.graph(), n.node_id));
             if let Some(r) = body.layout_rect {
                 self.node_sizes.insert(n.node_id, r.size);
             }
@@ -160,18 +160,18 @@ impl CanvasGeometry {
             };
             for kind in [PortKind::Input, PortKind::Output] {
                 for port in n.ports(kind) {
-                    let r = ui.response_for(wid::port_circle(port));
+                    let r = ui.response_for(wid::port_circle(graph_ctx.graph(), port));
                     self.ports.record(port, r, place);
                 }
             }
             // Emitter event glyphs, drag sources for subscription wires.
             for ev in n.event_ports() {
-                let r = ui.response_for(wid::event_glyph(ev));
+                let r = ui.response_for(wid::event_glyph(graph_ctx.graph(), ev));
                 self.events.record(ev, r, place);
             }
             // Only sink nodes render a subscription pin (see `header::subscription_pin`).
             if n.sink() {
-                let r = ui.response_for(wid::subscription_glyph(n.node_id));
+                let r = ui.response_for(wid::subscription_glyph(graph_ctx.graph(), n.node_id));
                 self.subs.record(n.node_id, r, place);
             }
         }

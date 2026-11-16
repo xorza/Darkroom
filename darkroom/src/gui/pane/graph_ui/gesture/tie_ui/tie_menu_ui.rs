@@ -124,7 +124,7 @@ impl TieMenuUi {
             MenuChoice::Free => angle(TieAngle::Auto),
             MenuChoice::Remove => GraphIntent::RemoveTie { tie },
         };
-        out.push_graph(intent);
+        out.push_graph(graph_ctx.graph(), intent);
     }
 }
 

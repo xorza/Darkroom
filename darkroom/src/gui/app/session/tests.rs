@@ -1,7 +1,7 @@
 use glam::{UVec2, Vec2};
 use palantir::Harness;
 use palantir::{DockOperation, Key, Modifiers};
-use scenarium::{InputPort, NodeId, OutputPort, ProgramId, numbered_port};
+use scenarium::{GraphId, InputPort, NodeId, OutputPort, ProgramId, numbered_port};
 use std::sync::Arc;
 
 use common::internals::alloc_audit;
@@ -68,12 +68,13 @@ fn a_settled_frame_records_without_allocating() {
     let view = &mut fixture.document.main_view;
     view.ties.get_mut(&tie).unwrap().angle = TieAngle::Pinned(30.0);
     view.selected.insert(ItemId::Tie(tie));
-    let preview = ProgramId::from(fixture.add(&preview_sink::func(Arc::default())));
+    let preview = fixture.add(&preview_sink::func(Arc::default()));
     fixture.document.validate().unwrap();
     app.adopt_document(OpenDocument::over(fixture.document));
-    app.run_state
-        .previews_mut()
-        .publish(preview, preview_store::internals::opaque_image_value());
+    app.run_state.previews_mut().publish(
+        ProgramId::from(preview),
+        preview_store::internals::opaque_image_value(),
+    );
     app.run_state.previews_mut().settle(ui.ui());
     // Each frame asked, as a wake asks one: a frame nothing asked for paints only and records
     // nothing, which would audit nothing.
@@ -119,8 +120,7 @@ fn a_menu_chord_leaves_the_others_watched() {
 #[test]
 fn a_viewer_opened_by_click_queues_its_full_image_in_that_same_frame() {
     let mut fixture = DocumentFixture::default();
-    let node_id = fixture.add(&preview_sink::func(Arc::default()));
-    let node = ProgramId::from(node_id);
+    let node = ProgramId::from(fixture.add(&preview_sink::func(Arc::default())));
     let mut test = SessionHarness::new(fixture);
     test.run_state
         .previews_mut()
@@ -139,7 +139,8 @@ fn a_viewer_opened_by_click_queues_its_full_image_in_that_same_frame() {
         "a card-only preview never uploads its full-resolution source"
     );
 
-    test.ui.click(wid::preview_image(node_id));
+    test.ui
+        .click(wid::preview_image(GraphId::Main, node.node_id()));
     let commands = test.frame();
     assert!(
         test.session
@@ -283,7 +284,8 @@ fn a_chord_and_a_click_on_one_frame_both_reach_the_app() {
 
     test.ui.hold_modifiers(Modifiers::CTRL);
     test.ui.key(Key::Char('S'));
-    test.ui.click(toolbar::internals::run_chip_wid());
+    test.ui
+        .click(toolbar::internals::run_chip_wid(GraphId::Main));
 
     let commands = test.frame();
     assert!(
@@ -307,8 +309,7 @@ fn image_viewer_tabs_dedupe_per_node_and_prune_state_on_close() {
     let mut fixture = DocumentFixture::default();
     let node_id = fixture.add(&preview_sink::func(Arc::default()));
     let mut test = SessionHarness::new(fixture);
-    let program_id = ProgramId::from(node_id);
-    let tab = TabRef::ImageViewer(program_id);
+    let tab = TabRef::ImageViewer(ProgramId::from(node_id));
 
     test.requests.push_view(DockOperation::OpenTab { tab });
     test.requests.push_view(DockOperation::OpenTab { tab });
@@ -325,10 +326,10 @@ fn image_viewer_tabs_dedupe_per_node_and_prune_state_on_close() {
         "one tab per node"
     );
 
-    test.session
-        .main_window
-        .image_viewers
-        .insert(program_id, ImageViewer::new(program_id));
+    test.session.main_window.image_viewers.insert(
+        ProgramId::from(node_id),
+        ImageViewer::new(ProgramId::from(node_id)),
+    );
     test.session
         .open
         .document_mut()
@@ -372,13 +373,13 @@ fn each_edit_route_owes_what_it_strands() {
 
     test.apply(select());
     assert!(!owed_then_clear(&mut test), "one edit, a selection");
-    test.requests.push_graph(select());
+    test.requests.push_graph(GraphId::Main, select());
     test.drain();
     assert!(!owed_then_clear(&mut test), "the queue, a selection");
 
     test.apply(rename("one"));
     assert!(owed_then_clear(&mut test), "one edit, a rename");
-    test.requests.push_graph(rename("two"));
+    test.requests.push_graph(GraphId::Main, rename("two"));
     test.drain();
     assert!(owed_then_clear(&mut test), "the queue, a rename");
     assert!(test.undo());
@@ -388,4 +389,56 @@ fn each_edit_route_owes_what_it_strands() {
     } = &mut test;
     session.redo(requests);
     assert!(owed_then_clear(&mut test), "a redo of a rename");
+}
+
+/// Two panes side by side on a subgraph and its copy, which holds the same node under the same
+/// id: a click on the node in one pane selects it in that graph alone, and makes it active.
+#[test]
+fn a_click_in_one_pane_selects_nothing_in_a_copy_beside_it() {
+    use palantir::{DockDrop, SplitSide};
+    use scenarium::{Interface, Subgraph, SubgraphId};
+
+    use crate::core::document::internals::insert_subgraph;
+    use crate::core::document::item_id::ItemId;
+
+    let mut fixture = DocumentFixture::default();
+    let [left, right] = [1, 2].map(SubgraphId::from_u128);
+    let shared = NodeId::from_u128(40);
+    for id in [left, right] {
+        let mut subgraph = Subgraph::new("copy", Interface::default());
+        subgraph.graph.insert(shared, fixture.plain_node());
+        insert_subgraph(&mut fixture.document, id, subgraph);
+    }
+    let layout = &mut fixture.document.layout;
+    let group = layout.primary().id();
+    let [left_tab, right_tab] = [left, right].map(|id| TabRef::Graph(GraphId::Subgraph(id)));
+    layout.apply(DockOperation::OpenTab { tab: left_tab });
+    layout.apply(DockOperation::OpenTab { tab: right_tab });
+    layout.apply(DockOperation::MoveTab {
+        tab: right_tab,
+        to: DockDrop::Split {
+            group,
+            side: SplitSide::Right,
+        },
+    });
+    let mut test = SessionHarness::new(fixture);
+    test.prime(2);
+    let [left_graph, right_graph] = [left, right].map(GraphId::Subgraph);
+    for graph in [left_graph, right_graph] {
+        assert!(
+            test.ui.rect(wid::body(graph, shared)).is_some(),
+            "premise: {graph:?}'s pane shows the node"
+        );
+    }
+
+    test.ui.click(wid::body(left_graph, shared));
+    test.frame();
+    test.drain();
+    let document = test.session.open.document();
+    assert_eq!(
+        document.view(left_graph).selected,
+        [ItemId::Node(shared)].into_iter().collect()
+    );
+    assert!(document.view(right_graph).selected.is_empty());
+    assert_eq!(document.active, left_graph);
 }

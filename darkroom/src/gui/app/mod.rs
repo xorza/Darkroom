@@ -9,8 +9,6 @@ use scenarium::Binding;
 use scenarium::ConstValue;
 use scenarium::FileMode;
 use scenarium::Library;
-use scenarium::ProgramId;
-use scenarium::{GraphId, NodeAddr};
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::io::document::document_format::DocumentFormat;
@@ -225,7 +223,9 @@ impl App {
             AppCommand::View(ViewCommand::CopyImage) => {
                 self.capture = Some(ViewCapture::new(CaptureTarget::Clipboard));
             }
-            AppCommand::View(ViewCommand::Frame(framing)) => self.session.frame_graph(framing),
+            AppCommand::View(ViewCommand::Frame { graph, framing }) => {
+                self.session.frame_graph(graph, framing);
+            }
             AppCommand::View(ViewCommand::ConvertFull {
                 program_id,
                 max_dim,
@@ -392,6 +392,7 @@ impl App {
         };
         self.status.succeeded(StatusFamily::Edit);
         self.session.apply_edit(
+            pick.graph,
             GraphIntent::SetInput {
                 input: pick.port,
                 to: Some(Binding::Const(value)),
@@ -546,17 +547,14 @@ impl App {
                 self.runtime.run_once(graphs);
                 Ok(())
             }
-            // A node of the main graph is one program node, under its own id.
-            RunCommand::Node(node_id) => self.runtime.run_node(graphs, ProgramId::from(node_id)),
+            RunCommand::Node(program_id) => self.runtime.run_node(graphs, program_id),
             // An eviction projects its outcome onto exactly the nodes it reaches.
-            RunCommand::EvictCache(node_id) => self
+            RunCommand::EvictCache(addr) => self
                 .runtime
-                .evict_cache(graphs, NodeAddr::new(GraphId::Main, node_id))
+                .evict_cache(graphs, addr)
                 .map(|evicted| self.run_state.clear_cache_projections(&evicted)),
             // A flush only gains the value a copy on disk, so no projection moves.
-            RunCommand::FlushCache(node_id) => self
-                .runtime
-                .flush_cache(graphs, NodeAddr::new(GraphId::Main, node_id)),
+            RunCommand::FlushCache(addr) => self.runtime.flush_cache(graphs, addr),
             RunCommand::StartEvents => {
                 self.runtime.start_event_loop(graphs);
                 Ok(())
@@ -844,6 +842,8 @@ pub(crate) mod internals {
 #[cfg(test)]
 mod tests {
     use std::mem;
+
+    use scenarium::GraphId;
 
     use super::*;
 
@@ -1207,7 +1207,7 @@ mod tests {
             .main_view
             .node_placements[&node]
             .pos;
-        let body = wid::body(node);
+        let body = wid::body(GraphId::Main, node);
         // The click's release frame, past the press frame the harness runs before it.
         let click = |ui: &mut Harness, counted: &mut CountedPasses, at: Locator, button| {
             ui.advance_past_double_click();
@@ -1226,7 +1226,7 @@ mod tests {
         );
         assert_eq!(selected(&counted), 1, "the click selected");
 
-        let bare = ui.point_in(canvas::outer_wid(), Vec2::new(4.0, 4.0));
+        let bare = ui.point_in(canvas::outer_wid(GraphId::Main), Vec2::new(4.0, 4.0));
         assert_eq!(
             click(&mut ui, &mut counted, bare.into(), PointerButton::Left),
             2,
@@ -1259,7 +1259,10 @@ mod tests {
             ui.frame_app(counted);
             [latch, counted.passes]
         };
-        let footer = ui.rect(wid::footer(node)).expect("the node shows").center();
+        let footer = ui
+            .rect(wid::footer(GraphId::Main, node))
+            .expect("the node shows")
+            .center();
         assert_eq!(drag(&mut ui, &mut counted, footer), [2, 2], "a node's drag");
         assert_eq!(
             counted
@@ -1273,7 +1276,7 @@ mod tests {
             moved_from + Vec2::new(30.0, 20.0),
             "the node followed"
         );
-        let band = ui.point_in(canvas::outer_wid(), Vec2::new(4.0, 4.0));
+        let band = ui.point_in(canvas::outer_wid(GraphId::Main), Vec2::new(4.0, 4.0));
         assert_eq!(drag(&mut ui, &mut counted, band), [2, 2], "a band's drag");
 
         let title = ui
@@ -1425,7 +1428,7 @@ mod tests {
         ui.ui_mut().request_repaint();
         ui.frame_app(&mut counted);
 
-        let chip = toolbar::internals::reset_view_chip_wid();
+        let chip = toolbar::internals::reset_view_chip_wid(GraphId::Main);
         ui.press(chip, PointerButton::Left);
         ui.frame_app(&mut counted);
         ui.release(PointerButton::Left);

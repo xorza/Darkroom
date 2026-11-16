@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
+use scenarium::{FileKind, FileKindId, FileMode, GraphId, numbered_port};
+
 use super::*;
-use scenarium::{FileKind, FileKindId, FileMode, numbered_port};
 
 /// The type line of a port tooltip: a path names its kind, mode and extensions, everything else
 /// the library's own name for the type, so a tooltip and a palette entry can't disagree.
@@ -92,9 +93,12 @@ fn double_clicking_a_wired_input_port_circle_clears_its_binding() {
     // left edge, which puts its center a hair outside the body, on the canvas beneath. Still well
     // inside the glyph's 23.4 px box, and both clicks land on the same point.
     let at =
-        h.ui.rect(wid::port_circle(PortRef::input(consumer, numbered_port(1))))
-            .expect("the widget shows")
-            .center()
+        h.ui.rect(wid::port_circle(
+            GraphId::Main,
+            PortRef::input(consumer, numbered_port(1)),
+        ))
+        .expect("the widget shows")
+        .center()
             + Vec2::new(4.0, 0.0);
 
     h.ui.click(at);

@@ -224,6 +224,7 @@ impl OpenDocument {
                                 signals.fold(step);
                             });
                     if withdrawn {
+                        self.document.active = graph;
                         continue;
                     }
                     (graph, otherwise, Some(cancelled))
@@ -231,10 +232,15 @@ impl OpenDocument {
                 // Pane arrangement is navigation: it records no step, raises no signal, and breaks
                 // no run of graph edits around it.
                 DocumentRequest::View(op) => {
-                    self.document.layout.apply(op);
+                    self.document.apply_view(op);
+                    continue;
+                }
+                DocumentRequest::Enter { subgraph, through } => {
+                    self.document.enter(subgraph, through);
                     continue;
                 }
             };
+            self.document.active = graph;
             let committed = self.batch.len();
             if let Err(malformed) =
                 intent.commit(&mut self.document, graph, library, &mut self.batch)

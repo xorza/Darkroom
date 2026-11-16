@@ -4,11 +4,10 @@ use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::RunCommand;
-use scenarium::{GraphId, NodeId};
+use scenarium::{NodeId, ProgramId};
 
 use crate::gui::frame::stage::Stage;
 use crate::gui::graph_ctx::GraphCtx;
-use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph_ui::gesture::item_menu::ItemMenu;
 
 /// Right-click on a node body → a small popup with actions on the node. The trigger scan, the
@@ -21,12 +20,13 @@ pub(crate) struct NodeMenuUi {
     menu: ItemMenu<NodeId>,
 }
 
-/// A menu pick before routing. `Run` names the node the menu opened on; the structural picks
+/// A menu pick before routing. `Run` names the program node the menu opened on, in the instance
+/// the pane shows; the structural picks
 /// carry only their kind, as their target is the selection (a right-click selects the node it
 /// landed on first).
 #[derive(Copy, Clone, Debug)]
 enum MenuChoice {
-    Run,
+    Run { program_id: ProgramId },
     Duplicate { incoming: IncomingWires },
     Remove,
 }
@@ -62,13 +62,15 @@ impl NodeMenuUi {
         self.menu.retain(|node_id| graph_ctx.contains(node_id));
         let pick = self.menu.show(ui, "node_body_menu", |ui, node_id| {
             let mut chosen = None;
-            // "Run to this node" and the duplicates show only when the clicked node is a graph
-            // node, not a stub (the header play chip's rule): a stub neither runs nor copies.
-            if graph_ctx.node(node_id).is_some_and(NodeCtx::runnable) {
-                if MenuItem::new("Run to this node").show(ui).left.clicked() {
-                    chosen = Some(MenuChoice::Run);
+            // The duplicates show only when the clicked node is a graph node, not a stub: a stub
+            // neither runs nor copies. "Run to this node" shows by the header play chip's rule.
+            if let Some(node) = graph_ctx.node(node_id).filter(|node| !node.stub()) {
+                if let Some(program_id) = node.runnable() {
+                    if MenuItem::new("Run to this node").show(ui).left.clicked() {
+                        chosen = Some(MenuChoice::Run { program_id });
+                    }
+                    MenuSeparator::new().show(ui);
                 }
-                MenuSeparator::new().show(ui);
                 if MenuItem::new("Duplicate").show(ui).clicked() {
                     chosen = Some(MenuChoice::Duplicate {
                         incoming: IncomingWires::Drop,
@@ -85,7 +87,12 @@ impl NodeMenuUi {
                 }
                 MenuSeparator::new().show(ui);
             }
-            if MenuItem::new("Remove").show(ui).clicked() {
+            // A subgraph keeps one boundary node a side.
+            let removable = graph_ctx
+                .body()
+                .find(node_id)
+                .is_none_or(|node| node.boundary().is_none());
+            if removable && MenuItem::new("Remove").show(ui).clicked() {
                 chosen = Some(MenuChoice::Remove);
             }
             chosen
@@ -94,19 +101,27 @@ impl NodeMenuUi {
             return;
         };
         match pick.choice {
-            MenuChoice::Run => out.push_app(AppCommand::Run(RunCommand::Node(pick.target))),
+            MenuChoice::Run { program_id } => {
+                out.push_app(AppCommand::Run(RunCommand::Node(program_id)));
+            }
             MenuChoice::Duplicate { incoming } => {
-                out.extend_graph(GraphIntent::duplicate(
-                    graph_ctx.document(),
-                    GraphId::Main,
-                    graph_ctx.library(),
-                    incoming,
-                    || NodeId::unique().as_u128(),
-                ));
+                out.extend_graph(
+                    graph_ctx.graph(),
+                    GraphIntent::duplicate(
+                        graph_ctx.document(),
+                        graph_ctx.graph(),
+                        graph_ctx.library(),
+                        incoming,
+                        || NodeId::unique().as_u128(),
+                    ),
+                );
             }
             // One intent per member, batched into a single undo entry by the drain, as the Delete
             // chord does.
-            MenuChoice::Remove => out.extend_graph(GraphIntent::remove_selection(graph_ctx.view())),
+            MenuChoice::Remove => out.extend_graph(
+                graph_ctx.graph(),
+                GraphIntent::remove_selection(graph_ctx.view()),
+            ),
         }
     }
 }

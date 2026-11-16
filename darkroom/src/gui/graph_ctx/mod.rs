@@ -1,8 +1,8 @@
 //! The graph as the UI reads it: the document, resolved against the library
 //! and the last run.
 //!
-//! Nothing here is copied or cached. A [`GraphCtx`] is the frame's [`AppCtx`] plus the open
-//! document; the handles it hands out ([`NodeCtx`], [`InputCtx`](input_ctx::InputCtx),
+//! Nothing here is copied or cached. A [`GraphCtx`] is the frame's [`DocCtx`] narrowed to one
+//! graph of the open document; the handles it hands out ([`NodeCtx`], [`InputCtx`](input_ctx::InputCtx),
 //! [`OutputCtx`](output_ctx::OutputCtx)) each resolve one more borrow and answer from the
 //! authority that owns the fact — the node's record off the document, its ports off the library's
 //! declaration, its status off the run. A widget therefore cannot read anything a frame behind.
@@ -19,84 +19,82 @@ use std::collections::BTreeSet;
 
 use palantir::{Display, RgbaF32};
 use scenarium::{
-    DataType, Graph, GraphId, InputPort, Library, NodeId, OutputPort, ProgramId, Scope,
-    Subscription,
+    DataType, Graph, GraphId, InputPort, InstancePath, Library, NodeId, OutputPort, ProgramId,
+    Scope, Subscription,
 };
 
 use crate::core::document::Document;
 use crate::core::document::graph_view::{GraphView, StackedNode};
 use crate::core::document::item_id::ItemId;
 use crate::core::document::viewport::Viewport;
-use crate::core::open_document::OpenDocument;
-use crate::gui::frame::app_ctx::AppCtx;
+use crate::gui::frame::doc_ctx::DocCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::port_ref::{PortKind, PortRef};
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
 
-/// The frame's world and the open document it shows: what every surface at window level and below
-/// reads. `Copy` (shared refs and one small value), so it threads through the draw chain like
-/// `DrawCtx`.
+/// One graph pane's world: the frame's [`DocCtx`] and one graph of its document, with that
+/// graph's view, the instance its run results are read through and the camera this frame draws
+/// it through. What every surface of a graph pane
+/// and below reads. `Copy` (shared refs and small values), so it threads through the draw chain
+/// like `DrawCtx`.
 ///
-/// It takes the [`OpenDocument`] rather than the bare [`Document`] because the window shows both
-/// halves of it: the graph and its pane arrangement, and the unsaved-changes flag, a fact about the
-/// document *and* the file behind it. Read-only, so nothing here can reach the edit history the pair
-/// also holds.
-///
-/// **Composed per phase, never per frame.** The document reference cannot outlive the phase that
-/// took it: the session drains the frame's requests into the document between phases, and that
-/// mutation needs the document exclusively. So one of these is built at each call into
-/// [`MainWindow`](crate::gui::main_window::MainWindow), over the document as it stands at that
-/// instant.
+/// **Composed per phase, never per frame**, as its [`DocCtx`] is: built at each call into a pane,
+/// over the document as it stands at that instant.
 ///
 /// A widget reaches the theme, the library and the last run through the same context it asks about
-/// nodes, one path to each. Refused: a window level above this one, whose only addition below it
-/// was the camera.
+/// nodes, one path to each.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct GraphCtx<'a> {
-    /// The frame's read-only world: the theme every widget paints from, the library each node's
-    /// declaration resolves through, and the last run's per-node verdicts.
-    app: AppCtx<'a>,
-    /// The document this frame shows, and the file behind it.
-    open: &'a OpenDocument,
-    /// The document's camera as this frame's display draws it. See [`Self::camera`].
+    doc: DocCtx<'a>,
+    graph: GraphId,
+    body: &'a Graph,
+    view: &'a GraphView,
+    /// See [`Self::through`]. Borrowed, as the context is copied into every node's and a path
+    /// is 113 bytes.
+    through: Option<&'a InstancePath>,
+    /// The view's camera as this frame's display draws it. See [`Self::camera`].
     camera: Viewport,
 }
 
 impl<'a> GraphCtx<'a> {
-    /// The context of `open` under the frame's `app` on `display`.
-    pub(crate) fn new(app: AppCtx<'a>, open: &'a OpenDocument, display: Display) -> Self {
+    /// The context of `graph` of `doc`'s document, drawn on `display`.
+    ///
+    /// # Panics
+    /// If the document holds no `graph`, or no view of it.
+    pub(crate) fn of(doc: DocCtx<'a>, graph: GraphId, display: Display) -> Self {
+        let document = doc.document();
+        let view = document.view(graph);
         Self {
-            camera: open.document().main_view.viewport.landed(display),
-            app,
-            open,
+            doc,
+            graph,
+            body: document.graphs.graph(graph),
+            view,
+            through: document.through(graph),
+            camera: view.viewport.landed(display),
         }
     }
 
-    /// The open document whole: its content *and* the file it came from. For the tab strip, which
-    /// also shows [`OpenDocument::is_dirty`].
-    pub(crate) const fn open(self) -> &'a OpenDocument {
-        self.open
+    /// Which graph of the document this pane shows.
+    pub(crate) const fn graph(self) -> GraphId {
+        self.graph
     }
 
-    /// The whole document behind this context.
-    ///
-    /// For the readers that build an intent against more of it than the
-    /// shown graph — a duplicate copies wiring the projection alone can't
-    /// describe. Prefer [`Self::body`] / [`Self::view`], which say which
+    /// The whole document behind this context, for the readers that build an intent against
+    /// more of it than the shown graph. Prefer [`Self::body`] / [`Self::view`], which say which
     /// half is being read.
     pub(crate) const fn document(self) -> &'a Document {
-        self.open.document()
+        self.doc.document()
     }
 
     /// The authoring graph this pane shows.
     pub(crate) const fn body(self) -> &'a Graph {
-        self.document().graphs.main()
+        self.body
     }
 
     /// Its view metadata: placements, viewport, committed selection.
     pub(crate) const fn view(self) -> &'a GraphView {
-        &self.document().main_view
+        self.view
     }
 
     /// The camera the canvas draws and hit-tests through: the stored one
@@ -106,16 +104,56 @@ impl<'a> GraphCtx<'a> {
         self.camera
     }
 
+    /// The instance whose run results this pane shows: the main graph's own path, or the one a
+    /// subgraph's side names; `None` for a subgraph shown through none, whose nodes show no run.
+    pub(crate) const fn through(self) -> Option<InstancePath> {
+        self.through.copied()
+    }
+
+    /// This context read through `through` in place of the instance the graph's pane shows: a
+    /// pinned inspector's, which keeps the instance it was pinned to.
+    pub(crate) const fn through_instance<'b>(
+        self,
+        through: Option<&'b InstancePath>,
+    ) -> GraphCtx<'b>
+    where
+        'a: 'b,
+    {
+        let narrowed: GraphCtx<'b> = self;
+        GraphCtx {
+            through,
+            ..narrowed
+        }
+    }
+
+    /// The program node `node_id` of this graph is in the instance [`Self::through`] names, or
+    /// `None` when the pane shows no instance.
+    pub(crate) fn program_id(self, node_id: NodeId) -> Option<ProgramId> {
+        self.through.map(|path| path.node(node_id))
+    }
+
     /// The palette and metrics every widget in this pane paints from.
     pub(crate) const fn theme(self) -> &'a Theme {
-        self.app.theme()
+        self.doc.theme()
     }
 
     /// The library every node's declaration is resolved through — for the
     /// readers that need type metadata a port doesn't carry (an enum's
     /// registered variants, a type's display name).
     pub(crate) const fn library(self) -> &'a Library {
-        self.app.library()
+        self.doc.library()
+    }
+
+    /// What the nodes of the graph this pane shows resolve against.
+    pub(crate) fn scope(self) -> Scope<'a> {
+        self.document().graphs.scope(self.library(), self.graph)
+    }
+
+    /// The last run's results, for the readers that want more of a node than
+    /// its [`NodeCtx`] surfaces — its logs, its failure message, the value
+    /// a preview published.
+    pub(crate) const fn run_state(self) -> &'a RunState {
+        self.doc.run_state()
     }
 
     /// The color a port of `data_type` paints at rest, and the wires touching it: its type's hue
@@ -130,18 +168,6 @@ impl<'a> GraphCtx<'a> {
         }
     }
 
-    /// What the nodes of the graph this pane shows resolve against.
-    pub(crate) fn scope(self) -> Scope<'a> {
-        self.document().graphs.scope(self.library(), GraphId::Main)
-    }
-
-    /// The last run's results, for the readers that want more of a node than
-    /// its [`NodeCtx`] surfaces — its logs, its failure message, the value
-    /// a preview published.
-    pub(crate) const fn run_state(self) -> &'a RunState {
-        self.app.run_state()
-    }
-
     /// The declared type of `port`, read straight off the graph and the
     /// library. For a per-wire reader that has no node context and wants none.
     ///
@@ -150,17 +176,25 @@ impl<'a> GraphCtx<'a> {
     /// If the graph does not hold `port`: a committed wire joins two declared
     /// ports, and an in-flight wire drops once its start is gone.
     pub(crate) fn data_type(self, port: PortRef) -> DataType {
-        let ports = self
+        let decl = self
             .body()
             .find(port.node_id)
             .expect("a painted port's node is in the graph")
-            .decl(self.scope())
-            .ports();
-        let declared = match port.kind {
-            PortKind::Input => ports.input(port.port).map(|input| input.data_type),
-            PortKind::Output => ports.output(port.port).map(|output| output.data_type),
-        };
-        declared.expect("a painted port is declared")
+            .decl(self.scope());
+        match port.kind {
+            PortKind::Input => {
+                decl.ports()
+                    .input(port.port)
+                    .expect("a painted port is declared")
+                    .data_type
+            }
+            PortKind::Output => {
+                decl.ports()
+                    .output(port.port)
+                    .expect("a painted port is declared")
+                    .data_type
+            }
+        }
     }
 
     /// This pane's placed nodes — every graph node and every stub — in no
@@ -192,12 +226,6 @@ impl<'a> GraphCtx<'a> {
     pub(crate) fn node(self, node_id: NodeId) -> Option<NodeCtx<'a>> {
         let placement = *self.view().node_placements.get(&node_id)?;
         Some(NodeCtx::resolve(self, node_id, placement.pos))
-    }
-
-    /// The program node `node_id` of this graph is: the node itself, as the main graph is placed
-    /// once.
-    pub(crate) fn program_id(self, node_id: NodeId) -> ProgramId {
-        ProgramId::from(node_id)
     }
 
     /// Whether the document places `node_id`, as a graph node or a stub.

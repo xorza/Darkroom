@@ -77,7 +77,7 @@ impl SelectionUi {
     pub(crate) fn input(&mut self, ui: &mut Ui, stage: &mut Stage<'_, CanvasCtx<'_>>) {
         let ctx = stage.ctx;
         let graph_ctx = ctx.graph_ctx();
-        let resp = ui.response_for(canvas::outer_wid());
+        let resp = ui.response_for(canvas::outer_wid(stage.ctx.graph_ctx().graph()));
         if self.band.is_none()
             && ctx.gesture() == Some(CanvasGesture::Select)
             && let Some(p) = resp.pointer_local
@@ -143,9 +143,12 @@ impl SelectionUi {
             self.band = Some(band);
             return;
         }
-        stage.out.push_graph(GraphIntent::SetSelection {
-            to: swept.iter().copied().collect(),
-        });
+        stage.out.push_graph(
+            stage.ctx.graph_ctx().graph(),
+            GraphIntent::SetSelection {
+                to: swept.iter().copied().collect(),
+            },
+        );
     }
 
     /// Paint the in-progress rectangle, inside the inner canvas so its world coords ride the

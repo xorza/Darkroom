@@ -47,7 +47,7 @@ impl ButtonStroke {
         ctx: CanvasCtx<'_>,
         latch: Option<PointerButton>,
     ) -> StrokeStep {
-        let resp = ui.response_for(canvas::outer_wid());
+        let resp = ui.response_for(canvas::outer_wid(ctx.graph_ctx().graph()));
         let viewport = ctx.graph_ctx().camera();
         let at = resp.pointer_local.map(|local| viewport.to_world(local));
         if ctx.cancelled() {

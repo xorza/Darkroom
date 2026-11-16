@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use glam::UVec2;
 use palantir::WidgetId;
-use scenarium::{Binding, InputPort, NodeId, numbered_port};
+use scenarium::{Binding, InputPort, NodeId, ProgramId, numbered_port};
 
 use crate::core::document::internals::DocumentFixture;
 use crate::core::document::item_id::ItemId;
@@ -201,7 +201,7 @@ fn run_pick_names_the_opened_node_and_edits_nothing() {
     assert!(
         matches!(
             h.commands[..],
-            [AppCommand::Run(RunCommand::Node(node_id))] if node_id == a,
+            [AppCommand::Run(RunCommand::Node(program_id))] if program_id == ProgramId::from(a),
         ),
         "the run names the node the menu opened on, not the selection: {:?}",
         h.commands

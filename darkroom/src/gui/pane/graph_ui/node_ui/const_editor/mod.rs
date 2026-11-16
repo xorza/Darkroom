@@ -82,7 +82,7 @@ impl ConstEditor<'_> {
     /// Render the editor for the value. Returns the new value when the user
     /// committed an edit this frame (scrub released, Enter, blur, or a
     /// discrete pick), otherwise `None`.
-    pub(super) fn show(self, ui: &mut Ui) -> Option<ConstValue> {
+    pub(crate) fn show(self, ui: &mut Ui) -> Option<ConstValue> {
         let ConstEditor {
             field,
             library,

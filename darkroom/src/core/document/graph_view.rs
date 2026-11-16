@@ -41,8 +41,8 @@ pub(crate) struct StackedNode {
     pub(crate) node_id: NodeId,
 }
 
-/// Editor-side view metadata for the document's graph: per-node placements, the wire ties and
-/// the routes through them, the viewport, and the selection (`Document::main_view`). The graph
+/// Editor-side view metadata for one graph of the document: per-node placements, the wire ties
+/// and the routes through them, the viewport, and the selection (`Document::view`). The graph
 /// *data* lives in the core `Graph`.
 ///
 /// Everything here is saved. Ctrl+Z walks the selection with the structural edits but not the

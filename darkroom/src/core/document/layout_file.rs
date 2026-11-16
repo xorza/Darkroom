@@ -1,10 +1,11 @@
 //! The pane layout as a document file holds it.
 //!
-//! - **The file holds palantir's `DockLayout` alone, loaded back with the graph tab pinned.**
+//! - **The file holds palantir's `DockLayout` alone, loaded back with the main graph's tab pinned.**
 //!   The pinned tab is the editor's, so no file can name another. A layout palantir's load
 //!   refuses fails the decode.
 
 use palantir::{DockLayout, DockState};
+use scenarium::GraphId;
 use serde::de::Error;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -20,5 +21,9 @@ pub(super) fn serialize<S: Serializer>(
 pub(super) fn deserialize<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<DockState<TabRef>, D::Error> {
-    DockState::load(DockLayout::deserialize(deserializer)?, TabRef::Graph).map_err(D::Error::custom)
+    DockState::load(
+        DockLayout::deserialize(deserializer)?,
+        TabRef::Graph(GraphId::Main),
+    )
+    .map_err(D::Error::custom)
 }

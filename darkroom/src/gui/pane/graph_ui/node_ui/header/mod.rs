@@ -11,7 +11,7 @@ use palantir::{
     Modifiers, Panel, Separator, SizeSpec, SplitSide, Ui, VAlign, Visibility, WidgetId,
 };
 
-use scenarium::{CacheMode, NodeId};
+use scenarium::{CacheMode, GraphId, NodeId};
 
 use crate::core::document::inspect_target::InspectTarget;
 use crate::core::document::item_id::ItemId;
@@ -60,7 +60,7 @@ pub(super) fn subscription_pin(
     // points an input exec pin along the flow. Placed by its grown box's center
     // rather than in flow, so it straddles the node's top-left corner.
     PortGlyph::arrow(
-        wid::subscription_glyph(node.node_id),
+        wid::subscription_glyph(node.graph_ctx.graph(), node.node_id),
         theme.port.size,
         hover.lift(theme.port.event),
     )
@@ -85,14 +85,20 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
         .gap(theme.space.xs)
         .child_align(VAlign::Center)
         .show(ui, |ui| {
-            if node.runnable() && run_button(ui, node) {
+            if let Some(program_id) = node.runnable()
+                && run_button(ui, node)
+            {
                 record
                     .stage
                     .out
-                    .push_app(AppCommand::Run(RunCommand::Node(node.node_id)));
+                    .push_app(AppCommand::Run(RunCommand::Node(program_id)));
             }
             title(ui, record);
-            kind_mark(ui, node, wid::of_node("kind_mark", node.node_id));
+            kind_mark(
+                ui,
+                node,
+                wid::of_node("kind_mark", node.graph_ctx.graph(), node.node_id),
+            );
             support::hspacer(ui, "header_spacer");
             if node.can_disable() {
                 disable_button(ui, record);
@@ -102,7 +108,7 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
             }
             if IconButton::press(
                 Icon::Inspect,
-                wid::inspect_button(node.node_id),
+                wid::inspect_button(node.graph_ctx.graph(), node.node_id),
                 theme.colors.accent,
                 "Inspect — values, status, log",
             )
@@ -110,9 +116,12 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
             {
                 // Inspect this node: select it alone, and show the inspector that follows the
                 // selection.
-                record.stage.out.push_graph(GraphIntent::SetSelection {
-                    to: BTreeSet::from([ItemId::Node(node.node_id)]),
-                });
+                record.stage.out.push_graph(
+                    record.node.graph_ctx.graph(),
+                    GraphIntent::SetSelection {
+                        to: BTreeSet::from([ItemId::Node(node.node_id)]),
+                    },
+                );
                 show_inspector(record);
             }
         });
@@ -137,7 +146,7 @@ pub(crate) fn kind_mark(ui: &mut Ui, node: NodeCtx<'_>, wid: WidgetId) {
 }
 
 /// Show the inspector that follows the selection: where it already sits, else in a pane split
-/// off the right of the graph's, so the graph it inspects stays in view.
+/// off the right of the node's graph's, so the graph it inspects stays in view.
 fn show_inspector(record: &mut NodeRecord<'_, '_>) {
     let tab = TabRef::Inspector(InspectTarget::Selection);
     let layout = &record.node.graph_ctx.document().layout;
@@ -149,10 +158,11 @@ fn show_inspector(record: &mut NodeRecord<'_, '_>) {
         return;
     }
     record.stage.out.push_view(DockOperation::OpenTab { tab });
-    if let Some(graph) = layout
-        .groups()
-        .find(|group| group.tabs().contains(&TabRef::Graph))
-    {
+    if let Some(graph) = layout.groups().find(|group| {
+        group
+            .tabs()
+            .contains(&TabRef::Graph(record.node.graph_ctx.graph()))
+    }) {
         record.stage.out.push_view(DockOperation::MoveTab {
             tab,
             to: DockDrop::Split {
@@ -173,7 +183,7 @@ fn run_button(ui: &mut Ui, node: NodeCtx<'_>) -> bool {
     let theme = node.theme();
     IconButton::press(
         Icon::Run,
-        wid::of_node("run_button", node.node_id),
+        wid::of_node("run_button", node.graph_ctx.graph(), node.node_id),
         theme.status.success,
         tooltip,
     )
@@ -186,17 +196,20 @@ fn disable_button(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     let theme = node.theme();
     if IconButton::press(
         Icon::Disable,
-        wid::of_node("disable_button", node.node_id),
+        wid::of_node("disable_button", node.graph_ctx.graph(), node.node_id),
         theme.ink.muted,
         "Disable — exclude this sink from graph runs",
     )
     .selected(node.disabled())
     .show(ui, theme)
     {
-        record.stage.out.push_graph(GraphIntent::SetNodeProperty {
-            node_id: node.node_id,
-            to: NodeProperty::Disabled(!node.disabled()),
-        });
+        record.stage.out.push_graph(
+            record.node.graph_ctx.graph(),
+            GraphIntent::SetNodeProperty {
+                node_id: node.node_id,
+                to: NodeProperty::Disabled(!node.disabled()),
+            },
+        );
     }
 }
 
@@ -205,7 +218,7 @@ fn disable_button(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
 fn cache_button(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     let node = record.node;
     let theme = node.theme();
-    let wid = cache_button_wid(node.node_id);
+    let wid = cache_button_wid(node.graph_ctx.graph(), node.node_id);
     let cache = node
         .cache()
         .expect("a header shows the cache button of a node with a body");
@@ -226,10 +239,13 @@ fn cache_button(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
             .show(ui)
             .changed
         {
-            record.stage.out.push_graph(GraphIntent::SetNodeProperty {
-                node_id: node.node_id,
-                to: NodeProperty::RuntimeCache(CacheMode::from_bits(keep_ram, disk)),
-            });
+            record.stage.out.push_graph(
+                record.node.graph_ctx.graph(),
+                GraphIntent::SetNodeProperty {
+                    node_id: node.node_id,
+                    to: NodeProperty::RuntimeCache(CacheMode::from_bits(keep_ram, disk)),
+                },
+            );
         }
         let mut save_disk = disk;
         if Checkbox::new(&mut save_disk)
@@ -237,17 +253,20 @@ fn cache_button(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
             .show(ui)
             .changed
         {
-            record.stage.out.push_graph(GraphIntent::SetNodeProperty {
-                node_id: node.node_id,
-                to: NodeProperty::RuntimeCache(CacheMode::from_bits(ram, save_disk)),
-            });
+            record.stage.out.push_graph(
+                record.node.graph_ctx.graph(),
+                GraphIntent::SetNodeProperty {
+                    node_id: node.node_id,
+                    to: NodeProperty::RuntimeCache(CacheMode::from_bits(ram, save_disk)),
+                },
+            );
             // Turning the disk bit on publishes what the node already holds in RAM, without
             // which the value would reach disk only when the node next recomputed.
             if save_disk {
                 record
                     .stage
                     .out
-                    .push_app(AppCommand::Run(RunCommand::FlushCache(node.node_id)));
+                    .push_app(AppCommand::Run(RunCommand::FlushCache(node.addr())));
             }
         }
         MenuSeparator::new().show(ui);
@@ -255,13 +274,13 @@ fn cache_button(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
             record
                 .stage
                 .out
-                .push_app(AppCommand::Run(RunCommand::EvictCache(node.node_id)));
+                .push_app(AppCommand::Run(RunCommand::EvictCache(node.addr())));
         }
     });
 }
 
-fn cache_button_wid(node_id: NodeId) -> WidgetId {
-    wid::of_node("cache_button", node_id)
+fn cache_button_wid(graph: GraphId, node_id: NodeId) -> WidgetId {
+    wid::of_node("cache_button", graph, node_id)
 }
 
 /// The node title: an inline-renamable label. Double-click swaps it for
@@ -272,7 +291,7 @@ fn title(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     let node = record.node;
     let mode = ClickMode::with_shift(ui.modifiers().contains(Modifiers::SHIFT));
     let title = EditableLabel::new(node.name())
-        .id(wid::rename(node.node_id))
+        .id(wid::rename(node.graph_ctx.graph(), node.node_id))
         .style(&node.theme().flat_text_edit)
         .bold()
         .max_chars(NODE_NAME_MAX_CHARS)
@@ -280,16 +299,18 @@ fn title(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
         .min_size((NODE_NAME_MIN_WIDTH, 0.0))
         .show(ui);
     if let Some(to) = title.committed_text {
-        record.stage.out.push_graph(GraphIntent::RenameNode {
-            node_id: node.node_id,
-            to,
-        });
+        record.stage.out.push_graph(
+            record.node.graph_ctx.graph(),
+            GraphIntent::RenameNode {
+                node_id: node.node_id,
+                to,
+            },
+        );
     } else if !title.editing && title.response.clicked() {
-        record.stage.out.extend_graph(GraphIntent::click(
-            mode,
-            node.graph_ctx.selected(),
-            ItemId::Node(node.node_id),
-        ));
+        record.stage.out.extend_graph(
+            record.node.graph_ctx.graph(),
+            GraphIntent::click(mode, node.graph_ctx.selected(), ItemId::Node(node.node_id)),
+        );
     }
 }
 

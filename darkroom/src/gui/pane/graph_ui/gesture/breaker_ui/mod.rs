@@ -2,6 +2,7 @@ pub(crate) mod breaker_probe;
 pub(crate) mod scribble;
 
 use palantir::{LineCap, LineJoin, Shape, Stroke, Ui};
+use scenarium::GraphId;
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::frame::requests::Requests;
@@ -55,7 +56,9 @@ impl BreakerUi {
         match self.stroke.step(ui, ctx, latch) {
             StrokeStep::Started(at) => self.scribble.restart(at),
             StrokeStep::Moved(at) => self.scribble.add_point(at, ctx.graph_ctx().camera().zoom),
-            StrokeStep::Released => release(&mut self.scribble, stage.out),
+            StrokeStep::Released => {
+                release(&mut self.scribble, ctx.graph_ctx().graph(), stage.out);
+            }
             StrokeStep::Idle => {}
         }
     }
@@ -89,7 +92,7 @@ impl BreakerUi {
 
 /// A released scribble: drain each target set into its severing intent. Drained rather than
 /// moved out, as moving would hand the allocation to the intent instead of the next gesture.
-fn release(scribble: &mut Scribble, out: &mut Requests) {
+fn release(scribble: &mut Scribble, graph: GraphId, out: &mut Requests) {
     let Scribble {
         broken,
         broken_node_ids,
@@ -97,6 +100,7 @@ fn release(scribble: &mut Scribble, out: &mut Requests) {
         ..
     } = scribble;
     out.extend_graph(
+        graph,
         broken_node_ids
             .iter()
             .map(|&node_id| GraphIntent::RemoveNode { node_id }),
@@ -105,10 +109,13 @@ fn release(scribble: &mut Scribble, out: &mut Requests) {
         if broken_node_ids.contains(&addr.node_id) {
             continue;
         }
-        out.push_graph(GraphIntent::SetInput {
-            input: addr,
-            to: None,
-        });
+        out.push_graph(
+            graph,
+            GraphIntent::SetInput {
+                input: addr,
+                to: None,
+            },
+        );
     }
     // A removed node already drops its subscriptions (its step captures every edge touching
     // it), so skip any whose emitter or subscriber is doomed, to avoid redundant history.
@@ -116,10 +123,13 @@ fn release(scribble: &mut Scribble, out: &mut Requests) {
         if broken_node_ids.contains(&s.event.node_id) || broken_node_ids.contains(&s.subscriber) {
             continue;
         }
-        out.push_graph(GraphIntent::SetSubscription {
-            subscription: s,
-            to: false,
-        });
+        out.push_graph(
+            graph,
+            GraphIntent::SetSubscription {
+                subscription: s,
+                to: false,
+            },
+        );
     }
     broken_node_ids.clear();
 }

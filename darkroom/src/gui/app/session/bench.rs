@@ -46,7 +46,7 @@ use palantir::{
     App, ColorScheme, Harness, HarnessDepth, Key, PointerButton, RecordPass, Ui, WindowToken,
 };
 use palantir::{FramePaint, ImageDownsample, OffscreenHost};
-use scenarium::{DynamicValue, NodeId, ProgramId};
+use scenarium::{DynamicValue, GraphId, NodeId, ProgramId};
 
 use crate::core::document::Document;
 use crate::core::document::item_id::ItemId;
@@ -229,8 +229,12 @@ impl Editor {
                 offset: Vec2::new(if n.is_multiple_of(2) { 1.0 } else { 0.0 }, 0.0),
             },
         };
-        self.session
-            .apply_edit(intent, self.library.cur(), &mut self.requests);
+        self.session.apply_edit(
+            GraphId::Main,
+            intent,
+            self.library.cur(),
+            &mut self.requests,
+        );
     }
 
     fn run_commands(&mut self) {
@@ -326,7 +330,7 @@ fn play_input(scenario: Scenario, frontend: &mut Harness, n: u32) {
         Scenario::Click => {
             if n.is_multiple_of(2) {
                 frontend.advance_past_double_click();
-                let bare = frontend.point_in(canvas::outer_wid(), BARE_CANVAS);
+                let bare = frontend.point_in(canvas::outer_wid(GraphId::Main), BARE_CANVAS);
                 frontend.press(bare, PointerButton::Left);
             } else {
                 frontend.release(PointerButton::Left);

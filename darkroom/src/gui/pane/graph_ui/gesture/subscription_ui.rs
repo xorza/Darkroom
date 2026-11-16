@@ -122,10 +122,13 @@ impl SubscriptionUi {
             | InFlight::FromSubscriber(GlyphDrag {
                 from: subscriber,
                 snap: Some(emitter),
-            }) => stage.out.push_graph(GraphIntent::SetSubscription {
-                subscription: Subscription::new(emitter, subscriber),
-                to: true,
-            }),
+            }) => stage.out.push_graph(
+                stage.ctx.graph_ctx().graph(),
+                GraphIntent::SetSubscription {
+                    subscription: Subscription::new(emitter, subscriber),
+                    to: true,
+                },
+            ),
             _ => {}
         }
         self.state = None;
@@ -160,7 +163,7 @@ impl SubscriptionUi {
         let Some(state) = self.state.as_ref().copied() else {
             return;
         };
-        let pointer = canvas::world_pointer(ui, graph_ctx.camera());
+        let pointer = canvas::world_pointer(ui, graph_ctx.graph(), graph_ctx.camera());
         let (p0, p3) = match state {
             InFlight::FromEmitter(drag) => {
                 let Some(p0) = geometry.events.center(drag.from) else {

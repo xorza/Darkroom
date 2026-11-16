@@ -10,16 +10,16 @@
 use palantir::{
     Chrome, Configure, Panel, SizeSpec, Sizing, Spacing, Text, TextStyle, Ui, VAlign, WidgetId, fmt,
 };
-use scenarium::RamUsage;
+use scenarium::{GraphId, RamUsage};
 
 use crate::core::document::item_id::ItemId;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::status_log::Severity;
 use crate::gui::frame::app_command::{AppCommand, ViewCommand};
+use crate::gui::frame::doc_ctx::DocCtx;
 use crate::gui::frame::framing::Framing;
 use crate::gui::frame::stage::Stage;
 use crate::gui::frame::window_parts::StatusInputs;
-use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::state::run_state::run_outcome::RunOutcome;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::format::bytes::Bytes;
@@ -37,7 +37,7 @@ pub(crate) fn wid() -> WidgetId {
 }
 
 /// Draw the bottom status bar. A link in its run line raises its edits on the stage's requests.
-pub(crate) fn show(ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>, status: StatusInputs<'_>) {
+pub(crate) fn show(ui: &mut Ui, stage: &mut Stage<'_, DocCtx<'_>>, status: StatusInputs<'_>) {
     let ctx = stage.ctx;
     let theme = ctx.theme();
     let ram = MemoryLabel::resolve(status.process_memory, ctx.run_state().cache_ram());
@@ -63,9 +63,10 @@ pub(crate) fn show(ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>, status: Sta
                 run_line(ui, stage, outcome);
             }
             support::hspacer(ui, "status_spacer");
-            let view = &ctx.document().main_view;
+            let (document, active) = (ctx.document(), ctx.active());
+            let view = document.view(active);
             let counts = CountsClause {
-                node_count: ctx.document().graphs.main().len(),
+                node_count: document.graphs.graph(active).len(),
                 selected_count: view.selected.len(),
             };
             Readout {
@@ -160,7 +161,7 @@ impl<T: Display> Figure<T> {
 
 /// What the last run came to, in the ink of its worst case, and — when a node needs a look —
 /// a link that selects it and frames it.
-fn run_line(ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>, outcome: RunOutcome) {
+fn run_line(ui: &mut Ui, stage: &mut Stage<'_, DocCtx<'_>>, outcome: RunOutcome) {
     let ctx = stage.ctx;
     let theme = ctx.theme();
     let color = if outcome.failed_count > 0 {
@@ -174,29 +175,34 @@ fn run_line(ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>, outcome: RunOutcom
     Text::new(fmt!(ui, "{}", RunLine(outcome)))
         .style(&style)
         .show(ui);
-    // The tally is a record of that run, so its cause may be gone from the graph since.
+    // The tally is a record of that run, so its cause may be gone from the graph since. The link
+    // shows the cause in its own graph's pane, entered through the instance it ran in.
     let Some(cause) = outcome.cause else {
         return;
     };
-    // A cause outside the main graph has no node here to show.
-    let Some(node) = cause
-        .path()
-        .is_main()
-        .then(|| ctx.document().graphs.main().find(cause.node_id()))
-        .flatten()
-    else {
+    let graphs = &ctx.document().graphs;
+    let Some(graph) = graphs.graph_at(cause.path()) else {
         return;
     };
-    let cause = cause.node_id();
+    let Some(node) = graphs.graph(graph).find(cause.node_id()) else {
+        return;
+    };
     let name = &node.name;
     let text = fmt!(ui, "Show {name}");
     if Link::new(cause_link_wid(), text).show(ui, theme) {
-        stage.out.push_graph(GraphIntent::SetSelection {
-            to: BTreeSet::from([ItemId::Node(cause)]),
-        });
-        stage
-            .out
-            .push_app(AppCommand::View(ViewCommand::Frame(Framing::ShowSelected)));
+        if let GraphId::Subgraph(subgraph) = graph {
+            stage.out.push_enter(subgraph, Some(cause.path()));
+        }
+        stage.out.push_graph(
+            graph,
+            GraphIntent::SetSelection {
+                to: BTreeSet::from([ItemId::Node(cause.node_id())]),
+            },
+        );
+        stage.out.push_app(AppCommand::View(ViewCommand::Frame {
+            graph,
+            framing: Framing::ShowSelected,
+        }));
     }
 }
 

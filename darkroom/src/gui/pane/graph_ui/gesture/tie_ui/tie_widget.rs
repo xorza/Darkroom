@@ -9,6 +9,7 @@ use glam::Vec2;
 use palantir::{
     Configure, Modifiers, Panel, PointerAction, PointerButton, PointerEdge, Sense, Sizing, Ui,
 };
+use scenarium::GraphId;
 
 use crate::core::document::item_id::ItemId;
 use crate::core::document::tie::{TieAngle, TieId};
@@ -86,7 +87,7 @@ impl TieWidgets {
             gesture: Some(knob.gesture),
         };
         if ctx.cancelled() {
-            out.push_graph(turn(knob.from));
+            out.push_graph(ctx.graph_ctx().graph(), turn(knob.from));
             self.knob = None;
             return;
         }
@@ -94,7 +95,10 @@ impl TieWidgets {
         let center = graph_ctx.view().ties.get(&knob.tie).map(|tie| tie.pos);
         let (Some(center), Some(_)) = (
             center,
-            ui.response_for(wid::tie_knob(knob.tie)).left.drag.delta(),
+            ui.response_for(wid::tie_knob(ctx.graph_ctx().graph(), knob.tie))
+                .left
+                .drag
+                .delta(),
         ) else {
             self.knob = None;
             return;
@@ -104,9 +108,15 @@ impl TieWidgets {
         } else {
             AngleSnap::Free
         };
-        if let Some(pointer) = ui.response_for(canvas::outer_wid()).pointer_local {
+        if let Some(pointer) = ui
+            .response_for(canvas::outer_wid(graph_ctx.graph()))
+            .pointer_local
+        {
             let offset = graph_ctx.camera().to_world(pointer) - center;
-            out.push_graph(turn(TieAngle::Pinned(knob_angle(offset, snap))));
+            out.push_graph(
+                graph_ctx.graph(),
+                turn(TieAngle::Pinned(knob_angle(offset, snap))),
+            );
         }
     }
 
@@ -122,11 +132,14 @@ impl TieWidgets {
         }
         match action.edge {
             PointerEdge::Clicked { count: 2 } => {
-                stage.out.push_graph(GraphIntent::SetTieAngle {
-                    tie,
-                    angle: TieAngle::Auto,
-                    gesture: None,
-                });
+                stage.out.push_graph(
+                    stage.ctx.graph_ctx().graph(),
+                    GraphIntent::SetTieAngle {
+                        tie,
+                        angle: TieAngle::Auto,
+                        gesture: None,
+                    },
+                );
             }
             PointerEdge::DragStarted => {
                 self.knob = Some(KnobDrag {
@@ -146,7 +159,7 @@ impl TiePass<'_, '_> {
     /// so a body covers a band as it covers wires, and wins a press over it.
     pub(crate) fn record(&mut self, ui: &mut Ui) {
         let draw_ctx = self.draw_ctx;
-        let theme = draw_ctx.theme();
+        let (theme, graph) = (draw_ctx.theme(), draw_ctx.graph_ctx().graph());
         for band in self
             .ties
             .bands()
@@ -161,7 +174,7 @@ impl TiePass<'_, '_> {
             let selected = draw_ctx.is_selected(item);
             let ink = if self.line.cross_band(band.tie, axes.reach()) {
                 BandInk::Crossed
-            } else if selected || ui.response_for(wid::tie_body(band.tie)).hovered() {
+            } else if selected || ui.response_for(wid::tie_body(graph, band.tie)).hovered() {
                 BandInk::Lit
             } else {
                 BandInk::Rest
@@ -177,22 +190,22 @@ impl TiePass<'_, '_> {
             );
             let hit = axes.hit_rect();
             Panel::zstack()
-                .id(wid::tie_body(band.tie))
+                .id(wid::tie_body(graph, band.tie))
                 .at(hit.min)
                 .size((Sizing::fixed(hit.size.w), Sizing::fixed(hit.size.h)))
                 .sense(Sense::CLICK | Sense::DRAG)
                 .show(ui, |_| {});
             if selected {
-                record_knob(ui, band.tie, axes.knob_center());
+                record_knob(ui, graph, band.tie, axes.knob_center());
             }
         }
     }
 }
 
 /// Record the knob of a selected tie, whose edges [`TieWidgets::act_on_knob`] reads.
-fn record_knob(ui: &mut Ui, tie: TieId, center: Vec2) {
+fn record_knob(ui: &mut Ui, graph: GraphId, tie: TieId, center: Vec2) {
     Panel::zstack()
-        .id(wid::tie_knob(tie))
+        .id(wid::tie_knob(graph, tie))
         .at(center - Vec2::splat(KNOB_HIT_RADIUS))
         .size(KNOB_HIT_RADIUS * 2.0)
         .sense(Sense::CLICK | Sense::DRAG)
@@ -217,7 +230,7 @@ pub(crate) fn grab(graph_ctx: GraphCtx<'_>, tie: TieId) -> GrabStart {
         grab: Grab {
             item,
             members,
-            handle: wid::tie_body(tie),
+            handle: wid::tie_body(graph_ctx.graph(), tie),
         },
         joined,
     }
