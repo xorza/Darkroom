@@ -11,8 +11,9 @@ the shape changes that keep behavior, then the features. Temporary: deleted once
 | 1 | Rename the port declarations `InputDecl` and `OutputDecl` | `78adc05e6`, pushed |
 | 2 | Name program nodes by `ProgramId` | `a718d77fe`, pushed |
 | 3 | Keep stubs in scenarium's `Graph` | `52c03147e`, pushed |
-| 4 | Make `DataType` a small value of ids | in the worktree, reviewed |
-| 5–12 | | to do |
+| 4 | Make `DataType` a small value of ids | `9ddb3e708`, pushed |
+| 5 | Name ports by id | in the worktree, reviewed |
+| 6–12 | | to do |
 
 ## Rules for the series
 
@@ -157,6 +158,10 @@ gains the port-id rule.
   `AGENTS.md`.
 - Partial: `graph/ports.rs` (ids, `numbered_port`, `PortsError`), `graph/mod.rs`,
   `graph/tests.rs`, `exec/compile/mod.rs`, `core/edit/graph_intent/tests.rs`.
+- The fixtures are the tip's, taken back to one graph: every binding names its port by id and a
+  node names its func by id alone.
+- `TestGraph::evolve_func` goes, as a node no longer holds its func's signature; a test edits a
+  func with `edit_func` and numbers a port it adds.
 - About +1 250 / −830, mostly mechanical.
 
 ## Phase 3: features
@@ -298,6 +303,12 @@ What the series' last tree holds where the tip holds otherwise.
   `program_id(n)`, not `node_id(n)` (commit 2); commit 10 keeps the name.
 - **`darkroom/src/core/document/tests.rs`:** a test that the load closes a viewer whose path
   goes through an instance (commit 2).
+- **`scenarium/src/graph/func/mod.rs`:** `Func`'s doc says the `FuncRef` is what a compiled node
+  runs under, where the tip still says a node is authored against it (commit 5).
+- **`scenarium/src/exec/compile/tests/mod.rs`:** the wire-interning test's doc names the output's
+  position by its id, not "the port index the authored wire named" (commit 5).
+- **`scenarium/src/exec/compile/tests/mod.rs`:** `a_port_lands_at_its_declared_position_whatever_its_number`,
+  a func numbering its ports against their order (commit 5).
 - **`scenarium/src/graph/tests.rs`:** `a_load_attaches_each_stub_that_resolves_again_with_the_wiring_that_fits`
   on one graph (commit 3); commit 6 moves it onto `GraphSet::reconcile` beside the tip's
   set-wide test, or drops it where that test covers each case.
