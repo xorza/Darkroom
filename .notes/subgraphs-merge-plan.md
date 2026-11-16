@@ -10,8 +10,9 @@ the shape changes that keep behavior, then the features. Temporary: deleted once
 |---|---|---|
 | 1 | Rename the port declarations `InputDecl` and `OutputDecl` | `78adc05e6`, pushed |
 | 2 | Name program nodes by `ProgramId` | `a718d77fe`, pushed |
-| 3 | Keep stubs in scenarium's `Graph` | in the worktree |
-| 4–12 | | to do |
+| 3 | Keep stubs in scenarium's `Graph` | `52c03147e`, pushed |
+| 4 | Make `DataType` a small value of ids | in the worktree, reviewed |
+| 5–12 | | to do |
 
 ## Rules for the series
 
@@ -127,8 +128,16 @@ This removes the `Arc<FsPathConfig>` the document serialized.
   `gui/widgets/format/`, `gui/theme/`, `gui/pane/graph_ui/node_ui/const_editor/`,
   `core/runtime_library.rs`.
 - Partial: the `lens` node files, `config_node.rs`, `fs_watch`, `port_row`, `input_ctx`.
-- Held back to commit 6: unknown types (`Library::knows`, the load report's `UnknownType`); only
-  an interface port can name a type the library lacks.
+- Held back to commit 6: unknown types — the load report's `UnknownType`, a constant of an
+  unregistered enum kept unchecked (`const_satisfies` refuses it here, as `is_some_and`), the
+  const editor's read-only field for a type the library lacks and its test, and the neutral port
+  color through `GraphCtx::port_color`. Only an interface port can name a type the library lacks.
+  `Library::knows` lands here, as `Library::check` reads it.
+- Held back to commit 10: `Library::data_types`, whose one caller is the interface card's retype.
+- The signature stays v2 and writes a directory and a file of any kind and mode as the one kind a
+  path was, so no saved node turns into a "changed ports" stub; commit 5's v3 writes them apart.
+- `AppCommand` and `EditCommand` become `Copy`, as a `PathPick` is; the commit that brings
+  `AppCommand::Warn(String)` takes `Copy` off `AppCommand` again.
 - About +1 950 / −750.
 
 ### 5. Name ports by id
