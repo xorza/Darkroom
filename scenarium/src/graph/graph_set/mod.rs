@@ -916,11 +916,9 @@ fn shape_of(graph: &Graph, shapes: &HashMap<SubgraphId, ProgramShape>) -> Progra
 /// [`ProgramShape::MAX_LEVELS`], and each one that would carry the count of the nodes before it
 /// past [`ProgramShape::MAX_NODES`].
 fn over_bounds(graph: &Graph, shapes: &HashMap<SubgraphId, ProgramShape>) -> Vec<Refusal> {
-    let mut nodes: Vec<_> = graph
+    let nodes = graph
         .iter()
-        .map(|node| (node.node_id, ProgramShape::of_node(&node.kind, shapes)))
-        .collect();
-    nodes.sort_unstable_by_key(|(node_id, _)| *node_id);
+        .map(|node| (node.node_id, ProgramShape::of_node(&node.kind, shapes)));
     let mut kept = ProgramShape::default();
     let mut refused = Vec::new();
     for (node_id, shape) in nodes {

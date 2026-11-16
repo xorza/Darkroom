@@ -43,6 +43,10 @@ impl<'a> From<&'a SavedPort> for ShownPort<'a> {
 /// An input as its declaration last showed it, with the default it gave a new node. Flat, not
 /// a [`SavedPort`] with a default beside it, as a file writes one for each input of each func
 /// it names.
+///
+/// A path input saves no default: its default is the machine's, a model the preferences point
+/// at, not the func's, and a file that went to another person would carry the folders of the
+/// one it was saved on.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SavedInput {
     pub name: String,
@@ -122,7 +126,10 @@ impl NodeDecl<'_> {
                         SavedInput {
                             name: input.name.clone(),
                             data_type: input.data_type,
-                            default_value: input.default_value.clone(),
+                            default_value: input
+                                .default_value
+                                .clone()
+                                .filter(|_| !input.data_type.is_path()),
                         },
                     )
                 })
@@ -153,5 +160,33 @@ impl NodeDecl<'_> {
                 })
                 .collect(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::data::const_value::ConstValue;
+    use crate::data::data_type::DataType;
+    use crate::graph::identity::{FuncId, PortId};
+    use crate::graph::node_decl::NodeDecl;
+    use crate::graph::ports::InputDecl;
+    use crate::internals;
+
+    /// A saved declaration keeps an input's default, but not a path input's: that default is the
+    /// machine's, and the file would carry its folders.
+    #[test]
+    fn a_saved_declaration_keeps_no_path_default() {
+        let func = internals::stub_func(FuncId::unique(), "model")
+            .input(1, InputDecl::optional("gain", DataType::Float).default(0.5))
+            .input(
+                2,
+                InputDecl::optional("model", DataType::Dir)
+                    .default(ConstValue::FsPath("/home/someone/models".to_owned())),
+            )
+            .build();
+        let saved = NodeDecl::Func(&func).saved();
+        let default = |id| saved.input(PortId::new(id)).unwrap().default_value.clone();
+        assert_eq!(default(1), Some(ConstValue::Float(0.5)));
+        assert_eq!(default(2), None);
     }
 }

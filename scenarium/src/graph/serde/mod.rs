@@ -10,7 +10,6 @@ use std::marker::PhantomData;
 use ::serde::de::Error as _;
 use ::serde::de::{MapAccess, Visitor};
 use ::serde::{Deserialize, Deserializer, Serialize, Serializer};
-use hashbrown::HashMap;
 
 use crate::graph::binding::Binding;
 use crate::graph::ghost_node::GhostNode;
@@ -71,8 +70,11 @@ pub(super) fn deserialize_ghost_subscriptions<'de, D: Deserializer<'de>>(
 /// wire naming that id. Only here do both entries still exist.
 pub(super) fn deserialize_nodes<'de, D: Deserializer<'de>>(
     deserializer: D,
-) -> Result<HashMap<NodeId, Node>, D::Error> {
-    deserializer.deserialize_map(NodesVisitor)
+) -> Result<BTreeMap<NodeId, Node>, D::Error> {
+    deserializer.deserialize_map(UniqueMapVisitor {
+        what: "node id",
+        entry: PhantomData,
+    })
 }
 
 /// The subgraph table, decoded as a map refusing a repeated id, as [`deserialize_nodes`] does
@@ -147,33 +149,6 @@ where
             }
         }
         Ok(map)
-    }
-}
-
-/// The most a decode reserves on a document's word alone.
-const MAX_PREALLOC_BYTES: usize = 1024 * 1024;
-
-#[derive(Debug)]
-struct NodesVisitor;
-
-impl<'de> Visitor<'de> for NodesVisitor {
-    type Value = HashMap<NodeId, Node>;
-
-    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("a map of node ids to nodes")
-    }
-
-    fn visit_map<A: MapAccess<'de>>(self, mut access: A) -> Result<Self::Value, A::Error> {
-        // The hint is the document's own claim, so it is capped, as serde caps its own
-        // collections, to what a megabyte of entries holds.
-        let cap = MAX_PREALLOC_BYTES / size_of::<(NodeId, Node)>();
-        let mut nodes = HashMap::with_capacity(access.size_hint().unwrap_or_default().min(cap));
-        while let Some((node_id, node)) = access.next_entry::<NodeId, Node>()? {
-            if nodes.insert(node_id, node).is_some() {
-                return Err(A::Error::custom(format!("duplicate node id {node_id:?}")));
-            }
-        }
-        Ok(nodes)
     }
 }
 

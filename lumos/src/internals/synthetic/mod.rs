@@ -11,24 +11,8 @@
 //! captured [`FrameTruth`](observe::FrameTruth) with [`metrics`]. A noiseless
 //! [`Camera::ideal`](camera::Camera::ideal) collapses the render to its own ground truth.
 //!
-//! ```rust,ignore
-//! use crate::internals::synthetic::camera::Camera;
-//! use crate::internals::synthetic::observe::{Observation, render};
-//! use crate::internals::synthetic::scene::{BgField, Placement, Scatter, Scene};
-//!
-//! let scene = Scene::scatter(
-//!     USize2::new(512, 512),
-//!     Scatter {
-//!         count: 80,
-//!         flux: (5.0, 200.0),
-//!         placement: Placement::Uniform { margin: 16.0 },
-//!         seed: 42,
-//!     },
-//!     BgField::Uniform { level: 0.05 },
-//! );
-//! let frame = render(&scene, &Camera::realistic(3.5), &Observation::reference(1));
-//! // Detect on `frame.image`, then grade against `frame.truth.sources` with `metrics`.
-//! ```
+//! The test `the_forward_model_renders_a_scene_to_grade_against`, beside [`observe`], walks it end
+//! to end: a scattered scene rendered through a realistic camera, its frame and truth read back.
 //!
 //! Ready-made fields live in [`fixtures`] (`star_field` / `cluster_field`), used by the
 //! detection tests.

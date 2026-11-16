@@ -24,6 +24,35 @@ fn argmax_xy(pixels: &[f32], width: usize) -> Peak {
     }
 }
 
+/// The forward model end to end, as the module doc gives it: a 512 × 512 scene of 80 stars
+/// scattered 16 px inside its edge, rendered through a realistic camera for one reference
+/// observation, gives a frame of the scene's size and a truth that holds every star, each on the
+/// sensor and inside the margin, as the reference observation moves nothing.
+#[test]
+fn the_forward_model_renders_a_scene_to_grade_against() {
+    use crate::internals::synthetic::camera::Camera;
+    use crate::internals::synthetic::scene::{Placement, Scatter};
+
+    let size = USize2::new(512, 512);
+    let scene = Scene::scatter(
+        size,
+        Scatter {
+            count: 80,
+            flux: (5.0, 200.0),
+            placement: Placement::Uniform { margin: 16.0 },
+            seed: 42,
+        },
+        BgField::Uniform { level: 0.05 },
+    );
+    let frame = render(&scene, &Camera::realistic(3.5), &Observation::reference(1));
+    assert_eq!(frame.image.size(), size);
+    assert_eq!(frame.truth.sources.len(), 80);
+    assert!(frame.truth.sources.iter().all(|source| {
+        let at = source.pos;
+        (16.0..=496.0).contains(&at.x) && (16.0..=496.0).contains(&at.y)
+    }));
+}
+
 #[test]
 fn ideal_render_equals_clean() {
     // Dim scene so the clean peak stays below saturation (no clamp difference).

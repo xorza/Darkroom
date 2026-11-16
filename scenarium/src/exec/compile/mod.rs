@@ -41,9 +41,9 @@
 //!   outside reads and discards what each node chose; a mode on the subgraph, which every
 //!   instance would share.
 //!
-//! **The sort comes first.** [`Graph::iter`](crate::Graph::iter) is a `HashMap` walk, so its order is not one an
-//! artifact may depend on. Sorting the ids *before* emitting anything settles the dense index
-//! space up front: a node's `NodeIdx` is its position in that sort, so a binding can name its
+//! **The sort comes first.** The placement gathers the nodes of many graphs, a frame at a time, so
+//! its order is not one an artifact may depend on. Sorting the program ids *before* emitting
+//! anything settles the dense index space up front: a node's `NodeIdx` is its position in that sort, so a binding can name its
 //! producer's index the moment the walk resolves it. Stable identity crosses into the dense index
 //! space in one direction only — [`NodeId`]/[`OutputPort`](crate::graph::identity::OutputPort)
 //! in, `NodeIdx`/`OutputAddr` out.

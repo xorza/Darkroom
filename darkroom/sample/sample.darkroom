@@ -3,12 +3,68 @@
         graphs: (
             main: (
                 nodes: {
-                    ("fcbce7ce-a04b-4b54-85fd-830e5b2fa22a"): (
+                    ("1085106c-81f8-4cdc-a47b-94fc3ffd2b8f"): (
                         kind: Body(
-                            source: Func(("c15248e0-006a-4a4a-9aae-b1fc7886dea1")),
+                            source: Func(("7d08e8c7-fd22-46d4-bb86-c0bd3c9e76fe")),
                             cache: r#None,
                         ),
-                        name: "Auto Stretch",
+                        name: "Preview Stretch",
+                        disabled: false,
+                    ),
+                    ("1597eb8d-1700-4637-9d30-37da1b6d28d4"): (
+                        kind: Body(
+                            source: Func(("975cc74b-8412-4293-b2cb-ef8d41fdd9b3")),
+                            cache: r#None,
+                        ),
+                        name: "Blend",
+                        disabled: false,
+                    ),
+                    ("3b60adfe-c8f3-4913-8de3-eef560a90417"): (
+                        kind: Instance(
+                            subgraph: ("32063e4c-0883-446f-bb45-6dcbf99e0722"),
+                            cache: Ram,
+                        ),
+                        name: "Adjust A",
+                        disabled: false,
+                    ),
+                    ("696af895-549c-44c9-9b92-5917e2dfbd9a"): (
+                        kind: Body(
+                            source: Func(("7d08e8c7-fd22-46d4-bb86-c0bd3c9e76fe")),
+                            cache: r#None,
+                        ),
+                        name: "Preview Blend",
+                        disabled: false,
+                    ),
+                    ("6b35d277-448c-4251-93e3-fd0ca81d492c"): (
+                        kind: Body(
+                            source: Func(("a4d9bf87-9d98-44f1-a162-7483c298be3d")),
+                            cache: r#None,
+                        ),
+                        name: "Load Image",
+                        disabled: false,
+                    ),
+                    ("78c51fe4-27cb-40d0-8f47-5a799c6ff0ae"): (
+                        kind: Instance(
+                            subgraph: ("32063e4c-0883-446f-bb45-6dcbf99e0722"),
+                            cache: r#None,
+                        ),
+                        name: "Adjust B",
+                        disabled: false,
+                    ),
+                    ("7acd8a24-9994-4cd0-92cc-abb719eccaa1"): (
+                        kind: Body(
+                            source: Func(("714dbc9a-ac0a-428b-90ee-eb13c1652c9e")),
+                            cache: r#None,
+                        ),
+                        name: "Frame Event",
+                        disabled: false,
+                    ),
+                    ("88281733-0d48-4ecf-b97f-0519ebd03bc3"): (
+                        kind: Body(
+                            source: Func(("7d08e8c7-fd22-46d4-bb86-c0bd3c9e76fe")),
+                            cache: r#None,
+                        ),
+                        name: "Preview Adjusted",
                         disabled: false,
                     ),
                     ("990c1378-f9da-4dbc-ab2e-3b29467853bd"): (
@@ -19,20 +75,12 @@
                         name: "Preview Denoised",
                         disabled: false,
                     ),
-                    ("c3b97484-121a-4c3e-8b83-6644eeb5f563"): (
-                        kind: Body(
-                            source: Func(("fbcc8899-efc3-40e0-a6fd-8743f86edbd3")),
+                    ("a47d4036-480f-47fe-b367-432c2662c8c5"): (
+                        kind: Instance(
+                            subgraph: ("5493d86c-2444-4d73-89b3-dc02b5ea4480"),
                             cache: r#None,
                         ),
-                        name: "Load Astro Image",
-                        disabled: false,
-                    ),
-                    ("1085106c-81f8-4cdc-a47b-94fc3ffd2b8f"): (
-                        kind: Body(
-                            source: Func(("7d08e8c7-fd22-46d4-bb86-c0bd3c9e76fe")),
-                            cache: r#None,
-                        ),
-                        name: "Preview Stretch",
+                        name: "",
                         disabled: false,
                     ),
                     ("ae3e2593-782b-47a6-ab2e-feffa1cb6636"): (
@@ -51,52 +99,12 @@
                         name: "Preview Adjust B",
                         disabled: false,
                     ),
-                    ("88281733-0d48-4ecf-b97f-0519ebd03bc3"): (
+                    ("c3b97484-121a-4c3e-8b83-6644eeb5f563"): (
                         kind: Body(
-                            source: Func(("7d08e8c7-fd22-46d4-bb86-c0bd3c9e76fe")),
+                            source: Func(("fbcc8899-efc3-40e0-a6fd-8743f86edbd3")),
                             cache: r#None,
                         ),
-                        name: "Preview Adjusted",
-                        disabled: false,
-                    ),
-                    ("696af895-549c-44c9-9b92-5917e2dfbd9a"): (
-                        kind: Body(
-                            source: Func(("7d08e8c7-fd22-46d4-bb86-c0bd3c9e76fe")),
-                            cache: r#None,
-                        ),
-                        name: "Preview Blend",
-                        disabled: false,
-                    ),
-                    ("7acd8a24-9994-4cd0-92cc-abb719eccaa1"): (
-                        kind: Body(
-                            source: Func(("714dbc9a-ac0a-428b-90ee-eb13c1652c9e")),
-                            cache: r#None,
-                        ),
-                        name: "Frame Event",
-                        disabled: false,
-                    ),
-                    ("3b60adfe-c8f3-4913-8de3-eef560a90417"): (
-                        kind: Instance(
-                            subgraph: ("32063e4c-0883-446f-bb45-6dcbf99e0722"),
-                            cache: Ram,
-                        ),
-                        name: "Adjust A",
-                        disabled: false,
-                    ),
-                    ("f6f72b9b-3e13-4d8d-bcbb-bffad1eeaa4b"): (
-                        kind: Body(
-                            source: Func(("7d08e8c7-fd22-46d4-bb86-c0bd3c9e76fe")),
-                            cache: r#None,
-                        ),
-                        name: "Preview Astro",
-                        disabled: false,
-                    ),
-                    ("78c51fe4-27cb-40d0-8f47-5a799c6ff0ae"): (
-                        kind: Instance(
-                            subgraph: ("32063e4c-0883-446f-bb45-6dcbf99e0722"),
-                            cache: r#None,
-                        ),
-                        name: "Adjust B",
+                        name: "Load Astro Image",
                         disabled: false,
                     ),
                     ("ef3d267f-7460-490f-a885-3944c99a9fdb"): (
@@ -107,28 +115,20 @@
                         name: "Brightness / Contrast",
                         disabled: false,
                     ),
-                    ("6b35d277-448c-4251-93e3-fd0ca81d492c"): (
+                    ("f6f72b9b-3e13-4d8d-bcbb-bffad1eeaa4b"): (
                         kind: Body(
-                            source: Func(("a4d9bf87-9d98-44f1-a162-7483c298be3d")),
+                            source: Func(("7d08e8c7-fd22-46d4-bb86-c0bd3c9e76fe")),
                             cache: r#None,
                         ),
-                        name: "Load Image",
+                        name: "Preview Astro",
                         disabled: false,
                     ),
-                    ("a47d4036-480f-47fe-b367-432c2662c8c5"): (
-                        kind: Instance(
-                            subgraph: ("5493d86c-2444-4d73-89b3-dc02b5ea4480"),
-                            cache: r#None,
-                        ),
-                        name: "",
-                        disabled: false,
-                    ),
-                    ("1597eb8d-1700-4637-9d30-37da1b6d28d4"): (
+                    ("fcbce7ce-a04b-4b54-85fd-830e5b2fa22a"): (
                         kind: Body(
-                            source: Func(("975cc74b-8412-4293-b2cb-ef8d41fdd9b3")),
+                            source: Func(("c15248e0-006a-4a4a-9aae-b1fc7886dea1")),
                             cache: r#None,
                         ),
-                        name: "Blend",
+                        name: "Auto Stretch",
                         disabled: false,
                     ),
                 },
@@ -442,6 +442,11 @@
                     ),
                     graph: (
                         nodes: {
+                            ("28a5f6c2-4910-44df-a974-c8bfa8310c38"): (
+                                kind: Boundary(Inputs),
+                                name: "Inputs 2",
+                                disabled: false,
+                            ),
                             ("a68a1c90-964c-46ae-ac17-b33ddef67633"): (
                                 kind: Body(
                                     source: Func(("7d08e8c7-fd22-46d4-bb86-c0bd3c9e76fe")),
@@ -450,22 +455,12 @@
                                 name: "Preview",
                                 disabled: false,
                             ),
-                            ("28a5f6c2-4910-44df-a974-c8bfa8310c38"): (
-                                kind: Boundary(Inputs),
-                                name: "Inputs 2",
-                                disabled: false,
-                            ),
                             ("a87a9b1a-6aec-4171-b564-7321081d7f85"): (
                                 kind: Body(
                                     source: Func(("714dbc9a-ac0a-428b-90ee-eb13c1652c9e")),
                                     cache: r#None,
                                 ),
                                 name: "Frame Event",
-                                disabled: false,
-                            ),
-                            ("ee437308-24f0-42ad-8c1a-307a33696bc5"): (
-                                kind: Boundary(Inputs),
-                                name: "Inputs",
                                 disabled: false,
                             ),
                             ("af8a6fe2-73a0-44a6-821f-05c0bf3b9755"): (
@@ -479,6 +474,11 @@
                                     cache: r#None,
                                 ),
                                 name: "Brightness / Contrast",
+                                disabled: false,
+                            ),
+                            ("ee437308-24f0-42ad-8c1a-307a33696bc5"): (
+                                kind: Boundary(Inputs),
+                                name: "Inputs",
                                 disabled: false,
                             ),
                         },
@@ -592,17 +592,17 @@
                                 name: "Outputs",
                                 disabled: false,
                             ),
-                            ("5d28633c-4b5b-440b-b93c-228402d84609"): (
-                                kind: Boundary(Inputs),
-                                name: "Inputs",
-                                disabled: false,
-                            ),
                             ("5d1f119a-d8a7-4fba-b3f9-1a873dd238bc"): (
                                 kind: Body(
                                     source: Func(("c15248e0-006a-4a4a-9aae-b1fc7886dea1")),
                                     cache: r#None,
                                 ),
                                 name: "Auto Stretch",
+                                disabled: false,
+                            ),
+                            ("5d28633c-4b5b-440b-b93c-228402d84609"): (
+                                kind: Boundary(Inputs),
+                                name: "Inputs",
                                 disabled: false,
                             ),
                         },

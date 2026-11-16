@@ -17,6 +17,8 @@ gate-doc = 'doc --workspace --no-deps --document-private-items --all-features --
 # No `real-data`, which reads the gitignored dataset, nor `profile-with-tracy`, which opens the
 # Tracy socket.
 gate-test = "test --workspace --tests --no-fail-fast --features imaginarium/wgpu,lumos/ml,common/introspect-derive"
+# The doc examples, which `--tests` leaves out: each runs, and a `no_run` one compiles.
+gate-doctest = "test --workspace --doc --no-fail-fast --features imaginarium/wgpu,lumos/ml,common/introspect-derive"
 real-data = "test -p lumos --all-features"
 mcp = "build -p darkroom-app --profile mcp"
 # `--bench *`, not `--benches`, which also selects each library and binary.

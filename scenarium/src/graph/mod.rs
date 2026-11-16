@@ -99,10 +99,10 @@
 //!   touch or refuses the edit until you remove them by hand. Reroute nodes
 //!   need a new design.
 
+use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
 
 use ::serde::{Deserialize, Serialize};
-use hashbrown::hash_map::Entry;
 use hashbrown::{HashMap, HashSet};
 
 use crate::data::const_value::ConstValue;
@@ -167,9 +167,12 @@ pub struct Graph {
     /// Every node, keyed by id, so an id is unique by construction:
     /// [`insert`](Self::insert) panics rather than replacing, and
     /// [`serde::deserialize_nodes`](crate::graph::serde) refuses a repeated id
-    /// instead of letting the map absorb it.
+    /// instead of letting the map absorb it. A `BTreeMap`, as every table of a graph: a save and
+    /// every walk of the nodes go in id order, where a hash map's order is arbitrary and its seed
+    /// differs with each process ([`HashMap::iter`](std::collections::HashMap::iter)), so two
+    /// saves of one document differed. A lookup is a few comparisons for a graph's nodes.
     #[serde(deserialize_with = "crate::graph::serde::deserialize_nodes")]
-    nodes: HashMap<NodeId, Node>,
+    nodes: BTreeMap<NodeId, Node>,
 
     /// Data wiring, keyed by consumer input port; absence means unbound. A `BTreeMap` keeps
     /// serialization deterministic and a node's ports contiguous. Serialized as `(port, binding)`
@@ -288,7 +291,7 @@ impl Graph {
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()
     }
-    /// Iteration order is unspecified.
+    /// In node-id order.
     pub fn iter(&self) -> impl Iterator<Item = NodeRef<'_>> {
         self.nodes
             .iter()
@@ -1234,14 +1237,12 @@ impl Graph {
             })
             .collect();
         if scope.owner().is_some() {
-            let mut held: Vec<NodeId> = self
+            let held = self
                 .iter()
                 .filter(|node| node.boundary() == Some(Boundary::Outputs))
-                .map(|node| node.node_id)
-                .collect();
-            held.sort_unstable();
-            refused.extend(held.iter().skip(1).map(|node_id| {
-                self.detaching(scope, manifest, *node_id, DetachReason::ExtraOutputs)
+                .map(|node| node.node_id);
+            refused.extend(held.skip(1).map(|node_id| {
+                self.detaching(scope, manifest, node_id, DetachReason::ExtraOutputs)
             }));
         }
         refused.sort_unstable_by_key(|detaching| detaching.node_id);
@@ -1641,10 +1642,8 @@ impl Graph {
         before: Before<'_>,
         notes: &GhostNotes,
     ) -> Vec<BindingEntry> {
-        let mut nodes: Vec<NodeRef<'_>> = self.iter().collect();
-        nodes.sort_unstable_by_key(|node| node.node_id);
         let mut seeds = Vec::new();
-        for node in nodes {
+        for node in self.iter() {
             let Some(declared_before) = before.of(node.node_id, &node) else {
                 continue;
             };

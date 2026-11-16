@@ -209,7 +209,7 @@ impl Report<'_> {
         let view = document.view(id);
         let through = document.through(id);
         let listed = |name: &str| nodes.is_none_or(|part| name.contains(part));
-        // By name, then id: the graph's own order is a hash map's, which no two reports share.
+        // By name, then id, as a reader looks a node up by its name.
         let mut matching: Vec<_> = graph
             .iter()
             .filter(|node| listed(document::title(node, scope)))
@@ -416,8 +416,8 @@ fn ghosts(graph: &Graph, scope: Scope<'_>) -> Vec<String> {
     ghosts
 }
 
-/// The wires with a node whose name `listed` keeps at either end, sorted: the graph's own order is
-/// a hash map's, which a reinsert by an undo changes.
+/// The wires with a node whose name `listed` keeps at either end, sorted by their text, as a reader
+/// reads them by name.
 fn wires(graph: &Graph, scope: Scope<'_>, listed: impl Fn(&str) -> bool) -> Vec<String> {
     let mut wires = Vec::new();
     for node in graph.iter() {

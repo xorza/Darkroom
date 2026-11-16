@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 
 use common::{ErrorChain, SerdeFormat};
-use hashbrown::HashMap;
 use ron::ser;
 use serde::de::value::{self, MapAccessDeserializer};
 use serde::de::{DeserializeSeed, MapAccess};
@@ -56,12 +55,42 @@ fn duplicate_ports_fail_in_every_binding_format() {
     }
 }
 
+/// A graph saves the same bytes however its nodes came in, and walks them in id order: three
+/// nodes inserted in one order and in its reverse serialize alike, and `iter` hands back their
+/// ids sorted.
+#[test]
+fn a_graph_saves_and_walks_its_nodes_in_id_order() {
+    let ids = [3, 1, 2].map(NodeId::from_u128);
+    let build = |order: &[NodeId]| {
+        let mut graph = Graph::default();
+        for &node_id in order {
+            graph.insert(node_id, internals::unresolved_node(FuncId::from_u128(9)));
+        }
+        graph
+    };
+    let forward = build(&ids);
+    let mut reversed = ids;
+    reversed.reverse();
+    let backward = build(&reversed);
+    for format in [SerdeFormat::Ron, SerdeFormat::Bitcode] {
+        assert_eq!(
+            format.serialize(&forward).unwrap(),
+            format.serialize(&backward).unwrap(),
+            "{format:?}"
+        );
+    }
+    assert_eq!(
+        forward.iter().map(|node| node.node_id).collect::<Vec<_>>(),
+        [1, 2, 3].map(NodeId::from_u128)
+    );
+}
+
 #[derive(Debug)]
 struct CheckedNodes;
 
 impl<'de> Deserialize<'de> for CheckedNodes {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let _: HashMap<NodeId, Node> = deserialize_nodes(deserializer)?;
+        let _: BTreeMap<NodeId, Node> = deserialize_nodes(deserializer)?;
         Ok(Self)
     }
 }
@@ -80,10 +109,10 @@ fn a_repeated_node_id_is_refused_rather_than_collapsed() {
     let second =
         ser::to_string(&internals::unresolved_node(FuncId::unique())).expect("a node serializes");
 
-    // The derived `HashMap` decode keeps the last entry and reports success, so the refusal
+    // The derived `BTreeMap` decode keeps the last entry and reports success, so the refusal
     // below is a behaviour rather than a coincidence of the fixture.
     let table = format!("{{{key}:{first},{key}:{second}}}");
-    let kept: HashMap<NodeId, Node> =
+    let kept: BTreeMap<NodeId, Node> =
         ron::from_str(&table).expect("the derived decode absorbs the collision");
     assert_eq!(kept.len(), 1, "the derived decode loses one of the two");
 

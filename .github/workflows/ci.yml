@@ -70,6 +70,8 @@ jobs:
         timeout-minutes: 45
         with:
           command: cargo --locked gate-test
+      - if: ${{ !cancelled() }}
+        run: cargo --locked gate-doctest
       - uses: xorza/rust-ci/failure-report@5c6e2c57d2c89c894225a4fd2ac61e9129e9e32b # v1
         if: failure()
         with:

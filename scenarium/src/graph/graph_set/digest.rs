@@ -55,9 +55,7 @@ impl GraphSet {
         write(&encode(&subgraph.description));
         write(&encode(subgraph.interface.ports()));
         let graph = &subgraph.graph;
-        let mut nodes: Vec<_> = graph.iter().collect();
-        nodes.sort_unstable_by_key(|node| node.node_id);
-        for node in nodes {
+        for node in graph.iter() {
             write(&encode(&node.node_id));
             write(&self.encode_node(&node, known));
         }

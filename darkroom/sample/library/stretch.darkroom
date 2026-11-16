@@ -49,11 +49,6 @@
                     ),
                     graph: (
                         nodes: {
-                            ("5d28633c-4b5b-440b-b93c-228402d84609"): (
-                                kind: Boundary(Inputs),
-                                name: "Inputs",
-                                disabled: false,
-                            ),
                             ("47f037e6-4035-43d4-8910-9c1132e7db3d"): (
                                 kind: Boundary(Outputs),
                                 name: "Outputs",
@@ -65,6 +60,11 @@
                                     cache: r#None,
                                 ),
                                 name: "Auto Stretch",
+                                disabled: false,
+                            ),
+                            ("5d28633c-4b5b-440b-b93c-228402d84609"): (
+                                kind: Boundary(Inputs),
+                                name: "Inputs",
                                 disabled: false,
                             ),
                         },

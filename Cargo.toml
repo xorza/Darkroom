@@ -122,9 +122,10 @@ codegen-units = 16
 incremental = true
 debug = "line-tables-only"
 
-# The MCP server catches a panic at its harness thread's edge, so a logic error ends the session
-# and not the server; `release` aborts on one. A profile of its own, as `panic` is not set per
-# package.
+# The MCP server catches a panic at its harness thread's edge, so a logic error reaches the client
+# as an error that names it before the server ends with the session (`darkroom/AGENTS.md`, "The
+# process is the session"); `release` aborts, which cuts the client off with no word of why. A
+# profile of its own, as `panic` is not set per package.
 [profile.mcp]
 inherits = "dev"
 panic = "unwind"
