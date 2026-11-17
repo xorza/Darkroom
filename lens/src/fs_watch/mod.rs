@@ -15,7 +15,7 @@ use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use scenarium::Invocation;
 use scenarium::async_lambda;
 use scenarium::{ConstValue, DataType};
-use scenarium::{EventLambda, Func, FuncId, InputDecl, InvokeError, Library, OutputDecl};
+use scenarium::{EventLambda, Func, FuncId, InputDecl, IntSpan, InvokeError, Library, OutputDecl};
 use tokio::sync::Notify;
 use tokio::time::timeout;
 
@@ -211,6 +211,7 @@ pub fn fs_watch_library() -> Library {
                         "Quiet window after a change before firing, collapsing a burst into one \
                          event. 0 disables debouncing.",
                     )
+                    .int_span(IntSpan::at_least(0))
                     .default(1000i64)
                     .const_only(),
             )

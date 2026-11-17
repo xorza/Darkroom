@@ -8,6 +8,7 @@ use crate::graph::func::event::EventLambda;
 use crate::graph::func::lambda::{FuncLambda, Invocation};
 use crate::graph::identity::FuncId;
 use crate::graph::ports::{InputDecl, OutputDecl};
+use crate::graph::value_domain::float_span::FloatSpan;
 use crate::library::Library;
 use crate::runtime::shared_any_state::SharedAnyState;
 use tokio::time;
@@ -138,6 +139,7 @@ pub fn worker_events_library() -> Library {
             1,
             InputDecl::required("Frequency", DataType::Float)
                 .description("Target ticks per second (Hz). 0 disables the FPS event.")
+                .float_span(FloatSpan::at_least(0.0))
                 .default(1.0)
                 .const_only(),
         )

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use scenarium::{Binding, EventPort, InputPort, Interface, OutputPort, PortId};
+use scenarium::{EventPort, Interface, OutputPort, PortId};
 
 use super::*;
 use crate::core::document::internals::{DocumentFixture, insert_compound};
@@ -37,12 +37,12 @@ fn node_liveness_is_one_rule_with_two_declared_narrowings() {
         "a ghost node retains no published value"
     );
     assert!(
-        !document.holds_tab(TabRef::ImageViewer(plain_id)),
+        !document.holds_tab(TabRef::Viewer(ViewTarget::Node(plain_id))),
         "a ghost node has no viewer"
     );
 
     // The same rule asked of a tab: a viewer dies with its node, the non-node tabs never do.
-    assert!(document.holds_tab(TabRef::ImageViewer(preview_id)));
+    assert!(document.holds_tab(TabRef::Viewer(ViewTarget::Node(preview_id))));
     assert!(document.holds_tab(TabRef::Graph(GraphId::Main)));
     assert!(document.holds_tab(TabRef::Preferences));
 
@@ -56,7 +56,7 @@ fn node_liveness_is_one_rule_with_two_declared_narrowings() {
         "and so does the narrowing"
     );
     assert!(
-        !document.holds_tab(TabRef::ImageViewer(preview_id)),
+        !document.holds_tab(TabRef::Viewer(ViewTarget::Node(preview_id))),
         "and so does the tab lift"
     );
     assert!(
@@ -74,7 +74,7 @@ fn removing_a_node_closes_its_viewer_and_its_pinned_inspector() {
     let node_id = fixture.add(&preview_sink::func(Arc::default()));
     let mut document = fixture.document;
     let tabs = [
-        TabRef::ImageViewer(ProgramId::from(node_id)),
+        TabRef::Viewer(ViewTarget::Node(ProgramId::from(node_id))),
         TabRef::Inspector(InspectTarget::Node {
             addr: NodeAddr::new(GraphId::Main, node_id),
             through: Some(InstancePath::MAIN),
@@ -96,6 +96,119 @@ fn removing_a_node_closes_its_viewer_and_its_pinned_inspector() {
         .collect();
     assert_eq!(open, [TabRef::Inspector(InspectTarget::Selection)]);
     document.validate().expect("no tab names the removed node");
+}
+
+/// Removing the active preview's node clears it, and the viewer that follows it stays, asking for
+/// one; a reconcile clears an active preview that names no preview node and reports it.
+#[test]
+fn the_active_preview_goes_with_its_node() {
+    let mut fixture = DocumentFixture::sample();
+    let preview = fixture.add(&preview_sink::func(Arc::default()));
+    let plain = fixture.ghost_node_at(Vec2::ZERO);
+    let mut document = fixture.document;
+    let following = TabRef::Viewer(ViewTarget::Active);
+
+    document.show_preview(ProgramId::from(preview));
+    assert_eq!(document.active_preview, Some(ProgramId::from(preview)));
+    assert!(document.layout.find_tab(following).is_some());
+    document.remove_node(GraphId::Main, preview);
+    assert_eq!(document.active_preview, None);
+    assert!(
+        document.layout.find_tab(following).is_some(),
+        "the viewer stays"
+    );
+    document
+        .validate()
+        .expect("no active preview names the removed node");
+
+    // A node that is no preview is never made the active one.
+    document.show_preview(ProgramId::from(plain));
+    assert_eq!(document.active_preview, None);
+    // A file that names one is cleared at load.
+    document.active_preview = Some(ProgramId::from(plain));
+    assert!(document.validate().is_err());
+    let report = document.reconcile(&DocumentFixture::sample().library, &Manifest::default());
+    assert_eq!(document.active_preview, None);
+    assert!(
+        report
+            .repairs
+            .contains(&DocumentRepair::ActivePreviewCleared {
+                program_id: ProgramId::from(plain)
+            }),
+        "{:?}",
+        report.repairs
+    );
+}
+
+/// A tab shows in its home: a sidebar tab with none open splits off the right of the main graph's
+/// group at 0.72, a viewer goes above an inspector and an inspector below a viewer, Preferences
+/// joins the main graph's strip, and a tab already open is made visible where it is. The group
+/// that had the focus keeps it and keeps its tab: an inspector shown while a viewer sits behind
+/// Main in one strip leaves Main in front.
+#[test]
+fn a_tab_shows_in_its_home_and_the_focus_stays() {
+    let main = TabRef::Graph(GraphId::Main);
+    let viewer = TabRef::Viewer(ViewTarget::Active);
+    let inspector = TabRef::Inspector(InspectTarget::Selection);
+    let group = |document: &Document, tab| document.layout.find_tab(tab).unwrap().group;
+    let visible = |document: &Document, tab| {
+        let at = document.layout.find_tab(tab).unwrap();
+        document.layout.group(at.group).unwrap().active_tab() == tab
+    };
+
+    let mut document = Document::default();
+    document.show_tab(inspector);
+    assert_ne!(group(&document, inspector), group(&document, main));
+    assert_eq!(document.layout.focused(), group(&document, main));
+    let saved = common::SerdeFormat::Ron
+        .serialize(document.layout.layout())
+        .unwrap();
+    let saved = String::from_utf8(saved).unwrap();
+    assert!(
+        saved.contains("ratio: 0.72"),
+        "the graphs keep 0.72: {saved}"
+    );
+    document.show_tab(viewer);
+    let (viewer_group, inspector_group) = (group(&document, viewer), group(&document, inspector));
+    assert_ne!(
+        viewer_group, inspector_group,
+        "a viewer gets a pane of its own"
+    );
+    assert_ne!(viewer_group, group(&document, main));
+    assert_eq!(document.layout.focused(), group(&document, main));
+    assert_eq!(document.layout.groups().count(), 3);
+
+    document.show_tab(TabRef::Preferences);
+    assert_eq!(
+        group(&document, TabRef::Preferences),
+        group(&document, main)
+    );
+    assert!(visible(&document, TabRef::Preferences));
+    document.show_tab(main);
+    assert!(visible(&document, main), "an open tab shows where it is");
+    assert_eq!(document.layout.groups().count(), 3);
+
+    // A pinned inspector joins the selection's, not the viewer above it.
+    let pinned = TabRef::Inspector(InspectTarget::Node {
+        addr: NodeAddr::new(GraphId::Main, NodeId::from_u128(7)),
+        through: None,
+    });
+    document.show_tab(pinned);
+    assert_eq!(group(&document, pinned), group(&document, inspector));
+    assert_eq!(document.layout.groups().count(), 3);
+
+    // The defect `ISSUES.md` logged: a viewer behind Main in one strip, then an inspector.
+    let mut document = Document::default();
+    let pinned = TabRef::Viewer(ViewTarget::Node(ProgramId::from(NodeId::from_u128(9))));
+    document
+        .layout
+        .apply(DockOperation::OpenTab { tab: pinned });
+    document
+        .layout
+        .apply(DockOperation::ActivateTab { tab: main });
+    document.show_tab(inspector);
+    assert!(visible(&document, main), "the graph stays in front");
+    assert_eq!(document.layout.focused(), group(&document, main));
 }
 
 /// The load repairs the view and the layout around the graph, in order,
@@ -124,7 +237,7 @@ fn reconcile_repairs_the_view_and_the_layout() {
         .node_placements
         .insert(ghost, NodePlacement::default());
     document.main_view.selected = [unplaced].map(ItemId::Node).into_iter().collect();
-    let viewer = TabRef::ImageViewer(ProgramId::from(shown));
+    let viewer = TabRef::Viewer(ViewTarget::Node(ProgramId::from(shown)));
     document
         .layout
         .apply(DockOperation::OpenTab { tab: viewer });
@@ -405,7 +518,7 @@ fn removing_an_instance_clears_what_showed_through_it() {
     document.sides.get_mut(&id).unwrap().through = Some(path);
     let pane = TabRef::Graph(GraphId::Compound(id));
     let shown = [
-        TabRef::ImageViewer(path.node(preview)),
+        TabRef::Viewer(ViewTarget::Node(path.node(preview))),
         TabRef::Inspector(InspectTarget::Node {
             addr: NodeAddr::new(GraphId::Compound(id), preview),
             through: Some(path),
@@ -631,4 +744,34 @@ fn an_unnamed_instance_is_titled_by_its_compound() {
     assert_eq!(titles(&document), ["Denoise", "Mine", ""]);
     document.graphs.rename_compound(id, "Stars".to_owned());
     assert_eq!(titles(&document), ["Stars", "Mine", ""]);
+}
+
+/// Run on Change seeds a preview the document holds that is not disabled: not a disabled one, not
+/// another func's node, not a node the document lacks.
+#[test]
+fn run_on_change_runs_the_previews_that_are_not_disabled() {
+    let mut fixture = DocumentFixture::probes(1);
+    let probe = fixture
+        .document
+        .graphs
+        .main()
+        .iter()
+        .next()
+        .unwrap()
+        .node_id;
+    let shown = fixture.add(&preview_sink::func(Arc::default()));
+    let off = fixture.add(&preview_sink::func(Arc::default()));
+    fixture
+        .document
+        .graphs
+        .main_mut()
+        .find_mut(off)
+        .unwrap()
+        .disabled = true;
+    let document = &fixture.document;
+    let runs = |node_id: NodeId| document.runs_preview(ProgramId::from(node_id));
+    assert_eq!(
+        [runs(shown), runs(off), runs(probe), runs(NodeId::unique())],
+        [true, false, false, false]
+    );
 }

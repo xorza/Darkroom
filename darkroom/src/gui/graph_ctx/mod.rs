@@ -28,6 +28,7 @@ use crate::core::document::Document;
 use crate::core::document::graph_view::{GraphView, StackedNode};
 use crate::core::document::item_id::ItemId;
 use crate::core::document::viewport::Viewport;
+use crate::core::io::preferences::run_mode::RunMode;
 use crate::core::open_document::OpenDocument;
 use crate::core::shared_library::SharedLibrary;
 use crate::gui::frame::doc_ctx::DocCtx;
@@ -79,6 +80,11 @@ impl<'a> GraphCtx<'a> {
     }
 
     /// Which graph of the document this pane shows.
+    /// When a run starts unasked.
+    pub(crate) const fn run_mode(self) -> RunMode {
+        self.doc.run_mode()
+    }
+
     pub(crate) const fn graph(self) -> GraphId {
         self.graph
     }

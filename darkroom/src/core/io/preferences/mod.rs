@@ -1,6 +1,8 @@
 pub(crate) mod error;
 pub(crate) mod interface_size;
 pub(crate) mod preferences_store;
+pub(crate) mod recent_documents;
+pub(crate) mod run_mode;
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -15,6 +17,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use crate::core::io::document::saved_paths::SavedPaths;
 use crate::core::io::preferences::error::{PreferencesLoadError, PreferencesSaveError};
 use crate::core::io::preferences::interface_size::InterfaceSize;
+use crate::core::io::preferences::recent_documents::RecentDocuments;
+use crate::core::io::preferences::run_mode::RunMode;
 
 /// Preferences file name, resolved inside the platform's configuration directory. RON, so it's
 /// hand-editable and matches every other file the app reads and writes.
@@ -27,6 +31,8 @@ const PREFERENCES_FILE: &str = "darkroom.preferences.ron";
 pub(crate) struct Preferences {
     /// Document to reopen on launch. `None` starts with an empty document.
     pub(crate) document_path: Option<PathBuf>,
+    /// The documents File lists to open again.
+    pub(crate) recent: RecentDocuments,
     /// Reopen `document_path` on launch. When `false`, launch starts with an empty document and
     /// the path is still remembered. Defaults to `true`.
     pub(crate) load_last_document: bool,
@@ -41,6 +47,8 @@ pub(crate) struct Preferences {
     pub(crate) relative_paths: bool,
     /// The whole UI's size, on top of the platform's scale.
     pub(crate) interface_size: InterfaceSize,
+    /// When a run starts unasked.
+    pub(crate) run_mode: RunMode,
     /// Main window geometry from the last session. `None` on first run (platform picks).
     pub(crate) window: Option<WindowState>,
     /// Image-viewer toolbar choices (backdrop and magnification sampling), shared by all viewer
@@ -132,20 +140,24 @@ impl Preferences {
     pub(crate) fn same_choices(&self, other: &Self) -> bool {
         let Self {
             document_path,
+            recent,
             load_last_document,
             confirm_unsaved_changes,
             relative_paths,
             interface_size,
+            run_mode,
             window: _,
             viewer,
             ml_models,
             library_folder,
         } = self;
         *document_path == other.document_path
+            && *recent == other.recent
             && *load_last_document == other.load_last_document
             && *confirm_unsaved_changes == other.confirm_unsaved_changes
             && *relative_paths == other.relative_paths
             && *interface_size == other.interface_size
+            && *run_mode == other.run_mode
             && *viewer == other.viewer
             && *ml_models == other.ml_models
             && *library_folder == other.library_folder
@@ -156,10 +168,12 @@ impl Default for Preferences {
     fn default() -> Self {
         Self {
             document_path: None,
+            recent: RecentDocuments::default(),
             load_last_document: true,
             confirm_unsaved_changes: true,
             relative_paths: true,
             interface_size: InterfaceSize::DEFAULT,
+            run_mode: RunMode::default(),
             window: None,
             viewer: ViewerPreferences::default(),
             ml_models: MlModelPaths::default(),

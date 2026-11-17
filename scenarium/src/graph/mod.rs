@@ -157,6 +157,7 @@ pub(crate) mod scope;
 mod serde;
 pub(crate) mod subscription;
 pub(crate) mod type_names;
+pub(crate) mod value_domain;
 
 /// `Clone` keeps every node id as it is, so a copy is sound only where it never lives beside its
 /// original in one document, as the copy a save rewrites and writes; an editor's duplicate mints
@@ -642,17 +643,9 @@ impl Graph {
                     .ports()
                     .output(source.port)
                     .ok_or(BindingRejection::UndeclaredOutput)?;
-                if input.const_only && !producer.output_is_const(source.port) {
-                    return Err(BindingRejection::WiredConstOnly);
-                }
-                if scope
+                scope
                     .library()
-                    .wire_satisfies(input.data_type, output.data_type)
-                {
-                    Ok(())
-                } else {
-                    Err(BindingRejection::WireMismatch)
-                }
+                    .admit_wire(input, output, producer.output_is_const(source.port))
             }
         }
     }

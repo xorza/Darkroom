@@ -112,6 +112,7 @@ impl SetInterface {
             dropped,
             ghosted,
             touched: Touched::Several,
+            program: true,
             ..EditFacts::NONE
         }
     }

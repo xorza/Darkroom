@@ -118,6 +118,8 @@ mod tests {
     use glam::UVec2;
     use scenarium::{DynamicValue, NodeId, ProgramId};
 
+    use lens::DisplayStretch;
+
     use crate::gui::state::preview_store::job_queue::queue;
     use crate::gui::state::preview_store::preview_converter::{Job, Ticket, Work};
 
@@ -125,6 +127,7 @@ mod tests {
         Job {
             program_id,
             ticket,
+            stretch: DisplayStretch::Linear,
             work,
         }
     }

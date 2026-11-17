@@ -1,5 +1,5 @@
 use std::ffi::OsStr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str;
 
 use common::{SerdeFormat, TempDir, fs};
@@ -10,6 +10,8 @@ use palantir::{ImageFilter, Size};
 use crate::core::io::preferences::error::{PreferencesLoadError, PreferencesSaveError};
 use crate::core::io::preferences::interface_size::InterfaceSize;
 use crate::core::io::preferences::preferences_store::PreferencesStore;
+use crate::core::io::preferences::recent_documents::RecentDocuments;
+use crate::core::io::preferences::run_mode::RunMode;
 use crate::core::io::preferences::{Preferences, ViewerBg, ViewerPreferences, WindowState};
 
 /// The file is named for the app, and lies in the OS's configuration directory
@@ -37,13 +39,17 @@ fn roundtrip(preferences: &Preferences) -> Preferences {
 /// A populated file and the default both read back equal, field for field.
 #[test]
 fn preferences_roundtrip() {
+    let mut recent = RecentDocuments::default();
+    recent.note(Path::new("/tmp/graph.darkroom"));
     let populated = Preferences {
         document_path: Some(PathBuf::from("/tmp/graph.darkroom")),
+        recent,
         // Every field off its default, so a field the round trip drops fails.
         load_last_document: false,
         confirm_unsaved_changes: false,
         relative_paths: false,
         interface_size: InterfaceSize::OFFERED[4],
+        run_mode: RunMode::Manual,
         window: Some(WindowState {
             size: Size::new(1440.0, 900.0),
             maximized: true,

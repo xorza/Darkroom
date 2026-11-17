@@ -1,8 +1,9 @@
 //! The editor frame: `bench.darkroom`, an astro pipeline saved from the editor, through the
 //! editor's real widgets, a frame of it as `App` runs one, on each backend.
 //!
-//! The document holds its own workspace: the graph, an image viewer and the inspector docked
-//! around it, at the camera it was saved with. Every preview node shows a 24 MP float image,
+//! The document holds its own workspace: the graph, and the viewer over the inspector docked
+//! beside it, at the camera it was saved with; the viewer follows the published node, as a press
+//! on its card makes it. Every preview node shows a 24 MP float image,
 //! planar as a stacked frame lumos publishes. Its inputs are absent, as no case runs the graph.
 //! The viewer shrinks that image with one tap, not the editor's area average, which would hide the
 //! rest of a `pan` or `zoom` frame: 0.6 ms on an Apple laptop.
@@ -50,7 +51,9 @@ use scenarium::{DynamicValue, GraphId, NodeId, ProgramId};
 
 use crate::core::document::Document;
 use crate::core::document::item_id::ItemId;
+use crate::core::document::view_target::ViewTarget;
 use crate::core::document::viewport::Viewport;
+use crate::core::edit::document_request::DocumentRequest;
 use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::drag_start::DragStart;
@@ -74,7 +77,7 @@ use crate::gui::theme::Theme;
 const DOCUMENT: &str = "src/gui/app/session/bench.darkroom";
 /// The blend the `drag` scenario moves: on screen at the document's camera, with four wires on it.
 const DRAGGED: NodeId = NodeId::literal("fabb092d-f756-441d-b6f5-1d1e629beda1");
-/// The preview node the viewer's active tab shows, which the `preview` scenario publishes to.
+/// The preview node the viewer follows, which the `preview` scenario publishes to.
 const PUBLISHED: NodeId = NodeId::literal("e156726f-3c5b-4d41-bbeb-380773608e40");
 /// How far the `pan` scenario moves the camera each frame, and the frames before it starts over.
 const PAN_STEP: Vec2 = Vec2::new(1.5, 0.7);
@@ -170,14 +173,22 @@ impl Editor {
             pos: document.main_view.node_placements[&DRAGGED].pos,
         }]);
 
+        let mut session = Session::new(open);
+        let mut requests = Requests::default();
+        // The viewer follows the published node, as a press on its card makes it.
+        session.apply_edits(
+            [DocumentRequest::ShowPreview(ProgramId::from(PUBLISHED))],
+            runtime.cur(),
+            &mut requests,
+        );
         Self {
-            session: Session::new(open),
+            session,
             library: runtime,
             theme: Theme::default(),
             run_state: RunState::new(wake::internals::noop()),
             shared: SharedLibrary::default(),
             preferences: Preferences::default(),
-            requests: Requests::default(),
+            requests,
             previews,
             camera,
             dragged,
@@ -273,6 +284,7 @@ impl App for Editor {
             self.library.cur(),
             &self.run_state,
             &self.shared,
+            self.preferences.run_mode,
         );
         let mut stage = Stage {
             ctx,
@@ -289,6 +301,7 @@ impl App for Editor {
             self.library.cur(),
             &self.run_state,
             &self.shared,
+            self.preferences.run_mode,
         );
         self.session.record(
             ui,
@@ -406,8 +419,8 @@ impl FrameCase {
                 .session
                 .main_window
                 .image_viewers
-                .get_mut(&ProgramId::from(PUBLISHED))
-                .expect("the published node's tab is the one the viewer shows")
+                .get_mut(&ViewTarget::Active)
+                .expect("the viewer follows the published node")
                 .set_downsample(ImageDownsample::Single);
             for _ in 0..SETTLE_FRAMES {
                 step(&mut editor);

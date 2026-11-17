@@ -4,17 +4,11 @@
 //! output to report. It is a row inside a normal node body, so selection, dragging, the
 //! breaker, and the input wire all come from the node machinery.
 
-use std::fmt;
-use std::fmt::Display;
-use std::fmt::Formatter;
-
-use imaginarium::ColorFormat;
 use palantir::{
-    Align, Configure, CursorIcon, DockOperation, Fit, ImagePaint, Justify, Panel, Sense, Shape,
-    SizeSpec, Sizing, Text, TextWrap, Ui, VAlign, fmt,
+    Align, Configure, CursorIcon, Fit, ImagePaint, Justify, Panel, Sense, Shape, SizeSpec, Sizing,
+    Text, TextWrap, Ui, VAlign, Visibility, fmt,
 };
 
-use crate::core::document::tab_ref::TabRef;
 use crate::gui::pane::graph_ui::node_ui::card;
 use crate::gui::pane::graph_ui::node_ui::card::LabeledValue;
 use crate::gui::pane::graph_ui::node_ui::node_record::NodeRecord;
@@ -22,6 +16,7 @@ use crate::gui::pane::graph_ui::wid;
 use crate::gui::state::preview_store::{DrawablePreview, StoredContent};
 use crate::gui::theme::Theme;
 use crate::gui::widgets::format::bytes::Bytes;
+use crate::gui::widgets::format::pixel_size::PixelSize;
 use crate::gui::widgets::support;
 
 /// Height of the value area itself, excluding the header, port row, and info footer. Fixed, so
@@ -41,6 +36,8 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     let program_id = node.program_id();
     let stored = program_id.and_then(|id| node_ctx.graph_ctx.run_state().previews().get(id));
     let has_image = stored.and_then(StoredContent::image).is_some();
+    // A picture reads at any zoom; the line that stands in for one is words.
+    let words = record.stage.ctx.words();
     let content = Panel::vstack()
         .id(wid::preview_image(node.graph_ctx.graph(), node.node_id))
         .size((Sizing::FILL, Sizing::fixed(PREVIEW_CONTENT_HEIGHT)))
@@ -73,6 +70,7 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
                 };
                 Text::new(text)
                     .style(&style)
+                    .visibility(words)
                     .text_wrap(TextWrap::Wrap)
                     .show(ui);
             }
@@ -81,26 +79,25 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     if content.hovered() {
         ui.request_cursor(CursorIcon::Pointer);
     }
-    // The card's one action: open this node's value at full resolution. A view request rather
-    // than a graph edit, as the pane arrangement is the dock's. Deduped by `OpenTab`, so a
-    // card whose viewer is already open just activates it.
+    // The card's one action: show this node's value at full resolution, in the viewer that
+    // follows the active preview. Navigation rather than a graph edit, as the pane arrangement
+    // is the dock's.
     if content.clicked() {
         let program_id = program_id.expect("an image is stored only under a program node");
-        record.stage.out.push_view(DockOperation::OpenTab {
-            tab: TabRef::ImageViewer(program_id),
-        });
+        record.stage.out.push_show_preview(program_id);
     }
     if let Some(image) = stored.and_then(StoredContent::image) {
-        info_row(ui, node_ctx.theme(), image);
+        info_row(ui, node_ctx.theme(), image, record.stage.ctx.words());
     }
 }
 
-/// The image's info footer: resolution, pixel format (channel layout and bit depth), and
+/// The image's info footer: resolution, pixel format, and
 /// original source size, styled like a node body's
 /// [`node_footer`](crate::gui::pane::graph_ui::node_ui::node_footer).
-fn info_row(ui: &mut Ui, theme: &Theme, image: &DrawablePreview) {
+fn info_row(ui: &mut Ui, theme: &Theme, image: &DrawablePreview, words: Visibility) {
     Panel::hstack()
         .id_salt("preview_info")
+        .visibility(words)
         .size(SizeSpec::FILL_W)
         .padding(card::band_padding(theme))
         .gap(theme.space.md)
@@ -108,9 +105,8 @@ fn info_row(ui: &mut Ui, theme: &Theme, image: &DrawablePreview) {
         // Round only the bottom corners, to seat into the body's rounded bottom.
         .chrome(theme.footer_chrome(theme.card_inner_radius()))
         .show(ui, |ui| {
-            let size = image.preview.native_size;
-            card::bare_value(ui, theme, format_args!("{}\u{d7}{}", size.x, size.y));
-            card::bare_value(ui, theme, FormatLabel(image.preview.native_format));
+            card::bare_value(ui, theme, PixelSize(image.preview.native_size));
+            card::bare_value(ui, theme, image.preview.native_format);
             Panel::hstack()
                 .id_salt("preview_info_size")
                 .size(SizeSpec::HUG)
@@ -126,38 +122,9 @@ fn info_row(ui: &mut Ui, theme: &Theme, image: &DrawablePreview) {
         });
 }
 
-/// `"RGBA \u{b7} 8-bit"`-style shorthand for a pixel format: channel layout, then per-channel
-/// bit depth. Rendered on demand, so the strip builds no `String` per frame.
-#[derive(Clone, Copy, Debug)]
-struct FormatLabel(ColorFormat);
-
-impl Display for FormatLabel {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let bits = self.0.sample_type.bits();
-        write!(f, "{} \u{b7} {bits}-bit", self.0.channel_count)
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
     use scenarium::GraphId;
-
-    #[test]
-    fn pixel_format_shorthand_reports_channel_layout_and_bit_depth() {
-        assert_eq!(
-            FormatLabel(ColorFormat::RGBA_U8).to_string(),
-            "RGBA \u{b7} 8-bit"
-        );
-        assert_eq!(
-            FormatLabel(ColorFormat::RGB_U16).to_string(),
-            "RGB \u{b7} 16-bit"
-        );
-        assert_eq!(
-            FormatLabel(ColorFormat::MONO_F32).to_string(),
-            "Mono \u{b7} 32-bit"
-        );
-    }
 
     /// Clicking a preview card's image asks the dock for that node's viewer
     /// tab — the canvas's one view-tier request.
@@ -165,11 +132,10 @@ mod tests {
     fn clicking_a_preview_card_asks_for_its_viewer_tab() {
         use std::sync::Arc;
 
-        use palantir::DockOperation;
+        use lens::DisplayStretch;
         use scenarium::ProgramId;
 
         use crate::core::document::internals::DocumentFixture;
-        use crate::core::document::tab_ref::TabRef;
         use crate::core::preview_sink;
         use crate::gui::pane::graph_ui::internals::CanvasHarness;
         use crate::gui::pane::graph_ui::wid;
@@ -183,24 +149,19 @@ mod tests {
         h.ctx.run_state.previews_mut().publish(
             ProgramId::from(node),
             preview_store::internals::opaque_image_value(),
+            DisplayStretch::Linear,
         );
         h.ctx.run_state.previews_mut().settle(h.ui.ui());
         h.prime(2);
-        assert!(h.view_ops.is_empty(), "nothing asked for before the click");
+        assert!(
+            h.shown_previews.is_empty(),
+            "nothing asked for before the click"
+        );
 
         h.ui.click(wid::preview_image(GraphId::Main, node));
         let intents = h.frame();
 
-        assert!(
-            matches!(
-                h.view_ops[..],
-                [DockOperation::OpenTab {
-                    tab: TabRef::ImageViewer(clicked)
-                }] if clicked == ProgramId::from(node)
-            ),
-            "expected one OpenTab for {node:?}, got {:?}",
-            h.view_ops
-        );
+        assert_eq!(h.shown_previews, [ProgramId::from(node)]);
         assert!(
             intents.is_empty(),
             "opening a viewer is navigation, not a graph edit: {intents:?}"

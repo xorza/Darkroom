@@ -1,6 +1,8 @@
 //! Structural validation errors for documents and their per-graph editor views.
 
-use scenarium::{CompoundId, GraphId, GraphValidationError, InstancePath, NodeAddr, NodeId};
+use scenarium::{
+    CompoundId, GraphId, GraphValidationError, InstancePath, NodeAddr, NodeId, ProgramId,
+};
 
 use crate::core::document::item_id::ItemId;
 use crate::core::document::tab_ref::TabRef;
@@ -71,6 +73,8 @@ pub(crate) enum DocumentValidationError {
     MissingTab { tab: TabRef },
     #[error("the active graph {graph:?} is no graph of the set")]
     ActiveMissing { graph: GraphId },
+    #[error("the active preview {program_id:?} names no preview node")]
+    StaleActivePreview { program_id: ProgramId },
     #[error("node {node:?} holds the relative path {path:?}, which memory holds resolved")]
     RelativePath { node: NodeAddr, path: String },
 }

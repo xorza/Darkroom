@@ -1,6 +1,7 @@
 use glam::{UVec2, Vec2};
+use lens::DisplayStretch;
 use palantir::Harness;
-use palantir::{DockOperation, Key, Modifiers};
+use palantir::{DockOperation, Key, Locator, Modifiers};
 use scenarium::{Binding, GraphId, InputPort, NodeId, OutputPort, PortId, ProgramId};
 use std::iter;
 use std::sync::Arc;
@@ -11,17 +12,19 @@ use crate::core::document::internals::DocumentFixture;
 use crate::core::document::item_id::ItemId;
 use crate::core::document::tab_ref::TabRef;
 use crate::core::document::tie::TieAngle;
+use crate::core::document::view_target::ViewTarget;
 use crate::core::edit::graph_intent::GraphIntent;
+use crate::core::io::preferences::run_mode::RunMode;
 use crate::core::open_document::OpenDocument;
 use crate::core::preview_sink;
 use crate::gui::app::App;
 use crate::gui::app::session::internals::SessionHarness;
+use crate::gui::command::Command;
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::FileCommand;
 use crate::gui::frame::app_command::RunCommand;
 use crate::gui::frame::app_command::ViewCommand;
-use crate::gui::frame::shortcuts;
-use crate::gui::pane::graph_ui::toolbar;
+use crate::gui::pane::graph_ui::pane_header;
 use crate::gui::pane::graph_ui::wid;
 use crate::gui::pane::image_viewer::ImageViewer;
 use crate::gui::state::preview_store;
@@ -75,6 +78,7 @@ fn a_settled_frame_records_without_allocating() {
     app.run_state.previews_mut().publish(
         ProgramId::from(preview),
         preview_store::internals::opaque_image_value(),
+        DisplayStretch::Linear,
     );
     app.run_state.previews_mut().settle(ui.ui());
     // Each frame asked, as a wake asks one: a frame nothing asked for paints only and records
@@ -104,28 +108,33 @@ fn a_settled_frame_records_without_allocating() {
 fn a_menu_chord_leaves_the_others_watched() {
     let mut test = SessionHarness::new(DocumentFixture::default());
     test.prime(2);
-    test.ui.key(shortcuts::NEW);
+    test.ui.key(Command::NewDocument.chord_keys());
     assert!(matches!(
         test.frame()[..],
         [AppCommand::File(FileCommand::New)]
     ));
-    assert!(test.ui.key_down(shortcuts::QUIT).repaint_requested);
+    assert!(
+        test.ui
+            .key_down(Command::Quit.chord_keys())
+            .repaint_requested
+    );
 }
 
-/// Opening a viewer by clicking a preview card lands its tab *inside* the
-/// record that read the click. The tab is drawn by the pass after that one
-/// — a click makes the frame record twice — and a viewer asks for its
-/// full-resolution conversion as it draws, so the frame the click opened it
-/// raises the one ask, with the thumbnail standing in until the texture
-/// lands.
+/// A click on a preview card makes it the active preview and shows the viewer that follows it
+/// *inside* the record that read the click, in a sidebar at the graph's right, the graph keeping
+/// the focus. The tab is drawn by the pass after that one — a click makes the frame record twice
+/// — and a viewer asks for its full-resolution conversion as it draws, so the frame the click
+/// opened it raises the one ask, with the thumbnail standing in until the texture lands.
 #[test]
 fn a_viewer_opened_by_click_queues_its_full_image_in_that_same_frame() {
     let mut fixture = DocumentFixture::default();
     let node = ProgramId::from(fixture.add(&preview_sink::func(Arc::default())));
     let mut test = SessionHarness::new(fixture);
-    test.run_state
-        .previews_mut()
-        .publish(node, preview_store::internals::opaque_image_value());
+    test.run_state.previews_mut().publish(
+        node,
+        preview_store::internals::opaque_image_value(),
+        DisplayStretch::Linear,
+    );
     test.run_state.previews_mut().settle(test.ui.ui());
     test.prime(2);
 
@@ -143,15 +152,15 @@ fn a_viewer_opened_by_click_queues_its_full_image_in_that_same_frame() {
     test.ui
         .click(wid::preview_image(GraphId::Main, node.node_id()));
     let commands = test.frame();
-    assert!(
-        test.session
-            .open
-            .document()
-            .layout
-            .all_tabs()
-            .any(|t| t == TabRef::ImageViewer(node)),
-        "the click opened the viewer tab within that same frame"
-    );
+    let document = test.session.open.document();
+    assert_eq!(document.active_preview, Some(node));
+    let layout = &document.layout;
+    let viewer = layout
+        .find_tab(TabRef::Viewer(ViewTarget::Active))
+        .expect("the click opened the viewer tab within that same frame");
+    let main = layout.find_tab(TabRef::Graph(GraphId::Main)).unwrap();
+    assert_ne!(viewer.group, main.group, "in a sidebar of its own");
+    assert_eq!(layout.focused(), main.group, "the graph keeps the focus");
     assert!(
         !resident(&test),
         "the conversion runs off the frame, so the click frame draws the \
@@ -235,7 +244,7 @@ fn dock_ops_apply_without_entering_the_undo_history_or_dirtying() {
         scenarium::Node::from(&preview),
     ));
 
-    let tab = TabRef::ImageViewer(ProgramId::from(node_id));
+    let tab = TabRef::Viewer(ViewTarget::Node(ProgramId::from(node_id)));
     test.session.open.set_dirty(false);
     test.requests.push_view(DockOperation::OpenTab { tab });
     test.drain();
@@ -285,8 +294,7 @@ fn a_chord_and_a_click_on_one_frame_both_reach_the_app() {
 
     test.ui.hold_modifiers(Modifiers::CTRL);
     test.ui.key(Key::Char('S'));
-    test.ui
-        .click(toolbar::internals::run_chip_wid(GraphId::Main));
+    test.ui.click(pane_header::run_chip_wid(GraphId::Main));
 
     let commands = test.frame();
     assert!(
@@ -301,19 +309,35 @@ fn a_chord_and_a_click_on_one_frame_both_reach_the_app() {
     );
 }
 
-/// Viewer tabs dedupe per node, and their navigation state is dropped
-/// once the tab closes.
+/// A right-click on the run chip opens its menu, whose Run on Change switches the start's On
+/// Change to Manual.
 #[test]
-fn image_viewer_tabs_dedupe_per_node_and_prune_state_on_close() {
+fn the_run_chip_menu_switches_run_on_change() {
+    let mut test = SessionHarness::new(DocumentFixture::probes(1));
+    test.prime(2);
+    test.ui
+        .right_click(pane_header::run_chip_wid(GraphId::Main));
+    assert!(test.frame().is_empty(), "the menu opens and raises nothing");
+    test.ui.click(Locator::text("Run on Change"));
+    assert!(
+        matches!(test.frame()[..], [AppCommand::SetRunMode(RunMode::Manual)]),
+        "the toggle raises the other mode"
+    );
+}
+
+/// A pinned viewer's tab dedupes per node, and its navigation state is dropped once the tab
+/// closes.
+#[test]
+fn a_pinned_viewer_dedupes_per_node_and_prunes_state_on_close() {
     // A preview node the graph holds: a viewer tab names the preview node
     // whose value it shows, and a document holds no viewer on any other.
     let mut fixture = DocumentFixture::default();
     let node_id = fixture.add(&preview_sink::func(Arc::default()));
     let mut test = SessionHarness::new(fixture);
-    let tab = TabRef::ImageViewer(ProgramId::from(node_id));
+    let tab = TabRef::Viewer(ViewTarget::Node(ProgramId::from(node_id)));
 
-    test.requests.push_view(DockOperation::OpenTab { tab });
-    test.requests.push_view(DockOperation::OpenTab { tab });
+    test.requests.push_show(tab);
+    test.requests.push_show(tab);
     test.drain();
     assert_eq!(
         test.session
@@ -328,7 +352,7 @@ fn image_viewer_tabs_dedupe_per_node_and_prune_state_on_close() {
     );
 
     test.session.main_window.image_viewers.insert(
-        ProgramId::from(node_id),
+        ViewTarget::Node(ProgramId::from(node_id)),
         ImageViewer::new(ProgramId::from(node_id)),
     );
     test.session
@@ -661,7 +685,7 @@ fn copy_and_paste_go_through_the_clipboard() {
         to: [ItemId::Node(instance)].into(),
     });
     test.prime(2);
-    test.ui.key(shortcuts::COPY);
+    test.ui.key(Command::Copy.chord_keys());
     test.frame();
     assert!(
         test.ui
@@ -669,7 +693,7 @@ fn copy_and_paste_go_through_the_clipboard() {
             .is_some_and(|text| text.starts_with(HEADER)),
         "the clipboard holds a clip"
     );
-    test.ui.key(shortcuts::PASTE);
+    test.ui.key(Command::Paste.chord_keys());
     test.frame();
     test.drain();
     let document = test.session.open.document();

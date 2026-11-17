@@ -4,8 +4,10 @@
 use std::array;
 
 use common::Buffer2;
+use glam::USizeVec2;
 
 use crate::color::color_format::{ChannelCount, ColorFormat};
+use crate::color::pixel_sample::{Channels, PixelSample};
 use crate::error::{DescError, PlanesError};
 use crate::interleaved::interleaved_desc::InterleavedDesc;
 use crate::interleaved::interleaved_image::InterleavedImage;
@@ -170,6 +172,19 @@ impl PlanarImage {
     }
 
     /// Every plane, in channel order.
+    /// The pixel at `pos`, one `f32` a plane, or `None` outside the image.
+    pub fn sample(&self, pos: USizeVec2) -> Option<PixelSample> {
+        if !self.desc().size().contains(pos) {
+            return None;
+        }
+        let channels = match self.planes() {
+            [mono] => Channels::Mono(mono[pos]),
+            [r, g, b] => Channels::Rgb([r[pos], g[pos], b[pos]]),
+            planes => unreachable!("planes are mono or RGB, not {}", planes.len()),
+        };
+        Some(PixelSample::F32(channels))
+    }
+
     pub const fn planes(&self) -> &[Buffer2<f32>] {
         match &self.planes {
             Planes::Mono(plane) => std::slice::from_ref(plane),

@@ -219,6 +219,7 @@ impl Reversible for SetNode {
     fn facts(&self) -> EditFacts {
         EditFacts {
             node_set: true,
+            program: true,
             ..EditFacts::NONE
         }
     }

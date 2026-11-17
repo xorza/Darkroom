@@ -5,7 +5,7 @@
 
 use palantir::{
     Block, Chrome, Configure, Corners, Panel, RgbaF32, Sense, SizeSpec, Sizing, Text, TextWrap, Ui,
-    VAlign, fmt,
+    VAlign, Visibility, fmt,
 };
 use scenarium::RamUsage;
 
@@ -23,13 +23,14 @@ const BAR_HEIGHT: f32 = 3.0;
 
 /// Draw the node's footer. `node.ram()` is mirrored from the run cache; each pool shows only
 /// when non-zero.
-pub(super) fn show(ui: &mut Ui, node_ctx: NodeCtx<'_>) {
+pub(super) fn show(ui: &mut Ui, node_ctx: NodeCtx<'_>, words: Visibility) {
     let node = node_ctx;
     let ram = node.ram();
     let status = node.exec_status();
     let theme = node_ctx.theme();
     Panel::vstack()
         .id(wid::footer(node.graph_ctx.graph(), node.node_id))
+        .visibility(words)
         .size(SizeSpec::FILL_W)
         .padding(card::band_padding(theme))
         .gap(theme.space.xs)

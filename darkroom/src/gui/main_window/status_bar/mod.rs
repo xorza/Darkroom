@@ -2,13 +2,17 @@
 //! (in the error or warning color: run/save/load failures and what a load repaired, parked in
 //! the engine's `StatusLog` until a success of the same family clears it), else what the last
 //! run came to with a link to the node that failed; at the right the graph's node and selection
-//! counts and zoom, then the memory readout: this process's resident footprint, plus the
+//! counts, then the memory readout: this process's resident footprint, plus the
 //! runtime cache's system + GPU bytes under one `Cache` clause, shown only when the cache holds
 //! something. The graph's line is always there, so the bar is one line tall on every frame: a
 //! strip that grew and shrank would jitter and resize the dock when a run lands.
+//!
+//! - **The memory figures stand in cells**, each right-aligned in a box of its widest value's
+//!   width with a hairline before it, so no gap moves as a digit count changes.
 
 use palantir::{
-    Chrome, Configure, Panel, SizeSpec, Sizing, Spacing, Text, TextStyle, Ui, VAlign, WidgetId, fmt,
+    Align, Chrome, Configure, Panel, PointerButton, Separator, SizeSpec, Sizing, Spacing, Text,
+    TextStyle, Ui, VAlign, WidgetId, fmt,
 };
 use scenarium::{GraphId, RamUsage};
 
@@ -16,15 +20,17 @@ use crate::core::document;
 use crate::core::document::item_id::ItemId;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::status_log::Severity;
-use crate::gui::frame::app_command::{AppCommand, ViewCommand};
+use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::doc_ctx::DocCtx;
 use crate::gui::frame::framing::Framing;
+use crate::gui::frame::pane_ask::PaneAsk;
 use crate::gui::frame::stage::Stage;
 use crate::gui::frame::window_parts::StatusInputs;
+use crate::gui::pane::graph_ui::canvas;
+use crate::gui::pane::graph_ui::canvas_input::{CanvasGesture, GestureHint};
 use crate::gui::state::run_state::run_outcome::RunOutcome;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::format::bytes::Bytes;
-use crate::gui::widgets::format::percent::Percent;
 use crate::gui::widgets::link::Link;
 use crate::gui::widgets::support;
 use std::collections::BTreeSet;
@@ -62,6 +68,8 @@ pub(crate) fn show(ui: &mut Ui, stage: &mut Stage<'_, DocCtx<'_>>, status: Statu
                 Text::new(message.line).style(&style).show(ui);
             } else if let Some(outcome) = ctx.run_state().outcome() {
                 run_line(ui, stage, outcome);
+            } else if ui.response_for(canvas::outer_wid(ctx.active())).hovered() {
+                gesture_hints(ui, theme);
             }
             support::hspacer(ui, "status_spacer");
             let (document, active) = (ctx.document(), ctx.active());
@@ -70,94 +78,147 @@ pub(crate) fn show(ui: &mut Ui, stage: &mut Stage<'_, DocCtx<'_>>, status: Statu
                 node_count: document.graphs.graph(active).len(),
                 selected_count: view.selected.len(),
             };
-            Readout {
-                counts,
-                zoom: view.viewport.zoom,
-                ram,
-            }
-            .show(ui, theme);
+            Readout { counts, ram }.show(ui, theme);
         });
 }
 
-/// The canvas zoom's width floor in figures: `Percent` writes the canvas's 10 % to 500 % in 3 or
-/// 4.
-const ZOOM_GLYPHS: u8 = 4;
+/// What the bare canvas under the pointer takes, in the words the reference shows: what a
+/// newcomer reaches first, as Blender's status bar names what each button does where the pointer
+/// is ([status bar](https://docs.blender.org/manual/en/latest/interface/window_system/status_bar.html)).
+fn gesture_hints(ui: &mut Ui, theme: &Theme) {
+    let style = support::muted_text(ui, theme, theme.font.body);
+    let line = fmt!(
+        ui,
+        "{}",
+        GestureLine(&[
+            CanvasGesture::NewNode,
+            CanvasGesture::Select,
+            CanvasGesture::Pan,
+            CanvasGesture::Breaker(PointerButton::Right),
+        ])
+    );
+    Text::new(line).style(&style).show(ui);
+}
+
+/// Each gesture's keys and what it does, `double-click Add a node · drag Select with a band`.
+#[derive(Clone, Copy, Debug)]
+struct GestureLine<'a>(&'a [CanvasGesture]);
+
+impl Display for GestureLine<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        for (idx, gesture) in self.0.iter().enumerate() {
+            if idx > 0 {
+                f.write_str(" \u{b7} ")?;
+            }
+            let GestureHint { keys, does } = gesture.hint();
+            write!(f, "{keys} {does}")?;
+        }
+        Ok(())
+    }
+}
 
 /// A byte figure's width floor: `Bytes` writes at most 10 below 1000 GiB, as `1023.9 MiB`.
 const BYTES_GLYPHS: u8 = 10;
 
-/// The graph's counts and zoom, then the memory, as one line of clauses: `19 nodes · 1 selected
-/// · 62% · Memory 3.0 MiB · Cache 1.0 KiB`.
+/// The graph's counts, then the memory in cells: `19 nodes · 1 selected │ Memory 3.0 MiB │
+/// Cache 1.0 KiB`. The zoom is the pane band's control.
 #[derive(Clone, Copy, Debug)]
 struct Readout {
     counts: CountsClause,
-    zoom: f32,
     ram: Option<MemoryLabel>,
 }
 
 impl Readout {
-    /// The figures that change while the line is watched draw in the figure face at the width of
-    /// their widest value, so the words beside them hold still as a digit count changes. Each
-    /// starts its box, beside the word that names it, and the box's slack trails it.
     fn show(self, ui: &mut Ui, theme: &Theme) {
-        let Self { counts, zoom, ram } = self;
-        let words = support::muted_text(ui, theme, theme.font.body);
-        let figures = TextStyle {
-            color: theme.ink.muted,
-            ..support::mono_text(ui, theme.font.body)
+        let Self { counts, ram } = self;
+        let styles = CellStyles {
+            words: support::muted_text(ui, theme, theme.font.body),
+            figures: TextStyle {
+                color: theme.ink.muted,
+                ..support::mono_text(ui, theme.font.body)
+            },
         };
-        let zoom_width = support::figure_width(ui, &figures, ZOOM_GLYPHS);
-        let bytes_width = support::figure_width(ui, &figures, BYTES_GLYPHS);
         Panel::hstack()
             .id_salt("status_readout")
             .size(SizeSpec::HUG)
             .child_align(VAlign::Center)
             .show(ui, |ui| {
-                Text::new(fmt!(ui, "{counts} \u{b7} "))
-                    .style(&words)
+                Text::new(fmt!(ui, "{counts}"))
+                    .style(&styles.words)
                     .show(ui);
-                Figure {
-                    value: Percent::new(zoom),
-                    min_width: zoom_width,
-                }
-                .show(ui, &figures);
                 let Some(MemoryLabel { process, cached }) = ram else {
                     return;
                 };
-                Text::new(" \u{b7} Memory ").style(&words).show(ui);
-                Figure {
+                Cell {
+                    word: "Memory",
                     value: Bytes::new(process),
-                    min_width: bytes_width,
+                    glyphs: BYTES_GLYPHS,
                 }
-                .show(ui, &figures);
+                .show(ui, theme, &styles);
                 if cached > 0 {
-                    Text::new(" \u{b7} Cache ").style(&words).show(ui);
-                    Figure {
+                    Cell {
+                        word: "Cache",
                         value: Bytes::new(cached),
-                        min_width: bytes_width,
+                        glyphs: BYTES_GLYPHS,
                     }
-                    .show(ui, &figures);
+                    .show(ui, theme, &styles);
                 }
             });
     }
 }
 
-/// A figure at the start of a box at least `min_width` wide.
-#[derive(Clone, Copy, Debug)]
-struct Figure<T> {
-    value: T,
-    min_width: f32,
+/// The two inks of the readout: its words, and its figures in the figure face.
+#[derive(Debug)]
+struct CellStyles {
+    words: TextStyle,
+    figures: TextStyle,
 }
 
-impl<T: Display> Figure<T> {
-    fn show(self, ui: &mut Ui, style: &TextStyle) {
-        let Self { value, min_width } = self;
-        let text = fmt!(ui, "{value}");
-        Text::new(text)
-            .style(style)
-            .min_size((min_width, 0.0))
-            .show(ui);
+/// One cell of the readout: a hairline before it, its word, then its figure right-aligned in a
+/// box as wide as `glyphs` figures, so neither the cell nor any hairline after it moves as the
+/// figure's digit count changes, and figures line up on their units.
+#[derive(Clone, Copy, Debug)]
+struct Cell<T> {
+    word: &'static str,
+    value: T,
+    glyphs: u8,
+}
+
+impl<T: Display> Cell<T> {
+    fn show(self, ui: &mut Ui, theme: &Theme, styles: &CellStyles) {
+        let Self {
+            word,
+            value,
+            glyphs,
+        } = self;
+        let width = support::figure_width(ui, &styles.figures, glyphs);
+        Panel::hstack()
+            .id(cell_wid(word))
+            .size(SizeSpec::HUG)
+            .padding(Spacing::new(theme.space.md, 0.0, 0.0, 0.0))
+            .gap(theme.space.sm)
+            .child_align(VAlign::Center)
+            .show(ui, |ui| {
+                Separator::vertical()
+                    .size((
+                        Sizing::fixed(theme.stroke.hairline),
+                        Sizing::fixed(theme.font.body),
+                    ))
+                    .margin(Spacing::new(0.0, 0.0, theme.space.sm, 0.0))
+                    .show(ui);
+                Text::new(word).style(&styles.words).show(ui);
+                Text::new(fmt!(ui, "{value}"))
+                    .style(&styles.figures)
+                    .size((Sizing::fixed(width), Sizing::HUG))
+                    .text_align(Align::RIGHT)
+                    .show(ui);
+            });
     }
+}
+
+/// The readout cell `word` names.
+fn cell_wid(word: &'static str) -> WidgetId {
+    WidgetId::from_hash(("darkroom.status_bar.cell", word))
 }
 
 /// What the last run came to, in the ink of its worst case, and — when a node needs a look —
@@ -200,10 +261,10 @@ fn run_line(ui: &mut Ui, stage: &mut Stage<'_, DocCtx<'_>>, outcome: RunOutcome)
                 to: BTreeSet::from([ItemId::Node(cause.node_id())]),
             },
         );
-        stage.out.push_app(AppCommand::View(ViewCommand::Frame {
+        stage.out.push_app(AppCommand::Pane {
             graph,
-            framing: Framing::ShowSelected,
-        }));
+            ask: PaneAsk::Frame(Framing::Selection),
+        });
     }
 }
 

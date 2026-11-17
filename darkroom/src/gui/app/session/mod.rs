@@ -18,20 +18,22 @@
 use crate::core::edit::document_request::DocumentRequest;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::open_document::OpenDocument;
+use crate::gui::command::{Availability, Command};
 use crate::gui::frame::app_command::AppCommand;
-use crate::gui::frame::app_command::FileCommand;
-use crate::gui::frame::app_command::RunCommand;
 use crate::gui::frame::doc_ctx::DocCtx;
-use crate::gui::frame::framing::Framing;
+use crate::gui::frame::pane_ask::PaneAsk;
 use crate::gui::frame::requests::Requests;
 use crate::gui::frame::stage::Stage;
+use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::main_window::MainWindow;
-use palantir::{Shortcut, Ui};
+use palantir::Ui;
 use scenarium::{GraphId, GraphSet, Library};
 
 use crate::gui::frame::app_ctx::AppCtx;
-use crate::gui::frame::shortcuts;
 use crate::gui::frame::window_parts::WindowParts;
+
+/// One bit a command, for the chords a frame's read found pressed.
+const _: () = assert!(Command::ALL.len() <= u64::BITS as usize);
 
 #[derive(Debug)]
 pub(crate) struct Session {
@@ -67,9 +69,10 @@ impl Session {
     /// previous asked for. So each takes a stage over a `GraphCtx` composed right here, over the
     /// document as the drain before it left it.
     ///
-    /// 1. NAVIGATION: settle which tab is active: the undo/redo chords, and tab and chip clicks
-    ///    read off last frame's responses, whose hit on a node the undo just removed finds nothing.
-    ///    First, so a switched-to tab records in the same present's first pass.
+    /// 1. NAVIGATION: settle which tab is active: the frame's chords, an undo or a redo among
+    ///    them, and tab and chip clicks read off last frame's responses, whose hit on a node the
+    ///    undo just removed finds nothing. First, so a switched-to tab records in the same
+    ///    present's first pass.
     /// 2. INPUT: reconcile pane visibility, rebuild the canvas's projection, then emit the
     ///    input-derived graph mutations (drag, pan/zoom, wire commit). A canvas that just became
     ///    visible needs a relayout: it may never have recorded, and a dock op raises no geometry
@@ -79,7 +82,7 @@ impl Session {
     pub(crate) fn input(&mut self, ui: &mut Ui, stage: &mut Stage<'_, AppCtx<'_>>) {
         debug_assert!(stage.out.is_empty(), "the last frame left requests behind");
         let library = stage.ctx.library();
-        self.apply_undo_redo(ui, stage.out);
+        self.read_chords(ui, stage);
         self.main_window
             .scan_navigation(ui, &mut stage.with(DocCtx::new(stage.ctx, &self.open)));
         self.drain(library, stage.out);
@@ -87,9 +90,6 @@ impl Session {
         self.main_window
             .input(ui, &mut stage.with(DocCtx::new(stage.ctx, &self.open)));
         self.drain(library, stage.out);
-
-        // The file/run/quit chords only queue an `AppCommand`, so they need no drain of their own.
-        menu_shortcut(ui, stage.out);
     }
 
     /// Apply what the frame raised against the document, and owe what that strands. Each route an
@@ -125,20 +125,38 @@ impl Session {
         requests.land(self.open.apply_edits(edits, library));
     }
 
-    /// Take back the last edit.
-    ///
-    /// The graph it changed comes to the front; the one it returns has no tab to show it.
-    pub(crate) fn undo(&mut self, requests: &mut Requests) -> Option<GraphId> {
+    /// Take back the last edit. The graph it changed comes to the front, and the status bar names
+    /// one no tab shows, so no undo changes only what is off screen.
+    pub(crate) fn undo(&mut self, requests: &mut Requests) {
         let facts = self.open.undo();
-        requests.owe_relayout_after(facts);
-        self.open.bring_forward(facts.touched)
+        requests.owe_after(facts);
+        let hidden = self.open.bring_forward(facts.touched);
+        self.name_hidden_edit("undid", hidden, requests);
     }
 
     /// Replay the last edit taken back, the mirror of [`Self::undo`].
-    pub(crate) fn redo(&mut self, requests: &mut Requests) -> Option<GraphId> {
+    pub(crate) fn redo(&mut self, requests: &mut Requests) {
         let facts = self.open.redo();
-        requests.owe_relayout_after(facts);
-        self.open.bring_forward(facts.touched)
+        requests.owe_after(facts);
+        let hidden = self.open.bring_forward(facts.touched);
+        self.name_hidden_edit("redid", hidden, requests);
+    }
+
+    /// Name on the status bar the graph an undo or a redo changed while no tab shows it.
+    fn name_hidden_edit(&self, verb: &str, hidden: Option<GraphId>, requests: &mut Requests) {
+        let Some(GraphId::Compound(id)) = hidden else {
+            return;
+        };
+        let name = &self
+            .open
+            .document()
+            .graphs
+            .compound(id)
+            .expect("an undo writes a graph the document holds")
+            .name;
+        requests.push_app(AppCommand::Warn(format!(
+            "{verb} an edit in compound {name:?}, which no tab shows"
+        )));
     }
 
     /// Ready the panes for a pass with no input to read, ahead of its [`Self::record`]: the warmup,
@@ -175,27 +193,45 @@ impl Session {
         self.drain(library, stage.out);
     }
 
-    /// Ctrl+Z / Ctrl+Shift+Z.
+    /// Read every command's chord, and raise each that fired and whose command is available
+    /// against the active graph.
     ///
-    /// Read every frame, unconditionally: the read also keeps the chord subscribed, and palantir's
-    /// keyboard wake-gate delivers an off-focus press only for a chord subscribed last frame.
-    /// No focus test: Ctrl+Z is `KeyClass::Edit`, so a focused text field's scope takes it and
-    /// the read answers `false` on its own.
-    fn apply_undo_redo(&mut self, ui: &mut Ui, requests: &mut Requests) {
-        let undo = ui.shortcut_pressed(shortcuts::UNDO);
-        let redo = ui.shortcut_pressed(shortcuts::REDO);
-        if undo {
-            self.undo(requests);
-        } else if redo {
-            self.redo(requests);
+    /// Every chord is read every frame, pressed or not: the read also watches it, and palantir's
+    /// wake-gate delivers an off-focus press only for a chord watched the frame before. No focus
+    /// test: palantir classes Ctrl+Z, X, C, V and A, Delete and a typed letter as a focused
+    /// field's own, so those reads answer `false` while one is edited.
+    ///
+    /// Undo and Redo apply here, in the navigation phase, so the tab one brings forward records
+    /// in this frame's first pass; every other command goes through [`Command::raise`], its
+    /// intents drained with the phase and its [`AppCommand`]s left for the shell.
+    fn read_chords(&mut self, ui: &mut Ui, stage: &mut Stage<'_, AppCtx<'_>>) {
+        let mut fired = 0_u64;
+        for (idx, command) in Command::ALL.into_iter().enumerate() {
+            if command.chord_pressed(ui) {
+                fired |= 1 << idx;
+            }
+        }
+        for (idx, command) in Command::ALL.into_iter().enumerate() {
+            if fired & (1 << idx) == 0 {
+                continue;
+            }
+            // Composed again for each: an undo ahead of it changed the document.
+            let doc = DocCtx::new(stage.ctx, &self.open);
+            let ctx = GraphCtx::of(doc, doc.active(), ui.display());
+            if command.availability(ctx) == Availability::Unavailable {
+                continue;
+            }
+            match command {
+                Command::Undo => self.undo(stage.out),
+                Command::Redo => self.redo(stage.out),
+                _ => command.raise(ui, ctx, stage.out),
+            }
         }
     }
 
-    /// Frame `graph` in its canvas's next input stage; see [`ViewCommand::Frame`].
-    ///
-    /// [`ViewCommand::Frame`]: crate::gui::frame::app_command::ViewCommand::Frame
-    pub(crate) fn frame_graph(&mut self, graph: GraphId, framing: Framing) {
-        self.main_window.frame(graph, framing);
+    /// Hand `ask` to `graph`'s pane; see [`AppCommand::Pane`].
+    pub(crate) fn ask_pane(&mut self, graph: GraphId, ask: PaneAsk) {
+        self.main_window.ask(graph, ask);
     }
 
     /// Release the canvas's `NodeId`-keyed caches for nodes the document has stopped holding.
@@ -203,33 +239,6 @@ impl Session {
     /// there would run twice on a frame carrying action input.
     pub(super) fn reconcile_caches(&mut self) {
         self.main_window.reconcile(&self.open);
-    }
-}
-
-/// The global chords and the command each raises. Document file ops fire regardless of focus,
-/// so Ctrl+S still saves while a node's const editor is focused (`TextEdit` binds none of these).
-/// Palantir matches modifiers exactly, so Ctrl+Shift+S never also reads as Ctrl+S.
-const MENU_CHORDS: [(Shortcut, AppCommand); 6] = [
-    (shortcuts::NEW, AppCommand::File(FileCommand::New)),
-    (shortcuts::OPEN, AppCommand::File(FileCommand::Open)),
-    (shortcuts::SAVE_AS, AppCommand::File(FileCommand::SaveAs)),
-    (shortcuts::SAVE, AppCommand::File(FileCommand::Save)),
-    (shortcuts::RUN, AppCommand::Run(RunCommand::Once)),
-    (shortcuts::QUIT, AppCommand::Quit),
-];
-
-/// Queue the command of the first [`MENU_CHORDS`] chord that fired, and read them all, so each stays
-/// watched for the next frame. Read outside every scope, so a chord a focused field claims does not
-/// reach them.
-fn menu_shortcut(ui: &mut Ui, requests: &mut Requests) {
-    let mut fired = None;
-    for (chord, command) in &MENU_CHORDS {
-        if ui.shortcut_pressed(*chord) {
-            fired.get_or_insert(command);
-        }
-    }
-    if let Some(command) = fired {
-        requests.push_app(command.clone());
     }
 }
 

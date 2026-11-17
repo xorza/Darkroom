@@ -1,10 +1,13 @@
 //! The narrower context the canvas's *drawing* half records against.
 
+use palantir::Visibility;
+
 use crate::core::document::item_id::ItemId;
 
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::scene::canvas_geometry::CanvasGeometry;
 use crate::gui::pane::graph_ui::scene::cull_region::CullRegion;
+use crate::gui::pane::graph_ui::scene::detail_level::DetailLevel;
 use crate::gui::pane::graph_ui::selection::Selection;
 use crate::gui::theme::Theme;
 
@@ -25,6 +28,8 @@ pub(crate) struct DrawCtx<'a> {
     pub(super) selected: Selection<'a>,
     /// What the viewport keeps; every reader of the context decides per node whether to record.
     pub(super) cull: CullRegion,
+    /// How much of each node the zoom leaves legible, worked out once a frame.
+    pub(super) detail: DetailLevel,
 }
 
 impl<'a> DrawCtx<'a> {
@@ -48,6 +53,22 @@ impl<'a> DrawCtx<'a> {
     /// The zoom this pass paints at: a screen-sized stroke divides by it.
     pub(crate) const fn zoom(self) -> f32 {
         self.graph_ctx.camera().zoom
+    }
+
+    /// How much of each node this pass paints.
+    pub(crate) const fn detail(self) -> DetailLevel {
+        self.detail
+    }
+
+    /// This context at `detail`, for a node that keeps its words whatever the zoom.
+    pub(crate) const fn with_detail(mut self, detail: DetailLevel) -> Self {
+        self.detail = detail;
+        self
+    }
+
+    /// How a node's words record this pass: hidden, though laid out, at the title level.
+    pub(crate) const fn words(self) -> Visibility {
+        self.detail.words()
     }
 
     /// Whether `item` paints selected this pass.

@@ -17,6 +17,7 @@
 
 use scenarium::{
     ConstValue, DataType, EventDecl, InputDecl, Interface, Numbered, OutputDecl, PortId,
+    ValueDomain,
 };
 
 /// Which list of an interface a port is in.
@@ -122,7 +123,7 @@ impl PortEdit {
                 InterfaceSide::Inputs => {
                     if let Some(input) = ports.inputs.iter_mut().find(|input| input.id == port) {
                         input.data_type = data_type;
-                        input.value_variants.clear();
+                        input.domain = ValueDomain::Any;
                     }
                     // A default the new type does not take goes with the old type.
                     if Interface::checked(ports.clone()).is_err()

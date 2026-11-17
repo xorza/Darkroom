@@ -4,6 +4,9 @@
 use crate::color::color_format::{ChannelCount, ColorFormat, SampleType};
 use crate::color::sample::Sample;
 use common::{Buffer2, USize2};
+use glam::USizeVec2;
+
+use crate::color::pixel_sample::{Channels, PixelSample};
 
 /// Tightly packed pixels of one of the nine formats, typed.
 #[derive(Debug, Clone)]
@@ -186,6 +189,19 @@ impl ImagePixels {
 
     pub(crate) const fn size(&self) -> USize2 {
         with_pixels!(self, pixels => pixels.size())
+    }
+
+    /// The pixel at `pos`, or `None` outside the image.
+    pub(crate) fn sample(&self, pos: USizeVec2) -> Option<PixelSample> {
+        fn at<T: Sample, const N: usize>(
+            pixels: &Buffer2<[T; N]>,
+            pos: USizeVec2,
+        ) -> Option<PixelSample> {
+            let size = pixels.size();
+            size.contains(pos)
+                .then(|| T::pixel_sample(Channels::of(&pixels[pos])))
+        }
+        with_pixels!(self, pixels => at(pixels, pos))
     }
 
     pub(crate) fn bytes(&self) -> &[u8] {

@@ -1,6 +1,6 @@
 //! [`ConstEditorTheme`]: how an inline const editor is styled.
 
-use palantir::{ButtonTheme, Chrome, DragValueTheme, FontFamily, RgbaF32, Spacing, TextEditTheme};
+use palantir::{ButtonTheme, DragValueTheme, FontFamily, RgbaF32, TextEditTheme};
 
 use crate::gui::theme::color;
 use crate::gui::theme::hover::Hover;
@@ -33,7 +33,15 @@ pub(crate) struct ConstEditorTheme {
     pub(crate) width: f32,
     /// Maximum logical-px width of the value column.
     pub(crate) max_width: f32,
+    /// How far along its span a number sits: the accent at [`SPAN_FILL_ALPHA`], over the field
+    /// and its figures, which it does not know.
+    pub(crate) span_fill: RgbaF32,
+    /// The fill's corners, the field's own.
+    pub(crate) span_radius: f32,
 }
+
+/// The span fill's strength over the field: the figures read through it.
+const SPAN_FILL_ALPHA: f32 = 0.3;
 
 /// The resting box's strength, of the fill a hovered chip takes.
 const REST_ALPHA: f32 = 0.5;
@@ -61,8 +69,8 @@ impl ConstEditorLooks {
         let mut button = ButtonTheme::subtle(p, m);
         button.defaults.padding = field.defaults.padding;
         Self {
-            rest: ConstEditorTheme::with_box(&button, field, p, REST_ALPHA),
-            revealed: ConstEditorTheme::with_box(&button, field, p, REVEAL_ALPHA),
+            rest: ConstEditorTheme::with_box(&button, field, p, m, REST_ALPHA),
+            revealed: ConstEditorTheme::with_box(&button, field, p, m, REVEAL_ALPHA),
         }
     }
 
@@ -76,16 +84,6 @@ impl ConstEditorLooks {
 }
 
 impl ConstEditorTheme {
-    /// The box a value sits in at rest, which the inspector draws a value in as the node does.
-    pub(crate) const fn rest_box(&self) -> &Chrome {
-        &self.button.unselected.normal.chrome
-    }
-
-    /// The inset of the value in [`Self::rest_box`].
-    pub(crate) const fn rest_padding(&self) -> Spacing {
-        self.button.defaults.padding
-    }
-
     /// `button`'s resting box at `alpha` of the hover fill, worn by the button, the number and
     /// the field alike, so every kind of value surfaces together; the number and the field take
     /// the caret, selection and placeholder of the app's `field`.
@@ -93,6 +91,7 @@ impl ConstEditorTheme {
         button: &ButtonTheme,
         field: &TextEditTheme,
         p: &palantir::Palette,
+        m: &palantir::Metrics,
         alpha: f32,
     ) -> Self {
         let mut button = button.clone();
@@ -117,6 +116,8 @@ impl ConstEditorTheme {
             unset: p.text_muted,
             width: VALUE_EDITOR_WIDTH,
             max_width: VALUE_EDITOR_MAX_WIDTH,
+            span_fill: p.accent.with_alpha(SPAN_FILL_ALPHA),
+            span_radius: m.radius.control,
         }
     }
 }

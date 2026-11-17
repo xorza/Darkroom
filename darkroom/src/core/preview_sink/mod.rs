@@ -14,8 +14,10 @@ use std::collections::HashMap;
 use std::mem;
 use std::sync::{Arc, Mutex};
 
+use lens::{DISPLAY_STRETCH_DATA_TYPE, DISPLAY_STRETCH_TYPE_ID, DisplayStretch};
 use scenarium::{
-    DataType, DynamicValue, Func, FuncId, InputDecl, Invocation, Library, ProgramId, async_lambda,
+    ConstValue, DataType, DynamicValue, EnumType, Func, FuncId, InputDecl, Invocation, Library,
+    PortId, ProgramId, async_lambda,
 };
 
 /// Stable `FuncId` for the preview node. Persisted in every document that holds
@@ -48,6 +50,21 @@ impl PreviewSink {
     }
 }
 
+/// The port of the value a preview shows.
+const VALUE_PORT: PortId = PortId::new(1);
+
+/// The port of how a preview's picture maps an image to the screen.
+pub(crate) const DISPLAY_PORT: PortId = PortId::new(2);
+
+/// Register the preview func, bound to `sink`, and the enum type its Display port takes.
+pub(crate) fn register(library: &mut Library, sink: Arc<PreviewSink>) {
+    library.add(func(sink));
+    library.register_enum(
+        DISPLAY_STRETCH_TYPE_ID,
+        EnumType::of::<DisplayStretch>("DisplayStretch"),
+    );
+}
+
 /// The preview func, bound to the sink its lambda publishes into.
 ///
 /// `sink()` so an ambient sinks run reaches it, refreshing a preview without the editor naming
@@ -73,9 +90,23 @@ pub(crate) fn func(sink: Arc<PreviewSink>) -> Func {
          rest of the graph computes.",
     )
     .input(
-        1,
+        VALUE_PORT.get(),
         InputDecl::optional("Value", DataType::Any)
             .description("The value to show. Anything can be wired here."),
+    )
+    // Read by the editor's picture of the value alone, never by the lambda: a look at a value
+    // changes nothing a run computes.
+    .input(
+        DISPLAY_PORT.get(),
+        InputDecl::optional("Display", DISPLAY_STRETCH_DATA_TYPE)
+            .const_only()
+            .default(ConstValue::Enum(
+                DisplayStretch::default().name().to_owned(),
+            ))
+            .description(
+                "How the picture maps an image to the screen: Linear as it is, Auto through \
+                 a screen stretch. The image itself stays as it is.",
+            ),
     )
     .build()
 }

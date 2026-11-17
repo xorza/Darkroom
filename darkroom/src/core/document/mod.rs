@@ -59,9 +59,11 @@ pub(crate) mod inspect_target;
 pub(crate) mod item_id;
 mod layout_file;
 pub(crate) mod load_report;
+pub(crate) mod pane_kind;
 pub(crate) mod route;
 pub(crate) mod tab_ref;
 pub(crate) mod tie;
+pub(crate) mod view_target;
 pub(crate) mod viewport;
 pub(crate) mod wire_key;
 
@@ -71,10 +73,12 @@ use std::mem;
 use std::slice;
 
 use glam::Vec2;
-use palantir::{DockOperation, DockState, TabGroup};
+use lens::DisplayStretch;
+use palantir::{DockDrop, DockOperation, DockPath, DockState, SplitSide, TabGroup};
 use scenarium::{
-    Compound, CompoundId, ConstValue, DetachedGhost, DetachedNode, Graph as CoreGraph, GraphId,
-    GraphSet, InstancePath, Library, Manifest, Node, NodeAddr, NodeId, PathForm, ProgramId, Scope,
+    Binding, Compound, CompoundId, ConstValue, DetachedGhost, DetachedNode, Graph as CoreGraph,
+    GraphId, GraphSet, InputPort, InstancePath, Library, Manifest, Node, NodeAddr, NodeId,
+    PathForm, ProgramId, Scope,
 };
 use serde::{Deserialize, Serialize};
 
@@ -85,8 +89,9 @@ use crate::core::document::inspect_target::InspectTarget;
 use crate::core::document::item_id::ItemId;
 use crate::core::document::load_report::{DocumentRepair, ForeignPath, LoadReport, ViewRepair};
 use crate::core::document::route::Route;
-use crate::core::document::tab_ref::TabRef;
+use crate::core::document::tab_ref::{TabHome, TabRef};
 use crate::core::document::tie::{TieAngle, TieId};
+use crate::core::document::view_target::ViewTarget;
 use crate::core::document::viewport::Viewport;
 use crate::core::edit::edit_facts::Touched;
 use crate::core::preview_sink;
@@ -118,6 +123,11 @@ pub(crate) struct Document {
     /// the graph a Duplicate or a Delete edits. View state, not undoable; a request against a
     /// graph makes it the active one.
     pub(crate) active: GraphId,
+    /// The preview the following viewer shows, the one last pressed. View state, saved and not
+    /// undoable, as `active` is; `None` until a press, and again once its path stops naming a
+    /// preview.
+    #[serde(default)]
+    pub(crate) active_preview: Option<ProgramId>,
 }
 
 /// One graph of the document and its view, borrowed apart: what an edit of one graph writes.
@@ -135,6 +145,7 @@ impl Default for Document {
             sides: BTreeMap::new(),
             layout: new_layout(),
             active: GraphId::Main,
+            active_preview: None,
         }
     }
 }
@@ -200,6 +211,126 @@ impl Document {
         if let Some(TabRef::Graph(graph)) = self.layout.group(focused).map(TabGroup::active_tab) {
             self.active = graph;
         }
+    }
+
+    /// Bring `tab` into view: where it is open, make it its group's visible tab; else open it in
+    /// its [`home`](TabRef::home). The group that had the focus keeps the tab it showed and the
+    /// focus, so the graph a press was made in stays in front: an Inspect pressed on a node leaves
+    /// that node's pane showing it.
+    ///
+    /// A sidebar tab with no pane yet joins the group that holds a tab of the sidebar, a viewer
+    /// above an inspector; else it splits off the right of the main graph's group, the graphs
+    /// keeping [`GRAPHS_RATIO`] of the width where that split is the dock's root, the one split
+    /// a caller can address.
+    pub(crate) fn show_tab(&mut self, tab: TabRef) {
+        let focused = self.layout.focused();
+        let shown_before = self.layout.group(focused).map(TabGroup::active_tab);
+        if self.layout.find_tab(tab).is_some() {
+            self.layout.apply(DockOperation::ActivateTab { tab });
+        } else {
+            match tab.home() {
+                TabHome::Graphs => self.open_in_group_of(tab, self.layout.pinned()),
+                TabHome::Sidebar => self.open_in_sidebar(tab),
+            }
+        }
+        let group_of = |layout: &DockState<TabRef>, tab| layout.find_tab(tab).map(|at| at.group);
+        if let Some(shown) = shown_before
+            && group_of(&self.layout, shown) != group_of(&self.layout, tab)
+        {
+            self.layout.apply(DockOperation::ActivateTab { tab: shown });
+        }
+    }
+
+    /// Open `tab` in the group that holds `beside`, as that group's visible tab.
+    fn open_in_group_of(&mut self, tab: TabRef, beside: TabRef) {
+        let group = self
+            .layout
+            .find_tab(beside)
+            .expect("the tab a new one joins is open")
+            .group;
+        self.layout.apply(DockOperation::FocusGroup { group });
+        self.layout.apply(DockOperation::OpenTab { tab });
+    }
+
+    /// Open sidebar `tab`, which no group holds, beside a tab of its kind, else beside the
+    /// sidebar's other tabs, else in a sidebar of its own.
+    fn open_in_sidebar(&mut self, tab: TabRef) {
+        let pinned = self.layout.pinned();
+        let same_kind = |open: &TabRef| {
+            matches!(
+                (tab, *open),
+                (TabRef::Viewer(_), TabRef::Viewer(_))
+                    | (TabRef::Inspector(_), TabRef::Inspector(_))
+            )
+        };
+        let beside = self.layout.all_tabs().find(same_kind).or_else(|| {
+            self.layout
+                .all_tabs()
+                .find(|open| open.home() == TabHome::Sidebar)
+        });
+        let Some(sidebar) = beside else {
+            let lone = self.layout.groups().count() == 1;
+            let group = self
+                .layout
+                .find_tab(pinned)
+                .expect("the pinned tab is open")
+                .group;
+            self.open_in_group_of(tab, pinned);
+            self.layout.apply(DockOperation::MoveTab {
+                tab,
+                to: DockDrop::Split {
+                    group,
+                    side: SplitSide::Right,
+                },
+            });
+            if lone {
+                self.layout.apply(DockOperation::SetRatio {
+                    split: DockPath::ROOT,
+                    ratio: GRAPHS_RATIO,
+                });
+            }
+            return;
+        };
+        let group = self
+            .layout
+            .find_tab(sidebar)
+            .expect("an open tab is in a group")
+            .group;
+        // A viewer goes above an inspector, and an inspector below a viewer; two of a kind share
+        // a strip.
+        let side = match (tab, sidebar) {
+            (TabRef::Viewer(_), TabRef::Inspector(_)) => Some(SplitSide::Top),
+            (TabRef::Inspector(_), TabRef::Viewer(_)) => Some(SplitSide::Bottom),
+            _ => None,
+        };
+        let can_split = self.layout.can_split(group);
+        self.open_in_group_of(tab, sidebar);
+        if let Some(side) = side.filter(|_| can_split) {
+            self.layout.apply(DockOperation::MoveTab {
+                tab,
+                to: DockDrop::Split { group, side },
+            });
+        }
+    }
+
+    /// Make `program_id` the active preview and show the viewer that follows it. A program the
+    /// document no longer holds as a preview, raised against an earlier frame, shows nothing.
+    pub(crate) fn show_preview(&mut self, program_id: ProgramId) {
+        if !self.holds_preview_node(program_id) {
+            return;
+        }
+        self.active_preview = Some(program_id);
+        self.show_tab(TabRef::Viewer(ViewTarget::Active));
+    }
+
+    /// Open the workspace a new document starts on: the graph, and beside it the viewer over the
+    /// inspector, the main graph's pane keeping the focus. Substance Designer's default, a graph
+    /// with its 2D View and its Properties docked beside it, the fit for an editor whose nodes
+    /// carry their own thumbnails. Refused: the viewer above the graph, Fusion's and Nuke's,
+    /// which halves the graph's height; the inspector alone, which leaves the image no place.
+    pub(crate) fn open_workspace(&mut self) {
+        self.show_tab(TabRef::Viewer(ViewTarget::Active));
+        self.show_tab(TabRef::Inspector(InspectTarget::Selection));
     }
 
     /// Show `compound`'s pane through `through`, open or focus its tab, and make it the active
@@ -354,9 +485,16 @@ impl Document {
         slot.graph.detach_ghost_node(node_id)
     }
 
-    /// Clear each side's `through` that stopped naming an instance of its compound, then close
-    /// each tab the document stopped holding, handing `pruned` each change.
+    /// Clear each side's `through` that stopped naming an instance of its compound and an active
+    /// preview that stopped naming a preview, then close each tab the document stopped holding,
+    /// handing `pruned` each change.
     fn prune_views(&mut self, pruned: &mut impl FnMut(DocumentRepair)) {
+        if let Some(program_id) = self.active_preview
+            && !self.holds_preview_node(program_id)
+        {
+            self.active_preview = None;
+            pruned(DocumentRepair::ActivePreviewCleared { program_id });
+        }
         let Self { graphs, sides, .. } = self;
         for (&compound, side) in sides.iter_mut() {
             if let Some(path) = side.through
@@ -381,15 +519,19 @@ impl Document {
         }
     }
 
-    /// Whether a tab may be open: `Preferences` and the selection's inspector always, a graph's
-    /// pane while the set holds the graph, a viewer exactly while its path names a preview node,
+    /// Whether a tab may be open: `Preferences`, the reference, the following viewer and the
+    /// selection's inspector always, a graph's pane while the set holds the graph, a pinned viewer
+    /// exactly while its path names a preview node,
     /// and a pinned inspector while its graph holds its node and its `through` names an instance
     /// of that graph.
     pub(crate) fn holds_tab(&self, tab: TabRef) -> bool {
         match tab {
-            TabRef::Preferences | TabRef::Inspector(InspectTarget::Selection) => true,
+            TabRef::Preferences
+            | TabRef::Reference
+            | TabRef::Viewer(ViewTarget::Active)
+            | TabRef::Inspector(InspectTarget::Selection) => true,
             TabRef::Graph(graph) => holds_graph(&self.graphs, graph),
-            TabRef::ImageViewer(program_id) => self.holds_preview_node(program_id),
+            TabRef::Viewer(ViewTarget::Node(program_id)) => self.holds_preview_node(program_id),
             TabRef::Inspector(InspectTarget::Node { addr, through }) => {
                 holds_graph(&self.graphs, addr.graph)
                     && self.graphs.graph(addr.graph).find(addr.node_id).is_some()
@@ -407,6 +549,33 @@ impl Document {
         self.graphs
             .graph_at(program_id.path())
             .is_some_and(|graph| is_preview_node(self.graphs.graph(graph), program_id.node_id()))
+    }
+
+    /// The stretch preview node `program_id`'s Display names: its constant, or the default where
+    /// the node binds none, as the input is optional.
+    pub(crate) fn preview_stretch(&self, program_id: ProgramId) -> DisplayStretch {
+        let graph = self
+            .graphs
+            .graph_at(program_id.path())
+            .expect("a stored preview's node is in the set");
+        let port = InputPort::new(program_id.node_id(), preview_sink::DISPLAY_PORT);
+        match self.graphs.graph(graph).bindings.get(&port) {
+            Some(Binding::Const(value)) => value
+                .as_enum()
+                .and_then(|name| name.parse().ok())
+                .expect("the const gate holds Display to a stretch's name"),
+            Some(Binding::Wire(_)) => unreachable!("Display is const-only"),
+            None => DisplayStretch::default(),
+        }
+    }
+
+    /// Whether Run on Change runs `program_id`: a preview node the document holds, not disabled,
+    /// as a seed would override the flag.
+    pub(crate) fn runs_preview(&self, program_id: ProgramId) -> bool {
+        self.graphs
+            .graph_at(program_id.path())
+            .and_then(|graph| self.graphs.graph(graph).find(program_id.node_id()))
+            .is_some_and(|node| !node.disabled && node.func_id().is_some_and(preview_sink::is_func))
     }
 
     /// Make a decoded document consistent with itself and `library`, and
@@ -537,6 +706,11 @@ impl Document {
                 return Err(DocumentValidationError::MissingTab { tab });
             }
         }
+        if let Some(program_id) = self.active_preview
+            && !self.holds_preview_node(program_id)
+        {
+            return Err(DocumentValidationError::StaleActivePreview { program_id });
+        }
         // A file holds relative paths; memory resolves each where it enters, so a relative one
         // here would be read against the working directory.
         let mut relative = None;
@@ -626,6 +800,7 @@ impl From<GraphSet> for Document {
             sides,
             layout: new_layout(),
             active: GraphId::Main,
+            active_preview: None,
         }
     }
 }
@@ -751,6 +926,10 @@ fn is_preview_node(graph: &CoreGraph, node_id: NodeId) -> bool {
         .and_then(Node::func_id)
         .is_some_and(preview_sink::is_func)
 }
+
+/// The share of the width the graphs keep beside a sidebar the editor opens: the sidebar's 28 %
+/// gives a 1600 px window a 450 px viewer and inspector.
+const GRAPHS_RATIO: f32 = 0.72;
 
 /// A fresh dock: one pane showing the main graph, the pinned tab, so the tree is never empty.
 fn new_layout() -> DockState<TabRef> {

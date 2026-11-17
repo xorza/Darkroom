@@ -32,6 +32,9 @@ use crate::graph::binding::Binding;
 use crate::graph::binding_entry::BindingEntry;
 use crate::graph::func::value_variant::ValueVariant;
 use crate::graph::identity::{InputPort, NodeId, PortId};
+use crate::graph::value_domain::ValueDomain;
+use crate::graph::value_domain::float_span::FloatSpan;
+use crate::graph::value_domain::int_span::IntSpan;
 
 /// A port's declaration under its id: the item a declaration's lists of ports hold.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -73,7 +76,10 @@ pub struct InputDecl {
     /// node reads as configuration.
     pub const_only: bool,
     pub default_value: Option<ConstValue>,
-    pub value_variants: Vec<ValueVariant>,
+    /// The constants the input admits past what its type holds. A file that states none holds
+    /// an input of no domain.
+    #[serde(default)]
+    pub domain: ValueDomain,
 }
 
 impl InputDecl {
@@ -86,7 +92,7 @@ impl InputDecl {
             description: None,
             const_only: false,
             default_value: None,
-            value_variants: Vec::new(),
+            domain: ValueDomain::Any,
         }
     }
 
@@ -119,19 +125,38 @@ impl InputDecl {
         self
     }
 
-    /// Attach the editor picker variants (`ValueVariant`s).
+    /// The constants the input admits; see [`ValueDomain`].
     #[must_use]
-    pub fn variants(mut self, variants: Vec<ValueVariant>) -> Self {
-        self.value_variants = variants;
+    pub fn domain(mut self, domain: ValueDomain) -> Self {
+        self.domain = domain;
         self
+    }
+
+    /// [`Self::domain`] of a picker of `variants`.
+    #[must_use]
+    pub fn variants(self, variants: Vec<ValueVariant>) -> Self {
+        self.domain(ValueDomain::Variants(variants))
+    }
+
+    /// [`Self::domain`] of an integer `span`.
+    #[must_use]
+    pub fn int_span(self, span: IntSpan) -> Self {
+        self.domain(ValueDomain::Int(span))
+    }
+
+    /// [`Self::domain`] of a float `span`.
+    #[must_use]
+    pub fn float_span(self, span: FloatSpan) -> Self {
+        self.domain(ValueDomain::Float(span))
     }
 
     /// Whether `value` may sit on this input as a `Const`: the whole const gate, at declaration
     /// and at compile time. A port contributes two things ahead of the type table in
     /// [`DataType::accepts_const`]:
     ///
-    /// - a **picker** port (one carrying `value_variants`) takes exactly one of the values it
-    ///   offers, whatever its declared type says;
+    /// - its **domain**: a picker takes exactly one of the values it offers, whatever its
+    ///   declared type says, and a span refuses a number outside it, the number read as the func
+    ///   reads it;
     /// - `Null` is "explicitly unset", so it fits an optional port and no required one (lens's
     ///   config machinery authors it on `Option`-field inputs and reads it back as `None`).
     ///
@@ -142,8 +167,10 @@ impl InputDecl {
         strictness: Strictness,
         enum_variant: impl FnOnce(EnumId, &str) -> bool,
     ) -> bool {
-        if !self.value_variants.is_empty() {
-            return self.value_variants.iter().any(|v| v.value == *value);
+        match (&self.domain, self.domain.admits(value)) {
+            (ValueDomain::Variants(_), Some(admitted)) => return admitted,
+            (_, Some(false)) => return false,
+            _ => {}
         }
         if matches!(value, ConstValue::Null) {
             return !self.required;
@@ -206,8 +233,8 @@ pub struct Ports {
 
 impl Ports {
     /// Hold these ports to the rules every declaration passes: each id is unique among the ports
-    /// of its side, each type names its registered entry under a set id, and each
-    /// default fits its input. Exact kinds for a scalar default, as nobody chose a coercion here;
+    /// of its side, each type names its registered entry under a set id, each domain fits its
+    /// input's type, and each default fits its input. Exact kinds for a scalar default, as nobody chose a coercion here;
     /// an enum default need only be an enum literal, as the variants are the library's, which
     /// [`Library::check`](crate::Library::check) holds it to.
     pub fn check(&self) -> Result<(), PortsError> {
@@ -222,6 +249,9 @@ impl Ports {
                     list: PortList::Inputs,
                     idx,
                 });
+            }
+            if !input.domain.fits(input.data_type) {
+                return Err(PortsError::DomainMismatch { idx });
             }
             if let Some(default) = &input.default_value
                 && !input.accepts_const(default, Strictness::Declared, |_, _| true)
@@ -319,6 +349,8 @@ pub enum PortsError {
     },
     #[error("{list} {idx} names a type under the nil id")]
     NilType { list: PortList, idx: usize },
-    #[error("input {idx} declares a default that matches neither its type nor its picker variants")]
+    #[error("input {idx} declares a default that matches neither its type nor its domain")]
     InvalidDefault { idx: usize },
+    #[error("input {idx} declares a span of another number type than its own")]
+    DomainMismatch { idx: usize },
 }

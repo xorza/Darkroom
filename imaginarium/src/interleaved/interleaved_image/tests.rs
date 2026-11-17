@@ -137,3 +137,65 @@ fn empty_planes_are_refused() {
     let empty: Buffer2<f32> = Buffer2::new((0, 3), Vec::new());
     drop(InterleavedImage::from([&empty]));
 }
+
+/// A 3 × 2 image in each sample type, its samples numbered from 1 in storage order: the pixel at
+/// each corner reads its own samples, in its own type, and one past each edge reads `None`.
+#[test]
+fn a_pixel_reads_at_each_corner_and_none_past_each_edge() {
+    use glam::USizeVec2;
+
+    use crate::color::pixel_sample::{Channels, PixelSample};
+
+    let size = USize2::new(3, 2);
+    // The corners in raster order; a pixel's first sample is number (x + 3·y)·channels + 1.
+    let corners = [(0, 0), (2, 0), (0, 1), (2, 1)];
+    let first = |(x, y): (usize, usize), channels: usize| (x + 3 * y) * channels + 1;
+    let u8_image = InterleavedImage::from_samples(
+        InterleavedDesc::new(size, ColorFormat::MONO_U8),
+        (1..=6).collect::<Vec<u8>>(),
+    );
+    let u16_image = InterleavedImage::from_samples(
+        InterleavedDesc::new(size, ColorFormat::RGB_U16),
+        (1..=18).map(|v| v * 1000).collect::<Vec<u16>>(),
+    );
+    let f32_image = InterleavedImage::from_samples(
+        InterleavedDesc::new(size, ColorFormat::RGBA_F32),
+        (1..=24).map(|v| v as f32 / 8.0).collect::<Vec<f32>>(),
+    );
+    for corner in corners {
+        let pos = USizeVec2::new(corner.0, corner.1);
+        let k = first(corner, 1) as u8;
+        assert_eq!(
+            u8_image.sample(pos),
+            Some(PixelSample::U8(Channels::Mono(k)))
+        );
+        let k = first(corner, 3) as u16;
+        assert_eq!(
+            u16_image.sample(pos),
+            Some(PixelSample::U16(Channels::Rgb([
+                k * 1000,
+                (k + 1) * 1000,
+                (k + 2) * 1000
+            ])))
+        );
+        let k = first(corner, 4) as f32;
+        assert_eq!(
+            f32_image.sample(pos),
+            Some(PixelSample::F32(Channels::Rgba([
+                k / 8.0,
+                (k + 1.0) / 8.0,
+                (k + 2.0) / 8.0,
+                (k + 3.0) / 8.0
+            ])))
+        );
+    }
+    for past in [
+        USizeVec2::new(3, 0),
+        USizeVec2::new(0, 2),
+        USizeVec2::new(3, 2),
+    ] {
+        assert_eq!(u8_image.sample(past), None, "{past}");
+        assert_eq!(u16_image.sample(past), None, "{past}");
+        assert_eq!(f32_image.sample(past), None, "{past}");
+    }
+}

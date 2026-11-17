@@ -1,23 +1,15 @@
-use common::ErrorChain;
 use palantir::{
-    Align, Configure, DockOperation, Grid, MenuBar, MenuBarMenus, MenuItem, MenuSeparator, Panel,
-    Sense, Shortcut, SizeSpec, Text, TextWrap, Track, Ui, VAlign, WidgetId, fmt,
+    Align, Configure, Grid, MenuBar, MenuItem, MenuSeparator, Panel, Sense, SizeSpec, Text,
+    TextWrap, Track, Ui, VAlign, WidgetId, fmt,
 };
-use scenarium::{GraphId, Node, NodeId};
 
-use crate::core::document::tab_ref::TabRef;
-use crate::core::edit::collapse;
-use crate::core::edit::compound_intent::CompoundIntent;
-use crate::core::edit::graph_intent::GraphIntent;
-use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
-use crate::core::edit::make_unique::MakeUnique;
-use crate::gui::frame::app_command::{AppCommand, FileCommand, RunCommand, ViewCommand};
-use crate::gui::frame::clip_commands;
+use crate::core::io::preferences::recent_documents::RecentDocuments;
+use crate::gui::command::menu::{self, MENU_BAR, MenuRow, Unavailable};
+use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::doc_ctx::DocCtx;
-use crate::gui::frame::framing::Framing;
 use crate::gui::frame::requests::Requests;
-use crate::gui::frame::shortcuts;
 use crate::gui::frame::stage::Stage;
+use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::widgets::support;
 
 /// Top-of-window menu bar: palantir's [`MenuBar`] at the left, and the document's name, with a
@@ -27,12 +19,11 @@ use crate::gui::widgets::support;
 /// floor, so the menus widen theirs and the name moves over. Refused: a name centered in the
 /// window over the menus, which it overlapped in a narrow window.
 ///
-/// A pick goes onto the stage's requests in its tier: graph edits as intents, the file lifecycle,
-/// the history, the run, the view and `Quit` as [`AppCommand`]s for `App` to run after the pass,
-/// Preferences as the [`DockOperation`] that opens its tab. Every item with a chord shows it,
-/// read from [`shortcuts`], the table its handler reads.
-pub(crate) fn show(ui: &mut Ui, stage: &mut Stage<'_, DocCtx<'_>>) {
+/// The menus are [`MENU_BAR`]'s, each row a [`Command`](crate::gui::command::Command) raised
+/// against the active graph: a row an unavailable command greys keeps its place.
+pub(crate) fn show(ui: &mut Ui, stage: &mut Stage<'_, DocCtx<'_>>, recent: &RecentDocuments) {
     let ctx = stage.ctx;
+    let active = GraphCtx::of(ctx, ctx.active(), ui.display());
     Grid::new()
         .id(bar_wid())
         .size(SizeSpec::FILL_W)
@@ -45,227 +36,45 @@ pub(crate) fn show(ui: &mut Ui, stage: &mut Stage<'_, DocCtx<'_>>) {
                 .size(SizeSpec::HUG)
                 .align(Align::LEFT)
                 .show(ui, |bar| {
-                    file_menu(bar, stage.out);
-                    edit_menu(bar, stage);
-                    graph_menu(bar, stage);
-                    view_menu(bar, stage.out);
+                    for spec in &MENU_BAR {
+                        bar.menu(spec.title, |ui| {
+                            // The rows around each recent-documents marker, the list between.
+                            let mut parts = spec
+                                .rows
+                                .split(|row| matches!(row, MenuRow::RecentDocuments));
+                            let first = parts.next().expect("a split yields a first part");
+                            menu::record(ui, first, active, stage.out, Unavailable::Greyed);
+                            for rest in parts {
+                                MenuSeparator::new().show(ui);
+                                if recent_rows(ui, recent, stage.out) {
+                                    MenuSeparator::new().show(ui);
+                                }
+                                menu::record(ui, rest, active, stage.out, Unavailable::Greyed);
+                            }
+                        });
+                    }
                 });
             document_name(ui, ctx);
         });
 }
 
-/// One row, `enabled` or greyed out, with the chord its handler reads shown beside it; `true`
-/// when picked.
-fn item(ui: &mut Ui, label: &'static str, shortcut: Option<Shortcut>, enabled: bool) -> bool {
-    let mut row = MenuItem::new(label).disabled(!enabled);
-    if let Some(shortcut) = shortcut {
-        row = row.shortcut_hint(shortcut);
+/// One row a recent document, its file's name with its folder as the tooltip; a pick opens it
+/// through the unsaved-changes prompt. Whether any was listed.
+fn recent_rows(ui: &mut Ui, recent: &RecentDocuments, out: &mut Requests) -> bool {
+    let mut any = false;
+    for (idx, path) in recent.iter().enumerate() {
+        any = true;
+        let name = path.file_name().unwrap_or(path.as_os_str());
+        let label = fmt!(ui, "{}", name.display());
+        // By its place, as two folders may hold one name.
+        let row = MenuItem::new(label).id_salt(("recent", idx)).show(ui);
+        if row.clicked() {
+            out.push_app(AppCommand::OpenAt(path.to_path_buf()));
+        }
+        let folder = path.parent().map(|folder| fmt!(ui, "{}", folder.display()));
+        support::tooltip_after(ui, &row, folder);
     }
-    row.show(ui).clicked()
-}
-
-fn file_menu(bar: &mut MenuBarMenus<'_>, out: &mut Requests) {
-    bar.menu("File", |ui| {
-        let file = [
-            ("New", Some(shortcuts::NEW), FileCommand::New),
-            ("Open…", Some(shortcuts::OPEN), FileCommand::Open),
-            ("Save", Some(shortcuts::SAVE), FileCommand::Save),
-            ("Save As…", Some(shortcuts::SAVE_AS), FileCommand::SaveAs),
-        ];
-        for (label, shortcut, command) in file {
-            if item(ui, label, shortcut, true) {
-                out.push_app(AppCommand::File(command));
-            }
-        }
-        MenuSeparator::new().show(ui);
-        if item(ui, "Pack Resources", None, true) {
-            out.push_app(AppCommand::File(FileCommand::PackResources));
-        }
-        MenuSeparator::new().show(ui);
-        if item(ui, "Preferences", None, true) {
-            out.push_view(DockOperation::OpenTab {
-                tab: TabRef::Preferences,
-            });
-        }
-        MenuSeparator::new().show(ui);
-        if item(ui, "Quit", Some(shortcuts::QUIT), true) {
-            out.push_app(AppCommand::Quit);
-        }
-    });
-}
-
-/// The history and the active graph's selection's edits. Duplicate drops the wires from producers
-/// outside the selection, as Ctrl+D does.
-fn edit_menu(bar: &mut MenuBarMenus<'_>, stage: &mut Stage<'_, DocCtx<'_>>) {
-    let (ctx, out) = (stage.ctx, &mut *stage.out);
-    let (open, active) = (ctx.open(), ctx.active());
-    let selected = !ctx.selected().is_empty();
-    bar.menu("Edit", |ui| {
-        if item(ui, "Undo", Some(shortcuts::UNDO), open.can_undo()) {
-            out.push_app(AppCommand::Undo);
-        }
-        if item(ui, "Redo", Some(shortcuts::REDO), open.can_redo()) {
-            out.push_app(AppCommand::Redo);
-        }
-        MenuSeparator::new().show(ui);
-        if item(ui, "Duplicate", Some(shortcuts::DUPLICATE), selected) {
-            out.extend_graph(
-                active,
-                GraphIntent::duplicate(
-                    open.document(),
-                    active,
-                    ctx.library(),
-                    IncomingWires::Drop,
-                    || NodeId::unique().as_u128(),
-                ),
-            );
-        }
-        if item(ui, "Copy", Some(shortcuts::COPY), selected) {
-            clip_commands::copy(ui, open.document(), active, ctx.library(), ctx.selected());
-        }
-        if item(ui, "Paste", Some(shortcuts::PASTE), true) {
-            clip_commands::paste(ui, open.document(), active, ctx.library(), out);
-        }
-        if item(ui, "Delete", Some(shortcuts::DELETE), selected) {
-            out.extend_graph(
-                active,
-                GraphIntent::remove_selection(open.document().view(active)),
-            );
-        }
-    });
-}
-
-/// The run and the camera: what the canvas toolbar does, by name and with its keys.
-fn graph_menu(bar: &mut MenuBarMenus<'_>, stage: &mut Stage<'_, DocCtx<'_>>) {
-    let (ctx, out) = (stage.ctx, &mut *stage.out);
-    let activity = ctx.run_state().activity();
-    let selected = !ctx.selected().is_empty();
-    bar.menu("Graph", |ui| {
-        let running = activity.is_executing();
-        if item(ui, "Run", Some(shortcuts::RUN), !running) {
-            out.push_app(AppCommand::Run(RunCommand::Once));
-        }
-        if item(ui, "Cancel Run", None, running) {
-            out.push_app(AppCommand::Run(RunCommand::Cancel));
-        }
-        let (events, command) = if activity.event_loop_active() {
-            ("Stop Events", RunCommand::StopEvents)
-        } else {
-            ("Start Events", RunCommand::StartEvents)
-        };
-        if item(ui, events, None, true) {
-            out.push_app(AppCommand::Run(command));
-        }
-        MenuSeparator::new().show(ui);
-        let framings = [
-            (
-                "Reset View",
-                Some(shortcuts::RESET_VIEW),
-                Framing::Reset,
-                true,
-            ),
-            ("Show All", None, Framing::ShowAll, true),
-            ("Show Selected", None, Framing::ShowSelected, selected),
-        ];
-        for (label, shortcut, framing, enabled) in framings {
-            if item(ui, label, shortcut, enabled) {
-                out.push_app(AppCommand::View(ViewCommand::Frame {
-                    graph: ctx.active(),
-                    framing,
-                }));
-            }
-        }
-        MenuSeparator::new().show(ui);
-        let (graph, document, library) = (ctx.active(), ctx.document(), ctx.library());
-        if item(ui, "Collapse to Compound", None, selected) {
-            match collapse::collapse(document, graph, library, ctx.selected()) {
-                Some(Ok(plan)) => plan.queue(graph, out.document()),
-                Some(Err(refusal)) => {
-                    out.push_app(AppCommand::Warn(ErrorChain::new(&refusal).to_string()));
-                }
-                None => {}
-            }
-        }
-        let instance = only_instance(ctx);
-        if item(ui, "Expand Compound", None, instance.is_some())
-            && let Some(instance) = instance
-        {
-            out.extend_graph(graph, collapse::expand(document, graph, library, instance));
-        }
-        let picked: Vec<NodeId> = ctx
-            .selected()
-            .iter()
-            .filter_map(|item| item.node())
-            .collect();
-        // Planned on the click alone, as a plan copies the whole definition.
-        let offered = MakeUnique::placed(document, graph, &picked).is_some();
-        if item(ui, "Make Unique", None, offered)
-            && let Some(unique) = MakeUnique::plan(document, graph, &picked)
-        {
-            unique.queue(out.document());
-        }
-        // The one instance the selection holds, else the compound the active pane shows.
-        let exported = instance
-            .and_then(|node| {
-                document
-                    .graphs
-                    .graph(graph)
-                    .find(node)
-                    .and_then(Node::compound)
-            })
-            .or(match graph {
-                GraphId::Compound(id) => Some(id),
-                GraphId::Main => None,
-            });
-        if item(ui, "Export Compound\u{2026}", None, exported.is_some())
-            && let Some(compound) = exported
-        {
-            out.push_app(AppCommand::Export { compound });
-        }
-        MenuSeparator::new().show(ui);
-        let held = document.graphs.graph(graph);
-        let ghosts = held.ghost_nodes().len() > 0 || !held.ghost_wiring().is_empty();
-        if item(ui, "Select Ghosts", None, ghosts) {
-            out.push_graph(graph, GraphIntent::select_ghosts(held));
-        }
-        // One batch, so one undo entry.
-        if item(ui, "Remove Ghosts", None, ghosts) {
-            out.extend_graph(graph, GraphIntent::remove_ghosts(held));
-        }
-        // One batch, so one undo entry, outermost first so each removal holds.
-        let unused = document.unused_compounds();
-        if item(ui, "Remove Unused Compounds", None, !unused.is_empty()) {
-            for id in unused {
-                out.push_compound(CompoundIntent::Remove { id });
-            }
-        }
-    });
-}
-
-/// The one node the active graph's selection holds when it is an instance, ties aside.
-fn only_instance(ctx: DocCtx<'_>) -> Option<NodeId> {
-    let mut nodes = ctx.selected().iter().filter_map(|item| item.node());
-    let node_id = nodes.next()?;
-    if nodes.next().is_some() {
-        return None;
-    }
-    ctx.document()
-        .graphs
-        .graph(ctx.active())
-        .find(node_id)?
-        .compound()
-        .map(|_| node_id)
-}
-
-fn view_menu(bar: &mut MenuBarMenus<'_>, out: &mut Requests) {
-    bar.menu("View", |ui| {
-        if item(ui, "Copy View as Image", None, true) {
-            out.push_app(AppCommand::View(ViewCommand::CopyImage));
-        }
-        if item(ui, "Save View as PNG…", None, true) {
-            out.push_app(AppCommand::View(ViewCommand::SaveImage));
-        }
-    });
+    any
 }
 
 /// The open document's file name, or "Untitled" before its first save, with a dot while it has
@@ -315,19 +124,24 @@ fn document_wid() -> WidgetId {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     use glam::UVec2;
-    use palantir::{InspectedWidget, Key, Shortcut};
+    use palantir::{InspectedWidget, Key};
     use scenarium::{Compound, CompoundId, GraphId, Interface};
 
     use crate::core::document::internals::{DocumentFixture, insert_compound};
     use crate::core::document::item_id::ItemId;
+    use crate::core::document::tab_ref::TabRef;
+    use crate::core::document::viewport::Viewport;
     use crate::core::edit::graph_intent::GraphIntent;
     use crate::gui::app::session::internals::SessionHarness;
-    use crate::gui::frame::app_command::{AppCommand, FileCommand, RunCommand, ViewCommand};
-    use crate::gui::frame::framing::Framing;
-    use crate::gui::frame::shortcuts;
+    use crate::gui::command::menu::{MENU_BAR, MenuRow};
+    use crate::gui::command::{Availability, Command};
+    use crate::gui::frame::app_command::AppCommand;
+    use crate::gui::frame::app_ctx::AppCtx;
+    use crate::gui::frame::doc_ctx::DocCtx;
+    use crate::gui::graph_ctx::GraphCtx;
     use crate::gui::main_window::menu_bar::{bar_wid, document_wid, menus_wid};
 
     /// The visible widget whose text starts with `label`: a menu row's text is its label, then
@@ -351,66 +165,146 @@ mod tests {
         h.frame()
     }
 
-    /// Each row raises the command its chord's handler raises, and shows that chord.
-    #[test]
-    fn each_row_raises_its_command_and_shows_its_chord() {
-        // The chord's label is the platform's own: Ctrl+S here, ⌘S on macOS.
-        let cases: [(&str, &str, Option<Shortcut>); 6] = [
-            ("File", "Save", Some(shortcuts::SAVE)),
-            ("File", "Open…", Some(shortcuts::OPEN)),
-            ("Edit", "Undo", Some(shortcuts::UNDO)),
-            ("Graph", "Run", Some(shortcuts::RUN)),
-            ("Graph", "Reset View", Some(shortcuts::RESET_VIEW)),
-            ("Graph", "Show All", None),
-        ];
-        for (menu, row, chord) in cases {
-            let mut h = SessionHarness::new(DocumentFixture::probes(1));
-            if row == "Undo" {
-                let node_id = h
-                    .session
-                    .open
-                    .document()
-                    .graphs
-                    .main()
-                    .iter()
-                    .next()
-                    .unwrap()
-                    .node_id;
-                h.apply(GraphIntent::SetSelection {
-                    to: [ItemId::Node(node_id)].into(),
-                });
-            }
-            let commands = pick(&mut h, menu, row);
-            let expected = match row {
-                "Save" => AppCommand::File(FileCommand::Save),
-                "Open…" => AppCommand::File(FileCommand::Open),
-                "Undo" => AppCommand::Undo,
-                "Run" => AppCommand::Run(RunCommand::Once),
-                "Reset View" => AppCommand::View(ViewCommand::Frame {
-                    graph: GraphId::Main,
-                    framing: Framing::Reset,
-                }),
-                _ => AppCommand::View(ViewCommand::Frame {
-                    graph: GraphId::Main,
-                    framing: Framing::ShowAll,
-                }),
-            };
-            assert_eq!(
-                format!("{commands:?}"),
-                format!("{:?}", [expected]),
-                "{menu} ▸ {row}"
-            );
-            let trigger = widget(&h, menu).id;
-            h.ui.click(trigger);
-            h.frame();
-            h.prime(2);
-            let text = widget(&h, row).text;
-            let shown = match chord {
-                Some(chord) => format!("{row} {chord}"),
-                None => row.to_owned(),
-            };
-            assert_eq!(text, shown, "{menu} ▸ {row} shows its chord");
+    /// `debug` with each `Id(..)` emptied: two fixtures mint ids of their own.
+    fn without_ids(debug: &str) -> String {
+        let mut out = String::new();
+        let mut rest = debug;
+        while let Some(start) = rest.find("Id(") {
+            let end = start + rest[start..].find(')').expect("an id closes");
+            out.push_str(&rest[..start]);
+            out.push_str("Id()");
+            rest = &rest[end + 1..];
         }
+        out.push_str(rest);
+        out
+    }
+
+    /// What an edit leaves that two fixtures with ids of their own can be compared by: how many
+    /// nodes and how many selected items the main graph holds, where its camera looks, and
+    /// which tabs are open.
+    fn shape(h: &SessionHarness) -> (usize, usize, Viewport, Vec<TabRef>) {
+        let document = h.session.open.document();
+        (
+            document.graphs.main().len(),
+            document.main_view.selected.len(),
+            document.main_view.viewport,
+            document.layout.all_tabs().collect(),
+        )
+    }
+
+    /// Each row shows its command's label and chord, greyed exactly where the command is
+    /// unavailable, and a pick raises what the command's chord raises: the same commands for the
+    /// shell, and the same document.
+    #[test]
+    fn each_row_is_its_command() {
+        // One node, selected and copied, so the selection's commands and Paste are live.
+        let fixture = || {
+            let mut h = SessionHarness::new(DocumentFixture::probes(1));
+            let node_id = h
+                .session
+                .open
+                .document()
+                .graphs
+                .main()
+                .iter()
+                .next()
+                .unwrap()
+                .node_id;
+            h.apply(GraphIntent::SetSelection {
+                to: [ItemId::Node(node_id)].into(),
+            });
+            h.prime(2);
+            h
+        };
+        let available = |h: &mut SessionHarness, command: Command| {
+            let display = h.ui.ui_mut().display();
+            let app = AppCtx::new(
+                &h.theme,
+                &h.library,
+                &h.run_state,
+                &h.shared,
+                h.preferences.run_mode,
+            );
+            let doc = DocCtx::new(app, &h.session.open);
+            let ctx = GraphCtx::of(doc, GraphId::Main, display);
+            command.availability(ctx) != Availability::Unavailable
+        };
+        let mut swept = 0;
+        for spec in &MENU_BAR {
+            for row in spec.rows {
+                let MenuRow::Command(command) = *row else {
+                    continue;
+                };
+                swept += 1;
+                let label = command.spec().label;
+                let mut picked = fixture();
+                let live = available(&mut picked, command);
+                let trigger = widget(&picked, spec.title).id;
+                picked.ui.click(trigger);
+                picked.frame();
+                picked.prime(2);
+                let shown = widget(&picked, label);
+                let text = match command.keys() {
+                    Some(keys) => format!("{label} {keys}"),
+                    None => label.to_owned(),
+                };
+                assert_eq!(shown.text, text, "{label} shows its chord");
+                assert_eq!(shown.disabled, !live, "{label} greys with its command");
+                let Some(keys) = command.keys().filter(|_| live) else {
+                    continue;
+                };
+                picked.ui.click(shown.id);
+                let by_pick = picked.frame();
+                let mut pressed = fixture();
+                pressed.ui.key(keys);
+                let by_chord = pressed.frame();
+                // An undo by its chord applies in the frame's first phase, and by its row after
+                // the pass, where the harness runs no command: its document is the chord's work.
+                if !matches!(command, Command::Undo) {
+                    assert_eq!(
+                        without_ids(&format!("{by_pick:?}")),
+                        without_ids(&format!("{by_chord:?}")),
+                        "{label}: the row and the chord raise one thing"
+                    );
+                    assert_eq!(
+                        shape(&picked),
+                        shape(&pressed),
+                        "{label}: the row and the chord edit alike"
+                    );
+                }
+            }
+        }
+        // File 7, Edit 11, View 10, Graph 13, Help 1.
+        assert_eq!(swept, 42, "every command row of the bar");
+    }
+
+    /// File lists each recent document by its file's name, newest first, and a pick asks the
+    /// shell to open that path.
+    #[test]
+    fn a_recent_document_opens_by_its_row() {
+        let mut h = SessionHarness::new(DocumentFixture::probes(1));
+        h.preferences
+            .recent
+            .note(Path::new("/work/a/first.darkroom"));
+        h.preferences
+            .recent
+            .note(Path::new("/work/b/second.darkroom"));
+        h.prime(2);
+        let file = widget(&h, "File").id;
+        h.ui.click(file);
+        h.frame();
+        h.prime(2);
+        let (first, second) = (widget(&h, "first.darkroom"), widget(&h, "second.darkroom"));
+        assert!(second.rect.min.y < first.rect.min.y, "newest first");
+        h.ui.click(first.id);
+        let commands = h.frame();
+        assert_eq!(
+            format!("{commands:?}"),
+            format!(
+                "{:?}",
+                [AppCommand::OpenAt(PathBuf::from("/work/a/first.darkroom"))]
+            )
+        );
     }
 
     /// Export offers the compound a selected instance places, and waits for one on the main
@@ -475,8 +369,8 @@ mod tests {
         assert!(!widget(&h, "Delete").disabled, "one node selected");
     }
 
-    /// At 1200 px the name's center is the bar's; at 600 px the even split, (600 − name) / 2, is
-    /// under the menus' width, so the name starts where the menus end, at its full width; at 420
+    /// At 1200 px the name's center is the bar's; at 680 px the even split, (680 − name) / 2, is
+    /// under the menus' width, so the name starts where the menus end, at its full width; at 470
     /// px it has less than that width past the menus, so it is cut to fit there, centered in it.
     #[test]
     fn the_name_centers_then_moves_past_the_menus_then_is_cut() {
@@ -497,14 +391,14 @@ mod tests {
         assert_eq!(name.center().x, bar.center().x, "centered on the window");
         assert!(name.min.x > menus.max().x, "clear of the menus");
 
-        let [bar, menus, name] = at(600);
+        let [bar, menus, name] = at(680);
         assert!((bar.size.w - full) / 2.0 < menus.size.w);
         assert!(menus.size.w + full <= bar.size.w);
         assert_eq!(menus.min.x, bar.min.x);
         assert_eq!(name.min.x, menus.max().x, "moved against the menus");
         assert_eq!(name.size.w, full, "whole");
 
-        let [bar, menus, name] = at(420);
+        let [bar, menus, name] = at(470);
         let left = bar.max().x - menus.max().x;
         assert!(left < full);
         assert_eq!(menus.min.x, bar.min.x);

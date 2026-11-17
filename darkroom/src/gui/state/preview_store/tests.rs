@@ -2,9 +2,8 @@ use imaginarium::InterleavedImage;
 
 use super::*;
 use palantir::Harness;
-use std::sync::Arc;
 
-use scenarium::{ConstValue, Node, NodeId, SpecialNode};
+use scenarium::{Binding, ConstValue, InputPort, Node, NodeId, SpecialNode};
 
 use crate::core::document::internals::DocumentFixture;
 use crate::core::preview_sink;
@@ -22,6 +21,16 @@ fn document_with_preview(node: ProgramId) -> Document {
         .main_mut()
         .insert(node.node_id(), Node::from(&func));
     fixture.document
+}
+
+/// [`document_with_preview`], its node's Display set to `stretch`.
+fn document_with_display(node: ProgramId, stretch: DisplayStretch) -> Document {
+    let mut document = document_with_preview(node);
+    document.graphs.main_mut().bindings.insert(
+        InputPort::new(node.node_id(), preview_sink::DISPLAY_PORT),
+        Binding::Const(ConstValue::Enum(stretch.name().to_owned())),
+    );
+    document
 }
 
 /// A target is chosen against a ceiling or against none; `None` is the common answer for a
@@ -70,7 +79,7 @@ fn conversion_produces_opaque_rgba8_at_the_target_size() {
     )
     .unwrap();
     assert_eq!(
-        rgba8_raster(&Image::from(rgba), UVec2::new(2, 1)),
+        rgba8_raster(&Image::from(rgba), UVec2::new(2, 1), DisplayStretch::Linear).unwrap(),
         Raster::from_srgba8(UVec2::new(2, 1), bytes).expect("2×1 RGBA8 is 8 bytes")
     );
 
@@ -80,7 +89,7 @@ fn conversion_produces_opaque_rgba8_at_the_target_size() {
     )
     .unwrap();
     assert_eq!(
-        rgba8_raster(&Image::from(rgb), UVec2::new(1, 1)),
+        rgba8_raster(&Image::from(rgb), UVec2::new(1, 1), DisplayStretch::Linear).unwrap(),
         Raster::from_srgba8(UVec2::ONE, vec![0, 0, 0, 255]).expect("1×1 RGBA8 is 4 bytes")
     );
 }
@@ -125,6 +134,7 @@ fn the_full_texture_converts_on_the_first_ask_and_is_reused_after() {
     store.publish(
         node,
         internals::image_value(USize2::new(1024, 512), ColorFormat::RGB_F32),
+        DisplayStretch::Linear,
     );
     assert!(
         store.entries.is_empty(),
@@ -241,15 +251,15 @@ fn a_previews_value_lives_exactly_as_long_as_its_node() {
         None => None,
     };
 
-    store.publish(node, int(7));
-    store.publish(other, int(9));
+    store.publish(node, int(7), DisplayStretch::Linear);
+    store.publish(other, int(9), DisplayStretch::Linear);
     store.settle(arena.ui());
     assert_eq!(shown(&store).as_deref(), Some("7"), "formatted on landing");
 
     // Held unlanded, so the newer publish comes while the older one has converted.
-    store.publish(node, int(8));
+    store.publish(node, int(8), DisplayStretch::Linear);
     let eight = store.next_converted();
-    store.publish(node, int(10));
+    store.publish(node, int(10), DisplayStretch::Linear);
     assert_eq!(
         shown(&store).as_deref(),
         Some("7"),
@@ -267,10 +277,10 @@ fn a_previews_value_lives_exactly_as_long_as_its_node() {
 
     // Removed after it converted, then published again: the first conversion
     // lands first, on the one thread, and is void.
-    store.publish(node, int(11));
+    store.publish(node, int(11), DisplayStretch::Linear);
     let eleven = store.next_converted();
     store.remove(node);
-    store.publish(node, int(13));
+    store.publish(node, int(13), DisplayStretch::Linear);
     store.land_one(arena.ui(), eleven);
     assert_eq!(
         shown(&store),
@@ -296,4 +306,63 @@ fn a_previews_value_lives_exactly_as_long_as_its_node() {
         store.entries.is_empty(),
         "deleting the node releases what it was showing"
     );
+}
+
+/// A preview whose node's Display moves converts its image again under the new stretch, once and
+/// with no run: a reconcile that finds it converting waits, and one that finds it current queues
+/// nothing. A flat image, which Auto finds nothing to stretch in, keeps its source, so moving back
+/// to Linear converts it again.
+#[test]
+fn a_moved_display_converts_the_image_again_once() {
+    let arena = Harness::builder(UVec2::ONE).mono().build();
+    let mut store = PreviewStore::new(wake::internals::noop());
+    let node = ProgramId::from(NodeId::unique());
+    // A dim 4 × 4 ramp, 0.01 to 0.025 in steps of 0.001, which the stretch can place.
+    let ramp: Vec<f32> = (0..16).map(|v| 0.01 + v as f32 * 0.001).collect();
+    let ramp = InterleavedImage::new_with_data(
+        InterleavedDesc::new(USize2::new(4, 4), ColorFormat::MONO_F32),
+        ramp.iter().flat_map(|v| v.to_ne_bytes()).collect(),
+    )
+    .unwrap();
+    let stretch_of = |store: &PreviewStore| match &store.entries[&node] {
+        StoredContent::Image(image) => Ok(image.stretch),
+        StoredContent::Unstretched(unstretched) => Err(unstretched.stretch),
+        other => panic!("{other:?} keeps no image"),
+    };
+
+    store.publish(
+        node,
+        DynamicValue::from_custom(Image::from(ramp)),
+        DisplayStretch::Linear,
+    );
+    store.settle(arena.ui());
+    let published = store.publishes();
+    let auto = document_with_display(node, DisplayStretch::Auto);
+    store.reconcile(&auto);
+    assert_eq!(store.publishes(), published + 1, "the move converts again");
+    store.reconcile(&auto);
+    assert_eq!(store.publishes(), published + 1, "converting, it waits");
+    store.settle(arena.ui());
+    store.reconcile(&auto);
+    assert_eq!(
+        store.publishes(),
+        published + 1,
+        "current, it queues nothing"
+    );
+    assert_eq!(stretch_of(&store), Ok(DisplayStretch::Auto));
+
+    store.publish(
+        node,
+        internals::image_value(USize2::new(4, 4), ColorFormat::MONO_F32),
+        DisplayStretch::Auto,
+    );
+    store.settle(arena.ui());
+    assert_eq!(stretch_of(&store), Err(DisplayStretch::Auto));
+    assert!(matches!(
+        store.entries[&node].message(),
+        Some(PreviewMessage::Failure(DrawablePreviewError::Stretch(_)))
+    ));
+    store.reconcile(&document_with_display(node, DisplayStretch::Linear));
+    store.settle(arena.ui());
+    assert_eq!(stretch_of(&store), Ok(DisplayStretch::Linear));
 }

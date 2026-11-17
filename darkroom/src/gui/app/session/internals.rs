@@ -57,7 +57,13 @@ struct SessionFrame<'a> {
 
 impl App for SessionFrame<'_> {
     fn record(&mut self, _: WindowToken, ui: &mut Ui) {
-        let ctx = AppCtx::new(self.theme, self.library, self.run_state, self.shared);
+        let ctx = AppCtx::new(
+            self.theme,
+            self.library,
+            self.run_state,
+            self.shared,
+            self.preferences.run_mode,
+        );
         let mut stage = Stage {
             ctx,
             out: &mut *self.requests,

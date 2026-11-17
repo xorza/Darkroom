@@ -8,6 +8,7 @@ use scenarium::{CompoundDigest, CompoundId, FuncId, GraphSet, Library, SpecialNo
 
 use crate::core::shared_library::SharedLibrary;
 
+use crate::gui::pane::graph_ui::gesture::new_node_ui::landing::{DroppedEnd, Landing};
 use crate::gui::pane::graph_ui::gesture::new_node_ui::node_palette::PaletteEntry;
 
 /// One palette row by identity, so the list outlives the borrow of the
@@ -23,6 +24,13 @@ pub(super) enum PaletteRow {
         digest: CompoundDigest,
     },
     Inputs,
+}
+
+/// One listed row: its entry, and for a dropped wire the port of the new node it lands on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Listed {
+    pub(super) row: PaletteRow,
+    pub(super) landing: Option<Landing>,
 }
 
 /// What the palette's rows are read from: the library's funcs, the document's compounds and the
@@ -74,7 +82,7 @@ impl PaletteRow {
 /// buffers keep their capacity across filterings.
 #[derive(Debug, Default)]
 pub(super) struct PaletteRows {
-    rows: Vec<PaletteRow>,
+    rows: Vec<Listed>,
     /// One range of `rows` per run, in order.
     runs: Vec<Range<usize>>,
     /// Whether each run is a category under its caption: the query was empty.
@@ -120,23 +128,36 @@ impl Rank {
 }
 
 impl PaletteRows {
-    /// Keep the `entries` that `query_lc` matches, in the order the palette lists them.
+    /// Keep the `entries` that `query_lc` matches, in the order the palette lists them. For a
+    /// `dropped` wire, one row for each port of an entry that takes it, in the port's declared
+    /// order, and none for an entry with no such port, as Blender's link-drag search lists
+    /// sockets rather than nodes.
     pub(super) fn refilter<'a>(
         &mut self,
         sources: PaletteSources<'a>,
         entries: impl Iterator<Item = PaletteEntry<'a>>,
         query_lc: &str,
+        dropped: Option<DroppedEnd<'_>>,
     ) {
         self.rows.clear();
         self.runs.clear();
         self.grouped = query_lc.is_empty();
-        self.rows.extend(
-            entries
-                .filter(|entry| Rank::of(*entry, query_lc).is_some())
-                .map(PaletteEntry::row),
-        );
-        let entry = |row: &PaletteRow| {
-            row.entry(sources)
+        for entry in entries.filter(|entry| Rank::of(*entry, query_lc).is_some()) {
+            let row = entry.row();
+            match dropped {
+                None => self.rows.push(Listed { row, landing: None }),
+                Some(dropped) => dropped.each_landing(sources.library, entry.ports(), |landing| {
+                    self.rows.push(Listed {
+                        row,
+                        landing: Some(landing),
+                    });
+                }),
+            }
+        }
+        let entry = |listed: &Listed| {
+            listed
+                .row
+                .entry(sources)
                 .expect("a row just filtered from its sources resolves in them")
         };
         // Case-insensitive by comparison, not by key: a folded key per row would allocate a
@@ -167,7 +188,7 @@ impl PaletteRows {
     }
 
     /// Each run's rows, in order, with the index of its first row in the whole list.
-    pub(super) fn runs(&self) -> impl Iterator<Item = (usize, &[PaletteRow])> {
+    pub(super) fn runs(&self) -> impl Iterator<Item = (usize, &[Listed])> {
         self.runs
             .iter()
             .map(|run| (run.start, &self.rows[run.clone()]))
@@ -184,7 +205,7 @@ impl PaletteRows {
     }
 
     /// The row at `idx` of the whole list.
-    pub(super) fn get(&self, idx: usize) -> Option<PaletteRow> {
+    pub(super) fn get(&self, idx: usize) -> Option<Listed> {
         self.rows.get(idx).copied()
     }
 }

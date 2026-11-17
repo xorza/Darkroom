@@ -47,14 +47,14 @@ fn memory_label_leads_with_the_process_then_sums_both_cache_pools() {
     );
 }
 
-/// The readout reserves each figure's widest value, so the line keeps its width as the zoom and
-/// the memory change their digit counts: 10% against 500%, and 1.0 KiB against 1023.9 MiB.
+/// The readout reserves each figure's widest value, so the line keeps its width as the memory
+/// changes its digit count: 1.0 KiB against 1023.9 MiB.
 #[test]
 fn the_readout_holds_its_width_as_its_figures_change() {
     let theme = Theme::default();
     let mut h = Harness::new(UVec2::new(1600, 100));
     let root = WidgetId::from_hash("readout_root");
-    let mut width = |zoom: f32, process: u64, cached: u64| {
+    let width = |h: &mut Harness, process: u64, cached: u64| {
         h.frame(|ui| {
             Panel::hstack().id(root).size(SizeSpec::HUG).show(ui, |ui| {
                 Readout {
@@ -62,7 +62,6 @@ fn the_readout_holds_its_width_as_its_figures_change() {
                         node_count: 19,
                         selected_count: 1,
                     },
-                    zoom,
                     ram: Some(MemoryLabel { process, cached }),
                 }
                 .show(ui, &theme);
@@ -70,9 +69,26 @@ fn the_readout_holds_its_width_as_its_figures_change() {
         });
         h.rect(root).expect("the readout arranged").size.w
     };
-    let short = width(0.1, 1024, 1024);
-    let long = width(5.0, 1_073_636_966, 1_073_636_966);
+    let cells = |h: &Harness| ["Memory", "Cache"].map(|word| h.rect(cell_wid(word)).unwrap());
+    let short = width(&mut h, 1024, 1024);
+    let short_cells = cells(&h);
+    let long = width(&mut h, 1_073_636_966, 1_073_636_966);
     assert_eq!(short, long);
+    // Each cell, and so the hairline that starts it, stands where it stood.
+    assert_eq!(short_cells, cells(&h));
+}
+
+/// The bare canvas's hints name each gesture's keys, then what it does.
+#[test]
+fn the_gesture_line_names_each_gestures_keys_and_what_it_does() {
+    let line = GestureLine(&[
+        CanvasGesture::NewNode,
+        CanvasGesture::Breaker(PointerButton::Right),
+    ]);
+    assert_eq!(
+        line.to_string(),
+        "double-click Add a node \u{b7} right-drag Cut the wires crossed"
+    );
 }
 
 /// The graph's line gives the bar something to say on every frame, so it is recorded on an
@@ -223,10 +239,10 @@ fn the_run_lines_link_selects_and_frames_the_cause() {
     assert!(
         matches!(
             commands[..],
-            [AppCommand::View(ViewCommand::Frame {
+            [AppCommand::Pane {
                 graph: GraphId::Main,
-                framing: Framing::ShowSelected
-            })]
+                ask: PaneAsk::Frame(Framing::Selection)
+            }]
         ),
         "{commands:?}"
     );
@@ -237,7 +253,8 @@ fn the_run_lines_link_selects_and_frames_the_cause() {
     );
 
     let before = h.session.open.document().main_view.viewport;
-    h.session.frame_graph(GraphId::Main, Framing::ShowSelected);
+    h.session
+        .ask_pane(GraphId::Main, PaneAsk::Frame(Framing::Selection));
     h.frame();
     h.drain();
     assert_ne!(
@@ -290,10 +307,10 @@ fn the_run_lines_link_enters_the_compound_of_its_cause() {
     assert!(
         matches!(
             commands[..],
-            [AppCommand::View(ViewCommand::Frame {
+            [AppCommand::Pane {
                 graph: framed,
-                framing: Framing::ShowSelected
-            })] if framed == graph
+                ask: PaneAsk::Frame(Framing::Selection)
+            }] if framed == graph
         ),
         "{commands:?}"
     );

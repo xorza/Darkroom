@@ -11,8 +11,8 @@ use lumos::{
     ProgressMonitor, SigmaThreshold, WriteError,
 };
 use scenarium::{
-    DataType, DynamicValue, Func, FuncId, InputDecl, Invocation, InvokeError, Library, OutputDecl,
-    async_lambda,
+    DataType, DynamicValue, FloatSpan, Func, FuncId, InputDecl, Invocation, InvokeError, Library,
+    OutputDecl, async_lambda,
 };
 
 use crate::astro::masters::{MASTERS_DATA_TYPE, Masters};
@@ -184,9 +184,9 @@ pub(crate) fn register(library: &mut Library) {
             InputDecl::required("Sigma", DataType::Float)
                 .description(
                     "Hot-pixel defect threshold: a master-dark pixel more than this many sigma \
-                     above its color's dark background is a defect. It must be finite and \
-                     at least 1.",
+                     above its color's dark background is a defect.",
                 )
+                .float_span(FloatSpan::at_least(1.0))
                 .default(f64::from(SigmaThreshold::DEFAULT.get())),
         )
         .input(

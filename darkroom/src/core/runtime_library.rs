@@ -56,7 +56,7 @@ fn compose(model_paths: &MlModelPaths, previews: &Arc<PreviewSink>) -> Scenarium
         star_removal: absolute(&model_paths.star_removal),
     };
     let mut library = ScenariumLibrary::default();
-    library.add(preview_sink::func(Arc::clone(previews)));
+    preview_sink::register(&mut library, Arc::clone(previews));
     library.merge(math_library());
     library.merge(system_library());
     library.merge(worker_events_library());
@@ -94,14 +94,15 @@ mod tests {
             astro_library(&paths),
         ];
         let library = compose(&paths, &Arc::default());
-        let preview = 1;
+        // The preview func, and the enum type of its Display.
+        let (preview, display) = (1, 1);
         assert_eq!(
             library.iter().count(),
             preview + parts.iter().map(|part| part.iter().count()).sum::<usize>()
         );
         assert_eq!(
             library.type_count(),
-            parts.iter().map(Library::type_count).sum::<usize>()
+            display + parts.iter().map(Library::type_count).sum::<usize>()
         );
     }
 

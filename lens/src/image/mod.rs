@@ -3,6 +3,7 @@
 //! port passes.
 
 mod codec;
+pub(crate) mod display_stretch;
 mod format;
 pub(crate) mod nodes;
 
@@ -11,11 +12,14 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 
 use common::USize2;
-use imaginarium::{ChannelLayout, PlanarDesc, PlanarImage};
+use glam::USizeVec2;
+use imaginarium::{ChannelLayout, PixelSample, PlanarDesc, PlanarImage};
 use lumos::{
     FrameDescError, FrameGain, ImageMetadata, LinearImage, LinearParts, PixelFlags, frame_desc,
 };
 use scenarium::{CustomTypeId, CustomValue, DataType, DynamicValue, InputDecl, RamUsage};
+
+use crate::image::display_stretch::{DisplayStretch, DisplayStretchError};
 
 pub const IMAGE_TYPE_ID: CustomTypeId =
     CustomTypeId::literal("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2");
@@ -138,13 +142,43 @@ impl Image {
         }
     }
 
-    /// The `RGBA_U8` preview of this image at `size` — see [`imaginarium::Preview`] — read from
-    /// the pixels where they lie, planes without interleaving them first.
-    pub fn preview_rgba8(&self, size: USize2) -> imaginarium::InterleavedImage {
+    /// The `RGBA_U8` preview of this image at `size` — see [`imaginarium::Preview`] — through
+    /// `stretch`. Linear reads the pixels where they lie, planes without interleaving them
+    /// first; Auto stretches a planar copy of the whole image, so its statistics are the
+    /// image's own at any `size`, and the card and the viewer agree.
+    ///
+    /// # Errors
+    ///
+    /// Under [`DisplayStretch::Auto`] alone: [`DisplayStretchError::Frame`] for an image with a
+    /// side past a `lumos` frame's, and [`DisplayStretchError::Stretch`] for one whose
+    /// background the stretch cannot place.
+    pub fn preview_rgba8(
+        &self,
+        size: USize2,
+        stretch: DisplayStretch,
+    ) -> Result<imaginarium::InterleavedImage, DisplayStretchError> {
         let preview = imaginarium::Preview::new(size);
+        match stretch {
+            DisplayStretch::Linear => Ok(match &self.pixels {
+                Pixels::Interleaved(image) => preview.to_rgba8(image),
+                Pixels::Planar(planes) => preview.planes_to_rgba8(planes),
+            }),
+            DisplayStretch::Auto => {
+                let mut frame = self.to_planar().map_err(DisplayStretchError::Frame)?;
+                DisplayStretch::AUTO
+                    .apply(&mut frame)
+                    .map_err(DisplayStretchError::Stretch)?;
+                Ok(preview.planes_to_rgba8(&LinearParts::from(frame).pixels))
+            }
+        }
+    }
+
+    /// The pixel at `pos` in the samples' own type, read where they lie, or `None` outside the
+    /// image: planes read as `f32`, as they hold it.
+    pub fn sample(&self, pos: USizeVec2) -> Option<PixelSample> {
         match &self.pixels {
-            Pixels::Interleaved(image) => preview.to_rgba8(image),
-            Pixels::Planar(planes) => preview.planes_to_rgba8(planes),
+            Pixels::Interleaved(image) => image.sample(pos),
+            Pixels::Planar(planes) => planes.sample(pos),
         }
     }
 

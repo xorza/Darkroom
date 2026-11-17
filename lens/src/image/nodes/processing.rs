@@ -6,7 +6,7 @@ use scenarium::FuncId;
 use scenarium::Invocation;
 use scenarium::async_lambda;
 use scenarium::{ConstValue, DataType, DynamicValue, InvokeError};
-use scenarium::{Func, InputDecl, Library, OutputDecl};
+use scenarium::{FloatSpan, Func, InputDecl, Library, OutputDecl};
 use strum::VariantNames;
 
 use crate::image::format::{CONVERSION_FORMAT_DATATYPE, ConversionFormat};
@@ -58,7 +58,8 @@ fn register_brightness(library: &mut Library) {
         .input(
             2,
             InputDecl::required("Brightness", DataType::Float)
-                .description("Brightness offset in [−1, 1]. 0 leaves it unchanged.")
+                .description("Brightness offset. 0 leaves it unchanged.")
+                .float_span(FloatSpan::between(-1.0, 1.0))
                 .default(0.0),
         )
         .input(
@@ -196,7 +197,8 @@ fn register_blend(library: &mut Library) {
         .input(
             4,
             InputDecl::required("Alpha", DataType::Float)
-                .description("Blend strength in [0, 1]. 1 is full source.")
+                .description("Blend strength. 1 is full source.")
+                .float_span(FloatSpan::between(0.0, 1.0))
                 .default(1.0),
         )
         .input(5, clamp_input())

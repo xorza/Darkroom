@@ -6,7 +6,7 @@
 //! canvas. Everything below is a pure function of sizes and viewports, so it is tested
 //! without the widget tree.
 
-use glam::Vec2;
+use glam::{USizeVec2, UVec2, Vec2};
 use palantir::{Rect, Size};
 
 use crate::core::document::viewport::Viewport;
@@ -25,6 +25,23 @@ pub(super) fn draw_rect(image: Vec2, v: Viewport) -> Rect {
         min: v.pan,
         size: Size::new(image.x * v.zoom, image.y * v.zoom),
     }
+}
+
+/// The source pixel painted at pane-local `at`, for an image of `native` pixels painted at its
+/// 1:1 logical footprint `image` through `v`, or `None` off the image. Read through `at`'s share
+/// of the drawn rect, so a texture downscaled below its source still names the source's pixel.
+pub(super) fn native_pixel(at: Vec2, image: Vec2, v: Viewport, native: UVec2) -> Option<USizeVec2> {
+    let rect = draw_rect(image, v);
+    let share = (at - rect.min) / Vec2::new(rect.size.w, rect.size.h);
+    if !(share.cmpge(Vec2::ZERO).all() && share.cmplt(Vec2::ONE).all()) {
+        return None;
+    }
+    // A share just under one can round up to `native` in f32: the last pixel is the one under it.
+    let pixel = (share * native.as_vec2())
+        .floor()
+        .as_uvec2()
+        .min(native - UVec2::ONE);
+    Some(pixel.as_usizevec2())
 }
 
 /// Aspect-preserving fit of `image` (its 1:1 logical footprint) in `pane`

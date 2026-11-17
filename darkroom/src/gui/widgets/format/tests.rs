@@ -1,7 +1,10 @@
+use glam::UVec2;
+
 use crate::gui::widgets::format;
 use crate::gui::widgets::format::bytes::Bytes;
 use crate::gui::widgets::format::elapsed::Elapsed;
 use crate::gui::widgets::format::percent::Percent;
+use crate::gui::widgets::format::pixel_size::PixelSize;
 
 /// Each unit switch on both sides, and the carry that shows a value rounding
 /// up to the next unit's 1 in that unit. The node header measures these
@@ -80,6 +83,16 @@ fn percent_reads_whole_then_two_significant_digits() {
     for (factor, expected) in cases {
         assert_eq!(Percent::new(factor).to_string(), expected, "{factor}");
     }
+}
+
+/// A size reads its width, the multiplication sign and its height, a space either side.
+#[test]
+fn a_pixel_size_reads_width_by_height() {
+    assert_eq!(
+        PixelSize(UVec2::new(4144, 2822)).to_string(),
+        "4144 \u{d7} 2822"
+    );
+    assert_eq!(PixelSize(UVec2::new(1, 0)).to_string(), "1 \u{d7} 0");
 }
 
 /// A node's name stands as it is; a cleared one reads "Unnamed" on every surface.

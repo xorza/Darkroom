@@ -12,6 +12,7 @@ mod ops;
 mod planar;
 
 pub use crate::color::color_format::{ChannelCount, ColorFormat, SampleType};
+pub use crate::color::pixel_sample::{Channels, PixelSample};
 pub use crate::error::{ByteLenError, CodecError, DescError, PlanesError, TiffSampleType};
 
 pub use crate::codec::raster_format::{RasterFormat, SUPPORTED_EXTENSIONS};

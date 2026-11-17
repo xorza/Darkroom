@@ -138,12 +138,12 @@ fn every_preset_input_takes_a_pick_or_its_builders_config() {
         assert_eq!(input.name, name, "{node}");
         assert!(input.required && !input.const_only, "{node} {name}");
         assert!(
-            !input.value_variants.is_empty(),
+            !input.domain.variants().is_empty(),
             "{node} {name} offers picks"
         );
         assert_eq!(
             input.default_value.as_ref(),
-            Some(&input.value_variants[0].value),
+            Some(&input.domain.variants()[0].value),
             "{node} {name} starts on its first pick"
         );
         let built = lib.by_name(builder).unwrap();

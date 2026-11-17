@@ -9,8 +9,9 @@ use common::ErrorChain;
 use lens::MlModelPaths;
 use scenarium::DiskStore;
 use scenarium::{CompiledGraph, Compiler, DynamicValue, WorkerExited, WorkerReport};
-use scenarium::{GraphSet, NodeAddr, ProgramId};
+use scenarium::{GraphSet, InstancePath, NodeAddr, ProgramId};
 
+use crate::core::document::Document;
 use crate::core::io::cache;
 use crate::core::runtime_host::error::NoCompiledWork;
 use crate::core::runtime_library::RuntimeLibrary;
@@ -190,6 +191,24 @@ impl RuntimeHost {
         self.dispatch(|worker| {
             worker.install(compiled)?;
             worker.run_sinks()
+        });
+    }
+
+    /// Compile `document` and evaluate the upstream cone of each preview it runs on change,
+    /// delivering their outputs: the previews alone are seeds, so no other sink runs. Nothing
+    /// reaches the worker when the document runs none.
+    pub(crate) fn run_previews(&mut self, document: &Document) {
+        let compiled = self.compile(&document.graphs);
+        let seeds: Vec<ProgramId> = compiled
+            .program_ids_within(InstancePath::MAIN)
+            .filter(|&program_id| document.runs_preview(program_id))
+            .collect();
+        if seeds.is_empty() {
+            return;
+        }
+        self.dispatch(|worker| {
+            worker.install(compiled)?;
+            worker.run_nodes(seeds)
         });
     }
 

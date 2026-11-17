@@ -1,7 +1,7 @@
 //! The document's share of a frame's requests.
 
 use palantir::DockOperation;
-use scenarium::{CompoundId, GraphId, InstancePath};
+use scenarium::{CompoundId, GraphId, InstancePath, ProgramId};
 
 use crate::core::document::tab_ref::TabRef;
 use crate::core::edit::compound_intent::CompoundIntent;
@@ -91,6 +91,16 @@ impl DocumentQueue {
     pub(crate) fn push_enter(&mut self, compound: CompoundId, through: Option<InstancePath>) {
         self.requests
             .push(DocumentRequest::Enter { compound, through });
+    }
+
+    /// Queue bringing `tab` into view.
+    pub(crate) fn push_show(&mut self, tab: TabRef) {
+        self.requests.push(DocumentRequest::Show(tab));
+    }
+
+    /// Queue making `program_id` the active preview, its viewer shown.
+    pub(crate) fn push_show_preview(&mut self, program_id: ProgramId) {
+        self.requests.push(DocumentRequest::ShowPreview(program_id));
     }
 
     /// Take everything queued, in the order raised.

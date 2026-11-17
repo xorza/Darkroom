@@ -19,6 +19,7 @@ use crate::core::document::item_id::ItemId;
 use crate::core::document::route::Route;
 use crate::core::document::tab_ref::TabRef;
 use crate::core::document::tie::TieAngle;
+use crate::core::document::view_target::ViewTarget;
 use crate::core::io::document::document_format::DOCUMENT_ENTRY;
 use crate::core::preview_sink;
 use crate::core::runtime_library::RuntimeLibrary;
@@ -47,12 +48,12 @@ fn document_round_trips_in_either_format() {
     let primary = document.layout.primary().id();
     for tab in [
         TabRef::Preferences,
-        TabRef::ImageViewer(ProgramId::from(viewer)),
+        TabRef::Viewer(ViewTarget::Node(ProgramId::from(viewer))),
     ] {
         document.layout.apply(DockOperation::OpenTab { tab });
     }
     document.layout.apply(DockOperation::MoveTab {
-        tab: TabRef::ImageViewer(ProgramId::from(viewer)),
+        tab: TabRef::Viewer(ViewTarget::Node(ProgramId::from(viewer))),
         to: DockDrop::Split {
             group: primary,
             side: SplitSide::Right,

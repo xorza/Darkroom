@@ -7,12 +7,10 @@
 //!   resolved once when the context is made, so every accessor stays a field read. Refused: one
 //!   context that is both, which fixes "the graph" for the whole window.
 
-use std::collections::BTreeSet;
-
 use scenarium::{GraphId, Library};
 
 use crate::core::document::Document;
-use crate::core::document::item_id::ItemId;
+use crate::core::io::preferences::run_mode::RunMode;
 use crate::core::open_document::OpenDocument;
 use crate::core::shared_library::SharedLibrary;
 use crate::gui::frame::app_ctx::AppCtx;
@@ -58,11 +56,6 @@ impl<'a> DocCtx<'a> {
         self.document().active
     }
 
-    /// The active graph's committed selection: what a menu command and the status bar read.
-    pub(crate) fn selected(self) -> &'a BTreeSet<ItemId> {
-        &self.document().view(self.active()).selected
-    }
-
     pub(crate) const fn theme(self) -> &'a Theme {
         self.app.theme()
     }
@@ -78,5 +71,10 @@ impl<'a> DocCtx<'a> {
     /// The library folder's shared compounds, as the last scan read them.
     pub(crate) const fn shared(self) -> &'a SharedLibrary {
         self.app.shared()
+    }
+
+    /// When a run starts unasked.
+    pub(crate) const fn run_mode(self) -> RunMode {
+        self.app.run_mode()
     }
 }

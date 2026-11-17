@@ -10,6 +10,7 @@ use scenarium::{GraphId, Library, NodeId};
 
 use crate::core::document::internals::{self, DocumentFixture};
 use crate::core::document::item_id::ItemId;
+use crate::core::io::preferences::run_mode::RunMode;
 use crate::core::open_document::OpenDocument;
 use crate::core::shared_library::SharedLibrary;
 use crate::core::wake;
@@ -97,7 +98,7 @@ impl GraphCtxFixture {
             shared,
             theme,
         } = self;
-        let app = AppCtx::new(theme, library, run_state, shared);
+        let app = AppCtx::new(theme, library, run_state, shared, RunMode::default());
         GraphCtx::of(DocCtx::new(app, open), graph, display)
     }
 }

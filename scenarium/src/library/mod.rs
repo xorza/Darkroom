@@ -27,9 +27,10 @@ use crate::data::data_type::custom_type::{CustomType, CustomTypeId};
 use crate::data::data_type::enum_type::{EnumId, EnumType};
 use crate::data::data_type::file_kind::{FileKind, FileKindId};
 use crate::data::data_type::{DataType, Strictness};
+use crate::graph::error::BindingRejection;
 use crate::graph::func::Func;
 use crate::graph::identity::FuncId;
-use crate::graph::ports::InputDecl;
+use crate::graph::ports::{InputDecl, OutputDecl};
 use crate::graph::type_names::TypeRef;
 use crate::library::func_redirect::{FuncRedirect, MAX_REDIRECTS};
 
@@ -320,7 +321,7 @@ impl Library {
                 let (DataType::Enum(enum_id), Some(ConstValue::Enum(name)), true) = (
                     input.data_type,
                     &input.default_value,
-                    input.value_variants.is_empty(),
+                    input.domain.variants().is_empty(),
                 ) else {
                     continue;
                 };
@@ -337,7 +338,7 @@ impl Library {
     }
 
     /// Whether an authored `Const` literal `value` may sit on `input`: the `Const` half of
-    /// [`Graph::admit`](crate::Graph::admit), [`Self::wire_satisfies`] the `Wire` half. The
+    /// [`Graph::admit`](crate::Graph::admit), [`Self::admit_wire`] the `Wire` half. The
     /// registry contributes only the enum arm, a variant *name*, which a constant of an enum the
     /// library does not register keeps unchecked; the rest is [`InputDecl::accepts_const`].
     pub(crate) fn const_satisfies(&self, input: &InputDecl, value: &ConstValue) -> bool {
@@ -347,9 +348,35 @@ impl Library {
         })
     }
 
-    /// Whether an output of type `source` may feed an input of type `input`: the `Wire` half of
-    /// [`Graph::admit`](crate::Graph::admit). The registry contributes the file arm, whether the
-    /// source's file kind is within the input's; the rest is [`DataType::compatible_with`].
+    /// Whether a wire from `output`, which holds only a constant when `output_is_const`, may
+    /// feed `input`: of a type the input accepts, into an input that is not const-only unless
+    /// the output holds a constant. The one rule [`Graph::admit_onto`](crate::Graph::admit_onto)
+    /// holds a wire to, which an editor also asks of a node it has not placed yet.
+    ///
+    /// # Errors
+    ///
+    /// [`BindingRejection::WiredConstOnly`] for a const-only input fed by an output that holds
+    /// more than a constant, and [`BindingRejection::WireMismatch`] for a type the input does not
+    /// accept.
+    pub fn admit_wire(
+        &self,
+        input: &InputDecl,
+        output: &OutputDecl,
+        output_is_const: bool,
+    ) -> Result<(), BindingRejection> {
+        if input.const_only && !output_is_const {
+            return Err(BindingRejection::WiredConstOnly);
+        }
+        if self.wire_satisfies(input.data_type, output.data_type) {
+            Ok(())
+        } else {
+            Err(BindingRejection::WireMismatch)
+        }
+    }
+
+    /// Whether an output of type `source` may feed an input of type `input`: the type half of
+    /// [`Self::admit_wire`]. The registry contributes the file arm, whether the source's file
+    /// kind is within the input's; the rest is [`DataType::compatible_with`].
     pub(crate) fn wire_satisfies(&self, input: DataType, source: DataType) -> bool {
         input.compatible_with(source, |source, input| self.file_kind_within(source, input))
     }

@@ -9,9 +9,12 @@ use lens::MlModelPaths;
 use crate::core::document::Document;
 use crate::core::document::graph_revision::GraphRevision;
 use crate::core::document::graph_view::NodePlacement;
+use crate::core::document::inspect_target::InspectTarget;
 use crate::core::document::internals::{DocumentFixture, insert_compound};
 use crate::core::document::item_id::ItemId;
 use crate::core::document::load_report::{DocumentRepair, ForeignPath};
+use crate::core::document::tab_ref::TabRef;
+use crate::core::document::view_target::ViewTarget;
 use crate::core::document::viewport::Viewport;
 use crate::core::edit::document_queue::DocumentQueue;
 use crate::core::edit::edit_facts::{EditFacts, Touched};
@@ -43,12 +46,29 @@ fn load_returns_the_document_error() {
     ));
 }
 
+/// An empty document holds the main graph's tab alone; the one File ▸ New and an empty launch
+/// open holds the workspace, the viewer over the inspector beside the graph, which keeps the
+/// focus.
 #[test]
-fn empty_document_has_the_main_graph_tab() {
+fn a_new_document_opens_on_the_workspace() {
     let open = OpenDocument::default();
-
     assert!(open.path.is_none());
     assert_eq!(open.document.layout.all_tabs().count(), 1);
+
+    let open = OpenDocument::new_document();
+    let layout = &open.document.layout;
+    let main = TabRef::Graph(GraphId::Main);
+    assert_eq!(
+        layout.all_tabs().collect::<Vec<_>>(),
+        [
+            main,
+            TabRef::Viewer(ViewTarget::Active),
+            TabRef::Inspector(InspectTarget::Selection)
+        ]
+    );
+    assert_eq!(layout.groups().count(), 3);
+    assert_eq!(layout.focused(), layout.find_tab(main).unwrap().group);
+    assert!(!open.is_dirty(), "a layout is no edit");
 }
 
 /// A remembered document comes back as the open one; none remembered is an
@@ -779,6 +799,57 @@ fn wiring_the_library_refuses_is_removed_at_load() {
             rejection: SubscriptionRejection::UndeclaredEvent.into(),
         }
     );
+}
+
+/// A constant outside its input's span, as a file holds it when its func's span narrowed, loads
+/// as a ghost constant, reported, as any constant the gate refuses does; one inside it loads
+/// untouched.
+#[test]
+fn a_constant_outside_its_span_loads_as_a_ghost() {
+    use scenarium::FloatSpan;
+
+    let dir = TempDir::new("darkroom-open-document-span");
+    let path = dir.join("spanned.darkroom");
+    let blend = internals::stub_func(FuncId::unique(), "blend")
+        .sink()
+        .input(
+            1,
+            InputDecl::optional("Alpha", DataType::Float).float_span(FloatSpan::between(0.0, 1.0)),
+        )
+        .build();
+    let mut library = Library::default();
+    library.add(blend.clone());
+    let node = NodeId::unique();
+    let alpha = InputPort::new(node, PortId::new(1));
+    let load = |value: f64| {
+        let mut graph = Graph::default();
+        graph.insert(node, Node::from(&blend));
+        graph.set_input_binding(alpha, Binding::Const(ConstValue::Float(value)));
+        document::save(
+            &Document::from(GraphSet::from(graph)),
+            &Library::default(),
+            &path,
+            SavedPaths::Relative,
+        )
+        .unwrap();
+        OpenDocument::load(path.clone(), &library).unwrap()
+    };
+
+    let inside = load(0.5);
+    assert!(inside.report.is_empty(), "{:?}", inside.report);
+    let outside = load(1.7);
+    assert_eq!(
+        outside.report.repairs,
+        [DocumentRepair::Graph {
+            graph: GraphId::Main,
+            repair: Repair::GhostedBinding {
+                port: alpha,
+                binding: Binding::Const(ConstValue::Float(1.7)),
+                rejection: BindingRejection::ConstMismatch.into(),
+            },
+        }]
+    );
+    assert!(outside.open.dirty);
 }
 
 /// The sample project opens on the editor's own library with nothing to repair, as plain RON, its

@@ -1,6 +1,6 @@
 use super::*;
 use scenarium::internals::func_invoker::FuncInvoker;
-use scenarium::{AnyState, ConstValue, CtxManager, NodeId, SharedAnyState};
+use scenarium::{AnyState, CtxManager, NodeId, SharedAnyState};
 
 #[test]
 fn the_declaration_is_a_sink_that_produces_nothing() {
@@ -8,7 +8,7 @@ fn the_declaration_is_a_sink_that_produces_nothing() {
     assert!(func.sink(), "an ambient sinks run must reach it");
     assert!(func.outputs().is_empty());
     assert!(func.events().is_empty());
-    assert_eq!(func.inputs().len(), 1);
+    assert_eq!(func.inputs().len(), 2);
     assert!(
         !func.inputs()[0].required,
         "an unwired preview must not read as a missing input"
@@ -18,6 +18,16 @@ fn the_declaration_is_a_sink_that_produces_nothing() {
         "a preview exists to watch an upstream wire"
     );
     assert_eq!(func.inputs()[0].data_type, DataType::Any);
+    // Display is a choice of the picture, set where the node sits, never wired.
+    let display = &func.inputs()[1];
+    assert_eq!(display.name, "Display");
+    assert_eq!(display.data_type, DISPLAY_STRETCH_DATA_TYPE);
+    assert!(display.const_only);
+    assert!(!display.required);
+    assert_eq!(
+        display.default_value,
+        Some(ConstValue::Enum("Linear".to_owned()))
+    );
     assert!(is_func(func.id()));
 }
 

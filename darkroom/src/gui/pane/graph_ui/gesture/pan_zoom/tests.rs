@@ -135,3 +135,47 @@ fn the_canvas_draws_a_fractional_pan_on_whole_physical_px() {
         "the stored camera stays exact"
     );
 }
+
+/// A step lands on the next rung of `2^(n/2)`, from a rung and from between two, stops at the
+/// range's ends, and holds the content at the pane's center.
+#[test]
+fn a_zoom_step_lands_on_the_next_rung() {
+    use std::f32::consts::{FRAC_1_SQRT_2, SQRT_2};
+
+    let pane = Vec2::new(800.0, 600.0);
+    let at = |zoom: f32| Viewport {
+        pan: Vec2::new(30.0, -20.0),
+        zoom,
+    };
+    let cases = [
+        (1.0, ZoomStep::In, Some(SQRT_2)),
+        // Between two rungs: up to the next, not by a factor.
+        (1.2, ZoomStep::In, Some(SQRT_2)),
+        (1.2, ZoomStep::Out, Some(1.0)),
+        (SQRT_2, ZoomStep::Out, Some(1.0)),
+        (1.0, ZoomStep::Out, Some(FRAC_1_SQRT_2)),
+        // A hair under a rung counts as on it.
+        (0.9995, ZoomStep::In, Some(SQRT_2)),
+        // The ends of the range close the ladder.
+        (4.0, ZoomStep::In, Some(5.0)),
+        (5.0, ZoomStep::In, None),
+        (0.125, ZoomStep::Out, Some(0.1)),
+        (0.1, ZoomStep::Out, None),
+    ];
+    for (zoom, step, expected) in cases {
+        let from = at(zoom);
+        let to = step_target(from, step, pane);
+        assert_eq!(to.map(|to| to.zoom), expected, "{zoom} {step:?}");
+        if let Some(to) = to {
+            let center = pane * 0.5;
+            let moved = to.to_world(center) - from.to_world(center);
+            // f32 pan math over a pane of hundreds of pixels: under a thousandth of a pixel.
+            assert!(moved.length() < 1e-3, "{zoom} {step:?}: {moved}");
+        }
+    }
+    // Two opposite steps return.
+    let there = step_target(at(1.0), ZoomStep::In, pane).unwrap();
+    let back = step_target(there, ZoomStep::Out, pane).unwrap();
+    assert_eq!(back.zoom, 1.0);
+    assert!((back.pan - at(1.0).pan).length() < 1e-3);
+}

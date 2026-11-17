@@ -159,6 +159,7 @@ fn every_kind_answers_the_frame_questions() {
                 true,
                 EditFacts {
                     node_set: true,
+                    program: true,
                     ..EditFacts::NONE
                 },
             ),
@@ -182,7 +183,13 @@ fn every_kind_answers_the_frame_questions() {
         (
             "value edit",
             set_input(port, Some(constant(1.0)), Some(constant(2.0))),
-            (true, EditFacts::NONE),
+            (
+                true,
+                EditFacts {
+                    program: true,
+                    ..EditFacts::NONE
+                },
+            ),
         ),
         (
             "const editor appears",
@@ -191,6 +198,7 @@ fn every_kind_answers_the_frame_questions() {
                 true,
                 EditFacts {
                     binding_kind: true,
+                    program: true,
                     ..EditFacts::NONE
                 },
             ),
@@ -202,6 +210,7 @@ fn every_kind_answers_the_frame_questions() {
                 true,
                 EditFacts {
                     binding_kind: true,
+                    program: true,
                     ..EditFacts::NONE
                 },
             ),
@@ -220,6 +229,7 @@ fn every_kind_answers_the_frame_questions() {
                 true,
                 EditFacts {
                     binding_kind: true,
+                    program: true,
                     ..EditFacts::NONE
                 },
             ),
@@ -237,7 +247,13 @@ fn every_kind_answers_the_frame_questions() {
                 },
                 ties: SetTies::default(),
             }))),
-            (true, EditFacts::NONE),
+            (
+                true,
+                EditFacts {
+                    program: true,
+                    ..EditFacts::NONE
+                },
+            ),
         ),
         (
             "selection",
@@ -263,7 +279,13 @@ fn every_kind_answers_the_frame_questions() {
                     to: CacheMode::Ram,
                 }),
             })),
-            (true, EditFacts::NONE),
+            (
+                true,
+                EditFacts {
+                    program: true,
+                    ..EditFacts::NONE
+                },
+            ),
         ),
         (
             "subscription",
@@ -278,7 +300,13 @@ fn every_kind_answers_the_frame_questions() {
                 },
                 ties: SetTies::default(),
             })),
-            (true, EditFacts::NONE),
+            (
+                true,
+                EditFacts {
+                    program: true,
+                    ..EditFacts::NONE
+                },
+            ),
         ),
         ("tie removal", tie_removal(), (true, EditFacts::NONE)),
         (
@@ -293,6 +321,7 @@ fn every_kind_answers_the_frame_questions() {
                 EditFacts {
                     node_set: true,
                     touched: Touched::Graph(GraphId::Compound(CompoundId::from_u128(9))),
+                    program: true,
                     ..EditFacts::NONE
                 },
             ),
@@ -315,6 +344,7 @@ fn every_kind_answers_the_frame_questions() {
                 EditFacts {
                     node_set: true,
                     touched: Touched::Graph(GraphId::Compound(CompoundId::from_u128(9))),
+                    program: true,
                     ..EditFacts::NONE
                 },
             ),
@@ -368,6 +398,7 @@ fn every_kind_answers_the_frame_questions() {
                     binding_kind: true,
                     dropped: 1,
                     touched: Touched::Several,
+                    program: true,
                     ..EditFacts::NONE
                 },
             ),

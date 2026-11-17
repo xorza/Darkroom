@@ -2,7 +2,7 @@
 //! input stage settles before any controller reads them.
 
 use crate::gui::graph_ctx::GraphCtx;
-use crate::gui::pane::graph_ui::canvas_input::{CanvasGesture, CanvasInput, Escape};
+use crate::gui::pane::graph_ui::canvas_input::{CanvasGesture, CanvasInput};
 use crate::gui::pane::graph_ui::scene::canvas_geometry::CanvasGeometry;
 use crate::gui::pane::graph_ui::unsettled_ctx::UnsettledCtx;
 
@@ -50,20 +50,8 @@ impl<'a> CanvasCtx<'a> {
         self.input.gesture
     }
 
-    /// This context with the gesture a later read of the frame classified.
-    pub(super) const fn with_gesture(mut self, gesture: Option<CanvasGesture>) -> Self {
-        self.input.gesture = gesture;
-        self
-    }
-
     /// Whether this frame's Esc cancels whatever gesture is in flight.
     pub(super) const fn cancelled(self) -> bool {
         self.input.cancelled()
-    }
-
-    /// Whether this frame's Esc clears the selection: pressed with nothing in
-    /// flight.
-    pub(super) const fn deselects(self) -> bool {
-        matches!(self.input.escape, Escape::Deselects)
     }
 }

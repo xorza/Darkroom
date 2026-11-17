@@ -3,10 +3,10 @@ use common::USize2;
 use std::cell::Cell;
 use std::sync::Arc;
 
-use imaginarium::ColorFormat;
+use imaginarium::{Channels, ColorFormat};
 use palantir::internals::{headless_test_gpu, isolated_headless_test_gpu};
 use palantir::{Harness, OffscreenHost, PointerButton};
-use scenarium::NodeId;
+use scenarium::{Binding, ConstValue, GraphId, InputPort, NodeId};
 
 use crate::core::document::internals::DocumentFixture;
 use crate::core::preview_sink;
@@ -76,6 +76,13 @@ fn header_readout_adds_its_conditional_clauses_only_when_they_apply() {
         );
     }
 
+    // The pixel under the pointer reads its position, then its samples as stored.
+    let probe = Probe {
+        pos: USizeVec2::new(3, 1),
+        sample: PixelSample::U8(Channels::Rgba([1, 2, 3, 255])),
+    };
+    assert_eq!(probe.to_string(), "x 3 y 1 · 1 2 3 255");
+
     let capped = FullView::Ready(shown(UVec2::new(8192, 4096)));
     assert_eq!(
         line(&capped, None),
@@ -91,6 +98,14 @@ fn header_readout_adds_its_conditional_clauses_only_when_they_apply() {
         line(&converting, Some(0.5)),
         "img · 8192 × 4096 · RGBA u8 · downscaled view · preparing full resolution · 50%"
     );
+}
+
+/// A main-graph preview `node`'s Display at its default.
+fn linear(node: ProgramId) -> PreviewDisplay {
+    PreviewDisplay {
+        node: NodeAddr::new(GraphId::Main, node.node_id()),
+        stretch: DisplayStretch::Linear,
+    }
 }
 
 fn viewer_node() -> ProgramId {
@@ -214,6 +229,7 @@ fn the_frame_that_first_draws_a_viewer_frames_it_at_the_full_size() {
     store.publish(
         node,
         preview_store::internals::image_value(USize2::new(512, 256), ColorFormat::RGB_U8),
+        DisplayStretch::Linear,
     );
     store.settle(h.ui());
 
@@ -234,6 +250,8 @@ fn the_frame_that_first_draws_a_viewer_frames_it_at_the_full_size() {
                 previews: store,
                 status: &ExecStatus::None,
                 size: pane,
+                pinnable: false,
+                display: linear(node),
             };
             viewer.show(
                 ui,
@@ -292,6 +310,7 @@ fn a_drag_starts_from_the_fit_and_a_double_click_fits_again() {
     store.publish(
         node,
         preview_store::internals::image_value(USize2::new(512, 256), ColorFormat::RGB_U8),
+        DisplayStretch::Linear,
     );
     store.settle(h.ui());
     let theme = Theme::default();
@@ -305,6 +324,8 @@ fn a_drag_starts_from_the_fit_and_a_double_click_fits_again() {
                 previews: &store,
                 status: &ExecStatus::None,
                 size: Some(Vec2::new(800.0, 600.0)),
+                pinnable: false,
+                display: linear(node),
             };
             viewer.show(
                 ui,
@@ -327,6 +348,41 @@ fn a_drag_starts_from_the_fit_and_a_double_click_fits_again() {
     assert_eq!((header.min.y, header.size.h), (pill.min.y, pill.size.h));
 
     let grab = h.rect(pane_wid(node)).expect("the widget shows").center();
+    // The pane's center is over the source's center pixel, (400 − 0) / 800 · 512 = 256 and
+    // (300 − 100) / 400 · 256 = 128, which the zeroed source holds as 0 in each channel.
+    h.hover(grab);
+    frame(&mut h, &mut viewer);
+    let mut probe = None;
+    h.frame(|ui| {
+        let pane = ViewerPane {
+            theme: &theme,
+            title: "img",
+            previews: &store,
+            status: &ExecStatus::None,
+            size: Some(Vec2::new(800.0, 600.0)),
+            pinnable: false,
+            display: linear(node),
+        };
+        let source = ShownSource::resolve(store.get(node), ui);
+        let view = source.image().expect("an image is stored");
+        let framing = viewer
+            .effective_view(ui, view.image(), pane.size)
+            .expect("a pane to fit in");
+        probe = viewer.probe(ui, Shown { pane, view }, framing);
+    });
+    assert_eq!(
+        probe,
+        Some(Probe {
+            pos: USizeVec2::new(256, 128),
+            sample: PixelSample::U8(Channels::Rgb([0, 0, 0])),
+        })
+    );
+    // Frames that show the pane again, so the press below lands on it: the second reads the
+    // pane's pointer from the first, and shows the probe's pill.
+    frame(&mut h, &mut viewer);
+    frame(&mut h, &mut viewer);
+    assert!(h.rect(probe_wid(node)).is_some(), "the probe's pill shows");
+
     h.press(grab, PointerButton::Left);
     frame(&mut h, &mut viewer);
     h.drag_to(grab + Vec2::new(30.0, -20.0));
@@ -347,4 +403,79 @@ fn a_drag_starts_from_the_fit_and_a_double_click_fits_again() {
         frame(&mut h, &mut viewer);
     }
     assert_eq!(viewer.view, None, "fitting again");
+}
+
+/// The stretch toggle sets the shown preview's Display, one graph edit on the node's graph: Auto
+/// from Linear, and Linear from Auto, the chip on while the preview shows through Auto.
+#[test]
+fn the_stretch_toggle_sets_the_previews_display() {
+    use crate::core::edit::document_request::DocumentRequest;
+    use crate::core::edit::graph_intent::GraphIntent;
+
+    let mut h = Harness::builder(UVec2::new(800, 600)).mono().build();
+    let mut fixture = DocumentFixture::default();
+    let node = ProgramId::from(fixture.add(&preview_sink::func(Arc::default())));
+    let mut store = PreviewStore::new(wake::internals::noop());
+    store.publish(
+        node,
+        preview_store::internals::image_value(USize2::new(64, 32), ColorFormat::RGB_U8),
+        DisplayStretch::Linear,
+    );
+    store.settle(h.ui());
+    let theme = Theme::default();
+    let mut preferences = ViewerPreferences::default();
+    let mut viewer = ImageViewer::new(node);
+    let mut toggle = |h: &mut Harness, stretch: DisplayStretch| {
+        let mut out = Requests::default();
+        let mut frame = |h: &mut Harness, out: &mut Requests| {
+            h.frame(|ui| {
+                let pane = ViewerPane {
+                    theme: &theme,
+                    title: "img",
+                    previews: &store,
+                    status: &ExecStatus::None,
+                    size: Some(Vec2::new(800.0, 600.0)),
+                    pinnable: false,
+                    display: PreviewDisplay {
+                        node: NodeAddr::new(GraphId::Main, node.node_id()),
+                        stretch,
+                    },
+                };
+                viewer.show(
+                    ui,
+                    pane,
+                    ViewerWrites {
+                        preferences: &mut preferences,
+                        out,
+                    },
+                );
+            });
+        };
+        frame(h, &mut Requests::default());
+        frame(h, &mut Requests::default());
+        h.click(toolbar::controls_wid(node, "stretch"));
+        frame(h, &mut out);
+        out.document().drain().collect::<Vec<_>>()
+    };
+    for (from, to) in [
+        (DisplayStretch::Linear, DisplayStretch::Auto),
+        (DisplayStretch::Auto, DisplayStretch::Linear),
+    ] {
+        let requests = toggle(&mut h, from);
+        let [DocumentRequest::Graph { graph, intent }] = requests.as_slice() else {
+            panic!("{from:?}: one graph edit, not {requests:?}");
+        };
+        assert_eq!(*graph, GraphId::Main);
+        let GraphIntent::SetInput { input, to: binding } = intent else {
+            panic!("{from:?}: an input set, not {intent:?}");
+        };
+        assert_eq!(
+            *input,
+            InputPort::new(node.node_id(), preview_sink::DISPLAY_PORT)
+        );
+        assert_eq!(
+            *binding,
+            Some(Binding::Const(ConstValue::Enum(to.name().to_owned())))
+        );
+    }
 }

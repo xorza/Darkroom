@@ -9,7 +9,6 @@ use scenarium::Binding;
 use scenarium::CompoundId;
 use scenarium::ConstValue;
 use scenarium::FileMode;
-use scenarium::GraphId;
 use scenarium::Library;
 
 use crate::core::edit::compound_intent::CompoundIntent;
@@ -22,6 +21,7 @@ use crate::core::io::document::resources;
 use crate::core::io::document::saved_paths::SavedPaths;
 use crate::core::io::export;
 use crate::core::io::preferences::preferences_store::{OpenedPreferences, PreferencesStore, Saved};
+use crate::core::io::preferences::run_mode::RunMode;
 use crate::core::io::preferences::{Preferences, WindowState};
 use crate::core::open_document::{Launched, Loaded, OpenDocument};
 use crate::core::runtime_host::RuntimeHost;
@@ -217,10 +217,17 @@ impl App {
             ..ui.preferences()
         });
         ui.set_user_scale(app.preferences.interface_size.user_scale());
+        // A document the launch opened is the newest of the recent ones, the command line's
+        // included.
+        if let Some(path) = app.session.open.path() {
+            app.preferences.recent.note(path);
+        }
         // A remembered document that failed to load is forgotten, and that is
         // persisted, so the next launch does not fail on it again.
         if forgot_remembered {
-            app.preferences.document_path = None;
+            if let Some(path) = app.preferences.document_path.take() {
+                app.preferences.recent.forget(&path);
+            }
             app.sync_preferences();
         }
         app
@@ -239,6 +246,7 @@ impl App {
             AppCommand::File(FileCommand::Open) => {
                 self.guard_discard(PendingTransition::OpenPicked);
             }
+            AppCommand::OpenAt(path) => self.open_document_at(path),
             AppCommand::File(FileCommand::Save) => self.save_cur(),
             AppCommand::File(FileCommand::SaveAs) => self.save_document_as(),
             AppCommand::File(FileCommand::PackResources) => self.pack_resources(),
@@ -277,9 +285,6 @@ impl App {
             AppCommand::View(ViewCommand::CopyImage) => {
                 self.capture = Some(ViewCapture::new(CaptureTarget::Clipboard));
             }
-            AppCommand::View(ViewCommand::Frame { graph, framing }) => {
-                self.session.frame_graph(graph, framing);
-            }
             AppCommand::View(ViewCommand::ConvertFull {
                 program_id,
                 max_dim,
@@ -293,15 +298,11 @@ impl App {
                     self.capture = Some(ViewCapture::new(CaptureTarget::Png(path)));
                 }
             }
-            AppCommand::Undo => {
-                let hidden = self.session.undo(&mut self.requests);
-                self.name_hidden_edit("undid", hidden);
-            }
-            AppCommand::Redo => {
-                let hidden = self.session.redo(&mut self.requests);
-                self.name_hidden_edit("redid", hidden);
-            }
+            AppCommand::Pane { graph, ask } => self.session.ask_pane(graph, ask),
+            AppCommand::Undo => self.session.undo(&mut self.requests),
+            AppCommand::Redo => self.session.redo(&mut self.requests),
             AppCommand::Quit => self.guard_discard(PendingTransition::Quit),
+            AppCommand::SetRunMode(mode) => self.preferences.run_mode = mode,
             AppCommand::Warn(line) => self.status.warn(StatusFamily::Edit, line),
         }
     }
@@ -524,9 +525,9 @@ impl App {
         }
     }
 
-    /// Replace the document with an empty one.
+    /// Replace the document with an empty one, on the workspace a new document starts on.
     fn new_document(&mut self) {
-        self.adopt_document(OpenDocument::default());
+        self.adopt_document(OpenDocument::new_document());
     }
 
     /// Swap in `open` and reset every piece of state derived from the
@@ -564,6 +565,8 @@ impl App {
             self.runtime.library.cur(),
             &mut self.status,
         ) else {
+            // A document that does not open leaves the list, so File stops offering it.
+            self.preferences.recent.forget(path);
             return false;
         };
         self.adopt_document(open);
@@ -647,9 +650,14 @@ impl App {
         }
     }
 
-    /// Mirror the open document's active path into the preferences after a successful transition.
+    /// Mirror the open document's active path into the preferences after a successful transition,
+    /// and put it first among the recent documents.
     fn remember_document_path(&mut self) {
-        self.preferences.document_path = self.session.open.path().map(Path::to_path_buf);
+        let path = self.session.open.path();
+        if let Some(path) = path {
+            self.preferences.recent.note(path);
+        }
+        self.preferences.document_path = path.map(Path::to_path_buf);
     }
 
     /// Carry a changed choice to what depends on it and persist it, once each pass past everything
@@ -722,24 +730,6 @@ impl App {
         }
     }
 
-    /// Name on the status bar the graph an undo or a redo changed while no tab shows it, so no
-    /// undo changes only what is off screen.
-    fn name_hidden_edit(&mut self, verb: &str, hidden: Option<GraphId>) {
-        let Some(GraphId::Compound(id)) = hidden else {
-            return;
-        };
-        let document = self.session.open.document();
-        let name = &document
-            .graphs
-            .compound(id)
-            .expect("an undo writes a graph the document holds")
-            .name;
-        self.status.warn(
-            StatusFamily::Edit,
-            format!("{verb} an edit in compound {name:?}, which no tab shows"),
-        );
-    }
-
     /// Hand `command` to the runtime and report its outcome. A command that
     /// compiles supersedes the last run's failure; the ids were read frames
     /// ago, so a node may be gone by now, which the runtime answers as nothing
@@ -749,6 +739,10 @@ impl App {
         let outcome = match command {
             RunCommand::Once => {
                 self.runtime.run_once(graphs);
+                Ok(())
+            }
+            RunCommand::Previews => {
+                self.runtime.run_previews(self.session.open.document());
                 Ok(())
             }
             RunCommand::Node(program_id) => self.runtime.run_node(graphs, program_id),
@@ -778,6 +772,24 @@ impl App {
                 .status
                 .error(StatusFamily::Run, ErrorChain::new(&error).to_string()),
         }
+    }
+
+    /// Run the previews' cones once an edit changed what a run reads, in On Change: the run in
+    /// flight stops first, so the last edit's run is the one that finishes. The cancel goes out
+    /// whether or not the editor has heard a run start: one the worker took and has not reported
+    /// stops, and with none the worker clears it when it takes the new run.
+    fn spend_run(&mut self) {
+        if !self.requests.take_run() || self.preferences.run_mode != RunMode::OnChange {
+            return;
+        }
+        self.run(RunCommand::Cancel);
+        self.run(RunCommand::Previews);
+    }
+
+    /// When a run starts unasked.
+    #[cfg(test)]
+    pub(crate) const fn run_mode(&self) -> RunMode {
+        self.preferences.run_mode
     }
 
     /// Take in what the host and the worker queued, for this pass's record to read.
@@ -868,6 +880,7 @@ impl App {
             self.runtime.library.cur(),
             &self.run_state,
             self.library_scan.library(),
+            self.preferences.run_mode,
         );
         self.session.input(
             ui,
@@ -936,6 +949,7 @@ impl palantir::App for App {
                 self.runtime.library.cur(),
                 &self.run_state,
                 self.library_scan.library(),
+                self.preferences.run_mode,
             );
             self.session.settle(
                 ui,
@@ -966,6 +980,7 @@ impl palantir::App for App {
             self.runtime.library.cur(),
             &self.run_state,
             self.library_scan.library(),
+            self.preferences.run_mode,
         );
         self.session.record(
             ui,
@@ -1000,6 +1015,8 @@ impl palantir::App for App {
         // The app's one relayout request, past both tiers: everything that can strand
         // `CanvasGeometry`'s cross-frame caches has owed by here.
         self.requests.spend_relayout(ui);
+        // Every edit of the frame has owed by here too, so one run answers them all.
+        self.spend_run();
 
         // A prompt the commands above raised records here, and a menu that recorded before it
         // costs a second pass.
@@ -1116,6 +1133,8 @@ pub(crate) mod internals {
 #[cfg(test)]
 mod tests {
     use std::mem;
+
+    use scenarium::GraphId;
 
     use super::*;
 
@@ -1509,7 +1528,7 @@ mod tests {
             "a right click on a body"
         );
         assert_eq!(selected(&counted), 1, "the right click selected");
-        assert_eq!(ui.widgets(Some("Remove")).len(), 1, "the menu shows");
+        assert_eq!(ui.widgets(Some("Replace with")).len(), 1, "the menu shows");
         ui.key(palantir::Key::Escape);
         ui.frame_app(&mut counted);
         ui.frame_app(&mut counted);
@@ -1664,14 +1683,15 @@ mod tests {
         assert!(app.status.cur().is_none(), "and clears the failure");
     }
 
-    /// A framing chip takes the one route a framing has, a command the record raises, and lands in
-    /// the second pass of its click: Reset view from zoom 2 ends at zoom 1, in that frame.
+    /// A framing row takes the one route a framing has, a command the record raises, and lands in
+    /// the second pass of its click: Zoom to 100% from zoom 2 ends at zoom 1, in that frame.
     #[test]
-    fn a_framing_chip_lands_in_its_clicks_second_pass() {
+    fn a_framing_row_lands_in_its_clicks_second_pass() {
         use glam::UVec2;
         use palantir::{Harness, PointerButton};
 
-        use crate::gui::pane::graph_ui::toolbar;
+        use crate::gui::command::Command;
+        use crate::gui::pane::graph_ui::pane_header;
 
         let mut ui = Harness::new(UVec2::new(1600, 1000));
         let mut counted = CountedPasses {
@@ -1697,8 +1717,17 @@ mod tests {
         ui.ui_mut().request_repaint();
         ui.frame_app(&mut counted);
 
-        let chip = toolbar::internals::reset_view_chip_wid(GraphId::Main);
-        ui.press(chip, PointerButton::Left);
+        ui.click(pane_header::zoom_control_wid(GraphId::Main));
+        ui.frame_app(&mut counted);
+        ui.frame_app(&mut counted);
+        let label = Command::ZoomToActual.spec().label;
+        let row = ui
+            .widgets(Some(label))
+            .into_iter()
+            .find(|widget| widget.text.starts_with(label))
+            .expect("the zoom control lists the row")
+            .id;
+        ui.press(row, PointerButton::Left);
         ui.frame_app(&mut counted);
         ui.release(PointerButton::Left);
         counted.passes = 0;
@@ -1778,16 +1807,12 @@ mod tests {
         use glam::UVec2;
         use palantir::Harness;
 
-        use crate::gui::frame::shortcuts;
+        use scenarium::GraphId;
+
+        use crate::gui::command::Command;
+        use crate::gui::pane::graph_ui::wid;
 
         const NODE: &str = "Auto Stretch";
-
-        // The node's title, which a hidden node does not list: its text then rolls up to the canvas.
-        let title = |ui: &Harness| {
-            ui.widgets(Some(NODE))
-                .into_iter()
-                .find(|widget| widget.text == NODE)
-        };
 
         let mut ui = Harness::new(UVec2::new(1600, 1000));
         let mut counted = CountedPasses {
@@ -1803,6 +1828,25 @@ mod tests {
             ui.frame_app(&mut counted);
         }
         assert_eq!(wires_anchored(&counted.app), 13);
+        // The node's body, which a hidden node does not list. By its id, as the sample's zoom draws
+        // its nodes at the title level, whose hidden words a widget's text still names; a delete
+        // and its undo keep the id.
+        let node_id = counted
+            .app
+            .session
+            .open
+            .document()
+            .graphs
+            .main()
+            .iter()
+            .find(|node| node.name == NODE)
+            .expect("the sample holds the node")
+            .node_id;
+        let title = |ui: &Harness| {
+            ui.widgets(None)
+                .into_iter()
+                .find(|widget| widget.id == wid::body(GraphId::Main, node_id))
+        };
 
         let delete = |ui: &mut Harness, counted: &mut CountedPasses| {
             let node = title(ui).expect("the node shows").id;
@@ -1810,7 +1854,7 @@ mod tests {
             ui.advance_past_double_click();
             ui.click(node);
             ui.frame_app(counted);
-            ui.key(shortcuts::DELETE);
+            ui.key(Command::Delete.chord_keys());
             for _ in 0..2 {
                 ui.frame_app(counted);
             }
@@ -1836,7 +1880,7 @@ mod tests {
         assert!(!report.repaint_requested, "settled");
 
         delete(&mut ui, &mut counted);
-        ui.key(shortcuts::UNDO);
+        ui.key(Command::Undo.chord_keys());
         ui.frame_app(&mut counted);
         assert!(title(&ui).is_some(), "the chord's own frame shows it");
         assert_eq!(wires_anchored(&counted.app), 13);

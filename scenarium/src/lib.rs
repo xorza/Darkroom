@@ -81,6 +81,10 @@ pub use graph::saved_decl::{SavedDecl, SavedEvent, SavedInput, SavedPort, ShownP
 pub use graph::scope::Scope;
 pub use graph::subscription::Subscription;
 pub use graph::type_names::{TypeNames, TypeRef};
+pub use graph::value_domain::ValueDomain;
+pub use graph::value_domain::float_span::FloatSpan;
+pub use graph::value_domain::int_span::IntSpan;
+pub use graph::value_domain::span_error::SpanError;
 pub use library::Library;
 pub use library::func_redirect::{FuncRedirect, MAX_REDIRECTS};
 pub use runtime::any_state::AnyState;

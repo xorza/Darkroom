@@ -13,8 +13,12 @@ use scenarium::{
 use tracing::{callsite, subscriber};
 use tracing_subscriber::layer::SubscriberExt as _;
 
+use lens::DisplayStretch;
+
+use crate::core::document::pane_kind::PaneKind;
 use crate::core::io::document as io_document;
 use crate::core::io::document::saved_paths::SavedPaths;
+use crate::core::io::preferences::run_mode::RunMode;
 use crate::driver::action::{Action, Play};
 use crate::driver::error::{ActFailure, DriverError};
 use crate::driver::locator::{EditorTarget, Locator, Side};
@@ -23,8 +27,8 @@ use crate::driver::offscreen;
 use crate::driver::shot::{NODE_MARGIN, Region, Shot};
 use crate::driver::state::{Detail, GhostNodeSummary, GraphSummary, State};
 use crate::driver::{COPY_LIMIT, DisplayKind, Driver, OpenMode, SessionConfig};
+use crate::gui::command::Command;
 use crate::gui::dialogs::DialogAnswer;
-use crate::gui::frame::shortcuts;
 use crate::gui::main_window::MainWindow;
 use crate::gui::state::preview_store::{PreviewMessage, StoredContent};
 use crate::gui::state::run_state::{ExecStatus, InstanceRunState};
@@ -554,18 +558,19 @@ fn a_folder_a_copy_would_break_is_refused() {
     assert_eq!((&state.document, state.active().nodes.len()), (&None, 0));
 }
 
-/// A shot of the whole 400 × 340 window, tall enough to hold the node, is the frame: the canvas's
-/// ground and the node's body show the theme's colours exactly, and the legend's node rect is the
-/// rect `state` reports, as the scale is 1. A `max_side` of 100 scales it to 100 × 85 and the
-/// legend by 1/4, exactly. A node's shot is its body as the canvas shows it, (40, 119) to
-/// (317, 312), with 24 px around it, clamped to the window and rounded out: (16, 95) to (341, 336),
-/// 325 × 241, the body at (24, 24) in it. A rect of the canvas at the node's place, 100 × 50 at
-/// zoom 1, starts at the body's corner, and one past the window or of negative size is empty. A
+/// A shot of the whole 400 × 380 window, tall enough to hold the node under the pane's band, is
+/// the frame: the canvas's ground and the node's body show the theme's colours exactly, and the
+/// legend's node rect is the rect `state` reports, as the scale is 1. A `max_side` of 100 scales it
+/// to 100 × 95 and the legend by 1/4, exactly. A node's shot is its body as the canvas shows it,
+/// (40, 158) to (317, 352), with 24 px around it, clamped to the window and rounded out: (16, 134)
+/// to (341, 376), 325 × 242, the body at (24, 24) in it. A rect of the canvas at the node's place,
+/// 100 × 50 at zoom 1, starts at the body's corner, and one past the window or of negative size is
+/// empty. A
 /// pane's shot is its rect, rounded out; a name no visible tab shows lists those that are. The CPU
 /// display lays the node out where the GPU one does, and has no shots and no device to lose.
 #[test]
 fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
-    let window = UVec2::new(400, 340);
+    let window = UVec2::new(400, 380);
     let mut driver = sized(DisplayKind::TestGpu, window);
     let dir = TempDir::new("darkroom-driver-shot");
     let path = fixture::project(dir.path(), &[BRIGHTNESS]);
@@ -573,7 +578,7 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
     let screen = active(driver.state(Detail::Concise, None).unwrap()).nodes[0]
         .screen
         .unwrap();
-    assert_eq!(screen, [40.0, 119.0, 277.0, 193.0]);
+    assert_eq!(screen, [40.0, 158.0, 277.0, 194.0]);
 
     let theme = Theme::default();
     let whole = driver
@@ -584,7 +589,7 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
     assert_eq!(whole.legend[0].rect, screen);
     let pixels = decode(&whole.png);
     assert_eq!(
-        pixels.get_pixel(380, 90).0,
+        pixels.get_pixel(380, 130).0,
         srgb(theme.canvas.bg),
         "the canvas"
     );
@@ -603,8 +608,8 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
     let quarter = driver
         .shot(&Region::Window, NonZeroU32::new(100).unwrap())
         .unwrap();
-    assert_eq!(quarter.size, UVec2::new(100, 85));
-    assert_eq!(decode(&quarter.png).dimensions(), (100, 85));
+    assert_eq!(quarter.size, UVec2::new(100, 95));
+    assert_eq!(decode(&quarter.png).dimensions(), (100, 95));
     assert_eq!(quarter.legend[0].rect, screen.map(|v| v / 4.0));
     let ports = |shot: &Shot| {
         shot.legend[0]
@@ -629,7 +634,7 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
         )
         .unwrap();
     assert_eq!(NODE_MARGIN, 24.0);
-    assert_eq!(node.size, UVec2::new(325, 241));
+    assert_eq!(node.size, UVec2::new(325, 242));
     assert_eq!(node.legend[0].rect[..2], [24.0, 24.0]);
     assert!(
         node.path
@@ -675,7 +680,7 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
         .unwrap();
     let pane = driver
         .shot(
-            &Region::Pane("Graph".to_string()),
+            &Region::Pane("Main".to_string()),
             NonZeroU32::new(1000).unwrap(),
         )
         .unwrap();
@@ -686,7 +691,7 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
         NonZeroU32::new(1000).unwrap(),
     ) {
         Err(DriverError::Locate(LocateError::NotFound { nearest, .. })) => {
-            assert_eq!(nearest, ["Graph"]);
+            assert_eq!(nearest, ["Main"]);
         }
         other => panic!("{other:?}"),
     }
@@ -926,7 +931,10 @@ fn a_save_writes_the_format_its_extension_names() {
             Action::Answer(DialogAnswer::Path(dir.join("again"))),
             click(Locator::text("File".to_string())),
             // The row shows the platform's own chord: Ctrl+Shift+S here, ⌘⇧S on macOS.
-            click(Locator::text(format!("Save As… {}", shortcuts::SAVE_AS))),
+            click(Locator::text(format!(
+                "Save As… {}",
+                Command::SaveDocumentAs.chord_keys()
+            ))),
         ])
         .unwrap();
     let again = dir.join("again.darkroom");
@@ -1118,6 +1126,22 @@ fn the_sample_project_runs_to_its_previews() {
             ("Preview Stretch".to_string(), Some(UVec2::new(100, 100))),
         ]
     );
+    // Every preview shows its value as it is: a saved Display reads Linear, the default.
+    let document = driver.app().open_document().document();
+    for node in state
+        .active()
+        .nodes
+        .iter()
+        .filter(|n| n.name.starts_with("Preview"))
+    {
+        let program_id = ProgramId::from(node_id(&driver, &node.name));
+        assert_eq!(
+            document.preview_stretch(program_id),
+            DisplayStretch::Linear,
+            "{}",
+            node.name
+        );
+    }
     let main = state.active();
     assert_eq!(
         main.ghost_nodes,
@@ -1135,6 +1159,73 @@ fn the_sample_project_runs_to_its_previews() {
             "const Float(0.8) -> Denoise.Strength",
         ]
     );
+}
+
+/// In On Change, the start, an edit of what a run reads runs the previews that are not disabled
+/// and nothing else: the Save Image fed nothing, which a run of every sink would fail on, stays
+/// unrun. Run on Change in the Graph menu sets Manual, where an undo of that edit runs nothing.
+#[test]
+fn an_edit_runs_the_previews_on_change_and_nothing_in_manual() {
+    let mut driver = driver();
+    let dir = TempDir::new("darkroom-driver-on-change");
+    let path = fixture::previews_beside_a_save(dir.path());
+    driver.open(&path, OpenMode::InPlace).unwrap();
+    assert_eq!(driver.app().run_mode(), RunMode::OnChange);
+
+    driver.act(&[click(node("Spare")), key("delete")]).unwrap();
+    driver.wait_run(Duration::from_secs(30)).unwrap();
+    let state = driver.state(Detail::Detailed, None).unwrap();
+    let mut runs: Vec<(&str, bool)> = state
+        .active()
+        .nodes
+        .iter()
+        .map(|node| {
+            let executed = node
+                .run
+                .as_ref()
+                .is_some_and(|run| run.starts_with("Executed"));
+            (node.name.as_str(), executed)
+        })
+        .collect();
+    runs.sort_unstable();
+    assert_eq!(
+        runs,
+        [("Off", false), ("Save Image", false), ("Shown", true)]
+    );
+    let shown = driver
+        .app()
+        .run_state()
+        .previews()
+        .get(ProgramId::from(node_id(&driver, "Shown")))
+        .and_then(StoredContent::message);
+    assert!(
+        matches!(shown, Some(PreviewMessage::Text(text)) if *text == fixture::SHOWN_PREVIEW_VALUE.to_string()),
+        "{shown:?}"
+    );
+
+    driver
+        .act(&[
+            click(Locator::text("Graph")),
+            click(Locator::text("Run on Change")),
+        ])
+        .unwrap();
+    assert_eq!(driver.app().run_mode(), RunMode::Manual);
+    driver.act(&[key("ctrl+z")]).unwrap();
+    assert_eq!(
+        driver
+            .state(Detail::Concise, None)
+            .unwrap()
+            .active()
+            .nodes
+            .len(),
+        4,
+        "the undo put Spare back"
+    );
+    // A run would end in a few milliseconds: Spare's constant feeds its preview alone.
+    assert!(matches!(
+        driver.wait_run(Duration::from_millis(500)),
+        Err(DriverError::RunTimeout { .. })
+    ));
 }
 
 /// A quit ends the session as it closes a window. With unsaved edits Ctrl+Q only asks, and
@@ -1249,10 +1340,10 @@ fn a_prompt_raised_with_no_press_closes_the_open_menu() {
     assert!(driver.state(Detail::Concise, None).unwrap().dirty);
 }
 
-/// A wire dropped on bare canvas opens the palette, and a pick adds the node and floats the wire
-/// again, bound to nothing until a click on the new node's input lands it.
+/// A wire dropped on bare canvas opens the palette on the ports that take it, and a pick adds the
+/// node and lands the wire on the port its row names, one undo step for both.
 #[test]
-fn a_dropped_wire_floats_onto_the_node_its_palette_adds() {
+fn a_dropped_wire_lands_on_the_port_its_palette_row_names() {
     let mut driver = driver();
     let dir = TempDir::new("darkroom-driver-drop");
     let path = fixture::project(dir.path(), &[BRIGHTNESS]);
@@ -1265,35 +1356,27 @@ fn a_dropped_wire_floats_onto_the_node_its_palette_adds() {
     driver
         .act(&[drag(output, Locator::point(Vec2::new(1100.0, 700.0)))])
         .unwrap();
-    // Picked by the keys: a row's text joins its name, category and description, and the
-    // library may scroll Convert out of view.
+    // Picked by the keys: the library may scroll Convert out of view.
     driver
         .act(&[Action::Play(Play::Type(CONVERT.to_string())), key("enter")])
         .unwrap();
-    let wires = |driver: &mut Driver| {
-        active(driver.state(Detail::Detailed, None).unwrap())
-            .details
-            .unwrap()
-            .wires
-    };
-    let names: Vec<String> = active(driver.state(Detail::Concise, None).unwrap())
-        .nodes
-        .into_iter()
-        .map(|node| node.name)
-        .collect();
+    let state = |driver: &mut Driver| active(driver.state(Detail::Detailed, None).unwrap());
+    let picked = state(&mut driver);
+    let names: Vec<&str> = picked.nodes.iter().map(|node| node.name.as_str()).collect();
     assert_eq!(names, [BRIGHTNESS, CONVERT], "the pick added the node");
-    assert_eq!(wires(&mut driver), Vec::<String>::new(), "the wire floats");
-
-    driver
-        .act(&[click(Locator::app(EditorTarget::Port {
-            node: CONVERT.to_string(),
-            side: Side::In,
-            port: "0".to_string(),
-        }))])
-        .unwrap();
     assert_eq!(
-        wires(&mut driver),
-        [format!("{BRIGHTNESS}.Image -> {CONVERT}.Image")]
+        picked.details.unwrap().wires,
+        [format!("{BRIGHTNESS}.Image -> {CONVERT}.Image")],
+        "and wired the port its row named"
+    );
+
+    driver.act(&[key("ctrl+z")]).unwrap();
+    let undone = state(&mut driver);
+    assert_eq!(undone.nodes.len(), 1, "one undo takes the node");
+    assert_eq!(
+        undone.details.unwrap().wires,
+        Vec::<String>::new(),
+        "and its wire"
     );
 }
 
@@ -1307,7 +1390,10 @@ fn an_interface_size_pick_scales_the_ui() {
     driver
         .act(&[
             click(Locator::text("File".to_string())),
-            click(Locator::text("Preferences".to_string())),
+            click(Locator::text(format!(
+                "Preferences {}",
+                Command::ShowPane(PaneKind::Preferences).chord_keys()
+            ))),
             click(Locator::text("100%".to_string())),
             click(Locator::text("125%".to_string())),
         ])

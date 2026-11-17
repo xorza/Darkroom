@@ -1,5 +1,8 @@
-//! Full-resolution viewers for preview nodes' runtime images, one editor tab
-//! per node ([`TabRef::ImageViewer`], deduped on open). Each visible viewer
+//! Full-resolution viewers for preview nodes' runtime images: one tab that follows the active
+//! preview, and one a pin holds on a node ([`TabRef::Viewer`]), as the inspector follows the
+//! selection and pins a node. As Blender's compositor shows one Viewer node behind its tree
+//! ([backdrop](https://docs.blender.org/manual/en/3.6/compositing/sidebar.html)). Refused: a tab
+//! a preview, which piles tabs up. Each visible viewer
 //! borrows its node's registered texture from the centralized preview
 //! store and keeps only navigation state, so opening or restoring a tab shows an
 //! already-received value without an editor-driven notification path.
@@ -15,18 +18,20 @@
 //! drawn vocabulary, and [`toolbar`] the floating toolbar the panel stamps out. This file
 //! is [`ImageViewer`]: the state one viewer tab keeps across frames, and the record pass.
 //!
-//! [`TabRef::ImageViewer`]: crate::core::document::tab_ref::TabRef::ImageViewer
+//! [`TabRef::Viewer`]: crate::core::document::tab_ref::TabRef::Viewer
 
 mod camera;
 mod glyph;
 mod toolbar;
 
-use scenarium::{Library, ProgramId};
+use lens::DisplayStretch;
+use scenarium::{Library, NodeAddr, ProgramId};
 use std::fmt;
 use std::fmt::Display;
 use std::fmt::Formatter;
 
-use glam::{UVec2, Vec2};
+use glam::{USizeVec2, UVec2, Vec2};
+use imaginarium::PixelSample;
 use palantir::{
     Align, Chrome, Configure, Fit, ImageDownsample, ImageFilter, ImageHandle, ImagePaint, Panel,
     Sense, Shape, SizeSpec, Spacing, Ui, WidgetId, fmt,
@@ -34,6 +39,8 @@ use palantir::{
 
 use crate::core::document;
 use crate::core::document::Document;
+use crate::core::document::tab_ref::TabRef;
+use crate::core::document::view_target::ViewTarget;
 use crate::core::document::viewport::Viewport;
 use crate::core::io::preferences::{ViewerBg, ViewerPreferences};
 use crate::gui::frame::app_command::{AppCommand, ViewCommand};
@@ -50,6 +57,7 @@ use crate::gui::theme::Theme;
 use crate::gui::widgets::chip::Chip;
 use crate::gui::widgets::format;
 use crate::gui::widgets::format::percent::Percent;
+use crate::gui::widgets::format::pixel_size::PixelSize;
 use crate::gui::widgets::icon::Icon;
 use crate::gui::widgets::pan_drag;
 use crate::gui::widgets::pill;
@@ -124,7 +132,12 @@ impl ShownSource {
                 Err(error) => Self::NoImage(error),
             },
             // A non-image value is `NotAnImage`: the preview card renders it, not a viewer tab.
-            Some(StoredContent::Error(error)) => Self::NoImage(error.clone()),
+            Some(content @ (StoredContent::Error(_) | StoredContent::Unstretched(_))) => {
+                let Some(PreviewMessage::Failure(error)) = content.message() else {
+                    unreachable!("a failed value reads as its failure")
+                };
+                Self::NoImage(error.clone())
+            }
             Some(StoredContent::Text(_)) => Self::NoImage(DrawablePreviewError::NotAnImage),
         }
     }
@@ -164,6 +177,31 @@ pub(crate) struct ViewerPane<'a> {
     pub(crate) status: &'a ExecStatus,
     /// The pane's size, `None` before it was ever arranged.
     pub(crate) size: Option<Vec2>,
+    /// Whether the viewer follows the active preview, so its pin holds this one in a tab.
+    pub(crate) pinnable: bool,
+    /// The shown preview's Display, which the stretch toggle edits.
+    pub(crate) display: PreviewDisplay,
+}
+
+/// A preview node's Display: the node that holds it, and the stretch it names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PreviewDisplay {
+    pub(crate) node: NodeAddr,
+    pub(crate) stretch: DisplayStretch,
+}
+
+impl PreviewDisplay {
+    /// Preview node `program_id`'s Display in `document`.
+    pub(crate) fn of(document: &Document, program_id: ProgramId) -> Self {
+        let graph = document
+            .graphs
+            .graph_at(program_id.path())
+            .expect("a viewer tab's path is in the set");
+        Self {
+            node: NodeAddr::new(graph, program_id.node_id()),
+            stretch: document.preview_stretch(program_id),
+        }
+    }
 }
 
 /// What a viewer writes this frame: the shared viewer preferences its controls edit, and the
@@ -192,6 +230,11 @@ impl ImageViewer {
             checker: None,
             downsample: ImageDownsample::Mean,
         }
+    }
+
+    /// The preview node this viewer shows.
+    pub(crate) const fn program_id(&self) -> ProgramId {
+        self.program_id
     }
 
     const fn reset_framing(&mut self) {
@@ -289,7 +332,8 @@ impl ImageViewer {
                         pane: pane_view,
                         view,
                     };
-                    self.top_row(ui, shown, preferences);
+                    self.top_row(ui, shown, preferences, out);
+                    self.probe_readout(ui, shown);
                 }
                 // Never drawn over a picture: the enum is either/or. On the readout pill, so the
                 // line stays legible over every backdrop.
@@ -342,7 +386,13 @@ impl ImageViewer {
     /// The row along the pane's top: the readout at the left, cut with an ellipsis where it would
     /// reach the control panel at the right. One row lays both out, so the readout yields to the
     /// panel in the frame they share.
-    fn top_row(&mut self, ui: &mut Ui, shown: Shown<'_>, preferences: &mut ViewerPreferences) {
+    fn top_row(
+        &mut self,
+        ui: &mut Ui,
+        shown: Shown<'_>,
+        preferences: &mut ViewerPreferences,
+        out: &mut Requests,
+    ) {
         let margin = shown.pane.theme.space.sm;
         Panel::hstack()
             .id(top_row_wid(self.program_id))
@@ -353,7 +403,7 @@ impl ImageViewer {
             .show(ui, |ui| {
                 self.header(ui, shown);
                 support::hspacer(ui, "viewer_top_spacer");
-                self.controls(ui, shown, preferences);
+                self.controls(ui, shown, preferences, out);
             });
     }
 
@@ -376,12 +426,65 @@ impl ImageViewer {
         .show(ui, theme);
     }
 
+    /// The pixel under the pointer, in a pill of its own at the pane's bottom left, as Nuke's
+    /// viewer writes it along its foot: apart from the header, which a narrow pane cuts, and
+    /// whose width it would move with every pixel.
+    fn probe_readout(&self, ui: &mut Ui, shown: Shown<'_>) {
+        let Some(probe) = self
+            .effective_view(ui, shown.view.image(), shown.pane.size)
+            .and_then(|v| self.probe(ui, shown, v))
+        else {
+            return;
+        };
+        let theme = shown.pane.theme;
+        let margin = theme.space.sm;
+        Readout {
+            panel: Panel::hstack()
+                .id(probe_wid(self.program_id))
+                .align(Align::BOTTOM_LEFT)
+                .margin(Spacing::new(margin, 0.0, 0.0, margin)),
+            text: fmt!(ui, "{probe}").into(),
+            ink: theme.ink.muted,
+            max_width: f32::INFINITY,
+        }
+        .show(ui, theme);
+    }
+
+    /// The source pixel under the pointer, through framing `v`, and its samples: `None` while
+    /// the pointer is off the pane or off the image. Last frame's pointer, as every response is.
+    fn probe(&self, ui: &Ui, shown: Shown<'_>, v: Viewport) -> Option<Probe> {
+        let pane = ui.response_for(pane_wid(self.program_id));
+        if !pane.pointer_over {
+            return None;
+        }
+        let image = shown.view.image();
+        let pos = camera::native_pixel(
+            pane.pointer_local?,
+            logical_size(image, ui),
+            v,
+            image.native_size,
+        )?;
+        let sample = shown
+            .pane
+            .previews
+            .get(self.program_id)?
+            .image()?
+            .sample(pos)?;
+        Some(Probe { pos, sample })
+    }
+
     /// The floating control panel in the pane's top-right corner, the viewer twin of the graph
     /// toolbar. The top pill frames the view (fit, 100%); the column below edits the shared
     /// appearance preferences: the backdrop radios and the sampling toggle. Drawn after the
     /// image so the buttons hit-test above the pane's gesture surface. Framing clicks land
     /// next frame, as responses lag the record by one frame.
-    fn controls(&mut self, ui: &mut Ui, shown: Shown<'_>, preferences: &mut ViewerPreferences) {
+    fn controls(
+        &mut self,
+        ui: &mut Ui,
+        shown: Shown<'_>,
+        preferences: &mut ViewerPreferences,
+        out: &mut Requests,
+    ) {
         let (theme, pane) = (shown.pane.theme, shown.pane.size);
         let controls = Controls {
             program_id: self.program_id,
@@ -395,6 +498,15 @@ impl ImageViewer {
             .show(ui, |ui| {
                 let framing = Panel::hstack().id(controls.wid("pill_framing"));
                 pill::dress(framing, theme).show(ui, |ui| {
+                    if shown.pane.pinnable
+                        && Chip::new(
+                            controls.wid("pin"),
+                            "Pin — keep this preview in its own tab",
+                        )
+                        .show_icon(ui, theme, Icon::Pin)
+                    {
+                        out.push_show(TabRef::Viewer(ViewTarget::Node(self.program_id)));
+                    }
                     if Chip::new(controls.wid("fit"), "Fit to view").show_icon(ui, theme, Icon::Fit)
                     {
                         self.reset_framing();
@@ -422,6 +534,7 @@ impl ImageViewer {
                     }
                     pill::rule(ui, theme);
                     controls.filter_toggle(ui, &mut preferences.mag_filter);
+                    controls.stretch_toggle(ui, shown.pane.display, out);
                 });
             });
     }
@@ -476,6 +589,26 @@ struct HeaderReadout<'a> {
     zoom: Option<f32>,
 }
 
+/// The source pixel under the pointer, and its samples in the source's own type, as Nuke's
+/// viewer shows the position and the values of the pixel under the pointer
+/// ([viewer controls](https://learn.foundry.com/nuke/content/getting_started/using_interface/using_viewer_controls.html)).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Probe {
+    pos: USizeVec2,
+    sample: PixelSample,
+}
+
+/// `x 2471 y 1338 · 0.03127`: the position, then the samples as stored.
+impl Display for Probe {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "x {} y {} \u{b7} {}",
+            self.pos.x, self.pos.y, self.sample
+        )
+    }
+}
+
 impl Display for HeaderReadout<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let DrawableImage {
@@ -486,8 +619,9 @@ impl Display for HeaderReadout<'_> {
         } = self.shown.image();
         write!(
             f,
-            "{} · {} × {} · {native_format}",
-            self.title, native_size.x, native_size.y
+            "{} · {} · {native_format}",
+            self.title,
+            PixelSize(*native_size)
         )?;
         if texels != native_size {
             f.write_str(" · downscaled view")?;
@@ -501,6 +635,29 @@ impl Display for HeaderReadout<'_> {
         Ok(())
     }
 }
+
+/// What the following viewer draws while no preview is active: one muted line that says how to
+/// show one.
+pub(crate) fn nothing_to_show(ui: &mut Ui, theme: &Theme) {
+    Panel::zstack()
+        .id_salt("viewer_nothing")
+        .size(SizeSpec::FILL)
+        .chrome(Chrome::new(theme.canvas.bg))
+        .show(ui, |ui| {
+            Readout {
+                panel: Panel::hstack()
+                    .id_salt("viewer_nothing_hint")
+                    .align(Align::CENTER),
+                text: NOTHING_ACTIVE_HINT.into(),
+                ink: theme.ink.muted,
+                max_width: f32::INFINITY,
+            }
+            .show(ui, theme);
+        });
+}
+
+/// Drawn by the following viewer while no preview is active.
+const NOTHING_ACTIVE_HINT: &str = "Press a preview to show its image here.";
 
 /// Display label for a viewer tab / pane header: the node's title through
 /// [`format::node_name`], borrowed from the document, its graph resolved against `library`. Each
@@ -531,6 +688,11 @@ fn logical_size(image: &DrawableImage, ui: &Ui) -> Vec2 {
 /// The header readout of `program_id`'s viewer.
 fn header_wid(program_id: ProgramId) -> WidgetId {
     WidgetId::from_hash(("darkroom.image_viewer.header", program_id))
+}
+
+/// The pill at a viewer's bottom left that names the pixel under the pointer.
+fn probe_wid(program_id: ProgramId) -> WidgetId {
+    WidgetId::from_hash(("darkroom.image_viewer.probe", program_id))
 }
 
 /// The row along a viewer's top that holds its readout and its control panel.

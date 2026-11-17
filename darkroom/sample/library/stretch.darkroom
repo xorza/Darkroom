@@ -27,7 +27,7 @@
                                         description: None,
                                         const_only: false,
                                         default_value: None,
-                                        value_variants: [],
+                                        domain: Any,
                                     ),
                                 ),
                             ],
@@ -154,6 +154,7 @@
             next_group: 1,
         ),
         active: Compound(("5493d86c-2444-4d73-89b3-dc02b5ea4480")),
+        active_preview: None,
     ),
     manifest: (
         funcs: {

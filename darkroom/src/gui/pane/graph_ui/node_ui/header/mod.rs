@@ -6,16 +6,15 @@
 use std::collections::BTreeSet;
 
 use palantir::{
-    Checkbox, Configure, DockDrop, DockOperation, EditableLabel, Menu, MenuItem, MenuSeparator,
-    Modifiers, Panel, Separator, SizeSpec, SplitSide, Ui, VAlign, WidgetId,
+    Checkbox, Configure, EditableLabel, Menu, MenuItem, MenuSeparator, Modifiers, Panel, Separator,
+    SizeSpec, Ui, VAlign, WidgetId,
 };
 
 use scenarium::{CacheMode, GraphId, NodeId, TriggerPort};
 
 use crate::core::document::compound_side::ReadOnly;
-use crate::core::document::inspect_target::InspectTarget;
 use crate::core::document::item_id::ItemId;
-use crate::core::document::tab_ref::TabRef;
+use crate::core::document::pane_kind::PaneKind;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::click_mode::ClickMode;
 use crate::core::edit::graph_intent::node_property::NodeProperty;
@@ -89,6 +88,7 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     let (theme, node) = (record.node.theme(), record.node);
     Panel::hstack()
         .id_salt("header")
+        .visibility(record.stage.ctx.words())
         .size(SizeSpec::FILL_W)
         .padding(card::band_padding(theme))
         .gap(theme.space.xs)
@@ -138,7 +138,7 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
                         to: BTreeSet::from([ItemId::Node(node.node_id)]),
                     },
                 );
-                show_inspector(record);
+                record.stage.out.push_show(PaneKind::Inspector.tab());
             }
         });
     Separator::horizontal().show(ui);
@@ -203,34 +203,6 @@ const fn compound_look(read_only: Option<ReadOnly>) -> (Icon, &'static str) {
             read_only_icon(why),
             "Follows the library — open it; Make Local from this node's menu or its pane",
         ),
-    }
-}
-
-/// Show the inspector that follows the selection: where it already sits, else in a pane split
-/// off the right of the node's graph's, so the graph it inspects stays in view.
-fn show_inspector(record: &mut NodeRecord<'_, '_>) {
-    let tab = TabRef::Inspector(InspectTarget::Selection);
-    let layout = &record.node.graph_ctx.document().layout;
-    if layout.all_tabs().any(|open| open == tab) {
-        record
-            .stage
-            .out
-            .push_view(DockOperation::ActivateTab { tab });
-        return;
-    }
-    record.stage.out.push_view(DockOperation::OpenTab { tab });
-    if let Some(graph) = layout.groups().find(|group| {
-        group
-            .tabs()
-            .contains(&TabRef::Graph(record.node.graph_ctx.graph()))
-    }) {
-        record.stage.out.push_view(DockOperation::MoveTab {
-            tab,
-            to: DockDrop::Split {
-                group: graph.id(),
-                side: SplitSide::Right,
-            },
-        });
     }
 }
 

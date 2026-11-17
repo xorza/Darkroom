@@ -27,10 +27,10 @@
 use std::fmt::{self as std_fmt, Display, Formatter};
 
 use palantir::{
-    Align, Button, Checkbox, ComboBox, Configure, DragValue, Panel, SizeSpec, Sizing, Text,
-    TextEdit, TextInput, TextWrap, Ui, VAlign, WidgetId, fmt,
+    Align, Block, Button, Checkbox, Chrome, ComboBox, Configure, Corners, DragValue, Panel,
+    SizeSpec, Sizing, Text, TextEdit, TextInput, TextWrap, Ui, VAlign, WidgetId, fmt,
 };
-use scenarium::{ConstValue, DataType, Library, ValueVariant};
+use scenarium::{ConstValue, DataType, FloatSpan, IntSpan, Library, ValueDomain, ValueVariant};
 
 use crate::gui::path_type::PathType;
 use crate::gui::theme::const_editor_theme::ConstEditorTheme;
@@ -46,9 +46,9 @@ pub(crate) struct ConstEditor<'a> {
     pub(crate) library: &'a Library,
     pub(crate) value: &'a ConstValue,
     pub(crate) data_type: DataType,
-    /// The port's named presets; a non-empty list overrides the per-type
-    /// editor.
-    pub(crate) value_variants: &'a [ValueVariant],
+    /// The constants the port admits: a picker overrides the per-type editor, and a span
+    /// bounds a number's field and shows how far along it the value sits.
+    pub(crate) domain: &'a ValueDomain,
 }
 
 /// Where one editor records: its stable id, and the theme every visual axis
@@ -88,11 +88,11 @@ impl ConstEditor<'_> {
             library,
             value,
             data_type,
-            value_variants,
+            domain,
         } = self;
-        // Picker variants (the input's `value_variants`, e.g. named config presets) override
-        // the per-type editor: a dropdown of variant names, binding the chosen variant's value,
-        // whatever the `data_type`.
+        // A picker (named config presets) overrides the per-type editor: a dropdown of variant
+        // names, binding the chosen variant's value, whatever the `data_type`.
+        let value_variants = domain.variants();
         if !value_variants.is_empty() {
             let current = value_variants
                 .iter()
@@ -128,13 +128,21 @@ impl ConstEditor<'_> {
                 let Some(cur) = value.as_i64() else {
                     return field.unset(ui, value);
                 };
-                field.int(ui, cur)
+                let span = match domain {
+                    ValueDomain::Int(span) => Some(*span),
+                    _ => None,
+                };
+                field.int(ui, cur, span)
             }
             DataType::Float => {
                 let Some(cur) = value.as_f64() else {
                     return field.unset(ui, value);
                 };
-                field.float(ui, cur)
+                let span = match domain {
+                    ValueDomain::Float(span) => Some(*span),
+                    _ => None,
+                };
+                field.float(ui, cur, span)
             }
             DataType::Bool => {
                 let Some(cur) = value.as_bool() else {
@@ -277,7 +285,7 @@ impl Field<'_> {
     /// An input with nothing in it — left unset, or bound to nothing: [`UNSET`] in the muted ink,
     /// in a box with an editor's resting look and size, as the inspector reads an input with
     /// nothing in it. It senses nothing, so a click falls through to the surrounding row.
-    pub(super) fn empty(self, ui: &mut Ui) {
+    pub(crate) fn empty(self, ui: &mut Ui) {
         let Self { theme, id } = self;
         let editor = &theme.field;
         Panel::hstack()
@@ -307,35 +315,85 @@ impl Field<'_> {
     /// Editor for an `Int` const: an editable `DragValue`. The draft re-seeds from the document
     /// value every frame and is emitted only on the widget's `committed` frame, which carries
     /// the gesture's final value, so one scrub or typed entry lands as one change.
-    fn int(self, ui: &mut Ui, cur: i64) -> Option<ConstValue> {
+    fn int(self, ui: &mut Ui, cur: i64, span: Option<IntSpan>) -> Option<ConstValue> {
         let mut draft = cur;
-        let committed = DragValue::new(&mut draft)
+        let mut value = DragValue::new(&mut draft)
             .speed(int_speed(cur))
             .style(&self.theme.number)
             .text_align(Align::LEFT)
             .size((Sizing::fixed(self.theme.width), Sizing::FILL))
-            .id(self.id)
-            .show(ui)
-            .committed;
+            .id(self.id);
+        if let Some(span) = span {
+            value = value.range(int_end(span.min())..=span.max().map_or(f64::INFINITY, int_end));
+        }
+        let committed = value.show(ui).committed;
         (committed && draft != cur).then_some(ConstValue::Int(draft))
     }
 
-    /// `Float` sibling of [`Self::int`].
-    fn float(self, ui: &mut Ui, cur: f64) -> Option<ConstValue> {
+    /// `Float` sibling of [`Self::int`]. A span with both ends shows how far along it the value
+    /// sits, as a fill across the field.
+    fn float(self, ui: &mut Ui, cur: f64, span: Option<FloatSpan>) -> Option<ConstValue> {
         let mut draft = cur;
-        let committed = DragValue::new(&mut draft)
-            .speed(float_speed(cur))
-            .decimals(FLOAT_DECIMALS)
-            .style(&self.theme.number)
-            .text_align(Align::LEFT)
+        let committed = Panel::zstack()
+            .id_salt(("float_field", self.id))
             .size((Sizing::fixed(self.theme.width), Sizing::FILL))
-            .id(self.id)
-            .show(ui)
-            .committed;
+            .show(ui, |ui| {
+                let mut value = DragValue::new(&mut draft)
+                    .speed(float_speed(cur))
+                    .decimals(FLOAT_DECIMALS)
+                    .style(&self.theme.number)
+                    .text_align(Align::LEFT)
+                    .size(SizeSpec::FILL)
+                    .id(self.id);
+                if let Some(span) = span {
+                    value = value.range(span.min()..=span.max().unwrap_or(f64::INFINITY));
+                }
+                let committed = value.show(ui).committed;
+                if let Some(fraction) = span.and_then(|span| span.fraction(cur)) {
+                    self.span_fill(ui, fraction);
+                }
+                committed
+            })
+            .inner;
         // Bit-exact, as `ConstValue`'s `PartialEq` is, so `1.0` → `1` (same value, different
         // text) emits no change.
         (committed && draft.to_bits() != cur.to_bits()).then_some(ConstValue::Float(draft))
     }
+
+    /// How far along its span a value sits: `fraction` of the field from its left edge, in a
+    /// translucent accent over the field and its figures, taking no input.
+    fn span_fill(self, ui: &mut Ui, fraction: f64) {
+        // f64 to the f32 a layout reads: a share of a field's width needs no more.
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "a share in [0, 1] of a field's width"
+        )]
+        let share = fraction as f32;
+        Block::new()
+            .id(span_fill_wid(self.id))
+            .size((Sizing::fixed(self.theme.width * share), Sizing::FILL))
+            .align(Align::LEFT)
+            .chrome(Chrome::rounded(
+                self.theme.span_fill,
+                Corners::all(self.theme.span_radius),
+            ))
+            .show(ui);
+    }
+}
+
+/// The span fill over the field `id`.
+fn span_fill_wid(id: WidgetId) -> WidgetId {
+    id.with("span_fill")
+}
+
+/// An integer span's end as the `f64` a field's range reads. An end past ±2^53 rounds to the
+/// nearest float, where a field's figures could not show the difference anyway.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "an end past 2^53 rounds, below what a field shows"
+)]
+const fn int_end(end: i64) -> f64 {
+    end as f64
 }
 
 /// Canonical text for an `Any` const, chosen so [`parse_any`] round-trips the numeric and bool

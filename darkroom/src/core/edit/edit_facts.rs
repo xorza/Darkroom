@@ -33,6 +33,12 @@ pub(crate) struct EditFacts {
     pub(crate) ghosted: usize,
     /// Which graphs the edit wrote.
     pub(crate) touched: Touched,
+    /// What a compile reads changed: a node, a binding, a subscription, a node's disabled flag
+    /// or cache mode, an interface or a definition, so a run of the change shows something new.
+    /// A move, a selection, a stacking, a tie and a name change none of it. Run on Change reads
+    /// this, not the content revision, which a drag moves every frame. Refused: a run on every
+    /// revision with the worker finding nothing to do, a compile each drag frame.
+    pub(crate) program: bool,
 }
 
 /// Which graphs a batch of edits wrote, folded with no allocation: one graph by name, or more
@@ -79,6 +85,7 @@ impl EditFacts {
         dropped: 0,
         ghosted: 0,
         touched: Touched::Nothing,
+        program: false,
     };
 
     /// Whether this edit leaves a frontend's cached geometry behind. A node that came has no cached
@@ -105,6 +112,7 @@ impl BitOr for EditFacts {
             dropped: self.dropped + rhs.dropped,
             ghosted: self.ghosted + rhs.ghosted,
             touched: self.touched | rhs.touched,
+            program: self.program || rhs.program,
         }
     }
 }

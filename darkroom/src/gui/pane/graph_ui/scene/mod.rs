@@ -5,5 +5,6 @@
 
 pub(crate) mod canvas_geometry;
 pub(crate) mod cull_region;
+pub(crate) mod detail_level;
 pub(crate) mod tie_layout;
 pub(crate) mod wire;

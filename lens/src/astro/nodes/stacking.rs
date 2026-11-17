@@ -7,8 +7,8 @@ use lumos::{
 use lumos::{ProgressCallback, ProgressMonitor};
 use scenarium::async_lambda;
 use scenarium::{
-    DataType, DynamicValue, Func, FuncId, InputDecl, Invocation, InvokeError, InvokeResult,
-    Library, OutputDecl, OutputDemand,
+    DataType, DynamicValue, Func, FuncId, InputDecl, IntSpan, Invocation, InvokeError,
+    InvokeResult, Library, OutputDecl, OutputDemand,
 };
 
 use crate::astro::config::preset::Preset;
@@ -126,10 +126,12 @@ pub(crate) fn register(library: &mut Library) {
         .input(5, CombineMethodChoice::input("Combine"))
         .input(
             6,
-            InputDecl::optional("Reference", DataType::Int).description(
-                "Alignment reference frame index; unset picks the frame with the lowest \
+            InputDecl::optional("Reference", DataType::Int)
+                .description(
+                    "Alignment reference frame index; unset picks the frame with the lowest \
                      median FWHM among those with enough stars.",
-            ),
+                )
+                .int_span(IntSpan::at_least(0)),
         )
         .output(
             1,

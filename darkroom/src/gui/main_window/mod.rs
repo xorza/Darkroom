@@ -15,12 +15,13 @@ use std::collections::{BTreeMap, HashMap};
 use palantir::{
     Chrome, Configure, DockOperation, DockView, Panel, SizeSpec, TabOverflow, Ui, VAlign, WidgetId,
 };
-use scenarium::{GraphId, ProgramId};
+use scenarium::GraphId;
 
 use crate::core::document::tab_ref::TabRef;
+use crate::core::document::view_target::ViewTarget;
 use crate::core::open_document::OpenDocument;
 use crate::gui::frame::doc_ctx::DocCtx;
-use crate::gui::frame::framing::Framing;
+use crate::gui::frame::pane_ask::PaneAsk;
 use crate::gui::frame::stage::Stage;
 use crate::gui::frame::window_parts::WindowParts;
 use crate::gui::graph_ctx::GraphCtx;
@@ -46,10 +47,10 @@ pub(crate) struct MainWindow {
     /// One canvas per graph a tab shows, made when the tab first shows and dropped when its
     /// last tab closes.
     pub(crate) graph_panes: BTreeMap<GraphId, GraphUi>,
-    /// One image-viewer navigation state per rendered viewer tab
-    /// ([`TabRef::ImageViewer`]), keyed by the preview program node it shows. Textures remain
-    /// centralized in the preview store.
-    pub(crate) image_viewers: HashMap<ProgramId, ImageViewer>,
+    /// One image-viewer navigation state per rendered viewer tab ([`TabRef::Viewer`]), keyed by
+    /// what the tab shows; the following viewer's is made anew when its preview changes.
+    /// Textures remain centralized in the preview store.
+    pub(crate) image_viewers: HashMap<ViewTarget, ImageViewer>,
     /// The dock's op sink for one frame, kept so the navigation scan and the record reuse one
     /// buffer.
     dock_ops: Vec<DockOperation<TabRef>>,
@@ -148,7 +149,7 @@ impl MainWindow {
                 .child_align(VAlign::Bottom)
                 .chrome(Chrome::new(fill))
                 .show(ui, |ui| {
-                    menu_bar::show(ui, stage);
+                    menu_bar::show(ui, stage, &preferences.recent);
                 });
             let mut panes = DockPanes {
                 stage: stage.with(ctx),
@@ -169,12 +170,9 @@ impl MainWindow {
         });
     }
 
-    /// Ask the active graph's canvas to frame `framing` in its next input stage.
-    pub(crate) fn frame(&mut self, active: GraphId, framing: Framing) {
-        self.graph_panes
-            .entry(active)
-            .or_default()
-            .request_framing(framing);
+    /// Hand `ask` to `graph`'s pane, which answers it at its next input stage.
+    pub(crate) fn ask(&mut self, graph: GraphId, ask: PaneAsk) {
+        self.graph_panes.entry(graph).or_default().ask(ask);
     }
 
     /// Release everything this window caches for a subject the document has
@@ -196,11 +194,11 @@ impl MainWindow {
             pane.sweep(document.graphs.graph(graph), open.graph_revision(graph));
         }
         // Scoped to the tab, not the node: a closed tab's node may still be in the graph.
-        self.image_viewers.retain(|program_id, _| {
+        self.image_viewers.retain(|&target, _| {
             document
                 .layout
                 .all_tabs()
-                .any(|t| t == TabRef::ImageViewer(*program_id))
+                .any(|tab| tab == TabRef::Viewer(target))
         });
     }
 }

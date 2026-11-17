@@ -31,10 +31,18 @@ fn shape(rows: &mut PaletteRows, library: &Library, query_lc: &str) -> Vec<(Stri
         graphs: &graphs,
         shared: &shared,
     };
-    rows.refilter(sources, library.iter().map(PaletteEntry::Func), query_lc);
+    rows.refilter(
+        sources,
+        library.iter().map(PaletteEntry::Func),
+        query_lc,
+        None,
+    );
     rows.runs()
         .map(|(_, run)| {
-            let entries: Vec<_> = run.iter().map(|row| row.entry(sources).unwrap()).collect();
+            let entries: Vec<_> = run
+                .iter()
+                .map(|listed| listed.row.entry(sources).unwrap())
+                .collect();
             (
                 entries[0].category().to_owned(),
                 entries.iter().map(|e| e.name().to_owned()).collect(),
@@ -207,10 +215,10 @@ fn the_documents_compounds_list_and_an_unused_one_is_marked() {
         .into_iter()
         .filter_map(|id| PaletteRow::Compound(id).entry(sources));
     let mut rows = PaletteRows::default();
-    rows.refilter(sources, entries, "");
+    rows.refilter(sources, entries, "", None);
     let listed: Vec<(String, String, Option<String>)> = rows
         .runs()
-        .flat_map(|(_, run)| run.iter().map(|row| row.entry(sources).unwrap()))
+        .flat_map(|(_, run)| run.iter().map(|listed| listed.row.entry(sources).unwrap()))
         .map(|entry| {
             (
                 entry.category().to_owned(),
@@ -230,4 +238,103 @@ fn the_documents_compounds_list_and_an_unused_one_is_marked() {
             ("Compounds".to_owned(), "Denoise".to_owned(), None),
         ]
     );
+}
+
+/// A dropped wire lists one row for each port of an entry that takes it, in declared order, and
+/// none for an entry with no such port: an `Int` output lands on `Mix`'s `Int` and `Any` inputs,
+/// not its `String` one nor any of `Text`'s; a `String` input is fed by `Name`'s `String` output
+/// alone, and a const-only one by none. A pick's wire lands on the port its row names.
+#[test]
+fn a_dropped_wire_lists_the_ports_that_take_it() {
+    use scenarium::{
+        Binding, DataType, InputDecl, InputPort, NodeId, OutputDecl, OutputPort, PortId,
+    };
+
+    use crate::core::edit::graph_intent::GraphIntent;
+    use crate::gui::pane::graph_ui::gesture::new_node_ui::landing::{DroppedEnd, Landing};
+
+    let mut library = Library::default();
+    library.add(
+        internals::stub_func(FuncId::unique(), "Mix")
+            .input(1, InputDecl::required("A", DataType::Int))
+            .input(2, InputDecl::required("B", DataType::String))
+            .input(3, InputDecl::required("C", DataType::Any))
+            .output(1, OutputDecl::new("Sum", DataType::Int))
+            .build(),
+    );
+    library.add(
+        internals::stub_func(FuncId::unique(), "Text")
+            .input(1, InputDecl::required("S", DataType::String))
+            .build(),
+    );
+    library.add(
+        internals::stub_func(FuncId::unique(), "Name")
+            .output(1, OutputDecl::new("Out", DataType::String))
+            .build(),
+    );
+    let (graphs, shared) = (GraphSet::default(), SharedLibrary::default());
+    let sources = PaletteSources {
+        library: &library,
+        graphs: &graphs,
+        shared: &shared,
+    };
+    let listed = |dropped: DroppedEnd<'_>| {
+        let mut rows = PaletteRows::default();
+        rows.refilter(
+            sources,
+            library.iter().map(PaletteEntry::Func),
+            "",
+            Some(dropped),
+        );
+        rows.runs()
+            .flat_map(|(_, run)| run.iter().copied())
+            .map(|listed| {
+                let entry = listed.row.entry(sources).unwrap();
+                let landing = listed.landing.expect("a dropped wire's row lands");
+                format!(
+                    "{} > {}",
+                    entry.name(),
+                    dropped.landing_name(entry.ports(), landing)
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+
+    let source = OutputPort::new(NodeId::from_u128(1), PortId::new(1));
+    let int_output = OutputDecl::new("x", DataType::Int);
+    let from_output = DroppedEnd::Output {
+        source,
+        decl: &int_output,
+        is_const: false,
+    };
+    assert_eq!(listed(from_output), ["Mix > A", "Mix > C"]);
+
+    let target = InputPort::new(NodeId::from_u128(1), PortId::new(1));
+    let string_input = InputDecl::required("in", DataType::String);
+    let from_input = DroppedEnd::Input {
+        target,
+        decl: &string_input,
+    };
+    assert_eq!(listed(from_input), ["Name > Out"]);
+    let const_only = InputDecl::required("in", DataType::String).const_only();
+    let from_const_only = DroppedEnd::Input {
+        target,
+        decl: &const_only,
+    };
+    assert_eq!(listed(from_const_only), Vec::<String>::new());
+
+    let node_id = NodeId::from_u128(2);
+    let landing = Landing {
+        port: PortId::new(3),
+    };
+    assert!(matches!(
+        from_output.wire(node_id, landing),
+        GraphIntent::SetInput { input, to: Some(Binding::Wire(wired)) }
+            if input == InputPort::new(node_id, PortId::new(3)) && wired == source
+    ));
+    assert!(matches!(
+        from_input.wire(node_id, landing),
+        GraphIntent::SetInput { input, to: Some(Binding::Wire(wired)) }
+            if input == target && wired == OutputPort::new(node_id, PortId::new(3))
+    ));
 }

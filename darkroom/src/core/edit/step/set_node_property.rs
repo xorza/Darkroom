@@ -57,7 +57,11 @@ impl Reversible for SetNodeProperty {
         true
     }
 
+    /// A disabled flag and a cache mode are both read by a compile.
     fn facts(&self) -> EditFacts {
-        EditFacts::NONE
+        EditFacts {
+            program: true,
+            ..EditFacts::NONE
+        }
     }
 }

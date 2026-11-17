@@ -1,62 +1,21 @@
-use palantir::{MenuItem, MenuSeparator, Ui};
+use palantir::Ui;
+use scenarium::NodeId;
 
-use crate::core::edit::collapse;
-use crate::core::edit::compound_intent::CompoundIntent;
 use crate::core::edit::graph_intent::GraphIntent;
-use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
-use crate::core::edit::make_unique::MakeUnique;
-use crate::gui::frame::app_command::AppCommand;
-use crate::gui::frame::app_command::RunCommand;
-use scenarium::{Boundary, CompoundId, Node, NodeId, ProgramId};
-
+use crate::gui::command::menu::{self, NODE_MENU, Unavailable};
 use crate::gui::frame::stage::Stage;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::gesture::item_menu::ItemMenu;
 
-/// Right-click on a node body → a small popup with actions on the node, and on an instance the
-/// actions on its compound, where the user meets it: Open, Expand, Make Unique, Make Local while
-/// it follows the library, and Lock or Unlock. The trigger scan, the
-/// per-open node latch, and the popup lifecycle are [`ItemMenu`]'s. "Run to this node" needs
-/// only the clicked node's id and surfaces an [`AppCommand`]; the structural picks read the live
-/// selection off the context and push their intents onto the frame's queue, through the same
-/// builders the Ctrl+D and Delete chords drive.
+/// Right-click on a node body → a popup of the selection's commands, [`NODE_MENU`]: a
+/// right-click selects the node it lands on first, so each row acts on what the menu opened on,
+/// and a row whose command the selection does not take is left out. On an instance that is its
+/// compound's commands too, where the user meets it: Open, Expand, Make Unique, Make Local while
+/// it follows the library, and Locked. The trigger scan, the per-open node latch, and the popup
+/// lifecycle are [`ItemMenu`]'s.
 #[derive(Default, Debug)]
 pub(crate) struct NodeMenuUi {
     menu: ItemMenu<NodeId>,
-}
-
-/// A menu pick before routing. `Run` names the program node the menu opened on, in the instance
-/// the pane shows; the structural picks
-/// carry only their kind, as their target is the selection (a right-click selects the node it
-/// landed on first).
-#[derive(Copy, Clone, Debug)]
-enum MenuChoice {
-    Run {
-        program_id: ProgramId,
-    },
-    Duplicate {
-        incoming: IncomingWires,
-    },
-    /// Put another node in this one's place, picked from the palette.
-    Replace,
-    Remove,
-    /// Open the instance's compound, as a double-click on its body does.
-    Open {
-        compound: CompoundId,
-    },
-    /// Put the compound's nodes in the instance's place.
-    Expand,
-    /// Give the instance a copy of its compound of its own.
-    MakeUnique,
-    /// Lock the compound against edits, or unlock it.
-    Lock {
-        compound: CompoundId,
-        locked: bool,
-    },
-    /// Stop following the library, and edit this copy.
-    MakeLocal {
-        compound: CompoundId,
-    },
 }
 
 impl NodeMenuUi {
@@ -81,156 +40,16 @@ impl NodeMenuUi {
         self.menu.open_on(ui, graph_ctx, node)
     }
 
-    /// Record the menu and resolve this frame's pick onto the stage's requests — a run as
-    /// the [`AppCommand`] it means, the structural picks as ordinary intents. Returns the node a
-    /// Replace with… pick names, for the palette to open on.
+    /// Record the menu, and raise the command of a picked row onto the stage's requests.
     ///
     /// Opening is [`Self::open_on`]'s; this only ever shows a menu already latched.
-    pub(crate) fn record(
-        &mut self,
-        ui: &mut Ui,
-        stage: &mut Stage<'_, GraphCtx<'_>>,
-    ) -> Option<NodeId> {
+    pub(crate) fn record(&mut self, ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
         let (graph_ctx, out) = (stage.ctx, &mut *stage.out);
         self.menu.retain(|node_id| graph_ctx.contains(node_id));
-        let pick = self.menu.show(ui, "node_body_menu", |ui, node_id| {
-            let mut chosen = None;
-            // The duplicates show only when the clicked node is a graph node, not a ghost node: a ghost node
-            // neither runs nor copies. "Run to this node" shows by the header play chip's rule.
-            if let Some(node) = graph_ctx.node(node_id).filter(|node| !node.ghost()) {
-                if let Some(program_id) = node.runnable() {
-                    if MenuItem::new("Run to this node").show(ui).left.clicked() {
-                        chosen = Some(MenuChoice::Run { program_id });
-                    }
-                    MenuSeparator::new().show(ui);
-                }
-                if MenuItem::new("Duplicate").show(ui).clicked() {
-                    chosen = Some(MenuChoice::Duplicate {
-                        incoming: IncomingWires::Drop,
-                    });
-                }
-                if MenuItem::new("Duplicate with incoming wires")
-                    .show(ui)
-                    .left
-                    .clicked()
-                {
-                    chosen = Some(MenuChoice::Duplicate {
-                        incoming: IncomingWires::Keep,
-                    });
-                }
-                MenuSeparator::new().show(ui);
-                if let Some(compound) = node.compound() {
-                    let document = graph_ctx.document();
-                    let side = &document.sides[&compound];
-                    if MenuItem::new("Open").show(ui).clicked() {
-                        chosen = Some(MenuChoice::Open { compound });
-                    }
-                    if MenuItem::new("Expand").show(ui).clicked() {
-                        chosen = Some(MenuChoice::Expand);
-                    }
-                    // Offered once another node places it too, as the pane header offers it
-                    // beside its count of uses.
-                    if document.graphs.uses(compound).count() > 1
-                        && MakeUnique::placed(document, graph_ctx.graph(), &[node_id]).is_some()
-                        && MenuItem::new("Make Unique").show(ui).clicked()
-                    {
-                        chosen = Some(MenuChoice::MakeUnique);
-                    }
-                    // As the pane header offers them: Make Local while it follows the library,
-                    // and Lock or Unlock beside it.
-                    if side.follows && MenuItem::new("Make Local").show(ui).clicked() {
-                        chosen = Some(MenuChoice::MakeLocal { compound });
-                    }
-                    let label = if side.locked { "Unlock" } else { "Lock" };
-                    if MenuItem::new(label).show(ui).clicked() {
-                        chosen = Some(MenuChoice::Lock {
-                            compound,
-                            locked: !side.locked,
-                        });
-                    }
-                    MenuSeparator::new().show(ui);
-                }
-            }
-            let boundary = graph_ctx.body().find(node_id).and_then(Node::boundary);
-            // Any node with a body, an instance or a ghost node takes another in its place.
-            if boundary.is_none() && MenuItem::new("Replace with\u{2026}").show(ui).clicked() {
-                chosen = Some(MenuChoice::Replace);
-            }
-            // A compound keeps its `Outputs` node and one `Inputs` node.
-            let inputs_count = || {
-                graph_ctx
-                    .body()
-                    .iter()
-                    .filter(|node| node.boundary() == Some(Boundary::Inputs))
-                    .count()
-            };
-            let removable = match boundary {
-                None => true,
-                Some(Boundary::Outputs) => false,
-                Some(Boundary::Inputs) => inputs_count() > 1,
-            };
-            if removable && MenuItem::new("Remove").show(ui).clicked() {
-                chosen = Some(MenuChoice::Remove);
-            }
-            chosen
+        self.menu.show(ui, "node_body_menu", |ui, _| {
+            menu::record(ui, NODE_MENU, graph_ctx, out, Unavailable::Hidden);
+            None::<()>
         });
-        let pick = pick?;
-        match pick.choice {
-            MenuChoice::Run { program_id } => {
-                out.push_app(AppCommand::Run(RunCommand::Node(program_id)));
-            }
-            MenuChoice::Duplicate { incoming } => {
-                out.extend_graph(
-                    graph_ctx.graph(),
-                    GraphIntent::duplicate(
-                        graph_ctx.document(),
-                        graph_ctx.graph(),
-                        graph_ctx.library(),
-                        incoming,
-                        || NodeId::unique().as_u128(),
-                    ),
-                );
-            }
-            // One intent per member, batched into a single undo entry by the drain, as the Delete
-            // chord does.
-            MenuChoice::Remove => out.extend_graph(
-                graph_ctx.graph(),
-                GraphIntent::remove_selection(graph_ctx.view()),
-            ),
-            MenuChoice::Replace => return Some(pick.target),
-            MenuChoice::Open { compound } => {
-                let through = graph_ctx.through().map(|path| path.child(pick.target));
-                out.push_enter(compound, through);
-            }
-            MenuChoice::Expand => out.extend_graph(
-                graph_ctx.graph(),
-                collapse::expand(
-                    graph_ctx.document(),
-                    graph_ctx.graph(),
-                    graph_ctx.library(),
-                    pick.target,
-                ),
-            ),
-            // Planned on the click alone, as a plan copies the whole definition.
-            MenuChoice::MakeUnique => {
-                if let Some(unique) =
-                    MakeUnique::plan(graph_ctx.document(), graph_ctx.graph(), &[pick.target])
-                {
-                    unique.queue(out.document());
-                }
-            }
-            MenuChoice::Lock { compound, locked } => out.push_compound(CompoundIntent::SetLocked {
-                id: compound,
-                locked,
-            }),
-            MenuChoice::MakeLocal { compound } => {
-                out.push_compound(CompoundIntent::SetFollows {
-                    id: compound,
-                    follows: false,
-                });
-            }
-        }
-        None
     }
 }
 

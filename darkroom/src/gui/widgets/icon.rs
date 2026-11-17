@@ -29,12 +29,6 @@ pub(crate) enum Icon {
     Sink,
     /// Impure, recomputed every run: a lightning bolt.
     Impure,
-    /// Reset the view: a ring around a dot.
-    ResetView,
-    /// Show all nodes: a frame around four dots.
-    ShowAll,
-    /// Show the selection: a frame around one square.
-    ShowSelected,
     /// Fit the image to the view: four corner brackets.
     Fit,
     /// Show the image at its actual size: a ratio of one to one, drawn as the set's strokes and
@@ -42,6 +36,9 @@ pub(crate) enum Icon {
     ActualSize,
     /// Nearest sampling: a 2 × 2 grid of squares.
     Pixels,
+    /// A display stretch: a tone curve rising steeply from black and easing into white, in its
+    /// axes.
+    Stretch,
     /// Done: a check mark.
     Check,
     /// Failed: a cross.
@@ -107,20 +104,6 @@ impl Icon {
                     (12.5, 10.5),
                 ],
             ),
-            Self::ResetView => {
-                pen.circle(ui, (12.0, 12.0), 7.0);
-                pen.dot(ui, (12.0, 12.0), 2.0);
-            }
-            Self::ShowAll => {
-                pen.frame(ui, (3.5, 3.5, 17.0, 17.0), 3.0);
-                for center in [(9.0, 9.0), (15.0, 9.0), (9.0, 15.0), (15.0, 15.0)] {
-                    pen.dot(ui, center, 1.5);
-                }
-            }
-            Self::ShowSelected => {
-                pen.frame(ui, (3.5, 3.5, 17.0, 17.0), 3.0);
-                pen.fill(ui, (8.5, 8.5, 7.0, 7.0), 1.5);
-            }
             Self::Fit => {
                 pen.open(ui, &[(4.0, 9.0), (4.0, 4.0), (9.0, 4.0)]);
                 pen.open(ui, &[(15.0, 4.0), (20.0, 4.0), (20.0, 9.0)]);
@@ -178,6 +161,21 @@ impl Icon {
                     pen.fill(ui, (x, y, 6.0, 6.0), 1.0);
                 }
             }
+            Self::Stretch => {
+                pen.open(ui, &[(4.0, 4.0), (4.0, 20.0), (20.0, 20.0)]);
+                // The midtones transfer `(m − 1)x / ((2m − 1)x − m)` at m = 0.2, the stretch's
+                // own curve, at x = 0, 0.1, 0.25, 0.5 and 1 on the 16-unit square from (4, 20).
+                pen.open(
+                    ui,
+                    &[
+                        (4.0, 20.0),
+                        (5.6, 15.1),
+                        (8.0, 10.9),
+                        (12.0, 7.2),
+                        (20.0, 4.0),
+                    ],
+                );
+            }
         }
     }
 }
@@ -206,9 +204,9 @@ impl Pen {
         ui.add_shape(Shape::line(self.at(a), self.at(b)), self.stroke);
     }
 
-    /// An open stroke through `points`; at most four, the most any icon draws in one stroke.
+    /// An open stroke through `points`; at most five, the most any icon draws in one stroke.
     fn open(self, ui: &mut Ui, points: &[(f32, f32)]) {
-        let mut placed = [Vec2::ZERO; 4];
+        let mut placed = [Vec2::ZERO; 5];
         for (to, &from) in placed.iter_mut().zip(points) {
             *to = self.at(from);
         }

@@ -11,7 +11,9 @@ use palantir::WidgetId;
 use palantir::{
     Checkbox, ComboBox, Configure, Panel, SizeSpec, Sizing, Spacing, Text, TextEdit, Ui, VAlign,
 };
-use scenarium::{CompoundId, ConstValue, DataType, EventDecl, GraphSet, Library, Numbered, PortId};
+use scenarium::{
+    CompoundId, ConstValue, DataType, EventDecl, GraphSet, Library, Numbered, PortId, ValueDomain,
+};
 
 use crate::core::document::compound_side::ReadOnly;
 use crate::core::edit::compound_intent::CompoundIntent;
@@ -375,7 +377,7 @@ impl PortRow<'_> {
                                 library,
                                 value,
                                 data_type,
-                                value_variants: &[],
+                                domain: &ValueDomain::Any,
                             };
                             if let Some(to) = editor.show(ui) {
                                 edit = Some(PortEdit::Default {

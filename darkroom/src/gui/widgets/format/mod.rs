@@ -5,8 +5,10 @@
 
 pub(crate) mod bytes;
 pub(crate) mod elapsed;
+pub(crate) mod gesture_keys;
 pub(crate) mod path_preview;
 pub(crate) mod percent;
+pub(crate) mod pixel_size;
 pub(crate) mod shown_value;
 
 use std::io::Cursor;

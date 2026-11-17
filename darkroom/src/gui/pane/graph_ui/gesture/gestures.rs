@@ -12,9 +12,7 @@ use crate::core::edit::graph_intent::click_mode::ClickMode;
 use crate::gui::frame::stage::Stage;
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
-use crate::gui::pane::graph_ui::canvas_input::{
-    CanvasGesture, CanvasInput, Escape, SecondaryPress,
-};
+use crate::gui::pane::graph_ui::canvas_input::{CanvasGesture, CanvasInput, Escape};
 use crate::gui::pane::graph_ui::gesture::breaker_ui::BreakerUi;
 use crate::gui::pane::graph_ui::gesture::group_drag::{self, GroupDrag};
 use crate::gui::pane::graph_ui::gesture::new_node_ui::NewNodeUi;
@@ -26,7 +24,7 @@ use crate::gui::pane::graph_ui::gesture::subscription_ui::SubscriptionUi;
 use crate::gui::pane::graph_ui::gesture::tie_ui::TieUi;
 use crate::gui::pane::graph_ui::gesture::tie_ui::tie_menu_ui::TieMenuUi;
 use crate::gui::pane::graph_ui::gesture::tie_ui::tie_widget::{self, TieWidgets};
-use crate::gui::pane::graph_ui::gesture::wire_ui::{WireEnd, WireUi};
+use crate::gui::pane::graph_ui::gesture::wire_ui::WireUi;
 use crate::gui::pane::graph_ui::unsettled_ctx::UnsettledCtx;
 use crate::gui::pane::graph_ui::wid;
 
@@ -39,10 +37,6 @@ use crate::gui::pane::graph_ui::wid;
 /// its state is a buffer and which is the gesture.
 #[derive(Debug, Default)]
 pub(crate) struct Gestures {
-    /// Whether the right press now held, or released this frame, already ended a floating wire,
-    /// whose release then opens no palette: palantir reports the click on the release, frames
-    /// after the press that ended the wire.
-    secondary: SecondaryPress,
     /// The one group drag a pointer holds, latched off a node's, a tie's or a preview spawn's
     /// press.
     pub(crate) group_drag: GroupDrag,
@@ -70,7 +64,6 @@ impl Gestures {
     /// here does not compile until it is either dropped or named as surviving.
     pub(crate) fn reset(&mut self) {
         let Self {
-            secondary,
             group_drag,
             breaker_ui,
             wire_ui,
@@ -95,7 +88,6 @@ impl Gestures {
         tie_widgets.reset();
         tie_menu.reset();
         camera.reset();
-        *secondary = SecondaryPress::Free;
     }
 
     /// Whether a gesture, a menu or the palette is in flight — what Esc
@@ -105,7 +97,6 @@ impl Gestures {
     /// here too.
     pub(crate) const fn in_flight(&self) -> bool {
         let Self {
-            secondary: _,
             group_drag,
             breaker_ui,
             wire_ui,
@@ -149,7 +140,7 @@ impl Gestures {
         };
         let canvas = ui.response_for(canvas::outer_wid(graph));
         CanvasInput {
-            gesture: CanvasGesture::classify(&canvas, ui.modifiers(), self.secondary),
+            gesture: CanvasGesture::classify(&canvas, ui.modifiers()),
             escape,
         }
     }
@@ -172,24 +163,7 @@ impl Gestures {
             self.group_drag
                 .latch(start, stage.ctx.graph_ctx().graph(), ui, stage.out);
         }
-        let canvas = ui.response_for(canvas::outer_wid(stage.ctx.graph_ctx().graph()));
-        let dropped = match self.wire_ui.input(ui, stage) {
-            Some(WireEnd::DroppedOnCanvas(source)) => Some(source),
-            // The press that ended a floating wire is spent, its release too when it lands this
-            // same frame: the palette sees no click.
-            Some(WireEnd::Secondary) => {
-                self.secondary = SecondaryPress::Spent;
-                let modifiers = ui.modifiers();
-                let gesture = CanvasGesture::classify(&canvas, modifiers, self.secondary);
-                stage.ctx = stage.ctx.with_gesture(gesture);
-                None
-            }
-            None => None,
-        };
-        // Past the classifications that read it, so a release still spends the press it ends.
-        if !canvas.right.held() {
-            self.secondary = SecondaryPress::Free;
-        }
+        let dropped = self.wire_ui.input(ui, stage);
         // Subscription wires (emitter → subscriber) latch and commit here, for the same reasons as
         // the wire gesture above; an emitter glyph and a data port can't both latch (different
         // widget-id spaces).

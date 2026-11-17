@@ -157,3 +157,63 @@ fn an_image_makes_a_frame_up_to_the_side_limit() {
         Err(FrameDescError::SidePastMax { size })
     );
 }
+
+/// A pixel reads where the samples lie: interleaved `u16` in its own type, planes as `f32`, and
+/// one past the edge as `None` in either.
+#[test]
+fn a_pixel_reads_in_the_layout_it_lies_in() {
+    use imaginarium::{Channels, InterleavedDesc, InterleavedImage};
+
+    let desc = InterleavedDesc::new(USize2::new(2, 1), imaginarium::ColorFormat::MONO_U16);
+    // 1000 and 2000 as native-endian bytes.
+    let bytes = [1000_u16, 2000]
+        .iter()
+        .flat_map(|v| v.to_ne_bytes())
+        .collect();
+    let interleaved = Image::from(InterleavedImage::new_with_data(desc, bytes).unwrap());
+    assert_eq!(
+        interleaved.sample(USizeVec2::new(1, 0)),
+        Some(PixelSample::U16(Channels::Mono(2000)))
+    );
+    let planar = Image::from(PlanarImage::new_mono(Buffer2::new(
+        (2, 1),
+        vec![0.25, 0.75],
+    )));
+    assert_eq!(
+        planar.sample(USizeVec2::new(1, 0)),
+        Some(PixelSample::F32(Channels::Mono(0.75)))
+    );
+    assert_eq!(interleaved.sample(USizeVec2::new(2, 0)), None);
+    assert_eq!(planar.sample(USizeVec2::new(0, 1)), None);
+}
+
+/// Auto shows the image through lumos's own stretch of it, byte for byte, which is not the
+/// linear picture; a flat image has no background to place, and Auto says so where Linear draws.
+#[test]
+fn an_auto_preview_is_lumos_stretch_of_the_image() {
+    use crate::image::display_stretch::{DisplayStretch, DisplayStretchError};
+
+    // A dim 8 × 8 ramp, as a linear frame sits: 0.01 to 0.0731 in steps of 0.001.
+    let ramp: Vec<f32> = (0..64).map(|v| 0.01 + v as f32 * 0.001).collect();
+    let image = Image::from(PlanarImage::new_mono(Buffer2::new((8, 8), ramp)));
+    let size = USize2::new(4, 4);
+
+    let mut frame = image.to_planar().unwrap();
+    DisplayStretch::AUTO.apply(&mut frame).unwrap();
+    let lumos = imaginarium::Preview::new(size).planes_to_rgba8(&LinearParts::from(frame).pixels);
+    let auto = image.preview_rgba8(size, DisplayStretch::Auto).unwrap();
+    assert_eq!(auto.bytes(), lumos.bytes());
+    let linear = image.preview_rgba8(size, DisplayStretch::Linear).unwrap();
+    assert_ne!(
+        auto.bytes(),
+        linear.bytes(),
+        "the stretch changes the picture"
+    );
+
+    let flat = Image::from(PlanarImage::new_mono(Buffer2::new((8, 8), vec![0.5; 64])));
+    assert!(flat.preview_rgba8(size, DisplayStretch::Linear).is_ok());
+    assert!(matches!(
+        flat.preview_rgba8(size, DisplayStretch::Auto),
+        Err(DisplayStretchError::Stretch(_))
+    ));
+}

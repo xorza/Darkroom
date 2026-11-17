@@ -21,11 +21,12 @@ pub(crate) mod preview_converter;
 use std::collections::HashMap;
 use std::fmt;
 use std::num::NonZeroU32;
+use std::sync::Arc;
 
 use common::{ErrorChain, USize2};
-use glam::UVec2;
-use imaginarium::{ColorFormat, InterleavedDesc};
-use lens::Image;
+use glam::{USizeVec2, UVec2};
+use imaginarium::{ColorFormat, InterleavedDesc, PixelSample};
+use lens::{DisplayStretch, Image};
 use palantir::{Image as Raster, ImageHandle, Ui};
 use scenarium::{DynamicValue, ProgramId};
 
@@ -54,7 +55,25 @@ pub(crate) struct PreviewStore {
 pub(crate) enum StoredContent {
     Text(String),
     Image(DrawablePreview),
+    /// An image its node's Display stretch found nothing to stretch in: the source stays, so a
+    /// change of the stretch converts it again with no run.
+    Unstretched(UnstretchedPreview),
     Error(DrawablePreviewError),
+}
+
+/// An image's source, and the stretch its picture was converted under.
+#[derive(Clone, Copy, Debug)]
+struct Stretched<'a> {
+    source: &'a DynamicValue,
+    stretch: DisplayStretch,
+}
+
+/// An image with no picture under the stretch it was converted under.
+#[derive(Debug)]
+pub(crate) struct UnstretchedPreview {
+    error: DrawablePreviewError,
+    source: DynamicValue,
+    stretch: DisplayStretch,
 }
 
 impl StoredContent {
@@ -64,7 +83,7 @@ impl StoredContent {
     pub(crate) const fn image(&self) -> Option<&DrawablePreview> {
         match self {
             Self::Image(image) => Some(image),
-            Self::Text(_) | Self::Error(_) => None,
+            Self::Text(_) | Self::Unstretched(_) | Self::Error(_) => None,
         }
     }
 
@@ -73,8 +92,26 @@ impl StoredContent {
     pub(crate) const fn message(&self) -> Option<PreviewMessage<'_>> {
         match self {
             Self::Text(text) => Some(PreviewMessage::Text(text.as_str())),
-            Self::Error(error) => Some(PreviewMessage::Failure(error)),
+            Self::Error(error) | Self::Unstretched(UnstretchedPreview { error, .. }) => {
+                Some(PreviewMessage::Failure(error))
+            }
             Self::Image(_) => None,
+        }
+    }
+
+    /// The source an image keeps and the stretch it was converted under: `None` for a value
+    /// with no image.
+    const fn stretched(&self) -> Option<Stretched<'_>> {
+        match self {
+            Self::Image(image) => Some(Stretched {
+                source: &image.source,
+                stretch: image.stretch,
+            }),
+            Self::Unstretched(unstretched) => Some(Stretched {
+                source: &unstretched.source,
+                stretch: unstretched.stretch,
+            }),
+            Self::Text(_) | Self::Error(_) => None,
         }
     }
 }
@@ -114,6 +151,8 @@ pub(crate) struct DrawablePreview {
     /// which palantir's device-loss decision refuses and whose `update` cannot resize; running
     /// the preview nodes again, which costs a run and touches run state.
     source: DynamicValue,
+    /// The stretch both textures are converted under: the node's Display when it was published.
+    stretch: DisplayStretch,
     pub(crate) source_bytes: usize,
     /// The publish this image came from, which a full raster converted from it names.
     ticket: Ticket,
@@ -201,18 +240,23 @@ impl PreviewStore {
         self.entries.get(&program_id)
     }
 
-    /// Queue one preview node's freshly published value for conversion. The card keeps what it
-    /// shows until a later [`Self::land`] lands the result.
+    /// Queue one preview node's freshly published value for conversion under `stretch`, its
+    /// node's Display. The card keeps what it shows until a later [`Self::land`] lands the result.
     ///
     /// No retention filter on the way in: a node that published exists. `reconcile` drops the
     /// value once that stops being true.
-    pub(crate) fn publish(&mut self, program_id: ProgramId, value: DynamicValue) {
+    pub(crate) fn publish(
+        &mut self,
+        program_id: ProgramId,
+        value: DynamicValue,
+        stretch: DisplayStretch,
+    ) {
         Publisher {
             converting: &mut self.converting,
             last_ticket: &mut self.last_ticket,
             converter: &self.converter,
         }
-        .card(program_id, value);
+        .card(program_id, value, stretch);
     }
 
     /// Register every conversion finished since the last frame. A card
@@ -246,7 +290,7 @@ impl PreviewStore {
                 && image.is_lost()
                 && !publisher.converting.contains_key(&program_id)
             {
-                publisher.card(program_id, image.source.clone());
+                publisher.card(program_id, image.source.clone(), image.stretch);
             }
         }
         let Publisher { converting, .. } = publisher;
@@ -281,6 +325,7 @@ impl PreviewStore {
         self.converter.jobs().send(Job {
             program_id,
             ticket: image.ticket,
+            stretch: image.stretch,
             work: Work::Full {
                 source: image.source.clone(),
                 texels,
@@ -308,11 +353,40 @@ impl PreviewStore {
     ///
     /// A preview's own node is its retention. See `Document::holds_preview_node` for why this
     /// cache is stricter than the others.
+    ///
+    /// An image whose node's Display moved converts again under the new stretch, so a change
+    /// shows with no run, as a lost device's textures are made anew. One still converting waits
+    /// for that conversion to land: converting its older source now would land after it and
+    /// show the older value.
     pub(crate) fn reconcile(&mut self, document: &Document) {
         self.entries
             .retain(|program_id, _| document.holds_preview_node(*program_id));
         self.converting
             .retain(|program_id, _| document.holds_preview_node(*program_id));
+        let Self {
+            entries,
+            converting,
+            last_ticket,
+            converter,
+        } = self;
+        let mut publisher = Publisher {
+            converting,
+            last_ticket,
+            converter,
+        };
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "each image publishes under its own node, so the order changes no result"
+        )]
+        for (&program_id, content) in entries.iter() {
+            let Some(Stretched { source, stretch }) = content.stretched() else {
+                continue;
+            };
+            let wanted = document.preview_stretch(program_id);
+            if wanted != stretch && !publisher.converting.contains_key(&program_id) {
+                publisher.card(program_id, source.clone(), wanted);
+            }
+        }
     }
 }
 
@@ -325,8 +399,8 @@ struct Publisher<'a> {
 }
 
 impl Publisher<'_> {
-    /// Queue `value` as `program_id`'s newest publish, for its card.
-    fn card(&mut self, program_id: ProgramId, value: DynamicValue) {
+    /// Queue `value` as `program_id`'s newest publish, for its card under `stretch`.
+    fn card(&mut self, program_id: ProgramId, value: DynamicValue, stretch: DisplayStretch) {
         let ticket = self.last_ticket.next();
         *self.last_ticket = ticket;
         self.converting
@@ -339,6 +413,7 @@ impl Publisher<'_> {
         self.converter.jobs().send(Job {
             program_id,
             ticket,
+            stretch,
             work: Work::Thumbnail(value),
         });
     }
@@ -365,7 +440,7 @@ fn accept(landing: Landing<'_>, ui: &Ui, converted: Converted) {
             if let Some(StoredContent::Image(image)) = landing.entries.get_mut(&program_id)
                 && image.ticket == ticket
             {
-                image.land_full(ui, &raster);
+                image.land_full(ui, raster);
             }
         }
     }
@@ -393,7 +468,20 @@ fn land_card(landing: Landing<'_>, ui: &Ui, program_id: ProgramId, ticket: Ticke
     let content = match card {
         Card::Text(text) => StoredContent::Text(text),
         Card::Failed(error) => StoredContent::Error(error),
-        Card::Image { thumbnail, source } => {
+        Card::Unstretched {
+            error,
+            source,
+            stretch,
+        } => StoredContent::Unstretched(UnstretchedPreview {
+            error,
+            source,
+            stretch,
+        }),
+        Card::Image {
+            thumbnail,
+            source,
+            stretch,
+        } => {
             let Thumbnail {
                 raster,
                 native_size,
@@ -410,6 +498,7 @@ fn land_card(landing: Landing<'_>, ui: &Ui, program_id: ProgramId, ticket: Ticke
                     source_bytes: source.ram_usage().total(),
                     full: FullImage::Unasked,
                     source,
+                    stretch,
                     ticket,
                 }),
                 Err(error) => StoredContent::Error(error.into()),
@@ -444,6 +533,15 @@ impl DrawablePreview {
         }
     }
 
+    /// The source's pixel at `pos`, or `None` outside it: a read of pixels the store already
+    /// holds, on the frame's thread.
+    pub(crate) fn sample(&self, pos: USizeVec2) -> Option<PixelSample> {
+        self.source
+            .as_custom::<Image>()
+            .expect("an image is stored only from an image's value")
+            .sample(pos)
+    }
+
     /// Whether a lost device took a texture this image shows: its thumbnail, or its full texture
     /// once landed.
     fn is_lost(&self) -> bool {
@@ -451,15 +549,15 @@ impl DrawablePreview {
             || matches!(&self.full, FullImage::Resident(full) if !full.is_resident())
     }
 
-    /// Register the full raster converted for this image.
-    fn land_full(&mut self, ui: &Ui, raster: &Raster) {
+    /// Register the full raster converted for this image, or why it has none.
+    fn land_full(&mut self, ui: &Ui, raster: Result<Raster, DrawablePreviewError>) {
         debug_assert!(
             matches!(self.full, FullImage::Converting { .. }),
             "a full raster lands only on the image that asked for it"
         );
-        self.full = match ui.load_image(raster) {
+        self.full = match raster.and_then(|raster| Ok(ui.load_image(&raster)?)) {
             Ok(handle) => FullImage::Resident(handle),
-            Err(error) => FullImage::Failed(error.into()),
+            Err(error) => FullImage::Failed(error),
         };
     }
 }
@@ -475,15 +573,24 @@ fn native_size(desc: InterleavedDesc) -> Result<UVec2, DrawablePreviewError> {
     Ok(UVec2::new(x, y))
 }
 
-/// Downscale to `target` and convert to RGBA8 — the one place pixels are
+/// Downscale to `target` and convert to RGBA8 through `stretch` — the one place pixels are
 /// produced, and so the seam a test asserts exact output on.
-fn rgba8_raster(image: &Image, target: UVec2) -> Raster {
-    let rgba = image.preview_rgba8(USize2::new(target.x as usize, target.y as usize));
+fn rgba8_raster(
+    image: &Image,
+    target: UVec2,
+    stretch: DisplayStretch,
+) -> Result<Raster, DrawablePreviewError> {
+    let rgba = image
+        .preview_rgba8(USize2::new(target.x as usize, target.y as usize), stretch)
+        .map_err(|error| DrawablePreviewError::Stretch(Arc::new(error)))?;
     let desc = rgba.desc();
     debug_assert_eq!(desc.color_format(), ColorFormat::RGBA_U8);
     let pixels = rgba.into_bytes();
     debug_assert_eq!(pixels.len(), desc.row_byte_len() * desc.size().height);
-    Raster::from_srgba8(target, pixels).expect("a non-zero target the converter filled exactly")
+    Ok(
+        Raster::from_srgba8(target, pixels)
+            .expect("a non-zero target the converter filled exactly"),
+    )
 }
 
 /// `native` scaled to fit `max_dim` on its longest edge — aspect preserved,

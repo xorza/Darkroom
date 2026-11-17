@@ -6,6 +6,9 @@ use crate::interleaved::image_pixels::{ImagePixels, Stored};
 use crate::interleaved::interleaved_desc::InterleavedDesc;
 use crate::planar::planar_image::PlanarImage;
 use common::Buffer2;
+use glam::USizeVec2;
+
+use crate::color::pixel_sample::PixelSample;
 
 /// A runtime-format image backed by tightly packed, typed interleaved pixels.
 #[derive(Clone, Debug)]
@@ -21,6 +24,11 @@ impl InterleavedImage {
 
     pub fn bytes(&self) -> &[u8] {
         self.pixels.bytes()
+    }
+
+    /// The pixel at `pos` in this image's own sample type, or `None` outside the image.
+    pub fn sample(&self, pos: USizeVec2) -> Option<PixelSample> {
+        self.pixels.sample(pos)
     }
 
     /// The pixel bytes as an owned `Vec<u8>`. A `u8` format hands over its allocation; `u16`

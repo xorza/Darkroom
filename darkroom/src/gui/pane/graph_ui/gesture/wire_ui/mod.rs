@@ -1,4 +1,4 @@
-use palantir::{PointerButton, PointerEvent, PointerWake, Ui};
+use palantir::Ui;
 use scenarium::{Binding, Boundary, CompoundId, GraphId, InputPort, Interface, OutputPort, PortId};
 
 use crate::core::edit::compound_intent::CompoundIntent;
@@ -18,43 +18,15 @@ use crate::gui::pane::graph_ui::scene::canvas_geometry::CanvasGeometry;
 use crate::gui::pane::graph_ui::scene::wire::Wire;
 use crate::gui::port_ref::{PortKind, PortRef};
 
-/// Owns the in-flight new wire, a held drag or a free-floating wire (see [`InFlight`]); one
-/// `Option` is enough. The permanent wires live on the authoring graph and are painted off it by
+/// Owns the in-flight new wire, a held drag (see [`GlyphDrag`]); one `Option` is enough. The
+/// permanent wires live on the authoring graph and are painted off it by
 /// [`WirePass::draw_data_wires`](crate::gui::pane::graph_ui::draw::wire::WirePass::draw_data_wires).
 #[derive(Default, Debug)]
 pub(crate) struct WireUi {
-    state: Option<InFlight>,
-}
-
-/// How a wire ended this frame, beyond the edit it raised, which the canvas acts on.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum WireEnd {
-    /// A held wire released over empty canvas, from this port: the palette opens on it, and
-    /// the wire floats from it again once a node is picked (see [`DragMode::Floating`]).
-    DroppedOnCanvas(PortRef),
-    /// A floating wire ended on a right press, which the canvas spends, so the press reads
-    /// purely as "cancel" and its click opens no palette.
-    Secondary,
-}
-
-/// The in-flight wire being created: a [`GlyphDrag`] within the data-port domain (both ends are
-/// `PortRef`s, as a wire can be pulled from either kind), plus which terminating input ends it.
-/// Both modes share one preview renderer ([`WireUi::record`]), snap tracking, and data.
-#[derive(Clone, Copy, Debug)]
-pub(super) struct InFlight {
-    pub(super) drag: GlyphDrag<PortRef, PortRef>,
-    pub(super) mode: DragMode,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(super) enum DragMode {
-    /// LMB-drag from the latched port; ends on button release. A compatible snap commits, an
-    /// input dropped on its own body gets a const, a drop on empty canvas opens the palette.
-    Held,
-    /// Free wire following the cursor with no button held, entered after a dropped wire spawned
-    /// a node, so the user aims at the exact port. A left-click over a compatible port commits;
-    /// a left-click elsewhere, a right-click, or Esc cancels.
-    Floating,
+    /// A drag within the data-port domain: both ends are `PortRef`s, as a wire can be pulled from
+    /// either kind. It ends on the button's release: a compatible snap commits, an input dropped
+    /// on its own body gets a const, and a drop on empty canvas opens the palette on it.
+    state: Option<GlyphDrag<PortRef, PortRef>>,
 }
 
 impl WireUi {
@@ -68,36 +40,20 @@ impl WireUi {
         self.state.is_some()
     }
 
-    /// Re-enter [`DragMode::Floating`] off `start`, the source of a wire dropped on empty canvas
-    /// whose palette pick spawned a node. Called in the record that saw the pick.
+    /// Drive the in-flight wire: latch a fresh drag, track the snap target, and resolve on the
+    /// button's release.
     ///
-    /// `start` was latched frames earlier, so a Ctrl+Z in between can have removed its node.
-    /// Not latching is how the wire drops, the same answer `input`'s re-latch gives for the same
-    /// window.
-    pub(crate) fn resume(&mut self, start: PortRef, graph_ctx: GraphCtx<'_>) {
-        if graph_ctx.contains(start.node_id) {
-            self.state = Some(InFlight {
-                drag: GlyphDrag::new(start),
-                mode: DragMode::Floating,
-            });
-        }
-    }
-
-    /// Drive the in-flight wire: latch a fresh drag, track the snap
-    /// target, and resolve on the active mode's terminating input.
-    ///
-    /// Latch: the first port whose `PortLayer::first_drag_started` fires starts a
-    /// [`DragMode::Held`] wire. While active, every port is rescanned each frame for the
-    /// topmost opposite-kind port under the pointer (`drag.snap`). [`DragMode::Held`] resolves
-    /// on release; a drop on empty canvas opens the new-node palette instead of dropping, and
-    /// [`Self::resume`] re-enters [`DragMode::Floating`] once a node is picked. The context's
-    /// Esc drops either mode without emitting anything. Reports how the wire ended, when that
-    /// asks the canvas for more than an edit.
+    /// Latch: the first port whose `PortLayer::first_drag_started` fires starts a wire. While it
+    /// is held, every port is rescanned each frame for the topmost opposite-kind port under the
+    /// pointer (`drag.snap`). On release a compatible snap commits, a drop on a boundary node
+    /// exposes the port, an input dropped on its own body gets a const, and a drop on empty
+    /// canvas returns the port the wire grew out of, which the palette opens on. The context's
+    /// Esc drops the wire without emitting anything.
     pub(crate) fn input(
         &mut self,
         ui: &mut Ui,
         stage: &mut Stage<'_, CanvasCtx<'_>>,
-    ) -> Option<WireEnd> {
+    ) -> Option<PortRef> {
         let ctx = stage.ctx;
         let (graph_ctx, geometry) = (ctx.graph_ctx(), ctx.geometry());
         // Latch a fresh port drag only when idle.
@@ -111,106 +67,44 @@ impl WireUi {
             })
             && graph_ctx.contains(drag.node())
         {
-            self.state = Some(InFlight {
-                drag,
-                mode: DragMode::Held,
-            });
+            self.state = Some(drag);
         }
         if ctx.cancelled() {
             self.state = None;
         }
-        let mut state = self.state.take()?;
-        // Both modes span frames, and undo runs before this input stage, so the node the wire grew
+        let mut drag = self.state.take()?;
+        // A drag spans frames, and undo runs before this input stage, so the node the wire grew
         // out of can be deleted under it. The gesture drops rather than re-latching; a commit
         // against a dead producer is refused at the edit boundary anyway.
-        if !graph_ctx.contains(state.drag.node()) {
+        if !graph_ctx.contains(drag.node()) {
             return None;
         }
-
-        // Refresh the compatible port under the pointer for both modes.
-        state.drag.snap = scan_snap_target(ui, ctx, state.drag.from);
-        self.state = Some(state);
-
-        match state.mode {
-            DragMode::Held => self.resolve_held(ui, stage, state.drag),
-            DragMode::Floating => self.resolve_floating(ui, stage, state.drag),
+        drag.snap = scan_snap_target(ui, ctx, drag.from);
+        if drag.held(&geometry.ports) {
+            self.state = Some(drag);
+            return None;
         }
-    }
-
-    /// `Held` release: commit a snapped port, else set a const on an
-    /// input dropped on its own body, else open the new-node palette for a
-    /// drop on empty canvas. While the button is still down, keep the wire.
-    fn resolve_held(
-        &mut self,
-        ui: &mut Ui,
-        stage: &mut Stage<'_, CanvasCtx<'_>>,
-        drag: GlyphDrag<PortRef, PortRef>,
-    ) -> Option<WireEnd> {
-        let ctx = stage.ctx;
         let out = &mut *stage.out;
-        if drag.held(&ctx.geometry().ports) {
-            return None;
-        }
-        self.state = None;
         if let Some(end) = drag.snap {
-            out.push_graph(ctx.graph_ctx().graph(), wire(drag.from, end));
+            out.push_graph(graph_ctx.graph(), wire(drag.from, end));
             return None;
         }
         if let Some(exposed) = exposed_on_boundary(ui, ctx, drag.from) {
-            exposed.raise(ctx.graph_ctx().graph(), out);
+            exposed.raise(graph_ctx.graph(), out);
             return None;
         }
         if let Some(set_const) = const_drop(ui, ctx, drag.from) {
-            out.push_graph(ctx.graph_ctx().graph(), set_const);
+            out.push_graph(graph_ctx.graph(), set_const);
             return None;
         }
-        dropped_on_empty_canvas(ui, ctx.graph_ctx().graph(), ctx.geometry())
-            .then_some(WireEnd::DroppedOnCanvas(drag.from))
-    }
-
-    /// `Floating` resolve: the wire follows the cursor with no button held, so its terminating
-    /// clicks aren't a widget drag; they are read off the global pointer stream. Left-click
-    /// lands the wire on a compatible port (or cancels if over none); right-click cancels (and
-    /// suppresses the palette); Esc is handled in `input`.
-    fn resolve_floating(
-        &mut self,
-        ui: &mut Ui,
-        stage: &mut Stage<'_, CanvasCtx<'_>>,
-        drag: GlyphDrag<PortRef, PortRef>,
-    ) -> Option<WireEnd> {
-        // `MOVE` wakes a repaint on every cursor move so the wire tracks the pointer: with no
-        // button held, no drag capture keeps frames coming. `BUTTONS` delivers the terminating
-        // press.
-        let events = ui.pointer_events(PointerWake::MOVE | PointerWake::BUTTONS);
-        let ended = events.iter().find_map(|ev| match ev {
-            PointerEvent::Pressed {
-                button: button @ (PointerButton::Left | PointerButton::Right),
-                ..
-            } => Some(*button),
-            _ => None,
-        });
-        match ended {
-            Some(PointerButton::Left) => {
-                self.state = None;
-                stage.out.extend_graph(
-                    stage.ctx.graph_ctx().graph(),
-                    drag.snap.map(|end| wire(drag.from, end)),
-                );
-                None
-            }
-            Some(PointerButton::Right) => {
-                self.state = None;
-                Some(WireEnd::Secondary)
-            }
-            _ => None, // keep floating
-        }
+        dropped_on_empty_canvas(ui, graph_ctx.graph(), geometry).then_some(drag.from)
     }
 
     /// Force the hover flag on the port the wire is currently snapped to, so `port_row` picks
     /// the hover color up as for an ordinary mouse-over: palantir suppresses `response.hovered`
     /// on every widget but the drag-capture owner while a drag is live.
     pub(crate) fn bake_snap_hover(&self, geometry: &mut CanvasGeometry) {
-        if let Some(snap) = self.state.as_ref().and_then(|state| state.drag.snap) {
+        if let Some(snap) = self.state.as_ref().and_then(|drag| drag.snap) {
             geometry.ports.set_hovered(snap);
         }
     }
@@ -220,15 +114,15 @@ impl WireUi {
     /// coordinates share the pan/zoom transform with permanent wires.
     pub(crate) fn record(&self, ui: &mut Ui, ctx: DrawCtx<'_>) {
         let (graph_ctx, geometry) = (ctx.graph_ctx(), ctx.geometry());
-        let Some(state) = self.state.as_ref().copied() else {
+        let Some(drag) = self.state else {
             return;
         };
-        let start_port = state.drag.from;
+        let start_port = drag.from;
         let Some(start) = geometry.ports.center(start_port) else {
             return;
         };
         let pointer = canvas::world_pointer(ui, graph_ctx.graph(), graph_ctx.camera());
-        let Some(end) = state.drag.free_end(pointer, &geometry.ports) else {
+        let Some(end) = drag.free_end(pointer, &geometry.ports) else {
             return;
         };
         // Orient by kind (`p0` the output end), so the preview matches the eventual permanent

@@ -63,3 +63,41 @@ fn zoom_about_pane_center_keeps_center_texel() {
     assert_eq!(v.pan, Vec2::new(300.0, 350.0));
     assert_eq!(draw_rect(img_2x, v).size, Size::new(200.0, 100.0));
 }
+
+/// A 400 × 200 source painted from a 100 × 50 texture: at zoom 2 from (10, 20) the image spans
+/// (10, 20) to (210, 120), 2 pane points a source pixel; at zoom 0.5 from the origin, 0 to
+/// (50, 25), 8 source pixels a point. Each corner names its corner pixel, and a point past an
+/// edge none.
+#[test]
+fn a_pane_point_names_the_source_pixel_under_it_at_any_zoom() {
+    let (image, native) = (Vec2::new(100.0, 50.0), UVec2::new(400, 200));
+    let pixel =
+        |at: Vec2, v: Viewport| native_pixel(at, image, v, native).map(|pos| pos.to_array());
+    let near = Viewport {
+        pan: Vec2::new(10.0, 20.0),
+        zoom: 2.0,
+    };
+    assert_eq!(pixel(Vec2::new(10.0, 20.0), near), Some([0, 0]));
+    // (209.5 − 10) / 200 · 400 = 399, (119.5 − 20) / 100 · 200 = 199.
+    assert_eq!(pixel(Vec2::new(209.5, 119.5), near), Some([399, 199]));
+    assert_eq!(pixel(Vec2::new(209.5, 20.0), near), Some([399, 0]));
+    // (11.5 − 10) / 200 · 400 = 3, (23.5 − 20) / 100 · 200 = 7.
+    assert_eq!(pixel(Vec2::new(11.5, 23.5), near), Some([3, 7]));
+    for past in [
+        Vec2::new(210.0, 20.0),
+        Vec2::new(10.0, 120.0),
+        Vec2::new(9.5, 50.0),
+        Vec2::new(50.0, 19.5),
+    ] {
+        assert_eq!(pixel(past, near), None, "{past}");
+    }
+    let far = Viewport {
+        pan: Vec2::ZERO,
+        zoom: 0.5,
+    };
+    // 25 / 50 · 400 = 200, 12.5 / 25 · 200 = 100.
+    assert_eq!(pixel(Vec2::new(25.0, 12.5), far), Some([200, 100]));
+    // 49.875 / 50 · 400 = 399, 24.875 / 25 · 200 = 199.
+    assert_eq!(pixel(Vec2::new(49.875, 24.875), far), Some([399, 199]));
+    assert_eq!(pixel(Vec2::new(50.0, 0.0), far), None);
+}

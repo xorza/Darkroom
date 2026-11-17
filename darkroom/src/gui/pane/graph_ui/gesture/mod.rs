@@ -24,7 +24,6 @@ pub(crate) mod pan_zoom;
 pub(crate) mod preview_drag;
 pub(crate) mod segments;
 pub(crate) mod selection_ui;
-pub(crate) mod shortcuts;
 pub(crate) mod subscription_ui;
 pub(crate) mod tie_ui;
 pub(crate) mod wire_ui;

@@ -23,6 +23,7 @@ use crate::core::shared_library::{LibraryEntry, SharedLibrary};
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::gesture::new_node_ui;
 use crate::gui::pane::graph_ui::gesture::new_node_ui::Search;
+use crate::gui::pane::graph_ui::gesture::new_node_ui::landing::{DroppedEnd, Landing};
 use crate::gui::pane::graph_ui::gesture::new_node_ui::palette_rows::{PaletteRow, PaletteSources};
 use crate::gui::theme::Theme;
 use crate::gui::theme::color;
@@ -104,7 +105,7 @@ impl<'a> PaletteEntry<'a> {
     }
 
     /// The ports a node of this entry shows, whose defaults its new node takes.
-    fn ports(self) -> &'a Ports {
+    pub(super) fn ports(self) -> &'a Ports {
         match self {
             PaletteEntry::Func(f) => f.ports(),
             PaletteEntry::Special(s) => s.func().ports(),
@@ -173,11 +174,13 @@ struct Placed {
     node: Node,
 }
 
-/// What a palette pick raises, in order: the definitions it copies in, then the node it adds.
+/// What a palette pick raises, in order: the definitions it copies in, the node it adds, and the
+/// dropped wire laid onto the port its row names.
 #[derive(Debug)]
 pub(super) struct PalettePick {
     pub(super) compounds: Vec<NewCompound>,
     pub(super) add: GraphIntent,
+    pub(super) wire: Option<GraphIntent>,
 }
 
 /// Everything one palette open lists, plus where a pick lands and how the frame lays it out,
@@ -193,6 +196,8 @@ pub(super) struct NodePalette<'a> {
     /// Opened to pick a node that replaces another: the library folder's entries, which a pick
     /// copies in first, and an `Inputs` node are not listed.
     pub(super) replacing: bool,
+    /// The end of the wire whose drop opened the palette: it lists the ports that take it.
+    pub(super) dropped: Option<DroppedEnd<'a>>,
 }
 
 /// Whether the palette opened this frame.
@@ -286,7 +291,7 @@ impl NodePalette<'_> {
                 if search.fold() || opened {
                     search
                         .rows
-                        .refilter(sources, self.entries(), &search.folded);
+                        .refilter(sources, self.entries(), &search.folded, self.dropped);
                     search.focused = 0;
                     reveal = true;
                 }
@@ -333,41 +338,46 @@ impl NodePalette<'_> {
                     // a single ranked run, the best match at the top.
                     for (start, rows) in search.rows.runs() {
                         if search.rows.grouped()
-                            && let Some(first) = rows.iter().find_map(|row| row.entry(sources))
+                            && let Some(first) =
+                                rows.iter().find_map(|listed| listed.row.entry(sources))
                         {
                             caption(ui, theme, first.category());
                         }
                         // Indexed before the lookup, so a row's index stays the one Enter
                         // reads back through `PaletteRows::get`.
-                        let entries = rows.iter().enumerate().filter_map(|(offset, row)| {
-                            Some((start + offset, row.entry(sources)?))
+                        let entries = rows.iter().enumerate().filter_map(|(offset, listed)| {
+                            Some((start + offset, listed.row.entry(sources)?, listed.landing))
                         });
-                        for (idx, entry) in entries {
+                        for (idx, entry, landing) in entries {
                             let row = Row {
                                 entry,
+                                landing: landing.zip(self.dropped).map(|(landing, dropped)| {
+                                    dropped.landing_name(entry.ports(), landing)
+                                }),
                                 idx,
                                 focused: idx == search.focused,
                                 query_lc: &search.folded,
                                 grouped: search.rows.grouped(),
                             };
                             if row.show(ui, theme) {
-                                chosen = Some(entry);
+                                chosen = Some((entry, landing));
                             }
                         }
                     }
                 });
         });
-        let chosen = chosen.or_else(|| {
-            let row = submitted.then(|| search.rows.get(search.focused))??;
-            row.entry(sources)
+        let (entry, landing) = chosen.or_else(|| {
+            let listed = submitted.then(|| search.rows.get(search.focused))??;
+            Some((listed.row.entry(sources)?, listed.landing))
         })?;
         ui.close_overlay();
-        Some(self.add(chosen))
+        Some(self.add(entry, landing))
     }
 
     /// What a pick of `entry` raises: the definitions a library entry copies in, then the
-    /// `AddNode`, seeded with the entry's port defaults. Built only on a pick.
-    pub(super) fn add(&self, entry: PaletteEntry<'_>) -> PalettePick {
+    /// `AddNode`, seeded with the entry's port defaults, then the dropped wire onto `landing`.
+    /// Built only on a pick. A wire whose source an undo took since the drop is laid nowhere.
+    pub(super) fn add(&self, entry: PaletteEntry<'_>, landing: Option<Landing>) -> PalettePick {
         let node_id = NodeId::unique();
         let Placed { compounds, node } =
             entry.placed(self.graph_ctx.document(), self.graph_ctx.library());
@@ -379,6 +389,9 @@ impl NodePalette<'_> {
                 node,
                 bindings: entry.ports().default_bindings(node_id).collect(),
             },
+            wire: landing
+                .zip(self.dropped)
+                .map(|(landing, dropped)| dropped.wire(node_id, landing)),
         }
     }
 }
@@ -392,6 +405,9 @@ const LIST_WIDTH: f32 = 380.0;
 #[derive(Debug)]
 struct Row<'a> {
     entry: PaletteEntry<'a>,
+    /// The name of the port of the new node a dropped wire lands on, which the row names after
+    /// the entry.
+    landing: Option<&'a str>,
     idx: usize,
     focused: bool,
     query_lc: &'a str,
@@ -464,6 +480,13 @@ impl Row<'_> {
                             .child_align(VAlign::Center)
                             .show(ui, |ui| {
                                 name(ui, theme, self.entry.name(), self.query_lc, lit);
+                                if let Some(port) = self.landing {
+                                    let style = support::body_text(ui, theme);
+                                    Text::new(fmt!(ui, " \u{25b8} {port}"))
+                                        .id_salt("landing")
+                                        .style(&style)
+                                        .show(ui);
+                                }
                                 support::hspacer(ui, "category_spacer");
                                 if !self.grouped {
                                     Text::new(self.entry.category()).style(&secondary).show(ui);

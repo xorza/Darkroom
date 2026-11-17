@@ -65,6 +65,7 @@ impl SetCompound {
         EditFacts {
             node_set: true,
             touched: Touched::Graph(GraphId::Compound(self.id)),
+            program: true,
             ..EditFacts::NONE
         }
     }

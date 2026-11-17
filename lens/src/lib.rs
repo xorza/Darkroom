@@ -16,6 +16,10 @@ mod random;
 // projections, presets, datatypes, the config bridge) stays crate-internal.
 pub use astro::nodes::{MlModelPaths, astro_library};
 pub use fs_watch::fs_watch_library;
+pub use image::display_stretch::{
+    DISPLAY_STRETCH_DATA_TYPE, DISPLAY_STRETCH_TYPE_ID, DisplayStretch, DisplayStretchError,
+    UnknownDisplayStretch,
+};
 pub use image::nodes::image_library;
 pub use image::{IMAGE_TYPE_ID, Image};
 pub use random::random_library;

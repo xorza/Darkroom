@@ -54,7 +54,7 @@ fn an_unknown_types_constant_shows_as_written_and_takes_no_edit() {
             library: &library,
             value: &value,
             data_type: DataType::Enum(EnumId::from_u128(78)),
-            value_variants: &[],
+            domain: &ValueDomain::Any,
         };
         assert!(editor.show(ui).is_none());
     };
@@ -257,4 +257,63 @@ fn an_any_field_commits_only_a_real_edit() {
             "{committed:?} over {value:?}"
         );
     }
+}
+
+/// A number with a span commits inside it: 1.7 typed into a field of [0, 1] lands 1.0, and -3
+/// lands 0.0. The field shows how far along the span its value sits: a fill a quarter of its
+/// width at 0.25, and none for a span with no ceiling.
+#[test]
+fn a_spanned_number_commits_inside_its_span_and_shows_its_share() {
+    use palantir::Modifiers;
+    use scenarium::FloatSpan;
+
+    let theme = Theme::default();
+    let library = Library::default();
+    let id = WidgetId::from_hash("const_editor::spanned");
+    let span = ValueDomain::Float(FloatSpan::between(0.0, 1.0));
+    let mut h = Harness::builder(UVec2::new(200, 60)).mono().build();
+    let commit = |h: &mut Harness, domain: &ValueDomain, value: f64, typed: &str| {
+        let value = ConstValue::Float(value);
+        let mut committed = Vec::new();
+        let mut record = |ui: &mut Ui| {
+            let editor = ConstEditor {
+                field: Field {
+                    theme: &theme.const_editor.rest,
+                    id,
+                },
+                library: &library,
+                value: &value,
+                data_type: DataType::Float,
+                domain,
+            };
+            committed.extend(editor.show(ui));
+        };
+        h.frame(&mut record);
+        let fill = h.rect(span_fill_wid(id)).map(|rect| rect.size.w);
+        let center = h.rect(id).expect("the field is arranged").center();
+        h.click(center);
+        h.frame(&mut record);
+        h.hold_modifiers(Modifiers::CTRL);
+        h.key(Key::Char('a'));
+        h.hold_modifiers(Modifiers::NONE);
+        h.type_text(typed);
+        h.key(Key::Enter);
+        h.frame(&mut record);
+        (committed, fill)
+    };
+    // 0.25 of the field's 100 px.
+    assert_eq!(theme.const_editor.rest.width, 100.0);
+    let (committed, fill) = commit(&mut h, &span, 0.25, "1.7");
+    assert_eq!(committed, [ConstValue::Float(1.0)]);
+    assert_eq!(fill, Some(25.0));
+    let (committed, _) = commit(&mut h, &span, 0.5, "-3");
+    assert_eq!(committed, [ConstValue::Float(0.0)]);
+    let unbounded = ValueDomain::Float(FloatSpan::at_least(0.0));
+    let (committed, fill) = commit(&mut h, &unbounded, 0.5, "7");
+    assert_eq!(
+        committed,
+        [ConstValue::Float(7.0)],
+        "no ceiling to hold it under"
+    );
+    assert_eq!(fill, None, "no far end to fill toward");
 }

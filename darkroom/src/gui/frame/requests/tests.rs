@@ -39,7 +39,10 @@ fn each_level_drains_its_own_tier_and_leaves_the_rest_queued() {
             | DocumentRequest::InGesture { .. }
             | DocumentRequest::Cancel { .. }
             | DocumentRequest::Compound(_) => "graph",
-            DocumentRequest::View(_) | DocumentRequest::Enter { .. } => "view",
+            DocumentRequest::View(_)
+            | DocumentRequest::Enter { .. }
+            | DocumentRequest::Show(_)
+            | DocumentRequest::ShowPreview(_) => "view",
         })
         .collect();
     assert_eq!(
@@ -67,9 +70,10 @@ fn each_level_drains_its_own_tier_and_leaves_the_rest_queued() {
 
 /// A debt comes from a direct owe, or from an edit that strands the geometry and from no other, and
 /// a spend asks one pass and clears it, however many levels owed it: 1 record for no debt and a
-/// move's facts, 2 for a debt, and 1 again past the spend.
+/// move's facts, 2 for a debt, and 1 again past the spend. A run is owed by an edit of what a run
+/// reads alone, once however many owed it, apart from the relayout.
 #[test]
-fn a_relayout_owed_takes_one_pass_and_a_spend_clears_it() {
+fn a_relayout_or_a_run_owed_is_spent_once() {
     let mut h = Harness::builder(UVec2::ONE).mono().build();
     let mut out = Requests::default();
     let passes = |h: &mut Harness, out: &mut Requests| {
@@ -83,17 +87,29 @@ fn a_relayout_owed_takes_one_pass_and_a_spend_clears_it() {
     };
     assert_eq!(passes(&mut h, &mut out), 1, "nothing owed");
 
-    out.owe_relayout_after(EditFacts::NONE);
+    out.owe_after(EditFacts::NONE);
     assert!(!out.owes_relayout(), "a move strands nothing");
+    assert!(!out.take_run(), "and changes nothing a run reads");
 
     out.owe_relayout();
-    out.owe_relayout_after(EditFacts {
+    out.owe_after(EditFacts {
         renamed: true,
         ..EditFacts::NONE
     });
     assert!(out.owes_relayout());
+    assert!(!out.take_run(), "a name is not read by a run");
     assert!(out.is_empty(), "a debt is no request");
     assert_eq!(passes(&mut h, &mut out), 2, "two debts, one pass");
     assert!(!out.owes_relayout());
     assert_eq!(passes(&mut h, &mut out), 1, "spent");
+
+    let program = EditFacts {
+        program: true,
+        ..EditFacts::NONE
+    };
+    out.owe_after(program);
+    out.owe_after(program);
+    assert!(!out.owes_relayout(), "a run owed strands no geometry");
+    assert!(out.take_run(), "two edits owe one run");
+    assert!(!out.take_run(), "taken");
 }

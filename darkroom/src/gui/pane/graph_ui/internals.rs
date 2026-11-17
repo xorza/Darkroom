@@ -7,7 +7,7 @@
 use glam::{UVec2, Vec2};
 use palantir::{App, Harness, RecordPass, SizeSpec, WindowToken};
 use palantir::{Configure, DockOperation, Panel, Rect, SystemScale, Ui, WidgetId};
-use scenarium::{CompoundId, GraphId, InstancePath, NodeId};
+use scenarium::{CompoundId, GraphId, InstancePath, NodeId, ProgramId};
 
 use crate::core::document::Document;
 use crate::core::document::internals::DocumentFixture;
@@ -21,7 +21,7 @@ use crate::gui::frame::stage::Stage;
 use crate::gui::graph_ctx::internals::GraphCtxFixture;
 use crate::gui::pane::graph_ui::GraphUi;
 use crate::gui::pane::graph_ui::scene::canvas_geometry::CanvasGeometry;
-use crate::gui::pane::graph_ui::wid;
+use crate::gui::pane::graph_ui::{canvas, wid};
 use crate::gui::port_ref::PortRef;
 use std::iter;
 
@@ -64,6 +64,10 @@ pub(crate) struct CanvasHarness {
     pub(crate) entries: Vec<(CompoundId, Option<InstancePath>)>,
     /// The edits of the set of graphs the last [`Self::frame`] raised.
     pub(crate) compound_edits: Vec<CompoundIntent>,
+    /// The tabs the last [`Self::frame`] asked to bring into view.
+    pub(crate) shows: Vec<TabRef>,
+    /// The previews the last [`Self::frame`] asked to make the active one.
+    pub(crate) shown_previews: Vec<ProgramId>,
 }
 
 impl CanvasHarness {
@@ -102,6 +106,8 @@ impl CanvasHarness {
             view_ops: Vec::new(),
             entries: Vec::new(),
             compound_edits: Vec::new(),
+            shows: Vec::new(),
+            shown_previews: Vec::new(),
         }
     }
 
@@ -116,6 +122,8 @@ impl CanvasHarness {
             view_ops,
             entries,
             compound_edits,
+            shows,
+            shown_previews,
         } = self;
         let mut frame = CanvasFrame::new(graph_ui, ctx, AppliesIntents::No);
         ui.frame_app(&mut frame);
@@ -123,6 +131,8 @@ impl CanvasHarness {
         view_ops.clear();
         entries.clear();
         compound_edits.clear();
+        shows.clear();
+        shown_previews.clear();
         let intents: Vec<GraphIntent> = out
             .document()
             .drain()
@@ -143,6 +153,14 @@ impl CanvasHarness {
                 }
                 DocumentRequest::Compound(intent) => {
                     compound_edits.push(intent);
+                    None
+                }
+                DocumentRequest::Show(tab) => {
+                    shows.push(tab);
+                    None
+                }
+                DocumentRequest::ShowPreview(program_id) => {
+                    shown_previews.push(program_id);
                     None
                 }
             })
@@ -264,6 +282,17 @@ impl CanvasHarness {
             .center()
     }
 
+    /// Where the canvas draws the world point `world`, on screen: the band above the canvas
+    /// moves the canvas off the window's top.
+    pub(crate) fn screen(&self, world: Vec2) -> Vec2 {
+        let origin = self
+            .ui
+            .rect(canvas::outer_wid(GraphId::Main))
+            .expect("the canvas recorded")
+            .min;
+        origin + self.ctx.graph_ctx().camera().pan + world * self.ctx.graph_ctx().camera().zoom
+    }
+
     /// The cached world rect wires anchor to and the cull reads, or `None` once the node's
     /// entry has been evicted. Unlike [`Self::node_rect`] it survives the node being culled.
     pub(crate) fn node_world_rect(&self, node_id: NodeId) -> Option<Rect> {
@@ -326,7 +355,7 @@ impl<'a> CanvasFrame<'a> {
                 .ctx
                 .open
                 .drain_requests(self.out.document(), &self.ctx.library);
-            self.out.owe_relayout_after(facts);
+            self.out.owe_after(facts);
         }
     }
 }

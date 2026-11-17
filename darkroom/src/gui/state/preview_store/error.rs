@@ -1,6 +1,9 @@
 //! Why a published value has no image to draw.
 
+use std::sync::Arc;
+
 use common::USize2;
+use lens::DisplayStretchError;
 use palantir::ImageSizeError;
 
 /// Why a preview value could not become a texture.
@@ -22,4 +25,8 @@ pub(crate) enum DrawablePreviewError {
     /// 2D dimension.
     #[error(transparent)]
     Register(#[from] ImageSizeError),
+    /// The node's Display stretch found nothing to stretch. Shared, as this error is cloned into
+    /// every viewer that reads it and lumos's own is not `Clone`.
+    #[error("no stretched picture")]
+    Stretch(#[source] Arc<DisplayStretchError>),
 }

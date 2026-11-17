@@ -5,7 +5,9 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 
 use common::ErrorChain;
-use scenarium::{CompoundId, GraphId, InstancePath, NodeAddr, NodeId, Repair, UnknownType};
+use scenarium::{
+    CompoundId, GraphId, InstancePath, NodeAddr, NodeId, ProgramId, Repair, UnknownType,
+};
 
 use crate::core::document::item_id::ItemId;
 use crate::core::document::tab_ref::TabRef;
@@ -54,6 +56,8 @@ pub(crate) enum DocumentRepair {
     },
     /// An active graph the set does not hold, made the main graph.
     ActiveReset { graph: GraphId },
+    /// An active preview that names no preview node, cleared.
+    ActivePreviewCleared { program_id: ProgramId },
     /// A tab on something the document does not hold: a graph, a preview node or a pinned
     /// inspector's node.
     TabClosed { tab: TabRef },
@@ -246,6 +250,12 @@ impl Display for DocumentRepair {
             }
             Self::ActiveReset { graph } => {
                 write!(f, "made the main graph active: {graph:?} names no graph")
+            }
+            Self::ActivePreviewCleared { program_id } => {
+                write!(
+                    f,
+                    "cleared the viewer's preview: {program_id:?} names no preview node"
+                )
             }
             Self::TabClosed { tab } => {
                 write!(

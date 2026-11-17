@@ -5,6 +5,7 @@ use palantir::{
     TextStyleOverrides, Ui, WidgetId, WidgetLook, fmt,
 };
 
+use crate::gui::command::Command;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::icon::Icon;
 use crate::gui::widgets::support;
@@ -39,10 +40,17 @@ impl Chip {
         }
     }
 
-    /// The chord that does what the chip does, shown after the tooltip: "Run · Ctrl+R".
-    pub(crate) const fn shortcut(mut self, shortcut: Shortcut) -> Self {
-        self.shortcut = Some(shortcut);
-        self
+    /// A chip that raises `command`: its tooltip is the command's label, then its chord,
+    /// "Run · Ctrl+R".
+    pub(crate) const fn command(wid: WidgetId, command: Command) -> Self {
+        Self {
+            wid,
+            tooltip: command.spec().label,
+            shortcut: command.keys(),
+            selected: false,
+            idle_glyph: None,
+            ink: None,
+        }
     }
 
     /// Whether the chip shows its on state: a wash of its ink under a glyph in it. Default

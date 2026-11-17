@@ -1,5 +1,4 @@
-//! The graph pane: the pan/zoom canvas, everything recorded on it, and the
-//! toolbar pinned to its corner.
+//! The graph pane: the band over it, the pan/zoom canvas, and everything recorded on it.
 //!
 //! Split by what each part does with a frame: [`scene`] is what a pass reads, [`gesture`]
 //! turns input into intents, [`draw`] is what the record pass draws between the node bodies,
@@ -16,34 +15,36 @@ pub(crate) mod canvas_ctx;
 pub(crate) mod canvas_input;
 pub(crate) mod draw;
 pub(crate) mod draw_ctx;
+pub(crate) mod empty_hint;
 pub(crate) mod gesture;
 pub(crate) mod node_ui;
 pub(crate) mod pane_header;
 pub(crate) mod scene;
 pub(crate) mod selection;
-pub(crate) mod toolbar;
 pub(crate) mod unsettled_ctx;
 pub(crate) mod wid;
 
-use palantir::{Chrome, Configure, Panel, Sense, SizeSpec, TranslateScale, Ui};
+use palantir::{Chrome, Configure, EditableLabel, Panel, Sense, SizeSpec, TranslateScale, Ui};
 use scenarium::Graph;
 
 use crate::core::document::graph_revision::GraphRevision;
-use crate::gui::frame::framing::Framing;
+use crate::core::edit::graph_intent::GraphIntent;
+use crate::gui::frame::pane_ask::PaneAsk;
 use crate::gui::frame::requests::Requests;
 use crate::gui::frame::stage::Stage;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::canvas_bg::CanvasBg;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
+use crate::gui::pane::graph_ui::canvas_input::Escape;
 use crate::gui::pane::graph_ui::draw::wire::{WireEmphasis, WirePass, WireSet};
 use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
 use crate::gui::pane::graph_ui::gesture::gestures::Gestures;
-use crate::gui::pane::graph_ui::gesture::shortcuts;
 use crate::gui::pane::graph_ui::gesture::tie_ui::tie_widget::TiePass;
 use crate::gui::pane::graph_ui::node_ui::{NodePass, NodeUi};
 use crate::gui::pane::graph_ui::pane_header::PaneHeader;
 use crate::gui::pane::graph_ui::scene::canvas_geometry::CanvasGeometry;
 use crate::gui::pane::graph_ui::scene::cull_region::CullRegion;
+use crate::gui::pane::graph_ui::scene::detail_level::DetailLevel;
 use crate::gui::pane::graph_ui::scene::tie_layout::{Span, TieLayout};
 use crate::gui::pane::graph_ui::selection::Selection;
 use crate::gui::pane::graph_ui::unsettled_ctx::UnsettledCtx;
@@ -99,21 +100,23 @@ pub(crate) struct GraphUi {
     node_ui: NodeUi,
     /// The controllers in flight, each dropped by [`Self::open_pass`] on a tab switch.
     pub(crate) gestures: Gestures,
-    /// A framing a surface outside the canvas asked for — the status bar's link, a menu —
-    /// raised as a camera move in the next input stage, which has the settled geometry it needs.
-    framing: Option<Framing>,
+    /// What a command outside the canvas asked of this pane — the status bar's link, a menu, a
+    /// chord — answered in the next input stage, which has the settled geometry, the pointer and
+    /// the widgets a framing, a palette and a rename need. One slot: the last ask of a frame
+    /// wins, and a frame raises a second only when two chords land in it.
+    ask: Option<PaneAsk>,
     /// The revision of this pane's graph its node caches were last swept at. A node can only go
     /// with a step that moves its graph's revision, so a frame at the same one has nothing to
     /// sweep.
     swept_at: Option<GraphRevision>,
-    /// The header over a compound's pane.
+    /// The band over the pane.
     header: PaneHeader,
 }
 
 impl GraphUi {
-    /// Raise `framing` as a camera move in the next input stage.
-    pub(crate) const fn request_framing(&mut self, framing: Framing) {
-        self.framing = Some(framing);
+    /// Take `ask`, to answer in the next input stage.
+    pub(crate) const fn ask(&mut self, ask: PaneAsk) {
+        self.ask = Some(ask);
     }
 
     /// [`Self::retain_nodes`], when `revision`, the revision of the graph this pane shows, moved
@@ -163,14 +166,36 @@ impl GraphUi {
             ui,
             &mut stage.with(CanvasCtx::new(unsettled, &self.geometry)),
         );
+        // Esc deselects only when nothing was in flight, as only the canvas knows whether the Esc
+        // cancelled a gesture instead.
+        if input.escape == Escape::Deselects && !graph_ctx.selected().is_empty() {
+            stage
+                .out
+                .push_graph(graph_ctx.graph(), GraphIntent::clear_selection());
+        }
         // Taking the table back `&mut` is what ends the stage above: nothing below may read it.
         self.finish_geometry(ui, stage);
-        // The keyboard half of the same phase. Last, so a chord reads the
-        // document the pointer gestures above were raised against.
-        shortcuts::emit(
-            ui,
-            &mut stage.with(CanvasCtx::new(unsettled, &self.geometry)),
-        );
+        self.answer_ask(ui, graph_ctx);
+    }
+
+    /// Answer a palette or a rename a command asked for. A framing is [`Self::finish_geometry`]'s,
+    /// which a settle reaches too.
+    fn answer_ask(&mut self, ui: &mut Ui, graph_ctx: GraphCtx<'_>) {
+        match self.ask {
+            Some(PaneAsk::AddNode) => self.gestures.new_node_ui.open_at_pointer(ui, graph_ctx),
+            Some(PaneAsk::Replace(node_id)) => {
+                if graph_ctx.contains(node_id) {
+                    self.gestures.new_node_ui.open_replacing(ui, node_id);
+                }
+            }
+            Some(PaneAsk::Rename(node_id)) => {
+                if graph_ctx.contains(node_id) {
+                    EditableLabel::start_editing(ui, wid::rename(graph_ctx.graph(), node_id));
+                }
+            }
+            Some(PaneAsk::Frame(_)) | None => return,
+        }
+        self.ask = None;
     }
 
     /// Ready the canvas for a record pass that no input stage ran just before: the one past the
@@ -185,12 +210,17 @@ impl GraphUi {
 
     /// What opens a pass on any path: a canvas back from being away drops the gesture state it left
     /// latched, since a drag still held would otherwise resume under a pointer that has long since
-    /// moved on, and owes a relayout.
+    /// moved on, and what a command asked of it but a framing, and owes a relayout.
     fn open_pass(&mut self, frame: u64, out: &mut Requests) {
         if self.appearing(frame) {
             self.gestures.reset();
             self.node_ui.reset();
             out.owe_relayout();
+            // A palette or a rename asked of a pane that then went away is not owed on its
+            // return; a framing is, as the status bar's link asks one of a pane it opens.
+            if !matches!(self.ask, Some(PaneAsk::Frame(_))) {
+                self.ask = None;
+            }
         }
     }
 
@@ -208,13 +238,14 @@ impl GraphUi {
         self.gestures
             .subscription_ui
             .bake_snap_hover(&mut self.geometry);
-        if let Some(framing) = self.framing.take() {
+        if let Some(PaneAsk::Frame(framing)) = self.ask {
+            self.ask = None;
             let moved = framing.intent(ui, stage.ctx, &self.geometry);
             stage.out.extend_graph(stage.ctx.graph(), moved);
         }
     }
 
-    /// Record one graph pane: its popups, the canvas itself, and the run/cancel toolbar over it.
+    /// Record one graph pane: its popups, the band over it, and the canvas under the band.
     /// Called once per visible graph tab from the dock's content closure, so everything here is
     /// scoped to `graph_ctx` — the canvas widget ids included.
     ///
@@ -222,32 +253,23 @@ impl GraphUi {
     /// menu pick means — lands on the stage's requests in the order it was raised.
     pub(crate) fn record(&mut self, ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
         self.record_popups(ui, stage);
-        // The toolbar overlays the canvas's top-left corner and a compound's header its top
-        // edge, so they share a stack. They record after the canvas, which puts them above it
-        // in the hit-test: a click on a chip or a name never starts a pan.
-        Panel::zstack()
-            .id_salt("graph_overlay")
+        Panel::vstack()
+            .id_salt("graph_pane")
             .size(SizeSpec::FILL)
             .show(ui, |ui| {
-                self.record_canvas(ui, stage);
-                toolbar::show(ui, stage);
                 self.header.show(ui, stage);
+                self.record_canvas(ui, stage);
             });
     }
 
     /// The palette and the menus, which read the clicks on their rows as they record.
     fn record_popups(&mut self, ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
         let gestures = &mut self.gestures;
-        // A wire released over empty canvas opened the new-node popup, and a pick re-floats it.
-        if let Some(source) = gestures.new_node_ui.record(ui, stage) {
-            gestures.wire_ui.resume(source, stage.ctx);
-        }
+        gestures.new_node_ui.record(ui, stage);
         // The menu records every frame whatever comes of it, as its popup's lifecycle depends on
         // it. Everything a pick means goes onto the requests, so a frame with both a menu pick
         // and a chip click raises both.
-        if let Some(node_id) = gestures.node_menu.record(ui, stage) {
-            gestures.new_node_ui.open_replacing(ui, node_id);
-        }
+        gestures.node_menu.record(ui, stage);
         gestures.tie_menu.record(ui, stage, &self.ties);
     }
 
@@ -289,6 +311,10 @@ impl GraphUi {
             .show(ui, |ui| {
                 // Dotted backdrop in screen space, beneath the inner canvas.
                 self.bg.draw(ui, graph_ctx.graph(), theme, viewport);
+                let shown = graph_ctx.document().graphs.graph(graph_ctx.graph());
+                if shown.is_empty() && shown.ghost_nodes().next().is_none() {
+                    empty_hint::show(ui, graph_ctx.graph(), theme);
+                }
                 Panel::canvas()
                     .id(canvas::inner_wid(graph_ctx.graph()))
                     .size(SizeSpec::FILL)
@@ -306,6 +332,7 @@ impl GraphUi {
                             geometry,
                             selected,
                             cull,
+                            detail: DetailLevel::at(viewport.zoom, theme.font.body),
                         };
                         // Painted first, beneath the wires and node bodies.
                         gestures.selection_ui.record(ui, draw_ctx);
@@ -379,7 +406,88 @@ mod tests {
     use palantir::Harness;
 
     use super::*;
-    use crate::core::edit::graph_intent::GraphIntent;
+
+    /// A node keeps its size and its ports' centers at the title level: 0.5 zooms 14 px body
+    /// text to 7 px, under the legible 8, and every word is laid out unpainted, so the geometry
+    /// is the full level's at 1.
+    #[test]
+    fn a_node_keeps_its_size_and_ports_at_the_title_level() {
+        use scenarium::PortId;
+
+        use crate::core::document::internals::DocumentFixture;
+        use crate::gui::pane::graph_ui::internals::CanvasHarness;
+        use crate::gui::port_ref::PortRef;
+
+        let mut h = CanvasHarness::new(DocumentFixture::probes(2));
+        let (producer, consumer) = (h.node(0), h.node(1));
+        let ports = [
+            PortRef::output(producer, PortId::new(1)),
+            PortRef::input(consumer, PortId::new(1)),
+        ];
+        let geometry = |h: &CanvasHarness| {
+            let graph_ctx = h.ctx.graph_ctx();
+            let rects = [producer, consumer].map(|node_id| {
+                h.graph_ui
+                    .geometry
+                    .node_world_rect(graph_ctx.node(node_id).unwrap())
+                    .unwrap()
+            });
+            let centers = ports.map(|port| h.graph_ui.geometry.ports.center(port).unwrap());
+            (rects, centers)
+        };
+        h.prime(2);
+        let full = geometry(&h);
+        h.document_mut().main_view.viewport.zoom = 0.5;
+        h.prime(2);
+        assert_eq!(geometry(&h), full);
+    }
+
+    /// At the title level a node's title field is laid out unpainted and listed nowhere, unless a
+    /// field of its node holds the focus: a rename open while the canvas zooms out stays in
+    /// sight, as a field laid out unpainted would still take what is typed.
+    #[test]
+    fn a_focused_node_keeps_its_words_at_the_title_level() {
+        use crate::core::document::internals::DocumentFixture;
+        use crate::gui::pane::graph_ui::internals::CanvasHarness;
+
+        let mut h = CanvasHarness::new(DocumentFixture::probes(1));
+        let node = h.node(0);
+        let rename = wid::rename(GraphId::Main, node);
+        let listed = |h: &CanvasHarness| h.ui.widgets(None).iter().any(|w| w.id == rename);
+        h.prime(2);
+        assert!(listed(&h), "listed at the full level");
+
+        h.document_mut().main_view.viewport.zoom = 0.5;
+        h.prime(2);
+        assert!(!listed(&h), "unpainted at the title level");
+
+        h.document_mut().main_view.viewport.zoom = 1.0;
+        h.prime(2);
+        h.ui.double_click(rename);
+        h.prime(2);
+        assert!(h.ui.ui().is_focus_within(rename), "the rename field opened");
+        h.document_mut().main_view.viewport.zoom = 0.5;
+        h.prime(2);
+        assert!(listed(&h), "the focused node keeps its words");
+    }
+
+    /// An empty graph says how to add a node, at the pane's center; a graph with a node says
+    /// nothing.
+    #[test]
+    fn an_empty_graph_says_how_to_add_a_node() {
+        use crate::core::document::internals::DocumentFixture;
+        use crate::gui::pane::graph_ui::internals::CanvasHarness;
+
+        let mut empty = CanvasHarness::new(DocumentFixture::default());
+        empty.prime(2);
+        let hint = empty.ui.rect(empty_hint::wid(GraphId::Main));
+        let pane = empty.ui.rect(canvas::outer_wid(GraphId::Main)).unwrap();
+        assert_eq!(hint.map(palantir::Rect::center), Some(pane.center()));
+
+        let mut probe = CanvasHarness::new(DocumentFixture::probes(1));
+        probe.prime(2);
+        assert_eq!(probe.ui.rect(empty_hint::wid(GraphId::Main)), None);
+    }
 
     /// What a frame's input stage takes: a body's click selects, its right click opens the menu, a
     /// bare click selects nothing, a right click there opens the palette, and a click past an open
@@ -388,12 +496,10 @@ mod tests {
     fn the_stage_acts_on_a_click_by_where_it_lands() {
         use glam::Vec2;
         use palantir::PointerButton;
-        use scenarium::{NodeId, PortId};
+        use scenarium::NodeId;
 
         use crate::core::document::internals::DocumentFixture;
-        use crate::gui::frame::shortcuts;
         use crate::gui::pane::graph_ui::internals::CanvasHarness;
-        use crate::gui::port_ref::PortRef;
 
         const BARE: Vec2 = Vec2::new(600.0, 600.0);
 
@@ -444,23 +550,6 @@ mod tests {
             wid::rename(GraphId::Main, node),
             PointerButton::Left,
         );
-
-        let (mut h, node) = fresh();
-        h.ui.press(wid::body(GraphId::Main, node), PointerButton::Left);
-        h.frame();
-        h.ui.release(PointerButton::Left);
-        h.ui.key(shortcuts::DELETE);
-        h.frame();
-
-        // The press would end a floating wire, so the wire floats from past the press.
-        let (mut h, node) = fresh();
-        h.ui.press(wid::body(GraphId::Main, node), PointerButton::Left);
-        h.frame();
-        let start = PortRef::output(h.node(1), PortId::new(1));
-        let CanvasHarness { graph_ui, ctx, .. } = &mut h;
-        graph_ui.gestures.wire_ui.resume(start, ctx.graph_ctx());
-        h.ui.release(PointerButton::Left);
-        h.frame();
 
         let (mut h, node) = fresh();
         let from = h.node_center(node);
@@ -531,12 +620,13 @@ mod tests {
         use crate::core::document::internals::DocumentFixture;
         use crate::core::edit::document_request::DocumentRequest;
         use crate::gui::frame::framing::Framing;
+        use crate::gui::frame::pane_ask::PaneAsk;
         use crate::gui::pane::graph_ui::internals::CanvasHarness;
 
         let mut h = CanvasHarness::new(DocumentFixture::probes(1));
         h.document_mut().main_view.viewport.zoom = 2.0;
         h.prime(2);
-        h.graph_ui.request_framing(Framing::Reset);
+        h.graph_ui.ask(PaneAsk::Frame(Framing::Actual));
 
         let settle = |h: &mut CanvasHarness| {
             let mut out = Requests::default();
@@ -561,6 +651,56 @@ mod tests {
             0,
             "the framing lands once"
         );
+    }
+
+    /// A pane answers what a command asked of it at its next input stage: Add Node opens the
+    /// palette, Rename the title's editor, each once; and one asked of a pane that then went
+    /// away is dropped on its return, where a framing is kept.
+    #[test]
+    fn a_pane_answers_an_ask_once_and_drops_a_stale_one() {
+        use palantir::EditableLabel;
+
+        use crate::core::document::internals::DocumentFixture;
+        use crate::gui::frame::framing::Framing;
+        use crate::gui::frame::pane_ask::PaneAsk;
+        use crate::gui::pane::graph_ui::internals::CanvasHarness;
+
+        let mut h = CanvasHarness::new(DocumentFixture::probes(1));
+        let node = h.node(0);
+        h.prime(2);
+
+        h.graph_ui.ask(PaneAsk::AddNode);
+        h.frame();
+        assert!(h.graph_ui.gestures.new_node_ui.in_flight(), "the palette");
+        assert_eq!(h.graph_ui.ask, None, "answered once");
+        h.ui.key(palantir::Key::Escape);
+        h.frame();
+        assert!(!h.graph_ui.gestures.new_node_ui.in_flight());
+
+        h.graph_ui.ask(PaneAsk::Rename(node));
+        h.frame();
+        let title = wid::rename(GraphId::Main, node);
+        assert!(
+            EditableLabel::is_editing(h.ui.ui_mut(), title),
+            "the editor"
+        );
+        assert_eq!(h.graph_ui.ask, None);
+
+        // Away, as while the dock shows another tab, then back.
+        let away = h.ui.ui_mut().record_frame_idx();
+        for (ask, kept) in [
+            (PaneAsk::AddNode, None),
+            (PaneAsk::Rename(node), None),
+            (
+                PaneAsk::Frame(Framing::Fit),
+                Some(PaneAsk::Frame(Framing::Fit)),
+            ),
+        ] {
+            h.graph_ui.ask(ask);
+            h.graph_ui.last_input_frame = Some(away.saturating_sub(2));
+            h.graph_ui.open_pass(away, &mut Requests::default());
+            assert_eq!(h.graph_ui.ask, kept, "{ask:?}");
+        }
     }
 
     /// The input stage runs only while the pane shows the graph, so the frame

@@ -291,6 +291,10 @@
                         port: 1,
                     ))),
                     ((
+                        node_id: ("2067de48-57e0-4900-b589-32320647bb55"),
+                        port: 2,
+                    ), Const(Enum("Linear"))),
+                    ((
                         node_id: ("25b00fb1-cdc1-4b3f-b927-1aa43b072784"),
                         port: 1,
                     ), Const(FsPaths([
@@ -338,6 +342,10 @@
                         node_id: ("fd576928-3f2a-4ba9-9d38-1be67824652f"),
                         port: 1,
                     ))),
+                    ((
+                        node_id: ("41884f76-a80f-4bb9-82c4-83e5016d37a9"),
+                        port: 2,
+                    ), Const(Enum("Linear"))),
                     ((
                         node_id: ("5fcd3fd1-6bb5-4241-ab6e-d4397a454896"),
                         port: 1,
@@ -398,12 +406,20 @@
                         port: 1,
                     ))),
                     ((
+                        node_id: ("e156726f-3c5b-4d41-bbeb-380773608e40"),
+                        port: 2,
+                    ), Const(Enum("Linear"))),
+                    ((
                         node_id: ("efc228bd-27f8-455a-8e22-97dbd688a2c6"),
                         port: 1,
                     ), Wire((
                         node_id: ("043a77db-9446-4ded-9231-8bac95b7fe12"),
                         port: 1,
                     ))),
+                    ((
+                        node_id: ("efc228bd-27f8-455a-8e22-97dbd688a2c6"),
+                        port: 2,
+                    ), Const(Enum("Linear"))),
                     ((
                         node_id: ("f69f0aa7-6de4-4660-8dc5-1ec9f19d18de"),
                         port: 1,
@@ -734,37 +750,30 @@
                 )),
                 Split((
                     axis: Y,
-                    ratio: 0.7012742,
+                    ratio: 0.5,
                     first: (3),
                     second: (4),
                 )),
                 Group((
-                    id: (1),
+                    id: (6),
                     tabs: [
-                        ImageViewer([
-                            ("2067de48-57e0-4900-b589-32320647bb55"),
-                        ]),
-                        Inspector(Selection),
+                        Viewer(Active),
                     ],
-                    active: 1,
+                    active: 0,
                 )),
                 Group((
-                    id: (2),
+                    id: (1),
                     tabs: [
-                        ImageViewer([
-                            ("e156726f-3c5b-4d41-bbeb-380773608e40"),
-                        ]),
-                        ImageViewer([
-                            ("efc228bd-27f8-455a-8e22-97dbd688a2c6"),
-                        ]),
+                        Inspector(Selection),
                     ],
                     active: 0,
                 )),
             ],
             focused: (0),
-            next_group: 6,
+            next_group: 7,
         ),
         active: Main,
+        active_preview: None,
     ),
     manifest: (
         funcs: {
@@ -915,6 +924,14 @@
                             name: "Value",
                             data_type: Any,
                             default_value: None,
+                        ),
+                    ),
+                    (
+                        id: 2,
+                        port: (
+                            name: "Display",
+                            data_type: Enum(("a2400ac8-e657-4a83-8382-ea9b36c15b0c")),
+                            default_value: Some(Enum("Linear")),
                         ),
                     ),
                 ],
@@ -1332,6 +1349,7 @@
             Enum(("3360655d-16af-47d8-a1bb-7ef0b3f0ddf9")): "Clamp",
             Enum(("54d531cf-d353-4e30-8ea7-8823a9b5305f")): "BlendMode",
             Enum(("6d9db73e-5c92-4332-af0d-b2eb7c95acd0")): "ConversionFormat",
+            Enum(("a2400ac8-e657-4a83-8382-ea9b36c15b0c")): "DisplayStretch",
             FileKind(("404e04fb-f5c4-43dd-9ee0-684ab9b16200")): "Image",
             FileKind(("48ace2a5-0d6c-423c-a67c-48108930fd37")): "Camera RAW",
             FileKind(("5bea0866-9834-4ddd-be25-4c4c5fe6d3c5")): "ONNX model",

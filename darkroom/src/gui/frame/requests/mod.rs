@@ -6,7 +6,7 @@ use std::mem;
 
 use common::ErrorChain;
 use palantir::{DockOperation, Ui};
-use scenarium::{CompoundId, GraphId, InstancePath};
+use scenarium::{CompoundId, GraphId, InstancePath, ProgramId};
 
 use crate::core::document::tab_ref::TabRef;
 use crate::core::edit::compound_intent::CompoundIntent;
@@ -44,6 +44,9 @@ pub(crate) struct Requests {
     app: VecDeque<AppCommand>,
     /// Whether anything stranded the canvas's cross-frame geometry since the last spend.
     relayout_owed: bool,
+    /// Whether an edit changed what a run reads since the last spend: what Run on Change runs
+    /// for, once a frame however many edits landed.
+    run_owed: bool,
 }
 
 impl Requests {
@@ -97,6 +100,16 @@ impl Requests {
         self.document.push_compound(intent);
     }
 
+    /// Queue bringing `tab` into view, where it is open or in its home.
+    pub(crate) fn push_show(&mut self, tab: TabRef) {
+        self.document.push_show(tab);
+    }
+
+    /// Queue making `program_id` the active preview, its viewer shown.
+    pub(crate) fn push_show_preview(&mut self, program_id: ProgramId) {
+        self.document.push_show_preview(program_id);
+    }
+
     /// Queue the entry into `compound`'s pane, shown through `through`.
     pub(crate) fn push_enter(&mut self, compound: CompoundId, through: Option<InstancePath>) {
         self.document.push_enter(compound, through);
@@ -132,7 +145,7 @@ impl Requests {
 
     /// Take what an edit reported: the relayout it owes, and the refusal the status bar names.
     pub(crate) fn land(&mut self, facts: EditFacts) {
-        self.owe_relayout_after(facts);
+        self.owe_after(facts);
         if let Some(refusal) = facts.refused {
             self.push_app(AppCommand::Warn(ErrorChain::new(&refusal).to_string()));
         }
@@ -150,9 +163,16 @@ impl Requests {
         }
     }
 
-    /// Owe a relayout if the edit that reported `facts` strands the geometry.
-    pub(crate) const fn owe_relayout_after(&mut self, facts: EditFacts) {
+    /// Owe what the edit that reported `facts` strands: a relayout if it strands the geometry,
+    /// a run if it changed what a run reads.
+    pub(crate) const fn owe_after(&mut self, facts: EditFacts) {
         self.relayout_owed |= facts.strands_geometry();
+        self.run_owed |= facts.program;
+    }
+
+    /// Take the run owed: `true` once after any number of edits that changed what a run reads.
+    pub(crate) const fn take_run(&mut self) -> bool {
+        mem::replace(&mut self.run_owed, false)
     }
 
     /// Ask `ui` for the relayout owed, if one is: however many levels owed it, one pass answers. A

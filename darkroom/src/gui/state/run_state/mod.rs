@@ -536,13 +536,16 @@ impl RunState {
             reason = "each preview lands under its own node, so the order changes nothing"
         )]
         for (program_id, value) in self.published.drain() {
-            // The borrow ends with the condition, so no clone of the compile is needed.
+            // The borrow ends with the condition, so no clone of the compile is needed. A node
+            // the document lost since the compile shows nothing, so its value converts for none.
             if self
                 .compiled
                 .as_ref()
                 .is_some_and(|compiled| compiled.contains(program_id))
+                && document.holds_preview_node(program_id)
             {
-                self.previews.publish(program_id, value);
+                let stretch = document.preview_stretch(program_id);
+                self.previews.publish(program_id, value, stretch);
             }
         }
         self.previews.land(ui);

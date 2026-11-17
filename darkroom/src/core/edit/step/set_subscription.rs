@@ -44,6 +44,9 @@ impl Reversible for SetSubscription {
     }
 
     fn facts(&self) -> EditFacts {
-        EditFacts::NONE
+        EditFacts {
+            program: true,
+            ..EditFacts::NONE
+        }
     }
 }

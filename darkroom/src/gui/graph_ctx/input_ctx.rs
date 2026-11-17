@@ -1,8 +1,8 @@
 //! One input port of a node, with its declaration and current binding.
 
 use scenarium::{
-    Binding, ConstValue, DataType, GhostBinding, InputDecl, InputPort, Library, Numbered,
-    ValueVariant,
+    Binding, ConstValue, DataType, GhostBinding, GraphId, InputDecl, InputPort, Library, Numbered,
+    ValueDomain,
 };
 
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
@@ -34,6 +34,21 @@ impl<'a> InputCtx<'a> {
     /// This port's address in the graph.
     pub(crate) const fn port(self) -> InputPort {
         InputPort::new(self.node.node_id, self.declared.id)
+    }
+
+    /// The node the port is on.
+    pub(crate) const fn node(self) -> NodeCtx<'a> {
+        self.node
+    }
+
+    /// The graph the port's node is in.
+    pub(crate) const fn graph(self) -> GraphId {
+        self.node.graph_ctx.graph()
+    }
+
+    /// The library the port's declaration resolves against.
+    pub(crate) const fn library(self) -> &'a Library {
+        self.node.graph_ctx.library()
     }
 
     /// This port's address in the canvas's glyph domains.
@@ -92,10 +107,9 @@ impl<'a> InputCtx<'a> {
         self.declared.port.const_only
     }
 
-    /// The editor picker's options for this port, e.g. named config presets.
-    /// Empty is the common case.
-    pub(crate) fn value_variants(self) -> &'a [ValueVariant] {
-        &self.declared.value_variants
+    /// The constants the port admits past its type: a picker, a span, or none.
+    pub(crate) fn domain(self) -> &'a ValueDomain {
+        &self.declared.domain
     }
 
     /// The last run could not feed this port — its own verdict, so a port

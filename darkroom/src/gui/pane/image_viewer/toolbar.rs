@@ -5,13 +5,18 @@
 //! The panel's layout stays on [`ImageViewer`](crate::gui::pane::image_viewer::ImageViewer),
 //! which reads and writes the viewer's framing; everything it stamps out is here.
 
+use lens::DisplayStretch;
 use palantir::{
     Configure, ImageFilter, Panel, RgbaF32, Sizing, Spacing, Text, TextInput, TextWrap, Ui, VAlign,
     WidgetId,
 };
-use scenarium::ProgramId;
+use scenarium::{Binding, ConstValue, InputPort, ProgramId};
 
+use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::io::preferences::ViewerBg;
+use crate::core::preview_sink;
+use crate::gui::frame::requests::Requests;
+use crate::gui::pane::image_viewer::PreviewDisplay;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::chip::Chip;
 use crate::gui::widgets::icon::Icon;
@@ -59,6 +64,36 @@ impl Controls<'_> {
             } else {
                 ImageFilter::Nearest
             };
+        }
+    }
+}
+
+impl Controls<'_> {
+    /// The Display toggle: on while the preview shows through the auto stretch. A click sets the
+    /// preview node's Display, one undo step, so the card and every viewer of the node agree.
+    pub(super) fn stretch_toggle(self, ui: &mut Ui, display: PreviewDisplay, out: &mut Requests) {
+        let auto = display.stretch == DisplayStretch::Auto;
+        let (tooltip, to) = if auto {
+            (
+                "Display: auto stretch — click for linear",
+                DisplayStretch::Linear,
+            )
+        } else {
+            (
+                "Display: linear — click for an auto stretch",
+                DisplayStretch::Auto,
+            )
+        };
+        if Chip::new(self.wid("stretch"), tooltip)
+            .selected(auto)
+            .show_icon(ui, self.theme, Icon::Stretch)
+        {
+            let port = InputPort::new(display.node.node_id, preview_sink::DISPLAY_PORT);
+            let name = ConstValue::Enum(to.name().to_owned());
+            out.push_graph(
+                display.node.graph,
+                GraphIntent::set_input(port, Binding::Const(name)),
+            );
         }
     }
 }

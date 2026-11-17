@@ -1,7 +1,7 @@
 //! One request a frontend raises against the open document.
 
 use palantir::DockOperation;
-use scenarium::{CompoundId, GraphId, InstancePath};
+use scenarium::{CompoundId, GraphId, InstancePath, ProgramId};
 
 use crate::core::document::tab_ref::TabRef;
 use crate::core::edit::compound_intent::CompoundIntent;
@@ -23,6 +23,10 @@ use crate::core::edit::graph_intent::GraphIntent;
 ///     the graph edits around it.
 ///   - [`Enter`](Self::Enter): navigation as a view op is, into a compound's pane: it shows the
 ///     compound through `through`, opens or focuses its tab, and makes it the active graph.
+///   - [`Show`](Self::Show): navigation, bringing a tab into view where it is or in its home;
+///     see [`Document::show_tab`](crate::core::document::Document::show_tab).
+///   - [`ShowPreview`](Self::ShowPreview): navigation, making a preview the active one and
+///     showing the viewer that follows it.
 #[derive(Debug)]
 pub(crate) enum DocumentRequest {
     Graph {
@@ -45,4 +49,6 @@ pub(crate) enum DocumentRequest {
         compound: CompoundId,
         through: Option<InstancePath>,
     },
+    Show(TabRef),
+    ShowPreview(ProgramId),
 }

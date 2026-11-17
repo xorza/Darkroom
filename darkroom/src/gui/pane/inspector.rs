@@ -1,31 +1,40 @@
-//! The inspector pane: a read-only summary of one node — its identity, run status, inputs,
-//! outputs and log — at UI scale, in a dock tab
-//! ([`crate::core::document::tab_ref::TabRef::Inspector`]).
+//! The inspector pane: one node — its identity, run status, inputs, outputs and log — at UI
+//! scale, in a dock tab ([`crate::core::document::tab_ref::TabRef::Inspector`]).
 //!
 //! The `Selection` tab follows the selection and the node header's inspect button opens it; its
-//! pin opens a tab held on that one node, which closes with the node. Input lines show the
-//! static binding; outputs show only their label. Neither reads a runtime value — a preview node
-//! is how you look at one.
+//! pin opens a tab held on that one node, which closes with the node. Outputs show only their
+//! label. Nothing here reads a runtime value — a preview node is how you look at one.
+//!
+//! - **The inspector edits.** An input's row records the node's own field, through
+//!   [`input_field`], so a value is set at the interface's size at any zoom; a wired input names
+//!   its producer. As Blender's Sidebar holds the properties of the selected node
+//!   ([nodes](https://docs.blender.org/manual/en/latest/interface/controls/nodes/introduction.html)),
+//!   and Houdini's parameter pane and Nuke's Properties do. Refused: a summary beside the node's
+//!   fields, which left a 16 px field as the one place a value changed; a second set of
+//!   editors, which would drift from the node's.
 
 use std::collections::BTreeSet;
 
 use palantir::{
-    Block, Border, Chrome, ClipMode, Configure, Corners, DockOperation, Panel, RgbaF32, Scroll,
-    Sense, SizeSpec, Sizing, Spacing, Text, TextInput, TextStyle, TextWrap, Ui, VAlign, WidgetId,
-    fmt,
+    Block, Border, Chrome, ClipMode, Configure, Corners, Panel, RgbaF32, Scroll, Sense, SizeSpec,
+    Sizing, Spacing, Text, TextInput, TextStyle, TextWrap, Ui, VAlign, WidgetId, fmt,
 };
 use scenarium::LogLevel;
 use scenarium::NodeId;
-use scenarium::{Binding, ConstValue, DataType, GraphId, ValueVariant};
+use scenarium::{DataType, GraphId};
 
+use crate::core::document;
 use crate::core::document::inspect_target::InspectTarget;
 use crate::core::document::item_id::ItemId;
 use crate::core::document::tab_ref::TabRef;
+use crate::gui::frame::requests::Requests;
 use crate::gui::frame::stage::Stage;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::input_ctx::InputCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
+use crate::gui::pane::graph_ui::node_ui::const_editor::Field;
 use crate::gui::pane::graph_ui::node_ui::header;
+use crate::gui::pane::graph_ui::node_ui::input_field::{self, InputField};
 use crate::gui::pane::graph_ui::node_ui::run_status::RunStatus;
 use crate::gui::pane::interface_card::{self, InterfaceCard};
 use crate::gui::port_ref::PortKind;
@@ -33,7 +42,7 @@ use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::Theme;
 use crate::gui::theme::color;
 use crate::gui::widgets::format;
-use crate::gui::widgets::format::shown_value::{ShownValue, UNSET};
+use crate::gui::widgets::format::shown_value::UNSET;
 use crate::gui::widgets::icon::Icon;
 use crate::gui::widgets::icon_button::IconButton;
 use crate::gui::widgets::support;
@@ -126,12 +135,10 @@ fn body(ui: &mut Ui, stage: &mut Stage<'_, NodeCtx<'_>>, target: InspectTarget) 
                         )
                         .show(ui, theme)
                     {
-                        stage.out.push_view(DockOperation::OpenTab {
-                            tab: TabRef::Inspector(InspectTarget::Node {
-                                addr: node.addr(),
-                                through: node.graph_ctx.through(),
-                            }),
-                        });
+                        stage.out.push_show(TabRef::Inspector(InspectTarget::Node {
+                            addr: node.addr(),
+                            through: node.graph_ctx.through(),
+                        }));
                     }
                 });
             // The kind line earns its row only when it says something the title doesn't: an
@@ -173,11 +180,12 @@ fn body(ui: &mut Ui, stage: &mut Stage<'_, NodeCtx<'_>>, target: InspectTarget) 
     let (library, graphs) = (node.graph_ctx.library(), &node.graph_ctx.document().graphs);
     let inputs = node.inputs();
     if inputs.len() > 0 {
+        let out = &mut *stage.out;
         card(ui, theme, "Inputs", inputs.len(), |ui| {
             for (idx, input) in inputs.enumerate() {
-                let value = PortValue::of(ui, input);
+                let wid = port_wid(PortKind::Input, idx);
                 InspectedPort {
-                    wid: port_wid(PortKind::Input, idx),
+                    wid,
                     name: input.name(),
                     dot: if input.const_only() {
                         PortDot::BLANK
@@ -185,9 +193,10 @@ fn body(ui: &mut Ui, stage: &mut Stage<'_, NodeCtx<'_>>, target: InspectTarget) 
                         PortDot::of(node.graph_ctx, input.data_type())
                     },
                     type_name: graphs.type_name(library, input.data_type()),
-                    value: Some(value),
                 }
-                .show(ui, theme);
+                .show(ui, theme, |ui| {
+                    input_value(ui, out, input, wid.with("value"));
+                });
             }
         });
     }
@@ -195,14 +204,21 @@ fn body(ui: &mut Ui, stage: &mut Stage<'_, NodeCtx<'_>>, target: InspectTarget) 
     if outputs.len() > 0 {
         card(ui, theme, "Outputs", outputs.len(), |ui| {
             for (idx, output) in outputs.enumerate() {
+                let wid = port_wid(PortKind::Output, idx);
+                let type_name = graphs.type_name(library, output.data_type());
                 InspectedPort {
-                    wid: port_wid(PortKind::Output, idx),
+                    wid,
                     name: output.name(),
                     dot: PortDot::of(node.graph_ctx, output.data_type()),
-                    type_name: graphs.type_name(library, output.data_type()),
-                    value: None,
+                    type_name,
                 }
-                .show(ui, theme);
+                .show(ui, theme, |ui| {
+                    Text::new(type_name)
+                        .id(wid.with("value"))
+                        .style(&support::muted_text(ui, theme, theme.font.caption))
+                        .text_wrap(TextWrap::EllipsisMiddle)
+                        .show(ui);
+                });
             }
         });
     }
@@ -427,25 +443,22 @@ impl PortDot {
 }
 
 /// One port row on one line: the port's dot, the name in the muted ink, its type the name's
-/// tooltip, and at the right the input's value in the node's field box, cut in the middle when it
-/// overruns so a path keeps its file's end, or the output's type name.
+/// tooltip, and at the right what the caller records there: an input's value, an output's type.
 #[derive(Debug)]
 struct InspectedPort<'a> {
     wid: WidgetId,
     name: &'a str,
     dot: PortDot,
     type_name: &'a str,
-    value: Option<PortValue<'a>>,
 }
 
 impl InspectedPort<'_> {
-    fn show(self, ui: &mut Ui, theme: &Theme) {
+    fn show(self, ui: &mut Ui, theme: &Theme, value: impl FnOnce(&mut Ui)) {
         let Self {
             wid,
             name,
             dot,
             type_name,
-            value,
         } = self;
         Panel::hstack()
             .id(wid)
@@ -465,114 +478,57 @@ impl InspectedPort<'_> {
                     .show(ui);
                 let shown_type = fmt!(ui, "{type_name}");
                 support::tooltip_after(ui, &name, Some(shown_type));
-                match value {
-                    Some(value) => value.show(ui, theme, wid.with("value")),
-                    None => {
-                        Text::new(shown_type)
-                            .id(wid.with("value"))
-                            .style(&support::muted_text(ui, theme, theme.font.caption))
-                            .text_wrap(TextWrap::EllipsisMiddle)
-                            .show(ui);
-                    }
-                }
+                value(ui);
             });
     }
 }
 
-/// What an input's field box reads, and the face it reads in.
-#[derive(Debug)]
-struct PortValue<'a> {
-    text: TextInput<'a>,
-    face: ValueFace,
-}
-
-/// The face of a field box's text, as the node's own field shows it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ValueFace {
-    /// A word, a path or a count of files, in the body face.
-    Text,
-    /// A number, in the mono face, so figures line up from row to row.
-    Number,
-    /// No value, as "—" in the muted ink.
-    Unset,
-}
-
-impl<'a> PortValue<'a> {
-    /// The value tier of an input row, as the node's own field shows it: a constant one of the
-    /// input's named variants holds reads by that variant's label, as the node's dropdown does,
-    /// and any other through [`ShownValue`], the node's formatter.
-    ///
-    /// The fixed answers stay borrowed and the formatted one goes straight into the text arena,
-    /// so an open pane builds no owned string per input per frame.
-    fn of(ui: &mut Ui, input: InputCtx<'a>) -> Self {
-        let value = match input.binding() {
-            None => {
-                return Self {
-                    text: TextInput::Borrowed(UNSET),
-                    face: ValueFace::Unset,
-                };
-            }
-            Some(Binding::Wire(_)) => {
-                return Self {
-                    text: TextInput::Borrowed("wired"),
-                    face: ValueFace::Text,
-                };
-            }
-            Some(Binding::Const(value)) => value,
-        };
-        if let Some(label) = variant_label(input.value_variants(), value) {
-            return Self {
-                text: TextInput::Borrowed(label),
-                face: ValueFace::Text,
-            };
+/// An input's value at the right of its row: a constant in the node's own field, which edits it,
+/// the empty field where one could sit, the producer a wire reads from, and a kept ghost's value
+/// dimmed. An input that takes no edit records its field disabled, its face kept.
+fn input_value(ui: &mut Ui, out: &mut Requests, input: InputCtx<'_>, wid: WidgetId) {
+    let theme = input.node().theme();
+    let muted = support::muted_text(ui, theme, theme.font.body);
+    let field = Field {
+        theme: &theme.const_editor.rest,
+        id: wid.with("editor"),
+    };
+    let value = match InputField::of(input) {
+        InputField::Const(value) => Some(value),
+        InputField::Empty => None,
+        InputField::Wired(source) => {
+            let graphs = &input.node().graph_ctx.document().graphs;
+            let scope = graphs.scope(input.library(), input.graph());
+            let producer = graphs
+                .graph(input.graph())
+                .find(source.node_id)
+                .map_or("", |node| format::node_name(document::title(node, scope)));
+            Text::new(fmt!(ui, "\u{2190} {producer}"))
+                .id(wid)
+                .style(&muted)
+                .text_wrap(TextWrap::Ellipsis)
+                .show(ui);
+            return;
         }
-        let shown = ShownValue {
-            value,
-            data_type: input.data_type(),
-        };
-        Self {
-            text: TextInput::Interned(fmt!(ui, "{shown}")),
-            face: if matches!(value, ConstValue::Int(_) | ConstValue::Float(_)) {
-                ValueFace::Number
-            } else {
-                ValueFace::Text
-            },
+        InputField::KeptConst(value) => {
+            Text::new(fmt!(ui, "kept {}", value.value_text()))
+                .id(wid)
+                .style(&muted)
+                .text_wrap(TextWrap::Ellipsis)
+                .show(ui);
+            return;
         }
-    }
-
-    /// The value in the node's resting field box, the row's height, as the node's field fills
-    /// its row.
-    fn show(self, ui: &mut Ui, theme: &Theme, wid: WidgetId) {
-        let style = match self.face {
-            ValueFace::Text => support::body_text(ui, theme),
-            ValueFace::Number => support::mono_text(ui, theme.font.body),
-            ValueFace::Unset => {
-                support::colored_text(ui, theme.const_editor.rest.unset, theme.font.body)
-            }
-        };
-        let field = &theme.const_editor.rest;
-        Panel::hstack()
-            .id(wid)
-            .size(SizeSpec::FILL_H)
-            .padding(field.rest_padding())
-            .child_align(VAlign::Center)
-            .chrome(field.rest_box().clone())
-            .show(ui, |ui| {
-                Text::new(self.text)
-                    .id(wid.with("text"))
-                    .style(&style)
-                    .text_wrap(TextWrap::EllipsisMiddle)
-                    .show(ui);
-            });
-    }
-}
-
-/// The label of the variant among `variants` that holds `value`, if one does.
-fn variant_label<'a>(variants: &'a [ValueVariant], value: &ConstValue) -> Option<&'a str> {
-    variants
-        .iter()
-        .find(|variant| &variant.value == value)
-        .map(ValueVariant::label)
+        InputField::Unwired | InputField::KeptWire => {
+            Text::new(UNSET).id(wid).style(&muted).show(ui);
+            return;
+        }
+    };
+    Panel::hstack()
+        .id(wid)
+        .size((Sizing::HUG, Sizing::FILL))
+        .disabled(input.read_only())
+        .child_align(VAlign::Center)
+        .show(ui, |ui| input_field::record(ui, out, input, value, field));
 }
 
 #[cfg(test)]
@@ -634,6 +590,79 @@ mod tests {
             (theme.port.row_dot, theme.port.row_dot, 0.0),
             "the dot opens the row"
         );
+    }
+
+    /// An input's field in the inspector edits its constant as the node's does: a typed value
+    /// lands one `SetInput`, which the node's own field then shows. A wired input names its
+    /// producer instead of a field.
+    #[test]
+    fn the_inspector_edits_a_constant_as_the_node_does() {
+        use palantir::{Key, Modifiers};
+        use scenarium::{Binding, ConstValue, InputPort, InputState, PortId};
+
+        use crate::core::document::internals::DocumentFixture;
+        use crate::core::edit::graph_intent::GraphIntent;
+        use crate::gui::app::session::internals::SessionHarness;
+        use crate::gui::pane::graph_ui::wid;
+
+        // In the sidebar, so the graph shows beside it.
+        let mut h = SessionHarness::new(DocumentFixture::probes(2));
+        h.requests
+            .push_show(TabRef::Inspector(InspectTarget::Selection));
+        h.drain();
+        let nodes: Vec<NodeId> = h
+            .session
+            .open
+            .document()
+            .graphs
+            .main()
+            .iter()
+            .map(|node| node.node_id)
+            .collect();
+        let port = InputPort::new(nodes[1], PortId::new(1));
+        h.apply(GraphIntent::set_input(
+            port,
+            Binding::Const(ConstValue::Int(3)),
+        ));
+        h.apply(GraphIntent::SetSelection {
+            to: [ItemId::Node(nodes[1])].into(),
+        });
+        h.prime(3);
+        let editor = port_wid(PortKind::Input, 0).with("value").with("editor");
+        h.ui.click(h.ui.rect(editor).expect("the field records").center());
+        h.frame();
+        h.ui.hold_modifiers(Modifiers::CTRL);
+        h.ui.key(Key::Char('a'));
+        h.ui.hold_modifiers(Modifiers::NONE);
+        h.ui.type_text("7");
+        h.ui.key(Key::Enter);
+        h.frame();
+        h.drain();
+        let state = h.session.open.document().graphs.main().input_state(port);
+        assert_eq!(
+            format!("{state:?}"),
+            format!("{:?}", InputState::Live(Binding::Const(ConstValue::Int(7))))
+        );
+        h.prime(2);
+        let on_node: Vec<String> =
+            h.ui.widgets(None)
+                .into_iter()
+                .filter(|widget| widget.id == wid::const_editor(GraphId::Main, port))
+                .map(|widget| widget.text)
+                .collect();
+        assert_eq!(
+            on_node,
+            ["7"],
+            "the node's field shows the inspector's edit"
+        );
+
+        h.apply(GraphIntent::set_input(
+            port,
+            Binding::wire(nodes[0], PortId::new(1)),
+        ));
+        h.prime(2);
+        let wired = h.ui.widgets(Some("\u{2190} probe"));
+        assert!(!wired.is_empty(), "a wired input names its producer");
     }
 
     /// The title row is a port row's height, its chip and pin centered on the title; an impure
@@ -803,24 +832,5 @@ mod tests {
         );
         assert_eq!(only_node(&set(&[ItemId::Node(a), ItemId::Node(b)])), None);
         assert_eq!(only_node(&set(&[ItemId::Tie(tie)])), None);
-    }
-
-    /// A constant one of the input's variants holds reads by that variant's label — its display
-    /// label when it has one, else its name — and any other constant has none.
-    #[test]
-    fn a_variant_constant_reads_by_its_label() {
-        let variants = [
-            ValueVariant::new("precise_ground", ConstValue::Int(1)).display("Precise Ground"),
-            ValueVariant::new("wide_field", ConstValue::Int(2)),
-        ];
-        assert_eq!(
-            variant_label(&variants, &ConstValue::Int(1)),
-            Some("Precise Ground")
-        );
-        assert_eq!(
-            variant_label(&variants, &ConstValue::Int(2)),
-            Some("wide_field")
-        );
-        assert_eq!(variant_label(&variants, &ConstValue::Int(3)), None);
     }
 }

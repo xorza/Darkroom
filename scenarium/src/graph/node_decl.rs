@@ -113,7 +113,7 @@ impl<'a> NodeDecl<'a> {
     /// Whether the output under `port` holds only a constant: the `Inputs` node's mirror of a
     /// const-only interface input, which an instance binds to a constant alone. So a const-only
     /// input inside the compound may take a wire from it.
-    pub(crate) fn output_is_const(self, port: PortId) -> bool {
+    pub fn output_is_const(self, port: PortId) -> bool {
         match self {
             Self::Boundary {
                 side: Boundary::Inputs,

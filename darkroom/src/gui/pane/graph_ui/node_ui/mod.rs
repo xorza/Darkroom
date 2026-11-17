@@ -1,6 +1,7 @@
 mod card;
 pub(crate) mod const_editor;
 pub(crate) mod header;
+pub(crate) mod input_field;
 mod node_footer;
 pub(super) mod node_record;
 pub(crate) mod port_row;
@@ -9,7 +10,10 @@ pub(crate) mod run_status;
 
 use std::mem;
 
-use palantir::{Border, Configure, Panel, Sense, Shadow, SizeSpec, Track, Ui, Visibility};
+use palantir::{
+    Align, Border, Configure, FontWeight, Panel, Sense, Shadow, Size, SizeSpec, Sizing, Spacing,
+    Text, TextStyle, TextWrap, Track, Ui, Visibility,
+};
 use scenarium::NodeId;
 
 use crate::core::document::graph_view::StackedNode;
@@ -19,9 +23,11 @@ use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
 use crate::gui::pane::graph_ui::gesture::breaker_ui::breaker_probe::BreakerProbe;
 use crate::gui::pane::graph_ui::node_ui::node_record::NodeRecord;
+use crate::gui::pane::graph_ui::scene::detail_level::DetailLevel;
 use crate::gui::pane::graph_ui::wid;
 use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::{CardTier, Theme};
+use crate::gui::widgets::support;
 
 /// Owns rendering of every graph node.
 ///
@@ -108,8 +114,15 @@ impl NodeUi {
     /// of, which per-node widget state would reallocate.
     fn draw_node(&mut self, ui: &mut Ui, node_ctx: NodeCtx<'_>, pass: &mut NodePass<'_, '_>) {
         let NodePass { stage, probe } = pass;
-        let draw_ctx = stage.ctx;
         let (theme, node) = (node_ctx.theme(), node_ctx);
+        let body = wid::body(node.graph_ctx.graph(), node.node_id);
+        // A node whose field holds the focus keeps its words at any zoom: a field laid out
+        // unpainted would still take what is typed.
+        let draw_ctx = if ui.is_focus_within(body) {
+            stage.ctx.with_detail(DetailLevel::Full)
+        } else {
+            stage.ctx
+        };
 
         // Probe the body against the breaker polyline: a hit recolors the border and flags the
         // node for deletion on release. The rect is the `node_world_rect` the cull and the
@@ -154,8 +167,12 @@ impl NodeUi {
         };
 
         let row_tracks = &mut self.row_tracks;
-        Panel::vstack()
-            .id(wid::body(node.graph_ctx.graph(), node.node_id))
+        // At the title level the title stands over the laid-out rows, so the body is a stack of
+        // the two; its size is the rows' alone, which the title's box takes from last frame.
+        let rows = body.with("rows");
+        let rows_size = ui.response_for(rows).layout_rect.map(|rect| rect.size);
+        Panel::zstack()
+            .id(body)
             .visibility(visibility)
             .at(node.pos)
             // A preview needs room for a thumbnail.
@@ -173,21 +190,55 @@ impl NodeUi {
                     .with_shadow(shadow),
             )
             .show(ui, |ui| {
-                let mut record = NodeRecord {
-                    node: node_ctx,
-                    stage: stage.with(draw_ctx),
-                };
-                header::show(ui, &mut record);
-                port_row::show(ui, &mut record, row_tracks);
-                // A preview has no output, so it has no cached value for the
-                // footer to report — its value takes that slot instead.
-                if node.preview() {
-                    preview_row::show(ui, &mut record);
-                } else {
-                    node_footer::show(ui, node_ctx);
+                Panel::vstack().id(rows).size(SizeSpec::HUG).show(ui, |ui| {
+                    let mut record = NodeRecord {
+                        node: node_ctx,
+                        stage: stage.with(draw_ctx),
+                    };
+                    header::show(ui, &mut record);
+                    port_row::show(ui, &mut record, row_tracks);
+                    // A preview has no output, so it has no cached value for the
+                    // footer to report — its value takes that slot instead.
+                    if node.preview() {
+                        preview_row::show(ui, &mut record);
+                    } else {
+                        node_footer::show(ui, node_ctx, draw_ctx.words());
+                    }
+                });
+                if draw_ctx.detail() == DetailLevel::Title
+                    && let Some(size) = rows_size
+                {
+                    standing_title(ui, node_ctx, size, draw_ctx.zoom());
                 }
             });
     }
+}
+
+/// A node's title at the title level: at the caption size on screen whatever the zoom, centered
+/// in a box of its rows' `size`, so it never sizes the node, and cut with an ellipsis at its
+/// width. A preview keeps its picture, so its title stands in the header band above it.
+fn standing_title(ui: &mut Ui, node: NodeCtx<'_>, size: Size, zoom: f32) {
+    let theme = node.theme();
+    let (align, inset) = if node.preview() {
+        (Align::TOP, theme.space.sm / zoom)
+    } else {
+        (Align::CENTER, 0.0)
+    };
+    let style = TextStyle {
+        weight: FontWeight::BOLD,
+        ..support::sized_text(ui, theme.font.caption / zoom)
+    };
+    Panel::zstack()
+        .id_salt("standing_title")
+        .size((Sizing::fixed(size.w), Sizing::fixed(size.h)))
+        .padding(Spacing::xy(theme.space.sm / zoom, inset))
+        .child_align(align)
+        .show(ui, |ui| {
+            Text::new(node.name())
+                .style(&style)
+                .text_wrap(TextWrap::Ellipsis)
+                .show(ui);
+        });
 }
 
 /// The node body's one shadow: the status frame for a last-run outcome that asks for attention,

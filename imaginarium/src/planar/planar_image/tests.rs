@@ -209,3 +209,31 @@ fn without_alpha_keeps_the_color_channels() {
         assert_eq!(dropped.bytes(), expected, "{format}");
     }
 }
+
+/// A 2 × 3 plane set reads each corner's samples, one a plane, in mono and RGB; one past each edge
+/// reads `None`.
+#[test]
+fn a_pixel_reads_one_sample_a_plane_and_none_past_each_edge() {
+    use glam::USizeVec2;
+
+    use crate::color::pixel_sample::{Channels, PixelSample};
+
+    // Interleaved RGB numbered from 1: the pixel at (x, y) starts at 3·(x + 2·y) + 1.
+    let samples: Vec<f32> = (1..=18).map(|v| v as f32).collect();
+    let rgb = PlanarImage::from_interleaved(PlanarDesc::new((2, 3), ChannelLayout::Rgb), samples);
+    let mono = PlanarImage::new_mono(Buffer2::new((2, 3), (1..=6).map(|v| v as f32).collect()));
+    for (x, y) in [(0, 0), (1, 0), (0, 2), (1, 2)] {
+        let pos = USizeVec2::new(x, y);
+        let k = (3 * (x + 2 * y) + 1) as f32;
+        assert_eq!(
+            rgb.sample(pos),
+            Some(PixelSample::F32(Channels::Rgb([k, k + 1.0, k + 2.0])))
+        );
+        let k = (x + 2 * y + 1) as f32;
+        assert_eq!(mono.sample(pos), Some(PixelSample::F32(Channels::Mono(k))));
+    }
+    for past in [USizeVec2::new(2, 0), USizeVec2::new(0, 3)] {
+        assert_eq!(rgb.sample(past), None, "{past}");
+        assert_eq!(mono.sample(past), None, "{past}");
+    }
+}

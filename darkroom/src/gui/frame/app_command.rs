@@ -12,7 +12,8 @@ use std::path::PathBuf;
 use lens::MlModelPaths;
 use scenarium::{CompoundId, GraphId, InputPort, Node, NodeAddr, NodeId, ProgramId};
 
-use crate::gui::frame::framing::Framing;
+use crate::core::io::preferences::run_mode::RunMode;
+use crate::gui::frame::pane_ask::PaneAsk;
 use crate::gui::path_type::PathType;
 
 /// A command a UI surface (the menu bar, the keyboard chords, the graph
@@ -28,6 +29,8 @@ use crate::gui::path_type::PathType;
 pub(crate) enum AppCommand {
     /// Document file lifecycle.
     File(FileCommand),
+    /// Open the document at this path, as a pick of a recent document asks.
+    OpenAt(PathBuf),
     /// Graph execution + worker event loop.
     Run(RunCommand),
     /// Pick a file for one of the ML nodes' models, in a blocking dialog.
@@ -47,14 +50,20 @@ pub(crate) enum AppCommand {
     },
     /// Node edits raised via a dialog.
     Edit(EditCommand),
-    /// An image of the window, and where the graph's camera looks.
+    /// An image of the window, and the full-resolution image a viewer draws.
     View(ViewCommand),
+    /// Hand `ask` to `graph`'s pane, which answers it as it next readies a pass. It names its
+    /// graph, so a pane's chip asks its own pane and a menu the active one: the active graph read
+    /// when the command runs is whichever pane last took an edit.
+    Pane { graph: GraphId, ask: PaneAsk },
     /// Take back the last entry of the undo history, as Ctrl+Z does.
     Undo,
     /// Replay the last undone entry, as Ctrl+Shift+Z does.
     Redo,
     /// Quit the app, through the unsaved-changes prompt.
     Quit,
+    /// Set when a run starts unasked.
+    SetRunMode(RunMode),
     /// Park a warning on the status bar: an edit the document's rules refused, or what an edit
     /// dropped, its causes included.
     Warn(String),
@@ -77,20 +86,14 @@ pub(crate) enum FileCommand {
     PackResources,
 }
 
-/// What the window shows: an image of it as the next frame paints it, where the graph's camera
-/// looks, and the full-resolution image a viewer draws.
+/// What the window shows: an image of it as the next frame paints it, and the full-resolution
+/// image a viewer draws.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum ViewCommand {
     /// Put the image on the clipboard.
     CopyImage,
     /// Prompt for a file and save the image there as a PNG.
     SaveImage,
-    /// Frame `graph` in its pane, as the canvas toolbar's button, the menu and the status bar's
-    /// link ask. The canvas raises the camera move as it next readies a pass, over that frame's
-    /// selection. It names its graph, so a toolbar chip frames its own pane and the menu the
-    /// active one: the active graph read when the command runs framed whichever pane last took an
-    /// edit.
-    Frame { graph: GraphId, framing: Framing },
     /// Convert `program_id`'s stored image at full resolution, its longest edge capped to `max_dim`,
     /// as [`PreviewStore::convert_full`] does: a viewer raises it for an image it found
     /// [`FullView::Unasked`].
@@ -109,6 +112,8 @@ pub(crate) enum ViewCommand {
 pub(crate) enum RunCommand {
     /// Evaluate the graph once on the worker.
     Once,
+    /// Evaluate the upstream cone of every preview that is not disabled, as Run on Change does.
+    Previews,
     /// Evaluate one program node's upstream cone and deliver its outputs.
     Node(ProgramId),
     /// Remove one authored node's compiled runtime-cache cone, in every instance of its graph,

@@ -30,7 +30,7 @@ pub fn project(dir: &Path, funcs: &[&str]) -> PathBuf {
                 .unwrap_or_else(|| panic!("the editor's library has no func {name}")),
         );
     }
-    save(fixture, dir)
+    save_to(fixture, dir)
 }
 
 /// The value [`nested_preview`]'s preview shows.
@@ -71,11 +71,51 @@ pub fn nested_preview(dir: &Path) -> PathBuf {
     for _ in 0..2 {
         fixture.add_instance(outer_id);
     }
-    save(fixture, dir)
+    save_to(fixture, dir)
+}
+
+/// The value [`previews_beside_a_save`]'s `Shown` preview shows.
+pub const SHOWN_PREVIEW_VALUE: i64 = 5;
+
+/// A project whose main graph holds three previews of constants, `Shown`, `Off`, which is
+/// disabled, and `Spare`, beside a Save Image fed nothing, saved as `dir/scene.darkroom`; its
+/// path. A run of every sink fails on the save, so a run that leaves it alone ran previews alone.
+///
+/// # Panics
+///
+/// When the save fails.
+pub fn previews_beside_a_save(dir: &Path) -> PathBuf {
+    let library = RuntimeLibrary::new(&MlModelPaths::default());
+    let func = |name| {
+        library
+            .cur()
+            .by_name(name)
+            .unwrap_or_else(|| panic!("the editor's library has no func {name}"))
+            .clone()
+    };
+    let (preview, save) = (func("Preview"), func("Save Image"));
+    let mut fixture = DocumentFixture::default();
+    for (name, value, disabled) in [
+        ("Shown", SHOWN_PREVIEW_VALUE, false),
+        ("Off", SHOWN_PREVIEW_VALUE + 1, true),
+        ("Spare", SHOWN_PREVIEW_VALUE + 2, false),
+    ] {
+        let id = fixture.add(&preview);
+        let graph = fixture.document.graphs.main_mut();
+        graph.bindings.insert(
+            InputPort::new(id, PortId::new(1)),
+            Binding::Const(ConstValue::Int(value)),
+        );
+        let node = graph.find_mut(id).expect("just added");
+        node.name = name.to_string();
+        node.disabled = disabled;
+    }
+    fixture.add(&save);
+    save_to(fixture, dir)
 }
 
 /// Save `fixture`'s document as `dir/scene.darkroom`; its path.
-fn save(fixture: DocumentFixture, dir: &Path) -> PathBuf {
+fn save_to(fixture: DocumentFixture, dir: &Path) -> PathBuf {
     let path = dir.join("scene.darkroom");
     OpenDocument::over(fixture.document)
         .save_to(&fixture.library, &path, SavedPaths::Relative)

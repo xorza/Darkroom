@@ -7,7 +7,7 @@ use common::thread;
 
 use glam::UVec2;
 use imaginarium::ColorFormat;
-use lens::Image;
+use lens::{DisplayStretch, Image};
 use palantir::Image as Raster;
 use scenarium::{DynamicValue, ProgramId};
 
@@ -43,11 +43,12 @@ impl Ticket {
     }
 }
 
-/// One conversion, and the publish it belongs to.
+/// One conversion, the publish it belongs to, and the stretch it converts under.
 #[derive(Debug)]
 pub(super) struct Job {
     pub(super) program_id: ProgramId,
     pub(super) ticket: Ticket,
+    pub(super) stretch: DisplayStretch,
     pub(super) work: Work,
 }
 
@@ -72,8 +73,8 @@ pub(crate) struct Converted {
 pub(super) enum Outcome {
     /// What a freshly published value shows on its card.
     Card(Card),
-    /// A viewer's full-resolution raster.
-    Full(Raster),
+    /// A viewer's full-resolution raster, or why it has none.
+    Full(Result<Raster, DrawablePreviewError>),
 }
 
 /// What a published value shows on its card.
@@ -82,10 +83,17 @@ pub(crate) enum Card {
     /// A non-image value, formatted.
     Text(String),
     /// An image: its thumbnail, and the source a viewer's full raster is
-    /// converted from later.
+    /// converted from later, under the same stretch.
     Image {
         thumbnail: Thumbnail,
         source: DynamicValue,
+        stretch: DisplayStretch,
+    },
+    /// An image the stretch found nothing to stretch in, kept so another stretch can convert it.
+    Unstretched {
+        error: DrawablePreviewError,
+        source: DynamicValue,
+        stretch: DisplayStretch,
     },
     /// An image no texture can hold.
     Failed(DrawablePreviewError),
@@ -141,15 +149,16 @@ impl Job {
         let Self {
             program_id,
             ticket,
+            stretch,
             work,
         } = self;
         let outcome = match work {
-            Work::Thumbnail(value) => Outcome::Card(card(value)),
+            Work::Thumbnail(value) => Outcome::Card(card(value, stretch)),
             Work::Full { source, texels } => {
                 let image = source
                     .as_custom::<Image>()
                     .expect("a full raster is only asked of an image value");
-                Outcome::Full(rgba8_raster(image, texels))
+                Outcome::Full(rgba8_raster(image, texels, stretch))
             }
         };
         Converted {
@@ -160,31 +169,44 @@ impl Job {
     }
 }
 
-/// What a published `value` shows on its card. The source moves into the
+/// What a published `value` shows on its card under `stretch`. The source moves into the
 /// card only after the pixels are read, since the image borrows it.
-fn card(value: DynamicValue) -> Card {
+fn card(value: DynamicValue, stretch: DisplayStretch) -> Card {
     let thumbnail = {
         let Some(image) = value.as_custom::<Image>() else {
             return Card::Text(value.to_string());
         };
         let desc = image.desc();
-        match native_size(desc) {
-            Ok(native_size) => Thumbnail {
-                raster: rgba8_raster(image, capped_target(native_size, Some(PREVIEW_TEXTURE_DIM))),
+        let native_size = match native_size(desc) {
+            Ok(native_size) => native_size,
+            Err(error) => return Card::Failed(error),
+        };
+        let target = capped_target(native_size, Some(PREVIEW_TEXTURE_DIM));
+        match rgba8_raster(image, target, stretch) {
+            Ok(raster) => Thumbnail {
+                raster,
                 native_size,
                 native_format: desc.color_format(),
             },
-            Err(error) => return Card::Failed(error),
+            Err(error) => {
+                return Card::Unstretched {
+                    error,
+                    source: value,
+                    stretch,
+                };
+            }
         }
     };
     Card::Image {
         thumbnail,
         source: value,
+        stretch,
     }
 }
 
 #[cfg(feature = "internals")]
 pub(crate) mod internals {
+    use lens::DisplayStretch;
     use scenarium::DynamicValue;
 
     use crate::gui::state::preview_store::preview_converter::{Card, card};
@@ -212,10 +234,10 @@ pub(crate) mod internals {
         }
     }
 
-    /// `value`'s card, converted on the calling thread — for a bench that
-    /// lands one conversion every frame and times the landing alone.
+    /// `value`'s card, converted linearly on the calling thread — for a bench that lands one
+    /// conversion every frame and times the landing alone.
     pub(crate) fn convert_here(value: DynamicValue) -> Card {
-        card(value)
+        card(value, DisplayStretch::Linear)
     }
 }
 

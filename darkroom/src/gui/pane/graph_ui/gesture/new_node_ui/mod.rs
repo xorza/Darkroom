@@ -2,6 +2,7 @@
 //! where the click landed. The roster it lists is
 //! [`NodePalette`].
 
+mod landing;
 pub(crate) mod node_palette;
 pub(crate) mod palette_rows;
 
@@ -21,6 +22,7 @@ use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph_ui::canvas_input::CanvasGesture;
 use crate::gui::pane::graph_ui::gesture::anchored_menu::{AnchoredMenu, PopupShape};
+use crate::gui::pane::graph_ui::gesture::new_node_ui::landing::DroppedEnd;
 use crate::gui::pane::graph_ui::gesture::new_node_ui::node_palette::{NodePalette, Opening};
 use crate::gui::pane::graph_ui::gesture::new_node_ui::palette_rows::PaletteRows;
 use crate::gui::port_ref::PortRef;
@@ -37,9 +39,8 @@ pub(crate) struct NewNodeUi {
     /// Inner-canvas pre-transform position of the current open, so the spawned node lands
     /// exactly under the click.
     world_pos: Vec2,
-    /// Source port when a wire dropped on empty canvas opened the palette; on pick the wire
-    /// resumes floating from it rather than auto-attaching. `None` for a plain RMB or
-    /// double-click.
+    /// Source port when a wire dropped on empty canvas opened the palette, which the rows land
+    /// on a port of their new node. `None` for a plain RMB or double-click.
     source: Option<PortRef>,
     /// The palette's search box. Cleared on each open; case-insensitively filters and ranks the
     /// listed entries by name, category and description. Empty shows everything.
@@ -115,8 +116,28 @@ impl NewNodeUi {
         self.opening = Opening::Fresh;
     }
 
-    /// Open the palette under the pointer to pick the node that replaces `node_id`, as the node
-    /// menu's Replace with… asks.
+    /// Open the palette as Add Node asks: under the pointer, or at the pane's center when the
+    /// pointer is outside it, as a pick from the menu bar leaves it.
+    pub(crate) fn open_at_pointer(&mut self, ui: &Ui, graph_ctx: GraphCtx<'_>) {
+        let resp = ui.response_for(canvas::outer_wid(graph_ctx.graph()));
+        let Some(rect) = resp.rect else {
+            return;
+        };
+        let size = Vec2::new(rect.size.w, rect.size.h);
+        let inside = |local: &Vec2| {
+            local.x >= 0.0 && local.y >= 0.0 && local.x <= size.x && local.y <= size.y
+        };
+        let local = resp.pointer_local.filter(inside).unwrap_or(size * 0.5);
+        self.world_pos = graph_ctx.camera().to_world(local);
+        self.source = None;
+        self.replacing = None;
+        self.menu.open_at(rect.min + local);
+        self.search.text.clear();
+        self.opening = Opening::Fresh;
+    }
+
+    /// Open the palette under the pointer to pick the node that replaces `node_id`, as Replace
+    /// with… asks.
     pub(crate) fn open_replacing(&mut self, ui: &mut Ui, node_id: NodeId) {
         let Some(pointer) = ui.pointer_pos() else {
             return;
@@ -128,20 +149,15 @@ impl NewNodeUi {
         self.opening = Opening::Fresh;
     }
 
-    /// Record the palette while it is open, and raise the `AddNode` a pick means, or the Replace
-    /// dialog when it was opened to replace a node.
-    /// Returns the source of the dropped wire that opened it, when a pick lands, which floats
-    /// again so the user clicks the exact port to land it rather than it auto-attaching.
-    pub(crate) fn record(
-        &mut self,
-        ui: &mut Ui,
-        stage: &mut Stage<'_, GraphCtx<'_>>,
-    ) -> Option<PortRef> {
+    /// Record the palette while it is open, and raise what a pick means: the `AddNode`, with the
+    /// wire whose drop opened it laid onto the port its row names, or the Replace dialog when it
+    /// was opened to replace a node.
+    pub(crate) fn record(&mut self, ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
         let graph_ctx = stage.ctx;
         // Everything below is per-open work (the height arithmetic reads the display and a
         // last-frame rect), which `show` would not skip, as its arguments are built first.
         if !self.menu.is_open() {
-            return None;
+            return;
         }
         let opening = mem::take(&mut self.opening);
 
@@ -161,6 +177,9 @@ impl NewNodeUi {
             max_height: Some(max_height),
         };
         let replacing = self.replacing;
+        let dropped = self
+            .source
+            .and_then(|source| DroppedEnd::of(graph_ctx, source));
         let chosen = self.menu.show(ui, shape, |ui| {
             let palette = NodePalette {
                 graph_ctx,
@@ -168,11 +187,14 @@ impl NewNodeUi {
                 scroll_cap,
                 opening,
                 replacing: replacing.is_some(),
+                dropped,
             };
             palette.body(ui, search)
         });
 
-        let picked = chosen?;
+        let Some(picked) = chosen else {
+            return;
+        };
         if let Some(node_id) = self.replacing.take() {
             let GraphIntent::AddNode { node, .. } = picked.add else {
                 unreachable!("a palette pick adds a node");
@@ -186,15 +208,17 @@ impl NewNodeUi {
                 node_id,
                 with: Box::new(node),
             });
-            return None;
+            return;
         }
         for compound in picked.compounds {
             stage
                 .out
                 .push_compound(CompoundIntent::Add(Box::new(compound)));
         }
-        stage.out.push_graph(stage.ctx.graph(), picked.add);
-        self.source
+        // One batch, so the node and its wire are one history entry.
+        let graph = stage.ctx.graph();
+        stage.out.push_graph(graph, picked.add);
+        stage.out.extend_graph(graph, picked.wire);
     }
 }
 

@@ -26,7 +26,8 @@ fn each_input_offers_its_variants_under_their_labels() {
             Some(ConstValue::Enum(P::VARIANTS[0].to_owned()))
         );
         input
-            .value_variants
+            .domain
+            .variants()
             .iter()
             .map(|variant| {
                 let label = P::LABELS[P::VARIANTS.iter().position(|v| *v == variant.name).unwrap()];

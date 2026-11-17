@@ -47,6 +47,7 @@ impl Reversible for SetInput {
         };
         EditFacts {
             binding_kind: constant(&self.state.from) != constant(&self.state.to),
+            program: true,
             ..EditFacts::NONE
         }
     }

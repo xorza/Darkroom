@@ -11,6 +11,7 @@ use std::fmt::Debug;
 use bytemuck::Pod;
 
 use crate::color::color_format::SampleType;
+use crate::color::pixel_sample::{Channels, PixelSample};
 
 /// A channel storage type.
 pub(crate) trait Sample: Pod + Default + Debug + PartialEq + Send + Sync + 'static {
@@ -34,6 +35,9 @@ pub(crate) trait Sample: Pod + Default + Debug + PartialEq + Send + Sync + 'stat
     /// A value already in this type's units, narrowed by the rounding rule. `f32` storage keeps
     /// the value as it is.
     fn from_f32(value: f32) -> Self;
+
+    /// One pixel's `channels`, as a sample of this type.
+    fn pixel_sample(channels: Channels<Self>) -> PixelSample;
 
     /// The value in another storage type: `to_unit`, then `from_unit`. Between the integer types
     /// that is exactly `v · 257` widening and `round(v / 257)` narrowing for every input — the
@@ -73,6 +77,10 @@ impl Sample for u8 {
     fn from_f32(value: f32) -> Self {
         value.round_ties_even() as Self
     }
+
+    fn pixel_sample(channels: Channels<Self>) -> PixelSample {
+        PixelSample::U8(channels)
+    }
 }
 
 #[expect(
@@ -103,6 +111,10 @@ impl Sample for u16 {
     fn from_f32(value: f32) -> Self {
         value.round_ties_even() as Self
     }
+
+    fn pixel_sample(channels: Channels<Self>) -> PixelSample {
+        PixelSample::U16(channels)
+    }
 }
 
 impl Sample for f32 {
@@ -132,6 +144,10 @@ impl Sample for f32 {
     #[inline]
     fn from_f32(value: f32) -> Self {
         value
+    }
+
+    fn pixel_sample(channels: Channels<Self>) -> PixelSample {
+        PixelSample::F32(channels)
     }
 }
 

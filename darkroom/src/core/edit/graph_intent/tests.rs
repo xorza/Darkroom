@@ -1386,8 +1386,11 @@ fn set_node_property_commits_and_reverts() {
         }
         assert_eq!(
             step.facts(),
-            main_touched(),
-            "a node-property toggle changes no shape"
+            EditFacts {
+                program: true,
+                ..main_touched()
+            },
+            "a node-property toggle changes no shape, only what a run reads"
         );
         step.revert(&mut document);
         let node = document.graphs.main().find(id).unwrap();

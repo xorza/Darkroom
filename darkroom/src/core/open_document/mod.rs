@@ -88,6 +88,16 @@ pub(crate) struct OpenDocument {
     batch: Vec<UndoStep>,
 }
 
+impl OpenDocument {
+    /// The document File ▸ New and an empty launch open: no graph yet, on the workspace a new
+    /// document starts on, the graph with the viewer and the inspector beside it.
+    pub(crate) fn new_document() -> Self {
+        let mut open = Self::default();
+        open.document.open_workspace();
+        open
+    }
+}
+
 impl Default for OpenDocument {
     /// An empty document with a fresh history, hand-written as the history's byte budget has no
     /// meaningful zero.
@@ -241,6 +251,14 @@ impl OpenDocument {
                 }
                 DocumentRequest::Enter { compound, through } => {
                     self.document.enter(compound, through);
+                    continue;
+                }
+                DocumentRequest::Show(tab) => {
+                    self.document.show_tab(tab);
+                    continue;
+                }
+                DocumentRequest::ShowPreview(program_id) => {
+                    self.document.show_preview(program_id);
                     continue;
                 }
                 // An edit of the set of graphs joins the batch's entry, outside any gesture.
@@ -400,7 +418,7 @@ impl OpenDocument {
                         ),
                     );
                     return Launched {
-                        open: Self::default(),
+                        open: Self::new_document(),
                         forgot_remembered: false,
                     };
                 }
@@ -408,7 +426,7 @@ impl OpenDocument {
             (None, Some(remembered)) => (remembered.to_path_buf(), true),
             (None, None) => {
                 return Launched {
-                    open: Self::default(),
+                    open: Self::new_document(),
                     forgot_remembered: false,
                 };
             }
@@ -422,7 +440,7 @@ impl OpenDocument {
                 }
             }
             None => Launched {
-                open: Self::default(),
+                open: Self::new_document(),
                 forgot_remembered: is_remembered,
             },
         }

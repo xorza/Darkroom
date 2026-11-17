@@ -15,21 +15,24 @@ use palantir::{
     Configure, DockDrop, DockOperation, DockTabMenu, DockTabs, EditableLabel, InternedStr,
     MenuItem, Size, SplitSide, TabChip, Ui, WidgetId, fmt,
 };
-use scenarium::{CompoundId, GraphId, Library, ProgramId};
+use scenarium::{CompoundId, GraphId, Library};
 
 use crate::core::document;
 use crate::core::document::Document;
 use crate::core::document::inspect_target::InspectTarget;
+use crate::core::document::pane_kind::PaneKind;
 use crate::core::document::tab_ref::TabRef;
+use crate::core::document::view_target::ViewTarget;
 use crate::core::edit::compound_intent::CompoundIntent;
 use crate::core::io::preferences::Preferences;
 use crate::gui::frame::doc_ctx::DocCtx;
 use crate::gui::frame::stage::Stage;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::GraphUi;
-use crate::gui::pane::image_viewer::{self, ImageViewer, ViewerPane, ViewerWrites};
+use crate::gui::pane::image_viewer::{self, ImageViewer, PreviewDisplay, ViewerPane, ViewerWrites};
 use crate::gui::pane::inspector;
 use crate::gui::pane::preferences::PreferencesForm;
+use crate::gui::pane::reference;
 use crate::gui::widgets::format;
 
 /// Everything a pane's body needs, borrowed for one record pass.
@@ -40,7 +43,7 @@ pub(crate) struct DockPanes<'a> {
     pub(crate) stage: Stage<'a, DocCtx<'a>>,
     /// One canvas per graph a tab shows; see `MainWindow::graph_panes`.
     pub(crate) graph_panes: &'a mut BTreeMap<GraphId, GraphUi>,
-    pub(crate) image_viewers: &'a mut HashMap<ProgramId, ImageViewer>,
+    pub(crate) image_viewers: &'a mut HashMap<ViewTarget, ImageViewer>,
     pub(crate) preferences: &'a mut Preferences,
 }
 
@@ -52,7 +55,7 @@ pub(crate) fn tab_label<'a>(
     tab: TabRef,
 ) -> TabLabel<'a> {
     match tab {
-        TabRef::Graph(GraphId::Main) => TabLabel::Plain("Graph"),
+        TabRef::Graph(GraphId::Main) => TabLabel::Plain("Main"),
         TabRef::Graph(GraphId::Compound(id)) => TabLabel::Plain(
             &document
                 .graphs
@@ -60,21 +63,24 @@ pub(crate) fn tab_label<'a>(
                 .expect("a compound's pane closes with it")
                 .name,
         ),
-        TabRef::Preferences => TabLabel::Plain("Preferences"),
-        TabRef::ImageViewer(program_id) => {
-            TabLabel::Plain(image_viewer::node_label(document, library, program_id))
-        }
-        TabRef::Inspector(InspectTarget::Selection) => TabLabel::Plain("Inspector"),
+        TabRef::Preferences => TabLabel::Plain(PaneKind::Preferences.label()),
+        TabRef::Reference => TabLabel::Plain(PaneKind::Reference.label()),
+        TabRef::Viewer(ViewTarget::Active) => TabLabel::Plain(PaneKind::Viewer.label()),
+        TabRef::Viewer(ViewTarget::Node(program_id)) => TabLabel::Held {
+            pane: PaneKind::Viewer,
+            name: image_viewer::node_label(document, library, program_id),
+        },
+        TabRef::Inspector(InspectTarget::Selection) => TabLabel::Plain(PaneKind::Inspector.label()),
         TabRef::Inspector(InspectTarget::Node { addr, .. }) => {
             let graphs = &document.graphs;
             let node = graphs
                 .graph(addr.graph)
                 .find(addr.node_id)
                 .expect("a held inspector closes with its node");
-            TabLabel::Inspector(format::node_name(document::title(
-                node,
-                graphs.scope(library, addr.graph),
-            )))
+            TabLabel::Held {
+                pane: PaneKind::Inspector,
+                name: format::node_name(document::title(node, graphs.scope(library, addr.graph))),
+            }
         }
     }
 }
@@ -83,15 +89,18 @@ pub(crate) fn tab_label<'a>(
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum TabLabel<'a> {
     Plain(&'a str),
-    /// An inspector held on the node of this name.
-    Inspector(&'a str),
+    /// A pane held on the node of this name.
+    Held {
+        pane: PaneKind,
+        name: &'a str,
+    },
 }
 
 impl Display for TabLabel<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Plain(label) => f.write_str(label),
-            Self::Inspector(name) => write!(f, "Inspector \u{b7} {name}"),
+            Self::Held { pane, name } => write!(f, "{} \u{b7} {name}", pane.label()),
         }
     }
 }
@@ -122,6 +131,7 @@ impl DockTabs for DockPanes<'_> {
                 }
                 .show(ui, self.preferences);
             }
+            TabRef::Reference => reference::show(ui, ctx.theme()),
             TabRef::Inspector(target) => {
                 // A held inspector reads its node's graph through the instance it was pinned to;
                 // the selection's is the active graph's, through the instance its pane shows.
@@ -133,13 +143,25 @@ impl DockTabs for DockPanes<'_> {
                 };
                 inspector::show(ui, &mut self.stage.with(graph_ctx), target);
             }
-            TabRef::ImageViewer(program_id) => {
+            TabRef::Viewer(target) => {
+                let program_id = match target {
+                    ViewTarget::Node(program_id) => Some(program_id),
+                    ViewTarget::Active => ctx.document().active_preview,
+                };
+                let Some(program_id) = program_id else {
+                    image_viewer::nothing_to_show(ui, ctx.theme());
+                    return;
+                };
                 let title = image_viewer::node_label(ctx.document(), ctx.library(), program_id);
                 let previews = ctx.run_state().previews();
                 let viewer = self
                     .image_viewers
-                    .entry(program_id)
+                    .entry(target)
                     .or_insert_with(|| ImageViewer::new(program_id));
+                // The following viewer starts over, at fit, on the next preview.
+                if viewer.program_id() != program_id {
+                    *viewer = ImageViewer::new(program_id);
+                }
                 // Viewer-toolbar edits go through the same in-place preferences path as the
                 // Preferences tab.
                 let pane = ViewerPane {
@@ -148,6 +170,8 @@ impl DockTabs for DockPanes<'_> {
                     previews,
                     status: ctx.run_state().exec_status(program_id),
                     size: size.map(Vec2::from),
+                    pinnable: target == ViewTarget::Active,
+                    display: PreviewDisplay::of(ctx.document(), program_id),
                 };
                 viewer.show(
                     ui,
@@ -250,6 +274,7 @@ mod tests {
     use crate::core::document::inspect_target::InspectTarget;
     use crate::core::document::internals::{DocumentFixture, insert_compound};
     use crate::core::document::tab_ref::TabRef;
+    use crate::core::document::view_target::ViewTarget;
     use crate::core::preview_sink;
     use crate::gui::main_window::dock_panes::tab_label;
 
@@ -268,10 +293,14 @@ mod tests {
         let DocumentFixture { document, library } = fixture;
         let label = |tab| tab_label(&document, &library, tab).to_string();
 
-        assert_eq!(label(TabRef::Graph(GraphId::Main)), "Graph");
+        assert_eq!(label(TabRef::Graph(GraphId::Main)), "Main");
         assert_eq!(label(TabRef::Graph(GraphId::Compound(id))), "Denoise");
         let path = InstancePath::new(&[instance]);
-        assert_eq!(label(TabRef::ImageViewer(path.node(shown))), "Shown");
+        assert_eq!(
+            label(TabRef::Viewer(ViewTarget::Node(path.node(shown)))),
+            "Viewer \u{b7} Shown"
+        );
+        assert_eq!(label(TabRef::Viewer(ViewTarget::Active)), "Viewer");
         assert_eq!(
             label(TabRef::Inspector(InspectTarget::Node {
                 addr: NodeAddr::new(GraphId::Compound(id), shown),

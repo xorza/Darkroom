@@ -1,7 +1,9 @@
 //! What this frame's input means on the canvas: which bare-canvas gesture a press latches among
 //! them, the one place that precedence is decided, and what Esc does.
 
-use palantir::{Modifiers, PointerButton, Response};
+use palantir::{Modifiers, PointerButton, Response, ShortcutMods};
+
+use crate::gui::widgets::format::gesture_keys::GestureKeys;
 
 /// What this frame's input means on the canvas, resolved once at the top of
 /// [`GraphUi::input`](crate::gui::pane::graph_ui::GraphUi::input) and read
@@ -50,25 +52,12 @@ pub(crate) enum CanvasGesture {
     Deselect,
 }
 
-/// Whether the right press now held, or released this frame, already ended a floating wire, so
-/// its click opens nothing more.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum SecondaryPress {
-    #[default]
-    Free,
-    Spent,
-}
-
 impl CanvasGesture {
     /// The bare-canvas gesture of the outer canvas's response `resp` with `modifiers` held.
     /// Drag-starts are checked before clicks; `None` when nothing latched — an idle canvas, or a
     /// press a node or port captured, as a node widget captures its own press and the canvas
     /// sees only presses that missed every one.
-    pub(crate) const fn classify(
-        resp: &Response,
-        modifiers: Modifiers,
-        secondary: SecondaryPress,
-    ) -> Option<Self> {
+    pub(crate) const fn classify(resp: &Response, modifiers: Modifiers) -> Option<Self> {
         if resp.middle.drag.started() {
             return Some(Self::Pan);
         }
@@ -94,14 +83,58 @@ impl CanvasGesture {
         }
         // A double-click sets `clicked` and `double_clicked` on one frame, so it precedes the
         // plain click's `Deselect`; the first click of the pair already cleared the selection.
-        let right_click = resp.right.clicked() && matches!(secondary, SecondaryPress::Free);
-        if right_click || resp.left.double_clicked() {
+        if resp.right.clicked() || resp.left.double_clicked() {
             return Some(Self::NewNode);
         }
         if resp.clicked() {
             return Some(Self::Deselect);
         }
         None
+    }
+}
+
+/// What a bare-canvas gesture is reached by and what it does, in the words the reference and
+/// the status bar show.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct GestureHint {
+    pub(crate) keys: GestureKeys,
+    pub(crate) does: &'static str,
+}
+
+impl CanvasGesture {
+    /// Every gesture the bare canvas takes, a two-button one once a button.
+    pub(crate) const ALL: [Self; 8] = [
+        Self::Select,
+        Self::Deselect,
+        Self::NewNode,
+        Self::Pan,
+        Self::Breaker(PointerButton::Left),
+        Self::Breaker(PointerButton::Right),
+        Self::Tie(PointerButton::Left),
+        Self::Tie(PointerButton::Right),
+    ];
+
+    /// The gesture's keys and what it does. Beside [`Self::classify`], which it puts into words,
+    /// so the two change together.
+    pub(crate) const fn hint(self) -> GestureHint {
+        const SHIFT: ShortcutMods = ShortcutMods::SHIFT;
+        const CTRL: ShortcutMods = ShortcutMods::CTRL;
+        let (mods, pointer, does) = match self {
+            Self::Select => (ShortcutMods::NONE, "drag", "Select with a band"),
+            Self::Deselect => (ShortcutMods::NONE, "click", "Clear the selection"),
+            Self::NewNode => (ShortcutMods::NONE, "double-click", "Add a node"),
+            Self::Pan => (ShortcutMods::NONE, "middle-drag", "Pan"),
+            Self::Breaker(PointerButton::Right) => {
+                (ShortcutMods::NONE, "right-drag", "Cut the wires crossed")
+            }
+            Self::Breaker(_) => (CTRL, "drag", "Cut the wires crossed"),
+            Self::Tie(PointerButton::Right) => (SHIFT, "right-drag", "Tie the wires crossed"),
+            Self::Tie(_) => (CTRL.union(SHIFT), "drag", "Tie the wires crossed"),
+        };
+        GestureHint {
+            keys: GestureKeys { mods, pointer },
+            does,
+        }
     }
 }
 
@@ -121,14 +154,54 @@ pub(crate) enum Escape {
 mod tests {
     use glam::Vec2;
     use palantir::{
-        Drag, Modifiers, PointerButton, PointerButtonPhase, PointerButtonState, Response, WidgetId,
+        Drag, Modifiers, PointerButton, PointerButtonPhase, PointerButtonState, Response,
+        ShortcutMods, WidgetId,
     };
 
-    use crate::gui::pane::graph_ui::canvas_input::{CanvasGesture, SecondaryPress};
+    use crate::gui::pane::graph_ui::canvas_input::CanvasGesture;
+
+    /// Each gesture's hint names the button and the modifiers that latch it: a drag of that
+    /// button under those modifiers classifies back to the gesture.
+    #[test]
+    fn a_drag_gestures_hint_is_what_latches_it() {
+        let dragged = PointerButtonState {
+            phase: PointerButtonPhase::Held,
+            drag: Drag::Started { delta: Vec2::X },
+        };
+        for gesture in CanvasGesture::ALL {
+            let hint = gesture.hint();
+            assert!(!hint.does.is_empty(), "{gesture:?}");
+            let idle = Response::idle(WidgetId::from_hash("probe"));
+            let resp = match hint.keys.pointer {
+                "drag" => Response {
+                    left: dragged,
+                    ..idle
+                },
+                "right-drag" => Response {
+                    right: dragged,
+                    ..idle
+                },
+                "middle-drag" => Response {
+                    middle: dragged,
+                    ..idle
+                },
+                // The two clicks: `each_press_latches_its_gesture_by_precedence` holds them.
+                "click" | "double-click" => continue,
+                other => panic!("{gesture:?} names no pointer part: {other}"),
+            };
+            let mut held = Modifiers::NONE;
+            held.set(Modifiers::CTRL, hint.keys.mods.contains(ShortcutMods::CTRL));
+            held.set(
+                Modifiers::SHIFT,
+                hint.keys.mods.contains(ShortcutMods::SHIFT),
+            );
+            assert_eq!(CanvasGesture::classify(&resp, held), Some(gesture));
+        }
+    }
 
     /// Every arm, each from the one button edge that latches it: a drag start beats a click, the
-    /// modifiers pick the drag's gesture, a double click opens the palette over the plain click's
-    /// deselect, and a right click spent ending a wire opens nothing.
+    /// modifiers pick the drag's gesture, and a double click opens the palette over the plain
+    /// click's deselect.
     #[test]
     fn each_press_latches_its_gesture_by_precedence() {
         let dragged = PointerButtonState {
@@ -164,113 +237,77 @@ mod tests {
             middle: dragged,
             ..Response::idle(WidgetId::from_hash("probe"))
         };
-        let free = SecondaryPress::Free;
         let cases = [
             (
                 "idle",
                 Response::idle(WidgetId::from_hash("probe")),
                 none,
-                free,
                 None,
             ),
             (
                 "middle drag",
                 middle_by(dragged),
                 none,
-                free,
                 Some(CanvasGesture::Pan),
             ),
-            (
-                "a drag beats a click",
-                both,
-                none,
-                free,
-                Some(CanvasGesture::Pan),
-            ),
+            ("a drag beats a click", both, none, Some(CanvasGesture::Pan)),
             (
                 "right drag",
                 right_by(dragged),
                 none,
-                free,
                 Some(CanvasGesture::Breaker(right)),
             ),
             (
                 "shift right drag",
                 right_by(dragged),
                 mods(false, true),
-                free,
                 Some(CanvasGesture::Tie(right)),
             ),
             (
                 "left drag",
                 left_by(dragged),
                 none,
-                free,
                 Some(CanvasGesture::Select),
             ),
             (
                 "shift left drag",
                 left_by(dragged),
                 mods(false, true),
-                free,
                 Some(CanvasGesture::Select),
             ),
             (
                 "ctrl left drag",
                 left_by(dragged),
                 mods(true, false),
-                free,
                 Some(CanvasGesture::Breaker(left)),
             ),
             (
                 "ctrl shift left drag",
                 left_by(dragged),
                 mods(true, true),
-                free,
                 Some(CanvasGesture::Tie(left)),
             ),
             (
                 "right click",
                 right_by(clicked(1)),
                 none,
-                free,
                 Some(CanvasGesture::NewNode),
-            ),
-            (
-                "spent right click",
-                right_by(clicked(1)),
-                none,
-                SecondaryPress::Spent,
-                None,
             ),
             (
                 "double click",
                 left_by(clicked(2)),
                 none,
-                free,
                 Some(CanvasGesture::NewNode),
             ),
             (
                 "left click",
                 left_by(clicked(1)),
                 none,
-                free,
-                Some(CanvasGesture::Deselect),
-            ),
-            (
-                "spent leaves the left",
-                left_by(clicked(1)),
-                none,
-                SecondaryPress::Spent,
                 Some(CanvasGesture::Deselect),
             ),
         ];
-        for (what, resp, modifiers, secondary, gesture) in cases {
-            assert_eq!(
-                CanvasGesture::classify(&resp, modifiers, secondary),
-                gesture,
-                "{what}"
-            );
+        for (what, resp, modifiers, gesture) in cases {
+            assert_eq!(CanvasGesture::classify(&resp, modifiers), gesture, "{what}");
         }
     }
 }

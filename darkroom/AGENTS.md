@@ -147,6 +147,11 @@ run. Refused: a pass-through node, which changes the graph for layout.
   fourth glyph domain in the wire gesture whose drop could still be refused.
 - **The accent is palantir's dark lime**; the info status keeps Ayu's blue, which the Path wire
   shares.
+- **A node carries no hue.** The library's categories name a domain, not a role, so a wash by
+  category paints an astro graph one hue; the title level, the sink and compound marks and a
+  preview's picture do the reading at a distance. Refused: Blender's header wash by category
+  ([ThemeNodeEditor](https://docs.blender.org/api/current/bpy.types.ThemeNodeEditor.html)), a third
+  use of seven hues; a color a person gives a node, which belongs with visual node groups.
 - **A good run is quiet, and one cause gets one red frame**: a node a failure skipped says so in
   its footer.
 - **Undo reads "Undo"**, as commands reach the history as batches of intents. Refused: a step name

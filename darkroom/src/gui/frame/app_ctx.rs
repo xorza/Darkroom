@@ -2,6 +2,7 @@
 
 use scenarium::Library;
 
+use crate::core::io::preferences::run_mode::RunMode;
 use crate::core::shared_library::SharedLibrary;
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
@@ -31,6 +32,9 @@ pub(crate) struct AppCtx<'a> {
     run_state: &'a RunState,
     /// The library folder's shared compounds, as the last scan read them.
     shared: &'a SharedLibrary,
+    /// When a run starts unasked, a copy of the preference, so a command reads it with no
+    /// borrow of the preferences the record edits.
+    run_mode: RunMode,
 }
 
 impl<'a> AppCtx<'a> {
@@ -39,13 +43,20 @@ impl<'a> AppCtx<'a> {
         library: &'a Library,
         run_state: &'a RunState,
         shared: &'a SharedLibrary,
+        run_mode: RunMode,
     ) -> Self {
         Self {
             theme,
             library,
             run_state,
             shared,
+            run_mode,
         }
+    }
+
+    /// When a run starts unasked.
+    pub(crate) const fn run_mode(self) -> RunMode {
+        self.run_mode
     }
 
     pub(crate) const fn theme(self) -> &'a Theme {

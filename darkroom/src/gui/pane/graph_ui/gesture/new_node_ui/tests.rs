@@ -315,13 +315,14 @@ fn only_a_compounds_pane_lists_an_inputs_node() {
             scroll_cap: 100.0,
             opening: Opening::Standing,
             replacing: false,
+            dropped: None,
         };
         let inputs: Vec<_> = palette
             .entries()
             .filter(|entry| matches!(entry, PaletteEntry::Inputs))
             .collect();
         if let [entry] = inputs.as_slice() {
-            let pick = palette.add(*entry);
+            let pick = palette.add(*entry, None);
             let GraphIntent::AddNode { node, bindings, .. } = pick.add else {
                 panic!("a pick adds a node");
             };

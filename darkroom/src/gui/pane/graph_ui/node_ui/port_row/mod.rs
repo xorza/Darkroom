@@ -13,7 +13,7 @@ use std::fmt::Formatter;
 use glam::Vec2;
 use palantir::{
     Align, Configure, Grid, InternedStr, Menu, MenuItem, Panel, Sense, SizeSpec, Spacing, Text,
-    TextStyle, TextWrap, Track, Ui, VAlign, WidgetId, fmt,
+    TextStyle, TextWrap, Track, Ui, VAlign, Visibility, WidgetId, fmt,
 };
 use scenarium::Binding;
 use scenarium::NodeId;
@@ -23,14 +23,13 @@ use scenarium::{GraphSet, Library};
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::preview_sink;
-use crate::gui::frame::app_command::AppCommand;
-use crate::gui::frame::app_command::{EditCommand, PathPick};
 use crate::gui::graph_ctx::ghost_port::{GhostEvent, GhostPort, GhostTrigger};
 use crate::gui::graph_ctx::input_ctx::InputCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::graph_ctx::output_ctx::OutputCtx;
 use crate::gui::pane::graph_ui::gesture::preview_drag::PreviewSpawn;
-use crate::gui::pane::graph_ui::node_ui::const_editor::{ConstEditor, Field};
+use crate::gui::pane::graph_ui::node_ui::const_editor::Field;
+use crate::gui::pane::graph_ui::node_ui::input_field::{self, InputField};
 use crate::gui::pane::graph_ui::node_ui::node_record::NodeRecord;
 use crate::gui::pane::graph_ui::wid;
 use crate::gui::path_type::PathType;
@@ -142,11 +141,12 @@ impl PortTooltip<'_> {
 
 /// A port's label, `name`, with `tooltip` (the port's data type) as its hover
 /// tooltip; `None` means no tooltip, as [`PortTooltip::intern`] answers off the
-/// hovered node.
+/// hovered node. `words` hides it, laid out, at the title level.
 #[derive(Debug, Clone, Copy)]
 struct PortLabel<'a> {
     name: &'a str,
     tooltip: Option<InternedStr>,
+    words: Visibility,
 }
 
 impl PortLabel<'_> {
@@ -156,6 +156,7 @@ impl PortLabel<'_> {
     fn show(self, ui: &mut Ui, theme: &Theme) {
         let label = Text::new(self.name)
             .style(&label_style(ui, theme))
+            .visibility(self.words)
             .sense(Sense::HOVER)
             .show(ui);
         support::tooltip_after(ui, &label, self.tooltip);
@@ -260,6 +261,7 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
     let label = PortLabel {
         name: input.name(),
         tooltip,
+        words: draw_ctx.words(),
     };
     let fill = Hover::from(draw_ctx.geometry().ports.is_hovered(port))
         .lift(node_ctx.graph_ctx.port_color(input.data_type()));
@@ -395,89 +397,46 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
     });
 }
 
-/// Column 1: the inline const editor for an input bound to a `Const`, and
-/// [`UNSET`](crate::gui::widgets::format::shown_value::UNSET) for one bound to
-/// nothing that could hold one. A hug-sized column, so every editor starts at
-/// the same x.
+/// Column 1: the inline const editor for an input bound to a `Const`, the empty field for one
+/// bound to nothing that could hold one, and a ghost constant's kept value; a wired input's value
+/// is its wire. A hug-sized column, so every editor starts at the same x.
 fn value_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCtx<'_>) {
     let node_ctx = record.node;
-    let port = input.port();
-    let editor_id = wid::const_editor(record.node.graph_ctx.graph(), port);
-    // The one owner of the "only Const bindings get an inline editor" filter: a wired input's
-    // value is its wire, and one that takes only a wire has no field to leave empty, so neither
-    // renders a value cell.
-    // An input a ghost sits on reads as wired, a ghost wire, or shows what it kept, a ghost
-    // constant: either is replaced by a bind and cleared by a double-click.
-    if input.binding().is_none()
-        && let Some(ghost) = input.ghost()
-    {
-        if let GhostSource::Const(value) = &ghost.source {
-            value_column(ui, input, |ui| kept_value(ui, node_ctx.theme(), value));
-        }
-        return;
-    }
-    let value = match input.binding() {
-        Some(Binding::Const(value)) => value,
-        Some(Binding::Wire(_)) => return,
-        None if !input.takes_const() => return,
-        None => {
-            value_column(ui, input, |ui| {
-                Field {
-                    theme: node_ctx.const_editor_theme(),
-                    id: editor_id,
-                }
-                .empty(ui);
+    let value = match InputField::of(input) {
+        InputField::Const(value) => Some(value),
+        InputField::Empty => None,
+        InputField::KeptConst(value) => {
+            value_column(ui, record.stage.ctx.words(), input, |ui| {
+                kept_value(ui, node_ctx.theme(), value);
             });
             return;
         }
+        InputField::Wired(_) | InputField::Unwired | InputField::KeptWire => return,
     };
-    let data_type = input.data_type();
-    let value_variants = input.value_variants();
-    // A path editor draws a pick button; clicking it raises a blocking file dialog, which
-    // only `App` can run, so this is the app tier. Whether a click means "pick a path" is a
-    // question about the port's type, which decided to draw the button, so it is answered here
-    // rather than by a canvas-level sweep.
-    if ui.response_for(editor_id).clicked()
-        && matches!(value, ConstValue::FsPath(_) | ConstValue::FsPaths(_))
-        && let Some(path_type) = PathType::of(data_type)
-    {
-        record
-            .stage
-            .out
-            .push_app(AppCommand::Edit(EditCommand::PickInputPath(PathPick {
-                graph: record.node.graph_ctx.graph(),
-                port,
-                path_type,
-            })));
-    }
-    let edited = value_column(ui, input, |ui| {
-        ConstEditor {
-            field: Field {
-                theme: node_ctx.const_editor_theme(),
-                id: editor_id,
-            },
-            library: node_ctx.graph_ctx.library(),
-            value,
-            data_type,
-            value_variants,
-        }
-        .show(ui)
+    let field = Field {
+        theme: node_ctx.const_editor_theme(),
+        id: wid::const_editor(node_ctx.graph_ctx.graph(), input.port()),
+    };
+    let words = record.stage.ctx.words();
+    let out = &mut *record.stage.out;
+    value_column(ui, words, input, |ui| {
+        input_field::record(ui, out, input, value, field);
     });
-    if let Some(new_value) = edited {
-        record.stage.out.push_graph(
-            record.node.graph_ctx.graph(),
-            GraphIntent::set_input(port, Binding::Const(new_value)),
-        );
-    }
 }
 
 /// The value column's cell of `input`: filled, so every editor is the same width
 /// (the column hugs to the widest editor's content). `min_size` on the editors keeps a floor.
 /// Disabled on an input that takes no edit, so its editor keeps its face and font and wears
 /// the disabled look, answering nothing, which the gate would refuse.
-fn value_column<R>(ui: &mut Ui, input: InputCtx<'_>, body: impl FnOnce(&mut Ui) -> R) -> R {
+fn value_column<R>(
+    ui: &mut Ui,
+    words: Visibility,
+    input: InputCtx<'_>,
+    body: impl FnOnce(&mut Ui) -> R,
+) -> R {
     Panel::hstack()
         .id_salt(("val", input.port().port))
+        .visibility(words)
         .grid_cell((grid_row(input.idx()), COL_VALUE))
         .size(SizeSpec::FILL)
         .disabled(input.read_only())
@@ -514,6 +473,7 @@ fn output_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, output: OutputCtx<'
             PortLabel {
                 name: output.name(),
                 tooltip,
+                words: record.stage.ctx.words(),
             }
             .show(ui, theme);
             PortGlyph::circle(wid, theme.port.size, fill)
@@ -605,6 +565,7 @@ impl EventRow<'_> {
                 // Muted like the data-port labels.
                 Text::new(event.name)
                     .style(&label_style(ui, theme))
+                    .visibility(draw_ctx.words())
                     .show(ui);
                 PortGlyph::arrow(wid, theme.port.size, fill)
                     .margin(margin)
@@ -646,7 +607,10 @@ impl TriggerRow<'_> {
                     .margin(margin)
                     .tooltip(tooltip)
                     .show(ui, theme);
-                Text::new(name).style(&label_style(ui, theme)).show(ui);
+                Text::new(name)
+                    .style(&label_style(ui, theme))
+                    .visibility(draw_ctx.words())
+                    .show(ui);
             });
     }
 }
@@ -677,6 +641,7 @@ impl GhostRow<'_> {
         let (graph_ctx, theme) = (node_ctx.graph_ctx, node_ctx.theme());
         let graph = graph_ctx.graph();
         let geometry = draw_ctx.geometry();
+        let words = draw_ctx.words();
         let ink = color::wash(theme.port.label, GHOST_INK, theme.card.fill);
         let (side, wid, hovered, name, number, data_type, held) = match ghost {
             GhostRowPort::Data(port) => (
@@ -731,10 +696,11 @@ impl GhostRow<'_> {
                 color: ink,
                 ..ui.theme().text
             };
-            match name {
-                Some(name) => Text::new(name).style(&style).show(ui),
-                None => Text::new(fmt!(ui, "#{number}")).style(&style).show(ui),
+            let text = match name {
+                Some(name) => Text::new(name),
+                None => Text::new(fmt!(ui, "#{number}")),
             };
+            text.style(&style).visibility(words).show(ui);
         };
         let margin = theme.port_margin(side, theme.port.radius());
         let glyph = |ui: &mut Ui| {
@@ -781,6 +747,7 @@ impl GhostRow<'_> {
         {
             Panel::hstack()
                 .id_salt(("ghost_value", number))
+                .visibility(words)
                 .grid_cell((grid_row(row), COL_VALUE))
                 .size(SizeSpec::FILL)
                 .child_align(VAlign::Center)

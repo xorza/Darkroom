@@ -118,7 +118,9 @@ fn tie_line(h: &mut CanvasHarness, from: Vec2, to: Vec2) -> Vec<GraphIntent> {
 #[test]
 fn a_line_across_wires_ties_them() {
     let Crossed { mut h, wires, x } = crossed(false);
-    let intents = tie_line(&mut h, Vec2::new(x, 5.0), Vec2::new(x, 790.0));
+    // From the canvas's top edge to the window's bottom.
+    let top = h.screen(Vec2::ZERO).y;
+    let intents = tie_line(&mut h, Vec2::new(x, top + 5.0), Vec2::new(x, 790.0));
     let [
         GraphIntent::TieWires {
             tie,
@@ -149,10 +151,11 @@ fn a_line_across_a_tie_joins_it() {
     let center = Vec2::new(x, 250.0);
     h.document_mut().main_view.ties.get_mut(&tie).unwrap().pos = center;
     h.frame();
+    let at = h.screen(center);
     let intents = tie_line(
         &mut h,
-        center - Vec2::new(15.0, 150.0),
-        center + Vec2::new(15.0, 150.0),
+        at - Vec2::new(15.0, 150.0),
+        at + Vec2::new(15.0, 150.0),
     );
     let [
         GraphIntent::JoinTie {
@@ -219,7 +222,7 @@ fn one_tie(selected: bool) -> (CanvasHarness, TieId) {
 #[test]
 fn a_tie_clicks_drags_and_sweeps_as_a_node_does() {
     let (mut h, tie) = one_tie(false);
-    let center = Vec2::new(470.0, 250.0);
+    let center = h.screen(Vec2::new(470.0, 250.0));
     h.ui.click(center);
     let clicked = h.frame();
     assert!(
@@ -356,8 +359,8 @@ fn the_tie_menu_releases_pins_and_removes() {
     use crate::core::document::tie::TieAngle;
     use crate::gui::pane::graph_ui::gesture::tie_ui::tie_widget::{AngleSnap, knob_angle};
 
-    let center = Vec2::new(470.0, 250.0);
     let open = |h: &mut CanvasHarness| {
+        let center = h.screen(Vec2::new(470.0, 250.0));
         h.ui.right_click(center);
         let opened = h.frame();
         h.prime(2);
