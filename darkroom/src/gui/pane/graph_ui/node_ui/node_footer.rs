@@ -262,4 +262,49 @@ mod tests {
                 .h;
         assert_eq!(before, after);
     }
+
+    /// A node whose rows are narrower than the card's minimum width takes that width, and its
+    /// footer and output port reach its right edge: the footer spans the body inside its 2 px
+    /// stroke, and the output's circle is centered on the edge. The probe is narrower than 320 px,
+    /// so a minimum of that is what sizes it.
+    #[test]
+    fn a_node_at_its_minimum_width_fills_it_to_the_right_edge() {
+        use scenarium::PortId;
+
+        use crate::gui::port_ref::PortRef;
+
+        // A glyph hung on the edge lands a fraction of a pixel past it, as an input's circle on
+        // the left edge does.
+        const SUBPIXEL: f32 = 0.01;
+        const MIN_WIDTH: f32 = 320.0;
+        let mut h = CanvasHarness::new(DocumentFixture::probes(1));
+        let node_id = h.node(0);
+        h.prime(2);
+        let natural = h.node_rect(node_id).size.w;
+        assert!(natural < MIN_WIDTH, "{natural}");
+        h.ctx.theme.card.min_width = MIN_WIDTH;
+        h.prime(2);
+        let body = h.node_rect(node_id);
+        assert_eq!(body.size.w, MIN_WIDTH, "{body:?}");
+        let footer =
+            h.ui.rect(wid::footer(GraphId::Main, node_id))
+                .expect("an idle node has a footer");
+        let stroke = h.ctx.theme.card.border_width;
+        assert_eq!(footer.min.x, body.min.x + stroke, "{footer:?} in {body:?}");
+        assert_eq!(
+            footer.max().x,
+            body.max().x - stroke,
+            "{footer:?} in {body:?}"
+        );
+        let output =
+            h.ui.rect(wid::port_circle(
+                GraphId::Main,
+                PortRef::output(node_id, PortId::new(1)),
+            ))
+            .expect("the output's circle recorded");
+        assert!(
+            (output.center().x - body.max().x).abs() < SUBPIXEL,
+            "{output:?} on {body:?}"
+        );
+    }
 }

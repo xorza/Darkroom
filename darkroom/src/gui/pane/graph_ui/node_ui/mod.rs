@@ -168,19 +168,22 @@ impl NodeUi {
 
         let row_tracks = &mut self.row_tracks;
         // At the title level the title stands over the laid-out rows, so the body is a stack of
-        // the two; its size is the rows' alone, which the title's box takes from last frame.
+        // the two; its size is the rows' alone, which the title's box takes from last frame. The
+        // minimum width sits on the rows, less the stroke the body pads with on each side, not on
+        // the body: a body wider than its rows would leave the header rule, the footer band and
+        // the output ports short of its right edge.
+        let min_width = if node.preview() {
+            // A preview needs room for a thumbnail.
+            theme.card.preview_min_width
+        } else {
+            theme.card.min_width
+        };
         let rows = body.with("rows");
         let rows_size = ui.response_for(rows).layout_rect.map(|rect| rect.size);
         Panel::zstack()
             .id(body)
             .visibility(visibility)
             .at(node.pos)
-            // A preview needs room for a thumbnail.
-            .min_size(if node.preview() {
-                (theme.card.preview_min_width, 0.0)
-            } else {
-                (theme.card.min_width, 0.0)
-            })
             .size(SizeSpec::HUG)
             .sense(Sense::CLICK | Sense::DRAG)
             .chrome(
@@ -190,21 +193,25 @@ impl NodeUi {
                     .with_shadow(shadow),
             )
             .show(ui, |ui| {
-                Panel::vstack().id(rows).size(SizeSpec::HUG).show(ui, |ui| {
-                    let mut record = NodeRecord {
-                        node: node_ctx,
-                        stage: stage.with(draw_ctx),
-                    };
-                    header::show(ui, &mut record);
-                    port_row::show(ui, &mut record, row_tracks);
-                    // A preview has no output, so it has no cached value for the
-                    // footer to report — its value takes that slot instead.
-                    if node.preview() {
-                        preview_row::show(ui, &mut record);
-                    } else {
-                        node_footer::show(ui, node_ctx, draw_ctx.words());
-                    }
-                });
+                Panel::vstack()
+                    .id(rows)
+                    .min_size((min_width - 2.0 * border_width, 0.0))
+                    .size(SizeSpec::HUG)
+                    .show(ui, |ui| {
+                        let mut record = NodeRecord {
+                            node: node_ctx,
+                            stage: stage.with(draw_ctx),
+                        };
+                        header::show(ui, &mut record);
+                        port_row::show(ui, &mut record, row_tracks);
+                        // A preview has no output, so it has no cached value for the
+                        // footer to report — its value takes that slot instead.
+                        if node.preview() {
+                            preview_row::show(ui, &mut record);
+                        } else {
+                            node_footer::show(ui, node_ctx, draw_ctx.words());
+                        }
+                    });
                 if draw_ctx.detail() == DetailLevel::Title
                     && let Some(size) = rows_size
                 {
