@@ -287,13 +287,13 @@ fn the_focused_rows_ink_keeps_its_contrast_on_the_tint() {
     assert!(ratio >= 4.5, "a resting match is {ratio:.2}:1 on the popup");
 }
 
-/// A subgraph's pane lists an `Inputs` node, which a pick adds with no binding; the main graph's
+/// A compound's pane lists an `Inputs` node, which a pick adds with no binding; the main graph's
 /// does not, as it has no interface.
 #[test]
-fn only_a_subgraphs_pane_lists_an_inputs_node() {
-    use scenarium::{Boundary, GraphId, Interface, Subgraph, SubgraphId};
+fn only_a_compounds_pane_lists_an_inputs_node() {
+    use scenarium::{Boundary, Compound, CompoundId, GraphId, Interface};
 
-    use crate::core::document::internals::insert_subgraph;
+    use crate::core::document::internals::insert_compound;
     use crate::core::edit::graph_intent::GraphIntent;
     use crate::gui::graph_ctx::internals::GraphCtxFixture;
     use crate::gui::pane::graph_ui::gesture::new_node_ui::node_palette::{
@@ -301,11 +301,11 @@ fn only_a_subgraphs_pane_lists_an_inputs_node() {
     };
 
     let mut fixture = DocumentFixture::default();
-    let id = SubgraphId::from_u128(1);
-    insert_subgraph(
+    let id = CompoundId::from_u128(1);
+    insert_compound(
         &mut fixture.document,
         id,
-        Subgraph::new("inner", Interface::default()),
+        Compound::new("inner", Interface::default()),
     );
     let fixture = GraphCtxFixture::over(fixture);
     let lists_inputs = |graph| {
@@ -327,10 +327,10 @@ fn only_a_subgraphs_pane_lists_an_inputs_node() {
             };
             assert_eq!(node.boundary(), Some(Boundary::Inputs));
             assert!(bindings.is_empty());
-            assert!(pick.subgraphs.is_empty());
+            assert!(pick.compounds.is_empty());
         }
         inputs.len()
     };
-    assert_eq!(lists_inputs(GraphId::Subgraph(id)), 1);
+    assert_eq!(lists_inputs(GraphId::Compound(id)), 1);
     assert_eq!(lists_inputs(GraphId::Main), 0);
 }

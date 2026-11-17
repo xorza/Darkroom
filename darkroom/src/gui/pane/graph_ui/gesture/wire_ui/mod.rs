@@ -1,9 +1,9 @@
 use palantir::{PointerButton, PointerEvent, PointerWake, Ui};
-use scenarium::{Binding, Boundary, GraphId, InputPort, Interface, OutputPort, PortId, SubgraphId};
+use scenarium::{Binding, Boundary, CompoundId, GraphId, InputPort, Interface, OutputPort, PortId};
 
+use crate::core::edit::compound_intent::CompoundIntent;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::port_edit::{DataSide, PortEdit};
-use crate::core::edit::subgraph_intent::SubgraphIntent;
 use crate::gui::frame::requests::Requests;
 use crate::gui::frame::stage::Stage;
 use crate::gui::graph_ctx::GraphCtx;
@@ -298,33 +298,33 @@ fn accepts_wire(graph_ctx: GraphCtx<'_>, start: PortRef, port: PortRef) -> bool 
         && !graph.produces_cycle(output.node_id, input.node_id)
 }
 
-/// A wire dropped on a subgraph's boundary node of the side that takes it: a port the interface
+/// A wire dropped on a compound's boundary node of the side that takes it: a port the interface
 /// gains, read off the end the wire grew out of, and the wire to it. Both land in one batch, so
 /// one history entry.
 #[derive(Debug)]
 struct Exposed {
-    subgraph: SubgraphId,
+    compound: CompoundId,
     to: Interface,
     wire: GraphIntent,
 }
 
 impl Exposed {
     fn raise(self, graph: GraphId, out: &mut Requests) {
-        out.push_subgraph(SubgraphIntent::SetInterface {
-            id: self.subgraph,
+        out.push_compound(CompoundIntent::SetInterface {
+            id: self.compound,
             to: Box::new(self.to),
         });
         out.push_graph(graph, self.wire);
     }
 }
 
-/// The port a held wire from `start` adds when released over a boundary node of a subgraph's
+/// The port a held wire from `start` adds when released over a boundary node of a compound's
 /// pane: an output dropped on the `Outputs` node becomes an interface output of its type and
 /// name, wired from it; an input dropped on the `Inputs` node becomes an interface input of its
 /// declaration, wired to it. `None` off a boundary node, or on the side that does not take it.
 fn exposed_on_boundary(ui: &mut Ui, ctx: CanvasCtx<'_>, start: PortRef) -> Option<Exposed> {
     let (graph_ctx, geometry) = (ctx.graph_ctx(), ctx.geometry());
-    let GraphId::Subgraph(subgraph) = graph_ctx.graph() else {
+    let GraphId::Compound(compound) = graph_ctx.graph() else {
         return None;
     };
     let pointer = ui.pointer_pos()?;
@@ -333,7 +333,7 @@ fn exposed_on_boundary(ui: &mut Ui, ctx: CanvasCtx<'_>, start: PortRef) -> Optio
         PortKind::Input => Boundary::Inputs,
     };
     let body = graph_ctx.body();
-    // A subgraph may hold several `Inputs` nodes; any of them takes the drop.
+    // A compound may hold several `Inputs` nodes; any of them takes the drop.
     let boundary = body
         .iter()
         .filter(|node| node.boundary() == Some(wanted) && node.node_id != start.node_id)
@@ -344,7 +344,7 @@ fn exposed_on_boundary(ui: &mut Ui, ctx: CanvasCtx<'_>, start: PortRef) -> Optio
         })?
         .node_id;
     let decl = body.find(start.node_id)?.decl(graph_ctx.scope());
-    let interface = &graph_ctx.document().graphs.subgraph(subgraph)?.interface;
+    let interface = &graph_ctx.document().graphs.compound(compound)?.interface;
     let (edit, wire) = match start.kind {
         PortKind::Output => {
             let output = decl.ports().output(start.port)?;
@@ -384,7 +384,7 @@ fn exposed_on_boundary(ui: &mut Ui, ctx: CanvasCtx<'_>, start: PortRef) -> Optio
         }
     };
     Some(Exposed {
-        subgraph,
+        compound,
         to: edit.apply(interface),
         wire,
     })

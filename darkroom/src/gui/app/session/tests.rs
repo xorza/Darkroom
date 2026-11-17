@@ -392,27 +392,27 @@ fn each_edit_route_owes_what_it_strands() {
     assert!(owed_then_clear(&mut test), "a redo of a rename");
 }
 
-/// Two panes side by side on a subgraph and its copy, which holds the same node under the same
+/// Two panes side by side on a compound and its copy, which holds the same node under the same
 /// id: a click on the node in one pane selects it in that graph alone, and makes it active.
 #[test]
 fn a_click_in_one_pane_selects_nothing_in_a_copy_beside_it() {
     use palantir::{DockDrop, SplitSide};
-    use scenarium::{Interface, Subgraph, SubgraphId};
+    use scenarium::{Compound, CompoundId, Interface};
 
-    use crate::core::document::internals::insert_subgraph;
+    use crate::core::document::internals::insert_compound;
     use crate::core::document::item_id::ItemId;
 
     let mut fixture = DocumentFixture::default();
-    let [left, right] = [1, 2].map(SubgraphId::from_u128);
+    let [left, right] = [1, 2].map(CompoundId::from_u128);
     let shared = NodeId::from_u128(40);
     for id in [left, right] {
-        let mut subgraph = Subgraph::new("copy", Interface::default());
-        subgraph.graph.insert(shared, fixture.plain_node());
-        insert_subgraph(&mut fixture.document, id, subgraph);
+        let mut compound = Compound::new("copy", Interface::default());
+        compound.graph.insert(shared, fixture.plain_node());
+        insert_compound(&mut fixture.document, id, compound);
     }
     let layout = &mut fixture.document.layout;
     let group = layout.primary().id();
-    let [left_tab, right_tab] = [left, right].map(|id| TabRef::Graph(GraphId::Subgraph(id)));
+    let [left_tab, right_tab] = [left, right].map(|id| TabRef::Graph(GraphId::Compound(id)));
     layout.apply(DockOperation::OpenTab { tab: left_tab });
     layout.apply(DockOperation::OpenTab { tab: right_tab });
     layout.apply(DockOperation::MoveTab {
@@ -424,7 +424,7 @@ fn a_click_in_one_pane_selects_nothing_in_a_copy_beside_it() {
     });
     let mut test = SessionHarness::new(fixture);
     test.prime(2);
-    let [left_graph, right_graph] = [left, right].map(GraphId::Subgraph);
+    let [left_graph, right_graph] = [left, right].map(GraphId::Compound);
     for graph in [left_graph, right_graph] {
         assert!(
             test.ui.rect(wid::body(graph, shared)).is_some(),
@@ -444,23 +444,23 @@ fn a_click_in_one_pane_selects_nothing_in_a_copy_beside_it() {
     assert_eq!(document.active, left_graph);
 }
 
-/// A wire from a node's output dropped on the `Outputs` node of its subgraph's pane gives the
+/// A wire from a node's output dropped on the `Outputs` node of its compound's pane gives the
 /// interface an output of that port's name and type, wired from it, as one history entry.
 #[test]
 fn a_wire_dropped_on_the_outputs_node_adds_an_interface_output() {
     use palantir::PointerButton;
-    use scenarium::{InputPort, Interface, Subgraph, SubgraphId};
+    use scenarium::{Compound, CompoundId, InputPort, Interface};
 
-    use crate::core::document::internals::insert_subgraph;
+    use crate::core::document::internals::insert_compound;
     use crate::gui::port_ref::PortRef;
 
     let mut fixture = DocumentFixture::default();
-    let id = SubgraphId::from_u128(1);
-    let mut subgraph = Subgraph::new("inner", Interface::default());
-    let inside = subgraph.graph.add(fixture.plain_node());
-    let outputs = subgraph.outputs_node();
-    insert_subgraph(&mut fixture.document, id, subgraph);
-    let graph = GraphId::Subgraph(id);
+    let id = CompoundId::from_u128(1);
+    let mut compound = Compound::new("inner", Interface::default());
+    let inside = compound.graph.add(fixture.plain_node());
+    let outputs = compound.outputs_node();
+    insert_compound(&mut fixture.document, id, compound);
+    let graph = GraphId::Compound(id);
     let fixture = fixture.with_tab(TabRef::Graph(graph));
     let mut test = SessionHarness::new(fixture);
     test.prime(2);
@@ -486,7 +486,7 @@ fn a_wire_dropped_on_the_outputs_node_adds_an_interface_output() {
     test.frame();
     test.drain();
     let document = test.session.open.document();
-    let interface = &document.graphs.subgraph(id).unwrap().interface;
+    let interface = &document.graphs.compound(id).unwrap().interface;
     assert_eq!(interface.outputs().len(), 1);
     let port = interface.outputs()[0].id;
     assert_eq!(
@@ -503,7 +503,7 @@ fn a_wire_dropped_on_the_outputs_node_adds_an_interface_output() {
             .open
             .document()
             .graphs
-            .subgraph(id)
+            .compound(id)
             .unwrap()
             .interface
             .outputs()
@@ -516,26 +516,26 @@ fn a_wire_dropped_on_the_outputs_node_adds_an_interface_output() {
 #[test]
 fn an_outputs_nodes_lost_trigger_is_no_corner_ghost() {
     use scenarium::{
-        EventPort, GhostSubscription, Interface, Subgraph, SubgraphId, Subscription,
+        Compound, CompoundId, EventPort, GhostSubscription, Interface, Subscription,
         SubscriptionState, TriggerPort,
     };
 
-    use crate::core::document::internals::insert_subgraph;
+    use crate::core::document::internals::insert_compound;
 
     let mut fixture = DocumentFixture::default();
-    let id = SubgraphId::from_u128(1);
-    let mut subgraph = Subgraph::new("inner", Interface::default());
-    let inside = subgraph.graph.add(fixture.plain_node());
-    let outputs = subgraph.outputs_node();
-    subgraph.graph.set_subscription_state(
+    let id = CompoundId::from_u128(1);
+    let mut compound = Compound::new("inner", Interface::default());
+    let inside = compound.graph.add(fixture.plain_node());
+    let outputs = compound.outputs_node();
+    compound.graph.set_subscription_state(
         Subscription::new(
             EventPort::new(inside, PortId::new(1)),
             TriggerPort::new(outputs, TriggerPort::NODE),
         ),
         SubscriptionState::Ghost(GhostSubscription::default()),
     );
-    insert_subgraph(&mut fixture.document, id, subgraph);
-    let graph = GraphId::Subgraph(id);
+    insert_compound(&mut fixture.document, id, compound);
+    let graph = GraphId::Compound(id);
     let mut test = SessionHarness::new(fixture.with_tab(TabRef::Graph(graph)));
     test.prime(2);
     assert!(
@@ -553,18 +553,18 @@ fn an_outputs_nodes_lost_trigger_is_no_corner_ghost() {
 /// boundary node's removal, which writes nothing.
 #[test]
 fn a_refused_edit_raises_its_status_line() {
-    use scenarium::{Interface, Subgraph, SubgraphId};
+    use scenarium::{Compound, CompoundId, Interface};
 
-    use crate::core::document::internals::insert_subgraph;
+    use crate::core::document::internals::insert_compound;
 
     let mut fixture = DocumentFixture::default();
-    let id = SubgraphId::from_u128(1);
-    let subgraph = Subgraph::new("inner", Interface::default());
-    let inputs = subgraph.inputs_node();
-    insert_subgraph(&mut fixture.document, id, subgraph);
+    let id = CompoundId::from_u128(1);
+    let compound = Compound::new("inner", Interface::default());
+    let inputs = compound.inputs_node();
+    insert_compound(&mut fixture.document, id, compound);
     let mut test = SessionHarness::new(fixture);
     test.requests.push_graph(
-        GraphId::Subgraph(id),
+        GraphId::Compound(id),
         GraphIntent::RemoveNode { node_id: inputs },
     );
     test.drain();
@@ -572,7 +572,7 @@ fn a_refused_edit_raises_its_status_line() {
     assert!(
         matches!(
             commands.as_slice(),
-            [AppCommand::Warn(line)] if line == "a subgraph keeps one Outputs node and at least one Inputs node"
+            [AppCommand::Warn(line)] if line == "a compound keeps one Outputs node and at least one Inputs node"
         ),
         "{commands:?}"
     );
@@ -583,18 +583,18 @@ fn a_refused_edit_raises_its_status_line() {
 /// instance of the same definition, which the paste reuses, as one history entry.
 #[test]
 fn copy_and_paste_go_through_the_clipboard() {
-    use scenarium::{Interface, Subgraph, SubgraphId};
+    use scenarium::{Compound, CompoundId, Interface};
 
     use crate::core::clip::HEADER;
-    use crate::core::document::internals::insert_subgraph;
+    use crate::core::document::internals::insert_compound;
     use crate::core::document::item_id::ItemId;
 
     let mut fixture = DocumentFixture::default();
-    let id = SubgraphId::from_u128(1);
-    insert_subgraph(
+    let id = CompoundId::from_u128(1);
+    insert_compound(
         &mut fixture.document,
         id,
-        Subgraph::new("inner", Interface::default()),
+        Compound::new("inner", Interface::default()),
     );
     let instance = fixture.add_instance(id);
     let mut test = SessionHarness::new(fixture);
@@ -618,31 +618,31 @@ fn copy_and_paste_go_through_the_clipboard() {
         .graphs
         .main()
         .iter()
-        .filter(|node| node.subgraph() == Some(id))
+        .filter(|node| node.compound() == Some(id))
         .count();
-    assert_eq!((instances, document.graphs.subgraphs().len()), (2, 1));
+    assert_eq!((instances, document.graphs.compounds().len()), (2, 1));
     assert!(test.undo());
     assert_eq!(test.session.open.document().graphs.main().len(), 1);
 }
 
-/// A double click on a subgraph's tab opens an editor of its name in the chip, and Enter renames
-/// the subgraph, one undo entry; the tab's menu opens the same editor, and Escape keeps the name.
+/// A double click on a compound's tab opens an editor of its name in the chip, and Enter renames
+/// the compound, one undo entry; the tab's menu opens the same editor, and Escape keeps the name.
 #[test]
-fn a_subgraphs_tab_renames_it_in_place() {
-    use scenarium::{Interface, Subgraph, SubgraphId};
+fn a_compounds_tab_renames_it_in_place() {
+    use scenarium::{Compound, CompoundId, Interface};
 
-    use crate::core::document::internals::insert_subgraph;
+    use crate::core::document::internals::insert_compound;
     use crate::gui::main_window::dock_panes::rename_wid;
 
     let mut fixture = DocumentFixture::default();
-    let id = SubgraphId::from_u128(1);
-    insert_subgraph(
+    let id = CompoundId::from_u128(1);
+    insert_compound(
         &mut fixture.document,
         id,
-        Subgraph::new("Denoise", Interface::default()),
+        Compound::new("Denoise", Interface::default()),
     );
     fixture.document.layout.apply(DockOperation::OpenTab {
-        tab: TabRef::Graph(GraphId::Subgraph(id)),
+        tab: TabRef::Graph(GraphId::Compound(id)),
     });
     let mut test = SessionHarness::new(fixture);
     let name = |test: &SessionHarness| {
@@ -650,7 +650,7 @@ fn a_subgraphs_tab_renames_it_in_place() {
             .open
             .document()
             .graphs
-            .subgraph(id)
+            .compound(id)
             .unwrap()
             .name
             .clone()

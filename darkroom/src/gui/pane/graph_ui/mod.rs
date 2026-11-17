@@ -106,7 +106,7 @@ pub(crate) struct GraphUi {
     /// with a step that moves its graph's revision, so a frame at the same one has nothing to
     /// sweep.
     swept_at: Option<GraphRevision>,
-    /// The header over a subgraph's pane.
+    /// The header over a compound's pane.
     header: PaneHeader,
 }
 
@@ -222,7 +222,7 @@ impl GraphUi {
     /// menu pick means — lands on the stage's requests in the order it was raised.
     pub(crate) fn record(&mut self, ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
         self.record_popups(ui, stage);
-        // The toolbar overlays the canvas's top-left corner and a subgraph's header its top
+        // The toolbar overlays the canvas's top-left corner and a compound's header its top
         // edge, so they share a stack. They record after the canvas, which puts them above it
         // in the hit-test: a click on a chip or a name never starts a pan.
         Panel::zstack()
@@ -488,22 +488,22 @@ mod tests {
         );
     }
 
-    /// A double click on an instance asks to enter its subgraph through the pane's path and the
+    /// A double click on an instance asks to enter its compound through the pane's path and the
     /// instance; on a node of a func it enters nothing.
     #[test]
-    fn a_double_click_on_an_instance_enters_its_subgraph() {
+    fn a_double_click_on_an_instance_enters_its_compound() {
         use palantir::PointerButton;
-        use scenarium::{InstancePath, Interface, Subgraph, SubgraphId};
+        use scenarium::{Compound, CompoundId, InstancePath, Interface};
 
-        use crate::core::document::internals::{DocumentFixture, insert_subgraph};
+        use crate::core::document::internals::{DocumentFixture, insert_compound};
         use crate::gui::pane::graph_ui::internals::CanvasHarness;
 
         let mut fixture = DocumentFixture::probes(1);
-        let id = SubgraphId::from_u128(1);
-        insert_subgraph(
+        let id = CompoundId::from_u128(1);
+        insert_compound(
             &mut fixture.document,
             id,
-            Subgraph::new("inner", Interface::default()),
+            Compound::new("inner", Interface::default()),
         );
         let instance = fixture.add_instance(id);
         let plain = fixture.node(0);

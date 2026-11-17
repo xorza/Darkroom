@@ -14,7 +14,7 @@
 //! - **What a load learns from it, it moves onto what needs it**: a ghost node's saved
 //!   declaration, a ghost's saved port. So a definition with its ghosts is one value in a clip,
 //!   an undo step and a library file. Refused: missing funcs' declarations in a table of the
-//!   set, which a subgraph travels without. The names of types are the exception
+//!   set, which a compound travels without. The names of types are the exception
 //!   ([`TypeNames`]): an id names one type for good, so the set keeps them aside.
 
 use std::collections::BTreeMap;

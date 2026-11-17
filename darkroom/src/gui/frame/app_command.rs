@@ -10,7 +10,7 @@ use std::num::NonZeroU32;
 use std::path::PathBuf;
 
 use lens::MlModelPaths;
-use scenarium::{GraphId, InputPort, Node, NodeAddr, NodeId, ProgramId, SubgraphId};
+use scenarium::{CompoundId, GraphId, InputPort, Node, NodeAddr, NodeId, ProgramId};
 
 use crate::gui::frame::framing::Framing;
 use crate::gui::path_type::PathType;
@@ -34,11 +34,11 @@ pub(crate) enum AppCommand {
     PickMlModel(MlModelKind),
     /// Pick the library folder, in a blocking dialog.
     PickLibraryFolder,
-    /// Write subgraph `subgraph`'s definition, and those it places, into the library file that
+    /// Write compound `compound`'s definition, and those it places, into the library file that
     /// holds it, the file written whole.
-    Publish { subgraph: SubgraphId },
-    /// Raise the export dialog for subgraph `subgraph`.
-    Export { subgraph: SubgraphId },
+    Publish { compound: CompoundId },
+    /// Raise the export dialog for compound `compound`.
+    Export { compound: CompoundId },
     /// Raise the Replace dialog for putting `with` in place of node `node_id` of `graph`.
     ProposeReplace {
         graph: GraphId,

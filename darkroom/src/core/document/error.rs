@@ -1,6 +1,6 @@
 //! Structural validation errors for documents and their per-graph editor views.
 
-use scenarium::{GraphId, GraphValidationError, InstancePath, NodeAddr, NodeId, SubgraphId};
+use scenarium::{CompoundId, GraphId, GraphValidationError, InstancePath, NodeAddr, NodeId};
 
 use crate::core::document::item_id::ItemId;
 use crate::core::document::tab_ref::TabRef;
@@ -60,11 +60,11 @@ pub(crate) enum DocumentValidationError {
         #[source]
         source: GraphViewValidationError,
     },
-    #[error("subgraph {subgraph:?} has no side, or a side names no subgraph")]
-    SideMismatch { subgraph: SubgraphId },
-    #[error("subgraph {subgraph:?} is shown through {path:?}, which names no instance of it")]
+    #[error("compound {compound:?} has no side, or a side names no compound")]
+    SideMismatch { compound: CompoundId },
+    #[error("compound {compound:?} is shown through {path:?}, which names no instance of it")]
     StaleThrough {
-        subgraph: SubgraphId,
+        compound: CompoundId,
         path: InstancePath,
     },
     #[error("open tab {tab:?} shows nothing the document holds")]

@@ -15,17 +15,17 @@
 use glam::Vec2;
 use scenarium::internals::test_graph::TestGraph;
 use scenarium::{
-    Binding, ConstValue, DataType, DetachReason, EventPort, Func, FuncId, GhostBinding, GhostNode,
-    GraphId, GraphSet, InputDecl, InputPort, InputState, Library, Node, NodeId, OutputDecl,
-    OutputPort, PortId, Subgraph, SubgraphId, Subscription, internals,
+    Binding, Compound, CompoundId, ConstValue, DataType, DetachReason, EventPort, Func, FuncId,
+    GhostBinding, GhostNode, GraphId, GraphSet, InputDecl, InputPort, InputState, Library, Node,
+    NodeId, OutputDecl, OutputPort, PortId, Subscription, internals,
 };
 
 use palantir::DockOperation;
 
 use crate::core::document::Document;
+use crate::core::document::compound_side::CompoundSide;
 use crate::core::document::graph_view::{GraphView, NodePlacement};
 use crate::core::document::route::Route;
-use crate::core::document::subgraph_side::SubgraphSide;
 use crate::core::document::tab_ref::TabRef;
 use crate::core::document::tie::{Tie, TieAngle, TieId};
 use crate::core::document::wire_key::{DataWire, WireKey};
@@ -43,11 +43,11 @@ fn spread(view: &mut GraphView) {
     }
 }
 
-/// Put `subgraph` into `document` under `id`, with a side whose view places its nodes in a row.
-pub(crate) fn insert_subgraph(document: &mut Document, id: SubgraphId, subgraph: Subgraph) {
-    let mut side = SubgraphSide::new(&subgraph.graph);
+/// Put `compound` into `document` under `id`, with a side whose view places its nodes in a row.
+pub(crate) fn insert_compound(document: &mut Document, id: CompoundId, compound: Compound) {
+    let mut side = CompoundSide::new(&compound.graph);
     spread(&mut side.view);
-    document.insert_subgraph(id, subgraph, side);
+    document.insert_compound(id, compound, side);
 }
 
 /// Place `node_id` at `pos`, frontmost, so paint order is the order constructors added in, which
@@ -145,11 +145,11 @@ impl DocumentFixture {
         node_id
     }
 
-    /// Add an instance of subgraph `id`, which the document holds, at the next slot in the row.
-    pub(crate) fn add_instance(&mut self, id: SubgraphId) -> NodeId {
+    /// Add an instance of compound `id`, which the document holds, at the next slot in the row.
+    pub(crate) fn add_instance(&mut self, id: CompoundId) -> NodeId {
         assert!(
-            self.document.graphs.subgraph(id).is_some(),
-            "the document holds the subgraph"
+            self.document.graphs.compound(id).is_some(),
+            "the document holds the compound"
         );
         let node = Node::instance(id);
         let node_id = self.document.graphs.main_mut().add(node);

@@ -7,10 +7,10 @@ use scenarium::{GraphId, Node, NodeId};
 
 use crate::core::document::tab_ref::TabRef;
 use crate::core::edit::collapse;
+use crate::core::edit::compound_intent::CompoundIntent;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
 use crate::core::edit::make_unique::MakeUnique;
-use crate::core::edit::subgraph_intent::SubgraphIntent;
 use crate::gui::frame::app_command::{AppCommand, FileCommand, RunCommand, ViewCommand};
 use crate::gui::frame::clip_commands;
 use crate::gui::frame::doc_ctx::DocCtx;
@@ -177,7 +177,7 @@ fn graph_menu(bar: &mut MenuBarMenus<'_>, stage: &mut Stage<'_, DocCtx<'_>>) {
         }
         MenuSeparator::new().show(ui);
         let (graph, document, library) = (ctx.active(), ctx.document(), ctx.library());
-        if item(ui, "Collapse to Subgraph", None, selected) {
+        if item(ui, "Collapse to Compound", None, selected) {
             match collapse::collapse(document, graph, library, ctx.selected()) {
                 Some(Ok(plan)) => plan.queue(graph, out.document()),
                 Some(Err(refusal)) => {
@@ -187,7 +187,7 @@ fn graph_menu(bar: &mut MenuBarMenus<'_>, stage: &mut Stage<'_, DocCtx<'_>>) {
             }
         }
         let instance = only_instance(ctx);
-        if item(ui, "Expand Subgraph", None, instance.is_some())
+        if item(ui, "Expand Compound", None, instance.is_some())
             && let Some(instance) = instance
         {
             out.extend_graph(graph, collapse::expand(document, graph, library, instance));
@@ -204,23 +204,23 @@ fn graph_menu(bar: &mut MenuBarMenus<'_>, stage: &mut Stage<'_, DocCtx<'_>>) {
         {
             unique.queue(out.document());
         }
-        // The one instance the selection holds, else the subgraph the active pane shows.
+        // The one instance the selection holds, else the compound the active pane shows.
         let exported = instance
             .and_then(|node| {
                 document
                     .graphs
                     .graph(graph)
                     .find(node)
-                    .and_then(Node::subgraph)
+                    .and_then(Node::compound)
             })
             .or(match graph {
-                GraphId::Subgraph(id) => Some(id),
+                GraphId::Compound(id) => Some(id),
                 GraphId::Main => None,
             });
-        if item(ui, "Export Subgraph\u{2026}", None, exported.is_some())
-            && let Some(subgraph) = exported
+        if item(ui, "Export Compound\u{2026}", None, exported.is_some())
+            && let Some(compound) = exported
         {
-            out.push_app(AppCommand::Export { subgraph });
+            out.push_app(AppCommand::Export { compound });
         }
         MenuSeparator::new().show(ui);
         let held = document.graphs.graph(graph);
@@ -233,10 +233,10 @@ fn graph_menu(bar: &mut MenuBarMenus<'_>, stage: &mut Stage<'_, DocCtx<'_>>) {
             out.extend_graph(graph, GraphIntent::remove_ghosts(held));
         }
         // One batch, so one undo entry, outermost first so each removal holds.
-        let unused = document.unused_subgraphs();
-        if item(ui, "Remove Unused Subgraphs", None, !unused.is_empty()) {
+        let unused = document.unused_compounds();
+        if item(ui, "Remove Unused Compounds", None, !unused.is_empty()) {
             for id in unused {
-                out.push_subgraph(SubgraphIntent::Remove { id });
+                out.push_compound(CompoundIntent::Remove { id });
             }
         }
     });
@@ -253,7 +253,7 @@ fn only_instance(ctx: DocCtx<'_>) -> Option<NodeId> {
         .graphs
         .graph(ctx.active())
         .find(node_id)?
-        .subgraph()
+        .compound()
         .map(|_| node_id)
 }
 
@@ -319,9 +319,9 @@ mod tests {
 
     use glam::UVec2;
     use palantir::{InspectedWidget, Key, Shortcut};
-    use scenarium::{GraphId, Interface, Subgraph, SubgraphId};
+    use scenarium::{Compound, CompoundId, GraphId, Interface};
 
-    use crate::core::document::internals::{DocumentFixture, insert_subgraph};
+    use crate::core::document::internals::{DocumentFixture, insert_compound};
     use crate::core::document::item_id::ItemId;
     use crate::core::edit::graph_intent::GraphIntent;
     use crate::gui::app::session::internals::SessionHarness;
@@ -413,16 +413,16 @@ mod tests {
         }
     }
 
-    /// Export offers the subgraph a selected instance places, and waits for one on the main
+    /// Export offers the compound a selected instance places, and waits for one on the main
     /// graph with nothing picked.
     #[test]
     fn export_names_the_selected_instance() {
         let mut fixture = DocumentFixture::default();
-        let id = SubgraphId::from_u128(1);
-        insert_subgraph(
+        let id = CompoundId::from_u128(1);
+        insert_compound(
             &mut fixture.document,
             id,
-            Subgraph::new("inner", Interface::default()),
+            Compound::new("inner", Interface::default()),
         );
         let instance = fixture.add_instance(id);
         let mut h = SessionHarness::new(fixture);
@@ -431,17 +431,17 @@ mod tests {
         h.ui.click(graph);
         h.frame();
         h.prime(2);
-        assert!(widget(&h, "Export Subgraph…").disabled, "nothing picked");
+        assert!(widget(&h, "Export Compound…").disabled, "nothing picked");
         h.ui.key(Key::Escape);
         h.frame();
 
         h.apply(GraphIntent::SetSelection {
             to: [ItemId::Node(instance)].into(),
         });
-        let commands = pick(&mut h, "Graph", "Export Subgraph…");
+        let commands = pick(&mut h, "Graph", "Export Compound…");
         assert_eq!(
             format!("{commands:?}"),
-            format!("{:?}", [AppCommand::Export { subgraph: id }])
+            format!("{:?}", [AppCommand::Export { compound: id }])
         );
     }
 

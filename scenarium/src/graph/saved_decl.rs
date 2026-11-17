@@ -76,7 +76,7 @@ pub struct SavedEvent {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SavedDecl {
     pub name: String,
-    /// Empty for a declaration with none: a subgraph's.
+    /// Empty for a declaration with none: a compound's.
     pub category: String,
     pub inputs: Vec<Numbered<SavedInput>>,
     pub outputs: Vec<Numbered<SavedPort>>,

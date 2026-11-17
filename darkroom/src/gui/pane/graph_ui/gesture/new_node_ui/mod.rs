@@ -12,8 +12,8 @@ use palantir::widget::domain;
 use palantir::{Ui, WidgetId};
 use scenarium::NodeId;
 
+use crate::core::edit::compound_intent::CompoundIntent;
 use crate::core::edit::graph_intent::GraphIntent;
-use crate::core::edit::subgraph_intent::SubgraphIntent;
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::stage::Stage;
 use crate::gui::graph_ctx::GraphCtx;
@@ -178,7 +178,7 @@ impl NewNodeUi {
                 unreachable!("a palette pick adds a node");
             };
             debug_assert!(
-                picked.subgraphs.is_empty(),
+                picked.compounds.is_empty(),
                 "a replace lists no library entry"
             );
             stage.out.push_app(AppCommand::ProposeReplace {
@@ -188,10 +188,10 @@ impl NewNodeUi {
             });
             return None;
         }
-        for subgraph in picked.subgraphs {
+        for compound in picked.compounds {
             stage
                 .out
-                .push_subgraph(SubgraphIntent::Add(Box::new(subgraph)));
+                .push_compound(CompoundIntent::Add(Box::new(compound)));
         }
         stage.out.push_graph(stage.ctx.graph(), picked.add);
         self.source

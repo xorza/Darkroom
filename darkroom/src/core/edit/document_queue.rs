@@ -1,13 +1,13 @@
 //! The document's share of a frame's requests.
 
 use palantir::DockOperation;
-use scenarium::{GraphId, InstancePath, SubgraphId};
+use scenarium::{CompoundId, GraphId, InstancePath};
 
 use crate::core::document::tab_ref::TabRef;
+use crate::core::edit::compound_intent::CompoundIntent;
 use crate::core::edit::document_request::DocumentRequest;
 use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::graph_intent::GraphIntent;
-use crate::core::edit::subgraph_intent::SubgraphIntent;
 
 /// The requests raised against the open document, in the order raised.
 ///
@@ -83,14 +83,14 @@ impl DocumentQueue {
     }
 
     /// Queue an edit of the set of graphs.
-    pub(crate) fn push_subgraph(&mut self, intent: SubgraphIntent) {
-        self.requests.push(DocumentRequest::Subgraph(intent));
+    pub(crate) fn push_compound(&mut self, intent: CompoundIntent) {
+        self.requests.push(DocumentRequest::Compound(intent));
     }
 
-    /// Queue the entry into `subgraph`'s pane, shown through `through`.
-    pub(crate) fn push_enter(&mut self, subgraph: SubgraphId, through: Option<InstancePath>) {
+    /// Queue the entry into `compound`'s pane, shown through `through`.
+    pub(crate) fn push_enter(&mut self, compound: CompoundId, through: Option<InstancePath>) {
         self.requests
-            .push(DocumentRequest::Enter { subgraph, through });
+            .push(DocumentRequest::Enter { compound, through });
     }
 
     /// Take everything queued, in the order raised.

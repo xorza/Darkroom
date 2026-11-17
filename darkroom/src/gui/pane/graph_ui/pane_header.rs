@@ -1,9 +1,9 @@
-//! The header over a subgraph's pane: the path of names from the main graph down to it, each a
+//! The header over a compound's pane: the path of names from the main graph down to it, each a
 //! link to that graph's pane, and the count of nodes that place it once more than one does.
 //!
-//! - **The header is the path the pane shows the subgraph through**, as Blender's node editor
+//! - **The header is the path the pane shows the compound through**, as Blender's node editor
 //!   and ComfyUI's navigation bar show where a group was entered from. A pane shown through no
-//!   instance names the main graph and the subgraph alone.
+//!   instance names the main graph and the compound alone.
 //! - **The count of uses shows once it passes one**: an edit here changes every one of them, and
 //!   Grasshopper's users report "no visual sign of entanglement"
 //!   ([forum](https://discourse.mcneel.com/t/cluster-disentangled-without-notice/57955)).
@@ -16,12 +16,12 @@
 use palantir::{
     Align, Configure, DockOperation, FontWeight, Panel, Spacing, Text, TextStyle, Ui, WidgetId, fmt,
 };
-use scenarium::{GraphId, InstancePath, SubgraphId};
+use scenarium::{CompoundId, GraphId, InstancePath};
 
 use crate::core::document::Document;
 use crate::core::document::tab_ref::TabRef;
+use crate::core::edit::compound_intent::{CompoundIntent, Update};
 use crate::core::edit::make_unique::MakeUnique;
-use crate::core::edit::subgraph_intent::{SubgraphIntent, Update};
 use crate::core::shared_library::{LibraryEntry, SyncState};
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::requests::Requests;
@@ -42,27 +42,27 @@ pub(crate) struct Crumb<'a> {
 pub(crate) enum CrumbTarget {
     /// The main graph's pane.
     Main,
-    /// The pane of an enclosing subgraph, through the instances down to it.
+    /// The pane of an enclosing compound, through the instances down to it.
     Enter {
-        subgraph: SubgraphId,
+        compound: CompoundId,
         through: InstancePath,
     },
     /// The pane the header sits on: no link.
     Here,
 }
 
-/// Hand `visit` each name on the path down to `subgraph`'s pane, the main graph first and the
-/// subgraph last: the enclosing graphs come from its side's `through`.
+/// Hand `visit` each name on the path down to `compound`'s pane, the main graph first and the
+/// compound last: the enclosing graphs come from its side's `through`.
 pub(crate) fn for_each_crumb<'a>(
     document: &'a Document,
-    subgraph: SubgraphId,
+    compound: CompoundId,
     mut visit: impl FnMut(Crumb<'a>),
 ) {
     let graphs = &document.graphs;
-    let name = |id: SubgraphId| {
+    let name = |id: CompoundId| {
         graphs
-            .subgraph(id)
-            .expect("a path names the subgraphs it passes")
+            .compound(id)
+            .expect("a path names the compounds it passes")
             .name
             .as_str()
     };
@@ -70,27 +70,27 @@ pub(crate) fn for_each_crumb<'a>(
         name: "Main",
         target: CrumbTarget::Main,
     });
-    if let Some(&through) = document.through(GraphId::Subgraph(subgraph)) {
+    if let Some(&through) = document.through(GraphId::Compound(compound)) {
         let ids = through.ids();
         for len in 1..ids.len() {
             let prefix = InstancePath::new(&ids[..len]);
-            let GraphId::Subgraph(enclosing) = graphs
+            let GraphId::Compound(enclosing) = graphs
                 .graph_at(prefix)
                 .expect("a side's through names instances")
             else {
-                unreachable!("a path past the main graph ends in a subgraph");
+                unreachable!("a path past the main graph ends in a compound");
             };
             visit(Crumb {
                 name: name(enclosing),
                 target: CrumbTarget::Enter {
-                    subgraph: enclosing,
+                    compound: enclosing,
                     through: prefix,
                 },
             });
         }
     }
     visit(Crumb {
-        name: name(subgraph),
+        name: name(compound),
         target: CrumbTarget::Here,
     });
 }
@@ -103,39 +103,39 @@ pub(crate) struct PaneHeader {
     publish_asked: bool,
 }
 
-/// A subgraph's standing against the library, as of a document content revision and a library
+/// A compound's standing against the library, as of a document content revision and a library
 /// scan: a digest walks the whole definition, so it is not worked out each frame.
 #[derive(Debug, Clone, Copy)]
 struct SyncCache {
-    subgraph: SubgraphId,
+    compound: CompoundId,
     content: u64,
     scan: u64,
     state: Option<SyncState>,
 }
 
 impl PaneHeader {
-    /// Where `subgraph` of the pane's document stands against the library, reusing the last
+    /// Where `compound` of the pane's document stands against the library, reusing the last
     /// answer while neither changed; `None` when the library lists no one entry under its id.
-    fn sync(&mut self, graph_ctx: GraphCtx<'_>, subgraph: SubgraphId) -> Option<SyncState> {
+    fn sync(&mut self, graph_ctx: GraphCtx<'_>, compound: CompoundId) -> Option<SyncState> {
         let (content, scan) = (
             graph_ctx.open().content_revision(),
             graph_ctx.shared().generation(),
         );
         if let Some(cache) = self.sync
-            && (cache.subgraph, cache.content, cache.scan) == (subgraph, content, scan)
+            && (cache.compound, cache.content, cache.scan) == (compound, content, scan)
         {
             return cache.state;
         }
         let document = graph_ctx.document();
-        let state = graph_ctx.shared().entry(subgraph).map(|entry| {
+        let state = graph_ctx.shared().entry(compound).map(|entry| {
             SyncState::of(
-                document.sides[&subgraph].synced,
-                document.graphs.digest(subgraph),
+                document.sides[&compound].synced,
+                document.graphs.digest(compound),
                 entry.digest,
             )
         });
         self.sync = Some(SyncCache {
-            subgraph,
+            compound,
             content,
             scan,
             state,
@@ -143,29 +143,29 @@ impl PaneHeader {
         state
     }
 
-    /// The header over a subgraph's pane, at its top edge's middle; nothing over the main
+    /// The header over a compound's pane, at its top edge's middle; nothing over the main
     /// graph's. A click on a name enters that graph's pane.
     pub(super) fn show(&mut self, ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
-        let GraphId::Subgraph(subgraph) = stage.ctx.graph() else {
+        let GraphId::Compound(compound) = stage.ctx.graph() else {
             return;
         };
-        let sync = self.sync(stage.ctx, subgraph);
-        show(ui, stage, subgraph, sync, &mut self.publish_asked);
+        let sync = self.sync(stage.ctx, compound);
+        show(ui, stage, compound, sync, &mut self.publish_asked);
     }
 }
 
-/// The header of `subgraph`'s pane, standing `sync` against the library.
+/// The header of `compound`'s pane, standing `sync` against the library.
 fn show(
     ui: &mut Ui,
     stage: &mut Stage<'_, GraphCtx<'_>>,
-    subgraph: SubgraphId,
+    compound: CompoundId,
     sync: Option<SyncState>,
     publish_asked: &mut bool,
 ) {
     let (graph_ctx, out) = (stage.ctx, &mut *stage.out);
     let theme = graph_ctx.theme();
     let document = graph_ctx.document();
-    let uses = document.graphs.uses(subgraph).count();
+    let uses = document.graphs.uses(compound).count();
     let panel = Panel::hstack()
         .id_salt("pane_header")
         .align(Align::TOP)
@@ -174,7 +174,7 @@ fn show(
     pill::dress(panel, theme).show(ui, |ui| {
         let muted = support::muted_text(ui, theme, theme.font.body);
         let mut idx = 0_usize;
-        for_each_crumb(document, subgraph, |crumb| {
+        for_each_crumb(document, compound, |crumb| {
             if idx > 0 {
                 Text::new("\u{203a}").style(&muted).show(ui);
             }
@@ -187,19 +187,19 @@ fn show(
                     Text::new(crumb.name).style(&bold).show(ui);
                 }
                 CrumbTarget::Main => {
-                    if Link::new(crumb_wid(subgraph, idx), crumb.name).show(ui, theme) {
+                    if Link::new(crumb_wid(compound, idx), crumb.name).show(ui, theme) {
                         out.push_view(DockOperation::OpenTab {
                             tab: TabRef::Graph(GraphId::Main),
                         });
                     }
                 }
                 // Keyed by the pane, not the graph it leads to: two panes inside one enclosing
-                // subgraph each show a link to it.
+                // compound each show a link to it.
                 CrumbTarget::Enter {
-                    subgraph: enclosing,
+                    compound: enclosing,
                     through,
                 } => {
-                    if Link::new(crumb_wid(subgraph, idx), crumb.name).show(ui, theme) {
+                    if Link::new(crumb_wid(compound, idx), crumb.name).show(ui, theme) {
                         out.push_enter(enclosing, Some(through));
                     }
                 }
@@ -213,10 +213,10 @@ fn show(
             // The instance the pane is shown through takes a copy of its own, and the pane goes
             // on showing it through that instance.
             // Planned on the click alone, as a plan copies the whole definition.
-            if let Some(&through) = document.through(GraphId::Subgraph(subgraph))
+            if let Some(&through) = document.through(GraphId::Compound(compound))
                 && let (Some(instance), Some(parent)) = (through.instance(), through.parent())
                 && let Some(holder) = document.graphs.graph_at(parent)
-                && Link::new(make_unique_wid(subgraph), "Make Unique").show(ui, theme)
+                && Link::new(make_unique_wid(compound), "Make Unique").show(ui, theme)
                 && let Some(unique) = MakeUnique::plan(document, holder, &[instance])
             {
                 let copy = unique.copy.id;
@@ -224,63 +224,63 @@ fn show(
                 out.push_enter(copy, Some(through));
             }
         }
-        let side = &document.sides[&subgraph];
+        let side = &document.sides[&compound];
         if side.follows {
             Text::new("\u{b7} follows the library")
                 .style(&muted)
                 .show(ui);
-            if Link::new(library_wid(subgraph, "make_local"), "Make Local")
+            if Link::new(library_wid(compound, "make_local"), "Make Local")
                 .tooltip("Stop following the library, and edit this copy")
                 .show(ui, theme)
             {
-                out.push_subgraph(SubgraphIntent::SetFollows {
-                    id: subgraph,
+                out.push_compound(CompoundIntent::SetFollows {
+                    id: compound,
                     follows: false,
                 });
             }
         } else if let Some(state) = sync
-            && let Some(entry) = graph_ctx.shared().entry(subgraph)
+            && let Some(entry) = graph_ctx.shared().entry(compound)
         {
-            library_row(ui, graph_ctx, out, subgraph, entry, state, publish_asked);
+            library_row(ui, graph_ctx, out, compound, entry, state, publish_asked);
             if matches!(state, SyncState::InSync | SyncState::UpdateAvailable)
-                && Link::new(library_wid(subgraph, "follow"), "Follow")
+                && Link::new(library_wid(compound, "follow"), "Follow")
                     .tooltip("Keep this copy as the library's, read-only, updated as it changes")
                     .show(ui, theme)
             {
-                out.push_subgraph(SubgraphIntent::SetFollows {
-                    id: subgraph,
+                out.push_compound(CompoundIntent::SetFollows {
+                    id: compound,
                     follows: true,
                 });
             }
         }
         let (label, tooltip) = if side.locked {
             Text::new("\u{b7} locked").style(&muted).show(ui);
-            ("Unlock", "Allow edits of this subgraph again")
+            ("Unlock", "Allow edits of this compound again")
         } else {
             (
                 "Lock",
-                "Refuse edits of this subgraph, in every copy, until it is unlocked",
+                "Refuse edits of this compound, in every copy, until it is unlocked",
             )
         };
-        if Link::new(library_wid(subgraph, "lock"), label)
+        if Link::new(library_wid(compound, "lock"), label)
             .tooltip(tooltip)
             .show(ui, theme)
         {
-            out.push_subgraph(SubgraphIntent::SetLocked {
-                id: subgraph,
+            out.push_compound(CompoundIntent::SetLocked {
+                id: compound,
                 locked: !side.locked,
             });
         }
     });
 }
 
-/// The header's library part: where the subgraph stands, an Update that puts the library's
+/// The header's library part: where the compound stands, an Update that puts the library's
 /// definition in place, and a Publish that asks before it writes the library file.
 fn library_row(
     ui: &mut Ui,
     graph_ctx: GraphCtx<'_>,
     out: &mut Requests,
-    subgraph: SubgraphId,
+    compound: CompoundId,
     entry: &LibraryEntry,
     state: SyncState,
     publish_asked: &mut bool,
@@ -295,12 +295,12 @@ fn library_row(
         *publish_asked = false;
         return;
     }
-    if Link::new(library_wid(subgraph, "update"), "Update")
+    if Link::new(library_wid(compound, "update"), "Update")
         .tooltip("Put the library's definition in place of this one")
         .show(ui, theme)
     {
-        out.push_subgraph(SubgraphIntent::Update(Box::new(Update {
-            id: subgraph,
+        out.push_compound(CompoundIntent::Update(Box::new(Update {
+            id: compound,
             carried: shared.carried(entry),
             manifest: shared.manifest(entry).clone(),
         })));
@@ -313,7 +313,7 @@ fn library_row(
         |name| name.to_string_lossy().into_owned(),
     );
     if !*publish_asked {
-        *publish_asked = Link::new(library_wid(subgraph, "publish"), "Publish")
+        *publish_asked = Link::new(library_wid(compound, "publish"), "Publish")
             .tooltip("Write this definition into the library file")
             .show(ui, theme);
         return;
@@ -324,55 +324,55 @@ fn library_row(
         _ => fmt!(ui, "write it into {file}?"),
     };
     Text::new(question).style(&muted).show(ui);
-    if Link::new(library_wid(subgraph, "publish_yes"), "Publish").show(ui, theme) {
-        out.push_app(AppCommand::Publish { subgraph });
+    if Link::new(library_wid(compound, "publish_yes"), "Publish").show(ui, theme) {
+        out.push_app(AppCommand::Publish { compound });
         *publish_asked = false;
     }
-    if Link::new(library_wid(subgraph, "publish_no"), "Cancel").show(ui, theme) {
+    if Link::new(library_wid(compound, "publish_no"), "Cancel").show(ui, theme) {
         *publish_asked = false;
     }
 }
 
-/// The library part's `part` in the header over `subgraph`'s pane.
-fn library_wid(subgraph: SubgraphId, part: &'static str) -> WidgetId {
-    WidgetId::from_hash(("darkroom.graph.pane_header.library", subgraph, part))
+/// The library part's `part` in the header over `compound`'s pane.
+fn library_wid(compound: CompoundId, part: &'static str) -> WidgetId {
+    WidgetId::from_hash(("darkroom.graph.pane_header.library", compound, part))
 }
 
-/// The Make Unique link in the header over `subgraph`'s pane.
-fn make_unique_wid(subgraph: SubgraphId) -> WidgetId {
-    WidgetId::from_hash(("darkroom.graph.pane_header.make_unique", subgraph))
+/// The Make Unique link in the header over `compound`'s pane.
+fn make_unique_wid(compound: CompoundId) -> WidgetId {
+    WidgetId::from_hash(("darkroom.graph.pane_header.make_unique", compound))
 }
 
-/// The `idx`th name's link in the header over `subgraph`'s pane.
-fn crumb_wid(subgraph: SubgraphId, idx: usize) -> WidgetId {
-    WidgetId::from_hash(("darkroom.graph.pane_header.crumb", subgraph, idx))
+/// The `idx`th name's link in the header over `compound`'s pane.
+fn crumb_wid(compound: CompoundId, idx: usize) -> WidgetId {
+    WidgetId::from_hash(("darkroom.graph.pane_header.crumb", compound, idx))
 }
 
 #[cfg(test)]
 mod tests {
-    use scenarium::{GraphId, InstancePath, Interface, Node, NodeId, Subgraph, SubgraphId};
+    use scenarium::{Compound, CompoundId, GraphId, InstancePath, Interface, Node, NodeId};
 
     use crate::core::document::Document;
-    use crate::core::document::internals::{DocumentFixture, insert_subgraph};
+    use crate::core::document::internals::{DocumentFixture, insert_compound};
     use crate::gui::pane::graph_ui::pane_header::{Crumb, CrumbTarget, for_each_crumb};
 
-    /// The path down to a subgraph two levels in names the main graph, the enclosing subgraph
-    /// through the outer instance, and the subgraph itself; shown through no instance it names
-    /// the main graph and the subgraph alone.
+    /// The path down to a compound two levels in names the main graph, the enclosing compound
+    /// through the outer instance, and the compound itself; shown through no instance it names
+    /// the main graph and the compound alone.
     #[test]
     fn the_header_names_each_graph_down_to_the_pane() {
         let mut fixture = DocumentFixture::default();
-        let [inner, outer] = [1, 2].map(SubgraphId::from_u128);
-        insert_subgraph(
+        let [inner, outer] = [1, 2].map(CompoundId::from_u128);
+        insert_compound(
             &mut fixture.document,
             inner,
-            Subgraph::new("Inner", Interface::default()),
+            Compound::new("Inner", Interface::default()),
         );
-        let mut enclosing = Subgraph::new("Outer", Interface::default());
+        let mut enclosing = Compound::new("Outer", Interface::default());
         let inner_instance = NodeId::from_u128(20);
         let placed = Node::instance(inner);
         enclosing.graph.insert(inner_instance, placed);
-        insert_subgraph(&mut fixture.document, outer, enclosing);
+        insert_compound(&mut fixture.document, outer, enclosing);
         let outer_instance = fixture.add_instance(outer);
         let mut document = fixture.document;
         let crumbs = |document: &Document| {
@@ -397,13 +397,13 @@ mod tests {
                 (
                     "Outer".to_string(),
                     CrumbTarget::Enter {
-                        subgraph: outer,
+                        compound: outer,
                         through: InstancePath::new(&[outer_instance]),
                     }
                 ),
                 here,
             ]
         );
-        assert_eq!(document.active, GraphId::Subgraph(inner));
+        assert_eq!(document.active, GraphId::Compound(inner));
     }
 }

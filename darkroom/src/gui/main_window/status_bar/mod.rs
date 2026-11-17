@@ -191,8 +191,8 @@ fn run_line(ui: &mut Ui, stage: &mut Stage<'_, DocCtx<'_>>, outcome: RunOutcome)
     let name = document::title(node, graphs.scope(ctx.library(), graph));
     let text = fmt!(ui, "Show {name}");
     if Link::new(cause_link_wid(), text).show(ui, theme) {
-        if let GraphId::Subgraph(subgraph) = graph {
-            stage.out.push_enter(subgraph, Some(cause.path()));
+        if let GraphId::Compound(compound) = graph {
+            stage.out.push_enter(compound, Some(cause.path()));
         }
         stage.out.push_graph(
             graph,

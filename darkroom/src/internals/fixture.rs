@@ -5,10 +5,10 @@ use std::path::{Path, PathBuf};
 
 use lens::MlModelPaths;
 use scenarium::{
-    Binding, ConstValue, InputPort, Interface, Node, NodeId, PortId, Subgraph, SubgraphId,
+    Binding, Compound, CompoundId, ConstValue, InputPort, Interface, Node, NodeId, PortId,
 };
 
-use crate::core::document::internals::{DocumentFixture, insert_subgraph};
+use crate::core::document::internals::{DocumentFixture, insert_compound};
 use crate::core::io::document::saved_paths::SavedPaths;
 use crate::core::open_document::OpenDocument;
 use crate::core::runtime_library::RuntimeLibrary;
@@ -36,7 +36,7 @@ pub fn project(dir: &Path, funcs: &[&str]) -> PathBuf {
 /// The value [`nested_preview`]'s preview shows.
 pub const NESTED_PREVIEW_VALUE: i64 = 7;
 
-/// A project whose main graph places the subgraph `Outer` twice, `Outer` places `Inner`, and
+/// A project whose main graph places the compound `Outer` twice, `Outer` places `Inner`, and
 /// `Inner` holds a `Preview` of the constant [`NESTED_PREVIEW_VALUE`], saved as
 /// `dir/scene.darkroom`; its path. Each instance of `Outer` is one preview in the program, three
 /// ids down.
@@ -54,20 +54,20 @@ pub fn nested_preview(dir: &Path) -> PathBuf {
     let mut fixture = DocumentFixture::default();
     fixture.library.add(preview.clone());
 
-    let mut inner = Subgraph::new("Inner", Interface::default());
+    let mut inner = Compound::new("Inner", Interface::default());
     let shown = inner.graph.add_func_node(&preview);
     inner.graph.bindings.insert(
         InputPort::new(shown, PortId::new(1)),
         Binding::Const(ConstValue::Int(NESTED_PREVIEW_VALUE)),
     );
-    let inner_id = SubgraphId::unique();
-    let mut outer = Subgraph::new("Outer", Interface::default());
+    let inner_id = CompoundId::unique();
+    let mut outer = Compound::new("Outer", Interface::default());
     outer
         .graph
         .insert(NodeId::unique(), Node::instance(inner_id));
-    insert_subgraph(&mut fixture.document, inner_id, inner);
-    let outer_id = SubgraphId::unique();
-    insert_subgraph(&mut fixture.document, outer_id, outer);
+    insert_compound(&mut fixture.document, inner_id, inner);
+    let outer_id = CompoundId::unique();
+    insert_compound(&mut fixture.document, outer_id, outer);
     for _ in 0..2 {
         fixture.add_instance(outer_id);
     }

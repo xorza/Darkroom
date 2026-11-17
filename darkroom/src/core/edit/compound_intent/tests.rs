@@ -1,25 +1,25 @@
 use glam::Vec2;
 use scenarium::{
-    Binding, DataType, GraphId, InputDecl, InputPort, Interface, Library, Node, Numbered,
-    OutputPort, PortId, Ports, Subgraph, SubgraphId, TypeNames,
+    Binding, Compound, CompoundId, DataType, GraphId, InputDecl, InputPort, Interface, Library,
+    Node, Numbered, OutputPort, PortId, Ports, TypeNames,
 };
 
 use crate::core::document::Document;
+use crate::core::document::compound_side::CompoundSide;
 use crate::core::document::graph_view::NodePlacement;
-use crate::core::document::internals::{DocumentFixture, insert_subgraph};
+use crate::core::document::internals::{DocumentFixture, insert_compound};
 use crate::core::document::route::Route;
-use crate::core::document::subgraph_side::SubgraphSide;
 use crate::core::document::tie::{Tie, TieAngle, TieId};
 use crate::core::document::wire_key::{DataWire, WireKey};
+use crate::core::edit::compound_intent::{CompoundIntent, NewCompound};
 use crate::core::edit::error::{EditRefusal, IntentError};
 use crate::core::edit::step::undo_step::UndoStep;
-use crate::core::edit::subgraph_intent::{NewSubgraph, SubgraphIntent};
 
 /// Commit `intent`, returning its steps.
 fn commit(
     document: &mut Document,
     library: &Library,
-    intent: SubgraphIntent,
+    intent: CompoundIntent,
 ) -> Result<Vec<UndoStep>, IntentError> {
     let mut steps = Vec::new();
     intent.commit(document, library, &mut steps)?;
@@ -45,29 +45,29 @@ fn inputs(decls: Vec<Numbered<InputDecl>>) -> Interface {
 }
 
 /// A definition comes in with its side and goes out with it, and an undo of each puts the
-/// document back; a removal while a node places the subgraph is refused, naming how many do.
+/// document back; a removal while a node places the compound is refused, naming how many do.
 #[test]
 fn a_definition_comes_and_goes_with_its_side_unless_placed() {
     let DocumentFixture {
         mut document,
         library,
     } = DocumentFixture::default();
-    let id = SubgraphId::from_u128(1);
-    let subgraph = Subgraph::new("inner", Interface::default());
-    let side = SubgraphSide::new(&subgraph.graph);
+    let id = CompoundId::from_u128(1);
+    let compound = Compound::new("inner", Interface::default());
+    let side = CompoundSide::new(&compound.graph);
     let empty = document.clone();
     let added = commit(
         &mut document,
         &library,
-        SubgraphIntent::Add(Box::new(NewSubgraph {
+        CompoundIntent::Add(Box::new(NewCompound {
             id,
-            subgraph: subgraph.clone(),
+            compound: compound.clone(),
             side: side.clone(),
             type_names: TypeNames::default(),
         })),
     )
     .unwrap();
-    assert_eq!(document.graphs.subgraph(id), Some(&subgraph));
+    assert_eq!(document.graphs.compound(id), Some(&compound));
     assert_eq!(document.sides[&id], side);
     document.validate().unwrap();
     let with = document.clone();
@@ -78,14 +78,14 @@ fn a_definition_comes_and_goes_with_its_side_unless_placed() {
         .node_placements
         .insert(placed, NodePlacement::default());
     assert_eq!(
-        commit(&mut document, &library, SubgraphIntent::Remove { id }).unwrap_err(),
-        IntentError::Refused(EditRefusal::SubgraphInUse { uses: 1 })
+        commit(&mut document, &library, CompoundIntent::Remove { id }).unwrap_err(),
+        IntentError::Refused(EditRefusal::CompoundInUse { uses: 1 })
     );
     document.graphs.main_mut().detach_node(placed);
     document.main_view.node_placements.remove(&placed);
     assert_eq!(document, with);
 
-    let removed = commit(&mut document, &library, SubgraphIntent::Remove { id }).unwrap();
+    let removed = commit(&mut document, &library, CompoundIntent::Remove { id }).unwrap();
     assert_eq!(document, empty);
     revert(&mut document, &removed);
     assert_eq!(
@@ -102,21 +102,21 @@ fn a_definition_comes_and_goes_with_its_side_unless_placed() {
 #[test]
 fn an_interface_edit_drops_wires_and_their_ties_in_every_graph_and_undo_restores_them() {
     let mut fixture = DocumentFixture::default();
-    let id = SubgraphId::from_u128(1);
+    let id = CompoundId::from_u128(1);
     let a = PortId::new(1);
-    let mut subgraph = Subgraph::new("inner", inputs(vec![input(1, "a"), input(2, "b")]));
-    let inside = subgraph.graph.add(fixture.plain_node());
-    let inputs_node = subgraph.inputs_node();
+    let mut compound = Compound::new("inner", inputs(vec![input(1, "a"), input(2, "b")]));
+    let inside = compound.graph.add(fixture.plain_node());
+    let inputs_node = compound.inputs_node();
     let inner_input = InputPort::new(inside, PortId::new(1));
     let inner_wire = WireKey::Data(DataWire {
         output: OutputPort::new(inputs_node, a),
         input: inner_input,
     });
-    subgraph
+    compound
         .graph
         .bindings
         .insert(inner_input, Binding::Wire(OutputPort::new(inputs_node, a)));
-    insert_subgraph(&mut fixture.document, id, subgraph);
+    insert_compound(&mut fixture.document, id, compound);
     let instance = fixture.add_instance(id);
     let producer = fixture.node_at(Vec2::new(0.0, 300.0));
     let outer_wire = fixture.wire(
@@ -144,7 +144,7 @@ fn an_interface_edit_drops_wires_and_their_ties_in_every_graph_and_undo_restores
     let reordered = commit(
         &mut document,
         &library,
-        SubgraphIntent::SetInterface {
+        CompoundIntent::SetInterface {
             id,
             to: Box::new(inputs(vec![input(2, "b"), input(1, "a")])),
         },
@@ -162,13 +162,13 @@ fn an_interface_edit_drops_wires_and_their_ties_in_every_graph_and_undo_restores
     let removed = commit(
         &mut document,
         &library,
-        SubgraphIntent::SetInterface {
+        CompoundIntent::SetInterface {
             id,
             to: Box::new(inputs(vec![input(2, "b")])),
         },
     )
     .unwrap();
-    let graph = GraphId::Subgraph(id);
+    let graph = GraphId::Compound(id);
     assert!(
         !document
             .graphs
@@ -192,32 +192,32 @@ fn an_interface_edit_drops_wires_and_their_ties_in_every_graph_and_undo_restores
     assert_eq!(document, before, "both wires, routes and ties come back");
 }
 
-/// A rename takes the name trimmed, and an undo puts the old one back; a name another subgraph
+/// A rename takes the name trimmed, and an undo puts the old one back; a name another compound
 /// holds takes the next free number, as Make Unique names a copy; a blank name, or the name the
-/// subgraph has, writes nothing; a subgraph gone since writes nothing either.
+/// compound has, writes nothing; a compound gone since writes nothing either.
 #[test]
 fn a_rename_takes_a_free_name_and_undoes() {
     let DocumentFixture {
         mut document,
         library,
     } = DocumentFixture::default();
-    let [denoise, clean] = [1, 2].map(SubgraphId::from_u128);
-    insert_subgraph(
+    let [denoise, clean] = [1, 2].map(CompoundId::from_u128);
+    insert_compound(
         &mut document,
         denoise,
-        Subgraph::new("Denoise", Interface::default()),
+        Compound::new("Denoise", Interface::default()),
     );
-    insert_subgraph(
+    insert_compound(
         &mut document,
         clean,
-        Subgraph::new("Clean", Interface::default()),
+        Compound::new("Clean", Interface::default()),
     );
-    let name = |document: &Document, id| document.graphs.subgraph(id).unwrap().name.clone();
+    let name = |document: &Document, id| document.graphs.compound(id).unwrap().name.clone();
     let rename = |document: &mut Document, id, to: &str| {
         commit(
             document,
             &library,
-            SubgraphIntent::Rename {
+            CompoundIntent::Rename {
                 id,
                 to: to.to_owned(),
             },
@@ -244,5 +244,5 @@ fn a_rename_takes_a_free_name_and_undoes() {
         );
     }
     assert_eq!(name(&document, denoise), "Clean 2");
-    assert!(rename(&mut document, SubgraphId::from_u128(9), "Gone").is_empty());
+    assert!(rename(&mut document, CompoundId::from_u128(9), "Gone").is_empty());
 }

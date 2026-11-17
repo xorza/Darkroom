@@ -6,16 +6,16 @@ use std::time::Duration;
 use common::ErrorChain;
 use palantir::{ColorScheme, Preference, RecordPass, Ui, UiPreferences};
 use scenarium::Binding;
+use scenarium::CompoundId;
 use scenarium::ConstValue;
 use scenarium::FileMode;
 use scenarium::GraphId;
 use scenarium::Library;
-use scenarium::SubgraphId;
 
+use crate::core::edit::compound_intent::CompoundIntent;
 use crate::core::edit::document_request::DocumentRequest;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::replace_plan::ReplacePlan;
-use crate::core::edit::subgraph_intent::SubgraphIntent;
 use crate::core::io::document;
 use crate::core::io::document::document_format::DocumentFormat;
 use crate::core::io::document::resources;
@@ -78,7 +78,7 @@ pub(crate) struct App {
     /// is its only writer, as the worker is drained; lent to the frame through [`AppCtx`]. Off the
     /// serialized state.
     run_state: RunState,
-    /// The library folder's shared subgraphs, scanned off the frame; lent to the frame through
+    /// The library folder's shared compounds, scanned off the frame; lent to the frame through
     /// [`AppCtx`].
     library_scan: LibraryScanner,
     /// The user-facing outcome log behind the status bar's sticky slot.
@@ -244,11 +244,11 @@ impl App {
             AppCommand::File(FileCommand::PackResources) => self.pack_resources(),
             AppCommand::Run(run) => self.run(run),
             AppCommand::PickMlModel(kind) => self.pick_ml_model(kind),
-            AppCommand::Publish { subgraph } => self.publish(subgraph),
-            AppCommand::Export { subgraph } => {
+            AppCommand::Publish { compound } => self.publish(compound),
+            AppCommand::Export { compound } => {
                 self.export = Some(ExportDialog::new(
                     self.session.open.document(),
-                    subgraph,
+                    compound,
                     self.runtime.library.cur(),
                 ));
             }
@@ -434,7 +434,7 @@ impl App {
             ExportChoice::Cancel => {}
             ExportChoice::Export => {
                 let bundled = dialog.bundled();
-                let subgraph = dialog.subgraph();
+                let compound = dialog.compound();
                 let kind = if bundled.is_empty() {
                     SavedFile::project(DocumentFormat::Ron)
                 } else {
@@ -443,7 +443,7 @@ impl App {
                 if let Some(path) = self.dialogs.save_path(kind, None) {
                     let library = self.runtime.library.cur();
                     let document =
-                        export::exported(self.session.open.document(), subgraph, library, &bundled);
+                        export::exported(self.session.open.document(), compound, library, &bundled);
                     match document::save_bundling(&document, library, &path, &bundled) {
                         Ok(()) => self.status.succeeded(StatusFamily::Document),
                         Err(error) => self
@@ -685,34 +685,34 @@ impl App {
         }
     }
 
-    /// Write `subgraph`'s definition and those it places into the library file that holds it,
+    /// Write `compound`'s definition and those it places into the library file that holds it,
     /// marked shared, the file reconciled and written whole; then record the digest as the one
     /// the copy last shared. A failure names itself on the status bar and writes nothing.
-    fn publish(&mut self, subgraph: SubgraphId) {
+    fn publish(&mut self, compound: CompoundId) {
         let library = self.library_scan.library();
-        let Some(entry) = library.entry(subgraph) else {
+        let Some(entry) = library.entry(compound) else {
             self.status.warn(
                 StatusFamily::Library,
-                "the library lists no one definition under this subgraph".to_string(),
+                "the library lists no one definition under this compound".to_string(),
             );
             return;
         };
         let path = library.path(entry).to_path_buf();
         let document = self.session.open.document();
-        let digest = document.graphs.digest(subgraph);
+        let digest = document.graphs.digest(compound);
         let funcs = self.runtime.library.cur();
         let file = shared_library::published(
             library.document(entry),
             library.manifest(entry),
             document,
-            subgraph,
+            compound,
             funcs,
         );
         match document::save(&file, funcs, &path, SavedPaths::Relative) {
             Ok(()) => {
                 self.status.succeeded(StatusFamily::Library);
-                self.requests.push_subgraph(SubgraphIntent::Synced {
-                    id: subgraph,
+                self.requests.push_compound(CompoundIntent::Synced {
+                    id: compound,
                     digest,
                 });
             }
@@ -725,18 +725,18 @@ impl App {
     /// Name on the status bar the graph an undo or a redo changed while no tab shows it, so no
     /// undo changes only what is off screen.
     fn name_hidden_edit(&mut self, verb: &str, hidden: Option<GraphId>) {
-        let Some(GraphId::Subgraph(id)) = hidden else {
+        let Some(GraphId::Compound(id)) = hidden else {
             return;
         };
         let document = self.session.open.document();
         let name = &document
             .graphs
-            .subgraph(id)
+            .compound(id)
             .expect("an undo writes a graph the document holds")
             .name;
         self.status.warn(
             StatusFamily::Edit,
-            format!("{verb} an edit in subgraph {name:?}, which no tab shows"),
+            format!("{verb} an edit in compound {name:?}, which no tab shows"),
         );
     }
 
@@ -836,7 +836,7 @@ impl App {
         }
     }
 
-    /// Update each subgraph that follows the library from the scan just landed, where the
+    /// Update each compound that follows the library from the scan just landed, where the
     /// library's copy moved and this one is as it last synced, as one undo entry, and say so.
     fn follow_library(&mut self) {
         let updates: Vec<DocumentRequest> = self
@@ -844,7 +844,7 @@ impl App {
             .library()
             .follower_updates(self.session.open.document())
             .into_iter()
-            .map(|update| DocumentRequest::Subgraph(SubgraphIntent::Update(Box::new(update))))
+            .map(|update| DocumentRequest::Compound(CompoundIntent::Update(Box::new(update))))
             .collect();
         if updates.is_empty() {
             return;
@@ -854,7 +854,7 @@ impl App {
             .apply_edits(updates, self.runtime.library.cur(), &mut self.requests);
         self.status.warn(
             StatusFamily::Library,
-            format!("updated {count} followed subgraph(s) from the library"),
+            format!("updated {count} followed compound(s) from the library"),
         );
     }
 

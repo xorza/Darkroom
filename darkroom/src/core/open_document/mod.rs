@@ -78,7 +78,7 @@ pub(crate) struct OpenDocument {
     /// changed is at the default revision.
     revisions: HashMap<GraphId, GraphRevision>,
     /// Moved by every edit, undo or redo that changes saved content: what a cache of a value
-    /// read off the whole document, as a subgraph's digest, is keyed by.
+    /// read off the whole document, as a compound's digest, is keyed by.
     content_revision: u64,
     /// This document's undo history, document state: opening another file replaces the pair, so
     /// no UI can inherit the other's history.
@@ -239,12 +239,12 @@ impl OpenDocument {
                     self.document.apply_view(op);
                     continue;
                 }
-                DocumentRequest::Enter { subgraph, through } => {
-                    self.document.enter(subgraph, through);
+                DocumentRequest::Enter { compound, through } => {
+                    self.document.enter(compound, through);
                     continue;
                 }
                 // An edit of the set of graphs joins the batch's entry, outside any gesture.
-                DocumentRequest::Subgraph(intent) => {
+                DocumentRequest::Compound(intent) => {
                     let committed = self.batch.len();
                     match intent.commit(&mut self.document, library, &mut self.batch) {
                         Ok(()) => {}

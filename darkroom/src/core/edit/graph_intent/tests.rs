@@ -2,15 +2,15 @@ use std::collections::BTreeSet;
 
 use glam::Vec2;
 use scenarium::{
-    Binding, BindingEntry, BindingRejection, Boundary, CacheMode, ConstValue, DataType,
-    DetachedNodeError, EventPort, FuncId, GhostBinding, GraphId, InputDecl, InputPort, InputState,
-    Interface, Library, Node, NodeId, OutputDecl, OutputPort, PlacementRejection, ProgramShape,
-    Subgraph, SubgraphId, Subscription, SubscriptionRejection, Unresolved, internals,
+    Binding, BindingEntry, BindingRejection, Boundary, CacheMode, Compound, CompoundId, ConstValue,
+    DataType, DetachedNodeError, EventPort, FuncId, GhostBinding, GraphId, InputDecl, InputPort,
+    InputState, Interface, Library, Node, NodeId, OutputDecl, OutputPort, PlacementRejection,
+    ProgramShape, Subscription, SubscriptionRejection, Unresolved, internals,
 };
 use scenarium::{PortId, internals::test_graph::TestGraph};
 
 use crate::core::document::Document;
-use crate::core::document::internals::{DocumentFixture, insert_subgraph};
+use crate::core::document::internals::{DocumentFixture, insert_compound};
 use crate::core::document::item_id::ItemId;
 use crate::core::document::route::Route;
 use crate::core::document::tie::{Tie, TieAngle, TieId};
@@ -594,25 +594,25 @@ fn duplicate_skips_a_selected_ghost_node() {
         .expect("a duplicate leaves a valid document");
 }
 
-/// Inside a subgraph an edit passes over its boundary nodes: a removal of the `Outputs` node or
+/// Inside a compound an edit passes over its boundary nodes: a removal of the `Outputs` node or
 /// the last `Inputs` node is refused and writes nothing, a second `Inputs` node comes and goes
 /// and a second `Outputs` node is refused, and a duplicate of a selection that holds both copies only the node beside
-/// them. An instance of the subgraph is refused inside itself, as it would place the subgraph in
+/// them. An instance of the compound is refused inside itself, as it would place the compound in
 /// itself, and taken in the main graph.
 #[test]
-fn an_edit_inside_a_subgraph_passes_over_its_boundary_nodes() {
+fn an_edit_inside_a_compound_passes_over_its_boundary_nodes() {
     let mut fixture = DocumentFixture::default();
-    let id = SubgraphId::from_u128(1);
-    let mut subgraph = Subgraph::new("inner", Interface::default());
-    let inside = subgraph.graph.add(fixture.plain_node());
-    let inputs = subgraph.inputs_node();
-    let outputs = subgraph.outputs_node();
-    insert_subgraph(&mut fixture.document, id, subgraph);
+    let id = CompoundId::from_u128(1);
+    let mut compound = Compound::new("inner", Interface::default());
+    let inside = compound.graph.add(fixture.plain_node());
+    let inputs = compound.inputs_node();
+    let outputs = compound.outputs_node();
+    insert_compound(&mut fixture.document, id, compound);
     let DocumentFixture {
         mut document,
         library,
     } = fixture;
-    let graph = GraphId::Subgraph(id);
+    let graph = GraphId::Compound(id);
     let commit = |document: &mut Document, intent: GraphIntent| {
         let mut steps = Vec::new();
         intent
@@ -676,7 +676,7 @@ fn an_edit_inside_a_subgraph_passes_over_its_boundary_nodes() {
     assert_eq!(
         commit(&mut document, refused).unwrap_err(),
         IntentError::Refused(EditRefusal::Placement(PlacementRejection::Recursive)),
-        "no subgraph inside itself"
+        "no compound inside itself"
     );
     let taken = GraphIntent::add_node(Vec2::ZERO, NodeId::from_u128(51), instance);
     let mut steps = Vec::new();
@@ -1305,30 +1305,30 @@ fn subscribe_unsubscribe_commit_and_undo() {
 }
 
 /// An instance that would nest the main graph past [`ProgramShape::MAX_LEVELS`] is refused,
-/// naming the depth it would reach, and adds nothing: subgraph `k` places subgraph `k + 1` and
+/// naming the depth it would reach, and adds nothing: compound `k` places compound `k + 1` and
 /// the last holds one node, so the first is `MAX_LEVELS` deep, and an instance of it one level
 /// more. An instance of the second fits.
 #[test]
 fn an_add_past_a_placement_bound_is_refused() {
     let mut fixture = DocumentFixture::default();
     let body = fixture.plain_node();
-    let ids: Vec<SubgraphId> = (1..=ProgramShape::MAX_LEVELS as u128)
-        .map(SubgraphId::from_u128)
+    let ids: Vec<CompoundId> = (1..=ProgramShape::MAX_LEVELS as u128)
+        .map(CompoundId::from_u128)
         .collect();
-    let empty = || Subgraph::new("level", Interface::default());
+    let empty = || Compound::new("level", Interface::default());
     let mut document = fixture.document;
     let mut inner = empty();
     inner.graph.add(body);
     for pair in ids.windows(2).rev() {
         let mut outer = empty();
         outer.graph.add(Node::instance(pair[1]));
-        insert_subgraph(&mut document, pair[1], inner);
+        insert_compound(&mut document, pair[1], inner);
         inner = outer;
     }
     let deepest_first = inner;
     let too_deep = Node::instance(ids[0]);
     let fits = Node::instance(ids[1]);
-    insert_subgraph(&mut document, ids[0], deepest_first);
+    insert_compound(&mut document, ids[0], deepest_first);
 
     let refused = NodeId::unique();
     let mut steps = Vec::new();
@@ -1382,7 +1382,7 @@ fn set_node_property_commits_and_reverts() {
         match to {
             NodeProperty::RuntimeCache(m) => assert_eq!(node.cache(), Some(m)),
             NodeProperty::Disabled(d) => assert_eq!(node.disabled, d),
-            NodeProperty::Subgraph(_) => unreachable!("no case re-points"),
+            NodeProperty::Compound(_) => unreachable!("no case re-points"),
         }
         assert_eq!(
             step.facts(),

@@ -7,7 +7,7 @@ use palantir::{
     Button, Checkbox, Configure, Modal, OverlayClose, Panel, Scroll, SizeSpec, Spacing, Text,
     TextWrap, Ui, VAlign, WidgetId, fmt,
 };
-use scenarium::{Library, SubgraphId};
+use scenarium::{CompoundId, Library};
 
 use crate::core::document::Document;
 use crate::core::io::export::{ExportPath, export_paths};
@@ -18,11 +18,11 @@ use crate::gui::widgets::support;
 /// The most a row list shows before it scrolls, in logical px.
 const LIST_MAX_HEIGHT: f32 = 320.0;
 
-/// An export waiting on its dialog: the subgraph, the paths it holds, and which the person picked
+/// An export waiting on its dialog: the compound, the paths it holds, and which the person picked
 /// to bundle, none at first.
 #[derive(Debug)]
 pub(super) struct ExportDialog {
-    subgraph: SubgraphId,
+    compound: CompoundId,
     name: String,
     paths: Vec<ExportPath>,
     bundled: Vec<bool>,
@@ -37,16 +37,16 @@ pub(super) enum ExportChoice {
 }
 
 impl ExportDialog {
-    /// The dialog for exporting `document`'s subgraph `subgraph`, reading the size of each path
+    /// The dialog for exporting `document`'s compound `compound`, reading the size of each path
     /// it holds once, here.
-    pub(super) fn new(document: &Document, subgraph: SubgraphId, library: &Library) -> Self {
-        let paths = export_paths(document, subgraph, library);
+    pub(super) fn new(document: &Document, compound: CompoundId, library: &Library) -> Self {
+        let paths = export_paths(document, compound, library);
         Self {
-            subgraph,
+            compound,
             name: document
                 .graphs
-                .subgraph(subgraph)
-                .expect("an exported subgraph is held")
+                .compound(compound)
+                .expect("an exported compound is held")
                 .name
                 .clone(),
             bundled: vec![false; paths.len()],
@@ -54,8 +54,8 @@ impl ExportDialog {
         }
     }
 
-    pub(super) const fn subgraph(&self) -> SubgraphId {
-        self.subgraph
+    pub(super) const fn compound(&self) -> CompoundId {
+        self.compound
     }
 
     /// The input paths picked to bundle.
@@ -199,7 +199,7 @@ mod tests {
     use crate::core::io::export::ExportPath;
     use crate::gui::app::export_dialog::{ExportChoice, ExportDialog, bundle_wid, export_wid};
     use crate::gui::theme::Theme;
-    use scenarium::SubgraphId;
+    use scenarium::CompoundId;
 
     /// Each input path starts stripped; a tick bundles it, an output offers no tick, and Export
     /// reports the paths ticked.
@@ -211,7 +211,7 @@ mod tests {
             output,
         };
         let mut dialog = ExportDialog {
-            subgraph: SubgraphId::from_u128(1),
+            compound: CompoundId::from_u128(1),
             name: "Calibrate".to_string(),
             paths: vec![
                 path("/a.fits", false),

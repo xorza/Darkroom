@@ -108,7 +108,7 @@ impl ConstEditor<'_> {
             )?;
             return Some(picked.value.clone());
         }
-        // A type the library does not register, which a subgraph's interface keeps as written,
+        // A type the library does not register, which a compound's interface keeps as written,
         // has no editor here: its constant shows as written and stays.
         if !library.knows(data_type) {
             field.read_only(ui, ShownValue { value, data_type });

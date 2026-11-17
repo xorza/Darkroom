@@ -37,7 +37,7 @@ pub struct State {
     /// The open document's file, `None` while it is unsaved.
     pub document: Option<String>,
     pub dirty: bool,
-    /// Each graph of the document: the main graph first, then the subgraphs in id order.
+    /// Each graph of the document: the main graph first, then the compounds in id order.
     pub graphs: Vec<GraphSummary>,
     /// The text of the focused widget, or its id when it shows none.
     pub focus: Option<String>,
@@ -51,7 +51,7 @@ pub struct State {
 /// One graph of the document.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct GraphSummary {
-    /// `main`, or the subgraph's name.
+    /// `main`, or the compound's name.
     pub name: String,
     /// Whether the window's commands act on this graph.
     pub active: bool,
@@ -220,9 +220,9 @@ impl Report<'_> {
         GraphSummary {
             name: match id {
                 GraphId::Main => "main".to_string(),
-                GraphId::Subgraph(subgraph) => document
+                GraphId::Compound(compound) => document
                     .graphs
-                    .subgraph(subgraph)
+                    .compound(compound)
                     .expect("the set holds each graph it lists")
                     .name
                     .clone(),
@@ -491,8 +491,8 @@ mod tests {
     fn a_trigger_reads_as_its_node_or_with_its_id() {
         use scenarium::internals::stub_func;
         use scenarium::{
-            EventDecl, EventPorts, FuncId, GraphSet, Interface, Library, Node, NodeId, Numbered,
-            PortId, Subgraph, SubgraphId, TriggerPort,
+            Compound, CompoundId, EventDecl, EventPorts, FuncId, GraphSet, Interface, Library,
+            Node, NodeId, Numbered, PortId, TriggerPort,
         };
 
         let probe = stub_func(FuncId::unique(), "probe").sink().build();
@@ -504,16 +504,16 @@ mod tests {
                 trigger: None,
             })
             .unwrap();
-        let mut subgraph = Subgraph::new("relay", interface);
-        let outputs = subgraph.outputs_node();
+        let mut compound = Compound::new("relay", interface);
+        let outputs = compound.outputs_node();
         let sink = NodeId::unique();
-        subgraph.graph.insert(sink, Node::from(&probe));
-        let id = SubgraphId::from_u128(1);
+        compound.graph.insert(sink, Node::from(&probe));
+        let id = CompoundId::from_u128(1);
         let mut set = GraphSet::default();
-        set.insert_subgraph(id, subgraph);
+        set.insert_compound(id, compound);
         let (graph, scope) = (
-            set.graph(GraphId::Subgraph(id)),
-            set.scope(&library, GraphId::Subgraph(id)),
+            set.graph(GraphId::Compound(id)),
+            set.scope(&library, GraphId::Compound(id)),
         );
         let name = |trigger| trigger_name(graph, scope, trigger);
         assert_eq!(name(TriggerPort::from(sink)), "probe");

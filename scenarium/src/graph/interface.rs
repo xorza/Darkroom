@@ -1,4 +1,4 @@
-//! [`Interface`]: the ports a subgraph shows, on its instances and its boundary nodes.
+//! [`Interface`]: the ports a compound shows, on its instances and its boundary nodes.
 //!
 //! # Decisions
 //!
@@ -22,9 +22,9 @@ use crate::graph::ports::{
     EventDecl, InputDecl, Numbered, OutputDecl, PortList, Ports, PortsError, check_ids,
 };
 
-/// The ports a subgraph shows, each a declaration under its id. An interface port's declaration
+/// The ports a compound shows, each a declaration under its id. An interface port's declaration
 /// is that of the port that made it, so a const-only input, a picker and an enum are exposed as
-/// they are, and a port's type is held as its declaration, so no edit inside the subgraph
+/// they are, and a port's type is held as its declaration, so no edit inside the compound
 /// retypes the wires on its instances.
 ///
 /// Held to the rules a func's ports pass ([`Ports::check`]), apart from the one that an output is
@@ -173,7 +173,7 @@ impl Interface {
         &self.ports.outputs
     }
 
-    /// The ports the boundary node on `side` shows: the interface from inside the subgraph.
+    /// The ports the boundary node on `side` shows: the interface from inside the compound.
     pub const fn boundary_ports(&self, side: Boundary) -> &Ports {
         match side {
             Boundary::Inputs => &self.inputs_node,

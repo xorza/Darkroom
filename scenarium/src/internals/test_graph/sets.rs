@@ -1,8 +1,8 @@
 //! What the tests of a set of graphs share: a library of a few plain funcs, and short
-//! constructors for the node and subgraph ids a test picks by hand.
+//! constructors for the node and compound ids a test picks by hand.
 
 use crate::data::data_type::DataType;
-use crate::graph::identity::{FuncId, NodeId, SubgraphId};
+use crate::graph::identity::{CompoundId, FuncId, NodeId};
 use crate::graph::node::Node;
 use crate::graph::ports::{InputDecl, OutputDecl};
 use crate::internals;
@@ -25,8 +25,8 @@ pub(crate) const fn n(id: u128) -> NodeId {
     NodeId::from_u128(id)
 }
 
-pub(crate) const fn s(id: u128) -> SubgraphId {
-    SubgraphId::from_u128(id)
+pub(crate) const fn s(id: u128) -> CompoundId {
+    CompoundId::from_u128(id)
 }
 
 /// The funcs above, each numbering its ports from 1.

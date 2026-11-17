@@ -10,7 +10,7 @@
 //! [`Library`](crate::library::Library) at compile.
 //!
 //! **One program node, one execution node, one [`ProgramId`].** An authored node outside every
-//! instance is one program node; one inside a subgraph is one per instance, each under its own
+//! instance is one program node; one inside a compound is one per instance, each under its own
 //! path. Resolving a program id against the artifact is a search of its own id column.
 
 use std::mem;

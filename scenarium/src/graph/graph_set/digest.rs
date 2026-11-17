@@ -1,7 +1,7 @@
-//! [`SubgraphDigest`]: what a subgraph's definition is, apart from the id it is held under.
+//! [`CompoundDigest`]: what a compound's definition is, apart from the id it is held under.
 //!
 //! - **A digest is of the definition alone**: its name and description, its interface, and its
-//!   graph in node id order with its ghosts, each subgraph it places by its own digest. The id is
+//!   graph in node id order with its ghosts, each compound it places by its own digest. The id is
 //!   left out, so two documents that hold one definition under two ids digest it alike, and a
 //!   paste or an update tells an equal definition from a changed one. As Git names a tree by
 //!   its content and each subtree by its own hash. Refused: the serialized definition hashed as
@@ -17,44 +17,44 @@ use serde::{Deserialize, Serialize};
 use common::SerdeFormat;
 
 use crate::graph::graph_set::GraphSet;
-use crate::graph::identity::SubgraphId;
+use crate::graph::identity::CompoundId;
 use crate::graph::node::{Node, NodeKind};
 
-/// The blake3 digest of a subgraph's definition.
+/// The blake3 digest of a compound's definition.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct SubgraphDigest(#[serde(with = "common::hex_bytes")] [u8; 32]);
+pub struct CompoundDigest(#[serde(with = "common::hex_bytes")] [u8; 32]);
 
 impl GraphSet {
-    /// The digest of subgraph `id`'s definition; see the module.
+    /// The digest of compound `id`'s definition; see the module.
     ///
     /// # Panics
-    /// If this set holds no subgraph `id`.
-    pub fn digest(&self, id: SubgraphId) -> SubgraphDigest {
+    /// If this set holds no compound `id`.
+    pub fn digest(&self, id: CompoundId) -> CompoundDigest {
         self.digest_with(id, &mut HashMap::new())
     }
 
-    /// [`Self::digest`], reusing each placed subgraph's digest once worked out: a subgraph placed
+    /// [`Self::digest`], reusing each placed compound's digest once worked out: a compound placed
     /// many times is digested once. The recursion is bounded by the set's depth gate.
     fn digest_with(
         &self,
-        id: SubgraphId,
-        known: &mut HashMap<SubgraphId, SubgraphDigest>,
-    ) -> SubgraphDigest {
+        id: CompoundId,
+        known: &mut HashMap<CompoundId, CompoundDigest>,
+    ) -> CompoundDigest {
         if let Some(&digest) = known.get(&id) {
             return digest;
         }
-        let subgraph = self
-            .subgraph(id)
-            .expect("a digested subgraph is in the set");
+        let compound = self
+            .compound(id)
+            .expect("a digested compound is in the set");
         let mut hasher = blake3::Hasher::new();
         let mut write = |bytes: &[u8]| {
             hasher.update(&(bytes.len() as u64).to_le_bytes());
             hasher.update(bytes);
         };
-        write(subgraph.name.as_bytes());
-        write(&encode(&subgraph.description));
-        write(&encode(subgraph.interface.ports()));
-        let graph = &subgraph.graph;
+        write(compound.name.as_bytes());
+        write(&encode(&compound.description));
+        write(&encode(compound.interface.ports()));
+        let graph = &compound.graph;
         for node in graph.iter() {
             write(&encode(&node.node_id));
             write(&self.encode_node(&node, known));
@@ -76,19 +76,19 @@ impl GraphSet {
                 .map(|(subscription, _)| subscription)
                 .collect::<Vec<_>>(),
         ));
-        let digest = SubgraphDigest(*hasher.finalize().as_bytes());
+        let digest = CompoundDigest(*hasher.finalize().as_bytes());
         known.insert(id, digest);
         digest
     }
 
-    /// `node`'s encoding, an instance's subgraph by that subgraph's digest rather than its id;
-    /// an instance of a subgraph the set lacks, as a ghost node may be, by its id.
-    fn encode_node(&self, node: &Node, known: &mut HashMap<SubgraphId, SubgraphDigest>) -> Vec<u8> {
+    /// `node`'s encoding, an instance's compound by that compound's digest rather than its id;
+    /// an instance of a compound the set lacks, as a ghost node may be, by its id.
+    fn encode_node(&self, node: &Node, known: &mut HashMap<CompoundId, CompoundDigest>) -> Vec<u8> {
         match node.kind {
             NodeKind::Instance {
-                subgraph: placed,
+                compound: placed,
                 cache,
-            } if self.subgraph(placed).is_some() => {
+            } if self.compound(placed).is_some() => {
                 let digest = self.digest_with(placed, known);
                 encode(&(digest, cache, &node.name, node.disabled))
             }

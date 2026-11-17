@@ -17,7 +17,7 @@
 //!   [`Manifest`](crate::Manifest) for a func the library lacks, from its declaration for a node
 //!   that resolves and is refused. So a definition with its ghosts is one value in a clip, an
 //!   undo step and a library file. Refused: the declarations of missing funcs in a table of the
-//!   set, which a subgraph travels without.
+//!   set, which a compound travels without.
 
 use ::serde::{Deserialize, Serialize};
 
@@ -35,6 +35,6 @@ pub struct GhostNode {
     pub reason: DetachReason,
     /// What the node declared when the load took it out: from the file's manifest for a func
     /// the library lacks, from its declaration for a node that resolves and is refused. `None`
-    /// when nothing knew it: a missing subgraph, a func no manifest listed.
+    /// when nothing knew it: a missing compound, a func no manifest listed.
     pub saved: Option<SavedDecl>,
 }

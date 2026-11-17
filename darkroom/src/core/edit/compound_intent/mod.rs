@@ -1,8 +1,8 @@
-//! [`SubgraphIntent`]: an edit of the document's set of graphs, rather than of one graph.
+//! [`CompoundIntent`]: an edit of the document's set of graphs, rather than of one graph.
 //!
 //! # Decisions
 //!
-//! - **A subgraph edit is a document edit**: one undo history, and the change is in every
+//! - **A compound edit is a document edit**: one undo history, and the change is in every
 //!   instance at once, with no publish step inside a document. As Houdini, where "other instances
 //!   of the same asset will get the same changes" ([editing
 //!   assets](https://www.sidefx.com/docs/houdini/assets/edit.html)). Refused: a draft with Apply, a
@@ -15,83 +15,83 @@
 use std::mem;
 
 use scenarium::{
-    GraphId, Interface, Library, Manifest, RefusedFate, Subgraph, SubgraphDigest, SubgraphId,
+    Compound, CompoundDigest, CompoundId, GraphId, Interface, Library, Manifest, RefusedFate,
     TypeNames,
 };
 
 use crate::core::document::Document;
-use crate::core::document::subgraph_side::{SideMarks, SubgraphSide};
+use crate::core::document::compound_side::{CompoundSide, SideMarks};
 use crate::core::edit::bring_in::{self, Carried, bring_in};
 use crate::core::edit::error::{EditRefusal, IntentError};
 use crate::core::edit::step::change::Change;
+use crate::core::edit::step::set_compound::SetCompound;
+use crate::core::edit::step::set_compound_name::SetCompoundName;
 use crate::core::edit::step::set_definition::SetDefinition;
 use crate::core::edit::step::set_interface::SetInterface;
 use crate::core::edit::step::set_side::SetSide;
-use crate::core::edit::step::set_subgraph::SetSubgraph;
-use crate::core::edit::step::set_subgraph_name::SetSubgraphName;
 use crate::core::edit::step::undo_step::UndoStep;
 
-/// An edit of a subgraph's definition: one coming in or going out, its interface or its name.
+/// An edit of a compound's definition: one coming in or going out, its interface or its name.
 /// Travels as a
-/// [`DocumentRequest::Subgraph`](crate::core::edit::document_request::DocumentRequest::Subgraph)
+/// [`DocumentRequest::Compound`](crate::core::edit::document_request::DocumentRequest::Compound)
 /// and lands in the same history entry as the graph edits of its batch, as a collapse's new
 /// definition lands with the instance that places it.
 #[derive(Debug)]
-pub(crate) enum SubgraphIntent {
+pub(crate) enum CompoundIntent {
     /// Put a new definition in, with its side. Boxed: a whole definition dwarfs the rest.
-    Add(Box<NewSubgraph>),
+    Add(Box<NewCompound>),
     /// Take out a definition no node places.
-    Remove { id: SubgraphId },
-    /// Set a subgraph's interface: what each instance and both boundary nodes show, dropping
+    Remove { id: CompoundId },
+    /// Set a compound's interface: what each instance and both boundary nodes show, dropping
     /// each binding the new one does not hold, in every graph. Boxed: an interface dwarfs the
     /// rest.
-    SetInterface { id: SubgraphId, to: Box<Interface> },
-    /// Rename a subgraph to `to`, trimmed: a blank name keeps the one it has, and one another
-    /// subgraph holds takes the next free number, as Make Unique names its copy.
-    Rename { id: SubgraphId, to: String },
-    /// Mark a subgraph shared, so the library lists it while the document is a library file, or
+    SetInterface { id: CompoundId, to: Box<Interface> },
+    /// Rename a compound to `to`, trimmed: a blank name keeps the one it has, and one another
+    /// compound holds takes the next free number, as Make Unique names its copy.
+    Rename { id: CompoundId, to: String },
+    /// Mark a compound shared, so the library lists it while the document is a library file, or
     /// take the mark off.
-    SetShared { id: SubgraphId, shared: bool },
+    SetShared { id: CompoundId, shared: bool },
     /// Put the library's definition in place of the copy held under its id, keeping each
     /// instance's bindings that the library's interface holds. Boxed: whole definitions.
     Update(Box<Update>),
-    /// Record `digest` as the one subgraph `id` last shared with the library: what a publish
+    /// Record `digest` as the one compound `id` last shared with the library: what a publish
     /// leaves.
     Synced {
-        id: SubgraphId,
-        digest: SubgraphDigest,
+        id: CompoundId,
+        digest: CompoundDigest,
     },
-    /// Make subgraph `id` follow the library, read-only, or Make Local.
-    SetFollows { id: SubgraphId, follows: bool },
-    /// Lock subgraph `id` against edits, or Unlock it.
-    SetLocked { id: SubgraphId, locked: bool },
+    /// Make compound `id` follow the library, read-only, or Make Local.
+    SetFollows { id: CompoundId, follows: bool },
+    /// Lock compound `id` against edits, or Unlock it.
+    SetLocked { id: CompoundId, locked: bool },
 }
 
-/// What [`SubgraphIntent::Update`] puts in: the library's definition under the copy's id, last,
+/// What [`CompoundIntent::Update`] puts in: the library's definition under the copy's id, last,
 /// after each definition it places, and the manifest of the file they came from.
 #[derive(Debug)]
 pub(crate) struct Update {
-    pub(crate) id: SubgraphId,
+    pub(crate) id: CompoundId,
     pub(crate) carried: Vec<Carried>,
     pub(crate) manifest: Manifest,
 }
 
-/// A definition [`SubgraphIntent::Add`] puts in.
+/// A definition [`CompoundIntent::Add`] puts in.
 #[derive(Clone, Debug)]
-pub(crate) struct NewSubgraph {
-    pub(crate) id: SubgraphId,
-    pub(crate) subgraph: Subgraph,
-    pub(crate) side: SubgraphSide,
+pub(crate) struct NewCompound {
+    pub(crate) id: CompoundId,
+    pub(crate) compound: Compound,
+    pub(crate) side: CompoundSide,
     /// The names the file it came from gave its types, which the set learns
     /// ([`GraphSet::learn_type_names`](scenarium::GraphSet::learn_type_names)); none for one
     /// made here.
     pub(crate) type_names: TypeNames,
 }
 
-impl SubgraphIntent {
+impl CompoundIntent {
     /// Build and apply this edit against `document`, pushing its step onto `steps`: none for a
-    /// stale one, as a subgraph gone since the request was raised, or a no-op. A removal of a
-    /// subgraph nodes still place is refused.
+    /// stale one, as a compound gone since the request was raised, or a no-op. A removal of a
+    /// compound nodes still place is refused.
     ///
     /// # Panics
     /// On an `Add` under an id the document holds: ids are minted fresh.
@@ -108,38 +108,38 @@ impl SubgraphIntent {
             }
         };
         if let Self::SetInterface { id, .. } | Self::Rename { id, .. } = &self
-            && let Some(why) = document.read_only(GraphId::Subgraph(*id))
+            && let Some(why) = document.read_only(GraphId::Compound(*id))
         {
             return Err(EditRefusal::ReadOnly { why }.into());
         }
         let step = match self {
             Self::Add(new) => {
-                let NewSubgraph {
+                let NewCompound {
                     id,
-                    subgraph,
+                    compound,
                     side,
                     type_names,
                 } = *new;
                 assert!(
-                    document.graphs.subgraph(id).is_none(),
-                    "a new subgraph takes a fresh id"
+                    document.graphs.compound(id).is_none(),
+                    "a new compound takes a fresh id"
                 );
                 // A cache of what files said, outside the undo (`TypeNames`).
                 document.graphs.learn_type_names(&type_names, library);
-                UndoStep::Subgraph(Box::new(SetSubgraph::insertion(id, subgraph, side)))
+                UndoStep::Compound(Box::new(SetCompound::insertion(id, compound, side)))
             }
             Self::Remove { id } => {
-                if document.graphs.subgraph(id).is_none() {
+                if document.graphs.compound(id).is_none() {
                     return Ok(());
                 }
                 let uses = document.graphs.uses(id).count();
                 if uses > 0 {
-                    return Err(EditRefusal::SubgraphInUse { uses }.into());
+                    return Err(EditRefusal::CompoundInUse { uses }.into());
                 }
-                UndoStep::Subgraph(Box::new(SetSubgraph::removal(document, id)))
+                UndoStep::Compound(Box::new(SetCompound::removal(document, id)))
             }
             Self::SetInterface { id, to } => {
-                if document.graphs.subgraph(id).is_none() {
+                if document.graphs.compound(id).is_none() {
                     return Ok(());
                 }
                 UndoStep::Interface(Box::new(SetInterface::plan(
@@ -151,18 +151,18 @@ impl SubgraphIntent {
                 )))
             }
             Self::Rename { id, to } => {
-                let Some(subgraph) = document.graphs.subgraph(id) else {
+                let Some(compound) = document.graphs.compound(id) else {
                     return Ok(());
                 };
                 let wanted = to.trim();
-                if wanted.is_empty() || wanted == subgraph.name {
+                if wanted.is_empty() || wanted == compound.name {
                     return Ok(());
                 }
-                UndoStep::SubgraphName(SetSubgraphName {
+                UndoStep::CompoundName(SetCompoundName {
                     id,
                     name: Change {
-                        from: subgraph.name.clone(),
-                        to: document.free_subgraph_name(wanted),
+                        from: compound.name.clone(),
+                        to: document.free_compound_name(wanted),
                     },
                 })
             }
@@ -196,7 +196,7 @@ impl SubgraphIntent {
                     mut carried,
                     manifest,
                 } = *update;
-                if document.graphs.subgraph(id).is_none() {
+                if document.graphs.compound(id).is_none() {
                     return Ok(());
                 }
                 // The definition itself is parsed against this library with those it places, as
@@ -211,18 +211,18 @@ impl SubgraphIntent {
                     "an update puts in the definition under its id"
                 );
                 let mut brought = bring_in(document, library, carried, &manifest);
-                for NewSubgraph {
-                    id, subgraph, side, ..
-                } in mem::take(&mut brought.subgraphs)
+                for NewCompound {
+                    id, compound, side, ..
+                } in mem::take(&mut brought.compounds)
                 {
                     land(
-                        UndoStep::Subgraph(Box::new(SetSubgraph::insertion(id, subgraph, side))),
+                        UndoStep::Compound(Box::new(SetCompound::insertion(id, compound, side))),
                         document,
                     );
                 }
-                let mut subgraph = definition.subgraph;
-                brought.enter(&mut subgraph, library);
-                let interface = subgraph.interface.clone();
+                let mut compound = definition.compound;
+                brought.enter(&mut compound, library);
+                let interface = compound.interface.clone();
                 land(
                     UndoStep::Interface(Box::new(SetInterface::plan(
                         document,
@@ -239,8 +239,8 @@ impl SubgraphIntent {
                     UndoStep::Definition(Box::new(SetDefinition {
                         id,
                         definition: Change {
-                            from: document.graphs.subgraph(id).expect("checked above").clone(),
-                            to: subgraph,
+                            from: document.graphs.compound(id).expect("checked above").clone(),
+                            to: compound,
                         },
                         view: Change {
                             from: side.view.clone(),
@@ -267,11 +267,11 @@ impl SubgraphIntent {
     }
 }
 
-/// The step that changes subgraph `id`'s marks as `edit` does, or `None` for a subgraph the
+/// The step that changes compound `id`'s marks as `edit` does, or `None` for a compound the
 /// document no longer holds.
 fn mark(
     document: &Document,
-    id: SubgraphId,
+    id: CompoundId,
     edit: impl FnOnce(&mut SideMarks),
 ) -> Option<UndoStep> {
     let from = document.sides.get(&id)?.marks();

@@ -7,7 +7,7 @@
 //!   an interface port alone, and no body reads a value of it. Refused: a check at each `add` and
 //!   each registration of the other's entries, as the two arrive in either order.
 //! - **A type the library lacks is a type like any other, equal only to itself.** A newer
-//!   version, a build without a feature or a shared subgraph can name one this build does not
+//!   version, a build without a feature or a shared compound can name one this build does not
 //!   register; the port, its bindings and its constants stay as written. A constant of an
 //!   unknown enum is kept unchecked, an unknown file kind is within itself alone, and an unknown
 //!   custom type has no disk codec. The same promise a ghost node makes for a node with no func: kept,

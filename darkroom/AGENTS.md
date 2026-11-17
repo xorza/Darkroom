@@ -129,6 +129,6 @@ run. Refused: a pass-through node, which changes the graph for layout.
 - **A good run is quiet, and one cause gets one red frame**: a node a failure skipped says so in
   its footer.
 - **Undo reads "Undo"**, as commands reach the history as batches of intents. Refused: a step name
-  read off them, which misnames a compound command.
+  read off them, which misnames a composite command.
 - **A dialog's buttons sit right-aligned**, the confirming one last. Refused: Qt's order by
   platform, which needs platform code in palantir.

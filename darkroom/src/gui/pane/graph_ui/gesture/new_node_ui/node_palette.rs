@@ -11,14 +11,14 @@ use palantir::{
 
 use glam::Vec2;
 use scenarium::{
-    Boundary, Func, GraphId, Library, Node, NodeId, Ports, SPECIAL_NODES, SpecialNode, Subgraph,
-    SubgraphId,
+    Boundary, Compound, CompoundId, Func, GraphId, Library, Node, NodeId, Ports, SPECIAL_NODES,
+    SpecialNode,
 };
 
 use crate::core::document::Document;
 use crate::core::edit::bring_in::bring_in;
+use crate::core::edit::compound_intent::NewCompound;
 use crate::core::edit::graph_intent::GraphIntent;
-use crate::core::edit::subgraph_intent::NewSubgraph;
 use crate::core::shared_library::{LibraryEntry, SharedLibrary};
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::gesture::new_node_ui;
@@ -29,33 +29,33 @@ use crate::gui::theme::color;
 use crate::gui::widgets::support;
 
 /// One row of a category's palette list: a library `Func`, a built-in special node, or one of
-/// the document's subgraphs. One type lets every source sort into one list, which makes a
+/// the document's compounds. One type lets every source sort into one list, which makes a
 /// category a run inside it.
 #[derive(Clone, Copy, Debug)]
 pub(super) enum PaletteEntry<'a> {
     Func(&'a Func),
     Special(SpecialNode),
     /// Whether a node places it: an unused one is marked, as the library list marks it.
-    Subgraph {
-        id: SubgraphId,
-        subgraph: &'a Subgraph,
+    Compound {
+        id: CompoundId,
+        compound: &'a Compound,
         used: bool,
     },
-    /// A subgraph the library folder shares, which a pick copies in with those it places.
+    /// A compound the library folder shares, which a pick copies in with those it places.
     Library {
         entry: &'a LibraryEntry,
         shared: &'a SharedLibrary,
     },
-    /// Another `Inputs` node, listed in a subgraph's pane alone, so a long graph reads an input
+    /// Another `Inputs` node, listed in a compound's pane alone, so a long graph reads an input
     /// where it is used.
     Inputs,
 }
 
-/// The category the document's subgraphs list under.
-const SUBGRAPHS: &str = "Subgraphs";
-/// The category the library folder's subgraphs list under.
+/// The category the document's compounds list under.
+const COMPOUNDS: &str = "Compounds";
+/// The category the library folder's compounds list under.
 const LIBRARY: &str = "Library";
-/// The category an `Inputs` node lists under, beside the subgraph it shows.
+/// The category an `Inputs` node lists under, beside the compound it shows.
 const INTERFACE: &str = "Interface";
 /// The ports a node with none to seed shows: an `Inputs` node, whose ports are outputs.
 static NO_PORTS: Ports = Ports {
@@ -70,7 +70,7 @@ impl<'a> PaletteEntry<'a> {
         match self {
             PaletteEntry::Func(f) => f.name(),
             PaletteEntry::Special(s) => s.func().name(),
-            PaletteEntry::Subgraph { subgraph, .. } => &subgraph.name,
+            PaletteEntry::Compound { compound, .. } => &compound.name,
             PaletteEntry::Library { entry, .. } => &entry.name,
             PaletteEntry::Inputs => "Inputs",
         }
@@ -80,25 +80,25 @@ impl<'a> PaletteEntry<'a> {
         match self {
             PaletteEntry::Func(f) => f.category(),
             PaletteEntry::Special(s) => s.func().category(),
-            PaletteEntry::Subgraph { .. } => SUBGRAPHS,
+            PaletteEntry::Compound { .. } => COMPOUNDS,
             PaletteEntry::Library { .. } => LIBRARY,
             PaletteEntry::Inputs => INTERFACE,
         }
     }
 
-    /// The first line of what the entry does, if it says; an unused subgraph says so instead.
+    /// The first line of what the entry does, if it says; an unused compound says so instead.
     pub(super) fn description(self) -> Option<&'a str> {
         let text = match self {
             PaletteEntry::Func(f) => f.description(),
             PaletteEntry::Special(s) => s.func().description(),
-            PaletteEntry::Subgraph { used: false, .. } => Some("Unused: no node places it"),
-            PaletteEntry::Subgraph { subgraph, .. } => subgraph.description.as_deref(),
+            PaletteEntry::Compound { used: false, .. } => Some("Unused: no node places it"),
+            PaletteEntry::Compound { compound, .. } => compound.description.as_deref(),
             // Its file names it apart from an entry of another file under the same id.
             PaletteEntry::Library { entry, shared } => shared
                 .path(entry)
                 .file_name()
                 .and_then(|name| name.to_str()),
-            PaletteEntry::Inputs => Some("The subgraph's inputs, read again where they are used"),
+            PaletteEntry::Inputs => Some("The compound's inputs, read again where they are used"),
         }?;
         Some(text.lines().next().unwrap_or(text))
     }
@@ -108,12 +108,12 @@ impl<'a> PaletteEntry<'a> {
         match self {
             PaletteEntry::Func(f) => f.ports(),
             PaletteEntry::Special(s) => s.func().ports(),
-            PaletteEntry::Subgraph { subgraph, .. } => subgraph.interface.ports(),
+            PaletteEntry::Compound { compound, .. } => compound.interface.ports(),
             PaletteEntry::Library { entry, shared } => shared
                 .document(entry)
                 .graphs
-                .subgraph(entry.id)
-                .expect("an entry names a subgraph of its file")
+                .compound(entry.id)
+                .expect("an entry names a compound of its file")
                 .interface
                 .ports(),
             PaletteEntry::Inputs => &NO_PORTS,
@@ -125,13 +125,13 @@ impl<'a> PaletteEntry<'a> {
     /// library-registered, so the node it spawns comes from the [`SpecialNode`] itself.
     fn placed(self, document: &Document, library: &Library) -> Placed {
         let alone = |node| Placed {
-            subgraphs: Vec::new(),
+            compounds: Vec::new(),
             node,
         };
         match self {
             PaletteEntry::Func(f) => alone(f.into()),
             PaletteEntry::Special(s) => alone(s.into()),
-            PaletteEntry::Subgraph { id, .. } => alone(Node::instance(id)),
+            PaletteEntry::Compound { id, .. } => alone(Node::instance(id)),
             PaletteEntry::Inputs => alone(Node::from(Boundary::Inputs)),
             PaletteEntry::Library { entry, shared } => {
                 let brought = bring_in(
@@ -142,7 +142,7 @@ impl<'a> PaletteEntry<'a> {
                 );
                 let node = Node::instance(brought.id(entry.id));
                 Placed {
-                    subgraphs: brought.subgraphs,
+                    compounds: brought.compounds,
                     node,
                 }
             }
@@ -156,7 +156,7 @@ impl<'a> PaletteEntry<'a> {
         match self {
             PaletteEntry::Func(f) => PaletteRow::Func(f.id()),
             PaletteEntry::Special(s) => PaletteRow::Special(s),
-            PaletteEntry::Subgraph { id, .. } => PaletteRow::Subgraph(id),
+            PaletteEntry::Compound { id, .. } => PaletteRow::Compound(id),
             PaletteEntry::Library { entry, .. } => PaletteRow::Library {
                 id: entry.id,
                 digest: entry.digest,
@@ -169,14 +169,14 @@ impl<'a> PaletteEntry<'a> {
 /// The node a pick adds, and the definitions it copies in first.
 #[derive(Debug)]
 struct Placed {
-    subgraphs: Vec<NewSubgraph>,
+    compounds: Vec<NewCompound>,
     node: Node,
 }
 
 /// What a palette pick raises, in order: the definitions it copies in, then the node it adds.
 #[derive(Debug)]
 pub(super) struct PalettePick {
-    pub(super) subgraphs: Vec<NewSubgraph>,
+    pub(super) compounds: Vec<NewCompound>,
     pub(super) add: GraphIntent,
 }
 
@@ -217,12 +217,12 @@ impl<'a> NodePalette<'a> {
     }
 
     /// Every row the palette can list, in no particular order: the library's
-    /// funcs, the built-in specials, the document's subgraphs, and unless it replaces a node the
-    /// library folder's and, in a subgraph's pane, an `Inputs` node.
+    /// funcs, the built-in specials, the document's compounds, and unless it replaces a node the
+    /// library folder's and, in a compound's pane, an `Inputs` node.
     pub(super) fn entries(&self) -> impl Iterator<Item = PaletteEntry<'a>> {
         let sources = self.sources();
         let replacing = self.replacing;
-        let inputs = (!replacing && matches!(self.graph_ctx.graph(), GraphId::Subgraph(_)))
+        let inputs = (!replacing && matches!(self.graph_ctx.graph(), GraphId::Compound(_)))
             .then_some(PaletteEntry::Inputs);
         sources
             .library
@@ -232,8 +232,8 @@ impl<'a> NodePalette<'a> {
             .chain(
                 sources
                     .graphs
-                    .subgraphs()
-                    .filter_map(move |(id, _)| PaletteRow::Subgraph(id).entry(sources)),
+                    .compounds()
+                    .filter_map(move |(id, _)| PaletteRow::Compound(id).entry(sources)),
             )
             .chain(
                 sources
@@ -369,10 +369,10 @@ impl NodePalette<'_> {
     /// `AddNode`, seeded with the entry's port defaults. Built only on a pick.
     pub(super) fn add(&self, entry: PaletteEntry<'_>) -> PalettePick {
         let node_id = NodeId::unique();
-        let Placed { subgraphs, node } =
+        let Placed { compounds, node } =
             entry.placed(self.graph_ctx.document(), self.graph_ctx.library());
         PalettePick {
-            subgraphs,
+            compounds,
             add: GraphIntent::AddNode {
                 pos: self.pos,
                 node_id,

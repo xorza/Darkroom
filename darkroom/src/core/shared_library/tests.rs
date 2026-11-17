@@ -1,36 +1,35 @@
 use common::{TempDir, fs};
 use scenarium::{
-    Binding, ConstValue, DataType, GhostBinding, GhostSource, GraphSet, InputDecl, InputPort,
-    Interface, Library, Node, Numbered, PortId, Ports, SavedPort, Subgraph, SubgraphDigest,
-    SubgraphId,
+    Binding, Compound, CompoundDigest, CompoundId, ConstValue, DataType, GhostBinding, GhostSource,
+    GraphSet, InputDecl, InputPort, Interface, Library, Node, Numbered, PortId, Ports, SavedPort,
 };
 
 use crate::core::document::Document;
 use crate::core::document::graph_view::NodePlacement;
-use crate::core::document::internals::{DocumentFixture, insert_subgraph};
+use crate::core::document::internals::{DocumentFixture, insert_compound};
+use crate::core::edit::compound_intent::{CompoundIntent, Update};
 use crate::core::edit::document_queue::DocumentQueue;
-use crate::core::edit::subgraph_intent::{SubgraphIntent, Update};
 use crate::core::io::document;
 use crate::core::io::document::saved_paths::SavedPaths;
 use crate::core::open_document::OpenDocument;
 use crate::core::shared_library::{SyncState, published, scan};
 
-/// A document sharing `subgraph` under `id`, or holding it unshared.
-fn library_file(id: SubgraphId, subgraph: Subgraph, shared: bool) -> Document {
+/// A document sharing `compound` under `id`, or holding it unshared.
+fn library_file(id: CompoundId, compound: Compound, shared: bool) -> Document {
     let mut fixture = DocumentFixture::default();
-    insert_subgraph(&mut fixture.document, id, subgraph);
+    insert_compound(&mut fixture.document, id, compound);
     fixture.document.sides.get_mut(&id).unwrap().shared = shared;
     fixture.document
 }
 
-/// A scan lists each subgraph a file shares and not one it holds unshared; an id two files share
+/// A scan lists each compound a file shares and not one it holds unshared; an id two files share
 /// with equal digests is one entry, and with differing ones one per file; a file that does not
 /// load is listed with its error, and the others still load.
 #[test]
 fn a_scan_lists_each_shared_definition_once_per_digest() {
     let dir = TempDir::new("darkroom-library-scan");
-    let [id, hidden] = [1, 2].map(SubgraphId::from_u128);
-    let denoise = Subgraph::new("Denoise", Interface::default());
+    let [id, hidden] = [1, 2].map(CompoundId::from_u128);
+    let denoise = Compound::new("Denoise", Interface::default());
     let mut changed = denoise.clone();
     changed.name = "Denoise, changed".to_string();
     let files = [
@@ -39,7 +38,7 @@ fn a_scan_lists_each_shared_definition_once_per_digest() {
         ("c.darkroomz", library_file(id, changed, true)),
         (
             "d.darkroom",
-            library_file(hidden, Subgraph::new("Hidden", Interface::default()), false),
+            library_file(hidden, Compound::new("Hidden", Interface::default()), false),
         ),
     ];
     for (name, held) in &files {
@@ -55,7 +54,7 @@ fn a_scan_lists_each_shared_definition_once_per_digest() {
     fs::write(dir.join("notes.txt"), b"ignored").unwrap();
 
     let library = scan(dir.path());
-    let listed: Vec<(SubgraphId, &str, String)> = library
+    let listed: Vec<(CompoundId, &str, String)> = library
         .entries()
         .iter()
         .map(|entry| {
@@ -108,13 +107,13 @@ fn a_scan_lists_each_shared_definition_once_per_digest() {
 fn a_copys_standing_reads_off_three_digests() {
     let digest = |name: &str| {
         let mut graphs = GraphSet::default();
-        graphs.insert_subgraph(
-            SubgraphId::from_u128(1),
-            Subgraph::new(name, Interface::default()),
+        graphs.insert_compound(
+            CompoundId::from_u128(1),
+            Compound::new(name, Interface::default()),
         );
-        graphs.digest(SubgraphId::from_u128(1))
+        graphs.digest(CompoundId::from_u128(1))
     };
-    let [old, ours, theirs]: [SubgraphDigest; 3] = ["old", "ours", "theirs"].map(digest);
+    let [old, ours, theirs]: [CompoundDigest; 3] = ["old", "ours", "theirs"].map(digest);
     let cases = [
         (Some(old), old, old, SyncState::InSync),
         (Some(old), old, theirs, SyncState::UpdateAvailable),
@@ -157,8 +156,8 @@ fn inputs(ids: &[u32]) -> Interface {
 #[test]
 fn an_update_takes_the_librarys_definition_and_a_publish_gives_ours() {
     let dir = TempDir::new("darkroom-library-update");
-    let id = SubgraphId::from_u128(1);
-    let original = Subgraph::new("Denoise", inputs(&[1, 2]));
+    let id = CompoundId::from_u128(1);
+    let original = Compound::new("Denoise", inputs(&[1, 2]));
     let mut theirs = original.clone();
     theirs.name = "Denoise, theirs".to_string();
     theirs.interface = inputs(&[2]);
@@ -174,7 +173,7 @@ fn an_update_takes_the_librarys_definition_and_a_publish_gives_ours() {
     let entry = shared.entry(id).unwrap().clone();
 
     let mut fixture = DocumentFixture::default();
-    insert_subgraph(&mut fixture.document, id, original);
+    insert_compound(&mut fixture.document, id, original);
     let instance = fixture.add_instance(id);
     let port = InputPort::new(instance, PortId::new(1));
     fixture
@@ -196,7 +195,7 @@ fn an_update_takes_the_librarys_definition_and_a_publish_gives_ours() {
     assert_eq!(local_state, SyncState::UpdateAvailable);
 
     let mut queue = DocumentQueue::default();
-    queue.push_subgraph(SubgraphIntent::Update(Box::new(Update {
+    queue.push_compound(CompoundIntent::Update(Box::new(Update {
         id,
         carried: shared.carried(&entry),
         manifest: shared.manifest(&entry).clone(),
@@ -204,7 +203,7 @@ fn an_update_takes_the_librarys_definition_and_a_publish_gives_ours() {
     let facts = open.drain_requests(&mut queue, &library);
     assert_eq!((facts.dropped, facts.ghosted), (0, 1));
     let updated = open.document();
-    assert_eq!(updated.graphs.subgraph(id), Some(&theirs));
+    assert_eq!(updated.graphs.compound(id), Some(&theirs));
     assert!(!updated.graphs.main().bindings.contains_key(&port));
     assert_eq!(
         updated.graphs.main().ghost_wiring().binding(port),
@@ -236,10 +235,10 @@ fn an_update_takes_the_librarys_definition_and_a_publish_gives_ours() {
         .bindings
         .insert(held_port, Binding::Const(ConstValue::Int(9)));
     let mut ours = before;
-    let mut changed = ours.graphs.subgraph(id).unwrap().clone();
+    let mut changed = ours.graphs.compound(id).unwrap().clone();
     changed.name = "Denoise, ours".to_string();
     changed.interface = inputs(&[1]);
-    ours.graphs.put_subgraph(id, changed.clone());
+    ours.graphs.put_compound(id, changed.clone());
     let written = published(
         &file_with_instance,
         shared.manifest(&entry),
@@ -247,7 +246,7 @@ fn an_update_takes_the_librarys_definition_and_a_publish_gives_ours() {
         id,
         &library,
     );
-    assert_eq!(written.graphs.subgraph(id), Some(&changed));
+    assert_eq!(written.graphs.compound(id), Some(&changed));
     assert!(written.sides[&id].shared);
     assert_eq!(written.sides[&id].synced, Some(ours.graphs.digest(id)));
     assert!(
@@ -265,8 +264,8 @@ fn an_update_keeps_a_node_this_library_lacks_as_a_ghost_node() {
     use scenarium::{DetachReason, FuncId, OutputDecl, Unresolved, internals};
 
     let dir = TempDir::new("darkroom-library-update-lacking");
-    let id = SubgraphId::from_u128(1);
-    let original = Subgraph::new("Denoise", Interface::default());
+    let id = CompoundId::from_u128(1);
+    let original = Compound::new("Denoise", Interface::default());
     let theirs_only = internals::stub_func(FuncId::unique(), "sharpen")
         .output(1, OutputDecl::new("out", DataType::Int))
         .build();
@@ -293,18 +292,18 @@ fn an_update_keeps_a_node_this_library_lacks_as_a_ghost_node() {
     );
 
     let mut fixture = DocumentFixture::default();
-    insert_subgraph(&mut fixture.document, id, original);
+    insert_compound(&mut fixture.document, id, original);
     let DocumentFixture { document, library } = fixture;
     let mut open = OpenDocument::over(document);
     let mut queue = DocumentQueue::default();
-    queue.push_subgraph(SubgraphIntent::Update(Box::new(Update {
+    queue.push_compound(CompoundIntent::Update(Box::new(Update {
         id,
         carried: shared.carried(&entry),
         manifest: shared.manifest(&entry).clone(),
     })));
     let _ = open.drain_requests(&mut queue, &library);
     let updated = open.document();
-    let held = &updated.graphs.subgraph(id).unwrap().graph;
+    let held = &updated.graphs.compound(id).unwrap().graph;
     assert!(held.find(inside).is_none());
     let ghost = held.ghost_node(inside).expect("the node is kept");
     assert_eq!(
@@ -319,34 +318,34 @@ fn an_update_keeps_a_node_this_library_lacks_as_a_ghost_node() {
     updated.graphs.validate_with(&library).unwrap();
 }
 
-/// A library file is read as written, with no reconcile: a shared subgraph placing one that has
+/// A library file is read as written, with no reconcile: a shared compound placing one that has
 /// no side lists the shared one alone, and placing it copies both in, the sideless one laid out
 /// in a row.
 #[test]
-fn a_subgraph_with_no_side_in_a_library_file_is_carried_in_a_row() {
+fn a_compound_with_no_side_in_a_library_file_is_carried_in_a_row() {
     use crate::core::document::graph_view::GraphView;
 
     let dir = TempDir::new("darkroom-library-sideless");
-    let [outer, inner] = [1, 2].map(SubgraphId::from_u128);
-    let mut file = library_file(inner, Subgraph::new("Inner", Interface::default()), false);
-    let mut enclosing = Subgraph::new("Outer", Interface::default());
+    let [outer, inner] = [1, 2].map(CompoundId::from_u128);
+    let mut file = library_file(inner, Compound::new("Inner", Interface::default()), false);
+    let mut enclosing = Compound::new("Outer", Interface::default());
     enclosing.graph.add(Node::instance(inner));
-    insert_subgraph(&mut file, outer, enclosing);
+    insert_compound(&mut file, outer, enclosing);
     file.sides.get_mut(&outer).unwrap().shared = true;
     file.sides.remove(&inner);
-    // Written by hand, as a save refuses a document with a subgraph and no side.
+    // Written by hand, as a save refuses a document with a compound and no side.
     document::internals::write_unchecked(&file, &dir.join("a.darkroom"));
 
     let library = scan(dir.path());
-    let ids: Vec<SubgraphId> = library.entries().iter().map(|entry| entry.id).collect();
+    let ids: Vec<CompoundId> = library.entries().iter().map(|entry| entry.id).collect();
     assert_eq!(ids, [outer]);
     let carried = library.carried(&library.entries()[0]);
-    let order: Vec<SubgraphId> = carried.iter().map(|definition| definition.id).collect();
+    let order: Vec<CompoundId> = carried.iter().map(|definition| definition.id).collect();
     assert_eq!(order, [inner, outer], "each after those it places");
     assert_eq!(
         carried[0].view,
-        GraphView::new(&carried[0].subgraph.graph),
-        "a subgraph with no side shows in a row"
+        GraphView::new(&carried[0].compound.graph),
+        "a compound with no side shows in a row"
     );
 }
 
@@ -358,21 +357,21 @@ fn a_subgraph_with_no_side_in_a_library_file_is_carried_in_a_row() {
 fn a_followed_copy_is_read_only_and_a_scan_updates_it() {
     use scenarium::{GraphId, Node};
 
+    use crate::core::document::compound_side::ReadOnly;
     use crate::core::document::item_id::ItemId;
-    use crate::core::document::subgraph_side::ReadOnly;
     use crate::core::edit::bring_in::bring_in;
     use crate::core::edit::collapse::{CollapseRefusal, collapse};
     use crate::core::edit::error::{EditRefusal, IntentError};
     use crate::core::edit::graph_intent::GraphIntent;
 
     let dir = TempDir::new("darkroom-library-follow");
-    let [followed, still, mine] = [1, 2, 3].map(SubgraphId::from_u128);
-    let original = Subgraph::new("Denoise", inputs(&[1]));
+    let [followed, still, mine] = [1, 2, 3].map(CompoundId::from_u128);
+    let original = Compound::new("Denoise", inputs(&[1]));
     let mut theirs = original.clone();
     theirs.name = "Denoise, theirs".to_string();
     let mut file = library_file(followed, theirs.clone(), true);
     for id in [still, mine] {
-        insert_subgraph(&mut file, id, theirs.clone());
+        insert_compound(&mut file, id, theirs.clone());
         file.sides.get_mut(&id).unwrap().shared = true;
     }
     file.sides.get_mut(&still).unwrap().locked = true;
@@ -387,7 +386,7 @@ fn a_followed_copy_is_read_only_and_a_scan_updates_it() {
 
     let mut fixture = DocumentFixture::default();
     for id in [followed, still, mine] {
-        insert_subgraph(&mut fixture.document, id, original.clone());
+        insert_compound(&mut fixture.document, id, original.clone());
         let synced = fixture.document.graphs.digest(id);
         let side = fixture.document.sides.get_mut(&id).unwrap();
         side.synced = Some(synced);
@@ -397,7 +396,7 @@ fn a_followed_copy_is_read_only_and_a_scan_updates_it() {
     fixture
         .document
         .graphs
-        .graph_mut(GraphId::Subgraph(mine))
+        .graph_mut(GraphId::Compound(mine))
         .add(Node::from(scenarium::Boundary::Inputs));
     let DocumentFixture {
         mut document,
@@ -413,7 +412,7 @@ fn a_followed_copy_is_read_only_and_a_scan_updates_it() {
     let commit = |document: &mut Document, graph, intent: GraphIntent| {
         intent.commit(document, graph, &library, &mut Vec::new())
     };
-    let inside = GraphId::Subgraph(followed);
+    let inside = GraphId::Compound(followed);
     let add = GraphIntent::add_node(
         glam::Vec2::ZERO,
         scenarium::NodeId::unique(),
@@ -425,7 +424,7 @@ fn a_followed_copy_is_read_only_and_a_scan_updates_it() {
             why: ReadOnly::Follows
         }))
     );
-    // Every planner that adds a subgraph beside its edits of the graph refuses up front, so no
+    // Every planner that adds a compound beside its edits of the graph refuses up front, so no
     // copy is left behind by edits the gate refuses.
     let selection = [ItemId::Node(original.inputs_node())].into_iter().collect();
     assert!(matches!(
@@ -439,7 +438,7 @@ fn a_followed_copy_is_read_only_and_a_scan_updates_it() {
     };
     commit(&mut document, inside, select).unwrap();
     let mut steps = Vec::new();
-    SubgraphIntent::SetFollows {
+    CompoundIntent::SetFollows {
         id: followed,
         follows: false,
     }
@@ -447,14 +446,14 @@ fn a_followed_copy_is_read_only_and_a_scan_updates_it() {
     .unwrap();
     commit(&mut document, inside, add).unwrap();
 
-    SubgraphIntent::SetLocked {
+    CompoundIntent::SetLocked {
         id: followed,
         locked: true,
     }
     .commit(&mut document, &library, &mut steps)
     .unwrap();
     assert_eq!(
-        SubgraphIntent::Rename {
+        CompoundIntent::Rename {
             id: followed,
             to: "Mine".to_string(),
         }
@@ -472,7 +471,7 @@ fn a_followed_copy_is_read_only_and_a_scan_updates_it() {
         shared.manifest(entry),
     );
     assert!(
-        placed.subgraphs.iter().all(|new| new.side.locked),
+        placed.compounds.iter().all(|new| new.side.locked),
         "the author's lock travels with the copy"
     );
 }

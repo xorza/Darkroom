@@ -213,11 +213,11 @@ fn scan_event_target(ui: &mut Ui, ctx: CanvasCtx<'_>, subscriber: NodeId) -> Opt
 mod tests {
     use palantir::PointerButton;
     use scenarium::{
-        EventDecl, EventPort, EventPorts, GraphId, Interface, PortId, Subgraph, SubgraphId,
+        Compound, CompoundId, EventDecl, EventPort, EventPorts, GraphId, Interface, PortId,
         Subscription, TriggerPort,
     };
 
-    use crate::core::document::internals::{DocumentFixture, insert_subgraph};
+    use crate::core::document::internals::{DocumentFixture, insert_compound};
     use crate::core::edit::graph_intent::GraphIntent;
     use crate::gui::pane::graph_ui::internals::CanvasHarness;
     use crate::gui::pane::graph_ui::wid;
@@ -229,14 +229,14 @@ mod tests {
     fn an_event_wire_lands_on_an_instances_trigger() {
         let mut fixture = DocumentFixture::probes(0);
         let emitter = fixture.node_at(glam::Vec2::new(40.0, 40.0));
-        let id = SubgraphId::from_u128(1);
+        let id = CompoundId::from_u128(1);
         let interface = Interface::default()
             .with_event_ports(EventPorts {
                 events: vec![],
                 trigger: Some(EventDecl::new("go")),
             })
             .unwrap();
-        insert_subgraph(&mut fixture.document, id, Subgraph::new("relay", interface));
+        insert_compound(&mut fixture.document, id, Compound::new("relay", interface));
         let instance = fixture.add_instance(id);
         let mut h = CanvasHarness::new(fixture);
         h.prime(2);

@@ -182,19 +182,19 @@ fn name_matches_is_case_insensitive_substring_with_empty_query_wildcard() {
     assert!(name_matches("ΜΕΓΑΛΟΣ ΔΡΟΜΟΣ", "λοσ δρ"));
 }
 
-/// The document's subgraphs list under their own category, by name, and one no node places says
+/// The document's compounds list under their own category, by name, and one no node places says
 /// it is unused.
 #[test]
-fn the_documents_subgraphs_list_and_an_unused_one_is_marked() {
-    use scenarium::{GraphId, Interface, Node, Subgraph, SubgraphId};
+fn the_documents_compounds_list_and_an_unused_one_is_marked() {
+    use scenarium::{Compound, CompoundId, GraphId, Interface, Node};
 
     use crate::gui::pane::graph_ui::gesture::new_node_ui::palette_rows::PaletteRow;
 
     let library = library();
     let mut graphs = GraphSet::default();
-    let [used, unused] = [1, 2].map(SubgraphId::from_u128);
-    graphs.insert_subgraph(used, Subgraph::new("Denoise", Interface::default()));
-    graphs.insert_subgraph(unused, Subgraph::new("Calibrate", Interface::default()));
+    let [used, unused] = [1, 2].map(CompoundId::from_u128);
+    graphs.insert_compound(used, Compound::new("Denoise", Interface::default()));
+    graphs.insert_compound(unused, Compound::new("Calibrate", Interface::default()));
     let instance = Node::instance(used);
     graphs.graph_mut(GraphId::Main).add(instance);
     let shared = SharedLibrary::default();
@@ -205,7 +205,7 @@ fn the_documents_subgraphs_list_and_an_unused_one_is_marked() {
     };
     let entries = [used, unused]
         .into_iter()
-        .filter_map(|id| PaletteRow::Subgraph(id).entry(sources));
+        .filter_map(|id| PaletteRow::Compound(id).entry(sources));
     let mut rows = PaletteRows::default();
     rows.refilter(sources, entries, "");
     let listed: Vec<(String, String, Option<String>)> = rows
@@ -223,11 +223,11 @@ fn the_documents_subgraphs_list_and_an_unused_one_is_marked() {
         listed,
         [
             (
-                "Subgraphs".to_owned(),
+                "Compounds".to_owned(),
                 "Calibrate".to_owned(),
                 Some("Unused: no node places it".to_owned())
             ),
-            ("Subgraphs".to_owned(), "Denoise".to_owned(), None),
+            ("Compounds".to_owned(), "Denoise".to_owned(), None),
         ]
     );
 }

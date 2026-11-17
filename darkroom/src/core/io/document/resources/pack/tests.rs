@@ -1,16 +1,16 @@
 use common::{TempDir, fs};
 use scenarium::{
-    Binding, ConstValue, DataType, FileKindId, FileMode, FuncId, GraphId, InputDecl, InputPort,
-    Interface, Node, PortId, Subgraph, SubgraphId, internals,
+    Binding, Compound, CompoundId, ConstValue, DataType, FileKindId, FileMode, FuncId, GraphId,
+    InputDecl, InputPort, Interface, Node, PortId, internals,
 };
 
-use crate::core::document::internals::{DocumentFixture, insert_subgraph};
+use crate::core::document::internals::{DocumentFixture, insert_compound};
 use crate::core::io::document::resources::pack::{PackedInput, pack};
 
 /// A node reading one file on input 1 and several on 2, writing one on 3, and reading a folder on
 /// 4: a pack copies `a.png` and `b.png` once each into `<digest>/<name>`, read-only, and names the
 /// copies on the two reading inputs alone, `a.png`'s twice-named copy once, and none in a locked
-/// subgraph; a second pack finds every file in the folder and changes nothing.
+/// compound; a second pack finds every file in the folder and changes nothing.
 #[test]
 fn a_pack_copies_each_file_an_input_reads_once_and_names_the_copies() {
     let dir = TempDir::new("darkroom-pack");
@@ -46,15 +46,15 @@ fn a_pack_copies_each_file_an_input_reads_once_and_names_the_copies() {
         port(4),
         Binding::Const(ConstValue::FsPath(dir.path().to_str().unwrap().to_owned())),
     );
-    // A locked subgraph reading `b.png` too, which takes no edit, so the pack leaves it.
-    let locked = SubgraphId::from_u128(9);
-    let mut inner = Subgraph::new("locked", Interface::default());
+    // A locked compound reading `b.png` too, which takes no edit, so the pack leaves it.
+    let locked = CompoundId::from_u128(9);
+    let mut inner = Compound::new("locked", Interface::default());
     let inner_node = inner.graph.add(Node::from(&reader));
     inner.graph.set_input_binding(
         InputPort::new(inner_node, PortId::new(1)),
         Binding::Const(ConstValue::FsPath(b)),
     );
-    insert_subgraph(&mut fixture.document, locked, inner);
+    insert_compound(&mut fixture.document, locked, inner);
     fixture.document.sides.get_mut(&locked).unwrap().locked = true;
     let root = dir.path().join("doc.darkroom-resources");
 

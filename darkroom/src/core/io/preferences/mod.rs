@@ -48,7 +48,7 @@ pub(crate) struct Preferences {
     pub(crate) viewer: ViewerPreferences,
     /// Default ONNX model paths copied into newly-authored ML node inputs.
     pub(crate) ml_models: MlModelPaths,
-    /// The folder whose documents' shared subgraphs the palette lists. `None` lists none.
+    /// The folder whose documents' shared compounds the palette lists. `None` lists none.
     pub(crate) library_folder: Option<PathBuf>,
 }
 

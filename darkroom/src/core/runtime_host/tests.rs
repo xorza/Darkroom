@@ -3,8 +3,8 @@ use std::path::Path;
 use common::{TempDir, fs};
 use lens::MlModelPaths;
 use scenarium::{
-    CacheMode, ConstValue, GraphId, GraphSet, InstancePath, Interface, Node, NodeAddr, NodeId,
-    ProgramId, Subgraph, SubgraphId,
+    CacheMode, Compound, CompoundId, ConstValue, GraphId, GraphSet, InstancePath, Interface, Node,
+    NodeAddr, NodeId, ProgramId,
 };
 
 use crate::core::io::cache;
@@ -22,7 +22,7 @@ fn ml_model_default(host: &RuntimeHost, func: &str) -> Option<ConstValue> {
 
 /// An eviction reaches the seed's consumer cone in the program it installs —
 /// here the seed alone, as nothing reads it — and nothing for a node the
-/// program holds no work for. A node inside a subgraph is evicted in every
+/// program holds no work for. A node inside a compound is evicted in every
 /// instance of it, as its cache mode is the authored node's.
 #[test]
 fn an_eviction_reaches_the_seed_cone_of_the_installed_program() {
@@ -34,13 +34,13 @@ fn an_eviction_reaches_the_seed_cone_of_the_installed_program() {
         .expect("built-in present");
     let mut graphs = GraphSet::default();
     let node = graphs.main_mut().add_func_node(func);
-    let subgraph = SubgraphId::unique();
-    let mut inner = Subgraph::new("inner", Interface::default());
+    let compound = CompoundId::unique();
+    let mut inner = Compound::new("inner", Interface::default());
     let inside = inner.graph.add_func_node(func);
-    graphs.insert_subgraph(subgraph, inner);
+    graphs.insert_compound(compound, inner);
     let instances = [NodeId::unique(), NodeId::unique()];
     for instance in instances {
-        let placed = Node::instance(subgraph);
+        let placed = Node::instance(compound);
         graphs.main_mut().insert(instance, placed);
     }
 
@@ -53,7 +53,7 @@ fn an_eviction_reaches_the_seed_cone_of_the_installed_program() {
     let mut each_instance = instances.map(|instance| InstancePath::new(&[instance]).node(inside));
     each_instance.sort_unstable();
     assert_eq!(
-        host.evict_cache(&graphs, NodeAddr::new(GraphId::Subgraph(subgraph), inside)),
+        host.evict_cache(&graphs, NodeAddr::new(GraphId::Compound(compound), inside)),
         Ok(each_instance.to_vec())
     );
     let gone = NodeId::unique();

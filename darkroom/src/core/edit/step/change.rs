@@ -54,7 +54,7 @@ impl Direction {
     }
 }
 
-/// Which way a step that moves a whole entry, a node or a subgraph, moves it when it applies:
+/// Which way a step that moves a whole entry, a node or a compound, moves it when it applies:
 /// adding one and removing one are the same edit in opposite directions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum EntryEdit {

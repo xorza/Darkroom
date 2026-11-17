@@ -113,7 +113,7 @@ impl<'a> GraphCtx<'a> {
     }
 
     /// The instance whose run results this pane shows: the main graph's own path, or the one a
-    /// subgraph's side names; `None` for a subgraph shown through none, whose nodes show no run.
+    /// compound's side names; `None` for a compound shown through none, whose nodes show no run.
     pub(crate) const fn through(self) -> Option<InstancePath> {
         self.through.copied()
     }
@@ -164,14 +164,14 @@ impl<'a> GraphCtx<'a> {
         self.doc.run_state()
     }
 
-    /// The library folder's shared subgraphs, as the last scan read them.
+    /// The library folder's shared compounds, as the last scan read them.
     pub(crate) const fn shared(self) -> &'a SharedLibrary {
         self.doc.shared()
     }
 
     /// The color a port of `data_type` paints at rest, and the wires touching it: its type's hue
     /// ([`Theme::port_color`]), or the neutral untyped color for a type the library does not
-    /// register, which a subgraph's interface keeps as written.
+    /// register, which a compound's interface keeps as written.
     pub(crate) fn port_color(self, data_type: DataType) -> RgbaF32 {
         let theme = self.theme();
         if self.library().knows(data_type) {

@@ -4,6 +4,7 @@
 
 pub(crate) mod bring_in;
 pub(crate) mod collapse;
+pub(crate) mod compound_intent;
 pub(crate) mod document_queue;
 pub(crate) mod document_request;
 pub(crate) mod edit_facts;
@@ -15,7 +16,6 @@ pub(crate) mod make_unique;
 pub(crate) mod port_edit;
 pub(crate) mod replace_plan;
 pub(crate) mod step;
-pub(crate) mod subgraph_intent;
 pub(crate) mod undo_history;
 mod unwired;
 mod validate;

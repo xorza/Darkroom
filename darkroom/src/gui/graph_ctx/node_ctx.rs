@@ -2,9 +2,9 @@
 
 use glam::Vec2;
 use scenarium::{
-    CacheMode, DetachReason, EventDecl, EventPort, EventRef, Func, GhostNode, GhostSource,
-    GhostWiring, GraphId, InputPort, Node, NodeAddr, NodeDecl, NodeEvents, NodeId, NodeTriggers,
-    Numbered, PortId, ProgramId, RamUsage, SavedDecl, SubgraphId, TriggerPort, Unresolved,
+    CacheMode, CompoundId, DetachReason, EventDecl, EventPort, EventRef, Func, GhostNode,
+    GhostSource, GhostWiring, GraphId, InputPort, Node, NodeAddr, NodeDecl, NodeEvents, NodeId,
+    NodeTriggers, Numbered, PortId, ProgramId, RamUsage, SavedDecl, TriggerPort, Unresolved,
 };
 
 use crate::core::document;
@@ -44,7 +44,7 @@ pub(crate) struct NodeCtx<'a> {
     /// The ghost node this is, for what it declared when the load took it out.
     ghost_node: Option<&'a GhostNode>,
     /// What a graph node declares — a library func, a special node's hardcoded spec, or a
-    /// subgraph's face — or why the load kept a ghost node. A ghost node keeps the user's work while its
+    /// compound's face — or why the load kept a ghost node. A ghost node keeps the user's work while its
     /// graph cannot hold the node: it declares no ports, and the user can still select, move and
     /// delete it.
     declaration: Result<NodeDecl<'a>, DetachReason>,
@@ -97,7 +97,7 @@ impl<'a> NodeCtx<'a> {
         };
         let run_state = graph_ctx.run_state();
         let program_id = program_id(graph_ctx, node_id, node);
-        let run = match (program_id, node.subgraph(), graph_ctx.through()) {
+        let run = match (program_id, node.compound(), graph_ctx.through()) {
             (Some(id), _, _) => run_state.node(id).map_or(RunView::None, RunView::Node),
             // An instance shows what the nodes inside it came to.
             (None, Some(_), Some(path)) => run_state
@@ -145,7 +145,7 @@ impl<'a> NodeCtx<'a> {
         self.graph_ctx.theme()
     }
 
-    /// The node's title ([`document::title`]): its name, or an unnamed instance's subgraph's;
+    /// The node's title ([`document::title`]): its name, or an unnamed instance's compound's;
     /// empty for any other node that carries none.
     pub(crate) fn name(self) -> &'a str {
         document::title(self.node, self.graph_ctx.scope())
@@ -157,10 +157,10 @@ impl<'a> NodeCtx<'a> {
         match self.declaration {
             Ok(decl) => decl.name(),
             Err(DetachReason::Unresolved(Unresolved::MissingFunc)) => "missing func",
-            Err(DetachReason::Unresolved(Unresolved::MissingSubgraph)) => "missing subgraph",
-            Err(DetachReason::Unresolved(Unresolved::NoInterface)) => "boundary outside a subgraph",
+            Err(DetachReason::Unresolved(Unresolved::MissingCompound)) => "missing compound",
+            Err(DetachReason::Unresolved(Unresolved::NoInterface)) => "boundary outside a compound",
             Err(DetachReason::ExtraOutputs) => "extra Outputs node",
-            Err(DetachReason::Recursive) => "subgraph inside itself",
+            Err(DetachReason::Recursive) => "compound inside itself",
             Err(DetachReason::TooDeep) => "nested too deep",
             Err(DetachReason::TooLarge) => "program too large",
         }
@@ -396,18 +396,18 @@ impl<'a> NodeCtx<'a> {
         self.sink()
     }
 
-    /// The subgraph whose interface this node shows: an instance's, or the subgraph a boundary
+    /// The compound whose interface this node shows: an instance's, or the compound a boundary
     /// node is in; `None` for any other node, and for a ghost node.
-    pub(crate) const fn shows_interface(self) -> Option<SubgraphId> {
+    pub(crate) const fn shows_interface(self) -> Option<CompoundId> {
         if self.ghost() {
             return None;
         }
         match (
-            self.node.subgraph(),
+            self.node.compound(),
             self.node.boundary(),
             self.graph_ctx.graph(),
         ) {
-            (Some(id), _, _) | (None, Some(_), GraphId::Subgraph(id)) => Some(id),
+            (Some(id), _, _) | (None, Some(_), GraphId::Compound(id)) => Some(id),
             _ => None,
         }
     }

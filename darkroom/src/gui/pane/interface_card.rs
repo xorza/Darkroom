@@ -1,9 +1,9 @@
-//! The inspector's interface card: a subgraph's ports, each renamed, retyped, moved, removed
+//! The inspector's interface card: a compound's ports, each renamed, retyped, moved, removed
 //! and, for an input, given a default, from an instance or a boundary node of it.
 //!
 //! - **The interface is edited where its ports show**, beside the node that shows them, as
 //!   Blender edits a node group's sockets in the sidebar of the node that holds the group. Each
-//!   edit is one [`SubgraphIntent::SetInterface`], so it drops the wires the new interface does
+//!   edit is one [`CompoundIntent::SetInterface`], so it drops the wires the new interface does
 //!   not hold, in every graph, as one history entry. Refused: a dialog of its own, a mode to
 //!   enter and leave.
 
@@ -11,10 +11,10 @@ use palantir::WidgetId;
 use palantir::{
     Checkbox, ComboBox, Configure, Panel, SizeSpec, Sizing, Spacing, Text, TextEdit, Ui, VAlign,
 };
-use scenarium::{ConstValue, DataType, EventDecl, GraphSet, Library, Numbered, PortId, SubgraphId};
+use scenarium::{CompoundId, ConstValue, DataType, EventDecl, GraphSet, Library, Numbered, PortId};
 
+use crate::core::edit::compound_intent::CompoundIntent;
 use crate::core::edit::port_edit::{InterfaceSide, PortEdit, Shift};
-use crate::core::edit::subgraph_intent::SubgraphIntent;
 use crate::gui::frame::requests::Requests;
 use crate::gui::pane::graph_ui::node_ui::const_editor::{ConstEditor, Field};
 use crate::gui::theme::Theme;
@@ -31,29 +31,29 @@ const SCALARS: [DataType; 6] = [
     DataType::Dir,
 ];
 
-/// What the interface card shows: one subgraph's interface, and whether the library shares it.
+/// What the interface card shows: one compound's interface, and whether the library shares it.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct InterfaceCard<'a> {
     pub(crate) theme: &'a Theme,
     pub(crate) library: &'a Library,
-    /// The set the subgraph is in, which names a type the library lacks as its file did.
+    /// The set the compound is in, which names a type the library lacks as its file did.
     pub(crate) graphs: &'a GraphSet,
-    pub(crate) subgraph: SubgraphId,
+    pub(crate) compound: CompoundId,
     pub(crate) shared: bool,
 }
 
-/// Record the interface card, raising the edits a frame's input makes of its subgraph.
+/// Record the interface card, raising the edits a frame's input makes of its compound.
 pub(crate) fn show(ui: &mut Ui, card: InterfaceCard<'_>, out: &mut Requests) {
     let InterfaceCard {
         theme,
         library,
         graphs,
-        subgraph,
+        compound,
         shared,
     } = card;
     let interface = &graphs
-        .subgraph(subgraph)
-        .expect("a card shows a subgraph the set holds")
+        .compound(compound)
+        .expect("a card shows a compound the set holds")
         .interface;
     let mut edit = None;
     // The choices a port's type picks among: the scalars, then the library's types by name.
@@ -79,8 +79,8 @@ pub(crate) fn show(ui: &mut Ui, card: InterfaceCard<'_>, out: &mut Requests) {
                 .show(ui)
                 .changed
             {
-                out.push_subgraph(SubgraphIntent::SetShared {
-                    id: subgraph,
+                out.push_compound(CompoundIntent::SetShared {
+                    id: compound,
                     shared: marked,
                 });
             }
@@ -163,8 +163,8 @@ pub(crate) fn show(ui: &mut Ui, card: InterfaceCard<'_>, out: &mut Requests) {
             }
         });
     if let Some(edit) = edit {
-        out.push_subgraph(SubgraphIntent::SetInterface {
-            id: subgraph,
+        out.push_compound(CompoundIntent::SetInterface {
+            id: compound,
             to: Box::new(edit.apply(interface)),
         });
     }
@@ -414,11 +414,11 @@ fn trigger_wid(part: &'static str) -> WidgetId {
 #[cfg(test)]
 mod tests {
     use scenarium::{
-        DataType, EventDecl, InputDecl, Interface, Numbered, PortId, Ports, Subgraph, SubgraphId,
+        Compound, CompoundId, DataType, EventDecl, InputDecl, Interface, Numbered, PortId, Ports,
     };
 
     use crate::core::document::inspect_target::InspectTarget;
-    use crate::core::document::internals::{DocumentFixture, insert_subgraph};
+    use crate::core::document::internals::{DocumentFixture, insert_compound};
     use crate::core::document::item_id::ItemId;
     use crate::core::document::tab_ref::TabRef;
     use crate::core::edit::graph_intent::GraphIntent;
@@ -426,13 +426,13 @@ mod tests {
     use crate::gui::app::session::internals::SessionHarness;
     use crate::gui::pane::interface_card::{port_wid, trigger_wid};
 
-    /// An instance's inspector shows its subgraph's ports, and a click on a port's removal
+    /// An instance's inspector shows its compound's ports, and a click on a port's removal
     /// takes it out of the interface, as one history entry. The trigger's add gives the
     /// interface its one trigger and goes, and its removal takes it away.
     #[test]
     fn the_inspector_removes_an_interface_port() {
         let mut fixture = DocumentFixture::default();
-        let id = SubgraphId::from_u128(1);
+        let id = CompoundId::from_u128(1);
         let (a, b) = (PortId::new(1), PortId::new(2));
         let interface = Interface::new(Ports {
             inputs: [(a, "a"), (b, "b")]
@@ -440,7 +440,7 @@ mod tests {
                 .into(),
             outputs: vec![],
         });
-        insert_subgraph(&mut fixture.document, id, Subgraph::new("inner", interface));
+        insert_compound(&mut fixture.document, id, Compound::new("inner", interface));
         let instance = fixture.add_instance(id);
         let mut h =
             SessionHarness::new(fixture.with_tab(TabRef::Inspector(InspectTarget::Selection)));
@@ -462,7 +462,7 @@ mod tests {
             .open
             .document()
             .graphs
-            .subgraph(id)
+            .compound(id)
             .unwrap()
             .interface;
         assert_eq!(
@@ -478,7 +478,7 @@ mod tests {
             .open
             .document()
             .graphs
-            .subgraph(id)
+            .compound(id)
             .unwrap()
             .interface;
         assert_eq!(held.inputs().len(), 2);
@@ -488,7 +488,7 @@ mod tests {
                 .open
                 .document()
                 .graphs
-                .subgraph(id)
+                .compound(id)
                 .unwrap()
                 .interface
                 .trigger()

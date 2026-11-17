@@ -169,7 +169,7 @@ impl DarkroomServer {
     #[tool(
         description = format!(
             "The editor as text: the open document, whether it has unsaved edits, whether an \
-             undo is possible, each graph (the main graph first, then each subgraph, the active \
+             undo is possible, each graph (the main graph first, then each compound, the active \
              one marked) with each of its nodes by name with its rect on screen and its \
              selection, the focus, the status line, and the warnings and errors logged since the \
              last call. detailed adds each node's id, ports, bindings and run status, and each \

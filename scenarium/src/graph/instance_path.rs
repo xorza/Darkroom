@@ -203,7 +203,7 @@ mod tests {
     }
 
     /// A path steps in through `child`, out through `parent`, and names a node with `node`:
-    /// `[7, 3]` is the main graph's instance 7, then its subgraph's instance 3.
+    /// `[7, 3]` is the main graph's instance 7, then its compound's instance 3.
     #[test]
     fn a_path_steps_in_and_out_and_names_its_nodes() {
         let main = InstancePath::MAIN;

@@ -203,8 +203,8 @@ One word, one meaning, in the workspace crates; the submodules keep their own.
   *event* is what a node fires, a *trigger* where a node is triggered, a sink's or a triggered
   instance's own at its corner, or the `Outputs` node's, one per interface event. The *emitter*
   fires and the *subscriber* is triggered; the GUI draws a subscription as an *event wire*. As
-  Unity's trigger ports, a subgraph's Input node with a trigger output and its Output node a
-  trigger input
+  Unity's trigger ports, a Unity subgraph's Input node with a trigger output and its Output node
+  a trigger input
   ([nodes](https://docs.unity3d.com/Packages/com.unity.visualscripting@1.9/manual/vs-nodes.html)).
   Refused: pin, which stays keep-in-place, the inspector's Pin and a tie's pinned angle;
   listener, a code term the canvas does not show; "subscription wire" beside "event wire".
@@ -237,20 +237,25 @@ One word, one meaning, in the workspace crates; the submodules keep their own.
   ([Ubuntu units policy](https://wiki.ubuntu.com/UnitsPolicy)).
 - **A run time under 1 µs reads in ns**, and one above 0 that prints as `0ns` reads `<1ns`, so
   time taken never reads as none.
-- **A subgraph is a graph with an interface, held by a document**, and a node of it an
+- **A compound is a graph with an interface, held by a document**, and a node of it an
   *instance*. Its *boundary nodes*, `Inputs` and `Outputs`, show its *interface*, the ports it
-  has. The main graph and the subgraphs are the *graph set*. Refused: "group", which stays free
-  for visual node groups; "function", as a `Func` is a library declaration with a lambda.
-- **A declaration is what a node resolves to**: a func, a subgraph for its instance, or a
-  subgraph for one of its boundary nodes; its *ports* are the inputs and outputs it shows.
-- **A program node is a node of the compiled program**, and an authored node inside a subgraph
+  has. The main graph and the compounds are the *graph set*. As Bifrost's compounds, made from a
+  selection whose outside connections become its ports, exploded back into nodes and published
+  to share
+  ([menu reference](https://help.autodesk.com/cloudhelp/ENU/Bifrost-Common/files/build-a-graph/Bifrost_Common_build_a_graph_menu_reference_html.html)).
+  Refused: "subgraph", which names it a part of another graph, as a library definition placed
+  nowhere is not; "group", which stays free for visual node groups; "function", as a `Func` is a
+  library declaration with a lambda; "macro", a reserved Rust keyword that no variable can take.
+- **A declaration is what a node resolves to**: a func, a compound for its instance, or a
+  compound for one of its boundary nodes; its *ports* are the inputs and outputs it shows.
+- **A program node is a node of the compiled program**, and an authored node inside a compound
   makes one per instance; an *instance path* is the instances from the main graph down to a graph.
 - **A ghost is what a graph keeps and cannot hold**: a *ghost node*, a node its scope refuses;
   a *ghost wire*, *ghost constant* or *ghost subscription*, wiring the scope refuses or that
   touches a ghost node; a *ghost port*, a port such wiring names that its node no longer
   declares. Refused: "stub" for the node, which stays the word for a test double
   (`internals::stub_func`), beside "ghost" for its wiring.
-- **A side is what the editor keeps beside one subgraph**: its view, the instance its pane shows
+- **A side is what the editor keeps beside one compound**: its view, the instance its pane shows
   it through, and its place in the library. The *active graph* is the one the window's commands
   act on; a *fragment* is a set of nodes as Duplicate, Copy, Paste, Collapse and Expand move it.
 - **The library folder holds what documents share**; `Library` stays scenarium's registry of

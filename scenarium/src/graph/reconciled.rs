@@ -10,7 +10,7 @@ use crate::graph::binding::Binding;
 use crate::graph::error::{
     DetachReason, GhostRejection, GhostSubscriptionRejection, SubscriptionRejection,
 };
-use crate::graph::identity::{FuncId, InputPort, NodeId, SubgraphId};
+use crate::graph::identity::{CompoundId, FuncId, InputPort, NodeId};
 use crate::graph::node::Boundary;
 use crate::graph::subscription::Subscription;
 
@@ -32,14 +32,14 @@ impl Reconciled {
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct GraphSetReconciled {
     pub main: Reconciled,
-    /// Only the subgraphs a load changed.
-    pub subgraphs: BTreeMap<SubgraphId, Reconciled>,
+    /// Only the compounds a load changed.
+    pub compounds: BTreeMap<CompoundId, Reconciled>,
 }
 
 impl GraphSetReconciled {
     /// Whether the set was already one the library can run.
     pub fn is_empty(&self) -> bool {
-        self.main.is_empty() && self.subgraphs.is_empty()
+        self.main.is_empty() && self.compounds.is_empty()
     }
 }
 
@@ -99,7 +99,7 @@ pub enum Repair {
         subscription: Subscription,
         rejection: SubscriptionRejection,
     },
-    /// A subgraph's graph lacked the boundary node on one side, which this one now is.
+    /// A compound's graph lacked the boundary node on one side, which this one now is.
     BoundaryAdded { boundary: Boundary, node_id: NodeId },
 }
 

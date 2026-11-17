@@ -494,7 +494,7 @@
                     subscriptions: [],
                 ),
             ),
-            subgraphs: {},
+            compounds: {},
         ),
         main_view: (
             node_placements: {

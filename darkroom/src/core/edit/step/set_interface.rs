@@ -1,9 +1,9 @@
-//! [`SetInterface`]: an edit of a subgraph's interface, with what it takes out of every view.
+//! [`SetInterface`]: an edit of a compound's interface, with what it takes out of every view.
 
 use std::collections::BTreeMap;
 
 use scenarium::Interface;
-use scenarium::{Binding, ChangeSide, GraphId, InterfaceChange, Library, RefusedFate, SubgraphId};
+use scenarium::{Binding, ChangeSide, CompoundId, GraphId, InterfaceChange, Library, RefusedFate};
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::Document;
@@ -13,7 +13,7 @@ use crate::core::edit::step::change::Direction;
 use crate::core::edit::step::reversible::Reversible;
 use crate::core::edit::step::set_ties::{SetTies, TiesDraft};
 
-/// An edit of one subgraph's interface: scenarium's [`InterfaceChange`], which holds both
+/// An edit of one compound's interface: scenarium's [`InterfaceChange`], which holds both
 /// interfaces and each binding the new one does not hold in any graph, and in each graph's view
 /// the route of each wire it drops and each tie only those wires held. A wire it keeps as a
 /// ghost keeps its route, as it is the same wire.
@@ -31,14 +31,14 @@ struct ViewTies {
 }
 
 impl SetInterface {
-    /// Set subgraph `id`'s interface in `document` to `to`, planned against `library`, what it
+    /// Set compound `id`'s interface in `document` to `to`, planned against `library`, what it
     /// refuses dropped or kept as ghosts as `fate` says.
     ///
     /// # Panics
-    /// If the document holds no subgraph `id`.
+    /// If the document holds no compound `id`.
     pub(crate) fn plan(
         document: &Document,
-        id: SubgraphId,
+        id: CompoundId,
         to: Interface,
         library: &Library,
         fate: RefusedFate,

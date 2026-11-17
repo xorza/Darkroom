@@ -6,14 +6,14 @@ use std::mem;
 
 use common::ErrorChain;
 use palantir::{DockOperation, Ui};
-use scenarium::{GraphId, InstancePath, SubgraphId};
+use scenarium::{CompoundId, GraphId, InstancePath};
 
 use crate::core::document::tab_ref::TabRef;
+use crate::core::edit::compound_intent::CompoundIntent;
 use crate::core::edit::document_queue::DocumentQueue;
 use crate::core::edit::edit_facts::EditFacts;
 use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::graph_intent::GraphIntent;
-use crate::core::edit::subgraph_intent::SubgraphIntent;
 use crate::gui::frame::app_command::AppCommand;
 
 /// A frame's requests, in the order they were raised.
@@ -93,13 +93,13 @@ impl Requests {
     }
 
     /// Queue an edit of the set of graphs.
-    pub(crate) fn push_subgraph(&mut self, intent: SubgraphIntent) {
-        self.document.push_subgraph(intent);
+    pub(crate) fn push_compound(&mut self, intent: CompoundIntent) {
+        self.document.push_compound(intent);
     }
 
-    /// Queue the entry into `subgraph`'s pane, shown through `through`.
-    pub(crate) fn push_enter(&mut self, subgraph: SubgraphId, through: Option<InstancePath>) {
-        self.document.push_enter(subgraph, through);
+    /// Queue the entry into `compound`'s pane, shown through `through`.
+    pub(crate) fn push_enter(&mut self, compound: CompoundId, through: Option<InstancePath>) {
+        self.document.push_enter(compound, through);
     }
 
     /// Queue a side effect for `App` to run after the pass.

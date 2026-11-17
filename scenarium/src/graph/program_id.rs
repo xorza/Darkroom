@@ -28,7 +28,7 @@ use crate::graph::instance_path::InstancePath;
 
 /// The id of a program node: its path, the instances from the main graph down and then the node
 /// itself. Unique by construction, as a node id is unique inside its graph and each instance
-/// expands its subgraph once; the same on every compile; and, ordered element by element, one
+/// expands its compound once; the same on every compile; and, ordered element by element, one
 /// instance's nodes are one run of a sorted program. As ComfyUI's execution id, "a list of all
 /// subgraph node IDs, followed by the actual original node ID"
 /// ([subgraphs](https://docs.comfy.org/custom-nodes/js/subgraphs)).

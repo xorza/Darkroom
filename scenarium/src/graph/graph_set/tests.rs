@@ -8,6 +8,7 @@ use crate::data::data_type::DataType;
 use crate::data::data_type::custom_type::{CustomType, CustomTypeId};
 use crate::data::data_type::enum_type::{EnumId, EnumType};
 use crate::graph::binding::Binding;
+use crate::graph::compound::Compound;
 use crate::graph::error::{
     BindingRejection, DetachReason, GraphValidationError, PlacementRejection,
     SubscriptionRejection, Unresolved,
@@ -16,7 +17,7 @@ use crate::graph::ghost_node::GhostNode;
 use crate::graph::ghost_wiring::{GhostBinding, GhostSource, InputState};
 use crate::graph::graph_set::{GraphSet, InterfacePort, ProgramShape, UnknownType};
 use crate::graph::identity::{
-    EventPort, FuncId, GraphId, InputPort, NodeAddr, NodeId, OutputPort, PortId, SubgraphId,
+    CompoundId, EventPort, FuncId, GraphId, InputPort, NodeAddr, NodeId, OutputPort, PortId,
 };
 use crate::graph::instance_path::InstancePath;
 use crate::graph::interface::Interface;
@@ -28,7 +29,6 @@ use crate::graph::node_decl::NodeDecl;
 use crate::graph::ports::{InputDecl, Numbered, OutputDecl, PortList, Ports};
 use crate::graph::reconciled::{Reconciled, Repair};
 use crate::graph::saved_decl::SavedPort;
-use crate::graph::subgraph::Subgraph;
 use crate::graph::subscription::Subscription;
 use crate::graph::type_names::TypeRef;
 use crate::graph::{Detaching, Graph};
@@ -38,13 +38,13 @@ use crate::internals::test_graph::sets::{
 };
 use crate::library::Library;
 
-/// A subgraph with no ports.
-fn empty(name: &str) -> Subgraph {
-    Subgraph::new(name, Interface::default())
+/// A compound with no ports.
+fn empty(name: &str) -> Compound {
+    Compound::new(name, Interface::default())
 }
 
 /// Put an instance of `placed` into `graph` under `node_id`.
-fn place(set: &mut GraphSet, graph: GraphId, node_id: NodeId, placed: SubgraphId) {
+fn place(set: &mut GraphSet, graph: GraphId, node_id: NodeId, placed: CompoundId) {
     let node = Node::instance(placed);
     set.graph_mut(graph).insert(node_id, node);
 }
@@ -60,40 +60,40 @@ fn ghosted(repairs: &[Repair]) -> Vec<(NodeId, DetachReason)> {
         .collect()
 }
 
-/// Subgraph 1 places 2, and 2 places nothing: a loop closes only by placing 1 inside 2 or
+/// Compound 1 places 2, and 2 places nothing: a loop closes only by placing 1 inside 2 or
 /// itself, and the main graph never closes one.
 #[test]
 fn a_placement_that_closes_a_loop_is_refused() {
     let mut set = GraphSet::default();
-    set.insert_subgraph(s(1), empty("outer"));
-    set.insert_subgraph(s(2), empty("inner"));
-    place(&mut set, GraphId::Subgraph(s(1)), n(10), s(2));
+    set.insert_compound(s(1), empty("outer"));
+    set.insert_compound(s(2), empty("inner"));
+    place(&mut set, GraphId::Compound(s(1)), n(10), s(2));
     let instance = |placed| Node::instance(placed);
     let admit = |graph, placed| set.admit_nodes(graph, [&instance(placed)]);
 
     assert_eq!(
-        admit(GraphId::Subgraph(s(2)), s(1)),
+        admit(GraphId::Compound(s(2)), s(1)),
         Err(PlacementRejection::Recursive)
     );
     assert_eq!(
-        admit(GraphId::Subgraph(s(1)), s(1)),
+        admit(GraphId::Compound(s(1)), s(1)),
         Err(PlacementRejection::Recursive)
     );
     assert_eq!(
-        admit(GraphId::Subgraph(s(2)), s(2)),
+        admit(GraphId::Compound(s(2)), s(2)),
         Err(PlacementRejection::Recursive)
     );
-    assert_eq!(admit(GraphId::Subgraph(s(1)), s(2)), Ok(()));
+    assert_eq!(admit(GraphId::Compound(s(1)), s(2)), Ok(()));
     assert_eq!(admit(GraphId::Main, s(1)), Ok(()));
 
-    // Subgraph 1 places nothing yet, so a walk in id order reaches it before 2: an instance of 2
+    // Compound 1 places nothing yet, so a walk in id order reaches it before 2: an instance of 2
     // added to it is measured all the same.
     let mut apart = GraphSet::default();
-    apart.insert_subgraph(s(1), empty("first"));
-    apart.insert_subgraph(s(2), empty("second"));
+    apart.insert_compound(s(1), empty("first"));
+    apart.insert_compound(s(2), empty("second"));
     let second = Node::instance(s(2));
     assert_eq!(
-        apart.admit_nodes(GraphId::Subgraph(s(1)), [&second]),
+        apart.admit_nodes(GraphId::Compound(s(1)), [&second]),
         Ok(())
     );
 }
@@ -106,13 +106,13 @@ fn a_placement_that_closes_a_loop_is_refused() {
 fn a_loop_is_refused_and_a_load_breaks_it_at_one_instance() {
     let library = library();
     let mut set = GraphSet::default();
-    set.insert_subgraph(s(1), empty("one"));
-    set.insert_subgraph(s(2), empty("two"));
-    place(&mut set, GraphId::Subgraph(s(1)), n(12), s(2));
-    place(&mut set, GraphId::Subgraph(s(2)), n(21), s(1));
+    set.insert_compound(s(1), empty("one"));
+    set.insert_compound(s(2), empty("two"));
+    place(&mut set, GraphId::Compound(s(1)), n(12), s(2));
+    place(&mut set, GraphId::Compound(s(2)), n(21), s(1));
 
     let error = set.validate_with(&library).unwrap_err();
-    assert_eq!(error.graph, GraphId::Subgraph(s(2)));
+    assert_eq!(error.graph, GraphId::Compound(s(2)));
     assert!(matches!(
         error.error,
         GraphValidationError::Recursive { node_id } if node_id == n(21)
@@ -120,21 +120,21 @@ fn a_loop_is_refused_and_a_load_breaks_it_at_one_instance() {
 
     let report = set.reconcile(&library, &Manifest::default());
     assert!(report.main.is_empty());
-    assert_eq!(report.subgraphs.keys().copied().collect::<Vec<_>>(), [s(2)]);
+    assert_eq!(report.compounds.keys().copied().collect::<Vec<_>>(), [s(2)]);
     assert_eq!(
-        report.subgraphs[&s(2)].repairs,
+        report.compounds[&s(2)].repairs,
         [Repair::GhostedNode {
             node_id: n(21),
             reason: DetachReason::Recursive,
         }]
     );
-    let two = set.graph(GraphId::Subgraph(s(2)));
+    let two = set.graph(GraphId::Compound(s(2)));
     assert_eq!(
         two.ghost_node(n(21)).unwrap().reason,
         DetachReason::Recursive
     );
     assert!(two.find(n(21)).is_none());
-    assert!(set.graph(GraphId::Subgraph(s(1))).find(n(12)).is_some());
+    assert!(set.graph(GraphId::Compound(s(1))).find(n(12)).is_some());
     set.validate_with(&library).unwrap();
 
     let reloaded = set.clone();
@@ -142,7 +142,7 @@ fn a_loop_is_refused_and_a_load_breaks_it_at_one_instance() {
     assert_eq!(set, reloaded);
 }
 
-/// A chain of eight subgraphs, each placing the next and the last holding a `src`, nests eight
+/// A chain of eight compounds, each placing the next and the last holding a `src`, nests eight
 /// levels: the last is 1, each one up adds one. The main graph placing the first would nest
 /// nine, past [`ProgramShape::MAX_LEVELS`], so the gate refuses the add and a load keeps that
 /// one instance as a ghost node, keeping the chain itself.
@@ -151,12 +151,12 @@ fn a_ninth_level_is_refused_and_detached() {
     let library = library();
     let mut set = GraphSet::default();
     for id in 1..=8 {
-        set.insert_subgraph(s(id), empty("link"));
+        set.insert_compound(s(id), empty("link"));
     }
     for id in 1..8 {
-        place(&mut set, GraphId::Subgraph(s(id)), n(100 + id), s(id + 1));
+        place(&mut set, GraphId::Compound(s(id)), n(100 + id), s(id + 1));
     }
-    set.graph_mut(GraphId::Subgraph(s(8)))
+    set.graph_mut(GraphId::Compound(s(8)))
         .insert(n(1), node(&library, SRC));
     set.main_mut().insert(n(1), node(&library, SRC));
     let first = Node::instance(s(1));
@@ -183,12 +183,12 @@ fn a_ninth_level_is_refused_and_detached() {
         ghosted(&report.main.repairs),
         [(n(2), DetachReason::TooDeep)]
     );
-    assert!(report.subgraphs.is_empty());
+    assert!(report.compounds.is_empty());
     assert_eq!(set.main().len(), 1);
     set.validate_with(&library).unwrap();
 }
 
-/// 256 `src`s in one subgraph and 256 instances of it in another make 2¹⁶ program nodes, which
+/// 256 `src`s in one compound and 256 instances of it in another make 2¹⁶ program nodes, which
 /// [`ProgramShape::MAX_NODES`] admits; a `src` beside an instance of the second in the main
 /// graph makes one more, which it does not. Nodes are taken in id order, so the `src`, 1, stays
 /// and the instance, 2, goes.
@@ -196,12 +196,12 @@ fn a_ninth_level_is_refused_and_detached() {
 fn a_program_past_the_node_bound_is_refused_and_detached() {
     let library = library();
     let mut set = GraphSet::default();
-    set.insert_subgraph(s(1), empty("wide"));
-    set.insert_subgraph(s(2), empty("wider"));
+    set.insert_compound(s(1), empty("wide"));
+    set.insert_compound(s(2), empty("wider"));
     for id in 0..256 {
-        set.graph_mut(GraphId::Subgraph(s(1)))
+        set.graph_mut(GraphId::Compound(s(1)))
             .insert(n(1000 + id), node(&library, SRC));
-        place(&mut set, GraphId::Subgraph(s(2)), n(1000 + id), s(1));
+        place(&mut set, GraphId::Compound(s(2)), n(1000 + id), s(1));
     }
     set.main_mut().insert(n(1), node(&library, SRC));
     place(&mut set, GraphId::Main, n(2), s(2));
@@ -222,32 +222,32 @@ fn a_program_past_the_node_bound_is_refused_and_detached() {
     set.validate_with(&library).unwrap();
 }
 
-/// An add grows every graph that places the graph it lands in. Subgraph 1 holds 255 `src`s,
-/// subgraph 2 holds 256 instances of it, 255 × 256 = 65 280 program nodes, and the main graph an
+/// An add grows every graph that places the graph it lands in. Compound 1 holds 255 `src`s,
+/// compound 2 holds 256 instances of it, 255 × 256 = 65 280 program nodes, and the main graph an
 /// instance of 2 and 255 `src`s, 65 535. One `src` more inside 2 brings the main graph to
 /// 65 536, the bound, and is admitted; two bring it to 65 537 and are refused, naming the main
 /// graph and its count, though 2 itself stays within the bound.
 #[test]
-fn an_add_inside_a_subgraph_is_held_to_the_bound_of_each_graph_that_places_it() {
+fn an_add_inside_a_compound_is_held_to_the_bound_of_each_graph_that_places_it() {
     let library = library();
     let mut set = GraphSet::default();
-    set.insert_subgraph(s(1), empty("leaves"));
-    set.insert_subgraph(s(2), empty("rows"));
+    set.insert_compound(s(1), empty("leaves"));
+    set.insert_compound(s(2), empty("rows"));
     for id in 0..255 {
-        set.graph_mut(GraphId::Subgraph(s(1)))
+        set.graph_mut(GraphId::Compound(s(1)))
             .insert(n(1000 + id), node(&library, SRC));
         set.main_mut().insert(n(1000 + id), node(&library, SRC));
     }
     for id in 0..256 {
-        place(&mut set, GraphId::Subgraph(s(2)), n(2000 + id), s(1));
+        place(&mut set, GraphId::Compound(s(2)), n(2000 + id), s(1));
     }
     place(&mut set, GraphId::Main, n(1), s(2));
     set.validate_with(&library).unwrap();
 
     let src = node(&library, SRC);
-    assert_eq!(set.admit_nodes(GraphId::Subgraph(s(2)), [&src]), Ok(()));
+    assert_eq!(set.admit_nodes(GraphId::Compound(s(2)), [&src]), Ok(()));
     assert_eq!(
-        set.admit_nodes(GraphId::Subgraph(s(2)), [&src, &src]),
+        set.admit_nodes(GraphId::Compound(s(2)), [&src, &src]),
         Err(PlacementRejection::TooLarge {
             graph: GraphId::Main,
             node_count: ProgramShape::MAX_NODES + 1
@@ -255,17 +255,17 @@ fn an_add_inside_a_subgraph_is_held_to_the_bound_of_each_graph_that_places_it() 
     );
 }
 
-/// A subgraph's graph holds one `Outputs` node and one or more `Inputs` nodes. A load keeps both
+/// A compound's graph holds one `Outputs` node and one or more `Inputs` nodes. A load keeps both
 /// `Inputs` nodes it finds, keeps the lowest id of two `Outputs` nodes and adds an `Inputs` node
 /// where none is; a boundary node in the main graph, which has no interface, is kept as a ghost
 /// node.
 #[test]
 fn a_load_keeps_every_inputs_node_and_one_outputs_node() {
     let library = library();
-    let boundaries = |subgraph: &Subgraph| -> Vec<NodeId> {
-        subgraph.graph.iter().map(|node| node.node_id).collect()
+    let boundaries = |compound: &Compound| -> Vec<NodeId> {
+        compound.graph.iter().map(|node| node.node_id).collect()
     };
-    let mut two_inputs = Subgraph::new("two", Interface::default());
+    let mut two_inputs = Compound::new("two", Interface::default());
     for node_id in boundaries(&two_inputs) {
         two_inputs.graph.detach_node(node_id);
     }
@@ -273,14 +273,14 @@ fn a_load_keeps_every_inputs_node_and_one_outputs_node() {
     two_inputs.graph.insert(n(2), Node::from(Boundary::Inputs));
     two_inputs.graph.insert(n(3), Node::from(Boundary::Outputs));
     two_inputs.graph.insert(n(4), Node::from(Boundary::Outputs));
-    let mut no_inputs = Subgraph::new("none", Interface::default());
+    let mut no_inputs = Compound::new("none", Interface::default());
     no_inputs.graph.detach_node(no_inputs.inputs_node());
     let mut set = GraphSet::default();
-    set.insert_subgraph(s(1), two_inputs);
-    set.insert_subgraph(s(2), no_inputs);
+    set.insert_compound(s(1), two_inputs);
+    set.insert_compound(s(2), no_inputs);
     let check = |set: &GraphSet, id| {
-        set.graph(GraphId::Subgraph(id))
-            .validate_with(set.scope(&library, GraphId::Subgraph(id)))
+        set.graph(GraphId::Compound(id))
+            .validate_with(set.scope(&library, GraphId::Compound(id)))
     };
     assert!(matches!(
         check(&set, s(1)),
@@ -310,22 +310,22 @@ fn a_load_keeps_every_inputs_node_and_one_outputs_node() {
             reason: DetachReason::Unresolved(Unresolved::NoInterface),
         }]
     );
-    let two = set.subgraph(s(1)).unwrap();
+    let two = set.compound(s(1)).unwrap();
     let mut inputs: Vec<NodeId> = two.inputs_nodes().collect();
     inputs.sort_unstable();
     assert_eq!(inputs, [n(1), n(2)]);
     assert_eq!(two.inputs_node(), n(1));
     assert_eq!(two.outputs_node(), n(3));
     assert_eq!(
-        report.subgraphs[&s(1)].repairs,
+        report.compounds[&s(1)].repairs,
         [Repair::GhostedNode {
             node_id: n(4),
             reason: DetachReason::ExtraOutputs,
         }]
     );
-    let added = set.subgraph(s(2)).unwrap().inputs_node();
+    let added = set.compound(s(2)).unwrap().inputs_node();
     assert_eq!(
-        report.subgraphs[&s(2)].repairs,
+        report.compounds[&s(2)].repairs,
         [Repair::BoundaryAdded {
             boundary: Boundary::Inputs,
             node_id: added,
@@ -335,22 +335,22 @@ fn a_load_keeps_every_inputs_node_and_one_outputs_node() {
 }
 
 /// A load attaches each ghost node that resolves again, in any graph, and makes live the ghosts
-/// the graph can hold again; a ghost node saved under a node's id goes. Here, inside subgraph 1,
+/// the graph can hold again; a ghost node saved under a node's id goes. Here, inside compound 1,
 /// the ghost node of `sink` 3 has a ghost wire from `src` 1, which comes back with it; in the
 /// main graph, a ghost node saved under the id of `src` 4 goes and the node stays.
 #[test]
 fn a_load_attaches_each_ghost_node_that_resolves_again_with_its_wiring() {
     let library = library();
-    let mut subgraph = empty("holder");
-    subgraph.graph.insert(n(1), node(&library, SRC));
+    let mut compound = empty("holder");
+    compound.graph.insert(n(1), node(&library, SRC));
     let into_sink = InputPort::new(n(3), PortId::new(1));
     let from_src = Binding::wire(n(1), PortId::new(1));
-    subgraph.graph.insert(n(3), node(&library, SINK));
-    subgraph
+    compound.graph.insert(n(3), node(&library, SINK));
+    compound
         .graph
         .set_input_binding(into_sink, from_src.clone());
-    let attached = subgraph.graph.clone();
-    subgraph.graph.detach_into_ghosts(
+    let attached = compound.graph.clone();
+    compound.graph.detach_into_ghosts(
         vec![Detaching {
             node_id: n(3),
             reason: DetachReason::Unresolved(Unresolved::MissingFunc),
@@ -359,7 +359,7 @@ fn a_load_attaches_each_ghost_node_that_resolves_again_with_its_wiring() {
         &mut Reconciled::default(),
     );
     let mut set = GraphSet::default();
-    set.insert_subgraph(s(1), subgraph);
+    set.insert_compound(s(1), compound);
     set.main_mut().insert(n(4), node(&library, SRC));
     let duplicate = set.main().clone();
     set.main_mut().ghost_nodes.insert(
@@ -378,7 +378,7 @@ fn a_load_attaches_each_ghost_node_that_resolves_again_with_its_wiring() {
     );
     assert_eq!(*set.main(), duplicate);
     assert_eq!(
-        report.subgraphs[&s(1)].repairs,
+        report.compounds[&s(1)].repairs,
         [
             Repair::Reattached { node_id: n(3) },
             Repair::RestoredBinding {
@@ -387,7 +387,7 @@ fn a_load_attaches_each_ghost_node_that_resolves_again_with_its_wiring() {
             },
         ]
     );
-    assert_eq!(*set.graph(GraphId::Subgraph(s(1))), attached);
+    assert_eq!(*set.graph(GraphId::Compound(s(1))), attached);
     set.validate_with(&library).unwrap();
 }
 
@@ -403,13 +403,13 @@ fn inputs(inputs: Vec<Numbered<InputDecl>>) -> Interface {
     })
 }
 
-/// An instance resolves to its subgraph's interface as it is now, and to nothing where the set
-/// holds no subgraph under its id.
+/// An instance resolves to its compound's interface as it is now, and to nothing where the set
+/// holds no compound under its id.
 #[test]
 fn an_instance_resolves_to_its_interface_as_it_is() {
     let library = library();
     let mut set = GraphSet::default();
-    set.insert_subgraph(s(1), Subgraph::new("one", inputs(vec![int_port(7)])));
+    set.insert_compound(s(1), Compound::new("one", inputs(vec![int_port(7)])));
     place(&mut set, GraphId::Main, n(1), s(1));
     let name = |set: &GraphSet| {
         set.scope(&library, GraphId::Main)
@@ -433,7 +433,7 @@ fn an_instance_resolves_to_its_interface_as_it_is() {
             .scope(&library, GraphId::Main)
             .resolve(lacking.main().find(n(1)).unwrap())
             .map(|decl| decl.name().to_owned()),
-        Err(Unresolved::MissingSubgraph)
+        Err(Unresolved::MissingCompound)
     );
 }
 
@@ -454,17 +454,17 @@ fn boundary_nodes_mirror_the_interface_under_the_one_admission_rule() {
             OutputDecl::new("count", DataType::Int),
         )],
     });
-    let mut subgraph = Subgraph::new("mirror", interface);
-    let inputs = subgraph.inputs_node();
-    let outputs = subgraph.outputs_node();
-    let graph = &mut subgraph.graph;
+    let mut compound = Compound::new("mirror", interface);
+    let inputs = compound.inputs_node();
+    let outputs = compound.outputs_node();
+    let graph = &mut compound.graph;
     graph.insert(n(1), node(&library, ANY_SINK));
     graph.insert(n(2), node(&library, SINK));
     graph.insert(n(3), node(&library, TICKER));
     let mut set = GraphSet::default();
-    set.insert_subgraph(s(1), subgraph);
-    let scope = set.scope(&library, GraphId::Subgraph(s(1)));
-    let graph = set.graph(GraphId::Subgraph(s(1)));
+    set.insert_compound(s(1), compound);
+    let scope = set.scope(&library, GraphId::Compound(s(1)));
+    let graph = set.graph(GraphId::Compound(s(1)));
 
     let inputs_decl = graph.find(inputs).unwrap().decl(scope);
     assert!(inputs_decl.inputs().is_empty());
@@ -536,9 +536,9 @@ fn a_new_instance_takes_its_interface_defaults() {
         PortId::new(1),
         InputDecl::optional("gain", DataType::Float).default(2.0),
     )]);
-    let subgraph = Subgraph::new("gain", interface);
+    let compound = Compound::new("gain", interface);
     let mut graph = Graph::default();
-    let node_id = graph.add_instance(s(1), &subgraph);
+    let node_id = graph.add_instance(s(1), &compound);
     assert_eq!(
         graph.input_bindings(node_id).collect::<Vec<_>>(),
         [(
@@ -547,10 +547,10 @@ fn a_new_instance_takes_its_interface_defaults() {
         )]
     );
     let node = graph.find(node_id).unwrap();
-    assert_eq!(node.subgraph(), Some(s(1)));
+    assert_eq!(node.compound(), Some(s(1)));
     assert!(
         node.name.is_empty(),
-        "an instance has no name of its own: a host shows its subgraph's"
+        "an instance has no name of its own: a host shows its compound's"
     );
     assert_eq!(
         node.cache(),
@@ -560,21 +560,21 @@ fn a_new_instance_takes_its_interface_defaults() {
 }
 
 /// A set round-trips with what its interfaces derive built again, and a file that names one
-/// subgraph id twice is refused rather than loaded with the last.
+/// compound id twice is refused rather than loaded with the last.
 #[test]
-fn a_set_round_trips_and_a_repeated_subgraph_id_is_refused() {
+fn a_set_round_trips_and_a_repeated_compound_id_is_refused() {
     let mut set = GraphSet::default();
-    set.insert_subgraph(s(1), Subgraph::new("one", inputs(vec![int_port(7)])));
+    set.insert_compound(s(1), Compound::new("one", inputs(vec![int_port(7)])));
     let ron = SerdeFormat::Ron.serialize(&set).unwrap();
     let back: GraphSet = SerdeFormat::Ron.deserialize(&ron).unwrap();
     assert_eq!(back, set);
-    let interface = |set: &GraphSet| set.subgraph(s(1)).unwrap().interface.clone();
+    let interface = |set: &GraphSet| set.compound(s(1)).unwrap().interface.clone();
     assert_eq!(
         interface(&back).boundary_ports(Boundary::Inputs),
         interface(&set).boundary_ports(Boundary::Inputs)
     );
 
-    let one = BTreeMap::from([(s(1), set.subgraph(s(1)).unwrap().clone())]);
+    let one = BTreeMap::from([(s(1), set.compound(s(1)).unwrap().clone())]);
     let text = String::from_utf8(SerdeFormat::Ron.serialize(&one).unwrap()).unwrap();
     let entry = text
         .trim()
@@ -584,12 +584,12 @@ fn a_set_round_trips_and_a_repeated_subgraph_id_is_refused() {
         .trim()
         .trim_end_matches(',');
     let main = String::from_utf8(SerdeFormat::Ron.serialize(&Graph::default()).unwrap()).unwrap();
-    let repeated = format!("(main: {main}, subgraphs: {{{entry},{entry}}})");
+    let repeated = format!("(main: {main}, compounds: {{{entry},{entry}}})");
     let error = SerdeFormat::Ron
         .deserialize::<GraphSet>(repeated.as_bytes())
         .unwrap_err();
     let chain = ErrorChain::new(&error).to_string();
-    assert!(chain.contains("duplicate subgraph id"), "{chain}");
+    assert!(chain.contains("duplicate compound id"), "{chain}");
 }
 
 /// A const-only input takes a wire from the `Inputs` node's mirror of a const-only interface
@@ -605,14 +605,14 @@ fn a_const_only_input_takes_a_wire_from_a_const_only_interface_input_alone() {
         ),
         int_port(2),
     ]);
-    let mut subgraph = Subgraph::new("configured", interface);
-    let inputs_node = subgraph.inputs_node();
-    subgraph.graph.insert(n(1), node(&library, CONFIG_SINK));
-    subgraph.graph.insert(n(2), node(&library, SRC));
+    let mut compound = Compound::new("configured", interface);
+    let inputs_node = compound.inputs_node();
+    compound.graph.insert(n(1), node(&library, CONFIG_SINK));
+    compound.graph.insert(n(2), node(&library, SRC));
     let mut set = GraphSet::default();
-    set.insert_subgraph(s(1), subgraph);
-    let scope = set.scope(&library, GraphId::Subgraph(s(1)));
-    let graph = set.graph(GraphId::Subgraph(s(1)));
+    set.insert_compound(s(1), compound);
+    let scope = set.scope(&library, GraphId::Compound(s(1)));
+    let graph = set.graph(GraphId::Compound(s(1)));
     let into_config = |producer: NodeId, port: u32| {
         graph.admit(
             scope,
@@ -629,16 +629,16 @@ fn a_const_only_input_takes_a_wire_from_a_const_only_interface_input_alone() {
 }
 
 /// An instance path names the graph it ends in through each instance on it, and none once one
-/// is not an instance; a graph's instances are every path that ends in it; a subgraph's uses are every node that places it, a ghost node's included, in
-/// each graph; a subgraph no one uses is removed, and one in use refuses.
+/// is not an instance; a graph's instances are every path that ends in it; a compound's uses are every node that places it, a ghost node's included, in
+/// each graph; a compound no one uses is removed, and one in use refuses.
 #[test]
 fn paths_and_uses_read_the_instances_of_every_graph() {
     let library = library();
     let mut set = GraphSet::default();
-    set.insert_subgraph(s(1), empty("inner"));
-    set.insert_subgraph(s(2), empty("outer"));
-    set.insert_subgraph(s(3), empty("unused"));
-    place(&mut set, GraphId::Subgraph(s(2)), n(20), s(1));
+    set.insert_compound(s(1), empty("inner"));
+    set.insert_compound(s(2), empty("outer"));
+    set.insert_compound(s(3), empty("unused"));
+    place(&mut set, GraphId::Compound(s(2)), n(20), s(1));
     place(&mut set, GraphId::Main, n(2), s(2));
     place(&mut set, GraphId::Main, n(3), s(1));
     set.main_mut().insert(n(4), node(&library, SRC));
@@ -653,8 +653,8 @@ fn paths_and_uses_read_the_instances_of_every_graph() {
 
     let path = |ids: &[u128]| InstancePath::new(&ids.iter().copied().map(n).collect::<Vec<_>>());
     assert_eq!(set.graph_at(InstancePath::MAIN), Some(GraphId::Main));
-    assert_eq!(set.graph_at(path(&[2])), Some(GraphId::Subgraph(s(2))));
-    assert_eq!(set.graph_at(path(&[2, 20])), Some(GraphId::Subgraph(s(1))));
+    assert_eq!(set.graph_at(path(&[2])), Some(GraphId::Compound(s(2))));
+    assert_eq!(set.graph_at(path(&[2, 20])), Some(GraphId::Compound(s(1))));
     assert_eq!(set.graph_at(path(&[4])), None, "a `src` places nothing");
     assert_eq!(
         set.graph_at(path(&[3])),
@@ -665,12 +665,12 @@ fn paths_and_uses_read_the_instances_of_every_graph() {
 
     assert_eq!(set.instances(GraphId::Main), [InstancePath::MAIN]);
     // `s(1)` is placed in the main graph by the ghost node `n(3)` alone, which expands nothing.
-    assert_eq!(set.instances(GraphId::Subgraph(s(1))), [path(&[2, 20])]);
-    assert_eq!(set.instances(GraphId::Subgraph(s(2))), [path(&[2])]);
-    assert_eq!(set.instances(GraphId::Subgraph(s(3))), []);
+    assert_eq!(set.instances(GraphId::Compound(s(1))), [path(&[2, 20])]);
+    assert_eq!(set.instances(GraphId::Compound(s(2))), [path(&[2])]);
+    assert_eq!(set.instances(GraphId::Compound(s(3))), []);
     place(&mut set, GraphId::Main, n(1), s(2));
     assert_eq!(
-        set.instances(GraphId::Subgraph(s(1))),
+        set.instances(GraphId::Compound(s(1))),
         [path(&[1, 20]), path(&[2, 20])],
         "each instance of the graph that places it, in path order"
     );
@@ -680,7 +680,7 @@ fn paths_and_uses_read_the_instances_of_every_graph() {
         set.uses(s(1)).collect::<Vec<_>>(),
         [
             NodeAddr::new(GraphId::Main, n(3)),
-            NodeAddr::new(GraphId::Subgraph(s(2)), n(20)),
+            NodeAddr::new(GraphId::Compound(s(2)), n(20)),
         ]
     );
     assert_eq!(
@@ -689,14 +689,14 @@ fn paths_and_uses_read_the_instances_of_every_graph() {
     );
     assert_eq!(set.uses(s(3)).count(), 0);
 
-    assert!(set.remove_subgraph(s(3)).is_some());
-    assert!(set.subgraph(s(3)).is_none());
-    let in_use = panic::catch_unwind(AssertUnwindSafe(|| set.remove_subgraph(s(1))));
-    assert!(in_use.is_err(), "a placed subgraph is not removed");
+    assert!(set.remove_compound(s(3)).is_some());
+    assert!(set.compound(s(3)).is_none());
+    let in_use = panic::catch_unwind(AssertUnwindSafe(|| set.remove_compound(s(1))));
+    assert!(in_use.is_err(), "a placed compound is not removed");
 }
 
 /// Each type an interface names that the library does not register is reported once, with every
-/// port that names it, in subgraph order, inputs before outputs; a registered type is not.
+/// port that names it, in compound order, inputs before outputs; a registered type is not.
 #[test]
 fn unknown_types_name_each_interface_port_that_uses_them() {
     let library = library();
@@ -704,9 +704,9 @@ fn unknown_types_name_each_interface_port_that_uses_them() {
     let port =
         |id: u32, data_type| Numbered::new(PortId::new(id), InputDecl::required("x", data_type));
     let mut set = GraphSet::default();
-    set.insert_subgraph(
+    set.insert_compound(
         s(1),
-        Subgraph::new(
+        Compound::new(
             "one",
             Interface::new(Ports {
                 inputs: vec![port(1, DataType::Int), port(2, unknown)],
@@ -714,9 +714,9 @@ fn unknown_types_name_each_interface_port_that_uses_them() {
             }),
         ),
     );
-    set.insert_subgraph(s(2), Subgraph::new("two", inputs(vec![port(4, unknown)])));
-    let at = |subgraph, list, id: u32| InterfacePort {
-        subgraph,
+    set.insert_compound(s(2), Compound::new("two", inputs(vec![port(4, unknown)])));
+    let at = |compound, list, id: u32| InterfacePort {
+        compound,
         list,
         port: PortId::new(id),
     };
@@ -748,9 +748,9 @@ fn a_file_names_the_types_its_ports_name_and_a_load_without_them_keeps_the_names
     let port =
         |id: u32, data_type| Numbered::new(PortId::new(id), InputDecl::required("x", data_type));
     let mut set = GraphSet::default();
-    set.insert_subgraph(
+    set.insert_compound(
         s(1),
-        Subgraph::new(
+        Compound::new(
             "one",
             Interface::new(Ports {
                 inputs: vec![port(1, DataType::Int), port(2, DataType::Custom(star))],
@@ -816,12 +816,12 @@ fn adder_interface(a_type: DataType, b_type: DataType) -> Interface {
     })
 }
 
-/// Subgraph 1, `adder`: its `Inputs` node's `a` and `b` into `add` 13, whose sum is the `Outputs`
+/// Compound 1, `adder`: its `Inputs` node's `a` and `b` into `add` 13, whose sum is the `Outputs`
 /// node's. The main graph: `src` 1 into instance 2's `a`, a constant 7 on its `b`, and `sink` 3
 /// reading its sum. So each interface port is bound in two graphs.
 fn adder_set() -> (GraphSet, Library) {
     let library = library();
-    let mut adder = Subgraph::new("adder", adder_interface(DataType::Int, DataType::Int));
+    let mut adder = Compound::new("adder", adder_interface(DataType::Int, DataType::Int));
     let (inputs, outputs) = (adder.inputs_node(), adder.outputs_node());
     adder.graph.insert(n(13), node(&library, ADD));
     let inner = &mut adder.graph;
@@ -838,7 +838,7 @@ fn adder_set() -> (GraphSet, Library) {
         Binding::wire(n(13), PortId::new(1)),
     );
     let mut set = GraphSet::default();
-    set.insert_subgraph(s(1), adder);
+    set.insert_compound(s(1), adder);
     set.main_mut().insert(n(1), node(&library, SRC));
     place(&mut set, GraphId::Main, n(2), s(1));
     set.main_mut().insert(n(3), node(&library, SINK));
@@ -882,7 +882,7 @@ fn an_interface_reorder_and_rename_drop_nothing() {
     let change = set.plan_interface(s(1), reordered.clone(), &library, RefusedFate::Drop);
     assert!(change.refused().is_empty());
     set.write_interface(&change, ChangeSide::After);
-    assert_eq!(set.subgraph(s(1)).unwrap().interface, reordered);
+    assert_eq!(set.compound(s(1)).unwrap().interface, reordered);
     for (graph, held) in before.graphs() {
         assert_eq!(set.graph(graph), held, "{graph:?} keeps every binding");
     }
@@ -906,10 +906,10 @@ fn an_interface_port_removed_drops_its_wires_in_every_graph_and_undo_restores_th
         inputs: vec![b],
         outputs: vec![],
     });
-    let adder = set.subgraph(s(1)).unwrap();
+    let adder = set.compound(s(1)).unwrap();
     let (inputs, outputs) = (adder.inputs_node(), adder.outputs_node());
     let change = set.plan_interface(s(1), without.clone(), &library, RefusedFate::Drop);
-    let inside = GraphId::Subgraph(s(1));
+    let inside = GraphId::Compound(s(1));
     let mut expected = vec![
         (
             GraphId::Main,
@@ -942,7 +942,7 @@ fn an_interface_port_removed_drops_its_wires_in_every_graph_and_undo_restores_th
             .collect::<Vec<_>>()
     };
     assert_eq!(refused(&change), expected);
-    assert_eq!(change.before(), &before.subgraph(s(1)).unwrap().interface);
+    assert_eq!(change.before(), &before.compound(s(1)).unwrap().interface);
     assert_eq!(change.after(), &without);
 
     set.write_interface(&change, ChangeSide::After);
@@ -991,7 +991,7 @@ fn an_interface_port_removed_drops_its_wires_in_every_graph_and_undo_restores_th
     // live, and the set is one a compile takes.
     let back = set.plan_interface(
         s(1),
-        before.subgraph(s(1)).unwrap().interface.clone(),
+        before.compound(s(1)).unwrap().interface.clone(),
         &library,
         RefusedFate::Ghost,
     );
@@ -1009,7 +1009,7 @@ fn an_interface_port_removed_drops_its_wires_in_every_graph_and_undo_restores_th
 #[test]
 fn an_interface_port_retyped_drops_only_what_the_new_type_refuses() {
     let (mut set, library) = adder_set();
-    let inputs = set.subgraph(s(1)).unwrap().inputs_node();
+    let inputs = set.compound(s(1)).unwrap().inputs_node();
     let change = set.plan_interface(
         s(1),
         adder_interface(DataType::Int, DataType::String),
@@ -1035,7 +1035,7 @@ fn an_interface_port_retyped_drops_only_what_the_new_type_refuses() {
                 None,
             ),
             (
-                GraphId::Subgraph(s(1)),
+                GraphId::Compound(s(1)),
                 InputPort::new(n(13), PortId::new(2)),
                 Binding::wire(inputs, B),
                 None,
@@ -1075,8 +1075,8 @@ fn a_ghost_node_of_a_missing_func_stays_one_until_the_library_holds_it() {
 }
 
 /// A digest is of the definition alone: two sets holding one definition under two ids, its
-/// nodes added in two orders and its placed subgraph under two ids, digest it alike; a renamed
-/// inner node, a changed placed subgraph, or a ghost it keeps, changes it.
+/// nodes added in two orders and its placed compound under two ids, digest it alike; a renamed
+/// inner node, a changed placed compound, or a ghost it keeps, changes it.
 #[test]
 fn a_digest_names_the_definition_and_not_its_ids() {
     let library = library();
@@ -1086,14 +1086,14 @@ fn a_digest_names_the_definition_and_not_its_ids() {
         for (id, held) in order {
             graph.insert(n(*id), held.clone());
         }
-        Subgraph {
+        Compound {
             name: name.to_string(),
             description: None,
             interface: Interface::default(),
             graph,
         }
     };
-    let build = |outer: SubgraphId, inner: SubgraphId, reversed: bool, inner_name: &str| {
+    let build = |outer: CompoundId, inner: CompoundId, reversed: bool, inner_name: &str| {
         let mut set = GraphSet::default();
         let placed = definition(
             inner_name,
@@ -1104,7 +1104,7 @@ fn a_digest_names_the_definition_and_not_its_ids() {
             ],
         );
         let instance = Node::instance(inner);
-        set.insert_subgraph(inner, placed);
+        set.insert_compound(inner, placed);
         let mut order = vec![
             (1, Node::from(Boundary::Inputs)),
             (2, Node::from(Boundary::Outputs)),
@@ -1115,7 +1115,7 @@ fn a_digest_names_the_definition_and_not_its_ids() {
         if reversed {
             order.reverse();
         }
-        set.insert_subgraph(outer, definition("outer", &order));
+        set.insert_compound(outer, definition("outer", &order));
         set
     };
     let one = build(s(1), s(2), false, "inner");
@@ -1125,7 +1125,7 @@ fn a_digest_names_the_definition_and_not_its_ids() {
 
     let mut renamed = build(s(1), s(2), false, "inner");
     renamed
-        .graph_mut(GraphId::Subgraph(s(1)))
+        .graph_mut(GraphId::Compound(s(1)))
         .find_mut(n(10))
         .unwrap()
         .name = "renamed".to_string();
@@ -1139,14 +1139,14 @@ fn a_digest_names_the_definition_and_not_its_ids() {
     assert_ne!(
         deeper.digest(s(1)),
         one.digest(s(1)),
-        "a placed subgraph's change reaches the one that places it"
+        "a placed compound's change reaches the one that places it"
     );
 
     // What a graph keeps is part of its definition: a ghost node and a ghost on an input each
     // change the digest.
     let mut ghosted = build(s(1), s(2), false, "inner");
     ghosted
-        .graph_mut(GraphId::Subgraph(s(1)))
+        .graph_mut(GraphId::Compound(s(1)))
         .detach_into_ghosts(
             vec![Detaching {
                 node_id: n(11),
@@ -1157,7 +1157,7 @@ fn a_digest_names_the_definition_and_not_its_ids() {
         );
     assert_ne!(ghosted.digest(s(1)), one.digest(s(1)));
     let mut kept = build(s(1), s(2), false, "inner");
-    kept.graph_mut(GraphId::Subgraph(s(1))).set_input_state(
+    kept.graph_mut(GraphId::Compound(s(1))).set_input_state(
         InputPort::new(n(11), PortId::new(1)),
         InputState::Ghost(GhostBinding::from(Binding::wire(n(10), PortId::new(1)))),
     );
@@ -1192,7 +1192,7 @@ fn a_subscription_lands_on_a_declared_trigger_and_an_interface_edit_refuses_it()
         })
         .unwrap();
     let mut set = GraphSet::default();
-    set.insert_subgraph(s(1), Subgraph::new("relay", interface.clone()));
+    set.insert_compound(s(1), Compound::new("relay", interface.clone()));
     set.main_mut().insert(n(1), node(&library, TICKER));
     set.main_mut().insert(n(2), Node::instance(s(1)));
     set.main_mut().insert(n(3), node(&library, SINK));

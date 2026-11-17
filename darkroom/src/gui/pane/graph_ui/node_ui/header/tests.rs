@@ -305,30 +305,30 @@ fn a_node_and_its_pin_show_once_measured() {
 #[test]
 fn an_instance_has_a_trigger_while_its_interface_declares_one() {
     use scenarium::{
-        EventDecl, EventPort, EventPorts, GhostSubscription, Interface, PortId, Subgraph,
-        SubgraphId, Subscription, SubscriptionState,
+        Compound, CompoundId, EventDecl, EventPort, EventPorts, GhostSubscription, Interface,
+        PortId, Subscription, SubscriptionState,
     };
 
-    use crate::core::document::internals::insert_subgraph;
+    use crate::core::document::internals::insert_compound;
 
     let mut fixture = DocumentFixture::probes(0);
     let emitter = fixture.node_at(Vec2::new(40.0, 40.0));
-    let [triggered, plain] = [1, 2].map(SubgraphId::from_u128);
+    let [triggered, plain] = [1, 2].map(CompoundId::from_u128);
     let interface = Interface::default()
         .with_event_ports(EventPorts {
             events: vec![],
             trigger: Some(EventDecl::new("go")),
         })
         .unwrap();
-    insert_subgraph(
+    insert_compound(
         &mut fixture.document,
         triggered,
-        Subgraph::new("triggered", interface),
+        Compound::new("triggered", interface),
     );
-    insert_subgraph(
+    insert_compound(
         &mut fixture.document,
         plain,
-        Subgraph::new("plain", Interface::default()),
+        Compound::new("plain", Interface::default()),
     );
     let with_trigger = fixture.add_instance(triggered);
     let without_trigger = fixture.add_instance(plain);

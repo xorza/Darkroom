@@ -12,8 +12,8 @@ use std::mem;
 
 use glam::Vec2;
 use scenarium::{
-    Binding, BindingEntry, EventPort, GraphId, InputPort, Library, Node, NodeId, OutputPort,
-    PortId, SubgraphId, Subscription, TriggerPort,
+    Binding, BindingEntry, CompoundId, EventPort, GraphId, InputPort, Library, Node, NodeId,
+    OutputPort, PortId, Subscription, TriggerPort,
 };
 use serde::{Deserialize, Serialize};
 
@@ -73,7 +73,7 @@ impl Fragment {
     /// wire or a subscription that reaches a node from outside goes as `incoming` says: dropped,
     /// leaving a data input's declared default as a wire removed on its own does, or kept on the
     /// outside producer or emitter. A ghost node is left out: it has no ports to join, and a copy of a
-    /// node that cannot run has little use. A boundary node is left out: a subgraph holds one of
+    /// node that cannot run has little use. A boundary node is left out: a compound holds one of
     /// each side, and a wire from one to a node of `items` comes from outside.
     pub(crate) fn capture(
         document: &Document,
@@ -162,21 +162,21 @@ impl Fragment {
         fragment
     }
 
-    /// The subgraphs its instances place, each once, in its node order.
-    pub(crate) fn placed(&self) -> impl Iterator<Item = SubgraphId> + '_ {
+    /// The compounds its instances place, each once, in its node order.
+    pub(crate) fn placed(&self) -> impl Iterator<Item = CompoundId> + '_ {
         let mut seen = BTreeSet::new();
         self.nodes
             .iter()
-            .filter_map(|node| node.node.subgraph())
+            .filter_map(|node| node.node.compound())
             .filter(move |&id| seen.insert(id))
     }
 
-    /// Point each instance of the fragment at `to`'s answer for the subgraph it places, as a
-    /// paste does with a subgraph that comes in under a fresh id.
-    pub(crate) fn repoint(&mut self, to: impl Fn(SubgraphId) -> SubgraphId) {
+    /// Point each instance of the fragment at `to`'s answer for the compound it places, as a
+    /// paste does with a compound that comes in under a fresh id.
+    pub(crate) fn repoint(&mut self, to: impl Fn(CompoundId) -> CompoundId) {
         for fragment_node in &mut self.nodes {
-            if let Some(placed) = fragment_node.node.subgraph() {
-                fragment_node.node.set_subgraph(to(placed));
+            if let Some(placed) = fragment_node.node.compound() {
+                fragment_node.node.set_compound(to(placed));
             }
         }
     }
@@ -188,7 +188,7 @@ impl Fragment {
 
     /// Put `to`'s answer for each port of `node`, a node outside the fragment, in place of each
     /// wire a node of it reads from that port; an input `to` answers nothing for is left unbound.
-    /// What an expand does with the wires from a subgraph's `Inputs` node: each takes what the
+    /// What an expand does with the wires from a compound's `Inputs` node: each takes what the
     /// instance's own input held.
     pub(crate) fn rebind_from(&mut self, node: NodeId, to: impl Fn(PortId) -> Option<Binding>) {
         for fragment_node in &mut self.nodes {

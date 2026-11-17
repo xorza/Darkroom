@@ -3,7 +3,7 @@ use std::sync::Arc;
 use scenarium::{Binding, EventPort, InputPort, Interface, OutputPort, PortId};
 
 use super::*;
-use crate::core::document::internals::{DocumentFixture, insert_subgraph};
+use crate::core::document::internals::{DocumentFixture, insert_compound};
 use crate::core::document::tie::Tie;
 use crate::core::document::wire_key::{DataWire, WireKey};
 
@@ -128,7 +128,7 @@ fn reconcile_repairs_the_view_and_the_layout() {
     document
         .layout
         .apply(DockOperation::OpenTab { tab: viewer });
-    let active = GraphId::Subgraph(SubgraphId::from_u128(4));
+    let active = GraphId::Compound(CompoundId::from_u128(4));
     document.active = active;
 
     let report = document.reconcile(&library, &Manifest::default());
@@ -312,33 +312,33 @@ fn validation_holds_paths_absolute() {
     ));
 }
 
-/// The load gives each subgraph a side and drops a side for none: a subgraph with no side gets
+/// The load gives each compound a side and drops a side for none: a compound with no side gets
 /// one placed in a row, one placement per node; a side whose `through` names no instance of its
-/// subgraph shows it through none; a tab on a graph the set lacks closes, while the active
-/// subgraph and its tab stay.
+/// compound shows it through none; a tab on a graph the set lacks closes, while the active
+/// compound and its tab stay.
 #[test]
-fn reconcile_keeps_one_side_per_subgraph() {
+fn reconcile_keeps_one_side_per_compound() {
     let mut fixture = DocumentFixture::default();
-    let [sided, missing, unsided] = [1, 2, 3].map(SubgraphId::from_u128);
-    let mut subgraph = Subgraph::new("unsided", Interface::default());
-    subgraph.graph.add(fixture.plain_node());
+    let [sided, missing, unsided] = [1, 2, 3].map(CompoundId::from_u128);
+    let mut compound = Compound::new("unsided", Interface::default());
+    compound.graph.add(fixture.plain_node());
     let DocumentFixture {
         mut document,
         library,
     } = fixture;
-    document.graphs.insert_subgraph(unsided, subgraph);
+    document.graphs.insert_compound(unsided, compound);
     let instance = Node::instance(unsided);
     let unsided_instance = document.graphs.main_mut().add(instance);
-    insert_subgraph(
+    insert_compound(
         &mut document,
         sided,
-        Subgraph::new("sided", Interface::default()),
+        Compound::new("sided", Interface::default()),
     );
     let stale = InstancePath::new(&[unsided_instance]);
     document.sides.get_mut(&sided).unwrap().through = Some(stale);
     document.sides.insert(
         missing,
-        SubgraphSide::new(&Subgraph::new("gone", Interface::default()).graph),
+        CompoundSide::new(&Compound::new("gone", Interface::default()).graph),
     );
     document
         .main_view
@@ -346,23 +346,23 @@ fn reconcile_keeps_one_side_per_subgraph() {
         .insert(unsided_instance, NodePlacement::default());
     for graph in [unsided, missing] {
         document.layout.apply(DockOperation::OpenTab {
-            tab: TabRef::Graph(GraphId::Subgraph(graph)),
+            tab: TabRef::Graph(GraphId::Compound(graph)),
         });
     }
-    document.active = GraphId::Subgraph(unsided);
+    document.active = GraphId::Compound(unsided);
 
     let report = document.reconcile(&library, &Manifest::default());
     assert_eq!(
         report.repairs,
         [
-            DocumentRepair::SideDropped { subgraph: missing },
-            DocumentRepair::SideAdded { subgraph: unsided },
+            DocumentRepair::SideDropped { compound: missing },
+            DocumentRepair::SideAdded { compound: unsided },
             DocumentRepair::ThroughCleared {
-                subgraph: sided,
+                compound: sided,
                 path: stale
             },
             DocumentRepair::TabClosed {
-                tab: TabRef::Graph(GraphId::Subgraph(missing))
+                tab: TabRef::Graph(GraphId::Compound(missing))
             },
         ]
     );
@@ -376,8 +376,8 @@ fn reconcile_keeps_one_side_per_subgraph() {
         "its two boundary nodes and its node"
     );
     assert_eq!(document.sides[&sided].through, None);
-    assert_eq!(document.active, GraphId::Subgraph(unsided));
-    assert!(document.holds_tab(TabRef::Graph(GraphId::Subgraph(unsided))));
+    assert_eq!(document.active, GraphId::Compound(unsided));
+    assert!(document.holds_tab(TabRef::Graph(GraphId::Compound(unsided))));
     document.validate().expect("a reconciled document is valid");
     assert!(
         document
@@ -389,25 +389,25 @@ fn reconcile_keeps_one_side_per_subgraph() {
 
 /// Removing an instance clears the `through` that named it and closes each tab that showed a
 /// node through it — a viewer of a preview inside, an inspector pinned through it — and leaves
-/// the subgraph's own pane open.
+/// the compound's own pane open.
 #[test]
 fn removing_an_instance_clears_what_showed_through_it() {
     let mut fixture = DocumentFixture::default();
-    let id = SubgraphId::from_u128(1);
+    let id = CompoundId::from_u128(1);
     let preview_func = preview_sink::func(Arc::default());
     fixture.library.add(preview_func.clone());
-    let mut subgraph = Subgraph::new("inner", Interface::default());
-    let preview = subgraph.graph.add(Node::from(&preview_func));
-    insert_subgraph(&mut fixture.document, id, subgraph);
+    let mut compound = Compound::new("inner", Interface::default());
+    let preview = compound.graph.add(Node::from(&preview_func));
+    insert_compound(&mut fixture.document, id, compound);
     let instance = fixture.add_instance(id);
     let mut document = fixture.document;
     let path = InstancePath::new(&[instance]);
     document.sides.get_mut(&id).unwrap().through = Some(path);
-    let pane = TabRef::Graph(GraphId::Subgraph(id));
+    let pane = TabRef::Graph(GraphId::Compound(id));
     let shown = [
         TabRef::ImageViewer(path.node(preview)),
         TabRef::Inspector(InspectTarget::Node {
-            addr: NodeAddr::new(GraphId::Subgraph(id), preview),
+            addr: NodeAddr::new(GraphId::Compound(id), preview),
             through: Some(path),
         }),
     ];
@@ -427,34 +427,34 @@ fn removing_an_instance_clears_what_showed_through_it() {
         .expect("nothing names the removed instance");
 }
 
-/// Entering a subgraph shows it through the path given, opens its tab once however often it is
-/// entered, and makes it the active graph; a path that names no instance of it, or a subgraph
+/// Entering a compound shows it through the path given, opens its tab once however often it is
+/// entered, and makes it the active graph; a path that names no instance of it, or a compound
 /// the set lacks, enters nothing.
 #[test]
-fn entering_a_subgraph_opens_its_one_tab_through_its_instance() {
+fn entering_a_compound_opens_its_one_tab_through_its_instance() {
     let mut fixture = DocumentFixture::default();
-    let [id, other] = [1, 2].map(SubgraphId::from_u128);
-    for subgraph in [id, other] {
-        insert_subgraph(
+    let [id, other] = [1, 2].map(CompoundId::from_u128);
+    for compound in [id, other] {
+        insert_compound(
             &mut fixture.document,
-            subgraph,
-            Subgraph::new("inner", Interface::default()),
+            compound,
+            Compound::new("inner", Interface::default()),
         );
     }
     let instance = fixture.add_instance(id);
     let stranger = fixture.add_instance(other);
     let mut document = fixture.document;
     let path = InstancePath::new(&[instance]);
-    let tab = TabRef::Graph(GraphId::Subgraph(id));
+    let tab = TabRef::Graph(GraphId::Compound(id));
     let tabs = |document: &Document| document.layout.all_tabs().filter(|&t| t == tab).count();
 
     document.enter(id, Some(InstancePath::new(&[stranger])));
     assert_eq!(
         tabs(&document),
         0,
-        "a path into another subgraph enters nothing"
+        "a path into another compound enters nothing"
     );
-    document.enter(SubgraphId::from_u128(9), None);
+    document.enter(CompoundId::from_u128(9), None);
     assert_eq!(document.active, GraphId::Main);
 
     for _ in 0..2 {
@@ -462,7 +462,7 @@ fn entering_a_subgraph_opens_its_one_tab_through_its_instance() {
     }
     assert_eq!(tabs(&document), 1);
     assert_eq!(document.sides[&id].through, Some(path));
-    assert_eq!(document.active, GraphId::Subgraph(id));
+    assert_eq!(document.active, GraphId::Compound(id));
     document.enter(id, None);
     assert_eq!(
         document.sides[&id].through, None,
@@ -478,16 +478,16 @@ fn an_undo_brings_its_graph_forward_or_names_it() {
     use crate::core::edit::edit_facts::Touched;
 
     let mut fixture = DocumentFixture::default();
-    let [shown, hidden] = [1, 2].map(SubgraphId::from_u128);
+    let [shown, hidden] = [1, 2].map(CompoundId::from_u128);
     for id in [shown, hidden] {
-        insert_subgraph(
+        insert_compound(
             &mut fixture.document,
             id,
-            Subgraph::new("inner", Interface::default()),
+            Compound::new("inner", Interface::default()),
         );
     }
     let mut document = fixture.document;
-    let tab = TabRef::Graph(GraphId::Subgraph(shown));
+    let tab = TabRef::Graph(GraphId::Compound(shown));
     document.layout.apply(DockOperation::OpenTab { tab });
     document.layout.apply(DockOperation::ActivateTab {
         tab: TabRef::Graph(GraphId::Main),
@@ -499,16 +499,16 @@ fn an_undo_brings_its_graph_forward_or_names_it() {
     );
 
     assert_eq!(
-        document.bring_forward(Touched::Graph(GraphId::Subgraph(shown))),
+        document.bring_forward(Touched::Graph(GraphId::Compound(shown))),
         None
     );
     assert!(active_tab(&document).contains(&tab));
-    assert_eq!(document.active, GraphId::Subgraph(shown));
+    assert_eq!(document.active, GraphId::Compound(shown));
     assert_eq!(
-        document.bring_forward(Touched::Graph(GraphId::Subgraph(hidden))),
-        Some(GraphId::Subgraph(hidden))
+        document.bring_forward(Touched::Graph(GraphId::Compound(hidden))),
+        Some(GraphId::Compound(hidden))
     );
-    assert_eq!(document.active, GraphId::Subgraph(shown), "nothing moved");
+    assert_eq!(document.active, GraphId::Compound(shown), "nothing moved");
     for touched in [Touched::Nothing, Touched::Several] {
         assert_eq!(document.bring_forward(touched), None);
     }
@@ -519,22 +519,22 @@ fn an_undo_brings_its_graph_forward_or_names_it() {
 #[test]
 fn the_active_graph_follows_the_focused_panes_tab() {
     let mut fixture = DocumentFixture::default();
-    let id = SubgraphId::from_u128(1);
-    insert_subgraph(
+    let id = CompoundId::from_u128(1);
+    insert_compound(
         &mut fixture.document,
         id,
-        Subgraph::new("inner", Interface::default()),
+        Compound::new("inner", Interface::default()),
     );
     let mut document = fixture.document;
-    let pane = TabRef::Graph(GraphId::Subgraph(id));
+    let pane = TabRef::Graph(GraphId::Compound(id));
     document.apply_view(DockOperation::OpenTab { tab: pane });
-    assert_eq!(document.active, GraphId::Subgraph(id));
+    assert_eq!(document.active, GraphId::Compound(id));
     document.apply_view(DockOperation::OpenTab {
         tab: TabRef::Preferences,
     });
     assert_eq!(
         document.active,
-        GraphId::Subgraph(id),
+        GraphId::Compound(id),
         "no graph on that tab"
     );
     document.apply_view(DockOperation::ActivateTab {
@@ -543,49 +543,49 @@ fn the_active_graph_follows_the_focused_panes_tab() {
     assert_eq!(document.active, GraphId::Main);
 }
 
-/// The unused subgraphs are those no node places, then those only they place, in an order whose
+/// The unused compounds are those no node places, then those only they place, in an order whose
 /// removals each hold: `outer` places `inner`, and nothing places `outer`; `kept` is placed in
 /// the main graph.
 #[test]
-fn unused_subgraphs_come_outermost_first() {
+fn unused_compounds_come_outermost_first() {
     let mut fixture = DocumentFixture::default();
-    let [inner, outer, kept] = [1, 2, 3].map(SubgraphId::from_u128);
-    insert_subgraph(
+    let [inner, outer, kept] = [1, 2, 3].map(CompoundId::from_u128);
+    insert_compound(
         &mut fixture.document,
         inner,
-        Subgraph::new("inner", Interface::default()),
+        Compound::new("inner", Interface::default()),
     );
-    let mut holder = Subgraph::new("outer", Interface::default());
+    let mut holder = Compound::new("outer", Interface::default());
     holder.graph.add(Node::instance(inner));
-    insert_subgraph(&mut fixture.document, outer, holder);
-    insert_subgraph(
+    insert_compound(&mut fixture.document, outer, holder);
+    insert_compound(
         &mut fixture.document,
         kept,
-        Subgraph::new("kept", Interface::default()),
+        Compound::new("kept", Interface::default()),
     );
     fixture.add_instance(kept);
-    assert_eq!(fixture.document.unused_subgraphs(), [outer, inner]);
+    assert_eq!(fixture.document.unused_compounds(), [outer, inner]);
 }
 
-/// The path walks reach a subgraph's constants: the check names a relative path there by its
+/// The path walks reach a compound's constants: the check names a relative path there by its
 /// graph, and a mapping rewrites it.
 #[test]
-fn a_subgraph_path_is_checked_and_mapped() {
+fn a_compound_path_is_checked_and_mapped() {
     use scenarium::ConstValue;
 
     let mut fixture = DocumentFixture::default();
     let node = fixture.plain_node();
-    let id = SubgraphId::from_u128(1);
-    let mut subgraph = Subgraph::new("inner", Interface::default());
-    let inner = subgraph.graph.add(node);
+    let id = CompoundId::from_u128(1);
+    let mut compound = Compound::new("inner", Interface::default());
+    let inner = compound.graph.add(node);
     let port = InputPort::new(inner, PortId::new(1));
-    subgraph.graph.set_input_binding(
+    compound.graph.set_input_binding(
         port,
         Binding::Const(ConstValue::FsPath("inputs/x.tiff".to_string())),
     );
-    insert_subgraph(&mut fixture.document, id, subgraph);
+    insert_compound(&mut fixture.document, id, compound);
     let mut document = fixture.document;
-    let addr = NodeAddr::new(GraphId::Subgraph(id), inner);
+    let addr = NodeAddr::new(GraphId::Compound(id), inner);
 
     assert!(matches!(
         document.validate(),
@@ -594,7 +594,7 @@ fn a_subgraph_path_is_checked_and_mapped() {
     ));
     document.map_paths(|path| Some(format!("/root/{path}")));
     assert_eq!(
-        document.graphs.graph(GraphId::Subgraph(id)).bindings[&port],
+        document.graphs.graph(GraphId::Compound(id)).bindings[&port],
         Binding::Const(ConstValue::FsPath("/root/inputs/x.tiff".to_string()))
     );
     let mut visited = Vec::new();
@@ -602,17 +602,17 @@ fn a_subgraph_path_is_checked_and_mapped() {
     assert_eq!(visited, [(addr, "/root/inputs/x.tiff".to_string())]);
 }
 
-/// A node's title is its own name, or for an instance with none its subgraph's, which a rename
-/// of the subgraph changes on each such instance; a named instance keeps its name, and a func
+/// A node's title is its own name, or for an instance with none its compound's, which a rename
+/// of the compound changes on each such instance; a named instance keeps its name, and a func
 /// node with none reads blank, which a surface shows as "Unnamed".
 #[test]
-fn an_unnamed_instance_is_titled_by_its_subgraph() {
+fn an_unnamed_instance_is_titled_by_its_compound() {
     let mut fixture = DocumentFixture::default();
-    let id = SubgraphId::from_u128(1);
-    insert_subgraph(
+    let id = CompoundId::from_u128(1);
+    insert_compound(
         &mut fixture.document,
         id,
-        Subgraph::new("Denoise", Interface::default()),
+        Compound::new("Denoise", Interface::default()),
     );
     let [unnamed, named] = [(); 2].map(|()| fixture.add_instance(id));
     let blank = fixture.node_at(Vec2::ZERO);
@@ -629,6 +629,6 @@ fn an_unnamed_instance_is_titled_by_its_subgraph() {
             .map(|node_id| title(document.graphs.main().find(node_id).unwrap(), scope).to_owned())
     };
     assert_eq!(titles(&document), ["Denoise", "Mine", ""]);
-    document.graphs.rename_subgraph(id, "Stars".to_owned());
+    document.graphs.rename_compound(id, "Stars".to_owned());
     assert_eq!(titles(&document), ["Stars", "Mine", ""]);
 }

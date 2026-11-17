@@ -596,7 +596,7 @@ fn a_long_event_loop_keeps_its_last_run_alone() {
 }
 
 /// Each row folds into every instance its path lies inside, outermost first. Two instances of
-/// one subgraph, `i1` and `i2`, each hold `a`, `b` and the nested instance `n` holding `c`. In
+/// one compound, `i1` and `i2`, each hold `a`, `b` and the nested instance `n` holding `c`. In
 /// `i1` all execute: `i1` reads `Executed(1.0 + 2.0 + 0.5 = 3.5)`, `i1/n` `Executed(0.5)`. In
 /// `i2` `b` fails: `i2` reads `Errored`, with its executed time `1.25 + 0.25 = 1.5` summed all
 /// the same, while `i2/n`, which holds no failure, reads `Executed(0.25)`. A progress row that

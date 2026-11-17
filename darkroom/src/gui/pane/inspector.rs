@@ -205,14 +205,14 @@ fn body(ui: &mut Ui, stage: &mut Stage<'_, NodeCtx<'_>>, target: InspectTarget) 
             }
         });
     }
-    if let Some(subgraph) = node.shows_interface() {
+    if let Some(compound) = node.shows_interface() {
         let document = node.graph_ctx.document();
         let card = InterfaceCard {
             theme,
             library,
             graphs: &document.graphs,
-            subgraph,
-            shared: document.sides[&subgraph].shared,
+            compound,
+            shared: document.sides[&compound].shared,
         };
         interface_card::show(ui, card, stage.out);
     }

@@ -75,7 +75,7 @@ impl<'a> DocCtx<'a> {
         self.app.run_state()
     }
 
-    /// The library folder's shared subgraphs, as the last scan read them.
+    /// The library folder's shared compounds, as the last scan read them.
     pub(crate) const fn shared(self) -> &'a SharedLibrary {
         self.app.shared()
     }

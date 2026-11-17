@@ -5,7 +5,7 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 
 use common::ErrorChain;
-use scenarium::{GraphId, InstancePath, NodeAddr, NodeId, Repair, SubgraphId, UnknownType};
+use scenarium::{CompoundId, GraphId, InstancePath, NodeAddr, NodeId, Repair, UnknownType};
 
 use crate::core::document::item_id::ItemId;
 use crate::core::document::tab_ref::TabRef;
@@ -43,13 +43,13 @@ pub(crate) enum DocumentRepair {
     Graph { graph: GraphId, repair: Repair },
     /// A change to one graph's view.
     View { graph: GraphId, repair: ViewRepair },
-    /// A subgraph with no side, given one with its nodes placed in a row.
-    SideAdded { subgraph: SubgraphId },
-    /// A side for no subgraph.
-    SideDropped { subgraph: SubgraphId },
-    /// A side's `through` that names no instance of its subgraph, cleared.
+    /// A compound with no side, given one with its nodes placed in a row.
+    SideAdded { compound: CompoundId },
+    /// A side for no compound.
+    SideDropped { compound: CompoundId },
+    /// A side's `through` that names no instance of its compound, cleared.
     ThroughCleared {
-        subgraph: SubgraphId,
+        compound: CompoundId,
         path: InstancePath,
     },
     /// An active graph the set does not hold, made the main graph.
@@ -215,33 +215,33 @@ impl Display for DocumentRepair {
                 repair,
             } => repair.fmt(f),
             Self::Graph {
-                graph: GraphId::Subgraph(id),
+                graph: GraphId::Compound(id),
                 repair,
-            } => write!(f, "in subgraph {id:?}, {repair}"),
+            } => write!(f, "in compound {id:?}, {repair}"),
             Self::View {
                 graph: GraphId::Main,
                 repair,
             } => repair.fmt(f),
             Self::View {
-                graph: GraphId::Subgraph(id),
+                graph: GraphId::Compound(id),
                 repair,
-            } => write!(f, "in the view of subgraph {id:?}, {repair}"),
-            Self::SideAdded { subgraph } => {
+            } => write!(f, "in the view of compound {id:?}, {repair}"),
+            Self::SideAdded { compound } => {
                 write!(
                     f,
-                    "placed the nodes of subgraph {subgraph:?} in a row: it had no view"
+                    "placed the nodes of compound {compound:?} in a row: it had no view"
                 )
             }
-            Self::SideDropped { subgraph } => {
+            Self::SideDropped { compound } => {
                 write!(
                     f,
-                    "removed the view of {subgraph:?}, which names no subgraph"
+                    "removed the view of {compound:?}, which names no compound"
                 )
             }
-            Self::ThroughCleared { subgraph, path } => {
+            Self::ThroughCleared { compound, path } => {
                 write!(
                     f,
-                    "showed subgraph {subgraph:?} through no instance: {path:?} names none of it"
+                    "showed compound {compound:?} through no instance: {path:?} names none of it"
                 )
             }
             Self::ActiveReset { graph } => {
@@ -319,8 +319,8 @@ impl Display for ViewRepair {
 #[cfg(test)]
 mod tests {
     use scenarium::{
-        CustomTypeId, DataType, DetachReason, GraphId, InterfacePort, NodeAddr, NodeId, PortId,
-        PortList, Repair, SubgraphId, UnknownType,
+        CompoundId, CustomTypeId, DataType, DetachReason, GraphId, InterfacePort, NodeAddr, NodeId,
+        PortId, PortList, Repair, UnknownType,
     };
 
     use crate::core::document::load_report::{DocumentRepair, ForeignPath, LoadReport};
@@ -340,7 +340,7 @@ mod tests {
         let unknown_types = vec![UnknownType {
             data_type: DataType::Custom(CustomTypeId::from_u128(1)),
             ports: vec![InterfacePort {
-                subgraph: SubgraphId::from_u128(1),
+                compound: CompoundId::from_u128(1),
                 list: PortList::Inputs,
                 port: PortId::new(1),
             }],

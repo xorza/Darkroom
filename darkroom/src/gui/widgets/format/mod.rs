@@ -32,7 +32,7 @@ fn printed_integer_part(value: f64, precision: usize) -> u64 {
         .unwrap_or(u64::MAX)
 }
 
-/// The most characters a name's inline editor takes, a node's title or a subgraph's tab.
+/// The most characters a name's inline editor takes, a node's title or a compound's tab.
 pub(crate) const NAME_MAX_CHARS: usize = 32;
 
 /// What a node is called on every surface that names it — a viewer's tab and title, the

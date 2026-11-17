@@ -38,6 +38,7 @@ pub use exec::report::run_reporter::RunPhase;
 pub use graph::Graph;
 pub use graph::binding::Binding;
 pub use graph::binding_entry::BindingEntry;
+pub use graph::compound::Compound;
 pub use graph::detached::{DetachedGhost, DetachedNode, DetachedNodeParts};
 pub use graph::error::{
     BindingRejection, DetachReason, DetachedNodeError, GhostRejection, GhostSubscriptionRejection,
@@ -54,10 +55,10 @@ pub use graph::ghost_node::GhostNode;
 pub use graph::ghost_wiring::{
     GhostBinding, GhostSource, GhostSubscription, GhostWiring, InputState, SubscriptionState,
 };
-pub use graph::graph_set::digest::SubgraphDigest;
+pub use graph::graph_set::digest::CompoundDigest;
 pub use graph::graph_set::{GraphSet, InterfacePort, ProgramShape, UnknownType};
 pub use graph::identity::{
-    EventPort, FuncId, GraphId, InputPort, NodeAddr, NodeId, OutputPort, PortId, SubgraphId,
+    CompoundId, EventPort, FuncId, GraphId, InputPort, NodeAddr, NodeId, OutputPort, PortId,
     TriggerPort,
 };
 pub use graph::instance_path::{InstancePath, InstancePathError};
@@ -78,7 +79,6 @@ pub use graph::program_id::{ProgramId, ProgramIdError};
 pub use graph::reconciled::{GraphSetReconciled, Reconciled, Repair};
 pub use graph::saved_decl::{SavedDecl, SavedEvent, SavedInput, SavedPort, ShownPort};
 pub use graph::scope::Scope;
-pub use graph::subgraph::Subgraph;
 pub use graph::subscription::Subscription;
 pub use graph::type_names::{TypeNames, TypeRef};
 pub use library::Library;

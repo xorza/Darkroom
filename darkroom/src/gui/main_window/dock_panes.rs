@@ -15,13 +15,13 @@ use palantir::{
     Configure, DockDrop, DockOperation, DockTabMenu, DockTabs, EditableLabel, InternedStr,
     MenuItem, Size, SplitSide, TabChip, Ui, WidgetId, fmt,
 };
-use scenarium::{GraphId, Library, ProgramId, SubgraphId};
+use scenarium::{CompoundId, GraphId, Library, ProgramId};
 
 use crate::core::document;
 use crate::core::document::Document;
 use crate::core::document::inspect_target::InspectTarget;
 use crate::core::document::tab_ref::TabRef;
-use crate::core::edit::subgraph_intent::SubgraphIntent;
+use crate::core::edit::compound_intent::CompoundIntent;
 use crate::core::io::preferences::Preferences;
 use crate::gui::frame::doc_ctx::DocCtx;
 use crate::gui::frame::stage::Stage;
@@ -44,7 +44,7 @@ pub(crate) struct DockPanes<'a> {
     pub(crate) preferences: &'a mut Preferences,
 }
 
-/// The name a tab's chip shows, written on demand: a subgraph's pane names the subgraph, and an
+/// The name a tab's chip shows, written on demand: a compound's pane names the compound, and an
 /// inspector held on a node names it, the node's graph resolved against `library`.
 pub(crate) fn tab_label<'a>(
     document: &'a Document,
@@ -53,11 +53,11 @@ pub(crate) fn tab_label<'a>(
 ) -> TabLabel<'a> {
     match tab {
         TabRef::Graph(GraphId::Main) => TabLabel::Plain("Graph"),
-        TabRef::Graph(GraphId::Subgraph(id)) => TabLabel::Plain(
+        TabRef::Graph(GraphId::Compound(id)) => TabLabel::Plain(
             &document
                 .graphs
-                .subgraph(id)
-                .expect("a subgraph's pane closes with it")
+                .compound(id)
+                .expect("a compound's pane closes with it")
                 .name,
         ),
         TabRef::Preferences => TabLabel::Plain("Preferences"),
@@ -161,17 +161,17 @@ impl DockTabs for DockPanes<'_> {
         }
     }
 
-    /// A subgraph's tab renames it in place: a double click on the chip, or Rename in its menu,
+    /// A compound's tab renames it in place: a double click on the chip, or Rename in its menu,
     /// opens an editor of the name, as Excel's sheet tab does
     /// ([rename a worksheet](https://support.microsoft.com/en-us/office/rename-a-worksheet-3f1f7148-ee83-404d-8ef0-9ff99fbad1f9)).
     /// Enter or a blur commits, Escape keeps the name; the chip keeps its click, drag and close
     /// button around the editor.
     fn chip(&mut self, ui: &mut Ui, tab: TabRef, chip: &TabChip) {
-        let TabRef::Graph(GraphId::Subgraph(subgraph)) = tab else {
+        let TabRef::Graph(GraphId::Compound(compound)) = tab else {
             chip.show_label(ui);
             return;
         };
-        let editor = rename_wid(subgraph);
+        let editor = rename_wid(compound);
         if ui.response_for(chip.id).left.double_clicked() {
             EditableLabel::start_editing(ui, editor);
         }
@@ -184,8 +184,8 @@ impl DockTabs for DockPanes<'_> {
             .ctx
             .document()
             .graphs
-            .subgraph(subgraph)
-            .expect("a subgraph's pane closes with it")
+            .compound(compound)
+            .expect("a compound's pane closes with it")
             .name;
         let label = EditableLabel::new(name.as_str())
             .id(editor)
@@ -195,11 +195,11 @@ impl DockTabs for DockPanes<'_> {
         if let Some(to) = label.committed_text {
             self.stage
                 .out
-                .push_subgraph(SubgraphIntent::Rename { id: subgraph, to });
+                .push_compound(CompoundIntent::Rename { id: compound, to });
         }
     }
 
-    /// Every tab has a menu: the splits for any, and Rename for a subgraph's.
+    /// Every tab has a menu: the splits for any, and Rename for a compound's.
     fn has_tab_menu(&mut self, _tab: TabRef) -> bool {
         true
     }
@@ -212,10 +212,10 @@ impl DockTabs for DockPanes<'_> {
     /// The keyboard-free, discoverable route to the same split a chip
     /// drag performs.
     fn tab_menu(&mut self, ui: &mut Ui, menu: DockTabMenu<'_, TabRef>) {
-        if let TabRef::Graph(GraphId::Subgraph(subgraph)) = menu.tab
+        if let TabRef::Graph(GraphId::Compound(compound)) = menu.tab
             && MenuItem::new("Rename").show(ui).left.clicked()
         {
-            EditableLabel::start_editing(ui, rename_wid(subgraph));
+            EditableLabel::start_editing(ui, rename_wid(compound));
         }
         let right = MenuItem::new("Split right").show(ui).left.clicked();
         let down = MenuItem::new("Split down").show(ui).left.clicked();
@@ -236,45 +236,45 @@ impl DockTabs for DockPanes<'_> {
     }
 }
 
-/// The editor of `subgraph`'s name in its tab's chip: keyed by the subgraph, as it has one tab.
-pub(crate) fn rename_wid(subgraph: SubgraphId) -> WidgetId {
-    WidgetId::from_hash(("darkroom.dock.rename", subgraph))
+/// The editor of `compound`'s name in its tab's chip: keyed by the compound, as it has one tab.
+pub(crate) fn rename_wid(compound: CompoundId) -> WidgetId {
+    WidgetId::from_hash(("darkroom.dock.rename", compound))
 }
 
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
-    use scenarium::{GraphId, InstancePath, Interface, Node, NodeAddr, Subgraph, SubgraphId};
+    use scenarium::{Compound, CompoundId, GraphId, InstancePath, Interface, Node, NodeAddr};
 
     use crate::core::document::inspect_target::InspectTarget;
-    use crate::core::document::internals::{DocumentFixture, insert_subgraph};
+    use crate::core::document::internals::{DocumentFixture, insert_compound};
     use crate::core::document::tab_ref::TabRef;
     use crate::core::preview_sink;
     use crate::gui::main_window::dock_panes::tab_label;
 
-    /// Each tab names what it shows: the main graph's pane "Graph", a subgraph's pane the
-    /// subgraph, and a viewer and a pinned inspector the node inside the subgraph they show.
+    /// Each tab names what it shows: the main graph's pane "Graph", a compound's pane the
+    /// compound, and a viewer and a pinned inspector the node inside the compound they show.
     #[test]
     fn a_tab_names_what_it_shows_in_any_graph() {
         let mut fixture = DocumentFixture::default();
-        let id = SubgraphId::from_u128(1);
-        let mut subgraph = Subgraph::new("Denoise", Interface::default());
+        let id = CompoundId::from_u128(1);
+        let mut compound = Compound::new("Denoise", Interface::default());
         let mut preview = Node::from(&preview_sink::func(Arc::default()));
         preview.name = "Shown".to_string();
-        let shown = subgraph.graph.add(preview);
-        insert_subgraph(&mut fixture.document, id, subgraph);
+        let shown = compound.graph.add(preview);
+        insert_compound(&mut fixture.document, id, compound);
         let instance = fixture.add_instance(id);
         let DocumentFixture { document, library } = fixture;
         let label = |tab| tab_label(&document, &library, tab).to_string();
 
         assert_eq!(label(TabRef::Graph(GraphId::Main)), "Graph");
-        assert_eq!(label(TabRef::Graph(GraphId::Subgraph(id))), "Denoise");
+        assert_eq!(label(TabRef::Graph(GraphId::Compound(id))), "Denoise");
         let path = InstancePath::new(&[instance]);
         assert_eq!(label(TabRef::ImageViewer(path.node(shown))), "Shown");
         assert_eq!(
             label(TabRef::Inspector(InspectTarget::Node {
-                addr: NodeAddr::new(GraphId::Subgraph(id), shown),
+                addr: NodeAddr::new(GraphId::Compound(id), shown),
                 through: Some(path),
             })),
             "Inspector \u{b7} Shown"

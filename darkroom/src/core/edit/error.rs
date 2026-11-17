@@ -1,6 +1,6 @@
 //! Why an intent could never have applied, and why the document refuses one that could.
 
-use crate::core::document::subgraph_side::ReadOnly;
+use crate::core::document::compound_side::ReadOnly;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
@@ -30,20 +30,20 @@ pub(crate) enum IntentError {
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EditRefusal {
     /// A node whose placement [`scenarium::GraphSet::admit_nodes`] refuses: an instance of a
-    /// subgraph inside itself, or one past a bound.
+    /// compound inside itself, or one past a bound.
     #[error("the node was not added")]
     Placement(#[source] PlacementRejection),
-    /// A removal of a subgraph's `Outputs` node or its last `Inputs` node, or a second
+    /// A removal of a compound's `Outputs` node or its last `Inputs` node, or a second
     /// `Outputs` node added.
-    #[error("a subgraph keeps one Outputs node and at least one Inputs node")]
+    #[error("a compound keeps one Outputs node and at least one Inputs node")]
     BoundaryNode,
-    /// A removal of a subgraph that nodes still place.
-    #[error("the subgraph is placed by {uses} node(s); remove them first")]
-    SubgraphInUse { uses: usize },
-    /// An edit of the graph or interface of a subgraph that follows the library or is locked.
+    /// A removal of a compound that nodes still place.
+    #[error("the compound is placed by {uses} node(s); remove them first")]
+    CompoundInUse { uses: usize },
+    /// An edit of the graph or interface of a compound that follows the library or is locked.
     #[error("{}", match why {
-        ReadOnly::Follows => "the subgraph follows the library; Make Local to edit it",
-        ReadOnly::Locked => "the subgraph is locked; Unlock it to edit it",
+        ReadOnly::Follows => "the compound follows the library; Make Local to edit it",
+        ReadOnly::Locked => "the compound is locked; Unlock it to edit it",
     })]
     ReadOnly { why: ReadOnly },
 }
@@ -77,9 +77,9 @@ pub(crate) enum MalformedIntent {
     /// nothing of its own: the canvas draws no cache chips on one, so this is a widget's bug.
     #[error("node {node_id:?} has no body, so no cache mode")]
     NoCacheMode { node_id: NodeId },
-    /// A subgraph set on a node that is no instance, or one whose interface is not the
+    /// A compound set on a node that is no instance, or one whose interface is not the
     /// instance's own: a re-pointing keeps every port, so a widget offers neither.
-    #[error("node {node_id:?} cannot be pointed at that subgraph")]
+    #[error("node {node_id:?} cannot be pointed at that compound")]
     NotRepointable { node_id: NodeId },
     /// An insertion's own wiring pointing at a node the graph doesn't hold. Unlike a stale
     /// reference this is malformed: the wiring is authored together with its node.

@@ -103,7 +103,7 @@ impl NodeMenuUi {
             if boundary.is_none() && MenuItem::new("Replace with\u{2026}").show(ui).clicked() {
                 chosen = Some(MenuChoice::Replace);
             }
-            // A subgraph keeps its `Outputs` node and one `Inputs` node.
+            // A compound keeps its `Outputs` node and one `Inputs` node.
             let inputs_count = || {
                 graph_ctx
                     .body()

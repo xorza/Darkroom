@@ -1,7 +1,7 @@
 //! [`Ports`]: the inputs and outputs a declaration shows and is wired by, each an [`InputDecl`]
 //! or an [`OutputDecl`] under its [`PortId`], a [`Numbered`].
 //!
-//! A func's ports and a subgraph's interface are both a `Ports`, held to one rule
+//! A func's ports and a compound's interface are both a `Ports`, held to one rule
 //! ([`Ports::check`]), so a port exposed on an interface keeps what made it: a const-only input,
 //! a picker, an enum.
 //!

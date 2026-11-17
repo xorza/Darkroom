@@ -5,37 +5,37 @@
 //!   definition held under its id, by digest, is that definition; a different one comes in beside
 //!   it under a fresh id, and what came with it names that one. As Cargo builds two copies of a
 //!   dependency two packages need at incompatible versions. Refused: one version per document,
-//!   which changes a subgraph nobody touched.
+//!   which changes a compound nobody touched.
 //! - **A definition that enters from another file is parsed against this library**, as a load
 //!   parses a document ([`GraphSet::reconcile`]), with the manifest its file held: a node its
 //!   graph cannot hold here stays a ghost node that says what it was, so the definition travels
 //!   whole. Refused: taking it in as the other file held it, which leaves the document a graph
 //!   the compile refuses.
 //! - **A definition that enters from another file loses its output paths**, as a write inside a
-//!   subgraph is one the receiver did not pick and cannot see; the input takes the receiver's
+//!   compound is one the receiver did not pick and cannot see; the input takes the receiver's
 //!   library default, as a new node's input does. A node pasted onto the canvas keeps its own,
 //!   which is in view.
 
 use std::collections::HashMap;
 
 use scenarium::{
-    Binding, DataType, FileMode, GraphSet, InputPort, InputState, Library, Manifest, NodeId,
-    Subgraph, SubgraphDigest, SubgraphId,
+    Binding, Compound, CompoundDigest, CompoundId, DataType, FileMode, GraphSet, InputPort,
+    InputState, Library, Manifest, NodeId,
 };
 
 use crate::core::document::Document;
+use crate::core::document::compound_side::CompoundSide;
 use crate::core::document::graph_view::GraphView;
-use crate::core::document::subgraph_side::SubgraphSide;
-use crate::core::edit::subgraph_intent::NewSubgraph;
+use crate::core::edit::compound_intent::NewCompound;
 
 /// A definition from another file, under the id that file held it under, with its view and the
 /// digest it last shared with the library there.
 #[derive(Debug)]
 pub(crate) struct Carried {
-    pub(crate) id: SubgraphId,
-    pub(crate) subgraph: Subgraph,
+    pub(crate) id: CompoundId,
+    pub(crate) compound: Compound,
     pub(crate) view: GraphView,
-    pub(crate) synced: Option<SubgraphDigest>,
+    pub(crate) synced: Option<CompoundDigest>,
     /// Its author's lock, which travels with every copy.
     pub(crate) locked: bool,
 }
@@ -44,14 +44,14 @@ pub(crate) struct Carried {
 /// definition goes by in the document.
 #[derive(Debug)]
 pub(crate) struct BroughtIn {
-    pub(crate) subgraphs: Vec<NewSubgraph>,
-    ids: HashMap<SubgraphId, SubgraphId>,
+    pub(crate) compounds: Vec<NewCompound>,
+    ids: HashMap<CompoundId, CompoundId>,
 }
 
 impl BroughtIn {
     /// The id the definition carried under `id` goes by in the document; `id` itself for one it
     /// did not carry.
-    pub(crate) fn id(&self, id: SubgraphId) -> SubgraphId {
+    pub(crate) fn id(&self, id: CompoundId) -> CompoundId {
         self.ids.get(&id).copied().unwrap_or(id)
     }
 }
@@ -66,16 +66,16 @@ pub(crate) fn reconcile(
 ) -> GraphSet {
     let mut set = GraphSet::default();
     for definition in &*carried {
-        set.insert_subgraph(definition.id, definition.subgraph.clone());
+        set.insert_compound(definition.id, definition.compound.clone());
     }
-    for (id, reconciled) in set.reconcile(library, manifest).subgraphs {
+    for (id, reconciled) in set.reconcile(library, manifest).compounds {
         for repair in reconciled.repairs {
-            tracing::info!(target: "darkroom::edit", "bringing in subgraph {id:?}: {repair}");
+            tracing::info!(target: "darkroom::edit", "bringing in compound {id:?}: {repair}");
         }
     }
     for definition in carried {
-        definition.subgraph.clone_from(
-            set.subgraph(definition.id)
+        definition.compound.clone_from(
+            set.compound(definition.id)
                 .expect("each carried definition is in the set"),
         );
     }
@@ -92,62 +92,62 @@ pub(crate) fn bring_in(
     manifest: &Manifest,
 ) -> BroughtIn {
     let set = reconcile(&mut carried, library, manifest);
-    let mut ids: HashMap<SubgraphId, SubgraphId> = HashMap::new();
+    let mut ids: HashMap<CompoundId, CompoundId> = HashMap::new();
     let mut incoming = Vec::new();
     for definition in carried {
-        let id = match document.graphs.subgraph(definition.id) {
+        let id = match document.graphs.compound(definition.id) {
             Some(_) if document.graphs.digest(definition.id) == set.digest(definition.id) => {
                 ids.insert(definition.id, definition.id);
                 continue;
             }
-            Some(_) => SubgraphId::unique(),
+            Some(_) => CompoundId::unique(),
             None => definition.id,
         };
         ids.insert(definition.id, id);
         incoming.push((id, definition));
     }
-    let subgraphs = incoming
+    let compounds = incoming
         .into_iter()
         .map(|(id, definition)| {
-            let mut subgraph = definition.subgraph;
-            enter(&mut subgraph, &ids, library);
-            let side = SubgraphSide {
+            let mut compound = definition.compound;
+            enter(&mut compound, &ids, library);
+            let side = CompoundSide {
                 view: definition.view,
                 synced: definition.synced,
                 locked: definition.locked,
-                ..SubgraphSide::new(&subgraph.graph)
+                ..CompoundSide::new(&compound.graph)
             };
-            NewSubgraph {
+            NewCompound {
                 id,
-                subgraph,
+                compound,
                 side,
                 type_names: manifest.types().clone(),
             }
         })
         .collect();
-    BroughtIn { subgraphs, ids }
+    BroughtIn { compounds, ids }
 }
 
-/// Ready `subgraph`, carried in from another file, for the document: each instance pointed at
-/// the id `ids` gives the subgraph it places, and its output paths stripped against `library`.
-fn enter(subgraph: &mut Subgraph, ids: &HashMap<SubgraphId, SubgraphId>, library: &Library) {
+/// Ready `compound`, carried in from another file, for the document: each instance pointed at
+/// the id `ids` gives the compound it places, and its output paths stripped against `library`.
+fn enter(compound: &mut Compound, ids: &HashMap<CompoundId, CompoundId>, library: &Library) {
     // Read before the graph is written.
-    let nodes: Vec<NodeId> = subgraph.graph.iter().map(|node| node.node_id).collect();
+    let nodes: Vec<NodeId> = compound.graph.iter().map(|node| node.node_id).collect();
     for node_id in nodes {
-        let node = subgraph.graph.find_mut(node_id).expect("listed above");
-        if let Some(placed) = node.subgraph() {
-            node.set_subgraph(ids.get(&placed).copied().unwrap_or(placed));
+        let node = compound.graph.find_mut(node_id).expect("listed above");
+        if let Some(placed) = node.compound() {
+            node.set_compound(ids.get(&placed).copied().unwrap_or(placed));
         }
     }
-    strip_output_paths(subgraph, library);
-    take_path_defaults(subgraph, library);
+    strip_output_paths(compound, library);
+    take_path_defaults(compound, library);
 }
 
-/// Put the library's default on each path input of `subgraph`'s func nodes that holds nothing, as
+/// Put the library's default on each path input of `compound`'s func nodes that holds nothing, as
 /// a new node's input takes it: an input an export stripped follows the receiver's preferences,
 /// a model path among them.
-fn take_path_defaults(subgraph: &mut Subgraph, library: &Library) {
-    let graph = &mut subgraph.graph;
+fn take_path_defaults(compound: &mut Compound, library: &Library) {
+    let graph = &mut compound.graph;
     let mut defaults = Vec::new();
     for node in graph.iter() {
         let Some(func) = node.func_id().and_then(|id| library.by_id(id)) else {
@@ -170,17 +170,17 @@ fn take_path_defaults(subgraph: &mut Subgraph, library: &Library) {
 }
 
 impl BroughtIn {
-    /// Ready `subgraph`, carried in beside what this brought in, for the document, as each
+    /// Ready `compound`, carried in beside what this brought in, for the document, as each
     /// definition it brought in was: what an update does with the definition it puts in place.
-    pub(crate) fn enter(&self, subgraph: &mut Subgraph, library: &Library) {
-        enter(subgraph, &self.ids, library);
+    pub(crate) fn enter(&self, compound: &mut Compound, library: &Library) {
+        enter(compound, &self.ids, library);
     }
 }
 
-/// Take each constant out of an input of `subgraph`'s func nodes that names a file to write,
+/// Take each constant out of an input of `compound`'s func nodes that names a file to write,
 /// putting the library's default in its place where the func declares one.
-fn strip_output_paths(subgraph: &mut Subgraph, library: &Library) {
-    let graph = &mut subgraph.graph;
+fn strip_output_paths(compound: &mut Compound, library: &Library) {
+    let graph = &mut compound.graph;
     let outputs: Vec<_> = graph
         .bindings
         .iter()
@@ -209,8 +209,8 @@ fn strip_output_paths(subgraph: &mut Subgraph, library: &Library) {
 #[cfg(test)]
 mod tests {
     use scenarium::{
-        Binding, ConstValue, DataType, FileKindId, FileMode, FuncId, InputDecl, InputPort,
-        Interface, Library, Manifest, Node, PortId, Subgraph, SubgraphId, internals,
+        Binding, Compound, CompoundId, ConstValue, DataType, FileKindId, FileMode, FuncId,
+        InputDecl, InputPort, Interface, Library, Manifest, Node, PortId, internals,
     };
 
     use crate::core::document::Document;
@@ -237,34 +237,34 @@ mod tests {
             .build();
         let mut library = Library::default();
         library.add(writer.clone());
-        let mut subgraph = Subgraph::new("export", Interface::default());
-        let node = subgraph.graph.add(Node::from(&writer));
+        let mut compound = Compound::new("export", Interface::default());
+        let node = compound.graph.add(Node::from(&writer));
         let path = |name: &str| Binding::Const(ConstValue::FsPath(format!("/data/{name}")));
         let (read, write) = (
             InputPort::new(node, PortId::new(1)),
             InputPort::new(node, PortId::new(2)),
         );
-        subgraph.graph.bindings.insert(read, path("in.tif"));
-        subgraph.graph.bindings.insert(write, path("out.tif"));
-        let view = GraphView::new(&subgraph.graph);
-        let id = SubgraphId::from_u128(1);
+        compound.graph.bindings.insert(read, path("in.tif"));
+        compound.graph.bindings.insert(write, path("out.tif"));
+        let view = GraphView::new(&compound.graph);
+        let id = CompoundId::from_u128(1);
         let brought = bring_in(
             &Document::default(),
             &library,
             vec![Carried {
                 id,
-                subgraph,
+                compound,
                 view,
                 synced: None,
                 locked: false,
             }],
             &Manifest::default(),
         );
-        let [entered] = brought.subgraphs.as_slice() else {
+        let [entered] = brought.compounds.as_slice() else {
             panic!("one definition comes in");
         };
         assert_eq!(entered.id, id, "an id the document lacks is kept");
-        let bindings = &entered.subgraph.graph.bindings;
+        let bindings = &entered.compound.graph.bindings;
         assert_eq!(bindings.get(&read), Some(&path("in.tif")));
         assert_eq!(bindings.get(&write), None);
         assert_eq!(

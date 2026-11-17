@@ -7,14 +7,14 @@
 use glam::{UVec2, Vec2};
 use palantir::{App, Harness, RecordPass, SizeSpec, WindowToken};
 use palantir::{Configure, DockOperation, Panel, Rect, SystemScale, Ui, WidgetId};
-use scenarium::{GraphId, InstancePath, NodeId, SubgraphId};
+use scenarium::{CompoundId, GraphId, InstancePath, NodeId};
 
 use crate::core::document::Document;
 use crate::core::document::internals::DocumentFixture;
 use crate::core::document::tab_ref::TabRef;
+use crate::core::edit::compound_intent::CompoundIntent;
 use crate::core::edit::document_request::DocumentRequest;
 use crate::core::edit::graph_intent::GraphIntent;
-use crate::core::edit::subgraph_intent::SubgraphIntent;
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::requests::Requests;
 use crate::gui::frame::stage::Stage;
@@ -59,11 +59,11 @@ pub(crate) struct CanvasHarness {
     /// The view ops the last [`Self::frame`] raised: the one thing the canvas asks of the dock,
     /// a viewer tab for a clicked preview card.
     pub(crate) view_ops: Vec<DockOperation<TabRef>>,
-    /// The subgraph panes the last [`Self::frame`] asked to enter, each with the instance it
+    /// The compound panes the last [`Self::frame`] asked to enter, each with the instance it
     /// shows them through.
-    pub(crate) entries: Vec<(SubgraphId, Option<InstancePath>)>,
+    pub(crate) entries: Vec<(CompoundId, Option<InstancePath>)>,
     /// The edits of the set of graphs the last [`Self::frame`] raised.
-    pub(crate) subgraph_edits: Vec<SubgraphIntent>,
+    pub(crate) compound_edits: Vec<CompoundIntent>,
 }
 
 impl CanvasHarness {
@@ -101,7 +101,7 @@ impl CanvasHarness {
             commands: Vec::new(),
             view_ops: Vec::new(),
             entries: Vec::new(),
-            subgraph_edits: Vec::new(),
+            compound_edits: Vec::new(),
         }
     }
 
@@ -115,14 +115,14 @@ impl CanvasHarness {
             commands,
             view_ops,
             entries,
-            subgraph_edits,
+            compound_edits,
         } = self;
         let mut frame = CanvasFrame::new(graph_ui, ctx, AppliesIntents::No);
         ui.frame_app(&mut frame);
         let mut out = frame.finish(ui);
         view_ops.clear();
         entries.clear();
-        subgraph_edits.clear();
+        compound_edits.clear();
         let intents: Vec<GraphIntent> = out
             .document()
             .drain()
@@ -137,12 +137,12 @@ impl CanvasHarness {
                     view_ops.push(op);
                     None
                 }
-                DocumentRequest::Enter { subgraph, through } => {
-                    entries.push((subgraph, through));
+                DocumentRequest::Enter { compound, through } => {
+                    entries.push((compound, through));
                     None
                 }
-                DocumentRequest::Subgraph(intent) => {
-                    subgraph_edits.push(intent);
+                DocumentRequest::Compound(intent) => {
+                    compound_edits.push(intent);
                     None
                 }
             })

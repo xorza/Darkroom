@@ -1,4 +1,4 @@
-//! [`InterfaceChange`]: the reversible record of an edit of a subgraph's interface.
+//! [`InterfaceChange`]: the reversible record of an edit of a compound's interface.
 //!
 //! # Decisions
 //!
@@ -30,18 +30,18 @@ use crate::graph::ghost_wiring::{
     GhostBinding, GhostSource, GhostSubscription, InputState, SubscriptionState,
 };
 use crate::graph::graph_set::GraphSet;
-use crate::graph::identity::{GraphId, InputPort, OutputPort, SubgraphId};
+use crate::graph::identity::{CompoundId, GraphId, InputPort, OutputPort};
 use crate::graph::interface::Interface;
 use crate::graph::saved_decl::{SavedEvent, SavedPort};
 use crate::graph::subscription::Subscription;
 use crate::library::Library;
 
-/// An edit of one subgraph's interface: the interface before and after, each binding the new
+/// An edit of one compound's interface: the interface before and after, each binding the new
 /// interface does not hold, in any graph, and what becomes of them. [`GraphSet::write_interface`]
 /// lands either side.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InterfaceChange {
-    id: SubgraphId,
+    id: CompoundId,
     before: Interface,
     after: Interface,
     refused: Vec<RefusedBinding>,
@@ -92,7 +92,7 @@ pub enum ChangeSide {
 }
 
 impl InterfaceChange {
-    pub const fn id(&self) -> SubgraphId {
+    pub const fn id(&self) -> CompoundId {
         self.id
     }
 
@@ -120,23 +120,23 @@ impl InterfaceChange {
 }
 
 impl GraphSet {
-    /// What setting subgraph `id`'s interface to `to` changes: each binding, in any graph, that
+    /// What setting compound `id`'s interface to `to` changes: each binding, in any graph, that
     /// the new interface does not hold — on or from an instance of `id` whose port it lacks or no
     /// longer admits, and on or from a boundary node of `id`'s graph likewise — which `fate`
     /// drops or keeps as ghosts.
     ///
     /// # Panics
-    /// If this set holds no subgraph under `id`.
+    /// If this set holds no compound under `id`.
     pub fn plan_interface(
         &self,
-        id: SubgraphId,
+        id: CompoundId,
         to: Interface,
         library: &Library,
         fate: RefusedFate,
     ) -> InterfaceChange {
         let before = self
-            .subgraph(id)
-            .expect("an interface edit's subgraph is in the set")
+            .compound(id)
+            .expect("an interface edit's compound is in the set")
             .interface
             .clone();
         let mut after = self.clone();

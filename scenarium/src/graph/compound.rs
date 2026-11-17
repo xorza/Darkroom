@@ -1,8 +1,8 @@
-//! [`Subgraph`]: a graph with an interface, held by a document and placed as instances.
+//! [`Compound`]: a graph with an interface, held by a document and placed as instances.
 //!
 //! # Decisions
 //!
-//! - **One kind of subgraph.** Every subgraph is a definition the document holds and every node
+//! - **One kind of compound.** Every compound is a definition the document holds and every node
 //!   of it an instance; one used once behaves as a private one. As Blender's node groups, shared
 //!   data-blocks with a user count ([node
 //!   groups](https://docs.blender.org/manual/en/latest/interface/controls/nodes/groups.html)),
@@ -37,7 +37,7 @@ use crate::graph::interface::Interface;
 use crate::graph::node::{Boundary, Node};
 
 /// A graph with an interface, held by a document; a node of it is an *instance*. One kind for
-/// every use: a subgraph used once behaves as a private one, as Blender's node groups, shared
+/// every use: a compound used once behaves as a private one, as Blender's node groups, shared
 /// data-blocks with a user count
 /// ([node groups](https://docs.blender.org/manual/en/latest/interface/controls/nodes/groups.html)).
 ///
@@ -51,15 +51,15 @@ use crate::graph::node::{Boundary, Node};
 /// another interface removes, in the same edit, each binding on an instance or a boundary node
 /// that names a port the new interface lacks or no longer admits.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Subgraph {
+pub struct Compound {
     pub name: String,
     pub description: Option<String>,
     pub interface: Interface,
     pub graph: Graph,
 }
 
-impl Subgraph {
-    /// A subgraph named `name` with `interface`, its graph holding the two boundary nodes alone.
+impl Compound {
+    /// A compound named `name` with `interface`, its graph holding the two boundary nodes alone.
     pub fn new(name: impl Into<String>, interface: Interface) -> Self {
         let mut graph = Graph::default();
         graph.add(Node::from(Boundary::Inputs));
@@ -72,7 +72,7 @@ impl Subgraph {
         }
     }
 
-    /// The `Inputs` nodes of this subgraph's graph, in no order.
+    /// The `Inputs` nodes of this compound's graph, in no order.
     pub fn inputs_nodes(&self) -> impl Iterator<Item = NodeId> {
         self.graph
             .iter()
@@ -80,25 +80,25 @@ impl Subgraph {
             .map(|node| node.node_id)
     }
 
-    /// The `Inputs` node of least id: a new subgraph's one.
+    /// The `Inputs` node of least id: a new compound's one.
     ///
     /// # Panics
-    /// If the graph holds none, which a subgraph a host keeps never does.
+    /// If the graph holds none, which a compound a host keeps never does.
     pub fn inputs_node(&self) -> NodeId {
         self.inputs_nodes()
             .min()
-            .expect("a subgraph's graph holds an Inputs node")
+            .expect("a compound's graph holds an Inputs node")
     }
 
-    /// The `Outputs` node of this subgraph's graph.
+    /// The `Outputs` node of this compound's graph.
     ///
     /// # Panics
-    /// If the graph holds none, which a subgraph a host keeps never does.
+    /// If the graph holds none, which a compound a host keeps never does.
     pub fn outputs_node(&self) -> NodeId {
         self.graph
             .iter()
             .find(|node| node.boundary() == Some(Boundary::Outputs))
-            .expect("a subgraph's graph holds an Outputs node")
+            .expect("a compound's graph holds an Outputs node")
             .node_id
     }
 }

@@ -1,22 +1,22 @@
 use std::collections::BTreeSet;
 
 use glam::Vec2;
-use scenarium::{GraphId, Interface, Library, NodeId, Subgraph, SubgraphId};
+use scenarium::{Compound, CompoundId, GraphId, Interface, Library, NodeId};
 
 use crate::core::clip::{Clip, HEADER};
 use crate::core::document::Document;
-use crate::core::document::internals::{DocumentFixture, insert_subgraph};
+use crate::core::document::internals::{DocumentFixture, insert_compound};
 use crate::core::document::item_id::ItemId;
 use crate::core::edit::document_queue::DocumentQueue;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::open_document::OpenDocument;
 
-/// A document holding subgraph `id`, one node inside it, and one instance of it in the main
+/// A document holding compound `id`, one node inside it, and one instance of it in the main
 /// graph; the instance's id.
-fn holder(fixture: &mut DocumentFixture, id: SubgraphId) -> NodeId {
-    let mut subgraph = Subgraph::new("Denoise", Interface::default());
-    subgraph.graph.add(fixture.plain_node());
-    insert_subgraph(&mut fixture.document, id, subgraph);
+fn holder(fixture: &mut DocumentFixture, id: CompoundId) -> NodeId {
+    let mut compound = Compound::new("Denoise", Interface::default());
+    compound.graph.add(fixture.plain_node());
+    insert_compound(&mut fixture.document, id, compound);
     fixture.add_instance(id)
 }
 
@@ -35,13 +35,13 @@ fn paste(open: &mut OpenDocument, library: &Library, text: &str) {
     let _ = open.drain_requests(&mut queue, library);
 }
 
-/// The instances of the main graph, by the subgraph each places.
-fn placed(document: &Document) -> Vec<SubgraphId> {
-    let mut placed: Vec<SubgraphId> = document
+/// The instances of the main graph, by the compound each places.
+fn placed(document: &Document) -> Vec<CompoundId> {
+    let mut placed: Vec<CompoundId> = document
         .graphs
         .main()
         .iter()
-        .filter_map(|node| node.subgraph())
+        .filter_map(|node| node.compound())
         .collect();
     placed.sort_unstable();
     placed
@@ -56,12 +56,12 @@ fn text_that_is_no_clip_pastes_nothing() {
     assert!(Clip::parse(&long).is_none());
 }
 
-/// A copied instance pastes into another document with its subgraph and that subgraph's view; a
+/// A copied instance pastes into another document with its compound and that compound's view; a
 /// second paste reuses the definition it brought, as the digests match; once that document
 /// changes the definition, a paste brings the copied one under a fresh id.
 #[test]
-fn a_paste_brings_its_subgraphs_by_digest() {
-    let id = SubgraphId::from_u128(1);
+fn a_paste_brings_its_compounds_by_digest() {
+    let id = CompoundId::from_u128(1);
     let mut source = DocumentFixture::default();
     let instance = holder(&mut source, id);
     let text = Clip::copy(
@@ -85,18 +85,18 @@ fn a_paste_brings_its_subgraphs_by_digest() {
     paste(&mut open, &library, &text);
     let document = open.document();
     assert_eq!(
-        document.graphs.subgraph(id),
-        source.document.graphs.subgraph(id)
+        document.graphs.compound(id),
+        source.document.graphs.compound(id)
     );
     assert_eq!(
-        document.view(GraphId::Subgraph(id)).node_placements,
-        source.document.view(GraphId::Subgraph(id)).node_placements
+        document.view(GraphId::Compound(id)).node_placements,
+        source.document.view(GraphId::Compound(id)).node_placements
     );
     assert_eq!(placed(document), [id]);
 
     paste(&mut open, &library, &text);
     assert_eq!(
-        open.document().graphs.subgraphs().len(),
+        open.document().graphs.compounds().len(),
         1,
         "an equal digest reuses it"
     );
@@ -105,14 +105,14 @@ fn a_paste_brings_its_subgraphs_by_digest() {
     let inside = open
         .document()
         .graphs
-        .graph(GraphId::Subgraph(id))
+        .graph(GraphId::Compound(id))
         .iter()
         .find(|node| node.boundary().is_none())
         .unwrap()
         .node_id;
     let mut queue = DocumentQueue::default();
     queue.push_graph(
-        GraphId::Subgraph(id),
+        GraphId::Compound(id),
         GraphIntent::RenameNode {
             node_id: inside,
             to: "changed here".to_string(),
@@ -122,13 +122,13 @@ fn a_paste_brings_its_subgraphs_by_digest() {
     paste(&mut open, &library, &text);
     let document = open.document();
     assert_eq!(
-        document.graphs.subgraphs().len(),
+        document.graphs.compounds().len(),
         2,
         "a changed one keeps its id"
     );
     let fresh = document
         .graphs
-        .subgraphs()
+        .compounds()
         .map(|(held, _)| held)
         .find(|&held| held != id)
         .unwrap();
@@ -137,7 +137,7 @@ fn a_paste_brings_its_subgraphs_by_digest() {
 }
 
 /// A clip from a document whose library this one lacks: a node whose func this library lacks
-/// is no edit the gate takes, so its paste lands nothing and says why; a subgraph holding one
+/// is no edit the gate takes, so its paste lands nothing and says why; a compound holding one
 /// comes in reconciled, the node kept inside it as a ghost node that holds what the clip's
 /// manifest says it declared, as a load keeps it.
 #[test]
@@ -148,12 +148,12 @@ fn a_clip_naming_a_func_this_library_lacks() {
 
     let mut source = DocumentFixture::default();
     let node = source.node_at(Vec2::ZERO);
-    let id = SubgraphId::from_u128(1);
+    let id = CompoundId::from_u128(1);
     let instance = holder(&mut source, id);
     let inside = source
         .document
         .graphs
-        .subgraph(id)
+        .compound(id)
         .unwrap()
         .graph
         .iter()
@@ -186,7 +186,7 @@ fn a_clip_naming_a_func_this_library_lacks() {
     paste(&mut open, &lacking, &copy(instance).to_text());
     let document = open.document();
     assert_eq!(placed(document), [id]);
-    let held = &document.graphs.subgraph(id).unwrap().graph;
+    let held = &document.graphs.compound(id).unwrap().graph;
     assert!(held.find(inside).is_none());
     let ghost = held.ghost_node(inside).expect("the node is kept");
     assert_eq!(

@@ -1,4 +1,4 @@
-//! [`PortEdit`]: one change of a subgraph's interface, as the inspector and the boundary nodes
+//! [`PortEdit`]: one change of a compound's interface, as the inspector and the boundary nodes
 //! raise it.
 //!
 //! # Decisions
@@ -36,7 +36,7 @@ pub(crate) enum Shift {
 }
 
 /// One change of an interface's ports. [`Self::apply`] gives the interface it leaves, which a
-/// [`SubgraphIntent::SetInterface`](crate::core::edit::subgraph_intent::SubgraphIntent) lands
+/// [`CompoundIntent::SetInterface`](crate::core::edit::compound_intent::CompoundIntent) lands
 /// with each binding the new one does not hold dropped.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum PortEdit {

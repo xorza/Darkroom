@@ -1,4 +1,4 @@
-//! Field codecs for [`Graph`](crate::graph::Graph)'s tables and a set's subgraphs. A map built by
+//! Field codecs for [`Graph`](crate::graph::Graph)'s tables and a set's compounds. A map built by
 //! repeated `insert` keeps the last value for a repeated key, so a corrupt document would load as
 //! a quietly different graph. Each codec decodes entry by entry and rejects the collision, since
 //! validation could only assert after the evidence was gone.
@@ -12,12 +12,12 @@ use ::serde::de::{MapAccess, Visitor};
 use ::serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::graph::binding::Binding;
+use crate::graph::compound::Compound;
 use crate::graph::ghost_node::GhostNode;
 use crate::graph::ghost_wiring::{GhostBinding, GhostSubscription};
-use crate::graph::identity::{FuncId, InputPort, NodeId, SubgraphId};
+use crate::graph::identity::{CompoundId, FuncId, InputPort, NodeId};
 use crate::graph::node::Node;
 use crate::graph::saved_decl::SavedDecl;
-use crate::graph::subgraph::Subgraph;
 use crate::graph::subscription::Subscription;
 use crate::graph::type_names::TypeRef;
 
@@ -77,13 +77,13 @@ pub(super) fn deserialize_nodes<'de, D: Deserializer<'de>>(
     })
 }
 
-/// The subgraph table, decoded as a map refusing a repeated id, as [`deserialize_nodes`] does
-/// for nodes: two subgraphs under one id are two definitions every instance of either names.
-pub(super) fn deserialize_subgraphs<'de, D: Deserializer<'de>>(
+/// The compound table, decoded as a map refusing a repeated id, as [`deserialize_nodes`] does
+/// for nodes: two compounds under one id are two definitions every instance of either names.
+pub(super) fn deserialize_compounds<'de, D: Deserializer<'de>>(
     deserializer: D,
-) -> Result<BTreeMap<SubgraphId, Subgraph>, D::Error> {
+) -> Result<BTreeMap<CompoundId, Compound>, D::Error> {
     deserializer.deserialize_map(UniqueMapVisitor {
-        what: "subgraph id",
+        what: "compound id",
         entry: PhantomData,
     })
 }

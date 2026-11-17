@@ -1,4 +1,4 @@
-//! Collapse and Expand: a selection turned into a new subgraph and one node of it, and one
+//! Collapse and Expand: a selection turned into a new compound and one node of it, and one
 //! instance's nodes put back in its graph.
 //!
 //! - **Collapse and Expand are each a plan lowered to ordinary requests**: a new definition,
@@ -20,21 +20,21 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 
 use glam::Vec2;
 use scenarium::{
-    Binding, BindingEntry, GraphId, InputDecl, InputPort, Interface, Library, Node, NodeId,
-    Numbered, OutputDecl, OutputPort, PortId, Ports, Subgraph, SubgraphId, TypeNames,
+    Binding, BindingEntry, Compound, CompoundId, GraphId, InputDecl, InputPort, Interface, Library,
+    Node, NodeId, Numbered, OutputDecl, OutputPort, PortId, Ports, TypeNames,
 };
 use thiserror::Error;
 
 use crate::core::document::Document;
+use crate::core::document::compound_side::CompoundSide;
+use crate::core::document::compound_side::ReadOnly;
 use crate::core::document::item_id::ItemId;
-use crate::core::document::subgraph_side::ReadOnly;
-use crate::core::document::subgraph_side::SubgraphSide;
+use crate::core::edit::compound_intent::{CompoundIntent, NewCompound};
 use crate::core::edit::document_queue::DocumentQueue;
 use crate::core::edit::error::EditRefusal;
 use crate::core::edit::fragment::Fragment;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
-use crate::core::edit::subgraph_intent::{NewSubgraph, SubgraphIntent};
 
 /// How far left of the selection the new definition's `Inputs` node sits, and right its
 /// `Outputs`, in canvas units.
@@ -51,7 +51,7 @@ pub(crate) enum CollapseRefusal {
     /// making data ports alone, does not carry.
     #[error("{name:?} is subscribed across the selection's edge")]
     SubscriptionCrosses { node: NodeId, name: String },
-    /// The graph follows the library or is locked: a collapse would add the new subgraph and
+    /// The graph follows the library or is locked: a collapse would add the new compound and
     /// have every edit of the graph refused.
     #[error("{}", EditRefusal::ReadOnly { why: *why })]
     ReadOnly { why: ReadOnly },
@@ -61,7 +61,7 @@ pub(crate) enum CollapseRefusal {
 /// of the graph around the selection.
 #[derive(Debug)]
 pub(crate) struct Collapse {
-    pub(crate) subgraph: NewSubgraph,
+    pub(crate) compound: NewCompound,
     /// Edits of the new definition's graph.
     pub(crate) inside: Vec<GraphIntent>,
     /// Edits of the graph the selection is in.
@@ -72,8 +72,8 @@ impl Collapse {
     /// Queue this collapse of `graph` on `queue`, in the order it lands: one batch, so one
     /// history entry.
     pub(crate) fn queue(self, graph: GraphId, queue: &mut DocumentQueue) {
-        let inner = GraphId::Subgraph(self.subgraph.id);
-        queue.push_subgraph(SubgraphIntent::Add(Box::new(self.subgraph)));
+        let inner = GraphId::Compound(self.compound.id);
+        queue.push_compound(CompoundIntent::Add(Box::new(self.compound)));
         queue.extend_graph(inner, self.inside);
         queue.extend_graph(graph, self.outside);
     }
@@ -88,7 +88,7 @@ struct Crossing {
     consumers: Vec<InputPort>,
 }
 
-/// Plan collapsing the graph nodes of `selection` in `graph` of `document` into a new subgraph
+/// Plan collapsing the graph nodes of `selection` in `graph` of `document` into a new compound
 /// and one instance of it; `None` when the selection holds no graph node. A boundary node and a
 /// ghost node in the selection stay where they are.
 pub(crate) fn collapse(
@@ -222,11 +222,11 @@ pub(crate) fn collapse(
     let max = poss.iter().copied().fold(Vec2::NEG_INFINITY, Vec2::max);
     let centroid = poss.iter().copied().sum::<Vec2>() / poss.len() as f32;
 
-    let id = SubgraphId::unique();
-    let subgraph = Subgraph::new(document.free_subgraph_name("Subgraph"), interface);
-    let inputs_node = subgraph.inputs_node();
-    let outputs_node = subgraph.outputs_node();
-    let mut side = SubgraphSide::new(&subgraph.graph);
+    let id = CompoundId::unique();
+    let compound = Compound::new(document.free_compound_name("Compound"), interface);
+    let inputs_node = compound.inputs_node();
+    let outputs_node = compound.outputs_node();
+    let mut side = CompoundSide::new(&compound.graph);
     for (node_id, x) in [
         (inputs_node, min.x - BOUNDARY_GAP),
         (outputs_node, max.x + BOUNDARY_GAP),
@@ -288,9 +288,9 @@ pub(crate) fn collapse(
     });
 
     Some(Ok(Collapse {
-        subgraph: NewSubgraph {
+        compound: NewCompound {
             id,
-            subgraph,
+            compound,
             side,
             type_names: TypeNames::default(),
         },
@@ -299,7 +299,7 @@ pub(crate) fn collapse(
     }))
 }
 
-/// The edits of `graph` that put the nodes of `instance`'s subgraph back in its place, under
+/// The edits of `graph` that put the nodes of `instance`'s compound back in its place, under
 /// fresh ids, wired as the instance was: each input the instance's own binding fed takes that
 /// binding, and each consumer of an instance output reads what fed the `Outputs` node there. The
 /// boundary nodes stay behind, and the definition stays in the document.
@@ -313,15 +313,15 @@ pub(crate) fn expand(
     instance: NodeId,
 ) -> Vec<GraphIntent> {
     let held = document.graphs.graph(graph);
-    let subgraph_id = held
+    let compound_id = held
         .find(instance)
-        .and_then(Node::subgraph)
+        .and_then(Node::compound)
         .expect("an expand names an instance");
-    let inner = GraphId::Subgraph(subgraph_id);
+    let inner = GraphId::Compound(compound_id);
     let definition = document
         .graphs
-        .subgraph(subgraph_id)
-        .expect("an instance's subgraph is in the set");
+        .compound(compound_id)
+        .expect("an instance's compound is in the set");
     let outputs_node = definition.outputs_node();
     let items: BTreeSet<ItemId> = definition
         .graph

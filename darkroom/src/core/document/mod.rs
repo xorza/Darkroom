@@ -23,10 +23,10 @@
 //!   a redo — goes through [`Document::remove_node`], which closes each tab and clears each
 //!   `through` the removal broke; an undo of the removal does not reopen the tab. Refused:
 //!   scanning every tab each frame.
-//! - **The editor keeps a side beside each subgraph**: its view and the instance its pane shows
-//!   it through, keyed as the set's subgraphs are. Refused: the view inside scenarium's
-//!   `Subgraph`, which puts the editor's layout in the framework; a `GraphSet` generic over what
-//!   a host keeps beside a subgraph, which threads a type parameter through the scope and the
+//! - **The editor keeps a side beside each compound**: its view and the instance its pane shows
+//!   it through, keyed as the set's compounds are. Refused: the view inside scenarium's
+//!   `Compound`, which puts the editor's layout in the framework; a `GraphSet` generic over what
+//!   a host keeps beside a compound, which threads a type parameter through the scope and the
 //!   compile.
 //! - **The window has one active graph**, the graph of the pane that last took input: the menu
 //!   bar, the status bar, the selection's inspector and each shortcut act on it, and an edit that
@@ -37,7 +37,7 @@
 //!   Refused: the main graph's selection as the one selection; the active graph moved only by an
 //!   edit, which leaves the menus on a pane no longer in front.
 //! - **One pane per graph, shown through one instance.** The main graph has its tab and each
-//!   subgraph at most one, whose `through` names the instance whose statuses, previews and timings
+//!   compound at most one, whose `through` names the instance whose statuses, previews and timings
 //!   it shows; opened from the palette it shows none. As Blender's Tab and ComfyUI's navigation
 //!   bar.
 //! - **Entering is navigation.** A double click on an instance, a name in the pane header and the
@@ -46,11 +46,12 @@
 //!   step, as the camera and the tabs stay out of the history.
 //! - **An undo brings the graph it changes to the front** when its tab is open, and the status
 //!   bar names it when not, so no undo changes only what is off screen.
-//! - **An unused subgraph stays until removed**: the palette marks it, and the Graph menu's
+//! - **An unused compound stays until removed**: the palette marks it, and the Graph menu's
 //!   Remove Unused clears them, outermost first, in one entry. Refused: removal with the last
 //!   instance, which loses work in Blender unless a fake user is set. Cost: a collapse and an
 //!   expand leave one behind.
 
+pub(crate) mod compound_side;
 pub(crate) mod error;
 pub(crate) mod graph_revision;
 pub(crate) mod graph_view;
@@ -59,7 +60,6 @@ pub(crate) mod item_id;
 mod layout_file;
 pub(crate) mod load_report;
 pub(crate) mod route;
-pub(crate) mod subgraph_side;
 pub(crate) mod tab_ref;
 pub(crate) mod tie;
 pub(crate) mod viewport;
@@ -73,18 +73,18 @@ use std::slice;
 use glam::Vec2;
 use palantir::{DockOperation, DockState, TabGroup};
 use scenarium::{
-    ConstValue, DetachedGhost, DetachedNode, Graph as CoreGraph, GraphId, GraphSet, InstancePath,
-    Library, Manifest, Node, NodeAddr, NodeId, PathForm, ProgramId, Scope, Subgraph, SubgraphId,
+    Compound, CompoundId, ConstValue, DetachedGhost, DetachedNode, Graph as CoreGraph, GraphId,
+    GraphSet, InstancePath, Library, Manifest, Node, NodeAddr, NodeId, PathForm, ProgramId, Scope,
 };
 use serde::{Deserialize, Serialize};
 
+use crate::core::document::compound_side::{CompoundSide, ReadOnly};
 use crate::core::document::error::DocumentValidationError;
 use crate::core::document::graph_view::{GraphView, NodePlacement};
 use crate::core::document::inspect_target::InspectTarget;
 use crate::core::document::item_id::ItemId;
 use crate::core::document::load_report::{DocumentRepair, ForeignPath, LoadReport, ViewRepair};
 use crate::core::document::route::Route;
-use crate::core::document::subgraph_side::{ReadOnly, SubgraphSide};
 use crate::core::document::tab_ref::TabRef;
 use crate::core::document::tie::{TieAngle, TieId};
 use crate::core::document::viewport::Viewport;
@@ -108,8 +108,8 @@ pub(crate) struct Document {
     pub(crate) graphs: GraphSet,
     /// Places every node and every ghost node of the main graph.
     pub(crate) main_view: GraphView,
-    /// One per subgraph of `graphs`, as a view holds one placement per node and ghost node.
-    pub(crate) sides: BTreeMap<SubgraphId, SubgraphSide>,
+    /// One per compound of `graphs`, as a view holds one placement per node and ghost node.
+    pub(crate) sides: BTreeMap<CompoundId, CompoundSide>,
     /// The pane arrangement: open tabs grouped into split panes, plus the focused group.
     /// Mutated only through a `DockOperation`, none of which is undoable.
     #[serde(default = "new_layout", with = "layout_file")]
@@ -147,7 +147,7 @@ impl Document {
     pub(crate) fn view(&self, graph: GraphId) -> &GraphView {
         match graph {
             GraphId::Main => &self.main_view,
-            GraphId::Subgraph(id) => &self.sides.get(&id).expect("each subgraph has a side").view,
+            GraphId::Compound(id) => &self.sides.get(&id).expect("each compound has a side").view,
         }
     }
 
@@ -158,11 +158,11 @@ impl Document {
     pub(crate) fn slot_mut(&mut self, graph: GraphId) -> GraphSlot<'_> {
         let view = match graph {
             GraphId::Main => &mut self.main_view,
-            GraphId::Subgraph(id) => {
+            GraphId::Compound(id) => {
                 &mut self
                     .sides
                     .get_mut(&id)
-                    .expect("each subgraph has a side")
+                    .expect("each compound has a side")
                     .view
             }
         };
@@ -173,17 +173,17 @@ impl Document {
     }
 
     /// The instance `graph`'s pane shows its run results through: the main graph's own path, a
-    /// subgraph's side's, or `None` for a subgraph shown through none.
+    /// compound's side's, or `None` for a compound shown through none.
     ///
     /// # Panics
     /// If the document holds no `graph`.
     pub(crate) fn through(&self, graph: GraphId) -> Option<&InstancePath> {
         match graph {
             GraphId::Main => Some(&InstancePath::MAIN),
-            GraphId::Subgraph(id) => self
+            GraphId::Compound(id) => self
                 .sides
                 .get(&id)
-                .expect("each subgraph has a side")
+                .expect("each compound has a side")
                 .through
                 .as_ref(),
         }
@@ -202,13 +202,13 @@ impl Document {
         }
     }
 
-    /// Show `subgraph`'s pane through `through`, open or focus its tab, and make it the active
-    /// graph: the entry into a subgraph. Navigation, as a tab switch is: it records nothing. A
-    /// subgraph the set no longer holds, or a path that names no instance of it, raised against
+    /// Show `compound`'s pane through `through`, open or focus its tab, and make it the active
+    /// graph: the entry into a compound. Navigation, as a tab switch is: it records nothing. A
+    /// compound the set no longer holds, or a path that names no instance of it, raised against
     /// an earlier frame's document, enters nothing.
-    pub(crate) fn enter(&mut self, subgraph: SubgraphId, through: Option<InstancePath>) {
-        let graph = GraphId::Subgraph(subgraph);
-        let Some(side) = self.sides.get_mut(&subgraph) else {
+    pub(crate) fn enter(&mut self, compound: CompoundId, through: Option<InstancePath>) {
+        let graph = GraphId::Compound(compound);
+        let Some(side) = self.sides.get_mut(&compound) else {
             return;
         };
         if through.is_some_and(|path| !shows(&self.graphs, path, graph)) {
@@ -221,94 +221,94 @@ impl Document {
         self.active = graph;
     }
 
-    /// Put `subgraph` into the document under `id`, with `side` beside it.
+    /// Put `compound` into the document under `id`, with `side` beside it.
     ///
     /// # Panics
-    /// If the document holds a subgraph under `id`.
-    pub(crate) fn insert_subgraph(
+    /// If the document holds a compound under `id`.
+    pub(crate) fn insert_compound(
         &mut self,
-        id: SubgraphId,
-        subgraph: Subgraph,
-        side: SubgraphSide,
+        id: CompoundId,
+        compound: Compound,
+        side: CompoundSide,
     ) {
-        self.graphs.insert_subgraph(id, subgraph);
+        self.graphs.insert_compound(id, compound);
         let prev = self.sides.insert(id, side);
-        assert!(prev.is_none(), "a subgraph id names one side");
+        assert!(prev.is_none(), "a compound id names one side");
     }
 
-    /// Take subgraph `id` and its side out of the document, then close each tab and clear each
+    /// Take compound `id` and its side out of the document, then close each tab and clear each
     /// `through` that stopped resolving, and hand the active graph to the main graph when it was
     /// `id`.
     ///
     /// # Panics
-    /// If the document holds no subgraph `id`, or a node places it.
-    pub(crate) fn remove_subgraph(&mut self, id: SubgraphId) -> (Subgraph, SubgraphSide) {
-        let subgraph = self
+    /// If the document holds no compound `id`, or a node places it.
+    pub(crate) fn remove_compound(&mut self, id: CompoundId) -> (Compound, CompoundSide) {
+        let compound = self
             .graphs
-            .remove_subgraph(id)
-            .expect("a removed subgraph is in the set");
-        let side = self.sides.remove(&id).expect("each subgraph has a side");
-        if self.active == GraphId::Subgraph(id) {
+            .remove_compound(id)
+            .expect("a removed compound is in the set");
+        let side = self.sides.remove(&id).expect("each compound has a side");
+        if self.active == GraphId::Compound(id) {
             self.active = GraphId::Main;
         }
         self.prune_views(&mut |_| {});
-        (subgraph, side)
+        (compound, side)
     }
 
-    /// Put `subgraph` and its `view` in place of the definition held under `id`, its interface
+    /// Put `compound` and its `view` in place of the definition held under `id`, its interface
     /// the same, then close each tab and clear each `through` that stopped resolving; the
     /// definition and view it replaces.
     ///
     /// # Panics
-    /// As [`GraphSet::replace_subgraph`].
-    pub(crate) fn replace_subgraph(
+    /// As [`GraphSet::replace_compound`].
+    pub(crate) fn replace_compound(
         &mut self,
-        id: SubgraphId,
-        subgraph: Subgraph,
+        id: CompoundId,
+        compound: Compound,
         view: GraphView,
-    ) -> (Subgraph, GraphView) {
-        let replaced = self.graphs.replace_subgraph(id, subgraph);
-        let side = self.sides.get_mut(&id).expect("each subgraph has a side");
+    ) -> (Compound, GraphView) {
+        let replaced = self.graphs.replace_compound(id, compound);
+        let side = self.sides.get_mut(&id).expect("each compound has a side");
         let view = mem::replace(&mut side.view, view);
         self.prune_views(&mut |_| {});
         (replaced, view)
     }
 
-    /// `base`, or `base N` with the least `N` from 2 that no subgraph of the document is named:
+    /// `base`, or `base N` with the least `N` from 2 that no compound of the document is named:
     /// the name a new definition takes.
-    pub(crate) fn free_subgraph_name(&self, base: &str) -> String {
+    pub(crate) fn free_compound_name(&self, base: &str) -> String {
         let taken = |name: &str| {
             self.graphs
-                .subgraphs()
-                .any(|(_, subgraph)| subgraph.name == name)
+                .compounds()
+                .any(|(_, compound)| compound.name == name)
         };
         if !taken(base) {
             return base.to_string();
         }
-        // One name is free past the count of subgraphs.
-        let last = self.graphs.subgraphs().len() + 2;
+        // One name is free past the count of compounds.
+        let last = self.graphs.compounds().len() + 2;
         (2..=last)
             .map(|n| format!("{base} {n}"))
             .find(|name| !taken(name))
-            .expect("a name past the count of subgraphs is free")
+            .expect("a name past the count of compounds is free")
     }
 
-    /// The subgraphs no node places, and then those only they placed, in the order their
-    /// removals hold: each placed by none of the subgraphs that remain. What Remove Unused takes
-    /// out; empty when every subgraph is in use.
-    pub(crate) fn unused_subgraphs(&self) -> Vec<SubgraphId> {
-        let mut unused: Vec<SubgraphId> = Vec::new();
-        // Each round finds at least one, or ends: bounded by the count of subgraphs.
+    /// The compounds no node places, and then those only they placed, in the order their
+    /// removals hold: each placed by none of the compounds that remain. What Remove Unused takes
+    /// out; empty when every compound is in use.
+    pub(crate) fn unused_compounds(&self) -> Vec<CompoundId> {
+        let mut unused: Vec<CompoundId> = Vec::new();
+        // Each round finds at least one, or ends: bounded by the count of compounds.
         loop {
-            let found: Vec<SubgraphId> = self
+            let found: Vec<CompoundId> = self
                 .graphs
-                .subgraphs()
+                .compounds()
                 .map(|(id, _)| id)
                 .filter(|id| !unused.contains(id))
                 .filter(|&id| {
                     self.graphs.uses(id).all(|addr| match addr.graph {
                         GraphId::Main => false,
-                        GraphId::Subgraph(holder) => unused.contains(&holder),
+                        GraphId::Compound(holder) => unused.contains(&holder),
                     })
                 })
                 .collect();
@@ -354,16 +354,16 @@ impl Document {
         slot.graph.detach_ghost_node(node_id)
     }
 
-    /// Clear each side's `through` that stopped naming an instance of its subgraph, then close
+    /// Clear each side's `through` that stopped naming an instance of its compound, then close
     /// each tab the document stopped holding, handing `pruned` each change.
     fn prune_views(&mut self, pruned: &mut impl FnMut(DocumentRepair)) {
         let Self { graphs, sides, .. } = self;
-        for (&subgraph, side) in sides.iter_mut() {
+        for (&compound, side) in sides.iter_mut() {
             if let Some(path) = side.through
-                && !shows(graphs, path, GraphId::Subgraph(subgraph))
+                && !shows(graphs, path, GraphId::Compound(compound))
             {
                 side.through = None;
-                pruned(DocumentRepair::ThroughCleared { subgraph, path });
+                pruned(DocumentRepair::ThroughCleared { compound, path });
             }
         }
         let stale: Vec<TabRef> = self
@@ -412,9 +412,9 @@ impl Document {
     /// Make a decoded document consistent with itself and `library`, and
     /// report each change: [`GraphSet::reconcile`] the graphs, which keeps
     /// each node a graph cannot hold as a ghost node and attaches each ghost node that
-    /// resolves again; then give each subgraph a side and drop each side of
+    /// resolves again; then give each compound a side and drop each side of
     /// none, repair each view against its graph, clear each `through` that
-    /// names no instance of its subgraph, make the main graph active in place
+    /// names no instance of its compound, make the main graph active in place
     /// of a graph the set lacks, and close each tab the document no longer
     /// holds. Afterwards [`Self::validate`] holds, and the graphs compile.
     ///
@@ -431,13 +431,13 @@ impl Document {
                 repair,
             })
             .collect();
-        for (id, reconciled) in reconciled.subgraphs {
+        for (id, reconciled) in reconciled.compounds {
             repairs.extend(
                 reconciled
                     .repairs
                     .into_iter()
                     .map(|repair| DocumentRepair::Graph {
-                        graph: GraphId::Subgraph(id),
+                        graph: GraphId::Compound(id),
                         repair,
                     }),
             );
@@ -449,22 +449,22 @@ impl Document {
             active,
             ..
         } = self;
-        sides.retain(|&subgraph, _| {
-            let held = graphs.subgraph(subgraph).is_some();
+        sides.retain(|&compound, _| {
+            let held = graphs.compound(compound).is_some();
             if !held {
-                repairs.push(DocumentRepair::SideDropped { subgraph });
+                repairs.push(DocumentRepair::SideDropped { compound });
             }
             held
         });
-        for (subgraph, held) in graphs.subgraphs() {
-            if let Entry::Vacant(side) = sides.entry(subgraph) {
-                side.insert(SubgraphSide::new(&held.graph));
-                repairs.push(DocumentRepair::SideAdded { subgraph });
+        for (compound, held) in graphs.compounds() {
+            if let Entry::Vacant(side) = sides.entry(compound) {
+                side.insert(CompoundSide::new(&held.graph));
+                repairs.push(DocumentRepair::SideAdded { compound });
             }
         }
         repair_view(GraphId::Main, main_view, graphs.main(), &mut repairs);
-        for (&subgraph, side) in sides.iter_mut() {
-            let graph = GraphId::Subgraph(subgraph);
+        for (&compound, side) in sides.iter_mut() {
+            let graph = GraphId::Compound(compound);
             repair_view(graph, &mut side.view, graphs.graph(graph), &mut repairs);
         }
         if !holds_graph(graphs, *active) {
@@ -495,7 +495,7 @@ impl Document {
     }
 
     /// Check what [`Self::reconcile`] establishes that needs no library: each graph's structure
-    /// with its ghost nodes, a side for each subgraph and for nothing else, each view against its
+    /// with its ghost nodes, a side for each compound and for nothing else, each view against its
     /// graph, each `through` against the set, the active graph, and the layout. A debug check: a
     /// document that fails it is a bug in the load or an edit.
     pub(crate) fn validate(&self) -> Result<(), DocumentValidationError> {
@@ -503,30 +503,30 @@ impl Document {
             held.validate()
                 .map_err(|source| DocumentValidationError::Graph { graph, source })?;
         }
-        if let Some(subgraph) = self
+        if let Some(compound) = self
             .graphs
-            .subgraphs()
+            .compounds()
             .map(|(id, _)| id)
             .find(|id| !self.sides.contains_key(id))
             .or_else(|| {
                 self.sides
                     .keys()
                     .copied()
-                    .find(|&id| self.graphs.subgraph(id).is_none())
+                    .find(|&id| self.graphs.compound(id).is_none())
             })
         {
-            return Err(DocumentValidationError::SideMismatch { subgraph });
+            return Err(DocumentValidationError::SideMismatch { compound });
         }
         for (graph, held) in self.graphs.graphs() {
             self.view(graph)
                 .validate(held)
                 .map_err(|source| DocumentValidationError::View { graph, source })?;
         }
-        for (&subgraph, side) in &self.sides {
+        for (&compound, side) in &self.sides {
             if let Some(path) = side.through
-                && !shows(&self.graphs, path, GraphId::Subgraph(subgraph))
+                && !shows(&self.graphs, path, GraphId::Compound(compound))
             {
-                return Err(DocumentValidationError::StaleThrough { subgraph, path });
+                return Err(DocumentValidationError::StaleThrough { compound, path });
             }
         }
         if !holds_graph(&self.graphs, self.active) {
@@ -552,12 +552,12 @@ impl Document {
     }
 
     /// Each path a constant holds in any graph, the ghost nodes' included, with the node it binds.
-    /// Why `graph` takes no edit of its own, if it takes none: a subgraph that follows the
+    /// Why `graph` takes no edit of its own, if it takes none: a compound that follows the
     /// library or is locked. The one answer the gate and every planner that writes a graph read.
     pub(crate) fn read_only(&self, graph: GraphId) -> Option<ReadOnly> {
         match graph {
             GraphId::Main => None,
-            GraphId::Subgraph(id) => self.sides.get(&id).and_then(SubgraphSide::read_only),
+            GraphId::Compound(id) => self.sides.get(&id).and_then(CompoundSide::read_only),
         }
     }
 
@@ -593,12 +593,12 @@ impl Document {
 }
 
 /// What a node's title reads: its own name, or for an instance with none the name of the
-/// subgraph it places, as Blender's group node shows its group's name while its label is empty,
-/// so a renamed subgraph reads renamed on each instance; empty for any other node with none,
+/// compound it places, as Blender's group node shows its group's name while its label is empty,
+/// so a renamed compound reads renamed on each instance; empty for any other node with none,
 /// which a surface reads as "Unnamed". `scope` is the one the node's graph resolves against.
 pub(crate) fn title<'a>(node: &'a Node, scope: Scope<'a>) -> &'a str {
     if node.name.is_empty()
-        && node.subgraph().is_some()
+        && node.compound().is_some()
         && let Ok(decl) = scope.resolve(node)
     {
         return decl.name();
@@ -617,8 +617,8 @@ impl From<GraphSet> for Document {
     fn from(graphs: GraphSet) -> Self {
         let main_view = GraphView::new(graphs.main());
         let sides = graphs
-            .subgraphs()
-            .map(|(id, subgraph)| (id, SubgraphSide::new(&subgraph.graph)))
+            .compounds()
+            .map(|(id, compound)| (id, CompoundSide::new(&compound.graph)))
             .collect();
         Self {
             graphs,
@@ -630,11 +630,11 @@ impl From<GraphSet> for Document {
     }
 }
 
-/// Whether `graphs` holds `graph`: the main graph, or a subgraph it holds.
+/// Whether `graphs` holds `graph`: the main graph, or a compound it holds.
 fn holds_graph(graphs: &GraphSet, graph: GraphId) -> bool {
     match graph {
         GraphId::Main => true,
-        GraphId::Subgraph(id) => graphs.subgraph(id).is_some(),
+        GraphId::Compound(id) => graphs.compound(id).is_some(),
     }
 }
 

@@ -1,11 +1,11 @@
-//! The compile's flatten: a document with subgraphs lowers to the program its hand-inlined twin
+//! The compile's flatten: a document with compounds lowers to the program its hand-inlined twin
 //! does, each node inside an instance under the path of instances down to it.
 
 use std::collections::{BTreeMap, HashMap};
 
 use super::*;
+use crate::graph::compound::Compound;
 use crate::graph::ports::{InputDecl, Numbered, OutputDecl, Ports};
-use crate::graph::subgraph::Subgraph;
 use crate::internals::engine::TestEngine;
 use crate::internals::test_graph::sets::{
     ADD, CONFIG_SINK, SINK, SRC, TICKER, library, n, node, s,
@@ -15,8 +15,8 @@ fn path(ids: &[u128]) -> ProgramId {
     ProgramId::new(&ids.iter().copied().map(n).collect::<Vec<_>>())
 }
 
-const ADDER: SubgraphId = s(50);
-const TWICE: SubgraphId = s(60);
+const ADDER: CompoundId = s(50);
+const TWICE: CompoundId = s(60);
 
 fn wire(graph: &mut Graph, consumer: (NodeId, PortId), producer: (NodeId, PortId)) {
     graph.set_input_binding(
@@ -50,17 +50,17 @@ fn adder_interface() -> Interface {
 
 /// `adder`: inputs `a` and `b` into node 13, an `add`; outputs its `sum`, and `pass`, which is
 /// `a` wired straight through.
-fn adder(library: &Library) -> Subgraph {
-    let mut subgraph = Subgraph::new("adder", adder_interface());
-    let inputs = subgraph.inputs_node();
-    let outputs = subgraph.outputs_node();
-    let graph = &mut subgraph.graph;
+fn adder(library: &Library) -> Compound {
+    let mut compound = Compound::new("adder", adder_interface());
+    let inputs = compound.inputs_node();
+    let outputs = compound.outputs_node();
+    let graph = &mut compound.graph;
     graph.insert(n(13), node(library, ADD));
     wire(graph, (n(13), FIRST), (inputs, A));
     wire(graph, (n(13), SECOND), (inputs, B));
     wire(graph, (outputs, SUM), (n(13), FIRST));
     wire(graph, (outputs, PASS), (inputs, A));
-    subgraph
+    compound
 }
 
 /// A document's graphs and the library they resolve against.
@@ -79,9 +79,9 @@ impl Doc {
         self.graphs.main_mut()
     }
 
-    /// Place an instance of `subgraph` in the main graph under `node_id`.
-    fn place(&mut self, node_id: NodeId, subgraph: SubgraphId) {
-        let instance = Node::instance(subgraph);
+    /// Place an instance of `compound` in the main graph under `node_id`.
+    fn place(&mut self, node_id: NodeId, compound: CompoundId) {
+        let instance = Node::instance(compound);
         self.main().insert(node_id, instance);
     }
 }
@@ -93,7 +93,7 @@ fn adder_doc() -> Doc {
         library: library(),
         ..Doc::default()
     };
-    doc.graphs.insert_subgraph(ADDER, adder(&doc.library));
+    doc.graphs.insert_compound(ADDER, adder(&doc.library));
     let [src, sink] = [SRC, SINK].map(|func_id| node(&doc.library, func_id));
     doc.main().insert(n(1), src);
     doc.place(n(2), ADDER);
@@ -149,12 +149,12 @@ fn labelled(
         .collect()
 }
 
-/// The proposal's own test: a graph with a subgraph compiles to the program of its twin with the
-/// subgraph's nodes written in by hand. The instance and both boundary nodes emit nothing; the
+/// The proposal's own test: a graph with a compound compiles to the program of its twin with the
+/// compound's nodes written in by hand. The instance and both boundary nodes emit nothing; the
 /// `add` inside reads `src` across the `Inputs` node and the instance's constant across both; the
 /// passthrough sink reads `src` directly, as nothing stands between them once the boundary goes.
 #[test]
-fn a_subgraph_compiles_to_its_hand_inlined_twin() {
+fn a_compound_compiles_to_its_hand_inlined_twin() {
     let doc = adder_doc();
     let compiled = doc.compile();
     assert_eq!(
@@ -216,7 +216,7 @@ fn an_instances_cache_mode_caches_the_values_that_leave_it() {
     );
 
     *doc.graphs
-        .graph_mut(GraphId::Subgraph(ADDER))
+        .graph_mut(GraphId::Compound(ADDER))
         .find_mut(n(13))
         .unwrap()
         .cache_mut()
@@ -231,7 +231,7 @@ fn an_instances_cache_mode_caches_the_values_that_leave_it() {
 fn a_second_inputs_node_reads_the_instances_bindings_as_the_first_does() {
     let doc = adder_doc();
     let mut two = adder_doc();
-    let adder = two.graphs.graph_mut(GraphId::Subgraph(ADDER));
+    let adder = two.graphs.graph_mut(GraphId::Compound(ADDER));
     adder.insert(n(14), Node::from(Boundary::Inputs));
     wire(adder, (n(13), SECOND), (n(14), B));
     let labels = HashMap::from([
@@ -252,10 +252,10 @@ fn a_second_inputs_node_reads_the_instances_bindings_as_the_first_does() {
 /// node, and the instance holds a constant there alone, so the wire lowers to that constant.
 #[test]
 fn a_const_only_port_lowers_to_the_instances_constant() {
-    const CONFIGURED: SubgraphId = s(80);
+    const CONFIGURED: CompoundId = s(80);
     const CONFIG: PortId = PortId::new(301);
     let library = library();
-    let mut configured = Subgraph::new(
+    let mut configured = Compound::new(
         "configured",
         Interface::new(Ports {
             inputs: vec![Numbered::new(
@@ -272,7 +272,7 @@ fn a_const_only_port_lowers_to_the_instances_constant() {
         library,
         ..Doc::default()
     };
-    doc.graphs.insert_subgraph(CONFIGURED, configured);
+    doc.graphs.insert_compound(CONFIGURED, configured);
     doc.place(n(1), CONFIGURED);
     doc.main()
         .set_input_binding(InputPort::new(n(1), CONFIG), Binding::Const(3i64.into()));
@@ -288,15 +288,15 @@ fn a_const_only_port_lowers_to_the_instances_constant() {
 #[test]
 fn a_nested_node_is_named_by_its_path_and_reads_across_both_boundaries() {
     let mut doc = adder_doc();
-    let adder = doc.graphs.subgraph(ADDER).unwrap();
-    let mut twice = Subgraph::new("twice", adder.interface.clone());
+    let adder = doc.graphs.compound(ADDER).unwrap();
+    let mut twice = Compound::new("twice", adder.interface.clone());
     let inputs = twice.inputs_node();
     let outputs = twice.outputs_node();
     twice.graph.insert(n(21), Node::instance(ADDER));
     wire(&mut twice.graph, (n(21), A), (inputs, A));
     wire(&mut twice.graph, (n(21), B), (inputs, B));
     wire(&mut twice.graph, (outputs, SUM), (n(21), SUM));
-    doc.graphs.insert_subgraph(TWICE, twice);
+    doc.graphs.insert_compound(TWICE, twice);
 
     doc.place(n(31), TWICE);
     wire(doc.main(), (n(31), A), (n(1), FIRST));
@@ -328,7 +328,7 @@ fn a_nested_node_is_named_by_its_path_and_reads_across_both_boundaries() {
     assert_eq!(program["sum sink"][1..], ["wire add in 31#0".to_owned()]);
 }
 
-/// Each instance expands its subgraph apart: two instances of `adder` are two `add` nodes, each
+/// Each instance expands its compound apart: two instances of `adder` are two `add` nodes, each
 /// reading its own instance's inputs. A disabled instance disables every node inside it and
 /// nothing outside.
 #[test]
@@ -376,20 +376,20 @@ fn a_node_inside_an_instance_makes_the_program_persist_to_disk() {
     assert!(!doc.compile().persists_to_disk());
     let inner = doc
         .graphs
-        .graph_mut(GraphId::Subgraph(ADDER))
+        .graph_mut(GraphId::Compound(ADDER))
         .find_mut(n(13))
         .unwrap();
     *inner.cache_mut().unwrap() = CacheMode::Disk;
     assert!(doc.compile().persists_to_disk());
 }
 
-/// A subscription inside a subgraph wires the emitter and subscriber of the same instance, and
+/// A subscription inside a compound wires the emitter and subscriber of the same instance, and
 /// none of another; inside a disabled instance it wires nothing, as between disabled nodes
 /// anywhere.
 #[test]
-fn a_subscription_inside_a_subgraph_stays_inside_each_instance() {
+fn a_subscription_inside_a_compound_stays_inside_each_instance() {
     let library = library();
-    let mut ticking = Subgraph::new("ticking", Interface::default());
+    let mut ticking = Compound::new("ticking", Interface::default());
     ticking.graph.insert(n(41), node(&library, TICKER));
     ticking.graph.insert(n(42), node(&library, SINK));
     ticking.graph.subscribe(EventPort::new(n(41), FIRST), n(42));
@@ -398,7 +398,7 @@ fn a_subscription_inside_a_subgraph_stays_inside_each_instance() {
         library,
         ..Doc::default()
     };
-    doc.graphs.insert_subgraph(id, ticking);
+    doc.graphs.insert_compound(id, ticking);
     for instance in [n(1), n(2)] {
         doc.place(instance, id);
     }
@@ -416,7 +416,7 @@ fn a_subscription_inside_a_subgraph_stays_inside_each_instance() {
     assert_eq!(program["ticker in 2"][1..], ["subscribers []"]);
 }
 
-/// An event crosses a subgraph's boundary on its interface. `relay` fires its event `out` 301
+/// An event crosses a compound's boundary on its interface. `relay` fires its event `out` 301
 /// when its trigger `in` is triggered, by its `Inputs` node firing it into its `Outputs` node;
 /// `outer` places a `relay` 61 inside, wiring `outer`'s trigger into its own and its event out, so
 /// an event goes two levels in and two out. In the main graph `ticker` 1 fires into instance 2's
@@ -441,7 +441,7 @@ fn an_event_crosses_boundaries_on_the_interface() {
             .unwrap()
     };
     let (relay_id, outer_id) = (s(80), s(81));
-    let mut relay = Subgraph::new("relay", events());
+    let mut relay = Compound::new("relay", events());
     let (relay_in, relay_out) = (relay.inputs_node(), relay.outputs_node());
     relay.graph.insert(n(53), node(&library, TICKER));
     relay.graph.subscribe(
@@ -452,7 +452,7 @@ fn an_event_crosses_boundaries_on_the_interface() {
         EventPort::new(n(53), FIRST),
         TriggerPort::new(relay_out, OUT),
     );
-    let mut outer = Subgraph::new("outer", events());
+    let mut outer = Compound::new("outer", events());
     let (outer_in, outer_out) = (outer.inputs_node(), outer.outputs_node());
     outer.graph.insert(n(61), Node::instance(relay_id));
     outer.graph.subscribe(EventPort::new(outer_in, IN), n(61));
@@ -463,8 +463,8 @@ fn an_event_crosses_boundaries_on_the_interface() {
         library,
         ..Doc::default()
     };
-    doc.graphs.insert_subgraph(relay_id, relay);
-    doc.graphs.insert_subgraph(outer_id, outer);
+    doc.graphs.insert_compound(relay_id, relay);
+    doc.graphs.insert_compound(outer_id, outer);
     let (ticker, sink) = (node(&doc.library, TICKER), node(&doc.library, SINK));
     doc.main().insert(n(1), ticker);
     doc.place(n(2), outer_id);
@@ -510,18 +510,18 @@ async fn a_flattened_program_runs() {
         .expect("`sum` has a body")
         .clone();
 
-    let mut subgraph = Subgraph::new("adder", adder_interface());
-    let inputs = subgraph.inputs_node();
-    let outputs = subgraph.outputs_node();
+    let mut compound = Compound::new("adder", adder_interface());
+    let inputs = compound.inputs_node();
+    let outputs = compound.outputs_node();
     let mut inner = Node::from(&sum);
     *inner.cache_mut().unwrap() = CacheMode::None;
-    subgraph.graph.insert(n(13), inner);
-    wire(&mut subgraph.graph, (n(13), FIRST), (inputs, A));
-    wire(&mut subgraph.graph, (n(13), SECOND), (inputs, B));
-    wire(&mut subgraph.graph, (outputs, SUM), (n(13), FIRST));
-    wire(&mut subgraph.graph, (outputs, PASS), (inputs, A));
-    let placed = subgraph.clone();
-    g.graphs.insert_subgraph(ADDER, subgraph);
+    compound.graph.insert(n(13), inner);
+    wire(&mut compound.graph, (n(13), FIRST), (inputs, A));
+    wire(&mut compound.graph, (n(13), SECOND), (inputs, B));
+    wire(&mut compound.graph, (outputs, SUM), (n(13), FIRST));
+    wire(&mut compound.graph, (outputs, PASS), (inputs, A));
+    let placed = compound.clone();
+    g.graphs.insert_compound(ADDER, compound);
 
     let [src, sum_sink, pass_sink] = ["src", "sum sink", "pass sink"].map(|name| g.id(name));
     let main = g.graph_mut();

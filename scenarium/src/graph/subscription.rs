@@ -10,7 +10,7 @@ use crate::graph::identity::{EventPort, NodeId, TriggerPort};
 /// event id), then trigger, so a compile wires each emitter's subscribers in a fixed order.
 ///
 /// A trigger is a sink's or an instance's own, which runs the node or passes the event into the
-/// subgraph, or the `Outputs` node's, one per interface event, which passes it out. Every trigger
+/// compound, or the `Outputs` node's, one per interface event, which passes it out. Every trigger
 /// is addressed alike, a node's own under [`TriggerPort::NODE`], as Unreal names a node's one exec
 /// input the pin "execute" and Unity declares a node's one control input as a named port
 /// ([custom node ports](https://docs.unity3d.com/Packages/com.unity.visualscripting@1.9/manual/vs-create-custom-node-add-ports.html)).

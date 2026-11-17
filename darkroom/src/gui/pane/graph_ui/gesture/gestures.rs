@@ -258,15 +258,15 @@ impl Gestures {
         let graph_ctx = stage.ctx.graph_ctx();
         let on_body = action.id == wid::body(graph_ctx.graph(), node);
         match (action.edge, action.button) {
-            // A double click on an instance enters its subgraph, through this pane's path and
+            // A double click on an instance enters its compound, through this pane's path and
             // the instance; its first click selected it.
             (PointerEdge::Clicked { count: 2 }, PointerButton::Left)
-                if let Some(subgraph) = on_body
-                    .then(|| graph_ctx.body().find(node).and_then(Node::subgraph))
+                if let Some(compound) = on_body
+                    .then(|| graph_ctx.body().find(node).and_then(Node::compound))
                     .flatten() =>
             {
                 let through = graph_ctx.through().map(|path| path.child(node));
-                stage.out.push_enter(subgraph, through);
+                stage.out.push_enter(compound, through);
             }
             (PointerEdge::Clicked { .. }, PointerButton::Left) if on_body => {
                 let mode = ClickMode::with_shift(ui.modifiers().contains(Modifiers::SHIFT));

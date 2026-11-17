@@ -7,7 +7,7 @@
 //! shows, [`detached`] the reversible-removal records,
 //! [`ghost_node`] a node the graph cannot hold, [`ghost_wiring`] the wiring it cannot hold,
 //! [`error`] what validation and admission reject,
-//! [`reconciled`] what a load repaired, [`subgraph`] and [`graph_set`] the graphs a document
+//! [`reconciled`] what a load repaired, [`compound`] and [`graph_set`] the graphs a document
 //! holds, and [`scope`] what a graph's nodes resolve against.
 //!
 //! A graph a host keeps holds among its nodes only nodes that resolve in its scope, and only
@@ -93,7 +93,7 @@
 //!   ports that share nothing inside is refused, as Blender refuses it.
 //! - **An output's type is its declaration.** No output is a wildcard, so no
 //!   edit retypes a distant wire and every wire is checkable. No func declares
-//!   an `Any` output; the `Inputs` node of a subgraph shows one for a port made
+//!   an `Any` output; the `Inputs` node of a compound shows one for a port made
 //!   from an `Any` input, held as declared, which feeds only `Any` inputs.
 //!   Refused: wildcard outputs, whose retype either removes wires you did not
 //!   touch or refuses the edit until you remove them by hand. Reroute nodes
@@ -108,6 +108,7 @@ use hashbrown::{HashMap, HashSet};
 use crate::data::const_value::ConstValue;
 use crate::graph::binding::Binding;
 use crate::graph::binding_entry::BindingEntry;
+use crate::graph::compound::Compound;
 use crate::graph::detached::{DetachedGhost, DetachedNode};
 use crate::graph::error::{
     BindingRejection, DetachReason, GhostRejection, GhostSubscriptionRejection,
@@ -119,7 +120,7 @@ use crate::graph::ghost_wiring::{
     GhostBinding, GhostSource, GhostSubscription, GhostWiring, InputState, SubscriptionState,
 };
 use crate::graph::identity::{
-    EventPort, InputPort, NodeId, OutputPort, PortId, SubgraphId, TriggerPort,
+    CompoundId, EventPort, InputPort, NodeId, OutputPort, PortId, TriggerPort,
 };
 use crate::graph::manifest::Manifest;
 use crate::graph::node::{Boundary, Node, NodeKind};
@@ -128,11 +129,11 @@ use crate::graph::node_ref::NodeRef;
 use crate::graph::reconciled::{Reconciled, Repair};
 use crate::graph::saved_decl::{SavedDecl, SavedEvent, SavedInput, SavedPort, ShownPort};
 use crate::graph::scope::Scope;
-use crate::graph::subgraph::Subgraph;
 use crate::graph::subscription::Subscription;
 
 pub(crate) mod binding;
 pub(crate) mod binding_entry;
+pub(crate) mod compound;
 pub(crate) mod detached;
 pub(crate) mod error;
 pub(crate) mod func;
@@ -154,7 +155,6 @@ pub(crate) mod reconciled;
 pub(crate) mod saved_decl;
 pub(crate) mod scope;
 mod serde;
-pub(crate) mod subgraph;
 pub(crate) mod subscription;
 pub(crate) mod type_names;
 
@@ -818,12 +818,12 @@ impl Graph {
         node_id
     }
 
-    /// Add an instance of `subgraph`, held under `id`, and seed its inputs' default const
+    /// Add an instance of `compound`, held under `id`, and seed its inputs' default const
     /// bindings. Returns the new node id.
-    pub fn add_instance(&mut self, id: SubgraphId, subgraph: &Subgraph) -> NodeId {
+    pub fn add_instance(&mut self, id: CompoundId, compound: &Compound) -> NodeId {
         let node_id = self.add(Node::instance(id));
         self.bindings.extend(
-            subgraph
+            compound
                 .interface
                 .ports()
                 .default_bindings(node_id)
@@ -971,7 +971,7 @@ impl Graph {
     }
 
     /// Validate this graph as one a host may compile in `scope`: the
-    /// structure, then the load contract — every node resolves, a subgraph's
+    /// structure, then the load contract — every node resolves, a compound's
     /// graph holds one boundary node a side, every binding and subscription is
     /// admitted, and no wire closes a data cycle. What lies across graphs, the
     /// recursion and the bounds, is
@@ -1168,7 +1168,7 @@ impl Graph {
             .collect()
     }
 
-    /// Add the boundary node a subgraph's graph lacks on each side, under a fresh id.
+    /// Add the boundary node a compound's graph lacks on each side, under a fresh id.
     pub(crate) fn add_missing_boundaries(&mut self, reconciled: &mut Reconciled) {
         for boundary in [Boundary::Inputs, Boundary::Outputs] {
             if !self
@@ -1215,7 +1215,7 @@ impl Graph {
     }
 
     /// The nodes `scope` does not let this graph hold, in node-id order: each node it does not
-    /// resolve, and in a subgraph's graph each `Outputs` node past the lowest id.
+    /// resolve, and in a compound's graph each `Outputs` node past the lowest id.
     pub(crate) fn unresolved(&self, scope: Scope<'_>, manifest: &Manifest) -> Vec<Detaching> {
         let mut refused: Vec<Detaching> = self
             .nodes

@@ -159,7 +159,7 @@ fn replace_wid() -> WidgetId {
 mod tests {
     use glam::UVec2;
     use palantir::Harness;
-    use scenarium::{GraphId, Node, NodeId, NodeRemap, SubgraphId};
+    use scenarium::{CompoundId, GraphId, Node, NodeId, NodeRemap};
 
     use crate::core::edit::replace_plan::{PlannedPort, PortSide, ReplacePlan};
     use crate::gui::app::replace_dialog::{ReplaceChoice, ReplaceDialog, replace_wid};
@@ -171,7 +171,7 @@ mod tests {
         let dialog = ReplaceDialog::new(ReplacePlan {
             graph: GraphId::Main,
             node_id: NodeId::from_u128(1),
-            with: Node::instance(SubgraphId::from_u128(2)),
+            with: Node::instance(CompoundId::from_u128(2)),
             remap: NodeRemap::default(),
             from_name: "Denoise".to_owned(),
             to_name: "Median".to_owned(),

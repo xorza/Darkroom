@@ -9,7 +9,7 @@ use lens::MlModelPaths;
 use crate::core::document::Document;
 use crate::core::document::graph_revision::GraphRevision;
 use crate::core::document::graph_view::NodePlacement;
-use crate::core::document::internals::{DocumentFixture, insert_subgraph};
+use crate::core::document::internals::{DocumentFixture, insert_compound};
 use crate::core::document::item_id::ItemId;
 use crate::core::document::load_report::{DocumentRepair, ForeignPath};
 use crate::core::document::viewport::Viewport;
@@ -24,11 +24,11 @@ use crate::core::open_document::{Launched, Loaded, OpenDocument};
 use crate::core::runtime_library::RuntimeLibrary;
 use crate::core::status_log::StatusLog;
 use scenarium::{
-    Binding, BindingRejection, Compiler, ConstValue, CustomTypeId, DataType, DetachReason, EnumId,
-    EventPort, Func, FuncId, GhostBinding, GhostSource, Graph, GraphId, GraphSet, InputDecl,
-    InputPort, Interface, InterfacePort, Library, Node, NodeAddr, NodeDecl, NodeId, Numbered,
-    OutputDecl, OutputPort, PortId, PortList, Ports, ProgramId, Repair, SavedPort, Subgraph,
-    SubgraphId, Subscription, SubscriptionRejection, UnknownType, Unresolved, internals,
+    Binding, BindingRejection, Compiler, Compound, CompoundId, ConstValue, CustomTypeId, DataType,
+    DetachReason, EnumId, EventPort, Func, FuncId, GhostBinding, GhostSource, Graph, GraphId,
+    GraphSet, InputDecl, InputPort, Interface, InterfacePort, Library, Node, NodeAddr, NodeDecl,
+    NodeId, Numbered, OutputDecl, OutputPort, PortId, PortList, Ports, ProgramId, Repair,
+    SavedPort, Subscription, SubscriptionRejection, UnknownType, Unresolved, internals,
 };
 
 #[test]
@@ -546,11 +546,11 @@ fn the_revision_follows_the_node_set_and_every_edit_dirties() {
         mut document,
         library,
     } = fixture;
-    let other = GraphId::Subgraph(SubgraphId::from_u128(5));
-    insert_subgraph(
+    let other = GraphId::Compound(CompoundId::from_u128(5));
+    insert_compound(
         &mut document,
-        SubgraphId::from_u128(5),
-        Subgraph::new("other", Interface::default()),
+        CompoundId::from_u128(5),
+        Compound::new("other", Interface::default()),
     );
     let mut open = OpenDocument::over(document);
     let mut queue = DocumentQueue::default();
@@ -850,25 +850,25 @@ fn a_path_of_another_system_is_reported_and_leaves_the_document_clean() {
     );
 }
 
-/// A file whose two subgraphs place each other opens with the loop broken at one instance, kept
+/// A file whose two compounds place each other opens with the loop broken at one instance, kept
 /// as a ghost node whose reason is `Recursive`, and opens the same way each time.
 #[test]
-fn a_loop_between_two_subgraphs_opens_with_one_recursive_ghost_node_every_time() {
+fn a_loop_between_two_compounds_opens_with_one_recursive_ghost_node_every_time() {
     let dir = TempDir::new("darkroom-open-loop");
     let path = dir.join("scene.darkroom");
-    let [a, b] = [1, 2].map(SubgraphId::from_u128);
+    let [a, b] = [1, 2].map(CompoundId::from_u128);
     let mut fixture = DocumentFixture::default();
     for id in [a, b] {
-        insert_subgraph(
+        insert_compound(
             &mut fixture.document,
             id,
-            Subgraph::new(format!("{id:?}"), Interface::default()),
+            Compound::new(format!("{id:?}"), Interface::default()),
         );
     }
     // Each places the other, past the edit gate that refuses the second placement.
     for (graph, placed, node_id) in [(a, b, 10), (b, a, 20)] {
         let node = Node::instance(placed);
-        let slot = fixture.document.slot_mut(GraphId::Subgraph(graph));
+        let slot = fixture.document.slot_mut(GraphId::Compound(graph));
         slot.graph.insert(NodeId::from_u128(node_id), node);
         slot.view
             .node_placements
@@ -903,12 +903,12 @@ fn a_loop_between_two_subgraphs_opens_with_one_recursive_ghost_node_every_time()
     assert_eq!(second.open.document(), first.open.document());
 }
 
-/// A subgraph whose interface names a type this build does not register loads as written, an
+/// A compound whose interface names a type this build does not register loads as written, an
 /// enum's default and an instance's constant of it included: the load reports each type and each
-/// port that names it, and leaves the document clean. A repair inside a subgraph names the
-/// subgraph it was made in.
+/// port that names it, and leaves the document clean. A repair inside a compound names the
+/// compound it was made in.
 #[test]
-fn a_subgraphs_unknown_type_is_reported_and_its_repairs_name_the_subgraph() {
+fn a_compounds_unknown_type_is_reported_and_its_repairs_name_the_compound() {
     let dir = TempDir::new("darkroom-open-unknown-type");
     let path = dir.join("scene.darkroom");
     let unknown = DataType::Custom(CustomTypeId::from_u128(77));
@@ -925,12 +925,12 @@ fn a_subgraphs_unknown_type_is_reported_and_its_repairs_name_the_subgraph() {
         ],
         outputs: vec![],
     });
-    let id = SubgraphId::from_u128(5);
+    let id = CompoundId::from_u128(5);
     let mut fixture = DocumentFixture::default();
-    insert_subgraph(
+    insert_compound(
         &mut fixture.document,
         id,
-        Subgraph::new("holder", interface),
+        Compound::new("holder", interface),
     );
     let instance = fixture.add_instance(id);
     let mut document = fixture.document;
@@ -944,7 +944,7 @@ fn a_subgraphs_unknown_type_is_reported_and_its_repairs_name_the_subgraph() {
     let named = |data_type, port| UnknownType {
         data_type,
         ports: vec![InterfacePort {
-            subgraph: id,
+            compound: id,
             list: PortList::Inputs,
             port,
         }],
@@ -958,7 +958,7 @@ fn a_subgraphs_unknown_type_is_reported_and_its_repairs_name_the_subgraph() {
     assert!(!loaded.open.dirty, "a type kept as written is no change");
 
     let ghost = NodeId::from_u128(9);
-    let slot = document.slot_mut(GraphId::Subgraph(id));
+    let slot = document.slot_mut(GraphId::Compound(id));
     slot.graph
         .insert(ghost, internals::unresolved_node(FuncId::from_u128(99)));
     slot.view
@@ -969,7 +969,7 @@ fn a_subgraphs_unknown_type_is_reported_and_its_repairs_name_the_subgraph() {
     assert_eq!(
         loaded.report.repairs,
         [DocumentRepair::Graph {
-            graph: GraphId::Subgraph(id),
+            graph: GraphId::Compound(id),
             repair: Repair::GhostedNode {
                 node_id: ghost,
                 reason: DetachReason::Unresolved(Unresolved::MissingFunc),
@@ -979,7 +979,7 @@ fn a_subgraphs_unknown_type_is_reported_and_its_repairs_name_the_subgraph() {
     assert_eq!(
         loaded.report.repairs[0].to_string(),
         format!(
-            "in subgraph {id:?}, kept {ghost:?} as a ghost node: the library holds no func under \
+            "in compound {id:?}, kept {ghost:?} as a ghost node: the library holds no func under \
              its id"
         )
     );

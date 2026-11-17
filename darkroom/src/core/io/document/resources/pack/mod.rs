@@ -11,7 +11,7 @@
 //! - **Only a file an input reads is packed**: not a folder, not a path an input writes, and not
 //!   what a ghost holds, as no declaration says it names a file to read, as an export strips it.
 //!   A file past [`MAX_RESOURCE_BYTES`], which no unpack would take, stays where it is, and so does
-//!   one a followed or locked subgraph reads, which takes no edit.
+//!   one a followed or locked compound reads, which takes no edit.
 
 use std::collections::BTreeMap;
 use std::io::{self, Read, Write};
@@ -100,7 +100,7 @@ pub(crate) fn pack(
 }
 
 /// Each live constant of `document` on an input that reads files, in graph order, outside a
-/// subgraph that takes no edit: its paths would be copied and every edit of them refused.
+/// compound that takes no edit: its paths would be copied and every edit of them refused.
 fn reading_inputs<'a>(
     document: &'a Document,
     library: &Library,

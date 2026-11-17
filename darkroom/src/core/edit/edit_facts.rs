@@ -117,7 +117,7 @@ impl BitOrAssign for EditFacts {
 
 #[cfg(test)]
 mod tests {
-    use scenarium::{GraphId, SubgraphId};
+    use scenarium::{CompoundId, GraphId};
 
     use crate::core::edit::edit_facts::{EditFacts, Touched};
 
@@ -127,7 +127,7 @@ mod tests {
     fn touched_folds_to_the_one_graph_or_several() {
         let (main, sub) = (
             Touched::Graph(GraphId::Main),
-            Touched::Graph(GraphId::Subgraph(SubgraphId::from_u128(1))),
+            Touched::Graph(GraphId::Compound(CompoundId::from_u128(1))),
         );
         let cases = [
             (Touched::Nothing, Touched::Nothing, Touched::Nothing),

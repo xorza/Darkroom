@@ -11,36 +11,36 @@
 //!   notes](https://blog.comfy.org/p/subgraph-official-release)). Refused: a copy by default, as
 //!   Nuke's Group, where ten copies of one pipeline are ten graphs to fix.
 
-use scenarium::{GraphId, NodeId, SubgraphId, TypeNames};
+use scenarium::{CompoundId, GraphId, NodeId, TypeNames};
 
 use crate::core::document::Document;
+use crate::core::edit::compound_intent::{CompoundIntent, NewCompound};
 use crate::core::edit::document_queue::DocumentQueue;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::node_property::NodeProperty;
-use crate::core::edit::subgraph_intent::{NewSubgraph, SubgraphIntent};
 
 /// What a Make Unique raises: the copy, and the instances of `graph` it points at it.
 #[derive(Debug)]
 pub(crate) struct MakeUnique {
-    pub(crate) copy: NewSubgraph,
+    pub(crate) copy: NewCompound,
     graph: GraphId,
     instances: Vec<NodeId>,
 }
 
 impl MakeUnique {
-    /// Plan giving `instances`, instances of `graph` that all place one subgraph, a copy of it;
+    /// Plan giving `instances`, instances of `graph` that all place one compound, a copy of it;
     /// `None` when they place none, or more than one.
     pub(crate) fn plan(document: &Document, graph: GraphId, instances: &[NodeId]) -> Option<Self> {
         let id = Self::placed(document, graph, instances)?;
-        let original = document.graphs.subgraph(id)?;
-        let mut subgraph = original.clone();
-        subgraph.name = document.free_subgraph_name(&original.name);
+        let original = document.graphs.compound(id)?;
+        let mut compound = original.clone();
+        compound.name = document.free_compound_name(&original.name);
         let mut side = document.sides[&id].clone();
         side.through = None;
         Some(Self {
-            copy: NewSubgraph {
-                id: SubgraphId::unique(),
-                subgraph,
+            copy: NewCompound {
+                id: CompoundId::unique(),
+                compound,
                 side,
                 type_names: TypeNames::default(),
             },
@@ -49,7 +49,7 @@ impl MakeUnique {
         })
     }
 
-    /// The one subgraph `instances`, nodes of `graph`, all place, or `None` when they place none
+    /// The one compound `instances`, nodes of `graph`, all place, or `None` when they place none
     /// or more than one, or `graph` takes no edit, as its re-pointing would be refused and leave
     /// the copy behind: whether a Make Unique of them is offered, answered without the copy a
     /// plan makes.
@@ -57,14 +57,14 @@ impl MakeUnique {
         document: &Document,
         graph: GraphId,
         instances: &[NodeId],
-    ) -> Option<SubgraphId> {
+    ) -> Option<CompoundId> {
         if document.read_only(graph).is_some() {
             return None;
         }
         let held = document.graphs.graph(graph);
         let mut placed = instances
             .iter()
-            .map(|&node_id| held.find(node_id)?.subgraph());
+            .map(|&node_id| held.find(node_id)?.compound());
         let id = placed.next()??;
         placed.all(|other| other == Some(id)).then_some(id)
     }
@@ -72,14 +72,14 @@ impl MakeUnique {
     /// Queue the copy and the re-pointing, in the order they land: one batch, so one entry.
     pub(crate) fn queue(self, queue: &mut DocumentQueue) {
         let to = self.copy.id;
-        queue.push_subgraph(SubgraphIntent::Add(Box::new(self.copy)));
+        queue.push_compound(CompoundIntent::Add(Box::new(self.copy)));
         queue.extend_graph(
             self.graph,
             self.instances
                 .into_iter()
                 .map(|node_id| GraphIntent::SetNodeProperty {
                     node_id,
-                    to: NodeProperty::Subgraph(to),
+                    to: NodeProperty::Compound(to),
                 }),
         );
     }
@@ -87,27 +87,27 @@ impl MakeUnique {
 
 #[cfg(test)]
 mod tests {
-    use scenarium::{GraphId, Interface, Subgraph, SubgraphId};
+    use scenarium::{Compound, CompoundId, GraphId, Interface};
 
-    use crate::core::document::internals::{DocumentFixture, insert_subgraph};
+    use crate::core::document::internals::{DocumentFixture, insert_compound};
     use crate::core::edit::document_queue::DocumentQueue;
     use crate::core::edit::make_unique::MakeUnique;
     use crate::core::open_document::OpenDocument;
 
     /// Making one of two instances unique gives it a copy under a fresh id, holding the same
     /// nodes under the same ids, named apart, while the other keeps the original; one undo takes
-    /// both back. Instances of two subgraphs make nothing.
+    /// both back. Instances of two compounds make nothing.
     #[test]
     fn make_unique_gives_the_picked_instance_a_copy_of_its_own() {
         let mut fixture = DocumentFixture::default();
-        let [id, other] = [1, 2].map(SubgraphId::from_u128);
-        let mut subgraph = Subgraph::new("Denoise", Interface::default());
-        let inside = subgraph.graph.add(fixture.plain_node());
-        insert_subgraph(&mut fixture.document, id, subgraph);
-        insert_subgraph(
+        let [id, other] = [1, 2].map(CompoundId::from_u128);
+        let mut compound = Compound::new("Denoise", Interface::default());
+        let inside = compound.graph.add(fixture.plain_node());
+        insert_compound(&mut fixture.document, id, compound);
+        insert_compound(
             &mut fixture.document,
             other,
-            Subgraph::new("Other", Interface::default()),
+            Compound::new("Other", Interface::default()),
         );
         let [picked, kept] = [(); 2].map(|()| fixture.add_instance(id));
         let stranger = fixture.add_instance(other);
@@ -122,9 +122,9 @@ mod tests {
 
         let document = open.document();
         let main = document.graphs.main();
-        assert_eq!(main.find(picked).unwrap().subgraph(), Some(copy));
-        assert_eq!(main.find(kept).unwrap().subgraph(), Some(id));
-        let made = document.graphs.subgraph(copy).unwrap();
+        assert_eq!(main.find(picked).unwrap().compound(), Some(copy));
+        assert_eq!(main.find(kept).unwrap().compound(), Some(id));
+        let made = document.graphs.compound(copy).unwrap();
         assert_eq!(made.name, "Denoise 2");
         assert!(
             made.graph.find(inside).is_some(),
@@ -137,9 +137,9 @@ mod tests {
         );
         let _ = open.undo();
         let document = open.document();
-        assert!(document.graphs.subgraph(copy).is_none());
+        assert!(document.graphs.compound(copy).is_none());
         assert_eq!(
-            document.graphs.main().find(picked).unwrap().subgraph(),
+            document.graphs.main().find(picked).unwrap().compound(),
             Some(id)
         );
     }

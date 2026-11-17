@@ -343,7 +343,7 @@ impl GraphIntent {
                 {
                     return Err(EditRefusal::BoundaryNode.into());
                 }
-                // An instance that places a subgraph inside itself, or one that takes a graph past
+                // An instance that places a compound inside itself, or one that takes a graph past
                 // a bound.
                 document
                     .graphs
@@ -378,7 +378,7 @@ impl GraphIntent {
             }
             Self::RemoveNode { node_id } => {
                 validate::non_nil_node(node_id, Role::RemoveNode)?;
-                // A subgraph keeps its `Outputs` node and one `Inputs` node; a selection that holds
+                // A compound keeps its `Outputs` node and one `Inputs` node; a selection that holds
                 // them deletes the rest.
                 let kept = match graph.find(node_id).and_then(Node::boundary) {
                     Some(Boundary::Outputs) => true,
@@ -536,12 +536,12 @@ impl GraphIntent {
                             .ok_or(MalformedIntent::NoCacheMode { node_id })?,
                         to,
                     }),
-                    NodeProperty::Subgraph(to) => {
+                    NodeProperty::Compound(to) => {
                         let refused = MalformedIntent::NotRepointable { node_id };
-                        let from = node.subgraph().ok_or(refused)?;
+                        let from = node.compound().ok_or(refused)?;
                         let graphs = &document.graphs;
                         let (Some(held), Some(target)) =
-                            (graphs.subgraph(from), graphs.subgraph(to))
+                            (graphs.compound(from), graphs.compound(to))
                         else {
                             return Ok(None);
                         };
@@ -549,11 +549,11 @@ impl GraphIntent {
                             return Err(refused.into());
                         }
                         let mut placed = node.clone();
-                        placed.set_subgraph(to);
+                        placed.set_compound(to);
                         graphs
                             .admit_nodes(graph_id, [&placed])
                             .map_err(EditRefusal::Placement)?;
-                        PropertyChange::Subgraph(Change { from, to })
+                        PropertyChange::Compound(Change { from, to })
                     }
                 };
                 GraphStep::NodeProperty(SetNodeProperty { node_id, property })
@@ -675,7 +675,7 @@ impl GraphIntent {
     }
 
     /// Whether the intent writes the graph itself, not the view of it: what a read-only
-    /// subgraph refuses.
+    /// compound refuses.
     const fn writes_graph(&self) -> bool {
         match self {
             Self::AddNode { .. }

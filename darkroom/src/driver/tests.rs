@@ -842,7 +842,7 @@ fn a_lost_device_takes_the_previews_and_they_convert_again() {
 
     let publishes = |driver: &Driver| driver.app().run_state().previews().publishes();
     let before = publishes(&driver);
-    // Every preview of the sample, those inside its subgraphs' instances included.
+    // Every preview of the sample, those inside its compounds' instances included.
     let images = u64::try_from(driver.app().run_state().previews().image_count()).unwrap();
     driver.act(&[Action::LoseDevice]).unwrap();
     assert!(!driver.offscreen().is_device_lost());
@@ -942,11 +942,11 @@ fn a_save_writes_the_format_its_extension_names() {
     );
 }
 
-/// A preview two subgraphs down runs once per instance of the outer one and publishes under its
+/// A preview two compounds down runs once per instance of the outer one and publishes under its
 /// path of three ids, the outer instance, the inner and the preview; each instance of the outer
 /// one shows what its inside came to. The driver's state lists each graph, the main one first.
 #[test]
-fn a_preview_inside_nested_subgraphs_publishes_under_its_path() {
+fn a_preview_inside_nested_compounds_publishes_under_its_path() {
     let mut driver = driver();
     let dir = TempDir::new("darkroom-driver-nested");
     let path = fixture::nested_preview(dir.path());
@@ -956,27 +956,27 @@ fn a_preview_inside_nested_subgraphs_publishes_under_its_path() {
 
     let app = driver.app();
     let graphs = &app.open_document().document().graphs;
-    // The one instance in `graph`, and the subgraph it places.
+    // The one instance in `graph`, and the compound it places.
     let instance_in = |graph: GraphId| {
         let node = graphs
             .graph(graph)
             .iter()
-            .find(|node| node.subgraph().is_some())
-            .expect("the graph places a subgraph");
-        (node.node_id, GraphId::Subgraph(node.subgraph().unwrap()))
+            .find(|node| node.compound().is_some())
+            .expect("the graph places a compound");
+        (node.node_id, GraphId::Compound(node.compound().unwrap()))
     };
     let mut outers: Vec<NodeId> = graphs
         .main()
         .iter()
         .filter(|node| {
-            node.subgraph()
-                .is_some_and(|id| graphs.subgraph(id).unwrap().name == "Outer")
+            node.compound()
+                .is_some_and(|id| graphs.compound(id).unwrap().name == "Outer")
         })
         .map(|node| node.node_id)
         .collect();
     outers.sort_unstable();
     assert_eq!(outers.len(), 2);
-    let outer_graph = GraphId::Subgraph(graphs.main().find(outers[0]).unwrap().subgraph().unwrap());
+    let outer_graph = GraphId::Compound(graphs.main().find(outers[0]).unwrap().compound().unwrap());
     let (inner, inner_graph) = instance_in(outer_graph);
     let preview = graphs
         .graph(inner_graph)
@@ -1013,9 +1013,9 @@ fn a_preview_inside_nested_subgraphs_publishes_under_its_path() {
         .map(|graph| (graph.name.as_str(), graph.active))
         .collect();
     assert_eq!(names[0], ("main", true), "the main graph first, and active");
-    let mut subgraphs = names[1..].to_vec();
-    subgraphs.sort_unstable();
-    assert_eq!(subgraphs, [("Inner", false), ("Outer", false)]);
+    let mut compounds = names[1..].to_vec();
+    compounds.sort_unstable();
+    assert_eq!(compounds, [("Inner", false), ("Outer", false)]);
     assert_eq!(
         state.graphs[0].nodes.len(),
         2,

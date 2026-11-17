@@ -247,25 +247,25 @@ fn the_run_lines_link_selects_and_frames_the_cause() {
     );
 }
 
-/// A cause inside a subgraph is shown in that subgraph's pane: the link enters it through the
+/// A cause inside a compound is shown in that compound's pane: the link enters it through the
 /// instance the cause ran in, selects the cause there and frames that pane.
 #[test]
-fn the_run_lines_link_enters_the_subgraph_of_its_cause() {
+fn the_run_lines_link_enters_the_compound_of_its_cause() {
     use scenarium::{
-        InstancePath, Interface, InvokeError, NodeExecStatus, NodeStatus, RunError, RunSummary,
-        Subgraph, SubgraphId,
+        Compound, CompoundId, InstancePath, Interface, InvokeError, NodeExecStatus, NodeStatus,
+        RunError, RunSummary,
     };
     use std::io;
     use std::sync::Arc;
 
-    use crate::core::document::internals::insert_subgraph;
+    use crate::core::document::internals::insert_compound;
     use crate::core::document::item_id::ItemId;
 
     let mut fixture = DocumentFixture::default();
-    let id = SubgraphId::from_u128(1);
-    let mut subgraph = Subgraph::new("inner", Interface::default());
-    let inside = subgraph.graph.add(fixture.plain_node());
-    insert_subgraph(&mut fixture.document, id, subgraph);
+    let id = CompoundId::from_u128(1);
+    let mut compound = Compound::new("inner", Interface::default());
+    let inside = compound.graph.add(fixture.plain_node());
+    insert_compound(&mut fixture.document, id, compound);
     let instance = fixture.add_instance(id);
     let mut h = SessionHarness::new(fixture);
     let path = InstancePath::new(&[instance]);
@@ -285,7 +285,7 @@ fn the_run_lines_link_enters_the_subgraph_of_its_cause() {
             .expect("the link shows")
             .center(),
     );
-    let graph = GraphId::Subgraph(id);
+    let graph = GraphId::Compound(id);
     let commands = h.frame();
     assert!(
         matches!(

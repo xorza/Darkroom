@@ -2,14 +2,14 @@
 //!
 //! # Decisions
 //!
-//! - **One type owns every graph of a document.** The main graph and the subgraphs travel
+//! - **One type owns every graph of a document.** The main graph and the compounds travel
 //!   together, and each rule that lies across graphs is a method here: the scope of a graph, the
 //!   recursion and the bounds, an interface edit, the load's repair. Refused: the main graph and
-//!   the subgraphs as two parameters, which no call can pass apart.
-//! - **The hierarchy lives here, not in a host.** The subgraphs sit beside the main graph and the
+//!   the compounds as two parameters, which no call can pass apart.
+//! - **The hierarchy lives here, not in a host.** The compounds sit beside the main graph and the
 //!   compile flattens them, as MaterialX keeps node graphs in its core and flattens there
-//!   ([`NodeGraph::flattenSubgraphs`](https://www.sidefx.com/docs/hdk/class_node_graph.html)).
-//! - **Subgraphs do not recurse.** No subgraph places itself, directly or through others, as
+//!   ([`NodeGraph::flattenCompounds`](https://www.sidefx.com/docs/hdk/class_node_graph.html)).
+//! - **Compounds do not recurse.** No compound places itself, directly or through others, as
 //!   Blender ("Recursive node groups are prohibited") and Substance Designer forbid
 //!   ([graph instances](https://helpx.adobe.com/substance-3d-designer/substance-model-graphs/graph-instances-in-substance-model-graphs.html)).
 //!   A load breaks a loop at the instance that closes it in a walk in id order, so every load
@@ -18,8 +18,8 @@
 //!   [`ProgramShape::MAX_NODES`] program nodes.** Two instances a level over thirty levels are
 //!   2³⁰ program nodes, and a compile has no expected failure, so the edit that would pass a
 //!   bound is refused and a load detaches the instance that passes it. Held for every graph, not
-//!   the main graph alone, so a subgraph within its bounds is one that fits where it is placed
-//!   at the top; an add inside a subgraph grows each graph that places it, so the gate asks them
+//!   the main graph alone, so a compound within its bounds is one that fits where it is placed
+//!   at the top; an add inside a compound grows each graph that places it, so the gate asks them
 //!   all. Cost: a ninth level is refused.
 
 pub(crate) mod digest;
@@ -32,12 +32,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::data::data_type::DataType;
 use crate::graph::Graph;
+use crate::graph::compound::Compound;
 use crate::graph::error::{
     DetachReason, GraphSetValidationError, GraphValidationError, PlacementRejection,
 };
 use crate::graph::ghost_node::GhostNode;
 use crate::graph::ghost_wiring::GhostSource;
-use crate::graph::identity::{GraphId, NodeAddr, NodeId, PortId, SubgraphId};
+use crate::graph::identity::{CompoundId, GraphId, NodeAddr, NodeId, PortId};
 use crate::graph::instance_path::InstancePath;
 use crate::graph::interface::Interface;
 use crate::graph::manifest::Manifest;
@@ -48,7 +49,6 @@ use crate::graph::program_id::ProgramId;
 use crate::graph::reconciled::{GraphSetReconciled, Reconciled, Repair};
 use crate::graph::saved_decl::SavedDecl;
 use crate::graph::scope::Scope;
-use crate::graph::subgraph::Subgraph;
 use crate::graph::type_names::{TypeNames, TypeRef};
 use crate::graph::{Before, Detaching, RefusedWiring};
 use crate::library::{Library, UNKNOWN_TYPE};
@@ -71,17 +71,17 @@ impl ProgramShape {
     /// memory.
     pub const MAX_NODES: usize = 1 << 16;
 
-    /// What one node of kind `kind` adds, given the shape of every subgraph it may place.
-    fn of_node(kind: &NodeKind, shapes: &HashMap<SubgraphId, Self>) -> Self {
+    /// What one node of kind `kind` adds, given the shape of every compound it may place.
+    fn of_node(kind: &NodeKind, shapes: &HashMap<CompoundId, Self>) -> Self {
         match kind {
             NodeKind::Body { .. } => Self {
                 levels: 1,
                 node_count: 1,
             },
-            NodeKind::Instance { subgraph, .. } => {
+            NodeKind::Instance { compound, .. } => {
                 let inner = shapes
-                    .get(subgraph)
-                    .expect("a placed subgraph's shape is known before its instance's");
+                    .get(compound)
+                    .expect("a placed compound's shape is known before its instance's");
                 Self {
                     levels: inner.levels + 1,
                     node_count: inner.node_count,
@@ -117,17 +117,17 @@ impl ProgramShape {
     }
 }
 
-/// Every graph of a document: its main graph, and the subgraphs it holds by id.
+/// Every graph of a document: its main graph, and the compounds it holds by id.
 ///
 /// The fields are private, so each rule across graphs is a method here and no caller holds the
-/// main graph apart from the subgraphs it resolves against.
+/// main graph apart from the compounds it resolves against.
 #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GraphSet {
     main: Graph,
     /// A `BTreeMap`, so a walk in id order is the map's own, and decoded entry by entry, so a
     /// document that repeats an id is refused rather than loaded with the last.
-    #[serde(deserialize_with = "crate::graph::serde::deserialize_subgraphs")]
-    subgraphs: BTreeMap<SubgraphId, Subgraph>,
+    #[serde(deserialize_with = "crate::graph::serde::deserialize_compounds")]
+    compounds: BTreeMap<CompoundId, Compound>,
     /// The names files gave the types the library lacks, as [`TypeNames`] says: learned at a
     /// load and as a definition enters, written by the next save's manifest.
     #[serde(skip)]
@@ -142,21 +142,21 @@ pub struct UnknownType {
     pub ports: Vec<InterfacePort>,
 }
 
-/// One port of a subgraph's interface.
+/// One port of a compound's interface.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct InterfacePort {
-    pub subgraph: SubgraphId,
+    pub compound: CompoundId,
     /// [`PortList::Inputs`] or [`PortList::Outputs`]: an event carries no type to be unknown.
     pub list: PortList,
     pub port: PortId,
 }
 
-/// What a walk of the subgraphs found: the instances that close a loop, and the subgraphs in an
-/// order where each comes after every subgraph it places, the closing instances aside.
+/// What a walk of the compounds found: the instances that close a loop, and the compounds in an
+/// order where each comes after every compound it places, the closing instances aside.
 #[derive(Debug, Default)]
 struct DefWalk {
     closing: Vec<NodeAddr>,
-    post_order: Vec<SubgraphId>,
+    post_order: Vec<CompoundId>,
 }
 
 impl From<Graph> for GraphSet {
@@ -164,24 +164,24 @@ impl From<Graph> for GraphSet {
     fn from(main: Graph) -> Self {
         Self {
             main,
-            subgraphs: BTreeMap::new(),
+            compounds: BTreeMap::new(),
             type_names: TypeNames::default(),
         }
     }
 }
 
 impl GraphSet {
-    /// The graph `graph` names: the main graph, or a subgraph's.
+    /// The graph `graph` names: the main graph, or a compound's.
     ///
     /// # Panics
-    /// If `graph` names a subgraph this set does not hold.
+    /// If `graph` names a compound this set does not hold.
     pub fn graph(&self, graph: GraphId) -> &Graph {
         match graph {
             GraphId::Main => &self.main,
-            GraphId::Subgraph(id) => {
+            GraphId::Compound(id) => {
                 &self
-                    .subgraph(id)
-                    .expect("a named subgraph is in the set")
+                    .compound(id)
+                    .expect("a named compound is in the set")
                     .graph
             }
         }
@@ -190,15 +190,15 @@ impl GraphSet {
     /// [`Self::graph`] for writing.
     ///
     /// # Panics
-    /// If `graph` names a subgraph this set does not hold.
+    /// If `graph` names a compound this set does not hold.
     pub fn graph_mut(&mut self, graph: GraphId) -> &mut Graph {
         match graph {
             GraphId::Main => &mut self.main,
-            GraphId::Subgraph(id) => {
+            GraphId::Compound(id) => {
                 &mut self
-                    .subgraphs
+                    .compounds
                     .get_mut(&id)
-                    .expect("a named subgraph is in the set")
+                    .expect("a named compound is in the set")
                     .graph
             }
         }
@@ -214,103 +214,103 @@ impl GraphSet {
         &mut self.main
     }
 
-    pub fn subgraph(&self, id: SubgraphId) -> Option<&Subgraph> {
-        self.subgraphs.get(&id)
+    pub fn compound(&self, id: CompoundId) -> Option<&Compound> {
+        self.compounds.get(&id)
     }
 
     /// In id order.
-    pub fn subgraphs(&self) -> impl ExactSizeIterator<Item = (SubgraphId, &Subgraph)> {
-        self.subgraphs.iter().map(|(id, subgraph)| (*id, subgraph))
+    pub fn compounds(&self) -> impl ExactSizeIterator<Item = (CompoundId, &Compound)> {
+        self.compounds.iter().map(|(id, compound)| (*id, compound))
     }
 
-    /// Every graph, the main graph first, then the subgraphs' in id order.
+    /// Every graph, the main graph first, then the compounds' in id order.
     pub fn graphs(&self) -> impl Iterator<Item = (GraphId, &Graph)> {
         [(GraphId::Main, &self.main)].into_iter().chain(
-            self.subgraphs
+            self.compounds
                 .iter()
-                .map(|(id, subgraph)| (GraphId::Subgraph(*id), &subgraph.graph)),
+                .map(|(id, compound)| (GraphId::Compound(*id), &compound.graph)),
         )
     }
 
     /// # Panics
     /// If `id` is nil or already held: an add takes a fresh id.
-    pub fn insert_subgraph(&mut self, id: SubgraphId, subgraph: Subgraph) {
-        assert!(!id.is_nil(), "cannot add a subgraph with a nil id");
-        let prev = self.subgraphs.insert(id, subgraph);
+    pub fn insert_compound(&mut self, id: CompoundId, compound: Compound) {
+        assert!(!id.is_nil(), "cannot add a compound with a nil id");
+        let prev = self.compounds.insert(id, compound);
         assert!(
             prev.is_none(),
-            "subgraph {id:?} already exists; adds must use a fresh id"
+            "compound {id:?} already exists; adds must use a fresh id"
         );
     }
 
-    /// Take out the subgraph under `id`, or `None` if this set holds none.
+    /// Take out the compound under `id`, or `None` if this set holds none.
     ///
     /// # Panics
-    /// If a node or a ghost node in any graph places it: a host removes a subgraph no one uses.
-    pub fn remove_subgraph(&mut self, id: SubgraphId) -> Option<Subgraph> {
+    /// If a node or a ghost node in any graph places it: a host removes a compound no one uses.
+    pub fn remove_compound(&mut self, id: CompoundId) -> Option<Compound> {
         assert!(
             self.uses(id).next().is_none(),
-            "subgraph {id:?} is removed while placed"
+            "compound {id:?} is removed while placed"
         );
-        self.subgraphs.remove(&id)
+        self.compounds.remove(&id)
     }
 
-    /// Put `interface` on subgraph `id` and change no binding: what an interface write does once
+    /// Put `interface` on compound `id` and change no binding: what an interface write does once
     /// it has taken out what the new interface does not hold.
-    pub(super) fn set_interface(&mut self, id: SubgraphId, interface: Interface) {
-        self.subgraphs
+    pub(super) fn set_interface(&mut self, id: CompoundId, interface: Interface) {
+        self.compounds
             .get_mut(&id)
-            .expect("an interface edit's subgraph is in the set")
+            .expect("an interface edit's compound is in the set")
             .interface = interface;
     }
 
-    /// Name subgraph `id` `name`, and hand back the name it replaces. A name holds no rule
+    /// Name compound `id` `name`, and hand back the name it replaces. A name holds no rule
     /// across graphs, so nothing else changes.
     ///
     /// # Panics
-    /// If the set holds no subgraph `id`.
-    pub fn rename_subgraph(&mut self, id: SubgraphId, name: String) -> String {
+    /// If the set holds no compound `id`.
+    pub fn rename_compound(&mut self, id: CompoundId, name: String) -> String {
         let held = self
-            .subgraphs
+            .compounds
             .get_mut(&id)
-            .expect("a renamed subgraph is in the set");
+            .expect("a renamed compound is in the set");
         mem::replace(&mut held.name, name)
     }
 
-    /// Hold `subgraph` under `id`, in place of the definition held there or beside the others,
+    /// Hold `compound` under `id`, in place of the definition held there or beside the others,
     /// and hand back the one it replaces. No check runs: what places it may no longer fit its
     /// ports, so the caller reconciles the set after, as a publish into a library file does.
-    pub fn put_subgraph(&mut self, id: SubgraphId, subgraph: Subgraph) -> Option<Subgraph> {
-        self.subgraphs.insert(id, subgraph)
+    pub fn put_compound(&mut self, id: CompoundId, compound: Compound) -> Option<Compound> {
+        self.compounds.insert(id, compound)
     }
 
-    /// Put `subgraph` in place of the definition held under `id`, its interface the same, and
+    /// Put `compound` in place of the definition held under `id`, its interface the same, and
     /// hand back the one it replaces: what an update from the library writes once the interface
     /// edit before it made the two interfaces one. Each instance keeps its ports and bindings.
     ///
     /// # Panics
-    /// If the set holds no subgraph `id`, or `subgraph`'s interface is not the held one's.
-    pub fn replace_subgraph(&mut self, id: SubgraphId, subgraph: Subgraph) -> Subgraph {
+    /// If the set holds no compound `id`, or `compound`'s interface is not the held one's.
+    pub fn replace_compound(&mut self, id: CompoundId, compound: Compound) -> Compound {
         let held = self
-            .subgraphs
+            .compounds
             .get_mut(&id)
-            .expect("a replaced subgraph is in the set");
+            .expect("a replaced compound is in the set");
         assert!(
-            held.interface == subgraph.interface,
+            held.interface == compound.interface,
             "a replacement keeps the interface an interface edit set"
         );
-        mem::replace(held, subgraph)
+        mem::replace(held, compound)
     }
 
     /// What the nodes of `graph` resolve against.
     ///
     /// # Panics
-    /// If `graph` names a subgraph this set does not hold.
+    /// If `graph` names a compound this set does not hold.
     pub fn scope<'a>(&'a self, library: &'a Library, graph: GraphId) -> Scope<'a> {
         let owner = match graph {
             GraphId::Main => None,
-            GraphId::Subgraph(id) => {
-                Some(self.subgraph(id).expect("a scope's subgraph is in the set"))
+            GraphId::Compound(id) => {
+                Some(self.compound(id).expect("a scope's compound is in the set"))
             }
         };
         Scope::new(library, self, owner)
@@ -321,15 +321,15 @@ impl GraphSet {
     pub fn graph_at(&self, path: InstancePath) -> Option<GraphId> {
         let mut graph = GraphId::Main;
         for &instance in path.ids() {
-            let placed = self.graph(graph).find(instance)?.subgraph()?;
-            self.subgraph(placed)?;
-            graph = GraphId::Subgraph(placed);
+            let placed = self.graph(graph).find(instance)?.compound()?;
+            self.compound(placed)?;
+            graph = GraphId::Compound(placed);
         }
         Some(graph)
     }
 
     /// Every instance whose expansion is `graph`, as the compile expands them, in path order:
-    /// the main graph's own path for the main graph, none for a subgraph no node places. A ghost node
+    /// the main graph's own path for the main graph, none for a compound no node places. A ghost node
     /// expands nothing, so a path through one is none.
     ///
     /// Walks the expansion from the main graph down, at most [`ProgramShape::MAX_LEVELS`] deep, as the
@@ -343,10 +343,10 @@ impl GraphSet {
                 found.push(path);
             }
             for node in self.graph(at).iter() {
-                if let Some(placed) = node.subgraph()
-                    && self.subgraph(placed).is_some()
+                if let Some(placed) = node.compound()
+                    && self.compound(placed).is_some()
                 {
-                    open.push((path.child(node.node_id), GraphId::Subgraph(placed)));
+                    open.push((path.child(node.node_id), GraphId::Compound(placed)));
                 }
             }
         }
@@ -354,39 +354,39 @@ impl GraphSet {
         found
     }
 
-    /// Subgraph `id` and each subgraph it places, however deep, each once and after those it
-    /// places: the order a copy of them goes into another set so each instance's subgraph is
-    /// held before it. Bounded by the depth gate; a placed subgraph the set lacks is left out.
-    pub fn placed_first(&self, id: SubgraphId) -> Vec<SubgraphId> {
+    /// Compound `id` and each compound it places, however deep, each once and after those it
+    /// places: the order a copy of them goes into another set so each instance's compound is
+    /// held before it. Bounded by the depth gate; a placed compound the set lacks is left out.
+    pub fn placed_first(&self, id: CompoundId) -> Vec<CompoundId> {
         let mut order = Vec::new();
         self.push_placed_first(id, &mut order);
         order
     }
 
-    fn push_placed_first(&self, id: SubgraphId, order: &mut Vec<SubgraphId>) {
+    fn push_placed_first(&self, id: CompoundId, order: &mut Vec<CompoundId>) {
         if order.contains(&id) {
             return;
         }
-        let Some(subgraph) = self.subgraph(id) else {
+        let Some(compound) = self.compound(id) else {
             return;
         };
-        for placed in subgraph.graph.iter().filter_map(|node| node.subgraph()) {
+        for placed in compound.graph.iter().filter_map(|node| node.compound()) {
             self.push_placed_first(placed, order);
         }
         order.push(id);
     }
 
-    /// Every node that places subgraph `id`, each ghost node included, in each graph: the main graph's
-    /// first, then the subgraphs' in id order.
-    pub fn uses(&self, id: SubgraphId) -> impl Iterator<Item = NodeAddr> {
+    /// Every node that places compound `id`, each ghost node included, in each graph: the main graph's
+    /// first, then the compounds' in id order.
+    pub fn uses(&self, id: CompoundId) -> impl Iterator<Item = NodeAddr> {
         self.graphs().flat_map(move |(graph, held)| {
             let nodes = held
                 .iter()
-                .filter(move |node| node.subgraph() == Some(id))
+                .filter(move |node| node.compound() == Some(id))
                 .map(|node| node.node_id);
             let ghosts = held
                 .ghost_nodes()
-                .filter(move |(_, ghost)| ghost.node.subgraph() == Some(id))
+                .filter(move |(_, ghost)| ghost.node.compound() == Some(id))
                 .map(|(node_id, _)| node_id);
             nodes
                 .chain(ghosts)
@@ -394,13 +394,13 @@ impl GraphSet {
         })
     }
 
-    /// Whether `nodes` may be added to `graph`: no instance among them places a subgraph inside
+    /// Whether `nodes` may be added to `graph`: no instance among them places a compound inside
     /// itself, and with them in place every graph keeps within both bounds — `graph`, and each
     /// graph that places it, however deep. The edit gate's question for an add, a paste and an
     /// update.
     ///
     /// # Panics
-    /// If an instance among `nodes` places a subgraph this set does not hold, which the gate
+    /// If an instance among `nodes` places a compound this set does not hold, which the gate
     /// refuses before as a node that does not resolve.
     pub fn admit_nodes<'a>(
         &self,
@@ -410,23 +410,23 @@ impl GraphSet {
         let nodes: Vec<&Node> = nodes.into_iter().collect();
         if nodes
             .iter()
-            .filter_map(|node| node.subgraph())
+            .filter_map(|node| node.compound())
             .any(|placed| self.would_recurse(graph, placed))
         {
             return Err(PlacementRejection::Recursive);
         }
         let walk = self.walk();
         debug_assert!(walk.closing.is_empty(), "a set a host keeps holds no loop");
-        // What the nodes add, read off the shapes as they are: a subgraph an added instance
+        // What the nodes add, read off the shapes as they are: a compound an added instance
         // places does not hold `graph`, or the add would recurse, so the add leaves its shape
         // alone, wherever the walk puts it.
         let before = self.shapes(&walk.post_order);
         let grown = nodes.iter().fold(ProgramShape::default(), |grown, node| {
             grown.beside(ProgramShape::of_node(&node.kind, &before))
         });
-        let mut shapes: HashMap<SubgraphId, ProgramShape> =
+        let mut shapes: HashMap<CompoundId, ProgramShape> =
             HashMap::with_capacity(walk.post_order.len());
-        let shape_with = |id: GraphId, held: &Graph, shapes: &HashMap<SubgraphId, ProgramShape>| {
+        let shape_with = |id: GraphId, held: &Graph, shapes: &HashMap<CompoundId, ProgramShape>| {
             let shape = shape_of(held, shapes);
             if id == graph {
                 shape.beside(grown)
@@ -435,13 +435,13 @@ impl GraphSet {
             }
         };
         for &id in &walk.post_order {
-            let shape = shape_with(GraphId::Subgraph(id), &self.subgraphs[&id].graph, &shapes);
+            let shape = shape_with(GraphId::Compound(id), &self.compounds[&id].graph, &shapes);
             shapes.insert(id, shape);
         }
         let main = shape_with(GraphId::Main, &self.main, &shapes);
         let own = match graph {
             GraphId::Main => main,
-            GraphId::Subgraph(id) => *shapes
+            GraphId::Compound(id) => *shapes
                 .get(&id)
                 .expect("the graph an add lands in is in the set"),
         };
@@ -453,7 +453,7 @@ impl GraphSet {
         let others = [(GraphId::Main, main)].into_iter().chain(
             shapes
                 .iter()
-                .map(|(id, shape)| (GraphId::Subgraph(*id), *shape)),
+                .map(|(id, shape)| (GraphId::Compound(*id), *shape)),
         );
         others
             .filter_map(|(id, shape)| shape.rejection(id).map(|rejection| (id, rejection)))
@@ -462,7 +462,7 @@ impl GraphSet {
     }
 
     /// Validate this set as one a host may compile against `library`: each graph holds the load
-    /// contract in its own [`Scope`] ([`Graph::validate_with`]), no subgraph places itself, and
+    /// contract in its own [`Scope`] ([`Graph::validate_with`]), no compound places itself, and
     /// every graph's expansion fits its bounds.
     ///
     /// What [`Self::reconcile`] establishes at load and the edit gate keeps, so a failure here
@@ -531,8 +531,8 @@ impl GraphSet {
     /// Every type the set itself names, apart from what its nodes' funcs declare: each
     /// interface's ports, each ghost node's saved declaration and each ghost's saved ports.
     fn named_types(&self) -> impl Iterator<Item = DataType> {
-        let interfaces = self.subgraphs.values().flat_map(|subgraph| {
-            let interface = &subgraph.interface;
+        let interfaces = self.compounds.values().flat_map(|compound| {
+            let interface = &compound.interface;
             let inputs = interface.inputs().iter().map(|input| input.data_type);
             inputs.chain(interface.outputs().iter().map(|output| output.data_type))
         });
@@ -579,7 +579,7 @@ impl GraphSet {
     /// graph: remove a node under the nil id, a ghost node under a node's id and the wiring that
     /// names a missing node; move each node and ghost node of a func the library redirects to the
     /// func its redirects end at; attach each ghost node that resolves again; keep one boundary node
-    /// a side in a subgraph's; make a ghost node of each node its scope does not resolve. Across
+    /// a side in a compound's; make a ghost node of each node its scope does not resolve. Across
     /// them, make a ghost node of each instance that closes a loop, nests past
     /// [`ProgramShape::MAX_LEVELS`] or expands past [`ProgramShape::MAX_NODES`], taken in id
     /// order. Then in each graph make a ghost of each binding and subscription its scope refuses
@@ -615,7 +615,7 @@ impl GraphSet {
                     .zip(ghosts)
                     .map(|(&node_id, ghost)| (graph, node_id, ghost)),
             );
-            if matches!(graph, GraphId::Subgraph(_)) {
+            if matches!(graph, GraphId::Compound(_)) {
                 self.graph_mut(graph).add_missing_boundaries(report);
             }
             let unresolved = self
@@ -646,7 +646,7 @@ impl GraphSet {
 
         let mut shapes = HashMap::with_capacity(walk.post_order.len());
         for &id in &walk.post_order {
-            let graph = GraphId::Subgraph(id);
+            let graph = GraphId::Compound(id);
             let refused = over_bounds(self.graph(graph), &shapes);
             self.detach(library, manifest, graph, refused, &mut reports);
             shapes.insert(id, shape_of(self.graph(graph), &shapes));
@@ -698,10 +698,10 @@ impl GraphSet {
         for (graph, reconciled) in reports {
             match graph {
                 GraphId::Main => report.main = reconciled,
-                GraphId::Subgraph(id) if !reconciled.is_empty() => {
-                    report.subgraphs.insert(id, reconciled);
+                GraphId::Compound(id) if !reconciled.is_empty() => {
+                    report.compounds.insert(id, reconciled);
                 }
-                GraphId::Subgraph(_) => {}
+                GraphId::Compound(_) => {}
             }
         }
         debug_assert!(
@@ -734,11 +734,11 @@ impl GraphSet {
     }
 
     /// Each type an interface names that `library` does not register, in the order the
-    /// interfaces first name it, with the ports that name it: subgraphs in id order, the inputs
+    /// interfaces first name it, with the ports that name it: compounds in id order, the inputs
     /// of each before its outputs.
     pub fn unknown_types(&self, library: &Library) -> Vec<UnknownType> {
         let mut unknown: Vec<UnknownType> = Vec::new();
-        for (subgraph, held) in self.subgraphs() {
+        for (compound, held) in self.compounds() {
             let ports = held
                 .interface
                 .inputs()
@@ -755,7 +755,7 @@ impl GraphSet {
                     continue;
                 }
                 let port = InterfacePort {
-                    subgraph,
+                    compound,
                     list,
                     port,
                 };
@@ -774,23 +774,23 @@ impl GraphSet {
         unknown
     }
 
-    /// Whether placing an instance of `placed` in `graph` would put a subgraph inside itself:
-    /// `graph` is the graph of `placed`, or of a subgraph `placed` holds, however deep.
-    fn would_recurse(&self, graph: GraphId, placed: SubgraphId) -> bool {
-        let GraphId::Subgraph(owner) = graph else {
+    /// Whether placing an instance of `placed` in `graph` would put a compound inside itself:
+    /// `graph` is the graph of `placed`, or of a compound `placed` holds, however deep.
+    fn would_recurse(&self, graph: GraphId, placed: CompoundId) -> bool {
+        let GraphId::Compound(owner) = graph else {
             return false;
         };
         let mut stack = vec![placed];
-        let mut seen: HashSet<SubgraphId> = HashSet::from_iter([placed]);
+        let mut seen: HashSet<CompoundId> = HashSet::from_iter([placed]);
         while let Some(id) = stack.pop() {
             if id == owner {
                 return true;
             }
-            let Some(subgraph) = self.subgraph(id) else {
+            let Some(compound) = self.compound(id) else {
                 continue;
             };
-            for node in subgraph.graph.iter() {
-                if let Some(inner) = node.subgraph()
+            for node in compound.graph.iter() {
+                if let Some(inner) = node.compound()
                     && seen.insert(inner)
                 {
                     stack.push(inner);
@@ -800,9 +800,9 @@ impl GraphSet {
         false
     }
 
-    /// A depth-first walk of what each subgraph places, from every subgraph in id order and
-    /// through each one's instances in node-id order: each instance that returns to a subgraph on
-    /// the current path closes a loop. Instances of a subgraph the set lacks are passed over.
+    /// A depth-first walk of what each compound places, from every compound in id order and
+    /// through each one's instances in node-id order: each instance that returns to a compound on
+    /// the current path closes a loop. Instances of a compound the set lacks are passed over.
     /// Removing the closing instances leaves no loop, and the id order makes the choice the same
     /// on every load.
     fn walk(&self) -> DefWalk {
@@ -813,22 +813,22 @@ impl GraphSet {
         }
         #[derive(Debug)]
         enum Visit {
-            Enter(SubgraphId),
+            Enter(CompoundId),
             Instance {
-                owner: SubgraphId,
+                owner: CompoundId,
                 node_id: NodeId,
-                placed: SubgraphId,
+                placed: CompoundId,
             },
-            Exit(SubgraphId),
+            Exit(CompoundId),
         }
 
-        let mut marks: HashMap<SubgraphId, Mark> = HashMap::with_capacity(self.subgraphs.len());
+        let mut marks: HashMap<CompoundId, Mark> = HashMap::with_capacity(self.compounds.len());
         let mut stack = Vec::new();
         let mut walk = DefWalk {
             closing: Vec::new(),
-            post_order: Vec::with_capacity(self.subgraphs.len()),
+            post_order: Vec::with_capacity(self.compounds.len()),
         };
-        for &root in self.subgraphs.keys() {
+        for &root in self.compounds.keys() {
             if marks.contains_key(&root) {
                 continue;
             }
@@ -839,8 +839,8 @@ impl GraphSet {
                         marks.insert(owner, Mark::OnPath);
                         stack.push(Visit::Exit(owner));
                         let first = stack.len();
-                        stack.extend(self.subgraphs[&owner].graph.iter().filter_map(|node| {
-                            node.subgraph().map(|placed| Visit::Instance {
+                        stack.extend(self.compounds[&owner].graph.iter().filter_map(|node| {
+                            node.compound().map(|placed| Visit::Instance {
                                 owner,
                                 node_id: node.node_id,
                                 placed,
@@ -860,9 +860,9 @@ impl GraphSet {
                     } => match marks.get(&placed) {
                         Some(Mark::OnPath) => walk
                             .closing
-                            .push(NodeAddr::new(GraphId::Subgraph(owner), node_id)),
+                            .push(NodeAddr::new(GraphId::Compound(owner), node_id)),
                         Some(Mark::Done) => {}
-                        None if self.subgraphs.contains_key(&placed) => {
+                        None if self.compounds.contains_key(&placed) => {
                             stack.push(Visit::Enter(placed));
                         }
                         None => {}
@@ -877,12 +877,12 @@ impl GraphSet {
         walk
     }
 
-    /// The shape of each subgraph, taken in `post_order`, so each is known before an instance of
+    /// The shape of each compound, taken in `post_order`, so each is known before an instance of
     /// it is counted.
-    fn shapes(&self, post_order: &[SubgraphId]) -> HashMap<SubgraphId, ProgramShape> {
+    fn shapes(&self, post_order: &[CompoundId]) -> HashMap<CompoundId, ProgramShape> {
         let mut shapes = HashMap::with_capacity(post_order.len());
         for id in post_order {
-            shapes.insert(*id, shape_of(&self.subgraphs[id].graph, &shapes));
+            shapes.insert(*id, shape_of(&self.compounds[id].graph, &shapes));
         }
         shapes
     }
@@ -905,8 +905,8 @@ fn reattaches(repair: &Repair, node_id: NodeId) -> bool {
     }
 }
 
-/// What `graph` expands into, given the shape of every subgraph it places.
-fn shape_of(graph: &Graph, shapes: &HashMap<SubgraphId, ProgramShape>) -> ProgramShape {
+/// What `graph` expands into, given the shape of every compound it places.
+fn shape_of(graph: &Graph, shapes: &HashMap<CompoundId, ProgramShape>) -> ProgramShape {
     graph.iter().fold(ProgramShape::default(), |shape, node| {
         shape.beside(ProgramShape::of_node(&node.kind, shapes))
     })
@@ -915,7 +915,7 @@ fn shape_of(graph: &Graph, shapes: &HashMap<SubgraphId, ProgramShape>) -> Progra
 /// The nodes of `graph` that pass its bounds, in node-id order: each one whose own levels pass
 /// [`ProgramShape::MAX_LEVELS`], and each one that would carry the count of the nodes before it
 /// past [`ProgramShape::MAX_NODES`].
-fn over_bounds(graph: &Graph, shapes: &HashMap<SubgraphId, ProgramShape>) -> Vec<Refusal> {
+fn over_bounds(graph: &Graph, shapes: &HashMap<CompoundId, ProgramShape>) -> Vec<Refusal> {
     let nodes = graph
         .iter()
         .map(|node| (node.node_id, ProgramShape::of_node(&node.kind, shapes)));

@@ -1,15 +1,15 @@
-//! [`NodeDecl`]: what a node resolves to, a func or a subgraph's face.
+//! [`NodeDecl`]: what a node resolves to, a func or a compound's face.
 
+use crate::graph::compound::Compound;
 use crate::graph::func::{Func, FuncEvent};
 use crate::graph::identity::{PortId, TriggerPort};
 use crate::graph::node::Boundary;
 use crate::graph::ports::EventDecl;
 use crate::graph::ports::{InputDecl, Numbered, OutputDecl, Ports};
-use crate::graph::subgraph::Subgraph;
 
 /// What a node resolves to through a [`Scope`](crate::Scope): the ports it shows and is wired
 /// by, and a body if it runs. A func is a declaration with a body; an instance and a boundary
-/// node show the ports their subgraph's interface gives them and have none, as the compile
+/// node show the ports their compound's interface gives them and have none, as the compile
 /// removes them.
 ///
 /// As MaterialX, where a `nodedef` declares the ports and an implementation, code or a nodegraph,
@@ -20,10 +20,10 @@ use crate::graph::subgraph::Subgraph;
 pub enum NodeDecl<'a> {
     /// A library func or a special node's built-in.
     Func(&'a Func),
-    /// An instance of the subgraph.
-    Instance(&'a Subgraph),
+    /// An instance of the compound.
+    Instance(&'a Compound),
     /// The boundary node on `side` of `owner`'s graph.
-    Boundary { side: Boundary, owner: &'a Subgraph },
+    Boundary { side: Boundary, owner: &'a Compound },
 }
 
 impl<'a> NodeDecl<'a> {
@@ -31,7 +31,7 @@ impl<'a> NodeDecl<'a> {
     pub fn name(self) -> &'a str {
         match self {
             Self::Func(func) => func.name(),
-            Self::Instance(subgraph) => &subgraph.name,
+            Self::Instance(compound) => &compound.name,
             Self::Boundary { side, .. } => side.name(),
         }
     }
@@ -39,7 +39,7 @@ impl<'a> NodeDecl<'a> {
     pub fn description(self) -> Option<&'a str> {
         match self {
             Self::Func(func) => func.description(),
-            Self::Instance(subgraph) => subgraph.description.as_deref(),
+            Self::Instance(compound) => compound.description.as_deref(),
             Self::Boundary { .. } => None,
         }
     }
@@ -47,7 +47,7 @@ impl<'a> NodeDecl<'a> {
     pub const fn ports(self) -> &'a Ports {
         match self {
             Self::Func(func) => func.ports(),
-            Self::Instance(subgraph) => subgraph.interface.ports(),
+            Self::Instance(compound) => compound.interface.ports(),
             Self::Boundary { side, owner } => owner.interface.boundary_ports(side),
         }
     }
@@ -65,7 +65,7 @@ impl<'a> NodeDecl<'a> {
     pub fn events(self) -> NodeEvents<'a> {
         match self {
             Self::Func(func) => NodeEvents::Func(func.events()),
-            Self::Instance(subgraph) => NodeEvents::Declared(subgraph.interface.events()),
+            Self::Instance(compound) => NodeEvents::Declared(compound.interface.events()),
             Self::Boundary {
                 side: Boundary::Inputs,
                 owner,
@@ -88,7 +88,7 @@ impl<'a> NodeDecl<'a> {
     pub fn triggers(self) -> NodeTriggers<'a> {
         match self {
             Self::Func(func) if func.sink() => NodeTriggers::Own,
-            Self::Instance(subgraph) if subgraph.interface.trigger().is_some() => NodeTriggers::Own,
+            Self::Instance(compound) if compound.interface.trigger().is_some() => NodeTriggers::Own,
             Self::Boundary {
                 side: Boundary::Outputs,
                 owner,
@@ -112,7 +112,7 @@ impl<'a> NodeDecl<'a> {
 
     /// Whether the output under `port` holds only a constant: the `Inputs` node's mirror of a
     /// const-only interface input, which an instance binds to a constant alone. So a const-only
-    /// input inside the subgraph may take a wire from it.
+    /// input inside the compound may take a wire from it.
     pub(crate) fn output_is_const(self, port: PortId) -> bool {
         match self {
             Self::Boundary {

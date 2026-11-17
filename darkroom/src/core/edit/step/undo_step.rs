@@ -12,14 +12,14 @@ use crate::core::document::Document;
 use crate::core::edit::edit_facts::{EditFacts, Touched};
 use crate::core::edit::step::change::Direction;
 use crate::core::edit::step::graph_step::GraphStep;
+use crate::core::edit::step::set_compound::SetCompound;
+use crate::core::edit::step::set_compound_name::SetCompoundName;
 use crate::core::edit::step::set_definition::SetDefinition;
 use crate::core::edit::step::set_interface::SetInterface;
 use crate::core::edit::step::set_side::SetSide;
-use crate::core::edit::step::set_subgraph::SetSubgraph;
-use crate::core::edit::step::set_subgraph_name::SetSubgraphName;
 
 /// One self-contained entry of the undo history: an edit of one graph of the document and its
-/// view, or of the set of graphs, a subgraph's definition or its interface.
+/// view, or of the set of graphs, a compound's definition or its interface.
 ///
 /// Only edits of the document's graphs are undoable: pane arrangement records nothing, so Ctrl+Z
 /// walks past a tab switch to the last edit that changed a graph.
@@ -30,9 +30,9 @@ pub(crate) enum UndoStep {
         step: GraphStep,
     },
     /// Boxed: a whole definition is several times the size of every other step.
-    Subgraph(Box<SetSubgraph>),
+    Compound(Box<SetCompound>),
     Interface(Box<SetInterface>),
-    SubgraphName(SetSubgraphName),
+    CompoundName(SetCompoundName),
     Side(SetSide),
     /// Boxed: two whole definitions.
     Definition(Box<SetDefinition>),
@@ -52,9 +52,9 @@ impl UndoStep {
     fn write(&self, document: &mut Document, dir: Direction) {
         match self {
             Self::Graph { graph, step } => step.kind().write(document, *graph, dir),
-            Self::Subgraph(step) => step.write(document, dir),
+            Self::Compound(step) => step.write(document, dir),
             Self::Interface(step) => step.write(document, dir),
-            Self::SubgraphName(step) => step.write(document, dir),
+            Self::CompoundName(step) => step.write(document, dir),
             Self::Side(step) => step.write(document, dir),
             Self::Definition(step) => step.write(document, dir),
         }
@@ -64,9 +64,9 @@ impl UndoStep {
         match self {
             Self::Graph { step, .. } => step.kind().is_noop(),
             // A definition always comes or goes.
-            Self::Subgraph(_) => false,
+            Self::Compound(_) => false,
             Self::Interface(step) => step.is_noop(),
-            Self::SubgraphName(step) => step.is_noop(),
+            Self::CompoundName(step) => step.is_noop(),
             Self::Side(step) => step.is_noop(),
             Self::Definition(step) => step.is_noop(),
         }
@@ -75,9 +75,9 @@ impl UndoStep {
     pub(crate) fn dirties_document(&self) -> bool {
         match self {
             Self::Graph { step, .. } => step.kind().dirties_document(),
-            Self::Subgraph(_)
+            Self::Compound(_)
             | Self::Interface(_)
-            | Self::SubgraphName(_)
+            | Self::CompoundName(_)
             | Self::Side(_)
             | Self::Definition(_) => true,
         }
@@ -90,9 +90,9 @@ impl UndoStep {
                 touched: Touched::Graph(*graph),
                 ..step.kind().facts()
             },
-            Self::Subgraph(step) => step.facts(),
+            Self::Compound(step) => step.facts(),
             Self::Interface(step) => step.facts(),
-            Self::SubgraphName(step) => step.facts(),
+            Self::CompoundName(step) => step.facts(),
             // A side holds no node and no port.
             Self::Side(_) => EditFacts::NONE,
             Self::Definition(step) => step.facts(),

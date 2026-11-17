@@ -4,7 +4,7 @@
 use std::cmp::Ordering;
 use std::ops::Range;
 
-use scenarium::{FuncId, GraphSet, Library, SpecialNode, SubgraphDigest, SubgraphId};
+use scenarium::{CompoundDigest, CompoundId, FuncId, GraphSet, Library, SpecialNode};
 
 use crate::core::shared_library::SharedLibrary;
 
@@ -16,16 +16,16 @@ use crate::gui::pane::graph_ui::gesture::new_node_ui::node_palette::PaletteEntry
 pub(super) enum PaletteRow {
     Func(FuncId),
     Special(SpecialNode),
-    Subgraph(SubgraphId),
+    Compound(CompoundId),
     /// A library entry, by its id and digest, as two files may share an id.
     Library {
-        id: SubgraphId,
-        digest: SubgraphDigest,
+        id: CompoundId,
+        digest: CompoundDigest,
     },
     Inputs,
 }
 
-/// What the palette's rows are read from: the library's funcs, the document's subgraphs and the
+/// What the palette's rows are read from: the library's funcs, the document's compounds and the
 /// library folder's shared ones.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct PaletteSources<'a> {
@@ -35,17 +35,17 @@ pub(super) struct PaletteSources<'a> {
 }
 
 impl PaletteRow {
-    /// The row's entry, or `None` for a func the library no longer holds or a subgraph the
+    /// The row's entry, or `None` for a func the library no longer holds or a compound the
     /// document no longer holds.
     pub(super) fn entry(self, sources: PaletteSources<'_>) -> Option<PaletteEntry<'_>> {
         match self {
             Self::Func(id) => sources.library.by_id(id).map(PaletteEntry::Func),
             Self::Special(special) => Some(PaletteEntry::Special(special)),
-            Self::Subgraph(id) => {
-                let subgraph = sources.graphs.subgraph(id)?;
-                Some(PaletteEntry::Subgraph {
+            Self::Compound(id) => {
+                let compound = sources.graphs.compound(id)?;
+                Some(PaletteEntry::Compound {
                     id,
-                    subgraph,
+                    compound,
                     used: sources.graphs.uses(id).next().is_some(),
                 })
             }

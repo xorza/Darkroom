@@ -1,16 +1,16 @@
 //! [`Clip`]: a document fragment as the system clipboard carries it, text under a header line.
 //!
 //! - **Copy and paste go through the system clipboard as text**: the nodes, the wires among them,
-//!   their ties and places, and each subgraph they place with its view, in RON under a header
+//!   their ties and places, and each compound they place with its view, in RON under a header
 //!   line, so a clip crosses documents and windows. Text with no header, or past [`MAX_BYTES`],
 //!   is no clip and pastes nothing. Refused: a clipboard of the app's own, which no other
 //!   window reads.
 //! - **A clip that does not fit the document pastes nothing**, and the status bar names why: one
 //!   naming a func this library lacks, or a port its declaration lacks, is text from outside, so
 //!   the paste lands on a copy of the document first, through the edit gate a widget's edit
-//!   takes; a subgraph it carries comes in reconciled, a node it cannot hold kept as a ghost node. Refused: queueing it unchecked, which turns another build's clip into a crash;
+//!   takes; a compound it carries comes in reconciled, a node it cannot hold kept as a ghost node. Refused: queueing it unchecked, which turns another build's clip into a crash;
 //!   dropping the parts that do not fit, which pastes a graph its author never wired.
-//! - **A pasted subgraph comes in by [`bring_in`]'s rules**: one equal to the definition the
+//! - **A pasted compound comes in by [`bring_in`]'s rules**: one equal to the definition the
 //!   document holds under its id is that definition, and one that differs comes in under a fresh
 //!   id. Cost: a clip holds a constant's path as the document does.
 
@@ -21,7 +21,7 @@ use std::str;
 
 use common::SerdeFormat;
 use glam::Vec2;
-use scenarium::{GraphId, GraphSet, Library, Manifest, NodeId, Subgraph, SubgraphId};
+use scenarium::{Compound, CompoundId, GraphId, GraphSet, Library, Manifest, NodeId};
 use serde::{Deserialize, Serialize};
 
 use crate::core::clip::error::PasteError;
@@ -29,11 +29,11 @@ use crate::core::document::Document;
 use crate::core::document::graph_view::GraphView;
 use crate::core::document::item_id::ItemId;
 use crate::core::edit::bring_in::{Carried, bring_in};
+use crate::core::edit::compound_intent::{CompoundIntent, NewCompound};
 use crate::core::edit::document_queue::DocumentQueue;
 use crate::core::edit::fragment::Fragment;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
-use crate::core::edit::subgraph_intent::{NewSubgraph, SubgraphIntent};
 
 /// The line a clip's text starts with, which names its form.
 pub(crate) const HEADER: &str = "darkroom clip 2";
@@ -45,33 +45,33 @@ pub(crate) const PASTE_OFFSET: Vec2 = Vec2::new(32.0, 32.0);
 /// The most text a clip is read from: past it the clipboard holds something else.
 pub(crate) const MAX_BYTES: usize = 16 << 20;
 
-/// A fragment and each subgraph it places, those placed first, as a copy takes them, with the
-/// manifest of the subgraphs: what each func they name declared in the build that copied, so a
+/// A fragment and each compound it places, those placed first, as a copy takes them, with the
+/// manifest of the compounds: what each func they name declared in the build that copied, so a
 /// paste into a build that lacks one keeps a ghost node that says what it was.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Clip {
     fragment: Fragment,
-    subgraphs: Vec<ClipSubgraph>,
+    compounds: Vec<ClipCompound>,
     manifest: Manifest,
 }
 
-/// One subgraph a clip carries, under the id the copied document held it under, with its view.
+/// One compound a clip carries, under the id the copied document held it under, with its view.
 #[derive(Debug, Serialize, Deserialize)]
-struct ClipSubgraph {
-    id: SubgraphId,
-    subgraph: Subgraph,
+struct ClipCompound {
+    id: CompoundId,
+    compound: Compound,
     view: GraphView,
 }
 
-/// What a paste raises: each subgraph that comes in, then the edits that land the fragment.
+/// What a paste raises: each compound that comes in, then the edits that land the fragment.
 #[derive(Debug)]
 pub(crate) struct Paste {
-    subgraphs: Vec<NewSubgraph>,
+    compounds: Vec<NewCompound>,
     intents: Vec<GraphIntent>,
 }
 
 impl Clip {
-    /// The graph nodes of `selection` in `graph` of `document`, with each subgraph they place,
+    /// The graph nodes of `selection` in `graph` of `document`, with each compound they place,
     /// however deep; `None` for a selection of no graph node. A wire from outside the selection
     /// stays behind, as it names a node the paste's graph may not hold.
     pub(crate) fn copy(
@@ -82,7 +82,7 @@ impl Clip {
     ) -> Option<Self> {
         let fragment = Fragment::capture(document, graph, library, selection, IncomingWires::Drop);
         fragment.node_ids().next()?;
-        let mut order: Vec<SubgraphId> = Vec::new();
+        let mut order: Vec<CompoundId> = Vec::new();
         for id in fragment.placed() {
             for placed in document.graphs.placed_first(id) {
                 if !order.contains(&placed) {
@@ -90,26 +90,26 @@ impl Clip {
                 }
             }
         }
-        let subgraphs: Vec<ClipSubgraph> = order
+        let compounds: Vec<ClipCompound> = order
             .into_iter()
-            .map(|id| ClipSubgraph {
+            .map(|id| ClipCompound {
                 id,
-                subgraph: document
+                compound: document
                     .graphs
-                    .subgraph(id)
-                    .expect("a copied instance places a held subgraph")
+                    .compound(id)
+                    .expect("a copied instance places a held compound")
                     .clone(),
-                view: document.view(GraphId::Subgraph(id)).clone(),
+                view: document.view(GraphId::Compound(id)).clone(),
             })
             .collect();
         let mut carried = GraphSet::default();
-        for clip in &subgraphs {
-            carried.insert_subgraph(clip.id, clip.subgraph.clone());
+        for clip in &compounds {
+            carried.insert_compound(clip.id, clip.compound.clone());
         }
         Some(Self {
             fragment,
             manifest: carried.manifest(library),
-            subgraphs,
+            compounds,
         })
     }
 
@@ -136,7 +136,7 @@ impl Clip {
     }
 
     /// Plan pasting this clip into `graph` of `document`, its nodes `offset` from where they were
-    /// copied, under fresh ids. Each subgraph it carries comes in by [`bring_in`]'s rules. A clip
+    /// copied, under fresh ids. Each compound it carries comes in by [`bring_in`]'s rules. A clip
     /// that does not fit the document pastes nothing.
     pub(crate) fn paste(
         self,
@@ -147,14 +147,14 @@ impl Clip {
     ) -> Result<Paste, PasteError> {
         let Self {
             mut fragment,
-            subgraphs,
+            compounds,
             manifest,
         } = self;
-        let carried = subgraphs
+        let carried = compounds
             .into_iter()
             .map(|clip| Carried {
                 id: clip.id,
-                subgraph: clip.subgraph,
+                compound: clip.compound,
                 view: clip.view,
                 synced: None,
                 locked: false,
@@ -164,7 +164,7 @@ impl Clip {
         fragment.repoint(|id| brought.id(id));
         let fragment = fragment.remap(|| NodeId::unique().as_u128());
         let paste = Paste {
-            subgraphs: brought.subgraphs,
+            compounds: brought.compounds,
             intents: fragment.into_intents(offset),
         };
         paste.check(document, graph, library)?;
@@ -175,7 +175,7 @@ impl Clip {
 impl Paste {
     /// Land this paste on a copy of `document`: a clip is text from outside, so an edit the gate
     /// takes as malformed is the clip's fault, which the paste refuses, not a widget's bug, which
-    /// panics. The subgraphs it brings come in reconciled ([`bring_in`]). A copy of the document
+    /// panics. The compounds it brings come in reconciled ([`bring_in`]). A copy of the document
     /// per paste, a click's cost.
     fn check(
         &self,
@@ -185,8 +185,8 @@ impl Paste {
     ) -> Result<(), PasteError> {
         let mut trial = document.clone();
         let mut steps = Vec::new();
-        for subgraph in &self.subgraphs {
-            SubgraphIntent::Add(Box::new(subgraph.clone()))
+        for compound in &self.compounds {
+            CompoundIntent::Add(Box::new(compound.clone()))
                 .commit(&mut trial, library, &mut steps)
                 .map_err(PasteError)?;
         }
@@ -206,8 +206,8 @@ impl Paste {
 
     /// Queue this paste into `graph`, in the order it lands: one batch, so one entry.
     pub(crate) fn queue(self, graph: GraphId, queue: &mut DocumentQueue) {
-        for subgraph in self.subgraphs {
-            queue.push_subgraph(SubgraphIntent::Add(Box::new(subgraph)));
+        for compound in self.compounds {
+            queue.push_compound(CompoundIntent::Add(Box::new(compound)));
         }
         queue.extend_graph(graph, self.intents);
     }

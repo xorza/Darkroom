@@ -41,9 +41,9 @@ pub enum DetachedNodeError {
 pub enum Unresolved {
     #[error("the library holds no func under its id")]
     MissingFunc,
-    #[error("the document holds no subgraph under its id")]
-    MissingSubgraph,
-    #[error("a boundary node lies outside a subgraph, which alone has an interface")]
+    #[error("the document holds no compound under its id")]
+    MissingCompound,
+    #[error("a boundary node lies outside a compound, which alone has an interface")]
     NoInterface,
 }
 
@@ -55,11 +55,11 @@ pub enum Unresolved {
 pub enum DetachReason {
     #[error(transparent)]
     Unresolved(#[from] Unresolved),
-    #[error("its subgraph already holds an Outputs node")]
+    #[error("its compound already holds an Outputs node")]
     ExtraOutputs,
-    #[error("it places a subgraph inside itself")]
+    #[error("it places a compound inside itself")]
     Recursive,
-    #[error("it nests subgraphs past {max} levels", max = ProgramId::MAX_LEN)]
+    #[error("it nests compounds past {max} levels", max = ProgramId::MAX_LEN)]
     TooDeep,
     #[error("it makes the program larger than {max} nodes", max = ProgramShape::MAX_NODES)]
     TooLarge,
@@ -166,11 +166,11 @@ pub enum GraphValidationError {
     },
     #[error("the wire into {port:?} closes a data cycle")]
     Cycle { port: InputPort },
-    #[error("the subgraph holds no Inputs node")]
+    #[error("the compound holds no Inputs node")]
     NoInputsNode,
-    #[error("the subgraph holds {count} Outputs nodes rather than one")]
+    #[error("the compound holds {count} Outputs nodes rather than one")]
     OutputsCount { count: usize },
-    #[error("instance {node_id:?} places a subgraph inside itself")]
+    #[error("instance {node_id:?} places a compound inside itself")]
     Recursive { node_id: NodeId },
     #[error("the graph nests {levels} levels, past {max}", max = ProgramId::MAX_LEN)]
     TooDeep { levels: usize },
@@ -194,7 +194,7 @@ pub struct GraphSetValidationError {
 /// Why [`GraphSet::admit_nodes`](crate::GraphSet::admit_nodes) refuses to add nodes to a graph.
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
 pub enum PlacementRejection {
-    #[error("it places a subgraph inside itself")]
+    #[error("it places a compound inside itself")]
     Recursive,
     #[error("graph {graph:?} would nest {levels} levels, past {max}", max = ProgramShape::MAX_LEVELS)]
     TooDeep { graph: GraphId, levels: usize },

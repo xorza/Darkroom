@@ -63,7 +63,7 @@ fn wiring(document: &Document, library: &Library) -> Vec<String> {
     wires
 }
 
-/// Collapsing `b` of the chain makes a subgraph of one input and one output, of the probe's
+/// Collapsing `b` of the chain makes a compound of one input and one output, of the probe's
 /// type, and an instance between `a` and `c`, all in one history entry; expanding that instance
 /// puts `b` back between them under a fresh id, so the wiring reads as before and both graphs
 /// compile.
@@ -80,11 +80,11 @@ fn collapse_then_expand_gives_back_the_wiring_but_for_ids() {
     let plan = collapse(open.document(), GraphId::Main, &library, &selection)
         .expect("the selection holds a node")
         .expect("the selection collapses");
-    let id = plan.subgraph.id;
+    let id = plan.compound.id;
     plan.queue(GraphId::Main, &mut queue);
     let _ = open.drain_requests(&mut queue, &library);
     let document = open.document();
-    let interface = &document.graphs.subgraph(id).unwrap().interface;
+    let interface = &document.graphs.compound(id).unwrap().interface;
     assert_eq!(
         (interface.inputs().len(), interface.outputs().len()),
         (1, 1)
@@ -93,20 +93,20 @@ fn collapse_then_expand_gives_back_the_wiring_but_for_ids() {
         .graphs
         .main()
         .iter()
-        .find(|node| node.subgraph() == Some(id))
+        .find(|node| node.compound() == Some(id))
         .unwrap()
         .node_id;
     assert_eq!(
         wiring(document, &library),
         [
-            format!("Subgraph.{:?} -> c.{:?}", PortId::new(1), PortId::new(1)),
-            format!("a.{:?} -> Subgraph.{:?}", PortId::new(1), PortId::new(1)),
+            format!("Compound.{:?} -> c.{:?}", PortId::new(1), PortId::new(1)),
+            format!("a.{:?} -> Compound.{:?}", PortId::new(1), PortId::new(1)),
         ]
     );
     assert!(
         document
             .graphs
-            .graph(GraphId::Subgraph(id))
+            .graph(GraphId::Compound(id))
             .find(b)
             .is_some(),
         "b keeps its id"
@@ -119,7 +119,7 @@ fn collapse_then_expand_gives_back_the_wiring_but_for_ids() {
         before,
         "one entry takes the collapse back"
     );
-    assert!(open.document().graphs.subgraph(id).is_none());
+    assert!(open.document().graphs.compound(id).is_none());
     let _ = open.redo();
 
     for intent in expand(open.document(), GraphId::Main, &library, instance) {
@@ -133,7 +133,7 @@ fn collapse_then_expand_gives_back_the_wiring_but_for_ids() {
         "the expanded b takes a fresh id"
     );
     assert!(
-        document.graphs.subgraph(id).is_some(),
+        document.graphs.compound(id).is_some(),
         "the definition stays, unused"
     );
     Compiler::default().compile(&document.graphs, &library);

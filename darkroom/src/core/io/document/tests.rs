@@ -6,15 +6,15 @@ use glam::Vec2;
 use lens::MlModelPaths;
 use palantir::{DockDrop, DockOperation, SplitSide};
 use scenarium::{
-    Binding, ConstValue, EventPort, InputPort, Interface, Node, NodeId, OutputPort, PortId,
-    ProgramId, Subgraph, SubgraphId,
+    Binding, Compound, CompoundId, ConstValue, EventPort, InputPort, Interface, Node, NodeId,
+    OutputPort, PortId, ProgramId,
 };
 
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
 use super::*;
-use crate::core::document::internals::{DocumentFixture, insert_subgraph};
+use crate::core::document::internals::{DocumentFixture, insert_compound};
 use crate::core::document::item_id::ItemId;
 use crate::core::document::route::Route;
 use crate::core::document::tab_ref::TabRef;
@@ -207,7 +207,7 @@ fn document_size_limit_rejects_the_first_byte_over_the_boundary() {
 }
 
 /// A document of path inputs: a Load Image node at `one`, a Stack Lights node at `many`, an
-/// unset Load Image node, a ghost node whose record binds `ghost node`, and a subgraph whose Load Image node
+/// unset Load Image node, a ghost node whose record binds `ghost node`, and a compound whose Load Image node
 /// is at `inner`. Its main graph's node ids, in that order.
 fn paths_document(one: &str, many: &[&str], ghost: &str, inner: &str) -> (Document, [NodeId; 4]) {
     let library = RuntimeLibrary::new(&MlModelPaths::default());
@@ -232,20 +232,20 @@ fn paths_document(one: &str, many: &[&str], ghost: &str, inner: &str) -> (Docume
         ConstValue::FsPaths(many.iter().map(ToString::to_string).collect()),
     );
     bind(&mut document, unset, ConstValue::FsPath(String::new()));
-    let mut subgraph = Subgraph::new("inner", Interface::default());
+    let mut compound = Compound::new("inner", Interface::default());
     let nested = NodeId::unique();
-    subgraph
+    compound
         .graph
         .insert(nested, Node::from(&func("Load Image")));
-    subgraph.graph.bindings.insert(
+    compound.graph.bindings.insert(
         InputPort::new(nested, PortId::new(1)),
         Binding::Const(ConstValue::FsPath(inner.to_string())),
     );
-    insert_subgraph(&mut document, SubgraphId::unique(), subgraph);
+    insert_compound(&mut document, CompoundId::unique(), compound);
     (document, [load, stack, unset, ghosted])
 }
 
-/// Every path `document` holds, the ghost node's and then the subgraph's last, in the order
+/// Every path `document` holds, the ghost node's and then the compound's last, in the order
 /// [`paths_document`] binds them.
 fn paths_of(document: &Document, nodes: [NodeId; 4]) -> Vec<String> {
     let mut paths = Vec::new();
@@ -267,8 +267,8 @@ fn paths_of(document: &Document, nodes: [NodeId; 4]) -> Vec<String> {
         panic!("a const binding");
     };
     paths.extend(value.as_fs_paths().unwrap().iter().cloned());
-    let (_, subgraph) = document.graphs.subgraphs().next().unwrap();
-    let Some(Binding::Const(value)) = subgraph.graph.bindings.values().next() else {
+    let (_, compound) = document.graphs.compounds().next().unwrap();
+    let Some(Binding::Const(value)) = compound.graph.bindings.values().next() else {
         panic!("a const binding");
     };
     paths.extend(value.as_fs_paths().unwrap().iter().cloned());
@@ -283,7 +283,7 @@ fn stored(path: &Path, nodes: [NodeId; 4]) -> Vec<String> {
 
 /// A save writes each path inside the document's folder relative to it, `/` between its parts,
 /// and the folder itself as `.`; a path outside, one reached through `..`, and an unset one stay
-/// as they are, and a ghost node's path and a subgraph's are written as the main graph's are. A load reads them against the
+/// as they are, and a ghost node's path and a compound's are written as the main graph's are. A load reads them against the
 /// folder of the file it reads: a copy in another folder names the copy's files. Saved absolute, the file holds the
 /// document's own paths; and a save to a folder below leaves the old folder's paths absolute.
 #[test]
@@ -408,7 +408,7 @@ fn paths_of_another_system_stay_as_they_are() {
 }
 
 /// A relative path that climbs out of the folder is listed, sorted, as `../x.tiff`,
-/// `a/../../y.tiff` and the subgraph's `../i.tiff` do; one that climbs back in before leaving,
+/// `a/../../y.tiff` and the compound's `../i.tiff` do; one that climbs back in before leaving,
 /// `a/../b.tiff`, is not, nor is an absolute one.
 #[test]
 fn relative_paths_that_leave_the_folder_are_listed() {

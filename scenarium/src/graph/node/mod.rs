@@ -2,8 +2,8 @@
 //!
 //! A [`Node`] does not store its own id, which lives only in the key that reaches it, so a node
 //! can be moved or remapped without carrying a stale identity. What it *is* is [`NodeKind`]: a
-//! node with a body, a library func or a built-in special, an instance of a subgraph, or one of a
-//! subgraph's two boundary nodes. Iterating a graph yields a
+//! node with a body, a library func or a built-in special, an instance of a compound, or one of a
+//! compound's two boundary nodes. Iterating a graph yields a
 //! [`NodeRef`](crate::graph::node_ref::NodeRef), pairing a node with the id it was found under;
 //! the lookups that *take* an id return the node alone.
 //!
@@ -13,7 +13,7 @@
 pub(crate) mod special;
 
 use crate::graph::func::Func;
-use crate::graph::identity::{FuncId, SubgraphId};
+use crate::graph::identity::{CompoundId, FuncId};
 use crate::graph::node::special::SpecialNode;
 use crate::graph::node_decl::NodeDecl;
 use crate::graph::scope::Scope;
@@ -89,14 +89,14 @@ pub(crate) enum NodeKind {
         source: BodySource,
         cache: CacheMode,
     },
-    /// An instance of `subgraph`. Its `cache` caches the values that leave it: the compile joins
-    /// it into each program node the subgraph's `Outputs` node reads, at this instance's path;
+    /// An instance of `compound`. Its `cache` caches the values that leave it: the compile joins
+    /// it into each program node the compound's `Outputs` node reads, at this instance's path;
     /// the nodes inside keep their own.
     Instance {
-        subgraph: SubgraphId,
+        compound: CompoundId,
         cache: CacheMode,
     },
-    /// One of a subgraph's two boundary nodes, which show its interface from inside.
+    /// One of a compound's two boundary nodes, which show its interface from inside.
     Boundary(Boundary),
 }
 
@@ -109,7 +109,7 @@ pub(crate) enum BodySource {
     Special(SpecialNode),
 }
 
-/// Which of a subgraph's two boundary nodes.
+/// Which of a compound's two boundary nodes.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum Boundary {
     /// The node whose outputs are the interface's inputs.
@@ -132,7 +132,7 @@ pub struct Node {
 
 impl Node {
     /// What this node declares: a library func, a special node's built-in, or the ports a
-    /// subgraph's interface gives its instances and boundary nodes.
+    /// compound's interface gives its instances and boundary nodes.
     ///
     /// # Panics
     ///
@@ -216,25 +216,25 @@ impl Node {
         }
     }
 
-    /// The subgraph this node is an instance of, if it is one.
-    pub const fn subgraph(&self) -> Option<SubgraphId> {
+    /// The compound this node is an instance of, if it is one.
+    pub const fn compound(&self) -> Option<CompoundId> {
         match self.kind {
-            NodeKind::Instance { subgraph, .. } => Some(subgraph),
+            NodeKind::Instance { compound, .. } => Some(compound),
             _ => None,
         }
     }
 
-    /// Point this instance at subgraph `id`, as Make Unique points the instances it picks at the
+    /// Point this instance at compound `id`, as Make Unique points the instances it picks at the
     /// copy it makes.
     ///
     /// # Panics
     /// If this node is no instance.
-    pub fn set_subgraph(&mut self, id: SubgraphId) {
+    pub fn set_compound(&mut self, id: CompoundId) {
         let NodeKind::Instance {
-            subgraph: placed, ..
+            compound: placed, ..
         } = &mut self.kind
         else {
-            panic!("only an instance places a subgraph");
+            panic!("only an instance places a compound");
         };
         *placed = id;
     }
@@ -265,13 +265,13 @@ impl Node {
         }
     }
 
-    /// An instance of the subgraph held under `id`, with no name of its own: a host shows the
-    /// subgraph's name until the instance is named, so a renamed subgraph reads renamed on each
+    /// An instance of the compound held under `id`, with no name of its own: a host shows the
+    /// compound's name until the instance is named, so a renamed compound reads renamed on each
     /// instance.
-    pub const fn instance(id: SubgraphId) -> Self {
+    pub const fn instance(id: CompoundId) -> Self {
         Self {
             kind: NodeKind::Instance {
-                subgraph: id,
+                compound: id,
                 cache: CacheMode::None,
             },
             name: String::new(),
@@ -311,7 +311,7 @@ impl From<SpecialNode> for Node {
 }
 
 impl From<Boundary> for Node {
-    /// A subgraph's boundary node, named for its side.
+    /// A compound's boundary node, named for its side.
     fn from(boundary: Boundary) -> Self {
         Self {
             kind: NodeKind::Boundary(boundary),

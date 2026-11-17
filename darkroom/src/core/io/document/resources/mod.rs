@@ -22,8 +22,8 @@
 //!   than its header says is refused and named in the load report, as an archive is another
 //!   person's data ([CVE-2025-29787](https://www.sentinelone.com/vulnerability-database/cve-2025-29787/)).
 //! - **An entry unpacks when a path that names it enters memory**: every one at the open of the
-//!   archive, and those a subgraph names when the library copies it in. A document that copies a
-//!   subgraph from an archive names the unpacked file where it lies, in the library folder. Cost:
+//!   archive, and those a compound names when the library copies it in. A document that copies a
+//!   compound from an archive names the unpacked file where it lies, in the library folder. Cost:
 //!   sending that document on means exporting it with the resource again.
 
 pub(crate) mod pack;

@@ -29,7 +29,7 @@ pub(crate) struct AppCtx<'a> {
     /// Last run's centralized runtime state: per-node status/logs and the
     /// latest published values read by preview cards and viewers.
     run_state: &'a RunState,
-    /// The library folder's shared subgraphs, as the last scan read them.
+    /// The library folder's shared compounds, as the last scan read them.
     shared: &'a SharedLibrary,
 }
 
@@ -62,7 +62,7 @@ impl<'a> AppCtx<'a> {
         self.run_state
     }
 
-    /// The library folder's shared subgraphs, as the last scan read them.
+    /// The library folder's shared compounds, as the last scan read them.
     pub(crate) const fn shared(self) -> &'a SharedLibrary {
         self.shared
     }

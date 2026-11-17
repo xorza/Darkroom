@@ -1,4 +1,4 @@
-//! Export: a subgraph and those it places written as a library document, each path it holds
+//! Export: a compound and those it places written as a library document, each path it holds
 //! bundled into the archive or stripped.
 //!
 //! - **An export lists every path the definition holds, and each is bundled or stripped**, with
@@ -13,15 +13,15 @@
 //!   Unreal's Migrate writes, which is two things to send.
 //! - **A path the receiver must choose is an interface input.** Its value sits on the instance,
 //!   outside the definition, and an export has nothing to strip.
-//! - **Export is a Graph menu command on the selected instance, else the subgraph the pane
+//! - **Export is a Graph menu command on the selected instance, else the compound the pane
 //!   shows**, beside Make Unique and Remove Unused, and asks in a modal dialog, as Save does.
 
 use std::collections::BTreeSet;
 
 use glam::Vec2;
 use scenarium::{
-    Binding, ConstValue, DataType, FileMode, GhostSource, Graph, GraphId, GraphSet, InputPort,
-    InputState, Library, Node, PortId, SubgraphId,
+    Binding, CompoundId, ConstValue, DataType, FileMode, GhostSource, Graph, GraphId, GraphSet,
+    InputPort, InputState, Library, Node, PortId,
 };
 
 use common::fs;
@@ -39,16 +39,16 @@ pub(crate) struct ExportPath {
     pub(crate) output: bool,
 }
 
-/// Each path subgraph `id` of `document` and each subgraph it places hold as a constant, each
+/// Each path compound `id` of `document` and each compound it places hold as a constant, each
 /// once, sorted, with its size read off the disk: what the export dialog lists.
 pub(crate) fn export_paths(
     document: &Document,
-    id: SubgraphId,
+    id: CompoundId,
     library: &Library,
 ) -> Vec<ExportPath> {
     let mut paths: Vec<ExportPath> = Vec::new();
     for placed in document.graphs.placed_first(id) {
-        let graph = document.graphs.graph(GraphId::Subgraph(placed));
+        let graph = document.graphs.graph(GraphId::Compound(placed));
         for (&port, binding) in &graph.bindings {
             let Binding::Const(value) = binding else {
                 continue;
@@ -86,25 +86,25 @@ fn writes(node: Option<&Node>, port: PortId, library: &Library) -> bool {
         })
 }
 
-/// The library document an export of `document`'s subgraph `id` writes: it and each subgraph it
+/// The library document an export of `document`'s compound `id` writes: it and each compound it
 /// places, with their views, `id` marked shared, each path stripped but the inputs' paths in
 /// `bundled`, and a main graph holding one instance of `id`.
 pub(crate) fn exported(
     document: &Document,
-    id: SubgraphId,
+    id: CompoundId,
     library: &Library,
     bundled: &BTreeSet<String>,
 ) -> Document {
     let mut graphs = GraphSet::default();
     let placed = document.graphs.placed_first(id);
     for &held in &placed {
-        let mut subgraph = document
+        let mut compound = document
             .graphs
-            .subgraph(held)
-            .expect("a placed subgraph is held")
+            .compound(held)
+            .expect("a placed compound is held")
             .clone();
-        strip(&mut subgraph.graph, library, bundled);
-        graphs.insert_subgraph(held, subgraph);
+        strip(&mut compound.graph, library, bundled);
+        graphs.insert_compound(held, compound);
     }
     let instance = Node::instance(id);
     let node_id = graphs.main_mut().add(instance);
@@ -120,8 +120,8 @@ pub(crate) fn exported(
         let side = exported
             .sides
             .get_mut(&held)
-            .expect("each subgraph has a side");
-        side.view = document.view(GraphId::Subgraph(held)).clone();
+            .expect("each compound has a side");
+        side.view = document.view(GraphId::Compound(held)).clone();
         side.shared = held == id;
     }
     exported
@@ -173,12 +173,12 @@ mod tests {
 
     use common::{TempDir, fs};
     use scenarium::{
-        Binding, ConstValue, DataType, FileKindId, FileMode, FuncId, GhostBinding, GraphId,
-        InputDecl, InputPort, InputState, Interface, Library, Node, PortId, Subgraph, SubgraphId,
+        Binding, Compound, CompoundId, ConstValue, DataType, FileKindId, FileMode, FuncId,
+        GhostBinding, GraphId, InputDecl, InputPort, InputState, Interface, Library, Node, PortId,
         internals,
     };
 
-    use crate::core::document::internals::{DocumentFixture, insert_subgraph};
+    use crate::core::document::internals::{DocumentFixture, insert_compound};
     use crate::core::io::export::{ExportPath, export_paths, exported};
 
     /// The dialog lists each path of the definition once with its size, an output marked; the
@@ -201,8 +201,8 @@ mod tests {
             .build();
         let mut library = Library::default();
         library.add(func.clone());
-        let mut subgraph = Subgraph::new("Calibrate", Interface::default());
-        let node = subgraph.graph.add(Node::from(&func));
+        let mut compound = Compound::new("Calibrate", Interface::default());
+        let node = compound.graph.add(Node::from(&func));
         let path = |p: &Path| p.to_str().unwrap().to_string();
         let port = |n| InputPort::new(node, PortId::new(n));
         for (n, value) in [
@@ -210,22 +210,22 @@ mod tests {
             (2, path(&dropped)),
             (3, "/out/x.fits".to_string()),
         ] {
-            subgraph
+            compound
                 .graph
                 .bindings
                 .insert(port(n), Binding::Const(ConstValue::FsPath(value)));
         }
         let ghost = |value| InputState::Ghost(GhostBinding::from(Binding::Const(value)));
-        subgraph.graph.set_input_state(
+        compound.graph.set_input_state(
             port(4),
             ghost(ConstValue::FsPath("/home/me/lost.fits".to_string())),
         );
-        subgraph
+        compound
             .graph
             .set_input_state(port(5), ghost(ConstValue::Int(7)));
-        let id = SubgraphId::from_u128(1);
+        let id = CompoundId::from_u128(1);
         let mut fixture = DocumentFixture::default();
-        insert_subgraph(&mut fixture.document, id, subgraph);
+        insert_compound(&mut fixture.document, id, compound);
         let document = fixture.document;
 
         assert_eq!(
@@ -250,14 +250,14 @@ mod tests {
         );
         let bundled = BTreeSet::from([path(&kept), "/out/x.fits".to_string()]);
         let written = exported(&document, id, &library, &bundled);
-        let bindings = &written.graphs.graph(GraphId::Subgraph(id)).bindings;
+        let bindings = &written.graphs.graph(GraphId::Compound(id)).bindings;
         assert_eq!(
             bindings.get(&port(1)),
             Some(&Binding::Const(ConstValue::FsPath(path(&kept))))
         );
         assert_eq!(bindings.get(&port(2)), None, "unbundled, stripped");
         assert_eq!(bindings.get(&port(3)), None, "an output is always stripped");
-        let written_graph = written.graphs.graph(GraphId::Subgraph(id));
+        let written_graph = written.graphs.graph(GraphId::Compound(id));
         assert_eq!(
             written_graph.input_state(port(4)),
             InputState::Unbound,
@@ -274,7 +274,7 @@ mod tests {
                 .graphs
                 .main()
                 .iter()
-                .filter(|n| n.subgraph() == Some(id))
+                .filter(|n| n.compound() == Some(id))
                 .count(),
             1
         );

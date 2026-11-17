@@ -1,5 +1,5 @@
 //! How an authored graph names things: the uuid identities ([`NodeId`],
-//! [`FuncId`], [`SubgraphId`]), a port's number ([`PortId`]), the graph a node lies in ([`GraphId`],
+//! [`FuncId`], [`CompoundId`]), a port's number ([`PortId`]), the graph a node lies in ([`GraphId`],
 //! [`NodeAddr`]), the addresses that pair a node with a port's id ([`InputPort`],
 //! [`OutputPort`], [`EventPort`]), and the crate-internal [`FuncRef`] that pairs a func's id
 //! with the signature of its ports for the compiled program.
@@ -18,14 +18,14 @@ use std::num::NonZeroU32;
 use ::serde::{Deserialize, Serialize};
 use common::Id;
 
+use crate::graph::compound::Compound;
 use crate::graph::func::Func;
 use crate::graph::func::signature::FuncSignature;
 use crate::graph::node::Node;
-use crate::graph::subgraph::Subgraph;
 
 /// A node's id, unique inside its graph: an authored node is addressed by its graph and its id
 /// ([`NodeAddr`]). As ComfyUI, where a node id is "local to its immediate graph level"
-/// ([subgraphs](https://docs.comfy.org/custom-nodes/js/subgraphs)), so a copy of a subgraph
+/// ([subgraphs](https://docs.comfy.org/custom-nodes/js/subgraphs)), so a copy of a compound
 /// keeps its node ids and stays equal to its source, as Blender's plain tree copy keeps its node
 /// identifiers
 /// ([persistent node identifiers](https://projects.blender.org/archive/blender-archive/commit/90ea1b76434fe175)).
@@ -34,8 +34,8 @@ use crate::graph::subgraph::Subgraph;
 pub type NodeId = Id<Node>;
 /// A declaration's id in the library, not anything in a document.
 pub type FuncId = Id<Func>;
-/// A subgraph's id among the subgraphs a document holds.
-pub type SubgraphId = Id<Subgraph>;
+/// A compound's id among the compounds a document holds.
+pub type CompoundId = Id<Compound>;
 /// A port's id, unique among the ports of its side of a declaration: the number a func gives the
 /// port, or the random one an interface mints, so a reorder and a rename keep it. Written as the
 /// bare number, and never 0, so no port is one "not numbered yet".
@@ -43,7 +43,7 @@ pub type SubgraphId = Id<Subgraph>;
 /// 32 bits, the width a func's number has: a number once shipped is never changed or given to
 /// another port, as a protobuf field's, "a number between 1 and 536,870,911"
 /// ([field numbers](https://protobuf.dev/programming-guides/proto3/#assigning)). Cost: two copies
-/// of a subgraph changed apart, each gaining `k` ports on a side, share an id with probability
+/// of a compound changed apart, each gaining `k` ports on a side, share an id with probability
 /// about `k² / 2³²`, 6 in 10⁸ for 16 each, where a UUID made it never. Refused: 64 bits, 4
 /// bytes more on every port address to improve odds already past caring; 16 bits, where a config
 /// struct of 100 fields numbered by a hash collides in 1 build of 13 (`100² / 2 / 2¹⁶`); a
@@ -93,11 +93,11 @@ impl PortId {
     }
 }
 
-/// Which graph of a document: the main graph, or a subgraph's.
+/// Which graph of a document: the main graph, or a compound's.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum GraphId {
     Main,
-    Subgraph(SubgraphId),
+    Compound(CompoundId),
 }
 
 /// An authored node's address in a document: its graph and its id there.

@@ -8,20 +8,22 @@ use std::collections::BTreeSet;
 
 use glam::Vec2;
 use scenarium::{
-    Binding, CacheMode, ConstValue, DataType, EventPort, GhostBinding, GraphId, InputDecl,
-    InputPort, InputState, Interface, NodeId, Numbered, OutputPort, PortId, Ports, RefusedFate,
-    Subgraph, SubgraphId, Subscription, SubscriptionState,
+    Binding, CacheMode, Compound, CompoundId, ConstValue, DataType, EventPort, GhostBinding,
+    GraphId, InputDecl, InputPort, InputState, Interface, NodeId, Numbered, OutputPort, PortId,
+    Ports, RefusedFate, Subscription, SubscriptionState,
 };
 
+use crate::core::document::compound_side::CompoundSide;
+use crate::core::document::compound_side::SideMarks;
 use crate::core::document::graph_view::GraphView;
-use crate::core::document::internals::{DocumentFixture, insert_subgraph};
+use crate::core::document::internals::{DocumentFixture, insert_compound};
 use crate::core::document::item_id::ItemId;
-use crate::core::document::subgraph_side::SideMarks;
-use crate::core::document::subgraph_side::SubgraphSide;
 use crate::core::edit::edit_facts::{EditFacts, Touched};
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::step::change::Change;
 use crate::core::edit::step::graph_step::GraphStep;
+use crate::core::edit::step::set_compound::SetCompound;
+use crate::core::edit::step::set_compound_name::SetCompoundName;
 use crate::core::edit::step::set_definition::SetDefinition;
 use crate::core::edit::step::set_depth::SetDepth;
 use crate::core::edit::step::set_input::SetInput;
@@ -32,8 +34,6 @@ use crate::core::edit::step::set_node_property::{PropertyChange, SetNodeProperty
 use crate::core::edit::step::set_positions::{Move, SetPositions};
 use crate::core::edit::step::set_selection::SetSelection;
 use crate::core::edit::step::set_side::SetSide;
-use crate::core::edit::step::set_subgraph::SetSubgraph;
-use crate::core::edit::step::set_subgraph_name::SetSubgraphName;
 use crate::core::edit::step::set_subscription::SetSubscription;
 use crate::core::edit::step::set_ties::SetTies;
 use crate::core::edit::step::undo_step::UndoStep;
@@ -66,7 +66,7 @@ fn set_input(input: InputPort, from: Option<Binding>, to: Option<Binding>) -> Un
     })))
 }
 
-/// An interface edit that removes the subgraph's one input, on which an instance in the main
+/// An interface edit that removes the compound's one input, on which an instance in the main
 /// graph holds a constant: the edit drops it.
 fn interface_port_removal() -> UndoStep {
     let port = PortId::new(1);
@@ -74,9 +74,9 @@ fn interface_port_removal() -> UndoStep {
         inputs: vec![Numbered::new(port, InputDecl::optional("a", DataType::Int))],
         outputs: vec![],
     });
-    let id = SubgraphId::from_u128(9);
+    let id = CompoundId::from_u128(9);
     let mut fixture = DocumentFixture::default();
-    insert_subgraph(&mut fixture.document, id, Subgraph::new("inner", interface));
+    insert_compound(&mut fixture.document, id, Compound::new("inner", interface));
     let instance = fixture.add_instance(id);
     fixture.document.graphs.main_mut().bindings.insert(
         InputPort::new(instance, port),
@@ -282,17 +282,17 @@ fn every_kind_answers_the_frame_questions() {
         ),
         ("tie removal", tie_removal(), (true, EditFacts::NONE)),
         (
-            "subgraph insertion",
-            UndoStep::Subgraph(Box::new(SetSubgraph::insertion(
-                SubgraphId::from_u128(9),
-                Subgraph::new("inner", Interface::default()),
-                SubgraphSide::new(&Subgraph::new("inner", Interface::default()).graph),
+            "compound insertion",
+            UndoStep::Compound(Box::new(SetCompound::insertion(
+                CompoundId::from_u128(9),
+                Compound::new("inner", Interface::default()),
+                CompoundSide::new(&Compound::new("inner", Interface::default()).graph),
             ))),
             (
                 true,
                 EditFacts {
                     node_set: true,
-                    touched: Touched::Graph(GraphId::Subgraph(SubgraphId::from_u128(9))),
+                    touched: Touched::Graph(GraphId::Compound(CompoundId::from_u128(9))),
                     ..EditFacts::NONE
                 },
             ),
@@ -300,10 +300,10 @@ fn every_kind_answers_the_frame_questions() {
         (
             "definition updated",
             UndoStep::Definition(Box::new(SetDefinition {
-                id: SubgraphId::from_u128(9),
+                id: CompoundId::from_u128(9),
                 definition: Change {
-                    from: Subgraph::new("before", Interface::default()),
-                    to: Subgraph::new("after", Interface::default()),
+                    from: Compound::new("before", Interface::default()),
+                    to: Compound::new("after", Interface::default()),
                 },
                 view: Change {
                     from: GraphView::default(),
@@ -314,15 +314,15 @@ fn every_kind_answers_the_frame_questions() {
                 true,
                 EditFacts {
                     node_set: true,
-                    touched: Touched::Graph(GraphId::Subgraph(SubgraphId::from_u128(9))),
+                    touched: Touched::Graph(GraphId::Compound(CompoundId::from_u128(9))),
                     ..EditFacts::NONE
                 },
             ),
         ),
         (
-            "subgraph marked shared",
+            "compound marked shared",
             UndoStep::Side(SetSide {
-                id: SubgraphId::from_u128(9),
+                id: CompoundId::from_u128(9),
                 marks: Change {
                     from: SideMarks {
                         shared: false,
@@ -341,9 +341,9 @@ fn every_kind_answers_the_frame_questions() {
             (true, EditFacts::NONE),
         ),
         (
-            "subgraph renamed",
-            UndoStep::SubgraphName(SetSubgraphName {
-                id: SubgraphId::from_u128(9),
+            "compound renamed",
+            UndoStep::CompoundName(SetCompoundName {
+                id: CompoundId::from_u128(9),
                 name: Change {
                     from: "Denoise".to_owned(),
                     to: "Clean".to_owned(),
@@ -353,7 +353,7 @@ fn every_kind_answers_the_frame_questions() {
                 true,
                 EditFacts {
                     renamed: true,
-                    touched: Touched::Graph(GraphId::Subgraph(SubgraphId::from_u128(9))),
+                    touched: Touched::Graph(GraphId::Compound(CompoundId::from_u128(9))),
                     ..EditFacts::NONE
                 },
             ),
@@ -376,11 +376,11 @@ fn every_kind_answers_the_frame_questions() {
     let kind = |step: &UndoStep| {
         let step = match step {
             UndoStep::Graph { step, .. } => step,
-            UndoStep::Subgraph(_) => return 9,
+            UndoStep::Compound(_) => return 9,
             UndoStep::Interface(_) => return 10,
             UndoStep::Side(_) => return 11,
             UndoStep::Definition(_) => return 12,
-            UndoStep::SubgraphName(_) => return 13,
+            UndoStep::CompoundName(_) => return 13,
         };
         match step {
             GraphStep::Node(_) => 0,
@@ -431,7 +431,7 @@ fn a_held_gesture_absorbs_its_next_frame_in_place() {
         ],
     }));
     let elsewhere = UndoStep::Graph {
-        graph: GraphId::Subgraph(SubgraphId::from_u128(1)),
+        graph: GraphId::Compound(CompoundId::from_u128(1)),
         step: GraphStep::Positions(SetPositions {
             moves: vec![mv(a, Vec2::new(10.0, 0.0), Vec2::new(25.0, 0.0))],
         }),

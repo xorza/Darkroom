@@ -99,7 +99,7 @@ pub(crate) struct SessionHarness {
     /// The run projections the frame reads, `App`'s in production: a test writes one here to make
     /// a node look executed.
     pub(crate) run_state: RunState,
-    /// The library folder's subgraphs the palette lists, `App`'s scan in production.
+    /// The library folder's compounds the palette lists, `App`'s scan in production.
     pub(crate) shared: SharedLibrary,
     pub(crate) preferences: Preferences,
     /// Footprint handed to the status bar. `0`, the default, is the no-reading path, so a

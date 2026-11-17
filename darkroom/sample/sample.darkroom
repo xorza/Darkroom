@@ -21,7 +21,7 @@
                     ),
                     ("3b60adfe-c8f3-4913-8de3-eef560a90417"): (
                         kind: Instance(
-                            subgraph: ("32063e4c-0883-446f-bb45-6dcbf99e0722"),
+                            compound: ("32063e4c-0883-446f-bb45-6dcbf99e0722"),
                             cache: Ram,
                         ),
                         name: "Adjust A",
@@ -45,7 +45,7 @@
                     ),
                     ("78c51fe4-27cb-40d0-8f47-5a799c6ff0ae"): (
                         kind: Instance(
-                            subgraph: ("32063e4c-0883-446f-bb45-6dcbf99e0722"),
+                            compound: ("32063e4c-0883-446f-bb45-6dcbf99e0722"),
                             cache: r#None,
                         ),
                         name: "Adjust B",
@@ -77,7 +77,7 @@
                     ),
                     ("a47d4036-480f-47fe-b367-432c2662c8c5"): (
                         kind: Instance(
-                            subgraph: ("5493d86c-2444-4d73-89b3-dc02b5ea4480"),
+                            compound: ("5493d86c-2444-4d73-89b3-dc02b5ea4480"),
                             cache: r#None,
                         ),
                         name: "",
@@ -379,7 +379,7 @@
                     subscriptions: [],
                 ),
             ),
-            subgraphs: {
+            compounds: {
                 ("32063e4c-0883-446f-bb45-6dcbf99e0722"): (
                     name: "Adjust",
                     description: None,

@@ -419,12 +419,12 @@ fn impure_flag_reads_from_func_behavior() {
 /// boundary node has no cache mode.
 #[test]
 fn an_instance_with_an_output_is_cacheable() {
-    use scenarium::{Interface, Numbered, OutputDecl, PortId, Ports, Subgraph, SubgraphId};
+    use scenarium::{Compound, CompoundId, Interface, Numbered, OutputDecl, PortId, Ports};
 
-    use crate::core::document::internals::insert_subgraph;
+    use crate::core::document::internals::insert_compound;
 
     let mut fixture = DocumentFixture::default();
-    let (with, without) = (SubgraphId::from_u128(1), SubgraphId::from_u128(2));
+    let (with, without) = (CompoundId::from_u128(1), CompoundId::from_u128(2));
     let outputs = Interface::new(Ports {
         inputs: vec![],
         outputs: vec![Numbered::new(
@@ -432,11 +432,11 @@ fn an_instance_with_an_output_is_cacheable() {
             OutputDecl::new("out", DataType::Int),
         )],
     });
-    insert_subgraph(&mut fixture.document, with, Subgraph::new("with", outputs));
-    insert_subgraph(
+    insert_compound(&mut fixture.document, with, Compound::new("with", outputs));
+    insert_compound(
         &mut fixture.document,
         without,
-        Subgraph::new("without", Interface::default()),
+        Compound::new("without", Interface::default()),
     );
     let [cached, empty] = [with, without].map(|id| fixture.add_instance(id));
     let fixture = GraphCtxFixture::over(fixture);
@@ -447,7 +447,7 @@ fn an_instance_with_an_output_is_cacheable() {
     assert!(!graph_ctx.node(empty).unwrap().cacheable());
 }
 
-/// A pane reads each run result through the instance it shows: a node of a subgraph reads its
+/// A pane reads each run result through the instance it shows: a node of a compound reads its
 /// program node under the side's `through`, and none when it shows none, when it can seed no run
 /// either; an instance in the main graph reads what its inside came to and seeds no run, as it
 /// has no body, and names the node inside that failed. Two instances, `i1` where the node ran in
@@ -459,18 +459,18 @@ fn run_results_read_through_the_instance_a_pane_shows() {
 
     use palantir::Display;
     use scenarium::{
-        GraphId, Interface, InvokeError, NodeExecStatus, NodeStatus, RamUsage, RunError,
-        RunSummary, Subgraph, SubgraphId,
+        Compound, CompoundId, GraphId, Interface, InvokeError, NodeExecStatus, NodeStatus,
+        RamUsage, RunError, RunSummary,
     };
 
-    use crate::core::document::internals::insert_subgraph;
+    use crate::core::document::internals::insert_compound;
     use crate::gui::state::run_state::ExecStatus;
 
     let mut document = DocumentFixture::default();
-    let id = SubgraphId::from_u128(1);
-    let mut subgraph = Subgraph::new("inner", Interface::default());
-    let inside = subgraph.graph.add(document.plain_node());
-    insert_subgraph(&mut document.document, id, subgraph);
+    let id = CompoundId::from_u128(1);
+    let mut compound = Compound::new("inner", Interface::default());
+    let inside = compound.graph.add(document.plain_node());
+    insert_compound(&mut document.document, id, compound);
     let [i1, i2] = [(); 2].map(|()| document.add_instance(id));
     let mut fixture = GraphCtxFixture::over(document);
     let row = |instance, status| NodeStatus {
@@ -492,7 +492,7 @@ fn run_results_read_through_the_instance_a_pane_shows() {
         ],
         ..RunSummary::default()
     });
-    let graph = GraphId::Subgraph(id);
+    let graph = GraphId::Compound(id);
     let through = |fixture: &mut GraphCtxFixture, path: Option<InstancePath>| {
         fixture
             .open

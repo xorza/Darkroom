@@ -8,7 +8,7 @@
 //! [`GraphSet::validate_with`] accepts — which the compile asserts up front.
 //!
 //! The walk is a copy with three jobs it is the only place to do: expanding each
-//! instance into its subgraph's nodes, resolving each binding to the producer it
+//! instance into its compound's nodes, resolving each binding to the producer it
 //! names across every boundary between, and interning every id-named reference
 //! into the dense index space.
 //!
@@ -33,12 +33,12 @@
 //! - **A disabled instance disables every node inside it.**
 //!
 //! - **An instance's cache mode caches the values that leave it.** Its bits join the cache mode
-//!   of each program node inside it that its subgraph's `Outputs` node reads, at that instance's
-//!   path, across any passthrough inside, so two instances of one subgraph cache apart and the
+//!   of each program node inside it that its compound's `Outputs` node reads, at that instance's
+//!   path, across any passthrough inside, so two instances of one compound cache apart and the
 //!   nodes inside keep their own. A value that only passes through from outside is cached, or
 //!   not, where it is made. As a Houdini asset caches its output with a File Cache node at its end, not each
 //!   node inside. Refused: an override of every node inside, which caches intermediates nothing
-//!   outside reads and discards what each node chose; a mode on the subgraph, which every
+//!   outside reads and discards what each node chose; a mode on the compound, which every
 //!   instance would share.
 //!
 //! **The sort comes first.** The placement gathers the nodes of many graphs, a frame at a time, so
@@ -71,7 +71,7 @@ use crate::exec::compile::compiled_graph::{
 use crate::exec::idx::{NodeIdx, OutputAddr};
 use crate::graph::binding::Binding;
 use crate::graph::graph_set::GraphSet;
-use crate::graph::identity::{EventPort, GraphId, InputPort, NodeId, PortId, SubgraphId};
+use crate::graph::identity::{CompoundId, EventPort, GraphId, InputPort, NodeId, PortId};
 use crate::graph::instance_path::InstancePath;
 use crate::graph::interface::Interface;
 use crate::graph::node::{Boundary, CacheMode, NodeKind};
@@ -91,7 +91,7 @@ struct PendingNode {
     disabled: bool,
 }
 
-/// One graph the placement has yet to expand: the main graph, or a subgraph's under the
+/// One graph the placement has yet to expand: the main graph, or a compound's under the
 /// instance that places it.
 #[derive(Debug, Clone, Copy)]
 struct Frame {
@@ -118,7 +118,7 @@ impl Level {
         self.path.node(node_id)
     }
 
-    /// The level inside instance `node_id` of this level's graph, which places subgraph `graph`.
+    /// The level inside instance `node_id` of this level's graph, which places compound `graph`.
     fn enter(self, node_id: NodeId, graph: GraphId) -> Self {
         Self {
             graph,
@@ -127,12 +127,12 @@ impl Level {
     }
 }
 
-/// An instance with a cache mode the placement met: the level inside it, and the subgraph whose
+/// An instance with a cache mode the placement met: the level inside it, and the compound whose
 /// `Outputs` node names the values that leave it.
 #[derive(Debug, Clone, Copy)]
 struct CachedInstance {
     inside: Level,
-    subgraph: SubgraphId,
+    compound: CompoundId,
     cache: CacheMode,
 }
 
@@ -167,9 +167,9 @@ pub struct Compiler {
     placed: Vec<PendingNode>,
     /// The graphs the placement has yet to expand.
     frames: Vec<Frame>,
-    /// The `Outputs` node of each subgraph the placement expanded, which a wire from an instance
+    /// The `Outputs` node of each compound the placement expanded, which a wire from an instance
     /// crosses into.
-    outputs_nodes: HashMap<SubgraphId, NodeId>,
+    outputs_nodes: HashMap<CompoundId, NodeId>,
     /// Each instance with a cache mode the placement expanded.
     cached_instances: Vec<CachedInstance>,
     /// What each placed node's cache mode gains from the instances whose values it produces, by
@@ -332,7 +332,7 @@ impl Compiler {
         compiled
     }
 
-    /// Settle the dense index space: expand every instance into the nodes of its subgraph, keep
+    /// Settle the dense index space: expand every instance into the nodes of its compound, keep
     /// each node with a body, and sort them by program id.
     ///
     /// Id order rather than `Graph::iter`'s, so the artifact is deterministic. A program id is
@@ -377,12 +377,12 @@ impl Compiler {
                             disabled,
                         });
                     }
-                    NodeKind::Instance { subgraph, cache } => {
-                        let inside = frame.level.enter(node.node_id, GraphId::Subgraph(subgraph));
+                    NodeKind::Instance { compound, cache } => {
+                        let inside = frame.level.enter(node.node_id, GraphId::Compound(compound));
                         if cache != CacheMode::None {
                             cached_instances.push(CachedInstance {
                                 inside,
-                                subgraph,
+                                compound,
                                 cache,
                             });
                         }
@@ -392,7 +392,7 @@ impl Compiler {
                         });
                     }
                     NodeKind::Boundary(Boundary::Outputs) => {
-                        if let GraphId::Subgraph(id) = frame.level.graph {
+                        if let GraphId::Compound(id) = frame.level.graph {
                             outputs_nodes.insert(id, node.node_id);
                         }
                     }
@@ -420,7 +420,7 @@ impl Compiler {
         joined.clear();
         joined.resize(self.placed.len(), CacheMode::None);
         for instance in &self.cached_instances {
-            let outputs = self.outputs_nodes[&instance.subgraph];
+            let outputs = self.outputs_nodes[&instance.compound];
             let graph = source.graphs.graph(instance.inside.graph);
             for (_, binding) in graph.input_bindings(outputs) {
                 if let ExecBinding::Wire(addr) = self.lower(source, instance.inside, Some(binding))
@@ -439,7 +439,7 @@ impl Compiler {
 
     /// Fill [`Self::triggered`] with the program nodes `event` at `level` triggers, sorted and each
     /// once: a subscription to a func's trigger triggers that node; one to an instance's is
-    /// followed inside, to what each of the subgraph's `Inputs` nodes fires as the trigger; one to
+    /// followed inside, to what each of the compound's `Inputs` nodes fires as the trigger; one to
     /// the `Outputs` node's is followed out, to what the instance fires under its id. As a
     /// binding is followed across boundaries ([`Self::lower`]), so a passthrough costs nothing.
     /// An event met twice is followed once, so a loop through boundaries ends.
@@ -471,12 +471,12 @@ impl Compiler {
                     NodeKind::Body { .. } => {
                         triggered.push(level.program_id(trigger.node_id));
                     }
-                    NodeKind::Instance { subgraph, .. } => {
-                        let inside = level.enter(trigger.node_id, GraphId::Subgraph(subgraph));
+                    NodeKind::Instance { compound, .. } => {
+                        let inside = level.enter(trigger.node_id, GraphId::Compound(compound));
                         let definition = source
                             .graphs
-                            .subgraph(subgraph)
-                            .expect("an instance's subgraph is in the set");
+                            .compound(compound)
+                            .expect("an instance's compound is in the set");
                         stack.extend(definition.inputs_nodes().map(|inputs| {
                             (inside, EventPort::new(inputs, Interface::TRIGGER_EVENT))
                         }));
@@ -532,7 +532,7 @@ impl Compiler {
     ///
     /// A wire from an instance or an `Inputs` node names no program node, so it is followed
     /// across the boundary to what the other side holds under the same port id: into the
-    /// subgraph, to the binding on its `Outputs` node, or out of it, to the binding on the
+    /// compound, to the binding on its `Outputs` node, or out of it, to the binding on the
     /// instance. A wire to a func's output lands on that output's position. Each step follows a
     /// wire back toward its producer, and the document holds no cycle, so the walk ends at a
     /// func's output, a constant or nothing. A passthrough costs nothing, and output demand
@@ -568,9 +568,9 @@ impl Compiler {
                         port_idx: u32::try_from(port_idx).expect("a func's outputs fit in u32"),
                     });
                 }
-                NodeKind::Instance { subgraph, .. } => {
-                    level = level.enter(source_port.node_id, GraphId::Subgraph(subgraph));
-                    let outputs = self.outputs_nodes[&subgraph];
+                NodeKind::Instance { compound, .. } => {
+                    level = level.enter(source_port.node_id, GraphId::Compound(compound));
+                    let outputs = self.outputs_nodes[&compound];
                     source
                         .graphs
                         .graph(level.graph)

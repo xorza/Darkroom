@@ -283,7 +283,7 @@ impl RuntimeHost {
         let instance = graphs
             .graph(addr.graph)
             .find(addr.node_id)
-            .is_some_and(|node| node.subgraph().is_some());
+            .is_some_and(|node| node.compound().is_some());
         let mut program_ids: Vec<ProgramId> = Vec::new();
         for path in graphs.instances(addr.graph) {
             if instance {

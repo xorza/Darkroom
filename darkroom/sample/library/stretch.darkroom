@@ -11,7 +11,7 @@
                     subscriptions: [],
                 ),
             ),
-            subgraphs: {
+            compounds: {
                 ("5493d86c-2444-4d73-89b3-dc02b5ea4480"): (
                     name: "Stretch",
                     description: None,
@@ -153,7 +153,7 @@
             focused: (0),
             next_group: 1,
         ),
-        active: Subgraph(("5493d86c-2444-4d73-89b3-dc02b5ea4480")),
+        active: Compound(("5493d86c-2444-4d73-89b3-dc02b5ea4480")),
     ),
     manifest: (
         funcs: {

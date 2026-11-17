@@ -183,7 +183,7 @@ pub(super) fn lit_by_tie(ui: &Ui, graph: GraphId, view: &GraphView, wire: WireKe
 
 #[cfg(test)]
 mod tests {
-    use scenarium::{GraphId, NodeId, PortId, SubgraphId};
+    use scenarium::{CompoundId, GraphId, NodeId, PortId};
 
     use crate::core::document::tie::TieId;
     use crate::gui::pane::graph_ui::{canvas, wid};
@@ -206,7 +206,7 @@ mod tests {
                 canvas::outer_wid(graph),
             ]
         };
-        let (main, sub) = (GraphId::Main, GraphId::Subgraph(SubgraphId::from_u128(1)));
+        let (main, sub) = (GraphId::Main, GraphId::Compound(CompoundId::from_u128(1)));
         assert_eq!(ids(main), ids(main));
         for (in_main, in_sub) in ids(main).into_iter().zip(ids(sub)) {
             assert_ne!(in_main, in_sub);
