@@ -41,6 +41,13 @@ impl<'a> InputCtx<'a> {
         PortRef::input(self.node.node_id, self.declared.id)
     }
 
+    /// Whether the input takes no edit: its graph is a compound that is locked or follows the
+    /// library, whose every edit the gate refuses.
+    pub(crate) fn read_only(self) -> bool {
+        let graph_ctx = self.node.graph_ctx;
+        graph_ctx.document().read_only(graph_ctx.graph()).is_some()
+    }
+
     /// Where this port stands among the node's inputs: the row it draws on.
     pub(crate) const fn idx(self) -> usize {
         self.idx

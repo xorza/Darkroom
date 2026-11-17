@@ -129,8 +129,9 @@ run. Refused: a pass-through node, which changes the graph for layout.
   a small graph while its compound takes edits, a padlock while its author locked it, a chain
   while it follows the library, and a press opens the compound. The card stays a node's, as a lock
   guards only what lies inside, and the instance's wiring and constants live in the graph that
-  holds it; inside a read-only compound its constants show as they stand. Its menu offers Open,
-  Expand, Make Unique, and Lock, Unlock or Make Local. As Blender's group node, entered from the
+  holds it; inside a read-only compound its constants and its interface's ports show disabled,
+  each editor's face kept. Its menu offers Open, Expand, Make Unique, Make Local while it follows
+  the library, and Lock or Unlock. As Blender's group node, entered from the
   icon in its header ([issue](https://projects.blender.org/blender/blender/issues/117530)), and
   Houdini's badge of a locked or unlocked asset
   ([editing assets](https://www.sidefx.com/docs/houdini/assets/edit.html)). Refused: a dimmed

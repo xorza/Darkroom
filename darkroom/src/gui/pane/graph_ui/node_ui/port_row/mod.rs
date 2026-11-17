@@ -38,7 +38,6 @@ use crate::gui::port_ref::PortKind;
 use crate::gui::theme::Theme;
 use crate::gui::theme::color;
 use crate::gui::theme::hover::Hover;
-use crate::gui::widgets::format::shown_value::ShownValue;
 use crate::gui::widgets::port_glyph;
 use crate::gui::widgets::port_glyph::PortGlyph;
 use crate::gui::widgets::support;
@@ -433,23 +432,6 @@ fn value_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCtx<'_>)
         }
     };
     let data_type = input.data_type();
-    let field = Field {
-        theme: node_ctx.const_editor_theme(),
-        id: editor_id,
-    };
-    // A compound that is locked or follows the library shows its constants as they stand, as the
-    // gate would refuse an edit of one: the pane says it is read-only where its edits would be.
-    if node_ctx
-        .graph_ctx
-        .document()
-        .read_only(node_ctx.graph_ctx.graph())
-        .is_some()
-    {
-        value_column(ui, input, |ui| {
-            field.read_only(ui, ShownValue { value, data_type });
-        });
-        return;
-    }
     let value_variants = input.value_variants();
     // A path editor draws a pick button; clicking it raises a blocking file dialog, which
     // only `App` can run, so this is the app tier. Whether a click means "pick a path" is a
@@ -470,7 +452,10 @@ fn value_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCtx<'_>)
     }
     let edited = value_column(ui, input, |ui| {
         ConstEditor {
-            field,
+            field: Field {
+                theme: node_ctx.const_editor_theme(),
+                id: editor_id,
+            },
             library: node_ctx.graph_ctx.library(),
             value,
             data_type,
@@ -488,11 +473,14 @@ fn value_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCtx<'_>)
 
 /// The value column's cell of `input`: filled, so every editor is the same width
 /// (the column hugs to the widest editor's content). `min_size` on the editors keeps a floor.
+/// Disabled on an input that takes no edit, so its editor keeps its face and font and wears
+/// the disabled look, answering nothing, which the gate would refuse.
 fn value_column<R>(ui: &mut Ui, input: InputCtx<'_>, body: impl FnOnce(&mut Ui) -> R) -> R {
     Panel::hstack()
         .id_salt(("val", input.port().port))
         .grid_cell((grid_row(input.idx()), COL_VALUE))
         .size(SizeSpec::FILL)
+        .disabled(input.read_only())
         .child_align(VAlign::Center)
         .show(ui, body)
         .inner

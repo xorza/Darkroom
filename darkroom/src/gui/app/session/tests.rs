@@ -565,17 +565,15 @@ fn an_outputs_nodes_lost_trigger_is_a_ghost_row() {
     );
 }
 
-/// A constant inside a compound that takes edits shows its editor, which takes the focus; inside a
-/// locked one it shows as it stands, in a box that takes nothing, where the gate would refuse an
-/// edit of it.
+/// A constant inside a compound that takes edits shows its editor, enabled; inside a locked one
+/// the same editor, its face and font kept, disabled, where the gate would refuse an edit of it.
 #[test]
-fn a_locked_compounds_constants_show_read_only() {
+fn a_locked_compounds_constants_show_disabled() {
     use scenarium::{Compound, CompoundId, ConstValue, Interface};
 
     use crate::core::document::internals::insert_compound;
 
-    // Whether the editor's box shows, and whether it takes input: the widget list holds only
-    // what takes input.
+    // The editor's box and size, and whether it is disabled.
     let editor = |locked: bool| {
         let mut fixture = DocumentFixture::default();
         let id = CompoundId::from_u128(1);
@@ -591,22 +589,22 @@ fn a_locked_compounds_constants_show_read_only() {
         let mut test = SessionHarness::new(fixture.with_tab(TabRef::Graph(graph)));
         test.prime(2);
         let editor = wid::const_editor(graph, port);
-        let takes_input = test
+        let widget = test
             .ui
             .widgets(None)
             .into_iter()
-            .any(|widget| widget.id == editor && widget.focusable);
-        (test.ui.rect(editor).is_some(), takes_input)
+            .find(|widget| widget.id == editor)
+            .expect("the editor shows");
+        (widget.rect.size, widget.disabled)
     };
-    assert_eq!(
-        editor(false),
-        (true, true),
-        "an editor while it takes edits"
-    );
-    assert_eq!(
-        editor(true),
-        (true, false),
-        "a box that takes nothing, locked"
+    let (open, locked) = (editor(false), editor(true));
+    assert!(!open.1, "enabled while it takes edits");
+    assert!(locked.1, "disabled, locked");
+    // The screen rect passes the camera's float transform, which lands the two widths 1e-5 apart.
+    assert_eq!(open.0.h, locked.0.h, "the same editor, of one height");
+    assert!(
+        (open.0.w - locked.0.w).abs() < 0.01,
+        "and one width: {open:?} against {locked:?}"
     );
 }
 

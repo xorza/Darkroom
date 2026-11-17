@@ -16,7 +16,7 @@ use palantir::{
 };
 use scenarium::LogLevel;
 use scenarium::NodeId;
-use scenarium::{Binding, ConstValue, DataType, ValueVariant};
+use scenarium::{Binding, ConstValue, DataType, GraphId, ValueVariant};
 
 use crate::core::document::inspect_target::InspectTarget;
 use crate::core::document::item_id::ItemId;
@@ -214,6 +214,7 @@ fn body(ui: &mut Ui, stage: &mut Stage<'_, NodeCtx<'_>>, target: InspectTarget) 
             graphs: &document.graphs,
             compound,
             shared: document.sides[&compound].shared,
+            read_only: document.read_only(GraphId::Compound(compound)),
         };
         interface_card::show(ui, card, stage.out);
     }

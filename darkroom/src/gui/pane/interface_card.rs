@@ -13,6 +13,7 @@ use palantir::{
 };
 use scenarium::{CompoundId, ConstValue, DataType, EventDecl, GraphSet, Library, Numbered, PortId};
 
+use crate::core::document::compound_side::ReadOnly;
 use crate::core::edit::compound_intent::CompoundIntent;
 use crate::core::edit::port_edit::{InterfaceSide, PortEdit, Shift};
 use crate::gui::frame::requests::Requests;
@@ -40,6 +41,8 @@ pub(crate) struct InterfaceCard<'a> {
     pub(crate) graphs: &'a GraphSet,
     pub(crate) compound: CompoundId,
     pub(crate) shared: bool,
+    /// Why the compound takes no edit of its interface, if it takes none.
+    pub(crate) read_only: Option<ReadOnly>,
 }
 
 /// Record the interface card, raising the edits a frame's input makes of its compound.
@@ -50,6 +53,7 @@ pub(crate) fn show(ui: &mut Ui, card: InterfaceCard<'_>, out: &mut Requests) {
         graphs,
         compound,
         shared,
+        read_only,
     } = card;
     let interface = &graphs
         .compound(compound)
@@ -84,83 +88,95 @@ pub(crate) fn show(ui: &mut Ui, card: InterfaceCard<'_>, out: &mut Requests) {
                     shared: marked,
                 });
             }
-            for (side, caption, ports) in [
-                (
-                    InterfaceSide::Inputs,
-                    "Inputs",
-                    interface
-                        .inputs()
-                        .iter()
-                        .map(|input| PortRow {
-                            port: input.id,
-                            name: &input.name,
-                            data: Some(RowData {
-                                data_type: input.data_type,
-                                type_name: graphs.type_name(library, input.data_type),
-                                default: RowDefault::Input(input.default_value.as_ref()),
-                            }),
-                        })
-                        .collect::<Vec<_>>(),
-                ),
-                (
-                    InterfaceSide::Outputs,
-                    "Outputs",
-                    interface
-                        .outputs()
-                        .iter()
-                        .map(|output| PortRow {
-                            port: output.id,
-                            name: &output.name,
-                            data: Some(RowData {
-                                data_type: output.data_type,
-                                type_name: graphs.type_name(library, output.data_type),
-                                default: RowDefault::Output,
-                            }),
-                        })
-                        .collect(),
-                ),
-                (
-                    InterfaceSide::Events,
-                    "Events",
-                    interface.events().iter().map(event_row).collect(),
-                ),
-            ] {
-                let muted = support::muted_text(ui, theme, theme.font.caption);
-                Panel::hstack()
-                    .id_salt(("caption", caption))
-                    .size(SizeSpec::FILL_W)
-                    .gap(theme.space.xs)
-                    .child_align(VAlign::Center)
-                    .show(ui, |ui| {
-                        Text::new(caption).style(&muted).show(ui);
-                        // A data port is made by a wire dropped on a boundary node; an event
-                        // carries no type for a wire to give, so it is added here.
-                        if side == InterfaceSide::Events
-                            && Link::new(port_wid(side, PortId::MIN, "add"), "+")
-                                .tooltip("Add one")
-                                .show(ui, theme)
-                        {
-                            let list = interface.events();
-                            edit = Some(PortEdit::AddEvent {
-                                port: PortId::mint(|id| list.iter().any(|event| event.id == id)),
-                                name: format!("event {}", list.len() + 1),
+            // A compound that is locked or follows the library takes no edit of its interface:
+            // its ports show disabled, as the gate would refuse each edit. Its library mark above
+            // is not its interface and stays.
+            Panel::vstack()
+                .id_salt("ports")
+                .size(SizeSpec::FILL_W)
+                .gap(theme.space.xs)
+                .disabled(read_only.is_some())
+                .show(ui, |ui| {
+                    for (side, caption, ports) in [
+                        (
+                            InterfaceSide::Inputs,
+                            "Inputs",
+                            interface
+                                .inputs()
+                                .iter()
+                                .map(|input| PortRow {
+                                    port: input.id,
+                                    name: &input.name,
+                                    data: Some(RowData {
+                                        data_type: input.data_type,
+                                        type_name: graphs.type_name(library, input.data_type),
+                                        default: RowDefault::Input(input.default_value.as_ref()),
+                                    }),
+                                })
+                                .collect::<Vec<_>>(),
+                        ),
+                        (
+                            InterfaceSide::Outputs,
+                            "Outputs",
+                            interface
+                                .outputs()
+                                .iter()
+                                .map(|output| PortRow {
+                                    port: output.id,
+                                    name: &output.name,
+                                    data: Some(RowData {
+                                        data_type: output.data_type,
+                                        type_name: graphs.type_name(library, output.data_type),
+                                        default: RowDefault::Output,
+                                    }),
+                                })
+                                .collect(),
+                        ),
+                        (
+                            InterfaceSide::Events,
+                            "Events",
+                            interface.events().iter().map(event_row).collect(),
+                        ),
+                    ] {
+                        let muted = support::muted_text(ui, theme, theme.font.caption);
+                        Panel::hstack()
+                            .id_salt(("caption", caption))
+                            .size(SizeSpec::FILL_W)
+                            .gap(theme.space.xs)
+                            .child_align(VAlign::Center)
+                            .show(ui, |ui| {
+                                Text::new(caption).style(&muted).show(ui);
+                                // A data port is made by a wire dropped on a boundary node; an event
+                                // carries no type for a wire to give, so it is added here.
+                                if side == InterfaceSide::Events
+                                    && Link::new(port_wid(side, PortId::MIN, "add"), "+")
+                                        .tooltip("Add one")
+                                        .show(ui, theme)
+                                {
+                                    let list = interface.events();
+                                    edit = Some(PortEdit::AddEvent {
+                                        port: PortId::mint(|id| {
+                                            list.iter().any(|event| event.id == id)
+                                        }),
+                                        name: format!("event {}", list.len() + 1),
+                                    });
+                                }
                             });
+                        let last = ports.len().saturating_sub(1);
+                        for (idx, row) in ports.into_iter().enumerate() {
+                            let edge = Edge {
+                                first: idx == 0,
+                                last: idx == last,
+                            };
+                            if let Some(made) = row.show(ui, theme, library, side, edge, &types) {
+                                edit = Some(made);
+                            }
                         }
-                    });
-                let last = ports.len().saturating_sub(1);
-                for (idx, row) in ports.into_iter().enumerate() {
-                    let edge = Edge {
-                        first: idx == 0,
-                        last: idx == last,
-                    };
-                    if let Some(made) = row.show(ui, theme, library, side, edge, &types) {
+                    }
+                    if let Some(made) = trigger_section(ui, theme, interface.trigger()) {
                         edit = Some(made);
                     }
-                }
-            }
-            if let Some(made) = trigger_section(ui, theme, interface.trigger()) {
-                edit = Some(made);
-            }
+                });
         });
     if let Some(edit) = edit {
         out.push_compound(CompoundIntent::SetInterface {
@@ -424,11 +440,12 @@ mod tests {
     use crate::core::edit::graph_intent::GraphIntent;
     use crate::core::edit::port_edit::InterfaceSide;
     use crate::gui::app::session::internals::SessionHarness;
-    use crate::gui::pane::interface_card::{port_wid, trigger_wid};
+    use crate::gui::pane::interface_card::{port_wid, shared_wid, trigger_wid};
 
     /// An instance's inspector shows its compound's ports, and a click on a port's removal
     /// takes it out of the interface, as one history entry. The trigger's add gives the
-    /// interface its one trigger and goes, and its removal takes it away.
+    /// interface its one trigger and goes, and its removal takes it away. A locked compound's
+    /// ports show disabled.
     #[test]
     fn the_inspector_removes_an_interface_port() {
         let mut fixture = DocumentFixture::default();
@@ -509,5 +526,28 @@ mod tests {
         h.frame();
         h.drain();
         assert_eq!(trigger(&h), None);
+
+        // Locked, its ports take no edit and show disabled; its library mark is no interface
+        // edit and stays enabled.
+        h.session
+            .open
+            .document_mut()
+            .sides
+            .get_mut(&id)
+            .unwrap()
+            .locked = true;
+        h.prime(2);
+        let disabled = |h: &SessionHarness, wid| {
+            h.ui.widgets(None)
+                .into_iter()
+                .find(|widget| widget.id == wid)
+                .map(|widget| widget.disabled)
+        };
+        assert_eq!(
+            disabled(&h, port_wid(InterfaceSide::Inputs, a, "remove")),
+            Some(true)
+        );
+        assert_eq!(disabled(&h, trigger_wid("add")), Some(true));
+        assert_eq!(disabled(&h, shared_wid()), Some(false));
     }
 }
