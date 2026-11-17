@@ -1,6 +1,7 @@
-//! The band floating over the top of every graph pane: the run's controls, the path of names from
-//! the main graph down to the pane, a compound's count of uses and its actions on one pill, and at
-//! the right the zoom on a pill of its own, which opens the camera's commands.
+//! The band floating over the top of every graph pane: at the left the run's controls and the path
+//! of names from the main graph down to the pane, with a compound's count of uses and where it
+//! stands, on one pill; at the right a compound's actions on a pill, and the zoom on a pill of its
+//! own, which opens the camera's commands.
 //!
 //! - **Pills floating over the canvas**, the viewer's toolbar pills at their alpha, so the tab
 //!   strip sits on the pane it names and the canvas runs up to it. As Blender's Region Overlap
@@ -17,11 +18,17 @@
 //!   Grasshopper's users report "no visual sign of entanglement"
 //!   ([forum](https://discourse.mcneel.com/t/cluster-disentangled-without-notice/57955)).
 //! - **The count of uses sits here, not on the instance**, whose header has no room for it beside
-//!   its title and marks; Make Unique stands beside it.
-//! - **A compound's actions are buttons, its path links**: a link goes somewhere, a button acts.
+//!   its title and marks.
+//! - **A compound's actions are icon chips at the right, its path links at the left**: a link
+//!   goes somewhere, a chip acts, and the actions keep their places however long the path runs. A
+//!   state an action toggles, locked or following the library, shows as its chip's on state, as
+//!   the event loop's does, and in words on the path. Refused: text buttons beside the run chips,
+//!   two looks of a control on one pill.
 //! - **Publish asks in the band**, naming the file it writes and, when the library changed too,
 //!   that it overwrites those changes: one click arms it, a second writes. Refused: a modal dialog
 //!   for one yes or no beside the button that asked it.
+
+use std::path::Path;
 
 use common::FloatExt;
 use glam::Vec2;
@@ -39,21 +46,19 @@ use crate::core::document::viewport::Viewport;
 use crate::core::edit::compound_intent::{CompoundIntent, Update};
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::make_unique::MakeUnique;
+use crate::core::io::preferences::run_mode::RunMode;
 use crate::core::shared_library::{LibraryEntry, SyncState};
 use crate::gui::command::Command;
 use crate::gui::command::menu::{self, RUN_MENU, Unavailable, ZOOM_MENU};
 use crate::gui::frame::app_command::AppCommand;
-use crate::gui::frame::requests::Requests;
 use crate::gui::frame::stage::Stage;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::gesture::pan_zoom;
 use crate::gui::pane::graph_ui::node_ui::header::read_only_icon;
-use crate::gui::theme::Theme;
 use crate::gui::widgets::chip::Chip;
 use crate::gui::widgets::format::percent::Percent;
 use crate::gui::widgets::icon::Icon;
-use crate::gui::widgets::icon_button::IconButton;
 use crate::gui::widgets::link::Link;
 use crate::gui::widgets::pill;
 use crate::gui::widgets::support;
@@ -143,6 +148,14 @@ struct SyncCache {
     state: Option<SyncState>,
 }
 
+/// Where a compound shared through the library stands: its entry there, and its state against it.
+#[derive(Debug, Clone, Copy)]
+struct Standing<'a> {
+    compound: CompoundId,
+    entry: &'a LibraryEntry,
+    state: SyncState,
+}
+
 impl PaneHeader {
     /// Where `compound` of the pane's document stands against the library, reusing the last
     /// answer while neither changed; `None` when the library lists no one entry under its id.
@@ -173,26 +186,246 @@ impl PaneHeader {
         state
     }
 
+    /// A compound pane's path, its count of uses and where it stands: following the library, else
+    /// against it, and locked.
+    fn compound_path(
+        &mut self,
+        ui: &mut Ui,
+        stage: &mut Stage<'_, GraphCtx<'_>>,
+        compound: CompoundId,
+    ) {
+        let sync = self.sync(stage.ctx, compound);
+        let (graph_ctx, out) = (stage.ctx, &mut *stage.out);
+        let theme = graph_ctx.theme();
+        let document = graph_ctx.document();
+        let muted = support::muted_text(ui, theme, theme.font.body);
+        let mut idx = 0_usize;
+        for_each_crumb(document, compound, |crumb| {
+            if idx > 0 {
+                Text::new("\u{203a}").style(&muted).show(ui);
+            }
+            match crumb.target {
+                // The pane's own name gives way first where the band runs short, cut with an
+                // ellipsis, so what follows it keeps its place.
+                CrumbTarget::Here => {
+                    let bold = TextStyle {
+                        weight: FontWeight::BOLD,
+                        ..support::body_text(ui, theme)
+                    };
+                    Text::new(crumb.name)
+                        .style(&bold)
+                        .text_wrap(TextWrap::Ellipsis)
+                        .show(ui);
+                }
+                CrumbTarget::Main => {
+                    if Link::new(crumb_wid(compound, idx), crumb.name).show(ui, theme) {
+                        out.push_view(DockOperation::OpenTab {
+                            tab: TabRef::Graph(GraphId::Main),
+                        });
+                    }
+                }
+                // Keyed by the pane, not the graph it leads to: two panes inside one enclosing
+                // compound each show a link to it.
+                CrumbTarget::Enter {
+                    compound: enclosing,
+                    through,
+                } => {
+                    if Link::new(crumb_wid(compound, idx), crumb.name).show(ui, theme) {
+                        out.push_enter(enclosing, Some(through));
+                    }
+                }
+            }
+            idx += 1;
+        });
+        let uses = document.graphs.uses(compound).count();
+        if uses > 1 {
+            Text::new(fmt!(ui, "\u{b7} {uses} uses"))
+                .style(&muted)
+                .show(ui);
+        }
+        let side = &document.sides[&compound];
+        if side.follows {
+            Text::new("\u{b7} follows the library")
+                .style(&muted)
+                .show(ui);
+        } else if let Some(state) = sync {
+            Text::new(fmt!(ui, "\u{b7} {}", state.label()))
+                .style(&muted)
+                .show(ui);
+        }
+        if side.locked {
+            Text::new("\u{b7} locked").style(&muted).show(ui);
+        }
+    }
+
+    /// A compound pane's actions, standing against the library: Make Unique once another
+    /// instance places it; Update, then Publish, which asks before it writes, while it differs from the
+    /// library and follows it not; following the library; and the lock.
+    fn compound_actions(
+        &mut self,
+        ui: &mut Ui,
+        stage: &mut Stage<'_, GraphCtx<'_>>,
+        compound: CompoundId,
+    ) {
+        let sync = self.sync(stage.ctx, compound);
+        let graph_ctx = stage.ctx;
+        let theme = graph_ctx.theme();
+        let document = graph_ctx.document();
+        let shared = graph_ctx.shared();
+        // The instance the pane is shown through takes a copy of its own, and the pane goes on showing
+        // it through that instance. Planned on the click alone, as a plan copies the whole definition.
+        if document.graphs.uses(compound).count() > 1
+            && let Some(&through) = document.through(GraphId::Compound(compound))
+            && let (Some(instance), Some(parent)) = (through.instance(), through.parent())
+            && let Some(holder) = document.graphs.graph_at(parent)
+            && Chip::new(
+                make_unique_wid(compound),
+                "Make Unique \u{2014} give this instance a copy of its own",
+            )
+            .show_icon(ui, theme, Icon::MakeUnique)
+            && let Some(unique) = MakeUnique::plan(document, holder, &[instance])
+        {
+            let copy = unique.copy.id;
+            unique.queue(stage.out.document());
+            stage.out.push_enter(copy, Some(through));
+        }
+        let side = &document.sides[&compound];
+        let entry = shared.entry(compound);
+        match (side.follows, sync, entry) {
+            (false, Some(state), Some(entry)) if state != SyncState::InSync => {
+                if Chip::new(
+                    library_wid(compound, "update"),
+                    "Update \u{2014} put the library's definition in place of this one",
+                )
+                .show_icon(ui, theme, Icon::Update)
+                {
+                    stage
+                        .out
+                        .push_compound(CompoundIntent::Update(Box::new(Update {
+                            id: compound,
+                            carried: shared.carried(entry),
+                            manifest: shared.manifest(entry).clone(),
+                        })));
+                }
+                if state == SyncState::UpdateAvailable {
+                    self.publish_asked = false;
+                } else {
+                    let standing = Standing {
+                        compound,
+                        entry,
+                        state,
+                    };
+                    self.publish(ui, stage, standing);
+                }
+            }
+            _ => self.publish_asked = false,
+        }
+        let follows = side.follows;
+        let can_follow = matches!(sync, Some(SyncState::InSync | SyncState::UpdateAvailable));
+        if follows || can_follow {
+            let tooltip = if follows {
+                "Follows the library \u{2014} click to make this copy local and edit it"
+            } else {
+                "Follow the library \u{2014} keep this copy as the library's, read-only, updated as it changes"
+            };
+            if Chip::new(library_wid(compound, "follow"), tooltip)
+                .selected(follows)
+                .show_icon(ui, theme, read_only_icon(ReadOnly::Follows))
+            {
+                stage.out.push_compound(CompoundIntent::SetFollows {
+                    id: compound,
+                    follows: !follows,
+                });
+            }
+        }
+        let tooltip = if side.locked {
+            "Locked \u{2014} click to allow edits of this compound again"
+        } else {
+            "Lock \u{2014} refuse edits of this compound, in every copy, until it is unlocked"
+        };
+        if Chip::new(library_wid(compound, "lock"), tooltip)
+            .selected(side.locked)
+            .show_icon(ui, theme, read_only_icon(ReadOnly::Locked))
+        {
+            stage.out.push_compound(CompoundIntent::SetLocked {
+                id: compound,
+                locked: !side.locked,
+            });
+        }
+    }
+
+    /// Publish, which a first click arms and a second confirms: armed, the chip shows its on state
+    /// beside the question, naming the library file of the compound's `standing` and, when the
+    /// library changed too, that the write overwrites those changes, and a check and a cross that
+    /// answer it.
+    fn publish(
+        &mut self,
+        ui: &mut Ui,
+        stage: &mut Stage<'_, GraphCtx<'_>>,
+        standing: Standing<'_>,
+    ) {
+        let (graph_ctx, out) = (stage.ctx, &mut *stage.out);
+        let Standing {
+            compound,
+            entry,
+            state,
+        } = standing;
+        let publish_asked = &mut self.publish_asked;
+        let theme = graph_ctx.theme();
+        if Chip::new(
+            library_wid(compound, "publish"),
+            "Publish \u{2014} write this definition into the library file",
+        )
+        .selected(*publish_asked)
+        .show_icon(ui, theme, Icon::Publish)
+        {
+            *publish_asked = !*publish_asked;
+        }
+        if !*publish_asked {
+            return;
+        }
+        let path = graph_ctx.shared().path(entry);
+        // Formatted into the frame's arena, so an armed Publish builds no `String` a frame.
+        let file = Path::new(path.file_name().unwrap_or(path.as_os_str())).display();
+        let question = match state {
+            SyncState::ChangedInBoth => fmt!(ui, "overwrite the library's changes in {file}?"),
+            _ => fmt!(ui, "write it into {file}?"),
+        };
+        Text::new(question)
+            .style(&support::muted_text(ui, theme, theme.font.body))
+            .padding(Spacing::xy(theme.space.xs, 0.0))
+            .show(ui);
+        if Chip::new(library_wid(compound, "publish_yes"), "Publish").show_icon(
+            ui,
+            theme,
+            Icon::Check,
+        ) {
+            out.push_app(AppCommand::Publish { compound });
+            *publish_asked = false;
+        }
+        if Chip::new(library_wid(compound, "publish_no"), "Cancel").show_icon(
+            ui,
+            theme,
+            Icon::Cross,
+        ) {
+            *publish_asked = false;
+        }
+    }
+
     /// The band over `stage`'s graph pane. A click on a name enters that graph's pane.
     pub(super) fn show(&mut self, ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
         let graph = stage.ctx.graph();
         let theme = stage.ctx.theme();
-        let sync = match graph {
-            GraphId::Compound(compound) => self.sync(stage.ctx, compound),
-            GraphId::Main => None,
-        };
-        let publish_asked = &mut self.publish_asked;
-        let zoom_scrub = &mut self.zoom_scrub;
         let margin = theme.space.sm;
-        // The zoom's pill stands alone at the right, so it never gives way; the controls' pill
+        // The right side stands alone, so it never gives way; the controls' pill
         // takes what the band leaves it as of last frame's layout, where the pane's name gives way
         // first and the pill clips what still runs past it. Refused: both in one row, which
         // shares a shortfall among its children and squeezes the zoom too.
         let last_w = |id: WidgetId| ui.response_for(id).layout_rect.map(|rect| rect.size.w);
         let controls_w_max = last_w(band_wid(graph)).map_or(f32::INFINITY, |band_w| {
-            let zoom_w = last_w(zoom_pill_wid(graph)).unwrap_or(0.0);
-            // A margin at each end and one between the pills.
-            (band_w - 3.0 * margin - zoom_w).max(0.0)
+            let right_w = last_w(right_wid(graph)).unwrap_or(0.0);
+            // A margin at each end and one between the two sides.
+            (band_w - 3.0 * margin - right_w).max(0.0)
         });
         // A band with no sense of its own: between the pills a press reaches the canvas.
         Panel::zstack()
@@ -223,14 +456,27 @@ impl PaneHeader {
                                     Text::new(MAIN).style(&bold).show(ui);
                                 }
                                 GraphId::Compound(compound) => {
-                                    compound_part(ui, stage, compound, sync, publish_asked);
+                                    self.compound_path(ui, stage, compound);
                                 }
                             });
                     });
-                let zoom = Panel::hstack()
-                    .id(zoom_pill_wid(graph))
-                    .align(Align::TOP_RIGHT);
-                pill::dress(zoom, theme).show(ui, |ui| zoom_control(ui, stage, zoom_scrub));
+                Panel::hstack()
+                    .id(right_wid(graph))
+                    .align(Align::TOP_RIGHT)
+                    .gap(margin)
+                    .show(ui, |ui| {
+                        if let GraphId::Compound(compound) = graph {
+                            let actions = Panel::hstack()
+                                .id(band_wid(graph).with("actions"))
+                                .child_align(VAlign::Center);
+                            pill::dress(actions, theme).show(ui, |ui| {
+                                self.compound_actions(ui, stage, compound);
+                            });
+                        }
+                        let zoom = Panel::hstack().id(zoom_pill_wid(graph));
+                        pill::dress(zoom, theme)
+                            .show(ui, |ui| zoom_control(ui, stage, &mut self.zoom_scrub));
+                    });
             });
     }
 }
@@ -238,7 +484,8 @@ impl PaneHeader {
 /// What the main graph is called, on its tab and in each path.
 pub(crate) const MAIN: &str = "Main";
 
-/// The run chip and the event loop's: Run while idle, Cancel Run while a run is in flight.
+/// The run chip, the event loop's and Run on Change's: Run while idle, Cancel Run while a run is
+/// in flight.
 fn run_controls(ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
     let (graph_ctx, out) = (stage.ctx, &mut *stage.out);
     let (graph, theme) = (graph_ctx.graph(), graph_ctx.theme());
@@ -258,7 +505,7 @@ fn run_controls(ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
     {
         run.raise(ui, graph_ctx, out);
     }
-    // Run on Change sits in the chip's context menu, beside the runs whose start it changes.
+    // The runs, Run on Change among them, in the chip's context menu too.
     Menu::context(&ui.response_for(run_chip_wid(graph))).show(ui, |ui| {
         menu::record(ui, RUN_MENU, graph_ctx, out, Unavailable::Greyed);
     });
@@ -268,6 +515,16 @@ fn run_controls(ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
         .show_icon(ui, theme, Icon::RunEvents)
     {
         Command::ToggleEvents.raise(ui, graph_ctx, out);
+    }
+    // A preference, not a run in flight: the accent's on state, as a toggle's.
+    if Chip::command(
+        band_wid(graph).with("run_on_change"),
+        Command::ToggleRunOnChange,
+    )
+    .selected(graph_ctx.run_mode() == RunMode::OnChange)
+    .show_icon(ui, theme, Icon::RunOnChange)
+    {
+        Command::ToggleRunOnChange.raise(ui, graph_ctx, out);
     }
 }
 
@@ -341,225 +598,14 @@ fn zoom_control(ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>, scrub: &mut Op
 /// glyphs, and the percent sign is measured with them, as it need not advance as a figure does.
 const WIDEST_ZOOM: &str = "500%";
 
-/// A compound pane's part of its band: its path, its count of uses and its actions, standing
-/// `sync` against the library.
-fn compound_part(
-    ui: &mut Ui,
-    stage: &mut Stage<'_, GraphCtx<'_>>,
-    compound: CompoundId,
-    sync: Option<SyncState>,
-    publish_asked: &mut bool,
-) {
-    let (graph_ctx, out) = (stage.ctx, &mut *stage.out);
-    let theme = graph_ctx.theme();
-    let document = graph_ctx.document();
-    let uses = document.graphs.uses(compound).count();
-    {
-        let muted = support::muted_text(ui, theme, theme.font.body);
-        let mut idx = 0_usize;
-        for_each_crumb(document, compound, |crumb| {
-            if idx > 0 {
-                Text::new("\u{203a}").style(&muted).show(ui);
-            }
-            match crumb.target {
-                // The pane's own name gives way first where the band runs short, cut with an
-                // ellipsis, so the controls after it keep their places.
-                CrumbTarget::Here => {
-                    let bold = TextStyle {
-                        weight: FontWeight::BOLD,
-                        ..support::body_text(ui, theme)
-                    };
-                    Text::new(crumb.name)
-                        .style(&bold)
-                        .text_wrap(TextWrap::Ellipsis)
-                        .show(ui);
-                }
-                CrumbTarget::Main => {
-                    if Link::new(crumb_wid(compound, idx), crumb.name).show(ui, theme) {
-                        out.push_view(DockOperation::OpenTab {
-                            tab: TabRef::Graph(GraphId::Main),
-                        });
-                    }
-                }
-                // Keyed by the pane, not the graph it leads to: two panes inside one enclosing
-                // compound each show a link to it.
-                CrumbTarget::Enter {
-                    compound: enclosing,
-                    through,
-                } => {
-                    if Link::new(crumb_wid(compound, idx), crumb.name).show(ui, theme) {
-                        out.push_enter(enclosing, Some(through));
-                    }
-                }
-            }
-            idx += 1;
-        });
-        if uses > 1 {
-            Text::new(fmt!(ui, "\u{b7} {uses} uses"))
-                .style(&muted)
-                .show(ui);
-            // The instance the pane is shown through takes a copy of its own, and the pane goes
-            // on showing it through that instance.
-            // Planned on the click alone, as a plan copies the whole definition.
-            if let Some(&through) = document.through(GraphId::Compound(compound))
-                && let (Some(instance), Some(parent)) = (through.instance(), through.parent())
-                && let Some(holder) = document.graphs.graph_at(parent)
-                && action(ui, make_unique_wid(compound), "Make Unique", None)
-                && let Some(unique) = MakeUnique::plan(document, holder, &[instance])
-            {
-                let copy = unique.copy.id;
-                unique.queue(out.document());
-                out.push_enter(copy, Some(through));
-            }
-        }
-        let side = &document.sides[&compound];
-        if side.follows {
-            read_only_mark(ui, theme, compound, ReadOnly::Follows);
-            Text::new("follows the library").style(&muted).show(ui);
-            if action(
-                ui,
-                library_wid(compound, "make_local"),
-                "Make Local",
-                Some("Stop following the library, and edit this copy"),
-            ) {
-                out.push_compound(CompoundIntent::SetFollows {
-                    id: compound,
-                    follows: false,
-                });
-            }
-        } else if let Some(state) = sync
-            && let Some(entry) = graph_ctx.shared().entry(compound)
-        {
-            library_row(ui, graph_ctx, out, compound, entry, state, publish_asked);
-            if matches!(state, SyncState::InSync | SyncState::UpdateAvailable)
-                && action(
-                    ui,
-                    library_wid(compound, "follow"),
-                    "Follow",
-                    Some("Keep this copy as the library's, read-only, updated as it changes"),
-                )
-            {
-                out.push_compound(CompoundIntent::SetFollows {
-                    id: compound,
-                    follows: true,
-                });
-            }
-        }
-        let (label, tooltip) = if side.locked {
-            read_only_mark(ui, theme, compound, ReadOnly::Locked);
-            Text::new("locked").style(&muted).show(ui);
-            ("Unlock", "Allow edits of this compound again")
-        } else {
-            (
-                "Lock",
-                "Refuse edits of this compound, in every copy, until it is unlocked",
-            )
-        };
-        if action(ui, library_wid(compound, "lock"), label, Some(tooltip)) {
-            out.push_compound(CompoundIntent::SetLocked {
-                id: compound,
-                locked: !side.locked,
-            });
-        }
-    }
-}
-
-/// One of a compound's actions: a button, `true` when it was pressed this frame. Its label never
-/// narrows, so where the band runs short the pane's name gives way and the action reads whole.
-fn action(ui: &mut Ui, wid: WidgetId, label: &'static str, tooltip: Option<&'static str>) -> bool {
-    let button = Button::new()
-        .id(wid)
-        .label(label)
-        .text_wrap(TextWrap::SingleLine)
-        .focusable(false)
-        .show(ui);
-    support::tooltip_after(ui, &button, tooltip);
-    button.clicked()
-}
-
-/// The glyph an instance's compound mark wears for the read-only state the header names beside
-/// it, so the pane and its instances say it alike.
-fn read_only_mark(ui: &mut Ui, theme: &Theme, compound: CompoundId, why: ReadOnly) {
-    let tooltip = match why {
-        ReadOnly::Locked => "Locked: its graph and interface take no edit",
-        ReadOnly::Follows => "Follows the library: its graph and interface take no edit",
-    };
-    IconButton::mark(
-        read_only_icon(why),
-        library_wid(compound, "read_only"),
-        theme.badge.kind,
-        tooltip,
-    )
-    .show(ui, theme);
-}
-
-/// The header's library part: where the compound stands, an Update that puts the library's
-/// definition in place, and a Publish that asks before it writes the library file.
-fn library_row(
-    ui: &mut Ui,
-    graph_ctx: GraphCtx<'_>,
-    out: &mut Requests,
-    compound: CompoundId,
-    entry: &LibraryEntry,
-    state: SyncState,
-    publish_asked: &mut bool,
-) {
-    let theme = graph_ctx.theme();
-    let shared = graph_ctx.shared();
-    let muted = support::muted_text(ui, theme, theme.font.body);
-    Text::new(fmt!(ui, "\u{b7} {}", state.label()))
-        .style(&muted)
-        .show(ui);
-    if state == SyncState::InSync {
-        *publish_asked = false;
-        return;
-    }
-    if action(
-        ui,
-        library_wid(compound, "update"),
-        "Update",
-        Some("Put the library's definition in place of this one"),
-    ) {
-        out.push_compound(CompoundIntent::Update(Box::new(Update {
-            id: compound,
-            carried: shared.carried(entry),
-            manifest: shared.manifest(entry).clone(),
-        })));
-    }
-    if state == SyncState::UpdateAvailable {
-        return;
-    }
-    let file = shared.path(entry).file_name().map_or_else(
-        || shared.path(entry).display().to_string(),
-        |name| name.to_string_lossy().into_owned(),
-    );
-    if !*publish_asked {
-        *publish_asked = action(
-            ui,
-            library_wid(compound, "publish"),
-            "Publish",
-            Some("Write this definition into the library file"),
-        );
-        return;
-    }
-    // Asks first, naming what the write replaces.
-    let question = match state {
-        SyncState::ChangedInBoth => fmt!(ui, "overwrite the library's changes in {file}?"),
-        _ => fmt!(ui, "write it into {file}?"),
-    };
-    Text::new(question).style(&muted).show(ui);
-    if action(ui, library_wid(compound, "publish_yes"), "Publish", None) {
-        out.push_app(AppCommand::Publish { compound });
-        *publish_asked = false;
-    }
-    if action(ui, library_wid(compound, "publish_no"), "Cancel", None) {
-        *publish_asked = false;
-    }
-}
-
 /// The band over `graph`'s pane.
 fn band_wid(graph: GraphId) -> WidgetId {
     WidgetId::from_hash(("darkroom.graph.pane_header", graph))
+}
+
+/// The right side of the band over `graph`'s pane: a compound's actions and the zoom.
+fn right_wid(graph: GraphId) -> WidgetId {
+    band_wid(graph).with("right")
 }
 
 /// The zoom control's pill in the band over `graph`'s pane.
@@ -701,9 +747,9 @@ mod tests {
     }
 
     /// A compound's band in a 500 px pane, its path, count of uses and actions wider than the
-    /// pane, cuts the pane's name: the controls' pill narrows from its width in a 1400 px pane
-    /// while Lock keeps its own and stays inside it, and the pill ends at least a margin clear of
-    /// the zoom's, whole a margin inside the pane.
+    /// pane, cuts the pane's name: the controls' pill narrows from its width in a 1400 px pane and
+    /// ends at least a margin clear of the right side, whose actions keep their places, Lock as in
+    /// the wide pane, and which stands whole a margin inside the pane.
     #[test]
     fn a_compound_band_too_wide_for_its_pane_cuts_the_name() {
         use glam::UVec2;
@@ -732,7 +778,7 @@ mod tests {
             [
                 rect(super::band_wid(graph)),
                 rect(super::band_wid(graph).with("controls")),
-                rect(super::zoom_pill_wid(graph)),
+                rect(super::right_wid(graph)),
                 rect(super::library_wid(compound, "lock")),
             ]
         };
@@ -741,17 +787,165 @@ mod tests {
         let [_, wide_controls, _, wide_lock] = rects(&h);
         h.ui.resize(UVec2::new(500, 800));
         h.prime(2);
-        let [band, controls, zoom, lock] = rects(&h);
+        let [band, controls, right, lock] = rects(&h);
         let margin = Theme::default().space.sm;
         assert_eq!(band.size.w, 500.0, "{band:?}");
         assert!(controls.size.w < wide_controls.size.w, "{controls:?}");
         assert_eq!(lock.size, wide_lock.size, "Lock reads whole");
-        assert!(lock.max().x <= controls.max().x, "{lock:?} in {controls:?}");
+        assert!(right.min.x <= lock.min.x, "{lock:?} in {right:?}");
+        assert!(lock.max().x <= right.max().x, "{lock:?} in {right:?}");
         assert!(
-            controls.max().x + margin <= zoom.min.x,
-            "{controls:?} before {zoom:?}"
+            controls.max().x + margin <= right.min.x,
+            "{controls:?} before {right:?}"
         );
-        assert_eq!(zoom.max().x, band.max().x - margin, "{zoom:?} in {band:?}");
+        assert_eq!(
+            right.max().x,
+            band.max().x - margin,
+            "{right:?} in {band:?}"
+        );
+    }
+
+    /// The band's chips act: Run on Change, on at the start, asks for Manual; on a compound placed
+    /// twice and shown through one instance, Lock locks it and shows its on state, a second press
+    /// unlocks it, and Make Unique gives that instance a copy of its own, which the pane then
+    /// shows, the compound left with its other use.
+    #[test]
+    fn the_bands_chips_toggle_the_run_mode_the_lock_and_make_unique() {
+        use crate::core::io::preferences::run_mode::RunMode;
+        use crate::gui::app::session::internals::SessionHarness;
+        use crate::gui::frame::app_command::AppCommand;
+
+        let mut fixture = DocumentFixture::default();
+        let compound = CompoundId::from_u128(1);
+        insert_compound(
+            &mut fixture.document,
+            compound,
+            Compound::new("Adjust", Interface::default()),
+        );
+        let instance = fixture.add_instance(compound);
+        fixture.add_instance(compound);
+        fixture
+            .document
+            .enter(compound, Some(InstancePath::new(&[instance])));
+        let mut h = SessionHarness::new(fixture);
+        h.prime(2);
+        let graph = GraphId::Compound(compound);
+        let press = |h: &mut SessionHarness, id| {
+            let at = h.ui.rect(id).expect("the chip").center();
+            h.ui.click(at);
+            let commands = h.frame();
+            h.prime(2);
+            commands
+        };
+
+        let commands = press(&mut h, super::band_wid(graph).with("run_on_change"));
+        assert!(
+            commands
+                .iter()
+                .any(|command| matches!(command, AppCommand::SetRunMode(RunMode::Manual))),
+            "{commands:?}"
+        );
+
+        let locked = |h: &SessionHarness| h.session.open.document().sides[&compound].locked;
+        press(&mut h, super::library_wid(compound, "lock"));
+        assert!(locked(&h), "locked");
+        press(&mut h, super::library_wid(compound, "lock"));
+        assert!(!locked(&h), "unlocked");
+
+        press(&mut h, super::make_unique_wid(compound));
+        let document = h.session.open.document();
+        assert_eq!(document.graphs.uses(compound).count(), 1);
+        let GraphId::Compound(copy) = document.active else {
+            panic!("the pane shows a compound");
+        };
+        assert_ne!(copy, compound, "the pane shows the copy");
+        assert_eq!(document.graphs.uses(copy).count(), 1);
+    }
+
+    /// A compound that changed here and in the library offers Update and Publish, and no Follow:
+    /// a first press on Publish arms it and shows the check and the cross, the cross disarms it
+    /// with no write, and the check asks for the publish once. Update then puts the library's
+    /// definition in place, so the two stand in sync: Update and Publish go, and Follow comes, whose
+    /// press makes the copy follow the library and shows its on state.
+    #[test]
+    fn the_library_chips_update_publish_once_asked_and_follow() {
+        use common::TempDir;
+        use scenarium::Library;
+
+        use crate::core::io::document;
+        use crate::core::io::document::saved_paths::SavedPaths;
+        use crate::core::shared_library::scan;
+        use crate::gui::app::session::internals::SessionHarness;
+        use crate::gui::frame::app_command::AppCommand;
+
+        let dir = TempDir::new("darkroom-band-library");
+        let compound = CompoundId::from_u128(1);
+        let mut library_file = DocumentFixture::default();
+        insert_compound(
+            &mut library_file.document,
+            compound,
+            Compound::new("Adjust", Interface::default()),
+        );
+        library_file
+            .document
+            .sides
+            .get_mut(&compound)
+            .unwrap()
+            .shared = true;
+        document::save(
+            &library_file.document,
+            &Library::default(),
+            &dir.join("library.darkroom"),
+            SavedPaths::Relative,
+        )
+        .unwrap();
+
+        let mut fixture = DocumentFixture::default();
+        insert_compound(
+            &mut fixture.document,
+            compound,
+            Compound::new("Adjust, changed here", Interface::default()),
+        );
+        let instance = fixture.add_instance(compound);
+        fixture
+            .document
+            .enter(compound, Some(InstancePath::new(&[instance])));
+        let mut h = SessionHarness::new(fixture);
+        h.shared = scan(dir.path());
+        h.prime(2);
+        let chip = |h: &SessionHarness, part| h.ui.rect(super::library_wid(compound, part));
+        let press = |h: &mut SessionHarness, part| {
+            let at = chip(h, part).expect("the chip shows").center();
+            h.ui.click(at);
+            let commands = h.frame();
+            h.prime(2);
+            commands
+        };
+        let published = |commands: &[AppCommand]| {
+            commands
+                .iter()
+                .filter(|command| matches!(command, AppCommand::Publish { .. }))
+                .count()
+        };
+        assert!(chip(&h, "update").is_some());
+        assert!(chip(&h, "follow").is_none(), "no Follow over local changes");
+        assert!(chip(&h, "publish_yes").is_none(), "not armed");
+
+        assert_eq!(published(&press(&mut h, "publish")), 0);
+        assert!(chip(&h, "publish_yes").is_some(), "armed");
+        assert_eq!(published(&press(&mut h, "publish_no")), 0);
+        assert!(chip(&h, "publish_yes").is_none(), "disarmed");
+        press(&mut h, "publish");
+        assert_eq!(published(&press(&mut h, "publish_yes")), 1);
+        assert!(chip(&h, "publish_yes").is_none(), "answered");
+
+        press(&mut h, "update");
+        let document = h.session.open.document();
+        assert_eq!(document.graphs.compound(compound).unwrap().name, "Adjust");
+        assert!(chip(&h, "update").is_none(), "in sync");
+        assert!(chip(&h, "publish").is_none(), "in sync");
+        press(&mut h, "follow");
+        assert!(h.session.open.document().sides[&compound].follows);
     }
 
     /// The path down to a compound two levels in names the main graph, the enclosing compound

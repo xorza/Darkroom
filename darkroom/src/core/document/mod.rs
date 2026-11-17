@@ -477,6 +477,21 @@ impl Document {
         record
     }
 
+    /// Point instance `node_id` of `graph` at `compound`, then clear each `through` and close each
+    /// tab the change stopped resolving: a path through the instance named the compound it
+    /// placed, as Make Unique's re-pointing leaves the original shown through it.
+    ///
+    /// # Panics
+    /// If `graph` holds no node `node_id`.
+    pub(crate) fn place_compound(&mut self, graph: GraphId, node_id: NodeId, compound: CompoundId) {
+        self.slot_mut(graph)
+            .graph
+            .find_mut(node_id)
+            .expect("a re-pointed instance is in its graph")
+            .set_compound(compound);
+        self.prune_views(&mut |_| {});
+    }
+
     /// [`Self::remove_node`] for a ghost node. A ghost node has no viewer and places nothing, so
     /// nothing else stops resolving with it.
     pub(crate) fn remove_ghost_node(&mut self, graph: GraphId, node_id: NodeId) -> DetachedGhost {

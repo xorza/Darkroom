@@ -1,6 +1,6 @@
 //! [`Icon`]: every glyph a node, a toolbar and the image viewer draw, as one set.
 
-use std::f32::consts::PI;
+use std::f32::consts::{FRAC_1_SQRT_2, PI};
 
 use palantir::{Border, LineCap, LineJoin, Rect, RgbaF32, Shape, Stroke, Ui};
 
@@ -18,6 +18,15 @@ pub(crate) enum Icon {
     Run,
     /// Run on events: a bar before a play triangle.
     RunEvents,
+    /// Run on change: a play triangle inside a clockwise arrow (Lucide `rotate-cw`), a run that
+    /// comes round again.
+    RunOnChange,
+    /// Make a copy of its own: two offset sheets (Lucide `copy`).
+    MakeUnique,
+    /// Take the library's version: an arrow down into a tray (Lucide `download`).
+    Update,
+    /// Write into the library: an arrow up out of a tray (Lucide `upload`).
+    Publish,
     /// Inspect: an `i` in a circle.
     Inspect,
     /// The node's output cache: three stacked disks.
@@ -71,6 +80,29 @@ impl Icon {
             Self::RunEvents => {
                 pen.line(ui, (5.0, 5.0), (5.0, 19.0));
                 pen.closed(ui, &[(10.0, 5.0), (20.0, 12.0), (10.0, 19.0)]);
+            }
+            Self::RunOnChange => {
+                // From 3 o'clock round through the bottom to 45° short of it, clockwise on
+                // screen, then on to the arrowhead's corner at (21, 8).
+                pen.arc(ui, (12.0, 12.0), 9.0, 0.0, 7.0 * PI / 4.0);
+                let end = 9.0 * FRAC_1_SQRT_2;
+                pen.open(ui, &[(12.0 + end, 12.0 - end), (21.0, 8.0)]);
+                pen.open(ui, &[(21.0, 3.0), (21.0, 8.0), (16.0, 8.0)]);
+                pen.closed(ui, &[(10.0, 8.5), (15.5, 12.0), (10.0, 15.5)]);
+            }
+            Self::MakeUnique => {
+                pen.frame(ui, (8.0, 8.0, 13.0, 13.0), 2.0);
+                pen.open(ui, &[(3.0, 15.0), (3.0, 3.0), (15.0, 3.0)]);
+            }
+            Self::Update => {
+                pen.open(ui, &[(3.0, 15.0), (3.0, 21.0), (21.0, 21.0), (21.0, 15.0)]);
+                pen.line(ui, (12.0, 3.0), (12.0, 15.0));
+                pen.open(ui, &[(7.0, 10.0), (12.0, 15.0), (17.0, 10.0)]);
+            }
+            Self::Publish => {
+                pen.open(ui, &[(3.0, 15.0), (3.0, 21.0), (21.0, 21.0), (21.0, 15.0)]);
+                pen.line(ui, (12.0, 15.0), (12.0, 3.0));
+                pen.open(ui, &[(7.0, 8.0), (12.0, 3.0), (17.0, 8.0)]);
             }
             Self::Inspect => {
                 pen.circle(ui, (12.0, 12.0), 9.0);

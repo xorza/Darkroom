@@ -1,6 +1,6 @@
 //! Flipping one scalar property of a node.
 
-use scenarium::{CacheMode, CompoundId, GraphId, NodeId};
+use scenarium::{CacheMode, CompoundId, GraphId, Node, NodeId};
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::Document;
@@ -29,19 +29,19 @@ pub(crate) enum PropertyChange {
 
 impl Reversible for SetNodeProperty {
     fn write(&self, document: &mut Document, graph: GraphId, dir: Direction) {
-        let node = document
-            .slot_mut(graph)
-            .graph
-            .find_mut(self.node_id)
-            .expect("history replays a property change against the node it recorded");
         match &self.property {
-            PropertyChange::Disabled(change) => node.disabled = *change.half(dir),
+            PropertyChange::Disabled(change) => {
+                recorded_node(document, graph, self.node_id).disabled = *change.half(dir);
+            }
             PropertyChange::RuntimeCache(change) => {
-                *node
+                *recorded_node(document, graph, self.node_id)
                     .cache_mut()
                     .expect("a node whose cache mode history recorded has one") = *change.half(dir);
             }
-            PropertyChange::Compound(change) => node.set_compound(*change.half(dir)),
+            // Through the document, which clears what the re-pointing stops resolving.
+            PropertyChange::Compound(change) => {
+                document.place_compound(graph, self.node_id, *change.half(dir));
+            }
         }
     }
 
@@ -64,4 +64,13 @@ impl Reversible for SetNodeProperty {
             ..EditFacts::NONE
         }
     }
+}
+
+/// Node `node_id` of `graph`, which history recorded a change of.
+fn recorded_node(document: &mut Document, graph: GraphId, node_id: NodeId) -> &mut Node {
+    document
+        .slot_mut(graph)
+        .graph
+        .find_mut(node_id)
+        .expect("history replays a property change against the node it recorded")
 }
