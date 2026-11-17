@@ -33,15 +33,10 @@ pub(crate) struct ConstEditorTheme {
     pub(crate) width: f32,
     /// Maximum logical-px width of the value column.
     pub(crate) max_width: f32,
-    /// How far along its span a number sits: the accent at [`SPAN_FILL_ALPHA`], over the field
-    /// and its figures, which it does not know.
-    pub(crate) span_fill: RgbaF32,
-    /// The fill's corners, the field's own.
-    pub(crate) span_radius: f32,
 }
 
-/// The span fill's strength over the field: the figures read through it.
-const SPAN_FILL_ALPHA: f32 = 0.3;
+/// The strength of a number's range fill, how far along its span it sits, under its figures.
+const RANGE_FILL_ALPHA: f32 = 0.3;
 
 /// The resting box's strength, of the fill a hovered chip takes.
 const REST_ALPHA: f32 = 0.5;
@@ -69,8 +64,8 @@ impl ConstEditorLooks {
         let mut button = ButtonTheme::subtle(p, m);
         button.defaults.padding = field.defaults.padding;
         Self {
-            rest: ConstEditorTheme::with_box(&button, field, p, m, REST_ALPHA),
-            revealed: ConstEditorTheme::with_box(&button, field, p, m, REVEAL_ALPHA),
+            rest: ConstEditorTheme::with_box(&button, field, p, REST_ALPHA),
+            revealed: ConstEditorTheme::with_box(&button, field, p, REVEAL_ALPHA),
         }
     }
 
@@ -91,7 +86,6 @@ impl ConstEditorTheme {
         button: &ButtonTheme,
         field: &TextEditTheme,
         p: &palantir::Palette,
-        m: &palantir::Metrics,
         alpha: f32,
     ) -> Self {
         let mut button = button.clone();
@@ -104,6 +98,8 @@ impl ConstEditorTheme {
             caret_width: field.caret_width,
             selection: field.selection,
             placeholder: field.placeholder,
+            range_fill: p.accent.with_alpha(RANGE_FILL_ALPHA),
+            range_fill_disabled: p.text_disabled.with_alpha(RANGE_FILL_ALPHA),
         };
         let mut number = proportional.clone();
         for look in number.looks.each_mut() {
@@ -116,8 +112,6 @@ impl ConstEditorTheme {
             unset: p.text_muted,
             width: VALUE_EDITOR_WIDTH,
             max_width: VALUE_EDITOR_MAX_WIDTH,
-            span_fill: p.accent.with_alpha(SPAN_FILL_ALPHA),
-            span_radius: m.radius.control,
         }
     }
 }

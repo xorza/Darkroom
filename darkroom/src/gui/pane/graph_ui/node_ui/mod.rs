@@ -215,30 +215,34 @@ impl NodeUi {
                 if draw_ctx.detail() == DetailLevel::Title
                     && let Some(size) = rows_size
                 {
-                    standing_title(ui, node_ctx, size, draw_ctx.zoom());
+                    standing_title(ui, node_ctx, size);
                 }
             });
     }
 }
 
-/// A node's title at the title level: at the caption size on screen whatever the zoom, centered
-/// in a box of its rows' `size`, so it never sizes the node, and cut with an ellipsis at its
-/// width. A preview keeps its picture, so its title stands in the header band above it.
-fn standing_title(ui: &mut Ui, node: NodeCtx<'_>, size: Size, zoom: f32) {
+/// A node's title at the title level: at the caption size on screen where the level starts and
+/// sized with the canvas past it, so a node zoomed further out reads smaller, as its body does;
+/// centered in a box of its rows' `size`, so it never sizes the node, and cut with an ellipsis at
+/// its width. A preview keeps its picture, so its title stands in the header band above it.
+/// Refused: one size on screen at every zoom, which read as large on a node a few pixels wide as
+/// on one at the level's start.
+fn standing_title(ui: &mut Ui, node: NodeCtx<'_>, size: Size) {
     let theme = node.theme();
+    let scaled = |px| DetailLevel::title_px(px, theme.font.body);
     let (align, inset) = if node.preview() {
-        (Align::TOP, theme.space.sm / zoom)
+        (Align::TOP, scaled(theme.space.sm))
     } else {
         (Align::CENTER, 0.0)
     };
     let style = TextStyle {
         weight: FontWeight::BOLD,
-        ..support::sized_text(ui, theme.font.caption / zoom)
+        ..support::sized_text(ui, scaled(theme.font.caption))
     };
     Panel::zstack()
         .id_salt("standing_title")
         .size((Sizing::fixed(size.w), Sizing::fixed(size.h)))
-        .padding(Spacing::xy(theme.space.sm / zoom, inset))
+        .padding(Spacing::xy(scaled(theme.space.sm), inset))
         .child_align(align)
         .show(ui, |ui| {
             Text::new(node.name())

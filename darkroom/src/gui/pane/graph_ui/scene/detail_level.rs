@@ -12,14 +12,14 @@ use palantir::Visibility;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DetailLevel {
     Full,
-    /// The title, at the caption size on screen, and the port glyphs alone.
+    /// The title, sized with the canvas, and the port glyphs alone.
     Title,
 }
 
 impl DetailLevel {
     /// The smallest body text, in screen pixels, a node draws its words at: under it, the
-    /// face's x-height falls under 4 px.
-    pub(crate) const LEGIBLE_PX: f32 = 8.0;
+    /// face's x-height falls under 3 px.
+    pub(crate) const LEGIBLE_PX: f32 = 6.0;
 
     /// `Full` while body text of `body_px` lands at [`Self::LEGIBLE_PX`] or over at `zoom`.
     pub(crate) fn at(zoom: f32, body_px: f32) -> Self {
@@ -28,6 +28,13 @@ impl DetailLevel {
         } else {
             Self::Title
         }
+    }
+
+    /// The canvas size of text that lands at `screen_px` on screen at the zoom where body text
+    /// of `body_px` turns `Title`, so a title drawn at it reads that size as the level starts and
+    /// shrinks with the canvas past it.
+    pub(crate) fn title_px(screen_px: f32, body_px: f32) -> f32 {
+        screen_px * body_px / Self::LEGIBLE_PX
     }
 
     /// How a node's words record at this level: laid out at both, painted at `Full` alone.
@@ -45,14 +52,17 @@ mod tests {
 
     use crate::gui::pane::graph_ui::scene::detail_level::DetailLevel;
 
-    /// Body text of 14 px is legible down to 8 / 14 = 0.5714… zoom: 14 · 0.572 = 8.008 is
-    /// `Full`, 14 · 0.571 = 7.994 is `Title`.
+    /// Body text of 14 px is legible down to 6 / 14 = 0.4285… zoom: 14 · 0.429 = 6.006 is
+    /// `Full`, 14 · 0.428 = 5.992 is `Title`. A 12 px title at that zoom is 12 · 14 / 6 = 28 px
+    /// on the canvas, 12 · 16 / 6 = 32 px over 16 px body text.
     #[test]
-    fn a_zoom_that_lands_body_text_under_eight_pixels_draws_titles() {
-        assert_eq!(DetailLevel::at(0.572, 14.0), DetailLevel::Full);
-        assert_eq!(DetailLevel::at(0.571, 14.0), DetailLevel::Title);
+    fn a_zoom_that_lands_body_text_under_six_pixels_draws_titles() {
+        assert_eq!(DetailLevel::at(0.429, 14.0), DetailLevel::Full);
+        assert_eq!(DetailLevel::at(0.428, 14.0), DetailLevel::Title);
         assert_eq!(DetailLevel::at(1.0, 14.0), DetailLevel::Full);
         assert_eq!(DetailLevel::Full.words(), Visibility::Visible);
         assert_eq!(DetailLevel::Title.words(), Visibility::Hidden);
+        assert_eq!(DetailLevel::title_px(12.0, 14.0), 28.0);
+        assert_eq!(DetailLevel::title_px(12.0, 16.0), 32.0);
     }
 }

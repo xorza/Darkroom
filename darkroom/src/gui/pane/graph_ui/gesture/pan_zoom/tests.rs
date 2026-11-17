@@ -179,3 +179,34 @@ fn a_zoom_step_lands_on_the_next_rung() {
     assert_eq!(back.zoom, 1.0);
     assert!((back.pan - at(1.0).pan).length() < 1e-3);
 }
+
+/// A drag of the zoom control doubles the zoom per 200 px along `x − y`, about the pane's center:
+/// from zoom 1 and pan 0 in an 800 × 600 pane, 200 px right gives zoom 2 and pan
+/// (400, 300) − (400, 300) · 2 = (−400, −300); 100 px right and 100 up, the same `x − y` of 200,
+/// gives the same; 200 px down halves it, pan (400, 300) − (400, 300) · ½ = (200, 150). Travel
+/// past the range stops at its end, 5 for 2^25 and 0.1 for 2^−25.
+#[test]
+fn a_zoom_scrub_doubles_per_two_hundred_pixels_about_the_center() {
+    let pane = Vec2::new(800.0, 600.0);
+    let anchor = Viewport {
+        pan: Vec2::ZERO,
+        zoom: 1.0,
+    };
+    let scrub = |x: f32, y: f32| scrub_target(anchor, Vec2::new(x, y), pane);
+    let doubled = Viewport {
+        pan: Vec2::new(-400.0, -300.0),
+        zoom: 2.0,
+    };
+    assert_eq!(scrub(200.0, 0.0), doubled);
+    assert_eq!(scrub(100.0, -100.0), doubled);
+    assert_eq!(
+        scrub(0.0, 200.0),
+        Viewport {
+            pan: Vec2::new(200.0, 150.0),
+            zoom: 0.5,
+        }
+    );
+    assert_eq!(scrub(0.0, 0.0), anchor);
+    assert_eq!(scrub(5000.0, 0.0).zoom, 5.0);
+    assert_eq!(scrub(-5000.0, 0.0).zoom, 0.1);
+}

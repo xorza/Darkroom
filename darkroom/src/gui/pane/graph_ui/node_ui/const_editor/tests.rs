@@ -261,7 +261,7 @@ fn an_any_field_commits_only_a_real_edit() {
 
 /// A number with a span commits inside it: 1.7 typed into a field of [0, 1] lands 1.0, and -3
 /// lands 0.0. The field shows how far along the span its value sits: a fill a quarter of its
-/// width at 0.25, and none for a span with no ceiling.
+/// width at 0.25, none for a span with no ceiling, and one that follows a scrub while it is held.
 #[test]
 fn a_spanned_number_commits_inside_its_span_and_shows_its_share() {
     use palantir::Modifiers;
@@ -289,7 +289,7 @@ fn a_spanned_number_commits_inside_its_span_and_shows_its_share() {
             committed.extend(editor.show(ui));
         };
         h.frame(&mut record);
-        let fill = h.rect(span_fill_wid(id)).map(|rect| rect.size.w);
+        let fill = h.rect(id.with("fill")).map(|rect| rect.size.w);
         let center = h.rect(id).expect("the field is arranged").center();
         h.click(center);
         h.frame(&mut record);
@@ -316,4 +316,34 @@ fn a_spanned_number_commits_inside_its_span_and_shows_its_share() {
         "no ceiling to hold it under"
     );
     assert_eq!(fill, None, "no far end to fill toward");
+
+    // A scrub moves the fill while it is held, before the commit moves the document's value:
+    // 0.25 dragged 25 px right at 0.01 a pixel, `float_speed`'s 1 % of a unit, reads 0.5, a fill
+    // half the field's 100 px. The record keeps the document's 0.25 throughout, as a frame does.
+    let value = ConstValue::Float(0.25);
+    let mut record = |ui: &mut Ui| {
+        let editor = ConstEditor {
+            field: Field {
+                theme: &theme.const_editor.rest,
+                id,
+            },
+            library: &library,
+            value: &value,
+            data_type: DataType::Float,
+            domain: &span,
+        };
+        let _ = editor.show(ui);
+    };
+    h.frame(&mut record);
+    let center = h.rect(id).expect("the field is arranged").center();
+    let fill = |h: &Harness| h.rect(id.with("fill")).map(|rect| rect.size.w);
+    assert_eq!(fill(&h), Some(25.0));
+    h.press(center, palantir::PointerButton::Left);
+    h.frame(&mut record);
+    h.drag_to(center + Vec2::new(25.0, 0.0));
+    h.frame(&mut record);
+    h.frame(&mut record);
+    assert_eq!(fill(&h), Some(50.0), "the fill follows the drag");
+    h.release(palantir::PointerButton::Left);
+    h.frame(&mut record);
 }

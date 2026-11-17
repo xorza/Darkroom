@@ -1,7 +1,7 @@
 //! The palantir-side half of the theme: darkroom's palette projected onto
 //! [`palantir::Palette`], and the [`palantir::Theme`] that builds.
 
-use palantir::{Border, Material, TabsTheme, TextStyleOverrides};
+use palantir::{Border, FontFamily, Material, TabsTheme, TextStyleOverrides};
 
 use crate::gui::theme;
 use crate::gui::theme::icon_scale::{self, IconScale};
@@ -39,7 +39,8 @@ pub(super) const fn palette(p: &Palette) -> palantir::Palette {
 
 /// Palantir sub-theme for darkroom: assemble every widget recipe from the palette and `m` via
 /// [`palantir::Theme::from_parts`], then apply the darkroom-only tweaks (a tooltip at the body
-/// tier, surround-colored dock seam, the icon set's tab close button, a wider menu).
+/// tier, surround-colored dock seam, the icon set's tab close button, a wider menu with its
+/// chords in the monospace face).
 ///
 /// The ambient size is `m`'s body tier, which `from_parts` sets, and no widget look pins a size
 /// of its own once the tooltip's caption tier is dropped: a palantir widget then reads the tier
@@ -61,6 +62,8 @@ pub(super) fn theme(
     theme.tooltip.text = TextStyleOverrides::NONE;
     let menu = &mut theme.menu;
     menu.min_width = MENU_MIN_WIDTH;
+    // A chord's hint in the monospace face, as the Keyboard and Mouse page sets every chord.
+    menu.item.shortcut = menu.item.shortcut.with_family(FontFamily::MONO);
     // The panel sits inside a rule in the separators' ink, not on palantir's lit border.
     menu.panel.paint.border.color = p.border_soft();
     // Every light-dismiss popup is frosted: the menu panel, which the menus, the node palette and

@@ -141,7 +141,10 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
                 record.stage.out.push_show(PaneKind::Inspector.tab());
             }
         });
-    Separator::horizontal().show(ui);
+    // The rule goes with the words: a node at the title level reads as one face.
+    Separator::horizontal()
+        .visibility(record.stage.ctx.words())
+        .show(ui);
 }
 
 /// The one mark that says what kind of node this is, after its title on the node and in the

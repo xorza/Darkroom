@@ -245,7 +245,7 @@ impl GraphUi {
         }
     }
 
-    /// Record one graph pane: its popups, the band over it, and the canvas under the band.
+    /// Record one graph pane: its popups, the canvas, and the band floating over the canvas's top.
     /// Called once per visible graph tab from the dock's content closure, so everything here is
     /// scoped to `graph_ctx` — the canvas widget ids included.
     ///
@@ -253,12 +253,13 @@ impl GraphUi {
     /// menu pick means — lands on the stage's requests in the order it was raised.
     pub(crate) fn record(&mut self, ui: &mut Ui, stage: &mut Stage<'_, GraphCtx<'_>>) {
         self.record_popups(ui, stage);
-        Panel::vstack()
+        // The band records after the canvas, so its pills hit-test above it.
+        Panel::zstack()
             .id_salt("graph_pane")
             .size(SizeSpec::FILL)
             .show(ui, |ui| {
-                self.header.show(ui, stage);
                 self.record_canvas(ui, stage);
+                self.header.show(ui, stage);
             });
     }
 
@@ -407,8 +408,11 @@ mod tests {
 
     use super::*;
 
-    /// A node keeps its size and its ports' centers at the title level: 0.5 zooms 14 px body
-    /// text to 7 px, under the legible 8, and every word is laid out unpainted, so the geometry
+    /// A zoom at the title level: 14 px body text lands at 5.6 px, under the legible 6.
+    const TITLE_ZOOM: f32 = 0.4;
+
+    /// A node keeps its size and its ports' centers at the title level: 0.4 zooms 14 px body
+    /// text to 5.6 px, under the legible 6, and every word is laid out unpainted, so the geometry
     /// is the full level's at 1.
     #[test]
     fn a_node_keeps_its_size_and_ports_at_the_title_level() {
@@ -437,7 +441,11 @@ mod tests {
         };
         h.prime(2);
         let full = geometry(&h);
-        h.document_mut().main_view.viewport.zoom = 0.5;
+        assert_eq!(
+            DetailLevel::at(TITLE_ZOOM, h.ctx.theme.font.body),
+            DetailLevel::Title
+        );
+        h.document_mut().main_view.viewport.zoom = TITLE_ZOOM;
         h.prime(2);
         assert_eq!(geometry(&h), full);
     }
@@ -457,7 +465,7 @@ mod tests {
         h.prime(2);
         assert!(listed(&h), "listed at the full level");
 
-        h.document_mut().main_view.viewport.zoom = 0.5;
+        h.document_mut().main_view.viewport.zoom = TITLE_ZOOM;
         h.prime(2);
         assert!(!listed(&h), "unpainted at the title level");
 
@@ -466,7 +474,7 @@ mod tests {
         h.ui.double_click(rename);
         h.prime(2);
         assert!(h.ui.ui().is_focus_within(rename), "the rename field opened");
-        h.document_mut().main_view.viewport.zoom = 0.5;
+        h.document_mut().main_view.viewport.zoom = TITLE_ZOOM;
         h.prime(2);
         assert!(listed(&h), "the focused node keeps its words");
     }

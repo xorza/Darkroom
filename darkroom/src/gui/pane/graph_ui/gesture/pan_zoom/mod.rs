@@ -6,6 +6,7 @@ pub(crate) mod camera_gesture;
 
 use std::f32::consts::{FRAC_1_SQRT_2, SQRT_2};
 
+use common::Libm;
 use glam::Vec2;
 use palantir::{Rect, Size, Ui};
 
@@ -42,6 +43,10 @@ const ZOOM_LADDER: [f32; 13] = [
     4.0,
     CANVAS_ZOOM.max,
 ];
+
+/// The travel along `x − y`, in logical px, that doubles the zoom while the zoom control is
+/// dragged: 200 px, so the canvas's 10 % to 500 % takes a drag of about 1,130 px.
+const SCRUB_DOUBLING_PX: f32 = 200.0;
 
 /// How near a rung, as a share of it, a zoom counts as on it: a scroll leaves the zoom anywhere,
 /// and a step shorter than a thousandth of it would move a 1000 px pane's edge by under a pixel,
@@ -106,6 +111,18 @@ fn step_target(from: Viewport, step: ZoomStep, pane: Vec2) -> Option<Viewport> {
     // The rung itself, not the product that reached it.
     to.zoom = zoom;
     Some(to)
+}
+
+/// The camera a drag of the zoom control by `travel` gives from `anchor`, the camera where the
+/// drag latched: right and up zoom in, left and down out, by `2^((x − y) / 200)` about the pane's
+/// center, held to the canvas's range. Up zooms in as the wheel turned up does under the command
+/// key, and right with it, so a drag along either axis zooms. Measured from the latch, as a pan
+/// drag is, so a dropped frame cannot drift.
+pub(crate) fn scrub_target(anchor: Viewport, travel: Vec2, pane: Vec2) -> Viewport {
+    let factor = ((travel.x - travel.y) / SCRUB_DOUBLING_PX).libm_exp2();
+    let mut to = anchor;
+    CANVAS_ZOOM.zoom_about(&mut to, pane * 0.5, factor);
+    to
 }
 
 /// Which nodes a framing bounds.

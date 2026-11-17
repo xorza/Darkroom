@@ -27,8 +27,8 @@ pub(crate) mod type_colors;
 pub(crate) mod viewer_theme;
 
 use palantir::{
-    AnimationSpec, Border, ButtonTheme, Chrome, Corners, FloatMaterial, Material, Metrics,
-    RadiusSteps, RgbaF32, ShadowGeometry, SpaceSteps, Spacing, StrokeSteps, TextEditTheme,
+    AnimationSpec, Border, ButtonTheme, Chrome, Corners, FloatMaterial, FontFamily, Material,
+    Metrics, RadiusSteps, RgbaF32, ShadowGeometry, SpaceSteps, Spacing, StrokeSteps, TextEditTheme,
     TextSteps,
 };
 
@@ -130,6 +130,10 @@ pub(crate) struct Theme {
     /// A dialog's primary action, the one Return picks: palantir's button filled with the accent.
     /// Darkroom's own slot, as no palantir widget resolves against it.
     pub(crate) primary_button: ButtonTheme,
+
+    /// palantir's button with its label in the monospace family: a readout that changes while it
+    /// is watched, as the zoom, holds its width. Precomputed, as `field_error` is.
+    pub(crate) mono_button: ButtonTheme,
 
     /// The palantir widget theme, set on the `Ui` once at startup by [`crate::gui::app::App::new`]
     /// so every palantir widget reads a darkroom-tuned palette.
@@ -337,6 +341,7 @@ impl Theme {
             Corners::all(radius.float),
         );
         let field_error = error_bordered(&palantir.text_edit, status.error);
+        let mono_button = monospaced(&palantir.button);
         Self {
             canvas: CanvasTheme::from_palette(p, &space),
             tie: TieTheme::from_palette(p, &tint),
@@ -360,6 +365,7 @@ impl Theme {
             field_error,
             pill,
             primary_button,
+            mono_button,
             palantir,
         }
     }
@@ -449,6 +455,20 @@ fn error_bordered(base: &TextEditTheme, color: RgbaF32) -> TextEditTheme {
     let mut style = base.clone();
     for look in style.looks.each_mut() {
         look.chrome.paint.border = Border::new(color, look.chrome.paint.border.width);
+    }
+    style
+}
+
+/// `base` with every look's label in the monospace family.
+fn monospaced(base: &ButtonTheme) -> ButtonTheme {
+    let mut style = base.clone();
+    let ButtonTheme {
+        unselected,
+        selected,
+        ..
+    } = &mut style;
+    for look in unselected.each_mut().into_iter().chain(selected.each_mut()) {
+        look.text = look.text.with_family(FontFamily::MONO);
     }
     style
 }

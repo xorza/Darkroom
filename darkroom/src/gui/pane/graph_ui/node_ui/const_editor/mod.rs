@@ -27,8 +27,8 @@
 use std::fmt::{self as std_fmt, Display, Formatter};
 
 use palantir::{
-    Align, Block, Button, Checkbox, Chrome, ComboBox, Configure, Corners, DragValue, Panel,
-    SizeSpec, Sizing, Text, TextEdit, TextInput, TextWrap, Ui, VAlign, WidgetId, fmt,
+    Align, Button, Checkbox, ComboBox, Configure, DragValue, Panel, SizeSpec, Sizing, Text,
+    TextEdit, TextInput, TextWrap, Ui, VAlign, WidgetId, fmt,
 };
 use scenarium::{ConstValue, DataType, FloatSpan, IntSpan, Library, ValueDomain, ValueVariant};
 
@@ -314,13 +314,15 @@ impl Field<'_> {
 
     /// Editor for an `Int` const: an editable `DragValue`. The draft re-seeds from the document
     /// value every frame and is emitted only on the widget's `committed` frame, which carries
-    /// the gesture's final value, so one scrub or typed entry lands as one change.
+    /// the gesture's final value, so one scrub or typed entry lands as one change. A span with
+    /// both ends shows how far along it the value sits, as palantir's range fill.
     fn int(self, ui: &mut Ui, cur: i64, span: Option<IntSpan>) -> Option<ConstValue> {
         let mut draft = cur;
         let mut value = DragValue::new(&mut draft)
             .speed(int_speed(cur))
             .style(&self.theme.number)
             .text_align(Align::LEFT)
+            .range_fill(true)
             .size((Sizing::fixed(self.theme.width), Sizing::FILL))
             .id(self.id);
         if let Some(span) = span {
@@ -330,60 +332,25 @@ impl Field<'_> {
         (committed && draft != cur).then_some(ConstValue::Int(draft))
     }
 
-    /// `Float` sibling of [`Self::int`]. A span with both ends shows how far along it the value
-    /// sits, as a fill across the field.
+    /// `Float` sibling of [`Self::int`].
     fn float(self, ui: &mut Ui, cur: f64, span: Option<FloatSpan>) -> Option<ConstValue> {
         let mut draft = cur;
-        let committed = Panel::zstack()
-            .id_salt(("float_field", self.id))
+        let mut value = DragValue::new(&mut draft)
+            .speed(float_speed(cur))
+            .decimals(FLOAT_DECIMALS)
+            .style(&self.theme.number)
+            .text_align(Align::LEFT)
+            .range_fill(true)
             .size((Sizing::fixed(self.theme.width), Sizing::FILL))
-            .show(ui, |ui| {
-                let mut value = DragValue::new(&mut draft)
-                    .speed(float_speed(cur))
-                    .decimals(FLOAT_DECIMALS)
-                    .style(&self.theme.number)
-                    .text_align(Align::LEFT)
-                    .size(SizeSpec::FILL)
-                    .id(self.id);
-                if let Some(span) = span {
-                    value = value.range(span.min()..=span.max().unwrap_or(f64::INFINITY));
-                }
-                let committed = value.show(ui).committed;
-                if let Some(fraction) = span.and_then(|span| span.fraction(cur)) {
-                    self.span_fill(ui, fraction);
-                }
-                committed
-            })
-            .inner;
+            .id(self.id);
+        if let Some(span) = span {
+            value = value.range(span.min()..=span.max().unwrap_or(f64::INFINITY));
+        }
+        let committed = value.show(ui).committed;
         // Bit-exact, as `ConstValue`'s `PartialEq` is, so `1.0` → `1` (same value, different
         // text) emits no change.
         (committed && draft.to_bits() != cur.to_bits()).then_some(ConstValue::Float(draft))
     }
-
-    /// How far along its span a value sits: `fraction` of the field from its left edge, in a
-    /// translucent accent over the field and its figures, taking no input.
-    fn span_fill(self, ui: &mut Ui, fraction: f64) {
-        // f64 to the f32 a layout reads: a share of a field's width needs no more.
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "a share in [0, 1] of a field's width"
-        )]
-        let share = fraction as f32;
-        Block::new()
-            .id(span_fill_wid(self.id))
-            .size((Sizing::fixed(self.theme.width * share), Sizing::FILL))
-            .align(Align::LEFT)
-            .chrome(Chrome::rounded(
-                self.theme.span_fill,
-                Corners::all(self.theme.span_radius),
-            ))
-            .show(ui);
-    }
-}
-
-/// The span fill over the field `id`.
-fn span_fill_wid(id: WidgetId) -> WidgetId {
-    id.with("span_fill")
 }
 
 /// An integer span's end as the `f64` a field's range reads. An end past ±2^53 rounds to the
