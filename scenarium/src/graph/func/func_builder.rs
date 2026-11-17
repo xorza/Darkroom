@@ -41,7 +41,8 @@ impl FuncBuilder {
         self
     }
 
-    /// Mark the func `Pure` (same inputs → same outputs; cacheable).
+    /// Mark the func `Pure` (same inputs → same outputs; cacheable), or for a sink with no
+    /// outputs, the same inputs → the same effect, skipped once done ([`FuncBehavior::Pure`]).
     #[must_use]
     pub const fn pure(mut self) -> Self {
         self.behavior = FuncBehavior::Pure;
@@ -54,7 +55,7 @@ impl FuncBuilder {
         self
     }
 
-    /// Set the [`CacheMode`] that new nodes of this func adopt; defaults to [`CacheMode::None`].
+    /// Set the [`CacheMode`] that new nodes of this func adopt; defaults to [`CacheMode::AUTO`].
     #[must_use]
     pub const fn default_cache_mode(mut self, mode: CacheMode) -> Self {
         self.default_cache_mode = mode;
@@ -127,15 +128,15 @@ impl FuncBuilder {
 
     /// Check this declaration independently of a graph — what
     /// [`build`](Self::build) asserts: the rules every declaration's ports pass
-    /// ([`Ports::check`]), and a func's own, an id, an output for a pure func, no `Any` output
-    /// and each event's number.
+    /// ([`Ports::check`]), and a func's own, an id, an output or a sink for a pure func, no `Any`
+    /// output and each event's number.
     pub fn validate(&self) -> Result<(), FuncValidationError> {
         if self.id.is_nil() {
             return Err(FuncValidationError::NilId);
         }
         let func_id = self.id;
-        if self.ports.outputs.is_empty() && self.behavior != FuncBehavior::Impure {
-            return Err(FuncValidationError::PureWithoutOutputs { func_id });
+        if self.ports.outputs.is_empty() && !self.sink && self.behavior != FuncBehavior::Impure {
+            return Err(FuncValidationError::PureWithoutEffect { func_id });
         }
         self.ports
             .check()

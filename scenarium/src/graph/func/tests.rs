@@ -9,7 +9,7 @@ use crate::graph::func::func_builder::FuncBuilder;
 use crate::graph::func::lambda::FuncLambda;
 use crate::graph::func::value_variant::ValueVariant;
 use crate::graph::identity::{FuncId, PortId};
-use crate::graph::node::CacheMode;
+use crate::graph::node::{CacheMode, Keep};
 use crate::graph::ports::{InputDecl, OutputDecl, PortList, PortsError};
 use crate::internals;
 
@@ -76,8 +76,9 @@ fn validate_rejects_invalid_identities_ports_and_defaults() {
         ),
         (
             func().pure(),
-            Err(FuncValidationError::PureWithoutOutputs { func_id: FUNC }),
+            Err(FuncValidationError::PureWithoutEffect { func_id: FUNC }),
         ),
+        (func().pure().sink(), Ok(())),
         (
             func().input(1, int()).input(1, int()),
             ports(PortsError::DuplicateId {
@@ -219,16 +220,26 @@ fn a_variant_label_is_its_display_else_its_name() {
 }
 
 #[test]
-fn default_cache_mode_defaults_to_none_and_builder_overrides() {
-    // Out of the box a func caches nothing.
+fn default_cache_mode_defaults_to_auto_and_builder_overrides() {
+    // Out of the box a func's nodes keep their output while memory allows.
     assert_eq!(
         internals::stub_func(FuncId::unique(), "f").default_cache_mode,
-        CacheMode::None
+        CacheMode::AUTO
     );
 
     // The builder sets a hotter default; distinct inputs map to distinct
     // stored modes (not a fixed constant).
-    for mode in [CacheMode::Ram, CacheMode::Disk, CacheMode::Both] {
+    for mode in [
+        CacheMode::ALWAYS,
+        CacheMode {
+            ram: Keep::Never,
+            disk: true,
+        },
+        CacheMode {
+            ram: Keep::Always,
+            disk: true,
+        },
+    ] {
         let func = internals::stub_func(FuncId::unique(), "f").default_cache_mode(mode);
         assert_eq!(func.default_cache_mode, mode, "{mode:?} is stored verbatim");
     }

@@ -129,6 +129,12 @@ impl WorkerBridge {
         self.worker.send(WorkerMessage::SetDiskStore(cache))
     }
 
+    /// Keep `bytes` of memory free for everything else, dropping kept values past it after each
+    /// run ([`WorkerMessage::SetRamHeadroom`]).
+    pub(crate) fn set_ram_headroom(&self, bytes: u64) -> Result<(), WorkerExited> {
+        self.worker.send(WorkerMessage::SetRamHeadroom(bytes))
+    }
+
     /// Write every installed node's resident disk-backed value into the attached store, owed by
     /// values computed while there was nowhere to put them. The worker's apply order puts it
     /// after any `SetDiskStore` in the same batch.

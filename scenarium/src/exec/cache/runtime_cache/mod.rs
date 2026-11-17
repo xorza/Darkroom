@@ -10,6 +10,7 @@
 pub(crate) mod cache_flush_report;
 pub(crate) mod error;
 
+use std::cmp::Reverse;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::iter;
@@ -37,6 +38,7 @@ use crate::exec::idx::{NodeIdx, OutputAddr};
 use crate::exec::schedule::{Delivery, RunSchedule};
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::lambda::OutputDemand;
+use crate::graph::node::Keep;
 use crate::graph::program_id::ProgramId;
 
 /// The per-node cross-run cache plus its disk backing. `slots` is a [`Col`] aligned to the
@@ -70,6 +72,17 @@ pub(crate) struct RuntimeCache {
     /// The first node of a run under each digest, while [`mark_twins`](Self::mark_twins) walks
     /// it. Scratch, kept only so the allocation survives; it holds one entry per node at most.
     leaders: HashMap<Digest, NodeIdx>,
+    /// The values [`relieve`](Self::relieve) may drop, in the order it drops them. Scratch, kept
+    /// only so the allocation survives; it holds one entry per node at most.
+    droppable: Vec<Droppable>,
+}
+
+/// One resident value memory pressure may drop: when it was last used, and the RAM it holds.
+#[derive(Clone, Copy, Debug)]
+struct Droppable {
+    node_idx: NodeIdx,
+    used_in: u64,
+    bytes: usize,
 }
 
 /// Where a reuse would come from, if one is possible at all — the front half of
@@ -212,6 +225,54 @@ impl RuntimeCache {
     /// program the slots are aligned to. Empty until the first measurement.
     pub(crate) const fn node_ram(&self) -> &Col<NodeIdx, RamUsage> {
         &self.node_ram
+    }
+
+    /// Drop values kept while memory allows ([`Keep::Auto`])
+    /// until they held at least `deficit` bytes of CPU memory: the least recently used first, and
+    /// among those used in one run the largest first, so the fewest values go. As ComfyUI's
+    /// default cache drops what it holds once free RAM falls under a headroom
+    /// ([startup flags](https://docs.comfy.org/development/comfyui-server/startup-flags)) and Nuke's
+    /// buffer cache the oldest first. A value kept always is never dropped, and one kept never is
+    /// already gone, as is one `droppable` refuses, a value a later node of the running run still
+    /// reads. Returns the bytes the dropped values held.
+    ///
+    /// A value another slot shares counts in full here though dropping it frees nothing while the
+    /// other holds it: the drop can fall short, and the next reading of memory drops more.
+    pub(crate) fn relieve(
+        &mut self,
+        program: &CompiledGraph,
+        deficit: u64,
+        droppable: impl Fn(NodeIdx) -> bool,
+    ) -> u64 {
+        self.droppable.clear();
+        for (node_idx, e_node) in program.e_nodes.iter_indexed() {
+            if e_node.cache.ram != Keep::Auto || !droppable(node_idx) {
+                continue;
+            }
+            let slot = &self.slots[node_idx];
+            let Some(values) = slot.output_values() else {
+                continue;
+            };
+            let bytes = values.iter().map(|value| value.ram_usage().cpu).sum();
+            if bytes > 0 {
+                self.droppable.push(Droppable {
+                    node_idx,
+                    used_in: slot.used_in,
+                    bytes,
+                });
+            }
+        }
+        self.droppable
+            .sort_unstable_by_key(|item| (item.used_in, Reverse(item.bytes), item.node_idx));
+        let mut freed = 0_u64;
+        for item in &self.droppable {
+            if freed >= deficit {
+                break;
+            }
+            self.slots[item.node_idx].clear_output();
+            freed += u64::try_from(item.bytes).expect("a value's size fits in u64");
+        }
+        freed
     }
 
     /// Realign the slots from the program they currently belong to onto a newly installed one
@@ -568,7 +629,7 @@ impl RuntimeCache {
 
     /// Write the blob a resident value owes.
     ///
-    /// A `Both`-mode value is served from RAM without the disk being consulted, so nothing else
+    /// A value kept in RAM and on disk is served from RAM without the disk being consulted, so nothing else
     /// would notice that the write establishing its durability never landed (a failed store, a
     /// missing codec, a cache mode turned on after the value was resident). Only `invoke_node`
     /// stores, and a node served from RAM does not invoke.

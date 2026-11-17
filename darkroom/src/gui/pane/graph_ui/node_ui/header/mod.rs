@@ -10,7 +10,7 @@ use palantir::{
     SizeSpec, Ui, VAlign, WidgetId,
 };
 
-use scenarium::{CacheMode, GraphId, NodeId, TriggerPort};
+use scenarium::{CacheMode, GraphId, Keep, NodeId, TriggerPort};
 
 use crate::core::document::compound_side::ReadOnly;
 use crate::core::document::item_id::ItemId;
@@ -156,7 +156,10 @@ pub(crate) fn kind_mark(ui: &mut Ui, node: NodeCtx<'_>, wid: WidgetId) {
             Icon::Sink,
             "Sink \u{b7} impure — runs for its effect and recomputes every run",
         ),
-        (true, false) => (Icon::Sink, "Sink — runs for its effect, not for a value"),
+        (true, false) => (
+            Icon::Sink,
+            "Sink — runs for its effect when what it reads changes",
+        ),
         (false, true) => (Icon::Impure, "Impure — recomputes every run, never cached"),
         (false, false) => return,
     };
@@ -249,8 +252,9 @@ fn disable_button(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     }
 }
 
-/// The cache button and the menu it opens below itself: keep the output in RAM, save it to
-/// disk, and clear what the node and the nodes after it hold. On while either bit is set.
+/// The cache button and the menu it opens below itself: how long RAM keeps the output, one row
+/// a choice with the current one picked, whether disk saves it, and clear what the node and the
+/// nodes after it hold. On while the node keeps its output otherwise than by default.
 fn cache_button(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     let node = record.node;
     let theme = node.theme();
@@ -258,42 +262,48 @@ fn cache_button(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     let cache = node
         .cache()
         .expect("a header shows the cache button of a node with a body");
-    let (ram, disk) = (cache.caches_in_ram(), cache.persists_to_disk());
     IconButton::press(
         Icon::Cache,
         wid,
         theme.badge.cache,
-        "Cache — keep this node's output across runs",
+        "Cache — how this node's output is kept across runs",
     )
-    .selected(ram || disk)
+    .selected(cache != CacheMode::AUTO)
     .show(ui, theme);
     let trigger = ui.response_for(wid);
+    let graph = record.node.graph_ctx.graph();
+    let set = |out: &mut Requests, to: CacheMode| {
+        out.push_graph(
+            graph,
+            GraphIntent::SetNodeProperty {
+                node_id: node.node_id,
+                to: NodeProperty::RuntimeCache(to),
+            },
+        );
+    };
     Menu::below(&trigger).show(ui, |ui| {
-        let mut keep_ram = ram;
-        if Checkbox::new(&mut keep_ram)
-            .label("Keep in RAM")
-            .show(ui)
-            .changed
-        {
-            record.stage.out.push_graph(
-                record.node.graph_ctx.graph(),
-                GraphIntent::SetNodeProperty {
-                    node_id: node.node_id,
-                    to: NodeProperty::RuntimeCache(CacheMode::from_bits(keep_ram, disk)),
-                },
-            );
+        for (keep, label) in KEEP_ROWS {
+            if MenuItem::new(label)
+                .selected(cache.ram == keep)
+                .show(ui)
+                .clicked()
+                && cache.ram != keep
+            {
+                set(record.stage.out, CacheMode { ram: keep, ..cache });
+            }
         }
-        let mut save_disk = disk;
+        MenuSeparator::new().show(ui);
+        let mut save_disk = cache.disk;
         if Checkbox::new(&mut save_disk)
             .label("Save to disk")
             .show(ui)
             .changed
         {
-            record.stage.out.push_graph(
-                record.node.graph_ctx.graph(),
-                GraphIntent::SetNodeProperty {
-                    node_id: node.node_id,
-                    to: NodeProperty::RuntimeCache(CacheMode::from_bits(ram, save_disk)),
+            set(
+                record.stage.out,
+                CacheMode {
+                    disk: save_disk,
+                    ..cache
                 },
             );
             // Turning the disk bit on publishes what the node already holds in RAM, without
@@ -314,6 +324,14 @@ fn cache_button(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
         }
     });
 }
+
+/// The cache menu's rows for how long RAM keeps an output, in the order a person reads them: the
+/// default first.
+const KEEP_ROWS: [(Keep, &str); 3] = [
+    (Keep::Auto, "Keep while memory allows"),
+    (Keep::Always, "Always keep in RAM"),
+    (Keep::Never, "Don't keep"),
+];
 
 fn cache_button_wid(graph: GraphId, node_id: NodeId) -> WidgetId {
     wid::of_node("cache_button", graph, node_id)

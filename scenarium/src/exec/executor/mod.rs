@@ -14,12 +14,13 @@
 //! producers settle: the loop prepares that identity off-thread, re-stamps at reach time, and
 //! serves the cache on a hit.
 
+use std::fmt;
 use std::sync::Arc;
 use std::time::Instant;
 
 use tokio::task;
 
-use common::{CancelToken, ErrorChain};
+use common::{CancelToken, ErrorChain, SystemMemory};
 
 use crate::containers::col::Col;
 use crate::data::dynamic_value::DynamicValue;
@@ -108,7 +109,35 @@ pub(crate) struct RunRequest<'a, 'r> {
     /// Live per-node feedback, published ahead of the final outcome.
     pub(crate) reporter: &'a mut (dyn RunReporter + 'r),
     pub(crate) cancel: CancelToken,
+    /// The run's count, which each node it runs or serves is stamped with, so memory pressure
+    /// drops the least recently used first.
+    pub(crate) run: u64,
+    /// The memory the process keeps free for everything else; zero keeps every value.
+    pub(crate) ram_headroom: u64,
+    /// Where the memory the process can still allocate is read.
+    pub(crate) memory: MemoryProbe,
 }
+
+/// Reads the memory the process can still allocate: the system's, or a test's fixed figure.
+#[derive(Clone, Copy)]
+pub(crate) struct MemoryProbe(pub(crate) fn() -> u64);
+
+impl Default for MemoryProbe {
+    fn default() -> Self {
+        Self(SystemMemory::available)
+    }
+}
+
+impl fmt::Debug for MemoryProbe {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("MemoryProbe")
+    }
+}
+
+/// How much the values a run makes may grow, as a share of the headroom, between two readings of
+/// the memory: an eighth, so a run checks often enough to stay near its headroom and a schedule
+/// of small values reads the memory, tens of microseconds a reading, seldom.
+const PRESSURE_CHECKS_PER_HEADROOM: u64 = 8;
 
 /// What [`Executor::collect_outcome`] reduces a run against: the program and
 /// schedule the loop walked, and the RAM each node was left holding once the
@@ -181,6 +210,9 @@ impl Executor {
             cache,
             reporter,
             cancel,
+            run,
+            ram_headroom,
+            memory,
         } = request;
 
         outcome.clear();
@@ -208,6 +240,7 @@ impl Executor {
 
             // The producer-first schedule excludes unseeded disabled nodes; the
             // resolved run cuts cache-hidden and blocked cones.
+            let mut grown = 0_u64;
             for (process_idx, &node_idx) in schedule.process_order.iter().enumerate() {
                 // A schedule of sync-completing lambdas never suspends on its own, and would
                 // starve everything sharing its thread (event-loop lambdas, other tasks under a
@@ -219,6 +252,23 @@ impl Executor {
                     break;
                 }
                 frame.run_node(node_idx).await;
+                if matches!(
+                    schedule.states[node_idx],
+                    NodeState::Run | NodeState::Reuse | NodeState::Twin
+                ) {
+                    frame.cache[node_idx].used_in = run;
+                }
+                if ram_headroom > 0 {
+                    grown += frame.held_bytes(node_idx);
+                    if grown >= ram_headroom / PRESSURE_CHECKS_PER_HEADROOM {
+                        grown = 0;
+                        frame.relieve(ram_headroom, memory);
+                    }
+                }
+            }
+            // Once more at the end, as what the run left kept is what the next one starts from.
+            if ram_headroom > 0 {
+                frame.relieve(ram_headroom, memory);
             }
         }
 
@@ -340,6 +390,31 @@ struct ExecFrame<'a, 'r> {
 }
 
 impl ExecFrame<'_, '_> {
+    /// The CPU bytes `node_idx` holds now, which a run adds to what memory pressure weighs.
+    fn held_bytes(&self, node_idx: NodeIdx) -> u64 {
+        self.cache[node_idx].output_values().map_or(0, |values| {
+            values
+                .iter()
+                .map(|value| u64::try_from(value.ram_usage().cpu).expect("a size fits in u64"))
+                .sum()
+        })
+    }
+
+    /// Read the memory the process can still allocate and, while it is under `ram_headroom`, drop
+    /// values kept while memory allows that no later node of this run reads
+    /// ([`RuntimeCache::relieve`]), as ComfyUI's default cache polls its headroom between nodes
+    /// ([startup flags](https://docs.comfy.org/development/comfyui-server/startup-flags)).
+    fn relieve(&mut self, ram_headroom: u64, memory: MemoryProbe) {
+        let deficit = ram_headroom.saturating_sub((memory.0)());
+        if deficit == 0 {
+            return;
+        }
+        let (program, reads) = (self.program, &*self.remaining_reads);
+        self.cache.relieve(program, deficit, |node_idx| {
+            reads.node_drained(program, node_idx)
+        });
+    }
+
     /// One node's turn. The resolved disposition decides which of the four things happens and is
     /// authoritative — a [`NodeState::Reuse`] is never re-derived here, since its producers may be
     /// pruned (see [`resolve::sweep`](crate::exec::resolve::sweep)).

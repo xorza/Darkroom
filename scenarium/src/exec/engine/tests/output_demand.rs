@@ -51,7 +51,7 @@ async fn cached_node_reruns_when_a_previously_skipped_output_becomes_needed() {
     g.add("split", |n| {
         let calls = calls.clone();
         n.pure()
-            .cache(CacheMode::Ram)
+            .cache(CacheMode::ALWAYS)
             .output(DataType::Int)
             .output(DataType::Int)
             .lambda(async_lambda!(

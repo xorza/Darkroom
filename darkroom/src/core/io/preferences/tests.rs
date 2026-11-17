@@ -9,6 +9,7 @@ use palantir::{ImageFilter, Size};
 
 use crate::core::io::preferences::error::{PreferencesLoadError, PreferencesSaveError};
 use crate::core::io::preferences::interface_size::InterfaceSize;
+use crate::core::io::preferences::memory_headroom::MemoryHeadroom;
 use crate::core::io::preferences::preferences_store::PreferencesStore;
 use crate::core::io::preferences::recent_documents::RecentDocuments;
 use crate::core::io::preferences::run_mode::RunMode;
@@ -50,6 +51,7 @@ fn preferences_roundtrip() {
         relative_paths: false,
         interface_size: InterfaceSize::OFFERED[4],
         run_mode: RunMode::Manual,
+        memory_headroom: MemoryHeadroom::Gib(4),
         window: Some(WindowState {
             size: Size::new(1440.0, 900.0),
             maximized: true,
@@ -70,6 +72,7 @@ fn preferences_roundtrip() {
         .expect("preferences RON serializes");
     let text = str::from_utf8(&bytes).expect("preferences RON is UTF-8");
     assert!(text.contains("mag_filter: linear"));
+    assert!(text.contains("memory_headroom: gib(4)"), "{text}");
     assert!(
         text.contains("interface_size: 125"),
         "a size saves as its percent"

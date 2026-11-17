@@ -1,5 +1,6 @@
 pub(crate) mod error;
 pub(crate) mod interface_size;
+pub(crate) mod memory_headroom;
 pub(crate) mod preferences_store;
 pub(crate) mod recent_documents;
 pub(crate) mod run_mode;
@@ -17,6 +18,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use crate::core::io::document::saved_paths::SavedPaths;
 use crate::core::io::preferences::error::{PreferencesLoadError, PreferencesSaveError};
 use crate::core::io::preferences::interface_size::InterfaceSize;
+use crate::core::io::preferences::memory_headroom::MemoryHeadroom;
 use crate::core::io::preferences::recent_documents::RecentDocuments;
 use crate::core::io::preferences::run_mode::RunMode;
 
@@ -49,6 +51,8 @@ pub(crate) struct Preferences {
     pub(crate) interface_size: InterfaceSize,
     /// When a run starts unasked.
     pub(crate) run_mode: RunMode,
+    /// The memory left free for everything else, past which kept node outputs are dropped.
+    pub(crate) memory_headroom: MemoryHeadroom,
     /// Main window geometry from the last session. `None` on first run (platform picks).
     pub(crate) window: Option<WindowState>,
     /// Image-viewer toolbar choices (backdrop and magnification sampling), shared by all viewer
@@ -146,6 +150,7 @@ impl Preferences {
             relative_paths,
             interface_size,
             run_mode,
+            memory_headroom,
             window: _,
             viewer,
             ml_models,
@@ -158,6 +163,7 @@ impl Preferences {
             && *relative_paths == other.relative_paths
             && *interface_size == other.interface_size
             && *run_mode == other.run_mode
+            && *memory_headroom == other.memory_headroom
             && *viewer == other.viewer
             && *ml_models == other.ml_models
             && *library_folder == other.library_folder
@@ -174,6 +180,7 @@ impl Default for Preferences {
             relative_paths: true,
             interface_size: InterfaceSize::DEFAULT,
             run_mode: RunMode::default(),
+            memory_headroom: MemoryHeadroom::default(),
             window: None,
             viewer: ViewerPreferences::default(),
             ml_models: MlModelPaths::default(),

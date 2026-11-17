@@ -275,8 +275,8 @@ fn every_kind_answers_the_frame_questions() {
             main(GraphStep::NodeProperty(SetNodeProperty {
                 node_id,
                 property: PropertyChange::RuntimeCache(Change {
-                    from: CacheMode::None,
-                    to: CacheMode::Ram,
+                    from: CacheMode::NEVER,
+                    to: CacheMode::ALWAYS,
                 }),
             })),
             (

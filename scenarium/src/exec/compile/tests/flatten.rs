@@ -1,6 +1,7 @@
 //! The compile's flatten: a document with compounds lowers to the program its hand-inlined twin
 //! does, each node inside an instance under the path of instances down to it.
 
+use crate::graph::node::Keep;
 use std::collections::{BTreeMap, HashMap};
 
 use super::*;
@@ -194,9 +195,10 @@ fn a_compound_compiles_to_its_hand_inlined_twin() {
 }
 
 /// An instance's cache mode joins the node inside it that makes a value leaving it, at that
-/// instance's path alone: with `adder` placed twice and instance 2 kept in RAM, its `add` keeps
-/// its value and instance 5's does not; `pass`, which only passes `src` through, leaves `src` as
-/// it was; and an `add` that saves to disk keeps both bits.
+/// instance's path alone: with `adder` placed twice and instance 2 kept in RAM always, its `add`
+/// keeps its value always and instance 5's while memory allows, the default; `pass`, which only
+/// passes `src` through, leaves `src` as it was; and an `add` that saves to disk and keeps
+/// nothing in RAM keeps both instance 2's RAM and its own disk.
 #[test]
 fn an_instances_cache_mode_caches_the_values_that_leave_it() {
     let cache_of = |doc: &Doc, path: ProgramId| {
@@ -206,12 +208,12 @@ fn an_instances_cache_mode_caches_the_values_that_leave_it() {
     let mut doc = adder_doc();
     doc.place(n(5), ADDER);
     wire(doc.main(), (n(5), A), (n(1), FIRST));
-    *doc.main().find_mut(n(2)).unwrap().cache_mut().unwrap() = CacheMode::Ram;
-    assert_eq!(cache_of(&doc, path(&[2, 13])), CacheMode::Ram);
-    assert_eq!(cache_of(&doc, path(&[5, 13])), CacheMode::None);
+    *doc.main().find_mut(n(2)).unwrap().cache_mut().unwrap() = CacheMode::ALWAYS;
+    assert_eq!(cache_of(&doc, path(&[2, 13])), CacheMode::ALWAYS);
+    assert_eq!(cache_of(&doc, path(&[5, 13])), CacheMode::AUTO);
     assert_eq!(
         cache_of(&doc, path(&[1])),
-        CacheMode::None,
+        CacheMode::AUTO,
         "a passthrough's producer"
     );
 
@@ -220,9 +222,24 @@ fn an_instances_cache_mode_caches_the_values_that_leave_it() {
         .find_mut(n(13))
         .unwrap()
         .cache_mut()
-        .unwrap() = CacheMode::Disk;
-    assert_eq!(cache_of(&doc, path(&[2, 13])), CacheMode::Both);
-    assert_eq!(cache_of(&doc, path(&[5, 13])), CacheMode::Disk);
+        .unwrap() = CacheMode {
+        ram: Keep::Never,
+        disk: true,
+    };
+    assert_eq!(
+        cache_of(&doc, path(&[2, 13])),
+        CacheMode {
+            ram: Keep::Always,
+            disk: true
+        }
+    );
+    assert_eq!(
+        cache_of(&doc, path(&[5, 13])),
+        CacheMode {
+            ram: Keep::Never,
+            disk: true
+        }
+    );
 }
 
 /// A wire from a second `Inputs` node reads what the instance holds as one from the first does:
@@ -352,7 +369,10 @@ fn each_instance_expands_apart_and_a_disabled_one_disables_its_nodes() {
     assert_eq!(
         program["add in 2"],
         [
-            format!("func={ADD:?} sink=false disabled=false cache=None outputs=1"),
+            format!(
+                "func={ADD:?} sink=false disabled=false cache={:?} outputs=1",
+                CacheMode::AUTO
+            ),
             "wire src#0".to_owned(),
             "const Int(7)".to_owned(),
         ]
@@ -360,7 +380,10 @@ fn each_instance_expands_apart_and_a_disabled_one_disables_its_nodes() {
     assert_eq!(
         program["add in 5"],
         [
-            format!("func={ADD:?} sink=false disabled=true cache=None outputs=1"),
+            format!(
+                "func={ADD:?} sink=false disabled=true cache={:?} outputs=1",
+                CacheMode::AUTO
+            ),
             "const Int(2)".to_owned(),
             "const Int(3)".to_owned(),
         ]
@@ -369,7 +392,7 @@ fn each_instance_expands_apart_and_a_disabled_one_disables_its_nodes() {
 }
 
 /// Whether a program writes to disk is a question about its program nodes: an `add` inside the
-/// instance set to `Disk` makes it so though no node of the main graph is.
+/// instance saved to disk makes it so though no node of the main graph is.
 #[test]
 fn a_node_inside_an_instance_makes_the_program_persist_to_disk() {
     let mut doc = adder_doc();
@@ -379,7 +402,10 @@ fn a_node_inside_an_instance_makes_the_program_persist_to_disk() {
         .graph_mut(GraphId::Compound(ADDER))
         .find_mut(n(13))
         .unwrap();
-    *inner.cache_mut().unwrap() = CacheMode::Disk;
+    *inner.cache_mut().unwrap() = CacheMode {
+        ram: Keep::Never,
+        disk: true,
+    };
     assert!(doc.compile().persists_to_disk());
 }
 
@@ -514,7 +540,7 @@ async fn a_flattened_program_runs() {
     let inputs = compound.inputs_node();
     let outputs = compound.outputs_node();
     let mut inner = Node::from(&sum);
-    *inner.cache_mut().unwrap() = CacheMode::None;
+    *inner.cache_mut().unwrap() = CacheMode::NEVER;
     compound.graph.insert(n(13), inner);
     wire(&mut compound.graph, (n(13), FIRST), (inputs, A));
     wire(&mut compound.graph, (n(13), SECOND), (inputs, B));

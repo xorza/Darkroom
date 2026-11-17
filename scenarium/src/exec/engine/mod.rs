@@ -16,7 +16,7 @@ use crate::exec::cache::runtime_cache::error::CacheNodeFailure;
 use crate::exec::compile::compiled_graph::CompiledGraph;
 use crate::exec::engine::error::InstallValidationError;
 use crate::exec::error::ExecResult;
-use crate::exec::executor::{CollectRequest, Executor, RunRequest};
+use crate::exec::executor::{CollectRequest, Executor, MemoryProbe, RunRequest};
 use crate::exec::report::exec_outcome::ExecOutcome;
 use crate::exec::report::run_reporter::RunReporter;
 use crate::exec::resolve;
@@ -49,6 +49,14 @@ pub(crate) struct ExecEngine {
     /// The one per-run state buffer: the schedule the planner builds and the dispositions, demand,
     /// and reader counts the cache-aware sweep refines it into. Recycled across runs.
     schedule: RunSchedule,
+    /// The runs executed so far, which stamps each node a run used for memory pressure to drop
+    /// the least recently used first.
+    runs: u64,
+    /// The memory the process keeps free for everything else: after each run, values kept while
+    /// memory allows are dropped while the allocatable memory is under it. Zero keeps them all.
+    ram_headroom: u64,
+    /// Where the allocatable memory is read.
+    memory: MemoryProbe,
 }
 
 /// One run as a host asks for it: what to seed, where live feedback goes, and
@@ -102,6 +110,11 @@ impl ExecEngine {
         self.cache.set_disk_store(disk_store);
     }
 
+    /// Keep `bytes` of memory free for everything else; see [`Self::ram_headroom`].
+    pub(crate) const fn set_ram_headroom(&mut self, bytes: u64) {
+        self.ram_headroom = bytes;
+    }
+
     pub(crate) async fn evict_cache(
         &mut self,
         program_ids: impl IntoIterator<Item = ProgramId>,
@@ -145,6 +158,7 @@ impl ExecEngine {
         // Phase 3: run the surviving schedule. Each node's disk cache is written the moment it
         // finishes (inside the run loop), so earlier caches are durable even if a later node fails
         // or the run is cancelled.
+        self.runs += 1;
         self.executor
             .run(
                 RunRequest {
@@ -153,6 +167,9 @@ impl ExecEngine {
                     cache: &mut self.cache,
                     reporter,
                     cancel,
+                    run: self.runs,
+                    ram_headroom: self.ram_headroom,
+                    memory: self.memory,
                 },
                 outcome,
             )
@@ -250,6 +267,7 @@ pub(crate) mod internals {
     use crate::exec::compile::compiled_graph::{CompiledGraph, ExecInput};
     use crate::exec::engine::ExecEngine;
     use crate::exec::error::ExecResult;
+    use crate::exec::executor::MemoryProbe;
     use crate::exec::idx::NodeIdx;
     use crate::exec::resolve;
     use crate::exec::schedule::NodeState;
@@ -346,6 +364,11 @@ pub(crate) mod internals {
                 .map_or_default(<[DynamicValue]>::to_vec);
 
             Some(ArgumentValues { inputs, outputs })
+        }
+
+        /// Read the allocatable memory from `memory`, a test's fixed figure.
+        pub(crate) const fn set_memory_probe(&mut self, memory: fn() -> u64) {
+            self.memory = MemoryProbe(memory);
         }
 
         /// The runtime slot for a stable id — test introspection.

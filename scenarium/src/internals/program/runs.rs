@@ -8,7 +8,7 @@ use crate::data::ram_usage::RamUsage;
 use crate::exec::cache::runtime_cache::RuntimeCache;
 use crate::exec::compile::compiled_graph::CompiledGraph;
 use crate::exec::error::RunError;
-use crate::exec::executor::{CollectRequest, Executor, RunRequest};
+use crate::exec::executor::{CollectRequest, Executor, MemoryProbe, RunRequest};
 use crate::exec::report::exec_outcome::ExecOutcome;
 use crate::exec::report::run_reporter::internals::DiscardedReports;
 use crate::exec::resolve;
@@ -136,6 +136,11 @@ impl<'a> Runs<'a> {
                     cache,
                     reporter: &mut DiscardedReports,
                     cancel: cancel.clone(),
+                    // A driven run keeps every value and stamps none: memory pressure is the
+                    // engine's, tested through it.
+                    run: 0,
+                    ram_headroom: 0,
+                    memory: MemoryProbe::default(),
                 },
                 outcome,
             )

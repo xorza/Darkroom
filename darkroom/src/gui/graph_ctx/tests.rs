@@ -1,6 +1,7 @@
 use scenarium::internals::test_graph::TestGraph;
 use scenarium::{
-    CacheMode, DataType, EventPort, FuncId, Graph, InstancePath, Node, NodeId, ProgramId, internals,
+    CacheMode, DataType, EventPort, FuncId, Graph, InstancePath, Keep, Node, NodeId, ProgramId,
+    internals,
 };
 use scenarium::{PortId, TriggerPort, internals::test_graph::NodeSpec};
 
@@ -360,10 +361,16 @@ fn cache_mode_reads_verbatim_per_node() {
     let mut graph = Graph::default();
     let mut ids = Vec::new();
     for mode in [
-        CacheMode::None,
-        CacheMode::Ram,
-        CacheMode::Disk,
-        CacheMode::Both,
+        CacheMode::NEVER,
+        CacheMode::ALWAYS,
+        CacheMode {
+            ram: Keep::Never,
+            disk: true,
+        },
+        CacheMode {
+            ram: Keep::Always,
+            disk: true,
+        },
     ] {
         let mut node: Node = library.by_name("Add").unwrap().into();
         *node.cache_mut().unwrap() = mode;
@@ -442,7 +449,7 @@ fn an_instance_with_an_output_is_cacheable() {
     let fixture = GraphCtxFixture::over(fixture);
     let graph_ctx = fixture.graph_ctx();
     let cached = graph_ctx.node(cached).unwrap();
-    assert_eq!(cached.cache(), Some(CacheMode::None));
+    assert_eq!(cached.cache(), Some(CacheMode::AUTO));
     assert!(cached.cacheable());
     assert!(!graph_ctx.node(empty).unwrap().cacheable());
 }

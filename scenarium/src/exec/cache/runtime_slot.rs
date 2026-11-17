@@ -85,6 +85,9 @@ pub(crate) struct RuntimeSlot {
     /// A resident value hits iff its `produced_under` equals this.
     pub(crate) cur_digest: Option<Digest>,
     value: ValueState,
+    /// The last run that ran or served this node, counted by the engine: what memory pressure
+    /// drops the least recently used by.
+    pub(crate) used_in: u64,
 }
 
 /// How [`RuntimeSlot::read_output`] hands a resident value over.

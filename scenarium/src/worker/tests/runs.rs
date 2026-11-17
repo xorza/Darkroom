@@ -48,7 +48,7 @@ async fn node_seeds_override_a_disabled_node_and_run_only_its_cone() {
     let mut graph = TestGraph::sample();
     graph.never("mult");
     graph.never("Print");
-    graph.cache_all(CacheMode::None);
+    graph.cache_all(CacheMode::NEVER);
     graph.disable("sum");
     let mut w = TestWorker::over(graph);
     let sum = w.id("sum");

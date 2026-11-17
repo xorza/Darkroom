@@ -13,6 +13,11 @@ use serde::{Deserialize, Serialize};
 ///   Dynamo's.
 /// - **A change runs the previews' cones alone.** A sink that is not a preview, a Save Image,
 ///   runs on Run alone, so moving a field writes no file. Refused: every sink, as Run does.
+/// - **Only the previews the change reaches run.** A preview is a pure sink, so one whose inputs
+///   fold to the digest it last showed is served as it stands and pulls nothing upstream, as
+///   TouchDesigner cooks a requested node only for a reason
+///   ([cook](https://derivative.ca/UserGuide/Cook)). Refused: darkroom working out what an edit
+///   reaches, a second record of change beside scenarium's digests.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum RunMode {

@@ -22,7 +22,7 @@ use crate::graph::ghost_wiring::{
 use crate::graph::graph_set::GraphSet;
 use crate::graph::identity::{EventPort, FuncId, PortId};
 use crate::graph::manifest::Manifest;
-use crate::graph::node::{BodySource, CacheMode, Node, NodeKind};
+use crate::graph::node::{BodySource, CacheMode, Keep, Node, NodeKind};
 use crate::graph::ports::{InputDecl, Numbered};
 use crate::graph::reconciled::{Reconciled, Repair};
 use crate::graph::saved_decl::{SavedDecl, SavedEvent, SavedInput, SavedPort};
@@ -41,35 +41,46 @@ fn validate_passes_for_valid_graph() {
     assert!(TestGraph::sample().graph().validate().is_ok());
 }
 
+/// Each mode's RAM and disk answers, hand-tabulated: RAM keeps an output unless it keeps it
+/// never, and disk saves it where the bit is set; a join keeps RAM as long as either and disk
+/// where either does.
 #[test]
-fn cache_mode_bits_and_from_bits_round_trip() {
-    // The two storage bits, hand-tabulated per mode, plus `from_bits` as their inverse.
+fn cache_mode_keeps_ram_and_disk_as_its_fields_say() {
+    let mode = |ram, disk| CacheMode { ram, disk };
     let table = [
-        (CacheMode::None, false, false),
-        (CacheMode::Ram, true, false),
-        (CacheMode::Disk, false, true),
-        (CacheMode::Both, true, true),
+        (mode(Keep::Never, false), false, false),
+        (mode(Keep::Auto, false), true, false),
+        (mode(Keep::Always, false), true, false),
+        (mode(Keep::Never, true), false, true),
+        (mode(Keep::Always, true), true, true),
     ];
     for (mode, ram, disk) in table {
-        assert_eq!(mode.caches_in_ram(), ram, "{mode:?} RAM bit");
-        assert_eq!(mode.persists_to_disk(), disk, "{mode:?} disk bit");
-        assert_eq!(
-            CacheMode::from_bits(ram, disk),
-            mode,
-            "from_bits({ram},{disk})"
-        );
+        assert_eq!(mode.caches_in_ram(), ram, "{mode:?} RAM");
+        assert_eq!(mode.persists_to_disk(), disk, "{mode:?} disk");
     }
+    assert_eq!(CacheMode::default(), CacheMode::AUTO);
+    assert_eq!(CacheMode::NEVER.join(CacheMode::AUTO), CacheMode::AUTO);
+    assert_eq!(
+        CacheMode::ALWAYS.join(mode(Keep::Never, true)),
+        mode(Keep::Always, true)
+    );
+    assert_eq!(CacheMode::NEVER.join(CacheMode::NEVER), CacheMode::NEVER);
 }
 
 #[test]
 fn cache_mode_round_trips() {
-    assert_eq!(CacheMode::default(), CacheMode::None);
-
     for mode in [
-        CacheMode::None,
-        CacheMode::Ram,
-        CacheMode::Disk,
-        CacheMode::Both,
+        CacheMode::NEVER,
+        CacheMode::AUTO,
+        CacheMode::ALWAYS,
+        CacheMode {
+            ram: Keep::Never,
+            disk: true,
+        },
+        CacheMode {
+            ram: Keep::Always,
+            disk: true,
+        },
     ] {
         let mut g = TestGraph::new();
         g.add("src", |n| n.pure().output(DataType::Int));
@@ -92,27 +103,39 @@ fn a_new_node_takes_what_its_declaration_says() {
     use crate::graph::node::special::SpecialNode;
 
     // A fresh func node inherits its func's `default_cache_mode` — the out-of-box
-    // `None`, or whatever the func's builder raised it to.
+    // `AUTO`, or whatever the func's builder set.
     let plain = internals::stub_func(FuncId::unique(), "plain").build();
     assert_eq!(
         Node::from(&plain).cache(),
-        Some(CacheMode::None),
-        "default func → no caching"
+        Some(CacheMode::AUTO),
+        "default func → kept while memory allows"
     );
 
     let hot = internals::stub_func(FuncId::unique(), "hot")
-        .default_cache_mode(CacheMode::Both)
+        .default_cache_mode(CacheMode {
+            ram: Keep::Always,
+            disk: true,
+        })
         .build();
     assert_eq!(
         Node::from(&hot).cache(),
-        Some(CacheMode::Both),
+        Some(CacheMode {
+            ram: Keep::Always,
+            disk: true
+        }),
         "func node copies the func's default_cache_mode"
     );
     // `add_func_node` routes through the same `From<&Func>`, so the graph-level
     // constructor propagates it too.
     let mut graph = Graph::default();
     let id = graph.add_func_node(&hot);
-    assert_eq!(graph.find(id).unwrap().cache(), Some(CacheMode::Both));
+    assert_eq!(
+        graph.find(id).unwrap().cache(),
+        Some(CacheMode {
+            ram: Keep::Always,
+            disk: true
+        })
+    );
 
     assert_eq!(
         Node::from(&hot).name,
@@ -132,9 +155,10 @@ fn a_new_node_takes_what_its_declaration_says() {
     assert_eq!(node.cache(), Some(special.func().default_cache_mode()));
 
     // Resolving a `Func` kind takes a library this constructor does not have, so it starts
-    // unnamed and uncached: an empty name means a node whose func nothing has resolved.
+    // unnamed and on the default cache: an empty name means a node whose func nothing has
+    // resolved.
     let unresolved = internals::unresolved_node(FuncId::unique());
-    assert_eq!(unresolved.cache(), Some(CacheMode::None));
+    assert_eq!(unresolved.cache(), Some(CacheMode::AUTO));
     assert!(unresolved.name.is_empty());
 }
 
@@ -602,7 +626,7 @@ fn add_func_node_seeds_only_the_inputs_with_defaults() {
         g.graph().find(id).unwrap().kind,
         NodeKind::Body {
             source: BodySource::Func(func.id()),
-            cache: CacheMode::None,
+            cache: CacheMode::NEVER,
         }
     );
     assert_eq!(

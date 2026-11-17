@@ -31,6 +31,7 @@ pub(crate) enum LoopCommand {
 pub(crate) struct BatchIntent {
     pub(crate) graph_state: Option<GraphOp>,
     pub(crate) disk_store: Option<DiskStore>,
+    pub(crate) ram_headroom: Option<u64>,
     /// Whether this batch owes every installed node a blob — see
     /// [`WorkerMessage::FlushAllCaches`].
     pub(crate) flush_all_caches: bool,
@@ -74,6 +75,7 @@ impl BatchIntent {
             }
             WorkerMessage::FlushAllCaches => self.flush_all_caches = true,
             WorkerMessage::SetDiskStore(cache) => self.disk_store = Some(cache),
+            WorkerMessage::SetRamHeadroom(bytes) => self.ram_headroom = Some(bytes),
             WorkerMessage::RunSinks => self.seeds.sinks = true,
             WorkerMessage::RunNodes { program_ids } => {
                 unique::extend(&mut self.seeds.program_ids, program_ids);
@@ -92,6 +94,7 @@ impl BatchIntent {
         let Self {
             graph_state,
             disk_store,
+            ram_headroom,
             flush_all_caches,
             loop_request,
             seeds,
@@ -102,6 +105,7 @@ impl BatchIntent {
         } = self;
         let empty = graph_state.is_none()
             && disk_store.is_none()
+            && ram_headroom.is_none()
             && !flush_all_caches
             && loop_request.is_none()
             && seeds.is_empty()
@@ -116,6 +120,7 @@ impl BatchIntent {
     pub(crate) fn clear(&mut self) {
         self.graph_state = None;
         self.disk_store = None;
+        self.ram_headroom = None;
         self.flush_all_caches = false;
         self.loop_request = None;
         self.seeds.clear();

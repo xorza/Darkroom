@@ -1,4 +1,5 @@
 use super::*;
+use crate::graph::node::Keep;
 use common::MutexExt;
 use common::fs;
 
@@ -12,8 +13,15 @@ async fn persist_output_survives_reopen_and_invalidates_on_digest_change() {
     let calls = Calls::default();
 
     // First run: everything computes; `mult` is stored to disk.
-    let mut e =
-        TestEngine::over(source_mult_print(CacheMode::Disk, 7, &calls)).with_disk_store(dir.path());
+    let mut e = TestEngine::over(source_mult_print(
+        CacheMode {
+            ram: Keep::Never,
+            disk: true,
+        },
+        7,
+        &calls,
+    ))
+    .with_disk_store(dir.path());
     e.run_sinks().await;
     assert_eq!(calls.count(), 1);
 
@@ -78,8 +86,15 @@ async fn a_probed_blob_that_stops_decoding_fails_its_node_and_self_heals() {
     let dir = TempDir::new("corrupt-frontier");
     let calls = Calls::default();
 
-    let mut e =
-        TestEngine::over(source_mult_print(CacheMode::Disk, 7, &calls)).with_disk_store(dir.path());
+    let mut e = TestEngine::over(source_mult_print(
+        CacheMode {
+            ram: Keep::Never,
+            disk: true,
+        },
+        7,
+        &calls,
+    ))
+    .with_disk_store(dir.path());
     e.run_sinks().await;
     assert_eq!(calls.count(), 1);
 
@@ -134,8 +149,15 @@ async fn an_older_format_blob_recomputes_and_is_replaced_in_the_same_run() {
     let calls = Calls::default();
 
     // Cold run: mult computes and stores its blob.
-    let mut e =
-        TestEngine::over(source_mult_print(CacheMode::Disk, 1, &calls)).with_disk_store(dir.path());
+    let mut e = TestEngine::over(source_mult_print(
+        CacheMode {
+            ram: Keep::Never,
+            disk: true,
+        },
+        1,
+        &calls,
+    ))
+    .with_disk_store(dir.path());
     let run = e.run_sinks().await;
     assert_eq!(
         run.ran(),
@@ -185,7 +207,12 @@ async fn vanished_frontier_blob_recomputes_instead_of_panicking() {
     // run must load.
     let mut g = TestGraph::new();
     g.add("src", |n| n.counted(7i64, &calls));
-    g.add("sum", |n| n.sum().cache(CacheMode::Disk));
+    g.add("sum", |n| {
+        n.sum().cache(CacheMode {
+            ram: Keep::Never,
+            disk: true,
+        })
+    });
     g.add("print", NodeSpec::records);
     g.wire("src", "sum");
     g.wire("src", ("sum", 1));
@@ -213,12 +240,12 @@ async fn vanished_frontier_blob_recomputes_instead_of_panicking() {
     assert_eq!(calls.count(), 2, "src re-ran to feed sum's recompute");
 }
 
-/// A `Both`-mode node whose store failed owes a blob, and pays it on the next
+/// A node kept always and on disk whose store failed owes a blob, and pays it on the next
 /// run — without recomputing.
 ///
-/// The RAM half of `Both` makes this reachable: every later run is a resident hit, served without
+/// Keeping RAM always makes this reachable: every later run is a resident hit, served without
 /// the disk being named, and only an invoke stores. A write that never landed would go unwritten
-/// while the value stays resident. `Disk` alone cannot reach it — its value is released after
+/// while the value stays resident. Disk with RAM kept never cannot reach it — its value is released after
 /// each run, so the next one misses and recomputes.
 ///
 /// The debt is settled from memory, not by asking the filesystem: once a blob is known to be
@@ -229,7 +256,12 @@ async fn a_both_mode_node_whose_store_failed_republishes_without_recomputing() {
     let calls = Calls::default();
 
     let mut g = TestGraph::new();
-    g.add("src", |n| n.counted(7i64, &calls).cache(CacheMode::Both));
+    g.add("src", |n| {
+        n.counted(7i64, &calls).cache(CacheMode {
+            ram: Keep::Always,
+            disk: true,
+        })
+    });
     g.add("print", NodeSpec::records);
     g.wire("src", "print");
 
@@ -305,7 +337,10 @@ async fn redefined_output_type_rekeys_and_recomputes() {
         let produce = runs.clone();
         let mut g = TestGraph::new();
         g.add("produce", move |n: NodeSpec| {
-            n.counted(value, &produce).cache(CacheMode::Disk)
+            n.counted(value, &produce).cache(CacheMode {
+                ram: Keep::Never,
+                disk: true,
+            })
         });
         g.add("consume", move |n: NodeSpec| {
             n.sink().input(DataType::Any).observes(move |inputs| {

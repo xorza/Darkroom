@@ -97,7 +97,7 @@ async fn update_with_a_grown_output_list_retires_the_shorter_snapshot() {
     // is what makes the stale one survive too.
     g.add("generate", |n| {
         n.pure()
-            .cache(CacheMode::Ram)
+            .cache(CacheMode::ALWAYS)
             .output(DataType::Int)
             .lambda(body())
     });

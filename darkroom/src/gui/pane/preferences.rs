@@ -13,12 +13,13 @@ use std::path::{Path, PathBuf};
 use common::{ErrorChain, fs, process};
 use lens::MlModelPaths;
 use palantir::{
-    Align, Button, Checkbox, ComboBox, Configure, Grid, Panel, SizeSpec, Spacing, Text, TextEdit,
-    TextWrap, Track, Ui, VAlign, WidgetId,
+    Align, Button, Checkbox, ComboBox, Configure, DragValue, Grid, Panel, SizeSpec, Spacing, Text,
+    TextEdit, TextWrap, Track, Ui, VAlign, WidgetId,
 };
 
 use crate::core::io::preferences::Preferences;
 use crate::core::io::preferences::interface_size::InterfaceSize;
+use crate::core::io::preferences::memory_headroom::MemoryHeadroom;
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::MlModelKind;
 use crate::gui::frame::requests::Requests;
@@ -114,7 +115,49 @@ impl PreferencesForm<'_> {
 
                         self.caption(ui, "Library", LIBRARY_ROW);
                         self.library_row(ui, &mut preferences.library_folder);
+
+                        self.caption(ui, "Memory", MEMORY_ROW);
+                        self.headroom_row(ui, &mut preferences.memory_headroom);
                     });
+            });
+    }
+
+    /// The memory left free for everything else: Automatic, or a size in GiB, whose field shows
+    /// only while Automatic is off, as a figure the automatic headroom does not use would read as
+    /// its size. Turning Automatic off starts the field at [`SET_HEADROOM_GIB`].
+    fn headroom_row(&self, ui: &mut Ui, headroom: &mut MemoryHeadroom) {
+        let row = MEMORY_ROW + 1;
+        let theme = self.theme;
+        self.label(ui, "Keep free", row);
+        Panel::hstack()
+            .id_salt("headroom")
+            .grid_cell((row, 1))
+            .gap(theme.space.md)
+            .child_align(VAlign::Center)
+            .show(ui, |ui| {
+                let mut auto = *headroom == MemoryHeadroom::Auto;
+                if Checkbox::new(&mut auto).label("Automatic").show(ui).changed {
+                    *headroom = if auto {
+                        MemoryHeadroom::Auto
+                    } else {
+                        MemoryHeadroom::Gib(SET_HEADROOM_GIB)
+                    };
+                }
+                let MemoryHeadroom::Gib(set) = *headroom else {
+                    return;
+                };
+                // An `i64` draft, the integer a drag value binds; its range holds it in a `u32`.
+                let mut gib = i64::from(set);
+                let edited = DragValue::new(&mut gib)
+                    .id(WidgetId::from_hash("darkroom.preferences.headroom"))
+                    .range(1.0..=f64::from(MAX_HEADROOM_GIB))
+                    .speed(0.1)
+                    .suffix(" GiB")
+                    .show(ui);
+                if edited.changed {
+                    let gib = u32::try_from(gib).expect("the field's range holds it in a u32");
+                    *headroom = MemoryHeadroom::Gib(gib);
+                }
             });
     }
 
@@ -282,14 +325,29 @@ const BEHAVIOR_ROW: u16 = 2;
 const MODELS_ROW: u16 = 6;
 /// Past the models' caption, then each model's field row and notes row.
 const LIBRARY_ROW: u16 = MODELS_ROW + 1 + 2 * 2;
-/// The library's caption and its folder row.
-const ROW_COUNT: usize = LIBRARY_ROW as usize + 2;
+/// Past the library's caption and its folder row.
+const MEMORY_ROW: u16 = LIBRARY_ROW + 2;
+/// The memory's caption and its headroom row.
+const ROW_COUNT: usize = MEMORY_ROW as usize + 2;
+
+/// The size a set headroom starts at when Automatic is turned off: Auto's floor, ComfyUI's
+/// smallest default, a starting point to edit from.
+const SET_HEADROOM_GIB: u32 = 2;
+
+/// The most a set headroom takes: a workstation's memory, past which no machine keeps more free.
+const MAX_HEADROOM_GIB: u32 = 256;
 
 /// Every row of the form: a caption and a note hug their text, and a row of controls is a
 /// row's height, so a checkbox row and a field row pitch alike.
 fn form_rows(theme: &Theme) -> [Track; ROW_COUNT] {
     let mut rows = [Track::fixed(theme.row_height()); ROW_COUNT];
-    for caption in [APPEARANCE_ROW, BEHAVIOR_ROW, MODELS_ROW, LIBRARY_ROW] {
+    for caption in [
+        APPEARANCE_ROW,
+        BEHAVIOR_ROW,
+        MODELS_ROW,
+        LIBRARY_ROW,
+        MEMORY_ROW,
+    ] {
         rows[usize::from(caption)] = Track::HUG;
     }
     for notes in [MODELS_ROW + 2, MODELS_ROW + 4] {

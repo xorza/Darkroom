@@ -60,6 +60,10 @@ pub enum WorkerMessage {
     /// Attach the store the cache persists to and serves from. Attaching alone
     /// writes nothing; see [`Self::FlushAllCaches`].
     SetDiskStore(DiskStore),
+    /// Keep this many bytes of memory free for everything else: after each run, the values kept
+    /// while memory allows are dropped, the least recently used first, while the memory the
+    /// process can still allocate is under it. Zero keeps them all.
+    SetRamHeadroom(u64),
     /// Run every sink of the installed program.
     RunSinks,
     /// Run these nodes of the installed program and deliver every output —

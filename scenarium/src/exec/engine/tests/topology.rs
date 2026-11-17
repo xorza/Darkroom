@@ -44,8 +44,8 @@ async fn empty_graph_executes_cleanly() {
 async fn cached_output_survives_node_removal() {
     let (calls_a, calls_b) = (Calls::default(), Calls::default());
     let mut g = TestGraph::new();
-    g.add("a", |n| n.counted(2i64, &calls_a).cache(CacheMode::Ram));
-    g.add("b", |n| n.counted(5i64, &calls_b).cache(CacheMode::Ram));
+    g.add("a", |n| n.counted(2i64, &calls_a).cache(CacheMode::ALWAYS));
+    g.add("b", |n| n.counted(5i64, &calls_b).cache(CacheMode::ALWAYS));
     g.add("print_a", NodeSpec::records);
     g.instance("print_b", "print_a");
     g.wire("a", "print_a");

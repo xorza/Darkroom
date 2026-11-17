@@ -178,7 +178,8 @@ impl App {
         }
         let run_state = RunState::new(Arc::clone(&wake));
         let library_scan = LibraryScanner::new(Arc::clone(&wake));
-        let mut runtime = RuntimeHost::new(wake, &preferences.ml_models);
+        let mut runtime =
+            RuntimeHost::new(wake, &preferences.ml_models, preferences.memory_headroom);
         let remembered = preferences
             .document_path
             .as_deref()
@@ -669,6 +670,8 @@ impl App {
             return;
         }
         self.runtime.set_ml_model_paths(&self.preferences.ml_models);
+        self.runtime
+            .set_memory_headroom(self.preferences.memory_headroom);
         self.save_preferences();
     }
 

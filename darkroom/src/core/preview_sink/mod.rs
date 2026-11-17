@@ -68,8 +68,9 @@ pub(crate) fn register(library: &mut Library, sink: Arc<PreviewSink>) {
 /// The preview func, bound to the sink its lambda publishes into.
 ///
 /// `sink()` so an ambient sinks run reaches it, refreshing a preview without the editor naming
-/// it as a seed. It stays `Impure` (the default) because `FuncBuilder::build` refuses an
-/// outputless func that claims to be pure.
+/// it as a seed. `pure()`, as a preview shows what it already shows until its inputs change: a
+/// run whose inputs fold to the digest it last published under skips it, and pulls nothing
+/// upstream for it, so an edit runs the previews it reaches alone.
 pub(crate) fn func(sink: Arc<PreviewSink>) -> Func {
     Func::builder(
         PREVIEW_FUNC_ID,
@@ -84,6 +85,7 @@ pub(crate) fn func(sink: Arc<PreviewSink>) -> Func {
     )
     .category("System")
     .sink()
+    .pure()
     .description(
         "Shows the value wired into it. The value goes to the editor \
          rather than to a consumer, so watching one never changes what the \

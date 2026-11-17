@@ -112,16 +112,16 @@ async fn chain_peak(relay_mode: CacheMode) -> usize {
 
 /// The cache mode drives peak residency. With `None`, each stage's output is freed the moment the
 /// next stage reads it, so only a producer/consumer pair is ever resident → peak 2, whatever the
-/// chain length. With `Ram`, every stage is retained for cross-run reuse → peak 4.
+/// chain length. Kept always, every stage is retained for cross-run reuse → peak 4.
 #[tokio::test]
 async fn none_cache_bounds_peak_residency_but_ram_accumulates() {
     assert_eq!(
-        chain_peak(CacheMode::None).await,
+        chain_peak(CacheMode::NEVER).await,
         2,
         "None frees each stage the instant it is drained"
     );
     assert_eq!(
-        chain_peak(CacheMode::Ram).await,
+        chain_peak(CacheMode::ALWAYS).await,
         4,
         "Ram retains every stage for the whole run"
     );
@@ -177,7 +177,7 @@ async fn probe_run(relay_mode: CacheMode, probes: usize) -> ProbeRun {
 /// same probe observes a shared value; with fan-out only the final read is the move.
 #[tokio::test]
 async fn last_read_of_non_ram_output_is_uniquely_owned() {
-    let run = probe_run(CacheMode::None, 1).await;
+    let run = probe_run(CacheMode::NEVER, 1).await;
     assert_eq!(
         run.unique_reads,
         [true],
@@ -185,7 +185,7 @@ async fn last_read_of_non_ram_output_is_uniquely_owned() {
     );
     assert_eq!(run.live_after, 0, "moved value dropped with the probe");
 
-    let run = probe_run(CacheMode::Ram, 1).await;
+    let run = probe_run(CacheMode::ALWAYS, 1).await;
     assert_eq!(
         run.unique_reads,
         [false],
@@ -193,7 +193,7 @@ async fn last_read_of_non_ram_output_is_uniquely_owned() {
     );
     assert_eq!(run.live_after, 1, "the RAM slot retains the value");
 
-    let run = probe_run(CacheMode::None, 2).await;
+    let run = probe_run(CacheMode::NEVER, 2).await;
     assert_eq!(
         run.unique_reads,
         [false, true],

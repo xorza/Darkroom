@@ -3,11 +3,12 @@ use std::path::Path;
 use common::{TempDir, fs};
 use lens::MlModelPaths;
 use scenarium::{
-    CacheMode, Compound, CompoundId, ConstValue, GraphId, GraphSet, InstancePath, Interface, Node,
-    NodeAddr, NodeId, ProgramId,
+    CacheMode, Compound, CompoundId, ConstValue, GraphId, GraphSet, InstancePath, Interface, Keep,
+    Node, NodeAddr, NodeId, ProgramId,
 };
 
 use crate::core::io::cache;
+use crate::core::io::preferences::memory_headroom::MemoryHeadroom;
 use crate::core::runtime_host::error::NoCompiledWork;
 use crate::core::runtime_host::{CacheRootChange, RuntimeHost};
 use crate::core::wake;
@@ -26,7 +27,11 @@ fn ml_model_default(host: &RuntimeHost, func: &str) -> Option<ConstValue> {
 /// instance of it, as its cache mode is the authored node's.
 #[test]
 fn an_eviction_reaches_the_seed_cone_of_the_installed_program() {
-    let mut host = RuntimeHost::new(wake::internals::noop(), &MlModelPaths::default());
+    let mut host = RuntimeHost::new(
+        wake::internals::noop(),
+        &MlModelPaths::default(),
+        MemoryHeadroom::default(),
+    );
     let func = host
         .library
         .cur()
@@ -83,7 +88,11 @@ fn ml_defaults_follow_preferences_and_the_cache_root_follows_the_document() {
         denoise: denoise_path.as_str().into(),
         star_removal: star_removal_path.as_str().into(),
     };
-    let mut host = RuntimeHost::new(wake::internals::noop(), &ml_models);
+    let mut host = RuntimeHost::new(
+        wake::internals::noop(),
+        &ml_models,
+        MemoryHeadroom::default(),
+    );
 
     // Startup seeds the ML nodes' path inputs from the preferences.
     assert_eq!(
@@ -143,7 +152,10 @@ fn ml_defaults_follow_preferences_and_the_cache_root_follows_the_document() {
         .find_mut(node)
         .unwrap()
         .cache_mut()
-        .unwrap() = CacheMode::Disk;
+        .unwrap() = CacheMode {
+        ram: Keep::Never,
+        disk: true,
+    };
     host.run_once(&disk_backed);
     assert!(
         fs::is_file(first_root.join(".gitignore")),

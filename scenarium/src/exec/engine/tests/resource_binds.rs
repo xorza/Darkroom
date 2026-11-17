@@ -1,4 +1,5 @@
 use super::*;
+use crate::graph::node::Keep;
 use common::MutexExt;
 
 use std::sync::Mutex;
@@ -164,7 +165,11 @@ async fn an_unidentifiable_path_runs_the_node_uncached() {
     assert_lambda_failed(&run, "load_text", "capture");
 
     // The same file reached through a producer's value, known only at the node's turn.
-    let mut e = TestEngine::over(path_graph(&data_path, CacheMode::None, Observed::default()));
+    let mut e = TestEngine::over(path_graph(
+        &data_path,
+        CacheMode::NEVER,
+        Observed::default(),
+    ));
     let Some(locked) = lock() else {
         return;
     };
@@ -217,7 +222,11 @@ async fn wired_path_rekeys_loader_on_file_change() {
     let data = TempFile::new("ram");
     fs::write(data.path(), "v1").unwrap();
     let observed = Observed::default();
-    let mut e = TestEngine::over(path_graph(&data.to_str(), CacheMode::Ram, observed.clone()));
+    let mut e = TestEngine::over(path_graph(
+        &data.to_str(),
+        CacheMode::ALWAYS,
+        observed.clone(),
+    ));
 
     // Cold run: everything computes. The loader's pre-run digest is `None`
     // — the delivered value does not exist yet — so it re-stamps at reach
@@ -284,8 +293,15 @@ async fn wired_path_disk_reuse_survives_reopen_until_file_changes() {
     let path = data.to_str();
 
     // Cold run: computes and stores the blobs.
-    let mut e = TestEngine::over(path_graph(&path, CacheMode::Disk, observed.clone()))
-        .with_disk_store(dir.path());
+    let mut e = TestEngine::over(path_graph(
+        &path,
+        CacheMode {
+            ram: Keep::Never,
+            disk: true,
+        },
+        observed.clone(),
+    ))
+    .with_disk_store(dir.path());
     e.run_sinks().await;
     assert_eq!((observed.loads(), observed.annotates()), (1, 1));
 

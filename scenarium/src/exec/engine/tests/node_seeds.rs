@@ -1,15 +1,15 @@
 use super::*;
 
 /// The sample fixture with nothing retained — every node on
-/// `CacheMode::None`, which is what these tests are about.
+/// `CacheMode::NEVER`, which is what these tests are about.
 fn uncached() -> TestGraph {
     let mut g = TestGraph::sample();
-    g.cache_all(CacheMode::None);
+    g.cache_all(CacheMode::NEVER);
     g
 }
 
 /// Seeding `sum` runs exactly its cone (`get_a`, `get_b`, `sum`) without
-/// overriding any node's `CacheMode::None` retention policy.
+/// overriding any node's `CacheMode::NEVER` retention policy.
 #[tokio::test]
 async fn seeded_run_executes_only_the_cone_without_retaining_outputs() {
     let mut g = uncached();
@@ -34,7 +34,7 @@ async fn seeded_run_executes_only_the_cone_without_retaining_outputs() {
     );
 }
 
-/// A second seeded run obeys `CacheMode::None` and recomputes the cone.
+/// A second seeded run obeys `CacheMode::NEVER` and recomputes the cone.
 #[tokio::test]
 async fn second_seeded_run_obeys_none_cache_mode() {
     // One counter behind both sources, so it reads as "how many source
@@ -46,7 +46,7 @@ async fn second_seeded_run_obeys_none_cache_mode() {
     g.add("sum", NodeSpec::sum);
     g.wire("a", "sum");
     g.wire("b", ("sum", 1));
-    g.cache_all(CacheMode::None);
+    g.cache_all(CacheMode::NEVER);
     let mut e = TestEngine::over(g);
 
     e.run_nodes(["sum"]).await;
@@ -64,7 +64,7 @@ async fn second_seeded_run_obeys_none_cache_mode() {
     assert!(run.holding_ram().is_empty());
 }
 
-/// Node seeds combine with a sink run without retaining `CacheMode::None`
+/// Node seeds combine with a sink run without retaining `CacheMode::NEVER`
 /// values — and the seed overrides `disabled` for that run.
 #[tokio::test]
 async fn node_seed_combines_with_a_sink_run_without_retaining() {

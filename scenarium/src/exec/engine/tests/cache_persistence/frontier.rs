@@ -1,4 +1,5 @@
 use super::*;
+use crate::graph::node::Keep;
 use common::fs;
 
 #[tokio::test]
@@ -10,13 +11,29 @@ async fn explicit_cache_eviction_removes_the_downstream_ram_and_disk_cone() {
     // an upstream sibling *outside* src_a's consumer cone.
     let mut g = TestGraph::new();
     g.add("src_a", |n| {
-        n.counted(1i64, &a_calls).cache(CacheMode::Both)
+        n.counted(1i64, &a_calls).cache(CacheMode {
+            ram: Keep::Always,
+            disk: true,
+        })
     });
     g.add("src_b", |n| {
-        n.counted(11i64, &b_calls).cache(CacheMode::Both)
+        n.counted(11i64, &b_calls).cache(CacheMode {
+            ram: Keep::Always,
+            disk: true,
+        })
     });
-    g.add("sum", |n| n.sum().cache(CacheMode::Both));
-    g.add("mult", |n| n.mult().cache(CacheMode::Both));
+    g.add("sum", |n| {
+        n.sum().cache(CacheMode {
+            ram: Keep::Always,
+            disk: true,
+        })
+    });
+    g.add("mult", |n| {
+        n.mult().cache(CacheMode {
+            ram: Keep::Always,
+            disk: true,
+        })
+    });
     g.add("print", NodeSpec::records);
     g.wire("src_a", "sum");
     g.wire("src_b", ("sum", 1));
@@ -105,7 +122,12 @@ async fn shared_producer_read_by_a_running_consumer_is_not_cut() {
     // src → mult(Disk) → print_mult ;  src → print_direct.
     let mut g = TestGraph::new();
     g.add("src", |n| n.counted(7i64, &calls));
-    g.add("mult", |n| n.mult().cache(CacheMode::Disk));
+    g.add("mult", |n| {
+        n.mult().cache(CacheMode {
+            ram: Keep::Never,
+            disk: true,
+        })
+    });
     g.add("print_mult", NodeSpec::records);
     g.instance("print_direct", "print_mult");
     g.wire("src", "mult");
@@ -143,13 +165,23 @@ async fn chained_disk_cache_hydrates_only_the_live_frontier() {
     let dir = TempDir::new("chain-frontier");
     let calls = Calls::default();
 
-    // src(7) → sum(Both) = 14 → mult(Both) = 98 → print. `Both` so the frontier the run reads is
-    // kept resident — that retention is what this test asserts; pure `Disk` would drop its RAM
+    // src(7) → sum (kept always, on disk) = 14 → mult (likewise) = 98 → print. Kept always so the frontier the run reads is
+    // kept resident — that retention is what this test asserts; disk with RAM kept never would drop its RAM
     // copy.
     let mut g = TestGraph::new();
     g.add("src", |n| n.counted(7i64, &calls));
-    g.add("sum", |n| n.sum().cache(CacheMode::Both));
-    g.add("mult", |n| n.mult().cache(CacheMode::Both));
+    g.add("sum", |n| {
+        n.sum().cache(CacheMode {
+            ram: Keep::Always,
+            disk: true,
+        })
+    });
+    g.add("mult", |n| {
+        n.mult().cache(CacheMode {
+            ram: Keep::Always,
+            disk: true,
+        })
+    });
     g.add("print", NodeSpec::records);
     g.wire("src", "sum");
     g.wire("src", ("sum", 1));
@@ -219,8 +251,8 @@ async fn chained_disk_cache_hydrates_only_the_live_frontier() {
 /// a RAM value produced under a superseded digest: the stale resident value must not mask the
 /// fresh blob.
 ///
-/// The intervening run uses `Ram` mode so it can't overwrite the node's one
-/// disk blob (a `Disk`-mode run would — the blob is keyed by node id).
+/// The intervening run keeps RAM always with no disk so it can't overwrite the node's one
+/// disk blob (a disk-backed run would — the blob is keyed by node id).
 #[tokio::test]
 async fn stale_ram_value_does_not_mask_a_valid_disk_blob() {
     let dir = TempDir::new("flip_back");
@@ -229,7 +261,12 @@ async fn stale_ram_value_does_not_mask_a_valid_disk_blob() {
     // Const binds detach mult from any upstream, so its digest is a pure
     // function of the two consts.
     let mut g = TestGraph::new();
-    g.add("mult", |n| n.mult().cache(CacheMode::Disk));
+    g.add("mult", |n| {
+        n.mult().cache(CacheMode {
+            ram: Keep::Never,
+            disk: true,
+        })
+    });
     g.add("print", NodeSpec::records);
     g.constant("mult", 0, 2i64);
     g.constant("mult", 1, 3i64);
@@ -245,7 +282,7 @@ async fn stale_ram_value_does_not_mask_a_valid_disk_blob() {
     e.edit(|g| {
         g.constant("mult", 0, 5i64);
         g.constant("mult", 1, 7i64);
-        g.cache("mult", CacheMode::Ram);
+        g.cache("mult", CacheMode::ALWAYS);
     });
     let second = e.run_sinks().await;
     assert_eq!(second.logs(), ["35"]);
@@ -257,7 +294,13 @@ async fn stale_ram_value_does_not_mask_a_valid_disk_blob() {
     e.edit(|g| {
         g.constant("mult", 0, 2i64);
         g.constant("mult", 1, 3i64);
-        g.cache("mult", CacheMode::Both);
+        g.cache(
+            "mult",
+            CacheMode {
+                ram: Keep::Always,
+                disk: true,
+            },
+        );
     });
     assert_eq!(
         e.output_i64("mult", 0),
@@ -292,7 +335,12 @@ async fn persist_node_lands_on_disk_before_its_consumer_runs() {
     // mult(const 2, const 3) = 6, Disk → sink. Const binds detach mult from
     // any upstream, so only mult and the sink run.
     let mut g = TestGraph::new();
-    g.add("mult", |n| n.mult().cache(CacheMode::Disk));
+    g.add("mult", |n| {
+        n.mult().cache(CacheMode {
+            ram: Keep::Never,
+            disk: true,
+        })
+    });
     g.add("watch", |n| {
         let (root, flag) = (root.clone(), Arc::clone(&blob_present));
         n.sink().input(DataType::Int).observes(move |_| {
@@ -319,15 +367,20 @@ async fn persist_node_lands_on_disk_before_its_consumer_runs() {
 /// stale w.r.t. its new digest; flushing it stamped with `D_B` would overwrite
 /// the node's blob with bytes a later run at `D_B` would load as a false hit.
 ///
-/// `Both`, so the value is still resident when the flush reaches it, and a plan between the edit
-/// and the flush, so the slot's *current* digest has moved to `D_B` — under `Disk` there would be
+/// Kept always and on disk, so the value is still resident when the flush reaches it, and a plan between the edit
+/// and the flush, so the slot's *current* digest has moved to `D_B` — with RAM kept never there would be
 /// no resident value to mis-stamp, and with no plan the slot would still carry `D_A`.
 #[tokio::test]
 async fn flush_skips_a_value_stale_for_the_current_digest() {
     let dir = TempDir::new("stale_flush");
 
     let mut g = TestGraph::new();
-    g.add("mult", |n| n.mult().cache(CacheMode::Both));
+    g.add("mult", |n| {
+        n.mult().cache(CacheMode {
+            ram: Keep::Always,
+            disk: true,
+        })
+    });
     g.add("print", NodeSpec::records);
     g.constant("mult", 0, 2i64);
     g.constant("mult", 1, 3i64);

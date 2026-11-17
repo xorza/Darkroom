@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 fn shifting_source(cell: Arc<AtomicI64>) -> impl FnOnce(NodeSpec) -> NodeSpec {
     move |n: NodeSpec| {
         n.pure()
-            .cache(CacheMode::Ram)
+            .cache(CacheMode::ALWAYS)
             .output(DataType::Int)
             .compute(move |_| cell.load(Ordering::Relaxed).into())
     }
@@ -20,8 +20,8 @@ async fn simple_compute() {
     let mut g = TestGraph::new();
     g.add("a", shifting_source(Arc::new(AtomicI64::new(2))));
     g.add("b", shifting_source(Arc::clone(&b)));
-    g.add("sum", |n| n.sum().cache(CacheMode::Ram));
-    g.add("mult", |n| n.mult().cache(CacheMode::Ram));
+    g.add("sum", |n| n.sum().cache(CacheMode::ALWAYS));
+    g.add("mult", |n| n.mult().cache(CacheMode::ALWAYS));
     g.add("print", NodeSpec::records);
     g.wire("a", "sum");
     g.wire("b", ("sum", 1));
@@ -86,7 +86,7 @@ async fn unwritten_output_port_is_cleared_before_reexecution() {
             .output(DataType::Int)
             .output(DataType::Int)
             // Retained so the in-place buffer reuse is observable at all.
-            .cache(CacheMode::Ram)
+            .cache(CacheMode::ALWAYS)
             .lambda(async_lambda!(
                 move |Invocation { outputs, .. }| { invocations = Arc::clone(&invocations) } => {
                     let run = invocations.fetch_add(1, Ordering::Relaxed);

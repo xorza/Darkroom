@@ -1,8 +1,9 @@
 use common::fs;
 
 use super::*;
+use crate::graph::node::Keep;
 
-/// A `Both` value remains resident even when a later run neither executes
+/// A value kept always and on disk remains resident even when a later run neither executes
 /// nor reads it.
 #[tokio::test]
 async fn both_value_stays_resident_outside_the_active_frontier() {
@@ -13,9 +14,19 @@ async fn both_value_stays_resident_outside_the_active_frontier() {
     let mut g = TestGraph::new();
     // `src` retains in RAM but never persists — the "non-reloadable value"
     // the last assertion is about.
-    g.add("src", |n| n.counted(1i64, &calls).cache(CacheMode::Ram));
-    g.add("sum", |n| n.sum().cache(CacheMode::Both));
-    g.add("mult", |n| n.mult().cache(CacheMode::Both));
+    g.add("src", |n| n.counted(1i64, &calls).cache(CacheMode::ALWAYS));
+    g.add("sum", |n| {
+        n.sum().cache(CacheMode {
+            ram: Keep::Always,
+            disk: true,
+        })
+    });
+    g.add("mult", |n| {
+        n.mult().cache(CacheMode {
+            ram: Keep::Always,
+            disk: true,
+        })
+    });
     g.add("print", NodeSpec::records);
     g.wire("src", "sum");
     g.wire("src", ("sum", 1));
@@ -67,7 +78,7 @@ async fn both_value_stays_resident_outside_the_active_frontier() {
     );
     assert!(
         e.holds_output("sum"),
-        "the reused Both value remains resident"
+        "the reused value kept always and on disk remains resident"
     );
 }
 
@@ -89,7 +100,7 @@ async fn assert_mode_behavior(mode: CacheMode) {
     );
 
     let run2 = e.run_sinks().await;
-    if mode == CacheMode::None {
+    if mode == CacheMode::NEVER {
         assert_eq!(
             run2.ran(),
             ["src", "mult", "print"],
@@ -159,15 +170,21 @@ async fn assert_mode_behavior(mode: CacheMode) {
     }
 }
 
-/// The four cache modes produce four distinct reuse / retention / persistence behaviors — the
+/// The five cache modes the matrix takes produce five distinct reuse / retention / persistence behaviors — the
 /// parameterized proof that the mode drives the engine.
 #[tokio::test]
 async fn cache_mode_matrix() {
     for mode in [
-        CacheMode::None,
-        CacheMode::Ram,
-        CacheMode::Disk,
-        CacheMode::Both,
+        CacheMode::NEVER,
+        CacheMode::ALWAYS,
+        CacheMode {
+            ram: Keep::Never,
+            disk: true,
+        },
+        CacheMode {
+            ram: Keep::Always,
+            disk: true,
+        },
     ] {
         assert_mode_behavior(mode).await;
     }
@@ -185,8 +202,13 @@ async fn none_upstream_does_not_disable_downstream_disk_cache() {
     // src(1) → a = sum(None) = 2 → b = mult(Disk) = 4 → print.
     let mut g = TestGraph::new();
     g.add("src", |n| n.counted(1i64, &calls));
-    g.add("a", |n| n.sum().cache(CacheMode::None));
-    g.add("b", |n| n.mult().cache(CacheMode::Disk));
+    g.add("a", |n| n.sum().cache(CacheMode::NEVER));
+    g.add("b", |n| {
+        n.mult().cache(CacheMode {
+            ram: Keep::Never,
+            disk: true,
+        })
+    });
     g.add("print", NodeSpec::records);
     g.wire("src", "a");
     g.wire("src", ("a", 1));
@@ -222,10 +244,16 @@ async fn none_upstream_does_not_disable_downstream_disk_cache() {
 /// than waiting for the end of a later run.
 #[tokio::test]
 async fn disabling_ram_retention_releases_resident_value_on_install() {
-    for mode in [CacheMode::None, CacheMode::Disk] {
+    for mode in [
+        CacheMode::NEVER,
+        CacheMode {
+            ram: Keep::Never,
+            disk: true,
+        },
+    ] {
         let dir = TempDir::new(&format!("ram-downgrade-{mode:?}"));
         let mut g = TestGraph::new();
-        g.add("mult", |n| n.mult().cache(CacheMode::Ram));
+        g.add("mult", |n| n.mult().cache(CacheMode::ALWAYS));
         g.add("print", NodeSpec::records);
         g.constant("mult", 0, 2i64);
         g.constant("mult", 1, 3i64);
@@ -245,7 +273,7 @@ async fn disabling_ram_retention_releases_resident_value_on_install() {
 
 /// Turning a node's disk bit on publishes its resident value straight away, instead of leaving it
 /// off disk until the node next recomputes — a run that resolves to a RAM reuse never reaches the
-/// executor's store, so a `Ram → Both` node would stay absent from the store while its inputs
+/// executor's store, so a node turned from RAM alone to RAM and disk would stay absent from the store while its inputs
 /// held still.
 ///
 /// And only the nodes the *installed program* calls disk-backed: `sum` is named
@@ -257,8 +285,8 @@ async fn enabling_disk_persists_the_resident_value_without_a_run() {
     // sum(2, 3) = 5 → mult(·, 4) = 20 → print. Both cacheable nodes start
     // memory-only; the sink is impure, so mult is demanded every run.
     let mut g = TestGraph::new();
-    g.add("sum", |n| n.sum().cache(CacheMode::Ram));
-    g.add("mult", |n| n.mult().cache(CacheMode::Ram));
+    g.add("sum", |n| n.sum().cache(CacheMode::ALWAYS));
+    g.add("mult", |n| n.mult().cache(CacheMode::ALWAYS));
     g.add("print", NodeSpec::records);
     g.constant("sum", 0, 2i64);
     g.constant("sum", 1, 3i64);
@@ -283,8 +311,16 @@ async fn enabling_disk_persists_the_resident_value_without_a_run() {
     );
     assert_eq!(dir.entry_count(), 0);
 
-    // The editor's `↓` chip: Ram → Both, reinstalled, then flushed.
-    e.edit(|g| g.cache("mult", CacheMode::Both));
+    // The editor's disk row: kept always, now on disk too, reinstalled, then flushed.
+    e.edit(|g| {
+        g.cache(
+            "mult",
+            CacheMode {
+                ram: Keep::Always,
+                disk: true,
+            },
+        );
+    });
     e.flush(["mult", "sum"]).await;
     assert_eq!(dir.entry_count(), 1, "exactly one blob was published");
     assert!(
@@ -314,12 +350,19 @@ async fn enabling_disk_persists_the_resident_value_without_a_run() {
 }
 
 /// A persisted node whose cone contains an impure node has digest `None`, so
-/// it's never disk-cached even with `Disk` — on reopen it recomputes.
+/// it's never disk-cached even with the disk bit — on reopen it recomputes.
 #[tokio::test]
 async fn impure_cone_persist_node_is_not_disk_cached() {
     let dir = TempDir::new("impure-cone");
     let calls = Calls::default();
-    let mut g = source_mult_print(CacheMode::Disk, 11, &calls);
+    let mut g = source_mult_print(
+        CacheMode {
+            ram: Keep::Never,
+            disk: true,
+        },
+        11,
+        &calls,
+    );
     g.edit_func("src", |func| func.behavior = FuncBehavior::Impure);
 
     let mut e = TestEngine::over(g).with_disk_store(dir.path());
@@ -375,7 +418,10 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
         g.add("make_blob", move |n: NodeSpec| {
             n.pure()
                 .sink()
-                .cache(CacheMode::Disk)
+                .cache(CacheMode {
+                    ram: Keep::Never,
+                    disk: true,
+                })
                 .output(DataType::Custom(BLOB_TYPE))
                 .lambda(crate::async_lambda!(
                     move |Invocation { outputs, .. }| { counter = recompute.clone() } => {
@@ -418,10 +464,18 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
         "the node recomputes instead of tripping a failed frontier load"
     );
 
-    // Still without the codec, a `Both` value stays in RAM and no blob is
+    // Still without the codec, a value kept always and on disk stays in RAM and no blob is
     // written for it: the store refuses the type before touching the disk.
     fs::remove_file(e.blob_path("make_blob")).unwrap();
-    e.edit(|g| g.cache("make_blob", CacheMode::Both));
+    e.edit(|g| {
+        g.cache(
+            "make_blob",
+            CacheMode {
+                ram: Keep::Always,
+                disk: true,
+            },
+        );
+    });
     e.run_sinks().await;
     assert_eq!(
         recompute.count(),
@@ -437,7 +491,13 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
     // mints the same ids, so the slot and its value carry over.
     e.edit(|g| {
         *g = build(true, &recompute);
-        g.cache("make_blob", CacheMode::Both);
+        g.cache(
+            "make_blob",
+            CacheMode {
+                ram: Keep::Always,
+                disk: true,
+            },
+        );
     });
     let run = e.run_sinks().await;
     assert_eq!(run.cached(), ["make_blob"], "served from RAM");

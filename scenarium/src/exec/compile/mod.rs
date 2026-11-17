@@ -70,6 +70,7 @@ use crate::exec::compile::compiled_graph::{
 };
 use crate::exec::idx::{NodeIdx, OutputAddr};
 use crate::graph::binding::Binding;
+use crate::graph::func::FuncBehavior;
 use crate::graph::graph_set::GraphSet;
 use crate::graph::identity::{CompoundId, EventPort, GraphId, InputPort, NodeId, PortId};
 use crate::graph::instance_path::InstancePath;
@@ -313,7 +314,14 @@ impl Compiler {
                 sink: func.sink(),
                 disabled: pending.disabled,
                 behavior: func.behavior(),
-                cache: cache.join(self.joined_cache[pos]),
+                cache: if func.behavior() == FuncBehavior::Pure && func.outputs().is_empty() {
+                    // A pure sink holds no values, only the digest it last ran under, so keeping
+                    // it costs nothing: in RAM always, and a run whose digest it already holds
+                    // reuses it rather than repeating its effect.
+                    CacheMode::ALWAYS
+                } else {
+                    cache.join(self.joined_cache[pos])
+                },
                 special: node.special(),
                 inputs: node_inputs,
                 outputs: node_outputs,
@@ -379,7 +387,9 @@ impl Compiler {
                     }
                     NodeKind::Instance { compound, cache } => {
                         let inside = frame.level.enter(node.node_id, GraphId::Compound(compound));
-                        if cache != CacheMode::None {
+                        // Joined only where it keeps more than the default the nodes inside
+                        // keep already.
+                        if cache != CacheMode::default() {
                             cached_instances.push(CachedInstance {
                                 inside,
                                 compound,
@@ -418,7 +428,8 @@ impl Compiler {
     fn join_instance_caches(&mut self, source: Source<'_>) {
         let mut joined = mem::take(&mut self.joined_cache);
         joined.clear();
-        joined.resize(self.placed.len(), CacheMode::None);
+        // Keeping nothing is what a join leaves as it found.
+        joined.resize(self.placed.len(), CacheMode::NEVER);
         for instance in &self.cached_instances {
             let outputs = self.outputs_nodes[&instance.compound];
             let graph = source.graphs.graph(instance.inside.graph);

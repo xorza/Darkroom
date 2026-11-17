@@ -233,7 +233,7 @@ pub(crate) mod internals {
                 sink: false,
                 disabled: false,
                 behavior: FuncBehavior::Impure,
-                cache: CacheMode::None,
+                cache: CacheMode::NEVER,
                 special: None,
                 inputs: Span::default(),
                 outputs: Span::default(),

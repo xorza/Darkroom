@@ -8,7 +8,7 @@ use crate::async_lambda;
 use crate::data::const_value::ConstValue;
 use crate::graph::func::lambda::{FuncLambda, internals};
 use crate::graph::identity::{FuncId, NodeId};
-use crate::graph::node::CacheMode;
+use crate::graph::node::{CacheMode, Keep};
 use crate::graph::program_id::ProgramId;
 use crate::internals::program::ProgramBuilder;
 use common::MutexExt;
@@ -77,13 +77,13 @@ async fn runs_in_order_resolving_binds_and_storing_outputs() {
     let mut prog = ProgramBuilder::default();
     let a = prog
         .node()
-        .cache(CacheMode::Ram)
+        .cache(CacheMode::ALWAYS)
         .outputs(1)
         .lambda(producer())
         .add();
     let b = prog
         .node()
-        .cache(CacheMode::Ram)
+        .cache(CacheMode::ALWAYS)
         .input(a.out(0))
         .outputs(1)
         .lambda(increment())
@@ -114,13 +114,13 @@ async fn upstream_error_retires_skipped_reads_without_harming_live_readers() {
     let healthy = prog.node().outputs(1).lambda(producer()).add();
     let failed = prog
         .node()
-        .cache(CacheMode::Ram)
+        .cache(CacheMode::ALWAYS)
         .outputs(1)
         .lambda(failing)
         .add();
     let blocked = prog
         .node()
-        .cache(CacheMode::Ram)
+        .cache(CacheMode::ALWAYS)
         .input(healthy.out(0))
         .input(failed.out(0))
         .outputs(1)
@@ -128,7 +128,7 @@ async fn upstream_error_retires_skipped_reads_without_harming_live_readers() {
         .add();
     let surviving = prog
         .node()
-        .cache(CacheMode::Ram)
+        .cache(CacheMode::ALWAYS)
         .input(healthy.out(0))
         .outputs(1)
         .lambda(relay())
@@ -281,13 +281,13 @@ async fn unbound_output_errors_only_when_demanded() {
     let silent = FuncLambda::stub();
     let a = prog
         .node()
-        .cache(CacheMode::Ram)
+        .cache(CacheMode::ALWAYS)
         .outputs(2)
         .lambda(silent)
         .add();
     let b = prog
         .node()
-        .cache(CacheMode::Ram)
+        .cache(CacheMode::ALWAYS)
         .input(a.out(0))
         .input(a.out(1))
         .outputs(1)
@@ -313,7 +313,7 @@ async fn unbound_output_errors_only_when_demanded() {
     let mut prog = ProgramBuilder::default();
     let skipped = prog
         .node()
-        .cache(CacheMode::Ram)
+        .cache(CacheMode::ALWAYS)
         .outputs(1)
         .lambda(FuncLambda::stub())
         .add();
@@ -331,7 +331,7 @@ async fn unbound_output_errors_only_when_demanded() {
 /// Retention after a run is the cache mode's call, not the reader count's. `Executor::run` does
 /// no end-of-run eviction, so an emptied slot here is the *mid-run* release: a `None` producer is
 /// dropped the moment its last consumer reads it (or, with no consumer, the moment it finishes)
-/// while a `Ram` producer survives both.
+/// while a producer kept always survives both.
 ///
 /// `consumed` picks the shape, since a reader count has to match the wiring: wired is
 /// `a(mode) → b(Ram)` with readers `[1, 1]` (b reads a, and a phantom consumer keeps b
@@ -339,14 +339,14 @@ async fn unbound_output_errors_only_when_demanded() {
 #[tokio::test]
 async fn ram_retention_survives_the_last_read_and_none_does_not() {
     for (mode, consumed) in [
-        (CacheMode::None, true),
-        (CacheMode::Ram, true),
-        (CacheMode::None, false),
-        (CacheMode::Ram, false),
+        (CacheMode::NEVER, true),
+        (CacheMode::ALWAYS, true),
+        (CacheMode::NEVER, false),
+        (CacheMode::ALWAYS, false),
     ] {
         let mut prog = ProgramBuilder::default();
         let a = prog.node().cache(mode).outputs(1).lambda(producer()).add();
-        let b = prog.node().cache(CacheMode::Ram).outputs(1);
+        let b = prog.node().cache(CacheMode::ALWAYS).outputs(1);
         // A consumer reads a's 7 and writes 7+1, so b's value says the read landed.
         let (b, readers, expected_b) = if consumed {
             (b.input(a.out(0)).lambda(increment()), [1, 1], 8)
@@ -403,7 +403,7 @@ async fn a_lambda_reads_the_execution_node_it_is_running_as() {
 }
 
 /// A node seed ("run to this node") demands the node's output but does not
-/// override `CacheMode::None` retention — targeting says *compute this*, not
+/// override `CacheMode::NEVER` retention — targeting says *compute this*, not
 /// *keep this*.
 #[tokio::test]
 async fn a_node_seed_demands_its_output_without_retaining_it() {
@@ -455,7 +455,10 @@ async fn a_reused_output_with_no_consumers_is_reclaimed_immediately() {
     let a = prog
         .node()
         .pure()
-        .cache(CacheMode::Disk)
+        .cache(CacheMode {
+            ram: Keep::Never,
+            disk: true,
+        })
         .outputs(1)
         .lambda(async_lambda!(|_| {
             panic!("a reused node must not invoke its lambda")
@@ -489,7 +492,7 @@ async fn reused_consumer_does_not_delay_last_read_reclamation() {
     let cached = prog
         .node()
         .pure()
-        .cache(CacheMode::Ram)
+        .cache(CacheMode::ALWAYS)
         .input(a.out(0))
         .outputs(1)
         .lambda(relay())
@@ -539,7 +542,7 @@ async fn reuse_survives_failed_upstream_rerun() {
     let b = prog
         .node()
         .pure()
-        .cache(CacheMode::Ram)
+        .cache(CacheMode::ALWAYS)
         .input(a.out(0))
         .outputs(1)
         .lambda(increment())

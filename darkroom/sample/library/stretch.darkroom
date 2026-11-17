@@ -57,7 +57,10 @@
                             ("5d1f119a-d8a7-4fba-b3f9-1a873dd238bc"): (
                                 kind: Body(
                                     source: Func(("c15248e0-006a-4a4a-9aae-b1fc7886dea1")),
-                                    cache: r#None,
+                                    cache: (
+                                        ram: Auto,
+                                        disk: false,
+                                    ),
                                 ),
                                 name: "Auto Stretch",
                                 disabled: false,

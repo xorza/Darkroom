@@ -233,6 +233,9 @@ where
         if let Some(cache) = self.intent.disk_store.take() {
             self.engine.set_disk_store(cache);
         }
+        if let Some(bytes) = self.intent.ram_headroom.take() {
+            self.engine.set_ram_headroom(bytes);
+        }
 
         self.evict_cache().await;
         self.flush_cache().await;

@@ -20,8 +20,9 @@ pub enum FuncValidationError {
     /// names the declaration by its name instead.
     #[error("function id must not be nil")]
     NilId,
-    #[error("function {func_id:?} has no outputs, so it must be impure")]
-    PureWithoutOutputs { func_id: FuncId },
+    /// A pure func with no outputs and no sink computes nothing anyone reads and has no effect.
+    #[error("function {func_id:?} is pure with no outputs and is no sink, so it does nothing")]
+    PureWithoutEffect { func_id: FuncId },
     #[error("function {func_id:?} declares a port no declaration may hold")]
     Ports {
         func_id: FuncId,

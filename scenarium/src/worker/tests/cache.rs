@@ -1,4 +1,5 @@
 use super::*;
+use crate::graph::node::Keep;
 
 use common::fs;
 
@@ -84,13 +85,16 @@ fn disk_cached_graph(calls: &Calls) -> TestGraph {
     let source = calls.returning(7i64);
     graph.add("source", move |node| {
         node.pure()
-            .cache(CacheMode::Ram)
+            .cache(CacheMode::ALWAYS)
             .output(DataType::Int)
             .compute(source)
     });
     graph.add("square", |node| {
         node.pure()
-            .cache(CacheMode::Disk)
+            .cache(CacheMode {
+                ram: Keep::Never,
+                disk: true,
+            })
             .input(DataType::Int)
             .output(DataType::Int)
             .compute(|inputs| {
@@ -105,7 +109,7 @@ fn disk_cached_graph(calls: &Calls) -> TestGraph {
 }
 
 /// The disk cache wires through `SetDiskStore` and persists across worker
-/// restarts: a `Disk` reproducible node's output, stored on a cold run,
+/// restarts: a disk-backed reproducible node's output, stored on a cold run,
 /// reloads on a fresh worker over the same store so its upstream never
 /// recomputes. `SetDiskStore` shares the batch with `Update`, proving it is
 /// applied before the install hydrates.
@@ -161,7 +165,13 @@ async fn a_flush_failure_uses_the_general_worker_error_report() {
     let dir = TempDir::new("flush-error");
     let calls = Calls::default();
     let mut graph = disk_cached_graph(&calls);
-    graph.cache("square", CacheMode::Both);
+    graph.cache(
+        "square",
+        CacheMode {
+            ram: Keep::Always,
+            disk: true,
+        },
+    );
 
     // Compute with no store attached, leaving the value resident and unwritten.
     let mut w = TestWorker::over(graph);
@@ -237,7 +247,10 @@ async fn an_unpersistable_type_is_reported_only_when_the_flush_was_requested() {
     graph.add("make_blob", |node| {
         node.pure()
             .sink()
-            .cache(CacheMode::Both)
+            .cache(CacheMode {
+                ram: Keep::Always,
+                disk: true,
+            })
             .output(DataType::Custom(BLOB_TYPE))
             .lambda(async_lambda!(|Invocation { outputs, .. }| {
                 outputs[0] = Blob::value([1]);
@@ -245,7 +258,7 @@ async fn an_unpersistable_type_is_reported_only_when_the_flush_was_requested() {
             }))
     });
 
-    // Compute with no store attached: the Both value is resident, unwritten.
+    // Compute with no store attached: the value kept always and on disk is resident, unwritten.
     let mut w = TestWorker::over(graph);
     w.send_many([w.update(), TestWorker::sinks()]);
     w.run().await;
@@ -302,7 +315,7 @@ async fn an_install_reports_the_cache_left_after_reconciling() {
     graph.add("heavy", |node| {
         node.pure()
             .sink()
-            .cache(CacheMode::Ram)
+            .cache(CacheMode::ALWAYS)
             .output(DataType::Custom(BLOB_TYPE))
             .lambda(async_lambda!(|Invocation { outputs, .. }| {
                 outputs[0] = Blob::value(vec![0; HEAVY_CPU]);
@@ -350,7 +363,7 @@ async fn an_install_reports_the_cache_left_after_reconciling() {
     w.quiet();
 }
 
-/// `FlushAllCaches` writes resident disk-backed values into the attached store: a `Both`-mode
+/// `FlushAllCaches` writes resident disk-backed values into the attached store: a kept-always, disk-backed
 /// value computed while no store root existed (an unsaved document) would otherwise be a RAM hit
 /// on every later run, which never stores, and recompute on reopen.
 ///
@@ -361,9 +374,15 @@ async fn resident_disk_backed_values_are_flushed_when_asked_and_not_on_a_bare_at
     let dir = TempDir::new("storeswap");
     let calls = Calls::default();
     let mut graph = disk_cached_graph(&calls);
-    graph.cache("square", CacheMode::Both);
+    graph.cache(
+        "square",
+        CacheMode {
+            ram: Keep::Always,
+            disk: true,
+        },
+    );
 
-    // Run with no store root: the Both value stays resident-only.
+    // Run with no store root: the kept-always, disk-backed value stays resident only.
     let mut w = TestWorker::over(graph);
     w.send_many([w.update(), TestWorker::sinks()]);
     w.run().await;
@@ -380,7 +399,7 @@ async fn resident_disk_backed_values_are_flushed_when_asked_and_not_on_a_bare_at
     assert_eq!(
         dir.entry_count(),
         1,
-        "the sweep wrote the resident Both-mode value into the attached store"
+        "the sweep wrote the resident kept-always, disk-backed value into the attached store"
     );
 }
 
@@ -398,7 +417,13 @@ async fn a_batch_resolves_its_graph_before_the_store_it_repoints_to() {
     let incoming = TempDir::new("incoming-doc");
     let calls = Calls::default();
     let mut graph = disk_cached_graph(&calls);
-    graph.cache("square", CacheMode::Both);
+    graph.cache(
+        "square",
+        CacheMode {
+            ram: Keep::Always,
+            disk: true,
+        },
+    );
 
     // The outgoing document: computed against its own store, value resident.
     let mut w = TestWorker::over(graph);

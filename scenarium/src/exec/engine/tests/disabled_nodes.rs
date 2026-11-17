@@ -104,7 +104,7 @@ async fn disabling_a_producer_rekeys_its_cached_consumer() {
             .output(DataType::Int)
             .compute(|inputs| inputs[0].as_i64().unwrap_or_default().into())
     });
-    g.add("mult", |n| n.mult().cache(CacheMode::Ram));
+    g.add("mult", |n| n.mult().cache(CacheMode::ALWAYS));
     g.add("print", NodeSpec::records);
     g.wire("src", "feed");
     g.wire("src", "mult");

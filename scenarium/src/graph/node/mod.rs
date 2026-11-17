@@ -19,62 +19,86 @@ use crate::graph::node_decl::NodeDecl;
 use crate::graph::scope::Scope;
 use ::serde::{Deserialize, Serialize};
 
-/// Where a node's computed output is cached: the storage bits *keep in RAM*
-/// ([`caches_in_ram`](Self::caches_in_ram)) and *persist to disk*
-/// ([`persists_to_disk`](Self::persists_to_disk)) as one enum:
+/// How a node's computed output is kept between runs: how long RAM keeps it, and whether disk
+/// holds a copy. Every combination is a mode a person may want, so the two are fields of their
+/// own.
 ///
-/// - `None` — cache nowhere: never reused across runs, recomputed whenever its value
-///   is needed, and dropped after the run to free RAM.
-/// - `Ram` — current reproducible values stay resident in the live engine and are reused
-///   across runs, but are lost on reload.
-/// - `Disk` — persisted to the disk store (survives reload); its RAM copy
-///   is dropped after the run and reloaded lazily when demanded.
-/// - `Both` — current reproducible values stay resident in RAM *and* on disk: hot reuse
-///   this session plus survival across reloads.
-///
-/// This is a *storage* choice only — it never affects reproducibility. Disk/RAM reuse is
-/// honored only for a node with a content digest (a reproducible cone); a node with an
-/// impure node anywhere upstream has no digest, so its output is released after the run
-/// and never risks serving a stale value, whatever its mode. The on-disk backend is wired
-/// only once a caller attaches a `DiskStore` with a disk root; until
-/// then `Disk`/`Both` degrade to memory-only.
+/// This is a *storage* choice only — it never affects reproducibility. A value is kept only for a
+/// node with a content digest (a reproducible cone); a node with an impure node anywhere upstream
+/// has no digest, so its output is released after the run and never risks serving a stale value,
+/// whatever its mode. The on-disk backend is wired only once a caller attaches a `DiskStore` with a
+/// disk root; until then the disk bit degrades to memory alone.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
-pub enum CacheMode {
+pub struct CacheMode {
+    /// How long RAM keeps the output.
+    pub ram: Keep,
+    /// The output is persisted to the disk store, so it survives a reload; a value RAM does not
+    /// keep is read back from it when a run demands it.
+    pub disk: bool,
+}
+
+/// How long RAM keeps a node's output after the run that made it.
+///
+/// - **Every output is kept by default, until memory runs short**, as Houdini keeps each SOP's
+///   cooked geometry and Nuke its buffer cache, and ComfyUI caches every node's result
+///   ([caching](https://docs.comfy.org/development/comfyui-server/startup-flags)): an edit then
+///   recomputes what it changed and serves the rest. The engine drops the least recently used of
+///   these while the memory the process can still allocate stays under its headroom.
+/// - **`Never` is Houdini's Unload flag** ([flags](https://www.sidefx.com/docs/houdini/network/flags.html)):
+///   a node whose output is cheap to make, or too big to keep, recomputes when demanded.
+/// - **`Always` is Nuke's cached box**: a node whose output is dear to make stays resident whatever
+///   the memory, until its digest changes.
+///
+/// Ordered by how long each keeps, the order [`CacheMode::join`] takes the longer of.
+#[derive(
+    Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Default, PartialOrd, Ord,
+)]
+pub enum Keep {
+    /// Dropped once the run that made it has delivered it.
+    Never,
+    /// Kept until memory runs short, the least recently used dropped first.
     #[default]
-    None,
-    Ram,
-    Disk,
-    Both,
+    Auto,
+    /// Kept whatever the memory.
+    Always,
 }
 
 impl CacheMode {
-    /// Whether a current reproducible value is retained in RAM and reused across runs.
+    /// The default, kept in RAM until memory runs short and on no disk.
+    pub const AUTO: Self = Self {
+        ram: Keep::Auto,
+        disk: false,
+    };
+
+    /// Kept in RAM whatever the memory, on no disk.
+    pub const ALWAYS: Self = Self {
+        ram: Keep::Always,
+        disk: false,
+    };
+
+    /// Kept nowhere: recomputed whenever a run demands it.
+    pub const NEVER: Self = Self {
+        ram: Keep::Never,
+        disk: false,
+    };
+
+    /// Whether a current reproducible value is retained in RAM after its run and reused across
+    /// runs, while memory allows or always.
     pub const fn caches_in_ram(self) -> bool {
-        matches!(self, Self::Ram | Self::Both)
+        !matches!(self.ram, Keep::Never)
     }
 
     /// Whether the node's value is persisted to the disk store, so it survives a reload.
     pub const fn persists_to_disk(self) -> bool {
-        matches!(self, Self::Disk | Self::Both)
+        self.disk
     }
 
-    /// What both modes keep: RAM where either keeps it, disk where either saves it.
+    /// What both modes keep: RAM as long as either keeps it, disk where either saves it.
     #[must_use]
-    pub const fn join(self, other: Self) -> Self {
-        Self::from_bits(
-            self.caches_in_ram() || other.caches_in_ram(),
-            self.persists_to_disk() || other.persists_to_disk(),
-        )
-    }
-
-    /// The inverse of [`caches_in_ram`](Self::caches_in_ram) and
-    /// [`persists_to_disk`](Self::persists_to_disk).
-    pub const fn from_bits(ram: bool, disk: bool) -> Self {
-        match (ram, disk) {
-            (false, false) => Self::None,
-            (true, false) => Self::Ram,
-            (false, true) => Self::Disk,
-            (true, true) => Self::Both,
+    pub fn join(self, other: Self) -> Self {
+        Self {
+            ram: self.ram.max(other.ram),
+            disk: self.disk || other.disk,
         }
     }
 }
@@ -272,7 +296,7 @@ impl Node {
         Self {
             kind: NodeKind::Instance {
                 compound: id,
-                cache: CacheMode::None,
+                cache: CacheMode::AUTO,
             },
             name: String::new(),
             disabled: false,
@@ -338,13 +362,13 @@ pub(crate) mod internals {
 
     impl Node {
         /// A node of func `func_id` with no wiring, before anything resolved its
-        /// func: unnamed and on `CacheMode::None`, as a document saved against a
+        /// func: unnamed and on the default `CacheMode`, as a document saved against a
         /// library that later dropped the func leaves it.
         pub(crate) const fn unresolved(func_id: FuncId) -> Self {
             Self {
                 kind: NodeKind::Body {
                     source: BodySource::Func(func_id),
-                    cache: CacheMode::None,
+                    cache: CacheMode::AUTO,
                 },
                 name: String::new(),
                 disabled: false,

@@ -200,7 +200,7 @@ fn batch_intent_graph_op_drops_node_seeds_its_program_lacks() {
 }
 
 /// Each slot keeps the last message that wrote it — a graph op by identity,
-/// so a burst of edits installs the newest program, and a loop request.
+/// so a burst of edits installs the newest program, a loop request, and a headroom.
 #[test]
 fn batch_intent_last_write_wins_per_slot() {
     let first = empty_compiled();
@@ -235,4 +235,13 @@ fn batch_intent_last_write_wins_per_slot() {
     assert!(matches!(intent.loop_request, Some(LoopCommand::Stop)));
     let intent = batch_intent([WorkerMessage::StopEventLoop, WorkerMessage::StartEventLoop]);
     assert!(matches!(intent.loop_request, Some(LoopCommand::Start)));
+
+    let mut intent = batch_intent([
+        WorkerMessage::SetRamHeadroom(1),
+        WorkerMessage::SetRamHeadroom(2),
+    ]);
+    assert_eq!(intent.ram_headroom, Some(2), "a headroom then a headroom");
+    assert!(!intent.is_empty(), "a headroom is work");
+    intent.clear();
+    assert!(intent.is_empty(), "a cleared batch forgets it");
 }

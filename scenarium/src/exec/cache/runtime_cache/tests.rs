@@ -14,7 +14,7 @@ use crate::exec::compile::compiled_graph::CompiledGraph;
 use crate::exec::idx::NodeIdx;
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::lambda::OutputDemand;
-use crate::graph::node::CacheMode;
+use crate::graph::node::{CacheMode, Keep};
 use crate::internals::program::ProgramBuilder;
 
 fn out() -> Vec<DynamicValue> {
@@ -69,7 +69,7 @@ fn program_of(nodes: impl IntoIterator<Item = (CacheMode, FuncBehavior)>) -> Com
 
 /// `count` `Pure` nodes retained in RAM — what the residency fixtures assume.
 fn ram_program(count: usize) -> CompiledGraph {
-    program_of((0..count).map(|_| (CacheMode::Ram, FuncBehavior::Pure)))
+    program_of((0..count).map(|_| (CacheMode::ALWAYS, FuncBehavior::Pure)))
 }
 
 /// Install `program` and fill the slots it opens, in index order. The only way a test gets slots:
@@ -165,7 +165,7 @@ fn releases_every_resident_value_that_cannot_be_a_future_ram_hit() {
     let cases = [
         (
             "current Ram",
-            CacheMode::Ram,
+            CacheMode::ALWAYS,
             FuncBehavior::Pure,
             Some(cur),
             Some(cur),
@@ -173,7 +173,10 @@ fn releases_every_resident_value_that_cannot_be_a_future_ram_hit() {
         ),
         (
             "current Both",
-            CacheMode::Both,
+            CacheMode {
+                ram: Keep::Always,
+                disk: true,
+            },
             FuncBehavior::Pure,
             Some(cur),
             Some(cur),
@@ -181,7 +184,7 @@ fn releases_every_resident_value_that_cannot_be_a_future_ram_hit() {
         ),
         (
             "impure Ram",
-            CacheMode::Ram,
+            CacheMode::ALWAYS,
             FuncBehavior::Impure,
             None,
             None,
@@ -189,7 +192,7 @@ fn releases_every_resident_value_that_cannot_be_a_future_ram_hit() {
         ),
         (
             "newly impure Ram",
-            CacheMode::Ram,
+            CacheMode::ALWAYS,
             FuncBehavior::Impure,
             Some(cur),
             Some(cur),
@@ -197,7 +200,10 @@ fn releases_every_resident_value_that_cannot_be_a_future_ram_hit() {
         ),
         (
             "superseded Both",
-            CacheMode::Both,
+            CacheMode {
+                ram: Keep::Always,
+                disk: true,
+            },
             FuncBehavior::Pure,
             Some(cur),
             Some(superseded),
@@ -205,7 +211,7 @@ fn releases_every_resident_value_that_cannot_be_a_future_ram_hit() {
         ),
         (
             "current None",
-            CacheMode::None,
+            CacheMode::NEVER,
             FuncBehavior::Pure,
             Some(cur),
             Some(cur),
@@ -213,7 +219,10 @@ fn releases_every_resident_value_that_cannot_be_a_future_ram_hit() {
         ),
         (
             "current Disk",
-            CacheMode::Disk,
+            CacheMode {
+                ram: Keep::Never,
+                disk: true,
+            },
             FuncBehavior::Pure,
             Some(cur),
             Some(cur),
@@ -245,10 +254,22 @@ fn releases_every_resident_value_that_cannot_be_a_future_ram_hit() {
 fn reconcile_applies_ram_mode_downgrades_without_waiting_for_a_run() {
     let digest = Digest([9u8; 32]);
     let cases = [
-        (CacheMode::None, false),
-        (CacheMode::Disk, false),
-        (CacheMode::Ram, true),
-        (CacheMode::Both, true),
+        (CacheMode::NEVER, false),
+        (
+            CacheMode {
+                ram: Keep::Never,
+                disk: true,
+            },
+            false,
+        ),
+        (CacheMode::ALWAYS, true),
+        (
+            CacheMode {
+                ram: Keep::Always,
+                disk: true,
+            },
+            true,
+        ),
     ];
     // One program per install: the values are produced under the first, where
     // every node retains in RAM, and the second is the recompile that downgrades
@@ -256,7 +277,7 @@ fn reconcile_applies_ram_mode_downgrades_without_waiting_for_a_run() {
     let build = |modes: [CacheMode; 4]| program_of(modes.map(|mode| (mode, FuncBehavior::Pure)));
 
     let mut cache = RuntimeCache::default();
-    let retaining = build([CacheMode::Ram; 4]);
+    let retaining = build([CacheMode::ALWAYS; 4]);
     cache.install_for_test(&retaining);
     for (idx, _) in cases.iter().enumerate() {
         make_resident(&mut cache.slots[NodeIdx(idx as u32)], digest);
@@ -284,7 +305,7 @@ fn reconcile_keeps_the_value_when_the_implementation_changes() {
             .id(program_id)
             .func(func_id)
             .pure()
-            .cache(CacheMode::Ram)
+            .cache(CacheMode::ALWAYS)
             .output_types([DataType::Int])
             .add();
         prog.into_program()
@@ -310,7 +331,7 @@ fn reconcile_follows_ids_when_the_index_space_shifts() {
             prog.node()
                 .id(ProgramId::from(NodeId::from_u128(*id)))
                 .pure()
-                .cache(CacheMode::Ram)
+                .cache(CacheMode::ALWAYS)
                 .add();
         }
         prog.into_program()
@@ -561,4 +582,79 @@ fn measure_resident_ram_accounts_each_owner_once_and_dedups_the_total() {
     assert_eq!(cache.ram_seen.capacity(), seen_capacity);
     assert_eq!(shared_calls.load(Ordering::Relaxed), 4);
     assert_eq!(distinct_calls.load(Ordering::Relaxed), 2);
+}
+
+/// Memory pressure drops values kept while memory allows, the least recently used first and the
+/// largest first among those used in one run, until the dropped ones held the deficit: with `a`
+/// (100 B, run 1), `b` (300 B, run 2) and `c` (50 B, run 2), a deficit of 350 drops `a`, then `b`,
+/// 400 B, and keeps `c`; with `a` still read, the same deficit keeps it and drops `b`, then `c`,
+/// 350 B. `d`, kept always, stays though it is the oldest and largest, and a deficit of none drops
+/// nothing.
+#[test]
+fn relief_drops_the_least_recently_used_kept_values_largest_first() {
+    use std::fmt;
+
+    use crate::data::data_type::custom_type::CustomTypeId;
+    use crate::data::dynamic_value::CustomValue;
+
+    #[derive(Debug)]
+    struct Payload(usize);
+    impl fmt::Display for Payload {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "payload")
+        }
+    }
+    impl CustomValue for Payload {
+        fn custom_type_id(&self) -> CustomTypeId {
+            CustomTypeId::from_u128(0x5124)
+        }
+        fn ram_bytes(&self) -> RamUsage {
+            RamUsage {
+                cpu: self.0,
+                gpu: 0,
+            }
+        }
+    }
+
+    let d = Digest([2u8; 32]);
+    let held = |bytes: usize, used_in: u64| {
+        let mut slot = resident_slot(
+            Some(d),
+            Some(d),
+            vec![DynamicValue::Custom(Arc::new(Payload(bytes)))],
+        );
+        slot.used_in = used_in;
+        slot
+    };
+    let program = program_of([
+        (CacheMode::AUTO, FuncBehavior::Pure),
+        (CacheMode::AUTO, FuncBehavior::Pure),
+        (CacheMode::AUTO, FuncBehavior::Pure),
+        (CacheMode::ALWAYS, FuncBehavior::Pure),
+    ]);
+    let filled = || {
+        let mut cache = RuntimeCache::default();
+        install(
+            &mut cache,
+            &program,
+            [held(100, 1), held(300, 2), held(50, 2), held(1000, 0)],
+        );
+        cache
+    };
+    let resident = |cache: &RuntimeCache| {
+        (0..4)
+            .map(|idx| cache.slots[NodeIdx(idx)].output_values().is_some())
+            .collect::<Vec<_>>()
+    };
+    let any = |_| true;
+
+    let mut cache = filled();
+    assert_eq!(cache.relieve(&program, 0, any), 0);
+    assert_eq!(resident(&cache), [true, true, true, true]);
+    assert_eq!(cache.relieve(&program, 350, any), 400);
+    assert_eq!(resident(&cache), [false, false, true, true]);
+
+    let mut cache = filled();
+    assert_eq!(cache.relieve(&program, 350, |idx| idx != NodeIdx(0)), 350);
+    assert_eq!(resident(&cache), [true, false, false, true]);
 }

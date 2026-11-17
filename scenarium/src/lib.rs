@@ -69,7 +69,7 @@ pub use graph::interface_change::{
 };
 pub use graph::manifest::Manifest;
 pub use graph::node::special::{SPECIAL_NODES, SpecialNode};
-pub use graph::node::{Boundary, CacheMode, Node};
+pub use graph::node::{Boundary, CacheMode, Keep, Node};
 pub use graph::node_decl::NodeDecl;
 pub use graph::node_decl::{EventRef, NodeEvents, NodeTriggers};
 pub use graph::node_ref::NodeRef;

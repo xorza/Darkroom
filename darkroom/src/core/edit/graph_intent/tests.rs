@@ -4,7 +4,7 @@ use glam::Vec2;
 use scenarium::{
     Binding, BindingEntry, BindingRejection, Boundary, CacheMode, Compound, CompoundId, ConstValue,
     DataType, DetachedNodeError, EventPort, FuncId, GhostBinding, GraphId, InputDecl, InputPort,
-    InputState, Interface, Library, Node, NodeId, OutputDecl, OutputPort, PlacementRejection,
+    InputState, Interface, Keep, Library, Node, NodeId, OutputDecl, OutputPort, PlacementRejection,
     ProgramShape, Subscription, SubscriptionRejection, Unresolved, internals,
 };
 use scenarium::{PortId, internals::test_graph::TestGraph};
@@ -1182,7 +1182,10 @@ fn each_edit_reverts_and_redoes_the_whole_document() {
             "cache to disk",
             GraphIntent::SetNodeProperty {
                 node_id: b,
-                to: NodeProperty::RuntimeCache(CacheMode::Disk),
+                to: NodeProperty::RuntimeCache(CacheMode {
+                    ram: Keep::Never,
+                    disk: true,
+                }),
             },
         ),
         ("subscribe", subscribe(a, b, true)),
@@ -1358,19 +1361,25 @@ fn set_node_property_commits_and_reverts() {
     let mut fixture = DocumentFixture::default();
     let id = fixture.node_at(Vec2::ZERO);
     let mut document = fixture.document;
-    // Fresh nodes default to no caching (None) and enabled.
+    // Fresh nodes default to keeping their output while memory allows, and enabled.
     assert_eq!(
         document.graphs.main().find(id).unwrap().cache(),
-        Some(CacheMode::None)
+        Some(CacheMode::AUTO)
     );
     assert!(!document.graphs.main().find(id).unwrap().disabled);
 
     // A representative flip of each property, committed then reverted, so each iteration returns
-    // the node to its defaults and the step's captured `from` is always None / enabled.
+    // the node to its defaults and the step's captured `from` is always AUTO / enabled.
     let cases = [
-        NodeProperty::RuntimeCache(CacheMode::Both),
-        NodeProperty::RuntimeCache(CacheMode::Ram),
-        NodeProperty::RuntimeCache(CacheMode::Disk),
+        NodeProperty::RuntimeCache(CacheMode {
+            ram: Keep::Always,
+            disk: true,
+        }),
+        NodeProperty::RuntimeCache(CacheMode::ALWAYS),
+        NodeProperty::RuntimeCache(CacheMode {
+            ram: Keep::Never,
+            disk: true,
+        }),
         NodeProperty::Disabled(true),
     ];
     for to in cases {
@@ -1396,7 +1405,7 @@ fn set_node_property_commits_and_reverts() {
         let node = document.graphs.main().find(id).unwrap();
         assert_eq!(
             node.cache(),
-            Some(CacheMode::None),
+            Some(CacheMode::AUTO),
             "revert restores the cache"
         );
         assert!(!node.disabled, "revert restores the disable flag");
@@ -1404,7 +1413,7 @@ fn set_node_property_commits_and_reverts() {
 
     // Setting a property to the value it already holds is a no-op (no undo entry).
     for to in [
-        NodeProperty::RuntimeCache(CacheMode::None),
+        NodeProperty::RuntimeCache(CacheMode::AUTO),
         NodeProperty::Disabled(false),
     ] {
         assert!(
@@ -1432,7 +1441,7 @@ fn a_cache_mode_on_a_node_with_no_body_is_malformed() {
     assert_eq!(
         GraphIntent::SetNodeProperty {
             node_id,
-            to: NodeProperty::RuntimeCache(CacheMode::Ram),
+            to: NodeProperty::RuntimeCache(CacheMode::ALWAYS),
         }
         .commit_one(&mut document, &fixture.library)
         .unwrap_err(),

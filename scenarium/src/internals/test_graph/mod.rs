@@ -154,7 +154,7 @@ impl TestGraph {
         let source = |value: i64| {
             move |n: NodeSpec| {
                 n.pure()
-                    .cache(CacheMode::Ram)
+                    .cache(CacheMode::ALWAYS)
                     .output(DataType::Int)
                     .compute(move |_| ConstValue::Float(value as f64))
             }
@@ -163,9 +163,9 @@ impl TestGraph {
         let mut g = Self::new();
         g.add("get_a", source(a));
         g.add("get_b", source(b));
-        g.add("sum", |n| n.sum().cache(CacheMode::Ram));
-        g.add("mult", |n| n.mult().cache(CacheMode::Ram));
-        g.add("Print", |n| n.records().cache(CacheMode::Ram));
+        g.add("sum", |n| n.sum().cache(CacheMode::ALWAYS));
+        g.add("mult", |n| n.mult().cache(CacheMode::ALWAYS));
+        g.add("Print", |n| n.records().cache(CacheMode::ALWAYS));
         g.wire("get_a", "sum");
         g.wire("get_b", ("sum", 1));
         g.wire("sum", "mult");
@@ -441,8 +441,11 @@ pub struct NodeSpec {
 impl NodeSpec {
     fn new(name: &str, func_id: FuncId) -> Self {
         // `Library::add` rejects a func with no implementation, and most fixtures never invoke one.
+        // A fixture node keeps nothing unless its test says so, so a test reads which nodes a run
+        // recomputes from its own lines; keeping by default is a test of its own.
         Self {
-            func: Func::builder(func_id, name, FuncLambda::stub()),
+            func: Func::builder(func_id, name, FuncLambda::stub())
+                .default_cache_mode(CacheMode::NEVER),
         }
     }
 

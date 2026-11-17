@@ -1,6 +1,6 @@
 use glam::{UVec2, Vec2};
 use palantir::{EditableLabel, PointerButton};
-use scenarium::{CacheMode, NodeAddr, NodeId, PortId, TriggerPort};
+use scenarium::{CacheMode, Keep, NodeAddr, NodeId, PortId, TriggerPort};
 use scenarium::{GraphId, internals::test_graph::TestGraph};
 use std::mem;
 use std::sync::Arc;
@@ -142,9 +142,13 @@ struct Pick {
 }
 
 /// The cache menu's rows, in order.
-const RAM: usize = 0;
-const DISK: usize = 1;
-const CLEAR: usize = 2;
+/// The cache menu's rows, top to bottom: how long RAM keeps the output, then the disk bit, then
+/// Clear cache.
+const AUTO: usize = 0;
+const ALWAYS: usize = 1;
+const NEVER: usize = 2;
+const DISK: usize = 3;
+const CLEAR: usize = 4;
 
 /// Open the cache menu of the fixture's only node, sitting at `from`, and pick its `row`.
 fn pick(from: CacheMode, row: usize) -> Pick {
@@ -169,7 +173,7 @@ fn pick(from: CacheMode, row: usize) -> Pick {
     h.frame();
     h.prime(2);
     let rows = h.menu_rows(Vec2::new(button.min.x, button.max().y));
-    assert_eq!(rows.len(), 3, "RAM, disk and clear: {rows:?}");
+    assert_eq!(rows.len(), 5, "three RAM rows, disk and clear: {rows:?}");
     mem::take(&mut h.commands);
     h.ui.click(rows[row]);
     let intents = h.frame();
@@ -199,21 +203,37 @@ fn flushed(pick: &Pick) -> bool {
     })
 }
 
-/// Each row flips its own bit and keeps the other. Turning the disk bit on also flushes what
-/// the node holds in RAM to disk; turning it off, or flipping RAM, flushes nothing.
+/// A RAM row sets how long RAM keeps the output and keeps the disk bit, and the row already
+/// picked edits nothing. The disk row flips its bit and keeps the RAM choice; turning it on also
+/// flushes what the node holds in RAM to disk, and turning it off or picking RAM flushes nothing.
 #[test]
-fn each_cache_row_flips_its_bit_and_the_disk_row_flushes_when_it_turns_on() {
+fn each_cache_row_sets_its_choice_and_the_disk_row_flushes_when_it_turns_on() {
+    let mode = |ram, disk| CacheMode { ram, disk };
     let cases = [
-        (CacheMode::None, RAM, CacheMode::Ram, false),
-        (CacheMode::Both, RAM, CacheMode::Disk, false),
-        (CacheMode::None, DISK, CacheMode::Disk, true),
-        (CacheMode::Ram, DISK, CacheMode::Both, true),
-        (CacheMode::Disk, DISK, CacheMode::None, false),
-        (CacheMode::Both, DISK, CacheMode::Ram, false),
+        (CacheMode::AUTO, ALWAYS, Some(CacheMode::ALWAYS), false),
+        (CacheMode::NEVER, AUTO, Some(CacheMode::AUTO), false),
+        (
+            mode(Keep::Always, true),
+            NEVER,
+            Some(mode(Keep::Never, true)),
+            false,
+        ),
+        (CacheMode::ALWAYS, ALWAYS, None, false),
+        (CacheMode::AUTO, DISK, Some(mode(Keep::Auto, true)), true),
+        (
+            mode(Keep::Always, true),
+            DISK,
+            Some(CacheMode::ALWAYS),
+            false,
+        ),
     ];
     for (from, row, to, flushes) in cases {
         let pick = pick(from, row);
-        assert_eq!(cache_edits(&pick), [to], "{from:?}, row {row}");
+        assert_eq!(
+            cache_edits(&pick),
+            Vec::from_iter(to),
+            "{from:?}, row {row}"
+        );
         assert_eq!(
             flushed(&pick),
             flushes,
@@ -226,7 +246,7 @@ fn each_cache_row_flips_its_bit_and_the_disk_row_flushes_when_it_turns_on() {
 /// Clear cache evicts the node's caches and edits nothing.
 #[test]
 fn clear_cache_evicts_and_edits_nothing() {
-    let pick = pick(CacheMode::Ram, CLEAR);
+    let pick = pick(CacheMode::ALWAYS, CLEAR);
     assert!(cache_edits(&pick).is_empty(), "{:?}", pick.intents);
     assert!(
         matches!(pick.commands[..], [AppCommand::Run(RunCommand::EvictCache(addr))] if addr == NodeAddr::new(GraphId::Main, pick.node_id)),
@@ -282,8 +302,8 @@ fn the_inspect_button_selects_its_node_and_opens_one_inspector() {
     }
 }
 
-/// A preview node is a sink recomputed every run, and says so with one kind mark between its
-/// title and the controls pinned right, not a mark for each kind.
+/// A preview node is a sink, and says so with one kind mark between its title and the controls
+/// pinned right, not a mark for each kind.
 #[test]
 fn a_preview_node_shows_one_kind_mark_after_its_title() {
     let mut fixture = DocumentFixture::default();

@@ -554,8 +554,8 @@ fn a_new_instance_takes_its_interface_defaults() {
     );
     assert_eq!(
         node.cache(),
-        Some(CacheMode::None),
-        "a new instance keeps nothing of what leaves it"
+        Some(CacheMode::AUTO),
+        "a new instance keeps what leaves it as any node does, while memory allows"
     );
 }
 

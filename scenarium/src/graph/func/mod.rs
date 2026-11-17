@@ -18,7 +18,12 @@ pub enum FuncBehavior {
     /// Could return different values for the same inputs.
     #[default]
     Impure,
-    /// Always returns the same values for the same inputs.
+    /// Always returns the same values for the same inputs. A sink with no outputs is pure when
+    /// running it again on the same inputs changes nothing, as a display shows what it already
+    /// shows: a run whose inputs fold to the digest it last ran under skips it, and so pulls
+    /// nothing upstream for it, as TouchDesigner cooks a requested node only for a reason
+    /// ([cook](https://derivative.ca/UserGuide/Cook)) and Nuke's viewer reuses what an op's hash
+    /// already drew ([hashing](https://learn.foundry.com/nuke/developers/90/ndkdevguide/advanced/hashing.html)).
     Pure,
 }
 
@@ -51,15 +56,15 @@ pub struct Func {
 }
 
 impl Func {
-    /// Start a func declaration around its implementation. Defaults: `Impure`, non-sink, cached
-    /// nowhere, with no category, ports or events.
+    /// Start a func declaration around its implementation. Defaults: `Impure`, non-sink, kept in
+    /// RAM while memory allows ([`CacheMode::AUTO`]), with no category, ports or events.
     pub fn builder(id: FuncId, name: impl Into<String>, lambda: FuncLambda) -> FuncBuilder {
         FuncBuilder {
             id,
             name: name.into(),
             category: String::new(),
             sink: false,
-            default_cache_mode: CacheMode::None,
+            default_cache_mode: CacheMode::AUTO,
             behavior: FuncBehavior::Impure,
             description: None,
             ports: Ports::default(),

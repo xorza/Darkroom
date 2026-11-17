@@ -68,7 +68,7 @@ async fn event_sources_collects_nodes_with_subscribers() {
 async fn bootstrap_prepares_events_and_bypasses_source_cache() {
     let EventPair { mut g, calls } = event_pair();
     g.edit_func("emit", |func| func.behavior = FuncBehavior::Pure);
-    g.cache("emit", CacheMode::Ram);
+    g.cache("emit", CacheMode::ALWAYS);
     let mut e = TestEngine::over(g);
 
     let tick = e.graph.event("emit", 0);

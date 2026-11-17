@@ -5,7 +5,7 @@ use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use common::ErrorChain;
+use common::{ErrorChain, SystemMemory};
 use lens::MlModelPaths;
 use scenarium::DiskStore;
 use scenarium::{CompiledGraph, Compiler, DynamicValue, WorkerExited, WorkerReport};
@@ -13,6 +13,7 @@ use scenarium::{GraphSet, InstancePath, NodeAddr, ProgramId};
 
 use crate::core::document::Document;
 use crate::core::io::cache;
+use crate::core::io::preferences::memory_headroom::MemoryHeadroom;
 use crate::core::runtime_host::error::NoCompiledWork;
 use crate::core::runtime_library::RuntimeLibrary;
 use crate::core::wake::Wake;
@@ -28,9 +29,12 @@ pub(crate) struct RuntimeHost {
     /// repeated [`set_document_cache`](Self::set_document_cache) can tell
     /// whether the root changed.
     disk_root: Option<DiskRoot>,
-    /// Whether the last compiled program holds a disk-backed (`Disk`/`Both`) node, the one kind
-    /// whose values reach the store.
+    /// Whether the last compiled program holds a disk-backed node, the one kind whose values reach
+    /// the store.
     disk_backed: bool,
+    /// The memory the process could allocate at launch, which an automatic headroom is a share
+    /// of: read once, as the free memory a run leaves behind is what the headroom measures.
+    allocatable_at_launch: u64,
     /// Long-lived so the lowering scratch is reused across compiles.
     compiler: Compiler,
 }
@@ -56,7 +60,7 @@ enum CacheRootChange {
     /// and refills lazily, per [`cache::root`].
     Repointed,
     /// A document that had nowhere to persist gained a root: the first save of an unsaved
-    /// document. **The one transition that owes a flush**: its `Both`-mode values were computed
+    /// document. **The one transition that owes a flush**: its values kept in RAM and on disk were computed
     /// memory-only, and a RAM hit never stores, so without one they would be served from RAM for
     /// the session and silently recompute on reopen.
     Gained,
@@ -82,8 +86,8 @@ struct NodeWork {
 
 impl RuntimeHost {
     /// Assemble the func library, its ML nodes defaulting to `ml_models`, and
-    /// spin up the evaluation worker, which is woken through `wake`.
-    pub(crate) fn new(wake: Wake, ml_models: &MlModelPaths) -> Self {
+    /// spin up the evaluation worker, which is woken through `wake` and keeps `headroom` free.
+    pub(crate) fn new(wake: Wake, ml_models: &MlModelPaths, headroom: MemoryHeadroom) -> Self {
         let library = RuntimeLibrary::new(ml_models);
         let worker = WorkerBridge::new(wake);
         let host = Self {
@@ -91,11 +95,20 @@ impl RuntimeHost {
             worker,
             disk_root: None,
             disk_backed: false,
+            allocatable_at_launch: SystemMemory::available(),
             compiler: Compiler::default(),
         };
         // Memory-only until a document has a path; `set_document_cache` repoints the root.
         host.sync_worker_disk_store();
+        host.set_memory_headroom(headroom);
         host
+    }
+
+    /// Keep `headroom` of memory free for everything else, past which the worker drops the kept
+    /// node outputs used least recently.
+    pub(crate) fn set_memory_headroom(&self, headroom: MemoryHeadroom) {
+        let bytes = headroom.bytes(self.allocatable_at_launch);
+        self.dispatch(|worker| worker.set_ram_headroom(bytes));
     }
 
     /// Re-seed the ML nodes' model-path defaults from `ml_models`.
@@ -153,7 +166,7 @@ impl RuntimeHost {
     }
 
     /// Point the disk cache at `document_path`'s project-local store (`<stem>.<extension>-cache/`
-    /// beside the file), so disk-backed (`Disk`/`Both`) nodes reload across sessions. `None` (an
+    /// beside the file), so disk-backed nodes reload across sessions. `None` (an
     /// unsaved document) is memory-only. Explicit-path cache nodes are unaffected: they always use
     /// their own path.
     ///
