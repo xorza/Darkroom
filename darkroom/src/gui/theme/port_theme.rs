@@ -16,7 +16,7 @@ use crate::gui::theme::palette::Palette;
 pub(crate) struct PortTheme {
     /// Color for an untyped (`Any`) input port. No output is untyped.
     pub(crate) input: RgbaF32,
-    /// Event emitter glyphs, subscription pins, and event wires — distinct
+    /// Event glyphs, trigger glyphs, and event wires — distinct
     /// from the type-colored data ports.
     pub(crate) event: RgbaF32,
     /// Port + event label ink, de-emphasized against the value/editor text so each port row has

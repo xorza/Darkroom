@@ -448,7 +448,7 @@ impl Remapped {
             }
             let landing = sides.events.get(subscription.event.event);
             (
-                Subscription::new(EventPort::new(node_id, landing.id()), subscription.listener),
+                Subscription::new(EventPort::new(node_id, landing.id()), subscription.trigger),
                 Some(landing),
             )
         };

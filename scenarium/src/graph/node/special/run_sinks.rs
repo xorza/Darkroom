@@ -3,8 +3,8 @@
 //! seeds the run with *every* sink node, re-running the whole graph, rather than its own
 //! (empty) data cone.
 //!
-//! It is a `sink` because only sink nodes are event subscribers (the editor renders a
-//! subscription pin for them alone, and `collect_roots` seeds runs from them). A normal sink
+//! It is a `sink` because a func has a trigger only as a sink (the editor renders one for sinks
+//! alone, and `collect_roots` seeds runs from them). A normal sink
 //! subscriber runs its own upstream cone; this one has none, so the planner promotes its firing
 //! into a full sink run (see `exec::schedule::RunSchedule::collect_roots`). Its lambda is a
 //! no-op, but the node still runs so it lights up in the editor like any other sink.
@@ -51,7 +51,7 @@ mod tests {
         assert!(func.inputs().is_empty());
         assert!(func.outputs().is_empty());
         assert!(func.events().is_empty());
-        // Only sinks subscribe, so the editor renders a subscription pin.
+        // Only a sink has a trigger, so the editor renders one.
         assert!(func.sink());
     }
 }

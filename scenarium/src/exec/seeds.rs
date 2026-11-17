@@ -11,10 +11,10 @@ use crate::graph::program_id::ProgramId;
 /// loop fires and the sources a loop start initializes.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct RunSeeds {
-    /// Include all sink nodes — the ordinary "produce the outputs" trigger.
+    /// Include all sink nodes — the ordinary "produce the outputs" run.
     pub(crate) sinks: bool,
     /// Include every node owning a subscribed event so it initializes the
-    /// shared state and runtime triggers that drive the event loop.
+    /// shared state and arms the events that drive the event loop.
     pub(crate) event_sources: bool,
     /// Run the subscribers of these specific fired events, each one the installed program
     /// declares.

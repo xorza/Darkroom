@@ -11,7 +11,7 @@ use palantir::{
     Modifiers, Panel, Separator, SizeSpec, SplitSide, Ui, VAlign, Visibility, WidgetId,
 };
 
-use scenarium::{CacheMode, GraphId, NodeId};
+use scenarium::{CacheMode, GraphId, NodeId, TriggerPort};
 
 use crate::core::document::inspect_target::InspectTarget;
 use crate::core::document::item_id::ItemId;
@@ -37,29 +37,23 @@ use crate::gui::widgets::support;
 /// editor does not collapse to a caret when the draft is emptied.
 const NODE_NAME_MIN_WIDTH: f32 = 40.0;
 
-/// One whole-node event-subscription pin: an event-colored triangle behind the node's top-left
-/// corner, its apex pointing up-left toward the incoming wire. Recorded by
-/// `NodeUi::draw_node` immediately before its node's body, so it peeks out from behind the
-/// corner while keeping the node stack's paint order and the cull decision. The
-/// `port_glyph::HIT_SCALE`-grown box is centered on the corner (world coords) while the
-/// triangle paints port-sized, the generous hit box the port circles get. It is both a drop
-/// target for an emitter's event wire and a drag source: pulling from the protruding half
-/// starts a subscription wire aimed at an emitter (see `SubscriptionUi`); the body-covered
-/// half yields presses to the node, while drop-snapping (rect-based) accepts the whole box.
-/// `hover` tints the triangle as drop feedback.
-pub(super) fn subscription_pin(
-    ui: &mut Ui,
-    node: NodeCtx<'_>,
-    hover: Hover,
-    visibility: Visibility,
-) {
+/// A node's own trigger: an event-colored triangle behind the node's top-left corner, its apex
+/// pointing up-left toward the incoming wire. Recorded by `NodeUi::draw_node` immediately before
+/// its node's body, so it peeks out from behind the corner while keeping the node stack's paint
+/// order and the cull decision. The `port_glyph::HIT_SCALE`-grown box is centered on the corner
+/// (world coords) while the triangle paints port-sized, the generous hit box the port circles
+/// get. It is both a drop target for an event wire and a drag source: pulling from the protruding
+/// half starts an event wire aimed at an event (see `SubscriptionUi`); the body-covered half
+/// yields presses to the node, while drop-snapping (rect-based) accepts the whole box. `hover`
+/// tints the triangle as drop feedback.
+pub(super) fn own_trigger(ui: &mut Ui, node: NodeCtx<'_>, hover: Hover, visibility: Visibility) {
     let theme = node.theme();
-    // The emitter arrow turned an eighth of a turn, so it points down-right into
+    // The event arrow turned an eighth of a turn, so it points down-right into
     // its node along the event wire arriving from the upper left, as Unreal
     // points an input exec pin along the flow. Placed by its grown box's center
     // rather than in flow, so it straddles the node's top-left corner.
     PortGlyph::arrow(
-        wid::subscription_glyph(node.graph_ctx.graph(), node.node_id),
+        wid::trigger_glyph(node.graph_ctx.graph(), TriggerPort::from(node.node_id)),
         theme.port.size,
         hover.lift(theme.port.event),
     )
@@ -67,18 +61,18 @@ pub(super) fn subscription_pin(
     .centered_on(node.pos)
     .visibility(visibility)
     .tooltip(Some(
-        "Event subscription — drag to an emitter, or drop an event wire here",
+        "Trigger — drag to an event, or drop an event wire here",
     ))
     .show(ui, theme);
 }
 
-/// The ghost pin of a node a ghost subscription ends on and that draws no pin of its own: the
-/// subscription pin's arrow in the ghost ink, where nothing starts or lands.
-pub(super) fn ghost_pin(ui: &mut Ui, node: NodeCtx<'_>, hover: Hover, visibility: Visibility) {
+/// The ghost trigger of a node a ghost subscription ends on and that has no trigger of its own:
+/// the trigger's arrow in the ghost ink, where nothing starts or lands.
+pub(super) fn ghost_trigger(ui: &mut Ui, node: NodeCtx<'_>, hover: Hover, visibility: Visibility) {
     let theme = node.theme();
-    let ink = color::wash(theme.port.event, GHOST_PIN_INK, theme.canvas.bg);
+    let ink = color::wash(theme.port.event, GHOST_TRIGGER_INK, theme.canvas.bg);
     PortGlyph::arrow(
-        wid::ghost_subscription_glyph(node.graph_ctx.graph(), node.node_id),
+        wid::ghost_trigger_glyph(node.graph_ctx.graph(), node.node_id),
         theme.port.size,
         hover.lift(ink),
     )
@@ -87,18 +81,19 @@ pub(super) fn ghost_pin(ui: &mut Ui, node: NodeCtx<'_>, hover: Hover, visibility
     .visibility(visibility)
     .tooltip(
         node.tooltips().then_some(
-            "A subscription kept as a ghost ends here: this node no longer hears events",
+            "A subscription kept as a ghost ends here: this node no longer has a trigger",
         ),
     )
     .show(ui, theme);
 }
 
-/// How much of the event ink a ghost pin keeps over the canvas: dimmed, as it is kept, not live.
-const GHOST_PIN_INK: f32 = 0.55;
+/// How much of the event ink a ghost trigger keeps over the canvas: dimmed, as it is kept, not
+/// live.
+const GHOST_TRIGGER_INK: f32 = 0.55;
 
 /// The header row: the run button, the title and its kind mark, then, pinned to the right edge
-/// by a `FILL` spacer, the disable button, the cache button and the inspect button. The
-/// subscription pin is not drawn here: it records before the node bodies.
+/// by a `FILL` spacer, the disable button, the cache button and the inspect button. The node's
+/// own trigger is not drawn here: it records before the node bodies.
 pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     let (theme, node) = (record.node.theme(), record.node);
     Panel::hstack()

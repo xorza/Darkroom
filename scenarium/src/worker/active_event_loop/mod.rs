@@ -6,7 +6,7 @@ use tokio::task;
 use tokio::task::{Id, JoinSet};
 
 use crate::exec::program_event::ProgramEvent;
-use crate::exec::report::event_trigger::EventTrigger;
+use crate::exec::report::armed_event::ArmedEvent;
 use crate::graph::program_id::ProgramId;
 use crate::worker::pause_gate::PauseGate;
 
@@ -32,18 +32,18 @@ pub(crate) struct ActiveEventLoop {
 }
 
 impl ActiveEventLoop {
-    pub(crate) fn start(event_triggers: Vec<EventTrigger>, pause_gate: &PauseGate) -> Self {
-        assert!(!event_triggers.is_empty());
+    pub(crate) fn start(armed_events: Vec<ArmedEvent>, pause_gate: &PauseGate) -> Self {
+        assert!(!armed_events.is_empty());
 
         let (event_tx, events) = channel::<ProgramEvent>(EVENT_LOOP_BACKPRESSURE);
         let mut tasks = JoinSet::new();
-        let mut task_nodes = HashMap::with_capacity(event_triggers.len());
+        let mut task_nodes = HashMap::with_capacity(armed_events.len());
 
-        for EventTrigger {
+        for ArmedEvent {
             event,
             lambda,
             state,
-        } in event_triggers
+        } in armed_events
         {
             let program_id = event.program_id;
             let task = tasks.spawn({

@@ -1900,7 +1900,7 @@ fn a_wire_onto_a_const_only_input_is_refused() {
 
 /// Every port an intent writes is held to the node's declaration: the probe, a sink, declares
 /// input, output and event 1, so port 1 of each commits and port 2 is refused, on an existing node
-/// and on an insertion's seed alike; a func that is no sink has no pin to subscribe. Clearing an
+/// and on an insertion's seed alike; a func that is no sink has no trigger to subscribe. Clearing an
 /// undeclared input is not a write.
 #[test]
 fn ports_the_declaration_lacks_are_refused() {
@@ -1986,7 +1986,7 @@ fn ports_the_declaration_lacks_are_refused() {
             },
             MalformedIntent::RejectedSubscription {
                 subscription: Subscription::new(EventPort::new(producer, PortId::new(1)), deaf),
-                rejection: SubscriptionRejection::PinlessSubscriber,
+                rejection: SubscriptionRejection::UndeclaredTrigger,
             },
         ),
     ];

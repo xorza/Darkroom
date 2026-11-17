@@ -25,7 +25,7 @@ struct SingleLoop {
 fn start_single_event_loop(lambda: EventLambda, pause_gate: &PauseGate) -> SingleLoop {
     let program_id = ProgramId::from(NodeId::unique());
     let active = ActiveEventLoop::start(
-        vec![EventTrigger {
+        vec![ArmedEvent {
             event: ProgramEvent {
                 program_id,
                 event_idx: 0,

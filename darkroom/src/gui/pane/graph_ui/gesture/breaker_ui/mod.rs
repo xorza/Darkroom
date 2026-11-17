@@ -121,7 +121,7 @@ fn release(scribble: &mut Scribble, graph: GraphId, out: &mut Requests) {
     // it), so skip any whose emitter or subscriber is doomed, to avoid redundant history.
     for s in broken_subscriptions.drain(..) {
         if broken_node_ids.contains(&s.event.node_id)
-            || broken_node_ids.contains(&s.listener.node_id())
+            || broken_node_ids.contains(&s.trigger.node_id)
         {
             continue;
         }

@@ -511,6 +511,44 @@ fn a_wire_dropped_on_the_outputs_node_adds_an_interface_output() {
     );
 }
 
+/// A ghost subscription on an `Outputs` node's trigger, whose interface event is gone, draws no
+/// ghost trigger at the node's corner: trigger 1 there is a row's, not the node's own.
+#[test]
+fn an_outputs_nodes_lost_trigger_is_no_corner_ghost() {
+    use scenarium::{
+        EventPort, GhostSubscription, Interface, Subgraph, SubgraphId, Subscription,
+        SubscriptionState, TriggerPort,
+    };
+
+    use crate::core::document::internals::insert_subgraph;
+
+    let mut fixture = DocumentFixture::default();
+    let id = SubgraphId::from_u128(1);
+    let mut subgraph = Subgraph::new("inner", Interface::default());
+    let inside = subgraph.graph.add(fixture.plain_node());
+    let outputs = subgraph.outputs_node();
+    subgraph.graph.set_subscription_state(
+        Subscription::new(
+            EventPort::new(inside, PortId::new(1)),
+            TriggerPort::new(outputs, TriggerPort::NODE),
+        ),
+        SubscriptionState::Ghost(GhostSubscription::default()),
+    );
+    insert_subgraph(&mut fixture.document, id, subgraph);
+    let graph = GraphId::Subgraph(id);
+    let mut test = SessionHarness::new(fixture.with_tab(TabRef::Graph(graph)));
+    test.prime(2);
+    assert!(
+        test.ui.rect(wid::body(graph, outputs)).is_some(),
+        "premise: the Outputs node shows"
+    );
+    assert!(
+        test.ui
+            .rect(wid::ghost_trigger_glyph(graph, outputs))
+            .is_none()
+    );
+}
+
 /// An edit the document's rules refuse reaches the shell as the status line naming why: here a
 /// boundary node's removal, which writes nothing.
 #[test]

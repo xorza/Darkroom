@@ -66,8 +66,8 @@ pub(crate) struct Palette {
     pub(crate) checker_dark: RgbaF32,
     /// Color for an untyped (`Any`) input port.
     pub(crate) input_port: RgbaF32,
-    /// Event emitters, subscription pins and event wires: one white, as Unreal draws its
-    /// execution pins, so the trigger machinery reads as one family.
+    /// Events, triggers and event wires: one white, as Unreal draws its execution pins, so the
+    /// event machinery reads as one family.
     pub(crate) event_port: RgbaF32,
     /// Port and event label ink.
     pub(crate) port_label: RgbaF32,

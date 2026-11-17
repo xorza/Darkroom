@@ -28,9 +28,8 @@ pub(crate) struct CanvasTheme {
     pub(crate) cut_bar_width: f32,
     /// The scribble that cuts wires.
     pub(crate) breaker_stroke: RgbaF32,
-    /// A wire's width, and every mark drawn at wire weight: the drag preview, the subscription
-    /// pin's leader and the breaker scribble that cuts them, so the blade reads at the weight of
-    /// what it severs.
+    /// A wire's width, and every mark drawn at wire weight: the drag preview and the breaker
+    /// scribble that cuts them, so the blade reads at the weight of what it severs.
     pub(crate) wire: f32,
     /// The dash a ghost wire breaks into, at 100 % zoom: a dash and a gap of the same length,
     /// which the wire's round caps close by its width.
@@ -70,7 +69,7 @@ impl CanvasTheme {
     }
 }
 
-/// A wire's width, which the drag preview, the pin leader and the breaker scribble share, as
+/// A wire's width, which the drag preview and the breaker scribble share, as
 /// Blender's links. Refused: 2 px, which thinned to 1 px at 50 %, and 3 px, which made crossings
 /// busy beside 12 px ports.
 const WIRE: f32 = 2.5;

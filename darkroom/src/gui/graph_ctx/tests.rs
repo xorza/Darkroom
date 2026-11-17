@@ -1,9 +1,8 @@
 use scenarium::internals::test_graph::TestGraph;
 use scenarium::{
-    CacheMode, DataType, EventPort, FuncId, Graph, InstancePath, Listener, Node, NodeId, ProgramId,
-    internals,
+    CacheMode, DataType, EventPort, FuncId, Graph, InstancePath, Node, NodeId, ProgramId, internals,
 };
-use scenarium::{PortId, internals::test_graph::NodeSpec};
+use scenarium::{PortId, TriggerPort, internals::test_graph::NodeSpec};
 
 use crate::core::document::internals::DocumentFixture;
 use crate::core::document::tab_ref::TabRef;
@@ -261,11 +260,11 @@ fn a_node_shows_the_ghost_ports_its_ghosts_name() {
             (EventPort::new(a, PortId::new(5)), None)
         ]
     );
-    // A ghost pin where a ghost subscription ends on a node that draws no pin: the ghost node,
+    // A ghost trigger where a ghost subscription ends on a node that has no trigger: the ghost node,
     // and `b`, whose `probe` is no sink; never on the emitter.
-    assert!(node.ghost_pinned());
-    assert!(graph_ctx.node(b).unwrap().ghost_pinned());
-    assert!(!producer.ghost_pinned());
+    assert!(node.ghost_triggered());
+    assert!(graph_ctx.node(b).unwrap().ghost_triggered());
+    assert!(!producer.ghost_triggered());
     let consumer = graph_ctx.node(b).unwrap();
     assert_eq!(
         rows(consumer.ghost_inputs()),
@@ -350,7 +349,7 @@ fn subscriptions_read_from_the_graph() {
 
     assert_eq!(subs.len(), 1);
     assert_eq!(subs[0].event, EventPort::new(emitter_id, PortId::new(2)));
-    assert_eq!(subs[0].listener, Listener::Pin(subscriber_id));
+    assert_eq!(subs[0].trigger, TriggerPort::from(subscriber_id));
 }
 
 #[test]

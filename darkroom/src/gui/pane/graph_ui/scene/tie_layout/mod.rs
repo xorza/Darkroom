@@ -25,7 +25,7 @@ const HANDLE_SHARE: f32 = 0.4;
 const MIN_HANDLE: f32 = 24.0;
 const MAX_HANDLE: f32 = 140.0;
 
-/// The way an event wire meets its subscriber pin, down-right, as [`Wire::event`]'s up-left
+/// The way an event wire meets its trigger, down-right, as [`Wire::event`]'s up-left
 /// handle has it.
 const EVENT_ARRIVAL: Vec2 = Vec2::new(FRAC_1_SQRT_2, FRAC_1_SQRT_2);
 
@@ -110,8 +110,8 @@ struct Ordered {
     strand: u32,
 }
 
-/// Where a wire's two ends sit: its output's or emitter's port, and its input's port or
-/// subscriber's pin.
+/// Where a wire's two ends sit: its output's port or its event's glyph, and its input's port or
+/// its trigger's glyph.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Span {
     pub(crate) start: Vec2,
@@ -128,7 +128,7 @@ impl Span {
             ),
             WireKey::Event(subscription) => (
                 geometry.event_center(subscription.event)?,
-                geometry.listener_center(subscription.listener)?,
+                geometry.trigger_center(subscription.trigger)?,
             ),
         };
         Some(Self { start, end })

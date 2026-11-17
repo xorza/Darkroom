@@ -417,10 +417,10 @@ fn a_subscription_inside_a_subgraph_stays_inside_each_instance() {
 }
 
 /// An event crosses a subgraph's boundary on its interface. `relay` fires its event `out` 301
-/// when its pin hears the trigger `in`, by its `Inputs` node firing it into its `Outputs` node;
-/// `outer` places a `relay` 61 inside, wiring `outer`'s trigger into its pin and its event out, so
+/// when its trigger `in` is triggered, by its `Inputs` node firing it into its `Outputs` node;
+/// `outer` places a `relay` 61 inside, wiring `outer`'s trigger into its own and its event out, so
 /// an event goes two levels in and two out. In the main graph `ticker` 1 fires into instance 2's
-/// pin, instance 2's event lands on `sink` 3, and a disabled instance 4 passes nothing: the ticker's
+/// trigger, instance 2's event lands on `sink` 3, and a disabled instance 4 passes nothing: the ticker's
 /// subscribers are the sink alone, with no node in between, and a ticker inside `relay` that
 /// fires its `Outputs` node reaches the main graph's sink too.
 #[test]
@@ -428,7 +428,6 @@ fn an_event_crosses_boundaries_on_the_interface() {
     use crate::graph::identity::TriggerPort;
     use crate::graph::interface::EventPorts;
     use crate::graph::ports::EventDecl;
-    use crate::graph::subscription::Listener;
 
     const OUT: PortId = PortId::new(301);
     const IN: PortId = Interface::TRIGGER_EVENT;
@@ -447,20 +446,19 @@ fn an_event_crosses_boundaries_on_the_interface() {
     relay.graph.insert(n(53), node(&library, TICKER));
     relay.graph.subscribe(
         EventPort::new(relay_in, IN),
-        Listener::Trigger(TriggerPort::new(relay_out, OUT)),
+        TriggerPort::new(relay_out, OUT),
     );
     relay.graph.subscribe(
         EventPort::new(n(53), FIRST),
-        Listener::Trigger(TriggerPort::new(relay_out, OUT)),
+        TriggerPort::new(relay_out, OUT),
     );
     let mut outer = Subgraph::new("outer", events());
     let (outer_in, outer_out) = (outer.inputs_node(), outer.outputs_node());
     outer.graph.insert(n(61), Node::instance(relay_id));
     outer.graph.subscribe(EventPort::new(outer_in, IN), n(61));
-    outer.graph.subscribe(
-        EventPort::new(n(61), OUT),
-        Listener::Trigger(TriggerPort::new(outer_out, OUT)),
-    );
+    outer
+        .graph
+        .subscribe(EventPort::new(n(61), OUT), TriggerPort::new(outer_out, OUT));
     let mut doc = Doc {
         library,
         ..Doc::default()

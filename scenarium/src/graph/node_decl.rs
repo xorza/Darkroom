@@ -1,7 +1,7 @@
 //! [`NodeDecl`]: what a node resolves to, a func or a subgraph's face.
 
 use crate::graph::func::{Func, FuncEvent};
-use crate::graph::identity::PortId;
+use crate::graph::identity::{PortId, TriggerPort};
 use crate::graph::node::Boundary;
 use crate::graph::ports::EventDecl;
 use crate::graph::ports::{InputDecl, Numbered, OutputDecl, Ports};
@@ -82,30 +82,23 @@ impl<'a> NodeDecl<'a> {
         self.events().get(id)
     }
 
-    /// The triggers the node hears: the `Outputs` node's interface events, which it hears
-    /// inside. A func and an instance hear on their pin.
-    pub fn triggers(self) -> &'a [Numbered<EventDecl>] {
+    /// The triggers the node shows: its own, for a sink func, which a subscription runs, and for
+    /// an instance whose interface declares a trigger, which a subscription passes into; one per
+    /// interface event for the `Outputs` node, which passes each out.
+    pub fn triggers(self) -> NodeTriggers<'a> {
         match self {
+            Self::Func(func) if func.sink() => NodeTriggers::Own,
+            Self::Instance(subgraph) if subgraph.interface.trigger().is_some() => NodeTriggers::Own,
             Self::Boundary {
                 side: Boundary::Outputs,
                 owner,
-            } => owner.interface.events(),
+            } => NodeTriggers::PerEvent(owner.interface.events()),
             Self::Func(_)
             | Self::Instance(_)
             | Self::Boundary {
                 side: Boundary::Inputs,
                 ..
-            } => &[],
-        }
-    }
-
-    /// Whether the node hears on its pin: a sink func, which a subscription runs, and an
-    /// instance whose interface declares a trigger, which a subscription passes into.
-    pub const fn hears_pin(self) -> bool {
-        match self {
-            Self::Func(func) => func.sink(),
-            Self::Instance(subgraph) => subgraph.interface.trigger().is_some(),
-            Self::Boundary { .. } => false,
+            } => NodeTriggers::None,
         }
     }
 
@@ -131,6 +124,27 @@ impl<'a> NodeDecl<'a> {
                 .input(port)
                 .is_some_and(|input| input.const_only),
             Self::Func(_) | Self::Instance(_) | Self::Boundary { .. } => false,
+        }
+    }
+}
+
+/// The triggers a node shows, where a subscription lands: no node has both its own and others.
+#[derive(Clone, Copy, Debug)]
+pub enum NodeTriggers<'a> {
+    None,
+    /// Its own, under [`TriggerPort::NODE`].
+    Own,
+    /// The `Outputs` node's, one per interface event, each under the event's id and named as it.
+    PerEvent(&'a [Numbered<EventDecl>]),
+}
+
+impl NodeTriggers<'_> {
+    /// Whether the node shows a trigger under `id`.
+    pub fn contains(self, id: PortId) -> bool {
+        match self {
+            Self::None => false,
+            Self::Own => id == TriggerPort::NODE,
+            Self::PerEvent(events) => events.iter().any(|event| event.id == id),
         }
     }
 }

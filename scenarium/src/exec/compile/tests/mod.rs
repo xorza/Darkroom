@@ -23,13 +23,13 @@ fn subscription_wiring_rejects_an_endpoint_outside_the_program() {
     g.add("ticker", |n| {
         n.sink().event("tick", internals::stub_event())
     });
-    g.add("listener", NodeSpec::sink);
-    g.subscribe("ticker", 0, "listener");
+    g.add("subscriber", NodeSpec::sink);
+    g.subscribe("ticker", 0, "subscriber");
 
     let mut compiled = g.compile();
     assert_eq!(
         compiled.subscribers("ticker", 0),
-        ["listener"],
+        ["subscriber"],
         "the authored subscription wired one subscriber"
     );
 
@@ -484,8 +484,8 @@ fn wires_each_event_with_the_subscribers_resolved_for_it() {
         n.event("quiet", internals::stub_event())
             .event("subscribed", internals::stub_event())
     });
-    g.add("listener", NodeSpec::sink);
-    g.subscribe("emitter", 1, "listener");
+    g.add("subscriber", NodeSpec::sink);
+    g.subscribe("emitter", 1, "subscriber");
 
     let compiled = g.compile();
     assert_eq!(compiled.node("emitter").events.len, 2);
@@ -493,7 +493,7 @@ fn wires_each_event_with_the_subscribers_resolved_for_it() {
         compiled.subscribers("emitter", 0).is_empty(),
         "the unsubscribed port carries no subscriber"
     );
-    assert_eq!(compiled.subscribers("emitter", 1), ["listener"]);
+    assert_eq!(compiled.subscribers("emitter", 1), ["subscriber"]);
     assert_eq!(
         compiled.program.subscribers.len(),
         1,
@@ -504,7 +504,7 @@ fn wires_each_event_with_the_subscribers_resolved_for_it() {
     // declaration puts it.
     g.edit_func("emitter", |builder| builder.events.reverse());
     let compiled = g.compile();
-    assert_eq!(compiled.subscribers("emitter", 0), ["listener"]);
+    assert_eq!(compiled.subscribers("emitter", 0), ["subscriber"]);
     assert!(compiled.subscribers("emitter", 1).is_empty());
 }
 
@@ -524,12 +524,12 @@ fn drops_subscriptions_that_cannot_fire() {
             n.event("e0", internals::stub_event())
                 .event("e1", internals::stub_event())
         });
-        g.add("listener", NodeSpec::sink);
-        g.subscribe("emitter", 1, "listener");
+        g.add("subscriber", NodeSpec::sink);
+        g.subscribe("emitter", 1, "subscriber");
         match disabled {
             Disabled::Neither => {}
             Disabled::Emitter => g.disable("emitter"),
-            Disabled::Subscriber => g.disable("listener"),
+            Disabled::Subscriber => g.disable("subscriber"),
         }
         let compiled = g.compile();
         (0..2)

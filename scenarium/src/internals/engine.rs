@@ -362,7 +362,7 @@ impl RunOutcome {
             executed_node_count: outcome.executed_node_count,
             cancelled: outcome.cancelled,
             armed_events: outcome
-                .event_triggers
+                .armed_events
                 .iter()
                 .map(|trigger| trigger.event)
                 .collect(),

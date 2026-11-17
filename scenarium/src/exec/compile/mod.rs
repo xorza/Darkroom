@@ -77,7 +77,6 @@ use crate::graph::interface::Interface;
 use crate::graph::node::{Boundary, CacheMode, NodeKind};
 use crate::graph::node_decl::NodeDecl;
 use crate::graph::program_id::ProgramId;
-use crate::graph::subscription::Listener;
 use crate::library::Library;
 
 /// One program node awaiting placement: its id, which the sort keys on, the graph it was
@@ -176,11 +175,11 @@ pub struct Compiler {
     /// What each placed node's cache mode gains from the instances whose values it produces, by
     /// position in [`Self::placed`].
     joined_cache: Vec<CacheMode>,
-    /// The pins one event reaches, as [`Self::collect_heard`] last found them.
-    heard: Vec<NodeIdx>,
-    /// The same pins by program id, as the walk meets them.
-    heard_ids: Vec<ProgramId>,
-    /// The events [`Self::collect_heard`] has yet to follow, each at its level.
+    /// The program nodes one event triggers, as [`Self::collect_triggered`] last found them.
+    triggered: Vec<NodeIdx>,
+    /// The same nodes by program id, as the walk meets them.
+    triggered_ids: Vec<ProgramId>,
+    /// The events [`Self::collect_triggered`] has yet to follow, each at its level.
     event_stack: Vec<(Level, EventPort)>,
     /// The events it followed, by the program id of their node, so a loop through boundaries
     /// ends.
@@ -286,17 +285,17 @@ impl Compiler {
             let node_outputs = Span::new(compiled.output_count, output_count);
             compiled.output_count += output_count;
 
-            // Each event lands with the pins it reaches, across any boundary between, resolved
+            // Each event lands with the nodes it triggers, across any boundary between, resolved
             // through the placement, which already covers nodes the walk has not reached.
             let mut node_events = Vec::with_capacity(func.events().len());
             for event in func.events() {
-                self.collect_heard(source, level, EventPort::new(node_id, event.id));
-                let subscribers = compiled.subscribers.append(
-                    self.heard
-                        .iter()
-                        .copied()
-                        .filter(|heard| !pending.disabled && !self.placed[heard.idx()].disabled),
-                );
+                self.collect_triggered(source, level, EventPort::new(node_id, event.id));
+                let subscribers =
+                    compiled
+                        .subscribers
+                        .append(self.triggered.iter().copied().filter(|triggered| {
+                            !pending.disabled && !self.placed[triggered.idx()].disabled
+                        }));
                 node_events.push(ExecEvent {
                     subscribers,
                     lambda: event.event_lambda.clone(),
@@ -346,8 +345,8 @@ impl Compiler {
             outputs_nodes,
             cached_instances,
             joined_cache: _,
-            heard: _,
-            heard_ids: _,
+            triggered: _,
+            triggered_ids: _,
             event_stack: _,
             event_seen: _,
         } = self;
@@ -438,20 +437,20 @@ impl Compiler {
         self.joined_cache = joined;
     }
 
-    /// Fill [`Self::heard`] with the pins `event` at `level` reaches, sorted and each once: a
-    /// subscription to a func's pin reaches that node; one to an instance's pin is followed
-    /// inside, to what each of the subgraph's `Inputs` nodes fires as the trigger; one to the
-    /// `Outputs` node's trigger is followed out, to what the instance fires under its id. As a
+    /// Fill [`Self::triggered`] with the program nodes `event` at `level` triggers, sorted and each
+    /// once: a subscription to a func's trigger triggers that node; one to an instance's is
+    /// followed inside, to what each of the subgraph's `Inputs` nodes fires as the trigger; one to
+    /// the `Outputs` node's is followed out, to what the instance fires under its id. As a
     /// binding is followed across boundaries ([`Self::lower`]), so a passthrough costs nothing.
     /// An event met twice is followed once, so a loop through boundaries ends.
-    fn collect_heard(&mut self, source: Source<'_>, level: Level, event: EventPort) {
+    fn collect_triggered(&mut self, source: Source<'_>, level: Level, event: EventPort) {
         let Self {
-            heard_ids: heard,
+            triggered_ids: triggered,
             event_stack: stack,
             event_seen: seen,
             ..
         } = self;
-        heard.clear();
+        triggered.clear();
         stack.clear();
         seen.clear();
         stack.push((level, event));
@@ -464,16 +463,16 @@ impl Compiler {
                 .subscriptions_of(event.node_id)
                 .filter(|subscription| subscription.event.event == event.event)
             {
-                let node_id = subscription.listener.node_id();
+                let trigger = subscription.trigger;
                 let node = graph
-                    .find(node_id)
-                    .expect("an admitted listener is in the graph");
-                match (subscription.listener, node.kind) {
-                    (Listener::Pin(_), NodeKind::Body { .. }) => {
-                        heard.push(level.program_id(node_id));
+                    .find(trigger.node_id)
+                    .expect("an admitted subscriber is in the graph");
+                match node.kind {
+                    NodeKind::Body { .. } => {
+                        triggered.push(level.program_id(trigger.node_id));
                     }
-                    (Listener::Pin(_), NodeKind::Instance { subgraph, .. }) => {
-                        let inside = level.enter(node_id, GraphId::Subgraph(subgraph));
+                    NodeKind::Instance { subgraph, .. } => {
+                        let inside = level.enter(trigger.node_id, GraphId::Subgraph(subgraph));
                         let definition = source
                             .graphs
                             .subgraph(subgraph)
@@ -482,7 +481,7 @@ impl Compiler {
                             (inside, EventPort::new(inputs, Interface::TRIGGER_EVENT))
                         }));
                     }
-                    (Listener::Trigger(trigger), NodeKind::Boundary(Boundary::Outputs)) => {
+                    NodeKind::Boundary(Boundary::Outputs) => {
                         let instance = level
                             .path
                             .instance()
@@ -497,28 +496,22 @@ impl Compiler {
                             EventPort::new(instance, trigger.trigger),
                         ));
                     }
-                    (Listener::Pin(_), NodeKind::Boundary(_)) => {
-                        unreachable!("a boundary node has no pin")
+                    NodeKind::Boundary(Boundary::Inputs) => {
+                        unreachable!("the `Inputs` node has no trigger")
                     }
-                    (
-                        Listener::Trigger(_),
-                        NodeKind::Body { .. }
-                        | NodeKind::Instance { .. }
-                        | NodeKind::Boundary(Boundary::Inputs),
-                    ) => unreachable!("only an `Outputs` node hears triggers"),
                 }
             }
         }
-        let mut heard = mem::take(&mut self.heard);
-        heard.clear();
-        heard.extend(
-            self.heard_ids
+        let mut triggered = mem::take(&mut self.triggered);
+        triggered.clear();
+        triggered.extend(
+            self.triggered_ids
                 .iter()
                 .map(|&program_id| self.idx(program_id)),
         );
-        heard.sort_unstable();
-        heard.dedup();
-        self.heard = heard;
+        triggered.sort_unstable();
+        triggered.dedup();
+        self.triggered = triggered;
     }
 
     /// Where `program_id` landed in the dense index space.

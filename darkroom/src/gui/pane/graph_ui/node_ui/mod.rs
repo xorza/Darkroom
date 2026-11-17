@@ -10,7 +10,7 @@ pub(crate) mod run_status;
 use std::mem;
 
 use palantir::{Border, Configure, Panel, Sense, Shadow, SizeSpec, Track, Ui, Visibility};
-use scenarium::NodeId;
+use scenarium::{NodeId, TriggerPort};
 
 use crate::core::document::graph_view::StackedNode;
 use crate::core::document::item_id::ItemId;
@@ -154,20 +154,21 @@ impl NodeUi {
             Visibility::Hidden
         };
 
-        // Recorded just before the body so the pin peeks out from behind this node's corner, with
-        // the node's own cull decision and stack position.
-        if node.pinned() {
-            header::subscription_pin(
+        // Recorded just before the body so the trigger peeks out from behind this node's corner,
+        // with the node's own cull decision and stack position.
+        let own = TriggerPort::from(node.node_id);
+        if node.has_own_trigger() {
+            header::own_trigger(
                 ui,
                 node,
-                Hover::from(draw_ctx.geometry().subs.is_hovered(node.node_id)),
+                Hover::from(draw_ctx.geometry().triggers.is_hovered(own)),
                 visibility,
             );
-        } else if node.ghost_pinned() {
-            header::ghost_pin(
+        } else if node.ghost_triggered() {
+            header::ghost_trigger(
                 ui,
                 node,
-                Hover::from(draw_ctx.geometry().ghost_subs.is_hovered(node.node_id)),
+                Hover::from(draw_ctx.geometry().ghost_triggers.is_hovered(own)),
                 visibility,
             );
         }

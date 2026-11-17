@@ -1,7 +1,7 @@
 //! [`ExecOutcome`]: what a completed run hands back.
 
 use crate::data::ram_usage::RamUsage;
-use crate::exec::report::event_trigger::EventTrigger;
+use crate::exec::report::armed_event::ArmedEvent;
 use crate::exec::report::node_status::NodeStatus;
 use crate::runtime::log_entry::LogEntry;
 
@@ -13,7 +13,7 @@ pub(crate) struct ExecOutcome {
     /// How many nodes invoked their lambda, successes and failures alike. Counted while the rows
     /// are built rather than derived from them.
     pub(crate) executed_node_count: usize,
-    pub(crate) event_triggers: Vec<EventTrigger>,
+    pub(crate) armed_events: Vec<ArmedEvent>,
     pub(crate) logs: Vec<LogEntry>,
     pub(crate) cancelled: bool,
     pub(crate) cache_ram: RamUsage,
@@ -23,7 +23,7 @@ impl ExecOutcome {
     pub(crate) fn clear(&mut self) {
         self.nodes.clear();
         self.executed_node_count = 0;
-        self.event_triggers.clear();
+        self.armed_events.clear();
         self.logs.clear();
         self.cancelled = false;
         self.cache_ram = RamUsage::default();

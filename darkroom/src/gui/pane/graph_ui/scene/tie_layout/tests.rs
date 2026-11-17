@@ -154,7 +154,7 @@ fn a_tied_wire_keeps_its_tangent_through_the_slot() {
     );
 }
 
-/// A tied event wire meets its subscriber pin as an untied one does, from the up-left: the last
+/// A tied event wire meets its trigger as an untied one does, from the up-left: the last
 /// piece's arriving handle runs along `(1, 1) / √2`, the direction `Wire::event` arrives in.
 #[test]
 fn a_tied_event_wire_meets_its_pin_from_the_up_left() {

@@ -218,7 +218,7 @@ fn trigger_section(ui: &mut Ui, theme: &Theme, trigger: Option<&EventDecl>) -> O
             Text::new("Trigger").style(&muted).show(ui);
             if trigger.is_none()
                 && Link::new(trigger_wid("add"), "+")
-                    .tooltip("Add the trigger an instance hears on its pin")
+                    .tooltip("Add the instance's trigger")
                     .show(ui, theme)
             {
                 edit = Some(PortEdit::SetTrigger(Some(EventDecl::new("trigger"))));
@@ -248,7 +248,7 @@ fn trigger_section(ui: &mut Ui, theme: &Theme, trigger: Option<&EventDecl>) -> O
                 })));
             }
             if Link::new(trigger_wid("remove"), "\u{d7}")
-                .tooltip("Remove the trigger, and every wire on the pin")
+                .tooltip("Remove the trigger, and every wire on it")
                 .show(ui, theme)
             {
                 edit = Some(PortEdit::SetTrigger(None));

@@ -169,7 +169,8 @@ impl EventPort {
     }
 }
 
-/// Address of a trigger the `Outputs` node hears, by the id of the interface event it mirrors.
+/// Address of a trigger, where a subscription lands: a node's own trigger under [`Self::NODE`],
+/// or the `Outputs` node's trigger under the id of the interface event it passes out.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TriggerPort {
     pub node_id: NodeId,
@@ -177,8 +178,19 @@ pub struct TriggerPort {
 }
 
 impl TriggerPort {
+    /// The id of a node's own trigger: a sink's, or an instance's whose interface declares one. No
+    /// node has both its own trigger and others, so it shares no id.
+    pub const NODE: PortId = PortId::new(1);
+
     pub const fn new(node_id: NodeId, trigger: PortId) -> Self {
         Self { node_id, trigger }
+    }
+}
+
+impl From<NodeId> for TriggerPort {
+    /// The node's own trigger.
+    fn from(node_id: NodeId) -> Self {
+        Self::new(node_id, Self::NODE)
     }
 }
 

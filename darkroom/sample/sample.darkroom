@@ -279,14 +279,20 @@
                             node_id: ("3b60adfe-c8f3-4913-8de3-eef560a90417"),
                             event: 1327470818,
                         ),
-                        listener: Pin(("ae3e2593-782b-47a6-ab2e-feffa1cb6636")),
+                        trigger: (
+                            node_id: ("ae3e2593-782b-47a6-ab2e-feffa1cb6636"),
+                            trigger: 1,
+                        ),
                     ),
                     (
                         event: (
                             node_id: ("7acd8a24-9994-4cd0-92cc-abb719eccaa1"),
                             event: 1,
                         ),
-                        listener: Pin(("3b60adfe-c8f3-4913-8de3-eef560a90417")),
+                        trigger: (
+                            node_id: ("3b60adfe-c8f3-4913-8de3-eef560a90417"),
+                            trigger: 1,
+                        ),
                     ),
                 ],
                 ghost_nodes: {
@@ -522,17 +528,20 @@
                                     node_id: ("a87a9b1a-6aec-4171-b564-7321081d7f85"),
                                     event: 1,
                                 ),
-                                listener: Trigger((
+                                trigger: (
                                     node_id: ("af8a6fe2-73a0-44a6-821f-05c0bf3b9755"),
                                     trigger: 1327470818,
-                                )),
+                                ),
                             ),
                             (
                                 event: (
                                     node_id: ("ee437308-24f0-42ad-8c1a-307a33696bc5"),
                                     event: 1,
                                 ),
-                                listener: Pin(("a68a1c90-964c-46ae-ac17-b33ddef67633")),
+                                trigger: (
+                                    node_id: ("a68a1c90-964c-46ae-ac17-b33ddef67633"),
+                                    trigger: 1,
+                                ),
                             ),
                         ],
                         ghost_nodes: {},

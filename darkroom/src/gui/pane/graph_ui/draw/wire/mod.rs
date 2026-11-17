@@ -242,7 +242,7 @@ impl WirePass<'_, '_, '_> {
         }
     }
 
-    /// Paint every committed subscription wire on the current scene retained by the pass's cull
+    /// Paint every committed event wire on the current scene retained by the pass's cull
     /// region, marking those the active breaker crosses as broken via
     /// `probe.mark_broken_subscription`. Reads nothing but committed scene state, as
     /// [`Self::draw_data_wires`] does.
@@ -255,14 +255,14 @@ impl WirePass<'_, '_, '_> {
         for s in graph_ctx.subscriptions() {
             let (Some(p0), Some(p3)) = (
                 geometry.events.center(s.event),
-                geometry.listener_center(s.listener),
+                geometry.trigger_center(s.trigger),
             ) else {
                 continue;
             };
             let key = WireKey::Event(s);
             let hover = Hover::from(
                 geometry.events.is_hovered(s.event)
-                    || geometry.listener_hovered(s.listener)
+                    || geometry.trigger_hovered(s.trigger)
                     || self.lit == Some(key)
                     || wid::lit_by_tie(ui, graph_ctx.graph(), graph_ctx.view(), key),
             );
@@ -334,7 +334,7 @@ impl WirePass<'_, '_, '_> {
         for (s, _) in ghosts.subscriptions() {
             let (Some(p0), Some(p3)) = (
                 geometry.event_center(s.event),
-                geometry.listener_center(s.listener),
+                geometry.trigger_center(s.trigger),
             ) else {
                 continue;
             };
@@ -342,7 +342,7 @@ impl WirePass<'_, '_, '_> {
             let hover = Hover::from(
                 geometry.ghost_events.is_hovered(s.event)
                     || geometry.events.is_hovered(s.event)
-                    || geometry.listener_hovered(s.listener)
+                    || geometry.trigger_hovered(s.trigger)
                     || self.lit == Some(key)
                     || wid::lit_by_tie(ui, graph_ctx.graph(), graph_ctx.view(), key),
             );
@@ -517,8 +517,7 @@ enum Tier {
 /// is off; at rest, endpoint colors pull toward the canvas; a hovered (or
 /// broken-alarm) wire gets full strength and a width lift.
 ///
-/// Emphasis is driven by endpoint hover targets only (port circles, event glyphs, subscription
-/// pins), never by raw pointer proximity to the curve: hover-target state repaints exactly when
+/// Emphasis is driven by endpoint hover targets only (port circles, event and trigger glyphs), never by raw pointer proximity to the curve: hover-target state repaints exactly when
 /// it changes, whereas pointer-derived paint needs a `MOVE` subscription (a record per mouse
 /// move) to stay fresh.
 #[derive(Debug)]

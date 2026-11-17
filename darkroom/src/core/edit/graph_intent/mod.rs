@@ -237,7 +237,7 @@ impl GraphIntent {
         }
         for (subscription, _) in wiring.subscriptions() {
             to.insert(ItemId::Node(subscription.event.node_id));
-            to.insert(ItemId::Node(subscription.listener.node_id()));
+            to.insert(ItemId::Node(subscription.trigger.node_id));
         }
         Self::SetSelection { to }
     }
@@ -262,8 +262,7 @@ impl GraphIntent {
         let subscriptions = wiring
             .subscriptions()
             .filter(|(subscription, _)| {
-                !ghost_node(subscription.event.node_id)
-                    && !ghost_node(subscription.listener.node_id())
+                !ghost_node(subscription.event.node_id) && !ghost_node(subscription.trigger.node_id)
             })
             .map(|(subscription, _)| Self::SetSubscription {
                 subscription,
@@ -569,8 +568,8 @@ impl GraphIntent {
                 subscription,
                 to: subscribe,
             } => {
-                let Subscription { event, listener } = subscription;
-                let subscriber = listener.node_id();
+                let Subscription { event, trigger } = subscription;
+                let subscriber = trigger.node_id;
                 validate::non_nil_node(event.node_id, Role::SetSubscriptionEmitter)?;
                 validate::non_nil_node(subscriber, Role::SetSubscriptionSubscriber)?;
                 // A subscribe needs both endpoints present. An unsubscribe of a vanished node

@@ -58,7 +58,7 @@
 //!   refreshed"
 //!   ([`bOrphanedPin`](https://docs.unrealengine.com/4.26/en-US/API/Runtime/Engine/EdGraph/UEdGraphPin/bOrphanedPin/index.html)).
 //!   Still dropped: wiring that names a node the graph holds as neither, a node subscribed to
-//!   itself, a pin on a boundary node: no library brings those back.
+//!   itself, a trigger on the `Inputs` node: no library brings those back.
 //! - **A constant equal to the default its port declared is not kept**, Unreal's "non-default
 //!   value": a func that loses an input would otherwise leave a ghost on every node of it, each
 //!   holding the default nobody set. The input then takes the default the port declares now, if
@@ -118,7 +118,9 @@ use crate::graph::ghost_node::GhostNode;
 use crate::graph::ghost_wiring::{
     GhostBinding, GhostSource, GhostSubscription, GhostWiring, InputState, SubscriptionState,
 };
-use crate::graph::identity::{EventPort, InputPort, NodeId, OutputPort, PortId, SubgraphId};
+use crate::graph::identity::{
+    EventPort, InputPort, NodeId, OutputPort, PortId, SubgraphId, TriggerPort,
+};
 use crate::graph::manifest::Manifest;
 use crate::graph::node::{Boundary, Node, NodeKind};
 use crate::graph::node_decl::NodeDecl;
@@ -127,7 +129,7 @@ use crate::graph::reconciled::{Reconciled, Repair};
 use crate::graph::saved_decl::{SavedDecl, SavedEvent, SavedInput, SavedPort, ShownPort};
 use crate::graph::scope::Scope;
 use crate::graph::subgraph::Subgraph;
-use crate::graph::subscription::{Listener, Subscription};
+use crate::graph::subscription::Subscription;
 
 pub(crate) mod binding;
 pub(crate) mod binding_entry;
@@ -564,7 +566,7 @@ impl Graph {
             self.ghost_wiring.subscription(subscription).is_some(),
             "an admitted ghost subscription is kept"
         );
-        if let Some(node_id) = [subscription.event.node_id, subscription.listener.node_id()]
+        if let Some(node_id) = [subscription.event.node_id, subscription.trigger.node_id]
             .into_iter()
             .find(|node_id| !self.nodes.contains_key(node_id))
         {
@@ -655,9 +657,7 @@ impl Graph {
         }
     }
     /// Whether this graph may hold `subscription`: the emitter declares the event, and it lands
-    /// on another node: on the pin of one that hears on it
-    /// ([`NodeDecl::hears_pin`](crate::NodeDecl::hears_pin)), or on a trigger an `Outputs` node
-    /// hears.
+    /// on a trigger another node shows ([`NodeDecl::triggers`](crate::NodeDecl::triggers)).
     ///
     /// # Panics
     ///
@@ -667,30 +667,18 @@ impl Graph {
         scope: Scope<'_>,
         subscription: Subscription,
     ) -> Result<(), SubscriptionRejection> {
-        let Subscription { event, listener } = subscription;
-        if event.node_id == listener.node_id() {
+        let Subscription { event, trigger } = subscription;
+        if event.node_id == trigger.node_id {
             return Err(SubscriptionRejection::SelfSubscription);
         }
-        let heard = self
-            .find(listener.node_id())
-            .expect("an admitted subscription's listener is in the graph");
-        match listener {
-            Listener::Pin(_) if matches!(heard.kind, NodeKind::Boundary(_)) => {
-                return Err(SubscriptionRejection::BoundarySubscriber);
-            }
-            Listener::Pin(_) if !heard.decl(scope).hears_pin() => {
-                return Err(SubscriptionRejection::PinlessSubscriber);
-            }
-            Listener::Trigger(trigger)
-                if !heard
-                    .decl(scope)
-                    .triggers()
-                    .iter()
-                    .any(|declared| declared.id == trigger.trigger) =>
-            {
-                return Err(SubscriptionRejection::UndeclaredTrigger);
-            }
-            Listener::Pin(_) | Listener::Trigger(_) => {}
+        let subscriber = self
+            .find(trigger.node_id)
+            .expect("an admitted subscription's subscriber is in the graph");
+        if subscriber.kind == NodeKind::Boundary(Boundary::Inputs) {
+            return Err(SubscriptionRejection::InputsSubscriber);
+        }
+        if !subscriber.decl(scope).triggers().contains(trigger.trigger) {
+            return Err(SubscriptionRejection::UndeclaredTrigger);
         }
         let emitter = self
             .find(event.node_id)
@@ -900,16 +888,13 @@ impl Graph {
     }
 
     /// Make the subscription, in place of a ghost of it.
-    pub fn subscribe(&mut self, event: EventPort, listener: impl Into<Listener>) {
-        self.set_subscription_state(Subscription::new(event, listener), SubscriptionState::Live);
+    pub fn subscribe(&mut self, event: EventPort, trigger: impl Into<TriggerPort>) {
+        self.set_subscription_state(Subscription::new(event, trigger), SubscriptionState::Live);
     }
 
     /// End the subscription, a ghost of it included.
-    pub fn unsubscribe(&mut self, event: EventPort, subscriber: NodeId) {
-        self.set_subscription_state(
-            Subscription::new(event, subscriber),
-            SubscriptionState::Absent,
-        );
+    pub fn unsubscribe(&mut self, event: EventPort, trigger: impl Into<TriggerPort>) {
+        self.set_subscription_state(Subscription::new(event, trigger), SubscriptionState::Absent);
     }
 
     /// Validate this graph structurally: everything a document must satisfy to
@@ -943,7 +928,7 @@ impl Graph {
             }
         }
         for (subscription, _) in self.ghost_wiring.subscriptions() {
-            let ends = [subscription.event.node_id, subscription.listener.node_id()];
+            let ends = [subscription.event.node_id, subscription.trigger.node_id];
             if let Some(node_id) = ends.into_iter().find(|id| !self.holds(*id)) {
                 return Err(GraphValidationError::GhostMissingNode { node_id });
             }
@@ -974,10 +959,10 @@ impl Graph {
                     event: subscription.event,
                 });
             }
-            if !self.nodes.contains_key(&subscription.listener.node_id()) {
+            if !self.nodes.contains_key(&subscription.trigger.node_id) {
                 return Err(GraphValidationError::MissingSubscriber {
                     event: subscription.event,
-                    subscriber: subscription.listener.node_id(),
+                    subscriber: subscription.trigger.node_id,
                 });
             }
         }
@@ -1080,8 +1065,7 @@ impl Graph {
         });
         let subscriptions = &self.subscriptions;
         self.ghost_wiring.subscriptions.retain(|subscription, _| {
-            let ends_held =
-                held(subscription.event.node_id) && held(subscription.listener.node_id());
+            let ends_held = held(subscription.event.node_id) && held(subscription.trigger.node_id);
             if !ends_held {
                 repairs.push(Repair::DanglingSubscription {
                     subscription: *subscription,
@@ -1128,7 +1112,7 @@ impl Graph {
             false
         });
         self.subscriptions.retain(|subscription| {
-            let ends = [subscription.event.node_id, subscription.listener.node_id()];
+            let ends = [subscription.event.node_id, subscription.trigger.node_id];
             let Some(off) = ends
                 .into_iter()
                 .find(|node_id| !nodes.contains_key(node_id))
@@ -1334,7 +1318,7 @@ impl Graph {
 
     /// Make a ghost of each piece of `refused`, then of each wire that closes a data cycle, and
     /// report each. A subscription no library can bring back, a node's to its own event or one
-    /// on a boundary node's pin, is removed.
+    /// on the `Inputs` node, is removed.
     pub(crate) fn ghost_refused(&mut self, refused: &[RefusedWiring], reconciled: &mut Reconciled) {
         for &refusal in refused {
             match refusal {
@@ -1347,10 +1331,9 @@ impl Graph {
                 } => {
                     self.subscriptions.remove(&subscription);
                     reconciled.repairs.push(match rejection {
-                        // A declaration that loses the event, the trigger or its sink may regain it.
+                        // A declaration that loses the event or the trigger may regain it.
                         SubscriptionRejection::UndeclaredEvent
-                        | SubscriptionRejection::UndeclaredTrigger
-                        | SubscriptionRejection::PinlessSubscriber => {
+                        | SubscriptionRejection::UndeclaredTrigger => {
                             self.ghost_wiring
                                 .subscriptions
                                 .insert(subscription, GhostSubscription::default());
@@ -1360,12 +1343,10 @@ impl Graph {
                             }
                         }
                         SubscriptionRejection::SelfSubscription
-                        | SubscriptionRejection::BoundarySubscriber => {
-                            Repair::RejectedSubscription {
-                                subscription,
-                                rejection,
-                            }
-                        }
+                        | SubscriptionRejection::InputsSubscriber => Repair::RejectedSubscription {
+                            subscription,
+                            rejection,
+                        },
                     });
                 }
             }

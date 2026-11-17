@@ -109,22 +109,17 @@ pub(super) fn event_glyph(graph: GraphId, event: EventPort) -> WidgetId {
     of_event("event_glyph", graph, event)
 }
 
-/// A node's event-subscription pin, keyed on the node (a subscription is whole-node, not
-/// per-port), so `CanvasGeometry` and `SubscriptionUi` poll its geometry as a wire drop target.
-pub(super) fn subscription_glyph(graph: GraphId, node_id: NodeId) -> WidgetId {
-    of_node("subscription_glyph", graph, node_id)
-}
-
-/// A node's ghost pin, where a ghost subscription ends on a node that draws no pin of its own.
-/// An id space apart from [`subscription_glyph`], so no subscription drag starts on or snaps to
-/// it.
-pub(super) fn ghost_subscription_glyph(graph: GraphId, node_id: NodeId) -> WidgetId {
-    of_node("ghost_subscription_glyph", graph, node_id)
-}
-
-/// A trigger's glyph on an `Outputs` node, where a subscription lands.
+/// A trigger's glyph, where a subscription lands: a node's own at its corner, or an `Outputs`
+/// node's row, so `CanvasGeometry` and `SubscriptionUi` poll its geometry as a wire drop target.
 pub(super) fn trigger_glyph(graph: GraphId, trigger: TriggerPort) -> WidgetId {
     WidgetId::from_hash(("trigger_glyph", graph, trigger.node_id, trigger.trigger))
+}
+
+/// A node's ghost trigger, where a ghost subscription ends on a node that has no trigger of its
+/// own. An id space apart from [`trigger_glyph`], so no subscription drag starts on or snaps to
+/// it.
+pub(crate) fn ghost_trigger_glyph(graph: GraphId, node_id: NodeId) -> WidgetId {
+    of_node("ghost_trigger_glyph", graph, node_id)
 }
 
 /// A preview's value area, so the canvas-level scan can read last frame's click.

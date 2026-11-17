@@ -12,8 +12,8 @@ use crate::gui::pane::graph_ui::scene::canvas_geometry::port_layer::PortLayer;
 ///
 /// Identity-only: both ends resolve their position out of `CanvasGeometry` every frame, so a
 /// drag survives node moves and relayouts. The direction of an event drag flips the two
-/// domains, hence separate `A` and `B`: a subscriber-started drag is a
-/// `GlyphDrag<NodeId, EventPort>` and an emitter-started one the reverse.
+/// domains, hence separate `A` and `B`: a trigger-started drag is a
+/// `GlyphDrag<TriggerPort, EventPort>` and an event-started one the reverse.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) struct GlyphDrag<A, B> {
     /// The glyph the press latched. Fixed for the drag's whole life.

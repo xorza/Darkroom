@@ -4,14 +4,14 @@
 //!
 //! - **A const-only input takes a wire from a const-only `Inputs` port, and from nothing else.**
 //!   An instance holds only a constant there, so the compile lowers the wire to that constant.
-//! - **An interface declares the events an instance fires and at most one trigger it hears**
-//!   ([`EventPorts`]), as Unreal's macro tunnels carry exec pins both ways. An instance hears its
-//!   trigger on its pin, as a func with a body hears on its one pin, so every node takes an
-//!   event in at one place and draws it one way. Inside, the `Inputs` node fires the trigger as
-//!   its one event, under [`Interface::TRIGGER_EVENT`], and the `Outputs` node hears each event
-//!   on a trigger of its own, mirrored as the data ports are, so an event crosses the boundary as
-//!   a wire does. Refused: a list of triggers, each a row on the instance, which draws an
-//!   instance's incoming events apart from every other node's.
+//! - **An interface declares the events an instance fires and at most one trigger**
+//!   ([`EventPorts`]), as Unreal's macro tunnels carry exec pins both ways. The trigger is the
+//!   instance's own, as a sink has its own, so every node is triggered at one place and draws it
+//!   one way. Inside, the `Inputs` node fires the trigger as its one event, under
+//!   [`Interface::TRIGGER_EVENT`], and the `Outputs` node shows each event as a trigger, mirrored
+//!   as the data ports are, so an event crosses the boundary as a wire does. Refused: a list of
+//!   triggers, each a row on the instance, which draws an instance's triggers apart from every
+//!   other node's.
 
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -44,13 +44,13 @@ pub struct Interface {
     inputs_node_events: Option<Numbered<EventDecl>>,
 }
 
-/// The events an interface fires, each under an id unique among them, and the one trigger it
-/// hears, if any.
+/// The events an interface fires, each under an id unique among them, and its one trigger, if
+/// any.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventPorts {
-    /// What an instance fires and the `Outputs` node hears inside.
+    /// What an instance fires and the `Outputs` node shows as triggers inside.
     pub events: Vec<Numbered<EventDecl>>,
-    /// What an instance hears on its pin and the `Inputs` node fires inside.
+    /// The instance's own trigger, which the `Inputs` node fires as an event inside.
     pub trigger: Option<EventDecl>,
 }
 
@@ -150,7 +150,7 @@ impl Interface {
         &self.event_ports.events
     }
 
-    /// What an instance hears on its pin.
+    /// The instance's own trigger.
     pub const fn trigger(&self) -> Option<&EventDecl> {
         self.event_ports.trigger.as_ref()
     }

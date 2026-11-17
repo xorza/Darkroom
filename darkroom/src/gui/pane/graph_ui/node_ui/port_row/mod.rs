@@ -61,14 +61,15 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, row_tracks: &mu
     let (theme, node) = (record.node.theme(), record.node);
     // Events list under the outputs in the same column: a row per output and per event. The
     // ghost ports list under the declared ones on their side.
-    let row_count =
-        (node.port_count(PortKind::Input) + node.triggers().len() + node.ghost_inputs().count())
-            .max(
-                node.port_count(PortKind::Output)
-                    + node.events().len()
-                    + node.ghost_outputs().count()
-                    + node.ghost_events().count(),
-            );
+    let row_count = (node.port_count(PortKind::Input)
+        + node.trigger_rows().len()
+        + node.ghost_inputs().count())
+    .max(
+        node.port_count(PortKind::Output)
+            + node.events().len()
+            + node.ghost_outputs().count()
+            + node.ghost_events().count(),
+    );
     if row_count == 0 {
         return;
     }
@@ -168,7 +169,7 @@ fn input_cells(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     }
     // Triggers land on the same (left) side, in the rows directly below the data inputs.
     let input_count = node.port_count(PortKind::Input);
-    for (idx, trigger) in node.triggers().iter().enumerate() {
+    for (idx, trigger) in node.trigger_rows().iter().enumerate() {
         TriggerRow {
             row: input_count + idx,
             trigger: TriggerPort::new(node.node_id, trigger.id),
@@ -176,7 +177,7 @@ fn input_cells(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
         }
         .show(ui, record);
     }
-    let declared = input_count + node.triggers().len();
+    let declared = input_count + node.trigger_rows().len();
     for (idx, ghost) in node.ghost_inputs().enumerate() {
         GhostRow {
             row: declared + idx,

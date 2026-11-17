@@ -110,7 +110,7 @@ impl ExecEngine {
     }
 
     /// Plan, resolve and run `request.seeds` into the caller-owned `outcome`. The outcome
-    /// also owns triggers initialized successfully by an `event_sources` seed.
+    /// also owns the events an `event_sources` seed armed.
     pub(crate) async fn execute(
         &mut self,
         request: ExecuteRequest<'_, '_>,

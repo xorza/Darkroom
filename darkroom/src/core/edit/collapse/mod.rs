@@ -119,7 +119,7 @@ pub(crate) fn collapse(
             .clone()
     };
     for subscription in held.subscriptions() {
-        let (emitter, subscriber) = (subscription.event.node_id, subscription.listener.node_id());
+        let (emitter, subscriber) = (subscription.event.node_id, subscription.trigger.node_id);
         if inside.contains(&emitter) != inside.contains(&subscriber) {
             let node = if inside.contains(&emitter) {
                 subscriber

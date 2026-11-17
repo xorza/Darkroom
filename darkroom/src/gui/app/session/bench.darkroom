@@ -482,7 +482,10 @@
                             node_id: ("5fcd3fd1-6bb5-4241-ab6e-d4397a454896"),
                             event: 2,
                         ),
-                        listener: Pin(("5fb6630e-e3aa-4f4d-9b48-d8ee886a2efc")),
+                        trigger: (
+                            node_id: ("5fb6630e-e3aa-4f4d-9b48-d8ee886a2efc"),
+                            trigger: 1,
+                        ),
                     ),
                 ],
                 ghost_nodes: {},

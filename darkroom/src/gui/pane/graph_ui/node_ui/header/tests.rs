@@ -1,6 +1,6 @@
 use glam::{UVec2, Vec2};
 use palantir::{EditableLabel, PointerButton};
-use scenarium::{CacheMode, NodeAddr, NodeId};
+use scenarium::{CacheMode, NodeAddr, NodeId, TriggerPort};
 use scenarium::{GraphId, internals::test_graph::TestGraph};
 use std::mem;
 use std::sync::Arc;
@@ -257,7 +257,7 @@ fn a_preview_node_shows_one_kind_mark_after_its_title() {
     }
 }
 
-/// A node with no measured size is laid out unseen, its subscription pin too, so neither takes a
+/// A node with no measured size is laid out unseen, its trigger too, so neither takes a
 /// pointer, and it owes a relayout, whose pass shows both. Removed and restored by an undo, a sink
 /// has lost its size, as a node first recorded has none.
 #[test]
@@ -275,7 +275,7 @@ fn a_node_and_its_pin_show_once_measured() {
         .node_id;
     let parts = [
         wid::body(GraphId::Main, sink),
-        wid::subscription_glyph(GraphId::Main, sink),
+        wid::trigger_glyph(GraphId::Main, TriggerPort::from(sink)),
     ];
     let listed = |h: &CanvasHarness| {
         parts.map(|part| h.ui.widgets(None).iter().any(|widget| widget.id == part))
@@ -300,10 +300,10 @@ fn a_node_and_its_pin_show_once_measured() {
     );
 }
 
-/// An instance draws a pin while its interface declares a trigger, as a sink does; one whose
-/// interface declares none draws no pin, and a ghost pin where a ghost subscription ends on it.
+/// An instance draws its own trigger while its interface declares one, as a sink does; one whose
+/// interface declares none draws none, and a ghost trigger where a ghost subscription ends on it.
 #[test]
-fn an_instance_has_a_pin_while_its_interface_declares_a_trigger() {
+fn an_instance_has_a_trigger_while_its_interface_declares_one() {
     use scenarium::{
         EventDecl, EventPort, EventPorts, GhostSubscription, Interface, PortId, Subgraph,
         SubgraphId, Subscription, SubscriptionState,
@@ -330,17 +330,29 @@ fn an_instance_has_a_pin_while_its_interface_declares_a_trigger() {
         plain,
         Subgraph::new("plain", Interface::default()),
     );
-    let heard = fixture.add_instance(triggered);
-    let deaf = fixture.add_instance(plain);
+    let with_trigger = fixture.add_instance(triggered);
+    let without_trigger = fixture.add_instance(plain);
     fixture.document.graphs.main_mut().set_subscription_state(
-        Subscription::new(EventPort::new(emitter, PortId::new(1)), deaf),
+        Subscription::new(EventPort::new(emitter, PortId::new(1)), without_trigger),
         SubscriptionState::Ghost(GhostSubscription::default()),
     );
     let mut h = CanvasHarness::new(fixture);
     h.prime(2);
     let shows = |id| h.ui.rect(id).is_some();
-    assert!(shows(wid::subscription_glyph(GraphId::Main, heard)));
-    assert!(!shows(wid::ghost_subscription_glyph(GraphId::Main, heard)));
-    assert!(!shows(wid::subscription_glyph(GraphId::Main, deaf)));
-    assert!(shows(wid::ghost_subscription_glyph(GraphId::Main, deaf)));
+    assert!(shows(wid::trigger_glyph(
+        GraphId::Main,
+        TriggerPort::from(with_trigger)
+    )));
+    assert!(!shows(wid::ghost_trigger_glyph(
+        GraphId::Main,
+        with_trigger
+    )));
+    assert!(!shows(wid::trigger_glyph(
+        GraphId::Main,
+        TriggerPort::from(without_trigger)
+    )));
+    assert!(shows(wid::ghost_trigger_glyph(
+        GraphId::Main,
+        without_trigger
+    )));
 }

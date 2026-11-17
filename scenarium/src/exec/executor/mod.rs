@@ -27,7 +27,7 @@ use crate::data::path_form::PathForm;
 use crate::data::ram_usage::RamUsage;
 use crate::exec::idx::{NodeIdx, OutputAddr, OutputIdx};
 use crate::exec::program_event::ProgramEvent;
-use crate::exec::report::event_trigger::EventTrigger;
+use crate::exec::report::armed_event::ArmedEvent;
 use crate::exec::report::exec_outcome::ExecOutcome;
 use crate::exec::report::node_status::{NodeExecStatus, NodeStatus};
 use crate::exec::report::run_reporter::{RunPhase, RunReporter};
@@ -628,7 +628,7 @@ impl ExecFrame<'_, '_> {
         }
 
         if self.schedule.root_flags(node_idx).is_event_source() {
-            self.collect_event_triggers(node_idx);
+            self.collect_armed_events(node_idx);
         }
         // Persist the moment the node finishes, not at the end of the run. The snapshot is taken
         // synchronously inside `store_node`; only the write awaits, so the cache borrow doesn't
@@ -662,18 +662,18 @@ impl ExecFrame<'_, '_> {
             })
     }
 
-    /// Hand the run's outcome the triggers a freshly initialized event source owns — only
+    /// Hand the run's outcome the events a freshly initialized event source arms — only
     /// events that have a subscriber can fire.
-    fn collect_event_triggers(&mut self, node_idx: NodeIdx) {
+    fn collect_armed_events(&mut self, node_idx: NodeIdx) {
         let program = self.program;
         let program_id = program.program_ids[node_idx];
         let event_state = &self.nodes[node_idx].event_state;
-        self.outcome.event_triggers.extend(
+        self.outcome.armed_events.extend(
             program.events[program[node_idx].events]
                 .iter()
                 .enumerate()
                 .filter(|(_, event)| !event.subscribers.is_empty())
-                .map(|(event_idx, event)| EventTrigger {
+                .map(|(event_idx, event)| ArmedEvent {
                     event: ProgramEvent::new(program_id, event_idx),
                     lambda: event.lambda.clone(),
                     state: event_state.clone(),

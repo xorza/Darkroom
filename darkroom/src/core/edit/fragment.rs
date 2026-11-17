@@ -13,7 +13,7 @@ use std::mem;
 use glam::Vec2;
 use scenarium::{
     Binding, BindingEntry, EventPort, GraphId, InputPort, Library, Node, NodeId, OutputPort,
-    PortId, SubgraphId, Subscription,
+    PortId, SubgraphId, Subscription, TriggerPort,
 };
 use serde::{Deserialize, Serialize};
 
@@ -132,7 +132,7 @@ impl Fragment {
         }
         fragment.subscriptions = held
             .subscriptions()
-            .filter(|subscription| inside.contains(&subscription.listener.node_id()))
+            .filter(|subscription| inside.contains(&subscription.trigger.node_id))
             .filter(|subscription| {
                 incoming == IncomingWires::Keep || inside.contains(&subscription.event.node_id)
             })
@@ -227,9 +227,10 @@ impl Fragment {
         let subscription = |subscription: Subscription| {
             Subscription::new(
                 EventPort::new(node(subscription.event.node_id), subscription.event.event),
-                subscription
-                    .listener
-                    .on(node(subscription.listener.node_id())),
+                TriggerPort {
+                    node_id: node(subscription.trigger.node_id),
+                    ..subscription.trigger
+                },
             )
         };
         let wire = |wire: DataWire| DataWire {

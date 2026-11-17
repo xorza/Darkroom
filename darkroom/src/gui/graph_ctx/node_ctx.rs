@@ -3,7 +3,7 @@
 use glam::Vec2;
 use scenarium::{
     CacheMode, DetachReason, EventDecl, EventPort, EventRef, Func, GhostNode, GhostSource,
-    GhostWiring, GraphId, InputPort, Listener, Node, NodeAddr, NodeDecl, NodeEvents, NodeId,
+    GhostWiring, GraphId, InputPort, Node, NodeAddr, NodeDecl, NodeEvents, NodeId, NodeTriggers,
     Numbered, PortId, ProgramId, RamUsage, SavedDecl, SubgraphId, TriggerPort, Unresolved,
 };
 
@@ -272,7 +272,7 @@ impl<'a> NodeCtx<'a> {
     }
 
     /// The events this node shows that its declaration does not fire; [`Self::ghost_inputs`] for
-    /// an event, each once however many ghost subscriptions hear it.
+    /// an event, each once however many ghost subscriptions leave it.
     pub(crate) fn ghost_events(self) -> impl Iterator<Item = GhostEvent<'a>> {
         let (node_id, wiring, saved) = (self.node_id, self.ghost_wiring(), self.saved());
         let declaration = self.declaration;
@@ -304,16 +304,17 @@ impl<'a> NodeCtx<'a> {
         from_saved.chain(unknown)
     }
 
-    /// Whether the node draws a ghost pin: a ghost subscription ends on it and it draws no
-    /// subscription pin of its own, as a ghost node, a node whose func no longer runs as a
-    /// sink, or an instance whose interface lost its trigger. The pin is read off the wiring, as
-    /// no saved declaration says sink.
-    pub(crate) fn ghost_pinned(self) -> bool {
-        !self.pinned()
+    /// Whether the node draws a ghost trigger: a ghost subscription ends on its own trigger and
+    /// it shows no trigger, as a ghost node, a node whose func no longer runs as a sink, or an
+    /// instance whose interface lost its trigger. Never on the `Outputs` node, whose trigger ids
+    /// are its rows'. Read off the wiring, as no saved declaration says sink.
+    pub(crate) fn ghost_triggered(self) -> bool {
+        let own = TriggerPort::from(self.node_id);
+        matches!(self.triggers(), NodeTriggers::None)
             && self
                 .ghost_wiring()
                 .subscriptions()
-                .any(|(subscription, _)| subscription.listener == Listener::Pin(self.node_id))
+                .any(|(subscription, _)| subscription.trigger == own)
     }
 
     /// How many ghosts touch this node, from either end: the count its footer and the inspector
@@ -347,11 +348,16 @@ impl<'a> NodeCtx<'a> {
         self.func().is_some_and(Func::sink)
     }
 
-    /// The node draws a subscription pin, where an event wire lands: one that hears on it
-    /// ([`NodeDecl::hears_pin`]), a sink or an instance whose interface declares a trigger.
-    /// Declared, like [`Self::sink`].
-    pub(crate) fn pinned(self) -> bool {
-        self.declaration.is_ok_and(NodeDecl::hears_pin)
+    /// The triggers the node shows ([`NodeDecl::triggers`]). Declared, like [`Self::sink`].
+    fn triggers(self) -> NodeTriggers<'a> {
+        self.declaration
+            .map_or(NodeTriggers::None, NodeDecl::triggers)
+    }
+
+    /// The node has its own trigger, drawn at its corner: a sink, or an instance whose interface
+    /// declares a trigger.
+    pub(crate) fn has_own_trigger(self) -> bool {
+        matches!(self.triggers(), NodeTriggers::Own)
     }
 
     /// The node holds work that recomputes every run. An impure node has no
@@ -519,18 +525,25 @@ impl<'a> NodeCtx<'a> {
         self.declaration.ok()?.event(event)
     }
 
-    /// The triggers this node hears: the `Outputs` node's mirror of the interface's events.
-    /// Listed in the input column, under the data inputs.
-    pub(crate) fn triggers(self) -> &'a [Numbered<EventDecl>] {
-        self.declaration.map_or(&[][..], NodeDecl::triggers)
+    /// The triggers the node lists as rows: the `Outputs` node's, one per interface event, in the
+    /// input column under the data inputs.
+    pub(crate) fn trigger_rows(self) -> &'a [Numbered<EventDecl>] {
+        match self.triggers() {
+            NodeTriggers::PerEvent(events) => events,
+            NodeTriggers::None | NodeTriggers::Own => &[],
+        }
     }
 
-    /// Every `TriggerPort`, in declaration order: [`Self::event_ports`] for a listener's end.
+    /// Every `TriggerPort` the node shows, its own or its rows': [`Self::event_ports`] for a
+    /// subscription's other end.
     pub(crate) fn trigger_ports(self) -> impl Iterator<Item = TriggerPort> {
         let node_id = self.node_id;
-        self.triggers()
-            .iter()
-            .map(move |trigger| TriggerPort::new(node_id, trigger.id))
+        let own = self.has_own_trigger().then(|| TriggerPort::from(node_id));
+        own.into_iter().chain(
+            self.trigger_rows()
+                .iter()
+                .map(move |trigger| TriggerPort::new(node_id, trigger.id)),
+        )
     }
 
     /// How many ports this node declares on `kind`'s side.

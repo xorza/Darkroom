@@ -341,12 +341,10 @@ where
             Ok(()) => {
                 if run.start_event_loop && !self.shutdown.is_cancelled() {
                     assert!(self.event_loop.is_none());
-                    let triggers = mem::take(&mut self.outcome.event_triggers);
-                    if !triggers.is_empty() {
-                        self.event_loop = Some(ActiveEventLoop::start(
-                            triggers,
-                            &self.event_loop_pause_gate,
-                        ));
+                    let armed = mem::take(&mut self.outcome.armed_events);
+                    if !armed.is_empty() {
+                        self.event_loop =
+                            Some(ActiveEventLoop::start(armed, &self.event_loop_pause_gate));
                         tracing::info!("Event loop started");
                     }
                 }

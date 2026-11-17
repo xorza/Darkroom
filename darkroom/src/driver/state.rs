@@ -4,8 +4,8 @@ use glam::Vec2;
 use palantir::InspectedWidget;
 use palantir::{Rect, Sense, Ui};
 use scenarium::{
-    Binding, GhostSource, Graph, GraphId, InputPort, Listener, NodeDecl, NodeId, OutputPort,
-    SavedPort, Scope,
+    Binding, GhostSource, Graph, GraphId, InputPort, NodeDecl, NodeId, NodeTriggers, OutputPort,
+    SavedPort, Scope, TriggerPort,
 };
 use serde::Serialize;
 
@@ -376,12 +376,18 @@ fn ghost_end(graph: &Graph, scope: Scope<'_>, port: PortRef, saved: Option<&Save
     }
 }
 
-/// Where a subscription lands, by name: a node's pin by its title, a trigger as `<node>.#<id>`.
-fn listener_name(graph: &Graph, scope: Scope<'_>, listener: Listener) -> String {
-    let title = node_title(graph, scope, listener.node_id());
-    match listener {
-        Listener::Pin(_) => title.to_owned(),
-        Listener::Trigger(trigger) => format!("{title}.#{}", trigger.trigger),
+/// Where a subscription lands, by name: a node's own trigger by the node's title, an `Outputs`
+/// node's trigger or another id as `<node>.#<id>`.
+fn trigger_name(graph: &Graph, scope: Scope<'_>, trigger: TriggerPort) -> String {
+    let title = node_title(graph, scope, trigger.node_id);
+    let rows = graph
+        .find(trigger.node_id)
+        .and_then(|node| scope.resolve(node).ok())
+        .is_some_and(|decl| matches!(decl.triggers(), NodeTriggers::PerEvent(_)));
+    if trigger.trigger == TriggerPort::NODE && !rows {
+        title.to_owned()
+    } else {
+        format!("{title}.#{}", trigger.trigger)
     }
 }
 
@@ -409,7 +415,7 @@ fn ghosts(graph: &Graph, scope: Scope<'_>) -> Vec<String> {
         format!(
             "{}.{event} => {}",
             node_title(graph, scope, subscription.event.node_id),
-            listener_name(graph, scope, subscription.listener)
+            trigger_name(graph, scope, subscription.trigger)
         )
     }));
     ghosts.sort_unstable();
@@ -449,7 +455,7 @@ mod tests {
     use scenarium::GraphId;
 
     use crate::core::document::internals::DocumentFixture;
-    use crate::driver::state::wires;
+    use crate::driver::state::{trigger_name, wires};
 
     /// The wires come sorted, whatever the graph's order; a filter keeps those with a listed
     /// node at either end.
@@ -476,6 +482,45 @@ mod tests {
                 "get_b.out0 -> sum.in1",
                 "sum.out0 -> mult.in0",
             ]
+        );
+    }
+
+    /// A subscription's end reads as its node's title on the node's own trigger, and with the id
+    /// on an `Outputs` node's, whose id 1 is an interface event's, and on an id the node lacks.
+    #[test]
+    fn a_trigger_reads_as_its_node_or_with_its_id() {
+        use scenarium::internals::stub_func;
+        use scenarium::{
+            EventDecl, EventPorts, FuncId, GraphSet, Interface, Library, Node, NodeId, Numbered,
+            PortId, Subgraph, SubgraphId, TriggerPort,
+        };
+
+        let probe = stub_func(FuncId::unique(), "probe").sink().build();
+        let mut library = Library::default();
+        library.add(probe.clone());
+        let interface = Interface::default()
+            .with_event_ports(EventPorts {
+                events: vec![Numbered::new(PortId::new(1), EventDecl::new("done"))],
+                trigger: None,
+            })
+            .unwrap();
+        let mut subgraph = Subgraph::new("relay", interface);
+        let outputs = subgraph.outputs_node();
+        let sink = NodeId::unique();
+        subgraph.graph.insert(sink, Node::from(&probe));
+        let id = SubgraphId::from_u128(1);
+        let mut set = GraphSet::default();
+        set.insert_subgraph(id, subgraph);
+        let (graph, scope) = (
+            set.graph(GraphId::Subgraph(id)),
+            set.scope(&library, GraphId::Subgraph(id)),
+        );
+        let name = |trigger| trigger_name(graph, scope, trigger);
+        assert_eq!(name(TriggerPort::from(sink)), "probe");
+        assert_eq!(name(TriggerPort::new(sink, PortId::new(7))), "probe.#7");
+        assert_eq!(
+            name(TriggerPort::new(outputs, PortId::new(1))),
+            "Outputs.#1"
         );
     }
 }

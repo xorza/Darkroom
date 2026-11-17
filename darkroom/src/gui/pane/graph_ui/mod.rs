@@ -325,7 +325,7 @@ impl GraphUi {
                                 WireSet::Standing
                             };
                             let emphasis = WireEmphasis::resolve(theme.canvas.bg, set);
-                            // Both wire renderers share these inputs. Subscription wires sit
+                            // Both wire renderers share these inputs. Event wires sit
                             // under the node bodies like data wires and share the breaker
                             // probe, so they are all cuttable.
                             let mut wires = WirePass {

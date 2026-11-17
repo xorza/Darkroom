@@ -180,7 +180,7 @@ impl OutputDecl {
     }
 }
 
-/// An event an interface fires or a trigger it hears: a name and what it is for, as a func's
+/// An event an interface fires or its trigger: a name and what it is for, as a func's
 /// event declares beside its lambda.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventDecl {

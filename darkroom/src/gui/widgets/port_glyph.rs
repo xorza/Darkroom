@@ -51,8 +51,8 @@ enum Placement {
 }
 
 /// One port-terminal glyph: the circle a data port paints as, the triangle an
-/// emitter event paints as, or the rotated triangle a subscription pin paints
-/// as. Builder chain ending in [`show`](Self::show), like a palantir widget.
+/// event or a trigger row paints as, or the rotated triangle a node's own trigger
+/// paints as. Builder chain ending in [`show`](Self::show), like a palantir widget.
 ///
 /// Domain-agnostic like the rest of `widgets`: the caller supplies the id, size, colors and
 /// tooltip, and maps the returned clicks onto its own intent. The glyph owns the
