@@ -1328,3 +1328,142 @@ fn a_subscription_lands_on_a_declared_trigger_and_an_interface_edit_refuses_it()
     set.write_interface(&kept, ChangeSide::Before);
     assert_eq!(set, before);
 }
+
+/// An interface edit that removes a port an existing ghost names saves the port's name and type on
+/// the ghost, at each end: outside, a ghost binding's source on the instance and a ghost
+/// subscription's event; inside, a ghost binding's input and a ghost subscription's trigger on the
+/// `Outputs` node. An undo takes them off again, and a ghost the edit leaves alone keeps what it
+/// had.
+#[test]
+fn an_interface_edit_names_the_ports_it_removes_on_existing_ghosts() {
+    use crate::data::const_value::ConstValue;
+    use crate::graph::ghost_wiring::{
+        GhostBinding, GhostSource, GhostSubscription, InputState, SubscriptionState,
+    };
+    use crate::graph::identity::{EventPort, OutputPort, TriggerPort};
+    use crate::graph::interface::EventPorts;
+    use crate::graph::interface_change::{ChangeSide, RefusedFate};
+    use crate::graph::ports::{EventDecl, OutputDecl};
+    use crate::graph::saved_decl::{SavedEvent, SavedPort};
+    use crate::graph::subscription::Subscription;
+    use crate::internals::test_graph::sets::TICKER;
+
+    const RESULT: PortId = PortId::new(201);
+    const OUT: PortId = PortId::new(301);
+    let library = library();
+    let interface = Interface::new(Ports {
+        inputs: vec![],
+        outputs: vec![Numbered::new(
+            RESULT,
+            OutputDecl::new("result", DataType::Int),
+        )],
+    })
+    .with_event_ports(EventPorts {
+        events: vec![Numbered::new(OUT, EventDecl::new("out"))],
+        trigger: None,
+    })
+    .unwrap();
+    let mut relay = Compound::new("relay", interface);
+    let outputs = relay.outputs_node();
+    relay.graph.insert(n(5), node(&library, TICKER));
+    // Inside, the ticker declares no output 9 and no event 7: each ghost's far end is unknown.
+    let fed = InputPort::new(outputs, RESULT);
+    relay.graph.set_input_state(
+        fed,
+        InputState::Ghost(GhostBinding {
+            input: None,
+            source: GhostSource::Wire {
+                output: OutputPort::new(n(5), PortId::new(9)),
+                saved: None,
+            },
+        }),
+    );
+    let passed = Subscription::new(
+        EventPort::new(n(5), PortId::new(7)),
+        TriggerPort::new(outputs, OUT),
+    );
+    relay.graph.set_subscription_state(
+        passed,
+        SubscriptionState::Ghost(GhostSubscription::default()),
+    );
+    let mut set = GraphSet::default();
+    set.insert_compound(s(1), relay);
+    set.main_mut().insert(n(2), Node::instance(s(1)));
+    set.main_mut().insert(n(3), node(&library, SINK));
+    set.main_mut().insert(n(4), node(&library, TICKER));
+    // The sink declares no input 9, and the ticker no trigger: each ghost's other end is live.
+    let wired = InputPort::new(n(3), PortId::new(9));
+    let wire = GhostBinding {
+        input: None,
+        source: GhostSource::Wire {
+            output: OutputPort::new(n(2), RESULT),
+            saved: None,
+        },
+    };
+    let constant = InputPort::new(n(3), PortId::new(8));
+    let kept = GhostBinding {
+        input: None,
+        source: GhostSource::Const(ConstValue::Int(4)),
+    };
+    let heard = Subscription::new(EventPort::new(n(2), OUT), TriggerPort::from(n(4)));
+    let main = set.main_mut();
+    main.set_input_state(wired, InputState::Ghost(wire));
+    main.set_input_state(constant, InputState::Ghost(kept.clone()));
+    main.set_subscription_state(
+        heard,
+        SubscriptionState::Ghost(GhostSubscription::default()),
+    );
+    let before = set.clone();
+
+    let change = set.plan_interface(s(1), Interface::default(), &library, RefusedFate::Drop);
+    assert_eq!(change.refused(), [], "no live wiring touches the instance");
+    set.write_interface(&change, ChangeSide::After);
+    assert_eq!(
+        set.main().input_state(wired),
+        InputState::Ghost(GhostBinding {
+            input: None,
+            source: GhostSource::Wire {
+                output: OutputPort::new(n(2), RESULT),
+                saved: Some(SavedPort {
+                    name: "result".to_owned(),
+                    data_type: DataType::Int,
+                }),
+            },
+        })
+    );
+    assert_eq!(set.main().input_state(constant), InputState::Ghost(kept));
+    assert_eq!(
+        set.main().subscription_state(heard),
+        SubscriptionState::Ghost(GhostSubscription {
+            event: Some(SavedEvent {
+                name: "out".to_owned(),
+            }),
+            trigger: None,
+        })
+    );
+    let inside = set.graph(GraphId::Compound(s(1)));
+    assert_eq!(
+        inside.input_state(fed),
+        InputState::Ghost(GhostBinding {
+            input: Some(SavedPort {
+                name: "result".to_owned(),
+                data_type: DataType::Int,
+            }),
+            source: GhostSource::Wire {
+                output: OutputPort::new(n(5), PortId::new(9)),
+                saved: None,
+            },
+        })
+    );
+    assert_eq!(
+        inside.subscription_state(passed),
+        SubscriptionState::Ghost(GhostSubscription {
+            event: None,
+            trigger: Some(SavedEvent {
+                name: "out".to_owned(),
+            }),
+        })
+    );
+    set.write_interface(&change, ChangeSide::Before);
+    assert_eq!(set, before);
+}

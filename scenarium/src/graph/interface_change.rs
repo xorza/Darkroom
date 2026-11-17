@@ -3,11 +3,12 @@
 //! # Decisions
 //!
 //! - **An interface edit is the set's, and it changes another graph only by the wiring it
-//!   refuses.** A reorder and a rename change no binding anywhere, as wiring names a port by id.
-//!   A removed port refuses the wires and constants on it in every graph, a retyped one those it
-//!   no longer admits, and undo puts them back: the record is the two interfaces and those
-//!   bindings. Refused: the interface as a field a host sets, which leaves the refused wires in
-//!   other graphs to each host.
+//!   refuses and the ghosts it names.** A reorder and a rename change no binding anywhere, as
+//!   wiring names a port by id. A removed port refuses the wires and constants on it in every
+//!   graph, a retyped one those it no longer admits, and a ghost already kept that names a removed
+//!   port takes its name, as a func's remap names one; undo puts each back: the record is the two
+//!   interfaces, those bindings and those ghosts. Refused: the interface as a field a host sets,
+//!   which leaves the refused wires in other graphs to each host.
 //! - **What it refuses is dropped or kept as ghosts, as the caller says** ([`RefusedFate`]). A
 //!   port a person removes or retypes takes its wiring, as they pointed at it; an update from a
 //!   library changes the interface under them, as a func update does, so it keeps the wiring as
@@ -30,7 +31,7 @@ use crate::graph::ghost_wiring::{
     GhostBinding, GhostSource, GhostSubscription, InputState, SubscriptionState,
 };
 use crate::graph::graph_set::GraphSet;
-use crate::graph::identity::{CompoundId, GraphId, InputPort, OutputPort};
+use crate::graph::identity::{CompoundId, EventPort, GraphId, InputPort, OutputPort, TriggerPort};
 use crate::graph::interface::Interface;
 use crate::graph::node_decl::NodeTriggers;
 use crate::graph::saved_decl::{SavedEvent, SavedPort};
@@ -47,7 +48,19 @@ pub struct InterfaceChange {
     after: Interface,
     refused: Vec<RefusedBinding>,
     refused_subscriptions: Vec<RefusedSubscription>,
+    named: Vec<NamedGhost<InputPort, GhostBinding>>,
+    named_subscriptions: Vec<NamedGhost<Subscription, GhostSubscription>>,
     fate: RefusedFate,
+}
+
+/// A ghost an interface edit keeps in place and names an end of, as the edit removed that end's
+/// port: the ghost before and after, under its key in `graph`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NamedGhost<K, G> {
+    pub graph: GraphId,
+    pub key: K,
+    pub before: G,
+    pub after: G,
 }
 
 /// A subscription an interface edit refuses, to or from an event or a trigger the new interface
@@ -92,6 +105,16 @@ pub enum ChangeSide {
     After,
 }
 
+impl<K, G> NamedGhost<K, G> {
+    /// The ghost a write of `side` finds, and the one it leaves.
+    const fn landing(&self, side: ChangeSide) -> [&G; 2] {
+        match side {
+            ChangeSide::After => [&self.before, &self.after],
+            ChangeSide::Before => [&self.after, &self.before],
+        }
+    }
+}
+
 impl InterfaceChange {
     pub const fn id(&self) -> CompoundId {
         self.id
@@ -113,6 +136,17 @@ impl InterfaceChange {
     /// In graph order, then in the order each graph keeps its subscriptions.
     pub fn refused_subscriptions(&self) -> &[RefusedSubscription] {
         &self.refused_subscriptions
+    }
+
+    /// The ghost bindings the edit names an end of, in graph order, then in the order each graph
+    /// keeps its ghosts.
+    pub fn named(&self) -> &[NamedGhost<InputPort, GhostBinding>] {
+        &self.named
+    }
+
+    /// [`Self::named`] for the ghost subscriptions.
+    pub fn named_subscriptions(&self) -> &[NamedGhost<Subscription, GhostSubscription>] {
+        &self.named_subscriptions
     }
 
     pub const fn fate(&self) -> RefusedFate {
@@ -144,84 +178,97 @@ impl GraphSet {
         after.set_interface(id, to.clone());
         let mut refused = Vec::new();
         let mut refused_subscriptions = Vec::new();
+        let mut named = Vec::new();
+        let mut named_subscriptions = Vec::new();
         for (graph, held) in after.graphs() {
             let scope = after.scope(library, graph);
             let was = self.scope(library, graph);
             let was_graph = self.graph(graph);
-            // The name and type a port had, where the new interface no longer gives it.
+            // The name and type a port of a node the graph holds had, where the new interface no
+            // longer gives it.
             let lost_input = |port: InputPort| {
-                let node = held
-                    .find(port.node_id)
-                    .expect("a refused binding's node is held");
-                if node.decl(scope).ports().input(port.port).is_some() {
+                if held
+                    .find(port.node_id)?
+                    .decl(scope)
+                    .ports()
+                    .input(port.port)
+                    .is_some()
+                {
                     return None;
                 }
-                let decl = was_graph.find(port.node_id)?.decl(was);
-                let input = decl.ports().input(port.port)?;
+                let input = was_graph
+                    .find(port.node_id)?
+                    .decl(was)
+                    .ports()
+                    .input(port.port)?;
                 Some(SavedPort {
                     name: input.name.clone(),
                     data_type: input.data_type,
                 })
             };
             let lost_output = |port: OutputPort| {
-                let node = held
-                    .find(port.node_id)
-                    .expect("a refused wire's producer is held");
-                if node.decl(scope).ports().output(port.port).is_some() {
+                if held
+                    .find(port.node_id)?
+                    .decl(scope)
+                    .ports()
+                    .output(port.port)
+                    .is_some()
+                {
                     return None;
                 }
-                let decl = was_graph.find(port.node_id)?.decl(was);
-                let output = decl.ports().output(port.port)?;
+                let output = was_graph
+                    .find(port.node_id)?
+                    .decl(was)
+                    .ports()
+                    .output(port.port)?;
                 Some(SavedPort {
                     name: output.name.clone(),
                     data_type: output.data_type,
+                })
+            };
+            let lost_event = |event: EventPort| {
+                if held
+                    .find(event.node_id)?
+                    .decl(scope)
+                    .event(event.event)
+                    .is_some()
+                {
+                    return None;
+                }
+                let old = was_graph
+                    .find(event.node_id)?
+                    .decl(was)
+                    .event(event.event)?;
+                Some(SavedEvent {
+                    name: old.name.to_owned(),
+                })
+            };
+            let lost_trigger = |trigger: TriggerPort| {
+                let node = held.find(trigger.node_id)?;
+                if node.decl(scope).triggers().contains(trigger.trigger) {
+                    return None;
+                }
+                let old = match was_graph.find(trigger.node_id)?.decl(was).triggers() {
+                    NodeTriggers::PerEvent(events) => {
+                        events.iter().find(|event| event.id == trigger.trigger)?
+                    }
+                    NodeTriggers::None | NodeTriggers::Own => return None,
+                };
+                Some(SavedEvent {
+                    name: old.name.clone(),
                 })
             };
             for refusal in held.refused_wiring(scope) {
                 let port = match refusal {
                     RefusedWiring::Binding { port, .. } => port,
                     RefusedWiring::Subscription { subscription, .. } => {
-                        let emitter = held
-                            .find(subscription.event.node_id)
-                            .expect("a refused subscription's emitter is held");
-                        let event = if emitter
-                            .decl(scope)
-                            .event(subscription.event.event)
-                            .is_some()
-                        {
-                            None
-                        } else {
-                            was_graph
-                                .find(subscription.event.node_id)
-                                .and_then(|node| node.decl(was).event(subscription.event.event))
-                                .map(|event| SavedEvent {
-                                    name: event.name.to_owned(),
-                                })
-                        };
-                        let trigger = subscription.trigger;
-                        let subscriber = held
-                            .find(trigger.node_id)
-                            .expect("a refused subscription's subscriber is held");
-                        let trigger = if subscriber.decl(scope).triggers().contains(trigger.trigger)
-                        {
-                            None
-                        } else {
-                            was_graph
-                                .find(trigger.node_id)
-                                .and_then(|node| match node.decl(was).triggers() {
-                                    NodeTriggers::PerEvent(events) => {
-                                        events.iter().find(|event| event.id == trigger.trigger)
-                                    }
-                                    NodeTriggers::None | NodeTriggers::Own => None,
-                                })
-                                .map(|event| SavedEvent {
-                                    name: event.name.clone(),
-                                })
-                        };
                         refused_subscriptions.push(RefusedSubscription {
                             graph,
                             subscription,
-                            ghost: GhostSubscription { event, trigger },
+                            ghost: GhostSubscription {
+                                event: lost_event(subscription.event),
+                                trigger: lost_trigger(subscription.trigger),
+                            },
                         });
                         continue;
                     }
@@ -242,6 +289,50 @@ impl GraphSet {
                     },
                 });
             }
+            // A ghost already kept whose end names a port the edit removes takes the name the
+            // old interface gave it, as a func's remap names one (`port_map`): its row then reads
+            // by name, not by number.
+            for (port, ghost) in held.ghost_wiring().bindings() {
+                let source = match &ghost.source {
+                    GhostSource::Wire { output, saved } => GhostSource::Wire {
+                        output: *output,
+                        saved: saved.clone().or_else(|| lost_output(*output)),
+                    },
+                    source @ GhostSource::Const(_) => source.clone(),
+                };
+                let after = GhostBinding {
+                    input: ghost.input.clone().or_else(|| lost_input(port)),
+                    source,
+                };
+                if after != *ghost {
+                    named.push(NamedGhost {
+                        graph,
+                        key: port,
+                        before: ghost.clone(),
+                        after,
+                    });
+                }
+            }
+            for (subscription, ghost) in held.ghost_wiring().subscriptions() {
+                let after = GhostSubscription {
+                    event: ghost
+                        .event
+                        .clone()
+                        .or_else(|| lost_event(subscription.event)),
+                    trigger: ghost
+                        .trigger
+                        .clone()
+                        .or_else(|| lost_trigger(subscription.trigger)),
+                };
+                if after != *ghost {
+                    named_subscriptions.push(NamedGhost {
+                        graph,
+                        key: subscription,
+                        before: ghost.clone(),
+                        after,
+                    });
+                }
+            }
         }
         InterfaceChange {
             id,
@@ -249,6 +340,8 @@ impl GraphSet {
             after: to,
             refused,
             refused_subscriptions,
+            named,
+            named_subscriptions,
             fate,
         }
     }
@@ -301,6 +394,27 @@ impl GraphSet {
                 "an interface edit lands on the subscription it recorded"
             );
             graph.set_subscription_state(refused.subscription, to);
+        }
+        // A ghost the edit names an end of takes the name, and gives it back on the way back.
+        for named in &change.named {
+            let [from, to] = named.landing(side);
+            let graph = self.graph_mut(named.graph);
+            assert_eq!(
+                graph.input_state(named.key),
+                InputState::Ghost(from.clone()),
+                "an interface edit names the ghost it recorded"
+            );
+            graph.set_input_state(named.key, InputState::Ghost(to.clone()));
+        }
+        for named in &change.named_subscriptions {
+            let [from, to] = named.landing(side);
+            let graph = self.graph_mut(named.graph);
+            assert_eq!(
+                graph.subscription_state(named.key),
+                SubscriptionState::Ghost(from.clone()),
+                "an interface edit names the ghost it recorded"
+            );
+            graph.set_subscription_state(named.key, SubscriptionState::Ghost(to.clone()));
         }
         if side == ChangeSide::After {
             self.set_interface(change.id, change.after.clone());

@@ -65,7 +65,7 @@ pub use graph::instance_path::{InstancePath, InstancePathError};
 pub use graph::interface::EventPorts;
 pub use graph::interface::Interface;
 pub use graph::interface_change::{
-    ChangeSide, InterfaceChange, RefusedBinding, RefusedFate, RefusedSubscription,
+    ChangeSide, InterfaceChange, NamedGhost, RefusedBinding, RefusedFate, RefusedSubscription,
 };
 pub use graph::manifest::Manifest;
 pub use graph::node::special::{SPECIAL_NODES, SpecialNode};
