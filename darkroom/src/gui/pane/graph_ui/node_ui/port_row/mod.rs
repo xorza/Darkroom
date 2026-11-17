@@ -38,6 +38,7 @@ use crate::gui::port_ref::PortKind;
 use crate::gui::theme::Theme;
 use crate::gui::theme::color;
 use crate::gui::theme::hover::Hover;
+use crate::gui::widgets::format::shown_value::ShownValue;
 use crate::gui::widgets::port_glyph;
 use crate::gui::widgets::port_glyph::PortGlyph;
 use crate::gui::widgets::support;
@@ -432,6 +433,23 @@ fn value_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCtx<'_>)
         }
     };
     let data_type = input.data_type();
+    let field = Field {
+        theme: node_ctx.const_editor_theme(),
+        id: editor_id,
+    };
+    // A compound that is locked or follows the library shows its constants as they stand, as the
+    // gate would refuse an edit of one: the pane says it is read-only where its edits would be.
+    if node_ctx
+        .graph_ctx
+        .document()
+        .read_only(node_ctx.graph_ctx.graph())
+        .is_some()
+    {
+        value_column(ui, input, |ui| {
+            field.read_only(ui, ShownValue { value, data_type });
+        });
+        return;
+    }
     let value_variants = input.value_variants();
     // A path editor draws a pick button; clicking it raises a blocking file dialog, which
     // only `App` can run, so this is the app tier. Whether a click means "pick a path" is a
@@ -452,10 +470,7 @@ fn value_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCtx<'_>)
     }
     let edited = value_column(ui, input, |ui| {
         ConstEditor {
-            field: Field {
-                theme: node_ctx.const_editor_theme(),
-                id: editor_id,
-            },
+            field,
             library: node_ctx.graph_ctx.library(),
             value,
             data_type,

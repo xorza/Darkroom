@@ -125,6 +125,17 @@ run. Refused: a pass-through node, which changes the graph for layout.
   ([nodes](https://docs.unity3d.com/Packages/com.unity.visualscripting@1.9/manual/vs-nodes.html)).
   Refused: a trigger turned at the node's corner with event wires arriving at 45°, which bent
   every wire into an `Outputs` node's trigger rows.
+- **An instance is a node with a compound mark**, after its title where a func's kind mark goes:
+  a small graph while its compound takes edits, a padlock while its author locked it, a chain
+  while it follows the library, and a press opens the compound. The card stays a node's, as a lock
+  guards only what lies inside, and the instance's wiring and constants live in the graph that
+  holds it; inside a read-only compound its constants show as they stand. Its menu offers Open,
+  Expand, Make Unique, and Lock, Unlock or Make Local. As Blender's group node, entered from the
+  icon in its header ([issue](https://projects.blender.org/blender/blender/issues/117530)), and
+  Houdini's badge of a locked or unlocked asset
+  ([editing assets](https://www.sidefx.com/docs/houdini/assets/edit.html)). Refused: a dimmed
+  card for a locked compound, which says its instance takes no edit when it does; a lock badge
+  beside a compound icon, a second slot in a header tight beside its title.
 - **A ghost is a broken line and a hollow dot in its type's hue**: what a graph keeps and cannot
   hold, under the live wires, with a footer count in the warning ink and no frame, which a run's
   status owns. A broken line reads as broken, as Blender's developers found of their dashed

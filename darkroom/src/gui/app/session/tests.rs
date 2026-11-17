@@ -565,6 +565,51 @@ fn an_outputs_nodes_lost_trigger_is_a_ghost_row() {
     );
 }
 
+/// A constant inside a compound that takes edits shows its editor, which takes the focus; inside a
+/// locked one it shows as it stands, in a box that takes nothing, where the gate would refuse an
+/// edit of it.
+#[test]
+fn a_locked_compounds_constants_show_read_only() {
+    use scenarium::{Compound, CompoundId, ConstValue, Interface};
+
+    use crate::core::document::internals::insert_compound;
+
+    // Whether the editor's box shows, and whether it takes input: the widget list holds only
+    // what takes input.
+    let editor = |locked: bool| {
+        let mut fixture = DocumentFixture::default();
+        let id = CompoundId::from_u128(1);
+        let mut compound = Compound::new("inner", Interface::default());
+        let inside = compound.graph.add(fixture.plain_node());
+        let port = InputPort::new(inside, PortId::new(1));
+        compound
+            .graph
+            .set_input_binding(port, Binding::Const(ConstValue::Int(3)));
+        insert_compound(&mut fixture.document, id, compound);
+        fixture.document.sides.get_mut(&id).unwrap().locked = locked;
+        let graph = GraphId::Compound(id);
+        let mut test = SessionHarness::new(fixture.with_tab(TabRef::Graph(graph)));
+        test.prime(2);
+        let editor = wid::const_editor(graph, port);
+        let takes_input = test
+            .ui
+            .widgets(None)
+            .into_iter()
+            .any(|widget| widget.id == editor && widget.focusable);
+        (test.ui.rect(editor).is_some(), takes_input)
+    };
+    assert_eq!(
+        editor(false),
+        (true, true),
+        "an editor while it takes edits"
+    );
+    assert_eq!(
+        editor(true),
+        (true, false),
+        "a box that takes nothing, locked"
+    );
+}
+
 /// An edit the document's rules refuse reaches the shell as the status line naming why: here a
 /// boundary node's removal, which writes nothing.
 #[test]

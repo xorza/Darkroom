@@ -19,6 +19,7 @@ use palantir::{
 use scenarium::{CompoundId, GraphId, InstancePath};
 
 use crate::core::document::Document;
+use crate::core::document::compound_side::ReadOnly;
 use crate::core::document::tab_ref::TabRef;
 use crate::core::edit::compound_intent::{CompoundIntent, Update};
 use crate::core::edit::make_unique::MakeUnique;
@@ -27,6 +28,9 @@ use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::requests::Requests;
 use crate::gui::frame::stage::Stage;
 use crate::gui::graph_ctx::GraphCtx;
+use crate::gui::pane::graph_ui::node_ui::header::read_only_icon;
+use crate::gui::theme::Theme;
+use crate::gui::widgets::icon_button::IconButton;
 use crate::gui::widgets::link::Link;
 use crate::gui::widgets::{pill, support};
 
@@ -226,9 +230,8 @@ fn show(
         }
         let side = &document.sides[&compound];
         if side.follows {
-            Text::new("\u{b7} follows the library")
-                .style(&muted)
-                .show(ui);
+            read_only_mark(ui, theme, compound, ReadOnly::Follows);
+            Text::new("follows the library").style(&muted).show(ui);
             if Link::new(library_wid(compound, "make_local"), "Make Local")
                 .tooltip("Stop following the library, and edit this copy")
                 .show(ui, theme)
@@ -254,7 +257,8 @@ fn show(
             }
         }
         let (label, tooltip) = if side.locked {
-            Text::new("\u{b7} locked").style(&muted).show(ui);
+            read_only_mark(ui, theme, compound, ReadOnly::Locked);
+            Text::new("locked").style(&muted).show(ui);
             ("Unlock", "Allow edits of this compound again")
         } else {
             (
@@ -272,6 +276,22 @@ fn show(
             });
         }
     });
+}
+
+/// The glyph an instance's compound mark wears for the read-only state the header names beside
+/// it, so the pane and its instances say it alike.
+fn read_only_mark(ui: &mut Ui, theme: &Theme, compound: CompoundId, why: ReadOnly) {
+    let tooltip = match why {
+        ReadOnly::Locked => "Locked: its graph and interface take no edit",
+        ReadOnly::Follows => "Follows the library: its graph and interface take no edit",
+    };
+    IconButton::mark(
+        read_only_icon(why),
+        library_wid(compound, "read_only"),
+        theme.badge.kind,
+        tooltip,
+    )
+    .show(ui, theme);
 }
 
 /// The header's library part: where the compound stands, an Update that puts the library's

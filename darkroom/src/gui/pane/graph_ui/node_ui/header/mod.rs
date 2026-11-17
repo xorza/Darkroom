@@ -12,6 +12,7 @@ use palantir::{
 
 use scenarium::{CacheMode, GraphId, NodeId, TriggerPort};
 
+use crate::core::document::compound_side::ReadOnly;
 use crate::core::document::inspect_target::InspectTarget;
 use crate::core::document::item_id::ItemId;
 use crate::core::document::tab_ref::TabRef;
@@ -20,6 +21,7 @@ use crate::core::edit::graph_intent::click_mode::ClickMode;
 use crate::core::edit::graph_intent::node_property::NodeProperty;
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::RunCommand;
+use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph_ui::node_ui::card;
 use crate::gui::pane::graph_ui::node_ui::node_record::NodeRecord;
@@ -81,7 +83,7 @@ fn own_trigger(ui: &mut Ui, record: &NodeRecord<'_, '_>) {
 const GHOST_TRIGGER_INK: f32 = 0.55;
 
 /// The header row: the node's own trigger on its left edge, the run button, the title and its
-/// kind mark, then, pinned to the right edge by a `FILL` spacer, the disable button, the cache
+/// kind mark or an instance's compound mark, then, pinned to the right edge by a `FILL` spacer, the disable button, the cache
 /// button and the inspect button.
 pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     let (theme, node) = (record.node.theme(), record.node);
@@ -106,6 +108,12 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
                 ui,
                 node,
                 wid::of_node("kind_mark", node.graph_ctx.graph(), node.node_id),
+            );
+            compound_mark(
+                ui,
+                node,
+                wid::of_node("compound_mark", node.graph_ctx.graph(), node.node_id),
+                record.stage.out,
             );
             support::hspacer(ui, "header_spacer");
             if node.can_disable() {
@@ -151,6 +159,51 @@ pub(crate) fn kind_mark(ui: &mut Ui, node: NodeCtx<'_>, wid: WidgetId) {
     };
     let theme = node.theme();
     IconButton::mark(icon, wid, theme.badge.kind, tooltip).show(ui, theme);
+}
+
+/// An instance's compound mark, after its title where a func's kind mark goes, which an
+/// instance never takes: the compound it places, and whether that compound is read-only, by the
+/// glyph alone — a small graph while it takes edits, a padlock while its author locked it, a
+/// chain while it follows the library. A press opens the compound, as a double-click on the body
+/// does, as Blender's group node enters its group from the icon in its header. The rest of the
+/// card stays a node's: a lock guards what lies inside the compound, and the instance's wiring,
+/// constants and cache live in the graph that holds it. On the node and in the inspector alike,
+/// as the kind mark is.
+pub(crate) fn compound_mark(ui: &mut Ui, node: NodeCtx<'_>, wid: WidgetId, out: &mut Requests) {
+    let Some(compound) = node.compound() else {
+        return;
+    };
+    let graph_ctx = node.graph_ctx;
+    let (icon, tooltip) = compound_look(graph_ctx.document().sides[&compound].read_only());
+    let theme = node.theme();
+    if IconButton::press(icon, wid, theme.badge.kind, tooltip).show(ui, theme) {
+        let through = graph_ctx.through().map(|path| path.child(node.node_id));
+        out.push_enter(compound, through);
+    }
+}
+
+/// The glyph a compound's read-only state wears, on its instances' marks and in its pane's
+/// header alike.
+pub(crate) const fn read_only_icon(why: ReadOnly) -> Icon {
+    match why {
+        ReadOnly::Locked => Icon::Lock,
+        ReadOnly::Follows => Icon::Link,
+    }
+}
+
+/// The glyph and tooltip of a compound mark for the compound's read-only state.
+const fn compound_look(read_only: Option<ReadOnly>) -> (Icon, &'static str) {
+    match read_only {
+        None => (Icon::Compound, "Compound — open it"),
+        Some(why @ ReadOnly::Locked) => (
+            read_only_icon(why),
+            "Locked compound — open it; Unlock from this node's menu or its pane",
+        ),
+        Some(why @ ReadOnly::Follows) => (
+            read_only_icon(why),
+            "Follows the library — open it; Make Local from this node's menu or its pane",
+        ),
+    }
 }
 
 /// Show the inspector that follows the selection: where it already sits, else in a pane split

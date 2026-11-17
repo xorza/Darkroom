@@ -1,16 +1,21 @@
 use palantir::{MenuItem, MenuSeparator, Ui};
 
+use crate::core::edit::collapse;
+use crate::core::edit::compound_intent::CompoundIntent;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
+use crate::core::edit::make_unique::MakeUnique;
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::RunCommand;
-use scenarium::{Boundary, Node, NodeId, ProgramId};
+use scenarium::{Boundary, CompoundId, Node, NodeId, ProgramId};
 
 use crate::gui::frame::stage::Stage;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::gesture::item_menu::ItemMenu;
 
-/// Right-click on a node body → a small popup with actions on the node. The trigger scan, the
+/// Right-click on a node body → a small popup with actions on the node, and on an instance the
+/// actions on its compound, where the user meets it: Open, Expand, Make Unique, Make Local while
+/// it follows the library, and Lock or Unlock. The trigger scan, the
 /// per-open node latch, and the popup lifecycle are [`ItemMenu`]'s. "Run to this node" needs
 /// only the clicked node's id and surfaces an [`AppCommand`]; the structural picks read the live
 /// selection off the context and push their intents onto the frame's queue, through the same
@@ -35,6 +40,23 @@ enum MenuChoice {
     /// Put another node in this one's place, picked from the palette.
     Replace,
     Remove,
+    /// Open the instance's compound, as a double-click on its body does.
+    Open {
+        compound: CompoundId,
+    },
+    /// Put the compound's nodes in the instance's place.
+    Expand,
+    /// Give the instance a copy of its compound of its own.
+    MakeUnique,
+    /// Lock the compound against edits, or unlock it.
+    Lock {
+        compound: CompoundId,
+        locked: bool,
+    },
+    /// Stop following the library, and edit this copy.
+    MakeLocal {
+        compound: CompoundId,
+    },
 }
 
 impl NodeMenuUi {
@@ -97,6 +119,37 @@ impl NodeMenuUi {
                     });
                 }
                 MenuSeparator::new().show(ui);
+                if let Some(compound) = node.compound() {
+                    let document = graph_ctx.document();
+                    let side = &document.sides[&compound];
+                    if MenuItem::new("Open").show(ui).clicked() {
+                        chosen = Some(MenuChoice::Open { compound });
+                    }
+                    if MenuItem::new("Expand").show(ui).clicked() {
+                        chosen = Some(MenuChoice::Expand);
+                    }
+                    // Offered once another node places it too, as the pane header offers it
+                    // beside its count of uses.
+                    if document.graphs.uses(compound).count() > 1
+                        && MakeUnique::placed(document, graph_ctx.graph(), &[node_id]).is_some()
+                        && MenuItem::new("Make Unique").show(ui).clicked()
+                    {
+                        chosen = Some(MenuChoice::MakeUnique);
+                    }
+                    // As the pane header offers them: Make Local while it follows the library,
+                    // and Lock or Unlock beside it.
+                    if side.follows && MenuItem::new("Make Local").show(ui).clicked() {
+                        chosen = Some(MenuChoice::MakeLocal { compound });
+                    }
+                    let label = if side.locked { "Unlock" } else { "Lock" };
+                    if MenuItem::new(label).show(ui).clicked() {
+                        chosen = Some(MenuChoice::Lock {
+                            compound,
+                            locked: !side.locked,
+                        });
+                    }
+                    MenuSeparator::new().show(ui);
+                }
             }
             let boundary = graph_ctx.body().find(node_id).and_then(Node::boundary);
             // Any node with a body, an instance or a ghost node takes another in its place.
@@ -145,6 +198,37 @@ impl NodeMenuUi {
                 GraphIntent::remove_selection(graph_ctx.view()),
             ),
             MenuChoice::Replace => return Some(pick.target),
+            MenuChoice::Open { compound } => {
+                let through = graph_ctx.through().map(|path| path.child(pick.target));
+                out.push_enter(compound, through);
+            }
+            MenuChoice::Expand => out.extend_graph(
+                graph_ctx.graph(),
+                collapse::expand(
+                    graph_ctx.document(),
+                    graph_ctx.graph(),
+                    graph_ctx.library(),
+                    pick.target,
+                ),
+            ),
+            // Planned on the click alone, as a plan copies the whole definition.
+            MenuChoice::MakeUnique => {
+                if let Some(unique) =
+                    MakeUnique::plan(graph_ctx.document(), graph_ctx.graph(), &[pick.target])
+                {
+                    unique.queue(out.document());
+                }
+            }
+            MenuChoice::Lock { compound, locked } => out.push_compound(CompoundIntent::SetLocked {
+                id: compound,
+                locked,
+            }),
+            MenuChoice::MakeLocal { compound } => {
+                out.push_compound(CompoundIntent::SetFollows {
+                    id: compound,
+                    follows: false,
+                });
+            }
         }
         None
     }

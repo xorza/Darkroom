@@ -113,6 +113,7 @@ fn body(ui: &mut Ui, stage: &mut Stage<'_, NodeCtx<'_>>, target: InspectTarget) 
                         .text_wrap(TextWrap::Ellipsis)
                         .show(ui);
                     header::kind_mark(ui, node, kind_mark_wid());
+                    header::compound_mark(ui, node, compound_mark_wid(), stage.out);
                     support::hspacer(ui, "inspector_title_spacer");
                     status_chip(ui, theme, node.exec_status());
                     if target == InspectTarget::Selection
@@ -290,6 +291,10 @@ fn title_wid() -> WidgetId {
 
 fn kind_mark_wid() -> WidgetId {
     WidgetId::from_hash("darkroom.inspector.kind_mark")
+}
+
+fn compound_mark_wid() -> WidgetId {
+    WidgetId::from_hash("darkroom.inspector.compound_mark")
 }
 
 fn pin_wid() -> WidgetId {
@@ -699,6 +704,38 @@ mod tests {
 
     /// A port's dot wears its type's hue, an input that takes any type is a ring in the untyped
     /// port's ink, and a type the library does not register is a disc in that neutral ink.
+    /// An instance's inspector wears its compound mark after the title, as the node does; a
+    /// func's node wears none.
+    #[test]
+    fn an_instances_inspector_wears_its_compound_mark() {
+        use scenarium::{Compound, CompoundId, Interface};
+
+        use crate::core::document::internals::{DocumentFixture, insert_compound};
+        use crate::core::edit::graph_intent::GraphIntent;
+        use crate::gui::app::session::internals::SessionHarness;
+
+        let mut fixture = DocumentFixture::probes(1);
+        let probe = fixture.node(0);
+        let id = CompoundId::from_u128(1);
+        insert_compound(
+            &mut fixture.document,
+            id,
+            Compound::new("inner", Interface::default()),
+        );
+        let instance = fixture.add_instance(id);
+        let mut h =
+            SessionHarness::new(fixture.with_tab(TabRef::Inspector(InspectTarget::Selection)));
+        let shows_mark = |h: &mut SessionHarness, node| {
+            h.apply(GraphIntent::SetSelection {
+                to: [ItemId::Node(node)].into(),
+            });
+            h.prime(3);
+            h.ui.rect(compound_mark_wid()).is_some()
+        };
+        assert!(shows_mark(&mut h, instance));
+        assert!(!shows_mark(&mut h, probe));
+    }
+
     #[test]
     fn a_port_dot_wears_its_type_hue() {
         use scenarium::CustomTypeId;

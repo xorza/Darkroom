@@ -431,6 +431,13 @@
                                         description: None,
                                     ),
                                 ),
+                                (
+                                    id: 1229689092,
+                                    port: (
+                                        name: "FPS",
+                                        description: None,
+                                    ),
+                                ),
                             ],
                             trigger: Some((
                                 name: "Refresh",
@@ -531,6 +538,16 @@
                                 trigger: (
                                     node_id: ("af8a6fe2-73a0-44a6-821f-05c0bf3b9755"),
                                     trigger: 1327470818,
+                                ),
+                            ),
+                            (
+                                event: (
+                                    node_id: ("a87a9b1a-6aec-4171-b564-7321081d7f85"),
+                                    event: 2,
+                                ),
+                                trigger: (
+                                    node_id: ("af8a6fe2-73a0-44a6-821f-05c0bf3b9755"),
+                                    trigger: 1229689092,
                                 ),
                             ),
                             (
@@ -649,7 +666,7 @@
                 ),
                 ("3b60adfe-c8f3-4913-8de3-eef560a90417"): (
                     pos: (502.47113, 932.26245),
-                    z: 25,
+                    z: 28,
                 ),
                 ("696af895-549c-44c9-9b92-5917e2dfbd9a"): (
                     pos: (994.9668, 511.0852),
@@ -715,10 +732,7 @@
                 zoom: 0.4492857,
             ),
             selected: [
-                Node(("1597eb8d-1700-4637-9d30-37da1b6d28d4")),
-                Node(("696af895-549c-44c9-9b92-5917e2dfbd9a")),
-                Node(("88281733-0d48-4ecf-b97f-0519ebd03bc3")),
-                Node(("ef3d267f-7460-490f-a885-3944c99a9fdb")),
+                Node(("3b60adfe-c8f3-4913-8de3-eef560a90417")),
             ],
         ),
         sides: {
@@ -734,8 +748,8 @@
                             z: 3,
                         ),
                         ("a87a9b1a-6aec-4171-b564-7321081d7f85"): (
-                            pos: (378.5296, -203.38782),
-                            z: 6,
+                            pos: (403.56897, -25.178635),
+                            z: 8,
                         ),
                         ("af8a6fe2-73a0-44a6-821f-05c0bf3b9755"): (
                             pos: (900.0, 80.0),
@@ -757,7 +771,7 @@
                         zoom: 0.7383272,
                     ),
                     selected: [
-                        Node(("be4c4e76-dbb7-42e7-9367-17e5fb372a87")),
+                        Node(("a87a9b1a-6aec-4171-b564-7321081d7f85")),
                     ],
                 ),
                 through: Some([
@@ -810,7 +824,7 @@
                 )),
             ],
             focused: (0),
-            next_group: 1,
+            next_group: 2,
         ),
         active: Main,
     ),

@@ -39,9 +39,9 @@ impl GraphUi {
 const SURFACE: UVec2 = UVec2::new(1200, 800);
 
 /// How far down from the anchor [`menu_rows`] sweeps, how far in from its left edge, and how
-/// fine its step: the sweep clears the whole menu, and the step is finer than its thinnest
+/// fine its step: the sweep clears the whole menu, an instance's longest, and the step is finer than its thinnest
 /// band (a separator).
-const PROBE_DEPTH: f32 = 320.0;
+const PROBE_DEPTH: f32 = 480.0;
 const PROBE_INSET: f32 = 20.0;
 const PROBE_STEP: f32 = 2.0;
 

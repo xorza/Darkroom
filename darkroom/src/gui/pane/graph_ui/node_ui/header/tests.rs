@@ -408,3 +408,38 @@ fn an_instance_has_a_trigger_while_its_interface_declares_one() {
         TriggerPort::from(without_trigger)
     )));
 }
+
+/// An instance wears a compound mark after its title and a func's node none; a press on it opens
+/// the compound through the instance. Its glyph says whether the compound takes edits: a small
+/// graph while it does, a padlock while locked, a chain while it follows the library.
+#[test]
+fn an_instances_compound_mark_opens_it_and_says_whether_it_takes_edits() {
+    use scenarium::{Compound, CompoundId, InstancePath, Interface};
+
+    use crate::core::document::compound_side::ReadOnly;
+    use crate::core::document::internals::insert_compound;
+    use crate::gui::pane::graph_ui::node_ui::header::compound_look;
+    use crate::gui::widgets::icon::Icon;
+
+    let mut fixture = DocumentFixture::probes(1);
+    let id = CompoundId::from_u128(1);
+    insert_compound(
+        &mut fixture.document,
+        id,
+        Compound::new("inner", Interface::default()),
+    );
+    let instance = fixture.add_instance(id);
+    let mut h = CanvasHarness::sized(fixture, SURFACE);
+    let probe = h.node(0);
+    h.prime(2);
+    let mark = |node| wid::of_node("compound_mark", GraphId::Main, node);
+    assert!(h.ui.rect(mark(probe)).is_none(), "a func's node has none");
+    h.ui.click(mark(instance));
+    h.frame();
+    assert_eq!(h.entries, [(id, Some(InstancePath::new(&[instance])))]);
+
+    let glyph = |read_only| compound_look(read_only).0;
+    assert_eq!(glyph(None), Icon::Compound);
+    assert_eq!(glyph(Some(ReadOnly::Locked)), Icon::Lock);
+    assert_eq!(glyph(Some(ReadOnly::Follows)), Icon::Link);
+}

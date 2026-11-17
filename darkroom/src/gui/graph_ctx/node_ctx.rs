@@ -436,6 +436,15 @@ impl<'a> NodeCtx<'a> {
         self.sink()
     }
 
+    /// The compound this node places: an instance's; `None` for any other node, and for a ghost
+    /// node, whose compound is gone.
+    pub(crate) const fn compound(self) -> Option<CompoundId> {
+        if self.ghost() {
+            return None;
+        }
+        self.node.compound()
+    }
+
     /// The compound whose interface this node shows: an instance's, or the compound a boundary
     /// node is in; `None` for any other node, and for a ghost node.
     pub(crate) const fn shows_interface(self) -> Option<CompoundId> {

@@ -93,7 +93,7 @@ pub(super) fn ghost_event(graph: GraphId, event: EventPort) -> WidgetId {
 
 /// An input port's inline const editor (text field, checkbox, or file-pick
 /// button).
-pub(super) fn const_editor(graph: GraphId, input: InputPort) -> WidgetId {
+pub(crate) fn const_editor(graph: GraphId, input: InputPort) -> WidgetId {
     of_port("const_editor", graph, input.into())
 }
 

@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use glam::UVec2;
 use palantir::WidgetId;
-use scenarium::{Binding, InputPort, NodeId, PortId, ProgramId};
+use scenarium::{Binding, GraphId, InputPort, NodeId, PortId, ProgramId};
 
 use crate::core::document::internals::DocumentFixture;
 use crate::core::document::item_id::ItemId;
@@ -246,5 +246,109 @@ fn a_menu_closes_when_its_node_leaves_the_document() {
     assert!(
         !h.graph_ui.gestures.node_menu.in_flight(),
         "the menu closed"
+    );
+}
+
+/// An instance's menu offers its compound's actions after the duplicates: Open, Expand, Make
+/// Unique while another node places it too, Make Local while it follows the library, and Lock,
+/// which reads Unlock on a locked compound. Open enters the compound through the
+/// instance, and Lock, Unlock and Make Local raise their edit of the compound.
+#[test]
+fn an_instances_menu_offers_its_compounds_actions() {
+    use scenarium::{Compound, CompoundId, InstancePath, Interface};
+
+    use crate::core::document::internals::insert_compound;
+    use crate::core::edit::compound_intent::CompoundIntent;
+
+    let mut fixture = DocumentFixture::probes(0);
+    let id = CompoundId::from_u128(1);
+    insert_compound(
+        &mut fixture.document,
+        id,
+        Compound::new("inner", Interface::default()),
+    );
+    let instance = fixture.add_instance(id);
+    let other = fixture.add_instance(id);
+    let mut h = CanvasHarness::shaping_text(fixture, SURFACE);
+    let texts = |h: &mut CanvasHarness| {
+        let rows = open_menu(h, instance);
+        let widgets = h.ui.widgets(None);
+        let text = |id: &WidgetId| {
+            widgets
+                .iter()
+                .find(|widget| widget.id == *id)
+                .map_or_else(String::new, |widget| widget.text.clone())
+        };
+        rows.iter().map(|row| (text(row), *row)).collect::<Vec<_>>()
+    };
+    let labels = |rows: &[(String, WidgetId)]| {
+        rows.iter()
+            .map(|(text, _)| text.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let click = |h: &mut CanvasHarness, rows: &[(String, WidgetId)], label: &str| {
+        let (_, row) = rows
+            .iter()
+            .find(|(text, _)| text == label)
+            .unwrap_or_else(|| panic!("{label} is offered: {}", labels(rows)));
+        h.ui.click(*row);
+        h.frame()
+    };
+
+    let rows = texts(&mut h);
+    assert_eq!(
+        labels(&rows),
+        "Duplicate, Duplicate with incoming wires, Open, Expand, Make Unique, Lock, \
+         Replace with\u{2026}, Remove"
+    );
+    click(&mut h, &rows, "Open");
+    assert_eq!(h.entries, [(id, Some(InstancePath::new(&[instance])))]);
+    let rows = texts(&mut h);
+    let expanded = click(&mut h, &rows, "Expand");
+    assert!(
+        expanded.iter().any(
+            |intent| matches!(intent, GraphIntent::RemoveNode { node_id } if *node_id == instance)
+        ),
+        "Expand takes the instance out for its nodes: {expanded:?}"
+    );
+    let rows = texts(&mut h);
+    click(&mut h, &rows, "Lock");
+    assert!(
+        matches!(h.compound_edits[..], [CompoundIntent::SetLocked { id: locked, locked: true }] if locked == id),
+        "{:?}",
+        h.compound_edits
+    );
+
+    h.document_mut().sides.get_mut(&id).unwrap().locked = true;
+    let rows = texts(&mut h);
+    click(&mut h, &rows, "Unlock");
+    assert!(
+        matches!(h.compound_edits[..], [CompoundIntent::SetLocked { id: locked, locked: false }] if locked == id),
+        "{:?}",
+        h.compound_edits
+    );
+
+    let side = h.document_mut().sides.get_mut(&id).unwrap();
+    (side.locked, side.follows) = (false, true);
+    let rows = texts(&mut h);
+    assert_eq!(
+        labels(&rows),
+        "Duplicate, Duplicate with incoming wires, Open, Expand, Make Unique, Make Local, Lock, \
+         Replace with\u{2026}, Remove"
+    );
+    click(&mut h, &rows, "Make Local");
+    assert!(
+        matches!(h.compound_edits[..], [CompoundIntent::SetFollows { id: local, follows: false }] if local == id),
+        "{:?}",
+        h.compound_edits
+    );
+
+    h.document_mut().remove_node(GraphId::Main, other);
+    let rows = texts(&mut h);
+    assert!(
+        !labels(&rows).contains("Make Unique"),
+        "one node places it: {}",
+        labels(&rows)
     );
 }

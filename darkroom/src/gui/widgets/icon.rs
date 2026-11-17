@@ -48,6 +48,12 @@ pub(crate) enum Icon {
     Cross,
     /// Keep in place: a push pin.
     Pin,
+    /// A compound, a graph held as one node: two small nodes joined by a wire.
+    Compound,
+    /// Read-only by its author's mark: a padlock.
+    Lock,
+    /// Follows the library: two links of a chain.
+    Link,
 }
 
 impl Icon {
@@ -149,6 +155,23 @@ impl Icon {
                     ],
                 );
                 pen.line(ui, (12.0, 14.5), (12.0, 20.5));
+            }
+            Self::Compound => {
+                pen.frame(ui, (3.5, 4.5, 7.0, 6.0), 1.5);
+                pen.frame(ui, (13.5, 13.5, 7.0, 6.0), 1.5);
+                pen.open(ui, &[(10.5, 7.5), (12.0, 7.5), (12.0, 16.5), (13.5, 16.5)]);
+            }
+            Self::Lock => {
+                pen.frame(ui, (5.0, 11.0, 14.0, 9.5), 2.0);
+                // The shackle: up from the body's top at x 8 and 16, round over the top.
+                pen.line(ui, (8.0, 11.0), (8.0, 7.5));
+                pen.line(ui, (16.0, 11.0), (16.0, 7.5));
+                pen.arc(ui, (12.0, 7.5), 4.0, PI, PI);
+            }
+            Self::Link => {
+                pen.frame(ui, (2.5, 8.5, 9.0, 7.0), 3.5);
+                pen.frame(ui, (12.5, 8.5, 9.0, 7.0), 3.5);
+                pen.line(ui, (8.5, 12.0), (15.5, 12.0));
             }
             Self::Pixels => {
                 for (x, y) in [(5.0, 5.0), (13.0, 5.0), (5.0, 13.0), (13.0, 13.0)] {

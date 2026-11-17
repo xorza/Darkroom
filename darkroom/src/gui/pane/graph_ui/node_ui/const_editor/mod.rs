@@ -254,9 +254,9 @@ impl Field<'_> {
     }
 
     /// A constant shown as written and not edited, in a box with an editor's resting look and
-    /// size: the value of a type the library does not register. It senses nothing, so a click
-    /// falls through to the surrounding row.
-    fn read_only(self, ui: &mut Ui, shown: ShownValue<'_>) {
+    /// size: the value of a type the library does not register, or any value in a compound that
+    /// takes no edit. It senses nothing, so a click falls through to the surrounding row.
+    pub(super) fn read_only(self, ui: &mut Ui, shown: ShownValue<'_>) {
         let Self { theme, id } = self;
         let editor = &theme.field;
         let text = fmt!(ui, "{shown}");
