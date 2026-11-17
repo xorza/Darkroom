@@ -345,7 +345,7 @@ fn an_instance_has_a_trigger_while_its_interface_declares_one() {
     )));
     assert!(!shows(wid::ghost_trigger_glyph(
         GraphId::Main,
-        with_trigger
+        TriggerPort::from(with_trigger)
     )));
     assert!(!shows(wid::trigger_glyph(
         GraphId::Main,
@@ -353,6 +353,6 @@ fn an_instance_has_a_trigger_while_its_interface_declares_one() {
     )));
     assert!(shows(wid::ghost_trigger_glyph(
         GraphId::Main,
-        without_trigger
+        TriggerPort::from(without_trigger)
     )));
 }

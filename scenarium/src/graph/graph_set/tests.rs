@@ -502,7 +502,7 @@ fn boundary_nodes_mirror_the_interface_under_the_one_admission_rule() {
             scope,
             Subscription::new(EventPort::new(n(3), PortId::new(1)), inputs)
         ),
-        Err(SubscriptionRejection::InputsSubscriber)
+        Err(SubscriptionRejection::ImpossibleTrigger)
     );
     assert_eq!(
         graph.admit_subscription(
@@ -1166,10 +1166,11 @@ fn a_digest_names_the_definition_and_not_its_ids() {
 }
 
 /// A subscription lands on a sink's own trigger, on an instance's when its interface declares a
-/// trigger, and on no other trigger of the instance nor on a func that is no sink, which a load
-/// keeps as a ghost; an interface edit that takes the event away refuses the subscription
-/// from it, which a person's edit drops and an update keeps as a ghost under the event's name, and
-/// undo puts it back live. One that takes the trigger away keeps the subscription to it as a
+/// trigger, and on no other trigger of the instance, which no node of its kind has and a load
+/// drops even as a ghost, nor on a func that is no sink, which a load keeps as a ghost; an
+/// interface edit that takes an event away refuses the subscriptions from it outside and to it
+/// inside, which a person's edit drops and an update keeps as ghosts under the event's name, and
+/// undo puts them back live. One that takes the trigger away keeps the subscription to it as a
 /// ghost, which a load under an interface with a trigger again brings back.
 #[test]
 fn a_subscription_lands_on_a_declared_trigger_and_an_interface_edit_refuses_it() {
@@ -1191,8 +1192,15 @@ fn a_subscription_lands_on_a_declared_trigger_and_an_interface_edit_refuses_it()
             trigger: Some(EventDecl::new("in")),
         })
         .unwrap();
+    let mut relay = Compound::new("relay", interface.clone());
+    relay.graph.insert(n(5), node(&library, TICKER));
+    let passed = Subscription::new(
+        EventPort::new(n(5), PortId::new(1)),
+        TriggerPort::new(relay.outputs_node(), OUT),
+    );
+    relay.graph.subscribe(passed.event, passed.trigger);
     let mut set = GraphSet::default();
-    set.insert_compound(s(1), Compound::new("relay", interface.clone()));
+    set.insert_compound(s(1), relay);
     set.main_mut().insert(n(1), node(&library, TICKER));
     set.main_mut().insert(n(2), Node::instance(s(1)));
     set.main_mut().insert(n(3), node(&library, SINK));
@@ -1207,7 +1215,7 @@ fn a_subscription_lands_on_a_declared_trigger_and_an_interface_edit_refuses_it()
     assert_eq!(admit(&set, TriggerPort::from(n(2))), Ok(()));
     assert_eq!(
         admit(&set, TriggerPort::new(n(2), PortId::new(2))),
-        Err(SubscriptionRejection::UndeclaredTrigger),
+        Err(SubscriptionRejection::ImpossibleTrigger),
         "an instance's one trigger is its own"
     );
     assert_eq!(
@@ -1230,6 +1238,17 @@ fn a_subscription_lands_on_a_declared_trigger_and_an_interface_edit_refuses_it()
         SubscriptionState::Ghost(GhostSubscription::default())
     );
     set.main_mut().unsubscribe(lost.event, n(4));
+    // A file's ghost on a trigger no node of its kind has is dropped and reported.
+    let impossible = Subscription::new(tick, TriggerPort::new(n(3), PortId::new(9)));
+    set.main_mut().set_subscription_state(
+        impossible,
+        SubscriptionState::Ghost(GhostSubscription::default()),
+    );
+    assert!(!set.reconcile(&library, &Manifest::default()).is_empty());
+    assert_eq!(
+        set.main().subscription_state(impossible),
+        SubscriptionState::Absent
+    );
 
     let triggered = Subscription::new(tick, n(2));
     set.main_mut().subscribe(triggered.event, n(2));
@@ -1269,7 +1288,11 @@ fn a_subscription_lands_on_a_declared_trigger_and_an_interface_edit_refuses_it()
     let before = set.clone();
     let without = Interface::default();
     let dropped = set.plan_interface(s(1), without.clone(), &library, RefusedFate::Drop);
-    assert_eq!(dropped.refused_subscriptions().len(), 1);
+    assert_eq!(
+        dropped.refused_subscriptions().len(),
+        2,
+        "the event outside and its trigger inside"
+    );
     set.write_interface(&dropped, ChangeSide::After);
     assert_eq!(
         set.main().subscription_state(out),
@@ -1287,7 +1310,19 @@ fn a_subscription_lands_on_a_declared_trigger_and_an_interface_edit_refuses_it()
             event: Some(SavedEvent {
                 name: "out".to_owned(),
             }),
+            trigger: None,
         })
+    );
+    assert_eq!(
+        set.graph(GraphId::Compound(s(1)))
+            .subscription_state(passed),
+        SubscriptionState::Ghost(GhostSubscription {
+            event: None,
+            trigger: Some(SavedEvent {
+                name: "out".to_owned(),
+            }),
+        }),
+        "the ticker inside still fires; the `Outputs` node lost the trigger"
     );
     set.validate_with(&library).unwrap();
     set.write_interface(&kept, ChangeSide::Before);

@@ -511,12 +511,13 @@ fn a_wire_dropped_on_the_outputs_node_adds_an_interface_output() {
     );
 }
 
-/// A ghost subscription on an `Outputs` node's trigger, whose interface event is gone, draws no
-/// ghost trigger at the node's corner: trigger 1 there is a row's, not the node's own.
+/// The ghost subscriptions on an `Outputs` node's trigger, whose interface event is gone, show as
+/// one ghost row under the name the interface change saved, inside the node's body, and as no
+/// ghost at its corner: trigger 1 there is a row's, not the node's own.
 #[test]
-fn an_outputs_nodes_lost_trigger_is_no_corner_ghost() {
+fn an_outputs_nodes_lost_trigger_is_a_ghost_row() {
     use scenarium::{
-        Compound, CompoundId, EventPort, GhostSubscription, Interface, Subscription,
+        Compound, CompoundId, EventPort, GhostSubscription, Interface, SavedEvent, Subscription,
         SubscriptionState, TriggerPort,
     };
 
@@ -525,27 +526,42 @@ fn an_outputs_nodes_lost_trigger_is_no_corner_ghost() {
     let mut fixture = DocumentFixture::default();
     let id = CompoundId::from_u128(1);
     let mut compound = Compound::new("inner", Interface::default());
-    let inside = compound.graph.add(fixture.plain_node());
     let outputs = compound.outputs_node();
-    compound.graph.set_subscription_state(
-        Subscription::new(
-            EventPort::new(inside, PortId::new(1)),
-            TriggerPort::new(outputs, TriggerPort::NODE),
-        ),
-        SubscriptionState::Ghost(GhostSubscription::default()),
-    );
+    let lost = TriggerPort::new(outputs, TriggerPort::NODE);
+    // Two ghosts on the one lost trigger, which shows once.
+    for _ in 0..2 {
+        let inside = compound.graph.add(fixture.plain_node());
+        compound.graph.set_subscription_state(
+            Subscription::new(EventPort::new(inside, PortId::new(1)), lost),
+            SubscriptionState::Ghost(GhostSubscription {
+                event: None,
+                trigger: Some(SavedEvent {
+                    name: "done".to_owned(),
+                }),
+            }),
+        );
+    }
     insert_compound(&mut fixture.document, id, compound);
     let graph = GraphId::Compound(id);
     let mut test = SessionHarness::new(fixture.with_tab(TabRef::Graph(graph)));
     test.prime(2);
+    let body = test
+        .ui
+        .rect(wid::body(graph, outputs))
+        .expect("the Outputs node shows");
+    let glyph = test
+        .ui
+        .rect(wid::ghost_trigger_glyph(graph, lost))
+        .expect("the lost trigger shows as a ghost");
     assert!(
-        test.ui.rect(wid::body(graph, outputs)).is_some(),
-        "premise: the Outputs node shows"
+        body.contains(glyph.center()),
+        "a row inside the body, not the corner glyph on its edge: {glyph:?} in {body:?}"
     );
-    assert!(
-        test.ui
-            .rect(wid::ghost_trigger_glyph(graph, outputs))
-            .is_none()
+    assert_ne!(glyph.center(), body.min, "not centered on the corner");
+    assert_eq!(
+        test.ui.widgets(Some("done")).len(),
+        1,
+        "named as it was, once"
     );
 }
 

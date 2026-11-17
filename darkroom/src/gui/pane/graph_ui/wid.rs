@@ -115,11 +115,16 @@ pub(super) fn trigger_glyph(graph: GraphId, trigger: TriggerPort) -> WidgetId {
     WidgetId::from_hash(("trigger_glyph", graph, trigger.node_id, trigger.trigger))
 }
 
-/// A node's ghost trigger, where a ghost subscription ends on a node that has no trigger of its
-/// own. An id space apart from [`trigger_glyph`], so no subscription drag starts on or snaps to
-/// it.
-pub(crate) fn ghost_trigger_glyph(graph: GraphId, node_id: NodeId) -> WidgetId {
-    of_node("ghost_trigger_glyph", graph, node_id)
+/// A ghost trigger's glyph, where a ghost subscription ends on a trigger its node does not show:
+/// a node's own at its corner, or an `Outputs` node's ghost row. An id space apart from
+/// [`trigger_glyph`], so no subscription drag starts on or snaps to it.
+pub(crate) fn ghost_trigger_glyph(graph: GraphId, trigger: TriggerPort) -> WidgetId {
+    WidgetId::from_hash((
+        "ghost_trigger_glyph",
+        graph,
+        trigger.node_id,
+        trigger.trigger,
+    ))
 }
 
 /// A preview's value area, so the canvas-level scan can read last frame's click.

@@ -1,3 +1,3 @@
 # Open issues
 
-- A ghost subscription whose trigger the node shows no glyph for — an `Outputs` node's trigger after its interface event is gone, or a trigger id other than `TriggerPort::NODE` on a node with its own — has no glyph at its trigger end, so `CanvasGeometry::trigger_center` finds none and its ghost event wire is not drawn.
+- `GraphSet::plan_interface` saves the lost port's or event's name only on the live wiring the new interface refuses; a binding or subscription that is already a ghost, whose other end the change removes, keeps no name for that end, so its ghost row reads by number.

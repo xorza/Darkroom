@@ -53,8 +53,8 @@ pub(crate) struct CanvasGeometry {
     pub(crate) ghost_ports: PortLayer<PortRef>,
     /// Ghost events' glyphs; [`Self::ghost_ports`] for a ghost subscription's emitter end.
     pub(crate) ghost_events: PortLayer<EventPort>,
-    /// Ghost triggers, a node's own; [`Self::ghost_ports`] for a ghost subscription's subscriber
-    /// end.
+    /// Ghost triggers, a node's own at its corner and an `Outputs` node's rows;
+    /// [`Self::ghost_ports`] for a ghost subscription's subscriber end.
     pub(crate) ghost_triggers: PortLayer<TriggerPort>,
     /// Last measured body size per node, from the pre-transform, unclipped `layout_rect`, kept
     /// across frames like `PortLayer::offsets`: a culled node records no response, yet
@@ -186,10 +186,9 @@ impl CanvasGeometry {
                 let r = ui.response_for(wid::event_glyph(graph_ctx.graph(), ev));
                 self.events.record(ev, r, place);
             }
-            if n.ghost_triggered() {
-                let r = ui.response_for(wid::ghost_trigger_glyph(graph_ctx.graph(), n.node_id));
-                self.ghost_triggers
-                    .record(TriggerPort::from(n.node_id), r, place);
+            for ghost in n.ghost_trigger_ports() {
+                let r = ui.response_for(wid::ghost_trigger_glyph(graph_ctx.graph(), ghost));
+                self.ghost_triggers.record(ghost, r, place);
             }
             for trigger in n.trigger_ports() {
                 let r = ui.response_for(wid::trigger_glyph(graph_ctx.graph(), trigger));
@@ -247,9 +246,8 @@ impl CanvasGeometry {
         for ev in n.event_ports() {
             self.events.replay(ev, n.pos);
         }
-        if n.ghost_triggered() {
-            self.ghost_triggers
-                .replay(TriggerPort::from(n.node_id), n.pos);
+        for ghost in n.ghost_trigger_ports() {
+            self.ghost_triggers.replay(ghost, n.pos);
         }
         for trigger in n.trigger_ports() {
             self.triggers.replay(trigger, n.pos);

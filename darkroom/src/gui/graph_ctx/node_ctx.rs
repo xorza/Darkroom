@@ -10,7 +10,7 @@ use scenarium::{
 use crate::core::document;
 use crate::core::preview_sink;
 use crate::gui::graph_ctx::GraphCtx;
-use crate::gui::graph_ctx::ghost_port::{GhostEvent, GhostPort};
+use crate::gui::graph_ctx::ghost_port::{GhostEvent, GhostPort, GhostTrigger};
 use crate::gui::graph_ctx::input_ctx::InputCtx;
 use crate::gui::graph_ctx::output_ctx::OutputCtx;
 use crate::gui::port_ref::{PortKind, PortRef};
@@ -302,6 +302,46 @@ impl<'a> NodeCtx<'a> {
                 name: ghost.event.as_ref().map(|saved| saved.name.as_str()),
             });
         from_saved.chain(unknown)
+    }
+
+    /// The triggers this node lists that its declaration does not show: each `Outputs` trigger a
+    /// ghost subscription names whose interface event is gone, each once, under the name the
+    /// interface change saved. A node's own lost trigger is its ghost corner instead
+    /// ([`Self::ghost_triggered`]); no other node keeps a ghost on another trigger, as the load
+    /// drops it.
+    pub(crate) fn ghost_triggers(self) -> impl Iterator<Item = GhostTrigger<'a>> {
+        let (node_id, wiring, triggers) = (self.node_id, self.ghost_wiring(), self.triggers());
+        // Only the `Outputs` node lists triggers, so every other node walks no ghost wiring.
+        let rows = matches!(triggers, NodeTriggers::PerEvent(_));
+        let to_node = move || {
+            rows.then(|| wiring.subscriptions())
+                .into_iter()
+                .flatten()
+                .filter(move |(subscription, _)| subscription.trigger.node_id == node_id)
+        };
+        to_node()
+            .enumerate()
+            .filter(move |(_, (subscription, _))| !triggers.contains(subscription.trigger.trigger))
+            .filter(move |&(idx, (subscription, _))| {
+                // The first ghost subscription to the trigger shows it.
+                !to_node()
+                    .take(idx)
+                    .any(|(earlier, _)| earlier.trigger == subscription.trigger)
+            })
+            .map(|(_, (subscription, ghost))| GhostTrigger {
+                trigger: subscription.trigger,
+                name: ghost.trigger.as_ref().map(|saved| saved.name.as_str()),
+            })
+    }
+
+    /// Every ghost trigger the node draws, its own at its corner and its ghost rows':
+    /// [`Self::trigger_ports`] for a ghost subscription's end.
+    pub(crate) fn ghost_trigger_ports(self) -> impl Iterator<Item = TriggerPort> {
+        let own = self
+            .ghost_triggered()
+            .then(|| TriggerPort::from(self.node_id));
+        own.into_iter()
+            .chain(self.ghost_triggers().map(|ghost| ghost.trigger))
     }
 
     /// Whether the node draws a ghost trigger: a ghost subscription ends on its own trigger and

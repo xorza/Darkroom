@@ -460,6 +460,7 @@ impl Remapped {
                         moved,
                         GhostSubscription {
                             event: saved_event(subscription),
+                            trigger: None,
                         },
                     );
                 }
@@ -474,7 +475,7 @@ impl Remapped {
             };
             out.ghosts
                 .subscriptions
-                .insert(moved, GhostSubscription { event });
+                .insert(moved, GhostSubscription { event, ..ghost });
         }
         out
     }

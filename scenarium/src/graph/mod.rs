@@ -58,7 +58,7 @@
 //!   refreshed"
 //!   ([`bOrphanedPin`](https://docs.unrealengine.com/4.26/en-US/API/Runtime/Engine/EdGraph/UEdGraphPin/bOrphanedPin/index.html)).
 //!   Still dropped: wiring that names a node the graph holds as neither, a node subscribed to
-//!   itself, a trigger on the `Inputs` node: no library brings those back.
+//!   itself, a trigger no node of its subscriber's kind has: no library brings those back.
 //! - **A constant equal to the default its port declared is not kept**, Unreal's "non-default
 //!   value": a func that loses an input would otherwise leave a ghost on every node of it, each
 //!   holding the default nobody set. The input then takes the default the port declares now, if
@@ -656,6 +656,59 @@ impl Graph {
             }
         }
     }
+    /// Why no library can let this graph hold `subscription`, live or as a ghost, whatever its
+    /// nodes declare: a node's to its own event, or one on a trigger no node of its subscriber's
+    /// kind has. `None` for one a declaration may admit.
+    ///
+    /// # Panics
+    ///
+    /// If the graph holds the subscriber as neither a node nor a ghost node.
+    fn impossible(&self, subscription: Subscription) -> Option<SubscriptionRejection> {
+        let Subscription { event, trigger } = subscription;
+        if event.node_id == trigger.node_id {
+            return Some(SubscriptionRejection::SelfSubscription);
+        }
+        let kind = self
+            .nodes
+            .get(&trigger.node_id)
+            .or_else(|| {
+                self.ghost_nodes
+                    .get(&trigger.node_id)
+                    .map(|ghost| &ghost.node)
+            })
+            .expect("a subscription's subscriber is held")
+            .kind;
+        let possible = match kind {
+            NodeKind::Boundary(Boundary::Outputs) => true,
+            NodeKind::Boundary(Boundary::Inputs) => false,
+            NodeKind::Body { .. } | NodeKind::Instance { .. } => {
+                trigger.trigger == TriggerPort::NODE
+            }
+        };
+        (!possible).then_some(SubscriptionRejection::ImpossibleTrigger)
+    }
+
+    /// Take out each ghost subscription no library can let this graph hold
+    /// ([`Self::impossible`]), and report each: a file can hold one, and no ghost of it ever
+    /// comes back.
+    pub(crate) fn drop_impossible_ghosts(&mut self, reconciled: &mut Reconciled) {
+        let impossible: Vec<_> = self
+            .ghost_wiring
+            .subscriptions()
+            .filter_map(|(subscription, _)| {
+                self.impossible(subscription)
+                    .map(|rejection| (subscription, rejection))
+            })
+            .collect();
+        for (subscription, rejection) in impossible {
+            self.ghost_wiring.subscriptions.remove(&subscription);
+            reconciled.repairs.push(Repair::RejectedSubscription {
+                subscription,
+                rejection,
+            });
+        }
+    }
+
     /// Whether this graph may hold `subscription`: the emitter declares the event, and it lands
     /// on a trigger another node shows ([`NodeDecl::triggers`](crate::NodeDecl::triggers)).
     ///
@@ -667,16 +720,13 @@ impl Graph {
         scope: Scope<'_>,
         subscription: Subscription,
     ) -> Result<(), SubscriptionRejection> {
-        let Subscription { event, trigger } = subscription;
-        if event.node_id == trigger.node_id {
-            return Err(SubscriptionRejection::SelfSubscription);
+        if let Some(rejection) = self.impossible(subscription) {
+            return Err(rejection);
         }
+        let Subscription { event, trigger } = subscription;
         let subscriber = self
             .find(trigger.node_id)
             .expect("an admitted subscription's subscriber is in the graph");
-        if subscriber.kind == NodeKind::Boundary(Boundary::Inputs) {
-            return Err(SubscriptionRejection::InputsSubscriber);
-        }
         if !subscriber.decl(scope).triggers().contains(trigger.trigger) {
             return Err(SubscriptionRejection::UndeclaredTrigger);
         }
@@ -1317,8 +1367,7 @@ impl Graph {
     }
 
     /// Make a ghost of each piece of `refused`, then of each wire that closes a data cycle, and
-    /// report each. A subscription no library can bring back, a node's to its own event or one
-    /// on the `Inputs` node, is removed.
+    /// report each. A subscription no library can bring back ([`Self::impossible`]) is removed.
     pub(crate) fn ghost_refused(&mut self, refused: &[RefusedWiring], reconciled: &mut Reconciled) {
         for &refusal in refused {
             match refusal {
@@ -1343,10 +1392,12 @@ impl Graph {
                             }
                         }
                         SubscriptionRejection::SelfSubscription
-                        | SubscriptionRejection::InputsSubscriber => Repair::RejectedSubscription {
-                            subscription,
-                            rejection,
-                        },
+                        | SubscriptionRejection::ImpossibleTrigger => {
+                            Repair::RejectedSubscription {
+                                subscription,
+                                rejection,
+                            }
+                        }
                     });
                 }
             }

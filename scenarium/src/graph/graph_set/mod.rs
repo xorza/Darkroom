@@ -659,6 +659,7 @@ impl GraphSet {
                 self.graph(graph).refused_wiring(self.scope(library, graph));
             let report = reports.entry(graph).or_default();
             self.graph_mut(graph).ghost_refused(&refused, report);
+            self.graph_mut(graph).drop_impossible_ghosts(report);
             let admitted = self
                 .graph(graph)
                 .admitted_ghosts(self.scope(library, graph));

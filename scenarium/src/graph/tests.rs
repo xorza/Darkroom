@@ -1555,7 +1555,8 @@ fn a_manifest_tells_a_load_what_each_func_declared() {
         Some(&GhostSubscription {
             event: Some(SavedEvent {
                 name: "tick".to_owned()
-            })
+            }),
+            trigger: None,
         })
     );
     let saved_again = g.graphs.manifest(&g.library);

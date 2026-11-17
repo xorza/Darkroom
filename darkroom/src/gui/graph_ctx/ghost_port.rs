@@ -1,6 +1,7 @@
-//! [`GhostPort`] and [`GhostEvent`]: the ports a node shows that no declaration gives it.
+//! [`GhostPort`], [`GhostEvent`] and [`GhostTrigger`]: the ports a node shows that no
+//! declaration gives it.
 
-use scenarium::{DataType, EventPort, GhostBinding};
+use scenarium::{DataType, EventPort, GhostBinding, TriggerPort};
 
 use crate::gui::port_ref::PortRef;
 
@@ -23,5 +24,12 @@ pub(crate) struct GhostPort<'a> {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct GhostEvent<'a> {
     pub(crate) event: EventPort,
+    pub(crate) name: Option<&'a str>,
+}
+
+/// One trigger a node shows that its declaration does not; [`GhostEvent`] for a trigger.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct GhostTrigger<'a> {
+    pub(crate) trigger: TriggerPort,
     pub(crate) name: Option<&'a str>,
 }

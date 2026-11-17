@@ -32,6 +32,7 @@ use crate::graph::ghost_wiring::{
 use crate::graph::graph_set::GraphSet;
 use crate::graph::identity::{CompoundId, GraphId, InputPort, OutputPort};
 use crate::graph::interface::Interface;
+use crate::graph::node_decl::NodeTriggers;
 use crate::graph::saved_decl::{SavedEvent, SavedPort};
 use crate::graph::subscription::Subscription;
 use crate::library::Library;
@@ -197,10 +198,30 @@ impl GraphSet {
                                     name: event.name.to_owned(),
                                 })
                         };
+                        let trigger = subscription.trigger;
+                        let subscriber = held
+                            .find(trigger.node_id)
+                            .expect("a refused subscription's subscriber is held");
+                        let trigger = if subscriber.decl(scope).triggers().contains(trigger.trigger)
+                        {
+                            None
+                        } else {
+                            was_graph
+                                .find(trigger.node_id)
+                                .and_then(|node| match node.decl(was).triggers() {
+                                    NodeTriggers::PerEvent(events) => {
+                                        events.iter().find(|event| event.id == trigger.trigger)
+                                    }
+                                    NodeTriggers::None | NodeTriggers::Own => None,
+                                })
+                                .map(|event| SavedEvent {
+                                    name: event.name.clone(),
+                                })
+                        };
                         refused_subscriptions.push(RefusedSubscription {
                             graph,
                             subscription,
-                            ghost: GhostSubscription { event },
+                            ghost: GhostSubscription { event, trigger },
                         });
                         continue;
                     }

@@ -72,7 +72,7 @@ pub(super) fn ghost_trigger(ui: &mut Ui, node: NodeCtx<'_>, hover: Hover, visibi
     let theme = node.theme();
     let ink = color::wash(theme.port.event, GHOST_TRIGGER_INK, theme.canvas.bg);
     PortGlyph::arrow(
-        wid::ghost_trigger_glyph(node.graph_ctx.graph(), node.node_id),
+        wid::ghost_trigger_glyph(node.graph_ctx.graph(), TriggerPort::from(node.node_id)),
         theme.port.size,
         hover.lift(ink),
     )

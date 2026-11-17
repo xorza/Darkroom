@@ -25,7 +25,7 @@ use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::preview_sink;
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::{EditCommand, PathPick};
-use crate::gui::graph_ctx::ghost_port::{GhostEvent, GhostPort};
+use crate::gui::graph_ctx::ghost_port::{GhostEvent, GhostPort, GhostTrigger};
 use crate::gui::graph_ctx::input_ctx::InputCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::graph_ctx::output_ctx::OutputCtx;
@@ -63,7 +63,8 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, row_tracks: &mu
     // ghost ports list under the declared ones on their side.
     let row_count = (node.port_count(PortKind::Input)
         + node.trigger_rows().len()
-        + node.ghost_inputs().count())
+        + node.ghost_inputs().count()
+        + node.ghost_triggers().count())
     .max(
         node.port_count(PortKind::Output)
             + node.events().len()
@@ -178,10 +179,14 @@ fn input_cells(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
         .show(ui, record);
     }
     let declared = input_count + node.trigger_rows().len();
-    for (idx, ghost) in node.ghost_inputs().enumerate() {
+    let ghosts = node
+        .ghost_inputs()
+        .map(GhostRowPort::Data)
+        .chain(node.ghost_triggers().map(GhostRowPort::Trigger));
+    for (idx, ghost) in ghosts.enumerate() {
         GhostRow {
             row: declared + idx,
-            ghost: GhostRowPort::Data(ghost),
+            ghost,
         }
         .show(ui, record);
     }
@@ -643,11 +648,12 @@ impl TriggerRow<'_> {
     }
 }
 
-/// A ghost row's port: a data port's, an input or an output, or an event's.
+/// A ghost row's port: a data port's, an input or an output, an event's or a trigger's.
 #[derive(Debug, Clone, Copy)]
 enum GhostRowPort<'a> {
     Data(GhostPort<'a>),
     Event(GhostEvent<'a>),
+    Trigger(GhostTrigger<'a>),
 }
 
 /// One row for a port its node shows and its declaration does not: a hollow dot in the hue of
@@ -688,10 +694,19 @@ impl GhostRow<'_> {
                 None,
                 None,
             ),
+            GhostRowPort::Trigger(trigger) => (
+                PortKind::Input,
+                wid::ghost_trigger_glyph(graph, trigger.trigger),
+                geometry.ghost_triggers.is_hovered(trigger.trigger),
+                trigger.name,
+                trigger.trigger.trigger.get(),
+                None,
+                None,
+            ),
         };
         let dot = match ghost {
             GhostRowPort::Data(_) => graph_ctx.ghost_color(data_type),
-            GhostRowPort::Event(_) => theme.port.event,
+            GhostRowPort::Event(_) | GhostRowPort::Trigger(_) => theme.port.event,
         };
         let fill = Hover::from(hovered).lift(dot);
         let tooltip = node_ctx
@@ -722,7 +737,9 @@ impl GhostRow<'_> {
         let glyph = |ui: &mut Ui| {
             let glyph = match ghost {
                 GhostRowPort::Data(_) => PortGlyph::circle(wid, theme.port.size, fill).hollow(),
-                GhostRowPort::Event(_) => PortGlyph::arrow(wid, theme.port.size, fill),
+                GhostRowPort::Event(_) | GhostRowPort::Trigger(_) => {
+                    PortGlyph::arrow(wid, theme.port.size, fill)
+                }
             };
             glyph.margin(margin).tooltip(tooltip).show(ui, theme)
         };
@@ -734,6 +751,7 @@ impl GhostRow<'_> {
         let salt = match ghost {
             GhostRowPort::Data(_) => ("ghost_port", side as u8, number),
             GhostRowPort::Event(_) => ("ghost_event", side as u8, number),
+            GhostRowPort::Trigger(_) => ("ghost_trigger", side as u8, number),
         };
         let cell = Panel::hstack()
             .id_salt(salt)

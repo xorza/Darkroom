@@ -93,8 +93,8 @@ pub enum Repair {
     /// An input its func gained, or whose default went as a ghost, bound to the default it
     /// declares, as on a new node.
     DefaultSeeded { port: InputPort, binding: Binding },
-    /// A subscription no graph could hold: a node to its own event, or a subscriber with no
-    /// body.
+    /// A subscription no library can let a graph hold, live or as a ghost: a node's to its own
+    /// event, or one on a trigger no node of its subscriber's kind has.
     RejectedSubscription {
         subscription: Subscription,
         rejection: SubscriptionRejection,

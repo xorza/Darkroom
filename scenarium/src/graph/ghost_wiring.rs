@@ -101,6 +101,9 @@ impl From<Binding> for GhostBinding {
 pub struct GhostSubscription {
     /// The event as it was, when no declaration the graph can read gives it.
     pub event: Option<SavedEvent>,
+    /// The trigger as it was, likewise: an `Outputs` node's, named as the interface event it
+    /// passed out.
+    pub trigger: Option<SavedEvent>,
 }
 
 /// What one input holds: the value an edit of an input reads and writes, so no edit leaves a

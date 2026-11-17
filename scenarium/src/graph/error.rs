@@ -111,8 +111,11 @@ pub enum SubscriptionRejection {
     UndeclaredEvent,
     #[error("a node cannot subscribe to its own event")]
     SelfSubscription,
-    #[error("the `Inputs` node has no trigger")]
-    InputsSubscriber,
+    /// No node of the subscriber's kind has the trigger: the `Inputs` node has none, and a node
+    /// other than the `Outputs` node has only its own, under
+    /// [`TriggerPort::NODE`](crate::TriggerPort::NODE).
+    #[error("no node of the subscriber's kind has that trigger")]
+    ImpossibleTrigger,
     /// The subscriber shows no trigger under that id: a func that is no sink, an instance whose
     /// interface declares no trigger, an `Outputs` node whose interface declares no such event.
     #[error("the subscriber has no such trigger")]
