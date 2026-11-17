@@ -38,7 +38,7 @@
                     ("6b35d277-448c-4251-93e3-fd0ca81d492c"): (
                         kind: Body(
                             source: Func(("a4d9bf87-9d98-44f1-a162-7483c298be3d")),
-                            cache: r#None,
+                            cache: Ram,
                         ),
                         name: "Load Image",
                         disabled: false,
@@ -165,7 +165,7 @@
                     ((
                         node_id: ("1597eb8d-1700-4637-9d30-37da1b6d28d4"),
                         port: 4,
-                    ), Const(Float(0.5))),
+                    ), Const(Float(0.547))),
                     ((
                         node_id: ("1597eb8d-1700-4637-9d30-37da1b6d28d4"),
                         port: 5,
@@ -309,16 +309,6 @@
                         ),
                         trigger: (
                             node_id: ("ae3e2593-782b-47a6-ab2e-feffa1cb6636"),
-                            trigger: 1,
-                        ),
-                    ),
-                    (
-                        event: (
-                            node_id: ("7acd8a24-9994-4cd0-92cc-abb719eccaa1"),
-                            event: 1,
-                        ),
-                        trigger: (
-                            node_id: ("3b60adfe-c8f3-4913-8de3-eef560a90417"),
                             trigger: 1,
                         ),
                     ),
@@ -693,8 +683,8 @@
                     z: 21,
                 ),
                 ("1597eb8d-1700-4637-9d30-37da1b6d28d4"): (
-                    pos: (634.9668, 451.0852),
-                    z: 3,
+                    pos: (666.7481, 447.80124),
+                    z: 30,
                 ),
                 ("3b60adfe-c8f3-4913-8de3-eef560a90417"): (
                     pos: (502.47113, 932.26245),
@@ -760,11 +750,11 @@
             ties: {},
             routes: {},
             viewport: (
-                pan: (844.8458, -56.325928),
+                pan: (603.49286, 2.491516),
                 zoom: 0.5568951,
             ),
             selected: [
-                Node(("990c1378-f9da-4dbc-ab2e-3b29467853bd")),
+                Node(("1597eb8d-1700-4637-9d30-37da1b6d28d4")),
             ],
         ),
         sides: {
@@ -772,12 +762,12 @@
                 view: (
                     node_placements: {
                         ("28a5f6c2-4910-44df-a974-c8bfa8310c38"): (
-                            pos: (40.0, 360.0),
-                            z: 2,
+                            pos: (-143.50468, 270.20764),
+                            z: 12,
                         ),
                         ("a68a1c90-964c-46ae-ac17-b33ddef67633"): (
-                            pos: (900.0, 360.0),
-                            z: 3,
+                            pos: (849.8925, 647.63477),
+                            z: 10,
                         ),
                         ("a87a9b1a-6aec-4171-b564-7321081d7f85"): (
                             pos: (403.56897, -25.178635),
@@ -788,22 +778,22 @@
                             z: 0,
                         ),
                         ("be4c4e76-dbb7-42e7-9367-17e5fb372a87"): (
-                            pos: (410.2778, 326.5582),
-                            z: 7,
+                            pos: (351.50806, 412.68082),
+                            z: 9,
                         ),
                         ("ee437308-24f0-42ad-8c1a-307a33696bc5"): (
-                            pos: (-45.8656, 95.6875),
-                            z: 5,
+                            pos: (-145.94595, 761.8894),
+                            z: 11,
                         ),
                     },
                     ties: {},
                     routes: {},
                     viewport: (
-                        pan: (173.95946, 240.90245),
+                        pan: (264.84015, 208.04735),
                         zoom: 0.7383272,
                     ),
                     selected: [
-                        Node(("a87a9b1a-6aec-4171-b564-7321081d7f85")),
+                        Node(("28a5f6c2-4910-44df-a974-c8bfa8310c38")),
                     ],
                 ),
                 through: Some([
@@ -851,14 +841,15 @@
                     id: (0),
                     tabs: [
                         Graph(Main),
+                        Graph(Compound(("32063e4c-0883-446f-bb45-6dcbf99e0722"))),
                     ],
-                    active: 0,
+                    active: 1,
                 )),
             ],
             focused: (0),
             next_group: 2,
         ),
-        active: Main,
+        active: Compound(("32063e4c-0883-446f-bb45-6dcbf99e0722")),
         active_preview: None,
     ),
     manifest: (
