@@ -4,15 +4,19 @@
 //!
 //! - **A const-only input takes a wire from a const-only `Inputs` port, and from nothing else.**
 //!   An instance holds only a constant there, so the compile lowers the wire to that constant.
-//! - **An interface declares the events an instance fires and the triggers it hears**
-//!   ([`EventPorts`]), each a numbered port, as Unreal's macro tunnels carry exec pins both ways.
-//!   Inside, the `Inputs` node fires each trigger as an event and the `Outputs` node hears each
-//!   event on a trigger, mirrored as the data ports are, so an event crosses the boundary as a
-//!   wire does.
+//! - **An interface declares the events an instance fires and at most one trigger it hears**
+//!   ([`EventPorts`]), as Unreal's macro tunnels carry exec pins both ways. An instance hears its
+//!   trigger on its pin, as a func with a body hears on its one pin, so every node takes an
+//!   event in at one place and draws it one way. Inside, the `Inputs` node fires the trigger as
+//!   its one event, under [`Interface::TRIGGER_EVENT`], and the `Outputs` node hears each event
+//!   on a trigger of its own, mirrored as the data ports are, so an event crosses the boundary as
+//!   a wire does. Refused: a list of triggers, each a row on the instance, which draws an
+//!   instance's incoming events apart from every other node's.
 
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use crate::graph::identity::PortId;
 use crate::graph::node::Boundary;
 use crate::graph::ports::{
     EventDecl, InputDecl, Numbered, OutputDecl, PortList, Ports, PortsError, check_ids,
@@ -36,24 +40,23 @@ pub struct Interface {
     /// The ports of the `Outputs` node: each interface output as an optional input, so an
     /// unwired one leaves the instance's output unbound.
     outputs_node: Ports,
+    /// The events the `Inputs` node fires: the trigger under [`Self::TRIGGER_EVENT`], or none.
+    inputs_node_events: Option<Numbered<EventDecl>>,
 }
 
-/// The events an interface fires and the triggers it hears, each under an id unique on its side.
+/// The events an interface fires, each under an id unique among them, and the one trigger it
+/// hears, if any.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventPorts {
     /// What an instance fires and the `Outputs` node hears inside.
     pub events: Vec<Numbered<EventDecl>>,
-    /// What an instance hears and the `Inputs` node fires inside.
-    pub triggers: Vec<Numbered<EventDecl>>,
+    /// What an instance hears on its pin and the `Inputs` node fires inside.
+    pub trigger: Option<EventDecl>,
 }
 
 impl EventPorts {
     fn check(&self) -> Result<(), PortsError> {
-        check_ids(self.events.iter().map(|event| event.id), PortList::Events)?;
-        check_ids(
-            self.triggers.iter().map(|trigger| trigger.id),
-            PortList::Triggers,
-        )
+        check_ids(self.events.iter().map(|event| event.id), PortList::Events)
     }
 }
 
@@ -65,6 +68,10 @@ struct InterfaceRepr {
 }
 
 impl Interface {
+    /// The id the `Inputs` node fires the trigger under, its one event: the trigger needs no id
+    /// of its own, as an interface has one at most.
+    pub const TRIGGER_EVENT: PortId = PortId::new(1);
+
     /// # Panics
     /// If `ports` are no interface's: see [`Self::checked`].
     pub fn new(ports: Ports) -> Self {
@@ -114,20 +121,26 @@ impl Interface {
             event_ports: EventPorts::default(),
             inputs_node,
             outputs_node,
+            inputs_node_events: None,
         })
     }
 
-    /// This interface with `event_ports` for its events and triggers, or why they are none: an
-    /// id twice on one side.
+    /// This interface with `event_ports` for its events and trigger, or why they are none: an
+    /// event id twice.
     pub fn with_event_ports(self, event_ports: EventPorts) -> Result<Self, PortsError> {
         event_ports.check()?;
+        let inputs_node_events = event_ports
+            .trigger
+            .clone()
+            .map(|trigger| Numbered::new(Self::TRIGGER_EVENT, trigger));
         Ok(Self {
             event_ports,
+            inputs_node_events,
             ..self
         })
     }
 
-    /// The events and triggers the interface carries.
+    /// The events and the trigger the interface carries.
     pub const fn event_ports(&self) -> &EventPorts {
         &self.event_ports
     }
@@ -137,9 +150,14 @@ impl Interface {
         &self.event_ports.events
     }
 
-    /// What an instance hears.
-    pub fn triggers(&self) -> &[Numbered<EventDecl>] {
-        &self.event_ports.triggers
+    /// What an instance hears on its pin.
+    pub const fn trigger(&self) -> Option<&EventDecl> {
+        self.event_ports.trigger.as_ref()
+    }
+
+    /// The events the `Inputs` node fires: the trigger under [`Self::TRIGGER_EVENT`], or none.
+    pub const fn inputs_node_events(&self) -> &[Numbered<EventDecl>] {
+        self.inputs_node_events.as_slice()
     }
 
     /// The ports an instance shows.
@@ -323,10 +341,10 @@ mod tests {
         );
     }
 
-    /// An interface's events and triggers are held to one id each per side, round-trip with its
-    /// ports, and count in its equality; an edit of the data ports alone leaves them.
+    /// An interface's events are held to one id each, round-trip with its ports and its trigger,
+    /// and count in its equality; the `Inputs` node fires the trigger under the one id it takes.
     #[test]
-    fn events_and_triggers_round_trip_and_hold_their_ids_apart() {
+    fn events_and_the_trigger_round_trip_and_events_hold_their_ids_apart() {
         use crate::graph::interface::EventPorts;
         use crate::graph::ports::EventDecl;
 
@@ -336,7 +354,7 @@ mod tests {
             base.clone()
                 .with_event_ports(EventPorts {
                     events: vec![event(1, "a"), event(1, "b")],
-                    triggers: vec![],
+                    trigger: None,
                 })
                 .err(),
             Some(PortsError::DuplicateId {
@@ -349,12 +367,21 @@ mod tests {
             .clone()
             .with_event_ports(EventPorts {
                 events: vec![event(1, "done")],
-                triggers: vec![event(1, "go")],
+                trigger: Some(EventDecl::new("go")),
             })
             .unwrap();
         assert_ne!(with, base, "the events count");
         assert_eq!(with.events()[0].name, "done");
-        assert_eq!(with.triggers()[0].name, "go");
+        assert_eq!(with.trigger(), Some(&EventDecl::new("go")));
+        assert_eq!(
+            with.inputs_node_events(),
+            [Numbered::new(
+                Interface::TRIGGER_EVENT,
+                EventDecl::new("go")
+            )]
+        );
+        assert_eq!(base.trigger(), None);
+        assert_eq!(base.inputs_node_events(), []);
         let ron = SerdeFormat::Ron.serialize(&with).unwrap();
         assert_eq!(
             SerdeFormat::Ron.deserialize::<Interface>(&ron).unwrap(),

@@ -73,6 +73,7 @@ use crate::graph::binding::Binding;
 use crate::graph::graph_set::GraphSet;
 use crate::graph::identity::{EventPort, GraphId, InputPort, NodeId, PortId, SubgraphId};
 use crate::graph::instance_path::InstancePath;
+use crate::graph::interface::Interface;
 use crate::graph::node::{Boundary, CacheMode, NodeKind};
 use crate::graph::node_decl::NodeDecl;
 use crate::graph::program_id::ProgramId;
@@ -438,8 +439,8 @@ impl Compiler {
     }
 
     /// Fill [`Self::heard`] with the pins `event` at `level` reaches, sorted and each once: a
-    /// subscription to a pin reaches that node; one to an instance's trigger is followed inside,
-    /// to what each of the subgraph's `Inputs` nodes fires under the trigger's id; one to the
+    /// subscription to a func's pin reaches that node; one to an instance's pin is followed
+    /// inside, to what each of the subgraph's `Inputs` nodes fires as the trigger; one to the
     /// `Outputs` node's trigger is followed out, to what the instance fires under its id. As a
     /// binding is followed across boundaries ([`Self::lower`]), so a passthrough costs nothing.
     /// An event met twice is followed once, so a loop through boundaries ends.
@@ -463,45 +464,48 @@ impl Compiler {
                 .subscriptions_of(event.node_id)
                 .filter(|subscription| subscription.event.event == event.event)
             {
-                match subscription.listener {
-                    Listener::Pin(node_id) => heard.push(level.program_id(node_id)),
-                    Listener::Trigger(trigger) => {
-                        let node = graph
-                            .find(trigger.node_id)
-                            .expect("an admitted listener is in the graph");
-                        match node.kind {
-                            NodeKind::Instance { subgraph, .. } => {
-                                let inside =
-                                    level.enter(trigger.node_id, GraphId::Subgraph(subgraph));
-                                let definition = source
-                                    .graphs
-                                    .subgraph(subgraph)
-                                    .expect("an instance's subgraph is in the set");
-                                stack.extend(definition.inputs_nodes().map(|inputs| {
-                                    (inside, EventPort::new(inputs, trigger.trigger))
-                                }));
-                            }
-                            NodeKind::Boundary(Boundary::Outputs) => {
-                                let instance = level
-                                    .path
-                                    .instance()
-                                    .expect("an `Outputs` node lies inside an instance");
-                                let path =
-                                    level.path.parent().expect("an instance lies in a graph");
-                                let graph = source
-                                    .graphs
-                                    .graph_at(path)
-                                    .expect("an instance path names instances");
-                                stack.push((
-                                    Level { graph, path },
-                                    EventPort::new(instance, trigger.trigger),
-                                ));
-                            }
-                            NodeKind::Body { .. } | NodeKind::Boundary(Boundary::Inputs) => {
-                                unreachable!("only an instance and an `Outputs` node hear triggers")
-                            }
-                        }
+                let node_id = subscription.listener.node_id();
+                let node = graph
+                    .find(node_id)
+                    .expect("an admitted listener is in the graph");
+                match (subscription.listener, node.kind) {
+                    (Listener::Pin(_), NodeKind::Body { .. }) => {
+                        heard.push(level.program_id(node_id));
                     }
+                    (Listener::Pin(_), NodeKind::Instance { subgraph, .. }) => {
+                        let inside = level.enter(node_id, GraphId::Subgraph(subgraph));
+                        let definition = source
+                            .graphs
+                            .subgraph(subgraph)
+                            .expect("an instance's subgraph is in the set");
+                        stack.extend(definition.inputs_nodes().map(|inputs| {
+                            (inside, EventPort::new(inputs, Interface::TRIGGER_EVENT))
+                        }));
+                    }
+                    (Listener::Trigger(trigger), NodeKind::Boundary(Boundary::Outputs)) => {
+                        let instance = level
+                            .path
+                            .instance()
+                            .expect("an `Outputs` node lies inside an instance");
+                        let path = level.path.parent().expect("an instance lies in a graph");
+                        let graph = source
+                            .graphs
+                            .graph_at(path)
+                            .expect("an instance path names instances");
+                        stack.push((
+                            Level { graph, path },
+                            EventPort::new(instance, trigger.trigger),
+                        ));
+                    }
+                    (Listener::Pin(_), NodeKind::Boundary(_)) => {
+                        unreachable!("a boundary node has no pin")
+                    }
+                    (
+                        Listener::Trigger(_),
+                        NodeKind::Body { .. }
+                        | NodeKind::Instance { .. }
+                        | NodeKind::Boundary(Boundary::Inputs),
+                    ) => unreachable!("only an `Outputs` node hears triggers"),
                 }
             }
         }

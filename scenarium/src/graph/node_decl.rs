@@ -61,7 +61,7 @@ impl<'a> NodeDecl<'a> {
     }
 
     /// The events the node fires: a func's, an instance's interface events, and the `Inputs`
-    /// node's interface triggers, which it fires inside.
+    /// node's interface trigger, which it fires inside.
     pub fn events(self) -> NodeEvents<'a> {
         match self {
             Self::Func(func) => NodeEvents::Func(func.events()),
@@ -69,7 +69,7 @@ impl<'a> NodeDecl<'a> {
             Self::Boundary {
                 side: Boundary::Inputs,
                 owner,
-            } => NodeEvents::Declared(owner.interface.triggers()),
+            } => NodeEvents::Declared(owner.interface.inputs_node_events()),
             Self::Boundary {
                 side: Boundary::Outputs,
                 ..
@@ -82,20 +82,28 @@ impl<'a> NodeDecl<'a> {
         self.events().get(id)
     }
 
-    /// The triggers the node hears: an instance's interface triggers, and the `Outputs` node's
-    /// interface events, which it hears inside. A node with a body hears on its pin.
+    /// The triggers the node hears: the `Outputs` node's interface events, which it hears
+    /// inside. A func and an instance hear on their pin.
     pub fn triggers(self) -> &'a [Numbered<EventDecl>] {
         match self {
-            Self::Instance(subgraph) => subgraph.interface.triggers(),
             Self::Boundary {
                 side: Boundary::Outputs,
                 owner,
             } => owner.interface.events(),
             Self::Func(_)
+            | Self::Instance(_)
             | Self::Boundary {
                 side: Boundary::Inputs,
                 ..
             } => &[],
+        }
+    }
+
+    /// The trigger an instance hears on its pin, if its interface declares one.
+    pub const fn trigger(self) -> Option<&'a EventDecl> {
+        match self {
+            Self::Instance(subgraph) => subgraph.interface.trigger(),
+            Self::Func(_) | Self::Boundary { .. } => None,
         }
     }
 

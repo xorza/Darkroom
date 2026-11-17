@@ -296,8 +296,6 @@ pub enum PortList {
     Inputs,
     Outputs,
     Events,
-    /// The triggers an interface hears: what an instance's listeners land on.
-    Triggers,
 }
 
 impl fmt::Display for PortList {
@@ -306,7 +304,6 @@ impl fmt::Display for PortList {
             Self::Inputs => "input",
             Self::Outputs => "output",
             Self::Events => "event",
-            Self::Triggers => "trigger",
         })
     }
 }

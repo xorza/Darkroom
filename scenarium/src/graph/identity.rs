@@ -169,8 +169,7 @@ impl EventPort {
     }
 }
 
-/// Address of a trigger a node hears, by the id its interface gives it: an instance's trigger, or
-/// the `Outputs` node's mirror of an interface event.
+/// Address of a trigger the `Outputs` node hears, by the id of the interface event it mirrors.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TriggerPort {
     pub node_id: NodeId,

@@ -146,7 +146,7 @@ fn an_interface_edit_drops_wires_and_their_ties_in_every_graph_and_undo_restores
         &library,
         SubgraphIntent::SetInterface {
             id,
-            to: inputs(vec![input(2, "b"), input(1, "a")]),
+            to: Box::new(inputs(vec![input(2, "b"), input(1, "a")])),
         },
     )
     .unwrap();
@@ -164,7 +164,7 @@ fn an_interface_edit_drops_wires_and_their_ties_in_every_graph_and_undo_restores
         &library,
         SubgraphIntent::SetInterface {
             id,
-            to: inputs(vec![input(2, "b")]),
+            to: Box::new(inputs(vec![input(2, "b")])),
         },
     )
     .unwrap();

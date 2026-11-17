@@ -111,8 +111,10 @@ pub enum SubscriptionRejection {
     UndeclaredEvent,
     #[error("a node cannot subscribe to its own event")]
     SelfSubscription,
-    #[error("the subscriber has no body to run: it is an instance or a boundary node")]
-    BodilessSubscriber,
+    #[error("a boundary node has no pin: the `Outputs` node hears on its triggers")]
+    BoundarySubscriber,
+    /// On an instance's pin, its interface declares no trigger; on an `Outputs` node's trigger,
+    /// its interface declares no such event.
     #[error("the listener does not hear that trigger")]
     UndeclaredTrigger,
 }

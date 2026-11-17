@@ -122,7 +122,7 @@ pub(super) fn ghost_subscription_glyph(graph: GraphId, node_id: NodeId) -> Widge
     of_node("ghost_subscription_glyph", graph, node_id)
 }
 
-/// A trigger's glyph on an instance or an `Outputs` node, where a subscription lands.
+/// A trigger's glyph on an `Outputs` node, where a subscription lands.
 pub(super) fn trigger_glyph(graph: GraphId, trigger: TriggerPort) -> WidgetId {
     WidgetId::from_hash(("trigger_glyph", graph, trigger.node_id, trigger.trigger))
 }

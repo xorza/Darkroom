@@ -312,7 +312,7 @@ impl Exposed {
     fn raise(self, graph: GraphId, out: &mut Requests) {
         out.push_subgraph(SubgraphIntent::SetInterface {
             id: self.subgraph,
-            to: self.to,
+            to: Box::new(self.to),
         });
         out.push_graph(graph, self.wire);
     }

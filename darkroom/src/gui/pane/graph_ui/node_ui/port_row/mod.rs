@@ -605,8 +605,8 @@ impl EventRow<'_> {
     }
 }
 
-/// One trigger an instance or an `Outputs` node hears, in the input column: the event arrow
-/// pointing in, where a subscription from outside the subgraph's boundary lands, and its name.
+/// One trigger an `Outputs` node hears, in the input column: the event arrow pointing in, where
+/// a subscription inside the subgraph passes out as the interface event of its name.
 #[derive(Debug)]
 struct TriggerRow<'a> {
     /// The grid row it sits in.

@@ -4,7 +4,6 @@
 use std::collections::{BTreeMap, HashMap};
 
 use super::*;
-use crate::graph::interface::Interface;
 use crate::graph::ports::{InputDecl, Numbered, OutputDecl, Ports};
 use crate::graph::subgraph::Subgraph;
 use crate::internals::engine::TestEngine;
@@ -418,10 +417,10 @@ fn a_subscription_inside_a_subgraph_stays_inside_each_instance() {
 }
 
 /// An event crosses a subgraph's boundary on its interface. `relay` fires its event `out` 301
-/// when the trigger `in` 401 is heard, by its `Inputs` node firing it into its `Outputs` node; `outer` places
-/// a `relay` 61 inside, wiring `outer`'s trigger into it and its event out, so an event goes two
-/// levels in and two out. In the main graph `ticker` 1 fires into instance 2's trigger, instance
-/// 2's event lands on `sink` 3, and a disabled instance 4 passes nothing: the ticker's
+/// when its pin hears the trigger `in`, by its `Inputs` node firing it into its `Outputs` node;
+/// `outer` places a `relay` 61 inside, wiring `outer`'s trigger into its pin and its event out, so
+/// an event goes two levels in and two out. In the main graph `ticker` 1 fires into instance 2's
+/// pin, instance 2's event lands on `sink` 3, and a disabled instance 4 passes nothing: the ticker's
 /// subscribers are the sink alone, with no node in between, and a ticker inside `relay` that
 /// fires its `Outputs` node reaches the main graph's sink too.
 #[test]
@@ -432,13 +431,13 @@ fn an_event_crosses_boundaries_on_the_interface() {
     use crate::graph::subscription::Listener;
 
     const OUT: PortId = PortId::new(301);
-    const IN: PortId = PortId::new(401);
+    const IN: PortId = Interface::TRIGGER_EVENT;
     let library = library();
     let events = || {
         Interface::default()
             .with_event_ports(EventPorts {
                 events: vec![Numbered::new(OUT, EventDecl::new("out"))],
-                triggers: vec![Numbered::new(IN, EventDecl::new("in"))],
+                trigger: Some(EventDecl::new("in")),
             })
             .unwrap()
     };
@@ -457,10 +456,7 @@ fn an_event_crosses_boundaries_on_the_interface() {
     let mut outer = Subgraph::new("outer", events());
     let (outer_in, outer_out) = (outer.inputs_node(), outer.outputs_node());
     outer.graph.insert(n(61), Node::instance(relay_id));
-    outer.graph.subscribe(
-        EventPort::new(outer_in, IN),
-        Listener::Trigger(TriggerPort::new(n(61), IN)),
-    );
+    outer.graph.subscribe(EventPort::new(outer_in, IN), n(61));
     outer.graph.subscribe(
         EventPort::new(n(61), OUT),
         Listener::Trigger(TriggerPort::new(outer_out, OUT)),
@@ -478,14 +474,8 @@ fn an_event_crosses_boundaries_on_the_interface() {
     doc.place(n(4), outer_id);
     doc.main().find_mut(n(4)).unwrap().disabled = true;
     let main = doc.main();
-    main.subscribe(
-        EventPort::new(n(1), FIRST),
-        Listener::Trigger(TriggerPort::new(n(2), IN)),
-    );
-    main.subscribe(
-        EventPort::new(n(1), FIRST),
-        Listener::Trigger(TriggerPort::new(n(4), IN)),
-    );
+    main.subscribe(EventPort::new(n(1), FIRST), n(2));
+    main.subscribe(EventPort::new(n(1), FIRST), n(4));
     main.subscribe(EventPort::new(n(2), OUT), n(3));
     main.subscribe(EventPort::new(n(4), OUT), n(3));
     doc.graphs.validate_with(&doc.library).unwrap();

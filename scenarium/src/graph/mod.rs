@@ -58,7 +58,7 @@
 //!   refreshed"
 //!   ([`bOrphanedPin`](https://docs.unrealengine.com/4.26/en-US/API/Runtime/Engine/EdGraph/UEdGraphPin/bOrphanedPin/index.html)).
 //!   Still dropped: wiring that names a node the graph holds as neither, a node subscribed to
-//!   itself, a subscriber with no body: no library brings those back.
+//!   itself, a pin on a boundary node: no library brings those back.
 //! - **A constant equal to the default its port declared is not kept**, Unreal's "non-default
 //!   value": a func that loses an input would otherwise leave a ghost on every node of it, each
 //!   holding the default nobody set. The input then takes the default the port declares now, if
@@ -655,7 +655,8 @@ impl Graph {
         }
     }
     /// Whether this graph may hold `subscription`: the emitter declares the event, and it lands
-    /// on another node: on the pin of one with a body to run, or on a trigger the node hears.
+    /// on another node: on the pin of one with a body to run or of an instance whose interface
+    /// declares a trigger, or on a trigger an `Outputs` node hears.
     ///
     /// # Panics
     ///
@@ -673,9 +674,14 @@ impl Graph {
             .find(listener.node_id())
             .expect("an admitted subscription's listener is in the graph");
         match listener {
-            Listener::Pin(_) if !matches!(heard.kind, NodeKind::Body { .. }) => {
-                return Err(SubscriptionRejection::BodilessSubscriber);
-            }
+            Listener::Pin(_) => match heard.kind {
+                NodeKind::Body { .. } => {}
+                NodeKind::Instance { .. } if heard.decl(scope).trigger().is_some() => {}
+                NodeKind::Instance { .. } => {
+                    return Err(SubscriptionRejection::UndeclaredTrigger);
+                }
+                NodeKind::Boundary(_) => return Err(SubscriptionRejection::BoundarySubscriber),
+            },
             Listener::Trigger(trigger)
                 if !heard
                     .decl(scope)
@@ -685,7 +691,7 @@ impl Graph {
             {
                 return Err(SubscriptionRejection::UndeclaredTrigger);
             }
-            Listener::Pin(_) | Listener::Trigger(_) => {}
+            Listener::Trigger(_) => {}
         }
         let emitter = self
             .find(event.node_id)
@@ -1329,7 +1335,7 @@ impl Graph {
 
     /// Make a ghost of each piece of `refused`, then of each wire that closes a data cycle, and
     /// report each. A subscription no library can bring back, a node's to its own event or one
-    /// of a subscriber with no body, is removed.
+    /// on a boundary node's pin, is removed.
     pub(crate) fn ghost_refused(&mut self, refused: &[RefusedWiring], reconciled: &mut Reconciled) {
         for &refusal in refused {
             match refusal {
@@ -1354,7 +1360,7 @@ impl Graph {
                             }
                         }
                         SubscriptionRejection::SelfSubscription
-                        | SubscriptionRejection::BodilessSubscriber => {
+                        | SubscriptionRejection::BoundarySubscriber => {
                             Repair::RejectedSubscription {
                                 subscription,
                                 rejection,

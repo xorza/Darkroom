@@ -20,7 +20,7 @@ use scenarium::EventPort;
 ///
 /// A sibling of [`crate::gui::pane::graph_ui::gesture::wire_ui::WireUi`] rather than a mode of
 /// it: an event wire carries no data type, runs no cycle or const checks, and links an emitter
-/// event glyph to a listener: a sink's pin, or a trigger an instance or an `Outputs` node hears.
+/// event glyph to a listener: a pin, or a trigger an `Outputs` node hears.
 /// What the two share (latching, the release edge, the fixed end's node, the preview's free end)
 /// is [`GlyphDrag`]'s. The drag can start from either end: pull from an emitter and drop on a
 /// pin or a trigger, or pull from either and drop on an emitter. Held-drag only.
@@ -197,9 +197,8 @@ impl SubscriptionUi {
     }
 }
 
-/// The listener under the pointer that's a valid drop for `emitter`: a sink's pin (the only node
-/// that renders one) or a trigger glyph, on a node other than the emitter's own, which a node
-/// cannot subscribe to.
+/// The listener under the pointer that's a valid drop for `emitter`: a pinned node's pin or a
+/// trigger glyph, on a node other than the emitter's own, which a node cannot subscribe to.
 fn scan_listener_target(ui: &mut Ui, ctx: CanvasCtx<'_>, emitter: EventPort) -> Option<Listener> {
     let pointer = ui.pointer_pos()?;
     let others = || {
@@ -210,7 +209,7 @@ fn scan_listener_target(ui: &mut Ui, ctx: CanvasCtx<'_>, emitter: EventPort) -> 
     let geometry = ctx.geometry();
     geometry
         .subs
-        .first_containing(pointer, others().filter(|n| n.sink()).map(|n| n.node_id))
+        .first_containing(pointer, others().filter(|n| n.pinned()).map(|n| n.node_id))
         .map(Listener::Pin)
         .or_else(|| {
             geometry
@@ -241,8 +240,8 @@ fn scan_emitter_target(
 mod tests {
     use palantir::PointerButton;
     use scenarium::{
-        EventDecl, EventPort, EventPorts, GraphId, Interface, Listener, Numbered, PortId, Subgraph,
-        SubgraphId, Subscription, TriggerPort,
+        EventDecl, EventPort, EventPorts, GraphId, Interface, Listener, PortId, Subgraph,
+        SubgraphId, Subscription,
     };
 
     use crate::core::document::internals::{DocumentFixture, insert_subgraph};
@@ -250,19 +249,18 @@ mod tests {
     use crate::gui::pane::graph_ui::internals::CanvasHarness;
     use crate::gui::pane::graph_ui::wid;
 
-    /// An event wire pulled from a node's event lands on an instance's trigger, which an
-    /// instance hears in place of a pin, and commits the subscription to that trigger; one pulled
-    /// back from the trigger to the event commits the same edge.
+    /// An instance whose interface declares a trigger shows a pin, as a sink does; an event wire
+    /// pulled from a node's event lands on the pin and commits the subscription to it, and one
+    /// pulled back from the pin to the event commits the same edge.
     #[test]
-    fn an_event_wire_lands_on_an_instances_trigger() {
-        const IN: PortId = PortId::new(401);
+    fn an_event_wire_lands_on_an_instances_pin() {
         let mut fixture = DocumentFixture::probes(0);
         let emitter = fixture.node_at(glam::Vec2::new(40.0, 40.0));
         let id = SubgraphId::from_u128(1);
         let interface = Interface::default()
             .with_event_ports(EventPorts {
                 events: vec![],
-                triggers: vec![Numbered::new(IN, EventDecl::new("go"))],
+                trigger: Some(EventDecl::new("go")),
             })
             .unwrap();
         insert_subgraph(&mut fixture.document, id, Subgraph::new("relay", interface));
@@ -270,21 +268,21 @@ mod tests {
         let mut h = CanvasHarness::new(fixture);
         h.prime(2);
         let event = EventPort::new(emitter, PortId::new(1));
-        let trigger = TriggerPort::new(instance, IN);
-        let expected = Subscription::new(event, Listener::Trigger(trigger));
+        let pin = wid::subscription_glyph(GraphId::Main, instance);
+        let expected = Subscription::new(event, Listener::Pin(instance));
         let committed = |intents: &[GraphIntent]| {
             matches!(
                 intents,
                 [GraphIntent::SetSubscription { subscription, to: true }] if *subscription == expected
             )
         };
-        let trigger_at =
-            h.ui.rect(wid::trigger_glyph(GraphId::Main, trigger))
-                .expect("the trigger shows")
-                .center();
+        let pin_rect = h.ui.rect(pin).expect("the pin shows");
+        let pin_at = pin_rect.center();
+        // The pin straddles the node's corner, and the body takes a press on its own half.
+        let pin_outside = (pin_rect.min + pin_rect.center()) * 0.5;
         h.ui.press(wid::event_glyph(GraphId::Main, event), PointerButton::Left);
         h.frame();
-        h.ui.drag_to(trigger_at);
+        h.ui.drag_to(pin_at);
         h.frame();
         h.ui.release(PointerButton::Left);
         let released = h.frame();
@@ -295,10 +293,7 @@ mod tests {
             h.ui.rect(wid::event_glyph(GraphId::Main, event))
                 .expect("the event shows")
                 .center();
-        h.ui.press(
-            wid::trigger_glyph(GraphId::Main, trigger),
-            PointerButton::Left,
-        );
+        h.ui.press(pin_outside, PointerButton::Left);
         h.frame();
         h.ui.drag_to(event_at);
         h.frame();

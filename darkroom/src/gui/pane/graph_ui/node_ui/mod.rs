@@ -156,7 +156,7 @@ impl NodeUi {
 
         // Recorded just before the body so the pin peeks out from behind this node's corner, with
         // the node's own cull decision and stack position.
-        if node.sink() {
+        if node.pinned() {
             header::subscription_pin(
                 ui,
                 node,

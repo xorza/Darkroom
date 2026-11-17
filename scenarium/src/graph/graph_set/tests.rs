@@ -502,7 +502,7 @@ fn boundary_nodes_mirror_the_interface_under_the_one_admission_rule() {
             scope,
             Subscription::new(EventPort::new(n(3), PortId::new(1)), outputs)
         ),
-        Err(SubscriptionRejection::BodilessSubscriber)
+        Err(SubscriptionRejection::BoundarySubscriber)
     );
     assert_eq!(
         graph.admit_subscription(
@@ -1157,10 +1157,11 @@ fn a_digest_names_the_definition_and_not_its_ids() {
     assert_ne!(kept.digest(s(1)), ghosted.digest(s(1)));
 }
 
-/// A subscription lands on a trigger the listener's interface declares, and not on an
-/// instance's pin; an interface edit that takes the event away refuses the subscription from it,
-/// which a person's edit drops and an update keeps as a ghost under the event's name, and undo
-/// puts it back live.
+/// A subscription lands on an instance's pin when its interface declares a trigger, and on no
+/// trigger of the instance; an interface edit that takes the event away refuses the subscription
+/// from it, which a person's edit drops and an update keeps as a ghost under the event's name, and
+/// undo puts it back live. One that takes the trigger away keeps the subscription to the pin as a
+/// ghost, which a load under an interface with a trigger again brings back.
 #[test]
 fn a_subscription_lands_on_a_declared_trigger_and_an_interface_edit_refuses_it() {
     use crate::graph::error::SubscriptionRejection;
@@ -1174,16 +1175,15 @@ fn a_subscription_lands_on_a_declared_trigger_and_an_interface_edit_refuses_it()
     use crate::internals::test_graph::sets::TICKER;
 
     const OUT: PortId = PortId::new(301);
-    const IN: PortId = PortId::new(401);
     let library = library();
     let interface = Interface::default()
         .with_event_ports(EventPorts {
             events: vec![Numbered::new(OUT, EventDecl::new("out"))],
-            triggers: vec![Numbered::new(IN, EventDecl::new("in"))],
+            trigger: Some(EventDecl::new("in")),
         })
         .unwrap();
     let mut set = GraphSet::default();
-    set.insert_subgraph(s(1), Subgraph::new("relay", interface));
+    set.insert_subgraph(s(1), Subgraph::new("relay", interface.clone()));
     set.main_mut().insert(n(1), node(&library, TICKER));
     set.main_mut().insert(n(2), Node::instance(s(1)));
     set.main_mut().insert(n(3), node(&library, SINK));
@@ -1194,18 +1194,46 @@ fn a_subscription_lands_on_a_declared_trigger_and_an_interface_edit_refuses_it()
             Subscription::new(tick, listener),
         )
     };
+    assert_eq!(admit(&set, Listener::Pin(n(2))), Ok(()));
     assert_eq!(
-        admit(&set, Listener::Trigger(TriggerPort::new(n(2), IN))),
-        Ok(())
-    );
-    assert_eq!(
-        admit(&set, Listener::Trigger(TriggerPort::new(n(2), OUT))),
+        admit(
+            &set,
+            Listener::Trigger(TriggerPort::new(n(2), Interface::TRIGGER_EVENT))
+        ),
         Err(SubscriptionRejection::UndeclaredTrigger)
+    );
+
+    let heard = Subscription::new(tick, n(2));
+    set.main_mut().subscribe(heard.event, n(2));
+    let untriggered = interface
+        .clone()
+        .with_event_ports(EventPorts {
+            events: interface.events().to_vec(),
+            trigger: None,
+        })
+        .unwrap();
+    let kept = set.plan_interface(s(1), untriggered, &library, RefusedFate::Ghost);
+    assert_eq!(kept.refused_subscriptions().len(), 1);
+    set.write_interface(&kept, ChangeSide::After);
+    assert_eq!(
+        set.main().subscription_state(heard),
+        SubscriptionState::Ghost(GhostSubscription::default())
     );
     assert_eq!(
         admit(&set, Listener::Pin(n(2))),
-        Err(SubscriptionRejection::BodilessSubscriber)
+        Err(SubscriptionRejection::UndeclaredTrigger)
     );
+    set.validate_with(&library).unwrap();
+    // A load under an interface that has a trigger again brings the ghost back live.
+    let regained = set.plan_interface(s(1), interface, &library, RefusedFate::Ghost);
+    assert_eq!(regained.refused_subscriptions(), []);
+    set.write_interface(&regained, ChangeSide::After);
+    assert!(!set.reconcile(&library, &Manifest::default()).is_empty());
+    assert_eq!(
+        set.main().subscription_state(heard),
+        SubscriptionState::Live
+    );
+    set.main_mut().unsubscribe(heard.event, n(2));
 
     let out = Subscription::new(EventPort::new(n(2), OUT), n(3));
     set.main_mut().subscribe(out.event, n(3));

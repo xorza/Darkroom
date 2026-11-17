@@ -44,12 +44,12 @@ pub(crate) struct CanvasGeometry {
     /// Emitter event glyphs (the white triangles under a node's outputs),
     /// keyed by [`EventPort`]. The drag source for subscription wires.
     pub(crate) events: PortLayer<EventPort>,
-    /// Subscription pins (the top-left triangle on sink nodes), keyed
+    /// Subscription pins (the top-left triangle on sinks and on instances with a trigger), keyed
     /// by node — a subscription is whole-node, so one pin per node. The
     /// drop target for subscription wires.
     pub(crate) subs: PortLayer<NodeId>,
-    /// Trigger glyphs on instances and `Outputs` nodes, keyed by trigger: where a subscription
-    /// that crosses a subgraph's boundary lands.
+    /// Trigger glyphs on `Outputs` nodes, keyed by trigger: where a subscription leaves a
+    /// subgraph through its interface.
     pub(crate) triggers: PortLayer<TriggerPort>,
     /// Ghost ports' hollow dots, where a ghost wire ends. A layer of its own, so no wire drag
     /// starts on one or snaps to one.
@@ -191,8 +191,8 @@ impl CanvasGeometry {
                 let r = ui.response_for(wid::event_glyph(graph_ctx.graph(), ev));
                 self.events.record(ev, r, place);
             }
-            // Only sink nodes render a subscription pin (see `header::subscription_pin`).
-            if n.sink() {
+            // Only a pinned node renders a subscription pin (see `header::subscription_pin`).
+            if n.pinned() {
                 let r = ui.response_for(wid::subscription_glyph(graph_ctx.graph(), n.node_id));
                 self.subs.record(n.node_id, r, place);
             }
@@ -266,7 +266,7 @@ impl CanvasGeometry {
         for ev in n.event_ports() {
             self.events.replay(ev, n.pos);
         }
-        if n.sink() {
+        if n.pinned() {
             self.subs.replay(n.node_id, n.pos);
         }
         if n.ghost_pinned() {

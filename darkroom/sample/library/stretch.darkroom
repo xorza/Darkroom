@@ -44,7 +44,7 @@
                         ),
                         event_ports: (
                             events: [],
-                            triggers: [],
+                            trigger: None,
                         ),
                     ),
                     graph: (

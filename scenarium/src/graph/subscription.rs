@@ -13,13 +13,15 @@ pub struct Subscription {
     pub listener: Listener,
 }
 
-/// Where a subscription lands: a node's pin, which runs the node, or a trigger an instance or an
-/// `Outputs` node hears, which passes the event across the subgraph's boundary.
+/// Where a subscription lands: a node's pin, which runs a func's node and passes the event into
+/// an instance's subgraph, or a trigger an `Outputs` node hears, which passes it out.
 ///
-/// A node with a body keeps its one pin, so every subscription to one keeps its meaning; an
-/// instance and an `Outputs` node are heard on a trigger, one for each event its interface
-/// carries. Refused: a trigger port on every func, which turns each pin into a list; an
-/// instance's pin firing every trigger, which cannot route two events apart.
+/// Every node that hears from outside hears on its one pin: a func, and an instance, whose
+/// interface has one trigger at most
+/// ([`Interface`](crate::Interface)). The `Outputs` node is heard on a trigger for each event its
+/// interface carries, as each passes out as an event of its own. Refused: a trigger port on every
+/// func, which turns each pin into a list; a list of triggers on an instance, drawn apart from
+/// every other node's pin.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Listener {
     Pin(NodeId),

@@ -305,10 +305,11 @@ impl<'a> NodeCtx<'a> {
     }
 
     /// Whether the node draws a ghost pin: a ghost subscription ends on it and it draws no
-    /// subscription pin of its own, as a ghost node, or a node whose func no longer runs as a
-    /// sink. The pin is read off the wiring, as no saved declaration says sink.
+    /// subscription pin of its own, as a ghost node, a node whose func no longer runs as a
+    /// sink, or an instance whose interface lost its trigger. The pin is read off the wiring, as
+    /// no saved declaration says sink.
     pub(crate) fn ghost_pinned(self) -> bool {
-        !self.sink()
+        !self.pinned()
             && self
                 .ghost_wiring()
                 .subscriptions()
@@ -340,10 +341,19 @@ impl<'a> NodeCtx<'a> {
     /// Sink node — no outputs feed downstream, so a run has to reach it
     /// explicitly.
     ///
-    /// Read off the declaration, so the affordances it gates — the disable toggle, the
-    /// subscription pin — render before the first compile.
+    /// Read off the declaration, so the affordances it gates — the disable toggle, and the
+    /// subscription pin through [`Self::pinned`] — render before the first compile.
     pub(crate) fn sink(self) -> bool {
         self.func().is_some_and(Func::sink)
+    }
+
+    /// The node draws a subscription pin, where an event wire lands: a sink, and an instance
+    /// whose interface declares a trigger. Declared, like [`Self::sink`].
+    pub(crate) fn pinned(self) -> bool {
+        self.sink()
+            || self
+                .declaration
+                .is_ok_and(|declaration| declaration.trigger().is_some())
     }
 
     /// The node holds work that recomputes every run. An impure node has no
@@ -511,8 +521,8 @@ impl<'a> NodeCtx<'a> {
         self.declaration.ok()?.event(event)
     }
 
-    /// The triggers this node hears: an instance's, and the `Outputs` node's mirror of the
-    /// interface's events. Listed in the input column, under the data inputs.
+    /// The triggers this node hears: the `Outputs` node's mirror of the interface's events.
+    /// Listed in the input column, under the data inputs.
     pub(crate) fn triggers(self) -> &'a [Numbered<EventDecl>] {
         self.declaration.map_or(&[][..], NodeDecl::triggers)
     }

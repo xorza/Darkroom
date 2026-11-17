@@ -299,3 +299,48 @@ fn a_node_and_its_pin_show_once_measured() {
         "the first pass laid it out unseen, and the relayout it owed shows it, measured",
     );
 }
+
+/// An instance draws a pin while its interface declares a trigger, as a sink does; one whose
+/// interface declares none draws no pin, and a ghost pin where a ghost subscription ends on it.
+#[test]
+fn an_instance_has_a_pin_while_its_interface_declares_a_trigger() {
+    use scenarium::{
+        EventDecl, EventPort, EventPorts, GhostSubscription, Interface, PortId, Subgraph,
+        SubgraphId, Subscription, SubscriptionState,
+    };
+
+    use crate::core::document::internals::insert_subgraph;
+
+    let mut fixture = DocumentFixture::probes(0);
+    let emitter = fixture.node_at(Vec2::new(40.0, 40.0));
+    let [triggered, plain] = [1, 2].map(SubgraphId::from_u128);
+    let interface = Interface::default()
+        .with_event_ports(EventPorts {
+            events: vec![],
+            trigger: Some(EventDecl::new("go")),
+        })
+        .unwrap();
+    insert_subgraph(
+        &mut fixture.document,
+        triggered,
+        Subgraph::new("triggered", interface),
+    );
+    insert_subgraph(
+        &mut fixture.document,
+        plain,
+        Subgraph::new("plain", Interface::default()),
+    );
+    let heard = fixture.add_instance(triggered);
+    let deaf = fixture.add_instance(plain);
+    fixture.document.graphs.main_mut().set_subscription_state(
+        Subscription::new(EventPort::new(emitter, PortId::new(1)), deaf),
+        SubscriptionState::Ghost(GhostSubscription::default()),
+    );
+    let mut h = CanvasHarness::new(fixture);
+    h.prime(2);
+    let shows = |id| h.ui.rect(id).is_some();
+    assert!(shows(wid::subscription_glyph(GraphId::Main, heard)));
+    assert!(!shows(wid::ghost_subscription_glyph(GraphId::Main, heard)));
+    assert!(!shows(wid::subscription_glyph(GraphId::Main, deaf)));
+    assert!(shows(wid::ghost_subscription_glyph(GraphId::Main, deaf)));
+}

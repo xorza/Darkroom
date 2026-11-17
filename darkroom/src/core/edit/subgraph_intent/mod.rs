@@ -43,8 +43,9 @@ pub(crate) enum SubgraphIntent {
     /// Take out a definition no node places.
     Remove { id: SubgraphId },
     /// Set a subgraph's interface: what each instance and both boundary nodes show, dropping
-    /// each binding the new one does not hold, in every graph.
-    SetInterface { id: SubgraphId, to: Interface },
+    /// each binding the new one does not hold, in every graph. Boxed: an interface dwarfs the
+    /// rest.
+    SetInterface { id: SubgraphId, to: Box<Interface> },
     /// Rename a subgraph to `to`, trimmed: a blank name keeps the one it has, and one another
     /// subgraph holds takes the next free number, as Make Unique names its copy.
     Rename { id: SubgraphId, to: String },
@@ -144,7 +145,7 @@ impl SubgraphIntent {
                 UndoStep::Interface(Box::new(SetInterface::plan(
                     document,
                     id,
-                    to,
+                    *to,
                     library,
                     RefusedFate::Drop,
                 )))

@@ -286,10 +286,7 @@
                             node_id: ("7acd8a24-9994-4cd0-92cc-abb719eccaa1"),
                             event: 1,
                         ),
-                        listener: Trigger((
-                            node_id: ("3b60adfe-c8f3-4913-8de3-eef560a90417"),
-                            trigger: 2829475344,
-                        )),
+                        listener: Pin(("3b60adfe-c8f3-4913-8de3-eef560a90417")),
                     ),
                 ],
                 ghost_nodes: {
@@ -429,15 +426,10 @@
                                     ),
                                 ),
                             ],
-                            triggers: [
-                                (
-                                    id: 2829475344,
-                                    port: (
-                                        name: "Refresh",
-                                        description: None,
-                                    ),
-                                ),
-                            ],
+                            trigger: Some((
+                                name: "Refresh",
+                                description: None,
+                            )),
                         ),
                     ),
                     graph: (
@@ -538,7 +530,7 @@
                             (
                                 event: (
                                     node_id: ("ee437308-24f0-42ad-8c1a-307a33696bc5"),
-                                    event: 2829475344,
+                                    event: 1,
                                 ),
                                 listener: Pin(("a68a1c90-964c-46ae-ac17-b33ddef67633")),
                             ),
@@ -582,7 +574,7 @@
                         ),
                         event_ports: (
                             events: [],
-                            triggers: [],
+                            trigger: None,
                         ),
                     ),
                     graph: (

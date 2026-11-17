@@ -13,7 +13,7 @@ use palantir::{
 };
 use scenarium::{ConstValue, DataType, EventDecl, GraphSet, Library, Numbered, PortId, SubgraphId};
 
-use crate::core::edit::port_edit::{EventSide, InterfaceSide, PortEdit, Shift};
+use crate::core::edit::port_edit::{InterfaceSide, PortEdit, Shift};
 use crate::core::edit::subgraph_intent::SubgraphIntent;
 use crate::gui::frame::requests::Requests;
 use crate::gui::pane::graph_ui::node_ui::const_editor::{ConstEditor, Field};
@@ -124,11 +124,6 @@ pub(crate) fn show(ui: &mut Ui, card: InterfaceCard<'_>, out: &mut Requests) {
                     "Events",
                     interface.events().iter().map(event_row).collect(),
                 ),
-                (
-                    InterfaceSide::Triggers,
-                    "Triggers",
-                    interface.triggers().iter().map(event_row).collect(),
-                ),
             ] {
                 let muted = support::muted_text(ui, theme, theme.font.caption);
                 Panel::hstack()
@@ -140,29 +135,15 @@ pub(crate) fn show(ui: &mut Ui, card: InterfaceCard<'_>, out: &mut Requests) {
                         Text::new(caption).style(&muted).show(ui);
                         // A data port is made by a wire dropped on a boundary node; an event
                         // carries no type for a wire to give, so it is added here.
-                        let event_side = match side {
-                            InterfaceSide::Events => Some(EventSide::Events),
-                            InterfaceSide::Triggers => Some(EventSide::Triggers),
-                            InterfaceSide::Inputs | InterfaceSide::Outputs => None,
-                        };
-                        if let Some(event_side) = event_side
+                        if side == InterfaceSide::Events
                             && Link::new(port_wid(side, PortId::MIN, "add"), "+")
                                 .tooltip("Add one")
                                 .show(ui, theme)
                         {
-                            let held = interface.event_ports();
-                            let list = match event_side {
-                                EventSide::Events => &held.events,
-                                EventSide::Triggers => &held.triggers,
-                            };
+                            let list = interface.events();
                             edit = Some(PortEdit::AddEvent {
-                                side: event_side,
                                 port: PortId::mint(|id| list.iter().any(|event| event.id == id)),
-                                name: format!(
-                                    "{} {}",
-                                    caption.trim_end_matches('s').to_lowercase(),
-                                    list.len() + 1
-                                ),
+                                name: format!("event {}", list.len() + 1),
                             });
                         }
                     });
@@ -177,11 +158,14 @@ pub(crate) fn show(ui: &mut Ui, card: InterfaceCard<'_>, out: &mut Requests) {
                     }
                 }
             }
+            if let Some(made) = trigger_section(ui, theme, interface.trigger()) {
+                edit = Some(made);
+            }
         });
     if let Some(edit) = edit {
         out.push_subgraph(SubgraphIntent::SetInterface {
             id: subgraph,
-            to: edit.apply(interface),
+            to: Box::new(edit.apply(interface)),
         });
     }
 }
@@ -206,7 +190,7 @@ enum RowDefault<'a> {
 struct PortRow<'a> {
     port: PortId,
     name: &'a str,
-    /// What a data port carries; `None` for an event or a trigger, which carries no type.
+    /// What a data port carries; `None` for an event, which carries no type.
     data: Option<RowData<'a>>,
 }
 
@@ -219,7 +203,61 @@ struct RowData<'a> {
     default: RowDefault<'a>,
 }
 
-/// An event's or a trigger's row.
+/// The trigger's caption, with its add while the interface has none, and its row: its name and
+/// its removal, and no moves, as an interface has one trigger at most. The edit its input made
+/// this frame, if any.
+fn trigger_section(ui: &mut Ui, theme: &Theme, trigger: Option<&EventDecl>) -> Option<PortEdit> {
+    let mut edit = None;
+    let muted = support::muted_text(ui, theme, theme.font.caption);
+    Panel::hstack()
+        .id_salt(("caption", "Trigger"))
+        .size(SizeSpec::FILL_W)
+        .gap(theme.space.xs)
+        .child_align(VAlign::Center)
+        .show(ui, |ui| {
+            Text::new("Trigger").style(&muted).show(ui);
+            if trigger.is_none()
+                && Link::new(trigger_wid("add"), "+")
+                    .tooltip("Add the trigger an instance hears on its pin")
+                    .show(ui, theme)
+            {
+                edit = Some(PortEdit::SetTrigger(Some(EventDecl::new("trigger"))));
+            }
+        });
+    let Some(trigger) = trigger else {
+        return edit;
+    };
+    let field = &theme.const_editor.rest;
+    Panel::hstack()
+        .id(trigger_wid("row"))
+        .size(SizeSpec::FILL_W)
+        .gap(theme.space.xs)
+        .child_align(VAlign::Center)
+        .show(ui, |ui| {
+            if let Some(renamed) = TextEdit::buffered(&trigger.name)
+                .id(trigger_wid("name"))
+                .style(&field.field)
+                .size((Sizing::fill(1.0), Sizing::HUG))
+                .show(ui)
+                .committed_text
+                && renamed != trigger.name
+            {
+                edit = Some(PortEdit::SetTrigger(Some(EventDecl {
+                    name: renamed,
+                    ..trigger.clone()
+                })));
+            }
+            if Link::new(trigger_wid("remove"), "\u{d7}")
+                .tooltip("Remove the trigger, and every wire on the pin")
+                .show(ui, theme)
+            {
+                edit = Some(PortEdit::SetTrigger(None));
+            }
+        });
+    edit
+}
+
+/// An event's row.
 fn event_row(event: &Numbered<EventDecl>) -> PortRow<'_> {
     PortRow {
         port: event.id,
@@ -364,15 +402,19 @@ fn port_wid(side: InterfaceSide, port: PortId, part: &'static str) -> WidgetId {
         InterfaceSide::Inputs => "inputs",
         InterfaceSide::Outputs => "outputs",
         InterfaceSide::Events => "events",
-        InterfaceSide::Triggers => "triggers",
     };
     WidgetId::from_hash(("darkroom.inspector.interface.port", side, port, part))
+}
+
+/// The `part` of the trigger's caption or row.
+fn trigger_wid(part: &'static str) -> WidgetId {
+    WidgetId::from_hash(("darkroom.inspector.interface.trigger", part))
 }
 
 #[cfg(test)]
 mod tests {
     use scenarium::{
-        DataType, InputDecl, Interface, Numbered, PortId, Ports, Subgraph, SubgraphId,
+        DataType, EventDecl, InputDecl, Interface, Numbered, PortId, Ports, Subgraph, SubgraphId,
     };
 
     use crate::core::document::inspect_target::InspectTarget;
@@ -382,10 +424,11 @@ mod tests {
     use crate::core::edit::graph_intent::GraphIntent;
     use crate::core::edit::port_edit::InterfaceSide;
     use crate::gui::app::session::internals::SessionHarness;
-    use crate::gui::pane::interface_card::port_wid;
+    use crate::gui::pane::interface_card::{port_wid, trigger_wid};
 
     /// An instance's inspector shows its subgraph's ports, and a click on a port's removal
-    /// takes it out of the interface, as one history entry.
+    /// takes it out of the interface, as one history entry. The trigger's add gives the
+    /// interface its one trigger and goes, and its removal takes it away.
     #[test]
     fn the_inspector_removes_an_interface_port() {
         let mut fixture = DocumentFixture::default();
@@ -439,5 +482,32 @@ mod tests {
             .unwrap()
             .interface;
         assert_eq!(held.inputs().len(), 2);
+
+        let trigger = |h: &SessionHarness| {
+            h.session
+                .open
+                .document()
+                .graphs
+                .subgraph(id)
+                .unwrap()
+                .interface
+                .trigger()
+                .cloned()
+        };
+        assert_eq!(trigger(&h), None, "premise: no trigger");
+        h.frame();
+        h.ui.click(trigger_wid("add"));
+        h.frame();
+        h.drain();
+        assert_eq!(trigger(&h), Some(EventDecl::new("trigger")));
+        h.frame();
+        assert!(
+            h.ui.rect(trigger_wid("add")).is_none(),
+            "one trigger at most"
+        );
+        h.ui.click(trigger_wid("remove"));
+        h.frame();
+        h.drain();
+        assert_eq!(trigger(&h), None);
     }
 }
