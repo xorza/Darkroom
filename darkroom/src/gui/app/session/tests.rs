@@ -513,7 +513,7 @@ fn a_wire_dropped_on_the_outputs_node_adds_an_interface_output() {
 
 /// The ghost subscriptions on an `Outputs` node's trigger, whose interface event is gone, show as
 /// one ghost row under the name the interface change saved, inside the node's body, and as no
-/// ghost at its corner: trigger 1 there is a row's, not the node's own.
+/// ghost on its header: trigger 1 there is a row's, not the node's own.
 #[test]
 fn an_outputs_nodes_lost_trigger_is_a_ghost_row() {
     use scenarium::{

@@ -1,7 +1,6 @@
 //! [`TieLayout`]: each tie's band and each tied wire's pieces, for one frame.
 
 use common::Libm;
-use std::f32::consts::FRAC_1_SQRT_2;
 use std::ops::Range;
 
 use glam::Vec2;
@@ -24,10 +23,6 @@ const SLOT_PASSES: usize = 3;
 const HANDLE_SHARE: f32 = 0.4;
 const MIN_HANDLE: f32 = 24.0;
 const MAX_HANDLE: f32 = 140.0;
-
-/// The way an event wire meets its trigger, down-right, as [`Wire::event`]'s up-left
-/// handle has it.
-const EVENT_ARRIVAL: Vec2 = Vec2::new(FRAC_1_SQRT_2, FRAC_1_SQRT_2);
 
 /// Where each tie's band stands this frame and where each tied wire runs through it, rebuilt
 /// each frame into buffers it keeps, so a settled frame allocates nothing.
@@ -85,9 +80,6 @@ struct RoutedWire {
     key: WireKey,
     start: Vec2,
     end: Vec2,
-    /// The way the wire leaves its output end and meets its input end.
-    leaves: Vec2,
-    arrives: Vec2,
     /// Its route's steps, a range of [`TieLayout::step_strand`].
     steps: Range<u32>,
     /// Its cubics, a range of [`TieLayout::pieces`].
@@ -166,16 +158,10 @@ impl TieLayout {
                 });
                 self.step_strand.push(0);
             }
-            let (leaves, arrives) = match key {
-                WireKey::Data(_) => (Vec2::X, Vec2::X),
-                WireKey::Event(_) => (Vec2::X, EVENT_ARRIVAL),
-            };
             self.wires.push(RoutedWire {
                 key,
                 start,
                 end,
-                leaves,
-                arrives,
                 steps: first..self.step_strand.len() as u32,
                 pieces: 0..0,
             });
@@ -352,14 +338,13 @@ impl TieLayout {
         }
     }
 
-    /// The way a wire runs at its point `idx`: along the band at a slot, toward the wire's
-    /// next point.
+    /// The way a wire runs at its point `idx`: rightward at its two ends, as [`Wire::new`] leaves
+    /// and arrives, and along the band at a slot, toward the wire's next point.
     fn tangent(&self, wire_idx: usize, idx: u32) -> Vec2 {
         let wire = &self.wires[wire_idx];
         let steps = wire.steps.end - wire.steps.start;
         match idx {
-            0 => wire.leaves,
-            idx if idx > steps => wire.arrives,
+            idx if idx == 0 || idx > steps => Vec2::X,
             idx => {
                 let band = &self.bands[self.strand_at(wire_idx, idx - 1).band as usize];
                 let travel = self.point(wire_idx, idx + 1) - self.point(wire_idx, idx - 1);

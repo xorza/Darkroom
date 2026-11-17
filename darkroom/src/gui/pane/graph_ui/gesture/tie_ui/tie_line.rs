@@ -266,7 +266,7 @@ mod tests {
         // A level wire from (0, 0) to (200, 0) has its middle sample at x = 100 exactly, the end
         // of chord 7 and the start of chord 8: a line straight through it crosses the wire,
         // halfway along the line.
-        let level = Wire::data(Vec2::ZERO, Vec2::new(200.0, 0.0));
+        let level = Wire::new(Vec2::ZERO, Vec2::new(200.0, 0.0));
         let through = line(Vec2::new(100.0, -20.0), Vec2::new(100.0, 20.0), 1.0);
         let crossing = through.first_crossing(wire, &[level]).expect("it crosses");
         assert_eq!(

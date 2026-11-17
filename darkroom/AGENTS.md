@@ -116,6 +116,15 @@ run. Refused: a pass-through node, which changes the graph for layout.
 - **A status and a type share a hue, never a form**: a status is a frame, a footer word and the
   status bar; a type is a port dot and a wire, as Blender and Unreal draw a red Bool beside a red
   error.
+- **Every wire meets its ports head-on and level**: an output or an event sends it rightward, an
+  input or a trigger takes it from the left, on one curve rule, and a node's own trigger is an
+  arrow into the node on its header row, hung on the left edge as an input's circle is on its
+  row. As Unreal's exec input at the top-left of a node, wired with the data wires' splines
+  ([nodes](https://dev.epicgames.com/documentation/en-us/unreal-engine/nodes-in-unreal-engine)),
+  and Unity's control ports beside its data ports
+  ([nodes](https://docs.unity3d.com/Packages/com.unity.visualscripting@1.9/manual/vs-nodes.html)).
+  Refused: a trigger turned at the node's corner with event wires arriving at 45°, which bent
+  every wire into an `Outputs` node's trigger rows.
 - **A ghost is a broken line and a hollow dot in its type's hue**: what a graph keeps and cannot
   hold, under the live wires, with a footer count in the warning ink and no frame, which a run's
   status owns. A broken line reads as broken, as Blender's developers found of their dashed

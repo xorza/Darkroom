@@ -201,10 +201,10 @@ One word, one meaning, in the workspace crates; the submodules keep their own.
   general word for a wire or a subscription, and "link" a text hyperlink.
 - **A subscription joins an event to a trigger**, as a wire joins an output to an input: an
   *event* is what a node fires, a *trigger* where a node is triggered, a sink's or a triggered
-  instance's own at its corner, or the `Outputs` node's, one per interface event. The *emitter*
-  fires and the *subscriber* is triggered; the GUI draws a subscription as an *event wire*. As
-  Unity's trigger ports, a Unity subgraph's Input node with a trigger output and its Output node
-  a trigger input
+  instance's own on its header row, or the `Outputs` node's, one per interface event. The
+  *emitter* fires and the *subscriber* is triggered; the GUI draws a subscription as an *event
+  wire*. As Unity's trigger ports, a Unity subgraph's Input node with a trigger output and its
+  Output node a trigger input
   ([nodes](https://docs.unity3d.com/Packages/com.unity.visualscripting@1.9/manual/vs-nodes.html)).
   Refused: pin, which stays keep-in-place, the inspector's Pin and a tie's pinned angle;
   listener, a code term the canvas does not show; "subscription wire" beside "event wire".

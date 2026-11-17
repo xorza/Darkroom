@@ -179,7 +179,7 @@ impl SubscriptionUi {
         };
         let theme = graph_ctx.theme();
         let width = theme.canvas.wire_at(ctx.zoom());
-        WirePaint::from(theme.port.event).stroke(ui, &Wire::event(p0, p3), width, None);
+        WirePaint::from(theme.port.event).stroke(ui, &Wire::new(p0, p3), width, None);
     }
 }
 
@@ -222,7 +222,7 @@ mod tests {
     use crate::gui::pane::graph_ui::internals::CanvasHarness;
     use crate::gui::pane::graph_ui::wid;
 
-    /// An instance whose interface declares a trigger shows it at its corner, as a sink does; an
+    /// An instance whose interface declares a trigger shows it on its header, as a sink does; an
     /// event wire pulled from a node's event lands on the trigger and commits the subscription to
     /// it, and one pulled back from the trigger to the event commits the same edge.
     #[test]
@@ -249,10 +249,7 @@ mod tests {
                 [GraphIntent::SetSubscription { subscription, to: true }] if *subscription == expected
             )
         };
-        let trigger_rect = h.ui.rect(trigger).expect("the trigger shows");
-        let trigger_at = trigger_rect.center();
-        // The trigger straddles the node's corner, and the body takes a press on its own half.
-        let trigger_outside = (trigger_rect.min + trigger_rect.center()) * 0.5;
+        let trigger_at = h.ui.rect(trigger).expect("the trigger shows").center();
         h.ui.press(wid::event_glyph(GraphId::Main, event), PointerButton::Left);
         h.frame();
         h.ui.drag_to(trigger_at);
@@ -266,7 +263,7 @@ mod tests {
             h.ui.rect(wid::event_glyph(GraphId::Main, event))
                 .expect("the event shows")
                 .center();
-        h.ui.press(trigger_outside, PointerButton::Left);
+        h.ui.press(trigger, PointerButton::Left);
         h.frame();
         h.ui.drag_to(event_at);
         h.frame();

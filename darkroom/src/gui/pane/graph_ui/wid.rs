@@ -109,14 +109,14 @@ pub(super) fn event_glyph(graph: GraphId, event: EventPort) -> WidgetId {
     of_event("event_glyph", graph, event)
 }
 
-/// A trigger's glyph, where a subscription lands: a node's own at its corner, or an `Outputs`
+/// A trigger's glyph, where a subscription lands: a node's own on its header, or an `Outputs`
 /// node's row, so `CanvasGeometry` and `SubscriptionUi` poll its geometry as a wire drop target.
 pub(super) fn trigger_glyph(graph: GraphId, trigger: TriggerPort) -> WidgetId {
     WidgetId::from_hash(("trigger_glyph", graph, trigger.node_id, trigger.trigger))
 }
 
 /// A ghost trigger's glyph, where a ghost subscription ends on a trigger its node does not show:
-/// a node's own at its corner, or an `Outputs` node's ghost row. An id space apart from
+/// a node's own on its header, or an `Outputs` node's ghost row. An id space apart from
 /// [`trigger_glyph`], so no subscription drag starts on or snaps to it.
 pub(crate) fn ghost_trigger_glyph(graph: GraphId, trigger: TriggerPort) -> WidgetId {
     WidgetId::from_hash((

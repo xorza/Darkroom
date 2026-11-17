@@ -306,7 +306,7 @@ impl<'a> NodeCtx<'a> {
 
     /// The triggers this node lists that its declaration does not show: each `Outputs` trigger a
     /// ghost subscription names whose interface event is gone, each once, under the name the
-    /// interface change saved. A node's own lost trigger is its ghost corner instead
+    /// interface change saved. A node's own lost trigger shows on its header instead
     /// ([`Self::ghost_triggered`]); no other node keeps a ghost on another trigger, as the load
     /// drops it.
     pub(crate) fn ghost_triggers(self) -> impl Iterator<Item = GhostTrigger<'a>> {
@@ -334,7 +334,7 @@ impl<'a> NodeCtx<'a> {
             })
     }
 
-    /// Every ghost trigger the node draws, its own at its corner and its ghost rows':
+    /// Every ghost trigger the node draws, its own on its header and its ghost rows':
     /// [`Self::trigger_ports`] for a ghost subscription's end.
     pub(crate) fn ghost_trigger_ports(self) -> impl Iterator<Item = TriggerPort> {
         let own = self
@@ -394,7 +394,7 @@ impl<'a> NodeCtx<'a> {
             .map_or(NodeTriggers::None, NodeDecl::triggers)
     }
 
-    /// The node has its own trigger, drawn at its corner: a sink, or an instance whose interface
+    /// The node has its own trigger, drawn on its header: a sink, or an instance whose interface
     /// declares a trigger.
     pub(crate) fn has_own_trigger(self) -> bool {
         matches!(self.triggers(), NodeTriggers::Own)

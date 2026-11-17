@@ -228,7 +228,7 @@ impl WirePass<'_, '_, '_> {
                     || self.lit == Some(key)
                     || wid::lit_by_tie(ui, graph_ctx.graph(), graph_ctx.view(), key),
             );
-            let untied = [Wire::data(p0, p3)];
+            let untied = [Wire::new(p0, p3)];
             let pieces = self.ties.pieces(key).unwrap_or(&untied);
             let ends = WireEnds {
                 wire: key,
@@ -266,7 +266,7 @@ impl WirePass<'_, '_, '_> {
                     || self.lit == Some(key)
                     || wid::lit_by_tie(ui, graph_ctx.graph(), graph_ctx.view(), key),
             );
-            let untied = [Wire::event(p0, p3)];
+            let untied = [Wire::new(p0, p3)];
             let pieces = self.ties.pieces(key).unwrap_or(&untied);
             // Events carry no data type, so one neutral swatch runs the whole curve.
             let ends = WireEnds {
@@ -314,7 +314,7 @@ impl WirePass<'_, '_, '_> {
                     || self.lit == Some(key)
                     || wid::lit_by_tie(ui, graph_ctx.graph(), graph_ctx.view(), key),
             );
-            let untied = [Wire::data(p0, p3)];
+            let untied = [Wire::new(p0, p3)];
             let pieces = self.ties.pieces(key).unwrap_or(&untied);
             let ends = WireEnds {
                 wire: key,
@@ -346,7 +346,7 @@ impl WirePass<'_, '_, '_> {
                     || self.lit == Some(key)
                     || wid::lit_by_tie(ui, graph_ctx.graph(), graph_ctx.view(), key),
             );
-            let untied = [Wire::event(p0, p3)];
+            let untied = [Wire::new(p0, p3)];
             let pieces = self.ties.pieces(key).unwrap_or(&untied);
             let ends = WireEnds {
                 wire: key,

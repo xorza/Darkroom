@@ -185,7 +185,7 @@ fn the_pieces_share_the_ramp_by_chord_length() {
 /// fiftieth of a pixel, under what any screen shows.
 #[test]
 fn a_wires_middle_is_halfway_along_its_length() {
-    let middle = Middle::of(&[Wire::data(Vec2::ZERO, Vec2::new(200.0, 0.0))]).expect("a length");
+    let middle = Middle::of(&[Wire::new(Vec2::ZERO, Vec2::new(200.0, 0.0))]).expect("a length");
     assert!(
         middle.at.abs_diff_eq(Vec2::new(100.0, 0.0), 1e-3),
         "{:?}",
@@ -193,8 +193,8 @@ fn a_wires_middle_is_halfway_along_its_length() {
     );
     assert_eq!(middle.dir, Vec2::X);
     let split = [
-        Wire::data(Vec2::ZERO, Vec2::new(120.0, 0.0)),
-        Wire::data(Vec2::new(120.0, 0.0), Vec2::new(200.0, 0.0)),
+        Wire::new(Vec2::ZERO, Vec2::new(120.0, 0.0)),
+        Wire::new(Vec2::new(120.0, 0.0), Vec2::new(200.0, 0.0)),
     ];
     let middle = Middle::of(&split).expect("a length");
     assert!(

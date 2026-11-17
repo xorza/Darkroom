@@ -4,11 +4,10 @@
 //! [`crate::gui::pane::graph_ui::node_ui::NodeUi`], over a rule that divides it from the ports.
 
 use std::collections::BTreeSet;
-use std::f32::consts::FRAC_PI_4;
 
 use palantir::{
     Checkbox, Configure, DockDrop, DockOperation, EditableLabel, Menu, MenuItem, MenuSeparator,
-    Modifiers, Panel, Separator, SizeSpec, SplitSide, Ui, VAlign, Visibility, WidgetId,
+    Modifiers, Panel, Separator, SizeSpec, SplitSide, Ui, VAlign, WidgetId,
 };
 
 use scenarium::{CacheMode, GraphId, NodeId, TriggerPort};
@@ -25,6 +24,7 @@ use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph_ui::node_ui::card;
 use crate::gui::pane::graph_ui::node_ui::node_record::NodeRecord;
 use crate::gui::pane::graph_ui::wid;
+use crate::gui::port_ref::PortKind;
 use crate::gui::theme::color;
 use crate::gui::theme::hover::Hover;
 use crate::gui::widgets::format;
@@ -37,63 +37,52 @@ use crate::gui::widgets::support;
 /// editor does not collapse to a caret when the draft is emptied.
 const NODE_NAME_MIN_WIDTH: f32 = 40.0;
 
-/// A node's own trigger: an event-colored triangle behind the node's top-left corner, its apex
-/// pointing up-left toward the incoming wire. Recorded by `NodeUi::draw_node` immediately before
-/// its node's body, so it peeks out from behind the corner while keeping the node stack's paint
-/// order and the cull decision. The `port_glyph::HIT_SCALE`-grown box is centered on the corner
-/// (world coords) while the triangle paints port-sized, the generous hit box the port circles
-/// get. It is both a drop target for an event wire and a drag source: pulling from the protruding
-/// half starts an event wire aimed at an event (see `SubscriptionUi`); the body-covered half
-/// yields presses to the node, while drop-snapping (rect-based) accepts the whole box. `hover`
-/// tints the triangle as drop feedback.
-pub(super) fn own_trigger(ui: &mut Ui, node: NodeCtx<'_>, hover: Hover, visibility: Visibility) {
-    let theme = node.theme();
-    // The event arrow turned an eighth of a turn, so it points down-right into
-    // its node along the event wire arriving from the upper left, as Unreal
-    // points an input exec pin along the flow. Placed by its grown box's center
-    // rather than in flow, so it straddles the node's top-left corner.
-    PortGlyph::arrow(
-        wid::trigger_glyph(node.graph_ctx.graph(), TriggerPort::from(node.node_id)),
-        theme.port.size,
-        hover.lift(theme.port.event),
-    )
-    .turn(FRAC_PI_4)
-    .centered_on(node.pos)
-    .visibility(visibility)
-    .tooltip(Some(
-        "Trigger — drag to an event, or drop an event wire here",
-    ))
-    .show(ui, theme);
-}
-
-/// The ghost trigger of a node a ghost subscription ends on and that has no trigger of its own:
-/// the trigger's arrow in the ghost ink, where nothing starts or lands.
-pub(super) fn ghost_trigger(ui: &mut Ui, node: NodeCtx<'_>, hover: Hover, visibility: Visibility) {
-    let theme = node.theme();
-    let ink = color::wash(theme.port.event, GHOST_TRIGGER_INK, theme.canvas.bg);
-    PortGlyph::arrow(
-        wid::ghost_trigger_glyph(node.graph_ctx.graph(), TriggerPort::from(node.node_id)),
-        theme.port.size,
-        hover.lift(ink),
-    )
-    .turn(FRAC_PI_4)
-    .centered_on(node.pos)
-    .visibility(visibility)
-    .tooltip(
-        node.tooltips().then_some(
-            "A subscription kept as a ghost ends here: this node no longer has a trigger",
-        ),
-    )
-    .show(ui, theme);
+/// A node's own trigger, the first item of its header row: an event-colored arrow pointing into
+/// the node, hung on its left edge at the header's middle as an input port's circle hangs on its
+/// row, so an event wire meets it head-on as a data wire meets an input. It is both a drop target
+/// for an event wire and a drag source, which pulls a wire toward an event (see
+/// `SubscriptionUi`); `hover` tints it as drop feedback. A node that lost its trigger to a ghost
+/// subscription shows its ghost there instead, dimmed, where nothing starts or lands.
+fn own_trigger(ui: &mut Ui, record: &NodeRecord<'_, '_>) {
+    let node = record.node;
+    let (theme, graph, own) = (
+        node.theme(),
+        node.graph_ctx.graph(),
+        TriggerPort::from(node.node_id),
+    );
+    let geometry = record.stage.ctx.geometry();
+    let (wid, ink, hovered, tooltip) = if node.has_own_trigger() {
+        (
+            wid::trigger_glyph(graph, own),
+            theme.port.event,
+            geometry.triggers.is_hovered(own),
+            Some("Trigger — drag to an event, or drop an event wire here"),
+        )
+    } else if node.ghost_triggered() {
+        (
+            wid::ghost_trigger_glyph(graph, own),
+            color::wash(theme.port.event, GHOST_TRIGGER_INK, theme.canvas.bg),
+            geometry.ghost_triggers.is_hovered(own),
+            node.tooltips().then_some(
+                "A subscription kept as a ghost ends here: this node no longer has a trigger",
+            ),
+        )
+    } else {
+        return;
+    };
+    PortGlyph::arrow(wid, theme.port.size, Hover::from(hovered).lift(ink))
+        .margin(theme.port_margin(PortKind::Input, theme.port.radius()))
+        .tooltip(tooltip)
+        .show(ui, theme);
 }
 
 /// How much of the event ink a ghost trigger keeps over the canvas: dimmed, as it is kept, not
 /// live.
 const GHOST_TRIGGER_INK: f32 = 0.55;
 
-/// The header row: the run button, the title and its kind mark, then, pinned to the right edge
-/// by a `FILL` spacer, the disable button, the cache button and the inspect button. The node's
-/// own trigger is not drawn here: it records before the node bodies.
+/// The header row: the node's own trigger on its left edge, the run button, the title and its
+/// kind mark, then, pinned to the right edge by a `FILL` spacer, the disable button, the cache
+/// button and the inspect button.
 pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     let (theme, node) = (record.node.theme(), record.node);
     Panel::hstack()
@@ -103,6 +92,7 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
         .gap(theme.space.xs)
         .child_align(VAlign::Center)
         .show(ui, |ui| {
+            own_trigger(ui, record);
             if let Some(program_id) = node.runnable()
                 && run_button(ui, node)
             {

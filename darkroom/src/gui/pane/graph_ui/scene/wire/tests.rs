@@ -12,55 +12,32 @@ fn assert_close(actual: f32, expected: f32) {
 /// A wire's chord is the straight distance between its ends, whatever its handles.
 #[test]
 fn a_chord_runs_end_to_end() {
-    let wire = Wire::data(Vec2::new(0.0, 0.0), Vec2::new(30.0, 40.0));
+    let wire = Wire::new(Vec2::new(0.0, 0.0), Vec2::new(30.0, 40.0));
     assert_eq!(wire.chord(), 50.0);
 }
 
 #[test]
-fn data_wire_forward_span_uses_half_vertical_gap_clamped() {
+fn a_forward_span_uses_half_vertical_gap_clamped() {
     // Level ports (no vertical gap): clamps up to MIN_HANDLE.
-    let w = Wire::data(Vec2::new(0.0, 0.0), Vec2::new(200.0, 0.0));
+    let w = Wire::new(Vec2::new(0.0, 0.0), Vec2::new(200.0, 0.0));
     assert_eq!(w.p1, Vec2::new(MIN_HANDLE, 0.0));
     assert_eq!(w.p2, Vec2::new(200.0 - MIN_HANDLE, 0.0));
 
     // A tall span's half-gap (300) exceeds MAX_HANDLE, so it clamps down.
     // Only the x component moves — both handles stay level with their
     // own endpoint's y.
-    let w = Wire::data(Vec2::new(0.0, 0.0), Vec2::new(200.0, 600.0));
+    let w = Wire::new(Vec2::new(0.0, 0.0), Vec2::new(200.0, 600.0));
     assert_eq!(w.p1, Vec2::new(MAX_HANDLE, 0.0));
     assert_eq!(w.p2, Vec2::new(200.0 - MAX_HANDLE, 600.0));
 }
 
 #[test]
-fn data_wire_backward_span_loops_via_sqrt_reach() {
+fn a_backward_span_loops_via_sqrt_reach() {
     // p3 sits left of p0 by 400 — forward term is 0 (level), backward
     // term is 10 * sqrt(400) = 200, which wins.
-    let w = Wire::data(Vec2::new(400.0, 0.0), Vec2::new(0.0, 0.0));
+    let w = Wire::new(Vec2::new(400.0, 0.0), Vec2::new(0.0, 0.0));
     assert_close(w.p1.x, 400.0 + 200.0);
     assert_close(w.p2.x, 0.0 - 200.0);
-}
-
-#[test]
-fn event_wire_arrives_up_left_at_the_subscriber_pin() {
-    // Level span of 100: d = max(100 * 0.4, MIN_HANDLE) = 40. The
-    // emitter handle leaves straight right; the subscriber handle backs
-    // off along the normalized (-1, -1) diagonal, i.e. 40/√2 ≈ 28.284
-    // in each axis, so the curve meets the outward-pointing pin
-    // head-on rather than flat.
-    let w = Wire::event(Vec2::new(0.0, 0.0), Vec2::new(100.0, 0.0));
-    assert_eq!(w.p1, Vec2::new(40.0, 0.0));
-    let diag = 40.0 / 2.0_f32.sqrt();
-    assert_close(w.p2.x, 100.0 - diag);
-    assert_close(w.p2.y, -diag);
-
-    // A short span floors at MIN_HANDLE (30) instead of collapsing:
-    // 10 * 0.4 = 4 < 30.
-    let short = Wire::event(Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0));
-    assert_eq!(short.p1, Vec2::new(MIN_HANDLE, 0.0));
-
-    // The two families place different handles for the same endpoints —
-    // a data wire arrives level from the left, an event wire diagonally.
-    assert_ne!(Wire::data(Vec2::ZERO, Vec2::new(100.0, 0.0)).p2, w.p2);
 }
 
 /// The curve runs from `p0` at `t = 0` to `p3` at `t = 1`, and at `t = ½`
@@ -84,14 +61,14 @@ fn at_runs_the_curve_from_p0_to_p3() {
 fn hull_bounds_every_control_point() {
     // Hand-computed: the backward-loop wire above spans x from -200
     // (p2) to 600 (p1) and y stays 0, so the hull is 800 wide and flat.
-    let w = Wire::data(Vec2::new(400.0, 0.0), Vec2::new(0.0, 0.0));
+    let w = Wire::new(Vec2::new(400.0, 0.0), Vec2::new(0.0, 0.0));
     let hull = w.hull();
     assert_close(hull.min.x, -200.0);
     assert_close(hull.size.w, 800.0);
     assert_close(hull.size.h, 0.0);
 
     // A stacked span's hull covers both endpoints' y.
-    let w = Wire::data(Vec2::new(0.0, 0.0), Vec2::new(200.0, 600.0));
+    let w = Wire::new(Vec2::new(0.0, 0.0), Vec2::new(200.0, 600.0));
     let hull = w.hull();
     assert_eq!(hull.min, Vec2::ZERO);
     assert_eq!(hull.size, Size::new(200.0, 600.0));

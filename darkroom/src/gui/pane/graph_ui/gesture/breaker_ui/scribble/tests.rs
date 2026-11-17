@@ -207,7 +207,7 @@ fn the_box_rejection_answers_as_the_segment_tests_do() {
 /// of its chords share; a scribble straight through it cuts the wire, as one beside it does.
 #[test]
 fn a_scribble_through_a_sample_point_cuts_the_wire() {
-    let level = Wire::data(Vec2::ZERO, Vec2::new(200.0, 0.0));
+    let level = Wire::new(Vec2::ZERO, Vec2::new(200.0, 0.0));
     for x in [100.0, 90.0] {
         let mut b = scribble_at(Vec2::new(x, -20.0));
         b.add_point(Vec2::new(x, 20.0), 1.0);

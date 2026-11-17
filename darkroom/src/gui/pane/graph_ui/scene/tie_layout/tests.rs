@@ -154,32 +154,30 @@ fn a_tied_wire_keeps_its_tangent_through_the_slot() {
     );
 }
 
-/// A tied event wire meets its trigger as an untied one does, from the up-left: the last
-/// piece's arriving handle runs along `(1, 1) / √2`, the direction `Wire::event` arrives in.
+/// A tied event wire runs as a tied data wire over the same span does, its last piece meeting
+/// its trigger level from the left, along `+x`, as an untied wire meets it.
 #[test]
-fn a_tied_event_wire_meets_its_pin_from_the_up_left() {
+fn a_tied_event_wire_meets_its_trigger_as_a_data_wire_does() {
     use scenarium::{EventPort, Subscription};
-
-    use crate::gui::pane::graph_ui::scene::wire::Wire;
 
     let event = WireKey::Event(Subscription::new(
         EventPort::new(NodeId::unique(), PortId::new(1)),
         NodeId::unique(),
     ));
+    let data = wire();
     let (start, end) = ((-100.0, 0.0), (100.0, 80.0));
-    let layout = tied(Vec2::ZERO, TieAngle::Auto, &[(event, span(start, end))]);
-    let [_, into_pin] = layout.pieces(event).unwrap() else {
-        panic!("one tie makes two pieces");
+    let last = |key| {
+        let layout = tied(Vec2::ZERO, TieAngle::Auto, &[(key, span(start, end))]);
+        let [_, last] = layout.pieces(key).unwrap() else {
+            panic!("one tie makes two pieces");
+        };
+        [last.p0, last.p1, last.p2, last.p3]
     };
-    let untied = Wire::event(Vec2::from(start), Vec2::from(end));
-    let arriving = |wire: &Wire| (wire.p3 - wire.p2).normalize();
-    assert!(
-        arriving(into_pin).abs_diff_eq(arriving(&untied), 1e-6),
-        "{:?} against {:?}: the two unit vectors agree to f32 rounding",
-        arriving(into_pin),
-        arriving(&untied)
-    );
-    assert_eq!(into_pin.p3, Vec2::from(end));
+    let [_, _, p2, p3] = last(event);
+    assert_eq!(last(event), last(data));
+    assert_eq!(p3, Vec2::from(end));
+    assert_eq!(p3.y, p2.y, "the arriving handle is level");
+    assert!(p2.x < p3.x, "and comes from the left: {p2} to {p3}");
 }
 
 /// Two ties in a chain keep one strand order. Both strands leave `t1` from different heights and

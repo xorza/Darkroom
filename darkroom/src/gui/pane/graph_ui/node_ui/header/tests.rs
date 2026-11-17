@@ -1,6 +1,6 @@
 use glam::{UVec2, Vec2};
 use palantir::{EditableLabel, PointerButton};
-use scenarium::{CacheMode, NodeAddr, NodeId, TriggerPort};
+use scenarium::{CacheMode, NodeAddr, NodeId, PortId, TriggerPort};
 use scenarium::{GraphId, internals::test_graph::TestGraph};
 use std::mem;
 use std::sync::Arc;
@@ -14,6 +14,7 @@ use crate::gui::frame::app_command::RunCommand;
 use crate::gui::pane::graph_ui::internals::CanvasHarness;
 use crate::gui::pane::graph_ui::node_ui::header::cache_button_wid;
 use crate::gui::pane::graph_ui::wid;
+use crate::gui::port_ref::PortRef;
 
 /// Room for the node and the cache menu opened below its header.
 const SURFACE: UVec2 = UVec2::new(1200, 800);
@@ -47,6 +48,57 @@ fn the_header_is_one_row_of_run_title_cache_and_inspect() {
         row[3].max().x + 12.0,
         body.max().x - 2.0,
         "the inspect button ends the row"
+    );
+}
+
+/// A node's own trigger hangs on its left edge at the header's middle, as an input port's circle
+/// hangs on its row: its center on the body's left edge, as the input's, level with the title, and the run button
+/// after it keeps the place it has on a node with no trigger.
+#[test]
+fn a_nodes_own_trigger_hangs_on_its_left_edge_level_with_the_title() {
+    // A glyph hung on the edge lands 1/320 px past it, the input's circle as the trigger, so the
+    // edge, the title's middle and the run button are held to 0.01 px, far under what a screen
+    // shows.
+    const SUBPIXEL: f32 = 0.01;
+    let mut fixture = DocumentFixture::probes(1);
+    let sink = fixture.node_at(Vec2::new(40.0, 300.0));
+    let mut h = CanvasHarness::sized(fixture, SURFACE);
+    let probe = h.node(0);
+    h.prime(2);
+    let rect = |h: &CanvasHarness, id| h.ui.rect(id).expect("recorded");
+    let middle = |r: palantir::Rect| r.min.y + r.size.h * 0.5;
+    let trigger = rect(
+        &h,
+        wid::trigger_glyph(GraphId::Main, TriggerPort::from(sink)),
+    );
+    let title = rect(&h, wid::rename(GraphId::Main, sink));
+    let body = h.node_rect(sink);
+    let input = rect(
+        &h,
+        wid::port_circle(GraphId::Main, PortRef::input(sink, PortId::new(1))),
+    );
+    assert_eq!(
+        trigger.center().x,
+        input.center().x,
+        "as the input's circle hangs"
+    );
+    assert!(
+        (trigger.center().x - body.min.x).abs() < SUBPIXEL,
+        "{trigger:?} on {body:?}"
+    );
+    assert!(
+        (middle(trigger) - middle(title)).abs() < SUBPIXEL,
+        "{trigger:?} level with {title:?}"
+    );
+    let run_offset = |h: &CanvasHarness, node_id| {
+        rect(h, wid::of_node("run_button", GraphId::Main, node_id))
+            .min
+            .x
+            - h.node_rect(node_id).min.x
+    };
+    assert!(
+        (run_offset(&h, sink) - run_offset(&h, probe)).abs() < SUBPIXEL,
+        "the trigger takes no room in the row"
     );
 }
 

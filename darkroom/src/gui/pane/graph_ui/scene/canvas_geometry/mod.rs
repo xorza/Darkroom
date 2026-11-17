@@ -44,16 +44,16 @@ pub(crate) struct CanvasGeometry {
     /// Event glyphs (the white triangles under a node's outputs), keyed by [`EventPort`]. The
     /// drag source for event wires.
     pub(crate) events: PortLayer<EventPort>,
-    /// Trigger glyphs, keyed by [`TriggerPort`]: a node's own, the top-left triangle on a sink and
-    /// on an instance with a trigger, and the `Outputs` node's rows. The drop target for event
-    /// wires.
+    /// Trigger glyphs, keyed by [`TriggerPort`]: a node's own, the arrow on the header of a sink
+    /// and of an instance with a trigger, and the `Outputs` node's rows. The drop target for
+    /// event wires.
     pub(crate) triggers: PortLayer<TriggerPort>,
     /// Ghost ports' hollow dots, where a ghost wire ends. A layer of its own, so no wire drag
     /// starts on one or snaps to one.
     pub(crate) ghost_ports: PortLayer<PortRef>,
     /// Ghost events' glyphs; [`Self::ghost_ports`] for a ghost subscription's emitter end.
     pub(crate) ghost_events: PortLayer<EventPort>,
-    /// Ghost triggers, a node's own at its corner and an `Outputs` node's rows;
+    /// Ghost triggers, a node's own on its header and an `Outputs` node's rows;
     /// [`Self::ghost_ports`] for a ghost subscription's subscriber end.
     pub(crate) ghost_triggers: PortLayer<TriggerPort>,
     /// Last measured body size per node, from the pre-transform, unclipped `layout_rect`, kept
