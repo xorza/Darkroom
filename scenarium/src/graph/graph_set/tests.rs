@@ -1157,8 +1157,9 @@ fn a_digest_names_the_definition_and_not_its_ids() {
     assert_ne!(kept.digest(s(1)), ghosted.digest(s(1)));
 }
 
-/// A subscription lands on an instance's pin when its interface declares a trigger, and on no
-/// trigger of the instance; an interface edit that takes the event away refuses the subscription
+/// A subscription lands on a sink's pin, on an instance's pin when its interface declares a
+/// trigger, and on no trigger of the instance nor on the pin of a func that is no sink, which a
+/// load keeps as a ghost; an interface edit that takes the event away refuses the subscription
 /// from it, which a person's edit drops and an update keeps as a ghost under the event's name, and
 /// undo puts it back live. One that takes the trigger away keeps the subscription to the pin as a
 /// ghost, which a load under an interface with a trigger again brings back.
@@ -1187,6 +1188,7 @@ fn a_subscription_lands_on_a_declared_trigger_and_an_interface_edit_refuses_it()
     set.main_mut().insert(n(1), node(&library, TICKER));
     set.main_mut().insert(n(2), Node::instance(s(1)));
     set.main_mut().insert(n(3), node(&library, SINK));
+    set.main_mut().insert(n(4), node(&library, TICKER));
     let tick = EventPort::new(n(1), PortId::new(1));
     let admit = |set: &GraphSet, listener: Listener| {
         set.main().admit_subscription(
@@ -1202,6 +1204,22 @@ fn a_subscription_lands_on_a_declared_trigger_and_an_interface_edit_refuses_it()
         ),
         Err(SubscriptionRejection::UndeclaredTrigger)
     );
+    assert_eq!(admit(&set, Listener::Pin(n(3))), Ok(()), "a sink hears");
+    assert_eq!(
+        admit(&set, Listener::Pin(n(4))),
+        Err(SubscriptionRejection::PinlessSubscriber),
+        "a func that is no sink has no pin"
+    );
+    // A load keeps a subscription on a pin its func no longer has as a ghost: a library may
+    // make the func a sink again.
+    let deaf = Subscription::new(tick, n(4));
+    set.main_mut().subscribe(deaf.event, n(4));
+    assert!(!set.reconcile(&library, &Manifest::default()).is_empty());
+    assert_eq!(
+        set.main().subscription_state(deaf),
+        SubscriptionState::Ghost(GhostSubscription::default())
+    );
+    set.main_mut().unsubscribe(deaf.event, n(4));
 
     let heard = Subscription::new(tick, n(2));
     set.main_mut().subscribe(heard.event, n(2));
@@ -1221,7 +1239,7 @@ fn a_subscription_lands_on_a_declared_trigger_and_an_interface_edit_refuses_it()
     );
     assert_eq!(
         admit(&set, Listener::Pin(n(2))),
-        Err(SubscriptionRejection::UndeclaredTrigger)
+        Err(SubscriptionRejection::PinlessSubscriber)
     );
     set.validate_with(&library).unwrap();
     // A load under an interface that has a trigger again brings the ghost back live.

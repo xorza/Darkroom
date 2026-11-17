@@ -99,11 +99,13 @@ impl<'a> NodeDecl<'a> {
         }
     }
 
-    /// The trigger an instance hears on its pin, if its interface declares one.
-    pub const fn trigger(self) -> Option<&'a EventDecl> {
+    /// Whether the node hears on its pin: a sink func, which a subscription runs, and an
+    /// instance whose interface declares a trigger, which a subscription passes into.
+    pub const fn hears_pin(self) -> bool {
         match self {
-            Self::Instance(subgraph) => subgraph.interface.trigger(),
-            Self::Func(_) | Self::Boundary { .. } => None,
+            Self::Func(func) => func.sink(),
+            Self::Instance(subgraph) => subgraph.interface.trigger().is_some(),
+            Self::Boundary { .. } => false,
         }
     }
 

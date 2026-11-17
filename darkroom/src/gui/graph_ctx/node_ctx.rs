@@ -341,19 +341,17 @@ impl<'a> NodeCtx<'a> {
     /// Sink node — no outputs feed downstream, so a run has to reach it
     /// explicitly.
     ///
-    /// Read off the declaration, so the affordances it gates — the disable toggle, and the
-    /// subscription pin through [`Self::pinned`] — render before the first compile.
+    /// Read off the declaration, so the disable toggle it gates renders before the first
+    /// compile.
     pub(crate) fn sink(self) -> bool {
         self.func().is_some_and(Func::sink)
     }
 
-    /// The node draws a subscription pin, where an event wire lands: a sink, and an instance
-    /// whose interface declares a trigger. Declared, like [`Self::sink`].
+    /// The node draws a subscription pin, where an event wire lands: one that hears on it
+    /// ([`NodeDecl::hears_pin`]), a sink or an instance whose interface declares a trigger.
+    /// Declared, like [`Self::sink`].
     pub(crate) fn pinned(self) -> bool {
-        self.sink()
-            || self
-                .declaration
-                .is_ok_and(|declaration| declaration.trigger().is_some())
+        self.declaration.is_ok_and(NodeDecl::hears_pin)
     }
 
     /// The node holds work that recomputes every run. An impure node has no

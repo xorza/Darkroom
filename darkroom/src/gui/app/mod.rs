@@ -1441,6 +1441,7 @@ mod tests {
         use glam::{UVec2, Vec2};
         use palantir::{Harness, Locator, PointerButton};
 
+        use crate::core::document::viewport::Viewport;
         use crate::gui::pane::graph_ui::{canvas, wid};
 
         const NODE: &str = "Auto Stretch";
@@ -1454,31 +1455,27 @@ mod tests {
         counted
             .app
             .open_document_at(PathBuf::from("sample/sample.darkroom"));
-        ui.ui_mut().request_repaint();
-        for _ in 0..4 {
-            ui.frame_app(&mut counted);
-        }
-        let selected =
-            |counted: &CountedPasses| counted.app.session.open.document().main_view.selected.len();
-        let node = counted
-            .app
-            .session
-            .open
-            .document()
+        let document = counted.app.session.open.document_mut();
+        let node = document
             .graphs
             .main()
             .iter()
             .find(|node| node.name == NODE)
             .expect("the sample holds the node")
             .node_id;
-        let moved_from = counted
-            .app
-            .session
-            .open
-            .document()
-            .main_view
-            .node_placements[&node]
-            .pos;
+        let moved_from = document.main_view.node_placements[&node].pos;
+        // The camera at zoom 1 with the node in view, whatever the sample was saved at, so a drag
+        // moves the node by the pixels it travels.
+        document.main_view.viewport = Viewport {
+            pan: Vec2::splat(200.0) - moved_from,
+            zoom: 1.0,
+        };
+        ui.ui_mut().request_repaint();
+        for _ in 0..4 {
+            ui.frame_app(&mut counted);
+        }
+        let selected =
+            |counted: &CountedPasses| counted.app.session.open.document().main_view.selected.len();
         let body = wid::body(GraphId::Main, node);
         // The click's release frame, past the press frame the harness runs before it.
         let click = |ui: &mut Harness, counted: &mut CountedPasses, at: Locator, button| {

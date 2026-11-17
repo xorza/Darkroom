@@ -115,10 +115,11 @@ async fn a_fired_event_does_not_reinitialize_the_event_sources() {
     }
     let counter = subscriber_calls.clone();
     graph.add("subscriber", move |node| {
-        node.lambda(async_lambda!(move |_| { counter = counter.clone() } => {
-            counter.bump();
-            Ok(())
-        }))
+        node.sink()
+            .lambda(async_lambda!(move |_| { counter = counter.clone() } => {
+                counter.bump();
+                Ok(())
+            }))
     });
     graph.subscribe("source_a", 0, "subscriber");
     graph.subscribe("source_b", 0, "subscriber");

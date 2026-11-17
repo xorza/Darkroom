@@ -77,6 +77,7 @@ fn plain_func() -> Func {
         FuncId::literal("1ed07f16-02ed-4fb2-9677-5aa67801c7ae"),
         "plain",
     )
+    .sink()
     .input(1, InputDecl::optional("a", DataType::Int))
     .input(2, InputDecl::optional("b", DataType::Int))
     .input(3, InputDecl::optional("c", DataType::Int))
@@ -157,8 +158,8 @@ impl DocumentFixture {
         node_id
     }
 
-    /// A node of the fixture's plain func, which the library then holds: three optional `Int`
-    /// inputs, one `Int` output and one event.
+    /// A node of the fixture's plain func, which the library then holds: a sink, so it hears on
+    /// its pin, with three optional `Int` inputs, one `Int` output and one event.
     pub(crate) fn plain_node(&mut self) -> Node {
         let func = plain_func();
         if self.library.by_id(func.id()).is_none() {

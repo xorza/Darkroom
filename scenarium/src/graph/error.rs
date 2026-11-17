@@ -113,9 +113,11 @@ pub enum SubscriptionRejection {
     SelfSubscription,
     #[error("a boundary node has no pin: the `Outputs` node hears on its triggers")]
     BoundarySubscriber,
-    /// On an instance's pin, its interface declares no trigger; on an `Outputs` node's trigger,
-    /// its interface declares no such event.
-    #[error("the listener does not hear that trigger")]
+    #[error(
+        "the subscriber hears on no pin: its func is no sink, or its interface declares no trigger"
+    )]
+    PinlessSubscriber,
+    #[error("the `Outputs` node does not hear that trigger")]
     UndeclaredTrigger,
 }
 

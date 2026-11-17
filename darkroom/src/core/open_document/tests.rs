@@ -696,6 +696,7 @@ fn wiring_the_library_refuses_is_removed_at_load() {
     let dir = TempDir::new("darkroom-open-document-declaration");
     let path = dir.join("wired.darkroom");
     let probe = internals::stub_func(FuncId::unique(), "probe")
+        .sink()
         .input(1, InputDecl::optional("a", DataType::Int))
         .output(1, OutputDecl::new("out", DataType::Int))
         .event(1, "tick", internals::stub_event())

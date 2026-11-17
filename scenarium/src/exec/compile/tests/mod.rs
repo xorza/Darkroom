@@ -403,6 +403,7 @@ fn a_port_lands_at_its_declared_position_whatever_its_number() {
     use crate::graph::ports::{InputDecl, OutputDecl};
 
     let swapped = internals::stub_func(FuncId::unique(), "swapped")
+        .sink()
         .input(2, InputDecl::optional("first", DataType::Int))
         .input(1, InputDecl::optional("second", DataType::Int))
         .output(2, OutputDecl::new("first", DataType::Int))

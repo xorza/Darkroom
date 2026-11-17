@@ -22,8 +22,7 @@ struct EventPair {
 }
 
 /// `emit`: impure source with an output and one `tick` event, subscribed to
-/// by `recv`. `recv`: impure consumer bound to emit's output. Neither is a
-/// sink, so only event-driven execution reaches them.
+/// by `recv`, a sink that records emit's output.
 fn event_pair() -> EventPair {
     let calls = Calls::default();
     let mut g = TestGraph::new();

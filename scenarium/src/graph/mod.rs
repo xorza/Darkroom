@@ -655,8 +655,9 @@ impl Graph {
         }
     }
     /// Whether this graph may hold `subscription`: the emitter declares the event, and it lands
-    /// on another node: on the pin of one with a body to run or of an instance whose interface
-    /// declares a trigger, or on a trigger an `Outputs` node hears.
+    /// on another node: on the pin of one that hears on it
+    /// ([`NodeDecl::hears_pin`](crate::NodeDecl::hears_pin)), or on a trigger an `Outputs` node
+    /// hears.
     ///
     /// # Panics
     ///
@@ -674,14 +675,12 @@ impl Graph {
             .find(listener.node_id())
             .expect("an admitted subscription's listener is in the graph");
         match listener {
-            Listener::Pin(_) => match heard.kind {
-                NodeKind::Body { .. } => {}
-                NodeKind::Instance { .. } if heard.decl(scope).trigger().is_some() => {}
-                NodeKind::Instance { .. } => {
-                    return Err(SubscriptionRejection::UndeclaredTrigger);
-                }
-                NodeKind::Boundary(_) => return Err(SubscriptionRejection::BoundarySubscriber),
-            },
+            Listener::Pin(_) if matches!(heard.kind, NodeKind::Boundary(_)) => {
+                return Err(SubscriptionRejection::BoundarySubscriber);
+            }
+            Listener::Pin(_) if !heard.decl(scope).hears_pin() => {
+                return Err(SubscriptionRejection::PinlessSubscriber);
+            }
             Listener::Trigger(trigger)
                 if !heard
                     .decl(scope)
@@ -691,7 +690,7 @@ impl Graph {
             {
                 return Err(SubscriptionRejection::UndeclaredTrigger);
             }
-            Listener::Trigger(_) => {}
+            Listener::Pin(_) | Listener::Trigger(_) => {}
         }
         let emitter = self
             .find(event.node_id)
@@ -1348,9 +1347,10 @@ impl Graph {
                 } => {
                     self.subscriptions.remove(&subscription);
                     reconciled.repairs.push(match rejection {
-                        // An interface that loses the event or the trigger may regain it.
+                        // A declaration that loses the event, the trigger or its sink may regain it.
                         SubscriptionRejection::UndeclaredEvent
-                        | SubscriptionRejection::UndeclaredTrigger => {
+                        | SubscriptionRejection::UndeclaredTrigger
+                        | SubscriptionRejection::PinlessSubscriber => {
                             self.ghost_wiring
                                 .subscriptions
                                 .insert(subscription, GhostSubscription::default());

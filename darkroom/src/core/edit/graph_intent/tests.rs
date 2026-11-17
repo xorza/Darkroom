@@ -1898,18 +1898,22 @@ fn a_wire_onto_a_const_only_input_is_refused() {
     assert!(matches!(constant, Ok(Some(_))), "{constant:?}");
 }
 
-/// Every port an intent writes is held to the node's declaration: the probe declares input,
-/// output and event 1, so port 1 of each commits and port 2 is refused, on an existing node and
-/// on an insertion's seed alike. Clearing an undeclared input is not a write.
+/// Every port an intent writes is held to the node's declaration: the probe, a sink, declares
+/// input, output and event 1, so port 1 of each commits and port 2 is refused, on an existing node
+/// and on an insertion's seed alike; a func that is no sink has no pin to subscribe. Clearing an
+/// undeclared input is not a write.
 #[test]
 fn ports_the_declaration_lacks_are_refused() {
     let probe = internals::stub_func(FuncId::unique(), "probe")
+        .sink()
         .input(1, InputDecl::optional("a", DataType::Int))
         .output(1, OutputDecl::new("out", DataType::Int))
         .event(1, "tick", internals::stub_event())
         .build();
+    let mute = internals::stub_func(FuncId::unique(), "mute").build();
     let mut fixture = DocumentFixture::default();
     let (producer, consumer) = (fixture.add(&probe), fixture.add(&probe));
+    let deaf = fixture.add(&mute);
     let mut document = fixture.document;
     let library = &fixture.library;
     let constant = || Some(Binding::Const(ConstValue::from(1i64)));
@@ -1972,6 +1976,17 @@ fn ports_the_declaration_lacks_are_refused() {
             MalformedIntent::RejectedSubscription {
                 subscription: Subscription::new(EventPort::new(producer, PortId::new(2)), consumer),
                 rejection: SubscriptionRejection::UndeclaredEvent,
+            },
+        ),
+        (
+            "a subscription on a func that is no sink",
+            GraphIntent::SetSubscription {
+                subscription: Subscription::new(EventPort::new(producer, PortId::new(1)), deaf),
+                to: true,
+            },
+            MalformedIntent::RejectedSubscription {
+                subscription: Subscription::new(EventPort::new(producer, PortId::new(1)), deaf),
+                rejection: SubscriptionRejection::PinlessSubscriber,
             },
         ),
     ];
