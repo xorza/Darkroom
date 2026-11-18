@@ -17,6 +17,14 @@ pub struct TempDir(PathBuf);
 impl TempDir {
     /// A fresh empty directory in `parent`. `tag` names what it is for, so a directory a killed
     /// process left says what it was.
+    ///
+    /// # Panics
+    ///
+    /// When `tag` holds a character outside POSIX's portable file-name characters, `A`–`Z`,
+    /// `a`–`z`, `0`–`9`, `.`, `_` and `-`
+    /// ([POSIX.1-2017 §3.282](https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap03.html#tag_03_282)),
+    /// so a tag fails on every system or on none: Windows refuses `:`, `<`, `>`, `"`, `|`, `?` and
+    /// `*` in a name where Unix takes them.
     pub fn create_in(parent: &Path, tag: &str) -> io::Result<Self> {
         create_first_free(iter::repeat_with(|| candidate(parent, tag))).map(Self)
     }
@@ -41,8 +49,17 @@ impl Drop for TempDir {
 /// The next name in `parent` for `tag`: the process id separates processes, and the counter the
 /// names one process asks for. [`TempDir`] and the test `TempFile` share it, so the two cannot
 /// pick one name.
+///
+/// # Panics
+///
+/// When `tag` holds a character [`TempDir::create_in`] refuses.
 pub(crate) fn candidate(parent: &Path, tag: &str) -> PathBuf {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
+    assert!(
+        tag.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-')),
+        "a temp tag holds portable file-name characters alone: {tag:?}"
+    );
     let sequence = COUNTER.fetch_add(1, Ordering::Relaxed);
     parent.join(format!("darkroom-{tag}-{}-{sequence}", process::id()))
 }
@@ -130,5 +147,20 @@ mod tests {
             free
         );
         assert!(common_fs::is_dir(&free));
+    }
+
+    /// A tag in the portable file-name characters names a directory on every system, and one with
+    /// a character Windows refuses fails on every system, here as on Windows.
+    #[test]
+    fn a_tag_takes_portable_file_name_characters_alone() {
+        let parent = TempDir::new("portable");
+        let dir = TempDir::create_in(parent.path(), "Az09._-").unwrap();
+        let name = dir.path().file_name().unwrap().to_string_lossy();
+        assert!(name.starts_with("darkroom-Az09._--"), "{name}");
+        for tag in ["mode-CacheMode { ram: Auto }", "a:b", "a/b", "a b", "é"] {
+            let refused =
+                std::panic::catch_unwind(|| TempDir::create_in(parent.path(), tag)).is_err();
+            assert!(refused, "{tag:?}");
+        }
     }
 }

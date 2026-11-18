@@ -88,7 +88,7 @@ async fn both_value_stays_resident_outside_the_active_frontier() {
 /// four modes' *distinct* outcomes on the axes they differ on: cross-run
 /// reuse, RAM retention after the run, and disk persistence.
 async fn assert_mode_behavior(mode: CacheMode) {
-    let dir = TempDir::new(&format!("mode-{mode:?}"));
+    let dir = TempDir::new(&format!("mode-{:?}-disk-{}", mode.ram, mode.disk));
     let calls = Calls::default();
 
     let mut e = TestEngine::over(source_mult_print(mode, 1, &calls)).with_disk_store(dir.path());
@@ -251,7 +251,7 @@ async fn disabling_ram_retention_releases_resident_value_on_install() {
             disk: true,
         },
     ] {
-        let dir = TempDir::new(&format!("ram-downgrade-{mode:?}"));
+        let dir = TempDir::new(&format!("ram-downgrade-{:?}-disk-{}", mode.ram, mode.disk));
         let mut g = TestGraph::new();
         g.add("mult", |n| n.mult().cache(CacheMode::ALWAYS));
         g.add("print", NodeSpec::records);
