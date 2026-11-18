@@ -249,7 +249,7 @@ fn a_file_feeds_an_input_whose_kind_holds_its_own() {
 
 /// What the library cannot tell about a type it does not register: a constant of an unknown
 /// enum is kept unchecked, while a registered enum's constant must name a variant; each kind
-/// shows as "unknown type".
+/// shows as "Unknown Type".
 #[test]
 fn a_type_the_library_lacks_is_kept_and_shown_as_unknown() {
     let (known, unknown) = (EnumId::unique(), EnumId::unique());
@@ -274,10 +274,19 @@ fn a_type_the_library_lacks_is_kept_and_shown_as_unknown() {
             mode: FileMode::Open,
         },
     ] {
-        assert_eq!(library.type_name(unknown_type), "unknown type");
+        assert_eq!(library.type_name(unknown_type), "Unknown Type");
         assert!(!library.knows(unknown_type));
     }
-    assert_eq!(library.type_name(DataType::Dir), "directory");
+    for (data_type, name) in [
+        (DataType::Any, "Any"),
+        (DataType::Float, "Float"),
+        (DataType::Int, "Integer"),
+        (DataType::Bool, "Boolean"),
+        (DataType::String, "String"),
+        (DataType::Dir, "Directory"),
+    ] {
+        assert_eq!(library.type_name(data_type), name);
+    }
     assert!(library.knows(DataType::Dir));
 }
 

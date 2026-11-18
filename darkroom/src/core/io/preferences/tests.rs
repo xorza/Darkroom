@@ -61,9 +61,10 @@ fn preferences_roundtrip() {
             bg: ViewerBg::Checker,
             mag_filter: ImageFilter::Linear,
         },
+        // One model set and one unset, so both shapes round-trip.
         ml_models: MlModelPaths {
-            denoise: PathBuf::from("/models/d.onnx"),
-            star_removal: PathBuf::from("/models/s.onnx"),
+            denoise: Some(PathBuf::from("/models/d.onnx")),
+            star_removal: None,
         },
         library_folder: Some(PathBuf::from("/library")),
     };
@@ -151,7 +152,7 @@ fn every_field_but_the_window_is_a_choice() {
                 .expect("more than one size is offered");
         },
         |p| p.viewer.bg = ViewerBg::Black,
-        |p| p.ml_models.denoise = PathBuf::from("b.onnx"),
+        |p| p.ml_models.denoise = Some(PathBuf::from("b.onnx")),
     ];
     for (idx, edit) in edits.into_iter().enumerate() {
         let mut edited = base.clone();
@@ -178,7 +179,14 @@ fn default_preferences() {
     assert_eq!(defaults.window, None);
     assert_eq!(defaults.viewer.bg, ViewerBg::Theme);
     assert_eq!(defaults.viewer.mag_filter, ImageFilter::Nearest);
-    assert_eq!(defaults.ml_models, MlModelPaths::default());
+    assert_eq!(
+        defaults.ml_models,
+        MlModelPaths {
+            denoise: None,
+            star_removal: None,
+        },
+        "no model is set until a person picks one"
+    );
     assert!(
         defaults.relative_paths,
         "paths inside the folder save relative"

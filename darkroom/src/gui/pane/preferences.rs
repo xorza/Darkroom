@@ -8,6 +8,7 @@
 //! The "Browse…" buttons raise [`AppCommand::PickMlModel`] so `App` can open the blocking dialog
 //! after authoring has released its borrows.
 
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 use common::{ErrorChain, fs, process};
@@ -206,8 +207,8 @@ impl PreferencesForm<'_> {
     }
 
     /// One model-path row: a label, an editable path field (Enter or click-away commits, Escape
-    /// drops), a "Browse…" button, and beneath the field an error line when the committed path is
-    /// broken, then a download hint.
+    /// drops, a blank commit unsets the model), a "Browse…" button, and beneath the field an error
+    /// line when the committed path is broken, then a download hint.
     ///
     /// Writes the path `kind` names in `paths` in place and queues
     /// [`AppCommand::PickMlModel`] when Browse is clicked.
@@ -226,12 +227,15 @@ impl PreferencesForm<'_> {
         // only when the stored path changes and on a commit, never per frame.
         ui.with_state::<PathField, _>(wid, |ui, field| {
             if field.checked != *path {
-                field.check(path);
+                field.check(path.as_deref());
             }
             let problem = field.problem;
             self.label(ui, name, at);
             // Borrowed for a UTF-8 path, every path that round-trips through this field.
-            let mut edit = TextEdit::buffered(path.to_string_lossy())
+            let shown = path
+                .as_deref()
+                .map_or(Cow::Borrowed(""), Path::to_string_lossy);
+            let mut edit = TextEdit::buffered(shown)
                 .id(wid)
                 .grid_cell((at, 1))
                 .align(VAlign::Center)
@@ -244,13 +248,13 @@ impl PreferencesForm<'_> {
             }
             let response = edit.show(ui);
             if let Some(text) = response.committed_text {
-                *path = PathBuf::from(text);
+                *path = committed_path(text);
             }
             if response.committed {
                 // Re-stat on every commit — even an unchanged path: the file may have appeared
                 // (or vanished) since the last check, and Enter is the natural retry. The stored
                 // path, not the text, which is lossy for a name that is not UTF-8.
-                field.check(path);
+                field.check(path.as_deref());
             }
 
             if Button::new()
@@ -371,12 +375,15 @@ struct ModelRow {
 /// Floor of an ML-path field, which fills the leftover column width.
 const ML_PATH_FIELD_MIN: f32 = 280.0;
 
-/// What's wrong with a committed model path, or `None` when it's empty (the ML nodes are
-/// optional) or healthy. Stats the filesystem, so never call it per frame.
+/// The model a commit of `text` sets: none for a blank text, as scenarium reads a blank path as
+/// unset, else the path as typed, never trimmed, as a file name may start or end in a space.
+fn committed_path(text: String) -> Option<PathBuf> {
+    (!text.trim().is_empty()).then(|| PathBuf::from(text))
+}
+
+/// What's wrong with a set model path, or `None` when it's healthy. Stats the filesystem, so never
+/// call it per frame.
 fn path_problem(p: &Path) -> Option<&'static str> {
-    if p.as_os_str().is_empty() {
-        return None;
-    }
     if fs::is_dir(p) {
         return Some("Points at a folder \u{2014} pick the .onnx file inside");
     }
@@ -393,17 +400,17 @@ fn path_problem(p: &Path) -> Option<&'static str> {
 /// last change of the stored path or the last commit found it.
 #[derive(Default, Debug)]
 struct PathField {
-    /// The path [`Self::problem`] was found for.
-    checked: PathBuf,
+    /// The path [`Self::problem`] was found for, `None` for an unset model.
+    checked: Option<PathBuf>,
+    /// Nothing for an unset model: the ML nodes are optional.
     problem: Option<&'static str>,
 }
 
 impl PathField {
-    /// Stat `path` and keep what is wrong with it.
-    fn check(&mut self, path: &Path) {
-        self.problem = path_problem(path);
-        self.checked.clear();
-        self.checked.push(path);
+    /// Stat `path`, when one is set, and keep what is wrong with it.
+    fn check(&mut self, path: Option<&Path>) {
+        self.problem = path.and_then(path_problem);
+        self.checked = path.map(Path::to_path_buf);
     }
 }
 
@@ -458,15 +465,13 @@ fn download_hint(ui: &mut Ui, theme: &Theme, row: ModelRow) {
 mod tests {
     use super::*;
     use glam::UVec2;
-    use palantir::Key;
+    use palantir::{Key, Modifiers};
 
     use common::{TempDir, TempFile, internals};
     use palantir::Harness;
 
     #[test]
-    fn path_problem_classifies_empty_missing_dir_and_extension() {
-        // Empty is the valid resting state (the ML nodes are optional).
-        assert_eq!(path_problem(Path::new("")), None);
+    fn path_problem_classifies_missing_dir_and_extension() {
         // A directory is distinguished from a truly absent path — pointing
         // at the unzipped folder is the mistake the download hint warns of.
         let dir = TempDir::new("darkroom-path-dir");
@@ -498,7 +503,8 @@ mod tests {
     }
 
     /// Escape in a path field drops the draft: the path and the field go back to the committed
-    /// value and nothing is queued. Enter writes the typed path and queues one change.
+    /// value and nothing is queued. Enter writes the typed path and queues one change, and the
+    /// missing file it names shows its problem; a blank commit unsets the model, which has none.
     #[test]
     fn escape_restores_the_path_and_enter_commits_it() {
         let theme = Theme::default();
@@ -510,8 +516,9 @@ mod tests {
             download_url: "https://example.invalid",
         };
         let wid = path_field_wid(row.label);
+        let committed = Some(PathBuf::from("/a.onnx"));
         let mut paths = MlModelPaths {
-            denoise: PathBuf::from("/a.onnx"),
+            denoise: committed.clone(),
             ..MlModelPaths::default()
         };
         let mut h = Harness::builder(UVec2::new(800, 200)).mono().build();
@@ -536,8 +543,8 @@ mod tests {
             h.key(Key::Char('x'));
             frame(h, paths);
             assert_eq!(
-                paths.denoise,
-                PathBuf::from("/a.onnx"),
+                paths.denoise.as_deref(),
+                Some(Path::new("/a.onnx")),
                 "typing writes nothing"
             );
         };
@@ -548,24 +555,36 @@ mod tests {
         for _ in 0..3 {
             frame(&mut h, &mut paths);
         }
-        assert_eq!(
-            paths.denoise,
-            PathBuf::from("/a.onnx"),
-            "Escape must not write the draft"
-        );
+        assert_eq!(paths.denoise, committed, "Escape must not write the draft");
 
         type_x(&mut h, &mut frame, &mut paths);
         h.key(Key::Enter);
         frame(&mut h, &mut paths);
         assert_eq!(
-            paths.denoise,
-            PathBuf::from("/a.onnxx"),
+            paths.denoise.as_deref(),
+            Some(Path::new("/a.onnxx")),
             "Enter writes the draft"
         );
         assert_eq!(
-            paths.star_removal,
-            MlModelPaths::default().star_removal,
+            paths.star_removal, None,
             "the row writes only the path its kind names"
         );
+        let problem = |h: &Harness| {
+            h.ui()
+                .state::<PathField>(wid)
+                .and_then(|field| field.problem)
+        };
+        assert_eq!(problem(&h), Some("File not found"));
+
+        // Spaces alone are blank: the commit unsets the model.
+        h.hold_modifiers(Modifiers::CTRL);
+        h.key(Key::Char('a'));
+        h.hold_modifiers(Modifiers::NONE);
+        frame(&mut h, &mut paths);
+        h.type_text("  ");
+        h.key(Key::Enter);
+        frame(&mut h, &mut paths);
+        assert_eq!(paths.denoise, None, "a blank commit unsets the model");
+        assert_eq!(problem(&h), None, "an unset model has no problem");
     }
 }

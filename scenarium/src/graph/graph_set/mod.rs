@@ -558,7 +558,7 @@ impl GraphSet {
     }
 
     /// The name `data_type` shows: the library's, else the one a file gave it
-    /// ([`TypeNames`]), else "unknown type".
+    /// ([`TypeNames`]), else "Unknown Type".
     pub fn type_name<'a>(&'a self, library: &'a Library, data_type: DataType) -> &'a str {
         match TypeRef::of(data_type) {
             None => library.type_name(data_type),

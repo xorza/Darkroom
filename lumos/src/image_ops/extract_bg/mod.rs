@@ -36,7 +36,10 @@ use common::USize2;
 /// `type_id` is this enum's identity to an introspecting consumer; that
 /// consumer stores it, so it is fixed for the life of the type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, IntrospectEnum)]
-#[config(type_id = "ed416b2d-378b-4eb1-9029-bc7a80a509aa")]
+#[config(
+    type_id = "ed416b2d-378b-4eb1-9029-bc7a80a509aa",
+    name = "Background Mode"
+)]
 pub enum BgMode {
     /// `out = in − (model − mean(model))`. For **additive** gradients (light pollution, sky/moon
     /// glow) — the usual choice. Removes the variation and keeps the sky level. Adds no noise (a
@@ -51,7 +54,10 @@ pub enum BgMode {
 /// data: the output background sits at each channel's mean sky level (`Subtract`) or keeps it
 /// (`Divide`), with the gradient gone.
 #[derive(Debug, Clone, Introspect)]
-#[config(type_id = "47a71876-5db9-45f9-a21d-cc2ce40a80f2")]
+#[config(
+    type_id = "47a71876-5db9-45f9-a21d-cc2ce40a80f2",
+    name = "Extract Background"
+)]
 pub struct ExtractBg {
     /// Sample-tile size in px. Each tile yields one robust sky sample. Larger → smoother, less able
     /// to absorb extended real signal; should be far larger than stars and smaller than the

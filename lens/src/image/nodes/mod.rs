@@ -21,11 +21,11 @@ pub fn image_library() -> Library {
     io::register(&mut library);
     processing::register(&mut library);
     library.register_custom_type(IMAGE_TYPE_ID, image_type());
-    library.register_enum(BLENDMODE_TYPE_ID, EnumType::of::<BlendMode>("BlendMode"));
+    library.register_enum(BLENDMODE_TYPE_ID, EnumType::of::<BlendMode>("Blend Mode"));
     library.register_enum(CLAMP_TYPE_ID, EnumType::of::<Clamp>("Clamp"));
     library.register_enum(
         CONVERSION_FORMAT_TYPE_ID,
-        EnumType::of::<ConversionFormat>("ConversionFormat"),
+        EnumType::of::<ConversionFormat>("Conversion Format"),
     );
     library
 }

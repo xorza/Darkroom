@@ -22,12 +22,12 @@ const STAR_REMOVAL_FUNC_ID: FuncId = FuncId::literal("60c31a76-eed4-467c-9ba3-5c
 const ONNX_MODEL_FILE: FileKindId = FileKindId::literal("5bea0866-9834-4ddd-be25-4c4c5fe6d3c5");
 
 pub(crate) fn register(library: &mut Library, model_paths: &MlModelPaths) {
-    library.register_file_kind(ONNX_MODEL_FILE, FileKind::new("ONNX model", ["onnx"]));
-    register_denoise(library, &model_paths.denoise);
-    register_star_removal(library, &model_paths.star_removal);
+    library.register_file_kind(ONNX_MODEL_FILE, FileKind::new("ONNX Model", ["onnx"]));
+    register_denoise(library, model_paths.denoise.as_deref());
+    register_star_removal(library, model_paths.star_removal.as_deref());
 }
 
-fn register_denoise(library: &mut Library, model_path: &Path) {
+fn register_denoise(library: &mut Library, model_path: Option<&Path>) {
     library.add(
         Func::builder(
             DENOISE_FUNC_ID,
@@ -62,7 +62,7 @@ fn register_denoise(library: &mut Library, model_path: &Path) {
     );
 }
 
-fn register_star_removal(library: &mut Library, model_path: &Path) {
+fn register_star_removal(library: &mut Library, model_path: Option<&Path>) {
     library.add(
         Func::builder(
             STAR_REMOVAL_FUNC_ID,
@@ -119,16 +119,21 @@ fn register_star_removal(library: &mut Library, model_path: &Path) {
     );
 }
 
-fn model_input(name: &str, default: &Path) -> InputDecl {
-    InputDecl::required(
+/// The `Model` input, which a new node fills with `default`, the model set in the preferences;
+/// with none set, it starts at the type's empty path, which its pick button fills.
+fn model_input(name: &str, default: Option<&Path>) -> InputDecl {
+    let input = InputDecl::required(
         name,
         DataType::File {
             kind: ONNX_MODEL_FILE,
             mode: FileMode::Open,
         },
     )
-    .description("ONNX model file. Its file identity participates in the node cache key.")
-    .default(ConstValue::FsPath(default.display().to_string()))
+    .description("ONNX model file. Its file identity participates in the node cache key.");
+    match default {
+        Some(path) => input.default(ConstValue::FsPath(path.display().to_string())),
+        None => input,
+    }
 }
 
 /// A model's failure as the node reports it: a cancel as the run's own, so the executor reads the

@@ -35,7 +35,7 @@ pub(super) const fn astro_raw_paths_type() -> DataType {
 pub(crate) fn register(library: &mut Library) {
     library.register_file_kind(
         ASTRO_IMAGE_FILE,
-        FileKind::new("Astro image", PREVIEW_IMAGE_EXTENSIONS.iter().copied()),
+        FileKind::new("Astro Image", PREVIEW_IMAGE_EXTENSIONS.iter().copied()),
     );
     library.register_file_kind(
         RAW_FILE,

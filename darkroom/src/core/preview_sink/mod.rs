@@ -61,7 +61,7 @@ pub(crate) fn register(library: &mut Library, sink: Arc<PreviewSink>) {
     library.add(func(sink));
     library.register_enum(
         DISPLAY_STRETCH_TYPE_ID,
-        EnumType::of::<DisplayStretch>("DisplayStretch"),
+        EnumType::of::<DisplayStretch>("Display Stretch"),
     );
 }
 

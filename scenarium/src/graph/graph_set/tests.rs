@@ -784,9 +784,9 @@ fn a_file_names_the_types_its_ports_name_and_a_load_without_them_keeps_the_names
     );
     assert_eq!(
         loaded.type_name(&without, DataType::Custom(nameless)),
-        "unknown type"
+        "Unknown Type"
     );
-    assert_eq!(loaded.type_name(&without, DataType::Int), "int");
+    assert_eq!(loaded.type_name(&without, DataType::Int), "Integer");
     assert_eq!(
         names(&loaded.manifest(&without)),
         expected,

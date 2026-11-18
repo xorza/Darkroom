@@ -20,8 +20,8 @@ fn type_label_names_a_path_by_its_kind_and_any_other_type_as_the_library_does() 
         }
         .to_string()
     };
-    assert_eq!(label(DataType::Any), "any");
-    assert_eq!(label(DataType::Float), "float");
+    assert_eq!(label(DataType::Any), "Any");
+    assert_eq!(label(DataType::Float), "Float");
     assert_eq!(
         label(DataType::File {
             kind: image,

@@ -72,7 +72,7 @@ impl PathType {
     }
 }
 
-/// A path type as a tooltip names it, rendered on demand: `directory`, or the kind's name, how
+/// A path type as a tooltip names it, rendered on demand: `Directory`, or the kind's name, how
 /// the port takes it and the extensions its dialog lists, as `Image · file (png, tif)`.
 #[derive(Debug)]
 pub(crate) struct PathLabel<'a> {
@@ -84,7 +84,7 @@ pub(crate) struct PathLabel<'a> {
 impl Display for PathLabel<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let PathType::File { kind, mode } = self.path_type else {
-            return f.write_str("directory");
+            return f.write_str(self.library.type_name(DataType::Dir));
         };
         let how = match mode {
             FileMode::Open => "file",
@@ -167,7 +167,7 @@ mod tests {
                 .to_string()
         };
         let file = |kind, mode| DataType::File { kind, mode };
-        assert_eq!(label(DataType::Dir), "directory");
+        assert_eq!(label(DataType::Dir), "Directory");
         assert_eq!(
             label(file(image, FileMode::OpenMany)),
             "Image · files (fit, fits, raf)"
@@ -175,7 +175,7 @@ mod tests {
         assert_eq!(label(file(any, FileMode::Open)), "File · file");
         assert_eq!(
             label(file(unknown, FileMode::Save)),
-            "unknown type · save path"
+            "Unknown Type · save path"
         );
     }
 }

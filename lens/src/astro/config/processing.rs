@@ -47,7 +47,10 @@ impl Preset for ScnrProtection {
 /// carries its own parameter set, which one flat knob list cannot present
 /// without showing every other method's parameters alongside it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, IntrospectEnum)]
-#[config(type_id = "722f7047-a6fc-4538-abd7-8af5fd1ee0ff")]
+#[config(
+    type_id = "722f7047-a6fc-4538-abd7-8af5fd1ee0ff",
+    name = "Stretch Method"
+)]
 pub(crate) enum StretchMethodChoice {
     AutoAsinh,
     #[config(label = "Auto STF")]

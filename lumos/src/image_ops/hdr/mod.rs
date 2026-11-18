@@ -34,7 +34,7 @@ const LOG_FLOOR: f32 = 1.0 / 65536.0;
 /// Computed on the combined intensity; color channels are rescaled hue-preservingly. Mono gets
 /// the compressed intensity directly.
 #[derive(Debug, Clone, Copy, Introspect)]
-#[config(type_id = "36babf1d-0fda-4d5d-b4c6-ed4c13ebff6b")]
+#[config(type_id = "36babf1d-0fda-4d5d-b4c6-ed4c13ebff6b", name = "HDR")]
 pub struct Hdr {
     /// Number of wavelet scales. Structures coarser than ~`2^scales` px live in the residual and
     /// get compressed; finer detail is preserved. *More* scales → only the very largest structures

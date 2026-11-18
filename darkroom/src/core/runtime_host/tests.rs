@@ -85,8 +85,8 @@ fn ml_defaults_follow_preferences_and_the_cache_root_follows_the_document() {
     let denoise_path = model("host-denoise.onnx");
     let star_removal_path = model("host-stars.onnx");
     let mut ml_models = MlModelPaths {
-        denoise: denoise_path.as_str().into(),
-        star_removal: star_removal_path.as_str().into(),
+        denoise: Some(denoise_path.as_str().into()),
+        star_removal: Some(star_removal_path.as_str().into()),
     };
     let mut host = RuntimeHost::new(
         wake::internals::noop(),
@@ -107,8 +107,8 @@ fn ml_defaults_follow_preferences_and_the_cache_root_follows_the_document() {
     // A later preferences edit republishes the library with the new paths.
     let updated_denoise_path = model("updated-denoise.onnx");
     let updated_star_removal_path = model("updated-stars.onnx");
-    ml_models.denoise = updated_denoise_path.as_str().into();
-    ml_models.star_removal = updated_star_removal_path.as_str().into();
+    ml_models.denoise = Some(updated_denoise_path.as_str().into());
+    ml_models.star_removal = Some(updated_star_removal_path.as_str().into());
     host.set_ml_model_paths(&ml_models);
     assert_eq!(
         ml_model_default(&host, "ML Denoise"),

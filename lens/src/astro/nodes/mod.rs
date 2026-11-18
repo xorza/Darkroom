@@ -14,22 +14,14 @@ use scenarium::{CustomType, Library};
 use crate::astro::config;
 use crate::astro::masters::MASTERS_TYPE_ID;
 
-/// The ONNX files the ML nodes load. Serializable so a frontend can persist
-/// it as it stands; a missing field reads as its default.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+/// The ONNX files the ML nodes load, each unset until a person picks one: lumos ships no model,
+/// and a bare file name would resolve against a working directory nobody chose. Serializable so a
+/// frontend can persist it as it stands; a missing field reads as unset.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct MlModelPaths {
-    pub denoise: PathBuf,
-    pub star_removal: PathBuf,
-}
-
-impl Default for MlModelPaths {
-    fn default() -> Self {
-        Self {
-            denoise: PathBuf::from("DeepSNR_weights_v2.onnx"),
-            star_removal: PathBuf::from("StarNet2_weights.onnx"),
-        }
-    }
+    pub denoise: Option<PathBuf>,
+    pub star_removal: Option<PathBuf>,
 }
 
 pub fn astro_library(model_paths: &MlModelPaths) -> Library {

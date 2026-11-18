@@ -310,7 +310,8 @@ pub struct FieldDesc {
 
 /// A struct whose fields can be described and rebuilt generically. Derive with
 /// `#[derive(Introspect)]` and a stable `#[config(type_id = "…")]` UUID, plus an
-/// optional `name = "…"` for the display name (the type's own name otherwise).
+/// optional `name = "…"` for the display name (the type's own name in words otherwise,
+/// `LocalContrast` → `Local Contrast`).
 ///
 /// [`Self::TYPE_ID`] is the built value's identity on the wire and on disk, so it
 /// may not change once a document has been saved with it.
@@ -328,8 +329,9 @@ pub trait Introspect: Default {
 
 /// A fieldless enum usable as an introspected field — a variant list plus a
 /// string round-trip. Derive with `#[derive(IntrospectEnum)]` and a stable
-/// `#[config(type_id = "…")]` UUID; the derive renders the variant names in
-/// `snake_case` itself, so the enum needs no other trait impl.
+/// `#[config(type_id = "…")]` UUID, plus an optional `name = "…"` for the display
+/// name (the type's own name in words otherwise); the derive renders the variant names
+/// in `snake_case` itself, so the enum needs no other trait impl.
 ///
 /// [`Self::TYPE_ID`] and the variant strings are the enum's identity on the
 /// wire and on disk: a consumer stores both. Neither may change once a

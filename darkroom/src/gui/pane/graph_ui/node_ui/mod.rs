@@ -260,3 +260,6 @@ const fn node_shadow(theme: &Theme, status: &ExecStatus) -> Shadow {
         None => theme.elevation.resting,
     }
 }
+
+#[cfg(test)]
+mod tests;

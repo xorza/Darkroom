@@ -44,6 +44,13 @@ enum Speed {
     VeryFast,
 }
 
+/// An enum whose name reads as another word than its type's.
+#[derive(Debug, Clone, Copy, PartialEq, IntrospectEnum)]
+#[config(type_id = "4b61b4d9-8cca-4d39-8b10-a08cdddab3d7", name = "Pace")]
+enum TempoChoice {
+    Steady,
+}
+
 /// The derive owns the variant strings, so this pins the rendering a consumer
 /// persists: `snake_case`, one word break per capital that starts a word. A
 /// change here is a change to what is already on disk.
@@ -51,6 +58,8 @@ enum Speed {
 fn derived_introspect_enum_renders_and_parses_its_own_variant_names() {
     assert_eq!(Speed::TYPE_ID, "3effbd19-d4a8-4a9b-a931-78fd0e4f8adb");
     assert_eq!(Speed::DISPLAY_NAME, "Speed");
+    assert_eq!(TempoChoice::DISPLAY_NAME, "Pace", "`name` sets it");
+    assert_eq!(TempoChoice::VARIANTS, ["steady"]);
     assert_eq!(Speed::VARIANTS, ["fast", "slow", "very_fast"]);
     // Labels are the variant's words title-cased unless the variant names its own.
     assert_eq!(Speed::LABELS, ["Fast", "Slow (safe)", "Very Fast"]);
@@ -160,8 +169,8 @@ fn fields_carry_labels_concrete_kinds_required_and_defaults() {
     );
     assert_eq!(
         OptionalDefaults::DISPLAY_NAME,
-        "OptionalDefaults",
-        "the type name otherwise"
+        "Optional Defaults",
+        "the type's name in words otherwise"
     );
     assert_eq!(Knobs::TYPE_ID, "ea74f1cf-8e8f-4940-a6b9-1cbf4ed60202");
     assert_eq!(

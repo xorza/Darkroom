@@ -1,6 +1,6 @@
 use syn::{DeriveInput, parse_quote};
 
-use crate::type_identity::{Derive, TypeIdentity};
+use crate::type_identity::{Derive, TypeIdentity, type_label};
 
 /// Each malformed type-level `#[config]` is refused with the message for
 /// its rule, naming the derive that read it; a well-formed one yields its id and name.
@@ -64,8 +64,33 @@ fn type_identity_refuses_each_malformed_attribute() {
         identity.type_id.value(),
         "3effbd19-d4a8-4a9b-a931-78fd0e4f8adb"
     );
+    assert_eq!(identity.name.value(), "Speed");
+    let unnamed: DeriveInput = parse_quote! {
+        #[config(type_id = "3effbd19-d4a8-4a9b-a931-78fd0e4f8adb")]
+        enum BlendMode { A }
+    };
+    let identity = TypeIdentity::parse(&unnamed, Derive::IntrospectEnum).unwrap();
     assert_eq!(
-        identity.name.map(|name| name.value()).as_deref(),
-        Some("Speed")
+        identity.name.value(),
+        "Blend Mode",
+        "the type's name in words"
     );
+}
+
+/// A type name splits into words at each capital that starts one: after a lower-case letter or a
+/// digit, and at the last capital of a run before a lower-case letter, so an acronym stays whole.
+#[test]
+fn type_label_splits_a_type_name_into_words() {
+    for (ident, label) in [
+        ("Mode", "Mode"),
+        ("BlendMode", "Blend Mode"),
+        ("CombineMethodChoice", "Combine Method Choice"),
+        ("HTTPServer", "HTTP Server"),
+        ("ServeHTTP", "Serve HTTP"),
+        ("Rgb2Hsv", "Rgb2 Hsv"),
+        ("Hdr", "Hdr"),
+        ("A", "A"),
+    ] {
+        assert_eq!(type_label(ident), label, "{ident}");
+    }
 }

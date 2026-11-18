@@ -840,9 +840,9 @@ fn kept_value(ui: &mut Ui, theme: &Theme, value: &ConstValue) {
 }
 
 /// Human-readable type for a port tooltip: a path's kind, mode and extensions
-/// ([`PathType::label`]), and the set's name for everything else ([`GraphSet::type_name`]: `any`
+/// ([`PathType::label`]), and the set's name for everything else ([`GraphSet::type_name`]: `Any`
 /// for the untyped boundary placeholder, a registered type's name, the name a file gave a type
-/// the library lacks, or "unknown type").
+/// the library lacks, or "Unknown Type").
 ///
 /// Renders on demand, as [`PortTooltip::intern`] feeds it straight to `fmt!`.
 #[derive(Debug)]

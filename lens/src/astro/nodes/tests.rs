@@ -35,7 +35,7 @@ fn the_astro_file_ports_name_their_registered_kinds() {
     assert_eq!(
         kind(astro_image_path_type()),
         (
-            "Astro image".to_owned(),
+            "Astro Image".to_owned(),
             extensions(PREVIEW_IMAGE_EXTENSIONS),
             FileMode::Open
         )
@@ -353,11 +353,19 @@ fn astro_nodes_are_registered_with_their_ports() {
     assert!(!stack.inputs()[5].required);
     assert_eq!(stack.inputs()[5].default_value, None);
 
-    for (name, model) in [
-        ("ML Denoise", "DeepSNR_weights_v2.onnx"),
-        ("ML Star Removal", "StarNet2_weights.onnx"),
-    ] {
-        let f = lib.by_name(name).unwrap();
+    // No model is set by default, so the model input declares no default; a set one is the
+    // default of its node alone.
+    let set = astro_library(&MlModelPaths {
+        denoise: Some("d.onnx".into()),
+        star_removal: None,
+    });
+    for (name, model) in [("ML Denoise", Some("d.onnx")), ("ML Star Removal", None)] {
+        assert_eq!(
+            lib.by_name(name).unwrap().inputs()[1].default_value,
+            None,
+            "{name}"
+        );
+        let f = set.by_name(name).unwrap();
         let DataType::File { kind, mode } = f.inputs()[1].data_type else {
             panic!("{name}: the model is a file path");
         };
@@ -369,7 +377,7 @@ fn astro_nodes_are_registered_with_their_ports() {
         );
         assert_eq!(
             f.inputs()[1].default_value,
-            Some(ConstValue::FsPath(model.to_owned())),
+            model.map(|model| ConstValue::FsPath(model.to_owned())),
             "{name}"
         );
     }

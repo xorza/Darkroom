@@ -13,7 +13,9 @@
 //! required, anything else → an enum (the type must impl
 //! `common::IntrospectEnum`). Field attribute `#[config(label = "…")]` overrides
 //! the auto label (the field name title-cased), and so does the same attribute
-//! on an enum variant (the variant's words title-cased). Enum derive requires a stable
+//! on an enum variant (the variant's words title-cased). A type's display name is the
+//! type's own name in words (`BlendMode` → `Blend Mode`), which `name` overrides on
+//! either derive. Enum derive requires a stable
 //! `#[config(type_id = "…")]` UUID, and owns the variant strings itself — no
 //! `Display`/`FromStr` and no derive crate beyond this one, so any crate that
 //! already depends on `common` can describe its own config types.
@@ -37,11 +39,10 @@ pub fn derive_introspect(input: TokenStream) -> TokenStream {
 
 fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     let ident = &input.ident;
-    let identity = TypeIdentity::parse(input, Derive::Introspect)?;
-    let type_id = identity.type_id;
-    let display_name = identity
-        .name
-        .unwrap_or_else(|| LitStr::new(&ident.to_string(), ident.span()));
+    let TypeIdentity {
+        type_id,
+        name: display_name,
+    } = TypeIdentity::parse(input, Derive::Introspect)?;
     let Data::Struct(data) = &input.data else {
         return Err(syn::Error::new_spanned(
             ident,
@@ -105,14 +106,10 @@ pub fn derive_introspect_enum(input: TokenStream) -> TokenStream {
 
 fn expand_enum(input: &DeriveInput) -> syn::Result<TokenStream> {
     let ident = &input.ident;
-    let identity = TypeIdentity::parse(input, Derive::IntrospectEnum)?;
-    if let Some(name) = identity.name {
-        return Err(syn::Error::new_spanned(
-            name,
-            "IntrospectEnum takes its display name from the type",
-        ));
-    }
-    let type_id = identity.type_id;
+    let TypeIdentity {
+        type_id,
+        name: display_name,
+    } = TypeIdentity::parse(input, Derive::IntrospectEnum)?;
     let Data::Enum(data) = &input.data else {
         return Err(syn::Error::new_spanned(
             ident,
@@ -139,7 +136,7 @@ fn expand_enum(input: &DeriveInput) -> syn::Result<TokenStream> {
     Ok(quote! {
         impl ::common::IntrospectEnum for #ident {
             const TYPE_ID: &'static str = #type_id;
-            const DISPLAY_NAME: &'static str = ::core::stringify!(#ident);
+            const DISPLAY_NAME: &'static str = #display_name;
             const VARIANTS: &'static [&'static str] = &[ #(#names),* ];
             const LABELS: &'static [&'static str] = &[ #(#labels),* ];
 

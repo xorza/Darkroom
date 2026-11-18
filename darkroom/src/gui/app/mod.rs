@@ -692,7 +692,7 @@ impl App {
 
     fn pick_ml_model(&mut self, kind: MlModelKind) {
         if let Some(path) = self.dialogs.existing_file(&["onnx"]) {
-            *kind.path_mut(&mut self.preferences.ml_models) = path;
+            *kind.path_mut(&mut self.preferences.ml_models) = Some(path);
         }
     }
 
@@ -1662,7 +1662,7 @@ mod tests {
 
         // A model path also reaches the library that a new node takes its default from.
         let model = dir.join("denoise.onnx");
-        app.preferences.ml_models.denoise.clone_from(&model);
+        app.preferences.ml_models.denoise = Some(model.clone());
         frame(&mut ui, &mut app);
         let denoise = app.runtime.library.cur().by_name("ML Denoise").unwrap();
         assert_eq!(

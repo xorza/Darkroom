@@ -35,7 +35,7 @@ use crate::graph::type_names::TypeRef;
 use crate::library::func_redirect::{FuncRedirect, MAX_REDIRECTS};
 
 /// The name a type shows when the library does not register it.
-pub(crate) const UNKNOWN_TYPE: &str = "unknown type";
+pub(crate) const UNKNOWN_TYPE: &str = "Unknown Type";
 
 /// The runtime registry every frontend resolves against: the [`Func`]s nodes instantiate, and the
 /// types their ports name, each kind in its own table under its own id type. Not a persistence
@@ -189,16 +189,17 @@ impl Library {
         self.enums.len() + self.custom_types.len() + self.file_kinds.len()
     }
 
-    /// A short human-readable name for `data_type`: the scalar keyword, `"directory"`, or a
-    /// registered type's name, which is "unknown type" for one the library does not register.
+    /// The name a person reads for `data_type`, in Title Case as every type name is: a built-in's
+    /// word, as Blender names its sockets (`Integer`, `Boolean`), or a registered type's name,
+    /// which is "Unknown Type" for one the library does not register.
     pub fn type_name(&self, data_type: DataType) -> &str {
         match data_type {
-            DataType::Any => "any",
-            DataType::Float => "float",
-            DataType::Int => "int",
-            DataType::Bool => "bool",
-            DataType::String => "string",
-            DataType::Dir => "directory",
+            DataType::Any => "Any",
+            DataType::Float => "Float",
+            DataType::Int => "Integer",
+            DataType::Bool => "Boolean",
+            DataType::String => "String",
+            DataType::Dir => "Directory",
             DataType::File { .. } | DataType::Custom(_) | DataType::Enum(_) => {
                 TypeRef::of(data_type)
                     .and_then(|type_ref| self.registered_name(type_ref))

@@ -24,12 +24,14 @@ impl fmt::Display for Derive {
 #[derive(Debug)]
 pub(super) struct TypeIdentity {
     pub(super) type_id: LitStr,
-    pub(super) name: Option<LitStr>,
+    /// The name a person reads: `name`, else the type's own name in words, as [`type_label`]
+    /// writes it.
+    pub(super) name: LitStr,
 }
 
 impl TypeIdentity {
     /// The type-level `#[config]` of `input`: a required canonical lowercase UUID `type_id`, and
-    /// an optional display `name`.
+    /// an optional display `name`, which overrides the one read off the type's name.
     pub(super) fn parse(input: &DeriveInput, derive: Derive) -> syn::Result<Self> {
         let mut type_id = None;
         let mut name = None;
@@ -72,8 +74,32 @@ impl TypeIdentity {
                 format!("{derive} requires `#[config(type_id = \"…\")]`"),
             )
         })?;
+        let name = name.unwrap_or_else(|| {
+            LitStr::new(&type_label(&input.ident.to_string()), input.ident.span())
+        });
         Ok(Self { type_id, name })
     }
+}
+
+/// A `PascalCase` type name as the Title Case words a person reads, as a variant's label is its
+/// name's words: a word starts at a capital after a lower-case letter or a digit, and at the last
+/// capital of a run followed by a lower-case letter, so an acronym stays whole (`HTTPServer` →
+/// `HTTP Server`). An acronym written as a word stays a word (`Hdr`); its type takes a `name`.
+fn type_label(ident: &str) -> String {
+    let chars: Vec<char> = ident.chars().collect();
+    let mut label = String::with_capacity(ident.len() + chars.len() / 2);
+    for (idx, &c) in chars.iter().enumerate() {
+        let starts_word = idx > 0 && c.is_uppercase() && {
+            let prev = chars[idx - 1];
+            let next_lower = chars.get(idx + 1).is_some_and(|next| next.is_lowercase());
+            prev.is_lowercase() || prev.is_ascii_digit() || (prev.is_uppercase() && next_lower)
+        };
+        if starts_word {
+            label.push(' ');
+        }
+        label.push(c);
+    }
+    label
 }
 
 #[cfg(test)]

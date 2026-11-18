@@ -171,7 +171,10 @@ impl From<RegistrationKnobs> for RegistrationConfig {
 /// method's parameters in its own shape, so the editor picks the method here
 /// and supplies the one shared parameter — `sigma` — as its own field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, IntrospectEnum)]
-#[config(type_id = "0ac16ec1-4a1e-48e9-aff5-17df1ff645bc")]
+#[config(
+    type_id = "0ac16ec1-4a1e-48e9-aff5-17df1ff645bc",
+    name = "Combine Method"
+)]
 pub(crate) enum CombineMethodChoice {
     SigmaClipped,
     Winsorized,
@@ -195,7 +198,7 @@ impl Preset for CombineMethodChoice {
 /// How much each light counts in the combine: lumos's [`Weighting`], less the
 /// manual weights a graph has no frame list to give.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, IntrospectEnum)]
-#[config(type_id = "a1f9be81-a6f8-44a6-b9c4-7a558e98d1df")]
+#[config(type_id = "a1f9be81-a6f8-44a6-b9c4-7a558e98d1df", name = "Weighting")]
 pub(crate) enum WeightingChoice {
     Noise,
     Equal,

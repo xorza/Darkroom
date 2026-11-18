@@ -18,7 +18,7 @@ use crate::image_ops::error::OpError;
 /// `type_id` is this config's identity to an introspecting consumer, which stores it, so it is
 /// fixed for the life of the type.
 #[derive(Debug, Clone, Copy, Introspect)]
-#[config(type_id = "cb80e688-a5ed-42fd-9087-6a9639a8b056")]
+#[config(type_id = "cb80e688-a5ed-42fd-9087-6a9639a8b056", name = "SCNR")]
 pub struct Scnr {
     pub protection: ScnrProtection,
     /// The blend toward the protection's full-strength green, in `[0, 1]`.
@@ -31,7 +31,10 @@ pub struct Scnr {
 /// `type_id` is this enum's identity to an introspecting consumer, which stores it, so it is
 /// fixed for the life of the type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, IntrospectEnum)]
-#[config(type_id = "662e2432-b685-4b5b-bf05-0041814dc908")]
+#[config(
+    type_id = "662e2432-b685-4b5b-bf05-0041814dc908",
+    name = "SCNR Protection"
+)]
 pub enum ScnrProtection {
     /// See [`Scnr::average_neutral`].
     AverageNeutral,

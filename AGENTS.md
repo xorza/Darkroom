@@ -227,6 +227,13 @@ One word, one meaning, in the workspace crates; the submodules keep their own.
   declare one name past its module, the narrower use takes a qualified one, as
   `imaginarium::AffineWarp` beside `lumos::Transform`; an error and its alias
   carry their domain, as `ExecError` and `ExecResult`.
+- **A data type a person reads is named in Title Case**, the built-ins `Integer` and `Boolean`,
+  as node names, port names and variant labels are, as Blender gives its labels MLA title case
+  ([commit](https://developer.blender.org/rB2917f550caa9e7a3724c7597bdeaec989a339138)) and names
+  its sockets `Integer` and `Boolean`; a derived type takes its identifier's words, and an
+  acronym written as a word (`Hdr`) its own `name`. A test over darkroom's composed library holds
+  every name to it. Refused: lower case, which turns `ONNX` and `RAW` into code words; `Int` and
+  `Bool`, programmer short forms.
 - **One channel is `mono`.** `luma` is the Rec. 709 weighted sum of encoded
   samples, and an RGB value with `R = G = B` a neutral. Refused: `L`, the PIL
   mode name; `gray` and `grey`, which the crates spelled both ways.

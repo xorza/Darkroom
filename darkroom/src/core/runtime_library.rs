@@ -50,7 +50,10 @@ impl RuntimeLibrary {
 fn compose(model_paths: &MlModelPaths, previews: &Arc<PreviewSink>) -> ScenariumLibrary {
     // A model path binds into each new node as its default, and a document holds absolute paths:
     // a relative one is taken against the working directory, where a run would have read it.
-    let absolute = |path: &PathBuf| path::absolute(path).unwrap_or_else(|_| path.clone());
+    let absolute = |path: &Option<PathBuf>| {
+        path.as_ref()
+            .map(|path| path::absolute(path).unwrap_or_else(|_| path.clone()))
+    };
     let model_paths = MlModelPaths {
         denoise: absolute(&model_paths.denoise),
         star_removal: absolute(&model_paths.star_removal),
@@ -74,7 +77,7 @@ mod tests {
     use std::sync::Arc;
 
     use lens::{MlModelPaths, astro_library, fs_watch_library, image_library, random_library};
-    use scenarium::{Library, math_library, system_library, worker_events_library};
+    use scenarium::{DataType, Library, math_library, system_library, worker_events_library};
 
     use crate::core::runtime_library::compose;
 
@@ -106,30 +109,80 @@ mod tests {
         );
     }
 
-    /// The default model paths are bare file names; each path default the library binds into a
-    /// new node is absolute, taken against the working directory, as a document holds its paths.
+    /// Every type name a person reads is Title Case: each word starts with a capital or a digit,
+    /// and none holds a lower-case letter before a capital, the mark of a Rust identifier. The
+    /// names checked are the built-ins', every custom and enum type's, and every file kind a port
+    /// takes. The failure lists each name that breaks the rule.
     #[test]
-    fn the_model_path_defaults_are_absolute() {
-        let paths = MlModelPaths::default();
-        assert!(paths.denoise.is_relative() && paths.star_removal.is_relative());
-        let library = compose(&paths, &Arc::default());
-        let mut defaults: Vec<PathBuf> = library
-            .iter()
-            .flat_map(|func| func.inputs().iter())
-            .filter_map(|input| {
-                input
-                    .default_value
-                    .as_ref()?
-                    .as_fs_path()
-                    .map(PathBuf::from)
+    fn every_type_name_is_title_case() {
+        let library = compose(&MlModelPaths::default(), &Arc::default());
+        let ports = library.iter().flat_map(|func| {
+            let inputs = func.inputs().iter().map(|input| input.data_type);
+            inputs.chain(func.outputs().iter().map(|output| output.data_type))
+        });
+        let mut names: Vec<&str> = [
+            DataType::Any,
+            DataType::Float,
+            DataType::Int,
+            DataType::Bool,
+            DataType::String,
+            DataType::Dir,
+        ]
+        .into_iter()
+        .chain(library.data_types())
+        .chain(ports)
+        .map(|data_type| library.type_name(data_type))
+        .collect();
+        names.sort_unstable();
+        names.dedup();
+        assert!(names.contains(&"Integer"), "{names:?}");
+        assert!(names.contains(&"Image"), "{names:?}");
+        let title_case = |name: &str| {
+            name.split(' ').all(|word| {
+                let starts = word
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_uppercase() || c.is_ascii_digit());
+                let hump = word
+                    .chars()
+                    .zip(word.chars().skip(1))
+                    .any(|(a, b)| a.is_lowercase() && b.is_uppercase());
+                starts && !hump
             })
-            .collect();
-        defaults.sort();
-        let mut expected = vec![
-            path::absolute(&paths.denoise).unwrap(),
-            path::absolute(&paths.star_removal).unwrap(),
-        ];
-        expected.sort();
-        assert_eq!(defaults, expected);
+        };
+        let broken: Vec<&str> = names.into_iter().filter(|name| !title_case(name)).collect();
+        assert_eq!(broken, Vec::<&str>::new());
+    }
+
+    /// No model is set by default, so no input of the library declares a path default: a new ML
+    /// node starts at the empty path its pick button fills. A model set by a relative path binds
+    /// into a new node absolute, taken against the working directory, as a document holds its
+    /// paths; one left unset still declares nothing.
+    #[test]
+    fn a_model_path_default_is_absolute_and_an_unset_one_is_none() {
+        let path_defaults = |paths: &MlModelPaths| -> Vec<PathBuf> {
+            let library = compose(paths, &Arc::default());
+            library
+                .iter()
+                .flat_map(|func| func.inputs().iter())
+                .filter_map(|input| {
+                    input
+                        .default_value
+                        .as_ref()?
+                        .as_fs_path()
+                        .map(PathBuf::from)
+                })
+                .collect()
+        };
+        assert_eq!(
+            path_defaults(&MlModelPaths::default()),
+            Vec::<PathBuf>::new()
+        );
+        let denoise = PathBuf::from("denoise.onnx");
+        let paths = MlModelPaths {
+            denoise: Some(denoise.clone()),
+            star_removal: None,
+        };
+        assert_eq!(path_defaults(&paths), [path::absolute(&denoise).unwrap()]);
     }
 }

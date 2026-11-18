@@ -138,8 +138,8 @@ pub(crate) enum MlModelKind {
 }
 
 impl MlModelKind {
-    /// The path this kind names in `paths`.
-    pub(crate) const fn path_mut(self, paths: &mut MlModelPaths) -> &mut PathBuf {
+    /// The path this kind names in `paths`, `None` while unset.
+    pub(crate) const fn path_mut(self, paths: &mut MlModelPaths) -> &mut Option<PathBuf> {
         match self {
             Self::Denoise => &mut paths.denoise,
             Self::StarRemoval => &mut paths.star_removal,
