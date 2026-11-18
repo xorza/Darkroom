@@ -6,8 +6,8 @@
 use std::collections::BTreeSet;
 
 use palantir::{
-    Checkbox, Configure, EditableLabel, Menu, MenuItem, MenuSeparator, Modifiers, Panel, Separator,
-    SizeSpec, Ui, VAlign, WidgetId,
+    Configure, EditableLabel, Menu, MenuItem, MenuSeparator, Modifiers, Panel, Separator, SizeSpec,
+    Ui, VAlign, WidgetId,
 };
 
 use scenarium::{CacheMode, GraphId, Keep, NodeId, TriggerPort};
@@ -293,12 +293,12 @@ fn cache_button(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
             }
         }
         MenuSeparator::new().show(ui);
-        let mut save_disk = cache.disk;
-        if Checkbox::new(&mut save_disk)
-            .label("Save to disk")
+        if MenuItem::new("Save to disk")
+            .checked(cache.disk)
             .show(ui)
-            .changed
+            .clicked()
         {
+            let save_disk = !cache.disk;
             set(
                 record.stage.out,
                 CacheMode {
