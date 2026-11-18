@@ -17,5 +17,5 @@ pub(crate) struct TypeColors {
     pub(crate) string: RgbaF32,
     pub(crate) path: RgbaF32,
     pub(crate) image: RgbaF32,
-    pub(crate) ramp: [RgbaF32; 3],
+    pub(crate) ramp: [RgbaF32; 6],
 }

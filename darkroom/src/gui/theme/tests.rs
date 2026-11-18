@@ -1,5 +1,5 @@
 use palantir::{CloseShown, SrgbaU8};
-use scenarium::CustomTypeId;
+use scenarium::{CustomTypeId, EnumId};
 use static_assertions::assert_not_impl_any;
 
 use super::*;
@@ -319,12 +319,32 @@ fn any_falls_back_to_the_untyped_input_color() {
     );
 }
 
+/// A custom type lands on the ramp slot its id names modulo the ramp's six, so ids 0 to 5 wear six
+/// hues and id 6 wraps onto id 0's; an enum keys the same way. The two numbers wear two hues, not
+/// two tints of one.
 #[test]
 fn custom_types_keyed_by_type_id() {
     let t = Theme::default();
-    // Ids in adjacent ramp slots → different colors (ramp entries
-    // are distinct, len > 1).
-    assert_ne!(t.port_color(custom(0)), t.port_color(custom(1)),);
+    let ramp = &t.type_colors.ramp;
+    assert_eq!(ramp.len(), 6);
+    for (id, hue) in (0..6).zip(ramp) {
+        assert_eq!(t.port_color(custom(id)), *hue, "id {id}");
+    }
+    for one in 0..ramp.len() {
+        for other in one + 1..ramp.len() {
+            assert_ne!(
+                ramp[one], ramp[other],
+                "slots {one} and {other} share a hue"
+            );
+        }
+    }
+    assert_eq!(t.port_color(custom(6)), ramp[0], "id 6 wraps onto slot 0");
+    assert_eq!(
+        t.port_color(DataType::Enum(EnumId::from_u128(7))),
+        ramp[1],
+        "an enum keys onto the ramp as a custom type does: 7 % 6 = 1"
+    );
+    assert_ne!(t.type_colors.int, t.type_colors.float);
     // The lens image type bypasses the ramp for its owned hue, which no
     // ramp entry may duplicate — a hash pick must never impersonate the
     // image color.

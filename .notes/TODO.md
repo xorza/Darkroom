@@ -4,7 +4,6 @@
 - auto chosen reference frame for stacking and manually specified
 - visual node groups
 
-- int and float a hue apart, and a ramp of six for the enum and custom types, through ayu-graphite and a copy of its `darkroom` target
 - palantir: a split sized in pixels, so the sidebar keeps its width as the window grows; the path of a split, so the sidebar's ratio holds where its split is not the dock's root
 - dropping a file on the canvas, once palantir reports a dropped file
 - align, distribute and snap; a minimap; a histogram and channel views in the viewer
