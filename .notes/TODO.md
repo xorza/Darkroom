@@ -5,5 +5,4 @@
 - visual node groups
 
 - dropping a file on the canvas, once palantir reports a dropped file
-- align, distribute and snap; a minimap; a histogram and channel views in the viewer
 - a light theme, through ayu-graphite
