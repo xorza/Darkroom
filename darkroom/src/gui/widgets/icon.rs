@@ -1,7 +1,8 @@
 //! [`Icon`]: every glyph a node, a toolbar and the image viewer draw, as one set.
 
-use std::f32::consts::{FRAC_1_SQRT_2, PI};
+use std::f32::consts::{FRAC_1_SQRT_2, PI, SQRT_2};
 
+use common::LibmVec2;
 use palantir::{Border, LineCap, LineJoin, Rect, RgbaF32, Shape, Stroke, Ui};
 
 use glam::Vec2;
@@ -60,6 +61,12 @@ pub(crate) enum Icon {
     Lock,
     /// Follows the library: two links of a chain.
     Link,
+    /// The system's color scheme: a screen on a stand (Lucide `monitor`).
+    Monitor,
+    /// The light scheme: a disc with eight rays (Lucide `sun`).
+    Sun,
+    /// The dark scheme: a crescent (Lucide `moon`).
+    Moon,
 }
 
 impl Icon {
@@ -187,6 +194,27 @@ impl Icon {
                 pen.frame(ui, (2.5, 8.5, 9.0, 7.0), 3.5);
                 pen.frame(ui, (12.5, 8.5, 9.0, 7.0), 3.5);
                 pen.line(ui, (8.5, 12.0), (15.5, 12.0));
+            }
+            Self::Monitor => {
+                pen.frame(ui, (3.0, 4.0, 18.0, 12.0), 2.0);
+                pen.line(ui, (12.0, 16.0), (12.0, 20.0));
+                pen.line(ui, (8.0, 20.0), (16.0, 20.0));
+            }
+            Self::Sun => {
+                pen.circle(ui, (12.0, 12.0), 4.0);
+                // Eight rays from 7 to 9 units out, one each 45°.
+                for ray in 0..8 {
+                    let dir = Vec2::libm_from_angle(ray as f32 * PI / 4.0);
+                    let [from, to] = [7.0, 9.0].map(|r| Vec2::splat(12.0) + dir * r);
+                    pen.line(ui, from, to);
+                }
+            }
+            Self::Moon => {
+                // The disc's rim from 3 o'clock round through the bottom to 12, clockwise on
+                // screen, and the bite: the arc of the circle through (21, 12), the disc's center
+                // and (12, 3), centered half way along the chord from (21, 12) to (12, 3).
+                pen.arc(ui, (12.0, 12.0), 9.0, 0.0, 3.0 * PI / 2.0);
+                pen.arc(ui, (16.5, 7.5), 4.5 * SQRT_2, PI / 4.0, PI);
             }
             Self::Pixels => {
                 for (x, y) in [(5.0, 5.0), (13.0, 5.0), (5.0, 13.0), (13.0, 13.0)] {

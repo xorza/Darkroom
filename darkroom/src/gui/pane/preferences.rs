@@ -15,8 +15,8 @@ use common::{ErrorChain, fs, process};
 use lens::MlModelPaths;
 use palantir::{
     Align, Axis, Button, Checkbox, ColorScheme, ComboBox, Configure, DragValue, Grid, Panel,
-    Preference, RadioGroup, RadioLook, SizeSpec, Spacing, Text, TextEdit, TextWrap, Track, Ui,
-    VAlign, WidgetId,
+    Preference, RadioGroup, RadioLook, Rect, SizeSpec, Spacing, Text, TextEdit, TextWrap, Track,
+    Ui, VAlign, WidgetId,
 };
 
 use crate::core::io::preferences::Preferences;
@@ -26,6 +26,7 @@ use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::MlModelKind;
 use crate::gui::frame::requests::Requests;
 use crate::gui::theme::Theme;
+use crate::gui::widgets::icon::Icon;
 use crate::gui::widgets::link::Link;
 use crate::gui::widgets::support;
 
@@ -196,9 +197,9 @@ impl PreferencesForm<'_> {
         }
     }
 
-    /// The scheme: a label and a segmented track of System, Light and Dark, all three in view and
-    /// one click from each other, its pill sliding to a pick, as macOS's Appearance setting shows
-    /// them. A pick writes `scheme` in place; the app hands it to palantir, which shows it from
+    /// The scheme: a label and a segmented track of System, Light and Dark, each after its icon,
+    /// all three in view and one click from each other, its pill sliding to a pick, as macOS's
+    /// Appearance setting shows them. A pick writes `scheme` in place; the app hands it to palantir, which shows it from
     /// the next frame.
     fn scheme_row(&self, ui: &mut Ui, scheme: &mut Preference<ColorScheme>) {
         let row = APPEARANCE_ROW + 1;
@@ -211,7 +212,13 @@ impl PreferencesForm<'_> {
             .align(Align::LEFT)
             .show(ui, |ui, options| {
                 for pick in SCHEMES {
-                    options.option(pick).label(scheme_label(pick)).show(ui);
+                    options
+                        .option(pick)
+                        .label(scheme_label(pick))
+                        .show_with(ui, |ui, text| {
+                            let side = text.line_height();
+                            scheme_icon(pick).draw(ui, Rect::new(0.0, 0.0, side, side), text.color);
+                        });
                 }
             });
     }
@@ -456,6 +463,16 @@ const SCHEMES: [Preference<ColorScheme>; 3] = [
     Preference::Fixed(ColorScheme::Dark),
 ];
 
+/// A scheme's icon on the Theme row: a monitor for the system's, a sun and a moon, as most theme
+/// switchers mark the three.
+const fn scheme_icon(scheme: Preference<ColorScheme>) -> Icon {
+    match scheme {
+        Preference::System => Icon::Monitor,
+        Preference::Fixed(ColorScheme::Light) => Icon::Sun,
+        Preference::Fixed(ColorScheme::Dark) => Icon::Moon,
+    }
+}
+
 /// A scheme as the Theme row lists it.
 const fn scheme_label(scheme: Preference<ColorScheme>) -> &'static str {
     match scheme {
@@ -514,6 +531,20 @@ mod tests {
 
     use common::{TempDir, TempFile, internals};
     use palantir::Harness;
+
+    /// Each offered scheme wears its own icon and label: a monitor for the system's, a sun for
+    /// light, a moon for dark.
+    #[test]
+    fn each_scheme_wears_its_own_icon() {
+        assert_eq!(
+            SCHEMES.map(|pick| (scheme_icon(pick), scheme_label(pick))),
+            [
+                (Icon::Monitor, "System"),
+                (Icon::Sun, "Light"),
+                (Icon::Moon, "Dark"),
+            ]
+        );
+    }
 
     #[test]
     fn path_problem_classifies_missing_dir_and_extension() {
