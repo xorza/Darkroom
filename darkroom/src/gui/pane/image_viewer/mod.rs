@@ -358,7 +358,8 @@ impl ImageViewer {
     }
 
     /// The checkerboard tile, filled again where a lost device took its texture: the theme holds
-    /// its texels, so the image needs no copy to survive the loss.
+    /// its texels, so the image needs no copy to survive the loss. Kept across a turn of the
+    /// scheme, as both schemes paint one checker (`theme::tests::both_schemes_paint_one_checker`).
     fn checker_tile(&mut self, ui: &Ui, theme: &Theme) -> ImageHandle {
         const FITS: &str = "checker image fits every supported GPU";
         let handle = self

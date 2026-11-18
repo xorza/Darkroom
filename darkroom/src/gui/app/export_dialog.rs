@@ -194,6 +194,7 @@ fn bundle_wid(idx: usize) -> WidgetId {
 #[cfg(test)]
 mod tests {
     use glam::UVec2;
+    use palantir::ColorScheme;
     use palantir::Harness;
 
     use crate::core::io::export::ExportPath;
@@ -220,7 +221,7 @@ mod tests {
             ],
             bundled: vec![false; 3],
         };
-        let theme = Theme::default();
+        let theme = Theme::new(ColorScheme::Dark);
         let mut h = Harness::new(UVec2::new(900, 700));
         h.prime(2, |ui| {
             dialog.record(ui, &theme);

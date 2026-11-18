@@ -175,6 +175,7 @@ fn proportion_bar(ui: &mut Ui, theme: &Theme, ram: RamUsage) {
 
 #[cfg(test)]
 mod tests {
+    use palantir::ColorScheme;
     use scenarium::GraphId;
 
     use crate::core::document::internals::DocumentFixture;
@@ -215,7 +216,7 @@ mod tests {
         let footer =
             h.ui.rect(wid::footer(GraphId::Main, node_id))
                 .expect("a failure has a footer");
-        let theme = Theme::default();
+        let theme = Theme::new(ColorScheme::Dark);
         // One label line, 12 × 1.2 = 14.4 px, on the 1/64 px grid the measurer keeps metrics on,
         // which `line_height` snaps to: 922 / 64, a block rounded up to 15 px.
         let caption = theme.palantir.text.with_font_size(theme.font.caption);

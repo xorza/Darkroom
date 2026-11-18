@@ -6,8 +6,8 @@ use palantir::RgbaF32;
 use crate::gui::theme::color;
 use crate::gui::theme::palette::Palette;
 
-/// How far a hovered link pulls toward white, further than a port's hover lift: a link is text,
-/// whose thin strokes need the larger step to read as lit.
+/// How far a hovered link pulls toward the palette's lift, further than a port's hover lift: a
+/// link is text, whose thin strokes need the larger step to read as lit.
 const LINK_HOVER_LIFT: f32 = 0.5;
 
 /// The colors that belong to no single widget.
@@ -21,7 +21,8 @@ pub(crate) struct AppColors {
     /// the nodes, so the surround recedes and the selected tab, which takes `canvas.bg`, reads
     /// as one with the graph.
     pub(crate) surround_bg: RgbaF32,
-    /// A text link at rest, and lifted halfway to white under the pointer.
+    /// A text link at rest, and lifted halfway to the palette's lift under the pointer: lighter on
+    /// a dark ground, darker on a light one.
     pub(crate) link: RgbaF32,
     pub(crate) link_hovered: RgbaF32,
 }
@@ -32,7 +33,7 @@ impl AppColors {
             accent: p.accent,
             surround_bg: p.surround_bg,
             link: p.link,
-            link_hovered: color::toward(p.link, RgbaF32::WHITE, LINK_HOVER_LIFT),
+            link_hovered: color::toward(p.link, p.lift, LINK_HOVER_LIFT),
         }
     }
 

@@ -1,4 +1,5 @@
 use glam::Vec2;
+use palantir::ColorScheme;
 use palantir::{Modifiers, PointerButton};
 
 use crate::core::document::internals::DocumentFixture;
@@ -122,7 +123,7 @@ fn a_shift_band_unions_with_the_committed_selection_counting_overlap_once() {
 /// is the hairline, 1 px, so 2 world px at 50 % and half a world px at 200 %.
 #[test]
 fn the_band_border_is_a_screen_hairline_at_every_zoom() {
-    let theme = Theme::default();
+    let theme = Theme::new(ColorScheme::Dark);
     for (zoom, world) in [(0.5, 2.0), (1.0, 1.0), (2.0, 0.5)] {
         assert_eq!(border(&theme, zoom).width, world, "{zoom}");
         assert_eq!(world * zoom, theme.stroke.hairline);

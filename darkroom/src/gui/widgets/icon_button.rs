@@ -141,6 +141,7 @@ fn mark_style(theme: &Theme, color: RgbaF32) -> ButtonTheme {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use palantir::ColorScheme;
 
     /// The fill a look paints.
     fn fill(look: &WidgetLook) -> RgbaF32 {
@@ -152,7 +153,7 @@ mod tests {
     /// inks a node's toggles take: the cache's and the disable's.
     #[test]
     fn an_on_button_rests_under_the_hover_lift_and_rises_past_it() {
-        let theme = Theme::default();
+        let theme = Theme::new(ColorScheme::Dark);
         let off = press_style(&theme, theme.ink.muted);
         let lift = fill(&off.unselected.hovered);
         assert!(

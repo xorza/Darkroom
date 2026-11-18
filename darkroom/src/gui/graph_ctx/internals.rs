@@ -5,6 +5,7 @@
 //! this resolves them against — a test that needs no context at all stops
 //! there. Everything that records a canvas builds on this.
 
+use palantir::ColorScheme;
 use palantir::Display;
 use scenarium::{GraphId, Library, NodeId};
 
@@ -44,7 +45,7 @@ impl Default for GraphCtxFixture {
             library: Library::default(),
             run_state: RunState::new(wake::internals::noop()),
             shared: SharedLibrary::default(),
-            theme: Theme::default(),
+            theme: Theme::new(ColorScheme::Dark),
         }
     }
 }

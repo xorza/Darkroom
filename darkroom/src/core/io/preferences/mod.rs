@@ -12,7 +12,7 @@ use common::{SerdeFormat, fs};
 use glam::IVec2;
 use lens::MlModelPaths;
 use palantir::widget::domain;
-use palantir::{ImageFilter, Size};
+use palantir::{ColorScheme, ImageFilter, Preference, Size};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 use crate::core::io::document::saved_paths::SavedPaths;
@@ -51,6 +51,9 @@ pub(crate) struct Preferences {
     pub(crate) relative_paths: bool,
     /// The whole UI's size, on top of the platform's scale.
     pub(crate) interface_size: InterfaceSize,
+    /// Light or dark, or the system's. Defaults to dark, as image editors ship, since a neutral
+    /// dark surround is the one an image is judged against.
+    pub(crate) color_scheme: Preference<ColorScheme>,
     /// When a run starts unasked.
     pub(crate) run_mode: RunMode,
     /// The memory left free for everything else, past which kept node outputs are dropped.
@@ -151,6 +154,7 @@ impl Preferences {
             confirm_unsaved_changes,
             relative_paths,
             interface_size,
+            color_scheme,
             run_mode,
             memory_headroom,
             window: _,
@@ -164,6 +168,7 @@ impl Preferences {
             && *confirm_unsaved_changes == other.confirm_unsaved_changes
             && *relative_paths == other.relative_paths
             && *interface_size == other.interface_size
+            && *color_scheme == other.color_scheme
             && *run_mode == other.run_mode
             && *memory_headroom == other.memory_headroom
             && *viewer == other.viewer
@@ -181,6 +186,7 @@ impl Default for Preferences {
             confirm_unsaved_changes: true,
             relative_paths: true,
             interface_size: InterfaceSize::DEFAULT,
+            color_scheme: Preference::Fixed(ColorScheme::Dark),
             run_mode: RunMode::default(),
             memory_headroom: MemoryHeadroom::default(),
             window: None,

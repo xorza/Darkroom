@@ -1,4 +1,5 @@
 use glam::UVec2;
+use palantir::ColorScheme;
 use palantir::Harness;
 
 use super::*;
@@ -51,7 +52,7 @@ fn memory_label_leads_with_the_process_then_sums_both_cache_pools() {
 /// changes its digit count: 1.0 KiB against 1023.9 MiB.
 #[test]
 fn the_readout_holds_its_width_as_its_figures_change() {
-    let theme = Theme::default();
+    let theme = Theme::new(ColorScheme::Dark);
     let mut h = Harness::new(UVec2::new(1600, 100));
     let root = WidgetId::from_hash("readout_root");
     let width = |h: &mut Harness, process: u64, cached: u64| {
@@ -107,7 +108,7 @@ fn status_bar_is_recorded_on_an_idle_document_with_or_without_a_reading() {
     let with = h.ui.rect(wid()).expect("status bar records");
 
     // A row, two body sizes: 2 × 14 = 28 px, on the 4 px grid.
-    let theme = Theme::default();
+    let theme = Theme::new(ColorScheme::Dark);
     assert_eq!(theme.row_height(), 28.0);
     assert_eq!(without.size.h, theme.row_height(), "no reading");
     assert_eq!(with.size.h, theme.row_height(), "a 3 MiB reading");

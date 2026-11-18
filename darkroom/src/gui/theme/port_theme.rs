@@ -2,7 +2,12 @@
 
 use palantir::{RgbaF32, SpaceSteps};
 
+use crate::gui::theme::color;
+use crate::gui::theme::hover::Hover;
 use crate::gui::theme::palette::Palette;
+
+/// How far a hovered port pulls toward [`PortTheme::lift`].
+const HOVER_LIFT: f32 = 0.28;
 
 /// A node's ports: the circles straddling the body edge, their labels,
 /// and the column geometry that lays them out.
@@ -10,8 +15,8 @@ use crate::gui::theme::palette::Palette;
 /// Positional colors only — a *typed* port takes its hue from
 /// [`TypeColors`](crate::gui::theme::type_colors::TypeColors) instead, resolved by
 /// [`Theme::port_color`](crate::gui::theme::Theme::port_color), which needs this roster and the
-/// type roster together. Every color here is a resting one; the pointer lift is applied at the
-/// call site.
+/// type roster together. Every color here is a resting one; [`Self::paint`] lifts one under the
+/// pointer.
 #[derive(Clone, Debug)]
 pub(crate) struct PortTheme {
     /// Color for an untyped (`Any`) input port. No output is untyped.
@@ -23,6 +28,10 @@ pub(crate) struct PortTheme {
     /// one strong element. Its own slot, as which of the row's three inks recedes is the
     /// interface's decision to change.
     pub(crate) label: RgbaF32,
+    /// The neutral a hovered port blends toward: past every ink, so the port lifts off the canvas
+    /// on either ground. The palette cannot carry a lifted color beside each resting one — most
+    /// port colors already sit on its far tint, which has nothing past it.
+    pub(crate) lift: RgbaF32,
     /// Side of the port circle quad, 12: a whole number of pixels at scales 1, 1.5 and 2 at
     /// 100 % zoom. The circle's radius is derived as half this (see [`Self::radius`]).
     pub(crate) size: f32,
@@ -47,11 +56,22 @@ impl PortTheme {
             input: p.input_port,
             event: p.event_port,
             label: p.port_label,
+            lift: p.lift,
             size: 12.0,
             row_dot: 10.0,
             col_pad_x: space.md,
             gap: space.sm,
             cols_gap: space.md,
+        }
+    }
+
+    /// A port of resting color `c` as it paints in `hover`: [`HOVER_LIFT`] of the way to
+    /// [`Self::lift`] while hovered, its alpha kept, and `c` itself at rest. Every port, typed,
+    /// untyped or an event's, lifts through this one rule.
+    pub(crate) const fn paint(&self, hover: Hover, c: RgbaF32) -> RgbaF32 {
+        match hover {
+            Hover::Over => color::toward(c, self.lift, HOVER_LIFT),
+            Hover::Rest => c,
         }
     }
 

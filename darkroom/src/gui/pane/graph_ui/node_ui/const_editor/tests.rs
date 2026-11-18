@@ -1,6 +1,7 @@
 use super::*;
 use common::Libm;
 use glam::{UVec2, Vec2};
+use palantir::ColorScheme;
 use palantir::Key;
 
 use palantir::Harness;
@@ -11,7 +12,7 @@ use crate::gui::theme::Theme;
 /// nothing, and the row around it gets the press.
 #[test]
 fn an_unset_field_shows_its_mark_and_takes_no_click() {
-    let theme = Theme::default();
+    let theme = Theme::new(ColorScheme::Dark);
     let id = WidgetId::from_hash("const_editor::unset");
     let field = Field {
         theme: &theme.const_editor.rest,
@@ -40,7 +41,7 @@ fn an_unset_field_shows_its_mark_and_takes_no_click() {
 fn an_unknown_types_constant_shows_as_written_and_takes_no_edit() {
     use scenarium::EnumId;
 
-    let theme = Theme::default();
+    let theme = Theme::new(ColorScheme::Dark);
     let library = Library::default();
     let id = WidgetId::from_hash("const_editor::unknown");
     let value = ConstValue::Enum("Bicubic".to_string());
@@ -104,7 +105,7 @@ fn escape_drops_the_draft_and_enter_or_blur_commits() {
         }
     }
 
-    let theme = Theme::default();
+    let theme = Theme::new(ColorScheme::Dark);
     let field = Probe {
         field: Field {
             theme: &theme.const_editor.rest,
@@ -272,7 +273,7 @@ fn a_spanned_number_commits_inside_its_span_and_shows_its_share() {
     use palantir::Modifiers;
     use scenarium::FloatSpan;
 
-    let theme = Theme::default();
+    let theme = Theme::new(ColorScheme::Dark);
     let library = Library::default();
     let id = WidgetId::from_hash("const_editor::spanned");
     let span = ValueDomain::Float(FloatSpan::between(0.0, 1.0));
@@ -360,7 +361,7 @@ fn a_spanned_number_commits_inside_its_span_and_shows_its_share() {
 fn every_editor_fills_its_column() {
     use scenarium::ValueVariant;
 
-    let theme = Theme::default();
+    let theme = Theme::new(ColorScheme::Dark);
     let library = Library::default();
     let wide = "a picker label wider than the floor";
     let picker = ValueDomain::Variants(vec![

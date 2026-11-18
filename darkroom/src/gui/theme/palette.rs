@@ -1,23 +1,23 @@
-//! [`Palette`]: darkroom's color roster, read from the baked-in
-//! `assets/ayu-graphite.ron`.
+//! [`Palette`]: darkroom's color roster, one per scheme, read from the baked-in
+//! `assets/ayu-graphite-dark.ron` and `assets/ayu-graphite-light.ron`.
 
-use palantir::RgbaF32;
+use palantir::{ColorScheme, RgbaF32};
 
 use crate::gui::theme::type_colors::TypeColors;
 
-/// The generated palette file, compiled in. Written by `darkroom/build.py`
-/// in the ayu-graphite repo, which resolves each role below against that
-/// palette's semantic layer and copies the result here.
-const AYU_GRAPHITE: &str = include_str!("../../../assets/ayu-graphite.ron");
+/// The generated palette files, compiled in, one per scheme. Written by `darkroom/build.py` in the
+/// ayu-graphite repo, which resolves each role below against that scheme's semantic layer and
+/// copies the result here.
+const DARK: &str = include_str!("../../../assets/ayu-graphite-dark.ron");
+const LIGHT: &str = include_str!("../../../assets/ayu-graphite-light.ron");
 
-/// Every color darkroom paints with, one field per role, as loaded from
-/// `assets/ayu-graphite.ron`: the theme's whole color vocabulary, which
+/// Every color darkroom paints with in one scheme, one field per role, as loaded from that
+/// scheme's file: the theme's whole color vocabulary, which
 /// [`Theme::build`](crate::gui::theme::Theme::build) fills each roster from.
 ///
-/// Every entry is a *resting* color. A port lifts under the pointer by
-/// blending toward white (see
-/// [`hover_lift`](crate::gui::theme::color::hover_lift)), because the
-/// palette's brightest tint has nothing above it to lift into.
+/// Every entry is a *resting* color. A port lifts under the pointer by blending toward
+/// [`Self::lift`] (see [`PortTheme::paint`](crate::gui::theme::port_theme::PortTheme::paint)),
+/// because the palette's far tint has nothing past it to lift into.
 ///
 /// **Roles may share a hue, never a form.** The file resolves every role against one upstream
 /// semantic layer, so a badge, a status and a wire type routinely land on the same value; each
@@ -59,6 +59,9 @@ pub(crate) struct Palette {
     pub(crate) wire_broken: RgbaF32,
     /// The scribble that cuts wires.
     pub(crate) breaker_stroke: RgbaF32,
+    /// The neutral a hover blends a port and a link toward, past every ink: white on a dark
+    /// ground, black on a light one.
+    pub(crate) lift: RgbaF32,
     /// The light square of the checker behind a transparent image, a transparency reference the
     /// same in every theme.
     pub(crate) checker_light: RgbaF32,
@@ -92,12 +95,17 @@ pub(crate) struct Palette {
 }
 
 impl Palette {
-    /// Parse the baked-in palette.
+    /// Parse the baked-in palette of `scheme`.
     ///
     /// Panics on a parse failure: the file is compiled in, so that is a mismatch between the
     /// checked-in asset and this struct, not a runtime condition.
-    pub(super) fn load() -> Self {
-        ron::from_str(AYU_GRAPHITE).expect("assets/ayu-graphite.ron matches Palette")
+    pub(super) fn load(scheme: ColorScheme) -> Self {
+        let file = match scheme {
+            ColorScheme::Dark => DARK,
+            ColorScheme::Light => LIGHT,
+        };
+        ron::from_str(file)
+            .unwrap_or_else(|error| panic!("the {scheme:?} palette matches Palette: {error}"))
     }
 }
 
@@ -107,22 +115,24 @@ mod tests {
 
     /// The file and the struct must name the same roles: one the generator
     /// still emits but darkroom stopped reading fails the load, like one it
-    /// dropped. Both edits start from the real asset, which loads.
+    /// dropped. Both edits start from a real asset, and both assets load.
     #[test]
     fn a_role_the_struct_does_not_read_fails_the_load() {
-        ron::from_str::<Palette>(AYU_GRAPHITE).expect("the asset loads");
+        for file in [DARK, LIGHT] {
+            ron::from_str::<Palette>(file).expect("the asset loads");
+        }
 
-        let extra = AYU_GRAPHITE.replacen("\n(\n", "\n(\n    output_port: \"#fa993b\",\n", 1);
-        assert_ne!(extra, AYU_GRAPHITE, "the role went in");
+        let extra = DARK.replacen("\n(\n", "\n(\n    output_port: \"#fa993b\",\n", 1);
+        assert_ne!(extra, DARK, "the role went in");
         let error = ron::from_str::<Palette>(&extra).expect_err("an extra role fails");
         assert!(error.to_string().contains("output_port"), "{error}");
 
-        let missing = AYU_GRAPHITE
+        let missing = DARK
             .lines()
             .filter(|line| !line.trim_start().starts_with("wire_broken:"))
             .collect::<Vec<_>>()
             .join("\n");
-        assert_ne!(missing, AYU_GRAPHITE, "the role came out");
+        assert_ne!(missing, DARK, "the role came out");
         let error = ron::from_str::<Palette>(&missing).expect_err("a missing role fails");
         assert!(error.to_string().contains("wire_broken"), "{error}");
     }

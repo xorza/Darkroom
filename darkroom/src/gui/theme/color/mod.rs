@@ -1,6 +1,6 @@
 //! `RgbaF32` math shared across the GUI's *derived* colors. The theme names the
 //! resting colors; the places that blend one — a wire endpoint pulled toward
-//! the canvas at rest, a port circle pulled toward white on hover —
+//! the canvas at rest, a port circle pulled toward the palette's lift on hover —
 //! go through here, so two emphases of the same swatch can't drift apart.
 
 use palantir::RgbaF32;
@@ -37,15 +37,6 @@ pub(crate) fn wash(ink: RgbaF32, alpha: f32, ground: RgbaF32) -> RgbaF32 {
         over(ink.g, under.g),
         over(ink.b, under.b),
     )
-}
-
-/// The hover emphasis every port shares: blend toward white, so the port lifts off the canvas.
-///
-/// The palette cannot carry a lifted color beside each resting one — most port colors already
-/// sit on its brightest tint, which has nothing above it — so the lift is computed here instead.
-pub(crate) const fn hover_lift(c: RgbaF32) -> RgbaF32 {
-    const T: f32 = 0.28;
-    toward(c, RgbaF32::WHITE, T)
 }
 
 #[cfg(test)]

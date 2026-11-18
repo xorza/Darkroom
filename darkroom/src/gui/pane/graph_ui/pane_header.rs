@@ -641,6 +641,7 @@ fn crumb_wid(compound: CompoundId, idx: usize) -> WidgetId {
 #[cfg(test)]
 mod tests {
     use glam::Vec2;
+    use palantir::ColorScheme;
     use scenarium::{Compound, CompoundId, GraphId, InstancePath, Interface, Node, NodeId};
 
     use crate::core::document::Document;
@@ -788,7 +789,7 @@ mod tests {
         h.ui.resize(UVec2::new(500, 800));
         h.prime(2);
         let [band, controls, right, lock] = rects(&h);
-        let margin = Theme::default().space.sm;
+        let margin = Theme::new(ColorScheme::Dark).space.sm;
         assert_eq!(band.size.w, 500.0, "{band:?}");
         assert!(controls.size.w < wide_controls.size.w, "{controls:?}");
         assert_eq!(lock.size, wide_lock.size, "Lock reads whole");

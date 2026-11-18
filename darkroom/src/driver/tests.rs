@@ -1,3 +1,4 @@
+use palantir::ColorScheme;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -592,7 +593,7 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
         .unwrap();
     assert_eq!(screen, [40.0, 119.0, 277.0, 232.0]);
 
-    let theme = Theme::default();
+    let theme = Theme::new(ColorScheme::Dark);
     let whole = driver
         .shot(&Region::Window, NonZeroU32::new(400).unwrap())
         .unwrap();
@@ -1437,6 +1438,39 @@ fn an_interface_size_pick_scales_the_ui() {
         ])
         .unwrap();
     assert_eq!(scale(&mut driver), 1.25);
+}
+
+/// The Preferences tab's theme reaches the window: a fresh launch shows dark, and a pick of Light
+/// turns palantir's scheme, whose theme is darkroom's light one, from the next frame.
+#[test]
+fn a_theme_pick_turns_the_scheme() {
+    let mut driver = driver();
+    let shown = |driver: &mut Driver| {
+        driver
+            .offscreen()
+            .with_app(|_, ui| (ui.color_scheme(), ui.theme().window_bg))
+    };
+    let light = Theme::new(ColorScheme::Light);
+    assert_eq!(
+        shown(&mut driver).0,
+        ColorScheme::Dark,
+        "premise: a fresh launch is dark"
+    );
+    driver
+        .act(&[
+            click(Locator::text("File".to_string())),
+            click(Locator::text(format!(
+                "Preferences {}",
+                Command::ShowPane(PaneKind::Preferences).chord_keys()
+            ))),
+            click(Locator::text("Dark".to_string())),
+            click(Locator::text("Light".to_string())),
+        ])
+        .unwrap();
+    assert_eq!(
+        shown(&mut driver),
+        (ColorScheme::Light, light.palantir.window_bg)
+    );
 }
 
 /// A window that runs no frame says why, from the case palantir's player gave: a native dialog, a

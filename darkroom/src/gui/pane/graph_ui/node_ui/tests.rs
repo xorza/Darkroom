@@ -1,3 +1,4 @@
+use palantir::ColorScheme;
 use scenarium::GraphId;
 
 use crate::core::document::internals::DocumentFixture;
@@ -27,7 +28,7 @@ fn a_node_at_the_title_level_reads_its_title_alone() {
 
     let zoom = 0.25;
     assert_eq!(
-        DetailLevel::at(zoom, Theme::default().font.body),
+        DetailLevel::at(zoom, Theme::new(ColorScheme::Dark).font.body),
         DetailLevel::Title
     );
     h.document_mut().main_view.viewport.zoom = zoom;

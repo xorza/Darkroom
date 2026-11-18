@@ -126,6 +126,7 @@ fn word(ui: &mut Ui, theme: &Theme, text: &'static str, color: RgbaF32) {
 #[cfg(test)]
 mod tests {
     use glam::UVec2;
+    use palantir::ColorScheme;
     use palantir::Harness;
     use palantir::WidgetId;
 
@@ -138,7 +139,7 @@ mod tests {
         let secs = [
             0.0, 999.4e-6, 999.94e-3, 9.994, 99.999, 999.994, 999.996, 9_999.96, 999_999.0,
         ];
-        let theme = Theme::default();
+        let theme = Theme::new(ColorScheme::Dark);
         let mut h = Harness::new(UVec2::new(800, 200));
         let id = |i: usize| WidgetId::from_hash(("run_time", i));
         let mut floor = 0.0;

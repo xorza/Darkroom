@@ -297,6 +297,7 @@ fn cancel_wid() -> WidgetId {
 #[cfg(test)]
 mod tests {
     use glam::{UVec2, Vec2};
+    use palantir::ColorScheme;
     use palantir::Harness;
     use palantir::Key;
     use palantir::{Chrome, Corners, Rect};
@@ -306,7 +307,7 @@ mod tests {
     /// The checkbox keeps its tick while the dialog is up; the next open starts unchecked.
     #[test]
     fn the_checkbox_holds_while_the_dialog_is_up_and_resets_once_it_closes() {
-        let theme = Theme::default();
+        let theme = Theme::new(ColorScheme::Dark);
         let mut h = Harness::new(UVec2::new(800, 600));
         let open =
             |h: &mut Harness| h.frame_value(|ui| show(ui, &theme, None, "quitting").dont_ask_again);
@@ -344,7 +345,7 @@ mod tests {
     /// long file name wraps the title inside its measure; Return picks Save.
     #[test]
     fn save_ends_the_footer_in_the_accent_and_return_picks_it() {
-        let theme = Theme::default();
+        let theme = Theme::new(ColorScheme::Dark);
         let mut h = Harness::new(UVec2::new(1200, 800));
         let name = "a file name long enough to run well past the title's measure.darkroom";
         let choice =

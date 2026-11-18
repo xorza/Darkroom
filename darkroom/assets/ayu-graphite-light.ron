@@ -1,0 +1,75 @@
+// Ayu Graphite light, for darkroom — generated. Do not edit by hand.
+//
+// Source:    ayu-graphite.toml
+// Generator: ayu-graphite/darkroom/build.py
+//
+// Each entry names a role darkroom paints with, the role here it is
+// taken from, and the primitive that resolves to. Every color is a
+// resting one: a port lifts under the pointer by blending toward
+// `lift`, because the palette's far tint has nothing past it.
+//
+// The graph ground is the one color with no step of its own. darkroom
+// stacks five surfaces and starts them one rung out from the neutral
+// ramp, so the ground is placed one of that ramp's own steps above `bg`.
+(
+    // Surfaces — what the editor is built out of, and the inks on them.
+    canvas_bg:      "#f3f3f3",    // (the ramp's step)            above gray_3
+    canvas_dot:     "#cfcfcf",    // border                       gray_5
+    surround_bg:    "#e7e7e7",    // bg                           gray_3
+    node_bg:        "#ffffff",    // elem                         gray_1
+    node_border:    "#00000000",  // (no outline)                 the shadow carries the edge
+    shadow:         "#00000024",  // overlay_black                black at 0x24
+    text:           "#262626",    // text                         gray_7
+    text_muted:     "#5d5d5d",    // text_muted                   gray_6
+    text_disabled:  "#b0b0b0",    // text                         gray_7 at 0x5d over node_bg
+    element_mid:    "#f3f3f3",    // elem_hover                   gray_2
+    element_strong: "#e7e7e7",    // elem_active                  gray_3
+
+    // Graph — the wires, and the marks drawn over them, and the neutral a
+    // hovered port blends toward.
+    accent:         "#5b7000",    // (solved)                     its hue, placed as an ink
+    wire_broken:    "#863136",    // error                        red_bright
+    breaker_stroke: "#863136",    // error                        red_bright
+    lift:           "#000000",    // (the far end)                black
+
+    // Viewer — the checker behind a transparent image.
+    checker_light:  "#4d4d4d",    // (fixed)                      a transparency reference
+    checker_dark:   "#333333",    // (fixed)                      a transparency reference
+
+    // Ports — an untyped port's circle, and the ink beside it. A typed port
+    // takes its hue from the type table instead.
+    input_port:     "#5d5d5d",    // text_muted                   gray_6
+    event_port:     "#262626",    // text                         gray_7
+    port_label:     "#5d5d5d",    // text_muted                   gray_6
+
+    // Badges — what a node's head says about itself.
+    link:           "#5b7000",    // (solved)                     its hue, placed as an ink
+    badge_cache:    "#6e6000",    // warning                      yellow_bright
+    badge_kind:     "#262626",    // text                         gray_7
+
+    // Status — what a node's head says about its last run.
+    status_success: "#29601b",    // success                      green_bright
+    status_info:    "#00669a",    // accent                       blue_bright
+    status_busy:    "#5d5d5d",    // text_muted                   gray_6
+    status_warning: "#925001",    // syn_keyword                  orange_bright
+    status_error:   "#863136",    // error                        red_bright
+
+    // A wire's hue is the type flowing along it. `ramp` backs the
+    // open-ended custom and enum families, keyed by type id.
+    type_colors: (
+        boolean: "#863136",    // error                        red_bright
+        int:     "#6e6000",    // ansi_bright_yellow           yellow_bright
+        float:   "#869f01",    // (between yellow and green)   normal row
+        string:  "#29601b",    // syn_string                   green_bright
+        path:    "#00669a",    // hint                         blue_bright
+        image:   "#925001",    // syn_keyword                  orange_bright
+        ramp: (
+            "#e67147",    // (between red and orange)     normal row
+            "#976b00",    // (between orange and yellow)  light row
+            "#00a87a",    // (between green and cyan)     normal row
+            "#007d94",    // (between cyan and blue)      light row
+            "#707be4",    // (between blue and purple)    normal row
+            "#d568a9",    // (between purple and red)     normal row
+        ),
+    ),
+)

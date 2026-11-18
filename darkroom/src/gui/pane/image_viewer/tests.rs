@@ -1,5 +1,6 @@
 use super::*;
 use common::USize2;
+use palantir::ColorScheme;
 use std::cell::Cell;
 use std::sync::Arc;
 
@@ -17,7 +18,7 @@ use crate::gui::state::preview_store;
 /// again.
 #[test]
 fn a_checker_tile_fills_again_on_a_new_device() {
-    let theme = Theme::default();
+    let theme = Theme::new(ColorScheme::Dark);
     let first = isolated_headless_test_gpu();
     let mut host = OffscreenHost::builder(first.handles()).build();
     let mut viewer = ImageViewer::new(viewer_node());
@@ -40,7 +41,7 @@ fn header_readout_adds_its_conditional_clauses_only_when_they_apply() {
     let h = Harness::builder(UVec2::ONE).mono().build();
     let handle = h
         .ui()
-        .load_image(&glyph::checker_image(&Theme::default()))
+        .load_image(&glyph::checker_image(&Theme::new(ColorScheme::Dark)))
         .expect("a 2x2 checker fits every supported GPU");
     // The texture is the 2×2 checker throughout; `native_size` against
     // `texels` is what says whether the view is capped below its source.
@@ -233,7 +234,7 @@ fn the_frame_that_first_draws_a_viewer_frames_it_at_the_full_size() {
     );
     store.settle(h.ui());
 
-    let theme = Theme::default();
+    let theme = Theme::new(ColorScheme::Dark);
     let mut preferences = ViewerPreferences::default();
     let mut viewer = ImageViewer::new(node);
     let pane = Some(Vec2::new(800.0, 600.0));
@@ -313,7 +314,7 @@ fn a_drag_starts_from_the_fit_and_a_double_click_fits_again() {
         DisplayStretch::Linear,
     );
     store.settle(h.ui());
-    let theme = Theme::default();
+    let theme = Theme::new(ColorScheme::Dark);
     let mut preferences = ViewerPreferences::default();
     let mut viewer = ImageViewer::new(node);
     let mut frame = |h: &mut Harness, viewer: &mut ImageViewer| {
@@ -422,7 +423,7 @@ fn the_stretch_toggle_sets_the_previews_display() {
         DisplayStretch::Linear,
     );
     store.settle(h.ui());
-    let theme = Theme::default();
+    let theme = Theme::new(ColorScheme::Dark);
     let mut preferences = ViewerPreferences::default();
     let mut viewer = ImageViewer::new(node);
     let mut toggle = |h: &mut Harness, stretch: DisplayStretch| {

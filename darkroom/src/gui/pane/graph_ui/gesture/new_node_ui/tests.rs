@@ -1,3 +1,4 @@
+use palantir::ColorScheme;
 use std::time::Duration;
 
 use glam::UVec2;
@@ -111,13 +112,13 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
         );
     }
 
-    let plain = palantir::Theme::stock(palantir::ColorScheme::Dark);
+    let plain = palantir::Theme::stock(ColorScheme::Dark);
     let small = open_palette(|_| {});
     assert_fits(small, &plain.menu, "default theme");
 
     // Restyle both terms a fixed allowance could never track: a much bigger search field and a
     // much roomier popup. The results area has to give up exactly what they took.
-    let mut restyled = palantir::Theme::stock(palantir::ColorScheme::Dark);
+    let mut restyled = palantir::Theme::stock(ColorScheme::Dark);
     enlarge(&mut restyled);
     let big = open_palette(enlarge);
     assert_fits(big, &restyled.menu, "bigger field and popup");
@@ -200,7 +201,7 @@ fn the_search_reports_only_a_changed_fold() {
 /// (16) inside a short one, and the floor inside one shorter still.
 #[test]
 fn the_popup_cap_holds_the_palette_inside_the_window() {
-    let theme = Theme::default();
+    let theme = Theme::new(ColorScheme::Dark);
     assert_eq!(popup_cap(&theme, 900.0), 400.0);
     assert_eq!(popup_cap(&theme, 300.0), 300.0 - 16.0);
     assert_eq!(popup_cap(&theme, 100.0), POPUP_MIN_HEIGHT);
@@ -272,7 +273,7 @@ fn the_list_follows_the_focus_the_keys_move() {
 /// the GPU paints it as it is.
 #[test]
 fn the_focused_rows_ink_keeps_its_contrast_on_the_tint() {
-    let theme = Theme::default();
+    let theme = Theme::new(ColorScheme::Dark);
     let tint = node_palette::focus_fill(&theme);
     assert_eq!(tint.a, 1.0, "a wash is opaque");
     let luminance = |c: RgbaF32| 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;

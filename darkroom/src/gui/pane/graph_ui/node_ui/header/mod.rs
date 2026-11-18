@@ -71,10 +71,14 @@ fn own_trigger(ui: &mut Ui, record: &NodeRecord<'_, '_>) {
     } else {
         return;
     };
-    PortGlyph::arrow(wid, theme.port.size, Hover::from(hovered).lift(ink))
-        .margin(theme.port_margin(PortKind::Input, theme.port.radius()))
-        .tooltip(tooltip)
-        .show(ui, theme);
+    PortGlyph::arrow(
+        wid,
+        theme.port.size,
+        theme.port.paint(Hover::from(hovered), ink),
+    )
+    .margin(theme.port_margin(PortKind::Input, theme.port.radius()))
+    .tooltip(tooltip)
+    .show(ui, theme);
 }
 
 /// How much of the event ink a ghost trigger keeps over the canvas: dimmed, as it is kept, not

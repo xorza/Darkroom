@@ -75,12 +75,13 @@ pub(super) const fn flat_fill(theme: &Theme, mode: ViewerBg) -> Option<RgbaF32> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use palantir::ColorScheme;
 
     /// Every flat backdrop maps to its one color, and the checker, a
     /// pattern, to none.
     #[test]
     fn each_flat_backdrop_has_one_fill_and_the_checker_none() {
-        let theme = Theme::default();
+        let theme = Theme::new(ColorScheme::Dark);
         assert_eq!(flat_fill(&theme, ViewerBg::Theme), Some(theme.canvas.bg));
         assert_eq!(flat_fill(&theme, ViewerBg::Black), Some(RgbaF32::BLACK));
         assert_eq!(flat_fill(&theme, ViewerBg::White), Some(RgbaF32::WHITE));
@@ -92,7 +93,7 @@ mod tests {
     fn checker_image_is_one_2x2_period() {
         const L: u8 = 0x4d;
         const D: u8 = 0x33;
-        let image = checker_image(&Theme::default());
+        let image = checker_image(&Theme::new(ColorScheme::Dark));
         // Row-major light/dark, dark/light — one full checker period.
         #[rustfmt::skip]
         let expected = [

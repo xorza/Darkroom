@@ -5,7 +5,7 @@ use std::str;
 use common::{SerdeFormat, TempDir, fs};
 use glam::IVec2;
 use lens::MlModelPaths;
-use palantir::{ImageFilter, Size};
+use palantir::{ColorScheme, ImageFilter, Preference, Size};
 
 use crate::core::io::preferences::error::{
     PreferencesLoadError, PreferencesParseError, PreferencesReadError, PreferencesSaveError,
@@ -55,6 +55,7 @@ fn preferences_roundtrip() {
         confirm_unsaved_changes: false,
         relative_paths: false,
         interface_size: InterfaceSize::OFFERED[4],
+        color_scheme: Preference::Fixed(ColorScheme::Light),
         run_mode: RunMode::Manual,
         memory_headroom: MemoryHeadroom::Gib(4),
         window: Some(WindowState {
@@ -83,6 +84,7 @@ fn preferences_roundtrip() {
         text.contains("interface_size: 125"),
         "a size saves as its percent"
     );
+    assert!(text.contains("color_scheme: Fixed(Light)"), "{text}");
 
     for preferences in [populated, Preferences::default()] {
         assert_eq!(roundtrip(&preferences), preferences);
@@ -101,6 +103,13 @@ fn partial_preferences_fill_defaults() {
             b"(interface_size: 117)",
             Preferences {
                 interface_size: InterfaceSize::OFFERED[3],
+                ..Preferences::default()
+            },
+        ),
+        (
+            b"(color_scheme: System)",
+            Preferences {
+                color_scheme: Preference::System,
                 ..Preferences::default()
             },
         ),
@@ -128,6 +137,11 @@ fn partial_preferences_fill_defaults() {
             .expect("partial preferences deserialize");
         assert_eq!(preferences, expected, "{}", String::from_utf8_lossy(text));
     }
+    // A file that names no scheme opens dark, as a fresh install does.
+    assert_eq!(
+        Preferences::default().color_scheme,
+        Preference::Fixed(ColorScheme::Dark)
+    );
     // A window size palantir cannot open is refused at the load, not at the window.
     for text in [
         b"(window: Some((size: (0, 600))))".as_slice(),
@@ -145,7 +159,7 @@ fn partial_preferences_fill_defaults() {
 fn every_field_but_the_window_is_a_choice() {
     let base = Preferences::default();
     assert!(base.same_choices(&base.clone()));
-    let edits: [fn(&mut Preferences); 7] = [
+    let edits: [fn(&mut Preferences); 8] = [
         |p| p.document_path = Some(PathBuf::from("a.darkroom")),
         |p| p.load_last_document = !p.load_last_document,
         |p| p.confirm_unsaved_changes = !p.confirm_unsaved_changes,
@@ -156,6 +170,7 @@ fn every_field_but_the_window_is_a_choice() {
                 .find(|size| **size != p.interface_size)
                 .expect("more than one size is offered");
         },
+        |p| p.color_scheme = Preference::System,
         |p| p.viewer.bg = ViewerBg::Black,
         |p| p.ml_models.denoise = Some(PathBuf::from("b.onnx")),
     ];

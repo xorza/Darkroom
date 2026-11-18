@@ -129,7 +129,7 @@ impl SessionHarness {
     /// Real text shaping — the dock strip and node headers size to their
     /// labels, so mono metrics would put every chip in the wrong place.
     pub(crate) fn new(fixture: DocumentFixture) -> Self {
-        let theme = Theme::default();
+        let theme = Theme::new(ColorScheme::Dark);
         let mut ui = Harness::new(SURFACE);
         // As `App::new` does before frame 1: without it a geometry assertion measures palantir's
         // stock theme rather than darkroom's.

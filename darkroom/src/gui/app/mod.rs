@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use common::ErrorChain;
-use palantir::{ColorScheme, Preference, RecordPass, Ui, UiPreferences};
+use palantir::{RecordPass, Ui, UiPreferences};
 use scenarium::Binding;
 use scenarium::CompoundId;
 use scenarium::ConstValue;
@@ -51,7 +51,7 @@ use crate::gui::frame::window_parts::{StatusInputs, WindowParts};
 use crate::gui::path_type::PathType;
 use crate::gui::state::process_memory::ProcessMemory;
 use crate::gui::state::run_state::{RunFeed, RunState};
-use crate::gui::theme::Theme;
+use crate::gui::theme::themes::Themes;
 
 mod discard_dialog;
 pub(crate) mod error;
@@ -89,7 +89,8 @@ pub(crate) struct App {
     /// runtime's: file load/save outcomes, load repairs, preferences failures and the startup
     /// document restore; only run outcomes come from the worker side.
     status: StatusLog,
-    theme: Theme,
+    /// The theme in each scheme; a frame reads the one `Ui` shows.
+    themes: Themes,
     /// A quit asked, which closes the window as the pass ends.
     quitting: QuitFlag,
     /// Persisted session state: the last document, the window, the viewer
@@ -214,7 +215,7 @@ impl App {
             run_state,
             library_scan,
             status,
-            theme: Theme::default(),
+            themes: Themes::new(),
             quitting: QuitFlag::default(),
             saved_preferences: preferences.clone(),
             preferences,
@@ -229,13 +230,11 @@ impl App {
         };
         // The document the launch opened owes a run, as one a later open adopts does.
         app.requests.owe_run();
-        // Onto the Ui before frame 1, so palantir's own widgets paint right and the first frame
-        // is at the remembered size. Darkroom has one look, Ayu Graphite's dark, so it pins the
-        // dark scheme whatever the system reports.
-        ui.set_scheme_theme(ColorScheme::Dark, app.theme.palantir.clone())
-            .expect("darkroom's theme names no press effect");
+        // Onto the Ui before frame 1, so palantir's own widgets paint right, in the scheme the
+        // preferences pick, and the first frame is at the remembered size.
+        app.themes.install(ui);
         ui.set_preferences(UiPreferences {
-            scheme: Preference::Fixed(ColorScheme::Dark),
+            scheme: app.preferences.color_scheme,
             ..ui.preferences()
         });
         ui.set_user_scale(app.preferences.interface_size.user_scale());
@@ -441,7 +440,8 @@ impl App {
             .path()
             .and_then(|p| p.file_name())
             .and_then(|s| s.to_str());
-        if let Some(answered) = self.discard.record(ui, &self.theme, file_name) {
+        let theme = self.themes.shown(ui);
+        if let Some(answered) = self.discard.record(ui, theme, file_name) {
             self.apply_discard_outcome(answered);
         }
     }
@@ -452,7 +452,7 @@ impl App {
         let Some(dialog) = &mut self.export else {
             return;
         };
-        match dialog.record(ui, &self.theme) {
+        match dialog.record(ui, self.themes.shown(ui)) {
             ExportChoice::Stay => return,
             ExportChoice::Cancel => {}
             ExportChoice::Export => {
@@ -484,7 +484,7 @@ impl App {
         let Some(dialog) = &self.replace else {
             return;
         };
-        let choice = dialog.record(ui, &self.theme);
+        let choice = dialog.record(ui, self.themes.shown(ui));
         if choice == ReplaceChoice::Stay {
             return;
         }
@@ -902,7 +902,7 @@ impl App {
         self.handle_close_request(ui);
 
         let ctx = AppCtx::new(
-            &self.theme,
+            self.themes.shown(ui),
             self.runtime.library.cur(),
             &self.run_state,
             self.library_scan.library(),
@@ -971,7 +971,7 @@ impl palantir::App for App {
             self.read_input(ui);
         } else {
             let ctx = AppCtx::new(
-                &self.theme,
+                self.themes.shown(ui),
                 self.runtime.library.cur(),
                 &self.run_state,
                 self.library_scan.library(),
@@ -1002,7 +1002,7 @@ impl palantir::App for App {
 
         // The frame's read-only world, composed once; everything below derives its context from it.
         let ctx = AppCtx::new(
-            &self.theme,
+            self.themes.shown(ui),
             self.runtime.library.cur(),
             &self.run_state,
             self.library_scan.library(),
@@ -1033,6 +1033,15 @@ impl palantir::App for App {
         let interface = self.preferences.interface_size.user_scale();
         if ui.user_scale() != interface {
             ui.set_user_scale(interface);
+        }
+        // The scheme pick too, which palantir adopts at the next frame's start, darkroom's own
+        // widgets with it, as they read the scheme `Ui` shows.
+        let scheme = self.preferences.color_scheme;
+        if ui.preferences().scheme != scheme {
+            ui.set_preferences(UiPreferences {
+                scheme,
+                ..ui.preferences()
+            });
         }
         // Palantir runs frames until the image lands, and `read_input` hands it over.
         if let Some(capture) = &mut self.capture {

@@ -263,8 +263,10 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
         tooltip,
         words: draw_ctx.words(),
     };
-    let fill = Hover::from(draw_ctx.geometry().ports.is_hovered(port))
-        .lift(node_ctx.graph_ctx.port_color(input.data_type()));
+    let fill = node_ctx.theme().port.paint(
+        Hover::from(draw_ctx.geometry().ports.is_hovered(port)),
+        node_ctx.graph_ctx.port_color(input.data_type()),
+    );
     // Flag a port only once a run actually failed on it, so it does not flip as you bind/unbind:
     // the run named the exact ports it could not feed, and only while the node's status is that
     // verdict. A ring in the warning ink around the type's own hue keeps the type readable. A
@@ -452,8 +454,10 @@ fn output_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, output: OutputCtx<'
     let theme = node_ctx.theme();
     let port = output.port_ref();
     let data_type = output.data_type();
-    let fill = Hover::from(draw_ctx.geometry().ports.is_hovered(port))
-        .lift(node_ctx.graph_ctx.port_color(data_type));
+    let fill = theme.port.paint(
+        Hover::from(draw_ctx.geometry().ports.is_hovered(port)),
+        node_ctx.graph_ctx.port_color(data_type),
+    );
     let tooltip = PortTooltip {
         description: output.description(),
         data_type,
@@ -550,7 +554,10 @@ impl EventRow<'_> {
         let margin = theme.port_margin(PortKind::Output, theme.port.radius());
         let ev = EventPort::new(node_id, event.id);
         let wid = wid::event_glyph(node_ctx.graph_ctx.graph(), ev);
-        let fill = Hover::from(draw_ctx.geometry().events.is_hovered(ev)).lift(theme.port.event);
+        let fill = theme.port.paint(
+            Hover::from(draw_ctx.geometry().events.is_hovered(ev)),
+            theme.port.event,
+        );
         let tooltip = node_ctx
             .tooltips()
             .then(|| fmt!(ui, "event: {}", event.name));
@@ -592,8 +599,10 @@ impl TriggerRow<'_> {
         let theme = node_ctx.theme();
         let margin = theme.port_margin(PortKind::Input, theme.port.radius());
         let wid = wid::trigger_glyph(node_ctx.graph_ctx.graph(), trigger);
-        let fill =
-            Hover::from(draw_ctx.geometry().triggers.is_hovered(trigger)).lift(theme.port.event);
+        let fill = theme.port.paint(
+            Hover::from(draw_ctx.geometry().triggers.is_hovered(trigger)),
+            theme.port.event,
+        );
         let tooltip = node_ctx.tooltips().then(|| fmt!(ui, "trigger: {name}"));
         Panel::hstack()
             .id_salt(("trigger", trigger.trigger))
@@ -676,7 +685,7 @@ impl GhostRow<'_> {
             GhostRowPort::Data(_) => graph_ctx.ghost_color(data_type),
             GhostRowPort::Event(_) | GhostRowPort::Trigger(_) => theme.port.event,
         };
-        let fill = Hover::from(hovered).lift(dot);
+        let fill = theme.port.paint(Hover::from(hovered), dot);
         let tooltip = node_ctx
             .tooltips()
             .then(|| match (data_type, node_ctx.ghost()) {

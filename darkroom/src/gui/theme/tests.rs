@@ -4,6 +4,7 @@ use static_assertions::assert_not_impl_any;
 
 use super::*;
 use crate::gui::theme::hover::Hover;
+use crate::gui::theme::themes::Themes;
 use crate::gui::widgets::port_glyph;
 
 assert_not_impl_any!(Theme: Copy);
@@ -15,29 +16,40 @@ assert_not_impl_any!(StatusColors: Copy);
 assert_not_impl_any!(TypeColors: Copy);
 assert_not_impl_any!(ConstEditorLooks: Copy);
 
-/// Pin which palette role reaches which field, plus the non-trivial
+/// Pin which palette role reaches which field in each scheme, plus the non-trivial
 /// palantir tweak, so a regression in `Theme::build`'s wiring or in
 /// `palantir_bridge::theme` fails loudly. Against the loaded palette rather than hex literals: the values
 /// are the palette's to choose, but landing `element_strong` in `canvas.bg` is
 /// still a bug.
 #[test]
 fn default_wiring_and_menu_tweak() {
-    let p = Palette::load();
-    let theme = Theme::default();
-    assert_eq!(theme.canvas.bg, p.canvas_bg);
-    assert_eq!(theme.card.lift, p.element_strong);
-    assert_eq!(theme.port.input, p.input_port);
-    assert_eq!(theme.badge.cache, p.badge_cache);
-    assert_eq!(theme.badge.kind, p.badge_kind);
-    assert_eq!(theme.status.busy, p.status_busy);
-    // Each of those is a distinct role, so a palette that collapsed them
-    // onto one color would pass every assertion above.
-    assert_ne!(theme.canvas.bg, theme.card.lift);
-    // The palantir half is the same palette, not palantir's own default.
-    assert_eq!(theme.palantir.window_bg, p.canvas_bg);
-    // The menu bar and every tab strip ride the surround band.
-    assert_eq!(theme.palantir.menu_bar.bar, Chrome::new(p.surround_bg));
-    assert_eq!(theme.palantir.tabs.strip, Chrome::new(p.surround_bg));
+    for scheme in ColorScheme::ALL {
+        let p = Palette::load(scheme);
+        let theme = Theme::new(scheme);
+        assert_eq!(theme.canvas.bg, p.canvas_bg, "{scheme:?}");
+        assert_eq!(theme.card.lift, p.element_strong, "{scheme:?}");
+        assert_eq!(theme.port.input, p.input_port, "{scheme:?}");
+        assert_eq!(theme.port.lift, p.lift, "{scheme:?}");
+        assert_eq!(theme.badge.cache, p.badge_cache, "{scheme:?}");
+        assert_eq!(theme.badge.kind, p.badge_kind, "{scheme:?}");
+        assert_eq!(theme.status.busy, p.status_busy, "{scheme:?}");
+        // Each of those is a distinct role, so a palette that collapsed them
+        // onto one color would pass every assertion above.
+        assert_ne!(theme.canvas.bg, theme.card.lift, "{scheme:?}");
+        // The palantir half is the same palette, not palantir's own default.
+        assert_eq!(theme.palantir.window_bg, p.canvas_bg, "{scheme:?}");
+        // The menu bar and every tab strip ride the surround band.
+        assert_eq!(theme.palantir.menu_bar.bar, Chrome::new(p.surround_bg));
+        assert_eq!(theme.palantir.tabs.strip, Chrome::new(p.surround_bg));
+    }
+    // The two schemes are two palettes, each its own file's.
+    assert_ne!(
+        Theme::new(ColorScheme::Light).canvas.bg,
+        Theme::new(ColorScheme::Dark).canvas.bg
+    );
+
+    let p = Palette::load(ColorScheme::Dark);
+    let theme = Theme::new(ColorScheme::Dark);
     assert!(theme.palantir.tooltip.max_size.h.is_infinite());
 
     // The open menu's trigger rests lit, as the hovered one does; a shut one rests flat.
@@ -64,7 +76,7 @@ fn default_wiring_and_menu_tweak() {
     assert_eq!(theme.palantir.modal.panel.paint.shadow, floating);
 
     // Every light-dismiss popup is frosted glass under its own color at
-    // 0.72 alpha; a modal stays opaque under its scrim. The glass's ceiling holds the muted ink,
+    // 0.72 alpha; a modal stays opaque under its scrim. The hand figures are the dark scheme's. The glass's ceiling holds the muted ink,
     // the dimmest each paints, at WCAG's 4.5:1 over the brightest backdrop as an 8-bit target
     // stores it: #a4a4a4 is `Y = 0.371238`, so the brightest ground is
     // `(0.371238 + 0.05) / 4.5 − 0.05 = 0.043608`, which encodes to byte 58.91, so byte 58 is the
@@ -146,7 +158,7 @@ fn default_wiring_and_menu_tweak() {
 /// default: the ambient size is the body tier, and no look pins a size of its own.
 #[test]
 fn every_palantir_widget_resolves_to_the_body_tier() {
-    let theme = Theme::default();
+    let theme = Theme::new(ColorScheme::Dark);
     let ui = &theme.palantir;
     assert_eq!(ui.text.font_size, theme.font.body);
     let looks = [
@@ -173,7 +185,7 @@ fn every_palantir_widget_resolves_to_the_body_tier() {
     assert_eq!(ui.tooltip.text.apply(&ui.text).font_size, theme.font.body);
 }
 
-/// Every badge is legible against every other, because a node's head
+/// Every badge is legible against every other in each scheme, because a node's head
 /// can carry several at once; and the kind mark wears no status hue, as a
 /// kind is not a status.
 ///
@@ -181,57 +193,60 @@ fn every_palantir_widget_resolves_to_the_body_tier() {
 /// common — the palette resolves both against one upstream semantic
 /// layer, and the two never share a surface. Two badges do, so this is
 /// the pair the roster cannot be allowed to collapse. Like
-/// [`surfaces_stack_darkest_first`], it is a rule a table of
+/// [`surfaces_stand_apart`], it is a rule a table of
 /// colors cannot state about itself.
 #[test]
 fn badges_are_told_apart_from_each_other() {
-    let theme = Theme::default();
-    let (c, b) = (&theme.colors, &theme.badge);
-    let badges = [
-        ("accent", c.accent),
-        ("badge_cache", b.cache),
-        ("badge_kind", b.kind),
-    ];
-    for (i, (name, color)) in badges.iter().enumerate() {
-        for (other_name, other) in &badges[i + 1..] {
-            assert_ne!(
-                color, other,
-                "{name} and {other_name} share a hue, and a head can show both",
-            );
+    for scheme in ColorScheme::ALL {
+        let theme = Theme::new(scheme);
+        let (c, b) = (&theme.colors, &theme.badge);
+        let badges = [
+            ("accent", c.accent),
+            ("badge_cache", b.cache),
+            ("badge_kind", b.kind),
+        ];
+        for (i, (name, color)) in badges.iter().enumerate() {
+            for (other_name, other) in &badges[i + 1..] {
+                assert_ne!(
+                    color, other,
+                    "{scheme:?}: {name} and {other_name} share a hue, and a head can show both",
+                );
+            }
         }
+        let s = &theme.status;
+        let statuses = [s.success, s.info, s.busy, s.warning, s.error];
+        assert!(
+            !statuses.contains(&b.kind),
+            "{scheme:?}: the kind mark wears a status hue"
+        );
     }
-    let s = Theme::default().status;
-    let statuses = [s.success, s.info, s.busy, s.warning, s.error];
-    assert!(
-        !statuses.contains(&b.kind),
-        "the kind mark wears a status hue"
-    );
 }
 
-/// The five surfaces stack in one view — a graph, the bar around
-/// it, a node, a hovered control, a pressed one — so
-/// each must be lighter than the one under it. The palette's generator
-/// checks this before it writes the file; this is the half that would
-/// catch a hand-edited asset, and it is the one rule a table of colors
-/// cannot state about itself.
+/// The five surfaces meet in one view — a graph, the bar around it, a node, a hovered control, a
+/// pressed one — so each must be darker than its partner by a step of the neutral ramp, 1.10:1.
+/// The dark scheme climbs from the graph to the press; the light one lifts a node off the graph
+/// as a white card and steps hover and press down from it, the graph the lighter of it and the
+/// surround. The palette's generator checks this before it writes the file; this is the half
+/// that would catch a hand-edited asset, and it is the one rule a table of colors cannot state
+/// about itself.
 #[test]
-fn surfaces_stack_darkest_first() {
-    let p = Palette::load();
-    let ladder = [
-        ("canvas_bg", p.canvas_bg),
-        ("surround_bg", p.surround_bg),
-        ("node_bg", p.node_bg),
-        ("element_mid", p.element_mid),
-        ("element_strong", p.element_strong),
+fn surfaces_stand_apart() {
+    let dark = Palette::load(ColorScheme::Dark);
+    let light = Palette::load(ColorScheme::Light);
+    let pairs = [
+        ("dark canvas/surround", dark.canvas_bg, dark.surround_bg),
+        ("dark surround/node", dark.surround_bg, dark.node_bg),
+        ("dark node/mid", dark.node_bg, dark.element_mid),
+        ("dark mid/strong", dark.element_mid, dark.element_strong),
+        ("light surround/canvas", light.surround_bg, light.canvas_bg),
+        ("light canvas/node", light.canvas_bg, light.node_bg),
+        ("light mid/node", light.element_mid, light.node_bg),
+        ("light strong/mid", light.element_strong, light.element_mid),
     ];
-    for pair in ladder.windows(2) {
-        let [(under, lower), (over, upper)] = pair else {
-            unreachable!("windows(2) yields pairs")
-        };
-        assert!(
-            lower.luminance() < upper.luminance(),
-            "{under} is not darker than {over} — a surface on it disappears",
-        );
+    for (name, darker, lighter) in pairs {
+        assert!(darker.luminance() < lighter.luminance(), "{name}");
+        // The generator's 1.10:1 on the 8-bit values the file holds; f32 rounding a few ulps under.
+        assert!(darker.contrast_ratio(lighter) >= 1.0999, "{name}");
     }
 }
 
@@ -239,21 +254,49 @@ fn surfaces_stack_darkest_first() {
 /// menu whose rows are all disabled does not read as live.
 #[test]
 fn a_disabled_row_is_dimmer_than_a_hint() {
-    let p = Palette::load();
-    let ratio = |ink: RgbaF32| ink.contrast_ratio(p.node_bg);
-    assert!(
-        ratio(p.text_disabled) < ratio(p.text_muted),
-        "disabled {:.2}:1 against muted {:.2}:1",
-        ratio(p.text_disabled),
-        ratio(p.text_muted),
-    );
+    for scheme in ColorScheme::ALL {
+        let p = Palette::load(scheme);
+        let ratio = |ink: RgbaF32| ink.contrast_ratio(p.node_bg);
+        assert!(
+            ratio(p.text_disabled) < ratio(p.text_muted),
+            "{scheme:?}: disabled {:.2}:1 against muted {:.2}:1",
+            ratio(p.text_disabled),
+            ratio(p.text_muted),
+        );
+    }
+}
+
+/// Each scheme's theme is its own palette's, and the frame reads the one `Ui` shows.
+#[test]
+fn themes_hand_out_each_schemes_theme() {
+    let themes = Themes::new();
+    for scheme in ColorScheme::ALL {
+        assert_eq!(
+            themes.get(scheme).canvas.bg,
+            Palette::load(scheme).canvas_bg,
+            "{scheme:?}"
+        );
+    }
+    let mut h = palantir::Harness::new(glam::UVec2::new(64, 64));
+    themes.install(h.ui_mut());
+    for scheme in ColorScheme::ALL {
+        let ui = h.ui_mut();
+        ui.set_preferences(palantir::UiPreferences {
+            scheme: palantir::Preference::Fixed(scheme),
+            ..ui.preferences()
+        });
+        h.frame(|_| {});
+        let ui = h.ui_mut();
+        assert_eq!(ui.color_scheme(), scheme);
+        assert_eq!(themes.shown(ui).canvas.bg, Palette::load(scheme).canvas_bg);
+    }
 }
 
 /// The broken-path look is palantir's text edit with every state's border in
 /// the error color, at the width each state already had.
 #[test]
 fn the_error_path_field_recolors_every_border_and_keeps_its_width() {
-    let theme = Theme::default();
+    let theme = Theme::new(ColorScheme::Dark);
     let (base, error) = (&theme.palantir.text_edit, &theme.field_error);
     for (base, error) in [
         (&base.looks.normal, &error.looks.normal),
@@ -278,7 +321,7 @@ fn custom(id: u128) -> DataType {
 /// flag — and what it must not vary with: the column it sits in.
 #[test]
 fn a_typed_ports_color_varies_by_type_and_hover_but_not_by_column() {
-    let theme = Theme::default();
+    let theme = Theme::new(ColorScheme::Dark);
     let types = [
         DataType::Float,
         DataType::Int,
@@ -301,7 +344,7 @@ fn a_typed_ports_color_varies_by_type_and_hover_but_not_by_column() {
         let rest = theme.port_color(*data_type);
         assert_ne!(
             rest,
-            Hover::Over.lift(theme.port_color(*data_type)),
+            theme.port.paint(Hover::Over, rest),
             "{data_type:?} must visibly lift on hover",
         );
     }
@@ -311,11 +354,11 @@ fn a_typed_ports_color_varies_by_type_and_hover_but_not_by_column() {
 /// untyped color and hovers to the same emphasis a typed one would.
 #[test]
 fn any_falls_back_to_the_untyped_input_color() {
-    let t = Theme::default();
+    let t = Theme::new(ColorScheme::Dark);
     assert_eq!(t.port_color(DataType::Any), t.port.input);
     assert_eq!(
-        Hover::Over.lift(t.port_color(DataType::Any)),
-        color::hover_lift(t.port.input)
+        t.port.paint(Hover::Over, t.port_color(DataType::Any)),
+        color::toward(t.port.input, t.port.lift, 0.28)
     );
 }
 
@@ -324,7 +367,7 @@ fn any_falls_back_to_the_untyped_input_color() {
 /// two tints of one.
 #[test]
 fn custom_types_keyed_by_type_id() {
-    let t = Theme::default();
+    let t = Theme::new(ColorScheme::Dark);
     let ramp = &t.type_colors.ramp;
     assert_eq!(ramp.len(), 6);
     for (id, hue) in (0..6).zip(ramp) {
@@ -353,22 +396,80 @@ fn custom_types_keyed_by_type_id() {
     assert!(!t.type_colors.ramp.contains(&t.type_colors.image));
 }
 
+/// A hovered port moves 28 % of its way to the scheme's lift and keeps its alpha: on the dark
+/// scheme toward white, so a zero channel lands on 0 + (1 − 0)·0.28 = 0.28 and a full one stays
+/// at 1; on the light one toward black, so a full channel lands on 1 + (0 − 1)·0.28 = 0.72. Either
+/// way the hovered port stands further off the node's body than the resting one.
 #[test]
-fn the_event_color_is_the_themes_and_lifts_on_hover() {
-    // Events use the theme's event color, distinct from any data hue, and
-    // the hover variant differs from rest.
-    let t = Theme::default();
-    let rest = t.port.event;
-    let hov = Hover::Over.lift(t.port.event);
-    assert_eq!(rest, t.port.event);
-    assert_eq!(hov, color::hover_lift(t.port.event));
-    assert_ne!(rest, hov, "hover must visibly differ from rest");
-    // At rest nothing lifts, and the flag a caller holds maps onto the state.
-    assert_eq!(Hover::Rest.lift(rest), rest);
+fn a_port_lifts_toward_the_schemes_far_end_on_hover() {
+    let green = RgbaF32::new(0.0, 1.0, 0.0, 0.5);
+    for (scheme, lift, want) in [
+        (ColorScheme::Dark, RgbaF32::WHITE, (0.28, 1.0, 0.28, 0.5)),
+        (ColorScheme::Light, RgbaF32::BLACK, (0.0, 0.72, 0.0, 0.5)),
+    ] {
+        let t = Theme::new(scheme);
+        assert_eq!(t.port.lift, lift, "{scheme:?}");
+        let lifted = t.port.paint(Hover::Over, green);
+        assert_eq!((lifted.r, lifted.g, lifted.b, lifted.a), want, "{scheme:?}");
+        let body = t.card.fill;
+        for rest in [t.port.event, t.port.input, t.type_colors.string] {
+            let hovered = t.port.paint(Hover::Over, rest);
+            assert!(
+                hovered.contrast_ratio(body) > rest.contrast_ratio(body),
+                "{scheme:?}: {rest:?} lifts off the body"
+            );
+            assert_eq!(
+                t.port.paint(Hover::Rest, rest),
+                rest,
+                "at rest nothing lifts"
+            );
+        }
+    }
+    // The flag a caller holds maps onto the state.
     assert_eq!(
         (Hover::from(false), Hover::from(true)),
         (Hover::Rest, Hover::Over)
     );
+}
+
+/// A hovered link moves half its way to the scheme's lift, so it reads lit on either ground: on
+/// a node's body it stands further off than the resting link.
+#[test]
+fn a_link_lifts_halfway_toward_the_schemes_far_end() {
+    for scheme in ColorScheme::ALL {
+        let t = Theme::new(scheme);
+        let (link, hovered) = (t.colors.link, t.colors.link_hovered);
+        assert_eq!(hovered, color::toward(link, t.port.lift, 0.5), "{scheme:?}");
+        assert!(
+            hovered.contrast_ratio(t.card.fill) > link.contrast_ratio(t.card.fill),
+            "{scheme:?}"
+        );
+    }
+}
+
+/// The light scheme's popups hold their dark ink with a floor under the frost, the dark scheme's
+/// their light ink with a ceiling, so a black page cannot sink a light popup's ground under its
+/// ink nor a white page lift a dark one's over it.
+#[test]
+fn a_frosted_popup_bounds_its_backdrop_on_the_side_its_ink_needs() {
+    for (scheme, floor, ceiling) in [
+        (ColorScheme::Dark, false, true),
+        (ColorScheme::Light, true, false),
+    ] {
+        let theme = Theme::new(scheme);
+        let material = theme.palantir.menu.material.expect("frosted");
+        assert_eq!(material.min_luminance.is_some(), floor, "{scheme:?}");
+        assert_eq!(material.max_luminance.is_some(), ceiling, "{scheme:?}");
+    }
+}
+
+/// The viewer registers its checker tile once and keeps it across a turn of the scheme, so both
+/// schemes paint one checker: a transparency reference, the same in every theme.
+#[test]
+fn both_schemes_paint_one_checker() {
+    let [light, dark] = [ColorScheme::Light, ColorScheme::Dark].map(|s| Theme::new(s).viewer);
+    assert_eq!(light.checker_light, dark.checker_light);
+    assert_eq!(light.checker_dark, dark.checker_dark);
 }
 
 /// palantir's recipes read the theme's own steps, and palantir's
@@ -377,7 +478,7 @@ fn the_event_color_is_the_themes_and_lifts_on_hover() {
 /// palantir control lines up with a darkroom one beside it.
 #[test]
 fn every_palantir_padding_and_radius_is_on_the_scale() {
-    let theme = Theme::default();
+    let theme = Theme::new(ColorScheme::Dark);
     let ui = &theme.palantir;
     let SpaceSteps { xs, sm, md, .. } = theme.space;
     let RadiusSteps {
@@ -428,7 +529,7 @@ fn every_palantir_padding_and_radius_is_on_the_scale() {
 /// on the selected chip and the one under the pointer.
 #[test]
 fn a_tab_chip_and_its_close_button_are_bare() {
-    let theme = Theme::default();
+    let theme = Theme::new(ColorScheme::Dark);
     let tabs = &theme.palantir.tabs;
     let looks = &tabs.unselected;
     assert_eq!(looks.normal.chrome.paint.fill, Chrome::NONE.paint.fill);
@@ -467,7 +568,7 @@ fn a_tab_chip_and_its_close_button_are_bare() {
 /// the resting shadow; their inks still tell them apart in the footer.
 #[test]
 fn only_a_status_that_asks_for_attention_frames_the_node() {
-    let theme = Theme::default();
+    let theme = Theme::new(ColorScheme::Dark);
     let s = &theme.status;
     let cases = [
         (ExecStatus::None, None, theme.ink.muted),
@@ -499,35 +600,37 @@ fn only_a_status_that_asks_for_attention_frames_the_node() {
 /// a spinner and a halo against a hollow ring.
 #[test]
 fn no_untyped_port_borrows_a_status_or_a_type_hue() {
-    let t = Theme::default();
-    let s = &t.status;
-    let statuses = [
-        s.success,
-        s.info,
-        s.warning,
-        s.error,
-        t.canvas.wire_broken,
-        t.canvas.breaker_stroke,
-    ];
-    let hues = &t.type_colors;
-    let types = [
-        hues.boolean,
-        hues.int,
-        hues.float,
-        hues.string,
-        hues.path,
-        hues.image,
-    ];
-    for (name, port) in [("event", t.port.event), ("untyped input", t.port.input)] {
-        assert!(
-            !statuses.contains(&port),
-            "the {name} port wears a status hue"
-        );
-        assert!(!types.contains(&port), "the {name} port wears a type hue");
-        assert!(
-            !hues.ramp.contains(&port),
-            "the {name} port wears a ramp hue"
-        );
+    for scheme in ColorScheme::ALL {
+        let t = Theme::new(scheme);
+        let s = &t.status;
+        let statuses = [
+            s.success,
+            s.info,
+            s.warning,
+            s.error,
+            t.canvas.wire_broken,
+            t.canvas.breaker_stroke,
+        ];
+        let hues = &t.type_colors;
+        let types = [
+            hues.boolean,
+            hues.int,
+            hues.float,
+            hues.string,
+            hues.path,
+            hues.image,
+        ];
+        for (name, port) in [("event", t.port.event), ("untyped input", t.port.input)] {
+            assert!(
+                !statuses.contains(&port),
+                "the {name} port wears a status hue"
+            );
+            assert!(!types.contains(&port), "the {name} port wears a type hue");
+            assert!(
+                !hues.ramp.contains(&port),
+                "the {name} port wears a ramp hue"
+            );
+        }
     }
 }
 
@@ -536,7 +639,7 @@ fn no_untyped_port_borrows_a_status_or_a_type_hue() {
 /// and `0.14·140 + 0.86·20 = 36.8`, so `#352525`, where a linear blend lands near `#653c3c`.
 #[test]
 fn a_wash_composites_on_the_encoded_values() {
-    let theme = Theme::default();
+    let theme = Theme::new(ColorScheme::Dark);
     assert_eq!(
         theme.status.error.to_srgba8(),
         SrgbaU8::hex(0xff8b8c),
@@ -563,7 +666,7 @@ fn a_wash_composites_on_the_encoded_values() {
 /// zero, for the plain 12 px circle, a required input's bigger one, and on either side.
 #[test]
 fn a_port_glyph_hangs_on_the_edge_and_leaves_its_label_at_the_inset() {
-    let theme = Theme::default();
+    let theme = Theme::new(ColorScheme::Dark);
     let inset = theme.card.border_width + theme.port.col_pad_x;
     assert_eq!(inset, theme.card.border_width + theme.space.md);
     // A required input's disc: the 12 px port and a 2 px ring each side, 12 + 2 × 2 = 16.
@@ -589,7 +692,7 @@ fn a_port_glyph_hangs_on_the_edge_and_leaves_its_label_at_the_inset() {
 /// 5 on screen.
 #[test]
 fn a_wire_keeps_its_width_on_screen_when_zoomed_out() {
-    let canvas = Theme::default().canvas;
+    let canvas = Theme::new(ColorScheme::Dark).canvas;
     assert_eq!(canvas.wire, 2.5);
     for (zoom, world, screen) in [(0.5, 5.0, 2.5), (1.0, 2.5, 2.5), (2.0, 2.5, 5.0)] {
         assert_eq!(canvas.wire_at(zoom), world, "{zoom}");

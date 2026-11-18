@@ -14,8 +14,8 @@ use std::path::{Path, PathBuf};
 use common::{ErrorChain, fs, process};
 use lens::MlModelPaths;
 use palantir::{
-    Align, Button, Checkbox, ComboBox, Configure, DragValue, Grid, Panel, SizeSpec, Spacing, Text,
-    TextEdit, TextWrap, Track, Ui, VAlign, WidgetId,
+    Align, Button, Checkbox, ColorScheme, ComboBox, Configure, DragValue, Grid, Panel, Preference,
+    SizeSpec, Spacing, Text, TextEdit, TextWrap, Track, Ui, VAlign, WidgetId,
 };
 
 use crate::core::io::preferences::Preferences;
@@ -64,6 +64,7 @@ impl PreferencesForm<'_> {
                     .line_gap(theme.space.xs)
                     .show(ui, |ui| {
                         self.caption(ui, "Appearance", APPEARANCE_ROW);
+                        self.scheme_row(ui, &mut preferences.color_scheme);
                         self.interface_size_row(ui, &mut preferences.interface_size);
 
                         self.caption(ui, "Behavior", BEHAVIOR_ROW);
@@ -194,10 +195,22 @@ impl PreferencesForm<'_> {
         }
     }
 
+    /// The scheme: a label and a dropdown of System, Light and Dark. A pick writes `scheme` in
+    /// place; the app hands it to palantir, which shows it from the next frame.
+    fn scheme_row(&self, ui: &mut Ui, scheme: &mut Preference<ColorScheme>) {
+        let row = APPEARANCE_ROW + 1;
+        self.label(ui, "Theme", row);
+        ComboBox::labeled(scheme, SCHEMES, |scheme| scheme_label(*scheme))
+            .id(scheme_wid())
+            .grid_cell((row, 1))
+            .align(Align::LEFT)
+            .show(ui);
+    }
+
     /// The interface size: a label in the form's label column and a dropdown of the offered
     /// sizes. A pick writes `size` in place; the app applies it from the next frame.
     fn interface_size_row(&self, ui: &mut Ui, size: &mut InterfaceSize) {
-        let row = APPEARANCE_ROW + 1;
+        let row = APPEARANCE_ROW + 2;
         self.label(ui, "Interface size", row);
         ComboBox::labeled(size, InterfaceSize::OFFERED, |size| size.label())
             .id(interface_size_wid())
@@ -325,8 +338,10 @@ impl PreferencesForm<'_> {
 /// The form's grid rows that start each section, a caption then its rows; a model takes two
 /// rows, its field's and its notes'.
 const APPEARANCE_ROW: u16 = 0;
-const BEHAVIOR_ROW: u16 = 2;
-const MODELS_ROW: u16 = 6;
+/// Past the appearance's caption, its theme row and its size row.
+const BEHAVIOR_ROW: u16 = APPEARANCE_ROW + 3;
+/// Past the behavior's caption and its three toggles.
+const MODELS_ROW: u16 = BEHAVIOR_ROW + 4;
 /// Past the models' caption, then each model's field row and notes row.
 const LIBRARY_ROW: u16 = MODELS_ROW + 1 + 2 * 2;
 /// Past the library's caption and its folder row.
@@ -424,6 +439,27 @@ fn path_field_wid(label: &str) -> WidgetId {
 /// every model.
 const DOWNLOAD_HINT: &str = " \u{2014} unzip and point the field above at the .onnx file inside";
 
+/// The schemes the Theme row offers, the system's first, as macOS lists Auto beside Light and
+/// Dark and Zed's `theme.mode` takes `system`, `light` or `dark`.
+const SCHEMES: [Preference<ColorScheme>; 3] = [
+    Preference::System,
+    Preference::Fixed(ColorScheme::Light),
+    Preference::Fixed(ColorScheme::Dark),
+];
+
+/// A scheme as the Theme row lists it.
+const fn scheme_label(scheme: Preference<ColorScheme>) -> &'static str {
+    match scheme {
+        Preference::System => "System",
+        Preference::Fixed(ColorScheme::Light) => "Light",
+        Preference::Fixed(ColorScheme::Dark) => "Dark",
+    }
+}
+
+fn scheme_wid() -> WidgetId {
+    WidgetId::from_hash("darkroom.preferences.scheme")
+}
+
 fn interface_size_wid() -> WidgetId {
     WidgetId::from_hash("darkroom.preferences.interface_size")
 }
@@ -507,7 +543,7 @@ mod tests {
     /// missing file it names shows its problem; a blank commit unsets the model, which has none.
     #[test]
     fn escape_restores_the_path_and_enter_commits_it() {
-        let theme = Theme::default();
+        let theme = Theme::new(ColorScheme::Dark);
         let row = ModelRow {
             row: 0,
             label: "Denoise model",

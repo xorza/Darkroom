@@ -119,6 +119,7 @@ fn keys_wid(grid_row: u16) -> WidgetId {
 #[cfg(test)]
 mod tests {
     use glam::UVec2;
+    use palantir::ColorScheme;
     use palantir::Harness;
 
     use crate::gui::command::Command;
@@ -130,7 +131,7 @@ mod tests {
     /// `1 + chords` are the captions.
     #[test]
     fn every_rows_keys_start_at_one_edge() {
-        let theme = Theme::default();
+        let theme = Theme::new(ColorScheme::Dark);
         let mut h = Harness::builder(UVec2::new(600, 1600)).mono().build();
         h.prime(2, |ui| super::show(ui, &theme));
         let chords = Command::ALL

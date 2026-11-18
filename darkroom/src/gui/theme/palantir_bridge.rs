@@ -26,12 +26,14 @@ pub(super) const fn palette(p: &Palette) -> palantir::Palette {
         element: p.node_bg,
         element_mid: p.element_mid,
         element_strong: p.element_strong,
-        // The accent, 10.06:1 on a node and 8.23:1 on a field's fill, over the 3:1 WCAG 1.4.11
-        // asks of a focus indicator.
+        // The accent, on the dark scheme 10.06:1 on a node and 8.23:1 on a field's fill, and on
+        // the light one past 4.5:1 on each surface, as ayu-graphite solves it: over the 3:1 WCAG
+        // 1.4.11 asks of a focus indicator.
         border_focused: p.accent,
         accent: p.accent,
-        // The canvas's ink on the accent, as palantir's dark palette sets it: 15.80:1, where the
-        // body text read 1.02:1 as an on switch's knob.
+        // The canvas's ink on the accent, as palantir's palettes set it: 15.80:1 on the dark
+        // scheme, where the body text read 1.02:1 as an on switch's knob, and past 4.5:1 on the
+        // light one, whose accent ayu-graphite solves to clear it on the canvas.
         on_accent: p.canvas_bg,
         shadow: p.shadow,
     }

@@ -184,7 +184,7 @@ impl Editor {
         Self {
             session,
             library: runtime,
-            theme: Theme::default(),
+            theme: Theme::new(ColorScheme::Dark),
             run_state: RunState::new(wake::internals::noop()),
             shared: SharedLibrary::default(),
             preferences: Preferences::default(),
@@ -458,7 +458,7 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
                         .build();
                     frontend
                         .ui_mut()
-                        .set_scheme_theme(ColorScheme::Dark, Theme::default().palantir)
+                        .set_scheme_theme(ColorScheme::Dark, Theme::new(ColorScheme::Dark).palantir)
                         .unwrap();
                     let mut published = false;
                     move |editor: &mut Editor, n: u32| {
@@ -480,7 +480,7 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
                         .swapchain_present()
                         .build();
                     host.ui_mut()
-                        .set_scheme_theme(ColorScheme::Dark, Theme::default().palantir)
+                        .set_scheme_theme(ColorScheme::Dark, Theme::new(ColorScheme::Dark).palantir)
                         .unwrap();
                     let mut published = false;
                     move |editor: &mut Editor, n: u32| {

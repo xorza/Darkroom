@@ -534,6 +534,7 @@ fn input_value(ui: &mut Ui, out: &mut Requests, input: InputCtx<'_>, wid: Widget
 #[cfg(test)]
 mod tests {
     use super::*;
+    use palantir::ColorScheme;
 
     /// A port row is 28 px high, its value boxed at the row's right edge, which is the card's
     /// right padding: a probe node's input, read in the inspector tab over the selected node.
@@ -569,7 +570,7 @@ mod tests {
         let card =
             h.ui.rect(card_wid("Inputs"))
                 .expect("the inputs card recorded");
-        let theme = Theme::default();
+        let theme = Theme::new(ColorScheme::Dark);
         assert_eq!(row.size.h, theme.row_height());
         assert_eq!(
             value.size.h,
@@ -694,7 +695,7 @@ mod tests {
             h.prime(3);
             h
         };
-        let theme = Theme::default();
+        let theme = Theme::new(ColorScheme::Dark);
         let impure = stub_func(FuncId::unique(), "probe")
             .input(1, InputDecl::optional("a", DataType::Int))
             .build();

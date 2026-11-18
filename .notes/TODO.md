@@ -5,4 +5,3 @@
 - visual node groups
 
 - dropping a file on the canvas, once palantir reports a dropped file
-- a light theme, through ayu-graphite

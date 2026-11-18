@@ -1,8 +1,8 @@
 //! [`Theme`]: darkroom's visual palette and layout dimensions, plus the
 //! per-widget rosters hanging off it.
 //!
-//! Every color comes from [`Palette`], read out of the generated
-//! `assets/ayu-graphite.ron`, and every size from a scale: the type, space, radius and stroke
+//! Every color comes from [`Palette`], read out of the scheme's generated
+//! `assets/ayu-graphite-<scheme>.ron`, and every size from a scale: the type, space, radius and stroke
 //! steps, which palantir's recipes read too, and darkroom's icon, elevation and tint scales.
 //! Each roster owns a file and builds from the palette and the scales it reads. The
 //! palantir-side half lives in [`palantir_bridge`].
@@ -21,15 +21,16 @@ pub(crate) mod palantir_bridge;
 pub(crate) mod palette;
 pub(crate) mod port_theme;
 pub(crate) mod status_colors;
+pub(crate) mod themes;
 pub(crate) mod tie_theme;
 pub(crate) mod tint_scale;
 pub(crate) mod type_colors;
 pub(crate) mod viewer_theme;
 
 use palantir::{
-    AnimationSpec, Border, ButtonTheme, Chrome, Corners, FloatMaterial, FontFamily, Material,
-    Metrics, RadiusSteps, RgbaF32, ShadowGeometry, SpaceSteps, Spacing, StrokeSteps, TextEditTheme,
-    TextSteps,
+    AnimationSpec, Border, ButtonTheme, Chrome, ColorScheme, Corners, FloatMaterial, FontFamily,
+    Material, Metrics, RadiusSteps, RgbaF32, ShadowGeometry, SpaceSteps, Spacing, StrokeSteps,
+    TextEditTheme, TextSteps,
 };
 
 use scenarium::DataType;
@@ -57,7 +58,8 @@ use crate::gui::theme::viewer_theme::ViewerTheme;
 /// of hard-coded constants. Layout fields live here too, so a theme swap restyles geometry as
 /// well as color.
 ///
-/// Built from the baked-in [`Palette`] on every launch; there is no theme file.
+/// One per scheme, built from that scheme's baked-in [`Palette`] on every launch; there is no
+/// theme file. [`Themes`](themes::Themes) holds the pair.
 #[derive(Clone, Debug)]
 pub(crate) struct Theme {
     /// Font sizes by hierarchy tier: [`TEXT`].
@@ -155,7 +157,7 @@ pub(crate) enum CardTier {
 
 impl Theme {
     /// The color a port of `data_type` paints at rest, and the wires touching it; see
-    /// [`Hover::lift`](crate::gui::theme::hover::Hover::lift). The built-in scalars and the
+    /// [`PortTheme::paint`]. The built-in scalars and the
     /// lens image type, the dominant payload on a darkroom canvas, take a fixed hue each from
     /// [`TypeColors`]; another custom or enum type lands on a ramp slot by its type id, so
     /// distinct types read distinct and stay stable. `Any`, which only an input declares, has no
@@ -473,11 +475,10 @@ fn monospaced(base: &ButtonTheme) -> ButtonTheme {
     style
 }
 
-impl Default for Theme {
-    /// Ayu Graphite — the one built-in look, read from
-    /// `assets/ayu-graphite.ron`.
-    fn default() -> Self {
-        Self::build(&Palette::load())
+impl Theme {
+    /// Ayu Graphite in `scheme`, read from its baked-in palette.
+    pub(crate) fn new(scheme: ColorScheme) -> Self {
+        Self::build(&Palette::load(scheme))
     }
 }
 

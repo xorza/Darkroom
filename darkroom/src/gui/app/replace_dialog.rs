@@ -158,6 +158,7 @@ fn replace_wid() -> WidgetId {
 #[cfg(test)]
 mod tests {
     use glam::UVec2;
+    use palantir::ColorScheme;
     use palantir::Harness;
     use scenarium::{CompoundId, GraphId, Node, NodeId, NodeRemap};
 
@@ -181,7 +182,7 @@ mod tests {
                 to: Some("Image".to_owned()),
             }],
         });
-        let theme = Theme::default();
+        let theme = Theme::new(ColorScheme::Dark);
         let mut h = Harness::new(UVec2::new(900, 700));
         let choice = h.frame_value(|ui| dialog.record(ui, &theme));
         assert_eq!(choice, ReplaceChoice::Stay);
