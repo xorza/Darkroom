@@ -7,10 +7,15 @@ use glam::IVec2;
 use lens::MlModelPaths;
 use palantir::{ImageFilter, Size};
 
-use crate::core::io::preferences::error::{PreferencesLoadError, PreferencesSaveError};
+use crate::core::io::preferences::error::{
+    PreferencesLoadError, PreferencesParseError, PreferencesReadError, PreferencesSaveError,
+    PreferencesSetAsideError,
+};
 use crate::core::io::preferences::interface_size::InterfaceSize;
 use crate::core::io::preferences::memory_headroom::MemoryHeadroom;
-use crate::core::io::preferences::preferences_store::PreferencesStore;
+use crate::core::io::preferences::preferences_store::{
+    BACKUP_COUNT_MAX, OpenFailure, PreferencesStore, backup_name,
+};
 use crate::core::io::preferences::recent_documents::RecentDocuments;
 use crate::core::io::preferences::run_mode::RunMode;
 use crate::core::io::preferences::{Preferences, ViewerBg, ViewerPreferences, WindowState};
@@ -218,15 +223,100 @@ fn only_a_missing_file_reads_as_the_defaults() {
     fs::write(&path, b"(confirm_unsaved_changes: maybe)").unwrap();
     assert!(matches!(
         Preferences::load_from(&path),
-        Err(PreferencesLoadError::Parse { path: failed, .. }) if failed == path
+        Err(PreferencesLoadError::Parse(PreferencesParseError { path: failed, .. })) if failed == path
     ));
 
     fs::remove_file(&path).unwrap();
     fs::create_dir(&path).unwrap();
     assert!(matches!(
         Preferences::load_from(&path),
-        Err(PreferencesLoadError::Read { path: failed, .. }) if failed == path
+        Err(PreferencesLoadError::Read(PreferencesReadError { path: failed, .. })) if failed == path
     ));
+}
+
+/// A file that does not parse moves to the first free backup name beside it, and the session
+/// starts on the defaults and keeps saving to the file: the first to `<stem>.invalid.ron`, the next
+/// to `<stem>.invalid-2.ron`, each holding the bytes it held. With every backup name taken, or a
+/// file that cannot be read, the file stays as it is and the session runs in memory.
+#[test]
+fn a_file_that_does_not_parse_is_set_aside_and_one_unreadable_is_kept() {
+    let dir = TempDir::new("darkroom-preferences-open");
+    let path = dir.join("darkroom.preferences.ron");
+    assert_eq!(
+        backup_name(&path, 1),
+        dir.join("darkroom.preferences.invalid.ron")
+    );
+    assert_eq!(
+        backup_name(&path, 2),
+        dir.join("darkroom.preferences.invalid-2.ron")
+    );
+    assert_eq!(
+        backup_name(Path::new("prefs"), 3),
+        Path::new("prefs.invalid-3")
+    );
+
+    for (n, bytes) in [
+        (1, b"not ron".as_slice()),
+        (2, b"(run_mode: sometimes)".as_slice()),
+    ] {
+        fs::write(&path, bytes).unwrap();
+        let opened = PreferencesStore::File(path.clone()).open();
+        assert_eq!(opened.preferences, Preferences::default());
+        assert_eq!(opened.store, PreferencesStore::File(path.clone()));
+        let backup = backup_name(&path, n);
+        assert!(
+            matches!(
+                opened.failure,
+                Some(OpenFailure::SetAside {
+                    failure: PreferencesParseError { path: ref failed, .. },
+                    backup: ref moved,
+                }) if *failed == path && *moved == backup
+            ),
+            "{:?}",
+            opened.failure
+        );
+        assert_eq!(fs::read(&backup).unwrap(), bytes);
+        assert!(!fs::exists(&path), "the file moved");
+    }
+
+    for n in 3..=BACKUP_COUNT_MAX {
+        fs::write(backup_name(&path, n), b"").unwrap();
+    }
+    fs::write(&path, b"not ron").unwrap();
+    let opened = PreferencesStore::File(path.clone()).open();
+    assert_eq!(opened.store, PreferencesStore::Memory);
+    assert!(
+        matches!(
+            opened.failure,
+            Some(OpenFailure::Kept {
+                failure: PreferencesParseError { .. },
+                set_aside: PreferencesSetAsideError::Exhausted { path: ref failed },
+            }) if *failed == path
+        ),
+        "{:?}",
+        opened.failure
+    );
+    assert_eq!(fs::read(&path).unwrap(), b"not ron", "the file stays");
+    assert_eq!(
+        fs::read(backup_name(&path, 1)).unwrap(),
+        b"not ron",
+        "no backup is overwritten"
+    );
+
+    fs::remove_file(&path).unwrap();
+    fs::create_dir(&path).unwrap();
+    let opened = PreferencesStore::File(path.clone()).open();
+    assert_eq!(opened.store, PreferencesStore::Memory);
+    assert!(
+        matches!(
+            opened.failure,
+            Some(OpenFailure::Unreadable(PreferencesReadError { path: ref failed, .. }))
+                if *failed == path
+        ),
+        "{:?}",
+        opened.failure
+    );
+    assert!(fs::is_dir(&path), "the unreadable file stays");
 }
 
 /// A save creates the missing configuration directory and writes a file the

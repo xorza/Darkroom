@@ -20,7 +20,9 @@ use crate::core::io::document::document_format::DocumentFormat;
 use crate::core::io::document::resources;
 use crate::core::io::document::saved_paths::SavedPaths;
 use crate::core::io::export;
-use crate::core::io::preferences::preferences_store::{OpenedPreferences, PreferencesStore, Saved};
+use crate::core::io::preferences::preferences_store::{
+    OpenFailure, OpenedPreferences, PreferencesStore, Saved,
+};
 use crate::core::io::preferences::run_mode::RunMode;
 use crate::core::io::preferences::{Preferences, WindowState};
 use crate::core::open_document::{Launched, Loaded, OpenDocument};
@@ -97,7 +99,7 @@ pub(crate) struct App {
     /// The copy last handed to the store, which [`Self::sync_preferences`] compares with.
     saved_preferences: Preferences,
     /// Where [`Self::preferences`] persist: [`PreferencesStore::Memory`] when the file existed
-    /// but could not be read, so the file stays as the user has it.
+    /// but could not be read or set aside, so the file stays as it is.
     preferences_store: PreferencesStore,
     /// Where path picks are answered: native dialogs, or a driver script.
     dialogs: Dialogs,
@@ -167,14 +169,31 @@ impl App {
         // `preferences` is loaded in `run` before the window exists, so its saved geometry sizes
         // the window.
         let mut status = StatusLog::default();
-        if let Some(failure) = failure {
-            status.error(
+        match failure {
+            None => {}
+            Some(OpenFailure::SetAside { failure, backup }) => status.warn(
+                StatusFamily::Preferences,
+                format!(
+                    "{}; kept it as '{}' and started on the defaults",
+                    ErrorChain::new(&failure),
+                    backup.display()
+                ),
+            ),
+            Some(OpenFailure::Kept { failure, set_aside }) => status.error(
+                StatusFamily::Preferences,
+                format!(
+                    "{}; {}; this session's settings are not saved",
+                    ErrorChain::new(&failure),
+                    ErrorChain::new(&set_aside)
+                ),
+            ),
+            Some(OpenFailure::Unreadable(failure)) => status.error(
                 StatusFamily::Preferences,
                 format!(
                     "{}; this session's settings are not saved",
                     ErrorChain::new(&failure)
                 ),
-            );
+            ),
         }
         let run_state = RunState::new(Arc::clone(&wake));
         let library_scan = LibraryScanner::new(Arc::clone(&wake));
@@ -1340,8 +1359,9 @@ mod tests {
 
     /// An app on the driver's host: a scripted Open dialog opens the answered document; with a
     /// file store the open is remembered in that file, and with the memory store nothing is
-    /// written. A file store whose load failed runs as the memory store, so the file stays as the
-    /// user has it, and the status line says so.
+    /// written. A file store whose file does not parse sets it aside and remembers the open in a
+    /// new file; one whose file cannot be read runs as the memory store, so the file stays as it
+    /// is. The status line says which at launch, until a save of the preferences succeeds.
     #[test]
     fn a_scripted_open_loads_the_answer_and_the_store_decides_what_persists() {
         use common::{TempDir, fs};
@@ -1352,6 +1372,14 @@ mod tests {
         use crate::gui::dialogs::DialogAnswer;
         use crate::gui::dialogs::DialogFallback;
 
+        /// What the preferences file holds at launch.
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        enum File {
+            Valid,
+            Unparsable,
+            Unreadable,
+        }
+
         let dir = TempDir::new("darkroom-scripted-open");
         let document = dir.join("scene.darkroom");
         OpenDocument::default()
@@ -1359,16 +1387,29 @@ mod tests {
             .unwrap();
         let preferences_file = dir.join("darkroom.preferences.ron");
 
-        // A file store over a valid file, a memory store, and a file store over
-        // a file that does not parse, which opens as a memory store.
-        for (store, readable) in [
-            (PreferencesStore::File(preferences_file.clone()), true),
-            (PreferencesStore::Memory, true),
-            (PreferencesStore::File(preferences_file.clone()), false),
+        // A file store over a valid file, a memory store, a file store over a file that does not
+        // parse, and one over a file that cannot be read, a directory.
+        let backup = dir.join("darkroom.preferences.invalid.ron");
+        for (store, file) in [
+            (
+                PreferencesStore::File(preferences_file.clone()),
+                File::Valid,
+            ),
+            (PreferencesStore::Memory, File::Valid),
+            (
+                PreferencesStore::File(preferences_file.clone()),
+                File::Unparsable,
+            ),
+            (
+                PreferencesStore::File(preferences_file.clone()),
+                File::Unreadable,
+            ),
         ] {
             fs::remove_file(&preferences_file).ok();
-            if !readable {
-                fs::write(&preferences_file, b"not ron").unwrap();
+            match file {
+                File::Valid => {}
+                File::Unparsable => fs::write(&preferences_file, b"not ron").unwrap(),
+                File::Unreadable => fs::create_dir(&preferences_file).unwrap(),
             }
             let mut ui = Harness::new(UVec2::new(800, 600));
             let mut dialogs = Dialogs::new(DialogFallback::Refuse);
@@ -1381,37 +1422,50 @@ mod tests {
                     dialogs,
                 },
             );
-            assert_eq!(app.session.open.path(), None, "{store:?}: launched empty");
+            let status = app.status.cur().map(|message| message.line.to_owned());
+            let says = |words: &str| {
+                assert!(
+                    status.as_deref().is_some_and(|line| line.contains(words)),
+                    "{file:?}: the status line says {words:?} at launch: {status:?}"
+                );
+            };
+            assert_eq!(app.session.open.path(), None, "{file:?}: launched empty");
             app.run_command(AppCommand::File(FileCommand::Open));
             assert_eq!(
                 app.session.open.path(),
                 Some(document.as_path()),
-                "{store:?}"
+                "{file:?}"
             );
             ui.ui_mut().request_repaint();
             ui.frame_app(&mut app);
-            if !readable {
-                assert_eq!(app.preferences_store, PreferencesStore::Memory);
-                assert!(
-                    app.status
-                        .cur()
-                        .is_some_and(|message| message.line.contains("settings are not saved")),
-                    "the status line says the settings are not saved: {:?}",
-                    app.status.cur()
-                );
-            }
-            match store {
-                PreferencesStore::File(_) if readable => assert_eq!(
+            match (&store, file) {
+                (PreferencesStore::File(_), File::Valid) => assert_eq!(
                     store.open().preferences.document_path,
                     Some(document.clone()),
                     "the file store remembers the open"
                 ),
-                PreferencesStore::File(_) => assert_eq!(
-                    fs::read(&preferences_file).unwrap(),
-                    b"not ron",
-                    "the file that did not load stays as it was"
-                ),
-                PreferencesStore::Memory => assert!(
+                (PreferencesStore::File(_), File::Unparsable) => {
+                    assert_eq!(app.preferences_store, store);
+                    says(&format!("kept it as '{}'", backup.display()));
+                    assert_eq!(
+                        app.status.cur(),
+                        None,
+                        "the save that remembers the open clears it"
+                    );
+                    assert_eq!(fs::read(&backup).unwrap(), b"not ron", "set aside whole");
+                    assert_eq!(
+                        store.clone().open().preferences.document_path,
+                        Some(document.clone()),
+                        "the new file remembers the open"
+                    );
+                }
+                (PreferencesStore::File(_), File::Unreadable) => {
+                    assert_eq!(app.preferences_store, PreferencesStore::Memory);
+                    says("settings are not saved");
+                    assert!(fs::is_dir(&preferences_file), "the file stays as it was");
+                    fs::remove_dir(&preferences_file).unwrap();
+                }
+                (PreferencesStore::Memory, _) => assert!(
                     !fs::exists(&preferences_file),
                     "the memory store writes nothing"
                 ),

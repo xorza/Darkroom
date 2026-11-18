@@ -16,7 +16,9 @@ use palantir::{ImageFilter, Size};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 use crate::core::io::document::saved_paths::SavedPaths;
-use crate::core::io::preferences::error::{PreferencesLoadError, PreferencesSaveError};
+use crate::core::io::preferences::error::{
+    PreferencesLoadError, PreferencesParseError, PreferencesReadError, PreferencesSaveError,
+};
 use crate::core::io::preferences::interface_size::InterfaceSize;
 use crate::core::io::preferences::memory_headroom::MemoryHeadroom;
 use crate::core::io::preferences::recent_documents::RecentDocuments;
@@ -207,18 +209,20 @@ impl Preferences {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Self::default()),
             Err(source) => {
-                return Err(PreferencesLoadError::Read {
+                return Err(PreferencesReadError {
                     path: path.to_path_buf(),
                     source,
-                });
+                }
+                .into());
             }
         };
-        SerdeFormat::Ron
-            .deserialize(&bytes)
-            .map_err(|source| PreferencesLoadError::Parse {
+        SerdeFormat::Ron.deserialize(&bytes).map_err(|source| {
+            PreferencesParseError {
                 path: path.to_path_buf(),
                 source: Box::new(source),
-            })
+            }
+            .into()
+        })
     }
 
     /// Write the preferences to `path`.
