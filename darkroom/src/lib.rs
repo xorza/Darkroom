@@ -133,9 +133,10 @@ pub fn init_tracing(ring: Option<&LogRing>) {
     tracing::info!(openmp = libraw::OPENMP, "libraw tiled decoders");
 }
 
-/// `RUST_LOG`, or `info` without it.
+/// `RUST_LOG`, or `info` without it, less `rmcp`'s, which logs each step of a session's
+/// handshake and close at `info`, and keeps its warnings.
 fn log_filter() -> EnvFilter {
-    EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"))
+    EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,rmcp=warn"))
 }
 
 #[cfg(feature = "internals")]

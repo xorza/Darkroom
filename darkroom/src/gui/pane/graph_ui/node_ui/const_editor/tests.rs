@@ -79,10 +79,15 @@ fn escape_drops_the_draft_and_enter_or_blur_commits() {
         field: Field<'a>,
     }
     impl Probe<'_> {
-        /// Every commit any pass of a frame produced.
+        /// Every commit any pass of a frame produced. The field fills a hugging host, so it
+        /// takes its floor and leaves the harness's right side free to click on.
         fn frame(&self, h: &mut Harness) -> Vec<String> {
             let mut commits = Vec::new();
-            h.frame(|ui| commits.extend(self.field.text(ui, "42")));
+            h.frame(|ui| {
+                Panel::hstack()
+                    .id_salt("host")
+                    .show(ui, |ui| commits.extend(self.field.text(ui, "42")));
+            });
             commits
         }
 
@@ -301,11 +306,10 @@ fn a_spanned_number_commits_inside_its_span_and_shows_its_share() {
         h.frame(&mut record);
         (committed, fill)
     };
-    // 0.25 of the field's 100 px.
-    assert_eq!(theme.const_editor.rest.width, 100.0);
+    // 0.25 of the field's 200 px, the harness's width, which the field fills.
     let (committed, fill) = commit(&mut h, &span, 0.25, "1.7");
     assert_eq!(committed, [ConstValue::Float(1.0)]);
-    assert_eq!(fill, Some(25.0));
+    assert_eq!(fill, Some(50.0));
     let (committed, _) = commit(&mut h, &span, 0.5, "-3");
     assert_eq!(committed, [ConstValue::Float(0.0)]);
     let unbounded = ValueDomain::Float(FloatSpan::at_least(0.0));
@@ -319,7 +323,7 @@ fn a_spanned_number_commits_inside_its_span_and_shows_its_share() {
 
     // A scrub moves the fill while it is held, before the commit moves the document's value:
     // 0.25 dragged 25 px right at 0.01 a pixel, `float_speed`'s 1 % of a unit, reads 0.5, a fill
-    // half the field's 100 px. The record keeps the document's 0.25 throughout, as a frame does.
+    // half the field's 200 px. The record keeps the document's 0.25 throughout, as a frame does.
     let value = ConstValue::Float(0.25);
     let mut record = |ui: &mut Ui| {
         let editor = ConstEditor {
@@ -337,13 +341,78 @@ fn a_spanned_number_commits_inside_its_span_and_shows_its_share() {
     h.frame(&mut record);
     let center = h.rect(id).expect("the field is arranged").center();
     let fill = |h: &Harness| h.rect(id.with("fill")).map(|rect| rect.size.w);
-    assert_eq!(fill(&h), Some(25.0));
+    assert_eq!(fill(&h), Some(50.0));
     h.press(center, palantir::PointerButton::Left);
     h.frame(&mut record);
     h.drag_to(center + Vec2::new(25.0, 0.0));
     h.frame(&mut record);
     h.frame(&mut record);
-    assert_eq!(fill(&h), Some(50.0), "the fill follows the drag");
+    assert_eq!(fill(&h), Some(100.0), "the fill follows the drag");
     h.release(palantir::PointerButton::Left);
     h.frame(&mut record);
+}
+
+/// Every editor in a column takes the column's width, so the boxes of a node's inputs line up on
+/// both edges: a picker whose label is wider than the floor widens the column, and a number, a
+/// text, an empty field and a value of no registered type fill it beside it; with only narrow
+/// values the column is the floor, `ConstEditorTheme::width`.
+#[test]
+fn every_editor_fills_its_column() {
+    use scenarium::ValueVariant;
+
+    let theme = Theme::default();
+    let library = Library::default();
+    let wide = "a picker label wider than the floor";
+    let picker = ValueDomain::Variants(vec![
+        ValueVariant::new("wide", ConstValue::Int(0)).display(wide),
+        ValueVariant::new("narrow", ConstValue::Int(1)),
+    ]);
+    let ids = ["picker", "float", "text", "empty"].map(WidgetId::from_hash);
+    let mut h = Harness::builder(UVec2::new(600, 200)).mono().build();
+    let widths = |h: &mut Harness, with_picker: bool| {
+        h.frame(&mut |ui: &mut Ui| {
+            Panel::vstack().id_salt("column").show(ui, |ui| {
+                let field = |id| Field {
+                    theme: &theme.const_editor.rest,
+                    id,
+                };
+                let editor = |id, value, data_type, domain| ConstEditor {
+                    field: field(id),
+                    library: &library,
+                    value,
+                    data_type,
+                    domain,
+                };
+                if with_picker {
+                    let _ = editor(ids[0], &ConstValue::Int(0), DataType::Int, &picker).show(ui);
+                }
+                let _ = editor(
+                    ids[1],
+                    &ConstValue::Float(0.5),
+                    DataType::Float,
+                    &ValueDomain::Any,
+                )
+                .show(ui);
+                let text = ConstValue::String("hi".to_owned());
+                let _ = editor(ids[2], &text, DataType::String, &ValueDomain::Any).show(ui);
+                field(ids[3]).empty(ui);
+            });
+        });
+        ids.map(|id| h.rect(id).map(|rect| rect.size.w))
+    };
+    let [picker_w, float_w, text_w, empty_w] = widths(&mut h, true);
+    let picker_w = picker_w.expect("the picker is arranged");
+    assert!(
+        picker_w > theme.const_editor.rest.width,
+        "the label widens the column past the floor: {picker_w}"
+    );
+    assert_eq!(float_w, Some(picker_w));
+    assert_eq!(text_w, Some(picker_w));
+    assert_eq!(empty_w, Some(picker_w));
+    let [picker_w, float_w, text_w, empty_w] = widths(&mut h, false);
+    let floor = Some(theme.const_editor.rest.width);
+    assert_eq!(picker_w, None);
+    assert_eq!(float_w, floor);
+    assert_eq!(text_w, floor);
+    assert_eq!(empty_w, floor);
 }

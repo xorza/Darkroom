@@ -217,7 +217,6 @@ where
                 (self.callback)(WorkerReport::Cleared);
             }
             Some(GraphOp::Replace(compiled)) => {
-                tracing::info!("Graph updated");
                 self.engine.install(Arc::clone(&compiled));
                 // After the install: reconciling onto the new program releases the slots of the
                 // nodes it dropped.
@@ -348,7 +347,6 @@ where
                     if !armed.is_empty() {
                         self.event_loop =
                             Some(ActiveEventLoop::start(armed, &self.event_loop_pause_gate));
-                        tracing::info!("Event loop started");
                     }
                 }
                 let activity = self.resting_activity();
@@ -388,7 +386,6 @@ where
         if let Some(panic) = leading_panic {
             panics.insert(0, panic);
         }
-        tracing::info!("Event loop stopped");
         if idle == IdleReport::Report {
             (self.callback)(WorkerReport::Activity(WorkerActivity::Idle));
         }

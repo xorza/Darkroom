@@ -12,7 +12,7 @@ const VALUE_EDITOR_MAX_WIDTH: f32 = 240.0;
 /// Per-widget theme bundle for the inline const editor on a
 /// `Binding::Const` input port: the `Button`/`ComboBox` look the path pick, enum and presets
 /// wear, the `DragValue` look of a number in the same box, the text field a string types into,
-/// and the fixed field width.
+/// and the bounds of the value column every editor fills.
 ///
 /// A value reads as a field at rest, as Blender's and Unreal's node inputs do: its chip wears a
 /// quiet box, a step over the node's fill at half strength.

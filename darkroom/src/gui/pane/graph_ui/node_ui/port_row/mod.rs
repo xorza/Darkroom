@@ -43,7 +43,7 @@ use crate::gui::widgets::support;
 use scenarium::{EventPort, EventRef, TriggerPort};
 
 /// Grid columns: inputs (hug), input values (hug, capped at `max_width`, so a very long
-/// editor ellipsizes; the numeric `DragValue` editor caps itself), a fill spacer, then outputs
+/// editor ellipsizes; every editor fills it, so the boxes line up), a fill spacer, then outputs
 /// (hug). The outputs sit in a hug column, not the fill, so the grid's content size includes
 /// them: a `fill` column contributes 0 to a hug-sized grid and would collapse, spilling the
 /// outputs out of the node (palantir `grid_hug_grid_collapses_fill_tracks`). The fill spacer

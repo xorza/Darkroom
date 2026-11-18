@@ -27,8 +27,8 @@
 use std::fmt::{self as std_fmt, Display, Formatter};
 
 use palantir::{
-    Align, Button, Checkbox, ComboBox, Configure, DragValue, Panel, SizeSpec, Sizing, Text,
-    TextEdit, TextInput, TextWrap, Ui, VAlign, WidgetId, fmt,
+    Align, Button, Checkbox, ComboBox, Configure, DragValue, Panel, SizeSpec, Text, TextEdit,
+    TextInput, TextWrap, Ui, VAlign, WidgetId, fmt,
 };
 use scenarium::{ConstValue, DataType, FloatSpan, IntSpan, Library, ValueDomain, ValueVariant};
 
@@ -270,7 +270,8 @@ impl Field<'_> {
         let text = fmt!(ui, "{shown}");
         Panel::hstack()
             .id(id)
-            .size((Sizing::fixed(theme.width), Sizing::FILL))
+            .size(SizeSpec::FILL)
+            .min_size((theme.width, 0.0))
             .padding(editor.defaults.padding)
             .child_align(VAlign::Center)
             .chrome(editor.looks.normal.chrome.clone())
@@ -290,7 +291,8 @@ impl Field<'_> {
         let editor = &theme.field;
         Panel::hstack()
             .id(id)
-            .size((Sizing::fixed(theme.width), Sizing::FILL))
+            .size(SizeSpec::FILL)
+            .min_size((theme.width, 0.0))
             .padding(editor.defaults.padding)
             .child_align(VAlign::Center)
             .chrome(editor.looks.normal.chrome.clone())
@@ -307,7 +309,8 @@ impl Field<'_> {
         TextEdit::buffered(current)
             .id(id)
             .style(&theme.field)
-            .size((Sizing::fixed(theme.width), Sizing::FILL))
+            .size(SizeSpec::FILL)
+            .min_size((theme.width, 0.0))
             .show(ui)
             .committed_text
     }
@@ -323,7 +326,8 @@ impl Field<'_> {
             .style(&self.theme.number)
             .text_align(Align::LEFT)
             .range_fill(true)
-            .size((Sizing::fixed(self.theme.width), Sizing::FILL))
+            .size(SizeSpec::FILL)
+            .min_size((self.theme.width, 0.0))
             .id(self.id);
         if let Some(span) = span {
             value = value.range(int_end(span.min())..=span.max().map_or(f64::INFINITY, int_end));
@@ -341,7 +345,8 @@ impl Field<'_> {
             .style(&self.theme.number)
             .text_align(Align::LEFT)
             .range_fill(true)
-            .size((Sizing::fixed(self.theme.width), Sizing::FILL))
+            .size(SizeSpec::FILL)
+            .min_size((self.theme.width, 0.0))
             .id(self.id);
         if let Some(span) = span {
             value = value.range(span.min()..=span.max().unwrap_or(f64::INFINITY));
