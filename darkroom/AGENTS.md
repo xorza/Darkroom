@@ -146,11 +146,12 @@ run. Refused: a pass-through node, which changes the graph for layout.
 - **A ghost moves to another port only from its row's menu**, which lists the inputs of its
   node that take it, so no move lands on a refusal. Refused: a drag from the ghost's dot, a
   fourth glyph domain in the wire gesture whose drop could still be refused.
-- **Two schemes, dark and light, picked in Preferences**: System, Light or Dark, dark on a fresh
-  install, as Lightroom, Photoshop and darktable ship, since a neutral dark surround is the one an
-  image is judged against. Both themes are built at launch and palantir resolves the scheme each
-  frame shows, so a turn rebuilds nothing. Refused: following the system by default, which opens a
-  Mac in light mode light; a theme file, which no one asked to edit.
+- **Two schemes, dark and light, picked in Preferences** on palantir's segmented track: System,
+  Light or Dark, all three in view, dark on a fresh install, as Lightroom, Photoshop and darktable
+  ship, since a neutral dark surround is the one an image is judged against. Both themes are built
+  at launch and palantir resolves the scheme each frame shows, so a turn rebuilds nothing.
+  Refused: following the system by default, which opens a Mac in light mode light; a theme file,
+  which no one asked to edit; a dropdown, which hides two of three choices behind a click.
 - **The light scheme lifts white cards off a grey canvas**: nodes and popups are white, hover and
   press step darker from them, and the canvas is a step lighter than the surround, as Fluent,
   macOS and FigJam build light. Refused: the mirrored ladder of Material 3's light surface

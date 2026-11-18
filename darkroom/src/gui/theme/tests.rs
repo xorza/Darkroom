@@ -225,10 +225,10 @@ fn badges_are_told_apart_from_each_other() {
 /// The five surfaces meet in one view — a graph, the bar around it, a node, a hovered control, a
 /// pressed one — so each must be darker than its partner by a step of the neutral ramp, 1.10:1.
 /// The dark scheme climbs from the graph to the press; the light one lifts a node off the graph
-/// as a white card and steps hover and press down from it, the graph the lighter of it and the
-/// surround. The palette's generator checks this before it writes the file; this is the half
-/// that would catch a hand-edited asset, and it is the one rule a table of colors cannot state
-/// about itself.
+/// as a white card and steps hover and press down past both grounds, as palantir rests a field
+/// and a button on the hover fill over them, the graph the lighter of it and the surround. The
+/// palette's generator checks this before it writes the file; this is the half that would catch
+/// a hand-edited asset, and it is the one rule a table of colors cannot state about itself.
 #[test]
 fn surfaces_stand_apart() {
     let dark = Palette::load(ColorScheme::Dark);
@@ -240,7 +240,7 @@ fn surfaces_stand_apart() {
         ("dark mid/strong", dark.element_mid, dark.element_strong),
         ("light surround/canvas", light.surround_bg, light.canvas_bg),
         ("light canvas/node", light.canvas_bg, light.node_bg),
-        ("light mid/node", light.element_mid, light.node_bg),
+        ("light mid/surround", light.element_mid, light.surround_bg),
         ("light strong/mid", light.element_strong, light.element_mid),
     ];
     for (name, darker, lighter) in pairs {

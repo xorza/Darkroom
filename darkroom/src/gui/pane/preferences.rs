@@ -14,8 +14,9 @@ use std::path::{Path, PathBuf};
 use common::{ErrorChain, fs, process};
 use lens::MlModelPaths;
 use palantir::{
-    Align, Button, Checkbox, ColorScheme, ComboBox, Configure, DragValue, Grid, Panel, Preference,
-    SizeSpec, Spacing, Text, TextEdit, TextWrap, Track, Ui, VAlign, WidgetId,
+    Align, Axis, Button, Checkbox, ColorScheme, ComboBox, Configure, DragValue, Grid, Panel,
+    Preference, RadioGroup, RadioLook, SizeSpec, Spacing, Text, TextEdit, TextWrap, Track, Ui,
+    VAlign, WidgetId,
 };
 
 use crate::core::io::preferences::Preferences;
@@ -195,16 +196,24 @@ impl PreferencesForm<'_> {
         }
     }
 
-    /// The scheme: a label and a dropdown of System, Light and Dark. A pick writes `scheme` in
-    /// place; the app hands it to palantir, which shows it from the next frame.
+    /// The scheme: a label and a segmented track of System, Light and Dark, all three in view and
+    /// one click from each other, its pill sliding to a pick, as macOS's Appearance setting shows
+    /// them. A pick writes `scheme` in place; the app hands it to palantir, which shows it from
+    /// the next frame.
     fn scheme_row(&self, ui: &mut Ui, scheme: &mut Preference<ColorScheme>) {
         let row = APPEARANCE_ROW + 1;
         self.label(ui, "Theme", row);
-        ComboBox::labeled(scheme, SCHEMES, |scheme| scheme_label(*scheme))
+        RadioGroup::new(scheme)
             .id(scheme_wid())
+            .axis(Axis::X)
+            .look(RadioLook::Segment(None))
             .grid_cell((row, 1))
             .align(Align::LEFT)
-            .show(ui);
+            .show(ui, |ui, options| {
+                for pick in SCHEMES {
+                    options.option(pick).label(scheme_label(pick)).show(ui);
+                }
+            });
     }
 
     /// The interface size: a label in the form's label column and a dropdown of the offered

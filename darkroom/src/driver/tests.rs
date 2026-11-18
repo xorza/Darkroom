@@ -1440,8 +1440,8 @@ fn an_interface_size_pick_scales_the_ui() {
     assert_eq!(scale(&mut driver), 1.25);
 }
 
-/// The Preferences tab's theme reaches the window: a fresh launch shows dark, and a pick of Light
-/// turns palantir's scheme, whose theme is darkroom's light one, from the next frame.
+/// The Preferences tab's theme reaches the window: a fresh launch shows dark, and a click on the
+/// Light segment turns palantir's scheme, whose theme is darkroom's light one, from the next frame.
 #[test]
 fn a_theme_pick_turns_the_scheme() {
     let mut driver = driver();
@@ -1463,7 +1463,6 @@ fn a_theme_pick_turns_the_scheme() {
                 "Preferences {}",
                 Command::ShowPane(PaneKind::Preferences).chord_keys()
             ))),
-            click(Locator::text("Dark".to_string())),
             click(Locator::text("Light".to_string())),
         ])
         .unwrap();

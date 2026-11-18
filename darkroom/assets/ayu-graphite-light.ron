@@ -22,12 +22,12 @@
     text:           "#262626",    // text                         gray_7
     text_muted:     "#5d5d5d",    // text_muted                   gray_6
     text_disabled:  "#b0b0b0",    // text                         gray_7 at 0x5d over node_bg
-    element_mid:    "#f3f3f3",    // elem_hover                   gray_2
-    element_strong: "#e7e7e7",    // elem_active                  gray_3
+    element_mid:    "#dbdbdb",    // elem_hover                   gray_4
+    element_strong: "#cfcfcf",    // elem_active                  gray_5
 
     // Graph — the wires, and the marks drawn over them, and the neutral a
     // hovered port blends toward.
-    accent:         "#5b7000",    // (solved)                     its hue, placed as an ink
+    accent:         "#546800",    // (solved)                     its hue, placed as an ink
     wire_broken:    "#863136",    // error                        red_bright
     breaker_stroke: "#863136",    // error                        red_bright
     lift:           "#000000",    // (the far end)                black
@@ -43,7 +43,7 @@
     port_label:     "#5d5d5d",    // text_muted                   gray_6
 
     // Badges — what a node's head says about itself.
-    link:           "#5b7000",    // (solved)                     its hue, placed as an ink
+    link:           "#546800",    // (solved)                     its hue, placed as an ink
     badge_cache:    "#6e6000",    // warning                      yellow_bright
     badge_kind:     "#262626",    // text                         gray_7
 
