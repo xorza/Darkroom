@@ -13,7 +13,7 @@ use std::fmt::Formatter;
 use glam::Vec2;
 use palantir::{
     Configure, DockDrop, DockOperation, DockTabMenu, DockTabs, EditableLabel, InternedStr,
-    MenuItem, Size, SplitSide, TabChip, Ui, WidgetId, fmt,
+    MenuItem, Size, SplitSide, SplitSize, TabChip, Ui, WidgetId, fmt,
 };
 use scenarium::{CompoundId, GraphId, Library};
 
@@ -254,6 +254,7 @@ impl DockTabs for DockPanes<'_> {
                 to: DockDrop::Split {
                     group: menu.group,
                     side,
+                    size: SplitSize::HALF,
                 },
             });
         }

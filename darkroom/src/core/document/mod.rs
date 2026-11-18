@@ -74,7 +74,7 @@ use std::slice;
 
 use glam::Vec2;
 use lens::DisplayStretch;
-use palantir::{DockDrop, DockOperation, DockPath, DockState, SplitSide, TabGroup};
+use palantir::{DockDrop, DockOperation, DockState, SplitHalf, SplitSide, SplitSize, TabGroup};
 use scenarium::{
     Binding, Compound, CompoundId, ConstValue, DetachedGhost, DetachedNode, Graph as CoreGraph,
     GraphId, GraphSet, InputPort, InstancePath, Library, Manifest, Node, NodeAddr, NodeId,
@@ -219,9 +219,8 @@ impl Document {
     /// that node's pane showing it.
     ///
     /// A sidebar tab with no pane yet joins the group that holds a tab of the sidebar, a viewer
-    /// above an inspector; else it splits off the right of the main graph's group, the graphs
-    /// keeping [`GRAPHS_RATIO`] of the width where that split is the dock's root, the one split
-    /// a caller can address.
+    /// above an inspector; else it splits off the right of the main graph's group at
+    /// [`SIDEBAR`], which it keeps as the window grows, wherever that split sits.
     pub(crate) fn show_tab(&mut self, tab: TabRef) {
         let focused = self.layout.focused();
         let shown_before = self.layout.group(focused).map(TabGroup::active_tab);
@@ -269,7 +268,6 @@ impl Document {
                 .find(|open| open.home() == TabHome::Sidebar)
         });
         let Some(sidebar) = beside else {
-            let lone = self.layout.groups().count() == 1;
             let group = self
                 .layout
                 .find_tab(pinned)
@@ -281,14 +279,9 @@ impl Document {
                 to: DockDrop::Split {
                     group,
                     side: SplitSide::Right,
+                    size: SIDEBAR,
                 },
             });
-            if lone {
-                self.layout.apply(DockOperation::SetRatio {
-                    split: DockPath::ROOT,
-                    ratio: GRAPHS_RATIO,
-                });
-            }
             return;
         };
         let group = self
@@ -296,8 +289,8 @@ impl Document {
             .find_tab(sidebar)
             .expect("an open tab is in a group")
             .group;
-        // A viewer goes above an inspector, and an inspector below a viewer; two of a kind share
-        // a strip.
+        // A viewer goes above an inspector, and an inspector below a viewer, the two sharing the
+        // sidebar's height by ratio as both grow with the window's; two of a kind share a strip.
         let side = match (tab, sidebar) {
             (TabRef::Viewer(_), TabRef::Inspector(_)) => Some(SplitSide::Top),
             (TabRef::Inspector(_), TabRef::Viewer(_)) => Some(SplitSide::Bottom),
@@ -308,7 +301,11 @@ impl Document {
         if let Some(side) = side.filter(|_| can_split) {
             self.layout.apply(DockOperation::MoveTab {
                 tab,
-                to: DockDrop::Split { group, side },
+                to: DockDrop::Split {
+                    group,
+                    side,
+                    size: SplitSize::HALF,
+                },
             });
         }
     }
@@ -942,9 +939,12 @@ fn is_preview_node(graph: &CoreGraph, node_id: NodeId) -> bool {
         .is_some_and(preview_sink::is_func)
 }
 
-/// The share of the width the graphs keep beside a sidebar the editor opens: the sidebar's 28 %
-/// gives a 1600 px window a 450 px viewer and inspector.
-const GRAPHS_RATIO: f32 = 0.72;
+/// The sidebar the editor opens beside the graphs: 450 logical px, which it keeps as the window
+/// grows, as an editor's side bar keeps its width; a 1600 px window leaves the graphs 1150.
+const SIDEBAR: SplitSize = SplitSize::Fixed {
+    half: SplitHalf::Second,
+    px: 450.0,
+};
 
 /// A fresh dock: one pane showing the main graph, the pinned tab, so the tree is never empty.
 fn new_layout() -> DockState<TabRef> {

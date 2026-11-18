@@ -420,7 +420,7 @@ fn each_edit_route_owes_what_it_strands() {
 /// id: a click on the node in one pane selects it in that graph alone, and makes it active.
 #[test]
 fn a_click_in_one_pane_selects_nothing_in_a_copy_beside_it() {
-    use palantir::{DockDrop, SplitSide};
+    use palantir::{DockDrop, SplitSide, SplitSize};
     use scenarium::{Compound, CompoundId, Interface};
 
     use crate::core::document::internals::insert_compound;
@@ -444,6 +444,7 @@ fn a_click_in_one_pane_selects_nothing_in_a_copy_beside_it() {
         to: DockDrop::Split {
             group,
             side: SplitSide::Right,
+            size: SplitSize::HALF,
         },
     });
     let mut test = SessionHarness::new(fixture);

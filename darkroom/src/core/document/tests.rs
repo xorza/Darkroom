@@ -140,8 +140,49 @@ fn the_active_preview_goes_with_its_node() {
     );
 }
 
+/// A sidebar opened where the main graph's pane is not the dock's root is sized as one opened at
+/// the root: with Preferences split off below the main graph at half, the inspector's split off
+/// the main graph's right holds the fixed 450 px, and the root keeps its half.
+#[test]
+fn a_sidebar_below_the_root_keeps_its_width() {
+    let main = TabRef::Graph(GraphId::Main);
+    let mut document = Document::default();
+    document.layout.apply(DockOperation::OpenTab {
+        tab: TabRef::Preferences,
+    });
+    let primary = document.layout.find_tab(main).unwrap().group;
+    document.layout.apply(DockOperation::MoveTab {
+        tab: TabRef::Preferences,
+        to: DockDrop::Split {
+            group: primary,
+            side: SplitSide::Bottom,
+            size: SplitSize::HALF,
+        },
+    });
+    document.show_tab(TabRef::Inspector(InspectTarget::Selection));
+    let saved = common::SerdeFormat::Ron
+        .serialize(document.layout.layout())
+        .unwrap();
+    // The splits' sizes in pre-order, the root first, with RON's layout whitespace taken out.
+    let saved: String = String::from_utf8(saved)
+        .unwrap()
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    let sizes: Vec<&str> = saved
+        .split("size:")
+        .skip(1)
+        .filter_map(|rest| rest.split_once(",first:").map(|(size, _)| size))
+        .collect();
+    assert_eq!(
+        sizes,
+        ["Ratio(0.5)", "Fixed(half:Second,px:450.0,)"],
+        "{saved}"
+    );
+}
+
 /// A tab shows in its home: a sidebar tab with none open splits off the right of the main graph's
-/// group at 0.72, a viewer goes above an inspector and an inspector below a viewer, Preferences
+/// group at a fixed 450 px, a viewer goes above an inspector and an inspector below a viewer, Preferences
 /// joins the main graph's strip, and a tab already open is made visible where it is. The group
 /// that had the focus keeps it and keeps its tab: an inspector shown while a viewer sits behind
 /// Main in one strip leaves Main in front.
@@ -163,10 +204,14 @@ fn a_tab_shows_in_its_home_and_the_focus_stays() {
     let saved = common::SerdeFormat::Ron
         .serialize(document.layout.layout())
         .unwrap();
-    let saved = String::from_utf8(saved).unwrap();
+    let saved: String = String::from_utf8(saved)
+        .unwrap()
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
     assert!(
-        saved.contains("ratio: 0.72"),
-        "the graphs keep 0.72: {saved}"
+        saved.contains("size:Fixed(half:Second,px:450.0,)"),
+        "the sidebar keeps 450 px: {saved}"
     );
     document.show_tab(viewer);
     let (viewer_group, inspector_group) = (group(&document, viewer), group(&document, inspector));

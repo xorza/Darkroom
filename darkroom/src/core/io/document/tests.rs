@@ -4,7 +4,7 @@ use std::sync::Arc;
 use common::TempDir;
 use glam::Vec2;
 use lens::MlModelPaths;
-use palantir::{DockDrop, DockOperation, SplitSide};
+use palantir::{DockDrop, DockOperation, SplitSide, SplitSize};
 use scenarium::{
     Binding, Compound, CompoundId, ConstValue, EventPort, InputPort, Interface, Node, NodeId,
     OutputPort, PortId, ProgramId,
@@ -57,6 +57,7 @@ fn document_round_trips_in_either_format() {
         to: DockDrop::Split {
             group: primary,
             side: SplitSide::Right,
+            size: SplitSize::HALF,
         },
     });
     document.validate().unwrap();
