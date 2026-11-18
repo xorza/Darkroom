@@ -70,8 +70,8 @@ fn each_level_drains_its_own_tier_and_leaves_the_rest_queued() {
 
 /// A debt comes from a direct owe, or from an edit that strands the geometry and from no other, and
 /// a spend asks one pass and clears it, however many levels owed it: 1 record for no debt and a
-/// move's facts, 2 for a debt, and 1 again past the spend. A run is owed by an edit of what a run
-/// reads alone, once however many owed it, apart from the relayout.
+/// move's facts, 2 for a debt, and 1 again past the spend. A run is owed by an open or an edit of
+/// what a run reads alone, once however many owed it, apart from the relayout.
 #[test]
 fn a_relayout_or_a_run_owed_is_spent_once() {
     let mut h = Harness::builder(UVec2::ONE).mono().build();
@@ -111,5 +111,11 @@ fn a_relayout_or_a_run_owed_is_spent_once() {
     out.owe_after(program);
     assert!(!out.owes_relayout(), "a run owed strands no geometry");
     assert!(out.take_run(), "two edits owe one run");
+    assert!(!out.take_run(), "taken");
+
+    out.owe_run();
+    out.owe_after(program);
+    assert!(!out.owes_relayout(), "an open owes no relayout");
+    assert!(out.take_run(), "an open and an edit owe one run");
     assert!(!out.take_run(), "taken");
 }

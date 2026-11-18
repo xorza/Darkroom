@@ -93,7 +93,8 @@ pub struct Driver {
     /// The session's own directory, which is RAM on a tmpfs `/tmp`.
     session: TempDir,
     log: LogRing,
-    /// The runs the worker had ended when the last `act` began, which a run it starts ends past.
+    /// The runs the worker had ended when the last `act` or open began, which a run it starts
+    /// ends past.
     runs_before: u64,
     /// Shots taken, which numbers the next one's file.
     shots: u32,
@@ -162,9 +163,11 @@ impl Driver {
         self.reopen(None, "the new document")
     }
 
-    /// An offscreen editor that quit opens again as a new app; a window that quit has closed.
+    /// An offscreen editor that quit opens again as a new app; a window that quit has closed. The
+    /// run the open owes starts on the settle's first frame, so a [`Self::wait_run`] waits for it.
     fn reopen(&mut self, document: Option<PathBuf>, step: &str) -> Result<(), DriverError> {
         self.backend.open(document)?;
+        self.runs_before = self.backend.read(|app, _| app.run_state().runs_ended())?;
         self.backend.settle(step)?;
         Ok(())
     }
@@ -225,8 +228,8 @@ impl Driver {
         Ok(shot)
     }
 
-    /// Wait until a run that began after the last `act` began has ended, the worker has no run
-    /// in flight, and the editor settles, its previews landed. A run the worker has not started
+    /// Wait until a run that began after the last `act` or open began has ended, the worker has no
+    /// run in flight, and the editor settles, its previews landed. A run the worker has not started
     /// yet reads as idle, so the run's end, and not the worker's idleness, ends the wait.
     pub fn wait_run(&mut self, timeout: Duration) -> Result<(), DriverError> {
         self.backend.running()?;

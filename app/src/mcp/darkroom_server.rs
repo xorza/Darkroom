@@ -216,9 +216,10 @@ impl DarkroomServer {
     }
 
     #[tool(
-        description = "Wait until a run the last darkroom_act started on the editor's worker \
-        finishes and the editor settles, for at most timeout_s seconds, 60 by default. Start the \
-        run in that darkroom_act, as with the toolbar's run button, a node's run chip or ctrl+r. \
+        description = "Wait until a run the last darkroom_act or darkroom_open started on the \
+        editor's worker finishes and the editor settles, for at most timeout_s seconds, 60 by \
+        default. An open runs the previews in Run on Change; else start the run in a \
+        darkroom_act, as with the toolbar's run button, a node's run chip or ctrl+r. \
         Example: {\"timeout_s\": 120}"
     )]
     async fn darkroom_wait_run(

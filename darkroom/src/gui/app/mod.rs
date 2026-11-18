@@ -208,6 +208,8 @@ impl App {
             process_memory: ProcessMemory::new(),
             requests: Requests::default(),
         };
+        // The document the launch opened owes a run, as one a later open adopts does.
+        app.requests.owe_run();
         // Onto the Ui before frame 1, so palantir's own widgets paint right and the first frame
         // is at the remembered size. Darkroom has one look, Ayu Graphite's dark, so it pins the
         // dark scheme whatever the system reports.
@@ -547,12 +549,14 @@ impl App {
     /// its runtime cache go with the document.
     ///
     /// The worker's disk cache repoints to the new document's store. A document failure on the
-    /// status bar was about the replaced document, so every adoption clears it.
+    /// status bar was about the replaced document, so every adoption clears it. The new document
+    /// owes a run, which On Change spends on its previews.
     fn adopt_document(&mut self, open: OpenDocument) {
         self.run_state.clear();
         self.runtime.clear_program();
         // One assignment, so no window holds fresh panes over a stale graph's gesture state.
         self.session = Session::new(open);
+        self.requests.owe_run();
         self.runtime.set_document_cache(self.session.open.path());
         self.remember_document_path();
         self.status.succeeded(StatusFamily::Document);
@@ -777,10 +781,10 @@ impl App {
         }
     }
 
-    /// Run the previews' cones once an edit changed what a run reads, in On Change: the run in
-    /// flight stops first, so the last edit's run is the one that finishes. The cancel goes out
-    /// whether or not the editor has heard a run start: one the worker took and has not reported
-    /// stops, and with none the worker clears it when it takes the new run.
+    /// Run the previews' cones once a document opened or an edit changed what a run reads, in On
+    /// Change: the run in flight stops first, so the last edit's run is the one that finishes. The
+    /// cancel goes out whether or not the editor has heard a run start: one the worker took and
+    /// has not reported stops, and with none the worker clears it when it takes the new run.
     fn spend_run(&mut self) {
         if !self.requests.take_run() || self.preferences.run_mode != RunMode::OnChange {
             return;
@@ -1216,6 +1220,34 @@ mod tests {
                 "{choice:?}"
             );
         }
+    }
+
+    /// A launch owes one run for the document it opened, as a later open does, which On Change
+    /// spends on its previews.
+    #[test]
+    fn a_launch_owes_a_run_for_its_document() {
+        use common::TempDir;
+        use glam::UVec2;
+        use palantir::Harness;
+
+        use crate::core::io::preferences::preferences_store::PreferencesStore;
+        use crate::gui::dialogs::{DialogFallback, Dialogs};
+        use crate::internals::fixture;
+
+        let dir = TempDir::new("darkroom-launch-run");
+        let path = fixture::previews_beside_a_save(dir.path());
+        let mut ui = Harness::new(UVec2::new(800, 600));
+        let mut app = App::new(
+            ui.ui_mut(),
+            LaunchInputs {
+                preferences: PreferencesStore::Memory.open(),
+                document: Some(path.clone()),
+                dialogs: Dialogs::new(DialogFallback::Refuse),
+            },
+        );
+        assert_eq!(app.session.open.path(), Some(path.as_path()));
+        assert!(app.requests.take_run(), "the launch owes a run");
+        assert!(!app.requests.take_run(), "one run");
     }
 
     /// A view capture asks frames until its image lands, and the app reads as busy only while a

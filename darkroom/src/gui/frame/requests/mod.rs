@@ -44,8 +44,8 @@ pub(crate) struct Requests {
     app: VecDeque<AppCommand>,
     /// Whether anything stranded the canvas's cross-frame geometry since the last spend.
     relayout_owed: bool,
-    /// Whether an edit changed what a run reads since the last spend: what Run on Change runs
-    /// for, once a frame however many edits landed.
+    /// Whether a document opened or an edit changed what a run reads since the last spend: what
+    /// Run on Change runs for, once a frame however many edits landed.
     run_owed: bool,
 }
 
@@ -170,7 +170,13 @@ impl Requests {
         self.run_owed |= facts.program;
     }
 
-    /// Take the run owed: `true` once after any number of edits that changed what a run reads.
+    /// Owe a run for a document that opened, which On Change spends on its previews.
+    pub(crate) const fn owe_run(&mut self) {
+        self.run_owed = true;
+    }
+
+    /// Take the run owed: `true` once after a document opened or any number of edits that changed
+    /// what a run reads.
     pub(crate) const fn take_run(&mut self) -> bool {
         mem::replace(&mut self.run_owed, false)
     }

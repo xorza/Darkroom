@@ -43,6 +43,18 @@ fn driver() -> Driver {
     logged(LogRing::default())
 }
 
+/// Turn Run on Change off, so a test that presses Run sees that run alone and not the one an open
+/// starts in On Change, which could end before or after it.
+fn run_manually(driver: &mut Driver) {
+    driver
+        .act(&[
+            click(Locator::text("Graph")),
+            click(Locator::text("Run on Change")),
+        ])
+        .unwrap();
+    assert_eq!(driver.app().run_mode(), RunMode::Manual);
+}
+
 /// [`driver`], whose logs `log` keeps.
 fn logged(log: LogRing) -> Driver {
     Driver::new(
@@ -800,6 +812,7 @@ fn a_lost_device_is_replaced_and_the_editor_paints_as_before() {
 #[test]
 fn a_lost_device_takes_the_previews_and_they_convert_again() {
     let mut driver = small(DisplayKind::IsolatedTestGpu);
+    run_manually(&mut driver);
     let sample = Path::new(env!("CARGO_MANIFEST_DIR")).join("sample/sample.darkroom");
     driver.open(&sample, OpenMode::Copy).unwrap();
     driver.act(&[key("ctrl+r")]).unwrap();
@@ -956,6 +969,7 @@ fn a_save_writes_the_format_its_extension_names() {
 #[test]
 fn a_preview_inside_nested_compounds_publishes_under_its_path() {
     let mut driver = driver();
+    run_manually(&mut driver);
     let dir = TempDir::new("darkroom-driver-nested");
     let path = fixture::nested_preview(dir.path());
     driver.open(&path, OpenMode::InPlace).unwrap();
@@ -1062,6 +1076,7 @@ fn a_window_past_the_device_limit_is_refused() {
 #[test]
 fn the_sample_project_runs_to_its_previews() {
     let mut driver = driver();
+    run_manually(&mut driver);
     let sample = Path::new(env!("CARGO_MANIFEST_DIR")).join("sample/sample.darkroom");
     driver.open(&sample, OpenMode::Copy).unwrap();
     // A run that ends while a later action of the batch plays is still the batch's run.
@@ -1161,9 +1176,11 @@ fn the_sample_project_runs_to_its_previews() {
     );
 }
 
-/// In On Change, the start, an edit of what a run reads runs the previews that are not disabled
-/// and nothing else: the Save Image fed nothing, which a run of every sink would fail on, stays
-/// unrun. Run on Change in the Graph menu sets Manual, where an undo of that edit runs nothing.
+/// In On Change, the start, an open runs the previews that are not disabled and nothing else: the
+/// Save Image fed nothing, which a run of every sink would fail on, stays unrun. An edit of what a
+/// run reads then runs them again, and Shown, whose inputs the delete of Spare leaves as they were,
+/// is served as it stands. Run on Change in the Graph menu sets Manual, where an undo of that edit
+/// runs nothing.
 #[test]
 fn an_edit_runs_the_previews_on_change_and_nothing_in_manual() {
     let mut driver = driver();
@@ -1171,26 +1188,53 @@ fn an_edit_runs_the_previews_on_change_and_nothing_in_manual() {
     let path = fixture::previews_beside_a_save(dir.path());
     driver.open(&path, OpenMode::InPlace).unwrap();
     assert_eq!(driver.app().run_mode(), RunMode::OnChange);
+    // Each node's name and how its last run went, an execution's time left out.
+    let runs = |driver: &mut Driver| {
+        let state = driver.state(Detail::Detailed, None).unwrap();
+        let mut runs: Vec<(String, Option<String>)> = state
+            .active()
+            .nodes
+            .iter()
+            .map(|node| {
+                let run = node.run.as_deref().map(|run| {
+                    if run.starts_with("Executed") {
+                        "Executed".to_owned()
+                    } else {
+                        run.to_owned()
+                    }
+                });
+                (node.name.clone(), run)
+            })
+            .collect();
+        runs.sort_unstable();
+        runs
+    };
+    let expected = |runs: &[(&str, Option<&str>)]| -> Vec<(String, Option<String>)> {
+        runs.iter()
+            .map(|&(name, run)| (name.to_owned(), run.map(str::to_owned)))
+            .collect()
+    };
+    driver.wait_run(Duration::from_secs(30)).unwrap();
+    assert_eq!(
+        runs(&mut driver),
+        expected(&[
+            ("Off", None),
+            ("Save Image", None),
+            ("Shown", Some("Executed")),
+            ("Spare", Some("Executed")),
+        ]),
+        "the open ran the previews"
+    );
 
     driver.act(&[click(node("Spare")), key("delete")]).unwrap();
     driver.wait_run(Duration::from_secs(30)).unwrap();
-    let state = driver.state(Detail::Detailed, None).unwrap();
-    let mut runs: Vec<(&str, bool)> = state
-        .active()
-        .nodes
-        .iter()
-        .map(|node| {
-            let executed = node
-                .run
-                .as_ref()
-                .is_some_and(|run| run.starts_with("Executed"));
-            (node.name.as_str(), executed)
-        })
-        .collect();
-    runs.sort_unstable();
     assert_eq!(
-        runs,
-        [("Off", false), ("Save Image", false), ("Shown", true)]
+        runs(&mut driver),
+        expected(&[
+            ("Off", None),
+            ("Save Image", None),
+            ("Shown", Some("Cached"))
+        ])
     );
     let shown = driver
         .app()
@@ -1203,13 +1247,7 @@ fn an_edit_runs_the_previews_on_change_and_nothing_in_manual() {
         "{shown:?}"
     );
 
-    driver
-        .act(&[
-            click(Locator::text("Graph")),
-            click(Locator::text("Run on Change")),
-        ])
-        .unwrap();
-    assert_eq!(driver.app().run_mode(), RunMode::Manual);
+    run_manually(&mut driver);
     driver.act(&[key("ctrl+z")]).unwrap();
     assert_eq!(
         driver

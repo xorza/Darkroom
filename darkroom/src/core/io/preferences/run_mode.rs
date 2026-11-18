@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 /// When a run starts unasked: one setting of the editor, not of a document, so it follows a
 /// person from one document to the next.
 ///
+/// - **In On Change an open runs the previews**, as Houdini cooks the display node of a file it
+///   loads ([cooking](https://www.sidefx.com/docs/houdini/basics/cooking.html)): a document shows
+///   what it holds without an edit or a Run first.
 /// - **On Change starts.** A change shows by itself, as Houdini's Auto Update, Dynamo's
 ///   Automatic ([interface](https://primer2.dynamobim.org/3_user_interface)) and Blender's
 ///   compositor run; an editor commits once a gesture, so a scrub runs on its release, as
