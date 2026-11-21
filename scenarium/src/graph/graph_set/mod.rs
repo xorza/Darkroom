@@ -27,12 +27,14 @@ pub(crate) mod digest;
 use std::collections::BTreeMap;
 use std::mem;
 
-use hashbrown::{HashMap, HashSet};
+use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::data::data_type::DataType;
 use crate::graph::Graph;
 use crate::graph::compound::Compound;
+use crate::graph::dfs;
+use crate::graph::dfs::BackEdges;
 use crate::graph::error::{
     DetachReason, GraphSetValidationError, GraphValidationError, PlacementRejection,
 };
@@ -149,14 +151,6 @@ pub struct InterfacePort {
     /// [`PortList::Inputs`] or [`PortList::Outputs`]: an event carries no type to be unknown.
     pub list: PortList,
     pub port: PortId,
-}
-
-/// What a walk of the compounds found: the instances that close a loop, and the compounds in an
-/// order where each comes after every compound it places, the closing instances aside.
-#[derive(Debug, Default)]
-struct DefWalk {
-    closing: Vec<NodeAddr>,
-    post_order: Vec<CompoundId>,
 }
 
 impl From<Graph> for GraphSet {
@@ -342,11 +336,9 @@ impl GraphSet {
             if at == graph {
                 found.push(path);
             }
-            for node in self.graph(at).iter() {
-                if let Some(placed) = node.compound()
-                    && self.compound(placed).is_some()
-                {
-                    open.push((path.child(node.node_id), GraphId::Compound(placed)));
+            for (node_id, placed) in self.graph(at).placed() {
+                if self.compound(placed).is_some() {
+                    open.push((path.child(node_id), GraphId::Compound(placed)));
                 }
             }
         }
@@ -358,22 +350,13 @@ impl GraphSet {
     /// places: the order a copy of them goes into another set so each instance's compound is
     /// held before it. Bounded by the depth gate; a placed compound the set lacks is left out.
     pub fn placed_first(&self, id: CompoundId) -> Vec<CompoundId> {
-        let mut order = Vec::new();
-        self.push_placed_first(id, &mut order);
-        order
-    }
-
-    fn push_placed_first(&self, id: CompoundId, order: &mut Vec<CompoundId>) {
-        if order.contains(&id) {
-            return;
+        if self.compound(id).is_none() {
+            return Vec::new();
         }
-        let Some(compound) = self.compound(id) else {
-            return;
-        };
-        for placed in compound.graph.iter().filter_map(|node| node.compound()) {
-            self.push_placed_first(placed, order);
-        }
-        order.push(id);
+        dfs::back_edges([id], |owner, next| {
+            next.extend(self.placed_compounds(owner).map(|placed| ((), placed)));
+        })
+        .post_order
     }
 
     /// Every node that places compound `id`, each ghost node included, in each graph: the main graph's
@@ -781,24 +764,19 @@ impl GraphSet {
         let GraphId::Compound(owner) = graph else {
             return false;
         };
-        let mut stack = vec![placed];
-        let mut seen: HashSet<CompoundId> = HashSet::from_iter([placed]);
-        while let Some(id) = stack.pop() {
-            if id == owner {
-                return true;
-            }
-            let Some(compound) = self.compound(id) else {
-                continue;
-            };
-            for node in compound.graph.iter() {
-                if let Some(inner) = node.compound()
-                    && seen.insert(inner)
-                {
-                    stack.push(inner);
-                }
-            }
-        }
-        false
+        dfs::reaches(placed, owner, |id, next| {
+            next.extend(self.placed_compounds(id));
+        })
+    }
+
+    /// The compounds `id`'s instances place that this set holds, in node-id order: the edges of
+    /// what each compound places. None for a compound the set lacks.
+    fn placed_compounds(&self, id: CompoundId) -> impl Iterator<Item = CompoundId> + '_ {
+        self.compound(id)
+            .into_iter()
+            .flat_map(|compound| compound.graph.placed())
+            .map(|(_, placed)| placed)
+            .filter(|placed| self.compounds.contains_key(placed))
     }
 
     /// A depth-first walk of what each compound places, from every compound in id order and
@@ -806,76 +784,18 @@ impl GraphSet {
     /// the current path closes a loop. Instances of a compound the set lacks are passed over.
     /// Removing the closing instances leaves no loop, and the id order makes the choice the same
     /// on every load.
-    fn walk(&self) -> DefWalk {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-        enum Mark {
-            OnPath,
-            Done,
-        }
-        #[derive(Debug)]
-        enum Visit {
-            Enter(CompoundId),
-            Instance {
-                owner: CompoundId,
-                node_id: NodeId,
-                placed: CompoundId,
-            },
-            Exit(CompoundId),
-        }
-
-        let mut marks: HashMap<CompoundId, Mark> = HashMap::with_capacity(self.compounds.len());
-        let mut stack = Vec::new();
-        let mut walk = DefWalk {
-            closing: Vec::new(),
-            post_order: Vec::with_capacity(self.compounds.len()),
-        };
-        for &root in self.compounds.keys() {
-            if marks.contains_key(&root) {
-                continue;
-            }
-            stack.push(Visit::Enter(root));
-            while let Some(visit) = stack.pop() {
-                match visit {
-                    Visit::Enter(owner) => {
-                        marks.insert(owner, Mark::OnPath);
-                        stack.push(Visit::Exit(owner));
-                        let first = stack.len();
-                        stack.extend(self.compounds[&owner].graph.iter().filter_map(|node| {
-                            node.compound().map(|placed| Visit::Instance {
-                                owner,
-                                node_id: node.node_id,
-                                placed,
-                            })
-                        }));
-                        let instances = &mut stack[first..];
-                        instances.sort_unstable_by_key(|visit| match visit {
-                            Visit::Instance { node_id, .. } => *node_id,
-                            Visit::Enter(_) | Visit::Exit(_) => unreachable!(),
-                        });
-                        instances.reverse();
-                    }
-                    Visit::Instance {
-                        owner,
-                        node_id,
-                        placed,
-                    } => match marks.get(&placed) {
-                        Some(Mark::OnPath) => walk
-                            .closing
-                            .push(NodeAddr::new(GraphId::Compound(owner), node_id)),
-                        Some(Mark::Done) => {}
-                        None if self.compounds.contains_key(&placed) => {
-                            stack.push(Visit::Enter(placed));
-                        }
-                        None => {}
-                    },
-                    Visit::Exit(owner) => {
-                        marks.insert(owner, Mark::Done);
-                        walk.post_order.push(owner);
-                    }
-                }
-            }
-        }
-        walk
+    fn walk(&self) -> BackEdges<CompoundId, NodeAddr> {
+        dfs::back_edges(self.compounds.keys().copied(), |owner, next| {
+            next.extend(
+                self.compounds[&owner]
+                    .graph
+                    .placed()
+                    .filter(|(_, placed)| self.compounds.contains_key(placed))
+                    .map(|(node_id, placed)| {
+                        (NodeAddr::new(GraphId::Compound(owner), node_id), placed)
+                    }),
+            );
+        })
     }
 
     /// The shape of each compound, taken in `post_order`, so each is known before an instance of

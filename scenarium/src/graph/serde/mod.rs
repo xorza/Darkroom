@@ -78,14 +78,20 @@ pub(super) fn deserialize_nodes<'de, D: Deserializer<'de>>(
 }
 
 /// The compound table, decoded as a map refusing a repeated id, as [`deserialize_nodes`] does
-/// for nodes: two compounds under one id are two definitions every instance of either names.
+/// for nodes: two compounds under one id are two definitions every instance of either names. A
+/// compound under the nil id is refused too: no set may hold one, and unlike a node, which a load
+/// moves to the ghosts, it has no graph to be repaired in.
 pub(super) fn deserialize_compounds<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<BTreeMap<CompoundId, Compound>, D::Error> {
-    deserializer.deserialize_map(UniqueMapVisitor {
+    let compounds = deserializer.deserialize_map(UniqueMapVisitor {
         what: "compound id",
         entry: PhantomData,
-    })
+    })?;
+    if compounds.contains_key(&CompoundId::nil()) {
+        return Err(D::Error::custom("a compound under the nil id"));
+    }
+    Ok(compounds)
 }
 
 /// The ghost nodes, decoded as a map refusing a repeated id: two ghost nodes under one id are

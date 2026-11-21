@@ -72,12 +72,9 @@ impl Compound {
         }
     }
 
-    /// The `Inputs` nodes of this compound's graph, in no order.
+    /// The `Inputs` nodes of this compound's graph, in node-id order.
     pub fn inputs_nodes(&self) -> impl Iterator<Item = NodeId> {
-        self.graph
-            .iter()
-            .filter(|node| node.boundary() == Some(Boundary::Inputs))
-            .map(|node| node.node_id)
+        self.graph.boundary_nodes(Boundary::Inputs)
     }
 
     /// The `Inputs` node of least id: a new compound's one.
@@ -86,7 +83,7 @@ impl Compound {
     /// If the graph holds none, which a compound a host keeps never does.
     pub fn inputs_node(&self) -> NodeId {
         self.inputs_nodes()
-            .min()
+            .next()
             .expect("a compound's graph holds an Inputs node")
     }
 
@@ -96,9 +93,8 @@ impl Compound {
     /// If the graph holds none, which a compound a host keeps never does.
     pub fn outputs_node(&self) -> NodeId {
         self.graph
-            .iter()
-            .find(|node| node.boundary() == Some(Boundary::Outputs))
+            .boundary_nodes(Boundary::Outputs)
+            .next()
             .expect("a compound's graph holds an Outputs node")
-            .node_id
     }
 }

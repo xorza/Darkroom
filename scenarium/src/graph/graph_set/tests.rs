@@ -140,6 +140,53 @@ fn a_loop_is_refused_and_a_load_breaks_it_at_one_instance() {
     let reloaded = set.clone();
     assert!(set.reconcile(&library, &Manifest::default()).is_empty());
     assert_eq!(set, reloaded);
+
+    // The broken loop is held by a ghost node, which a digest encodes by id rather than
+    // follow, where the walk once went round the loop until the stack ran out. Each digest is
+    // its own definition's, and the same each time.
+    let (one, two) = (set.digest(s(1)), set.digest(s(2)));
+    assert_ne!(one, two);
+    assert_eq!(set.digest(s(1)), one);
+    assert_eq!(set.placed_first(s(1)), [s(2), s(1)]);
+}
+
+/// A compound that places itself live, as a library file no load reconciled may hold, ends the
+/// walks a copy and a digest take, where each once recursed until the stack ran out.
+#[test]
+fn a_compound_that_places_itself_ends_every_walk() {
+    let mut set = GraphSet::default();
+    set.insert_compound(s(1), empty("one"));
+    place(&mut set, GraphId::Compound(s(1)), n(11), s(1));
+
+    assert_eq!(set.placed_first(s(1)), [s(1)]);
+    assert_eq!(set.digest(s(1)), set.digest(s(1)));
+}
+
+/// A compound under the nil id is refused at decode: no set holds one, and it has no graph a
+/// load could repair it in.
+#[test]
+fn a_compound_under_the_nil_id_is_refused() {
+    let mut set = GraphSet::default();
+    set.insert_compound(s(1), empty("one"));
+    let text = String::from_utf8(SerdeFormat::Ron.serialize(&set).unwrap()).unwrap();
+    assert!(
+        SerdeFormat::Ron
+            .deserialize::<GraphSet>(text.as_bytes())
+            .is_ok()
+    );
+
+    let nil = text.replace(&s(1).to_string(), &CompoundId::nil().to_string());
+    assert_ne!(nil, text, "the id is spelled in the text");
+    let error = SerdeFormat::Ron
+        .deserialize::<GraphSet>(nil.as_bytes())
+        .expect_err("a nil compound does not load");
+    assert!(
+        ErrorChain::new(&error)
+            .to_string()
+            .contains("a compound under the nil id"),
+        "{}",
+        ErrorChain::new(&error)
+    );
 }
 
 /// A chain of eight compounds, each placing the next and the last holding a `src`, nests eight

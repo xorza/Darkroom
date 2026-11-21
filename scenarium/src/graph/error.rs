@@ -126,7 +126,7 @@ pub enum SubscriptionRejection {
 /// breaks the load contract against a library.
 #[derive(Debug, Error)]
 pub enum GraphValidationError {
-    #[error("graph contains a node with a nil id")]
+    #[error("graph holds a node or a ghost node under the nil id")]
     NilNodeId,
     #[error("a ghost node holds the id of node {node_id:?}")]
     GhostHoldsNode { node_id: NodeId },

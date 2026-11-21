@@ -184,7 +184,13 @@ fn const_only_input_rejects_bind_but_a_normal_input_accepts_it() {
     );
     let err = validate(true).expect_err("a const-only input must reject a wired binding");
     assert!(
-        err.to_string().contains("const-only"),
+        matches!(
+            err,
+            GraphValidationError::RejectedBinding {
+                rejection: BindingRejection::WiredConstOnly,
+                ..
+            }
+        ),
         "unexpected error: {err}"
     );
 }
@@ -606,6 +612,23 @@ fn a_detached_node_restores_its_wiring_and_malformed_records_are_refused() {
         attached,
         "a refused attach leaves the graph alone"
     );
+
+    // A ghost on an input the record binds is wiring there too: the attach is refused before
+    // the node goes in, where it once left a live binding and a ghost on one input.
+    let detached = g.graph_mut().detach_node(sum);
+    g.graph_mut().set_input_state(
+        first.port,
+        InputState::Ghost(GhostBinding::from(Binding::Const(1i64.into()))),
+    );
+    let ghosted = g.graph().clone();
+    let over_ghost = panic::catch_unwind(AssertUnwindSafe(|| {
+        g.graph_mut().attach_node(detached);
+    }));
+    assert!(
+        over_ghost.is_err(),
+        "a ghost where the record binds refuses it"
+    );
+    assert_eq!(*g.graph(), ghosted, "and the graph is untouched");
 }
 
 /// Placing a node seeds a const binding for every input its declaration gave a
@@ -704,10 +727,6 @@ fn loading_rejects_a_corrupt_graph() {
         error,
         GraphValidationError::BindingMissingProducer { .. }
     ));
-    assert!(
-        error.to_string().contains("binds to missing node"),
-        "the message names what broke: {error}"
-    );
 
     let mut nil_key = Graph::default();
     nil_key
@@ -717,6 +736,19 @@ fn loading_rejects_a_corrupt_graph() {
     let decoded: Graph = SerdeFormat::Bitcode.deserialize(&bytes).unwrap();
     assert!(matches!(
         decoded.validate(),
+        Err(GraphValidationError::NilNodeId)
+    ));
+    let mut nil_ghost = Graph::default();
+    nil_ghost.ghost_nodes.insert(
+        NodeId::nil(),
+        GhostNode {
+            node: internals::unresolved_node(FuncId::unique()),
+            reason: DetachReason::Unresolved(Unresolved::MissingFunc),
+            saved: None,
+        },
+    );
+    assert!(matches!(
+        nil_ghost.validate(),
         Err(GraphValidationError::NilNodeId)
     ));
 
@@ -894,13 +926,16 @@ fn a_wire_between_two_ghost_nodes_outlives_either_returning_alone() {
 
 /// A load repairs the ghosts a file breaks: a ghost node saved under a node's id goes and the
 /// node stays; a ghost saved on a bound input goes; a ghost that names a node the graph holds as
-/// neither goes; and live wiring that names a ghost node becomes a ghost. A ghost saved of a
+/// neither goes; and live wiring that names a ghost node becomes a ghost. Live wiring is repaired
+/// first, so on `Print`'s input, wired live from a node the file lacks and as a ghost from one it
+/// keeps, the live wire goes and the ghost stays. A ghost saved of a
 /// subscription the graph has made goes the same way
 /// ([`a_ghost_is_held_to_admission_and_the_loop_check`]).
 #[test]
 fn a_load_repairs_the_ghosts_a_file_breaks() {
     let mut g = TestGraph::sample();
-    let [get_a, get_b, sum, mult] = ["get_a", "get_b", "sum", "mult"].map(|name| g.id(name));
+    let [get_a, get_b, sum, mult, print] =
+        ["get_a", "get_b", "sum", "mult", "Print"].map(|name| g.id(name));
     let missing = DetachReason::Unresolved(Unresolved::MissingFunc);
     let sum_func = g.graph().find(sum).unwrap().func_id().unwrap();
     g.library.remove(sum_func).unwrap();
@@ -929,6 +964,23 @@ fn a_load_repairs_the_ghosts_a_file_breaks() {
         ghosts
             .subscriptions
             .insert(stray, GhostSubscription::default());
+        // A ghost on `sum`'s first input of another binding than the live one, which the live
+        // one replaces as it becomes a ghost; one on its second of the same binding, which stays.
+        ghosts
+            .bindings
+            .insert(port(sum, 1), GhostBinding::from(five.clone()));
+        ghosts.bindings.insert(
+            port(sum, 2),
+            GhostBinding::from(Binding::wire(get_b, PortId::new(1))),
+        );
+        // An output `get_b` does not declare, so the load keeps the ghost rather than restore it.
+        ghosts.bindings.insert(
+            port(print, 1),
+            GhostBinding::from(Binding::wire(get_b, PortId::new(9))),
+        );
+        graph
+            .bindings
+            .insert(port(print, 1), Binding::wire(absent, PortId::new(1)));
     }
 
     let reconciled = g.graphs.reconcile(&g.library, &Manifest::default()).main;
@@ -945,7 +997,7 @@ fn a_load_repairs_the_ghosts_a_file_breaks() {
         },
         Repair::DanglingBinding {
             port: port(absent, 1),
-            binding: five,
+            binding: five.clone(),
         },
     ];
     ghost_repairs.sort_by_key(|repair| match repair {
@@ -953,21 +1005,33 @@ fn a_load_repairs_the_ghosts_a_file_breaks() {
         _ => unreachable!(),
     });
     let mut live_repairs = vec![
+        Repair::GhostOnBoundInput {
+            port: port(sum, 1),
+            binding: five,
+        },
         into_ghost(port(sum, 1), Binding::wire(get_a, PortId::new(1))),
         into_ghost(port(sum, 2), Binding::wire(get_b, PortId::new(1))),
         into_ghost(port(mult, 1), Binding::wire(sum, PortId::new(1))),
+        Repair::DanglingBinding {
+            port: port(print, 1),
+            binding: Binding::wire(absent, PortId::new(1)),
+        },
     ];
+    // Stable, so the ghost a live binding replaces is reported before the binding it became.
     live_repairs.sort_by_key(|repair| match repair {
-        Repair::GhostedBinding { port, .. } => *port,
+        Repair::GhostedBinding { port, .. }
+        | Repair::DanglingBinding { port, .. }
+        | Repair::GhostOnBoundInput { port, .. } => *port,
         _ => unreachable!(),
     });
+    // The live wiring first, so a ghost is weighed against the live wiring that stays.
     let expected: Vec<Repair> = [Repair::DuplicateGhostNode { node_id: get_a }]
         .into_iter()
+        .chain(live_repairs)
         .chain(ghost_repairs)
         .chain([Repair::DanglingSubscription {
             subscription: stray,
         }])
-        .chain(live_repairs)
         .collect();
     assert_eq!(reconciled.repairs, expected);
     assert!(g.graph().find(get_a).is_some(), "the node keeps its id");
@@ -978,7 +1042,14 @@ fn a_load_repairs_the_ghosts_a_file_breaks() {
             .collect::<Vec<_>>(),
         [sum]
     );
-    assert_eq!(g.graph().ghost_wiring().bindings().len(), 3);
+    assert_eq!(g.graph().ghost_wiring().bindings().len(), 4);
+    assert_eq!(
+        g.graph()
+            .ghost_wiring()
+            .binding(port(print, 1))
+            .and_then(GhostBinding::output),
+        Some(OutputPort::new(get_b, PortId::new(9)))
+    );
     assert_eq!(g.graph().ghost_wiring().subscriptions().len(), 0);
     g.graph().validate_with(g.scope()).unwrap();
     assert!(
@@ -1806,6 +1877,16 @@ fn reconcile_keeps_as_ghosts_what_the_library_cannot_hold() {
         .main_mut()
         .nodes
         .insert(NodeId::nil(), Node::from(src_func));
+    // A ghost node under the nil id that would resolve, which the load once attached and
+    // panicked on.
+    g.graphs.main_mut().ghost_nodes.insert(
+        NodeId::nil(),
+        GhostNode {
+            node: Node::from(src_func),
+            reason: DetachReason::Unresolved(Unresolved::MissingFunc),
+            saved: None,
+        },
+    );
     g.graph_mut()
         .insert(nil_func, internals::unresolved_node(FuncId::nil()));
     let gone_func = g.graph().find(gone).unwrap().func_id().unwrap();
@@ -1821,6 +1902,7 @@ fn reconcile_keeps_as_ghosts_what_the_library_cannot_hold() {
     assert_eq!(
         reconciled.repairs,
         [
+            Repair::NilNode,
             Repair::NilNode,
             Repair::DanglingBinding {
                 port: absent_port,

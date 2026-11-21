@@ -40,10 +40,9 @@ Named so no batch touches it.
 3. **Blob I/O is asynchronous one operation at a time.** `tokio::fs::File` turns each read, write,
    seek and stat into its own blocking-pool round trip, the format seeks back to patch each
    output's length, and the probe's header read is thrown away and repeated at the load.
-4. **The document's rules are written where they are used, not once.** Seven hand-rolled walks, of
-   which the two without an on-path mark recurse without bound; the structural repair covers
-   `nodes` and not `ghost_nodes`; "may this graph hold this bind" is assembled by hand at three
-   host sites; the live wiring is two loose fields where the ghost wiring is a type.
+4. **The document's rules are written where they are used, not once.** "May this graph hold this
+   bind" is assembled by hand at three host sites; the live wiring is two loose fields where the
+   ghost wiring is a type.
 5. **Declarations are assembled through types that never close.** `Library` is at once the
    registration surface and the registry every frame reads; `Func` and `FuncBuilder` write one
    field list five times; an event is declared in two shapes; what a lambda wrote is never held to
@@ -58,10 +57,6 @@ Each is traced to its code; the batch that fixes it carries its test.
 
 | # | Where | Input → wrong result |
 |---|---|---|
-| B4 | `graph/graph_set/digest.rs:38-97` | `digest_with` records a compound after hashing it and recurses into each instance, ghost nodes included. The state a load leaves after breaking a loop (compound 1 places 2, 2 keeps a ghost instance of 1, reason `Recursive`) recurses until the stack overflows. `push_placed_first` (`graph_set/mod.rs:366-377`) pushes after recursing, so a live self-placement in a library file that was never reconciled does the same. |
-| B5 | `graph/mod.rs:1075-1087,1195-1207` | A file whose `ghost_nodes` holds the nil id with a node that resolves: `repair_structure` removes `nodes[nil]` only, `reattach` calls `insert`, which asserts a non-nil id. The load panics. A nil `CompoundId` has the same hole. |
-| B10 | `graph/mod.rs:890-925` | `attach_node` checks a record's bindings against the live table, not the ghost table: a record attached over a ghost on one input leaves a live binding and a ghost on it, which `validate` refuses and the next compile asserts on. `put_ghost_wiring` asserts after the node is already in. |
-| B11 | `graph/mod.rs:1093-1156` | `repair_structure` prunes ghosts against the live table before it prunes dangling live bindings: with live `(B,1) ← Missing.out` and ghost `(B,1) ← A.out`, the ghost goes as a duplicate, then the live one as dangling. A wire whose two nodes the graph keeps is dropped. |
 | B12 | `graph/value_domain/float_span.rs:90-116` | `FloatSpan::at_least(0.0).contains(f64::INFINITY)` is `true` for a type documented as finite; `between(-f64::MAX, f64::MAX).fraction(f64::MAX)` is `Some(NaN)`. |
 | B13 | `data/const_value.rs:156` | `Display` prints a float as `{:.4}`: `0.00004` reads `0.0000`, a zero that hides a nonzero value, shown through `DynamicValue`'s `Display` on a preview card. |
 
@@ -285,14 +280,6 @@ pub enum BindRejection { GhostNode { node_id: NodeId }, Binding(#[from] BindingR
 // graph/detached.rs
 pub struct DetachedNode { node_id: NodeId, node: Node, wiring: Wiring, ghost_wiring: GhostWiring }
 
-// graph/dfs.rs — new; the one depth-first walk, iterative, with an on-path mark
-pub(crate) struct BackEdges<N, E> { pub(crate) closing: Vec<E>, pub(crate) post_order: Vec<N> }
-pub(crate) fn back_edges<N: Copy + Ord, E>(
-    roots: impl IntoIterator<Item = N>,
-    successors: impl FnMut(N, &mut Vec<(E, N)>),
-) -> BackEdges<N, E>;
-pub(crate) fn reaches<N: Copy + Ord>(from: N, to: N, successors: impl FnMut(N, &mut Vec<N>)) -> bool;
-
 // graph/inline_ids.rs — new, private to `graph`
 #[derive(Clone, Copy)]
 pub(crate) struct InlineIds<const N: usize> { len: u8, ids: [NodeId; N] }
@@ -340,17 +327,9 @@ impl GhostNode {
 - **`Wiring`** — a port is bound once by construction, so `DetachedNode::new` loses its sort,
   its duplicate scan and two error variants; `bindings` is no longer a public field, so
   `set_input_state` is the one write and the live and ghost keys stay disjoint by it.
-- **`dfs::back_edges`** carries the on-path mark that B4's two walks lack: `closing_wires`,
-  `GraphSet::walk`, `placed_first` and `digest_with` are calls into it, and `produces_cycle` and
-  `would_recurse` calls into `reaches`. A digest encodes an instance met on its own path, and every
-  ghost-node instance, by the compound's id.
-- **The structural rule is one function**, `Graph::repair_structure`, and `validate` is "it would
-  repair nothing": the nil id in either node table, each key in two tables, each dangling end,
-  dangling live wiring pruned before ghosts.
 - **Gone:** `BindingEntry` (a `(InputPort, Binding)` pair of a `Wiring`), `RefusedBinding`,
   `RefusedSubscription`, `NamedGhost`, `RefusedWiring` (it takes `AdmittedGhosts`' two-list shape),
-  `ExactChain`, `Graph::is_subscribed`, `reads_input` / `reads_output`, `DefWalk`, both local
-  `Mark` / `Visit` pairs.
+  `ExactChain`, `Graph::is_subscribed`, `reads_input` / `reads_output`.
 
 Batch 9 alone:
 
@@ -786,10 +765,10 @@ cache passes it; no borrow in the call graph outlives `ExecEngine::execute`.
   by `FuncBuilder::event`, their equal length asserted in `checked`. Refused: one
   `Vec<FuncEvent>`, from which no `&[Numbered<EventDecl>]` can be borrowed, the reason
   `NodeEvents`, `EventRef` and `ExactChain` exist.
-- **One depth-first walk with an on-path mark.** As petgraph's `depth_first_search`, whose
-  `DfsEvent::BackEdge` is "an edge to an already visited node"
-  ([`DfsEvent`](https://docs.rs/petgraph/latest/petgraph/visit/enum.DfsEvent.html)). Refused:
-  petgraph itself, a dependency for one function over `Id` keys held in a `BTreeMap`.
+- **Not taken: one test a behaviour for `a_manifest_tells_a_load_what_each_func_declared` and
+  `a_subscription_lands_on_a_declared_trigger_and_an_interface_edit_refuses_it`.** The second is
+  one story whose steps build on each other's state, and the first's phases share its fixture's
+  closures; split, each would carry the fixture again for a better failure name alone.
 - **`Library` is built, then read.** "Builders enable construction of complex values"
   ([C-BUILDER](https://rust-lang.github.io/api-guidelines/type-safety.html)); `FuncBuilder` →
   `Func` is the same shape one level down. Refused: `check()` as a call the composer remembers.
@@ -844,35 +823,6 @@ cache passes it; no borrow in the call graph outlives `ExecEngine::execute`.
 # Part 2 — Plan
 
 Each batch leaves the build and the tests green. Whoever addresses an item deletes it.
-
-## Batch 4 — the document's bugs and its one walk
-
-Files: `graph/dfs.rs` (new), `graph/mod.rs`, `graph/graph_set/`, `graph/compound.rs`,
-`graph/tests.rs`, `graph/graph_set/tests.rs`.
-
-- [ ] `graph_set/digest.rs:38-97`, `graph_set/mod.rs:366-377` — B4. Target: `dfs::back_edges`;
-  an on-path or ghost-node instance encodes by id. Tests: `digest` on the state
-  `a_loop_is_refused_and_a_load_breaks_it_at_one_instance` leaves; `placed_first` on a live
-  self-placement.
-- [ ] `graph/mod.rs:1075-1087,336-342,949-960` — B5. Target: `repair_structure` removes
-  `ghost_nodes[nil]`, `validate` refuses it, `insert_ghost_node` asserts; a nil `CompoundId` is
-  refused at decode. Test: a load of each.
-- [ ] `graph/mod.rs:890-925,386-406` — B10. Target: every assert of an attach before its first
-  insert, the ghost table among them. Test: an attach over a ghost panics with the graph untouched.
-- [ ] `graph/mod.rs:1093-1156` — B11. Target: dangling live wiring pruned first. Test: the
-  doubly-wrong file keeps the ghost.
-- [ ] `graph/mod.rs:757-777,1713-1762`, `graph_set/mod.rs:338-377,780-879` — seven walks, two
-  identical `Mark` / `Visit` pairs, an `order.contains` that is quadratic. Target: `back_edges`
-  and `reaches`.
-- [ ] `graph/mod.rs:1726-1727`, `graph_set/mod.rs:636,850-855`, `compound.rs:87-91` — sorts and a
-  `min` over what a `BTreeMap` already orders. Target: none.
-- [ ] `graph_set/mod.rs:345,373,385,793,843`; `graph/mod.rs:1039,1220,1274`, `compound.rs:79,100` —
-  "the compounds a graph places" five times, "the boundary nodes of a side" eight. Target:
-  `Graph::placed`, `Graph::boundary_nodes`.
-- [ ] `graph/tests.rs:185-189,703-710,732-736,753-757` — errors asserted by message substring.
-  Target: the variant.
-- [ ] `graph/tests.rs:1429-1729`, `graph_set/tests.rs:1176-1337` — one test of 300 lines over six
-  behaviours, twice. Target: a table over the one fixture.
 
 ## Batch 5 — blob and stamp I/O
 
