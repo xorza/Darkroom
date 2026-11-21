@@ -18,6 +18,7 @@ use crate::identity::{EventPort, NodeId, TriggerPort};
 /// address type per kind of trigger, which every site that handles a subscription's end matches
 /// on.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(deny_unknown_fields)]
 pub struct Subscription {
     pub event: EventPort,
     pub trigger: TriggerPort,

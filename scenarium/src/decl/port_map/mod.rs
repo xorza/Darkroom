@@ -130,6 +130,7 @@ impl From<PortMap> for Vec<(PortId, PortId)> {
 /// Where each port of a node's old declaration went in its new one: its inputs, its outputs and
 /// its events.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NodeRemap {
     pub inputs: PortMap,
     pub outputs: PortMap,

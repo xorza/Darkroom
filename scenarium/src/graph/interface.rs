@@ -49,6 +49,7 @@ pub struct Interface {
 /// The events an interface fires, each under an id unique among them, and its one trigger, if
 /// any.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EventPorts {
     /// What an instance fires and the `Outputs` node shows as triggers inside.
     pub events: Vec<Numbered<EventDecl>>,
@@ -64,6 +65,7 @@ impl EventPorts {
 
 /// An interface as a file holds it: borrowed to write, owned once read.
 #[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct InterfaceRepr<'a> {
     ports: Cow<'a, Ports>,
     event_ports: Cow<'a, EventPorts>,

@@ -30,6 +30,7 @@ use crate::graph::node::Node;
 /// definition is one value wherever it goes. No edit wires to one: it and the wiring that
 /// touches it are a frozen record until a load attaches it again.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GhostNode {
     pub node: Node,
     pub reason: DetachReason,

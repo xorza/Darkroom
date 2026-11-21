@@ -176,6 +176,14 @@ arguments after a `--`; each submodule runs its own.
   with the library and reports it; the edit gate keeps the document
   consistent after that. At run time and in each frame, code asserts the
   document is valid and does not check it again or fall back.
+- **A type a text file holds refuses a field it does not hold**, and a field every write writes
+  takes no `default`: each named-field type of a document, a clip or a palette carries
+  `#[serde(deny_unknown_fields)]`, on the type it reads through when it reads through another,
+  so a file of another shape fails on the field it names. Refused: serde's default, which skips
+  an unknown field ([container attributes](https://serde.rs/container-attrs.html#deny_unknown_fields)),
+  so a field renamed or moved loads as absent and a save writes the loss back, as a document saved
+  before `wiring` opened with every wire gone. The preferences file stays lenient, a partial one
+  loading on defaults.
 - **No value held by shared ownership is serialized.** A write copies the value once per
   holder and a read gives each holder its own, so the sharing the type states is gone; a serialized
   type holds the value itself, or an id into a table written once. Refused: serde's `rc` feature,

@@ -44,6 +44,7 @@ use crate::library::Library;
 /// graph's wiring, and what becomes of the wiring it refuses. [`GraphSet::write_interface`] lands
 /// either side.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct InterfaceChange {
     id: CompoundId,
     before: Interface,
@@ -60,6 +61,7 @@ pub struct InterfaceChange {
 /// What an interface edit changes of one graph's wiring, as ghosts under the keys the graph keeps
 /// them by.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct WiringChange {
     /// Each binding and subscription the new interface refuses, as the ghost it would be: with
     /// the name and type of each of its ends the new interface no longer gives.

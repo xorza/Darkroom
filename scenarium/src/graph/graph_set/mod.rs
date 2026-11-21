@@ -84,6 +84,7 @@ pub struct GraphSet {
 
 /// A set as a file holds it: the main graph, and each compound whole.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct GraphSetRepr {
     main: Graph,
     /// Decoded entry by entry, so a document that repeats an id is refused rather than loaded

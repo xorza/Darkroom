@@ -104,6 +104,7 @@ pub enum GraphId {
 
 /// An authored node's address in a document: its graph and its id there.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(deny_unknown_fields)]
 pub struct NodeAddr {
     pub graph: GraphId,
     pub node_id: NodeId,
@@ -124,6 +125,7 @@ impl fmt::Display for PortId {
 /// Address of a producer node's output port, the source side of a `Binding::Wire`, by the id
 /// its declaration gives the port.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(deny_unknown_fields)]
 pub struct OutputPort {
     pub node_id: NodeId,
     pub port: PortId,
@@ -137,6 +139,7 @@ impl OutputPort {
 
 /// Address of an emitter node's event, by the id its declaration gives it.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(deny_unknown_fields)]
 pub struct EventPort {
     pub node_id: NodeId,
     pub event: PortId,
@@ -151,6 +154,7 @@ impl EventPort {
 /// Address of a trigger, where a subscription lands: a node's own trigger under [`Self::NODE`],
 /// or the `Outputs` node's trigger under the id of the interface event it passes out.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(deny_unknown_fields)]
 pub struct TriggerPort {
     pub node_id: NodeId,
     pub trigger: PortId,
@@ -176,6 +180,7 @@ impl From<NodeId> for TriggerPort {
 /// Address of a consumer node's input port; keys a graph's bindings. Distinct from `OutputPort`
 /// so source and sink can't be confused.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(deny_unknown_fields)]
 pub struct InputPort {
     pub node_id: NodeId,
     pub port: PortId,

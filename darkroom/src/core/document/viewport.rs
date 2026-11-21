@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 /// top-left offset in pane-local px, `zoom` is display px per texel, so one `ZoomRange` algebra
 /// serves both.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct Viewport {
     pub(crate) pan: Vec2,
     pub(crate) zoom: f32,

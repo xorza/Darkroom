@@ -10,6 +10,7 @@ use palantir::RgbaF32;
 /// `ramp` is a fixed-size array, which serde reads as a tuple, so the palette file writes it in
 /// parentheses, not brackets.
 #[derive(Clone, Debug, PartialEq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct TypeColors {
     pub(crate) boolean: RgbaF32,
     pub(crate) int: RgbaF32,

@@ -18,20 +18,19 @@ use crate::identity::{EventPort, InputPort, NodeId, OutputPort, PortId};
 /// graph's own methods, which keep it apart from the ghost wiring; a value of its own, as an edit
 /// assembles one, is written here.
 #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct Wiring {
     /// Data wiring, keyed by consumer input port; absence means unbound. A `BTreeMap` keeps
     /// serialization deterministic and a node's ports contiguous. Serialized as `(port, binding)`
     /// pairs decoded entry by entry, so a document that repeats a port is refused rather than
     /// loaded with only the last binding.
     #[serde(
-        default,
         serialize_with = "crate::graph::serde::serialize_pairs",
         deserialize_with = "crate::graph::serde::deserialize_bindings"
     )]
     pub(super) bindings: BTreeMap<InputPort, Binding>,
     /// Event wiring: every (emitter event → subscriber) edge, flat. A `BTreeSet` dedups and keeps
     /// serialization and compile order deterministic.
-    #[serde(default)]
     pub(super) subscriptions: BTreeSet<Subscription>,
 }
 

@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 /// whatever its mode. The on-disk backend is wired only once a caller attaches a `DiskStore` with a
 /// disk root; until then the disk bit degrades to memory alone.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
+#[serde(deny_unknown_fields)]
 pub struct CacheMode {
     /// How long RAM keeps the output.
     pub ram: Keep,

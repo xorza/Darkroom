@@ -349,14 +349,21 @@ fn completed_snapshot_replaces_the_previous_run() {
 /// A failed run leaves no results to show, so an execution error clears the
 /// last run's statuses. A flush that wrote nothing fails no run, so the statuses the last
 /// completed run left stand. A completed run and a failed one each end a run; the flush ends
-/// none.
+/// none. A run has ended since a count once the count passed it and no run executes.
 #[test]
 fn only_a_failed_run_clears_the_last_run_statuses() {
     let node = node_id(1);
     let mut rs = run_state([node]);
     let mut log = StatusLog::default();
+    assert!(!rs.ended_since(0), "no run has ended");
+    rs.apply_report(WorkerReport::Activity(WorkerActivity::Executing), &mut log);
+    assert!(!rs.ended_since(0), "the run executes");
     rs.apply_report(completed_status(&[(node, 1.0)], &[]), &mut log);
     assert_eq!(rs.runs_ended(), 1);
+    assert!(rs.ended_since(0));
+    assert!(!rs.ended_since(1), "no run ended after the count read 1");
+    rs.apply_report(WorkerReport::Activity(WorkerActivity::Executing), &mut log);
+    assert!(!rs.ended_since(0), "a later run executes");
 
     rs.apply_report(flush_wrote_nothing(node), &mut log);
     assert_eq!(rs.status(node), ExecStatus::Executed(1.0));

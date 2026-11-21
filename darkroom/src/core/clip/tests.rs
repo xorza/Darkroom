@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use common::internals::with_unknown_field::WithUnknownField;
 use glam::Vec2;
 use scenarium::{Compound, CompoundId, GraphId, Interface, Library, NodeId};
 
@@ -58,7 +59,8 @@ fn text_that_is_no_clip_pastes_nothing() {
 
 /// A copied instance pastes into another document with its compound and that compound's view; a
 /// second paste reuses the definition it brought, as the digests match; once that document
-/// changes the definition, a paste brings the copied one under a fresh id.
+/// changes the definition, a paste brings the copied one under a fresh id. A field no clip type
+/// holds, in any struct of the text, makes it no clip.
 #[test]
 fn a_paste_brings_its_compounds_by_digest() {
     let id = CompoundId::from_u128(1);
@@ -73,6 +75,19 @@ fn a_paste_brings_its_compounds_by_digest() {
     .expect("the selection holds a node")
     .to_text();
     assert!(text.starts_with(HEADER));
+    let variants = WithUnknownField::each_struct(&text);
+    assert_eq!(
+        variants.first().map(|variant| variant.line),
+        Some(3),
+        "the clip's own struct opens on line 2, under the header"
+    );
+    for variant in variants {
+        assert!(
+            Clip::parse(&variant.text).is_none(),
+            "line {}",
+            variant.line
+        );
+    }
 
     // Another document, whose library declares the copied node's func.
     let mut other = DocumentFixture::default();

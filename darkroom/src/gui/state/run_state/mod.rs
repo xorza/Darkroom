@@ -281,6 +281,13 @@ impl RunState {
         self.runs_ended
     }
 
+    /// Whether a run asked for after [`Self::runs_ended`] read `runs_before` has ended, and none
+    /// runs now. The count, not the activity alone, tells: a run the worker has not taken yet
+    /// reads as no run executing.
+    pub(crate) const fn ended_since(&self, runs_before: u64) -> bool {
+        self.runs_ended > runs_before && !self.activity.is_executing()
+    }
+
     /// RAM the worker's runtime cache holds, as of the last report that measured it.
     pub(crate) const fn cache_ram(&self) -> RamUsage {
         self.cache_ram

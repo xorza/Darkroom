@@ -41,6 +41,7 @@ pub(crate) mod error;
 
 /// A port's declaration under its id: the item a declaration's lists of ports hold.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Numbered<T> {
     pub id: PortId,
     pub port: T,
@@ -68,6 +69,7 @@ impl<T> DerefMut for Numbered<T> {
 
 /// One input port a declaration shows.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct InputDecl {
     pub name: String,
     pub required: bool,
@@ -183,6 +185,7 @@ impl InputDecl {
 
 /// One output port a declaration shows.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct OutputDecl {
     pub name: String,
     pub data_type: DataType,
@@ -211,6 +214,7 @@ impl OutputDecl {
 /// An event an interface fires or its trigger: a name and what it is for, as a func's
 /// event declares beside its lambda.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EventDecl {
     pub name: String,
     pub description: Option<String>,
@@ -234,6 +238,7 @@ impl EventDecl {
 
 /// The inputs and outputs a declaration shows, each in the order a node draws them.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Ports {
     pub inputs: Vec<Numbered<InputDecl>>,
     pub outputs: Vec<Numbered<OutputDecl>>,

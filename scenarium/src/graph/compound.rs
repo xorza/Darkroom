@@ -117,6 +117,7 @@ impl From<CompoundRef<'_>> for Compound {
 
 /// A compound as a file writes it: its declaration's fields, then its graph.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct CompoundRepr {
     name: String,
     description: Option<String>,

@@ -1,7 +1,8 @@
 use std::io::Write as _;
 use std::sync::Arc;
 
-use common::TempDir;
+use common::internals::with_unknown_field::{UNKNOWN_FIELD, WithUnknownField};
+use common::{DeserializeError, TempDir};
 use glam::Vec2;
 use lens::MlModelPaths;
 use palantir::{DockDrop, DockOperation, SplitSide, SplitSize};
@@ -189,6 +190,44 @@ fn load_rejects_malformed_documents_and_archives() {
         load(&zipped_malformed).unwrap_err(),
         DocumentLoadError::Deserialize { path, .. } if path == zipped_malformed
     ));
+}
+
+/// A load refuses a field no type of the file holds, wherever it stands, so a document of
+/// another shape fails on the field it names rather than opening with that field's data gone:
+/// each checked-in document loads, then each of its structs takes such a field in turn, and each
+/// load fails on it, at its line.
+#[test]
+fn a_field_the_file_does_not_hold_fails_the_load() {
+    const DOCUMENTS: [&str; 3] = [
+        include_str!("../../../../sample/sample.darkroom"),
+        include_str!("../../../../sample/library/stretch.darkroom"),
+        include_str!("../../../gui/app/session/bench.darkroom"),
+    ];
+    for document in DOCUMENTS {
+        SerdeFormat::Ron
+            .deserialize::<FileOwned>(document.as_bytes())
+            .expect("a checked-in document loads");
+
+        let variants = WithUnknownField::each_struct(document);
+        assert_eq!(
+            variants.first().map(|variant| variant.line),
+            Some(2),
+            "the file's own struct opens on line 1"
+        );
+        for variant in variants {
+            let error = SerdeFormat::Ron
+                .deserialize::<FileOwned>(variant.text.as_bytes())
+                .expect_err("an unknown field fails the load");
+            let DeserializeError::Ron(error) = error else {
+                panic!("RON text fails as RON: {error}");
+            };
+            assert_eq!(error.span.start.line, variant.line, "{error}");
+            assert!(
+                matches!(&error.code, ron::Error::NoSuchStructField { found, .. } if found == UNKNOWN_FIELD),
+                "{error}"
+            );
+        }
+    }
 }
 
 fn write_test_archive(path: &Path, name: &str, contents: &[u8]) {

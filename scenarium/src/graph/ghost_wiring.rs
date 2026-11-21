@@ -38,6 +38,7 @@ use crate::identity::{EventPort, InputPort, NodeId, OutputPort, PortId};
 /// A binding a graph keeps and cannot hold: what was on an input, and the ports as they were
 /// where a node no longer declares them.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GhostBinding {
     /// The input as it was, when no declaration the graph can read gives it: its node no
     /// longer declares it, or is a ghost node that does not know it.
@@ -47,6 +48,7 @@ pub struct GhostBinding {
 
 /// What a ghost binding bound its input to.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum GhostSource {
     Const(ConstValue),
     Wire {
@@ -97,6 +99,7 @@ impl From<Binding> for GhostBinding {
 
 /// A subscription a graph keeps and cannot hold.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GhostSubscription {
     /// The event as it was, when no declaration the graph can read gives it.
     pub event: Option<SavedEvent>,
@@ -136,15 +139,14 @@ pub enum SubscriptionState {
 /// Read through the methods here and written through [`Graph`](crate::Graph)'s, which keep it
 /// apart from the live tables.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GhostWiring {
     #[serde(
-        default,
         serialize_with = "crate::graph::serde::serialize_pairs",
         deserialize_with = "crate::graph::serde::deserialize_ghost_bindings"
     )]
     pub(super) bindings: BTreeMap<InputPort, GhostBinding>,
     #[serde(
-        default,
         serialize_with = "crate::graph::serde::serialize_pairs",
         deserialize_with = "crate::graph::serde::deserialize_ghost_subscriptions"
     )]

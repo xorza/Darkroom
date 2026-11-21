@@ -49,6 +49,7 @@ pub(crate) const MAX_BYTES: usize = 16 << 20;
 /// manifest of the compounds: what each func they name declared in the build that copied, so a
 /// paste into a build that lacks one keeps a ghost node that says what it was.
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct Clip {
     fragment: Fragment,
     compounds: Vec<ClipCompound>,
@@ -57,6 +58,7 @@ pub(crate) struct Clip {
 
 /// One compound a clip carries, under the id the copied document held it under, with its view.
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ClipCompound {
     id: CompoundId,
     compound: Compound,

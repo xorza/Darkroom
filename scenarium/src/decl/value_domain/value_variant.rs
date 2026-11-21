@@ -6,6 +6,7 @@ use crate::data::const_value::ConstValue;
 
 /// One entry of an input's picker: the label it shows, and the constant a pick binds.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ValueVariant {
     pub label: String,
     pub value: ConstValue,

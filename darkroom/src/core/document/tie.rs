@@ -11,6 +11,7 @@ pub(crate) type TieId = Id<Tie>;
 /// The wires it holds are the routes that name it, in
 /// [`GraphView::routes`](crate::core::document::graph_view::GraphView::routes).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct Tie {
     /// Canvas-world position of the band's center.
     pub(crate) pos: Vec2,

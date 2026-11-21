@@ -3,8 +3,10 @@
         graphs: (
             main: (
                 nodes: {},
-                bindings: [],
-                subscriptions: [],
+                wiring: (
+                    bindings: [],
+                    subscriptions: [],
+                ),
                 ghost_nodes: {},
                 ghost_wiring: (
                     bindings: [],

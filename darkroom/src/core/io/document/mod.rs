@@ -47,6 +47,7 @@ struct FileRef<'a> {
 
 /// What a file holds, as a load reads it.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FileOwned {
     document: Document,
     manifest: Manifest,

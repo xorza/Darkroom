@@ -1,10 +1,12 @@
 use glam::{UVec2, Vec2};
 use lens::DisplayStretch;
+use palantir::App as _;
 use palantir::Harness;
 use palantir::{DockOperation, Key, Locator, Modifiers};
 use scenarium::{Binding, GraphId, InputPort, NodeId, OutputPort, PortId, ProgramId};
 use std::iter;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use common::internals::alloc_audit;
 
@@ -30,16 +32,22 @@ use crate::gui::pane::image_viewer::ImageViewer;
 use crate::gui::state::preview_store;
 use crate::gui::state::preview_store::StoredContent;
 
-/// Frames to settle the scene before the window opens. The caches that
-/// grow once — text shaping, palantir's widget tables, the record store's
-/// arenas — do it inside these, so what the window sees is steady state.
+/// Frames to settle the scene before the window opens, once the document's run has ended. The
+/// caches that grow once — text shaping, palantir's widget tables, the record store's arenas — do
+/// it inside these, so what the window sees is steady state.
 const SETTLE_FRAMES: u32 = 32;
+/// The most real time the document's run may take to end and its work off the frame to land, a
+/// bound for a hung worker: both take milliseconds.
+const RUN_WAIT: Duration = Duration::from_secs(30);
 /// Long enough that a once-every-N-frames allocation lands inside the
 /// window rather than after it.
 const AUDITED_FRAMES: usize = 64;
 
 /// A whole frame of the app performs no heap operation once the editor has settled: its sweeps
-/// and every record pass, as the window runs them.
+/// and every record pass, as the window runs them. Settled means the run the adopted document
+/// owes has ended too, with no work off the frame left and no wake waiting, as the driver's
+/// `wait_run` holds a run to: reports land on the worker's time, and the frame that folds them
+/// is not a steady one, so a slow machine would audit that frame.
 ///
 /// Strict zero, because every allocation on this path would be the editor's own: a `format!`
 /// for a label palantir copies into its text arena anyway, or a `collect()` for a list that
@@ -87,6 +95,18 @@ fn a_settled_frame_records_without_allocating() {
         ui.ui_mut().request_repaint();
         ui.frame_app(app)
     };
+    let runs_before = app.run_state.runs_ended();
+    let deadline = Instant::now() + RUN_WAIT;
+    loop {
+        full_frame(&mut ui, &mut app);
+        if app.run_state.ended_since(runs_before) && !app.is_busy() && !ui.has_pending_wake() {
+            break;
+        }
+        assert!(
+            ui.wait_for_wake(deadline.saturating_duration_since(Instant::now())),
+            "the document's run did not end and settle within {RUN_WAIT:?}"
+        );
+    }
     for _ in 0..SETTLE_FRAMES {
         full_frame(&mut ui, &mut app);
     }

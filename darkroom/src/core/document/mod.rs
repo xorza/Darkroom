@@ -107,6 +107,7 @@ use crate::core::preview_sink;
 /// destructuring proves they are disjoint, where accessor methods would each borrow the whole
 /// `Document`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct Document {
     /// Each graph holds only nodes its scope resolves, with only admitted wiring, and keeps each
     /// node it cannot hold as a ghost node.
@@ -117,7 +118,7 @@ pub(crate) struct Document {
     pub(crate) sides: BTreeMap<CompoundId, CompoundSide>,
     /// The pane arrangement: open tabs grouped into split panes, plus the focused group.
     /// Mutated only through a `DockOperation`, none of which is undoable.
-    #[serde(default = "new_layout", with = "layout_file")]
+    #[serde(with = "layout_file")]
     pub(crate) layout: DockState<TabRef>,
     /// The graph the window's commands act on: the selection a menu or the status bar reads, and
     /// the graph a Duplicate or a Delete edits. View state, not undoable; a request against a
@@ -126,7 +127,6 @@ pub(crate) struct Document {
     /// The preview the following viewer shows, the one last pressed. View state, saved and not
     /// undoable, as `active` is; `None` until a press, and again once its path stops naming a
     /// preview.
-    #[serde(default)]
     pub(crate) active_preview: Option<ProgramId>,
 }
 

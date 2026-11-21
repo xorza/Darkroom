@@ -18,6 +18,7 @@ use crate::identity::PortId;
 
 /// A port as its declaration last showed it: its name and its type.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SavedPort {
     pub name: String,
     pub data_type: DataType,
@@ -47,6 +48,7 @@ impl<'a> From<&'a SavedPort> for ShownPort<'a> {
 /// at, not the func's, and a file that went to another person would carry the folders of the
 /// one it was saved on.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SavedInput {
     pub name: String,
     pub data_type: DataType,
@@ -65,6 +67,7 @@ impl SavedInput {
 
 /// An event as its declaration last showed it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SavedEvent {
     pub name: String,
 }
@@ -73,6 +76,7 @@ pub struct SavedEvent {
 /// in the order it showed them. What a [`Manifest`](crate::Manifest) holds of each func a file
 /// names, and what a [`GhostNode`](crate::GhostNode) holds of the node it was.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SavedDecl {
     pub name: String,
     /// Empty for a declaration with none: a compound's.

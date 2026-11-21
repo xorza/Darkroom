@@ -16,6 +16,7 @@ pub(crate) enum WireKey {
 
 /// A data wire: `input` bound to `output`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct DataWire {
     pub(crate) output: OutputPort,
     pub(crate) input: InputPort,

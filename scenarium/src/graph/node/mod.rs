@@ -22,6 +22,7 @@ use ::serde::{Deserialize, Serialize};
 /// [`Scope`](crate::Scope), so one admission rule holds for all; only a node with a body runs,
 /// and it and an instance carry a [`CacheMode`].
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub(crate) enum NodeKind {
     /// A node that runs: a library func or a built-in special, cached as `cache` says.
     Body {
@@ -58,11 +59,11 @@ pub enum Boundary {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct Node {
     pub(crate) kind: NodeKind,
     /// The node's own name; `None` shows its declaration's, so a func or a compound renamed reads
     /// renamed on each node nobody named ([`Scope::title`](crate::Scope::title)).
-    #[serde(default)]
     pub name: Option<String>,
 
     /// Disabled nodes remain in the compiled program but ambient planning

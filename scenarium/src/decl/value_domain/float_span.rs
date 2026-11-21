@@ -123,6 +123,7 @@ impl FloatSpan {
 
 /// What a file writes: the ends, which [`FloatSpan`]'s decode checks.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FloatSpanRepr {
     min: f64,
     max: Option<f64>,

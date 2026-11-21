@@ -28,6 +28,7 @@ use crate::identity::FuncId;
 /// The saved declaration of each func a file's graphs name, and the name of each type its ports
 /// name, as the library gave them at the save.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Manifest {
     #[serde(deserialize_with = "crate::graph::serde::deserialize_manifest_funcs")]
     funcs: BTreeMap<FuncId, SavedDecl>,

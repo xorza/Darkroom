@@ -22,6 +22,7 @@ use crate::core::document::graph_view::GraphView;
 /// alike, as a view holds one placement per node: the view is the editor's, not the
 /// framework's.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct CompoundSide {
     pub(crate) view: GraphView,
     /// The instance whose run results the compound's pane shows, or `None` for none. View
@@ -42,6 +43,7 @@ pub(crate) struct CompoundSide {
 
 /// What an edit of a compound's place in the library writes: its marks beside the definition.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct SideMarks {
     pub(crate) shared: bool,
     pub(crate) synced: Option<CompoundDigest>,

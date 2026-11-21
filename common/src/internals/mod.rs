@@ -8,6 +8,7 @@
 pub mod alloc_audit;
 pub(crate) mod temp_file;
 pub(crate) mod unreadable;
+pub mod with_unknown_field;
 
 use std::env;
 use std::ffi::OsString;

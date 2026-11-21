@@ -20,6 +20,7 @@ use crate::core::document::wire_key::WireKey;
 /// [`GraphView`] derive its equality and serde, and makes
 /// [`SetDepth`](crate::core::edit::step::set_depth::SetDepth) a field write instead of a reorder.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct NodePlacement {
     /// Canvas-world position of the body's top-left corner.
     pub(crate) pos: Vec2,
@@ -48,6 +49,7 @@ pub(crate) struct StackedNode {
 /// Everything here is saved. Ctrl+Z walks the selection with the structural edits but not the
 /// camera (`darkroom/AGENTS.md`, "The camera is outside the undo history").
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct GraphView {
     /// Every node body's placement. Exactly one entry per graph node and per ghost node, enforced by
     /// [`Self::validate`]. Order-insensitive: paint order rides in each entry's

@@ -158,6 +158,7 @@ pub(crate) mod wiring;
 /// Every table is reached through the methods below, which keep the live wiring and the ghost
 /// wiring apart: an input holds one binding, live or ghost.
 #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct Graph {
     /// Every node, keyed by id, so an id is unique by construction:
     /// [`insert`](Self::insert) panics rather than replacing, and
@@ -170,20 +171,15 @@ pub struct Graph {
     nodes: BTreeMap<NodeId, Node>,
 
     /// The bindings and subscriptions, each end a node of this graph.
-    #[serde(default)]
     wiring: Wiring,
 
     /// The nodes this graph cannot hold, by id, their ids disjoint from `nodes`'. Decoded entry
     /// by entry, so a document that repeats an id is refused.
-    #[serde(
-        default,
-        deserialize_with = "crate::graph::serde::deserialize_ghost_nodes"
-    )]
+    #[serde(deserialize_with = "crate::graph::serde::deserialize_ghost_nodes")]
     ghost_nodes: BTreeMap<NodeId, GhostNode>,
 
     /// The bindings and subscriptions this graph cannot hold, their keys disjoint from the live
     /// tables'. Each end of each is a node or a ghost node of this graph.
-    #[serde(default)]
     ghost_wiring: GhostWiring,
 }
 

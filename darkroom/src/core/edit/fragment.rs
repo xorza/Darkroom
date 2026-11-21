@@ -29,6 +29,7 @@ use crate::core::edit::unwired;
 /// copies them: [`Self::capture`] reads them out of the document, [`Self::remap`] gives them
 /// fresh ids, and [`Self::into_intents`] lands them as the edits that add them.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct Fragment {
     /// In the order the selection lists them.
     nodes: Vec<FragmentNode>,
@@ -48,6 +49,7 @@ pub(crate) struct Fragment {
 /// start with — each constant, and each wire from outside as the capture's [`IncomingWires`]
 /// left it; no subscription.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FragmentNode {
     node_id: NodeId,
     node: Node,
@@ -56,12 +58,14 @@ struct FragmentNode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FragmentTie {
     tie: TieId,
     placed: Tie,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FragmentRoute {
     wire: WireKey,
     ties: Vec<TieId>,

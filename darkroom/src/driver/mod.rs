@@ -228,20 +228,18 @@ impl Driver {
         Ok(shot)
     }
 
-    /// Wait until a run that began after the last `act` or open began has ended, the worker has no
-    /// run in flight, and the editor settles, its previews landed. A run the worker has not started
-    /// yet reads as idle, so the run's end, and not the worker's idleness, ends the wait.
+    /// Wait until a run asked for after the last `act` or open began has ended, as the run state's
+    /// `ended_since` tells, and the editor settles, its previews landed.
     pub fn wait_run(&mut self, timeout: Duration) -> Result<(), DriverError> {
         self.backend.running()?;
         let deadline = Instant::now() + timeout;
         let before = self.runs_before;
         loop {
             self.backend.settle("the run")?;
-            let (executing, ended) = self.backend.read(|app, _| {
-                let run = app.run_state();
-                (run.activity().is_executing(), run.runs_ended())
-            })?;
-            if ended > before && !executing && !self.backend.wake_pending() {
+            let ended = self
+                .backend
+                .read(move |app, _| app.run_state().ended_since(before))?;
+            if ended && !self.backend.wake_pending() {
                 return Ok(());
             }
             if Instant::now() > deadline {

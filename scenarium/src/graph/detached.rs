@@ -101,14 +101,13 @@ impl DetachedNode {
 /// The contents of a [`DetachedNode`] before [`DetachedNode::new`] checks them — what a caller
 /// assembles a record from, and what one deserializes as.
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DetachedNodeParts {
     pub node_id: NodeId,
     pub node: Node,
     /// Each binding and subscription that touches the node.
-    #[serde(default)]
     pub wiring: Wiring,
     /// Each ghost that touches the node: none for a node an edit authors.
-    #[serde(default)]
     pub ghost_wiring: GhostWiring,
 }
 
@@ -123,6 +122,7 @@ impl TryFrom<DetachedNodeParts> for DetachedNode {
 /// A ghost node taken out of a graph, with each ghost that touched it: what a removal of one
 /// takes out and an undo puts back. A graph builds one from its own tables.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DetachedGhost {
     pub(super) node_id: NodeId,
     pub(super) ghost: GhostNode,

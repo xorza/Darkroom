@@ -111,21 +111,30 @@ impl Palette {
 
 #[cfg(test)]
 mod tests {
+    use common::internals::with_unknown_field::{UNKNOWN_FIELD, WithUnknownField};
+
     use super::*;
 
     /// The file and the struct must name the same roles: one the generator
-    /// still emits but darkroom stopped reading fails the load, like one it
-    /// dropped. Both edits start from a real asset, and both assets load.
+    /// still emits but darkroom stopped reading fails the load, in the palette and in its type
+    /// roster alike, like one it dropped. Both edits start from a real asset, and both assets
+    /// load.
     #[test]
     fn a_role_the_struct_does_not_read_fails_the_load() {
         for file in [DARK, LIGHT] {
             ron::from_str::<Palette>(file).expect("the asset loads");
         }
 
-        let extra = DARK.replacen("\n(\n", "\n(\n    output_port: \"#fa993b\",\n", 1);
-        assert_ne!(extra, DARK, "the role went in");
-        let error = ron::from_str::<Palette>(&extra).expect_err("an extra role fails");
-        assert!(error.to_string().contains("output_port"), "{error}");
+        let extras = WithUnknownField::each_struct(DARK);
+        assert_eq!(extras.len(), 2, "the palette and its `type_colors`");
+        for extra in extras {
+            let error = ron::from_str::<Palette>(&extra.text).expect_err("an extra role fails");
+            assert_eq!(error.span.start.line, extra.line, "{error}");
+            assert!(
+                matches!(&error.code, ron::Error::NoSuchStructField { found, .. } if found == UNKNOWN_FIELD),
+                "{error}"
+            );
+        }
 
         let missing = DARK
             .lines()

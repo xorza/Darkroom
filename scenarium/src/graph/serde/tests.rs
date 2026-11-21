@@ -125,7 +125,9 @@ fn a_repeated_node_id_is_refused_rather_than_collapsed() {
 
     // And through `Graph` itself, where the field attribute has to be wired
     // up for any of this to apply.
-    let document = format!("(nodes:{table},bindings:[],subscriptions:[])");
+    let document = format!(
+        "(nodes:{table},wiring:(bindings:[],subscriptions:[]),ghost_nodes:{{}},ghost_wiring:(bindings:[],subscriptions:[]))"
+    );
     let error = ron::from_str::<Graph>(&document)
         .expect_err("a graph holding a repeated node id does not load");
     assert!(
@@ -135,7 +137,9 @@ fn a_repeated_node_id_is_refused_rather_than_collapsed() {
 
     // One entry per id still loads, so the check refuses collisions rather
     // than maps.
-    let document = format!("(nodes:{{{key}:{first}}},bindings:[],subscriptions:[])");
+    let document = format!(
+        "(nodes:{{{key}:{first}}},wiring:(bindings:[],subscriptions:[]),ghost_nodes:{{}},ghost_wiring:(bindings:[],subscriptions:[]))"
+    );
     let graph: Graph = ron::from_str(&document).expect("a well-formed document loads");
     assert_eq!(graph.len(), 1);
 }
