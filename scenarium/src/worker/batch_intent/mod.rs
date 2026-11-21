@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::containers::unique;
 use crate::exec::cache::disk_store::DiskStore;
 use crate::exec::compile::compiled_graph::CompiledGraph;
+use crate::exec::program_event::ProgramEvent;
 use crate::exec::seeds::RunSeeds;
 use crate::graph::program_id::ProgramId;
 use crate::worker::protocol::WorkerMessage;
@@ -56,15 +57,18 @@ impl BatchIntent {
         match msg {
             // A graph op supersedes the node seeds named before it, which asked about the program
             // it replaces, so one its program lacks is void. A seed named after the last graph op
-            // still fails the run when absent.
+            // still fails the run when absent. The events fired before it go whole: each names
+            // the program the loop it came from was armed over.
             WorkerMessage::Update { compiled } => {
                 self.seeds
                     .program_ids
                     .retain(|&program_id| compiled.contains(program_id));
+                self.seeds.events.clear();
                 self.graph_state = Some(GraphOp::Replace(compiled));
             }
             WorkerMessage::Clear => {
                 self.seeds.program_ids.clear();
+                self.seeds.events.clear();
                 self.graph_state = Some(GraphOp::Clear);
             }
             WorkerMessage::EvictCache { program_ids } => {
@@ -81,12 +85,38 @@ impl BatchIntent {
                 unique::extend(&mut self.seeds.program_ids, program_ids);
             }
             #[cfg(test)]
-            WorkerMessage::FireEvents { events } => self.seeds.add_events(events),
+            WorkerMessage::FireEvents { events } => {
+                for event in events {
+                    self.push_event(event);
+                }
+            }
             WorkerMessage::StartEventLoop => self.loop_request = Some(LoopCommand::Start),
             WorkerMessage::StopEventLoop => self.loop_request = Some(LoopCommand::Stop),
             #[cfg(test)]
             WorkerMessage::Sync { reply } => self.syncs.push(reply),
         }
+    }
+
+    /// Merge an event the running loop fired, once however often it fires.
+    ///
+    /// **A fired event lives no longer than the loop that fired it**, which armed it over the
+    /// program then installed: a graph op merged after it voids it ([`push`](Self::push)), a
+    /// batch that stops or rebuilds the loop voids its own ([`void_events`](Self::void_events)),
+    /// and once that loop's tasks are joined, so none fires again, the worker voids what they
+    /// left in the mailbox. So every event the planner reads names the installed program.
+    pub(crate) fn push_event(&mut self, event: ProgramEvent) {
+        unique::extend(&mut self.seeds.events, [event]);
+    }
+
+    /// Forget the fired events, as the loop that fired them stops.
+    pub(crate) fn void_events(&mut self) {
+        self.seeds.events.clear();
+    }
+
+    /// Forget every run the batch asks for, as a cancel does. Everything else stays: a graph op,
+    /// a store, a headroom, cache maintenance and a loop command are not runs.
+    pub(crate) fn void_runs(&mut self) {
+        self.seeds.clear();
     }
 
     /// Whether the batch asks the worker for nothing.

@@ -1,4 +1,3 @@
-use crate::containers::unique;
 use crate::exec::program_event::ProgramEvent;
 use crate::graph::program_id::ProgramId;
 
@@ -40,12 +39,6 @@ impl RunSeeds {
         self.event_sources = false;
         self.events.clear();
         self.program_ids.clear();
-    }
-
-    /// Seed the subscribers of `events` too — the event loop's fired events,
-    /// which reach a batch outside any `Run` message.
-    pub(crate) fn add_events(&mut self, events: impl IntoIterator<Item = ProgramEvent>) {
-        unique::extend(&mut self.events, events);
     }
 }
 

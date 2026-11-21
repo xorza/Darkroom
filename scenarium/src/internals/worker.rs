@@ -195,9 +195,7 @@ impl TestWorker {
                 | WorkerReport::Activity(_)
                 | WorkerReport::Progress { .. }
                 | WorkerReport::Error(
-                    WorkerError::CacheEviction { .. }
-                    | WorkerError::CacheFlush { .. }
-                    | WorkerError::EventLambdaPanic { .. },
+                    WorkerError::CacheEviction { .. } | WorkerError::CacheFlush { .. },
                 ) => {}
             }
         }
@@ -213,6 +211,17 @@ impl TestWorker {
         self.installed
             .as_ref()
             .expect("nothing was installed before this point")
+    }
+
+    /// Wait for the worker task to end, its callback dropped, reading every report it left.
+    pub(crate) async fn ended(&mut self) {
+        timeout(PATIENCE, async {
+            while let Some(report) = self.reports.recv().await {
+                self.observe(&report);
+            }
+        })
+        .await
+        .expect("the worker task did not end");
     }
 
     /// Take every report already queued, so the next wait sees only what happens from here.

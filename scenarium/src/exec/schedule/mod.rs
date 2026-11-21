@@ -365,8 +365,8 @@ impl RunSchedule {
         // A `RunSinks` sink among them is skipped as a root; it promotes this run to all sinks
         // (below).
         let mut run_sinks = seeds.sinks;
-        // A fired event names the installed program: events arrive in a batch
-        // of their own, and each install rebuilds the event loop.
+        // A fired event names the installed program: the worker voids every event of a loop it
+        // stops or rebuilds, and a graph op voids the events fired before it.
         for &event in &seeds.events {
             let owner_idx = program
                 .node(event.program_id)

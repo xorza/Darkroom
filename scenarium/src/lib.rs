@@ -93,7 +93,7 @@ pub use runtime::log_entry::{LogEntry, LogLevel};
 pub use runtime::shared_any_state::{EventStateGuard, SharedAnyState};
 pub use worker::Worker;
 pub use worker::activity::WorkerActivity;
-pub use worker::error::{WorkerError, WorkerExited};
+pub use worker::error::{ExitError, WorkerError, WorkerExited};
 pub use worker::protocol::{WorkerMessage, WorkerReport};
 pub use worker::run_summary::RunSummary;
 

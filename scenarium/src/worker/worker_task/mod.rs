@@ -3,27 +3,20 @@ use std::mem;
 use std::sync::Arc;
 
 use tokio::task;
-use tokio_util::sync::CancellationToken;
-
-use common::CancelToken;
 
 use crate::exec::cache::runtime_cache::cache_flush_report::CacheFlushReport;
 use crate::exec::engine::{ExecEngine, ExecuteRequest};
-use crate::exec::program_event::ProgramEvent;
 use crate::exec::report::exec_outcome::ExecOutcome;
 use crate::exec::report::run_reporter::RunPhase;
 use crate::exec::report::run_reporter::RunReporter;
-use crate::exec::seeds::RunSeeds;
 use crate::graph::program_id::ProgramId;
-use crate::worker::active_event_loop::{
-    ActiveEventLoop, EVENT_LOOP_BACKPRESSURE, EventLoopWake, LambdaPanic,
-};
+use crate::worker::active_event_loop::ActiveEventLoop;
 use crate::worker::activity::WorkerActivity;
 use crate::worker::batch_intent::{BatchIntent, GraphOp, LoopCommand};
 use crate::worker::error::WorkerError;
-use crate::worker::mailbox::Mailbox;
-use crate::worker::pause_gate::PauseGate;
+use crate::worker::mailbox::{Mailbox, Taken};
 use crate::worker::protocol::WorkerReport;
+use crate::worker::run_epoch::RunEpoch;
 use crate::worker::run_summary::RunSummaryPublisher;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,147 +58,96 @@ enum IdleReport {
     Quiet,
 }
 
-#[derive(Debug)]
-struct PendingRun {
-    seeds: RunSeeds,
-    start_event_loop: bool,
+/// Where the worker's reports go: the host's callback, called in place on the worker task.
+pub(crate) struct ReportSink(Box<dyn Fn(WorkerReport) + Send + Sync>);
+
+impl ReportSink {
+    pub(crate) fn new(callback: impl Fn(WorkerReport) + Send + Sync + 'static) -> Self {
+        Self(Box::new(callback))
+    }
+
+    fn publish(&self, report: WorkerReport) {
+        (self.0)(report);
+    }
 }
 
-impl PendingRun {
-    fn take(intent: &mut BatchIntent, transition: EventLoopTransition) -> Option<Self> {
-        let start_event_loop = matches!(transition, EventLoopTransition::Rebuild);
-        if intent.seeds.is_empty() && !start_event_loop {
-            return None;
-        }
-
-        let mut seeds = mem::take(&mut intent.seeds);
-        // Rebuilding the loop re-initializes every event source, whether or not a message asked.
-        seeds.event_sources |= start_event_loop;
-        Some(Self {
-            seeds,
-            start_event_loop,
-        })
+impl fmt::Debug for ReportSink {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("ReportSink")
     }
 }
 
 #[derive(Debug)]
-enum WorkerWake {
-    Ready,
-    Stopped,
-    EventLoopPanicked(LambdaPanic),
-}
-
-/// What ties a [`WorkerTask`] to the [`Worker`](crate::Worker) handle that
-/// spawned it: the mailbox, where reports go, and the two tokens the handle
-/// trips.
-#[derive(Debug)]
-pub(crate) struct WorkerLinks<ExecCallback> {
-    pub(crate) mailbox: Arc<Mailbox>,
-    pub(crate) callback: ExecCallback,
-    pub(crate) run_cancel: CancelToken,
-    pub(crate) shutdown: CancellationToken,
-}
-
-#[derive(Debug)]
-pub(crate) struct WorkerTask<ExecCallback> {
+pub(crate) struct WorkerTask {
     mailbox: Arc<Mailbox>,
-    callback: ExecCallback,
-    run_cancel: CancelToken,
-    shutdown: CancellationToken,
+    reports: ReportSink,
     engine: ExecEngine,
     summary: RunSummaryPublisher,
     outcome: ExecOutcome,
     intent: BatchIntent,
-    event_buffer: Vec<ProgramEvent>,
     event_loop: Option<ActiveEventLoop>,
-    event_loop_pause_gate: PauseGate,
+    epoch: RunEpoch,
 }
 
 /// A task that ends refuses every later post, however it ends.
-impl<ExecCallback> Drop for WorkerTask<ExecCallback> {
+impl Drop for WorkerTask {
     fn drop(&mut self) {
         self.mailbox.close();
     }
 }
 
-impl<ExecCallback> WorkerTask<ExecCallback>
-where
-    ExecCallback: Fn(WorkerReport) + Send + Sync + 'static,
-{
-    pub(crate) fn new(links: WorkerLinks<ExecCallback>) -> Self {
-        let WorkerLinks {
-            mailbox,
-            callback,
-            run_cancel,
-            shutdown,
-        } = links;
+impl WorkerTask {
+    pub(crate) fn new(mailbox: Arc<Mailbox>, reports: ReportSink) -> Self {
         Self {
             mailbox,
-            callback,
-            run_cancel,
-            shutdown,
+            reports,
             engine: ExecEngine::default(),
             summary: RunSummaryPublisher::default(),
             outcome: ExecOutcome::default(),
             intent: BatchIntent::default(),
-            event_buffer: Vec::with_capacity(EVENT_LOOP_BACKPRESSURE),
             event_loop: None,
-            event_loop_pause_gate: PauseGate::default(),
+            epoch: RunEpoch::default(),
         }
     }
 
     pub(crate) async fn run(mut self) {
-        while self.next_intent().await.is_some() {
+        while self.next_batch().await == Taken::Batch {
             self.apply_intent().await;
+            self.epoch.advance();
             task::yield_now().await;
         }
         self.stop_event_loop().await;
     }
 
-    async fn next_intent(&mut self) -> Option<&BatchIntent> {
+    /// Wait for the next batch, or the shutdown. An event task's panic is resumed here, ahead of
+    /// a post: the loop's other sources post once per batch, so a post is ready at nearly every
+    /// wake and would keep the panic waiting for good.
+    async fn next_batch(&mut self) -> Taken {
         loop {
-            self.event_buffer.clear();
-            let wake = tokio::select! {
+            tokio::select! {
                 biased;
-                () = self.shutdown.cancelled() => WorkerWake::Stopped,
-                () = self.mailbox.posted() => WorkerWake::Ready,
-                wake = async {
-                    self.event_loop.as_mut().unwrap().recv(&mut self.event_buffer).await
-                }, if self.event_loop.is_some() => match wake {
-                    EventLoopWake::Events => WorkerWake::Ready,
-                    EventLoopWake::TaskPanicked(panic) => WorkerWake::EventLoopPanicked(panic),
-                },
-            };
-
-            match wake {
-                WorkerWake::Ready => {}
-                WorkerWake::Stopped => return None,
-                WorkerWake::EventLoopPanicked(panic) => {
-                    self.fail_event_loop(panic).await;
-                    continue;
-                }
+                never = async {
+                    self.event_loop.as_mut().unwrap().failed().await
+                }, if self.event_loop.is_some() => match never {},
+                () = self.mailbox.posted() => {}
             }
             self.intent.clear();
-            self.mailbox.take_into(&mut self.intent);
-            self.intent.seeds.add_events(self.event_buffer.drain(..));
-            // A wake whose posts an earlier batch already took; a batch the events woke takes
-            // whatever was posted beside them.
-            if self.intent.is_empty() {
-                continue;
+            match self.mailbox.take_into(&mut self.intent) {
+                Taken::Nothing => {}
+                taken => return taken,
             }
-            // The cancellation commit boundary: a cancel raised from here on targets this batch's
-            // run; one raised while nothing was committed clears now.
-            self.run_cancel.reset();
-            return Some(&self.intent);
         }
     }
 
     async fn apply_intent(&mut self) {
         let transition = EventLoopTransition::for_intent(&self.intent, self.event_loop.is_some());
-        let stopped_loop =
-            !matches!(transition, EventLoopTransition::Preserve) && self.event_loop.is_some();
+        let ends_loop = transition != EventLoopTransition::Preserve;
+        let stopped_loop = ends_loop && self.event_loop.is_some();
+        if ends_loop {
+            self.intent.void_events();
+        }
         if stopped_loop {
-            self.finish_event_loop(None, IdleReport::Quiet).await;
+            self.finish_event_loop(IdleReport::Quiet).await;
         }
 
         // The graph op leads: every stage below is about the program it establishes. After the
@@ -214,14 +156,14 @@ where
         match self.intent.graph_state.take() {
             Some(GraphOp::Clear) => {
                 self.engine.clear();
-                (self.callback)(WorkerReport::Cleared);
+                self.reports.publish(WorkerReport::Cleared);
             }
             Some(GraphOp::Replace(compiled)) => {
                 self.engine.install(Arc::clone(&compiled));
                 // After the install: reconciling onto the new program releases the slots of the
                 // nodes it dropped.
                 let cache_ram = self.engine.resident_cache_ram();
-                (self.callback)(WorkerReport::Installed {
+                self.reports.publish(WorkerReport::Installed {
                     compiled,
                     cache_ram,
                 });
@@ -239,18 +181,19 @@ where
         self.evict_cache().await;
         self.flush_cache().await;
 
-        let ran = if let Some(run) = PendingRun::take(&mut self.intent, transition)
-            && !self.engine.is_empty()
-        {
-            self.execute(run).await;
-            true
-        } else {
-            false
-        };
+        // Rebuilding the loop re-initializes every event source, whether or not a message asked.
+        if transition == EventLoopTransition::Rebuild {
+            self.intent.seeds.event_sources = true;
+        }
+        let ran = !self.intent.seeds.is_empty() && !self.engine.is_empty();
+        if ran {
+            self.execute(transition).await;
+        }
         // A rebuild's `execute` reports `Executing` directly, so only a stop with no follow-up run
         // is idle.
         if stopped_loop && !ran {
-            (self.callback)(WorkerReport::Activity(WorkerActivity::Idle));
+            self.reports
+                .publish(WorkerReport::Activity(WorkerActivity::Idle));
         }
 
         #[cfg(test)]
@@ -273,7 +216,8 @@ where
             return;
         }
 
-        (self.callback)(WorkerReport::Error(WorkerError::CacheEviction { failures }));
+        self.reports
+            .publish(WorkerReport::Error(WorkerError::CacheEviction { failures }));
     }
 
     /// Persist resident disk-backed values: the nodes this batch named, then, if it also asked
@@ -311,29 +255,31 @@ where
         if failures.is_empty() && unsupported.is_empty() {
             return;
         }
-        (self.callback)(WorkerReport::Error(WorkerError::CacheFlush {
-            failures,
-            unsupported,
-        }));
+        self.reports
+            .publish(WorkerReport::Error(WorkerError::CacheFlush {
+                failures,
+                unsupported,
+            }));
     }
 
-    async fn execute(&mut self, run: PendingRun) {
-        if self.shutdown.is_cancelled() {
+    /// Run the batch's seeds, which stay in the batch so their buffers come back to the mailbox;
+    /// a `Rebuild` starts the loop over the events the run armed.
+    async fn execute(&mut self, transition: EventLoopTransition) {
+        if self.mailbox.shutting_down() {
             return;
         }
         let activity = self.executing_activity();
-        (self.callback)(WorkerReport::Activity(activity));
-        let _pause_guard = self.event_loop_pause_gate.close();
+        self.reports.publish(WorkerReport::Activity(activity));
         let mut reporter = WorkerRunReporter {
-            callback: &self.callback,
+            reports: &self.reports,
         };
         let result = self
             .engine
             .execute(
                 ExecuteRequest {
-                    seeds: &run.seeds,
+                    seeds: &self.intent.seeds,
                     reporter: &mut reporter,
-                    cancel: self.run_cancel.clone(),
+                    cancel: self.mailbox.cancel_token(),
                 },
                 &mut self.outcome,
             )
@@ -341,23 +287,24 @@ where
 
         match result {
             Ok(()) => {
-                if run.start_event_loop && !self.shutdown.is_cancelled() {
+                if transition == EventLoopTransition::Rebuild && !self.mailbox.shutting_down() {
                     assert!(self.event_loop.is_none());
                     let armed = mem::take(&mut self.outcome.armed_events);
                     if !armed.is_empty() {
                         self.event_loop =
-                            Some(ActiveEventLoop::start(armed, &self.event_loop_pause_gate));
+                            Some(ActiveEventLoop::start(armed, &self.mailbox, &self.epoch));
                     }
                 }
                 let activity = self.resting_activity();
-                (self.callback)(WorkerReport::Completed(
+                self.reports.publish(WorkerReport::Completed(
                     self.summary.publish(activity, &mut self.outcome),
                 ));
             }
             Err(error) => {
                 let activity = self.resting_activity();
-                (self.callback)(WorkerReport::Activity(activity));
-                (self.callback)(WorkerReport::Error(WorkerError::Exec { error }));
+                self.reports.publish(WorkerReport::Activity(activity));
+                self.reports
+                    .publish(WorkerReport::Error(WorkerError::Exec { error }));
             }
         }
     }
@@ -365,35 +312,20 @@ where
     /// Stop the loop and report `Idle`, as on worker shutdown; intent application stops
     /// [quietly](IdleReport::Quiet) instead.
     async fn stop_event_loop(&mut self) {
-        self.finish_event_loop(None, IdleReport::Report).await;
+        self.finish_event_loop(IdleReport::Report).await;
     }
 
-    async fn fail_event_loop(&mut self, panic: LambdaPanic) {
-        self.finish_event_loop(Some(panic), IdleReport::Report)
-            .await;
-    }
-
-    async fn finish_event_loop(&mut self, leading_panic: Option<LambdaPanic>, idle: IdleReport) {
+    /// Stop the loop, then forget what its tasks fired after this batch was taken: none fires
+    /// again once they are joined.
+    async fn finish_event_loop(&mut self, idle: IdleReport) {
         let Some(mut active) = self.event_loop.take() else {
-            assert!(
-                leading_panic.is_none(),
-                "event task panic received without an active event loop"
-            );
             return;
         };
-
-        let mut panics = active.stop().await;
-        if let Some(panic) = leading_panic {
-            panics.insert(0, panic);
-        }
+        active.stop().await;
+        self.mailbox.void_events();
         if idle == IdleReport::Report {
-            (self.callback)(WorkerReport::Activity(WorkerActivity::Idle));
-        }
-        for panic in panics {
-            (self.callback)(WorkerReport::Error(WorkerError::EventLambdaPanic {
-                program_id: panic.program_id,
-                message: panic.message,
-            }));
+            self.reports
+                .publish(WorkerReport::Activity(WorkerActivity::Idle));
         }
     }
 
@@ -414,22 +346,15 @@ where
 
 /// Publishes a run's live feedback to the host as the run loop produces it, by value, so the
 /// executor can hand each event straight over instead of queueing it for a relay to drain.
-struct WorkerRunReporter<'a, C> {
-    callback: &'a C,
+#[derive(Debug)]
+struct WorkerRunReporter<'a> {
+    reports: &'a ReportSink,
 }
 
-impl<C> fmt::Debug for WorkerRunReporter<'_, C> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("WorkerRunReporter").finish_non_exhaustive()
-    }
-}
-
-impl<C> RunReporter for WorkerRunReporter<'_, C>
-where
-    C: Fn(WorkerReport) + Sync,
-{
+impl RunReporter for WorkerRunReporter<'_> {
     fn progress(&mut self, program_id: ProgramId, phase: RunPhase) {
-        (self.callback)(WorkerReport::Progress { program_id, phase });
+        self.reports
+            .publish(WorkerReport::Progress { program_id, phase });
     }
 }
 

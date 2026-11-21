@@ -1,211 +1,154 @@
 use super::*;
 
-use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use tokio::sync::Notify;
 use tokio::time;
 use tokio::time::{Duration, timeout};
 
-use crate::graph::identity::NodeId;
-
+use crate::exec::program_event::ProgramEvent;
 use crate::graph::func::event::EventLambda;
+use crate::graph::identity::NodeId;
+use crate::graph::program_id::ProgramId;
 use crate::internals::worker::PATIENCE;
 use crate::runtime::shared_any_state::SharedAnyState;
+use crate::worker::batch_intent::BatchIntent;
+use crate::worker::mailbox::Taken;
 
-/// A started loop and the node its one trigger fires for.
+/// A loop over one event, the mailbox it fires into and the count that paces it.
 #[derive(Debug)]
 struct SingleLoop {
     active: ActiveEventLoop,
-    program_id: ProgramId,
+    mailbox: Arc<Mailbox>,
+    epoch: RunEpoch,
+    event: ProgramEvent,
 }
 
-/// Start an event loop with a single lambda as its only trigger, on a fresh
-/// `NodeId` — the shape most `start_event_loop` tests want when they only
-/// care about one lambda's behavior.
-fn start_single_event_loop(lambda: EventLambda, pause_gate: &PauseGate) -> SingleLoop {
-    let program_id = ProgramId::from(NodeId::unique());
+fn start_single_event_loop(lambda: EventLambda) -> SingleLoop {
+    let mailbox = Arc::new(Mailbox::default());
+    let epoch = RunEpoch::default();
+    let event = ProgramEvent {
+        program_id: ProgramId::from(NodeId::unique()),
+        event_idx: 0,
+    };
     let active = ActiveEventLoop::start(
         vec![ArmedEvent {
-            event: ProgramEvent {
-                program_id,
-                event_idx: 0,
-            },
+            event,
             lambda,
             state: SharedAnyState::default(),
         }],
-        pause_gate,
+        &mailbox,
+        &epoch,
     );
-    SingleLoop { active, program_id }
-}
-
-#[tokio::test]
-async fn start_event_loop_forwards_events() {
-    let event_lambda = EventLambda::new(|_state| async move {});
-    let SingleLoop {
-        mut active,
-        program_id,
-    } = start_single_event_loop(event_lambda, &PauseGate::default());
-
-    let event = active
-        .recv_event()
-        .await
-        .expect("Expected event loop event");
-    assert_eq!(
+    SingleLoop {
+        active,
+        mailbox,
+        epoch,
         event,
-        ProgramEvent {
-            program_id,
-            event_idx: 0
-        }
-    );
-
-    active.stop().await;
+    }
 }
 
-#[tokio::test]
-async fn start_event_loop_waits_for_callback() {
-    let notify = Arc::new(Notify::new());
-    let notify_for_event = Arc::clone(&notify);
-    let event_lambda = EventLambda::new(move |_state| {
-        let notify = Arc::clone(&notify_for_event);
-        async move {
-            notify.notified().await;
-        }
-    });
-
-    let notify_for_callback = Arc::clone(&notify);
-
-    let SingleLoop {
-        mut active,
-        program_id,
-    } = start_single_event_loop(event_lambda, &PauseGate::default());
-
-    // `notify_one` stores a permit, so the lambda proceeds whether or not it has parked yet.
-    notify_for_callback.notify_one();
-
-    let event = timeout(PATIENCE, active.recv_event())
-        .await
-        .expect("Expected event")
-        .expect("Event channel closed");
-    assert_eq!(
-        event,
-        ProgramEvent {
-            program_id,
-            event_idx: 0
-        }
-    );
-
-    active.stop().await;
+/// The fired events the mailbox holds.
+fn fired(mailbox: &Mailbox) -> Vec<ProgramEvent> {
+    let mut intent = BatchIntent::default();
+    match mailbox.take_into(&mut intent) {
+        Taken::Nothing => Vec::new(),
+        Taken::Batch => intent.seeds.events,
+        Taken::Shutdown => panic!("nothing shut the mailbox down"),
+    }
 }
 
-/// The loop checks the gate after each event, so a closed gate stops the next invocation and
-/// reopening it resumes the loop. The lambda parks on `proceed` inside every invocation, so the
-/// test steps it one invocation at a time; under paused time, a sleep returns only once every
-/// task has run to its next block point, which makes each count exact.
+/// Under paused time, a sleep returns only once every task has run to its next block point.
+async fn settle() {
+    time::sleep(Duration::from_millis(1)).await;
+}
+
+/// A fire reaches the mailbox once the lambda's future completes: none while it waits, the event
+/// once it is let go.
 #[tokio::test(start_paused = true)]
-async fn pause_gate_blocks_event_loop_iterations() {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    let invocations = Arc::new(AtomicUsize::new(0));
+async fn a_fire_reaches_the_mailbox_when_the_lambda_completes() {
     let proceed = Arc::new(Notify::new());
-    let event_lambda = EventLambda::new({
-        let invocations = Arc::clone(&invocations);
+    let lambda = EventLambda::new({
         let proceed = Arc::clone(&proceed);
         move |_state| {
-            let invocations = Arc::clone(&invocations);
             let proceed = Arc::clone(&proceed);
-            async move {
-                invocations.fetch_add(1, Ordering::SeqCst);
-                proceed.notified().await;
-            }
+            async move { proceed.notified().await }
         }
     });
-    let pause_gate = PauseGate::default();
     let SingleLoop {
         mut active,
-        program_id,
-    } = start_single_event_loop(event_lambda, &pause_gate);
-    let settle = || time::sleep(Duration::from_millis(1));
+        mailbox,
+        event,
+        ..
+    } = start_single_event_loop(lambda);
 
     settle().await;
-    assert_eq!(
-        invocations.load(Ordering::SeqCst),
-        1,
-        "the first invocation runs"
-    );
+    assert!(fired(&mailbox).is_empty());
 
-    // Closed, the gate lets the running invocation finish and send, then holds the next.
-    let guard = pause_gate.close();
     proceed.notify_one();
-    settle().await;
-    assert_eq!(
-        active.recv_event().await,
-        Some(ProgramEvent {
-            program_id,
-            event_idx: 0
-        })
-    );
-    assert_eq!(
-        invocations.load(Ordering::SeqCst),
-        1,
-        "a closed gate holds the loop"
-    );
-
-    drop(guard);
-    settle().await;
-    assert_eq!(
-        invocations.load(Ordering::SeqCst),
-        2,
-        "a reopened gate resumes it"
-    );
+    timeout(PATIENCE, mailbox.posted()).await.unwrap();
+    assert_eq!(fired(&mailbox), [event]);
 
     active.stop().await;
 }
 
-#[tokio::test]
-async fn lambda_panic_is_captured_not_unwound() {
-    let event_lambda = EventLambda::new(|_state| async { panic!("boom in lambda") });
-    let SingleLoop {
-        mut active,
-        program_id,
-    } = start_single_event_loop(event_lambda, &PauseGate::default());
-    let mut events = Vec::new();
-
-    let wake = active.recv(&mut events).await;
-    let EventLoopWake::TaskPanicked(panic) = wake else {
-        panic!("panicking lambda must wake the event loop");
-    };
-    assert!(events.is_empty());
-    assert_eq!(panic.program_id, program_id, "panic attributed to its node");
-    assert!(
-        panic.message.contains("boom in lambda"),
-        "panic message preserved: {}",
-        panic.message
-    );
-    assert!(active.stop().await.is_empty());
-}
-
-/// Stopping the loop aborts every sender task, so its receiver reads closed once the events
-/// already queued are drained.
-#[tokio::test]
-async fn stopped_event_loop_channel_is_closed() {
-    let event_lambda = EventLambda::new(|_state| async move {});
-    let SingleLoop {
-        mut active,
-        program_id: _node_id,
-    } = start_single_event_loop(event_lambda, &PauseGate::default());
-
-    active.stop().await;
-
-    // After stop, all lambda tasks (the sole senders) are aborted →
-    // the Receiver must observe channel closure. Drain under a
-    // bounded per-recv timeout so a regression that stops closing
-    // the channel fails fast instead of wedging the test.
-    loop {
-        let item = timeout(PATIENCE, active.recv_event())
-            .await
-            .expect("recv must complete — channel must eventually close after handle.stop()");
-        if item.is_none() {
-            break;
+/// A source fires once per finished batch however fast its stream yields: an always-ready lambda
+/// runs once, then waits, and each advance of the count lets it run once more.
+#[tokio::test(start_paused = true)]
+async fn a_source_fires_once_per_finished_batch() {
+    let invocations = Arc::new(AtomicUsize::new(0));
+    let lambda = EventLambda::new({
+        let invocations = Arc::clone(&invocations);
+        move |_state| {
+            invocations.fetch_add(1, Ordering::SeqCst);
+            async {}
         }
-    }
+    });
+    let SingleLoop {
+        mut active,
+        mailbox,
+        epoch,
+        event,
+    } = start_single_event_loop(lambda);
+
+    settle().await;
+    assert_eq!(invocations.load(Ordering::SeqCst), 1);
+    assert_eq!(fired(&mailbox), [event]);
+
+    settle().await;
+    assert_eq!(invocations.load(Ordering::SeqCst), 1, "no batch finished");
+
+    epoch.advance();
+    settle().await;
+    assert_eq!(invocations.load(Ordering::SeqCst), 2);
+    assert_eq!(fired(&mailbox), [event]);
+
+    active.stop().await;
+}
+
+/// A lambda's panic is resumed by `failed`, on whatever awaits it.
+#[tokio::test]
+async fn a_lambda_panic_is_resumed_by_failed() {
+    let lambda = EventLambda::new(|_state| async { panic!("boom in lambda") });
+    let SingleLoop { mut active, .. } = start_single_event_loop(lambda);
+
+    let error = tokio::spawn(async move { active.failed().await })
+        .await
+        .expect_err("the panic is resumed");
+    let payload = error.into_panic();
+    assert_eq!(payload.downcast_ref::<&str>(), Some(&"boom in lambda"));
+}
+
+/// Stopping joins every task, so none holds the mailbox afterwards: the test's handle is its one.
+#[tokio::test]
+async fn a_stopped_loop_holds_nothing() {
+    let lambda = EventLambda::new(|_state| async {});
+    let SingleLoop {
+        mut active,
+        mailbox,
+        ..
+    } = start_single_event_loop(lambda);
+
+    active.stop().await;
+    assert_eq!(Arc::strong_count(&mailbox), 1);
 }

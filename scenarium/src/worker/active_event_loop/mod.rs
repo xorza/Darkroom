@@ -1,167 +1,86 @@
-use std::any::Any;
+//! [`ActiveEventLoop`]: one task per armed event, each firing into the worker's mailbox.
 
-use hashbrown::HashMap;
-use tokio::sync::mpsc::{Receiver, channel};
-use tokio::task;
-use tokio::task::{Id, JoinSet};
+use std::convert::Infallible;
+use std::future;
+use std::panic;
+use std::sync::Arc;
 
-use crate::exec::program_event::ProgramEvent;
+use tokio::task::JoinSet;
+
 use crate::exec::report::armed_event::ArmedEvent;
-use crate::graph::program_id::ProgramId;
-use crate::worker::pause_gate::PauseGate;
+use crate::worker::mailbox::Mailbox;
+use crate::worker::run_epoch::RunEpoch;
 
-pub(crate) const EVENT_LOOP_BACKPRESSURE: usize = 10;
-
-#[derive(Debug)]
-pub(crate) struct LambdaPanic {
-    pub(crate) program_id: ProgramId,
-    pub(crate) message: String,
-}
-
-#[derive(Debug)]
-pub(crate) enum EventLoopWake {
-    Events,
-    TaskPanicked(LambdaPanic),
-}
-
+/// The running loop's tasks. A task never ends of itself: it is stopped, or it panics, and a
+/// panic is resumed on the worker task, as a func lambda's ends it, so a lambda's panic is one
+/// behavior whichever lambda it is and whatever the build. Refused: catching an event lambda's
+/// panic and reporting it against its node, which only an unwind build could, and which keeps a
+/// state the panic left half-changed in use.
 #[derive(Debug)]
 pub(crate) struct ActiveEventLoop {
-    tasks: JoinSet<()>,
-    task_nodes: HashMap<Id, ProgramId>,
-    events: Receiver<ProgramEvent>,
+    tasks: JoinSet<Infallible>,
 }
 
 impl ActiveEventLoop {
-    pub(crate) fn start(armed_events: Vec<ArmedEvent>, pause_gate: &PauseGate) -> Self {
+    pub(crate) fn start(
+        armed_events: Vec<ArmedEvent>,
+        mailbox: &Arc<Mailbox>,
+        epoch: &RunEpoch,
+    ) -> Self {
         assert!(!armed_events.is_empty());
 
-        let (event_tx, events) = channel::<ProgramEvent>(EVENT_LOOP_BACKPRESSURE);
         let mut tasks = JoinSet::new();
-        let mut task_nodes = HashMap::with_capacity(armed_events.len());
-
         for ArmedEvent {
             event,
             lambda,
             state,
         } in armed_events
         {
-            let program_id = event.program_id;
-            let task = tasks.spawn({
-                let event_tx = event_tx.clone();
-                let pause_gate = pause_gate.clone();
-                let mut fires = lambda.fires(state);
-                async move {
-                    loop {
-                        fires.next().await;
-                        if event_tx.send(event).await.is_err() {
-                            return;
-                        }
-                        pause_gate.wait().await;
-                        task::yield_now().await;
+            let mailbox = Arc::clone(mailbox);
+            let mut epoch = epoch.subscribe();
+            let mut fires = lambda.fires(state);
+            tasks.spawn(async move {
+                loop {
+                    fires.next().await;
+                    // Seen before the fire, so a batch that ends between the fire and the wait
+                    // still counts as the one this source waits for.
+                    epoch.borrow_and_update();
+                    mailbox.fire(event);
+                    if epoch.changed().await.is_err() {
+                        // The worker is gone, and its abort of this task follows.
+                        return future::pending().await;
                     }
                 }
             });
-            let prev = task_nodes.insert(task.id(), program_id);
-            debug_assert!(prev.is_none(), "duplicate event task id");
         }
+        Self { tasks }
+    }
 
-        Self {
-            tasks,
-            task_nodes,
-            events,
+    /// Resolves only with a task's panic, which it resumes on the caller.
+    pub(crate) async fn failed(&mut self) -> Infallible {
+        let joined = self
+            .tasks
+            .join_next()
+            .await
+            .expect("an active loop holds its tasks");
+        match joined {
+            Ok(never) => never,
+            Err(error) => panic::resume_unwind(error.into_panic()),
         }
     }
 
-    pub(crate) async fn recv(&mut self, events: &mut Vec<ProgramEvent>) -> EventLoopWake {
-        // Observe failures even when another task keeps the event stream continuously ready.
-        let task_result = tokio::select! {
-            biased;
-            result = self.tasks.join_next_with_id() => result,
-            count = self.events.recv_many(events, EVENT_LOOP_BACKPRESSURE) => {
-                if count > 0 {
-                    return EventLoopWake::Events;
-                }
-                self.tasks.join_next_with_id().await
-            }
-        }
-        .expect("active event loop must contain a task");
-
-        match task_result {
-            Ok((task_id, ())) => {
-                let program_id = self.remove_task(task_id);
-                panic!("event task for {program_id:?} exited while the event loop was active");
-            }
-            Err(error) => {
-                let program_id = self.remove_task(error.id());
-                assert!(
-                    error.is_panic(),
-                    "event task for {program_id:?} was cancelled while the event loop was active"
-                );
-                EventLoopWake::TaskPanicked(LambdaPanic {
-                    program_id,
-                    message: panic_message(&*error.into_panic()),
-                })
-            }
-        }
-    }
-
-    pub(crate) async fn stop(&mut self) -> Vec<LambdaPanic> {
+    /// Abort every task and wait until none runs, resuming the first that had panicked.
+    pub(crate) async fn stop(&mut self) {
         self.tasks.abort_all();
-        let mut panics = Vec::new();
-        while let Some(result) = self.tasks.join_next_with_id().await {
-            match result {
-                Ok((task_id, ())) => {
-                    let program_id = self.remove_task(task_id);
-                    panic!("event task for {program_id:?} exited before shutdown");
-                }
-                Err(error) => {
-                    let program_id = self.remove_task(error.id());
-                    if error.is_panic() {
-                        panics.push(LambdaPanic {
-                            program_id,
-                            message: panic_message(&*error.into_panic()),
-                        });
-                    } else {
-                        assert!(
-                            error.is_cancelled(),
-                            "event task for {program_id:?} failed during shutdown: {error}"
-                        );
-                    }
-                }
+        while let Some(joined) = self.tasks.join_next().await {
+            match joined {
+                Ok(never) => match never {},
+                Err(error) if error.is_panic() => panic::resume_unwind(error.into_panic()),
+                Err(error) => assert!(
+                    error.is_cancelled(),
+                    "an event task ends cancelled: {error}"
+                ),
             }
-        }
-        debug_assert!(self.task_nodes.is_empty());
-        panics
-    }
-
-    fn remove_task(&mut self, task_id: Id) -> ProgramId {
-        self.task_nodes
-            .remove(&task_id)
-            .unwrap_or_else(|| panic!("event task {task_id} has no node attribution"))
-    }
-}
-
-fn panic_message(payload: &(dyn Any + Send)) -> String {
-    if let Some(message) = payload.downcast_ref::<&str>() {
-        (*message).to_string()
-    } else if let Some(message) = payload.downcast_ref::<String>() {
-        message.clone()
-    } else {
-        "unknown panic".to_string()
-    }
-}
-
-#[cfg(test)]
-pub(crate) mod internals {
-    use crate::exec::program_event::ProgramEvent;
-    use crate::worker::active_event_loop::ActiveEventLoop;
-
-    impl ActiveEventLoop {
-        /// Raw next event from the loop's channel, bypassing the join-set
-        /// machinery `recv` also watches — what tests want when they only
-        /// care about the event stream itself.
-        pub(crate) async fn recv_event(&mut self) -> Option<ProgramEvent> {
-            self.events.recv().await
         }
     }
 }

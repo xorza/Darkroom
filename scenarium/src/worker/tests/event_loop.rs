@@ -1,10 +1,9 @@
 use super::*;
-use std::future;
 
 /// The whole loop lifecycle end to end. The second run is the one an event
 /// *lambda* drove — it can only have come from the firing, since the
 /// bootstrap is already accounted for — so this covers the lambda reaching
-/// the worker's execute path over the dedicated bounded channel.
+/// the worker's execute path through its mailbox.
 ///
 /// The lambda then fires as fast as it can, and `settle` sends
 /// `StopEventLoop` and waits for its `Sync` to come back: the command is
@@ -141,59 +140,46 @@ async fn a_fired_event_does_not_reinitialize_the_event_sources() {
     w.settle([WorkerMessage::StopEventLoop]).await;
 }
 
-/// One event task panicking stops the whole loop and is attributed to its
-/// node, even while a sibling task is still parked.
+/// An event lambda's panic ends the worker with it, as a func lambda's does, even while a
+/// sibling source posts once per batch, a post ready at every wake: `exit` hands the panic back
+/// for the host to resume.
 #[tokio::test]
-async fn one_task_panicking_stops_the_loop() {
+async fn an_event_lambda_panic_ends_the_worker_with_it() {
     let mut w = TestWorker::frames();
     w.graph.edit_func("Frame Event", |func| {
         func.events[0].event_lambda =
             EventLambda::new(|_state| async { panic!("event loop stopped") });
-        func.events[1].event_lambda = EventLambda::new(|_state| future::pending());
+        func.events[1].event_lambda = EventLambda::new(|_state| async {});
     });
     w.graph.subscribe("Frame Event", 1, "Print");
-    let frame_event = w.id("Frame Event");
 
     w.send_many([w.update(), WorkerMessage::StartEventLoop]);
+    w.ended().await;
 
-    let mut activities = Vec::new();
-    loop {
-        match w.report().await {
-            WorkerReport::Activity(activity) => {
-                if activities.last() != Some(&activity) {
-                    activities.push(activity);
-                }
-            }
-            WorkerReport::Completed(summary) => {
-                if activities.last() != Some(&summary.activity) {
-                    activities.push(summary.activity);
-                }
-            }
-            WorkerReport::Error(WorkerError::EventLambdaPanic {
-                program_id,
-                message,
-            }) => {
-                assert_eq!(program_id, frame_event);
-                assert!(message.contains("event loop stopped"));
-                break;
-            }
-            WorkerReport::Installed { .. }
-            | WorkerReport::Cleared
-            | WorkerReport::Progress { .. }
-            | WorkerReport::Error(
-                WorkerError::Exec { .. }
-                | WorkerError::CacheEviction { .. }
-                | WorkerError::CacheFlush { .. },
-            ) => {}
-        }
-    }
-    assert_eq!(
-        activities,
-        [
-            WorkerActivity::Executing,
-            WorkerActivity::EventLoop,
-            WorkerActivity::Idle,
-        ]
-    );
+    assert_panicked_with(w.worker.exit(PATIENCE).await, "event loop stopped");
+    assert!(w.worker.send(WorkerMessage::Clear).is_err());
+}
+
+/// A graph op voids the events fired before it, which name the program it replaces: a fire of
+/// `Frame Event` merged with an install of a graph that lacks it runs nothing, where the planner
+/// would have looked for an emitter the program does not hold.
+#[tokio::test]
+async fn a_fire_before_an_update_that_drops_its_emitter_runs_nothing() {
+    let mut w = TestWorker::frames();
+    w.settle([w.update()]).await;
+    let fire = w.fire("Frame Event", 0);
+    w.graph.remove("Frame Event");
+
+    w.settle_without_run([fire, w.update()]).await;
     w.sync().await;
+}
+
+/// A batch that stops the loop voids the events fired into it: the loop that fired them is gone.
+#[tokio::test]
+async fn a_stop_voids_the_events_fired_beside_it() {
+    let mut w = TestWorker::frames();
+    w.settle([w.update()]).await;
+
+    w.settle_without_run([w.fire("Frame Event", 0), WorkerMessage::StopEventLoop])
+        .await;
 }

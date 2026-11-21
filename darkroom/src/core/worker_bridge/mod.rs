@@ -9,19 +9,27 @@ use std::collections::VecDeque;
 use std::fmt;
 use std::fmt::Debug;
 use std::fmt::Formatter;
+use std::panic;
 use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 
 use common::{BgRuntime, ErrorChain};
 use scenarium::CompiledGraph;
 use scenarium::DiskStore;
 use scenarium::ProgramId;
-use scenarium::{Worker, WorkerExited, WorkerMessage, WorkerReport};
+use scenarium::{ExitError, Worker, WorkerExited, WorkerMessage, WorkerReport};
 
 use crate::core::status_log;
 use crate::core::wake::Wake;
 use crate::core::worker_bridge::report_mailbox::ReportMailbox;
 
 pub(crate) mod report_mailbox;
+
+/// How long quitting waits for the running node once it is cancelled. A lambda polls its cancel
+/// token between chunks of its work, so a cancelled node returns within one; ten seconds is past
+/// a chunk and short of a person force-quitting a window that will not close.
+const QUIT_PATIENCE: Duration = Duration::from_secs(10);
 
 /// Every command here answers whether the worker took it. A send only fails once the worker task
 /// is gone, and then *no report will ever arrive*, so a caller that assumed success would leave
@@ -142,11 +150,10 @@ impl WorkerBridge {
         self.worker.send(WorkerMessage::FlushAllCaches)
     }
 
-    /// Request cancellation of the in-flight run. Coarse: the running node finishes, but no
-    /// further nodes are scheduled. A shared atomic the executor polls, with no channel
-    /// round-trip.
+    /// Cancel the in-flight run and void every run requested before it. Coarse: the running node
+    /// finishes, but no further nodes are scheduled.
     pub(crate) fn cancel_run(&self) {
-        self.worker.request_cancel();
+        self.worker.cancel();
     }
 
     /// Start the installed program's event loop.
@@ -167,13 +174,19 @@ impl WorkerBridge {
     }
 }
 
+/// A worker that panicked takes the editor down with its own panic, as the release build aborts
+/// on it anyway; resumed only when this thread is not unwinding already, which would abort.
 impl Drop for WorkerBridge {
     fn drop(&mut self) {
-        if let Err(error) = self.runtime.block_on(self.worker.exit()) {
-            tracing::error!(
+        match self.runtime.block_on(self.worker.exit(QUIT_PATIENCE)) {
+            Ok(()) => {}
+            Err(ExitError::Panicked(error)) if !thread::panicking() => {
+                panic::resume_unwind(error.into_panic());
+            }
+            Err(error) => tracing::error!(
                 error = %ErrorChain::new(&error),
                 "worker task failed during shutdown"
-            );
+            ),
         }
     }
 }

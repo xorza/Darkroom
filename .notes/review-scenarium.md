@@ -41,10 +41,6 @@ Named so no batch touches it.
    Whether a node is cacheable and whether its key is merely late share one `None`; what disk holds
    is a field of the value in RAM, so it is forgotten with the value; a twin's leader is in a
    second column the state must agree with.
-2. **The worker has two inputs and no one rule for a batch.** Posts merge in the mailbox under its
-   lock; fired events arrive by a channel and are added after the merge; a cancel is a shared flag
-   a batch commit clears. So a fired event can ride with the `Update` that removed its emitter and
-   panic the planner, and a cancel can miss the run it was meant for.
 3. **Blob I/O is asynchronous one operation at a time.** `tokio::fs::File` turns each read, write,
    seek and stat into its own blocking-pool round trip, the format seeks back to patch each
    output's length, and the probe's header read is thrown away and repeated at the load.
@@ -66,10 +62,8 @@ Each is traced to its code; the batch that fixes it carries its test.
 
 | # | Where | Input → wrong result |
 |---|---|---|
-| B3 | `worker/worker_task/mod.rs:188-190`, `exec/schedule/mod.rs:368-376` | The select resolves on the event branch; before `take_into` the host posts an `Update` whose program lacks the emitter. The batch is `Replace` plus the old program's events; `collect_roots` hits `expect("a fired event's emitter is in the installed program")`. Under `panic = "abort"` the process dies. An emitter that survives with renumbered events runs the wrong subscribers. |
 | B4 | `graph/graph_set/digest.rs:38-97` | `digest_with` records a compound after hashing it and recurses into each instance, ghost nodes included. The state a load leaves after breaking a loop (compound 1 places 2, 2 keeps a ghost instance of 1, reason `Recursive`) recurses until the stack overflows. `push_placed_first` (`graph_set/mod.rs:366-377`) pushes after recursing, so a live self-placement in a library file that was never reconciled does the same. |
 | B5 | `graph/mod.rs:1075-1087,1195-1207` | A file whose `ghost_nodes` holds the nil id with a node that resolves: `repair_structure` removes `nodes[nil]` only, `reattach` calls `insert`, which asserts a non-nil id. The load panics. A nil `CompoundId` has the same hole. |
-| B6 | `worker/worker_task/mod.rs:196-198`, `worker/mod.rs:55-57` | Run A executes, run B is posted, the user cancels: A stops, the batch commit clears the flag, B runs in full. A cancel raised between a post and the worker's wake is erased the same way. |
 | B7 | `exec/cache/runtime_slot.rs:223-238` | A node with outputs 0 and 1. Run 1 demands {0}; run 2 demands {1} under the same digest: `invoke_outputs` resets every port, so the slot and the blob now hold {1} alone; run 3 demands {0} and the node runs again. Two previews on two ports of one node recompute it on each alternation. |
 | B8 | `exec/executor/mod.rs:715-718`, `exec/cache/runtime_slot.rs:147-156` | A blob write that fails in a run is discarded (`let _ =`), leaves `BlobState::Owed`, and is retried at every later reuse: with an unwritable cache folder, a probe and a failed create per owed node per run, with no log line and no report. A lost error and a retry with no bound. |
 | B10 | `graph/mod.rs:890-925` | `attach_node` checks a record's bindings against the live table, not the ghost table: a record attached over a ghost on one input leaves a live binding and a ghost on it, which `validate` refuses and the next compile asserts on. `put_ghost_wiring` asserts after the node is already in. |
@@ -240,130 +234,6 @@ impl DataType { pub(crate) fn holds(self, value: &DynamicValue) -> bool; }
   fails with its producers cut.
 - **`store_node` returns `StoreResult`**, "nothing to write" a case of `StoreOutcome`, where it
   returned an `Option` of a `Result`.
-
-#### Worker — `worker/`
-
-```rust
-// worker/mailbox.rs
-pub(crate) struct Mailbox { pending: Mutex<Pending>, wake: Notify }
-struct Pending {
-    intent: BatchIntent,
-    /// The run in flight is cancelled. Cleared under the lock as a batch is taken.
-    cancel: CancelToken,
-    closed: bool,
-    /// The worker is asked to end.
-    shutdown: bool,
-}
-impl Mailbox {
-    pub(crate) fn post(&self, msgs: impl IntoIterator<Item = WorkerMessage>) -> Result<(), WorkerExited>;
-    /// A fired event of the running loop, merged as a post is; ignored once closed.
-    pub(crate) fn fire(&self, event: ProgramEvent);
-    /// Forget every fired event not yet taken: the loop that fired them is stopped.
-    pub(crate) fn void_events(&self);
-    /// Void every run seed posted so far and cancel the run in flight.
-    pub(crate) fn cancel(&self);
-    /// The token a run polls; one for the worker's life.
-    pub(crate) fn cancel_token(&self) -> CancelToken;
-    pub(crate) fn shut_down(&self);
-    pub(crate) async fn posted(&self);
-    /// Swap the pending batch out and clear the cancel, in one critical section.
-    pub(crate) fn take_into(&self, intent: &mut BatchIntent) -> Taken;
-    pub(crate) fn close(&self);
-}
-pub(crate) enum Taken {
-    /// A wake whose posts an earlier batch already took.
-    Nothing,
-    Batch,
-    Shutdown,
-}
-
-// worker/batch_intent/mod.rs
-impl BatchIntent {
-    /// A fired event of the running loop.
-    pub(crate) fn push_event(&mut self, event: ProgramEvent);
-    /// Forget the fired events, as the batch stops or rebuilds the loop that fired them.
-    pub(crate) fn void_events(&mut self);
-    /// Clear `seeds`: sinks, event sources, fired events and node seeds. A loop command stays: it
-    /// is a mode the host shows, not a run.
-    pub(crate) fn void_runs(&mut self);
-}
-
-// worker/run_epoch.rs — replaces pause_gate/
-/// Counts finished batches; an event source parks on it between fires.
-#[derive(Clone, Debug)]
-pub(crate) struct RunEpoch(watch::Sender<u64>);
-impl RunEpoch {
-    pub(crate) fn advance(&self);
-    pub(crate) fn subscribe(&self) -> watch::Receiver<u64>;
-}
-
-// worker/active_event_loop/mod.rs
-pub(crate) struct ActiveEventLoop { tasks: JoinSet<Infallible> }
-impl ActiveEventLoop {
-    pub(crate) fn start(armed: Vec<ArmedEvent>, mailbox: &Arc<Mailbox>, epoch: &RunEpoch) -> Self;
-    /// Resolves only with a task's panic, which it resumes.
-    pub(crate) async fn failed(&mut self) -> Infallible;
-    pub(crate) async fn stop(&mut self);
-}
-
-// worker/worker_task/mod.rs — no type parameter
-pub(crate) struct WorkerTask {
-    mailbox: Arc<Mailbox>,
-    callback: Box<dyn Fn(WorkerReport) + Send + Sync>,
-    engine: ExecEngine,
-    summary: RunSummaryPublisher,
-    outcome: ExecOutcome,
-    intent: BatchIntent,
-    event_loop: Option<ActiveEventLoop>,
-    epoch: RunEpoch,
-}
-
-// worker/mod.rs
-pub struct Worker { task: AbortOnDropHandle<()>, mailbox: Arc<Mailbox> }
-impl Worker {
-    pub fn new(callback: impl Fn(WorkerReport) + Send + Sync + 'static) -> Self;
-    pub fn cancel(&self);                       // was `request_cancel`
-    /// Cancel, then wait at most `patience` for the running node to finish; past it, abort the
-    /// task.
-    pub async fn exit(&mut self, patience: Duration) -> Result<(), ExitError>;
-}
-
-// worker/error.rs
-#[derive(Debug, Error)]
-pub enum ExitError {
-    /// The worker task panicked; the host resumes it.
-    #[error("the worker task panicked")]
-    Panicked(#[source] JoinError),
-    /// A lambda was still running at the deadline.
-    #[error("a node was still running when the worker was told to exit")]
-    TimedOut,
-}
-```
-
-- **One input.** A host post, a fired event, a cancel and a shutdown all change `Pending` under
-  one lock.
-- **A fired event lives no longer than the loop that fired it**, in three places that together
-  close every window of B3: `push(Update | Clear)` clears `seeds.events`, as it voids the node
-  seeds named before it; a batch whose transition stops or rebuilds the loop calls
-  `BatchIntent::void_events` on itself before anything else; and once `ActiveEventLoop::stop` has
-  joined the tasks, so none can fire again, the worker calls `Mailbox::void_events`. Without the
-  last, a task that fires between the take and the stop leaves an old program's event for the next
-  batch.
-- **A cancel names posts, not time.** It voids the seeds posted before it and cancels the run in
-  flight; `take_into` clears the flag in the critical section that takes the batch, so a cancel is
-  either before the take, and voids, or after it, and cancels that batch's run.
-- **A source fires once per finished batch.** An event task reads the epoch, fires, and waits for
-  the epoch to change. The bound that replaces the channel of ten: at most one pending entry per
-  event in the set, and one fire beyond per batch that finished between the fire and the wait.
-- **`exit` has a bound the host names.** The wait is `tokio::time::timeout` over the task handle,
-  so a paused clock tests it; darkroom's bridge passes `QUIT_PATIENCE`, ten seconds: a lambda
-  polls the cancel token between chunks of its work, so a cancelled node returns within one, and
-  ten seconds is past a chunk and short of a person force-quitting. On `TimedOut` at quit the
-  process ends, which is what stops a lambda that never returns.
-- **Gone:** `PauseGate`, `PauseGateCloseGuard`, the `mpsc` and `EVENT_LOOP_BACKPRESSURE`,
-  `event_buffer`, `LambdaPanic`, `EventLoopWake`, `WorkerWake`, `task_nodes`, `panic_message`,
-  `WorkerLinks`, the `CancellationToken`, `WorkerError::EventLambdaPanic`, the generic parameter
-  of `WorkerTask` and `WorkerRunReporter`.
 
 #### Blob I/O — `data/codec/mod.rs`, `exec/cache/disk_store/`, `exec/cache/stamp_job/mod.rs`
 
@@ -813,12 +683,9 @@ Every shared-ownership case of the current code, with its verdict:
 | `DynamicValue::Custom(Arc<dyn CustomValue>)` | `data/dynamic_value.rs:38` | Kept: an immutable value too costly to copy, held by a slot, each consumer and a twin at once. `into_custom` moves on the last holder. |
 | `FuncLambda(Arc<dyn AsyncLambdaFn>)` | `graph/func/lambda.rs:64` | Kept: the library on the host and each program on the worker run it. |
 | `EventLambda(Arc<dyn Fn>)` over an inner `Arc<F>` | `graph/func/event.rs:14,35-37` | Kept: the stream needs an owned lambda; a single `Arc` through an `Arc<Self>` receiver would save one allocation per declared event, which is nothing. |
-| `Arc<Mailbox>`, `Mutex<Pending>` | `worker/mod.rs:26`, `worker/mailbox.rs:22` | Kept: it is the channel. It gains the event tasks as holders and the cancel and shutdown as state. |
-| `Arc<RunSummary>` and its `Arc::get_mut` reuse | `worker/run_summary/mod.rs:30,43-47` | Kept. The doc's "allocates nothing" holds only while the host has dropped the last summary; the doc says so after batch 2. |
+| `Arc<Mailbox>`, `Mutex<Pending>` | `worker/mod.rs`, `worker/mailbox/mod.rs` | Kept: it is the channel, held by the handle, the task and each event task. |
+| `Arc<RunSummary>` and its `Arc::get_mut` reuse | `worker/run_summary/mod.rs:30,43-47` | Kept: its "allocates nothing" holds only while the host has dropped the last summary, as its doc says. |
 | `SharedAnyState { Arc<Mutex<AnyState>> }` | `runtime/shared_any_state.rs:10` | Kept: a func lambda in a run and an event lambda between runs both write it. Its guard is `!Send`, so holding it across an await does not compile. |
-| `CancelToken` (`Arc<AtomicBool>`) on `Worker` | `worker/mod.rs:27` | Kept as a flag lambdas poll off-thread; moved into `Pending`, where the take clears it under the lock, so no `reset` races the host. |
-| `CancellationToken` (shutdown) | `worker/mod.rs:28` | Replaced by `Pending.shutdown`: one mechanism from host to worker. |
-| `PauseGate { watch::Sender<usize> }` | `worker/pause_gate/mod.rs:9` | Replaced by `RunEpoch`: the counter of overlapping closers has one closer, and the gate did not give one fire per run; the full channel did. |
 | `ram_seen: HashSet<usize>` of `Arc::as_ptr` | `runtime_cache/mod.rs:67,210` | Kept: every `Arc` is alive for the pass, so no address repeats. Spelled `Arc::as_ptr(arc).addr()`. |
 | `LazyLock<Func>` | `graph/node/special/run_sinks.rs:24` | Kept: immutable, built once. |
 
@@ -1022,10 +889,6 @@ cache passes it; no borrow in the call graph outlives `ExecEngine::execute`.
   by `FuncBuilder::event`, their equal length asserted in `checked`. Refused: one
   `Vec<FuncEvent>`, from which no `&[Numbered<EventDecl>]` can be borrowed, the reason
   `NodeEvents`, `EventRef` and `ExactChain` exist.
-- **The fired events go through the mailbox.** `watch` "only retains the *last* sent value"
-  ([`watch`](https://docs.rs/tokio/latest/tokio/sync/watch/index.html)), which is what the epoch
-  is; it was refused for the mailbox itself, whose receiver must take and reset. Refused: the
-  channel beside the mailbox, a second input whose order against a post no rule decides.
 - **One depth-first walk with an on-path mark.** As petgraph's `depth_first_search`, whose
   `DfsEvent::BackEdge` is "an edge to an already visited node"
   ([`DfsEvent`](https://docs.rs/petgraph/latest/petgraph/visit/enum.DfsEvent.html)). Refused:
@@ -1041,22 +904,6 @@ cache passes it; no borrow in the call graph outlives `ExecEngine::execute`.
   that a numbered port reads as its port at every site, and the alternative is `.port.` at each.
 - **`InstancePath` and `ProgramId` share an in-crate `InlineIds`.** Refused: `arrayvec`, a new
   dependency for this crate and a `u32` length, 132 bytes for `ProgramId`'s 129.
-- **A cancel stops the run in flight and voids each run posted before it.** The editor shows no
-  queue, so a run posted and not yet started is the run the user cancels. A graph op, a store, a
-  headroom, cache maintenance and a loop command posted beside it still apply. Refused: the run in
-  flight alone, as ComfyUI's `/interrupt`, "stop the current workflow execution", beside a separate
-  `/queue` to "clear pending/running"
-  ([routes](https://docs.comfy.org/development/comfyui-server/comms_routes)): it has a queue a
-  person sees and clears, and here Cancel pressed before the worker woke would stop nothing.
-- **`Worker::exit` takes a deadline.** A cancel is coarse, the running node finishes first, and
-  nothing stops a lambda that never returns: "tasks spawned using `spawn_blocking` cannot be
-  aborted because they are not async"
-  ([`spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html)). As
-  tokio's `Runtime::shutdown_timeout`: "when the timeout is reached, spawned work that did not
-  stop in time and threads running it are leaked"
-  ([`Runtime`](https://docs.rs/tokio/latest/tokio/runtime/struct.Runtime.html)). Cost: a node cut
-  off at the deadline may leave a partly written file, as a force-quit does. Refused: no bound,
-  under which a stuck lambda hangs quit for good.
 - **A node with no name of its own shows its declaration's, whatever its kind.** A func renamed
   in the library then reads renamed on each node nobody named, as a renamed compound already does
   on its instances, the rule darkroom's `title` gives Blender's group node as its source. Refused:
@@ -1080,13 +927,6 @@ cache passes it; no borrow in the call graph outlives `ExecEngine::execute`.
   "default cache size is 10 gigabytes"
   ([local cache](https://github.com/mozilla/sccache/blob/main/docs/Local.md)): a cap setting,
   access times and a collector, a cache policy of its own; leaving it unbounded.
-- **A lambda's panic is resumed, whichever lambda.** An event task's panic is resumed on the
-  worker task, by `ActiveEventLoop::failed` and by `stop`, which joins the tasks; the worker
-  task's own is what `Worker::exit` returns, and the host resumes it on its thread, where the
-  `mcp` profile's harness catches it. One behaviour with the release build, which aborts, as
-  `common::task::run_blocking` resumes a panic "as the release build aborts on a panic anyway".
-  Refused: catching both and reporting by node, which makes an unwind build differ from the one
-  that ships and keeps state a panic left half-changed; the two policies as they were.
 - **A set holds a compound's declaration apart from its body.** A scope reads a compound's name,
   description and interface and never its graph, so a graph of the set can change while a scope
   lives, and a load step reads and writes in one method. It amends "a repair reads, then writes":
@@ -1107,45 +947,6 @@ cache passes it; no borrow in the call graph outlives `ExecEngine::execute`.
 # Part 2 — Plan
 
 Each batch leaves the build and the tests green. Whoever addresses an item deletes it.
-
-## Batch 2 — the worker's one input
-
-Files: `worker/`, `exec/schedule/mod.rs`, `exec/seeds.rs`, `internals/worker.rs`,
-`darkroom/src/core/worker_bridge/mod.rs`.
-
-- [ ] `worker/worker_task/mod.rs:188-190`, `worker/batch_intent/mod.rs:60-65` — B3. Target:
-  `Mailbox::fire` and `BatchIntent::push_event`; the three places a fired event is voided, as *A
-  fired event lives no longer than the loop that fired it* lists them. Tests: a fire, then an
-  `Update` without the emitter, in one batch, runs and does not panic; a `StopEventLoop` with a
-  pending fire runs nothing; a fire after the take of a rebuilding batch is gone from the next.
-- [ ] `worker/mod.rs:55-57`, `worker_task/mod.rs:196-198` — B6. Target: `Mailbox::cancel`, the
-  token in `Pending`, cleared in `take_into`. Tests: a cancel voids a posted run; a cancel after
-  the take stops that batch's run.
-- [ ] `worker/pause_gate/`, `worker/active_event_loop/mod.rs:13,38,53-62` — a counted gate with one
-  closer, a channel of ten feeding a set. Target: `RunEpoch`; the wall-clock timeouts in
-  `pause_gate/tests.rs:13,22,48,74` go with it, a blocked wait asserted by one poll.
-- [ ] `worker/active_event_loop/mod.rs:16-32,89-152`, `worker/error.rs:41-45` — two panic
-  policies. Target: `JoinSet<Infallible>`, `failed()` and `stop()` resuming a task's panic.
-  `darkroom/src/core/worker_bridge/mod.rs`: where a send returns `WorkerExited`, the bridge awaits
-  `Worker::exit` and resumes the panic it returns. Test: an event lambda's panic and a func
-  lambda's both end the worker task with that panic.
-- [ ] `worker/worker_task/mod.rs:110-134,417` — a 300-line task generic over its callback. Target:
-  `Box<dyn Fn(WorkerReport) + Send + Sync>`.
-- [ ] `worker/worker_task/mod.rs:81` — `mem::take(&mut intent.seeds)` drops the buffers the swap
-  keeps. Target: `execute` borrows the seeds. Test: capacity kept across an applied batch.
-- [ ] `worker/worker_task/mod.rs:164` — `next_intent` returns `Option<&BatchIntent>` read as a
-  `bool`. Target: `Taken`.
-- [ ] `worker/mod.rs:24-97` — a second token for shutdown, a hand-written abort on drop. Target:
-  `Pending.shutdown`, `tokio_util::task::AbortOnDropHandle`.
-- [ ] `worker/mod.rs:70-78`, `darkroom/src/core/worker_bridge/mod.rs:171-179` — `exit` waits with
-  no bound, and the bridge blocks on it at quit. Target: `exit(patience)`, `ExitError`,
-  `QUIT_PATIENCE`. Tests, on a paused clock: a lambda that never returns gives `TimedOut` at the
-  deadline; one that returns before it gives `Ok`.
-- [ ] `worker/run_summary/mod.rs:25-27` — "allocates nothing to report itself" holds only while the
-  host has dropped the last summary. Target: the doc says so.
-- [ ] `exec/schedule/mod.rs:368-376` — the comment "events arrive in a batch of their own" beside
-  the worker's "takes whatever was posted beside them". Target: one statement of the rule, at
-  `push_event`.
 
 ## Batch 3 — the slot
 

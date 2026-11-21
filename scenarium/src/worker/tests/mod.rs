@@ -25,8 +25,21 @@ use crate::internals::test_graph::TestGraph;
 use crate::internals::worker::{PATIENCE, TestWorker};
 use crate::worker::Worker;
 use crate::worker::activity::WorkerActivity;
-use crate::worker::error::WorkerError;
+use crate::worker::error::{ExitError, WorkerError};
 use crate::worker::protocol::{WorkerMessage, WorkerReport};
+
+/// Assert `exit` saw the worker task end in a panic carrying `message`.
+fn assert_panicked_with(exited: Result<(), ExitError>, message: &str) {
+    let Err(ExitError::Panicked(error)) = exited else {
+        panic!("the worker task did not panic: {exited:?}");
+    };
+    let payload = error.into_panic();
+    let text = payload
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str));
+    assert_eq!(text, Some(message));
+}
 
 mod batching;
 mod cache;

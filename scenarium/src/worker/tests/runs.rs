@@ -92,12 +92,48 @@ async fn a_disabled_sink_stays_out_of_sink_runs() {
 async fn a_cancel_with_no_active_run_does_not_reach_the_next_one() {
     let mut w = TestWorker::printing("hi");
 
-    w.worker.request_cancel();
+    w.worker.cancel();
     w.send_many([w.update(), TestWorker::sinks()]);
 
     let run = w.run().await;
     assert!(!run.cancelled, "an idle cancel affected the next run");
     assert_eq!(run.executed_node_count, 1, "the run completed in full");
+}
+
+/// A cancel stops the run in flight and voids the run posted behind it: `gate` holds the first
+/// run until the test lets it go, a second run waits in the mailbox meanwhile, and after the
+/// cancel the first reports cancelled and the second never starts.
+#[tokio::test]
+async fn a_cancel_stops_the_run_in_flight_and_voids_the_one_posted_behind_it() {
+    let entered = Arc::new(Notify::new());
+    let release = Arc::new(Notify::new());
+    let calls = Calls::default();
+    let mut graph = TestGraph::new();
+    graph.add("gate", |node| {
+        let (entered, release, calls) = (Arc::clone(&entered), Arc::clone(&release), calls.clone());
+        node.sink().lambda(async_lambda!(
+            move |_| { entered = Arc::clone(&entered), release = Arc::clone(&release), calls = calls.clone() } => {
+                calls.bump();
+                entered.notify_one();
+                release.notified().await;
+                Ok(())
+            }
+        ))
+    });
+    let mut w = TestWorker::over(graph);
+    w.send_many([w.update(), TestWorker::sinks()]);
+    timeout(PATIENCE, entered.notified())
+        .await
+        .expect("the first run did not start");
+
+    w.send(TestWorker::sinks());
+    w.worker.cancel();
+    release.notify_one();
+
+    let run = w.run().await;
+    assert!(run.cancelled);
+    w.assert_no_run().await;
+    assert_eq!(calls.count(), 1);
 }
 
 /// A `Sync` sent behind a run is acknowledged only after the run reported:

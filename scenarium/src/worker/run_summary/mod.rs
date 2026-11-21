@@ -23,8 +23,9 @@ pub struct RunSummary {
 }
 
 /// Publishes each completed run into one retained allocation. A host that dropped the last
-/// summary before the next run ends — the usual case — gets the same buffers back, so a run
-/// under the event loop allocates nothing to report itself.
+/// summary before the next run ends gets the same buffers back, so the run allocates nothing to
+/// report itself; one that still holds it, as a host whose frames fall behind an event loop does,
+/// costs the run a new summary.
 #[derive(Default, Debug)]
 pub(crate) struct RunSummaryPublisher {
     summary: Arc<RunSummary>,

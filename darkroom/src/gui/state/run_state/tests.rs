@@ -347,9 +347,9 @@ fn completed_snapshot_replaces_the_previous_run() {
 }
 
 /// A failed run leaves no results to show, so an execution error clears the
-/// last run's statuses. A panicking event lambda stops the loop but fails no
-/// run, so the statuses the last completed run left stand. A completed run and a failed one
-/// each end a run; the panic ends none.
+/// last run's statuses. A flush that wrote nothing fails no run, so the statuses the last
+/// completed run left stand. A completed run and a failed one each end a run; the flush ends
+/// none.
 #[test]
 fn only_a_failed_run_clears_the_last_run_statuses() {
     let node = node_id(1);
@@ -358,15 +358,9 @@ fn only_a_failed_run_clears_the_last_run_statuses() {
     rs.apply_report(completed_status(&[(node, 1.0)], &[]), &mut log);
     assert_eq!(rs.runs_ended(), 1);
 
-    rs.apply_report(
-        WorkerReport::Error(WorkerError::EventLambdaPanic {
-            program_id: node,
-            message: "boom".to_owned(),
-        }),
-        &mut log,
-    );
+    rs.apply_report(flush_wrote_nothing(node), &mut log);
     assert_eq!(rs.status(node), ExecStatus::Executed(1.0));
-    assert_eq!(rs.runs_ended(), 1, "the panic ends no run");
+    assert_eq!(rs.runs_ended(), 1, "the flush ends no run");
 
     rs.apply_report(
         WorkerReport::Error(WorkerError::Exec {
@@ -488,6 +482,17 @@ fn run_error(node: ProgramId) -> WorkerReport {
     })
 }
 
+/// A worker error that ends no run: a flush that could not persist `node`'s type.
+fn flush_wrote_nothing(node: ProgramId) -> WorkerReport {
+    WorkerReport::Error(WorkerError::CacheFlush {
+        failures: Vec::new(),
+        unsupported: vec![scenarium::CacheFlushUnsupported {
+            program_id: node,
+            type_id: scenarium::CustomTypeId::from_u128(1),
+        }],
+    })
+}
+
 fn installed(nodes: &[ProgramId]) -> WorkerReport {
     WorkerReport::Installed {
         compiled: Arc::new(CompiledGraph::bare(nodes.iter().copied())),
@@ -503,10 +508,7 @@ fn event_loop_stream([a, b]: [ProgramId; 2]) -> Vec<WorkerReport> {
     stream.extend(event_run(b, run_error(b)));
     stream.extend(event_run(a, completed_status(&[(a, 2.0)], &[b])));
     stream.extend(event_run(b, run_error(a)));
-    stream.push(WorkerReport::Error(WorkerError::EventLambdaPanic {
-        program_id: a,
-        message: "boom".to_owned(),
-    }));
+    stream.push(flush_wrote_nothing(a));
     stream.extend(event_run(a, run_error(b)));
     stream.extend(event_run(b, completed_status(&[(b, 3.0)], &[])));
     stream.extend(event_run(a, run_error(a)));

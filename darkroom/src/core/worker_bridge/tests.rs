@@ -12,7 +12,7 @@ use scenarium::{
 
 use crate::core::wake;
 use crate::core::wake::Wake;
-use crate::core::worker_bridge::{Arrival, WorkerBridge};
+use crate::core::worker_bridge::{Arrival, QUIT_PATIENCE, WorkerBridge};
 
 #[test]
 fn drop_waits_for_worker_idle_before_runtime_shutdown() {
@@ -106,7 +106,7 @@ fn commands_report_a_dead_worker_instead_of_reading_as_queued() {
     // Stop the worker the way shutdown does, then keep issuing commands.
     bridge
         .runtime
-        .block_on(bridge.worker.exit())
+        .block_on(bridge.worker.exit(QUIT_PATIENCE))
         .expect("worker task joins cleanly");
 
     assert!(
@@ -155,4 +155,40 @@ fn an_arriving_report_records_its_error_and_its_cancel() {
             None,
         ]
     );
+}
+
+/// A worker that panicked takes the editor down with its own panic: dropping the bridge resumes
+/// it. The wake holds a sender its receiver sees close once the worker task, and the callback
+/// that holds the wake with it, is gone, which proves the panic ended the task without a wait.
+#[test]
+fn dropping_the_bridge_resumes_the_worker_panic() {
+    use std::panic::{self, AssertUnwindSafe};
+
+    use scenarium::internals::test_graph::TestGraph;
+    use tokio::sync::oneshot;
+    use tokio::time::timeout;
+
+    let (alive, ended) = oneshot::channel::<()>();
+    let wake: Wake = Arc::new(move || {
+        let _alive = &alive;
+    });
+    let bridge = WorkerBridge::new(wake);
+    let mut graph = TestGraph::new();
+    graph.add("boom", |node| {
+        node.sink().lambda(scenarium::async_lambda!(|_| {
+            panic!("node lambda failed")
+        }))
+    });
+    let compiled = Compiler::default().compile(&graph.graphs, &graph.library);
+    bridge.install(Arc::new(compiled)).unwrap();
+    bridge.run_sinks().unwrap();
+    bridge
+        .runtime
+        .block_on(async { timeout(Duration::from_secs(5), ended).await })
+        .expect("the worker task did not end")
+        .expect_err("the wake's sender closes unused");
+
+    let payload = panic::catch_unwind(AssertUnwindSafe(move || drop(bridge)))
+        .expect_err("the drop resumes the worker's panic");
+    assert_eq!(payload.downcast_ref::<&str>(), Some(&"node lambda failed"));
 }

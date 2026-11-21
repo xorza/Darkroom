@@ -4,8 +4,6 @@ use tokio::sync::oneshot;
 
 use crate::graph::identity::NodeId;
 
-use crate::exec::program_event::ProgramEvent;
-
 use crate::exec::compile::Compiler;
 use crate::graph::graph_set::GraphSet;
 use crate::library::Library;
@@ -117,7 +115,7 @@ fn batch_intent_deduplicates_events() {
             events: vec![event, event],
         },
     ]);
-    intent.seeds.add_events([event]);
+    intent.push_event(event);
 
     assert_eq!(
         intent.seeds.events.len(),
@@ -197,6 +195,65 @@ fn batch_intent_graph_op_drops_node_seeds_its_program_lacks() {
         intent.seeds.program_ids.is_empty(),
         "a Clear voids every seed before it, even one the next program holds"
     );
+}
+
+/// A fired event names the program its loop was armed over, so a graph op voids every event
+/// fired before it, and one fired after it stays.
+#[test]
+fn batch_intent_graph_op_voids_the_events_fired_before_it() {
+    let event = |event_idx| ProgramEvent {
+        program_id: ProgramId::from(NodeId::from_u128(1)),
+        event_idx,
+    };
+    let fire = |event_idx| WorkerMessage::FireEvents {
+        events: vec![event(event_idx)],
+    };
+    let update = || WorkerMessage::Update {
+        compiled: empty_compiled(),
+    };
+
+    assert_eq!(batch_intent([fire(0), update()]).seeds.events, []);
+    assert_eq!(
+        batch_intent([fire(0), WorkerMessage::Clear]).seeds.events,
+        []
+    );
+    assert_eq!(
+        batch_intent([fire(0), update(), fire(1)]).seeds.events,
+        [event(1)]
+    );
+}
+
+/// A cancel voids every run a batch asks for, sinks, event sources, fired events and node
+/// seeds, and keeps everything that is no run.
+#[test]
+fn batch_intent_void_runs_keeps_what_is_no_run() {
+    let program_id = ProgramId::from(NodeId::from_u128(1));
+    let mut intent = batch_intent([
+        WorkerMessage::Clear,
+        WorkerMessage::RunSinks,
+        WorkerMessage::RunNodes {
+            program_ids: vec![program_id],
+        },
+        WorkerMessage::FireEvents {
+            events: vec![ProgramEvent {
+                program_id,
+                event_idx: 0,
+            }],
+        },
+        WorkerMessage::StartEventLoop,
+        WorkerMessage::SetRamHeadroom(7),
+        WorkerMessage::EvictCache {
+            program_ids: vec![program_id],
+        },
+    ]);
+    intent.seeds.event_sources = true;
+
+    intent.void_runs();
+    assert!(intent.seeds.is_empty());
+    assert!(matches!(intent.graph_state, Some(GraphOp::Clear)));
+    assert!(matches!(intent.loop_request, Some(LoopCommand::Start)));
+    assert_eq!(intent.ram_headroom, Some(7));
+    assert_eq!(intent.evict_cache, [program_id]);
 }
 
 /// Each slot keeps the last message that wrote it — a graph op by identity,

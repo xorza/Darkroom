@@ -1,59 +1,50 @@
+//! [`Worker`]: the handle a host drives a background worker task through.
+
 use std::sync::Arc;
+use std::time::Duration;
 
-use tokio::task::{JoinError, JoinHandle};
-use tokio_util::sync::CancellationToken;
+use tokio::time;
+use tokio_util::task::AbortOnDropHandle;
 
-use common::CancelToken;
-
-use crate::worker::error::WorkerExited;
+use crate::worker::error::{ExitError, WorkerExited};
 use crate::worker::mailbox::Mailbox;
 use crate::worker::protocol::{WorkerMessage, WorkerReport};
-use crate::worker::worker_task::{WorkerLinks, WorkerTask};
+use crate::worker::worker_task::{ReportSink, WorkerTask};
 
 pub(crate) mod active_event_loop;
 pub(crate) mod activity;
 pub(crate) mod batch_intent;
 pub(crate) mod error;
 mod mailbox;
-pub(crate) mod pause_gate;
 pub(crate) mod protocol;
+mod run_epoch;
 pub(crate) mod run_summary;
 mod worker_task;
 
+/// A worker task, and the mailbox every message, cancel and shutdown reaches it through. Dropped,
+/// it asks the task to end and aborts it.
 #[derive(Debug)]
 pub struct Worker {
-    task: Option<JoinHandle<()>>,
+    /// `None` once [`exit`](Self::exit) has joined it.
+    task: Option<AbortOnDropHandle<()>>,
     mailbox: Arc<Mailbox>,
-    run_cancel: CancelToken,
-    shutdown: CancellationToken,
 }
 
 impl Worker {
-    pub fn new<ExecCallback>(callback: ExecCallback) -> Self
-    where
-        ExecCallback: Fn(WorkerReport) + Send + Sync + 'static,
-    {
+    pub fn new(callback: impl Fn(WorkerReport) + Send + Sync + 'static) -> Self {
         let mailbox = Arc::new(Mailbox::default());
-        let run_cancel = CancelToken::new();
-        let shutdown = CancellationToken::new();
-        let worker_task = WorkerTask::new(WorkerLinks {
-            mailbox: Arc::clone(&mailbox),
-            callback,
-            run_cancel: run_cancel.clone(),
-            shutdown: shutdown.clone(),
-        });
-        let task = tokio::spawn(worker_task.run());
-
+        let task = WorkerTask::new(Arc::clone(&mailbox), ReportSink::new(callback));
         Self {
-            task: Some(task),
+            task: Some(AbortOnDropHandle::new(tokio::spawn(task.run()))),
             mailbox,
-            run_cancel,
-            shutdown,
         }
     }
 
-    pub fn request_cancel(&self) {
-        self.run_cancel.cancel();
+    /// Stop the run in flight and void every run posted before this call. A cancel lands before
+    /// the worker takes a batch or after it, so it never misses the run it was meant for nor
+    /// reaches a run posted after it.
+    pub fn cancel(&self) {
+        self.mailbox.cancel();
     }
 
     /// Merge `msg` into the worker's next batch.
@@ -69,30 +60,35 @@ impl Worker {
         self.mailbox.post(msgs)
     }
 
-    /// Cancel active work, drain event tasks, and wait for the worker task to finish.
-    pub async fn exit(&mut self) -> Result<(), JoinError> {
-        self.request_exit();
-        let result = match self.task.as_mut() {
-            Some(task) => task.await,
-            None => return Ok(()),
+    /// Cancel the run in flight, stop the event loop, and wait for the task to end; past
+    /// `patience`, abort it. A cancel is coarse, the running node finishes first, and nothing
+    /// stops a lambda that never returns: so the host names how long it waits, as tokio's
+    /// `Runtime::shutdown_timeout` does
+    /// ([`Runtime`](https://docs.rs/tokio/latest/tokio/runtime/struct.Runtime.html)).
+    pub async fn exit(&mut self, patience: Duration) -> Result<(), ExitError> {
+        let Some(mut task) = self.task.take() else {
+            return Ok(());
         };
-        self.task.take();
-        result
-    }
-
-    fn request_exit(&self) {
-        self.shutdown.cancel();
-        self.run_cancel.cancel();
+        self.mailbox.shut_down();
+        match time::timeout(patience, &mut task).await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(error)) => {
+                assert!(error.is_panic(), "only `exit` and a drop abort the task");
+                Err(ExitError::Panicked(error))
+            }
+            Err(_elapsed) => {
+                task.abort();
+                Err(ExitError::TimedOut)
+            }
+        }
     }
 }
 
 impl Drop for Worker {
     fn drop(&mut self) {
-        self.request_exit();
-        // Drop cannot await; callers needing structured cleanup use `exit`.
-        if let Some(task) = self.task.take() {
-            task.abort();
-        }
+        // The task's handle, dropped after this, aborts it; the shutdown also cancels a lambda's
+        // work off the task, which an abort does not reach.
+        self.mailbox.shut_down();
     }
 }
 

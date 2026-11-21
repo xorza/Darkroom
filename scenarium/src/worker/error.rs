@@ -4,13 +4,15 @@
 //! [`WorkerError`] always arrives as a
 //! [`WorkerReport::Error`](crate::worker::protocol::WorkerReport), never as a return value,
 //! because the worker runs the operation long after the call that queued it. [`WorkerExited`]
-//! is the send-side failure every handle method returns once the task is gone.
+//! is the send-side failure every handle method returns once the task is gone, and
+//! [`ExitError`] what [`Worker::exit`](crate::Worker::exit) answers.
 
 use std::fmt::Display;
 
+use tokio::task::JoinError;
+
 use crate::exec::cache::runtime_cache::error::{CacheFlushUnsupported, CacheNodeFailure};
 use crate::exec::error::ExecError;
-use crate::graph::program_id::ProgramId;
 
 #[derive(Debug, thiserror::Error)]
 pub enum WorkerError {
@@ -36,13 +38,6 @@ pub enum WorkerError {
         failures: Vec<CacheNodeFailure>,
         unsupported: Vec<CacheFlushUnsupported>,
     },
-    /// An event lambda panicked, which stops the event loop. No run failed: the
-    /// last completed run's results still stand.
-    #[error("event lambda for node {program_id:?} panicked: {message}")]
-    EventLambdaPanic {
-        program_id: ProgramId,
-        message: String,
-    },
 }
 
 /// The rendering both cache variants share: one entry per node, in the order the sweep met them.
@@ -57,3 +52,14 @@ fn join(entries: &[impl Display]) -> String {
 #[derive(Debug, thiserror::Error)]
 #[error("worker task has exited")]
 pub struct WorkerExited;
+
+/// Why [`Worker::exit`](crate::Worker::exit) did not see the task end cleanly.
+#[derive(Debug, thiserror::Error)]
+pub enum ExitError {
+    /// The worker task panicked, a lambda's panic among them; the host resumes it.
+    #[error("the worker task panicked")]
+    Panicked(#[source] JoinError),
+    /// A node was still running at the deadline, and the task was aborted.
+    #[error("a node was still running when the worker was told to exit")]
+    TimedOut,
+}

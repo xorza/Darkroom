@@ -18,7 +18,7 @@ pub struct EventLambda(Arc<dyn Fn(SharedAnyState) -> EventFires + Send + Sync>);
 /// A stream that `futures_util::stream::unfold` builds from the author's future, which it holds
 /// inline: one allocation for each loop start, not one for each fire. Refused: a boxed future for
 /// each fire, an allocation at the event's rate; an author's loop that sends to the worker,
-/// which puts the worker's sender and pause gate in the graph layer. A `Stream` is the async
+/// which puts the worker's mailbox in the graph layer. A `Stream` is the async
 /// source of many values that the tokio docs and iced's `Subscription::run` take, and arti moved
 /// to `unfold` to box no future for each item
 /// (<https://gitlab.torproject.org/tpo/core/arti/-/issues/2070>).
