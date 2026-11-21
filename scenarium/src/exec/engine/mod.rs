@@ -389,8 +389,8 @@ pub(crate) mod internals {
             values: Vec<DynamicValue>,
         ) {
             let node_idx = self.node_idx(program_id);
-            let slot = &mut self.cache[node_idx];
-            let produced_under = slot.cur_digest;
+            let slot = self.cache.slot_mut(node_idx);
+            let produced_under = slot.stamp().digest();
             slot.load_output(OutputSnapshot::new(values), produced_under);
         }
     }

@@ -9,8 +9,8 @@ use crate::exec::idx::NodeIdx;
 /// outputs, transitively, plus the seeds themselves.
 ///
 /// Answering that needs the program's wires reversed, a pure function of the program, so it is
-/// **derived per call, never kept**: an index held between calls would be stale the moment the
-/// graph is edited. What persists is the *storage*: [`RuntimeCache`] owns one of these, so the
+/// **derived per call, never kept**: the question is a user's action, an eviction, rare beside
+/// the runs that would carry a kept index for nothing. What persists is the *storage*: [`RuntimeCache`] owns one of these, so the
 /// second eviction refills the buffers below instead of allocating them again.
 /// [`CompiledGraph::consumer_cone`], answering the same question for a host ahead of the
 /// eviction, has nowhere to keep one and allocates per call.

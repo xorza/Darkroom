@@ -84,10 +84,10 @@ pub(crate) enum NodeState {
     Reuse,
     /// The node must run and owns one pending read for each bound input.
     Run,
-    /// An earlier node of this run has its digest, so it takes that node's values rather than
-    /// running ([`RunSchedule::twin_of`]): it owns one pending read of each of that node's outputs
-    /// it demands, and none of its own inputs.
-    Twin,
+    /// An earlier node of this run, `leader`, has its digest, so it takes that node's values
+    /// rather than running: it owns one pending read of each of that node's outputs it demands,
+    /// and none of its own inputs.
+    Twin { leader: NodeIdx },
 }
 
 impl NodeState {
@@ -167,7 +167,7 @@ impl ResolvedOutputs {
 pub(crate) struct RunSchedule {
     /// Post-order DFS over the dependency graph (deps before consumers), seeded from the roots.
     /// Disabled dependencies stay outside the order unless they are explicit node seeds. The sweep
-    /// refines it into the surviving run.
+    /// leaves it whole and refines `states`: a node it cuts stays in the order, verdicted `Cut`.
     pub(crate) process_order: Vec<NodeIdx>,
     /// Per-node [`NodeState`], aligned to the program's dense node vector. The
     /// planner writes the structural verdict; the sweep refines it in place.
@@ -187,10 +187,6 @@ pub(crate) struct RunSchedule {
     root_flags: Col<NodeIdx, RootFlags>,
     /// Exact per-output demand and live reader counts, written by the sweep.
     pub(crate) outputs: ResolvedOutputs,
-    /// For each node, the earlier node of this run with its digest whose values it may take,
-    /// written by the digest pass ([`RuntimeCache::mark_twins`](crate::exec::cache::runtime_cache::RuntimeCache::mark_twins))
-    /// and acted on where the sweep makes the node a [`NodeState::Twin`].
-    pub(crate) twins: Col<NodeIdx, Option<NodeIdx>>,
 }
 
 /// What one node is to a run's roots: whether the backward walk started from it
@@ -264,7 +260,7 @@ impl RunSchedule {
                 }
                 NodeState::Disabled => Delivery::Unbound,
                 NodeState::MissingInputs => Delivery::Blocked,
-                NodeState::Cut | NodeState::Reuse | NodeState::Run | NodeState::Twin => {
+                NodeState::Cut | NodeState::Reuse | NodeState::Run | NodeState::Twin { .. } => {
                     Delivery::Wire(*addr)
                 }
             },
@@ -302,13 +298,14 @@ impl RunSchedule {
         self.root_flags
             .reset(program.e_nodes.len(), RootFlags::default());
         self.outputs.reset(program.output_count as usize);
-        self.twins.reset(program.e_nodes.len(), None);
     }
 
     /// The node whose values `node_idx` takes, where it is a [`NodeState::Twin`].
     pub(crate) fn twin_of(&self, node_idx: NodeIdx) -> Option<NodeIdx> {
-        (self.states[node_idx] == NodeState::Twin)
-            .then(|| self.twins[node_idx].expect("a twin names the node whose values it takes"))
+        match self.states[node_idx] {
+            NodeState::Twin { leader } => Some(leader),
+            _ => None,
+        }
     }
 
     /// The nodes the backward walk starts from, ascending.

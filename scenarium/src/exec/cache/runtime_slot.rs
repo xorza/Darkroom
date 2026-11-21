@@ -43,7 +43,7 @@ impl OutputSnapshot {
     }
 }
 
-/// Whether one node's cached output is resident, and whether disk backs it.
+/// Whether one node's cached output is resident.
 ///
 /// Private to the slot, so "resident" has one definition and no caller can leave the slot in a
 /// shape the slot itself would not produce.
@@ -53,41 +53,68 @@ enum ValueState {
     #[default]
     Empty,
     /// Values resident in RAM. `produced_under` is the digest they were computed
-    /// under — `None` for an impure node, which holds a value but is never a hit.
+    /// under — `None` for an unkeyed node, which holds a value but is never a hit.
     Resident {
         snapshot: OutputSnapshot,
         produced_under: Option<Digest>,
-        /// What disk holds for the value. Rides *with* the value because it is only read when
-        /// serving from RAM, and dropping the value drops the belief with no second call.
-        blob: BlobState,
     },
 }
 
-/// What disk holds for a resident value.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// A node's cache key this run, stamped producer-first by the resolver
+/// ([`RuntimeCache::node_digest`](crate::exec::cache::runtime_cache::RuntimeCache::node_digest)).
+///
+/// Three cases where an `Option<Digest>` held two: an impure cone, which no later stamp keys, and
+/// a key that waits on a path, which the run loop stamps again at the node's turn. Held apart, a
+/// node of an impure cone is not stamped twice for nothing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Stamp {
+    /// Not reproducible: impure, or reading a producer that is. Final for the run.
+    #[default]
+    Unkeyed,
+    /// Reproducible, but a path it reads was not identified at the sweep, or a producer's key
+    /// waits on one: the run loop stamps it again at its turn.
+    Deferred,
+    Keyed(Digest),
+}
+
+impl Stamp {
+    /// The key, where the node has one.
+    pub(crate) const fn digest(self) -> Option<Digest> {
+        match self {
+            Self::Keyed(digest) => Some(digest),
+            Self::Unkeyed | Self::Deferred => None,
+        }
+    }
+}
+
+/// What disk holds for the node's resident value.
+///
+/// On the slot rather than the value, so a write that failed stays failed across the values the
+/// node makes: the run does not retry it until an install or a new store, or a flush asks.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum BlobState {
     /// No blob is believed to back the value; a disk-backed node owes one.
+    #[default]
     Owed,
     /// A blob under the value's digest is believed to be on disk.
     Written,
     /// The value holds a type the program's codecs cannot encode, so no blob can be written.
     Unwritable,
+    /// The last write failed.
+    Failed,
 }
 
-/// One node's cross-run output cache: the [`value`](RuntimeSlot::value) and the
-/// digest it is checked against.
+/// One node's cross-run output cache: the [`value`](RuntimeSlot::value), the stamp it is checked
+/// against, and what disk holds for it.
 #[derive(Default, Debug)]
 pub(crate) struct RuntimeSlot {
-    /// The node's current content digest — its cache-validity key (`None` when not reproducible),
-    /// stamped producer-first by the resolver and refreshed at execution reach only for a late
-    /// bound-path identity
-    /// ([`RuntimeCache::node_digest`](crate::exec::cache::runtime_cache::RuntimeCache::node_digest)).
-    /// A resident value hits iff its `produced_under` equals this.
-    pub(crate) cur_digest: Option<Digest>,
+    /// A resident value hits iff its `produced_under` is this stamp's digest.
+    stamp: Stamp,
     value: ValueState,
+    blob: BlobState,
     /// The last run that ran or served this node, counted by the engine: what memory pressure
     /// drops the least recently used by.
-    pub(crate) used_in: u64,
+    used_in: u64,
 }
 
 /// How [`RuntimeSlot::read_output`] hands a resident value over.
@@ -102,6 +129,23 @@ pub(crate) enum OutputRead {
 }
 
 impl RuntimeSlot {
+    pub(crate) const fn stamp(&self) -> Stamp {
+        self.stamp
+    }
+
+    pub(crate) const fn set_stamp(&mut self, stamp: Stamp) {
+        self.stamp = stamp;
+    }
+
+    pub(crate) const fn used_in(&self) -> u64 {
+        self.used_in
+    }
+
+    /// Record that run `run` ran or served the node.
+    pub(crate) const fn mark_used(&mut self, run: u64) {
+        self.used_in = run;
+    }
+
     /// Drop the cached output. The run loop calls this on the failure paths — a node that
     /// errored or was skipped for an errored dependency — so a stale prior value isn't left
     /// resident as this run's result. (Successful runs reuse the buffer in place; see
@@ -118,50 +162,45 @@ impl RuntimeSlot {
         self.value = ValueState::Resident {
             snapshot,
             produced_under: Some(digest),
-            blob: BlobState::Written,
         };
+        self.blob = BlobState::Written;
     }
 
-    /// Whether the resident value still owes a blob: none is believed to be on disk, and none was
-    /// found impossible to write.
+    /// Whether the resident value still owes a blob: none is believed to be on disk, none was
+    /// found impossible to write, and no write failed.
     ///
     /// Belief, not proof: it records what this engine last wrote or read, so a blob deleted behind
     /// its back still reads as present. Proving it would take a read per node per run; a user who
     /// suspects the store reaches for a flush. No digest to pass: this is only asked of a value
     /// already established as a hit by [`cur_snapshot`](Self::cur_snapshot).
     pub(crate) const fn owes_blob(&self) -> bool {
-        matches!(
-            self.value,
-            ValueState::Resident {
-                blob: BlobState::Owed,
-                ..
-            }
-        )
+        matches!(self.value, ValueState::Resident { .. }) && matches!(self.blob, BlobState::Owed)
+    }
+
+    /// Whether the last write failed, so the run writes nothing until it is reconsidered.
+    pub(crate) const fn write_failed(&self) -> bool {
+        matches!(self.blob, BlobState::Failed)
     }
 
     /// Record what a store left on disk for the resident value.
     ///
-    /// A write that did not land leaves the node owing one, and the next resident reuse tries
-    /// again, so a transient full disk heals itself. A value no codec encodes is not retried:
+    /// A write that did not land is not retried by a run: a full disk or a folder it may not
+    /// write would fail it on every one, unseen. A value no codec encodes is not retried either:
     /// nothing about it changes until the value or the codecs do.
     pub(crate) const fn note_store(&mut self, outcome: &StoreResult) {
-        let ValueState::Resident { blob, .. } = &mut self.value else {
-            return;
-        };
-        *blob = match outcome {
+        self.blob = match outcome {
             Ok(StoreOutcome::Published | StoreOutcome::AlreadyCovered) => BlobState::Written,
             Ok(StoreOutcome::Unsupported { .. }) => BlobState::Unwritable,
-            Err(_) => BlobState::Owed,
+            Ok(StoreOutcome::NothingOwed) => return,
+            Err(_) => BlobState::Failed,
         };
     }
 
-    /// Owe a blob again for a value found unwritable — for an install, which
-    /// may bring the codec that was missing.
-    pub(crate) fn reconsider_unwritable_blob(&mut self) {
-        if let ValueState::Resident { blob, .. } = &mut self.value
-            && *blob == BlobState::Unwritable
-        {
-            *blob = BlobState::Owed;
+    /// Owe a blob again for a value found unwritable or whose write failed: for an install, which
+    /// may bring the codec that was missing, a new store, and a flush someone asked for.
+    pub(crate) const fn reconsider_blob(&mut self) {
+        if matches!(self.blob, BlobState::Unwritable | BlobState::Failed) {
+            self.blob = BlobState::Owed;
         }
     }
 
@@ -200,34 +239,49 @@ impl RuntimeSlot {
         snapshot.values[port_idx as usize] = DynamicValue::Unbound;
     }
 
-    /// The resident values, but only where they were produced under the digest the slot currently
-    /// carries — the one definition of "the bytes are here", relied on by cache reuse, the
-    /// executor's input read, and the disk store. A `None` current digest (an impure cone) never
-    /// qualifies, nor does a value produced under a *different* digest.
+    /// The resident values, but only where they were produced under the key the slot is stamped
+    /// with — the one definition of "the bytes are here", relied on by cache reuse, the
+    /// executor's input read, and the disk store. A node with no key never qualifies, nor does a
+    /// value produced under a *different* digest.
     pub(crate) fn cur_snapshot(&self) -> Option<&OutputSnapshot> {
         let ValueState::Resident {
             snapshot,
             produced_under,
-            ..
         } = &self.value
         else {
             return None;
         };
-        (self.cur_digest.is_some() && *produced_under == self.cur_digest).then_some(snapshot)
+        let digest = self.stamp.digest()?;
+        (*produced_under == Some(digest)).then_some(snapshot)
     }
 
     /// Prepare the slot for a lambda invocation and hand back the output buffer the lambda
-    /// writes. A resident buffer is reused **in place**, cleared to `Unbound` (so a skipped output
-    /// retains nothing from an earlier run), and `resize`d to the current arity. `produced_under`
-    /// stays as-is until [`stamp_produced`](Self::stamp_produced) updates it on success.
-    pub(crate) fn invoke_outputs(&mut self, output_count: usize) -> &mut [DynamicValue] {
+    /// writes, one entry per entry of `demand`. A resident buffer is reused **in place**: every
+    /// demanded output is cleared to `Unbound`, and so is every other one unless the value was
+    /// produced under the key the node is stamped with, where an output the run skips is still
+    /// that key's and stays. So a node read on one port, then another, under one key holds both.
+    /// `produced_under` stays as-is until [`stamp_produced`](Self::stamp_produced) updates it on
+    /// success.
+    pub(crate) fn invoke_outputs(&mut self, demand: &[OutputDemand]) -> &mut [DynamicValue] {
+        let keeps_skipped = self.cur_snapshot().is_some();
         match &mut self.value {
-            ValueState::Resident { snapshot, .. } => snapshot.reset(output_count),
+            ValueState::Resident { snapshot, .. } if keeps_skipped => {
+                debug_assert_eq!(
+                    snapshot.values.len(),
+                    demand.len(),
+                    "a current value has the node's arity"
+                );
+                for (value, demand) in snapshot.values.iter_mut().zip(demand) {
+                    if !demand.is_skip() {
+                        *value = DynamicValue::Unbound;
+                    }
+                }
+            }
+            ValueState::Resident { snapshot, .. } => snapshot.reset(demand.len()),
             ValueState::Empty => {
                 self.value = ValueState::Resident {
-                    snapshot: OutputSnapshot::empty(output_count),
+                    snapshot: OutputSnapshot::empty(demand.len()),
                     produced_under: None,
-                    blob: BlobState::Owed,
                 };
             }
         }
@@ -256,22 +310,18 @@ impl RuntimeSlot {
             .collect()
     }
 
-    /// Stamp the resident value with the node's current content digest on a successful run:
-    /// `produced_under` makes it a RAM hit next run and the key its disk blob is stored under.
+    /// Stamp the resident value with the node's key on a successful run: `produced_under` makes
+    /// it a RAM hit next run and the key its disk blob is stored under.
     pub(crate) fn stamp_produced(&mut self) {
-        let digest = self.cur_digest;
-        let ValueState::Resident {
-            produced_under,
-            blob,
-            ..
-        } = &mut self.value
-        else {
+        let digest = self.stamp.digest();
+        let ValueState::Resident { produced_under, .. } = &mut self.value else {
             panic!("a node's output must be resident when it is stamped produced");
         };
         *produced_under = digest;
-        // Not on disk until the store that follows says so, and the buffer may carry the previous
-        // value's answer.
-        *blob = BlobState::Owed;
+        // Not on disk until the store that follows says so; a failed write stays failed.
+        if self.blob != BlobState::Failed {
+            self.blob = BlobState::Owed;
+        }
     }
 }
 
@@ -291,8 +341,8 @@ pub(crate) mod internals {
             self.value = ValueState::Resident {
                 snapshot,
                 produced_under,
-                blob: BlobState::Owed,
             };
+            self.blob = BlobState::Owed;
         }
     }
 }
@@ -308,9 +358,9 @@ mod tests {
     use crate::exec::cache::disk_store::store_outcome::StoreOutcome;
     use crate::exec::cache::runtime_slot::{OutputSnapshot, RuntimeSlot};
 
-    /// Each store outcome settles the debt its own way: a blob on disk pays
-    /// it, a failed write leaves it for the next reuse, and a value no codec
-    /// encodes is not retried until an install reconsiders it.
+    /// Each store outcome settles the debt its own way: a blob on disk pays it; a failed write
+    /// and a value no codec encodes are not retried, the failure not even by a new value, until
+    /// an install, a new store or a flush reconsiders them.
     #[test]
     fn a_store_outcome_settles_the_blob_debt() {
         let mut slot = RuntimeSlot::default();
@@ -328,29 +378,40 @@ mod tests {
                 type_id: CustomTypeId::unique(),
             })
         };
-        let rows: [(StoreResult, bool); 4] = [
-            (Ok(StoreOutcome::Published), false),
-            (failed(), true),
-            (Ok(StoreOutcome::AlreadyCovered), false),
-            (unsupported(), false),
+        let rows: [(StoreResult, bool, bool); 5] = [
+            (Ok(StoreOutcome::Published), false, false),
+            (Ok(StoreOutcome::NothingOwed), false, false),
+            (failed(), false, true),
+            (Ok(StoreOutcome::AlreadyCovered), false, false),
+            (unsupported(), false, false),
         ];
-        for (outcome, owes) in rows {
+        for (outcome, owes, failed) in rows {
             slot.note_store(&outcome);
             assert_eq!(slot.owes_blob(), owes, "{outcome:?}");
+            assert_eq!(slot.write_failed(), failed, "{outcome:?}");
         }
 
-        slot.reconsider_unwritable_blob();
+        slot.reconsider_blob();
         assert!(
             slot.owes_blob(),
             "an install reconsiders an unwritable value"
         );
         slot.note_store(&Ok(StoreOutcome::Published));
-        slot.reconsider_unwritable_blob();
+        slot.reconsider_blob();
         assert!(!slot.owes_blob(), "a written blob is not reconsidered");
+
+        slot.note_store(&failed());
+        slot.stamp_produced();
+        assert!(
+            slot.write_failed(),
+            "a new value does not retry a failed write"
+        );
+        slot.reconsider_blob();
+        assert!(slot.owes_blob(), "an install, a new store or a flush does");
 
         slot.clear_output();
         slot.note_store(&unsupported());
-        slot.reconsider_unwritable_blob();
+        slot.reconsider_blob();
         assert!(!slot.owes_blob(), "an empty slot owes nothing");
     }
 }

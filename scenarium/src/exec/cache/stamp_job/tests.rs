@@ -6,7 +6,7 @@ use common::{CancelToken, FileId, FileIdentity, TempDir, Unreadable, fs};
 
 use crate::data::const_value::ConstValue;
 use crate::data::data_type::DataType;
-use crate::exec::cache::digest::{Digest, DigestHasher};
+use crate::exec::cache::digest::{Digest, DigestHasher, InputTag};
 use crate::exec::cache::runtime_cache::RuntimeCache;
 use crate::exec::cache::stamp_job::error::StampError;
 use crate::exec::cache::stamp_job::{FsPathId, StampJob};
@@ -269,10 +269,10 @@ fn file_identity_folds_every_field() {
         hasher.finish()
     };
 
-    // Tag 0, then `write_to`'s layout: len (u64 LE), mtime (i128 LE), and a 0 byte for
-    // each of the two fields the system did not state.
+    // The file-path tag, then `write_to`'s layout: len (u64 LE), mtime (i128 LE), and a 0 byte
+    // for each of the two fields the system did not state.
     let layout = [
-        vec![0],
+        vec![InputTag::FilePath as u8],
         4u64.to_le_bytes().to_vec(),
         0i128.to_le_bytes().to_vec(),
         vec![0, 0],
@@ -368,11 +368,12 @@ async fn same_path_uses_one_identity_until_the_next_run() {
     fs::write(&file, b"longer").unwrap();
     cache.stamp_digest(program, &schedule, second.node_idx);
     assert_eq!(
-        cache[first.node_idx].cur_digest, cache[second.node_idx].cur_digest,
+        cache[first.node_idx].stamp(),
+        cache[second.node_idx].stamp(),
         "both consumers fold the run's one coherent resource identity"
     );
 
-    let first_run = cache[first.node_idx].cur_digest;
+    let first_run = cache[first.node_idx].stamp();
     // A key only the memo has: a copy of the path would be the path's length.
     let path_text = file.to_string_lossy().into_owned();
     cache.widen_path_key(&path_text, 4096);
@@ -381,7 +382,8 @@ async fn same_path_uses_one_identity_until_the_next_run() {
         .await;
     cache.stamp_digest(program, &schedule, first.node_idx);
     assert_ne!(
-        cache[first.node_idx].cur_digest, first_run,
+        cache[first.node_idx].stamp(),
+        first_run,
         "the next run refreshes resource identity"
     );
     assert!(

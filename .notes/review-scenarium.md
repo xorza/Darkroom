@@ -37,10 +37,6 @@ Named so no batch touches it.
 
 ## Root causes
 
-1. **The run's state answers "is this node keyed" and "what does disk hold" from proxies.**
-   Whether a node is cacheable and whether its key is merely late share one `None`; what disk holds
-   is a field of the value in RAM, so it is forgotten with the value; a twin's leader is in a
-   second column the state must agree with.
 3. **Blob I/O is asynchronous one operation at a time.** `tokio::fs::File` turns each read, write,
    seek and stat into its own blocking-pool round trip, the format seeks back to patch each
    output's length, and the probe's header read is thrown away and repeated at the load.
@@ -64,8 +60,6 @@ Each is traced to its code; the batch that fixes it carries its test.
 |---|---|---|
 | B4 | `graph/graph_set/digest.rs:38-97` | `digest_with` records a compound after hashing it and recurses into each instance, ghost nodes included. The state a load leaves after breaking a loop (compound 1 places 2, 2 keeps a ghost instance of 1, reason `Recursive`) recurses until the stack overflows. `push_placed_first` (`graph_set/mod.rs:366-377`) pushes after recursing, so a live self-placement in a library file that was never reconciled does the same. |
 | B5 | `graph/mod.rs:1075-1087,1195-1207` | A file whose `ghost_nodes` holds the nil id with a node that resolves: `repair_structure` removes `nodes[nil]` only, `reattach` calls `insert`, which asserts a non-nil id. The load panics. A nil `CompoundId` has the same hole. |
-| B7 | `exec/cache/runtime_slot.rs:223-238` | A node with outputs 0 and 1. Run 1 demands {0}; run 2 demands {1} under the same digest: `invoke_outputs` resets every port, so the slot and the blob now hold {1} alone; run 3 demands {0} and the node runs again. Two previews on two ports of one node recompute it on each alternation. |
-| B8 | `exec/executor/mod.rs:715-718`, `exec/cache/runtime_slot.rs:147-156` | A blob write that fails in a run is discarded (`let _ =`), leaves `BlobState::Owed`, and is retried at every later reuse: with an unwritable cache folder, a probe and a failed create per owed node per run, with no log line and no report. A lost error and a retry with no bound. |
 | B10 | `graph/mod.rs:890-925` | `attach_node` checks a record's bindings against the live table, not the ghost table: a record attached over a ghost on one input leaves a live binding and a ghost on it, which `validate` refuses and the next compile asserts on. `put_ghost_wiring` asserts after the node is already in. |
 | B11 | `graph/mod.rs:1093-1156` | `repair_structure` prunes ghosts against the live table before it prunes dangling live bindings: with live `(B,1) ← Missing.out` and ghost `(B,1) ← A.out`, the ghost goes as a duplicate, then the live one as dangling. A wire whose two nodes the graph keeps is dropped. |
 | B12 | `graph/value_domain/float_span.rs:90-116` | `FloatSpan::at_least(0.0).contains(f64::INFINITY)` is `true` for a type documented as finite; `between(-f64::MAX, f64::MAX).fraction(f64::MAX)` is `Some(NaN)`. |
@@ -105,103 +99,9 @@ impl<I, T> Col<I, T> {
 - `Col::clone_from` keeps its allocation; the derive's does not, so `RemainingOutputReads::seed`
   allocated a column each run.
 
-#### Run state — `exec/schedule/mod.rs`, `exec/cache/runtime_slot.rs`, `exec/cache/runtime_cache/mod.rs`, `exec/executor/mod.rs`, `exec/error.rs`
+#### Output types — `exec/error.rs`, `exec/compile/compiled_graph.rs`, `data/data_type/mod.rs`
 
 ```rust
-// exec/schedule/mod.rs
-pub(crate) enum NodeState {
-    Unvisited, Disabled, MissingInputs, Cut, Reuse, Run,
-    Twin { leader: NodeIdx },
-}
-pub(crate) struct RunSchedule {           // `twins` goes
-    pub(crate) process_order: Vec<NodeIdx>,
-    pub(crate) states: Col<NodeIdx, NodeState>,
-    root_flags: Col<NodeIdx, RootFlags>,
-    pub(crate) outputs: ResolvedOutputs,
-}
-
-// exec/cache/runtime_slot.rs
-/// A node's cache key this run.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum Stamp {
-    /// Not reproducible: impure, or reads an unkeyed producer. Final for the run.
-    #[default]
-    Unkeyed,
-    /// A bound path was not readable at the sweep; the run loop stamps it at reach.
-    Deferred,
-    Keyed(Digest),
-}
-
-/// What this engine believes disk holds for a node. Outlives the value in RAM.
-#[derive(Debug, Default)]
-pub(crate) enum DiskBelief {
-    /// Never looked since the store was attached: the one state that probes.
-    #[default]
-    Unknown,
-    /// No blob: probed and missed, or removed.
-    Absent,
-    /// A blob, as its header last read: this engine wrote or probed it.
-    Holds(BlobHeader),
-    /// The resident value's type has no codec in the installed program.
-    Unwritable,
-    /// The last write failed. Cleared by an install or a new store, never by a run.
-    Failed,
-}
-
-enum ValueState {
-    Empty,
-    Resident { snapshot: OutputSnapshot, produced_under: Option<Digest> },
-}
-
-pub(crate) struct RuntimeSlot {
-    stamp: Stamp,
-    value: ValueState,
-    disk: DiskBelief,
-    used_in: u64,
-}
-impl RuntimeSlot {
-    pub(crate) const fn stamp(&self) -> Stamp;
-    pub(crate) fn set_stamp(&mut self, stamp: Stamp);
-    pub(crate) fn mark_used(&mut self, run: u64);
-    /// The buffer a lambda writes: each demanded port cleared; under a stamp the value was
-    /// produced under, each port the run skips kept.
-    pub(crate) fn invoke_outputs(&mut self, demand: &[OutputDemand]) -> &mut [DynamicValue];
-    /// Whether the resident value owes a blob: derived from `value`, `stamp` and `disk`.
-    pub(crate) fn owes_blob(&self) -> bool;
-}
-
-// exec/cache/runtime_cache/mod.rs — `IndexMut<NodeIdx>` goes; `Index<NodeIdx>` stays
-pub(crate) struct RuntimeCache {
-    slots: Col<NodeIdx, RuntimeSlot>,
-    disk_store: DiskStore,
-    paths: PathIdentities,
-    cone: ConsumerCone,
-    ram_seen: HashSet<usize>,
-    node_ram: Col<NodeIdx, RamUsage>,
-    leaders: HashMap<Digest, NodeIdx, BuildHasherDefault<DigestKeyHasher>>,
-    /// Each stamped node's earlier twin this run; what the sweep reads.
-    twin_leaders: Col<NodeIdx, Option<NodeIdx>>,
-    droppable: Vec<Droppable>,
-}
-impl RuntimeCache {
-    pub(crate) fn slot_mut(&mut self, node_idx: NodeIdx) -> &mut RuntimeSlot;
-    pub(crate) fn mark_leaders(&mut self, program: &CompiledGraph, schedule: &RunSchedule);
-    pub(crate) fn twin_leader(&self, node_idx: NodeIdx) -> Option<NodeIdx>;
-    /// What the write did; the run logs an `Err`, a flush reports it.
-    pub(crate) async fn store_node(&mut self, program: &CompiledGraph, node_idx: NodeIdx,
-                                   policy: StorePolicy) -> StoreResult;
-}
-// exec/cache/disk_store/store_outcome.rs
-pub(crate) enum StoreOutcome {
-    /* Published, AlreadyCovered, Unsupported { type_id } unchanged */
-    /// The node is not disk-backed, or holds no value current under its stamp.
-    NothingOwed,
-}
-
-// exec/cache/digest/mod.rs
-/// Takes the first 8 bytes of a key that is already a blake3 digest.
-pub(super) struct DigestKeyHasher(u64);
-
 // exec/error.rs
 pub enum RunError {
     Invoke(InvokeError),
@@ -218,22 +118,14 @@ pub struct CompiledGraph {
 }
 // data/data_type/mod.rs
 impl DataType { pub(crate) fn holds(self, value: &DynamicValue) -> bool; }
-```
 
-- **Memory relief keeps a node not reached yet** where the run will serve from its value: a
-  `Reuse`, or a `Run` with no digest yet, which becomes a `Run` under a `Deferred` stamp.
-- **`Twin { leader }`** — a twin without a leader cannot be built, and the cache no longer writes
-  the schedule.
-- **`Stamp`** — only `Deferred` restamps at reach, so an impure cone stops re-folding a digest that
-  ends unkeyed again.
-- **`DiskBelief`** — "owed" is derived, so it cannot disagree with the value; `Failed` ends the
-  per-run retry. A belief saves I/O only where being wrong costs a recompute: `Absent`, and
-  `Holds` under another digest than the stamp, are misses with no read. `Unknown`, and `Holds`
-  under the stamp, are probed at the sweep as today, and the header that probe read is what the
-  load takes, so a blob deleted behind the engine is still a miss at the sweep and not a node that
-  fails with its producers cut.
-- **`store_node` returns `StoreResult`**, "nothing to write" a case of `StoreOutcome`, where it
-  returned an `Option` of a `Result`.
+// exec/cache/runtime_cache/mod.rs
+pub(crate) struct RuntimeCache {
+    /* … */
+    /// The header each reused node's probe read this run, which its load takes.
+    probed: Col<NodeIdx, Option<BlobHeader>>,
+}
+```
 
 #### Blob I/O — `data/codec/mod.rs`, `exec/cache/disk_store/`, `exec/cache/stamp_job/mod.rs`
 
@@ -324,8 +216,8 @@ pub fn entry_metadata(entry: &DirEntry) -> io::Result<Metadata>;
 - **A payload is held to its hash.** After a codec decodes an output, the reader drains what the
   codec left of the payload, then compares the hash; a mismatch is `FrameError::PayloadHash`, a
   miss, and the blob is removed as an undecodable one is. The value is dropped, never served.
-- A probe is one read of the fixed prefix and the descriptors. The header it read is kept in the
-  slot's `DiskBelief::Holds`, so the load reads the body alone.
+- A probe is one read of the fixed prefix and the descriptors. The header it read is kept for the
+  run in `RuntimeCache.probed`, so the load reads the body alone.
 - A directory stamp is one pass: each entry's metadata is the listing's own, and names sit in one
   buffer.
 - **The store's bound is one blob per node of the installed program.** A store is swept once,
@@ -853,7 +745,7 @@ their satellites (`Before`, `GhostNotes`, `AdmittedGhosts`). Its module doc's "e
 Every type a graph names is declared above or kept; `Worker` owns a mailbox and a task handle and
 nothing else, as its tree shows; the event task's two shared edges are `Arc<Mailbox>` and
 `SharedAnyState`, both in the table; `BlobTarget::read` takes the `BlobHeader` that
-`DiskBelief::Holds` stores and `probe` returns; `GraphLoad` borrows one graph mutably and a
+`RuntimeCache.probed` keeps and `probe` returns; `GraphLoad` borrows one graph mutably and a
 `Scope` over `decls`, two fields `graph_and_scope` splits; `Worker::exit` returns the `ExitError`
 `worker/error.rs` declares; the predicate `ExecFrame::relieve` hands `RuntimeCache::relieve`
 reads `node_outcomes` and `schedule.states`, which the frame borrows for the run, and the slot the
@@ -867,10 +759,15 @@ cache passes it; no borrow in the call graph outlives `ExecEngine::execute`.
   ([`newtype_index`](https://doc.rust-lang.org/nightly/nightly-rustc/rustc_index/macro.newtype_index.html),
   [cranelift-entity](https://docs.rs/cranelift-entity/latest/cranelift_entity/)). Not taken: a
   niche for `Option<NodeIdx>`, whose one column `Twin { leader }` removes.
-- **`leaders` hashes a digest by its first eight bytes.** rustc's `Unhasher` is "intended for map
-  keys that already have hash-like quality, like `Fingerprint`"
-  ([`unhash`](https://doc.rust-lang.org/nightly/nightly-rustc/rustc_data_structures/unhash/index.html)).
-  Refused: SipHash over 32 bytes that are already uniform.
+- **Not taken: a pass-through hasher for the twin leaders' map**, as rustc's `Unhasher` for keys
+  "that already have hash-like quality"
+  ([`unhash`](https://doc.rust-lang.org/nightly/nightly-rustc/rustc_data_structures/unhash/index.html)):
+  the map moved to hashbrown, whose default hasher is no SipHash, and one insert a stamped node a
+  run is no cost a custom `Hasher` repays.
+- **Not taken: a disk belief that outlives the value.** It would save a probe for a node whose
+  digest changed, which then runs anyway, and keep a header for the load, which batch 5 keeps per
+  run instead. A failed write, the one state that must outlive the value, is the slot's
+  `BlobState::Failed`.
 - **A blob operation is one blocking closure over `std` I/O, and a codec is synchronous.** A
   `tokio::fs::File` read is a blocking-pool hop of at most 2 MiB and a copy, and
   `BufWriter::seek` flushes: about 138 round trips and one extra copy of every byte for a 288 MiB
@@ -948,41 +845,6 @@ cache passes it; no borrow in the call graph outlives `ExecEngine::execute`.
 
 Each batch leaves the build and the tests green. Whoever addresses an item deletes it.
 
-## Batch 3 — the slot
-
-Files: `exec/cache/runtime_slot.rs`, `exec/cache/runtime_cache/`, `exec/cache/digest/mod.rs`,
-`exec/schedule/mod.rs`, `exec/resolve/mod.rs`, `exec/executor/mod.rs`.
-
-- [ ] `runtime_slot.rs:86`, `executor/mod.rs:561-575` — `cur_digest: Option<Digest>` is both
-  "never cacheable" and "not readable yet", so every impure-cone node re-folds a digest at reach.
-  Target: `Stamp`.
-- [ ] `runtime_slot.rs:51-76` — what disk holds is a field of the resident value. Target:
-  `DiskBelief` on the slot, `owes_blob` derived; `format`'s `BlobHeader` becomes `pub(crate)` and
-  carries its digest, and a new store resets every belief to `Unknown`. Test: a node whose digest
-  changed, and one never stored, are missed with no read by the store's I/O counters.
-- [ ] `runtime_cache/mod.rs:660-676` — `store_node` returns `Option<StoreResult>`. Target:
-  `StoreResult`, `StoreOutcome::NothingOwed`.
-- [ ] `executor/mod.rs:540-543,715-718`, `runtime_slot.rs:147-156` — B8. Target: `store_node`
-  returns its outcome, the run logs the first failure against the node through
-  `CtxManager::log_node`, `DiskBelief::Failed` holds until an install or a new store. Test: a
-  read-only store fails once per attach, with one log row.
-- [ ] `runtime_slot.rs:223-238` — B7. Target: `invoke_outputs(demand)`. Test: demands {0}, {1},
-  {0} under one digest run the node twice, not three times, and the blob holds both.
-- [ ] `schedule/mod.rs:84-90,193,309-312`, `runtime_cache/mod.rs:345-368` — the twin relation in a
-  state and a column. Target: `Twin { leader }`, `mark_leaders`, `twin_leader`,
-  `DigestKeyHasher`.
-- [ ] `runtime_cache/mod.rs:138`, `runtime_slot.rs:86,91` — `IndexMut` and two `pub(crate)` fields
-  let the executor edit a slot at a dozen sites. Target: `slot_mut`, `set_stamp`, `mark_used`.
-- [ ] `runtime_cache/mod.rs:15` — std `HashMap` beside hashbrown in one module tree. Target:
-  hashbrown.
-- [ ] `exec/cache/digest/mod.rs:96-100`, `stamp_job/mod.rs:29,32` — `InputTag`'s doc claims the
-  whole discriminant space while `FsPathId::hash` writes raw `[0]` and `[1]`. Target: two
-  `InputTag` cases.
-- [ ] `exec/resolve/mod.rs:6-7`, `schedule/mod.rs:168-171`,
-  `compile/consumer_cone/mod.rs:11-13` — docs that no longer hold ("neither depends on the other",
-  "the sweep refines it into the surviving run", "stale the moment the graph is edited"). Target:
-  what the code does.
-
 ## Batch 4 — the document's bugs and its one walk
 
 Files: `graph/dfs.rs` (new), `graph/mod.rs`, `graph/graph_set/`, `graph/compound.rs`,
@@ -1017,7 +879,7 @@ Files: `graph/dfs.rs` (new), `graph/mod.rs`, `graph/graph_set/`, `graph/compound
 Files: `data/codec/`, `exec/cache/disk_store/`, `exec/cache/stamp_job/`,
 `exec/cache/runtime_cache/mod.rs`, `internals/blob.rs`, `library/tests.rs`,
 `lens/src/image/codec/mod.rs`, `common/src/fs/mod.rs`, `clippy.toml`, `Cargo.toml` (`async-trait`
-leaves `scenarium`). After batch 3.
+leaves `scenarium`).
 
 - [ ] `disk_store/blob_target/mod.rs:98-106,193-229`, `format/mod.rs:76-139,266-296,353-382` —
   3 + K round trips to probe, about 8K + 7 to store, each payload byte copied once more. Target:
@@ -1028,8 +890,8 @@ leaves `scenarium`). After batch 3.
   and a zeroed tail, are each a miss that removes the blob; a codec that reads less than its
   payload still has the whole payload hashed.
 - [ ] `format/mod.rs:99` — a `debug_assert_eq!` that flushes and seeks. Target: gone with the seek.
-- [ ] `runtime_cache/mod.rs:575-628` — the probe's header is read again at the load. Target:
-  `DiskBelief::Holds(BlobHeader)` passed to `BlobTarget::read`.
+- [ ] `runtime_cache/mod.rs` `probe_reuse`, `hydrate_reuse` — the probe's header is read again
+  at the load. Target: `RuntimeCache.probed`, passed to `BlobTarget::read`.
 - [ ] `runtime_cache/mod.rs:178-180` — one `remove_file` hop per cone node. Target:
   `DiskStore::remove_nodes`.
 - [ ] `disk_store/mod.rs:25-78` — no bound on dead blobs. Target: `DiskStore::sweep`,

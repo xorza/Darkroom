@@ -79,8 +79,9 @@ impl<'a> Runs<'a> {
     /// Make `node` a twin taking `leader`'s values, as the sweep does for a later node under an
     /// earlier one's digest. Its reads of the leader are [`readers`](Self::readers)' to count.
     pub(crate) fn twin(mut self, node: Placed, leader: Placed) -> Self {
-        self.schedule.states[node.node_idx] = NodeState::Twin;
-        self.schedule.twins[node.node_idx] = Some(leader.node_idx);
+        self.schedule.states[node.node_idx] = NodeState::Twin {
+            leader: leader.node_idx,
+        };
         self
     }
 

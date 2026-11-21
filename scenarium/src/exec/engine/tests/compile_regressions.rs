@@ -76,7 +76,7 @@ async fn update_with_evolved_func_recompiles_and_runs_new_lambda() {
 ///
 /// The grown-input case above re-keys the digest, which retires the old value. Growing an output
 /// need not: the id is unchanged, so the stale `produced_under` still equals the stale
-/// `cur_digest`, and the RAM-retention check would keep a snapshot one value short of the port
+/// stamp, and the RAM-retention check would keep a snapshot one value short of the port
 /// list. The install retires it, so the next run recomputes both outputs.
 #[tokio::test]
 async fn update_with_a_grown_output_list_retires_the_shorter_snapshot() {

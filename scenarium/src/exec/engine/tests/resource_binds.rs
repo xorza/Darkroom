@@ -109,7 +109,7 @@ fn path_graph(data_path: &str, mode: CacheMode, observed: Observed) -> TestGraph
 /// A declared path with no determinate identity denies the node its **cache
 /// key**, not its turn.
 ///
-/// A `None` digest is where every `Impure` node already sits, so the node runs — uncached — and
+/// No key is where every `Impure` node already sits, so the node runs — uncached — and
 /// only its lambda knows whether the path mattered. One that reads the file fails with its own
 /// message; one that never reads it, or writes the path it was handed, succeeds. What the node
 /// must not do is go quiet, because a node that asked to be cached and silently never is has no
@@ -213,6 +213,27 @@ async fn an_unidentifiable_path_runs_the_node_uncached() {
     );
 }
 
+/// A node no stamp can key, as it reads an impure producer, is not stamped again at its turn: a
+/// path it reads that is not there costs it no second walk and no warning, as it was never to be
+/// cached.
+#[tokio::test]
+async fn an_impure_cone_is_not_stamped_again_at_its_turn() {
+    let dir = TempDir::new("impure-cone");
+    let missing = dir.join("missing.txt").to_string_lossy().into_owned();
+    let mut g = TestGraph::new();
+    g.add("noise", |n| n.output(DataType::Int).compute(|_| 1.into()));
+    g.add("use", |n| {
+        n.sink().pure().input(file_path()).input(DataType::Int)
+    });
+    g.constant("use", 0, ConstValue::FsPath(missing));
+    g.wire("noise", ("use", 1));
+    let mut e = TestEngine::over(g);
+
+    let run = e.run_sinks().await;
+    assert_eq!(run.ran(), ["noise", "use"]);
+    assert!(run.logs().is_empty(), "{:?}", run.logs());
+}
+
 /// The core regression: a path arriving over a **Bind** edge keys the loader on the file behind
 /// the *delivered value*. Editing the file re-keys and recomputes the loader, while an unchanged
 /// file still reuses the cache — the reach-time re-stamp keeps wired-path loaders cacheable
@@ -228,7 +249,7 @@ async fn wired_path_rekeys_loader_on_file_change() {
         observed.clone(),
     ));
 
-    // Cold run: everything computes. The loader's pre-run digest is `None`
+    // Cold run: everything computes. The loader's pre-run key is deferred
     // — the delivered value does not exist yet — so it re-stamps at reach
     // time and runs.
     e.run_sinks().await;
@@ -345,7 +366,7 @@ async fn memory_pressure_keeps_a_value_a_restamp_may_serve() {
 /// delivered path's live identity, so a fresh engine reuses it while the file is unchanged —
 /// hydrating the on-disk path producer just to stamp — and recomputes once the file changes,
 /// while the producer itself stays a disk hit. The downstream `annotate` proves the re-stamp
-/// *cascade*: on reopen its own pre-run digest is `None` too, and its reach-time re-stamp lands
+/// *cascade*: on reopen its own pre-run key is deferred too, and its reach-time re-stamp lands
 /// on its blob — the whole tainted cone skips compute, not just the loader.
 #[tokio::test]
 async fn wired_path_disk_reuse_survives_reopen_until_file_changes() {

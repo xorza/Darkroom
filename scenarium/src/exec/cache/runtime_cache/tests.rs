@@ -9,7 +9,7 @@ use crate::data::dynamic_value::DynamicValue;
 use crate::data::ram_usage::RamUsage;
 use crate::exec::cache::digest::Digest;
 use crate::exec::cache::runtime_cache::RuntimeCache;
-use crate::exec::cache::runtime_slot::{OutputSnapshot, RuntimeSlot};
+use crate::exec::cache::runtime_slot::{OutputSnapshot, RuntimeSlot, Stamp};
 use crate::exec::compile::compiled_graph::CompiledGraph;
 use crate::exec::idx::NodeIdx;
 use crate::graph::func::FuncBehavior;
@@ -23,31 +23,36 @@ fn out() -> Vec<DynamicValue> {
 
 const DEMANDED: &[OutputDemand] = &[OutputDemand::Produce];
 
+/// The stamp a node keyed by `digest` carries; no digest is a node with no key.
+fn keyed(digest: Option<Digest>) -> Stamp {
+    digest.map_or(Stamp::Unkeyed, Stamp::Keyed)
+}
+
 /// Make `slot` hold [`out`] produced under `digest`, which is also its
 /// current digest — a resident hit, on a slot an install already owns.
 fn make_resident(slot: &mut RuntimeSlot, digest: Digest) {
-    slot.cur_digest = Some(digest);
+    slot.set_stamp(Stamp::Keyed(digest));
     slot.load_output(OutputSnapshot::new(out()), Some(digest));
 }
 
-/// A slot holding `values`, keyed by `cur_digest` and recorded as produced
+/// A slot holding `values`, keyed by `stamped` and recorded as produced
 /// under `produced_under` — the two digests every residency test varies
 /// independently, since a hit is exactly the case where they agree.
 fn resident_slot(
-    cur_digest: Option<Digest>,
+    stamped: Option<Digest>,
     produced_under: Option<Digest>,
     values: Vec<DynamicValue>,
 ) -> RuntimeSlot {
     let mut slot = RuntimeSlot::default();
-    slot.cur_digest = cur_digest;
+    slot.set_stamp(keyed(stamped));
     slot.load_output(OutputSnapshot::new(values), produced_under);
     slot
 }
 
 /// A slot with a digest but no value: a node that has never produced.
-fn keyed_slot(cur_digest: Option<Digest>) -> RuntimeSlot {
+fn keyed_slot(stamped: Option<Digest>) -> RuntimeSlot {
     let mut slot = RuntimeSlot::default();
-    slot.cur_digest = cur_digest;
+    slot.set_stamp(keyed(stamped));
     slot
 }
 
@@ -110,7 +115,7 @@ async fn eviction_clears_only_the_output_cache() {
     assert!(failures.is_empty());
     assert!(cache.slots[node_idx].output_values().is_none());
     assert_eq!(
-        cache.slots[node_idx].cur_digest,
+        cache.slots[node_idx].stamp().digest(),
         Some(digest),
         "eviction drops the value, not the digest the node is keyed by"
     );
@@ -234,8 +239,8 @@ fn releases_every_resident_value_that_cannot_be_a_future_ram_hit() {
     install(
         &mut cache,
         &program,
-        cases.map(|(_, _, _, cur_digest, produced_under, _)| {
-            resident_slot(cur_digest, produced_under, out())
+        cases.map(|(_, _, _, stamped, produced_under, _)| {
+            resident_slot(stamped, produced_under, out())
         }),
     );
 
@@ -352,17 +357,17 @@ fn reconcile_follows_ids_when_the_index_space_shifts() {
     reinstall(&mut cache, &installed, build(&[2, 3, 4]));
 
     assert_eq!(
-        cache.slots[NodeIdx(0)].cur_digest,
+        cache.slots[NodeIdx(0)].stamp().digest(),
         Some(digest(2)),
         "node 2's slot moved from index 1 to index 0"
     );
     assert_eq!(
-        cache.slots[NodeIdx(1)].cur_digest,
+        cache.slots[NodeIdx(1)].stamp().digest(),
         Some(digest(3)),
         "node 3's slot moved from index 2 to index 1"
     );
     assert_eq!(
-        cache.slots[NodeIdx(2)].cur_digest,
+        cache.slots[NodeIdx(2)].stamp().digest(),
         None,
         "the appended node 4 gets a fresh slot"
     );
@@ -388,7 +393,7 @@ fn hydrate_turns_a_miss_into_a_hit() {
     );
 
     // Hydrating under a digest that is no longer current does not hit.
-    cache.slots[node_idx].cur_digest = Some(Digest([9u8; 32]));
+    cache.slots[node_idx].set_stamp(Stamp::Keyed(Digest([9u8; 32])));
     assert!(
         !cache.is_resident_hit(node_idx, DEMANDED),
         "current digest moved on ⇒ miss"
@@ -400,7 +405,8 @@ fn resident_hit_derives_coverage_from_values() {
     let digest = Digest([5; 32]);
     let mut cache = RuntimeCache::default();
     let mut slot = keyed_slot(Some(digest));
-    slot.invoke_outputs(2)[0] = ConstValue::Int(10).into();
+    slot.invoke_outputs(&[OutputDemand::Produce, OutputDemand::Produce])[0] =
+        ConstValue::Int(10).into();
     slot.stamp_produced();
     let node_idx = NodeIdx(0);
     install(&mut cache, &ram_program(1), [slot]);
@@ -414,7 +420,7 @@ fn resident_hit_derives_coverage_from_values() {
     assert!(cache.is_resident_hit(node_idx, &[OutputDemand::Produce, OutputDemand::Skip]));
     assert!(!cache.is_resident_hit(node_idx, &[OutputDemand::Produce, OutputDemand::Produce]));
 
-    cache[node_idx].clear_output_port(0);
+    cache.slot_mut(node_idx).clear_output_port(0);
     let values = cache.slots[node_idx]
         .output_values()
         .expect("clearing one output keeps the snapshot resident");
@@ -475,7 +481,7 @@ fn debug_assertions_reject_invalid_cache_arities_and_ports() {
     );
     assert!(
         catch_unwind(AssertUnwindSafe(|| {
-            cache[NodeIdx(0)].clear_output_port(1);
+            cache.slot_mut(NodeIdx(0)).clear_output_port(1);
         }))
         .is_err(),
         "a released output port must be in range"
@@ -623,7 +629,7 @@ fn relief_drops_the_least_recently_used_kept_values_largest_first() {
             Some(d),
             vec![DynamicValue::Custom(Arc::new(Payload(bytes)))],
         );
-        slot.used_in = used_in;
+        slot.mark_used(used_in);
         slot
     };
     let program = program_of([

@@ -3,8 +3,9 @@
 //! [`RunSchedule`] against the [`RuntimeCache`]. The planner's answer is *what could run*;
 //! this one is *what will*.
 //!
-//! Its own module because it reads both: the schedule stays structural and the cache knows
-//! nothing of liveness, so neither depends on the other.
+//! Its own module because it writes the schedule from what the cache answers: the cache reads
+//! the schedule to stamp its nodes and name their twins, and only this sweep turns those answers
+//! into the schedule's verdicts.
 
 use crate::exec::cache::runtime_cache::RuntimeCache;
 use crate::exec::compile::compiled_graph::CompiledGraph;
@@ -15,7 +16,7 @@ use crate::graph::func::lambda::OutputDemand;
 /// reuse, writing the result into that same buffer: the [`NodeState`] column the planner
 /// opened, plus the `outputs` half beside it.
 ///
-/// **Mutates `cache`** only to stamp each runnable node's `cur_digest`: a live
+/// **Mutates `cache`** only to stamp each runnable node and name its twin: a live
 /// disk-cache frontier is *probed* from its blob header here and decoded later, by the
 /// run loop, when it reaches the node.
 ///
@@ -37,7 +38,7 @@ pub(crate) async fn sweep(
     // The cache holds no program of its own, so every question names the `program` this schedule
     // was planned against.
     cache.stamp_digests(program, schedule);
-    cache.mark_twins(program, schedule);
+    cache.mark_leaders(program, schedule);
     // The sweep *accumulates* demand and readers, so it starts from zero rather than trusting
     // whoever opened the schedule.
     schedule.outputs.reset(program.output_count as usize);
@@ -70,8 +71,8 @@ pub(crate) async fn sweep(
         // An earlier node of the run under the same digest makes the same values: this one takes
         // them, reading each output it demands from that node, which must then run or be served.
         // Its own producers are not promoted, as a reuse's are not.
-        if let Some(leader) = schedule.twins[node_idx] {
-            schedule.states[node_idx] = NodeState::Twin;
+        if let Some(leader) = cache.twin_leader(node_idx) {
+            schedule.states[node_idx] = NodeState::Twin { leader };
             let promoted = schedule.states[leader].promote_to_run();
             debug_assert!(promoted, "a twin's leader is runnable");
             let (own, theirs) = (e_node.outputs, program[leader].outputs);

@@ -240,8 +240,9 @@ async fn vanished_frontier_blob_recomputes_instead_of_panicking() {
     assert_eq!(calls.count(), 2, "src re-ran to feed sum's recompute");
 }
 
-/// A node kept always and on disk whose store failed owes a blob, and pays it on the next
-/// run — without recomputing.
+/// A node kept always and on disk whose store failed is logged once and not retried by a run:
+/// a store that takes nothing would fail on every run, unseen. The next install, as any edit
+/// makes, owes the blob again, and the run after it pays it — without recomputing.
 ///
 /// Keeping RAM always makes this reachable: every later run is a resident hit, served without
 /// the disk being named, and only an invoke stores. A write that never landed would go unwritten
@@ -270,13 +271,31 @@ async fn a_both_mode_node_whose_store_failed_republishes_without_recomputing() {
     // A directory where src's blob belongs: the publication cannot land.
     let blob = e.blob_path("src");
     fs::create_dir_all(&blob).unwrap();
-    e.run_sinks().await;
+    let run = e.run_sinks().await;
     assert_eq!(calls.count(), 1, "the cold run computes");
     assert!(fs::is_dir(&blob), "the blocked path is still what it was");
+    let logs = run.logs();
+    assert_eq!(
+        logs.len(),
+        2,
+        "src's warning, then what print printed: {logs:?}"
+    );
+    assert!(
+        logs[0].starts_with("its value was not written to the disk cache: "),
+        "{logs:?}"
+    );
+    assert_eq!(logs[1], "7");
 
-    // Clear the blockage. The value is still resident, so the node does not
-    // recompute — but the blob it owes is now written.
+    // Clear the blockage. A run leaves the failed write alone, and says nothing more.
     fs::remove_dir(&blob).unwrap();
+    let run = e.run_sinks().await;
+    assert_eq!(run.ran(), ["print"]);
+    assert_eq!(run.logs(), ["7"], "no second warning");
+    assert!(!fs::exists(&blob), "a run does not retry a failed write");
+
+    // An install owes the blob again. The value is still resident, so the node does not
+    // recompute — but the blob it owes is now written.
+    e.reinstall();
     let run = e.run_sinks().await;
     assert_eq!(
         calls.count(),
@@ -313,6 +332,48 @@ async fn a_both_mode_node_whose_store_failed_republishes_without_recomputing() {
     let run = e.run_sinks().await;
     assert_eq!(calls.count(), 1, "the republished blob is served on reopen");
     assert_eq!(run.cached(), ["src"]);
+}
+
+/// A failed write is tried again by each of the three that may bring a store that takes it: an
+/// install, a new store, and a flush someone asked for. Each publishes `src`'s resident value
+/// without recomputing it, where the run before it wrote nothing.
+#[tokio::test]
+async fn a_failed_write_is_retried_by_an_install_a_new_store_and_a_flush() {
+    #[derive(Clone, Copy, Debug)]
+    enum Retry {
+        Install,
+        NewStore,
+        Flush,
+    }
+    for retry in [Retry::Install, Retry::NewStore, Retry::Flush] {
+        let dir = TempDir::new("store-retry");
+        let calls = Calls::default();
+        let mut g = TestGraph::new();
+        g.add("src", |n| {
+            n.counted(7i64, &calls).cache(CacheMode {
+                ram: Keep::Always,
+                disk: true,
+            })
+        });
+        g.add("print", NodeSpec::records);
+        g.wire("src", "print");
+        let mut e = TestEngine::over(g).with_disk_store(dir.path());
+        let blob = e.blob_path("src");
+        fs::create_dir_all(&blob).unwrap();
+        e.run_sinks().await;
+        fs::remove_dir(&blob).unwrap();
+        e.run_sinks().await;
+        assert!(!fs::exists(&blob), "{retry:?}: a run does not retry");
+
+        match retry {
+            Retry::Install => e.reinstall(),
+            Retry::NewStore => e.attach_disk_store(dir.path()),
+            Retry::Flush => e.flush(["src"]).await,
+        }
+        e.run_sinks().await;
+        assert!(fs::is_file(&blob), "{retry:?} retries the write");
+        assert_eq!(calls.count(), 1, "{retry:?}: from RAM, not recomputed");
+    }
 }
 
 /// A redefined output type can't serve a stale blob: `produce`'s func changes `Int → Float` with

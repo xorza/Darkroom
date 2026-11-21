@@ -42,14 +42,11 @@ async fn unused_output_marked_skip() {
     );
 }
 
-#[tokio::test]
-async fn cached_node_reruns_when_a_previously_skipped_output_becomes_needed() {
-    let calls = Calls::default();
-    let received = Arc::new(Mutex::new(Vec::new()));
-
-    let mut g = TestGraph::new();
-    g.add("split", |n| {
-        let calls = calls.clone();
+/// A pure, kept node of two outputs, 10 and 20, that writes only what is demanded, counting its
+/// runs in `calls`.
+fn split(calls: &Calls) -> impl FnOnce(NodeSpec) -> NodeSpec {
+    let calls = calls.clone();
+    move |n| {
         n.pure()
             .cache(CacheMode::ALWAYS)
             .output(DataType::Int)
@@ -66,18 +63,30 @@ async fn cached_node_reruns_when_a_previously_skipped_output_becomes_needed() {
                     Ok(())
                 }
             ))
-    });
-    let sink = |received: Arc<Mutex<Vec<i64>>>| {
-        move |n: NodeSpec| {
-            n.sink().input(DataType::Int).lambda(async_lambda!(
-                move |Invocation { inputs, .. }| { received = Arc::clone(&received) } => {
-                    received.lock_unpoisoned().push(inputs[0].as_i64().unwrap());
-                    Ok(())
-                }
-            ))
-        }
-    };
-    g.add("sink_a", sink(Arc::clone(&received)));
+    }
+}
+
+/// A sink that records the integer it reads into `received`.
+fn recording_sink(received: &Arc<Mutex<Vec<i64>>>) -> impl FnOnce(NodeSpec) -> NodeSpec {
+    let received = Arc::clone(received);
+    move |n| {
+        n.sink().input(DataType::Int).lambda(async_lambda!(
+            move |Invocation { inputs, .. }| { received = Arc::clone(&received) } => {
+                received.lock_unpoisoned().push(inputs[0].as_i64().unwrap());
+                Ok(())
+            }
+        ))
+    }
+}
+
+#[tokio::test]
+async fn cached_node_reruns_when_a_previously_skipped_output_becomes_needed() {
+    let calls = Calls::default();
+    let received = Arc::new(Mutex::new(Vec::new()));
+
+    let mut g = TestGraph::new();
+    g.add("split", split(&calls));
+    g.add("sink_a", recording_sink(&received));
     g.wire("split", "sink_a");
 
     let mut e = TestEngine::over(g);
@@ -86,7 +95,7 @@ async fn cached_node_reruns_when_a_previously_skipped_output_becomes_needed() {
     // A second consumer arrives on the output the first run skipped: the
     // cached value does not cover the new demand, so `split` must re-run.
     e.edit(|g| {
-        g.add("sink_b", sink(Arc::clone(&received)));
+        g.add("sink_b", recording_sink(&received));
         g.wire(("split", 1), "sink_b");
     });
     e.run_sinks().await;
@@ -95,4 +104,30 @@ async fn cached_node_reruns_when_a_previously_skipped_output_becomes_needed() {
     let mut received = received.lock_unpoisoned().clone();
     received.sort_unstable();
     assert_eq!(received, [10, 10, 20]);
+}
+
+/// A node re-run for an output it skipped keeps the one it made before under the same key: read
+/// on port 0, then port 1, then port 0 again, `split` runs twice, not three times, and holds 10
+/// and 20 after its second run.
+#[tokio::test]
+async fn a_rerun_for_a_skipped_output_keeps_the_one_made_before() {
+    let calls = Calls::default();
+    let received = Arc::new(Mutex::new(Vec::new()));
+    let mut g = TestGraph::new();
+    g.add("split", split(&calls));
+    g.add("sink_a", recording_sink(&received));
+    g.add("sink_b", recording_sink(&received));
+    g.wire("split", "sink_a");
+    g.wire(("split", 1), "sink_b");
+    let mut e = TestEngine::over(g);
+
+    e.run_nodes(["sink_a"]).await;
+    e.run_nodes(["sink_b"]).await;
+    assert_eq!(e.output_i64("split", 0), Some(10));
+    assert_eq!(e.output_i64("split", 1), Some(20));
+    let run = e.run_nodes(["sink_a"]).await;
+
+    assert_eq!(calls.count(), 2);
+    assert_eq!(run.cached(), ["split"]);
+    assert_eq!(*received.lock_unpoisoned(), [10, 20, 10]);
 }

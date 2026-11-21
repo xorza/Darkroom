@@ -276,11 +276,11 @@ async fn a_node_kept_while_memory_allows_is_served_and_stamped_by_its_run() {
     let mut e = TestEngine::over(g);
 
     assert_eq!(e.run_sinks().await.ran(), ["src", "Print"]);
-    assert_eq!(e.engine.slot(e.id("src")).used_in, 1);
+    assert_eq!(e.engine.slot(e.id("src")).used_in(), 1);
     let run = e.run_sinks().await;
     assert_eq!(run.ran(), ["Print"]);
     assert_eq!(run.cached(), ["src"]);
-    assert_eq!(e.engine.slot(e.id("src")).used_in, 2);
+    assert_eq!(e.engine.slot(e.id("src")).used_in(), 2);
 }
 
 /// Under memory pressure a run drops each value kept while memory allows once nothing later in

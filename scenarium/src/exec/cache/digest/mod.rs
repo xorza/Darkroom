@@ -6,7 +6,7 @@
 //! external resources it reads.
 //! [`RuntimeCache::node_digest`](crate::exec::cache::runtime_cache::RuntimeCache::node_digest)
 //! folds that into a 256-bit BLAKE3 digest, reading each `Wire` producer's *already-stamped*
-//! `cur_digest` (the resolver computes digests producer-first, so no recursive traversal is
+//! stamp (the resolver computes digests producer-first, so no recursive traversal is
 //! needed). This module owns the *encoding* — the hasher, the tags, and the [`DOMAIN`]
 //! versioning them; the fold itself is a cache method, since what it reads (slots, the path memo)
 //! is the cache's. External identities come from that memo, filled once per run by a
@@ -114,6 +114,10 @@ pub(super) enum InputTag {
     /// One path slot naming nothing — the state before a file is chosen. Stands in place of the
     /// identity a named path would fold, so an unset slot keys on its position.
     UnsetPath = 5,
+    /// One path slot naming a file, its identity following.
+    FilePath = 6,
+    /// One path slot naming a folder, the digest of every file beneath it following.
+    DirPath = 7,
 }
 
 /// A fluent builder for a [`Digest`] — a thin wrapper over the BLAKE3 hasher with digest-friendly

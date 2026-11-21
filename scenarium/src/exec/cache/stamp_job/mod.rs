@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use common::{CancelToken, FileIdentity, fs};
 use hashbrown::HashSet;
 
-use crate::exec::cache::digest::{Digest, DigestHasher};
+use crate::exec::cache::digest::{Digest, DigestHasher, InputTag};
 use crate::exec::cache::stamp_job::error::StampError;
 
 #[derive(Clone, Copy, Debug)]
@@ -26,10 +26,14 @@ impl FsPathId {
     pub(super) fn hash(&self, hasher: &mut DigestHasher) {
         match self {
             Self::File(file) => {
-                hasher.write_bytes(&[0]).write_file_identity(file);
+                hasher
+                    .write_input_tag(InputTag::FilePath)
+                    .write_file_identity(file);
             }
             Self::Dir(digest) => {
-                hasher.write_bytes(&[1]).write_digest(digest);
+                hasher
+                    .write_input_tag(InputTag::DirPath)
+                    .write_digest(digest);
             }
         }
     }

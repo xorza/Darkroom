@@ -4,7 +4,7 @@ use common::{TempFile, fs};
 
 use crate::data::data_type::DataType;
 use crate::exec::cache::runtime_cache::RuntimeCache;
-use crate::exec::cache::runtime_slot::OutputSnapshot;
+use crate::exec::cache::runtime_slot::{OutputSnapshot, Stamp};
 use crate::exec::compile::compiled_graph::{CompiledGraph, ExecBinding};
 use crate::exec::idx::{NodeIdx, OutputAddr};
 use crate::exec::schedule::{NodeState, RunSchedule};
@@ -34,7 +34,7 @@ fn typed<'a>(prog: &'a mut ProgramBuilder, func: u128, types: &[DataType]) -> No
 }
 
 /// Every node's content digest, folded producer-first the way the executor does — each node
-/// reading its producers' just-stamped `cur_digest`, over a cache that identifies its own paths
+/// reading its producers' just-stamped keys, over a cache that identifies its own paths
 /// afresh.
 #[derive(Debug)]
 struct Digests(RuntimeCache);
@@ -52,15 +52,15 @@ impl Digests {
         Self(cache)
     }
 
-    fn at(&self, node: Placed) -> Option<Digest> {
-        self.0[node.node_idx].cur_digest
+    fn at(&self, node: Placed) -> Stamp {
+        self.0[node.node_idx].stamp()
     }
 }
 
 #[derive(Debug)]
 struct DigestPair {
-    typed: Option<Digest>,
-    plain: Option<Digest>,
+    typed: Stamp,
+    plain: Stamp,
 }
 
 #[test]
@@ -92,7 +92,7 @@ fn deterministic_and_per_function_distinct() {
     // bound input's fold (its producer's digest), `c` a const input's.
     assert_eq!(
         first.at(b),
-        Some(Digest([
+        Stamp::Keyed(Digest([
             218, 160, 43, 122, 147, 145, 128, 55, 200, 36, 197, 1, 235, 238, 80, 75, 192, 5, 136,
             252, 76, 188, 202, 146, 164, 147, 200, 171, 207, 11, 182, 247
         ])),
@@ -100,7 +100,7 @@ fn deterministic_and_per_function_distinct() {
     );
     assert_eq!(
         first.at(c),
-        Some(Digest([
+        Stamp::Keyed(Digest([
             140, 195, 137, 23, 86, 44, 240, 67, 152, 58, 210, 86, 150, 213, 65, 221, 13, 30, 181,
             158, 150, 238, 179, 54, 252, 26, 58, 152, 9, 240, 66, 159
         ])),
@@ -225,13 +225,13 @@ fn fs_path_folds_file_identity_and_path() {
         "path-list order is part of the authored input"
     );
 
-    // A path that is not there has no identity to fold: the node is left without a digest, and
-    // the executor fails it at its turn rather than keying it on an absence.
+    // A path that is not there has no identity to fold: the node's key waits for its turn, where
+    // the executor stamps it again rather than keying it on an absence.
     fs::remove_file(file).unwrap();
     assert_eq!(
         Digests::of(&p).at(single),
-        None,
-        "a missing file leaves its node with no digest"
+        Stamp::Deferred,
+        "a missing file defers its node's key"
     );
 
     // An *unset* path is not a missing one. It names nothing to stat, so the node keeps a sound
@@ -241,15 +241,24 @@ fn fs_path_folds_file_identity_and_path() {
         Digests::of(&p).at(node)
     };
     let d_empty = unset(ConstValue::FsPath(String::new()));
-    assert!(d_empty.is_some(), "an unset path leaves its node cacheable");
+    assert!(
+        matches!(d_empty, Stamp::Keyed(_)),
+        "an unset path leaves its node cacheable"
+    );
     let d_blank = unset(ConstValue::FsPath("  ".into()));
-    assert!(d_blank.is_some(), "whitespace names no file either");
+    assert!(
+        matches!(d_blank, Stamp::Keyed(_)),
+        "whitespace names no file either"
+    );
     assert_ne!(
         d_blank, d_empty,
         "the authored string still folds — a blank path is not the empty one"
     );
     assert!(
-        unset(ConstValue::FsPaths(vec![String::new()])).is_some(),
+        matches!(
+            unset(ConstValue::FsPaths(vec![String::new()])),
+            Stamp::Keyed(_)
+        ),
         "an unset slot inside a list is unset too"
     );
 
@@ -272,6 +281,7 @@ fn fs_path_folds_file_identity_and_path() {
     assert!(
         cache
             .node_digest(batched, &running(batched), real_node.node_idx)
+            .digest()
             .is_some(),
         "a named path still stamps when batched beside an unset one"
     );
@@ -305,9 +315,9 @@ fn fs_path_folds_file_identity_and_path() {
     // silently invalidates every persisted cache blob.
     assert_eq!(
         d_here,
-        Some(Digest([
-            112, 118, 217, 26, 57, 48, 80, 168, 191, 103, 115, 27, 84, 191, 100, 101, 91, 0, 44,
-            64, 83, 217, 222, 107, 196, 18, 156, 9, 71, 18, 75, 252
+        Stamp::Keyed(Digest([
+            113, 177, 158, 170, 108, 26, 209, 194, 130, 29, 184, 97, 226, 144, 76, 71, 134, 231,
+            151, 208, 139, 81, 76, 150, 21, 4, 74, 203, 196, 190, 243, 11
         ])),
         "the single-path digest encoding must remain stable"
     );
@@ -315,7 +325,7 @@ fn fs_path_folds_file_identity_and_path() {
 
 /// A **Bind-delivered** path re-keys its consumer like a const one: the fold reads the
 /// producer's delivered value and stats the pointed-at file live — but only through an
-/// path-declared input, and only once the value is readable (unreadable ⇒ `None`,
+/// path-declared input, and only once the value is readable (unreadable ⇒ deferred,
 /// the taint the run loop's reach-time re-stamp resolves).
 #[test]
 fn bound_fs_path_folds_delivered_file_identity() {
@@ -340,8 +350,11 @@ fn bound_fs_path_folds_delivered_file_identity() {
         cache.install_for_test(program);
         let stamped = cache
             .node_digest(program, &running(program), producer.node_idx)
+            .digest()
             .unwrap();
-        cache[producer.node_idx].cur_digest = Some(stamped);
+        cache
+            .slot_mut(producer.node_idx)
+            .set_stamp(Stamp::Keyed(stamped));
         if let Some(value) = value {
             cache.hydrate(producer.node_idx, OutputSnapshot::new(vec![value]), stamped);
         }
@@ -359,7 +372,8 @@ fn bound_fs_path_folds_delivered_file_identity() {
         typed: typed_len1,
         plain: plain_len1,
     } = digests_with(fs_path());
-    assert!(typed_len1.is_some() && plain_len1.is_some());
+    assert!(matches!(typed_len1, Stamp::Keyed(_)));
+    assert!(matches!(plain_len1, Stamp::Keyed(_)));
     assert_eq!(
         digests_with(fs_path()).typed,
         typed_len1,
@@ -408,7 +422,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
     let blank_first = with_blank(vec![String::new(), path.clone()]);
     let blank_last = with_blank(vec![path.clone(), String::new()]);
     assert!(
-        blank_first.is_some(),
+        matches!(blank_first, Stamp::Keyed(_)),
         "an unset slot keeps the declared consumer cacheable"
     );
     assert_ne!(
@@ -422,7 +436,8 @@ fn bound_fs_path_folds_delivered_file_identity() {
         plain: plain_missing,
     } = digests_with(fs_path());
     assert_eq!(
-        typed_missing, None,
+        typed_missing,
+        Stamp::Deferred,
         "a wired path that is not there has no identity to fold"
     );
     assert_eq!(
@@ -433,7 +448,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
     // A delivered non-path value folds a distinct marker — still cacheable.
     let typed_int = digests_with(Some(DynamicValue::Static(ConstValue::Int(7)))).typed;
     assert!(
-        typed_int.is_some(),
+        matches!(typed_int, Stamp::Keyed(_)),
         "a mis-typed wire stays cacheable, unlike an unreadable referent"
     );
 
@@ -443,11 +458,12 @@ fn bound_fs_path_folds_delivered_file_identity() {
         plain: plain_unread,
     } = digests_with(None);
     assert_eq!(
-        typed_unread, None,
-        "unreadable reference value ⇒ None digest"
+        typed_unread,
+        Stamp::Deferred,
+        "an unreadable reference value defers the key"
     );
     assert!(
-        plain_unread.is_some(),
+        matches!(plain_unread, Stamp::Keyed(_)),
         "the undeclared consumer never reads the value, so it still folds"
     );
 
@@ -456,18 +472,23 @@ fn bound_fs_path_folds_delivered_file_identity() {
     cache.install_for_test(program);
     let stamped = cache
         .node_digest(program, &running(program), producer.node_idx)
+        .digest()
         .unwrap();
-    cache[producer.node_idx].cur_digest = Some(stamped);
+    cache
+        .slot_mut(producer.node_idx)
+        .set_stamp(Stamp::Keyed(stamped));
     cache.hydrate(
         producer.node_idx,
         OutputSnapshot::new(vec![DynamicValue::Static(ConstValue::FsPath(path))]),
         stamped,
     );
-    cache[producer.node_idx].cur_digest = Some(Digest([9; 32]));
+    cache
+        .slot_mut(producer.node_idx)
+        .set_stamp(Stamp::Keyed(Digest([9; 32])));
     cache.prepare_node_blocking(program, declared.node_idx);
     assert_eq!(
         cache.node_digest(program, &running(program), declared.node_idx),
-        None,
+        Stamp::Deferred,
         "a path value produced under an old producer digest is unreadable"
     );
 }
@@ -555,7 +576,7 @@ fn cycle_yields_none() {
     let a = pure(&mut p, 10, 1).input(forward).add();
     pure(&mut p, 20, 1).input(a.out(0)).add();
 
-    assert_eq!(Digests::of(&p).at(a), None);
+    assert_eq!(Digests::of(&p).at(a), Stamp::Unkeyed);
 }
 
 #[test]
@@ -573,11 +594,15 @@ fn impure_node_and_its_dependents_are_none() {
     let independent = pure(&mut p, 40, 1).const_input(ConstValue::Int(5)).add();
 
     let d = Digests::of(&p);
-    assert_eq!(d.at(src), None, "impure node ⇒ None");
-    assert_eq!(d.at(mid), None, "pure node under impure ⇒ None");
-    assert_eq!(d.at(sink), None, "taint flows the whole way up");
+    assert_eq!(d.at(src), Stamp::Unkeyed, "impure node ⇒ unkeyed");
+    assert_eq!(
+        d.at(mid),
+        Stamp::Unkeyed,
+        "pure node under impure ⇒ unkeyed"
+    );
+    assert_eq!(d.at(sink), Stamp::Unkeyed, "taint flows the whole way up");
     assert!(
-        d.at(independent).is_some(),
+        matches!(d.at(independent), Stamp::Keyed(_)),
         "independent pure node is unaffected"
     );
 }

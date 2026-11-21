@@ -10,7 +10,7 @@
 //! cut. A cut node (its cone feeds only cache hits, so a disk-cached node's stale upstream isn't
 //! recomputed on reopen) gets [`NodeOutcome::Cut`]. A missing implementation is reported without
 //! probing its cache or retaining its input cone. The one verdict the loop *improves* is a `Run`
-//! whose stamped digest is `None` because a Bind-delivered path value exists only once its
+//! whose key is [`Stamp::Deferred`] because a Bind-delivered path value exists only once its
 //! producers settle: the loop prepares that identity off-thread, re-stamps at reach time, and
 //! serves the cache on a hit.
 
@@ -37,8 +37,9 @@ use crate::runtime::ctx_manager::CtxManager;
 use crate::runtime::log_entry::LogLevel;
 
 use crate::exec::cache::disk_store::StorePolicy;
+use crate::exec::cache::disk_store::error::StoreResult;
 use crate::exec::cache::runtime_cache::{Restamp, ReuseOutcome, RuntimeCache};
-use crate::exec::cache::runtime_slot::OutputRead;
+use crate::exec::cache::runtime_slot::{OutputRead, Stamp};
 use crate::exec::cache::stamp_job::error::StampError;
 use crate::exec::compile::compiled_graph::{CompiledGraph, ExecBinding};
 use crate::exec::error::RunError;
@@ -245,7 +246,7 @@ impl Executor {
             for (process_idx, &node_idx) in schedule.process_order.iter().enumerate() {
                 let serves = matches!(
                     schedule.states[node_idx],
-                    NodeState::Run | NodeState::Reuse | NodeState::Twin
+                    NodeState::Run | NodeState::Reuse | NodeState::Twin { .. }
                 );
                 // A schedule of sync-completing lambdas never suspends on its own, and would
                 // starve everything sharing its thread (event-loop lambdas, other tasks under a
@@ -271,7 +272,7 @@ impl Executor {
                 };
                 frame.run_node(node_idx).await;
                 if serves {
-                    frame.cache[node_idx].used_in = run;
+                    frame.cache.slot_mut(node_idx).mark_used(run);
                 }
                 if ram_headroom > 0 {
                     grown += frame.held_bytes(node_idx).saturating_sub(held_before);
@@ -437,7 +438,7 @@ impl ExecFrame<'_, '_> {
             match outcomes[node_idx] {
                 NodeOutcome::Pending => match schedule.states[node_idx] {
                     NodeState::Reuse => false,
-                    NodeState::Run => slot.cur_digest.is_some(),
+                    NodeState::Run => slot.stamp() != Stamp::Deferred,
                     _ => true,
                 },
                 _ => reads.node_drained(program, node_idx),
@@ -465,7 +466,7 @@ impl ExecFrame<'_, '_> {
                 };
             }
             NodeState::Reuse => self.serve_reuse(node_idx, demand).await,
-            NodeState::Twin => self.serve_twin(node_idx, demand).await,
+            NodeState::Twin { .. } => self.serve_twin(node_idx, demand).await,
             // Reuse is settled *before* the errored-dependency check inside `invoke_node`: a
             // digest-valid cached value stays valid when an upstream re-ran for another consumer
             // and failed, so it must not be cleared as skipped.
@@ -484,7 +485,7 @@ impl ExecFrame<'_, '_> {
         for &node_idx in &schedule.process_order[from_process_idx..] {
             match schedule.states[node_idx] {
                 NodeState::Run => self.abandon_input_reads(node_idx),
-                NodeState::Twin => self.abandon_twin_reads(node_idx),
+                NodeState::Twin { .. } => self.abandon_twin_reads(node_idx),
                 _ => {}
             }
         }
@@ -506,6 +507,7 @@ impl ExecFrame<'_, '_> {
             }
             ReuseOutcome::Served => {
                 self.node_outcomes[node_idx] = NodeOutcome::Reused;
+                self.settle_blob_debt(node_idx).await;
                 self.release_drained_outputs(node_idx);
             }
         }
@@ -560,29 +562,29 @@ impl ExecFrame<'_, '_> {
             self.mark_skipped(node_idx, RunError::SkippedUpstream);
             return;
         }
-        let slot = &mut self.cache[node_idx];
-        for (out, value) in slot
-            .invoke_outputs(output_count as usize)
+        let slot = self.cache.slot_mut(node_idx);
+        for ((out, value), demand) in slot
+            .invoke_outputs(demand)
             .iter_mut()
             .zip(self.scratch.drain(..))
+            .zip(demand)
         {
-            *out = value;
+            if !demand.is_skip() {
+                *out = value;
+            }
         }
         slot.stamp_produced();
         self.node_outcomes[node_idx] = NodeOutcome::Reused;
-        let _ = self
-            .cache
-            .store_node(program, node_idx, StorePolicy::PreserveCovering)
-            .await;
+        self.store(node_idx, StorePolicy::PreserveCovering).await;
         self.release_drained_outputs(node_idx);
     }
 
     /// Whether this node's lambda still has to run, after the late second chance at reuse.
     ///
-    /// The one verdict the loop *improves*: a `Run` whose stamped digest is `None` because it
-    /// folds a Bind-delivered path value the sweep could not read yet (`hash_bound_fs_path`). Its
-    /// producers settled earlier in this walk, so re-stamp it now and serve the cache on a hit. A
-    /// genuinely uncacheable node (an impure cone) re-folds to `None` and runs as before.
+    /// The one verdict the loop *improves*: a `Run` whose key is [`Stamp::Deferred`] because it
+    /// folds a path the sweep could not identify, or a Bind-delivered path value it could not read
+    /// yet (`hash_bound_fs_path`). Its producers settled earlier in this walk, so re-stamp it now
+    /// and serve the cache on a hit. An unkeyed node, of an impure cone, is not stamped again.
     ///
     /// `true` — nothing was improvable, the improved digest still missed, or a declared path
     /// would not stamp: the node runs, in the last case uncached and with a warning against its
@@ -592,7 +594,7 @@ impl ExecFrame<'_, '_> {
     /// Loading *before* retiring this node's input reads lets a failed load fall through to a
     /// normal invoke here, unlike [`serve_reuse`](Self::serve_reuse).
     async fn needs_invoke(&mut self, node_idx: NodeIdx, demand: &[OutputDemand]) -> bool {
-        if self.cache[node_idx].cur_digest.is_some() {
+        if self.cache[node_idx].stamp() != Stamp::Deferred {
             return true;
         }
         let program = self.program;
@@ -636,8 +638,9 @@ impl ExecFrame<'_, '_> {
                 // reader is gone. A `Reuse` node never owned them, hence `serve_reuse` has no
                 // such line.
                 self.abandon_input_reads(node_idx);
-                self.release_drained_outputs(node_idx);
                 self.node_outcomes[node_idx] = NodeOutcome::Reused;
+                self.settle_blob_debt(node_idx).await;
+                self.release_drained_outputs(node_idx);
                 false
             }
         }
@@ -680,7 +683,7 @@ impl ExecFrame<'_, '_> {
                     event_state: &node.event_state,
                     inputs: self.scratch,
                     demand,
-                    outputs: self.cache[node_idx].invoke_outputs(e_node.outputs.len as usize),
+                    outputs: self.cache.slot_mut(node_idx).invoke_outputs(demand),
                 })
                 .await
                 .map_err(|e| match e {
@@ -706,7 +709,7 @@ impl ExecFrame<'_, '_> {
             other => other,
         };
         let cancelled = matches!(&result, Err(RunError::Cancelled));
-        let slot = &mut self.cache[node_idx];
+        let slot = self.cache.slot_mut(node_idx);
         let succeeded = match result {
             // The fresh output corresponds to the node's current digest, so the next run's reuse
             // check is a RAM hit.
@@ -741,25 +744,44 @@ impl ExecFrame<'_, '_> {
         if self.schedule.root_flags(node_idx).is_event_source() {
             self.collect_armed_events(node_idx);
         }
-        // Persist the moment the node finishes, not at the end of the run. The snapshot is taken
-        // synchronously inside `store_node`; only the write awaits, so the cache borrow doesn't
-        // cross it. The preceding reuse miss proves no blob can cover this result.
-        //
-        // The answer is dropped deliberately: nobody is waiting on it, so a blob that did not
-        // land degrades into a later recompute; the flush sweeps are where a store's answer
-        // reaches a human. The slot still records it, inside the store.
-        let _ = self
-            .cache
-            .store_node(program, node_idx, StorePolicy::KnownMiss)
-            .await;
+        // Persist the moment the node finishes, not at the end of the run. The preceding reuse
+        // miss proves no blob can cover this result.
+        self.store(node_idx, StorePolicy::KnownMiss).await;
         self.release_drained_outputs(node_idx);
+    }
+
+    /// Write `node_idx`'s value to disk as `policy` says, and log a write that failed against the
+    /// node: the slot then owes no blob until an install, a new store or a flush, so a store that
+    /// takes nothing is logged once, not on every run.
+    async fn store(&mut self, node_idx: NodeIdx, policy: StorePolicy) {
+        let stored = self.cache.store_node(self.program, node_idx, policy).await;
+        self.log_failed_store(node_idx, stored);
+    }
+
+    /// Write the blob a value served from RAM owes, logging a failure as [`Self::store`] does.
+    async fn settle_blob_debt(&mut self, node_idx: NodeIdx) {
+        let stored = self.cache.settle_blob_debt(self.program, node_idx).await;
+        self.log_failed_store(node_idx, stored);
+    }
+
+    fn log_failed_store(&mut self, node_idx: NodeIdx, stored: StoreResult) {
+        if let Err(error) = stored {
+            self.ctx.log_node(
+                self.program.program_ids[node_idx],
+                LogLevel::Warn,
+                format!(
+                    "its value was not written to the disk cache: {}",
+                    ErrorChain::new(&error)
+                ),
+            );
+        }
     }
 
     /// Drop `node_idx` from this run: clear any stale cached output so it isn't served as this
     /// run's result, and record `error` — [`RunError::SkippedUpstream`] for an errored
     /// dependency, or [`RunError::CacheLoadFailed`] for a probed blob that no longer loads.
     fn mark_skipped(&mut self, node_idx: NodeIdx, error: RunError) {
-        self.cache[node_idx].clear_output();
+        self.cache.slot_mut(node_idx).clear_output();
         self.node_outcomes[node_idx] = NodeOutcome::Skipped { error };
     }
 
@@ -880,7 +902,7 @@ impl ExecFrame<'_, '_> {
         if !self.program[node_idx].cache.caches_in_ram()
             && self.remaining_reads.node_drained(self.program, node_idx)
         {
-            self.cache[node_idx].clear_output();
+            self.cache.slot_mut(node_idx).clear_output();
         }
     }
 
@@ -899,7 +921,9 @@ impl ExecFrame<'_, '_> {
         {
             self.release_drained_outputs(address.node_idx);
         } else if !self.program[address.node_idx].cache.caches_in_ram() {
-            self.cache[address.node_idx].clear_output_port(address.port_idx);
+            self.cache
+                .slot_mut(address.node_idx)
+                .clear_output_port(address.port_idx);
         }
     }
 }
