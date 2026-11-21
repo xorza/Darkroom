@@ -69,6 +69,29 @@ fn append_hands_back_the_run_it_packed_and_every_address_into_it_agrees() {
     assert_eq!(col[first], [10, 25]);
 }
 
+/// A per-run column is refilled in place: `clone_from` copies a shorter column into one with room
+/// and keeps the buffer (capacity 8 stays 8, where a fresh clone holds exactly the 3 copied), and
+/// `reset_with` refills every entry from `fill` without growing.
+#[test]
+fn a_column_refilled_from_another_keeps_its_buffer() {
+    let source: Col<NodeIdx, u32> = [1, 2, 3].into();
+    let mut dest = Col::<NodeIdx, u32>::with_capacity(8);
+    dest.extend([9, 9, 9, 9, 9]);
+
+    dest.clone_from(&source);
+    assert_eq!(dest.iter().copied().collect::<Vec<_>>(), [1, 2, 3]);
+    assert_eq!(dest.capacity(), 8);
+    assert_eq!(source.clone().capacity(), 3);
+
+    let mut next = 0;
+    dest.reset_with(4, || {
+        next += 10;
+        next
+    });
+    assert_eq!(dest.iter().copied().collect::<Vec<_>>(), [10, 20, 30, 40]);
+    assert_eq!(dest.capacity(), 8);
+}
+
 /// A span from a longer column reaches past a shorter one — the case
 /// `get_span` exists for, and the one a validator meets when a column and the
 /// program its spans came from disagree.

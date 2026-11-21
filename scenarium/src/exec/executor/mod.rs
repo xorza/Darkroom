@@ -15,14 +15,13 @@
 //! serves the cache on a hit.
 
 use std::fmt;
-use std::sync::Arc;
 use std::time::Instant;
 
 use tokio::task;
 
 use common::{CancelToken, ErrorChain, SystemMemory};
 
-use crate::containers::col::Col;
+use crate::containers::col::{Col, Idx};
 use crate::data::dynamic_value::DynamicValue;
 use crate::data::path_form::PathForm;
 use crate::data::ram_usage::RamUsage;
@@ -50,7 +49,7 @@ mod node_runtime;
 
 /// What became of a node this run — one result map, so run-time facts can't contradict (a node
 /// can't be `Reused` yet carry a run time).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 enum NodeOutcome {
     /// Not reached this run: skipped for missing inputs, below a cancel, or unscheduled.
     #[default]
@@ -82,13 +81,15 @@ impl NodeOutcome {
 
 #[derive(Default, Debug)]
 pub(crate) struct Executor {
-    pub(crate) ctx_manager: CtxManager,
-    /// Per-*invoke* scratch: the node's resolved inputs, refilled for each node that runs.
-    inputs: Vec<DynamicValue>,
+    ctx_manager: CtxManager,
+    /// The values one turn hands over: a node's resolved inputs for its invoke, or a leader's
+    /// outputs for its twin. Empty between turns, so no value outlives the turn that read it.
+    scratch: Vec<DynamicValue>,
     /// The run's mutable copy of the resolved live binding counts; the resolved demand stays as
     /// the sweep left it.
     remaining_reads: RemainingOutputReads,
-    /// Per-run outcome per node, aligned to the program's dense node vector.
+    /// Per-run outcome per node, aligned to the program's dense node vector; drained into the
+    /// rows by [`collect_outcome`](Self::collect_outcome).
     outcomes: Col<NodeIdx, NodeOutcome>,
     /// Each node's cross-run lambda state, aligned to the installed program by
     /// [`reconcile`](Self::reconcile).
@@ -221,7 +222,7 @@ impl Executor {
         self.ctx_manager.cancel = cancel;
         self.ctx_manager.logs.clear();
         self.outcomes
-            .reset(program.e_nodes.len(), NodeOutcome::Pending);
+            .reset_with(program.e_nodes.len(), NodeOutcome::default);
         self.remaining_reads.seed(schedule);
 
         {
@@ -230,7 +231,7 @@ impl Executor {
                 schedule,
                 cache,
                 remaining_reads: &mut self.remaining_reads,
-                inputs: &mut self.inputs,
+                scratch: &mut self.scratch,
                 node_outcomes: &mut self.outcomes,
                 nodes: &mut self.nodes,
                 ctx: &mut self.ctx_manager,
@@ -242,24 +243,38 @@ impl Executor {
             // resolved run cuts cache-hidden and blocked cones.
             let mut grown = 0_u64;
             for (process_idx, &node_idx) in schedule.process_order.iter().enumerate() {
+                let serves = matches!(
+                    schedule.states[node_idx],
+                    NodeState::Run | NodeState::Reuse | NodeState::Twin
+                );
                 // A schedule of sync-completing lambdas never suspends on its own, and would
                 // starve everything sharing its thread (event-loop lambdas, other tasks under a
-                // current-thread runtime).
-                task::yield_now().await;
+                // current-thread runtime). A node that serves nothing, cut, disabled or blocked,
+                // takes no time to starve anything with. Not tokio's `consume_budget`, which
+                // yields only once the task's budget is spent: a lambda that runs for seconds
+                // would then be followed by no yield.
+                if serves {
+                    task::yield_now().await;
+                }
 
                 if frame.ctx.cancel.is_cancelled() {
                     frame.retire_cancelled_tail(process_idx);
                     break;
                 }
+                // What the turn adds to RAM is what its slot holds after it beyond what it held
+                // before: a resident reuse and a cut add nothing, a run, a twin or a blob load
+                // their values.
+                let held_before = if ram_headroom > 0 {
+                    frame.held_bytes(node_idx)
+                } else {
+                    0
+                };
                 frame.run_node(node_idx).await;
-                if matches!(
-                    schedule.states[node_idx],
-                    NodeState::Run | NodeState::Reuse | NodeState::Twin
-                ) {
+                if serves {
                     frame.cache[node_idx].used_in = run;
                 }
                 if ram_headroom > 0 {
-                    grown += frame.held_bytes(node_idx);
+                    grown += frame.held_bytes(node_idx).saturating_sub(held_before);
                     if grown >= ram_headroom / PRESSURE_CHECKS_PER_HEADROOM {
                         grown = 0;
                         frame.relieve(ram_headroom, memory);
@@ -275,6 +290,7 @@ impl Executor {
         self.ctx_manager.cur_program_id = None;
         outcome.logs.append(&mut self.ctx_manager.logs);
         outcome.cancelled = self.ctx_manager.cancel.is_cancelled();
+        self.ctx_manager.cancel = CancelToken::never();
     }
 
     /// Reduce this run's per-node column and the RAM it left resident into the caller's outcome —
@@ -285,13 +301,20 @@ impl Executor {
     /// Separate from [`run`](Self::run) because `node_ram` can only be measured once the engine
     /// has released what the run left dead. It walks the program rather than `process_order`: a
     /// node the run never scheduled can still hold RAM from an earlier one.
-    pub(crate) fn collect_outcome(&self, request: CollectRequest<'_>, outcome: &mut ExecOutcome) {
+    ///
+    /// Each outcome moves into its row, so a row is its error's one owner.
+    pub(crate) fn collect_outcome(
+        &mut self,
+        request: CollectRequest<'_>,
+        outcome: &mut ExecOutcome,
+    ) {
         let CollectRequest {
             program,
             schedule,
             node_ram,
         } = request;
-        for (node_idx, node_outcome) in self.outcomes.iter_indexed() {
+        for (idx, node_outcome) in self.outcomes.drain().enumerate() {
+            let node_idx = NodeIdx::from_idx(idx);
             let status = match node_outcome {
                 // Available and not recomputed: reported cached.
                 NodeOutcome::Reused | NodeOutcome::Cut { cached: true } => {
@@ -299,9 +322,7 @@ impl Executor {
                 }
                 NodeOutcome::Ran { secs } => {
                     outcome.executed_node_count += 1;
-                    Some(NodeExecStatus::Executed {
-                        elapsed_secs: *secs,
-                    })
+                    Some(NodeExecStatus::Executed { elapsed_secs: secs })
                 }
                 // A cancelled node didn't complete, so it has neither a run nor a failure of its
                 // own — the run as a whole was cancelled. `Skipped` alongside `Failed`: a cancel
@@ -309,7 +330,6 @@ impl Executor {
                 // the cut left uncached ran nothing either.
                 NodeOutcome::Failed {
                     error: RunError::Cancelled,
-                    ..
                 }
                 | NodeOutcome::Skipped {
                     error: RunError::Cancelled,
@@ -318,13 +338,9 @@ impl Executor {
                 // A genuine failure did run, so it counts among the executed.
                 NodeOutcome::Failed { error } => {
                     outcome.executed_node_count += 1;
-                    Some(NodeExecStatus::Errored {
-                        error: error.clone(),
-                    })
+                    Some(NodeExecStatus::Errored { error })
                 }
-                NodeOutcome::Skipped { error } => Some(NodeExecStatus::Errored {
-                    error: error.clone(),
-                }),
+                NodeOutcome::Skipped { error } => Some(NodeExecStatus::Errored { error }),
                 // The planner may have stopped at this node for want of an input — a verdict that
                 // isn't the run loop's to give, since a node it never reached holds no outcome.
                 NodeOutcome::Pending => missing_inputs(program, schedule, node_idx),
@@ -380,7 +396,7 @@ struct ExecFrame<'a, 'r> {
     schedule: &'a RunSchedule,
     cache: &'a mut RuntimeCache,
     remaining_reads: &'a mut RemainingOutputReads,
-    inputs: &'a mut Vec<DynamicValue>,
+    scratch: &'a mut Vec<DynamicValue>,
     /// Per-node results for this run, distinct from the whole-run `outcome` below.
     node_outcomes: &'a mut Col<NodeIdx, NodeOutcome>,
     nodes: &'a mut Col<NodeIdx, NodeRuntime>,
@@ -390,7 +406,7 @@ struct ExecFrame<'a, 'r> {
 }
 
 impl ExecFrame<'_, '_> {
-    /// The CPU bytes `node_idx` holds now, which a run adds to what memory pressure weighs.
+    /// The CPU bytes `node_idx`'s slot holds now; a turn's growth is what this rises by over it.
     fn held_bytes(&self, node_idx: NodeIdx) -> u64 {
         self.cache[node_idx].output_values().map_or(0, |values| {
             values
@@ -401,17 +417,31 @@ impl ExecFrame<'_, '_> {
     }
 
     /// Read the memory the process can still allocate and, while it is under `ram_headroom`, drop
-    /// values kept while memory allows that no later node of this run reads
+    /// values kept while memory allows that no later step of this run serves or reads
     /// ([`RuntimeCache::relieve`]), as ComfyUI's default cache polls its headroom between nodes
     /// ([startup flags](https://docs.comfy.org/development/comfyui-server/startup-flags)).
+    ///
+    /// A value goes by its node's place in the run, not by its readers alone, as a root has none.
+    /// A node not reached yet keeps it where the run will serve from it: a `Reuse`, or a `Run`
+    /// with no digest yet, which a restamp may serve. Any other may lose it, as its run
+    /// overwrites it or the run does not serve it. A node already reached keeps it while a later
+    /// reader is owed it.
     fn relieve(&mut self, ram_headroom: u64, memory: MemoryProbe) {
         let deficit = ram_headroom.saturating_sub((memory.0)());
         if deficit == 0 {
             return;
         }
-        let (program, reads) = (self.program, &*self.remaining_reads);
-        self.cache.relieve(program, deficit, |node_idx| {
-            reads.node_drained(program, node_idx)
+        let (program, schedule) = (self.program, self.schedule);
+        let (outcomes, reads) = (&*self.node_outcomes, &*self.remaining_reads);
+        self.cache.relieve(program, deficit, |node_idx, slot| {
+            match outcomes[node_idx] {
+                NodeOutcome::Pending => match schedule.states[node_idx] {
+                    NodeState::Reuse => false,
+                    NodeState::Run => slot.cur_digest.is_some(),
+                    _ => true,
+                },
+                _ => reads.node_drained(program, node_idx),
+            }
         });
     }
 
@@ -452,8 +482,10 @@ impl ExecFrame<'_, '_> {
     fn retire_cancelled_tail(&mut self, from_process_idx: usize) {
         let schedule = self.schedule;
         for &node_idx in &schedule.process_order[from_process_idx..] {
-            if schedule.states[node_idx] == NodeState::Run {
-                self.abandon_input_reads(node_idx);
+            match schedule.states[node_idx] {
+                NodeState::Run => self.abandon_input_reads(node_idx),
+                NodeState::Twin => self.abandon_twin_reads(node_idx),
+                _ => {}
             }
         }
     }
@@ -494,10 +526,10 @@ impl ExecFrame<'_, '_> {
             .expect("a twin names its leader");
         let failed = self.node_outcomes[leader].error().is_some();
         let output_count = program[node_idx].outputs.len;
-        self.inputs.clear();
+        debug_assert!(self.scratch.is_empty(), "a turn leaves the scratch empty");
         for port_idx in 0..output_count {
             if demand[port_idx as usize].is_skip() {
-                self.inputs.push(DynamicValue::Unbound);
+                self.scratch.push(DynamicValue::Unbound);
                 continue;
             }
             let address = OutputAddr {
@@ -521,9 +553,10 @@ impl ExecFrame<'_, '_> {
                 .read_output_port(program, address, read)
                 .expect("a twin's leader is resident when the twin is reached");
             self.complete_planned_read(address);
-            self.inputs.push(value);
+            self.scratch.push(value);
         }
         if failed {
+            self.scratch.clear();
             self.mark_skipped(node_idx, RunError::SkippedUpstream);
             return;
         }
@@ -531,7 +564,7 @@ impl ExecFrame<'_, '_> {
         for (out, value) in slot
             .invoke_outputs(output_count as usize)
             .iter_mut()
-            .zip(self.inputs.drain(..))
+            .zip(self.scratch.drain(..))
         {
             *out = value;
         }
@@ -576,6 +609,7 @@ impl ExecFrame<'_, '_> {
         match hydrated {
             // Torn down: invoking would begin work the cancel exists to stop.
             Err(StampError::Cancelled) => {
+                self.abandon_input_reads(node_idx);
                 self.mark_skipped(node_idx, RunError::Cancelled);
                 false
             }
@@ -644,7 +678,7 @@ impl ExecFrame<'_, '_> {
                     ctx: self.ctx,
                     state: &mut node.state,
                     event_state: &node.event_state,
-                    inputs: self.inputs,
+                    inputs: self.scratch,
                     demand,
                     outputs: self.cache[node_idx].invoke_outputs(e_node.outputs.len as usize),
                 })
@@ -652,10 +686,12 @@ impl ExecFrame<'_, '_> {
                 .map_err(|e| match e {
                     // A lambda that bailed on cancel reports it truthfully.
                     InvokeError::Cancelled => RunError::Cancelled,
-                    other => RunError::Invoke(Arc::new(other)),
+                    other => RunError::Invoke(other),
                 })
         };
         let run_time = invoke_start.elapsed().as_secs_f64();
+        // The lambda never reads its inputs again: each value goes now, not at the next turn.
+        self.scratch.clear();
 
         // A cancellable lambda reports a cancel itself. Safety net for one that doesn't poll the
         // token (a builtin, a single decode) but ran while the run was cancelled: its `Ok` comes
@@ -762,7 +798,7 @@ impl ExecFrame<'_, '_> {
         let declared = &self.program.inputs[self.program[node_idx].inputs];
         declared
             .iter()
-            .zip(self.inputs.iter())
+            .zip(self.scratch.iter())
             .enumerate()
             .filter(|(_, (input, _))| input.fs_path)
             .find_map(|(idx, (_, value))| {
@@ -778,7 +814,7 @@ impl ExecFrame<'_, '_> {
     }
 
     fn collect_inputs(&mut self, node_idx: NodeIdx) {
-        self.inputs.clear();
+        debug_assert!(self.scratch.is_empty(), "a turn leaves the scratch empty");
         for input in &self.program.inputs[self.program[node_idx].inputs] {
             let value = match self.schedule.delivery(input) {
                 // No read was planned: a bound input reads as unbound only
@@ -807,7 +843,7 @@ impl ExecFrame<'_, '_> {
                     value
                 }
             };
-            self.inputs.push(value);
+            self.scratch.push(value);
         }
     }
 
@@ -817,6 +853,25 @@ impl ExecFrame<'_, '_> {
         for input in &self.program.inputs[self.program[consumer_idx].inputs] {
             if let Delivery::Wire(address) = self.schedule.delivery(input) {
                 self.complete_planned_read(address);
+            }
+        }
+    }
+
+    /// Abandons the reads a twin that will not be served owns of its leader: one of each output
+    /// the twin demands, as the sweep counted them.
+    fn abandon_twin_reads(&mut self, node_idx: NodeIdx) {
+        let program = self.program;
+        let leader = self
+            .schedule
+            .twin_of(node_idx)
+            .expect("a twin names its leader");
+        let own = program[node_idx].outputs;
+        for port_idx in 0..own.len {
+            if !self.schedule.outputs.demand[own.nth(port_idx)].is_skip() {
+                self.complete_planned_read(OutputAddr {
+                    node_idx: leader,
+                    port_idx,
+                });
             }
         }
     }

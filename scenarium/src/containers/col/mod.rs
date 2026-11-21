@@ -123,10 +123,25 @@ impl<I> Eq for Span<I> {}
 /// A dense column of `T` aligned to the space `I` indexes: resets are memsets and lookups are
 /// array reads. `I` is carried, not stored, so a column keyed by one `…Idx` cannot be read with
 /// another.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct Col<I, T> {
     values: Vec<T>,
     space: PhantomData<I>,
+}
+
+/// Hand-written for `clone_from`, which the derive leaves at `*self = source.clone()`: a per-run
+/// column copied from another keeps its own buffer, as [`Vec::clone_from`] does.
+impl<I, T: Clone> Clone for Col<I, T> {
+    fn clone(&self) -> Self {
+        Self {
+            values: self.values.clone(),
+            space: PhantomData,
+        }
+    }
+
+    fn clone_from(&mut self, source: &Self) {
+        self.values.clone_from(&source.values);
+    }
 }
 
 /// An empty column, for any `I` and `T`. Derived, this would demand
@@ -180,6 +195,13 @@ impl<I, T: Clone> Col<I, T> {
 }
 
 impl<I, T> Col<I, T> {
+    /// [`reset`](Self::reset) for an entry that is not `Clone`: each of the `len` entries is a
+    /// fresh `fill()`.
+    pub(crate) fn reset_with(&mut self, len: usize, fill: impl FnMut() -> T) {
+        self.values.clear();
+        self.values.resize_with(len, fill);
+    }
+
     /// An empty column that will hold `capacity` entries without growing.
     pub(crate) fn with_capacity(capacity: usize) -> Self {
         Self {

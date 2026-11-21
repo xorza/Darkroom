@@ -5,7 +5,9 @@
 //! **The outcome is a snapshot, not a borrow**, so a test can hold two runs side by side and
 //! compare them.
 
+use std::mem;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use common::{CancelToken, fs};
 use hashbrown::HashMap;
@@ -329,8 +331,10 @@ pub(crate) struct ReportedRun {
 pub(crate) struct RunOutcome {
     /// Names that invoked their lambda and succeeded, in schedule order (deps before consumers).
     ran: Vec<String>,
+    /// Each row's node name, aligned to `rows`.
+    row_names: Vec<String>,
     /// Every row the run reported, in the program's node order.
-    rows: Vec<(String, NodeStatus)>,
+    rows: Rows,
     logs: Vec<String>,
     pub(crate) executed_node_count: usize,
     pub(crate) cancelled: bool,
@@ -340,20 +344,20 @@ pub(crate) struct RunOutcome {
 }
 
 impl RunOutcome {
-    fn snapshot(graph: &TestGraph, engine: &ExecEngine, outcome: &ExecOutcome) -> Self {
+    /// Takes the outcome's rows, which the next run clears anyway.
+    fn snapshot(graph: &TestGraph, engine: &ExecEngine, outcome: &mut ExecOutcome) -> Self {
         let names = NameMap::of(graph);
+        let ran = engine
+            .schedule_order()
+            .into_iter()
+            .filter(|&program_id| outcome.ran(program_id))
+            .map(|program_id| names.name(program_id))
+            .collect();
+        let rows = mem::take(&mut outcome.nodes);
         Self {
-            ran: engine
-                .schedule_order()
-                .into_iter()
-                .filter(|&program_id| outcome.ran(program_id))
-                .map(|program_id| names.name(program_id))
-                .collect(),
-            rows: outcome
-                .nodes
-                .iter()
-                .map(|row| (names.name(row.program_id), row.clone()))
-                .collect(),
+            ran,
+            row_names: rows.iter().map(|row| names.name(row.program_id)).collect(),
+            rows: Rows::Taken(rows),
             logs: outcome
                 .logs
                 .iter()
@@ -375,14 +379,14 @@ impl RunOutcome {
     /// the armed events stay empty.
     ///
     /// [`Worker`]: crate::worker::Worker
-    pub(crate) fn published(graph: &TestGraph, status: &RunSummary) -> Self {
+    pub(crate) fn published(graph: &TestGraph, status: Arc<RunSummary>) -> Self {
         let names = NameMap::of(graph);
         let mut outcome = Self {
             ran: Vec::new(),
-            rows: status
+            row_names: status
                 .nodes
                 .iter()
-                .map(|row| (names.name(row.program_id), row.clone()))
+                .map(|row| names.name(row.program_id))
                 .collect(),
             logs: status
                 .logs
@@ -393,6 +397,7 @@ impl RunOutcome {
             cancelled: status.cancelled,
             armed_events: Vec::new(),
             cache_ram: status.cache_ram,
+            rows: Rows::Published(status),
         };
         outcome.ran = outcome
             .with_status(|status| matches!(status, NodeExecStatus::Executed { .. }))
@@ -424,7 +429,7 @@ impl RunOutcome {
 
     /// Names still holding RAM after the run, sorted.
     pub(crate) fn holding_ram(&self) -> Vec<&str> {
-        sorted_names(&self.rows, |row| row.ram.total() > 0)
+        sorted_names(self.named_rows(), |row| row.ram.total() > 0)
     }
 
     /// Log lines the run emitted, in order.
@@ -453,16 +458,41 @@ impl RunOutcome {
     }
 
     fn row(&self, name: &str) -> Option<&NodeStatus> {
-        self.rows
-            .iter()
-            .find(|(row_name, _)| row_name == name)
+        self.named_rows()
+            .find(|(row_name, _)| *row_name == name)
             .map(|(_, row)| row)
+    }
+
+    fn named_rows(&self) -> impl Iterator<Item = (&str, &NodeStatus)> {
+        self.row_names
+            .iter()
+            .map(String::as_str)
+            .zip(self.rows.get())
     }
 
     /// Sorted by name, not by the program's node order, which an id sort settles and a test
     /// should not have to predict.
     fn with_status(&self, matches: impl Fn(&NodeExecStatus) -> bool) -> Vec<&str> {
-        sorted_names(&self.rows, |row| row.status.as_ref().is_some_and(&matches))
+        sorted_names(self.named_rows(), |row| {
+            row.status.as_ref().is_some_and(&matches)
+        })
+    }
+}
+
+/// Where a snapshot's rows live: taken from the engine's outcome, or in the summary a worker
+/// published, which the worker holds too.
+#[derive(Debug)]
+enum Rows {
+    Taken(Vec<NodeStatus>),
+    Published(Arc<RunSummary>),
+}
+
+impl Rows {
+    fn get(&self) -> &[NodeStatus] {
+        match self {
+            Self::Taken(rows) => rows,
+            Self::Published(summary) => &summary.nodes,
+        }
     }
 }
 
@@ -521,18 +551,23 @@ impl PlanOutcome {
 
     /// Sorted by name — see [`RunOutcome::cached`] for why.
     fn where_state(&self, matches: impl Fn(NodeState) -> bool) -> Vec<&str> {
-        sorted_names(&self.states, |state| {
-            *state != NodeState::Unvisited && matches(*state)
-        })
+        sorted_names(
+            self.states
+                .iter()
+                .map(|(name, state)| (name.as_str(), state)),
+            |state| *state != NodeState::Unvisited && matches(*state),
+        )
     }
 }
 
 /// The names of the `rows` that `keep` holds for, sorted.
-fn sorted_names<T>(rows: &[(String, T)], keep: impl Fn(&T) -> bool) -> Vec<&str> {
+fn sorted_names<'a, T: 'a>(
+    rows: impl Iterator<Item = (&'a str, &'a T)>,
+    keep: impl Fn(&T) -> bool,
+) -> Vec<&'a str> {
     let mut names: Vec<&str> = rows
-        .iter()
         .filter(|(_, row)| keep(row))
-        .map(|(name, _)| name.as_str())
+        .map(|(name, _)| name)
         .collect();
     names.sort_unstable();
     names

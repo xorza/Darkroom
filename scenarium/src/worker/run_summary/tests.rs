@@ -17,32 +17,35 @@ fn a_summary_publishes_the_runs_rows_verbatim() {
     let missing = ProgramId::from(NodeId::unique());
     let failed = ProgramId::from(NodeId::unique());
     let resident = ProgramId::from(NodeId::unique());
-    let rows = vec![
-        NodeStatus {
-            program_id: executed,
-            status: Some(NodeExecStatus::Executed { elapsed_secs: 0.5 }),
-            ram: RamUsage { cpu: 3, gpu: 0 },
-        },
-        NodeStatus {
-            program_id: missing,
-            status: Some(NodeExecStatus::MissingInputs { ports: vec![1, 3] }),
-            ram: RamUsage::default(),
-        },
-        NodeStatus {
-            program_id: failed,
-            status: Some(NodeExecStatus::Errored {
-                error: RunError::Invoke(Arc::new(internals::failure("failed"))),
-            }),
-            ram: RamUsage::default(),
-        },
-        NodeStatus {
-            program_id: resident,
-            status: None,
-            ram: RamUsage { cpu: 5, gpu: 7 },
-        },
-    ];
+    // Built twice, once to publish and once to compare: a row is no `Clone`, as it owns its error.
+    let rows = || {
+        vec![
+            NodeStatus {
+                program_id: executed,
+                status: Some(NodeExecStatus::Executed { elapsed_secs: 0.5 }),
+                ram: RamUsage { cpu: 3, gpu: 0 },
+            },
+            NodeStatus {
+                program_id: missing,
+                status: Some(NodeExecStatus::MissingInputs { ports: vec![1, 3] }),
+                ram: RamUsage::default(),
+            },
+            NodeStatus {
+                program_id: failed,
+                status: Some(NodeExecStatus::Errored {
+                    error: RunError::Invoke(internals::failure("failed")),
+                }),
+                ram: RamUsage::default(),
+            },
+            NodeStatus {
+                program_id: resident,
+                status: None,
+                ram: RamUsage { cpu: 5, gpu: 7 },
+            },
+        ]
+    };
     let mut outcome = ExecOutcome {
-        nodes: rows.clone(),
+        nodes: rows(),
         executed_node_count: 2,
         logs: vec![LogEntry {
             program_id: executed,
@@ -61,6 +64,7 @@ fn a_summary_publishes_the_runs_rows_verbatim() {
     assert_eq!(summary.logs.len(), 1);
     assert_eq!(summary.logs[0].message, "warning");
 
+    let rows = rows();
     assert_eq!(summary.nodes.len(), rows.len());
     for (published, produced) in summary.nodes.iter().zip(&rows) {
         assert_eq!(published.program_id, produced.program_id);

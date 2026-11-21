@@ -1,6 +1,35 @@
 use super::*;
 
+use std::pin::pin;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::task::{Context, Poll, Waker};
+
+use common::internals::alloc_audit;
+
+use crate::data::data_type::custom_type::CustomType;
+use crate::exec::report::run_reporter::internals::DiscardedReports;
+
+/// A future polled to its end, and how many polls that took: one more than its suspensions.
+#[derive(Debug)]
+struct Finished<T> {
+    output: T,
+    polls: usize,
+}
+
+/// Polls `future` to its end on this thread, outside any runtime: a run with no I/O suspends only
+/// at its yields, each of which wakes at once.
+fn finish<F: Future>(future: F) -> Finished<F::Output> {
+    /// Past a yield per node of any fixture here.
+    const POLLS_MAX: usize = 1_000;
+    let mut future = pin!(future);
+    let mut cx = Context::from_waker(Waker::noop());
+    for polls in 1..=POLLS_MAX {
+        if let Poll::Ready(output) = future.as_mut().poll(&mut cx) {
+            return Finished { output, polls };
+        }
+    }
+    panic!("the future did not finish in {POLLS_MAX} polls");
+}
 
 #[tokio::test]
 async fn execute_emits_started_then_succeeded_progress_per_node() {
@@ -261,34 +290,6 @@ async fn a_node_kept_while_memory_allows_is_served_and_stamped_by_its_run() {
 /// `pinned`, kept always, is served.
 #[tokio::test]
 async fn memory_pressure_drops_what_no_later_node_reads() {
-    use crate::async_lambda;
-    use crate::data::data_type::custom_type::CustomType;
-    use crate::internals::blob::{BLOB_TYPE, Blob};
-
-    let blob = |inputs: &[DynamicValue]| -> Vec<u8> {
-        inputs
-            .first()
-            .and_then(|value| value.as_custom::<Blob>())
-            .map_or_else(Vec::new, |blob| blob.0.clone())
-    };
-    let grows = move |cache| {
-        move |n: NodeSpec| {
-            n.pure()
-                .optional(DataType::Custom(BLOB_TYPE))
-                .output(DataType::Custom(BLOB_TYPE))
-                .cache(cache)
-                .lambda(async_lambda!(
-                    move |Invocation {
-                              inputs, outputs, ..
-                          }| {
-                        let mut bytes = blob(inputs);
-                        bytes.extend([0; 64]);
-                        outputs[0] = DynamicValue::Custom(Arc::new(Blob(bytes)));
-                        Ok(())
-                    }
-                ))
-        }
-    };
     let mut g = TestGraph::new();
     g.library
         .register_custom_type(BLOB_TYPE, CustomType::new("Blob"));
@@ -308,7 +309,8 @@ async fn memory_pressure_drops_what_no_later_node_reads() {
     g.add("Print pinned", NodeSpec::records);
     g.wire("pinned", "Print pinned");
     let mut e = TestEngine::over(g);
-    // 512 B: memory is read after every 512 / 8 = 64 B a run makes, so after each node here.
+    // 512 B: memory is read after every 512 / 8 = 64 B a run makes, so after each node here that
+    // makes a value.
     e.engine.set_ram_headroom(512);
     e.engine.set_memory_probe(|| 0);
 
@@ -322,4 +324,73 @@ async fn memory_pressure_drops_what_no_later_node_reads() {
     let mut ran = run.ran();
     ran.sort_unstable();
     assert_eq!(ran, ["Print", "Print pinned", "mid", "src"]);
+}
+
+/// A root the run serves from its kept value keeps it under memory pressure until its turn,
+/// though nothing reads it: `kept`, resident from the first run and seeded again, is served from
+/// RAM after `fresh`, run first, makes 64 bytes and sends the run to relieve memory with none
+/// left. Dropped by its reader count alone, `kept` would fail as a load that missed.
+#[tokio::test]
+async fn memory_pressure_keeps_a_reused_root_until_it_is_served() {
+    let mut g = TestGraph::new();
+    g.library
+        .register_custom_type(BLOB_TYPE, CustomType::new("Blob"));
+    // Placed last, so the planner's stack walks `fresh` first.
+    g.add("kept", grows(CacheMode::AUTO));
+    g.add("fresh", grows(CacheMode::AUTO));
+    let mut e = TestEngine::over(g);
+    assert_eq!(e.run_nodes(["kept"]).await.ran(), ["kept"]);
+
+    // 512 B: memory is read after every 512 / 8 = 64 B a run makes, so after `fresh`.
+    e.engine.set_ram_headroom(512);
+    e.engine.set_memory_probe(|| 0);
+    let run = e.run_nodes(["fresh", "kept"]).await;
+    assert_eq!(run.ran(), ["fresh"]);
+    assert_eq!(run.cached(), ["kept"]);
+    assert!(run.errored().is_empty(), "{:?}", run.errored());
+}
+
+/// A run over an unchanged graph allocates nothing but what its debug self-checks build: every
+/// scratch and per-run column is kept on its owner and refilled. `src` → a kept pure `sink`,
+/// run twice to settle every buffer, then once counted: `sink` is served from RAM and `src` is
+/// cut, so no lambda runs to box a future. A debug build checks the schedule after the plan and
+/// after the sweep, each check building one set: 2. The run yields before `sink` alone, the one
+/// node it serves, so it finishes on its second poll.
+#[test]
+fn a_warm_run_allocates_nothing_and_yields_only_before_what_it_serves() {
+    let mut g = TestGraph::new();
+    g.add("src", |n| n.cache(CacheMode::ALWAYS).returns(3));
+    g.add("sink", |n| {
+        n.sink()
+            .pure()
+            .cache(CacheMode::ALWAYS)
+            .input(DataType::Int)
+    });
+    g.wire("src", "sink");
+    let mut e = TestEngine::over(g);
+    let sink = e.id("sink");
+    let seeds = RunSeeds::sinks();
+    let cancel = CancelToken::never();
+    let mut outcome = ExecOutcome::default();
+    let mut polls = 0;
+    let mut run = || {
+        let finished = finish(e.engine.execute(
+            ExecuteRequest {
+                seeds: &seeds,
+                reporter: &mut DiscardedReports,
+                cancel: cancel.clone(),
+            },
+            &mut outcome,
+        ));
+        finished.output.expect("the run completes");
+        polls = finished.polls;
+    };
+    run();
+    run();
+
+    let allocations = alloc_audit::allocations(run);
+    let checks = if is_debug() { 2 } else { 0 };
+    assert_eq!(allocations, checks);
+    assert!(outcome.cached(sink));
+    assert_eq!(polls, 2);
 }

@@ -29,9 +29,7 @@ fn completed_status(executed: &[(ProgramId, f64)], errored: &[ProgramId]) -> Wor
     nodes.extend(errored.iter().map(|&node_id| NodeStatus {
         program_id: node_id,
         status: Some(NodeExecStatus::Errored {
-            error: RunError::Invoke(Arc::new(InvokeError::external(io::Error::other(
-                "test error",
-            )))),
+            error: RunError::Invoke(InvokeError::external(io::Error::other("test error"))),
         }),
         ram: RamUsage::default(),
     }));
@@ -393,7 +391,7 @@ fn a_skipped_node_is_not_a_failure_and_the_outcome_names_the_cause() {
         ram: RamUsage::default(),
     };
     let invoke = || NodeExecStatus::Errored {
-        error: RunError::Invoke(Arc::new(InvokeError::external(io::Error::other("boom")))),
+        error: RunError::Invoke(InvokeError::external(io::Error::other("boom"))),
     };
     let skipped = || NodeExecStatus::Errored {
         error: RunError::SkippedUpstream,

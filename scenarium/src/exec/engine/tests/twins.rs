@@ -6,8 +6,10 @@ use super::*;
 
 /// `src` → `double` and its twin `double_2`, a second node of the same func on the same input,
 /// each into a sink that adds what it reads to a total. The run invokes the func once: the twin
-/// takes its 6, so the sinks read 6 each (total 12), and one of them reports executed, the
-/// other cached. An impure node has no digest, so its twin still runs.
+/// takes its 6, so the sinks read 6 each (total 12). `double_2` leads, as the planner's stack
+/// walks the roots from the last placed, `sink_d`, down, and so reaches `sink_b` before
+/// `sink_a`: it reports executed and `double` cached. An impure node has no digest, so its twin
+/// still runs.
 #[tokio::test]
 async fn a_twin_takes_its_leaders_values_and_runs_nothing() {
     let calls = Calls::default();
@@ -50,24 +52,18 @@ async fn a_twin_takes_its_leaders_values_and_runs_nothing() {
     assert_eq!(calls.count(), 1, "the twin runs nothing");
     assert_eq!(noisy.count(), 2, "an impure node has no digest to share");
     assert_eq!(total.load(Ordering::Relaxed), 6 + 6 + 1 + 1);
-    // The first of the two in the run's order leads, the other takes its values.
-    let doubles = ["double", "double_2"];
-    let ran: Vec<&str> = run
-        .ran()
-        .into_iter()
-        .filter(|name| doubles.contains(name))
-        .collect();
-    let cached: Vec<&str> = run
-        .cached()
-        .into_iter()
-        .filter(|name| doubles.contains(name))
-        .collect();
-    assert_eq!((ran.len(), cached.len()), (1, 1), "{ran:?} {cached:?}");
-    assert_ne!(ran, cached);
+    assert_eq!(
+        run.ran(),
+        [
+            "src", "noisy_2", "sink_d", "noisy", "sink_c", "double_2", "sink_b", "sink_a"
+        ]
+    );
+    assert_eq!(run.cached(), ["double"]);
 }
 
 /// A leader that fails leaves its twin skipped as errored upstream, so neither sink reads a
-/// value; the func ran once.
+/// value; the func ran once. `double_2` leads, as above: it fails with the lambda's error, and
+/// `double` is skipped.
 #[tokio::test]
 async fn a_failed_leader_skips_its_twin() {
     let mut g = TestGraph::new();
@@ -86,22 +82,14 @@ async fn a_failed_leader_skips_its_twin() {
     g.fails("double", "boom");
     let mut e = TestEngine::over(g);
     let run = e.run_sinks().await;
-    let errors: Vec<_> = ["double", "double_2"]
-        .map(|name| run.error(name).cloned())
-        .into_iter()
-        .collect();
     assert!(
-        errors
-            .iter()
-            .any(|error| matches!(error, Some(RunError::Invoke(_))))
-            && errors
-                .iter()
-                .any(|error| matches!(error, Some(RunError::SkippedUpstream))),
-        "{errors:?}"
-    );
-    assert!(
-        run.ran().is_empty() || run.ran() == ["src"],
+        matches!(run.error("double_2"), Some(RunError::Invoke(error)) if error.to_string() == "boom"),
         "{:?}",
-        run.ran()
+        run.error("double_2")
     );
+    assert!(matches!(
+        run.error("double"),
+        Some(RunError::SkippedUpstream)
+    ));
+    assert_eq!(run.ran(), ["src"]);
 }

@@ -48,7 +48,7 @@ fn planning_resets_the_output_half_to_the_programs_pool() {
 
     planner
         .plan(prog.program(), &RunSeeds::sinks(), &mut schedule)
-        .expect("no cycle");
+        .expect("every seed names an installed node");
 
     assert_eq!(
         schedule.outputs.demand.len(),
@@ -334,7 +334,7 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     let mut p = RunSchedule::default();
     planner
         .plan(prog.program(), &RunSeeds::nodes(vec![b.program_id]), &mut p)
-        .expect("no cycle");
+        .expect("every seed names an installed node");
 
     assert_eq!(
         p.process_order,
@@ -356,7 +356,7 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     let seeds = RunSeeds::nodes(vec![b.program_id, b.program_id]);
     planner
         .plan(prog.program(), &seeds, &mut p)
-        .expect("no cycle");
+        .expect("every seed names an installed node");
     assert_eq!(
         p.roots().collect::<Vec<_>>(),
         [b.node_idx],
@@ -374,7 +374,7 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     let seeds = RunSeeds::nodes(vec![b.program_id, a.program_id]);
     planner
         .plan(prog.program(), &seeds, &mut p)
-        .expect("no cycle");
+        .expect("every seed names an installed node");
     assert_eq!(p.roots().collect::<Vec<_>>(), [a.node_idx, b.node_idx]);
     assert_eq!(p.seeded_roots(), vec![a.node_idx, b.node_idx]);
 
@@ -386,7 +386,7 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     };
     planner
         .plan(prog.program(), &seeds, &mut p)
-        .expect("no cycle");
+        .expect("every seed names an installed node");
     assert_eq!(p.process_order, [a, b, c].map(|node| node.node_idx));
     assert_eq!(p.seeded_roots(), vec![b.node_idx]);
 
@@ -399,7 +399,7 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     };
     planner
         .plan(prog.program(), &seeds, &mut p)
-        .expect("no cycle");
+        .expect("every seed names an installed node");
     assert_eq!(
         p.roots().collect::<Vec<_>>(),
         [c.node_idx],
@@ -419,8 +419,10 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     assert!(matches!(err, ExecError::NodeSeedNotFound { program_id } if program_id == bogus));
 }
 
+/// A fired event's subscribers are the run's roots, and an event-source seed's its emitter; a
+/// node seeded both ways is one root carrying both.
 #[test]
-fn event_seed_schedules_subscribers_and_rejects_missing_ports() {
+fn an_event_seed_roots_its_subscribers_and_an_event_source_roots_its_emitter() {
     let mut prog = ProgramBuilder::default();
     let subscriber = prog.node().outputs(0).add();
     let emitter = prog.node().outputs(0).event([subscriber]).add();

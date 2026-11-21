@@ -646,7 +646,7 @@ fn relief_drops_the_least_recently_used_kept_values_largest_first() {
             .map(|idx| cache.slots[NodeIdx(idx)].output_values().is_some())
             .collect::<Vec<_>>()
     };
-    let any = |_| true;
+    let any = |_, _: &RuntimeSlot| true;
 
     let mut cache = filled();
     assert_eq!(cache.relieve(&program, 0, any), 0);
@@ -655,6 +655,9 @@ fn relief_drops_the_least_recently_used_kept_values_largest_first() {
     assert_eq!(resident(&cache), [false, false, true, true]);
 
     let mut cache = filled();
-    assert_eq!(cache.relieve(&program, 350, |idx| idx != NodeIdx(0)), 350);
+    assert_eq!(
+        cache.relieve(&program, 350, |idx, _| idx != NodeIdx(0)),
+        350
+    );
     assert_eq!(resident(&cache), [true, false, false, true]);
 }

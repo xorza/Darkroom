@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use thiserror::Error;
 
 use crate::graph::func::error::InvokeError;
@@ -11,7 +9,7 @@ use crate::graph::program_id::ProgramId;
 /// [`WorkerError::Exec`](crate::worker::error::WorkerError::Exec). A *single node's* run
 /// failure is a [`RunError`], carried by that node's
 /// [`NodeStatus`](crate::exec::report::node_status::NodeStatus) row, never one of these.
-#[derive(Debug, Error, Clone)]
+#[derive(Debug, Error)]
 pub enum ExecError {
     /// An execution-node seed is absent from the installed compiled program. A stale
     /// identity fails the run rather than being silently skipped.
@@ -27,12 +25,11 @@ pub enum ExecError {
 /// a node's outcome.
 ///
 /// It names no node or func: it is always read beside the row's own `ProgramId`.
-#[derive(Debug, Error, Clone)]
+#[derive(Debug, Error)]
 pub enum RunError {
-    /// The lambda failed, with the error it returned. Shared, so the row and
-    /// every copy of the run summary carry the one error.
+    /// The lambda failed, with the error it returned.
     #[error(transparent)]
-    Invoke(Arc<InvokeError>),
+    Invoke(InvokeError),
     #[error("skipped: an upstream dependency errored")]
     SkippedUpstream,
     /// A disk blob the resolver verified by header no longer loaded when the run loop

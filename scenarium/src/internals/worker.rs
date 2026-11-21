@@ -187,7 +187,7 @@ impl TestWorker {
         loop {
             match self.report().await {
                 WorkerReport::Completed(summary) => {
-                    return Ok(RunOutcome::published(&self.graph, &summary));
+                    return Ok(RunOutcome::published(&self.graph, summary));
                 }
                 WorkerReport::Error(WorkerError::Exec { error }) => return Err(error),
                 WorkerReport::Installed { .. }

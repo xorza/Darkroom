@@ -3,6 +3,8 @@
 //! Every node declares its [`CacheMode`] explicitly: which values survive which read *is* the
 //! subject, so a default would assert on something the fixture never said.
 
+use std::sync::Arc;
+
 use super::*;
 use crate::async_lambda;
 use crate::data::const_value::ConstValue;
@@ -244,6 +246,8 @@ async fn a_path_in_another_systems_form_fails_its_node_before_the_lambda_runs() 
     assert_eq!(run.ran_count(), 7);
 }
 
+/// A cancel retires every read the unreached tail owns: the pending consumer's of `source`, and
+/// the twin's of its leader, `source`, for the one output it demands, 2 reads in all.
 #[tokio::test]
 async fn cancellation_retires_reads_owned_by_the_unreached_tail() {
     let mut prog = ProgramBuilder::default();
@@ -259,20 +263,57 @@ async fn cancellation_retires_reads_owned_by_the_unreached_tail() {
         .outputs(0)
         .lambda(pending)
         .add();
+    let twin = prog.node().outputs(1).add();
 
-    let mut run = prog.runs().readers([1]).cancel(CancelToken::new());
+    let mut run = prog
+        .runs()
+        .readers([2, 0])
+        .demand(twin, 0)
+        .twin(twin, source)
+        .cancel(CancelToken::new());
     run.go().await;
 
     assert!(run.cancelled());
     assert_eq!(
         run.remaining_reads(source, 0),
         0,
-        "the pending consumer's read was retired"
+        "the pending consumer's read and the twin's were retired"
     );
     assert!(
         run.outputs(source).is_none(),
         "tail retirement reclaims the source before the engine's final sweep"
     );
+}
+
+/// A node's inputs live no longer than its invoke: once the run ends, the value `source` keeps is
+/// held by its slot alone, though `reader`, the last node to run, read a clone of it.
+#[tokio::test]
+async fn an_invoke_lets_its_inputs_go_when_it_returns() {
+    use crate::internals::blob::Blob;
+
+    let mut prog = ProgramBuilder::default();
+    let source = prog
+        .node()
+        .cache(CacheMode::ALWAYS)
+        .outputs(1)
+        .lambda(async_lambda!(|Invocation { outputs, .. }| {
+            outputs[0] = DynamicValue::Custom(Arc::new(Blob(vec![1, 2, 3])));
+            Ok(())
+        }))
+        .add();
+    prog.node()
+        .input(source.out(0))
+        .outputs(0)
+        .lambda(FuncLambda::stub())
+        .add();
+
+    let mut run = prog.runs();
+    run.go().await;
+
+    let Some([DynamicValue::Custom(value)]) = run.outputs(source) else {
+        panic!("the kept value stays resident: {:?}", run.outputs(source));
+    };
+    assert_eq!(Arc::strong_count(value), 1);
 }
 
 #[tokio::test]

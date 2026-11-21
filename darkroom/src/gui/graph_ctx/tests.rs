@@ -462,7 +462,6 @@ fn an_instance_with_an_output_is_cacheable() {
 #[test]
 fn run_results_read_through_the_instance_a_pane_shows() {
     use std::io;
-    use std::sync::Arc;
 
     use palantir::Display;
     use scenarium::{
@@ -491,9 +490,7 @@ fn run_results_read_through_the_instance_a_pane_shows() {
             row(
                 i2,
                 NodeExecStatus::Errored {
-                    error: RunError::Invoke(Arc::new(InvokeError::external(io::Error::other(
-                        "boom",
-                    )))),
+                    error: RunError::Invoke(InvokeError::external(io::Error::other("boom"))),
                 },
             ),
         ],

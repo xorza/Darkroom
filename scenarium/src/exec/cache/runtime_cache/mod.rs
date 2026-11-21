@@ -233,8 +233,8 @@ impl RuntimeCache {
     /// default cache drops what it holds once free RAM falls under a headroom
     /// ([startup flags](https://docs.comfy.org/development/comfyui-server/startup-flags)) and Nuke's
     /// buffer cache the oldest first. A value kept always is never dropped, and one kept never is
-    /// already gone, as is one `droppable` refuses, a value a later node of the running run still
-    /// reads. Returns the bytes the dropped values held.
+    /// already gone, as is one `droppable` refuses, given the node and its slot: a value a later
+    /// step of the running run still serves or reads. Returns the bytes the dropped values held.
     ///
     /// A value another slot shares counts in full here though dropping it frees nothing while the
     /// other holds it: the drop can fall short, and the next reading of memory drops more.
@@ -242,14 +242,14 @@ impl RuntimeCache {
         &mut self,
         program: &CompiledGraph,
         deficit: u64,
-        droppable: impl Fn(NodeIdx) -> bool,
+        droppable: impl Fn(NodeIdx, &RuntimeSlot) -> bool,
     ) -> u64 {
         self.droppable.clear();
         for (node_idx, e_node) in program.e_nodes.iter_indexed() {
-            if e_node.cache.ram != Keep::Auto || !droppable(node_idx) {
+            let slot = &self.slots[node_idx];
+            if e_node.cache.ram != Keep::Auto || !droppable(node_idx, slot) {
                 continue;
             }
-            let slot = &self.slots[node_idx];
             let Some(values) = slot.output_values() else {
                 continue;
             };

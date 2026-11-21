@@ -10,7 +10,7 @@ use crate::worker::activity::WorkerActivity;
 
 /// One completed run: the worker's activity once it ended, the run's verdicts, one row per node
 /// with something to report, the logs its lambdas wrote, and what the cache holds afterwards.
-#[derive(Clone, Default, Debug)]
+#[derive(Default, Debug)]
 pub struct RunSummary {
     pub activity: WorkerActivity,
     /// How many nodes invoked their lambda, successes and failures alike.

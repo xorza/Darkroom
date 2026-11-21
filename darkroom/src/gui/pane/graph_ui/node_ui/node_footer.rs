@@ -189,7 +189,6 @@ mod tests {
     #[test]
     fn a_failed_node_says_why_on_one_row() {
         use std::io;
-        use std::sync::Arc;
 
         use scenarium::{
             GraphId, InvokeError, NodeExecStatus, NodeStatus, ProgramId, RamUsage, RunError,
@@ -204,9 +203,9 @@ mod tests {
             nodes: vec![NodeStatus {
                 program_id: ProgramId::from(node_id),
                 status: Some(NodeExecStatus::Errored {
-                    error: RunError::Invoke(Arc::new(InvokeError::external(io::Error::other(
+                    error: RunError::Invoke(InvokeError::external(io::Error::other(
                         "no light frames\nprovided",
-                    )))),
+                    ))),
                 }),
                 ram: RamUsage::default(),
             }],

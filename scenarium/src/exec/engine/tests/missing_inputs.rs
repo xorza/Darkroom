@@ -1,24 +1,60 @@
 use super::*;
 
-/// A required input left unbound blocks its node, and the verdict travels down every consumer —
-/// so the whole tail of the chain is out of the run while its sources still stand. The report
-/// names the exact port that failed rather than the node as a whole, and the verdict is stable:
-/// what *runs* can differ as pure nodes start reusing their cache, but the missing set cannot
-/// flap.
+/// Which nodes a plan blocks for want of a required input, and which it clears, as one edit of
+/// the sample (`get_a`, `get_b` → `sum`; `sum`, `get_b` → `mult` → `Print`) changes them:
+///
+/// - `sum[0]` unbound blocks `sum`, and the verdict travels down `mult` and `Print`; `get_a`,
+///   read by nothing left, is never reached, and `get_b` still stands.
+/// - The same with `mult[0]` optional: a binding to a blocked producer blocks even an optional
+///   input, as optionality excuses only an unbound one.
+/// - `mult[0]` unbound and optional: a deliberate no-value blocks nothing, and `sum` and `get_a`,
+///   read by nothing left, are never reached.
 #[tokio::test]
-async fn required_missing_propagates_downstream() {
+async fn a_missing_required_input_blocks_its_node_and_every_consumer() {
+    struct Case {
+        edit: fn(&mut TestGraph),
+        missing: &'static [&'static str],
+        runnable: &'static [&'static str],
+    }
+    let cases = [
+        Case {
+            edit: |g| g.unbind("sum", 0),
+            missing: &["Print", "mult", "sum"],
+            runnable: &["get_b"],
+        },
+        Case {
+            edit: |g| {
+                g.unbind("sum", 0);
+                g.edit_func("mult", |func| func.ports.inputs[0].required = false);
+            },
+            missing: &["Print", "mult", "sum"],
+            runnable: &["get_b"],
+        },
+        Case {
+            edit: |g| {
+                g.unbind("mult", 0);
+                g.edit_func("mult", |func| func.ports.inputs[0].required = false);
+            },
+            missing: &[],
+            runnable: &["Print", "get_b", "mult"],
+        },
+    ];
+    for (idx, case) in cases.iter().enumerate() {
+        let mut e = TestEngine::over(TestGraph::sample());
+        e.edit(case.edit);
+        let plan = e.plan_sinks().await;
+        assert_eq!(plan.missing_inputs(), case.missing, "case {idx}");
+        assert_eq!(plan.runnable(), case.runnable, "case {idx}");
+    }
+}
+
+/// A run names the exact port that failed rather than the node as a whole, and the verdict is
+/// stable: what *runs* can differ as pure nodes start reusing their cache, but the missing set
+/// cannot flap.
+#[tokio::test]
+async fn a_run_names_the_missing_port_and_the_verdict_holds_across_runs() {
     let mut e = TestEngine::over(TestGraph::sample());
     e.edit(|g| g.unbind("sum", 0));
-
-    let plan = e.plan_sinks().await;
-
-    assert_eq!(plan.missing_inputs(), ["Print", "mult", "sum"]);
-    assert_eq!(
-        plan.runnable(),
-        ["get_b"],
-        "the one source still feeding something stands; unbinding sum[0] left \
-         `get_a` reading into nothing, so the backward walk never reaches it"
-    );
 
     let first = e.run_sinks().await;
     let second = e.run_sinks().await;
@@ -30,43 +66,6 @@ async fn required_missing_propagates_downstream() {
     );
     assert_eq!(first.missing_inputs(), ["Print", "mult", "sum"]);
     assert_eq!(second.missing_inputs(), first.missing_inputs());
-}
-
-/// A *binding* to a missing-required producer propagates even through an
-/// **optional** input: the wired value can't be delivered, so the consumer
-/// (and its consumers) are missing too. Optionality only excuses an
-/// *unbound* input (see `optional_unbound_does_not_propagate`), not a
-/// binding to a broken upstream.
-#[tokio::test]
-async fn optional_bind_to_missing_propagates() {
-    let mut e = TestEngine::over(TestGraph::sample());
-    e.edit(|g| {
-        // sum missing-required; mult[0] stays bound to sum but goes optional.
-        g.unbind("sum", 0);
-        g.edit_func("mult", |func| func.ports.inputs[0].required = false);
-    });
-
-    let plan = e.plan_sinks().await;
-
-    assert_eq!(plan.missing_inputs(), ["Print", "mult", "sum"]);
-    assert_eq!(plan.runnable(), ["get_b"]);
-}
-
-/// The contrast to `optional_bind_to_missing_propagates`: an optional input
-/// left **unbound** is a deliberate no-value, so it does not flag the node
-/// missing — it runs with its default.
-#[tokio::test]
-async fn optional_unbound_does_not_propagate() {
-    let mut e = TestEngine::over(TestGraph::sample());
-    e.edit(|g| {
-        g.unbind("mult", 0);
-        g.edit_func("mult", |func| func.ports.inputs[0].required = false);
-    });
-
-    let plan = e.plan_sinks().await;
-
-    assert!(plan.missing_inputs().is_empty());
-    assert!(plan.runnable().contains(&"mult"));
 }
 
 /// Executing counterpart: an optional bind to a gated upstream gates the consumer chain, so the

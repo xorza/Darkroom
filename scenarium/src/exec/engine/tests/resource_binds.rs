@@ -278,6 +278,69 @@ async fn wired_path_rekeys_loader_on_file_change() {
     );
 }
 
+/// Memory pressure keeps the value of a node a re-stamp may still serve: `make_path`, kept
+/// never, recomputes, so `load_blob` reaches its turn with no digest; `grower`, walked first,
+/// makes 64 bytes and sends the run to relieve memory with none left; and `load_blob`, kept while
+/// memory allows, is served from RAM once its re-stamp completes its key. The file is read once,
+/// by the first run.
+#[tokio::test]
+async fn memory_pressure_keeps_a_value_a_restamp_may_serve() {
+    use crate::data::data_type::custom_type::CustomType;
+    use crate::internals::blob::Blob;
+
+    let data = TempFile::new("ram");
+    fs::write(data.path(), "v1").unwrap();
+    let loads = Calls::default();
+    let counted = loads.clone();
+    let mut g = TestGraph::new();
+    g.library
+        .register_custom_type(BLOB_TYPE, CustomType::new("Blob"));
+    g.add("make_path", |n| {
+        n.pure()
+            .input(DataType::String)
+            .output(file_path())
+            .compute(|inputs| ConstValue::FsPath(inputs[0].as_string().unwrap().to_string()))
+    });
+    g.add("load_blob", |n| {
+        n.pure()
+            .cache(CacheMode::AUTO)
+            .input(file_path())
+            .output(DataType::Custom(BLOB_TYPE))
+            .lambda(async_lambda!(
+                move |Invocation { inputs, outputs, .. }| { loads = counted.clone() } => {
+                    loads.bump();
+                    let bytes = fs::read(inputs[0].as_fs_path().unwrap())
+                        .map_err(InvokeError::external)?;
+                    outputs[0] = DynamicValue::Custom(Arc::new(Blob(bytes)));
+                    Ok(())
+                }
+            ))
+    });
+    g.add("capture", |n| n.sink().input(DataType::Any));
+    g.add("grower", grows(CacheMode::AUTO));
+    g.constant("make_path", 0, data.to_str());
+    g.wire("make_path", "load_blob");
+    g.wire("load_blob", "capture");
+    let mut e = TestEngine::over(g);
+    e.run_sinks().await;
+    assert_eq!(loads.count(), 1);
+
+    // 512 B: memory is read after every 512 / 8 = 64 B a run makes, so after `grower`.
+    e.engine.set_ram_headroom(512);
+    e.engine.set_memory_probe(|| 0);
+    let grower = e.id("grower");
+    let run = e
+        .run(RunSeeds {
+            sinks: true,
+            program_ids: vec![grower],
+            ..RunSeeds::default()
+        })
+        .await;
+    assert_eq!(run.ran(), ["grower", "make_path", "capture"]);
+    assert_eq!(run.cached(), ["load_blob"]);
+    assert_eq!(loads.count(), 1);
+}
+
 /// Disk persistence across a reopen with a wired path: the loader's blob is keyed under the
 /// delivered path's live identity, so a fresh engine reuses it while the file is unchanged —
 /// hydrating the on-disk path producer just to stamp — and recomputes once the file changes,

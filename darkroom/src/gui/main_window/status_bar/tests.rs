@@ -188,7 +188,6 @@ fn the_run_line_leads_with_the_worst_of_the_run() {
 fn the_run_lines_link_selects_and_frames_the_cause() {
     use scenarium::{InvokeError, NodeExecStatus, NodeStatus, RunError, RunSummary};
     use std::io;
-    use std::sync::Arc;
 
     use crate::core::document::item_id::ItemId;
 
@@ -213,9 +212,7 @@ fn the_run_lines_link_selects_and_frames_the_cause() {
             NodeStatus {
                 program_id: ProgramId::from(cause),
                 status: Some(NodeExecStatus::Errored {
-                    error: RunError::Invoke(Arc::new(InvokeError::external(io::Error::other(
-                        "boom",
-                    )))),
+                    error: RunError::Invoke(InvokeError::external(io::Error::other("boom"))),
                 }),
                 ram: RamUsage::default(),
             },
@@ -274,7 +271,6 @@ fn the_run_lines_link_enters_the_compound_of_its_cause() {
         RunError, RunSummary,
     };
     use std::io;
-    use std::sync::Arc;
 
     use crate::core::document::internals::insert_compound;
     use crate::core::document::item_id::ItemId;
@@ -291,7 +287,7 @@ fn the_run_lines_link_enters_the_compound_of_its_cause() {
         nodes: vec![NodeStatus {
             program_id: path.node(inside),
             status: Some(NodeExecStatus::Errored {
-                error: RunError::Invoke(Arc::new(InvokeError::external(io::Error::other("boom")))),
+                error: RunError::Invoke(InvokeError::external(io::Error::other("boom"))),
             }),
             ram: RamUsage::default(),
         }],

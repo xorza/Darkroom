@@ -76,6 +76,14 @@ impl<'a> Runs<'a> {
         self
     }
 
+    /// Make `node` a twin taking `leader`'s values, as the sweep does for a later node under an
+    /// earlier one's digest. Its reads of the leader are [`readers`](Self::readers)' to count.
+    pub(crate) fn twin(mut self, node: Placed, leader: Placed) -> Self {
+        self.schedule.states[node.node_idx] = NodeState::Twin;
+        self.schedule.twins[node.node_idx] = Some(leader.node_idx);
+        self
+    }
+
     /// Demand one output no consumer reads, as a node seed does.
     pub(crate) fn demand(mut self, node: Placed, port: usize) -> Self {
         let output_idx = self.program().output_idx(node.addr(port));
