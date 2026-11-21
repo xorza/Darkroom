@@ -2,7 +2,7 @@
 
 use crate::data::ram_usage::RamUsage;
 use crate::exec::error::RunError;
-use crate::graph::program_id::ProgramId;
+use crate::identity::program_id::ProgramId;
 
 /// What one node did this run, at the host boundary — the published projection of the
 /// executor's private per-node verdict.

@@ -1,6 +1,6 @@
 //! [`LogEntry`]: one node-attributed log record, and its [`LogLevel`].
 
-use crate::graph::program_id::ProgramId;
+use crate::identity::program_id::ProgramId;
 
 /// How loud a log record is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

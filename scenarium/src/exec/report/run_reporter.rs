@@ -3,7 +3,7 @@
 use std::fmt::Debug;
 use std::time::Instant;
 
-use crate::graph::program_id::ProgramId;
+use crate::identity::program_id::ProgramId;
 
 /// Where one node's lambda is, live: started at `at`, or finished after `elapsed_secs` with or
 /// without its outputs. A cancelled lambda reports no finish — it did not complete.
@@ -26,7 +26,7 @@ pub(crate) trait RunReporter: Send + Debug {
 #[cfg(test)]
 pub(crate) mod internals {
     use crate::exec::report::run_reporter::{RunPhase, RunReporter};
-    use crate::graph::program_id::ProgramId;
+    use crate::identity::program_id::ProgramId;
 
     /// Discards a run's live feedback, for the tests that only assert on the final outcome.
     /// Production always has a host listening, so this stays test-only.

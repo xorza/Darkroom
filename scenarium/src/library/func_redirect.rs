@@ -14,8 +14,8 @@
 //!   registered func, one into a loop, and a chain past [`MAX_REDIRECTS`] or ending at no
 //!   registered func, and flattens each chain, so a load takes one step for any redirect.
 
-use crate::graph::identity::FuncId;
-use crate::graph::port_map::NodeRemap;
+use crate::decl::port_map::NodeRemap;
+use crate::identity::FuncId;
 
 /// The most redirects a load follows from one func id to the func it lands on.
 pub const MAX_REDIRECTS: usize = 8;

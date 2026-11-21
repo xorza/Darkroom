@@ -15,7 +15,7 @@ use hashbrown::HashSet;
 use crate::exec::cache::digest::Digest;
 use crate::exec::cache::disk_store::blob_target::BlobTarget;
 use crate::exec::cache::disk_store::error::{PruneError, RemovalError};
-use crate::graph::program_id::ProgramId;
+use crate::identity::program_id::ProgramId;
 
 /// Where the node-output cache persists: a directory of blobs, each named by the digest of its
 /// program node's path, or nowhere. The codecs belong to each program, so the store is the root
@@ -204,7 +204,7 @@ pub(crate) mod internals {
     use common::fs;
 
     use crate::exec::cache::disk_store::{DiskStore, format};
-    use crate::graph::program_id::ProgramId;
+    use crate::identity::program_id::ProgramId;
 
     impl DiskStore {
         /// Where this node's blob lives, so a fixture can corrupt, read back or delete one.

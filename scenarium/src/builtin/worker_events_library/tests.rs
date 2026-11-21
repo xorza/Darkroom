@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use crate::builtin::worker_events_library::{FRAME_EVENT_FUNC_ID, worker_events_library};
-use crate::graph::func::Func;
-use crate::graph::func::error::{InvokeError, InvokeResult};
+use crate::decl::func::Func;
+use crate::decl::func::error::{InvokeError, InvokeResult};
 use crate::internals::func_invoker::FuncInvoker;
 use tokio::task;
 use tokio::task::JoinHandle;

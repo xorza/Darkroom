@@ -8,7 +8,8 @@ pub(crate) fn binding(graph: &Graph, scope: Scope<'_>, port: InputPort) -> Optio
     let node = graph
         .find(port.node_id)
         .expect("an input that loses its wire is on a graph node");
-    node.decl(scope)
+    scope
+        .decl(node)
         .ports()
         .input(port.port)
         .expect("an input that loses its wire is declared")

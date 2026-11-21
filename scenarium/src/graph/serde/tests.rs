@@ -8,10 +8,10 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::graph::Graph;
 use crate::graph::binding::Binding;
-use crate::graph::identity::PortId;
-use crate::graph::identity::{FuncId, InputPort, NodeId};
 use crate::graph::node::Node;
 use crate::graph::serde::{deserialize_bindings, deserialize_nodes};
+use crate::identity::PortId;
+use crate::identity::{FuncId, InputPort, NodeId};
 use crate::internals;
 
 #[derive(Debug, Serialize)]

@@ -1,18 +1,18 @@
 use crate::data::const_value::ConstValue;
 use crate::data::data_type::DataType;
+use crate::decl::port_map::{NodeRemap, PortMap};
+use crate::decl::ports::{InputDecl, OutputDecl};
+use crate::decl::saved_decl::SavedPort;
 use crate::graph::Graph;
 use crate::graph::binding::Binding;
 use crate::graph::error::{DetachReason, Unresolved};
 use crate::graph::ghost_node::GhostNode;
 use crate::graph::ghost_wiring::{GhostBinding, GhostSource, InputState};
 use crate::graph::graph_set::GraphSet;
-use crate::graph::identity::{FuncId, GraphId, InputPort, PortId};
 use crate::graph::manifest::Manifest;
 use crate::graph::node_decl::NodeDecl;
-use crate::graph::port_map::{NodeRemap, PortMap, PortMapError};
-use crate::graph::ports::{InputDecl, OutputDecl};
 use crate::graph::reconciled::Repair;
-use crate::graph::saved_decl::SavedPort;
+use crate::identity::{FuncId, GraphId, InputPort, PortId};
 use crate::internals;
 use crate::internals::test_graph::sets::{SINK, SRC, library, n, node};
 use crate::library::Library;
@@ -56,39 +56,6 @@ fn with_filters(mut library: Library) -> Library {
             .build(),
     );
     library
-}
-
-/// A map is an injection: an old id twice or a new id twice is refused, a lookup answers the
-/// pairs alone, and one map followed by another drops what the second does not name.
-#[test]
-fn a_port_map_is_an_injection_and_composes() {
-    assert_eq!(
-        PortMap::checked([(p(1), p(2)), (p(1), p(3))]),
-        Err(PortMapError::OldTwice(p(1)))
-    );
-    assert_eq!(
-        PortMap::checked([(p(1), p(3)), (p(2), p(3))]),
-        Err(PortMapError::NewTwice(p(3)))
-    );
-    let first = PortMap::new([(p(2), p(20)), (p(1), p(10))]);
-    assert_eq!(first.pairs(), [(p(1), p(10)), (p(2), p(20))]);
-    assert_eq!(first.get(p(2)), Some(p(20)));
-    assert_eq!(first.get(p(3)), None);
-    let second = PortMap::new([(p(10), p(100))]);
-    assert_eq!(first.then(&second).pairs(), [(p(1), p(100))]);
-}
-
-/// A proposal pairs a port with the new one of its id and type, else an unpaired one of its name
-/// and type: `blur` to `sharpen` takes `x` 1 to `x` 5 by name, as 1 is a `String` there, leaves
-/// `y`, which `sharpen` lacks, and takes `out` 1 to 1 by id.
-#[test]
-fn a_proposal_pairs_by_id_and_type_then_name_and_type() {
-    let library = with_filters(Library::default());
-    let saved = |id| NodeDecl::Func(library.by_id(id).unwrap()).saved();
-    let remap = NodeRemap::propose(&saved(BLUR), &saved(SHARPEN));
-    assert_eq!(remap.inputs.pairs(), [(p(1), p(5))]);
-    assert_eq!(remap.outputs.pairs(), [(p(1), p(1))]);
-    assert!(remap.events.pairs().is_empty());
 }
 
 /// `blur` 2 in a graph: `src` 1 feeds `x`, `y` holds 0.5, `sink` 3 reads `out`. As `sharpen`

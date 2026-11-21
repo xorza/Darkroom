@@ -320,8 +320,8 @@ impl RuntimeHost {
         for path in graphs.instances(addr.graph) {
             if instance {
                 program_ids.extend(compiled.program_ids_within(path.child(addr.node_id)));
-            } else if compiled.contains(path.node(addr.node_id)) {
-                program_ids.push(path.node(addr.node_id));
+            } else if compiled.contains(ProgramId::of(path, addr.node_id)) {
+                program_ids.push(ProgramId::of(path, addr.node_id));
             }
         }
         if program_ids.is_empty() {

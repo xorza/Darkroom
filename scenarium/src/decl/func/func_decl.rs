@@ -2,13 +2,14 @@
 //! [`FuncBuilder`](crate::FuncBuilder) fills and a [`Func`](crate::Func) reads.
 
 use crate::data::data_type::DataType;
-use crate::graph::func::FuncBehavior;
-use crate::graph::func::error::FuncValidationError;
-use crate::graph::func::event::EventLambda;
-use crate::graph::func::lambda::FuncLambda;
-use crate::graph::identity::FuncId;
-use crate::graph::node::CacheMode;
-use crate::graph::ports::{EventDecl, Numbered, PortList, Ports, check_ids};
+use crate::decl::cache_mode::CacheMode;
+use crate::decl::func::FuncBehavior;
+use crate::decl::func::error::FuncValidationError;
+use crate::decl::func::event_lambda::EventLambda;
+use crate::decl::func::func_lambda::FuncLambda;
+use crate::decl::ports::error::PortList;
+use crate::decl::ports::{EventDecl, Numbered, Ports, check_ids};
+use crate::identity::FuncId;
 
 /// What a func declares: its identity, how it runs and the ports it shows. A builder writes it
 /// through its setters alone, and a func reads it, so the list is written once.

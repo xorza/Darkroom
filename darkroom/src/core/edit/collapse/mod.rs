@@ -168,17 +168,15 @@ pub(crate) fn collapse(
 
     let scope = document.graphs.scope(library, graph);
     let output_decl = |port: OutputPort| -> &OutputDecl {
-        held.find(port.node_id)
-            .expect("a wire reads a graph node")
-            .decl(scope)
+        scope
+            .decl(held.find(port.node_id).expect("a wire reads a graph node"))
             .ports()
             .output(port.port)
             .expect("a wire reads a declared output")
     };
     let input_name = |port: InputPort| -> String {
-        held.find(port.node_id)
-            .expect("a wire feeds a graph node")
-            .decl(scope)
+        scope
+            .decl(held.find(port.node_id).expect("a wire feeds a graph node"))
             .ports()
             .input(port.port)
             .expect("a wire feeds a declared input")

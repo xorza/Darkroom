@@ -15,7 +15,7 @@ use std::rc::Rc;
 
 use glam::Vec2;
 use palantir::{Modifiers, Ui};
-use scenarium::{Binding, Func, InputPort, NodeId, OutputPort};
+use scenarium::{Binding, Func, InputPort, NodeId, OutputPort, Wiring};
 
 use crate::core::document::item_id::ItemId;
 use crate::core::edit::graph_intent::GraphIntent;
@@ -93,7 +93,7 @@ impl PreviewSpawn {
                 pos,
                 node_id,
                 node: func.into(),
-                bindings: func.ports().default_bindings(node_id),
+                bindings: Wiring::defaults(node_id, func.ports()),
             },
             GraphIntent::SetInput {
                 input: InputPort::new(

@@ -15,7 +15,7 @@ use thiserror::Error;
 
 use crate::exec::idx::NodeIdx;
 use crate::exec::schedule::NodeState;
-use crate::graph::program_id::ProgramId;
+use crate::identity::program_id::ProgramId;
 
 #[derive(Debug, Error)]
 pub(crate) enum RunScheduleValidationError {

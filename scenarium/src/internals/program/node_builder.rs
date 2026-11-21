@@ -2,14 +2,15 @@
 
 use crate::data::const_value::ConstValue;
 use crate::data::data_type::DataType;
+use crate::decl::cache_mode::CacheMode;
+use crate::decl::func::FuncBehavior;
+use crate::decl::func::func_lambda::FuncLambda;
+use crate::decl::func::func_signature::FuncRef;
+use crate::decl::func::func_signature::FuncSignature;
+use crate::decl::ports::{Numbered, OutputDecl, Ports};
 use crate::exec::compile::compiled_graph::{ExecBinding, ExecEvent, ExecInput, ExecNode};
-use crate::graph::func::FuncBehavior;
-use crate::graph::func::lambda::FuncLambda;
-use crate::graph::func::signature::FuncSignature;
-use crate::graph::identity::{FuncId, FuncRef, NodeId, PortId};
-use crate::graph::node::CacheMode;
-use crate::graph::ports::{Numbered, OutputDecl, Ports};
-use crate::graph::program_id::ProgramId;
+use crate::identity::program_id::ProgramId;
+use crate::identity::{FuncId, NodeId, PortId};
 use crate::internals;
 use crate::internals::program::{Placed, ProgramBuilder};
 

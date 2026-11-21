@@ -7,10 +7,10 @@
 //! the schedule to stamp its nodes and name their twins, and only this sweep turns those answers
 //! into the schedule's verdicts.
 
+use crate::decl::func::func_lambda::OutputDemand;
 use crate::exec::cache::runtime_cache::RuntimeCache;
 use crate::exec::compile::compiled_graph::CompiledGraph;
 use crate::exec::schedule::{Delivery, NodeState, RunSchedule};
-use crate::graph::func::lambda::OutputDemand;
 
 /// Stamp the planned `schedule`, then sweep it in reverse for exact liveness and cache
 /// reuse, writing the result into that same buffer: the [`NodeState`] column the planner

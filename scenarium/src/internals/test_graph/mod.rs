@@ -16,23 +16,24 @@ use crate::async_lambda;
 use crate::data::const_value::ConstValue;
 use crate::data::data_type::DataType;
 use crate::data::dynamic_value::DynamicValue;
+use crate::decl::cache_mode::CacheMode;
+use crate::decl::func::Func;
+use crate::decl::func::event_lambda::EventLambda;
+use crate::decl::func::func_builder::FuncBuilder;
+use crate::decl::func::func_decl::FuncDecl;
+use crate::decl::func::func_lambda::internals as lambda;
+use crate::decl::func::func_lambda::{FuncLambda, Invocation};
+use crate::decl::ports::{EventDecl, InputDecl, OutputDecl};
 use crate::graph::Graph;
 use crate::graph::binding::Binding;
 use crate::graph::detached::DetachedNode;
-use crate::graph::func::Func;
-use crate::graph::func::event::EventLambda;
-use crate::graph::func::func_builder::FuncBuilder;
-use crate::graph::func::func_decl::FuncDecl;
-use crate::graph::func::lambda::internals as lambda;
-use crate::graph::func::lambda::{FuncLambda, Invocation};
 use crate::graph::graph_set::GraphSet;
-use crate::graph::identity::GraphId;
-use crate::graph::identity::{EventPort, FuncId, InputPort, NodeId, OutputPort};
+use crate::graph::node::Node;
 use crate::graph::node::special::SpecialNode;
-use crate::graph::node::{CacheMode, Node};
 use crate::graph::node_decl::NodeDecl;
-use crate::graph::ports::{EventDecl, InputDecl, OutputDecl};
 use crate::graph::scope::Scope;
+use crate::identity::GraphId;
+use crate::identity::{EventPort, FuncId, InputPort, NodeId, OutputPort};
 use crate::internals::calls::Calls;
 use crate::library::Library;
 
@@ -234,7 +235,7 @@ impl TestGraph {
 
     /// What `name` declares.
     fn decl(&self, name: &str) -> NodeDecl<'_> {
-        self.node(name).decl(self.scope())
+        self.scope().decl(self.node(name))
     }
 
     /// Put a literal on `consumer`'s input `input`.
@@ -632,7 +633,7 @@ mod internals {
     use crate::exec::compile::Compiler;
     use crate::exec::compile::compiled_graph::CompiledGraph;
     use crate::exec::program_event::ProgramEvent;
-    use crate::graph::program_id::ProgramId;
+    use crate::identity::program_id::ProgramId;
     use crate::internals::test_graph::TestGraph;
     use crate::internals::test_graph::compiled::Compiled;
 

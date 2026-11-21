@@ -5,9 +5,10 @@ use std::mem;
 
 use ::serde::{Deserialize, Serialize};
 
+use crate::decl::ports::Ports;
 use crate::graph::binding::Binding;
-use crate::graph::identity::{EventPort, InputPort, NodeId, OutputPort, PortId};
 use crate::graph::subscription::Subscription;
+use crate::identity::{EventPort, InputPort, NodeId, OutputPort, PortId};
 
 /// The bindings and subscriptions a graph holds, and what a removal takes out with its nodes:
 /// [`GhostWiring`](crate::GhostWiring)'s live counterpart, with its method names. An input holds
@@ -35,6 +36,21 @@ pub struct Wiring {
 }
 
 impl Wiring {
+    /// The const bindings a fresh node `node_id` of `ports` starts with: one per input that
+    /// declares a default, on that input.
+    pub fn defaults(node_id: NodeId, ports: &Ports) -> Self {
+        let mut wiring = Self::default();
+        for input in &ports.inputs {
+            if let Some(default) = &input.default_value {
+                wiring.bind(
+                    InputPort::new(node_id, input.id),
+                    Binding::Const(default.clone()),
+                );
+            }
+        }
+        wiring
+    }
+
     pub fn is_empty(&self) -> bool {
         self.bindings.is_empty() && self.subscriptions.is_empty()
     }

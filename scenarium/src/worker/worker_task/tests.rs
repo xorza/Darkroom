@@ -4,11 +4,11 @@ use std::sync::Arc;
 
 use tokio::sync::mpsc;
 
-use crate::graph::program_id::ProgramId;
+use crate::identity::program_id::ProgramId;
 
 use crate::exec::report::run_reporter::RunPhase;
 use crate::exec::report::run_reporter::RunReporter;
-use crate::graph::identity::NodeId;
+use crate::identity::NodeId;
 use crate::worker::batch_intent::{BatchIntent, GraphOp, LoopCommand};
 use crate::worker::mailbox::{Mailbox, Taken};
 use crate::worker::protocol::{WorkerMessage, WorkerReport};

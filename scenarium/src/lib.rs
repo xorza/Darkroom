@@ -3,8 +3,10 @@
 mod builtin;
 mod containers;
 mod data;
+mod decl;
 mod exec;
 mod graph;
+mod identity;
 #[cfg(feature = "internals")]
 pub mod internals;
 mod library;
@@ -18,12 +20,30 @@ pub use data::codec::CustomValueCodec;
 pub use data::codec::error::CodecError;
 pub use data::const_value::{ConstValue, ValueText};
 pub use data::data_type::custom_type::{CustomType, CustomTypeId};
-pub use data::data_type::enum_type::{EnumId, EnumType};
+pub use data::data_type::enum_type::{EnumId, EnumType, EnumVariants};
 pub use data::data_type::file_kind::{FileKind, FileKindId};
-pub use data::data_type::{DataType, EnumVariants, FileMode};
+pub use data::data_type::type_ref::TypeRef;
+pub use data::data_type::{DataType, FileMode};
 pub use data::dynamic_value::{CustomValue, DynamicValue};
 pub use data::path_form::PathForm;
 pub use data::ram_usage::RamUsage;
+pub use decl::cache_mode::{CacheMode, Keep};
+pub use decl::func::error::{FuncValidationError, InvokeError, InvokeResult};
+pub use decl::func::event_lambda::{EventFires, EventLambda};
+pub use decl::func::func_builder::FuncBuilder;
+pub use decl::func::func_lambda::{
+    AsyncLambda, AsyncLambdaFn, FuncLambda, Invocation, OutputDemand,
+};
+pub use decl::func::{Func, FuncBehavior};
+pub use decl::port_map::{NodeRemap, PortMap, PortMapError};
+pub use decl::ports::error::{BindingRejection, PortList, PortsError};
+pub use decl::ports::{EventDecl, InputDecl, Numbered, OutputDecl, Ports};
+pub use decl::saved_decl::{SavedDecl, SavedEvent, SavedInput, SavedPort, ShownPort};
+pub use decl::value_domain::ValueDomain;
+pub use decl::value_domain::float_span::FloatSpan;
+pub use decl::value_domain::int_span::IntSpan;
+pub use decl::value_domain::span_error::SpanError;
+pub use decl::value_domain::value_variant::ValueVariant;
 pub use exec::cache::disk_store::DiskStore;
 pub use exec::cache::disk_store::error::{
     CodecFormatError, FrameError, PruneError, RemovalError, StoreError,
@@ -42,49 +62,38 @@ pub use graph::binding::Binding;
 pub use graph::compound::Compound;
 pub use graph::detached::{DetachedGhost, DetachedNode, DetachedNodeParts};
 pub use graph::error::{
-    BindRejection, BindingRejection, DetachReason, DetachedNodeError, GhostSubscriptionRejection,
+    BindRejection, DetachReason, DetachedNodeError, GhostSubscriptionRejection,
     GraphSetValidationError, GraphValidationError, PlacementRejection, SubscriptionRejection,
     Unresolved,
 };
-pub use graph::func::error::{FuncValidationError, InvokeError, InvokeResult};
-pub use graph::func::event::{EventFires, EventLambda};
-pub use graph::func::func_builder::FuncBuilder;
-pub use graph::func::lambda::{AsyncLambda, AsyncLambdaFn, FuncLambda, Invocation, OutputDemand};
-pub use graph::func::{Func, FuncBehavior};
 pub use graph::ghost_node::GhostNode;
 pub use graph::ghost_wiring::{
     GhostBinding, GhostSource, GhostSubscription, GhostWiring, InputState, SubscriptionState,
 };
+pub use graph::graph_set::GraphSet;
 pub use graph::graph_set::digest::CompoundDigest;
-pub use graph::graph_set::{GraphSet, InterfacePort, ProgramShape, UnknownType};
-pub use graph::identity::{
-    CompoundId, EventPort, FuncId, GraphId, InputPort, NodeAddr, NodeId, OutputPort, PortId,
-    TriggerPort,
-};
-pub use graph::instance_path::{InstancePath, InstancePathError};
+pub use graph::graph_set::program_shape::ProgramShape;
+pub use graph::graph_set::unknown_type::{InterfacePort, UnknownType};
 pub use graph::interface::EventPorts;
 pub use graph::interface::Interface;
 pub use graph::interface_change::{ChangeSide, InterfaceChange, RefusedFate, WiringChange};
 pub use graph::manifest::Manifest;
 pub use graph::node::special::{SPECIAL_NODES, SpecialNode};
-pub use graph::node::{Boundary, CacheMode, Keep, Node};
+pub use graph::node::{Boundary, Node};
 pub use graph::node_decl::NodeDecl;
 pub use graph::node_decl::NodeTriggers;
 pub use graph::node_ref::NodeRef;
-pub use graph::port_map::{NodeRemap, PortMap, PortMapError};
-pub use graph::ports::{EventDecl, InputDecl, Numbered, OutputDecl, PortList, Ports, PortsError};
-pub use graph::program_id::{ProgramId, ProgramIdError};
 pub use graph::reconciled::{GraphSetReconciled, Repair};
-pub use graph::saved_decl::{SavedDecl, SavedEvent, SavedInput, SavedPort, ShownPort};
 pub use graph::scope::Scope;
 pub use graph::subscription::Subscription;
-pub use graph::type_names::{TypeNames, TypeRef};
-pub use graph::value_domain::ValueDomain;
-pub use graph::value_domain::float_span::FloatSpan;
-pub use graph::value_domain::int_span::IntSpan;
-pub use graph::value_domain::span_error::SpanError;
-pub use graph::value_domain::value_variant::ValueVariant;
+pub use graph::type_names::TypeNames;
 pub use graph::wiring::Wiring;
+pub use identity::instance_path::{InstancePath, InstancePathError};
+pub use identity::program_id::{ProgramId, ProgramIdError};
+pub use identity::{
+    CompoundId, EventPort, FuncId, GraphId, InputPort, NodeAddr, NodeId, OutputPort, PortId,
+    TriggerPort,
+};
 pub use library::Library;
 pub use library::func_redirect::{FuncRedirect, MAX_REDIRECTS};
 pub use library::library_builder::LibraryBuilder;

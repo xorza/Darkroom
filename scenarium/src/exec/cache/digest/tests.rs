@@ -4,12 +4,13 @@ use common::{TempFile, fs};
 
 use crate::containers::col::Idx;
 use crate::data::data_type::DataType;
+use crate::decl::func::func_signature::FuncRef;
 use crate::exec::cache::runtime_cache::RuntimeCache;
 use crate::exec::cache::runtime_slot::{OutputSnapshot, Stamp};
 use crate::exec::compile::compiled_graph::{CompiledGraph, ExecBinding};
 use crate::exec::idx::{NodeIdx, OutputAddr};
 use crate::exec::schedule::{NodeState, RunSchedule};
-use crate::graph::identity::{FuncId, FuncRef};
+use crate::identity::FuncId;
 use crate::internals::program::node_builder::NodeBuilder;
 use crate::internals::program::{Placed, ProgramBuilder};
 

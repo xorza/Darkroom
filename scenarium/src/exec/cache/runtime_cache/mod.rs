@@ -22,6 +22,9 @@ use hashbrown::{HashMap, HashSet};
 use crate::containers::col::Col;
 use crate::data::dynamic_value::DynamicValue;
 use crate::data::ram_usage::RamUsage;
+use crate::decl::cache_mode::Keep;
+use crate::decl::func::FuncBehavior;
+use crate::decl::func::func_lambda::OutputDemand;
 use crate::exec::cache::digest::{DOMAIN, Digest, DigestHasher, InputTag};
 use crate::exec::cache::disk_store::blob_target::BlobTarget;
 use crate::exec::cache::disk_store::error::{PruneError, StoreResult};
@@ -36,10 +39,7 @@ use crate::exec::compile::compiled_graph::{CompiledGraph, ExecBinding};
 use crate::exec::compile::consumer_cone::ConsumerCone;
 use crate::exec::idx::{NodeIdx, OutputAddr};
 use crate::exec::schedule::{Delivery, RunSchedule};
-use crate::graph::func::FuncBehavior;
-use crate::graph::func::lambda::OutputDemand;
-use crate::graph::node::Keep;
-use crate::graph::program_id::ProgramId;
+use crate::identity::program_id::ProgramId;
 
 /// The per-node cross-run cache plus its disk backing. `slots` is a [`Col`] aligned to the
 /// installed program; [`reconcile`](Self::reconcile) re-pairs it with a new index order by stable

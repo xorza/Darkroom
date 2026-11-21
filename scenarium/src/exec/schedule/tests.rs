@@ -3,16 +3,16 @@
 
 use crate::containers::col::Idx;
 use crate::exec::program_event::ProgramEvent;
-use crate::graph::program_id::ProgramId;
+use crate::identity::program_id::ProgramId;
 
+use crate::decl::func::func_lambda::OutputDemand;
 use crate::exec::compile::compiled_graph::ExecBinding;
 use crate::exec::error::ExecError;
 use crate::exec::idx::{InputIdx, NodeIdx, OutputAddr, OutputIdx};
 use crate::exec::schedule::planner::Planner;
 use crate::exec::schedule::{Delivery, NodeState, RootFlags, RunSchedule};
 use crate::exec::seeds::RunSeeds;
-use crate::graph::func::lambda::OutputDemand;
-use crate::graph::identity::NodeId;
+use crate::identity::NodeId;
 use crate::internals::program::ProgramBuilder;
 
 #[test]

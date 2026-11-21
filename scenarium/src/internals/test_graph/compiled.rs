@@ -7,7 +7,7 @@ use hashbrown::HashMap;
 
 use crate::exec::compile::compiled_graph::{CompiledGraph, ExecBinding, ExecNode};
 use crate::exec::idx::NodeIdx;
-use crate::graph::program_id::ProgramId;
+use crate::identity::program_id::ProgramId;
 
 /// A [`TestGraph`] lowered, still answering by the names the fixture gave its nodes, so a test
 /// names the node it authored rather than translating an id per assertion.

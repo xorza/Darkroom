@@ -2,11 +2,11 @@ use super::*;
 
 use crate::containers::col::Idx;
 
+use crate::decl::ports::OutputDecl;
+use crate::decl::ports::{InputDecl, Numbered};
 use crate::exec::compile::compiled_graph::ExecBinding;
-use crate::graph::identity::PortId;
 use crate::graph::manifest::Manifest;
-use crate::graph::ports::OutputDecl;
-use crate::graph::ports::{InputDecl, Numbered};
+use crate::identity::PortId;
 
 /// The output pool is range-addressed: when a consumer precedes its producer
 /// in insertion order, lowering claims the producer's *index* early while

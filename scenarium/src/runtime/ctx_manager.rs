@@ -1,6 +1,6 @@
 use common::CancelToken;
 
-use crate::graph::program_id::ProgramId;
+use crate::identity::program_id::ProgramId;
 use crate::runtime::log_entry::{LogEntry, LogLevel};
 
 #[derive(Debug, Default)]
@@ -81,7 +81,7 @@ impl CtxManager {
 
 #[cfg(feature = "internals")]
 pub(crate) mod internals {
-    use crate::graph::program_id::ProgramId;
+    use crate::identity::program_id::ProgramId;
     use crate::runtime::ctx_manager::CtxManager;
 
     impl CtxManager {

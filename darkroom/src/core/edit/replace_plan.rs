@@ -51,7 +51,7 @@ impl ReplacePlan {
         let held = document.graphs.graph(graph);
         let scope = document.graphs.scope(library, graph);
         let (from_name, before) = if let Some(node) = held.find(node_id) {
-            (scope.title(node).to_owned(), node.decl(scope).saved())
+            (scope.title(node).to_owned(), scope.decl(node).saved())
         } else {
             let ghost = held.ghost_node(node_id)?;
             (

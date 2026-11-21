@@ -29,11 +29,11 @@ use std::mem;
 use ::serde::{Deserialize, Serialize};
 
 use crate::data::const_value::ConstValue;
+use crate::decl::saved_decl::{SavedEvent, SavedPort};
 use crate::graph::binding::Binding;
-use crate::graph::identity::{EventPort, InputPort, NodeId, OutputPort, PortId};
-use crate::graph::saved_decl::{SavedEvent, SavedPort};
 use crate::graph::subscription::Subscription;
 use crate::graph::wiring::{self, subscription_touches};
+use crate::identity::{EventPort, InputPort, NodeId, OutputPort, PortId};
 
 /// A binding a graph keeps and cannot hold: what was on an input, and the ports as they were
 /// where a node no longer declares them.

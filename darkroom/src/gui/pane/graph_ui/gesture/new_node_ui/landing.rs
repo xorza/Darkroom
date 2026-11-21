@@ -39,9 +39,8 @@ impl<'a> DroppedEnd<'a> {
     /// between the drop and the pick can take it.
     pub(super) fn of(graph_ctx: GraphCtx<'a>, source: PortRef) -> Option<Self> {
         let decl = graph_ctx
-            .body()
-            .find(source.node_id)?
-            .decl(graph_ctx.scope());
+            .scope()
+            .decl(graph_ctx.body().find(source.node_id)?);
         Some(match source.kind {
             PortKind::Output => Self::Output {
                 source: source.output_port().expect("an output's port"),

@@ -608,36 +608,19 @@ cache passes it; no borrow in the call graph outlives `ExecEngine::execute`.
   test whose subject is the check builds through `LibraryBuilder::build`. A redirect has no
   in-place edit, as the library holds only the flattened chains.
 
+- **Batch 8 as built departs from the layout in four places.** `BindingRejection` moves whole
+  to `decl/ports/error.rs`, as every case is a port's or a type's, rather than splitting its wire
+  cases out. `SavedDecl` and the port maps move to `decl` too (`decl/saved_decl.rs`,
+  `decl/port_map.rs`), so `FuncRedirect` names no graph type, and the move of a node's wiring
+  through a remap stays in the graph as `graph/remap/`. `add_func_node` and `add_instance`, which
+  only tests call, move under `internals`. `ProgramShape::of_graph` keeps its `&Graph`: the
+  `error → program_shape → graph` loop it leaves runs through the parent module, as each child
+  does. `GraphSet::unknown_types` stays a method of the set, beside the types in
+  `unknown_type.rs`.
+
 # Part 2 — Plan
 
 Each batch leaves the build and the tests green. Whoever addresses an item deletes it.
-
-## Batch 8 — the layers
-
-Files: `identity/` (new), `decl/` (new), `graph/`, `library/`, `data/`, `runtime/`, `lib.rs`. After
-batches 6 and 7.
-Moves only; `lib.rs` keeps every published name.
-
-- [ ] `library/mod.rs:30-34`, `func_redirect.rs:18` ⇄ `graph/{graph_set/mod.rs:54,
-  port_map/mod.rs:35-36, interface_change.rs:39, type_names.rs:26, scope.rs:8}` — `graph ⇄
-  library`. Target: `decl`.
-- [ ] `graph/func/{lambda,event}.rs` ⇄ `runtime/ctx_manager.rs:3`, `runtime/log_entry.rs:3` —
-  `graph ⇄ runtime`. Target: `ProgramId` in `identity`, `FuncRef` beside `FuncSignature`.
-- [ ] `graph/func/mod.rs:13` ⇄ `graph/node/mod.rs:15`; `ports.rs:31-33`;
-  `value_domain/mod.rs:22`; `identity.rs:21-24` — the cycles inside `graph`. Target: the moves
-  under *Module layout*.
-- [ ] `node/mod.rs:18-19` ⇄ `scope.rs:6`; `scope.rs:5` ⇄ `graph_set`; `graph/mod.rs:111` ⇄
-  `compound.rs:34`; `error.rs:9` ⇄ `graph_set/mod.rs:36`. Target: `Scope::decl`, the compound
-  table in `Scope`, `Graph::insert_seeded` alone, `graph_set/program_shape.rs`.
-- [ ] `data/data_type/` — `custom_type → codec → dynamic_value → custom_type`, `data_type ⇄
-  enum_type`. Target: `EnumVariants` in `enum_type.rs`, `TypeRef` in `type_ref.rs`.
-- [ ] `graph/func/{lambda,event,signature}.rs`, `ports.rs` — files not named for their type;
-  `PortsError` outside an `error.rs`; test mods of 75 of 169 lines (`signature.rs`) and 36 of 87
-  (`path_form.rs`). Target: `func_lambda.rs`, `event_lambda.rs`, `func_signature/{mod,tests}.rs`,
-  `ports/error.rs`, `path_form/{mod,tests}.rs`.
-- [ ] `graph_set/mod.rs` (950 lines) — `ProgramShape` with `shape_of` and `over_bounds`;
-  `UnknownType` with `InterfacePort` and `unknown_types`. Target: `program_shape.rs`,
-  `unknown_type.rs`.
 
 ## Batch 9 — a compound's declaration apart from its body
 

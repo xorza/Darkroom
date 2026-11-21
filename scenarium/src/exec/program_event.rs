@@ -1,9 +1,9 @@
 //! [`ProgramEvent`]: an event of a program node.
 
-use crate::graph::program_id::ProgramId;
+use crate::identity::program_id::ProgramId;
 
 /// An event of a program node: what the event loop fires and a run seeds, as an
-/// [`EventPort`](crate::graph::identity::EventPort) names one of an authored node.
+/// [`EventPort`](crate::identity::EventPort) names one of an authored node.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct ProgramEvent {
     pub(crate) program_id: ProgramId,

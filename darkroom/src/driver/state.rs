@@ -5,7 +5,7 @@ use palantir::InspectedWidget;
 use palantir::{Rect, Sense, Ui};
 use scenarium::{
     Binding, GhostNode, GhostSource, Graph, GraphId, InputPort, NodeDecl, NodeId, NodeTriggers,
-    OutputPort, SavedPort, Scope, TriggerPort,
+    OutputPort, ProgramId, SavedPort, Scope, TriggerPort,
 };
 use serde::Serialize;
 
@@ -265,7 +265,7 @@ impl Report<'_> {
                                 .collect();
                         }
                         state.run = through
-                            .and_then(|path| app.run_state().node(path.node(node_id)))
+                            .and_then(|path| app.run_state().node(ProgramId::of(*path, node_id)))
                             .map(|node| format!("{:?}", node.status()));
                     }
                     state

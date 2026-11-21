@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::graph::func::event::EventLambda;
+use crate::decl::func::event_lambda::EventLambda;
 use crate::graph::node::special::SpecialNode;
 
 /// An impure source carrying a `tick` event and emitting its own call count —

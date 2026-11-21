@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::graph::value_domain::span_error::SpanError;
+use crate::decl::value_domain::span_error::SpanError;
 
 /// A span of finite floats from a floor, with or without a ceiling: valid by construction, its
 /// ends finite and its floor below its ceiling.

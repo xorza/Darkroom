@@ -2,8 +2,8 @@
 
 use std::ops::Deref;
 
-use crate::graph::identity::NodeId;
 use crate::graph::node::Node;
+use crate::identity::NodeId;
 
 /// A [`Node`] with its id attached — the item [`Graph::iter`](crate::graph::Graph::iter) yields.
 ///

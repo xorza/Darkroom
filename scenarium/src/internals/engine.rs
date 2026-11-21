@@ -14,6 +14,7 @@ use hashbrown::HashMap;
 
 use crate::data::dynamic_value::DynamicValue;
 use crate::data::ram_usage::RamUsage;
+use crate::decl::func::func_lambda::OutputDemand;
 use crate::exec::cache::disk_store::DiskStore;
 use crate::exec::cache::runtime_cache::error::CacheNodeFailure;
 use crate::exec::engine::{ExecEngine, ExecuteRequest};
@@ -25,8 +26,7 @@ use crate::exec::report::run_reporter::internals::{CollectingReporter, Discarded
 use crate::exec::report::run_reporter::{RunPhase, RunReporter};
 use crate::exec::schedule::NodeState;
 use crate::exec::seeds::RunSeeds;
-use crate::graph::func::lambda::OutputDemand;
-use crate::graph::program_id::ProgramId;
+use crate::identity::program_id::ProgramId;
 use crate::internals::test_graph::TestGraph;
 use crate::worker::run_summary::RunSummary;
 

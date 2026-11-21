@@ -2,11 +2,11 @@
 //! and [`Swept`], what it leaves behind.
 
 use crate::data::dynamic_value::DynamicValue;
+use crate::decl::func::func_lambda::OutputDemand;
 use crate::exec::cache::runtime_cache::RuntimeCache;
 use crate::exec::compile::compiled_graph::CompiledGraph;
 use crate::exec::resolve;
 use crate::exec::schedule::{NodeState, RootFlags, RunSchedule};
-use crate::graph::func::lambda::OutputDemand;
 use crate::internals::program::{Placed, ProgramBuilder};
 
 /// The cache-aware sweep over a hand-stated schedule: which nodes the planner would have rooted

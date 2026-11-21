@@ -78,7 +78,7 @@ mod tests {
 
     use common::internals::alloc_audit;
 
-    use crate::graph::func::event::{EventFires, EventLambda};
+    use crate::decl::func::event_lambda::{EventFires, EventLambda};
     use crate::runtime::shared_any_state::SharedAnyState;
 
     /// A loop start makes one allocation, the box of its fires; each fire after it makes none, as

@@ -19,9 +19,9 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::graph::identity::NodeId;
-use crate::graph::inline_ids::InlineIds;
-use crate::graph::instance_path::InstancePath;
+use crate::identity::NodeId;
+use crate::identity::inline_ids::InlineIds;
+use crate::identity::instance_path::InstancePath;
 
 /// The id of a program node: its path, the instances from the main graph down and then the node
 /// itself. Unique by construction, as a node id is unique inside its graph and each instance
@@ -50,9 +50,8 @@ pub enum ProgramIdError {
 }
 
 impl ProgramId {
-    /// The most ids a path holds: a program node at most seven instances down. Eight, as a path
-    /// of eight ids is 128 bytes and stays a plain value.
-    pub const MAX_LEN: usize = 8;
+    /// The most ids a program id holds: the most instances a path holds, and the node.
+    pub const MAX_LEN: usize = InstancePath::MAX_LEN + 1;
 
     /// The path `ids`, outermost instance first.
     ///
@@ -83,6 +82,18 @@ impl ProgramId {
     /// The path, outermost instance first, the node last.
     pub fn ids(&self) -> &[NodeId] {
         self.0.ids()
+    }
+
+    /// The program id of `node_id`, a node of the graph `path` ends in.
+    ///
+    /// # Panics
+    /// If `node_id` is nil.
+    pub fn of(path: InstancePath, node_id: NodeId) -> Self {
+        let mut ids = [NodeId::nil(); Self::MAX_LEN];
+        let len = path.ids().len();
+        ids[..len].copy_from_slice(path.ids());
+        ids[len] = node_id;
+        Self::new(&ids[..=len])
     }
 
     /// The authored node this program node is, in the graph of its innermost instance.
@@ -147,9 +158,9 @@ mod tests {
 
     use common::SerdeFormat;
 
-    use crate::graph::identity::NodeId;
-    use crate::graph::instance_path::InstancePath;
-    use crate::graph::program_id::{ProgramId, ProgramIdError};
+    use crate::identity::NodeId;
+    use crate::identity::instance_path::InstancePath;
+    use crate::identity::program_id::{ProgramId, ProgramIdError};
 
     fn ids(values: &[u128]) -> Vec<NodeId> {
         values.iter().copied().map(NodeId::from_u128).collect()
@@ -179,7 +190,11 @@ mod tests {
         let inner = ProgramId::new(&ids(&[7, 3, 9]));
         assert_eq!(inner.path(), InstancePath::new(&ids(&[7, 3])));
         assert_eq!(inner.node_id(), NodeId::from_u128(9));
-        assert_eq!(inner.path().node(inner.node_id()), inner);
+        assert_eq!(ProgramId::of(inner.path(), inner.node_id()), inner);
+        assert_eq!(
+            ProgramId::of(InstancePath::MAIN, NodeId::from_u128(5)),
+            ProgramId::new(&ids(&[5]))
+        );
     }
 
     /// The order is the paths' element by element, so an instance's nodes are one run: `[1]`,
@@ -213,9 +228,10 @@ mod tests {
             program_id.hash(&mut hasher);
             hasher.finish()
         };
-        let built = InstancePath::MAIN
-            .child(NodeId::from_u128(1))
-            .node(NodeId::from_u128(2));
+        let built = ProgramId::of(
+            InstancePath::MAIN.child(NodeId::from_u128(1)),
+            NodeId::from_u128(2),
+        );
         let given = ProgramId::new(&ids(&[1, 2]));
         assert_eq!(built, given);
         assert_eq!(hash(built), hash(given));

@@ -1,7 +1,7 @@
 //! [`ArmedEvent`]: an event source a successful run armed.
 
+use crate::decl::func::event_lambda::EventLambda;
 use crate::exec::program_event::ProgramEvent;
-use crate::graph::func::event::EventLambda;
 use crate::runtime::shared_any_state::SharedAnyState;
 
 /// One `(event, lambda, state)` triple a successful event-source run armed, spawned by the worker

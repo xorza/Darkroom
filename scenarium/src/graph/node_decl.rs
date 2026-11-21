@@ -1,10 +1,11 @@
 //! [`NodeDecl`]: what a node resolves to, a func or a compound's face.
 
+use crate::decl::func::Func;
+use crate::decl::ports::{EventDecl, InputDecl, Numbered, OutputDecl, Ports};
+use crate::decl::saved_decl::{SavedDecl, SavedEvent, SavedInput, SavedPort};
 use crate::graph::compound::Compound;
-use crate::graph::func::Func;
-use crate::graph::identity::{PortId, TriggerPort};
 use crate::graph::node::Boundary;
-use crate::graph::ports::{EventDecl, InputDecl, Numbered, OutputDecl, Ports};
+use crate::identity::{PortId, TriggerPort};
 
 /// What a node resolves to through a [`Scope`](crate::Scope): the ports it shows and is wired
 /// by, and a body if it runs. A func is a declaration with a body; an instance and a boundary
@@ -145,5 +146,87 @@ impl NodeTriggers<'_> {
             Self::Own => id == TriggerPort::NODE,
             Self::PerEvent(events) => events.iter().any(|event| event.id == id),
         }
+    }
+}
+
+impl NodeDecl<'_> {
+    /// This declaration as a document remembers it.
+    pub fn saved(self) -> SavedDecl {
+        SavedDecl {
+            name: self.name().to_owned(),
+            category: self
+                .func()
+                .map_or_else(String::new, |func| func.category().to_owned()),
+            inputs: self
+                .inputs()
+                .iter()
+                .map(|input| {
+                    Numbered::new(
+                        input.id,
+                        SavedInput {
+                            name: input.name.clone(),
+                            data_type: input.data_type,
+                            default_value: input
+                                .default_value
+                                .clone()
+                                .filter(|_| !input.data_type.is_path()),
+                        },
+                    )
+                })
+                .collect(),
+            outputs: self
+                .outputs()
+                .iter()
+                .map(|output| {
+                    Numbered::new(
+                        output.id,
+                        SavedPort {
+                            name: output.name.clone(),
+                            data_type: output.data_type,
+                        },
+                    )
+                })
+                .collect(),
+            events: self
+                .events()
+                .iter()
+                .map(|event| {
+                    Numbered::new(
+                        event.id,
+                        SavedEvent {
+                            name: event.name.clone(),
+                        },
+                    )
+                })
+                .collect(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::data::const_value::ConstValue;
+    use crate::data::data_type::DataType;
+    use crate::decl::ports::InputDecl;
+    use crate::graph::node_decl::NodeDecl;
+    use crate::identity::{FuncId, PortId};
+    use crate::internals;
+
+    /// A saved declaration keeps an input's default, but not a path input's: that default is the
+    /// machine's, and the file would carry its folders.
+    #[test]
+    fn a_saved_declaration_keeps_no_path_default() {
+        let func = internals::stub_func(FuncId::unique(), "model")
+            .input(1, InputDecl::optional("gain", DataType::Float).default(0.5))
+            .input(
+                2,
+                InputDecl::optional("model", DataType::Dir)
+                    .default(ConstValue::FsPath("/home/someone/models".to_owned())),
+            )
+            .build();
+        let saved = NodeDecl::Func(&func).saved();
+        let default = |id| saved.input(PortId::new(id)).unwrap().default_value.clone();
+        assert_eq!(default(1), Some(ConstValue::Float(0.5)));
+        assert_eq!(default(2), None);
     }
 }

@@ -1,6 +1,6 @@
 //! [`NodeRuntime`]: one node's cross-run lambda state.
 
-use crate::graph::identity::FuncRef;
+use crate::decl::func::func_signature::FuncRef;
 use crate::runtime::any_state::AnyState;
 use crate::runtime::shared_any_state::SharedAnyState;
 

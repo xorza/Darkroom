@@ -480,7 +480,7 @@ fn run_results_read_through_the_instance_a_pane_shows() {
     let [i1, i2] = [(); 2].map(|()| document.add_instance(id));
     let mut fixture = GraphCtxFixture::over(document);
     let row = |instance, status| NodeStatus {
-        program_id: InstancePath::new(&[instance]).node(inside),
+        program_id: ProgramId::of(InstancePath::new(&[instance]), inside),
         status: Some(status),
         ram: RamUsage::default(),
     };
@@ -513,7 +513,7 @@ fn run_results_read_through_the_instance_a_pane_shows() {
         .node(inside)
         .unwrap();
     assert_eq!(node.exec_status(), &ExecStatus::Executed(1.0));
-    let in_i1 = InstancePath::new(&[i1]).node(inside);
+    let in_i1 = ProgramId::of(InstancePath::new(&[i1]), inside);
     assert_eq!(node.runnable(), Some(in_i1));
 
     through(&mut fixture, Some(InstancePath::new(&[i2])));

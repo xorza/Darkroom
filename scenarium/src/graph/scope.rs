@@ -1,15 +1,17 @@
 //! [`Scope`]: what the nodes of one graph resolve against.
 
+use std::collections::BTreeMap;
+
 use crate::graph::compound::Compound;
 use crate::graph::error::Unresolved;
-use crate::graph::graph_set::GraphSet;
 use crate::graph::node::{BodySource, Node, NodeKind};
 use crate::graph::node_decl::NodeDecl;
+use crate::identity::CompoundId;
 use crate::library::Library;
 
 /// What the nodes of one graph resolve against: the library's funcs, the set's compounds, and,
 /// for a compound's own graph, the interface its boundary nodes show. Made by
-/// [`GraphSet::scope`].
+/// [`GraphSet::scope`](crate::GraphSet::scope).
 ///
 /// The library stays the host's registry of funcs, fixed for a process; the compounds are the
 /// document's. Refused: writing a func for each compound into the library, which the load
@@ -17,21 +19,22 @@ use crate::library::Library;
 #[derive(Clone, Copy, Debug)]
 pub struct Scope<'a> {
     library: &'a Library,
-    graphs: &'a GraphSet,
+    /// The set's compounds, by id.
+    compounds: &'a BTreeMap<CompoundId, Compound>,
     /// The compound whose graph this is: `None` for the main graph.
     owner: Option<&'a Compound>,
 }
 
 impl<'a> Scope<'a> {
-    /// The scope of the graph of `owner`, a compound `graphs` holds, or of the main graph.
+    /// The scope of the graph of `owner`, one of `compounds`, or of the main graph.
     pub(crate) const fn new(
         library: &'a Library,
-        graphs: &'a GraphSet,
+        compounds: &'a BTreeMap<CompoundId, Compound>,
         owner: Option<&'a Compound>,
     ) -> Self {
         Self {
             library,
-            graphs,
+            compounds,
             owner,
         }
     }
@@ -55,6 +58,25 @@ impl<'a> Scope<'a> {
         }
     }
 
+    /// What `node` declares: a library func, a special node's built-in, or the ports a
+    /// compound's interface gives its instances and boundary nodes.
+    ///
+    /// # Panics
+    ///
+    /// If this scope does not resolve the node. A graph holds only nodes that
+    /// resolve — [`GraphSet::reconcile`](crate::GraphSet::reconcile) keeps the
+    /// rest as ghost nodes at load — so a miss is a broken contract; a node that may not
+    /// resolve is asked through [`Self::resolve`].
+    pub fn decl(&self, node: &Node) -> NodeDecl<'a> {
+        match self.resolve(node) {
+            Ok(decl) => decl,
+            Err(reason) => panic!(
+                "a graph node resolves, and {:?} does not: {reason}",
+                node.name
+            ),
+        }
+    }
+
     /// What `node` declares, or why it declares nothing here: no func or compound under its id,
     /// or a boundary node outside a compound. A declaration whose ports changed since the node
     /// was authored still resolves: the node's wiring names ports by id, and the load admits
@@ -74,8 +96,8 @@ impl<'a> Scope<'a> {
                 ..
             } => Ok(NodeDecl::Func(special.func())),
             NodeKind::Instance { compound, .. } => self
-                .graphs
-                .compound(compound)
+                .compounds
+                .get(&compound)
                 .map(NodeDecl::Instance)
                 .ok_or(Unresolved::MissingCompound),
             NodeKind::Boundary(side) => self

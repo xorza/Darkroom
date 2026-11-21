@@ -1,11 +1,11 @@
 use super::*;
 
-use crate::graph::program_id::ProgramId;
+use crate::identity::program_id::ProgramId;
 
+use crate::decl::func::func_lambda::internals;
 use crate::exec::error::RunError;
 use crate::exec::report::node_status::NodeExecStatus;
-use crate::graph::func::lambda::internals;
-use crate::graph::identity::NodeId;
+use crate::identity::NodeId;
 use crate::runtime::log_entry::LogLevel;
 
 /// Publishing a completed run is a move, not a reduction: the rows the run produced

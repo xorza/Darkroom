@@ -45,7 +45,7 @@
 //! its order is not one an artifact may depend on. Sorting the program ids *before* emitting
 //! anything settles the dense index space up front: a node's `NodeIdx` is its position in that sort, so a binding can name its
 //! producer's index the moment the walk resolves it. Stable identity crosses into the dense index
-//! space in one direction only — [`NodeId`]/[`OutputPort`](crate::graph::identity::OutputPort)
+//! space in one direction only — [`NodeId`]/[`OutputPort`](crate::identity::OutputPort)
 //! in, `NodeIdx`/`OutputAddr` out.
 //!
 //! The program is immutable for the life of the install, so each step below produces its part
@@ -66,19 +66,20 @@ use hashbrown::{HashMap, HashSet};
 
 use crate::containers::col::{Col, Idx};
 use crate::data::const_value::ConstValue;
+use crate::decl::cache_mode::CacheMode;
+use crate::decl::func::FuncBehavior;
 use crate::exec::compile::compiled_graph::{
     CompiledGraph, ExecBinding, ExecEvent, ExecInput, ExecNode,
 };
 use crate::exec::idx::{NodeIdx, OutputAddr};
 use crate::graph::binding::Binding;
-use crate::graph::func::FuncBehavior;
 use crate::graph::graph_set::GraphSet;
-use crate::graph::identity::{CompoundId, EventPort, GraphId, InputPort, NodeId, PortId};
-use crate::graph::instance_path::InstancePath;
 use crate::graph::interface::Interface;
-use crate::graph::node::{Boundary, CacheMode, NodeKind};
+use crate::graph::node::{Boundary, NodeKind};
 use crate::graph::node_decl::NodeDecl;
-use crate::graph::program_id::ProgramId;
+use crate::identity::instance_path::InstancePath;
+use crate::identity::program_id::ProgramId;
+use crate::identity::{CompoundId, EventPort, GraphId, InputPort, NodeId, PortId};
 use crate::library::Library;
 
 /// One program node awaiting placement: its id, which the sort keys on, the graph it was
@@ -117,7 +118,7 @@ impl Level {
 
     /// The program id of `node_id` of this level's graph.
     fn program_id(self, node_id: NodeId) -> ProgramId {
-        self.path.node(node_id)
+        ProgramId::of(self.path, node_id)
     }
 
     /// The level inside instance `node_id` of this level's graph, which places compound `graph`.
@@ -283,7 +284,7 @@ impl Compiler {
             // both resolve to a `&Func` spec.
             let (NodeKind::Body { cache, .. }, NodeDecl::Func(func)) = (
                 node.kind,
-                node.decl(source.graphs.scope(source.library, level.graph)),
+                source.graphs.scope(source.library, level.graph).decl(node),
             ) else {
                 unreachable!("the placement keeps only the nodes with a body");
             };
@@ -403,7 +404,7 @@ impl Compiler {
                 let disabled = frame.disabled || node.disabled;
                 match node.kind {
                     NodeKind::Body { .. } => {
-                        let decl = node.decl(scope);
+                        let decl = scope.decl(&node);
                         totals.inputs += decl.inputs().len();
                         totals.outputs += decl.outputs().len();
                         totals.events += decl.events().len();
@@ -604,8 +605,10 @@ impl Compiler {
                 .expect("an admitted wire's producer is in the graph");
             binding = match producer.kind {
                 NodeKind::Body { .. } => {
-                    let port_idx = producer
-                        .decl(source.graphs.scope(source.library, level.graph))
+                    let port_idx = source
+                        .graphs
+                        .scope(source.library, level.graph)
+                        .decl(producer)
                         .ports()
                         .output_idx(source_port.port)
                         .expect("an admitted wire reads an output its producer declares");

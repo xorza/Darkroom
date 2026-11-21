@@ -1,13 +1,14 @@
 use crate::data::const_value::ConstValue;
 use crate::data::data_type::DataType;
 use crate::data::data_type::Strictness;
-use crate::graph::identity::PortId;
-use crate::graph::ports::{InputDecl, Numbered, Ports, PortsError};
-use crate::graph::value_domain::ValueDomain;
-use crate::graph::value_domain::float_span::FloatSpan;
-use crate::graph::value_domain::int_span::IntSpan;
-use crate::graph::value_domain::span_error::SpanError;
-use crate::graph::value_domain::value_variant::ValueVariant;
+use crate::decl::ports::error::PortsError;
+use crate::decl::ports::{InputDecl, Numbered, Ports};
+use crate::decl::value_domain::ValueDomain;
+use crate::decl::value_domain::float_span::FloatSpan;
+use crate::decl::value_domain::int_span::IntSpan;
+use crate::decl::value_domain::span_error::SpanError;
+use crate::decl::value_domain::value_variant::ValueVariant;
+use crate::identity::PortId;
 
 /// A span's checked constructors refuse an empty span and a non-finite end; the others build one.
 #[test]

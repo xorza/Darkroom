@@ -12,21 +12,22 @@
 //!   declarations can borrow from, so each reader went through a bridge enum.
 
 pub(crate) mod error;
-pub(crate) mod event;
+pub(crate) mod event_lambda;
 pub(crate) mod func_builder;
 pub(crate) mod func_decl;
-pub(crate) mod lambda;
+pub(crate) mod func_lambda;
+pub(crate) mod func_signature;
 mod macros;
-pub(crate) mod signature;
 
-use crate::graph::func::event::EventLambda;
-use crate::graph::func::func_builder::FuncBuilder;
-use crate::graph::func::func_decl::FuncDecl;
-use crate::graph::func::lambda::FuncLambda;
-use crate::graph::func::signature::FuncSignature;
-use crate::graph::identity::{FuncId, FuncRef, PortId};
-use crate::graph::node::CacheMode;
-use crate::graph::ports::{EventDecl, InputDecl, Numbered, OutputDecl, Ports};
+use crate::decl::cache_mode::CacheMode;
+use crate::decl::func::event_lambda::EventLambda;
+use crate::decl::func::func_builder::FuncBuilder;
+use crate::decl::func::func_decl::FuncDecl;
+use crate::decl::func::func_lambda::FuncLambda;
+use crate::decl::func::func_signature::FuncRef;
+use crate::decl::func::func_signature::FuncSignature;
+use crate::decl::ports::{EventDecl, InputDecl, Numbered, OutputDecl, Ports};
+use crate::identity::{FuncId, PortId};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum FuncBehavior {
@@ -147,8 +148,8 @@ impl Func {
 
 #[cfg(feature = "internals")]
 pub(crate) mod internals {
-    use crate::graph::func::Func;
-    use crate::graph::func::func_builder::FuncBuilder;
+    use crate::decl::func::Func;
+    use crate::decl::func::func_builder::FuncBuilder;
 
     impl Func {
         /// This declaration as a builder again, for a test to edit and build anew.

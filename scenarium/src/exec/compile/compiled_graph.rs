@@ -21,16 +21,16 @@ use crate::containers::col::{Col, Span};
 use crate::data::codec::Codecs;
 use crate::data::const_value::ConstValue;
 use crate::data::data_type::DataType;
+use crate::decl::cache_mode::CacheMode;
+use crate::decl::func::FuncBehavior;
+use crate::decl::func::event_lambda::EventLambda;
+use crate::decl::func::func_lambda::FuncLambda;
+use crate::decl::func::func_signature::FuncRef;
 use crate::exec::compile::consumer_cone::ConsumerCone;
 use crate::exec::idx::{EventIdx, InputIdx, NodeIdx, OutputAddr, OutputIdx, SubscriberIdx};
-use crate::graph::func::FuncBehavior;
-use crate::graph::func::event::EventLambda;
-use crate::graph::func::lambda::FuncLambda;
-use crate::graph::identity::FuncRef;
-use crate::graph::instance_path::InstancePath;
-use crate::graph::node::CacheMode;
 use crate::graph::node::special::SpecialNode;
-use crate::graph::program_id::ProgramId;
+use crate::identity::instance_path::InstancePath;
+use crate::identity::program_id::ProgramId;
 
 #[derive(Clone, Debug, Default)]
 pub(crate) enum ExecBinding {
@@ -73,8 +73,8 @@ pub(crate) struct ExecNode {
     pub(crate) behavior: FuncBehavior,
 
     /// The authoring node's cache mode, copied at lowering. Its two bits
-    /// ([`caches_in_ram`](crate::graph::node::CacheMode::caches_in_ram) /
-    /// [`persists_to_disk`](crate::graph::node::CacheMode::persists_to_disk)) gate RAM retention
+    /// ([`caches_in_ram`](crate::decl::cache_mode::CacheMode::caches_in_ram) /
+    /// [`persists_to_disk`](crate::decl::cache_mode::CacheMode::persists_to_disk)) gate RAM retention
     /// and the disk load/store; disk is honored only when the node has a content digest and a disk
     /// root is configured — see the `digest` and `disk_store` modules.
     pub(crate) cache: CacheMode,
@@ -231,13 +231,13 @@ impl CompiledGraph {
 #[cfg(feature = "internals")]
 pub(crate) mod internals {
     use crate::containers::col::{Idx, Span};
+    use crate::decl::cache_mode::CacheMode;
+    use crate::decl::func::FuncBehavior;
+    use crate::decl::func::func_lambda::FuncLambda;
     use crate::exec::compile::compiled_graph::{CompiledGraph, ExecNode};
     use crate::exec::idx::NodeIdx;
-    use crate::graph::func::FuncBehavior;
-    use crate::graph::func::lambda::FuncLambda;
-    use crate::graph::identity::FuncId;
-    use crate::graph::node::CacheMode;
-    use crate::graph::program_id::ProgramId;
+    use crate::identity::FuncId;
+    use crate::identity::program_id::ProgramId;
     use crate::internals::portless_func_ref;
 
     impl ExecNode {

@@ -86,7 +86,7 @@ impl<'a> NodeCtx<'a> {
     /// document holds a placement exactly for every graph node and ghost node.
     pub(super) fn resolve(graph_ctx: GraphCtx<'a>, node_id: NodeId, pos: Vec2) -> Self {
         let (node, declaration, ghost_node) = if let Some(node) = graph_ctx.body().find(node_id) {
-            (node, Ok(node.decl(graph_ctx.scope())), None)
+            (node, Ok(graph_ctx.scope().decl(node)), None)
         } else {
             let ghost = graph_ctx
                 .body()

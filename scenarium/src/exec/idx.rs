@@ -4,7 +4,7 @@
 //! [`IdxSet`](crate::containers::idx_set::IdxSet).
 //!
 //! This is an *index* space, not an identity space. A node in a compiled
-//! program is named by its [`ProgramId`](crate::graph::program_id::ProgramId),
+//! program is named by its [`ProgramId`](crate::identity::program_id::ProgramId),
 //! the path of instances down to the authored node, and its ports by their
 //! index on it. Those are the stable names: they survive installs, cross the
 //! host boundary, and may enter digests.
@@ -21,7 +21,7 @@ use crate::containers::col::idx_type;
 idx_type!(
     /// A node's position in the installed program's dense node vector. Install-local: it must
     /// never enter a digest, a persisted byte, or any host-facing report — those stay on
-    /// [`ProgramId`](crate::graph::program_id::ProgramId).
+    /// [`ProgramId`](crate::identity::program_id::ProgramId).
     pub(crate) struct NodeIdx,
     "node index"
 );

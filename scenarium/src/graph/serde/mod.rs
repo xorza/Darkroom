@@ -11,16 +11,16 @@ use ::serde::de::Error as _;
 use ::serde::de::{MapAccess, Visitor};
 use ::serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use crate::data::data_type::type_ref::TypeRef;
+use crate::decl::saved_decl::SavedDecl;
 use crate::graph::binding::Binding;
 use crate::graph::compound::Compound;
 use crate::graph::ghost_node::GhostNode;
 use crate::graph::ghost_wiring::{GhostBinding, GhostSubscription};
-use crate::graph::identity::{CompoundId, FuncId, GraphId, InputPort, NodeId};
 use crate::graph::interface_change::WiringChange;
 use crate::graph::node::Node;
-use crate::graph::saved_decl::SavedDecl;
 use crate::graph::subscription::Subscription;
-use crate::graph::type_names::TypeRef;
+use crate::identity::{CompoundId, FuncId, GraphId, InputPort, NodeId};
 
 /// A table whose key is a struct travels as a sequence of `(key, value)` pairs.
 pub(super) fn serialize_pairs<K: Serialize, V: Serialize, S: Serializer>(

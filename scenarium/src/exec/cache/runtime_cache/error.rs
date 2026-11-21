@@ -6,7 +6,7 @@ use common::ErrorChain;
 
 use crate::data::data_type::custom_type::CustomTypeId;
 use crate::exec::cache::disk_store::error::{RemovalError, StoreError};
-use crate::graph::program_id::ProgramId;
+use crate::identity::program_id::ProgramId;
 
 /// One node a sweep could not do its work on, named by the id the host asked
 /// in.
@@ -64,8 +64,8 @@ mod tests {
 
     use crate::exec::cache::disk_store::error::RemovalError;
     use crate::exec::cache::runtime_cache::error::{CacheNodeError, CacheNodeFailure};
-    use crate::graph::identity::NodeId;
-    use crate::graph::program_id::ProgramId;
+    use crate::identity::NodeId;
+    use crate::identity::program_id::ProgramId;
 
     /// An entry of the list keeps what the OS said under the store's own words.
     #[test]

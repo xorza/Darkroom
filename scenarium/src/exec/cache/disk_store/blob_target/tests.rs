@@ -7,15 +7,15 @@ use common::{ErrorChain, TempDir, TempFile, fs};
 use crate::data::codec::Codecs;
 use crate::data::const_value::ConstValue;
 use crate::data::dynamic_value::DynamicValue;
+use crate::decl::func::func_lambda::OutputDemand;
 use crate::exec::cache::digest::Digest;
 use crate::exec::cache::disk_store::StorePolicy;
 use crate::exec::cache::disk_store::blob_target::BlobTarget;
 use crate::exec::cache::disk_store::error::StoreError;
 use crate::exec::cache::disk_store::store_outcome::StoreOutcome;
 use crate::exec::cache::runtime_slot::OutputSnapshot;
-use crate::graph::func::lambda::OutputDemand;
-use crate::graph::identity::NodeId;
-use crate::graph::program_id::ProgramId;
+use crate::identity::NodeId;
+use crate::identity::program_id::ProgramId;
 use crate::internals::blob::{BLOB_TYPE, Blob, BlobCodec, BlobFault};
 use crate::internals::calls::Calls;
 

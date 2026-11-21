@@ -11,8 +11,8 @@ use thiserror::Error;
 use std::error;
 use std::fmt;
 
-use crate::graph::identity::FuncId;
-use crate::graph::ports::PortsError;
+use crate::decl::ports::error::PortsError;
+use crate::identity::FuncId;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum FuncValidationError {

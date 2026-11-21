@@ -35,7 +35,7 @@ pub(crate) mod internals {
     use crate::exec::error::RunError;
     use crate::exec::report::exec_outcome::ExecOutcome;
     use crate::exec::report::node_status::NodeExecStatus;
-    use crate::graph::program_id::ProgramId;
+    use crate::identity::program_id::ProgramId;
 
     impl ExecOutcome {
         /// This node's row, or `None` when the run reported nothing for it.

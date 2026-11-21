@@ -18,10 +18,10 @@ use crate::data::codec::Codecs;
 use crate::data::const_value::ConstValue;
 use crate::data::data_type::custom_type::CustomTypeId;
 use crate::data::dynamic_value::DynamicValue;
+use crate::decl::func::func_lambda::OutputDemand;
 use crate::exec::cache::digest::Digest;
 use crate::exec::cache::disk_store::error::{CodecFormatError, FormatResult, FrameError};
-use crate::graph::func::lambda::OutputDemand;
-use crate::graph::program_id::ProgramId;
+use crate::identity::program_id::ProgramId;
 
 const MAGIC: &[u8; 8] = b"SCENBLOB";
 const FORMAT_VERSION: u32 = 12;

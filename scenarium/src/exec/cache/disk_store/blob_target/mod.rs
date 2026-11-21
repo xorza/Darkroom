@@ -11,14 +11,14 @@ use common::{ErrorChain, task};
 
 use crate::data::codec::Codecs;
 use crate::data::dynamic_value::DynamicValue;
+use crate::decl::func::func_lambda::OutputDemand;
 use crate::exec::cache::digest::Digest;
 use crate::exec::cache::disk_store::error::{StoreError, StoreResult};
 use crate::exec::cache::disk_store::format::{BlobReader, BlobWriter};
 use crate::exec::cache::disk_store::store_outcome::StoreOutcome;
 use crate::exec::cache::disk_store::{StorePolicy, format};
 use crate::exec::cache::runtime_slot::OutputSnapshot;
-use crate::graph::func::lambda::OutputDemand;
-use crate::graph::program_id::ProgramId;
+use crate::identity::program_id::ProgramId;
 
 /// Where one node's blob lives, the node it holds values of, and the digest it must be stored
 /// under: every read, probe and write of that blob goes through here.

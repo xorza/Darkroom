@@ -55,7 +55,8 @@ fn an_eviction_reaches_the_seed_cone_of_the_installed_program() {
         host.evict_cache(&graphs, main(node)),
         Ok(vec![ProgramId::from(node)])
     );
-    let mut each_instance = instances.map(|instance| InstancePath::new(&[instance]).node(inside));
+    let mut each_instance =
+        instances.map(|instance| ProgramId::of(InstancePath::new(&[instance]), inside));
     each_instance.sort_unstable();
     assert_eq!(
         host.evict_cache(&graphs, NodeAddr::new(GraphId::Compound(compound), inside)),

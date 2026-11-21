@@ -480,7 +480,7 @@ impl GraphIntent {
                     };
                     let default = destination
                         .filter(|_| lost_wire)
-                        .and_then(|node| node.decl(scope).ports().input(input.port))
+                        .and_then(|node| scope.decl(node).ports().input(input.port))
                         .and_then(|declared| declared.default_value.clone());
                     InputState::from(default.map(Binding::Const))
                 };

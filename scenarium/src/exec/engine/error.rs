@@ -2,7 +2,7 @@
 
 use thiserror::Error;
 
-use crate::graph::program_id::ProgramId;
+use crate::identity::program_id::ProgramId;
 
 /// What [`ExecEngine::validate`](crate::exec::engine::ExecEngine)
 /// rejects: a cache or lambda state that does not span the installed program's

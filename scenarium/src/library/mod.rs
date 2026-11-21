@@ -40,12 +40,12 @@ use crate::data::const_value::ConstValue;
 use crate::data::data_type::custom_type::{CustomType, CustomTypeId};
 use crate::data::data_type::enum_type::{EnumId, EnumType};
 use crate::data::data_type::file_kind::{FileKind, FileKindId};
+use crate::data::data_type::type_ref::TypeRef;
 use crate::data::data_type::{DataType, Strictness};
-use crate::graph::error::BindingRejection;
-use crate::graph::func::Func;
-use crate::graph::identity::FuncId;
-use crate::graph::ports::{InputDecl, OutputDecl};
-use crate::graph::type_names::TypeRef;
+use crate::decl::func::Func;
+use crate::decl::ports::error::BindingRejection;
+use crate::decl::ports::{InputDecl, OutputDecl};
+use crate::identity::FuncId;
 use crate::library::func_redirect::FuncRedirect;
 
 /// The name a type shows when the library does not register it.
@@ -331,8 +331,8 @@ pub(crate) mod internals {
     use crate::data::data_type::custom_type::{CustomType, CustomTypeId};
     use crate::data::data_type::enum_type::{EnumId, EnumType};
     use crate::data::data_type::file_kind::{FileKind, FileKindId};
-    use crate::graph::func::Func;
-    use crate::graph::identity::FuncId;
+    use crate::decl::func::Func;
+    use crate::identity::FuncId;
     use crate::library::Library;
     use crate::library::library_builder::LibraryBuilder;
 

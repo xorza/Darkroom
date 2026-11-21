@@ -2,7 +2,7 @@
 
 use ::serde::{Deserialize, Serialize};
 
-use crate::graph::identity::{EventPort, NodeId, TriggerPort};
+use crate::identity::{EventPort, NodeId, TriggerPort};
 
 /// One event-subscription edge: `trigger` is triggered when `event` fires, as a wire joins an
 /// output to an input; the event side's

@@ -5,7 +5,7 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
-use crate::graph::identity::NodeId;
+use crate::identity::NodeId;
 
 /// At most `N` node ids, held inline so the value carries no allocation. Compared, ordered and
 /// hashed by the ids it holds, element by element: a list before every longer list it begins.

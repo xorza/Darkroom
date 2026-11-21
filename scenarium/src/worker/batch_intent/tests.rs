@@ -2,7 +2,7 @@ use super::*;
 
 use tokio::sync::oneshot;
 
-use crate::graph::identity::NodeId;
+use crate::identity::NodeId;
 
 use crate::exec::compile::Compiler;
 use crate::graph::graph_set::GraphSet;

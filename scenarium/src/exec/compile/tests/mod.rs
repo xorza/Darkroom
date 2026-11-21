@@ -2,11 +2,11 @@ use std::collections::HashSet;
 
 use super::*;
 use crate::data::data_type::DataType;
+use crate::decl::ports::EventDecl;
 use crate::exec::compile::error::{CompiledGraphValidationError, PortPool};
 use crate::graph::Graph;
-use crate::graph::identity::FuncId;
 use crate::graph::node::Node;
-use crate::graph::ports::EventDecl;
+use crate::identity::FuncId;
 use crate::internals;
 use crate::internals::program::ProgramBuilder;
 use crate::internals::test_graph::compiled::Compiled;
@@ -403,9 +403,9 @@ fn interns_a_wire_to_the_producers_dense_address() {
 /// a wire and a subscription named by id land at position 1.
 #[test]
 fn a_port_lands_at_its_declared_position_whatever_its_number() {
-    use crate::graph::identity::EventPort;
-    use crate::graph::identity::PortId;
-    use crate::graph::ports::{InputDecl, OutputDecl};
+    use crate::decl::ports::{InputDecl, OutputDecl};
+    use crate::identity::EventPort;
+    use crate::identity::PortId;
 
     let swapped = internals::stub_func(FuncId::unique(), "swapped")
         .sink()
@@ -562,9 +562,9 @@ fn drops_subscriptions_that_cannot_fire() {
 /// nested instances' nodes included, and none past it; the main graph's path holds them all.
 #[test]
 fn the_nodes_within_a_path_are_the_ids_that_begin_with_it() {
-    use crate::graph::identity::NodeId;
-    use crate::graph::instance_path::InstancePath;
-    use crate::graph::program_id::ProgramId;
+    use crate::identity::NodeId;
+    use crate::identity::instance_path::InstancePath;
+    use crate::identity::program_id::ProgramId;
 
     let n = NodeId::from_u128;
     let id = |ids: &[u128]| ProgramId::new(&ids.iter().copied().map(n).collect::<Vec<_>>());

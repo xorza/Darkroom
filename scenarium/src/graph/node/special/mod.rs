@@ -10,7 +10,7 @@ pub(crate) mod run_sinks;
 
 use serde::{Deserialize, Serialize};
 
-use crate::graph::func::Func;
+use crate::decl::func::Func;
 use crate::graph::node::special::run_sinks::run_sinks_func;
 
 /// A built-in node identified by *kind*, not by a `FuncId`; its ports and lambda come from

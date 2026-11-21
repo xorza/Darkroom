@@ -1,7 +1,7 @@
 use common::fs;
 
 use super::*;
-use crate::graph::node::Keep;
+use crate::decl::cache_mode::Keep;
 
 /// A value kept always and on disk remains resident even when a later run neither executes
 /// nor reads it.

@@ -1,9 +1,9 @@
 use crate::async_lambda;
 use crate::data::data_type::DataType;
-use crate::graph::func::Func;
-use crate::graph::func::lambda::Invocation;
-use crate::graph::identity::FuncId;
-use crate::graph::ports::{InputDecl, OutputDecl};
+use crate::decl::func::Func;
+use crate::decl::func::func_lambda::Invocation;
+use crate::decl::ports::{InputDecl, OutputDecl};
+use crate::identity::FuncId;
 use crate::library::library_builder::LibraryBuilder;
 
 const PRINT_FUNC_ID: FuncId = FuncId::literal("06b169d2-d3d8-43fb-ba80-c566fcffea44");

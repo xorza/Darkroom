@@ -1,9 +1,9 @@
 use crate::data::data_type::DataType;
 use crate::data::dynamic_value::DynamicValue;
+use crate::decl::func::func_lambda::OutputDemand;
 use crate::exec::cache::digest::Digest;
 use crate::exec::cache::disk_store::error::StoreResult;
 use crate::exec::cache::disk_store::store_outcome::StoreOutcome;
-use crate::graph::func::lambda::OutputDemand;
 use std::mem;
 
 #[derive(Debug)]

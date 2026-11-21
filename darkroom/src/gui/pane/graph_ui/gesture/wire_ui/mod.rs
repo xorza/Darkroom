@@ -236,7 +236,7 @@ fn exposed_on_boundary(ui: &mut Ui, ctx: CanvasCtx<'_>, start: PortRef) -> Optio
                 .is_some_and(|rect| rect.contains(pointer))
         })?
         .node_id;
-    let decl = body.find(start.node_id)?.decl(graph_ctx.scope());
+    let decl = graph_ctx.scope().decl(body.find(start.node_id)?);
     let interface = &graph_ctx.document().graphs.compound(compound)?.interface;
     let (edit, wire) = match start.kind {
         PortKind::Output => {

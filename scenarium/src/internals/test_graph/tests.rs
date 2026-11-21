@@ -1,7 +1,7 @@
 use super::*;
-use crate::graph::func::FuncBehavior;
-use crate::graph::identity::PortId;
-use crate::graph::node::Keep;
+use crate::decl::cache_mode::Keep;
+use crate::decl::func::FuncBehavior;
+use crate::identity::PortId;
 
 /// The builder states a whole graph — declarations, wiring and bodies — and
 /// what it produces compiles.
@@ -30,7 +30,7 @@ fn a_named_graph_compiles_to_one_node_per_name() {
     );
     // `returns` declared the output its literal implies.
     let src = g.graph().find(g.id("src")).unwrap();
-    assert_eq!(src.decl(g.scope()).outputs()[0].data_type, DataType::Int);
+    assert_eq!(g.scope().decl(src).outputs()[0].data_type, DataType::Int);
 }
 
 /// One func per node by default: editing one node's declaration leaves
@@ -47,7 +47,7 @@ fn declarations_are_per_node_unless_a_test_shares_one() {
 
     let required = |g: &TestGraph, name: &str| {
         let node = g.graph().find(g.id(name)).unwrap();
-        node.decl(g.scope()).inputs()[0].required
+        g.scope().decl(node).inputs()[0].required
     };
     assert!(!required(&g, "a"), "the edited declaration went optional");
     assert!(!required(&g, "a2"), "and its other instance shares it");
@@ -162,7 +162,8 @@ fn spec_flags_reach_the_declaration() {
 
     let func = |g: &TestGraph, name: &str| {
         let node = g.graph().find(g.id(name)).unwrap();
-        node.decl(g.scope())
+        g.scope()
+            .decl(node)
             .func()
             .expect("a fixture's node has a body")
             .clone()

@@ -20,8 +20,8 @@ use common::SerdeFormat;
 
 use crate::graph::dfs;
 use crate::graph::graph_set::GraphSet;
-use crate::graph::identity::CompoundId;
 use crate::graph::node::{Node, NodeKind};
+use crate::identity::CompoundId;
 
 /// The blake3 digest of a compound's definition.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

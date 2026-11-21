@@ -22,14 +22,15 @@ pub mod test_graph;
 #[cfg(test)]
 pub(crate) mod worker;
 
-use crate::graph::func::Func;
-use crate::graph::func::event::EventLambda;
-use crate::graph::func::func_builder::FuncBuilder;
-use crate::graph::func::lambda::FuncLambda;
-use crate::graph::func::signature::FuncSignature;
-use crate::graph::identity::{FuncId, FuncRef};
+use crate::decl::func::Func;
+use crate::decl::func::event_lambda::EventLambda;
+use crate::decl::func::func_builder::FuncBuilder;
+use crate::decl::func::func_lambda::FuncLambda;
+use crate::decl::func::func_signature::FuncRef;
+use crate::decl::func::func_signature::FuncSignature;
+use crate::decl::ports::Ports;
 use crate::graph::node::Node;
-use crate::graph::ports::Ports;
+use crate::identity::FuncId;
 
 /// A func declaration whose body does nothing, for a fixture that never runs it.
 pub fn stub_func(id: FuncId, name: impl Into<String>) -> FuncBuilder {

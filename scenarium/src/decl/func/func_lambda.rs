@@ -5,7 +5,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::data::dynamic_value::DynamicValue;
-use crate::graph::func::error::InvokeResult;
+use crate::decl::func::error::InvokeResult;
 use crate::runtime::any_state::AnyState;
 use crate::runtime::ctx_manager::CtxManager;
 use crate::runtime::shared_any_state::SharedAnyState;
@@ -87,8 +87,8 @@ pub(crate) mod internals {
     use std::io;
 
     use crate::async_lambda;
-    use crate::graph::func::error::InvokeError;
-    use crate::graph::func::lambda::FuncLambda;
+    use crate::decl::func::error::InvokeError;
+    use crate::decl::func::func_lambda::FuncLambda;
 
     impl FuncLambda {
         /// A body that does nothing, for a fixture that never runs it.

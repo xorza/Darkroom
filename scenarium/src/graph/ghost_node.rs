@@ -21,9 +21,9 @@
 
 use ::serde::{Deserialize, Serialize};
 
+use crate::decl::saved_decl::SavedDecl;
 use crate::graph::error::DetachReason;
 use crate::graph::node::Node;
-use crate::graph::saved_decl::SavedDecl;
 
 /// A node its graph cannot hold, and why the load took it out. Kept in the graph beside its
 /// nodes, under its id, so your settings and wiring outlive a library that lost a func, and a

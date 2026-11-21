@@ -1,6 +1,6 @@
 use crate::containers::col::Idx;
-use crate::graph::identity::{FuncId, NodeId};
-use crate::graph::program_id::ProgramId;
+use crate::identity::program_id::ProgramId;
+use crate::identity::{FuncId, NodeId};
 use std::panic;
 use std::sync::Arc;
 
@@ -8,14 +8,14 @@ use crate::data::const_value::ConstValue;
 use crate::data::data_type::DataType;
 use crate::data::dynamic_value::DynamicValue;
 use crate::data::ram_usage::RamUsage;
+use crate::decl::cache_mode::{CacheMode, Keep};
+use crate::decl::func::FuncBehavior;
+use crate::decl::func::func_lambda::OutputDemand;
 use crate::exec::cache::digest::Digest;
 use crate::exec::cache::runtime_cache::RuntimeCache;
 use crate::exec::cache::runtime_slot::{OutputSnapshot, RuntimeSlot, Stamp};
 use crate::exec::compile::compiled_graph::CompiledGraph;
 use crate::exec::idx::NodeIdx;
-use crate::graph::func::FuncBehavior;
-use crate::graph::func::lambda::OutputDemand;
-use crate::graph::node::{CacheMode, Keep};
 use crate::internals::program::ProgramBuilder;
 
 fn out() -> Vec<DynamicValue> {

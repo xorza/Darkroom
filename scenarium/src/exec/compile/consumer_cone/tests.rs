@@ -1,7 +1,7 @@
 use super::*;
 use crate::data::data_type::DataType;
-use crate::graph::identity::NodeId;
-use crate::graph::program_id::ProgramId;
+use crate::identity::NodeId;
+use crate::identity::program_id::ProgramId;
 use crate::internals::test_graph::compiled::Compiled;
 use crate::internals::test_graph::{NodeSpec, TestGraph};
 

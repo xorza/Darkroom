@@ -12,8 +12,8 @@
 use std::sync::LazyLock;
 
 use crate::async_lambda;
-use crate::graph::func::Func;
-use crate::graph::identity::FuncId;
+use crate::decl::func::Func;
+use crate::identity::FuncId;
 
 /// Stands in for the run-sinks node in the lowered program; not registered in any `Library`.
 const RUN_SINKS_FUNC_ID: FuncId = FuncId::literal("edec890e-5c23-49fb-a131-aaef3844d7c7");

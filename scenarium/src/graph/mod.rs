@@ -1,14 +1,12 @@
-//! The authoring graph: the [`Graph`] type, the satellite types it owns
-//! ([`Node`], [`Binding`], [`CacheMode`](node::CacheMode), …), and **every method a `Graph`
-//! has**, in one impl, so the whole surface is one file to read.
+//! The authoring graph: the [`Graph`] type and the satellite types it owns ([`Node`],
+//! [`Binding`], …).
 //!
-//! The modules beside it keep what those methods work *with*: [`identity`]
-//! how a node or port is named, [`ports`] the inputs and outputs a declaration
-//! shows, [`detached`] the reversible-removal records,
-//! [`ghost_node`] a node the graph cannot hold, [`ghost_wiring`] the wiring it cannot hold,
-//! [`error`] what validation and admission reject,
-//! [`reconciled`] what a load repaired, [`compound`] and [`graph_set`] the graphs a document
-//! holds, and [`scope`] what a graph's nodes resolve against.
+//! The modules beside it keep what its methods work *with*: [`detached`] the reversible-removal
+//! records, [`ghost_node`] a node the graph cannot hold, [`ghost_wiring`] the wiring it cannot
+//! hold, [`error`] what validation and admission reject, [`reconciled`] what a load repaired,
+//! [`compound`] and [`graph_set`] the graphs a document holds, and [`scope`] what a graph's nodes
+//! resolve against. How a node or port is named is [`identity`](crate::identity), and what a
+//! declaration shows is [`decl`](crate::decl).
 //!
 //! A graph a host keeps holds among its nodes only nodes that resolve in its scope, and only
 //! wiring [`Graph::admit`] accepts; each node it cannot hold is a [`GhostNode`] beside them, and
@@ -107,58 +105,49 @@ use ::serde::{Deserialize, Serialize};
 use hashbrown::HashMap;
 
 use crate::data::const_value::ConstValue;
+use crate::decl::ports::Ports;
+use crate::decl::ports::error::BindingRejection;
+use crate::decl::saved_decl::{SavedDecl, SavedEvent, SavedInput, SavedPort, ShownPort};
 use crate::graph::binding::Binding;
-use crate::graph::compound::Compound;
 use crate::graph::detached::{DetachedGhost, DetachedNode};
 use crate::graph::error::{
-    BindRejection, BindingRejection, DetachReason, GhostSubscriptionRejection,
-    GraphValidationError, SubscriptionRejection, ValidationResult,
+    BindRejection, DetachReason, GhostSubscriptionRejection, GraphValidationError,
+    SubscriptionRejection, ValidationResult,
 };
-use crate::graph::func::Func;
 use crate::graph::ghost_node::GhostNode;
 use crate::graph::ghost_wiring::{
     GhostBinding, GhostSource, GhostSubscription, GhostWiring, InputState, SubscriptionState,
 };
-use crate::graph::identity::{CompoundId, EventPort, InputPort, NodeId, OutputPort, TriggerPort};
 use crate::graph::manifest::Manifest;
 use crate::graph::node::{Boundary, Node, NodeKind};
 use crate::graph::node_decl::NodeDecl;
 use crate::graph::node_ref::NodeRef;
-use crate::graph::ports::Ports;
 use crate::graph::reconciled::Repair;
-use crate::graph::saved_decl::{SavedDecl, SavedEvent, SavedInput, SavedPort, ShownPort};
 use crate::graph::scope::Scope;
 use crate::graph::subscription::Subscription;
 use crate::graph::wiring::Wiring;
+use crate::identity::{CompoundId, EventPort, InputPort, NodeId, OutputPort, TriggerPort};
 
 pub(crate) mod binding;
 pub(crate) mod compound;
 pub(crate) mod detached;
 mod dfs;
 pub(crate) mod error;
-pub(crate) mod func;
 pub(crate) mod ghost_node;
 pub(crate) mod ghost_wiring;
 pub(crate) mod graph_set;
-pub(crate) mod identity;
-mod inline_ids;
-pub(crate) mod instance_path;
 pub(crate) mod interface;
 pub(crate) mod interface_change;
 pub(crate) mod manifest;
 pub(crate) mod node;
 pub(crate) mod node_decl;
 pub(crate) mod node_ref;
-pub(crate) mod port_map;
-pub(crate) mod ports;
-pub(crate) mod program_id;
 pub(crate) mod reconciled;
-pub(crate) mod saved_decl;
+pub(crate) mod remap;
 pub(crate) mod scope;
 mod serde;
 pub(crate) mod subscription;
 pub(crate) mod type_names;
-pub(crate) mod value_domain;
 pub(crate) mod wiring;
 
 /// `Clone` keeps every node id as it is, so a copy is sound only where it never lives beside its
@@ -613,10 +602,10 @@ impl Graph {
         port: InputPort,
         binding: &Binding,
     ) -> Result<(), BindingRejection> {
-        let consumer = self
-            .find(port.node_id)
-            .expect("an admitted binding's consumer is in the graph")
-            .decl(scope);
+        let consumer = scope.decl(
+            self.find(port.node_id)
+                .expect("an admitted binding's consumer is in the graph"),
+        );
         self.admit_onto(scope, consumer, port, binding)
     }
     /// [`Self::admit`] onto a consumer that declares `consumer` — for a
@@ -646,10 +635,10 @@ impl Graph {
                 }
             }
             Binding::Wire(source) => {
-                let producer = self
-                    .find(source.node_id)
-                    .expect("an admitted wire's producer is in the graph")
-                    .decl(scope);
+                let producer = scope.decl(
+                    self.find(source.node_id)
+                        .expect("an admitted wire's producer is in the graph"),
+                );
                 let output = producer
                     .ports()
                     .output(source.port)
@@ -731,13 +720,13 @@ impl Graph {
         let subscriber = self
             .find(trigger.node_id)
             .expect("an admitted subscription's subscriber is in the graph");
-        if !subscriber.decl(scope).triggers().contains(trigger.trigger) {
+        if !scope.decl(subscriber).triggers().contains(trigger.trigger) {
             return Err(SubscriptionRejection::UndeclaredTrigger);
         }
-        let emitter = self
-            .find(event.node_id)
-            .expect("an admitted subscription's emitter is in the graph")
-            .decl(scope);
+        let emitter = scope.decl(
+            self.find(event.node_id)
+                .expect("an admitted subscription's emitter is in the graph"),
+        );
         if emitter.event(event.event).is_some() {
             Ok(())
         } else {
@@ -809,21 +798,7 @@ impl Graph {
     /// As [`Self::insert`].
     pub fn insert_seeded(&mut self, node_id: NodeId, node: Node, ports: &Ports) {
         self.insert(node_id, node);
-        self.wiring.extend(ports.default_bindings(node_id));
-    }
-
-    /// Add a node of `func` with its inputs' defaults, under a fresh id.
-    pub fn add_func_node(&mut self, func: &Func) -> NodeId {
-        let node_id = NodeId::unique();
-        self.insert_seeded(node_id, Node::from(func), func.ports());
-        node_id
-    }
-
-    /// Add an instance of `compound`, held under `id`, with its inputs' defaults, under a fresh id.
-    pub fn add_instance(&mut self, id: CompoundId, compound: &Compound) -> NodeId {
-        let node_id = NodeId::unique();
-        self.insert_seeded(node_id, Node::instance(id), compound.interface.ports());
-        node_id
+        self.wiring.extend(Wiring::defaults(node_id, ports));
     }
 
     /// Take the node `node_id` out with the wiring, live and ghost, that touches it.
@@ -1425,7 +1400,7 @@ impl Graph {
         saved: Option<&'a SavedPort>,
     ) -> Option<ShownPort<'a>> {
         let declared = self.find(port.node_id).and_then(|node| {
-            let input = node.decl(scope).ports().input(port.port)?;
+            let input = scope.decl(node).ports().input(port.port)?;
             Some(ShownPort {
                 name: &input.name,
                 data_type: input.data_type,
@@ -1448,7 +1423,7 @@ impl Graph {
         saved: Option<&'a SavedPort>,
     ) -> Option<ShownPort<'a>> {
         let declared = self.find(port.node_id).and_then(|node| {
-            let output = node.decl(scope).ports().output(port.port)?;
+            let output = scope.decl(node).ports().output(port.port)?;
             Some(ShownPort {
                 name: &output.name,
                 data_type: output.data_type,
@@ -1470,7 +1445,7 @@ impl Graph {
     ) -> Option<&'a str> {
         let declared = self
             .find(port.node_id)
-            .and_then(|node| Some(node.decl(scope).event(port.event)?.name.as_str()));
+            .and_then(|node| Some(scope.decl(node).event(port.event)?.name.as_str()));
         declared
             .or_else(|| saved.map(|saved| saved.name.as_str()))
             .or_else(|| {
@@ -1553,8 +1528,8 @@ impl Graph {
                 .nodes
                 .get(&subscription.trigger.node_id)
                 .is_none_or(|node| {
-                    !node
-                        .decl(scope)
+                    !scope
+                        .decl(node)
                         .triggers()
                         .contains(subscription.trigger.trigger)
                 })
@@ -1627,7 +1602,7 @@ impl Graph {
             let Some(declared_before) = before.of(node.node_id, &node) else {
                 continue;
             };
-            for input in node.decl(scope).inputs() {
+            for input in scope.decl(&node).inputs() {
                 let port = InputPort::new(node.node_id, input.id);
                 let gained = declared_before.input(input.id).is_none();
                 if (gained || notes.defaults.contains(&port))
@@ -1684,6 +1659,32 @@ impl Graph {
         self.iter()
             .filter(move |node| node.boundary() == Some(side))
             .map(|node| node.node_id)
+    }
+}
+
+#[cfg(feature = "internals")]
+pub(crate) mod internals {
+    use crate::decl::func::Func;
+    use crate::graph::Graph;
+    use crate::graph::compound::Compound;
+    use crate::graph::node::Node;
+    use crate::identity::{CompoundId, NodeId};
+
+    /// A test's shorthand for [`Graph::insert_seeded`] under a fresh id.
+    impl Graph {
+        /// Add a node of `func` with its inputs' defaults, under a fresh id.
+        pub fn add_func_node(&mut self, func: &Func) -> NodeId {
+            let node_id = NodeId::unique();
+            self.insert_seeded(node_id, Node::from(func), func.ports());
+            node_id
+        }
+
+        /// Add an instance of `compound`, held under `id`, with its inputs' defaults, under a fresh id.
+        pub fn add_instance(&mut self, id: CompoundId, compound: &Compound) -> NodeId {
+            let node_id = NodeId::unique();
+            self.insert_seeded(node_id, Node::instance(id), compound.interface.ports());
+            node_id
+        }
     }
 }
 

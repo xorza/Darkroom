@@ -22,27 +22,14 @@
 pub(crate) mod custom_type;
 pub(crate) mod enum_type;
 pub(crate) mod file_kind;
+pub(crate) mod type_ref;
 
 use serde::{Deserialize, Serialize};
-use strum::VariantNames;
 
 use crate::data::const_value::ConstValue;
 use crate::data::data_type::custom_type::CustomTypeId;
 use crate::data::data_type::enum_type::EnumId;
 use crate::data::data_type::file_kind::FileKindId;
-
-pub trait EnumVariants {
-    fn variant_names() -> Vec<String>;
-}
-
-impl<T: VariantNames> EnumVariants for T {
-    fn variant_names() -> Vec<String> {
-        T::VARIANTS
-            .iter()
-            .map(|variant| (*variant).to_string())
-            .collect()
-    }
-}
 
 /// How a file port takes its value: the kind of value it holds, and the dialog that picks it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

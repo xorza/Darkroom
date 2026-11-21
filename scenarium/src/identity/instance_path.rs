@@ -9,16 +9,15 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::graph::identity::NodeId;
-use crate::graph::inline_ids::InlineIds;
-use crate::graph::program_id::ProgramId;
+use crate::identity::NodeId;
+use crate::identity::inline_ids::InlineIds;
 
 /// The instances from the main graph down, outermost first: one expansion of a graph in the
 /// program. Empty for the main graph; each id is an instance in the graph the path before it
-/// ends in. A [`ProgramId`] is a path and a node.
+/// ends in. A [`ProgramId`](crate::ProgramId) is a path and a node.
 ///
-/// Held inline, as a [`ProgramId`] is, so a pane or a run state keys on it with no allocation.
-/// In a file, its list of ids, read through [`Self::checked`].
+/// Held inline, as a [`ProgramId`](crate::ProgramId) is, so a pane or a run state keys on it with
+/// no allocation. In a file, its list of ids, read through [`Self::checked`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(try_from = "Vec<NodeId>", into = "Vec<NodeId>")]
 pub struct InstancePath(InlineIds<{ Self::MAX_LEN }>);
@@ -33,9 +32,10 @@ pub enum InstancePathError {
 }
 
 impl InstancePath {
-    /// The most instances a path holds: one fewer than a [`ProgramId`] holds ids, as the node
-    /// itself is the last.
-    pub const MAX_LEN: usize = ProgramId::MAX_LEN - 1;
+    /// The most instances a path holds: a program node at most seven instances down, so a
+    /// [`ProgramId`](crate::ProgramId), its path and its node, holds eight ids, 128 bytes, and
+    /// stays a plain value.
+    pub const MAX_LEN: usize = 7;
 
     /// The path of the main graph, which nothing places.
     pub const MAIN: Self = Self(InlineIds::EMPTY);
@@ -89,18 +89,6 @@ impl InstancePath {
         Self(self.0.pushed(instance))
     }
 
-    /// The program id of `node_id`, a node of the graph this path ends in.
-    ///
-    /// # Panics
-    /// If `node_id` is nil.
-    pub fn node(self, node_id: NodeId) -> ProgramId {
-        let mut ids = [NodeId::nil(); ProgramId::MAX_LEN];
-        let len = self.ids().len();
-        ids[..len].copy_from_slice(self.ids());
-        ids[len] = node_id;
-        ProgramId::new(&ids[..=len])
-    }
-
     /// The path of the graph that places the innermost instance, or `None` for the main graph.
     pub fn parent(self) -> Option<Self> {
         let (_, outer) = self.ids().split_last()?;
@@ -131,9 +119,8 @@ impl From<InstancePath> for Vec<NodeId> {
 mod tests {
     use common::SerdeFormat;
 
-    use crate::graph::identity::NodeId;
-    use crate::graph::instance_path::{InstancePath, InstancePathError};
-    use crate::graph::program_id::ProgramId;
+    use crate::identity::NodeId;
+    use crate::identity::instance_path::{InstancePath, InstancePathError};
 
     fn ids(values: &[u128]) -> Vec<NodeId> {
         values.iter().copied().map(NodeId::from_u128).collect()
@@ -162,17 +149,12 @@ mod tests {
         assert!(main.is_main());
         assert_eq!(main.parent(), None);
         assert_eq!(main.instance(), None);
-        assert_eq!(main.node(NodeId::from_u128(5)), ProgramId::new(&ids(&[5])));
 
         let inner = main.child(NodeId::from_u128(7)).child(NodeId::from_u128(3));
         assert!(!inner.is_main());
         assert_eq!(inner, InstancePath::new(&ids(&[7, 3])));
         assert_eq!(inner.instance(), Some(NodeId::from_u128(3)));
         assert_eq!(inner.parent(), Some(InstancePath::new(&ids(&[7]))));
-        assert_eq!(
-            inner.node(NodeId::from_u128(9)),
-            ProgramId::new(&ids(&[7, 3, 9]))
-        );
     }
 
     #[test]

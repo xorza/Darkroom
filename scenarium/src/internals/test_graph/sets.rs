@@ -2,9 +2,9 @@
 //! constructors for the node and compound ids a test picks by hand.
 
 use crate::data::data_type::DataType;
-use crate::graph::identity::{CompoundId, FuncId, NodeId};
+use crate::decl::ports::{EventDecl, InputDecl, OutputDecl};
 use crate::graph::node::Node;
-use crate::graph::ports::{EventDecl, InputDecl, OutputDecl};
+use crate::identity::{CompoundId, FuncId, NodeId};
 use crate::internals;
 use crate::library::Library;
 

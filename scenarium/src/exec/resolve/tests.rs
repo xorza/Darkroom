@@ -2,9 +2,9 @@
 //! [`Sweep`](crate::internals::program::sweep::Sweep) fixture.
 
 use crate::data::dynamic_value::DynamicValue;
+use crate::decl::func::func_lambda::OutputDemand;
 use crate::exec::compile::compiled_graph::ExecBinding;
 use crate::exec::schedule::NodeState;
-use crate::graph::func::lambda::OutputDemand;
 use crate::internals::program::ProgramBuilder;
 
 #[tokio::test]

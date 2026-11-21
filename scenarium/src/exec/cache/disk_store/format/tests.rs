@@ -2,15 +2,15 @@ use std::io::Cursor;
 
 use crate::data::const_value::ConstValue;
 use crate::data::dynamic_value::DynamicValue;
+use crate::decl::func::func_lambda::OutputDemand;
 use crate::exec::cache::digest::Digest;
 use crate::exec::cache::disk_store::error::{CodecFormatError, FrameError};
 use crate::exec::cache::disk_store::format::{
     BlobReader, BlobWriter, COUNT_OFFSET, DESC_LEN, FIXED_LEN, FORMAT_VERSION, header_len,
 };
-use crate::graph::func::lambda::OutputDemand;
-use crate::graph::identity::NodeId;
-use crate::graph::instance_path::InstancePath;
-use crate::graph::program_id::ProgramId;
+use crate::identity::NodeId;
+use crate::identity::instance_path::InstancePath;
+use crate::identity::program_id::ProgramId;
 use crate::internals::blob::{Blob, BlobCodec, BlobFault};
 use crate::internals::calls::Calls;
 use crate::library::Library;
@@ -123,9 +123,10 @@ fn a_blob_of_another_node_serves_nothing() {
         }
     };
     assert!(read(node()).is_some(), "its own node reads it");
-    let inner = InstancePath::MAIN
-        .child(node().node_id())
-        .node(NodeId::from_u128(9));
+    let inner = ProgramId::of(
+        InstancePath::MAIN.child(node().node_id()),
+        NodeId::from_u128(9),
+    );
     assert!(read(inner).is_none(), "a node inside it does not");
     assert!(
         read(ProgramId::from(NodeId::from_u128(8))).is_none(),

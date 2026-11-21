@@ -38,12 +38,12 @@ use common::is_debug;
 use crate::containers::col::Col;
 use crate::containers::idx_set::IdxSet;
 use crate::data::const_value::ConstValue;
+use crate::decl::func::func_lambda::OutputDemand;
 use crate::exec::compile::compiled_graph::{CompiledGraph, ExecBinding, ExecInput};
 use crate::exec::error::{ExecError, ExecResult};
 use crate::exec::idx::{NodeIdx, OutputAddr, OutputIdx};
 use crate::exec::schedule::error::{RunScheduleValidationError, ScheduleCol};
 use crate::exec::seeds::RunSeeds;
-use crate::graph::func::lambda::OutputDemand;
 use crate::graph::node::special::SpecialNode;
 
 pub(crate) mod error;

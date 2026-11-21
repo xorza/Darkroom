@@ -143,7 +143,7 @@ impl<'a> GraphCtx<'a> {
     /// The program node `node_id` of this graph is in the instance [`Self::through`] names, or
     /// `None` when the pane shows no instance.
     pub(crate) fn program_id(self, node_id: NodeId) -> Option<ProgramId> {
-        self.through.map(|path| path.node(node_id))
+        self.through.map(|path| ProgramId::of(*path, node_id))
     }
 
     /// The palette and metrics every widget in this pane paints from.
@@ -224,11 +224,11 @@ impl<'a> GraphCtx<'a> {
     /// If the graph does not hold `port`: a committed wire joins two declared
     /// ports, and an in-flight wire drops once its start is gone.
     pub(crate) fn data_type(self, port: PortRef) -> DataType {
-        let decl = self
-            .body()
-            .find(port.node_id)
-            .expect("a painted port's node is in the graph")
-            .decl(self.scope());
+        let decl = self.scope().decl(
+            self.body()
+                .find(port.node_id)
+                .expect("a painted port's node is in the graph"),
+        );
         match port.kind {
             PortKind::Input => {
                 decl.ports()

@@ -17,7 +17,7 @@ use crate::data::const_value::ConstValue;
 use crate::exec::cache::disk_store::DiskStore;
 use crate::exec::compile::compiled_graph::CompiledGraph;
 use crate::exec::error::ExecError;
-use crate::graph::program_id::ProgramId;
+use crate::identity::program_id::ProgramId;
 use crate::internals::engine::RunOutcome;
 use crate::internals::test_graph::TestGraph;
 use crate::worker::Worker;

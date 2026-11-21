@@ -27,16 +27,16 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::decl::saved_decl::{SavedEvent, SavedPort};
 use crate::graph::RefusedWiring;
 use crate::graph::binding::Binding;
 use crate::graph::ghost_wiring::{
     GhostBinding, GhostSource, GhostSubscription, GhostWiring, InputState, SubscriptionState,
 };
 use crate::graph::graph_set::GraphSet;
-use crate::graph::identity::{CompoundId, EventPort, GraphId, InputPort, OutputPort, TriggerPort};
 use crate::graph::interface::Interface;
 use crate::graph::node_decl::NodeTriggers;
-use crate::graph::saved_decl::{SavedEvent, SavedPort};
+use crate::identity::{CompoundId, EventPort, GraphId, InputPort, OutputPort, TriggerPort};
 use crate::library::Library;
 
 /// An edit of one compound's interface: the interface before and after, what it changes of each
@@ -150,18 +150,16 @@ impl GraphSet {
             // The name and type a port of a node the graph holds had, where the new interface no
             // longer gives it.
             let lost_input = |port: InputPort| {
-                if held
-                    .find(port.node_id)?
-                    .decl(scope)
+                if scope
+                    .decl(held.find(port.node_id)?)
                     .ports()
                     .input(port.port)
                     .is_some()
                 {
                     return None;
                 }
-                let input = was_graph
-                    .find(port.node_id)?
-                    .decl(was)
+                let input = was
+                    .decl(was_graph.find(port.node_id)?)
                     .ports()
                     .input(port.port)?;
                 Some(SavedPort {
@@ -170,18 +168,16 @@ impl GraphSet {
                 })
             };
             let lost_output = |port: OutputPort| {
-                if held
-                    .find(port.node_id)?
-                    .decl(scope)
+                if scope
+                    .decl(held.find(port.node_id)?)
                     .ports()
                     .output(port.port)
                     .is_some()
                 {
                     return None;
                 }
-                let output = was_graph
-                    .find(port.node_id)?
-                    .decl(was)
+                let output = was
+                    .decl(was_graph.find(port.node_id)?)
                     .ports()
                     .output(port.port)?;
                 Some(SavedPort {
@@ -190,17 +186,15 @@ impl GraphSet {
                 })
             };
             let lost_event = |event: EventPort| {
-                if held
-                    .find(event.node_id)?
-                    .decl(scope)
+                if scope
+                    .decl(held.find(event.node_id)?)
                     .event(event.event)
                     .is_some()
                 {
                     return None;
                 }
-                let old = was_graph
-                    .find(event.node_id)?
-                    .decl(was)
+                let old = was
+                    .decl(was_graph.find(event.node_id)?)
                     .event(event.event)?;
                 Some(SavedEvent {
                     name: old.name.clone(),
@@ -208,10 +202,10 @@ impl GraphSet {
             };
             let lost_trigger = |trigger: TriggerPort| {
                 let node = held.find(trigger.node_id)?;
-                if node.decl(scope).triggers().contains(trigger.trigger) {
+                if scope.decl(node).triggers().contains(trigger.trigger) {
                     return None;
                 }
-                let old = match was_graph.find(trigger.node_id)?.decl(was).triggers() {
+                let old = match was.decl(was_graph.find(trigger.node_id)?).triggers() {
                     NodeTriggers::PerEvent(events) => {
                         events.iter().find(|event| event.id == trigger.trigger)?
                     }
@@ -378,9 +372,9 @@ impl GraphSet {
 #[cfg(test)]
 pub(crate) mod internals {
     use crate::graph::ghost_wiring::{GhostBinding, GhostSubscription};
-    use crate::graph::identity::{GraphId, InputPort};
     use crate::graph::interface_change::InterfaceChange;
     use crate::graph::subscription::Subscription;
+    use crate::identity::{GraphId, InputPort};
 
     /// One binding an interface edit refuses, as a test reads it.
     #[derive(Debug)]

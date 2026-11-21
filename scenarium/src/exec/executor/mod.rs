@@ -25,14 +25,14 @@ use crate::containers::col::{Col, Idx};
 use crate::data::dynamic_value::DynamicValue;
 use crate::data::path_form::PathForm;
 use crate::data::ram_usage::RamUsage;
+use crate::decl::func::error::InvokeError;
+use crate::decl::func::func_lambda::{Invocation, OutputDemand};
 use crate::exec::idx::{NodeIdx, OutputAddr, OutputIdx};
 use crate::exec::program_event::ProgramEvent;
 use crate::exec::report::armed_event::ArmedEvent;
 use crate::exec::report::exec_outcome::ExecOutcome;
 use crate::exec::report::node_status::{NodeExecStatus, NodeStatus};
 use crate::exec::report::run_reporter::{RunPhase, RunReporter};
-use crate::graph::func::error::InvokeError;
-use crate::graph::func::lambda::{Invocation, OutputDemand};
 use crate::runtime::ctx_manager::CtxManager;
 use crate::runtime::log_entry::LogLevel;
 

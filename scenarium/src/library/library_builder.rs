@@ -10,8 +10,8 @@ use common::Id;
 use crate::data::data_type::custom_type::{CustomType, CustomTypeId};
 use crate::data::data_type::enum_type::{EnumId, EnumType};
 use crate::data::data_type::file_kind::{FileKind, FileKindId};
-use crate::graph::func::Func;
-use crate::graph::identity::FuncId;
+use crate::decl::func::Func;
+use crate::identity::FuncId;
 use crate::library::Library;
 use crate::library::func_redirect::{FuncRedirect, MAX_REDIRECTS};
 

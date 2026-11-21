@@ -1,9 +1,9 @@
 //! [`FuncInvoker`]: one func's lambda called on its own, outside any graph.
 
 use crate::data::dynamic_value::DynamicValue;
-use crate::graph::func::Func;
-use crate::graph::func::error::InvokeResult;
-use crate::graph::func::lambda::{Invocation, OutputDemand};
+use crate::decl::func::Func;
+use crate::decl::func::error::InvokeResult;
+use crate::decl::func::func_lambda::{Invocation, OutputDemand};
 use crate::runtime::any_state::AnyState;
 use crate::runtime::ctx_manager::CtxManager;
 use crate::runtime::shared_any_state::SharedAnyState;
@@ -69,11 +69,11 @@ mod tests {
     use crate::data::const_value::ConstValue;
     use crate::data::data_type::DataType;
     use crate::data::dynamic_value::DynamicValue;
-    use crate::graph::func::Func;
-    use crate::graph::func::error::InvokeError;
-    use crate::graph::func::lambda::Invocation;
-    use crate::graph::identity::FuncId;
-    use crate::graph::ports::{InputDecl, OutputDecl};
+    use crate::decl::func::Func;
+    use crate::decl::func::error::InvokeError;
+    use crate::decl::func::func_lambda::Invocation;
+    use crate::decl::ports::{InputDecl, OutputDecl};
+    use crate::identity::FuncId;
     use crate::internals::func_invoker::FuncInvoker;
     use crate::library::Library;
 

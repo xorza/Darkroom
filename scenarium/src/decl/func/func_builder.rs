@@ -3,14 +3,14 @@
 
 use common::ErrorChain;
 
-use crate::graph::func::error::FuncValidationError;
-use crate::graph::func::event::EventLambda;
-use crate::graph::func::func_decl::FuncDecl;
-use crate::graph::func::signature::FuncSignature;
-use crate::graph::func::{Func, FuncBehavior};
-use crate::graph::identity::PortId;
-use crate::graph::node::CacheMode;
-use crate::graph::ports::{EventDecl, InputDecl, Numbered, OutputDecl};
+use crate::decl::cache_mode::CacheMode;
+use crate::decl::func::error::FuncValidationError;
+use crate::decl::func::event_lambda::EventLambda;
+use crate::decl::func::func_decl::FuncDecl;
+use crate::decl::func::func_signature::FuncSignature;
+use crate::decl::func::{Func, FuncBehavior};
+use crate::decl::ports::{EventDecl, InputDecl, Numbered, OutputDecl};
+use crate::identity::PortId;
 
 /// A func declaration in progress, started by [`Func::builder`]. Its setters are the one way to
 /// write a declaration; [`checked`](Self::checked) seals it.
@@ -114,8 +114,8 @@ impl FuncBuilder {
 
 #[cfg(feature = "internals")]
 pub(crate) mod internals {
-    use crate::graph::func::func_builder::FuncBuilder;
-    use crate::graph::func::func_decl::FuncDecl;
+    use crate::decl::func::func_builder::FuncBuilder;
+    use crate::decl::func::func_decl::FuncDecl;
 
     impl FuncBuilder {
         /// The declaration in progress, for a fixture to change what no setter does.

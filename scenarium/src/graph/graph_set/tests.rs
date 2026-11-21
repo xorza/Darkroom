@@ -7,31 +7,35 @@ use common::{ErrorChain, SerdeFormat};
 use crate::data::data_type::DataType;
 use crate::data::data_type::custom_type::{CustomType, CustomTypeId};
 use crate::data::data_type::enum_type::{EnumId, EnumType};
+use crate::data::data_type::type_ref::TypeRef;
+use crate::decl::cache_mode::CacheMode;
+use crate::decl::ports::error::BindingRejection;
+use crate::decl::ports::error::PortList;
+use crate::decl::ports::{InputDecl, Numbered, OutputDecl, Ports};
+use crate::decl::saved_decl::{SavedDecl, SavedPort};
 use crate::graph::binding::Binding;
 use crate::graph::compound::Compound;
 use crate::graph::error::{
-    BindingRejection, DetachReason, GraphValidationError, PlacementRejection,
-    SubscriptionRejection, Unresolved,
+    DetachReason, GraphValidationError, PlacementRejection, SubscriptionRejection, Unresolved,
 };
 use crate::graph::ghost_node::GhostNode;
 use crate::graph::ghost_wiring::{GhostBinding, GhostSource, InputState};
-use crate::graph::graph_set::{GraphSet, InterfacePort, ProgramShape, UnknownType};
-use crate::graph::identity::{
-    CompoundId, EventPort, FuncId, GraphId, InputPort, NodeAddr, NodeId, OutputPort, PortId,
-};
-use crate::graph::instance_path::InstancePath;
+use crate::graph::graph_set::GraphSet;
+use crate::graph::graph_set::program_shape::ProgramShape;
+use crate::graph::graph_set::unknown_type::{InterfacePort, UnknownType};
 use crate::graph::interface::Interface;
 use crate::graph::interface_change::InterfaceChange;
 use crate::graph::interface_change::{ChangeSide, RefusedFate};
 use crate::graph::manifest::Manifest;
-use crate::graph::node::{Boundary, CacheMode, Node};
+use crate::graph::node::{Boundary, Node};
 use crate::graph::node_decl::NodeDecl;
-use crate::graph::ports::{InputDecl, Numbered, OutputDecl, PortList, Ports};
 use crate::graph::reconciled::Repair;
-use crate::graph::saved_decl::{SavedDecl, SavedPort};
 use crate::graph::subscription::Subscription;
-use crate::graph::type_names::TypeRef;
 use crate::graph::{Detaching, Graph};
+use crate::identity::instance_path::InstancePath;
+use crate::identity::{
+    CompoundId, EventPort, FuncId, GraphId, InputPort, NodeAddr, NodeId, OutputPort, PortId,
+};
 use crate::internals;
 use crate::internals::test_graph::sets::{
     ADD, ANY_SINK, CONFIG_SINK, SINK, SRC, TICKER, library, n, node, s,
@@ -601,10 +605,10 @@ fn boundary_nodes_mirror_the_interface_under_the_one_admission_rule() {
     let scope = set.scope(&library, GraphId::Compound(s(1)));
     let graph = set.graph(GraphId::Compound(s(1)));
 
-    let inputs_decl = graph.find(inputs).unwrap().decl(scope);
+    let inputs_decl = scope.decl(graph.find(inputs).unwrap());
     assert!(inputs_decl.inputs().is_empty());
     assert_eq!(inputs_decl.outputs()[0].data_type, DataType::Any);
-    let outputs_decl = graph.find(outputs).unwrap().decl(scope);
+    let outputs_decl = scope.decl(graph.find(outputs).unwrap());
     assert!(outputs_decl.outputs().is_empty());
     assert!(!outputs_decl.inputs()[0].required);
     assert_eq!(outputs_decl.inputs()[0].data_type, DataType::Int);
@@ -1318,14 +1322,14 @@ fn a_digest_names_the_definition_and_not_its_ids() {
 /// ghost, which a load under an interface with a trigger again brings back.
 #[test]
 fn a_subscription_lands_on_a_declared_trigger_and_an_interface_edit_refuses_it() {
+    use crate::decl::ports::EventDecl;
+    use crate::decl::saved_decl::SavedEvent;
     use crate::graph::error::SubscriptionRejection;
     use crate::graph::ghost_wiring::{GhostSubscription, SubscriptionState};
-    use crate::graph::identity::{EventPort, TriggerPort};
     use crate::graph::interface::EventPorts;
     use crate::graph::interface_change::{ChangeSide, RefusedFate};
-    use crate::graph::ports::EventDecl;
-    use crate::graph::saved_decl::SavedEvent;
     use crate::graph::subscription::Subscription;
+    use crate::identity::{EventPort, TriggerPort};
     use crate::internals::test_graph::sets::TICKER;
 
     const OUT: PortId = PortId::new(301);
@@ -1511,15 +1515,15 @@ fn a_subscription_lands_on_a_declared_trigger_and_an_interface_edit_refuses_it()
 #[test]
 fn an_interface_edit_names_the_ports_it_removes_on_existing_ghosts() {
     use crate::data::const_value::ConstValue;
+    use crate::decl::ports::{EventDecl, OutputDecl};
+    use crate::decl::saved_decl::{SavedEvent, SavedPort};
     use crate::graph::ghost_wiring::{
         GhostBinding, GhostSource, GhostSubscription, InputState, SubscriptionState,
     };
-    use crate::graph::identity::{EventPort, OutputPort, TriggerPort};
     use crate::graph::interface::EventPorts;
     use crate::graph::interface_change::{ChangeSide, RefusedFate};
-    use crate::graph::ports::{EventDecl, OutputDecl};
-    use crate::graph::saved_decl::{SavedEvent, SavedPort};
     use crate::graph::subscription::Subscription;
+    use crate::identity::{EventPort, OutputPort, TriggerPort};
     use crate::internals::test_graph::sets::TICKER;
 
     const RESULT: PortId = PortId::new(201);

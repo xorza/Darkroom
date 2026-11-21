@@ -21,9 +21,9 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::graph::identity::FuncId;
-use crate::graph::saved_decl::SavedDecl;
+use crate::decl::saved_decl::SavedDecl;
 use crate::graph::type_names::TypeNames;
+use crate::identity::FuncId;
 
 /// The saved declaration of each func a file's graphs name, and the name of each type its ports
 /// name, as the library gave them at the save.

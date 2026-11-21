@@ -1,5 +1,5 @@
 use super::*;
-use crate::graph::node::Keep;
+use crate::decl::cache_mode::Keep;
 use common::fs;
 
 #[tokio::test]

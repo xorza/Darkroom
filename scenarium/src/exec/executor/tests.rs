@@ -9,11 +9,11 @@ use super::*;
 use crate::async_lambda;
 use crate::data::const_value::ConstValue;
 use crate::data::data_type::DataType;
+use crate::decl::cache_mode::{CacheMode, Keep};
+use crate::decl::func::func_lambda::{FuncLambda, internals};
 use crate::exec::compile::compiled_graph::ExecBinding;
-use crate::graph::func::lambda::{FuncLambda, internals};
-use crate::graph::identity::{FuncId, NodeId};
-use crate::graph::node::{CacheMode, Keep};
-use crate::graph::program_id::ProgramId;
+use crate::identity::program_id::ProgramId;
+use crate::identity::{FuncId, NodeId};
 use crate::internals::program::ProgramBuilder;
 use common::MutexExt;
 

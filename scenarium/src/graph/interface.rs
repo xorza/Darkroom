@@ -18,11 +18,11 @@ use std::borrow::Cow;
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::graph::identity::PortId;
+use crate::decl::ports::error::{PortList, PortsError};
+
+use crate::decl::ports::{EventDecl, InputDecl, Numbered, OutputDecl, Ports, check_ids};
 use crate::graph::node::Boundary;
-use crate::graph::ports::{
-    EventDecl, InputDecl, Numbered, OutputDecl, PortList, Ports, PortsError, check_ids,
-};
+use crate::identity::PortId;
 
 /// The ports a compound shows, each a declaration under its id. An interface port's declaration
 /// is that of the port that made it, so a const-only input, a picker and an enum are exposed as
@@ -228,10 +228,11 @@ mod tests {
     use crate::data::const_value::ConstValue;
     use crate::data::data_type::file_kind::FileKindId;
     use crate::data::data_type::{DataType, FileMode};
-    use crate::graph::identity::PortId;
+    use crate::decl::ports::error::{PortList, PortsError};
+    use crate::decl::ports::{InputDecl, Numbered, OutputDecl, Ports};
     use crate::graph::interface::Interface;
     use crate::graph::node::Boundary;
-    use crate::graph::ports::{InputDecl, Numbered, OutputDecl, PortList, Ports, PortsError};
+    use crate::identity::PortId;
 
     fn input(id: u32) -> Numbered<InputDecl> {
         Numbered::new(
@@ -347,8 +348,8 @@ mod tests {
     /// and count in its equality; the `Inputs` node fires the trigger under the one id it takes.
     #[test]
     fn events_and_the_trigger_round_trip_and_events_hold_their_ids_apart() {
+        use crate::decl::ports::EventDecl;
         use crate::graph::interface::EventPorts;
-        use crate::graph::ports::EventDecl;
 
         let event = |id: u32, name: &str| Numbered::new(PortId::new(id), EventDecl::new(name));
         let base = Interface::new(ports(vec![input(1)], vec![]));

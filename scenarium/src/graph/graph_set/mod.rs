@@ -23,6 +23,8 @@
 //!   all. Cost: a ninth level is refused.
 
 pub(crate) mod digest;
+pub(crate) mod program_shape;
+pub(crate) mod unknown_type;
 
 use std::collections::BTreeMap;
 use std::mem;
@@ -31,6 +33,10 @@ use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::data::data_type::DataType;
+use crate::data::data_type::type_ref::TypeRef;
+use crate::decl::func::Func;
+use crate::decl::ports::error::PortList;
+use crate::decl::saved_decl::SavedDecl;
 use crate::graph::Graph;
 use crate::graph::compound::Compound;
 use crate::graph::dfs;
@@ -38,87 +44,21 @@ use crate::graph::dfs::BackEdges;
 use crate::graph::error::{
     DetachReason, GraphSetValidationError, GraphValidationError, PlacementRejection,
 };
-use crate::graph::func::Func;
 use crate::graph::ghost_node::GhostNode;
 use crate::graph::ghost_wiring::GhostSource;
-use crate::graph::identity::{CompoundId, FuncId, GraphId, NodeAddr, NodeId, PortId};
-use crate::graph::instance_path::InstancePath;
+use crate::graph::graph_set::program_shape::ProgramShape;
+use crate::graph::graph_set::unknown_type::{InterfacePort, UnknownType};
 use crate::graph::interface::Interface;
 use crate::graph::manifest::Manifest;
-use crate::graph::node::{Node, NodeKind};
+use crate::graph::node::Node;
 use crate::graph::node_decl::NodeDecl;
-use crate::graph::ports::PortList;
-use crate::graph::program_id::ProgramId;
 use crate::graph::reconciled::{GraphSetReconciled, Repair};
-use crate::graph::saved_decl::SavedDecl;
 use crate::graph::scope::Scope;
-use crate::graph::type_names::{TypeNames, TypeRef};
+use crate::graph::type_names::TypeNames;
 use crate::graph::{Before, Detaching, RefusedWiring};
+use crate::identity::instance_path::InstancePath;
+use crate::identity::{CompoundId, FuncId, GraphId, NodeAddr, NodeId};
 use crate::library::{Library, UNKNOWN_TYPE};
-
-/// What a graph expands into: how deep its program paths run and how many program nodes it
-/// makes.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct ProgramShape {
-    /// The longest program path among its nodes: 1 for a graph of funcs alone, one more for each
-    /// instance a node lies inside.
-    pub levels: usize,
-    pub node_count: usize,
-}
-
-impl ProgramShape {
-    /// The deepest a graph nests: a [`ProgramId`] holds this many ids.
-    pub const MAX_LEVELS: usize = ProgramId::MAX_LEN;
-    /// The most program nodes a graph expands into: 2¹⁶, past every graph a person wires by hand
-    /// yet small enough that a blowup stays a refused edit, not a compile that runs out of
-    /// memory.
-    pub const MAX_NODES: usize = 1 << 16;
-
-    /// What one node of kind `kind` adds, given the shape of every compound it may place.
-    fn of_node(kind: &NodeKind, shapes: &HashMap<CompoundId, Self>) -> Self {
-        match kind {
-            NodeKind::Body { .. } => Self {
-                levels: 1,
-                node_count: 1,
-            },
-            NodeKind::Instance { compound, .. } => {
-                let inner = shapes
-                    .get(compound)
-                    .expect("a placed compound's shape is known before its instance's");
-                Self {
-                    levels: inner.levels + 1,
-                    node_count: inner.node_count,
-                }
-            }
-            NodeKind::Boundary(_) => Self::default(),
-        }
-    }
-
-    /// This shape with `other` beside it in one graph.
-    fn beside(self, other: Self) -> Self {
-        Self {
-            levels: self.levels.max(other.levels),
-            node_count: self.node_count.saturating_add(other.node_count),
-        }
-    }
-
-    /// Why a graph of this shape is one a set may not hold, or `None` if it fits.
-    const fn rejection(self, graph: GraphId) -> Option<PlacementRejection> {
-        if self.levels > Self::MAX_LEVELS {
-            Some(PlacementRejection::TooDeep {
-                graph,
-                levels: self.levels,
-            })
-        } else if self.node_count > Self::MAX_NODES {
-            Some(PlacementRejection::TooLarge {
-                graph,
-                node_count: self.node_count,
-            })
-        } else {
-            None
-        }
-    }
-}
 
 /// Every graph of a document: its main graph, and the compounds it holds by id.
 ///
@@ -135,23 +75,6 @@ pub struct GraphSet {
     /// load and as a definition enters, written by the next save's manifest.
     #[serde(skip)]
     type_names: TypeNames,
-}
-
-/// A type an interface names that the library does not register, and each interface port that
-/// names it: what a load reports, as the ports are kept as written.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct UnknownType {
-    pub data_type: DataType,
-    pub ports: Vec<InterfacePort>,
-}
-
-/// One port of a compound's interface.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct InterfacePort {
-    pub compound: CompoundId,
-    /// [`PortList::Inputs`] or [`PortList::Outputs`]: an event carries no type to be unknown.
-    pub list: PortList,
-    pub port: PortId,
 }
 
 impl From<Graph> for GraphSet {
@@ -308,7 +231,7 @@ impl GraphSet {
                 Some(self.compound(id).expect("a scope's compound is in the set"))
             }
         };
-        Scope::new(library, self, owner)
+        Scope::new(library, &self.compounds, owner)
     }
 
     /// The graph `path` ends in: each of its ids an instance in the graph the path before it ends
@@ -411,7 +334,7 @@ impl GraphSet {
         let mut shapes: HashMap<CompoundId, ProgramShape> =
             HashMap::with_capacity(walk.post_order.len());
         let shape_with = |id: GraphId, held: &Graph, shapes: &HashMap<CompoundId, ProgramShape>| {
-            let shape = shape_of(held, shapes);
+            let shape = ProgramShape::of_graph(held, shapes);
             if id == graph {
                 shape.beside(grown)
             } else {
@@ -429,7 +352,7 @@ impl GraphSet {
                 .get(&id)
                 .expect("the graph an add lands in is in the set"),
         };
-        if let Some(rejection) = own.rejection(graph) {
+        if let Some(rejection) = rejection(own, graph) {
             return Err(rejection);
         }
         // The graphs that place `graph` grow with it; the first in id order that passes a bound
@@ -440,7 +363,7 @@ impl GraphSet {
                 .map(|(id, shape)| (GraphId::Compound(*id), *shape)),
         );
         others
-            .filter_map(|(id, shape)| shape.rejection(id).map(|rejection| (id, rejection)))
+            .filter_map(|(id, shape)| rejection(shape, id).map(|rejection| (id, rejection)))
             .min_by_key(|(id, _)| *id)
             .map_or(Ok(()), |(_, rejection)| Err(rejection))
     }
@@ -467,7 +390,7 @@ impl GraphSet {
         }
         let shapes = self.shapes(&walk.post_order);
         for (graph, held) in self.graphs() {
-            if let Some(rejection) = shape_of(held, &shapes).rejection(graph) {
+            if let Some(rejection) = rejection(ProgramShape::of_graph(held, &shapes), graph) {
                 return Err(GraphSetValidationError {
                     graph,
                     error: GraphValidationError::Placement(rejection),
@@ -631,7 +554,7 @@ impl GraphSet {
             let graph = GraphId::Compound(id);
             let refused = over_bounds(self.graph(graph), &shapes);
             self.detach(library, manifest, graph, refused, &mut reports);
-            shapes.insert(id, shape_of(self.graph(graph), &shapes));
+            shapes.insert(id, ProgramShape::of_graph(self.graph(graph), &shapes));
         }
         let refused = over_bounds(&self.main, &shapes);
         self.detach(library, manifest, GraphId::Main, refused, &mut reports);
@@ -793,7 +716,10 @@ impl GraphSet {
     fn shapes(&self, post_order: &[CompoundId]) -> HashMap<CompoundId, ProgramShape> {
         let mut shapes = HashMap::with_capacity(post_order.len());
         for id in post_order {
-            shapes.insert(*id, shape_of(&self.compounds[id].graph, &shapes));
+            shapes.insert(
+                *id,
+                ProgramShape::of_graph(&self.compounds[id].graph, &shapes),
+            );
         }
         shapes
     }
@@ -816,11 +742,21 @@ fn reattaches(repair: &Repair, node_id: NodeId) -> bool {
     }
 }
 
-/// What `graph` expands into, given the shape of every compound it places.
-fn shape_of(graph: &Graph, shapes: &HashMap<CompoundId, ProgramShape>) -> ProgramShape {
-    graph.iter().fold(ProgramShape::default(), |shape, node| {
-        shape.beside(ProgramShape::of_node(&node.kind, shapes))
-    })
+/// Why a graph of `shape` is one a set may not hold, or `None` if it fits.
+const fn rejection(shape: ProgramShape, graph: GraphId) -> Option<PlacementRejection> {
+    if shape.levels > ProgramShape::MAX_LEVELS {
+        Some(PlacementRejection::TooDeep {
+            graph,
+            levels: shape.levels,
+        })
+    } else if shape.node_count > ProgramShape::MAX_NODES {
+        Some(PlacementRejection::TooLarge {
+            graph,
+            node_count: shape.node_count,
+        })
+    } else {
+        None
+    }
 }
 
 /// The nodes of `graph` that pass its bounds, in node-id order: each one whose own levels pass

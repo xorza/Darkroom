@@ -1,5 +1,5 @@
 use crate::exec::program_event::ProgramEvent;
-use crate::graph::program_id::ProgramId;
+use crate::identity::program_id::ProgramId;
 
 /// What seeds a run's schedule — the roots the planner walks back from. The four
 /// are independent and combine: a run can target sink nodes, the event loop's
@@ -46,7 +46,7 @@ impl RunSeeds {
 pub(crate) mod internals {
     use crate::exec::program_event::ProgramEvent;
     use crate::exec::seeds::RunSeeds;
-    use crate::graph::program_id::ProgramId;
+    use crate::identity::program_id::ProgramId;
 
     impl RunSeeds {
         pub(crate) fn sinks() -> Self {

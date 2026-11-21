@@ -563,7 +563,7 @@ fn removing_an_instance_clears_what_showed_through_it() {
     document.sides.get_mut(&id).unwrap().through = Some(path);
     let pane = TabRef::Graph(GraphId::Compound(id));
     let shown = [
-        TabRef::Viewer(ViewTarget::Node(path.node(preview))),
+        TabRef::Viewer(ViewTarget::Node(ProgramId::of(path, preview))),
         TabRef::Inspector(InspectTarget::Node {
             addr: NodeAddr::new(GraphId::Compound(id), preview),
             through: Some(path),

@@ -6,7 +6,7 @@ use crate::data::ram_usage::RamUsage;
 use crate::exec::cache::disk_store::DiskStore;
 use crate::exec::compile::compiled_graph::CompiledGraph;
 use crate::exec::report::run_reporter::RunPhase;
-use crate::graph::program_id::ProgramId;
+use crate::identity::program_id::ProgramId;
 use crate::worker::activity::WorkerActivity;
 use crate::worker::run_summary::RunSummary;
 

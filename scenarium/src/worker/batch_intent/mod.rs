@@ -5,7 +5,7 @@ use crate::exec::cache::disk_store::DiskStore;
 use crate::exec::compile::compiled_graph::CompiledGraph;
 use crate::exec::program_event::ProgramEvent;
 use crate::exec::seeds::RunSeeds;
-use crate::graph::program_id::ProgramId;
+use crate::identity::program_id::ProgramId;
 use crate::worker::protocol::WorkerMessage;
 
 #[derive(Debug)]

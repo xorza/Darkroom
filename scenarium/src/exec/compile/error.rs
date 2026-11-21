@@ -11,8 +11,8 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 
 use crate::exec::idx::{NodeIdx, OutputAddr};
-use crate::graph::identity::FuncId;
-use crate::graph::program_id::ProgramId;
+use crate::identity::FuncId;
+use crate::identity::program_id::ProgramId;
 
 /// Self-consistency checks for the compile artifact. Each fallible `validate` has an
 /// `is_debug()`-gated `validate_debug` wrapper, so production call sites pay nothing

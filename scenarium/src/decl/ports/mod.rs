@@ -19,22 +19,21 @@
 //!   pair them. Refused: an `id` field that is nil until the port is numbered, a state a check
 //!   had to catch.
 
-use std::fmt;
 use std::ops::{Deref, DerefMut};
 
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
 
 use crate::data::const_value::ConstValue;
 use crate::data::data_type::enum_type::EnumId;
 use crate::data::data_type::{DataType, Strictness};
-use crate::graph::binding::Binding;
-use crate::graph::identity::{InputPort, NodeId, PortId};
-use crate::graph::value_domain::ValueDomain;
-use crate::graph::value_domain::float_span::FloatSpan;
-use crate::graph::value_domain::int_span::IntSpan;
-use crate::graph::value_domain::value_variant::ValueVariant;
-use crate::graph::wiring::Wiring;
+use crate::decl::ports::error::{PortList, PortsError};
+use crate::decl::value_domain::ValueDomain;
+use crate::decl::value_domain::float_span::FloatSpan;
+use crate::decl::value_domain::int_span::IntSpan;
+use crate::decl::value_domain::value_variant::ValueVariant;
+use crate::identity::PortId;
+
+pub(crate) mod error;
 
 /// A port's declaration under its id: the item a declaration's lists of ports hold.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -297,21 +296,6 @@ impl Ports {
     pub fn output_idx(&self, id: PortId) -> Option<usize> {
         self.outputs.iter().position(|output| output.id == id)
     }
-
-    /// The const bindings a fresh node `node_id` of these ports starts with: one per input that
-    /// declares a default, on that input.
-    pub fn default_bindings(&self, node_id: NodeId) -> Wiring {
-        let mut wiring = Wiring::default();
-        for input in &self.inputs {
-            if let Some(default) = &input.default_value {
-                wiring.bind(
-                    InputPort::new(node_id, input.id),
-                    Binding::Const(default.clone()),
-                );
-            }
-        }
-        wiring
-    }
 }
 
 /// Hold `ids`, the ports of one side in order, to the id rule: none twice.
@@ -327,39 +311,4 @@ pub(crate) fn check_ids(
         seen.push(port_id);
     }
     Ok(())
-}
-
-/// Which side of a declaration a port lies on.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PortList {
-    Inputs,
-    Outputs,
-    Events,
-}
-
-impl fmt::Display for PortList {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Inputs => "input",
-            Self::Outputs => "output",
-            Self::Events => "event",
-        })
-    }
-}
-
-/// Why a list of ports is no declaration's: what [`Ports::check`] refuses.
-#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
-pub enum PortsError {
-    #[error("{list} {idx} repeats the id {port_id:?} of an earlier one")]
-    DuplicateId {
-        list: PortList,
-        idx: usize,
-        port_id: PortId,
-    },
-    #[error("{list} {idx} names a type under the nil id")]
-    NilType { list: PortList, idx: usize },
-    #[error("input {idx} declares a default that matches neither its type nor its domain")]
-    InvalidDefault { idx: usize },
-    #[error("input {idx} declares a span of another number type than its own")]
-    DomainMismatch { idx: usize },
 }

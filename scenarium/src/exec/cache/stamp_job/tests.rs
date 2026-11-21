@@ -11,7 +11,7 @@ use crate::exec::cache::digest::{Digest, DigestHasher, InputTag};
 use crate::exec::cache::runtime_cache::RuntimeCache;
 use crate::exec::cache::stamp_job::error::StampError;
 use crate::exec::cache::stamp_job::{FsPathId, StampJob};
-use crate::graph::identity::FuncId;
+use crate::identity::FuncId;
 use crate::internals::program::ProgramBuilder;
 
 fn fingerprint_with(job: &mut StampJob, path: &str) -> Digest {

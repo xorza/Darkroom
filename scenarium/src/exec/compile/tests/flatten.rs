@@ -1,12 +1,12 @@
 //! The compile's flatten: a document with compounds lowers to the program its hand-inlined twin
 //! does, each node inside an instance under the path of instances down to it.
 
-use crate::graph::node::Keep;
+use crate::decl::cache_mode::Keep;
 use std::collections::{BTreeMap, HashMap};
 
 use super::*;
+use crate::decl::ports::{InputDecl, Numbered, OutputDecl, Ports};
 use crate::graph::compound::Compound;
-use crate::graph::ports::{InputDecl, Numbered, OutputDecl, Ports};
 use crate::internals::engine::TestEngine;
 use crate::internals::test_graph::sets::{
     ADD, CONFIG_SINK, SINK, SRC, TICKER, library, n, node, s,
@@ -451,9 +451,9 @@ fn a_subscription_inside_a_compound_stays_inside_each_instance() {
 /// fires its `Outputs` node reaches the main graph's sink too.
 #[test]
 fn an_event_crosses_boundaries_on_the_interface() {
-    use crate::graph::identity::TriggerPort;
+    use crate::decl::ports::EventDecl;
     use crate::graph::interface::EventPorts;
-    use crate::graph::ports::EventDecl;
+    use crate::identity::TriggerPort;
 
     const OUT: PortId = PortId::new(301);
     const IN: PortId = Interface::TRIGGER_EVENT;
@@ -528,10 +528,10 @@ async fn a_flattened_program_runs() {
     g.add("sum", NodeSpec::sum);
     g.add("sum sink", NodeSpec::records);
     g.add("pass sink", NodeSpec::records);
+    let removed = g.remove("sum");
     let sum = g
-        .remove("sum")
-        .node()
-        .decl(g.scope())
+        .scope()
+        .decl(removed.node())
         .func()
         .expect("`sum` has a body")
         .clone();

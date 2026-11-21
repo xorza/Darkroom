@@ -12,7 +12,7 @@ use palantir::{
 use glam::Vec2;
 use scenarium::{
     Boundary, Compound, CompoundId, Func, GraphId, Library, Node, NodeId, Ports, SPECIAL_NODES,
-    SpecialNode,
+    SpecialNode, Wiring,
 };
 
 use crate::core::document::Document;
@@ -387,7 +387,7 @@ impl NodePalette<'_> {
                 pos: self.pos,
                 node_id,
                 node,
-                bindings: entry.ports().default_bindings(node_id),
+                bindings: Wiring::defaults(node_id, entry.ports()),
             },
             wire: landing
                 .zip(self.dropped)

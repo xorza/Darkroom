@@ -32,9 +32,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::graph::Graph;
-use crate::graph::identity::NodeId;
 use crate::graph::interface::Interface;
 use crate::graph::node::{Boundary, Node};
+use crate::identity::NodeId;
 
 /// A graph with an interface, held by a document; a node of it is an *instance*. One kind for
 /// every use: a compound used once behaves as a private one, as Blender's node groups, shared

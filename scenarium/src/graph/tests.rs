@@ -6,28 +6,30 @@ use ron::value::RawValue;
 use crate::data::const_value::ConstValue;
 use crate::data::data_type::file_kind::FileKindId;
 use crate::data::data_type::{DataType, FileMode};
+use crate::decl::cache_mode::{CacheMode, Keep};
+use crate::decl::func::Func;
+use crate::decl::func::func_decl::FuncDecl;
+use crate::decl::ports::error::BindingRejection;
+use crate::decl::ports::{InputDecl, Numbered};
+use crate::decl::saved_decl::{SavedDecl, SavedEvent, SavedInput, SavedPort, ShownPort};
 use crate::graph::binding::Binding;
 use crate::graph::detached::{DetachedNode, DetachedNodeParts};
 use crate::graph::error::{
-    BindRejection, BindingRejection, DetachReason, DetachedNodeError, GhostSubscriptionRejection,
+    BindRejection, DetachReason, DetachedNodeError, GhostSubscriptionRejection,
     GraphValidationError, SubscriptionRejection, Unresolved,
 };
-use crate::graph::func::Func;
-use crate::graph::func::func_decl::FuncDecl;
 use crate::graph::ghost_node::GhostNode;
 use crate::graph::ghost_wiring::{
     GhostBinding, GhostSource, GhostSubscription, GhostWiring, InputState, SubscriptionState,
 };
 use crate::graph::graph_set::GraphSet;
-use crate::graph::identity::{EventPort, FuncId, GraphId, PortId};
 use crate::graph::manifest::Manifest;
-use crate::graph::node::{BodySource, CacheMode, Keep, Node, NodeKind};
-use crate::graph::ports::{InputDecl, Numbered};
+use crate::graph::node::{BodySource, Node, NodeKind};
 use crate::graph::reconciled::Repair;
-use crate::graph::saved_decl::{SavedDecl, SavedEvent, SavedInput, SavedPort, ShownPort};
 use crate::graph::subscription::Subscription;
 use crate::graph::wiring::Wiring;
 use crate::graph::{Detaching, Graph, InputPort, NodeId, OutputPort};
+use crate::identity::{EventPort, FuncId, GraphId, PortId};
 use crate::internals;
 use crate::internals::test_graph::TestGraph;
 use common::{ErrorChain, SerdeFormat};
@@ -2183,7 +2185,7 @@ fn a_bind_is_held_to_its_nodes_its_input_and_the_loops_it_would_close() {
     let fresh = NodeId::unique();
     {
         let scope = g.scope();
-        let decl = g.graph().find(g.id("sum")).unwrap().decl(scope);
+        let decl = scope.decl(g.graph().find(g.id("sum")).unwrap());
         let onto = |port: u32, binding: &Binding| {
             g.graph().admit_onto(
                 scope,
@@ -2217,7 +2219,7 @@ fn a_bind_is_held_to_its_nodes_its_input_and_the_loops_it_would_close() {
 fn a_port_shows_what_the_first_declaration_that_knows_it_gives() {
     let mut g = TestGraph::sample();
     let sum = g.id("sum");
-    let declared = &g.graph().find(sum).unwrap().decl(g.scope()).inputs()[0];
+    let declared = &g.scope().decl(g.graph().find(sum).unwrap()).inputs()[0];
     let (declared_name, declared_type) = (declared.name.clone(), declared.data_type);
     let saved = SavedPort {
         name: "kept".to_owned(),

@@ -3,7 +3,7 @@
 use ::serde::{Deserialize, Serialize};
 
 use crate::data::const_value::ConstValue;
-use crate::graph::identity::{InputPort, NodeId, OutputPort, PortId};
+use crate::identity::{InputPort, NodeId, OutputPort, PortId};
 
 /// What a consumer input port is wired to; an input a graph binds nothing to is unbound.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

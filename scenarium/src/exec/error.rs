@@ -1,7 +1,7 @@
 use thiserror::Error;
 
-use crate::graph::func::error::InvokeError;
-use crate::graph::program_id::ProgramId;
+use crate::decl::func::error::InvokeError;
+use crate::identity::program_id::ProgramId;
 
 /// An **operation-level** failure that aborts a whole plan / run: a node seed had no
 /// occurrence ([`NodeSeedNotFound`](ExecError::NodeSeedNotFound)). It's the error type of the

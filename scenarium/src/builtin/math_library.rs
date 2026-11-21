@@ -1,9 +1,9 @@
 use crate::async_lambda;
 use crate::data::data_type::DataType;
-use crate::graph::func::Func;
-use crate::graph::func::lambda::{FuncLambda, Invocation};
-use crate::graph::identity::FuncId;
-use crate::graph::ports::{InputDecl, OutputDecl};
+use crate::decl::func::Func;
+use crate::decl::func::func_lambda::{FuncLambda, Invocation};
+use crate::decl::ports::{InputDecl, OutputDecl};
+use crate::identity::FuncId;
 use crate::library::library_builder::LibraryBuilder;
 use common::Libm;
 
@@ -409,7 +409,7 @@ mod tests {
     use super::*;
     use crate::data::const_value::ConstValue;
     use crate::data::dynamic_value::DynamicValue;
-    use crate::graph::func::error::InvokeError;
+    use crate::decl::func::error::InvokeError;
     use crate::internals::func_invoker::FuncInvoker;
 
     async fn invoke(name: &str, values: &[DynamicValue]) -> Result<Vec<DynamicValue>, InvokeError> {

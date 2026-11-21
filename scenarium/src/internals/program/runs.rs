@@ -5,6 +5,7 @@ use common::CancelToken;
 use crate::containers::col::Col;
 use crate::data::dynamic_value::DynamicValue;
 use crate::data::ram_usage::RamUsage;
+use crate::decl::func::func_lambda::OutputDemand;
 use crate::exec::cache::runtime_cache::RuntimeCache;
 use crate::exec::compile::compiled_graph::CompiledGraph;
 use crate::exec::error::RunError;
@@ -13,7 +14,6 @@ use crate::exec::report::exec_outcome::ExecOutcome;
 use crate::exec::report::run_reporter::internals::DiscardedReports;
 use crate::exec::resolve;
 use crate::exec::schedule::{NodeState, ResolvedOutputs, RootFlags, RunSchedule};
-use crate::graph::func::lambda::OutputDemand;
 use crate::internals::program::{Placed, ProgramBuilder};
 
 /// The executor over a hand-built program, keeping its cache and run loop across

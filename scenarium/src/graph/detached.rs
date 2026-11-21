@@ -14,9 +14,9 @@ use ::serde::{Deserialize, Serialize};
 use crate::graph::error::DetachedNodeError;
 use crate::graph::ghost_node::GhostNode;
 use crate::graph::ghost_wiring::GhostWiring;
-use crate::graph::identity::NodeId;
 use crate::graph::node::Node;
 use crate::graph::wiring::Wiring;
+use crate::identity::NodeId;
 
 /// A node taken out of a graph, with every binding and subscription that touched it and each
 /// ghost that touched it. Well formed by construction: [`new`](Self::new) checks a record from

@@ -6,10 +6,11 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::graph::graph_set::ProgramShape;
-use crate::graph::identity::{EventPort, GraphId, InputPort, NodeId, OutputPort};
-use crate::graph::program_id::ProgramId;
+use crate::decl::ports::error::BindingRejection;
+use crate::graph::graph_set::program_shape::ProgramShape;
 use crate::graph::subscription::Subscription;
+use crate::identity::program_id::ProgramId;
+use crate::identity::{EventPort, GraphId, InputPort, NodeId, OutputPort};
 
 /// Every graph validation returns this.
 pub(crate) type ValidationResult<T> = Result<T, GraphValidationError>;
@@ -59,21 +60,6 @@ pub enum DetachReason {
     TooDeep,
     #[error("it makes the program larger than {max} nodes", max = ProgramShape::MAX_NODES)]
     TooLarge,
-}
-
-/// Why [`Graph::admit`](crate::Graph::admit) refuses a binding.
-#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
-pub enum BindingRejection {
-    #[error("its node does not declare the input")]
-    UndeclaredInput,
-    #[error("the producer does not declare the output")]
-    UndeclaredOutput,
-    #[error("the input is const-only and cannot take a wire")]
-    WiredConstOnly,
-    #[error("the input does not accept the constant")]
-    ConstMismatch,
-    #[error("the input does not accept the producer's output type")]
-    WireMismatch,
 }
 
 /// Why a graph cannot hold a binding now: what [`Graph::admit_bind`](crate::Graph::admit_bind)

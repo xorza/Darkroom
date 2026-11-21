@@ -325,7 +325,10 @@ impl RunState {
             // Ordered by program id, the nodes inside an instance follow its own id in one run.
             let inside = self
                 .nodes
-                .range((Bound::Excluded(parent.node(instance)), Bound::Unbounded))
+                .range((
+                    Bound::Excluded(ProgramId::of(parent, instance)),
+                    Bound::Unbounded,
+                ))
                 .take_while(|(id, _)| id.ids().starts_with(path.ids()));
             for (&program_id, node) in inside {
                 folded.absorb(program_id, &node.status);

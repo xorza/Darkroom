@@ -269,7 +269,9 @@ pub(crate) fn rename_wid(compound: CompoundId) -> WidgetId {
 mod tests {
     use std::sync::Arc;
 
-    use scenarium::{Compound, CompoundId, GraphId, InstancePath, Interface, Node, NodeAddr};
+    use scenarium::{
+        Compound, CompoundId, GraphId, InstancePath, Interface, Node, NodeAddr, ProgramId,
+    };
 
     use crate::core::document::inspect_target::InspectTarget;
     use crate::core::document::internals::{DocumentFixture, insert_compound};
@@ -297,7 +299,7 @@ mod tests {
         assert_eq!(label(TabRef::Graph(GraphId::Compound(id))), "Denoise");
         let path = InstancePath::new(&[instance]);
         assert_eq!(
-            label(TabRef::Viewer(ViewTarget::Node(path.node(shown)))),
+            label(TabRef::Viewer(ViewTarget::Node(ProgramId::of(path, shown)))),
             "Viewer \u{b7} Shown"
         );
         assert_eq!(label(TabRef::Viewer(ViewTarget::Active)), "Viewer");

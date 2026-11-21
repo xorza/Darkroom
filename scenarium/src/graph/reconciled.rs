@@ -10,9 +10,9 @@ use crate::graph::binding::Binding;
 use crate::graph::error::{
     BindRejection, DetachReason, GhostSubscriptionRejection, SubscriptionRejection,
 };
-use crate::graph::identity::{FuncId, GraphId, InputPort, NodeId};
 use crate::graph::node::Boundary;
 use crate::graph::subscription::Subscription;
+use crate::identity::{FuncId, GraphId, InputPort, NodeId};
 
 /// Every change a load made to a set of graphs: what
 /// [`GraphSet::reconcile`](crate::GraphSet::reconcile) reports.
@@ -179,8 +179,8 @@ impl Display for Repair {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use crate::graph::identity::GraphId;
     use crate::graph::reconciled::{GraphSetReconciled, Repair};
+    use crate::identity::GraphId;
 
     impl GraphSetReconciled {
         /// What the load changed in `graph`, none for a graph it left as it was.

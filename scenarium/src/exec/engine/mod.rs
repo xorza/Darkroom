@@ -24,7 +24,7 @@ use crate::exec::resolve;
 use crate::exec::schedule::RunSchedule;
 use crate::exec::schedule::planner::Planner;
 use crate::exec::seeds::RunSeeds;
-use crate::graph::program_id::ProgramId;
+use crate::identity::program_id::ProgramId;
 
 /// The run-side pipeline container: the installed program, the reusable `schedule` buffer, the
 /// `planner` (scheduling scratch), the cross-run `cache` (per-node outputs, plus its owned
@@ -276,6 +276,7 @@ impl ExecEngine {
 pub(crate) mod internals {
 
     use crate::data::dynamic_value::DynamicValue;
+    use crate::decl::func::func_lambda::OutputDemand;
     use crate::exec::cache::disk_store::DiskStore;
     use crate::exec::cache::runtime_slot::{OutputSnapshot, RuntimeSlot};
     use crate::exec::compile;
@@ -288,9 +289,8 @@ pub(crate) mod internals {
     use crate::exec::resolve;
     use crate::exec::schedule::NodeState;
     use crate::exec::seeds::RunSeeds;
-    use crate::graph::func::lambda::OutputDemand;
     use crate::graph::graph_set::GraphSet;
-    use crate::graph::program_id::ProgramId;
+    use crate::identity::program_id::ProgramId;
     use crate::library::Library;
 
     #[derive(Debug, Default)]

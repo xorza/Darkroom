@@ -9,7 +9,7 @@ use crate::exec::engine::{ExecEngine, ExecuteRequest};
 use crate::exec::report::exec_outcome::ExecOutcome;
 use crate::exec::report::run_reporter::RunPhase;
 use crate::exec::report::run_reporter::RunReporter;
-use crate::graph::program_id::ProgramId;
+use crate::identity::program_id::ProgramId;
 use crate::worker::active_event_loop::ActiveEventLoop;
 use crate::worker::activity::WorkerActivity;
 use crate::worker::batch_intent::{BatchIntent, GraphOp, LoopCommand};

@@ -1,10 +1,11 @@
 //! [`FuncSignature`]: a digest of a func's ports, which a compiled node's state and cached values
-//! are owned by.
+//! are owned by, and the [`FuncRef`] a compiled node runs under.
 
 use std::fmt;
 
 use crate::data::data_type::{DataType, FileMode};
-use crate::graph::ports::{EventDecl, Numbered, Ports};
+use crate::decl::ports::{EventDecl, Numbered, Ports};
+use crate::identity::FuncId;
 
 /// A digest of a func's ports: each input's and output's id and type, and each event's id, in
 /// order.
@@ -21,8 +22,8 @@ impl FuncSignature {
     const DOMAIN: &'static [u8] = b"scenarium-func-signature-v4";
 
     /// The signature of `ports` and `events`, in order — what
-    /// [`FuncBuilder::checked`](crate::graph::func::func_builder::FuncBuilder::checked)
-    /// seals into a [`Func`](crate::graph::func::Func).
+    /// [`FuncBuilder::checked`](crate::decl::func::func_builder::FuncBuilder::checked)
+    /// seals into a [`Func`](crate::decl::func::Func).
     pub(crate) fn of(ports: &Ports, events: &[Numbered<EventDecl>]) -> Self {
         let mut hasher = blake3::Hasher::new();
         hasher.update(Self::DOMAIN);
@@ -49,6 +50,29 @@ impl FuncSignature {
     /// The digest's bytes, for a fold that keys on the signature.
     pub(crate) const fn bytes(&self) -> &[u8; 32] {
         &self.0
+    }
+}
+
+/// The implementation a compiled node runs: its func's id and the signature of its ports, which
+/// a node's state and cached values are owned by. Internal to the crate: a node names its func by
+/// its [`FuncId`] alone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct FuncRef {
+    id: FuncId,
+    signature: FuncSignature,
+}
+
+impl FuncRef {
+    pub(crate) const fn new(id: FuncId, signature: FuncSignature) -> Self {
+        Self { id, signature }
+    }
+
+    pub(crate) const fn id(self) -> FuncId {
+        self.id
+    }
+
+    pub(crate) const fn signature(self) -> FuncSignature {
+        self.signature
     }
 }
 
@@ -92,77 +116,4 @@ impl fmt::Debug for FuncSignature {
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::data::data_type::file_kind::FileKindId;
-    use crate::data::data_type::{DataType, FileMode};
-    use crate::graph::func::signature::FuncSignature;
-    use crate::graph::identity::FuncId;
-    use crate::graph::ports::{EventDecl, InputDecl, OutputDecl};
-    use crate::internals;
-
-    /// One small func's signature, from its bytes written out by hand rather than by the
-    /// encoder: the domain, then each length-prefixed list — input 3 of kind 2 (Int), output 1 of
-    /// kind 1 (Float), event 2 — each port id 4 bytes and each type its tag and 16 id bytes.
-    #[test]
-    fn a_small_func_has_the_pinned_signature() {
-        let func = internals::stub_func(FuncId::from_u128(1), "pinned")
-            .input(3, InputDecl::required("value", DataType::Int))
-            .output(1, OutputDecl::new("out", DataType::Float))
-            .event(2, EventDecl::new("tick"), internals::stub_event())
-            .build();
-        let count = |n: u64| n.to_le_bytes().to_vec();
-        let port = |n: u32| n.to_le_bytes().to_vec();
-        let type_id = |n: u128| n.to_le_bytes().to_vec();
-        let layout = [
-            b"scenarium-func-signature-v4".to_vec(),
-            count(1),
-            port(3),
-            vec![2],
-            type_id(0),
-            count(1),
-            port(1),
-            vec![1],
-            type_id(0),
-            count(1),
-            port(2),
-        ]
-        .concat();
-        assert_eq!(
-            func.func_ref().signature(),
-            FuncSignature(*blake3::hash(&layout).as_bytes())
-        );
-    }
-
-    /// The signature changes with what a run reads of a port, its id and its type, a file's
-    /// kind and mode included, and not with its name or description.
-    #[test]
-    fn a_signature_covers_ids_and_types_and_not_names() {
-        let file = |kind, mode| DataType::File {
-            kind: FileKindId::from_u128(kind),
-            mode,
-        };
-        let signature = |number: u32, input: InputDecl| {
-            internals::stub_func(FuncId::from_u128(1), "f")
-                .input(number, input)
-                .build()
-                .func_ref()
-                .signature()
-        };
-        let base = signature(1, InputDecl::required("a", file(1, FileMode::Open)));
-        assert_eq!(
-            signature(
-                1,
-                InputDecl::optional("renamed", file(1, FileMode::Open)).description("text")
-            ),
-            base
-        );
-        for changed in [
-            signature(2, InputDecl::required("a", file(1, FileMode::Open))),
-            signature(1, InputDecl::required("a", file(2, FileMode::Open))),
-            signature(1, InputDecl::required("a", file(1, FileMode::Save))),
-            signature(1, InputDecl::required("a", DataType::Dir)),
-        ] {
-            assert_ne!(changed, base);
-        }
-    }
-}
+mod tests;

@@ -285,7 +285,7 @@ fn the_run_lines_link_enters_the_compound_of_its_cause() {
     let path = InstancePath::new(&[instance]);
     h.run_state.complete(RunSummary {
         nodes: vec![NodeStatus {
-            program_id: path.node(inside),
+            program_id: ProgramId::of(path, inside),
             status: Some(NodeExecStatus::Errored {
                 error: RunError::Invoke(InvokeError::external(io::Error::other("boom"))),
             }),
