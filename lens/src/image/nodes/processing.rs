@@ -5,8 +5,8 @@ use imaginarium::{AffineWarp, Blend, BlendMode, Clamp, ColorFormat, ContrastBrig
 use scenarium::FuncId;
 use scenarium::Invocation;
 use scenarium::async_lambda;
-use scenarium::{ConstValue, DataType, DynamicValue, InvokeError};
-use scenarium::{FloatSpan, Func, InputDecl, Library, OutputDecl};
+use scenarium::{ConstValue, DataType, DynamicValue, InvokeError, LibraryBuilder};
+use scenarium::{FloatSpan, Func, InputDecl, OutputDecl};
 use strum::VariantNames;
 
 use crate::image::format::{CONVERSION_FORMAT_DATATYPE, ConversionFormat};
@@ -19,14 +19,14 @@ const CONVERT_FUNC_ID: FuncId = FuncId::literal("80aa1ee7-3b75-4200-b480-b9db913
 const BLEND_FUNC_ID: FuncId = FuncId::literal("975cc74b-8412-4293-b2cb-ef8d41fdd9b3");
 const TRANSFORM_FUNC_ID: FuncId = FuncId::literal("c99c2613-a381-4ef1-9fca-b75aa9656cd2");
 
-pub(super) fn register(library: &mut Library) {
+pub(super) fn register(library: &mut LibraryBuilder) {
     register_brightness(library);
     register_convert(library);
     register_blend(library);
     register_transform(library);
 }
 
-fn register_brightness(library: &mut Library) {
+fn register_brightness(library: &mut LibraryBuilder) {
     library.add(
         Func::builder(
             BRIGHTNESS_CONTRAST_FUNC_ID,
@@ -89,7 +89,7 @@ fn clamp_input() -> InputDecl {
         )
 }
 
-fn register_convert(library: &mut Library) {
+fn register_convert(library: &mut LibraryBuilder) {
     library.add(
         Func::builder(
             CONVERT_FUNC_ID,
@@ -135,7 +135,7 @@ fn register_convert(library: &mut Library) {
     );
 }
 
-fn register_blend(library: &mut Library) {
+fn register_blend(library: &mut LibraryBuilder) {
     library.add(
         Func::builder(
             BLEND_FUNC_ID,
@@ -210,7 +210,7 @@ fn register_blend(library: &mut Library) {
     );
 }
 
-fn register_transform(library: &mut Library) {
+fn register_transform(library: &mut LibraryBuilder) {
     library.add(
         Func::builder(
             TRANSFORM_FUNC_ID,

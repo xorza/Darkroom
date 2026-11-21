@@ -8,9 +8,9 @@ use crate::graph::func::error::{InvokeError, InvokeResult};
 use crate::graph::func::event::EventLambda;
 use crate::graph::func::lambda::Invocation;
 use crate::graph::identity::FuncId;
-use crate::graph::ports::{InputDecl, OutputDecl};
+use crate::graph::ports::{EventDecl, InputDecl, OutputDecl};
 use crate::graph::value_domain::float_span::FloatSpan;
-use crate::library::Library;
+use crate::library::library_builder::LibraryBuilder;
 use crate::runtime::shared_any_state::SharedAnyState;
 use tokio::time;
 use tokio::time::Instant;
@@ -81,8 +81,8 @@ async fn wait_for_fps_event(state: SharedAnyState) {
 }
 
 /// The worker frame / fps event-source nodes.
-pub fn worker_events_library() -> Library {
-    let mut library = Library::default();
+pub fn worker_events_library() -> LibraryBuilder {
+    let mut library = LibraryBuilder::default();
 
     library.add(
         Func::builder(
@@ -150,8 +150,16 @@ pub fn worker_events_library() -> Library {
             OutputDecl::new("Frame #", DataType::Int)
                 .description("Frame counter, incremented each tick."),
         )
-        .event(1, "Always", EventLambda::new(|_state| async {}))
-        .event(2, "FPS", EventLambda::new(wait_for_fps_event))
+        .event(
+            1,
+            EventDecl::new("Always"),
+            EventLambda::new(|_state| async {}),
+        )
+        .event(
+            2,
+            EventDecl::new("FPS"),
+            EventLambda::new(wait_for_fps_event),
+        )
         .build(),
     );
 

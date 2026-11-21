@@ -13,7 +13,7 @@ use crate::graph::error::{
     GraphValidationError, SubscriptionRejection, Unresolved,
 };
 use crate::graph::func::Func;
-use crate::graph::func::func_builder::FuncBuilder;
+use crate::graph::func::func_decl::FuncDecl;
 use crate::graph::ghost_node::GhostNode;
 use crate::graph::ghost_wiring::{
     GhostBinding, GhostSource, GhostSubscription, GhostWiring, InputState, SubscriptionState,
@@ -1386,7 +1386,7 @@ fn a_func_whose_ports_change_keeps_each_binding_its_ports_still_admit() {
         g.constant("dst", 2, 3i64);
         g
     };
-    let reconciled = |edit: fn(&mut FuncBuilder)| {
+    let reconciled = |edit: fn(&mut FuncDecl)| {
         let mut g = fixture();
         let original = g.graph().clone();
         let before = g.library.by_name("dst").unwrap().clone();
@@ -1440,13 +1440,13 @@ fn a_func_whose_ports_change_keeps_each_binding_its_ports_still_admit() {
         (PortId::new(3), Binding::Const(ConstValue::Int(3))),
     ];
 
-    let gained: fn(&mut FuncBuilder) = |f| {
+    let gained: fn(&mut FuncDecl) = |f| {
         f.ports.inputs.push(Numbered::new(
             PortId::new(4),
             InputDecl::required("new", DataType::Int),
         ));
     };
-    let renamed_and_reordered: fn(&mut FuncBuilder) = |f| {
+    let renamed_and_reordered: fn(&mut FuncDecl) = |f| {
         f.ports.inputs[0].name = "renamed".into();
         f.ports.inputs.swap(1, 2);
     };
@@ -1738,8 +1738,8 @@ fn a_manifest_tells_a_load_what_each_func_declared() {
     assert_eq!(without.func(dst_func), None, "a ghost node holds its own");
     assert!(g.graphs.reconcile(&g.library, &without).is_empty());
     let mut returned = lost.into_builder();
-    returned.ports.inputs.truncate(2);
-    returned.ports.inputs.push(Numbered::new(
+    returned.decl_mut().ports.inputs.truncate(2);
+    returned.decl_mut().ports.inputs.push(Numbered::new(
         PortId::new(4),
         InputDecl::optional("new", DataType::Int).default(9i64),
     ));

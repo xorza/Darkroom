@@ -19,7 +19,7 @@ Named so no batch touches it.
   reverse lookup, no mutators. The shape of cranelift-entity's `PrimaryMap` ("a primary mapping
   `K -> V` allocating dense entity references") and rustc's `IndexVec`.
 - **`Col` / `Span` / `IdxSet` / `idx_type!`** — the canonical typed dense-index containers; per-run
-  columns reset in place. They need tightening only (batch 7).
+  columns reset in place. They needed tightening only.
 - **Forward wires only in the program**, reverse edges derived per eviction by a counting-sort CSR;
   topological order derived per run over the seeded cone.
 - **`Graph`'s tables** — `BTreeMap`/`BTreeSet` keyed by id, bindings keyed by the consumer input
@@ -33,7 +33,7 @@ Named so no batch touches it.
   closed sum types with no invalid combination reachable.
 - **The self-check error enums** (`CompiledGraphValidationError`, `RunScheduleValidationError`,
   `InstallValidationError`) stay: their doc comments record the choice, a value a test can match
-  on. Only the holes in what they check are findings (batch 7).
+  on. Only the holes in what they checked were findings.
 
 ## Root causes
 
@@ -597,32 +597,20 @@ cache passes it; no borrow in the call graph outlives `ExecEngine::execute`.
   microseconds per install, and a map would allocate.
 - **Not taken: a hot and cold split of `ExecNode`, constants in a side column.** At the 65 536-node
   bound the two columns are about 12 MiB and no pass is bound by them.
+- **Not taken: `custom_type_names` in `Library`, its codecs held by `Codecs` alone.** A custom
+  type's identity is its name and its codec instance (`CustomType::same_as`), so the library
+  keeps the `CustomType` whole and the codec table holds a second `Arc` of each codec, built once
+  at the build. A test's in-place edit (`internals`) takes the library back to a builder, which
+  needs the type whole.
+- **A test edits a built library in place, under `internals`.** `Library::add` and the type
+  registrations there take the library back to a `LibraryBuilder`, edit it and assemble it
+  again, unchecked: a fixture grows the library its graph resolves against as a test goes, and a
+  test whose subject is the check builds through `LibraryBuilder::build`. A redirect has no
+  in-place edit, as the library holds only the flattened chains.
 
 # Part 2 — Plan
 
 Each batch leaves the build and the tests green. Whoever addresses an item deletes it.
-
-## Batch 7 — the declaration types
-
-Files: `library/`, `graph/func/`, `graph/ports.rs`, `graph/node_decl.rs`, `builtin/`, the `lens`
-and `darkroom` callers.
-
-- [ ] `library/mod.rs:44-55,75-150` — one type to register into and to read. Target:
-  `LibraryBuilder` and a `Library` with no mutators; fragment fns return or take a builder.
-- [ ] `library/mod.rs:167-185`, `darkroom/src/gui/pane/interface_card.rs:66-70` — `data_types()`
-  allocates and sorts with two hash lookups a comparison, per frame, and its caller collects again.
-  Target: `&[DataType]`, built once.
-- [ ] `library/mod.rs:99-117,285-339` — `redirect()` clones and composes the chain per call.
-  Target: flattened at `build`.
-- [ ] `graph/func/mod.rs:43-90`, `func_builder.rs:17-29,106-157` — ten fields written five times,
-  each `pub` beside its setter, a `validate` with no fallible way to a `Func`. Target: `FuncDecl`,
-  `checked` and `build`.
-- [ ] `graph/func/mod.rs:30-36`, `ports.rs:212-216`, `node_decl.rs:152-222` — an event in two
-  shapes and 70 lines to bridge them. Target: `Numbered<EventDecl>` and `event_lambdas`;
-  `EventDecl::description`.
-- [ ] `Func::into_builder`, `FuncBuilder::validate`, `Library::by_name`, `Library::type_count`,
-  `Library::custom_type` — test-only on the published surface. Target: under `internals`.
-- [ ] Untested: `LibraryBuilder::merge`, `data_types` order. Target: a case each.
 
 ## Batch 8 — the layers
 

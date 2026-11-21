@@ -10,7 +10,7 @@ use super::*;
 fn type_label_names_a_path_by_its_kind_and_any_other_type_as_the_library_does() {
     let image = FileKindId::from_u128(1);
     let mut library = Library::default();
-    library.register_file_kind(image, FileKind::new("Image", ["png"]));
+    library.add_file_kind(image, FileKind::new("Image", ["png"]));
     let graphs = GraphSet::default();
     let label = |data_type| {
         TypeLabel {

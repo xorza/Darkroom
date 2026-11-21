@@ -3,7 +3,7 @@
 use lumos::{LoadCtx, PREVIEW_IMAGE_EXTENSIONS, RAW_EXTENSIONS};
 use scenarium::{
     DataType, DynamicValue, FileKind, FileKindId, FileMode, Func, FuncId, InputDecl, Invocation,
-    Library, OutputDecl, async_lambda,
+    LibraryBuilder, OutputDecl, async_lambda,
 };
 
 use crate::astro::nodes::runtime;
@@ -32,12 +32,12 @@ pub(super) const fn astro_raw_paths_type() -> DataType {
     }
 }
 
-pub(crate) fn register(library: &mut Library) {
-    library.register_file_kind(
+pub(crate) fn register(library: &mut LibraryBuilder) {
+    library.add_file_kind(
         ASTRO_IMAGE_FILE,
         FileKind::new("Astro Image", PREVIEW_IMAGE_EXTENSIONS.iter().copied()),
     );
-    library.register_file_kind(
+    library.add_file_kind(
         RAW_FILE,
         FileKind::new("Camera RAW", RAW_EXTENSIONS.iter().copied()),
     );

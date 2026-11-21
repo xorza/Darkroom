@@ -220,6 +220,13 @@ impl EventDecl {
             description: None,
         }
     }
+
+    /// Attach what the event is for, as [`OutputDecl::description`] does for an output.
+    #[must_use]
+    pub fn description(mut self, description: impl Into<String>) -> Self {
+        self.description = Some(description.into());
+        self
+    }
 }
 
 /// The inputs and outputs a declaration shows, each in the order a node draws them.
@@ -232,9 +239,9 @@ pub struct Ports {
 impl Ports {
     /// Hold these ports to the rules every declaration passes: each id is unique among the ports
     /// of its side, each type names its registered entry under a set id, each domain fits its
-    /// input's type, and each default fits its input. Exact kinds for a scalar default, as nobody chose a coercion here;
-    /// an enum default need only be an enum literal, as the variants are the library's, which
-    /// [`Library::check`](crate::Library::check) holds it to.
+    /// input's type, and each default fits its input. Exact kinds for a scalar default, as nobody
+    /// chose a coercion here; an enum default need only be an enum literal, as the variants are
+    /// the library's, which [`LibraryBuilder::build`](crate::LibraryBuilder::build) holds it to.
     pub fn check(&self) -> Result<(), PortsError> {
         check_ids(self.inputs.iter().map(|input| input.id), PortList::Inputs)?;
         check_ids(

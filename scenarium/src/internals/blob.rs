@@ -80,7 +80,7 @@ impl BlobCodec {
     /// A library holding [`Blob`] with this codec.
     pub(crate) fn library(self) -> Library {
         let mut library = Library::default();
-        library.register_custom_type(BLOB_TYPE, CustomType::with_codec("Blob", Arc::new(self)));
+        library.add_custom_type(BLOB_TYPE, CustomType::with_codec("Blob", Arc::new(self)));
         library
     }
 

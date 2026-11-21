@@ -23,7 +23,7 @@ async fn exit_waits_for_active_event_cleanup_and_the_idle_report() {
     w.graph.edit_func("Frame Event", |func| {
         let entered = Arc::clone(&entered);
         let dropped = Arc::clone(&dropped);
-        func.events[0].event_lambda = EventLambda::new(move |_state| {
+        func.event_lambdas[0] = EventLambda::new(move |_state| {
             let entered = Arc::clone(&entered);
             let dropped = Arc::clone(&dropped);
             async move {

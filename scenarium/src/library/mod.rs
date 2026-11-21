@@ -2,24 +2,38 @@
 //!
 //! # Decisions
 //!
-//! - **A library registers every type its funcs declare**, held by [`Library::check`] once it is
-//!   composed. So a type the library lacks is one no func here declares: a document names it on
-//!   an interface port alone, and no body reads a value of it. Refused: a check at each `add` and
-//!   each registration of the other's entries, as the two arrive in either order.
+//! - **A library is composed, then built whole and read.** A [`LibraryBuilder`] takes each
+//!   fragment's funcs and types, and [`LibraryBuilder::build`] checks the whole once and derives
+//!   what readers ask for: each redirect chain flattened, the type list sorted, the codec table.
+//!   So no reader meets a library half-composed, no caller has to remember the check, and nothing
+//!   is derived again per call, as the type list was each frame. The builder pattern of
+//!   [C-BUILDER](https://rust-lang.github.io/api-guidelines/type-safety.html#c-builder), as
+//!   `std::process::Command` builds a process. Refused: mutators on `Library` beside a `check`
+//!   each composer calls.
+//! - **Each table is a `BTreeMap` by id**, so every walk of it, the first gap a build names and
+//!   the ties of the type list among them, is the same in every process. Refused: `HashMap`,
+//!   whose order is seeded per process; a lookup among the hundred-odd funcs costs a handful of
+//!   comparisons.
+//! - **A library registers every type its funcs declare**, held by the build. So a type the
+//!   library lacks is one no func here declares: a document names it on an interface port alone,
+//!   and no body reads a value of it. Refused: a check at each `add` and each registration of the
+//!   other's entries, as the two arrive in either order.
 //! - **A type the library lacks is a type like any other, equal only to itself.** A newer
 //!   version, a build without a feature or a shared compound can name one this build does not
 //!   register; the port, its bindings and its constants stay as written. A constant of an
 //!   unknown enum is kept unchecked, an unknown file kind is within itself alone, and an unknown
-//!   custom type has no disk codec. The same promise a ghost node makes for a node with no func: kept,
-//!   inert, shown with its reason, live again when the library has it.
+//!   custom type has no disk codec. The same promise a ghost node makes for a node with no func:
+//!   kept, inert, shown with its reason, live again when the library has it.
+//!
+//! [`LibraryBuilder`]: crate::LibraryBuilder
+//! [`LibraryBuilder::build`]: crate::LibraryBuilder::build
 
 pub(crate) mod func_redirect;
+pub(crate) mod library_builder;
 
-use std::collections::HashMap;
-use std::collections::hash_map::{Entry, Values};
+use std::collections::BTreeMap;
+use std::collections::btree_map::Values;
 use std::sync::Arc;
-
-use common::Id;
 
 use crate::data::codec::Codecs;
 use crate::data::const_value::ConstValue;
@@ -32,7 +46,7 @@ use crate::graph::func::Func;
 use crate::graph::identity::FuncId;
 use crate::graph::ports::{InputDecl, OutputDecl};
 use crate::graph::type_names::TypeRef;
-use crate::library::func_redirect::{FuncRedirect, MAX_REDIRECTS};
+use crate::library::func_redirect::FuncRedirect;
 
 /// The name a type shows when the library does not register it.
 pub(crate) const UNKNOWN_TYPE: &str = "Unknown Type";
@@ -43,14 +57,16 @@ pub(crate) const UNKNOWN_TYPE: &str = "Unknown Type";
 /// process-assembled library.
 #[derive(Default, Debug)]
 pub struct Library {
-    funcs: HashMap<FuncId, Func>,
-    enums: HashMap<EnumId, EnumType>,
-    custom_types: HashMap<CustomTypeId, CustomType>,
-    file_kinds: HashMap<FileKindId, FileKind>,
-    /// The funcs the library no longer registers, each by the func that replaces it.
-    redirects: HashMap<FuncId, FuncRedirect>,
-    /// The codecs among `custom_types`, shared with each program compiled from this library;
-    /// registration copies the map only while a program still holds the previous one.
+    funcs: BTreeMap<FuncId, Func>,
+    enums: BTreeMap<EnumId, EnumType>,
+    custom_types: BTreeMap<CustomTypeId, CustomType>,
+    file_kinds: BTreeMap<FileKindId, FileKind>,
+    /// The funcs the library no longer registers, each by the registered func its redirects end
+    /// at, with the one remap of the whole chain.
+    redirects: BTreeMap<FuncId, FuncRedirect>,
+    /// The custom and enum types by name, then id: [`Self::data_types`].
+    data_types: Vec<DataType>,
+    /// The codecs among `custom_types`, shared with each program compiled from this library.
     codecs: Arc<Codecs>,
 }
 
@@ -61,100 +77,20 @@ impl Library {
         self.funcs.get(&id)
     }
 
-    pub fn by_name(&self, name: &str) -> Option<&Func> {
-        self.iter().find(|func| func.name() == name)
-    }
-
-    /// The registered funcs, in no particular order.
+    /// The registered funcs, in id order.
     pub fn iter(&self) -> Values<'_, FuncId, Func> {
         self.funcs.values()
     }
 
-    /// # Panics
-    /// If a func is registered under its id already.
-    pub fn add(&mut self, func: Func) {
-        assert!(
-            !self.funcs.contains_key(&func.id()),
-            "duplicate function registration"
-        );
-        self.funcs.insert(func.id(), func);
-    }
-
-    /// Register `redirect`, from a func id this library does not register to the func that
-    /// replaces it; [`Self::check`] holds the chain to its rules.
-    ///
-    /// # Panics
-    /// If a redirect from the same id is registered already.
-    pub fn add_redirect(&mut self, redirect: FuncRedirect) {
-        assert!(
-            !self.redirects.contains_key(&redirect.from),
-            "duplicate redirect registration"
-        );
-        self.redirects.insert(redirect.from, redirect);
-    }
-
     /// Where a node of func `from`, which this library does not register, goes: the func at the
-    /// end of its redirects, and the one remap of them all. `None` for a registered func or one
-    /// no redirect names.
-    pub fn redirect(&self, from: FuncId) -> Option<FuncRedirect> {
-        if self.funcs.contains_key(&from) {
-            return None;
-        }
-        let first = self.redirects.get(&from)?;
-        let mut landed = first.clone();
-        for _ in 0..MAX_REDIRECTS {
-            if self.funcs.contains_key(&landed.to) {
-                return Some(landed);
-            }
-            let next = self.redirects.get(&landed.to)?;
-            landed = FuncRedirect {
-                from,
-                to: next.to,
-                remap: landed.remap.then(&next.remap),
-            };
-        }
-        None
-    }
-
-    /// Register an enum. Registering an identical one again does nothing, so libraries that
-    /// share it merge.
-    ///
-    /// # Panics
-    /// If `id` is nil, or another enum is registered under it.
-    pub fn register_enum(&mut self, id: EnumId, enum_type: EnumType) {
-        register(&mut self.enums, id, enum_type, PartialEq::eq);
-    }
-
-    /// Register a custom type, and its codec if it has one. Registering an identical one again
-    /// does nothing, so libraries that share it merge.
-    ///
-    /// # Panics
-    /// If `id` is nil, or another custom type is registered under it: another name, or another
-    /// codec instance.
-    pub fn register_custom_type(&mut self, id: CustomTypeId, custom_type: CustomType) {
-        let codec = custom_type.codec().map(Arc::clone);
-        if register(&mut self.custom_types, id, custom_type, CustomType::same_as)
-            && let Some(codec) = codec
-        {
-            Arc::make_mut(&mut self.codecs).insert(id, codec);
-        }
-    }
-
-    /// Register a file kind. Registering an identical one again does nothing, so libraries that
-    /// share it merge.
-    ///
-    /// # Panics
-    /// If `id` is nil, or another file kind is registered under it.
-    pub fn register_file_kind(&mut self, id: FileKindId, file_kind: FileKind) {
-        register(&mut self.file_kinds, id, file_kind, PartialEq::eq);
+    /// end of its redirects, and the one remap of them all, composed at the build. `None` for a
+    /// registered func or one no redirect names.
+    pub fn redirect(&self, from: FuncId) -> Option<&FuncRedirect> {
+        self.redirects.get(&from)
     }
 
     pub fn enum_type(&self, id: EnumId) -> Option<&EnumType> {
         self.enums.get(&id)
-    }
-
-    pub fn custom_type(&self, id: CustomTypeId) -> Option<&CustomType> {
-        self.custom_types.get(&id)
     }
 
     pub fn file_kind(&self, id: FileKindId) -> Option<&FileKind> {
@@ -163,8 +99,12 @@ impl Library {
 
     /// Each custom and enum type the library registers, ordered by name, then by id: what a port
     /// can be retyped to beside the scalars. A file kind is left out, as its port also names how
-    /// it is taken.
-    pub fn data_types(&self) -> Vec<DataType> {
+    /// it is taken. Sorted once, at the build.
+    pub fn data_types(&self) -> &[DataType] {
+        &self.data_types
+    }
+
+    fn sorted_data_types(&self) -> Vec<DataType> {
         let mut types: Vec<DataType> = self
             .custom_types
             .keys()
@@ -182,11 +122,6 @@ impl Library {
                 .then_with(|| id(a).cmp(&id(b)))
         });
         types
-    }
-
-    /// How many types the library registers, of every kind.
-    pub fn type_count(&self) -> usize {
-        self.enums.len() + self.custom_types.len() + self.file_kinds.len()
     }
 
     /// The name a person reads for `data_type`, in Title Case as every type name is: a built-in's
@@ -221,7 +156,7 @@ impl Library {
     pub fn registered_name(&self, type_ref: TypeRef) -> Option<&str> {
         match type_ref {
             TypeRef::FileKind(kind) => self.file_kind(kind).map(FileKind::name),
-            TypeRef::Custom(id) => self.custom_type(id).map(CustomType::name),
+            TypeRef::Custom(id) => self.custom_types.get(&id).map(CustomType::name),
             TypeRef::Enum(id) => self.enum_type(id).map(EnumType::name),
         }
     }
@@ -236,71 +171,16 @@ impl Library {
         &self.codecs
     }
 
-    /// Add every func and type `other` holds, under the rules [`add`](Self::add) and each
-    /// registration apply.
-    pub fn merge(&mut self, other: Self) {
-        let Self {
-            funcs,
-            enums,
-            custom_types,
-            file_kinds,
-            redirects,
-            codecs: _,
-        } = other;
-        for func in funcs.into_values() {
-            self.add(func);
-        }
-        for redirect in redirects.into_values() {
-            self.add_redirect(redirect);
-        }
-        #[expect(
-            clippy::iter_over_hash_type,
-            reason = "each registration is keyed, so the order changes nothing"
-        )]
-        for (id, enum_type) in enums {
-            self.register_enum(id, enum_type);
-        }
-        #[expect(
-            clippy::iter_over_hash_type,
-            reason = "each registration is keyed, so the order changes nothing"
-        )]
-        for (id, custom_type) in custom_types {
-            self.register_custom_type(id, custom_type);
-        }
-        #[expect(
-            clippy::iter_over_hash_type,
-            reason = "each registration is keyed, so the order changes nothing"
-        )]
-        for (id, file_kind) in file_kinds {
-            self.register_file_kind(id, file_kind);
-        }
-    }
-
-    /// Check the library is whole, once it is composed: every type a func's port names is
-    /// registered, and every enum default a func declares is a variant of its enum.
+    /// Check every type a func's port names is registered, and every enum default a func
+    /// declares is a variant of its enum: what [`LibraryBuilder::build`] asserts once the
+    /// registry can answer.
     ///
     /// # Panics
-    /// On the first func that breaks either rule, naming the func and the port: a library is
-    /// composed by code, so a gap is a bug in that code.
-    pub fn check(&self) {
-        let mut redirects: Vec<&FuncRedirect> = self.redirects.values().collect();
-        redirects.sort_unstable_by_key(|redirect| redirect.from);
-        for redirect in redirects {
-            assert!(
-                !self.funcs.contains_key(&redirect.from),
-                "a redirect from {:?} names a func the library registers",
-                redirect.from
-            );
-            assert!(
-                self.redirect(redirect.from).is_some(),
-                "the redirects from {:?} loop, run past {MAX_REDIRECTS}, or end at no registered \
-                 func",
-                redirect.from
-            );
-        }
-        let mut funcs: Vec<&Func> = self.funcs.values().collect();
-        funcs.sort_unstable_by_key(|func| func.id());
-        for func in funcs {
+    /// On the first func that breaks a rule, in id order, naming the func and the port.
+    ///
+    /// [`LibraryBuilder::build`]: crate::LibraryBuilder::build
+    fn check(&self) {
+        for func in self.funcs.values() {
             let types = func
                 .inputs()
                 .iter()
@@ -435,33 +315,6 @@ impl Library {
     }
 }
 
-/// Insert `entry` under `id` into `table`, or do nothing when `same` finds the one held there
-/// identical. Whether it inserted.
-///
-/// # Panics
-/// If `id` is nil, or the table holds another entry under it.
-fn register<M, T>(
-    table: &mut HashMap<Id<M>, T>,
-    id: Id<M>,
-    entry: T,
-    same: impl FnOnce(&T, &T) -> bool,
-) -> bool {
-    assert!(!id.is_nil(), "cannot register a type under the nil id");
-    match table.entry(id) {
-        Entry::Occupied(held) => {
-            assert!(
-                same(held.get(), &entry),
-                "conflicting registration of type {id:?}"
-            );
-            false
-        }
-        Entry::Vacant(slot) => {
-            slot.insert(entry);
-            true
-        }
-    }
-}
-
 impl<'a> IntoIterator for &'a Library {
     type Item = &'a Func;
     type IntoIter = Values<'a, FuncId, Func>;
@@ -473,14 +326,76 @@ impl<'a> IntoIterator for &'a Library {
 
 #[cfg(feature = "internals")]
 pub(crate) mod internals {
+    use std::mem;
+
+    use crate::data::data_type::custom_type::{CustomType, CustomTypeId};
+    use crate::data::data_type::enum_type::{EnumId, EnumType};
+    use crate::data::data_type::file_kind::{FileKind, FileKindId};
     use crate::graph::func::Func;
     use crate::graph::identity::FuncId;
     use crate::library::Library;
+    use crate::library::library_builder::LibraryBuilder;
 
+    /// A test's edits of a library in place, each sugar over a [`LibraryBuilder`] assembled
+    /// again with its types unchecked: a fixture grows the library its graph resolves against
+    /// as a test goes, and a test whose subject is the check builds through
+    /// [`LibraryBuilder::build`].
     impl Library {
-        /// Take a func declaration out, for a fixture that edits it and adds it back.
-        pub(crate) fn remove(&mut self, id: FuncId) -> Option<Func> {
-            self.funcs.remove(&id)
+        /// This library as a builder again, for an edit to build anew.
+        pub fn into_builder(self) -> LibraryBuilder {
+            LibraryBuilder {
+                funcs: self.funcs,
+                enums: self.enums,
+                custom_types: self.custom_types,
+                file_kinds: self.file_kinds,
+                redirects: self.redirects,
+            }
+        }
+
+        fn edit<T>(&mut self, edit: impl FnOnce(&mut LibraryBuilder) -> T) -> T {
+            let mut builder = mem::take(self).into_builder();
+            let answer = edit(&mut builder);
+            *self = builder.assemble();
+            answer
+        }
+
+        /// [`LibraryBuilder::add`] in place.
+        pub fn add(&mut self, func: Func) {
+            self.edit(|builder| builder.add(func));
+        }
+
+        /// Take the func `id` out, as a library that dropped it.
+        pub fn remove(&mut self, id: FuncId) -> Option<Func> {
+            self.edit(|builder| builder.funcs.remove(&id))
+        }
+
+        /// [`LibraryBuilder::add_enum`] in place.
+        pub fn add_enum(&mut self, id: EnumId, enum_type: EnumType) {
+            self.edit(|builder| builder.add_enum(id, enum_type));
+        }
+
+        /// [`LibraryBuilder::add_custom_type`] in place.
+        pub fn add_custom_type(&mut self, id: CustomTypeId, custom_type: CustomType) {
+            self.edit(|builder| builder.add_custom_type(id, custom_type));
+        }
+
+        /// [`LibraryBuilder::add_file_kind`] in place.
+        pub fn add_file_kind(&mut self, id: FileKindId, file_kind: FileKind) {
+            self.edit(|builder| builder.add_file_kind(id, file_kind));
+        }
+
+        /// The func named `name`, the first in id order.
+        pub fn by_name(&self, name: &str) -> Option<&Func> {
+            self.iter().find(|func| func.name() == name)
+        }
+
+        /// How many types the library registers, of every kind.
+        pub fn type_count(&self) -> usize {
+            self.enums.len() + self.custom_types.len() + self.file_kinds.len()
+        }
+
+        pub fn custom_type(&self, id: CustomTypeId) -> Option<&CustomType> {
+            self.custom_types.get(&id)
         }
     }
 }

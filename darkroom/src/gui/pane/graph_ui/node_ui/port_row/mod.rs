@@ -40,7 +40,7 @@ use crate::gui::theme::hover::Hover;
 use crate::gui::widgets::port_glyph;
 use crate::gui::widgets::port_glyph::PortGlyph;
 use crate::gui::widgets::support;
-use scenarium::{EventPort, EventRef, TriggerPort};
+use scenarium::{EventDecl, EventPort, Numbered, TriggerPort};
 
 /// Grid columns: inputs (hug), input values (hug, capped at `max_width`, so a very long
 /// editor ellipsizes; every editor fills it, so the boxes line up), a fill spacer, then outputs
@@ -542,7 +542,7 @@ const PREVIEW_SPAWN_OFFSET: Vec2 = Vec2::new(80.0, -60.0);
 struct EventRow<'a> {
     /// The grid row it sits in.
     row: usize,
-    event: EventRef<'a>,
+    event: &'a Numbered<EventDecl>,
 }
 
 impl EventRow<'_> {
@@ -570,7 +570,7 @@ impl EventRow<'_> {
             .child_align(VAlign::Center)
             .show(ui, |ui| {
                 // Muted like the data-port labels.
-                Text::new(event.name)
+                Text::new(event.name.as_str())
                     .style(&label_style(ui, theme))
                     .visibility(draw_ctx.words())
                     .show(ui);

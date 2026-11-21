@@ -9,7 +9,7 @@ mod stacking;
 
 use std::path::PathBuf;
 
-use scenarium::{CustomType, Library};
+use scenarium::{CustomType, LibraryBuilder};
 
 use crate::astro::config;
 use crate::astro::masters::MASTERS_TYPE_ID;
@@ -24,9 +24,9 @@ pub struct MlModelPaths {
     pub star_removal: Option<PathBuf>,
 }
 
-pub fn astro_library(model_paths: &MlModelPaths) -> Library {
-    let mut library = Library::default();
-    library.register_custom_type(MASTERS_TYPE_ID, CustomType::new("Masters"));
+pub fn astro_library(model_paths: &MlModelPaths) -> LibraryBuilder {
+    let mut library = LibraryBuilder::default();
+    library.add_custom_type(MASTERS_TYPE_ID, CustomType::new("Masters"));
     config::register_builders(&mut library);
     io::register(&mut library);
     calibration::register(&mut library);

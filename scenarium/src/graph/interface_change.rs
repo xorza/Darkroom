@@ -203,7 +203,7 @@ impl GraphSet {
                     .decl(was)
                     .event(event.event)?;
                 Some(SavedEvent {
-                    name: old.name.to_owned(),
+                    name: old.name.clone(),
                 })
             };
             let lost_trigger = |trigger: TriggerPort| {

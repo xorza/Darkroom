@@ -14,8 +14,10 @@ use notify::event::ModifyKind;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use scenarium::Invocation;
 use scenarium::async_lambda;
-use scenarium::{ConstValue, DataType};
-use scenarium::{EventLambda, Func, FuncId, InputDecl, IntSpan, InvokeError, Library, OutputDecl};
+use scenarium::{ConstValue, DataType, LibraryBuilder};
+use scenarium::{
+    EventDecl, EventLambda, Func, FuncId, InputDecl, IntSpan, InvokeError, OutputDecl,
+};
 use tokio::sync::Notify;
 use tokio::time::timeout;
 
@@ -128,8 +130,8 @@ const fn is_content_change(kind: EventKind) -> bool {
 
 /// A node that passes a directory path through unchanged and fires a `changed`
 /// event whenever the directory's contents change on disk.
-pub fn fs_watch_library() -> Library {
-    let mut library = Library::default();
+pub fn fs_watch_library() -> LibraryBuilder {
+    let mut library = LibraryBuilder::default();
 
     library.add(
         Func::builder(WATCH_DIR_FUNC_ID, "Watch Directory", async_lambda!(move |Invocation { event_state, inputs, outputs, .. }| {
@@ -220,7 +222,7 @@ pub fn fs_watch_library() -> Library {
                     .description("The same directory, re-emitted on each change."),
             )
             .event(
-                1, "Changed",
+                1, EventDecl::new("Changed"),
                 EventLambda::new(|state| {
                     async move {
                         let watch = state

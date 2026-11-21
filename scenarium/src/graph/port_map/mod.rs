@@ -569,7 +569,7 @@ impl Graph {
         let ghosts = self
             .ghost_nodes()
             .map(|(node_id, ghost)| (node_id, ghost.node.func_id()));
-        let mut redirected: Vec<(NodeId, FuncRedirect)> = nodes
+        let mut redirected: Vec<(NodeId, &FuncRedirect)> = nodes
             .chain(ghosts)
             .filter_map(|(node_id, func)| Some((node_id, library.redirect(func?)?)))
             .collect();

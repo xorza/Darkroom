@@ -27,6 +27,7 @@ fn drop_waits_for_worker_idle_before_runtime_shutdown() {
 
     let mut library = system_library();
     library.merge(worker_events_library());
+    let library = library.build();
     let mut graph = Graph::default();
     let frame = graph.add(library.by_name("Frame Event").unwrap().into());
     let print = graph.add(library.by_name("Print").unwrap().into());

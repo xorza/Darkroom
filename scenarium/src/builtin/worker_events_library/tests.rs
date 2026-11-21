@@ -27,6 +27,7 @@ impl FrameSource {
     fn new() -> Self {
         Self {
             func: worker_events_library()
+                .build()
                 .by_id(FRAME_EVENT_FUNC_ID)
                 .expect("worker events library must contain Frame Event")
                 .clone(),
@@ -46,7 +47,7 @@ impl FrameSource {
     /// A task awaiting the FPS event, over the state this source's executions
     /// write.
     fn fps_event(&self) -> JoinHandle<()> {
-        let event = self.func.events()[1].event_lambda.clone();
+        let event = self.func.event_lambdas()[1].clone();
         let state = self.node.event_state();
         tokio::spawn(async move { event.fires(state).next().await })
     }

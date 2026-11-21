@@ -140,7 +140,7 @@ mod tests {
     fn a_dialog_filters_by_the_registered_kinds_extensions() {
         let [image, unknown] = [1, 2].map(FileKindId::from_u128);
         let mut library = Library::default();
-        library.register_file_kind(image, FileKind::new("Image", ["png", "tif"]));
+        library.add_file_kind(image, FileKind::new("Image", ["png", "tif"]));
         let open = |kind| PathType::File {
             kind,
             mode: FileMode::Open,
@@ -157,8 +157,8 @@ mod tests {
     fn a_label_names_the_kind_its_mode_and_extensions() {
         let [image, any, unknown] = [1, 2, 3].map(FileKindId::from_u128);
         let mut library = Library::default();
-        library.register_file_kind(image, FileKind::new("Image", ["fit", "fits", "raf"]));
-        library.register_file_kind(any, FileKind::new("File", Vec::<&str>::new()));
+        library.add_file_kind(image, FileKind::new("Image", ["fit", "fits", "raf"]));
+        library.add_file_kind(any, FileKind::new("File", Vec::<&str>::new()));
         let graphs = scenarium::GraphSet::default();
         let label = |data_type| {
             PathType::of(data_type)

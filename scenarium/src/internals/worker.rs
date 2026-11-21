@@ -62,7 +62,7 @@ impl TestWorker {
         let mut library = system_library();
         library.merge(worker_events_library());
 
-        let mut graph = TestGraph::over(library);
+        let mut graph = TestGraph::over(library.build());
         graph.add_declared("Frame Event");
         graph.add_declared("To String");
         graph.add_declared("Print");
@@ -80,7 +80,7 @@ impl TestWorker {
 
     /// The graph [`printing`](Self::printing) is built over.
     pub(crate) fn print_graph(message: &str) -> TestGraph {
-        let mut graph = TestGraph::over(system_library());
+        let mut graph = TestGraph::over(system_library().build());
         graph.add_declared("Print");
         graph.constant("Print", 0, ConstValue::String(message.to_owned()));
         graph

@@ -83,7 +83,7 @@ fn relay(tracker: Arc<Mutex<LiveTracker>>, mode: CacheMode) -> impl FnOnce(NodeS
 fn tracked_graph() -> TestGraph {
     let mut g = TestGraph::new();
     g.library
-        .register_custom_type(TRACKED_TYPE, CustomType::new("Tracked"));
+        .add_custom_type(TRACKED_TYPE, CustomType::new("Tracked"));
     g
 }
 

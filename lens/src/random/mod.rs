@@ -3,7 +3,7 @@ use rand::{RngExt, SeedableRng};
 use scenarium::FuncId;
 use scenarium::Invocation;
 use scenarium::async_lambda;
-use scenarium::{DataType, Func, InputDecl, Library, OutputDecl};
+use scenarium::{DataType, Func, InputDecl, LibraryBuilder, OutputDecl};
 
 const RANDOM_FUNC_ID: FuncId = FuncId::literal("01897928-66cd-52cb-abeb-a5bfd7f3763e");
 
@@ -51,8 +51,8 @@ fn random_func() -> Func {
     .build()
 }
 
-pub fn random_library() -> Library {
-    let mut library = Library::default();
+pub fn random_library() -> LibraryBuilder {
+    let mut library = LibraryBuilder::default();
     library.add(random_func());
     library
 }

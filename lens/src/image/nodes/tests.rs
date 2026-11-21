@@ -10,7 +10,7 @@ use crate::image::{IMAGE_DATA_TYPE, Image};
 
 #[test]
 fn enum_defaults_are_exact() {
-    let library = image_library();
+    let library = image_library().build();
     let convert = library.by_name("Convert").unwrap();
     assert_eq!(convert.inputs()[0].data_type, IMAGE_DATA_TYPE);
     assert_eq!(convert.inputs()[1].data_type, CONVERSION_FORMAT_DATATYPE);
@@ -56,7 +56,7 @@ async fn load_and_save_round_trip_exact_pixels() {
     let desc = imaginarium::InterleavedDesc::new(USize2::new(2, 1), ColorFormat::RGB_U8);
     let pixels = vec![10, 20, 30, 40, 50, 60];
     let image = imaginarium::InterleavedImage::new_with_data(desc, pixels.clone()).unwrap();
-    let library = image_library();
+    let library = image_library().build();
 
     let mut invoker = FuncInvoker::default();
     invoker
@@ -120,7 +120,7 @@ async fn load_and_save_round_trip_exact_pixels() {
 /// as the mix would extrapolate beyond both images; both ends run.
 #[tokio::test]
 async fn blend_refuses_a_mismatched_destination_and_an_alpha_out_of_range() {
-    let library = image_library();
+    let library = image_library().build();
     let image = |width, format| {
         DynamicValue::from_custom(Image::from(imaginarium::InterleavedImage::new_zeroed(
             imaginarium::InterleavedDesc::new(USize2::new(width, 2), format),
@@ -166,7 +166,7 @@ async fn blend_refuses_a_mismatched_destination_and_an_alpha_out_of_range() {
 /// error instead of crashing the worker; the identity runs.
 #[tokio::test]
 async fn transform_refuses_a_transform_with_no_inverse() {
-    let library = image_library();
+    let library = image_library().build();
     let transform = library.by_name("Transform").unwrap();
     let run = |values: [f64; 5]| {
         let image =

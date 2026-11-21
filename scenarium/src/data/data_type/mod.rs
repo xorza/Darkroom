@@ -155,8 +155,8 @@ impl DataType {
     ///   `Bool` default on an `Int` port is caught at registration.
     /// - **Enums.** A literal is a variant *name*; only a [`Library`](crate::Library) knows
     ///   whether it is registered, so the caller supplies `enum_variant`. Declaration time has no
-    ///   registry yet and passes `|_, _| true`; `Library::check` checks declared defaults once
-    ///   the library is whole.
+    ///   registry yet and passes `|_, _| true`; `LibraryBuilder::build` checks declared defaults
+    ///   once the library is whole.
     ///
     /// A path is checked for its kind of value alone, one path or several, not for its
     /// extension: extensions vary in case and some files have none. A `Custom` port has no

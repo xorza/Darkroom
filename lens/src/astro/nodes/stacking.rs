@@ -10,7 +10,7 @@ use lumos::{ProgressCallback, ProgressMonitor};
 use scenarium::async_lambda;
 use scenarium::{
     DataType, DynamicValue, Func, FuncId, InputDecl, IntSpan, Invocation, InvokeError,
-    InvokeResult, Library, OutputDecl, OutputDemand,
+    InvokeResult, LibraryBuilder, OutputDecl, OutputDemand,
 };
 
 use crate::astro::config::preset::Preset;
@@ -50,7 +50,7 @@ fn reference(idx: &DynamicValue) -> InvokeResult<Reference> {
         .map_err(|_negative| InvokeError::invalid_input(REFERENCE, "a frame index", idx))
 }
 
-pub(crate) fn register(library: &mut Library) {
+pub(crate) fn register(library: &mut LibraryBuilder) {
     library.add(
         Func::builder(
             STACK_LIGHTS_FUNC_ID,

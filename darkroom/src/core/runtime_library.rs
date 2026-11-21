@@ -4,7 +4,7 @@ use std::path::{self, PathBuf};
 use std::sync::Arc;
 
 use lens::{MlModelPaths, astro_library, fs_watch_library, image_library, random_library};
-use scenarium::Library as ScenariumLibrary;
+use scenarium::{Library as ScenariumLibrary, LibraryBuilder};
 use scenarium::{math_library, system_library, worker_events_library};
 
 use crate::core::preview_sink::{self, PreviewSink};
@@ -58,7 +58,7 @@ fn compose(model_paths: &MlModelPaths, previews: &Arc<PreviewSink>) -> Scenarium
         denoise: absolute(&model_paths.denoise),
         star_removal: absolute(&model_paths.star_removal),
     };
-    let mut library = ScenariumLibrary::default();
+    let mut library = LibraryBuilder::default();
     preview_sink::register(&mut library, Arc::clone(previews));
     library.merge(math_library());
     library.merge(system_library());
@@ -67,8 +67,7 @@ fn compose(model_paths: &MlModelPaths, previews: &Arc<PreviewSink>) -> Scenarium
     library.merge(random_library());
     library.merge(image_library());
     library.merge(astro_library(&model_paths));
-    library.check();
-    library
+    library.build()
 }
 
 #[cfg(test)]
@@ -77,7 +76,9 @@ mod tests {
     use std::sync::Arc;
 
     use lens::{MlModelPaths, astro_library, fs_watch_library, image_library, random_library};
-    use scenarium::{DataType, Library, math_library, system_library, worker_events_library};
+    use scenarium::{
+        DataType, LibraryBuilder, math_library, system_library, worker_events_library,
+    };
 
     use crate::core::runtime_library::compose;
 
@@ -101,11 +102,11 @@ mod tests {
         let (preview, display) = (1, 1);
         assert_eq!(
             library.iter().count(),
-            preview + parts.iter().map(|part| part.iter().count()).sum::<usize>()
+            preview + parts.iter().map(LibraryBuilder::func_count).sum::<usize>()
         );
         assert_eq!(
             library.type_count(),
-            display + parts.iter().map(Library::type_count).sum::<usize>()
+            display + parts.iter().map(LibraryBuilder::type_count).sum::<usize>()
         );
     }
 
@@ -129,7 +130,7 @@ mod tests {
             DataType::Dir,
         ]
         .into_iter()
-        .chain(library.data_types())
+        .chain(library.data_types().iter().copied())
         .chain(ports)
         .map(|data_type| library.type_name(data_type))
         .collect();

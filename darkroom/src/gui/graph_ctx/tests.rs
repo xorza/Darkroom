@@ -55,7 +55,7 @@ fn a_missing_func_reads_as_a_deletable_ghost_node() {
     use scenarium::math_library;
 
     // A resolvable func, and one whose id the library no longer holds.
-    let library = math_library();
+    let library = math_library().build();
     let mut graph = Graph::default();
     let mut known: Node = library.by_name("Add").unwrap().into();
     known.disabled = true;
@@ -312,7 +312,7 @@ fn func_events_read_in_order_alongside_outputs() {
     use scenarium::{FRAME_EVENT_FUNC_ID, worker_events_library};
 
     // The `frame event` func declares two events and two data outputs; each reads independently.
-    let library = worker_events_library();
+    let library = worker_events_library().build();
     let mut graph = Graph::default();
     let node: Node = library.by_id(FRAME_EVENT_FUNC_ID).unwrap().into();
     let node_id = graph.add(node);
@@ -320,7 +320,7 @@ fn func_events_read_in_order_alongside_outputs() {
     let fixture = GraphCtxFixture::over(DocumentFixture::with_library(graph, library));
     let n = fixture.graph_ctx().node(node_id).unwrap();
 
-    let event_names: Vec<&str> = n.events().iter().map(|e| e.name).collect();
+    let event_names: Vec<&str> = n.events().iter().map(|e| e.name.as_str()).collect();
     assert_eq!(event_names, ["Always", "FPS"], "events read in order");
     assert_eq!(n.event_ports().count(), 2, "one ref per declared event");
 
@@ -337,7 +337,7 @@ fn subscriptions_read_from_the_graph() {
     use scenarium::{FRAME_EVENT_FUNC_ID, worker_events_library};
 
     // The second node subscribes to the first's "FPS" event, its event 2.
-    let library = worker_events_library();
+    let library = worker_events_library().build();
     let mut graph = Graph::default();
     let emitter: Node = library.by_id(FRAME_EVENT_FUNC_ID).unwrap().into();
     let emitter_id = graph.add(emitter);
@@ -357,7 +357,7 @@ fn subscriptions_read_from_the_graph() {
 fn cache_mode_reads_verbatim_per_node() {
     use scenarium::math_library;
 
-    let library = math_library();
+    let library = math_library().build();
     let mut graph = Graph::default();
     let mut ids = Vec::new();
     for mode in [

@@ -315,7 +315,7 @@ async fn memory_pressure_keeps_a_value_a_restamp_may_serve() {
     let counted = loads.clone();
     let mut g = TestGraph::new();
     g.library
-        .register_custom_type(BLOB_TYPE, CustomType::new("Blob"));
+        .add_custom_type(BLOB_TYPE, CustomType::new("Blob"));
     g.add("make_path", |n| {
         n.pure()
             .input(DataType::String)

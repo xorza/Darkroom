@@ -1,16 +1,32 @@
+//! [`Func`]: a library declaration, the ports it shows and the lambda that runs it.
+//!
+//! # Decisions
+//!
+//! - **One field list for a func**, [`FuncDecl`], which a [`FuncBuilder`]'s setters write and a
+//!   [`Func`] reads. Refused: the builder's fields public beside its setters, two routes to one
+//!   field, with the list written out in each type.
+//! - **A func's events are two columns in one order**, its declarations and their lambdas, pushed
+//!   together by [`FuncBuilder::event`] and held to one length by the check. So a func lends its
+//!   events as the `&[Numbered<EventDecl>]` an interface does, and a node's events read one way
+//!   whatever it resolves to. Refused: one list of an event beside its lambda, which no slice of
+//!   declarations can borrow from, so each reader went through a bridge enum.
+
 pub(crate) mod error;
 pub(crate) mod event;
 pub(crate) mod func_builder;
+pub(crate) mod func_decl;
 pub(crate) mod lambda;
 mod macros;
 pub(crate) mod signature;
 
 use crate::graph::func::event::EventLambda;
 use crate::graph::func::func_builder::FuncBuilder;
+use crate::graph::func::func_decl::FuncDecl;
 use crate::graph::func::lambda::FuncLambda;
+use crate::graph::func::signature::FuncSignature;
 use crate::graph::identity::{FuncId, FuncRef, PortId};
 use crate::graph::node::CacheMode;
-use crate::graph::ports::{InputDecl, Numbered, OutputDecl, Ports};
+use crate::graph::ports::{EventDecl, InputDecl, Numbered, OutputDecl, Ports};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum FuncBehavior {
@@ -26,32 +42,14 @@ pub enum FuncBehavior {
     Pure,
 }
 
-#[derive(Clone, Debug)]
-pub struct FuncEvent {
-    /// The number the func gives the event, as it numbers its ports.
-    pub id: PortId,
-    pub name: String,
-    pub event_lambda: EventLambda,
-}
-
-/// A validated func declaration: its ports, behavior, implementation, and the `FuncRef` a compiled
-/// node of it runs under, computed once by [`FuncBuilder::build`].
+/// A validated func declaration: its ports, behavior, implementation, and the signature a
+/// compiled node of it runs under, computed once by [`FuncBuilder::checked`].
 ///
-/// Read-only, so the signature always describes the ports beside it; to change a declaration,
-/// take it back with [`into_builder`](Self::into_builder) and build it again.
+/// Read-only, so the signature always describes the ports beside it.
 #[derive(Clone, Debug)]
 pub struct Func {
-    func_ref: FuncRef,
-    name: String,
-    category: String,
-    sink: bool,
-    /// The [`CacheMode`] a new node of this func copies; existing nodes keep their own.
-    default_cache_mode: CacheMode,
-    behavior: FuncBehavior,
-    description: Option<String>,
-    ports: Ports,
-    events: Vec<FuncEvent>,
-    lambda: FuncLambda,
+    decl: FuncDecl,
+    signature: FuncSignature,
 }
 
 impl Func {
@@ -59,98 +57,104 @@ impl Func {
     /// RAM while memory allows ([`CacheMode::AUTO`]), with no category, ports or events.
     pub fn builder(id: FuncId, name: impl Into<String>, lambda: FuncLambda) -> FuncBuilder {
         FuncBuilder {
-            id,
-            name: name.into(),
-            category: String::new(),
-            sink: false,
-            default_cache_mode: CacheMode::AUTO,
-            behavior: FuncBehavior::Impure,
-            description: None,
-            ports: Ports::default(),
-            events: Vec::new(),
-            lambda,
-        }
-    }
-
-    /// This declaration as a builder again, for an edit to build anew.
-    pub fn into_builder(self) -> FuncBuilder {
-        FuncBuilder {
-            id: self.func_ref.id(),
-            name: self.name,
-            category: self.category,
-            sink: self.sink,
-            default_cache_mode: self.default_cache_mode,
-            behavior: self.behavior,
-            description: self.description,
-            ports: self.ports,
-            events: self.events,
-            lambda: self.lambda,
+            decl: FuncDecl {
+                id,
+                name: name.into(),
+                category: String::new(),
+                sink: false,
+                default_cache_mode: CacheMode::AUTO,
+                behavior: FuncBehavior::Impure,
+                description: None,
+                ports: Ports::default(),
+                events: Vec::new(),
+                event_lambdas: Vec::new(),
+                lambda,
+            },
         }
     }
 
     pub const fn id(&self) -> FuncId {
-        self.func_ref.id()
+        self.decl.id
     }
 
     pub fn name(&self) -> &str {
-        &self.name
+        &self.decl.name
     }
 
     pub fn category(&self) -> &str {
-        &self.category
+        &self.decl.category
     }
 
     pub const fn sink(&self) -> bool {
-        self.sink
+        self.decl.sink
     }
 
+    /// The [`CacheMode`] a new node of this func copies; existing nodes keep their own.
     pub const fn default_cache_mode(&self) -> CacheMode {
-        self.default_cache_mode
+        self.decl.default_cache_mode
     }
 
     pub const fn behavior(&self) -> FuncBehavior {
-        self.behavior
+        self.decl.behavior
     }
 
     pub fn description(&self) -> Option<&str> {
-        self.description.as_deref()
+        self.decl.description.as_deref()
     }
 
     pub const fn ports(&self) -> &Ports {
-        &self.ports
+        &self.decl.ports
     }
 
     pub fn inputs(&self) -> &[Numbered<InputDecl>] {
-        &self.ports.inputs
+        &self.decl.ports.inputs
     }
 
     pub fn outputs(&self) -> &[Numbered<OutputDecl>] {
-        &self.ports.outputs
+        &self.decl.ports.outputs
     }
 
-    pub fn events(&self) -> &[FuncEvent] {
-        &self.events
+    pub fn events(&self) -> &[Numbered<EventDecl>] {
+        &self.decl.events
     }
 
     /// The event under `id`, if this func declares one.
-    pub fn event(&self, id: PortId) -> Option<&FuncEvent> {
-        self.events.iter().find(|event| event.id == id)
+    pub fn event(&self, id: PortId) -> Option<&Numbered<EventDecl>> {
+        self.decl.events.iter().find(|event| event.id == id)
+    }
+
+    /// What fires each event, in [`Self::events`]' order.
+    pub fn event_lambdas(&self) -> &[EventLambda] {
+        &self.decl.event_lambdas
     }
 
     pub const fn lambda(&self) -> &FuncLambda {
-        &self.lambda
+        &self.decl.lambda
     }
 
     /// What a compiled node of this func runs: its id, and the signature its state and cached
     /// values are keyed by.
     pub(crate) const fn func_ref(&self) -> FuncRef {
-        self.func_ref
+        FuncRef::new(self.decl.id, self.signature)
     }
 
     /// Whether this func recomputes every run: it has no content digest, so no cache mode is
     /// honored on a node of it.
     pub const fn impure(&self) -> bool {
-        matches!(self.behavior, FuncBehavior::Impure)
+        matches!(self.decl.behavior, FuncBehavior::Impure)
+    }
+}
+
+#[cfg(feature = "internals")]
+pub(crate) mod internals {
+    use crate::graph::func::Func;
+    use crate::graph::func::func_builder::FuncBuilder;
+
+    impl Func {
+        /// This declaration as a builder again, for a test to edit and build anew.
+        pub fn into_builder(self) -> FuncBuilder {
+            FuncBuilder { decl: self.decl }
+        }
     }
 }
 

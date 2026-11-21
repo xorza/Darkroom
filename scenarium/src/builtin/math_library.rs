@@ -4,7 +4,7 @@ use crate::graph::func::Func;
 use crate::graph::func::lambda::{FuncLambda, Invocation};
 use crate::graph::identity::FuncId;
 use crate::graph::ports::{InputDecl, OutputDecl};
-use crate::library::Library;
+use crate::library::library_builder::LibraryBuilder;
 use common::Libm;
 
 const ADD_FUNC_ID: FuncId = FuncId::literal("01897c4c-ac6a-84c0-d0b7-17d49e1ae2ee");
@@ -103,8 +103,8 @@ impl FloatFunc<2> {
     }
 }
 
-pub fn math_library() -> Library {
-    let mut library = Library::default();
+pub fn math_library() -> LibraryBuilder {
+    let mut library = LibraryBuilder::default();
 
     library.add(
         FloatFunc {
@@ -413,7 +413,7 @@ mod tests {
     use crate::internals::func_invoker::FuncInvoker;
 
     async fn invoke(name: &str, values: &[DynamicValue]) -> Result<Vec<DynamicValue>, InvokeError> {
-        let library = math_library();
+        let library = math_library().build();
         let func = library.by_name(name).unwrap();
         FuncInvoker::default().call(func, values.to_vec()).await
     }

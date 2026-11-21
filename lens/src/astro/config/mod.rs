@@ -9,7 +9,7 @@ use std::fmt;
 
 use common::Introspect;
 use lumos::{ExtractBg, Scnr};
-use scenarium::{FuncId, Library};
+use scenarium::{FuncId, LibraryBuilder};
 
 use crate::astro::config::processing::StretchKnobs;
 use crate::astro::config::stacking::{CombineKnobs, DetectionKnobs, RegistrationKnobs};
@@ -27,7 +27,7 @@ const BUILD_STRETCH_CONFIG_FUNC_ID: FuncId =
     FuncId::literal("82f271d4-d047-459a-83aa-0bf8288787cf");
 const BUILD_SCNR_CONFIG_FUNC_ID: FuncId = FuncId::literal("d07742d1-4469-4739-b2ff-78b4dcf64132");
 
-pub(crate) fn register_builders(library: &mut Library) {
+pub(crate) fn register_builders(library: &mut LibraryBuilder) {
     add_builder::<ExtractBg>(
         library,
         NodeSpec {
@@ -79,7 +79,7 @@ pub(crate) fn register_builders(library: &mut Library) {
 }
 
 fn add_builder<T: Introspect + Clone + fmt::Debug + Send + Sync + 'static>(
-    library: &mut Library,
+    library: &mut LibraryBuilder,
     spec: NodeSpec,
 ) {
     let func = ConfigValue::<T>::builder(library, spec)

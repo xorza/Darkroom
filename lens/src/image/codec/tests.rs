@@ -343,7 +343,7 @@ fn record_layout_is_pinned() {
 #[test]
 fn register_image_type_wires_the_codec() {
     let mut library = Library::default();
-    library.register_custom_type(IMAGE_TYPE_ID, image_type());
+    library.add_custom_type(IMAGE_TYPE_ID, image_type());
     let entry = library.custom_type(IMAGE_TYPE_ID).unwrap();
     assert_eq!(entry.name(), "Image");
     assert!(

@@ -22,6 +22,7 @@ impl WatchNode {
     fn new() -> Self {
         Self {
             func: fs_watch_library()
+                .build()
                 .by_name("Watch Directory")
                 .unwrap()
                 .clone(),
@@ -62,7 +63,7 @@ fn stored_signal(event_state: &SharedAnyState) -> Option<Arc<Notify>> {
 
 #[test]
 fn registers_watch_dir_func() {
-    let lib = fs_watch_library();
+    let lib = fs_watch_library().build();
     let func = lib.by_name("Watch Directory").expect("func registered");
 
     assert_eq!(func.id(), WATCH_DIR_FUNC_ID);
@@ -207,8 +208,7 @@ async fn empty_path_skips_watcher_and_event_parks() {
     // Without a watcher the `changed` event must park forever, not panic.
     let fired = timeout(
         Duration::from_millis(200),
-        node.func.events()[0]
-            .event_lambda
+        node.func.event_lambdas()[0]
             .fires(event_state.clone())
             .next(),
     )
@@ -290,7 +290,7 @@ async fn watcher_signals_on_content_change() {
 #[tokio::test(start_paused = true)]
 async fn debounce_collapses_burst_into_one_fire() {
     let dir = TempDir::new("lens-watch");
-    let lib = fs_watch_library();
+    let lib = fs_watch_library().build();
     let func = lib.by_name("Watch Directory").unwrap();
 
     // Seed per-node state with a 200ms-debounce watcher, then drive the real
@@ -305,7 +305,7 @@ async fn debounce_collapses_burst_into_one_fire() {
     let signal = Arc::clone(&ws.signal);
     event_state.lock().set(ws);
 
-    let lambda = func.events()[0].event_lambda.clone();
+    let lambda = func.event_lambdas()[0].clone();
     let es = event_state.clone();
     let start = Instant::now();
     let handle = tokio::spawn(async move { lambda.fires(es).next().await });

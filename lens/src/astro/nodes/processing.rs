@@ -12,7 +12,7 @@ use lumos::{
     ScnrProtection, Stretch,
 };
 use scenarium::{
-    Func, FuncBuilder, FuncId, FuncLambda, Invocation, Library, OutputDecl, async_lambda,
+    Func, FuncBuilder, FuncId, FuncLambda, Invocation, LibraryBuilder, OutputDecl, async_lambda,
 };
 
 use crate::astro::config::preset::Preset;
@@ -30,7 +30,7 @@ const NEUTRALIZE_BG_FUNC_ID: FuncId = FuncId::literal("5a8c9043-61ca-4a5a-8e55-c
 const HDR_COMPRESSION_FUNC_ID: FuncId = FuncId::literal("300a2ec5-0ccd-47ec-b282-030eea41441c");
 const LOCAL_CONTRAST_FUNC_ID: FuncId = FuncId::literal("6a28b732-2704-454b-8afd-0a91d385458a");
 
-pub(crate) fn register(library: &mut Library) {
+pub(crate) fn register(library: &mut LibraryBuilder) {
     library.add(preset_func::<StretchMethodChoice>(
         NodeSpec {
             id: AUTO_STRETCH_FUNC_ID,
@@ -134,7 +134,7 @@ where
 
 /// A node over a `T` of a few plain knobs: the image, and `T`'s fields as
 /// inputs of their own, each starting at the op's default, the config run by `op`.
-fn fields_func<T>(library: &mut Library, spec: NodeSpec, op: FrameOp<T>) -> Func
+fn fields_func<T>(library: &mut LibraryBuilder, spec: NodeSpec, op: FrameOp<T>) -> Func
 where
     T: Introspect + Clone + fmt::Debug + Send + Sync + 'static,
 {

@@ -28,9 +28,9 @@ use crate::core::runtime_library::RuntimeLibrary;
 use crate::core::status_log::StatusLog;
 use scenarium::{
     Binding, BindingRejection, Compiler, Compound, CompoundId, ConstValue, CustomTypeId, DataType,
-    DetachReason, EnumId, EventPort, Func, FuncId, GhostBinding, GhostSource, Graph, GraphId,
-    GraphSet, InputDecl, InputPort, Interface, InterfacePort, Library, Node, NodeAddr, NodeDecl,
-    NodeId, Numbered, OutputDecl, OutputPort, PortId, PortList, Ports, ProgramId, Repair,
+    DetachReason, EnumId, EventDecl, EventPort, Func, FuncId, GhostBinding, GhostSource, Graph,
+    GraphId, GraphSet, InputDecl, InputPort, Interface, InterfacePort, Library, Node, NodeAddr,
+    NodeDecl, NodeId, Numbered, OutputDecl, OutputPort, PortId, PortList, Ports, ProgramId, Repair,
     SavedPort, Subscription, SubscriptionRejection, UnknownType, Unresolved, internals,
 };
 
@@ -207,9 +207,10 @@ fn a_node_whose_ports_changed_keeps_the_wiring_they_admit() {
     let path = dir.join("first.darkroom");
     let chain = Chain::new();
     let mut changed = Library::default();
-    let mut moved = chain.mid.clone().into_builder();
-    moved.ports.inputs[0].data_type = DataType::String;
-    moved.ports.outputs[0].id = PortId::new(2);
+    let moved = internals::stub_func(chain.mid.id(), "mid")
+        .pure()
+        .input(1, InputDecl::required("in", DataType::String))
+        .output(2, OutputDecl::new("out", DataType::Int));
     changed.add(chain.src.clone());
     changed.add(moved.build());
     changed.add(chain.dst.clone());
@@ -719,7 +720,7 @@ fn wiring_the_library_refuses_is_removed_at_load() {
         .sink()
         .input(1, InputDecl::optional("a", DataType::Int))
         .output(1, OutputDecl::new("out", DataType::Int))
-        .event(1, "tick", internals::stub_event())
+        .event(1, EventDecl::new("tick"), internals::stub_event())
         .build();
     let mut library = Library::default();
     library.add(probe.clone());

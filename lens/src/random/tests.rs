@@ -5,7 +5,7 @@ use crate::random::{random_library, scale_random};
 
 #[test]
 fn registers_random_func_and_scales_unit_values() {
-    let library = random_library();
+    let library = random_library().build();
     let function = library.by_name("Random").unwrap();
     assert_eq!(function.inputs().len(), 2);
     assert_eq!(function.inputs()[0].name, "Min");
@@ -25,7 +25,7 @@ fn registers_random_func_and_scales_unit_values() {
 
 #[tokio::test]
 async fn equal_bounds_produce_that_exact_value() {
-    let library = random_library();
+    let library = random_library().build();
     let function = library.by_name("Random").unwrap();
     let outputs = FuncInvoker::default()
         .call(

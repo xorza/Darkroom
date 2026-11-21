@@ -308,7 +308,7 @@ async fn an_unpersistable_type_is_reported_only_when_the_flush_was_requested() {
     // same library, so the value is unwritable by construction.
     graph
         .library
-        .register_custom_type(BLOB_TYPE, CustomType::new("Blob"));
+        .add_custom_type(BLOB_TYPE, CustomType::new("Blob"));
     graph.add("make_blob", |node| {
         node.pure()
             .sink()
@@ -376,7 +376,7 @@ async fn an_install_reports_the_cache_left_after_reconciling() {
     let mut graph = TestGraph::new();
     graph
         .library
-        .register_custom_type(BLOB_TYPE, CustomType::new("Blob"));
+        .add_custom_type(BLOB_TYPE, CustomType::new("Blob"));
     graph.add("heavy", |node| {
         node.pure()
             .sink()

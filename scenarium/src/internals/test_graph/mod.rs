@@ -5,7 +5,7 @@
 //! every later call names the node the way the test thinks of it.
 //!
 //! **One func per node.** Two nodes never share a declaration unless a test asks with
-//! [`instance`](TestGraph::instance), so [`edit_func`](TestGraph::edit_func) changes what one
+//! [`instance`](TestGraph::instance), so `edit_func` changes what one
 //! node declares, including inside [`sample`](TestGraph::sample).
 
 use std::sync::Arc;
@@ -22,6 +22,7 @@ use crate::graph::detached::DetachedNode;
 use crate::graph::func::Func;
 use crate::graph::func::event::EventLambda;
 use crate::graph::func::func_builder::FuncBuilder;
+use crate::graph::func::func_decl::FuncDecl;
 use crate::graph::func::lambda::internals as lambda;
 use crate::graph::func::lambda::{FuncLambda, Invocation};
 use crate::graph::graph_set::GraphSet;
@@ -30,7 +31,7 @@ use crate::graph::identity::{EventPort, FuncId, InputPort, NodeId, OutputPort};
 use crate::graph::node::special::SpecialNode;
 use crate::graph::node::{CacheMode, Node};
 use crate::graph::node_decl::NodeDecl;
-use crate::graph::ports::{InputDecl, OutputDecl};
+use crate::graph::ports::{EventDecl, InputDecl, OutputDecl};
 use crate::graph::scope::Scope;
 use crate::internals::calls::Calls;
 use crate::library::Library;
@@ -225,8 +226,7 @@ impl TestGraph {
         let id = self
             .decl(name)
             .events()
-            .iter()
-            .nth(idx)
+            .get(idx)
             .expect("the node fires that many events")
             .id;
         EventPort::new(self.id(name), id)
@@ -295,14 +295,14 @@ impl TestGraph {
     /// Edit the declaration `name` instantiates, in place. This is remove-edit-re-add, which
     /// re-runs [`FuncBuilder::build`]'s checks, so an edit that breaks the declaration fails
     /// here. Under [`instance`](Self::instance) the edit reaches every node of that func.
-    pub fn edit_func(&mut self, name: &str, edit: impl FnOnce(&mut FuncBuilder)) {
+    pub(crate) fn edit_func(&mut self, name: &str, edit: impl FnOnce(&mut FuncDecl)) {
         let func_id = self.func_id(name);
         let mut builder = self
             .library
             .remove(func_id)
             .expect("the named node's func is registered")
             .into_builder();
-        edit(&mut builder);
+        edit(builder.decl_mut());
         self.library.add(builder.build());
     }
 
@@ -436,7 +436,7 @@ pub struct NodeSpec {
 
 impl NodeSpec {
     fn new(name: &str, func_id: FuncId) -> Self {
-        // `Library::add` rejects a func with no implementation, and most fixtures never invoke one.
+        // A stub lambda, as most fixtures never invoke one.
         // A fixture node keeps nothing unless its test says so, so a test reads which nodes a run
         // recomputes from its own lines; keeping by default is a test of its own.
         Self {
@@ -474,6 +474,7 @@ impl NodeSpec {
     pub fn const_only(mut self) -> Self {
         let last = self
             .func
+            .decl_mut()
             .ports
             .inputs
             .last_mut()
@@ -495,14 +496,14 @@ impl NodeSpec {
 
     /// The next input, named `in{idx}` and numbered `idx + 1`.
     fn push_input(mut self, input: impl FnOnce(String) -> InputDecl) -> Self {
-        let idx = self.func.ports.inputs.len();
+        let idx = self.func.decl_mut().ports.inputs.len();
         self.func = self.func.input(number(idx), input(format!("in{idx}")));
         self
     }
 
     #[must_use]
     pub fn output(mut self, data_type: DataType) -> Self {
-        let idx = self.func.ports.outputs.len();
+        let idx = self.func.decl_mut().ports.outputs.len();
         self.func = self
             .func
             .output(number(idx), OutputDecl::new(format!("out{idx}"), data_type));
@@ -511,14 +512,14 @@ impl NodeSpec {
 
     #[must_use]
     pub fn event(mut self, name: &str, lambda: EventLambda) -> Self {
-        let idx = self.func.events.len();
-        self.func = self.func.event(number(idx), name, lambda);
+        let idx = self.func.decl_mut().events.len();
+        self.func = self.func.event(number(idx), EventDecl::new(name), lambda);
         self
     }
 
     #[must_use]
     pub fn lambda(mut self, lambda: FuncLambda) -> Self {
-        self.func.lambda = lambda;
+        self.func.decl_mut().lambda = lambda;
         self
     }
 

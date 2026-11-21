@@ -1470,7 +1470,7 @@ impl Graph {
     ) -> Option<&'a str> {
         let declared = self
             .find(port.node_id)
-            .and_then(|node| Some(node.decl(scope).event(port.event)?.name));
+            .and_then(|node| Some(node.decl(scope).event(port.event)?.name.as_str()));
         declared
             .or_else(|| saved.map(|saved| saved.name.as_str()))
             .or_else(|| {

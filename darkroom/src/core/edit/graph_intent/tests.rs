@@ -3,9 +3,9 @@ use std::collections::BTreeSet;
 use glam::Vec2;
 use scenarium::{
     Binding, BindingRejection, Boundary, CacheMode, Compound, CompoundId, ConstValue, DataType,
-    EventPort, FuncId, GhostBinding, GraphId, InputDecl, InputPort, InputState, Interface, Keep,
-    Library, Node, NodeId, OutputDecl, OutputPort, PlacementRejection, ProgramShape, Subscription,
-    SubscriptionRejection, Unresolved, Wiring, internals,
+    EventDecl, EventPort, FuncId, GhostBinding, GraphId, InputDecl, InputPort, InputState,
+    Interface, Keep, Library, Node, NodeId, OutputDecl, OutputPort, PlacementRejection,
+    ProgramShape, Subscription, SubscriptionRejection, Unresolved, Wiring, internals,
 };
 use scenarium::{PortId, internals::test_graph::TestGraph};
 
@@ -2004,7 +2004,7 @@ fn ports_the_declaration_lacks_are_refused() {
         .sink()
         .input(1, InputDecl::optional("a", DataType::Int))
         .output(1, OutputDecl::new("out", DataType::Int))
-        .event(1, "tick", internals::stub_event())
+        .event(1, EventDecl::new("tick"), internals::stub_event())
         .build();
     let mute = internals::stub_func(FuncId::unique(), "mute").build();
     let mut fixture = DocumentFixture::default();

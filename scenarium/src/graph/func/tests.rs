@@ -9,7 +9,7 @@ use crate::graph::func::func_builder::FuncBuilder;
 use crate::graph::func::lambda::FuncLambda;
 use crate::graph::identity::{FuncId, PortId};
 use crate::graph::node::CacheMode;
-use crate::graph::ports::{InputDecl, OutputDecl, PortList, PortsError};
+use crate::graph::ports::{EventDecl, InputDecl, OutputDecl, PortList, PortsError};
 use crate::graph::value_domain::value_variant::ValueVariant;
 use crate::internals;
 
@@ -88,11 +88,9 @@ fn validate_rejects_invalid_identities_ports_and_defaults() {
             }),
         ),
         (
-            func().event(2, "tick", internals::stub_event()).event(
-                2,
-                "tock",
-                internals::stub_event(),
-            ),
+            func()
+                .event(2, EventDecl::new("tick"), internals::stub_event())
+                .event(2, EventDecl::new("tock"), internals::stub_event()),
             ports(PortsError::DuplicateId {
                 list: PortList::Events,
                 idx: 1,
@@ -100,15 +98,16 @@ fn validate_rejects_invalid_identities_ports_and_defaults() {
             }),
         ),
     ];
-    for (func, expected) in cases {
-        assert_eq!(func.validate(), expected, "{:?}", func.name);
+    for (idx, (func, expected)) in cases.into_iter().enumerate() {
+        assert_eq!(func.checked().map(drop), expected, "case {idx}");
     }
     // An input and an output may share a number, each unique on its own side.
     assert_eq!(
         func()
             .input(1, int())
             .output(1, OutputDecl::new("value", DataType::Int))
-            .validate(),
+            .checked()
+            .map(drop),
         Ok(())
     );
 
@@ -116,7 +115,7 @@ fn validate_rejects_invalid_identities_ports_and_defaults() {
     // an authoring mismatch fails at registration, not in a document.
     let default_mismatch = |input: InputDecl| {
         assert_eq!(
-            func().input(1, input).validate(),
+            func().input(1, input).checked().map(drop),
             ports(PortsError::InvalidDefault { idx: 0 })
         );
     };
@@ -171,7 +170,7 @@ fn validate_rejects_invalid_identities_ports_and_defaults() {
                 .default(ConstValue::Enum("fast".to_owned())),
         )
         .output(1, OutputDecl::new("value", DataType::Int));
-    assert_eq!(ok.validate(), Ok(()));
+    assert_eq!(ok.checked().map(drop), Ok(()));
 }
 
 /// Each port takes the number its builder call gives it, whatever was declared before it.
@@ -181,7 +180,7 @@ fn a_port_takes_the_number_its_func_gives_it() {
         .input(3, InputDecl::required("a", DataType::Int))
         .input(1, InputDecl::required("b", DataType::Int))
         .output(7, OutputDecl::new("c", DataType::Int))
-        .event(2, "tick", internals::stub_event())
+        .event(2, EventDecl::new("tick"), internals::stub_event())
         .build();
     let ids = |ids: &[u32]| ids.iter().copied().map(PortId::new).collect::<Vec<_>>();
     assert_eq!(
@@ -211,7 +210,9 @@ fn a_port_takes_the_number_its_func_gives_it() {
 fn default_cache_mode_defaults_to_auto() {
     // Out of the box a func's nodes keep their output while memory allows.
     assert_eq!(
-        internals::stub_func(FuncId::unique(), "f").default_cache_mode,
+        internals::stub_func(FuncId::unique(), "f")
+            .build()
+            .default_cache_mode(),
         CacheMode::AUTO
     );
 }
@@ -219,14 +220,29 @@ fn default_cache_mode_defaults_to_auto() {
 #[test]
 fn node_events_expose_names_and_arity() {
     let emitter = internals::stub_func(FuncId::unique(), "ticker")
-        .event(1, "tick", internals::stub_event())
-        .event(2, "tock", internals::stub_event());
-    assert_eq!(emitter.events.len(), 2);
-    let names: Vec<&str> = emitter.events.iter().map(|e| e.name.as_str()).collect();
+        .event(
+            1,
+            EventDecl::new("tick").description("each beat"),
+            internals::stub_event(),
+        )
+        .event(2, EventDecl::new("tock"), internals::stub_event())
+        .build();
+    assert_eq!(emitter.events().len(), 2);
+    assert_eq!(emitter.event_lambdas().len(), 2);
+    let names: Vec<&str> = emitter.events().iter().map(|e| e.name.as_str()).collect();
     assert_eq!(names, ["tick", "tock"]);
+    assert_eq!(
+        emitter
+            .event(PortId::new(1))
+            .unwrap()
+            .description
+            .as_deref(),
+        Some("each beat")
+    );
+    assert!(emitter.event(PortId::new(3)).is_none());
 
-    let silent = internals::stub_func(FuncId::unique(), "silent");
-    assert!(silent.events.is_empty());
+    let silent = internals::stub_func(FuncId::unique(), "silent").build();
+    assert!(silent.events().is_empty());
 }
 
 /// `build` refuses what `validate` refuses, naming the declaration and the rule;
@@ -248,4 +264,14 @@ fn build_refuses_a_declaration_validate_refuses() {
 #[should_panic(expected = "a port's number is not 0")]
 fn a_port_numbered_zero_is_refused_at_the_builder() {
     let _ = func().input(0, InputDecl::required("value", DataType::Int));
+}
+
+/// Each event has the lambda that fires it: a declaration whose two columns drifted apart is a
+/// bug in the code that edited it, refused at the check.
+#[test]
+#[should_panic(expected = "a lambda fires each event")]
+fn an_event_without_its_lambda_is_refused() {
+    let mut builder = func().event(1, EventDecl::new("tick"), internals::stub_event());
+    builder.decl_mut().event_lambdas.clear();
+    let _ = builder.checked();
 }

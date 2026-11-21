@@ -2,9 +2,9 @@
 
 use glam::Vec2;
 use scenarium::{
-    CacheMode, CompoundId, DetachReason, EventDecl, EventPort, EventRef, Func, GhostNode,
-    GhostSource, GhostWiring, GraphId, InputPort, Node, NodeAddr, NodeDecl, NodeEvents, NodeId,
-    NodeTriggers, Numbered, PortId, ProgramId, RamUsage, SavedDecl, TriggerPort, Unresolved,
+    CacheMode, CompoundId, DetachReason, EventDecl, EventPort, Func, GhostNode, GhostSource,
+    GhostWiring, GraphId, InputPort, Node, NodeAddr, NodeDecl, NodeId, NodeTriggers, Numbered,
+    PortId, ProgramId, RamUsage, SavedDecl, TriggerPort, Unresolved,
 };
 
 use crate::core::preview_sink;
@@ -561,13 +561,12 @@ impl<'a> NodeCtx<'a> {
     /// This node's event (emitter) ports. Events carry no data type — they
     /// are pure triggers — so the declaration is all the UI needs, and the
     /// output column lists them under the data outputs.
-    pub(crate) fn events(self) -> NodeEvents<'a> {
-        self.declaration
-            .map_or(NodeEvents::Declared(&[]), NodeDecl::events)
+    pub(crate) fn events(self) -> &'a [Numbered<EventDecl>] {
+        self.declaration.map_or(&[], NodeDecl::events)
     }
 
     /// The event under `event`, if this node fires one.
-    pub(crate) fn event(self, event: PortId) -> Option<EventRef<'a>> {
+    pub(crate) fn event(self, event: PortId) -> Option<&'a Numbered<EventDecl>> {
         self.declaration.ok()?.event(event)
     }
 

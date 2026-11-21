@@ -62,12 +62,6 @@ pub(crate) fn show(ui: &mut Ui, card: InterfaceCard<'_>, out: &mut Requests) {
         .expect("a card shows a compound the set holds")
         .interface;
     let mut edit = None;
-    // The choices a port's type picks among: the scalars, then the library's types by name.
-    let types: Vec<(DataType, &str)> = SCALARS
-        .into_iter()
-        .chain(library.data_types())
-        .map(|data_type| (data_type, library.type_name(data_type)))
-        .collect();
     Panel::vstack()
         .id(card_wid())
         .size(SizeSpec::FILL_W)
@@ -170,7 +164,7 @@ pub(crate) fn show(ui: &mut Ui, card: InterfaceCard<'_>, out: &mut Requests) {
                                 first: idx == 0,
                                 last: idx == last,
                             };
-                            if let Some(made) = row.show(ui, theme, library, side, edge, &types) {
+                            if let Some(made) = row.show(ui, theme, library, side, edge) {
                                 edit = Some(made);
                             }
                         }
@@ -293,7 +287,6 @@ impl PortRow<'_> {
         library: &Library,
         side: InterfaceSide,
         edge: Edge,
-        types: &[(DataType, &str)],
     ) -> Option<PortEdit> {
         let Self { port, name, data } = self;
         let wid = |part: &'static str| port_wid(side, port, part);
@@ -320,12 +313,17 @@ impl PortRow<'_> {
                     });
                 }
                 if let Some(data) = &data {
+                    // The choices a port's type picks among: the scalars, then the library's
+                    // types by name, walked where they are read rather than collected each frame.
+                    let types = SCALARS
+                        .into_iter()
+                        .chain(library.data_types().iter().copied())
+                        .map(|data_type| (data_type, library.type_name(data_type)));
                     let mut picked = types
-                        .iter()
-                        .copied()
+                        .clone()
                         .find(|(option, _)| *option == data.data_type)
                         .unwrap_or((data.data_type, data.type_name));
-                    if ComboBox::labeled(&mut picked, types.iter().copied(), |option| option.1)
+                    if ComboBox::labeled(&mut picked, types, |option| option.1)
                         .id(wid("type"))
                         .button_style(&field.button)
                         .show(ui)

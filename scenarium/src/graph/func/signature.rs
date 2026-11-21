@@ -4,8 +4,7 @@
 use std::fmt;
 
 use crate::data::data_type::{DataType, FileMode};
-use crate::graph::func::FuncEvent;
-use crate::graph::ports::Ports;
+use crate::graph::ports::{EventDecl, Numbered, Ports};
 
 /// A digest of a func's ports: each input's and output's id and type, and each event's id, in
 /// order.
@@ -22,9 +21,9 @@ impl FuncSignature {
     const DOMAIN: &'static [u8] = b"scenarium-func-signature-v4";
 
     /// The signature of `ports` and `events`, in order — what
-    /// [`FuncBuilder::build`](crate::graph::func::func_builder::FuncBuilder::build)
+    /// [`FuncBuilder::checked`](crate::graph::func::func_builder::FuncBuilder::checked)
     /// seals into a [`Func`](crate::graph::func::Func).
-    pub(crate) fn of(ports: &Ports, events: &[FuncEvent]) -> Self {
+    pub(crate) fn of(ports: &Ports, events: &[Numbered<EventDecl>]) -> Self {
         let mut hasher = blake3::Hasher::new();
         hasher.update(Self::DOMAIN);
         let count = |hasher: &mut blake3::Hasher, count: usize| {
@@ -98,7 +97,7 @@ mod tests {
     use crate::data::data_type::{DataType, FileMode};
     use crate::graph::func::signature::FuncSignature;
     use crate::graph::identity::FuncId;
-    use crate::graph::ports::{InputDecl, OutputDecl};
+    use crate::graph::ports::{EventDecl, InputDecl, OutputDecl};
     use crate::internals;
 
     /// One small func's signature, from its bytes written out by hand rather than by the
@@ -109,7 +108,7 @@ mod tests {
         let func = internals::stub_func(FuncId::from_u128(1), "pinned")
             .input(3, InputDecl::required("value", DataType::Int))
             .output(1, OutputDecl::new("out", DataType::Float))
-            .event(2, "tick", internals::stub_event())
+            .event(2, EventDecl::new("tick"), internals::stub_event())
             .build();
         let count = |n: u64| n.to_le_bytes().to_vec();
         let port = |n: u32| n.to_le_bytes().to_vec();

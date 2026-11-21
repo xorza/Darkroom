@@ -10,20 +10,29 @@ use lumos::{
     SigmaThreshold, SourceProvenance,
 };
 use scenarium::internals::func_invoker::FuncInvoker;
-use scenarium::{ConstValue, DataType, DynamicValue, FileMode, FuncBehavior};
+use scenarium::{ConstValue, DataType, DynamicValue, FileMode, FuncBehavior, Library};
 
 use crate::astro::masters::MASTERS_DATA_TYPE;
 use crate::astro::nodes::io::{astro_image_path_type, astro_raw_paths_type};
 use crate::astro::nodes::{MlModelPaths, astro_library};
 use crate::config_node::config_data_type;
+use crate::image::nodes::image_library;
 use crate::image::{IMAGE_DATA_TYPE, Image};
+
+/// The astro library as the editor composes it, over the image library whose `Image` type its
+/// ports name.
+fn library(model_paths: &MlModelPaths) -> Library {
+    let mut library = astro_library(model_paths);
+    library.merge(image_library());
+    library.build()
+}
 
 /// The astro library registers the file kinds its ports name: an astro image is every file a
 /// preview opens, one at a time, and raw frames are camera RAW, several at a time. RAW lies
 /// within the astro image kind, so a RAW file port feeds a load.
 #[test]
 fn the_astro_file_ports_name_their_registered_kinds() {
-    let library = astro_library(&MlModelPaths::default());
+    let library = library(&MlModelPaths::default());
     let kind = |data_type: DataType| {
         let DataType::File { kind, mode } = data_type else {
             panic!("{data_type:?} is a file type");
@@ -71,7 +80,7 @@ async fn load_astro_image_keeps_the_decoded_metadata() {
     image.write_fits(&fits).unwrap();
     image.write_raster(&tiff).unwrap();
 
-    let library = astro_library(&MlModelPaths::default());
+    let library = library(&MlModelPaths::default());
     let load = library.by_name("Load Astro Image").unwrap();
     for (path, object, from_fits) in [(&fits, Some("M31"), true), (&tiff, None, false)] {
         let outputs = FuncInvoker::default()
@@ -118,7 +127,7 @@ async fn load_astro_image_keeps_the_decoded_metadata() {
 /// preset processing nodes and on the stacking node's three stages.
 #[test]
 fn every_preset_input_takes_a_pick_or_its_builders_config() {
-    let lib = astro_library(&MlModelPaths::default());
+    let lib = library(&MlModelPaths::default());
     // (node, input index, input name, builder)
     let cases = [
         ("Auto Stretch", 1, "Method", "Build Stretch Config"),
@@ -155,7 +164,7 @@ fn every_preset_input_takes_a_pick_or_its_builders_config() {
 /// one per field at the op's default, and has no config builder.
 #[test]
 fn a_few_knobs_are_the_nodes_own_inputs() {
-    let lib = astro_library(&MlModelPaths::default());
+    let lib = library(&MlModelPaths::default());
     // The labels are the lumos field names title-cased.
     for (node, labels, builder) in [
         (
@@ -209,7 +218,7 @@ fn a_few_knobs_are_the_nodes_own_inputs() {
 
 #[tokio::test]
 async fn build_background_config_reflects_fields_and_rejects_invalid_values() {
-    let lib = astro_library(&MlModelPaths::default());
+    let lib = library(&MlModelPaths::default());
     // The builder exposes one labeled input per BackgroundConfig field, in
     // struct order; all required (none are `Option`s).
     let builder = lib.by_name("Build Background Config").unwrap();
@@ -254,7 +263,7 @@ async fn build_background_config_reflects_fields_and_rejects_invalid_values() {
 /// optional sets, the defaults and the purity a digest relies on.
 #[test]
 fn astro_nodes_are_registered_with_their_ports() {
-    let lib = astro_library(&MlModelPaths::default());
+    let lib = library(&MlModelPaths::default());
     let rows: [(&str, &[&str], &[&str]); 11] = [
         ("Load Astro Image", &["Path"], &["Image"]),
         (
@@ -355,7 +364,7 @@ fn astro_nodes_are_registered_with_their_ports() {
 
     // No model is set by default, so the model input declares no default; a set one is the
     // default of its node alone.
-    let set = astro_library(&MlModelPaths {
+    let set = library(&MlModelPaths {
         denoise: Some("d.onnx".into()),
         star_removal: None,
     });

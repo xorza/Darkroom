@@ -878,8 +878,8 @@ fn a_file_names_the_types_its_ports_name_and_a_load_without_them_keeps_the_names
     let mode = EnumId::from_u128(78);
     let nameless = CustomTypeId::from_u128(79);
     let mut with = library();
-    with.register_custom_type(star, CustomType::new("Star List"));
-    with.register_enum(mode, EnumType::new("Mode", ["a"]));
+    with.add_custom_type(star, CustomType::new("Star List"));
+    with.add_enum(mode, EnumType::new("Mode", ["a"]));
     let port =
         |id: u32, data_type| Numbered::new(PortId::new(id), InputDecl::required("x", data_type));
     let mut set = GraphSet::default();
@@ -928,7 +928,7 @@ fn a_file_names_the_types_its_ports_name_and_a_load_without_them_keeps_the_names
         "a save without the types writes the names it learned"
     );
     let mut renamed = library();
-    renamed.register_custom_type(star, CustomType::new("Stars"));
+    renamed.add_custom_type(star, CustomType::new("Stars"));
     assert_eq!(
         loaded.type_name(&renamed, DataType::Custom(star)),
         "Stars",

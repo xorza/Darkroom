@@ -15,9 +15,9 @@
 use glam::Vec2;
 use scenarium::internals::test_graph::TestGraph;
 use scenarium::{
-    Binding, Compound, CompoundId, ConstValue, DataType, DetachReason, EventPort, Func, FuncId,
-    GhostBinding, GhostNode, GraphId, GraphSet, InputDecl, InputPort, InputState, Library, Node,
-    NodeId, OutputDecl, OutputPort, PortId, Subscription, internals,
+    Binding, Compound, CompoundId, ConstValue, DataType, DetachReason, EventDecl, EventPort, Func,
+    FuncId, GhostBinding, GhostNode, GraphId, GraphSet, InputDecl, InputPort, InputState, Library,
+    Node, NodeId, OutputDecl, OutputPort, PortId, Subscription, internals,
 };
 
 use palantir::DockOperation;
@@ -82,7 +82,7 @@ fn plain_func() -> Func {
     .input(2, InputDecl::optional("b", DataType::Int))
     .input(3, InputDecl::optional("c", DataType::Int))
     .output(1, OutputDecl::new("out", DataType::Int))
-    .event(1, "tick", internals::stub_event())
+    .event(1, EventDecl::new("tick"), internals::stub_event())
     .build()
 }
 

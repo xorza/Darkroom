@@ -9,10 +9,10 @@
 //!   redirect's port map before it resolves anything, and reports it. Refused: a redirect in the
 //!   document, which the author of the func, not of the document, knows; a version number on a
 //!   func, which says that it changed, not how.
-//! - **Redirects chain, and a chain is bounded**: [`Library::check`](crate::Library::check)
-//!   refuses a redirect from a registered func, one into a loop, and a chain past
-//!   [`MAX_REDIRECTS`] or ending at no registered func, so a load follows each in a fixed number
-//!   of steps.
+//! - **Redirects chain, and a chain is bounded**:
+//!   [`LibraryBuilder::build`](crate::LibraryBuilder::build) refuses a redirect from a
+//!   registered func, one into a loop, and a chain past [`MAX_REDIRECTS`] or ending at no
+//!   registered func, and flattens each chain, so a load takes one step for any redirect.
 
 use crate::graph::identity::FuncId;
 use crate::graph::port_map::NodeRemap;

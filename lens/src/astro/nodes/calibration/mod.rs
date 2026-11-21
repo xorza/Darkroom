@@ -11,8 +11,8 @@ use lumos::{
     ProgressMonitor, SigmaThreshold, WriteError,
 };
 use scenarium::{
-    DataType, DynamicValue, FloatSpan, Func, FuncId, InputDecl, Invocation, InvokeError, Library,
-    OutputDecl, async_lambda,
+    DataType, DynamicValue, FloatSpan, Func, FuncId, InputDecl, Invocation, InvokeError,
+    LibraryBuilder, OutputDecl, async_lambda,
 };
 
 use crate::astro::masters::{MASTERS_DATA_TYPE, Masters};
@@ -124,7 +124,7 @@ impl RoleCachePaths {
     }
 }
 
-pub(crate) fn register(library: &mut Library) {
+pub(crate) fn register(library: &mut LibraryBuilder) {
     library.add(
         Func::builder(
             BUILD_MASTERS_FUNC_ID,

@@ -8,8 +8,10 @@ use std::path::{Path, PathBuf};
 
 use common::{SystemMemory, fs, task};
 use imaginarium::{RasterFormat, SUPPORTED_EXTENSIONS};
-use scenarium::{ConstValue, DataType, DynamicValue, FileKind, FileKindId, FileMode, InvokeError};
-use scenarium::{Func, InputDecl, Library, OutputDecl};
+use scenarium::{
+    ConstValue, DataType, DynamicValue, FileKind, FileKindId, FileMode, InvokeError, LibraryBuilder,
+};
+use scenarium::{Func, InputDecl, OutputDecl};
 
 use crate::image::format::{AS_IS, CONVERSION_FORMAT_DATATYPE, ConversionFormat};
 use crate::image::nodes::error::RasterFileError;
@@ -22,8 +24,8 @@ const SAVE_IMAGE_FUNC_ID: FuncId = FuncId::literal("0c17bcbe-d757-43be-b184-27b4
 /// The raster images imaginarium reads and writes.
 const IMAGE_FILE: FileKindId = FileKindId::literal("404e04fb-f5c4-43dd-9ee0-684ab9b16200");
 
-pub(super) fn register(library: &mut Library) {
-    library.register_file_kind(IMAGE_FILE, FileKind::new("Image", SUPPORTED_EXTENSIONS));
+pub(super) fn register(library: &mut LibraryBuilder) {
+    library.add_file_kind(IMAGE_FILE, FileKind::new("Image", SUPPORTED_EXTENSIONS));
     register_load(library);
     register_save(library);
 }
@@ -53,7 +55,7 @@ fn raster_format(path: &Path) -> Result<RasterFormat, RasterFileError> {
     })
 }
 
-fn register_load(library: &mut Library) {
+fn register_load(library: &mut LibraryBuilder) {
     library.add(
         Func::builder(
             LOAD_IMAGE_FUNC_ID,
@@ -88,7 +90,7 @@ fn register_load(library: &mut Library) {
     );
 }
 
-fn register_save(library: &mut Library) {
+fn register_save(library: &mut LibraryBuilder) {
     library.add(
         Func::builder(SAVE_IMAGE_FUNC_ID, "Save Image", async_lambda!(move |Invocation { inputs, .. }| {
                     debug_assert_eq!(inputs.len(), 3);

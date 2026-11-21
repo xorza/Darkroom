@@ -154,7 +154,7 @@ impl NodeDecl<'_> {
                     Numbered::new(
                         event.id,
                         SavedEvent {
-                            name: event.name.to_owned(),
+                            name: event.name.clone(),
                         },
                     )
                 })

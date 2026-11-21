@@ -17,10 +17,12 @@ use std::sync::Arc;
 
 use common::{FieldKind, FieldValue, Introspect};
 use scenarium::Invocation;
+use scenarium::InvokeError;
 use scenarium::async_lambda;
-use scenarium::{ConstValue, CustomType, CustomTypeId, CustomValue, DataType, DynamicValue};
+use scenarium::{
+    ConstValue, CustomType, CustomTypeId, CustomValue, DataType, DynamicValue, LibraryBuilder,
+};
 use scenarium::{EnumId, EnumType, FuncBuilder, InputDecl, OutputDecl};
-use scenarium::{InvokeError, Library};
 
 use crate::node_spec::NodeSpec;
 
@@ -56,8 +58,8 @@ impl<T: Introspect + Clone + fmt::Debug + Send + Sync + 'static> ConfigValue<T> 
     /// and a single `Config` output of [`config_data_type::<T>`]. Registers
     /// `T`'s output type on `library`, so the editor can render it. The caller
     /// adds the node, under its own category.
-    pub(crate) fn builder(library: &mut Library, spec: NodeSpec) -> FuncBuilder {
-        library.register_custom_type(wire_type_id::<T>(), CustomType::new(T::DISPLAY_NAME));
+    pub(crate) fn builder(library: &mut LibraryBuilder, spec: NodeSpec) -> FuncBuilder {
+        library.add_custom_type(wire_type_id::<T>(), CustomType::new(T::DISPLAY_NAME));
         let fields = FieldInputs::<T>::new(library);
         let lambda = async_lambda!(move |Invocation { inputs, outputs, .. }| {
             fields = fields.clone(),
@@ -90,7 +92,7 @@ impl<T> Clone for FieldInputs<T> {
 impl<T: Introspect> FieldInputs<T> {
     /// `T`'s fields, with their enum types registered on `library`, so the
     /// editor can render them.
-    pub(crate) fn new(library: &mut Library) -> Self {
+    pub(crate) fn new(library: &mut LibraryBuilder) -> Self {
         let fields = T::fields();
         for field in &fields {
             register_field_enum(library, &field.kind);
@@ -167,9 +169,9 @@ fn data_type(kind: &FieldKind) -> DataType {
 }
 
 /// Register the enum type(s) a `kind` references on `library`. One enum can
-/// appear across several config builders; `register_enum` takes the identical
+/// appear across several config builders; `add_enum` takes the identical
 /// registration again and panics on conflicting metadata.
-fn register_field_enum(library: &mut Library, kind: &FieldKind) {
+fn register_field_enum(library: &mut LibraryBuilder, kind: &FieldKind) {
     match kind {
         FieldKind::Enum {
             type_id,
@@ -177,7 +179,7 @@ fn register_field_enum(library: &mut Library, kind: &FieldKind) {
             variants,
         } => {
             let id = EnumId::literal(type_id);
-            library.register_enum(id, EnumType::new(*display_name, variants.iter().copied()));
+            library.add_enum(id, EnumType::new(*display_name, variants.iter().copied()));
         }
         FieldKind::Option(inner) => register_field_enum(library, inner),
         _ => {}
@@ -221,7 +223,7 @@ fn field_value(kind: &FieldKind, value: DynamicValue) -> FieldValue {
 #[cfg(test)]
 mod tests {
     use common::{FieldKind, FieldValue, FloatKind, IntegerKind, IntegerValue};
-    use scenarium::{ConstValue, DataType, DynamicValue, EnumId, Library};
+    use scenarium::{ConstValue, DataType, DynamicValue, EnumId, LibraryBuilder};
 
     use crate::config_node::{data_type, field_number, field_value, register_field_enum};
 
@@ -251,9 +253,10 @@ mod tests {
         };
         assert_eq!(data_type(&renamed), DataType::Enum(expected_id));
 
-        let mut library = Library::default();
-        register_field_enum(&mut library, &kind);
-        register_field_enum(&mut library, &kind);
+        let mut builder = LibraryBuilder::default();
+        register_field_enum(&mut builder, &kind);
+        register_field_enum(&mut builder, &kind);
+        let library = builder.build();
         let entry = library.enum_type(expected_id).unwrap();
         assert_eq!(entry.name(), "Mode");
         assert_eq!(entry.variants(), ["a".to_string(), "b".to_string()]);
@@ -273,7 +276,7 @@ mod tests {
             display_name: "Mode",
             variants: &["b"],
         };
-        let mut library = Library::default();
+        let mut library = LibraryBuilder::default();
         register_field_enum(&mut library, &first);
         register_field_enum(&mut library, &conflicting);
     }

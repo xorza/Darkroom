@@ -292,7 +292,7 @@ async fn a_node_kept_while_memory_allows_is_served_and_stamped_by_its_run() {
 async fn memory_pressure_drops_what_no_later_node_reads() {
     let mut g = TestGraph::new();
     g.library
-        .register_custom_type(BLOB_TYPE, CustomType::new("Blob"));
+        .add_custom_type(BLOB_TYPE, CustomType::new("Blob"));
     g.add("src", grows(CacheMode::AUTO));
     g.add("mid", grows(CacheMode::AUTO));
     g.wire("src", "mid");
@@ -334,7 +334,7 @@ async fn memory_pressure_drops_what_no_later_node_reads() {
 async fn memory_pressure_keeps_a_reused_root_until_it_is_served() {
     let mut g = TestGraph::new();
     g.library
-        .register_custom_type(BLOB_TYPE, CustomType::new("Blob"));
+        .add_custom_type(BLOB_TYPE, CustomType::new("Blob"));
     // Placed last, so the planner's stack walks `fresh` first.
     g.add("kept", grows(CacheMode::AUTO));
     g.add("fresh", grows(CacheMode::AUTO));

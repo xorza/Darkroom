@@ -50,7 +50,7 @@ pub use graph::func::error::{FuncValidationError, InvokeError, InvokeResult};
 pub use graph::func::event::{EventFires, EventLambda};
 pub use graph::func::func_builder::FuncBuilder;
 pub use graph::func::lambda::{AsyncLambda, AsyncLambdaFn, FuncLambda, Invocation, OutputDemand};
-pub use graph::func::{Func, FuncBehavior, FuncEvent};
+pub use graph::func::{Func, FuncBehavior};
 pub use graph::ghost_node::GhostNode;
 pub use graph::ghost_wiring::{
     GhostBinding, GhostSource, GhostSubscription, GhostWiring, InputState, SubscriptionState,
@@ -69,7 +69,7 @@ pub use graph::manifest::Manifest;
 pub use graph::node::special::{SPECIAL_NODES, SpecialNode};
 pub use graph::node::{Boundary, CacheMode, Keep, Node};
 pub use graph::node_decl::NodeDecl;
-pub use graph::node_decl::{EventRef, NodeEvents, NodeTriggers};
+pub use graph::node_decl::NodeTriggers;
 pub use graph::node_ref::NodeRef;
 pub use graph::port_map::{NodeRemap, PortMap, PortMapError};
 pub use graph::ports::{EventDecl, InputDecl, Numbered, OutputDecl, PortList, Ports, PortsError};
@@ -87,6 +87,7 @@ pub use graph::value_domain::value_variant::ValueVariant;
 pub use graph::wiring::Wiring;
 pub use library::Library;
 pub use library::func_redirect::{FuncRedirect, MAX_REDIRECTS};
+pub use library::library_builder::LibraryBuilder;
 pub use runtime::any_state::AnyState;
 pub use runtime::ctx_manager::CtxManager;
 pub use runtime::log_entry::{LogEntry, LogLevel};

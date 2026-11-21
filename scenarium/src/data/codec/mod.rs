@@ -43,8 +43,14 @@ impl Codecs {
     pub(crate) fn get(&self, type_id: CustomTypeId) -> Option<&dyn CustomValueCodec> {
         self.by_type.get(&type_id).map(Arc::as_ref)
     }
+}
 
-    pub(crate) fn insert(&mut self, type_id: CustomTypeId, codec: Arc<dyn CustomValueCodec>) {
-        self.by_type.insert(type_id, codec);
+impl FromIterator<(CustomTypeId, Arc<dyn CustomValueCodec>)> for Codecs {
+    fn from_iter<I: IntoIterator<Item = (CustomTypeId, Arc<dyn CustomValueCodec>)>>(
+        codecs: I,
+    ) -> Self {
+        Self {
+            by_type: codecs.into_iter().collect(),
+        }
     }
 }

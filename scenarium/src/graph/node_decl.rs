@@ -1,11 +1,10 @@
 //! [`NodeDecl`]: what a node resolves to, a func or a compound's face.
 
 use crate::graph::compound::Compound;
-use crate::graph::func::{Func, FuncEvent};
+use crate::graph::func::Func;
 use crate::graph::identity::{PortId, TriggerPort};
 use crate::graph::node::Boundary;
-use crate::graph::ports::EventDecl;
-use crate::graph::ports::{InputDecl, Numbered, OutputDecl, Ports};
+use crate::graph::ports::{EventDecl, InputDecl, Numbered, OutputDecl, Ports};
 
 /// What a node resolves to through a [`Scope`](crate::Scope): the ports it shows and is wired
 /// by, and a body if it runs. A func is a declaration with a body; an instance and a boundary
@@ -62,24 +61,24 @@ impl<'a> NodeDecl<'a> {
 
     /// The events the node fires: a func's, an instance's interface events, and the `Inputs`
     /// node's interface trigger, which it fires inside.
-    pub fn events(self) -> NodeEvents<'a> {
+    pub fn events(self) -> &'a [Numbered<EventDecl>] {
         match self {
-            Self::Func(func) => NodeEvents::Func(func.events()),
-            Self::Instance(compound) => NodeEvents::Declared(compound.interface.events()),
+            Self::Func(func) => func.events(),
+            Self::Instance(compound) => compound.interface.events(),
             Self::Boundary {
                 side: Boundary::Inputs,
                 owner,
-            } => NodeEvents::Declared(owner.interface.inputs_node_events()),
+            } => owner.interface.inputs_node_events(),
             Self::Boundary {
                 side: Boundary::Outputs,
                 ..
-            } => NodeEvents::Declared(&[]),
+            } => &[],
         }
     }
 
     /// The event under `id`, if the node fires one.
-    pub fn event(self, id: PortId) -> Option<EventRef<'a>> {
-        self.events().get(id)
+    pub fn event(self, id: PortId) -> Option<&'a Numbered<EventDecl>> {
+        self.events().iter().find(|event| event.id == id)
     }
 
     /// The triggers the node shows: its own, for a sink func, which a subscription runs, and for
@@ -146,52 +145,5 @@ impl NodeTriggers<'_> {
             Self::Own => id == TriggerPort::NODE,
             Self::PerEvent(events) => events.iter().any(|event| event.id == id),
         }
-    }
-}
-
-/// The events a node fires, as its declaration holds them: a func's beside their lambdas, or an
-/// interface's.
-#[derive(Clone, Copy, Debug)]
-pub enum NodeEvents<'a> {
-    Func(&'a [FuncEvent]),
-    Declared(&'a [Numbered<EventDecl>]),
-}
-
-/// One event a node fires: its id and its name.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct EventRef<'a> {
-    pub id: PortId,
-    pub name: &'a str,
-}
-
-impl<'a> NodeEvents<'a> {
-    pub const fn len(self) -> usize {
-        match self {
-            Self::Func(events) => events.len(),
-            Self::Declared(events) => events.len(),
-        }
-    }
-
-    pub const fn is_empty(self) -> bool {
-        self.len() == 0
-    }
-
-    /// In the order the node shows them.
-    pub fn iter(self) -> impl ExactSizeIterator<Item = EventRef<'a>> {
-        (0..self.len()).map(move |idx| match self {
-            Self::Func(events) => EventRef {
-                id: events[idx].id,
-                name: &events[idx].name,
-            },
-            Self::Declared(events) => EventRef {
-                id: events[idx].id,
-                name: &events[idx].name,
-            },
-        })
-    }
-
-    /// The event under `id`, if the node fires one.
-    pub fn get(self, id: PortId) -> Option<EventRef<'a>> {
-        self.iter().find(|event| event.id == id)
     }
 }

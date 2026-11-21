@@ -4,7 +4,7 @@
 use crate::data::data_type::DataType;
 use crate::graph::identity::{CompoundId, FuncId, NodeId};
 use crate::graph::node::Node;
-use crate::graph::ports::{InputDecl, OutputDecl};
+use crate::graph::ports::{EventDecl, InputDecl, OutputDecl};
 use crate::internals;
 use crate::library::Library;
 
@@ -54,7 +54,7 @@ pub(crate) fn library() -> Library {
     );
     library.add(
         internals::stub_func(TICKER, "ticker")
-            .event(1, "tick", internals::stub_event())
+            .event(1, EventDecl::new("tick"), internals::stub_event())
             .build(),
     );
     library.add(

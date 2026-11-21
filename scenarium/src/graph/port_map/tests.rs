@@ -17,6 +17,7 @@ use crate::internals;
 use crate::internals::test_graph::sets::{SINK, SRC, library, n, node};
 use crate::library::Library;
 use crate::library::func_redirect::FuncRedirect;
+use crate::library::library_builder::LibraryBuilder;
 
 fn p(id: u32) -> PortId {
     PortId::new(id)
@@ -168,8 +169,9 @@ fn a_replaced_node_keeps_what_the_map_names_and_ghosts_the_rest() {
 fn a_load_moves_a_redirected_funcs_nodes_to_the_func_its_redirects_end_at() {
     let old_blur = FuncId::from_u128(80);
     let between = FuncId::from_u128(81);
-    let mut library = with_filters(library());
-    let blur = NodeDecl::Func(library.by_id(BLUR).unwrap()).saved();
+    let filters = with_filters(library());
+    let blur = NodeDecl::Func(filters.by_id(BLUR).unwrap()).saved();
+    let mut library = filters.into_builder();
     library.add_redirect(FuncRedirect {
         from: old_blur,
         to: between,
@@ -188,7 +190,12 @@ fn a_load_moves_a_redirected_funcs_nodes_to_the_func_its_redirects_end_at() {
             events: PortMap::default(),
         },
     });
-    library.check();
+    let library = library.build();
+    assert_eq!(
+        library.redirect(old_blur).map(|redirect| redirect.to),
+        Some(SHARPEN),
+        "the chain is followed once, at the build"
+    );
     // The file saved its node of `blur` live, so its manifest lists `blur`; its ghost node was a
     // ghost at the save, so only its own saved declaration knows `blur`'s ports.
     let manifest: Manifest = [(old_blur, blur.clone())].into_iter().collect();
@@ -272,7 +279,7 @@ fn a_load_moves_a_redirected_funcs_nodes_to_the_func_its_redirects_end_at() {
 #[should_panic(expected = "loop, run past")]
 fn redirects_that_loop_are_refused() {
     let (a, b) = (FuncId::from_u128(90), FuncId::from_u128(91));
-    let mut library = Library::default();
+    let mut library = LibraryBuilder::default();
     for (from, to) in [(a, b), (b, a)] {
         library.add_redirect(FuncRedirect {
             from,
@@ -280,5 +287,5 @@ fn redirects_that_loop_are_refused() {
             remap: NodeRemap::default(),
         });
     }
-    library.check();
+    library.build();
 }

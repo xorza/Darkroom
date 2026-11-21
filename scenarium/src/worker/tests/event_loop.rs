@@ -147,9 +147,8 @@ async fn a_fired_event_does_not_reinitialize_the_event_sources() {
 async fn an_event_lambda_panic_ends_the_worker_with_it() {
     let mut w = TestWorker::frames();
     w.graph.edit_func("Frame Event", |func| {
-        func.events[0].event_lambda =
-            EventLambda::new(|_state| async { panic!("event loop stopped") });
-        func.events[1].event_lambda = EventLambda::new(|_state| async {});
+        func.event_lambdas[0] = EventLambda::new(|_state| async { panic!("event loop stopped") });
+        func.event_lambdas[1] = EventLambda::new(|_state| async {});
     });
     w.graph.subscribe("Frame Event", 1, "Print");
 

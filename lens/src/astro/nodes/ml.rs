@@ -9,7 +9,7 @@ use common::FileIdentity;
 use lumos::{MlDenoise, MlError, OnnxModel, RemoveStars};
 use scenarium::{
     AnyState, ConstValue, DataType, DynamicValue, FileKind, FileKindId, FileMode, Func, FuncId,
-    InputDecl, Invocation, InvokeError, Library, OutputDecl, async_lambda,
+    InputDecl, Invocation, InvokeError, LibraryBuilder, OutputDecl, async_lambda,
 };
 
 use crate::astro::nodes::{MlModelPaths, runtime};
@@ -21,13 +21,13 @@ const STAR_REMOVAL_FUNC_ID: FuncId = FuncId::literal("60c31a76-eed4-467c-9ba3-5c
 /// ONNX model files.
 const ONNX_MODEL_FILE: FileKindId = FileKindId::literal("5bea0866-9834-4ddd-be25-4c4c5fe6d3c5");
 
-pub(crate) fn register(library: &mut Library, model_paths: &MlModelPaths) {
-    library.register_file_kind(ONNX_MODEL_FILE, FileKind::new("ONNX Model", ["onnx"]));
+pub(crate) fn register(library: &mut LibraryBuilder, model_paths: &MlModelPaths) {
+    library.add_file_kind(ONNX_MODEL_FILE, FileKind::new("ONNX Model", ["onnx"]));
     register_denoise(library, model_paths.denoise.as_deref());
     register_star_removal(library, model_paths.star_removal.as_deref());
 }
 
-fn register_denoise(library: &mut Library, model_path: Option<&Path>) {
+fn register_denoise(library: &mut LibraryBuilder, model_path: Option<&Path>) {
     library.add(
         Func::builder(
             DENOISE_FUNC_ID,
@@ -62,7 +62,7 @@ fn register_denoise(library: &mut Library, model_path: Option<&Path>) {
     );
 }
 
-fn register_star_removal(library: &mut Library, model_path: Option<&Path>) {
+fn register_star_removal(library: &mut LibraryBuilder, model_path: Option<&Path>) {
     library.add(
         Func::builder(
             STAR_REMOVAL_FUNC_ID,

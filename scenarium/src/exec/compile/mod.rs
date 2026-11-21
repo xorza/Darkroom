@@ -317,7 +317,7 @@ impl Compiler {
             // Each event lands with the nodes it triggers, across any boundary between, resolved
             // through the placement, which already covers nodes the walk has not reached.
             let mut node_events = Vec::with_capacity(func.events().len());
-            for event in func.events() {
+            for (event, lambda) in func.events().iter().zip(func.event_lambdas()) {
                 self.collect_triggered(source, level, EventPort::new(node_id, event.id));
                 let subscribers =
                     compiled
@@ -327,7 +327,7 @@ impl Compiler {
                         }));
                 node_events.push(ExecEvent {
                     subscribers,
-                    lambda: event.event_lambda.clone(),
+                    lambda: lambda.clone(),
                 });
             }
             let node_events = compiled.events.append(node_events);

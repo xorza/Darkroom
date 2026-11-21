@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 use lens::{DISPLAY_STRETCH_DATA_TYPE, DISPLAY_STRETCH_TYPE_ID, DisplayStretch};
 use scenarium::{
     ConstValue, DataType, DynamicValue, EnumType, Func, FuncId, InputDecl, Invocation, Library,
-    PortId, ProgramId, async_lambda,
+    LibraryBuilder, PortId, ProgramId, async_lambda,
 };
 
 /// Stable `FuncId` for the preview node. Persisted in every document that holds
@@ -57,9 +57,9 @@ const VALUE_PORT: PortId = PortId::new(1);
 pub(crate) const DISPLAY_PORT: PortId = PortId::new(2);
 
 /// Register the preview func, bound to `sink`, and the enum type its Display port takes.
-pub(crate) fn register(library: &mut Library, sink: Arc<PreviewSink>) {
+pub(crate) fn register(library: &mut LibraryBuilder, sink: Arc<PreviewSink>) {
     library.add(func(sink));
-    library.register_enum(
+    library.add_enum(
         DISPLAY_STRETCH_TYPE_ID,
         EnumType::of::<DisplayStretch>("Display Stretch"),
     );

@@ -4,15 +4,15 @@ use crate::graph::func::Func;
 use crate::graph::func::lambda::Invocation;
 use crate::graph::identity::FuncId;
 use crate::graph::ports::{InputDecl, OutputDecl};
-use crate::library::Library;
+use crate::library::library_builder::LibraryBuilder;
 
 const PRINT_FUNC_ID: FuncId = FuncId::literal("06b169d2-d3d8-43fb-ba80-c566fcffea44");
 const TO_STRING_FUNC_ID: FuncId = FuncId::literal("9731dfca-061b-421c-a193-4aa9a61d89b5");
 const CONCAT_FUNC_ID: FuncId = FuncId::literal("8854cccc-81d3-4e26-8b4f-e33d62e3117b");
 
 /// The built-in system / utility nodes: logging and value-to-text conversion.
-pub fn system_library() -> Library {
-    let mut library = Library::default();
+pub fn system_library() -> LibraryBuilder {
+    let mut library = LibraryBuilder::default();
 
     library.add(
         Func::builder(
@@ -113,7 +113,7 @@ mod tests {
     /// Invoke the `Concat` node's lambda with two runtime values and return its
     /// text output.
     async fn run_concat(a: DynamicValue, b: DynamicValue) -> String {
-        let library = system_library();
+        let library = system_library().build();
         let concat = library.by_name("Concat").unwrap();
         let outputs = FuncInvoker::default()
             .call(concat, [a, b])

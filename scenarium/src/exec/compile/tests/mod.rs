@@ -6,6 +6,7 @@ use crate::exec::compile::error::{CompiledGraphValidationError, PortPool};
 use crate::graph::Graph;
 use crate::graph::identity::FuncId;
 use crate::graph::node::Node;
+use crate::graph::ports::EventDecl;
 use crate::internals;
 use crate::internals::program::ProgramBuilder;
 use crate::internals::test_graph::compiled::Compiled;
@@ -412,8 +413,8 @@ fn a_port_lands_at_its_declared_position_whatever_its_number() {
         .input(1, InputDecl::optional("second", DataType::Int))
         .output(2, OutputDecl::new("first", DataType::Int))
         .output(1, OutputDecl::new("second", DataType::Int))
-        .event(2, "first", internals::stub_event())
-        .event(1, "second", internals::stub_event())
+        .event(2, EventDecl::new("first"), internals::stub_event())
+        .event(1, EventDecl::new("second"), internals::stub_event())
         .build();
     let mut library = Library::default();
     library.add(swapped.clone());
@@ -506,7 +507,10 @@ fn wires_each_event_with_the_subscribers_resolved_for_it() {
 
     // The subscription names event 2, which the program finds at its position, wherever the
     // declaration puts it.
-    g.edit_func("emitter", |builder| builder.events.reverse());
+    g.edit_func("emitter", |decl| {
+        decl.events.reverse();
+        decl.event_lambdas.reverse();
+    });
     let compiled = g.compile();
     assert_eq!(compiled.subscribers("emitter", 0), ["subscriber"]);
     assert!(compiled.subscribers("emitter", 1).is_empty());

@@ -399,7 +399,7 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
     let build = |with_codec: bool, recompute: &Calls| {
         let recompute = recompute.clone();
         let mut g = TestGraph::new();
-        g.library.register_custom_type(
+        g.library.add_custom_type(
             BLOB_TYPE,
             if with_codec {
                 CustomType::with_codec(
